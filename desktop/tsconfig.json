@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "../",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["./src/renderer/*"],
+      "@novel/shared": ["../server/shared/src"]
+    }
+  },
+  "include": ["src/**/*", "vite-env.d.ts", "../server/shared/src/**/*"],
+  "exclude": ["node_modules", "dist", "dist-electron", "release"]
+}

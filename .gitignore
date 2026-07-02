@@ -1,0 +1,98 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+**/dist/
+dist-electron/
+**/dist-electron/
+release/
+**/release/
+out/
+**/out/
+.turbo/
+*.tsbuildinfo
+
+# Vite / Electron generated cache
+.vite/
+**/.vite/
+.electron-bin/
+.appdata/
+
+# Runtime data and local databases
+data/
+server/data/
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.db-shm
+data/*.db-wal
+data/*.db-journal
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite-journal
+server/**/*.db
+server/**/*.sqlite
+server/**/*.sqlite3
+server/**/*.db-shm
+server/**/*.db-wal
+server/**/*.db-journal
+server/_tmp_integration/
+
+# Logs
+*.log
+*.log.*
+logs/
+**/logs/
+server/logs/
+desktop/*.log
+server/*.log
+backend*.log
+server-*.log
+
+# Local environment and runtime state
+.env
+.env.*
+!.env.example
+.port
+*.local
+
+# Shared package compiled artifacts
+server/shared/**/*.js
+server/shared/**/*.d.ts
+server/shared/**/*.js.map
+server/shared/**/*.d.ts.map
+
+# Test and coverage artifacts
+coverage/
+**/coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Temporary files
+tmp/
+temp/
+**/tmp/
+**/temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+nul
+**/nul
+
+# Local editor / OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local assistant/tooling state
+.codebuddy/

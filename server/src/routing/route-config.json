@@ -1,0 +1,75 @@
+{
+  "version": "1.2.0",
+  "description": "AI写作平台模型路由配置 - 仅保留 DeepSeek 可用模型",
+
+  "models": {
+    "deepseek": {
+      "name": "DeepSeek",
+      "provider": "deepseek",
+      "tier": "standard",
+      "capabilities": ["body_writing", "outline", "character", "planning", "review"],
+      "versions": [
+        { "id": "deepseek-chat", "label": "DeepSeek Chat", "tier": "standard" },
+        { "id": "deepseek-chat", "label": "DeepSeek Chat (Fast)", "tier": "fast" }
+      ]
+    }
+  },
+
+  "model_versions": {
+    "deepseek": "deepseek-chat"
+  },
+
+  "roles": {
+    "writer": {
+      "models": [
+        { "model": "deepseek", "priority": 1, "label": "主力写手", "defaultVersion": "deepseek-chat" },
+        { "model": "deepseek", "priority": 2, "label": "快速写手", "defaultVersion": "deepseek-chat" }
+      ]
+    },
+    "reviewer": {
+      "models": [
+        { "model": "deepseek", "priority": 1, "label": "深度评审", "defaultVersion": "deepseek-chat" }
+      ]
+    },
+    "planner": {
+      "models": [
+        { "model": "deepseek", "priority": 1, "label": "深度策划", "defaultVersion": "deepseek-chat" }
+      ]
+    }
+  },
+
+  "scenarios": {
+    "idea_generate":        { "model": "deepseek", "temperature": 0.9, "label": "灵感生成" },
+    "outline":              { "model": "deepseek", "temperature": 0.6, "label": "大纲规划" },
+    "world_building":       { "model": "deepseek", "temperature": 0.6, "label": "世界观" },
+    "character_design":     { "model": "deepseek", "temperature": 0.7, "label": "角色设定" },
+    "organization_map":     { "model": "deepseek", "temperature": 0.6, "label": "组织与地图" },
+    "foreshadowing":        { "model": "deepseek", "temperature": 0.7, "label": "伏笔设计" },
+    "timeline":             { "model": "deepseek", "temperature": 0.5, "label": "时间线" },
+    "writing":              { "model": "deepseek", "temperature": 0.7, "label": "写作" },
+    "writing_daily":        { "model": "deepseek", "temperature": 0.7, "label": "日常写作" },
+    "writing_climax":       { "model": "deepseek", "temperature": 0.8, "label": "高潮章节" },
+    "polish":               { "model": "deepseek", "temperature": 0.4, "label": "精修润色" },
+    "character_review":     { "model": "deepseek", "temperature": 0.3, "label": "人设评审" },
+    "quality_check":        { "model": "deepseek", "temperature": 0.3, "label": "质检检查" },
+    "tianlong-8step":       { "model": "deepseek", "temperature": 0.7, "label": "天龙8步" }
+  },
+
+  "chapter_function_routing": {
+    "exposition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "展开" },
+    "rising":        { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "发展" },
+    "climax":        { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "高潮" },
+    "falling":       { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "回落" },
+    "resolution":    { "model": "deepseek", "tier": "standard", "temperature": 0.5, "label": "解决" },
+    "transition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "过渡" },
+    "foreshadowing": { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "伏笔" },
+    "revelation":    { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "揭露" },
+    "world_building":{ "model": "deepseek", "tier": "standard", "temperature": 0.6, "label": "世界观" }
+  },
+
+  "defaults": {
+    "temperature": 0.7,
+    "maxTokens": 4096,
+    "timeout": 30000
+  }
+}

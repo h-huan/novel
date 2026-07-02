@@ -1,0 +1,25 @@
+# 包管理器 lock 文件
+pnpm-lock.yaml
+
+# 构建产物
+dist/
+out/
+release/
+.turbo/
+coverage/
+
+# 自动生成
+*.tsbuildinfo
+
+# CI
+.github/
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# 数据
+*.db
+*.db-journal
+data/

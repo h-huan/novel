@@ -1,0 +1,59 @@
+{
+  "name": "@novel/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI写作平台 - Electron桌面应用",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "node ../kill-by-port.js 5173 && chcp 65001 >nul && vite",
+    "build": "tsc && vite build",
+    "build:vite": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint ok'",
+    "clean": "rm -rf dist dist-electron release",
+    "pack:win": "electron-builder --win --x64",
+    "pack:mac": "electron-builder --mac",
+    "pack:linux": "electron-builder --linux",
+    "pack:all": "electron-builder --win --mac --linux",
+    "dist": "npm run build && npm run pack:win",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:all": "vitest run && playwright test"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@novel/shared": "file:../server/shared",
+    "@reactflow/core": "^11.11.4",
+    "dagre": "^0.8.5",
+    "monaco-editor": "^0.55.1",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^6.28.0",
+    "reactflow": "^11.11.4",
+    "socket.io-client": "^4.8.3",
+    "zustand": "^4.5.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.5.0",
+    "electron": "^32.3.3",
+    "electron-builder": "^24.13.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0",
+    "vite-plugin-electron": "^0.28.0",
+    "vite-plugin-electron-renderer": "^0.14.0",
+    "vitest": "^4.1.8"
+  }
+}

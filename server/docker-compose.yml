@@ -1,0 +1,96 @@
+version: "3.8"
+
+# ──────────────────────────────────────
+#  AI写作平台 — Docker 开发环境
+# ──────────────────────────────────────
+
+services:
+  # ── NestJS API 服务 ──
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      target: development
+    container_name: novelai-server
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - server-node-modules:/app/server/node_modules
+    environment:
+      - NODE_ENV=development
+      - DATABASE_PATH=/app/data/novelai.db
+      - CHROMADB_URL=http://chromadb:8000
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TZ=Asia/Shanghai
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - novelai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ── ChromaDB 向量数据库 ──
+  chromadb:
+    image: chromadb/chroma:0.5.5
+    container_name: novelai-chromadb
+    ports:
+      - "${CHROMADB_PORT:-8000}:8000"
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token.TokenConfigServerAuthProvider
+      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMADB_TOKEN:-novelai-local-token}
+      - CHROMA_SERVER_AUTH_CREDENTIALS_FILE=/chroma/auth.json
+      - CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=AUTHORIZATION
+    restart: unless-stopped
+    networks:
+      - novelai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── 可选：Meilisearch 全文检索引擎 ──
+  meilisearch:
+    image: getmeili/meilisearch:v1.9
+    container_name: novelai-meilisearch
+    profiles:
+      - full
+      - search
+    ports:
+      - "${MEILI_PORT:-7700}:7700"
+    volumes:
+      - meili-data:/meili_data
+    environment:
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-novelai-meili-key}
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_ENV=development
+    restart: unless-stopped
+    networks:
+      - novelai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  server-node-modules:
+  chromadb-data:
+  meili-data:
+
+networks:
+  novelai-net:
+    driver: bridge

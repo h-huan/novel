@@ -1,0 +1,54 @@
+appId: com.novelai.writing
+productName: AI写作平台
+copyright: Copyright © 2026
+
+directories:
+  output: dist-elec
+  buildResources: build
+
+files:
+  - "dist/**/*"
+  - "package.json"
+
+extraResources:
+  - from: "../server/dist"
+    to: "server"
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: build/icon.icns
+  category: public.app-category.productivity
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AI写作平台
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+publish:
+  provider: generic
+  url: https://releases.novel-ai.example.com
+  channel: latest
