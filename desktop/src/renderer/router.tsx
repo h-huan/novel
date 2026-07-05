@@ -31,6 +31,7 @@ import ImmersiveView from './pages/ImmersiveView';
 import WeeklySummaryPage from './pages/WeeklySummaryPage';
 import TimelinePage from './pages/TimelinePage';
 import OrganizationMapPage from './pages/OrganizationMapPage';
+import IdeaLabPage from './pages/IdeaLabPage';
 
 const AppRouter: React.FC = () => {
   return (
@@ -70,6 +71,7 @@ const AppRouter: React.FC = () => {
         <Route path="/settings" element={<Navigate to="/" replace />} />
         <Route path="/dictionary" element={<DictionaryPage />} />
         <Route path="/help" element={<HelpPage />} />
+        <Route path="/idea-lab/:draftId" element={<IdeaLabPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>

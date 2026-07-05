@@ -33,6 +33,7 @@ import { StoryDictModule } from './modules/story-dict/story-dict.module';
 import { OrganizationModule } from './modules/organization/organization.module';
 import { MapPointModule } from './modules/map-point/map-point.module';
 import { TimelineModule } from './modules/timeline/timeline.module';
+import { IdeaLabModule } from './modules/idea-lab/idea-lab.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { TimelineModule } from './modules/timeline/timeline.module';
     OrganizationModule,
     MapPointModule,
     TimelineModule,
+    IdeaLabModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

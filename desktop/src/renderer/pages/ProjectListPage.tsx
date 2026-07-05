@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../stores/projectStore';
+import { useIdeaLabStore } from '../stores/ideaLabStore';
 import { openProject } from '../lib/openProject';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
@@ -645,12 +646,15 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
 
                 {creationSource === 'idea' && (
                   <div style={dialogStyles.field}>
-                    <label style={dialogStyles.label}>原始想法（可选）</label>
+                    <label style={dialogStyles.label}>原始想法 *</label>
                     <textarea
-                      style={dialogStyles.textarea}
+                      style={{
+                        ...dialogStyles.textarea,
+                        borderColor: ideaSeed.trim() ? '' : 'var(--color-accent, #e94560)',
+                      }}
                       value={ideaSeed}
                       onChange={(e) => setIdeaSeed(e.target.value)}
-                      placeholder="写下你的想法，哪怕只是一句话..."
+                      placeholder="写下你的想法，哪怕只是一句话。AI 会通过追问帮你完善成可创作的作品设定。"
                       rows={3}
                     />
                   </div>
@@ -684,7 +688,7 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
             </button>
           ) : (
             <button type="button" style={dialogStyles.submitBtn} onClick={handleCreate}>
-              创建作品
+              {creationSource === 'idea' ? '开始孵化' : '创建作品'}
             </button>
           )}
         </div>
@@ -1071,6 +1075,7 @@ const ProjectListPage: React.FC = () => {
   const navigate = useNavigate();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const { createDraft } = useIdeaLabStore();
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
@@ -1088,6 +1093,27 @@ const ProjectListPage: React.FC = () => {
     ideaSeed?: string;
     description?: string;
   }) => {
+    if (data.creationSource === 'idea') {
+      // 从想法开始 → 创建 Idea Draft 并跳转 Idea Lab
+      try {
+        const draft = await createDraft({
+          rawIdea: data.ideaSeed || data.description || data.title || '',
+          projectType: data.type,
+          targetPlatform: data.targetPlatform,
+          targetWords: data.targetWords || 0,
+          title: data.title || '',
+          description: data.description || '',
+        });
+        setIsDialogOpen(false);
+        navigate(`/idea-lab/${draft.id}`);
+      } catch (err: any) {
+        console.error('[ProjectList] 创建想法草稿失败:', err);
+        alert(err?.message || '创建想法草稿失败，请重试');
+      }
+      return;
+    }
+
+    // 非 idea 来源保持原有创建逻辑
     const project = await createProject(data);
     setIsDialogOpen(false);
     await openProject(project.id, project.title, navigate);

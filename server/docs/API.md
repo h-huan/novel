@@ -272,3 +272,90 @@ Content-Type: application/json
 |------|------|------|
 | `GET` | `/chain/memory-health` | 记忆健康度检查 |
 | `GET` | `/health` | 服务健康检查 |
+
+---
+
+## 想法孵化（Idea Lab）
+
+Idea Lab 提供「从想法开始」的完整孵化流程：用户输入一句模糊想法 → AI 追问 → 用户补充 → AI 完善 → 成熟度评分 → 确认想法 → 创建项目。
+
+### 数据表
+
+新增 `idea_drafts` 表用于存储孵化中的想法草稿，不等同于 `projects` 表。
+
+### API 列表
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/idea-lab/drafts` | 创建想法草稿 |
+| `GET` | `/idea-lab/drafts` | 获取所有草稿 |
+| `GET` | `/idea-lab/drafts/:id` | 获取草稿详情 |
+| `POST` | `/idea-lab/drafts/:id/questions` | AI 生成追问问题 |
+| `PUT` | `/idea-lab/drafts/:id/answers` | 保存用户回答 |
+| `POST` | `/idea-lab/drafts/:id/refine` | AI 完善想法并评分 |
+| `POST` | `/idea-lab/drafts/:id/confirm` | 确认想法 |
+| `POST` | `/idea-lab/drafts/:id/convert-to-project` | 转换为项目 |
+
+### 创建想法草稿
+
+```
+POST /api/v1/idea-lab/drafts
+Content-Type: application/json
+
+{
+  "rawIdea": "我想写一个县城青年靠旧账本发现家族秘密的故事",
+  "projectType": "long_novel",
+  "targetPlatform": "fanqie",
+  "targetWords": 200000,
+  "title": "",
+  "description": ""
+}
+```
+
+**响应：**
+```json
+{
+  "id": "uuid",
+  "rawIdea": "...",
+  "projectType": "long_novel",
+  "targetPlatform": "fanqie",
+  "status": "draft",
+  "questions": [],
+  "answers": [],
+  "refinedIdea": null,
+  "maturityScore": 0,
+  "maturityReport": null,
+  "confirmedIdea": "",
+  "convertedProjectId": null
+}
+```
+
+### 生成追问
+
+```
+POST /api/v1/idea-lab/drafts/:id/questions
+```
+
+LLM 不可用时返回模板问题并标记 `isFallback: true`。
+
+### 完善想法
+
+```
+POST /api/v1/idea-lab/drafts/:id/refine
+```
+
+LLM 不可用时返回基于模板的完善结果，标记 `isFallback: true`。
+
+### 转换为项目
+
+```
+POST /api/v1/idea-lab/drafts/:id/convert-to-project
+```
+
+创建项目时复用 `ProjectService.create`，写入以下字段：
+- `creationSource = "idea"`
+- `ideaStatus = "converted"`
+- `ideaSeed = 原始想法`
+- `confirmedIdea = 确认后的成熟想法`
+- `type = draft.projectType`
+- `targetPlatform = draft.targetPlatform`
