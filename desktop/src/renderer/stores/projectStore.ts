@@ -4,12 +4,29 @@
  */
 import { create } from 'zustand';
 import { api } from '../lib/api';
-import { Project, ProjectType, ProjectStatus } from '@novel/shared';
+import {
+  Project,
+  ProjectType,
+  ProjectStatus,
+  CreationSource,
+  TargetPlatform,
+  WorkflowStage,
+  IdeaStatus,
+} from '@novel/shared';
 
 interface ProjectCreateData {
   title: string;
-  type: Project['type'];
+  type?: Project['type'];
+  projectMode?: Project['type'];
+  creationSource?: CreationSource;
+  targetPlatform?: TargetPlatform;
   platformStyle?: string;
+  targetWords?: number;
+  currentWorkflowStage?: WorkflowStage;
+  ideaStatus?: IdeaStatus;
+  ideaSeed?: string;
+  confirmedIdea?: string;
+  description?: string;
 }
 
 interface ProjectState {
@@ -36,25 +53,43 @@ function mapServerProject(raw: any): Project {
     return {
       id: '',
       title: '数据异常',
-      type: ProjectType.LONG_NOVEL,
-      status: ProjectStatus.ACTIVE,
+      type: 'long_novel' as ProjectType,
+      status: 'active' as ProjectStatus,
       description: '',
       wordCount: 0,
       chapterCount: 0,
       platforms: [],
+      creationSource: 'blank' as CreationSource,
+      targetPlatform: 'generic' as TargetPlatform,
+      targetWords: 0,
+      currentWorkflowStage: 'idea_or_inspiration' as WorkflowStage,
+      ideaStatus: 'none' as IdeaStatus,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
   }
+
+  // 推导默认阶段
+  const creationSource = (raw.creationSource || 'blank') as CreationSource;
+  const rawType = raw.type || 'long_novel';
+  const defaultStage = rawType === 'short_story' ? 'topic' : 'idea_or_inspiration';
+
   return {
     id: raw.id || '',
     title: raw.title || '未命名项目',
-    type: raw.type || ProjectType.LONG_NOVEL,
-    status: raw.status || ProjectStatus.ACTIVE,
+    type: raw.type || 'long_novel',
+    status: raw.status || 'active',
     description: raw.description || '',
     wordCount: raw.currentWords ?? raw.wordCount ?? 0,
     chapterCount: raw.chapterCount ?? 0,
     platforms: Array.isArray(raw.platforms) ? raw.platforms : [],
+    creationSource,
+    targetPlatform: (raw.targetPlatform || raw.platformStyle || 'generic') as TargetPlatform,
+    targetWords: raw.targetWords ?? raw.target_words ?? 0,
+    currentWorkflowStage: (raw.currentWorkflowStage || defaultStage) as WorkflowStage,
+    ideaStatus: (raw.ideaStatus || 'none') as IdeaStatus,
+    ideaSeed: raw.ideaSeed || undefined,
+    confirmedIdea: raw.confirmedIdea || undefined,
     createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
     updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : new Date(),
   };
@@ -104,12 +139,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   createProject: async (data: ProjectCreateData) => {
     set({ loading: true, error: null });
     try {
-      const res = await api.post<any>('/projects', {
+      const body: Record<string, unknown> = {
         title: data.title,
-        type: data.type,
-        platformStyle: data.platformStyle || 'generic',
-      });
-      // POST /projects 返回 flat { id, title, ... }，API 不会额外包裹 data
+        type: data.type || data.projectMode || 'long_novel',
+        platformStyle: data.platformStyle || data.targetPlatform || 'generic',
+      };
+      if (data.projectMode) body.projectMode = data.projectMode;
+      if (data.creationSource) body.creationSource = data.creationSource;
+      if (data.targetPlatform) body.targetPlatform = data.targetPlatform;
+      if (data.targetWords !== undefined) body.targetWords = data.targetWords;
+      if (data.currentWorkflowStage) body.currentWorkflowStage = data.currentWorkflowStage;
+      if (data.ideaStatus) body.ideaStatus = data.ideaStatus;
+      if (data.ideaSeed) body.ideaSeed = data.ideaSeed;
+      if (data.confirmedIdea) body.confirmedIdea = data.confirmedIdea;
+      if (data.description) body.description = data.description;
+
+      const res = await api.post<any>('/projects', body);
       const raw = (res as any).data ?? res;
       const p = mapServerProject(raw);
       set((state) => ({

@@ -1,8 +1,8 @@
 /**
  * 更新项目 DTO
  */
-import { IsString, IsOptional, IsNumber, IsBoolean, IsIn, Min } from 'class-validator';
-import type { ProjectType, ProjectStatus } from '@novel/shared';
+import { IsString, IsOptional, IsNumber, IsIn } from 'class-validator';
+import type { ProjectType, ProjectStatus, CreationSource, TargetPlatform, WorkflowStage, IdeaStatus } from '@novel/shared';
 
 export class UpdateProjectDto {
   @IsOptional()
@@ -19,7 +19,6 @@ export class UpdateProjectDto {
 
   @IsOptional()
   @IsNumber()
-  @Min(0)
   targetWords?: number;
 
   @IsOptional()
@@ -41,4 +40,30 @@ export class UpdateProjectDto {
 
   @IsOptional()
   writingStyle?: string | Record<string, unknown>;
+
+  // ======== 第一阶段新增字段 ========
+
+  @IsOptional()
+  @IsIn(['inspiration', 'idea', 'import', 'blank'])
+  creationSource?: CreationSource;
+
+  @IsOptional()
+  @IsIn(['zhihu', 'fanqie', 'qidian', 'douyin', 'xiaohongshu', 'custom', 'generic'])
+  targetPlatform?: TargetPlatform;
+
+  @IsOptional()
+  @IsString()
+  currentWorkflowStage?: WorkflowStage;
+
+  @IsOptional()
+  @IsIn(['none', 'draft', 'refining', 'confirmed', 'converted'])
+  ideaStatus?: IdeaStatus;
+
+  @IsOptional()
+  @IsString()
+  ideaSeed?: string;
+
+  @IsOptional()
+  @IsString()
+  confirmedIdea?: string;
 }

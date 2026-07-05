@@ -16,6 +16,12 @@ export interface ProjectRow {
   description: string | null;
   writing_style: string | null;
   settings: string;
+  creation_source: string;
+  target_platform: string;
+  current_workflow_stage: string | null;
+  idea_status: string;
+  idea_seed: string | null;
+  confirmed_idea: string | null;
   created_at: string;
   updated_at: string;
 }

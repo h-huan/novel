@@ -21,6 +21,57 @@
 | `PUT` | `/projects/:id` | 更新项目信息 |
 | `DELETE` | `/projects/:id` | 删除项目 |
 
+### 创建项目
+
+```http
+POST /api/v1/projects
+Content-Type: application/json
+
+{
+  "title": "我的新作品",
+  "type": "long_novel",
+  "creationSource": "idea",
+  "targetPlatform": "fanqie",
+  "platformStyle": "fanqie",
+  "targetWords": 2000000,
+  "currentWorkflowStage": "idea_or_inspiration",
+  "ideaStatus": "draft",
+  "ideaSeed": "用户的一句话想法",
+  "confirmedIdea": "",
+  "description": "作品简介"
+}
+```
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| title | string | 是 | — | 作品标题 |
+| type | enum | 否 | `long_novel` | 作品类型：`short_story` / `long_novel` / `script` |
+| creationSource | enum | 否 | `blank` | 创建来源：`inspiration` / `idea` / `import` / `blank` |
+| targetPlatform | enum | 否 | `generic` | 目标平台：`zhihu` / `fanqie` / `qidian` / `douyin` / `xiaohongshu` / `custom` / `generic` |
+| platformStyle | string | 否 | `generic` | 平台风格（与 targetPlatform 兼容） |
+| targetWords | number | 否 | `0` | 目标字数 |
+| currentWorkflowStage | string | 否 | 自动推导 | 当前创作阶段（短篇=`topic`，长篇=`idea_or_inspiration`） |
+| ideaStatus | enum | 否 | `none` | 想法状态：`none` / `draft` / `refining` / `confirmed` / `converted` |
+| ideaSeed | string | 否 | — | 用户原始想法 |
+| confirmedIdea | string | 否 | — | 确认后的成熟想法 |
+| description | string | 否 | — | 作品简介 |
+| status | enum | 否 | `active` | 项目状态 |
+
+**兼容：** 旧客户端只传 `title`、`type`、`platformStyle` 仍正常工作，缺字段用默认值。
+
+### 项目列表/详情响应
+
+新增字段（旧项目自动补默认值）：
+
+| 字段 | 来源 | 默认值 |
+|------|------|--------|
+| creationSource | `creation_source` | `blank` |
+| targetPlatform | `target_platform` ∥ `platform_style` | `generic` |
+| currentWorkflowStage | `current_workflow_stage` | 短篇=`topic`，长篇=`idea_or_inspiration` |
+| ideaStatus | `idea_status` | `none` |
+| ideaSeed | `idea_seed` | `undefined` |
+| confirmedIdea | `confirmed_idea` | `undefined` |
+
 ---
 
 ## 角色管理

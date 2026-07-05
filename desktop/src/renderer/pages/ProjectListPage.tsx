@@ -9,7 +9,14 @@ import { useProjectStore } from '../stores/projectStore';
 import { openProject } from '../lib/openProject';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
-import type { Project, ProjectType } from '@novel/shared';
+import type {
+  Project,
+  ProjectType,
+  CreationSource,
+  TargetPlatform,
+  WorkflowStage,
+  IdeaStatus,
+} from '@novel/shared';
 
 // ============================================================
 // 常量
@@ -25,6 +32,34 @@ const TYPE_COLORS: Record<ProjectType, string> = {
   short_story: '#2ecc71',
   long_novel: '#e94560',
   script: '#f39c12',
+};
+
+const CREATION_SOURCE_LABELS: Record<CreationSource, string> = {
+  inspiration: '灵感',
+  idea: '想法',
+  import: '导入',
+  blank: '空白',
+};
+
+const TARGET_PLATFORM_LABELS: Record<TargetPlatform, string> = {
+  zhihu: '知乎盐选',
+  fanqie: '番茄',
+  qidian: '起点',
+  douyin: '抖音',
+  xiaohongshu: '小红书',
+  custom: '自定义',
+  generic: '通用',
+};
+
+const WORKFLOW_STAGE_LABELS: Record<string, string> = {
+  topic: '题材',
+  idea_or_inspiration: '想法孵化',
+  world_setting: '世界观',
+  character: '角色',
+  outline: '大纲',
+  volume: '分卷',
+  chapter: '章节',
+  writing: '写作',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -62,22 +97,6 @@ const USER_STATUS_LABELS: Record<string, string> = {
   editing: '创作中',
   published: '已完成',
 };
-
-const PLATFORM_OPTIONS = [
-  { value: 'generic', label: '通用' },
-  { value: 'qidian', label: '起点中文网' },
-  { value: 'fanqie', label: '番茄小说' },
-  { value: 'zhihu', label: '知乎盐选' },
-  { value: 'jinjiang', label: '晋江文学城' },
-  { value: 'douyin', label: '抖音故事' },
-  { value: 'rules_horror', label: '规则怪谈' },
-];
-
-const TYPE_OPTIONS: { value: ProjectType; label: string }[] = [
-  { value: 'short_story', label: '短篇' },
-  { value: 'long_novel', label: '长篇' },
-  { value: 'script', label: '剧本' },
-];
 
 // ============================================================
 // 工具函数
@@ -126,6 +145,9 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
   const statusLabel = USER_STATUS_LABELS[project.status] || project.status;
   const statusBgColor = STATUS_COLORS[project.status] || 'rgba(108,108,128,0.2)';
   const statusTextColor = STATUS_TEXT_COLORS[project.status] || '#6c6c80';
+  const creationLabel = CREATION_SOURCE_LABELS[project.creationSource] || project.creationSource;
+  const platformLabel = TARGET_PLATFORM_LABELS[project.targetPlatform] || project.targetPlatform;
+  const stageLabel = WORKFLOW_STAGE_LABELS[project.currentWorkflowStage] || project.currentWorkflowStage;
 
   return (
     <div
@@ -168,6 +190,14 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
             🗑
           </button>
         </div>
+      </div>
+
+      <div style={cardStyles.metaRow}>
+        <span style={cardStyles.metaTag}>{creationLabel}</span>
+        <span style={cardStyles.metaDivider}>·</span>
+        <span style={cardStyles.metaTag}>{stageLabel}</span>
+        <span style={cardStyles.metaDivider}>·</span>
+        <span style={cardStyles.metaTag}>{platformLabel}</span>
       </div>
 
       {project.description && (
@@ -252,6 +282,22 @@ const cardStyles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     flexShrink: 0,
   },
+  metaRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap',
+  },
+  metaTag: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted, #6c6c80)',
+    fontWeight: 400,
+  },
+  metaDivider: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted, #6c6c80)',
+    opacity: 0.4,
+  },
   deleteBtn: {
     background: 'none',
     border: 'none',
@@ -317,7 +363,7 @@ const cardStyles: Record<string, React.CSSProperties> = {
 };
 
 // ============================================================
-// 创建项目对话框
+// 创建项目对话框（四步式流程）
 // ============================================================
 
 interface CreateDialogProps {
@@ -327,122 +373,321 @@ interface CreateDialogProps {
     title: string;
     type: ProjectType;
     platformStyle: string;
+    creationSource: CreationSource;
+    targetPlatform: TargetPlatform;
+    targetWords: number;
+    currentWorkflowStage: WorkflowStage;
+    ideaStatus: IdeaStatus;
+    ideaSeed?: string;
+    description?: string;
   }) => void;
 }
 
+const CREATION_SOURCE_OPTIONS: { value: CreationSource; label: string; desc: string }[] = [
+  {
+    value: 'inspiration',
+    label: '从灵感开始',
+    desc: '适合还没有明确故事，只想从热点、题材、脑洞、灵感卡中挑选方向。',
+  },
+  {
+    value: 'idea',
+    label: '从想法开始',
+    desc: '适合你已经有一句模糊想法，AI 会通过追问帮你补全题材、主角、冲突、世界观和卖点。',
+  },
+  {
+    value: 'import',
+    label: '导入已有资料',
+    desc: '适合你已经有大纲、角色、世界观、正文片段或 .novel 项目包。',
+  },
+  {
+    value: 'blank',
+    label: '空白创建',
+    desc: '适合你自己手动填写项目资料。',
+  },
+];
+
+const PROJECT_TYPE_OPTIONS: { value: ProjectType; label: string; desc: string }[] = [
+  {
+    value: 'short_story',
+    label: '短篇',
+    desc: '适合短故事、平台短篇、反转故事，流程为题材 → 大纲 → 正文。',
+  },
+  {
+    value: 'long_novel',
+    label: '长篇',
+    desc: '适合连载小说、长篇网文，流程为设定 → 世界观 → 人物 → 总纲 → 分卷 → 章节 → 正文。',
+  },
+];
+
+const PLATFORM_OPTIONS_WIZARD: { value: TargetPlatform; label: string }[] = [
+  { value: 'zhihu', label: '知乎盐选' },
+  { value: 'fanqie', label: '番茄' },
+  { value: 'qidian', label: '起点' },
+  { value: 'douyin', label: '抖音故事' },
+  { value: 'xiaohongshu', label: '小红书' },
+  { value: 'custom', label: '自定义' },
+  { value: 'generic', label: '通用' },
+];
+
 const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }) => {
+  const [step, setStep] = useState(1);
+  const [creationSource, setCreationSource] = useState<CreationSource>('blank');
+  const [projectType, setProjectType] = useState<ProjectType>('long_novel');
+  const [targetPlatform, setTargetPlatform] = useState<TargetPlatform>('generic');
   const [title, setTitle] = useState('');
-  const [type, setType] = useState<ProjectType>('long_novel');
-  const [platformStyle, setPlatformStyle] = useState('generic');
+  const [targetWords, setTargetWords] = useState('');
+  const [ideaSeed, setIdeaSeed] = useState('');
+  const [description, setDescription] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   if (!isOpen) return null;
 
-  const validate = (): boolean => {
+  const reset = () => {
+    setStep(1);
+    setCreationSource('blank');
+    setProjectType('long_novel');
+    setTargetPlatform('generic');
+    setTitle('');
+    setTargetWords('');
+    setIdeaSeed('');
+    setDescription('');
+    setErrors({});
+  };
+
+  const validateStep4 = (): boolean => {
     const newErrors: Record<string, string> = {};
     if (!title.trim()) {
-      newErrors.title = '请输入项目标题';
+      newErrors.title = '请输入作品标题';
     }
-    // 字数校验可选，创建后可设置目标字数
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (validate()) {
-      onCreate({ title: title.trim(), type, platformStyle });
-      setTitle('');
-      setType('long_novel');
-      setPlatformStyle('generic');
-      setErrors({});
+  const handleCreate = () => {
+    if (validateStep4()) {
+      const workflowStage =
+        projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';
+      const ideaStatusValue = creationSource === 'idea' ? 'draft' : 'none';
+
+      onCreate({
+        title: title.trim(),
+        type: projectType,
+        platformStyle: targetPlatform,
+        creationSource,
+        targetPlatform,
+        targetWords: parseInt(targetWords) || 0,
+        currentWorkflowStage: workflowStage,
+        ideaStatus: ideaStatusValue,
+        ideaSeed: creationSource === 'idea' ? ideaSeed.trim() : undefined,
+        description: description.trim() || undefined,
+      });
+      reset();
     }
   };
 
   const handleBackdrop = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
+      reset();
       onClose();
     }
   };
+
+  const handleClose = () => {
+    reset();
+    onClose();
+  };
+
+  const handleNext = () => setStep((s) => Math.min(s + 1, 4));
+  const handlePrev = () => setStep((s) => Math.max(s - 1, 1));
 
   return (
     <div style={dialogStyles.backdrop} onClick={handleBackdrop}>
       <div style={dialogStyles.dialog}>
         <div style={dialogStyles.header}>
-          <h2 style={dialogStyles.title}>新建项目</h2>
-          <button style={dialogStyles.closeBtn} onClick={onClose}>
+          <div>
+            <h2 style={dialogStyles.title}>创建新作品</h2>
+            <p style={dialogStyles.subtitle}>
+              选择一个开始方式，后续将根据短篇或长篇自动进入对应创作流程。
+            </p>
+          </div>
+          <button style={dialogStyles.closeBtn} onClick={handleClose}>
             ✕
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={dialogStyles.form}>
-          <div style={dialogStyles.field}>
-            <label style={dialogStyles.label}>标题 *</label>
-            <input
-              style={{
-                ...dialogStyles.input,
-                ...(errors.title ? dialogStyles.inputError : {}),
-              }}
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="输入项目标题..."
-              autoFocus
-            />
-            {errors.title && <span style={dialogStyles.error}>{errors.title}</span>}
-          </div>
+        {/* 步骤指示器 */}
+        <div style={dialogStyles.steps}>
+          {['开始方式', '作品类型', '目标平台', '基础信息'].map((label, i) => (
+            <div key={i} style={dialogStyles.stepItem}>
+              <div
+                style={{
+                  ...dialogStyles.stepDot,
+                  backgroundColor: step > i + 1 ? '#2ecc71' : step === i + 1 ? 'var(--color-accent, #e94560)' : 'rgba(255,255,255,0.1)',
+                  color: step > i + 1 ? '#fff' : step === i + 1 ? '#fff' : 'var(--color-text-muted, #6c6c80)',
+                }}
+              >
+                {step > i + 1 ? '✓' : i + 1}
+              </div>
+              <span
+                style={{
+                  ...dialogStyles.stepLabel,
+                  color: step === i + 1 ? 'var(--color-text-primary, #eaeaea)' : 'var(--color-text-muted, #6c6c80)',
+                }}
+              >
+                {label}
+              </span>
+              {i < 3 && <div style={dialogStyles.stepLine} />}
+            </div>
+          ))}
+        </div>
 
-          <div style={dialogStyles.field}>
-            <label style={dialogStyles.label}>类型</label>
-            <select
-              style={dialogStyles.select}
-              value={type}
-              onChange={(e) => setType(e.target.value as ProjectType)}
-            >
-              {TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div style={dialogStyles.stepContent}>
+          {/* Step 1: 创建来源 */}
+          {step === 1 && (
+            <div style={dialogStyles.stepBody}>
+              <h3 style={dialogStyles.stepTitle}>你想从哪里开始？</h3>
+              <div style={dialogStyles.cardGrid}>
+                {CREATION_SOURCE_OPTIONS.map((opt) => (
+                  <div
+                    key={opt.value}
+                    style={{
+                      ...dialogStyles.selectCard,
+                      borderColor: creationSource === opt.value ? 'var(--color-accent, #e94560)' : 'var(--color-border, #2a2a4a)',
+                      backgroundColor: creationSource === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, #1a1a2e)',
+                    }}
+                    onClick={() => setCreationSource(opt.value)}
+                  >
+                    <span style={dialogStyles.cardLabel}>{opt.label}</span>
+                    <span style={dialogStyles.cardDesc}>{opt.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-          <div style={dialogStyles.field}>
-            <label style={dialogStyles.label}>目标平台</label>
-            <select
-              style={dialogStyles.select}
-              value={platformStyle}
-              onChange={(e) => setPlatformStyle(e.target.value)}
-            >
-              {PLATFORM_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Step 2: 作品类型 */}
+          {step === 2 && (
+            <div style={dialogStyles.stepBody}>
+              <h3 style={dialogStyles.stepTitle}>你要创作什么类型？</h3>
+              <div style={dialogStyles.cardGrid}>
+                {PROJECT_TYPE_OPTIONS.map((opt) => (
+                  <div
+                    key={opt.value}
+                    style={{
+                      ...dialogStyles.selectCard,
+                      borderColor: projectType === opt.value ? 'var(--color-accent, #e94560)' : 'var(--color-border, #2a2a4a)',
+                      backgroundColor: projectType === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, #1a1a2e)',
+                    }}
+                    onClick={() => setProjectType(opt.value)}
+                  >
+                    <span style={dialogStyles.cardLabel}>{opt.label}</span>
+                    <span style={dialogStyles.cardDesc}>{opt.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-          <div style={dialogStyles.field}>
-            <label style={dialogStyles.label}>目标字数</label>
-            <input
-              style={dialogStyles.input}
-              type="number"
-              defaultValue={100000}
-              min={1}
-              placeholder="输入目标字数..."
-              disabled
-            />
-          </div>
+          {/* Step 3: 目标平台 */}
+          {step === 3 && (
+            <div style={dialogStyles.stepBody}>
+              <h3 style={dialogStyles.stepTitle}>目标平台？</h3>
+              <div style={dialogStyles.platformGrid}>
+                {PLATFORM_OPTIONS_WIZARD.map((opt) => (
+                  <div
+                    key={opt.value}
+                    style={{
+                      ...dialogStyles.platformCard,
+                      borderColor: targetPlatform === opt.value ? 'var(--color-accent, #e94560)' : 'var(--color-border, #2a2a4a)',
+                      backgroundColor: targetPlatform === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, #1a1a2e)',
+                    }}
+                    onClick={() => setTargetPlatform(opt.value)}
+                  >
+                    {opt.label}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-          <div style={dialogStyles.actions}>
-            <button type="button" style={dialogStyles.cancelBtn} onClick={onClose}>
-              取消
+          {/* Step 4: 基础信息 */}
+          {step === 4 && (
+            <div style={dialogStyles.stepBody}>
+              <h3 style={dialogStyles.stepTitle}>基础信息</h3>
+              <div style={dialogStyles.form}>
+                <div style={dialogStyles.field}>
+                  <label style={dialogStyles.label}>作品标题 *</label>
+                  <input
+                    style={{
+                      ...dialogStyles.input,
+                      ...(errors.title ? dialogStyles.inputError : {}),
+                    }}
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="输入作品标题..."
+                    autoFocus
+                  />
+                  {errors.title && <span style={dialogStyles.error}>{errors.title}</span>}
+                </div>
+
+                <div style={dialogStyles.field}>
+                  <label style={dialogStyles.label}>目标字数（可选）</label>
+                  <input
+                    style={dialogStyles.input}
+                    type="number"
+                    value={targetWords}
+                    onChange={(e) => setTargetWords(e.target.value)}
+                    placeholder="例如：200000"
+                    min={0}
+                  />
+                </div>
+
+                {creationSource === 'idea' && (
+                  <div style={dialogStyles.field}>
+                    <label style={dialogStyles.label}>原始想法（可选）</label>
+                    <textarea
+                      style={dialogStyles.textarea}
+                      value={ideaSeed}
+                      onChange={(e) => setIdeaSeed(e.target.value)}
+                      placeholder="写下你的想法，哪怕只是一句话..."
+                      rows={3}
+                    />
+                  </div>
+                )}
+
+                <div style={dialogStyles.field}>
+                  <label style={dialogStyles.label}>简短描述（可选）</label>
+                  <textarea
+                    style={dialogStyles.textarea}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="简要描述你的作品..."
+                    rows={2}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={dialogStyles.actions}>
+          {step > 1 && (
+            <button type="button" style={dialogStyles.secondaryBtn} onClick={handlePrev}>
+              上一步
             </button>
-            <button type="submit" style={dialogStyles.submitBtn}>
-              创建项目
+          )}
+          <div style={{ flex: 1 }} />
+          {step < 4 ? (
+            <button type="button" style={dialogStyles.submitBtn} onClick={handleNext}>
+              下一步
             </button>
-          </div>
-        </form>
+          ) : (
+            <button type="button" style={dialogStyles.submitBtn} onClick={handleCreate}>
+              创建作品
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -463,21 +708,29 @@ const dialogStyles: Record<string, React.CSSProperties> = {
     borderRadius: 'var(--radius-lg, 12px)',
     border: '1px solid var(--color-border, #2a2a4a)',
     padding: '24px',
-    width: '460px',
+    width: '600px',
     maxWidth: '90vw',
+    maxHeight: '90vh',
+    overflowY: 'auto',
     boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: '20px',
   },
   title: {
-    fontSize: '18px',
+    fontSize: '20px',
     fontWeight: 600,
     color: 'var(--color-text-primary, #eaeaea)',
     margin: 0,
+  },
+  subtitle: {
+    fontSize: '13px',
+    color: 'var(--color-text-muted, #6c6c80)',
+    margin: '6px 0 0 0',
+    lineHeight: 1.4,
   },
   closeBtn: {
     background: 'none',
@@ -487,11 +740,102 @@ const dialogStyles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     padding: '4px 8px',
     borderRadius: 'var(--radius-sm, 4px)',
+    flexShrink: 0,
+  },
+  steps: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '24px',
+    gap: '0',
+  },
+  stepItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0',
+  },
+  stepDot: {
+    width: '28px',
+    height: '28px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '12px',
+    fontWeight: 600,
+    flexShrink: 0,
+  },
+  stepLabel: {
+    fontSize: '12px',
+    fontWeight: 500,
+    marginLeft: '6px',
+    marginRight: '4px',
+  },
+  stepLine: {
+    width: '36px',
+    height: '1px',
+    backgroundColor: 'var(--color-border, #2a2a4a)',
+    margin: '0 2px',
+  },
+  stepContent: {
+    minHeight: '200px',
+  },
+  stepBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+  },
+  stepTitle: {
+    fontSize: '15px',
+    fontWeight: 600,
+    color: 'var(--color-text-primary, #eaeaea)',
+    margin: 0,
+  },
+  cardGrid: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  selectCard: {
+    padding: '14px 16px',
+    border: '1px solid var(--color-border, #2a2a4a)',
+    borderRadius: 'var(--radius-md, 8px)',
+    cursor: 'pointer',
+    transition: 'border-color 0.15s, background-color 0.15s',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  cardLabel: {
+    fontSize: '14px',
+    fontWeight: 600,
+    color: 'var(--color-text-primary, #eaeaea)',
+  },
+  cardDesc: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted, #6c6c80)',
+    lineHeight: 1.4,
+  },
+  platformGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '10px',
+  },
+  platformCard: {
+    padding: '12px',
+    border: '1px solid var(--color-border, #2a2a4a)',
+    borderRadius: 'var(--radius-md, 8px)',
+    cursor: 'pointer',
+    textAlign: 'center',
+    fontSize: '13px',
+    fontWeight: 500,
+    color: 'var(--color-text-primary, #eaeaea)',
+    transition: 'border-color 0.15s, background-color 0.15s',
   },
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
+    gap: '14px',
   },
   field: {
     display: 'flex',
@@ -517,6 +861,17 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   inputError: {
     borderColor: 'var(--color-accent, #e94560)',
   },
+  textarea: {
+    padding: '8px 12px',
+    backgroundColor: 'var(--color-bg-primary, #1a1a2e)',
+    border: '1px solid var(--color-border, #2a2a4a)',
+    borderRadius: 'var(--radius-md, 8px)',
+    color: 'var(--color-text-primary, #eaeaea)',
+    fontSize: '14px',
+    fontFamily: 'var(--font-family, sans-serif)',
+    outline: 'none',
+    resize: 'vertical',
+  },
   select: {
     padding: '10px 12px',
     backgroundColor: '#1a1a2e',
@@ -536,11 +891,11 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   },
   actions: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: '12px',
-    marginTop: '8px',
+    marginTop: '20px',
   },
-  cancelBtn: {
+  secondaryBtn: {
     padding: '8px 20px',
     backgroundColor: 'transparent',
     border: '1px solid var(--color-border, #2a2a4a)',
@@ -551,7 +906,7 @@ const dialogStyles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-family, sans-serif)',
   },
   submitBtn: {
-    padding: '8px 20px',
+    padding: '8px 24px',
     backgroundColor: 'var(--color-accent, #e94560)',
     border: 'none',
     borderRadius: 'var(--radius-md, 8px)',
@@ -611,7 +966,11 @@ const SearchFilter: React.FC<SearchFilterProps> = ({
         >
           全部
         </button>
-        {TYPE_OPTIONS.map((opt) => (
+        {[
+          { value: 'short_story' as ProjectType, label: '短篇' },
+          { value: 'long_novel' as ProjectType, label: '长篇' },
+          { value: 'script' as ProjectType, label: '剧本' },
+        ].map((opt) => (
           <button
             key={opt.value}
             style={{
@@ -721,10 +1080,16 @@ const ProjectListPage: React.FC = () => {
     title: string;
     type: ProjectType;
     platformStyle: string;
+    creationSource: CreationSource;
+    targetPlatform: TargetPlatform;
+    targetWords: number;
+    currentWorkflowStage: WorkflowStage;
+    ideaStatus: IdeaStatus;
+    ideaSeed?: string;
+    description?: string;
   }) => {
     const project = await createProject(data);
     setIsDialogOpen(false);
-    // 引导窗口中通过 IPC 通知主进程切换窗口；主窗口中直接路由
     await openProject(project.id, project.title, navigate);
   };
 
