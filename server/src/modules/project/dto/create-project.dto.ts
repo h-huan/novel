@@ -31,7 +31,7 @@ export class CreateProjectDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['zhihu', 'fanqie', 'qidian', 'douyin', 'rules_horror', 'jinjiang', 'generic'])
+  @IsIn(['zhihu', 'fanqie', 'qidian', 'douyin', 'xiaohongshu', 'custom', 'generic', 'rules_horror', 'jinjiang'])
   platformStyle?: string = 'generic';
 
   @IsOptional()

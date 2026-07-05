@@ -57,7 +57,7 @@ export class ProjectService {
     });
 
     // 推导默认创作阶段
-    const projectType = dto.projectMode || dto.type || 'long_novel';
+    const projectType = dto.type || dto.projectMode || 'long_novel';
     const creationSource = dto.creationSource || 'blank';
     const currentWorkflowStage = dto.currentWorkflowStage ||
       this.defaultWorkflowStage(projectType, creationSource);
