@@ -34,6 +34,7 @@ import { OrganizationModule } from './modules/organization/organization.module';
 import { MapPointModule } from './modules/map-point/map-point.module';
 import { TimelineModule } from './modules/timeline/timeline.module';
 import { IdeaLabModule } from './modules/idea-lab/idea-lab.module';
+import { WorkflowGuardModule } from './modules/workflow-guard/workflow-guard.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { IdeaLabModule } from './modules/idea-lab/idea-lab.module';
     MapPointModule,
     TimelineModule,
     IdeaLabModule,
+    WorkflowGuardModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

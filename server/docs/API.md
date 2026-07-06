@@ -359,3 +359,103 @@ POST /api/v1/idea-lab/drafts/:id/convert-to-project
 - `confirmedIdea = 确认后的成熟想法`
 - `type = draft.projectType`
 - `targetPlatform = draft.targetPlatform`
+
+---
+
+## 流程守卫（Workflow Guard）
+
+Workflow Guard 提供流程判断和阶段管理能力，根据项目类型、当前阶段和已有资产，判断用户下一步应该做什么。
+
+### API 列表
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/projects/:projectId/workflow-guard` | 获取项目完整流程守卫状态 |
+| `POST` | `/projects/:projectId/workflow-guard/check` | 检查某个操作是否允许 |
+| `POST` | `/projects/:projectId/workflow-guard/advance` | 推进流程阶段 |
+
+### 获取流程守卫状态
+
+```
+GET /api/v1/projects/:projectId/workflow-guard
+```
+
+**响应结构：**
+
+```json
+{
+  "projectId": "uuid",
+  "projectType": "short_story",
+  "creationSource": "idea",
+  "currentStage": "topic",
+  "currentStageLabel": "题材",
+  "recommendedNextStage": "outline",
+  "recommendedNextAction": "建议先完成题材设定，确认想法后再进入大纲阶段",
+  "progressPercent": 20,
+  "canProceed": true,
+  "allowedActions": [
+    { "key": "edit_project", "label": "编辑基础设定", "targetRoute": "" },
+    { "key": "edit_topic", "label": "完善题材", "targetRoute": "" },
+    { "key": "generate_topic", "label": "生成题材建议" }
+  ],
+  "blockedActions": [
+    { "key": "generate_body", "label": "生成正文", "reason": "当前还缺少大纲" }
+  ],
+  "missingAssets": [
+    { "key": "outline", "label": "大纲", "severity": "required", "reason": "短篇正文生成前需要先有大纲" }
+  ],
+  "completedAssets": [
+    { "key": "idea", "label": "创作想法" }
+  ],
+  "warnings": [],
+  "stageMap": [
+    { "key": "topic", "label": "题材", "status": "current" },
+    { "key": "outline", "label": "大纲", "status": "next" },
+    { "key": "writing", "label": "正文", "status": "locked" }
+  ]
+}
+```
+
+### 检查操作
+
+```
+POST /api/v1/projects/:projectId/workflow-guard/check
+Content-Type: application/json
+
+{
+  "action": "generate_body"
+}
+```
+
+**响应：**
+```json
+{
+  "allowed": false,
+  "action": "generate_body",
+  "reason": "当前还缺少大纲",
+  "missingAssets": ["outline"],
+  "warnings": []
+}
+```
+
+### 推进阶段
+
+```
+POST /api/v1/projects/:projectId/workflow-guard/advance
+Content-Type: application/json
+
+{
+  "targetStage": "outline",
+  "force": false
+}
+```
+
+**响应：**
+```json
+{
+  "projectId": "uuid",
+  "previousStage": "topic",
+  "currentStage": "outline",
+  "message": "已进入大纲阶段"
+}
+```

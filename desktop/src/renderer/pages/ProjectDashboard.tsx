@@ -6,6 +6,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
+import { useWorkflowGuardStore } from '../stores/workflowGuardStore';
+import WorkflowAssistantPanel from '../components/workflow/WorkflowAssistantPanel';
 
 interface DashboardStats {
   totalChapters: number; completedChapters: number; writingChapters: number;
@@ -54,6 +56,10 @@ const ProjectDashboard: React.FC = () => {
       setLoading(false);
     };
     load();
+    // 加载流程守卫数据
+    if (projectId) {
+      useWorkflowGuardStore.getState().fetchGuard(projectId);
+    }
   }, [projectId, selectProject]);
 
   // 从 currentProject 解析 projectMeta（替代原来的本地 state）
@@ -312,6 +318,9 @@ const ProjectDashboard: React.FC = () => {
           ))}
         </div>
       )}
+
+      {/* 创作流程助手 */}
+      {projectId && <WorkflowAssistantPanel projectId={projectId} />}
     </div>
   );
 };
