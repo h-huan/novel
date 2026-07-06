@@ -1,10 +1,11 @@
 /**
  * 创建想法草稿 DTO
  */
-import { IsString, IsOptional, IsNumber, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, IsIn } from 'class-validator';
 
 export class CreateIdeaDraftDto {
   @IsString()
+  @IsNotEmpty()
   rawIdea: string;
 
   @IsOptional()

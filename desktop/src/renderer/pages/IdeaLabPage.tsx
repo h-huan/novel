@@ -269,12 +269,12 @@ const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
 // ========== 子组件: 确认想法编辑区 ==========
 
 interface ConfirmSectionProps {
-  confirmedIdea: string;
-  initialValue: string;
+  /** textarea 当前值，外部维护状态 */
+  value: string;
   onValueChange: (value: string) => void;
 }
 
-const ConfirmSection: React.FC<ConfirmSectionProps> = ({ confirmedIdea, initialValue, onValueChange }) => {
+const ConfirmSection: React.FC<ConfirmSectionProps> = ({ value, onValueChange }) => {
   return (
     <div style={sectionStyles.container}>
       <h3 style={sectionStyles.title}>✅ 确认想法</h3>
@@ -283,7 +283,7 @@ const ConfirmSection: React.FC<ConfirmSectionProps> = ({ confirmedIdea, initialV
       </p>
       <textarea
         style={sectionStyles.confirmTextarea}
-        value={confirmedIdea || initialValue}
+        value={value}
         onChange={(e) => onValueChange(e.target.value)}
         rows={4}
       />
@@ -296,7 +296,7 @@ const ConfirmSection: React.FC<ConfirmSectionProps> = ({ confirmedIdea, initialV
 const IdeaLabPage: React.FC = () => {
   const { draftId } = useParams<{ draftId: string }>();
   const navigate = useNavigate();
-  const { draft, loading, error, fetchDraft, generateQuestions, saveAnswers, refineIdea, confirmIdea, convertToProject } = useIdeaLabStore();
+  const { draft, loading, error, questionsIsFallback, refineIsFallback, fetchDraft, generateQuestions, saveAnswers, refineIdea, confirmIdea, convertToProject } = useIdeaLabStore();
 
   const [localAnswers, setLocalAnswers] = useState<AnswerItem[]>([]);
   const [confirmedText, setConfirmedText] = useState('');
@@ -316,6 +316,13 @@ const IdeaLabPage: React.FC = () => {
       });
     }
   }, [draftId, fetchDraft]);
+
+  // 在 refinedIdea 出现时初始化确认文本（仅首次）
+  useEffect(() => {
+    if (draft && draft.refinedIdea && draft.refinedIdea.oneLineHook && !confirmedText && draft.status !== 'confirmed' && draft.status !== 'converted') {
+      setConfirmedText(draft.refinedIdea.oneLineHook);
+    }
+  }, [draft?.refinedIdea?.oneLineHook]);
 
   // 初始化项目标题
   useEffect(() => {
@@ -486,6 +493,13 @@ const IdeaLabPage: React.FC = () => {
         <p style={pageStyles.rawIdeaText}>{draft.rawIdea}</p>
       </div>
 
+      {/* Fallback 提示 */}
+      {(questionsIsFallback || refineIsFallback) && (
+        <div style={pageStyles.fallbackBanner}>
+          ℹ️ 当前使用本地兜底结果，可稍后重新生成。
+        </div>
+      )}
+
       {/* 追问区 */}
       {hasQuestions && (
         <QuestionsSection
@@ -508,8 +522,7 @@ const IdeaLabPage: React.FC = () => {
       {/* 确认想法区 */}
       {isRefined && !isConfirmed && (
         <ConfirmSection
-          confirmedIdea={confirmedText}
-          initialValue={draft.refinedIdea?.oneLineHook || draft.rawIdea}
+          value={confirmedText}
           onValueChange={setConfirmedText}
         />
       )}
@@ -867,6 +880,15 @@ const pageStyles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
     marginBottom: '12px',
+  },
+  fallbackBanner: {
+    padding: '10px 16px',
+    backgroundColor: 'rgba(243,156,18,0.1)',
+    border: '1px solid rgba(243,156,18,0.3)',
+    borderRadius: 'var(--radius-md, 8px)',
+    color: '#f39c12',
+    fontSize: '13px',
+    marginBottom: '16px',
   },
 };
 

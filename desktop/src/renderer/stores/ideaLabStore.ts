@@ -92,6 +92,10 @@ interface IdeaLabState {
   draft: IdeaDraft | null;
   loading: boolean;
   error: string | null;
+  /** 追问是否使用了 fallback 模板 */
+  questionsIsFallback: boolean;
+  /** 完善想法是否使用了 fallback 模板 */
+  refineIsFallback: boolean;
 
   createDraft: (data: CreateDraftData) => Promise<IdeaDraft>;
   fetchDraft: (id: string) => Promise<IdeaDraft>;
@@ -107,6 +111,8 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
   draft: null,
   loading: false,
   error: null,
+  questionsIsFallback: false,
+  refineIsFallback: false,
 
   /**
    * 创建想法草稿
@@ -153,12 +159,13 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
    * 生成追问问题
    */
   generateQuestions: async (id: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, questionsIsFallback: false });
     try {
       const res = await api.post<any>(`/idea-lab/drafts/${id}/questions`);
       const result = (res as any).data ?? res;
       set((state) => ({
         loading: false,
+        questionsIsFallback: result.isFallback === true,
         draft: state.draft
           ? {
               ...state.draft,
@@ -203,12 +210,13 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
    * 完善想法
    */
   refineIdea: async (id: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, refineIsFallback: false });
     try {
       const res = await api.post<any>(`/idea-lab/drafts/${id}/refine`);
       const result = (res as any).data ?? res;
       set((state) => ({
         loading: false,
+        refineIsFallback: result.isFallback === true,
         draft: state.draft
           ? {
               ...state.draft,
@@ -286,6 +294,6 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
    * 重置状态
    */
   reset: () => {
-    set({ draft: null, loading: false, error: null });
+    set({ draft: null, loading: false, error: null, questionsIsFallback: false, refineIsFallback: false });
   },
 }));

@@ -457,8 +457,16 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
 
   const validateStep4 = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!title.trim()) {
-      newErrors.title = '请输入作品标题';
+    if (creationSource === 'idea') {
+      // 从想法开始：原始想法必填，标题可选
+      if (!ideaSeed.trim()) {
+        newErrors.ideaSeed = '请输入原始想法';
+      }
+    } else {
+      // 其他来源：标题必填
+      if (!title.trim()) {
+        newErrors.title = '请输入作品标题';
+      }
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -470,18 +478,34 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
         projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';
       const ideaStatusValue = creationSource === 'idea' ? 'draft' : 'none';
 
-      onCreate({
-        title: title.trim(),
-        type: projectType,
-        platformStyle: targetPlatform,
-        creationSource,
-        targetPlatform,
-        targetWords: parseInt(targetWords) || 0,
-        currentWorkflowStage: workflowStage,
-        ideaStatus: ideaStatusValue,
-        ideaSeed: creationSource === 'idea' ? ideaSeed.trim() : undefined,
-        description: description.trim() || undefined,
-      });
+      if (creationSource === 'idea') {
+        // 从想法开始：rawIdea 必须来自 ideaSeed，不能回退到 description 或 title
+        onCreate({
+          title: title.trim() || '',
+          type: projectType,
+          platformStyle: targetPlatform,
+          creationSource,
+          targetPlatform,
+          targetWords: parseInt(targetWords) || 0,
+          currentWorkflowStage: workflowStage,
+          ideaStatus: ideaStatusValue,
+          ideaSeed: ideaSeed.trim(),
+          description: description.trim() || undefined,
+        });
+      } else {
+        onCreate({
+          title: title.trim(),
+          type: projectType,
+          platformStyle: targetPlatform,
+          creationSource,
+          targetPlatform,
+          targetWords: parseInt(targetWords) || 0,
+          currentWorkflowStage: workflowStage,
+          ideaStatus: ideaStatusValue,
+          ideaSeed: undefined,
+          description: description.trim() || undefined,
+        });
+      }
       reset();
     }
   };
@@ -617,7 +641,9 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
               <h3 style={dialogStyles.stepTitle}>基础信息</h3>
               <div style={dialogStyles.form}>
                 <div style={dialogStyles.field}>
-                  <label style={dialogStyles.label}>作品标题 *</label>
+                  <label style={dialogStyles.label}>
+                    {creationSource === 'idea' ? '作品标题（可选）' : '作品标题 *'}
+                  </label>
                   <input
                     style={{
                       ...dialogStyles.input,
@@ -650,13 +676,14 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
                     <textarea
                       style={{
                         ...dialogStyles.textarea,
-                        borderColor: ideaSeed.trim() ? '' : 'var(--color-accent, #e94560)',
+                        ...(errors.ideaSeed ? dialogStyles.inputError : {}),
                       }}
                       value={ideaSeed}
-                      onChange={(e) => setIdeaSeed(e.target.value)}
+                      onChange={(e) => { setIdeaSeed(e.target.value); if (errors.ideaSeed) setErrors({}); }}
                       placeholder="写下你的想法，哪怕只是一句话。AI 会通过追问帮你完善成可创作的作品设定。"
                       rows={3}
                     />
+                    {errors.ideaSeed && <span style={dialogStyles.error}>{errors.ideaSeed}</span>}
                   </div>
                 )}
 
