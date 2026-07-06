@@ -1124,7 +1124,7 @@ const ProjectListPage: React.FC = () => {
       // 从想法开始 → 创建 Idea Draft 并跳转 Idea Lab
       try {
         const draft = await createDraft({
-          rawIdea: data.ideaSeed || data.description || data.title || '',
+          rawIdea: data.ideaSeed || '',
           projectType: data.type,
           targetPlatform: data.targetPlatform,
           targetWords: data.targetWords || 0,
