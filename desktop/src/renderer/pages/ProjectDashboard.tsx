@@ -121,6 +121,10 @@ const ProjectDashboard: React.FC = () => {
           <div style={{ height: '100%', width: `${Math.min(progress, 100)}%`, backgroundColor: progress > 80 ? '#2ecc71' : '#e94560', borderRadius: '3px' }} />
         </div>
       </div>
+
+      {/* 创作流程助手 */}
+      {projectId && <WorkflowAssistantPanel projectId={projectId} />}
+
       <div style={{ marginBottom: '28px' }}>
         <div style={{ fontSize: '12px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>快捷操作</div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -319,8 +323,6 @@ const ProjectDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 创作流程助手 */}
-      {projectId && <WorkflowAssistantPanel projectId={projectId} />}
     </div>
   );
 };

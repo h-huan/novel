@@ -4,7 +4,7 @@
  * 定义每个阶段的目标、允许操作、不建议操作、缺失资产判断逻辑。
  * 不依赖 Service，纯规则函数。
  */
-import type { ProjectAssets, AllowedAction, BlockedAction, AssetItem, CompletedAssetItem, StageMapItem } from './types';
+import type { ProjectAssets, AllowedAction, BlockedAction, AssetItem, CompletedAssetItem, StageMapItem, WarningItem } from './types';
 import { SHORT_STAGE_LABELS, LONG_STAGE_LABELS } from './types';
 
 // ========== 短篇规则 ==========
@@ -19,6 +19,7 @@ export interface ShortStoryStageResult {
   blockedActions: BlockedAction[];
   missingAssets: AssetItem[];
   completedAssets: CompletedAssetItem[];
+  warnings: WarningItem[];
   stageMap: StageMapItem[];
 }
 
@@ -181,6 +182,7 @@ function buildShortStoryResult(
     blockedActions,
     missingAssets,
     completedAssets,
+    warnings,
     stageMap,
   };
 }
@@ -202,6 +204,7 @@ export interface LongNovelStageResult {
   blockedActions: BlockedAction[];
   missingAssets: AssetItem[];
   completedAssets: CompletedAssetItem[];
+  warnings: WarningItem[];
   stageMap: StageMapItem[];
 }
 
@@ -469,6 +472,7 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
     blockedActions,
     missingAssets,
     completedAssets,
+    warnings,
     stageMap,
   };
 }

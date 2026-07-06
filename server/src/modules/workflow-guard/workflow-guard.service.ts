@@ -107,12 +107,12 @@ export class WorkflowGuardService {
       };
     }
 
-    // 未明确列出的操作，默认允许（白名单模式）
+    // 未明确列出的操作，不允许
     return {
-      allowed: true,
+      allowed: false,
       action,
-      reason: '',
-      missingAssets: [],
+      reason: '当前操作未被流程守卫识别',
+      missingAssets: guard.missingAssets.map((m) => m.key),
       warnings: guard.warnings.map((w) => w.message),
     };
   }
@@ -142,12 +142,22 @@ export class WorkflowGuardService {
       }
     }
 
-    // 非 force 模式检查是否可以进入
+    // 非 force 模式检查是否越级
     if (!force) {
-      const guard = this.getGuard(projectId);
-      if (!guard.canProceed && targetStage !== previousStage) {
+      const stageOrder = projectType === 'short_story'
+        ? ['topic', 'outline', 'writing']
+        : [
+            'idea_or_inspiration', 'world_setting', 'character', 'outline',
+            'volume', 'chapter', 'writing', 'state_archive', 'weekly_review',
+          ];
+
+      const prevIdx = stageOrder.indexOf(previousStage);
+      const targetIdx = stageOrder.indexOf(targetStage);
+
+      // 允许：同阶段不动，或推进到下一阶段
+      if (targetIdx < prevIdx || targetIdx > prevIdx + 1) {
         throw new BadRequestException(
-          `当前阶段不允许推进到 ${targetStage}：${guard.recommendedNextAction}`,
+          `不能越级推进，请先完成当前阶段要求`,
         );
       }
     }
