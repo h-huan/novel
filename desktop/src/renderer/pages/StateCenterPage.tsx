@@ -442,6 +442,7 @@ const CharacterEvolutionPanel: React.FC<{
           onClick={() => {
             onSelect(item.id);
             onCharacterIdChange(item.targetId || item.targetLabel || '');
+            setTimeout(onLoadEvolution, 0);
           }}
         >
           <strong style={styles.itemTitle}>{item.targetLabel || item.title || '角色状态'}</strong>
@@ -468,6 +469,14 @@ const CharacterEvolutionPanel: React.FC<{
           <p>{event.summary}</p>
           {Boolean(event.delta?.tags?.length) && <span style={styles.tagRow}>{event.delta.tags.map((tag: string) => <b key={tag}>{tag}</b>)}</span>}
           {event.delta?.conflictWithPersona && <p style={styles.warningText}>这个角色当前不会自然做出这个选择。如果坚持，需要补充动机、事件或过渡剧情。</p>}
+          {event.delta?.needsTransition && <p style={styles.warningText}>需要补充过渡剧情来衔接角色状态变化。</p>}
+          {event.delta?.needsReview && <p style={styles.warningText}>该状态变化需要复核，确认是否与角色核心设定一致。</p>}
+          {event.delta?.evidenceEvent && (
+            <div style={styles.evidenceBox}>
+              <span style={{ fontWeight: 600 }}>依据事件：</span>
+              <span>{String(event.delta.evidenceEvent).slice(0, 200)}</span>
+            </div>
+          )}
         </div>
       ))}
     </section>
@@ -479,7 +488,7 @@ const styles: Record<string, React.CSSProperties> = {
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   backButton: { border: 'none', background: 'transparent', color: '#52606d', cursor: 'pointer', padding: 0, marginBottom: 8 },
   title: { margin: 0, fontSize: 28, fontWeight: 700 },
-  summaryRow: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(120px, 1fr))', gap: 12, marginBottom: 16 },
+  summaryRow: { display: 'grid', gridTemplateColumns: 'repeat(5, minmax(100px, 1fr))', gap: 12, marginBottom: 16 },
   summaryCard: { background: '#fff', border: '1px solid #d9e2ec', borderRadius: 8, padding: 14, display: 'grid', gridTemplateColumns: '12px 1fr auto', gap: 10, alignItems: 'center' },
   summaryDot: { width: 10, height: 10, borderRadius: '50%' },
   summaryLabel: { color: '#52606d', fontSize: 13 },
@@ -520,6 +529,7 @@ const styles: Record<string, React.CSSProperties> = {
   contextLayers: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(140px, 1fr))', gap: 10, margin: '14px 0' },
   layerBox: { background: '#f5f7f8', border: '1px solid #d9e2ec', borderRadius: 6, padding: 10, display: 'grid', gap: 6 },
   warningText: { color: '#9b2c2c', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: 6, padding: 8 },
+  evidenceBox: { background: '#f0f4f8', border: '1px solid #d9e2ec', borderRadius: 6, padding: 8, marginTop: 8, fontSize: 13, color: '#334e68' },
 };
 
 function entersWritingContext(item: StateItem) {

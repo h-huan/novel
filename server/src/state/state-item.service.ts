@@ -78,9 +78,16 @@ export class StateItemService {
       WHERE project_id = ? AND target_type = ? AND IFNULL(target_id, '') = IFNULL(?, '') AND summary_hash = ?
       LIMIT 1
     `).get(projectId, targetType, input.targetId || null, summaryHash) as any;
-    if (existing) return this.mapStateItem(existing);
+    if (existing) {
+      // active 状态（pending / confirmed / conflict / stale）命中去重时，直接返回已有项
+      if (existing.status !== 'rejected' && existing.status !== 'archived') return this.mapStateItem(existing);
+      // rejected / archived 命中时，允许创建新状态项
+    }
 
     const id = randomUUID();
+    if (existing && (existing.status === 'rejected' || existing.status === 'archived')) {
+      input.payload = { ...(input.payload || {}), reusedFromArchived: true, previousStatus: existing.status };
+    }
     db.prepare(`
       INSERT INTO state_items (
         id, project_id, source_type, source_id, source_chapter_id, target_type, target_id, target_label,
@@ -201,7 +208,7 @@ export class StateItemService {
     return this.get(projectId, id);
   }
 
-  createFromArchive(projectId: string, sourceChapterId: string, archive: any) {
+  createFromArchive(projectId: string, sourceChapterId: string, archive: any, sourceMode = 'generated_body') {
     const groups = [
       { key: 'worldSettingUpdates', type: 'world_setting', label: '世界观', tags: ['world'] },
       { key: 'characterUpdates', type: 'character', label: '角色', tags: ['character'] },
@@ -227,7 +234,7 @@ export class StateItemService {
           title: item.title || group.label,
           summary: `${item.title || group.label}: ${item.summary || item.content || ''}`,
           content: item.summary || item.content || '',
-          payload: { ...item, matchedTarget: target },
+          payload: { ...item, matchedTarget: target, sourceMode },
           status: group.type === 'plot_logic' ? 'conflict' : 'pending',
           tags: group.tags,
           source: 'ai_archive',
@@ -495,11 +502,21 @@ export class StateItemService {
       ? db.prepare('SELECT chapter_index FROM chapters WHERE project_id = ? AND id = ?').get(projectId, item.sourceChapterId) as any
       : null;
     const evolutionPayload = this.buildCharacterEvolutionPayload(item);
+    // 尝试获取前一个状态作为 before_state
+    const prevEvent = item.targetId ? db.prepare(`
+      SELECT id, delta, after_state FROM character_evolution_events
+      WHERE project_id = ? AND character_id = ?
+      ORDER BY COALESCE(chapter_index, 999999) DESC, created_at DESC
+      LIMIT 1
+    `).get(projectId, item.targetId) as any : null;
+    const beforeState = prevEvent?.after_state || '{}';
+    // 当前状态作为 after_state（如果无法推断则写空对象）
+    const afterState = JSON.stringify({ summary: item.summary, content: item.content, changedAt: new Date().toISOString() });
     db.prepare(`
       INSERT INTO character_evolution_events (
         id, project_id, character_id, character_name, source_state_item_id, source_chapter_id,
-        chapter_index, event_type, title, summary, delta, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        chapter_index, event_type, title, summary, before_state, after_state, delta, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       randomUUID(),
       projectId,
@@ -511,6 +528,8 @@ export class StateItemService {
       'state_change',
       item.title || '角色状态变化',
       item.summary,
+      beforeState,
+      afterState,
       JSON.stringify(evolutionPayload),
       item.status === 'confirmed' ? 'confirmed' : 'pending',
     );

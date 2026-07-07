@@ -131,16 +131,34 @@ export class CharacterService {
   }
 
   addRelationship(id: string, dto: AddRelationshipDto): CharacterResponse {
+    const existing = this.repo.findById(id);
+    if (!existing) throw new NotFoundException(`Character ${id} not found`);
     const relationship = { ...dto, history: [] };
     const row = this.repo.addRelationship(id, relationship);
     if (!row) throw new NotFoundException(`Character ${id} not found`);
-    return this.toResponse(row);
+    const response = this.toResponse(row);
+    this.analyzeStateImpact(existing.project_id, id, '人物关系添加影响分析', {
+      before: { relationships: existing.relationships },
+      after: { relationships: row.relationships },
+      relationChange: `add_relationship: ${dto.targetCharacterId || (dto as any).type || 'unknown'}`,
+      priority: 'character',
+    });
+    return response;
   }
 
   removeRelationship(id: string, targetId: string): CharacterResponse {
+    const existing = this.repo.findById(id);
+    if (!existing) throw new NotFoundException(`Character ${id} not found`);
     const row = this.repo.removeRelationship(id, targetId);
     if (!row) throw new NotFoundException(`Character ${id} not found`);
-    return this.toResponse(row);
+    const response = this.toResponse(row);
+    this.analyzeStateImpact(existing.project_id, id, '人物关系删除影响分析', {
+      before: { relationships: existing.relationships },
+      after: { relationships: row.relationships },
+      relationChange: `remove_relationship: ${targetId}`,
+      priority: 'character',
+    });
+    return response;
   }
 
   getLatestState(id: string): any {

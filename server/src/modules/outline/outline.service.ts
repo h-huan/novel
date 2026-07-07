@@ -121,6 +121,7 @@ export class OutlineService {
     }
     // 状态同步
     this.syncAfterChapterChange(existing.project_id, order + 1, -1);
+    this.analyzeOperationImpact(existing, 'remove');
     return { success: true };
   }
 
@@ -129,11 +130,15 @@ export class OutlineService {
     if (!existing) throw new NotFoundException(`Outline ${id} not found`);
 
     const row = this.repo.moveNode(id, dto.newParentId || null, dto.newOrder);
+    this.analyzeOperationImpact(existing, 'move', { newParentId: dto.newParentId, newOrder: dto.newOrder });
     return this.toResponse(row!);
   }
 
   reorderChildren(id: string, dto: { orderedIds: string[] }): { success: boolean } {
+    const existing = this.repo.findById(id);
+    if (!existing) throw new NotFoundException(`Outline ${id} not found`);
     this.repo.reorderChildren(id, dto.orderedIds);
+    this.analyzeOperationImpact(existing, 'reorder', { orderedIds: dto.orderedIds });
     return { success: true };
   }
 
@@ -191,6 +196,7 @@ export class OutlineService {
 
     // 状态同步：更新伏笔和角色状态中引用的章节号
     this.syncAfterChapterChange(existing.project_id, existing.order + 1, 1);
+    this.analyzeOperationImpact(existing, 'split', { newTitle: dto.newTitle, splitPoint: dto.splitPoint });
 
     return {
       original: this.toResponse(this.repo.findById(id)!),
@@ -204,7 +210,9 @@ export class OutlineService {
   moveToVolume(id: string, targetVolumeId: string): OutlineResponse {
     const node = this.repo.findById(id);
     if (!node) throw new NotFoundException(`Outline ${id} not found`);
-    return this.move(id, { newParentId: targetVolumeId, newOrder: 999 });
+    const row = this.repo.moveNode(id, targetVolumeId, 999);
+    this.analyzeOperationImpact(node, 'move_to_volume', { targetVolumeId });
+    return this.toResponse(row!);
   }
 
   /**
@@ -259,6 +267,36 @@ export class OutlineService {
       });
     } catch {
       // 影响分析失败不能阻断大纲保存
+    }
+  }
+
+  private analyzeOperationImpact(existing: OutlineRow, operation: string, extra?: Record<string, unknown>) {
+    if (!this.stateItemService) return;
+    const targetType = existing.level === 'volume'
+      ? 'volume'
+      : existing.level === 'chapter'
+        ? 'chapter_plan'
+        : 'outline';
+    const priority = targetType === 'outline' ? 'book_outline' : targetType;
+    try {
+      this.stateItemService.analyzeImpact(existing.project_id, {
+        targetType,
+        targetId: existing.id,
+        summary: `${operation}: ${existing.title || existing.level} 结构变更影响分析`,
+        payload: {
+          operation,
+          before: { title: existing.title, content: existing.content, level: existing.level, order: existing.order, parentId: existing.parent_id },
+          after: { ...(extra || {}) },
+          priority,
+          affects: targetType === 'outline'
+            ? ['volume', 'chapter_plan', 'chapter']
+            : targetType === 'volume'
+              ? ['chapter_plan', 'chapter']
+              : ['chapter'],
+        },
+      });
+    } catch {
+      // 影响分析失败不能阻断主操作
     }
   }
 

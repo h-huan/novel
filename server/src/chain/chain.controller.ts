@@ -344,7 +344,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
       });
 
       const content = response.content;
-      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content);
+      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'long_write');
 
       // G1 三连续检查（角色/场景/时间）
       let continuityCheck: any = null;
@@ -469,7 +469,7 @@ ${(content || '').substring(0, 2000)}
           } catch { /* 保存失败不影响返回 */ }
         }
 
-        const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, fullContent);
+        const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, fullContent, 'generated_body');
         return {
           success: result.status === 'completed',
           content: fullContent,
@@ -502,7 +502,7 @@ ${(content || '').substring(0, 2000)}
       });
 
       const content = response.content;
-      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content);
+      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'generated_body');
 
       // 如果传了 chapterId，自动回写到 chapters 表
       if (dto.chapterId) {
@@ -557,7 +557,7 @@ ${(content || '').substring(0, 2000)}
 
       const response = await this.realLLM.generate({ prompt, scenario: dto.scenario || 'writing', temperature: 0.7 });
       const content = response.content;
-      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content);
+      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'continue_write');
 
       // 自动追加到章节内容
       if (dto.chapterId) {
@@ -1686,7 +1686,7 @@ ${(dto.newForeshadowing || []).map(f => `- ${f.content}`).join('\n') || '无'}
       const response = await this.realLLM.generate({ prompt, temperature: 0.4 });
       const archive = this.parseArchiveReport(response.content);
       const confirmations = this.createArchiveConfirmations(dto.projectId, dto.chapterId, archive);
-      const stateItems = this.stateItemService.createFromArchive(dto.projectId, dto.chapterId, archive);
+      const stateItems = this.stateItemService.createFromArchive(dto.projectId, dto.chapterId, archive, 'manual_post_write_archive');
 
       return { success: true, archive, rawArchive: response.content, confirmations, stateItems };
     } catch (err) {
@@ -4027,7 +4027,7 @@ ${contentSizeRule}
     }
   }
 
-  private async runPostWriteArchive(projectId?: string, chapterId?: string, content?: string) {
+  private async runPostWriteArchive(projectId?: string, chapterId?: string, content?: string, sourceMode = 'generated_body') {
     if (!projectId || !chapterId || !content?.trim()) {
       return { stateItemsCreated: 0, stateArchiveWarning: null as string | null };
     }
@@ -4052,7 +4052,7 @@ ${content.slice(-4000)}
         temperature: 0.3,
       });
       const archive = this.parseArchiveReport(response.content);
-      const stateItems = this.stateItemService.createFromArchive(projectId, chapterId, archive);
+      const stateItems = this.stateItemService.createFromArchive(projectId, chapterId, archive, sourceMode);
       return { stateItemsCreated: stateItems.length, stateArchiveWarning: null as string | null };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

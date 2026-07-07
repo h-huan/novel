@@ -109,16 +109,34 @@ export class WorldSettingService {
   }
 
   addConstraint(id: string, dto: AddConstraintDto): WorldSettingResponse {
+    const existing = this.repo.findById(id);
+    if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
     const constraint = { id: uuid(), ...dto, appliesTo: [] };
     const row = this.repo.addConstraint(id, constraint);
     if (!row) throw new NotFoundException(`WorldSetting ${id} not found`);
-    return this.toResponse(row);
+    const response = this.toResponse(row);
+    this.analyzeStateImpact(existing.project_id, id, '世界观约束添加影响分析', {
+      before: { constraints: existing.constraints },
+      after: { constraints: row.constraints },
+      constraintChange: `add_constraint: ${dto.category || 'unknown'}: ${(dto as any).rule || ''}`,
+      priority: 'world_setting',
+    });
+    return response;
   }
 
   removeConstraint(id: string, constraintId: string): WorldSettingResponse {
+    const existing = this.repo.findById(id);
+    if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
     const row = this.repo.removeConstraint(id, constraintId);
     if (!row) throw new NotFoundException(`WorldSetting ${id} not found`);
-    return this.toResponse(row);
+    const response = this.toResponse(row);
+    this.analyzeStateImpact(existing.project_id, id, '世界观约束删除影响分析', {
+      before: { constraints: existing.constraints },
+      after: { constraints: row.constraints },
+      constraintChange: `remove_constraint: ${constraintId}`,
+      priority: 'world_setting',
+    });
+    return response;
   }
 
   /**
