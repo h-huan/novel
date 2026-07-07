@@ -81,13 +81,11 @@ export class StateItemService {
     if (existing) {
       // active 状态（pending / confirmed / conflict / stale）命中去重时，直接返回已有项
       if (existing.status !== 'rejected' && existing.status !== 'archived') return this.mapStateItem(existing);
-      // rejected / archived 命中时，允许创建新状态项
+      // rejected / archived 命中时，复活旧记录而非 INSERT（避免唯一索引冲突）
+      return this.reviveExcludedStateItem(projectId, existing, input, targetType, summary, summaryHash, now);
     }
 
     const id = randomUUID();
-    if (existing && (existing.status === 'rejected' || existing.status === 'archived')) {
-      input.payload = { ...(input.payload || {}), reusedFromArchived: true, previousStatus: existing.status };
-    }
     db.prepare(`
       INSERT INTO state_items (
         id, project_id, source_type, source_id, source_chapter_id, target_type, target_id, target_label,
@@ -121,6 +119,60 @@ export class StateItemService {
     );
 
     const item = this.get(projectId, id);
+    this.createCharacterEvolutionFromItem(projectId, item);
+    return item;
+  }
+
+  /**
+   * 复活被排除的状态项（rejected / archived）
+   * 将旧记录 UPDATE 回 pending，而非 INSERT 新行，避免唯一索引冲突。
+   * 复活后状态变为 pending + soft_candidate，重新进入写作上下文候选池。
+   */
+  private reviveExcludedStateItem(projectId: string, existing: any, input: StateItemInput, targetType: string, summary: string, summaryHash: string, now: string) {
+    const db = this.databaseService.getDb();
+    const isArchived = existing.status === 'archived';
+    const oldPayload = this.parseJson(existing.payload, {});
+    const mergedPayload = {
+      ...oldPayload,
+      ...(input.payload || {}),
+      previousStatus: existing.status,
+      revivedAt: now,
+      ...(isArchived ? { reusedFromArchived: true } : { reusedFromRejected: true }),
+    };
+
+    db.prepare(`
+      UPDATE state_items
+      SET source_type = ?, source_id = ?, source_chapter_id = ?,
+          target_label = ?, state_key = ?, title = ?,
+          summary = ?, content = ?, payload = ?,
+          status = 'pending', authority = 'soft_candidate',
+          source = ?, confidence = ?, tags = ?, impact_scope = ?,
+          summary_hash = ?, created_by = ?,
+          rejected_by = NULL, rejected_at = NULL, archived_at = NULL,
+          updated_at = ?
+      WHERE project_id = ? AND id = ?
+    `).run(
+      input.sourceType || 'ai',
+      input.sourceId || null,
+      input.sourceChapterId || null,
+      input.targetLabel || input.title || targetType,
+      input.stateKey || null,
+      input.title || input.targetLabel || targetType,
+      summary,
+      input.content || summary,
+      JSON.stringify(mergedPayload),
+      input.source || 'ai_extracted',
+      input.confidence ?? 0.6,
+      JSON.stringify(input.tags || []),
+      JSON.stringify(input.impactScope || []),
+      summaryHash,
+      input.createdBy || 'system',
+      now,
+      projectId,
+      existing.id,
+    );
+
+    const item = this.get(projectId, existing.id);
     this.createCharacterEvolutionFromItem(projectId, item);
     return item;
   }

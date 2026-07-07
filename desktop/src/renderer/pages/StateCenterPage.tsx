@@ -204,6 +204,13 @@ const StateCenterPage: React.FC = () => {
     }
   };
 
+  // 角色 ID 变化时自动加载成长时间线
+  useEffect(() => {
+    if (characterId.trim()) {
+      void loadCharacterEvolution();
+    }
+  }, [characterId, loadCharacterEvolution]);
+
   return (
     <div style={styles.page}>
       <header style={styles.header}>
@@ -442,7 +449,6 @@ const CharacterEvolutionPanel: React.FC<{
           onClick={() => {
             onSelect(item.id);
             onCharacterIdChange(item.targetId || item.targetLabel || '');
-            setTimeout(onLoadEvolution, 0);
           }}
         >
           <strong style={styles.itemTitle}>{item.targetLabel || item.title || '角色状态'}</strong>

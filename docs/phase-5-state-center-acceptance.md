@@ -154,6 +154,21 @@ npm run build              # 必须 exit 0
 3. 验证 `state_impact_items` 包含 `blocked_by_locked_chapter` 条目
 4. 正文内容保持不变
 
+### 3.19 rejected / archived 状态重新进入状态池
+
+1. 创建一条 pending 状态项（通过正文归档或手动提取）
+2. 在 StateCenterPage 将该状态项 reject
+3. 再次通过正文归档或手动提取生成同 summary 的状态（触发 create 去重逻辑）
+4. 验证不会报 `UNIQUE constraint failed`
+5. 验证原状态被恢复为 pending 而非新插入一行
+6. 验证 authority = soft_candidate
+7. 验证 payload.previousStatus = "rejected"
+8. 验证 payload.reusedFromRejected = true
+9. 将状态 archive 后重复同样流程
+10. 验证 payload.previousStatus = "archived"
+11. 验证 payload.reusedFromArchived = true
+12. 验证 rejected / archived 仍不进入写作上下文（authority = soft_candidate 后重新进入 pendiing 池，正常参与上下文）
+
 ## 4. 数据库 Schema 验证
 
 ### 4.1 state_items
