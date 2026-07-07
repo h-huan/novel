@@ -48,10 +48,205 @@
 
 | 检查项 | 状态 | 时间 | 环境 |
 |--------|------|------|------|
-| server `npm run typecheck` | 待验证 | - | Windows 11 |
-| server `npm run build` | 待验证 | - | Windows 11 |
-| desktop `npm run typecheck` | 待验证 | - | Windows 11 |
-| desktop `npm run build` | 待验证 | - | Windows 11 |
+| server `npm run typecheck` | 通过 ✅ | 2026-07-07 | Windows 11, Node 22, tsc --noEmit |
+| server `npm run build` | 通过 ✅ | 2026-07-07 | Windows 11, Node 22, tsc + route-config copy |
+| desktop `npm run typecheck` | 通过 ✅ | 2026-07-07 | Windows 11, Node 22, tsc --noEmit |
+| desktop `npm run build` | 通过 ✅ | 2026-07-07 | Windows 11, Node 22, tsc + vite build |
+
+## Phase 6.3 真实联调验收记录（2026-07-07）
+
+### 基本信息
+
+- **最新提交 SHA**: `2f5e5c37b36f96bcbfda09b46f1726c711647399`
+- **执行日期**: 2026-07-07
+- **执行环境**: Windows 11 Pro, Node 22, PowerShell, SQLite
+- **LLM 配置**: DeepSeek API (DEEPSEEK_API_KEY 已配置)
+
+### 构建结果
+
+| 检查项 | 结果 | 备注 |
+|--------|------|------|
+| server `npm run typecheck` | 通过 ✅ | `tsc --noEmit` 零错误 |
+| server `npm run build` | 通过 ✅ | `tsc` 编译 + route-config.json 复制 |
+| desktop `npm run typecheck` | 通过 ✅ | `tsc --noEmit` 零错误 |
+| desktop `npm run build` | 通过 ✅ | `tsc` + vite build, 仅 chunk size warning（非阻塞） |
+
+### 修复内容
+
+#### 1. state-item.service.ts `is_locked` 列不存在问题
+
+- **文件**: `server/src/state/state-item.service.ts:811`
+- **问题**: `hasLockedChapter` 方法查询 `SELECT status, is_locked FROM chapters`，但 `chapters` 表没有 `is_locked` 列（只有 `status` 字段）
+- **影响**: applyRevision 调用 ChapterService.update 时触发 state extraction，导致 stateSyncWarning 显示 "no such column: is_locked"
+- **修复**: 移除 `is_locked` 列引用，仅使用 `status = 'locked'` 判断
+- **验证**: 修复后 applyRevision 的 stateSync 不再出现该警告
+
+### 后端接口联调结果
+
+#### 1. GET /projects/:projectId/chapters ✅
+
+- 返回章节列表
+- 返回字段包含 id, title, status, wordCount, volumeIndex, chapterIndex
+- 能区分 draft / locked 状态
+
+#### 2. POST /writing-quality/analyze ✅
+
+- `success: true`
+- 返回 report 包含: id, projectId, chapterId, title, summary, overallLevel ("medium"), overallScore (65)
+- 返回 5 个 issues（reader_hook, pacing_risk, flat_dialogue, lack_of_subtext, needs_hook）
+- issueType 来自 WRITING_QUALITY_TAGS
+- tags 正确过滤
+- report 统计: issueCount=5, openIssueCount=5, highIssueCount=0, resolvedIssueCount=0, chapterLocked=false
+- writing_quality_reports 写入成功
+- writing_quality_issues 写入成功
+
+#### 3. GET /writing-quality/reports ✅
+
+- 返回数组
+- 每条 report 包含: issueCount, openIssueCount, highIssueCount, resolvedIssueCount, chapterLocked
+- 统计数据与详情一致
+
+#### 4. GET /writing-quality/reports/:reportId ✅
+
+- 返回 report + issues
+- report 统计字段与 issues 列表一致
+- issues 包含 severity, issueType, status 等信息
+
+#### 5. POST /writing-quality/issues/:issueId/resolve ✅
+
+- issue status → "resolved"
+- resolved_at 有值
+- resolved_by → "author"
+- 查询 reports 列表时统计同步更新（resolvedIssueCount 从 0 → 1）
+
+#### 6. POST /writing-quality/issues/:issueId/refine ✅
+
+- 生成 revision 包含: beforeText, afterText, diff, reason
+- canApply: true（unlocked 章节）
+- locked: false
+- writing_revision_records 写入成功
+- 不修改章节正文
+
+#### 7. POST /writing-quality/revisions/:revisionId/apply ✅
+
+- unlocked 章节 apply 成功
+- revision.applied = true, appliedAt 有值
+- issue 自动 resolved（apply 后 resolvedIssueCount 从 1 → 2）
+- 只替换 beforeText 第一次出现的位置（不做全文覆盖）
+- 返回 needsRecheck: true
+- 返回 needsStateReview, stateSyncWarning
+- ChapterService.update 降级后返回 stateSyncWarning
+
+#### 8. POST /writing-quality/revisions/:revisionId/recheck ✅
+
+- 返回 pass/warning/fail 级别
+- 返回 remainingIssues: 3
+- LLM 失败时 fallback 不崩溃（simpleRecheck）
+
+### 前端页面联调结果
+
+由于当前运行环境限制（classifier 安全检测阻止前端服务启动），前端页面联调无法在本轮完成。但以下已通过代码审查确认：
+
+- ✅ `WritingQualityPage` 已导入到 `router.tsx`（第 35 行）
+- ✅ 路由 `/project/:id/writing-quality` 已注册（第 61 行）
+- ✅ `AiWritingPanel` 中 "📊 写作质量诊断中心" 按钮已添加（第 812-814 行）
+- ✅ 所有 API 调用路径与后端匹配
+- ✅ TypeScript 类型安全
+
+### 写作页入口检查（代码审查）
+
+- ✅ AiWritingPanel 的 "质检" Tab 存在
+- ✅ "写作质量诊断中心" 按钮在 AiWritingPanel 中
+- ✅ 按钮跳转到 `/project/:id/writing-quality`
+- ✅ 路由正确解析 projectId
+
+### 第五阶段回归检查（代码审查 + API 测试）
+
+- ✅ `/project/:id/state` 路由注册（第 58 行）
+- ✅ StateCenterPage 组件存在且导入
+- ✅ `state_items` 只查 confirmed / pending（WritingQualityService 第 614-618 行）
+- ✅ rejected / archived 不进入写作上下文
+- ✅ applyRevision 后不直接把质量问题写入 state_items
+- ✅ locked 保护未绕过
+- ✅ 角色成长事件模块未受影响
+- ✅ Workflow Guard 未受影响
+
+### 发现的问题
+
+| # | 问题 | 状态 | 严重程度 | 备注 |
+|---|------|------|----------|------|
+| 1 | state-item.service.ts 的 hasLockedChapter 查询 is_locked 列不存在 | 已修复 | 低 | 导致 applyRevision 时出现 stateSyncWarning |
+| 2 | 文档构建记录矛盾：顶部写"待验证"但验收清单勾选"通过" | 已修复 | 中 | 已统一为真实通过记录 |
+| 3 | 章节 PUT API 不支持通过正常接口变更 status 字段 | 未修复 | 低 | 通过 DB 直接操作可绕过，不属于本阶段修复范围 |
+| 4 | 前端页面联调因环境限制未实际执行 | 未验证 | 中 | 需要在本地工作站手动打开 desktop 前端验证 |
+
+### 已修复的问题
+
+1. state-item.service.ts `is_locked` 列引用 → 改为仅检查 `status = 'locked'`
+2. 文档构建记录状态矛盾 → 顶部和清单统一为真实通过记录
+
+### 尚未验证的问题
+
+1. 前端页面联调（WritingQualityPage UI 交互）
+2. locked 章节 apply 拒绝（代码逻辑已审查，但未通过 API 验证）
+3. 页面顶部统计刷新后正确性
+
+### 最终验收标准达成情况
+
+| # | 验收项 | 状态 |
+|---|--------|------|
+| 1 | 最新 main 已读取 | ✅ |
+| 2 | server npm run typecheck 真实通过 | ✅ |
+| 3 | server npm run build 真实通过 | ✅ |
+| 4 | desktop npm run typecheck 真实通过 | ✅ |
+| 5 | desktop npm run build 真实通过 | ✅ |
+| 6 | docs 构建记录不再矛盾 | ✅ |
+| 7 | /writing-quality/analyze 可用 | ✅ |
+| 8 | /writing-quality/reports 可用 | ✅ |
+| 9 | /writing-quality/reports/:reportId 可用 | ✅ |
+| 10 | /writing-quality/issues/:issueId/resolve 可用 | ✅ |
+| 11 | /writing-quality/issues/:issueId/refine 可用 | ✅ |
+| 12 | /writing-quality/revisions/:revisionId/apply 可用 | ✅ |
+| 13 | /writing-quality/revisions/:revisionId/recheck 可用 | ✅ |
+| 14 | writing_quality_reports 正常写入 | ✅ |
+| 15 | writing_quality_issues 正常写入 | ✅ |
+| 16 | writing_revision_records 正常写入 | ✅ |
+| 17 | listReports 返回 issueCount | ✅ |
+| 18 | listReports 返回 openIssueCount | ✅ |
+| 19 | listReports 返回 highIssueCount | ✅ |
+| 20 | listReports 返回 resolvedIssueCount | ✅ |
+| 21 | listReports 返回 chapterLocked | ✅ |
+| 22 | getReport 返回完整 report + issues | ✅ |
+| 23 | WritingQualityPage 可打开 | 🔲 代码审查通过，未实际打开 |
+| 24 | WritingQualityPage 可选择章节 | 🔲 代码审查通过，未实际打开 |
+| 25 | WritingQualityPage 可诊断章节 | 🔲 代码审查通过，未实际打开 |
+| 26 | WritingQualityPage 顶部统计正确 | 🔲 代码审查通过，未实际打开 |
+| 27 | WritingQualityPage 可展示 issue | 🔲 代码审查通过，未实际打开 |
+| 28 | WritingQualityPage 可生成精修建议 | 🔲 代码审查通过，未实际打开 |
+| 29 | WritingQualityPage 可展示 diff | 🔲 代码审查通过，未实际打开 |
+| 30 | unlocked 章节可 apply | ✅ API 验证通过 |
+| 31 | locked 章节不可 apply | 🔲 代码审查 confirmed，未通过 API 验证 |
+| 32 | applyRevision 不全文覆盖 | ✅ |
+| 33 | applyRevision 返回 needsRecheck | ✅ |
+| 34 | applyRevision 返回 needsStateReview / stateSyncWarning | ✅ |
+| 35 | recheck 可返回结果 | ✅ |
+| 36 | AiWritingPanel 入口可跳转 | 🔲 代码审查通过，未实际打开 |
+| 37 | 不破坏 StateCenterPage | ✅ |
+| 38 | 不破坏角色成长事件 | ✅ |
+| 39 | 不破坏 Workflow Guard | ✅ |
+| 40 | 不破坏正文生成/续写/long-write | ✅ |
+| 41 | 不把质量问题写入 state_items | ✅ |
+| 42 | 不自动修改 locked 章节 | ✅ |
+| 43 | 不进入第七阶段 | ✅ |
+
+### 下一步建议
+
+1. 在本地工作站手动打开 desktop 前端验证 WritingQualityPage 交互
+2. 前端联调建议创建测试项目 → 写作章节 → 质检 Tab → 触发诊断全流程
+3. 验证 locked 章节的实际 apply 拒绝和前端显示
+4. 验证页面顶部统计与 API 数据一致性
+5. 考虑为章节 PUT 接口增加 status 字段更新支持
+
 
 ## 1. 第六阶段目标
 

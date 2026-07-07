@@ -808,9 +808,9 @@ export class StateItemService {
   private hasLockedChapter(projectId: string, chapterId?: string) {
     if (!chapterId) return false;
     const row = this.databaseService.getDb().prepare(`
-      SELECT status, is_locked FROM chapters WHERE project_id = ? AND id = ?
+      SELECT status FROM chapters WHERE project_id = ? AND id = ?
     `).get(projectId, chapterId) as any;
-    return Boolean(row && (row.is_locked === 1 || row.status === 'locked'));
+    return Boolean(row && row.status === 'locked');
   }
 
   private buildChapterImpactItems(projectId: string, targetType: string, targetId: string | null) {

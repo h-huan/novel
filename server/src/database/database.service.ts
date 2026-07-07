@@ -33,8 +33,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     this.db = new DatabaseSync(this._dbPath);
 
-    // WAL 模式
+    // WAL 模式 — 优化并发写入
     this.db.exec('PRAGMA journal_mode = WAL');
+    // WAL 自动 checkpoint：WAL 超过 500 页（约 2MB）时自动合并入主库，防止 WAL 无限增长
+    this.db.exec('PRAGMA wal_autocheckpoint = 500');
     this.db.exec('PRAGMA synchronous = NORMAL');
     this.db.exec('PRAGMA foreign_keys = ON');
     this.db.exec('PRAGMA cache_size = -8000');

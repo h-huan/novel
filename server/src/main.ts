@@ -38,19 +38,11 @@ if (fs.existsSync(envPath)) {
   if (result.error) {
     console.error(`[dotenv] ❌ 加载 .env 失败: ${(result.error as Error).message}`);
     console.error(`[dotenv] 尝试路径: ${envPath}`);
-  } else {
-    console.log(`[dotenv] ✅ 加载 .env 成功: ${envPath}`);
-    if (result.parsed) {
-      console.log(`[dotenv] 注入变量: ${Object.keys(result.parsed).join(', ')}`);
-    }
   }
+  // 启动日志静默，仅记录错误
 } else {
   console.error(`[dotenv] ❌ .env 文件不存在: ${envPath}`);
 }
-
-console.log(`[dotenv] process.cwd() = ${process.cwd()}`);
-console.log(`[dotenv] DEEPSEEK_API_KEY: ${process.env.DEEPSEEK_API_KEY ? '已设置(len=' + process.env.DEEPSEEK_API_KEY.length + ')' : '❌ 未设置'}`);
-console.log(`[dotenv] DEEPSEEK_BASE_URL: ${process.env.DEEPSEEK_BASE_URL || '❌ 未设置'}`);
 
 /**
  * 根据 LOG_LEVEL 环境变量映射 NestJS 日志级别
@@ -161,22 +153,17 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  // 启动后检查 ChromaDB 状态
+  // 启动后检查 ChromaDB 状态（静默，仅在异常时输出 warning）
   try {
     const vectorIndex = app.get(VectorIndexService);
     const health = vectorIndex.getHealthStatus();
-    if (health.available) {
-      console.log(`[ChromaDB] 状态: 已连接 - ${health.detail}`);
-    } else {
-      console.warn(`[ChromaDB] 状态: 未连接 - ${health.detail}`);
-      console.warn('[ChromaDB] 向量检索将使用内存存储运行，重启后数据会丢失');
+    if (!health.available) {
+      console.warn(`[ChromaDB] 未连接，向量检索使用内存存储`);
     }
-  } catch (err) {
-    console.warn('[ChromaDB] 无法获取向量索引状态');
+  } catch {
+    // 静默
   }
 
-  console.log(`[NestJS] Server running on http://${host}:${port}`);
-  console.log(`[NestJS] API prefix: /api/v1`);
   // Desktop 主进程通过此标记提取实际端口
   console.log(`[PORT] ${port}`);
 

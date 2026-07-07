@@ -71,11 +71,14 @@ export class VectorIndexService implements OnModuleInit {
 class SqliteVectorStore implements VectorStore {
   private db!: DatabaseSync;
   private available = false;
+  private writeCount = 0;
 
   constructor(dbPath: string) {
     try {
       this.db = new DatabaseSync(dbPath);
       this.db.exec('PRAGMA journal_mode = WAL');
+      // WAL 文件自动 checkpoint：每次写操作后积累，每 100 次合并到主文件
+      this.db.exec('PRAGMA wal_autocheckpoint = 100');
       this.db.exec(`CREATE TABLE IF NOT EXISTS vectors (
         collection TEXT NOT NULL, id TEXT NOT NULL,
         vector_json TEXT NOT NULL, metadata_json TEXT NOT NULL,
@@ -88,10 +91,21 @@ class SqliteVectorStore implements VectorStore {
   async upsert(collection: string, chunks: VectorUpsertPayload[]) {
     if (!this.available) return;
     try {
-      for (const c of chunks)
+      for (const c of chunks) {
         this.db.prepare('INSERT OR REPLACE INTO vectors VALUES (?,?,?,?)')
           .run(collection, c.id, JSON.stringify(c.vector), JSON.stringify(c.metadata));
+      }
+      this.maybeCheckpoint();
     } catch { /* ignore */ }
+  }
+
+  private maybeCheckpoint() {
+    this.writeCount++;
+    // 每 500 次写入强制 RESTART checkpoint（SQLite 自动 checkpoint 是 PASSIVE，不保证立即合并）
+    if (this.writeCount >= 500) {
+      try { this.db.exec('PRAGMA wal_checkpoint(RESTART)'); } catch { /* ignore */ }
+      this.writeCount = 0;
+    }
   }
 
   async query(collection: string, qv: number[], limit: number, filters?: SearchFilters) {
