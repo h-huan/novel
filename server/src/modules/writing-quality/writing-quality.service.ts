@@ -472,29 +472,10 @@ export class WritingQualityService {
     const newWordCount = chineseChars + englishWords;
     const now = new Date().toISOString();
 
-    // 尝试通过 ChapterService.update 更新以触发状态提取链路
-    let stateSyncWarning: string | null = null;
-    if (this.chapterService) {
-      try {
-        const updateResult = this.chapterService.update(revision.chapter_id, {
-          content: newContent,
-        } as any);
-        if ((updateResult as any)?.stateSync?.warning) {
-          stateSyncWarning = (updateResult as any).stateSync.warning;
-        }
-      } catch {
-        // 降级：直接更新数据库
-        this.logger.warn('ChapterService.update failed, falling back to direct DB update');
-        db.prepare('UPDATE chapters SET content = ?, word_count = ?, updated_at = ? WHERE id = ?')
-          .run(newContent, newWordCount, now, revision.chapter_id);
-        stateSyncWarning = 'ChapterService.update unavailable, state extraction may not have been triggered.';
-      }
-    } else {
-      // ChapterService 不可用，直接更新 DB
-      db.prepare('UPDATE chapters SET content = ?, word_count = ?, updated_at = ? WHERE id = ?')
-        .run(newContent, newWordCount, now, revision.chapter_id);
-      stateSyncWarning = 'ChapterService is not available; chapter content updated directly without state extraction. Manual review recommended.';
-    }
+    // Writing quality revisions are local prose fixes. They must not enter the
+    // state extraction pipeline, otherwise quality issues can create state_items.
+    db.prepare('UPDATE chapters SET content = ?, word_count = ?, updated_at = ? WHERE id = ?')
+      .run(newContent, newWordCount, now, revision.chapter_id);
 
     // 更新 revision 记录
     db.prepare(`
@@ -516,8 +497,8 @@ export class WritingQualityService {
       revision: { id: revisionId, applied: true, appliedAt: now },
       chapter: { id: revision.chapter_id, wordCount: newWordCount },
       needsRecheck: true,
-      needsStateReview: !!stateSyncWarning,
-      stateSyncWarning,
+      needsStateReview: false,
+      stateSyncWarning: null,
     };
   }
 

@@ -165,7 +165,8 @@ const WritingQualityPage: React.FC = () => {
 
   const handleResolve = async (issueId: string) => {
     try {
-      await api.post(`/projects/${projectId}/writing-quality/issues/${issueId}/resolve`);
+      await api.post(`/projects/${projectId}/writing-quality/issues/${issueId}/resolve`, {});
+      await loadReports();
       if (selectedReport) await selectReport(selectedReport);
     } catch (err: any) {
       setError('标记失败: ' + (err.message || String(err)));
@@ -188,15 +189,17 @@ const WritingQualityPage: React.FC = () => {
 
   const handleApplyRevision = async (revisionId: string) => {
     try {
-      const res = await api.post<any>(`/projects/${projectId}/writing-quality/revisions/${revisionId}/apply`);
+      const res = await api.post<any>(`/projects/${projectId}/writing-quality/revisions/${revisionId}/apply`, {});
       const data = apiPayload<any>(res);
       if (data?.success) {
         setRevisionResult((prev) => prev ? { ...prev, applied: true } : null);
         if (data.needsRecheck) {
-          const recheckRes = await api.post<any>(`/projects/${projectId}/writing-quality/revisions/${revisionId}/recheck`);
+          const recheckRes = await api.post<any>(`/projects/${projectId}/writing-quality/revisions/${revisionId}/recheck`, {});
           const recheckData = apiPayload<{ result: any }>(recheckRes);
           setRecheckResult(recheckData?.result || null);
         }
+        await loadReports();
+        if (selectedReport) await selectReport(selectedReport);
       }
     } catch (err: any) {
       setError('应用精修失败: ' + (err.message || String(err)));

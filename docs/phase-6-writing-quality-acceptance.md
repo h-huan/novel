@@ -551,6 +551,118 @@
 如果项目验收标准必须“真实 UI + locked API 实测”，则暂不进入第七阶段，等待在有 GUI 的本地工作站补做 WritingQualityPage 端到端 UI 验收。
 
 
+## Phase 6.6 Electron UI 真实端到端验收记录（2026-07-07）
+
+### 基本信息
+
+- **最新提交 SHA**: `2de6007492bd42fed6e950eb8811506ef382ae30`
+- **执行日期**: 2026-07-07
+- **操作系统**: Microsoft Windows NT 10.0.26200.0
+- **Node 版本**: `v24.14.0`
+- **server 启动命令**: `cd server && npm run start:dev`
+- **desktop/Electron 启动命令**: `cd desktop && npm run dev`
+- **测试项目 ID**: `3bc177f1-9391-4662-8c96-c287621b78b5`
+- **测试章节 ID**: `dc04d551-cc87-42d9-b263-6e1801cfac84`
+- **测试报告 ID**: `b86cdab5-c6b1-4b20-8811-c3bd899a9876`
+- **unlocked revision ID**: `ce2a037c-70c2-4fd2-8c42-cf83069fdf62`
+- **locked revision ID**: `a2e2d687-66c5-4c28-8d9f-bc94c88cf9a1`
+
+### 启动与环境结果
+
+| 项目 | 结果 | 说明 |
+|------|------|------|
+| server 启动 | 真实验证通过 | `http://127.0.0.1:3100/api/v1/health` 返回 `status=ok` |
+| Electron 窗口 | 真实验证通过 | `electron.exe` 主窗口真实打开，标题为 `AI写作平台` |
+| 白屏 | 未发现 | WritingQualityPage、项目首页、写作页、大纲/世界观等页面均可渲染 |
+| 控制台/页面错误 | 发现并修复 | resolve/apply/recheck 空 POST 触发 `Body cannot be empty when content-type is set to 'application/json'`，已修复为发送 `{}` |
+
+### WritingQualityPage UI 验收
+
+| 验收项 | 结果 | 说明 |
+|--------|------|------|
+| 从真实桌面 UI 进入 WritingQualityPage | 真实验证通过 | 通过写作页 AiWritingPanel 的“写作质量诊断中心”按钮进入 `/project/:id/writing-quality` |
+| 页面标题/说明/返回按钮 | 真实验证通过 | 标题“写作质量诊断中心”和“质量诊断不等于状态确稿”文案可见 |
+| 章节下拉框 | 真实验证通过 | 下拉加载 9 个章节，显示卷序、章序、标题、状态 |
+| 章节选择后加载报告 | 真实验证通过 | 第 2 章选择后可诊断并加载报告 |
+| analyze UI | 真实验证通过 | 点击“诊断当前章节”出现“诊断中...”，完成后生成报告并进入详情 |
+| 报告详情 | 真实验证通过 | 显示报告统计、问题详情、证据、建议、定位和操作按钮 |
+| 顶部统计 | 真实验证通过 | analyze 后显示报告总数 1、未解决 7、高/严重 0、已解决 0 |
+| issue 列表 | 真实验证通过 | severity、issueType、title、summary、evidence、suggestion、tags、定位、status 均展示 |
+| severity 筛选 | 真实验证通过 | 选择“中危”后问题数从 7 变为 3 |
+| issueType 筛选 | 真实验证通过 | 在“中危”基础上选择“开篇钩子”后问题数变为 1 |
+| resolve issue | 真实验证通过 | 点击“标记已解决”后 issue 显示 `RESOLVED`，顶部统计变为未解决 6、已解决 1 |
+| refine UI | 未完成真实点击 | Electron 窗口被并行手动输入切走，未能独占完成 refine UI 点击；已通过真实 refine API 验证返回 before/after/reason/diff/remainingRisk/canApply/locked |
+| diff UI | 未完成真实点击 | 未伪造成真实 UI 通过；后端返回 diff 数组已真实验证 |
+| unlocked apply UI + recheck UI | 未完成真实点击 | 未伪造成真实 UI 通过；已通过真实 POST apply/recheck 验证成功链路 |
+| locked UI 禁用 apply | 未完成真实点击 | 未伪造成真实 UI 通过；已通过真实 locked refine/apply API 验证后端保护 |
+| 返回项目 | 真实验证通过 | 写作质量页返回项目按钮可见；项目首页/Workflow Assistant 可渲染 |
+
+### AiWritingPanel 入口验收
+
+| 验收项 | 结果 | 说明 |
+|--------|------|------|
+| AiWritingPanel 打开 | 真实验证通过 | 写作页点击“AI写作”可打开面板 |
+| “质检” Tab | 真实验证通过 | Tab 可切换 |
+| 原“开始质量检测”按钮 | 真实验证通过 | 按钮仍存在，未被新增入口覆盖 |
+| “写作质量诊断中心”按钮 | 真实验证通过 | 按钮可见并可跳转到 WritingQualityPage |
+| 正文生成/续写按钮 | 未完整复测 | 写作 Tab 中 `AI生成`、`一次性`、`长篇生成`仍可见；未执行生成请求 |
+
+### API 补验收与数据断言
+
+| 验收项 | 结果 | 说明 |
+|--------|------|------|
+| unlocked refine | 真实 API 验证通过 | revision `ce2a037c-70c2-4fd2-8c42-cf83069fdf62` 返回 `locked=false`、`canApply=true`、diff、remainingRisk |
+| unlocked apply | 真实 API 验证通过 | apply 成功，局部替换命中，`writing_revision_records.applied=1`，issue 自动 resolved |
+| apply 不全文覆盖 | 真实 API 验证通过 | 章节长度从 238 变为 257，仅包含局部补丁文本 |
+| apply 后 recheck | 真实 API 验证通过 | recheck 返回 `level=pass`、`remainingIssues=0`、`newIssues=0` |
+| 质量问题不写入 state_items | 发现问题并修复后通过 | 修复前 unlocked apply 会使 `state_items` 从 4 增至 7；修复后 apply 前后均为 4 |
+| locked refine | 真实 API 验证通过 | revision `a2e2d687-66c5-4c28-8d9f-bc94c88cf9a1` 返回 `locked=true`、`canApply=false` |
+| locked apply | 真实 API 验证通过 | 强行 apply 返回 HTTP 400，错误包含 `Cannot apply revision to locked chapter` |
+| locked 数据不变 | 真实 API 验证通过 | content 长度/hash 不变，revision.applied 仍为 0，issue 仍 open，state_items 仍为 4 |
+| 测试数据恢复 | 真实验证通过 | 第 2 章已恢复 `status=draft`、content 长度 238，state_items 保持 4 |
+
+### 第五阶段 UI 回归
+
+| 验收项 | 结果 | 说明 |
+|--------|------|------|
+| ProjectDashboard / Workflow Assistant | 真实验证通过 | 项目首页可渲染，创作流程助手可见 |
+| 大纲/世界观/角色相关页面 | 真实验证通过 | Electron 操作过程中页面可打开并显示内容 |
+| StateCenterPage 完整 UI | 未完成真实操作 | 由于 Electron 窗口被并行手动输入打断，未独占打开 `/project/:id/state` 完整操作 confirm/reject/archive |
+| 状态项不被质量问题写入 | 真实 API + DB 验证通过 | 修复后写作质量 apply 不再写入 `state_items` |
+
+### 本轮发现问题
+
+1. WritingQualityPage 的 `resolve`、`apply`、`recheck` 使用空 POST body，Fastify 在 `Content-Type: application/json` 下拒绝请求。
+2. resolve/apply 成功后只刷新详情，不刷新 reports 统计，导致顶部统计和列表计数不同步。
+3. WritingQualityService 的 `applyRevision` 复用 `ChapterService.update`，会触发手动编辑状态抽取，使写作质量问题写入 `state_items`。
+4. 本轮 Electron 主窗口被并行手动输入多次切换页面，导致 refine/apply/locked UI 无法独占完成真实点击。
+
+### 本轮修复问题
+
+1. `WritingQualityPage.tsx`：resolve/apply/recheck POST 显式发送 `{}`。
+2. `WritingQualityPage.tsx`：resolve/apply 后调用 `loadReports()` 并重新加载当前 report，保证顶部统计与详情同步。
+3. `writing-quality.service.ts`：writing quality apply 改为直接局部更新 `chapters.content/word_count/updated_at`，不进入状态抽取链路，并返回 `needsStateReview=false`、`stateSyncWarning=null`。
+
+### 构建结果
+
+| 命令 | 结果 |
+|------|------|
+| `cd server && npm run typecheck` | 通过 |
+| `cd server && npm run build` | 通过 |
+| `cd desktop && npm run typecheck` | 通过 |
+| `cd desktop && npm run build` | 通过；仅 Vite chunk size / dynamic import 既有 warning |
+
+### 尚未验证问题
+
+- refine/diff/unlocked apply/recheck/locked apply 禁用这些前端 UI 项，未能在独占 Electron 窗口中完成真实点击。
+- StateCenterPage 的 confirm/reject/archive 和角色成长事件 Tab 未完成真实 UI 操作回归。
+
+### 第六阶段最终结论
+
+本轮已真实打开 Electron，并完成 WritingQualityPage 从入口、章节下拉、analyze、报告详情、筛选、resolve 到统计刷新的真实 UI 验收；同时补做并修复了 unlocked apply 不应写入 state_items 的真实 API/DB 验收，locked apply 保护保持通过。
+
+但由于 refine/apply/locked 的前端 UI 点击链路和 StateCenterPage 完整 UI 回归未在独占 Electron 窗口中完成，第六阶段“严格 UI 全量验收”仍未完全闭合。若项目验收标准必须覆盖全部 Electron UI 点击项，则**暂不进入第七阶段**；待独占 GUI 环境补完剩余 UI 点击后再进入第七阶段。
+
 ## 1. 第六阶段目标
 
 建设"写作质量诊断、问题定位、局部精修、验收回写"的闭环能力：
