@@ -164,9 +164,9 @@ Content-Type: application/json
 | `POST` | `/chain/idea-generate` | 灵感生成（3-5个故事题材） |
 | `POST` | `/chain/outline-generate` | 大纲生成 |
 | `POST` | `/chain/long-outline-generate` | 长篇大纲生成 |
-| `POST` | `/chain/long-write` | 长篇正文生成 |
-| `POST` | `/chain/generate` | 正文生成（天龙8步法） |
-| `POST` | `/chain/continue` | 续写当前章节 |
+| `POST` | `/chain/long-write` | 长篇正文生成，执行 Workflow Guard 强校验 |
+| `POST` | `/chain/generate` | 正文生成（天龙8步法），执行 Workflow Guard 强校验 |
+| `POST` | `/chain/continue` | 续写正文，执行 Workflow Guard 强校验 |
 | `POST` | `/chain/enhance-opening` | 开头强化 |
 | `POST` | `/chain/enhance-reversal` | 反转强化 |
 | `POST` | `/chain/adapt-platform` | 平台风格改写 |
@@ -184,7 +184,7 @@ Content-Type: application/json
 | `POST` | `/chain/templates/save` | 保存模板 |
 | `DELETE` | `/chain/templates/:id` | 删除模板 |
 | `POST` | `/chain/templates/validate` | 验证模板结构 |
-| `POST` | `/chain/templates/execute/:id` | 执行模板测试 |
+| `POST` | `/chain/templates/execute/:id` | 执行模板；大纲类模板带 `projectId` 时执行 Workflow Guard 校验 |
 
 ### 版本管理
 
@@ -366,6 +366,38 @@ POST /api/v1/idea-lab/drafts/:id/convert-to-project
 
 Workflow Guard 提供流程判断和阶段管理能力，根据项目类型、当前阶段和已有资产，判断用户下一步应该做什么。
 
+第四阶段开始，Workflow Guard 也是关键 AI 生成动作前的后端强校验来源。页面仍可自由进入，但正文生成、续写、长篇正文生成、长篇总纲生成、大纲类模板执行等入口会先校验项目阶段和关键资产。
+
+### 强校验接入点
+
+| 接口 | 校验动作 | 规则 |
+|------|----------|------|
+| `POST /chain/generate` | `generate_body` | 短篇必须处于 `writing` 且有大纲；长篇必须处于 `writing` 且有章节规划 |
+| `POST /chain/continue` | `continue_body` | 必须处于 `writing`，长篇至少已有章节规划或正文上下文 |
+| `POST /chain/long-write` | `generate_body` | 长篇必须处于 `writing` 且有章节规划 |
+| `POST /chain/long-outline-generate` | `generate_outline` | 长篇必须完成世界观和主角设定，处于总纲阶段或由流程推进后进入总纲阶段 |
+| `POST /chain/templates/execute/:id` | `generate_outline` | 模板 id 包含 `outline` 且输入含 `projectId` 时校验 |
+| `POST /chain/stream-generate` | `generate_body` | 流式正文生成同样校验正文生成条件 |
+
+### 阻断错误
+
+流程阻断时返回 HTTP 400：
+
+```json
+{
+  "statusCode": 400,
+  "message": "当前阶段不能生成正文，请先完成大纲",
+  "error": "WorkflowGuardBlocked",
+  "missingAssets": ["outline"],
+  "currentStage": "outline",
+  "recommendedNextAction": "请先生成大纲后再进入正文阶段"
+}
+```
+
+### 第四阶段 action key
+
+前后端统一使用以下关键 action：`generate_topic`、`generate_outline`、`generate_volume`、`generate_chapter_plan`、`generate_body`、`continue_body`、`refine_body`、`export_project`、`archive_state`、`weekly_review`、`enter_world`、`enter_character`、`enter_outline`、`enter_volume`、`enter_chapter`、`enter_writing`、`enter_state`。
+
 ### API 列表
 
 | 方法 | 路径 | 说明 |
@@ -434,7 +466,9 @@ Content-Type: application/json
   "action": "generate_body",
   "reason": "当前还缺少大纲",
   "missingAssets": ["outline"],
-  "warnings": []
+  "warnings": [],
+  "currentStage": "outline",
+  "recommendedNextAction": "请先生成大纲后再进入正文阶段"
 }
 ```
 

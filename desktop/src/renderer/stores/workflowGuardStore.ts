@@ -68,7 +68,15 @@ interface WorkflowGuardState {
   lastFetched: number;
 
   fetchGuard: (projectId: string) => Promise<void>;
-  checkAction: (projectId: string, action: string) => Promise<{ allowed: boolean; reason: string }>;
+  checkAction: (projectId: string, action: string) => Promise<{
+    allowed: boolean;
+    reason: string;
+    missingAssets: string[];
+    warnings: string[];
+    currentStage?: string;
+    recommendedNextAction?: string;
+  }>;
+  advanceStage: (projectId: string, targetStage: string) => Promise<void>;
   clear: () => void;
 }
 
@@ -103,9 +111,34 @@ export const useWorkflowGuardStore = create<WorkflowGuardState>((set, get) => ({
     try {
       const res = await api.post<any>(`/projects/${projectId}/workflow-guard/check`, { action });
       const result = (res as any).data ?? res;
-      return { allowed: result.allowed, reason: result.reason || '' };
+      return {
+        allowed: Boolean(result.allowed),
+        reason: result.reason || '',
+        missingAssets: result.missingAssets || [],
+        warnings: result.warnings || [],
+        currentStage: result.currentStage,
+        recommendedNextAction: result.recommendedNextAction,
+      };
     } catch {
-      return { allowed: true, reason: '' };
+      return {
+        allowed: false,
+        reason: '流程校验失败，请刷新后重试',
+        missingAssets: [],
+        warnings: [],
+      };
+    }
+  },
+
+  advanceStage: async (projectId: string, targetStage: string) => {
+    set({ loading: true, error: null });
+    try {
+      await api.post(`/projects/${projectId}/workflow-guard/advance`, { targetStage });
+      set({ data: null, loading: false, lastFetched: 0 });
+      await get().fetchGuard(projectId);
+    } catch (err: any) {
+      const msg = err.message || '推进阶段失败';
+      set({ loading: false, error: msg });
+      throw err;
     }
   },
 

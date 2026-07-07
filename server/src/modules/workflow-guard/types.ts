@@ -97,6 +97,8 @@ export interface CheckActionResponse {
   reason: string;
   missingAssets: string[];
   warnings: string[];
+  currentStage?: string;
+  recommendedNextAction?: string;
 }
 
 export interface AdvanceStageRequest {

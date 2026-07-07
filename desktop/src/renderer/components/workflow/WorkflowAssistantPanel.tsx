@@ -7,7 +7,7 @@
  * UI 命名：创作流程助手
  * 不要在 UI 中暴露 Workflow Guard
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
 
@@ -151,7 +151,8 @@ interface WorkflowAssistantPanelProps {
 
 const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ projectId }) => {
   const navigate = useNavigate();
-  const { data, loading, error, fetchGuard } = useWorkflowGuardStore();
+  const { data, loading, error, fetchGuard, advanceStage } = useWorkflowGuardStore();
+  const [advanceError, setAdvanceError] = useState('');
 
   const handleRefresh = useCallback(() => {
     fetchGuard(projectId);
@@ -163,6 +164,21 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
       navigate(route);
     }
   }, [projectId, navigate]);
+
+  const nextStageLabel = useMemo(() => {
+    if (!data?.recommendedNextStage) return '';
+    return data.stageMap.find((stage) => stage.key === data.recommendedNextStage)?.label || data.recommendedNextStage;
+  }, [data]);
+
+  const handleAdvance = useCallback(async () => {
+    if (!data?.recommendedNextStage || data.recommendedNextStage === data.currentStage) return;
+    setAdvanceError('');
+    try {
+      await advanceStage(projectId, data.recommendedNextStage);
+    } catch (err: any) {
+      setAdvanceError(err?.message || '推进阶段失败');
+    }
+  }, [advanceStage, data, projectId]);
 
   if (loading && !data) {
     return (
@@ -193,7 +209,19 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
 
   if (!data) return null;
 
-  const { currentStageLabel, recommendedNextAction, stageMap, missingAssets, completedAssets, allowedActions, blockedActions, warnings } = data;
+  const {
+    currentStage,
+    currentStageLabel,
+    recommendedNextStage,
+    recommendedNextAction,
+    canProceed,
+    stageMap,
+    missingAssets,
+    completedAssets,
+    allowedActions,
+    blockedActions,
+    warnings,
+  } = data;
 
   return (
     <div style={panelStyles.container}>
@@ -218,6 +246,17 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
         <div style={panelStyles.section}>
           <div style={panelStyles.sectionLabel}>下一步建议</div>
           <p style={panelStyles.suggestionText}>{recommendedNextAction}</p>
+          {canProceed && recommendedNextStage && recommendedNextStage !== currentStage && (
+            <button
+              type="button"
+              style={panelStyles.advanceBtn}
+              onClick={handleAdvance}
+              disabled={loading}
+            >
+              进入下一阶段：{nextStageLabel}
+            </button>
+          )}
+          {advanceError && <div style={panelStyles.advanceError}>{advanceError}</div>}
         </div>
       )}
 
@@ -417,6 +456,23 @@ const panelStyles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
     transition: 'background-color 0.15s',
+  },
+  advanceBtn: {
+    marginTop: '8px',
+    padding: '7px 12px',
+    backgroundColor: 'rgba(52,152,219,0.12)',
+    border: '1px solid rgba(52,152,219,0.35)',
+    borderRadius: 'var(--radius-sm, 4px)',
+    color: '#3498db',
+    fontSize: '12px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-family, sans-serif)',
+  },
+  advanceError: {
+    marginTop: '6px',
+    fontSize: '11px',
+    color: '#f8c471',
   },
   blockedList: {
     display: 'flex',

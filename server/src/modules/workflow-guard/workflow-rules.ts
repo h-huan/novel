@@ -67,6 +67,7 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
     allowedActions.push(
       { key: 'edit_topic', label: '完善题材', targetRoute: '' },
       { key: 'generate_topic', label: '生成题材建议' },
+      { key: 'generate_outline', label: '生成大纲', targetRoute: `/project/${project.id}/outline` },
     );
 
     // 如果有题材或确认想法，可以进入大纲
@@ -76,6 +77,8 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
 
     blockedActions.push(
       { key: 'generate_body', label: '生成正文', reason: '当前还缺少大纲，请先完成题材和大纲阶段' },
+      { key: 'continue_body', label: '续写正文', reason: '当前还缺少正文阶段，请先完成题材和大纲' },
+      { key: 'export_project', label: '导出终稿', reason: '当前还没有正文，不能导出终稿' },
     );
 
     // 缺失资产
@@ -106,6 +109,7 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
 
     blockedActions.push(
       { key: 'generate_body', label: '生成正文', reason: '请先生成并确认大纲' },
+      { key: 'continue_body', label: '续写正文', reason: '请先生成并确认大纲，再进入正文阶段' },
     );
 
     if (!assets.hasOutline) {
@@ -117,10 +121,20 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
     // ===== writing 阶段 =====
     allowedActions.push(
       { key: 'edit_outline', label: '查看大纲', targetRoute: `/project/${project.id}/outline` },
-      { key: 'generate_body', label: '生成正文', targetRoute: `/project/${project.id}/writing` },
-      { key: 'continue_body', label: '续写正文', targetRoute: `/project/${project.id}/writing` },
       { key: 'refine_body', label: '精修正文', targetRoute: `/project/${project.id}/refinement` },
     );
+
+    if (assets.hasOutline) {
+      allowedActions.push(
+        { key: 'generate_body', label: '生成正文', targetRoute: `/project/${project.id}/writing` },
+        { key: 'continue_body', label: '续写正文', targetRoute: `/project/${project.id}/writing` },
+      );
+    } else {
+      blockedActions.push(
+        { key: 'generate_body', label: '生成正文', reason: '短篇正文生成前必须先有大纲' },
+        { key: 'continue_body', label: '续写正文', reason: '短篇续写前必须先有大纲' },
+      );
+    }
 
     if (!assets.hasBody) {
       missingAssets.push({ key: 'body', label: '正文', severity: 'recommended', reason: '当前还没有正文内容' });
@@ -275,7 +289,11 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
 
     blockedActions.push(
       { key: 'generate_body', label: '生成正文', reason: '当前还处于想法阶段，需要先建立世界观和角色' },
+      { key: 'continue_body', label: '续写正文', reason: '当前还处于想法阶段，不能续写正文' },
+      { key: 'generate_outline', label: '生成总纲', reason: '请先完成世界观和主角设定后再生成总纲' },
+      { key: 'generate_volume', label: '生成分卷', reason: '请先完成总纲后再生成分卷' },
       { key: 'generate_chapter_plan', label: '生成章节规划', reason: '请先完成世界观、角色和总纲' },
+      { key: 'export_project', label: '导出终稿', reason: '当前还没有正文，不能导出终稿' },
     );
 
     if (!assets.hasWorldSetting) {
@@ -302,6 +320,10 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
 
     blockedActions.push(
       { key: 'generate_body', label: '生成正文', reason: '世界观尚不完整，请先完成世界观和角色设定' },
+      { key: 'continue_body', label: '续写正文', reason: '当前还未进入正文阶段，不能续写正文' },
+      { key: 'generate_outline', label: '生成总纲', reason: '请先完成世界观和主角设定后再生成总纲' },
+      { key: 'generate_volume', label: '生成分卷', reason: '请先完成总纲后再生成分卷' },
+      { key: 'generate_chapter_plan', label: '生成章节规划', reason: '请先完成总纲和分卷后再生成章节规划' },
     );
 
     if (!assets.hasWorldSetting) {
@@ -322,6 +344,13 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
     if (assets.hasMainCharacter) {
       allowedActions.push({ key: 'enter_outline', label: '进入总纲', targetRoute: `/project/${project.id}/outline` });
     }
+
+    blockedActions.push(
+      { key: 'generate_body', label: '生成正文', reason: '当前还未完成总纲、分卷和章节规划，不能生成正文' },
+      { key: 'continue_body', label: '续写正文', reason: '当前还未进入正文阶段，不能续写正文' },
+      { key: 'generate_volume', label: '生成分卷', reason: '请先进入总纲阶段并完成总纲' },
+      { key: 'generate_chapter_plan', label: '生成章节规划', reason: '请先完成总纲和分卷后再生成章节规划' },
+    );
 
     if (!assets.hasMainCharacter) {
       missingAssets.push({ key: 'main_character', label: '主角', severity: 'required', reason: '需要至少有一个主角' });
@@ -345,6 +374,12 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
     if (!assets.hasBookOutline) {
       missingAssets.push({ key: 'book_outline', label: '总纲', severity: 'required', reason: '需要先生成全书总纲' });
     }
+    blockedActions.push(
+      { key: 'generate_body', label: '生成正文', reason: '请先完成总纲、分卷和章节规划' },
+      { key: 'continue_body', label: '续写正文', reason: '当前还未进入正文阶段，不能续写正文' },
+      { key: 'generate_volume', label: '生成分卷', reason: assets.hasBookOutline ? '请先进入分卷阶段' : '请先生成总纲' },
+      { key: 'generate_chapter_plan', label: '生成章节规划', reason: '请先完成分卷后再生成章节规划' },
+    );
   }
 
   if (currentStage === 'volume') {
@@ -361,6 +396,11 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
     if (!assets.hasVolumeOutline) {
       missingAssets.push({ key: 'volume_outline', label: '分卷', severity: 'required', reason: '需要先规划分卷' });
     }
+    blockedActions.push(
+      { key: 'generate_body', label: '生成正文', reason: '请先完成章节规划后再生成正文' },
+      { key: 'continue_body', label: '续写正文', reason: '当前还未进入正文阶段，不能续写正文' },
+      { key: 'generate_chapter_plan', label: '生成章节规划', reason: assets.hasVolumeOutline ? '请先进入章节规划阶段' : '请先生成分卷' },
+    );
   }
 
   if (currentStage === 'chapter') {
@@ -377,16 +417,31 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
     if (!assets.hasChapterPlan) {
       missingAssets.push({ key: 'chapter_plan', label: '章节规划', severity: 'required', reason: '需要先规划章节' });
     }
+    blockedActions.push(
+      { key: 'generate_body', label: '生成正文', reason: '请先完成章节规划并进入正文阶段' },
+      { key: 'continue_body', label: '续写正文', reason: '当前还未进入正文阶段，不能续写正文' },
+    );
   }
 
   if (currentStage === 'writing') {
     // ===== 正文阶段 =====
     allowedActions.push(
       { key: 'enter_writing', label: '写正文', targetRoute: `/project/${project.id}/writing` },
-      { key: 'continue_body', label: '续写', targetRoute: `/project/${project.id}/writing` },
       { key: 'refine_body', label: '精修正文', targetRoute: `/project/${project.id}/refinement` },
       { key: 'enter_state', label: '查看状态', targetRoute: `/project/${project.id}/state` },
     );
+
+    if (assets.hasChapterPlan) {
+      allowedActions.push(
+        { key: 'generate_body', label: '生成正文', targetRoute: `/project/${project.id}/writing` },
+        { key: 'continue_body', label: '续写', targetRoute: `/project/${project.id}/writing` },
+      );
+    } else {
+      blockedActions.push(
+        { key: 'generate_body', label: '生成正文', reason: '长篇正文生成前必须先有章节规划' },
+        { key: 'continue_body', label: '续写', reason: '长篇续写前必须先有章节规划' },
+      );
+    }
 
     if (assets.pendingStateCount > 0) {
       warnings.push({ key: 'pending_states', message: `有 ${assets.pendingStateCount} 个待确认状态，建议尽快处理` });

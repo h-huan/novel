@@ -12,6 +12,8 @@ import { api } from '../lib/api';
 import { useCharacterStore } from '../stores/characterStore';
 import { useForeshadowingStore } from '../stores/foreshadowingStore';
 import { useProjectStore } from '../stores/projectStore';
+import { useWorkflowGuardStore } from '../stores/workflowGuardStore';
+import WorkflowBlockedNotice from '../components/workflow/WorkflowBlockedNotice';
 
 type ChapterFunctionType =
   | 'opening'
@@ -279,6 +281,7 @@ const OutlinePage: React.FC = () => {
   const { characters, fetchCharacters } = useCharacterStore();
   const { foreshadowings, fetchForeshadowings } = useForeshadowingStore();
   const { currentProject, selectProject } = useProjectStore();
+  const checkAction = useWorkflowGuardStore((state) => state.checkAction);
 
   const [activeView, setActiveView] = useState<'generate' | 'browse'>('browse');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -297,6 +300,11 @@ const OutlinePage: React.FC = () => {
   const [platform, setPlatform] = useState('fanqie');
   const [targetWords, setTargetWords] = useState('3000');
   const [tone, setTone] = useState('neutral');
+  const [blockedNotice, setBlockedNotice] = useState<{
+    reason: string;
+    missingAssets: string[];
+    recommendedNextAction?: string;
+  } | null>(null);
 
   const projectType = currentProject?.type === 'long_novel' ? 'long' : 'short';
 
@@ -591,6 +599,16 @@ const OutlinePage: React.FC = () => {
 
   const handleGenerateOutline = useCallback(async () => {
     if (!projectId) return;
+    const guard = await checkAction(projectId, 'generate_outline');
+    if (!guard.allowed) {
+      setBlockedNotice({
+        reason: guard.reason || '当前阶段不能生成大纲',
+        missingAssets: guard.missingAssets,
+        recommendedNextAction: guard.recommendedNextAction,
+      });
+      return;
+    }
+    setBlockedNotice(null);
     setIsGenerating(true);
     setSaveGenerated(false);
     setCanRegenerate(false);
@@ -598,7 +616,8 @@ const OutlinePage: React.FC = () => {
 
     try {
       const result = await api.post('/chain/templates/execute/long-novel-flexible-outline', {
-        user_input: {
+        userInput: {
+          projectId,
           story_setting: material || '自动生成',
           targetWords: Math.max(1, Number(targetWords || 3000) / 10000),
           genre: tone || platform || '自动判断',
@@ -627,7 +646,7 @@ const OutlinePage: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, material, platform, targetWords, tone]);
+  }, [projectId, material, platform, targetWords, tone, checkAction]);
 
   const handleSaveGenerated = useCallback(async () => {
     setGenProgress('正在保存大纲...');
@@ -952,6 +971,14 @@ const OutlinePage: React.FC = () => {
 
       {activeView === 'generate' && (
         <div style={styles.generatePanel}>
+          {blockedNotice && (
+            <WorkflowBlockedNotice
+              reason={blockedNotice.reason}
+              missingAssets={blockedNotice.missingAssets}
+              recommendedNextAction={blockedNotice.recommendedNextAction}
+              onDismiss={() => setBlockedNotice(null)}
+            />
+          )}
           <div style={styles.formSection}>
             <label style={styles.formLabel}>目标平台</label>
             <input style={styles.input} value={platform} onChange={event => setPlatform(event.target.value)} placeholder="fanqie / zhihu / qidian" />

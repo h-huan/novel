@@ -20,6 +20,7 @@ import {
   Logger,
   Res,
   Sse,
+  HttpException,
 } from '@nestjs/common';
 import { Observable, Subscriber } from 'rxjs';
 import { ApiTags } from '@nestjs/swagger';
@@ -34,6 +35,7 @@ import { FileStorageService } from '../modules/file-storage/file-storage.service
 import { ChainTemplateService } from './chain-template.service';
 import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
+import { WorkflowGuardService } from '../modules/workflow-guard/workflow-guard.service';
 
 type OutlineChapterFunction =
   | 'opening'
@@ -255,6 +257,7 @@ export class ChainController {
     private readonly chainTemplate: ChainTemplateService,
     private readonly db: DatabaseService,
     private readonly vectorIndex: VectorIndexService,
+    private readonly workflowGuard: WorkflowGuardService,
   ) {}
 
 
@@ -267,6 +270,9 @@ export class ChainController {
     this.logger.log(`long-outline-generate: ${dto.projectTitle}`);
 
     try {
+      if (dto.projectId) {
+        this.workflowGuard.assertCanGenerateOutline(dto.projectId);
+      }
       const result = await this.storyChain.executeLongOutline({
         projectTitle: dto.projectTitle,
         outline: dto.outline,
@@ -284,6 +290,7 @@ export class ChainController {
         totalLatency: result.totalLatency,
       };
     } catch (err) {
+      if (err instanceof HttpException) throw err;
       const message = err instanceof Error ? err.message : '长篇大纲生成失败';
       this.logger.error(`long-outline-generate 失败: ${message}`);
       return { success: false, error: message };
@@ -296,6 +303,7 @@ export class ChainController {
     this.logger.log(`long-write: project=${dto.projectId} ch${dto.chapterIndex}`);
 
     try {
+      this.workflowGuard.assertCanGenerateBody(dto.projectId);
       let prompt = `你正在创作一部长篇小说的第${dto.volumeIndex || 1}卷第${dto.chapterIndex || 1}章。
 
 ## 大纲指引
@@ -364,6 +372,7 @@ ${(content || '').substring(0, 2000)}
 
       return { success: true, content, continuityCheck };
     } catch (err) {
+      if (err instanceof HttpException) throw err;
       const message = err instanceof Error ? err.message : '长篇生成失败';
       this.logger.error(`long-write 失败: ${message}`);
       return { success: false, error: message };
@@ -389,6 +398,7 @@ ${(content || '').substring(0, 2000)}
     }
 
     try {
+      this.workflowGuard.assertCanGenerateBody(dto.projectId);
       const db = this.db.getDb();
       // RAG 上下文注入: 检索项目相关的角色和世界观信息
       let ragContext = '';
@@ -496,6 +506,7 @@ ${(content || '').substring(0, 2000)}
         content,
       };
     } catch (err) {
+      if (err instanceof HttpException) throw err;
       const message = err instanceof Error ? err.message : '生成失败';
       this.logger.error(`generate 失败: ${message}`);
       return { success: false, error: message };
@@ -511,6 +522,7 @@ ${(content || '').substring(0, 2000)}
     this.logger.log(`continue: chapter=${dto.chapterId}`);
 
     try {
+      this.workflowGuard.assertCanContinueBody(dto.projectId);
       const contextStr = dto.context
         ? `\n前文内容：${dto.context.substring(0, 2000)}`
         : '';
@@ -548,6 +560,7 @@ ${(content || '').substring(0, 2000)}
         content,
       };
     } catch (err) {
+      if (err instanceof HttpException) throw err;
       const message = err instanceof Error ? err.message : '续写失败';
       this.logger.error(`continue 失败: ${message}`);
       return { success: false, error: message };
@@ -894,13 +907,18 @@ ${dto.content.substring(0, 6000)}
    * 执行 Chain 模板（正式执行，接受用户真实输入）
    */
   @Post('templates/execute/:id')
-  async executeTemplate(@Param('id') id: string, @Body() dto: { userInput?: Record<string, unknown>; testData?: Record<string, unknown> }) {
+  async executeTemplate(@Param('id') id: string, @Body() dto: { userInput?: Record<string, unknown>; user_input?: Record<string, unknown>; testData?: Record<string, unknown> }) {
     try {
       // 优先使用 userInput（正式执行），如果没有则使用 testData（向后兼容）
-      const input = dto.userInput || dto.testData || {};
+      const input = dto.userInput || dto.user_input || dto.testData || {};
+      const projectId = typeof input.projectId === 'string' ? input.projectId : '';
+      if (projectId && id.includes('outline')) {
+        this.workflowGuard.assertCanGenerateOutline(projectId);
+      }
       const result = await this.chainTemplate.executeChain(id, input);
       return { ...result };
     } catch (err) {
+      if (err instanceof HttpException) throw err;
       return { success: false, error: err instanceof Error ? err.message : '执行失败' };
     }
   }
@@ -2190,6 +2208,7 @@ ${(dto.content || '').substring(0, 3000)}
     const clearHeartbeat = () => clearInterval(heartbeatInterval);
 
     try {
+      this.workflowGuard.assertCanGenerateBody(dto.projectId);
       // 天龙8步模式：有 chapterId 时走 Chain
       if (dto.chapterId) {
         // 加载章节信息

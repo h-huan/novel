@@ -36,6 +36,7 @@ import { CharacterModule } from '../modules/character/character.module';
 import { WorldSettingModule } from '../modules/world-setting/world-setting.module';
 import { OrganizationModule } from '../modules/organization/organization.module';
 import { MapPointModule } from '../modules/map-point/map-point.module';
+import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { MapPointModule } from '../modules/map-point/map-point.module';
     WorldSettingModule,
     OrganizationModule,
     MapPointModule,
+    WorkflowGuardModule,
   ],
   controllers: [ChainController],
   providers: [

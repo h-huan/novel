@@ -94,6 +94,8 @@ export class WorkflowGuardService {
         reason: '',
         missingAssets: [],
         warnings: guard.warnings.map((w) => w.message),
+        currentStage: guard.currentStage,
+        recommendedNextAction: guard.recommendedNextAction,
       };
     }
 
@@ -104,6 +106,8 @@ export class WorkflowGuardService {
         reason: blockedAction.reason,
         missingAssets: guard.missingAssets.map((m) => m.key),
         warnings: guard.warnings.map((w) => w.message),
+        currentStage: guard.currentStage,
+        recommendedNextAction: guard.recommendedNextAction,
       };
     }
 
@@ -114,7 +118,179 @@ export class WorkflowGuardService {
       reason: '当前操作未被流程守卫识别',
       missingAssets: guard.missingAssets.map((m) => m.key),
       warnings: guard.warnings.map((w) => w.message),
+      currentStage: guard.currentStage,
+      recommendedNextAction: guard.recommendedNextAction,
     };
+  }
+
+  /**
+   * 强校验某个动作。用于关键 AI 生成接口前的后端最终拦截。
+   */
+  assertActionAllowed(projectId: string, action: string): CheckActionResponse {
+    if (!projectId) {
+      throw new BadRequestException({
+        message: '缺少 projectId，无法进行流程校验',
+        error: 'WorkflowGuardBlocked',
+        missingAssets: ['projectId'],
+        currentStage: '',
+        recommendedNextAction: '请在请求中提供 projectId 后再执行生成动作',
+      });
+    }
+
+    const result = this.checkAction(projectId, action);
+    if (!result.allowed) {
+      throw new BadRequestException({
+        message: result.reason || '当前阶段不能执行该操作',
+        error: 'WorkflowGuardBlocked',
+        missingAssets: result.missingAssets,
+        currentStage: result.currentStage,
+        recommendedNextAction: result.recommendedNextAction,
+      });
+    }
+    return result;
+  }
+
+  assertCanGenerateOutline(projectId: string): CheckActionResponse {
+    const result = this.assertActionAllowed(projectId, 'generate_outline');
+    const project = this.projectRepo.findById(projectId);
+    if (!project) throw new NotFoundException(`项目不存在: ${projectId}`);
+    const assets = this.collectProjectAssets(project);
+    const currentStage = this.inferCurrentStage(project, assets);
+
+    if (project.type === 'long_novel') {
+      const missing: string[] = [];
+      if (!assets.hasWorldSetting) missing.push('world_setting');
+      if (!assets.hasMainCharacter) missing.push('main_character');
+      if (missing.length > 0 || !['outline', 'character'].includes(currentStage)) {
+        this.throwWorkflowBlocked(
+          '当前阶段不能生成长篇总纲，请先完成世界观和主角设定',
+          missing.length > 0 ? missing : ['current_stage'],
+          currentStage,
+          '请先完成世界观、人物，再进入总纲阶段',
+        );
+      }
+    }
+
+    if (project.type === 'short_story' && !['topic', 'outline', 'writing'].includes(currentStage)) {
+      this.throwWorkflowBlocked(
+        '当前阶段不能生成短篇大纲，请先回到题材或大纲阶段',
+        ['current_stage'],
+        currentStage,
+        '请先完成题材，再生成大纲',
+      );
+    }
+
+    return result;
+  }
+
+  assertCanGenerateVolume(projectId: string): CheckActionResponse {
+    const result = this.assertActionAllowed(projectId, 'generate_volume');
+    const project = this.projectRepo.findById(projectId);
+    if (!project) throw new NotFoundException(`项目不存在: ${projectId}`);
+    const assets = this.collectProjectAssets(project);
+    const currentStage = this.inferCurrentStage(project, assets);
+
+    if (project.type !== 'long_novel' || currentStage !== 'volume' || !assets.hasBookOutline) {
+      this.throwWorkflowBlocked(
+        '当前阶段不能生成分卷，请先完成长篇总纲并进入分卷阶段',
+        assets.hasBookOutline ? ['current_stage'] : ['book_outline'],
+        currentStage,
+        '请先生成总纲，再进入分卷阶段',
+      );
+    }
+    return result;
+  }
+
+  assertCanGenerateChapterPlan(projectId: string): CheckActionResponse {
+    const result = this.assertActionAllowed(projectId, 'generate_chapter_plan');
+    const project = this.projectRepo.findById(projectId);
+    if (!project) throw new NotFoundException(`项目不存在: ${projectId}`);
+    const assets = this.collectProjectAssets(project);
+    const currentStage = this.inferCurrentStage(project, assets);
+
+    if (project.type !== 'long_novel' || currentStage !== 'chapter' || !assets.hasVolumeOutline) {
+      this.throwWorkflowBlocked(
+        '当前阶段不能生成章节规划，请先完成分卷并进入章节规划阶段',
+        assets.hasVolumeOutline ? ['current_stage'] : ['volume_outline'],
+        currentStage,
+        '请先生成分卷，再进入章节规划阶段',
+      );
+    }
+    return result;
+  }
+
+  assertCanGenerateBody(projectId: string): CheckActionResponse {
+    const result = this.assertActionAllowed(projectId, 'generate_body');
+    const project = this.projectRepo.findById(projectId);
+    if (!project) throw new NotFoundException(`项目不存在: ${projectId}`);
+    const assets = this.collectProjectAssets(project);
+    const currentStage = this.inferCurrentStage(project, assets);
+
+    if (currentStage !== 'writing') {
+      const missing = project.type === 'short_story'
+        ? ['outline']
+        : ['world_setting', 'main_character', 'book_outline', 'volume_outline', 'chapter_plan'];
+      this.throwWorkflowBlocked(
+        project.type === 'short_story'
+          ? '当前阶段不能生成正文，请先完成题材和大纲并进入正文阶段'
+          : '当前阶段不能生成正文，请先完成世界观、人物、总纲、分卷和章节规划',
+        missing,
+        currentStage,
+        project.type === 'short_story'
+          ? '请先生成大纲后再进入正文阶段'
+          : '请先完成世界观、人物、总纲、分卷、章节规划后再进入正文阶段',
+      );
+    }
+
+    if (project.type === 'short_story' && !assets.hasOutline) {
+      this.throwWorkflowBlocked(
+        '当前阶段不能生成正文，请先完成大纲',
+        ['outline'],
+        currentStage,
+        '请先生成大纲后再进入正文阶段',
+      );
+    }
+
+    if (project.type === 'long_novel' && !assets.hasChapterPlan) {
+      this.throwWorkflowBlocked(
+        '当前阶段不能生成正文，请先完成章节规划',
+        ['chapter_plan'],
+        currentStage,
+        '请先完成世界观、人物、总纲、分卷、章节规划后再进入正文阶段',
+      );
+    }
+
+    return result;
+  }
+
+  assertCanContinueBody(projectId: string): CheckActionResponse {
+    const result = this.assertActionAllowed(projectId, 'continue_body');
+    const project = this.projectRepo.findById(projectId);
+    if (!project) throw new NotFoundException(`项目不存在: ${projectId}`);
+    const assets = this.collectProjectAssets(project);
+    const currentStage = this.inferCurrentStage(project, assets);
+
+    if (currentStage !== 'writing') {
+      this.throwWorkflowBlocked(
+        '当前阶段不能续写正文，请先进入正文阶段',
+        ['current_stage'],
+        currentStage,
+        project.type === 'short_story'
+          ? '请先完成大纲后再进入正文阶段'
+          : '请先完成章节规划后再进入正文阶段',
+      );
+    }
+
+    if (!assets.hasBody && !assets.hasChapterPlan && project.type === 'long_novel') {
+      this.throwWorkflowBlocked(
+        '当前缺少章节上下文，不能续写正文',
+        ['chapter_plan'],
+        currentStage,
+        '请先完成章节规划或生成第一段正文',
+      );
+    }
+
+    return result;
   }
 
   /**
@@ -309,5 +485,20 @@ export class WorkflowGuardService {
   private getStageLabel(type: string, stage: string): string {
     if (type === 'short_story') return SHORT_STAGE_LABELS[stage] || stage;
     return LONG_STAGE_LABELS[stage] || stage;
+  }
+
+  private throwWorkflowBlocked(
+    message: string,
+    missingAssets: string[],
+    currentStage: string,
+    recommendedNextAction: string,
+  ): never {
+    throw new BadRequestException({
+      message,
+      error: 'WorkflowGuardBlocked',
+      missingAssets,
+      currentStage,
+      recommendedNextAction,
+    });
   }
 }

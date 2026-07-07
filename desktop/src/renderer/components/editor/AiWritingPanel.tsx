@@ -12,6 +12,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { api, streamRequest } from '../../lib/api';
 import AuthorNotePanel from './AuthorNotePanel';
+import WorkflowBlockedNotice from '../workflow/WorkflowBlockedNotice';
+import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
 
 // ==================== Types ====================
 
@@ -106,6 +108,12 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
   const [currentStep, setCurrentStep] = useState(-1);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [prompt, setPrompt] = useState('');
+  const [blockedNotice, setBlockedNotice] = useState<{
+    reason: string;
+    missingAssets: string[];
+    recommendedNextAction?: string;
+  } | null>(null);
+  const checkAction = useWorkflowGuardStore((state) => state.checkAction);
 
   // 获取当前场景对应的后端 scenario key
   const getScenarioKey = useCallback(() => {
@@ -142,6 +150,16 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
 
   const handleGenerate = useCallback(async () => {
     if (!projectId || isGenerating) return;
+    const guard = await checkAction(projectId, 'generate_body');
+    if (!guard.allowed) {
+      setBlockedNotice({
+        reason: guard.reason || '当前阶段不能生成正文',
+        missingAssets: guard.missingAssets,
+        recommendedNextAction: guard.recommendedNextAction,
+      });
+      return;
+    }
+    setBlockedNotice(null);
     setIsGenerating(true);
     setCurrentStep(0);
     setStreamContent('');
@@ -214,10 +232,20 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
       setIsGenerating(false);
       setCurrentStep(-1);
     }
-  }, [projectId, chapterId, writingMode, prompt, isGenerating, streamMode, generateMethod, getScenarioKey, onGenerateStart, onGenerateComplete, onError]);
+  }, [projectId, chapterId, writingMode, prompt, isGenerating, streamMode, generateMethod, getScenarioKey, checkAction, onGenerateStart, onGenerateComplete, onError]);
 
   const handleContinue = useCallback(async () => {
     if (!projectId || !chapterId || isGenerating) return;
+    const guard = await checkAction(projectId, 'continue_body');
+    if (!guard.allowed) {
+      setBlockedNotice({
+        reason: guard.reason || '当前阶段不能续写正文',
+        missingAssets: guard.missingAssets,
+        recommendedNextAction: guard.recommendedNextAction,
+      });
+      return;
+    }
+    setBlockedNotice(null);
     setIsGenerating(true);
 
     try {
@@ -236,7 +264,7 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, chapterId, prompt, chapterContent, isGenerating, getScenarioKey, onGenerateComplete, onError]);
+  }, [projectId, chapterId, prompt, chapterContent, isGenerating, getScenarioKey, checkAction, onGenerateComplete, onError]);
 
   // ========== 外挂功能 ==========
 
@@ -537,6 +565,14 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
           )}
 
           {/* 操作按钮 */}
+          {blockedNotice && (
+            <WorkflowBlockedNotice
+              reason={blockedNotice.reason}
+              missingAssets={blockedNotice.missingAssets}
+              recommendedNextAction={blockedNotice.recommendedNextAction}
+              onDismiss={() => setBlockedNotice(null)}
+            />
+          )}
           <div style={styles.actions}>
             <button
               style={{
@@ -575,6 +611,16 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
               }}
               onClick={async () => {
                 if (!projectId || isGenerating) return;
+                const guard = await checkAction(projectId, 'generate_body');
+                if (!guard.allowed) {
+                  setBlockedNotice({
+                    reason: guard.reason || '当前阶段不能生成正文',
+                    missingAssets: guard.missingAssets,
+                    recommendedNextAction: guard.recommendedNextAction,
+                  });
+                  return;
+                }
+                setBlockedNotice(null);
                 setIsGenerating(true);
                 onGenerateStart?.();
                 try {
