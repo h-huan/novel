@@ -40,14 +40,25 @@ const WorkflowBlockedNotice: React.FC<WorkflowBlockedNoticeProps> = ({
           </button>
         )}
       </div>
-      <div style={styles.reason}>{reason}</div>
+      <div style={styles.row}>
+        <span style={styles.label}>原因</span>
+        <span style={styles.value}>{reason}</span>
+      </div>
       {labels.length > 0 && (
-        <div style={styles.assets}>
-          缺少：{labels.join('、')}
+        <div style={styles.row}>
+          <span style={styles.label}>缺少</span>
+          <div style={styles.tagList}>
+            {labels.map((label) => (
+              <span key={label} style={styles.tag}>{label}</span>
+            ))}
+          </div>
         </div>
       )}
       {recommendedNextAction && (
-        <div style={styles.nextAction}>{recommendedNextAction}</div>
+        <div style={styles.row}>
+          <span style={styles.label}>建议</span>
+          <span style={styles.valueStrong}>{recommendedNextAction}</span>
+        </div>
       )}
     </div>
   );
@@ -55,11 +66,13 @@ const WorkflowBlockedNotice: React.FC<WorkflowBlockedNoticeProps> = ({
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: '10px 12px',
-    borderRadius: 6,
-    border: '1px solid rgba(248,196,113,0.28)',
-    backgroundColor: 'rgba(248,196,113,0.08)',
-    color: '#f8c471',
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '14px',
+    borderRadius: 10,
+    border: '1px solid rgba(239,68,68,0.35)',
+    backgroundColor: 'rgba(239,68,68,0.06)',
+    color: '#eaeaea',
     fontSize: 12,
     lineHeight: 1.6,
   },
@@ -67,34 +80,65 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 4,
+    gap: 12,
+    marginBottom: 10,
   },
   title: {
-    fontSize: 12,
+    minWidth: 0,
+    fontSize: 13,
     fontWeight: 700,
-    color: '#f8c471',
+    color: '#ef4444',
   },
   closeButton: {
-    width: 22,
-    height: 22,
-    borderRadius: 4,
-    border: '1px solid rgba(248,196,113,0.25)',
-    backgroundColor: 'rgba(0,0,0,0.12)',
-    color: '#f8c471',
+    width: 26,
+    height: 26,
+    flexShrink: 0,
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    color: '#8a8aa0',
     cursor: 'pointer',
     lineHeight: 1,
   },
-  reason: {
-    color: '#f3d59a',
+  row: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 8,
   },
-  assets: {
-    marginTop: 4,
-    color: '#e2b86a',
+  label: {
+    width: 34,
+    flexShrink: 0,
+    color: '#8a8aa0',
+    fontSize: 12,
+    fontWeight: 700,
   },
-  nextAction: {
-    marginTop: 4,
-    color: '#f8c471',
+  value: {
+    color: '#eaeaea',
+    fontSize: 12,
+    lineHeight: 1.6,
+    minWidth: 0,
+  },
+  valueStrong: {
+    color: '#f59e0b',
+    fontSize: 12,
+    lineHeight: 1.6,
+    fontWeight: 600,
+    minWidth: 0,
+  },
+  tagList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
+    minWidth: 0,
+  },
+  tag: {
+    padding: '3px 8px',
+    borderRadius: 999,
+    border: '1px solid rgba(239,68,68,0.32)',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    color: '#ef4444',
+    fontSize: 12,
     fontWeight: 600,
   },
 };

@@ -13,12 +13,26 @@ import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
 
 // ========== 颜色常量 ==========
 
+const colors = {
+  panelBg: 'rgba(255,255,255,0.03)',
+  sectionBg: 'rgba(255,255,255,0.035)',
+  sectionBgStrong: 'rgba(255,255,255,0.05)',
+  border: 'rgba(255,255,255,0.08)',
+  text: '#eaeaea',
+  muted: '#8a8aa0',
+  weak: '#6c6c80',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+  success: '#22c55e',
+  info: '#60a5fa',
+};
+
 const STAGE_COLORS: Record<string, { bg: string; fg: string; border: string }> = {
-  done:    { bg: 'rgba(46,204,113,0.08)', fg: '#2ecc71', border: 'rgba(46,204,113,0.2)' },
-  current: { bg: 'rgba(233,69,96,0.12)',  fg: '#e94560', border: 'rgba(233,69,96,0.35)' },
-  next:    { bg: 'rgba(52,152,219,0.08)', fg: '#3498db', border: 'rgba(52,152,219,0.2)' },
-  locked:  { bg: 'rgba(255,255,255,0.02)',fg: '#6c6c80', border: 'rgba(255,255,255,0.06)' },
-  warning: { bg: 'rgba(243,156,18,0.08)', fg: '#f39c12', border: 'rgba(243,156,18,0.2)' },
+  done:    { bg: 'rgba(34,197,94,0.08)', fg: colors.success, border: 'rgba(34,197,94,0.35)' },
+  current: { bg: 'rgba(96,165,250,0.10)', fg: colors.info, border: 'rgba(96,165,250,0.4)' },
+  next:    { bg: 'rgba(245,158,11,0.08)', fg: colors.warning, border: 'rgba(245,158,11,0.35)' },
+  locked:  { bg: 'rgba(255,255,255,0.025)', fg: colors.weak, border: 'rgba(255,255,255,0.08)' },
+  warning: { bg: 'rgba(245,158,11,0.08)', fg: colors.warning, border: 'rgba(245,158,11,0.35)' },
 };
 
 // ========== 路由映射 ==========
@@ -73,7 +87,6 @@ const StageBar: React.FC<StageBarProps> = ({ stages }) => {
       <div style={stageBarStyles.row}>
         {stages.map((s, i) => {
           const colors = STAGE_COLORS[s.status] || STAGE_COLORS.locked;
-          const isLast = i === stages.length - 1;
           return (
             <React.Fragment key={s.key}>
               <div style={stageBarStyles.item}>
@@ -86,11 +99,10 @@ const StageBar: React.FC<StageBarProps> = ({ stages }) => {
                   }}
                   title={s.label}
                 >
-                  {s.status === 'done' ? '✓' : s.status === 'current' ? '●' : '○'}
+                  {i + 1}
                 </div>
                 <span style={{ ...stageBarStyles.label, color: colors.fg }}>{s.label}</span>
               </div>
-              {!isLast && <div style={stageBarStyles.line} />}
             </React.Fragment>
           );
         })}
@@ -101,45 +113,42 @@ const StageBar: React.FC<StageBarProps> = ({ stages }) => {
 
 const stageBarStyles: Record<string, React.CSSProperties> = {
   container: {
-    overflowX: 'auto',
-    paddingBottom: '4px',
+    overflow: 'hidden',
   },
   row: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0',
-    minWidth: 'max-content',
+    flexWrap: 'wrap',
+    gap: '8px',
   },
   item: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '4px',
+    gap: '6px',
     flexShrink: 0,
+    padding: '8px 10px',
+    minWidth: '72px',
+    backgroundColor: 'rgba(255,255,255,0.025)',
+    border: '1px solid rgba(255,255,255,0.06)',
+    borderRadius: 8,
   },
   dot: {
-    width: '22px',
-    height: '22px',
+    width: '24px',
+    height: '24px',
     borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '10px',
+    fontSize: '11px',
     fontWeight: 700,
     border: '2px solid',
     flexShrink: 0,
   },
   label: {
-    fontSize: '10px',
+    fontSize: '11px',
     fontWeight: 500,
     whiteSpace: 'nowrap',
-  },
-  line: {
-    width: '16px',
-    height: '1px',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    margin: '0 2px',
-    marginBottom: '18px',
   },
 };
 
@@ -184,7 +193,7 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
     return (
       <div style={panelStyles.container}>
         <div style={panelStyles.headerRow}>
-          <h3 style={panelStyles.title}>🎬 创作流程助手</h3>
+          <h3 style={panelStyles.title}>创作流程助手</h3>
         </div>
         <div style={{ padding: '16px', textAlign: 'center', color: '#6c6c80', fontSize: '13px' }}>
           加载中...
@@ -197,8 +206,8 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
     return (
       <div style={panelStyles.container}>
         <div style={panelStyles.headerRow}>
-          <h3 style={panelStyles.title}>🎬 创作流程助手</h3>
-          <button style={panelStyles.refreshBtn} onClick={handleRefresh}>🔄</button>
+          <h3 style={panelStyles.title}>创作流程助手</h3>
+          <button style={panelStyles.refreshBtn} onClick={handleRefresh}>刷新</button>
         </div>
         <div style={{ padding: '16px', textAlign: 'center', color: '#e94560', fontSize: '13px' }}>
           加载失败，点击刷新重试
@@ -227,9 +236,9 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
     <div style={panelStyles.container}>
       {/* 头部 */}
       <div style={panelStyles.headerRow}>
-        <h3 style={panelStyles.title}>🎬 创作流程助手</h3>
+        <h3 style={panelStyles.title}>创作流程助手</h3>
         <button style={panelStyles.refreshBtn} onClick={handleRefresh} title="刷新流程状态">
-          🔄
+          刷新
         </button>
       </div>
 
@@ -269,9 +278,10 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
       {/* 警告 */}
       {warnings.length > 0 && (
         <div style={panelStyles.section}>
+          <div style={panelStyles.sectionLabel}>提醒</div>
           {warnings.map((w, i) => (
             <div key={i} style={panelStyles.warningItem}>
-              ⚠️ {w.message}
+              {w.message}
             </div>
           ))}
         </div>
@@ -295,11 +305,15 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
           <div style={panelStyles.sectionLabel}>待完善</div>
           <div style={panelStyles.missingList}>
             {missingAssets.map((m) => (
-              <div key={m.key} style={panelStyles.missingItem}>
-                <span style={panelStyles.missingIcon}>
-                  {m.severity === 'required' ? '🔴' : '🟡'}
-                </span>
-                <span>{m.label}</span>
+              <div
+                key={m.key}
+                style={{
+                  ...panelStyles.missingItem,
+                  borderColor: m.severity === 'required' ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)',
+                  color: m.severity === 'required' ? colors.danger : colors.warning,
+                }}
+              >
+                <span style={panelStyles.missingLabel}>{m.label}</span>
                 <span style={panelStyles.missingReason}>{m.reason}</span>
               </div>
             ))}
@@ -347,36 +361,44 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
 
 const panelStyles: Record<string, React.CSSProperties> = {
   container: {
-    backgroundColor: 'var(--color-bg-secondary, #16213e)',
-    borderRadius: 'var(--radius-lg, 12px)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    backgroundColor: colors.panelBg,
+    borderRadius: 10,
+    border: `1px solid ${colors.border}`,
     padding: '16px',
-    marginTop: '24px',
+    marginTop: '20px',
+    marginBottom: '20px',
+    boxSizing: 'border-box',
+    maxWidth: '100%',
   },
   headerRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '12px',
+    marginBottom: '14px',
   },
   title: {
     fontSize: '15px',
     fontWeight: 700,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: colors.text,
     margin: 0,
   },
   refreshBtn: {
-    background: 'none',
-    border: '1px solid var(--color-border, #2a2a4a)',
-    borderRadius: 'var(--radius-sm, 4px)',
-    color: 'var(--color-text-secondary, #a0a0b0)',
-    fontSize: '14px',
+    height: 32,
+    background: 'rgba(255,255,255,0.04)',
+    border: `1px solid ${colors.border}`,
+    borderRadius: 8,
+    color: colors.muted,
+    fontSize: '12px',
     cursor: 'pointer',
-    padding: '4px 8px',
+    padding: '0 12px',
     fontFamily: 'var(--font-family, sans-serif)',
   },
   section: {
     marginBottom: '14px',
+    padding: '12px',
+    borderRadius: 10,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.sectionBg,
   },
   sectionRow: {
     display: 'flex',
@@ -386,71 +408,77 @@ const panelStyles: Record<string, React.CSSProperties> = {
   sectionLabel: {
     fontSize: '11px',
     fontWeight: 600,
-    color: 'var(--color-text-muted, #6c6c80)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    marginBottom: '6px',
+    color: colors.muted,
+    letterSpacing: 0,
+    marginBottom: '8px',
   },
   currentStageBadge: {
-    padding: '3px 12px',
-    borderRadius: 'var(--radius-sm, 4px)',
-    backgroundColor: 'rgba(233,69,96,0.15)',
-    color: '#e94560',
+    padding: '5px 12px',
+    borderRadius: 999,
+    backgroundColor: 'rgba(96,165,250,0.10)',
+    border: '1px solid rgba(96,165,250,0.35)',
+    color: colors.info,
     fontSize: '13px',
     fontWeight: 600,
   },
   suggestionText: {
     fontSize: '13px',
-    color: 'var(--color-text-primary, #eaeaea)',
-    lineHeight: 1.5,
+    color: colors.text,
+    lineHeight: 1.7,
     margin: 0,
   },
   tagList: {
     display: 'flex',
     flexWrap: 'wrap',
-    gap: '6px',
+    gap: '8px',
   },
   doneTag: {
-    padding: '3px 8px',
-    borderRadius: 'var(--radius-sm, 4px)',
-    fontSize: '11px',
+    padding: '5px 9px',
+    borderRadius: 999,
+    fontSize: '12px',
     fontWeight: 500,
-    backgroundColor: 'rgba(46,204,113,0.1)',
-    color: '#2ecc71',
+    backgroundColor: 'rgba(34,197,94,0.08)',
+    border: '1px solid rgba(34,197,94,0.35)',
+    color: colors.success,
   },
   missingList: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
+    flexWrap: 'wrap',
+    gap: '8px',
   },
   missingItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
+    gap: '8px',
     fontSize: '12px',
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    color: colors.muted,
     flexWrap: 'wrap',
+    padding: '6px 9px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.025)',
   },
-  missingIcon: {
-    fontSize: '10px',
-    flexShrink: 0,
+  missingLabel: {
+    fontWeight: 700,
+    color: 'inherit',
   },
   missingReason: {
-    fontSize: '11px',
-    color: 'var(--color-text-muted, #6c6c80)',
-    fontStyle: 'italic',
+    fontSize: '12px',
+    color: colors.muted,
+    fontStyle: 'normal',
   },
   actionGrid: {
     display: 'flex',
     flexWrap: 'wrap',
-    gap: '6px',
+    gap: '8px',
   },
   actionBtn: {
-    padding: '6px 14px',
-    backgroundColor: 'rgba(233,69,96,0.1)',
-    border: '1px solid rgba(233,69,96,0.25)',
-    borderRadius: 'var(--radius-sm, 4px)',
-    color: '#e94560',
+    minHeight: 32,
+    padding: '0 13px',
+    backgroundColor: 'rgba(96,165,250,0.08)',
+    border: '1px solid rgba(96,165,250,0.25)',
+    borderRadius: 8,
+    color: colors.info,
     fontSize: '12px',
     fontWeight: 500,
     cursor: 'pointer',
@@ -458,53 +486,57 @@ const panelStyles: Record<string, React.CSSProperties> = {
     transition: 'background-color 0.15s',
   },
   advanceBtn: {
-    marginTop: '8px',
-    padding: '7px 12px',
-    backgroundColor: 'rgba(52,152,219,0.12)',
-    border: '1px solid rgba(52,152,219,0.35)',
-    borderRadius: 'var(--radius-sm, 4px)',
-    color: '#3498db',
+    minHeight: 34,
+    marginTop: '12px',
+    padding: '0 14px',
+    backgroundColor: 'rgba(96,165,250,0.12)',
+    border: '1px solid rgba(96,165,250,0.4)',
+    borderRadius: 8,
+    color: colors.info,
     fontSize: '12px',
     fontWeight: 700,
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
   },
   advanceError: {
-    marginTop: '6px',
-    fontSize: '11px',
-    color: '#f8c471',
+    marginTop: '8px',
+    fontSize: '12px',
+    color: colors.warning,
   },
   blockedList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px',
+    gap: '8px',
   },
   blockedItem: {
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
-    padding: '8px 10px',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderRadius: 'var(--radius-sm, 4px)',
-    border: '1px solid rgba(255,255,255,0.05)',
+    padding: '10px 12px',
+    backgroundColor: 'rgba(239,68,68,0.06)',
+    borderRadius: 8,
+    border: '1px solid rgba(239,68,68,0.22)',
   },
   blockedLabel: {
     fontSize: '12px',
-    color: 'var(--color-text-muted, #6c6c80)',
-    fontWeight: 500,
+    color: colors.text,
+    fontWeight: 700,
   },
   blockedReason: {
-    fontSize: '11px',
-    color: 'var(--color-text-muted, #6c6c80)',
-    fontStyle: 'italic',
+    fontSize: '12px',
+    color: colors.muted,
+    fontStyle: 'normal',
+    lineHeight: 1.5,
   },
   warningItem: {
-    padding: '6px 10px',
-    backgroundColor: 'rgba(243,156,18,0.08)',
-    borderRadius: 'var(--radius-sm, 4px)',
+    padding: '10px 12px',
+    backgroundColor: 'rgba(245,158,11,0.07)',
+    border: '1px solid rgba(245,158,11,0.24)',
+    borderRadius: 8,
     fontSize: '12px',
-    color: '#f39c12',
-    marginBottom: '4px',
+    color: colors.warning,
+    lineHeight: 1.5,
+    marginBottom: '6px',
   },
 };
 

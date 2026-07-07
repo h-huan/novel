@@ -464,10 +464,35 @@ const OutlinePage: React.FC = () => {
       } catch {}
     }
 
+    const summary = volumesToSave.map((volume, index) => {
+      const chapters = volume.chapters.map((chapter, chapterIndex) => `${chapterIndex + 1}. ${chapter.title}`).join('\n');
+      return `第${index + 1}卷：${volume.title}\n${volume.description || volume.goal || ''}\n${chapters}`;
+    }).join('\n\n');
+
+    const bookRes = await api.post(`/projects/${projectId}/outlines`, {
+      level: 'book',
+      parentId: null,
+      order: 1,
+      title: '全书总纲',
+      content: summary || '根据 AI 生成结果汇总出的全书总纲。',
+      scenes: {
+        coreSetting: meta.coreSetting || {},
+        worldview: meta.worldview || null,
+        timeline: meta.timeline || [],
+        reversals: meta.reversals || [],
+        summary,
+      },
+    });
+    const bookData = (bookRes as any).data ?? bookRes;
+    const bookId = bookData?.id || bookData?.data?.id;
+    if (!bookId) {
+      throw new Error('总纲节点保存失败，请重新生成或稍后重试。');
+    }
+
     for (const [volumeIndex, volume] of volumesToSave.entries()) {
       const volumeRes = await api.post(`/projects/${projectId}/outlines`, {
         level: 'volume',
-        parentId: null,
+        parentId: bookId,
         order: volumeIndex + 1,
         title: volume.title,
         content: volume.description || volume.goal || '',
@@ -650,11 +675,16 @@ const OutlinePage: React.FC = () => {
 
   const handleSaveGenerated = useCallback(async () => {
     setGenProgress('正在保存大纲...');
-    await saveGeneratedOutline(generatedVolumesTmp, outlineMeta);
-    setSaveGenerated(false);
-    setGeneratedVolumesTmp([]);
-    setGenProgress('大纲已保存。');
-    await loadVolumes();
+    try {
+      await saveGeneratedOutline(generatedVolumesTmp, outlineMeta);
+      setSaveGenerated(false);
+      setGeneratedVolumesTmp([]);
+      setGenProgress('大纲已保存。');
+      await loadVolumes();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '大纲保存失败，请稍后重试。';
+      setGenProgress(message);
+    }
   }, [generatedVolumesTmp, outlineMeta, saveGeneratedOutline, loadVolumes]);
 
   const handleSplitChapter = useCallback(async (_volumeId: string, chapterId: string) => {
@@ -971,14 +1001,6 @@ const OutlinePage: React.FC = () => {
 
       {activeView === 'generate' && (
         <div style={styles.generatePanel}>
-          {blockedNotice && (
-            <WorkflowBlockedNotice
-              reason={blockedNotice.reason}
-              missingAssets={blockedNotice.missingAssets}
-              recommendedNextAction={blockedNotice.recommendedNextAction}
-              onDismiss={() => setBlockedNotice(null)}
-            />
-          )}
           <div style={styles.formSection}>
             <label style={styles.formLabel}>目标平台</label>
             <input style={styles.input} value={platform} onChange={event => setPlatform(event.target.value)} placeholder="fanqie / zhihu / qidian" />
@@ -1004,6 +1026,16 @@ const OutlinePage: React.FC = () => {
             {saveGenerated && <button type="button" style={{ ...styles.genBtn, backgroundColor: '#2ecc71' }} onClick={handleSaveGenerated}>保存到数据库</button>}
             {canRegenerate && !isGenerating && <button type="button" style={styles.secondaryButton} onClick={handleGenerateOutline}>重新生成</button>}
           </div>
+          {blockedNotice && (
+            <div style={styles.blockedNoticeWrap}>
+              <WorkflowBlockedNotice
+                reason={blockedNotice.reason}
+                missingAssets={blockedNotice.missingAssets}
+                recommendedNextAction={blockedNotice.recommendedNextAction}
+                onDismiss={() => setBlockedNotice(null)}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -1134,6 +1166,7 @@ const styles: Record<string, React.CSSProperties> = {
   headerMessage: { color: '#8a8aa0', fontSize: 12, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerButton: { padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontFamily: 'inherit' },
   generatePanel: { padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', maxWidth: 660 },
+  blockedNoticeWrap: { marginTop: -4 },
   formSection: { display: 'flex', flexDirection: 'column', gap: 6 },
   formLabel: { fontSize: 11, fontWeight: 600, color: '#8a8aa0' },
   formRow: { display: 'flex', gap: 12 },

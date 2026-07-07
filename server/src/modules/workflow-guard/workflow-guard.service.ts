@@ -436,7 +436,7 @@ export class WorkflowGuardService {
       hasMainCharacter: characterCount > 0,
       hasAntagonist: antagonistCount > 0,
       hasOutline: outlineCount > 0,
-      hasBookOutline: bookOutlineCount > 0,
+      hasBookOutline: bookOutlineCount > 0 || volumeOutlineCount > 0,
       hasVolumeOutline: volumeOutlineCount > 0,
       hasChapterPlan: chapterPlanCount > 0,
       hasBody: chapterWithBodyCount > 0,

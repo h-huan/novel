@@ -566,12 +566,14 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
 
           {/* 操作按钮 */}
           {blockedNotice && (
-            <WorkflowBlockedNotice
-              reason={blockedNotice.reason}
-              missingAssets={blockedNotice.missingAssets}
-              recommendedNextAction={blockedNotice.recommendedNextAction}
-              onDismiss={() => setBlockedNotice(null)}
-            />
+            <div style={{ marginBottom: 12 }}>
+              <WorkflowBlockedNotice
+                reason={blockedNotice.reason}
+                missingAssets={blockedNotice.missingAssets}
+                recommendedNextAction={blockedNotice.recommendedNextAction}
+                onDismiss={() => setBlockedNotice(null)}
+              />
+            </div>
           )}
           <div style={styles.actions}>
             <button
