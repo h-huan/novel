@@ -105,6 +105,10 @@ export const api = {
     return request<T>('PUT', path, body, timeoutMs);
   },
 
+  patch<T = unknown>(path: string, body?: unknown, timeoutMs?: number): Promise<ApiResponse<T>> {
+    return request<T>('PATCH', path, body, timeoutMs);
+  },
+
   delete<T = unknown>(path: string, timeoutMs?: number): Promise<ApiResponse<T>> {
     return request<T>('DELETE', path, undefined, timeoutMs);
   },

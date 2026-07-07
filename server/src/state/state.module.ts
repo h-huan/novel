@@ -7,9 +7,10 @@
 import { Module } from '@nestjs/common';
 import { StateEngineService } from './state-engine.service';
 import { StatePersistenceService } from './state-persistence.service';
+import { StateItemService } from './state-item.service';
 
 @Module({
-  providers: [StateEngineService, StatePersistenceService],
-  exports: [StateEngineService, StatePersistenceService],
+  providers: [StateEngineService, StatePersistenceService, StateItemService],
+  exports: [StateEngineService, StatePersistenceService, StateItemService],
 })
 export class StateModule {}

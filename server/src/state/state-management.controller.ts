@@ -9,11 +9,12 @@
  * 5. 版本历史 API
  * 6. 字段锁定 API
  */
-import { Controller, Get, Post, Put, Body, Param, Query, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { StateExtractionService } from './state-extraction.service';
 import { ConsistencyCheckService } from './consistency-check.service';
 import { CharacterStateRepository } from '../database/repositories/character-state.repository';
+import { StateItemService } from './state-item.service';
 
 @Controller('projects/:projectId/state')
 export class StateManagementController {
@@ -24,6 +25,7 @@ export class StateManagementController {
     private readonly stateExtractionService: StateExtractionService,
     private readonly consistencyCheckService: ConsistencyCheckService,
     private readonly characterStateRepo: CharacterStateRepository,
+    private readonly stateItemService: StateItemService,
   ) {}
 
   // ═══════════════════════════════════════════
@@ -56,11 +58,17 @@ export class StateManagementController {
         body.chapterIds?.[0],
         result.extractedStates,
       );
+      const stateItems = this.stateItemService.createFromExtractedStates(
+        projectId,
+        body.chapterIds?.[0],
+        result.extractedStates,
+      );
 
       return {
         success: true,
         extractedStates: result.extractedStates,
         confirmations,
+        stateItems,
       };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -70,6 +78,116 @@ export class StateManagementController {
         error: err.message,
       };
     }
+  }
+
+  @Get('items')
+  listStateItems(
+    @Param('projectId') projectId: string,
+    @Query('status') status: string = 'all',
+    @Query('targetType') targetType?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return {
+      success: true,
+      items: this.stateItemService.list(projectId, { status, targetType, limit }),
+    };
+  }
+
+  @Get('items/:id')
+  getStateItem(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return { success: true, item: this.stateItemService.get(projectId, id) };
+  }
+
+  @Patch('items/:id')
+  updateStateItem(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    return { success: true, item: this.stateItemService.update(projectId, id, body) };
+  }
+
+  @Post('items/:id/confirm')
+  confirmStateItem(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() body: { confirmedBy?: string } = {},
+  ) {
+    return { success: true, item: this.stateItemService.confirm(projectId, id, body.confirmedBy || 'author') };
+  }
+
+  @Post('items/:id/reject')
+  rejectStateItem(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() body: { rejectedBy?: string } = {},
+  ) {
+    return { success: true, item: this.stateItemService.reject(projectId, id, body.rejectedBy || 'author') };
+  }
+
+  @Post('items/:id/archive')
+  archiveStateItem(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return { success: true, item: this.stateItemService.archive(projectId, id) };
+  }
+
+  @Get('context-preview')
+  getWritingStateContext(
+    @Param('projectId') projectId: string,
+    @Query('chapterNumber') chapterNumber?: string,
+  ) {
+    return {
+      success: true,
+      context: this.stateItemService.buildWritingStateContext(projectId, Number(chapterNumber || 0) || undefined),
+    };
+  }
+
+  @Post('impact/analyze')
+  analyzeStateImpact(
+    @Param('projectId') projectId: string,
+    @Body() body: any,
+  ) {
+    return { success: true, report: this.stateItemService.analyzeImpact(projectId, body || {}) };
+  }
+
+  @Get('impact/reports')
+  listImpactReports(
+    @Param('projectId') projectId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return { success: true, reports: this.stateItemService.listImpactReports(projectId, Number(limit || 100) || 100) };
+  }
+
+  @Get('impact/reports/:id')
+  getImpactReport(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return { success: true, report: this.stateItemService.getImpactReport(projectId, id) };
+  }
+
+  @Post('impact/items/:id/apply')
+  applyImpactItem(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return { success: true, item: this.stateItemService.applyImpactItem(projectId, id) };
+  }
+
+  @Get('characters/:characterId/evolution')
+  getCharacterEvolution(
+    @Param('projectId') projectId: string,
+    @Param('characterId') characterId: string,
+  ) {
+    return {
+      success: true,
+      events: this.stateItemService.getCharacterEvolution(projectId, characterId),
+    };
   }
 
   /**

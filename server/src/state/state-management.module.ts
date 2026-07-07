@@ -13,6 +13,7 @@ import { CharacterStateRepository } from '../database/repositories/character-sta
 import { DatabaseModule } from '../database/database.module';
 import { RoutingModule } from '../routing/routing.module';
 import { RealLLMService } from '../chain/real-llm.service';
+import { StateItemService } from './state-item.service';
 
 @Module({
   imports: [DatabaseModule, RoutingModule],
@@ -23,11 +24,13 @@ import { RealLLMService } from '../chain/real-llm.service';
     ConsistencyCheckService,
     CharacterStateRepository,
     RealLLMService,
+    StateItemService,
   ],
   exports: [
     StateEngineService,
     StateExtractionService,
     ConsistencyCheckService,
+    StateItemService,
   ],
 })
 export class StateManagementModule {}

@@ -36,6 +36,7 @@ import { ChainTemplateService } from './chain-template.service';
 import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
 import { WorkflowGuardService } from '../modules/workflow-guard/workflow-guard.service';
+import { StateItemService } from '../state/state-item.service';
 
 type OutlineChapterFunction =
   | 'opening'
@@ -258,6 +259,7 @@ export class ChainController {
     private readonly db: DatabaseService,
     private readonly vectorIndex: VectorIndexService,
     private readonly workflowGuard: WorkflowGuardService,
+    private readonly stateItemService: StateItemService,
   ) {}
 
 
@@ -403,12 +405,12 @@ ${(content || '').substring(0, 2000)}
       // RAG 上下文注入: 检索项目相关的角色和世界观信息
       let ragContext = '';
       try {
-        const confirmedContext = this.buildConfirmedWritingContext(dto.projectId, dto.chapterNumber);
-        if (confirmedContext.contextText || confirmedContext.pendingTotal > 0) {
-          ragContext += '\n【已确稿状态上下文】\n' + (confirmedContext.contextText || '暂无已确稿状态。');
-          ragContext += `\n【待确稿排除】当前有${confirmedContext.pendingTotal}项待确稿状态，严禁作为事实写入正文或后续设定。`;
-          if (confirmedContext.pendingSummary.length > 0) {
-            ragContext += '\n' + confirmedContext.pendingSummary.map(item => `- ${item}`).join('\n');
+        const stateContext = this.buildWritingStateContext(dto.projectId, dto.chapterNumber);
+        if (stateContext.contextText || stateContext.pendingTotal > 0) {
+          ragContext += '\n【写作状态上下文】\n' + (stateContext.contextText || '暂无状态上下文。');
+          ragContext += `\n【状态使用规则】${stateContext.stateGuard}`;
+          if (stateContext.pendingSummary.length > 0) {
+            ragContext += '\n待确稿候选:\n' + stateContext.pendingSummary.map(item => `- ${item}`).join('\n');
           }
         }
         // 正文生成只使用统一状态管理中的已确稿资料。
@@ -429,7 +431,7 @@ ${(content || '').substring(0, 2000)}
         chapterContext = {
           ...chapterContext,
           confirmedStateContext: ragContext,
-          stateGuard: 'Only use confirmed character, foreshadowing, plot, and setting state as story facts. Pending state is excluded until the author confirms it.',
+          stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention and must not be treated as stable facts.',
         };
       }
 
@@ -529,8 +531,8 @@ ${(content || '').substring(0, 2000)}
       const chapter = this.db.getDb().prepare(
         'SELECT chapter_index FROM chapters WHERE id = ? AND project_id = ? LIMIT 1'
       ).get(dto.chapterId, dto.projectId) as any;
-      const confirmedContext = this.buildConfirmedWritingContext(dto.projectId, chapter?.chapter_index);
-      const stateContext = `\n\n【只允许使用的已确稿状态】\n${confirmedContext.contextText || '暂无已确稿状态。不要使用待确稿状态作为事实。'}\n\n【待确稿状态提醒】\n当前仍有 ${confirmedContext.pendingTotal} 项状态未确稿，严禁作为事实写入续写内容。\n${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `- ${item}`).join('\n') : '无'}`;
+      const confirmedContext = this.buildWritingStateContext(dto.projectId, chapter?.chapter_index);
+      const stateContext = `\n\n【写作状态上下文】\n${confirmedContext.contextText || '暂无状态上下文。'}\n\n【状态使用规则】\n${confirmedContext.stateGuard}\n${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `待确稿候选: ${item}`).join('\n') : '无待确稿候选'}`;
 
       let prompt = `继续续写当前章节。${contextStr}${stateContext}\n${dto.prompt ? `创作要求：${dto.prompt}` : '自然续写下去'}`;
 
@@ -1584,7 +1586,7 @@ ${dto.content.substring(0, 4000)}
     this.logger.log(`writing-context: project=${dto.projectId} ch${dto.chapterNumber}`);
 
     try {
-      const confirmedContext = this.buildConfirmedWritingContext(dto.projectId, dto.chapterNumber);
+      const confirmedContext = this.buildWritingStateContext(dto.projectId, dto.chapterNumber);
       const prompt = `作为AI写作助手，为写作者准备以下创作上下文。
 
 项目ID: ${dto.projectId}
@@ -1593,11 +1595,12 @@ ${dto.content.substring(0, 4000)}
 前文概要:
 ${dto.previousChapterSummary || '第一章/无前文'}
 
-【只允许使用的已确稿状态】
-${confirmedContext.contextText || '暂无已确稿状态。不要使用待确稿状态作为事实。'}
+【写作状态上下文】
+${confirmedContext.contextText || '暂无状态上下文。'}
 
-【待确稿状态提醒】
-当前仍有 ${confirmedContext.pendingTotal} 项状态未确稿，已从本次RAG上下文中排除。
+【状态使用规则】
+${confirmedContext.stateGuard}
+当前仍有 ${confirmedContext.pendingTotal} 项待确稿状态，只能作为候选参考。
 ${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `- ${item}`).join('\n') : '无'}
 
 请生成三段式创作上下文：
@@ -1614,7 +1617,7 @@ ${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(i
 
       const response = await this.realLLM.generate({ prompt, temperature: 0.4 });
 
-      return { success: true, confirmedContext, ...response };
+      return { success: true, writingStateContext: confirmedContext, ...response };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : '构建失败' };
     }
@@ -1667,8 +1670,9 @@ ${(dto.newForeshadowing || []).map(f => `- ${f.content}`).join('\n') || '无'}
       const response = await this.realLLM.generate({ prompt, temperature: 0.4 });
       const archive = this.parseArchiveReport(response.content);
       const confirmations = this.createArchiveConfirmations(dto.projectId, dto.chapterId, archive);
+      const stateItems = this.stateItemService.createFromArchive(dto.projectId, dto.chapterId, archive);
 
-      return { success: true, archive, rawArchive: response.content, confirmations };
+      return { success: true, archive, rawArchive: response.content, confirmations, stateItems };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : '归档失败' };
     }
@@ -2272,10 +2276,10 @@ ${(dto.content || '').substring(0, 3000)}
         const currentOutline = allOutlines.find(
           (o: any) => o.order === chapterRow.chapter_index
         ) || allOutlines[0] || null;
-        const confirmedContext = this.buildConfirmedWritingContext(dto.projectId, chapterRow.chapter_index || 1);
+        const confirmedContext = this.buildWritingStateContext(dto.projectId, chapterRow.chapter_index || 1);
         const confirmedStateContext = [
-          confirmedContext.contextText || 'No confirmed dynamic state yet.',
-          `Pending state count: ${confirmedContext.pendingTotal}. Pending state must not be treated as confirmed story facts.`,
+          confirmedContext.contextText || 'No dynamic state yet.',
+          confirmedContext.stateGuard,
           ...confirmedContext.pendingSummary.map(item => `Pending: ${item}`),
         ].join('\n');
 
@@ -2324,7 +2328,7 @@ ${(dto.content || '').substring(0, 3000)}
                   characters: fullOutline.characters,
                   foreshadowings: fullOutline.foreshadows,
                   confirmedStateContext,
-                  stateGuard: 'Only use confirmed dynamic state as story facts. Pending state is excluded until the author confirms it.',
+                  stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention.',
                   previousChaptersSummary: allOutlines
                     .slice(0, (chapterRow.chapter_index || 1) - 1)
                     .map((o: any) => o.title || '').join('；'),
@@ -2344,7 +2348,7 @@ ${(dto.content || '').substring(0, 3000)}
                   characters: fullOutline.characters,
                   foreshadowings: fullOutline.foreshadows,
                   confirmedStateContext,
-                  stateGuard: 'Only use confirmed dynamic state as story facts. Pending state is excluded until the author confirms it.',
+                  stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention.',
                   chapterNumber: chapterRow.chapter_index || 1,
                 },
               }),
@@ -2365,8 +2369,8 @@ ${(dto.content || '').substring(0, 3000)}
       let userPrompt = dto.prompt || '生成一段小说正文';
       if (dto.projectId) {
         try {
-          const confirmedContext = this.buildConfirmedWritingContext(dto.projectId);
-          userPrompt += `\n\n[Confirmed writing state]\n${confirmedContext.contextText || 'No confirmed dynamic state yet.'}\n\n[Pending state guard]\nThere are ${confirmedContext.pendingTotal} pending state changes. Do not treat pending state as confirmed story facts.`;
+          const confirmedContext = this.buildWritingStateContext(dto.projectId);
+          userPrompt += `\n\n[Writing state context]\n${confirmedContext.contextText || 'No dynamic state yet.'}\n\n[State usage rule]\n${confirmedContext.stateGuard}`;
         } catch {}
       }
       const response = await this.realLLM.generate({
@@ -3988,6 +3992,23 @@ ${contentSizeRule}
     }
 
     return parts.length > 0 ? parts.join('\n') : '';
+  }
+
+  private buildWritingStateContext(projectId: string, chapterNumber?: number) {
+    try {
+      return this.stateItemService.buildWritingStateContext(projectId, chapterNumber);
+    } catch (error) {
+      this.logger.warn(`buildWritingStateContext failed, fallback to legacy context: ${error instanceof Error ? error.message : String(error)}`);
+      const legacy = this.buildConfirmedWritingContext(projectId, chapterNumber);
+      return {
+        ...legacy,
+        confirmed: [],
+        pending: [],
+        conflict: [],
+        stale: [],
+        stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention.',
+      };
+    }
   }
 
   private buildConfirmedWritingContext(projectId: string, chapterNumber?: number) {

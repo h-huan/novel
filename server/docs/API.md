@@ -42,6 +42,57 @@ Content-Type: application/json
 }
 ```
 
+## 第五阶段：状态确稿中心 API
+
+第五阶段新增统一状态池 `state_items`，旧 `state_confirmations` 接口保留兼容。
+
+### 状态条目
+
+```
+GET /api/v1/projects/:projectId/state/items?status=all&targetType=character&limit=200
+GET /api/v1/projects/:projectId/state/items/:id
+PATCH /api/v1/projects/:projectId/state/items/:id
+POST /api/v1/projects/:projectId/state/items/:id/confirm
+POST /api/v1/projects/:projectId/state/items/:id/reject
+POST /api/v1/projects/:projectId/state/items/:id/archive
+```
+
+状态可为：`pending`、`confirmed`、`conflict`、`stale`、`rejected`、`archived`。
+
+确稿后，服务会把可匹配的角色、伏笔、剧情状态写回长期状态表；未匹配到 canonical 表的条目仍会标记为已确稿。
+
+### 写作状态上下文
+
+```
+GET /api/v1/projects/:projectId/state/context-preview?chapterNumber=1
+```
+
+返回四层上下文：
+
+- `confirmed`：可作为事实。
+- `pending`：候选参考，不能作为硬事实。
+- `conflict`：冲突状态，需避开或等待处理。
+- `stale`：受后续修改影响的过期状态。
+
+### 影响分析
+
+```
+POST /api/v1/projects/:projectId/state/impact/analyze
+GET /api/v1/projects/:projectId/state/impact/reports
+GET /api/v1/projects/:projectId/state/impact/reports/:id
+POST /api/v1/projects/:projectId/state/impact/items/:id/apply
+```
+
+`impact/analyze` 用于在作者手动修改状态后生成影响报告。若影响项涉及已锁定章节，`apply` 会返回 400，提示需要先解锁或手动处理。
+
+### 角色成长
+
+```
+GET /api/v1/projects/:projectId/state/characters/:characterId/evolution
+```
+
+返回角色成长事件时间线。角色状态条目进入状态池时会自动生成待确稿成长事件，状态确稿后对应事件同步确稿。
+
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | title | string | 是 | — | 作品标题 |

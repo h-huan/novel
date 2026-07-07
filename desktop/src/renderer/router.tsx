@@ -20,7 +20,7 @@ import StyleWritingPage from './pages/StyleWritingPage';
 import QualityStandardsPage from './pages/QualityStandardsPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import VisualizationPage from './pages/VisualizationPage';
-import StatePage from './pages/StatePage';
+import StateCenterPage from './pages/StateCenterPage';
 import VersionHistoryPage from './pages/VersionHistoryPage';
 import NewsPage from './pages/NewsPage';
 import ToolsPage from './pages/ToolsPage';
@@ -54,7 +54,7 @@ const AppRouter: React.FC = () => {
         <Route path="/project/:id/refinement" element={<RefinementPage />} />
         <Route path="/project/:id/style-writing" element={<StyleWritingPage />} />
         {/* 状态和可视化已嵌套到各功能页内，保留路由以兼容直接 URL 访问 */}
-        <Route path="/project/:id/state" element={<StatePage />} />
+        <Route path="/project/:id/state" element={<StateCenterPage />} />
         <Route path="/project/:id/visualization" element={<VisualizationPage />} />
         <Route path="/project/:id/quality-standards" element={<QualityStandardsPage />} />
         <Route path="/project/:id/wizard" element={<ProjectDetailRedirect />} />
