@@ -253,7 +253,7 @@
 
 ### 基本信息
 
-- **最新提交 SHA**: `fbb79e54a7e18a3eb17210aa8cbefdfcd12a1301`
+- **最新提交 SHA**: `779c964b07d0eaf8b60da7cd0c6a284b17edad72`
 - **执行日期**: 2026-07-07
 - **执行环境**: Windows 11 Pro, Node 22, PowerShell, SQLite (headless, 无桌面环境)
 - **LLM 配置**: DeepSeek API (DEEPSEEK_API_KEY 已配置)
@@ -483,6 +483,72 @@
 
 **建议**：在本地工作站打开前端验证 WritingQualityPage 交互流程 5 分钟即可完成最终确认。
 5. 考虑为章节 PUT 接口增加 status 字段更新支持
+
+---
+
+## Phase 6.5 最终验收记录修正（2026-07-07）
+
+### 基本信息
+
+- **最新提交 SHA**: `779c964b07d0eaf8b60da7cd0c6a284b17edad72`
+- **执行日期**: 2026-07-07
+- **本次修改范围**: 仅修正文档验收记录，未修改业务代码
+- **构建说明**: 本次仅文档修正，未改代码；沿用 Phase 6.4 构建记录
+
+### 本次修正
+
+1. 修正 Phase 6.4 的最新提交 SHA：从 `fbb79e54a7e18a3eb17210aa8cbefdfcd12a1301` 修正为 `779c964b07d0eaf8b60da7cd0c6a284b17edad72`。
+2. 保持 Phase 6.3 记录中的 SHA 为 `fbb79e54a7e18a3eb17210aa8cbefdfcd12a1301`，该 SHA 对应 Phase 6.3 验收提交。
+3. 新增 Phase 6.5 记录，明确区分真实执行、代码审查和环境限制未执行项目。
+
+### 前端真实 UI 联调
+
+- **是否补做**: 未补做 Electron 桌面真实联调
+- **原因**: 本轮环境可以启动后端和 Vite Web 页面，但未完成真实 Electron 桌面窗口联调；直接访问 `http://localhost:5173/project/3bc177f1-9391-4662-8c96-c287621b78b5/writing-quality` 时，Web/Vite 页面可打开且无白屏，但应用停留在项目列表上下文，未真实进入 WritingQualityPage 完整交互流程。
+- **结论**: 不将前端项目改写为“真实验证通过”；继续保持“代码审查通过，未实际打开 Electron 完整联调”。
+
+### locked apply API 实测
+
+- **是否补做**: 已补做真实 POST API 验证
+- **测试项目**: `3bc177f1-9391-4662-8c96-c287621b78b5`（画中血眼）
+- **测试章节**: `82bd4d54-e60f-4e63-97fe-fd35a483f4af`（第1章：画眼初渗）
+- **原始章节状态**: `draft`
+- **恢复结果**: 测试结束后已恢复原始 `status` 和 `content`
+
+| 验证项 | 结果 |
+|--------|------|
+| 将测试章节临时设置为 locked | 通过 |
+| `POST /projects/:projectId/writing-quality/analyze` | 通过，HTTP 201 |
+| 找到 open issue | 通过 |
+| `POST /projects/:projectId/writing-quality/issues/:issueId/refine` | 通过，HTTP 201 |
+| refine 返回 `locked = true` | 通过 |
+| refine 返回 `canApply = false` | 通过 |
+| `POST /projects/:projectId/writing-quality/revisions/:revisionId/apply` | 按预期失败，HTTP 400 |
+| 错误信息包含 `Cannot apply revision to locked chapter` | 通过 |
+| `chapters.content` 不变化 | 通过 |
+| `writing_revision_records.applied` 仍为 0 | 通过 |
+| issue 不被自动 resolved | 通过 |
+| 不写入 `state_items` | 通过，apply 前后数量均为 4 |
+
+### 当前第六阶段最终状态
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| 后端链路 | 通过 | Phase 6.3/6.4 已验证；本轮补做 locked apply 真实 POST 验证 |
+| 构建 | 文档记录通过 | 本次仅文档修正，未改代码，沿用 Phase 6.4 构建记录 |
+| 前端 | 代码审查通过但未真实打开 Electron 完整联调 | 本轮未完成真实 Electron UI 验收，不伪造真实通过 |
+| locked apply | 真实 API 验证通过 | locked refine/apply 行为已通过真实 POST 验证 |
+
+### 下一步建议
+
+1. 如 UI 未实测，后续在有 GUI 的本地工作站补做端到端 UI 验收。
+2. locked apply 已完成真实 POST 验证；后续如验收流程要求，可再用 curl/Postman 复测一次并归档请求响应。
+
+### 是否允许进入第七阶段
+
+如果项目验收标准接受“后端 API + 构建 + 代码审查”，可以进入第七阶段。
+
+如果项目验收标准必须“真实 UI + locked API 实测”，则暂不进入第七阶段，等待在有 GUI 的本地工作站补做 WritingQualityPage 端到端 UI 验收。
 
 
 ## 1. 第六阶段目标
