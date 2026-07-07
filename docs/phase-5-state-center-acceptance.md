@@ -167,7 +167,7 @@ npm run build              # 必须 exit 0
 9. 将状态 archive 后重复同样流程
 10. 验证 payload.previousStatus = "archived"
 11. 验证 payload.reusedFromArchived = true
-12. 验证 rejected / archived 仍不进入写作上下文（authority = soft_candidate 后重新进入 pendiing 池，正常参与上下文）
+12. 验证 rejected / archived 原状态不进入写作上下文；复活后状态变为 pending + soft_candidate，正常进入候选上下文
 
 ## 4. 数据库 Schema 验证
 
@@ -252,3 +252,21 @@ LIMIT 1;
 - 不要物理删除状态项（rejected/archived 保留标记）
 - 已确稿（confirmed hard_fact）修改会触发关联 confirmed → stale 转换
 - 已锁定章节自动同步被阻止，生成 blocked_by_locked_chapter 提示
+
+## 8. Phase 5.5 最终构建记录
+
+| 检查项 | 结果 | 执行时间 |
+|--------|------|----------|
+| server npm run typecheck | ✅ 通过（0 错误） | 2026-07-07 |
+| server npm run build | ✅ 通过（exit 0） | 2026-07-07 |
+| desktop npm run typecheck | ✅ 通过（0 错误） | 2026-07-07 |
+| desktop npm run build | ✅ 通过（exit 0） | 2026-07-07 |
+
+- 执行环境：Windows 11 Pro, Node.js (via .nvmrc)
+- 构建方式：tsc --noEmit（typecheck）+ tsc && vite build（build）
+- 修复内容：
+  - StateCenterPage `loadCharacterEvolution` 改用 `useCallback` 包裹，避免依赖不稳定导致 useEffect 重复触发
+  - 修复验收文档 3.19 拼写错误和歧义表述
+- 未执行破坏性数据库迁移
+- 未删除已有状态中心功能
+- 未进入第六阶段

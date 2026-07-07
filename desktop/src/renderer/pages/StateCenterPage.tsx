@@ -194,7 +194,7 @@ const StateCenterPage: React.FC = () => {
     }
   };
 
-  const loadCharacterEvolution = async () => {
+  const loadCharacterEvolution = useCallback(async () => {
     if (!projectId || !characterId.trim()) return;
     try {
       const res = await api.get(`/projects/${projectId}/state/characters/${encodeURIComponent(characterId.trim())}/evolution`);
@@ -202,9 +202,9 @@ const StateCenterPage: React.FC = () => {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '角色成长加载失败');
     }
-  };
+  }, [projectId, characterId]);
 
-  // 角色 ID 变化时自动加载成长时间线
+  // 角色 ID 变化时自动加载成长时间线（useCallback 保证 loadCharacterEvolution 引用稳定）
   useEffect(() => {
     if (characterId.trim()) {
       void loadCharacterEvolution();
