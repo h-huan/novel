@@ -1,13 +1,11 @@
 /**
- * WritingQualityService - Phase 6.1 Writing Quality Diagnosis & Revision Engine
+ * WritingQualityService - Phase 6.2 稳定修复版
  *
- * 核心能力：
- * 1. 正文质量诊断（analyzeChapterQuality）
- * 2. 报告/问题查询（listReports / getReport）
- * 3. 问题解决标记（markIssueResolved）
- * 4. 局部精修建议（refineIssue）
- * 5. 精修应用（applyRevision）
- * 6. 精修后复查（recheckAfterRevision）
+ * 修复：
+ * - buildProjectContext schema 兼容（world_settings/outlines/characters 实字段）
+ * - listReports/getReport 补齐 issueCount/chapterLocked 等统计
+ * - LLM JSON 解析失败时 payload 记录 parseWarning
+ * - applyRevision 返回 needsStateReview
  */
 import { Injectable, Logger, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
@@ -20,7 +18,6 @@ import type {
   ListReportsDto,
   RefineIssueDto,
   LLMQualityOutput,
-  LLMQualityIssue,
   LLMRefineOutput,
   RecheckResult,
 } from './dto/writing-quality.dto';
@@ -90,6 +87,13 @@ interface RevisionRow {
   updated_at: string;
 }
 
+interface IssueCounts {
+  total: number;
+  open: number;
+  high: number;
+  resolved: number;
+}
+
 @Injectable()
 export class WritingQualityService {
   private readonly logger = new Logger(WritingQualityService.name);
@@ -106,7 +110,6 @@ export class WritingQualityService {
     const db = this.dbService.getDb();
     const chapterId = dto.chapterId;
 
-    // 读取章节内容
     let content = dto.content;
     let chapterTitle = '';
     let chapterStatus = '';
@@ -132,20 +135,41 @@ export class WritingQualityService {
       throw new BadRequestException('Chapter content is empty, cannot analyze');
     }
 
-    // 读取项目上下文
     const context = this.buildProjectContext(projectId, db);
 
-    // 调用 LLM 进行质量诊断
-    let llmResult: LLMQualityOutput;
-    if (this.realLLM) {
-      llmResult = await this.callQualityLLM(content, chapterTitle, context, dto);
-    } else {
+    if (!this.realLLM) {
       throw new BadRequestException('LLM service is not available. Please configure an API key.');
     }
 
-    // 写入数据库
+    // LLM 调用（失败时直接抛错，不写空报告）
+    let llmResult: LLMQualityOutput;
+    let parseWarning: string | null = null;
+    let rawContentPreview: string | null = null;
+    try {
+      const response = await this.callQualityLLM(content, chapterTitle, context, dto);
+      llmResult = response.result;
+      parseWarning = response.parseWarning;
+      rawContentPreview = response.rawPreview;
+    } catch (err) {
+      this.logger.error(`LLM quality analysis failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new BadRequestException(`Quality analysis failed: ${err instanceof Error ? err.message : 'LLM call error'}`);
+    }
+
     const now = new Date().toISOString();
     const reportId = uuid();
+
+    const reportPayload: Record<string, any> = {};
+    if (parseWarning) {
+      reportPayload.parseWarning = true;
+      reportPayload.rawContentPreview = rawContentPreview;
+      reportPayload.reason = parseWarning;
+    }
+
+    const summary = parseWarning
+      ? `质量诊断解析失败：${parseWarning}。请重试。`
+      : llmResult.summary;
+    const overallLevel = llmResult.overallLevel || 'medium';
+    const overallScore = llmResult.overallScore ?? null;
 
     db.prepare(`
       INSERT INTO writing_quality_reports (
@@ -153,31 +177,16 @@ export class WritingQualityService {
         overall_level, overall_score, model, payload, created_by, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      reportId,
-      projectId,
-      chapterId,
-      'manual_check',
-      null,
-      dto.scope || 'chapter',
-      `Chapter Quality: ${chapterTitle}`,
-      llmResult.summary,
-      llmResult.overallLevel || 'medium',
-      llmResult.overallScore ?? null,
-      'llm',
-      '{}',
-      'system',
-      now,
-      now,
+      reportId, projectId, chapterId, 'manual_check', null,
+      dto.scope || 'chapter', `Chapter Quality: ${chapterTitle}`,
+      summary, overallLevel, overallScore, 'llm',
+      JSON.stringify(reportPayload), 'system', now, now,
     );
 
-    // 写入 issues
     const issues: IssueRow[] = [];
     const validTags = new Set(WRITING_QUALITY_TAGS as readonly string[]);
-
     for (const issue of llmResult.issues || []) {
-      // 过滤非法 issueType
       const issueType = validTags.has(issue.issueType) ? issue.issueType : 'needs_hook';
-      // 过滤 tags
       const tags = (issue.tags || []).filter(t => validTags.has(t));
       if (!tags.includes(issueType)) tags.unshift(issueType);
 
@@ -189,39 +198,20 @@ export class WritingQualityService {
           original_text, suggested_text, tags, status, payload, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        issueId,
-        reportId,
-        projectId,
-        chapterId,
-        issueType,
-        issue.severity || 'medium',
-        issue.title,
-        issue.summary,
-        issue.evidence || '',
-        issue.suggestion || '',
-        issue.paragraphIndex ?? null,
-        issue.sentenceIndex ?? null,
-        issue.startOffset ?? null,
-        issue.endOffset ?? null,
-        issue.originalText || '',
-        issue.suggestedText || '',
-        JSON.stringify(tags),
-        'open',
-        '{}',
-        now,
-        now,
+        issueId, reportId, projectId, chapterId, issueType,
+        issue.severity || 'medium', issue.title, issue.summary,
+        issue.evidence || '', issue.suggestion || '',
+        issue.paragraphIndex ?? null, issue.sentenceIndex ?? null,
+        issue.startOffset ?? null, issue.endOffset ?? null,
+        issue.originalText || '', issue.suggestedText || '',
+        JSON.stringify(tags), 'open', '{}', now, now,
       );
 
       issues.push({
-        id: issueId,
-        report_id: reportId,
-        project_id: projectId,
-        chapter_id: chapterId,
-        issue_type: issueType,
-        severity: issue.severity || 'medium',
-        title: issue.title,
-        summary: issue.summary,
-        evidence: issue.evidence || '',
+        id: issueId, report_id: reportId, project_id: projectId,
+        chapter_id: chapterId, issue_type: issueType,
+        severity: issue.severity || 'medium', title: issue.title,
+        summary: issue.summary, evidence: issue.evidence || '',
         suggestion: issue.suggestion || '',
         paragraph_index: issue.paragraphIndex ?? null as any,
         sentence_index: issue.sentenceIndex ?? null as any,
@@ -229,28 +219,25 @@ export class WritingQualityService {
         end_offset: issue.endOffset ?? null as any,
         original_text: issue.originalText || '',
         suggested_text: issue.suggestedText || '',
-        tags: JSON.stringify(tags),
-        status: 'open',
-        payload: '{}',
-        created_at: now,
-        updated_at: now,
-        resolved_at: null as any,
-        resolved_by: null as any,
+        tags: JSON.stringify(tags), status: 'open', payload: '{}',
+        created_at: now, updated_at: now,
+        resolved_at: null as any, resolved_by: null as any,
       });
     }
+
+    const counts = this.calcIssueCounts(issues);
 
     return {
       success: true,
       report: {
-        id: reportId,
-        projectId,
-        chapterId,
+        id: reportId, projectId, chapterId,
         title: `Chapter Quality: ${chapterTitle}`,
-        summary: llmResult.summary,
-        overallLevel: llmResult.overallLevel || 'medium',
-        overallScore: llmResult.overallScore ?? null,
+        summary, overallLevel, overallScore,
         status: 'open',
-        issueCount: issues.length,
+        issueCount: counts.total,
+        openIssueCount: counts.open,
+        highIssueCount: counts.high,
+        resolvedIssueCount: counts.resolved,
         chapterLocked: chapterStatus === 'locked',
         createdAt: now,
       },
@@ -279,7 +266,70 @@ export class WritingQualityService {
     params.push(limit);
 
     const rows = db.prepare(sql).all(...params) as unknown as ReportRow[];
-    return rows.map(r => this.reportRowToResponse(r));
+
+    // 批量查询每个 report 的 issue 统计
+    const reportIds = rows.map(r => r.id);
+    const issueCountMap = new Map<string, IssueCounts>();
+    const chapterLockedMap = new Map<string, boolean>();
+
+    if (reportIds.length > 0) {
+      // 批量获取 issue 统计
+      for (const rid of reportIds) {
+        issueCountMap.set(rid, { total: 0, open: 0, high: 0, resolved: 0 });
+      }
+      try {
+        const issueStatsStmt = db.prepare(`
+          SELECT report_id, status, severity, COUNT(*) as cnt
+          FROM writing_quality_issues
+          WHERE report_id IN (${reportIds.map(() => '?').join(',')})
+          GROUP BY report_id, status, severity
+        `);
+        const issueStats = issueStatsStmt.all(...reportIds) as Array<{ report_id: string; status: string; severity: string; cnt: number }>;
+        for (const stat of issueStats) {
+          const entry = issueCountMap.get(stat.report_id);
+          if (!entry) continue;
+          entry.total += stat.cnt;
+          if (stat.status === 'open') {
+            entry.open += stat.cnt;
+            if (stat.severity === 'high' || stat.severity === 'critical') {
+              entry.high += stat.cnt;
+            }
+          }
+          if (stat.status === 'resolved') entry.resolved += stat.cnt;
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to load issue stats for reports: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // 批量获取 locked 状态
+      const uniqueChapterIds = [...new Set(rows.map(r => r.chapter_id).filter(Boolean))];
+      if (uniqueChapterIds.length > 0) {
+        try {
+          const chapterStmt = db.prepare(`
+            SELECT id, status FROM chapters
+            WHERE id IN (${uniqueChapterIds.map(() => '?').join(',')})
+          `);
+          const chapterRows = chapterStmt.all(...uniqueChapterIds) as Array<{ id: string; status: string }>;
+          for (const cr of chapterRows) {
+            chapterLockedMap.set(cr.id, cr.status === 'locked');
+          }
+        } catch (err) {
+          this.logger.warn(`Failed to load chapter status for reports: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    return rows.map(r => {
+      const counts = issueCountMap.get(r.id) || { total: 0, open: 0, high: 0, resolved: 0 };
+      return {
+        ...this.reportRowToResponse(r),
+        issueCount: counts.total,
+        openIssueCount: counts.open,
+        highIssueCount: counts.high,
+        resolvedIssueCount: counts.resolved,
+        chapterLocked: r.chapter_id ? (chapterLockedMap.get(r.chapter_id) || false) : false,
+      };
+    });
   }
 
   // ====================== 3. GET REPORT ======================
@@ -293,8 +343,24 @@ export class WritingQualityService {
       'SELECT * FROM writing_quality_issues WHERE report_id = ? ORDER BY severity DESC, created_at ASC',
     ).all(reportId) as unknown as IssueRow[];
 
+    const counts = this.calcIssueCounts(issueRows);
+    let chapterLocked = false;
+    if (report.chapter_id) {
+      try {
+        const cr = db.prepare('SELECT status FROM chapters WHERE id = ?').get(report.chapter_id) as { status: string } | undefined;
+        chapterLocked = cr?.status === 'locked';
+      } catch { /* ignore */ }
+    }
+
     return {
-      report: this.reportRowToResponse(report),
+      report: {
+        ...this.reportRowToResponse(report),
+        issueCount: counts.total,
+        openIssueCount: counts.open,
+        highIssueCount: counts.high,
+        resolvedIssueCount: counts.resolved,
+        chapterLocked,
+      },
       issues: issueRows.map(i => this.issueRowToResponse(i)),
     };
   }
@@ -332,18 +398,14 @@ export class WritingQualityService {
 
     const isLocked = chapterRow.status === 'locked';
     const mode = dto.mode || 'suggest_only';
-
-    // 获取章节上下文（前后文）
     const contextText = this.getChapterContext(chapterRow.content, issue);
 
-    let refineResult: LLMRefineOutput;
-    if (this.realLLM) {
-      refineResult = await this.callRefineLLM(issue, chapterRow.content, contextText, dto.instruction);
-    } else {
+    if (!this.realLLM) {
       throw new BadRequestException('LLM service is not available');
     }
 
-    // 写入 revision record
+    const refineResult = await this.callRefineLLM(issue, chapterRow.content, contextText, dto.instruction);
+
     const now = new Date().toISOString();
     const revisionId = uuid();
     db.prepare(`
@@ -352,37 +414,20 @@ export class WritingQualityService {
         before_text, after_text, diff_json, applied, payload, created_by, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      revisionId,
-      projectId,
-      issue.chapter_id,
-      issueId,
-      issue.report_id,
-      'local_refine',
-      refineResult.beforeText,
-      refineResult.afterText,
-      JSON.stringify(refineResult.diff),
-      0,
-      '{}',
-      'system',
-      now,
-      now,
+      revisionId, projectId, issue.chapter_id, issueId, issue.report_id,
+      'local_refine', refineResult.beforeText, refineResult.afterText,
+      JSON.stringify(refineResult.diff), 0, '{}', 'system', now, now,
     );
 
     return {
       success: true,
       revision: {
-        id: revisionId,
-        issueId,
-        projectId,
-        chapterId: issue.chapter_id,
-        beforeText: refineResult.beforeText,
-        afterText: refineResult.afterText,
-        reason: refineResult.reason,
-        diff: refineResult.diff,
+        id: revisionId, issueId, projectId, chapterId: issue.chapter_id,
+        beforeText: refineResult.beforeText, afterText: refineResult.afterText,
+        reason: refineResult.reason, diff: refineResult.diff,
         remainingRisk: refineResult.remainingRisk,
         canApply: mode !== 'suggest_only' && !isLocked,
-        locked: isLocked,
-        applied: false,
+        locked: isLocked, applied: false,
       },
       canApply: mode !== 'suggest_only' && !isLocked,
       locked: isLocked,
@@ -411,7 +456,6 @@ export class WritingQualityService {
       throw new BadRequestException('Cannot apply revision to locked chapter');
     }
 
-    // 局部替换
     const beforeText = revision.before_text;
     const afterText = revision.after_text;
     const currentContent = chapterRow.content;
@@ -422,18 +466,35 @@ export class WritingQualityService {
       );
     }
 
-    // 只替换第一次出现（局部替换）
     const newContent = currentContent.replace(beforeText, afterText);
     const chineseChars = (newContent.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) || []).length;
     const englishWords = newContent.replace(/[^\x00-\xff]/g, '').split(/\s+/).filter(w => w.length > 0).length;
     const newWordCount = chineseChars + englishWords;
-
     const now = new Date().toISOString();
 
-    // 更新章节内容
-    db.prepare(`
-      UPDATE chapters SET content = ?, word_count = ?, updated_at = ? WHERE id = ?
-    `).run(newContent, newWordCount, now, revision.chapter_id);
+    // 尝试通过 ChapterService.update 更新以触发状态提取链路
+    let stateSyncWarning: string | null = null;
+    if (this.chapterService) {
+      try {
+        const updateResult = this.chapterService.update(revision.chapter_id, {
+          content: newContent,
+        } as any);
+        if ((updateResult as any)?.stateSync?.warning) {
+          stateSyncWarning = (updateResult as any).stateSync.warning;
+        }
+      } catch {
+        // 降级：直接更新数据库
+        this.logger.warn('ChapterService.update failed, falling back to direct DB update');
+        db.prepare('UPDATE chapters SET content = ?, word_count = ?, updated_at = ? WHERE id = ?')
+          .run(newContent, newWordCount, now, revision.chapter_id);
+        stateSyncWarning = 'ChapterService.update unavailable, state extraction may not have been triggered.';
+      }
+    } else {
+      // ChapterService 不可用，直接更新 DB
+      db.prepare('UPDATE chapters SET content = ?, word_count = ?, updated_at = ? WHERE id = ?')
+        .run(newContent, newWordCount, now, revision.chapter_id);
+      stateSyncWarning = 'ChapterService is not available; chapter content updated directly without state extraction. Manual review recommended.';
+    }
 
     // 更新 revision 记录
     db.prepare(`
@@ -442,7 +503,6 @@ export class WritingQualityService {
       WHERE id = ?
     `).run(now, now, revisionId);
 
-    // 更新关联 issue 状态
     if (revision.issue_id) {
       db.prepare(`
         UPDATE writing_quality_issues
@@ -453,16 +513,11 @@ export class WritingQualityService {
 
     return {
       success: true,
-      revision: {
-        id: revisionId,
-        applied: true,
-        appliedAt: now,
-      },
-      chapter: {
-        id: revision.chapter_id,
-        wordCount: newWordCount,
-      },
+      revision: { id: revisionId, applied: true, appliedAt: now },
+      chapter: { id: revision.chapter_id, wordCount: newWordCount },
       needsRecheck: true,
+      needsStateReview: !!stateSyncWarning,
+      stateSyncWarning,
     };
   }
 
@@ -479,7 +534,6 @@ export class WritingQualityService {
       ? db.prepare('SELECT * FROM writing_quality_issues WHERE id = ?').get(revision.issue_id) as IssueRow | undefined
       : null;
 
-    // 检查关联 issues 的剩余数量
     const remainingCount = issue
       ? (db.prepare(
           'SELECT COUNT(*) as cnt FROM writing_quality_issues WHERE chapter_id = ? AND status = ?',
@@ -493,10 +547,9 @@ export class WritingQualityService {
           'SELECT content FROM chapters WHERE id = ?',
         ).get(revision.chapter_id) as { content: string } | undefined;
         const content = chapterRow?.content || '';
-
         result = await this.callRecheckLLM(issue, revision.after_text, content);
       } catch (err) {
-        this.logger.warn(`LLM recheck failed, fallback to simple check: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.warn(`LLM recheck failed, fallback: ${err instanceof Error ? err.message : String(err)}`);
         result = this.simpleRecheck(remainingCount);
       }
     } else {
@@ -509,37 +562,63 @@ export class WritingQualityService {
   // ====================== HELPER: Project Context ======================
 
   private buildProjectContext(projectId: string, db: any): Record<string, any> {
-    const context: Record<string, any> = {};
+    const context: Record<string, any> = {
+      project: null,
+      outlines: [],
+      characters: [],
+      worldSettings: [],
+      stateItems: [],
+    };
 
-    // 大纲信息
-    const outlines = db.prepare(
-      'SELECT title, summary FROM outlines WHERE project_id = ? ORDER BY chapter_index LIMIT 20',
-    ).all(projectId) as Array<{ title: string; summary: string }>;
-    context.outlines = outlines;
+    // 项目信息（兼容实际 schema）
+    try {
+      const project = db.prepare(
+        'SELECT title, description, platform_style, type, target_words FROM projects WHERE id = ?',
+      ).get(projectId);
+      if (project) context.project = project;
+    } catch (err) {
+      this.logger.warn(`buildProjectContext: failed to query projects - ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-    // 角色信息
-    const characters = db.prepare(
-      'SELECT name, identity, personality, role_type FROM characters WHERE project_id = ? LIMIT 15',
-    ).all(projectId);
-    context.characters = characters;
+    // 大纲（兼容实际 schema：outlines 表有 title/content/level/chapter_function 等）
+    try {
+      const outlines = db.prepare(
+        'SELECT title, content, level, chapter_function, status FROM outlines WHERE project_id = ? ORDER BY "order" LIMIT 20',
+      ).all(projectId);
+      context.outlines = outlines || [];
+    } catch (err) {
+      this.logger.warn(`buildProjectContext: failed to query outlines - ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-    // 世界观
-    const worldSettings = db.prepare(
-      'SELECT category, key, value FROM world_settings WHERE project_id = ? LIMIT 20',
-    ).all(projectId);
-    context.worldSettings = worldSettings;
+    // 角色（兼容实际 schema：characters 表有 name/identity/personality 等，没有 role_type）
+    try {
+      const characters = db.prepare(
+        'SELECT name, identity, personality, dialogue_style, is_pov_character FROM characters WHERE project_id = ? LIMIT 15',
+      ).all(projectId);
+      context.characters = characters || [];
+    } catch (err) {
+      this.logger.warn(`buildProjectContext: failed to query characters - ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-    // 项目信息
-    const project = db.prepare(
-      'SELECT title, genre, target_chapters FROM projects WHERE id = ?',
-    ).get(projectId);
-    if (project) context.project = project;
+    // 世界观（兼容实际 schema：world_settings 表有 name/era/geography/factions/power_system 等）
+    try {
+      const worldSettings = db.prepare(
+        'SELECT name, era, geography, factions, power_system, economy, society FROM world_settings WHERE project_id = ? LIMIT 10',
+      ).all(projectId);
+      context.worldSettings = worldSettings || [];
+    } catch (err) {
+      this.logger.warn(`buildProjectContext: failed to query world_settings - ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-    // 已有 state items
-    const stateItems = db.prepare(
-      'SELECT title, summary, target_type, status FROM state_items WHERE project_id = ? AND status IN (?, ?) LIMIT 20',
-    ).all(projectId, 'confirmed', 'pending');
-    context.stateItems = stateItems;
+    // state_items（仅查询 confirmed 和 pending）
+    try {
+      const stateItems = db.prepare(
+        'SELECT title, summary, target_type, status FROM state_items WHERE project_id = ? AND status IN (?, ?) LIMIT 20',
+      ).all(projectId, 'confirmed', 'pending');
+      context.stateItems = stateItems || [];
+    } catch (err) {
+      this.logger.warn(`buildProjectContext: failed to query state_items - ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     return context;
   }
@@ -551,7 +630,7 @@ export class WritingQualityService {
     chapterTitle: string,
     context: Record<string, any>,
     _dto: AnalyzeChapterDto,
-  ): Promise<LLMQualityOutput> {
+  ): Promise<{ result: LLMQualityOutput; parseWarning: string | null; rawPreview: string | null }> {
     const tagsList = WRITING_QUALITY_TAGS.join(', ');
     const systemPrompt = `你是一位专业的网络小说编辑和质量诊断专家。你的任务是对网文章节进行深度质量诊断。
 
@@ -575,7 +654,7 @@ export class WritingQualityService {
 你必须只输出严格JSON，不输出任何其他内容。`;
 
     const contextSerialized = JSON.stringify(context, null, 0);
-    const prompt = `请对以​下网文章节进行专业质量诊断。
+    const prompt = `请对以下网文章节进行专业质量诊断。
 
 章节标题：${chapterTitle}
 
@@ -609,34 +688,33 @@ ${content.slice(0, 15000)}
 }`;
 
     const response = await this.realLLM!.generate({
-      prompt,
-      systemPrompt,
-      model: 'deepseek',
-      temperature: 0.3,
-      scenario: 'quality_check',
+      prompt, systemPrompt, model: 'deepseek', temperature: 0.3, scenario: 'quality_check',
     } as any);
 
-    const result = this.parseJson<LLMQualityOutput>(response.content);
-    if (!result) {
-      this.logger.warn(`Failed to parse LLM quality output, using fallback`);
+    const rawContent = response.content || '';
+    const parsed = this.parseJson<LLMQualityOutput>(rawContent);
+
+    if (!parsed) {
+      this.logger.warn('Failed to parse LLM quality output JSON');
       return {
-        summary: '质量诊断解析失败，请重试',
-        overallLevel: 'medium',
-        overallScore: 60,
-        issues: [],
+        result: {
+          summary: '质量诊断解析失败，请重试',
+          overallLevel: 'medium',
+          overallScore: 60,
+          issues: [],
+        },
+        parseWarning: 'LLM returned non-JSON or malformed JSON output',
+        rawPreview: rawContent.slice(0, 1000),
       };
     }
 
-    // 标准化
-    result.overallLevel = ['low', 'medium', 'high', 'critical'].includes(result.overallLevel)
-      ? result.overallLevel
-      : 'medium';
-    result.overallScore = typeof result.overallScore === 'number'
-      ? Math.max(0, Math.min(100, Math.round(result.overallScore)))
-      : 60;
-    result.summary = String(result.summary || '').slice(0, 200);
+    parsed.overallLevel = ['low', 'medium', 'high', 'critical'].includes(parsed.overallLevel)
+      ? parsed.overallLevel : 'medium';
+    parsed.overallScore = typeof parsed.overallScore === 'number'
+      ? Math.max(0, Math.min(100, Math.round(parsed.overallScore))) : 60;
+    parsed.summary = String(parsed.summary || '').slice(0, 200);
 
-    return result;
+    return { result: parsed, parseWarning: null, rawPreview: null };
   }
 
   private async callRefineLLM(
@@ -654,7 +732,6 @@ ${content.slice(0, 15000)}
 4. 不要擅自新增长期设定。
 5. 不要擅自解决伏笔或改变剧情走向。
 6. 如果需要改变剧情事实，在 remainingRisk 标记为 high。
-
 只输出严格JSON。`;
 
     const prompt = `请对以下质量问题进行局部精修。
@@ -676,21 +753,13 @@ ${contextText.slice(0, 3000)}
   "afterText": "修改后的文本",
   "reason": "为什么这样改，控制在80字内",
   "diff": [
-    {
-      "type": "keep|delete|insert|replace",
-      "before": "原文本",
-      "after": "新文本"
-    }
+    { "type": "keep|delete|insert|replace", "before": "原文本", "after": "新文本" }
   ],
   "remainingRisk": "none|low|medium|high"
 }`;
 
     const response = await this.realLLM!.generate({
-      prompt,
-      systemPrompt,
-      model: 'deepseek',
-      temperature: 0.4,
-      scenario: 'quality_refine',
+      prompt, systemPrompt, model: 'deepseek', temperature: 0.4, scenario: 'quality_refine',
     } as any);
 
     const result = this.parseJson<LLMRefineOutput>(response.content);
@@ -708,20 +777,15 @@ ${contextText.slice(0, 3000)}
     result.afterText = result.afterText || result.beforeText;
     result.reason = String(result.reason || '').slice(0, 200);
     result.remainingRisk = ['none', 'low', 'medium', 'high'].includes(result.remainingRisk)
-      ? result.remainingRisk
-      : 'medium';
+      ? result.remainingRisk : 'medium';
     result.diff = Array.isArray(result.diff) ? result.diff : [];
-
     return result;
   }
 
   private async callRecheckLLM(
-    issue: IssueRow,
-    revisedText: string,
-    fullContent: string,
+    issue: IssueRow, revisedText: string, fullContent: string,
   ): Promise<RecheckResult> {
     const fixText = revisedText.slice(0, 2000);
-
     const prompt = `请复查以下精修结果。
 
 原始问题：${issue.title}
@@ -732,25 +796,12 @@ ${fixText}
 章节当前内容（片段）：
 ${fullContent.slice(0, 3000)}
 
-请判断：
-1. 问题是否已修复
-2. 是否引入新问题
-3. 修改是否符合写作质量要求
-
+请判断问题是否已修复、是否引入新问题、修改是否符合写作质量要求。
 输出严格JSON：
-{
-  "pass": true/false,
-  "level": "pass|warning|fail",
-  "remainingIssues": 0,
-  "newIssues": 0,
-  "summary": "复查总结，80字内"
-}`;
+{ "pass": true/false, "level": "pass|warning|fail", "remainingIssues": 0, "newIssues": 0, "summary": "复查总结，80字内" }`;
 
     const response = await this.realLLM!.generate({
-      prompt,
-      model: 'deepseek',
-      temperature: 0.2,
-      scenario: 'quality_check',
+      prompt, model: 'deepseek', temperature: 0.2, scenario: 'quality_check',
     } as any);
 
     const raw = this.parseJson<Record<string, any>>(response.content);
@@ -763,14 +814,12 @@ ${fullContent.slice(0, 3000)}
         summary: String(raw.summary || '复查完成').slice(0, 120),
       };
     }
-
     return { pass: true, level: 'pass', remainingIssues: 0, newIssues: 0, summary: '复查完成（自动判断）' };
   }
 
   // ====================== HELPERS ======================
 
   private getChapterContext(content: string, issue: IssueRow): string {
-    // 返回问题附近的内容
     const idx = content.indexOf(issue.original_text || issue.evidence || '');
     if (idx >= 0) {
       const start = Math.max(0, idx - 500);
@@ -786,78 +835,62 @@ ${fullContent.slice(0, 3000)}
       level: remainingCount === 0 ? 'pass' : remainingCount <= 2 ? 'warning' : 'fail',
       remainingIssues: remainingCount,
       newIssues: 0,
-      summary: remainingCount === 0
-        ? '该章节所有问题已解决'
-        : `该章节还有 ${remainingCount} 个问题待处理`,
+      summary: remainingCount === 0 ? '该章节所有问题已解决' : `该章节还有 ${remainingCount} 个问题待处理`,
     };
+  }
+
+  private calcIssueCounts(issueRows: IssueRow[]): IssueCounts {
+    let total = 0, open = 0, high = 0, resolved = 0;
+    for (const i of issueRows) {
+      total++;
+      if (i.status === 'resolved') resolved++;
+      if (i.status === 'open') {
+        open++;
+        if (i.severity === 'high' || i.severity === 'critical') high++;
+      }
+    }
+    return { total, open, high, resolved };
   }
 
   private parseJson<T>(content: string | null | undefined): T | null {
     if (!content) return null;
     const clean = content.replace(/```json\n?|```\n?/g, '').trim();
-    try {
-      return JSON.parse(clean) as T;
-    } catch {
-      const start = clean.indexOf('{');
-      const end = clean.lastIndexOf('}');
-      if (start >= 0 && end > start) {
-        try {
-          return JSON.parse(clean.slice(start, end + 1)) as T;
-        } catch {
-          return null;
-        }
-      }
-      return null;
+    try { return JSON.parse(clean) as T; } catch { /* try extract */ }
+    const start = clean.indexOf('{');
+    const end = clean.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(clean.slice(start, end + 1)) as T; } catch { /* fall through */ }
     }
+    return null;
   }
 
   // ====================== RESPONSE MAPPERS ======================
 
   private reportRowToResponse(r: ReportRow) {
     return {
-      id: r.id,
-      projectId: r.project_id,
-      chapterId: r.chapter_id,
-      sourceType: r.source_type,
-      scope: r.scope,
-      title: r.title,
-      summary: r.summary,
-      overallLevel: r.overall_level,
-      overallScore: r.overall_score,
-      status: r.status,
-      model: r.model,
+      id: r.id, projectId: r.project_id, chapterId: r.chapter_id,
+      sourceType: r.source_type, scope: r.scope,
+      title: r.title, summary: r.summary,
+      overallLevel: r.overall_level, overallScore: r.overall_score,
+      status: r.status, model: r.model,
       payload: safeJsonParse(r.payload),
-      createdBy: r.created_by,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
+      createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
 
   private issueRowToResponse(r: IssueRow) {
     return {
-      id: r.id,
-      reportId: r.report_id,
-      projectId: r.project_id,
-      chapterId: r.chapter_id,
-      issueType: r.issue_type,
-      severity: r.severity,
-      title: r.title,
-      summary: r.summary,
-      evidence: r.evidence,
-      suggestion: r.suggestion,
-      paragraphIndex: r.paragraph_index,
-      sentenceIndex: r.sentence_index,
-      startOffset: r.start_offset,
-      endOffset: r.end_offset,
-      originalText: r.original_text,
-      suggestedText: r.suggested_text,
+      id: r.id, reportId: r.report_id, projectId: r.project_id, chapterId: r.chapter_id,
+      issueType: r.issue_type, severity: r.severity,
+      title: r.title, summary: r.summary,
+      evidence: r.evidence, suggestion: r.suggestion,
+      paragraphIndex: r.paragraph_index, sentenceIndex: r.sentence_index,
+      startOffset: r.start_offset, endOffset: r.end_offset,
+      originalText: r.original_text, suggestedText: r.suggested_text,
       tags: safeJsonParse(r.tags, []),
-      status: r.status,
-      payload: safeJsonParse(r.payload),
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-      resolvedAt: r.resolved_at,
-      resolvedBy: r.resolved_by,
+      status: r.status, payload: safeJsonParse(r.payload),
+      createdAt: r.created_at, updatedAt: r.updated_at,
+      resolvedAt: r.resolved_at, resolvedBy: r.resolved_by,
     };
   }
 }

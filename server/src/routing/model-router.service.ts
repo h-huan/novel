@@ -110,6 +110,7 @@ const SCENARIO_ALIASES: Record<string, string> = {
   enhance_reversal: 'polish',
   adapt_platform: 'polish',
   quality_check: 'quality_check',
+  quality_refine: 'polish',
   character_review: 'quality_check',
   review: 'quality_check',
 };

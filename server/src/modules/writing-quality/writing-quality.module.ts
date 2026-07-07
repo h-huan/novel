@@ -1,23 +1,19 @@
 /**
- * WritingQuality Module - Phase 6.1
+ * WritingQuality Module - Phase 6.1 / 6.2
+ *
+ * 依赖 ChainModule（提供 RealLLMService/RoutingModule 的 ModelRouterService/FailoverService）
+ * 依赖 ChapterModule（提供 ChapterService）
  */
 import { Module } from '@nestjs/common';
 import { WritingQualityController } from './writing-quality.controller';
 import { WritingQualityService } from './writing-quality.service';
 import { ChapterModule } from '../chapter/chapter.module';
-import { RealLLMService } from '../../chain/real-llm.service';
-import { ModelRouterService } from '../../routing/model-router.service';
-import { FailoverService } from '../../routing/failover.service';
+import { ChainModule } from '../../chain/chain.module';
 
 @Module({
-  imports: [ChapterModule],
+  imports: [ChapterModule, ChainModule],
   controllers: [WritingQualityController],
-  providers: [
-    WritingQualityService,
-    RealLLMService,
-    ModelRouterService,
-    FailoverService,
-  ],
+  providers: [WritingQualityService],
   exports: [WritingQualityService],
 })
 export class WritingQualityModule {}

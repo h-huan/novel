@@ -1,4 +1,57 @@
-# Phase 6.1 写作质量诊断与精修闭环 — 验收文档
+# Phase 6.x 写作质量诊断与精修闭环 — 验收文档
+
+## Phase 6.2 稳定修复说明（2026-07-07）
+
+### 修复内容
+
+#### 1. buildProjectContext schema 兼容
+- 修复 `world_settings` 查询：使用实字段 `name, era, geography, factions, power_system, economy, society`（而非不存在的 category/key/value）
+- 修复 `outlines` 查询：使用实字段 `title, content, level, chapter_function, status`（而非不存在的 summary/chapter_index）
+- 修复 `characters` 查询：使用实字段 `name, identity, personality, dialogue_style, is_pov_character`（而非不存在的 role_type）
+- 修复 `projects` 查询：使用实字段 `title, description, platform_style, type, target_words`（而非不存在的 genre/target_chapters）
+- 所有上下文查询做 try/catch 保护，单类失败不影响整体
+
+#### 2. quality_refine 路由映射
+- 在 `ModelRouterService.SCENARIO_ALIASES` 追加 `quality_refine: polish`
+- polish 场景对应温度 0.4，适合局部精修润色
+- route-config.json 已存在 polish 场景，无需修改
+
+#### 3. reports 列表返回 issueCount / locked 状态
+- `listReports` 批量查询 issue 统计：`issueCount`, `openIssueCount`, `highIssueCount`, `resolvedIssueCount`
+- `listReports` 批量查询 chapters 表的 `status` 字段，返回 `chapterLocked`
+- `getReport` 同样补齐上述字段
+
+#### 4. WritingQualityPage 顶部统计
+- 统计基于 `reports` 数组实时聚合（`openIssues/highIssues/resolvedIssues`）
+- 移除未使用变量
+- `apiPayload` helper 统一解析 API 响应
+
+#### 5. React Hooks 稳定性
+- `loadChapters`, `loadReports`, `selectReport` 使用 `useCallback` 包裹
+- `useEffect` 依赖改为稳定函数引用
+
+#### 6. applyRevision 与状态确稿中心关系
+- 优先通过 `ChapterService.update` 更新（触发状态提取链路）
+- 降级方案：直接 DB 更新并返回 `needsStateReview` + `stateSyncWarning`
+- locked 章节仍然禁止 apply
+
+#### 7. LLM JSON 解析失败处理
+- 解析失败时在 report payload 记录 `parseWarning`、`rawContentPreview`（最多 1000 字符）
+- LLM 调用失败时直接抛错（不写成功报告），返回明确错误信息
+
+#### 8. Module 依赖注入优化
+- `WritingQualityModule` 改为 `imports: [ChapterModule, ChainModule]`
+- 不再直接 providers `RealLLMService/ModelRouterService/FailoverService`
+- 通过 `ChainModule` 获得 `RealLLMService`，通过 `RoutingModule`（ChainModule 的依赖）获得路由服务
+
+### 构建记录
+
+| 检查项 | 状态 | 时间 | 环境 |
+|--------|------|------|------|
+| server `npm run typecheck` | 待验证 | - | Windows 11 |
+| server `npm run build` | 待验证 | - | Windows 11 |
+| desktop `npm run typecheck` | 待验证 | - | Windows 11 |
+| desktop `npm run build` | 待验证 | - | Windows 11 |
 
 ## 1. 第六阶段目标
 
