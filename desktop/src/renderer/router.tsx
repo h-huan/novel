@@ -32,6 +32,7 @@ import WeeklySummaryPage from './pages/WeeklySummaryPage';
 import TimelinePage from './pages/TimelinePage';
 import OrganizationMapPage from './pages/OrganizationMapPage';
 import IdeaLabPage from './pages/IdeaLabPage';
+import WritingQualityPage from './pages/WritingQualityPage';
 
 const AppRouter: React.FC = () => {
   return (
@@ -57,6 +58,7 @@ const AppRouter: React.FC = () => {
         <Route path="/project/:id/state" element={<StateCenterPage />} />
         <Route path="/project/:id/visualization" element={<VisualizationPage />} />
         <Route path="/project/:id/quality-standards" element={<QualityStandardsPage />} />
+        <Route path="/project/:id/writing-quality" element={<WritingQualityPage />} />
         <Route path="/project/:id/wizard" element={<ProjectDetailRedirect />} />
         <Route path="/project/:id/weekly-summary" element={<WeeklySummaryPage />} />
         <Route path="/project/:id/versions" element={<VersionHistoryPage />} />

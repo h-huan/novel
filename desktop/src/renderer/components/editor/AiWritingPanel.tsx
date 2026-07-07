@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, streamRequest } from '../../lib/api';
 import AuthorNotePanel from './AuthorNotePanel';
 import WorkflowBlockedNotice from '../workflow/WorkflowBlockedNotice';
@@ -99,6 +100,8 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
   onGenerateComplete,
   onError,
 }) => {
+  const navigate = useNavigate();
+
   // ========== 写作 Tab State ==========
   const [activeTab, setActiveTab] = useState<TabType>('writing');
   const [writingMode, setWritingMode] = useState<WritingMode>('semi_auto');
@@ -797,6 +800,18 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
             disabled={qaLoading}
           >
             {qaLoading ? '🔍 检测中...' : '🔍 开始质量检测'}
+          </button>
+
+          {/* 写作质量诊断入口 */}
+          <button
+            style={{
+              ...styles.qaBtn,
+              background: '#3b82f6',
+              marginTop: '8px',
+            }}
+            onClick={() => navigate(`/project/${projectId}/writing-quality`)}
+          >
+            📊 写作质量诊断中心
           </button>
 
           {/* 质检结果 */}
