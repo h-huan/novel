@@ -37,6 +37,7 @@ interface ImpactReport {
     severity: string;
     status: string;
     actionHint?: string;
+    payload?: Record<string, any>;
   }>;
 }
 
@@ -140,6 +141,11 @@ const StateCenterPage: React.FC = () => {
     }, {});
   }, [items]);
 
+  const todayAdded = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return items.filter(item => (item.createdAt || '').startsWith(today)).length;
+  }, [items]);
+
   const actOnItem = async (itemId: string, action: 'confirm' | 'reject' | 'archive') => {
     if (!projectId) return;
     setMessage('');
@@ -215,6 +221,7 @@ const StateCenterPage: React.FC = () => {
         <SummaryCard label="已确稿" value={counts.confirmed || 0} color="#1f8a5b" />
         <SummaryCard label="冲突" value={counts.conflict || 0} color="#c0392b" />
         <SummaryCard label="过期" value={counts.stale || 0} color="#7f5fc4" />
+        <SummaryCard label="今日新增" value={todayAdded} color="#2f80ed" />
       </section>
 
       {message && <div style={styles.notice}>{message}</div>}
@@ -239,7 +246,7 @@ const StateCenterPage: React.FC = () => {
           onApply={applyImpactItem}
         />
       ) : activeTab === 'context' ? (
-        <ContextPanel contextText={contextText} />
+        <ContextPanel contextText={contextText} items={items} />
       ) : activeTab === 'character' ? (
         <CharacterEvolutionPanel
           items={filteredItems}
@@ -265,6 +272,11 @@ const StateCenterPage: React.FC = () => {
                   {statusLabel[item.status] || item.status}
                 </span>
                 <strong style={styles.itemTitle}>{item.targetLabel || item.title || item.targetType}</strong>
+                <span style={styles.itemMetaLine}>
+                  {item.authority || '-'} · {item.source || '-'} · {item.targetType}
+                  {entersWritingContext(item) ? ' · 进入写作上下文' : ' · 不进入写作上下文'}
+                </span>
+                {Boolean(item.tags?.length) && <span style={styles.tagRow}>{item.tags!.map(tag => <b key={tag}>{tag}</b>)}</span>}
                 <span style={styles.itemSummary}>{item.summary}</span>
               </button>
             ))}
@@ -320,7 +332,11 @@ const StateDetailPanel: React.FC<{
         <Meta label="权威级别" value={item.authority || '-'} />
         <Meta label="来源" value={item.source || '-'} />
         <Meta label="置信度" value={typeof item.confidence === 'number' ? `${Math.round(item.confidence * 100)}%` : '-'} />
+        <Meta label="写作上下文" value={entersWritingContext(item) ? '进入' : '不进入'} />
       </div>
+      {Boolean(item.tags?.length) && (
+        <div style={styles.detailTags}>{item.tags!.map(tag => <span key={tag}>{tag}</span>)}</div>
+      )}
       <h3 style={styles.sectionTitle}>状态摘要</h3>
       <p style={styles.contentText}>{item.summary}</p>
       {item.content && item.content !== item.summary && (
@@ -372,6 +388,11 @@ const ImpactPanel: React.FC<{
               <strong>{item.targetLabel || item.targetType}</strong>
               <p>{item.summary}</p>
               <span>{item.actionHint}</span>
+              <div style={styles.impactFlags}>
+                <span>{item.payload?.locked ? '锁定正文阻断' : '未锁定'}</span>
+                <span>{item.payload?.canAutoSync ? '可自动同步' : '需人工复核'}</span>
+                <span>{item.payload?.needsReview ? 'needs_review' : '已处理'}</span>
+              </div>
               <button style={styles.secondaryButton} onClick={() => onApply(item.id)} disabled={item.status === 'applied'}>
                 {item.status === 'applied' ? '已应用' : '标记已处理'}
               </button>
@@ -383,11 +404,24 @@ const ImpactPanel: React.FC<{
   </main>
 );
 
-const ContextPanel: React.FC<{ contextText: string }> = ({ contextText }) => (
+const ContextPanel: React.FC<{ contextText: string; items: StateItem[] }> = ({ contextText, items }) => (
   <section style={styles.detailPanel}>
     <h2 style={styles.detailTitle}>写作上下文预览</h2>
+    <div style={styles.contextLayers}>
+      <Layer title="已确稿状态｜必须遵守" items={items.filter(item => item.status === 'confirmed' && item.authority === 'hard_fact')} />
+      <Layer title="待确认状态｜可参考但不要写死" items={items.filter(item => item.status === 'pending' && item.authority === 'soft_candidate')} />
+      <Layer title="冲突提醒｜需要避免" items={items.filter(item => item.status === 'conflict' && item.authority === 'warning')} />
+      <Layer title="过期风险｜需要复核" items={items.filter(item => item.status === 'stale' && item.authority === 'warning')} />
+    </div>
     <pre style={styles.contextBox}>{contextText || '暂无状态上下文'}</pre>
   </section>
+);
+
+const Layer: React.FC<{ title: string; items: StateItem[] }> = ({ title, items }) => (
+  <div style={styles.layerBox}>
+    <strong>{title}</strong>
+    <span>{items.length} 项</span>
+  </div>
 );
 
 const CharacterEvolutionPanel: React.FC<{
@@ -402,8 +436,16 @@ const CharacterEvolutionPanel: React.FC<{
   <main style={styles.mainGrid}>
     <section style={styles.listPanel}>
       {items.map(item => (
-        <button key={item.id} style={styles.itemButton} onClick={() => onSelect(item.id)}>
+        <button
+          key={item.id}
+          style={styles.itemButton}
+          onClick={() => {
+            onSelect(item.id);
+            onCharacterIdChange(item.targetId || item.targetLabel || '');
+          }}
+        >
           <strong style={styles.itemTitle}>{item.targetLabel || item.title || '角色状态'}</strong>
+          {Boolean(item.tags?.length) && <span style={styles.tagRow}>{item.tags!.map(tag => <b key={tag}>{tag}</b>)}</span>}
           <span style={styles.itemSummary}>{item.summary}</span>
         </button>
       ))}
@@ -424,6 +466,8 @@ const CharacterEvolutionPanel: React.FC<{
           <span style={styles.timelineChapter}>第{event.chapterIndex || '?'}章</span>
           <strong>{event.title}</strong>
           <p>{event.summary}</p>
+          {Boolean(event.delta?.tags?.length) && <span style={styles.tagRow}>{event.delta.tags.map((tag: string) => <b key={tag}>{tag}</b>)}</span>}
+          {event.delta?.conflictWithPersona && <p style={styles.warningText}>这个角色当前不会自然做出这个选择。如果坚持，需要补充动机、事件或过渡剧情。</p>}
         </div>
       ))}
     </section>
@@ -469,6 +513,17 @@ const styles: Record<string, React.CSSProperties> = {
   input: { flex: 1, border: '1px solid #cbd5e1', borderRadius: 6, padding: '8px 10px' },
   timelineItem: { borderLeft: '3px solid #1f8a5b', padding: '8px 0 8px 12px', marginBottom: 10 },
   timelineChapter: { display: 'block', color: '#52606d', fontSize: 12, marginBottom: 4 },
+  itemMetaLine: { color: '#7b8794', fontSize: 12 },
+  tagRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  detailTags: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 },
+  impactFlags: { display: 'flex', gap: 8, flexWrap: 'wrap', color: '#52606d', fontSize: 12 },
+  contextLayers: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(140px, 1fr))', gap: 10, margin: '14px 0' },
+  layerBox: { background: '#f5f7f8', border: '1px solid #d9e2ec', borderRadius: 6, padding: 10, display: 'grid', gap: 6 },
+  warningText: { color: '#9b2c2c', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: 6, padding: 8 },
 };
+
+function entersWritingContext(item: StateItem) {
+  return ['confirmed', 'pending', 'conflict', 'stale'].includes(item.status) && item.authority !== 'excluded';
+}
 
 export default StateCenterPage;

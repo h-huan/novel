@@ -1,12 +1,13 @@
 /**
  * 角色 Service
  */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { CharacterRepository } from '../../database/repositories/character.repository';
 import { CharacterStateRepository } from '../../database/repositories/character-state.repository';
 import type { CharacterRow } from '../../database/repositories/character.repository';
 import type { CreateCharacterDto, AddRelationshipDto } from './dto/character.dto';
+import { StateItemService } from '../../state/state-item.service';
 
 export interface CharacterResponse {
   id: string;
@@ -36,6 +37,7 @@ export class CharacterService {
   constructor(
     private readonly repo: CharacterRepository,
     private readonly stateRepo: CharacterStateRepository,
+    @Optional() private readonly stateItemService?: StateItemService,
   ) {}
 
   create(projectId: string, dto: CreateCharacterDto): CharacterResponse {
@@ -105,7 +107,20 @@ export class CharacterService {
     if (dto.arc !== undefined) updateData.arc = typeof dto.arc === 'string' ? dto.arc : JSON.stringify(dto.arc);
 
     this.repo.update(id, updateData);
-    return this.toResponse(this.repo.findById(id)!);
+    const response = this.toResponse(this.repo.findById(id)!);
+    this.analyzeStateImpact(existing.project_id, id, '人物资料修改影响分析', {
+      before: {
+        name: existing.name,
+        identity: existing.identity,
+        appearance: existing.appearance,
+        background: existing.background,
+        personality: existing.personality,
+        relationships: existing.relationships,
+      },
+      after: dto,
+      priority: 'character',
+    });
+    return response;
   }
 
   remove(id: string): { success: boolean } {
@@ -180,5 +195,19 @@ export class CharacterService {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  private analyzeStateImpact(projectId: string, id: string, summary: string, payload: Record<string, unknown>) {
+    if (!this.stateItemService) return;
+    try {
+      this.stateItemService.analyzeImpact(projectId, {
+        targetType: 'character',
+        targetId: id,
+        summary,
+        payload: { ...payload, priority: 'character', affects: ['outline', 'volume', 'chapter_plan', 'chapter'] },
+      });
+    } catch {
+      // 影响分析失败不能阻断人物保存
+    }
   }
 }

@@ -1,0 +1,26 @@
+export const WRITING_QUALITY_TAGS = [
+  'reader_hook',
+  'retention_point',
+  'emotional_payoff',
+  'meme_point',
+  'chapter_hook',
+  'pacing_risk',
+  'low_retention',
+  'needs_payoff',
+  'needs_hook',
+  'ai_pattern_risk',
+  'template_repetition',
+  'too_abstract',
+  'too_expository',
+  'flat_dialogue',
+  'same_voice_characters',
+  'lack_of_subtext',
+  'repeated_emotion_action',
+  'low_specificity',
+  'over_explained',
+  'needs_detail',
+  'needs_character_voice',
+  'needs_asymmetry',
+] as const;
+
+export type WritingQualityTag = typeof WRITING_QUALITY_TAGS[number];

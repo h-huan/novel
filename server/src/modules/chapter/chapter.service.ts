@@ -1,12 +1,13 @@
 /**
  * 章节 Service
  */
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { ChapterRepository } from '../../database/repositories/chapter.repository';
 import { VersionHistoryRepository } from '../../database/repositories/version-history.repository';
 import type { ChapterRow } from '../../database/repositories/chapter.repository';
 import type { CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
+import { StateItemService } from '../../state/state-item.service';
 
 export interface ChapterResponse {
   id: string;
@@ -29,6 +30,7 @@ export interface ChapterResponse {
   createdAt: string;
   updatedAt: string;
   lockedAt?: string;
+  stateSync?: any;
 }
 
 @Injectable()
@@ -36,6 +38,7 @@ export class ChapterService {
   constructor(
     private readonly repo: ChapterRepository,
     private readonly versionRepo: VersionHistoryRepository,
+    @Optional() private readonly stateItemService?: StateItemService,
   ) {}
 
   create(projectId: string, dto: CreateChapterDto): ChapterResponse {
@@ -102,6 +105,7 @@ export class ChapterService {
     const updateData: Record<string, unknown> = { updated_at: now };
 
     if (dto.title !== undefined) updateData.title = dto.title;
+    const contentChanged = dto.content !== undefined && dto.content !== existing.content;
     if (dto.content !== undefined) {
       updateData.content = dto.content;
       // 计算字数 (中文字符 + 英文单词)
@@ -113,7 +117,22 @@ export class ChapterService {
     if (dto.transitionMode !== undefined) updateData.transition_mode = dto.transitionMode;
 
     this.repo.update(id, updateData);
-    return this.toResponse(this.repo.findById(id)!);
+    const response = this.toResponse(this.repo.findById(id)!);
+    if (contentChanged && this.stateItemService) {
+      try {
+        response.stateSync = this.stateItemService.createFromManualChapterEdit(
+          existing.project_id,
+          id,
+          existing.content || '',
+          dto.content || '',
+        );
+      } catch (error) {
+        response.stateSync = {
+          warning: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return response;
   }
 
   remove(id: string): { success: boolean } {

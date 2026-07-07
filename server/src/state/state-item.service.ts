@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID, createHash } from 'crypto';
 import { DatabaseService } from '../database/database.service';
+import { WRITING_QUALITY_TAGS } from './writing-quality-tags';
 
 type StateStatus = 'pending' | 'confirmed' | 'rejected' | 'archived' | 'conflict' | 'stale';
 
@@ -101,7 +102,7 @@ export class StateItemService {
       input.content || summary,
       JSON.stringify(input.payload || {}),
       input.status || 'pending',
-      input.authority || 'soft_candidate',
+      input.authority || this.authorityForStatus(input.status || 'pending'),
       input.source || 'ai_extracted',
       input.confidence ?? 0.6,
       JSON.stringify(input.tags || []),
@@ -156,7 +157,7 @@ export class StateItemService {
     try {
       db.prepare(`
         UPDATE state_items
-        SET status = 'confirmed', authority = 'canon', confirmed_by = ?, confirmed_at = datetime('now'), updated_at = datetime('now')
+        SET status = 'confirmed', authority = 'hard_fact', confirmed_by = ?, confirmed_at = datetime('now'), updated_at = datetime('now')
         WHERE project_id = ? AND id = ?
       `).run(confirmedBy, projectId, id);
 
@@ -179,7 +180,7 @@ export class StateItemService {
     const db = this.databaseService.getDb();
     db.prepare(`
       UPDATE state_items
-      SET status = 'rejected', rejected_by = ?, rejected_at = datetime('now'), updated_at = datetime('now')
+      SET status = 'rejected', authority = 'excluded', rejected_by = ?, rejected_at = datetime('now'), updated_at = datetime('now')
       WHERE project_id = ? AND id = ?
     `).run(rejectedBy, projectId, id);
     db.prepare(`
@@ -194,7 +195,7 @@ export class StateItemService {
     this.get(projectId, id);
     this.databaseService.getDb().prepare(`
       UPDATE state_items
-      SET status = 'archived', archived_at = datetime('now'), updated_at = datetime('now')
+      SET status = 'archived', authority = 'excluded', archived_at = datetime('now'), updated_at = datetime('now')
       WHERE project_id = ? AND id = ?
     `).run(projectId, id);
     return this.get(projectId, id);
@@ -274,10 +275,10 @@ export class StateItemService {
     };
 
     const contextSections = [
-      this.formatContextSection('【已确稿状态: 可作为事实】', grouped.confirmed.slice(0, 40)),
-      this.formatContextSection('【待确稿状态: 只能作为候选参考, 不可写成硬事实】', grouped.pending.slice(0, 25)),
-      this.formatContextSection('【冲突状态: 写作时必须避开或等待作者处理】', grouped.conflict.slice(0, 15)),
-      this.formatContextSection('【过期状态: 可能被后续修改影响, 仅作提醒】', grouped.stale.slice(0, 15)),
+      this.formatContextSection('【已确稿状态｜必须遵守】', grouped.confirmed.filter(item => item.authority === 'hard_fact').slice(0, 40)),
+      this.formatContextSection('【待确认状态｜可参考但不要写死】', grouped.pending.filter(item => item.authority === 'soft_candidate').slice(0, 25)),
+      this.formatContextSection('【冲突提醒｜需要避免】', grouped.conflict.filter(item => item.authority === 'warning').slice(0, 15)),
+      this.formatContextSection('【过期风险｜需要复核】', grouped.stale.filter(item => item.authority === 'warning').slice(0, 15)),
     ].filter(Boolean);
 
     const legacy = this.buildLegacyConfirmedContext(projectId, chapterNumber, grouped.pending);
@@ -289,7 +290,7 @@ export class StateItemService {
       stale: grouped.stale,
       pendingTotal: grouped.pending.length,
       pendingSummary: grouped.pending.slice(0, 10).map(item => `${item.targetLabel}: ${item.summary}`),
-      stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention and must not be treated as stable facts.',
+      stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。若提示角色不会自然做出某选择, 必须补充动机、事件或过渡剧情。',
     };
   }
 
@@ -327,6 +328,9 @@ export class StateItemService {
       actionHint: row.status === 'confirmed' ? '请复核后标记为过期或重新确认' : '请在状态确稿中心确认或驳回',
       payload: { relatedStateItemId: row.id, sourceStatus: row.status },
     }));
+
+    const chapterImpacts = this.buildChapterImpactItems(projectId, targetType, targetId);
+    items.push(...chapterImpacts);
 
     const hasLockedChapter = this.hasLockedChapter(projectId, sourceItem?.source_chapter_id || body.payload?.sourceChapterId as string | undefined);
     if (hasLockedChapter) {
@@ -377,7 +381,7 @@ export class StateItemService {
 
       for (const row of related.filter(row => row.status === 'confirmed')) {
         db.prepare(`
-          UPDATE state_items SET status = 'stale', updated_at = datetime('now')
+          UPDATE state_items SET status = 'stale', authority = 'warning', updated_at = datetime('now')
           WHERE project_id = ? AND id = ?
         `).run(projectId, row.id);
       }
@@ -457,12 +461,40 @@ export class StateItemService {
     }));
   }
 
+  createFromManualChapterEdit(projectId: string, chapterId: string, beforeContent: string, afterContent: string) {
+    const facts = this.extractManualChapterFacts(afterContent || '', beforeContent || '');
+    const created = facts.map(fact => this.create(projectId, {
+      sourceType: 'manual_chapter_edit',
+      sourceId: chapterId,
+      sourceChapterId: chapterId,
+      targetType: fact.targetType,
+      targetLabel: fact.targetLabel,
+      title: fact.title,
+      summary: fact.summary,
+      content: fact.evidence,
+      payload: { evidenceEvent: fact.evidence, manualEdit: true },
+      tags: fact.tags,
+      status: 'pending',
+      authority: 'soft_candidate',
+      source: 'manual_edit_extract',
+      createdBy: 'manual_edit',
+    }));
+    const impactReport = this.analyzeImpact(projectId, {
+      targetType: 'chapter',
+      targetId: chapterId,
+      summary: `未锁定正文修改影响分析: ${created.length} 项状态候选`,
+      payload: { sourceChapterId: chapterId, stateItemIds: created.map(item => item.id), canAutoSync: true, needsReview: created.length > 0 },
+    });
+    return { created, impactReport };
+  }
+
   private createCharacterEvolutionFromItem(projectId: string, item: any) {
     if (item.targetType !== 'character' && !item.tags.includes('character')) return;
     const db = this.databaseService.getDb();
     const chapter = item.sourceChapterId
       ? db.prepare('SELECT chapter_index FROM chapters WHERE project_id = ? AND id = ?').get(projectId, item.sourceChapterId) as any
       : null;
+    const evolutionPayload = this.buildCharacterEvolutionPayload(item);
     db.prepare(`
       INSERT INTO character_evolution_events (
         id, project_id, character_id, character_name, source_state_item_id, source_chapter_id,
@@ -479,7 +511,7 @@ export class StateItemService {
       'state_change',
       item.title || '角色状态变化',
       item.summary,
-      JSON.stringify(item.payload || {}),
+      JSON.stringify(evolutionPayload),
       item.status === 'confirmed' ? 'confirmed' : 'pending',
     );
   }
@@ -594,7 +626,77 @@ export class StateItemService {
 
   private formatContextSection(title: string, items: any[]) {
     if (!items.length) return '';
-    return `${title}\n${items.map(item => `- [${item.targetType}] ${item.targetLabel || item.title}: ${item.summary}`).join('\n')}`;
+    return `${title}\n${items.map(item => {
+      const tags = item.tags?.length ? ` 标签:${item.tags.join(',')}` : '';
+      const personaWarning = item.tags?.includes('out_of_character') || item.tags?.includes('needs_transition')
+        ? ' 这个角色当前不会自然做出这个选择。如果坚持，需要补充动机、事件或过渡剧情。'
+        : '';
+      return `- [${item.targetType}/${item.authority}] ${item.targetLabel || item.title}: ${item.summary}${tags}${personaWarning}`;
+    }).join('\n')}`;
+  }
+
+  private extractManualChapterFacts(afterContent: string, beforeContent: string) {
+    const delta = afterContent.length > beforeContent.length ? afterContent.slice(Math.max(0, beforeContent.length - 200)) : afterContent;
+    const text = delta || afterContent;
+    const rules: Array<{ pattern: RegExp; targetType: string; targetLabel: string; title: string; tags: string[] }> = [
+      { pattern: /受伤|流血|伤口|昏迷|中毒|骨折/, targetType: 'character', targetLabel: '人物状态', title: '人物受伤或身体状态变化', tags: ['character', 'needs_review'] },
+      { pattern: /关系|背叛|和解|结盟|决裂|信任|怀疑/, targetType: 'character', targetLabel: '人物关系', title: '人物关系变化', tags: ['character', 'relationshipChange', 'needs_review'] },
+      { pattern: /来到|抵达|离开|返回|进入|地点|城|村|山|宫|学校|公司/, targetType: 'timeline_state', targetLabel: '地点变化', title: '地点或场景变化', tags: ['location_change'] },
+      { pattern: /埋下|暗示|伏笔|线索|谜团/, targetType: 'foreshadowing', targetLabel: '伏笔', title: '伏笔埋设', tags: ['foreshadowing', 'reader_hook'] },
+      { pattern: /回收|揭晓|真相|原来|终于明白/, targetType: 'foreshadowing', targetLabel: '伏笔', title: '伏笔回收', tags: ['foreshadowing', 'emotional_payoff'] },
+      { pattern: /规则|禁忌|法则|设定|世界观|制度/, targetType: 'world_setting', targetLabel: '世界观规则', title: '世界观新增规则', tags: ['world'] },
+      { pattern: /道具|钥匙|戒指|剑|手机|信物|归属|交给|拿走/, targetType: 'prop', targetLabel: '道具归属', title: '道具归属变化', tags: ['prop_ownership'] },
+      { pattern: /组织|门派|公司|家族|阵营|联盟|敌对/, targetType: 'organization', targetLabel: '组织关系', title: '组织关系变化', tags: ['organization'] },
+      { pattern: /第二天|当天|随后|此前|之后|时间|三年|一夜|清晨|黄昏/, targetType: 'timeline_state', targetLabel: '时间线', title: '时间线推进', tags: ['timeline'] },
+      { pattern: /不像他|反常|突然变得|毫无理由|性格大变/, targetType: 'character', targetLabel: '角色一致性', title: '角色行为可能违背核心设定', tags: ['character', 'out_of_character', 'needs_transition', 'needs_review'] },
+    ];
+    const matched = rules.filter(rule => rule.pattern.test(text));
+    return (matched.length ? matched : [{
+      pattern: /./,
+      targetType: 'timeline_state',
+      targetLabel: '正文变化',
+      title: '未锁定正文发生修改',
+      tags: ['needs_review'],
+    }]).map(rule => ({
+      targetType: rule.targetType,
+      targetLabel: rule.targetLabel,
+      title: rule.title,
+      summary: `${rule.title}: ${text.slice(0, 220)}`,
+      evidence: text.slice(0, 1000),
+      tags: [...rule.tags, ...this.inferWritingQualityTags(text)],
+    }));
+  }
+
+  private inferWritingQualityTags(text: string) {
+    const tags: string[] = [];
+    if (/钩子|悬念|谜团|反转/.test(text)) tags.push('chapter_hook');
+    if (/说明|解释|介绍|背景是/.test(text)) tags.push('too_expository');
+    if (/感到|觉得|非常|很/.test(text)) tags.push('low_specificity');
+    if (/对话|说道|说/.test(text) && !/[“”"]/.test(text)) tags.push('flat_dialogue');
+    return tags.filter(tag => (WRITING_QUALITY_TAGS as readonly string[]).includes(tag));
+  }
+
+  private buildCharacterEvolutionPayload(item: any) {
+    const text = `${item.summary}\n${item.content || ''}`;
+    const tags = new Set<string>(item.tags || []);
+    if (/不像他|反常|毫无理由|性格大变|违背/.test(text)) tags.add('out_of_character');
+    if (/突然|立刻|瞬间|直接/.test(text)) tags.add('needs_transition');
+    if (!item.content && !item.payload?.evidenceEvent) tags.add('needs_review');
+    return {
+      coreSetting: item.payload?.coreSetting || null,
+      currentState: item.payload?.currentState || item.summary,
+      personalityDrift: /性格|反常|不像/.test(text),
+      appearanceChange: /外貌|衣着|伤口|脸色/.test(text),
+      relationshipChange: /关系|背叛|和解|结盟|决裂/.test(text),
+      motivationChange: /目标|动机|想要|决定/.test(text),
+      behaviorPattern: item.payload?.behaviorPattern || null,
+      readerExpectation: item.payload?.readerExpectation || null,
+      conflictWithPersona: tags.has('out_of_character'),
+      needsTransition: tags.has('needs_transition'),
+      needsReview: tags.has('needs_review'),
+      evidenceEvent: item.payload?.evidenceEvent || item.content || item.summary,
+      tags: Array.from(tags),
+    };
   }
 
   private resolveTarget(projectId: string, sourceChapterId: string | null, targetType: string, item: any) {
@@ -640,6 +742,57 @@ export class StateItemService {
     return Boolean(row && (row.is_locked === 1 || row.status === 'locked'));
   }
 
+  private buildChapterImpactItems(projectId: string, targetType: string, targetId: string | null) {
+    const db = this.databaseService.getDb();
+    const rows = db.prepare(`
+      SELECT id, title, status, chapter_index, volume_index
+      FROM chapters
+      WHERE project_id = ?
+      ORDER BY
+        CASE WHEN status = 'locked' THEN 0 ELSE 1 END,
+        volume_index ASC,
+        chapter_index ASC
+      LIMIT 40
+    `).all(projectId) as any[];
+    if (!rows.length) return [];
+
+    const priorityRank: Record<string, number> = {
+      world_setting: 90,
+      character: 80,
+      outline: 70,
+      volume: 60,
+      chapter_plan: 50,
+      chapter: 40,
+    };
+    const rank = priorityRank[targetType] || 30;
+    return rows
+      .filter(row => row.status === 'locked' || rank >= 50)
+      .slice(0, 12)
+      .map(row => {
+        const locked = row.status === 'locked';
+        return {
+          id: randomUUID(),
+          impactType: locked ? 'blocked_by_locked_chapter' : 'downstream_chapter_needs_sync',
+          targetType: 'chapter',
+          targetId: row.id,
+          targetLabel: `第${row.chapter_index || '?'}章 ${row.title || ''}`.trim(),
+          summary: locked
+            ? `已锁定正文可能受 ${targetType} 修改影响, 只生成阻断提示, 不自动修改`
+            : `未锁定正文可能受 ${targetType} 修改影响, 可标记为 stale/needs_review/can_auto_sync`,
+          severity: locked ? 'high' : rank >= 80 ? 'medium' : 'low',
+          actionHint: locked ? '保持锁定, 人工复核冲突' : '标记需复核, 可后续自动同步',
+          payload: {
+            sourceTargetType: targetType,
+            sourceTargetId: targetId,
+            locked,
+            stale: true,
+            needsReview: true,
+            canAutoSync: !locked,
+          },
+        };
+      });
+  }
+
   private summarizeExtractedState(state: any) {
     const changes = state?.changes ? JSON.stringify(state.changes) : '';
     return String(state?.summary || state?.description || changes || `${state?.type || '状态'} 更新`).slice(0, 800);
@@ -649,6 +802,13 @@ export class StateItemService {
     const value = String(type || 'state').trim();
     if (value === 'plot') return 'timeline_state';
     return value;
+  }
+
+  private authorityForStatus(status: string) {
+    if (status === 'confirmed') return 'hard_fact';
+    if (status === 'conflict' || status === 'stale') return 'warning';
+    if (status === 'rejected' || status === 'archived') return 'excluded';
+    return 'soft_candidate';
   }
 
   private hashSummary(summary: string) {
@@ -680,7 +840,7 @@ export class StateItemService {
       content: row.content,
       payload: this.parseJson(row.payload, {}),
       status: row.status,
-      authority: row.authority,
+      authority: row.authority === 'canon' ? 'hard_fact' : (row.authority || this.authorityForStatus(row.status)),
       source: row.source,
       confidence: row.confidence,
       tags: this.parseJson(row.tags, []),

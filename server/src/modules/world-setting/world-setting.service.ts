@@ -1,11 +1,12 @@
 /**
  * 世界观 Setting Service
  */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { WorldSettingRepository } from '../../database/repositories/world-setting.repository';
 import type { WorldSettingRow } from '../../database/repositories/world-setting.repository';
 import type { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } from './dto/world-setting.dto';
+import { StateItemService } from '../../state/state-item.service';
 
 export interface WorldSettingResponse {
   id: string;
@@ -32,7 +33,10 @@ export interface WorldSettingResponse {
 
 @Injectable()
 export class WorldSettingService {
-  constructor(private readonly repo: WorldSettingRepository) {}
+  constructor(
+    private readonly repo: WorldSettingRepository,
+    @Optional() private readonly stateItemService?: StateItemService,
+  ) {}
 
   create(projectId: string, dto: CreateWorldSettingDto): WorldSettingResponse {
     const now = new Date().toISOString();
@@ -88,7 +92,13 @@ export class WorldSettingService {
     if (dto.era !== undefined) updateData.era = dto.era;
 
     this.repo.update(id, updateData);
-    return this.toResponse(this.repo.findById(id)!);
+    const response = this.toResponse(this.repo.findById(id)!);
+    this.analyzeStateImpact(existing.project_id, id, '世界观资料修改影响分析', {
+      before: { name: existing.name, era: existing.era },
+      after: dto,
+      priority: 'world_setting',
+    });
+    return response;
   }
 
   remove(id: string): { success: boolean } {
@@ -187,6 +197,17 @@ export class WorldSettingService {
       updateData.setting_type = 'short';
 
       this.repo.update(row.id, updateData);
+      this.analyzeStateImpact(projectId, row.id, '短篇世界观设定修改影响分析', {
+        before: {
+          storyPremise: row.story_premise,
+          era: row.era,
+          locations: row.locations,
+          socialRules: row.social_rules,
+          specialSettings: row.special_settings,
+        },
+        after: dto,
+        priority: 'world_setting',
+      });
     }
 
     // 返回保存后的数据
@@ -216,5 +237,19 @@ export class WorldSettingService {
       specialSettings: row.special_settings || '',
       settingType: row.setting_type || 'full',
     };
+  }
+
+  private analyzeStateImpact(projectId: string, id: string, summary: string, payload: Record<string, unknown>) {
+    if (!this.stateItemService) return;
+    try {
+      this.stateItemService.analyzeImpact(projectId, {
+        targetType: 'world_setting',
+        targetId: id,
+        summary,
+        payload: { ...payload, priority: 'world_setting', affects: ['character', 'outline', 'volume', 'chapter_plan', 'chapter'] },
+      });
+    } catch {
+      // 影响分析失败不能阻断资料保存
+    }
   }
 }

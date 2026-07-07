@@ -1,12 +1,13 @@
 /**
  * 大纲 Service
  */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { OutlineRepository } from '../../database/repositories/outline.repository';
 import { DatabaseService } from '../../database/database.service';
 import type { OutlineRow } from '../../database/repositories/outline.repository';
 import type { CreateOutlineDto, UpdateOutlineDto, MoveOutlineDto } from './dto/outline.dto';
+import { StateItemService } from '../../state/state-item.service';
 
 export interface OutlineResponse {
   id: string;
@@ -34,6 +35,7 @@ export class OutlineService {
   constructor(
     private readonly repo: OutlineRepository,
     private readonly db: DatabaseService,
+    @Optional() private readonly stateItemService?: StateItemService,
   ) {}
 
   create(projectId: string, dto: CreateOutlineDto): OutlineResponse {
@@ -101,7 +103,9 @@ export class OutlineService {
     if (dto.bookSkeleton !== undefined) updateData.book_skeleton = dto.bookSkeleton ? JSON.stringify(dto.bookSkeleton) : null;
 
     this.repo.update(id, updateData);
-    return this.toResponse(this.repo.findById(id)!);
+    const response = this.toResponse(this.repo.findById(id)!);
+    this.analyzeStateImpact(existing, dto);
+    return response;
   }
 
   remove(id: string): { success: boolean } {
@@ -221,6 +225,40 @@ export class OutlineService {
       `).run(offset, fromChapter, offset, new Date().toISOString(), projectId, fromChapter);
     } catch {
       // 状态同步失败不影响主流程
+    }
+  }
+
+  private analyzeStateImpact(existing: OutlineRow, dto: UpdateOutlineDto) {
+    if (!this.stateItemService) return;
+    const targetType = existing.level === 'volume'
+      ? 'volume'
+      : existing.level === 'chapter'
+        ? 'chapter_plan'
+        : 'outline';
+    const priority = targetType === 'outline' ? 'book_outline' : targetType;
+    try {
+      this.stateItemService.analyzeImpact(existing.project_id, {
+        targetType,
+        targetId: existing.id,
+        summary: `${targetType === 'volume' ? '分卷' : targetType === 'chapter_plan' ? '章节规划' : '总纲'}修改影响分析`,
+        payload: {
+          before: {
+            title: existing.title,
+            content: existing.content,
+            level: existing.level,
+            order: existing.order,
+          },
+          after: dto,
+          priority,
+          affects: targetType === 'outline'
+            ? ['volume', 'chapter_plan', 'chapter']
+            : targetType === 'volume'
+              ? ['chapter_plan', 'chapter']
+              : ['chapter'],
+        },
+      });
+    } catch {
+      // 影响分析失败不能阻断大纲保存
     }
   }
 

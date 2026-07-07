@@ -344,6 +344,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
       });
 
       const content = response.content;
+      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content);
 
       // G1 三连续检查（角色/场景/时间）
       let continuityCheck: any = null;
@@ -372,7 +373,13 @@ ${(content || '').substring(0, 2000)}
         } catch { /* 保存失败不影响返回 */ }
       }
 
-      return { success: true, content, continuityCheck };
+      return {
+        success: true,
+        content,
+        continuityCheck,
+        stateItemsCreated: archiveResult.stateItemsCreated,
+        stateArchiveWarning: archiveResult.stateArchiveWarning,
+      };
     } catch (err) {
       if (err instanceof HttpException) throw err;
       const message = err instanceof Error ? err.message : '长篇生成失败';
@@ -431,7 +438,7 @@ ${(content || '').substring(0, 2000)}
         chapterContext = {
           ...chapterContext,
           confirmedStateContext: ragContext,
-          stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention and must not be treated as stable facts.',
+          stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。',
         };
       }
 
@@ -462,9 +469,12 @@ ${(content || '').substring(0, 2000)}
           } catch { /* 保存失败不影响返回 */ }
         }
 
+        const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, fullContent);
         return {
           success: result.status === 'completed',
           content: fullContent,
+          stateItemsCreated: archiveResult.stateItemsCreated,
+          stateArchiveWarning: archiveResult.stateArchiveWarning,
           chainResult: {
             status: result.status,
             totalLatency: result.totalLatency,
@@ -492,6 +502,7 @@ ${(content || '').substring(0, 2000)}
       });
 
       const content = response.content;
+      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content);
 
       // 如果传了 chapterId，自动回写到 chapters 表
       if (dto.chapterId) {
@@ -506,6 +517,8 @@ ${(content || '').substring(0, 2000)}
       return {
         success: true,
         content,
+        stateItemsCreated: archiveResult.stateItemsCreated,
+        stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
     } catch (err) {
       if (err instanceof HttpException) throw err;
@@ -544,6 +557,7 @@ ${(content || '').substring(0, 2000)}
 
       const response = await this.realLLM.generate({ prompt, scenario: dto.scenario || 'writing', temperature: 0.7 });
       const content = response.content;
+      const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content);
 
       // 自动追加到章节内容
       if (dto.chapterId) {
@@ -560,6 +574,8 @@ ${(content || '').substring(0, 2000)}
       return {
         success: true,
         content,
+        stateItemsCreated: archiveResult.stateItemsCreated,
+        stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
     } catch (err) {
       if (err instanceof HttpException) throw err;
@@ -2328,7 +2344,7 @@ ${(dto.content || '').substring(0, 3000)}
                   characters: fullOutline.characters,
                   foreshadowings: fullOutline.foreshadows,
                   confirmedStateContext,
-                  stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention.',
+                  stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。',
                   previousChaptersSummary: allOutlines
                     .slice(0, (chapterRow.chapter_index || 1) - 1)
                     .map((o: any) => o.title || '').join('；'),
@@ -2348,7 +2364,7 @@ ${(dto.content || '').substring(0, 3000)}
                   characters: fullOutline.characters,
                   foreshadowings: fullOutline.foreshadows,
                   confirmedStateContext,
-                  stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention.',
+                  stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。',
                   chapterNumber: chapterRow.chapter_index || 1,
                 },
               }),
@@ -4006,8 +4022,42 @@ ${contentSizeRule}
         pending: [],
         conflict: [],
         stale: [],
-        stateGuard: 'Confirmed items are canon. Pending items are candidate references only. Conflict and stale items require author attention.',
+        stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。',
       };
+    }
+  }
+
+  private async runPostWriteArchive(projectId?: string, chapterId?: string, content?: string) {
+    if (!projectId || !chapterId || !content?.trim()) {
+      return { stateItemsCreated: 0, stateArchiveWarning: null as string | null };
+    }
+
+    try {
+      const response = await this.realLLM.generate({
+        prompt: `请从以下正文中提取需要进入状态确稿中心的结构化变化。只输出严格 JSON，不要 Markdown。
+
+正文:
+${content.slice(-4000)}
+
+格式:
+{
+  "worldSettingUpdates": [{"title": "世界观变化", "summary": "新增规则或设定"}],
+  "characterUpdates": [{"title": "角色变化", "summary": "受伤、关系、动机、外貌、立场或行为变化"}],
+  "organizationUpdates": [{"title": "组织变化", "summary": "组织、阵营、权力关系变化"}],
+  "outlineUpdates": [{"title": "大纲变化", "summary": "后续剧情计划受到影响"}],
+  "foreshadowingUpdates": [{"title": "伏笔变化", "summary": "埋设、激活、回收或悬空风险"}],
+  "timelineUpdates": [{"title": "时间线变化", "summary": "时间、地点、事件顺序推进"}],
+  "conflicts": [{"title": "潜在冲突", "summary": "与已知状态可能冲突的点"}]
+}`,
+        temperature: 0.3,
+      });
+      const archive = this.parseArchiveReport(response.content);
+      const stateItems = this.stateItemService.createFromArchive(projectId, chapterId, archive);
+      return { stateItemsCreated: stateItems.length, stateArchiveWarning: null as string | null };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`post-write state archive failed: ${message}`);
+      return { stateItemsCreated: 0, stateArchiveWarning: message };
     }
   }
 
