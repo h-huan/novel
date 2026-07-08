@@ -71,4 +71,73 @@ export class ContinuityController {
   updateForeshadowingTask(@Param('projectId') projectId: string, @Param('taskId') taskId: string, @Body() body: any) {
     return this.service.updateForeshadowingTask(projectId, taskId, body);
   }
+
+  // ===== Phase 7.4: World Rules =====
+
+  @Get('world-rules')
+  getWorldRules(@Param('projectId') projectId: string, @Query('focusChapterId') focusChapterId?: string) {
+    return this.service.getWorldRules(projectId, focusChapterId);
+  }
+
+  @Post('world-rules')
+  createWorldRule(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.createWorldRule(projectId, body);
+  }
+
+  @Patch('world-rules/:ruleId')
+  updateWorldRule(@Param('projectId') projectId: string, @Param('ruleId') ruleId: string, @Body() body: any) {
+    return this.service.updateWorldRule(projectId, ruleId, body);
+  }
+
+  @Post('world-rules/:ruleId/events')
+  createWorldRuleEvent(@Param('projectId') projectId: string, @Param('ruleId') ruleId: string, @Body() body: any) {
+    return this.service.createWorldRuleEvent(projectId, ruleId, body);
+  }
+
+  @Post('world-rule-tasks')
+  createWorldRuleTask(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.createWorldRuleTask(projectId, body);
+  }
+
+  @Patch('world-rule-tasks/:taskId')
+  updateWorldRuleTask(@Param('projectId') projectId: string, @Param('taskId') taskId: string, @Body() body: any) {
+    return this.service.updateWorldRuleTask(projectId, taskId, body);
+  }
+
+  // ===== Phase 7.4: Timeline =====
+
+  @Get('timeline')
+  getTimeline(@Param('projectId') projectId: string, @Query('focusChapterId') focusChapterId?: string) {
+    return this.service.getTimeline(projectId, focusChapterId);
+  }
+
+  @Post('timeline-events')
+  createTimelineEvent(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.createTimelineEvent(projectId, body);
+  }
+
+  @Patch('timeline-events/:eventId')
+  updateTimelineEvent(@Param('projectId') projectId: string, @Param('eventId') eventId: string, @Body() body: any) {
+    return this.service.updateTimelineEvent(projectId, eventId, body);
+  }
+
+  @Post('timeline-links')
+  createTimelineLink(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.createTimelineLink(projectId, body);
+  }
+
+  @Patch('timeline-links/:linkId')
+  updateTimelineLink(@Param('projectId') projectId: string, @Param('linkId') linkId: string, @Body() body: any) {
+    return this.service.updateTimelineLink(projectId, linkId, body);
+  }
+
+  @Post('timeline-tasks')
+  createTimelineTask(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.createTimelineTask(projectId, body);
+  }
+
+  @Patch('timeline-tasks/:taskId')
+  updateTimelineTask(@Param('projectId') projectId: string, @Param('taskId') taskId: string, @Body() body: any) {
+    return this.service.updateTimelineTask(projectId, taskId, body);
+  }
 }

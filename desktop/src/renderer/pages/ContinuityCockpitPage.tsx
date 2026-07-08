@@ -174,6 +174,8 @@ const ContinuityCockpitPage: React.FC = () => {
   const [continuityCharacters, setContinuityCharacters] = useState<any | null>(null);
   const [continuityRelationships, setContinuityRelationships] = useState<any | null>(null);
   const [continuityForeshadowings, setContinuityForeshadowings] = useState<any | null>(null);
+  const [continuityWorldRules, setContinuityWorldRules] = useState<any | null>(null);
+  const [continuityTimeline, setContinuityTimeline] = useState<any | null>(null);
   const [focusChapterId, setFocusChapterId] = useState('');
   const [manualGoal, setManualGoal] = useState('');
   const [manualForbidden, setManualForbidden] = useState('');
@@ -230,14 +232,18 @@ const ContinuityCockpitPage: React.FC = () => {
     setContinuityLoading(true);
     try {
       const suffix = focusChapterId ? `?focusChapterId=${encodeURIComponent(focusChapterId)}` : '';
-      const [characterRes, relationshipRes, foreshadowingRes] = await Promise.allSettled([
+      const [characterRes, relationshipRes, foreshadowingRes, worldRes, timelineRes] = await Promise.allSettled([
         api.get(`/projects/${projectId}/continuity/characters${suffix}`),
         api.get(`/projects/${projectId}/continuity/relationships${suffix}`),
         api.get(`/projects/${projectId}/continuity/foreshadowings${suffix}`),
+        api.get(`/projects/${projectId}/continuity/world-rules${suffix}`),
+        api.get(`/projects/${projectId}/continuity/timeline${suffix}`),
       ]);
       if (characterRes.status === 'fulfilled') setContinuityCharacters(payload<any>(characterRes.value));
       if (relationshipRes.status === 'fulfilled') setContinuityRelationships(payload<any>(relationshipRes.value));
       if (foreshadowingRes.status === 'fulfilled') setContinuityForeshadowings(payload<any>(foreshadowingRes.value));
+      if (worldRes.status === 'fulfilled') setContinuityWorldRules(payload<any>(worldRes.value));
+      if (timelineRes.status === 'fulfilled') setContinuityTimeline(payload<any>(timelineRes.value));
     } catch (err: any) {
       setError(err.message || 'Phase 7 连续性数据加载失败');
     } finally {
@@ -288,6 +294,10 @@ const ContinuityCockpitPage: React.FC = () => {
   const focusCharacterItems = continuityCharacters?.groups?.focusCharacters || [];
   const focusRelationshipItems = continuityRelationships?.groups?.focusRelationships || [];
   const focusForeshadowingTasks = continuityForeshadowings?.groups?.focusTasks || [];
+  const focusWorldTasks = continuityWorldRules?.groups?.focusTasks || [];
+  const focusWorldRules = continuityWorldRules?.groups?.focusRules || [];
+  const focusTimelineTasks = continuityTimeline?.groups?.focusTasks || [];
+  const focusTimelineEvents = continuityTimeline?.groups?.focusEvents || [];
   const relatedCharacters = focusCharacterItems.length ? focusCharacterItems : findRelatedCharacters(legacyCharacters, focusChapter, focusOutline);
   const pendingItems = useMemo(() => stateItems.filter(item => ['pending', 'draft', 'needs_review'].includes(item.status)), [stateItems]);
   const reportSearchTexts = useMemo(() => qualityReports.map(report => searchableFields([report.payload, report.summary, report.title, report.issueSummary, report.issue_summary])), [qualityReports]);
@@ -295,6 +305,8 @@ const ContinuityCockpitPage: React.FC = () => {
   const timelineRisks = qualityReports.reduce((sum, report) => sum + Number(report.timelineRiskCount || 0), 0)
     + countKeywordMatches(reportSearchTexts, RISK_KEYWORDS.timeline)
     + countKeywordMatches(stateItemSearchTexts, RISK_KEYWORDS.timeline);
+  const worldRuleRisksFromSummary = Number(continuityWorldRules?.summary?.highRiskCount || 0) + Number(continuityWorldRules?.summary?.conflictCount || 0);
+  const timelineRisksFromSummary = Number(continuityTimeline?.summary?.timeConflictCount || 0) + Number(continuityTimeline?.summary?.causalityGapCount || 0);
   const foreshadowingRisks = foreshadowings.filter(f => {
     const status = f.status || '';
     return status === 'pending' || status === 'buried' && Number(f.plannedRecoveryChapterIndex ?? f.planned_recovery_chapter_index ?? 9999) <= (focusIndex + 2);
@@ -327,6 +339,14 @@ const ContinuityCockpitPage: React.FC = () => {
     recoveryDueForeshadowings: Number(continuityForeshadowings?.summary?.recoveryDueCount || 0),
     overdueForeshadowings: Number(continuityForeshadowings?.summary?.overdueCount || 0),
     highRiskForeshadowings: Number(continuityForeshadowings?.summary?.highRiskCount || 0),
+    focusWorldRules: Number(continuityWorldRules?.summary?.focusRules || 0),
+    focusWorldTasks: Number(continuityWorldRules?.summary?.focusTasks || 0),
+    worldRuleConflicts: Number(continuityWorldRules?.summary?.conflictCount || 0),
+    worldRuleHighRisk: Number(continuityWorldRules?.summary?.highRiskCount || 0),
+    focusTimelineEvents: Number(continuityTimeline?.summary?.focusEvents || 0),
+    focusTimelineTasks: Number(continuityTimeline?.summary?.focusTasks || 0),
+    timeConflicts: Number(continuityTimeline?.summary?.timeConflictCount || 0),
+    causalityGaps: Number(continuityTimeline?.summary?.causalityGapCount || 0),
   };
 
   const generatedPrompt = useMemo(() => buildPreWritingPrompt({
@@ -338,6 +358,10 @@ const ContinuityCockpitPage: React.FC = () => {
     relatedForeshadowings,
     focusForeshadowingTasks,
     relatedTimelineEvents,
+    focusWorldTasks,
+    focusWorldRules,
+    focusTimelineTasks,
+    focusTimelineEvents,
     manualGoal,
     manualForbidden,
     manualNotes,
@@ -599,7 +623,21 @@ const ContinuityCockpitPage: React.FC = () => {
         patchTask: patchForeshadowingTask,
         setNotice,
       })}
-      {!['overview', 'focus', 'characters', 'relations', 'foreshadowing'].includes(activeTab) && renderFutureTab(activeTab)}
+      {activeTab === 'world' && renderWorldTab({
+        data: continuityWorldRules,
+        chapters: sortedChapters,
+        characters: continuityCharacters?.groups?.allCharacters || [],
+        relationships: continuityRelationships?.groups?.allRelationships || [],
+        setNotice,
+      })}
+      {activeTab === 'timeline' && renderTimelineTab({
+        data: continuityTimeline,
+        chapters: sortedChapters,
+        characters: continuityCharacters?.groups?.allCharacters || [],
+        relationships: continuityRelationships?.groups?.allRelationships || [],
+        setNotice,
+      })}
+      {['precheck', 'postupdate'].includes(activeTab) && renderFutureTab(activeTab)}
     </div>
   );
 };
@@ -625,7 +663,7 @@ function renderOverview(input: any) {
   ];
   return (
     <div>
-      <div style={styles.notice}>当前风险统计为轻量统计：Phase 7.2 人物状态与关系统计来自连续性 API；伏笔、时间线和质量风险仍使用已加载摘要数据。</div>
+      <div style={styles.notice}>当前风险统计为轻量统计：人物状态、关系、伏笔、世界观、时间线统计均来自连续性 API。</div>
       <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={label} value={value} />)}</section>
       <section style={styles.twoColumns}>
         <Panel title="当前创作全貌">
@@ -654,6 +692,16 @@ function renderFocus(input: any) {
   const relationshipNotes = input.relatedRelationships.length
     ? input.relatedRelationships.map((r: any) => `${r.sourceCharacterName} - ${r.targetCharacterName}：${r.publicRelation || EMPTY}，冲突 ${r.conflictScore}`).join('；')
     : '暂无本章关系数据，Phase 7.2 可通过关系网 Tab 手动补全。';
+  const worldNotes = input.relatedWorldTasks?.length
+    ? input.relatedWorldTasks.map((t: any) => `${t.ruleTitle || t.ruleId}: ${t.instruction || t.reason || EMPTY}`).join('；')
+    : input.relatedWorldRules?.length
+      ? input.relatedWorldRules.map((r: any) => r.title).join('；')
+      : '暂无本章世界观规则数据，Phase 7.4 可通过世界观 Tab 手动补全。';
+  const timelineNotes = input.relatedTimelineTasks?.length
+    ? input.relatedTimelineTasks.map((t: any) => `${t.eventTitle || t.eventId}: ${t.instruction || t.reason || EMPTY}`).join('；')
+    : input.relatedTimelineEvents?.length
+      ? input.relatedTimelineEvents.map((e: any) => e.title || e.id).join('；')
+      : '暂无本章时间线数据，Phase 7.4 可通过时间线 Tab 手动补全。';
   const foreshadowingNotes = input.relatedForeshadowingTasks?.length
     ? groupTaskNotes(input.relatedForeshadowingTasks)
     : ch && input.relatedForeshadowings.length
@@ -1182,6 +1230,217 @@ function RelationshipCard({ relationship, input }: { relationship: any; input: a
   );
 }
 
+
+function renderWorldTab(input: any) {
+  const data = input.data || {};
+  const summary = data.summary || {};
+  const groups = data.groups || {};
+  const allRules = groups.allRules || [];
+  const cards = [
+    ['总规则数', summary.totalRules ?? 0],
+    ['当前章相关规则', summary.focusRules ?? 0],
+    ['当前章规则任务', summary.focusTasks ?? 0],
+    ['全书规则', summary.fullBookRules ?? 0],
+    ['卷内规则', summary.volumeRules ?? 0],
+    ['章节规则', summary.chapterRules ?? 0],
+    ['待确认规则', summary.pendingReviewCount ?? 0],
+    ['冲突规则', summary.conflictCount ?? 0],
+    ['高风险规则', summary.highRiskCount ?? 0],
+    ['locked 规则', summary.lockedCount ?? 0],
+  ];
+  return (
+    <div>
+      <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={String(label)} value={String(value)} />)}</section>
+      <section style={styles.twoColumns}>
+        <Panel title="当前章节创作辅助区">
+          {(groups.focusRules || []).length ? groups.focusRules.map((rule: any) => <WorldRuleCard key={rule.id} rule={rule} input={input} />) : (
+            <p style={styles.empty}>暂无本章世界观规则数据，Phase 7.4 可通过世界观 Tab 手动补全。</p>
+          )}
+        </Panel>
+        <Panel title="世界观创作注意">
+          <Line label="本章必须遵守" value={(groups.focusRules || []).filter((r: any) => r.status === 'established' || r.status === 'active').map((r: any) => r.title).join(' / ') || EMPTY} />
+          <Line label="本章规则冲突" value={(groups.conflictRules || []).length ? groups.conflictRules.map((r: any) => r.title).join(' / ') : EMPTY} />
+        </Panel>
+      </section>
+      <section style={styles.detailGrid}>
+        <Panel title="结构化详情区">
+          <Group title="本章必须处理" items={groups.focusTasks || groups.focusRules || []} render={(item: any) => {
+            if (item.ruleId) return <WorldRuleTaskCard task={item} input={input} />;
+            return <WorldRuleCard rule={item} input={input} />;
+          }} />
+          <Group title="当前章相关规则" items={groups.focusRules || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="活跃规则" items={groups.activeRules || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="冲突规则" items={groups.conflictRules || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="高风险规则" items={groups.highRisk || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="待确认规则" items={groups.pendingReview || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="全书规则" items={groups.fullBookRules || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="卷内规则" items={groups.volumeRules || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="章节规则" items={groups.chapterRules || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="最近变化规则" items={groups.changedRecently || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+          <Group title="全部规则" items={allRules} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
+        </Panel>
+      </section>
+    </div>
+  );
+}
+
+function WorldRuleCard({ rule, input }: { rule: any; input: any }) {
+  const isDerived = rule.derived || rule.source === 'radar_derived';
+  return (
+    <details style={styles.itemCard}>
+      <summary style={styles.itemSummary}>
+        <strong>{rule.title || EMPTY}</strong>
+        <span>{rule.ruleType || EMPTY}</span>
+        <span>{rule.scope || EMPTY}</span>
+        <span>{rule.status || EMPTY}</span>
+        <span>{rule.riskLevel || EMPTY}{rule.locked ? ' / locked' : ''}{isDerived ? ' / 雷达推导' : ''}</span>
+      </summary>
+      <Line label="规则内容" value={rule.content || EMPTY} />
+      <Line label="解释" value={rule.explanation || EMPTY} />
+      <Line label="限制" value={rule.limitation || EMPTY} />
+      <Line label="违背风险" value={rule.contradictionRisk || EMPTY} />
+      <Line label="首次建立章节" value={rule.firstEstablishedChapterId || EMPTY} />
+      <Line label="最近验证章节" value={rule.lastVerifiedChapterId || EMPTY} />
+      <Line label="关联人物" value={(rule.relatedCharacterIds || []).join(' / ') || EMPTY} />
+      <Line label="关联关系" value={(rule.relatedRelationshipIds || []).join(' / ') || EMPTY} />
+      <Line label="关联伏笔" value={(rule.relatedForeshadowingIds || []).join(' / ') || EMPTY} />
+      <Line label="关联时间线事件" value={(rule.relatedTimelineEventIds || []).join(' / ') || EMPTY} />
+      <Line label="规则事件" value={(rule.latestEvents || []).length ? rule.latestEvents.map((e: any) => `${e.eventType}:${e.summary || EMPTY}`).join(' / ') : EMPTY} />
+      <Line label="来源" value={rule.source || EMPTY} />
+      <Line label="更新时间" value={rule.updatedAt || EMPTY} />
+      {!rule.legacy && (
+        <div style={styles.inlineActions}>
+          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.setNotice(`世界观规则审核更新：${status}（API 待接入）`)}>{status}</button>)}
+        </div>
+      )}
+    </details>
+  );
+}
+
+function WorldRuleTaskCard({ task, input }: { task: any; input: any }) {
+  const isDerived = task.derived || task.source === 'radar_derived';
+  return (
+    <div style={styles.itemCard}>
+      <Line label="关联规则" value={task.ruleTitle || task.ruleId || EMPTY} />
+      <Line label="任务" value={`${task.taskType || EMPTY} / ${task.priority || EMPTY} / ${task.status || EMPTY}`} />
+      <Line label="写作指令" value={task.instruction || EMPTY} />
+      <Line label="原因" value={task.reason || EMPTY} />
+      <Line label="审核" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}${isDerived ? ' / 雷达推导' : ''}`} />
+      {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
+    </div>
+  );
+}
+
+
+function renderTimelineTab(input: any) {
+  const data = input.data || {};
+  const summary = data.summary || {};
+  const groups = data.groups || {};
+  const allEvents = groups.allEvents || [];
+  const legacyEvents = groups.legacyTimelineEvents || [];
+  const cards = [
+    ['总事件数', summary.totalEvents ?? 0],
+    ['当前章相关事件', summary.focusEvents ?? 0],
+    ['当前章时间线任务', summary.focusTasks ?? 0],
+    ['客观故事时间', summary.storyTimeEvents ?? 0],
+    ['叙事呈现事件', summary.narrativeOrderEvents ?? 0],
+    ['因果链事件', summary.causalityEvents ?? 0],
+    ['因果链路', summary.causalityLinks ?? 0],
+    ['时间冲突', summary.timeConflictCount ?? 0],
+    ['因果缺口', summary.causalityGapCount ?? 0],
+    ['待确认事件', summary.pendingReviewCount ?? 0],
+    ['高风险事件', summary.highRiskCount ?? 0],
+    ['locked 事件', summary.lockedCount ?? 0],
+  ];
+  return (
+    <div>
+      <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={String(label)} value={String(value)} />)}</section>
+      <section style={styles.twoColumns}>
+        <Panel title="当前章节创作辅助区">
+          {(groups.focusEvents || []).length ? groups.focusEvents.map((event: any) => <TimelineEventCard key={event.id} event={event} input={input} />) : (
+            <p style={styles.empty}>暂无本章时间线数据，Phase 7.4 可通过时间线 Tab 手动补全。</p>
+          )}
+        </Panel>
+        <Panel title="时间线创作注意">
+          <Line label="客观故事时间" value={(groups.storyTimeLine || []).slice(0, 3).map((e: any) => e.title).join(' / ') || EMPTY} />
+          <Line label="叙事呈现顺序" value={(groups.narrativeOrderLine || []).slice(0, 3).map((e: any) => e.title).join(' / ') || EMPTY} />
+          <Line label="时间顺序冲突" value={(groups.timeConflicts || []).length ? groups.timeConflicts.map((e: any) => e.title).join(' / ') : EMPTY} />
+          <Line label="因果缺口" value={(groups.causalityGaps || []).length ? `${groups.causalityGaps.length} 个事件缺少因果链` : EMPTY} />
+        </Panel>
+      </section>
+      <section style={styles.detailGrid}>
+        <Panel title="结构化详情区 - 三线模型">
+          <Group title="本章必须处理" items={groups.focusTasks || groups.focusEvents || []} render={(item: any) => {
+            if (item.eventId) return <TimelineTaskCard task={item} input={input} />;
+            return <TimelineEventCard event={item} input={input} />;
+          }} />
+          <Group title="当前章相关事件" items={groups.focusEvents || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="客观故事时间线（第一线）" items={groups.storyTimeLine || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="叙事呈现顺序线（第二线）" items={groups.narrativeOrderLine || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="因果链 / 信息链（第三线）" items={groups.causalityLine || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="时间冲突" items={groups.timeConflicts || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="因果缺口" items={groups.causalityGaps || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="高风险事件" items={groups.highRisk || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="待确认事件" items={groups.pendingReview || []} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="legacy 时间线，只读兼容" items={legacyEvents} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+          <Group title="全部事件" items={allEvents} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
+        </Panel>
+      </section>
+    </div>
+  );
+}
+
+function TimelineEventCard({ event, input }: { event: any; input: any }) {
+  const isDerived = event.derived || event.source === 'radar_derived';
+  const isLegacy = event.legacy;
+  return (
+    <details style={styles.itemCard}>
+      <summary style={styles.itemSummary}>
+        <strong>{event.title || EMPTY}</strong>
+        <span>{event.lineType || EMPTY}</span>
+        <span>{event.status || EMPTY}</span>
+        <span>{event.riskLevel || EMPTY}{event.locked ? ' / locked' : ''}{isDerived ? ' / 雷达推导' : ''}{isLegacy ? ' / legacy' : ''}</span>
+      </summary>
+      <Line label="事件摘要" value={event.summary || EMPTY} />
+      <Line label="lineType" value={event.lineType || EMPTY} />
+      <Line label="所属章节" value={event.chapterId || EMPTY} />
+      <Line label="客观故事时间" value={event.storyTimeText || EMPTY} />
+      <Line label="故事时间顺序" value={String(event.storyTimeOrder ?? '')} />
+      <Line label="叙事呈现顺序" value={String(event.narrativeOrder ?? '')} />
+      <Line label="因果顺序" value={String(event.causalityOrder ?? '')} />
+      <Line label="地点" value={event.location || EMPTY} />
+      <Line label="参与人物" value={(event.participants || []).map((p: any) => p.name || p.id).join(' / ') || EMPTY} />
+      <Line label="关联关系" value={(event.relatedRelationshipIds || []).join(' / ') || EMPTY} />
+      <Line label="关联伏笔" value={(event.relatedForeshadowingIds || []).join(' / ') || EMPTY} />
+      <Line label="关联世界观规则" value={(event.relatedWorldRuleIds || []).join(' / ') || EMPTY} />
+      <Line label="读者已知状态" value={event.readerKnownState || EMPTY} />
+      <Line label="角色已知状态" value={event.characterKnownState || EMPTY} />
+      <Line label="前因链路" value={(event.incomingLinks || []).length ? event.incomingLinks.map((l: any) => `${l.linkType}:${l.summary || EMPTY}`).join(' / ') : EMPTY} />
+      <Line label="后果链路" value={(event.outgoingLinks || []).length ? event.outgoingLinks.map((l: any) => `${l.linkType}:${l.summary || EMPTY}`).join(' / ') : EMPTY} />
+      <Line label="来源" value={event.source || EMPTY} />
+      <Line label="更新时间" value={event.updatedAt || EMPTY} />
+      {!isLegacy && !isDerived && (
+        <div style={styles.inlineActions}>
+          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.setNotice(`时间线事件审核更新：${status}（API 待接入）`)}>{status}</button>)}
+        </div>
+      )}
+    </details>
+  );
+}
+
+function TimelineTaskCard({ task, input }: { task: any; input: any }) {
+  const isDerived = task.derived || task.source === 'radar_derived';
+  return (
+    <div style={styles.itemCard}>
+      <Line label="关联事件" value={task.eventTitle || task.eventId || EMPTY} />
+      <Line label="任务" value={`${task.taskType || EMPTY} / ${task.priority || EMPTY} / ${task.status || EMPTY}`} />
+      <Line label="写作指令" value={task.instruction || EMPTY} />
+      <Line label="原因" value={task.reason || EMPTY} />
+      <Line label="审核" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}${isDerived ? ' / 雷达推导' : ''}`} />
+      {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
+    </div>
+  );
+}
 function renderFutureTab(tab: TabKey) {
   const phaseMap: Record<string, string> = {
     foreshadowing: 'Phase 7.3 将接入伏笔雷达与生命周期。',
