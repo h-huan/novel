@@ -8,7 +8,14 @@ const RELATION_TYPES = new Set(['ally', 'enemy', 'family', 'mentor', 'disciple',
 const READER_STATES = new Set(['unknown', 'hinted', 'known', 'misdirected']);
 const CHARACTER_KNOWN_STATES = new Set(['unknown', 'partial', 'known', 'misunderstood']);
 const RELATION_EVENT_TYPES = new Set(['established', 'deepened', 'conflicted', 'betrayed', 'reconciled', 'revealed', 'hidden', 'weakened', 'strengthened', 'other']);
-const SOURCES = new Set(['manual', 'ai', 'chapter_extract']);
+const FORESHADOWING_LEVELS = new Set(['full_book', 'volume', 'chapter']);
+const FORESHADOWING_STATUSES = new Set(['planned', 'buried', 'deepened', 'misdirected', 'recovery_due', 'recovered', 'overdue', 'conflict', 'abandoned']);
+const FORESHADOWING_RISK_LEVELS = new Set(['none', 'low', 'medium', 'high', 'critical']);
+const FORESHADOWING_EVENT_TYPES = new Set(['planned', 'buried', 'deepened', 'misdirected', 'hinted', 'recovered', 'delayed', 'cancelled', 'conflict', 'other']);
+const FORESHADOWING_TASK_TYPES = new Set(['bury', 'deepen', 'misdirect', 'recover', 'delay', 'check', 'avoid_contradiction']);
+const TASK_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
+const TASK_STATUSES = new Set(['todo', 'doing', 'done', 'skipped', 'overdue', 'conflict']);
+const SOURCES = new Set(['manual', 'ai', 'chapter_extract', 'legacy_import']);
 
 @Injectable()
 export class ContinuityService {
@@ -91,6 +98,208 @@ export class ContinuityService {
         allRelationships: responseItems,
       },
     };
+  }
+
+  getForeshadowings(projectId: string, focusChapterId?: string) {
+    const focusChapter = this.getChapter(projectId, focusChapterId);
+    const threads = this.allForeshadowingThreads(projectId);
+    const events = this.allForeshadowingEvents(projectId);
+    const tasks = this.allForeshadowingTasks(projectId);
+    const legacy = this.allLegacyForeshadowings(projectId);
+    const currentChapterIndex = focusChapter ? Number(focusChapter.chapter_index || focusChapter.chapterIndex || 0) : 0;
+    const responseThreads = threads.map(thread => this.foreshadowingToResponse(thread, events, tasks, focusChapter));
+    const legacyThreads = legacy.map(item => this.legacyForeshadowingToResponse(item, currentChapterIndex, focusChapter));
+    const allThreads = [...responseThreads, ...legacyThreads];
+    const focusTasks = [
+      ...tasks.filter(task => task.chapter_id === focusChapter?.id).map(task => this.taskToResponse(task, responseThreads.find(t => t.id === task.thread_id))),
+      ...legacyThreads.flatMap(thread => thread.focusTasks || []),
+    ];
+    const recoveryDue = allThreads.filter(thread => this.isRecoveryDue(thread, focusChapter, currentChapterIndex));
+    const overdue = allThreads.filter(thread => this.isOverdue(thread, focusChapter, currentChapterIndex));
+    const highRisk = allThreads.filter(thread => ['high', 'critical'].includes(thread.riskLevel) || thread.status === 'conflict');
+    const pendingReview = allThreads.filter(thread => thread.reviewStatus === 'pending')
+      .concat(responseThreads.filter(thread => (thread.latestEvents || []).some((event: any) => event.reviewStatus === 'pending')));
+
+    return {
+      success: true,
+      focusChapter: focusChapter || null,
+      summary: {
+        totalThreads: allThreads.length,
+        focusTasks: focusTasks.length,
+        fullBookThreads: allThreads.filter(t => t.level === 'full_book').length,
+        volumeThreads: allThreads.filter(t => t.level === 'volume').length,
+        chapterThreads: allThreads.filter(t => t.level === 'chapter').length,
+        pendingReviewCount: pendingReview.length + tasks.filter(task => task.review_status === 'pending').length,
+        overdueCount: overdue.length,
+        recoveryDueCount: recoveryDue.length,
+        highRiskCount: highRisk.length,
+        lockedCount: allThreads.filter(t => t.locked).length,
+      },
+      groups: {
+        focusTasks,
+        recoveryDue,
+        overdue,
+        highRisk,
+        pendingReview,
+        fullBookThreads: allThreads.filter(t => t.level === 'full_book'),
+        volumeThreads: allThreads.filter(t => t.level === 'volume'),
+        chapterThreads: allThreads.filter(t => t.level === 'chapter'),
+        recovered: allThreads.filter(t => t.status === 'recovered'),
+        allThreads,
+      },
+    };
+  }
+
+  createForeshadowingThread(projectId: string, body: any) {
+    if (!String(body?.title || '').trim()) throw new BadRequestException('title is required');
+    const level = this.ensureEnum(body.level || 'chapter', FORESHADOWING_LEVELS, 'level');
+    const now = new Date().toISOString();
+    const id = uuid();
+    this.database.prepare(`
+      INSERT INTO foreshadowing_threads (
+        id, project_id, legacy_foreshadowing_id, title, level, volume_index, status, summary,
+        reader_understanding, true_meaning, reveal_strategy, risk_level, risk_reason,
+        planned_bury_chapter_id, actual_bury_chapter_id, planned_deepen_chapter_ids,
+        planned_misdirect_chapter_ids, recovery_window_start_chapter_id, recovery_window_end_chapter_id,
+        actual_recovery_chapter_id, related_character_ids, related_relationship_ids,
+        related_timeline_event_ids, related_world_rule_ids, review_status, locked, source,
+        confidence, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, projectId, body.legacyForeshadowingId || null, String(body.title).trim(), level,
+      numberOrNull(body.volumeIndex), 'planned', body.summary || '', body.readerUnderstanding || '',
+      body.trueMeaning || '', body.revealStrategy || '', this.ensureEnum(body.riskLevel || 'none', FORESHADOWING_RISK_LEVELS, 'riskLevel'),
+      body.riskReason || '', body.plannedBuryChapterId || null, body.actualBuryChapterId || null,
+      JSON.stringify(body.plannedDeepenChapterIds || []), JSON.stringify(body.plannedMisdirectChapterIds || []),
+      body.recoveryWindowStartChapterId || null, body.recoveryWindowEndChapterId || null,
+      body.actualRecoveryChapterId || null, JSON.stringify(body.relatedCharacterIds || []),
+      JSON.stringify(body.relatedRelationshipIds || []), JSON.stringify(body.relatedTimelineEventIds || []),
+      JSON.stringify(body.relatedWorldRuleIds || []), 'pending', 0, this.normalizeSource(body.source),
+      numberOrDefault(body.confidence, 1), now, now,
+    );
+    return this.foreshadowingById(projectId, id);
+  }
+
+  updateForeshadowingThread(projectId: string, threadId: string, body: any) {
+    const existing: any = this.foreshadowingRawById(projectId, threadId);
+    const normalizedSource = body.source !== undefined ? this.normalizeSource(body.source) : undefined;
+    if (Number(existing.locked) === 1 && normalizedSource === 'ai') throw new ConflictException('Cannot let AI overwrite locked foreshadowing');
+    const coreFields = ['title', 'summary', 'readerUnderstanding', 'trueMeaning', 'revealStrategy', 'riskLevel', 'riskReason', 'status', 'plannedBuryChapterId', 'actualBuryChapterId', 'recoveryWindowStartChapterId', 'recoveryWindowEndChapterId', 'actualRecoveryChapterId'];
+    if (Number(existing.locked) === 1 && !body.forceUnlock && coreFields.some(field => body[field] !== undefined)) {
+      throw new ConflictException('Cannot modify locked foreshadowing core fields without forceUnlock=true');
+    }
+    const nextReviewStatus = body.reviewStatus !== undefined
+      ? this.ensureEnum(body.reviewStatus, REVIEW_STATUSES, 'reviewStatus')
+      : existing.review_status;
+    if (body.locked === true && nextReviewStatus !== 'confirmed') throw new BadRequestException('Only confirmed foreshadowings can be locked');
+    const fields: Record<string, unknown> = {};
+    const map: Record<string, string> = {
+      title: 'title', level: 'level', volumeIndex: 'volume_index', status: 'status', summary: 'summary',
+      readerUnderstanding: 'reader_understanding', trueMeaning: 'true_meaning', revealStrategy: 'reveal_strategy',
+      riskLevel: 'risk_level', riskReason: 'risk_reason', plannedBuryChapterId: 'planned_bury_chapter_id',
+      actualBuryChapterId: 'actual_bury_chapter_id', recoveryWindowStartChapterId: 'recovery_window_start_chapter_id',
+      recoveryWindowEndChapterId: 'recovery_window_end_chapter_id', actualRecoveryChapterId: 'actual_recovery_chapter_id',
+      reviewStatus: 'review_status', locked: 'locked', source: 'source',
+    };
+    for (const [camel, column] of Object.entries(map)) {
+      if (body[camel] === undefined) continue;
+      if (camel === 'level') fields[column] = this.ensureEnum(body[camel], FORESHADOWING_LEVELS, camel);
+      else if (camel === 'status') fields[column] = this.ensureEnum(body[camel], FORESHADOWING_STATUSES, camel);
+      else if (camel === 'riskLevel') fields[column] = this.ensureEnum(body[camel], FORESHADOWING_RISK_LEVELS, camel);
+      else if (camel === 'reviewStatus') fields[column] = nextReviewStatus;
+      else if (camel === 'locked') fields[column] = body[camel] ? 1 : 0;
+      else if (camel === 'source') fields[column] = this.normalizeSource(body[camel]);
+      else fields[column] = body[camel];
+    }
+    if (body.relatedCharacterIds !== undefined) fields.related_character_ids = JSON.stringify(body.relatedCharacterIds || []);
+    if (body.relatedRelationshipIds !== undefined) fields.related_relationship_ids = JSON.stringify(body.relatedRelationshipIds || []);
+    if (body.relatedTimelineEventIds !== undefined) fields.related_timeline_event_ids = JSON.stringify(body.relatedTimelineEventIds || []);
+    if (body.plannedDeepenChapterIds !== undefined) fields.planned_deepen_chapter_ids = JSON.stringify(body.plannedDeepenChapterIds || []);
+    if (body.plannedMisdirectChapterIds !== undefined) fields.planned_misdirect_chapter_ids = JSON.stringify(body.plannedMisdirectChapterIds || []);
+    this.updateRow('foreshadowing_threads', projectId, threadId, fields);
+    return this.foreshadowingById(projectId, threadId);
+  }
+
+  createForeshadowingEvent(projectId: string, threadId: string, body: any) {
+    const thread: any = this.foreshadowingRawById(projectId, threadId);
+    const source = this.normalizeSource(body.source);
+    if (Number(thread.locked) === 1 && source === 'ai') throw new ConflictException('Cannot let AI add event to locked foreshadowing');
+    const now = new Date().toISOString();
+    const eventType = this.ensureEnum(body.eventType || 'other', FORESHADOWING_EVENT_TYPES, 'eventType');
+    const id = uuid();
+    this.database.prepare(`
+      INSERT INTO foreshadowing_lifecycle_events (
+        id, project_id, thread_id, chapter_id, event_type, summary, reader_effect, true_effect,
+        evidence, impact, before_state_json, after_state_json, review_status, source, confidence,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, projectId, threadId, body.chapterId || null, eventType, body.summary || '',
+      body.readerEffect || '', body.trueEffect || '', body.evidence || '', body.impact || '',
+      JSON.stringify(body.beforeState || {}), JSON.stringify(body.afterState || {}), 'pending',
+      source, numberOrDefault(body.confidence, 1), now, now,
+    );
+    if (Number(thread.locked) !== 1) {
+      const fields: Record<string, unknown> = {};
+      if (eventType === 'buried') fields.actual_bury_chapter_id = body.chapterId || thread.actual_bury_chapter_id;
+      if (eventType === 'recovered') {
+        fields.actual_recovery_chapter_id = body.chapterId || thread.actual_recovery_chapter_id;
+        fields.status = 'recovered';
+      }
+      if (eventType === 'deepened') fields.status = 'deepened';
+      if (eventType === 'misdirected') fields.status = 'misdirected';
+      if (eventType === 'conflict') fields.status = 'conflict';
+      this.updateRow('foreshadowing_threads', projectId, threadId, fields);
+    }
+    return this.database.prepare('SELECT * FROM foreshadowing_lifecycle_events WHERE project_id = ? AND id = ?').get(projectId, id);
+  }
+
+  createForeshadowingTask(projectId: string, body: any) {
+    if (!body?.threadId || !body?.chapterId) throw new BadRequestException('threadId and chapterId are required');
+    this.foreshadowingRawById(projectId, body.threadId);
+    const chapter = this.getChapter(projectId, body.chapterId);
+    if (!chapter) throw new BadRequestException('chapterId must reference an existing chapter');
+    const now = new Date().toISOString();
+    const id = uuid();
+    this.database.prepare(`
+      INSERT INTO foreshadowing_chapter_tasks (
+        id, project_id, thread_id, chapter_id, task_type, priority, instruction, reason,
+        status, review_status, source, locked, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, projectId, body.threadId, body.chapterId,
+      this.ensureEnum(body.taskType || 'check', FORESHADOWING_TASK_TYPES, 'taskType'),
+      this.ensureEnum(body.priority || 'medium', TASK_PRIORITIES, 'priority'),
+      body.instruction || '', body.reason || '', 'todo', 'pending', this.normalizeSource(body.source), 0, now, now,
+    );
+    return this.database.prepare('SELECT * FROM foreshadowing_chapter_tasks WHERE project_id = ? AND id = ?').get(projectId, id);
+  }
+
+  updateForeshadowingTask(projectId: string, taskId: string, body: any) {
+    const existing: any = this.foreshadowingTaskRawById(projectId, taskId);
+    const normalizedSource = body.source !== undefined ? this.normalizeSource(body.source) : undefined;
+    if (Number(existing.locked) === 1 && normalizedSource === 'ai') throw new ConflictException('Cannot let AI overwrite locked foreshadowing task');
+    const nextReviewStatus = body.reviewStatus !== undefined
+      ? this.ensureEnum(body.reviewStatus, REVIEW_STATUSES, 'reviewStatus')
+      : existing.review_status;
+    if (body.locked === true && nextReviewStatus !== 'confirmed') throw new BadRequestException('Only confirmed foreshadowing tasks can be locked');
+    const fields: Record<string, unknown> = {};
+    const map: Record<string, string> = {
+      taskType: 'task_type', priority: 'priority', instruction: 'instruction', reason: 'reason',
+      status: 'status', reviewStatus: 'review_status', source: 'source', locked: 'locked',
+    };
+    for (const [camel, column] of Object.entries(map)) {
+      if (body[camel] === undefined) continue;
+      if (camel === 'taskType') fields[column] = this.ensureEnum(body[camel], FORESHADOWING_TASK_TYPES, camel);
+      else if (camel === 'priority') fields[column] = this.ensureEnum(body[camel], TASK_PRIORITIES, camel);
+      else if (camel === 'status') fields[column] = this.ensureEnum(body[camel], TASK_STATUSES, camel);
+      else if (camel === 'reviewStatus') fields[column] = nextReviewStatus;
+      else if (camel === 'source') fields[column] = this.normalizeSource(body[camel]);
+      else if (camel === 'locked') fields[column] = body[camel] ? 1 : 0;
+      else fields[column] = body[camel];
+    }
+    this.updateRow('foreshadowing_chapter_tasks', projectId, taskId, fields);
+    return this.database.prepare('SELECT * FROM foreshadowing_chapter_tasks WHERE project_id = ? AND id = ?').get(projectId, taskId);
   }
 
   createCharacterState(projectId: string, body: any) {
@@ -254,6 +463,192 @@ export class ContinuityService {
       `).run(body.chapterId || null, body.summary || '', now, projectId, relationshipId);
     }
     return this.database.prepare('SELECT * FROM character_relationship_events WHERE project_id = ? AND id = ?').get(projectId, id);
+  }
+
+  private allForeshadowingThreads(projectId: string): any[] {
+    return this.database.prepare('SELECT * FROM foreshadowing_threads WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as any[];
+  }
+
+  private allForeshadowingEvents(projectId: string): any[] {
+    return this.database.prepare('SELECT * FROM foreshadowing_lifecycle_events WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as any[];
+  }
+
+  private allForeshadowingTasks(projectId: string): any[] {
+    return this.database.prepare('SELECT * FROM foreshadowing_chapter_tasks WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as any[];
+  }
+
+  private allLegacyForeshadowings(projectId: string): any[] {
+    return this.database.prepare('SELECT * FROM foreshadowings WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as any[];
+  }
+
+  private foreshadowingRawById(projectId: string, threadId: string) {
+    const row = this.database.prepare('SELECT * FROM foreshadowing_threads WHERE project_id = ? AND id = ?').get(projectId, threadId);
+    if (!row) throw new NotFoundException(`Foreshadowing thread ${threadId} not found`);
+    return row;
+  }
+
+  private foreshadowingTaskRawById(projectId: string, taskId: string) {
+    const row = this.database.prepare('SELECT * FROM foreshadowing_chapter_tasks WHERE project_id = ? AND id = ?').get(projectId, taskId);
+    if (!row) throw new NotFoundException(`Foreshadowing task ${taskId} not found`);
+    return row;
+  }
+
+  private foreshadowingById(projectId: string, threadId: string) {
+    const events = this.allForeshadowingEvents(projectId);
+    const tasks = this.allForeshadowingTasks(projectId);
+    return this.foreshadowingToResponse(this.foreshadowingRawById(projectId, threadId), events, tasks, null);
+  }
+
+  private foreshadowingToResponse(row: any, events: any[], tasks: any[], focusChapter: any | null) {
+    const latestEvents = events.filter(event => event.thread_id === row.id).map(event => ({
+      id: event.id,
+      chapterId: event.chapter_id,
+      eventType: event.event_type,
+      summary: event.summary || '',
+      readerEffect: event.reader_effect || '',
+      trueEffect: event.true_effect || '',
+      evidence: event.evidence || '',
+      impact: event.impact || '',
+      reviewStatus: event.review_status,
+      source: event.source,
+      updatedAt: event.updated_at,
+    }));
+    const focusTasks = tasks.filter(task => task.thread_id === row.id && (!focusChapter || task.chapter_id === focusChapter.id)).map(task => this.taskToResponse(task));
+    return {
+      id: row.id,
+      title: row.title,
+      level: row.level,
+      volumeIndex: row.volume_index,
+      status: row.status,
+      summary: row.summary || '',
+      readerUnderstanding: row.reader_understanding || '',
+      trueMeaning: row.true_meaning || '',
+      revealStrategy: row.reveal_strategy || '',
+      riskLevel: row.risk_level || 'none',
+      riskReason: row.risk_reason || '',
+      plannedBuryChapterId: row.planned_bury_chapter_id || null,
+      actualBuryChapterId: row.actual_bury_chapter_id || null,
+      plannedDeepenChapterIds: parseJson(row.planned_deepen_chapter_ids, []),
+      plannedMisdirectChapterIds: parseJson(row.planned_misdirect_chapter_ids, []),
+      recoveryWindowStartChapterId: row.recovery_window_start_chapter_id || null,
+      recoveryWindowEndChapterId: row.recovery_window_end_chapter_id || null,
+      actualRecoveryChapterId: row.actual_recovery_chapter_id || null,
+      relatedCharacterIds: parseJson(row.related_character_ids, []),
+      relatedRelationshipIds: parseJson(row.related_relationship_ids, []),
+      relatedTimelineEventIds: parseJson(row.related_timeline_event_ids, []),
+      reviewStatus: row.review_status,
+      locked: Number(row.locked) === 1,
+      source: row.source || 'manual',
+      updatedAt: row.updated_at,
+      latestEvents,
+      focusTasks,
+      legacy: false,
+    };
+  }
+
+  private taskToResponse(task: any, thread?: any) {
+    return {
+      id: task.id,
+      threadId: task.thread_id,
+      threadTitle: thread?.title,
+      chapterId: task.chapter_id,
+      taskType: task.task_type,
+      priority: task.priority,
+      instruction: task.instruction || '',
+      reason: task.reason || '',
+      status: task.status,
+      reviewStatus: task.review_status,
+      source: task.source,
+      locked: Number(task.locked) === 1,
+      updatedAt: task.updated_at,
+    };
+  }
+
+  private legacyForeshadowingToResponse(row: any, currentChapterIndex: number, focusChapter: any | null) {
+    const buryIndex = Number(row.buried_chapter_index || 0);
+    const plannedRecovery = Number(row.planned_recovery_chapter_index || 0);
+    const actualRecovery = Number(row.actual_recovery_chapter_index || 0);
+    const status = actualRecovery ? 'recovered' : plannedRecovery && plannedRecovery < currentChapterIndex ? 'overdue' : (row.status || 'planned');
+    const focusTasks = [];
+    if (focusChapter && buryIndex === currentChapterIndex) {
+      focusTasks.push({
+        id: `legacy-${row.id}-bury`,
+        threadId: `legacy-${row.id}`,
+        threadTitle: row.content,
+        chapterId: focusChapter.id,
+        taskType: 'bury',
+        priority: row.importance >= 4 ? 'high' : 'medium',
+        instruction: row.content,
+        reason: 'legacy foreshadowings buried chapter matches current chapter',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'legacy_import',
+        locked: false,
+        updatedAt: row.updated_at,
+      });
+    }
+    if (focusChapter && plannedRecovery === currentChapterIndex && !actualRecovery) {
+      focusTasks.push({
+        id: `legacy-${row.id}-recover`,
+        threadId: `legacy-${row.id}`,
+        threadTitle: row.content,
+        chapterId: focusChapter.id,
+        taskType: 'recover',
+        priority: 'high',
+        instruction: row.content,
+        reason: 'legacy planned recovery chapter matches current chapter',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'legacy_import',
+        locked: false,
+        updatedAt: row.updated_at,
+      });
+    }
+    return {
+      id: `legacy-${row.id}`,
+      legacyForeshadowingId: row.id,
+      title: row.content || 'legacy foreshadowing',
+      level: row.scope === 'volume' ? 'volume' : row.scope === 'full_book' ? 'full_book' : 'chapter',
+      volumeIndex: row.volume_index,
+      status,
+      summary: row.content || '',
+      readerUnderstanding: '',
+      trueMeaning: '',
+      revealStrategy: '',
+      riskLevel: status === 'overdue' ? 'high' : 'none',
+      riskReason: status === 'overdue' ? 'legacy planned recovery is overdue' : '',
+      plannedBuryChapterId: null,
+      actualBuryChapterId: null,
+      legacyBuryChapterIndex: buryIndex || null,
+      legacyRecoveryChapterIndex: plannedRecovery || null,
+      recoveryWindowStartChapterId: null,
+      recoveryWindowEndChapterId: null,
+      actualRecoveryChapterId: null,
+      relatedCharacterIds: parseJson(row.related_character_ids, []),
+      relatedRelationshipIds: [],
+      relatedTimelineEventIds: [],
+      reviewStatus: 'pending',
+      locked: false,
+      source: 'legacy_import',
+      updatedAt: row.updated_at,
+      latestEvents: [],
+      focusTasks,
+      legacy: true,
+    };
+  }
+
+  private isRecoveryDue(thread: any, focusChapter: any | null, currentChapterIndex: number): boolean {
+    if (thread.status === 'recovery_due') return true;
+    if (thread.legacyRecoveryChapterIndex) return Math.abs(Number(thread.legacyRecoveryChapterIndex) - currentChapterIndex) <= 2 && !thread.actualRecoveryChapterId;
+    if (!focusChapter) return false;
+    return [thread.recoveryWindowStartChapterId, thread.recoveryWindowEndChapterId].includes(focusChapter.id);
+  }
+
+  private isOverdue(thread: any, focusChapter: any | null, currentChapterIndex: number): boolean {
+    if (thread.status === 'overdue') return true;
+    if (thread.legacyRecoveryChapterIndex) return Number(thread.legacyRecoveryChapterIndex) < currentChapterIndex && thread.status !== 'recovered';
+    if (!focusChapter || !thread.recoveryWindowEndChapterId || thread.actualRecoveryChapterId) return false;
+    return thread.recoveryWindowEndChapterId !== focusChapter.id && thread.status !== 'recovered';
   }
 
   private allCharacters(projectId: string): any[] {

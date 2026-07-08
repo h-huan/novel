@@ -17,6 +17,11 @@ export class ContinuityController {
     return this.service.getRelationships(projectId, focusChapterId);
   }
 
+  @Get('foreshadowings')
+  getForeshadowings(@Param('projectId') projectId: string, @Query('focusChapterId') focusChapterId?: string) {
+    return this.service.getForeshadowings(projectId, focusChapterId);
+  }
+
   @Post('character-states')
   createCharacterState(@Param('projectId') projectId: string, @Body() body: any) {
     return this.service.createCharacterState(projectId, body);
@@ -40,5 +45,30 @@ export class ContinuityController {
   @Post('relationships/:relationshipId/events')
   createRelationshipEvent(@Param('projectId') projectId: string, @Param('relationshipId') relationshipId: string, @Body() body: any) {
     return this.service.createRelationshipEvent(projectId, relationshipId, body);
+  }
+
+  @Post('foreshadowings')
+  createForeshadowing(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.createForeshadowingThread(projectId, body);
+  }
+
+  @Patch('foreshadowings/:threadId')
+  updateForeshadowing(@Param('projectId') projectId: string, @Param('threadId') threadId: string, @Body() body: any) {
+    return this.service.updateForeshadowingThread(projectId, threadId, body);
+  }
+
+  @Post('foreshadowings/:threadId/events')
+  createForeshadowingEvent(@Param('projectId') projectId: string, @Param('threadId') threadId: string, @Body() body: any) {
+    return this.service.createForeshadowingEvent(projectId, threadId, body);
+  }
+
+  @Post('foreshadowing-tasks')
+  createForeshadowingTask(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.createForeshadowingTask(projectId, body);
+  }
+
+  @Patch('foreshadowing-tasks/:taskId')
+  updateForeshadowingTask(@Param('projectId') projectId: string, @Param('taskId') taskId: string, @Body() body: any) {
+    return this.service.updateForeshadowingTask(projectId, taskId, body);
   }
 }

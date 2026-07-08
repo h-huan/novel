@@ -55,6 +55,13 @@ const REVIEW_STATUSES = ['pending', 'confirmed', 'ignored', 'conflict'];
 const RELATION_TYPES = ['ally', 'enemy', 'family', 'mentor', 'disciple', 'superior', 'subordinate', 'rival', 'lover_like', 'debt', 'benefit', 'hidden', 'unknown', 'other'];
 const KNOWN_STATES = ['unknown', 'partial', 'known', 'misunderstood'];
 const READER_STATES = ['unknown', 'hinted', 'known', 'misdirected'];
+const FORESHADOWING_LEVELS = ['full_book', 'volume', 'chapter'];
+const FORESHADOWING_STATUSES = ['planned', 'buried', 'deepened', 'misdirected', 'recovery_due', 'recovered', 'overdue', 'conflict', 'abandoned'];
+const FORESHADOWING_RISK_LEVELS = ['none', 'low', 'medium', 'high', 'critical'];
+const FORESHADOWING_EVENT_TYPES = ['planned', 'buried', 'deepened', 'misdirected', 'hinted', 'recovered', 'delayed', 'cancelled', 'conflict', 'other'];
+const FORESHADOWING_TASK_TYPES = ['bury', 'deepen', 'misdirect', 'recover', 'delay', 'check', 'avoid_contradiction'];
+const TASK_PRIORITIES = ['low', 'medium', 'high', 'critical'];
+const TASK_STATUSES = ['todo', 'doing', 'done', 'skipped', 'overdue', 'conflict'];
 
 const defaultStateForm = {
   stateId: '',
@@ -93,6 +100,50 @@ const defaultRelationshipForm = {
   locked: false,
 };
 
+const defaultForeshadowingForm = {
+  threadId: '',
+  title: '',
+  level: 'chapter',
+  volumeIndex: 1,
+  status: 'planned',
+  summary: '',
+  readerUnderstanding: '',
+  trueMeaning: '',
+  revealStrategy: '',
+  riskLevel: 'none',
+  riskReason: '',
+  plannedBuryChapterId: '',
+  actualBuryChapterId: '',
+  plannedDeepenChapterIds: [] as string[],
+  plannedMisdirectChapterIds: [] as string[],
+  recoveryWindowStartChapterId: '',
+  recoveryWindowEndChapterId: '',
+  actualRecoveryChapterId: '',
+  relatedCharacterIds: [] as string[],
+  relatedRelationshipIds: [] as string[],
+  relatedTimelineEventIds: [] as string[],
+  relatedWorldRuleIds: [] as string[],
+  reviewStatus: 'pending',
+  locked: false,
+};
+
+const defaultForeshadowingEventForm = {
+  threadId: '',
+  eventType: 'hinted',
+  summary: '',
+  evidence: '',
+  impact: '',
+};
+
+const defaultForeshadowingTaskForm = {
+  threadId: '',
+  chapterId: '',
+  taskType: 'check',
+  priority: 'medium',
+  instruction: '',
+  reason: '',
+};
+
 const ContinuityCockpitPage: React.FC = () => {
   const { id: projectId = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -112,6 +163,7 @@ const ContinuityCockpitPage: React.FC = () => {
   const [qualityReports, setQualityReports] = useState<any[]>([]);
   const [continuityCharacters, setContinuityCharacters] = useState<any | null>(null);
   const [continuityRelationships, setContinuityRelationships] = useState<any | null>(null);
+  const [continuityForeshadowings, setContinuityForeshadowings] = useState<any | null>(null);
   const [focusChapterId, setFocusChapterId] = useState('');
   const [manualGoal, setManualGoal] = useState('');
   const [manualForbidden, setManualForbidden] = useState('');
@@ -121,6 +173,9 @@ const ContinuityCockpitPage: React.FC = () => {
   const [stateForm, setStateForm] = useState(defaultStateForm);
   const [relationshipForm, setRelationshipForm] = useState(defaultRelationshipForm);
   const [relationshipEventForm, setRelationshipEventForm] = useState({ relationshipId: '', eventType: 'other', summary: '', evidence: '', impact: '' });
+  const [foreshadowingForm, setForeshadowingForm] = useState(defaultForeshadowingForm);
+  const [foreshadowingEventForm, setForeshadowingEventForm] = useState(defaultForeshadowingEventForm);
+  const [foreshadowingTaskForm, setForeshadowingTaskForm] = useState(defaultForeshadowingTaskForm);
 
   const viewKey = `phase7:continuity:${projectId}`;
 
@@ -165,12 +220,14 @@ const ContinuityCockpitPage: React.FC = () => {
     setContinuityLoading(true);
     try {
       const suffix = focusChapterId ? `?focusChapterId=${encodeURIComponent(focusChapterId)}` : '';
-      const [characterRes, relationshipRes] = await Promise.allSettled([
+      const [characterRes, relationshipRes, foreshadowingRes] = await Promise.allSettled([
         api.get(`/projects/${projectId}/continuity/characters${suffix}`),
         api.get(`/projects/${projectId}/continuity/relationships${suffix}`),
+        api.get(`/projects/${projectId}/continuity/foreshadowings${suffix}`),
       ]);
       if (characterRes.status === 'fulfilled') setContinuityCharacters(payload<any>(characterRes.value));
       if (relationshipRes.status === 'fulfilled') setContinuityRelationships(payload<any>(relationshipRes.value));
+      if (foreshadowingRes.status === 'fulfilled') setContinuityForeshadowings(payload<any>(foreshadowingRes.value));
     } catch (err: any) {
       setError(err.message || 'Phase 7.2 连续性数据加载失败');
     } finally {
@@ -220,6 +277,7 @@ const ContinuityCockpitPage: React.FC = () => {
   const relatedTimelineEvents = useMemo(() => findRelatedTimelineEvents(timelineEvents, focusChapter), [timelineEvents, focusChapter]);
   const focusCharacterItems = continuityCharacters?.groups?.focusCharacters || [];
   const focusRelationshipItems = continuityRelationships?.groups?.focusRelationships || [];
+  const focusForeshadowingTasks = continuityForeshadowings?.groups?.focusTasks || [];
   const relatedCharacters = focusCharacterItems.length ? focusCharacterItems : findRelatedCharacters(legacyCharacters, focusChapter, focusOutline);
   const pendingItems = useMemo(() => stateItems.filter(item => ['pending', 'draft', 'needs_review'].includes(item.status)), [stateItems]);
   const reportSearchTexts = useMemo(() => qualityReports.map(report => searchableFields([report.payload, report.summary, report.title, report.issueSummary, report.issue_summary])), [qualityReports]);
@@ -239,8 +297,12 @@ const ContinuityCockpitPage: React.FC = () => {
     targetWords: Number(project?.targetWords ?? project?.target_words ?? 0),
     pendingConfirmations: pendingItems.length
       + Number(continuityCharacters?.summary?.pendingStateCount || 0)
-      + Number(continuityRelationships?.summary?.pendingReviewCount || 0),
-    foreshadowingRisks,
+      + Number(continuityRelationships?.summary?.pendingReviewCount || 0)
+      + Number(continuityForeshadowings?.summary?.pendingReviewCount || 0),
+    foreshadowingRisks: Number(continuityForeshadowings?.summary?.recoveryDueCount || 0)
+      + Number(continuityForeshadowings?.summary?.overdueCount || 0)
+      + Number(continuityForeshadowings?.summary?.highRiskCount || 0)
+      + foreshadowingRisks,
     timelineRisks,
     characterStateRisks: Number(continuityCharacters?.summary?.conflictStateCount || 0)
       + stateItems.filter(item => item.targetType === 'character' || item.target_type === 'character').length
@@ -251,6 +313,10 @@ const ContinuityCockpitPage: React.FC = () => {
     focusRelationships: Number(continuityRelationships?.summary?.focusRelationships || 0),
     highConflictRelationships: Number(continuityRelationships?.summary?.highConflictRelationships || 0),
     hiddenRelationships: Number(continuityRelationships?.summary?.hiddenRelationships || 0),
+    focusForeshadowingTasks: Number(continuityForeshadowings?.summary?.focusTasks || 0),
+    recoveryDueForeshadowings: Number(continuityForeshadowings?.summary?.recoveryDueCount || 0),
+    overdueForeshadowings: Number(continuityForeshadowings?.summary?.overdueCount || 0),
+    highRiskForeshadowings: Number(continuityForeshadowings?.summary?.highRiskCount || 0),
   };
 
   const generatedPrompt = useMemo(() => buildPreWritingPrompt({
@@ -260,11 +326,12 @@ const ContinuityCockpitPage: React.FC = () => {
     relatedCharacters,
     relatedRelationships: focusRelationshipItems,
     relatedForeshadowings,
+    focusForeshadowingTasks,
     relatedTimelineEvents,
     manualGoal,
     manualForbidden,
     manualNotes,
-  }), [project, focusChapter, focusOutline, relatedCharacters, focusRelationshipItems, relatedForeshadowings, relatedTimelineEvents, manualGoal, manualForbidden, manualNotes]);
+  }), [project, focusChapter, focusOutline, relatedCharacters, focusRelationshipItems, relatedForeshadowings, focusForeshadowingTasks, relatedTimelineEvents, manualGoal, manualForbidden, manualNotes]);
 
   const visiblePrompt = focusChapter ? manualPrompt || generatedPrompt : '待创建章节后生成。';
 
@@ -358,6 +425,86 @@ const ContinuityCockpitPage: React.FC = () => {
     await loadContinuity();
   };
 
+  const saveForeshadowingThread = async () => {
+    if (!foreshadowingForm.title.trim()) return setNotice('Please enter foreshadowing title.');
+    const isEditing = Boolean(foreshadowingForm.threadId);
+    const body = {
+      title: foreshadowingForm.title,
+      level: foreshadowingForm.level,
+      volumeIndex: Number(foreshadowingForm.volumeIndex || 1),
+      status: foreshadowingForm.status,
+      summary: foreshadowingForm.summary,
+      readerUnderstanding: foreshadowingForm.readerUnderstanding,
+      trueMeaning: foreshadowingForm.trueMeaning,
+      revealStrategy: foreshadowingForm.revealStrategy,
+      riskLevel: foreshadowingForm.riskLevel,
+      riskReason: foreshadowingForm.riskReason,
+      plannedBuryChapterId: foreshadowingForm.plannedBuryChapterId || undefined,
+      actualBuryChapterId: foreshadowingForm.actualBuryChapterId || undefined,
+      plannedDeepenChapterIds: foreshadowingForm.plannedDeepenChapterIds,
+      plannedMisdirectChapterIds: foreshadowingForm.plannedMisdirectChapterIds,
+      recoveryWindowStartChapterId: foreshadowingForm.recoveryWindowStartChapterId || undefined,
+      recoveryWindowEndChapterId: foreshadowingForm.recoveryWindowEndChapterId || undefined,
+      actualRecoveryChapterId: foreshadowingForm.actualRecoveryChapterId || undefined,
+      relatedCharacterIds: foreshadowingForm.relatedCharacterIds,
+      relatedRelationshipIds: foreshadowingForm.relatedRelationshipIds,
+      relatedTimelineEventIds: foreshadowingForm.relatedTimelineEventIds,
+      relatedWorldRuleIds: foreshadowingForm.relatedWorldRuleIds,
+      source: 'manual',
+    };
+    if (isEditing) await api.patch(`/projects/${projectId}/continuity/foreshadowings/${foreshadowingForm.threadId}`, {
+      ...body,
+      reviewStatus: foreshadowingForm.reviewStatus,
+      locked: foreshadowingForm.reviewStatus === 'confirmed' && foreshadowingForm.locked,
+      forceUnlock: !foreshadowingForm.locked,
+    });
+    else await api.post(`/projects/${projectId}/continuity/foreshadowings`, body);
+    setNotice(isEditing ? 'Foreshadowing thread saved.' : 'Foreshadowing thread created as pending review.');
+    setForeshadowingForm(defaultForeshadowingForm);
+    await loadContinuity();
+  };
+
+  const patchForeshadowingThread = async (thread: any, patch: Record<string, unknown>) => {
+    await api.patch(`/projects/${projectId}/continuity/foreshadowings/${thread.id}`, patch);
+    await loadContinuity();
+  };
+
+  const saveForeshadowingEvent = async () => {
+    if (!foreshadowingEventForm.threadId) return setNotice('Please choose a foreshadowing thread.');
+    await api.post(`/projects/${projectId}/continuity/foreshadowings/${foreshadowingEventForm.threadId}/events`, {
+      chapterId: focusChapter?.id,
+      eventType: foreshadowingEventForm.eventType,
+      summary: foreshadowingEventForm.summary,
+      evidence: foreshadowingEventForm.evidence,
+      impact: foreshadowingEventForm.impact,
+      source: 'manual',
+    });
+    setNotice('Foreshadowing lifecycle event created as pending review.');
+    setForeshadowingEventForm(defaultForeshadowingEventForm);
+    await loadContinuity();
+  };
+
+  const saveForeshadowingTask = async () => {
+    if (!foreshadowingTaskForm.threadId || !foreshadowingTaskForm.chapterId) return setNotice('Please choose thread and chapter for task.');
+    await api.post(`/projects/${projectId}/continuity/foreshadowing-tasks`, {
+      threadId: foreshadowingTaskForm.threadId,
+      chapterId: foreshadowingTaskForm.chapterId,
+      taskType: foreshadowingTaskForm.taskType,
+      priority: foreshadowingTaskForm.priority,
+      instruction: foreshadowingTaskForm.instruction,
+      reason: foreshadowingTaskForm.reason,
+      source: 'manual',
+    });
+    setNotice('Foreshadowing chapter task created as pending review.');
+    setForeshadowingTaskForm(defaultForeshadowingTaskForm);
+    await loadContinuity();
+  };
+
+  const patchForeshadowingTask = async (task: any, patch: Record<string, unknown>) => {
+    await api.patch(`/projects/${projectId}/continuity/foreshadowing-tasks/${task.id}`, patch);
+    await loadContinuity();
+  };
+
   if (loading) return <div style={styles.loading}>加载小说连续性驾驶舱...</div>;
   if (!projectId) return <div style={styles.loading}>请先选择项目。</div>;
 
@@ -414,7 +561,7 @@ const ContinuityCockpitPage: React.FC = () => {
       {activeTab === 'overview' && renderOverview({ stats, focusChapter, recentChapters, stateItems: pendingItems, relatedForeshadowings, relatedTimelineEvents })}
       {activeTab === 'focus' && renderFocus({
         focusChapter, focusOutline, relatedCharacters, relatedRelationships: focusRelationshipItems, relatedForeshadowings,
-        relatedTimelineEvents, manualGoal, setManualGoal, manualForbidden, setManualForbidden, manualNotes, setManualNotes,
+        relatedForeshadowingTasks: focusForeshadowingTasks, relatedTimelineEvents, manualGoal, setManualGoal, manualForbidden, setManualForbidden, manualNotes, setManualNotes,
         manualPrompt, setManualPrompt, visiblePrompt, promptDisabled: !focusChapter, copyStatus, onCopyPrompt: handleCopyPrompt,
       })}
       {activeTab === 'characters' && renderCharactersTab({
@@ -424,7 +571,25 @@ const ContinuityCockpitPage: React.FC = () => {
         data: continuityRelationships, characters: continuityCharacters?.groups?.allCharacters || [], relationshipForm, setRelationshipForm,
         relationshipEventForm, setRelationshipEventForm, saveRelationship, saveRelationshipEvent, patchRelationship, setNotice,
       })}
-      {!['overview', 'focus', 'characters', 'relations'].includes(activeTab) && renderFutureTab(activeTab)}
+      {activeTab === 'foreshadowing' && renderForeshadowingTab({
+        data: continuityForeshadowings,
+        chapters: sortedChapters,
+        characters: continuityCharacters?.groups?.allCharacters || [],
+        relationships: continuityRelationships?.groups?.allRelationships || [],
+        form: foreshadowingForm,
+        setForm: setForeshadowingForm,
+        eventForm: foreshadowingEventForm,
+        setEventForm: setForeshadowingEventForm,
+        taskForm: foreshadowingTaskForm,
+        setTaskForm: setForeshadowingTaskForm,
+        saveThread: saveForeshadowingThread,
+        patchThread: patchForeshadowingThread,
+        saveEvent: saveForeshadowingEvent,
+        saveTask: saveForeshadowingTask,
+        patchTask: patchForeshadowingTask,
+        setNotice,
+      })}
+      {!['overview', 'focus', 'characters', 'relations', 'foreshadowing'].includes(activeTab) && renderFutureTab(activeTab)}
     </div>
   );
 };
@@ -441,6 +606,10 @@ function renderOverview(input: any) {
     ['高冲突关系', String(input.stats.highConflictRelationships)],
     ['隐藏关系', String(input.stats.hiddenRelationships)],
     ['伏笔风险', String(input.stats.foreshadowingRisks)],
+    ['本章伏笔任务', String(input.stats.focusForeshadowingTasks)],
+    ['临近回收', String(input.stats.recoveryDueForeshadowings)],
+    ['逾期伏笔', String(input.stats.overdueForeshadowings)],
+    ['高风险伏笔', String(input.stats.highRiskForeshadowings)],
     ['时间线风险', String(input.stats.timelineRisks)],
     ['注意力风险', String(input.stats.attentionRisks)],
   ];
@@ -475,6 +644,11 @@ function renderFocus(input: any) {
   const relationshipNotes = input.relatedRelationships.length
     ? input.relatedRelationships.map((r: any) => `${r.sourceCharacterName} - ${r.targetCharacterName}：${r.publicRelation || EMPTY}，冲突 ${r.conflictScore}`).join('；')
     : '暂无本章关系数据，Phase 7.2 可通过关系网 Tab 手动补全。';
+  const foreshadowingNotes = input.relatedForeshadowingTasks?.length
+    ? groupTaskNotes(input.relatedForeshadowingTasks)
+    : ch && input.relatedForeshadowings.length
+      ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join(' / ')
+      : 'No current chapter foreshadowing task. Add one in Phase 7.3 Foreshadowing tab when needed.';
   const forbiddenBase = [
     ch?.status === 'locked' ? 'locked 章节不可自动修改。' : '',
     '已确认设定不可被当前页面直接覆盖。',
@@ -499,7 +673,7 @@ function renderFocus(input: any) {
         <Panel title="结构化详情区">
           <Line label="人物状态注意事项" value={characterNotes} />
           <Line label="关系注意事项" value={relationshipNotes} />
-          <Line label="伏笔注意事项" value={ch && input.relatedForeshadowings.length ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join('；') : '暂无本章伏笔任务，Phase 7.3 将接入伏笔雷达。'} />
+          <Line label="伏笔注意事项" value={foreshadowingNotes} />
           <Line label="世界观注意事项" value="暂无本章世界观规则，Phase 7.4 将接入世界观规则系统。" />
           <Line label="时间线注意事项" value={ch && input.relatedTimelineEvents.length ? input.relatedTimelineEvents.map((e: any) => e.title).join('；') : '暂无本章时间线事件，Phase 7.4 将接入时间线三线模型。'} />
           <Line label="禁止写错事项" value={[...forbiddenBase, input.manualForbidden].filter(Boolean).join('；')} />
@@ -711,6 +885,193 @@ function renderRelationsTab(input: any) {
   );
 }
 
+function renderForeshadowingTab(input: any) {
+  const data = input.data || {};
+  const summary = data.summary || {};
+  const groups = data.groups || {};
+  const allThreads = groups.allThreads || [];
+  const legacyThreads = allThreads.filter((thread: any) => thread.legacy);
+  const editableThreads = allThreads.filter((thread: any) => !thread.legacy);
+  const isEditing = Boolean(input.form.threadId);
+  const canLock = isEditing && input.form.reviewStatus === 'confirmed';
+  const cards = [
+    ['Threads', summary.totalThreads ?? 0],
+    ['Focus tasks', summary.focusTasks ?? 0],
+    ['Recovery due', summary.recoveryDueCount ?? 0],
+    ['Overdue', summary.overdueCount ?? 0],
+    ['High risk', summary.highRiskCount ?? 0],
+    ['Pending review', summary.pendingReviewCount ?? 0],
+  ];
+  return (
+    <div>
+      <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={String(label)} value={String(value)} />)}</section>
+      <section style={styles.twoColumns}>
+        <Panel title="Current Chapter Foreshadowing Tasks">
+          {(groups.focusTasks || []).length ? groups.focusTasks.map((task: any) => (
+            <ForeshadowingTaskCard key={task.id} task={task} input={input} />
+          )) : <p style={styles.empty}>No foreshadowing task for current chapter.</p>}
+        </Panel>
+        <Panel title="Radar Alerts">
+          <Line label="Recovery due" value={(groups.recoveryDue || []).length ? groups.recoveryDue.map((t: any) => t.title).join(' / ') : EMPTY} />
+          <Line label="Overdue" value={(groups.overdue || []).length ? groups.overdue.map((t: any) => t.title).join(' / ') : EMPTY} />
+          <Line label="High risk" value={(groups.highRisk || []).length ? groups.highRisk.map((t: any) => `${t.title}:${t.riskLevel}`).join(' / ') : EMPTY} />
+          <Line label="Pending review" value={(groups.pendingReview || []).length ? `${groups.pendingReview.length} pending items` : EMPTY} />
+          <div style={styles.notice}>Radar reads persisted Phase 7.3 records and legacy foreshadowings. Legacy records are shown read-only and are not silently migrated.</div>
+        </Panel>
+      </section>
+      <section style={styles.detailGrid}>
+        <Panel title="Foreshadowing Lifecycle">
+          <Group title="Full Book Threads" items={groups.fullBookThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="Volume Threads" items={groups.volumeThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="Chapter Threads" items={groups.chapterThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="Recovered Threads" items={groups.recovered || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="Legacy Foreshadowings (Read Only)" items={legacyThreads} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+        </Panel>
+        <Panel title="Manual Edit Area">
+          <label style={styles.label}>Title</label>
+          <input style={styles.input} value={input.form.title} onChange={(e) => input.setForm({ ...input.form, title: e.target.value })} />
+          <KnownSelect label="Level" options={FORESHADOWING_LEVELS} value={input.form.level} onChange={(value) => input.setForm({ ...input.form, level: value })} />
+          <NumberInput label="Volume index" value={input.form.volumeIndex} onChange={(value) => input.setForm({ ...input.form, volumeIndex: value })} />
+          <KnownSelect label="Status" options={FORESHADOWING_STATUSES} value={input.form.status} onChange={(value) => input.setForm({ ...input.form, status: value })} />
+          <KnownSelect label="Risk level" options={FORESHADOWING_RISK_LEVELS} value={input.form.riskLevel} onChange={(value) => input.setForm({ ...input.form, riskLevel: value })} />
+          <FormTextarea label="Summary" value={input.form.summary} onChange={(value) => input.setForm({ ...input.form, summary: value })} />
+          <FormTextarea label="Reader understanding" value={input.form.readerUnderstanding} onChange={(value) => input.setForm({ ...input.form, readerUnderstanding: value })} />
+          <FormTextarea label="True meaning" value={input.form.trueMeaning} onChange={(value) => input.setForm({ ...input.form, trueMeaning: value })} />
+          <FormTextarea label="Reveal strategy" value={input.form.revealStrategy} onChange={(value) => input.setForm({ ...input.form, revealStrategy: value })} />
+          <FormTextarea label="Risk reason" value={input.form.riskReason} onChange={(value) => input.setForm({ ...input.form, riskReason: value })} />
+          <ChapterSelect label="Planned bury chapter" chapters={input.chapters} value={input.form.plannedBuryChapterId} onChange={(value) => input.setForm({ ...input.form, plannedBuryChapterId: value })} />
+          <ChapterSelect label="Actual bury chapter" chapters={input.chapters} value={input.form.actualBuryChapterId} onChange={(value) => input.setForm({ ...input.form, actualBuryChapterId: value })} />
+          <ChapterSelect label="Recovery window start" chapters={input.chapters} value={input.form.recoveryWindowStartChapterId} onChange={(value) => input.setForm({ ...input.form, recoveryWindowStartChapterId: value })} />
+          <ChapterSelect label="Recovery window end" chapters={input.chapters} value={input.form.recoveryWindowEndChapterId} onChange={(value) => input.setForm({ ...input.form, recoveryWindowEndChapterId: value })} />
+          <ChapterSelect label="Actual recovery chapter" chapters={input.chapters} value={input.form.actualRecoveryChapterId} onChange={(value) => input.setForm({ ...input.form, actualRecoveryChapterId: value })} />
+          <MultiSelect label="Related characters" options={input.characters.map((c: any) => ({ id: c.id, label: c.name }))} value={input.form.relatedCharacterIds} onChange={(value) => input.setForm({ ...input.form, relatedCharacterIds: value })} />
+          <MultiSelect label="Related relationships" options={input.relationships.map((r: any) => ({ id: r.id, label: `${r.sourceCharacterName || EMPTY} - ${r.targetCharacterName || EMPTY}` }))} value={input.form.relatedRelationshipIds} onChange={(value) => input.setForm({ ...input.form, relatedRelationshipIds: value })} />
+          <label style={styles.label}>Review status</label>
+          {isEditing ? (
+            <select style={styles.selectFull} value={input.form.reviewStatus} onChange={(e) => input.setForm({ ...input.form, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.form.locked : false })}>
+              {REVIEW_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
+            </select>
+          ) : <div style={styles.readonlyBox}>New records are always pending and unlocked.</div>}
+          <label style={styles.checkbox}>
+            <input type="checkbox" checked={isEditing && input.form.locked} disabled={!canLock} onChange={(e) => input.setForm({ ...input.form, locked: e.target.checked })} /> Lock thread
+          </label>
+          {!canLock && <div style={styles.hint}>{isEditing ? 'Confirm before locking.' : 'Create first, then confirm before locking.'}</div>}
+          <button type="button" style={styles.primaryButton} onClick={input.saveThread}>{isEditing ? 'Save Thread' : 'Create Thread'}</button>
+          <button type="button" style={styles.secondaryButton} onClick={() => input.setForm(defaultForeshadowingForm)}>Clear Thread Form</button>
+          <hr style={styles.hr} />
+          <label style={styles.label}>Lifecycle event</label>
+          <select style={styles.selectFull} value={input.eventForm.threadId} onChange={(e) => input.setEventForm({ ...input.eventForm, threadId: e.target.value })}>
+            <option value="">Choose thread</option>
+            {editableThreads.map((thread: any) => <option key={thread.id} value={thread.id}>{thread.title}</option>)}
+          </select>
+          <KnownSelect label="Event type" options={FORESHADOWING_EVENT_TYPES} value={input.eventForm.eventType} onChange={(value) => input.setEventForm({ ...input.eventForm, eventType: value })} />
+          <FormTextarea label="Event summary" value={input.eventForm.summary} onChange={(value) => input.setEventForm({ ...input.eventForm, summary: value })} />
+          <FormTextarea label="Evidence" value={input.eventForm.evidence} onChange={(value) => input.setEventForm({ ...input.eventForm, evidence: value })} />
+          <FormTextarea label="Impact" value={input.eventForm.impact} onChange={(value) => input.setEventForm({ ...input.eventForm, impact: value })} />
+          <button type="button" style={styles.primaryButton} onClick={input.saveEvent}>Add Event</button>
+          <hr style={styles.hr} />
+          <label style={styles.label}>Chapter task</label>
+          <select style={styles.selectFull} value={input.taskForm.threadId} onChange={(e) => input.setTaskForm({ ...input.taskForm, threadId: e.target.value })}>
+            <option value="">Choose thread</option>
+            {editableThreads.map((thread: any) => <option key={thread.id} value={thread.id}>{thread.title}</option>)}
+          </select>
+          <ChapterSelect label="Task chapter" chapters={input.chapters} value={input.taskForm.chapterId} onChange={(value) => input.setTaskForm({ ...input.taskForm, chapterId: value })} />
+          <KnownSelect label="Task type" options={FORESHADOWING_TASK_TYPES} value={input.taskForm.taskType} onChange={(value) => input.setTaskForm({ ...input.taskForm, taskType: value })} />
+          <KnownSelect label="Priority" options={TASK_PRIORITIES} value={input.taskForm.priority} onChange={(value) => input.setTaskForm({ ...input.taskForm, priority: value })} />
+          <FormTextarea label="Instruction" value={input.taskForm.instruction} onChange={(value) => input.setTaskForm({ ...input.taskForm, instruction: value })} />
+          <FormTextarea label="Reason" value={input.taskForm.reason} onChange={(value) => input.setTaskForm({ ...input.taskForm, reason: value })} />
+          <button type="button" style={styles.primaryButton} onClick={input.saveTask}>Add Task</button>
+          <div style={styles.notice}>Thread, event, and task saves are persisted. AI or manual proposals stay pending until the author confirms them.</div>
+        </Panel>
+      </section>
+    </div>
+  );
+}
+
+function ForeshadowingThreadCard({ thread, input }: { thread: any; input: any }) {
+  const canEdit = !thread.legacy;
+  return (
+    <details style={styles.itemCard}>
+      <summary style={styles.itemSummary}>
+        <strong>{thread.title || EMPTY}</strong>
+        <span>{thread.level || EMPTY}</span>
+        <span>{thread.status || EMPTY}</span>
+        <span>{thread.riskLevel || EMPTY}{thread.locked ? ' / locked' : ''}</span>
+      </summary>
+      <Line label="Summary" value={thread.summary || EMPTY} />
+      <Line label="Reader view" value={thread.readerUnderstanding || EMPTY} />
+      <Line label="True meaning" value={thread.trueMeaning || EMPTY} />
+      <Line label="Reveal strategy" value={thread.revealStrategy || EMPTY} />
+      <Line label="Risk reason" value={thread.riskReason || EMPTY} />
+      <Line label="Bury chapter" value={thread.actualBuryChapterId || thread.plannedBuryChapterId || EMPTY} />
+      <Line label="Recovery window" value={`${thread.recoveryWindowStartChapterId || EMPTY} -> ${thread.recoveryWindowEndChapterId || EMPTY}`} />
+      <Line label="Recovery chapter" value={thread.actualRecoveryChapterId || EMPTY} />
+      <Line label="Related characters" value={(thread.relatedCharacterIds || []).join(' / ') || EMPTY} />
+      <Line label="Related relationships" value={(thread.relatedRelationshipIds || []).join(' / ') || EMPTY} />
+      <Line label="Lifecycle events" value={(thread.latestEvents || []).length ? thread.latestEvents.map((event: any) => `${event.eventType}:${event.summary || EMPTY}`).join(' / ') : EMPTY} />
+      <Line label="Chapter tasks" value={(thread.focusTasks || []).length ? thread.focusTasks.map((task: any) => `${task.taskType}:${task.instruction || EMPTY}`).join(' / ') : EMPTY} />
+      {canEdit ? (
+        <div style={styles.inlineActions}>
+          <button type="button" style={styles.tinyButton} onClick={() => input.setForm({
+            ...defaultForeshadowingForm,
+            threadId: thread.id,
+            title: thread.title || '',
+            level: thread.level || 'chapter',
+            volumeIndex: Number(thread.volumeIndex || 1),
+            status: thread.status || 'planned',
+            summary: thread.summary || '',
+            readerUnderstanding: thread.readerUnderstanding || '',
+            trueMeaning: thread.trueMeaning || '',
+            revealStrategy: thread.revealStrategy || '',
+            riskLevel: thread.riskLevel || 'none',
+            riskReason: thread.riskReason || '',
+            plannedBuryChapterId: thread.plannedBuryChapterId || '',
+            actualBuryChapterId: thread.actualBuryChapterId || '',
+            plannedDeepenChapterIds: thread.plannedDeepenChapterIds || [],
+            plannedMisdirectChapterIds: thread.plannedMisdirectChapterIds || [],
+            recoveryWindowStartChapterId: thread.recoveryWindowStartChapterId || '',
+            recoveryWindowEndChapterId: thread.recoveryWindowEndChapterId || '',
+            actualRecoveryChapterId: thread.actualRecoveryChapterId || '',
+            relatedCharacterIds: thread.relatedCharacterIds || [],
+            relatedRelationshipIds: thread.relatedRelationshipIds || [],
+            relatedTimelineEventIds: thread.relatedTimelineEventIds || [],
+            relatedWorldRuleIds: thread.relatedWorldRuleIds || [],
+            reviewStatus: thread.reviewStatus || 'pending',
+            locked: Boolean(thread.locked),
+          })}>Edit</button>
+          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchThread(thread, { reviewStatus: status })}>{status}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => {
+            if (!thread.locked && thread.reviewStatus !== 'confirmed') return input.setNotice('Confirm before locking.');
+            return input.patchThread(thread, { locked: !thread.locked, forceUnlock: thread.locked });
+          }}>{thread.locked ? 'Unlock' : 'Lock'}</button>
+        </div>
+      ) : <div style={styles.hint}>Legacy record is read-only in Phase 7.3.</div>}
+    </details>
+  );
+}
+
+function ForeshadowingTaskCard({ task, input }: { task: any; input: any }) {
+  return (
+    <div style={styles.itemCard}>
+      <Line label="Thread" value={task.threadTitle || task.threadId || EMPTY} />
+      <Line label="Task" value={`${task.taskType || EMPTY} / ${task.priority || EMPTY} / ${task.status || EMPTY}`} />
+      <Line label="Instruction" value={task.instruction || EMPTY} />
+      <Line label="Reason" value={task.reason || EMPTY} />
+      <Line label="Review" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}`} />
+      {!task.legacy && (
+        <div style={styles.inlineActions}>
+          {TASK_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchTask(task, { status })}>{status}</button>)}
+          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchTask(task, { reviewStatus: status })}>{status}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => {
+            if (!task.locked && task.reviewStatus !== 'confirmed') return input.setNotice('Confirm before locking.');
+            return input.patchTask(task, { locked: !task.locked });
+          }}>{task.locked ? 'Unlock' : 'Lock'}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CharacterCard({ character, input }: { character: any; input: any }) {
   const snapshots = character.latestStateSnapshots || [];
   return (
@@ -864,6 +1225,34 @@ function KnownSelect({ label, options, value, onChange }: { label: string; optio
   );
 }
 
+function ChapterSelect({ label, chapters, value, onChange }: { label: string; chapters: Chapter[]; value: string; onChange: (value: string) => void }) {
+  return (
+    <>
+      <label style={styles.label}>{label}</label>
+      <select style={styles.selectFull} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">None</option>
+        {chapters.map(ch => <option key={ch.id} value={ch.id}>{volumeIndex(ch)}-{chapterIndex(ch)} {ch.title}</option>)}
+      </select>
+    </>
+  );
+}
+
+function MultiSelect({ label, options, value, onChange }: { label: string; options: { id: string; label: string }[]; value: string[]; onChange: (value: string[]) => void }) {
+  return (
+    <>
+      <label style={styles.label}>{label}</label>
+      <select
+        multiple
+        style={{ ...styles.selectFull, minHeight: 96 }}
+        value={value}
+        onChange={(e) => onChange(Array.from(e.currentTarget.selectedOptions).map(option => option.value))}
+      >
+        {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+      </select>
+    </>
+  );
+}
+
 function readView(key: string) {
   try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; }
 }
@@ -920,6 +1309,16 @@ function findRelatedTimelineEvents(events: any[], chapter: Chapter | null) {
   }).slice(0, 8);
 }
 
+function groupTaskNotes(tasks: any[]) {
+  const grouped = tasks.reduce((acc: Record<string, string[]>, task: any) => {
+    const key = task.taskType || 'check';
+    acc[key] = acc[key] || [];
+    acc[key].push(`${task.threadTitle || task.threadId || EMPTY}: ${task.instruction || task.reason || task.status || EMPTY}`);
+    return acc;
+  }, {});
+  return Object.entries(grouped).map(([type, items]) => `${type}: ${items.join(' / ')}`).join(' | ');
+}
+
 function buildPreWritingPrompt(input: any) {
   const ch = input.focusChapter as Chapter | null;
   if (!ch) return '待创建章节后生成。';
@@ -930,7 +1329,7 @@ function buildPreWritingPrompt(input: any) {
     `出场人物：${input.relatedCharacters.length ? input.relatedCharacters.map((c: any) => c.name).join('、') : EMPTY}`,
     `人物状态注意事项：${input.relatedCharacters.length ? input.relatedCharacters.map((c: any) => `${c.name}-${c.currentStateSummary || c.identity || EMPTY}`).join('；') : EMPTY}`,
     `关系注意事项：${input.relatedRelationships.length ? input.relatedRelationships.map((r: any) => `${r.sourceCharacterName}-${r.targetCharacterName}:${r.publicRelation || EMPTY}`).join('；') : EMPTY}`,
-    `伏笔注意事项：${input.relatedForeshadowings.length ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join('；') : EMPTY}`,
+    `伏笔注意事项：${input.focusForeshadowingTasks?.length ? groupTaskNotes(input.focusForeshadowingTasks) : input.relatedForeshadowings.length ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join('；') : EMPTY}`,
     '世界观注意事项：待补全，Phase 7.4 将接入世界观规则系统。',
     `时间线注意事项：${input.relatedTimelineEvents.length ? input.relatedTimelineEvents.map((e: any) => e.title).join('；') : EMPTY}`,
     '冲突设计：待补全。',
