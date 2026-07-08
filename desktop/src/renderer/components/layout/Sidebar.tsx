@@ -38,6 +38,7 @@ const ICONS: Record<string, React.ReactNode> = {
   news:      SVG('<rect x="1" y="2" width="14" height="12" rx="1"/><line x1="3" y1="5" x2="11" y2="5"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="11" x2="8" y2="11"/>'),
   settings:  SVG('<circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1.5 4.5l1.5 2.6M11 8.9l1.5 2.6M14.5 4.5l-1.5 2.6M5 8.9L3.5 11.5"/>'),
   timeline:  SVG('<line x1="2" y1="4" x2="14" y2="4" stroke-width="1.2" fill="none"/><line x1="2" y1="8" x2="10" y2="8" stroke-width="1.2" fill="none"/><line x1="2" y1="12" x2="12" y2="12" stroke-width="1.2" fill="none"/><circle cx="14" cy="4" r="1.5" fill="currentColor"/><circle cx="10" cy="8" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'),
+  continuity:SVG('<path d="M2 8a6 6 0 0 1 10.2-4.2"/><path d="M12 2v4H8"/><path d="M14 8a6 6 0 0 1-10.2 4.2"/><path d="M4 14v-4h4" fill="none" stroke-width="1.4"/>'),
 };
 
 const Sidebar: React.FC = () => {
@@ -61,6 +62,7 @@ const Sidebar: React.FC = () => {
     { id: 'orgMap', label: '组织与地图', path: `/project/${pid}/organization-map`, icon: ICONS.orgMap },
     { id: 'foreshadow', label: '伏笔', path: `/project/${pid}/foreshadowing`, icon: ICONS.foreshadow },
     { id: 'timeline', label: '时间线', path: `/project/${pid}/timeline`, icon: ICONS.timeline },
+    { id: 'continuity', label: '连续性驾驶舱', path: `/project/${pid}/continuity`, icon: ICONS.continuity },
     { id: 'state', label: '状态确稿', path: `/project/${pid}/state`, icon: ICONS.state },
     { id: 'material', label: '素材', path: `/project/${pid}/material`, icon: ICONS.material },
     { id: 'conflict', label: '冲突检测', path: `/project/${pid}/conflicts`, icon: ICONS.conflict },

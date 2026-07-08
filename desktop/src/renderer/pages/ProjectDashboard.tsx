@@ -89,6 +89,7 @@ const ProjectDashboard: React.FC = () => {
     { id: 'export', label: '导出', icon: '📦', done: false, path: `/project/${projectId}/import-export` },
   ];
   const quickActions = [
+    { label: '🧭 连续性驾驶舱', path: `/project/${projectId}/continuity`, color: '#60a5fa' },
     { label: '✍️ 继续写作', path: `/project/${projectId}/writing`, color: '#e94560' },
     { label: '📋 查看大纲', path: `/project/${projectId}/outline`, color: '#3498db' },
     { label: '⚡ 处理冲突', path: `/project/${projectId}/conflicts`, color: '#f39c12', badge: stats.unresolvedConflicts },
@@ -124,6 +125,21 @@ const ProjectDashboard: React.FC = () => {
 
       {/* 创作流程助手 */}
       {projectId && <WorkflowAssistantPanel projectId={projectId} />}
+
+      <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.22)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#bfdbfe', marginBottom: '4px' }}>Phase 7：小说连续性驾驶舱</div>
+            <div style={{ fontSize: '12px', color: '#93c5fd', lineHeight: 1.6 }}>
+              7.0 阶段展示与边界收口、7.1 小说全貌总览 + 当前章节创作焦点为本轮实现；7.2-7.5 标记为待开发。
+            </div>
+          </div>
+          <button type="button" onClick={() => navigate(`/project/${projectId}/continuity`)}
+            style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid rgba(147,197,253,0.36)', backgroundColor: '#0f172a', color: '#dbeafe', cursor: 'pointer', fontWeight: 600 }}>
+            进入驾驶舱
+          </button>
+        </div>
+      </div>
 
       <div style={{ marginBottom: '28px' }}>
         <div style={{ fontSize: '12px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>快捷操作</div>

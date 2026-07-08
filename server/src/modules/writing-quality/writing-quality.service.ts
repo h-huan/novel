@@ -1297,8 +1297,14 @@ ${fullContent.slice(0, 3000)}
 
   private issueRowToResponse(r: IssueRow) {
     const tags = safeJsonParse(r.tags, []);
-    const navigation = safeJsonParse(r.navigation_json || '{}', null)
-      || this.buildIssueNavigation({
+    const parsedNavigation = safeJsonParse(r.navigation_json || '{}', {});
+    const hasValidNavigation = parsedNavigation?.target
+      && parsedNavigation?.label
+      && parsedNavigation?.path
+      && parsedNavigation?.context;
+    const navigation = hasValidNavigation
+      ? parsedNavigation
+      : this.buildIssueNavigation({
         projectId: r.project_id,
         chapterId: r.chapter_id,
         reportId: r.report_id,
