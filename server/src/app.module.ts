@@ -36,6 +36,7 @@ import { TimelineModule } from './modules/timeline/timeline.module';
 import { IdeaLabModule } from './modules/idea-lab/idea-lab.module';
 import { WorkflowGuardModule } from './modules/workflow-guard/workflow-guard.module';
 import { WritingQualityModule } from './modules/writing-quality/writing-quality.module';
+import { ContinuityModule } from './modules/continuity/continuity.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { WritingQualityModule } from './modules/writing-quality/writing-quality.
     IdeaLabModule,
     WorkflowGuardModule,
     WritingQualityModule,
+    ContinuityModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
