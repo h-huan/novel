@@ -8,6 +8,7 @@ const RELATION_TYPES = new Set(['ally', 'enemy', 'family', 'mentor', 'disciple',
 const READER_STATES = new Set(['unknown', 'hinted', 'known', 'misdirected']);
 const CHARACTER_KNOWN_STATES = new Set(['unknown', 'partial', 'known', 'misunderstood']);
 const RELATION_EVENT_TYPES = new Set(['established', 'deepened', 'conflicted', 'betrayed', 'reconciled', 'revealed', 'hidden', 'weakened', 'strengthened', 'other']);
+const SOURCES = new Set(['manual', 'ai', 'chapter_extract']);
 
 @Injectable()
 export class ContinuityService {
@@ -95,7 +96,6 @@ export class ContinuityService {
   createCharacterState(projectId: string, body: any) {
     if (!body?.characterId || !body?.stateType) throw new BadRequestException('characterId and stateType are required');
     const stateType = this.ensureEnum(body.stateType, STATE_TYPES, 'stateType');
-    const reviewStatus = this.ensureEnum(body.reviewStatus || 'pending', REVIEW_STATUSES, 'reviewStatus');
     const existingLocked = this.database.prepare(`
       SELECT * FROM character_state_snapshots
       WHERE project_id = ? AND character_id = ? AND COALESCE(chapter_id, '') = COALESCE(?, '')
@@ -116,16 +116,29 @@ export class ContinuityService {
       id, projectId, body.characterId, body.chapterId || null, numberOrNull(body.volumeIndex), stateType,
       body.currentState || '', body.evidence || '', body.cause || '', body.actionImpact || '',
       body.relationImpact || '', body.goalImpact || '', body.foreshadowingImpact || '', body.futureChange || '',
-      body.conflictRisk || '', reviewStatus, body.source || 'manual', numberOrDefault(body.confidence, 1),
-      body.locked ? 1 : 0, now, now,
+      body.conflictRisk || '', 'pending', this.normalizeSource(body.source), numberOrDefault(body.confidence, 1),
+      0, now, now,
     );
     return this.stateById(projectId, id);
   }
 
   updateCharacterState(projectId: string, stateId: string, body: any) {
     const existing: any = this.stateById(projectId, stateId);
+    const normalizedSource = body.source !== undefined ? this.normalizeSource(body.source) : undefined;
+    if (existing.locked && normalizedSource === 'ai') {
+      throw new ConflictException('Cannot let AI overwrite locked character state');
+    }
     if (Number(existing.locked) === 1 && !body.forceUnlock) {
       throw new ConflictException('Cannot modify locked character state without forceUnlock=true');
+    }
+    if (existing.locked && body.forceUnlock && normalizedSource === 'ai') {
+      throw new ConflictException('AI source cannot force unlock character state');
+    }
+    const nextReviewStatus = body.reviewStatus !== undefined
+      ? this.ensureEnum(body.reviewStatus, REVIEW_STATUSES, 'reviewStatus')
+      : existing.reviewStatus;
+    if (body.locked === true && nextReviewStatus !== 'confirmed') {
+      throw new BadRequestException('Only confirmed character states can be locked');
     }
     const fields: Record<string, unknown> = {};
     const map: Record<string, string> = {
@@ -137,7 +150,8 @@ export class ContinuityService {
     for (const [camel, column] of Object.entries(map)) {
       if (body[camel] === undefined) continue;
       if (camel === 'stateType') fields[column] = this.ensureEnum(body[camel], STATE_TYPES, camel);
-      else if (camel === 'reviewStatus') fields[column] = this.ensureEnum(body[camel], REVIEW_STATUSES, camel);
+      else if (camel === 'reviewStatus') fields[column] = nextReviewStatus;
+      else if (camel === 'source') fields[column] = this.normalizeSource(body[camel]);
       else if (camel === 'locked') fields[column] = body[camel] ? 1 : 0;
       else fields[column] = body[camel];
     }
@@ -156,7 +170,7 @@ export class ContinuityService {
       WHERE project_id = ? AND source_character_id = ? AND target_character_id = ? AND relation_type = ?
       LIMIT 1
     `).get(projectId, body.sourceCharacterId, body.targetCharacterId, relationType);
-    if (duplicate) return this.relationshipToResponse(duplicate, this.allCharacters(projectId), this.allRelationshipEvents(projectId));
+    if (duplicate) throw new ConflictException('Relationship already exists; update the existing relationship instead');
 
     const now = new Date().toISOString();
     const id = uuid();
@@ -176,15 +190,22 @@ export class ContinuityService {
       this.ensureEnum(body.sourceKnownState || 'unknown', CHARACTER_KNOWN_STATES, 'sourceKnownState'),
       this.ensureEnum(body.targetKnownState || 'unknown', CHARACTER_KNOWN_STATES, 'targetKnownState'),
       body.changeSummary || '', JSON.stringify(body.changeHistory || []), JSON.stringify(body.relatedForeshadowingIds || []),
-      JSON.stringify(body.relatedTimelineEventIds || []), this.ensureEnum(body.reviewStatus || 'pending', REVIEW_STATUSES, 'reviewStatus'),
-      body.locked ? 1 : 0, body.source || 'manual', numberOrDefault(body.confidence, 1), now, now,
+      JSON.stringify(body.relatedTimelineEventIds || []), 'pending',
+      0, this.normalizeSource(body.source), numberOrDefault(body.confidence, 1), now, now,
     );
     return this.relationshipById(projectId, id);
   }
 
   updateRelationship(projectId: string, relationshipId: string, body: any) {
     const existing: any = this.relationshipRawById(projectId, relationshipId);
-    if (Number(existing.locked) === 1 && body.source === 'ai') throw new ConflictException('Cannot let AI overwrite locked relationship');
+    const normalizedSource = body.source !== undefined ? this.normalizeSource(body.source) : undefined;
+    if (Number(existing.locked) === 1 && normalizedSource === 'ai') throw new ConflictException('Cannot let AI overwrite locked relationship');
+    const nextReviewStatus = body.reviewStatus !== undefined
+      ? this.ensureEnum(body.reviewStatus, REVIEW_STATUSES, 'reviewStatus')
+      : existing.review_status;
+    if (body.locked === true && nextReviewStatus !== 'confirmed') {
+      throw new BadRequestException('Only confirmed relationships can be locked');
+    }
     const fields: Record<string, unknown> = {};
     const map: Record<string, string> = {
       publicRelation: 'public_relation', hiddenRelation: 'hidden_relation', trustScore: 'trust_score',
@@ -200,7 +221,8 @@ export class ContinuityService {
         fields[column] = Number(body[camel]);
       } else if (camel === 'readerKnownState') fields[column] = this.ensureEnum(body[camel], READER_STATES, camel);
       else if (camel === 'sourceKnownState' || camel === 'targetKnownState') fields[column] = this.ensureEnum(body[camel], CHARACTER_KNOWN_STATES, camel);
-      else if (camel === 'reviewStatus') fields[column] = this.ensureEnum(body[camel], REVIEW_STATUSES, camel);
+      else if (camel === 'reviewStatus') fields[column] = nextReviewStatus;
+      else if (camel === 'source') fields[column] = this.normalizeSource(body[camel]);
       else if (camel === 'locked') fields[column] = body[camel] ? 1 : 0;
       else fields[column] = body[camel];
     }
@@ -221,7 +243,7 @@ export class ContinuityService {
       id, projectId, relationshipId, body.chapterId || null,
       this.ensureEnum(body.eventType || 'other', RELATION_EVENT_TYPES, 'eventType'),
       body.summary || '', JSON.stringify(body.beforeState || {}), JSON.stringify(body.afterState || {}),
-      body.evidence || '', body.impact || '', this.ensureEnum(body.reviewStatus || 'pending', REVIEW_STATUSES, 'reviewStatus'),
+      body.evidence || '', body.impact || '', 'pending',
       now, now,
     );
     if (Number(relationship.locked) !== 1) {
@@ -409,6 +431,11 @@ export class ContinuityService {
     if (value === undefined || value === null || value === '') return;
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) throw new BadRequestException(`${field} must be between 0 and 100`);
+  }
+
+  private normalizeSource(value: unknown): string {
+    const source = String(value || 'manual');
+    return SOURCES.has(source) ? source : 'manual';
   }
 }
 

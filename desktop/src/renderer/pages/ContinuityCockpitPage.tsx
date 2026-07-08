@@ -279,6 +279,7 @@ const ContinuityCockpitPage: React.FC = () => {
 
   const saveStateSnapshot = async () => {
     if (!stateForm.characterId) return setNotice('请先选择人物。');
+    const isEditing = Boolean(stateForm.stateId);
     const body = {
       characterId: stateForm.characterId,
       chapterId: focusChapter?.id,
@@ -293,13 +294,16 @@ const ContinuityCockpitPage: React.FC = () => {
       foreshadowingImpact: stateForm.foreshadowingImpact,
       futureChange: stateForm.futureChange,
       conflictRisk: stateForm.conflictRisk,
-      reviewStatus: stateForm.reviewStatus || 'pending',
-      locked: stateForm.locked,
       source: 'manual',
     };
-    if (stateForm.stateId) await api.patch(`/projects/${projectId}/continuity/character-states/${stateForm.stateId}`, body);
+    if (isEditing) await api.patch(`/projects/${projectId}/continuity/character-states/${stateForm.stateId}`, {
+      ...body,
+      reviewStatus: stateForm.reviewStatus,
+      locked: stateForm.reviewStatus === 'confirmed' && stateForm.locked,
+      forceUnlock: !stateForm.locked,
+    });
     else await api.post(`/projects/${projectId}/continuity/character-states`, body);
-    setNotice('人物状态已保存为待确认连续性记录。');
+    setNotice(isEditing ? '人物状态修改已保存。' : '人物状态已保存为待确认记录，需要确认后才能锁定。');
     setStateForm(defaultStateForm);
     await loadContinuity();
   };
@@ -311,15 +315,25 @@ const ContinuityCockpitPage: React.FC = () => {
 
   const saveRelationship = async () => {
     if (!relationshipForm.sourceCharacterId || !relationshipForm.targetCharacterId) return setNotice('请先选择关系双方。');
+    const isEditing = Boolean(relationshipForm.relationshipId);
     const body = {
       ...relationshipForm,
       firstChapterId: focusChapter?.id,
       latestChapterId: focusChapter?.id,
       source: 'manual',
     };
-    if (relationshipForm.relationshipId) await api.patch(`/projects/${projectId}/continuity/relationships/${relationshipForm.relationshipId}`, body);
-    else await api.post(`/projects/${projectId}/continuity/relationships`, body);
-    setNotice('人物关系已保存为待确认连续性记录。');
+    if (isEditing) await api.patch(`/projects/${projectId}/continuity/relationships/${relationshipForm.relationshipId}`, {
+      ...body,
+      locked: relationshipForm.reviewStatus === 'confirmed' && relationshipForm.locked,
+    });
+    else {
+      const { relationshipId, reviewStatus, locked, ...createBody } = body;
+      void relationshipId;
+      void reviewStatus;
+      void locked;
+      await api.post(`/projects/${projectId}/continuity/relationships`, createBody);
+    }
+    setNotice(isEditing ? '人物关系修改已保存。' : '人物关系已保存为待确认记录，需要确认后才能锁定。');
     setRelationshipForm(defaultRelationshipForm);
     await loadContinuity();
   };
@@ -404,11 +418,11 @@ const ContinuityCockpitPage: React.FC = () => {
         manualPrompt, setManualPrompt, visiblePrompt, promptDisabled: !focusChapter, copyStatus, onCopyPrompt: handleCopyPrompt,
       })}
       {activeTab === 'characters' && renderCharactersTab({
-        data: continuityCharacters, legacyCharacters, stateForm, setStateForm, saveStateSnapshot, patchStateSnapshot,
+        data: continuityCharacters, legacyCharacters, stateForm, setStateForm, saveStateSnapshot, patchStateSnapshot, setNotice,
       })}
       {activeTab === 'relations' && renderRelationsTab({
         data: continuityRelationships, characters: continuityCharacters?.groups?.allCharacters || [], relationshipForm, setRelationshipForm,
-        relationshipEventForm, setRelationshipEventForm, saveRelationship, saveRelationshipEvent, patchRelationship,
+        relationshipEventForm, setRelationshipEventForm, saveRelationship, saveRelationshipEvent, patchRelationship, setNotice,
       })}
       {!['overview', 'focus', 'characters', 'relations'].includes(activeTab) && renderFutureTab(activeTab)}
     </div>
@@ -516,6 +530,8 @@ function renderCharactersTab(input: any) {
   const summary = data.summary || {};
   const groups = data.groups || {};
   const allCharacters = groups.allCharacters || input.legacyCharacters || [];
+  const isEditing = Boolean(input.stateForm.stateId);
+  const canLock = isEditing && input.stateForm.reviewStatus === 'confirmed';
   const cards = [
     ['总人物数', summary.totalCharacters ?? allCharacters.length ?? 0],
     ['当前章相关人物', summary.focusCharacters ?? 0],
@@ -564,13 +580,27 @@ function renderCharactersTab(input: any) {
           <FormTextarea label="形成原因" value={input.stateForm.cause} onChange={(value) => input.setStateForm({ ...input.stateForm, cause: value })} />
           <FormTextarea label="对行动的影响" value={input.stateForm.actionImpact} onChange={(value) => input.setStateForm({ ...input.stateForm, actionImpact: value })} />
           <FormTextarea label="对关系的影响" value={input.stateForm.relationImpact} onChange={(value) => input.setStateForm({ ...input.stateForm, relationImpact: value })} />
+          <FormTextarea label="对目标的影响" value={input.stateForm.goalImpact} onChange={(value) => input.setStateForm({ ...input.stateForm, goalImpact: value })} />
+          <FormTextarea label="对伏笔的影响" value={input.stateForm.foreshadowingImpact} onChange={(value) => input.setStateForm({ ...input.stateForm, foreshadowingImpact: value })} />
           <FormTextarea label="后续变化可能" value={input.stateForm.futureChange} onChange={(value) => input.setStateForm({ ...input.stateForm, futureChange: value })} />
           <FormTextarea label="冲突风险" value={input.stateForm.conflictRisk} onChange={(value) => input.setStateForm({ ...input.stateForm, conflictRisk: value })} />
           <label style={styles.label}>处理状态</label>
-          <select style={styles.selectFull} value={input.stateForm.reviewStatus} onChange={(e) => input.setStateForm({ ...input.stateForm, reviewStatus: e.target.value })}>
-            {REVIEW_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
-          </select>
-          <label style={styles.checkbox}><input type="checkbox" checked={input.stateForm.locked} onChange={(e) => input.setStateForm({ ...input.stateForm, locked: e.target.checked })} /> 锁定状态</label>
+          {isEditing ? (
+            <select style={styles.selectFull} value={input.stateForm.reviewStatus} onChange={(e) => input.setStateForm({ ...input.stateForm, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.stateForm.locked : false })}>
+              {REVIEW_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
+            </select>
+          ) : (
+            <div style={styles.readonlyBox}>新增模式固定为 pending。</div>
+          )}
+          <label style={styles.checkbox}>
+            <input
+              type="checkbox"
+              checked={isEditing && input.stateForm.locked}
+              disabled={!canLock}
+              onChange={(e) => input.setStateForm({ ...input.stateForm, locked: e.target.checked })}
+            /> 锁定状态
+          </label>
+          {!canLock && <div style={styles.hint}>{isEditing ? '先确认后才能锁定。' : '新增模式固定 unlocked，确认后才能锁定。'}</div>}
           <button type="button" style={styles.primaryButton} onClick={input.saveStateSnapshot}>{input.stateForm.stateId ? '保存状态修改' : '新增人物状态快照'}</button>
           <button type="button" style={styles.secondaryButton} onClick={() => input.setStateForm(defaultStateForm)}>清空表单</button>
           <div style={styles.notice}>人工微调内容写入 Phase 7.2 待确认记录，不直接覆盖已确认设定；locked 状态不能被静默覆盖。</div>
@@ -585,6 +615,8 @@ function renderRelationsTab(input: any) {
   const summary = data.summary || {};
   const groups = data.groups || {};
   const allRelationships = groups.allRelationships || [];
+  const isEditing = Boolean(input.relationshipForm.relationshipId);
+  const canLock = isEditing && input.relationshipForm.reviewStatus === 'confirmed';
   const cards = [
     ['总关系数', summary.totalRelationships ?? 0],
     ['当前章相关关系', summary.focusRelationships ?? 0],
@@ -642,7 +674,23 @@ function renderRelationsTab(input: any) {
           <KnownSelect label="读者已知状态" options={READER_STATES} value={input.relationshipForm.readerKnownState} onChange={(value) => input.setRelationshipForm({ ...input.relationshipForm, readerKnownState: value })} />
           <KnownSelect label="A 已知状态" options={KNOWN_STATES} value={input.relationshipForm.sourceKnownState} onChange={(value) => input.setRelationshipForm({ ...input.relationshipForm, sourceKnownState: value })} />
           <KnownSelect label="B 已知状态" options={KNOWN_STATES} value={input.relationshipForm.targetKnownState} onChange={(value) => input.setRelationshipForm({ ...input.relationshipForm, targetKnownState: value })} />
-          <label style={styles.checkbox}><input type="checkbox" checked={input.relationshipForm.locked} onChange={(e) => input.setRelationshipForm({ ...input.relationshipForm, locked: e.target.checked })} /> 锁定关系</label>
+          <label style={styles.label}>处理状态</label>
+          {isEditing ? (
+            <select style={styles.selectFull} value={input.relationshipForm.reviewStatus} onChange={(e) => input.setRelationshipForm({ ...input.relationshipForm, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.relationshipForm.locked : false })}>
+              {REVIEW_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
+            </select>
+          ) : (
+            <div style={styles.readonlyBox}>新增模式固定为 pending。</div>
+          )}
+          <label style={styles.checkbox}>
+            <input
+              type="checkbox"
+              checked={isEditing && input.relationshipForm.locked}
+              disabled={!canLock}
+              onChange={(e) => input.setRelationshipForm({ ...input.relationshipForm, locked: e.target.checked })}
+            /> 锁定关系
+          </label>
+          {!canLock && <div style={styles.hint}>{isEditing ? '先确认后才能锁定。' : '新增模式固定 unlocked，确认后才能锁定。'}</div>}
           <button type="button" style={styles.primaryButton} onClick={input.saveRelationship}>{input.relationshipForm.relationshipId ? '保存关系修改' : '新增人物关系'}</button>
           <button type="button" style={styles.secondaryButton} onClick={() => input.setRelationshipForm(defaultRelationshipForm)}>清空表单</button>
           <hr style={styles.hr} />
@@ -655,6 +703,7 @@ function renderRelationsTab(input: any) {
           <FormTextarea label="证据" value={input.relationshipEventForm.evidence} onChange={(value) => input.setRelationshipEventForm({ ...input.relationshipEventForm, evidence: value })} />
           <FormTextarea label="影响" value={input.relationshipEventForm.impact} onChange={(value) => input.setRelationshipEventForm({ ...input.relationshipEventForm, impact: value })} />
           <button type="button" style={styles.primaryButton} onClick={input.saveRelationshipEvent}>新增关系变化事件</button>
+          <div style={styles.hint}>关系变化事件会进入待确认记录，不直接确认。</div>
           <div style={styles.notice}>保存后只更新 Phase 7.2 关系记录；不会生成不存在的关系，也不会进入 Phase 7.3。</div>
         </Panel>
       </section>
@@ -691,9 +740,14 @@ function CharacterCard({ character, input }: { character: any; input: any }) {
       {snapshots.map((state: any) => (
         <div key={state.id} style={styles.inlineActions}>
           <span>{state.stateType} / {state.reviewStatus} / {state.locked ? 'locked' : 'unlocked'} / {state.source}</span>
-          <button type="button" style={styles.tinyButton} onClick={() => input.setStateForm({ ...defaultStateForm, stateId: state.id, characterId: character.id, stateType: state.stateType, currentState: state.currentState, evidence: state.evidence, cause: state.cause, actionImpact: state.actionImpact, relationImpact: state.relationImpact, futureChange: state.futureChange, conflictRisk: state.conflictRisk, reviewStatus: state.reviewStatus, locked: state.locked })}>编辑</button>
+          <Line label="对目标的影响" value={state.goalImpact || EMPTY} />
+          <Line label="对伏笔的影响" value={state.foreshadowingImpact || EMPTY} />
+          <button type="button" style={styles.tinyButton} onClick={() => input.setStateForm({ ...defaultStateForm, stateId: state.id, characterId: character.id, stateType: state.stateType, currentState: state.currentState, evidence: state.evidence, cause: state.cause, actionImpact: state.actionImpact, relationImpact: state.relationImpact, goalImpact: state.goalImpact, foreshadowingImpact: state.foreshadowingImpact, futureChange: state.futureChange, conflictRisk: state.conflictRisk, reviewStatus: state.reviewStatus, locked: state.locked })}>编辑</button>
           {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchStateSnapshot(state, { reviewStatus: status })}>{status}</button>)}
-          <button type="button" style={styles.tinyButton} onClick={() => input.patchStateSnapshot(state, { locked: !state.locked, forceUnlock: state.locked })}>{state.locked ? '解锁' : '锁定'}</button>
+          <button type="button" style={styles.tinyButton} onClick={() => {
+            if (!state.locked && state.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
+            return input.patchStateSnapshot(state, { locked: !state.locked, forceUnlock: state.locked });
+          }}>{state.locked ? '解锁' : '锁定'}</button>
         </div>
       ))}
     </details>
@@ -726,7 +780,10 @@ function RelationshipCard({ relationship, input }: { relationship: any; input: a
       <div style={styles.inlineActions}>
         <button type="button" style={styles.tinyButton} onClick={() => input.setRelationshipForm({ ...defaultRelationshipForm, relationshipId: relationship.id, sourceCharacterId: relationship.sourceCharacterId, targetCharacterId: relationship.targetCharacterId, relationType: relationship.relationType, publicRelation: relationship.publicRelation === EMPTY ? '' : relationship.publicRelation, hiddenRelation: relationship.hiddenRelation, trustScore: relationship.trustScore, conflictScore: relationship.conflictScore, emotionalTendency: relationship.emotionalTendency === EMPTY ? '' : relationship.emotionalTendency, interestBinding: relationship.interestBinding === EMPTY ? '' : relationship.interestBinding, currentPhase: relationship.currentPhase === EMPTY ? '' : relationship.currentPhase, readerKnownState: relationship.readerKnownState, sourceKnownState: relationship.sourceKnownState, targetKnownState: relationship.targetKnownState, changeSummary: relationship.changeSummary, reviewStatus: relationship.reviewStatus, locked: relationship.locked })}>编辑</button>
         {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchRelationship(relationship, { reviewStatus: status })}>{status}</button>)}
-        <button type="button" style={styles.tinyButton} onClick={() => input.patchRelationship(relationship, { locked: !relationship.locked })}>{relationship.locked ? '解锁' : '锁定'}</button>
+        <button type="button" style={styles.tinyButton} onClick={() => {
+          if (!relationship.locked && relationship.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
+          return input.patchRelationship(relationship, { locked: !relationship.locked });
+        }}>{relationship.locked ? '解锁' : '锁定'}</button>
       </div>
     </details>
   );
@@ -935,6 +992,8 @@ const styles: Record<string, React.CSSProperties> = {
   select: { background: '#020617', color: '#e5e7eb', border: '1px solid #334155', borderRadius: 6, padding: '8px 10px', minWidth: 320 },
   selectFull: { width: '100%', background: '#020617', color: '#e5e7eb', border: '1px solid #334155', borderRadius: 6, padding: '8px 10px', margin: '6px 0 10px' },
   input: { width: '100%', background: '#020617', color: '#e5e7eb', border: '1px solid #334155', borderRadius: 6, padding: '8px 10px', margin: '6px 0 10px' },
+  readonlyBox: { width: '100%', background: '#020617', color: '#93c5fd', border: '1px solid #334155', borderRadius: 6, padding: '8px 10px', margin: '6px 0 10px', fontSize: 12 },
+  hint: { color: '#fbbf24', fontSize: 12, margin: '4px 0 10px' },
   savedHint: { color: '#64748b', fontSize: 12 },
   phasePanel: { border: '1px solid #334155', borderRadius: 8, padding: 14, marginBottom: 14, background: '#0f172a' },
   phaseGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 },
