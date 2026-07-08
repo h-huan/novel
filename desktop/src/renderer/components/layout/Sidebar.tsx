@@ -61,6 +61,7 @@ const Sidebar: React.FC = () => {
     { id: 'orgMap', label: '组织与地图', path: `/project/${pid}/organization-map`, icon: ICONS.orgMap },
     { id: 'foreshadow', label: '伏笔', path: `/project/${pid}/foreshadowing`, icon: ICONS.foreshadow },
     { id: 'timeline', label: '时间线', path: `/project/${pid}/timeline`, icon: ICONS.timeline },
+    { id: 'state', label: '状态确稿', path: `/project/${pid}/state`, icon: ICONS.state },
     { id: 'material', label: '素材', path: `/project/${pid}/material`, icon: ICONS.material },
     { id: 'conflict', label: '冲突检测', path: `/project/${pid}/conflicts`, icon: ICONS.conflict },
     { id: 'importExport', label: '导入导出', path: `/project/${pid}/import-export`, icon: ICONS.importExport },

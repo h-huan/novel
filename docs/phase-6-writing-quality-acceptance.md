@@ -750,6 +750,125 @@
 
 但 StateCenterPage 的 confirm/reject/archive 与角色成长 Tab 仍未完成真实 Electron UI 回归。因此在“必须覆盖全部剩余 Electron 点击链路”的严格验收标准下，第六阶段仍未完全闭环，**暂不进入第七阶段**。后续需要在可稳定进入 `/project/:id/state` 的 Electron 环境中补做 StateCenterPage 真实 UI 回归；若项目验收标准仅要求写作质量链路和 locked apply 保护，本轮对应链路可以视为通过，但该放行需由项目验收标准明确接受。
 
+## Phase 6.8 StateCenterPage 入口修复与最终严格验收记录（2026-07-07）
+
+### 基本信息
+
+- **基准最新提交 SHA**: `30002269ddb6e9120e0f2f86aec84053aa301b58`
+- **执行日期**: 2026-07-08（Asia/Shanghai；本节标题沿用阶段提示词中的 2026-07-07）
+- **执行环境**: Windows + Node.js v24.14.0 + Electron 真实桌面窗口。
+- **远端同步**: `git fetch origin main` 成功，`origin/main` 与本地基准提交一致。
+- **本轮修改文件**:
+  - `desktop/src/renderer/components/layout/Sidebar.tsx`
+  - `docs/phase-6-writing-quality-acceptance.md`
+
+### 本轮入口修复
+
+- **是否新增 StateCenterPage 入口**: 是，真实新增。
+- **入口位置**: 项目内通用左侧侧边栏。
+- **入口名称**: `状态确稿`
+- **入口跳转路径**: `/project/:id/state`
+- **修复方式**: 复用侧边栏已存在的 `ICONS.state`，仅在 `projectItems` 中补充一项导航；未修改 StateCenterPage 核心状态流，未修改 WritingQualityPage，未修改 WritingQualityService，未新增第七阶段功能。
+
+### 启动与构建结果
+
+| 命令 | 结果 |
+|------|------|
+| `cd server && npm run typecheck` | 通过 |
+| `cd server && npm run build` | 通过 |
+| `cd desktop && npm run typecheck` | 通过 |
+| `cd desktop && npm run build` | 通过；仅保留既有 Vite dynamic import / chunk size warning |
+| `cd server && npm run start:dev` | 启动成功；`GET /api/v1/health` 返回 `{"status":"ok"}` |
+| `cd desktop && npm run dev` | Electron 真实窗口打开，标题为 `AI写作平台` |
+
+### 测试对象
+
+- **测试项目 ID**: `3bc177f1-9391-4662-8c96-c287621b78b5`
+- **测试项目名称**: `画中血眼`
+- **测试章节 ID**: `82bd4d54-e60f-4e63-97fe-fd35a483f4af`
+- **章节正文基线 hash**: `a396b8ac40548775232977103a59a10adb7445a3ac4b3377314be867d7ab0c91`
+- **confirm 测试 state_item ID**: `cd05ee13-b1a2-4053-bd5e-1a414598bacb`
+- **reject 测试 state_item ID**: `0eec3783-be61-41b7-ae89-125aa388b8b0`
+- **archive 测试 state_item ID**: `3854df51-b509-44f5-a766-10f2ad996c81`
+- **角色成长测试输入 ID**: `phase68-character-ui-test`
+- **状态层级临时项**: `phase68_ui_hierarchy_pending`、`phase68_ui_hierarchy_confirmed`、`phase68_ui_hierarchy_conflict`、`phase68_ui_hierarchy_stale`、`phase68_ui_hierarchy_rejected`、`phase68_ui_hierarchy_archived`
+
+### StateCenterPage 真实 UI 验收
+
+| 项目 | 结果 | 记录 |
+|------|------|------|
+| 通过真实 UI 进入 StateCenterPage | 真实验证通过 | 从 Electron 左侧侧边栏点击 `状态确稿` 进入 `/project/:id/state`，未使用地址栏或 DevTools 跳转。 |
+| 页面打开 | 真实验证通过 | 页面标题 `状态确稿中心` 正常显示，无白屏。 |
+| 状态项列表加载 | 真实验证通过 | 临时测试项和既有状态项均可加载。 |
+| 空态/详情 | 真实验证通过 | 有列表时显示详情；角色成长无数据时显示 `暂无角色成长事件`。 |
+| 控制台致命错误 | 真实验证通过 | Electron 真实操作过程中未观察到页面崩溃、白屏或致命错误；本轮未生成单独的 desktop 日志文件。 |
+
+### 状态层级显示验收
+
+| 状态 | 结果 | 记录 |
+|------|------|------|
+| pending | 真实验证通过 | `phase68_ui_hierarchy_pending` 显示为 `待确稿`，写作上下文标记为进入。 |
+| confirmed | 真实验证通过 | `phase68_ui_hierarchy_confirmed` 显示为 `已确稿`，写作上下文标记为进入。 |
+| conflict | 真实验证通过 | `phase68_ui_hierarchy_conflict` 显示为 `冲突`。 |
+| stale / expired | 真实验证通过 | `phase68_ui_hierarchy_stale` 显示为 `过期`。 |
+| rejected | 真实验证通过 | `phase68_ui_hierarchy_rejected` 显示为 `已驳回`，写作上下文标记为不进入。 |
+| archived | 真实验证通过 | `phase68_ui_hierarchy_archived` 显示为 `已归档`，写作上下文标记为不进入。 |
+
+### confirm / reject / archive 真实点击验收
+
+| 操作 | 结果 | 记录 |
+|------|------|------|
+| confirm | 真实验证通过 | 点击 `确稿` 后页面提示 `状态已确稿并写回长期状态`，列表计数从待确稿 7 / 已确稿 0 更新为待确稿 6 / 已确稿 1；DB 中 `phase68_ui_confirm_test` 变为 `status=confirmed`、`authority=hard_fact`。 |
+| reject | 真实验证通过 | 点击 `驳回` 后页面提示 `状态已驳回`；DB 中 `phase68_ui_reject_test` 变为 `status=rejected`、`authority=excluded`，详情显示写作上下文不进入。 |
+| archive | 真实验证通过 | 点击 `归档` 后页面提示 `状态已归档`；DB 中 `phase68_ui_archive_test` 变为 `status=archived`、`authority=excluded`，详情显示写作上下文不进入。 |
+| 写作质量表影响 | 真实 DB 复查通过 | 操作前后 `writing_quality_issues=52`、`writing_quality_reports=7`，未被状态确稿操作影响。 |
+| 章节正文影响 | 真实 DB 复查通过 | 操作前后测试章节 hash 均为 `a396b8ac40548775232977103a59a10adb7445a3ac4b3377314be867d7ab0c91`，正文未变化。 |
+| rejected / archived 上下文 | 真实 API 复查通过 | `context-preview` 不包含 `phase68_ui_reject_test` / `phase68_ui_archive_test`，也不包含 hierarchy 的 rejected / archived 项；confirmed 测试项可进入上下文。 |
+
+### 角色成长事件 Tab 验收
+
+- **Tab 可见**: 真实验证通过。
+- **Tab 可点击**: 真实验证通过。
+- **页面状态**: 真实验证通过，无白屏。
+- **测试输入**: 在输入框输入 `phase68-character-ui-test` 并点击 `加载`。
+- **结果**: 当前项目没有角色成长事件数据，页面显示 `暂无角色成长事件`，空态正常；本轮未伪造正式角色成长数据。
+
+### 回归复核
+
+| 项目 | 结果 | 记录 |
+|------|------|------|
+| WritingQualityPage | 真实验证通过 | 从 AI 写作面板 `质检` Tab 点击 `写作质量诊断中心` 后页面可打开，无白屏。 |
+| 原有开始质量检测按钮 | 真实验证通过 | `开始质量检测` 按钮仍可见。 |
+| 正文生成 / 续写 / long-write 入口 | 真实验证通过 | 写作页和 AI 写作面板可打开，`AI生成`、`一次性`、`长篇生成` 入口仍可见。 |
+| Workflow Guard / 工作流入口 | 真实验证通过 | 写作页 `工作流` 入口仍可见；本轮未修改 Workflow Guard 规则或服务。 |
+| 写作质量 apply 不写入 state_items | 真实 DB 复查通过 | Phase 6.7 已实测；本轮状态操作和临时层级测试清理后 `state_items` 回到 4。 |
+
+### 临时测试数据清理结果
+
+- `phase68_ui_acceptance` 操作测试项已清理。
+- `phase68_ui_hierarchy` 状态层级测试项已清理。
+- 清理后 `phase68Remaining=0`。
+- 清理后 `state_items=4`。
+- 清理后 `character_evolution_events=0`。
+- 清理后 `writing_quality_issues=52`、`writing_quality_reports=7`。
+- 清理后测试章节 `status=draft`、正文长度 863、hash `a396b8ac40548775232977103a59a10adb7445a3ac4b3377314be867d7ab0c91`。
+
+### 本轮发现与修复
+
+- **发现问题**: StateCenterPage 路由存在，但项目侧边栏缺少稳定可点击入口，导致 Phase 6.7 无法通过真实 UI 进入页面。
+- **修复问题**: 在项目侧边栏补充 `状态确稿` 导航项，路径 `/project/:id/state`。
+- **未修改内容**: 未重写 StateCenterPage，未修改状态确稿中心核心状态流，未修改 WritingQualityPage，未修改 WritingQualityService，未修改数据库迁移，未进入第七阶段。
+
+### 尚未验证问题
+
+本轮 Phase 6.8 要求范围内无剩余未验证项。角色成长事件 Tab 已真实打开并验证空态；当前项目无角色成长事件数据，因此未验证“有数据时”的事件列表内容展示，但未将该项伪造成有数据通过。
+
+### 第六阶段最终结论
+
+第六阶段严格验收完成：写作质量诊断与精修闭环、locked apply 保护、StateCenterPage 稳定入口、confirm/reject/archive 真实点击、状态层级显示、角色成长事件 Tab、临时数据清理和第六阶段对第五阶段状态确稿中心的回归复核均已完成。
+
+**是否可以进入第七阶段**: 可以进入第七阶段。
+
 ## 1. 第六阶段目标
 
 建设"写作质量诊断、问题定位、局部精修、验收回写"的闭环能力：
