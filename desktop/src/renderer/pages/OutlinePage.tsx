@@ -14,6 +14,7 @@ import { useForeshadowingStore } from '../stores/foreshadowingStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useWorkflowGuardStore } from '../stores/workflowGuardStore';
 import WorkflowBlockedNotice from '../components/workflow/WorkflowBlockedNotice';
+import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
 type ChapterFunctionType =
   | 'opening'
@@ -452,7 +453,7 @@ const OutlinePage: React.FC = () => {
   const refreshAfterChange = useCallback(async (nextSelectedId?: string) => {
     await loadVolumes();
     if (nextSelectedId) setSelectedChapterId(nextSelectedId);
-    setSyncMessage('已刷新大纲树，并同步后续伏笔章节索引；角色、组织与地图、未锁定正文需要在待确认列表中复核。');
+    setSyncMessage('当前仅提供伏笔章节索引基础同步能力；时间线、角色状态、未锁定正文会生成待确认影响项，需要人工复核。');
   }, [loadVolumes]);
 
   const saveGeneratedOutline = useCallback(async (volumesToSave: VolumeNode[], meta: Record<string, any>) => {
@@ -991,7 +992,7 @@ const OutlinePage: React.FC = () => {
           <button type="button" style={{ ...styles.operationButton, color: '#ef4444', borderColor: 'rgba(239,68,68,0.24)' }} onClick={() => selectedVolume && handleDeleteChapter(selectedVolume.id, selectedChapter.id)}>删除</button>
         </div>
         <div style={styles.impactNotice}>
-          影响提示：尽量小改。世界观为上游设定；已锁定正文不自动改；大纲、角色、组织与地图、伏笔会产生待确认影响；未锁定正文可按新大纲联动。
+          影响提示：当前仅提供伏笔章节索引基础同步能力；时间线、角色状态、未锁定正文会生成待确认影响项，需要人工复核。
         </div>
         <div style={styles.impactNotice}>
           续创建：
@@ -1084,6 +1085,7 @@ const OutlinePage: React.FC = () => {
 
   return (
     <div style={styles.container}>
+      <WritingQualityContextBanner />
       <div style={styles.header}>
         <div style={styles.tabs}>
           <button type="button" style={{ ...styles.tab, ...(activeView === 'generate' ? styles.tabActive : null) }} onClick={() => setActiveView('generate')}>AI大纲生成</button>

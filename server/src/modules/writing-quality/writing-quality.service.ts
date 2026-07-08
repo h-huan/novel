@@ -220,7 +220,17 @@ export class WritingQualityService {
         issue.startOffset ?? null, issue.endOffset ?? null,
         issue.originalText || '', issue.suggestedText || '',
         JSON.stringify(tags), 'open', '{}',
-        JSON.stringify(this.buildIssueNavigation(projectId, chapterId, issueType, tags)),
+        JSON.stringify(this.buildIssueNavigation({
+          projectId,
+          chapterId,
+          reportId,
+          issueId,
+          issueType,
+          tags,
+          evidence: issue.evidence || '',
+          paragraphIndex: issue.paragraphIndex ?? null,
+          sentenceIndex: issue.sentenceIndex ?? null,
+        })),
         now, now,
       );
 
@@ -237,7 +247,17 @@ export class WritingQualityService {
         original_text: issue.originalText || '',
         suggested_text: issue.suggestedText || '',
         tags: JSON.stringify(tags), status: 'open', payload: '{}',
-        navigation_json: JSON.stringify(this.buildIssueNavigation(projectId, chapterId, issueType, tags)),
+        navigation_json: JSON.stringify(this.buildIssueNavigation({
+          projectId,
+          chapterId,
+          reportId,
+          issueId,
+          issueType,
+          tags,
+          evidence: issue.evidence || '',
+          paragraphIndex: issue.paragraphIndex ?? null,
+          sentenceIndex: issue.sentenceIndex ?? null,
+        })),
         created_at: now, updated_at: now,
         resolved_at: null as any, resolved_by: null as any,
       });
@@ -268,14 +288,16 @@ export class WritingQualityService {
     let title = dto.title || '';
     let intro = dto.intro || '';
     let content = dto.content || '';
+    let chapterStatus = '';
 
     if (dto.chapterId) {
       const chapter = db.prepare(
-        'SELECT title, content FROM chapters WHERE id = ? AND project_id = ?',
-      ).get(dto.chapterId, projectId) as { title: string; content: string } | undefined;
+        'SELECT title, content, status FROM chapters WHERE id = ? AND project_id = ?',
+      ).get(dto.chapterId, projectId) as { title: string; content: string; status: string } | undefined;
       if (!chapter) throw new NotFoundException(`Chapter ${dto.chapterId} not found`);
       title = title || chapter.title;
       content = content || chapter.content || '';
+      chapterStatus = chapter.status || '';
     }
 
     const project = db.prepare(
@@ -289,7 +311,16 @@ export class WritingQualityService {
       mode: dto.mode === 'auto' || !dto.mode ? this.inferAttentionMode({ project }) : dto.mode,
     });
 
-    return { success: true, attention: result };
+    const report = dto.persist && dto.chapterId
+      ? this.persistAttentionReport(db, projectId, dto, {
+          title: title || project?.title || '',
+          chapterId: dto.chapterId,
+          attention: result,
+          chapterLocked: chapterStatus === 'locked',
+        })
+      : null;
+
+    return { success: true, attention: result, report };
   }
 
   // ====================== 2. LIST REPORTS ======================
@@ -757,6 +788,12 @@ export class WritingQualityService {
     _dto: AnalyzeChapterDto,
   ): Promise<{ result: LLMQualityOutput; parseWarning: string | null; rawPreview: string | null }> {
     const tagsList = WRITING_QUALITY_TAGS.join(', ');
+    const timelineCheck = `
+额外检查时间线与因果链：
+- 时间顺序冲突：使用 issueType timeline_conflict 或 time_order_error。
+- 因果链断裂：使用 issueType causality_gap。
+- 事件先后矛盾或读者得知顺序混乱：使用 issueType event_sequence_risk。
+这些问题需要保留在 tags 中，便于跳转到时间线页面。`;
     const systemPrompt = `你是一位专业的网络小说编辑和质量诊断专家。你的任务是对网文章节进行深度质量诊断。
 
 诊断维度：
@@ -775,6 +812,7 @@ export class WritingQualityService {
 - 潜台词缺乏（lack_of_subtext / repeated_emotion_action）
 
 可用质量标签：${tagsList}
+${timelineCheck}
 
 你必须只输出严格JSON，不输出任何其他内容。`;
 
@@ -944,6 +982,91 @@ ${fullContent.slice(0, 3000)}
 
   // ====================== HELPERS ======================
 
+  private persistAttentionReport(
+    db: any,
+    projectId: string,
+    dto: AttentionCheckDto,
+    input: { title: string; chapterId: string; attention: any; chapterLocked: boolean },
+  ) {
+    const now = new Date().toISOString();
+    const level = input.attention.slipAwayRiskScore >= 85
+      ? 'critical'
+      : input.attention.slipAwayRiskScore >= 70
+        ? 'high'
+        : input.attention.slipAwayRiskScore >= 45
+          ? 'medium'
+          : 'low';
+    const summary = input.attention.reasons?.length
+      ? `滑走风险 ${input.attention.slipAwayRiskScore}：${input.attention.reasons.slice(0, 2).join('；')}`
+      : `滑走风险 ${input.attention.slipAwayRiskScore}，前三屏注意力基础通过。`;
+    const payload = { attention: input.attention, mode: dto.mode || 'auto' };
+
+    if (dto.reportId) {
+      const existing = db.prepare(
+        'SELECT * FROM writing_quality_reports WHERE id = ? AND project_id = ?',
+      ).get(dto.reportId, projectId) as ReportRow | undefined;
+      if (existing) {
+        const oldPayload = safeJsonParse(existing.payload || '{}', {});
+        db.prepare(`
+          UPDATE writing_quality_reports
+          SET summary = ?, overall_level = ?, overall_score = ?, payload = ?, attention_json = ?, updated_at = ?
+          WHERE id = ?
+        `).run(
+          summary,
+          level,
+          Math.max(0, 100 - Number(input.attention.slipAwayRiskScore || 0)),
+          JSON.stringify({ ...oldPayload, ...payload }),
+          JSON.stringify(input.attention),
+          now,
+          dto.reportId,
+        );
+        const updated = db.prepare('SELECT * FROM writing_quality_reports WHERE id = ?').get(dto.reportId) as ReportRow;
+        return {
+          ...this.reportRowToResponse(updated),
+          issueCount: 0,
+          openIssueCount: 0,
+          highIssueCount: 0,
+          resolvedIssueCount: 0,
+          chapterLocked: input.chapterLocked,
+        };
+      }
+    }
+
+    const reportId = uuid();
+    db.prepare(`
+      INSERT INTO writing_quality_reports (
+        id, project_id, chapter_id, source_type, source_id, scope, title, summary,
+        overall_level, overall_score, model, payload, attention_json, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      reportId,
+      projectId,
+      input.chapterId,
+      'attention_check',
+      input.chapterId,
+      'attention',
+      `Attention Check: ${input.title}`,
+      summary,
+      level,
+      Math.max(0, 100 - Number(input.attention.slipAwayRiskScore || 0)),
+      'rule',
+      JSON.stringify(payload),
+      JSON.stringify(input.attention),
+      'system',
+      now,
+      now,
+    );
+    const created = db.prepare('SELECT * FROM writing_quality_reports WHERE id = ?').get(reportId) as ReportRow;
+    return {
+      ...this.reportRowToResponse(created),
+      issueCount: 0,
+      openIssueCount: 0,
+      highIssueCount: 0,
+      resolvedIssueCount: 0,
+      chapterLocked: input.chapterLocked,
+    };
+  }
+
   private buildAttentionAnalysis(input: { title: string; intro: string; content: string; mode: string }) {
     const content = (input.content || '').trim();
     const title = (input.title || '').trim();
@@ -1029,21 +1152,59 @@ ${fullContent.slice(0, 3000)}
     return 'long';
   }
 
-  private buildIssueNavigation(projectId: string, chapterId: string, issueType: string, tags: string[]) {
-    const all = new Set([issueType, ...tags]);
-    if (all.has('needs_character_voice') || all.has('same_voice_characters') || all.has('needs_asymmetry')) {
-      return { target: 'character', label: '角色', path: `/project/${projectId}/characters` };
+  private buildIssueNavigation(input: {
+    projectId: string;
+    chapterId: string;
+    reportId: string;
+    issueId: string;
+    issueType: string;
+    tags: string[];
+    evidence?: string;
+    paragraphIndex?: number | null;
+    sentenceIndex?: number | null;
+  }) {
+    const all = new Set([input.issueType, ...input.tags]);
+    const timelineTags = ['timeline_conflict', 'causality_gap', 'time_order_error', 'event_sequence_risk'];
+    const target = timelineTags.some(tag => all.has(tag))
+      ? { target: 'timeline', label: '时间线', pathBase: `/project/${input.projectId}/timeline` }
+      : all.has('needs_character_voice') || all.has('same_voice_characters') || all.has('needs_asymmetry')
+        ? { target: 'character', label: '角色', pathBase: `/project/${input.projectId}/characters` }
+        : all.has('logic_gap') || all.has('too_expository')
+          ? { target: 'world', label: '世界观', pathBase: `/project/${input.projectId}/world` }
+          : all.has('needs_payoff') || all.has('needs_hook')
+            ? { target: 'foreshadowing', label: '伏笔', pathBase: `/project/${input.projectId}/foreshadowing` }
+            : all.has('pacing_risk') || all.has('chapter_hook')
+              ? { target: 'outline', label: '大纲章节', pathBase: `/project/${input.projectId}/outline` }
+              : { target: 'writing', label: '正文定位', pathBase: `/project/${input.projectId}/writing` };
+    const evidencePreview = (input.evidence || '').replace(/\s+/g, ' ').slice(0, 80);
+    const params = new URLSearchParams({
+      source: 'writing-quality',
+      reportId: input.reportId,
+      issueId: input.issueId,
+      chapterId: input.chapterId,
+      target: target.target,
+    });
+    if (input.paragraphIndex !== null && input.paragraphIndex !== undefined) {
+      params.set('paragraphIndex', String(input.paragraphIndex));
     }
-    if (all.has('logic_gap') || all.has('too_expository')) {
-      return { target: 'world', label: '世界观', path: `/project/${projectId}/world` };
-    }
-    if (all.has('needs_payoff') || all.has('needs_hook')) {
-      return { target: 'foreshadowing', label: '伏笔', path: `/project/${projectId}/foreshadowing` };
-    }
-    if (all.has('pacing_risk') || all.has('chapter_hook')) {
-      return { target: 'outline', label: '大纲章节', path: `/project/${projectId}/outline` };
-    }
-    return { target: 'writing', label: '正文定位', path: `/project/${projectId}/writing?chapterId=${chapterId}` };
+    if (evidencePreview) params.set('evidencePreview', evidencePreview);
+    const context = {
+      source: 'writing-quality',
+      reportId: input.reportId,
+      issueId: input.issueId,
+      chapterId: input.chapterId,
+      evidence: input.evidence || '',
+      evidencePreview,
+      paragraphIndex: input.paragraphIndex ?? null,
+      sentenceIndex: input.sentenceIndex ?? null,
+      issueType: input.issueType,
+    };
+    return {
+      target: target.target,
+      label: target.label,
+      path: `${target.pathBase}?${params.toString()}`,
+      context,
+    };
   }
 
   private persistRecheckResult(db: any, revision: RevisionRow, issue: IssueRow | null, result: RecheckResult) {
@@ -1135,6 +1296,19 @@ ${fullContent.slice(0, 3000)}
   }
 
   private issueRowToResponse(r: IssueRow) {
+    const tags = safeJsonParse(r.tags, []);
+    const navigation = safeJsonParse(r.navigation_json || '{}', null)
+      || this.buildIssueNavigation({
+        projectId: r.project_id,
+        chapterId: r.chapter_id,
+        reportId: r.report_id,
+        issueId: r.id,
+        issueType: r.issue_type,
+        tags,
+        evidence: r.evidence || '',
+        paragraphIndex: r.paragraph_index,
+        sentenceIndex: r.sentence_index,
+      });
     return {
       id: r.id, reportId: r.report_id, projectId: r.project_id, chapterId: r.chapter_id,
       issueType: r.issue_type, severity: r.severity,
@@ -1143,10 +1317,10 @@ ${fullContent.slice(0, 3000)}
       paragraphIndex: r.paragraph_index, sentenceIndex: r.sentence_index,
       startOffset: r.start_offset, endOffset: r.end_offset,
       originalText: r.original_text, suggestedText: r.suggested_text,
-      tags: safeJsonParse(r.tags, []),
+      tags,
       status: r.status, payload: safeJsonParse(r.payload),
       latestRevisionId: r.latest_revision_id || null,
-      navigation: safeJsonParse(r.navigation_json || '{}', {}),
+      navigation,
       statusHistory: safeJsonParse(r.status_history_json || '[]', []),
       recheckResult: safeJsonParse(r.recheck_result_json || '{}', {}),
       createdAt: r.created_at, updatedAt: r.updated_at,

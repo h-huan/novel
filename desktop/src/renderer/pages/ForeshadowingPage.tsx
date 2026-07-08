@@ -8,6 +8,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useForeshadowingStore } from '../stores/foreshadowingStore';
 import { useProjectStore } from '../stores/projectStore';
+import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
 type ForeshadowingStatus = 'buried' | 'pending' | 'recovered' | 'cancelled';
 
@@ -130,6 +131,7 @@ const ForeshadowingPage: React.FC = () => {
 
   return (
     <div style={{ padding: '20px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <WritingQualityContextBanner />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>🔍 伏笔看板</h1>
         <div style={{ display: 'flex', gap: '8px' }}>

@@ -1093,7 +1093,7 @@ npm run build
 | 单 issue 方案、apply、单项复检、忽略/归档 | 已实现 |
 | issue 跳转创作位置 | 已实现基础导航 |
 | 大纲动态长篇规划 | 已实现参数入口，不写死超长篇参考值 |
-| 短篇三步骤与强钩子提示 | 已实现入口提示 |
+| 短篇三步骤与强钩子提示 | 入口与生成约束已实现；完整结构化工作流待后续展开 |
 | 大纲合并、插入、排序、续创建 | 已实现 |
 | 角色描述密度 | 完成数据结构入口，完整编辑器后续展开 |
 | 世界观规则系统 | 完成数据结构入口，完整编辑器后续展开 |
@@ -1117,3 +1117,67 @@ npm run build
 - [x] 不破坏角色成长事件
 - [x] 不破坏 Workflow Guard
 - [x] 不破坏正文生成/续写/long-write
+
+## Phase 6.9 P0 修正记录（2026-07-08）
+
+### 最新提交 SHA
+
+- 本轮修正提交 SHA：以本轮最终输出为准（提交后 SHA 会因文档回填发生变化）
+- 基准提交 SHA：`e7c898d637e4b972b3ff416644f1d209a4b65bd8`
+- 基准提交信息：`feat: complete phase 6.9 creative core loop`
+
+### 本轮修正范围
+
+本轮仍属于 Phase 6.9 修正提交，不进入 Phase 7。修正目标是补齐第一版实现中的 P0 缺口，并降低文档中对尚未完整落地项目的验收措辞。
+
+### 注意力独立检查持久化
+
+- `POST /projects/:projectId/writing-quality/attention` 已扩展 `persist` 与 `reportId`。
+- `persist=true` 且存在 `chapterId` 时，服务端会创建或更新 `source_type = attention_check`、`scope = attention` 的 report。
+- attention report 写入 `attention_json`，`payload.attention` 同步更新，`model = rule`。
+- attention report 不创建 `writing_quality_issues`，因此 issueCount 为 0，不会把注意力检查强行变成 issue。
+- locked 章节可以做 attention 诊断，但不会修改正文，也不会触发 apply。
+
+### Issue 跳转上下文
+
+- `buildIssueNavigation` 已升级为 `path + context` 结构。
+- URL query 包含 `source=writing-quality`、`reportId`、`issueId`、`chapterId`、`target`、可选 `paragraphIndex` 与短 `evidencePreview`。
+- 完整 evidence 不写入 URL，放在 `navigation.context` 和 React Router `state` 中传递。
+- 返回路径已按真实路由修正为 `/project/:id/writing-quality`。
+- `WritingPage`、`OutlinePage`、`CharacterPage`、`WorldPage`、`ForeshadowingPage`、`TimelinePage` 已接入轻量提示条，能显示来自质检的问题上下文并返回质检页。
+- 正文写作页已兼容 `chapterId` query，用于从质检跳转后打开对应章节。
+
+### Timeline 映射
+
+- `WRITING_QUALITY_TAGS` 新增并兼容：`timeline_conflict`、`causality_gap`、`time_order_error`、`event_sequence_risk`。
+- LLM 质检 prompt 已增加时间顺序冲突、因果链断裂、事件先后矛盾、读者得知顺序混乱等检查维度。
+- 命中上述 issueType 或 tags 时，导航目标为 `/project/:id/timeline`。
+
+### 大纲同步声明修正
+
+- 当前代码只提供伏笔章节索引基础同步能力。
+- 时间线、角色状态、未锁定正文不会被宣称为已完整自动同步。
+- 大纲变动对时间线、角色状态、正文的影响仍通过 `analyzeOperationImpact` 作为待确认影响记录保留，完整自动同步留待后续阶段。
+
+### 短篇三步骤验收措辞修正
+
+- 短篇三步骤当前是入口提示、planning 参数传递和生成约束，不是完整结构化短篇工作流。
+- 正确状态：短篇三步骤入口与生成约束已实现；完整题材库、递进反转表、伏笔回收表结构化编辑器后续展开。
+- 短篇生成已传入三步骤约束，待真实生成质量验收。
+
+### 构建记录
+
+- `server npm run typecheck`: 通过
+- `server npm run build`: 通过
+- `desktop npm run typecheck`: 通过
+- `desktop npm run build`: 通过
+
+### 遗留项
+
+1. 角色密度档案完整编辑器未完成。
+2. 世界观规则系统完整编辑器未完成。
+3. 伏笔链视图未完成。
+4. 时间线三线模型完整编辑器未完成。
+5. 注意力引擎当前仍是规则版，后续可叠加 LLM 深度改写。
+6. 短篇三步骤完整结构化工作流待后续实现。
+7. 大纲变动对时间线、角色状态、正文的全自动同步未完成。

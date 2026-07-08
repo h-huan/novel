@@ -12,6 +12,7 @@ import { useChapterStore } from '../stores/chapterStore';
 import { api } from '../lib/api';
 import { showNotification } from '../components/common/Notification';
 import { useWritingWebSocket } from '../hooks/useWebSocket';
+import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
 const SIDEBAR_WIDTH = 180;
 const PANEL_WIDTH = 420;
@@ -173,7 +174,7 @@ const WritingPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const chapterIdFromUrl = searchParams.get('chapter');
+  const chapterIdFromUrl = searchParams.get('chapter') || searchParams.get('chapterId');
 
   const { chapters, currentChapter, fetchChapters, selectChapter, lockChapter, unlockChapter, createChapter, updateChapter, setCurrentChapterContent } = useChapterStore();
 
@@ -620,6 +621,9 @@ const WritingPage: React.FC = () => {
 
         {/* 编辑器主体 */}
         <div style={{ flex: 1, overflow: 'auto' }}>
+          <div style={{ padding: '10px 14px 0' }}>
+            <WritingQualityContextBanner />
+          </div>
           <ChapterEditorShell
             chapter={currentChapter}
             projectId={projectId || ''}

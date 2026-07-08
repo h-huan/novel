@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
 interface Timeline {
   id: string;
@@ -176,6 +177,7 @@ const TimelinePage: React.FC = () => {
 
   return (
     <div style={styles.container}>
+      <WritingQualityContextBanner />
       {/* 顶部栏 */}
       <div style={styles.header}>
         <h2 style={styles.title}>⏰ 时间线</h2>

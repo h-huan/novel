@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useCharacterStore } from '../stores/characterStore';
+import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
 type RoleType = 'protagonist' | 'major' | 'supporting' | 'minor';
 
@@ -367,6 +368,7 @@ const CharacterPage: React.FC = () => {
       </aside>
 
       <main style={styles.main}>
+        <WritingQualityContextBanner />
         {!selected || !draft ? (
           <div style={styles.empty}>请选择一个角色</div>
         ) : (

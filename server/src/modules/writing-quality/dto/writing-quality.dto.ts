@@ -71,6 +71,13 @@ export class AttentionCheckDto {
   @IsString()
   @IsIn(['short', 'long', 'auto'])
   mode?: string;
+
+  @IsOptional()
+  persist?: boolean;
+
+  @IsOptional()
+  @IsString()
+  reportId?: string;
 }
 
 export class UpdateIssueStatusDto {

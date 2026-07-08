@@ -21,6 +21,10 @@ export const WRITING_QUALITY_TAGS = [
   'needs_detail',
   'needs_character_voice',
   'needs_asymmetry',
+  'timeline_conflict',
+  'causality_gap',
+  'time_order_error',
+  'event_sequence_risk',
 ] as const;
 
 export type WritingQualityTag = typeof WRITING_QUALITY_TAGS[number];

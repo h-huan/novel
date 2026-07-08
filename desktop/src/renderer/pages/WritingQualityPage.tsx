@@ -17,6 +17,7 @@ interface QualityReport {
   id: string;
   projectId: string;
   chapterId: string;
+  sourceType?: string;
   title: string;
   summary: string;
   overallLevel: string;
@@ -64,7 +65,7 @@ interface QualityIssue {
   status: string;
   latestRevision?: RevisionResult | null;
   revisions?: RevisionResult[];
-  navigation?: { label?: string; path?: string; target?: string };
+  navigation?: { label?: string; path?: string; target?: string; context?: Record<string, any> };
   recheckResult?: any;
   createdAt: string;
   resolvedAt: string | null;
@@ -241,10 +242,24 @@ const WritingQualityPage: React.FC = () => {
     if (!selectedChapterId || !projectId) return;
     setError(null);
     try {
-      const res = await api.post<any>(`/projects/${projectId}/writing-quality/attention`, { chapterId: selectedChapterId, mode: 'auto' });
-      const data = apiPayload<{ attention: AttentionResult }>(res);
+      const res = await api.post<any>(`/projects/${projectId}/writing-quality/attention`, {
+        chapterId: selectedChapterId,
+        mode: 'auto',
+        persist: true,
+        reportId: selectedReport?.sourceType === 'attention_check' ? selectedReport.id : undefined,
+      });
+      const data = apiPayload<{ attention: AttentionResult; report?: QualityReport }>(res);
       setAttention(data.attention);
       setActiveTab('detail');
+      await loadReports();
+      if (data.report) {
+        persistView({
+          selectedChapterId,
+          selectedReportId: data.report.id,
+          activeTab: 'detail',
+        });
+        await selectReport(data.report);
+      }
     } catch (err: any) {
       setError(`注意力检查失败：${err.message || String(err)}`);
     }
@@ -312,7 +327,22 @@ const WritingQualityPage: React.FC = () => {
   };
 
   const jumpToIssueTarget = (issue: QualityIssue) => {
-    if (issue.navigation?.path) navigate(issue.navigation.path);
+    if (issue.navigation?.path) {
+      navigate(issue.navigation.path, {
+        state: {
+          ...(issue.navigation.context || {}),
+          from: 'writing-quality',
+          reportId: issue.reportId,
+          issueId: issue.id,
+          chapterId: issue.chapterId,
+          evidence: issue.evidence,
+          evidencePreview: issue.evidence?.slice(0, 120) || '',
+          paragraphIndex: issue.paragraphIndex,
+          sentenceIndex: issue.sentenceIndex,
+          returnTo: `/project/${projectId}/writing-quality`,
+        },
+      });
+    }
   };
 
   const statusLabel = (status: string) => ({
