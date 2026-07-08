@@ -44,8 +44,8 @@ type TabKey = 'overview' | 'focus' | 'characters' | 'relations' | 'foreshadowing
 const PHASE_TASKS = [
   { id: '7.0', title: '阶段展示与边界收口', status: '已完成' },
   { id: '7.1', title: '小说全貌总览 + 当前章节创作焦点', status: '已完成' },
-  { id: '7.2', title: '人物状态与人物关系网', status: '本轮实现' },
-  { id: '7.3', title: '伏笔雷达与伏笔生命周期', status: '本轮实现' },
+  { id: '7.2', title: '人物状态与人物关系网', status: '已完成' },
+  { id: '7.3', title: '伏笔雷达与伏笔生命周期', status: '已完成' },
   { id: '7.4', title: '世界观规则与时间线三线模型', status: '待开发' },
   { id: '7.5', title: '写作前检查与写作后更新闭环', status: '待开发' },
 ];
@@ -239,7 +239,7 @@ const ContinuityCockpitPage: React.FC = () => {
       if (relationshipRes.status === 'fulfilled') setContinuityRelationships(payload<any>(relationshipRes.value));
       if (foreshadowingRes.status === 'fulfilled') setContinuityForeshadowings(payload<any>(foreshadowingRes.value));
     } catch (err: any) {
-      setError(err.message || 'Phase 7.2 连续性数据加载失败');
+      setError(err.message || 'Phase 7 连续性数据加载失败');
     } finally {
       setContinuityLoading(false);
     }
@@ -436,7 +436,7 @@ const ContinuityCockpitPage: React.FC = () => {
   };
 
   const saveForeshadowingThread = async () => {
-    if (!foreshadowingForm.title.trim()) return setNotice('Please enter foreshadowing title.');
+    if (!foreshadowingForm.title.trim()) return setNotice('请填写伏笔标题。');
     const isEditing = Boolean(foreshadowingForm.threadId);
     const body = {
       title: foreshadowingForm.title,
@@ -469,7 +469,7 @@ const ContinuityCockpitPage: React.FC = () => {
       forceUnlock: !foreshadowingForm.locked,
     });
     else await api.post(`/projects/${projectId}/continuity/foreshadowings`, body);
-    setNotice(isEditing ? 'Foreshadowing thread saved.' : 'Foreshadowing thread created as pending review.');
+    setNotice(isEditing ? '伏笔修改已保存。' : '伏笔已保存为待确认记录，需要确认后才能锁定。');
     setForeshadowingForm(defaultForeshadowingForm);
     await loadContinuity();
   };
@@ -480,7 +480,7 @@ const ContinuityCockpitPage: React.FC = () => {
   };
 
   const saveForeshadowingEvent = async () => {
-    if (!foreshadowingEventForm.threadId) return setNotice('Please choose a foreshadowing thread.');
+    if (!foreshadowingEventForm.threadId) return setNotice('请先选择伏笔。');
     await api.post(`/projects/${projectId}/continuity/foreshadowings/${foreshadowingEventForm.threadId}/events`, {
       chapterId: focusChapter?.id,
       eventType: foreshadowingEventForm.eventType,
@@ -489,13 +489,13 @@ const ContinuityCockpitPage: React.FC = () => {
       impact: foreshadowingEventForm.impact,
       source: 'manual',
     });
-    setNotice('Foreshadowing lifecycle event created as pending review.');
+    setNotice('伏笔生命周期事件已保存为待确认记录。');
     setForeshadowingEventForm(defaultForeshadowingEventForm);
     await loadContinuity();
   };
 
   const saveForeshadowingTask = async () => {
-    if (!foreshadowingTaskForm.threadId || !foreshadowingTaskForm.chapterId) return setNotice('Please choose thread and chapter for task.');
+    if (!foreshadowingTaskForm.threadId || !foreshadowingTaskForm.chapterId) return setNotice('请先选择伏笔和任务章节。');
     await api.post(`/projects/${projectId}/continuity/foreshadowing-tasks`, {
       threadId: foreshadowingTaskForm.threadId,
       chapterId: foreshadowingTaskForm.chapterId,
@@ -505,7 +505,7 @@ const ContinuityCockpitPage: React.FC = () => {
       reason: foreshadowingTaskForm.reason,
       source: 'manual',
     });
-    setNotice('Foreshadowing chapter task created as pending review.');
+    setNotice('当前章伏笔任务已保存为待确认记录。');
     setForeshadowingTaskForm(defaultForeshadowingTaskForm);
     await loadContinuity();
   };
@@ -548,7 +548,7 @@ const ContinuityCockpitPage: React.FC = () => {
         <div style={styles.panelTitle}>Phase 7 分期边界</div>
         <div style={styles.phaseGrid}>
           {PHASE_TASKS.map(task => (
-            <div key={task.id} style={{ ...styles.phaseItem, borderColor: task.status === '本轮实现' ? 'rgba(34,197,94,.35)' : 'rgba(148,163,184,.22)' }}>
+            <div key={task.id} style={{ ...styles.phaseItem, borderColor: ['已完成', '本轮实现'].includes(task.status) ? 'rgba(34,197,94,.35)' : 'rgba(148,163,184,.22)' }}>
               <strong>{task.id}</strong>
               <span>{task.title}</span>
               <em>{task.status}</em>
@@ -935,7 +935,7 @@ function renderForeshadowingTab(input: any) {
       </section>
       <section style={styles.detailGrid}>
         <Panel title="伏笔生命周期">
-          <Group title="本章必须处理" items={groups.focusTasks || groups.focusThreads || []} render={(item: any) => {
+          <Group title="本章必须处理" items={(groups.focusTasks || []).length ? (groups.focusTasks || []) : (groups.focusThreads || [])} render={(item: any) => {
             if (item.taskType) return <ForeshadowingTaskCard task={item} input={input} />;
             return <ForeshadowingThreadCard thread={item} input={input} />;
           }} />
@@ -1076,6 +1076,7 @@ function ForeshadowingThreadCard({ thread, input }: { thread: any; input: any })
 
 function ForeshadowingTaskCard({ task, input }: { task: any; input: any }) {
   const isDerived = task.derived || task.source === 'radar_derived';
+  const isPersistedTask = !task.legacy && !isDerived;
   return (
     <div style={styles.itemCard}>
       <Line label="关联伏笔" value={task.threadTitle || task.threadId || EMPTY} />
@@ -1083,7 +1084,7 @@ function ForeshadowingTaskCard({ task, input }: { task: any; input: any }) {
       <Line label="写作指令" value={task.instruction || EMPTY} />
       <Line label="原因" value={task.reason || EMPTY} />
       <Line label="审核" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}${isDerived ? ' / 雷达推导' : ''}`} />
-      {!task.legacy && (
+      {isPersistedTask && (
         <div style={styles.inlineActions}>
           {TASK_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchTask(task, { status })}>{status}</button>)}
           {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchTask(task, { reviewStatus: status })}>{status}</button>)}
@@ -1092,6 +1093,12 @@ function ForeshadowingTaskCard({ task, input }: { task: any; input: any }) {
             return input.patchTask(task, { locked: !task.locked });
           }}>{task.locked ? '解锁' : '锁定'}</button>
         </div>
+      )}
+      {isDerived && (
+        <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>
+      )}
+      {task.legacy && !isPersistedTask && !isDerived && (
+        <div style={styles.hint}>旧版伏笔任务只读展示。</div>
       )}
     </div>
   );
@@ -1255,7 +1262,7 @@ function ChapterSelect({ label, chapters, value, onChange }: { label: string; ch
     <>
       <label style={styles.label}>{label}</label>
       <select style={styles.selectFull} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">None</option>
+        <option value="">不选择</option>
         {chapters.map(ch => <option key={ch.id} value={ch.id}>{volumeIndex(ch)}-{chapterIndex(ch)} {ch.title}</option>)}
       </select>
     </>
