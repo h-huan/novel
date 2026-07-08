@@ -663,6 +663,93 @@
 
 但由于 refine/apply/locked 的前端 UI 点击链路和 StateCenterPage 完整 UI 回归未在独占 Electron 窗口中完成，第六阶段“严格 UI 全量验收”仍未完全闭合。若项目验收标准必须覆盖全部 Electron UI 点击项，则**暂不进入第七阶段**；待独占 GUI 环境补完剩余 UI 点击后再进入第七阶段。
 
+## Phase 6.7 剩余 Electron 点击链路补验收记录（2026-07-07）
+
+### 基本信息
+
+- **基准提交 SHA**: `ca8835cf95b9cc87cbb8ff48f9e9dcecb4d115c5`
+- **远端同步状态**: 本轮尝试 `git fetch origin main`，但 GitHub 443 连接被当前网络环境阻断；验收基于本地 `main` 当前 HEAD。
+- **执行日期**: 2026-07-08（Asia/Shanghai；本节标题沿用阶段提示词中的 2026-07-07）
+- **执行环境**: Windows + Node.js v24.14.0 + Electron 真实窗口；Electron DevTools 仅出现既有 Autofill 协议 warning，未观察到写作质量业务报错。
+- **Server 启动**: `cd server && npm run start:dev`，健康检查返回 `{"status":"ok"}`。
+- **Desktop 启动**: `cd desktop && npm run dev`，Electron 主窗口真实打开，标题为 `AI写作平台`。
+- **项目 ID**: `3bc177f1-9391-4662-8c96-c287621b78b5`
+- **测试章节 ID**: `dc04d551-cc87-42d9-b263-6e1801cfac84`
+
+### WritingQualityPage 真实 Electron 补验收
+
+| 项目 | 结果 | 记录 |
+|------|------|------|
+| Electron 打开项目与写作页 | 真实验证通过 | 项目 `画中血眼` 可打开；写作页可打开，无白屏。 |
+| AiWritingPanel 入口 | 真实验证通过 | `AI写作` 面板可打开；`质检` Tab 下原有 `开始质量检测` 按钮仍可见；`写作质量诊断中心` 按钮可点击并跳转。 |
+| WritingQualityPage 打开 | 真实验证通过 | 诊断中心页面可打开，无白屏。 |
+| 章节下拉框 | 真实验证通过 | 下拉框可展开并加载 9 个章节；选择第 2 章后报告可加载。 |
+| 报告详情与顶部统计 | 真实验证通过 | 报告详情、统计卡片、issue 列表均可展示；应用精修后统计可刷新。 |
+| severity / issueType 筛选 | 真实验证通过 | 两类筛选控件均可切换并更新列表。 |
+| resolve issue | 真实验证通过 | 真实点击后 issue 可 resolved，顶部统计同步刷新。 |
+| refine issue | 真实验证通过 | 真实点击 `生成精修建议`，可观察到 `生成中...` loading，随后展示精修建议。 |
+| diff 展示 | 真实验证通过 | unlocked 与 locked 两条路径均展示 diff；未出现 `undefined` / `null` 文案。 |
+| unlocked apply | 真实验证通过（受控数据准备后） | 首次 refine 生成的 `before_text` 与当前大纲式章节正文不匹配，前端正确提示 `Cannot apply revision: original text not found in chapter`。随后用受控测试数据将章节内容临时设置为 revision 的 `before_text`，再通过真实 UI 点击 `应用精修到章节`，成功显示 `✓ 精修已应用`。 |
+| recheck 展示 | 真实验证通过 | apply 后页面展示 `复查结果`、`FAIL`、复查摘要和剩余问题数量，页面无崩溃。 |
+
+### 本轮 unlocked 链路明细
+
+- **负向 refine issue ID**: `2dbb30a2-5dbd-4e0a-8db2-7bef1853bf21`
+- **负向 revision ID**: `361f2620-cbcf-4c01-81c3-e130391084ba`
+- **负向结果**: diff 可展示，但 `before_text` 未命中章节原文，因此 apply 被正确拒绝；该路径不计为成功 apply。
+- **成功 apply issue ID**: `c7e18758-a1e2-4110-a238-1a40901e241a`
+- **成功 apply revision ID**: `9f291c68-fa1b-4b76-94f1-ede036f641d7`
+- **成功 apply 结果**: 真实 UI 点击 apply 后，revision 一度写为 `applied=1`，issue 一度写为 `resolved`，recheck 结果正常展示。
+- **数据恢复**: 验收结束后已恢复测试章节原始 `status=draft`、原始正文长度 238，并将本轮临时 resolved/applied 状态还原，避免污染后续验收。
+
+### locked apply 真实补验收
+
+| 项目 | 结果 | 记录 |
+|------|------|------|
+| locked analyze | 真实验证通过 | 将测试章节真实置为 `locked` 后，在 Electron 页面点击 `诊断当前章节`，生成新报告 `bcf29d82-efac-478b-a488-a7cf24066065`。 |
+| locked refine | 真实验证通过 | 对 locked 报告 issue 点击 `生成精修建议`，可观察到 loading 和精修建议。 |
+| locked diff | 真实验证通过 | locked refinement 展示 `[replace]` diff。 |
+| locked apply 前端禁用 | 真实验证通过 | 页面显示 `LOCKED - 只读` 和 `此章节已锁定，无法自动应用修改`；未出现 `应用精修到章节` 按钮。 |
+| 强制 locked apply API | 真实 API 验证通过 | 强制 POST apply 返回 400，错误信息为 `Cannot apply revision to locked chapter`。 |
+| chapters.content | 真实 DB 复查通过 | 强制 apply 后章节正文 hash 仍为原始 `f17f7ccd36fca0dc2b35ea263110222fc11cba52196cd9c21df08336d4d2d75e`。 |
+| writing_revision_records.applied | 真实 DB 复查通过 | locked revision `425d3cc1-09b2-4d00-8a58-4f6b10841ab5` 保持 `applied=0`。 |
+| issue 自动 resolved | 真实 DB 复查通过 | locked issue `fa07153e-38a1-41cf-a597-c1df484a19a0` 保持 `status=open`。 |
+| state_items 写入 | 真实 DB 复查通过 | locked 强制 apply 前后 `state_items` 数量保持 4，未写入状态确稿中心。 |
+
+### StateCenterPage 真实 UI 回归
+
+| 项目 | 结果 | 记录 |
+|------|------|------|
+| 打开 StateCenterPage | 未完成真实 UI 验证 | 当前 Electron 侧边栏未发现可点击的状态中心入口；WritingQualityPage 中的 `状态确稿中心` 仅为文本提示，不是链接。 |
+| confirm/reject/archive | 未完成真实 UI 验证 | 曾插入 3 条临时 `phase67_ui` 状态项用于测试，但由于未能进入 StateCenterPage，未真实点击 confirm/reject/archive。临时状态项已删除。 |
+| role growth Tab | 未完成真实 UI 验证 | 未能进入 StateCenterPage，因此未真实打开角色成长事件 Tab。 |
+| 路由尝试 | 环境限制未执行成功 | 应用使用 hash route；尝试通过 DevTools 控制台跳转 `#/project/:id/state` 时被 DevTools 粘贴保护和焦点输入限制阻断，未伪造成通过。 |
+
+### state_items 污染复查
+
+- 写作质量 unlocked apply 前 `state_items=4`。
+- 写作质量 unlocked apply 后 `state_items=4`，未因质量精修写入状态确稿中心。
+- StateCenterPage 回归尝试期间临时插入 3 条 `phase67_ui` 状态项；由于页面未能打开，未做 confirm/reject/archive 点击。
+- 本轮清理后 `phase67_ui` 临时状态项为 0，最终 `state_items=4`。
+
+### 本轮发现问题
+
+1. LLM 生成的部分 refinement 会引用不在当前章节正文中的 `before_text`；前端和后端能正确拒绝 apply，但该类 revision 不能作为成功 apply 验收样本。
+2. locked analyze 后，章节下拉框仍显示缓存的 `[draft]` 标签；locked refine/apply 禁用行为正确，但报告列表中的可视 `LOCKED` 标识本轮未能稳定确认。
+3. StateCenterPage 在当前 Electron UI 中缺少可点击入口；本轮也未能通过 DevTools 安全限制完成 hash 路由跳转，因此状态确稿中心完整 UI 回归仍未完成。
+
+### 本轮修复与构建
+
+- **代码修复**: 无。
+- **修改范围**: 仅更新本文档验收记录。
+- **构建**: 本轮未改代码，未重新执行完整构建；沿用 Phase 6.6 的 `server typecheck/build` 与 `desktop typecheck/build` 通过记录。
+
+### 第六阶段严格验收结论
+
+本轮已真实补齐 WritingQualityPage 的 refine、diff、unlocked apply、recheck 点击链路，并真实验证 locked 章节前端禁用 apply 与强制 API apply 400 保护；写作质量 apply 不写入 `state_items` 的复查也通过。
+
+但 StateCenterPage 的 confirm/reject/archive 与角色成长 Tab 仍未完成真实 Electron UI 回归。因此在“必须覆盖全部剩余 Electron 点击链路”的严格验收标准下，第六阶段仍未完全闭环，**暂不进入第七阶段**。后续需要在可稳定进入 `/project/:id/state` 的 Electron 环境中补做 StateCenterPage 真实 UI 回归；若项目验收标准仅要求写作质量链路和 locked apply 保护，本轮对应链路可以视为通过，但该放行需由项目验收标准明确接受。
+
 ## 1. 第六阶段目标
 
 建设"写作质量诊断、问题定位、局部精修、验收回写"的闭环能力：
