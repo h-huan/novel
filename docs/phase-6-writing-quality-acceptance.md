@@ -1026,7 +1026,7 @@ npm run build
 
 ### 最小完整实现方案
 
-本轮只做 Phase 6.9 P0 可用闭环和 P1 数据/UI 入口设计基础，不进入 Phase 7。
+历史记录：Phase 6.9 当轮只做 P0 可用闭环和 P1 数据/UI 入口设计基础，当轮未进入 Phase 7；后续已在 Phase 7.0 + Phase 7.1 正式新增小说连续性驾驶舱。
 
 - 注意力引擎：新增 `POST /projects/:projectId/writing-quality/attention`，并在 analyze 报告中保存 `attention_json`。
 - 质检闭环：报告详情返回 issue 的 `revisions / latestRevision / recheckResult`；issue 支持状态流转、单项复检、忽略、归档和创作位置跳转；apply 后不写入 `state_items` 的 Phase 6.6/6.7 约束保持不变。
@@ -1111,7 +1111,7 @@ npm run build
 
 1. P1 的角色密度档案、世界观规则编辑器、伏笔链视图、时间线三线模型仍为数据结构与入口设计基础，未在本轮过度展开。
 2. 注意力引擎本轮为确定性规则版，后续可叠加 LLM 深度改写建议。
-3. 本轮不进入 Phase 7。
+3. 历史记录：Phase 6.9 当轮未进入 Phase 7；后续已在 Phase 7.0 + Phase 7.1 正式新增小说连续性驾驶舱。
 - [x] 写作页面有质量诊断入口
 - [x] 不破坏状态确稿中心
 - [x] 不破坏角色成长事件

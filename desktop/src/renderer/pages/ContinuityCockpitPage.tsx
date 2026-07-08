@@ -3,6 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 
 const payload = <T,>(res: any): T => res?.data ?? res;
+const RISK_KEYWORDS = {
+  timeline: ['timeline_conflict', 'causality_gap', 'time_order_error', 'event_sequence_risk'],
+  foreshadowing: ['foreshadowing', '伏笔'],
+  character: ['character', '角色'],
+  world: ['world', '世界观'],
+  attention: ['needs_hook', 'pacing_risk'],
+};
 
 interface Chapter {
   id: string;
@@ -64,6 +71,7 @@ const ContinuityCockpitPage: React.FC = () => {
   const [manualForbidden, setManualForbidden] = useState('');
   const [manualNotes, setManualNotes] = useState('');
   const [manualPrompt, setManualPrompt] = useState('');
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   const viewKey = `phase7:continuity:${projectId}`;
 
@@ -128,6 +136,12 @@ const ContinuityCockpitPage: React.FC = () => {
     writeView(viewKey, { focusChapterId, manualGoal, manualForbidden, manualNotes, manualPrompt });
   }, [focusChapterId, manualGoal, manualForbidden, manualNotes, manualPrompt, projectId, viewKey]);
 
+  useEffect(() => {
+    if (copyStatus === 'idle') return;
+    const timer = window.setTimeout(() => setCopyStatus('idle'), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
+
   const sortedChapters = useMemo(() => [...chapters].sort(chapterSort), [chapters]);
   const focusChapter = useMemo(() => chapters.find(ch => ch.id === focusChapterId) || sortedChapters[0] || null, [chapters, focusChapterId, sortedChapters]);
   const focusIndex = useMemo(() => focusChapter ? sortedChapters.findIndex(ch => ch.id === focusChapter.id) : -1, [focusChapter, sortedChapters]);
@@ -138,12 +152,27 @@ const ContinuityCockpitPage: React.FC = () => {
   const relatedTimelineEvents = useMemo(() => findRelatedTimelineEvents(timelineEvents, focusChapter), [timelineEvents, focusChapter]);
   const relatedCharacters = useMemo(() => findRelatedCharacters(characters, focusChapter, focusOutline), [characters, focusChapter, focusOutline]);
   const pendingItems = useMemo(() => stateItems.filter(item => ['pending', 'draft', 'needs_review'].includes(item.status)), [stateItems]);
+  const reportSearchTexts = useMemo(() => qualityReports.map(report => searchableFields([
+    report.payload,
+    report.summary,
+    report.title,
+    report.issueSummary,
+    report.issue_summary,
+  ])), [qualityReports]);
+  const stateItemSearchTexts = useMemo(() => stateItems.map(item => searchableFields([
+    item.payload,
+    item.summary,
+    item.title,
+    item.targetType,
+    item.target_type,
+  ])), [stateItems]);
   const timelineRisks = qualityReports.reduce((sum, report) => sum + Number(report.timelineRiskCount || 0), 0)
-    + qualityReports.filter(r => String(r.payload || '').includes('timeline_conflict') || String(r.payload || '').includes('causality_gap')).length;
+    + countKeywordMatches(reportSearchTexts, RISK_KEYWORDS.timeline)
+    + countKeywordMatches(stateItemSearchTexts, RISK_KEYWORDS.timeline);
   const foreshadowingRisks = foreshadowings.filter(f => {
     const status = f.status || '';
     return status === 'pending' || status === 'buried' && Number(f.plannedRecoveryChapterIndex ?? f.planned_recovery_chapter_index ?? 9999) <= (focusIndex + 2);
-  }).length;
+  }).length + countKeywordMatches(reportSearchTexts, RISK_KEYWORDS.foreshadowing);
 
   const stats = {
     totalChapters: chapters.length,
@@ -153,8 +182,11 @@ const ContinuityCockpitPage: React.FC = () => {
     pendingConfirmations: pendingItems.length,
     foreshadowingRisks,
     timelineRisks,
-    characterStateRisks: stateItems.filter(item => item.targetType === 'character' || item.target_type === 'character').length,
-    worldRuleRisks: qualityReports.filter(r => String(r.summary || '').includes('世界观') || String(r.payload || '').includes('world')).length,
+    characterStateRisks: stateItems.filter(item => item.targetType === 'character' || item.target_type === 'character').length
+      + countKeywordMatches(reportSearchTexts, RISK_KEYWORDS.character),
+    worldRuleRisks: countKeywordMatches(reportSearchTexts, RISK_KEYWORDS.world)
+      + countKeywordMatches(stateItemSearchTexts, RISK_KEYWORDS.world),
+    attentionRisks: countKeywordMatches(reportSearchTexts, RISK_KEYWORDS.attention),
   };
 
   const generatedPrompt = useMemo(() => buildPreWritingPrompt({
@@ -169,7 +201,16 @@ const ContinuityCockpitPage: React.FC = () => {
     manualNotes,
   }), [project, focusChapter, focusOutline, relatedCharacters, relatedForeshadowings, relatedTimelineEvents, manualGoal, manualForbidden, manualNotes]);
 
-  const visiblePrompt = manualPrompt || generatedPrompt;
+  const visiblePrompt = focusChapter ? manualPrompt || generatedPrompt : '待创建章节后生成。';
+
+  const handleCopyPrompt = useCallback(async () => {
+    try {
+      await copyText(visiblePrompt);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('failed');
+    }
+  }, [visiblePrompt]);
 
   if (loading) return <div style={styles.loading}>加载小说连续性驾驶舱...</div>;
   if (!projectId) return <div style={styles.loading}>请先选择项目。</div>;
@@ -189,14 +230,22 @@ const ContinuityCockpitPage: React.FC = () => {
 
       <section style={styles.focusBar}>
         <label style={styles.label}>当前创作章节</label>
-        <select value={focusChapterId} onChange={event => setFocusChapterId(event.target.value)} style={styles.select}>
+        <select
+          value={focusChapterId}
+          onChange={event => setFocusChapterId(event.target.value)}
+          style={styles.select}
+          disabled={!sortedChapters.length}
+        >
+          {!sortedChapters.length && <option value="">暂无章节</option>}
           {sortedChapters.map(ch => (
             <option key={ch.id} value={ch.id}>
               第{volumeIndex(ch)}卷 第{chapterIndex(ch)}章 {ch.title} [{ch.status || 'draft'}]
             </option>
           ))}
         </select>
-        <span style={styles.savedHint}>已保存到本地视图状态，刷新后恢复。</span>
+        <span style={styles.savedHint}>
+          {sortedChapters.length ? '已保存到本地视图状态，刷新后恢复。' : '当前项目暂无章节，请先创建大纲或章节。'}
+        </span>
       </section>
 
       <section style={styles.phasePanel}>
@@ -246,6 +295,9 @@ const ContinuityCockpitPage: React.FC = () => {
         manualPrompt,
         setManualPrompt,
         visiblePrompt,
+        promptDisabled: !focusChapter,
+        copyStatus,
+        onCopyPrompt: handleCopyPrompt,
       })}
       {activeTab !== 'overview' && activeTab !== 'focus' && renderFutureTab(activeTab)}
     </div>
@@ -266,12 +318,16 @@ function renderOverview(input: {
     ['已写字数/目标字数', `${input.stats.writtenWords}/${input.stats.targetWords || '待接入'}`],
     ['待确认设定', String(input.stats.pendingConfirmations)],
     ['伏笔风险', String(input.stats.foreshadowingRisks)],
-    ['时间线风险', input.stats.timelineRisks ? String(input.stats.timelineRisks) : '待接入'],
-    ['人物状态风险', input.stats.characterStateRisks ? String(input.stats.characterStateRisks) : '待接入'],
-    ['世界观规则风险', input.stats.worldRuleRisks ? String(input.stats.worldRuleRisks) : '待接入'],
+    ['时间线风险', String(input.stats.timelineRisks)],
+    ['人物状态风险', String(input.stats.characterStateRisks)],
+    ['世界观规则风险', String(input.stats.worldRuleRisks)],
+    ['注意力风险', String(input.stats.attentionRisks)],
   ];
   return (
     <div>
+      <div style={styles.notice}>
+        当前风险统计为轻量统计：仅基于已加载的报告摘要、状态项、伏笔与时间线数据做关键词和状态聚合；完整聚合 API 留到后续阶段接入。
+      </div>
       <section style={styles.cardGrid}>
         {cards.map(([label, value]) => (
           <div key={label} style={styles.statCard}>
@@ -301,6 +357,7 @@ function renderOverview(input: {
 function renderFocus(input: any) {
   const ch = input.focusChapter as Chapter | null;
   const goal = input.manualGoal || extractGoal(input.focusOutline);
+  const hasChapter = Boolean(ch);
   const forbiddenBase = [
     ch?.status === 'locked' ? 'locked 章节不可自动修改。' : '',
     '已确认设定不可被当前页面直接覆盖。',
@@ -311,24 +368,26 @@ function renderFocus(input: any) {
     <div>
       <section style={styles.twoColumns}>
         <Panel title="顶部全貌摘要区">
-          <Line label="章节标题" value={ch?.title || '待选择章节'} />
+          <Line label="当前章节" value={ch?.title || '待创建'} />
           <Line label="卷序号/章序号" value={ch ? `${volumeIndex(ch)} / ${chapterIndex(ch)}` : '待补全'} />
           <Line label="状态/字数" value={ch ? `${ch.status || 'draft'} / ${wordCount(ch)}字 / ${ch.status === 'locked' ? 'locked' : '可编辑'}` : '待补全'} />
         </Panel>
         <Panel title="当前章节创作辅助区">
-          <Line label="本章写作目标" value={goal || '待从大纲补全'} />
-          <Line label="出场人物" value={input.relatedCharacters.length ? input.relatedCharacters.map((c: any) => c.name).join(' / ') : '暂无本章角色数据，Phase 7.2 将接入角色状态系统。'} />
+          <Line label="本章目标" value={hasChapter ? goal || '待补全' : '待补全'} />
+          <Line label="出场人物" value={hasChapter
+            ? input.relatedCharacters.length ? input.relatedCharacters.map((c: any) => c.name).join(' / ') : '暂无本章角色数据，Phase 7.2 将接入角色状态系统。'
+            : '待创建章节后识别'} />
           <Line label="本章备注" value={input.manualNotes || '暂无人工备注。'} />
         </Panel>
       </section>
 
       <section style={styles.detailGrid}>
         <Panel title="结构化详情区">
-          <Line label="人物状态注意事项" value={input.relatedCharacters.length ? input.relatedCharacters.map((c: any) => `${c.name}：${c.identity || '身份待补全'}`).join('；') : '暂无本章角色状态快照，Phase 7.2 将接入角色状态系统。'} />
+          <Line label="人物状态注意事项" value={hasChapter && input.relatedCharacters.length ? input.relatedCharacters.map((c: any) => `${c.name}：${c.identity || '身份待补全'}`).join('；') : '暂无本章角色状态快照，Phase 7.2 将接入角色状态系统。'} />
           <Line label="关系注意事项" value="暂无本章关系数据，Phase 7.2 将接入人物关系网。" />
-          <Line label="伏笔注意事项" value={input.relatedForeshadowings.length ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join('；') : '暂无本章伏笔任务，Phase 7.3 将接入伏笔雷达。'} />
+          <Line label="伏笔注意事项" value={hasChapter && input.relatedForeshadowings.length ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join('；') : '暂无本章伏笔任务，Phase 7.3 将接入伏笔雷达。'} />
           <Line label="世界观注意事项" value="暂无本章世界观规则，Phase 7.4 将接入世界观规则系统。" />
-          <Line label="时间线注意事项" value={input.relatedTimelineEvents.length ? input.relatedTimelineEvents.map((e: any) => e.title).join('；') : '暂无本章时间线事件，Phase 7.4 将接入时间线三线模型。'} />
+          <Line label="时间线注意事项" value={hasChapter && input.relatedTimelineEvents.length ? input.relatedTimelineEvents.map((e: any) => e.title).join('；') : '暂无本章时间线事件，Phase 7.4 将接入时间线三线模型。'} />
           <Line label="禁止写错事项" value={[...forbiddenBase, input.manualForbidden].filter(Boolean).join('；')} />
         </Panel>
         <Panel title="人工微调区">
@@ -343,7 +402,15 @@ function renderFocus(input: any) {
       </section>
 
       <Panel title="本章写作前提示词">
-        <textarea value={input.visiblePrompt} onChange={(e) => input.setManualPrompt(e.target.value)} style={{ ...styles.textarea, minHeight: 240 }} />
+        <textarea
+          value={input.visiblePrompt}
+          onChange={(e) => input.setManualPrompt(e.target.value)}
+          style={{ ...styles.textarea, minHeight: 240 }}
+          disabled={input.promptDisabled}
+        />
+        <button type="button" style={styles.copyButton} onClick={input.onCopyPrompt}>
+          {input.copyStatus === 'copied' ? '已复制' : input.copyStatus === 'failed' ? '复制失败，请手动复制' : '复制提示词'}
+        </button>
         <div style={styles.notice}>可复制文本用于写作前检查。缺失信息会标记为“待补全”，不会编造人物关系、伏笔或世界观规则。</div>
       </Panel>
     </div>
@@ -434,12 +501,13 @@ function findRelatedTimelineEvents(events: any[], chapter: Chapter | null) {
   if (!chapter) return [];
   return events.filter(event => {
     const ids = event.relatedChapterIds || event.related_chapter_ids || [];
-    return Array.isArray(ids) ? ids.includes(chapter.id) : String(ids).includes(chapter.id);
+    return Array.isArray(ids) ? ids.includes(chapter.id) : stringifySearchable(ids).includes(chapter.id);
   }).slice(0, 8);
 }
 
 function buildPreWritingPrompt(input: any) {
   const ch = input.focusChapter as Chapter | null;
+  if (!ch) return '待创建章节后生成。';
   return [
     `当前章节信息：${ch ? `第${volumeIndex(ch)}卷第${chapterIndex(ch)}章《${ch.title}》，状态 ${ch.status || 'draft'}，字数 ${wordCount(ch)}` : '待补全'}`,
     `前情提要：${input.focusOutline?.content?.slice(0, 240) || '待补全'}`,
@@ -460,6 +528,40 @@ function buildPreWritingPrompt(input: any) {
 
 function safeJson(raw: string) {
   try { return JSON.parse(raw || '{}'); } catch { return {}; }
+}
+
+function stringifySearchable(value: any): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
+function searchableFields(values: any[]): string {
+  return values.map(stringifySearchable).filter(Boolean).join('\n').toLowerCase();
+}
+
+function countKeywordMatches(texts: string[], keywords: string[]): number {
+  return texts.filter(text => keywords.some(keyword => text.includes(keyword.toLowerCase()))).length;
+}
+
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    const ok = document.execCommand('copy');
+    if (!ok) throw new Error('copy failed');
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -489,6 +591,7 @@ const styles: Record<string, React.CSSProperties> = {
   line: { display: 'grid', gridTemplateColumns: '130px 1fr', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(148,163,184,.12)', fontSize: 13 },
   empty: { color: '#94a3b8', fontSize: 13, lineHeight: 1.7 },
   textarea: { width: '100%', minHeight: 72, resize: 'vertical', background: '#020617', color: '#e5e7eb', border: '1px solid #334155', borderRadius: 6, padding: 10, margin: '6px 0 12px', fontFamily: 'inherit' },
+  copyButton: { background: '#2563eb', color: '#fff', border: '1px solid #3b82f6', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', marginBottom: 10 },
   notice: { fontSize: 12, color: '#93c5fd', background: 'rgba(37,99,235,.10)', border: '1px solid rgba(59,130,246,.24)', borderRadius: 6, padding: 10 },
   error: { color: '#fecaca', background: 'rgba(239,68,68,.12)', border: '1px solid rgba(239,68,68,.32)', borderRadius: 8, padding: 12, marginBottom: 12 },
 };
