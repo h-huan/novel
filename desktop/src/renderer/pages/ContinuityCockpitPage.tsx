@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 
@@ -45,7 +45,7 @@ const PHASE_TASKS = [
   { id: '7.0', title: '阶段展示与边界收口', status: '已完成' },
   { id: '7.1', title: '小说全貌总览 + 当前章节创作焦点', status: '已完成' },
   { id: '7.2', title: '人物状态与人物关系网', status: '本轮实现' },
-  { id: '7.3', title: '伏笔雷达与伏笔生命周期', status: '待开发' },
+  { id: '7.3', title: '伏笔雷达与伏笔生命周期', status: '本轮实现' },
   { id: '7.4', title: '世界观规则与时间线三线模型', status: '待开发' },
   { id: '7.5', title: '写作前检查与写作后更新闭环', status: '待开发' },
 ];
@@ -60,6 +60,16 @@ const FORESHADOWING_STATUSES = ['planned', 'buried', 'deepened', 'misdirected', 
 const FORESHADOWING_RISK_LEVELS = ['none', 'low', 'medium', 'high', 'critical'];
 const FORESHADOWING_EVENT_TYPES = ['planned', 'buried', 'deepened', 'misdirected', 'hinted', 'recovered', 'delayed', 'cancelled', 'conflict', 'other'];
 const FORESHADOWING_TASK_TYPES = ['bury', 'deepen', 'misdirect', 'recover', 'delay', 'check', 'avoid_contradiction'];
+const TASK_TYPE_LABELS: Record<string, string> = {
+  bury: '本章要埋设',
+  deepen: '本章要加深',
+  misdirect: '本章要误导',
+  recover: '本章要回收',
+  check: '本章要检查',
+  avoid_contradiction: '本章避免矛盾',
+  delay: '本章可延期',
+};
+
 const TASK_PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const TASK_STATUSES = ['todo', 'doing', 'done', 'skipped', 'overdue', 'conflict'];
 
@@ -514,14 +524,14 @@ const ContinuityCockpitPage: React.FC = () => {
         <div>
           <div style={styles.kicker}>Phase 7：小说连续性驾驶舱</div>
           <h1 style={styles.title}>小说连续性驾驶舱</h1>
-          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险与写作前注意事项。7.3-7.5 只展示入口，不假装完成。</p>
+          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达与写作前注意事项。7.4-7.5 只展示入口，不假装完成。</p>
         </div>
         <button type="button" style={styles.secondaryButton} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回首页</button>
       </header>
 
       {error && <div style={styles.error}>{error}</div>}
       {notice && <div style={styles.notice}>{notice}</div>}
-      {continuityLoading && <div style={styles.notice}>正在刷新 Phase 7.2 人物连续性数据...</div>}
+      {continuityLoading && <div style={styles.notice}>正在刷新 Phase 7 连续性数据...</div>}
 
       <section style={styles.focusBar}>
         <label style={styles.label}>当前创作章节</label>
@@ -648,7 +658,7 @@ function renderFocus(input: any) {
     ? groupTaskNotes(input.relatedForeshadowingTasks)
     : ch && input.relatedForeshadowings.length
       ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join(' / ')
-      : 'No current chapter foreshadowing task. Add one in Phase 7.3 Foreshadowing tab when needed.';
+      : '暂无本章伏笔任务，Phase 7.3 可通过伏笔 Tab 手动补全。';
   const forbiddenBase = [
     ch?.status === 'locked' ? 'locked 章节不可自动修改。' : '',
     '已确认设定不可被当前页面直接覆盖。',
@@ -895,93 +905,106 @@ function renderForeshadowingTab(input: any) {
   const isEditing = Boolean(input.form.threadId);
   const canLock = isEditing && input.form.reviewStatus === 'confirmed';
   const cards = [
-    ['Threads', summary.totalThreads ?? 0],
-    ['Focus tasks', summary.focusTasks ?? 0],
-    ['Recovery due', summary.recoveryDueCount ?? 0],
-    ['Overdue', summary.overdueCount ?? 0],
-    ['High risk', summary.highRiskCount ?? 0],
-    ['Pending review', summary.pendingReviewCount ?? 0],
+    ['总伏笔数', summary.totalThreads ?? 0],
+    ['本章伏笔任务', summary.focusTasks ?? 0],
+    ['全书伏笔', summary.fullBookThreads ?? 0],
+    ['卷内伏笔', summary.volumeThreads ?? 0],
+    ['章节伏笔', summary.chapterThreads ?? 0],
+    ['待确认伏笔', summary.pendingReviewCount ?? 0],
+    ['即将回收', summary.recoveryDueCount ?? 0],
+    ['逾期风险', summary.overdueCount ?? 0],
+    ['高风险伏笔', summary.highRiskCount ?? 0],
+    ['locked 伏笔', summary.lockedCount ?? 0],
   ];
   return (
     <div>
       <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={String(label)} value={String(value)} />)}</section>
       <section style={styles.twoColumns}>
-        <Panel title="Current Chapter Foreshadowing Tasks">
+        <Panel title="当前章伏笔雷达">
           {(groups.focusTasks || []).length ? groups.focusTasks.map((task: any) => (
             <ForeshadowingTaskCard key={task.id} task={task} input={input} />
-          )) : <p style={styles.empty}>No foreshadowing task for current chapter.</p>}
+          )) : <p style={styles.empty}>暂无本章伏笔任务。</p>}
         </Panel>
-        <Panel title="Radar Alerts">
-          <Line label="Recovery due" value={(groups.recoveryDue || []).length ? groups.recoveryDue.map((t: any) => t.title).join(' / ') : EMPTY} />
-          <Line label="Overdue" value={(groups.overdue || []).length ? groups.overdue.map((t: any) => t.title).join(' / ') : EMPTY} />
-          <Line label="High risk" value={(groups.highRisk || []).length ? groups.highRisk.map((t: any) => `${t.title}:${t.riskLevel}`).join(' / ') : EMPTY} />
-          <Line label="Pending review" value={(groups.pendingReview || []).length ? `${groups.pendingReview.length} pending items` : EMPTY} />
-          <div style={styles.notice}>Radar reads persisted Phase 7.3 records and legacy foreshadowings. Legacy records are shown read-only and are not silently migrated.</div>
+        <Panel title="伏笔风险提醒">
+          <Line label="即将回收" value={(groups.recoveryDue || []).length ? groups.recoveryDue.map((t: any) => t.title).join(' / ') : EMPTY} />
+          <Line label="逾期风险" value={(groups.overdue || []).length ? groups.overdue.map((t: any) => t.title).join(' / ') : EMPTY} />
+          <Line label="高风险伏笔" value={(groups.highRisk || []).length ? groups.highRisk.map((t: any) => `${t.title}:${t.riskLevel}`).join(' / ') : EMPTY} />
+          <Line label="待确认伏笔" value={(groups.pendingReview || []).length ? `${groups.pendingReview.length} 项待确认` : EMPTY} />
+          <div style={styles.notice}>伏笔雷达读取 Phase 7.3 新生命周期数据和旧版伏笔。旧版只读展示，不静默迁移。</div>
         </Panel>
       </section>
       <section style={styles.detailGrid}>
-        <Panel title="Foreshadowing Lifecycle">
-          <Group title="Full Book Threads" items={groups.fullBookThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
-          <Group title="Volume Threads" items={groups.volumeThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
-          <Group title="Chapter Threads" items={groups.chapterThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
-          <Group title="Recovered Threads" items={groups.recovered || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
-          <Group title="Legacy Foreshadowings (Read Only)" items={legacyThreads} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+        <Panel title="伏笔生命周期">
+          <Group title="本章必须处理" items={groups.focusTasks || groups.focusThreads || []} render={(item: any) => {
+            if (item.taskType) return <ForeshadowingTaskCard task={item} input={input} />;
+            return <ForeshadowingThreadCard thread={item} input={input} />;
+          }} />
+          <Group title="即将回收" items={groups.recoveryDue || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="逾期风险" items={groups.overdue || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="高风险伏笔" items={groups.highRisk || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="待确认伏笔" items={groups.pendingReview || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="全书伏笔" items={groups.fullBookThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="卷内伏笔" items={groups.volumeThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="章节伏笔" items={groups.chapterThreads || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="已回收伏笔" items={groups.recovered || []} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="全部伏笔" items={allThreads.filter((t: any) => !t.legacy)} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
+          <Group title="旧版伏笔，只读兼容" items={legacyThreads} render={(thread: any) => <ForeshadowingThreadCard thread={thread} input={input} />} />
         </Panel>
-        <Panel title="Manual Edit Area">
-          <label style={styles.label}>Title</label>
+        <Panel title="人工微调区">
+          <label style={styles.label}>伏笔标题</label>
           <input style={styles.input} value={input.form.title} onChange={(e) => input.setForm({ ...input.form, title: e.target.value })} />
-          <KnownSelect label="Level" options={FORESHADOWING_LEVELS} value={input.form.level} onChange={(value) => input.setForm({ ...input.form, level: value })} />
-          <NumberInput label="Volume index" value={input.form.volumeIndex} onChange={(value) => input.setForm({ ...input.form, volumeIndex: value })} />
-          <KnownSelect label="Status" options={FORESHADOWING_STATUSES} value={input.form.status} onChange={(value) => input.setForm({ ...input.form, status: value })} />
-          <KnownSelect label="Risk level" options={FORESHADOWING_RISK_LEVELS} value={input.form.riskLevel} onChange={(value) => input.setForm({ ...input.form, riskLevel: value })} />
-          <FormTextarea label="Summary" value={input.form.summary} onChange={(value) => input.setForm({ ...input.form, summary: value })} />
-          <FormTextarea label="Reader understanding" value={input.form.readerUnderstanding} onChange={(value) => input.setForm({ ...input.form, readerUnderstanding: value })} />
-          <FormTextarea label="True meaning" value={input.form.trueMeaning} onChange={(value) => input.setForm({ ...input.form, trueMeaning: value })} />
-          <FormTextarea label="Reveal strategy" value={input.form.revealStrategy} onChange={(value) => input.setForm({ ...input.form, revealStrategy: value })} />
-          <FormTextarea label="Risk reason" value={input.form.riskReason} onChange={(value) => input.setForm({ ...input.form, riskReason: value })} />
-          <ChapterSelect label="Planned bury chapter" chapters={input.chapters} value={input.form.plannedBuryChapterId} onChange={(value) => input.setForm({ ...input.form, plannedBuryChapterId: value })} />
-          <ChapterSelect label="Actual bury chapter" chapters={input.chapters} value={input.form.actualBuryChapterId} onChange={(value) => input.setForm({ ...input.form, actualBuryChapterId: value })} />
-          <ChapterSelect label="Recovery window start" chapters={input.chapters} value={input.form.recoveryWindowStartChapterId} onChange={(value) => input.setForm({ ...input.form, recoveryWindowStartChapterId: value })} />
-          <ChapterSelect label="Recovery window end" chapters={input.chapters} value={input.form.recoveryWindowEndChapterId} onChange={(value) => input.setForm({ ...input.form, recoveryWindowEndChapterId: value })} />
-          <ChapterSelect label="Actual recovery chapter" chapters={input.chapters} value={input.form.actualRecoveryChapterId} onChange={(value) => input.setForm({ ...input.form, actualRecoveryChapterId: value })} />
-          <MultiSelect label="Related characters" options={input.characters.map((c: any) => ({ id: c.id, label: c.name }))} value={input.form.relatedCharacterIds} onChange={(value) => input.setForm({ ...input.form, relatedCharacterIds: value })} />
-          <MultiSelect label="Related relationships" options={input.relationships.map((r: any) => ({ id: r.id, label: `${r.sourceCharacterName || EMPTY} - ${r.targetCharacterName || EMPTY}` }))} value={input.form.relatedRelationshipIds} onChange={(value) => input.setForm({ ...input.form, relatedRelationshipIds: value })} />
-          <label style={styles.label}>Review status</label>
+          <KnownSelect label="伏笔层级" options={FORESHADOWING_LEVELS} value={input.form.level} onChange={(value) => input.setForm({ ...input.form, level: value })} />
+          <NumberInput label="卷序号" value={input.form.volumeIndex} onChange={(value) => input.setForm({ ...input.form, volumeIndex: value })} />
+          <KnownSelect label="生命周期状态" options={FORESHADOWING_STATUSES} value={input.form.status} onChange={(value) => input.setForm({ ...input.form, status: value })} />
+          <KnownSelect label="风险等级" options={FORESHADOWING_RISK_LEVELS} value={input.form.riskLevel} onChange={(value) => input.setForm({ ...input.form, riskLevel: value })} />
+          <FormTextarea label="伏笔简述" value={input.form.summary} onChange={(value) => input.setForm({ ...input.form, summary: value })} />
+          <FormTextarea label="读者理解" value={input.form.readerUnderstanding} onChange={(value) => input.setForm({ ...input.form, readerUnderstanding: value })} />
+          <FormTextarea label="真实含义" value={input.form.trueMeaning} onChange={(value) => input.setForm({ ...input.form, trueMeaning: value })} />
+          <FormTextarea label="揭示策略" value={input.form.revealStrategy} onChange={(value) => input.setForm({ ...input.form, revealStrategy: value })} />
+          <FormTextarea label="风险原因" value={input.form.riskReason} onChange={(value) => input.setForm({ ...input.form, riskReason: value })} />
+          <ChapterSelect label="计划埋设章节" chapters={input.chapters} value={input.form.plannedBuryChapterId} onChange={(value) => input.setForm({ ...input.form, plannedBuryChapterId: value })} />
+          <ChapterSelect label="实际埋设章节" chapters={input.chapters} value={input.form.actualBuryChapterId} onChange={(value) => input.setForm({ ...input.form, actualBuryChapterId: value })} />
+          <ChapterSelect label="回收窗口开始" chapters={input.chapters} value={input.form.recoveryWindowStartChapterId} onChange={(value) => input.setForm({ ...input.form, recoveryWindowStartChapterId: value })} />
+          <ChapterSelect label="回收窗口结束" chapters={input.chapters} value={input.form.recoveryWindowEndChapterId} onChange={(value) => input.setForm({ ...input.form, recoveryWindowEndChapterId: value })} />
+          <ChapterSelect label="实际回收章节" chapters={input.chapters} value={input.form.actualRecoveryChapterId} onChange={(value) => input.setForm({ ...input.form, actualRecoveryChapterId: value })} />
+          <MultiSelect label="关联人物" options={input.characters.map((c: any) => ({ id: c.id, label: c.name }))} value={input.form.relatedCharacterIds} onChange={(value) => input.setForm({ ...input.form, relatedCharacterIds: value })} />
+          <MultiSelect label="关联关系" options={input.relationships.map((r: any) => ({ id: r.id, label: `${r.sourceCharacterName || EMPTY} - ${r.targetCharacterName || EMPTY}` }))} value={input.form.relatedRelationshipIds} onChange={(value) => input.setForm({ ...input.form, relatedRelationshipIds: value })} />
+          <label style={styles.label}>审核状态</label>
           {isEditing ? (
             <select style={styles.selectFull} value={input.form.reviewStatus} onChange={(e) => input.setForm({ ...input.form, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.form.locked : false })}>
               {REVIEW_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
             </select>
-          ) : <div style={styles.readonlyBox}>New records are always pending and unlocked.</div>}
+          ) : <div style={styles.readonlyBox}>新增模式固定 pending + unlocked。</div>}
           <label style={styles.checkbox}>
-            <input type="checkbox" checked={isEditing && input.form.locked} disabled={!canLock} onChange={(e) => input.setForm({ ...input.form, locked: e.target.checked })} /> Lock thread
+            <input type="checkbox" checked={isEditing && input.form.locked} disabled={!canLock} onChange={(e) => input.setForm({ ...input.form, locked: e.target.checked })} /> 锁定伏笔
           </label>
-          {!canLock && <div style={styles.hint}>{isEditing ? 'Confirm before locking.' : 'Create first, then confirm before locking.'}</div>}
-          <button type="button" style={styles.primaryButton} onClick={input.saveThread}>{isEditing ? 'Save Thread' : 'Create Thread'}</button>
-          <button type="button" style={styles.secondaryButton} onClick={() => input.setForm(defaultForeshadowingForm)}>Clear Thread Form</button>
+          {!canLock && <div style={styles.hint}>{isEditing ? '先确认后才能锁定。' : '先创建并确认后才能锁定。'}</div>}
+          <button type="button" style={styles.primaryButton} onClick={input.saveThread}>{isEditing ? '保存伏笔' : '新增伏笔'}</button>
+          <button type="button" style={styles.secondaryButton} onClick={() => input.setForm(defaultForeshadowingForm)}>清空伏笔表单</button>
           <hr style={styles.hr} />
-          <label style={styles.label}>Lifecycle event</label>
+          <label style={styles.label}>生命周期事件</label>
           <select style={styles.selectFull} value={input.eventForm.threadId} onChange={(e) => input.setEventForm({ ...input.eventForm, threadId: e.target.value })}>
-            <option value="">Choose thread</option>
+            <option value="">选择伏笔</option>
             {editableThreads.map((thread: any) => <option key={thread.id} value={thread.id}>{thread.title}</option>)}
           </select>
-          <KnownSelect label="Event type" options={FORESHADOWING_EVENT_TYPES} value={input.eventForm.eventType} onChange={(value) => input.setEventForm({ ...input.eventForm, eventType: value })} />
-          <FormTextarea label="Event summary" value={input.eventForm.summary} onChange={(value) => input.setEventForm({ ...input.eventForm, summary: value })} />
-          <FormTextarea label="Evidence" value={input.eventForm.evidence} onChange={(value) => input.setEventForm({ ...input.eventForm, evidence: value })} />
-          <FormTextarea label="Impact" value={input.eventForm.impact} onChange={(value) => input.setEventForm({ ...input.eventForm, impact: value })} />
-          <button type="button" style={styles.primaryButton} onClick={input.saveEvent}>Add Event</button>
+          <KnownSelect label="事件类型" options={FORESHADOWING_EVENT_TYPES} value={input.eventForm.eventType} onChange={(value) => input.setEventForm({ ...input.eventForm, eventType: value })} />
+          <FormTextarea label="事件摘要" value={input.eventForm.summary} onChange={(value) => input.setEventForm({ ...input.eventForm, summary: value })} />
+          <FormTextarea label="证据" value={input.eventForm.evidence} onChange={(value) => input.setEventForm({ ...input.eventForm, evidence: value })} />
+          <FormTextarea label="影响" value={input.eventForm.impact} onChange={(value) => input.setEventForm({ ...input.eventForm, impact: value })} />
+          <button type="button" style={styles.primaryButton} onClick={input.saveEvent}>新增生命周期事件</button>
           <hr style={styles.hr} />
-          <label style={styles.label}>Chapter task</label>
+          <label style={styles.label}>当前章任务</label>
           <select style={styles.selectFull} value={input.taskForm.threadId} onChange={(e) => input.setTaskForm({ ...input.taskForm, threadId: e.target.value })}>
-            <option value="">Choose thread</option>
+            <option value="">选择伏笔</option>
             {editableThreads.map((thread: any) => <option key={thread.id} value={thread.id}>{thread.title}</option>)}
           </select>
-          <ChapterSelect label="Task chapter" chapters={input.chapters} value={input.taskForm.chapterId} onChange={(value) => input.setTaskForm({ ...input.taskForm, chapterId: value })} />
-          <KnownSelect label="Task type" options={FORESHADOWING_TASK_TYPES} value={input.taskForm.taskType} onChange={(value) => input.setTaskForm({ ...input.taskForm, taskType: value })} />
-          <KnownSelect label="Priority" options={TASK_PRIORITIES} value={input.taskForm.priority} onChange={(value) => input.setTaskForm({ ...input.taskForm, priority: value })} />
-          <FormTextarea label="Instruction" value={input.taskForm.instruction} onChange={(value) => input.setTaskForm({ ...input.taskForm, instruction: value })} />
-          <FormTextarea label="Reason" value={input.taskForm.reason} onChange={(value) => input.setTaskForm({ ...input.taskForm, reason: value })} />
-          <button type="button" style={styles.primaryButton} onClick={input.saveTask}>Add Task</button>
-          <div style={styles.notice}>Thread, event, and task saves are persisted. AI or manual proposals stay pending until the author confirms them.</div>
+          <ChapterSelect label="任务章节" chapters={input.chapters} value={input.taskForm.chapterId} onChange={(value) => input.setTaskForm({ ...input.taskForm, chapterId: value })} />
+          <KnownSelect label="任务类型" options={FORESHADOWING_TASK_TYPES} value={input.taskForm.taskType} onChange={(value) => input.setTaskForm({ ...input.taskForm, taskType: value })} />
+          <KnownSelect label="优先级" options={TASK_PRIORITIES} value={input.taskForm.priority} onChange={(value) => input.setTaskForm({ ...input.taskForm, priority: value })} />
+          <FormTextarea label="写作指令" value={input.taskForm.instruction} onChange={(value) => input.setTaskForm({ ...input.taskForm, instruction: value })} />
+          <FormTextarea label="原因" value={input.taskForm.reason} onChange={(value) => input.setTaskForm({ ...input.taskForm, reason: value })} />
+          <button type="button" style={styles.primaryButton} onClick={input.saveTask}>新增当前章任务</button>
+          <div style={styles.notice}>伏笔、事件、任务的修改会持久化。AI 或手动提案默认进入待确认。</div>
         </Panel>
       </section>
     </div>
@@ -990,26 +1013,27 @@ function renderForeshadowingTab(input: any) {
 
 function ForeshadowingThreadCard({ thread, input }: { thread: any; input: any }) {
   const canEdit = !thread.legacy;
+  const isDerivedTask = thread.derived || thread.source === 'radar_derived';
   return (
     <details style={styles.itemCard}>
       <summary style={styles.itemSummary}>
         <strong>{thread.title || EMPTY}</strong>
         <span>{thread.level || EMPTY}</span>
         <span>{thread.status || EMPTY}</span>
-        <span>{thread.riskLevel || EMPTY}{thread.locked ? ' / locked' : ''}</span>
+        <span>{thread.riskLevel || EMPTY}{thread.locked ? ' / locked' : ''}{isDerivedTask ? ' / 雷达推导' : ''}</span>
       </summary>
-      <Line label="Summary" value={thread.summary || EMPTY} />
-      <Line label="Reader view" value={thread.readerUnderstanding || EMPTY} />
-      <Line label="True meaning" value={thread.trueMeaning || EMPTY} />
-      <Line label="Reveal strategy" value={thread.revealStrategy || EMPTY} />
-      <Line label="Risk reason" value={thread.riskReason || EMPTY} />
-      <Line label="Bury chapter" value={thread.actualBuryChapterId || thread.plannedBuryChapterId || EMPTY} />
-      <Line label="Recovery window" value={`${thread.recoveryWindowStartChapterId || EMPTY} -> ${thread.recoveryWindowEndChapterId || EMPTY}`} />
-      <Line label="Recovery chapter" value={thread.actualRecoveryChapterId || EMPTY} />
-      <Line label="Related characters" value={(thread.relatedCharacterIds || []).join(' / ') || EMPTY} />
-      <Line label="Related relationships" value={(thread.relatedRelationshipIds || []).join(' / ') || EMPTY} />
-      <Line label="Lifecycle events" value={(thread.latestEvents || []).length ? thread.latestEvents.map((event: any) => `${event.eventType}:${event.summary || EMPTY}`).join(' / ') : EMPTY} />
-      <Line label="Chapter tasks" value={(thread.focusTasks || []).length ? thread.focusTasks.map((task: any) => `${task.taskType}:${task.instruction || EMPTY}`).join(' / ') : EMPTY} />
+      <Line label="伏笔简述" value={thread.summary || EMPTY} />
+      <Line label="读者理解" value={thread.readerUnderstanding || EMPTY} />
+      <Line label="真实含义" value={thread.trueMeaning || EMPTY} />
+      <Line label="揭示策略" value={thread.revealStrategy || EMPTY} />
+      <Line label="风险原因" value={thread.riskReason || EMPTY} />
+      <Line label="埋设章节" value={thread.actualBuryChapterId || thread.plannedBuryChapterId || EMPTY} />
+      <Line label="回收窗口" value={`${thread.recoveryWindowStartChapterId || EMPTY} -> ${thread.recoveryWindowEndChapterId || EMPTY}`} />
+      <Line label="回收章节" value={thread.actualRecoveryChapterId || EMPTY} />
+      <Line label="关联人物" value={(thread.relatedCharacterIds || []).join(' / ') || EMPTY} />
+      <Line label="关联关系" value={(thread.relatedRelationshipIds || []).join(' / ') || EMPTY} />
+      <Line label="生命周期事件" value={(thread.latestEvents || []).length ? thread.latestEvents.map((event: any) => `${event.eventType}:${event.summary || EMPTY}`).join(' / ') : EMPTY} />
+      <Line label="章节任务" value={(thread.focusTasks || []).length ? thread.focusTasks.map((task: any) => `${task.taskType}:${task.instruction || EMPTY}`).join(' / ') : EMPTY} />
       {canEdit ? (
         <div style={styles.inlineActions}>
           <button type="button" style={styles.tinyButton} onClick={() => input.setForm({
@@ -1038,34 +1062,35 @@ function ForeshadowingThreadCard({ thread, input }: { thread: any; input: any })
             relatedWorldRuleIds: thread.relatedWorldRuleIds || [],
             reviewStatus: thread.reviewStatus || 'pending',
             locked: Boolean(thread.locked),
-          })}>Edit</button>
+          })}>编辑</button>
           {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchThread(thread, { reviewStatus: status })}>{status}</button>)}
           <button type="button" style={styles.tinyButton} onClick={() => {
-            if (!thread.locked && thread.reviewStatus !== 'confirmed') return input.setNotice('Confirm before locking.');
+            if (!thread.locked && thread.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
             return input.patchThread(thread, { locked: !thread.locked, forceUnlock: thread.locked });
-          }}>{thread.locked ? 'Unlock' : 'Lock'}</button>
+          }}>{thread.locked ? '解锁' : '锁定'}</button>
         </div>
-      ) : <div style={styles.hint}>Legacy record is read-only in Phase 7.3.</div>}
+      ) : <div style={styles.hint}>旧版伏笔在 Phase 7.3 中只读展示。</div>}
     </details>
   );
 }
 
 function ForeshadowingTaskCard({ task, input }: { task: any; input: any }) {
+  const isDerived = task.derived || task.source === 'radar_derived';
   return (
     <div style={styles.itemCard}>
-      <Line label="Thread" value={task.threadTitle || task.threadId || EMPTY} />
-      <Line label="Task" value={`${task.taskType || EMPTY} / ${task.priority || EMPTY} / ${task.status || EMPTY}`} />
-      <Line label="Instruction" value={task.instruction || EMPTY} />
-      <Line label="Reason" value={task.reason || EMPTY} />
-      <Line label="Review" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}`} />
+      <Line label="关联伏笔" value={task.threadTitle || task.threadId || EMPTY} />
+      <Line label="任务" value={`${TASK_TYPE_LABELS[task.taskType] || task.taskType || EMPTY} / ${task.priority || EMPTY} / ${task.status || EMPTY}`} />
+      <Line label="写作指令" value={task.instruction || EMPTY} />
+      <Line label="原因" value={task.reason || EMPTY} />
+      <Line label="审核" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}${isDerived ? ' / 雷达推导' : ''}`} />
       {!task.legacy && (
         <div style={styles.inlineActions}>
           {TASK_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchTask(task, { status })}>{status}</button>)}
           {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchTask(task, { reviewStatus: status })}>{status}</button>)}
           <button type="button" style={styles.tinyButton} onClick={() => {
-            if (!task.locked && task.reviewStatus !== 'confirmed') return input.setNotice('Confirm before locking.');
+            if (!task.locked && task.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
             return input.patchTask(task, { locked: !task.locked });
-          }}>{task.locked ? 'Unlock' : 'Lock'}</button>
+          }}>{task.locked ? '解锁' : '锁定'}</button>
         </div>
       )}
     </div>
@@ -1316,7 +1341,7 @@ function groupTaskNotes(tasks: any[]) {
     acc[key].push(`${task.threadTitle || task.threadId || EMPTY}: ${task.instruction || task.reason || task.status || EMPTY}`);
     return acc;
   }, {});
-  return Object.entries(grouped).map(([type, items]) => `${type}: ${items.join(' / ')}`).join(' | ');
+  return Object.entries(grouped).map(([type, items]) => `${TASK_TYPE_LABELS[type] || type}: ${items.join(' / ')}`).join(' | ');
 }
 
 function buildPreWritingPrompt(input: any) {

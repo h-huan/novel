@@ -107,15 +107,77 @@ export class ContinuityService {
     const tasks = this.allForeshadowingTasks(projectId);
     const legacy = this.allLegacyForeshadowings(projectId);
     const currentChapterIndex = focusChapter ? Number(focusChapter.chapter_index || focusChapter.chapterIndex || 0) : 0;
+    const orderMap = this.getChapterOrderMap(projectId);
+
+    // Get focus character and relationship IDs for the current chapter
+    const characters = this.allCharacters(projectId);
+    const snapshots = this.allStateSnapshots(projectId);
+    const relationships = this.allRelationships(projectId);
+    const outline = focusChapter ? this.getFocusOutline(projectId, focusChapter) : null;
+    const focusCharacterIds = this.focusCharacterIds(characters, snapshots, relationships, focusChapter, outline);
+
+    // Focus relationship IDs for current chapter
+    const relEvents = this.allRelationshipEvents(projectId);
+    const focusRelationshipIds = new Set<string>();
+    if (focusChapter) {
+      for (const rel of relationships) {
+        if (rel.first_chapter_id === focusChapter.id || rel.latest_chapter_id === focusChapter.id) {
+          focusRelationshipIds.add(rel.id);
+        }
+        if (focusCharacterIds.has(rel.source_character_id) && focusCharacterIds.has(rel.target_character_id)) {
+          focusRelationshipIds.add(rel.id);
+        }
+      }
+      for (const rEvent of relEvents) {
+        if (rEvent.chapter_id === focusChapter.id) {
+          focusRelationshipIds.add(rEvent.relationship_id);
+        }
+      }
+    }
+
     const responseThreads = threads.map(thread => this.foreshadowingToResponse(thread, events, tasks, focusChapter));
     const legacyThreads = legacy.map(item => this.legacyForeshadowingToResponse(item, currentChapterIndex, focusChapter));
     const allThreads = [...responseThreads, ...legacyThreads];
-    const focusTasks = [
+
+    // Persisted focus tasks (from foreshadowing_chapter_tasks + legacy)
+    const persistedFocusTasks = [
       ...tasks.filter(task => task.chapter_id === focusChapter?.id).map(task => this.taskToResponse(task, responseThreads.find(t => t.id === task.thread_id))),
       ...legacyThreads.flatMap(thread => thread.focusTasks || []),
     ];
-    const recoveryDue = allThreads.filter(thread => this.isRecoveryDue(thread, focusChapter, currentChapterIndex));
-    const overdue = allThreads.filter(thread => this.isOverdue(thread, focusChapter, currentChapterIndex));
+
+    // Build derived tasks for each new-format thread
+    const derivedTasks: any[] = [];
+    for (const thread of responseThreads) {
+      const threadDerived = this.buildDerivedForeshadowingTasks(thread, focusChapter, orderMap, events, focusCharacterIds, focusRelationshipIds);
+      derivedTasks.push(...threadDerived);
+    }
+
+    // Dedup: if a persisted task has the same (threadId, taskType, reason), prefer persisted
+    const persistedKeySet = new Set(persistedFocusTasks.map(t => `${t.threadId}-${t.taskType}-${t.reason}`));
+    const uniqueDerived = derivedTasks.filter(t => !persistedKeySet.has(`${t.threadId}-${t.taskType}-${t.reason}`));
+
+    // Dedup derived tasks among themselves
+    const derivedKeySet = new Set<string>();
+    const dedupedDerived: any[] = [];
+    for (const t of uniqueDerived) {
+      const key = `${t.threadId}-${t.taskType}-${t.reason}`;
+      if (!derivedKeySet.has(key)) {
+        derivedKeySet.add(key);
+        dedupedDerived.push(t);
+      }
+    }
+
+    const focusTasks = [...persistedFocusTasks, ...dedupedDerived];
+
+    // Focus threads: all threads that have any focus task (persisted or derived)
+    const focusThreadIds = new Set<string>();
+    for (const task of focusTasks) {
+      focusThreadIds.add(task.threadId);
+    }
+    const focusThreads = allThreads.filter(t => focusThreadIds.has(t.id));
+
+    const recoveryDue = allThreads.filter(thread => this.isRecoveryDue(thread, focusChapter, currentChapterIndex, orderMap));
+    const overdue = allThreads.filter(thread => this.isOverdue(thread, focusChapter, currentChapterIndex, orderMap));
     const highRisk = allThreads.filter(thread => ['high', 'critical'].includes(thread.riskLevel) || thread.status === 'conflict');
     const pendingReview = allThreads.filter(thread => thread.reviewStatus === 'pending')
       .concat(responseThreads.filter(thread => (thread.latestEvents || []).some((event: any) => event.reviewStatus === 'pending')));
@@ -126,6 +188,7 @@ export class ContinuityService {
       summary: {
         totalThreads: allThreads.length,
         focusTasks: focusTasks.length,
+        focusThreads: focusThreads.length,
         fullBookThreads: allThreads.filter(t => t.level === 'full_book').length,
         volumeThreads: allThreads.filter(t => t.level === 'volume').length,
         chapterThreads: allThreads.filter(t => t.level === 'chapter').length,
@@ -137,6 +200,7 @@ export class ContinuityService {
       },
       groups: {
         focusTasks,
+        focusThreads,
         recoveryDue,
         overdue,
         highRisk,
@@ -637,18 +701,45 @@ export class ContinuityService {
     };
   }
 
-  private isRecoveryDue(thread: any, focusChapter: any | null, currentChapterIndex: number): boolean {
+  private isRecoveryDue(thread: any, focusChapter: any | null, currentChapterIndex: number, orderMap: Map<string, number>): boolean {
+    if (thread.status === 'recovered') return false;
     if (thread.status === 'recovery_due') return true;
-    if (thread.legacyRecoveryChapterIndex) return Math.abs(Number(thread.legacyRecoveryChapterIndex) - currentChapterIndex) <= 2 && !thread.actualRecoveryChapterId;
+    // Legacy: check planned recovery chapter index within 2
+    if (thread.legacyRecoveryChapterIndex) {
+      return Math.abs(Number(thread.legacyRecoveryChapterIndex) - currentChapterIndex) <= 2 && !thread.actualRecoveryChapterId;
+    }
     if (!focusChapter) return false;
-    return [thread.recoveryWindowStartChapterId, thread.recoveryWindowEndChapterId].includes(focusChapter.id);
+    // Current chapter within recovery window
+    if (this.isChapterWithinWindow(orderMap, focusChapter.id, thread.recoveryWindowStartChapterId, thread.recoveryWindowEndChapterId)) {
+      return true;
+    }
+    // Current chapter within 2 chapters of window start or end
+    const currentOrder = this.chapterOrder(orderMap, focusChapter.id);
+    if (currentOrder === 0) return false;
+    if (thread.recoveryWindowStartChapterId) {
+      const startOrder = this.chapterOrder(orderMap, thread.recoveryWindowStartChapterId);
+      if (startOrder > 0 && Math.abs(currentOrder - startOrder) <= 2) return true;
+    }
+    if (thread.recoveryWindowEndChapterId) {
+      const endOrder = this.chapterOrder(orderMap, thread.recoveryWindowEndChapterId);
+      if (endOrder > 0 && Math.abs(currentOrder - endOrder) <= 2) return true;
+    }
+    return false;
   }
 
-  private isOverdue(thread: any, focusChapter: any | null, currentChapterIndex: number): boolean {
+  private isOverdue(thread: any, focusChapter: any | null, currentChapterIndex: number, orderMap: Map<string, number>): boolean {
     if (thread.status === 'overdue') return true;
-    if (thread.legacyRecoveryChapterIndex) return Number(thread.legacyRecoveryChapterIndex) < currentChapterIndex && thread.status !== 'recovered';
-    if (!focusChapter || !thread.recoveryWindowEndChapterId || thread.actualRecoveryChapterId) return false;
-    return thread.recoveryWindowEndChapterId !== focusChapter.id && thread.status !== 'recovered';
+    // Legacy: planned recovery chapter index < current chapter index, and not recovered
+    if (thread.legacyRecoveryChapterIndex) {
+      return Number(thread.legacyRecoveryChapterIndex) < currentChapterIndex && thread.status !== 'recovered';
+    }
+    // New table: must have recoveryWindowEndChapterId, no actual recovery, and current chapter past the window
+    if (!focusChapter || !thread.recoveryWindowEndChapterId || thread.actualRecoveryChapterId || thread.status === 'recovered') return false;
+    const currentOrder = this.chapterOrder(orderMap, focusChapter.id);
+    const endOrder = this.chapterOrder(orderMap, thread.recoveryWindowEndChapterId);
+    // Can't determine order => don't mis-judge
+    if (currentOrder === 0 || endOrder === 0) return false;
+    return currentOrder > endOrder;
   }
 
   private allCharacters(projectId: string): any[] {
@@ -703,6 +794,205 @@ export class ContinuityService {
       }
     }
     return ids;
+  }
+
+  private getChapterOrderMap(projectId: string): Map<string, number> {
+    const chapters = this.database.prepare(
+      'SELECT id, volume_index, chapter_index FROM chapters WHERE project_id = ? ORDER BY volume_index ASC, chapter_index ASC'
+    ).all(projectId) as any[];
+    const map = new Map<string, number>();
+    chapters.forEach((ch, index) => {
+      map.set(ch.id, index + 1);
+    });
+    return map;
+  }
+
+  private chapterOrder(orderMap: Map<string, number>, chapterId?: string | null): number {
+    if (!chapterId) return 0;
+    return orderMap.get(chapterId) || 0;
+  }
+
+  private isChapterWithinWindow(
+    orderMap: Map<string, number>,
+    currentChapterId: string,
+    startChapterId?: string | null,
+    endChapterId?: string | null,
+  ): boolean {
+    const currentOrder = this.chapterOrder(orderMap, currentChapterId);
+    if (currentOrder === 0) return false;
+    if (startChapterId && endChapterId) {
+      const start = this.chapterOrder(orderMap, startChapterId);
+      const end = this.chapterOrder(orderMap, endChapterId);
+      if (start > 0 && end > 0) return currentOrder >= start && currentOrder <= end;
+    }
+    if (startChapterId) {
+      const start = this.chapterOrder(orderMap, startChapterId);
+      if (start > 0) return currentOrder >= start;
+    }
+    if (endChapterId) {
+      const end = this.chapterOrder(orderMap, endChapterId);
+      if (end > 0) return currentOrder <= end;
+    }
+    return false;
+  }
+
+  private buildDerivedForeshadowingTasks(
+    thread: any,
+    focusChapter: any | null,
+    orderMap: Map<string, number>,
+    events: any[],
+    focusCharacterIds: Set<string>,
+    focusRelationshipIds: Set<string>,
+  ): any[] {
+    if (!focusChapter) return [];
+    const derived: any[] = [];
+    const threadEvents = events.filter(event => event.thread_id === thread.id && event.chapter_id === focusChapter.id);
+
+    // 1. planned_bury_chapter_id hits current chapter
+    if (thread.plannedBuryChapterId === focusChapter.id) {
+      derived.push({
+        id: `radar-${thread.id}-planned-bury`,
+        threadId: thread.id,
+        threadTitle: thread.title,
+        chapterId: focusChapter.id,
+        taskType: 'bury',
+        priority: 'high',
+        instruction: `本章计划埋设伏笔：${thread.title}`,
+        reason: 'planned_bury_chapter_id 命中当前章',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'radar_derived',
+        locked: false,
+        derived: true,
+      });
+    }
+
+    // 2. actual_bury_chapter_id hits current chapter
+    if (thread.actualBuryChapterId === focusChapter.id) {
+      derived.push({
+        id: `radar-${thread.id}-actual-bury`,
+        threadId: thread.id,
+        threadTitle: thread.title,
+        chapterId: focusChapter.id,
+        taskType: 'check',
+        priority: 'medium',
+        instruction: `本章已埋设伏笔，需要检查呈现是否一致：${thread.title}`,
+        reason: 'actual_bury_chapter_id 命中当前章',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'radar_derived',
+        locked: false,
+        derived: true,
+      });
+    }
+
+    // 3. lifecycle events hitting current chapter
+    for (const event of threadEvents) {
+      const eventTypeMap: Record<string, string> = {
+        buried: 'bury',
+        deepened: 'deepen',
+        misdirected: 'misdirect',
+        recovered: 'recover',
+        hinted: 'check',
+        conflict: 'avoid_contradiction',
+      };
+      const taskType = eventTypeMap[event.event_type] || 'check';
+      derived.push({
+        id: `radar-${thread.id}-event-${event.id || threadEvents.indexOf(event)}`,
+        threadId: thread.id,
+        threadTitle: thread.title,
+        chapterId: focusChapter.id,
+        taskType,
+        priority: 'medium',
+        instruction: `本章存在伏笔事件：${event.summary || thread.title}`,
+        reason: 'lifecycle event 命中当前章',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'radar_derived',
+        locked: false,
+        derived: true,
+      });
+    }
+
+    // 4. actual_recovery_chapter_id hits current chapter
+    if (thread.actualRecoveryChapterId === focusChapter.id) {
+      derived.push({
+        id: `radar-${thread.id}-actual-recover`,
+        threadId: thread.id,
+        threadTitle: thread.title,
+        chapterId: focusChapter.id,
+        taskType: 'recover',
+        priority: 'high',
+        instruction: `本章已回收伏笔，需要检查回收是否闭合：${thread.title}`,
+        reason: 'actual_recovery_chapter_id 命中当前章',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'radar_derived',
+        locked: false,
+        derived: true,
+      });
+    }
+
+    // 5. current chapter within recovery window
+    if (this.isChapterWithinWindow(orderMap, focusChapter.id, thread.recoveryWindowStartChapterId, thread.recoveryWindowEndChapterId)) {
+      derived.push({
+        id: `radar-${thread.id}-recovery-window`,
+        threadId: thread.id,
+        threadTitle: thread.title,
+        chapterId: focusChapter.id,
+        taskType: 'recover',
+        priority: 'high',
+        instruction: `本章处于伏笔回收窗口，需要考虑是否回收：${thread.title}`,
+        reason: '当前章处于 recovery window',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'radar_derived',
+        locked: false,
+        derived: true,
+      });
+    }
+
+    // 6. related_character_ids intersects focus characters
+    const threadChars = thread.relatedCharacterIds || [];
+    if (threadChars.some((charId: string) => focusCharacterIds.has(charId))) {
+      derived.push({
+        id: `radar-${thread.id}-char-related`,
+        threadId: thread.id,
+        threadTitle: thread.title,
+        chapterId: focusChapter.id,
+        taskType: 'check',
+        priority: 'medium',
+        instruction: `本章人物关联伏笔，需要检查人物状态与伏笔一致：${thread.title}`,
+        reason: 'related_character_ids 与当前章人物相交',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'radar_derived',
+        locked: false,
+        derived: true,
+      });
+    }
+
+    // 7. related_relationship_ids intersects focus relationships
+    const threadRels = thread.relatedRelationshipIds || [];
+    if (threadRels.some((relId: string) => focusRelationshipIds.has(relId))) {
+      derived.push({
+        id: `radar-${thread.id}-rel-related`,
+        threadId: thread.id,
+        threadTitle: thread.title,
+        chapterId: focusChapter.id,
+        taskType: 'check',
+        priority: 'medium',
+        instruction: `本章关系关联伏笔，需要检查关系变化与伏笔一致：${thread.title}`,
+        reason: 'related_relationship_ids 与当前章关系相交',
+        status: 'todo',
+        reviewStatus: 'pending',
+        source: 'radar_derived',
+        locked: false,
+        derived: true,
+      });
+    }
+
+    return derived;
   }
 
   private characterToResponse(character: any, snapshots: any[], relationships: any[], focusChapter: any | null) {
