@@ -4,7 +4,17 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, BadRequestException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { OutlineService } from './outline.service';
-import { CreateOutlineDto, UpdateOutlineDto, MoveOutlineDto, ReorderChildrenDto, SplitOutlineDto } from './dto/outline.dto';
+import {
+  ContinueOutlineDto,
+  CreateOutlineDto,
+  InsertOutlineDto,
+  MoveOutlineDto,
+  MoveOutlineOrderDto,
+  RecommendOutlinePlanDto,
+  ReorderChildrenDto,
+  SplitOutlineDto,
+  UpdateOutlineDto,
+} from './dto/outline.dto';
 
 @ApiTags('outline')
 @Controller('projects/:projectId/outlines')
@@ -24,6 +34,16 @@ export class OutlineController {
   @Get('tree')
   getTree(@Param('projectId') projectId: string) {
     return this.service.getTree(projectId);
+  }
+
+  @Post('planning/recommend')
+  recommendPlan(@Param('projectId') projectId: string, @Body() dto: RecommendOutlinePlanDto) {
+    return this.service.recommendPlan(projectId, dto);
+  }
+
+  @Post('continue')
+  continueCreate(@Param('projectId') projectId: string, @Body() dto: ContinueOutlineDto) {
+    return this.service.continueCreate(projectId, dto);
   }
 
   @Get(':id')
@@ -54,6 +74,21 @@ export class OutlineController {
   @Post(':id/split')
   split(@Param('id') id: string, @Body() dto: SplitOutlineDto) {
     return this.service.split(id, dto);
+  }
+
+  @Post(':id/insert')
+  insertAdjacent(@Param('id') id: string, @Body() dto: InsertOutlineDto) {
+    return this.service.insertAdjacent(id, dto);
+  }
+
+  @Post(':id/merge-next')
+  mergeNext(@Param('id') id: string) {
+    return this.service.mergeNext(id);
+  }
+
+  @Post(':id/move-order')
+  moveOrder(@Param('id') id: string, @Body() dto: MoveOutlineOrderDto) {
+    return this.service.moveOrder(id, dto.direction);
   }
 
   @Post(':id/move-to-volume')

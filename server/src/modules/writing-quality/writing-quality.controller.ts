@@ -4,7 +4,13 @@
 import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { WritingQualityService } from './writing-quality.service';
-import { AnalyzeChapterDto, ListReportsDto, RefineIssueDto } from './dto/writing-quality.dto';
+import {
+  AnalyzeChapterDto,
+  AttentionCheckDto,
+  ListReportsDto,
+  RefineIssueDto,
+  UpdateIssueStatusDto,
+} from './dto/writing-quality.dto';
 
 @ApiTags('writing-quality')
 @Controller('projects/:projectId/writing-quality')
@@ -15,6 +21,12 @@ export class WritingQualityController {
   @Post('analyze')
   analyzeChapter(@Param('projectId') projectId: string, @Body() dto: AnalyzeChapterDto) {
     return this.service.analyzeChapterQuality(projectId, dto);
+  }
+
+  /** POST /projects/:projectId/writing-quality/attention */
+  @Post('attention')
+  checkAttention(@Param('projectId') projectId: string, @Body() dto: AttentionCheckDto) {
+    return this.service.checkAttention(projectId, dto);
   }
 
   /** GET /projects/:projectId/writing-quality/reports */
@@ -33,6 +45,16 @@ export class WritingQualityController {
   @Post('issues/:issueId/resolve')
   resolveIssue(@Param('issueId') issueId: string) {
     return this.service.markIssueResolved(issueId);
+  }
+
+  /** POST /projects/:projectId/writing-quality/issues/:issueId/status */
+  @Post('issues/:issueId/status')
+  updateIssueStatus(
+    @Param('projectId') projectId: string,
+    @Param('issueId') issueId: string,
+    @Body() dto: UpdateIssueStatusDto,
+  ) {
+    return this.service.updateIssueStatus(projectId, issueId, dto.status, dto.reason);
   }
 
   /** POST /projects/:projectId/writing-quality/issues/:issueId/refine */
@@ -61,5 +83,14 @@ export class WritingQualityController {
     @Param('revisionId') revisionId: string,
   ) {
     return this.service.recheckAfterRevision(projectId, revisionId);
+  }
+
+  /** POST /projects/:projectId/writing-quality/issues/:issueId/recheck */
+  @Post('issues/:issueId/recheck')
+  recheckIssue(
+    @Param('projectId') projectId: string,
+    @Param('issueId') issueId: string,
+  ) {
+    return this.service.recheckIssue(projectId, issueId);
   }
 }

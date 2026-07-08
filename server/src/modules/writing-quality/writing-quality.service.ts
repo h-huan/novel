@@ -15,6 +15,7 @@ import { WRITING_QUALITY_TAGS } from '../../state/writing-quality-tags';
 import { ChapterService } from '../chapter/chapter.service';
 import type {
   AnalyzeChapterDto,
+  AttentionCheckDto,
   ListReportsDto,
   RefineIssueDto,
   LLMQualityOutput,
@@ -39,6 +40,8 @@ interface ReportRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+  attention_json?: string;
+  view_state_json?: string;
 }
 
 interface IssueRow {
@@ -65,6 +68,10 @@ interface IssueRow {
   updated_at: string;
   resolved_at: string;
   resolved_by: string;
+  latest_revision_id?: string;
+  recheck_result_json?: string;
+  navigation_json?: string;
+  status_history_json?: string;
 }
 
 interface RevisionRow {
@@ -85,6 +92,8 @@ interface RevisionRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+  recheck_result_json?: string;
+  can_apply?: number;
 }
 
 interface IssueCounts {
@@ -157,8 +166,14 @@ export class WritingQualityService {
 
     const now = new Date().toISOString();
     const reportId = uuid();
+    const attention = this.buildAttentionAnalysis({
+      title: chapterTitle,
+      intro: context?.project?.description || '',
+      content,
+      mode: this.inferAttentionMode(context?.project),
+    });
 
-    const reportPayload: Record<string, any> = {};
+    const reportPayload: Record<string, any> = { attention };
     if (parseWarning) {
       reportPayload.parseWarning = true;
       reportPayload.rawContentPreview = rawContentPreview;
@@ -174,13 +189,13 @@ export class WritingQualityService {
     db.prepare(`
       INSERT INTO writing_quality_reports (
         id, project_id, chapter_id, source_type, source_id, scope, title, summary,
-        overall_level, overall_score, model, payload, created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        overall_level, overall_score, model, payload, attention_json, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       reportId, projectId, chapterId, 'manual_check', null,
       dto.scope || 'chapter', `Chapter Quality: ${chapterTitle}`,
       summary, overallLevel, overallScore, 'llm',
-      JSON.stringify(reportPayload), 'system', now, now,
+      JSON.stringify(reportPayload), JSON.stringify(attention), 'system', now, now,
     );
 
     const issues: IssueRow[] = [];
@@ -195,8 +210,8 @@ export class WritingQualityService {
         INSERT INTO writing_quality_issues (
           id, report_id, project_id, chapter_id, issue_type, severity, title, summary,
           evidence, suggestion, paragraph_index, sentence_index, start_offset, end_offset,
-          original_text, suggested_text, tags, status, payload, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          original_text, suggested_text, tags, status, payload, navigation_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         issueId, reportId, projectId, chapterId, issueType,
         issue.severity || 'medium', issue.title, issue.summary,
@@ -204,7 +219,9 @@ export class WritingQualityService {
         issue.paragraphIndex ?? null, issue.sentenceIndex ?? null,
         issue.startOffset ?? null, issue.endOffset ?? null,
         issue.originalText || '', issue.suggestedText || '',
-        JSON.stringify(tags), 'open', '{}', now, now,
+        JSON.stringify(tags), 'open', '{}',
+        JSON.stringify(this.buildIssueNavigation(projectId, chapterId, issueType, tags)),
+        now, now,
       );
 
       issues.push({
@@ -220,6 +237,7 @@ export class WritingQualityService {
         original_text: issue.originalText || '',
         suggested_text: issue.suggestedText || '',
         tags: JSON.stringify(tags), status: 'open', payload: '{}',
+        navigation_json: JSON.stringify(this.buildIssueNavigation(projectId, chapterId, issueType, tags)),
         created_at: now, updated_at: now,
         resolved_at: null as any, resolved_by: null as any,
       });
@@ -243,6 +261,35 @@ export class WritingQualityService {
       },
       issues: issues.map(i => this.issueRowToResponse(i)),
     };
+  }
+
+  checkAttention(projectId: string, dto: AttentionCheckDto) {
+    const db = this.dbService.getDb();
+    let title = dto.title || '';
+    let intro = dto.intro || '';
+    let content = dto.content || '';
+
+    if (dto.chapterId) {
+      const chapter = db.prepare(
+        'SELECT title, content FROM chapters WHERE id = ? AND project_id = ?',
+      ).get(dto.chapterId, projectId) as { title: string; content: string } | undefined;
+      if (!chapter) throw new NotFoundException(`Chapter ${dto.chapterId} not found`);
+      title = title || chapter.title;
+      content = content || chapter.content || '';
+    }
+
+    const project = db.prepare(
+      'SELECT title, description, type, target_words, platform_style FROM projects WHERE id = ?',
+    ).get(projectId) as Record<string, any> | undefined;
+
+    const result = this.buildAttentionAnalysis({
+      title: title || project?.title || '',
+      intro: intro || project?.description || '',
+      content,
+      mode: dto.mode === 'auto' || !dto.mode ? this.inferAttentionMode({ project }) : dto.mode,
+    });
+
+    return { success: true, attention: result };
   }
 
   // ====================== 2. LIST REPORTS ======================
@@ -289,13 +336,13 @@ export class WritingQualityService {
           const entry = issueCountMap.get(stat.report_id);
           if (!entry) continue;
           entry.total += stat.cnt;
-          if (stat.status === 'open') {
+          if (this.isOpenIssueStatus(stat.status)) {
             entry.open += stat.cnt;
             if (stat.severity === 'high' || stat.severity === 'critical') {
               entry.high += stat.cnt;
             }
           }
-          if (stat.status === 'resolved') entry.resolved += stat.cnt;
+          if (this.isClosedIssueStatus(stat.status)) entry.resolved += stat.cnt;
         }
       } catch (err) {
         this.logger.warn(`Failed to load issue stats for reports: ${err instanceof Error ? err.message : String(err)}`);
@@ -342,6 +389,16 @@ export class WritingQualityService {
     const issueRows = db.prepare(
       'SELECT * FROM writing_quality_issues WHERE report_id = ? ORDER BY severity DESC, created_at ASC',
     ).all(reportId) as unknown as IssueRow[];
+    const revisionRows = db.prepare(
+      'SELECT * FROM writing_revision_records WHERE report_id = ? ORDER BY created_at ASC',
+    ).all(reportId) as unknown as RevisionRow[];
+    const revisionsByIssue = new Map<string, RevisionRow[]>();
+    for (const revision of revisionRows) {
+      if (!revision.issue_id) continue;
+      const list = revisionsByIssue.get(revision.issue_id) || [];
+      list.push(revision);
+      revisionsByIssue.set(revision.issue_id, list);
+    }
 
     const counts = this.calcIssueCounts(issueRows);
     let chapterLocked = false;
@@ -361,7 +418,17 @@ export class WritingQualityService {
         resolvedIssueCount: counts.resolved,
         chapterLocked,
       },
-      issues: issueRows.map(i => this.issueRowToResponse(i)),
+      issues: issueRows.map(i => {
+        const revisions = revisionsByIssue.get(i.id) || [];
+        const latest = revisions.length > 0 ? revisions[revisions.length - 1] : null;
+        return {
+          ...this.issueRowToResponse(i),
+          revisions: revisions.map(r => this.revisionRowToResponse(r)),
+          latestRevision: latest ? this.revisionRowToResponse(latest) : null,
+          recheckResult: safeJsonParse(i.recheck_result_json || '{}'),
+        };
+      }),
+      revisions: revisionRows.map(r => this.revisionRowToResponse(r)),
     };
   }
 
@@ -380,6 +447,35 @@ export class WritingQualityService {
     `).run(now, resolvedBy, now, issueId);
 
     return { success: true, issue: { id: issueId, status: 'resolved', resolvedAt: now, resolvedBy } };
+  }
+
+  updateIssueStatus(projectId: string, issueId: string, status: string, reason?: string) {
+    const db = this.dbService.getDb();
+    const issue = db.prepare(
+      'SELECT * FROM writing_quality_issues WHERE id = ? AND project_id = ?',
+    ).get(issueId, projectId) as IssueRow | undefined;
+    if (!issue) throw new NotFoundException(`Issue ${issueId} not found`);
+
+    const allowed = new Set([
+      'open', 'planned', 'refined', 'applied', 'recheck_passed',
+      'recheck_failed', 'ignored', 'archived', 'resolved',
+    ]);
+    if (!allowed.has(status)) {
+      throw new BadRequestException(`Unsupported issue status: ${status}`);
+    }
+
+    const now = new Date().toISOString();
+    const history = safeJsonParse(issue.status_history_json || '[]', []);
+    history.push({ from: issue.status, to: status, reason: reason || '', at: now });
+
+    const resolvedAt = this.isClosedIssueStatus(status) ? now : null;
+    db.prepare(`
+      UPDATE writing_quality_issues
+      SET status = ?, status_history_json = ?, resolved_at = COALESCE(?, resolved_at), updated_at = ?
+      WHERE id = ?
+    `).run(status, JSON.stringify(history), resolvedAt, now, issueId);
+
+    return { success: true, issue: { id: issueId, status, updatedAt: now } };
   }
 
   // ====================== 5. REFINE ISSUE ======================
@@ -411,13 +507,23 @@ export class WritingQualityService {
     db.prepare(`
       INSERT INTO writing_revision_records (
         id, project_id, chapter_id, issue_id, report_id, revision_type,
-        before_text, after_text, diff_json, applied, payload, created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        before_text, after_text, diff_json, applied, payload, can_apply, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       revisionId, projectId, issue.chapter_id, issueId, issue.report_id,
       'local_refine', refineResult.beforeText, refineResult.afterText,
-      JSON.stringify(refineResult.diff), 0, '{}', 'system', now, now,
+      JSON.stringify(refineResult.diff), 0,
+      JSON.stringify({ reason: refineResult.reason, remainingRisk: refineResult.remainingRisk, locked: isLocked }),
+      mode !== 'suggest_only' && !isLocked ? 1 : 0,
+      'system', now, now,
     );
+    const history = safeJsonParse(issue.status_history_json || '[]', []);
+    history.push({ from: issue.status, to: 'refined', reason: 'generate_patch', at: now });
+    db.prepare(`
+      UPDATE writing_quality_issues
+      SET status = 'refined', latest_revision_id = ?, status_history_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(revisionId, JSON.stringify(history), now, issueId);
 
     return {
       success: true,
@@ -485,11 +591,14 @@ export class WritingQualityService {
     `).run(now, now, revisionId);
 
     if (revision.issue_id) {
+      const issue = db.prepare('SELECT * FROM writing_quality_issues WHERE id = ?').get(revision.issue_id) as IssueRow | undefined;
+      const history = issue ? safeJsonParse(issue.status_history_json || '[]', []) : [];
+      if (issue) history.push({ from: issue.status, to: 'applied', reason: 'revision_applied', at: now });
       db.prepare(`
         UPDATE writing_quality_issues
-        SET status = 'resolved', resolved_at = ?, resolved_by = 'system', updated_at = ?
+        SET status = 'applied', latest_revision_id = ?, status_history_json = ?, resolved_at = ?, resolved_by = 'system', updated_at = ?
         WHERE id = ?
-      `).run(now, now, revision.issue_id);
+      `).run(revisionId, JSON.stringify(history), now, now, revision.issue_id);
     }
 
     return {
@@ -537,7 +646,42 @@ export class WritingQualityService {
       result = this.simpleRecheck(remainingCount);
     }
 
+    this.persistRecheckResult(db, revision, issue || null, result);
     return { success: true, result };
+  }
+
+  async recheckIssue(projectId: string, issueId: string): Promise<{ success: boolean; result: RecheckResult; revisionId: string | null }> {
+    const db = this.dbService.getDb();
+    const issue = db.prepare(
+      'SELECT * FROM writing_quality_issues WHERE id = ? AND project_id = ?',
+    ).get(issueId, projectId) as IssueRow | undefined;
+    if (!issue) throw new NotFoundException(`Issue ${issueId} not found`);
+
+    const revision = issue.latest_revision_id
+      ? db.prepare('SELECT * FROM writing_revision_records WHERE id = ? AND project_id = ?').get(issue.latest_revision_id, projectId) as RevisionRow | undefined
+      : db.prepare('SELECT * FROM writing_revision_records WHERE issue_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT 1').get(issueId, projectId) as RevisionRow | undefined;
+
+    if (revision) {
+      return this.recheckAfterRevision(projectId, revision.id).then(res => ({
+        ...res,
+        revisionId: revision.id,
+      }));
+    }
+
+    const openCount = (db.prepare(
+      'SELECT COUNT(*) as cnt FROM writing_quality_issues WHERE chapter_id = ? AND status IN (?, ?, ?, ?)',
+    ).get(issue.chapter_id, 'open', 'planned', 'refined', 'recheck_failed') as { cnt: number }).cnt;
+    const result = this.simpleRecheck(openCount);
+    const now = new Date().toISOString();
+    const nextStatus = result.pass ? 'recheck_passed' : 'recheck_failed';
+    const history = safeJsonParse(issue.status_history_json || '[]', []);
+    history.push({ from: issue.status, to: nextStatus, reason: 'issue_recheck', at: now });
+    db.prepare(`
+      UPDATE writing_quality_issues
+      SET status = ?, recheck_result_json = ?, status_history_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(nextStatus, JSON.stringify(result), JSON.stringify(history), now, issueId);
+    return { success: true, result, revisionId: null };
   }
 
   // ====================== HELPER: Project Context ======================
@@ -800,6 +944,127 @@ ${fullContent.slice(0, 3000)}
 
   // ====================== HELPERS ======================
 
+  private buildAttentionAnalysis(input: { title: string; intro: string; content: string; mode: string }) {
+    const content = (input.content || '').trim();
+    const title = (input.title || '').trim();
+    const intro = (input.intro || '').trim();
+    const slices = [
+      { key: 'first50', label: '前50字', text: content.slice(0, 50) },
+      { key: 'first100', label: '前100字', text: content.slice(0, 100) },
+      { key: 'first300', label: '前300字', text: content.slice(0, 300) },
+      { key: 'first500', label: '前500字', text: content.slice(0, 500) },
+    ];
+    const hookWords = ['死', '血', '骗', '秘密', '崩', '逃', '杀', '债', '失踪', '背叛', '规则', '代价', '真相', '不能', '必须', '突然', '只有', '为什么', '？', '?'];
+    const emotionWords = ['怕', '怒', '痛', '恨', '哭', '笑', '悔', '疯', '冷', '羞', '爽', '惊'];
+    const conflictWords = ['冲突', '威胁', '追', '抢', '逼', '拒绝', '争', '输', '赢', '赌', '陷阱'];
+    const scoreText = (text: string) => {
+      const hits = [...hookWords, ...emotionWords, ...conflictWords].filter(word => text.includes(word)).length;
+      const hasDialogue = /[“”"]/.test(text);
+      const hasQuestion = /[?？]/.test(text);
+      const hasAction = /[，。！？!?]/.test(text) && text.length > 20;
+      return Math.min(100, hits * 12 + (hasDialogue ? 12 : 0) + (hasQuestion ? 10 : 0) + (hasAction ? 10 : 0));
+    };
+
+    const checkpoints = [
+      { name: '标题', text: title, score: title ? scoreText(title) + 15 : 0 },
+      { name: '简介', text: intro, score: intro ? scoreText(intro) + 10 : 0 },
+      ...slices.map(slice => ({ name: slice.label, text: slice.text, score: scoreText(slice.text) })),
+    ].map(item => ({
+      ...item,
+      pass: item.score >= 45,
+      issue: item.score >= 45 ? '' : `${item.name}缺少明确疑点、冲突、情绪或信息变化。`,
+    }));
+
+    const windows: Array<{ start: number; end: number; score: number; risk: string }> = [];
+    for (let start = 0; start < Math.min(content.length, 3000); start += 300) {
+      const text = content.slice(start, start + 300);
+      if (!text) break;
+      const score = scoreText(text);
+      windows.push({
+        start,
+        end: start + text.length,
+        score,
+        risk: score >= 45 ? 'ok' : 'needs_question_or_turn',
+      });
+    }
+
+    const longPromises = ['主线目标', '核心谜题', '关系张力', '升级空间'].map(name => ({
+      name,
+      present: scoreText(content.slice(0, 2500)) >= (name === '升级空间' ? 55 : 35),
+      suggestion: `${name}需要在首章、前三章或前十章内给出可追读承诺。`,
+    }));
+    const failures = checkpoints.filter(item => !item.pass).length + windows.filter(item => item.score < 45).length;
+    const slipAwayRiskScore = Math.max(0, Math.min(100, 30 + failures * 8 - Math.floor(scoreText(content.slice(0, 500)) / 4)));
+    const reasons = [
+      ...checkpoints.filter(item => !item.pass).map(item => item.issue),
+      ...windows.filter(item => item.score < 45).slice(0, 5).map(item => `${item.start}-${item.end}字缺少新的疑点、冲突、信息变化或情绪推进。`),
+    ];
+
+    return {
+      mode: input.mode,
+      slipAwayRiskScore,
+      level: slipAwayRiskScore >= 75 ? 'high' : slipAwayRiskScore >= 50 ? 'medium' : 'low',
+      checkpoints,
+      shortStoryWindows: windows,
+      longReadThroughPromises: longPromises,
+      reasons,
+      revisionPlan: [
+        '前50字放入不可忽略的异常、危机或强情绪反应。',
+        '前300字完成一次信息变化：误判、反转、身份差或明确代价。',
+        '前500字给出本章目标和继续读下去的承诺。',
+      ],
+      alternativeOpenings: [
+        `如果从冲突开场：${title || '本章'}可以先写主角被迫做出一个会付出代价的选择。`,
+        `如果从疑点开场：先展示一个违反常识的结果，再倒推原因。`,
+        `如果从情绪开场：用具体动作呈现恐惧、愤怒或羞耻，不先解释设定。`,
+      ],
+    };
+  }
+
+  private inferAttentionMode(project: any): 'short' | 'long' {
+    const raw = project?.project || project || {};
+    const type = String(raw.type || '').toLowerCase();
+    const targetWords = Number(raw.target_words || 0);
+    if (type.includes('short') || targetWords > 0 && targetWords <= 50000) return 'short';
+    return 'long';
+  }
+
+  private buildIssueNavigation(projectId: string, chapterId: string, issueType: string, tags: string[]) {
+    const all = new Set([issueType, ...tags]);
+    if (all.has('needs_character_voice') || all.has('same_voice_characters') || all.has('needs_asymmetry')) {
+      return { target: 'character', label: '角色', path: `/project/${projectId}/characters` };
+    }
+    if (all.has('logic_gap') || all.has('too_expository')) {
+      return { target: 'world', label: '世界观', path: `/project/${projectId}/world` };
+    }
+    if (all.has('needs_payoff') || all.has('needs_hook')) {
+      return { target: 'foreshadowing', label: '伏笔', path: `/project/${projectId}/foreshadowing` };
+    }
+    if (all.has('pacing_risk') || all.has('chapter_hook')) {
+      return { target: 'outline', label: '大纲章节', path: `/project/${projectId}/outline` };
+    }
+    return { target: 'writing', label: '正文定位', path: `/project/${projectId}/writing?chapterId=${chapterId}` };
+  }
+
+  private persistRecheckResult(db: any, revision: RevisionRow, issue: IssueRow | null, result: RecheckResult) {
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE writing_revision_records
+      SET recheck_result_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(JSON.stringify(result), now, revision.id);
+
+    if (!issue) return;
+    const nextStatus = result.pass ? 'recheck_passed' : 'recheck_failed';
+    const history = safeJsonParse(issue.status_history_json || '[]', []);
+    history.push({ from: issue.status, to: nextStatus, reason: 'revision_recheck', at: now });
+    db.prepare(`
+      UPDATE writing_quality_issues
+      SET status = ?, recheck_result_json = ?, status_history_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(nextStatus, JSON.stringify(result), JSON.stringify(history), now, issue.id);
+  }
+
   private getChapterContext(content: string, issue: IssueRow): string {
     const idx = content.indexOf(issue.original_text || issue.evidence || '');
     if (idx >= 0) {
@@ -824,13 +1089,21 @@ ${fullContent.slice(0, 3000)}
     let total = 0, open = 0, high = 0, resolved = 0;
     for (const i of issueRows) {
       total++;
-      if (i.status === 'resolved') resolved++;
-      if (i.status === 'open') {
+      if (this.isClosedIssueStatus(i.status)) resolved++;
+      if (this.isOpenIssueStatus(i.status)) {
         open++;
         if (i.severity === 'high' || i.severity === 'critical') high++;
       }
     }
     return { total, open, high, resolved };
+  }
+
+  private isOpenIssueStatus(status: string): boolean {
+    return ['open', 'planned', 'refined', 'recheck_failed'].includes(status);
+  }
+
+  private isClosedIssueStatus(status: string): boolean {
+    return ['resolved', 'applied', 'recheck_passed', 'ignored', 'archived'].includes(status);
   }
 
   private parseJson<T>(content: string | null | undefined): T | null {
@@ -855,6 +1128,8 @@ ${fullContent.slice(0, 3000)}
       overallLevel: r.overall_level, overallScore: r.overall_score,
       status: r.status, model: r.model,
       payload: safeJsonParse(r.payload),
+      attention: safeJsonParse(r.attention_json || '{}'),
+      viewState: safeJsonParse(r.view_state_json || '{}'),
       createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
@@ -870,8 +1145,38 @@ ${fullContent.slice(0, 3000)}
       originalText: r.original_text, suggestedText: r.suggested_text,
       tags: safeJsonParse(r.tags, []),
       status: r.status, payload: safeJsonParse(r.payload),
+      latestRevisionId: r.latest_revision_id || null,
+      navigation: safeJsonParse(r.navigation_json || '{}', {}),
+      statusHistory: safeJsonParse(r.status_history_json || '[]', []),
+      recheckResult: safeJsonParse(r.recheck_result_json || '{}', {}),
       createdAt: r.created_at, updatedAt: r.updated_at,
       resolvedAt: r.resolved_at, resolvedBy: r.resolved_by,
+    };
+  }
+
+  private revisionRowToResponse(r: RevisionRow) {
+    const payload = safeJsonParse(r.payload || '{}', {});
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      chapterId: r.chapter_id,
+      issueId: r.issue_id,
+      reportId: r.report_id,
+      revisionType: r.revision_type,
+      beforeText: r.before_text,
+      afterText: r.after_text,
+      diff: safeJsonParse(r.diff_json, []),
+      applied: r.applied === 1,
+      appliedAt: r.applied_at,
+      reverted: r.reverted === 1,
+      payload,
+      reason: payload.reason || '',
+      remainingRisk: payload.remainingRisk || 'medium',
+      canApply: r.can_apply !== 0,
+      recheckResult: safeJsonParse(r.recheck_result_json || '{}', {}),
+      createdBy: r.created_by,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
     };
   }
 }

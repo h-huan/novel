@@ -1,17 +1,7 @@
-/**
- * WritingQualityPage - Phase 6.2 稳定修复版
- *
- * 修复：
- * - apiPayload 统一响应解析
- * - useCallback 包裹函数 + 稳定 useEffect 依赖
- * - 顶部统计基于 reports 聚合（不限于单个 report detail）
- * - 移除未使用变量
- */
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 
-// 统一 API 响应解析
 const apiPayload = <T,>(res: any): T => res?.data ?? res;
 
 interface ChapterSummary {
@@ -37,7 +27,22 @@ interface QualityReport {
   highIssueCount: number;
   resolvedIssueCount: number;
   chapterLocked: boolean;
+  attention?: AttentionResult;
   createdAt: string;
+}
+
+interface RevisionResult {
+  id: string;
+  issueId: string;
+  beforeText: string;
+  afterText: string;
+  reason: string;
+  diff: Array<{ type: string; before: string; after: string }>;
+  remainingRisk: string;
+  canApply: boolean;
+  locked?: boolean;
+  applied: boolean;
+  recheckResult?: any;
 }
 
 interface QualityIssue {
@@ -53,102 +58,171 @@ interface QualityIssue {
   suggestion: string;
   paragraphIndex: number | null;
   sentenceIndex: number | null;
-  startOffset: number | null;
-  endOffset: number | null;
   originalText: string;
   suggestedText: string;
   tags: string[];
   status: string;
+  latestRevision?: RevisionResult | null;
+  revisions?: RevisionResult[];
+  navigation?: { label?: string; path?: string; target?: string };
+  recheckResult?: any;
   createdAt: string;
   resolvedAt: string | null;
 }
 
-interface RevisionResult {
-  id: string;
-  beforeText: string;
-  afterText: string;
-  reason: string;
-  diff: Array<{ type: string; before: string; after: string }>;
-  remainingRisk: string;
-  canApply: boolean;
-  locked: boolean;
-  applied: boolean;
+interface AttentionResult {
+  slipAwayRiskScore: number;
+  level: string;
+  checkpoints: Array<{ name: string; score: number; pass: boolean; issue?: string }>;
+  shortStoryWindows: Array<{ start: number; end: number; score: number; risk: string }>;
+  longReadThroughPromises: Array<{ name: string; present: boolean; suggestion: string }>;
+  reasons: string[];
+  revisionPlan: string[];
+  alternativeOpenings: string[];
 }
+
+const OPEN_STATUSES = new Set(['open', 'planned', 'refined', 'recheck_failed']);
 
 const WritingQualityPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const storageKey = projectId ? `phase69:wq:${projectId}` : 'phase69:wq';
 
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
-  const [selectedChapterId, setSelectedChapterId] = useState<string>('');
+  const [selectedChapterId, setSelectedChapterId] = useState('');
   const [reports, setReports] = useState<QualityReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<QualityReport | null>(null);
   const [issues, setIssues] = useState<QualityIssue[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [refiningIssueId, setRefiningIssueId] = useState<string | null>(null);
+  const [selectedIssueId, setSelectedIssueId] = useState('');
+  const [activeTab, setActiveTab] = useState<'reports' | 'detail'>('reports');
+  const [filterSeverity, setFilterSeverity] = useState('all');
+  const [filterType, setFilterType] = useState('all');
   const [revisionResult, setRevisionResult] = useState<RevisionResult | null>(null);
   const [recheckResult, setRecheckResult] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'reports' | 'detail'>('reports');
-  const [filterSeverity, setFilterSeverity] = useState<string>('all');
-  const [filterType, setFilterType] = useState<string>('all');
+  const [attention, setAttention] = useState<AttentionResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [busyIssueId, setBusyIssueId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Stats — computed directly from reports data
-  const stats = {
-    totalReports: reports.length,
-    openIssues: reports.reduce((sum, r) => sum + (r.openIssueCount || 0), 0),
-    highIssues: reports.reduce((sum, r) => sum + (r.highIssueCount || 0), 0),
-    resolvedIssues: reports.reduce((sum, r) => sum + (r.resolvedIssueCount || 0), 0),
-  };
+  const persistView = useCallback((patch: Record<string, unknown>) => {
+    try {
+      const oldValue = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      localStorage.setItem(storageKey, JSON.stringify({ ...oldValue, ...patch }));
+    } catch {
+      localStorage.setItem(storageKey, JSON.stringify(patch));
+    }
+  }, [storageKey]);
+
+  const restoreView = useCallback(() => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) || '{}');
+    } catch {
+      return {};
+    }
+  }, [storageKey]);
 
   const loadChapters = useCallback(async () => {
     if (!projectId) return;
-    try {
-      const res = await api.get<any>(`/projects/${projectId}/chapters`);
-      setChapters(apiPayload<ChapterSummary[]>(res) || []);
-    } catch (err: any) {
-      setError('加载章节列表失败: ' + (err.message || String(err)));
+    const res = await api.get<any>(`/projects/${projectId}/chapters`);
+    const data = apiPayload<ChapterSummary[]>(res) || [];
+    setChapters(data);
+    const saved = restoreView();
+    if (saved.selectedChapterId && data.some(ch => ch.id === saved.selectedChapterId)) {
+      setSelectedChapterId(saved.selectedChapterId);
+    } else if (!selectedChapterId && data[0]) {
+      setSelectedChapterId(data[0].id);
     }
-  }, [projectId]);
+  }, [projectId, restoreView, selectedChapterId]);
 
   const loadReports = useCallback(async () => {
     if (!projectId || !selectedChapterId) return;
     setLoading(true);
     setError(null);
     try {
-      const queryStr = `?chapterId=${selectedChapterId}&limit=50`;
-      const res = await api.get<any>(`/projects/${projectId}/writing-quality/reports${queryStr}`);
+      const res = await api.get<any>(`/projects/${projectId}/writing-quality/reports?chapterId=${selectedChapterId}&limit=50`);
       const data = apiPayload<QualityReport[]>(res) || [];
       setReports(data);
+      const saved = restoreView();
+      const reportToRestore = data.find(r => r.id === saved.selectedReportId);
+      if (reportToRestore) {
+        setSelectedReport(reportToRestore);
+      }
     } catch (err: any) {
-      setError('加载报告失败: ' + (err.message || String(err)));
+      setError(`加载报告失败：${err.message || String(err)}`);
     } finally {
       setLoading(false);
     }
-  }, [projectId, selectedChapterId]);
+  }, [projectId, restoreView, selectedChapterId]);
 
   const selectReport = useCallback(async (report: QualityReport) => {
+    if (!projectId) return;
     setSelectedReport(report);
     setActiveTab('detail');
     setLoading(true);
     setError(null);
+    persistView({ selectedReportId: report.id, activeTab: 'detail' });
     try {
       const res = await api.get<any>(`/projects/${projectId}/writing-quality/reports/${report.id}`);
       const data = apiPayload<{ report: QualityReport; issues: QualityIssue[] }>(res);
+      setSelectedReport(data?.report || report);
       setIssues(data?.issues || []);
+      setAttention(data?.report?.attention || null);
+      const saved = restoreView();
+      const issue = data?.issues?.find(i => i.id === saved.selectedIssueId);
+      if (issue) {
+        setSelectedIssueId(issue.id);
+        setRevisionResult(issue.latestRevision || null);
+        setRecheckResult(issue.recheckResult || issue.latestRevision?.recheckResult || null);
+      }
     } catch (err: any) {
-      setError('加载报告详情失败: ' + (err.message || String(err)));
+      setError(`加载报告详情失败：${err.message || String(err)}`);
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [persistView, projectId, restoreView]);
 
-  useEffect(() => { loadChapters(); }, [loadChapters]);
-  useEffect(() => { loadReports(); }, [loadReports]);
+  useEffect(() => {
+    loadChapters().catch((err: any) => setError(`加载章节失败：${err.message || String(err)}`));
+  }, [loadChapters]);
+
+  useEffect(() => {
+    loadReports();
+    persistView({ selectedChapterId });
+  }, [loadReports, persistView, selectedChapterId]);
+
+  useEffect(() => {
+    const saved = restoreView();
+    if (saved.activeTab === 'detail') setActiveTab('detail');
+  }, [restoreView]);
+
+  const stats = useMemo(() => ({
+    totalReports: reports.length,
+    openIssues: reports.reduce((sum, r) => sum + (r.openIssueCount || 0), 0),
+    highIssues: reports.reduce((sum, r) => sum + (r.highIssueCount || 0), 0),
+    resolvedIssues: reports.reduce((sum, r) => sum + (r.resolvedIssueCount || 0), 0),
+  }), [reports]);
+
+  const filteredIssues = issues.filter(issue => {
+    if (filterSeverity !== 'all' && issue.severity !== filterSeverity) return false;
+    if (filterType !== 'all' && issue.issueType !== filterType) return false;
+    return true;
+  });
+
+  const selectIssue = (issue: QualityIssue) => {
+    setSelectedIssueId(issue.id);
+    setRevisionResult(issue.latestRevision || null);
+    setRecheckResult(issue.recheckResult || issue.latestRevision?.recheckResult || null);
+    persistView({ selectedIssueId: issue.id });
+  };
+
+  const refreshSelectedReport = async () => {
+    await loadReports();
+    if (selectedReport) await selectReport(selectedReport);
+  };
 
   const handleAnalyze = async () => {
-    if (!selectedChapterId) { setError('请先选择一个章节'); return; }
+    if (!selectedChapterId || !projectId) return;
     setAnalyzing(true);
     setError(null);
     try {
@@ -157,135 +231,129 @@ const WritingQualityPage: React.FC = () => {
       await loadReports();
       if (data?.report) await selectReport(data.report as QualityReport);
     } catch (err: any) {
-      setError('质量诊断失败: ' + (err.message || String(err)));
+      setError(`质量诊断失败：${err.message || String(err)}`);
     } finally {
       setAnalyzing(false);
     }
   };
 
-  const handleResolve = async (issueId: string) => {
+  const handleAttention = async () => {
+    if (!selectedChapterId || !projectId) return;
+    setError(null);
     try {
-      await api.post(`/projects/${projectId}/writing-quality/issues/${issueId}/resolve`, {});
-      await loadReports();
-      if (selectedReport) await selectReport(selectedReport);
+      const res = await api.post<any>(`/projects/${projectId}/writing-quality/attention`, { chapterId: selectedChapterId, mode: 'auto' });
+      const data = apiPayload<{ attention: AttentionResult }>(res);
+      setAttention(data.attention);
+      setActiveTab('detail');
     } catch (err: any) {
-      setError('标记失败: ' + (err.message || String(err)));
+      setError(`注意力检查失败：${err.message || String(err)}`);
     }
   };
 
-  const handleRefine = async (issueId: string) => {
-    setRefiningIssueId(issueId);
-    setRevisionResult(null);
+  const updateIssueStatus = async (issue: QualityIssue, status: string) => {
+    if (!projectId) return;
+    setBusyIssueId(issue.id);
     try {
-      const res = await api.post<any>(`/projects/${projectId}/writing-quality/issues/${issueId}/refine`, { mode: 'generate_patch' });
-      const data = apiPayload<{ revision: RevisionResult }>(res);
-      setRevisionResult(data?.revision || null);
+      await api.post(`/projects/${projectId}/writing-quality/issues/${issue.id}/status`, { status });
+      await refreshSelectedReport();
     } catch (err: any) {
-      setError('精修建议生成失败: ' + (err.message || String(err)));
+      setError(`更新 issue 状态失败：${err.message || String(err)}`);
     } finally {
-      setRefiningIssueId(null);
+      setBusyIssueId(null);
+    }
+  };
+
+  const handleRefine = async (issue: QualityIssue) => {
+    if (!projectId) return;
+    selectIssue(issue);
+    setBusyIssueId(issue.id);
+    try {
+      const res = await api.post<any>(`/projects/${projectId}/writing-quality/issues/${issue.id}/refine`, { mode: 'generate_patch' });
+      const data = apiPayload<{ revision: RevisionResult }>(res);
+      setRevisionResult(data.revision || null);
+      await refreshSelectedReport();
+    } catch (err: any) {
+      setError(`生成精修建议失败：${err.message || String(err)}`);
+    } finally {
+      setBusyIssueId(null);
     }
   };
 
   const handleApplyRevision = async (revisionId: string) => {
+    if (!projectId) return;
     try {
       const res = await api.post<any>(`/projects/${projectId}/writing-quality/revisions/${revisionId}/apply`, {});
       const data = apiPayload<any>(res);
-      if (data?.success) {
-        setRevisionResult((prev) => prev ? { ...prev, applied: true } : null);
-        if (data.needsRecheck) {
-          const recheckRes = await api.post<any>(`/projects/${projectId}/writing-quality/revisions/${revisionId}/recheck`, {});
-          const recheckData = apiPayload<{ result: any }>(recheckRes);
-          setRecheckResult(recheckData?.result || null);
-        }
-        await loadReports();
-        if (selectedReport) await selectReport(selectedReport);
+      if (data?.needsRecheck) {
+        const recheckRes = await api.post<any>(`/projects/${projectId}/writing-quality/revisions/${revisionId}/recheck`, {});
+        setRecheckResult(apiPayload<{ result: any }>(recheckRes)?.result || null);
       }
+      setRevisionResult(prev => prev ? { ...prev, applied: true } : prev);
+      await refreshSelectedReport();
     } catch (err: any) {
-      setError('应用精修失败: ' + (err.message || String(err)));
+      setError(`应用精修失败：${err.message || String(err)}`);
     }
   };
 
-  const filteredIssues = issues.filter(i => {
-    if (filterSeverity !== 'all' && i.severity !== filterSeverity) return false;
-    if (filterType !== 'all' && i.issueType !== filterType) return false;
-    return true;
-  });
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical': return '#ef4444';
-      case 'high': return '#f97316';
-      case 'medium': return '#eab308';
-      case 'low': return '#22c55e';
-      default: return '#6c6c80';
+  const handleIssueRecheck = async (issue: QualityIssue) => {
+    if (!projectId) return;
+    selectIssue(issue);
+    setBusyIssueId(issue.id);
+    try {
+      const res = await api.post<any>(`/projects/${projectId}/writing-quality/issues/${issue.id}/recheck`, {});
+      const data = apiPayload<{ result: any }>(res);
+      setRecheckResult(data.result || null);
+      await refreshSelectedReport();
+    } catch (err: any) {
+      setError(`单项复检失败：${err.message || String(err)}`);
+    } finally {
+      setBusyIssueId(null);
     }
   };
 
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case 'critical': return '#ef4444';
-      case 'high': return '#f97316';
-      case 'medium': return '#eab308';
-      case 'low': return '#22c55e';
-      default: return '#6c6c80';
-    }
+  const jumpToIssueTarget = (issue: QualityIssue) => {
+    if (issue.navigation?.path) navigate(issue.navigation.path);
   };
 
-  const getIssueTypeLabel = (type: string) => {
-    const labels: Record<string, string> = {
-      reader_hook: '开篇钩子', retention_point: '留存点', emotional_payoff: '情绪回报',
-      meme_point: '记忆点', chapter_hook: '章节钩子', pacing_risk: '节奏风险',
-      low_retention: '低留存', needs_payoff: '需回报', needs_hook: '需钩子',
-      ai_pattern_risk: 'AI模板', template_repetition: '模板重复', too_abstract: '太抽象',
-      too_expository: '说明过多', flat_dialogue: '对话平淡', same_voice_characters: '角色同声',
-      lack_of_subtext: '缺潜台词', repeated_emotion_action: '重复情绪', low_specificity: '细节不足',
-      over_explained: '过度解释', needs_detail: '需细节', needs_character_voice: '需角色声音',
-      needs_asymmetry: '需差异性',
-    };
-    return labels[type] || type;
-  };
+  const statusLabel = (status: string) => ({
+    open: '待处理',
+    planned: '已计划',
+    refined: '已出方案',
+    applied: '已应用',
+    recheck_passed: '复检通过',
+    recheck_failed: '复检未过',
+    ignored: '已忽略',
+    archived: '已归档',
+    resolved: '已解决',
+  }[status] || status);
+
+  const severityColor = (severity: string) => ({
+    critical: '#ef4444',
+    high: '#f97316',
+    medium: '#eab308',
+    low: '#22c55e',
+  }[severity] || '#94a3b8');
 
   const styles: Record<string, React.CSSProperties> = {
-    container: { padding: '24px', maxWidth: '1400px', margin: '0 auto', color: '#e2e8f0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' },
-    title: { fontSize: '24px', fontWeight: 700, color: '#f1f5f9' },
-    subtitle: { fontSize: '13px', color: '#94a3b8', marginTop: '4px' },
-    statsRow: { display: 'flex', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' as const },
-    statCard: { background: '#1e293b', borderRadius: '10px', padding: '16px 20px', minWidth: '140px', border: '1px solid #334155' },
-    statValue: { fontSize: '28px', fontWeight: 700, color: '#f1f5f9' },
-    statLabel: { fontSize: '12px', color: '#94a3b8', marginTop: '4px' },
-    controls: { display: 'flex', gap: '12px', marginBottom: '20px', alignItems: 'center', flexWrap: 'wrap' as const },
-    select: { padding: '8px 12px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: '#e2e8f0', fontSize: '14px', minWidth: '180px' },
-    button: { padding: '8px 18px', borderRadius: '8px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer', background: '#3b82f6', color: '#fff' },
-    buttonSecondary: { padding: '8px 18px', borderRadius: '8px', border: '1px solid #334155', fontSize: '14px', fontWeight: 600, cursor: 'pointer', background: '#1e293b', color: '#e2e8f0' },
-    buttonSmall: { padding: '4px 12px', borderRadius: '6px', border: '1px solid #334155', fontSize: '12px', fontWeight: 500, cursor: 'pointer', background: '#1e293b', color: '#e2e8f0' },
-    reportCard: { background: '#1e293b', borderRadius: '10px', padding: '16px', marginBottom: '12px', border: '1px solid #334155', cursor: 'pointer' },
-    reportCardSelected: { borderColor: '#3b82f6' },
-    reportHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
-    reportTitle: { fontSize: '16px', fontWeight: 600, color: '#f1f5f9' },
-    reportMeta: { fontSize: '12px', color: '#94a3b8', marginTop: '4px' },
-    issueCard: { background: '#1e293b', borderRadius: '10px', padding: '16px', marginBottom: '12px', border: '1px solid #334155' },
-    issueHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' },
-    issueTitle: { fontSize: '15px', fontWeight: 600, color: '#f1f5f9' },
-    badge: { display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' as const },
-    tabRow: { display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '1px solid #334155', paddingBottom: '8px' },
-    tab: { padding: '8px 16px', borderRadius: '6px 6px 0 0', fontSize: '14px', fontWeight: 500, cursor: 'pointer', color: '#94a3b8', border: 'none', background: 'transparent' },
-    tabActive: { color: '#3b82f6', borderBottom: '2px solid #3b82f6', fontWeight: 600 },
-    sectionBox: { background: '#1e293b', borderRadius: '10px', padding: '20px', marginBottom: '16px', border: '1px solid #334155' },
-    sectionTitle: { fontSize: '18px', fontWeight: 600, color: '#f1f5f9', marginBottom: '12px' },
-    text: { fontSize: '14px', color: '#cbd5e1', lineHeight: '1.7' },
-    textMuted: { fontSize: '13px', color: '#94a3b8' },
-    textBlock: { background: '#0f172a', borderRadius: '8px', padding: '12px', fontSize: '13px', color: '#e2e8f0', whiteSpace: 'pre-wrap' as const, lineHeight: '1.6', marginTop: '8px', border: '1px solid #1e293b' },
-    diffAdd: { background: 'rgba(34,197,94,0.15)', color: '#4ade80', padding: '2px 4px', borderRadius: '3px' },
-    diffDelete: { background: 'rgba(239,68,68,0.15)', color: '#f87171', padding: '2px 4px', borderRadius: '3px', textDecoration: 'line-through' },
-    loading: { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', color: '#94a3b8', fontSize: '15px' },
-    errorBanner: { background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', color: '#fca5a5', fontSize: '14px' },
-    emptyState: { textAlign: 'center' as const, padding: '60px 20px', color: '#94a3b8', fontSize: '15px' },
-    noteBox: { background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#93c5fd' },
-    actions: { display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' as const },
-    tag: { display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', background: '#334155', color: '#94a3b8', marginRight: '4px' },
-    filterBar: { display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' as const, alignItems: 'center' },
+    container: { padding: 24, maxWidth: 1440, margin: '0 auto', color: '#e2e8f0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' },
+    header: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 20 },
+    title: { fontSize: 24, fontWeight: 700 },
+    subtitle: { fontSize: 13, color: '#94a3b8', marginTop: 4 },
+    row: { display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' },
+    panel: { background: '#111827', border: '1px solid #334155', borderRadius: 8, padding: 16, marginBottom: 16 },
+    card: { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: 14, marginBottom: 12 },
+    selectedCard: { borderColor: '#60a5fa' },
+    select: { background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 6, padding: '8px 10px', minWidth: 180 },
+    button: { background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontWeight: 600 },
+    ghostButton: { background: '#0f172a', color: '#dbeafe', border: '1px solid #334155', borderRadius: 6, padding: '8px 12px', cursor: 'pointer' },
+    smallButton: { background: '#0f172a', color: '#dbeafe', border: '1px solid #334155', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', fontSize: 12 },
+    muted: { color: '#94a3b8', fontSize: 13 },
+    text: { color: '#cbd5e1', fontSize: 14, lineHeight: 1.7 },
+    badge: { display: 'inline-flex', alignItems: 'center', padding: '2px 7px', borderRadius: 4, fontSize: 11, fontWeight: 700 },
+    block: { background: '#020617', border: '1px solid #1e293b', borderRadius: 6, padding: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6 },
+    error: { background: 'rgba(239,68,68,.12)', color: '#fecaca', border: '1px solid rgba(239,68,68,.35)', borderRadius: 8, padding: 12, marginBottom: 16 },
+    stat: { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px 16px', minWidth: 130 },
+    statValue: { fontSize: 24, fontWeight: 800 },
   };
 
   return (
@@ -293,178 +361,160 @@ const WritingQualityPage: React.FC = () => {
       <div style={styles.header}>
         <div>
           <div style={styles.title}>写作质量诊断中心</div>
-          <div style={styles.subtitle}>质量诊断不等于状态确稿 —— 本页关注写作质量，状态事实请前往状态确稿中心确认</div>
+          <div style={styles.subtitle}>Phase 6.9：注意力引擎、单项复检、精修恢复与创作位置跳转</div>
         </div>
-        <button style={styles.buttonSecondary} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回项目</button>
+        <button style={styles.ghostButton} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回项目</button>
       </div>
 
-      <div style={styles.noteBox}>
-        质量诊断中心用于发现正文的写作质量问题（钩子、节奏、对话、AI味等），并提供局部精修建议。
-        <strong>locked 章节只能诊断不能修改</strong>。
-        角色/世界观/时间线/伏笔等长期状态事实请前往 <strong>状态确稿中心</strong>。
+      <div style={styles.panel}>
+        <div style={styles.row}>
+          <select style={styles.select} value={selectedChapterId} onChange={event => {
+            setSelectedChapterId(event.target.value);
+            setSelectedReport(null);
+            setIssues([]);
+            persistView({ selectedChapterId: event.target.value, selectedReportId: '', selectedIssueId: '' });
+          }}>
+            <option value="">选择章节</option>
+            {chapters.map(ch => (
+              <option key={ch.id} value={ch.id}>第{ch.volumeIndex}卷 第{ch.chapterIndex}章 {ch.title} [{ch.status}]</option>
+            ))}
+          </select>
+          <button style={{ ...styles.button, opacity: analyzing || !selectedChapterId ? .55 : 1 }} disabled={analyzing || !selectedChapterId} onClick={handleAnalyze}>
+            {analyzing ? '诊断中...' : '诊断当前章节'}
+          </button>
+          <button style={styles.ghostButton} onClick={handleAttention} disabled={!selectedChapterId}>前三屏生死线检查</button>
+          <button style={styles.ghostButton} onClick={loadReports}>刷新报告</button>
+        </div>
       </div>
 
-      {/* Stats overview */}
-      {reports.length > 0 && (
-        <div style={styles.statsRow}>
-          <div style={styles.statCard}><div style={styles.statValue}>{stats.totalReports}</div><div style={styles.statLabel}>诊断报告总数</div></div>
-          <div style={{ ...styles.statCard, borderColor: '#f97316' }}><div style={{ ...styles.statValue, color: '#f97316' }}>{stats.openIssues}</div><div style={styles.statLabel}>未解决问题</div></div>
-          <div style={{ ...styles.statCard, borderColor: '#ef4444' }}><div style={{ ...styles.statValue, color: '#ef4444' }}>{stats.highIssues}</div><div style={styles.statLabel}>高/严重风险</div></div>
-          <div style={{ ...styles.statCard, borderColor: '#22c55e' }}><div style={{ ...styles.statValue, color: '#22c55e' }}>{stats.resolvedIssues}</div><div style={styles.statLabel}>已解决</div></div>
+      {error && <div style={styles.error}>{error}</div>}
+
+      <div style={{ ...styles.row, marginBottom: 16 }}>
+        <div style={styles.stat}><div style={styles.statValue}>{stats.totalReports}</div><div style={styles.muted}>报告</div></div>
+        <div style={styles.stat}><div style={{ ...styles.statValue, color: '#f97316' }}>{stats.openIssues}</div><div style={styles.muted}>待处理</div></div>
+        <div style={styles.stat}><div style={{ ...styles.statValue, color: '#ef4444' }}>{stats.highIssues}</div><div style={styles.muted}>高风险</div></div>
+        <div style={styles.stat}><div style={{ ...styles.statValue, color: '#22c55e' }}>{stats.resolvedIssues}</div><div style={styles.muted}>已闭环</div></div>
+      </div>
+
+      <div style={{ ...styles.row, borderBottom: '1px solid #334155', marginBottom: 16 }}>
+        <button style={activeTab === 'reports' ? styles.button : styles.ghostButton} onClick={() => setActiveTab('reports')}>报告列表</button>
+        <button style={activeTab === 'detail' ? styles.button : styles.ghostButton} onClick={() => setActiveTab('detail')} disabled={!selectedReport}>问题详情</button>
+      </div>
+
+      {attention && (
+        <div style={styles.panel}>
+          <div style={{ ...styles.row, justifyContent: 'space-between' }}>
+            <div style={{ fontWeight: 700 }}>前三屏生死线</div>
+            <span style={{ ...styles.badge, background: attention.level === 'high' ? '#7f1d1d' : attention.level === 'medium' ? '#713f12' : '#14532d', color: '#fff' }}>
+              滑走风险 {attention.slipAwayRiskScore}
+            </span>
+          </div>
+          <div style={{ ...styles.row, marginTop: 10 }}>
+            {attention.checkpoints.map(item => (
+              <span key={item.name} style={{ ...styles.badge, background: item.pass ? '#064e3b' : '#7f1d1d', color: '#fff' }}>
+                {item.name} {item.score}
+              </span>
+            ))}
+          </div>
+          {attention.reasons.length > 0 && <div style={{ ...styles.text, marginTop: 10 }}>{attention.reasons.slice(0, 4).join('；')}</div>}
+          <div style={{ ...styles.row, alignItems: 'stretch', marginTop: 12 }}>
+            <div style={{ flex: 1, minWidth: 260 }}><div style={styles.muted}>修改方案</div><div style={styles.block}>{attention.revisionPlan.join('\n')}</div></div>
+            <div style={{ flex: 1, minWidth: 260 }}><div style={styles.muted}>替代开头建议</div><div style={styles.block}>{attention.alternativeOpenings.join('\n')}</div></div>
+          </div>
         </div>
       )}
 
-      {/* Controls */}
-      <div style={styles.controls}>
-        <select style={styles.select} value={selectedChapterId} onChange={(e) => setSelectedChapterId(e.target.value)}>
-          <option value="">-- 选择章节 --</option>
-          {chapters.map((ch) => (
-            <option key={ch.id} value={ch.id}>第{ch.volumeIndex}卷 第{ch.chapterIndex}章 {ch.title} [{ch.status}]</option>
-          ))}
-        </select>
-        <button style={{ ...styles.button, opacity: analyzing || !selectedChapterId ? 0.6 : 1, cursor: analyzing || !selectedChapterId ? 'not-allowed' : 'pointer' }}
-          onClick={handleAnalyze} disabled={analyzing || !selectedChapterId}>
-          {analyzing ? '诊断中...' : '诊断当前章节'}
-        </button>
-        <button style={styles.buttonSecondary} onClick={loadReports}>刷新报告</button>
-      </div>
+      {loading && <div style={styles.panel}>加载中...</div>}
 
-      {error && <div style={styles.errorBanner}>{error}</div>}
-      {loading && <div style={styles.loading}>加载中...</div>}
-
-      {!loading && reports.length === 0 && !error && (
-        <div style={styles.emptyState}>
-          <p>暂无质量诊断报告</p><p style={{ fontSize: '13px', color: '#64748b' }}>选择一个章节，点击「诊断当前章节」开始质量分析</p>
-        </div>
-      )}
-
-      {!loading && reports.length > 0 && (
+      {!loading && activeTab === 'reports' && (
         <div>
-          <div style={styles.tabRow}>
-            <button style={{ ...styles.tab, ...(activeTab === 'reports' ? styles.tabActive : {}) }} onClick={() => setActiveTab('reports')}>诊断报告 ({reports.length})</button>
-            {selectedReport && <button style={{ ...styles.tab, ...(activeTab === 'detail' ? styles.tabActive : {}) }} onClick={() => setActiveTab('detail')}>问题详情 ({issues.length})</button>}
+          {reports.length === 0 && <div style={styles.panel}>暂无报告。选择章节后可以先做“前三屏生死线检查”，再诊断当前章节。</div>}
+          {reports.map(report => (
+            <div key={report.id} style={{ ...styles.card, ...(selectedReport?.id === report.id ? styles.selectedCard : {}) }} onClick={() => selectReport(report)}>
+              <div style={{ ...styles.row, justifyContent: 'space-between' }}>
+                <div>
+                  <strong>{report.title}</strong>
+                  <span style={{ ...styles.badge, marginLeft: 8, background: '#0f172a', color: '#bfdbfe' }}>{report.overallLevel}</span>
+                  {report.chapterLocked && <span style={{ ...styles.badge, marginLeft: 8, background: '#7f1d1d', color: '#fff' }}>LOCKED</span>}
+                </div>
+                <span style={styles.muted}>{new Date(report.createdAt).toLocaleString()}</span>
+              </div>
+              <div style={{ ...styles.text, marginTop: 8 }}>{report.summary}</div>
+              <div style={{ ...styles.muted, marginTop: 8 }}>问题 {report.issueCount}，待处理 {report.openIssueCount}，已闭环 {report.resolvedIssueCount}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && activeTab === 'detail' && selectedReport && (
+        <div>
+          <div style={{ ...styles.row, marginBottom: 12 }}>
+            <select style={styles.select} value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}>
+              <option value="all">全部严重度</option>
+              <option value="critical">critical</option>
+              <option value="high">high</option>
+              <option value="medium">medium</option>
+              <option value="low">low</option>
+            </select>
+            <select style={styles.select} value={filterType} onChange={e => setFilterType(e.target.value)}>
+              <option value="all">全部类型</option>
+              {[...new Set(issues.map(i => i.issueType))].map(type => <option key={type} value={type}>{type}</option>)}
+            </select>
+            <span style={styles.muted}>显示 {filteredIssues.length} / {issues.length}</span>
           </div>
 
-          {activeTab === 'reports' && (
-            <div>
-              {reports.map((report) => (
-                <div key={report.id} style={{ ...styles.reportCard, ...(selectedReport?.id === report.id ? styles.reportCardSelected : {}) }}
-                  onClick={() => selectReport(report)}>
-                  <div style={styles.reportHeader}>
-                    <div>
-                      <span style={styles.reportTitle}>{report.title}</span>
-                      <span style={{ ...styles.badge, marginLeft: '12px', background: `${getLevelColor(report.overallLevel)}22`, color: getLevelColor(report.overallLevel) }}>{report.overallLevel.toUpperCase()}</span>
-                      {report.overallScore != null && <span style={{ ...styles.badge, marginLeft: '8px', background: '#334155', color: '#e2e8f0' }}>评分: {report.overallScore}</span>}
-                      {report.issueCount > 0 && <span style={{ ...styles.badge, marginLeft: '8px', background: '#475569', color: '#e2e8f0' }}>{report.issueCount} 问题</span>}
-                    </div>
-                    <span style={styles.reportMeta}>{new Date(report.createdAt).toLocaleString()}</span>
-                  </div>
-                  <div style={styles.text}>{report.summary}</div>
-                  {report.chapterLocked && <div style={{ ...styles.badge, marginTop: '8px', background: '#ef444422', color: '#ef4444' }}>LOCKED</div>}
+          {filteredIssues.map(issue => (
+            <div key={issue.id} style={{ ...styles.card, ...(selectedIssueId === issue.id ? styles.selectedCard : {}) }} onClick={() => selectIssue(issue)}>
+              <div style={{ ...styles.row, justifyContent: 'space-between' }}>
+                <div>
+                  <strong>{issue.title}</strong>
+                  <span style={{ ...styles.badge, marginLeft: 8, background: `${severityColor(issue.severity)}22`, color: severityColor(issue.severity) }}>{issue.severity}</span>
+                  <span style={{ ...styles.badge, marginLeft: 6, background: OPEN_STATUSES.has(issue.status) ? '#713f12' : '#14532d', color: '#fff' }}>{statusLabel(issue.status)}</span>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {activeTab === 'detail' && selectedReport && (
-            <div>
-              <div style={styles.filterBar}>
-                <span style={styles.textMuted}>筛选:</span>
-                <select style={{ ...styles.select, minWidth: '120px' }} value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)}>
-                  <option value="all">所有严重度</option>
-                  <option value="critical">严重</option><option value="high">高危</option><option value="medium">中危</option><option value="low">低危</option>
-                </select>
-                <select style={{ ...styles.select, minWidth: '140px' }} value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-                  <option value="all">所有类型</option>
-                  <option value="reader_hook">开篇钩子</option><option value="pacing_risk">节奏风险</option><option value="ai_pattern_risk">AI模板</option>
-                  <option value="flat_dialogue">对话平淡</option><option value="too_abstract">太抽象</option><option value="needs_hook">需钩子</option>
-                  <option value="emotional_payoff">情绪回报</option><option value="too_expository">说明过多</option><option value="low_specificity">细节不足</option>
-                </select>
-                <span style={{ ...styles.textMuted, marginLeft: '8px' }}>共 {filteredIssues.length} 个问题</span>
+                <span style={styles.muted}>{issue.issueType}</span>
               </div>
-
-              {filteredIssues.map((issue) => (
-                <div key={issue.id} style={styles.issueCard}>
-                  <div style={styles.issueHeader}>
-                    <div>
-                      <div style={styles.issueTitle}>{issue.title}</div>
-                      <div style={{ marginTop: '6px', display: 'flex', gap: '6px', flexWrap: 'wrap' as const }}>
-                        <span style={{ ...styles.badge, background: `${getSeverityColor(issue.severity)}22`, color: getSeverityColor(issue.severity) }}>{issue.severity.toUpperCase()}</span>
-                        <span style={styles.tag}>{getIssueTypeLabel(issue.issueType)}</span>
-                        {issue.tags.filter(t => t !== issue.issueType).slice(0, 3).map(tag => <span key={tag} style={styles.tag}>{getIssueTypeLabel(tag)}</span>)}
-                        {issue.status === 'resolved' && <span style={{ ...styles.badge, background: '#22c55e22', color: '#22c55e' }}>RESOLVED</span>}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ ...styles.text, marginTop: '8px' }}>{issue.summary}</div>
-                  {issue.evidence && <div style={{ marginTop: '8px' }}><span style={styles.textMuted}>证据：</span><div style={styles.textBlock}>{issue.evidence}</div></div>}
-                  {issue.suggestion && <div style={{ marginTop: '8px' }}><span style={styles.textMuted}>建议：</span><div style={styles.text}>{issue.suggestion}</div></div>}
-                  {issue.paragraphIndex != null && <div style={{ ...styles.textMuted, marginTop: '4px' }}>定位：段落 {issue.paragraphIndex + 1}{issue.sentenceIndex != null ? `, 句子 ${issue.sentenceIndex + 1}` : ''}</div>}
-                  <div style={styles.actions}>
-                    {issue.status !== 'resolved' && <>
-                      <button style={styles.buttonSmall} onClick={() => handleResolve(issue.id)}>标记已解决</button>
-                      <button style={{ ...styles.buttonSmall, background: '#3b82f6', color: '#fff', opacity: refiningIssueId === issue.id ? 0.6 : 1 }}
-                        onClick={() => handleRefine(issue.id)} disabled={refiningIssueId === issue.id}>
-                        {refiningIssueId === issue.id ? '生成中...' : '生成精修建议'}
-                      </button>
-                    </>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Revision result */}
-          {revisionResult && (
-            <div style={styles.sectionBox}>
-              <div style={styles.sectionTitle}>精修建议
-                <span style={{ ...styles.badge, marginLeft: '12px', background: revisionResult.canApply ? '#22c55e22' : '#ef444422', color: revisionResult.canApply ? '#22c55e' : '#ef4444' }}>
-                  {revisionResult.locked ? 'LOCKED - 只读' : revisionResult.canApply ? '可应用' : '建议模式'}
-                </span>
+              <div style={{ ...styles.text, marginTop: 8 }}>{issue.summary}</div>
+              {issue.evidence && <div style={{ marginTop: 8 }}><div style={styles.muted}>证据</div><div style={styles.block}>{issue.evidence}</div></div>}
+              {issue.suggestion && <div style={{ ...styles.text, marginTop: 8 }}>建议：{issue.suggestion}</div>}
+              <div style={{ ...styles.row, marginTop: 12 }}>
+                <button style={styles.smallButton} disabled={busyIssueId === issue.id} onClick={event => { event.stopPropagation(); updateIssueStatus(issue, 'planned'); }}>计划处理</button>
+                <button style={styles.smallButton} disabled={busyIssueId === issue.id} onClick={event => { event.stopPropagation(); handleRefine(issue); }}>生成方案</button>
+                <button style={styles.smallButton} disabled={busyIssueId === issue.id} onClick={event => { event.stopPropagation(); handleIssueRecheck(issue); }}>单项复检</button>
+                <button style={styles.smallButton} onClick={event => { event.stopPropagation(); jumpToIssueTarget(issue); }}>{issue.navigation?.label || '正文定位'}</button>
+                <button style={styles.smallButton} disabled={busyIssueId === issue.id} onClick={event => { event.stopPropagation(); updateIssueStatus(issue, 'ignored'); }}>忽略</button>
+                <button style={styles.smallButton} disabled={busyIssueId === issue.id} onClick={event => { event.stopPropagation(); updateIssueStatus(issue, 'archived'); }}>归档</button>
               </div>
-              <div style={styles.text}>{revisionResult.reason}</div>
-              <div style={{ marginTop: '16px' }}>
-                <div style={styles.textMuted}>修改对比 (Diff)：</div>
-                {revisionResult.diff.length > 0 ? (
-                  <div style={{ ...styles.textBlock, marginTop: '8px' }}>
-                    {revisionResult.diff.map((d, idx) => (
-                      <div key={idx} style={{ marginBottom: '6px' }}>
-                        <span style={{ fontSize: '11px', color: '#64748b', marginRight: '8px' }}>[{d.type}]</span>
-                        {d.type === 'delete' && <span style={styles.diffDelete}>{d.before}</span>}
-                        {d.type === 'insert' && <span style={styles.diffAdd}>{d.after}</span>}
-                        {d.type === 'replace' && <><span style={styles.diffDelete}>{d.before}</span>{' → '}<span style={styles.diffAdd}>{d.after}</span></>}
-                        {d.type === 'keep' && <span>{d.before}</span>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ ...styles.textBlock, marginTop: '8px' }}>
-                    <div style={{ marginBottom: '12px' }}><div style={{ ...styles.textMuted, marginBottom: '4px' }}>修改前：</div><div style={styles.diffDelete}>{revisionResult.beforeText}</div></div>
-                    <div><div style={{ ...styles.textMuted, marginBottom: '4px' }}>修改后：</div><div style={styles.diffAdd}>{revisionResult.afterText}</div></div>
-                  </div>
-                )}
-              </div>
-              {!revisionResult.applied && revisionResult.canApply && (
-                <div style={styles.actions}><button style={styles.button} onClick={() => handleApplyRevision(revisionResult.id)}>应用精修到章节</button></div>
-              )}
-              {revisionResult.applied && <div style={{ ...styles.text, marginTop: '12px', color: '#22c55e' }}>✓ 精修已应用</div>}
-              {revisionResult.locked && !revisionResult.canApply && <div style={{ ...styles.text, marginTop: '12px', color: '#f87171' }}>此章节已锁定，无法自动应用修改</div>}
             </div>
-          )}
+          ))}
+        </div>
+      )}
 
-          {/* Recheck result */}
-          {recheckResult && (
-            <div style={styles.sectionBox}>
-              <div style={styles.sectionTitle}>复查结果
-                <span style={{ ...styles.badge, marginLeft: '12px', background: recheckResult.level === 'pass' ? '#22c55e22' : recheckResult.level === 'fail' ? '#ef444422' : '#eab30822', color: recheckResult.level === 'pass' ? '#22c55e' : recheckResult.level === 'fail' ? '#ef4444' : '#eab308' }}>
-                  {recheckResult.level.toUpperCase()}
-                </span>
-              </div>
-              <div style={styles.text}>{recheckResult.summary}</div>
-              {recheckResult.remainingIssues > 0 && <div style={{ ...styles.text, marginTop: '8px', color: '#f97316' }}>仍有 {recheckResult.remainingIssues} 个问题待处理</div>}
-              {recheckResult.newIssues > 0 && <div style={{ ...styles.text, marginTop: '4px', color: '#ef4444' }}>新发现 {recheckResult.newIssues} 个问题</div>}
-            </div>
-          )}
+      {revisionResult && (
+        <div style={styles.panel}>
+          <div style={{ ...styles.row, justifyContent: 'space-between' }}>
+            <strong>精修建议</strong>
+            <span style={{ ...styles.badge, background: revisionResult.canApply ? '#064e3b' : '#7f1d1d', color: '#fff' }}>
+              {revisionResult.locked ? 'locked 只读' : revisionResult.canApply ? '可应用' : '建议模式'}
+            </span>
+          </div>
+          <div style={{ ...styles.text, marginTop: 8 }}>{revisionResult.reason}</div>
+          <div style={{ ...styles.row, alignItems: 'stretch', marginTop: 12 }}>
+            <div style={{ flex: 1, minWidth: 280 }}><div style={styles.muted}>修改前</div><div style={styles.block}>{revisionResult.beforeText}</div></div>
+            <div style={{ flex: 1, minWidth: 280 }}><div style={styles.muted}>修改后</div><div style={styles.block}>{revisionResult.afterText}</div></div>
+          </div>
+          <div style={{ ...styles.row, marginTop: 12 }}>
+            {!revisionResult.applied && revisionResult.canApply && <button style={styles.button} onClick={() => handleApplyRevision(revisionResult.id)}>应用精修</button>}
+            {revisionResult.applied && <span style={{ ...styles.badge, background: '#14532d', color: '#fff' }}>已应用</span>}
+            {!revisionResult.canApply && <span style={styles.muted}>locked 章节只能诊断和建议，不能 apply。</span>}
+          </div>
+        </div>
+      )}
+
+      {recheckResult && (
+        <div style={styles.panel}>
+          <strong>复检结果</strong>
+          <span style={{ ...styles.badge, marginLeft: 8, background: recheckResult.level === 'pass' ? '#14532d' : '#713f12', color: '#fff' }}>{recheckResult.level}</span>
+          <div style={{ ...styles.text, marginTop: 8 }}>{recheckResult.summary}</div>
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 /**
- * 大纲 DTO
+ * Outline DTOs
  */
 import { IsString, IsOptional, IsNumber, IsArray, IsIn, Min } from 'class-validator';
 import type { OutlineLevel, ChapterFunctionType, GoalArcType } from '@novel/shared';
@@ -134,5 +134,55 @@ export class SplitOutlineDto {
 
   @IsOptional()
   @IsNumber()
-  splitPoint?: number; // 分割位置（默认在中间）
+  splitPoint?: number;
+}
+
+export class InsertOutlineDto {
+  @IsString()
+  @IsIn(['before', 'after'])
+  position: 'before' | 'after';
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  content?: string;
+}
+
+export class MoveOutlineOrderDto {
+  @IsString()
+  @IsIn(['up', 'down'])
+  direction: 'up' | 'down';
+}
+
+export class ContinueOutlineDto {
+  @IsOptional()
+  @IsString()
+  fromOutlineId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  count?: number;
+
+  @IsOptional()
+  planning?: Record<string, unknown>;
+}
+
+export class RecommendOutlinePlanDto {
+  @IsOptional()
+  @IsString()
+  workScale?: string;
+
+  @IsOptional()
+  @IsString()
+  targetWordsRange?: string;
+
+  @IsOptional()
+  @IsString()
+  platform?: string;
+
+  @IsOptional()
+  planning?: Record<string, unknown>;
 }

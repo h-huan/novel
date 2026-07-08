@@ -73,8 +73,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html'),
-        launcher: path.resolve(__dirname, 'launcher.html'),
+        main: 'index.html',
+        launcher: 'launcher.html',
       },
     },
   },

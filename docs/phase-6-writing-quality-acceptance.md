@@ -1012,6 +1012,106 @@ npm run build
 - [x] WritingQualityPage 可以查看报告和 issues
 - [x] WritingQualityPage 可以触发精修建议
 - [x] WritingQualityPage 可以展示 diff
+
+## Phase 6.9 创作核心链路密度、闭环与注意力整改（2026-07-08）
+
+### 当前代码审查差距
+
+1. `WritingQualityPage` 原先依赖页面内存状态保存 report / issue / revision / recheck，切换页面后只能重新打开报告，不能恢复已生成精修、apply 与 recheck 结果。
+2. 写作质量 issue 原先只有 `open / resolved`，缺少 planned / refined / applied / recheck_passed / recheck_failed / ignored / archived 的处理闭环。
+3. 写作质量缺少前三屏注意力检查，不能针对标题、简介、前 50 / 100 / 300 / 500 字、短篇每 300 字节奏、长篇首章追读承诺输出滑走风险。
+4. 大纲生成仍偏向一次性章节列表，生成参数过少，不能表达作品规模、目标字数范围、每章字数、卷数、每卷章节数、更新计划和生成数量。
+5. 大纲编辑已有拆分、新增、删除、扩写、手动微调，但缺少合并、插入前后、上下移和续创建。
+6. 角色、世界观、伏笔、时间线现有页面可用，但数据结构还不足以支撑角色描述密度、世界观规则系统、伏笔链和时间线三线模型。
+
+### 最小完整实现方案
+
+本轮只做 Phase 6.9 P0 可用闭环和 P1 数据/UI 入口设计基础，不进入 Phase 7。
+
+- 注意力引擎：新增 `POST /projects/:projectId/writing-quality/attention`，并在 analyze 报告中保存 `attention_json`。
+- 质检闭环：报告详情返回 issue 的 `revisions / latestRevision / recheckResult`；issue 支持状态流转、单项复检、忽略、归档和创作位置跳转；apply 后不写入 `state_items` 的 Phase 6.6/6.7 约束保持不变。
+- 大纲整改：新增动态规划参数、短故事三步骤提示、章节细纲字段模板；新增插入、合并、上下移、续创建 API 与前端按钮。
+- P1 基础：新增兼容迁移字段，为角色密度档案、世界观规则系统、伏笔链、时间线三线模型保留持久化结构，后续再做完整编辑器。
+
+### 涉及文件
+
+- `server/src/database/migrations/019_phase_6_9_creative_core.ts`
+- `server/src/modules/writing-quality/dto/writing-quality.dto.ts`
+- `server/src/modules/writing-quality/writing-quality.controller.ts`
+- `server/src/modules/writing-quality/writing-quality.service.ts`
+- `server/src/modules/outline/dto/outline.dto.ts`
+- `server/src/modules/outline/outline.controller.ts`
+- `server/src/modules/outline/outline.service.ts`
+- `desktop/src/renderer/pages/WritingQualityPage.tsx`
+- `desktop/src/renderer/pages/OutlinePage.tsx`
+- `desktop/vite.config.ts`
+- `docs/phase-6-writing-quality-acceptance.md`
+
+### 数据库迁移
+
+新增幂等迁移 `019_phase_6_9_creative_core.ts`，只追加 JSON/nullable 扩展列，不删除旧表、不改旧字段、不破坏现有 SQLite 数据。
+
+- `writing_quality_reports`: `attention_json`, `view_state_json`
+- `writing_quality_issues`: `latest_revision_id`, `recheck_result_json`, `navigation_json`, `status_history_json`
+- `writing_revision_records`: `recheck_result_json`, `can_apply`
+- `outlines`: `detail_json`, `attention_json`, `plan_json`
+- `characters`: `density_profile_json`
+- `world_settings`: `rule_system_json`
+- `foreshadowings`: `chain_json`, `recovery_window_json`, `density_json`
+- `timeline_events`: `time_model_json`, `causality_json`, `visibility_json`
+
+### API 变化
+
+- 新增 `POST /projects/:projectId/writing-quality/attention`
+- 新增 `POST /projects/:projectId/writing-quality/issues/:issueId/status`
+- 新增 `POST /projects/:projectId/writing-quality/issues/:issueId/recheck`
+- 扩展 `GET /projects/:projectId/writing-quality/reports/:reportId`
+- 扩展 `POST /projects/:projectId/writing-quality/issues/:issueId/refine`
+- 扩展 `POST /projects/:projectId/writing-quality/revisions/:revisionId/apply`
+- 扩展 `POST /projects/:projectId/writing-quality/revisions/:revisionId/recheck`
+- 新增 `POST /projects/:projectId/outlines/planning/recommend`
+- 新增 `POST /projects/:projectId/outlines/continue`
+- 新增 `POST /projects/:projectId/outlines/:id/insert`
+- 新增 `POST /projects/:projectId/outlines/:id/merge-next`
+- 新增 `POST /projects/:projectId/outlines/:id/move-order`
+
+### 前端整改
+
+- `WritingQualityPage` 支持页面刷新/返回后恢复选中章节、报告、issue、latest revision 和 recheck 结果。
+- `WritingQualityPage` 新增前三屏生死线检查、滑走风险、原因、修改方案和替代开头建议展示。
+- `WritingQualityPage` 支持 issue 计划处理、生成方案、单项复检、忽略、归档和跳转到正文/大纲/角色/世界观/伏笔入口。
+- `OutlinePage` 新增动态长篇规划参数，不再把 200 万字、8 卷、每卷 50 章、每章 4000-5000 字写死为默认。
+- `OutlinePage` 保留已有拆分、新增、删除、AI 扩写、手动微调，并新增合并下一章、插入前、插入后、上移、下移、续创建 1 / 2 / 5 / 10 章。
+- `OutlinePage` 为短篇显示短故事三步骤和前 300-500 字强吸引提示。
+
+### 验收结果
+
+| 项目 | 状态 |
+| --- | --- |
+| 前 300-500 字注意力检查 | 已实现 API 与前端入口 |
+| 质检报告切换页面后恢复 | 已实现 localStorage 视图恢复 + 服务端 revision/recheck 返回 |
+| 单 issue 方案、apply、单项复检、忽略/归档 | 已实现 |
+| issue 跳转创作位置 | 已实现基础导航 |
+| 大纲动态长篇规划 | 已实现参数入口，不写死超长篇参考值 |
+| 短篇三步骤与强钩子提示 | 已实现入口提示 |
+| 大纲合并、插入、排序、续创建 | 已实现 |
+| 角色描述密度 | 完成数据结构入口，完整编辑器后续展开 |
+| 世界观规则系统 | 完成数据结构入口，完整编辑器后续展开 |
+| 伏笔链 | 完成数据结构入口，完整编辑器后续展开 |
+| 时间线三线模型 | 完成数据结构入口，完整编辑器后续展开 |
+
+### 构建记录
+
+- `server npm run typecheck`: 通过
+- `desktop npm run typecheck`: 通过
+- `server npm run build`: 通过
+- `desktop npm run build`: 首次因 Windows 下 Vite HTML input 绝对路径输出名失败；已将 `desktop/vite.config.ts` 的 renderer input 改为相对入口名后重跑通过。
+
+### 遗留项
+
+1. P1 的角色密度档案、世界观规则编辑器、伏笔链视图、时间线三线模型仍为数据结构与入口设计基础，未在本轮过度展开。
+2. 注意力引擎本轮为确定性规则版，后续可叠加 LLM 深度改写建议。
+3. 本轮不进入 Phase 7。
 - [x] 写作页面有质量诊断入口
 - [x] 不破坏状态确稿中心
 - [x] 不破坏角色成长事件

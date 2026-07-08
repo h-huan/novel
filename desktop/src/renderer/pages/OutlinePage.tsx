@@ -299,6 +299,13 @@ const OutlinePage: React.FC = () => {
   const [material, setMaterial] = useState('');
   const [platform, setPlatform] = useState('fanqie');
   const [targetWords, setTargetWords] = useState('3000');
+  const [workScale, setWorkScale] = useState('ai_recommended');
+  const [targetWordsRange, setTargetWordsRange] = useState('');
+  const [chapterWordsMode, setChapterWordsMode] = useState('platform_default');
+  const [volumeMode, setVolumeMode] = useState('ai_recommended');
+  const [chaptersPerVolumeMode, setChaptersPerVolumeMode] = useState('dynamic');
+  const [updatePlan, setUpdatePlan] = useState('daily_words');
+  const [generateCount, setGenerateCount] = useState('5');
   const [tone, setTone] = useState('neutral');
   const [blockedNotice, setBlockedNotice] = useState<{
     reason: string;
@@ -644,9 +651,22 @@ const OutlinePage: React.FC = () => {
         userInput: {
           projectId,
           story_setting: material || '自动生成',
-          targetWords: Math.max(1, Number(targetWords || 3000) / 10000),
+          targetWords: targetWordsRange || Math.max(1, Number(targetWords || 3000) / 10000),
           genre: tone || platform || '自动判断',
-          chapterLimit: Number(targetWords) >= 50000 ? undefined : '9',
+          chapterLimit: generateCount === 'remaining' ? undefined : generateCount,
+          planning: {
+            workScale,
+            targetWordsRange,
+            chapterWordsMode,
+            volumeMode,
+            chaptersPerVolumeMode,
+            updatePlan,
+            generateCount,
+            shortStoryFlow: projectType === 'short'
+              ? ['题材钩子', '完整第一人称大纲', '递进反转表', '伏笔回收表', '每章天龙8步法', '前300-500字强吸引']
+              : [],
+            ultraLongReferenceOnly: true,
+          },
         },
       });
       const data = (result as any).data ?? result;
@@ -671,7 +691,7 @@ const OutlinePage: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, material, platform, targetWords, tone, checkAction]);
+  }, [projectId, material, platform, targetWords, targetWordsRange, tone, generateCount, workScale, chapterWordsMode, volumeMode, chaptersPerVolumeMode, updatePlan, projectType, checkAction]);
 
   const handleSaveGenerated = useCallback(async () => {
     setGenProgress('正在保存大纲...');
@@ -753,6 +773,69 @@ const OutlinePage: React.FC = () => {
       alert(`新增失败：${error?.message || '未知错误'}`);
     }
   }, [projectId, volumes, refreshAfterChange]);
+
+  const handleInsertChapter = useCallback(async (chapterId: string, position: 'before' | 'after') => {
+    if (!projectId) return;
+    const title = window.prompt(position === 'before' ? '插入前：新章节标题' : '插入后：新章节标题', '新章节细纲');
+    if (!title?.trim()) return;
+    try {
+      const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/insert`, {
+        position,
+        title: title.trim(),
+      });
+      const data = (res as any).data ?? res;
+      await refreshAfterChange(data?.id);
+    } catch (error: any) {
+      alert(`插入失败：${error?.message || '未知错误'}`);
+    }
+  }, [projectId, refreshAfterChange]);
+
+  const handleMergeNext = useCallback(async (chapterId: string) => {
+    if (!projectId) return;
+    if (!window.confirm('确定将本章与下一章合并？已锁定节点不会被合并，正文不会被自动改写。')) return;
+    try {
+      const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/merge-next`, {});
+      const data = (res as any).data ?? res;
+      await refreshAfterChange(data?.id || chapterId);
+    } catch (error: any) {
+      alert(`合并失败：${error?.message || '未知错误'}`);
+    }
+  }, [projectId, refreshAfterChange]);
+
+  const handleMoveOrder = useCallback(async (chapterId: string, direction: 'up' | 'down') => {
+    if (!projectId) return;
+    try {
+      const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/move-order`, { direction });
+      const data = (res as any).data ?? res;
+      await refreshAfterChange(data?.id || chapterId);
+    } catch (error: any) {
+      alert(`排序失败：${error?.message || '未知错误'}`);
+    }
+  }, [projectId, refreshAfterChange]);
+
+  const handleContinueCreate = useCallback(async (count: number) => {
+    if (!projectId) return;
+    try {
+      const res = await api.post(`/projects/${projectId}/outlines/continue`, {
+        fromOutlineId: selectedChapter?.id,
+        count,
+        planning: {
+          workScale,
+          targetWordsRange,
+          chapterWordsMode,
+          volumeMode,
+          chaptersPerVolumeMode,
+          updatePlan,
+        },
+      });
+      const data = (res as any).data ?? res;
+      const last = data?.outlines?.[data.outlines.length - 1];
+      await refreshAfterChange(last?.id);
+      setGenProgress(`已续创建 ${data?.outlines?.length || count} 章细纲。`);
+    } catch (error: any) {
+      alert(`续创建失败：${error?.message || '未知错误'}`);
+    }
+  }, [projectId, selectedChapter, workScale, targetWordsRange, chapterWordsMode, volumeMode, chaptersPerVolumeMode, updatePlan, refreshAfterChange]);
 
   const handleExpandChapter = useCallback(async () => {
     if (!projectId || !selectedChapter) return;
@@ -899,11 +982,24 @@ const OutlinePage: React.FC = () => {
           <button type="button" style={styles.operationButton} onClick={handleExpandChapter}>AI扩写</button>
           <button type="button" style={styles.operationButton} onClick={() => { setEditingContentId(selectedChapter.id); setEditContent(formatOutlineFields(docFields)); }}>手动微调</button>
           <button type="button" style={styles.operationButton} onClick={() => selectedVolume && handleSplitChapter(selectedVolume.id, selectedChapter.id)}>拆分本章</button>
+          <button type="button" style={styles.operationButton} onClick={() => handleMergeNext(selectedChapter.id)}>合并下一章</button>
+          <button type="button" style={styles.operationButton} onClick={() => handleInsertChapter(selectedChapter.id, 'before')}>插入前</button>
+          <button type="button" style={styles.operationButton} onClick={() => handleInsertChapter(selectedChapter.id, 'after')}>插入后</button>
+          <button type="button" style={styles.operationButton} onClick={() => handleMoveOrder(selectedChapter.id, 'up')}>上移</button>
+          <button type="button" style={styles.operationButton} onClick={() => handleMoveOrder(selectedChapter.id, 'down')}>下移</button>
           <button type="button" style={styles.operationButton} onClick={() => selectedVolume && handleAddChapter(selectedVolume.id)}>新增章节</button>
           <button type="button" style={{ ...styles.operationButton, color: '#ef4444', borderColor: 'rgba(239,68,68,0.24)' }} onClick={() => selectedVolume && handleDeleteChapter(selectedVolume.id, selectedChapter.id)}>删除</button>
         </div>
         <div style={styles.impactNotice}>
           影响提示：尽量小改。世界观为上游设定；已锁定正文不自动改；大纲、角色、组织与地图、伏笔会产生待确认影响；未锁定正文可按新大纲联动。
+        </div>
+        <div style={styles.impactNotice}>
+          续创建：
+          {[1, 2, 5, 10].map(count => (
+            <button key={count} type="button" style={{ ...styles.operationButton, marginLeft: 8 }} onClick={() => handleContinueCreate(count)}>
+              续 {count} 章
+            </button>
+          ))}
         </div>
         <div style={styles.qualityPanel}>
           <div style={styles.qualityTitle}>章节大纲完整度</div>
@@ -1019,6 +1115,72 @@ const OutlinePage: React.FC = () => {
               <input style={styles.input} value={tone} onChange={event => setTone(event.target.value)} placeholder="neutral / dark / light" />
             </div>
           </div>
+          <div style={styles.formRow}>
+            <div style={{ ...styles.formSection, flex: 1 }}>
+              <label style={styles.formLabel}>作品规模</label>
+              <select style={styles.input} value={workScale} onChange={event => setWorkScale(event.target.value)}>
+                <option value="ai_recommended">AI推荐</option>
+                <option value="short_middle">短中长篇</option>
+                <option value="middle_long">中长篇</option>
+                <option value="long">长篇</option>
+                <option value="ultra_long">超长篇参考</option>
+                <option value="custom">自定义</option>
+              </select>
+            </div>
+            <div style={{ ...styles.formSection, flex: 1 }}>
+              <label style={styles.formLabel}>目标字数范围</label>
+              <input style={styles.input} value={targetWordsRange} onChange={event => setTargetWordsRange(event.target.value)} placeholder="可空，例：80000-120000" />
+            </div>
+          </div>
+          <div style={styles.formRow}>
+            <div style={{ ...styles.formSection, flex: 1 }}>
+              <label style={styles.formLabel}>每章字数</label>
+              <select style={styles.input} value={chapterWordsMode} onChange={event => setChapterWordsMode(event.target.value)}>
+                <option value="platform_default">平台默认</option>
+                <option value="custom">用户自定义</option>
+                <option value="ai_recommended">AI推荐</option>
+              </select>
+            </div>
+            <div style={{ ...styles.formSection, flex: 1 }}>
+              <label style={styles.formLabel}>卷数</label>
+              <select style={styles.input} value={volumeMode} onChange={event => setVolumeMode(event.target.value)}>
+                <option value="ai_recommended">AI推荐</option>
+                <option value="manual">手动指定</option>
+              </select>
+            </div>
+            <div style={{ ...styles.formSection, flex: 1 }}>
+              <label style={styles.formLabel}>每卷章节</label>
+              <select style={styles.input} value={chaptersPerVolumeMode} onChange={event => setChaptersPerVolumeMode(event.target.value)}>
+                <option value="dynamic">AI动态分配</option>
+                <option value="manual">手动指定</option>
+              </select>
+            </div>
+          </div>
+          <div style={styles.formRow}>
+            <div style={{ ...styles.formSection, flex: 1 }}>
+              <label style={styles.formLabel}>更新计划</label>
+              <select style={styles.input} value={updatePlan} onChange={event => setUpdatePlan(event.target.value)}>
+                <option value="daily_words">日更字数</option>
+                <option value="daily_chapters">日更章数</option>
+                <option value="stockpile">存稿模式</option>
+              </select>
+            </div>
+            <div style={{ ...styles.formSection, flex: 1 }}>
+              <label style={styles.formLabel}>生成数量</label>
+              <select style={styles.input} value={generateCount} onChange={event => setGenerateCount(event.target.value)}>
+                <option value="1">1章</option>
+                <option value="2">2章</option>
+                <option value="5">5章</option>
+                <option value="10">10章</option>
+                <option value="remaining">本卷剩余/AI推荐</option>
+              </select>
+            </div>
+          </div>
+          {projectType === 'short' && (
+            <div style={styles.impactNotice}>
+              短故事三步骤：题材钩子、完整第一人称大纲、递进反转表、伏笔回收表、每章天龙8步法，并要求前300-500字强吸引。
+            </div>
+          )}
           <div style={styles.actionRow}>
             <button type="button" style={{ ...styles.genBtn, opacity: isGenerating ? 0.65 : 1 }} onClick={handleGenerateOutline} disabled={isGenerating}>
               {isGenerating ? '生成中...' : 'AI生成完整大纲'}

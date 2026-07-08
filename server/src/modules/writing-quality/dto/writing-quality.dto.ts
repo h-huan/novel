@@ -50,6 +50,39 @@ export class RefineIssueDto {
   instruction?: string;
 }
 
+export class AttentionCheckDto {
+  @IsOptional()
+  @IsString()
+  chapterId?: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  intro?: string;
+
+  @IsOptional()
+  @IsString()
+  content?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['short', 'long', 'auto'])
+  mode?: string;
+}
+
+export class UpdateIssueStatusDto {
+  @IsString()
+  @IsIn(['open', 'planned', 'refined', 'applied', 'recheck_passed', 'recheck_failed', 'ignored', 'archived', 'resolved'])
+  status: string;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
 export class LLMQualityOutput {
   summary: string;
   overallLevel: 'low' | 'medium' | 'high' | 'critical';
