@@ -553,6 +553,8 @@ export class ContinuityService {
     const outline = focusChapter ? this.getFocusOutline(projectId, focusChapter) : null;
     const focusCharacterIds = this.focusCharacterIds(characters, snapshots, relationships, focusChapter, outline);
     const focusRelationshipIds = this.getFocusRelationshipIds(projectId, focusChapter, relationships, focusCharacterIds);
+    const focusForeshadowingIds = this.getFocusForeshadowingIds(projectId, focusChapter, focusCharacterIds, focusRelationshipIds);
+    const focusTimelineEventIds = this.getFocusTimelineEventIds(projectId, focusChapter, focusCharacterIds, focusRelationshipIds);
     const orderMap = this.getChapterOrderMap(projectId);
     const currentVolumeIndex = focusChapter ? Number(focusChapter.volume_index || focusChapter.volumeIndex || 0) : 0;
 
@@ -566,13 +568,16 @@ export class ContinuityService {
       || (rule.scope === 'volume' && rule.volumeIndex === currentVolumeIndex)
       || rule.relatedCharacterIds?.some((c: string) => focusCharacterIds.has(c))
       || rule.relatedRelationshipIds?.some((r: string) => focusRelationshipIds.has(r))
+      || (rule.relatedForeshadowingIds || []).some((f: string) => focusForeshadowingIds.has(f))
+      || (rule.relatedTimelineEventIds || []).some((t: string) => focusTimelineEventIds.has(t))
+      || focusTasks.some((ft: any) => ft.ruleId === rule.id)
     );
 
     // Persisted focus tasks
     const persistedFocusTasks = tasks.filter(t => t.chapter_id === focusChapter?.id).map(t => this.worldRuleTaskToResponse(t));
 
     // Build derived tasks for each rule
-    const derivedTasks = this.buildDerivedWorldRuleTasks(responseRules, focusChapter, focusCharacterIds, focusRelationshipIds);
+    const derivedTasks = this.buildDerivedWorldRuleTasks(responseRules, focusChapter, focusCharacterIds, focusRelationshipIds, focusForeshadowingIds, focusTimelineEventIds);
     const persistedKeySet = new Set(persistedFocusTasks.map((t: any) => `${t.ruleId}-${t.taskType}-${t.reason}`));
     const uniqueDerived = derivedTasks.filter((t: any) => !persistedKeySet.has(`${t.ruleId}-${t.taskType}-${t.reason}`));
     const dedupedDerived: any[] = [];
@@ -593,7 +598,9 @@ export class ContinuityService {
         fullBookRules: responseRules.filter(r => r.scope === 'full_book').length,
         volumeRules: responseRules.filter(r => r.scope === 'volume').length,
         chapterRules: responseRules.filter(r => r.scope === 'chapter').length,
-        pendingReviewCount: responseRules.filter(r => r.reviewStatus === 'pending').length + tasks.filter(t => t.review_status === 'pending').length,
+        pendingReviewCount: responseRules.filter(r => r.reviewStatus === 'pending').length
+        + tasks.filter(t => t.review_status === 'pending').length
+        + events.filter(e => e.review_status === 'pending').length,
         conflictCount: responseRules.filter(r => r.status === 'conflict' || r.contradictionRisk).length,
         highRiskCount: responseRules.filter(r => ['high', 'critical'].includes(r.riskLevel)).length,
         lockedCount: responseRules.filter(r => r.locked).length,
@@ -617,8 +624,8 @@ export class ContinuityService {
 
   createWorldRule(projectId: string, body: any) {
     if (!String(body?.title || '').trim()) throw new BadRequestException('title is required');
-    this.ensureEnum(body.ruleType || 'law', WORLD_RULE_TYPES, 'ruleType');
-    this.ensureEnum(body.scope || 'full_book', WORLD_RULE_SCOPES, 'scope');
+    const ruleType = this.ensureEnum(body.ruleType || 'law', WORLD_RULE_TYPES, 'ruleType');
+    const scope = this.ensureEnum(body.scope || 'full_book', WORLD_RULE_SCOPES, 'scope');
     const now = new Date().toISOString();
     const id = uuid();
     this.database.prepare(`
@@ -629,7 +636,7 @@ export class ContinuityService {
         review_status, locked, source, confidence, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      id, projectId, String(body.title).trim(), body.ruleType, body.scope, numberOrNull(body.volumeIndex),
+      id, projectId, String(body.title).trim(), ruleType, scope, numberOrNull(body.volumeIndex),
       body.content || '', body.explanation || '', body.limitation || '', body.contradictionRisk || '',
       'planned', this.ensureEnum(body.riskLevel || 'none', WORLD_RULE_RISK_LEVELS, 'riskLevel'),
       body.firstEstablishedChapterId || null, body.lastVerifiedChapterId || null,
@@ -764,8 +771,11 @@ export class ContinuityService {
     const outline = focusChapter ? this.getFocusOutline(projectId, focusChapter) : null;
     const focusCharacterIds = this.focusCharacterIds(characters, snapshots, relationships, focusChapter, outline);
     const focusRelationshipIds = this.getFocusRelationshipIds(projectId, focusChapter, relationships, focusCharacterIds);
+    const focusForeshadowingIds = this.getFocusForeshadowingIds(projectId, focusChapter, focusCharacterIds, focusRelationshipIds);
+    const focusWorldRuleIds = this.getFocusWorldRuleIds(projectId, focusChapter, focusCharacterIds, focusRelationshipIds);
     const orderMap = this.getChapterOrderMap(projectId);
     const currentChapterIndex = focusChapter ? Number(focusChapter.chapter_index || focusChapter.chapterIndex || 0) : 0;
+    const currentChapterOrder = this.chapterOrder(orderMap, focusChapter?.id);
 
     const responseEvents = events.map(e => this.timelineEventToResponse(e, links, tasks, characters, focusChapter));
     const legacyEvents = legacy.map(item => this.legacyTimelineToResponse(item, focusChapter, currentChapterIndex));
@@ -777,10 +787,16 @@ export class ContinuityService {
       || e.chapterId === focusChapter?.id
       || (e.relatedCharacterIds || []).some((c: string) => focusCharacterIds.has(c))
       || (e.relatedRelationshipIds || []).some((r: string) => focusRelationshipIds.has(r))
+      || (!e.legacy && e.narrativeOrder === currentChapterIndex)
+      || (!e.legacy && currentChapterOrder > 0 && Math.abs(Number(e.storyTimeOrder || 0) - currentChapterOrder) <= 1)
+      || (!e.legacy && responseLinks.some(l => l.sourceEventId === e.id || l.targetEventId === e.id))
+      || (!e.legacy && (e.relatedForeshadowingIds || []).some((f: string) => focusForeshadowingIds.has(f)))
+      || (!e.legacy && (e.relatedWorldRuleIds || []).some((w: string) => focusWorldRuleIds.has(w)))
+      || legacyEvents.some((le: any) => le.id === e.id)
     );
 
     const persistedFocusTasks = tasks.filter(t => t.chapter_id === focusChapter?.id).map(t => this.timelineTaskToResponse(t));
-    const derivedTasks = this.buildDerivedTimelineTasks(responseEvents, focusChapter, focusCharacterIds, focusRelationshipIds, currentChapterIndex);
+    const derivedTasks = this.buildDerivedTimelineTasks(responseEvents, focusChapter, focusCharacterIds, focusRelationshipIds, currentChapterIndex, focusForeshadowingIds, focusWorldRuleIds, currentChapterOrder);
     const persistedKeySet = new Set(persistedFocusTasks.map((t: any) => `${t.eventId}-${t.taskType}-${t.reason}`));
     const uniqueDerived = derivedTasks.filter((t: any) => !persistedKeySet.has(`${t.eventId}-${t.taskType}-${t.reason}`));
     const dedupedDerived: any[] = [];
@@ -812,7 +828,9 @@ export class ContinuityService {
         narrativeOrderEvents: allEvents.filter(e => e.lineType === 'narrative_order').length,
         causalityEvents: allEvents.filter(e => e.lineType === 'causality').length,
         causalityLinks: responseLinks.length,
-        pendingReviewCount: allEvents.filter(e => e.reviewStatus === 'pending').length + tasks.filter(t => t.review_status === 'pending').length,
+        pendingReviewCount: allEvents.filter(e => e.reviewStatus === 'pending').length
+        + tasks.filter(t => t.review_status === 'pending').length
+        + links.filter(l => l.review_status === 'pending').length,
         timeConflictCount: timeConflicts.length,
         causalityGapCount: causalityGaps.length,
         highRiskCount: allEvents.filter(e => ['high', 'critical'].includes(e.riskLevel)).length,
@@ -837,7 +855,9 @@ export class ContinuityService {
 
   createTimelineEvent(projectId: string, body: any) {
     if (!String(body?.title || '').trim()) throw new BadRequestException('title is required');
-    this.ensureEnum(body.lineType || 'story_time', TIMELINE_LINE_TYPES, 'lineType');
+    const lineType = this.ensureEnum(body.lineType || 'story_time', TIMELINE_LINE_TYPES, 'lineType');
+    const readerKnownState = this.ensureEnum(body.readerKnownState || 'unknown', READER_STATES, 'readerKnownState');
+    const characterKnownState = this.ensureEnum(body.characterKnownState || 'unknown', CHARACTER_KNOWN_STATES, 'characterKnownState');
     const now = new Date().toISOString();
     const id = uuid();
     this.database.prepare(`
@@ -849,13 +869,13 @@ export class ContinuityService {
         risk_reason, review_status, locked, source, confidence, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      id, projectId, String(body.title).trim(), body.summary || '', body.lineType,
+      id, projectId, String(body.title).trim(), body.summary || '', lineType,
       body.chapterId || null, numberOrNull(body.volumeIndex), numberOrNull(body.chapterIndex),
       body.storyTimeText || '', numberOrDefault(body.storyTimeOrder, 0), numberOrDefault(body.narrativeOrder, 0),
       numberOrDefault(body.causalityOrder, 0), body.location || '',
       JSON.stringify(body.participantsCharacterIds || []), JSON.stringify(body.relatedRelationshipIds || []),
       JSON.stringify(body.relatedForeshadowingIds || []), JSON.stringify(body.relatedWorldRuleIds || []),
-      body.readerKnownState || 'unknown', body.characterKnownState || 'unknown', 'planned',
+      readerKnownState, characterKnownState, 'planned',
       this.ensureEnum(body.riskLevel || 'none', WORLD_RULE_RISK_LEVELS, 'riskLevel'),
       body.riskReason || '', 'pending', 0, this.normalizeSource(body.source),
       numberOrDefault(body.confidence, 1), now, now,
@@ -1014,7 +1034,11 @@ export class ContinuityService {
   }
 
   private allLegacyForeshadowings(projectId: string): any[] {
-    return this.database.prepare('SELECT * FROM foreshadowings WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as any[];
+    try {
+      return this.database.prepare('SELECT * FROM foreshadowings WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as any[];
+    } catch {
+      return [];
+    }
   }
 
   private foreshadowingRawById(projectId: string, threadId: string) {
@@ -1468,7 +1492,62 @@ export class ContinuityService {
   }
 
   
-  private getFocusRelationshipIds(projectId: string, focusChapter: any | null, relationships: any[], focusCharacterIds: Set<string>): Set<string> {
+
+  private getFocusForeshadowingIds(projectId: string, focusChapter: any | null, focusCharacterIds: Set<string>, focusRelationshipIds: Set<string>): Set<string> {
+    const ids = new Set<string>();
+    if (!focusChapter) return ids;
+    const tasks = this.allForeshadowingTasks(projectId);
+    const events = this.allForeshadowingEvents(projectId);
+    const threads = this.allForeshadowingThreads(projectId);
+    for (const t of tasks) { if (t.chapter_id === focusChapter.id) ids.add(t.thread_id); }
+    for (const e of events) { if (e.chapter_id === focusChapter.id) ids.add(e.thread_id); }
+    for (const th of threads) {
+      if (th.planned_bury_chapter_id === focusChapter.id || th.actual_bury_chapter_id === focusChapter.id || th.actual_recovery_chapter_id === focusChapter.id) {
+        ids.add(th.id);
+      }
+      const chars = JSON.parse(th.related_character_ids || '[]');
+      if (chars.some((c: string) => focusCharacterIds.has(c))) ids.add(th.id);
+      const rels = JSON.parse(th.related_relationship_ids || '[]');
+      if (rels.some((r: string) => focusRelationshipIds.has(r))) ids.add(th.id);
+    }
+    return ids;
+  }
+
+  private getFocusTimelineEventIds(projectId: string, focusChapter: any | null, focusCharacterIds: Set<string>, focusRelationshipIds: Set<string>): Set<string> {
+    const ids = new Set<string>();
+    if (!focusChapter) return ids;
+    const tasks = this.allTimelineTasks(projectId);
+    const events = this.allTimelineEvents(projectId);
+    for (const t of tasks) { if (t.chapter_id === focusChapter.id) ids.add(t.event_id); }
+    for (const e of events) {
+      if (e.chapter_id === focusChapter.id) ids.add(e.id);
+      const chars = JSON.parse(e.participants_character_ids || '[]');
+      if (chars.some((c: string) => focusCharacterIds.has(c))) ids.add(e.id);
+      const rels = JSON.parse(e.related_relationship_ids || '[]');
+      if (rels.some((r: string) => focusRelationshipIds.has(r))) ids.add(e.id);
+    }
+    return ids;
+  }
+
+  private getFocusWorldRuleIds(projectId: string, focusChapter: any | null, focusCharacterIds: Set<string>, focusRelationshipIds: Set<string>): Set<string> {
+    const ids = new Set<string>();
+    if (!focusChapter) return ids;
+    const tasks = this.allWorldRuleTasks(projectId);
+    const events = this.allWorldRuleEvents(projectId);
+    const rules = this.allWorldRules(projectId);
+    for (const t of tasks) { if (t.chapter_id === focusChapter.id) ids.add(t.rule_id); }
+    for (const e of events) { if (e.chapter_id === focusChapter.id) ids.add(e.rule_id); }
+    for (const r of rules) {
+      if (r.first_established_chapter_id === focusChapter.id || r.last_verified_chapter_id === focusChapter.id) ids.add(r.id);
+      const chars = JSON.parse(r.related_character_ids || '[]');
+      if (chars.some((c: string) => focusCharacterIds.has(c))) ids.add(r.id);
+      const rels = JSON.parse(r.related_relationship_ids || '[]');
+      if (rels.some((rel: string) => focusRelationshipIds.has(rel))) ids.add(r.id);
+    }
+    return ids;
+  }
+
+    private getFocusRelationshipIds(projectId: string, focusChapter: any | null, relationships: any[], focusCharacterIds: Set<string>): Set<string> {
     const ids = new Set<string>();
     if (!focusChapter) return ids;
     const relEvents = this.allRelationshipEvents(projectId);
@@ -1507,7 +1586,11 @@ export class ContinuityService {
   }
 
   private allLegacyTimelines(projectId: string): any[] {
-    return this.database.prepare('SELECT * FROM timeline_events WHERE project_id = ? ORDER BY event_date ASC, updated_at DESC').all(projectId) as any[];
+    try {
+      return this.database.prepare('SELECT * FROM timeline_events WHERE project_id = ? ORDER BY event_date ASC, updated_at DESC').all(projectId) as any[];
+    } catch {
+      return [];
+    }
   }
 
   private worldRuleRawById(projectId: string, ruleId: string) {
@@ -1581,7 +1664,7 @@ export class ContinuityService {
     };
   }
 
-  private buildDerivedWorldRuleTasks(rules: any[], focusChapter: any | null, focusCharacterIds: Set<string>, focusRelationshipIds: Set<string>): any[] {
+  private buildDerivedWorldRuleTasks(rules: any[], focusChapter: any | null, focusCharacterIds: Set<string>, focusRelationshipIds: Set<string>, focusForeshadowingIds?: Set<string>, focusTimelineEventIds?: Set<string>): any[] {
     if (!focusChapter) return [];
     const derived: any[] = [];
     for (const rule of rules) {
@@ -1635,6 +1718,28 @@ export class ContinuityService {
           taskType: 'check', priority: 'medium',
           instruction: `当前章关系关联世界观规则：${rule.title}`,
           reason: 'related_relationship_ids 与当前章关系相交', status: 'todo', reviewStatus: 'pending',
+          source: 'radar_derived', locked: false, derived: true,
+        });
+      }
+      const ruleForeshadowings = rule.relatedForeshadowingIds || [];
+      if (focusForeshadowingIds && ruleForeshadowings.some((f: string) => focusForeshadowingIds.has(f))) {
+        derived.push({
+          id: `world-radar-${rule.id}-foreshadowing`,
+          ruleId: rule.id, ruleTitle: rule.title, chapterId: focusChapter.id,
+          taskType: 'check', priority: 'medium',
+          instruction: `当前章伏笔关联世界观规则：${rule.title}`,
+          reason: 'related_foreshadowing_ids 与当前章伏笔相交', status: 'todo', reviewStatus: 'pending',
+          source: 'radar_derived', locked: false, derived: true,
+        });
+      }
+      const ruleTimelineEvents = rule.relatedTimelineEventIds || [];
+      if (focusTimelineEventIds && ruleTimelineEvents.some((t: string) => focusTimelineEventIds.has(t))) {
+        derived.push({
+          id: `world-radar-${rule.id}-timeline`,
+          ruleId: rule.id, ruleTitle: rule.title, chapterId: focusChapter.id,
+          taskType: 'check', priority: 'medium',
+          instruction: `当前章时间线事件关联世界观规则：${rule.title}`,
+          reason: 'related_timeline_event_ids 与当前章时间线事件相交', status: 'todo', reviewStatus: 'pending',
           source: 'radar_derived', locked: false, derived: true,
         });
       }
@@ -1705,7 +1810,7 @@ export class ContinuityService {
     };
   }
 
-  private buildDerivedTimelineTasks(events: any[], focusChapter: any | null, focusCharacterIds: Set<string>, focusRelationshipIds: Set<string>, currentChapterIndex: number): any[] {
+  private buildDerivedTimelineTasks(events: any[], focusChapter: any | null, focusCharacterIds: Set<string>, focusRelationshipIds: Set<string>, currentChapterIndex: number, focusForeshadowingIds?: Set<string>, focusWorldRuleIds?: Set<string>, currentChapterOrder?: number): any[] {
     if (!focusChapter) return [];
     const derived: any[] = [];
     for (const event of events) {
@@ -1737,6 +1842,36 @@ export class ContinuityService {
           taskType: 'check_order', priority: 'medium',
           instruction: `当前章人物参与时间线事件：${event.title}`,
           reason: 'participants_character_ids 与当前章人物相交', status: 'todo', reviewStatus: 'pending',
+          source: 'radar_derived', locked: false, derived: true,
+        });
+      }
+      if (currentChapterOrder && currentChapterOrder > 0 && Math.abs(Number(event.storyTimeOrder || 0) - currentChapterOrder) <= 1) {
+        derived.push({
+          id: `timeline-radar-${event.id}-storytime`,
+          eventId: event.id, eventTitle: event.title, chapterId: focusChapter.id,
+          taskType: 'check_order', priority: 'medium',
+          instruction: `当前章与客观故事时间相邻的事件：${event.title}`,
+          reason: 'story_time_order 与当前章相邻', status: 'todo', reviewStatus: 'pending',
+          source: 'radar_derived', locked: false, derived: true,
+        });
+      }
+      if (focusForeshadowingIds && (event.relatedForeshadowingIds || []).some((f: string) => focusForeshadowingIds.has(f))) {
+        derived.push({
+          id: `timeline-radar-${event.id}-foreshadow`,
+          eventId: event.id, eventTitle: event.title, chapterId: focusChapter.id,
+          taskType: 'sync_lines', priority: 'medium',
+          instruction: `当前章伏笔关联时间线事件：${event.title}`,
+          reason: 'related_foreshadowing_ids 与当前章伏笔相交', status: 'todo', reviewStatus: 'pending',
+          source: 'radar_derived', locked: false, derived: true,
+        });
+      }
+      if (focusWorldRuleIds && (event.relatedWorldRuleIds || []).some((w: string) => focusWorldRuleIds.has(w))) {
+        derived.push({
+          id: `timeline-radar-${event.id}-worldrule`,
+          eventId: event.id, eventTitle: event.title, chapterId: focusChapter.id,
+          taskType: 'sync_lines', priority: 'medium',
+          instruction: `当前章世界观规则关联时间线事件：${event.title}`,
+          reason: 'related_world_rule_ids 与当前章规则相交', status: 'todo', reviewStatus: 'pending',
           source: 'radar_derived', locked: false, derived: true,
         });
       }

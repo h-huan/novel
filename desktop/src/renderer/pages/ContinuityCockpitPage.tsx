@@ -46,7 +46,7 @@ const PHASE_TASKS = [
   { id: '7.1', title: '小说全貌总览 + 当前章节创作焦点', status: '已完成' },
   { id: '7.2', title: '人物状态与人物关系网', status: '已完成' },
   { id: '7.3', title: '伏笔雷达与伏笔生命周期', status: '已完成' },
-  { id: '7.4', title: '世界观规则与时间线三线模型', status: '待开发' },
+  { id: '7.4', title: '世界观规则与时间线三线模型', status: '本轮实现' },
   { id: '7.5', title: '写作前检查与写作后更新闭环', status: '待开发' },
 ];
 
@@ -59,6 +59,14 @@ const FORESHADOWING_LEVELS = ['full_book', 'volume', 'chapter'];
 const FORESHADOWING_STATUSES = ['planned', 'buried', 'deepened', 'misdirected', 'recovery_due', 'recovered', 'overdue', 'conflict', 'abandoned'];
 const FORESHADOWING_RISK_LEVELS = ['none', 'low', 'medium', 'high', 'critical'];
 const FORESHADOWING_EVENT_TYPES = ['planned', 'buried', 'deepened', 'misdirected', 'hinted', 'recovered', 'delayed', 'cancelled', 'conflict', 'other'];
+const WORLD_RULE_TYPES = ['geography', 'era', 'society', 'law', 'profession', 'organization', 'technology', 'power_system', 'resource', 'culture', 'economy', 'family', 'custom'];
+const WORLD_RULE_SCOPES = ['full_book', 'volume', 'chapter', 'location', 'organization', 'character', 'relationship'];
+const WORLD_RULE_RISK_LEVELS = ['none', 'low', 'medium', 'high', 'critical'];
+const WORLD_RULE_EVENT_TYPES = ['established', 'used', 'verified', 'changed', 'violated', 'revealed', 'conflict', 'deprecated', 'other'];
+const WORLD_RULE_TASK_TYPES = ['apply', 'check', 'reveal', 'avoid_contradiction', 'update_rule', 'verify'];
+const TIMELINE_LINE_TYPES = ['story_time', 'narrative_order', 'causality'];
+const TIMELINE_LINK_TYPES = ['cause', 'effect', 'condition', 'motivation', 'information', 'misdirection', 'contradiction', 'parallel', 'other'];
+const TIMELINE_TASK_TYPES = ['place_event', 'check_order', 'check_causality', 'reveal_information', 'avoid_time_conflict', 'sync_lines'];
 const FORESHADOWING_TASK_TYPES = ['bury', 'deepen', 'misdirect', 'recover', 'delay', 'check', 'avoid_contradiction'];
 const TASK_TYPE_LABELS: Record<string, string> = {
   bury: '本章要埋设',
@@ -145,6 +153,46 @@ const defaultForeshadowingEventForm = {
   impact: '',
 };
 
+const defaultWorldRuleForm = {
+  ruleId: '', title: '', ruleType: 'law', scope: 'full_book', volumeIndex: 1,
+  content: '', explanation: '', limitation: '', contradictionRisk: '',
+  status: 'planned', riskLevel: 'none',
+  firstEstablishedChapterId: '', lastVerifiedChapterId: '',
+  relatedCharacterIds: [] as string[], relatedRelationshipIds: [] as string[],
+  relatedForeshadowingIds: [] as string[], relatedTimelineEventIds: [] as string[],
+  reviewStatus: 'pending', locked: false,
+};
+
+const defaultWorldRuleEventForm = {
+  ruleId: '', chapterId: '', eventType: 'other', summary: '', evidence: '', impact: '',
+};
+
+const defaultWorldRuleTaskForm = {
+  ruleId: '', chapterId: '', taskType: 'check', priority: 'medium', instruction: '', reason: '',
+};
+
+const defaultTimelineEventForm = {
+  eventId: '', title: '', summary: '', lineType: 'story_time',
+  chapterId: '', volumeIndex: 1, chapterIndex: 1,
+  storyTimeText: '', storyTimeOrder: 0, narrativeOrder: 0, causalityOrder: 0,
+  location: '', participantsCharacterIds: [] as string[],
+  relatedRelationshipIds: [] as string[], relatedForeshadowingIds: [] as string[],
+  relatedWorldRuleIds: [] as string[],
+  readerKnownState: 'unknown', characterKnownState: 'unknown',
+  status: 'planned', riskLevel: 'none', riskReason: '',
+  reviewStatus: 'pending', locked: false,
+};
+
+const defaultTimelineLinkForm = {
+  linkId: '', sourceEventId: '', targetEventId: '', linkType: 'cause',
+  summary: '', evidence: '', riskLevel: 'none', riskReason: '',
+  reviewStatus: 'pending', locked: false,
+};
+
+const defaultTimelineTaskForm = {
+  eventId: '', chapterId: '', taskType: 'check_order', priority: 'medium', instruction: '', reason: '',
+};
+
 const defaultForeshadowingTaskForm = {
   threadId: '',
   chapterId: '',
@@ -188,6 +236,12 @@ const ContinuityCockpitPage: React.FC = () => {
   const [foreshadowingForm, setForeshadowingForm] = useState(defaultForeshadowingForm);
   const [foreshadowingEventForm, setForeshadowingEventForm] = useState(defaultForeshadowingEventForm);
   const [foreshadowingTaskForm, setForeshadowingTaskForm] = useState(defaultForeshadowingTaskForm);
+  const [worldRuleForm, setWorldRuleForm] = useState(defaultWorldRuleForm);
+  const [worldRuleEventForm, setWorldRuleEventForm] = useState(defaultWorldRuleEventForm);
+  const [worldRuleTaskForm, setWorldRuleTaskForm] = useState(defaultWorldRuleTaskForm);
+  const [timelineEventForm, setTimelineEventForm] = useState(defaultTimelineEventForm);
+  const [timelineLinkForm, setTimelineLinkForm] = useState(defaultTimelineLinkForm);
+  const [timelineTaskForm, setTimelineTaskForm] = useState(defaultTimelineTaskForm);
 
   const viewKey = `phase7:continuity:${projectId}`;
 
@@ -539,6 +593,117 @@ const ContinuityCockpitPage: React.FC = () => {
     await loadContinuity();
   };
 
+
+  const saveWorldRule = async () => {
+    if (!worldRuleForm.title.trim()) return setNotice('请填写规则标题。');
+    const isEditing = Boolean(worldRuleForm.ruleId);
+    const body = {
+      title: worldRuleForm.title, ruleType: worldRuleForm.ruleType, scope: worldRuleForm.scope,
+      volumeIndex: Number(worldRuleForm.volumeIndex || 1), content: worldRuleForm.content,
+      explanation: worldRuleForm.explanation, limitation: worldRuleForm.limitation,
+      contradictionRisk: worldRuleForm.contradictionRisk, riskLevel: worldRuleForm.riskLevel,
+      firstEstablishedChapterId: worldRuleForm.firstEstablishedChapterId || undefined,
+      lastVerifiedChapterId: worldRuleForm.lastVerifiedChapterId || undefined,
+      relatedCharacterIds: worldRuleForm.relatedCharacterIds,
+      relatedRelationshipIds: worldRuleForm.relatedRelationshipIds,
+      relatedForeshadowingIds: worldRuleForm.relatedForeshadowingIds,
+      relatedTimelineEventIds: worldRuleForm.relatedTimelineEventIds, source: 'manual',
+    };
+    if (isEditing) await api.patch(`/projects/${projectId}/continuity/world-rules/${worldRuleForm.ruleId}`, {
+      ...body, reviewStatus: worldRuleForm.reviewStatus,
+      locked: worldRuleForm.reviewStatus === 'confirmed' && worldRuleForm.locked, forceUnlock: !worldRuleForm.locked,
+    });
+    else await api.post(`/projects/${projectId}/continuity/world-rules`, body);
+    setNotice(isEditing ? '世界观规则修改已保存。' : '世界观规则已保存为待确认记录，需要确认后才能锁定。');
+    setWorldRuleForm(defaultWorldRuleForm); await loadContinuity();
+  };
+  const patchWorldRule = async (rule: any, patch: Record<string, unknown>) => {
+    await api.patch(`/projects/${projectId}/continuity/world-rules/${rule.id}`, patch); await loadContinuity();
+  };
+  const saveWorldRuleEvent = async () => {
+    if (!worldRuleEventForm.ruleId) return setNotice('请先选择规则。');
+    await api.post(`/projects/${projectId}/continuity/world-rules/${worldRuleEventForm.ruleId}/events`, {
+      chapterId: focusChapter?.id, eventType: worldRuleEventForm.eventType,
+      summary: worldRuleEventForm.summary, evidence: worldRuleEventForm.evidence,
+      impact: worldRuleEventForm.impact, source: 'manual',
+    });
+    setNotice('世界观规则事件已保存为待确认记录。');
+    setWorldRuleEventForm(defaultWorldRuleEventForm); await loadContinuity();
+  };
+  const saveWorldRuleTask = async () => {
+    if (!worldRuleTaskForm.ruleId || !worldRuleTaskForm.chapterId) return setNotice('请先选择规则和章节。');
+    await api.post(`/projects/${projectId}/continuity/world-rule-tasks`, {
+      ruleId: worldRuleTaskForm.ruleId, chapterId: worldRuleTaskForm.chapterId,
+      taskType: worldRuleTaskForm.taskType, priority: worldRuleTaskForm.priority,
+      instruction: worldRuleTaskForm.instruction, reason: worldRuleTaskForm.reason, source: 'manual',
+    });
+    setNotice('当前章世界观任务已保存为待确认记录。');
+    setWorldRuleTaskForm(defaultWorldRuleTaskForm); await loadContinuity();
+  };
+  const patchWorldRuleTask = async (task: any, patch: Record<string, unknown>) => {
+    await api.patch(`/projects/${projectId}/continuity/world-rule-tasks/${task.id}`, patch); await loadContinuity();
+  };
+  const saveTimelineEvent = async () => {
+    if (!timelineEventForm.title.trim()) return setNotice('请填写时间线事件标题。');
+    const isEditing = Boolean(timelineEventForm.eventId);
+    const body = {
+      title: timelineEventForm.title, summary: timelineEventForm.summary, lineType: timelineEventForm.lineType,
+      chapterId: timelineEventForm.chapterId || undefined, volumeIndex: Number(timelineEventForm.volumeIndex || 1),
+      chapterIndex: Number(timelineEventForm.chapterIndex || 1), storyTimeText: timelineEventForm.storyTimeText,
+      storyTimeOrder: Number(timelineEventForm.storyTimeOrder || 0), narrativeOrder: Number(timelineEventForm.narrativeOrder || 0),
+      causalityOrder: Number(timelineEventForm.causalityOrder || 0), location: timelineEventForm.location,
+      participantsCharacterIds: timelineEventForm.participantsCharacterIds,
+      relatedRelationshipIds: timelineEventForm.relatedRelationshipIds,
+      relatedForeshadowingIds: timelineEventForm.relatedForeshadowingIds,
+      relatedWorldRuleIds: timelineEventForm.relatedWorldRuleIds,
+      readerKnownState: timelineEventForm.readerKnownState, characterKnownState: timelineEventForm.characterKnownState,
+      status: timelineEventForm.status, riskLevel: timelineEventForm.riskLevel, riskReason: timelineEventForm.riskReason, source: 'manual',
+    };
+    if (isEditing) await api.patch(`/projects/${projectId}/continuity/timeline-events/${timelineEventForm.eventId}`, {
+      ...body, reviewStatus: timelineEventForm.reviewStatus,
+      locked: timelineEventForm.reviewStatus === 'confirmed' && timelineEventForm.locked, forceUnlock: !timelineEventForm.locked,
+    });
+    else await api.post(`/projects/${projectId}/continuity/timeline-events`, body);
+    setNotice(isEditing ? '时间线事件修改已保存。' : '时间线事件已保存为待确认记录，需要确认后才能锁定。');
+    setTimelineEventForm(defaultTimelineEventForm); await loadContinuity();
+  };
+  const patchTimelineEvent = async (event: any, patch: Record<string, unknown>) => {
+    await api.patch(`/projects/${projectId}/continuity/timeline-events/${event.id}`, patch); await loadContinuity();
+  };
+  const saveTimelineLink = async () => {
+    if (!timelineLinkForm.sourceEventId || !timelineLinkForm.targetEventId) return setNotice('请选择源事件和目标事件。');
+    if (timelineLinkForm.sourceEventId === timelineLinkForm.targetEventId) return setNotice('源事件和目标事件不能相同。');
+    const isEditing = Boolean(timelineLinkForm.linkId);
+    const body = {
+      sourceEventId: timelineLinkForm.sourceEventId, targetEventId: timelineLinkForm.targetEventId,
+      linkType: timelineLinkForm.linkType, summary: timelineLinkForm.summary, evidence: timelineLinkForm.evidence,
+      riskLevel: timelineLinkForm.riskLevel, riskReason: timelineLinkForm.riskReason, source: 'manual',
+    };
+    if (isEditing) await api.patch(`/projects/${projectId}/continuity/timeline-links/${timelineLinkForm.linkId}`, {
+      ...body, reviewStatus: timelineLinkForm.reviewStatus,
+      locked: timelineLinkForm.reviewStatus === 'confirmed' && timelineLinkForm.locked,
+    });
+    else await api.post(`/projects/${projectId}/continuity/timeline-links`, body);
+    setNotice(isEditing ? '因果链路修改已保存。' : '因果链路已保存为待确认记录，需要确认后才能锁定。');
+    setTimelineLinkForm(defaultTimelineLinkForm); await loadContinuity();
+  };
+  const patchTimelineLink = async (link: any, patch: Record<string, unknown>) => {
+    await api.patch(`/projects/${projectId}/continuity/timeline-links/${link.id}`, patch); await loadContinuity();
+  };
+  const saveTimelineTask = async () => {
+    if (!timelineTaskForm.eventId || !timelineTaskForm.chapterId) return setNotice('请先选择事件和章节。');
+    await api.post(`/projects/${projectId}/continuity/timeline-tasks`, {
+      eventId: timelineTaskForm.eventId, chapterId: timelineTaskForm.chapterId,
+      taskType: timelineTaskForm.taskType, priority: timelineTaskForm.priority,
+      instruction: timelineTaskForm.instruction, reason: timelineTaskForm.reason, source: 'manual',
+    });
+    setNotice('当前章时间线任务已保存为待确认记录。');
+    setTimelineTaskForm(defaultTimelineTaskForm); await loadContinuity();
+  };
+  const patchTimelineTask = async (task: any, patch: Record<string, unknown>) => {
+    await api.patch(`/projects/${projectId}/continuity/timeline-tasks/${task.id}`, patch); await loadContinuity();
+  };
+
   if (loading) return <div style={styles.loading}>加载小说连续性驾驶舱...</div>;
   if (!projectId) return <div style={styles.loading}>请先选择项目。</div>;
 
@@ -629,6 +794,11 @@ const ContinuityCockpitPage: React.FC = () => {
         characters: continuityCharacters?.groups?.allCharacters || [],
         relationships: continuityRelationships?.groups?.allRelationships || [],
         setNotice,
+        worldRuleForm, setWorldRuleForm,
+        worldRuleEventForm, setWorldRuleEventForm,
+        worldRuleTaskForm, setWorldRuleTaskForm,
+        saveWorldRule, patchWorldRule,
+        saveWorldRuleEvent, saveWorldRuleTask, patchWorldRuleTask,
       })}
       {activeTab === 'timeline' && renderTimelineTab({
         data: continuityTimeline,
@@ -636,6 +806,12 @@ const ContinuityCockpitPage: React.FC = () => {
         characters: continuityCharacters?.groups?.allCharacters || [],
         relationships: continuityRelationships?.groups?.allRelationships || [],
         setNotice,
+        timelineEventForm, setTimelineEventForm,
+        timelineLinkForm, setTimelineLinkForm,
+        timelineTaskForm, setTimelineTaskForm,
+        saveTimelineEvent, patchTimelineEvent,
+        saveTimelineLink, patchTimelineLink,
+        saveTimelineTask, patchTimelineTask,
       })}
       {['precheck', 'postupdate'].includes(activeTab) && renderFutureTab(activeTab)}
     </div>
@@ -693,12 +869,12 @@ function renderFocus(input: any) {
     ? input.relatedRelationships.map((r: any) => `${r.sourceCharacterName} - ${r.targetCharacterName}：${r.publicRelation || EMPTY}，冲突 ${r.conflictScore}`).join('；')
     : '暂无本章关系数据，Phase 7.2 可通过关系网 Tab 手动补全。';
   const worldNotes = input.relatedWorldTasks?.length
-    ? input.relatedWorldTasks.map((t: any) => `${t.ruleTitle || t.ruleId}: ${t.instruction || t.reason || EMPTY}`).join('；')
+    ? groupWorldTaskNotes(input.relatedWorldTasks)
     : input.relatedWorldRules?.length
       ? input.relatedWorldRules.map((r: any) => r.title).join('；')
       : '暂无本章世界观规则数据，Phase 7.4 可通过世界观 Tab 手动补全。';
   const timelineNotes = input.relatedTimelineTasks?.length
-    ? input.relatedTimelineTasks.map((t: any) => `${t.eventTitle || t.eventId}: ${t.instruction || t.reason || EMPTY}`).join('；')
+    ? groupTimelineTaskNotes(input.relatedTimelineTasks)
     : input.relatedTimelineEvents?.length
       ? input.relatedTimelineEvents.map((e: any) => e.title || e.id).join('；')
       : '暂无本章时间线数据，Phase 7.4 可通过时间线 Tab 手动补全。';
@@ -1279,6 +1455,67 @@ function renderWorldTab(input: any) {
           <Group title="最近变化规则" items={groups.changedRecently || []} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
           <Group title="全部规则" items={allRules} render={(rule: any) => <WorldRuleCard rule={rule} input={input} />} />
         </Panel>
+        <Panel title="人工微调区">
+          <label style={styles.label}>规则标题</label>
+          <input style={styles.input} value={input.worldRuleForm.title} onChange={(e) => input.setWorldRuleForm({ ...input.worldRuleForm, title: e.target.value })} />
+          <label style={styles.label}>规则类型</label>
+          <select style={styles.selectFull} value={input.worldRuleForm.ruleType} onChange={(e) => input.setWorldRuleForm({ ...input.worldRuleForm, ruleType: e.target.value })}>
+            {WORLD_RULE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <label style={styles.label}>作用范围</label>
+          <select style={styles.selectFull} value={input.worldRuleForm.scope} onChange={(e) => input.setWorldRuleForm({ ...input.worldRuleForm, scope: e.target.value })}>
+            {WORLD_RULE_SCOPES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <FormTextarea label="规则内容" value={input.worldRuleForm.content} onChange={(v) => input.setWorldRuleForm({ ...input.worldRuleForm, content: v })} />
+          <FormTextarea label="解释" value={input.worldRuleForm.explanation} onChange={(v) => input.setWorldRuleForm({ ...input.worldRuleForm, explanation: v })} />
+          <FormTextarea label="限制" value={input.worldRuleForm.limitation} onChange={(v) => input.setWorldRuleForm({ ...input.worldRuleForm, limitation: v })} />
+          <FormTextarea label="违背风险" value={input.worldRuleForm.contradictionRisk} onChange={(v) => input.setWorldRuleForm({ ...input.worldRuleForm, contradictionRisk: v })} />
+          <label style={styles.label}>风险等级</label>
+          <select style={styles.selectFull} value={input.worldRuleForm.riskLevel} onChange={(e) => input.setWorldRuleForm({ ...input.worldRuleForm, riskLevel: e.target.value })}>
+            {WORLD_RULE_RISK_LEVELS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <label style={styles.label}>审核状态</label>
+          {input.worldRuleForm.ruleId ? (
+            <select style={styles.selectFull} value={input.worldRuleForm.reviewStatus} onChange={(e) => input.setWorldRuleForm({ ...input.worldRuleForm, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.worldRuleForm.locked : false })}>
+              {REVIEW_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          ) : <div style={styles.readonlyBox}>新增模式固定 pending。</div>}
+          <label style={styles.checkbox}>
+            <input type="checkbox" checked={input.input.worldRuleForm.ruleId && input.worldRuleForm.locked} disabled={!input.canLock}
+              onChange={(e) => input.setWorldRuleForm({ ...input.worldRuleForm, locked: e.target.checked })} /> 锁定规则
+          </label>
+          {!input.canLock && input.worldRuleForm.ruleId && <div style={styles.hint}>先确认后才能锁定。</div>}
+          <button type="button" style={styles.primaryButton} onClick={() => input.saveWorldRule()}>{input.worldRuleForm.ruleId ? '保存规则修改' : '新增世界观规则'}</button>
+          <button type="button" style={styles.secondaryButton} onClick={() => input.setWorldRuleForm(defaultWorldRuleForm)}>清空表单</button>
+          <hr style={styles.hr} />
+          <label style={styles.label}>新增规则事件</label>
+          <select style={styles.selectFull} value={input.worldRuleEventForm.ruleId} onChange={(e) => input.setWorldRuleEventForm({ ...input.worldRuleEventForm, ruleId: e.target.value })}>
+            <option value="">选择规则</option>
+            {input.editableWorldRules.map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
+          <label style={styles.label}>事件类型</label>
+          <select style={styles.selectFull} value={input.worldRuleEventForm.eventType} onChange={(e) => input.setWorldRuleEventForm({ ...input.worldRuleEventForm, eventType: e.target.value })}>
+            {WORLD_RULE_EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <FormTextarea label="事件摘要" value={input.worldRuleEventForm.summary} onChange={(v) => input.setWorldRuleEventForm({ ...input.worldRuleEventForm, summary: v })} />
+          <FormTextarea label="证据" value={input.worldRuleEventForm.evidence} onChange={(v) => input.setWorldRuleEventForm({ ...input.worldRuleEventForm, evidence: v })} />
+          <FormTextarea label="影响" value={input.worldRuleEventForm.impact} onChange={(v) => input.setWorldRuleEventForm({ ...input.worldRuleEventForm, impact: v })} />
+          <button type="button" style={styles.primaryButton} onClick={() => input.saveWorldRuleEvent()}>新增规则事件</button>
+          <hr style={styles.hr} />
+          <label style={styles.label}>新增当前章世界观任务</label>
+          <select style={styles.selectFull} value={input.worldRuleTaskForm.ruleId} onChange={(e) => input.setWorldRuleTaskForm({ ...input.worldRuleTaskForm, ruleId: e.target.value })}>
+            <option value="">选择规则</option>
+            {input.editableWorldRules.map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
+          <label style={styles.label}>任务类型</label>
+          <select style={styles.selectFull} value={input.worldRuleTaskForm.taskType} onChange={(e) => input.setWorldRuleTaskForm({ ...input.worldRuleTaskForm, taskType: e.target.value })}>
+            {WORLD_RULE_TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <FormTextarea label="写作指令" value={input.worldRuleTaskForm.instruction} onChange={(v) => input.setWorldRuleTaskForm({ ...input.worldRuleTaskForm, instruction: v })} />
+          <FormTextarea label="原因" value={input.worldRuleTaskForm.reason} onChange={(v) => input.setWorldRuleTaskForm({ ...input.worldRuleTaskForm, reason: v })} />
+          <button type="button" style={styles.primaryButton} onClick={() => input.saveWorldRuleTask()}>新增当前章任务</button>
+          <div style={styles.notice}>世界观规则、事件、任务新增内容进入待确认，不直接覆盖已确认设定。</div>
+        </Panel>
       </section>
     </div>
   );
@@ -1286,6 +1523,7 @@ function renderWorldTab(input: any) {
 
 function WorldRuleCard({ rule, input }: { rule: any; input: any }) {
   const isDerived = rule.derived || rule.source === 'radar_derived';
+  const canEdit = !rule.legacy && !isDerived;
   return (
     <details style={styles.itemCard}>
       <summary style={styles.itemSummary}>
@@ -1308,17 +1546,39 @@ function WorldRuleCard({ rule, input }: { rule: any; input: any }) {
       <Line label="规则事件" value={(rule.latestEvents || []).length ? rule.latestEvents.map((e: any) => `${e.eventType}:${e.summary || EMPTY}`).join(' / ') : EMPTY} />
       <Line label="来源" value={rule.source || EMPTY} />
       <Line label="更新时间" value={rule.updatedAt || EMPTY} />
-      {!rule.legacy && (
+      {canEdit && (
         <div style={styles.inlineActions}>
-          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.setNotice(`世界观规则审核更新：${status}（API 待接入）`)}>{status}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => input.setWorldRuleForm({
+            ...defaultWorldRuleForm,
+            ruleId: rule.id, title: rule.title || '', ruleType: rule.ruleType || 'law',
+            scope: rule.scope || 'full_book', volumeIndex: Number(rule.volumeIndex || 1),
+            content: rule.content || '', explanation: rule.explanation || '',
+            limitation: rule.limitation || '', contradictionRisk: rule.contradictionRisk || '',
+            status: rule.status || 'planned', riskLevel: rule.riskLevel || 'none',
+            firstEstablishedChapterId: rule.firstEstablishedChapterId || '',
+            lastVerifiedChapterId: rule.lastVerifiedChapterId || '',
+            relatedCharacterIds: rule.relatedCharacterIds || [],
+            relatedRelationshipIds: rule.relatedRelationshipIds || [],
+            relatedForeshadowingIds: rule.relatedForeshadowingIds || [],
+            relatedTimelineEventIds: rule.relatedTimelineEventIds || [],
+            reviewStatus: rule.reviewStatus || 'pending', locked: Boolean(rule.locked),
+          })}>编辑</button>
+          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchWorldRule(rule, { reviewStatus: status })}>{status}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => {
+            if (!rule.locked && rule.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
+            return input.patchWorldRule(rule, { locked: !rule.locked, forceUnlock: rule.locked });
+          }}>{rule.locked ? '解锁' : '锁定'}</button>
         </div>
       )}
+      {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
+      {rule.legacy && <div style={styles.hint}>旧版规则在 Phase 7.4 中只读展示。</div>}
     </details>
   );
 }
 
 function WorldRuleTaskCard({ task, input }: { task: any; input: any }) {
   const isDerived = task.derived || task.source === 'radar_derived';
+  const isPersistedTask = !task.legacy && !isDerived;
   return (
     <div style={styles.itemCard}>
       <Line label="关联规则" value={task.ruleTitle || task.ruleId || EMPTY} />
@@ -1326,7 +1586,18 @@ function WorldRuleTaskCard({ task, input }: { task: any; input: any }) {
       <Line label="写作指令" value={task.instruction || EMPTY} />
       <Line label="原因" value={task.reason || EMPTY} />
       <Line label="审核" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}${isDerived ? ' / 雷达推导' : ''}`} />
+      {isPersistedTask && (
+        <div style={styles.inlineActions}>
+          {TASK_STATUSES.map(s => <button key={s} type="button" style={styles.tinyButton} onClick={() => input.patchWorldRuleTask(task, { status: s })}>{s}</button>)}
+          {REVIEW_STATUSES.map(s => <button key={s} type="button" style={styles.tinyButton} onClick={() => input.patchWorldRuleTask(task, { reviewStatus: s })}>{s}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => {
+            if (!task.locked && task.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
+            return input.patchWorldRuleTask(task, { locked: !task.locked });
+          }}>{task.locked ? '解锁' : '锁定'}</button>
+        </div>
+      )}
       {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
+      {task.legacy && <div style={styles.hint}>旧版任务只读展示。</div>}
     </div>
   );
 }
@@ -1385,6 +1656,59 @@ function renderTimelineTab(input: any) {
           <Group title="legacy 时间线，只读兼容" items={legacyEvents} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
           <Group title="全部事件" items={allEvents} render={(event: any) => <TimelineEventCard event={event} input={input} />} />
         </Panel>
+        <Panel title="人工微调区">
+          <label style={styles.label}>事件标题</label>
+          <input style={styles.input} value={input.timelineEventForm.title} onChange={(e) => input.setTimelineEventForm({ ...input.timelineEventForm, title: e.target.value })} />
+          <label style={styles.label}>lineType</label>
+          <select style={styles.selectFull} value={input.timelineEventForm.lineType} onChange={(e) => input.setTimelineEventForm({ ...input.timelineEventForm, lineType: e.target.value })}>
+            {TIMELINE_LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <FormTextarea label="事件摘要" value={input.timelineEventForm.summary} onChange={(v) => input.setTimelineEventForm({ ...input.timelineEventForm, summary: v })} />
+          <FormTextarea label="客观故事时间" value={input.timelineEventForm.storyTimeText} onChange={(v) => input.setTimelineEventForm({ ...input.timelineEventForm, storyTimeText: v })} />
+          <label style={styles.label}>审核状态</label>
+          {input.timelineEventForm.eventId ? (
+            <select style={styles.selectFull} value={input.input.timelineEventForm.reviewStatus} onChange={(e) => input.setTimelineEventForm({ ...input.timelineEventForm, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.timelineEventForm.locked : false })}>
+              {REVIEW_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          ) : <div style={styles.readonlyBox}>新增模式固定 pending。</div>}
+          <label style={styles.checkbox}>
+            <input type="checkbox" checked={input.timelineEventForm.eventId && input.timelineEventForm.locked} disabled={!(input.timelineEventForm.eventId && input.timelineEventForm.reviewStatus === 'confirmed')}
+              onChange={(e) => input.setTimelineEventForm({ ...input.timelineEventForm, locked: e.target.checked })} /> 锁定事件
+          </label>
+          <button type="button" style={styles.primaryButton} onClick={() => input.saveTimelineEvent()}>{input.timelineEventForm.eventId ? '保存事件修改' : '新增时间线事件'}</button>
+          <button type="button" style={styles.secondaryButton} onClick={() => input.setTimelineEventForm(defaultTimelineEventForm)}>清空表单</button>
+          <hr style={styles.hr} />
+          <label style={styles.label}>新增因果链路</label>
+          <select style={styles.selectFull} value={input.timelineLinkForm.sourceEventId} onChange={(e) => input.setTimelineLinkForm({ ...input.timelineLinkForm, sourceEventId: e.target.value })}>
+            <option value="">选择源事件</option>
+            {input.allEvents?.filter((ev: any) => !ev.legacy).map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+          </select>
+          <select style={styles.selectFull} value={input.timelineLinkForm.targetEventId} onChange={(e) => input.setTimelineLinkForm({ ...input.timelineLinkForm, targetEventId: e.target.value })}>
+            <option value="">选择目标事件</option>
+            {input.allEvents?.filter((ev: any) => !ev.legacy).map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+          </select>
+          <label style={styles.label}>链路类型</label>
+          <select style={styles.selectFull} value={input.timelineLinkForm.linkType} onChange={(e) => input.setTimelineLinkForm({ ...input.timelineLinkForm, linkType: e.target.value })}>
+            {TIMELINE_LINK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <FormTextarea label="摘要" value={input.timelineLinkForm.summary} onChange={(v) => input.setTimelineLinkForm({ ...input.timelineLinkForm, summary: v })} />
+          <button type="button" style={styles.primaryButton} onClick={() => input.saveTimelineLink()}>{input.timelineLinkForm.linkId ? '保存链路修改' : '新增因果链路'}</button>
+          <button type="button" style={styles.secondaryButton} onClick={() => input.setTimelineLinkForm(defaultTimelineLinkForm)}>清空表单</button>
+          <hr style={styles.hr} />
+          <label style={styles.label}>新增当前章时间线任务</label>
+          <select style={styles.selectFull} value={input.timelineTaskForm.eventId} onChange={(e) => input.setTimelineTaskForm({ ...input.timelineTaskForm, eventId: e.target.value })}>
+            <option value="">选择事件</option>
+            {input.allEvents?.filter((ev: any) => !ev.legacy).map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+          </select>
+          <label style={styles.label}>任务类型</label>
+          <select style={styles.selectFull} value={input.timelineTaskForm.taskType} onChange={(e) => input.setTimelineTaskForm({ ...input.timelineTaskForm, taskType: e.target.value })}>
+            {TIMELINE_TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <FormTextarea label="写作指令" value={input.timelineTaskForm.instruction} onChange={(v) => input.setTimelineTaskForm({ ...input.timelineTaskForm, instruction: v })} />
+          <FormTextarea label="原因" value={input.timelineTaskForm.reason} onChange={(v) => input.setTimelineTaskForm({ ...input.timelineTaskForm, reason: v })} />
+          <button type="button" style={styles.primaryButton} onClick={() => input.saveTimelineTask()}>新增当前章任务</button>
+          <div style={styles.notice}>时间线事件、因果链路、任务新增内容进入待确认，不直接覆盖已确认设定。</div>
+        </Panel>
       </section>
     </div>
   );
@@ -1393,6 +1717,7 @@ function renderTimelineTab(input: any) {
 function TimelineEventCard({ event, input }: { event: any; input: any }) {
   const isDerived = event.derived || event.source === 'radar_derived';
   const isLegacy = event.legacy;
+  const canEdit = !isLegacy && !isDerived;
   return (
     <details style={styles.itemCard}>
       <summary style={styles.itemSummary}>
@@ -1419,17 +1744,41 @@ function TimelineEventCard({ event, input }: { event: any; input: any }) {
       <Line label="后果链路" value={(event.outgoingLinks || []).length ? event.outgoingLinks.map((l: any) => `${l.linkType}:${l.summary || EMPTY}`).join(' / ') : EMPTY} />
       <Line label="来源" value={event.source || EMPTY} />
       <Line label="更新时间" value={event.updatedAt || EMPTY} />
-      {!isLegacy && !isDerived && (
+      {canEdit && (
         <div style={styles.inlineActions}>
-          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.setNotice(`时间线事件审核更新：${status}（API 待接入）`)}>{status}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => input.setTimelineEventForm({
+            ...defaultTimelineEventForm,
+            eventId: event.id, title: event.title || '', summary: event.summary || '',
+            lineType: event.lineType || 'story_time', chapterId: event.chapterId || '',
+            volumeIndex: Number(event.volumeIndex || 1), chapterIndex: Number(event.chapterIndex || 1),
+            storyTimeText: event.storyTimeText || '', storyTimeOrder: Number(event.storyTimeOrder || 0),
+            narrativeOrder: Number(event.narrativeOrder || 0), causalityOrder: Number(event.causalityOrder || 0),
+            location: event.location || '', participantsCharacterIds: event.participantsCharacterIds || [],
+            relatedRelationshipIds: event.relatedRelationshipIds || [],
+            relatedForeshadowingIds: event.relatedForeshadowingIds || [],
+            relatedWorldRuleIds: event.relatedWorldRuleIds || [],
+            readerKnownState: event.readerKnownState || 'unknown',
+            characterKnownState: event.characterKnownState || 'unknown',
+            status: event.status || 'planned', riskLevel: event.riskLevel || 'none',
+            riskReason: event.riskReason || '', reviewStatus: event.reviewStatus || 'pending',
+            locked: Boolean(event.locked),
+          })}>编辑</button>
+          {REVIEW_STATUSES.map(status => <button key={status} type="button" style={styles.tinyButton} onClick={() => input.patchTimelineEvent(event, { reviewStatus: status })}>{status}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => {
+            if (!event.locked && event.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
+            return input.patchTimelineEvent(event, { locked: !event.locked, forceUnlock: event.locked });
+          }}>{event.locked ? '解锁' : '锁定'}</button>
         </div>
       )}
+      {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
+      {isLegacy && <div style={styles.hint}>旧版时间线事件在 Phase 7.4 中只读展示。</div>}
     </details>
   );
 }
 
 function TimelineTaskCard({ task, input }: { task: any; input: any }) {
   const isDerived = task.derived || task.source === 'radar_derived';
+  const isPersistedTask = !task.legacy && !isDerived;
   return (
     <div style={styles.itemCard}>
       <Line label="关联事件" value={task.eventTitle || task.eventId || EMPTY} />
@@ -1437,7 +1786,18 @@ function TimelineTaskCard({ task, input }: { task: any; input: any }) {
       <Line label="写作指令" value={task.instruction || EMPTY} />
       <Line label="原因" value={task.reason || EMPTY} />
       <Line label="审核" value={`${task.reviewStatus || EMPTY}${task.locked ? ' / locked' : ''}${isDerived ? ' / 雷达推导' : ''}`} />
+      {isPersistedTask && (
+        <div style={styles.inlineActions}>
+          {TASK_STATUSES.map(s => <button key={s} type="button" style={styles.tinyButton} onClick={() => input.patchTimelineTask(task, { status: s })}>{s}</button>)}
+          {REVIEW_STATUSES.map(s => <button key={s} type="button" style={styles.tinyButton} onClick={() => input.patchTimelineTask(task, { reviewStatus: s })}>{s}</button>)}
+          <button type="button" style={styles.tinyButton} onClick={() => {
+            if (!task.locked && task.reviewStatus !== 'confirmed') return input.setNotice('先确认后才能锁定。');
+            return input.patchTimelineTask(task, { locked: !task.locked });
+          }}>{task.locked ? '解锁' : '锁定'}</button>
+        </div>
+      )}
       {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
+      {task.legacy && <div style={styles.hint}>旧版任务只读展示。</div>}
     </div>
   );
 }
@@ -1598,6 +1958,36 @@ function findRelatedTimelineEvents(events: any[], chapter: Chapter | null) {
     const ids = event.relatedChapterIds || event.related_chapter_ids || [];
     return Array.isArray(ids) ? ids.includes(chapter.id) : stringifySearchable(ids).includes(chapter.id);
   }).slice(0, 8);
+}
+
+const WORLD_TASK_LABELS: Record<string, string> = {
+  apply: '本章必须遵守', check: '本章需要检查', reveal: '本章可能暴露',
+  avoid_contradiction: '本章避免矛盾', update_rule: '本章规则需更新', verify: '本章需要验证',
+};
+
+const TIMELINE_TASK_LABELS: Record<string, string> = {
+  place_event: '当前章客观时间位置', check_order: '叙事顺序检查', check_causality: '因果链检查',
+  reveal_information: '信息差/信息揭示', avoid_time_conflict: '避免时间冲突', sync_lines: '同步三线模型',
+};
+
+function groupWorldTaskNotes(tasks: any[]): string {
+  const grouped = tasks.reduce((acc: Record<string, string[]>, task: any) => {
+    const key = task.taskType || 'check';
+    acc[key] = acc[key] || [];
+    acc[key].push(`${task.ruleTitle || task.ruleId || EMPTY}: ${task.instruction || task.reason || EMPTY}`);
+    return acc;
+  }, {});
+  return Object.entries(grouped).map(([type, items]) => `${WORLD_TASK_LABELS[type] || type}: ${items.join(' / ')}`).join(' | ');
+}
+
+function groupTimelineTaskNotes(tasks: any[]): string {
+  const grouped = tasks.reduce((acc: Record<string, string[]>, task: any) => {
+    const key = task.taskType || 'check_order';
+    acc[key] = acc[key] || [];
+    acc[key].push(`${task.eventTitle || task.eventId || EMPTY}: ${task.instruction || task.reason || EMPTY}`);
+    return acc;
+  }, {});
+  return Object.entries(grouped).map(([type, items]) => `${TIMELINE_TASK_LABELS[type] || type}: ${items.join(' / ')}`).join(' | ');
 }
 
 function groupTaskNotes(tasks: any[]) {

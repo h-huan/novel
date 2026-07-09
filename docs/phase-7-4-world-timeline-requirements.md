@@ -262,15 +262,93 @@ task_type：place_event, check_order, check_causality, reveal_information, avoid
 
 ## 24. 遗留项
 
-- 世界观规则的人工微调区（CRUD 表单）未在前端完整实现。
-- 时间线事件的人工微调区（CRUD 表单）未在前端完整实现。
 - 因果链路的可视化展示未实现。
 - 自动从正文抽取世界观规则未实现。
 - 自动从正文抽取时间线事件未实现。
 - AI 建议世界观规则未实现。
-- 世界观规则与时间线的冲突检测仅基于 status 字段，未实现复杂推导。
+- AI 建议时间线事件未实现。
+- 世界观规则与时间线的复杂冲突检测未实现。
 
 ## 25. 构建记录
+
+- `server npm run typecheck`: 本地执行通过。
+- `server npm run build`: 本地执行通过。
+- `desktop npm run typecheck`: 本地执行通过。
+- `desktop npm run build`: 本地执行通过；保留既有 Vite CJS API deprecated、PromptChainPage 动静态导入和 chunk size warning。
+
+## 26. Phase 7.4 修正记录
+
+### 26.1 Phase 7 状态展示修正
+
+- Phase 7 展示中 7.4 从"待开发"修正为"本轮实现"。
+
+### 26.2 当前章焦点 Tab 联动修正
+
+- 当前章焦点 Tab 已传入 `focusWorldTasks`、`focusWorldRules`、`focusTimelineTasks`、`focusTimelineEvents`。
+- 新增 `groupWorldTaskNotes` 和 `groupTimelineTaskNotes` 辅助函数。
+- 世界观注意事项按 taskType 分组：本章必须遵守、本章需要检查、本章可能暴露、本章避免矛盾、本章规则需更新、本章需要验证。
+- 时间线注意事项按 taskType 分组：当前章客观时间位置、叙事顺序检查、因果链检查、信息差/信息揭示、避免时间冲突、同步三线模型。
+- 无数据时显示"暂无本章世界观规则数据 / 暂无本章时间线数据"。
+
+### 26.3 写作前提示词联动修正
+
+- 世界观注意事项使用真实 world-rules API 数据（有 focusWorldTasks 时优先使用 `groupWorldTaskNotes`）。
+- 时间线注意事项使用真实 timeline API 数据（有 focusTimelineTasks 时优先使用 `groupTimelineTaskNotes`）。
+- useMemo dependency array 已包含 Phase 7.4 数据依赖。
+
+### 26.4 总览 Tab 统计修正
+
+- 新增 10 项 Phase 7.4 统计卡片：当前章世界观规则、当前章世界观任务、世界观冲突、高风险世界观、当前章时间线事件、当前章时间线任务、时间冲突、因果缺口。
+- 下一个创作动作新增世界观提醒和时间线提醒。
+
+### 26.5 pendingConfirmations 修正
+
+- pendingConfirmations 已包含 `continuityWorldRules.summary.pendingReviewCount`。
+- pendingConfirmations 已包含 `continuityTimeline.summary.pendingReviewCount`。
+- 后端 pendingReviewCount 已包含规则/事件/任务的 pending 数据。
+
+### 26.6 世界观 Tab 人工微调区实现
+
+- 新增 `saveWorldRule`、`patchWorldRule`、`saveWorldRuleEvent`、`saveWorldRuleTask`、`patchWorldRuleTask`。
+- 新增 `defaultWorldRuleForm`、`defaultWorldRuleEventForm`、`defaultWorldRuleTaskForm`。
+- 新增规则时强制 pending + unlocked。
+- 编辑规则时支持 reviewStatus 修改和 confirmed 后锁定。
+- 新增规则事件、新增当前章世界观任务。
+- WorldRuleCard 审核按钮为真实 PATCH，不再显示 API 待接入。
+- WorldRuleTaskCard 支持 persisted task 的 PATCH 操作。
+
+### 26.7 时间线 Tab 人工微调区实现
+
+- 新增 `saveTimelineEvent`、`patchTimelineEvent`、`saveTimelineLink`、`patchTimelineLink`、`saveTimelineTask`、`patchTimelineTask`。
+- 新增 `defaultTimelineEventForm`、`defaultTimelineLinkForm`、`defaultTimelineTaskForm`。
+- 新增事件时强制 pending + unlocked。
+- 编辑事件时支持 reviewStatus 修改和 confirmed 后锁定。
+- 新增因果链路、新增当前章时间线任务。
+- TimelineEventCard 审核按钮为真实 PATCH，不再显示 API 待接入。
+- TimelineTaskCard 支持 persisted task 的 PATCH 操作。
+
+### 26.8 createWorldRule / createTimelineEvent 默认值修正
+
+- createWorldRule 的 ruleType 和 scope 现在使用 `this.ensureEnum` 返回值，不再直接使用 `body.ruleType`/`body.scope`。
+- createTimelineEvent 的 lineType、readerKnownState、characterKnownState 同样使用 `this.ensureEnum` 返回值。
+- 新增时 status 固定 planned，review_status 固定 pending，locked 固定 0。
+
+### 26.9 currentFocusChapter 识别规则补全
+
+- 新增 `getFocusForeshadowingIds` 辅助方法，用于推导当前章相关伏笔 ID。
+- 新增 `getFocusTimelineEventIds` 辅助方法，用于推导当前章相关时间线事件 ID。
+- 新增 `getFocusWorldRuleIds` 辅助方法（仅用于 getTimeline 方向）。
+- getWorldRules 的 focusRules 补充：relatedForeshadowingIds 相交、relatedTimelineEventIds 相交、有 derived task 的规则。
+- buildDerivedWorldRuleTasks 补充：relatedForeshadowingIds 相交、relatedTimelineEventIds 相交的派生任务。
+- getTimeline 的 focusEvents 补充：narrativeOrder 命中、storyTimeOrder 相邻、causalityLinks 命中、relatedForeshadowingIds 相交、relatedWorldRuleIds 相交、legacy 数据命中。
+- buildDerivedTimelineTasks 补充：storyTimeOrder 相邻、relatedForeshadowingIds 相交、relatedWorldRuleIds 相交的派生任务。
+
+### 26.10 legacy timeline 安全兼容
+
+- allLegacyTimelines 增加 try/catch 保护，表不存在时安全返回空数组。
+- allLegacyForeshadowings 同样增加 try/catch 保护。
+
+## 27. Phase 7.4 修正构建记录
 
 - `server npm run typecheck`: 本地执行通过。
 - `server npm run build`: 本地执行通过。
