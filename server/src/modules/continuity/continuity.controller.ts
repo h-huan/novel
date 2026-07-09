@@ -140,4 +140,41 @@ export class ContinuityController {
   updateTimelineTask(@Param('projectId') projectId: string, @Param('taskId') taskId: string, @Body() body: any) {
     return this.service.updateTimelineTask(projectId, taskId, body);
   }
+
+  // ===== Phase 7.5: Pre-writing check and post-writing update =====
+
+  @Get('precheck')
+  getPrecheck(@Param('projectId') projectId: string, @Query('focusChapterId') focusChapterId?: string) {
+    return this.service.getPrecheck(projectId, focusChapterId);
+  }
+
+  @Post('precheck/run')
+  runPrecheck(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.getPrecheck(projectId, body?.focusChapterId);
+  }
+
+  @Get('postupdate')
+  getPostupdate(@Param('projectId') projectId: string, @Query('focusChapterId') focusChapterId?: string) {
+    return this.service.getPostupdate(projectId, focusChapterId);
+  }
+
+  @Post('postupdate/run')
+  runPostupdate(@Param('projectId') projectId: string, @Body() body: any) {
+    return this.service.getPostupdate(projectId, body?.focusChapterId);
+  }
+
+  @Post('postupdate/suggestions/:suggestionId/confirm')
+  confirmPostupdateSuggestion(@Param('projectId') projectId: string, @Param('suggestionId') suggestionId: string, @Body() body: any) {
+    return this.service.applyPostupdateSuggestion(projectId, suggestionId, body?.suggestion || body, 'pending');
+  }
+
+  @Post('postupdate/suggestions/:suggestionId/ignore')
+  ignorePostupdateSuggestion(@Param('projectId') projectId: string, @Param('suggestionId') suggestionId: string, @Body() body: any) {
+    return this.service.applyPostupdateSuggestion(projectId, suggestionId, body?.suggestion || body, 'ignored');
+  }
+
+  @Post('postupdate/suggestions/:suggestionId/conflict')
+  conflictPostupdateSuggestion(@Param('projectId') projectId: string, @Param('suggestionId') suggestionId: string, @Body() body: any) {
+    return this.service.applyPostupdateSuggestion(projectId, suggestionId, body?.suggestion || body, 'conflict');
+  }
 }

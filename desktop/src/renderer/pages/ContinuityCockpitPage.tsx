@@ -47,7 +47,7 @@ const PHASE_TASKS = [
   { id: '7.2', title: '人物状态与人物关系网', status: '已完成' },
   { id: '7.3', title: '伏笔雷达与伏笔生命周期', status: '已完成' },
   { id: '7.4', title: '世界观规则与时间线三线模型', status: '本轮实现' },
-  { id: '7.5', title: '写作前检查与写作后更新闭环', status: '待开发' },
+  { id: '7.5', title: '写作前检查与写作后更新闭环', status: '本轮实现' },
 ];
 
 const STATE_TYPES = ['physical', 'emotion', 'goal', 'identity', 'relationship', 'resource', 'secret', 'ability', 'restriction', 'reputation', 'location', 'arc'];
@@ -224,6 +224,9 @@ const ContinuityCockpitPage: React.FC = () => {
   const [continuityForeshadowings, setContinuityForeshadowings] = useState<any | null>(null);
   const [continuityWorldRules, setContinuityWorldRules] = useState<any | null>(null);
   const [continuityTimeline, setContinuityTimeline] = useState<any | null>(null);
+  const [precheckResult, setPrecheckResult] = useState<any | null>(null);
+  const [postupdateResult, setPostupdateResult] = useState<any | null>(null);
+  const [phase75Loading, setPhase75Loading] = useState(false);
   const [focusChapterId, setFocusChapterId] = useState('');
   const [manualGoal, setManualGoal] = useState('');
   const [manualForbidden, setManualForbidden] = useState('');
@@ -305,8 +308,27 @@ const ContinuityCockpitPage: React.FC = () => {
     }
   }, [projectId, focusChapterId]);
 
+  const loadPhase75 = useCallback(async () => {
+    if (!projectId) return;
+    setPhase75Loading(true);
+    try {
+      const suffix = focusChapterId ? `?focusChapterId=${encodeURIComponent(focusChapterId)}` : '';
+      const [precheckRes, postupdateRes] = await Promise.allSettled([
+        api.get(`/projects/${projectId}/continuity/precheck${suffix}`),
+        api.get(`/projects/${projectId}/continuity/postupdate${suffix}`),
+      ]);
+      if (precheckRes.status === 'fulfilled') setPrecheckResult(payload<any>(precheckRes.value));
+      if (postupdateRes.status === 'fulfilled') setPostupdateResult(payload<any>(postupdateRes.value));
+    } catch (err: any) {
+      setError(err.message || 'Phase 7.5 闭环数据加载失败');
+    } finally {
+      setPhase75Loading(false);
+    }
+  }, [projectId, focusChapterId]);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadContinuity(); }, [loadContinuity]);
+  useEffect(() => { loadPhase75(); }, [loadPhase75]);
 
   useEffect(() => {
     if (!chapters.length || focusChapterId) return;
@@ -433,6 +455,34 @@ const ContinuityCockpitPage: React.FC = () => {
       setCopyStatus('failed');
     }
   }, [visiblePrompt]);
+
+  const runPrecheck = async () => {
+    const result = await api.post(`/projects/${projectId}/continuity/precheck/run`, { focusChapterId });
+    setPrecheckResult(payload<any>(result));
+    setNotice('写作前检查已重新运行。');
+  };
+
+  const runPostupdate = async () => {
+    const result = await api.post(`/projects/${projectId}/continuity/postupdate/run`, { focusChapterId });
+    setPostupdateResult(payload<any>(result));
+    setNotice('写作后更新分析已重新运行。');
+  };
+
+  const copyPrecheckSummary = async () => {
+    await copyText(formatPrecheckResult(precheckResult));
+    setNotice('写作前检查结果已复制。');
+  };
+
+  const copyPostupdateSummary = async () => {
+    await copyText(formatPostupdateResult(postupdateResult));
+    setNotice('写作后更新摘要已复制。');
+  };
+
+  const applyPostupdateSuggestion = async (suggestion: any, action: 'confirm' | 'ignore' | 'conflict') => {
+    await api.post(`/projects/${projectId}/continuity/postupdate/suggestions/${encodeURIComponent(suggestion.id)}/${action}`, { suggestion });
+    setNotice(action === 'confirm' ? '已生成 pending 待确认项。' : action === 'ignore' ? '已记录为 ignored。' : '已记录为 conflict。');
+    await loadPhase75();
+  };
 
   const saveStateSnapshot = async () => {
     if (!stateForm.characterId) return setNotice('请先选择人物。');
@@ -715,7 +765,7 @@ const ContinuityCockpitPage: React.FC = () => {
         <div>
           <div style={styles.kicker}>Phase 7：小说连续性驾驶舱</div>
           <h1 style={styles.title}>小说连续性驾驶舱</h1>
-          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达、世界观规则、时间线三线模型与写作前注意事项。7.5 只展示入口，不假装完成。</p>
+          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达、世界观规则、时间线三线模型、写作前检查与写作后更新闭环。</p>
         </div>
         <button type="button" style={styles.secondaryButton} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回首页</button>
       </header>
@@ -723,6 +773,7 @@ const ContinuityCockpitPage: React.FC = () => {
       {error && <div style={styles.error}>{error}</div>}
       {notice && <div style={styles.notice}>{notice}</div>}
       {continuityLoading && <div style={styles.notice}>正在刷新 Phase 7 连续性数据...</div>}
+      {phase75Loading && <div style={styles.notice}>正在刷新 Phase 7.5 写作闭环数据...</div>}
 
       <section style={styles.focusBar}>
         <label style={styles.label}>当前创作章节</label>
@@ -821,7 +872,19 @@ const ContinuityCockpitPage: React.FC = () => {
         saveTimelineLink, patchTimelineLink,
         saveTimelineTask, patchTimelineTask,
       })}
-      {['precheck', 'postupdate'].includes(activeTab) && renderFutureTab(activeTab)}
+      {activeTab === 'precheck' && renderPrecheckTab({
+        data: precheckResult,
+        onRun: runPrecheck,
+        onCopy: copyPrecheckSummary,
+        setActiveTab,
+      })}
+      {activeTab === 'postupdate' && renderPostupdateTab({
+        data: postupdateResult,
+        focusChapter,
+        onRun: runPostupdate,
+        onCopy: copyPostupdateSummary,
+        onApply: applyPostupdateSuggestion,
+      })}
     </div>
   );
 };
@@ -1837,16 +1900,128 @@ function TimelineTaskCard({ task, input }: { task: any; input: any }) {
     </div>
   );
 }
-function renderFutureTab(tab: TabKey) {
-  const phaseMap: Record<string, string> = {
-    precheck: 'Phase 7.5 将接入写作前检查。',
-    postupdate: 'Phase 7.5 将接入写作后更新闭环。',
-  };
+
+function renderPrecheckTab(input: any) {
+  const data = input.data || {};
+  const summary = data.summary || {};
+  const groups = data.groups || {};
+  const conclusion = summary.riskLevel === 'blocked'
+    ? '不建议直接写正文：请先处理阻塞项。'
+    : summary.riskLevel === 'warning'
+      ? '可以写，但需要带着提醒写。'
+      : '可以开始写作。';
+  const cards = [
+    ['风险等级', summary.riskLevel || EMPTY],
+    ['检查分数', String(summary.score ?? 0)],
+    ['阻塞项', String(summary.blockCount ?? 0)],
+    ['警告项', String(summary.warningCount ?? 0)],
+    ['通过项', String(summary.passCount ?? 0)],
+    ['建议开始写作', summary.canStartWriting ? '是' : '否'],
+  ];
   return (
-    <Panel title="分期入口">
-      <p style={styles.empty}>{phaseMap[tab] || '后续阶段实现。'}</p>
-      <p style={styles.empty}>当前只展示入口和空态，不生成占位关系、占位伏笔或不存在的规则。</p>
-    </Panel>
+    <div>
+      <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={String(label)} value={String(value)} />)}</section>
+      <section style={styles.twoColumns}>
+        <Panel title="当前章检查结论">
+          <Line label="结论" value={conclusion} />
+          <Line label="待确认设定" value={`${summary.pendingCount ?? 0} 项`} />
+          <Line label="当前章节" value={data.focusChapter?.title || '待选择章节'} />
+        </Panel>
+        <Panel title="操作区">
+          <button type="button" style={styles.primaryButton} onClick={input.onRun}>重新运行检查</button>
+          <button type="button" style={styles.secondaryButton} onClick={input.onCopy}>复制检查结果</button>
+          <button type="button" style={styles.secondaryButton} onClick={() => input.setActiveTab('focus')}>跳转当前章焦点</button>
+          <div style={styles.inlineActions}>
+            {[
+              ['characters', '人物'], ['relations', '关系'], ['foreshadowing', '伏笔'], ['world', '世界观'], ['timeline', '时间线'],
+            ].map(([key, label]) => <button key={key} type="button" style={styles.tinyButton} onClick={() => input.setActiveTab(key)}>{label}</button>)}
+          </div>
+        </Panel>
+      </section>
+      <Panel title="结构化详情区">
+        <CheckGroup title="阻塞项" items={groups.blockers || []} />
+        <CheckGroup title="警告项" items={groups.warnings || []} />
+        <CheckGroup title="通过项" items={groups.passes || []} />
+        <CheckGroup title="建议项" items={groups.suggestions || []} />
+      </Panel>
+    </div>
+  );
+}
+
+function renderPostupdateTab(input: any) {
+  const data = input.data || {};
+  const summary = data.summary || {};
+  const groups = data.groups || {};
+  const ch = input.focusChapter || data.focusChapter;
+  const cards = [
+    ['更新建议', String(summary.suggestionCount ?? 0)],
+    ['冲突数', String(summary.conflictCount ?? 0)],
+    ['locked 冲突', String(summary.lockedConflictCount ?? 0)],
+    ['pending 数', String(summary.pendingCount ?? 0)],
+    ['可安全生成待确认项', summary.canApplySafely ? '是' : '否'],
+  ];
+  return (
+    <div>
+      <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={String(label)} value={String(value)} />)}</section>
+      <section style={styles.twoColumns}>
+        <Panel title="当前章正文状态">
+          <Line label="当前章节" value={ch?.title || '待选择章节'} />
+          <Line label="字数" value={`${wordCount(ch)} 字`} />
+          <Line label="是否有正文" value={String(ch?.content || '').trim() ? '是' : '否'} />
+          <Line label="是否 locked" value={ch?.status === 'locked' ? '是' : '否'} />
+        </Panel>
+        <Panel title="操作区">
+          <button type="button" style={styles.primaryButton} onClick={input.onRun}>运行写作后更新分析</button>
+          <button type="button" style={styles.secondaryButton} onClick={input.onCopy}>复制更新摘要</button>
+          <div style={styles.notice}>确认生成也只会写入 pending 待确认项；locked / confirmed 设定不会被自动覆盖。</div>
+        </Panel>
+      </section>
+      <Panel title="结构化详情区">
+        <SuggestionGroup title="人物状态更新建议" items={groups.characterUpdates || []} input={input} />
+        <SuggestionGroup title="人物关系更新建议" items={groups.relationshipUpdates || []} input={input} />
+        <SuggestionGroup title="伏笔更新建议" items={groups.foreshadowingUpdates || []} input={input} />
+        <SuggestionGroup title="世界观规则更新建议" items={groups.worldRuleUpdates || []} input={input} />
+        <SuggestionGroup title="时间线更新建议" items={groups.timelineUpdates || []} input={input} />
+        <SuggestionGroup title="冲突建议" items={groups.conflicts || []} input={input} />
+        <SuggestionGroup title="已忽略建议" items={groups.ignored || []} input={input} />
+      </Panel>
+    </div>
+  );
+}
+
+function CheckGroup({ title, items }: { title: string; items: any[] }) {
+  return (
+    <div style={styles.group}>
+      <h3 style={styles.groupTitle}>{title}</h3>
+      {items.length ? items.map(item => (
+        <div key={item.id} style={styles.itemCard}>
+          <Line label={item.title || EMPTY} value={item.detail || EMPTY} />
+          <Line label="模块 / 级别" value={`${item.module || EMPTY} / ${item.level || EMPTY}`} />
+          <Line label="操作建议" value={item.actionHint || EMPTY} />
+        </div>
+      )) : <p style={styles.empty}>暂无数据。</p>}
+    </div>
+  );
+}
+
+function SuggestionGroup({ title, items, input }: { title: string; items: any[]; input: any }) {
+  return (
+    <div style={styles.group}>
+      <h3 style={styles.groupTitle}>{title}</h3>
+      {items.length ? items.map(item => (
+        <div key={item.id} style={styles.itemCard}>
+          <Line label={item.title || EMPTY} value={item.summary || EMPTY} />
+          <Line label="目标 / 动作" value={`${item.targetType || EMPTY} / ${item.actionType || EMPTY}`} />
+          <Line label="风险 / 状态" value={`${item.riskLevel || EMPTY} / ${item.reviewStatus || EMPTY}${item.lockedConflict ? ' / locked conflict' : ''}`} />
+          <Line label="证据片段" value={item.evidence || EMPTY} />
+          <div style={styles.inlineActions}>
+            <button type="button" style={styles.tinyButton} onClick={() => input.onApply(item, 'confirm')}>生成待确认项</button>
+            <button type="button" style={styles.tinyButton} onClick={() => input.onApply(item, 'ignore')}>忽略</button>
+            <button type="button" style={styles.tinyButton} onClick={() => input.onApply(item, 'conflict')}>标记冲突</button>
+          </div>
+        </div>
+      )) : <p style={styles.empty}>暂无数据。</p>}
+    </div>
   );
 }
 
@@ -2070,6 +2245,45 @@ function searchableFields(values: any[]): string {
 
 function countKeywordMatches(texts: string[], keywords: string[]): number {
   return texts.filter(text => keywords.some(keyword => text.includes(keyword.toLowerCase()))).length;
+}
+
+function formatPrecheckResult(data: any) {
+  const summary = data?.summary || {};
+  const groups = data?.groups || {};
+  const lines = [
+    `写作前检查：${data?.focusChapter?.title || '待选择章节'}`,
+    `风险等级：${summary.riskLevel || EMPTY}`,
+    `分数：${summary.score ?? 0}`,
+    `阻塞/警告/通过：${summary.blockCount ?? 0}/${summary.warningCount ?? 0}/${summary.passCount ?? 0}`,
+    `建议开始写作：${summary.canStartWriting ? '是' : '否'}`,
+  ];
+  for (const [label, items] of Object.entries({ 阻塞项: groups.blockers || [], 警告项: groups.warnings || [], 通过项: groups.passes || [], 建议项: groups.suggestions || [] })) {
+    lines.push(`\n${label}`);
+    (items as any[]).forEach(item => lines.push(`- [${item.module}/${item.level}] ${item.title}: ${item.detail}`));
+  }
+  return lines.join('\n');
+}
+
+function formatPostupdateResult(data: any) {
+  const summary = data?.summary || {};
+  const groups = data?.groups || {};
+  const lines = [
+    `写作后更新：${data?.focusChapter?.title || '待选择章节'}`,
+    `建议/冲突/pending/locked冲突：${summary.suggestionCount ?? 0}/${summary.conflictCount ?? 0}/${summary.pendingCount ?? 0}/${summary.lockedConflictCount ?? 0}`,
+    `可安全生成待确认项：${summary.canApplySafely ? '是' : '否'}`,
+  ];
+  for (const [label, items] of Object.entries({
+    人物状态: groups.characterUpdates || [],
+    人物关系: groups.relationshipUpdates || [],
+    伏笔: groups.foreshadowingUpdates || [],
+    世界观: groups.worldRuleUpdates || [],
+    时间线: groups.timelineUpdates || [],
+    冲突: groups.conflicts || [],
+  })) {
+    lines.push(`\n${label}`);
+    (items as any[]).forEach(item => lines.push(`- [${item.targetType}/${item.reviewStatus}] ${item.title}: ${item.summary}`));
+  }
+  return lines.join('\n');
 }
 
 async function copyText(text: string): Promise<void> {

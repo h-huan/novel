@@ -1,4 +1,5 @@
 ﻿import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { v4 as uuid } from 'uuid';
 import { DatabaseService } from '../../database/database.service';
 
@@ -868,6 +869,234 @@ export class ContinuityService {
     };
   }
 
+  // ===== Phase 7.5: Pre-writing check and post-writing update =====
+
+  getPrecheck(projectId: string, focusChapterId?: string) {
+    const context = this.buildPhase75Context(projectId, focusChapterId);
+    const items: any[] = [];
+    const add = (module: string, level: string, title: string, detail: string, actionHint?: string, relatedId?: string, relatedType?: string) => {
+      items.push({
+        id: `precheck-${module}-${items.length + 1}`,
+        module,
+        level,
+        title,
+        detail,
+        evidence: context.focusChapter?.title || '',
+        actionHint,
+        relatedId,
+        relatedType,
+      });
+    };
+
+    if (!context.focusChapter) {
+      add('chapter', 'blocker', '未选择当前创作章节', '写作前检查必须围绕 currentFocusChapter 执行。', '先在顶部选择当前创作章节。');
+    } else {
+      if (String(context.focusChapter.status || '') === 'locked') {
+        add('locked', 'blocker', '当前章节已 locked', 'locked 章节不建议自动写正文，也不能被自动更新覆盖。', '如需继续写作，请先确认是否解锁或另建草稿。', context.focusChapter.id, 'chapter');
+      } else {
+        add('chapter', 'pass', '当前章节可编辑', '当前章节未 locked，可进入写作前检查流程。', undefined, context.focusChapter.id, 'chapter');
+      }
+      if (!String(context.focusChapter.title || '').trim()) {
+        add('chapter', 'warning', '当前章节缺少标题', '缺少标题会降低检查结论的上下文准确度。', '先补齐章节标题。', context.focusChapter.id, 'chapter');
+      }
+      if (!String(context.outline?.content || '').trim()) {
+        add('chapter', 'warning', '当前章节缺少大纲目标', '写作前检查没有读到当前章大纲目标。', '先在大纲中补齐本章目标。', context.focusChapter.id, 'outline');
+      } else {
+        add('chapter', 'pass', '当前章节大纲目标已存在', String(context.outline.content).slice(0, 180), undefined, context.outline.id, 'outline');
+      }
+    }
+
+    const focusCharacters = context.characters.groups.focusCharacters || [];
+    const conflictCharacters = context.characters.groups.conflictRisk || [];
+    if (focusCharacters.length && !context.characters.summary.focusCharacters) {
+      add('character', 'warning', '当前章人物状态快照不足', '当前章有人物线索，但缺少可直接复核的状态快照。', '到人物 Tab 补齐状态快照。');
+    }
+    if (conflictCharacters.length) {
+      add('character', 'blocker', '人物状态存在冲突', `${conflictCharacters.length} 个相关人物存在状态冲突风险。`, '先处理人物 Tab 中的 conflict 状态。');
+    } else {
+      add('character', 'pass', '人物状态无明显冲突', `当前章相关人物 ${focusCharacters.length} 个。`);
+    }
+    if (Number(context.characters.summary.pendingStateCount || 0) > 5) {
+      add('character', 'warning', '人物 pending 状态较多', `仍有 ${context.characters.summary.pendingStateCount} 条人物状态待确认。`, '写作前先确认关键状态。');
+    }
+
+    const highConflictRelationships = Number(context.relationships.summary.highConflictRelationships || 0);
+    const hiddenRelationships = Number(context.relationships.summary.hiddenRelationships || 0);
+    if (highConflictRelationships >= 3) add('relationship', 'blocker', '高冲突关系过多', `当前关系网有 ${highConflictRelationships} 条高冲突关系。`, '先核对关系边界。');
+    else if (highConflictRelationships > 0) add('relationship', 'warning', '存在高冲突关系', `当前关系网有 ${highConflictRelationships} 条高冲突关系。`, '写作时避免关系边界错位。');
+    else add('relationship', 'pass', '人物关系无明显高冲突', `当前章相关关系 ${context.relationships.summary.focusRelationships || 0} 条。`);
+    if (hiddenRelationships > 0) add('relationship', 'warning', '存在隐藏关系提醒', `有 ${hiddenRelationships} 条隐藏/读者未知关系需要注意。`, '写作时确认读者已知状态。');
+
+    if (Number(context.foreshadowings.summary.overdueCount || 0) > 0) add('foreshadowing', 'blocker', '存在逾期伏笔', `${context.foreshadowings.summary.overdueCount} 条伏笔已经逾期。`, '先处理伏笔 Tab 的逾期项。');
+    if (Number(context.foreshadowings.summary.recoveryDueCount || 0) > 0) add('foreshadowing', 'warning', '存在临近回收伏笔', `${context.foreshadowings.summary.recoveryDueCount} 条伏笔临近回收。`, '写作时安排回收或延期。');
+    if (Number(context.foreshadowings.summary.highRiskCount || 0) > 0) add('foreshadowing', 'warning', '存在高风险伏笔', `${context.foreshadowings.summary.highRiskCount} 条伏笔风险较高。`, '先核对伏笔生命周期。');
+    if (!Number(context.foreshadowings.summary.focusTasks || 0)) add('foreshadowing', 'suggestion', '本章暂无伏笔任务', '如本章大纲涉及线索、真相或秘密，可补充伏笔任务。', '到伏笔 Tab 复核。');
+
+    if (Number(context.worldRules.summary.conflictCount || 0) > 0) add('world', 'blocker', '存在世界观冲突', `${context.worldRules.summary.conflictCount} 条世界观规则存在冲突。`, '先解决世界观规则矛盾。');
+    if (Number(context.worldRules.summary.highRiskCount || 0) > 0) add('world', 'warning', '存在高风险世界观规则', `${context.worldRules.summary.highRiskCount} 条规则高风险。`, '写作前确认不能违背。');
+    if (Number(context.worldRules.summary.focusTasks || 0) > 0) add('world', 'warning', '存在当前章世界观任务', `${context.worldRules.summary.focusTasks} 个世界观任务需要处理。`, '到世界观 Tab 处理任务。');
+    if (!Number(context.worldRules.summary.focusRules || 0) && this.hasWorldKeywords(context.chapterText)) {
+      add('world', 'suggestion', '正文或大纲涉及世界观关键词', '当前章没有相关规则，但文本涉及地点、组织、能力或制度。', '建议补充世界观规则。');
+    }
+
+    if (Number(context.timeline.summary.timeConflictCount || 0) > 0) add('timeline', 'blocker', '存在时间冲突', `${context.timeline.summary.timeConflictCount} 个时间线冲突。`, '先校正客观故事时间。');
+    if (Number(context.timeline.summary.causalityGapCount || 0) > 0) add('timeline', 'blocker', '存在因果缺口', `${context.timeline.summary.causalityGapCount} 个因果链缺口。`, '先补足事件因果链。');
+    if (Number(context.timeline.summary.focusTasks || 0) > 0) add('timeline', 'warning', '存在当前章时间线任务', `${context.timeline.summary.focusTasks} 个时间线任务需要处理。`, '到时间线 Tab 处理任务。');
+    if (!Number(context.timeline.summary.focusEvents || 0) && String(context.focusChapter?.content || '').trim()) {
+      add('timeline', 'suggestion', '正文已有内容但缺少时间线事件', '当前章已有正文，建议补充时间线事件。', '到时间线 Tab 新增事件。');
+    }
+
+    if (context.pendingCount >= 20) add('quality', 'blocker', '待确认设定过多', `当前共有 ${context.pendingCount} 项待确认设定。`, '先处理关键 pending 项。');
+    else if (context.pendingCount > 0) add('quality', 'warning', '存在待确认设定', `当前共有 ${context.pendingCount} 项待确认设定。`, '写作前不要把 pending 当作 confirmed 使用。');
+    else add('quality', 'pass', '没有待确认设定阻塞', '当前未发现 pending 确认项。');
+
+    const blockers = items.filter(i => i.level === 'blocker');
+    const warnings = items.filter(i => i.level === 'warning');
+    const passes = items.filter(i => i.level === 'pass');
+    const suggestions = items.filter(i => i.level === 'suggestion');
+    const score = Math.max(0, 100 - blockers.length * 25 - warnings.length * 8 - suggestions.length * 2);
+    return {
+      success: true,
+      focusChapter: context.focusChapter || null,
+      summary: {
+        riskLevel: blockers.length ? 'blocked' : warnings.length ? 'warning' : 'pass',
+        score,
+        blockCount: blockers.length,
+        warningCount: warnings.length,
+        passCount: passes.length,
+        pendingCount: context.pendingCount,
+        canStartWriting: blockers.length === 0,
+      },
+      groups: { blockers, warnings, passes, suggestions },
+    };
+  }
+
+  getPostupdate(projectId: string, focusChapterId?: string) {
+    const context = this.buildPhase75Context(projectId, focusChapterId);
+    const suggestions: any[] = [];
+    const add = (targetType: string, actionType: string, title: string, summary: string, evidence: string, riskLevel = 'medium', targetId?: string, lockedConflict = false, payload: Record<string, unknown> = {}) => {
+      suggestions.push({
+        id: `postupdate-${targetType}-${suggestions.length + 1}`,
+        targetType,
+        actionType,
+        title,
+        summary,
+        evidence: evidence || context.focusChapter?.title || '',
+        riskLevel,
+        reviewStatus: lockedConflict || actionType === 'conflict' ? 'conflict' : 'pending',
+        lockedConflict,
+        targetId,
+        payload: {
+          ...payload,
+          focusChapterId: context.focusChapter?.id || null,
+          sourceChapterId: context.focusChapter?.id || null,
+          suggestionType: actionType,
+        },
+      });
+    };
+
+    if (!context.focusChapter) {
+      add('state_item', 'conflict', '未选择当前创作章节', '写作后更新必须围绕 currentFocusChapter 执行。', '', 'critical', undefined, true);
+    } else if (!String(context.focusChapter.content || '').trim()) {
+      add('state_item', 'conflict', '当前章没有正文', '没有正文时不能假装完成写作后更新分析。', context.focusChapter.title || '', 'critical', context.focusChapter.id, true);
+    } else if (String(context.focusChapter.status || '') === 'locked') {
+      add('state_item', 'conflict', '当前章已 locked', 'locked 章节不允许自动生成覆盖性更新。', context.focusChapter.title || '', 'critical', context.focusChapter.id, true);
+    } else {
+      const content = String(context.focusChapter.content || '');
+      for (const character of (context.characters.groups.focusCharacters || []).slice(0, 8)) {
+        if (character.name && content.includes(character.name)) {
+          const hasLockedState = (character.latestStateSnapshots || []).some((state: any) => state.locked);
+          add('character_state', 'verify', `复核人物状态：${character.name}`, `正文出现 ${character.name}，建议生成待确认人物状态复核项。`, this.evidenceAround(content, character.name), 'medium', character.id, hasLockedState, { characterId: character.id, characterName: character.name });
+        }
+      }
+      for (const rel of (context.relationships.groups.focusRelationships || []).slice(0, 8)) {
+        const a = rel.sourceCharacterName || '';
+        const b = rel.targetCharacterName || '';
+        if (a && b && content.includes(a) && content.includes(b)) {
+          add('relationship', 'verify', `复核人物关系：${a} - ${b}`, '正文同时出现关系双方，建议复核关系边界与读者已知状态。', this.evidenceAround(content, a), 'medium', rel.id, Boolean(rel.locked), { relationshipId: rel.id });
+        }
+      }
+      if (this.hasForeshadowingKeywords(content)) {
+        add('foreshadowing', 'verify', '复核伏笔生命周期', '正文出现伏笔、线索、秘密、真相或回收相关关键词。', this.keywordEvidence(content, ['伏笔', '线索', '秘密', '真相', '回收']), 'medium', undefined, false, { keywordSource: 'chapter_content' });
+      }
+      if (this.hasWorldKeywords(content)) {
+        add('world_rule', 'verify', '复核世界观规则使用', '正文涉及地点、组织、能力体系、规则或制度，建议生成待确认世界观验证项。', this.keywordEvidence(content, ['地点', '组织', '能力', '规则', '制度', '世界观']), 'medium', undefined, false, { keywordSource: 'chapter_content' });
+      }
+      if (this.hasTimelineKeywords(content)) {
+        add('timeline_event', 'verify', '复核时间线 / 因果链', '正文出现时间、先后、因为、所以、导致等关键词，建议补充时间线事件或因果链。', this.keywordEvidence(content, ['时间', '随后', '此前', '因为', '所以', '导致', '后来']), 'medium', undefined, false, { keywordSource: 'chapter_content' });
+      }
+      for (const rule of (context.worldRules.groups.activeRules || []).slice(0, 6)) {
+        const needle = rule.title || rule.content || '';
+        if (needle && content.includes(String(needle).slice(0, 8))) {
+          add('world_rule', rule.locked ? 'conflict' : 'verify', `验证世界观规则：${rule.title}`, '正文疑似使用已登记世界观规则，需作者确认是否一致。', this.evidenceAround(content, String(needle).slice(0, 8)), rule.locked ? 'high' : 'medium', rule.id, Boolean(rule.locked), { ruleId: rule.id });
+        }
+      }
+    }
+
+    const characterUpdates = suggestions.filter(s => s.targetType === 'character_state');
+    const relationshipUpdates = suggestions.filter(s => s.targetType === 'relationship');
+    const foreshadowingUpdates = suggestions.filter(s => s.targetType === 'foreshadowing');
+    const worldRuleUpdates = suggestions.filter(s => s.targetType === 'world_rule');
+    const timelineUpdates = suggestions.filter(s => s.targetType === 'timeline_event' || s.targetType === 'timeline_link');
+    const conflicts = suggestions.filter(s => s.reviewStatus === 'conflict' || s.lockedConflict);
+    const ignored = suggestions.filter(s => s.reviewStatus === 'ignored');
+    return {
+      success: true,
+      focusChapter: context.focusChapter || null,
+      summary: {
+        suggestionCount: suggestions.length,
+        conflictCount: conflicts.length,
+        pendingCount: suggestions.filter(s => s.reviewStatus === 'pending').length,
+        lockedConflictCount: suggestions.filter(s => s.lockedConflict).length,
+        canApplySafely: Boolean(context.focusChapter && String(context.focusChapter.content || '').trim() && context.focusChapter.status !== 'locked'),
+      },
+      groups: { characterUpdates, relationshipUpdates, foreshadowingUpdates, worldRuleUpdates, timelineUpdates, conflicts, ignored },
+    };
+  }
+
+  applyPostupdateSuggestion(projectId: string, suggestionId: string, suggestion: any, status: 'pending' | 'ignored' | 'conflict') {
+    if (!suggestion || !String(suggestion.title || '').trim()) throw new BadRequestException('suggestion payload is required');
+    const now = new Date().toISOString();
+    const summary = String(suggestion.summary || suggestion.title).slice(0, 800);
+    const targetType = String(suggestion.targetType || 'continuity_postupdate');
+    const targetId = suggestion.targetId || null;
+    const hash = this.hashSummary(summary);
+    const existing = this.database.prepare(`
+      SELECT * FROM state_items
+      WHERE project_id = ? AND target_type = ? AND IFNULL(target_id, '') = IFNULL(?, '') AND summary_hash = ?
+      LIMIT 1
+    `).get(projectId, targetType, targetId, hash) as any;
+    if (existing) return { success: true, status: existing.status, stateItem: existing, deduped: true };
+
+    const id = uuid();
+    const payload = {
+      ...(suggestion.payload || {}),
+      suggestionId,
+      evidence: suggestion.evidence || '',
+      riskLevel: suggestion.riskLevel || 'medium',
+      lockedConflict: Boolean(suggestion.lockedConflict),
+      actionType: suggestion.actionType || 'verify',
+      reviewStatus: status,
+    };
+    this.database.prepare(`
+      INSERT INTO state_items (
+        id, project_id, source_type, source_id, source_chapter_id, target_type, target_id, target_label,
+        state_key, title, summary, content, payload, status, authority, source, confidence, tags,
+        impact_scope, summary_hash, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, projectId, 'ai', suggestionId, payload.sourceChapterId || payload.focusChapterId || null,
+      targetType, targetId, suggestion.title || targetType, suggestion.actionType || 'verify',
+      suggestion.title, summary, suggestion.evidence || summary, JSON.stringify(payload),
+      status, status === 'conflict' ? 'warning' : status === 'ignored' ? 'excluded' : 'soft_candidate',
+      'phase_7_5_postupdate', 0.6, JSON.stringify(['phase7.5', 'postupdate', suggestion.actionType || 'verify']),
+      JSON.stringify([payload.focusChapterId || payload.sourceChapterId || null].filter(Boolean)),
+      hash, 'system', now, now,
+    );
+    const stateItem = this.database.prepare('SELECT * FROM state_items WHERE project_id = ? AND id = ?').get(projectId, id);
+    return { success: true, status, stateItem, deduped: false };
+  }
+
   createTimelineEvent(projectId: string, body: any) {
     if (!String(body?.title || '').trim()) throw new BadRequestException('title is required');
     const lineType = this.ensureEnum(body.lineType || 'story_time', TIMELINE_LINE_TYPES, 'lineType');
@@ -1251,6 +1480,58 @@ export class ContinuityService {
     // Can't determine order => don't mis-judge
     if (currentOrder === 0 || endOrder === 0) return false;
     return currentOrder > endOrder;
+  }
+
+  private buildPhase75Context(projectId: string, focusChapterId?: string) {
+    const focusChapter = this.getChapter(projectId, focusChapterId);
+    const outline = this.getFocusOutline(projectId, focusChapter);
+    const characters = this.getCharacters(projectId, focusChapterId);
+    const relationships = this.getRelationships(projectId, focusChapterId);
+    const foreshadowings = this.getForeshadowings(projectId, focusChapterId);
+    const worldRules = this.getWorldRules(projectId, focusChapterId);
+    const timeline = this.getTimeline(projectId, focusChapterId);
+    const statePendingCount = (this.database.prepare(`
+      SELECT COUNT(*) as count FROM state_items
+      WHERE project_id = ? AND status IN ('pending', 'needs_review', 'conflict')
+    `).get(projectId) as any)?.count || 0;
+    const pendingCount = Number(statePendingCount || 0)
+      + Number(characters.summary?.pendingStateCount || 0)
+      + Number(relationships.summary?.pendingReviewCount || 0)
+      + Number(foreshadowings.summary?.pendingReviewCount || 0)
+      + Number(worldRules.summary?.pendingReviewCount || 0)
+      + Number(timeline.summary?.pendingReviewCount || 0);
+    const chapterText = `${focusChapter?.title || ''}\n${outline?.content || ''}\n${focusChapter?.content || ''}`;
+    return { focusChapter, outline, characters, relationships, foreshadowings, worldRules, timeline, pendingCount, chapterText };
+  }
+
+  private hasForeshadowingKeywords(text: string) {
+    return /伏笔|线索|秘密|真相|回收|暗示|谜团/.test(text || '');
+  }
+
+  private hasWorldKeywords(text: string) {
+    return /地点|组织|能力|规则|制度|世界观|家族|门派|公司|城|村|宫|法则|禁忌/.test(text || '');
+  }
+
+  private hasTimelineKeywords(text: string) {
+    return /时间|随后|此前|之后|先后|因为|所以|导致|后来|第二天|当天|清晨|黄昏/.test(text || '');
+  }
+
+  private evidenceAround(text: string, needle: string) {
+    if (!text || !needle) return '';
+    const index = text.indexOf(needle);
+    if (index < 0) return text.slice(0, 120);
+    return text.slice(Math.max(0, index - 40), Math.min(text.length, index + needle.length + 80));
+  }
+
+  private keywordEvidence(text: string, keywords: string[]) {
+    for (const keyword of keywords) {
+      if (text.includes(keyword)) return this.evidenceAround(text, keyword);
+    }
+    return text.slice(0, 120);
+  }
+
+  private hashSummary(summary: string) {
+    return createHash('sha1').update(String(summary || '').trim().toLowerCase()).digest('hex');
   }
 
   private allCharacters(projectId: string): any[] {
