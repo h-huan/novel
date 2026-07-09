@@ -559,6 +559,20 @@ export class ContinuityService {
     const currentVolumeIndex = focusChapter ? Number(focusChapter.volume_index || focusChapter.volumeIndex || 0) : 0;
 
     const responseRules = rules.map(rule => this.worldRuleToResponse(rule, events, tasks, focusChapter));
+
+    // Persisted focus tasks (compute before focusRules since focusRules references focusTasks)
+    const persistedFocusTasks = tasks.filter(t => t.chapter_id === focusChapter?.id).map(t => this.worldRuleTaskToResponse(t));
+    const derivedTasks = this.buildDerivedWorldRuleTasks(responseRules, focusChapter, focusCharacterIds, focusRelationshipIds, focusForeshadowingIds, focusTimelineEventIds);
+    const persistedKeySet = new Set(persistedFocusTasks.map((t: any) => `${t.ruleId}-${t.taskType}-${t.reason}`));
+    const uniqueDerived = derivedTasks.filter((t: any) => !persistedKeySet.has(`${t.ruleId}-${t.taskType}-${t.reason}`));
+    const dedupedDerived: any[] = [];
+    const derivedKeySet = new Set<string>();
+    for (const t of uniqueDerived) {
+      const key = `${t.ruleId}-${t.taskType}-${t.reason}`;
+      if (!derivedKeySet.has(key)) { derivedKeySet.add(key); dedupedDerived.push(t); }
+    }
+    const focusTasks = [...persistedFocusTasks, ...dedupedDerived];
+
     const focusRules = responseRules.filter(rule =>
       tasks.some(t => t.rule_id === rule.id && t.chapter_id === focusChapter?.id)
       || events.some(e => e.rule_id === rule.id && e.chapter_id === focusChapter?.id)
@@ -572,21 +586,6 @@ export class ContinuityService {
       || (rule.relatedTimelineEventIds || []).some((t: string) => focusTimelineEventIds.has(t))
       || focusTasks.some((ft: any) => ft.ruleId === rule.id)
     );
-
-    // Persisted focus tasks
-    const persistedFocusTasks = tasks.filter(t => t.chapter_id === focusChapter?.id).map(t => this.worldRuleTaskToResponse(t));
-
-    // Build derived tasks for each rule
-    const derivedTasks = this.buildDerivedWorldRuleTasks(responseRules, focusChapter, focusCharacterIds, focusRelationshipIds, focusForeshadowingIds, focusTimelineEventIds);
-    const persistedKeySet = new Set(persistedFocusTasks.map((t: any) => `${t.ruleId}-${t.taskType}-${t.reason}`));
-    const uniqueDerived = derivedTasks.filter((t: any) => !persistedKeySet.has(`${t.ruleId}-${t.taskType}-${t.reason}`));
-    const dedupedDerived: any[] = [];
-    const derivedKeySet = new Set<string>();
-    for (const t of uniqueDerived) {
-      const key = `${t.ruleId}-${t.taskType}-${t.reason}`;
-      if (!derivedKeySet.has(key)) { derivedKeySet.add(key); dedupedDerived.push(t); }
-    }
-    const focusTasks = [...persistedFocusTasks, ...dedupedDerived];
 
     return {
       success: true,
@@ -782,16 +781,32 @@ export class ContinuityService {
     const allEvents = [...responseEvents, ...legacyEvents];
     const responseLinks = links.map(l => this.timelineLinkToResponse(l));
 
+    // Step 1: Directly focused events
+    const directFocusEventIds = new Set<string>();
+    for (const e of responseEvents as any[]) {
+      if (
+        tasks.some(t => t.event_id === e.id && t.chapter_id === focusChapter?.id)
+        || e.chapterId === focusChapter?.id
+        || e.narrativeOrder === currentChapterIndex
+        || (currentChapterOrder > 0 && Math.abs(Number(e.storyTimeOrder || 0) - currentChapterOrder) <= 1)
+        || (e.relatedCharacterIds || []).some((c: string) => focusCharacterIds.has(c))
+        || (e.relatedRelationshipIds || []).some((r: string) => focusRelationshipIds.has(r))
+        || (e.relatedForeshadowingIds || []).some((f: string) => focusForeshadowingIds.has(f))
+        || (e.relatedWorldRuleIds || []).some((w: string) => focusWorldRuleIds.has(w))
+      ) { directFocusEventIds.add(e.id); }
+    }
+
+    // Step 2: Events linked via causality to directly focused events
+    const causalityLinkedFocusEventIds = new Set<string>();
+    for (const link of responseLinks) {
+      if (directFocusEventIds.has(link.sourceEventId)) causalityLinkedFocusEventIds.add(link.targetEventId);
+      if (directFocusEventIds.has(link.targetEventId)) causalityLinkedFocusEventIds.add(link.sourceEventId);
+    }
+
+    // Step 3: Combine direct + causality-linked + legacy
     const focusEvents = allEvents.filter((e: any) =>
-      tasks.some(t => t.event_id === e.id && t.chapter_id === focusChapter?.id)
-      || e.chapterId === focusChapter?.id
-      || (e.relatedCharacterIds || []).some((c: string) => focusCharacterIds.has(c))
-      || (e.relatedRelationshipIds || []).some((r: string) => focusRelationshipIds.has(r))
-      || (!e.legacy && e.narrativeOrder === currentChapterIndex)
-      || (!e.legacy && currentChapterOrder > 0 && Math.abs(Number(e.storyTimeOrder || 0) - currentChapterOrder) <= 1)
-      || (!e.legacy && responseLinks.some(l => l.sourceEventId === e.id || l.targetEventId === e.id))
-      || (!e.legacy && (e.relatedForeshadowingIds || []).some((f: string) => focusForeshadowingIds.has(f)))
-      || (!e.legacy && (e.relatedWorldRuleIds || []).some((w: string) => focusWorldRuleIds.has(w)))
+      directFocusEventIds.has(e.id)
+      || causalityLinkedFocusEventIds.has(e.id)
       || legacyEvents.some((le: any) => le.id === e.id)
     );
 

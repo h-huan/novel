@@ -354,3 +354,60 @@ task_type：place_event, check_order, check_causality, reveal_information, avoid
 - `server npm run build`: 本地执行通过。
 - `desktop npm run typecheck`: 本地执行通过。
 - `desktop npm run build`: 本地执行通过；保留既有 Vite CJS API deprecated、PromptChainPage 动静态导入和 chunk size warning。
+
+## 28. Phase 7.4 收尾修正记录
+
+### 28.1 后端变量顺序修正
+
+- getWorldRules 中 focusTasks 初始化前被 focusRules 引用的问题已修复。
+- 计算顺序改为：responseRules → persistedFocusTasks → derivedTasks → focusTasks → focusRules。
+
+### 28.2 前端 input.input.xxx 运行时错误修复
+
+- 世界观 Tab 中的 input.input.worldRuleForm.ruleId 已改为 input.worldRuleForm.ruleId。
+- 时间线 Tab 中的 input.input.timelineEventForm.reviewStatus 已改为 input.timelineEventForm.reviewStatus。
+- renderWorldTab 内自己计算 canLockWorldRule。
+- renderTimelineTab 内自己计算 canLockTimelineEvent。
+
+### 28.3 当前章焦点 Tab 联动修正
+
+- renderFocus 调用已传入 relatedWorldTasks、relatedWorldRules、relatedTimelineTasks、relatedTimelineEvents。
+- 不再显示 Phase 7.4 将接入占位文案。
+
+### 28.4 写作前提示词修正
+
+- buildPreWritingPrompt 中世界观/时间线注意事项使用真实数据。
+
+### 28.5 总览 Tab 统计补齐
+
+- renderOverview 的 cards 已新增 8 项 Phase 7.4 统计。
+- 下一个创作动作区域新增世界观提醒和时间线提醒。
+
+### 28.6 pendingConfirmations 补齐
+
+- 已加入 continuityWorldRules 和 continuityTimeline 的 pending 统计。
+
+### 28.7 本章必须处理 fallback 修正
+
+- 世界观 Tab 使用 worldMustHandleItems（优先 focusTasks → focusRules）。
+- 时间线 Tab 使用 timelineMustHandleItems（优先 focusTasks → focusEvents）。
+
+### 28.8 页面 subtitle 修正
+
+- 已改为 7.5 只展示入口并包含世界观规则、时间线三线模型。
+
+### 28.9 timeline focusEvents 因果链判断收窄
+
+- 先计算 directFocusEventIds，再通过 causality links 扩展。
+- 仅当 link 的一端在 directFocusEventIds 中时，另一端才加入 focusEvents。
+
+### 28.10 renderFutureTab 清理
+
+- 已移除 world/timeline 占位条目。
+
+## 29. Phase 7.4 收尾构建记录
+
+- server npm run typecheck: 本地执行通过。
+- server npm run build: 本地执行通过。
+- desktop npm run typecheck: 本地执行通过。
+- desktop npm run build: 本地执行通过；保留既有 Vite CJS API deprecated、PromptChainPage 动静态导入和 chunk size warning。

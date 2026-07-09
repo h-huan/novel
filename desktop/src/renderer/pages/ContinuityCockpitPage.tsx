@@ -713,7 +713,7 @@ const ContinuityCockpitPage: React.FC = () => {
         <div>
           <div style={styles.kicker}>Phase 7：小说连续性驾驶舱</div>
           <h1 style={styles.title}>小说连续性驾驶舱</h1>
-          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达与写作前注意事项。7.4-7.5 只展示入口，不假装完成。</p>
+          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达、世界观规则、时间线三线模型与写作前注意事项。7.5 只展示入口，不假装完成。</p>
         </div>
         <button type="button" style={styles.secondaryButton} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回首页</button>
       </header>
@@ -908,8 +908,8 @@ function renderFocus(input: any) {
           <Line label="人物状态注意事项" value={characterNotes} />
           <Line label="关系注意事项" value={relationshipNotes} />
           <Line label="伏笔注意事项" value={foreshadowingNotes} />
-          <Line label="世界观注意事项" value="暂无本章世界观规则，Phase 7.4 将接入世界观规则系统。" />
-          <Line label="时间线注意事项" value={ch && input.relatedTimelineEvents.length ? input.relatedTimelineEvents.map((e: any) => e.title).join('；') : '暂无本章时间线事件，Phase 7.4 将接入时间线三线模型。'} />
+          <Line label="世界观注意事项" value={worldNotes} />
+          <Line label="时间线注意事项" value={timelineNotes} />
           <Line label="禁止写错事项" value={[...forbiddenBase, input.manualForbidden].filter(Boolean).join('；')} />
         </Panel>
         <Panel title="人工微调区">
@@ -1412,6 +1412,11 @@ function renderWorldTab(input: any) {
   const summary = data.summary || {};
   const groups = data.groups || {};
   const allRules = groups.allRules || [];
+  const worldFocusTasks = groups.focusTasks || [];
+  const worldFocusRules = groups.focusRules || [];
+  const worldMustHandleItems = worldFocusTasks.length ? worldFocusTasks : worldFocusRules;
+  const isEditingWorldRule = Boolean(input.worldRuleForm.ruleId);
+  const canLockWorldRule = isEditingWorldRule && input.worldRuleForm.reviewStatus === 'confirmed';
   const cards = [
     ['总规则数', summary.totalRules ?? 0],
     ['当前章相关规则', summary.focusRules ?? 0],
@@ -1439,8 +1444,7 @@ function renderWorldTab(input: any) {
         </Panel>
       </section>
       <section style={styles.detailGrid}>
-        <Panel title="结构化详情区">
-          <Group title="本章必须处理" items={groups.focusTasks || groups.focusRules || []} render={(item: any) => {
+        <Panel title="结构化详情区"> <Group title="本章必须处理" items={worldMustHandleItems} render={(item: any) => {
             if (item.ruleId) return <WorldRuleTaskCard task={item} input={input} />;
             return <WorldRuleCard rule={item} input={input} />;
           }} />
@@ -1481,7 +1485,7 @@ function renderWorldTab(input: any) {
             </select>
           ) : <div style={styles.readonlyBox}>新增模式固定 pending。</div>}
           <label style={styles.checkbox}>
-            <input type="checkbox" checked={input.input.worldRuleForm.ruleId && input.worldRuleForm.locked} disabled={!input.canLock}
+            <input type="checkbox" checked={Boolean(input.worldRuleForm.ruleId && input.worldRuleForm.locked)} disabled={!canLockWorldRule}
               onChange={(e) => input.setWorldRuleForm({ ...input.worldRuleForm, locked: e.target.checked })} /> 锁定规则
           </label>
           {!input.canLock && input.worldRuleForm.ruleId && <div style={styles.hint}>先确认后才能锁定。</div>}
@@ -1609,6 +1613,11 @@ function renderTimelineTab(input: any) {
   const groups = data.groups || {};
   const allEvents = groups.allEvents || [];
   const legacyEvents = groups.legacyTimelineEvents || [];
+  const timelineFocusTasks = groups.focusTasks || [];
+  const timelineFocusEvents = groups.focusEvents || [];
+  const timelineMustHandleItems = timelineFocusTasks.length ? timelineFocusTasks : timelineFocusEvents;
+  const isEditingTimelineEvent = Boolean(input.timelineEventForm.eventId);
+  const canLockTimelineEvent = isEditingTimelineEvent && input.timelineEventForm.reviewStatus === 'confirmed';
   const cards = [
     ['总事件数', summary.totalEvents ?? 0],
     ['当前章相关事件', summary.focusEvents ?? 0],
@@ -1641,7 +1650,10 @@ function renderTimelineTab(input: any) {
       </section>
       <section style={styles.detailGrid}>
         <Panel title="结构化详情区 - 三线模型">
-          <Group title="本章必须处理" items={groups.focusTasks || groups.focusEvents || []} render={(item: any) => {
+                    const timelineFocusTasks = groups.focusTasks || [];
+          const timelineFocusEvents = groups.focusEvents || [];
+          const timelineMustHandleItems = timelineFocusTasks.length ? timelineFocusTasks : timelineFocusEvents;
+        <Group title="本章必须处理" items={timelineMustHandleItems} render={(item: any) => {
             if (item.eventId) return <TimelineTaskCard task={item} input={input} />;
             return <TimelineEventCard event={item} input={input} />;
           }} />
@@ -1667,7 +1679,7 @@ function renderTimelineTab(input: any) {
           <FormTextarea label="客观故事时间" value={input.timelineEventForm.storyTimeText} onChange={(v) => input.setTimelineEventForm({ ...input.timelineEventForm, storyTimeText: v })} />
           <label style={styles.label}>审核状态</label>
           {input.timelineEventForm.eventId ? (
-            <select style={styles.selectFull} value={input.input.timelineEventForm.reviewStatus} onChange={(e) => input.setTimelineEventForm({ ...input.timelineEventForm, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.timelineEventForm.locked : false })}>
+            <select style={styles.selectFull} value={input.timelineEventForm.reviewStatus} onChange={(e) => input.setTimelineEventForm({ ...input.timelineEventForm, reviewStatus: e.target.value, locked: e.target.value === 'confirmed' ? input.timelineEventForm.locked : false })}>
               {REVIEW_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           ) : <div style={styles.readonlyBox}>新增模式固定 pending。</div>}
@@ -1803,9 +1815,6 @@ function TimelineTaskCard({ task, input }: { task: any; input: any }) {
 }
 function renderFutureTab(tab: TabKey) {
   const phaseMap: Record<string, string> = {
-    foreshadowing: 'Phase 7.3 将接入伏笔雷达与生命周期。',
-    world: 'Phase 7.4 将接入世界观规则系统。',
-    timeline: 'Phase 7.4 将接入时间线三线模型。',
     precheck: 'Phase 7.5 将接入写作前检查。',
     postupdate: 'Phase 7.5 将接入写作后更新闭环。',
   };
@@ -2011,8 +2020,8 @@ function buildPreWritingPrompt(input: any) {
     `人物状态注意事项：${input.relatedCharacters.length ? input.relatedCharacters.map((c: any) => `${c.name}-${c.currentStateSummary || c.identity || EMPTY}`).join('；') : EMPTY}`,
     `关系注意事项：${input.relatedRelationships.length ? input.relatedRelationships.map((r: any) => `${r.sourceCharacterName}-${r.targetCharacterName}:${r.publicRelation || EMPTY}`).join('；') : EMPTY}`,
     `伏笔注意事项：${input.focusForeshadowingTasks?.length ? groupTaskNotes(input.focusForeshadowingTasks) : input.relatedForeshadowings.length ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join('；') : EMPTY}`,
-    '世界观注意事项：待补全，Phase 7.4 将接入世界观规则系统。',
-    `时间线注意事项：${input.relatedTimelineEvents.length ? input.relatedTimelineEvents.map((e: any) => e.title).join('；') : EMPTY}`,
+    `世界观注意事项：${input.focusWorldTasks?.length ? groupWorldTaskNotes(input.focusWorldTasks) : input.focusWorldRules?.length ? input.focusWorldRules.map((r: any) => `${r.title || EMPTY}：${r.content || r.explanation || EMPTY}`).join('；') : EMPTY}`,
+    `时间线注意事项：${input.focusTimelineTasks?.length ? groupTimelineTaskNotes(input.focusTimelineTasks) : input.focusTimelineEvents?.length ? input.focusTimelineEvents.map((e: any) => `${e.title || EMPTY}（${e.lineType || EMPTY}）：${e.storyTimeText || e.summary || EMPTY}`).join('；') : EMPTY}`,
     '冲突设计：待补全。',
     '爽点 / 压迫点：待补全。',
     '结尾钩子：待补全。',
