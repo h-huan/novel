@@ -78,13 +78,25 @@ Phase 7.5 不直接覆盖 confirmed 或 locked 的正式设定。
 
 ## 8. 构建记录
 
-本地构建命令需执行：
+本轮实际构建记录：
 
-- `cd server && npm run typecheck`
-- `cd server && npm run build`
-- `cd desktop && npm run typecheck`
-- `cd desktop && npm run build`
+- server npm run typecheck: 通过。
+- server npm run build: 通过。
+- desktop npm run typecheck: 通过。
+- desktop npm run build: 通过；保留既有 Vite CJS API deprecated、PromptChainPage 动静态导入和 chunk size warning。
 
 ## 9. 后续优化
 
 第一版写作后更新使用轻量关键词和连续性数据规则，不引入复杂 NLP。后续可在不破坏 pending / locked 保护的前提下接入更细粒度的模型分析。
+
+## 10. Phase 7.5 第一轮验收修复记录
+
+- 已补齐 buildPhase75Context。
+- 已补齐 hasWorldKeywords / hasForeshadowingKeywords / hasTimelineKeywords。
+- 已补齐 containsAny / evidenceAround / keywordEvidence。
+- 已补齐 hashSummary，使用本地轻量稳定 hash，不引入 crypto。
+- 已核对 state_items.status 写入策略：schema 未限制枚举，当前保持 pending / ignored / conflict；payload.reviewStatus 保留原始操作语义。
+- 已核对 target_type 写入策略：state_items.target_type 无枚举限制，保持 character_state / relationship / foreshadowing / world_rule / timeline_event / timeline_link / state_item 等原始类型。
+- buildPhase75Context 不直接查询新表，不新增迁移，只聚合既有 continuity summary。
+- server typecheck / build 已通过。
+- desktop typecheck / build 已通过。

@@ -765,7 +765,7 @@ const ContinuityCockpitPage: React.FC = () => {
         <div>
           <div style={styles.kicker}>Phase 7：小说连续性驾驶舱</div>
           <h1 style={styles.title}>小说连续性驾驶舱</h1>
-          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达、世界观规则、时间线三线模型、写作前检查与写作后更新闭环。</p>
+          <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达、世界观规则、时间线三线模型、写作前检查与写作后更新闭环能力。</p>
         </div>
         <button type="button" style={styles.secondaryButton} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回首页</button>
       </header>
@@ -1015,7 +1015,7 @@ function renderFocus(input: any) {
         <button type="button" style={styles.copyButton} onClick={input.onCopyPrompt}>
           {input.copyStatus === 'copied' ? '已复制' : input.copyStatus === 'failed' ? '复制失败，请手动复制' : '复制提示词'}
         </button>
-        <div style={styles.notice}>可复制文本用于写作前检查。人物状态与关系只使用真实连续性数据，缺失信息显示“待补全”。</div>
+        <div style={styles.notice}>可复制文本用于写作前检查；人物状态与关系只使用真实连续性数据，缺失信息显示“待补全”。</div>
       </Panel>
     </div>
   );

@@ -1,5 +1,4 @@
 ﻿import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { createHash } from 'crypto';
 import { v4 as uuid } from 'uuid';
 import { DatabaseService } from '../../database/database.service';
 
@@ -1484,54 +1483,67 @@ export class ContinuityService {
 
   private buildPhase75Context(projectId: string, focusChapterId?: string) {
     const focusChapter = this.getChapter(projectId, focusChapterId);
-    const outline = this.getFocusOutline(projectId, focusChapter);
+    const outline = focusChapter ? this.getFocusOutline(projectId, focusChapter) : null;
     const characters = this.getCharacters(projectId, focusChapterId);
     const relationships = this.getRelationships(projectId, focusChapterId);
     const foreshadowings = this.getForeshadowings(projectId, focusChapterId);
     const worldRules = this.getWorldRules(projectId, focusChapterId);
     const timeline = this.getTimeline(projectId, focusChapterId);
-    const statePendingCount = (this.database.prepare(`
-      SELECT COUNT(*) as count FROM state_items
-      WHERE project_id = ? AND status IN ('pending', 'needs_review', 'conflict')
-    `).get(projectId) as any)?.count || 0;
-    const pendingCount = Number(statePendingCount || 0)
-      + Number(characters.summary?.pendingStateCount || 0)
+    const chapterText = [
+      focusChapter?.title || '',
+      focusChapter?.content || '',
+      outline?.title || '',
+      outline?.content || '',
+    ].filter(Boolean).join('\n');
+    const pendingCount = Number(characters.summary?.pendingStateCount || 0)
       + Number(relationships.summary?.pendingReviewCount || 0)
       + Number(foreshadowings.summary?.pendingReviewCount || 0)
       + Number(worldRules.summary?.pendingReviewCount || 0)
       + Number(timeline.summary?.pendingReviewCount || 0);
-    const chapterText = `${focusChapter?.title || ''}\n${outline?.content || ''}\n${focusChapter?.content || ''}`;
     return { focusChapter, outline, characters, relationships, foreshadowings, worldRules, timeline, pendingCount, chapterText };
   }
 
   private hasForeshadowingKeywords(text: string) {
-    return /伏笔|线索|秘密|真相|回收|暗示|谜团/.test(text || '');
+    return this.containsAny(text, ['伏笔', '线索', '秘密', '真相', '回收', '暗示', '误导', '揭开', '隐藏', '谜团', '证据', '痕迹', '异常', '不对劲']);
   }
 
   private hasWorldKeywords(text: string) {
-    return /地点|组织|能力|规则|制度|世界观|家族|门派|公司|城|村|宫|法则|禁忌/.test(text || '');
+    return this.containsAny(text, ['世界观', '规则', '制度', '组织', '宗门', '公司', '部门', '法律', '法规', '地点', '城市', '国家', '村', '镇', '学校', '医院', '能力', '异能', '修炼', '功法', '资源', '货币', '阶层', '职业']);
   }
 
   private hasTimelineKeywords(text: string) {
-    return /时间|随后|此前|之后|先后|因为|所以|导致|后来|第二天|当天|清晨|黄昏/.test(text || '');
+    return this.containsAny(text, ['时间', '当天', '第二天', '随后', '此前', '之前', '之后', '后来', '因为', '所以', '导致', '结果', '同时', '先', '再', '终于', '过去', '现在', '未来', '回忆']);
   }
 
-  private evidenceAround(text: string, needle: string) {
-    if (!text || !needle) return '';
-    const index = text.indexOf(needle);
-    if (index < 0) return text.slice(0, 120);
-    return text.slice(Math.max(0, index - 40), Math.min(text.length, index + needle.length + 80));
+  private containsAny(text: string, keywords: string[]): boolean {
+    const source = String(text || '').toLowerCase();
+    return keywords.some(keyword => source.includes(keyword.toLowerCase()));
+  }
+
+  private evidenceAround(text: string, keyword: string, radius = 60): string {
+    const source = String(text || '');
+    const key = String(keyword || '');
+    if (!source || !key) return '';
+    const index = source.indexOf(key);
+    if (index < 0) return source.slice(0, radius * 2);
+    const start = Math.max(0, index - radius);
+    const end = Math.min(source.length, index + key.length + radius);
+    return source.slice(start, end);
   }
 
   private keywordEvidence(text: string, keywords: string[]) {
-    for (const keyword of keywords) {
-      if (text.includes(keyword)) return this.evidenceAround(text, keyword);
-    }
-    return text.slice(0, 120);
+    const source = String(text || '');
+    const hit = keywords.find(keyword => source.includes(keyword));
+    return hit ? this.evidenceAround(source, hit) : source.slice(0, 120);
   }
 
-  private hashSummary(summary: string) {
-    return createHash('sha1').update(String(summary || '').trim().toLowerCase()).digest('hex');
+  private hashSummary(value: string): string {
+    const source = String(value || '');
+    let hash = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      hash = ((hash << 5) - hash + source.charCodeAt(i)) | 0;
+    }
+    return `phase75-${Math.abs(hash)}`;
   }
 
   private allCharacters(projectId: string): any[] {

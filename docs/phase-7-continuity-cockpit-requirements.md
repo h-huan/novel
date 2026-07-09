@@ -261,3 +261,12 @@ Phase 7.5 已开始并补齐第一版写作前检查与写作后更新闭环。
 - 本轮未修改既有迁移。
 - 本轮未修改 `022` 迁移。
 - Phase 7.1-7.4 既有能力保持不变。
+
+Phase 7.5 第一轮验收修复：
+
+- 已补齐 buildPhase75Context、hasWorldKeywords、hasForeshadowingKeywords、hasTimelineKeywords、containsAny、evidenceAround、keywordEvidence、hashSummary。
+- buildPhase75Context 复用 getCharacters / getRelationships / getForeshadowings / getWorldRules / getTimeline 聚合上下文，不新增迁移。
+- hashSummary 改为本地轻量稳定 hash，不引入 crypto。
+- state_items.status 已核对：schema 未限制枚举，保持 pending / ignored / conflict 写入策略。
+- state_items.target_type 已核对：schema 未限制枚举，保持 Phase 7.5 建议原始 targetType。
+- 本轮未修改已有迁移，未修改 `022` 迁移。
