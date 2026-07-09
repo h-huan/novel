@@ -374,7 +374,9 @@ const ContinuityCockpitPage: React.FC = () => {
     pendingConfirmations: pendingItems.length
       + Number(continuityCharacters?.summary?.pendingStateCount || 0)
       + Number(continuityRelationships?.summary?.pendingReviewCount || 0)
-      + Number(continuityForeshadowings?.summary?.pendingReviewCount || 0),
+      + Number(continuityForeshadowings?.summary?.pendingReviewCount || 0)
+      + Number(continuityWorldRules?.summary?.pendingReviewCount || 0)
+      + Number(continuityTimeline?.summary?.pendingReviewCount || 0),
     foreshadowingRisks: Number(continuityForeshadowings?.summary?.recoveryDueCount || 0)
       + Number(continuityForeshadowings?.summary?.overdueCount || 0)
       + Number(continuityForeshadowings?.summary?.highRiskCount || 0)
@@ -419,7 +421,7 @@ const ContinuityCockpitPage: React.FC = () => {
     manualGoal,
     manualForbidden,
     manualNotes,
-  }), [project, focusChapter, focusOutline, relatedCharacters, focusRelationshipItems, relatedForeshadowings, focusForeshadowingTasks, relatedTimelineEvents, manualGoal, manualForbidden, manualNotes]);
+  }), [project, focusChapter, focusOutline, relatedCharacters, focusRelationshipItems, relatedForeshadowings, focusForeshadowingTasks, relatedTimelineEvents, focusWorldTasks, focusWorldRules, focusTimelineTasks, focusTimelineEvents, manualGoal, manualForbidden, manualNotes]);
 
   const visiblePrompt = focusChapter ? manualPrompt || generatedPrompt : '待创建章节后生成。';
 
@@ -760,7 +762,13 @@ const ContinuityCockpitPage: React.FC = () => {
       {activeTab === 'overview' && renderOverview({ stats, focusChapter, recentChapters, stateItems: pendingItems, relatedForeshadowings, relatedTimelineEvents })}
       {activeTab === 'focus' && renderFocus({
         focusChapter, focusOutline, relatedCharacters, relatedRelationships: focusRelationshipItems, relatedForeshadowings,
-        relatedForeshadowingTasks: focusForeshadowingTasks, relatedTimelineEvents, manualGoal, setManualGoal, manualForbidden, setManualForbidden, manualNotes, setManualNotes,
+        relatedForeshadowingTasks: focusForeshadowingTasks,
+        relatedWorldTasks: focusWorldTasks,
+        relatedWorldRules: focusWorldRules,
+        relatedTimelineTasks: focusTimelineTasks,
+        relatedTimelineEvents: focusTimelineEvents,
+        legacyTimelineEvents: relatedTimelineEvents,
+        manualGoal, setManualGoal, manualForbidden, setManualForbidden, manualNotes, setManualNotes,
         manualPrompt, setManualPrompt, visiblePrompt, promptDisabled: !focusChapter, copyStatus, onCopyPrompt: handleCopyPrompt,
       })}
       {activeTab === 'characters' && renderCharactersTab({
@@ -834,9 +842,25 @@ function renderOverview(input: any) {
     ['临近回收', String(input.stats.recoveryDueForeshadowings)],
     ['逾期伏笔', String(input.stats.overdueForeshadowings)],
     ['高风险伏笔', String(input.stats.highRiskForeshadowings)],
+    ['当前章世界观规则', String(input.stats.focusWorldRules)],
+    ['当前章世界观任务', String(input.stats.focusWorldTasks)],
+    ['世界观冲突', String(input.stats.worldRuleConflicts)],
+    ['高风险世界观', String(input.stats.worldRuleHighRisk)],
+    ['当前章时间线事件', String(input.stats.focusTimelineEvents)],
+    ['当前章时间线任务', String(input.stats.focusTimelineTasks)],
+    ['时间冲突', String(input.stats.timeConflicts)],
+    ['因果缺口', String(input.stats.causalityGaps)],
     ['时间线风险', String(input.stats.timelineRisks)],
     ['注意力风险', String(input.stats.attentionRisks)],
   ];
+  const nextActions = [
+    input.stats.worldRuleConflicts ? `存在 ${input.stats.worldRuleConflicts} 个世界观冲突，先解决规则矛盾。` : '',
+    input.stats.timeConflicts ? `存在 ${input.stats.timeConflicts} 个时间冲突，先校正客观故事时间。` : '',
+    input.stats.causalityGaps ? `存在 ${input.stats.causalityGaps} 个因果缺口，先补足事件因果链。` : '',
+    input.stats.worldRuleHighRisk ? `存在 ${input.stats.worldRuleHighRisk} 个高风险世界观规则，写作前先确认不能违背。` : '',
+    input.stats.focusWorldTasks ? `当前章有 ${input.stats.focusWorldTasks} 个世界观任务，写正文前先处理。` : '',
+    input.stats.focusTimelineTasks ? `当前章有 ${input.stats.focusTimelineTasks} 个时间线任务，写正文前先处理。` : '',
+  ].filter(Boolean);
   return (
     <div>
       <div style={styles.notice}>当前风险统计为轻量统计：人物状态、关系、伏笔、世界观、时间线统计均来自连续性 API。</div>
@@ -849,6 +873,7 @@ function renderOverview(input: any) {
           <Line label="待作者确认项" value={input.stats.pendingConfirmations ? `${input.stats.pendingConfirmations} 项待确认` : EMPTY} />
         </Panel>
         <Panel title="下一个创作动作">
+          <Line label="世界观 / 时间线提醒" value={nextActions.length ? nextActions.join('；') : '暂无本章世界观 / 时间线阻塞提醒。'} />
           <Line label="人物状态" value={input.stats.focusCharacters ? `当前章 ${input.stats.focusCharacters} 个相关人物，先核对状态再写正文。` : '暂无本章人物数据。'} />
           <Line label="人物关系" value={input.stats.focusRelationships ? `当前章 ${input.stats.focusRelationships} 条相关关系。` : '暂无本章关系数据。'} />
           <Line label="伏笔提醒" value={input.relatedForeshadowings.length ? input.relatedForeshadowings.slice(0, 4).map((f: any) => f.content || f.title).join(' / ') : EMPTY} />
@@ -872,12 +897,12 @@ function renderFocus(input: any) {
     ? groupWorldTaskNotes(input.relatedWorldTasks)
     : input.relatedWorldRules?.length
       ? input.relatedWorldRules.map((r: any) => r.title).join('；')
-      : '暂无本章世界观规则数据，Phase 7.4 可通过世界观 Tab 手动补全。';
+      : '暂无本章额外世界观处理项。';
   const timelineNotes = input.relatedTimelineTasks?.length
     ? groupTimelineTaskNotes(input.relatedTimelineTasks)
     : input.relatedTimelineEvents?.length
       ? input.relatedTimelineEvents.map((e: any) => e.title || e.id).join('；')
-      : '暂无本章时间线数据，Phase 7.4 可通过时间线 Tab 手动补全。';
+      : '暂无本章额外时间线处理项。';
   const foreshadowingNotes = input.relatedForeshadowingTasks?.length
     ? groupTaskNotes(input.relatedForeshadowingTasks)
     : ch && input.relatedForeshadowings.length
@@ -1412,6 +1437,7 @@ function renderWorldTab(input: any) {
   const summary = data.summary || {};
   const groups = data.groups || {};
   const allRules = groups.allRules || [];
+  const editableWorldRules = allRules.filter((rule: any) => !rule.legacy && !(rule.derived || rule.source === 'radar_derived'));
   const worldFocusTasks = groups.focusTasks || [];
   const worldFocusRules = groups.focusRules || [];
   const worldMustHandleItems = worldFocusTasks.length ? worldFocusTasks : worldFocusRules;
@@ -1495,7 +1521,7 @@ function renderWorldTab(input: any) {
           <label style={styles.label}>新增规则事件</label>
           <select style={styles.selectFull} value={input.worldRuleEventForm.ruleId} onChange={(e) => input.setWorldRuleEventForm({ ...input.worldRuleEventForm, ruleId: e.target.value })}>
             <option value="">选择规则</option>
-            {input.editableWorldRules.map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}
+            {editableWorldRules.map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}
           </select>
           <label style={styles.label}>事件类型</label>
           <select style={styles.selectFull} value={input.worldRuleEventForm.eventType} onChange={(e) => input.setWorldRuleEventForm({ ...input.worldRuleEventForm, eventType: e.target.value })}>
@@ -1509,7 +1535,7 @@ function renderWorldTab(input: any) {
           <label style={styles.label}>新增当前章世界观任务</label>
           <select style={styles.selectFull} value={input.worldRuleTaskForm.ruleId} onChange={(e) => input.setWorldRuleTaskForm({ ...input.worldRuleTaskForm, ruleId: e.target.value })}>
             <option value="">选择规则</option>
-            {input.editableWorldRules.map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}
+            {editableWorldRules.map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}
           </select>
           <label style={styles.label}>任务类型</label>
           <select style={styles.selectFull} value={input.worldRuleTaskForm.taskType} onChange={(e) => input.setWorldRuleTaskForm({ ...input.worldRuleTaskForm, taskType: e.target.value })}>
@@ -1612,6 +1638,7 @@ function renderTimelineTab(input: any) {
   const summary = data.summary || {};
   const groups = data.groups || {};
   const allEvents = groups.allEvents || [];
+  const editableTimelineEvents = allEvents.filter((event: any) => !event.legacy && !(event.derived || event.source === 'radar_derived'));
   const legacyEvents = groups.legacyTimelineEvents || [];
   const timelineFocusTasks = groups.focusTasks || [];
   const timelineFocusEvents = groups.focusEvents || [];
@@ -1650,10 +1677,7 @@ function renderTimelineTab(input: any) {
       </section>
       <section style={styles.detailGrid}>
         <Panel title="结构化详情区 - 三线模型">
-                    const timelineFocusTasks = groups.focusTasks || [];
-          const timelineFocusEvents = groups.focusEvents || [];
-          const timelineMustHandleItems = timelineFocusTasks.length ? timelineFocusTasks : timelineFocusEvents;
-        <Group title="本章必须处理" items={timelineMustHandleItems} render={(item: any) => {
+          <Group title="本章必须处理" items={timelineMustHandleItems} render={(item: any) => {
             if (item.eventId) return <TimelineTaskCard task={item} input={input} />;
             return <TimelineEventCard event={item} input={input} />;
           }} />
@@ -1693,11 +1717,11 @@ function renderTimelineTab(input: any) {
           <label style={styles.label}>新增因果链路</label>
           <select style={styles.selectFull} value={input.timelineLinkForm.sourceEventId} onChange={(e) => input.setTimelineLinkForm({ ...input.timelineLinkForm, sourceEventId: e.target.value })}>
             <option value="">选择源事件</option>
-            {input.allEvents?.filter((ev: any) => !ev.legacy).map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+            {editableTimelineEvents.map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
           </select>
           <select style={styles.selectFull} value={input.timelineLinkForm.targetEventId} onChange={(e) => input.setTimelineLinkForm({ ...input.timelineLinkForm, targetEventId: e.target.value })}>
             <option value="">选择目标事件</option>
-            {input.allEvents?.filter((ev: any) => !ev.legacy).map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+            {editableTimelineEvents.map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
           </select>
           <label style={styles.label}>链路类型</label>
           <select style={styles.selectFull} value={input.timelineLinkForm.linkType} onChange={(e) => input.setTimelineLinkForm({ ...input.timelineLinkForm, linkType: e.target.value })}>
@@ -1710,7 +1734,7 @@ function renderTimelineTab(input: any) {
           <label style={styles.label}>新增当前章时间线任务</label>
           <select style={styles.selectFull} value={input.timelineTaskForm.eventId} onChange={(e) => input.setTimelineTaskForm({ ...input.timelineTaskForm, eventId: e.target.value })}>
             <option value="">选择事件</option>
-            {input.allEvents?.filter((ev: any) => !ev.legacy).map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+            {editableTimelineEvents.map((ev: any) => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
           </select>
           <label style={styles.label}>任务类型</label>
           <select style={styles.selectFull} value={input.timelineTaskForm.taskType} onChange={(e) => input.setTimelineTaskForm({ ...input.timelineTaskForm, taskType: e.target.value })}>

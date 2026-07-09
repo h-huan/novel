@@ -371,8 +371,8 @@ task_type：place_event, check_order, check_causality, reveal_information, avoid
 
 ### 28.3 当前章焦点 Tab 联动修正
 
-- renderFocus 调用已传入 relatedWorldTasks、relatedWorldRules、relatedTimelineTasks、relatedTimelineEvents。
-- 不再显示 Phase 7.4 将接入占位文案。
+- renderFocus 调用已传入 relatedWorldTasks、relatedWorldRules、relatedTimelineTasks、relatedTimelineEvents、legacyTimelineEvents。
+- 已清理 Phase 7.4 旧占位文案，空态表达为本章真实无额外处理项。
 
 ### 28.4 写作前提示词修正
 
@@ -411,3 +411,19 @@ task_type：place_event, check_order, check_causality, reveal_information, avoid
 - server npm run build: 本地执行通过。
 - desktop npm run typecheck: 本地执行通过。
 - desktop npm run build: 本地执行通过；保留既有 Vite CJS API deprecated、PromptChainPage 动静态导入和 chunk size warning。
+
+## 30. Phase 7.4 cockpit closeout 记录
+
+- renderFocus 调用已传入真实世界观 / 时间线数据：relatedWorldTasks、relatedWorldRules、relatedTimelineTasks、relatedTimelineEvents，并保留 legacyTimelineEvents 兼容旧时间线数据。
+- generatedPrompt useMemo dependency array 已补齐 focusWorldTasks、focusWorldRules、focusTimelineTasks、focusTimelineEvents。
+- pendingConfirmations 已计入 continuityWorldRules.summary.pendingReviewCount 和 continuityTimeline.summary.pendingReviewCount。
+- renderOverview 已展示 8 项 Phase 7.4 专项统计：当前章世界观规则、当前章世界观任务、世界观冲突、高风险世界观、当前章时间线事件、当前章时间线任务、时间冲突、因果缺口。
+- 总览“下一个创作动作”已加入世界观 / 时间线提醒，优先显示冲突、时间冲突、因果缺口、高风险规则和当前章任务。
+- renderTimelineTab JSX 中的补丁残留声明已清理，只保留函数顶部的 timelineFocusTasks、timelineFocusEvents、timelineMustHandleItems。
+- 世界观 Tab 可编辑规则下拉由 allRules 内部过滤生成，不再依赖未传入的 input.editableWorldRules。
+- 时间线 Tab 可编辑事件下拉由 allEvents 内部过滤生成，不再依赖未传入的 input.allEvents。
+- Phase 7.5 未开始。
+- 未新增数据库迁移。
+- 未修改 022 迁移。
+- 未开发写作前检查闭环。
+- 未开发写作后更新闭环。
