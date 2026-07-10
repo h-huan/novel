@@ -38,6 +38,7 @@ import { VectorIndexService } from '../rag/vector-index.service';
 import { WorkflowGuardService } from '../modules/workflow-guard/workflow-guard.service';
 import { StateItemService } from '../state/state-item.service';
 import { CharacterService } from '../modules/character/character.service';
+import { WorldSettingService } from '../modules/world-setting/world-setting.service';
 
 type OutlineChapterFunction =
   | 'opening'
@@ -262,6 +263,7 @@ export class ChainController {
     private readonly workflowGuard: WorkflowGuardService,
     private readonly stateItemService: StateItemService,
     private readonly characterService: CharacterService,
+    private readonly worldSettingService: WorldSettingService,
   ) {}
 
 
@@ -339,6 +341,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
         if (autoCtx) prompt += '\n\n【大纲与角色上下文】\n' + autoCtx;
       } catch {}
       prompt += this.buildCharacterWritingContext(dto.projectId);
+      prompt += this.buildWorldWritingContext(dto.projectId);
 
       const response = await this.realLLM.generate({
         prompt,
@@ -419,7 +422,9 @@ ${(content || '').substring(0, 2000)}
       try {
         const stateContext = this.buildWritingStateContext(dto.projectId, dto.chapterNumber);
         const characterContext = this.buildCharacterWritingContext(dto.projectId);
+        const worldContext = this.buildWorldWritingContext(dto.projectId);
         if (characterContext) ragContext += `\n${characterContext}`;
+        if (worldContext) ragContext += `\n${worldContext}`;
         if (stateContext.contextText || stateContext.pendingTotal > 0) {
           ragContext += '\n【写作状态上下文】\n' + (stateContext.contextText || '暂无状态上下文。');
           ragContext += `\n【状态使用规则】${stateContext.stateGuard}`;
@@ -478,10 +483,12 @@ ${(content || '').substring(0, 2000)}
 
         const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, fullContent, 'generated_body');
         const characterConsistency = this.characterService.checkConsistency(dto.projectId, fullContent);
+        const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, fullContent);
         return {
           success: result.status === 'completed',
           content: fullContent,
           characterConsistency,
+          worldConsistency,
           stateItemsCreated: archiveResult.stateItemsCreated,
           stateArchiveWarning: archiveResult.stateArchiveWarning,
           chainResult: {
@@ -512,6 +519,7 @@ ${(content || '').substring(0, 2000)}
 
       const content = response.content;
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
+      const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'generated_body');
 
       // 如果传了 chapterId，自动回写到 chapters 表
@@ -528,6 +536,7 @@ ${(content || '').substring(0, 2000)}
         success: true,
         content,
         characterConsistency,
+        worldConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -557,7 +566,8 @@ ${(content || '').substring(0, 2000)}
       ).get(dto.chapterId, dto.projectId) as any;
       const confirmedContext = this.buildWritingStateContext(dto.projectId, chapter?.chapter_index);
       const characterContext = this.buildCharacterWritingContext(dto.projectId);
-      const stateContext = `\n\n【写作状态上下文】\n${confirmedContext.contextText || '暂无状态上下文。'}\n\n【状态使用规则】\n${confirmedContext.stateGuard}\n${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `待确稿候选: ${item}`).join('\n') : '无待确稿候选'}\n${characterContext}`;
+      const worldContext = this.buildWorldWritingContext(dto.projectId);
+      const stateContext = `\n\n【写作状态上下文】\n${confirmedContext.contextText || '暂无状态上下文。'}\n\n【状态使用规则】\n${confirmedContext.stateGuard}\n${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `待确稿候选: ${item}`).join('\n') : '无待确稿候选'}\n${characterContext}\n${worldContext}`;
 
       let prompt = `继续续写当前章节。${contextStr}${stateContext}\n${dto.prompt ? `创作要求：${dto.prompt}` : '自然续写下去'}`;
 
@@ -570,6 +580,7 @@ ${(content || '').substring(0, 2000)}
       const response = await this.realLLM.generate({ prompt, scenario: dto.scenario || 'writing', temperature: 0.7 });
       const content = response.content;
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
+      const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'continue_write');
 
       // 自动追加到章节内容
@@ -588,6 +599,7 @@ ${(content || '').substring(0, 2000)}
         success: true,
         content,
         characterConsistency,
+        worldConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -799,6 +811,7 @@ ${dto.content.substring(0, 2000)}
 
     try {
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, dto.content);
+      const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, dto.content);
       const prompt = `作为专业小说质检员，对以下章节进行十大维度评分。
 
 章节内容：
@@ -838,6 +851,7 @@ ${dto.content.substring(0, 6000)}
         success: true,
         ...response,
         characterConsistency,
+        worldConsistency,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : '质检失败';
@@ -4048,6 +4062,16 @@ ${contentSizeRule}
       const summaries = this.characterService.findByProjectId(projectId)
         .map(character => this.characterService.getWritingSummary(projectId, character.id).summary);
       return summaries.length ? `【角色创作约束】\n${summaries.join('\n\n')}` : '';
+    } catch {
+      return '';
+    }
+  }
+
+  private buildWorldWritingContext(projectId: string): string {
+    try {
+      const summaries = this.worldSettingService.findByProjectId(projectId)
+        .map(setting => this.worldSettingService.getWritingSummary(projectId, setting.id).summary);
+      return summaries.length ? `【世界观创作约束】\n${summaries.join('\n\n')}` : '';
     } catch {
       return '';
     }
