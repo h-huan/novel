@@ -105,6 +105,33 @@ export class WorldSettingService {
   }
 
   getWritingSummary(projectId: string, id: string) {
+    const profileData = this.getProfile(projectId, id);
+    return { summary: this.buildWritingSummary(profileData.profile), profile: profileData.profile };
+  }
+
+  private buildWritingSummary(profile: Record<string, string>) {
+    const value = (key: string) => profile[key] || '待补全';
+    const fields: Array<[string, string]> = [
+      ['故事前提','story_premise'],['核心主题','core_theme'],['读者期待','reader_promise'],['类型定位','genre_type'],['基调风格','tone_style'],
+      ['时代背景','era_background'],['时间跨度','time_span'],['历法系统','calendar_system'],['历史阶段','historical_stage'],['当前世界状态','current_world_status'],
+      ['地理结构','geography_structure'],['主要地区','major_regions'],['危险区域','dangerous_zones'],['资源分布','resource_distribution'],['交通路线','traffic_routes'],['距离逻辑','distance_logic'],
+      ['社会结构','social_structure'],['阶层系统','class_system'],['家族结构','family_structure'],['职业体系','occupation_system'],['教育体系','education_system'],['阶层流动','social_mobility'],
+      ['政治结构','political_structure'],['统治体系','ruling_system'],['法律系统','law_system'],['官僚体系','bureaucracy'],['军事体系','military_system'],['税收体系','tax_system'],
+      ['经济系统','economic_system'],['货币系统','currency_system'],['交易规则','trade_rules'],['资源规则','resource_rules'],['黑市','black_market'],['稀缺逻辑','scarcity_logic'],
+      ['力量体系','power_system'],['力量来源','power_source'],['力量等级','power_levels'],['力量代价','power_cost'],['力量限制','power_limit'],['成长路径','power_growth'],['力量禁忌','power_taboo'],['失败案例','power_failure_case'],
+      ['技术体系','technology_system'],['技术水平','technology_level'],['特殊技术','special_technology'],['技术限制','technology_limit'],['技术代价','technology_cost'],
+      ['文化日常','culture_daily_life'],['衣食住行','food_clothing_housing'],['节日习俗','festival_customs'],['宗教信仰','religion_belief'],['语言命名','language_naming_rules'],['礼仪规则','etiquette_rules'],
+      ['法律禁忌','law_and_taboo'],['禁止行为','forbidden_behaviors'],['惩罚规则','punishment_rules'],['公共秩序','public_order'],['隐藏规则','hidden_rules'],['潜规则','unspoken_rules'],
+      ['历史事件','history_events'],['主要灾难','major_disasters'],['建国事件','founding_events'],['战争','wars'],['王朝更替','dynasty_changes'],['失落真相','lost_truths'],
+      ['主要势力','major_forces'],['势力关系','force_relations'],['势力冲突','force_conflicts'],['势力资源','force_resources'],['势力秘密','force_secrets'],
+      ['世界钩子','world_hooks'],['主冲突来源','main_conflict_source'],['隐藏真相','hidden_truth'],['最终真相方向','final_truth_direction'],['世界谜团','world_mystery'],
+      ['禁止世界观规则','forbidden_world_rules'],['必须遵守','must_obey_rules'],['允许变化','can_change_rules'],['容易写崩点','easy_to_break_points'],['本章可用','current_chapter_usage'],
+    ];
+    return ['【世界观写作摘要】', ...fields.map(([label, key]) => `${label}：${value(key)}`)].join('\n');
+  }
+
+  /* Legacy summary implementation is retained below for source compatibility. */
+  private legacyWritingSummary(projectId: string, id: string) {
     const data = this.getProfile(projectId, id); const p = data.profile; const value = (key: string) => p[key] || '待补全';
     const labels: Array<[string,string]> = [['故事前提','story_premise'],['核心主题','core_theme'],['读者期待','reader_promise'],['时代背景','era_background'],['当前世界状态','current_world_status'],['地理结构','geography_structure'],['主要地区','major_regions'],['危险区域','dangerous_zones'],['社会结构','social_structure'],['政治法律','political_structure'],['经济资源','economic_system'],['力量体系','power_system'],['力量限制','power_limit'],['力量代价','power_cost'],['技术体系','technology_system'],['文化日常','culture_daily_life'],['法律禁忌','law_and_taboo'],['历史真相','lost_truths'],['势力冲突','force_conflicts'],['世界钩子','world_hooks'],['主冲突来源','main_conflict_source'],['AI 写作约束','must_obey_rules'],['禁止世界规则','forbidden_world_rules'],['容易写崩点','easy_to_break_points']];
     return { summary: ['【世界观写作摘要】', ...labels.map(([label,key]) => `${label}：${value(key)}`)].join('\n'), profile: p };
@@ -112,6 +139,8 @@ export class WorldSettingService {
 
   checkConsistency(projectId: string, content: string) {
     const issues: any[] = []; for (const setting of this.findByProjectId(projectId)) { const p = this.getProfile(projectId, setting.id).profile; const add = (issueType: string, evidence: string, reason: string, suggestion: string, severity: 'low'|'medium'|'high') => issues.push({ worldSettingId: setting.id, worldSettingName: setting.name, issueType, evidence, reason, suggestion, severity });
+      if (p.must_obey_rules && /(?:\u65e0\u89c6\u89c4\u5219|\u6253\u7834\u89c4\u5219|\u4e0d\u53d7\u9650\u5236|\u4e0d\u53d7\u6cd5\u5219\u7ea6\u675f|\u89c4\u5219\u5931\u6548)/.test(content) && !content.includes(p.must_obey_rules)) add('must_obey_rules', p.must_obey_rules, '正文可能违反世界观必须遵守规则', `补充或改写以遵守规则：${p.must_obey_rules}`, 'high');
+      if (p.current_world_status && /(?:\u5929\u4e0b\u592a\u5e73|\u6218\u4e89\u5df2\u7ecf\u7ed3\u675f|\u79e9\u5e8f\u5b8c\u5168\u6062\u590d|\u707e\u96be\u4ece\u672a\u53d1\u751f|\u6240\u6709\u4eba\u90fd\u77e5\u9053\u771f\u76f8)/.test(content) && !content.includes(p.current_world_status)) add('current_world_status', p.current_world_status, '正文可能与当前世界状态冲突', `回扣当前世界状态：${p.current_world_status}`, 'medium');
       if (p.forbidden_world_rules && content.includes(p.forbidden_world_rules)) add('forbidden_world_rules', p.forbidden_world_rules, '正文命中禁止世界规则', '改写以遵守世界禁令', 'high');
       if (p.power_limit && /瞬间|轻易|无代价/.test(content) && !content.includes(p.power_limit)) add('power_limit', p.power_limit, '力量表现未体现限制', '补充力量限制或代价', 'medium');
       if (p.power_cost && /施展|力量|法术/.test(content) && !content.includes(p.power_cost)) add('power_cost', p.power_cost, '力量使用未体现代价', '补充代价', 'medium');

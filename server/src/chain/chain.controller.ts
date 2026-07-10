@@ -351,6 +351,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
 
       const content = response.content;
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
+      const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'long_write');
 
       // G1 三连续检查（角色/场景/时间）
@@ -385,6 +386,7 @@ ${(content || '').substring(0, 2000)}
         content,
         continuityCheck,
         characterConsistency,
+        worldConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
