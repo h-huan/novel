@@ -39,6 +39,7 @@ import { WorkflowGuardService } from '../modules/workflow-guard/workflow-guard.s
 import { StateItemService } from '../state/state-item.service';
 import { CharacterService } from '../modules/character/character.service';
 import { WorldSettingService } from '../modules/world-setting/world-setting.service';
+import { MapPointService } from '../modules/map-point/map-point.service';
 
 type OutlineChapterFunction =
   | 'opening'
@@ -264,6 +265,7 @@ export class ChainController {
     private readonly stateItemService: StateItemService,
     private readonly characterService: CharacterService,
     private readonly worldSettingService: WorldSettingService,
+    private readonly mapPointService: MapPointService,
   ) {}
 
 
@@ -342,6 +344,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
       } catch {}
       prompt += this.buildCharacterWritingContext(dto.projectId);
       prompt += this.buildWorldWritingContext(dto.projectId);
+      prompt += this.buildLocationWritingContext(dto.projectId);
 
       const response = await this.realLLM.generate({
         prompt,
@@ -352,6 +355,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
       const content = response.content;
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
       const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, content);
+      const locationConsistency = this.mapPointService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'long_write');
 
       // G1 三连续检查（角色/场景/时间）
@@ -387,6 +391,7 @@ ${(content || '').substring(0, 2000)}
         continuityCheck,
         characterConsistency,
         worldConsistency,
+        locationConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -425,8 +430,10 @@ ${(content || '').substring(0, 2000)}
         const stateContext = this.buildWritingStateContext(dto.projectId, dto.chapterNumber);
         const characterContext = this.buildCharacterWritingContext(dto.projectId);
         const worldContext = this.buildWorldWritingContext(dto.projectId);
+        const locationContext = this.buildLocationWritingContext(dto.projectId);
         if (characterContext) ragContext += `\n${characterContext}`;
         if (worldContext) ragContext += `\n${worldContext}`;
+        if (locationContext) ragContext += `\n${locationContext}`;
         if (stateContext.contextText || stateContext.pendingTotal > 0) {
           ragContext += '\n【写作状态上下文】\n' + (stateContext.contextText || '暂无状态上下文。');
           ragContext += `\n【状态使用规则】${stateContext.stateGuard}`;
@@ -486,11 +493,13 @@ ${(content || '').substring(0, 2000)}
         const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, fullContent, 'generated_body');
         const characterConsistency = this.characterService.checkConsistency(dto.projectId, fullContent);
         const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, fullContent);
+        const locationConsistency = this.mapPointService.checkConsistency(dto.projectId, fullContent);
         return {
           success: result.status === 'completed',
           content: fullContent,
           characterConsistency,
           worldConsistency,
+          locationConsistency,
           stateItemsCreated: archiveResult.stateItemsCreated,
           stateArchiveWarning: archiveResult.stateArchiveWarning,
           chainResult: {
@@ -522,6 +531,7 @@ ${(content || '').substring(0, 2000)}
       const content = response.content;
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
       const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, content);
+      const locationConsistency = this.mapPointService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'generated_body');
 
       // 如果传了 chapterId，自动回写到 chapters 表
@@ -539,6 +549,7 @@ ${(content || '').substring(0, 2000)}
         content,
         characterConsistency,
         worldConsistency,
+        locationConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -569,9 +580,11 @@ ${(content || '').substring(0, 2000)}
       const confirmedContext = this.buildWritingStateContext(dto.projectId, chapter?.chapter_index);
       const characterContext = this.buildCharacterWritingContext(dto.projectId);
       const worldContext = this.buildWorldWritingContext(dto.projectId);
+      const locationContext = this.buildLocationWritingContext(dto.projectId);
       const stateContext = `\n\n【写作状态上下文】\n${confirmedContext.contextText || '暂无状态上下文。'}\n\n【状态使用规则】\n${confirmedContext.stateGuard}\n${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `待确稿候选: ${item}`).join('\n') : '无待确稿候选'}\n${characterContext}\n${worldContext}`;
 
       let prompt = `继续续写当前章节。${contextStr}${stateContext}\n${dto.prompt ? `创作要求：${dto.prompt}` : '自然续写下去'}`;
+      prompt += locationContext;
 
       // 自动注入大纲/角色/世界观上下文
       try {
@@ -583,6 +596,7 @@ ${(content || '').substring(0, 2000)}
       const content = response.content;
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
       const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, content);
+      const locationConsistency = this.mapPointService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'continue_write');
 
       // 自动追加到章节内容
@@ -602,6 +616,7 @@ ${(content || '').substring(0, 2000)}
         content,
         characterConsistency,
         worldConsistency,
+        locationConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -814,6 +829,7 @@ ${dto.content.substring(0, 2000)}
     try {
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, dto.content);
       const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, dto.content);
+      const locationConsistency = this.mapPointService.checkConsistency(dto.projectId, dto.content);
       const prompt = `作为专业小说质检员，对以下章节进行十大维度评分。
 
 章节内容：
@@ -854,6 +870,7 @@ ${dto.content.substring(0, 6000)}
         ...response,
         characterConsistency,
         worldConsistency,
+        locationConsistency,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : '质检失败';
@@ -4077,6 +4094,14 @@ ${contentSizeRule}
     } catch {
       return '';
     }
+  }
+
+  private buildLocationWritingContext(projectId: string): string {
+    try {
+      const summaries = this.mapPointService.findByProjectId(projectId)
+        .map(point => this.mapPointService.getWritingSummary(projectId, point.id).summary);
+      return summaries.length ? `【地点写作约束】\n${summaries.join('\n\n')}` : '';
+    } catch { return ''; }
   }
 
   private async runPostWriteArchive(projectId?: string, chapterId?: string, content?: string, sourceMode = 'generated_body') {
