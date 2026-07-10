@@ -50,13 +50,21 @@ interface DraftState {
   arcDescription: string;
 }
 
-const PROFILE_SECTIONS: Array<[string, string, string]> = [
-  ['外貌记忆点', 'appearance_memory_points', '用于保持可辨识外观与标志物。'], ['目标动机', 'core_desire', '用于判断角色为什么行动。'],
-  ['背景秘密', 'secret', '用于控制信息揭示与身份反转。'], ['能力与代价', 'ability_limit', '用于限制能力使用，避免乱开挂。'],
-  ['弱点与边界', 'personality_weakness', '用于维持代价、恐惧与道德边界。'], ['性格矛盾', 'contradiction_point', '用于避免角色扁平。'],
-  ['语言风格', 'speech_style', '用于让对话保持人物辨识度。'], ['行为模式', 'danger_reaction', '用于约束关键反应。'],
-  ['剧情用途', 'plot_function', '用于连接冲突、反转与读者期待。'], ['成长弧光', 'current_arc_state', '用于防止提前完成成长。'],
-  ['AI 写作约束', 'forbidden_writing', '用于告诉正文生成不能违背哪些设定。'], ['本章使用', 'current_chapter_usage', '用于提供当前章节可用冲突。'],
+type ProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
+type ProfileSectionConfig = { title: string; description: string; fields: ProfileFieldConfig[] };
+const profileFields = (keys: string[], labels: string[], hints: string[]): ProfileFieldConfig[] => keys.map((key, index) => ({ key, label: labels[index], hint: hints[index], multiline: true }));
+const PROFILE_SECTION_GROUPS: ProfileSectionConfig[] = [
+  { title: '外貌记忆点', description: '用于保持角色视觉辨识度，避免外貌、习惯和标志物漂移。', fields: profileFields(['appearance_memory_points','signature_item','action_habits','clothing_style'], ['外貌记忆点','标志物','动作习惯','穿着风格'], ['读者一眼能记住的外貌点','长期携带或反复出现的物件','习惯性动作','稳定的穿着风格']) },
+  { title: '目标动机', description: '用于判断角色为什么行动，避免无动机行为。', fields: profileFields(['short_term_goal','long_term_goal','core_desire','core_fear','current_problem','failure_cost'], ['短期目标','长期目标','核心欲望','核心恐惧','当前难题','失败代价'], ['当前阶段要解决的事','跨卷持续追求的目标','真正想得到的东西','最怕面对或失去的东西','当前卡住的问题','失败后的具体代价']) },
+  { title: '背景秘密', description: '用于控制身份反转、秘密揭示与长期驱动力。', fields: profileFields(['key_backstory','trauma','obsession','hidden_identity','secret','main_truth_relation'], ['关键往事','创伤','执念','隐藏身份','秘密','主线真相关系'], ['影响当前选择的旧事','避不开的旧伤','反复执着的事','尚未公开的身份','不能过早暴露的信息','与主线真相的关系']) },
+  { title: '能力体系', description: '用于限制能力使用，保证来源、等级、边界与代价一致。', fields: profileFields(['ability_source','ability_level','special_skills','ability_limit','ability_cost','growth_route','cannot_use_reason'], ['能力来源','能力等级','特殊技能','能力限制','能力代价','成长路径','不能使用原因'], ['能力从何而来','当前能力层级','可使用的特殊技能','能力边界','使用能力的代价','后续成长路径','什么情况下不能使用']) },
+  { title: '弱点边界', description: '用于制造冲突、代价与可被击中的位置。', fields: profileFields(['body_weakness','personality_weakness','emotion_weakness','relationship_weakness','moral_boundary','exploitable_point'], ['身体弱点','性格弱点','情感弱点','关系弱点','道德边界','可利用弱点'], ['身体或能力短板','性格缺陷','最容易被击中的情感点','关系软肋','不应轻易跨越的底线','敌人可利用的弱点']) },
+  { title: '性格矛盾', description: '用于维持表层表现、深层性格与价值冲突。', fields: profileFields(['surface_personality','deep_personality','contradiction_point','value_system'], ['表层性格','深层性格','矛盾点','价值系统'], ['别人看到的样子','真实底层性格','自我冲突点','判断对错与取舍的标准']) },
+  { title: '语言风格', description: '用于让不同角色对话不再像同一个 AI。', fields: profileFields(['speech_style','catchphrase','common_words','forbidden_words','tone_to_different_people','emotion_outburst_style'], ['说话风格','口头禅','常用词','禁用词','对不同人的语气','情绪爆发方式'], ['节奏、句式与语气','可重复但不可滥用','习惯表达','不应说出的词','面对不同人的语气差异','失控时的说话方式']) },
+  { title: '行为模式', description: '用于约束角色在关键关系和压力情境中的反应。', fields: profileFields(['danger_reaction','temptation_reaction','betrayal_reaction','weak_person_reaction','strong_person_reaction','principle_break_condition'], ['危险反应','诱惑反应','背叛反应','面对弱者','面对强者','原则破坏条件'], ['遇险的第一反应','面对诱惑时的反应','遭遇背叛时的反应','面对弱者的态度','面对强者的态度','何时会打破原则']) },
+  { title: '剧情用途', description: '用于明确角色如何制造冲突、反转、伏笔和读者期待。', fields: profileFields(['plot_function','conflict_function','reversal_function','foreshadowing_function','reader_empathy_point','reader_expectation'], ['剧情功能','冲突功能','反转功能','伏笔功能','读者共情点','读者期待'], ['结构中的作用','制造或承接的冲突','能制造的反转','承载的伏笔','读者在意的原因','期待其后续发生什么']) },
+  { title: '成长弧光', description: '用于控制成长节奏，避免提前完成成长或突然转变。', fields: profileFields(['initial_arc_state','current_arc_state','volume_arc','midpoint_arc','ending_arc'], ['初始弧光','当前弧光','卷级弧光','中点弧光','结局弧光'], ['初登场状态','当前阶段状态','本卷成长任务','中段转折点','最终变化方向']) },
+  { title: 'AI 写作约束', description: '用于告诉正文生成哪些设定必须遵守、哪些写法禁止出现。', fields: profileFields(['must_obey_rules','can_change_rules','forbidden_writing','easy_to_break_points','current_chapter_usage'], ['必须遵守','可以变化','禁止写法','容易写崩点','本章可用'], ['任何正文都必须遵守的硬规则','允许随剧情变化的部分','禁止出现的写法','AI 容易写崩的点','当前章可用冲突或表达']) },
 ];
 
 const ROLE_META: Record<RoleType, { label: string; hint: string; color: string }> = {
@@ -454,11 +462,9 @@ const CharacterPage: React.FC = () => {
                   <TextInput label="弧光终点" value={draft.arcTo} onChange={value => updateDraft({ arcTo: value })} />
                 </div>
                 <TextArea label="弧光说明" value={draft.arcDescription} onChange={value => updateDraft({ arcDescription: value })} />
-                <div style={styles.editorGrid}>
-                  {PROFILE_SECTIONS.map(([label, key, hint]) => (
-                    <TextArea key={key} label={label} value={profile[key] || ''} onChange={value => setProfile(current => ({ ...current, [key]: value }))} hint={hint} />
-                  ))}
-                </div>
+                {PROFILE_SECTION_GROUPS.map(section => (
+                  <ProfileSection key={section.title} section={section} profile={profile} onChange={(key, value) => setProfile(current => ({ ...current, [key]: value }))} />
+                ))}
                 <div style={styles.row}>
                   <button type="button" onClick={saveCharacter} style={styles.primaryButton}>保存微调</button>
                   <button type="button" onClick={() => { setDraft(createDraft(selected)); setEditing(false); }} style={styles.secondaryButton}>放弃改动</button>
@@ -536,6 +542,18 @@ const CharacterPage: React.FC = () => {
     </div>
   );
 };
+
+const ProfileSection: React.FC<{ section: ProfileSectionConfig; profile: Record<string, string>; onChange: (key: string, value: string) => void }> = ({ section, profile, onChange }) => (
+  <section style={styles.editorPanel}>
+    <h3 style={styles.panelTitle}>{section.title}</h3>
+    <p style={styles.hint}>{section.description}</p>
+    <div style={styles.editorGrid}>
+      {section.fields.map(field => (
+        <TextArea key={field.key} label={field.label} value={profile[field.key] || ''} onChange={value => onChange(field.key, value)} hint={field.hint} />
+      ))}
+    </div>
+  </section>
+);
 
 function roleOptions() {
   return (Object.keys(ROLE_META) as RoleType[]).map(role => <option key={role} value={role}>{ROLE_META[role].label}</option>);
