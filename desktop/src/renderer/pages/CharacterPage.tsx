@@ -297,15 +297,16 @@ const CharacterPage: React.FC = () => {
         arc,
         dialogueStyle: draft.dialogueStyle,
       });
-      const profileRes = await api.put(`/projects/${projectId}/characters/${selected.id}/profile`, {
+      const profilePayload = {
         ...profile,
         short_term_goal: draft.shortTermGoal,
         long_term_goal: draft.longTermGoal,
         core_fear: draft.fear,
         speech_style: draft.dialogueStyle,
         current_arc_state: draft.arcTo,
-      });
-      setProfile(apiPayload<any>(profileRes).profile || profile);
+      };
+      const profileRes = await api.put(`/projects/${projectId}/characters/${selected.id}/profile`, profilePayload);
+      setProfile(apiPayload<any>(profileRes).profile || profilePayload);
       const summaryRes = await api.get(`/projects/${projectId}/characters/${selected.id}/writing-summary`);
       setWritingSummary(apiPayload<any>(summaryRes).summary || '');
       setEditing(false);
@@ -314,7 +315,7 @@ const CharacterPage: React.FC = () => {
     } catch (error: any) {
       setSaveMessage(`保存失败：${error?.message || '未知错误'}`);
     }
-  }, [projectId, selected, draft, fetchCharacters]);
+  }, [projectId, selected, draft, profile, fetchCharacters]);
 
   const enhanceDraft = useCallback(() => {
     if (!selected || !draft) return;
