@@ -91,12 +91,14 @@ export class CharacterController {
   /** 将角色数据索引到 RAG 向量库 */
   private async indexCharacter(projectId: string, char: any): Promise<void> {
     try {
+      const writingSummary = this.service.getWritingSummary(projectId, char.id).summary;
       const tagsText = Array.isArray(char.tags) ? char.tags.join('、') : (char.tags || '');
       const metadata: Record<string, unknown> = {
         projectId,
         name: char.name || '',
         identity: char.identity || '',
         personality: char.personality || '',
+        writingSummary,
         dialogueStyle: char.dialogueStyle || '',
         role: char.role || 'supporting',
         tags: tagsText,
@@ -105,7 +107,7 @@ export class CharacterController {
       await this.vectorIndex.indexChunks(VectorIndexService.COLLECTIONS.CHARACTERS, [{
         chunk: {
           id: char.id,
-          text: `${char.name} ${char.identity} ${char.personality || ''} ${tagsText}`,
+          text: `${char.name} ${char.identity} ${char.personality || ''} ${tagsText}\n${writingSummary}`,
           docType: 'character_profile',
           metadata: { chunkIndex: 0, characters: [char.name || ''] },
         },

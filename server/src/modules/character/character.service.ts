@@ -216,7 +216,16 @@ export class CharacterService {
       ON CONFLICT(character_id) DO UPDATE SET ${PROFILE_FIELDS.map(field => `${field}=excluded.${field}`).join(', ')}, updated_at=excluded.updated_at`)
       .run(before?.id || uuid(), projectId, id, ...values, before?.created_at || now, now);
     const changed = PROFILE_FIELDS.filter(field => String(before?.[field] ?? '') !== String(input[field] ?? before?.[field] ?? ''));
-    if (changed.length) this.analyzeStateImpact(projectId, id, '角色创作资料修改影响分析', { changedFields: changed, before: this.profileRow(before), after: input, affects: ['chapter', 'dialogue', 'conflict', 'outline'] });
+    if (changed.length) {
+      const groups = {
+        motivation: ['short_term_goal', 'long_term_goal', 'core_desire'], ability: ['ability_limit', 'ability_cost', 'cannot_use_reason'],
+        dialogue: ['speech_style', 'catchphrase', 'forbidden_words'], arc: ['current_arc_state', 'volume_arc', 'ending_arc'],
+        constraints: ['forbidden_writing', 'must_obey_rules', 'easy_to_break_points'],
+      };
+      const changedGroups = Object.entries(groups).filter(([, fields]) => fields.some(field => changed.includes(field as any))).map(([group]) => group);
+      const affectedModules = [...new Set(changedGroups.flatMap(group => group === 'motivation' ? ['chapter', 'outline', 'conflict'] : group === 'ability' ? ['chapter', 'conflict', 'writing_quality'] : group === 'dialogue' ? ['chapter', 'dialogue_quality'] : group === 'arc' ? ['chapter', 'character_state', 'outline'] : ['chapter', 'writing_context', 'writing_quality']))];
+      this.analyzeStateImpact(projectId, id, '角色创作资料修改影响分析', { changedFields: changed, changedGroups, riskReason: '核心角色设定已变化，后续正文与质量检查上下文需要复核。', affectedModules, suggestedReviewAction: '在状态中心查看影响报告，并复核关联章节和对话。', before: this.profileRow(before), after: input, affects: affectedModules });
+    }
     return this.getProfile(projectId, id);
   }
 
@@ -225,12 +234,15 @@ export class CharacterService {
     const p = data.profile;
     const lines = [
       '【角色写作摘要】', `姓名：${data.character.name}`, `当前身份：${data.character.identity || '待补全'}`,
-      `当前目标：${p.short_term_goal || p.current_problem || '待补全'}`, `当前状态：${JSON.stringify(data.currentState?.states || {}) || '待补全'}`,
-      `核心欲望：${p.core_desire || '待补全'}`, `底层恐惧：${p.core_fear || '待补全'}`,
-      `能力与限制：${[p.ability_source, p.ability_level, p.ability_limit, p.ability_cost].filter(Boolean).join('；') || '待补全'}`,
-      `弱点与代价：${[p.body_weakness, p.personality_weakness, p.failure_cost].filter(Boolean).join('；') || '待补全'}`,
-      `本章可用冲突：${p.conflict_function || p.current_chapter_usage || '待补全'}`, `本章不能违背：${[p.must_obey_rules, p.forbidden_writing].filter(Boolean).join('；') || '待补全'}`,
-      `说话风格：${p.speech_style || data.character.dialogueStyle || '待补全'}`, `容易写崩的点：${p.easy_to_break_points || '待补全'}`,
+      `当前目标：${p.short_term_goal || '待补全'}`, `长期目标：${p.long_term_goal || '待补全'}`, `核心欲望：${p.core_desire || '待补全'}`, `底层恐惧：${p.core_fear || '待补全'}`, `当前难题：${p.current_problem || '待补全'}`, `失败代价：${p.failure_cost || '待补全'}`,
+      `背景秘密：${[p.key_backstory, p.trauma, p.obsession, p.hidden_identity, p.secret, p.main_truth_relation].filter(Boolean).join('；') || '待补全'}`,
+      `能力来源：${p.ability_source || '待补全'}`, `能力等级：${p.ability_level || '待补全'}`, `特殊技能：${p.special_skills || '待补全'}`, `能力限制：${p.ability_limit || '待补全'}`, `能力代价：${p.ability_cost || '待补全'}`,
+      `身体弱点：${p.body_weakness || '待补全'}`, `性格弱点：${p.personality_weakness || '待补全'}`, `情感弱点：${p.emotion_weakness || '待补全'}`, `道德边界：${p.moral_boundary || '待补全'}`,
+      `表层性格：${p.surface_personality || '待补全'}`, `深层性格：${p.deep_personality || '待补全'}`, `性格矛盾：${p.contradiction_point || '待补全'}`, `价值系统：${p.value_system || '待补全'}`,
+      `说话风格：${p.speech_style || data.character.dialogueStyle || '待补全'}`, `口头禅：${p.catchphrase || '待补全'}`, `常用词：${p.common_words || '待补全'}`, `禁用词：${p.forbidden_words || '待补全'}`, `危险反应：${p.danger_reaction || '待补全'}`, `背叛反应：${p.betrayal_reaction || '待补全'}`,
+      `剧情功能：${p.plot_function || '待补全'}`, `冲突功能：${p.conflict_function || '待补全'}`, `反转功能：${p.reversal_function || '待补全'}`, `伏笔功能：${p.foreshadowing_function || '待补全'}`,
+      `初始弧光：${p.initial_arc_state || '待补全'}`, `当前弧光：${p.current_arc_state || '待补全'}`, `卷级弧光：${p.volume_arc || '待补全'}`, `结局弧光：${p.ending_arc || '待补全'}`,
+      `必须遵守：${p.must_obey_rules || '待补全'}`, `可以变化：${p.can_change_rules || '待补全'}`, `禁止写法：${p.forbidden_writing || '待补全'}`, `容易写崩的点：${p.easy_to_break_points || '待补全'}`, `本章可用：${p.current_chapter_usage || '待补全'}`,
     ];
     return { summary: lines.join('\n'), profile: p };
   }
@@ -241,9 +253,15 @@ export class CharacterService {
       const profile = this.getProfile(projectId, character.id).profile;
       const evidence = content.includes(character.name) ? character.name : '';
       if (!evidence) continue;
+      const add = (issueType: string, evidence: string, reason: string, suggestion: string, severity: 'low' | 'medium' | 'high') => issues.push({ characterId: character.id, characterName: character.name, issueType, evidence, reason, suggestion, severity });
       if (profile.forbidden_writing && content.includes(profile.forbidden_writing)) {
         issues.push({ characterId: character.id, characterName: character.name, issueType: 'forbidden_writing', evidence: profile.forbidden_writing, reason: '正文命中了角色禁止写法', suggestion: '重写该段行为或对白以遵守角色约束', severity: 'high' });
       }
+      if (profile.forbidden_words && content.includes(profile.forbidden_words)) add('forbidden_words', profile.forbidden_words, '对白命中禁用词', '替换为符合角色语气的表达', 'medium');
+      if (profile.easy_to_break_points && content.includes(profile.easy_to_break_points)) add('easy_to_break_points', profile.easy_to_break_points, '正文命中角色易写崩点', '补充动机、过渡或改写行为', 'medium');
+      if ((profile.core_desire || profile.short_term_goal) && evidence && /毫无理由|无缘无故|突然背叛/.test(content)) add('motivation', evidence, '正文出现缺少动机的行动信号', `回扣目标或欲望：${profile.short_term_goal || profile.core_desire}`, 'medium');
+      if (profile.moral_boundary && /杀害无辜|背叛同伴/.test(content) && !content.includes(profile.moral_boundary)) add('moral_boundary', evidence, '正文可能无铺垫突破道德边界', `补充边界被突破的条件：${profile.moral_boundary}`, 'high');
+      if (profile.ending_arc && content.includes(profile.ending_arc)) add('arc_premature', profile.ending_arc, '正文可能提前完成结局弧光', `保留当前弧光：${profile.current_arc_state || '待补全'}`, 'low');
       if (profile.ability_limit && profile.ability_limit.length > 0 && !content.includes(profile.ability_limit) && /轻易|瞬间|毫无代价/.test(content)) {
         issues.push({ characterId: character.id, characterName: character.name, issueType: 'ability_limit', evidence, reason: '正文出现无代价能力表达，但未体现能力限制', suggestion: `补充限制或代价：${profile.ability_limit}`, severity: 'medium' });
       }

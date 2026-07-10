@@ -477,9 +477,11 @@ ${(content || '').substring(0, 2000)}
         }
 
         const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, fullContent, 'generated_body');
+        const characterConsistency = this.characterService.checkConsistency(dto.projectId, fullContent);
         return {
           success: result.status === 'completed',
           content: fullContent,
+          characterConsistency,
           stateItemsCreated: archiveResult.stateItemsCreated,
           stateArchiveWarning: archiveResult.stateArchiveWarning,
           chainResult: {
@@ -509,6 +511,7 @@ ${(content || '').substring(0, 2000)}
       });
 
       const content = response.content;
+      const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'generated_body');
 
       // 如果传了 chapterId，自动回写到 chapters 表
@@ -524,6 +527,7 @@ ${(content || '').substring(0, 2000)}
       return {
         success: true,
         content,
+        characterConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -565,6 +569,7 @@ ${(content || '').substring(0, 2000)}
 
       const response = await this.realLLM.generate({ prompt, scenario: dto.scenario || 'writing', temperature: 0.7 });
       const content = response.content;
+      const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'continue_write');
 
       // 自动追加到章节内容
@@ -582,6 +587,7 @@ ${(content || '').substring(0, 2000)}
       return {
         success: true,
         content,
+        characterConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -792,6 +798,7 @@ ${dto.content.substring(0, 2000)}
     this.logger.log(`quality-check: chapter=${dto.chapterId}`);
 
     try {
+      const characterConsistency = this.characterService.checkConsistency(dto.projectId, dto.content);
       const prompt = `作为专业小说质检员，对以下章节进行十大维度评分。
 
 章节内容：
@@ -830,6 +837,7 @@ ${dto.content.substring(0, 6000)}
       return {
         success: true,
         ...response,
+        characterConsistency,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : '质检失败';
