@@ -36,6 +36,28 @@ export class CharacterController {
     return this.service.findByProjectId(projectId);
   }
 
+  @Get(':id/profile')
+  getProfile(@Param('projectId') projectId: string, @Param('id') id: string) {
+    return this.service.getProfile(projectId, id);
+  }
+
+  @Put(':id/profile')
+  async updateProfile(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    const result = this.service.updateProfile(projectId, id, body);
+    await this.indexCharacter(projectId, result.character);
+    return result;
+  }
+
+  @Get(':id/writing-summary')
+  getWritingSummary(@Param('projectId') projectId: string, @Param('id') id: string) {
+    return this.service.getWritingSummary(projectId, id);
+  }
+
+  @Post('consistency-check')
+  checkConsistency(@Param('projectId') projectId: string, @Body() body: { content?: string }) {
+    return { characterConsistency: this.service.checkConsistency(projectId, body.content || '') };
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);

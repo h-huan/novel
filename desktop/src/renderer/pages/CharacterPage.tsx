@@ -50,6 +50,15 @@ interface DraftState {
   arcDescription: string;
 }
 
+const PROFILE_SECTIONS: Array<[string, string, string]> = [
+  ['外貌记忆点', 'appearance_memory_points', '用于保持可辨识外观与标志物。'], ['目标动机', 'core_desire', '用于判断角色为什么行动。'],
+  ['背景秘密', 'secret', '用于控制信息揭示与身份反转。'], ['能力与代价', 'ability_limit', '用于限制能力使用，避免乱开挂。'],
+  ['弱点与边界', 'personality_weakness', '用于维持代价、恐惧与道德边界。'], ['性格矛盾', 'contradiction_point', '用于避免角色扁平。'],
+  ['语言风格', 'speech_style', '用于让对话保持人物辨识度。'], ['行为模式', 'danger_reaction', '用于约束关键反应。'],
+  ['剧情用途', 'plot_function', '用于连接冲突、反转与读者期待。'], ['成长弧光', 'current_arc_state', '用于防止提前完成成长。'],
+  ['AI 写作约束', 'forbidden_writing', '用于告诉正文生成不能违背哪些设定。'], ['本章使用', 'current_chapter_usage', '用于提供当前章节可用冲突。'],
+];
+
 const ROLE_META: Record<RoleType, { label: string; hint: string; color: string }> = {
   protagonist: { label: '全书贯穿', hint: '跨卷成长，状态、关系和伏笔长期跟踪', color: '#e94560' },
   major: { label: '卷级核心', hint: '服务一卷或一条主线，影响大纲和势力关系', color: '#60a5fa' },
@@ -175,6 +184,8 @@ const CharacterPage: React.FC = () => {
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [stateHistory, setStateHistory] = useState<any[]>([]);
   const [saveMessage, setSaveMessage] = useState('');
+  const [profile, setProfile] = useState<Record<string, string>>({});
+  const [writingSummary, setWritingSummary] = useState('');
 
   useEffect(() => {
     if (projectId) fetchCharacters(projectId, true);
@@ -212,6 +223,17 @@ const CharacterPage: React.FC = () => {
         if (!cancelled) setStateHistory([]);
       });
     return () => { cancelled = true; };
+  }, [projectId, selected?.id]);
+
+  useEffect(() => {
+    if (!projectId || !selected?.id) return;
+    api.get(`/projects/${projectId}/characters/${selected.id}/profile`).then((res: any) => {
+      const data = apiPayload<any>(res);
+      setProfile(data.profile || {});
+    }).catch(() => setProfile({}));
+    api.get(`/projects/${projectId}/characters/${selected.id}/writing-summary`).then((res: any) => {
+      setWritingSummary(apiPayload<any>(res).summary || '');
+    }).catch(() => setWritingSummary(''));
   }, [projectId, selected?.id]);
 
   const filtered = useMemo(() => {
@@ -267,6 +289,17 @@ const CharacterPage: React.FC = () => {
         arc,
         dialogueStyle: draft.dialogueStyle,
       });
+      const profileRes = await api.put(`/projects/${projectId}/characters/${selected.id}/profile`, {
+        ...profile,
+        short_term_goal: draft.shortTermGoal,
+        long_term_goal: draft.longTermGoal,
+        core_fear: draft.fear,
+        speech_style: draft.dialogueStyle,
+        current_arc_state: draft.arcTo,
+      });
+      setProfile(apiPayload<any>(profileRes).profile || profile);
+      const summaryRes = await api.get(`/projects/${projectId}/characters/${selected.id}/writing-summary`);
+      setWritingSummary(apiPayload<any>(summaryRes).summary || '');
       setEditing(false);
       setSaveMessage('已保存角色微调，并更新 RAG 索引。');
       await fetchCharacters(projectId, true);
@@ -421,6 +454,11 @@ const CharacterPage: React.FC = () => {
                   <TextInput label="弧光终点" value={draft.arcTo} onChange={value => updateDraft({ arcTo: value })} />
                 </div>
                 <TextArea label="弧光说明" value={draft.arcDescription} onChange={value => updateDraft({ arcDescription: value })} />
+                <div style={styles.editorGrid}>
+                  {PROFILE_SECTIONS.map(([label, key, hint]) => (
+                    <TextArea key={key} label={label} value={profile[key] || ''} onChange={value => setProfile(current => ({ ...current, [key]: value }))} hint={hint} />
+                  ))}
+                </div>
                 <div style={styles.row}>
                   <button type="button" onClick={saveCharacter} style={styles.primaryButton}>保存微调</button>
                   <button type="button" onClick={() => { setDraft(createDraft(selected)); setEditing(false); }} style={styles.secondaryButton}>放弃改动</button>
@@ -429,6 +467,9 @@ const CharacterPage: React.FC = () => {
             )}
 
             <section style={styles.contentGrid}>
+              <Panel title="角色写作摘要">
+                <div style={styles.mutedBox}>{writingSummary || '保存角色资料后将生成真实写作摘要。'}</div>
+              </Panel>
               <Panel title="基础信息">
                 <InfoRow label="姓名" value={selected.name} />
                 <InfoRow label="身份" value={selected.identity || '未填写'} />

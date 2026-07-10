@@ -8,6 +8,9 @@ import { CharacterStateRepository } from '../../database/repositories/character-
 import type { CharacterRow } from '../../database/repositories/character.repository';
 import type { CreateCharacterDto, AddRelationshipDto } from './dto/character.dto';
 import { StateItemService } from '../../state/state-item.service';
+import { DatabaseService } from '../../database/database.service';
+
+const PROFILE_FIELDS = ['appearance_memory_points','signature_item','action_habits','clothing_style','short_term_goal','long_term_goal','core_desire','core_fear','current_problem','failure_cost','key_backstory','trauma','obsession','hidden_identity','secret','main_truth_relation','ability_source','ability_level','special_skills','ability_limit','ability_cost','growth_route','cannot_use_reason','body_weakness','personality_weakness','emotion_weakness','relationship_weakness','moral_boundary','exploitable_point','surface_personality','deep_personality','contradiction_point','value_system','speech_style','catchphrase','common_words','forbidden_words','tone_to_different_people','emotion_outburst_style','danger_reaction','temptation_reaction','betrayal_reaction','weak_person_reaction','strong_person_reaction','principle_break_condition','plot_function','conflict_function','reversal_function','foreshadowing_function','reader_empathy_point','reader_expectation','initial_arc_state','current_arc_state','volume_arc','midpoint_arc','ending_arc','must_obey_rules','can_change_rules','forbidden_writing','easy_to_break_points','current_chapter_usage'] as const;
 
 export interface CharacterResponse {
   id: string;
@@ -37,6 +40,7 @@ export class CharacterService {
   constructor(
     private readonly repo: CharacterRepository,
     private readonly stateRepo: CharacterStateRepository,
+    private readonly databaseService: DatabaseService,
     @Optional() private readonly stateItemService?: StateItemService,
   ) {}
 
@@ -190,6 +194,64 @@ export class CharacterService {
   search(projectId: string, query: string): CharacterResponse[] {
     return this.repo.search(projectId, query).map((r) => this.toResponse(r));
   }
+
+  getProfile(projectId: string, id: string) {
+    const character = this.findOne(id);
+    if (character.projectId !== projectId) throw new NotFoundException(`Character ${id} not found`);
+    const db = this.databaseService.getDb();
+    const profile = db.prepare('SELECT * FROM character_extended_profiles WHERE project_id = ? AND character_id = ?').get(projectId, id) as any;
+    const stateContext = this.stateItemService?.buildWritingStateContext(projectId);
+    return { character, profile: this.profileRow(profile), currentState: this.getLatestState(id), warnings: stateContext?.pendingSummary || [], relationships: character.relationships };
+  }
+
+  updateProfile(projectId: string, id: string, input: Record<string, unknown>) {
+    const character = this.findOne(id);
+    if (character.projectId !== projectId) throw new NotFoundException(`Character ${id} not found`);
+    const db = this.databaseService.getDb();
+    const now = new Date().toISOString();
+    const before = db.prepare('SELECT * FROM character_extended_profiles WHERE character_id = ?').get(id) as any;
+    const values = PROFILE_FIELDS.map(field => String(input[field] ?? before?.[field] ?? ''));
+    db.prepare(`INSERT INTO character_extended_profiles (id, project_id, character_id, ${PROFILE_FIELDS.join(', ')}, created_at, updated_at)
+      VALUES (?, ?, ?, ${PROFILE_FIELDS.map(() => '?').join(', ')}, ?, ?)
+      ON CONFLICT(character_id) DO UPDATE SET ${PROFILE_FIELDS.map(field => `${field}=excluded.${field}`).join(', ')}, updated_at=excluded.updated_at`)
+      .run(before?.id || uuid(), projectId, id, ...values, before?.created_at || now, now);
+    const changed = PROFILE_FIELDS.filter(field => String(before?.[field] ?? '') !== String(input[field] ?? before?.[field] ?? ''));
+    if (changed.length) this.analyzeStateImpact(projectId, id, '角色创作资料修改影响分析', { changedFields: changed, before: this.profileRow(before), after: input, affects: ['chapter', 'dialogue', 'conflict', 'outline'] });
+    return this.getProfile(projectId, id);
+  }
+
+  getWritingSummary(projectId: string, id: string): { summary: string; profile: any } {
+    const data = this.getProfile(projectId, id);
+    const p = data.profile;
+    const lines = [
+      '【角色写作摘要】', `姓名：${data.character.name}`, `当前身份：${data.character.identity || '待补全'}`,
+      `当前目标：${p.short_term_goal || p.current_problem || '待补全'}`, `当前状态：${JSON.stringify(data.currentState?.states || {}) || '待补全'}`,
+      `核心欲望：${p.core_desire || '待补全'}`, `底层恐惧：${p.core_fear || '待补全'}`,
+      `能力与限制：${[p.ability_source, p.ability_level, p.ability_limit, p.ability_cost].filter(Boolean).join('；') || '待补全'}`,
+      `弱点与代价：${[p.body_weakness, p.personality_weakness, p.failure_cost].filter(Boolean).join('；') || '待补全'}`,
+      `本章可用冲突：${p.conflict_function || p.current_chapter_usage || '待补全'}`, `本章不能违背：${[p.must_obey_rules, p.forbidden_writing].filter(Boolean).join('；') || '待补全'}`,
+      `说话风格：${p.speech_style || data.character.dialogueStyle || '待补全'}`, `容易写崩的点：${p.easy_to_break_points || '待补全'}`,
+    ];
+    return { summary: lines.join('\n'), profile: p };
+  }
+
+  checkConsistency(projectId: string, content: string) {
+    const issues: any[] = [];
+    for (const character of this.findByProjectId(projectId)) {
+      const profile = this.getProfile(projectId, character.id).profile;
+      const evidence = content.includes(character.name) ? character.name : '';
+      if (!evidence) continue;
+      if (profile.forbidden_writing && content.includes(profile.forbidden_writing)) {
+        issues.push({ characterId: character.id, characterName: character.name, issueType: 'forbidden_writing', evidence: profile.forbidden_writing, reason: '正文命中了角色禁止写法', suggestion: '重写该段行为或对白以遵守角色约束', severity: 'high' });
+      }
+      if (profile.ability_limit && profile.ability_limit.length > 0 && !content.includes(profile.ability_limit) && /轻易|瞬间|毫无代价/.test(content)) {
+        issues.push({ characterId: character.id, characterName: character.name, issueType: 'ability_limit', evidence, reason: '正文出现无代价能力表达，但未体现能力限制', suggestion: `补充限制或代价：${profile.ability_limit}`, severity: 'medium' });
+      }
+    }
+    return { passed: issues.length === 0, score: Math.max(0, 100 - issues.length * 25), issues };
+  }
+
+  private profileRow(row: any) { return Object.fromEntries(PROFILE_FIELDS.map(field => [field, row?.[field] || ''])); }
 
   private toResponse(row: CharacterRow): CharacterResponse {
     return {

@@ -37,6 +37,7 @@ import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
 import { WorkflowGuardService } from '../modules/workflow-guard/workflow-guard.service';
 import { StateItemService } from '../state/state-item.service';
+import { CharacterService } from '../modules/character/character.service';
 
 type OutlineChapterFunction =
   | 'opening'
@@ -260,6 +261,7 @@ export class ChainController {
     private readonly vectorIndex: VectorIndexService,
     private readonly workflowGuard: WorkflowGuardService,
     private readonly stateItemService: StateItemService,
+    private readonly characterService: CharacterService,
   ) {}
 
 
@@ -336,6 +338,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
         const autoCtx = this.buildAutoContext(dto.projectId, dto.chapterIndex || 1);
         if (autoCtx) prompt += '\n\n【大纲与角色上下文】\n' + autoCtx;
       } catch {}
+      prompt += this.buildCharacterWritingContext(dto.projectId);
 
       const response = await this.realLLM.generate({
         prompt,
@@ -344,6 +347,7 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
       });
 
       const content = response.content;
+      const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
       const archiveResult = await this.runPostWriteArchive(dto.projectId, dto.chapterId, content, 'long_write');
 
       // G1 三连续检查（角色/场景/时间）
@@ -377,6 +381,7 @@ ${(content || '').substring(0, 2000)}
         success: true,
         content,
         continuityCheck,
+        characterConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
       };
@@ -413,6 +418,8 @@ ${(content || '').substring(0, 2000)}
       let ragContext = '';
       try {
         const stateContext = this.buildWritingStateContext(dto.projectId, dto.chapterNumber);
+        const characterContext = this.buildCharacterWritingContext(dto.projectId);
+        if (characterContext) ragContext += `\n${characterContext}`;
         if (stateContext.contextText || stateContext.pendingTotal > 0) {
           ragContext += '\n【写作状态上下文】\n' + (stateContext.contextText || '暂无状态上下文。');
           ragContext += `\n【状态使用规则】${stateContext.stateGuard}`;
@@ -545,7 +552,8 @@ ${(content || '').substring(0, 2000)}
         'SELECT chapter_index FROM chapters WHERE id = ? AND project_id = ? LIMIT 1'
       ).get(dto.chapterId, dto.projectId) as any;
       const confirmedContext = this.buildWritingStateContext(dto.projectId, chapter?.chapter_index);
-      const stateContext = `\n\n【写作状态上下文】\n${confirmedContext.contextText || '暂无状态上下文。'}\n\n【状态使用规则】\n${confirmedContext.stateGuard}\n${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `待确稿候选: ${item}`).join('\n') : '无待确稿候选'}`;
+      const characterContext = this.buildCharacterWritingContext(dto.projectId);
+      const stateContext = `\n\n【写作状态上下文】\n${confirmedContext.contextText || '暂无状态上下文。'}\n\n【状态使用规则】\n${confirmedContext.stateGuard}\n${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(item => `待确稿候选: ${item}`).join('\n') : '无待确稿候选'}\n${characterContext}`;
 
       let prompt = `继续续写当前章节。${contextStr}${stateContext}\n${dto.prompt ? `创作要求：${dto.prompt}` : '自然续写下去'}`;
 
@@ -4024,6 +4032,16 @@ ${contentSizeRule}
         stale: [],
         stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。',
       };
+    }
+  }
+
+  private buildCharacterWritingContext(projectId: string): string {
+    try {
+      const summaries = this.characterService.findByProjectId(projectId)
+        .map(character => this.characterService.getWritingSummary(projectId, character.id).summary);
+      return summaries.length ? `【角色创作约束】\n${summaries.join('\n\n')}` : '';
+    } catch {
+      return '';
     }
   }
 
