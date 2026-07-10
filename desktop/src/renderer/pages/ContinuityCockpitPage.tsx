@@ -3,6 +3,27 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 
 const payload = <T,>(res: any): T => res?.data ?? res;
+
+function normalizeArray<T = any>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const key of ['items', 'data', 'results', 'list', 'rows']) {
+      if (Array.isArray(obj[key])) return obj[key] as T[];
+    }
+  }
+
+  return [];
+}
+
+function normalizeGroups(value: unknown): Record<string, any[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, normalizeArray(item)]),
+  );
+}
+
 const EMPTY = '待补全';
 const RISK_KEYWORDS = {
   timeline: ['timeline_conflict', 'causality_gap', 'time_order_error', 'event_sequence_risk'],
@@ -264,19 +285,19 @@ const ContinuityCockpitPage: React.FC = () => {
         api.get(`/projects/${projectId}/writing-quality/reports?limit=200`),
       ]);
       const projectData = projectRes.status === 'fulfilled' ? payload<any>(projectRes.value) : null;
-      const chapterData = chaptersRes.status === 'fulfilled' ? payload<Chapter[]>(chaptersRes.value) || [] : [];
-      const timelineData = timelinesRes.status === 'fulfilled' ? payload<any[]>(timelinesRes.value) || [] : [];
+      const chapterData = chaptersRes.status === 'fulfilled' ? normalizeArray<Chapter>(payload(chaptersRes.value)) : [];
+      const timelineData = timelinesRes.status === 'fulfilled' ? normalizeArray<any>(payload(timelinesRes.value)) : [];
       setProject(projectData?.data || projectData || null);
-      setChapters(Array.isArray(chapterData) ? chapterData : []);
-      setOutlines(outlinesRes.status === 'fulfilled' ? payload<any[]>(outlinesRes.value) || [] : []);
-      setLegacyCharacters(charactersRes.status === 'fulfilled' ? payload<any[]>(charactersRes.value) || [] : []);
-      setForeshadowings(foreshadowRes.status === 'fulfilled' ? payload<any[]>(foreshadowRes.value) || [] : []);
+      setChapters(chapterData);
+      setOutlines(outlinesRes.status === 'fulfilled' ? normalizeArray<any>(payload(outlinesRes.value)) : []);
+      setLegacyCharacters(charactersRes.status === 'fulfilled' ? normalizeArray<any>(payload(charactersRes.value)) : []);
+      setForeshadowings(foreshadowRes.status === 'fulfilled' ? normalizeArray<any>(payload(foreshadowRes.value)) : []);
       setTimelines(timelineData);
-      setStateItems(stateRes.status === 'fulfilled' ? payload<any[]>(stateRes.value) || [] : []);
-      setQualityReports(reportsRes.status === 'fulfilled' ? payload<any[]>(reportsRes.value) || [] : []);
+      setStateItems(stateRes.status === 'fulfilled' ? normalizeArray<any>(payload(stateRes.value)) : []);
+      setQualityReports(reportsRes.status === 'fulfilled' ? normalizeArray<any>(payload(reportsRes.value)) : []);
 
       const eventResults = await Promise.allSettled(timelineData.slice(0, 5).map(t => api.get(`/projects/${projectId}/timelines/${t.id}/events`)));
-      setTimelineEvents(eventResults.flatMap(result => result.status === 'fulfilled' ? payload<any[]>(result.value) || [] : []));
+      setTimelineEvents(eventResults.flatMap(result => result.status === 'fulfilled' ? normalizeArray<any>(payload(result.value)) : []));
     } catch (err: any) {
       setError(err.message || '连续性驾驶舱加载失败');
     } finally {
@@ -367,13 +388,13 @@ const ContinuityCockpitPage: React.FC = () => {
   const recentChapters = useMemo(() => sortedChapters.slice(Math.max(0, focusIndex - 4), Math.max(0, focusIndex) + 1), [focusIndex, sortedChapters]);
   const relatedForeshadowings = useMemo(() => findRelatedForeshadowings(foreshadowings, focusChapter, focusIndex + 1), [foreshadowings, focusChapter, focusIndex]);
   const relatedTimelineEvents = useMemo(() => findRelatedTimelineEvents(timelineEvents, focusChapter), [timelineEvents, focusChapter]);
-  const focusCharacterItems = continuityCharacters?.groups?.focusCharacters || [];
-  const focusRelationshipItems = continuityRelationships?.groups?.focusRelationships || [];
-  const focusForeshadowingTasks = continuityForeshadowings?.groups?.focusTasks || [];
-  const focusWorldTasks = continuityWorldRules?.groups?.focusTasks || [];
-  const focusWorldRules = continuityWorldRules?.groups?.focusRules || [];
-  const focusTimelineTasks = continuityTimeline?.groups?.focusTasks || [];
-  const focusTimelineEvents = continuityTimeline?.groups?.focusEvents || [];
+  const focusCharacterItems = normalizeArray<any>(continuityCharacters?.groups?.focusCharacters);
+  const focusRelationshipItems = normalizeArray<any>(continuityRelationships?.groups?.focusRelationships);
+  const focusForeshadowingTasks = normalizeArray<any>(continuityForeshadowings?.groups?.focusTasks);
+  const focusWorldTasks = normalizeArray<any>(continuityWorldRules?.groups?.focusTasks);
+  const focusWorldRules = normalizeArray<any>(continuityWorldRules?.groups?.focusRules);
+  const focusTimelineTasks = normalizeArray<any>(continuityTimeline?.groups?.focusTasks);
+  const focusTimelineEvents = normalizeArray<any>(continuityTimeline?.groups?.focusEvents);
   const relatedCharacters = focusCharacterItems.length ? focusCharacterItems : findRelatedCharacters(legacyCharacters, focusChapter, focusOutline);
   const pendingItems = useMemo(() => stateItems.filter(item => ['pending', 'draft', 'needs_review'].includes(item.status)), [stateItems]);
   const reportSearchTexts = useMemo(() => qualityReports.map(report => searchableFields([report.payload, report.summary, report.title, report.issueSummary, report.issue_summary])), [qualityReports]);
@@ -826,14 +847,14 @@ const ContinuityCockpitPage: React.FC = () => {
         data: continuityCharacters, legacyCharacters, stateForm, setStateForm, saveStateSnapshot, patchStateSnapshot, setNotice,
       })}
       {activeTab === 'relations' && renderRelationsTab({
-        data: continuityRelationships, characters: continuityCharacters?.groups?.allCharacters || [], relationshipForm, setRelationshipForm,
+        data: continuityRelationships, characters: normalizeArray<any>(continuityCharacters?.groups?.allCharacters), relationshipForm, setRelationshipForm,
         relationshipEventForm, setRelationshipEventForm, saveRelationship, saveRelationshipEvent, patchRelationship, setNotice,
       })}
       {activeTab === 'foreshadowing' && renderForeshadowingTab({
         data: continuityForeshadowings,
         chapters: sortedChapters,
-        characters: continuityCharacters?.groups?.allCharacters || [],
-        relationships: continuityRelationships?.groups?.allRelationships || [],
+        characters: normalizeArray<any>(continuityCharacters?.groups?.allCharacters),
+        relationships: normalizeArray<any>(continuityRelationships?.groups?.allRelationships),
         form: foreshadowingForm,
         setForm: setForeshadowingForm,
         eventForm: foreshadowingEventForm,
@@ -850,8 +871,8 @@ const ContinuityCockpitPage: React.FC = () => {
       {activeTab === 'world' && renderWorldTab({
         data: continuityWorldRules,
         chapters: sortedChapters,
-        characters: continuityCharacters?.groups?.allCharacters || [],
-        relationships: continuityRelationships?.groups?.allRelationships || [],
+        characters: normalizeArray<any>(continuityCharacters?.groups?.allCharacters),
+        relationships: normalizeArray<any>(continuityRelationships?.groups?.allRelationships),
         setNotice,
         worldRuleForm, setWorldRuleForm,
         worldRuleEventForm, setWorldRuleEventForm,
@@ -862,8 +883,8 @@ const ContinuityCockpitPage: React.FC = () => {
       {activeTab === 'timeline' && renderTimelineTab({
         data: continuityTimeline,
         chapters: sortedChapters,
-        characters: continuityCharacters?.groups?.allCharacters || [],
-        relationships: continuityRelationships?.groups?.allRelationships || [],
+        characters: normalizeArray<any>(continuityCharacters?.groups?.allCharacters),
+        relationships: normalizeArray<any>(continuityRelationships?.groups?.allRelationships),
         setNotice,
         timelineEventForm, setTimelineEventForm,
         timelineLinkForm, setTimelineLinkForm,
@@ -1024,8 +1045,10 @@ function renderFocus(input: any) {
 function renderCharactersTab(input: any) {
   const data = input.data || {};
   const summary = data.summary || {};
-  const groups = data.groups || {};
-  const allCharacters = groups.allCharacters || input.legacyCharacters || [];
+  const groups = normalizeGroups(data.groups);
+  const allCharacters = normalizeArray<any>(groups.allCharacters).length
+    ? normalizeArray<any>(groups.allCharacters)
+    : normalizeArray<any>(input.legacyCharacters);
   const isEditing = Boolean(input.stateForm.stateId);
   const canLock = isEditing && input.stateForm.reviewStatus === 'confirmed';
   const cards = [
@@ -1109,8 +1132,8 @@ function renderCharactersTab(input: any) {
 function renderRelationsTab(input: any) {
   const data = input.data || {};
   const summary = data.summary || {};
-  const groups = data.groups || {};
-  const allRelationships = groups.allRelationships || [];
+  const groups = normalizeGroups(data.groups);
+  const allRelationships = normalizeArray<any>(groups.allRelationships);
   const isEditing = Boolean(input.relationshipForm.relationshipId);
   const canLock = isEditing && input.relationshipForm.reviewStatus === 'confirmed';
   const cards = [
@@ -1210,8 +1233,8 @@ function renderRelationsTab(input: any) {
 function renderForeshadowingTab(input: any) {
   const data = input.data || {};
   const summary = data.summary || {};
-  const groups = data.groups || {};
-  const allThreads = groups.allThreads || [];
+  const groups = normalizeGroups(data.groups);
+  const allThreads = normalizeArray<any>(groups.allThreads);
   const legacyThreads = allThreads.filter((thread: any) => thread.legacy);
   const editableThreads = allThreads.filter((thread: any) => !thread.legacy);
   const isEditing = Boolean(input.form.threadId);
@@ -1498,8 +1521,8 @@ function RelationshipCard({ relationship, input }: { relationship: any; input: a
 function renderWorldTab(input: any) {
   const data = input.data || {};
   const summary = data.summary || {};
-  const groups = data.groups || {};
-  const allRules = groups.allRules || [];
+  const groups = normalizeGroups(data.groups);
+  const allRules = normalizeArray<any>(groups.allRules);
   const editableWorldRules = allRules.filter((rule: any) => !rule.legacy && !(rule.derived || rule.source === 'radar_derived'));
   const worldFocusTasks = groups.focusTasks || [];
   const worldFocusRules = groups.focusRules || [];
@@ -1699,8 +1722,8 @@ function WorldRuleTaskCard({ task, input }: { task: any; input: any }) {
 function renderTimelineTab(input: any) {
   const data = input.data || {};
   const summary = data.summary || {};
-  const groups = data.groups || {};
-  const allEvents = groups.allEvents || [];
+  const groups = normalizeGroups(data.groups);
+  const allEvents = normalizeArray<any>(groups.allEvents);
   const editableTimelineEvents = allEvents.filter((event: any) => !event.legacy && !(event.derived || event.source === 'radar_derived'));
   const legacyEvents = groups.legacyTimelineEvents || [];
   const timelineFocusTasks = groups.focusTasks || [];
@@ -1904,7 +1927,7 @@ function TimelineTaskCard({ task, input }: { task: any; input: any }) {
 function renderPrecheckTab(input: any) {
   const data = input.data || {};
   const summary = data.summary || {};
-  const groups = data.groups || {};
+  const groups = normalizeGroups(data.groups);
   const conclusion = summary.riskLevel === 'blocked'
     ? '不建议直接写正文：请先处理阻塞项。'
     : summary.riskLevel === 'warning'
@@ -1951,7 +1974,7 @@ function renderPrecheckTab(input: any) {
 function renderPostupdateTab(input: any) {
   const data = input.data || {};
   const summary = data.summary || {};
-  const groups = data.groups || {};
+  const groups = normalizeGroups(data.groups);
   const ch = input.focusChapter || data.focusChapter;
   const cards = [
     ['更新建议', String(summary.suggestionCount ?? 0)],
@@ -1990,10 +2013,11 @@ function renderPostupdateTab(input: any) {
 }
 
 function CheckGroup({ title, items }: { title: string; items: any[] }) {
+  const safeItems = normalizeArray<any>(items);
   return (
     <div style={styles.group}>
       <h3 style={styles.groupTitle}>{title}</h3>
-      {items.length ? items.map(item => (
+      {safeItems.length ? safeItems.map(item => (
         <div key={item.id} style={styles.itemCard}>
           <Line label={item.title || EMPTY} value={item.detail || EMPTY} />
           <Line label="模块 / 级别" value={`${item.module || EMPTY} / ${item.level || EMPTY}`} />
@@ -2005,10 +2029,11 @@ function CheckGroup({ title, items }: { title: string; items: any[] }) {
 }
 
 function SuggestionGroup({ title, items, input }: { title: string; items: any[]; input: any }) {
+  const safeItems = normalizeArray<any>(items);
   return (
     <div style={styles.group}>
       <h3 style={styles.groupTitle}>{title}</h3>
-      {items.length ? items.map(item => (
+      {safeItems.length ? safeItems.map(item => (
         <div key={item.id} style={styles.itemCard}>
           <Line label={item.title || EMPTY} value={item.summary || EMPTY} />
           <Line label="目标 / 动作" value={`${item.targetType || EMPTY} / ${item.actionType || EMPTY}`} />
@@ -2026,10 +2051,11 @@ function SuggestionGroup({ title, items, input }: { title: string; items: any[];
 }
 
 function Group({ title, items, render }: { title: string; items: any[]; render: (item: any) => React.ReactNode }) {
+  const safeItems = normalizeArray<any>(items);
   return (
     <div style={styles.group}>
       <h3 style={styles.groupTitle}>{title}</h3>
-      {items.length ? items.map((item) => <React.Fragment key={item.id}>{render(item)}</React.Fragment>) : <p style={styles.empty}>暂无数据。</p>}
+      {safeItems.length ? safeItems.map((item) => <React.Fragment key={item.id}>{render(item)}</React.Fragment>) : <p style={styles.empty}>暂无数据。</p>}
     </div>
   );
 }
@@ -2129,7 +2155,7 @@ function chapterIndex(ch: Chapter) { return Number(ch.chapterIndex ?? ch.chapter
 function wordCount(ch: Chapter) { return Number(ch.wordCount ?? ch.word_count ?? 0); }
 
 function flattenOutlines(items: any[]): any[] {
-  return items.flatMap(item => [item, ...flattenOutlines(item.children || [])]);
+  return normalizeArray<any>(items).flatMap(item => [item, ...flattenOutlines(normalizeArray<any>(item?.children))]);
 }
 
 function findFocusOutline(chapter: Chapter | null, outlines: any[]) {
@@ -2148,12 +2174,12 @@ function extractGoal(outline: any) {
 function findRelatedCharacters(characters: any[], chapter: Chapter | null, outline: any) {
   if (!chapter) return [];
   const text = `${chapter.title || ''}\n${chapter.content || ''}\n${outline?.content || ''}`;
-  return characters.filter(c => c.name && text.includes(c.name)).slice(0, 8);
+  return normalizeArray<any>(characters).filter(c => c.name && text.includes(c.name)).slice(0, 8);
 }
 
 function findRelatedForeshadowings(items: any[], chapter: Chapter | null, index: number) {
   if (!chapter) return [];
-  return items.filter(item => {
+  return normalizeArray<any>(items).filter(item => {
     const buried = Number(item.buriedChapterIndex ?? item.buried_chapter_index ?? -1);
     const recover = Number(item.plannedRecoveryChapterIndex ?? item.planned_recovery_chapter_index ?? -1);
     return buried === index || recover === index || recover > 0 && recover <= index + 2;
@@ -2162,8 +2188,8 @@ function findRelatedForeshadowings(items: any[], chapter: Chapter | null, index:
 
 function findRelatedTimelineEvents(events: any[], chapter: Chapter | null) {
   if (!chapter) return [];
-  return events.filter(event => {
-    const ids = event.relatedChapterIds || event.related_chapter_ids || [];
+  return normalizeArray<any>(events).filter(event => {
+    const ids = normalizeArray<any>(event.relatedChapterIds || event.related_chapter_ids);
     return Array.isArray(ids) ? ids.includes(chapter.id) : stringifySearchable(ids).includes(chapter.id);
   }).slice(0, 8);
 }
@@ -2249,7 +2275,7 @@ function countKeywordMatches(texts: string[], keywords: string[]): number {
 
 function formatPrecheckResult(data: any) {
   const summary = data?.summary || {};
-  const groups = data?.groups || {};
+  const groups = normalizeGroups(data?.groups);
   const lines = [
     `写作前检查：${data?.focusChapter?.title || '待选择章节'}`,
     `风险等级：${summary.riskLevel || EMPTY}`,
@@ -2266,7 +2292,7 @@ function formatPrecheckResult(data: any) {
 
 function formatPostupdateResult(data: any) {
   const summary = data?.summary || {};
-  const groups = data?.groups || {};
+  const groups = normalizeGroups(data?.groups);
   const lines = [
     `写作后更新：${data?.focusChapter?.title || '待选择章节'}`,
     `建议/冲突/pending/locked冲突：${summary.suggestionCount ?? 0}/${summary.conflictCount ?? 0}/${summary.pendingCount ?? 0}/${summary.lockedConflictCount ?? 0}`,

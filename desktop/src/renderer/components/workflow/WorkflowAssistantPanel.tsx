@@ -10,6 +10,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
+import { clearProjectFlowState } from '../../stores/projectStore';
 
 // ========== 颜色常量 ==========
 
@@ -160,7 +161,7 @@ interface WorkflowAssistantPanelProps {
 
 const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ projectId }) => {
   const navigate = useNavigate();
-  const { data, loading, error, fetchGuard, advanceStage } = useWorkflowGuardStore();
+  const { data, loading, error, fetchGuard, advanceStage, resetStage } = useWorkflowGuardStore();
   const [advanceError, setAdvanceError] = useState('');
 
   const handleRefresh = useCallback(() => {
@@ -188,6 +189,16 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
       setAdvanceError(err?.message || '推进阶段失败');
     }
   }, [advanceStage, data, projectId]);
+
+  const handleReset = useCallback(async () => {
+    setAdvanceError('');
+    try {
+      clearProjectFlowState(projectId);
+      await resetStage(projectId);
+    } catch (err: any) {
+      setAdvanceError(err?.message || '重置流程位置失败');
+    }
+  }, [projectId, resetStage]);
 
   if (loading && !data) {
     return (
@@ -265,6 +276,14 @@ const WorkflowAssistantPanel: React.FC<WorkflowAssistantPanelProps> = ({ project
               进入下一阶段：{nextStageLabel}
             </button>
           )}
+          <button
+            type="button"
+            style={panelStyles.refreshBtn}
+            onClick={handleReset}
+            disabled={loading}
+          >
+            重置流程位置
+          </button>
           {advanceError && <div style={panelStyles.advanceError}>{advanceError}</div>}
         </div>
       )}

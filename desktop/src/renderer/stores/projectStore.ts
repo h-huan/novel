@@ -14,6 +14,27 @@ import {
   IdeaStatus,
 } from '@novel/shared';
 
+const PROJECT_FLOW_STORAGE_PREFIX = 'novel:project-flow:';
+
+interface ProjectFlowViewState {
+  lastRoute: string;
+}
+
+export function projectFlowStorageKey(projectId: string): string {
+  return `${PROJECT_FLOW_STORAGE_PREFIX}${projectId}`;
+}
+
+export function rememberProjectRoute(projectId: string, route: string): void {
+  if (!projectId || !route.startsWith(`/project/${projectId}/`)) return;
+  localStorage.setItem(projectFlowStorageKey(projectId), JSON.stringify({ lastRoute: route } satisfies ProjectFlowViewState));
+}
+
+export function clearProjectFlowState(projectId: string): void {
+  if (projectId) localStorage.removeItem(projectFlowStorageKey(projectId));
+  // Legacy global keys were never project-scoped and can revive an invalid page.
+  ['lastRoute', 'activeStep', 'activeTab'].forEach((key) => localStorage.removeItem(key));
+}
+
 interface ProjectCreateData {
   title: string;
   type?: Project['type'];

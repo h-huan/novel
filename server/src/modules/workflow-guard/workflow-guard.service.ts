@@ -52,6 +52,16 @@ export class WorkflowGuardService {
     const currentStage = this.inferCurrentStage(project, assets);
     const projectType = project.type;
 
+    // Older projects may have kept the initial inspiration stage after assets
+    // were created. Persist the asset-derived stage so reopening the project
+    // does not keep returning it to discovery.
+    if (project.current_workflow_stage !== currentStage) {
+      this.projectRepo.update(projectId, {
+        current_workflow_stage: currentStage,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
     let stageResult: any;
     if (projectType === 'short_story') {
       stageResult = buildShortStoryGuard(assets, currentStage);
@@ -352,6 +362,15 @@ export class WorkflowGuardService {
     };
   }
 
+  resetStage(projectId: string): AdvanceStageResponse {
+    const project = this.projectRepo.findById(projectId);
+    if (!project) throw new NotFoundException(`项目不存在: ${projectId}`);
+
+    const assets = this.collectProjectAssets(project);
+    const targetStage = this.inferStageFromAssets(project.type, assets);
+    return this.advanceStage(projectId, targetStage, true);
+  }
+
   /**
    * 收集项目资产
    */
@@ -450,6 +469,14 @@ export class WorkflowGuardService {
     const projectType = project.type;
     const currentStage = project.current_workflow_stage;
 
+    const inferredStage = this.inferStageFromAssets(projectType, assets);
+
+    // The initial inspiration marker is valid only while no project asset has
+    // been created. It is a stale persisted value once a project has content.
+    if (currentStage === 'idea_or_inspiration' && inferredStage !== currentStage) {
+      return inferredStage;
+    }
+
     // 如果已有明确的 current_workflow_stage，直接使用
     if (currentStage && currentStage !== 'idea' && currentStage !== '') {
       if (projectType === 'short_story' && ['topic', 'outline', 'writing'].includes(currentStage)) {
@@ -472,12 +499,21 @@ export class WorkflowGuardService {
       return 'topic';
     }
 
-    // 长篇推断
+    return inferredStage;
+  }
+
+  private inferStageFromAssets(projectType: string, assets: ProjectAssets): string {
+    if (projectType === 'short_story') {
+      if (assets.hasBody) return 'writing';
+      if (assets.hasOutline) return 'outline';
+      return 'topic';
+    }
+
     if (assets.hasBody) return 'writing';
     if (assets.hasChapterPlan) return 'chapter';
     if (assets.hasVolumeOutline) return 'volume';
     if (assets.hasBookOutline) return 'outline';
-    if (assets.hasMainCharacter && assets.hasWorldSetting) return 'character';
+    if (assets.hasMainCharacter) return 'character';
     if (assets.hasWorldSetting) return 'world_setting';
     return 'idea_or_inspiration';
   }

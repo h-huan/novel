@@ -5,11 +5,19 @@
  * 在主窗口中调用时：直接通过路由导航
  */
 
+import { clearProjectFlowState, rememberProjectRoute } from '../stores/projectStore';
+
 export async function openProject(
   projectId: string,
   projectTitle: string,
   navigate?: (path: string) => void,
 ): Promise<void> {
+  const dashboardRoute = `/project/${projectId}/dashboard`;
+  // Opening a project always starts from its real project overview. This avoids
+  // restoring a stale global discovery route from a different project.
+  clearProjectFlowState(projectId);
+  rememberProjectRoute(projectId, dashboardRoute);
+
   // 如果 electronAPI 存在且有 open-project 通道，说明在引导窗口中
   if (window.electronAPI?.invoke) {
     try {
@@ -26,5 +34,5 @@ export async function openProject(
   }
 
   // 浏览器环境或主窗口：直接路由导航（HashRouter 支持 hash 路径）
-  navigate?.(`/project/${projectId}/dashboard`);
+  navigate?.(dashboardRoute);
 }

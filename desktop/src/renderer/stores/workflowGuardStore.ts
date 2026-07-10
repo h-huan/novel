@@ -77,6 +77,7 @@ interface WorkflowGuardState {
     recommendedNextAction?: string;
   }>;
   advanceStage: (projectId: string, targetStage: string) => Promise<void>;
+  resetStage: (projectId: string) => Promise<void>;
   clear: () => void;
 }
 
@@ -137,6 +138,19 @@ export const useWorkflowGuardStore = create<WorkflowGuardState>((set, get) => ({
       await get().fetchGuard(projectId);
     } catch (err: any) {
       const msg = err.message || '推进阶段失败';
+      set({ loading: false, error: msg });
+      throw err;
+    }
+  },
+
+  resetStage: async (projectId: string) => {
+    set({ loading: true, error: null });
+    try {
+      await api.post(`/projects/${projectId}/workflow-guard/reset`);
+      set({ data: null, loading: false, lastFetched: 0 });
+      await get().fetchGuard(projectId);
+    } catch (err: any) {
+      const msg = err.message || '重置流程位置失败';
       set({ loading: false, error: msg });
       throw err;
     }

@@ -43,4 +43,13 @@ export class WorkflowGuardController {
   ) {
     return this.service.advanceStage(projectId, body.targetStage, body.force);
   }
+
+  /**
+   * Rebuild the persisted stage from real project assets.
+   * POST /api/v1/projects/:projectId/workflow-guard/reset
+   */
+  @Post('reset')
+  resetStage(@Param('projectId') projectId: string) {
+    return this.service.resetStage(projectId);
+  }
 }
