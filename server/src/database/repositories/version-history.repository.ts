@@ -56,4 +56,15 @@ export class VersionHistoryRepository extends BaseRepository<VersionHistoryRow> 
     `).get(entityType, entityId) as unknown as { max_version: number };
     return result.max_version;
   }
+
+  /** Get the latest entity snapshot for content-level deduplication. */
+  getLatest(entityType: string, entityId: string): VersionHistoryRow | undefined {
+    const stmt = this.db.prepare(`
+      SELECT * FROM version_history
+      WHERE entity_type = ? AND entity_id = ?
+      ORDER BY version DESC
+      LIMIT 1
+    `);
+    return stmt.get(entityType, entityId) as unknown as VersionHistoryRow | undefined;
+  }
 }
