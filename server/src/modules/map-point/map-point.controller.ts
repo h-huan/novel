@@ -70,5 +70,5 @@ export class MapPointController {
     return this.service.remove(id);
   }
 
-  private async indexLocation(projectId: string, id: string) { try { const summary = this.service.getWritingSummary(projectId, id).summary; await this.vectorIndex.indexChunks(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [{ chunk: { id: `map-point:${id}`, text: summary, docType: 'world_setting', metadata: { chunkIndex: 0 } }, vector: [0] }]); } catch {} }
+  private async indexLocation(projectId: string, id: string) { try { const summary = this.service.getWritingSummary(projectId, id).summary; await this.vectorIndex.indexChunks(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [{ chunk: { id: `map-point:${id}`, text: summary, docType: 'location_profile' as any, metadata: { chunkIndex: 0 } }, vector: [0] }]); } catch {} }
 }

@@ -7,7 +7,7 @@ import MapGraphView from '../components/world/MapGraphView';
 import MapDetailCard from '../components/world/MapDetailCard';
 import OrgTreeView from '../components/world/OrgTreeView';
 import OrgDetailCard from '../components/world/OrgDetailCard';
-import { LocationKnowledgePanel } from '../components/world/LocationKnowledgePanel';
+import { LocationKnowledgePanelV2 as LocationKnowledgePanel } from '../components/world/LocationKnowledgePanelV2';
 
 type WorkbenchTab = 'map' | 'organization';
 
