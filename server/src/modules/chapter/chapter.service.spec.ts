@@ -123,6 +123,7 @@ describe('ChapterService', () => {
       'project-1', row.id, '旧正文', '历史正文',
     );
     expect(result.stateSync?.stateCandidates).toBeDefined();
+    expect(result.derivedSync).toBeDefined();
     expect(derivedDataSync.syncAfterContentChange).toHaveBeenCalledWith(expect.objectContaining({
       reason: 'version_restore', beforeContent: '旧正文', afterContent: '历史正文',
     }));
@@ -140,6 +141,22 @@ describe('ChapterService', () => {
     (stateItemService.createFromManualChapterEdit as any).mockImplementation(() => { throw new Error('state offline'); });
     const result = await service.restoreVersion(row.id, 1);
     expect(result.stateSync?.warning).toContain('state offline');
+  });
+
+  it('returns derivedSync separately after a normal content update', async () => {
+    const result = await service.update(row.id, { content: '新的正文' });
+    expect(result.derivedSync).toEqual(expect.objectContaining({ success: true }));
+  });
+
+  it('resyncs current derived data without changing content or creating a version', async () => {
+    const result = await service.resyncDerivedData('project-1', row.id);
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(versionRepo.insert).not.toHaveBeenCalled();
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(derivedDataSync.syncAfterContentChange).toHaveBeenCalledWith(expect.objectContaining({
+      beforeContent: row.content,
+      afterContent: row.content,
+    }));
   });
 
   it('returns without another snapshot when restored content equals current content', async () => {

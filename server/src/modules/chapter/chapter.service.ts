@@ -30,6 +30,7 @@ export interface ChapterResponse {
   updatedAt: string;
   lockedAt?: string;
   stateSync?: any;
+  derivedSync?: any;
 }
 
 @Injectable()
@@ -93,7 +94,9 @@ export class ChapterService {
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
     if (contentChanged) {
-      response.stateSync = await this.syncAfterContentChange(existing, dto.content || '', 'manual_save');
+      const sync = await this.syncAfterContentChange(existing, dto.content || '', 'manual_save');
+      response.stateSync = sync.stateSync;
+      response.derivedSync = sync.derivedSync;
     }
     return response;
   }
@@ -155,8 +158,25 @@ export class ChapterService {
       updated_at: new Date().toISOString(),
     });
     const response = this.toResponse(this.repo.findById(id)!);
-    response.stateSync = await this.syncAfterContentChange(existing, restoredContent, 'version_restore');
+    const sync = await this.syncAfterContentChange(existing, restoredContent, 'version_restore');
+    response.stateSync = sync.stateSync;
+    response.derivedSync = sync.derivedSync;
     return response;
+  }
+
+  async resyncDerivedData(projectId: string, id: string): Promise<any> {
+    const chapter = this.repo.findById(id);
+    if (!chapter || chapter.project_id !== projectId) throw new NotFoundException(`Chapter ${id} not found`);
+    if (!this.derivedDataSync) {
+      return { success: false, warning: 'Derived data sync service is unavailable' };
+    }
+    return this.derivedDataSync.syncAfterContentChange({
+      projectId,
+      chapterId: id,
+      beforeContent: chapter.content || '',
+      afterContent: chapter.content || '',
+      reason: 'manual_save',
+    });
   }
 
   getVolumes(projectId: string): { volumeIndex: number; chapters: ChapterListItem[] }[] {
@@ -190,12 +210,13 @@ export class ChapterService {
     existing: ChapterRow,
     afterContent: string,
     reason: 'manual_save' | 'version_restore',
-  ): Promise<Record<string, unknown>> {
-    const result: Record<string, unknown> = {};
+  ): Promise<{ stateSync: Record<string, unknown>; derivedSync: Record<string, unknown> }> {
+    const stateSync: Record<string, unknown> = {};
+    let derivedSync: any = { success: false };
     const warnings: string[] = [];
     if (this.stateItemService) {
       try {
-        result.stateCandidates = this.stateItemService.createFromManualChapterEdit(
+        stateSync.stateCandidates = this.stateItemService.createFromManualChapterEdit(
           existing.project_id, existing.id, existing.content || '', afterContent,
         );
       } catch (error) {
@@ -206,7 +227,7 @@ export class ChapterService {
     }
     if (this.derivedDataSync) {
       try {
-        result.derivedData = await this.derivedDataSync.syncAfterContentChange({
+        derivedSync = await this.derivedDataSync.syncAfterContentChange({
           projectId: existing.project_id, chapterId: existing.id,
           beforeContent: existing.content || '', afterContent, reason,
         });
@@ -216,8 +237,11 @@ export class ChapterService {
     } else {
       warnings.push('Derived data sync service is unavailable');
     }
-    if (warnings.length > 0) result.warning = warnings.join('; ');
-    return result;
+    if (warnings.length > 0) {
+      stateSync.warning = warnings.join('; ');
+      derivedSync = { ...derivedSync, warning: warnings.join('; '), success: false };
+    }
+    return { stateSync, derivedSync };
   }
 
   private errorMessage(error: unknown): string {

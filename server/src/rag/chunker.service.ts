@@ -121,7 +121,7 @@ export class ChunkerService {
     }
 
     // 最后一块
-    if (currentText && currentTokens >= strategy.minChunkSize) {
+    if (currentText && (currentTokens >= strategy.minChunkSize || chunks.length === 0)) {
       chunks.push(this.createChunk(currentText, docType, chunkIndex, parentId));
     }
 

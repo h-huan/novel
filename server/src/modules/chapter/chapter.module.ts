@@ -9,9 +9,10 @@ import { VersionHistoryRepository } from '../../database/repositories/version-hi
 import { StateModule } from '../../state/state.module';
 import { ConflictEngineModule } from '../conflict-engine/conflict.module';
 import { ChapterDerivedDataSyncService } from './chapter-derived-data-sync.service';
+import { RagModule } from '../../rag/rag.module';
 
 @Module({
-  imports: [StateModule, ConflictEngineModule],
+  imports: [StateModule, ConflictEngineModule, RagModule],
   controllers: [ChapterController],
   providers: [ChapterService, ChapterDerivedDataSyncService, ChapterRepository, VersionHistoryRepository],
   exports: [ChapterService, ChapterDerivedDataSyncService],

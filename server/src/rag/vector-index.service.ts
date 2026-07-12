@@ -19,6 +19,11 @@ export interface VectorStore {
   }>>;
   delete(collection: string, ids: string[]): Promise<void>;
   count(collection: string): Promise<number>;
+  upsertStrict(collection: string, chunks: VectorUpsertPayload[]): Promise<void>;
+  deleteStrict(collection: string, ids: string[]): Promise<void>;
+  findByMetadata(collection: string, filters: Record<string, unknown>): Promise<Array<{
+    id: string; vector: number[]; metadata: Record<string, unknown>;
+  }>>;
   isAvailable(): boolean;
 }
 
@@ -60,6 +65,18 @@ export class VectorIndexService implements OnModuleInit {
   }
   async count(collection: string): Promise<number> { return this.store.count(collection); }
 
+  async upsertChunksStrict(collection: string, chunks: VectorUpsertPayload[]): Promise<void> {
+    await this.store.upsertStrict(collection, chunks);
+  }
+
+  async deleteChunksStrict(collection: string, ids: string[]): Promise<void> {
+    await this.store.deleteStrict(collection, ids);
+  }
+
+  async getChunksByMetadata(collection: string, filters: Record<string, unknown>) {
+    return this.store.findByMetadata(collection, filters);
+  }
+
   async indexChunks(collection: string, chunks: Array<{ chunk: Chunk; vector: number[] }>) {
     await this.store.upsert(collection, chunks.map(({ chunk, vector }) => ({
       id: chunk.id, vector,
@@ -90,13 +107,23 @@ class SqliteVectorStore implements VectorStore {
 
   async upsert(collection: string, chunks: VectorUpsertPayload[]) {
     if (!this.available) return;
+    try { await this.upsertStrict(collection, chunks); } catch { /* legacy best-effort API */ }
+  }
+
+  async upsertStrict(collection: string, chunks: VectorUpsertPayload[]): Promise<void> {
+    this.assertAvailable();
+    this.db.exec('BEGIN IMMEDIATE');
     try {
-      for (const c of chunks) {
-        this.db.prepare('INSERT OR REPLACE INTO vectors VALUES (?,?,?,?)')
-          .run(collection, c.id, JSON.stringify(c.vector), JSON.stringify(c.metadata));
+      const stmt = this.db.prepare('INSERT OR REPLACE INTO vectors VALUES (?,?,?,?)');
+      for (const chunk of chunks) {
+        stmt.run(collection, chunk.id, JSON.stringify(chunk.vector), JSON.stringify(chunk.metadata));
       }
+      this.db.exec('COMMIT');
       this.maybeCheckpoint();
-    } catch { /* ignore */ }
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   private maybeCheckpoint() {
@@ -129,7 +156,34 @@ class SqliteVectorStore implements VectorStore {
 
   async delete(collection: string, ids: string[]) {
     if (!this.available) return;
-    try { for (const id of ids) this.db.prepare('DELETE FROM vectors WHERE collection=? AND id=?').run(collection, id); } catch { /* ignore */ }
+    try { await this.deleteStrict(collection, ids); } catch { /* legacy best-effort API */ }
+  }
+
+  async deleteStrict(collection: string, ids: string[]): Promise<void> {
+    this.assertAvailable();
+    if (ids.length === 0) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const stmt = this.db.prepare('DELETE FROM vectors WHERE collection=? AND id=?');
+      for (const id of ids) stmt.run(collection, id);
+      this.db.exec('COMMIT');
+      this.maybeCheckpoint();
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  async findByMetadata(collection: string, filters: Record<string, unknown>) {
+    this.assertAvailable();
+    const rows = this.db.prepare(
+      'SELECT id, vector_json, metadata_json FROM vectors WHERE collection = ?'
+    ).all(collection) as Array<{ id: string; vector_json: string; metadata_json: string }>;
+    return rows.map((row) => ({
+      id: row.id,
+      vector: JSON.parse(row.vector_json) as number[],
+      metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
+    })).filter((row) => Object.entries(filters).every(([key, value]) => row.metadata[key] === value));
   }
 
   async count(collection: string): Promise<number> {
@@ -138,6 +192,10 @@ class SqliteVectorStore implements VectorStore {
   }
 
   isAvailable(): boolean { return this.available; }
+
+  private assertAvailable(): void {
+    if (!this.available) throw new Error('Vector store is unavailable');
+  }
 }
 
 function cosineSim(a: number[], b: number[]): number {

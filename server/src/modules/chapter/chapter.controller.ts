@@ -65,4 +65,9 @@ export class ChapterController {
   restoreVersion(@Param('id') id: string, @Param('version') version: number) {
     return this.service.restoreVersion(id, version);
   }
+
+  @Post(':id/resync-derived-data')
+  resyncDerivedData(@Param('projectId') projectId: string, @Param('id') id: string) {
+    return this.service.resyncDerivedData(projectId, id);
+  }
 }
