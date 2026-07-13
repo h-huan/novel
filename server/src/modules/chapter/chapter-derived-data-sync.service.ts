@@ -457,8 +457,12 @@ export class ChapterDerivedDataSyncService {
   }
 
   private summaryBatches(inputs: string[]): string[][] {
-    const batches: string[][] = []; let current: string[] = []; let length = 0;
-    for (const input of inputs) { const value = input.slice(0, 12000); if (current.length >= 20 || (current.length && length + value.length > 48000)) { batches.push(current); current = []; length = 0; } current.push(value); length += value.length; }
+    const bodyBudget = 44000; const batches: string[][] = []; let current: string[] = []; let length = 0;
+    const pieces = inputs.flatMap((input) => {
+      if (input.length <= bodyBudget) return [input];
+      const result: string[] = []; for (let offset = 0; offset < input.length; offset += bodyBudget) result.push(input.slice(offset, offset + bodyBudget)); return result;
+    });
+    for (const value of pieces) { if (current.length >= 20 || (current.length && length + value.length > bodyBudget)) { batches.push(current); current = []; length = 0; } current.push(value); length += value.length; }
     if (current.length) batches.push(current); return batches;
   }
 
@@ -474,6 +478,7 @@ export class ChapterDerivedDataSyncService {
         if (!response.content.trim()) throw new Error('Aggregate summary model returned empty content');
         next.push(response.content.trim());
       }
+      if (!firstPass && next.length >= level.length && level.length > 1) throw new Error('Aggregate reduction did not reduce input count');
       level = next;
     }
     return level[0];

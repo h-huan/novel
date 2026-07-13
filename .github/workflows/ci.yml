@@ -16,5 +16,5 @@ jobs:
           cache-dependency-path: |
             server/package-lock.json
             desktop/package-lock.json
-      - run: cd server && npm ci && npm run typecheck && npm run build && npm test
-      - run: cd desktop && npm ci && npm run build
+      - run: cd server && npm ci && npm run typecheck && npm run build && npm test && npm run test:acceptance
+      - run: cd desktop && npm ci && npm run typecheck && npm test && npm run build
