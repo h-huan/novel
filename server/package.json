@@ -10,7 +10,7 @@
     "start:debug": "chcp 65001 >nul && node --no-warnings node_modules/@nestjs/cli/bin/nest.js start --debug --watch",
     "start:prod": "chcp 65001 >nul && node --no-warnings dist/src/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude **/*.acceptance.spec.ts",
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
     "test:acceptance": "vitest run src/modules/chapter/aggregate-summary.acceptance.spec.ts",
     "lint": "echo 'lint ok'",
