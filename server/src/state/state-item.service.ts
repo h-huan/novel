@@ -438,12 +438,6 @@ export class StateItemService {
         );
       }
 
-      for (const row of related.filter(row => row.status === 'confirmed')) {
-        db.prepare(`
-          UPDATE state_items SET status = 'stale', authority = 'warning', updated_at = datetime('now')
-          WHERE project_id = ? AND id = ?
-        `).run(projectId, row.id);
-      }
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -479,18 +473,140 @@ export class StateItemService {
 
   applyImpactItem(projectId: string, itemId: string) {
     const db = this.databaseService.getDb();
-    const item = db.prepare('SELECT * FROM state_impact_items WHERE project_id = ? AND id = ?')
-      .get(projectId, itemId) as any;
-    if (!item) throw new NotFoundException('Impact item not found');
-    if (item.impact_type === 'blocked_by_locked_chapter') {
-      throw new BadRequestException('相关章节已锁定, 不能自动应用该影响项');
+    db.exec('BEGIN');
+    try {
+      const item = db.prepare('SELECT * FROM state_impact_items WHERE project_id = ? AND id = ?')
+        .get(projectId, itemId) as any;
+      if (!item) throw new NotFoundException('Impact item not found');
+
+      const payload = this.parseJson<Record<string, any>>(item.payload, {});
+      if (item.status === 'applied') {
+        const actionResult = payload.actionResult;
+        if (!actionResult?.verified) throw new BadRequestException('Applied impact item has no verified action result');
+        const reportStatus = this.updateImpactReportStatus(db, projectId, item.report_id);
+        db.exec('COMMIT');
+        return { impactItem: this.mapImpactItem(item), actionResult, reportStatus };
+      }
+
+      const executedAt = new Date().toISOString();
+      let actionResult: {
+        action: string;
+        verified: boolean;
+        targetId?: string;
+        stateItemId?: string;
+        chapterId?: string;
+        executedAt: string;
+      };
+
+      switch (item.impact_type) {
+        case 'may_make_confirmed_state_stale': {
+          const stateItemId = String(payload.relatedStateItemId || '');
+          if (!stateItemId) throw new BadRequestException('Impact item is missing relatedStateItemId');
+          const related = db.prepare('SELECT * FROM state_items WHERE project_id = ? AND id = ?')
+            .get(projectId, stateItemId) as any;
+          if (!related) throw new NotFoundException(`Related state item not found: ${stateItemId}`);
+          const alreadyStale = related.status === 'stale';
+          if (!alreadyStale) {
+            db.prepare(`
+              UPDATE state_items SET status = 'stale', authority = 'warning', updated_at = ?
+              WHERE project_id = ? AND id = ?
+            `).run(executedAt, projectId, stateItemId);
+          }
+          const verified = db.prepare('SELECT status, authority FROM state_items WHERE project_id = ? AND id = ?')
+            .get(projectId, stateItemId) as any;
+          if (verified?.status !== 'stale' || (!alreadyStale && verified?.authority !== 'warning')) {
+            throw new BadRequestException(`Failed to verify stale state item: ${stateItemId}`);
+          }
+          actionResult = {
+            action: 'mark_state_item_stale', verified: true, targetId: stateItemId, stateItemId, executedAt,
+          };
+          break;
+        }
+        case 'candidate_needs_review': {
+          const stateItemId = String(payload.relatedStateItemId || '');
+          if (!stateItemId) throw new BadRequestException('Impact item is missing relatedStateItemId');
+          const related = db.prepare('SELECT status FROM state_items WHERE project_id = ? AND id = ?')
+            .get(projectId, stateItemId) as any;
+          if (!related) throw new NotFoundException(`Related state item not found: ${stateItemId}`);
+          if (related.status === 'rejected' || related.status === 'archived') {
+            throw new BadRequestException(`Candidate is no longer in author review: ${related.status}`);
+          }
+          if (!['pending', 'conflict', 'stale'].includes(related.status)) {
+            throw new BadRequestException(`Candidate is not in author review: ${related.status}`);
+          }
+          actionResult = {
+            action: 'retain_candidate_for_author_review', verified: true, targetId: stateItemId, stateItemId, executedAt,
+          };
+          break;
+        }
+        case 'downstream_chapter_needs_sync': {
+          const chapterId = String(item.target_id || '');
+          if (!chapterId) throw new BadRequestException('Impact item is missing target chapter id');
+          if (payload.canAutoSync !== true || payload.needsReview !== true) {
+            throw new BadRequestException('Chapter impact item is not eligible for reviewed synchronization');
+          }
+          const chapter = db.prepare('SELECT id, status, content, checksum FROM chapters WHERE project_id = ? AND id = ?')
+            .get(projectId, chapterId) as any;
+          if (!chapter) throw new NotFoundException(`Target chapter not found: ${chapterId}`);
+          if (chapter.status === 'locked') throw new BadRequestException(`Target chapter is locked: ${chapterId}`);
+          const checksum = chapter.checksum || createHash('sha256').update(String(chapter.content || ''), 'utf8').digest('hex');
+          db.prepare(`
+            INSERT INTO chapter_derived_sync_states (
+              chapter_id, project_id, content_checksum, summary_sync_status, vector_sync_status,
+              foreshadowing_sync_status, timeline_sync_status, outline_sync_status,
+              needs_resync, needs_author_review, updated_at
+            ) VALUES (?, ?, ?, 'pending', 'pending', 'pending', 'pending', 'pending', 1, 1, ?)
+            ON CONFLICT(chapter_id) DO UPDATE SET
+              needs_resync = 1, needs_author_review = 1, updated_at = excluded.updated_at
+          `).run(chapterId, projectId, checksum, executedAt);
+          const verified = db.prepare(`
+            SELECT needs_resync, needs_author_review FROM chapter_derived_sync_states
+            WHERE project_id = ? AND chapter_id = ?
+          `).get(projectId, chapterId) as any;
+          if (verified?.needs_resync !== 1 || verified?.needs_author_review !== 1) {
+            throw new BadRequestException(`Failed to verify chapter sync state: ${chapterId}`);
+          }
+          actionResult = {
+            action: 'mark_chapter_derived_data_for_resync', verified: true, targetId: chapterId, chapterId, executedAt,
+          };
+          break;
+        }
+        case 'blocked_by_locked_chapter':
+          throw new BadRequestException('相关章节已锁定, 不能自动应用该影响项');
+        default:
+          throw new BadRequestException(`Unsupported impact type: ${item.impact_type}`);
+      }
+
+      const nextPayload = { ...payload, actionResult };
+      db.prepare(`
+        UPDATE state_impact_items
+        SET status = 'applied', payload = ?, applied_at = ?, updated_at = ?
+        WHERE project_id = ? AND id = ? AND status = 'pending'
+      `).run(JSON.stringify(nextPayload), executedAt, executedAt, projectId, itemId);
+      const applied = db.prepare('SELECT * FROM state_impact_items WHERE project_id = ? AND id = ?')
+        .get(projectId, itemId) as any;
+      const savedResult = this.parseJson<Record<string, any>>(applied?.payload, {}).actionResult;
+      if (applied?.status !== 'applied' || !savedResult?.verified) {
+        throw new BadRequestException(`Failed to verify applied impact item: ${itemId}`);
+      }
+      const reportStatus = this.updateImpactReportStatus(db, projectId, item.report_id);
+      db.exec('COMMIT');
+      return { impactItem: this.mapImpactItem(applied), actionResult: savedResult, reportStatus };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
     }
-    db.prepare(`
-      UPDATE state_impact_items
-      SET status = 'applied', applied_at = datetime('now'), updated_at = datetime('now')
-      WHERE project_id = ? AND id = ?
-    `).run(projectId, itemId);
-    return this.mapImpactItem({ ...item, status: 'applied', applied_at: new Date().toISOString() });
+  }
+
+  private updateImpactReportStatus(db: any, projectId: string, reportId: string): 'open' | 'completed' {
+    const remaining = db.prepare(`
+      SELECT COUNT(*) AS count FROM state_impact_items
+      WHERE project_id = ? AND report_id = ? AND status != 'applied'
+    `).get(projectId, reportId) as { count: number };
+    const status: 'open' | 'completed' = remaining.count === 0 ? 'completed' : 'open';
+    db.prepare('UPDATE state_impact_reports SET status = ?, updated_at = ? WHERE project_id = ? AND id = ?')
+      .run(status, new Date().toISOString(), projectId, reportId);
+    return status;
   }
 
   getCharacterEvolution(projectId: string, characterId: string) {

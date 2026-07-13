@@ -185,12 +185,15 @@ const StateCenterPage: React.FC = () => {
 
   const applyImpactItem = async (impactItemId: string) => {
     if (!projectId) return;
+    setMessage('');
     try {
-      await api.post(`/projects/${projectId}/state/impact/items/${impactItemId}/apply`, {});
+      const response = await api.post(`/projects/${projectId}/state/impact/items/${impactItemId}/apply`, {});
+      const result = (apiPayload(response) as any).item;
+      setMessage(`影响动作：${result.actionResult.action}；验证：${result.actionResult.verified ? '通过' : '未通过'}`);
       if (selectedReport) await openImpactReport(selectedReport.id);
       await loadImpactReports();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '应用影响项失败');
+      setMessage(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -400,8 +403,14 @@ const ImpactPanel: React.FC<{
                 <span>{item.payload?.canAutoSync ? '可自动同步' : '需人工复核'}</span>
                 <span>{item.payload?.needsReview ? 'needs_review' : '已处理'}</span>
               </div>
+              {item.payload?.actionResult && (
+                <div style={styles.impactFlags}>
+                  <span>动作：{item.payload.actionResult.action}</span>
+                  <span>验证：{item.payload.actionResult.verified ? '通过' : '未通过'}</span>
+                </div>
+              )}
               <button style={styles.secondaryButton} onClick={() => onApply(item.id)} disabled={item.status === 'applied'}>
-                {item.status === 'applied' ? '已应用' : '标记已处理'}
+                {item.status === 'applied' ? '已执行' : '执行影响动作'}
               </button>
             </div>
           ))}
