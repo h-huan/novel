@@ -24,9 +24,16 @@ describe('300 chapter aggregate acceptance', () => {
     const volumeIndexes = (db.prepare('SELECT DISTINCT volume_index FROM chapters WHERE project_id=? ORDER BY volume_index').all('p') as any[]).map((row) => row.volume_index);
     for (const volume of volumeIndexes) await service.rebuildVolumeSummary('p', volume);
     await service.rebuildNovelSummary('p'); const calls = llm.generate.mock.calls.length;
+    const before = db.prepare('SELECT scope_key,source_fingerprint FROM aggregate_summary_states WHERE project_id=? ORDER BY scope_key').all('p');
     for (const volume of volumeIndexes) await service.rebuildVolumeSummary('p', volume); await service.rebuildNovelSummary('p');
     expect(db.prepare("SELECT COUNT(*) count FROM aggregate_summary_states WHERE scope='volume'").get()).toEqual({ count: volumeIndexes.length });
     expect(db.prepare("SELECT COUNT(*) count FROM aggregate_summary_states WHERE scope='novel'").get()).toEqual({ count: 1 });
-    expect(prompts.every((prompt) => prompt.length <= 48000)).toBe(true); expect(llm.generate).toHaveBeenCalledTimes(calls);
+    expect(volumeIndexes).toEqual([1, 3, 5, 8, 12, 13, 21, 34, 35, 55, 56, 89]);
+    expect(prompts.every((prompt) => prompt.length <= 48000 && !prompt.includes('body-v'))).toBe(true);
+    expect(prompts.some((prompt) => prompt.includes('summary-v1c1'))).toBe(true);
+    expect(prompts.some((prompt) => prompt.includes('aggregate-'))).toBe(true);
+    expect(llm.generate).toHaveBeenCalledTimes(calls); expect(calls).toBeGreaterThan(volumeIndexes.length);
+    expect(db.prepare('SELECT project_id,scope_key,COUNT(*) count FROM aggregate_summary_states GROUP BY project_id,scope_key HAVING COUNT(*) > 1').all()).toEqual([]);
+    expect(db.prepare('SELECT scope_key,source_fingerprint FROM aggregate_summary_states WHERE project_id=? ORDER BY scope_key').all('p')).toEqual(before);
   });
 });
