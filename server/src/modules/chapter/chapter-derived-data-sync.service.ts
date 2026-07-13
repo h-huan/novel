@@ -21,6 +21,11 @@ export interface ContinuityReviewStep extends DerivedSyncStep {
 }
 export interface ChapterSummaryStep extends DerivedSyncStep { entityId?: string; checksum?: string; }
 export interface AggregateSummaryStep extends DerivedSyncStep { staleTargets?: string[]; }
+export interface AggregateSummaryResult {
+  summary: string | null; scope: 'volume' | 'novel'; scopeKey: string; stale: boolean; status: string;
+  sourceFingerprint: string | null; sourceCount: number; missingChapterIds: string[]; missingVolumeIndexes: number[];
+  generatedAt: string | null; lastError: string | null; idempotent?: boolean;
+}
 export interface VectorIndexStep extends DerivedSyncStep {
   deletedChunks?: number;
   createdChunks?: number;
@@ -168,6 +173,46 @@ export class ChapterDerivedDataSyncService {
         outline: sync?.outline_sync_status || 'missing',
       },
     };
+  }
+
+  getAggregateSummaries(projectId: string): AggregateSummaryResult[] {
+    const rows = this.database.getDb().prepare(`SELECT * FROM aggregate_summary_states WHERE project_id=? ORDER BY CASE scope WHEN 'volume' THEN 0 ELSE 1 END, volume_index`).all(projectId) as any[];
+    return rows.map((row) => this.aggregateResult(row));
+  }
+
+  async rebuildVolumeSummary(projectId: string, volumeIndex: number): Promise<AggregateSummaryResult> {
+    if (!Number.isInteger(volumeIndex)) throw new NotFoundException('A valid volumeIndex is required');
+    const db = this.database.getDb(); const scopeKey = `volume:${volumeIndex}`;
+    const chapters = db.prepare('SELECT id, content FROM chapters WHERE project_id=? AND volume_index=? ORDER BY chapter_index, id').all(projectId, volumeIndex) as any[];
+    const summaries = chapters.map((chapter) => db.prepare('SELECT * FROM chapter_summaries WHERE project_id=? AND chapter_id=?').get(projectId, chapter.id) as any);
+    const missing = chapters.filter((chapter, index) => !summaries[index] || summaries[index].status !== 'current' || summaries[index].content_checksum !== this.checksum(chapter.content || '')).map((chapter) => chapter.id);
+    if (missing.length) return this.markAggregatePending(projectId, 'volume', volumeIndex, scopeKey, missing, []);
+    const fingerprint = this.checksum(summaries.map((summary) => `${summary.chapter_id}:${summary.content_checksum}:${summary.summary}`).join('\n'));
+    const current = this.aggregateByKey(projectId, scopeKey);
+    if (current?.status === 'current' && current.stale === 0 && current.source_fingerprint === fingerprint) return { ...this.aggregateResult(current), idempotent: true };
+    return this.generateAggregate(projectId, 'volume', volumeIndex, scopeKey, summaries.map((summary) => summary.summary), fingerprint);
+  }
+
+  async rebuildNovelSummary(projectId: string): Promise<AggregateSummaryResult> {
+    const db = this.database.getDb(); const scopeKey = 'novel';
+    const volumes = db.prepare('SELECT DISTINCT volume_index FROM chapters WHERE project_id=? ORDER BY volume_index').all(projectId) as Array<{ volume_index: number }>;
+    const summaries = volumes.map(({ volume_index }) => this.aggregateByKey(projectId, `volume:${volume_index}`));
+    const missing = volumes.filter((_, index) => !summaries[index] || summaries[index].stale === 1 || summaries[index].status !== 'current' || !summaries[index].summary).map(({ volume_index }) => volume_index);
+    if (missing.length) return this.markAggregatePending(projectId, 'novel', -1, scopeKey, [], missing);
+    const fingerprint = this.checksum(summaries.map((summary) => `${summary.scope_key}:${summary.source_fingerprint}:${summary.summary}`).join('\n'));
+    const current = this.aggregateByKey(projectId, scopeKey);
+    if (current?.status === 'current' && current.stale === 0 && current.source_fingerprint === fingerprint) return { ...this.aggregateResult(current), idempotent: true };
+    return this.generateAggregate(projectId, 'novel', -1, scopeKey, summaries.map((summary) => summary.summary), fingerprint);
+  }
+
+  async rebuildStaleAggregateSummaries(projectId: string, volumeIndex?: number) {
+    const rows = this.getAggregateSummaries(projectId).filter((row) => row.stale || row.status !== 'current');
+    const volumes = rows.filter((row) => row.scope === 'volume' && (volumeIndex === undefined || row.scopeKey === `volume:${volumeIndex}`));
+    const results: AggregateSummaryResult[] = [];
+    for (const row of volumes) results.push(await this.rebuildVolumeSummary(projectId, Number(row.scopeKey.slice(7))));
+    const novel = this.aggregateByKey(projectId, 'novel');
+    if (novel?.stale === 1 || novel?.status !== 'current') results.push(await this.rebuildNovelSummary(projectId));
+    return results;
   }
 
   private reviewForeshadowing(input: SyncInput, checksum: string): ContinuityReviewStep {
@@ -322,16 +367,16 @@ export class ChapterDerivedDataSyncService {
     const now = new Date().toISOString();
     const targets = [
       { scope: 'volume', volume: Number(volumeIndex), id: `volume:${volumeIndex}` },
-      { scope: 'novel', volume: -1, id: `novel:${input.projectId}` },
+      { scope: 'novel', volume: -1, id: 'novel' },
     ];
     db.exec('BEGIN IMMEDIATE');
     try {
       const stmt = db.prepare(`
         INSERT INTO aggregate_summary_states (
           id, project_id, scope, volume_index, stale, stale_reason,
-          source_chapter_id, source_chapter_checksum, stale_at, updated_at
-        ) VALUES (?, ?, ?, ?, 1, 'chapter_content_changed', ?, ?, ?, ?)
-        ON CONFLICT(project_id, scope, volume_index) DO UPDATE SET
+          source_chapter_id, source_chapter_checksum, stale_at, updated_at, scope_key, status
+        ) VALUES (?, ?, ?, ?, 1, 'chapter_content_changed', ?, ?, ?, ?, ?, 'stale')
+        ON CONFLICT(project_id, scope_key) DO UPDATE SET
           stale = 1,
           stale_reason = 'chapter_content_changed',
           source_chapter_id = excluded.source_chapter_id,
@@ -340,7 +385,7 @@ export class ChapterDerivedDataSyncService {
           updated_at = excluded.updated_at
       `);
       for (const target of targets) {
-        stmt.run(randomUUID(), input.projectId, target.scope, target.volume, input.chapterId, contentChecksum, now, now);
+        stmt.run(randomUUID(), input.projectId, target.scope, target.volume, input.chapterId, contentChecksum, now, now, target.id);
       }
       db.exec('COMMIT');
     } catch (error) {
@@ -352,6 +397,54 @@ export class ChapterDerivedDataSyncService {
       detail: `Persistently marked ${targets.map((target) => target.id).join(', ')} as stale`,
       staleTargets: targets.map((target) => target.id),
     };
+  }
+
+  private aggregateByKey(projectId: string, scopeKey: string): any {
+    return this.database.getDb().prepare('SELECT * FROM aggregate_summary_states WHERE project_id=? AND scope_key=? LIMIT 1').get(projectId, scopeKey) as any;
+  }
+
+  private aggregateResult(row: any, missingChapterIds: string[] = [], missingVolumeIndexes: number[] = []): AggregateSummaryResult {
+    return {
+      summary: row?.summary || null, scope: row?.scope || (row?.scope_key === 'novel' ? 'novel' : 'volume'),
+      scopeKey: row?.scope_key || (row?.scope === 'novel' ? 'novel' : `volume:${row?.volume_index}`),
+      stale: !row || row.stale === 1, status: row?.status || 'pending', sourceFingerprint: row?.source_fingerprint || null,
+      sourceCount: Number(row?.source_count || 0), missingChapterIds, missingVolumeIndexes,
+      generatedAt: row?.generated_at || null, lastError: row?.last_error || null,
+    };
+  }
+
+  private markAggregatePending(projectId: string, scope: 'volume' | 'novel', volumeIndex: number, scopeKey: string, missingChapterIds: string[], missingVolumeIndexes: number[]): AggregateSummaryResult {
+    const db = this.database.getDb(); const now = new Date().toISOString(); const previous = this.aggregateByKey(projectId, scopeKey);
+    db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,stale,status,stale_reason,updated_at)
+      VALUES (?,?,?,?,?,1,'pending','source_summary_missing_or_stale',?)
+      ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='pending',stale_reason='source_summary_missing_or_stale',updated_at=excluded.updated_at`).run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, now);
+    return this.aggregateResult(this.aggregateByKey(projectId, scopeKey), missingChapterIds, missingVolumeIndexes);
+  }
+
+  private async generateAggregate(projectId: string, scope: 'volume' | 'novel', volumeIndex: number, scopeKey: string, inputs: string[], fingerprint: string): Promise<AggregateSummaryResult> {
+    const previous = this.aggregateByKey(projectId, scopeKey); let llm: RealLLMService | undefined;
+    try { llm = this.moduleRef.get(RealLLMService, { strict: false }); } catch { llm = undefined; }
+    if (!llm || !(await llm.isAvailable())) return this.markAggregatePending(projectId, scope, volumeIndex, scopeKey, [], []);
+    const requirement = scope === 'volume'
+      ? '本卷主线进展、关键人物变化、关系变化、时间地点变化、伏笔埋设与回收、未解决冲突、卷末状态'
+      : '当前主线、分卷进展、核心人物状态、主要关系、世界观关键事实、活跃伏笔、时间线状态、未解决冲突';
+    try {
+      const response = await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000,
+        prompt: `基于以下${scope === 'volume' ? '章节' : '卷'}摘要生成聚合摘要。必须覆盖：${requirement}。只输出摘要，不得编造。\n\n${inputs.join('\n\n')}` });
+      const summary = response.content.trim(); if (!summary) throw new Error('Aggregate summary model returned empty content');
+      const now = new Date().toISOString(); const db = this.database.getDb();
+      db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,summary,source_fingerprint,source_count,source,status,stale,generated_at,last_error,updated_at)
+        VALUES (?,?,?,?,?,?,?,?, 'ai','current',0,?,NULL,?)
+        ON CONFLICT(project_id,scope_key) DO UPDATE SET scope=excluded.scope,volume_index=excluded.volume_index,summary=excluded.summary,source_fingerprint=excluded.source_fingerprint,source_count=excluded.source_count,source='ai',status='current',stale=0,generated_at=excluded.generated_at,last_error=NULL,updated_at=excluded.updated_at`)
+        .run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, summary, fingerprint, inputs.length, now, now);
+      return this.aggregateResult(this.aggregateByKey(projectId, scopeKey));
+    } catch (error) {
+      const message = this.errorMessage(error); const db = this.database.getDb(); const now = new Date().toISOString();
+      db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,stale,status,last_error,updated_at)
+        VALUES (?,?,?,?,?,1,'warning',?,?) ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='warning',last_error=excluded.last_error,updated_at=excluded.updated_at`)
+        .run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, message, now);
+      return this.aggregateResult(this.aggregateByKey(projectId, scopeKey));
+    }
   }
 
   private async syncVectorIndex(

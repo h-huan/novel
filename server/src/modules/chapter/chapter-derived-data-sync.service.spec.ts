@@ -188,7 +188,7 @@ describe('ChapterDerivedDataSyncService', () => {
     const rows = db.prepare('SELECT * FROM aggregate_summary_states ORDER BY scope').all() as any[];
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.stale === 1 && row.stale_reason === 'chapter_content_changed')).toBe(true);
-    expect(result.steps.aggregateSummaries.staleTargets).toEqual(['volume:2', 'novel:project-1']);
+    expect(result.steps.aggregateSummaries.staleTargets).toEqual(['volume:2', 'novel']);
   });
 
   it('writes and verifies new vectors before deleting old chunks', async () => {
