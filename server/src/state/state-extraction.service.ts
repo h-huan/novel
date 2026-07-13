@@ -147,6 +147,7 @@ export class StateExtractionService {
         );
 
         results.push({
+          id: (db.prepare('SELECT id FROM foreshadowing_states WHERE project_id = ? AND foreshadowing_id = ?').get(projectId, fs.id) as any)?.id,
           foreshadowingId: fs.id,
           mentioned: true,
           status: nextStatus || undefined,
@@ -246,6 +247,8 @@ export class StateExtractionService {
         projectId,
         chapterIndex,
       );
+      const existing = db.prepare('SELECT id FROM plot_progress WHERE project_id = ? AND chapter_index = ?').get(projectId, chapterIndex) as any;
+      plotProgress.id = existing?.id || plotProgress.id;
     }
 
     return plotProgress;
@@ -266,7 +269,7 @@ export class StateExtractionService {
   }> {
     this.logger.log(`Batch extracting states for project ${projectId}`);
 
-    const extractedStates: Array<{ type: string; id: string; changes: number }> = [];
+    const extractedStates: Array<{ type: string; id: string; changes: number; legacyReviewTarget?: { entityType: string; targetId: string } }> = [];
     const db = this.databaseService.getDb();
 
     // 获取要处理的章节
@@ -319,8 +322,9 @@ export class StateExtractionService {
         for (const snapshot of snapshots) {
           extractedStates.push({
             type: 'character',
-            id: snapshot.characterId,
+            id: snapshot.snapshotId,
             changes: snapshot.changedDimensions.length,
+            legacyReviewTarget: { entityType: 'character_state', targetId: snapshot.snapshotId },
           });
         }
       }
@@ -334,10 +338,12 @@ export class StateExtractionService {
         );
         
         for (const result of results) {
+          if (!result.id) continue;
           extractedStates.push({
             type: 'foreshadowing',
-            id: result.foreshadowingId,
+            id: result.id,
             changes: 1,
+            legacyReviewTarget: { entityType: 'foreshadowing_state', targetId: result.id },
           });
         }
       }
@@ -353,6 +359,7 @@ export class StateExtractionService {
           type: 'plot',
           id: progress.id,
           changes: 1,
+          legacyReviewTarget: { entityType: 'plot_progress', targetId: progress.id },
         });
       }
     }

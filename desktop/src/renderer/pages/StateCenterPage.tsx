@@ -155,9 +155,11 @@ const StateCenterPage: React.FC = () => {
       if (action === 'confirm') {
         const writeback = (apiPayload(response) as any).item?.writeback;
         setMessage(writeback?.mode === 'review_only'
-          ? '复核项已确认，未修改权威内容'
+          ? writeback.applied === false
+            ? `复核任务已完成：${writeback.reason || 'review_task_has_no_canonical_target'}`
+            : '复核任务已完成，不作为小说事实写入上下文'
           : writeback?.mode === 'canonical_change'
-            ? `已写入 ${writeback.canonicalType}`
+            ? `权威数据已写入：${writeback.canonicalType}`
             : '状态已确稿');
       } else {
         setMessage(action === 'reject' ? '状态已驳回' : '状态已归档');

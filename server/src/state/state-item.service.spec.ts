@@ -23,6 +23,7 @@ function fixture(continuityService?: any) {
       content TEXT DEFAULT '', checksum TEXT, volume_index INTEGER DEFAULT 1, chapter_index INTEGER DEFAULT 1
     )
     ;
+    CREATE TABLE characters (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, identity TEXT);
     CREATE TABLE character_relationships (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, trust_score INTEGER NOT NULL DEFAULT 50,
       review_status TEXT NOT NULL DEFAULT 'pending', locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
@@ -42,6 +43,18 @@ function fixture(continuityService?: any) {
     CREATE TABLE timeline_three_line_events (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, summary TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
       locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+    );
+    CREATE TABLE character_states (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, states_json TEXT, needs_review INTEGER NOT NULL DEFAULT 1,
+      reviewed_by TEXT, reviewed_at TEXT, updated_at TEXT
+    );
+    CREATE TABLE foreshadowing_states (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT, recovery_method TEXT, needs_review INTEGER NOT NULL DEFAULT 1,
+      reviewed_by TEXT, reviewed_at TEXT, updated_at TEXT
+    );
+    CREATE TABLE plot_progress (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, emotional_beat TEXT, turning_points TEXT, needs_review INTEGER NOT NULL DEFAULT 1,
+      reviewed_by TEXT, reviewed_at TEXT, updated_at TEXT
     )
   `);
   return { db, service: new StateItemService({ getDb: () => db } as any, continuityService) };
@@ -236,6 +249,8 @@ describe('StateItemService confirmation semantics', () => {
     expect(f.db.prepare(`SELECT trust_score, review_status FROM character_relationships WHERE id='rel'`).get())
       .toMatchObject({ trust_score: 25, review_status: 'confirmed' });
     expect(confirmed.writeback).toMatchObject({ mode: 'review_only', applied: true, verified: true, canonicalId: 'rel' });
+    expect(confirmed.authority).toBe('excluded');
+    expect(f.service.buildWritingStateContext('p').contextText).not.toContain('state summary');
   });
 
   it('confirms a review_only task with no target without canonical writes', () => {
@@ -292,5 +307,59 @@ describe('StateItemService confirmation semantics', () => {
 
     expect(() => f.service.confirm('p', 'state')).toThrow('Unsupported canonical type');
     expect((f.db.prepare(`SELECT status FROM state_items WHERE id='state'`).get() as any).status).toBe('pending');
+  });
+
+  it('persists confirmationResult and does not repeat canonical creates', () => {
+    const continuity = { createRelationship: vi.fn() };
+    const f = fixture(continuity);
+    continuity.createRelationship.mockImplementation(() => {
+      f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('created', 'p', 50, 'pending', 'now')`).run();
+      return { id: 'created' };
+    });
+    addState(f, 'state', 'pending', 'relationship');
+    setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'relationship', action: 'create', values: { trustScore: 50 } } });
+
+    const first = f.service.confirm('p', 'state');
+    const second = f.service.confirm('p', 'state');
+
+    expect(continuity.createRelationship).toHaveBeenCalledTimes(1);
+    expect(second.writeback).toEqual(first.writeback);
+    expect((f.db.prepare(`SELECT payload FROM state_items WHERE id='state'`).get() as any).payload).toContain('confirmationResult');
+    expect(first.authority).toBe('hard_fact');
+  });
+
+  it.each([
+    ['character_state', 'character_states', `INSERT INTO character_states (id, project_id, states_json, needs_review, updated_at) VALUES ('legacy', 'p', '{"hp":1}', 1, 'old')`, 'states_json'],
+    ['foreshadowing_state', 'foreshadowing_states', `INSERT INTO foreshadowing_states (id, project_id, status, recovery_method, needs_review, updated_at) VALUES ('legacy', 'p', 'planted', 'method', 1, 'old')`, 'recovery_method'],
+    ['plot_progress', 'plot_progress', `INSERT INTO plot_progress (id, project_id, emotional_beat, turning_points, needs_review, updated_at) VALUES ('legacy', 'p', 'calm', '["turn"]', 1, 'old')`, 'emotional_beat'],
+  ])('confirms legacy %s review target without changing core fields', (entityType, table, insertSql, coreColumn) => {
+    const f = fixture(); f.db.prepare(insertSql).run(); addState(f, 'state', 'pending');
+    setPayload(f, 'state', { intent: 'review_only', legacyReviewTarget: { entityType, targetId: 'legacy' } });
+    const before = (f.db.prepare(`SELECT ${coreColumn} AS value FROM ${table} WHERE id='legacy'`).get() as any).value;
+
+    const confirmed = f.service.confirm('p', 'state', 'author');
+    const after = f.db.prepare(`SELECT needs_review, reviewed_by, ${coreColumn} AS value FROM ${table} WHERE id='legacy'`).get() as any;
+
+    expect(after).toMatchObject({ needs_review: 0, reviewed_by: 'author', value: before });
+    expect(confirmed.writeback).toMatchObject({ mode: 'review_only', applied: true, canonicalId: 'legacy' });
+  });
+
+  it('rolls back canonical confirmation when a submitted value is not persisted', () => {
+    const continuity = { updateRelationship: vi.fn(() => ({ id: 'rel' })) };
+    const f = fixture(continuity);
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('rel', 'p', 20, 'pending', 'old')`).run();
+    addState(f, 'state', 'pending', 'relationship', 'rel');
+    setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'relationship', action: 'update', targetId: 'rel', values: { trustScore: 99 } } });
+
+    expect(() => f.service.confirm('p', 'state')).toThrow('Canonical field verification failed');
+    expect((f.db.prepare(`SELECT status FROM state_items WHERE id='state'`).get() as any).status).toBe('pending');
+  });
+
+  it('sets archive candidate intent only for a complete canonicalChange', () => {
+    const f = fixture();
+    const review = f.service.createFromArchive('p', 'chapter', { characterUpdates: [{ title: 'review', summary: 'only' }] })[0];
+    const canonical = f.service.createFromArchive('p', 'chapter', { characterUpdates: [{ title: 'change', canonicalChange: { entityType: 'relationship', action: 'create', values: { trustScore: 50 } } }] })[0];
+    expect(review.payload.intent).toBe('review_only');
+    expect(canonical.payload.intent).toBe('canonical_change');
   });
 });

@@ -220,27 +220,31 @@ export class StateItemService {
 
   confirm(projectId: string, id: string, confirmedBy = 'author') {
     const item = this.get(projectId, id);
+    const existingPayload = item.payload && typeof item.payload === 'object' ? item.payload as Record<string, any> : {};
+    if (item.status === 'confirmed') {
+      const confirmationResult = existingPayload.confirmationResult;
+      if (confirmationResult) return { ...item, writeback: confirmationResult };
+      throw new BadRequestException('Confirmed state item is missing confirmationResult');
+    }
     const db = this.databaseService.getDb();
     db.exec('BEGIN');
     try {
-      const payload = item.payload && typeof item.payload === 'object'
-        ? item.payload as Record<string, any>
-        : this.parseJson<Record<string, any>>(String(item.payload || ''), {});
+      const payload = existingPayload;
       const writeback = payload.intent === 'canonical_change'
         ? this.applyCanonicalChange(projectId, payload.canonicalChange)
-        : this.confirmReviewOnly(projectId, item, payload);
+        : this.confirmReviewOnly(projectId, item, payload, confirmedBy);
+      const confirmationResult = { ...writeback, confirmedAt: new Date().toISOString() };
       db.prepare(`
         UPDATE state_items
-        SET status = 'confirmed', authority = 'hard_fact', confirmed_by = ?, confirmed_at = datetime('now'), updated_at = datetime('now')
+        SET status = 'confirmed', authority = ?, payload = ?, confirmed_by = ?, confirmed_at = datetime('now'), updated_at = datetime('now')
         WHERE project_id = ? AND id = ?
-      `).run(confirmedBy, projectId, id);
-      db.prepare(`
-        UPDATE character_evolution_events
-        SET status = 'confirmed', confirmed_at = datetime('now'), updated_at = datetime('now')
-        WHERE project_id = ? AND source_state_item_id = ?
-      `).run(projectId, id);
+      `).run(writeback.mode === 'canonical_change' ? 'hard_fact' : 'excluded', JSON.stringify({ ...payload, confirmationResult }), confirmedBy, projectId, id);
+      if (writeback.mode === 'canonical_change') {
+        db.prepare(`UPDATE character_evolution_events SET status = 'confirmed', confirmed_at = datetime('now'), updated_at = datetime('now') WHERE project_id = ? AND source_state_item_id = ?`)
+          .run(projectId, id);
+      }
       db.exec('COMMIT');
-      return { ...this.get(projectId, id), writeback };
+      return { ...this.get(projectId, id), writeback: confirmationResult };
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
@@ -299,7 +303,11 @@ export class StateItemService {
           title: item.title || group.label,
           summary: `${item.title || group.label}: ${item.summary || item.content || ''}`,
           content: item.summary || item.content || '',
-          payload: { ...item, matchedTarget: target, sourceMode },
+          payload: {
+            ...item, matchedTarget: target, sourceMode,
+            intent: this.isCanonicalChange(item.canonicalChange) ? 'canonical_change' : 'review_only',
+            ...(this.isCanonicalChange(item.canonicalChange) ? { canonicalChange: item.canonicalChange } : {}),
+          },
           status: group.type === 'plot_logic' ? 'conflict' : 'pending',
           tags: group.tags,
           source: 'ai_archive',
@@ -321,7 +329,7 @@ export class StateItemService {
       title: state.label || state.name || state.type || '状态更新',
       summary: this.summarizeExtractedState(state),
       content: this.summarizeExtractedState(state),
-      payload: state,
+      payload: { ...state, intent: 'review_only', legacyReviewTarget: state.legacyReviewTarget || this.legacyReviewTargetForExtractedState(state) },
       tags: [String(state.type || 'state')],
       source: 'ai_extract',
       createdBy: 'state_extract',
@@ -716,8 +724,23 @@ export class StateItemService {
     );
   }
 
-  private confirmReviewOnly(projectId: string, item: any, payload: Record<string, any>) {
+  private confirmReviewOnly(projectId: string, item: any, payload: Record<string, any>, actor: string) {
     const db = this.databaseService.getDb();
+    const legacyTarget = payload.legacyReviewTarget;
+    if (legacyTarget?.entityType && legacyTarget?.targetId) {
+      const legacyTables: Record<string, string> = { character_state: 'character_states', foreshadowing_state: 'foreshadowing_states', plot_progress: 'plot_progress' };
+      const table = legacyTables[legacyTarget.entityType];
+      if (table) {
+        const existing = db.prepare(`SELECT id FROM ${table} WHERE project_id = ? AND id = ?`).get(projectId, legacyTarget.targetId) as any;
+        if (!existing) return { mode: 'review_only', applied: false, verified: true, reason: 'review_task_has_no_canonical_target' };
+        const now = new Date().toISOString();
+        db.prepare(`UPDATE ${table} SET needs_review = 0, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
+          .run(actor, now, now, projectId, legacyTarget.targetId);
+        const verified = db.prepare(`SELECT needs_review FROM ${table} WHERE project_id = ? AND id = ?`).get(projectId, legacyTarget.targetId) as any;
+        if (Number(verified?.needs_review) !== 0) throw new BadRequestException(`Failed to confirm legacy review target: ${legacyTarget.targetId}`);
+        return { mode: 'review_only', applied: true, verified: true, canonicalType: legacyTarget.entityType, canonicalId: legacyTarget.targetId };
+      }
+    }
     const reviewTargets: Record<string, { table: string; id: string | null }> = {
       relationship: { table: 'character_relationships', id: item.targetId || payload.relationshipId || null },
       foreshadowing: { table: 'foreshadowing_threads', id: item.targetId || payload.threadId || null },
@@ -757,6 +780,8 @@ export class StateItemService {
       timeline_event: { table: 'timeline_three_line_events', create: 'createTimelineEvent', update: 'updateTimelineEvent' },
     };
     const definition = metadata[entityType];
+    const supportedFields = this.canonicalFieldMap(entityType);
+    for (const key of Object.keys(values)) if (!supportedFields[key]) throw new BadRequestException(`Unsupported canonical field for ${entityType}: ${key}`);
     if (action === 'update') {
       const existing = this.databaseService.getDb().prepare(`SELECT id, locked FROM ${definition.table} WHERE project_id = ? AND id = ?`)
         .get(projectId, targetId) as any;
@@ -770,10 +795,44 @@ export class StateItemService {
       : method.call(this.continuityService, projectId, targetId, valuesWithManualSource);
     const canonicalId = action === 'create' ? result?.id : targetId;
     if (!canonicalId) throw new BadRequestException('Canonical writeback did not return a target id');
-    const verified = this.databaseService.getDb().prepare(`SELECT id FROM ${definition.table} WHERE project_id = ? AND id = ?`)
+    const verified = this.databaseService.getDb().prepare(`SELECT * FROM ${definition.table} WHERE project_id = ? AND id = ?`)
       .get(projectId, canonicalId) as any;
     if (!verified) throw new BadRequestException(`Failed to verify canonical writeback: ${canonicalId}`);
+    for (const [field, expected] of Object.entries(values)) {
+      if (!this.canonicalValueMatches(verified[supportedFields[field]], expected)) throw new BadRequestException(`Canonical field verification failed: ${field}`);
+    }
     return { mode: 'canonical_change', applied: true, verified: true, canonicalType: entityType, canonicalId };
+  }
+
+  private isCanonicalChange(value: any) {
+    return Boolean(value && ['character_state', 'relationship', 'foreshadowing', 'world_rule', 'timeline_event'].includes(value.entityType)
+      && ['create', 'update'].includes(value.action) && value.values && typeof value.values === 'object'
+      && !Array.isArray(value.values) && Object.keys(value.values).length > 0);
+  }
+
+  private legacyReviewTargetForExtractedState(state: any) {
+    const type = String(state.type || state.targetType || '');
+    if (type === 'character') return { entityType: 'character_state', targetId: state.id };
+    if (type === 'foreshadowing') return { entityType: 'foreshadowing_state', targetId: state.id };
+    if (type === 'plot') return { entityType: 'plot_progress', targetId: state.id };
+    return undefined;
+  }
+
+  private canonicalFieldMap(entityType: string): Record<string, string> {
+    const maps: Record<string, Record<string, string>> = {
+      character_state: { characterId: 'character_id', chapterId: 'chapter_id', volumeIndex: 'volume_index', stateType: 'state_type', currentState: 'current_state', evidence: 'evidence', cause: 'cause', actionImpact: 'action_impact', relationImpact: 'relation_impact', goalImpact: 'goal_impact', foreshadowingImpact: 'foreshadowing_impact', futureChange: 'future_change', conflictRisk: 'conflict_risk', confidence: 'confidence' },
+      relationship: { sourceCharacterId: 'source_character_id', targetCharacterId: 'target_character_id', relationType: 'relation_type', publicRelation: 'public_relation', hiddenRelation: 'hidden_relation', trustScore: 'trust_score', conflictScore: 'conflict_score', emotionalTendency: 'emotional_tendency', interestBinding: 'interest_binding', currentPhase: 'current_phase', changeSummary: 'change_summary' },
+      foreshadowing: { title: 'title', level: 'level', volumeIndex: 'volume_index', status: 'status', summary: 'summary', readerUnderstanding: 'reader_understanding', trueMeaning: 'true_meaning', revealStrategy: 'reveal_strategy', riskLevel: 'risk_level', riskReason: 'risk_reason' },
+      world_rule: { title: 'title', ruleType: 'rule_type', scope: 'scope', volumeIndex: 'volume_index', content: 'content', explanation: 'explanation', limitation: 'limitation', contradictionRisk: 'contradiction_risk', status: 'status', riskLevel: 'risk_level' },
+      timeline_event: { title: 'title', summary: 'summary', lineType: 'line_type', chapterId: 'chapter_id', volumeIndex: 'volume_index', chapterIndex: 'chapter_index', storyTimeText: 'story_time_text', storyTimeOrder: 'story_time_order', narrativeOrder: 'narrative_order', causalityOrder: 'causality_order', location: 'location', status: 'status', riskLevel: 'risk_level', riskReason: 'risk_reason' },
+    };
+    return maps[entityType] || {};
+  }
+
+  private canonicalValueMatches(actual: unknown, expected: unknown) {
+    if (actual === expected) return true;
+    if (typeof actual === 'number' || typeof expected === 'number') return Number(actual) === Number(expected);
+    return String(actual ?? '') === String(expected ?? '');
   }
 
   private buildLegacyConfirmedContext(projectId: string, chapterNumber: number | undefined, pendingItems: any[]) {
