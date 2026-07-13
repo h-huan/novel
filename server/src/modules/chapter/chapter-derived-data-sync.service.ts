@@ -184,6 +184,7 @@ export class ChapterDerivedDataSyncService {
     if (!Number.isInteger(volumeIndex)) throw new NotFoundException('A valid volumeIndex is required');
     const db = this.database.getDb(); const scopeKey = `volume:${volumeIndex}`;
     const chapters = db.prepare('SELECT id, content FROM chapters WHERE project_id=? AND volume_index=? ORDER BY chapter_index, id').all(projectId, volumeIndex) as any[];
+    if (!chapters.length) throw new NotFoundException(`Volume ${volumeIndex} has no chapters in project ${projectId}`);
     const summaries = chapters.map((chapter) => db.prepare('SELECT * FROM chapter_summaries WHERE project_id=? AND chapter_id=?').get(projectId, chapter.id) as any);
     const missing = chapters.filter((chapter, index) => !summaries[index] || summaries[index].status !== 'current' || summaries[index].content_checksum !== this.checksum(chapter.content || '')).map((chapter) => chapter.id);
     if (missing.length) return this.markAggregatePending(projectId, 'volume', volumeIndex, scopeKey, missing, []);
@@ -196,6 +197,7 @@ export class ChapterDerivedDataSyncService {
   async rebuildNovelSummary(projectId: string): Promise<AggregateSummaryResult> {
     const db = this.database.getDb(); const scopeKey = 'novel';
     const volumes = db.prepare('SELECT DISTINCT volume_index FROM chapters WHERE project_id=? ORDER BY volume_index').all(projectId) as Array<{ volume_index: number }>;
+    if (!volumes.length) return this.markAggregatePending(projectId, 'novel', -1, scopeKey, [], [], 'project_has_no_chapters');
     const summaries = volumes.map(({ volume_index }) => this.aggregateByKey(projectId, `volume:${volume_index}`));
     const missing = volumes.filter((_, index) => !summaries[index] || summaries[index].stale === 1 || summaries[index].status !== 'current' || !summaries[index].summary).map(({ volume_index }) => volume_index);
     if (missing.length) return this.markAggregatePending(projectId, 'novel', -1, scopeKey, [], missing);
@@ -206,12 +208,17 @@ export class ChapterDerivedDataSyncService {
   }
 
   async rebuildStaleAggregateSummaries(projectId: string, volumeIndex?: number) {
-    const rows = this.getAggregateSummaries(projectId).filter((row) => row.stale || row.status !== 'current');
-    const volumes = rows.filter((row) => row.scope === 'volume' && (volumeIndex === undefined || row.scopeKey === `volume:${volumeIndex}`));
+    const db = this.database.getDb();
+    const indexes = volumeIndex === undefined
+      ? (db.prepare('SELECT DISTINCT volume_index FROM chapters WHERE project_id=? ORDER BY volume_index').all(projectId) as Array<{ volume_index: number }>).map((row) => row.volume_index)
+      : [volumeIndex];
     const results: AggregateSummaryResult[] = [];
-    for (const row of volumes) results.push(await this.rebuildVolumeSummary(projectId, Number(row.scopeKey.slice(7))));
+    for (const index of indexes) {
+      const current = this.aggregateByKey(projectId, `volume:${index}`);
+      if (!current || current.stale === 1 || current.status !== 'current') results.push(await this.rebuildVolumeSummary(projectId, index));
+    }
     const novel = this.aggregateByKey(projectId, 'novel');
-    if (novel?.stale === 1 || novel?.status !== 'current') results.push(await this.rebuildNovelSummary(projectId));
+    if (!novel || novel.stale === 1 || novel.status !== 'current') results.push(await this.rebuildNovelSummary(projectId));
     return results;
   }
 
@@ -404,38 +411,45 @@ export class ChapterDerivedDataSyncService {
   }
 
   private aggregateResult(row: any, missingChapterIds: string[] = [], missingVolumeIndexes: number[] = []): AggregateSummaryResult {
+    let diagnostics: any = {}; try { diagnostics = JSON.parse(row?.diagnostics || '{}'); } catch { diagnostics = {}; }
     return {
       summary: row?.summary || null, scope: row?.scope || (row?.scope_key === 'novel' ? 'novel' : 'volume'),
       scopeKey: row?.scope_key || (row?.scope === 'novel' ? 'novel' : `volume:${row?.volume_index}`),
       stale: !row || row.stale === 1, status: row?.status || 'pending', sourceFingerprint: row?.source_fingerprint || null,
-      sourceCount: Number(row?.source_count || 0), missingChapterIds, missingVolumeIndexes,
+      sourceCount: Number(row?.source_count || 0), missingChapterIds: missingChapterIds.length ? missingChapterIds : (diagnostics.missingChapterIds || []), missingVolumeIndexes: missingVolumeIndexes.length ? missingVolumeIndexes : (diagnostics.missingVolumeIndexes || []),
       generatedAt: row?.generated_at || null, lastError: row?.last_error || null,
     };
   }
 
-  private markAggregatePending(projectId: string, scope: 'volume' | 'novel', volumeIndex: number, scopeKey: string, missingChapterIds: string[], missingVolumeIndexes: number[]): AggregateSummaryResult {
+  private markAggregatePending(projectId: string, scope: 'volume' | 'novel', volumeIndex: number, scopeKey: string, missingChapterIds: string[], missingVolumeIndexes: number[], reason = 'source_summary_missing_or_stale'): AggregateSummaryResult {
     const db = this.database.getDb(); const now = new Date().toISOString(); const previous = this.aggregateByKey(projectId, scopeKey);
-    db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,stale,status,stale_reason,updated_at)
-      VALUES (?,?,?,?,?,1,'pending','source_summary_missing_or_stale',?)
-      ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='pending',stale_reason='source_summary_missing_or_stale',updated_at=excluded.updated_at`).run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, now);
+    const diagnostics = JSON.stringify({ reason, missingChapterIds, missingVolumeIndexes });
+    db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,stale,status,stale_reason,diagnostics,updated_at)
+      VALUES (?,?,?,?,?,1,'pending',?,?,?)
+      ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='pending',stale_reason=excluded.stale_reason,diagnostics=excluded.diagnostics,updated_at=excluded.updated_at`).run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, reason, diagnostics, now);
     return this.aggregateResult(this.aggregateByKey(projectId, scopeKey), missingChapterIds, missingVolumeIndexes);
   }
 
   private async generateAggregate(projectId: string, scope: 'volume' | 'novel', volumeIndex: number, scopeKey: string, inputs: string[], fingerprint: string): Promise<AggregateSummaryResult> {
     const previous = this.aggregateByKey(projectId, scopeKey); let llm: RealLLMService | undefined;
     try { llm = this.moduleRef.get(RealLLMService, { strict: false }); } catch { llm = undefined; }
-    if (!llm || !(await llm.isAvailable())) return this.markAggregatePending(projectId, scope, volumeIndex, scopeKey, [], []);
+    if (!inputs.length || !llm || !(await llm.isAvailable())) return this.markAggregatePending(projectId, scope, volumeIndex, scopeKey, [], [], !inputs.length ? 'empty_source_input' : 'llm_unavailable');
     const requirement = scope === 'volume'
       ? '本卷主线进展、关键人物变化、关系变化、时间地点变化、伏笔埋设与回收、未解决冲突、卷末状态'
       : '当前主线、分卷进展、核心人物状态、主要关系、世界观关键事实、活跃伏笔、时间线状态、未解决冲突';
     try {
-      const response = await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000,
-        prompt: `基于以下${scope === 'volume' ? '章节' : '卷'}摘要生成聚合摘要。必须覆盖：${requirement}。只输出摘要，不得编造。\n\n${inputs.join('\n\n')}` });
+      const batches = this.summaryBatches(inputs); const stage: string[] = [];
+      for (const batch of batches) {
+        const response = await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000,
+          prompt: `基于以下${scope === 'volume' ? '章节' : '卷'}摘要生成聚合摘要。必须覆盖：${requirement}。只输出摘要，不得编造。\n\n${batch.join('\n\n')}` });
+        if (!response.content.trim()) throw new Error('Aggregate summary model returned empty content'); stage.push(response.content.trim());
+      }
+      const response = stage.length === 1 ? { content: stage[0] } : await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000, prompt: `合并以下阶段摘要，覆盖：${requirement}。只输出最终摘要，不得编造。\n\n${stage.join('\n\n')}` });
       const summary = response.content.trim(); if (!summary) throw new Error('Aggregate summary model returned empty content');
       const now = new Date().toISOString(); const db = this.database.getDb();
       db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,summary,source_fingerprint,source_count,source,status,stale,generated_at,last_error,updated_at)
         VALUES (?,?,?,?,?,?,?,?, 'ai','current',0,?,NULL,?)
-        ON CONFLICT(project_id,scope_key) DO UPDATE SET scope=excluded.scope,volume_index=excluded.volume_index,summary=excluded.summary,source_fingerprint=excluded.source_fingerprint,source_count=excluded.source_count,source='ai',status='current',stale=0,generated_at=excluded.generated_at,last_error=NULL,updated_at=excluded.updated_at`)
+        ON CONFLICT(project_id,scope_key) DO UPDATE SET scope=excluded.scope,volume_index=excluded.volume_index,summary=excluded.summary,source_fingerprint=excluded.source_fingerprint,source_count=excluded.source_count,source='ai',status='current',stale=0,generated_at=excluded.generated_at,last_error=NULL,diagnostics=NULL,updated_at=excluded.updated_at`)
         .run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, summary, fingerprint, inputs.length, now, now);
       return this.aggregateResult(this.aggregateByKey(projectId, scopeKey));
     } catch (error) {
@@ -445,6 +459,12 @@ export class ChapterDerivedDataSyncService {
         .run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, message, now);
       return this.aggregateResult(this.aggregateByKey(projectId, scopeKey));
     }
+  }
+
+  private summaryBatches(inputs: string[]): string[][] {
+    const batches: string[][] = []; let current: string[] = []; let length = 0;
+    for (const input of inputs) { const value = input.slice(0, 12000); if (current.length >= 20 || (current.length && length + value.length > 48000)) { batches.push(current); current = []; length = 0; } current.push(value); length += value.length; }
+    if (current.length) batches.push(current); return batches;
   }
 
   private async syncVectorIndex(
