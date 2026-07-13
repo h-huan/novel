@@ -25,6 +25,7 @@ export interface AggregateSummaryResult {
   summary: string | null; scope: 'volume' | 'novel'; scopeKey: string; stale: boolean; status: string;
   sourceFingerprint: string | null; sourceCount: number; missingChapterIds: string[]; missingVolumeIndexes: number[];
   generatedAt: string | null; lastError: string | null; idempotent?: boolean;
+  diagnosticReason: string | null;
 }
 export interface VectorIndexStep extends DerivedSyncStep {
   deletedChunks?: number;
@@ -417,7 +418,7 @@ export class ChapterDerivedDataSyncService {
       scopeKey: row?.scope_key || (row?.scope === 'novel' ? 'novel' : `volume:${row?.volume_index}`),
       stale: !row || row.stale === 1, status: row?.status || 'pending', sourceFingerprint: row?.source_fingerprint || null,
       sourceCount: Number(row?.source_count || 0), missingChapterIds: missingChapterIds.length ? missingChapterIds : (diagnostics.missingChapterIds || []), missingVolumeIndexes: missingVolumeIndexes.length ? missingVolumeIndexes : (diagnostics.missingVolumeIndexes || []),
-      generatedAt: row?.generated_at || null, lastError: row?.last_error || null,
+      generatedAt: row?.generated_at || null, lastError: row?.last_error || null, diagnosticReason: diagnostics.reason || null,
     };
   }
 
@@ -426,7 +427,7 @@ export class ChapterDerivedDataSyncService {
     const diagnostics = JSON.stringify({ reason, missingChapterIds, missingVolumeIndexes });
     db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,stale,status,stale_reason,diagnostics,updated_at)
       VALUES (?,?,?,?,?,1,'pending',?,?,?)
-      ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='pending',stale_reason=excluded.stale_reason,diagnostics=excluded.diagnostics,updated_at=excluded.updated_at`).run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, reason, diagnostics, now);
+      ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='pending',stale_reason=excluded.stale_reason,diagnostics=excluded.diagnostics,last_error=NULL,updated_at=excluded.updated_at`).run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, reason, diagnostics, now);
     return this.aggregateResult(this.aggregateByKey(projectId, scopeKey), missingChapterIds, missingVolumeIndexes);
   }
 
@@ -438,14 +439,7 @@ export class ChapterDerivedDataSyncService {
       ? '本卷主线进展、关键人物变化、关系变化、时间地点变化、伏笔埋设与回收、未解决冲突、卷末状态'
       : '当前主线、分卷进展、核心人物状态、主要关系、世界观关键事实、活跃伏笔、时间线状态、未解决冲突';
     try {
-      const batches = this.summaryBatches(inputs); const stage: string[] = [];
-      for (const batch of batches) {
-        const response = await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000,
-          prompt: `基于以下${scope === 'volume' ? '章节' : '卷'}摘要生成聚合摘要。必须覆盖：${requirement}。只输出摘要，不得编造。\n\n${batch.join('\n\n')}` });
-        if (!response.content.trim()) throw new Error('Aggregate summary model returned empty content'); stage.push(response.content.trim());
-      }
-      const response = stage.length === 1 ? { content: stage[0] } : await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000, prompt: `合并以下阶段摘要，覆盖：${requirement}。只输出最终摘要，不得编造。\n\n${stage.join('\n\n')}` });
-      const summary = response.content.trim(); if (!summary) throw new Error('Aggregate summary model returned empty content');
+      const summary = await this.reduceAggregateInputs(llm, inputs, scope, requirement);
       const now = new Date().toISOString(); const db = this.database.getDb();
       db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,summary,source_fingerprint,source_count,source,status,stale,generated_at,last_error,updated_at)
         VALUES (?,?,?,?,?,?,?,?, 'ai','current',0,?,NULL,?)
@@ -454,9 +448,10 @@ export class ChapterDerivedDataSyncService {
       return this.aggregateResult(this.aggregateByKey(projectId, scopeKey));
     } catch (error) {
       const message = this.errorMessage(error); const db = this.database.getDb(); const now = new Date().toISOString();
-      db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,stale,status,last_error,updated_at)
-        VALUES (?,?,?,?,?,1,'warning',?,?) ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='warning',last_error=excluded.last_error,updated_at=excluded.updated_at`)
-        .run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, message, now);
+      const diagnostics = JSON.stringify({ reason: 'aggregate_generation_failed', missingChapterIds: [], missingVolumeIndexes: [] });
+      db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,stale,status,last_error,diagnostics,updated_at)
+        VALUES (?,?,?,?,?,1,'warning',?,?,?) ON CONFLICT(project_id,scope_key) DO UPDATE SET stale=1,status='warning',last_error=excluded.last_error,diagnostics=excluded.diagnostics,updated_at=excluded.updated_at`)
+        .run(previous?.id || randomUUID(), projectId, scope, volumeIndex, scopeKey, message, diagnostics, now);
       return this.aggregateResult(this.aggregateByKey(projectId, scopeKey));
     }
   }
@@ -465,6 +460,23 @@ export class ChapterDerivedDataSyncService {
     const batches: string[][] = []; let current: string[] = []; let length = 0;
     for (const input of inputs) { const value = input.slice(0, 12000); if (current.length >= 20 || (current.length && length + value.length > 48000)) { batches.push(current); current = []; length = 0; } current.push(value); length += value.length; }
     if (current.length) batches.push(current); return batches;
+  }
+
+  private async reduceAggregateInputs(llm: RealLLMService, inputs: string[], scope: 'volume' | 'novel', requirement: string): Promise<string> {
+    let level = inputs; let firstPass = true;
+    while (firstPass || level.length > 1) {
+      firstPass = false;
+      const next: string[] = [];
+      for (const batch of this.summaryBatches(level)) {
+        const prompt = `基于以下${scope === 'volume' ? '章节' : '卷'}摘要生成聚合摘要。必须覆盖：${requirement}。只输出摘要，不得编造。\n\n${batch.join('\n\n')}`;
+        if (prompt.length > 48000) throw new Error('Aggregate prompt exceeded 48000 characters');
+        const response = await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000, prompt });
+        if (!response.content.trim()) throw new Error('Aggregate summary model returned empty content');
+        next.push(response.content.trim());
+      }
+      level = next;
+    }
+    return level[0];
   }
 
   private async syncVectorIndex(
