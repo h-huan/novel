@@ -48,6 +48,7 @@ describe('ChapterService', () => {
     } as unknown as StateItemService;
     derivedDataSync = {
       syncAfterContentChange: vi.fn(async () => ({ success: true, chapterId: row.id, steps: {}, warnings: [] })),
+      getLockGate: vi.fn(() => ({ allowed: true, reasons: [], reviewItemIds: [], checksum: checksum(row.content) })),
     } as unknown as ChapterDerivedDataSyncService;
     service = new ChapterService(repo, versionRepo, stateItemService, derivedDataSync);
   });
@@ -80,9 +81,9 @@ describe('ChapterService', () => {
     expect(versionRepo.insert).not.toHaveBeenCalled();
   });
 
-  it('locks a reviewing chapter with exactly one deduplicated snapshot', () => {
+  it('locks a reviewing chapter with exactly one deduplicated snapshot', async () => {
     row = { ...row, status: 'reviewing' };
-    const result = service.lock(row.id);
+    const result = await service.lock(row.id);
     expect(result.status).toBe('locked');
     expect(versionRepo.insert).toHaveBeenCalledTimes(1);
     expect(versionRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
@@ -90,11 +91,18 @@ describe('ChapterService', () => {
     }));
   });
 
-  it('does not duplicate a lock snapshot already stored as the latest version', () => {
+  it('does not duplicate a lock snapshot already stored as the latest version', async () => {
     row = { ...row, status: 'reviewing' };
     (versionRepo.getLatest as any).mockReturnValue({ version: 2, snapshot: row.content, checksum: checksum(row.content) });
-    service.lock(row.id);
+    await service.lock(row.id);
     expect(versionRepo.insert).not.toHaveBeenCalled();
+  });
+
+  it('blocks locking when the continuity gate has unresolved blocking reviews', async () => {
+    row = { ...row, status: 'reviewing' };
+    (derivedDataSync.getLockGate as any).mockReturnValue({ allowed: false, reasons: ['timeline:confirmed_event_overturned'], reviewItemIds: ['review-1'] });
+    await expect(service.lock(row.id)).rejects.toThrow('Chapter continuity gate blocked locking');
+    expect(repo.lockChapter).not.toHaveBeenCalled();
   });
 
   it('saves current content before restoring a historical version', async () => {

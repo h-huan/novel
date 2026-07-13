@@ -115,10 +115,16 @@ export class ChapterService {
     return this.toResponse(this.repo.submitForReview(id)!);
   }
 
-  lock(id: string): ChapterResponse {
+  async lock(id: string): Promise<ChapterResponse> {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Chapter ${id} not found`);
     if (existing.status !== 'reviewing') throw new BadRequestException('Only reviewing chapters can be locked');
+    if (this.derivedDataSync) {
+      const gate = this.derivedDataSync.getLockGate(existing.project_id, id, existing.content || '');
+      if (!gate.allowed) {
+        throw new BadRequestException({ message: 'Chapter continuity gate blocked locking', reasons: gate.reasons, reviewItemIds: gate.reviewItemIds });
+      }
+    }
     this.saveContentSnapshot(existing, 'Chapter lock snapshot', 'system');
     return this.toResponse(this.repo.lockChapter(id)!);
   }
@@ -175,7 +181,7 @@ export class ChapterService {
       chapterId: id,
       beforeContent: chapter.content || '',
       afterContent: chapter.content || '',
-      reason: 'manual_save',
+      reason: 'manual_resync',
     });
   }
 

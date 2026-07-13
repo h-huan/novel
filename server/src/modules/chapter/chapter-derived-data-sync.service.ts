@@ -7,9 +7,11 @@ import { ChunkerService } from '../../rag/chunker.service';
 import { EmbeddingService } from '../../rag/embedding.service';
 import { VectorIndexService } from '../../rag/vector-index.service';
 import { ConflictEngineService } from '../conflict-engine/conflict-engine.service';
+import { StateItemService } from '../../state/state-item.service';
 
 export type DerivedSyncStepStatus = 'completed' | 'pending' | 'warning';
 export interface DerivedSyncStep { status: DerivedSyncStepStatus; detail: string; }
+export interface ContinuityReviewStep extends DerivedSyncStep { issueCount: number; blockingCount: number; reviewItemIds: string[]; }
 export interface ChapterSummaryStep extends DerivedSyncStep { entityId?: string; checksum?: string; }
 export interface AggregateSummaryStep extends DerivedSyncStep { staleTargets?: string[]; }
 export interface VectorIndexStep extends DerivedSyncStep {
@@ -25,15 +27,15 @@ export interface ChapterDerivedDataSyncResult {
   coreSyncSuccess: boolean;
   fullSyncSuccess: boolean;
   chapterId: string;
-  reason: 'manual_save' | 'version_restore';
+  reason: 'manual_save' | 'version_restore' | 'manual_resync';
   contentChecksum: string;
   steps: {
     chapterSummary: ChapterSummaryStep;
     aggregateSummaries: AggregateSummaryStep;
     vectorIndex: VectorIndexStep;
-    foreshadowingReview: DerivedSyncStep;
-    timelineReview: DerivedSyncStep;
-    outlineDeviation: DerivedSyncStep;
+    foreshadowingReview: ContinuityReviewStep;
+    timelineReview: ContinuityReviewStep;
+    outlineDeviation: ContinuityReviewStep;
     conflictReview: DerivedSyncStep;
   };
   warnings: string[];
@@ -44,7 +46,7 @@ interface SyncInput {
   chapterId: string;
   beforeContent: string;
   afterContent: string;
-  reason: 'manual_save' | 'version_restore';
+  reason: 'manual_save' | 'version_restore' | 'manual_resync';
 }
 
 @Injectable()
@@ -58,12 +60,13 @@ export class ChapterDerivedDataSyncService {
     private readonly embedding: EmbeddingService,
     private readonly moduleRef: ModuleRef,
     @Optional() private readonly conflictEngine?: ConflictEngineService,
+    @Optional() private readonly stateItems?: StateItemService,
   ) {}
 
   async syncAfterContentChange(input: SyncInput): Promise<ChapterDerivedDataSyncResult> {
     const db = this.database.getDb();
     const chapter = db.prepare(`
-      SELECT id, project_id, volume_index, chapter_index, content
+      SELECT id, project_id, outline_id, volume_index, chapter_index, content
       FROM chapters WHERE id = ? AND project_id = ?
     `).get(input.chapterId, input.projectId) as any;
     if (!chapter) throw new NotFoundException(`Chapter ${input.chapterId} not found in project ${input.projectId}`);
@@ -82,16 +85,17 @@ export class ChapterDerivedDataSyncService {
       aggregateSummaries = { status: 'warning', detail: message, staleTargets: [] };
     }
     const vectorIndex = await this.syncVectorIndex(input, chapter, contentChecksum, warnings);
+    const foreshadowingReview = this.reviewForeshadowing(input, contentChecksum);
+    const timelineReview = this.reviewTimeline(input, contentChecksum);
+    const outlineDeviation = this.reviewOutline(input, contentChecksum, chapter);
     const conflictReview = await this.runConflictReview(input, warnings);
-
-    const pending = (detail: string): DerivedSyncStep => ({ status: 'pending', detail });
     const steps: ChapterDerivedDataSyncResult['steps'] = {
       chapterSummary,
       aggregateSummaries,
       vectorIndex,
-      foreshadowingReview: pending('Foreshadowing evidence recheck remains scheduled for the next batch'),
-      timelineReview: pending('Timeline recheck remains scheduled for the next batch'),
-      outlineDeviation: pending('Outline deviation detection remains scheduled for the next batch'),
+      foreshadowingReview,
+      timelineReview,
+      outlineDeviation,
       conflictReview,
     };
     const coreSyncSuccess = [chapterSummary, aggregateSummaries, vectorIndex]
@@ -117,6 +121,82 @@ export class ChapterDerivedDataSyncService {
       warnings,
     };
   }
+
+  getLockGate(projectId: string, chapterId: string, content: string) {
+    const checksum = this.checksum(content);
+    const db = this.database.getDb();
+    const sync = db.prepare('SELECT * FROM chapter_derived_sync_states WHERE project_id=? AND chapter_id=?').get(projectId, chapterId) as any;
+    const reviews = db.prepare(`SELECT r.id, r.review_type, r.issue_type FROM chapter_continuity_reviews r
+      LEFT JOIN state_items s ON s.id=r.state_item_id
+      WHERE r.project_id=? AND r.chapter_id=? AND r.content_checksum=? AND r.blocks_lock=1
+        AND COALESCE(s.status,r.status) IN ('pending','conflict','stale')`).all(projectId, chapterId, checksum) as any[];
+    const reasons: string[] = [];
+    if (!sync || sync.content_checksum !== checksum) reasons.push('derived data is not current for the chapter checksum');
+    if (sync?.summary_sync_status === 'warning') reasons.push('chapter summary synchronization has a warning');
+    if (sync?.vector_sync_status === 'warning') reasons.push('chapter vector synchronization has a warning');
+    reasons.push(...reviews.map((row) => `${row.review_type}:${row.issue_type}`));
+    return { allowed: reasons.length === 0, reasons, reviewItemIds: reviews.map((row) => row.id), checksum };
+  }
+
+  private reviewForeshadowing(input: SyncInput, checksum: string): ContinuityReviewStep {
+    const rows = this.database.getDb().prepare(`SELECT t.*, e.id event_id, e.event_type, e.evidence
+      FROM foreshadowing_threads t JOIN foreshadowing_lifecycle_events e ON e.thread_id=t.id
+      WHERE t.project_id=? AND e.chapter_id=?`).all(input.projectId, input.chapterId) as any[];
+    const issues: any[] = [];
+    for (const row of rows) {
+      const evidence = String(row.evidence || '').trim();
+      const was = evidence && input.beforeContent.includes(evidence);
+      const is = evidence && input.afterContent.includes(evidence);
+      if (was && !is) issues.push({ type: row.event_type === 'recovered' ? 'removed_recovery' : 'missing_evidence', target: row.id, requirement: row.title, old: evidence, next: '', severity: row.event_type === 'recovered' ? 'high' : 'medium', block: row.event_type === 'recovered' });
+      if (!was && is) issues.push({ type: 'evidence_added', target: row.id, requirement: row.title, old: '', next: evidence, severity: 'low', block: false });
+    }
+    return this.persistReviews(input, checksum, 'foreshadowing', issues);
+  }
+
+  private reviewTimeline(input: SyncInput, checksum: string): ContinuityReviewStep {
+    const rows = this.database.getDb().prepare(`SELECT * FROM timeline_three_line_events WHERE project_id=? AND chapter_id=?`).all(input.projectId, input.chapterId) as any[];
+    const issues: any[] = [];
+    for (const row of rows) {
+      const evidence = String(row.summary || row.story_time_text || '').trim();
+      if (evidence && input.beforeContent.includes(evidence) && !input.afterContent.includes(evidence)) {
+        issues.push({ type: row.review_status === 'confirmed' ? 'confirmed_event_overturned' : 'event_removed', target: row.id, requirement: row.title, old: evidence, next: '', severity: row.review_status === 'confirmed' ? 'high' : 'medium', block: row.review_status === 'confirmed' });
+      }
+    }
+    const timeMarks = input.afterContent.match(/(?:第[一二三四五六七八九十\d]+[天日年月]|\d{4}年\d{1,2}月\d{1,2}日)/g) || [];
+    if (timeMarks.length > 1 && new Set(timeMarks).size !== timeMarks.length) {
+      issues.push({ type: 'time_order_risk', requirement: '时间标记顺序应保持一致', old: '', next: timeMarks.join(' / '), severity: 'medium', block: false });
+    }
+    return this.persistReviews(input, checksum, 'timeline', issues);
+  }
+
+  private reviewOutline(input: SyncInput, checksum: string, chapter: any): ContinuityReviewStep {
+    const outline = chapter.outline_id ? this.database.getDb().prepare('SELECT * FROM outlines WHERE id=? AND project_id=?').get(chapter.outline_id, input.projectId) as any : null;
+    if (!outline) return { status: 'pending', detail: 'Chapter is not linked to an outline; author review is required', issueCount: 0, blockingCount: 0, reviewItemIds: [] };
+    const issues: any[] = [];
+    const requirements = [String(outline.content || ''), ...this.jsonStrings(outline.plot_points), ...this.jsonStrings(outline.scenes)].filter((v) => v.length >= 4);
+    for (const requirement of requirements.slice(0, 20)) {
+      if (!input.afterContent.includes(requirement)) issues.push({ type: 'missing_requirement', target: outline.id, requirement, old: input.beforeContent.includes(requirement) ? requirement : '', next: '', severity: 'medium', block: false });
+    }
+    return this.persistReviews(input, checksum, 'outline', issues);
+  }
+
+  private persistReviews(input: SyncInput, checksum: string, reviewType: string, issues: any[]): ContinuityReviewStep {
+    const db = this.database.getDb(); const now = new Date().toISOString(); const ids: string[] = [];
+    for (const issue of issues) {
+      const summary = `${reviewType}:${issue.type}:${issue.requirement || issue.target || input.chapterId}`;
+      const state = this.stateItems?.create(input.projectId, { sourceType: 'chapter_continuity_recheck', sourceId: input.chapterId, sourceChapterId: input.chapterId, targetType: reviewType, targetId: issue.target, title: summary, summary, content: issue.next || issue.old, payload: { oldEvidence: issue.old, newEvidence: issue.next, changeType: issue.type, severity: issue.severity, blocksLock: issue.block }, status: issue.block ? 'conflict' : 'pending', authority: 'soft_candidate', source: 'chapter_recheck', createdBy: 'chapter-derived-sync' });
+      const id = randomUUID();
+      db.prepare(`INSERT INTO chapter_continuity_reviews (id,project_id,chapter_id,content_checksum,review_type,issue_type,target_id,requirement,old_evidence,new_evidence,change_type,severity,blocks_lock,status,state_item_id,payload,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chapter_id,content_checksum,review_type,issue_type,target_id) DO UPDATE SET updated_at=excluded.updated_at`)
+        .run(id,input.projectId,input.chapterId,checksum,reviewType,issue.type,issue.target||'',issue.requirement||null,issue.old||null,issue.next||null,issue.type,issue.severity,issue.block?1:0,issue.block?'conflict':'pending',state?.id||null,JSON.stringify(issue),now,now);
+      const row = db.prepare(`SELECT id FROM chapter_continuity_reviews WHERE chapter_id=? AND content_checksum=? AND review_type=? AND issue_type=? AND target_id=?`).get(input.chapterId,checksum,reviewType,issue.type,issue.target||'') as any;
+      ids.push(row.id);
+    }
+    const blocking = issues.filter((x) => x.block).length;
+    return { status: 'completed', detail: `Persisted ${issues.length} ${reviewType} review finding(s)`, issueCount: issues.length, blockingCount: blocking, reviewItemIds: ids };
+  }
+
+  private jsonStrings(raw: string): string[] { try { const value=JSON.parse(raw||'[]'); const out:string[]=[]; const walk=(v:any)=>{ if(typeof v==='string') out.push(v.trim()); else if(Array.isArray(v)) v.forEach(walk); else if(v&&typeof v==='object') Object.values(v).forEach(walk); }; walk(value); return out; } catch { return []; } }
 
   private async syncChapterSummary(
     input: SyncInput,
