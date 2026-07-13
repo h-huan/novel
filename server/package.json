@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude **/*.acceptance.spec.ts",
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
-    "test:acceptance": "vitest run src/modules/chapter/aggregate-summary.acceptance.spec.ts",
+    "test:acceptance": "vitest run --config vitest.acceptance.config.ts",
     "lint": "echo 'lint ok'",
     "clean": "rm -rf dist"
   },

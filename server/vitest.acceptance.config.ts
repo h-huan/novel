@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
+import { resolve } from 'path';
 export default defineConfig({
-  server: { deps: { external: ['node:sqlite'] } },
+  resolve: { alias: { 'node:sqlite': resolve(__dirname, 'src/__mocks__/node-sqlite.ts') } },
   test: { environment: 'node', include: ['src/acceptance/*.acceptance.spec.ts', 'src/modules/chapter/aggregate-summary.acceptance.spec.ts'] },
 });

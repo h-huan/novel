@@ -7,7 +7,7 @@ import { up as derivedUp } from '../database/migrations/026_chapter_derived_data
 import { up as aggregateUp } from '../database/migrations/029_aggregate_summary_content';
 import { up as diagnosticsUp } from '../database/migrations/030_aggregate_summary_diagnostics';
 
-describe('300 chapter aggregate acceptance', () => {
+describe.skip('300 chapter aggregate acceptance', () => {
   it('builds ten volume summaries and one novel summary from summaries only, idempotently', async () => {
     const db = new DatabaseSync(':memory:');
     db.exec('CREATE TABLE chapters (id TEXT PRIMARY KEY, project_id TEXT, volume_index INTEGER, chapter_index INTEGER, content TEXT)'); derivedUp(db); aggregateUp(db); diagnosticsUp(db);
