@@ -11,7 +11,14 @@ import { StateItemService } from '../../state/state-item.service';
 
 export type DerivedSyncStepStatus = 'completed' | 'pending' | 'warning';
 export interface DerivedSyncStep { status: DerivedSyncStepStatus; detail: string; }
-export interface ContinuityReviewStep extends DerivedSyncStep { issueCount: number; blockingCount: number; reviewItemIds: string[]; }
+export interface ContinuityReviewStep extends DerivedSyncStep {
+  issueCount: number;
+  blockingCount: number;
+  reviewIds: string[];
+  stateItemIds: string[];
+  /** @deprecated use reviewIds and stateItemIds */
+  reviewItemIds?: string[];
+}
 export interface ChapterSummaryStep extends DerivedSyncStep { entityId?: string; checksum?: string; }
 export interface AggregateSummaryStep extends DerivedSyncStep { staleTargets?: string[]; }
 export interface VectorIndexStep extends DerivedSyncStep {
@@ -73,7 +80,7 @@ export class ChapterDerivedDataSyncService {
 
     const contentChecksum = this.checksum(input.afterContent);
     const warnings: string[] = [];
-    this.persistSyncState(input, contentChecksum, 'pending', 'pending', true, null);
+    this.persistSyncState(input, contentChecksum, 'pending', 'pending', 'pending', 'pending', 'pending', true, false, []);
 
     const chapterSummary = await this.syncChapterSummary(input, contentChecksum, warnings);
     let aggregateSummaries: AggregateSummaryStep;
@@ -101,13 +108,22 @@ export class ChapterDerivedDataSyncService {
     const coreSyncSuccess = [chapterSummary, aggregateSummaries, vectorIndex]
       .every((step) => step.status === 'completed') && warnings.length === 0;
     const fullSyncSuccess = Object.values(steps).every((step) => step.status === 'completed') && warnings.length === 0;
+    const needsAuthorReview = foreshadowingReview.issueCount > 0 || timelineReview.issueCount > 0
+      || outlineDeviation.issueCount > 0 || outlineDeviation.status === 'pending';
+    const needsResync = !fullSyncSuccess && !(outlineDeviation.status === 'pending'
+      && Object.entries(steps).filter(([key]) => key !== 'outlineDeviation').every(([, step]) => step.status === 'completed')
+      && warnings.length === 0);
     this.persistSyncState(
       input,
       contentChecksum,
       chapterSummary.status,
       vectorIndex.status,
-      !coreSyncSuccess,
-      warnings.length ? warnings.join('; ') : null,
+      foreshadowingReview.status,
+      timelineReview.status,
+      outlineDeviation.status,
+      needsResync,
+      needsAuthorReview,
+      warnings,
     );
 
     return {
@@ -126,7 +142,7 @@ export class ChapterDerivedDataSyncService {
     const checksum = this.checksum(content);
     const db = this.database.getDb();
     const sync = db.prepare('SELECT * FROM chapter_derived_sync_states WHERE project_id=? AND chapter_id=?').get(projectId, chapterId) as any;
-    const reviews = db.prepare(`SELECT r.id, r.review_type, r.issue_type FROM chapter_continuity_reviews r
+    const reviews = db.prepare(`SELECT r.id AS review_id, r.state_item_id, r.review_type, r.issue_type FROM chapter_continuity_reviews r
       LEFT JOIN state_items s ON s.id=r.state_item_id
       WHERE r.project_id=? AND r.chapter_id=? AND r.content_checksum=? AND r.blocks_lock=1
         AND COALESCE(s.status,r.status) IN ('pending','conflict','stale')`).all(projectId, chapterId, checksum) as any[];
@@ -134,8 +150,21 @@ export class ChapterDerivedDataSyncService {
     if (!sync || sync.content_checksum !== checksum) reasons.push('derived data is not current for the chapter checksum');
     if (sync?.summary_sync_status === 'warning') reasons.push('chapter summary synchronization has a warning');
     if (sync?.vector_sync_status === 'warning') reasons.push('chapter vector synchronization has a warning');
+    if (sync?.foreshadowing_sync_status === 'warning') reasons.push('foreshadowing synchronization has a warning');
+    if (sync?.timeline_sync_status === 'warning') reasons.push('timeline synchronization has a warning');
+    if (sync?.outline_sync_status === 'warning') reasons.push('outline synchronization has a warning');
     reasons.push(...reviews.map((row) => `${row.review_type}:${row.issue_type}`));
-    return { allowed: reasons.length === 0, reasons, reviewItemIds: reviews.map((row) => row.id), checksum };
+    return {
+      allowed: reasons.length === 0, reasons,
+      reviewIds: reviews.map((row) => row.review_id),
+      stateItemIds: reviews.map((row) => row.state_item_id).filter(Boolean),
+      checksum,
+      syncStatuses: {
+        summary: sync?.summary_sync_status || 'missing', vector: sync?.vector_sync_status || 'missing',
+        foreshadowing: sync?.foreshadowing_sync_status || 'missing', timeline: sync?.timeline_sync_status || 'missing',
+        outline: sync?.outline_sync_status || 'missing',
+      },
+    };
   }
 
   private reviewForeshadowing(input: SyncInput, checksum: string): ContinuityReviewStep {
@@ -171,7 +200,7 @@ export class ChapterDerivedDataSyncService {
 
   private reviewOutline(input: SyncInput, checksum: string, chapter: any): ContinuityReviewStep {
     const outline = chapter.outline_id ? this.database.getDb().prepare('SELECT * FROM outlines WHERE id=? AND project_id=?').get(chapter.outline_id, input.projectId) as any : null;
-    if (!outline) return { status: 'pending', detail: 'Chapter is not linked to an outline; author review is required', issueCount: 0, blockingCount: 0, reviewItemIds: [] };
+    if (!outline) return { status: 'pending', detail: 'Chapter is not linked to an outline; author review is required', issueCount: 0, blockingCount: 0, reviewIds: [], stateItemIds: [] };
     const issues: any[] = [];
     const requirements = [String(outline.content || ''), ...this.jsonStrings(outline.plot_points), ...this.jsonStrings(outline.scenes)].filter((v) => v.length >= 4);
     for (const requirement of requirements.slice(0, 20)) {
@@ -181,19 +210,27 @@ export class ChapterDerivedDataSyncService {
   }
 
   private persistReviews(input: SyncInput, checksum: string, reviewType: string, issues: any[]): ContinuityReviewStep {
-    const db = this.database.getDb(); const now = new Date().toISOString(); const ids: string[] = [];
+    const db = this.database.getDb(); const now = new Date().toISOString(); const reviewIds: string[] = []; const stateItemIds: string[] = [];
     for (const issue of issues) {
-      const summary = `${reviewType}:${issue.type}:${issue.requirement || issue.target || input.chapterId}`;
-      const state = this.stateItems?.create(input.projectId, { sourceType: 'chapter_continuity_recheck', sourceId: input.chapterId, sourceChapterId: input.chapterId, targetType: reviewType, targetId: issue.target, title: summary, summary, content: issue.next || issue.old, payload: { oldEvidence: issue.old, newEvidence: issue.next, changeType: issue.type, severity: issue.severity, blocksLock: issue.block }, status: issue.block ? 'conflict' : 'pending', authority: 'soft_candidate', source: 'chapter_recheck', createdBy: 'chapter-derived-sync' });
-      const id = randomUUID();
-      db.prepare(`INSERT INTO chapter_continuity_reviews (id,project_id,chapter_id,content_checksum,review_type,issue_type,target_id,requirement,old_evidence,new_evidence,change_type,severity,blocks_lock,status,state_item_id,payload,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chapter_id,content_checksum,review_type,issue_type,target_id) DO UPDATE SET updated_at=excluded.updated_at`)
-        .run(id,input.projectId,input.chapterId,checksum,reviewType,issue.type,issue.target||'',issue.requirement||null,issue.old||null,issue.next||null,issue.type,issue.severity,issue.block?1:0,issue.block?'conflict':'pending',state?.id||null,JSON.stringify(issue),now,now);
-      const row = db.prepare(`SELECT id FROM chapter_continuity_reviews WHERE chapter_id=? AND content_checksum=? AND review_type=? AND issue_type=? AND target_id=?`).get(input.chapterId,checksum,reviewType,issue.type,issue.target||'') as any;
-      ids.push(row.id);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const id = randomUUID();
+        db.prepare(`INSERT INTO chapter_continuity_reviews (id,project_id,chapter_id,content_checksum,review_type,issue_type,target_id,requirement,old_evidence,new_evidence,change_type,severity,blocks_lock,status,state_item_id,payload,created_at,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chapter_id,content_checksum,review_type,issue_type,target_id) DO NOTHING`)
+          .run(id,input.projectId,input.chapterId,checksum,reviewType,issue.type,issue.target||'',issue.requirement||null,issue.old||null,issue.next||null,issue.type,issue.severity,issue.block?1:0,issue.block?'conflict':'pending',null,JSON.stringify(issue),now,now);
+        let row = db.prepare(`SELECT id,state_item_id FROM chapter_continuity_reviews WHERE chapter_id=? AND content_checksum=? AND review_type=? AND issue_type=? AND target_id=?`).get(input.chapterId,checksum,reviewType,issue.type,issue.target||'') as any;
+        if (!row.state_item_id && this.stateItems) {
+          const dedupeKey = [input.chapterId, checksum, reviewType, issue.type, issue.target || ''].join(':');
+          const summary = `${reviewType}:${issue.type}:${dedupeKey}`;
+          const state = this.stateItems.create(input.projectId, { sourceType: 'chapter_continuity_recheck', sourceId: dedupeKey, sourceChapterId: input.chapterId, targetType: reviewType, targetId: issue.target, title: summary, summary, content: issue.next || issue.old, payload: { dedupeKey, oldEvidence: issue.old, newEvidence: issue.next, changeType: issue.type, severity: issue.severity, blocksLock: issue.block }, status: issue.block ? 'conflict' : 'pending', authority: 'soft_candidate', source: 'chapter_recheck', createdBy: 'chapter-derived-sync' });
+          db.prepare('UPDATE chapter_continuity_reviews SET state_item_id=?,updated_at=? WHERE id=? AND state_item_id IS NULL').run(state.id,now,row.id);
+          row = { ...row, state_item_id: state.id };
+        }
+        db.exec('COMMIT'); reviewIds.push(row.id); if (row.state_item_id) stateItemIds.push(row.state_item_id);
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
     const blocking = issues.filter((x) => x.block).length;
-    return { status: 'completed', detail: `Persisted ${issues.length} ${reviewType} review finding(s)`, issueCount: issues.length, blockingCount: blocking, reviewItemIds: ids };
+    return { status: 'completed', detail: `Persisted ${issues.length} ${reviewType} review finding(s)`, issueCount: issues.length, blockingCount: blocking, reviewIds, stateItemIds };
   }
 
   private jsonStrings(raw: string): string[] { try { const value=JSON.parse(raw||'[]'); const out:string[]=[]; const walk=(v:any)=>{ if(typeof v==='string') out.push(v.trim()); else if(Array.isArray(v)) v.forEach(walk); else if(v&&typeof v==='object') Object.values(v).forEach(walk); }; walk(value); return out; } catch { return []; } }
@@ -421,27 +458,32 @@ export class ChapterDerivedDataSyncService {
   private persistSyncState(
     input: SyncInput,
     checksum: string,
-    summaryStatus: string,
-    vectorStatus: string,
+    summaryStatus: string, vectorStatus: string, foreshadowingStatus: string, timelineStatus: string, outlineStatus: string,
     needsResync: boolean,
-    lastError: string | null,
+    needsAuthorReview: boolean,
+    warnings: string[],
   ): void {
     const now = new Date().toISOString();
     this.database.getDb().prepare(`
       INSERT INTO chapter_derived_sync_states (
         chapter_id, project_id, content_checksum, summary_sync_status, vector_sync_status,
-        needs_resync, last_error, last_attempt_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        foreshadowing_sync_status, timeline_sync_status, outline_sync_status,
+        needs_resync, needs_author_review, last_error, last_attempt_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chapter_id) DO UPDATE SET
         project_id = excluded.project_id,
         content_checksum = excluded.content_checksum,
         summary_sync_status = excluded.summary_sync_status,
         vector_sync_status = excluded.vector_sync_status,
+        foreshadowing_sync_status = excluded.foreshadowing_sync_status,
+        timeline_sync_status = excluded.timeline_sync_status,
+        outline_sync_status = excluded.outline_sync_status,
         needs_resync = excluded.needs_resync,
+        needs_author_review = excluded.needs_author_review,
         last_error = excluded.last_error,
         last_attempt_at = excluded.last_attempt_at,
         updated_at = excluded.updated_at
-    `).run(input.chapterId, input.projectId, checksum, summaryStatus, vectorStatus, needsResync ? 1 : 0, lastError, now, now);
+    `).run(input.chapterId, input.projectId, checksum, summaryStatus, vectorStatus, foreshadowingStatus, timelineStatus, outlineStatus, needsResync ? 1 : 0, needsAuthorReview ? 1 : 0, warnings.length ? JSON.stringify(warnings) : null, now, now);
   }
 
   private checksum(content: string): string {

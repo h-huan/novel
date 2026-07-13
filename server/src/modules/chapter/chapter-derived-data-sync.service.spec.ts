@@ -82,11 +82,13 @@ class FakeDatabase {
       return;
     }
     if (sql.startsWith('insert into chapter_derived_sync_states')) {
-      const [chapterId, projectId, checksum, summaryStatus, vectorStatus, needsResync, lastError, lastAttemptAt, updatedAt] = args;
+      const [chapterId, projectId, checksum, summaryStatus, vectorStatus, foreshadowingStatus, timelineStatus, outlineStatus, needsResync, needsAuthorReview, lastError, lastAttemptAt, updatedAt] = args;
       this.syncStates.set(chapterId, {
         chapter_id: chapterId, project_id: projectId, content_checksum: checksum,
         summary_sync_status: summaryStatus, vector_sync_status: vectorStatus,
-        needs_resync: needsResync, last_error: lastError, last_attempt_at: lastAttemptAt, updated_at: updatedAt,
+        foreshadowing_sync_status: foreshadowingStatus, timeline_sync_status: timelineStatus,
+        outline_sync_status: outlineStatus, needs_resync: needsResync, needs_author_review: needsAuthorReview,
+        last_error: lastError, last_attempt_at: lastAttemptAt, updated_at: updatedAt,
       });
     }
   }

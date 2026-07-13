@@ -122,7 +122,7 @@ export class ChapterService {
     if (this.derivedDataSync) {
       const gate = this.derivedDataSync.getLockGate(existing.project_id, id, existing.content || '');
       if (!gate.allowed) {
-        throw new BadRequestException({ message: 'Chapter continuity gate blocked locking', reasons: gate.reasons, reviewItemIds: gate.reviewItemIds });
+        throw new BadRequestException({ code: 'CHAPTER_LOCK_BLOCKED', message: 'Chapter continuity gate blocked locking', reasons: gate.reasons, reviewIds: gate.reviewIds, stateItemIds: gate.stateItemIds, syncStatuses: gate.syncStatuses });
       }
     }
     this.saveContentSnapshot(existing, 'Chapter lock snapshot', 'system');
