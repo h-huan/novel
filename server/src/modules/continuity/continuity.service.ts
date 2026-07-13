@@ -1070,6 +1070,7 @@ export class ContinuityService {
     const id = uuid();
     const payload = {
       ...(suggestion.payload || {}),
+      intent: 'review_only',
       suggestionId,
       evidence: suggestion.evidence || '',
       riskLevel: suggestion.riskLevel || 'medium',

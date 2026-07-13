@@ -61,4 +61,17 @@ describe('continuity review idempotency', () => {
     db.prepare("UPDATE state_items SET status='confirmed' WHERE id=?").run(created.stateItemIds[0]);
     expect(service.getLockGate('p','c','new').allowed).toBe(true);
   });
+
+  it('blocks locking while derived data needs resynchronization, then allows it after resync clears the flag', () => {
+    const { db,service } = fixture(); const checksum=createHash('sha256').update('new').digest('hex');
+    db.prepare(`INSERT INTO chapter_derived_sync_states (chapter_id,project_id,content_checksum,summary_sync_status,vector_sync_status,foreshadowing_sync_status,timeline_sync_status,outline_sync_status,needs_resync,needs_author_review,updated_at) VALUES ('c','p',?,'completed','completed','completed','completed','completed',1,1,'now')`).run(checksum);
+
+    const blocked = service.getLockGate('p', 'c', 'new');
+    expect(blocked.allowed).toBe(false); expect(blocked.needsResync).toBe(true); expect(blocked.needsAuthorReview).toBe(true);
+    expect(blocked.reasons).toContain('chapter derived data requires resynchronization');
+
+    db.prepare(`UPDATE chapter_derived_sync_states SET needs_resync=0 WHERE chapter_id='c'`).run();
+    const allowed = service.getLockGate('p', 'c', 'new');
+    expect(allowed.allowed).toBe(true); expect(allowed.needsResync).toBe(false); expect(allowed.needsAuthorReview).toBe(true);
+  });
 });

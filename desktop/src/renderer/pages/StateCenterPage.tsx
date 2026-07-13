@@ -150,9 +150,18 @@ const StateCenterPage: React.FC = () => {
     if (!projectId) return;
     setMessage('');
     try {
-      await api.post(`/projects/${projectId}/state/items/${itemId}/${action}`, {});
+      const response = await api.post(`/projects/${projectId}/state/items/${itemId}/${action}`, {});
       await loadAll();
-      setMessage(action === 'confirm' ? '状态已确稿并写回长期状态' : action === 'reject' ? '状态已驳回' : '状态已归档');
+      if (action === 'confirm') {
+        const writeback = (apiPayload(response) as any).item?.writeback;
+        setMessage(writeback?.mode === 'review_only'
+          ? '复核项已确认，未修改权威内容'
+          : writeback?.mode === 'canonical_change'
+            ? `已写入 ${writeback.canonicalType}`
+            : '状态已确稿');
+      } else {
+        setMessage(action === 'reject' ? '状态已驳回' : '状态已归档');
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '操作失败');
     }

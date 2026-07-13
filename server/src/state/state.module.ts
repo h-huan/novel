@@ -8,8 +8,10 @@ import { Module } from '@nestjs/common';
 import { StateEngineService } from './state-engine.service';
 import { StatePersistenceService } from './state-persistence.service';
 import { StateItemService } from './state-item.service';
+import { ContinuityModule } from '../modules/continuity/continuity.module';
 
 @Module({
+  imports: [ContinuityModule],
   providers: [StateEngineService, StatePersistenceService, StateItemService],
   exports: [StateEngineService, StatePersistenceService, StateItemService],
 })

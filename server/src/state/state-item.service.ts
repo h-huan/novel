@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { randomUUID, createHash } from 'crypto';
 import { DatabaseService } from '../database/database.service';
+import { ContinuityService } from '../modules/continuity/continuity.service';
 import { WRITING_QUALITY_TAGS } from './writing-quality-tags';
 
 type StateStatus = 'pending' | 'confirmed' | 'rejected' | 'archived' | 'conflict' | 'stale';
@@ -30,7 +31,10 @@ interface StateItemInput {
 export class StateItemService {
   private readonly logger = new Logger(StateItemService.name);
 
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    @Optional() private readonly continuityService?: ContinuityService,
+  ) {}
 
   list(projectId: string, query: { status?: string; targetType?: string; limit?: string | number } = {}) {
     const db = this.databaseService.getDb();
@@ -86,6 +90,10 @@ export class StateItemService {
     }
 
     const id = randomUUID();
+    const payload = {
+      intent: (input.payload as any)?.intent || 'review_only',
+      ...(input.payload || {}),
+    };
     db.prepare(`
       INSERT INTO state_items (
         id, project_id, source_type, source_id, source_chapter_id, target_type, target_id, target_label,
@@ -105,7 +113,7 @@ export class StateItemService {
       input.title || input.targetLabel || targetType,
       summary,
       input.content || summary,
-      JSON.stringify(input.payload || {}),
+      JSON.stringify(payload),
       input.status || 'pending',
       input.authority || this.authorityForStatus(input.status || 'pending'),
       input.source || 'ai_extracted',
@@ -133,6 +141,7 @@ export class StateItemService {
     const isArchived = existing.status === 'archived';
     const oldPayload = this.parseJson(existing.payload, {});
     const mergedPayload = {
+      intent: (input.payload as any)?.intent || (oldPayload as any).intent || 'review_only',
       ...oldPayload,
       ...(input.payload || {}),
       previousStatus: existing.status,
@@ -214,13 +223,17 @@ export class StateItemService {
     const db = this.databaseService.getDb();
     db.exec('BEGIN');
     try {
+      const payload = item.payload && typeof item.payload === 'object'
+        ? item.payload as Record<string, any>
+        : this.parseJson<Record<string, any>>(String(item.payload || ''), {});
+      const writeback = payload.intent === 'canonical_change'
+        ? this.applyCanonicalChange(projectId, payload.canonicalChange)
+        : this.confirmReviewOnly(projectId, item, payload);
       db.prepare(`
         UPDATE state_items
         SET status = 'confirmed', authority = 'hard_fact', confirmed_by = ?, confirmed_at = datetime('now'), updated_at = datetime('now')
         WHERE project_id = ? AND id = ?
       `).run(confirmedBy, projectId, id);
-
-      const writeback = this.writeBackCanonical(projectId, item, confirmedBy);
       db.prepare(`
         UPDATE character_evolution_events
         SET status = 'confirmed', confirmed_at = datetime('now'), updated_at = datetime('now')
@@ -703,70 +716,64 @@ export class StateItemService {
     );
   }
 
-  private writeBackCanonical(projectId: string, item: any, actor: string) {
+  private confirmReviewOnly(projectId: string, item: any, payload: Record<string, any>) {
     const db = this.databaseService.getDb();
-    const now = new Date().toISOString();
-    if (item.targetType === 'character') {
-      const characterId = item.targetId || this.findCharacterId(projectId, item.targetLabel || item.title);
-      if (!characterId) return { skipped: true, reason: 'character_not_matched' };
-      const latest = db.prepare(`
-        SELECT * FROM character_states WHERE project_id = ? AND character_id = ?
-        ORDER BY snapshot_order DESC LIMIT 1
-      `).get(projectId, characterId) as any;
-      const states = latest ? this.parseJson(latest.states_json, {}) : {};
-      const nextStates = {
-        ...states,
-        last_confirmed_change: item.summary,
-        last_confirmed_at: now,
-      };
-      const order = (latest?.snapshot_order || 0) + 1;
-      db.prepare(`
-        INSERT INTO character_states (
-          id, project_id, character_id, snapshot_order, states_json, change_summary,
-          changed_by, previous_snapshot_id, timestamp, needs_review, manually_modified, modified_fields
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
-      `).run(randomUUID(), projectId, characterId, order, JSON.stringify(nextStates), item.summary, actor, latest?.id || null, now, JSON.stringify(['last_confirmed_change']));
-      return { type: 'character_states', characterId, snapshotOrder: order };
-    }
+    const reviewTargets: Record<string, { table: string; id: string | null }> = {
+      relationship: { table: 'character_relationships', id: item.targetId || payload.relationshipId || null },
+      foreshadowing: { table: 'foreshadowing_threads', id: item.targetId || payload.threadId || null },
+      world_rule: { table: 'world_rules', id: item.targetId || payload.ruleId || null },
+      timeline_event: { table: 'timeline_three_line_events', id: item.targetId || payload.eventId || null },
+      character_state: { table: 'character_state_snapshots', id: payload.stateId || null },
+    };
+    const target = reviewTargets[item.targetType];
+    if (!target?.id) return { mode: 'review_only', applied: false, verified: true, reason: 'review_task_has_no_canonical_target' };
+    const existing = db.prepare(`SELECT id FROM ${target.table} WHERE project_id = ? AND id = ?`).get(projectId, target.id) as any;
+    if (!existing) return { mode: 'review_only', applied: false, verified: true, reason: 'review_task_has_no_canonical_target' };
+    db.prepare(`UPDATE ${target.table} SET review_status = 'confirmed', updated_at = ? WHERE project_id = ? AND id = ?`)
+      .run(new Date().toISOString(), projectId, target.id);
+    const verified = db.prepare(`SELECT review_status FROM ${target.table} WHERE project_id = ? AND id = ?`)
+      .get(projectId, target.id) as any;
+    if (verified?.review_status !== 'confirmed') throw new BadRequestException(`Failed to confirm review target: ${target.id}`);
+    return { mode: 'review_only', applied: true, verified: true, canonicalType: item.targetType, canonicalId: target.id };
+  }
 
-    if (item.targetType === 'foreshadowing') {
-      const targetId = item.targetId || randomUUID();
-      const existing = db.prepare('SELECT id FROM foreshadowing_states WHERE project_id = ? AND foreshadowing_id = ?')
+  private applyCanonicalChange(projectId: string, canonicalChange: any) {
+    if (!canonicalChange || typeof canonicalChange !== 'object') throw new BadRequestException('canonicalChange is required');
+    const { entityType, action, targetId, values } = canonicalChange;
+    const supported = new Set(['character_state', 'relationship', 'foreshadowing', 'world_rule', 'timeline_event']);
+    if (!supported.has(entityType)) throw new BadRequestException(`Unsupported canonical type: ${entityType}`);
+    if (action !== 'create' && action !== 'update') throw new BadRequestException('canonicalChange.action must be create or update');
+    if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).length === 0) {
+      throw new BadRequestException('canonicalChange.values must be a non-empty object');
+    }
+    if (action === 'update' && !targetId) throw new BadRequestException('canonicalChange.targetId is required for update');
+    if (!this.continuityService) throw new BadRequestException('Continuity service is unavailable for canonical writeback');
+
+    const metadata: Record<string, { table: string; create: string; update: string }> = {
+      character_state: { table: 'character_state_snapshots', create: 'createCharacterState', update: 'updateCharacterState' },
+      relationship: { table: 'character_relationships', create: 'createRelationship', update: 'updateRelationship' },
+      foreshadowing: { table: 'foreshadowing_threads', create: 'createForeshadowingThread', update: 'updateForeshadowingThread' },
+      world_rule: { table: 'world_rules', create: 'createWorldRule', update: 'updateWorldRule' },
+      timeline_event: { table: 'timeline_three_line_events', create: 'createTimelineEvent', update: 'updateTimelineEvent' },
+    };
+    const definition = metadata[entityType];
+    if (action === 'update') {
+      const existing = this.databaseService.getDb().prepare(`SELECT id, locked FROM ${definition.table} WHERE project_id = ? AND id = ?`)
         .get(projectId, targetId) as any;
-      if (existing) {
-        db.prepare(`
-          UPDATE foreshadowing_states
-          SET recovery_method = COALESCE(recovery_method, ?), needs_review = 0, reviewed_at = datetime('now'), reviewed_by = ?, updated_at = datetime('now')
-          WHERE project_id = ? AND foreshadowing_id = ?
-        `).run(item.summary, actor, projectId, targetId);
-      } else {
-        db.prepare(`
-          INSERT INTO foreshadowing_states (
-            id, project_id, foreshadowing_id, status, recovery_method, mention_count, needs_review, reviewed_at, reviewed_by, created_at, updated_at
-          ) VALUES (?, ?, ?, 'planted', ?, 1, 0, datetime('now'), ?, datetime('now'), datetime('now'))
-        `).run(randomUUID(), projectId, targetId, item.summary, actor);
-      }
-      return { type: 'foreshadowing_states', foreshadowingId: targetId };
+      if (!existing) throw new NotFoundException(`Canonical target not found: ${targetId}`);
+      if (Number(existing.locked) === 1) throw new BadRequestException(`Cannot overwrite locked canonical target: ${targetId}`);
     }
-
-    if (item.targetType === 'timeline_state' || item.targetType === 'plot') {
-      const chapter = item.sourceChapterId
-        ? db.prepare('SELECT chapter_index FROM chapters WHERE project_id = ? AND id = ?').get(projectId, item.sourceChapterId) as any
-        : null;
-      const chapterIndex = chapter?.chapter_index || 0;
-      const existing = db.prepare('SELECT id FROM plot_progress WHERE project_id = ? AND chapter_index = ?')
-        .get(projectId, chapterIndex) as any;
-      if (existing) {
-        db.prepare(`
-          UPDATE plot_progress
-          SET emotional_beat = ?, needs_review = 0, reviewed_at = datetime('now'), reviewed_by = ?, updated_at = datetime('now')
-          WHERE project_id = ? AND id = ?
-        `).run(item.summary, actor, projectId, existing.id);
-        return { type: 'plot_progress', id: existing.id };
-      }
-    }
-
-    return { type: item.targetType, status: 'confirmed_without_canonical_table' };
+    const valuesWithManualSource = { ...values, source: 'manual' };
+    const method = (this.continuityService as any)[action === 'create' ? definition.create : definition.update];
+    const result = action === 'create'
+      ? method.call(this.continuityService, projectId, valuesWithManualSource)
+      : method.call(this.continuityService, projectId, targetId, valuesWithManualSource);
+    const canonicalId = action === 'create' ? result?.id : targetId;
+    if (!canonicalId) throw new BadRequestException('Canonical writeback did not return a target id');
+    const verified = this.databaseService.getDb().prepare(`SELECT id FROM ${definition.table} WHERE project_id = ? AND id = ?`)
+      .get(projectId, canonicalId) as any;
+    if (!verified) throw new BadRequestException(`Failed to verify canonical writeback: ${canonicalId}`);
+    return { mode: 'canonical_change', applied: true, verified: true, canonicalType: entityType, canonicalId };
   }
 
   private buildLegacyConfirmedContext(projectId: string, chapterNumber: number | undefined, pendingItems: any[]) {

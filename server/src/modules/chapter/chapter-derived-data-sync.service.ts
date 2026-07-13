@@ -148,6 +148,7 @@ export class ChapterDerivedDataSyncService {
         AND COALESCE(s.status,r.status) IN ('pending','conflict','stale')`).all(projectId, chapterId, checksum) as any[];
     const reasons: string[] = [];
     if (!sync || sync.content_checksum !== checksum) reasons.push('derived data is not current for the chapter checksum');
+    if (sync?.needs_resync === 1) reasons.push('chapter derived data requires resynchronization');
     if (sync?.summary_sync_status === 'warning') reasons.push('chapter summary synchronization has a warning');
     if (sync?.vector_sync_status === 'warning') reasons.push('chapter vector synchronization has a warning');
     if (sync?.foreshadowing_sync_status === 'warning') reasons.push('foreshadowing synchronization has a warning');
@@ -159,6 +160,8 @@ export class ChapterDerivedDataSyncService {
       reviewIds: reviews.map((row) => row.review_id),
       stateItemIds: reviews.map((row) => row.state_item_id).filter(Boolean),
       checksum,
+      needsResync: sync?.needs_resync === 1,
+      needsAuthorReview: sync?.needs_author_review === 1,
       syncStatuses: {
         summary: sync?.summary_sync_status || 'missing', vector: sync?.vector_sync_status || 'missing',
         foreshadowing: sync?.foreshadowing_sync_status || 'missing', timeline: sync?.timeline_sync_status || 'missing',

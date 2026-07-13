@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { up as stateUp } from '../database/migrations/017_state_items_and_evolution';
 import { up as syncUp } from '../database/migrations/026_chapter_derived_data_sync';
 import { up as continuityUp } from '../database/migrations/027_chapter_continuity_rechecks';
@@ -11,7 +11,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof
 type Fixture = ReturnType<typeof fixture>;
 const openDatabases: Array<InstanceType<typeof DatabaseSync>> = [];
 
-function fixture() {
+function fixture(continuityService?: any) {
   const db = new DatabaseSync(':memory:');
   openDatabases.push(db);
   stateUp(db);
@@ -22,8 +22,29 @@ function fixture() {
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT, status TEXT NOT NULL DEFAULT 'draft',
       content TEXT DEFAULT '', checksum TEXT, volume_index INTEGER DEFAULT 1, chapter_index INTEGER DEFAULT 1
     )
+    ;
+    CREATE TABLE character_relationships (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, trust_score INTEGER NOT NULL DEFAULT 50,
+      review_status TEXT NOT NULL DEFAULT 'pending', locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+    );
+    CREATE TABLE character_state_snapshots (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, current_state TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
+      locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+    );
+    CREATE TABLE foreshadowing_threads (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, summary TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
+      locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+    );
+    CREATE TABLE world_rules (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, content TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
+      locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+    );
+    CREATE TABLE timeline_three_line_events (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, summary TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
+      locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+    )
   `);
-  return { db, service: new StateItemService({ getDb: () => db } as any) };
+  return { db, service: new StateItemService({ getDb: () => db } as any, continuityService) };
 }
 
 function addState(f: Fixture, id: string, status: string, targetType = 'character', targetId = 'hero') {
@@ -60,6 +81,10 @@ function addImpact(
       id, report_id, project_id, impact_type, target_type, target_id, summary, payload
     ) VALUES (?, ?, 'p', ?, 'state', ?, 'impact', ?)
   `).run(id, reportId, impactType, targetId, JSON.stringify(payload));
+}
+
+function setPayload(f: Fixture, id: string, payload: Record<string, unknown>) {
+  f.db.prepare(`UPDATE state_items SET payload = ? WHERE id = ?`).run(JSON.stringify(payload), id);
 }
 
 afterEach(() => {
@@ -196,5 +221,76 @@ describe('StateItemService impact actions', () => {
     addImpact(f, 'impact', 'may_make_confirmed_state_stale', { relatedStateItemId: 'missing' });
     expect(() => f.service.applyImpactItem('p', 'impact')).toThrow(NotFoundException);
     expect((f.db.prepare(`SELECT status FROM state_impact_items WHERE id='impact'`).get() as any).status).toBe('pending');
+  });
+});
+
+describe('StateItemService confirmation semantics', () => {
+  it('confirms review_only without changing canonical core content', () => {
+    const f = fixture();
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('rel', 'p', 25, 'pending', 'old')`).run();
+    addState(f, 'state', 'pending', 'relationship', 'rel');
+    setPayload(f, 'state', { intent: 'review_only', relationshipId: 'rel' });
+
+    const confirmed = f.service.confirm('p', 'state');
+
+    expect(f.db.prepare(`SELECT trust_score, review_status FROM character_relationships WHERE id='rel'`).get())
+      .toMatchObject({ trust_score: 25, review_status: 'confirmed' });
+    expect(confirmed.writeback).toMatchObject({ mode: 'review_only', applied: true, verified: true, canonicalId: 'rel' });
+  });
+
+  it('confirms a review_only task with no target without canonical writes', () => {
+    const f = fixture(); addState(f, 'state', 'pending', 'relationship', null as any);
+    setPayload(f, 'state', { intent: 'review_only' });
+
+    const confirmed = f.service.confirm('p', 'state');
+
+    expect(confirmed.writeback).toMatchObject({ mode: 'review_only', applied: false, verified: true, reason: 'review_task_has_no_canonical_target' });
+    expect((f.db.prepare(`SELECT status FROM state_items WHERE id='state'`).get() as any).status).toBe('confirmed');
+  });
+
+  it('rolls back a canonical_change with missing fields', () => {
+    const f = fixture({}); addState(f, 'state', 'pending', 'relationship', 'rel');
+    setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'relationship', action: 'update' } });
+
+    expect(() => f.service.confirm('p', 'state')).toThrow(BadRequestException);
+    expect((f.db.prepare(`SELECT status FROM state_items WHERE id='state'`).get() as any).status).toBe('pending');
+  });
+
+  it('uses ContinuityService and rereads a canonical target before confirming', () => {
+    const continuity = { updateRelationship: vi.fn() };
+    const f = fixture(continuity);
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('rel', 'p', 20, 'pending', 'old')`).run();
+    continuity.updateRelationship.mockImplementation((_projectId: string, id: string, values: any) => {
+      f.db.prepare(`UPDATE character_relationships SET trust_score = ?, updated_at = 'new' WHERE id = ?`).run(values.trustScore, id);
+      return { id };
+    });
+    addState(f, 'state', 'pending', 'relationship', 'rel');
+    setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'relationship', action: 'update', targetId: 'rel', values: { trustScore: 91 } } });
+
+    const confirmed = f.service.confirm('p', 'state');
+
+    expect(continuity.updateRelationship).toHaveBeenCalledWith('p', 'rel', expect.objectContaining({ trustScore: 91, source: 'manual' }));
+    expect((f.db.prepare(`SELECT trust_score FROM character_relationships WHERE id='rel'`).get() as any).trust_score).toBe(91);
+    expect(confirmed.writeback).toMatchObject({ mode: 'canonical_change', applied: true, verified: true, canonicalType: 'relationship', canonicalId: 'rel' });
+  });
+
+  it('does not let canonical_change overwrite a locked entity', () => {
+    const continuity = { updateRelationship: vi.fn() };
+    const f = fixture(continuity);
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, locked, updated_at) VALUES ('rel', 'p', 20, 'pending', 1, 'old')`).run();
+    addState(f, 'state', 'pending', 'relationship', 'rel');
+    setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'relationship', action: 'update', targetId: 'rel', values: { trustScore: 91 } } });
+
+    expect(() => f.service.confirm('p', 'state')).toThrow('Cannot overwrite locked canonical target');
+    expect(continuity.updateRelationship).not.toHaveBeenCalled();
+    expect((f.db.prepare(`SELECT status FROM state_items WHERE id='state'`).get() as any).status).toBe('pending');
+  });
+
+  it('does not confirm unsupported canonical types', () => {
+    const f = fixture({}); addState(f, 'state', 'pending');
+    setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'unsupported', action: 'create', values: { title: 'x' } } });
+
+    expect(() => f.service.confirm('p', 'state')).toThrow('Unsupported canonical type');
+    expect((f.db.prepare(`SELECT status FROM state_items WHERE id='state'`).get() as any).status).toBe('pending');
   });
 });
