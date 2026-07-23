@@ -1,177 +1,138 @@
-/**
- * VersionHistoryPage - 版本管理页面
- * 显示版本列表+版本对比+恢复功能
- */
-import React, { useState, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 
-interface Version { id: string; title: string; timestamp: string; size: number; isCurrent?: boolean; }
+type Chapter = { id: string; volumeIndex: number; chapterIndex: number; title: string; content?: string; wordCount?: number };
+type Version = { id: string; version: number; snapshot: string; checksum?: string; changeSummary?: string; createdBy?: string; createdAt?: string };
+
+const payload = (response: any) => response?.data ?? response;
+const wordCount = (text: string) => (text.match(/[\u4e00-\u9fff]|[A-Za-z0-9]+/g) || []).length;
 
 const VersionHistoryPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
-  const [chapterId, setChapterId] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [chapterId, setChapterId] = useState(searchParams.get('chapter') || '');
   const [versions, setVersions] = useState<Version[]>([]);
-  const [content, setContent] = useState('');
+  const [currentContent, setCurrentContent] = useState('');
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedA, setSelectedA] = useState<string | null>(null);
-  const [selectedB, setSelectedB] = useState<string | null>(null);
-  const [diffResult, setDiffResult] = useState<any>(null);
-  const [tab, setTab] = useState<'history' | 'diff'>('history');
+  const [message, setMessage] = useState('');
+
+  const selectedChapter = useMemo(() => chapters.find(chapter => chapter.id === chapterId), [chapters, chapterId]);
+  const displayedContent = selectedVersion === null
+    ? currentContent
+    : versions.find(version => version.version === selectedVersion)?.snapshot || '';
+
+  const loadChapters = useCallback(async () => {
+    if (!projectId) return;
+    const result = payload(await api.get(`/projects/${projectId}/chapters`));
+    const list = Array.isArray(result) ? result : result.chapters || [];
+    setChapters(list);
+    setChapterId(current => current || list[0]?.id || '');
+  }, [projectId]);
 
   const loadHistory = useCallback(async () => {
-    if (!chapterId.trim()) return;
+    if (!projectId || !chapterId) return;
     setLoading(true);
+    setMessage('');
     try {
-      const res = await api.post('/chain/version/history', { projectId, chapterId });
-      const data = res.data as any;
-      if (data.versions) setVersions(data.versions as Version[]);
-    } catch { /* */ }
-    setLoading(false);
-  }, [projectId, chapterId]);
+      const [chapterResult, historyResult] = await Promise.all([
+        api.get(`/projects/${projectId}/chapters/${chapterId}`),
+        api.get(`/projects/${projectId}/chapters/${chapterId}/versions`),
+      ]);
+      const chapter = payload(chapterResult) as Chapter;
+      const history = payload(historyResult);
+      setCurrentContent(chapter.content || '');
+      setVersions(Array.isArray(history) ? history : history.versions || []);
+      setSelectedVersion(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '无法读取该章节的真实版本记录');
+    } finally {
+      setLoading(false);
+    }
+  }, [chapterId, projectId]);
 
-  const createSnapshot = useCallback(async () => {
-    if (!chapterId.trim() || !content.trim()) return;
+  useEffect(() => { void loadChapters(); }, [loadChapters]);
+  useEffect(() => { if (chapterId) void loadHistory(); }, [chapterId, loadHistory]);
+
+  const chooseChapter = (id: string) => {
+    setChapterId(id);
+    setSearchParams(id ? { chapter: id } : {});
+  };
+
+  const restore = async (version: number) => {
+    if (!projectId || !chapterId) return;
+    if (!window.confirm(`恢复到版本 ${version} 会先自动保存当前正文快照。确定恢复吗？`)) return;
     setLoading(true);
+    setMessage('');
     try {
-      await api.post('/chain/version/snapshot', { projectId, chapterId, content, title: `手动保存 ${new Date().toLocaleTimeString()}` });
+      const result = payload(await api.post(`/projects/${projectId}/chapters/${chapterId}/versions/${version}/restore`, {}));
+      const syncWarning = result?.derivedSync?.warning || result?.stateSync?.warning;
+      setMessage(syncWarning ? `正文已恢复，但${syncWarning}` : `已恢复到版本 ${version}，当前正文已重新同步。`);
       await loadHistory();
-      setContent('');
-    } catch { /* */ }
-    setLoading(false);
-  }, [projectId, chapterId, content, loadHistory]);
-
-  const restoreVersion = useCallback(async (versionId: string) => {
-    if (!confirm('确定要恢复到该版本吗？当前内容将被覆盖。')) return;
-    try {
-      const res = await api.post('/chain/version/restore', { projectId, chapterId, versionId });
-      alert((res.data as any).message || '已恢复');
-      await loadHistory();
-    } catch { /* */ }
-  }, [projectId, chapterId, loadHistory]);
-
-  const compareVersions = useCallback(async () => {
-    if (!selectedA || !selectedB) return;
-    setLoading(true);
-    try {
-      const res = await api.post('/chain/version/diff', { projectId, chapterId, versionA: selectedA, versionB: selectedB });
-      setDiffResult((res.data as any).diff || (res.data as any));
-      setTab('diff');
-    } catch { /* */ }
-    setLoading(false);
-  }, [projectId, chapterId, selectedA, selectedB]);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '恢复失败；当前正文未被覆盖');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div style={{ padding: '24px', height: '100%', overflow: 'auto', maxWidth: '700px' }}>
-      <h1 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>📋 版本管理</h1>
-
-      {/* 输入章节ID */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        <input value={chapterId} onChange={e => setChapterId(e.target.value)} placeholder="章节ID"
-          style={{ flex: 1, padding: '8px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }} />
-        <button onClick={loadHistory} disabled={loading}
-          style={{ padding: '8px 16px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-          {loading ? '...' : '加载历史'}
-        </button>
-      </div>
-
-      {/* 创建快照 */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
-        <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="输入要保存为版本快照的章节内容..."
-          style={{ flex: 1, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', resize: 'vertical', outline: 'none', minHeight: '50px', lineHeight: 1.5 }} />
-        <button onClick={createSnapshot} disabled={loading || !chapterId}
-          style={{ padding: '8px 16px', backgroundColor: 'rgba(46,204,113,0.15)', border: '1px solid rgba(46,204,113,0.3)', borderRadius: '6px', color: '#2ecc71', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-          + 创建快照
-        </button>
-      </div>
-
-      {/* Tab切换 */}
-      <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '14px' }}>
-        <button onClick={() => setTab('history')} style={{ padding: '8px 14px', fontSize: '13px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: tab === 'history' ? '#e94560' : '#8a8aa0', borderBottom: tab === 'history' ? '2px solid #e94560' : '2px solid transparent' }}>版本历史</button>
-        <button onClick={() => setTab('diff')} disabled={!diffResult} style={{ padding: '8px 14px', fontSize: '13px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: tab === 'diff' ? '#e94560' : !diffResult ? '#3a3a50' : '#8a8aa0', borderBottom: tab === 'diff' ? '2px solid #e94560' : '2px solid transparent' }}>版本对比</button>
-      </div>
-
-      {/* 版本历史 */}
-      {tab === 'history' && (
+    <div style={styles.page}>
+      <header style={styles.header}>
         <div>
-          {versions.length === 0 && <p style={{ color: '#6c6c80', fontSize: '13px', textAlign: 'center', padding: '30px' }}>暂无版本历史，输入章节ID后点击加载</p>}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-            <select value={selectedA || ''} onChange={e => setSelectedA(e.target.value || null)} style={{ flex: 1, padding: '6px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }}>
-              <option value="">选择版本A(旧)</option>
-              {versions.map(v => <option key={v.id} value={v.id}>{v.title} ({new Date(v.timestamp).toLocaleDateString()})</option>)}
-            </select>
-            <select value={selectedB || ''} onChange={e => setSelectedB(e.target.value || null)} style={{ flex: 1, padding: '6px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }}>
-              <option value="">选择版本B(新)</option>
-              {versions.map(v => <option key={v.id} value={v.id}>{v.title} ({new Date(v.timestamp).toLocaleDateString()})</option>)}
-            </select>
-            <button onClick={compareVersions} disabled={!selectedA || !selectedB}
-              style={{ padding: '6px 14px', backgroundColor: '#3498db', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-              对比
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {versions.map(v => (
-              <div key={v.id} style={{
-                padding: '10px 14px', borderRadius: '8px', border: '1px solid',
-                backgroundColor: v.isCurrent ? 'rgba(46,204,113,0.06)' : 'rgba(255,255,255,0.02)',
-                borderColor: v.isCurrent ? 'rgba(46,204,113,0.2)' : 'rgba(255,255,255,0.06)',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: v.isCurrent ? '#2ecc71' : '#eaeaea' }}>{v.title}</span>
-                    <span style={{ fontSize: '11px', color: '#6c6c80', marginLeft: '8px' }}>{new Date(v.timestamp).toLocaleString()}</span>
-                    <span style={{ fontSize: '11px', color: '#6c6c80', marginLeft: '8px' }}>{v.size}字</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    {v.isCurrent && <span style={{ padding: '2px 8px', backgroundColor: 'rgba(46,204,113,0.1)', borderRadius: '4px', fontSize: '10px', color: '#2ecc71' }}>当前</span>}
-                    {!v.isCurrent && (
-                      <button onClick={() => restoreVersion(v.id)} style={{ padding: '3px 8px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '4px', color: '#f39c12', fontSize: '10px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                        恢复
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <button style={styles.link} onClick={() => navigate(`/project/${projectId}/writing${chapterId ? `?chapter=${chapterId}` : ''}`)}>返回正文</button>
+          <h1 style={styles.title}>修改记录</h1>
+          <p style={styles.subtitle}>这里读取数据库中该章节的真实正文快照；不会创建内存里的临时版本。</p>
         </div>
-      )}
+        <button style={styles.refresh} onClick={() => void loadHistory()} disabled={loading || !chapterId}>{loading ? '读取中…' : '刷新'}</button>
+      </header>
 
-      {/* 版本对比 */}
-      {tab === 'diff' && diffResult && (
-        <div>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '14px' }}>
-            <div style={{ padding: '10px', backgroundColor: 'rgba(46,204,113,0.08)', borderRadius: '6px', flex: 1, textAlign: 'center' }}>
-              <div style={{ fontSize: '20px', fontWeight: 700, color: '#2ecc71' }}>+{diffResult.additions || diffResult.stats?.additions || 0}</div>
-              <div style={{ fontSize: '11px', color: '#6c6c80' }}>新增</div>
+      <label style={styles.label}>核对章节
+        <select value={chapterId} onChange={event => chooseChapter(event.target.value)} style={styles.select}>
+          {chapters.length === 0 && <option value="">暂无章节</option>}
+          {chapters.map(chapter => <option key={chapter.id} value={chapter.id}>第{chapter.chapterIndex}章《{chapter.title || '未命名'}》</option>)}
+        </select>
+      </label>
+
+      {message && <div style={styles.notice}>{message}</div>}
+      {selectedChapter && <div style={styles.chapterInfo}>当前归属：第{selectedChapter.chapterIndex}章《{selectedChapter.title || '未命名'}》</div>}
+
+      <main style={styles.grid}>
+        <section style={styles.history}>
+          <button style={{ ...styles.version, ...(selectedVersion === null ? styles.activeVersion : {}) }} onClick={() => setSelectedVersion(null)}>
+            <strong>当前正文</strong><span>{wordCount(currentContent)} 字</span>
+          </button>
+          {versions.length === 0 ? <p style={styles.empty}>尚无历史快照。正文每次保存、送审或锁定前会自动保存已有内容。</p> : versions.map(version => (
+            <div key={version.id} style={{ ...styles.version, ...(selectedVersion === version.version ? styles.activeVersion : {}) }}>
+              <button style={styles.versionSelect} onClick={() => setSelectedVersion(version.version)}>
+                <strong>版本 {version.version}</strong><span>{new Date(version.createdAt || '').toLocaleString()} · {wordCount(version.snapshot || '')} 字</span>
+                <small>{version.changeSummary || '正文快照'}</small>
+              </button>
+              <button style={styles.restore} onClick={() => void restore(version.version)} disabled={loading}>恢复</button>
             </div>
-            <div style={{ padding: '10px', backgroundColor: 'rgba(231,76,60,0.08)', borderRadius: '6px', flex: 1, textAlign: 'center' }}>
-              <div style={{ fontSize: '20px', fontWeight: 700, color: '#e74c3c' }}>-{diffResult.deletions || diffResult.stats?.deletions || 0}</div>
-              <div style={{ fontSize: '11px', color: '#6c6c80' }}>删除</div>
-            </div>
-            <div style={{ padding: '10px', backgroundColor: 'rgba(52,152,219,0.08)', borderRadius: '6px', flex: 1, textAlign: 'center' }}>
-              <div style={{ fontSize: '20px', fontWeight: 700, color: '#3498db' }}>{diffResult.net || diffResult.stats?.net || 0}</div>
-              <div style={{ fontSize: '11px', color: '#6c6c80' }}>净变化</div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {(diffResult.changes || diffResult.differences || []).map((c: any, i: number) => (
-              <div key={i} style={{
-                padding: '8px 12px', borderRadius: '6px', border: '1px solid',
-                borderColor: c.type === 'insert' ? 'rgba(46,204,113,0.2)' : c.type === 'delete' ? 'rgba(231,76,60,0.2)' : 'rgba(243,156,18,0.2)',
-                backgroundColor: c.type === 'insert' ? 'rgba(46,204,113,0.04)' : c.type === 'delete' ? 'rgba(231,76,60,0.04)' : 'rgba(243,156,18,0.04)',
-              }}>
-                <div style={{ fontSize: '11px', color: c.type === 'insert' ? '#2ecc71' : c.type === 'delete' ? '#e74c3c' : '#f39c12', fontWeight: 600 }}>
-                  {c.type === 'insert' ? '+ 新增' : c.type === 'delete' ? '- 删除' : '~ 修改'} · {c.location || c.position}
-                </div>
-                <div style={{ fontSize: '12px', color: '#c0c0d0', marginTop: '4px' }}>{c.desc || c.description}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+          ))}
+        </section>
+        <section style={styles.reader}>
+          <div style={styles.readerHeader}><strong>{selectedVersion === null ? '当前正文' : `版本 ${selectedVersion} 正文`}</strong><span>{wordCount(displayedContent)} 字</span></div>
+          {displayedContent ? <article style={styles.prose}>{displayedContent}</article> : <p style={styles.empty}>该版本没有可阅读的正文内容。</p>}
+        </section>
+      </main>
     </div>
   );
+};
+
+const styles: Record<string, React.CSSProperties> = {
+  page: { height: '100%', overflow: 'auto', padding: 24, color: '#e9ecf6', background: '#11162a' },
+  header: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 18 },
+  link: { padding: 0, color: '#9db5ff', border: 0, background: 'transparent', cursor: 'pointer' }, title: { margin: '8px 0 4px', fontSize: 22 }, subtitle: { margin: 0, color: '#9ea8c6', fontSize: 13 },
+  refresh: { padding: '8px 14px', borderRadius: 6, color: '#fff', border: '1px solid #e94560', background: '#e94560', cursor: 'pointer' }, label: { display: 'grid', gap: 6, maxWidth: 560, fontSize: 13, color: '#aeb8d7' },
+  select: { padding: '9px 10px', color: '#edf0fb', background: '#1b213a', border: '1px solid #3a456d', borderRadius: 6 }, notice: { margin: '14px 0', padding: 10, color: '#ffd891', border: '1px solid #7d5e28', background: '#2d261c', borderRadius: 6 }, chapterInfo: { margin: '14px 0', color: '#aab5d3' },
+  grid: { display: 'grid', gridTemplateColumns: 'minmax(250px, 34%) minmax(0, 1fr)', gap: 16, minHeight: 520 }, history: { display: 'grid', alignContent: 'start', gap: 8 }, version: { display: 'flex', border: '1px solid #303b60', borderRadius: 8, overflow: 'hidden', background: '#181e34' }, activeVersion: { borderColor: '#e94560', background: '#29203a' },
+  versionSelect: { minWidth: 0, flex: 1, display: 'grid', gap: 4, textAlign: 'left', padding: 12, border: 0, color: '#ecf0ff', background: 'transparent', cursor: 'pointer' }, restore: { margin: 10, padding: '4px 10px', alignSelf: 'center', color: '#ffd37a', border: '1px solid #8c682c', borderRadius: 5, background: 'transparent', cursor: 'pointer' },
+  reader: { border: '1px solid #303b60', borderRadius: 8, background: '#171c31', minWidth: 0 }, readerHeader: { display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #303b60', color: '#c6d0eb' }, prose: { margin: 0, padding: 22, whiteSpace: 'pre-wrap', fontSize: 16, lineHeight: 2, color: '#f2f4fc' }, empty: { padding: 18, color: '#95a0c0', fontSize: 13, lineHeight: 1.7 },
 };
 
 export default VersionHistoryPage;

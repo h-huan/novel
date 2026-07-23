@@ -22,7 +22,7 @@ const MODULES: ModuleEntry[] = [
   { key: 'outline', label: '大纲', icon: '📋', path: 'outline', description: '规划卷章节结构与剧情' },
   { key: 'characters', label: '角色', icon: '👤', path: 'characters', description: '管理角色卡与关系图谱' },
   { key: 'world', label: '世界观', icon: '🌍', path: 'world', description: '地理/势力/力量体系设定' },
-  { key: 'organizationMap', label: '组织与地图', icon: '🗺️', path: 'organization-map', description: '管理势力层级与地点图谱' },
+  { key: 'organizationMap', label: '地点与势力', icon: '🗺️', path: 'organization-map', description: '记录故事实际出现的地点、组织和相互关系' },
   { key: 'foreshadowing', label: '伏笔', icon: '🎯', path: 'foreshadowing', description: '埋设与追踪伏笔回收' },
   { key: 'timeline', label: '时间线', icon: '⏰', path: 'timeline', description: '管理故事时间线与事件' },
   { key: 'material', label: '素材', icon: '📚', path: 'material', description: '管理写作参考资料' },

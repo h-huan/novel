@@ -27,7 +27,7 @@ export class CreateProjectDto {
   @IsOptional()
   @IsString()
   @IsIn(['full_auto', 'semi_auto', 'free'])
-  writingMode?: string = 'semi_auto';
+  writingMode?: string = 'full_auto';
 
   @IsOptional()
   @IsString()

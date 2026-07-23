@@ -1,12 +1,13 @@
 /**
  * 组织/势力 Service
  */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { OrganizationRepository } from '../../database/repositories/organization.repository';
 import type { OrganizationRow } from '../../database/repositories/organization.repository';
 import type { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
 import type { OrganizationType, OrganizationTreeNode } from '@novel/shared';
+import { StateItemService } from '../../state/state-item.service';
 
 export interface OrganizationResponse {
   id: string;
@@ -22,7 +23,7 @@ export interface OrganizationResponse {
 
 @Injectable()
 export class OrganizationService {
-  constructor(private readonly repo: OrganizationRepository) {}
+  constructor(private readonly repo: OrganizationRepository, @Optional() private readonly stateItems?: StateItemService) {}
 
   create(projectId: string, dto: CreateOrganizationDto): OrganizationResponse {
     const now = new Date().toISOString();
@@ -66,13 +67,26 @@ export class OrganizationService {
     if (dto.parentId !== undefined) updateData.parent_id = dto.parentId || null;
 
     this.repo.update(id, updateData);
-    return this.toResponse(this.repo.findById(id)!);
+    const response = this.toResponse(this.repo.findById(id)!);
+    this.stateItems?.analyzeImpactTracked(existing.project_id, {
+      targetType: 'organization', targetId: id,
+      summary: '组织/势力设定修改影响分析',
+      payload: { before: this.toResponse(existing), after: response, affects: ['character', 'outline', 'chapter_plan', 'chapter', 'map_point', 'writing_context'], needsReview: true },
+      createdBy: 'organization-service',
+    });
+    return response;
   }
 
   remove(id: string): { success: boolean } {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Organization ${id} not found`);
     this.repo.delete(id);
+    this.stateItems?.analyzeImpactTracked(existing.project_id, {
+      targetType: 'organization', targetId: id,
+      summary: '组织/势力删除影响分析',
+      payload: { operation: 'remove', before: this.toResponse(existing), affects: ['character', 'outline', 'chapter_plan', 'chapter', 'map_point', 'writing_context'], needsReview: true },
+      createdBy: 'organization-service',
+    });
     return { success: true };
   }
 

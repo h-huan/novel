@@ -1,16 +1,15 @@
 /**
  * ForeshadowingPage - 伏笔看板
  * 对接后端 /foreshadowing/* API
- * 状态机: buried → pending → recovered | cancelled
+ * 状态机: buried → active → reminder → recovered | cancelled
  */
 import React, { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useForeshadowingStore } from '../stores/foreshadowingStore';
 import { useProjectStore } from '../stores/projectStore';
-import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
-type ForeshadowingStatus = 'buried' | 'pending' | 'recovered' | 'cancelled';
+type ForeshadowingStatus = 'buried' | 'active' | 'reminder' | 'pending' | 'recovered' | 'cancelled';
 
 interface ForeshadowingItem {
   id: string;
@@ -21,16 +20,29 @@ interface ForeshadowingItem {
   scope: 'global' | 'volume' | 'chapter';
   buriedChapterIndex: number;
   plannedRecoveryChapterIndex: number;
+  recoveryWindowStart?: number;
+  recoveryWindowEnd?: number;
+  evidenceText?: string;
+  actualRecoveryChapterIndex?: number;
+  recoveryMethod?: string;
+  recoveryCondition?: string;
+  payoffDescription?: string;
+  riskLevel?: 'low' | 'medium' | 'high';
   relatedCharacterIds: string[];
   notes?: string;
 }
 
 const STATUS_LABELS: Record<ForeshadowingStatus, string> = {
-  buried: '埋设中', pending: '待回收', recovered: '已回收', cancelled: '已取消',
+  buried: '已埋设', active: '已激活', reminder: '临近回收', pending: '待回收', recovered: '已回收', cancelled: '已取消',
 };
 const STATUS_COLORS: Record<ForeshadowingStatus, string> = {
-  buried: '#3498db', pending: '#f39c12', recovered: '#2ecc71', cancelled: '#95a5a6',
+  buried: '#3498db', active: '#8b5cf6', reminder: '#f39c12', pending: '#f39c12', recovered: '#2ecc71', cancelled: '#95a5a6',
 };
+const TYPE_LABELS: Record<string, string> = {
+  hint: '提示线索', clue: '关键线索', object: '物件伏笔', identity: '身份伏笔',
+  relationship: '关系伏笔', mystery: '谜团', promise: '承诺', secret: '秘密',
+};
+const RISK_LABELS: Record<string, string> = { low: '低', medium: '中', high: '高' };
 
 const ForeshadowingPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
@@ -39,6 +51,7 @@ const ForeshadowingPage: React.FC = () => {
 
   const [filter, setFilter] = useState<ForeshadowingStatus | 'all'>('all');
   const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'volume' | 'chapter'>('all');
+  const [traceFilter, setTraceFilter] = useState<'all' | 'unpaved' | 'recovered'>('all');
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -46,7 +59,8 @@ const ForeshadowingPage: React.FC = () => {
   const [showCreate, setShowCreate] = useState(false);
   const [genProgress, setGenProgress] = useState<string | null>(null);
   const [reversals, setReversals] = useState<any[]>([]);
-  const [newItem, setNewItem] = useState({ content: '', type: 'plot', importance: 2 as 1|2|3, scope: 'chapter' as const, buriedChapterIndex: 0, plannedRecoveryChapterIndex: 0, relatedCharacterIds: '' });
+  const emptyNewItem = () => ({ content: '', type: 'hint', importance: 2 as 1|2|3, scope: 'chapter' as const, buriedChapterIndex: 0, plannedRecoveryChapterIndex: 0, recoveryWindowStart: 0, recoveryWindowEnd: 0, evidenceText: '', riskLevel: 'medium' as 'low'|'medium'|'high', relatedCharacterIds: '' });
+  const [newItem, setNewItem] = useState(emptyNewItem);
 
   // 从 store 读取伏笔列表（Foreshadowing 类型来自 shared，运行时可能有额外字段如 scope/notes）
   const items = store.foreshadowings as unknown as ForeshadowingItem[];
@@ -70,7 +84,9 @@ const ForeshadowingPage: React.FC = () => {
           else if (Array.isArray(parsed?.outlineReversals)) setReversals(parsed.outlineReversals);
         }
       } catch {}
-    } catch { /* mock fallback */ }
+    } catch (error: any) {
+      setGenProgress(`❌ 伏笔加载失败：${error?.message || String(error)}`);
+    }
     setLoading(false);
   }, [projectId, store, selectProject, currentProject]);
 
@@ -79,12 +95,18 @@ const ForeshadowingPage: React.FC = () => {
     load();
   }, [load]);
 
-  const changeStatus = async (id: string, action: 'activate' | 'recover' | 'cancel') => {
+  const changeStatus = async (id: string, action: 'activate' | 'remind' | 'recover' | 'cancel') => {
     try {
-      await api.post(`/projects/${projectId}/foreshadowings/${id}/${action}`, {});
+      const item = items.find(candidate => candidate.id === id);
+      const body = action === 'recover'
+        ? { chapterIndex: item?.recoveryWindowEnd || item?.plannedRecoveryChapterIndex || item?.buriedChapterIndex || 1, method: '人工确认回收' }
+        : {};
+      await api.post(`/projects/${projectId}/foreshadowings/${id}/${action}`, body);
       // 状态变更后重新从 store 加载
       store.fetchForeshadowings(projectId || '', true);
-    } catch { /* fallback */ }
+    } catch (error: any) {
+      setGenProgress(`❌ 状态更新失败：${error?.message || String(error)}`);
+    }
   };
 
   const createItem = async () => {
@@ -93,18 +115,24 @@ const ForeshadowingPage: React.FC = () => {
         projectId, content: newItem.content, type: newItem.type, importance: newItem.importance,
         scope: newItem.scope,
         buriedChapterIndex: newItem.buriedChapterIndex, plannedRecoveryChapterIndex: newItem.plannedRecoveryChapterIndex,
+        recoveryWindowStart: newItem.recoveryWindowStart || newItem.plannedRecoveryChapterIndex,
+        recoveryWindowEnd: newItem.recoveryWindowEnd || newItem.plannedRecoveryChapterIndex,
+        evidenceText: newItem.evidenceText,
+        riskLevel: newItem.riskLevel,
         relatedCharacterIds: newItem.relatedCharacterIds.split(',').map(s => s.trim()).filter(Boolean),
         status: 'buried',
       });
       // 创建后重新加载 store
       store.fetchForeshadowings(projectId || '', true);
       setShowCreate(false);
-      setNewItem({ content: '', type: 'plot', importance: 2, scope: 'chapter', buriedChapterIndex: 0, plannedRecoveryChapterIndex: 0, relatedCharacterIds: '' });
-    } catch { /* fallback */ }
+      setNewItem(emptyNewItem());
+    } catch (error: any) {
+      setGenProgress(`❌ 伏笔创建失败：${error?.message || String(error)}`);
+    }
   };
 
   const deleteItem = async (id: string) => {
-    try { await api.delete(`/projects/${projectId}/foreshadowings/${id}`); } catch { /* */ }
+    try { await api.delete(`/projects/${projectId}/foreshadowings/${id}`); } catch (error: any) { setGenProgress(`❌ 删除失败：${error?.message || String(error)}`); }
     store.fetchForeshadowings(projectId || '', true);
   };
 
@@ -112,26 +140,36 @@ const ForeshadowingPage: React.FC = () => {
     try {
       await api.put(`/projects/${projectId}/foreshadowings/${id}`, { content: editContent });
       store.fetchForeshadowings(projectId || '', true);
-    } catch { /* */ }
+    } catch (error: any) {
+      setGenProgress(`❌ 修改失败：${error?.message || String(error)}`);
+    }
     setEditingId(null);
   };
 
+  const isUnpaved = (item: ForeshadowingItem) => item.buriedChapterIndex <= 0 || !item.evidenceText?.trim();
+  const chapterSpan = (item: ForeshadowingItem) => {
+    const end = item.status === 'recovered' ? item.actualRecoveryChapterIndex : item.plannedRecoveryChapterIndex;
+    return item.buriedChapterIndex > 0 && end && end >= item.buriedChapterIndex ? end - item.buriedChapterIndex : null;
+  };
   const filtered = items.filter(i =>
     (filter === 'all' || i.status === filter) &&
-    (scopeFilter === 'all' || i.scope === scopeFilter)
+    (scopeFilter === 'all' || i.scope === scopeFilter) &&
+    (traceFilter === 'all' || (traceFilter === 'unpaved' ? isUnpaved(i) : i.status === 'recovered'))
   );
   const stats = {
     all: items.length, buried: items.filter(i => i.status === 'buried').length,
+    active: items.filter(i => i.status === 'active' || i.status === 'pending').length,
+    reminder: items.filter(i => i.status === 'reminder').length,
     pending: items.filter(i => i.status === 'pending').length,
     recovered: items.filter(i => i.status === 'recovered').length,
     global: items.filter(i => i.scope === 'global').length,
     volume: items.filter(i => i.scope === 'volume').length,
     chapter: items.filter(i => i.scope === 'chapter').length,
+    unpaved: items.filter(isUnpaved).length,
   };
 
   return (
     <div style={{ padding: '20px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <WritingQualityContextBanner />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>🔍 伏笔看板</h1>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -142,7 +180,7 @@ const ForeshadowingPage: React.FC = () => {
 
       {/* 统计 */}
       <div style={{ display: 'flex', gap: '12px' }}>
-        {[{ k: 'all', l: '全部', c: '#eaeaea' }, { k: 'buried', l: '埋设中', c: '#3498db' }, { k: 'pending', l: '待回收', c: '#f39c12' }, { k: 'recovered', l: '已回收', c: '#2ecc71' }].map(s => (
+        {[{ k: 'all', l: '全部', c: '#eaeaea' }, { k: 'buried', l: '已埋设', c: '#3498db' }, { k: 'active', l: '已激活', c: '#8b5cf6' }, { k: 'reminder', l: '提醒回收', c: '#f39c12' }, { k: 'recovered', l: '已回收', c: '#2ecc71' }].map(s => (
           <div key={s.k} onClick={() => setFilter(s.k as any)} style={{
             flex: 1, padding: '10px', borderRadius: '8px', cursor: 'pointer', textAlign: 'center',
             backgroundColor: filter === s.k ? `${s.c}15` : 'rgba(255,255,255,0.02)',
@@ -167,16 +205,16 @@ const ForeshadowingPage: React.FC = () => {
       </div>
 
       {genProgress && (
-        <div style={{ padding: '8px 14px', backgroundColor: genProgress.startsWith('🔍') ? 'rgba(243,156,18,0.08)' : 'rgba(46,204,113,0.08)', borderRadius: '6px', color: genProgress.startsWith('🔍') ? '#f39c12' : '#2ecc71', fontSize: '12px' }}>
+        <div style={{ padding: '8px 14px', backgroundColor: genProgress.startsWith('❌') ? 'rgba(231,76,60,0.08)' : genProgress.startsWith('🔍') ? 'rgba(243,156,18,0.08)' : 'rgba(46,204,113,0.08)', borderRadius: '6px', color: genProgress.startsWith('❌') ? '#e74c3c' : genProgress.startsWith('🔍') ? '#f39c12' : '#2ecc71', fontSize: '12px' }}>
           {genProgress}
         </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px' }}>
         {[
-          { key: 'global', title: '全书伏笔', hint: '贯穿全文，像核心功法、血脉、身份谜团，跨卷埋设与回收', color: '#e94560' },
-          { key: 'volume', title: '卷级伏笔', hint: '服务一卷或一条阶段主线，常与组织、地图区域、阶段反派绑定', color: '#3b82f6' },
-          { key: 'chapter', title: '章节/场景伏笔', hint: '服务几章内的小回收，用具体物件、动作和错位细节建立读者记忆', color: '#a855f7' },
+          { key: 'global', title: '全书伏笔', hint: '贯穿主线的重要秘密、身份、承诺或因果，跨阶段埋设与回收', color: '#e94560' },
+          { key: 'volume', title: '阶段伏笔', hint: '服务一个故事阶段或一条支线，在阶段高潮前后兑现', color: '#3b82f6' },
+          { key: 'chapter', title: '章节伏笔', hint: '几章内回收的物件、动作、话语和信息差', color: '#a855f7' },
         ].map(card => {
           const count = (stats as any)[card.key] || 0;
           return (
@@ -197,6 +235,23 @@ const ForeshadowingPage: React.FC = () => {
       </div>
 
       {/* 新建表单 */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+        {[
+          { key: 'all', title: '全部伏笔', value: stats.all, hint: '按范围和状态查看完整链路', color: '#c0c0d0' },
+          { key: 'unpaved', title: '缺少铺垫', value: stats.unpaved, hint: '没有埋设章节或章纲证据，不能视为已铺垫', color: '#ef4444' },
+          { key: 'recovered', title: '已回收', value: stats.recovered, hint: '显示实际回收章节与埋设跨度', color: '#22c55e' },
+        ].map(card => (
+          <button key={card.key} type="button" onClick={() => setTraceFilter(card.key as typeof traceFilter)} style={{
+            flex: 1, textAlign: 'left', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontFamily: 'inherit',
+            backgroundColor: traceFilter === card.key ? `${card.color}14` : 'rgba(255,255,255,0.025)',
+            border: `1px solid ${traceFilter === card.key ? `${card.color}55` : 'rgba(255,255,255,0.06)'}`,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong style={{ color: card.color, fontSize: 12 }}>{card.title}</strong><strong style={{ color: '#eaeaea' }}>{card.value}</strong></div>
+            <div style={{ marginTop: 4, color: '#8a8aa0', fontSize: 11, lineHeight: 1.45 }}>{card.hint}</div>
+          </button>
+        ))}
+      </div>
+
       {showCreate && (
         <div style={{ padding: '14px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <textarea value={newItem.content} onChange={e => setNewItem(p => ({ ...p, content: e.target.value }))} placeholder="伏笔内容..."
@@ -204,6 +259,14 @@ const ForeshadowingPage: React.FC = () => {
           <div style={{ display: 'flex', gap: '8px' }}>
             <input value={newItem.buriedChapterIndex} onChange={e => setNewItem(p => ({ ...p, buriedChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="埋设章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
             <input value={newItem.plannedRecoveryChapterIndex} onChange={e => setNewItem(p => ({ ...p, plannedRecoveryChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="计划回收章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input value={newItem.recoveryWindowStart} onChange={e => setNewItem(p => ({ ...p, recoveryWindowStart: parseInt(e.target.value) || 0 }))} placeholder="回收区间开始" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
+            <input value={newItem.recoveryWindowEnd} onChange={e => setNewItem(p => ({ ...p, recoveryWindowEnd: parseInt(e.target.value) || 0 }))} placeholder="回收区间结束" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
+            <input value={newItem.evidenceText} onChange={e => setNewItem(p => ({ ...p, evidenceText: e.target.value }))} placeholder="证据文本/埋设细节" style={{ flex: 2, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
+            <select value={newItem.riskLevel} onChange={e => setNewItem(p => ({ ...p, riskLevel: e.target.value as 'low'|'medium'|'high' }))} style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
+              <option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option>
+            </select>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <select value={newItem.scope} onChange={e => setNewItem(p => ({ ...p, scope: e.target.value as any }))}
@@ -214,10 +277,11 @@ const ForeshadowingPage: React.FC = () => {
             </select>
             <select value={newItem.type} onChange={e => setNewItem(p => ({ ...p, type: e.target.value }))}
               style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
-              <option value="plot">剧情伏笔</option>
-              <option value="character">人设伏笔</option>
-              <option value="setting">设定伏笔</option>
+              <option value="hint">暗示伏笔</option>
+              <option value="setup">铺垫伏笔</option>
+              <option value="mystery">谜团伏笔</option>
               <option value="object">道具伏笔</option>
+              <option value="relationship">关系伏笔</option>
             </select>
             <select value={newItem.importance} onChange={e => setNewItem(p => ({ ...p, importance: parseInt(e.target.value) as 1|2|3 }))}
               style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
@@ -281,6 +345,8 @@ const ForeshadowingPage: React.FC = () => {
                 <span style={{ flex: 1, fontSize: '13px', color: '#c0c0d0', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setEditingId(item.id); setEditContent(item.content); }}>{item.content}</span>
               )}
               <span style={{ fontSize: '11px', color: '#6c6c80' }}>#{item.buriedChapterIndex} → #{item.plannedRecoveryChapterIndex}</span>
+              {isUnpaved(item) && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(239,68,68,0.12)', color: '#f87171', fontSize: '10px', fontWeight: 600 }}>缺少铺垫</span>}
+              {item.status === 'recovered' && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(34,197,94,0.12)', color: '#86efac', fontSize: '10px', fontWeight: 600 }}>{item.actualRecoveryChapterIndex ? `实际第${item.actualRecoveryChapterIndex}章回收` : '回收章节未记录'}</span>}
               {item.status === 'buried' && item.plannedRecoveryChapterIndex > 0 && (
                 <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(231,76,60,0.1)', color: '#e74c3c', fontSize: '10px', fontWeight: 600 }}>
                   ⏰ 第{item.plannedRecoveryChapterIndex}章回收
@@ -290,16 +356,29 @@ const ForeshadowingPage: React.FC = () => {
 
             {expandedId === item.id && (
               <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ fontSize: '11px', color: '#8a8aa0' }}>类型: {item.type} | 关联角色: {item.relatedCharacterIds?.join(', ') || '无'}</div>
+                <div style={{ fontSize: '11px', color: '#8a8aa0' }}>类型：{TYPE_LABELS[item.type] || item.type || '未分类'} · 关联角色：{item.relatedCharacterIds?.length ? `${item.relatedCharacterIds.length}人` : '无'}</div>
+                <div style={{ fontSize: '11px', color: '#8a8aa0' }}>计划回收：第{item.recoveryWindowStart || item.plannedRecoveryChapterIndex || '?'}—{item.recoveryWindowEnd || item.plannedRecoveryChapterIndex || '?'}章 · 遗漏风险：{RISK_LABELS[item.riskLevel || 'medium']}</div>
+                {item.evidenceText && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>证据：{item.evidenceText}</p>}
+                {item.status === 'recovered' && <div style={{ fontSize: '11px', color: '#86efac' }}>实际回收：{item.actualRecoveryChapterIndex ? `第${item.actualRecoveryChapterIndex}章` : '未记录章节'}{chapterSpan(item) !== null ? ` · 跨 ${chapterSpan(item)} 章` : ''}{item.recoveryMethod ? ` · ${item.recoveryMethod}` : ''}</div>}
+                {item.status !== 'recovered' && chapterSpan(item) !== null && <div style={{ fontSize: '11px', color: '#8a8aa0' }}>计划跨度：从埋设到回收约跨 {chapterSpan(item)} 章</div>}
+                {!item.evidenceText && <p style={{ margin: 0, fontSize: '12px', color: '#f87171' }}>尚未记录章纲中的埋设证据；这条不能作为已铺垫伏笔使用。</p>}
+                {item.recoveryCondition && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>回收条件：{item.recoveryCondition}</p>}
+                {item.payoffDescription && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>回收结果：{item.payoffDescription}</p>}
                 {item.notes && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>{item.notes}</p>}
                 <div style={{ display: 'flex', gap: '6px' }}>
                   {item.status === 'buried' && (
                     <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'activate'); }}
                       style={{ padding: '4px 10px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '4px', color: '#f39c12', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                      标记待回收
+                      激活伏笔
                     </button>
                   )}
-                  {item.status === 'pending' && (
+                  {(item.status === 'active' || item.status === 'pending') && (
+                    <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'remind'); }}
+                      style={{ padding: '4px 10px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '4px', color: '#f39c12', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      提醒回收
+                    </button>
+                  )}
+                  {(item.status === 'active' || item.status === 'reminder' || item.status === 'pending') && (
                     <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'recover'); }}
                       style={{ padding: '4px 10px', backgroundColor: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.2)', borderRadius: '4px', color: '#2ecc71', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
                       标记已回收

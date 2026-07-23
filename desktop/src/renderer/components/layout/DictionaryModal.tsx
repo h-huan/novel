@@ -95,7 +95,7 @@ const DictionaryContent: React.FC = () => {
   };
 
   const handleSeed = async () => {
-    const res = await api.post('/dict/seed');
+    const res = await api.post('/dict/seed', {});
     const count = (res as any)?.count || 0;
     if (count > 0) { loadTypes(); setActiveType(''); }
   };

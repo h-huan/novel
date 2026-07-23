@@ -1,7 +1,7 @@
 /**
  * WorldSimpleView - 短篇世界观极简视图
  * 设计原则：简洁明了、可视化操作
- * 对接 API：待后端提供短篇世界观接口
+ * 对接短篇世界观读取与保存接口
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
@@ -9,14 +9,14 @@ import { api } from '../../lib/api';
 
 /**
  * 短篇世界观数据结构
- * TODO: 后端需要提供对应的 API 接口
- * GET/PUT /projects/:id/world-simple
+ * GET /projects/:id/world-settings?mode=simple
+ * PUT /projects/:id/world-settings/simple
  */
 interface SimpleWorldSettings {
   storyPremise: string;        // 故事前提
   era: 'ancient' | 'modern' | 'future' | '';  // 时代背景
-  locations: string[];         // 核心地点（最多3个）
-  socialRules: string;         // 社会规则（200字限制）
+  locations: string[];         // 剧情实际地点
+  socialRules: string;         // 剧情涉及的社会/行业规则
   specialSettings: string;     // 特殊设定（可选）
 }
 
@@ -52,7 +52,8 @@ const toDisplayText = (value: unknown): string => {
     const type = toDisplayText(item.type || item.level || item.category);
     const description = toDisplayText(item.description || item.rule || item.content);
     if (name && description) return type ? `${name}（${type}）：${description}` : `${name}：${description}`;
-    return name || description || JSON.stringify(item);
+    const parts = Object.values(item).map(toDisplayText).filter(Boolean);
+    return name || description || parts.join('；');
   }
   return '';
 };
@@ -79,13 +80,6 @@ const ERA_OPTIONS = [
   { value: 'future', label: '未来', icon: '🚀' },
 ] as const;
 
-const SOCIAL_RULES_TEMPLATES = [
-  { label: '封建等级', template: '社会等级森严，贵族享有特权，平民上升通道狭窄。' },
-  { label: '科技垄断', template: '高科技被少数企业或组织垄断，普通人难以获得。' },
-  { label: '魔法体系', template: '魔法力量需要天赋或特殊条件才能使用，并非人人可及。' },
-  { label: '末世秩序', template: '文明崩溃后，幸存者建立新的秩序与规则。' },
-];
-
 const WorldSimpleView: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
   const [settings, setSettings] = useState<SimpleWorldSettings & { extendedDims?: any; constraints?: WorldConstraint[] }>({
@@ -100,6 +94,7 @@ const WorldSimpleView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [showSpecialSettings, setShowSpecialSettings] = useState(false);
   const [locationInput, setLocationInput] = useState('');
 
@@ -142,9 +137,9 @@ const WorldSimpleView: React.FC = () => {
     setSaving(true);
     setSaveMessage(null);
     try {
-      // TODO: 后端需要提供 PUT /projects/:id/world-settings/simple 接口
       await api.put(`/projects/${projectId}/world-settings/simple`, settings);
       setSaveMessage('✅ 保存成功');
+      setIsEditing(false);
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
       console.error('保存世界观设定失败:', error);
@@ -164,7 +159,7 @@ const WorldSimpleView: React.FC = () => {
   // 添加地点
   const addLocation = () => {
     const location = locationInput.trim();
-    if (!location || settings.locations.length >= 3) return;
+    if (!location || settings.locations.includes(location)) return;
     updateSetting('locations', [...settings.locations, location]);
     setLocationInput('');
   };
@@ -172,11 +167,6 @@ const WorldSimpleView: React.FC = () => {
   // 移除地点
   const removeLocation = (index: number) => {
     updateSetting('locations', settings.locations.filter((_, i) => i !== index));
-  };
-
-  // 应用社会规则模板
-  const applyTemplate = (template: string) => {
-    updateSetting('socialRules', template);
   };
 
   if (loading) {
@@ -194,9 +184,20 @@ const WorldSimpleView: React.FC = () => {
           🌍 世界观设定
         </h2>
         <p style={{ margin: 0, fontSize: '13px', color: '#8a8aa0' }}>
-          短篇小说的世界观应当简洁明了，专注于核心设定
+          只记录这部小说实际用到的时代、环境、地点和规则，不需要的内容不用填写
         </p>
       </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          if (isEditing) { void loadSettings(); setIsEditing(false); }
+          else setIsEditing(true);
+        }}
+        style={{ alignSelf: 'flex-end', padding: '8px 14px', borderRadius: '6px', border: '1px solid rgba(233,69,96,0.45)', background: isEditing ? 'rgba(255,255,255,0.04)' : 'rgba(233,69,96,0.12)', color: isEditing ? '#c0c0d0' : '#ff9aaa', cursor: 'pointer', fontFamily: 'inherit' }}
+      >
+        {isEditing ? '取消编辑' : '编辑世界观'}
+      </button>
 
       {saveMessage && (
         <div style={{
@@ -210,15 +211,16 @@ const WorldSimpleView: React.FC = () => {
         </div>
       )}
 
-      {/* 1. 故事前提输入 */}
+      <fieldset disabled={!isEditing} style={{ border: 0, padding: 0, margin: 0, minInlineSize: 0, display: 'flex', flexDirection: 'column', gap: '20px', opacity: isEditing ? 1 : 0.78 }}>
+      {/* 1. 故事背景 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
-          📖 故事前提
+          📖 故事背景
         </label>
         <textarea
           value={settings.storyPremise}
           onChange={(e) => updateSetting('storyPremise', e.target.value)}
-          placeholder='例如："一个关于勇气与成长的故事"'
+          placeholder="故事发生在哪里、什么时期，人物正处在怎样的现实环境中"
           style={{
             padding: '12px',
             fontSize: '15px',
@@ -276,7 +278,7 @@ const WorldSimpleView: React.FC = () => {
         <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
           📍 核心地点
           <span style={{ fontSize: '11px', color: '#6c6c80', marginLeft: '8px' }}>
-            {settings.locations.length}/3
+            {settings.locations.length} 个
           </span>
         </label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
@@ -312,8 +314,7 @@ const WorldSimpleView: React.FC = () => {
             </span>
           ))}
         </div>
-        {settings.locations.length < 3 && (
-          <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
             <input
               value={locationInput}
               onChange={(e) => setLocationInput(e.target.value)}
@@ -347,47 +348,18 @@ const WorldSimpleView: React.FC = () => {
             >
               添加
             </button>
-          </div>
-        )}
+        </div>
       </section>
 
       {/* 4. 社会规则文本域 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
-          ⚖️ 社会规则
-          <span style={{ fontSize: '11px', color: '#6c6c80', marginLeft: '8px' }}>
-            {settings.socialRules.length}/200
-          </span>
+          ⚖️ 社会与行业规则
         </label>
-        {/* 快捷模板 */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-          {SOCIAL_RULES_TEMPLATES.map((tmpl, index) => (
-            <button
-              key={index}
-              onClick={() => applyTemplate(tmpl.template)}
-              style={{
-                padding: '4px 10px',
-                backgroundColor: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '4px',
-                color: '#8a8aa0',
-                fontSize: '11px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              {tmpl.label}
-            </button>
-          ))}
-        </div>
         <textarea
           value={settings.socialRules}
-          onChange={(e) => {
-            if (e.target.value.length <= 200) {
-              updateSetting('socialRules', e.target.value);
-            }
-          }}
-          placeholder="描述故事世界的社会规则、法律体系、文化习俗等..."
+          onChange={(e) => updateSetting('socialRules', e.target.value)}
+          placeholder="只写与剧情有关的行业规则、法律边界、社会关系或生活常识"
           style={{
             padding: '12px',
             fontSize: '13px',
@@ -448,42 +420,6 @@ const WorldSimpleView: React.FC = () => {
         )}
       </section>
 
-      {settings.constraints && settings.constraints.length > 0 && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
-            世界观约束
-          </label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
-            {settings.constraints.map((item, index) => (
-              <div
-                key={item.id || `${item.category || 'constraint'}-${index}`}
-                style={{
-                  padding: '12px',
-                  backgroundColor: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '8px',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '12px', color: '#8a8aa0' }}>{toDisplayText(item.category) || '约束'}</span>
-                  <span style={{ fontSize: '11px', color: item.severity === 'hard' ? '#e94560' : '#f6c85f' }}>
-                    {toDisplayText(item.severity) || 'normal'}
-                  </span>
-                </div>
-                <div style={{ fontSize: '13px', color: '#eaeaea', fontWeight: 600, marginBottom: '4px' }}>
-                  {toDisplayText(item.rule) || '未命名规则'}
-                </div>
-                {toDisplayText(item.description) && (
-                  <p style={{ margin: 0, fontSize: '12px', color: '#8a8aa0', lineHeight: 1.55 }}>
-                    {toDisplayText(item.description)}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* 保存按钮 */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '12px' }}>
         <button
@@ -521,24 +457,7 @@ const WorldSimpleView: React.FC = () => {
         </button>
       </div>
 
-      {/* 长篇7维度扩展展示 */}
-      {settings.extendedDims && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#eaeaea', marginBottom: '4px' }}>📐 长篇世界观扩展</div>
-          {[
-            { k: 'socialStructure', l: '🏛️ 社会结构' },
-            { k: 'powerSystem', l: '⚡ 力量体系' },
-            { k: 'economy', l: '💰 经济体系' },
-            { k: 'culture', l: '🎭 文化特色' },
-            { k: 'history', l: '📜 历史背景' },
-          ].map(d => settings.extendedDims[d.k] ? (
-            <div key={d.k}>
-              <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600 }}>{d.l}</span>
-              <p style={{ fontSize: '12px', color: '#8a8aa0', margin: '2px 0 0 0', lineHeight: 1.5 }}>{toDisplayText(settings.extendedDims[d.k])}</p>
-            </div>
-          ) : null)}
-        </div>
-      )}
+      </fieldset>
     </div>
   );
 };

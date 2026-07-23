@@ -23,3 +23,9 @@ export function up(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_world_system_profiles_project ON world_system_profiles(project_id);
   `);
 }
+
+export function down(db: DatabaseSync): void {
+  db.exec(`DROP INDEX IF EXISTS idx_world_system_profiles_project; DROP TABLE IF EXISTS world_system_profiles;`);
+}
+
+export default { up, down };

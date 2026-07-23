@@ -13,6 +13,7 @@ export interface IdeaDraftRow {
   target_platform: string;
   target_words: number;
   description: string;
+  settings_json: string;
   status: string;
   questions_json: string;
   answers_json: string;

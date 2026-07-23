@@ -28,10 +28,42 @@ interface ChapterState {
   fetchChapters: (projectId: string, forceRefresh?: boolean) => Promise<void>;
   createChapter: (data: CreateChapterDto) => Promise<Chapter | null>;
   updateChapter: (id: string, data: UpdateChapterDto) => Promise<void>;
+  submitForReview: (projectId: string, id: string) => Promise<void>;
   lockChapter: (projectId: string, id: string) => Promise<void>;
+  directLockChapter: (projectId: string, id: string) => Promise<void>;
   unlockChapter: (projectId: string, id: string) => Promise<void>;
+  rejectReview: (projectId: string, id: string) => Promise<void>;
   selectChapter: (projectId: string, id: string) => Promise<void>;
   setCurrentChapterContent: (content: string) => void;
+}
+
+/**
+ * Controllers in this project return a mix of raw resources and `{ data }`
+ * envelopes. The fetch client intentionally preserves the response body, so
+ * chapter loading must unwrap both forms instead of treating a raw array as
+ * an empty result.
+ */
+function unwrapApiPayload<T>(response: unknown): T {
+  if (response && typeof response === 'object' && !Array.isArray(response) && 'data' in response) {
+    return (response as { data: T }).data;
+  }
+  return response as T;
+}
+
+/** Do not render a generation transport envelope as the author's manuscript. */
+function narrativeContent(value: unknown): string {
+  const source = typeof value === 'string' ? value.trim() : '';
+  if (!source.startsWith('{')) return source;
+  try {
+    const parsed = JSON.parse(source) as Record<string, unknown>;
+    for (const key of ['fullText', 'full_text', 'content', 'text', 'chapterContent']) {
+      const candidate = parsed[key];
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    }
+  } catch {
+    // A leading brace can still be intentional prose; preserve it verbatim.
+  }
+  return source;
 }
 
 function mapServerChapter(raw: any): Chapter {
@@ -53,6 +85,8 @@ function mapServerChapter(raw: any): Chapter {
       updatedAt: new Date(),
     };
   }
+  const content = narrativeContent(raw.content);
+  const wordCount = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
   return {
     id: raw.id || '',
     projectId: raw.projectId || '',
@@ -60,8 +94,9 @@ function mapServerChapter(raw: any): Chapter {
     volumeIndex: raw.volumeIndex ?? 1,
     chapterIndex: raw.chapterIndex ?? 1,
     title: raw.title || '未命名章节',
-    content: raw.content || '',
-    wordCount: raw.wordCount ?? 0,
+    content,
+    wordCount: content === String(raw.content || '').trim() ? (raw.wordCount ?? wordCount) : wordCount,
+    targetWords: raw.targetWords == null ? undefined : Number(raw.targetWords),
     status: raw.status || 'draft',
     tianLong8Steps: raw.tianLong8Steps || { goal: '', trigger: '', action: '', obstacle: '', misjudge: '', reversal: '', cost: '', hook: '' },
     modelConfig: raw.modelConfig || { writerModel: 'gpt-4', temperature: 0.8, cost: 0 },
@@ -85,7 +120,8 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
     set({ loading: true });
     try {
       const res = await api.get<any>(`/projects/${projectId}/chapters`);
-      const list = res.data?.data ?? res.data ?? [];
+      const payload = unwrapApiPayload<unknown>(res);
+      const list = Array.isArray(payload) ? payload : [];
       const chapters = Array.isArray(list) ? list.map(mapServerChapter) : [];
       set({ chapters, loading: false });
     } catch {
@@ -101,7 +137,7 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
         chapterIndex: data.chapterIndex,
         outlineId: data.outlineId,
       });
-      const ch = mapServerChapter(res.data);
+      const ch = mapServerChapter(unwrapApiPayload(res));
       set((state) => ({
         chapters: [...state.chapters, ch],
         currentChapter: ch,
@@ -114,17 +150,28 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
 
   updateChapter: async (id: string, data: UpdateChapterDto) => {
     const chapter = get().chapters.find((c) => c.id === id);
-    if (!chapter) return;
+    if (!chapter) throw new Error('未找到要更新的章节，请先重新选择章节');
     try {
       const res = await api.put<any>(`/projects/${chapter.projectId}/chapters/${id}`, data);
-      const updated = mapServerChapter(res.data);
+      const updated = mapServerChapter(unwrapApiPayload(res));
       set((state) => ({
         chapters: state.chapters.map((c) => (c.id === id ? updated : c)),
         currentChapter: state.currentChapter?.id === id ? updated : state.currentChapter,
       }));
-    } catch {
+    } catch (error) {
+      throw error;
       // silent fail — content is saved locally by WritingPage auto-save
     }
+  },
+
+  submitForReview: async (projectId: string, id: string) => {
+    const res = await api.post<any>(`/projects/${projectId}/writing-quality/submit-review`, { chapterId: id, scope: 'chapter' });
+    const payload = unwrapApiPayload<any>(res);
+    const updated = mapServerChapter(payload?.chapter);
+    set((state) => ({
+      chapters: state.chapters.map((chapter) => chapter.id === id ? updated : chapter),
+      currentChapter: state.currentChapter?.id === id ? updated : state.currentChapter,
+    }));
   },
 
   lockChapter: async (projectId: string, id: string) => {
@@ -136,7 +183,18 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
         currentChapter: state.currentChapter?.id === id
           ? { ...state.currentChapter, status: 'locked' as ChapterStatus, lockedAt: new Date() } : state.currentChapter,
       }));
-    } catch {}
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  directLockChapter: async (projectId: string, id: string) => {
+    const res = await api.post<any>(`/projects/${projectId}/chapters/${id}/direct-lock`);
+    const updated = mapServerChapter(unwrapApiPayload(res));
+    set((state) => ({
+      chapters: state.chapters.map((chapter) => chapter.id === id ? updated : chapter),
+      currentChapter: state.currentChapter?.id === id ? updated : state.currentChapter,
+    }));
   },
 
   unlockChapter: async (projectId: string, id: string) => {
@@ -148,7 +206,18 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
         currentChapter: state.currentChapter?.id === id
           ? { ...state.currentChapter, status: 'draft' as ChapterStatus, lockedAt: undefined } : state.currentChapter,
       }));
-    } catch {}
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  rejectReview: async (projectId: string, id: string) => {
+    const res = await api.post<any>(`/projects/${projectId}/chapters/${id}/reject-review`);
+    const updated = mapServerChapter(unwrapApiPayload(res));
+    set((state) => ({
+      chapters: state.chapters.map((chapter) => chapter.id === id ? updated : chapter),
+      currentChapter: state.currentChapter?.id === id ? updated : state.currentChapter,
+    }));
   },
 
   selectChapter: async (projectId: string, id: string) => {
@@ -164,7 +233,7 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
     // content 为空或不在缓存中 → 单独请求完整章节数据
     try {
       const res = await api.get<any>(`/projects/${projectId}/chapters/${id}`);
-      const full = mapServerChapter(res.data?.data ?? res.data);
+      const full = mapServerChapter(unwrapApiPayload(res));
       // 更新 chapters 数组中的对应条目
       set((state) => ({
         chapters: state.chapters.map((c) => (c.id === id ? full : c)),

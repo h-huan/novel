@@ -310,7 +310,7 @@ const CharacterPage: React.FC = () => {
       const summaryRes = await api.get(`/projects/${projectId}/characters/${selected.id}/writing-summary`);
       setWritingSummary(apiPayload<any>(summaryRes).summary || '');
       setEditing(false);
-      setSaveMessage('已保存角色微调，并更新 RAG 索引。');
+      setSaveMessage('角色修改已保存，后续写作会使用最新资料。');
       await fetchCharacters(projectId, true);
     } catch (error: any) {
       setSaveMessage(`保存失败：${error?.message || '未知错误'}`);
@@ -434,7 +434,7 @@ const CharacterPage: React.FC = () => {
             {saveMessage && <div style={styles.message}>{saveMessage}</div>}
 
             <section style={styles.impactBox}>
-              修改建议：尽量小改，影响范围按 世界观 &gt; 已锁定章节正文 &gt; 大纲=角色=组织与地图=伏笔 &gt; 未锁定章节正文。保存后会刷新角色列表并重新索引，正文状态仍需审核后写入时间线。
+              修改角色后，系统会列出受影响的大纲、关系、伏笔和章节；已经锁定的正文不会被自动改写。
             </section>
 
             {editing && (
@@ -522,6 +522,23 @@ const CharacterPage: React.FC = () => {
                   </div>
                 )) : <div style={styles.mutedBox}>暂无人际关系。后续可从正文抽取或手动补充。</div>}
               </Panel>
+            </section>
+
+            <section style={styles.profileArchive}>
+              <div style={styles.panelTitle}>人物设定档案</div>
+              <p style={styles.archiveHint}>按创作指南核对人物关系、动机、能力、成长和剧情功能；只展示已确认资料，不用空白模板冒充设定。</p>
+              <div style={styles.archiveGrid}>
+                {PROFILE_SECTION_GROUPS.map(section => {
+                  const entries = section.fields
+                    .map(field => ({ ...field, value: profile[field.key] || '' }))
+                    .filter(field => field.value.trim());
+                  if (!entries.length) return null;
+                  return <section key={section.title} style={styles.archiveSection}>
+                    <h3 style={styles.archiveTitle}>{section.title}</h3>
+                    {entries.map(field => <div key={field.key} style={styles.archiveRow}><strong>{field.label}</strong><p>{field.value}</p></div>)}
+                  </section>;
+                })}
+              </div>
             </section>
 
             <section style={styles.statusPanel}>
@@ -658,6 +675,12 @@ const styles: Record<string, React.CSSProperties> = {
   mutedBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', color: '#8a8aa0', fontSize: 12, lineHeight: 1.6 },
   relationshipRow: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 12 },
   statusPanel: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
+  profileArchive: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
+  archiveHint: { margin: 0, padding: '10px 12px', color: '#8a8aa0', fontSize: 12, lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  archiveGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, padding: 12 },
+  archiveSection: { border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.025)', overflow: 'hidden' },
+  archiveTitle: { margin: 0, padding: '8px 10px', color: '#eaeaea', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  archiveRow: { padding: '8px 10px', fontSize: 12, lineHeight: 1.55, borderBottom: '1px solid rgba(255,255,255,0.045)' },
   statusList: { display: 'flex', flexDirection: 'column', gap: 6, padding: 12 },
   statusRow: { display: 'grid', gridTemplateColumns: '100px minmax(0, 1fr) auto auto', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.055)', fontSize: 12 },
   statusLabel: { color: '#8a8aa0', fontWeight: 700 },

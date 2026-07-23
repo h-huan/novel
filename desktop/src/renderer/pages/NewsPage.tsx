@@ -11,15 +11,20 @@ const NewsPage: React.FC = () => {
   const [items, setItems] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [keywords, setKeywords] = useState('');
+  const [error, setError] = useState('');
 
   const fetchNews = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await api.post('/chain/news-rss', { keywords: keywords || undefined, count: 10 });
-      const data = res as any;
+      const data = res.data as any;
       if (data.items) setItems(data.items as NewsItem[]);
-    } catch { /* */ }
-    setLoading(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '获取热点失败，请检查网络后重试。');
+    } finally {
+      setLoading(false);
+    }
   }, [keywords]);
 
   return (
@@ -37,6 +42,7 @@ const NewsPage: React.FC = () => {
         </button>
       </div>
 
+      {error && <div style={{ marginBottom: '16px', padding: '8px 10px', borderRadius: '6px', color: '#ff9aaa', backgroundColor: 'rgba(233,69,96,0.1)' }}>{error}</div>}
       {items.length === 0 && (
         <div style={{ textAlign: 'center', padding: '50px 0', color: '#6c6c80' }}>
           <div style={{ fontSize: '40px', marginBottom: '12px' }}>📰</div>

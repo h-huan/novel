@@ -43,15 +43,17 @@ export class MapPointService {
     const values = LOCATION_PROFILE_FIELDS.map(key => String(input[key] ?? before[key] ?? ''));
     db.prepare(`INSERT INTO location_knowledge_profiles (id,project_id,map_point_id,${LOCATION_PROFILE_FIELDS.join(',')},created_at,updated_at) VALUES (?,?,?,${LOCATION_PROFILE_FIELDS.map(() => '?').join(',')},?,?) ON CONFLICT(map_point_id) DO UPDATE SET ${LOCATION_PROFILE_FIELDS.map(key => `${key}=excluded.${key}`).join(',')},updated_at=excluded.updated_at`).run((db.prepare('SELECT id FROM location_knowledge_profiles WHERE map_point_id = ?').get(id) as any)?.id || uuid(), projectId, id, ...values, now, now);
     const changedFields = LOCATION_PROFILE_FIELDS.filter(key => String(before[key] || '') !== String(input[key] ?? before[key] ?? ''));
-    if (changedFields.length) this.analyzeImpact(projectId, id, changedFields);
+    if (changedFields.length) this.analyzeImpact(projectId, id, changedFields, before, this.getProfile(projectId, id).profile);
     return this.getProfile(projectId, id);
   }
 
   getRelations(projectId: string, id: string) { return this.databaseService.getDb().prepare('SELECT * FROM location_knowledge_relations WHERE project_id = ? AND source_location_id = ? ORDER BY created_at').all(projectId, id) as any[]; }
   updateRelations(projectId: string, id: string, relations: any[]) {
+    const before = this.getRelations(projectId, id);
     const db = this.databaseService.getDb(); const now = new Date().toISOString(); db.prepare('DELETE FROM location_knowledge_relations WHERE project_id = ? AND source_location_id = ?').run(projectId, id);
     for (const relation of Array.isArray(relations) ? relations : []) db.prepare('INSERT INTO location_knowledge_relations (id,project_id,source_location_id,target_location_id,relation_type,relation_description,distance_cost,travel_time,travel_method,risk_level,access_condition,is_hidden,is_one_way,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(relation.id || uuid(), projectId, id, relation.target_location_id || '', relation.relation_type || 'route_to', relation.relation_description || '', relation.distance_cost || '', relation.travel_time || '', relation.travel_method || '', relation.risk_level || '', relation.access_condition || '', relation.is_hidden ? 1 : 0, relation.is_one_way ? 1 : 0, now, now);
-    this.analyzeImpact(projectId, id, ['relations']); return this.getRelations(projectId, id);
+    const after = this.getRelations(projectId, id);
+    this.analyzeImpact(projectId, id, ['relations'], { relations: before }, { relations: after }); return after;
   }
 
   getWritingSummary(projectId: string, id: string) {
@@ -83,7 +85,7 @@ export class MapPointService {
   }
   private profileRow(row: any, point: MapPointResponse) { return Object.fromEntries(LOCATION_PROFILE_FIELDS.map(key => [key, row?.[key] || (key === 'location_name' ? point.name : key === 'location_type' ? point.type : key === 'parent_location_id' ? point.parentId || '' : '')])); }
   private listValue(value: unknown) { try { return Array.isArray(value) ? value : JSON.parse(String(value || '[]')); } catch { return []; } }
-  private analyzeImpact(projectId: string, id: string, changedFields: readonly string[]) { const groups: Record<string,string[]> = { identity:['location_name','location_type','parent_location_id','hierarchy_path'], sensory:['basic_description','visual_features','sound_smell_texture','atmosphere'], route:['distance_logic','traffic_routes','entry_conditions','hidden_paths'], control:['owner_force','controlling_character','security_level'], plot:['location_function','plot_function','foreshadowing_function'], status:['current_status','danger_level'], resource:['available_resources','scarce_resources'], history:['historical_events','lost_truth','secret_buried_here'], connections:['connected_characters','connected_forces','connected_foreshadowing'], scene:['scene_hooks','sensory_anchor','climax_usage'], constraints:['must_obey_rules','forbidden_writing','easy_to_break_points'], relations:['relations'] }; const changedGroups = Object.entries(groups).filter(([, keys]) => keys.some(key => changedFields.includes(key))).map(([key]) => key); this.stateItemService?.analyzeImpact(projectId, { targetType: 'map_point', targetId: id, summary: '地点知识图谱修改影响分析', payload: { changedFields, changedGroups, riskReason: '地点规则或关系变化，关联剧情需要复核。', affectedModules: ['chapter','outline','character','world_setting','foreshadowing','timeline','map','writing_context','writing_quality'], suggestedReviewAction: '复核关联路线、章节和伏笔。' }, createdBy: 'map-point-service' }); }
+  private analyzeImpact(projectId: string, id: string, changedFields: readonly string[], before?: unknown, after?: unknown) { const groups: Record<string,string[]> = { identity:['location_name','location_type','parent_location_id','hierarchy_path'], sensory:['basic_description','visual_features','sound_smell_texture','atmosphere'], route:['distance_logic','traffic_routes','entry_conditions','hidden_paths'], control:['owner_force','controlling_character','security_level'], plot:['location_function','plot_function','foreshadowing_function'], status:['current_status','danger_level'], resource:['available_resources','scarce_resources'], history:['historical_events','lost_truth','secret_buried_here'], connections:['connected_characters','connected_forces','connected_foreshadowing'], scene:['scene_hooks','sensory_anchor','climax_usage'], constraints:['must_obey_rules','forbidden_writing','easy_to_break_points'], relations:['relations'] }; const changedGroups = Object.entries(groups).filter(([, keys]) => keys.some(key => changedFields.includes(key))).map(([key]) => key); this.stateItemService?.analyzeImpactTracked(projectId, { targetType: 'map_point', targetId: id, summary: '地点知识图谱修改影响分析', payload: { before, after, changedFields, changedGroups, riskReason: '地点规则或关系变化，关联剧情需要复核。', affectedModules: ['chapter','outline','character','world_setting','foreshadowing','timeline','map','writing_context','writing_quality'], suggestedReviewAction: '复核关联路线、章节和伏笔。' }, createdBy: 'map-point-service' }); }
 
   create(projectId: string, dto: CreateMapPointDto): MapPointResponse {
     const now = new Date().toISOString();
@@ -138,13 +140,17 @@ export class MapPointService {
     }
 
     this.repo.update(id, updateData);
-    return this.toResponse(this.repo.findById(id)!);
+    const response = this.toResponse(this.repo.findById(id)!);
+    this.analyzeImpact(existing.project_id, id, Object.keys(updateData).filter(key => key !== 'updated_at'), this.toResponse(existing), response);
+    return response;
   }
 
   remove(id: string): { success: boolean } {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`MapPoint ${id} not found`);
+    const before = this.toResponse(existing);
     this.repo.delete(id);
+    this.analyzeImpact(existing.project_id, id, ['remove'], before, null);
     return { success: true };
   }
 

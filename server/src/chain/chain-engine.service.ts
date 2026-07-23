@@ -27,6 +27,15 @@ import {
   GateCheckType,
 } from './chain.types';
 
+/**
+ * Chinese prose is close to one token per character for the configured models.
+ * Keep a small completion margin, but never advertise enough budget for a
+ * second full chapter when the chapter contract is 3200–4000 words.
+ */
+export const chapterSynthesisMaxTokens = (targetWords: number): number => (
+  Math.min(4_800, Math.max(3_800, Math.ceil(targetWords * 1.15)))
+);
+
 /** 节点执行上下文（运行时） */
 interface NodeExecutionContext {
   node: ChainNode;
@@ -398,7 +407,6 @@ export class ChainEngineService {
     // 调用 LLM
     const response = await this.llm.generate({
       prompt,
-      model: node.modelConfig.primary,
       temperature: this.calculateTemperature(node.modelConfig.temperature, retryCount),
       timeout: node.timeout * 1000,
       scenario: chain.id,
@@ -470,6 +478,16 @@ export class ChainEngineService {
       const reversalText = extractText(input['reversal']);
       const costText = extractText(input['cost']);
       const hookText = extractText(input['hook']);
+      const targetWords = Number(input['targetWords']);
+      if (!Number.isInteger(targetWords) || targetWords < 3200 || targetWords > 4000) {
+        throw new Error('本章缺少有效的3200-4000字动态目标，拒绝生成正文');
+      }
+      const countNarrativeWords = (text: string) => {
+        const chinese = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+        const english = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ').split(/\s+/).filter(token => /[a-zA-Z]/.test(token)).length;
+        return chinese + english;
+      };
+      const outputMaxTokens = chapterSynthesisMaxTokens(targetWords);
 
       // 将8步输出拼接为完整章节正文
       const sections: string[] = [];
@@ -489,17 +507,29 @@ export class ChainEngineService {
       let polishedText = fullText;
       try {
         const sceneContext = typeof context.variables['chapterFunction'] === 'string' ? context.variables['chapterFunction'] : '';
-        const stylePrompt = `你是第一人称短篇小说写手。请将以下8步草稿重写为连贯的章节正文。不要分段加小标题，自然融合为连续叙事。
+        const chapterOutline = String(input['chapterOutline'] || context.variables['chapterOutline'] || '').trim();
+        const chapterContext = input['chapterContext'] || context.variables['chapterContext'];
+        if (!chapterOutline || chapterOutline.length < 20) {
+          throw new Error('本章缺少可执行的详细大纲，拒绝用八步法自行编造故事');
+        }
+        const serializedContext = typeof chapterContext === 'string'
+          ? chapterContext
+          : JSON.stringify(chapterContext || {});
+        const chapterContract = `【本章不可偏离的创作合同】\n章节：第${input['chapterNumber'] || context.variables['chapterNumber'] || ''}章\n详细大纲：\n${chapterOutline}\n\n确认的故事上下文（人物、世界观、时间线、前文与伏笔）：\n${serializedContext}\n\n合同执行规则：正文必须把详细大纲中的核心事件、冲突、人物行动和结尾钩子写成实际发生的叙事；不得用同主题的另一件事替代，不得引入合同外的主线人物、设定、案件或结局。若八步草稿与合同冲突，以合同为准并重写草稿。`;
+        const stylePrompt = `你是中文小说作者。请将以下8步草稿扩写并重写为连贯、完整、可直接阅读的章节正文。不要分段加小标题，自然融合为连续叙事。
+本章动态目标为${targetWords}字；最终正文必须在3200-4000字之间。不得概述、压缩、跳过场景或以提纲代替叙事；请用事件推进、行动、对话、细节和心理变化自然达到篇幅。只输出正文，不输出字数、说明或JSON。
 
 要求：
-1. 一整段流畅的第一人称叙事，不要保留"目标""诱因""行动"等步骤标识
-2. 去AI味：删除"不禁""仿佛""内心深处""似乎""渐渐地"等套话；句式长短错落，不要排比/对仗
-3. 具体不空泛：用五感细节替代抽象形容词——写了什么声音、什么颜色、什么气味、什么触感
-4. 角色有差异：每个人说话方式不同，小动作不同。有人啰嗦有人只说半句，有人习惯性摸东西有人死盯着你看
-5. 留白：不要把所有信息说完。用没说出口的话、被忽略的物件、反常的停顿来暗示
-6. 不要过度工整——真实的叙事会跑题、有毛边、有临时改变主意的时候
-7. 段落短（手机阅读），对话占比高，开头三句内进入事件
+1. 正文必须服从已确认的大纲、角色状态、世界观规则、时间线和伏笔；八步法只作为内部骨架，正文不得出现步骤标识，也不得为了文风改写既有事实。
+2. 使用自然短段落而非整齐分节；句式、段长、信息密度要随人物和场景变化，禁止排比、对仗、总结式升华和模板化收束。
+3. 具体不空泛：让情节通过可观察的动作、物件、声音、光线、气味、触感和即时选择发生；少用“紧张”“悲伤”“他很愤怒”这类结论代替现场。
+4. 角色必须像独立的人：说话节奏、词汇、回避方式、注意的东西和行动逻辑都要从其已知设定、立场和经历推出。不要让所有人语气相同，也不要为制造差异凭空增加设定。
+5. 留白而非讲解：不要替读者解释每个动机、因果和情绪。允许答非所问、话说半截、沉默、误会、被忽略的物件和没有立刻追问的细节，让读者自行连接含义。
+6. 不要过度工整，但“毛边”只能来自人物的犹豫、偏见、临时选择或信息差；不得偏离本章剧情任务、破坏角色逻辑或跳过应有的关键事件。
+7. 开头尽快进入事件，对话必须带有各自目的和潜台词，避免角色轮流完整解释；结尾保留与本章大纲一致的钩子或未解信息。
 8. 本章功能是：${sceneContext}。确保剧情推进匹配此功能定位。
+
+${chapterContract}
 
 草稿内容：
 ${fullText}`;
@@ -508,12 +538,42 @@ ${fullText}`;
           prompt: stylePrompt,
           scenario: 'chapter_synthesis',
           temperature: 0.7,
-          maxTokens: Math.min(fullText.length + 1500, 4096),
+          maxTokens: outputMaxTokens,
         });
-        if (llmResp?.content && llmResp.content.length > fullText.length * 0.3) {
-          polishedText = llmResp.content;
+        if (!llmResp?.content || llmResp.content.length <= fullText.length * 0.3) {
+          throw new Error('章节合成结果为空或明显不完整');
         }
-      } catch (e) { /* 合成润色失败不影响主流程，回退到原始拼接 */ }
+        polishedText = llmResp.content;
+        const generatedWords = countNarrativeWords(polishedText);
+        if (generatedWords < 3200) {
+          const expansion = await this.llm.generate({
+            prompt: `以下章节初稿只有${generatedWords}字，未达到本章${targetWords}字的写作合同。请在不改变既有角色、世界观规则、事件顺序、时间线、伏笔和结局钩子的前提下，输出一篇完整重写后的正文，不是续写片段。必须通过补足可感知的行动、场景转换、人物对话、细节、心理与因果推进，将全文控制在3200-4000字，目标约${targetWords}字。
+人物不许同声同气：让每人按自己的立场、习惯与信息量说话、回避或行动；不要把动机和真相替读者解释完，用停顿、错答、物件、未被追问的细节保留推想空间。允许节奏有毛边，但不得偏离章节大纲或制造新设定。只输出正文，不要解释。\n\n${chapterContract}\n\n初稿：\n${polishedText}`,
+            scenario: 'chapter_synthesis',
+            temperature: 0.7,
+            maxTokens: outputMaxTokens,
+          });
+          if (!expansion?.content) throw new Error('章节补写未返回正文');
+          polishedText = expansion.content;
+        }
+        const expandedWords = countNarrativeWords(polishedText);
+        if (expandedWords > 4000) {
+          const compression = await this.llm.generate({
+            prompt: `以下完整章节为${expandedWords}字，超过本章${targetWords}字的写作合同。请在不删除详细大纲要求的核心事件、冲突、人物行动、因果、伏笔和结尾钩子的前提下，输出一篇完整精炼重写后的正文，不是摘要、删节片段或续写。删去重复解释、同义反复和无效场景，保留可感知的动作、对话和关键细节。全文必须严格为3200-4000字，目标约${targetWords}字。只输出正文，不要解释。\n\n${chapterContract}\n\n待精炼全文：\n${polishedText}`,
+            scenario: 'chapter_synthesis',
+            temperature: 0.55,
+            maxTokens: outputMaxTokens,
+          });
+          if (!compression?.content) throw new Error('章节精炼未返回正文');
+          polishedText = compression.content;
+        }
+        const finalWords = countNarrativeWords(polishedText);
+        if (finalWords < 3200 || finalWords > 4000) {
+          throw new Error(`章节合成后的正文为${finalWords}字，不符合3200-4000字要求`);
+        }
+      } catch (e) {
+        throw new Error(`章节合成失败，未使用原始步骤拼接内容降级：${e instanceof Error ? e.message : String(e)}`);
+      }
 
       this.logger.log(`[node_9] 正文合成完成：原始 ${fullText.length} → 润色后 ${polishedText.length} 字符`);
 

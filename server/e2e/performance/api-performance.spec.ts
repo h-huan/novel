@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-const BASE_URL = 'http://localhost:3100/api/v1';
+const BASE_URL = 'http://127.0.0.1:3100/api/v1';
 
 interface TimingResult {
   operation: string;

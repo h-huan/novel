@@ -30,6 +30,11 @@ export interface ProjectAssets {
   hasVolumeOutline: boolean;
   hasChapterPlan: boolean;
   hasBody: boolean;
+  hasShortCoreConflict: boolean;
+  hasShortProtagonistDesire: boolean;
+  hasShortTurningPoint: boolean;
+  hasShortEndingClosure: boolean;
+  hasShortSceneSequence: boolean;
 }
 
 // ========== 流程守卫响应 ==========

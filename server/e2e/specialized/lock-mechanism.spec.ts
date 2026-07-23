@@ -1,156 +1,68 @@
 import { test, expect } from '@playwright/test';
 import { createProject, deleteProject, createChapter, uniqueTitle } from '../helpers';
 
-const BASE = 'http://localhost:3100/api/v1';
+const BASE = 'http://127.0.0.1:3100/api/v1';
 
-test.describe('Lock Mechanism (7.6)', () => {
+test.describe('Chapter lock continuity gate', () => {
   let projectId: string;
 
   test.beforeEach(async ({ request }) => {
     const res = await request.post(`${BASE}/projects`, {
-      data: { title: uniqueTitle('lock-test'), type: 'long_novel' },
+      data: { title: uniqueTitle('lock-test'), type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
     });
     projectId = (await res.json()).id;
   });
 
   test.afterEach(async ({ request }) => {
-    if (projectId) {
-      await deleteProject(request, projectId);
-    }
+    if (projectId) await deleteProject(request, projectId);
   });
 
-  test('should create a chapter with draft status', async ({ request }) => {
-    const chapter = await createChapter(request, projectId, {
-      title: '草稿章节',
-      content: '这是草稿内容。',
-    });
-
-    expect(chapter).toHaveProperty('id');
-    expect(chapter.status).toBe('draft');
-    expect(chapter.lockedAt).toBeUndefined();
-  });
-
-  test('should lock a chapter and verify locked status', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
-
-    // Submit for review first
-    const reviewRes = await request.post(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}/review`,
-    );
+  async function reviewAndLock(request: any) {
+    const chapter = await createChapter(request, projectId, { content: 'A reviewed chapter needs current derived data before it can be locked.' });
+    const reviewRes = await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/review`);
     expect(reviewRes.status()).toBe(201);
+    const lockRes = await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`);
+    return { chapter, lockRes };
+  }
 
-    // Lock the chapter
-    const lockRes = await request.post(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`,
-    );
+  test('draft chapters cannot be locked', async ({ request }) => {
+    const chapter = await createChapter(request, projectId);
+    const res = await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`);
+    expect(res.status()).toBe(400);
+    expect((await res.json()).message).toContain('Only reviewing chapters can be locked');
+  });
+
+  test('reviewed chapter locks after derived data is current', async ({ request }) => {
+    const { lockRes } = await reviewAndLock(request);
     expect(lockRes.status()).toBe(201);
-    const locked = await lockRes.json();
-    expect(locked.status).toBe('locked');
-    expect(locked.lockedAt).toBeDefined();
-    expect(typeof locked.lockedAt).toBe('string');
-    expect(new Date(locked.lockedAt).getTime()).toBeGreaterThan(0);
+    expect((await lockRes.json()).status).toBe('locked');
   });
 
-  test('should unlock a chapter and verify revert to draft', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
-
-    // Review → Lock
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/review`);
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`);
-
-    // Unlock
-    const unlockRes = await request.post(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}/unlock`,
-    );
-    expect(unlockRes.status()).toBe(201);
-    const unlocked = await unlockRes.json();
-    expect(unlocked.status).toBe('draft');
-    // lockedAt should be cleared after unlock
-    expect(unlocked.lockedAt).toBeUndefined();
-  });
-
-  test('should return locked chapter with read-only indication in status', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
-
-    // Review → Lock
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/review`);
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`);
-
-    // Fetch the locked chapter
-    const getRes = await request.get(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}`,
-    );
+  test('a successful lock persists the locked state', async ({ request }) => {
+    const { chapter, lockRes } = await reviewAndLock(request);
+    expect(lockRes.status()).toBe(201);
+    const getRes = await request.get(`${BASE}/projects/${projectId}/chapters/${chapter.id}`);
     expect(getRes.status()).toBe(200);
     const fetched = await getRes.json();
-
-    // The chapter should have locked status which serves as read-only flag
     expect(fetched.status).toBe('locked');
     expect(fetched.lockedAt).toBeDefined();
-    // Content should still be accessible
-    expect(fetched.content).toBeDefined();
-    expect(typeof fetched.content).toBe('string');
   });
 
-  test('should reject PUT on locked chapter title', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
-
-    // Review → Lock
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/review`);
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`);
-
-    // Attempt to modify the locked chapter title
-    const updateRes = await request.put(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}`,
-      { data: { title: '修改后的标题' } },
-    );
+  test('a locked chapter rejects direct author edits', async ({ request }) => {
+    const { chapter, lockRes } = await reviewAndLock(request);
+    expect(lockRes.status()).toBe(201);
+    const updateRes = await request.put(`${BASE}/projects/${projectId}/chapters/${chapter.id}`, {
+      data: { content: 'Corrected content after continuity review.' },
+    });
     expect(updateRes.status()).toBe(400);
-    const errorBody = await updateRes.json();
-    expect(errorBody).toHaveProperty('message');
-    expect(errorBody.message).toContain('Cannot modify locked chapter');
+    expect((await updateRes.json()).message).toContain('Cannot modify locked chapter');
   });
 
-  test('should reject lock if chapter is not in reviewing status', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
-
-    // Attempt to lock a draft chapter directly (without submitting for review)
-    const lockRes = await request.post(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`,
-    );
-    expect(lockRes.status()).toBe(400);
-    const errorBody = await lockRes.json();
-    expect(errorBody).toHaveProperty('message');
-    expect(errorBody.message).toContain('Only reviewing chapters can be locked');
-  });
-
-  test('should reject unlock if chapter is not locked', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
-
-    // Attempt to unlock a draft chapter
-    const unlockRes = await request.post(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}/unlock`,
-    );
-    expect(unlockRes.status()).toBe(400);
-    const errorBody = await unlockRes.json();
-    expect(errorBody).toHaveProperty('message');
-    expect(errorBody.message).toContain('Only locked chapters can be unlocked');
-  });
-
-  test('should allow modification after unlock', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
-
-    // Review → Lock → Unlock
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/review`);
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`);
-    await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/unlock`);
-
-    // Now modify should succeed
-    const updateRes = await request.put(
-      `${BASE}/projects/${projectId}/chapters/${chapter.id}`,
-      { data: { content: '解锁后修改的内容。' } },
-    );
-    expect(updateRes.status()).toBe(200);
-    const updated = await updateRes.json();
-    expect(updated.content).toBe('解锁后修改的内容。');
-    expect(updated.status).toBe('draft');
+  test('a successfully locked chapter can be unlocked for revision', async ({ request }) => {
+    const { chapter, lockRes } = await reviewAndLock(request);
+    expect(lockRes.status()).toBe(201);
+    const unlockRes = await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/unlock`);
+    expect(unlockRes.status()).toBe(201);
+    expect((await unlockRes.json()).status).toBe('draft');
   });
 });

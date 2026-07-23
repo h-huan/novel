@@ -32,6 +32,10 @@ export interface ChapterEditorShellProps {
   onSave?: (chapterId: string, content: string) => Promise<void>;
   /** 章节锁定回调 */
   onLock?: (chapterId: string) => Promise<void>;
+  /** 作者明确选择“直接锁定”时的回调，不进入质检状态 */
+  onDirectLock?: (chapterId: string) => Promise<void>;
+  /** 将送审章节退回草稿 */
+  onRejectReview?: (chapterId: string) => Promise<void>;
   /** 章节解锁回调 */
   onUnlock?: (chapterId: string) => Promise<void>;
   /** 生成下一章回调 */
@@ -59,12 +63,14 @@ const ChapterEditorShell: React.FC<ChapterEditorShellProps> = ({
   projectId,
   onSave,
   onLock,
+  onDirectLock,
+  onRejectReview,
   onUnlock,
   onGenerateNext,
   onAiWrite,
 }) => {
   const navigate = useNavigate();
-  const { updateChapter } = useChapterStore();
+  const { updateChapter, submitForReview } = useChapterStore();
   const [localContent, setLocalContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -173,20 +179,61 @@ const ChapterEditorShell: React.FC<ChapterEditorShellProps> = ({
       setLastSaved(new Date());
     } catch (err) {
       console.error('保存失败:', err);
+      showNotification('error', `保存失败：${err instanceof Error ? err.message : '请检查服务连接后重试'}`);
     }
   }, [chapter, updateChapter, onSave, projectId]);
 
   // 锁定
+  const actionError = (error: unknown) => error instanceof Error ? error.message : '请检查服务连接后重试';
+
+  const ensureCurrentContentSaved = useCallback(async () => {
+    if (!chapter) return;
+    const content = contentRef.current;
+    await updateChapter(chapter.id, { content });
+    if (onSave) await onSave(chapter.id, content);
+    setIsDirty(false);
+    setLastSaved(new Date());
+  }, [chapter, updateChapter, onSave]);
+
+  const handleSubmitForReview = useCallback(async () => {
+    if (!chapter) return;
+    try {
+      await ensureCurrentContentSaved();
+      await submitForReview(projectId, chapter.id);
+      showNotification('success', '已提交质检。质检通过后可锁定本章。');
+    } catch (error) {
+      showNotification('error', `未能提交质检：${actionError(error)}`);
+    }
+  }, [chapter, ensureCurrentContentSaved, submitForReview, projectId]);
+
   const handleLock = useCallback(async () => {
     if (!chapter) return;
     try {
-      await updateChapter(chapter.id, { content: contentRef.current });
-      try { const { api } = await import('../../lib/api'); await api.post('/chain/conflict-mark', { projectId, modifiedContent: contentRef.current }); } catch {}
-      if (onLock) await onLock(chapter.id);
+      await ensureCurrentContentSaved();
+      if (chapter.status === 'draft') {
+        if (!onDirectLock) throw new Error('直接锁定不可用');
+        await onDirectLock(chapter.id);
+        showNotification('success', '章节已直接锁定');
+      } else {
+        if (!onLock) throw new Error('质检锁定不可用');
+        await onLock(chapter.id);
+        showNotification('success', '章节已通过质检并锁定');
+      }
     } catch (err) {
       console.error('锁定失败:', err);
+      showNotification('error', `无法锁定：${err instanceof Error ? err.message : '请先处理本章的同步或连续性问题'}`);
     }
-  }, [chapter, updateChapter, onLock]);
+  }, [chapter, ensureCurrentContentSaved, onLock, onDirectLock]);
+
+  const handleRejectReview = useCallback(async () => {
+    if (!chapter || !onRejectReview) return;
+    try {
+      await onRejectReview(chapter.id);
+      showNotification('success', '已退回草稿，可继续修改正文');
+    } catch (error) {
+      showNotification('error', `无法退回草稿：${actionError(error)}`);
+    }
+  }, [chapter, onRejectReview]);
 
   // 解锁（先确认）
   const handleUnlock = useCallback(async () => {
@@ -198,6 +245,7 @@ const ChapterEditorShell: React.FC<ChapterEditorShellProps> = ({
       setUnlockDialogOpen(false);
     } catch (err) {
       console.error('解锁失败:', err);
+      showNotification('error', `无法解锁：${err instanceof Error ? err.message : '请稍后重试'}`);
     }
   }, [chapter, onUnlock]);
 
@@ -257,7 +305,7 @@ const ChapterEditorShell: React.FC<ChapterEditorShellProps> = ({
               </button>
               <button
                 style={styles.unlockBtn}
-                onClick={() => setUnlockDialogOpen(true)}
+                onClick={handleRejectReview}
                 title="驳回质检，返回草稿"
               >
                 ↩️ 驳回 · 返回草稿
@@ -267,18 +315,7 @@ const ChapterEditorShell: React.FC<ChapterEditorShellProps> = ({
             <>
               <button
                 style={styles.lockBtn}
-                onClick={async () => {
-                  if (chapter) {
-                    try {
-                      const { api } = await import('../../lib/api');
-                      await api.put(`/projects/${projectId}/chapters/${chapter.id}`, { status: 'reviewing' });
-                      updateChapter(chapter.id, { status: 'reviewing' });
-                      showNotification('success', '已提交质检，进入审核流程');
-                    } catch {
-                      showNotification('error', '提交质检失败，请重试');
-                    }
-                  }
-                }}
+                onClick={handleSubmitForReview}
                 title="提交质检，进入审核流程"
               >
                 📋 提交质检

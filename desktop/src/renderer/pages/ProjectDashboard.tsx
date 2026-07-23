@@ -6,8 +6,6 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
-import { useWorkflowGuardStore } from '../stores/workflowGuardStore';
-import WorkflowAssistantPanel from '../components/workflow/WorkflowAssistantPanel';
 
 interface DashboardStats {
   totalChapters: number; completedChapters: number; writingChapters: number;
@@ -16,9 +14,36 @@ interface DashboardStats {
   _loadError?: boolean;
 }
 
+interface GenerationRecoveryAudit {
+  status: string;
+  counts: Record<string, number>;
+  protectedHumanWork: boolean;
+  protectionReasons: string[];
+  missingModules: string[];
+  consistencyIssues: string[];
+  canResume: boolean;
+  running: boolean;
+  recommendedAction: string;
+}
+
 /** 轻量全局缓存：同一项目短时间内不重复请求 stats */
 const statsCache: Record<string, { data: DashboardStats; ts: number }> = {};
 const STATS_CACHE_TTL = 30_000; // 30秒内不重复请求
+
+const dashboardText = (value: unknown): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(dashboardText).filter(Boolean).join(' · ');
+  if (typeof value === 'object') {
+    const row = value as Record<string, unknown>;
+    const name = dashboardText(row.name || row.title || row.date);
+    const detail = dashboardText(row.description || row.content || row.event || row.coreGoal || row.goal);
+    if (name && detail) return `${name}：${detail}`;
+    return name || detail || Object.values(row).map(dashboardText).filter(Boolean).join('；');
+  }
+  return '';
+};
 
 const ProjectDashboard: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
@@ -26,6 +51,9 @@ const ProjectDashboard: React.FC = () => {
   const { currentProject, selectProject } = useProjectStore();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recovery, setRecovery] = useState<GenerationRecoveryAudit | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
 
   useEffect(() => {
     const load = async () => {
@@ -49,6 +77,15 @@ const ProjectDashboard: React.FC = () => {
 
         await selectPromise;
         if (statsData) setStats(statsData);
+        if (projectId) {
+          try {
+            const recoveryRes = await api.get(`/chain/generation-recovery/${projectId}`);
+            const recoveryData = (recoveryRes as any).data ?? recoveryRes;
+            setRecovery(recoveryData.audit || null);
+          } catch (recoveryError: any) {
+            console.warn('恢复诊断加载失败:', recoveryError?.message);
+          }
+        }
       } catch (e: any) {
         console.warn('Dashboard 加载失败:', e?.message);
         setStats({ totalChapters: 0, completedChapters: 0, writingChapters: 0, totalWords: 0, targetWords: 0, totalCharacters: 0, totalConflicts: 0, unresolvedConflicts: 0, _loadError: true } as any);
@@ -56,10 +93,6 @@ const ProjectDashboard: React.FC = () => {
       setLoading(false);
     };
     load();
-    // 加载流程守卫数据
-    if (projectId) {
-      useWorkflowGuardStore.getState().fetchGuard(projectId);
-    }
   }, [projectId, selectProject]);
 
   // 从 currentProject 解析 projectMeta（替代原来的本地 state）
@@ -80,25 +113,93 @@ const ProjectDashboard: React.FC = () => {
 
   const progress = stats.targetWords > 0 ? Math.round((stats.totalWords / stats.targetWords) * 100) : 0;
   const chapterProgress = stats.totalChapters > 0 ? Math.round((stats.completedChapters / stats.totalChapters) * 100) : 0;
-  const stages = [
+  const projectStatus = String((currentProject as any)?.status || recovery?.status || '');
+  const needsRecovery = ['generation_failed', 'creating'].includes(projectStatus);
+  const hasConfirmedIdea = Boolean(
+    (currentProject as any)?.confirmedIdea
+    || (currentProject as any)?.ideaSeed
+    || (currentProject as any)?.ideaStatus === 'confirmed',
+  );
+  const outlineReady = Boolean(recovery?.counts?.outlineChapters)
+    && !recovery?.consistencyIssues?.some(issue => issue.includes('章节'));
+
+  const resumeGeneration = async () => {
+    if (!projectId || recovering || !recovery?.canResume) return;
+    setRecovering(true);
+    setRecoveryMessage('正在按已确认题材重新整理人物、世界、情节、伏笔和时间顺序，请勿重复点击……');
+    try {
+      const result = await api.post(`/chain/generation-recovery/${projectId}/resume`, {}, 1_800_000);
+      const data = (result as any).data ?? result;
+      setRecovery(data.audit || null);
+      delete statsCache[projectId];
+      await selectProject(projectId);
+      const statsRes = await api.post('/chain/dashboard-stats', { projectId });
+      const statsData = ((statsRes as any).data ?? statsRes).stats;
+      if (statsData) setStats(statsData);
+      setRecoveryMessage('创作资料已经重新整理完成，可以继续写作。');
+    } catch (error: any) {
+      setRecoveryMessage(error?.message || '创作资料尚未整理完成，原有内容已保留。');
+      try {
+        const auditRes = await api.get(`/chain/generation-recovery/${projectId}`);
+        setRecovery((((auditRes as any).data ?? auditRes).audit) || null);
+      } catch {}
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  const stageDefinitions = [
     { id: 'inspiration', label: '灵感', icon: '💡', done: true, path: null, isLauncherAction: true },
     { id: 'outline', label: '大纲', icon: '📋', done: true, path: `/project/${projectId}/outline` },
-    { id: 'writing', label: '正文', icon: '✍️', done: stats.writingChapters > 0, progress: chapterProgress, path: `/project/${projectId}/writing` },
+    { id: 'writing', label: '正文', icon: '✍️', done: stats.writingChapters > 0, progress: chapterProgress, path: needsRecovery ? null : `/project/${projectId}/writing` },
     { id: 'refinement', label: '精修', icon: '✨', done: false, path: `/project/${projectId}/refinement` },
     { id: 'qa', label: '质检', icon: '🔍', done: false, path: `/project/${projectId}/refinement` },
     { id: 'export', label: '导出', icon: '📦', done: false, path: `/project/${projectId}/import-export` },
   ];
+  const stages = stageDefinitions.map(stage => {
+    if (stage.id === 'inspiration') return { ...stage, done: hasConfirmedIdea };
+    if (stage.id === 'outline') return { ...stage, done: outlineReady };
+    return stage;
+  });
   const quickActions = [
-    { label: '🧭 连续性驾驶舱', path: `/project/${projectId}/continuity`, color: '#60a5fa' },
-    { label: '✍️ 继续写作', path: `/project/${projectId}/writing`, color: '#e94560' },
+    { label: '🧭 查看全书脉络', path: `/project/${projectId}/continuity`, color: '#60a5fa' },
+    ...(!needsRecovery ? [{ label: '✍️ 继续写作', path: `/project/${projectId}/writing`, color: '#e94560' }] : []),
     { label: '📋 查看大纲', path: `/project/${projectId}/outline`, color: '#3498db' },
-    { label: '⚡ 处理冲突', path: `/project/${projectId}/conflicts`, color: '#f39c12', badge: stats.unresolvedConflicts },
+    { label: '⚡ 检查前后矛盾', path: `/project/${projectId}/conflicts`, color: '#f39c12', badge: stats.unresolvedConflicts },
     { label: '📤 导出', path: `/project/${projectId}/import-export`, color: '#2ecc71' },
   ];
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '800px', margin: '0 auto', overflow: 'auto', height: '100%' }}>
       <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#eaeaea', marginBottom: '24px' }}>🏠 首页</h1>
+      {(needsRecovery || recovery?.protectedHumanWork || recoveryMessage) && (
+        <div style={{ padding: '16px', marginBottom: '20px', borderRadius: '10px', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#fbbf24', marginBottom: '7px' }}>
+            {needsRecovery ? '创作资料尚未准备好' : '创作资料提醒'}
+          </div>
+          <div style={{ fontSize: '12px', color: '#d1d5db', lineHeight: 1.65 }}>
+            {recovery?.protectedHumanWork
+              ? `已保留创作内容：${recovery.protectionReasons.join('；')}。系统不会自动覆盖。`
+              : recoveryMessage || '继续整理时会严格沿用已确认题材，原有内容会在成功前保留。'}
+          </div>
+          {recovery?.protectedHumanWork && (
+            <button type="button" onClick={() => navigate(`/project/${projectId}/writing`)}
+              style={{ marginTop: '10px', padding: '8px 12px', borderRadius: '7px', border: '1px solid rgba(147,197,253,0.36)', backgroundColor: '#0f172a', color: '#dbeafe', cursor: 'pointer', fontWeight: 600 }}>
+              查看已保留正文
+            </button>
+          )}
+          {!!recovery?.missingModules?.length && (
+            <div style={{ marginTop: '6px', fontSize: '12px', color: '#fca5a5' }}>尚未准备：{recovery.missingModules.join('、')}</div>
+          )}
+          {recoveryMessage && <div style={{ marginTop: '7px', fontSize: '12px', color: '#bfdbfe' }}>{recoveryMessage}</div>}
+          {needsRecovery && (
+            <button type="button" onClick={resumeGeneration} disabled={!recovery?.canResume || recovering}
+              style={{ marginTop: '12px', padding: '9px 15px', borderRadius: '8px', border: '1px solid rgba(251,191,36,0.45)', backgroundColor: recovery?.canResume && !recovering ? '#b45309' : '#374151', color: '#fff', cursor: recovery?.canResume && !recovering ? 'pointer' : 'not-allowed', fontWeight: 700 }}>
+              {recovering ? '正在整理创作资料…' : '继续准备创作资料'}
+            </button>
+          )}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '28px' }}>
         {[
           { label: '总字数', value: `${(stats.totalWords / 1000).toFixed(1)}k`, sub: `目标 ${(stats.targetWords / 1000).toFixed(0)}k`, color: '#eaeaea' },
@@ -123,20 +224,17 @@ const ProjectDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 创作流程助手 */}
-      {projectId && <WorkflowAssistantPanel projectId={projectId} />}
-
       <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.22)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#bfdbfe', marginBottom: '4px' }}>Phase 7：小说连续性驾驶舱</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#bfdbfe', marginBottom: '4px' }}>全书脉络</div>
             <div style={{ fontSize: '12px', color: '#93c5fd', lineHeight: 1.6 }}>
-              7.0 阶段展示与边界收口、7.1 小说全貌总览 + 当前章节创作焦点为本轮实现；7.2-7.5 标记为待开发。
+              集中查看故事主线、当前章节、人物关系、伏笔、世界规则和时间先后。手动修改后会标出受影响的内容。
             </div>
           </div>
           <button type="button" onClick={() => navigate(`/project/${projectId}/continuity`)}
             style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid rgba(147,197,253,0.36)', backgroundColor: '#0f172a', color: '#dbeafe', cursor: 'pointer', fontWeight: 600 }}>
-            进入驾驶舱
+            查看全书脉络
           </button>
         </div>
       </div>
@@ -171,7 +269,8 @@ const ProjectDashboard: React.FC = () => {
                 flex: 1, padding: '12px', borderRadius: '8px',
                 cursor: s.path || s.isLauncherAction ? 'pointer' : 'default', textAlign: 'center',
                 backgroundColor: s.done ? 'rgba(46,204,113,0.08)' : 'rgba(255,255,255,0.02)',
-                border: '1px solid',
+                borderWidth: 1,
+                borderStyle: 'solid',
                 borderColor: s.done ? 'rgba(46,204,113,0.2)' : 'rgba(255,255,255,0.06)',
               }}
             >
@@ -215,7 +314,7 @@ const ProjectDashboard: React.FC = () => {
             {worldview.geography && Array.isArray(worldview.geography) && worldview.geography.length > 0 && (
               <div style={dimBlockStyle}>
                 <div style={dimLabelStyle}>🗺️ 世界地理</div>
-                <div style={dimContentStyle}>{worldview.geography.map((g: any) => typeof g === 'string' ? g : g.name || g.description || JSON.stringify(g)).join(' · ')}</div>
+                <div style={dimContentStyle}>{worldview.geography.map(dashboardText).filter(Boolean).join(' · ')}</div>
               </div>
             )}
             {worldview.geography && typeof worldview.geography === 'string' && <DimRow icon="🗺️" label="世界地理" val={worldview.geography} />}
@@ -226,7 +325,7 @@ const ProjectDashboard: React.FC = () => {
             {worldview.history && Array.isArray(worldview.history) && worldview.history.length > 0 && (
               <div style={dimBlockStyle}>
                 <div style={dimLabelStyle}>📜 历史背景</div>
-                <div style={dimContentStyle}>{worldview.history.map((h: any) => typeof h === 'string' ? h : h.date ? `${h.date}: ${h.event || ''}` : h).join(' | ')}</div>
+                <div style={dimContentStyle}>{worldview.history.map(dashboardText).filter(Boolean).join(' · ')}</div>
               </div>
             )}
             {worldview.history && typeof worldview.history === 'string' && <DimRow icon="📜" label="历史背景" val={worldview.history} />}
@@ -245,7 +344,7 @@ const ProjectDashboard: React.FC = () => {
       {dashboardCharacters.length > 0 && (
         <div style={{ marginTop: '24px' }}>
           <div style={sectionTitleStyle}>👥 角色体系 ({dashboardCharacters.length}人)</div>
-          {dashboardCharacters.slice(0, 5).map((c: any, i: number) => (
+          {dashboardCharacters.map((c: any, i: number) => (
             <div key={i} style={{ padding: '10px', marginBottom: '6px', borderRadius: '8px', backgroundColor: 'rgba(52,152,219,0.05)', border: '1px solid rgba(52,152,219,0.1)' }}>
               <div style={{ fontSize: '13px', fontWeight: 600, color: '#3498db', marginBottom: '4px' }}>
                 {c.name || `角色${i + 1}`}
@@ -276,7 +375,7 @@ const ProjectDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {timeline.slice(0, 10).map((t: any, i: number) => (
+              {timeline.map((t: any, i: number) => (
                 <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                   <td style={{ padding: '5px 10px', color: '#e94560', fontWeight: 500 }}>{t.date || ''}</td>
                   <td style={{ padding: '5px 10px', color: '#c0c0d0' }}>{t.event || ''}</td>
@@ -329,7 +428,7 @@ const ProjectDashboard: React.FC = () => {
               </div>
             ))}
           </div>
-          {dashboardForeshadows.slice(0, 5).map((f: any, i: number) => (
+          {dashboardForeshadows.map((f: any, i: number) => (
             <div key={i} style={{ display: 'flex', gap: '8px', padding: '5px 10px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.01)', marginBottom: '3px', alignItems: 'center' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: f.scope === 'global' ? '#e94560' : f.scope === 'volume' ? '#f39c12' : '#3498db', flexShrink: 0 }} />
               <span style={{ color: '#c0c0d0', fontSize: '11px', flex: 1 }}>{truncate(f.content, 50)}</span>

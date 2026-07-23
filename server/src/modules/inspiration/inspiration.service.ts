@@ -5,7 +5,7 @@
  *   世界观（基于 setting）→ 角色（基于 characters）→ 核心伏笔（基于 hook）→ 大纲根节点（关联角色与伏笔）
  * 这样项目创建完成后，设定/角色/大纲/伏笔面板即有可编辑的初始数据，不会出现"空空如也"的状态。
  */
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { InspirationRepository, InspirationRow } from '../../database/repositories/inspiration.repository';
 import { ProjectRepository } from '../../database/repositories/project.repository';
@@ -129,7 +129,7 @@ export class InspirationService {
       tags: JSON.stringify(dto.tags || []),
       characters: JSON.stringify(dto.characters || []),
       setting: dto.setting || '',
-      estimated_words: dto.estimatedWords || 3000,
+      estimated_words: dto.estimatedWords || 0,
       status: 'active',
       created_at: now,
       updated_at: now,
@@ -181,7 +181,10 @@ export class InspirationService {
     const seedSetting: string = inspiration.setting || '';
     const seedHook: string = inspiration.hook || '';
     const seedDescription: string = inspiration.description || '';
-    const estimatedWords: number = inspiration.estimated_words || 3000;
+    const estimatedWords: number = Number(inspiration.estimated_words);
+    if (!Number.isInteger(estimatedWords) || estimatedWords <= 0) {
+      throw new BadRequestException('灵感未配置有效目标字数，不能转换项目');
+    }
 
     // 创建项目，使用灵感数据作为种子
     const projectType = dto.type || 'short_story';
@@ -766,7 +769,7 @@ export class InspirationService {
         content: [
           `【核心钩子】${seed.hook || seedPremise}`,
           `【创作流程】先建世界观、角色网、组织地图、时间线与伏笔表，再按卷大纲推进；每章写作前检查伏笔表，写后更新回收状态。`,
-          `【长篇规模】按两百万字长篇预留 400-500 章，每章约 4000-5000 字，当前先生成可扩展根结构。`,
+          `【长篇规模】卷数、每卷章数与总章数由主线阶段、人物弧线、冲突升级和节奏动态决定；每章在3200-4000字内按本章任务单独规划。当前只建立可扩展根结构，不预设数量。`,
         ].join('\n\n'),
         targetWords: seed.estimatedWords,
         characterIds: createdCharacterIds,
@@ -782,18 +785,20 @@ export class InspirationService {
           '【卷冲突】中枢旧派、地方观望、外部势力施压三线并行。',
           '【写作规则】每章使用：核心内容、主要场景、人物行动、冲突设计、爽点设置、伏笔设置、伏笔回收、结尾设置、目标字数。',
         ].join('\n\n'),
-        targetWords: 250000,
         characterIds: createdCharacterIds,
         foreshadowingIds,
       });
       for (const [idx, chapter] of chapterSeeds.entries()) {
+        const sceneCount = chapter.scenes.split('、').map((item) => item.trim()).filter(Boolean).length;
+        const chapterTargetWords = Math.min(4000, 3200 + sceneCount * 160 + (chapter.recovery ? 120 : 0) + (chapter.payoff ? 120 : 0));
+        const wordCountReason = `本章含${sceneCount}个主要场景，并根据冲突推进、伏笔${chapter.recovery ? '回收' : '埋设'}和情绪兑现强度确定篇幅。`;
         this.outlineService.create(projectId, {
           title: `第${idx + 1}章 ${chapter.title}`,
           level: 'chapter',
           parentId: volume.id,
           order: idx,
-          content: `${chapterCard(chapter)}\n\n目标字数：5000`,
-          targetWords: 5000,
+          content: `${chapterCard(chapter)}\n\n目标字数：${chapterTargetWords}\n篇幅理由：${wordCountReason}`,
+          targetWords: chapterTargetWords,
           characterIds: createdCharacterIds,
           foreshadowingIds,
           scenes: {
@@ -806,6 +811,7 @@ export class InspirationService {
             mood: idx === 0 ? '惊疑、克制、冷意' : idx === 1 ? '互相试探、雨夜压低声' : idx === 2 ? '脏、急、道德不适' : idx === 3 ? '公开压迫、暗处松动' : '务实、疲惫、隐约振奋',
             characterActions: chapter.actions,
             texture: chapter.texture || '',
+            wordCountReason,
           },
         });
       }

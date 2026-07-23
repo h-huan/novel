@@ -16,7 +16,7 @@ export interface HealthCheckResult {
 
 export interface RagHealthResult {
   status: "ok" | "degraded";
-  vectorStore: "sqlite" | "in_memory";
+  vectorStore: "sqlite" | "unavailable";
   vectorStoreAvailable: boolean;
   detail: string;
   collectionsCount: number;
@@ -60,7 +60,7 @@ export class HealthController {
     const health = this.vectorIndex?.getHealthStatus();
     return {
       status: available ? "ok" : "degraded",
-      vectorStore: available ? "sqlite" : "in_memory",
+      vectorStore: available ? "sqlite" : "unavailable",
       vectorStoreAvailable: available,
       detail: health?.detail ?? "VectorIndexService not available",
       collectionsCount: Object.keys(VectorIndexService.COLLECTIONS).length,

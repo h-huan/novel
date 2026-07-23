@@ -19,6 +19,7 @@ import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
 // ==================== Types ====================
 
 export type WritingMode = 'manual' | 'semi_auto' | 'full_auto';
+export type GenerationNotice = { tone: 'working' | 'success' | 'error'; text: string };
 
 /** 章节类型：日常写作 或 高潮章节 */
 export type ChapterScenario = 'daily' | 'climax';
@@ -27,15 +28,40 @@ type TabType = 'writing' | 'plugins' | 'qa' | 'notes';
 
 type PlatformType = 'zhihu' | 'fanqie' | 'qidian' | 'douyin' | 'rules_horror';
 
+type ChapterTarget = {
+  id: string;
+  volumeIndex: number;
+  chapterIndex: number;
+  title: string;
+  status?: string;
+};
+
+// Closing and reopening the drawer unmounts this component. A generation must
+// remain owned by its project/chapter until the request has actually settled.
+const activeChapterGenerations = new Set<string>();
+
+function chapterGenerationKey(projectId?: string, chapterId?: string) {
+  return projectId && chapterId ? `${projectId}:${chapterId}` : null;
+}
+
+function isChapterGenerationActive(projectId?: string, chapterId?: string) {
+  const key = chapterGenerationKey(projectId, chapterId);
+  return Boolean(key && activeChapterGenerations.has(key));
+}
+
 interface AiWritingPanelProps {
   projectId: string;
   chapterId?: string;
   chapterContent?: string;
   volumeIndex?: number;
   chapterIndex?: number;
+  chapters?: ChapterTarget[];
+  onChapterChange?: (chapterId: string) => void;
   onGenerateStart?: () => void;
-  onGenerateComplete?: (content: string) => void;
+  onGenerateComplete?: (content: string, generatedChapterId: string) => void;
   onError?: (error: string) => void;
+  generationNotice?: GenerationNotice | null;
+  onGenerationStatus?: (notice: GenerationNotice) => void;
 }
 
 // ==================== Constants ====================
@@ -49,6 +75,8 @@ const TIANLONG_STEPS = [
   { key: 'reversal', label: '反转', short: '反转' },
   { key: 'cost', label: '代价', short: '代价' },
   { key: 'hook', label: '钩子', short: '钩子' },
+  { key: 'synthesis', label: '正文合成', short: '合成' },
+  { key: 'qa', label: '篇幅核验', short: '核验' },
 ];
 
 const GENERATE_METHOD_LABELS: Record<'tianlong' | 'direct', string> = {
@@ -96,18 +124,22 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
   chapterContent,
   volumeIndex = 1,
   chapterIndex = 1,
+  chapters = [],
+  onChapterChange,
   onGenerateStart,
   onGenerateComplete,
   onError,
+  generationNotice: externalGenerationNotice,
+  onGenerationStatus,
 }) => {
   const navigate = useNavigate();
 
   // ========== 写作 Tab State ==========
   const [activeTab, setActiveTab] = useState<TabType>('writing');
-  const [writingMode, setWritingMode] = useState<WritingMode>('semi_auto');
+  const [writingMode, setWritingMode] = useState<WritingMode>('full_auto');
   const [generateMethod, setGenerateMethod] = useState<'tianlong' | 'direct'>('tianlong');
-  const [chapterScenario, setChapterScenario] = useState<ChapterScenario>('daily');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [chapterScenario, setChapterScenario] = useState<ChapterScenario | null>(null);
+  const [isGenerating, setIsGenerating] = useState(() => isChapterGenerationActive(projectId, chapterId));
   const [currentStep, setCurrentStep] = useState(-1);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [prompt, setPrompt] = useState('');
@@ -120,13 +152,11 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
 
   // 获取当前场景对应的后端 scenario key
   const getScenarioKey = useCallback(() => {
-    return 'writing';
+    return chapterScenario === 'climax' ? 'writing_climax' : 'writing_daily';
   }, [chapterScenario]);
 
   // --- 外挂 Tab State ---
   const [pluginLoading, setPluginLoading] = useState<string | null>(null);
-  const [batchCount, setBatchCount] = useState(5);
-  const [batchStatus, setBatchStatus] = useState('');
   const [pluginResult, setPluginResult] = useState<{ type: string; content: string } | null>(null);
 
   // --- 质检 Tab State ---
@@ -135,9 +165,19 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
 
   // ========== 写作功能 ==========
 
-  const [streamMode, setStreamMode] = useState(false);
+  // Generation always uses the progress-reporting endpoint. This is not an author-facing choice.
+  const streamMode = true;
   const [streamProgress, setStreamProgress] = useState(0);
   const [streamContent, setStreamContent] = useState('');
+  const [generationNotice, setGenerationNotice] = useState<GenerationNotice | null>(externalGenerationNotice || null);
+  const publishGenerationNotice = useCallback((notice: GenerationNotice) => {
+    setGenerationNotice(notice);
+    onGenerationStatus?.(notice);
+  }, [onGenerationStatus]);
+
+  useEffect(() => {
+    if (externalGenerationNotice) setGenerationNotice(externalGenerationNotice);
+  }, [externalGenerationNotice]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -151,10 +191,53 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
     return () => window.removeEventListener('novel-ai-workflow-prompt', handler);
   }, []);
 
+  useEffect(() => {
+    if (!projectId || !chapterId) {
+      setChapterScenario(null);
+      return;
+    }
+    void (async () => {
+      try {
+        const chapterResponse = await api.get(`/projects/${projectId}/chapters/${chapterId}`);
+        const chapter = (chapterResponse as any).data ?? chapterResponse;
+        if (!chapter?.outlineId) return setChapterScenario(null);
+        const outlineResponse = await api.get(`/projects/${projectId}/outlines/${chapter.outlineId}`);
+        const outline = (outlineResponse as any).data ?? outlineResponse;
+        const signals = [outline?.chapterFunction, outline?.goalArc, outline?.content, JSON.stringify(outline?.scenes || {})].join(' ');
+        setChapterScenario(/climax|climactic|showdown|reversal|reveal|高潮|决战|反转|爆发|揭示|收束/i.test(signals) ? 'climax' : 'daily');
+      } catch {
+        setChapterScenario(null);
+      }
+    })();
+  }, [projectId, chapterId]);
+
+  useEffect(() => {
+    // Restore the real request state whenever this drawer is mounted again.
+    setIsGenerating(isChapterGenerationActive(projectId, chapterId));
+  }, [projectId, chapterId]);
+
   const handleGenerate = useCallback(async () => {
-    if (!projectId || isGenerating) return;
+    if (!projectId || !chapterId || isGenerating || isChapterGenerationActive(projectId, chapterId)) {
+      if (isChapterGenerationActive(projectId, chapterId)) setIsGenerating(true);
+      return;
+    }
+    const generationKey = chapterGenerationKey(projectId, chapterId);
+    if (!generationKey || activeChapterGenerations.has(generationKey)) {
+      setIsGenerating(true);
+      return;
+    }
+    activeChapterGenerations.add(generationKey);
+    const finishGeneration = () => {
+      activeChapterGenerations.delete(generationKey);
+      setIsGenerating(false);
+      setCurrentStep(-1);
+    };
+    setIsGenerating(true);
+    publishGenerationNotice({ tone: 'working', text: '正在校验本章大纲与写作条件…' });
     const guard = await checkAction(projectId, 'generate_body');
     if (!guard.allowed) {
+      finishGeneration();
+      publishGenerationNotice({ tone: 'error', text: guard.reason || '当前条件不允许生成正文' });
       setBlockedNotice({
         reason: guard.reason || '当前阶段不能生成正文',
         missingAssets: guard.missingAssets,
@@ -163,52 +246,90 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
       return;
     }
     setBlockedNotice(null);
-    setIsGenerating(true);
     setCurrentStep(0);
     setStreamContent('');
     setStreamProgress(0);
+    publishGenerationNotice({ tone: 'working', text: '已开始生成，正在等待服务端进度…' });
     onGenerateStart?.();
 
     if (streamMode) {
       // SSE 流式输出（真实天龙8步进度）— 使用 fetch 流解析（POST 模式）
       try {
-        const body: Record<string, unknown> = { projectId, chapterId, chapterNumber: chapterIndex, prompt, scenario: getScenarioKey() };
-        if (generateMethod === 'tianlong') {
-          body.templateId = 'tianlong-8step';
-        }
-        streamRequest(
+        const body: Record<string, unknown> = { projectId, chapterId, chapterNumber: chapterIndex, mode: writingMode, prompt, scenario: getScenarioKey() };
+        // Keep every visible chapter-generation action on the single verified
+        // path, including its terminal event and hard acceptance gates.
+        body.templateId = 'tianlong-8step';
+        let receivedTerminalEvent = false;
+        void streamRequest(
           '/chain/stream-generate',
           body,
           (data) => {
-            if (data.type === 'step') {
-              setCurrentStep(data.step as number);
+            if (data.type === 'start') {
+              publishGenerationNotice({ tone: 'working', text: String(data.message || '正在生成正文…') });
+            } else if (data.type === 'heartbeat') {
+              setStreamProgress(Number(data.progress || 0));
+              publishGenerationNotice({ tone: 'working', text: String(data.message || '生成仍在执行，连接正常…') });
+            } else if (data.type === 'step') {
+              // Server node_0 is context assembly; author-facing stages begin at
+              // node_1 (目标), and continue through synthesis and verification.
+              const authorStage = Math.max(0, Math.min(TIANLONG_STEPS.length - 1, Number(data.step || 1) - 1));
+              setCurrentStep(authorStage);
               setStreamProgress((data.progress as number) || 0);
+              publishGenerationNotice({ tone: 'working', text: `${String(data.label || '正在生成')}（${Number(data.progress || 0)}%）` });
+            } else if (data.type === 'quality') {
+              const report = (data.report || {}) as Record<string, unknown>;
+              const evidence = Array.isArray(report.evidence) ? report.evidence.filter(Boolean).slice(0, 2).join('；') : '';
+              publishGenerationNotice({
+                tone: 'success',
+                text: `正文质检通过：大纲、人物、世界观、时间线与叙事连贯性已验收${evidence ? `。证据：${evidence}` : ''}`,
+              });
             } else if (data.type === 'complete') {
-              setIsGenerating(false);
-              setCurrentStep(-1);
-              onGenerateComplete?.( (data.content as string) || '');
+              receivedTerminalEvent = true;
+              finishGeneration();
+              const content = String(data.content || '').trim();
+              if (!content) {
+                publishGenerationNotice({ tone: 'error', text: '生成结束但未返回可写入的正文，原正文未变更。' });
+                onError?.('生成结束但未返回可写入的正文');
+                return;
+              }
+              const report = (data.qualityReport || {}) as Record<string, unknown>;
+              const evidence = Array.isArray(report.evidence) ? report.evidence.filter(Boolean).slice(0, 2).join('；') : '';
+              publishGenerationNotice({
+                tone: 'success',
+                text: `正文质检通过（大纲、人物、世界观、时间线、叙事连贯性），正在保存并同步创作资料…${evidence ? ` 证据：${evidence}` : ''}`,
+              });
+              onGenerateComplete?.(content, chapterId);
             } else if (data.type === 'error') {
-              setIsGenerating(false);
-              setCurrentStep(-1);
-              onError?.( (data.error as string) || '生成失败');
+              receivedTerminalEvent = true;
+              finishGeneration();
+              const message = String(data.error || '生成失败');
+              publishGenerationNotice({ tone: 'error', text: `生成失败：${message}` });
+              onError?.(message);
             } else if (data.progress !== undefined) {
               setStreamProgress(data.progress as number);
               setStreamContent(prev => prev + (data.chunk as string || ''));
             }
           },
           (error) => {
-            setIsGenerating(false);
-            setCurrentStep(-1);
+            receivedTerminalEvent = true;
+            finishGeneration();
+            publishGenerationNotice({ tone: 'error', text: `生成连接失败：${error.message}` });
             onError?.(error.message);
           },
           () => {
-            setIsGenerating(false);
-            setCurrentStep(-1);
+            if (!receivedTerminalEvent) {
+              const message = '生成连接已结束，但未收到完成结果。原正文未变更。';
+              publishGenerationNotice({ tone: 'error', text: message });
+              onError?.(message);
+            }
+            finishGeneration();
           },
         );
       } catch (err: any) {
-        setIsGenerating(false);
-        onError?.(err.message);
+        finishGeneration();
+        const message = err?.message || '生成请求无法启动';
+        publishGenerationNotice({ tone: 'error', text: `生成失败：${message}` });
+        onError?.(message);
       }
       return;
     }
@@ -226,21 +347,41 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
       });
 
       setCurrentStep(-1);
-      const data = response.data as any;
-      onGenerateComplete?.(data.content || JSON.stringify(data));
+      const data = ((response as any).data ?? response) as any;
+      if (data?.success === false || !String(data?.content || '').trim()) {
+        throw new Error(data?.error || '生成未返回可写入的正文');
+      }
+      publishGenerationNotice({ tone: 'success', text: '正文已生成，正在保存并同步创作资料…' });
+      onGenerateComplete?.(String(data.content), chapterId);
     } catch (err) {
       const message = err instanceof Error ? err.message : '生成失败';
+      publishGenerationNotice({ tone: 'error', text: `生成失败：${message}` });
       onError?.(message);
     } finally {
-      setIsGenerating(false);
-      setCurrentStep(-1);
+      finishGeneration();
     }
-  }, [projectId, chapterId, writingMode, prompt, isGenerating, streamMode, generateMethod, getScenarioKey, checkAction, onGenerateStart, onGenerateComplete, onError]);
+  }, [projectId, chapterId, writingMode, prompt, isGenerating, generateMethod, getScenarioKey, checkAction, onGenerateStart, onGenerateComplete, onError, publishGenerationNotice]);
 
   const handleContinue = useCallback(async () => {
-    if (!projectId || !chapterId || isGenerating) return;
+    if (!projectId || !chapterId || isGenerating || isChapterGenerationActive(projectId, chapterId)) {
+      if (isChapterGenerationActive(projectId, chapterId)) setIsGenerating(true);
+      return;
+    }
+    const generationKey = chapterGenerationKey(projectId, chapterId);
+    if (!generationKey || activeChapterGenerations.has(generationKey)) {
+      setIsGenerating(true);
+      return;
+    }
+    activeChapterGenerations.add(generationKey);
+    const finishGeneration = () => {
+      activeChapterGenerations.delete(generationKey);
+      setIsGenerating(false);
+    };
+    setIsGenerating(true);
+    publishGenerationNotice({ tone: 'working', text: '正在校验续写条件…' });
     const guard = await checkAction(projectId, 'continue_body');
     if (!guard.allowed) {
+      finishGeneration();
       setBlockedNotice({
         reason: guard.reason || '当前阶段不能续写正文',
         missingAssets: guard.missingAssets,
@@ -249,7 +390,7 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
       return;
     }
     setBlockedNotice(null);
-    setIsGenerating(true);
+    publishGenerationNotice({ tone: 'working', text: '正在续写正文…' });
 
     try {
       const response = await api.post('/chain/continue', {
@@ -259,15 +400,20 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
         context: chapterContent,
         scenario: getScenarioKey(),
       });
-      const data = response.data as any;
-      onGenerateComplete?.(data.content || '');
+      const data = ((response as any).data ?? response) as any;
+      if (data?.success === false || !String(data?.content || '').trim()) {
+        throw new Error(data?.error || '续写未返回可写入的正文');
+      }
+      publishGenerationNotice({ tone: 'success', text: '续写已生成，正在保存并同步创作资料…' });
+      onGenerateComplete?.(String(data.content), chapterId);
     } catch (err) {
       const message = err instanceof Error ? err.message : '续写失败';
+      publishGenerationNotice({ tone: 'error', text: `续写失败：${message}` });
       onError?.(message);
     } finally {
-      setIsGenerating(false);
+      finishGeneration();
     }
-  }, [projectId, chapterId, prompt, chapterContent, isGenerating, getScenarioKey, checkAction, onGenerateComplete, onError]);
+  }, [projectId, chapterId, prompt, chapterContent, isGenerating, getScenarioKey, checkAction, onGenerateComplete, onError, publishGenerationNotice]);
 
   // ========== 外挂功能 ==========
 
@@ -414,18 +560,39 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
       {/* ========== 写作 Tab ========== */}
       {activeTab === 'writing' && (
         <div style={styles.tabContent}>
+          <div style={styles.section}>
+            <div style={styles.sectionHeader}>
+              <span style={styles.sectionTitle}>生成目标</span>
+            </div>
+            <select
+              value={chapterId || ''}
+              onChange={(event) => onChapterChange?.(event.target.value)}
+              disabled={isGenerating || chapters.length === 0}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', background: '#17172a', color: '#eaeaea', fontFamily: 'inherit', fontSize: '12px' }}
+            >
+              {chapters.length === 0 && <option value="">请先在章节列表选择章节</option>}
+              {chapters.map((chapter) => (
+                <option key={chapter.id} value={chapter.id}>
+                  第{chapter.volumeIndex}卷·第{chapter.chapterIndex}章 {chapter.title}
+                </option>
+              ))}
+            </select>
+            <p style={{ fontSize: '11px', color: '#8a8aa0', margin: '4px 0 0', lineHeight: 1.5 }}>
+              每次只生成当前选定章节，并严格使用该章节绑定的大纲、已确认设定与前文状态；不会自动生成后续章节。
+            </p>
+          </div>
           {/* 生成方式 */}
           <div style={styles.section}>
             <div style={styles.sectionHeader}>
               <span style={styles.sectionTitle}>生成方式</span>
             </div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {(['tianlong', 'direct'] as const).map((method) => (
+              {(['tianlong'] as const).map((method) => (
                 <button
                   key={method}
                   onClick={() => setGenerateMethod(method)}
                   style={{
-                    padding: '6px 12px', borderRadius: '6px', border: '1px solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: '12px',
+                    padding: '6px 12px', borderRadius: '6px', borderWidth: 1, borderStyle: 'solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: '12px',
                     backgroundColor: generateMethod === method ? (method === 'tianlong' ? 'rgba(233,69,96,0.12)' : 'rgba(46,204,113,0.12)') : 'transparent',
                     borderColor: generateMethod === method ? (method === 'tianlong' ? '#e94560' : '#2ecc71') : 'rgba(255,255,255,0.08)',
                     color: generateMethod === method ? (method === 'tianlong' ? '#e94560' : '#2ecc71') : '#8a8aa0',
@@ -476,22 +643,23 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
           {/* 章节类型（决定使用哪个模型） */}
           <div style={styles.section}>
             <div style={styles.sectionHeader}>
-              <span style={styles.sectionTitle}>章节类型</span>
+              <span style={styles.sectionTitle}>章节类型（大纲自动判断）</span>
             </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div style={{ display: 'none' }} aria-hidden="true">
               {([
                 { key: 'daily' as ChapterScenario, label: '📝 日常', desc: '使用日常写作模型' },
                 { key: 'climax' as ChapterScenario, label: '🔥 高潮', desc: '使用高潮章节模型' },
               ]).map((s) => (
                 <button
                   key={s.key}
-                  onClick={() => setChapterScenario(s.key)}
+                  disabled
                   style={{
                     flex: 1,
                     padding: '8px 12px',
                     borderRadius: '6px',
-                    border: '1px solid',
-                    cursor: 'pointer',
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    cursor: 'default',
                     fontFamily: 'inherit',
                     fontSize: '12px',
                     backgroundColor: chapterScenario === s.key
@@ -510,10 +678,13 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
                 </button>
               ))}
             </div>
+            <div style={{ padding: '8px 12px', borderRadius: '6px', border: `1px solid ${chapterScenario === 'climax' ? 'rgba(233,69,96,0.35)' : chapterScenario === 'daily' ? 'rgba(46,204,113,0.32)' : 'rgba(255,255,255,0.12)'}`, backgroundColor: chapterScenario === 'climax' ? 'rgba(233,69,96,0.12)' : chapterScenario === 'daily' ? 'rgba(46,204,113,0.1)' : 'rgba(255,255,255,0.03)', color: chapterScenario === 'climax' ? '#e94560' : chapterScenario === 'daily' ? '#2ecc71' : '#8a8aa0', fontSize: '12px', fontWeight: 700 }}>
+              {chapterScenario === null ? '等待选择章节并读取详细大纲' : chapterScenario === 'climax' ? '🔥 高潮章节（自动识别）' : '📝 日常章节（自动识别）'}
+            </div>
             <p style={{ fontSize: '11px', color: '#8a8aa0', margin: '4px 0 0 0', lineHeight: 1.5 }}>
               {chapterScenario === 'climax'
-                ? '高潮章节将使用配置的高潮模型（更高温度、更强表现力）'
-                : '除高潮场景外，所有写作均使用配置的日常模型'}
+                ? '依据本章大纲的功能、冲突与场景自动识别，使用配置的高潮模型。'
+                : '依据本章详细大纲自动识别，使用配置的日常模型。'}
             </p>
           </div>
 
@@ -578,6 +749,23 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
               />
             </div>
           )}
+          {generationNotice && (
+            <div
+              role="status"
+              style={{
+                marginBottom: 10,
+                padding: '9px 10px',
+                borderRadius: 6,
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: generationNotice.tone === 'error' ? '#ff9aa9' : generationNotice.tone === 'success' ? '#8fe3a2' : '#f4cf72',
+                backgroundColor: generationNotice.tone === 'error' ? 'rgba(231, 76, 96, .12)' : generationNotice.tone === 'success' ? 'rgba(46, 204, 113, .10)' : 'rgba(243, 156, 18, .10)',
+                border: `1px solid ${generationNotice.tone === 'error' ? 'rgba(231, 76, 96, .45)' : generationNotice.tone === 'success' ? 'rgba(46, 204, 113, .40)' : 'rgba(243, 156, 18, .38)'}`,
+              }}
+            >
+              {generationNotice.text}
+            </div>
+          )}
           <div style={styles.actions}>
             <button
               style={{
@@ -586,13 +774,9 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
                 cursor: isGenerating ? 'not-allowed' : 'pointer',
               }}
               onClick={handleGenerate}
-              disabled={isGenerating}
+              disabled={isGenerating || !chapterId}
             >
               {isGenerating ? '生成中...' : '🤖 AI生成'}
-            </button>
-            <button onClick={() => setStreamMode(p => !p)}
-              style={{ padding: '5px 10px', borderRadius: '5px', border: '1px solid', cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit', backgroundColor: streamMode ? 'rgba(46,204,113,0.1)' : 'rgba(255,255,255,0.04)', borderColor: streamMode ? '#2ecc71' : 'rgba(255,255,255,0.08)', color: streamMode ? '#2ecc71' : '#6c6c80' }}>
-              {streamMode ? '⚡ 实时流' : '💾 一次性'}
             </button>
             {chapterId && (
               <button
@@ -607,88 +791,10 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
                 📝 AI续写
               </button>
             )}
-            {/* 长篇每日生成 (long-write) */}
-            <button
-              style={{
-                padding: '8px 14px', borderRadius: '6px', border: '1px solid rgba(155,89,182,0.3)',
-                cursor: isGenerating ? 'not-allowed' : 'pointer', fontFamily: 'inherit', fontSize: '12px',
-                backgroundColor: 'rgba(155,89,182,0.08)', color: '#9b59b6', opacity: isGenerating ? 0.5 : 1,
-              }}
-              onClick={async () => {
-                if (!projectId || isGenerating) return;
-                const guard = await checkAction(projectId, 'generate_body');
-                if (!guard.allowed) {
-                  setBlockedNotice({
-                    reason: guard.reason || '当前阶段不能生成正文',
-                    missingAssets: guard.missingAssets,
-                    recommendedNextAction: guard.recommendedNextAction,
-                  });
-                  return;
-                }
-                setBlockedNotice(null);
-                setIsGenerating(true);
-                onGenerateStart?.();
-                try {
-                  const res = await api.post('/chain/long-write', {
-                    projectId, chapterId,
-                    outline: prompt || chapterContent?.substring(0, 500) || '请生成章节正文',
-                    previousChapterSummary: chapterContent?.substring(0, 300) || '',
-                    volumeIndex, chapterIndex,
-                    scenario: getScenarioKey(),
-                  });
-                  const data = res.data as any;
-                  if (data.success) {
-                    onGenerateComplete?.(data.content || '');
-                  } else {
-                    onError?.(data.error || '长篇生成失败');
-                  }
-                } catch (err: any) {
-                  onError?.(err.message);
-                } finally {
-                  setIsGenerating(false);
-                }
-              }}
-              disabled={isGenerating}
-              title="长篇每日写作：生成正文 + 三连续检查 + 自动保存"
-            >
-              📖 长篇生成
-            </button>
           </div>
         </div>
       )}
 
-      {/* 批量生成 */}
-      {activeTab === 'writing' && (
-        <div style={{ padding: '8px 14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#8a8aa0', marginBottom: '6px' }}>📦 批量生成</div>
-          <div style={{ fontSize: '11px', color: '#f8c471', lineHeight: 1.5, marginBottom: '8px' }}>
-            批量正文生成已改为逐章确稿流程：每章生成后必须同步保存、自动提取待确稿状态并由作者确认，避免多章状态混乱。
-          </div>
-          {streamMode && streamProgress > 0 && (
-            <div style={{ marginBottom: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#6c6c80', marginBottom: '2px' }}>
-                <span>流式输出进度</span><span>{streamProgress}%</span>
-              </div>
-              <div style={{ height: '3px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{ width: `${streamProgress}%`, height: '100%', backgroundColor: '#2ecc71', borderRadius: '2px', transition: 'width 0.2s' }} />
-              </div>
-            </div>
-          )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '11px', color: '#6c6c80' }}>生成</span>
-            <input type="number" min={1} max={30} value={batchCount} onChange={e => setBatchCount(Math.min(30, Math.max(1, parseInt(e.target.value) || 1)))}
-              style={{ width: '50px', padding: '4px 6px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', textAlign: 'center', outline: 'none' }} />
-            <span style={{ fontSize: '11px', color: '#6c6c80' }}>章（最多30章）</span>
-            <button onClick={() => {
-              setBatchStatus('请使用单章“生成正文”。系统会同步保存初稿并生成待确稿状态。');
-            }} disabled={isGenerating}
-              style={{ padding: '5px 12px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '5px', color: '#f8c471', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
-              转为逐章确稿
-            </button>
-          </div>
-          {batchStatus && <div style={{ fontSize: '11px', color: batchStatus.startsWith('✅') ? '#2ecc71' : batchStatus.startsWith('❌') ? '#e74c3c' : '#f39c12', marginTop: '4px' }}>{batchStatus}</div>}
-        </div>
-      )}
 
       {/* ========== 外挂 Tab ========== */}
       {activeTab === 'plugins' && (
@@ -976,7 +1082,9 @@ const styles: Record<string, React.CSSProperties> = {
   modeBtn: {
     padding: '4px 10px',
     backgroundColor: 'rgba(255,255,255,0.06)',
-    border: '1px solid rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: '4px',
     color: '#eaeaea',
     fontSize: '12px',
@@ -999,7 +1107,8 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: '2px',
     padding: '8px 12px',
-    border: '1px solid',
+    borderWidth: 1,
+    borderStyle: 'solid',
     borderRadius: '6px',
     cursor: 'pointer',
     textAlign: 'left' as const,

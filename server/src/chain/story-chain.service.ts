@@ -50,6 +50,7 @@ export class StoryChainService {
       chapterNumber: number;
       chapterOutline: string;
       chapterFunction: string;
+      targetWords: number;
     },
     onProgress?: (nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => void,
   ): Promise<ChainResult> {
@@ -123,7 +124,11 @@ export class StoryChainService {
       chainId: 'tianlong-8step',
       promptTemplateId: 'tianlong-step2-trigger',
       modelConfig: { primary: 'deepseek', fallback: 'glm', temperature: 0.6, tier: 'economy' },
-      inputMapping: { goal: 'chain_output.node_1' },
+      inputMapping: {
+        goal: 'chain_output.node_1',
+        chapterContext: 'user_input.chapterContext',
+        chapterOutline: 'user_input.chapterOutline',
+      },
       outputMapping: { triggerEvent: 'node_2.triggerEvent', triggerMethod: 'node_2.triggerMethod', urgency: 'node_2.urgency' },
       timeout: 30,
       retryCount: 2,
@@ -149,7 +154,11 @@ export class StoryChainService {
       chainId: 'tianlong-8step',
       promptTemplateId: 'tianlong-step3-action',
       modelConfig: { primary: 'deepseek', fallback: 'kimi', temperature: 0.8, tier: 'economy' },
-      inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2' },
+      inputMapping: {
+        goal: 'chain_output.node_1', trigger: 'chain_output.node_2',
+        chapterContext: 'user_input.chapterContext',
+        chapterOutline: 'user_input.chapterOutline',
+      },
       outputMapping: {},
       timeout: 60,
       retryCount: 2,
@@ -176,7 +185,11 @@ export class StoryChainService {
       chainId: 'tianlong-8step',
       promptTemplateId: 'tianlong-step4-obstacle',
       modelConfig: { primary: 'claude', fallback: 'deepseek', temperature: 0.6, tier: 'balanced' },
-      inputMapping: { action: 'chain_output.node_3' },
+      inputMapping: {
+        action: 'chain_output.node_3',
+        chapterContext: 'user_input.chapterContext',
+        chapterOutline: 'user_input.chapterOutline',
+      },
       outputMapping: { obstacleType: 'node_4.obstacleType', description: 'node_4.description', protagonistReaction: 'node_4.protagonistReaction' },
       timeout: 30,
       retryCount: 2,
@@ -202,7 +215,10 @@ export class StoryChainService {
       chainId: 'tianlong-8step',
       promptTemplateId: 'tianlong-step5-misjudge',
       modelConfig: { primary: 'gpt4o', fallback: 'claude', temperature: 0.7, tier: 'balanced' },
-      inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2', action: 'chain_output.node_3', obstacle: 'chain_output.node_4' },
+      inputMapping: {
+        goal: 'chain_output.node_1', trigger: 'chain_output.node_2', action: 'chain_output.node_3', obstacle: 'chain_output.node_4',
+        chapterContext: 'user_input.chapterContext', chapterOutline: 'user_input.chapterOutline',
+      },
       outputMapping: { protagonistThinks: 'node_5.protagonistThinks', actualTruth: 'node_5.actualTruth', infoGapSource: 'node_5.infoGapSource', consequenceOfMisjudgment: 'node_5.consequenceOfMisjudgment' },
       timeout: 30,
       retryCount: 2,
@@ -228,7 +244,10 @@ export class StoryChainService {
       chainId: 'tianlong-8step',
       promptTemplateId: 'tianlong-step6-reversal',
       modelConfig: { primary: 'claude', temperature: 0.7, tier: 'performance' },
-      inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2', action: 'chain_output.node_3', obstacle: 'chain_output.node_4', misjudge: 'chain_output.node_5' },
+      inputMapping: {
+        goal: 'chain_output.node_1', trigger: 'chain_output.node_2', action: 'chain_output.node_3', obstacle: 'chain_output.node_4', misjudge: 'chain_output.node_5',
+        chapterContext: 'user_input.chapterContext', chapterOutline: 'user_input.chapterOutline',
+      },
       outputMapping: { reversalType: 'node_6.reversalType', reversalMoment: 'node_6.reversalMoment', reactions: 'node_6.reactions' },
       timeout: 60,
       retryCount: 2,
@@ -255,7 +274,10 @@ export class StoryChainService {
       chainId: 'tianlong-8step',
       promptTemplateId: 'tianlong-step7-cost',
       modelConfig: { primary: 'deepseek', fallback: 'glm', temperature: 0.7, tier: 'economy' },
-      inputMapping: { reversal: 'chain_output.node_6' },
+      inputMapping: {
+        reversal: 'chain_output.node_6',
+        chapterContext: 'user_input.chapterContext', chapterOutline: 'user_input.chapterOutline',
+      },
       outputMapping: { costType: 'node_7.costType', description: 'node_7.description', subsequentImpact: 'node_7.subsequentImpact' },
       timeout: 30,
       retryCount: 2,
@@ -281,7 +303,10 @@ export class StoryChainService {
       chainId: 'tianlong-8step',
       promptTemplateId: 'tianlong-step8-hook',
       modelConfig: { primary: 'gpt4o', fallback: 'claude', temperature: 0.8, tier: 'performance' },
-      inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2', reversal: 'chain_output.node_6', cost: 'chain_output.node_7' },
+      inputMapping: {
+        goal: 'chain_output.node_1', trigger: 'chain_output.node_2', reversal: 'chain_output.node_6', cost: 'chain_output.node_7',
+        chapterContext: 'user_input.chapterContext', chapterOutline: 'user_input.chapterOutline',
+      },
       outputMapping: { hookType: 'node_8.hookType', hookText: 'node_8.hookText', nextChapterDirection: 'node_8.nextChapterDirection' },
       timeout: 30,
       retryCount: 2,
@@ -308,10 +333,18 @@ export class StoryChainService {
       promptTemplateId: undefined,
       modelConfig: { primary: 'deepseek', temperature: 0.5, tier: 'economy' },
       inputMapping: {
+        goal: 'chain_output.node_1',
+        trigger: 'chain_output.node_2',
         action: 'chain_output.node_3',
+        obstacle: 'chain_output.node_4',
+        misjudge: 'chain_output.node_5',
         reversal: 'chain_output.node_6',
         cost: 'chain_output.node_7',
         hook: 'chain_output.node_8',
+        targetWords: 'user_input.targetWords',
+        chapterContext: 'user_input.chapterContext',
+        chapterOutline: 'user_input.chapterOutline',
+        chapterNumber: 'user_input.chapterNumber',
       },
       outputMapping: {},
       timeout: 10,
@@ -357,21 +390,32 @@ export class StoryChainService {
       name: '天龙8步正文生成',
       version: '1.0.0',
       description: '阶段三：基于大纲使用天龙8步法生成完整章节正文',
-      nodes: [node0, node1, node2, node3, node4, node5, node6, node7, node8, node9, node10],
+      // The controller performs the authoritative post-synthesis review against
+      // the bound detailed outline and confirmed story state. Do not run a
+      // second generic score-only QA node here: it cannot prove those facts and
+      // previously rejected usable chapters on arbitrary 68/70-style scores.
+      nodes: [node0, node1, node2, node3, node4, node5, node6, node7, node8, node9],
       variables: [
         { name: 'outline', source: 'user_input', path: 'outline', required: true, description: '完整大纲' },
         { name: 'chapterContext', source: 'user_input', path: 'chapterContext', required: true, description: '章节执行上下文' },
         { name: 'chapterNumber', source: 'user_input', path: 'chapterNumber', required: true, description: '当前章节号' },
         { name: 'chapterOutline', source: 'user_input', path: 'chapterOutline', required: true, description: '本章大纲' },
         { name: 'chapterFunction', source: 'user_input', path: 'chapterFunction', required: true, description: '本章剧情功能' },
+        { name: 'targetWords', source: 'user_input', path: 'targetWords', required: true, description: '本章动态正文目标字数' },
       ],
       executionMode: 'sequential',
       config: {
         timeout: 300,
         maxRetries: 3,
         enableLogging: true,
-        enableQualityGate: true,
-        strictMode: false,
+        // Internal planning-node scores are advisory prompts, not evidence that
+        // a complete chapter violates its outline. The final structured review
+        // below the chain remains mandatory and fail-closed.
+        enableQualityGate: false,
+        // A missing/failed synthesis must stop here. Continuing into the QA node
+        // hides the actual model failure, adds an unnecessary request, and leaves
+        // callers with a misleading "no complete chapter" error.
+        strictMode: true,
       },
     };
   }
@@ -385,8 +429,8 @@ export class StoryChainService {
   async executeLongOutline(userInput: {
     projectTitle: string;
     outline: string;
-    volumeCount: number;
-    chaptersPerVolume: number;
+    targetWords: number;
+    chapterWordRange: { min: number; max: number };
     genre: string;
     characters?: Record<string, unknown>[];
   }): Promise<ChainResult> {
@@ -422,7 +466,7 @@ export class StoryChainService {
       chainId: 'long-outline',
       promptTemplateId: 'long-outline-volumes',
       modelConfig: { primary: 'claude', fallback: 'gpt4o', temperature: 0.7, tier: 'balanced' },
-      inputMapping: { globalSettings: 'chain_output.node_1', volumeCount: 'user_input.volumeCount', chaptersPerVolume: 'user_input.chaptersPerVolume' },
+      inputMapping: { globalSettings: 'chain_output.node_1', targetWords: 'user_input.targetWords', chapterWordRange: 'user_input.chapterWordRange' },
       outputMapping: { volumes: 'node_2.volumes', mainArc: 'node_2.mainArc' },
       timeout: 60,
       retryCount: 2,

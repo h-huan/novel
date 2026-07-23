@@ -7,6 +7,8 @@ import { ApiTags } from '@nestjs/swagger';
 import { CharacterService } from './character.service';
 import { CreateCharacterDto, AddRelationshipDto } from './dto/character.dto';
 import { VectorIndexService } from '../../rag/vector-index.service';
+import { EmbeddingService } from '../../rag/embedding.service';
+import { CanonicalSyncStateService } from '../../rag/canonical-sync-state.service';
 
 @ApiTags('character')
 @Controller('projects/:projectId/characters')
@@ -14,20 +16,22 @@ export class CharacterController {
   constructor(
     private readonly service: CharacterService,
     private readonly vectorIndex: VectorIndexService,
+    private readonly embedding: EmbeddingService,
+    private readonly syncStates: CanonicalSyncStateService,
   ) {}
 
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateCharacterDto) {
     const result = await this.service.create(projectId, dto);
-    await this.indexCharacter(projectId, result);
-    return result;
+    const sync = await this.indexCharacter(projectId, result);
+    return { ...result, sync };
   }
 
   @Put(':id')
   async update(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: Partial<CreateCharacterDto>) {
     const result = await this.service.update(id, dto);
-    await this.indexCharacter(projectId, result);
-    return result;
+    const sync = await this.indexCharacter(projectId, result);
+    return { ...result, sync };
   }
 
   @Get()
@@ -44,8 +48,8 @@ export class CharacterController {
   @Put(':id/profile')
   async updateProfile(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: Record<string, unknown>) {
     const result = this.service.updateProfile(projectId, id, body);
-    await this.indexCharacter(projectId, result.character);
-    return result;
+    const sync = await this.indexCharacter(projectId, result.character);
+    return { ...result, sync };
   }
 
   @Get(':id/writing-summary')
@@ -64,8 +68,11 @@ export class CharacterController {
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  async remove(@Param('projectId') projectId: string, @Param('id') id: string) {
+    const result = this.service.remove(id);
+    const sync = await this.syncStates.run(projectId, 'character', id, () =>
+      this.vectorIndex.deleteChunksStrict(VectorIndexService.COLLECTIONS.CHARACTERS, [id]));
+    return { ...result, sync };
   }
 
   @Post(':id/relationships')
@@ -89,8 +96,8 @@ export class CharacterController {
   }
 
   /** 将角色数据索引到 RAG 向量库 */
-  private async indexCharacter(projectId: string, char: any): Promise<void> {
-    try {
+  private async indexCharacter(projectId: string, char: any) {
+    return this.syncStates.run(projectId, 'character', char.id, async () => {
       const writingSummary = this.service.getWritingSummary(projectId, char.id).summary;
       const tagsText = Array.isArray(char.tags) ? char.tags.join('、') : (char.tags || '');
       const metadata: Record<string, unknown> = {
@@ -104,15 +111,17 @@ export class CharacterController {
         tags: tagsText,
         docType: 'character',
       };
-      await this.vectorIndex.indexChunks(VectorIndexService.COLLECTIONS.CHARACTERS, [{
+      const text = `${char.name} ${char.identity} ${char.personality || ''} ${tagsText}\n${writingSummary}`;
+      const [vector] = await this.embedding.embed([text]);
+      await this.vectorIndex.indexChunksStrict(VectorIndexService.COLLECTIONS.CHARACTERS, [{
         chunk: {
           id: char.id,
-          text: `${char.name} ${char.identity} ${char.personality || ''} ${tagsText}\n${writingSummary}`,
+          text,
           docType: 'character_profile',
           metadata: { chunkIndex: 0, characters: [char.name || ''] },
         },
-        vector: [0],
+        vector,
       }]);
-    } catch { /* 索引失败不影响主流程 */ }
+    });
   }
 }

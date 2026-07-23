@@ -60,6 +60,7 @@ export interface UserKeyEntry {
   modelName: string;
   apiKey: string;
   baseUrl?: string;
+  embeddingModel?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -378,10 +379,7 @@ export class ModelRouterService implements OnModuleInit {
       if (roleModels) {
         const hasModel = roleModels.models.some((m) => m.model === targetModel);
         if (!hasModel) {
-          // 使用角色优先模型
-          const fallback = roleModels.models[0];
-          targetModel = fallback.model;
-          this.logger.warn(`模型 ${targetModel} 不在角色 ${options.role} 中，回退到 ${fallback.model}`);
+          throw new Error(`模型配置冲突：场景要求模型 ${targetModel}，但角色 ${options.role} 未允许该模型。未自动切换模型。`);
         }
       }
     }
@@ -413,6 +411,24 @@ export class ModelRouterService implements OnModuleInit {
         modelVersion: customVersion,
         temperature,
         tier: modelInfo?.tier || 'low',
+        role: options?.role || 'writer',
+      };
+    }
+
+    // “日常模型”是作者为当前写作模式选择的默认执行模型。
+    // 只有在场景模型表中明确指定了任务模型时才会覆盖它；未单独指定
+    // 的灵感、资料整理、写作、润色和审查调用都必须实际走这里的模型。
+    const dailyKey = `daily:${this.currentMode}`;
+    const dailyModel = this.customScenes[dailyKey] || this.customScenes.daily;
+    if (dailyModel) {
+      const dailyVersion = this.resolveModelVersion(dailyModel);
+      const dailyInfo = this.config.models[dailyModel];
+      this.logger.debug(`[日常模型] ${scenario}(${this.currentMode}) → ${dailyVersion}`);
+      return {
+        modelName: dailyVersion,
+        modelVersion: dailyVersion,
+        temperature,
+        tier: dailyInfo?.tier || 'low',
         role: options?.role || 'writer',
       };
     }
@@ -548,6 +564,7 @@ export class ModelRouterService implements OnModuleInit {
     modelName: string,
     apiKey: string,
     baseUrl?: string,
+    embeddingModel?: string,
   ): void {
     const key = `${projectId}_${modelName}`;
     this.userKeys.set(key, {
@@ -555,6 +572,7 @@ export class ModelRouterService implements OnModuleInit {
       modelName,
       apiKey,
       baseUrl,
+      embeddingModel,
       createdAt: new Date(),
       updatedAt: new Date(),
     });

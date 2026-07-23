@@ -16,6 +16,8 @@ import { WorldSettingService } from './world-setting.service';
 import { ConflictEngineService } from '../conflict-engine/conflict-engine.service';
 import { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } from './dto/world-setting.dto';
 import { VectorIndexService } from '../../rag/vector-index.service';
+import { EmbeddingService } from '../../rag/embedding.service';
+import { CanonicalSyncStateService } from '../../rag/canonical-sync-state.service';
 
 @ApiTags('world-setting')
 @Controller('projects/:projectId/world-settings')
@@ -24,13 +26,15 @@ export class WorldSettingController {
     private readonly service: WorldSettingService,
     private readonly conflictEngine: ConflictEngineService,
     private readonly vectorIndex: VectorIndexService,
+    private readonly embedding: EmbeddingService,
+    private readonly syncStates: CanonicalSyncStateService,
   ) {}
 
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateWorldSettingDto) {
     const result = await this.service.create(projectId, dto);
-    await this.indexWorldSetting(projectId, result);
-    return result;
+    const sync = await this.indexWorldSetting(projectId, result);
+    return { ...result, sync };
   }
 
   @Get()
@@ -50,8 +54,8 @@ export class WorldSettingController {
   @Put(':id/profile')
   async updateProfile(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: Record<string, unknown>) {
     const result = this.service.updateProfile(projectId, id, body);
-    await this.indexWorldSetting(projectId, result.worldSetting);
-    return result;
+    const sync = await this.indexWorldSetting(projectId, result.worldSetting);
+    return { ...result, sync };
   }
 
   @Get(':id/writing-summary')
@@ -68,13 +72,15 @@ export class WorldSettingController {
   @Put(':id')
   async update(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: UpdateWorldSettingDto) {
     const result = await this.service.update(id, dto);
-    await this.indexWorldSetting(projectId, result);
-    return result;
+    const sync = await this.indexWorldSetting(projectId, result);
+    return { ...result, sync };
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  async remove(@Param('projectId') projectId: string, @Param('id') id: string) {
+    const result = this.service.remove(id);
+    const sync = await this.syncStates.run(projectId, 'world_setting', id, () => this.vectorIndex.deleteChunksStrict(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [`world-setting:${id}`]));
+    return { ...result, sync };
   }
 
   @Post(':id/constraints')
@@ -125,20 +131,22 @@ export class WorldSettingController {
   }
 
   /** Keep the full persisted profile available to retrieval, not just basic fields. */
-  private async indexWorldSetting(projectId: string, worldSetting: any): Promise<void> {
-    try {
+  private async indexWorldSetting(projectId: string, worldSetting: any) {
+    return this.syncStates.run(projectId, 'world_setting', worldSetting.id, async () => {
       const summary = this.service.getWritingSummary(projectId, worldSetting.id).summary;
-      await this.vectorIndex.indexChunks(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [{
+      const text = `${worldSetting.name || ''}\n${summary}`;
+      const [vector] = await this.embedding.embed([text]);
+      await this.vectorIndex.indexChunksStrict(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [{
         chunk: {
           id: `world-setting:${worldSetting.id}`,
-          text: `${worldSetting.name || ''}\n${summary}`,
+          text,
           docType: 'world_setting',
           metadata: {
             chunkIndex: 0,
           },
         },
-        vector: [0],
+        vector,
       }]);
-    } catch { /* Indexing must never block a profile save. */ }
+    });
   }
 }

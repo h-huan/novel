@@ -222,7 +222,7 @@ export const STYLE_CONFIGS: Record<StyleId, StyleConfig> = {
       maxCharactersPerChapter: 8,
       allowInternalMonologue: true,
       allowTimeSkip: true,
-      chapterWordCount: { min: 3000, max: 6000 },
+      chapterWordCount: { min: 3200, max: 4000 },
       avgSentenceLength: { min: 15, max: 35 },
       vocabularyRichness: 0.7,
     },
@@ -265,7 +265,7 @@ export const STYLE_CONFIGS: Record<StyleId, StyleConfig> = {
       maxCharactersPerChapter: 6,
       allowInternalMonologue: true,
       allowTimeSkip: true,
-      chapterWordCount: { min: 2500, max: 5000 },
+      chapterWordCount: { min: 3200, max: 4000 },
       avgSentenceLength: { min: 12, max: 30 },
       vocabularyRichness: 0.5,
       customRules: { includeStatusPanel: true, includeLevelUp: true },
@@ -309,7 +309,7 @@ export const STYLE_CONFIGS: Record<StyleId, StyleConfig> = {
       maxCharactersPerChapter: 7,
       allowInternalMonologue: true,
       allowTimeSkip: true,
-      chapterWordCount: { min: 3000, max: 6000 },
+      chapterWordCount: { min: 3200, max: 4000 },
       avgSentenceLength: { min: 18, max: 40 },
       vocabularyRichness: 0.8,
       useDialect: true,
@@ -354,7 +354,7 @@ export const STYLE_CONFIGS: Record<StyleId, StyleConfig> = {
       maxCharactersPerChapter: 10,
       allowInternalMonologue: true,
       allowTimeSkip: true,
-      chapterWordCount: { min: 2000, max: 5000 },
+      chapterWordCount: { min: 3200, max: 4000 },
       avgSentenceLength: { min: 10, max: 25 },
       vocabularyRichness: 0.6,
       customRules: { emphasizeAtmosphere: true, avoidExcessiveRomance: true },
@@ -398,7 +398,7 @@ export const STYLE_CONFIGS: Record<StyleId, StyleConfig> = {
       maxCharactersPerChapter: 6,
       allowInternalMonologue: true,
       allowTimeSkip: false,
-      chapterWordCount: { min: 3000, max: 6000 },
+      chapterWordCount: { min: 3200, max: 4000 },
       avgSentenceLength: { min: 15, max: 35 },
       vocabularyRichness: 0.7,
       customRules: { realisticDialogue: true, modernSetting: true },
@@ -442,7 +442,7 @@ export const STYLE_CONFIGS: Record<StyleId, StyleConfig> = {
       maxCharactersPerChapter: 5,
       allowInternalMonologue: true,
       allowTimeSkip: true,
-      chapterWordCount: { min: 3000, max: 7000 },
+      chapterWordCount: { min: 3200, max: 4000 },
       avgSentenceLength: { min: 18, max: 40 },
       vocabularyRichness: 0.8,
       customRules: { requiresWorldbuilding: true, techDescriptionLevel: 'detailed' },
@@ -486,7 +486,7 @@ export const STYLE_CONFIGS: Record<StyleId, StyleConfig> = {
       maxCharactersPerChapter: 6,
       allowInternalMonologue: true,
       allowTimeSkip: false,
-      chapterWordCount: { min: 2500, max: 5000 },
+      chapterWordCount: { min: 3200, max: 4000 },
       avgSentenceLength: { min: 12, max: 30 },
       vocabularyRichness: 0.75,
       customRules: { foreshadowingRequired: true, redHerringAllowed: true, cluesMustBeFair: true },
@@ -518,7 +518,7 @@ export class WritingModeService {
   private readonly logger = new Logger(WritingModeService.name);
 
   /** 当前写作模式 */
-  private currentMode: WritingMode = 'semi_auto';
+  private currentMode: WritingMode = 'full_auto';
 
   /** 用户确认队列（半自动模式使用） */
   private confirmationQueue: UserConfirmationRequest[] = [];

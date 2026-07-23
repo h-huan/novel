@@ -266,32 +266,6 @@ const Header: React.FC = () => {
 
             {/* ════════ 工具类弹框按钮（字典 / Chain / 手册） ════════ */}
             <div className="flex items-center gap-0.5 ml-1 no-drag">
-              {/* 字典弹框 */}
-              <button
-                onClick={() => setDictOpen(true)}
-                className={`px-2.5 py-1 text-xs rounded transition-colors duration-150 ${
-                  dictOpen
-                    ? 'text-purple-400 bg-purple-400/10'
-                    : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
-                }`}
-                title="字典管理"
-              >
-                📖 字典
-              </button>
-
-              {/* Prompt Chain 弹框 */}
-              <button
-                onClick={() => setPromptChainOpen(true)}
-                className={`px-2.5 py-1 text-xs rounded transition-colors duration-150 ${
-                  promptChainOpen
-                    ? 'text-blue-400 bg-blue-400/10'
-                    : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
-                }`}
-                title="Prompt Chain 编辑器"
-              >
-                ⛓ Prompt Chain
-              </button>
-
               {/* 使用手册弹框 */}
               <button
                 onClick={() => setHelpOpen(true)}

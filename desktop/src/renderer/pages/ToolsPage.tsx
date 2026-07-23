@@ -1,6 +1,6 @@
 /**
  * ToolsPage - 综合工具面板
- * 时代检测 + 自动篇幅规划 + 风格向量化 + 内容相似度 + 每日校验
+ * 时代检查 + 篇幅规划 + 文风分析 + 相似内容检查 + 创作资料检查
  */
 import React, { useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
@@ -23,11 +23,11 @@ const ToolsPage: React.FC = () => {
   }, [projectId]);
 
   const tabs = [
-    { id: 'era', label: '时代检测', icon: '🏛️', desc: '65条约束自动校验内容时代一致性' },
-    { id: 'wordplan', label: '篇幅规划', icon: '📐', desc: '自动分卷分章+字数目标+工期估算' },
-    { id: 'stylevec', label: '风格向量', icon: '🎨', desc: '提取写作风格特征并向量化存储' },
-    { id: 'similarity', label: '相似度', icon: '🔍', desc: '内容相似度检测+版权风险评估' },
-    { id: 'schedule', label: '每日校验', icon: '📅', desc: '记忆系统健康检查+数据一致性验证' },
+    { id: 'era', label: '时代检查', icon: '🏛️', desc: '检查正文中是否出现不符合时代背景的内容' },
+    { id: 'wordplan', label: '篇幅规划', icon: '📐', desc: '依据故事体量和节奏规划卷章与字数' },
+    { id: 'stylevec', label: '文风分析', icon: '🎨', desc: '分析句式、节奏、用词和叙事倾向' },
+    { id: 'similarity', label: '相似内容检查', icon: '🔍', desc: '检查相似表达与版权风险' },
+    { id: 'schedule', label: '创作资料检查', icon: '📅', desc: '检查大纲、人物、伏笔和时间顺序是否一致' },
   ];
 
   return (
@@ -55,7 +55,8 @@ const ToolsPage: React.FC = () => {
       {/* 执行按钮 */}
       <button onClick={() => {
         const endpoints: Record<string, string> = { era: '/chain/era-check', wordplan: '/chain/word-plan', stylevec: '/chain/style-vectorize', similarity: '/chain/content-similarity', schedule: '/chain/schedule-check' };
-        const bodies: Record<string, any> = { era: { content }, wordplan: { totalChapters: 100, totalWords: 300000, genre: '历史穿越' }, stylevec: { samples: [content || '示例文本...'] }, similarity: { content }, schedule: {} };
+        if (['era', 'stylevec', 'similarity'].includes(tab) && !content.trim()) { setResult({ error: '请提供真实文本；系统不会使用示例内容代替。' }); return; }
+        const bodies: Record<string, any> = { era: { content }, wordplan: {}, stylevec: { samples: [content] }, similarity: { content }, schedule: {} };
         callApi(endpoints[tab], bodies[tab]);
       }} disabled={loading}
         style={{ padding: '10px 24px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1, marginBottom: '16px' }}>
@@ -84,23 +85,24 @@ const ToolsPage: React.FC = () => {
             <div>
               <div style={{ display: 'flex', gap: '12px', marginBottom: '14px' }}>
                 <div style={{ flex: 1, padding: '10px', backgroundColor: 'rgba(52,152,219,0.08)', borderRadius: '6px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#3498db' }}>{result.plan.totalChapters}章</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#3498db' }}>{result.plan.totalChapters ? `${result.plan.totalChapters}章` : `${result.plan.feasibleChapterRange?.min}-${result.plan.feasibleChapterRange?.max}章`}</div>
                   <div style={{ fontSize: '11px', color: '#6c6c80' }}>总章节</div>
                 </div>
                 <div style={{ flex: 1, padding: '10px', backgroundColor: 'rgba(46,204,113,0.08)', borderRadius: '6px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#2ecc71' }}>{result.plan.volumes}卷</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#2ecc71' }}>{result.plan.volumes ? `${result.plan.volumes}卷` : '待规划'}</div>
                   <div style={{ fontSize: '11px', color: '#6c6c80' }}>卷数</div>
                 </div>
                 <div style={{ flex: 1, padding: '10px', backgroundColor: 'rgba(243,156,18,0.08)', borderRadius: '6px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#f39c12' }}>{result.plan.estimatedDays}天</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#f39c12' }}>{result.plan.estimatedDays ? `${result.plan.estimatedDays}天` : '未设置'}</div>
                   <div style={{ fontSize: '11px', color: '#6c6c80' }}>预计工期</div>
                 </div>
               </div>
-              <div style={{ fontSize: '12px', color: '#6c6c80', marginBottom: '8px' }}>每章目标 {result.plan.perChapterTarget}字 · 每日目标 {result.plan.dailyTarget}字</div>
+              <div style={{ fontSize: '12px', color: '#6c6c80', marginBottom: '8px' }}>每章范围 {result.plan.chapterWordRange?.min}-{result.plan.chapterWordRange?.max}字 · 具体目标按本章任务动态确定 · 每日目标 {result.plan.dailyTarget || '未设置'}</div>
+              <div style={{ fontSize: '12px', color: '#8a8aa0', marginBottom: '8px' }}>{result.plan.note}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {(result.plan.volumeBreakdown || []).map((v: any, i: number) => (
                   <div key={i} style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#c0c0d0', fontSize: '12px' }}>第{v.volume}卷 · {v.chapters}章 · {v.arcType}</span>
+                    <span style={{ color: '#c0c0d0', fontSize: '12px' }}>{v.title || `第${v.volume}卷`} · {v.chapters}章</span>
                     <span style={{ color: '#6c6c80', fontSize: '11px' }}>{(v.wordsTarget / 1000).toFixed(0)}k字</span>
                   </div>
                 ))}
@@ -143,9 +145,7 @@ const ToolsPage: React.FC = () => {
               ))}
               <div style={{ marginTop: '12px', fontSize: '11px', color: '#6c6c80' }}>下次校验: {new Date(result.nextScheduled).toLocaleString()}</div>
             </div>
-          ) : (
-            <pre style={{ margin: 0, fontSize: '12px', color: '#c0c0d0', whiteSpace: 'pre-wrap' }}>{JSON.stringify(result, null, 2)}</pre>
-          )}
+          ) : <p style={{ margin: 0, fontSize: '13px', color: '#c0c0d0' }}>操作已完成，请在对应创作模块查看结果。</p>}
         </div>
       )}
     </div>

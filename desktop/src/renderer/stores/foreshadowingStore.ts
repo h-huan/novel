@@ -58,7 +58,7 @@ interface ForeshadowingState {
   /** 获取筛选后的伏笔列表 */
   getFilteredForeshadowings: () => Foreshadowing[];
   /** 计算统计 */
-  getStats: () => { total: number; buried: number; pending: number; recovered: number; cancelled: number; recoveryRate: number };
+  getStats: () => { total: number; buried: number; active: number; reminder: number; pending: number; recovered: number; cancelled: number; recoveryRate: number };
 }
 
 const DEFAULT_FILTERS: ForeshadowingFilters = {
@@ -188,6 +188,8 @@ export const useForeshadowingStore = create<ForeshadowingState>((set, get) => ({
     const { foreshadowings } = get();
     const total = foreshadowings.length;
     const buried = foreshadowings.filter((f) => f.status === 'buried').length;
+    const active = foreshadowings.filter((f) => f.status === 'active').length;
+    const reminder = foreshadowings.filter((f) => f.status === 'reminder').length;
     const pending = foreshadowings.filter((f) => f.status === 'pending').length;
     const recovered = foreshadowings.filter((f) => f.status === 'recovered').length;
     const cancelled = foreshadowings.filter((f) => f.status === 'cancelled').length;
@@ -195,6 +197,8 @@ export const useForeshadowingStore = create<ForeshadowingState>((set, get) => ({
     return {
       total,
       buried,
+      active,
+      reminder,
       pending,
       recovered,
       cancelled,

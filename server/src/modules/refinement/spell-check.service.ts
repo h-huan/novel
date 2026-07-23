@@ -36,7 +36,7 @@ export class SpellCheckService {
   constructor() {
     this.builtinDictionary = this.buildBuiltinDictionary();
     // 自定义词库持久化路径（用户工作目录）
-    this.customDictPath = path.join(process.cwd(), 'data', 'custom-spell-dictionary.json');
+    this.customDictPath = path.join(process.env.DATA_DIR || path.join(process.cwd(), 'data'), 'custom-spell-dictionary.json');
     this.loadCustomDictionary();
   }
 

@@ -292,7 +292,7 @@ const StatePage: React.FC = () => {
               状态仪表盘
             </h1>
             <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#6c6c80' }}>
-              最后更新: {new Date().toLocaleString()} · AI提取状态需带确稿后进入RAG上下文
+              最后更新: {new Date().toLocaleString()} · AI整理的变化需由作者确认后才用于后续创作
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -410,7 +410,7 @@ const StatePage: React.FC = () => {
                 统一状态确稿规则
               </div>
               <div style={{ fontSize: '11px', color: '#8a8aa0', lineHeight: 1.55 }}>
-                AI正文生成后提取的人物、伏笔、情节和时间线变化，先作为待确稿状态；作者确认后才写入后续RAG检索，避免前后文对不上。
+                AI从正文整理出人物、伏笔、情节和时间变化，先交给作者确认；确认后的内容才会约束后续创作，避免前后文对不上。
               </div>
             </div>
             <span style={reviewBadgeStyle}>带确稿</span>

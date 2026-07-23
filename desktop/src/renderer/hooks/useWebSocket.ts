@@ -4,11 +4,20 @@
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { getBaseUrl } from '../lib/api';
 
 interface WsEvent {
   type: string;
   data: Record<string, unknown>;
   timestamp: string;
+}
+
+function getSocketServerOrigin(): string {
+  try {
+    return new URL(getBaseUrl()).origin;
+  } catch {
+    return 'http://localhost:3100';
+  }
 }
 
 export function useWritingWebSocket(projectId: string | undefined) {
@@ -20,8 +29,8 @@ export function useWritingWebSocket(projectId: string | undefined) {
   useEffect(() => {
     if (!projectId) return;
 
-    // Connect to Socket.IO /writing namespace
-    const socket = io('/writing', {
+    // Always connect to the API server, never the Vite renderer origin.
+    const socket = io(`${getSocketServerOrigin()}/writing`, {
       transports: ['websocket', 'polling'],
       query: { projectId },
       reconnection: true,
@@ -39,12 +48,9 @@ export function useWritingWebSocket(projectId: string | undefined) {
 
     // 监听服务端推送的事件
     const eventTypes = [
-      'notifyChapterProgress',
-      'notifyChapterStatusChange',
-      'notifyContentUpdate',
-      'notifyForeshadowingWarning',
-      'notifyConflictDetected',
-      'notifySystem',
+      'chapter_progress',
+      'chapter_status',
+      'content_update',
     ];
     for (const eventType of eventTypes) {
       socket.on(eventType, (data: any) => {
@@ -82,7 +88,7 @@ export function useSystemWebSocket() {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const socket = io('/system', {
+    const socket = io(`${getSocketServerOrigin()}/system`, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 5000,
@@ -92,7 +98,7 @@ export function useSystemWebSocket() {
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
 
-    const eventTypes = ['notifyConflictDetected', 'notifySystem', 'notifyForeshadowingWarning'];
+    const eventTypes = ['conflict_detected', 'system_notification', 'foreshadowing_warning'];
     for (const eventType of eventTypes) {
       socket.on(eventType, (data: any) => {
         setLastEvent({

@@ -4,7 +4,6 @@ import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
 import WorldSimpleView from '../components/world/WorldSimpleView';
 import WorldTabView from '../components/world/WorldTabView';
-import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
 type WorldProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
 type WorldProfileSectionConfig = { title: string; description: string; fields: WorldProfileFieldConfig[] };
@@ -25,8 +24,8 @@ const WORLD_FIELD_LABELS: Record<string, string> = {
   world_hooks: '世界钩子', main_conflict_source: '主冲突来源', hidden_truth: '隐藏真相', final_truth_direction: '最终真相方向', world_mystery: '世界谜团',
   forbidden_world_rules: '禁止世界观规则', must_obey_rules: '必须遵守', can_change_rules: '允许变化', easy_to_break_points: '容易写崩点', current_chapter_usage: '本章可用',
 };
-const WORLD_FIELD_META: Record<string, { label: string; hint: string }> = Object.fromEntries(Object.entries(WORLD_FIELD_LABELS).map(([key, label]) => [key, { label, hint: `补全${label}，作为正文生成和一致性检查依据。` }]));
-const field = (key: string): WorldProfileFieldConfig => ({ key, ...(WORLD_FIELD_META[key] || { label: key, hint: '补全世界观设定。' }), multiline: true });
+const WORLD_FIELD_META: Record<string, { label: string; hint: string }> = Object.fromEntries(Object.entries(WORLD_FIELD_LABELS).map(([key, label]) => [key, { label, hint: `写下与本书剧情有关的${label}；不需要时可以留空。` }]));
+const field = (key: string): WorldProfileFieldConfig => ({ key, ...(WORLD_FIELD_META[key] || { label: key, hint: '写下与本书有关的设定；不需要时可以留空。' }), multiline: true });
 const section = (title: string, description: string, keys: string[]): WorldProfileSectionConfig => ({ title, description, fields: keys.map(field) });
 
 export const PROFILE_SECTION_GROUPS: WorldProfileSectionConfig[] = [
@@ -43,7 +42,7 @@ export const PROFILE_SECTION_GROUPS: WorldProfileSectionConfig[] = [
   section('历史真相', '承载历史遗留问题、战争和失落真相。', ['history_events', 'major_disasters', 'founding_events', 'wars', 'dynasty_changes', 'lost_truths']),
   section('势力冲突', '定义势力关系、资源、秘密和长期对抗。', ['major_forces', 'force_relations', 'force_conflicts', 'force_resources', 'force_secrets']),
   section('世界钩子', '记录主冲突、谜团与最终真相方向。', ['world_hooks', 'main_conflict_source', 'hidden_truth', 'final_truth_direction', 'world_mystery']),
-  section('AI 写作约束', '告诉 AI 哪些规则必须遵守、可变更或容易写崩。', ['forbidden_world_rules', 'must_obey_rules', 'can_change_rules', 'easy_to_break_points', 'current_chapter_usage']),
+  section('创作边界', '记录不可违背、允许变化和本章会用到的规则。', ['forbidden_world_rules', 'must_obey_rules', 'can_change_rules', 'easy_to_break_points', 'current_chapter_usage']),
 ];
 
 function payload<T = any>(response: any): T { return (response?.data?.data ?? response?.data ?? response ?? {}) as T; }
@@ -116,12 +115,12 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
 
   return <section style={{ padding: '20px', maxWidth: 1180, margin: '0 auto' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-      <div><h2 style={{ margin: 0 }}>世界观创作资料</h2><p style={{ color: '#6c6c80', margin: '6px 0 0' }}>这些世界规则会进入正文生成、RAG 检索和写后一致性检查。</p></div>
+      <div><h2 style={{ margin: 0 }}>世界观创作资料</h2><p style={{ color: '#6c6c80', margin: '6px 0 0' }}>写作和前后矛盾检查会引用这些规则；与本书无关的部分可以留空。</p></div>
       {worldSettings.length > 0 && <div style={{ display: 'flex', gap: 8 }}><select value={selectedId} onChange={async event => { setSelectedId(event.target.value); await loadProfile(event.target.value); }}>{worldSettings.map(item => <option key={item.id} value={item.id}>{item.name || '未命名世界观'}</option>)}</select><button type="button" onClick={saveProfile}>保存世界观资料</button></div>}
     </div>
     {loading ? <p>正在加载世界观资料...</p> : worldSettings.length === 0 ? <div style={{ padding: 20, border: '1px solid #d8d8e2', marginTop: 16 }}><p>当前项目还没有世界观设定。</p><button type="button" onClick={createWorldSetting}>创建世界观设定</button></div> : <>
       {status && <p style={{ color: status === '已保存。' ? '#15803d' : '#6c6c80' }}>{status}</p>}
-      <pre style={{ whiteSpace: 'pre-wrap', padding: 14, background: '#f6f7fb', border: '1px solid #e4e5ed', maxHeight: 220, overflow: 'auto' }}>{summary || '保存世界观资料后将生成真实写作摘要。'}</pre>
+      <pre style={{ whiteSpace: 'pre-wrap', padding: 14, background: '#f6f7fb', border: '1px solid #e4e5ed', maxHeight: 220, overflow: 'auto' }}>{summary || '保存后，这里会汇总正文真正需要遵守的世界规则。'}</pre>
       {PROFILE_SECTION_GROUPS.map(group => <section key={group.title} style={{ marginTop: 18, borderTop: '1px solid #e4e5ed', paddingTop: 16 }}><h3 style={{ margin: 0 }}>{group.title}</h3><p style={{ color: '#6c6c80', margin: '6px 0 12px' }}>{group.description}</p><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>{group.fields.map(item => <label key={item.key} style={{ display: 'grid', gap: 5, fontSize: 13 }}><span>{item.label}</span><textarea rows={3} value={profile[item.key] || ''} placeholder={item.hint} onChange={event => setProfile(current => ({ ...current, [item.key]: event.target.value }))} /></label>)}</div></section>)}
       <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '20px 0' }}><button type="button" onClick={saveProfile}>保存世界观资料</button></div>
     </>}
@@ -135,7 +134,7 @@ const WorldPage: React.FC = () => {
 
   if (!currentProject || !projectId) return <div style={{ padding: '40px', textAlign: 'center', color: '#6c6c80', fontSize: '14px' }}>请先选择或创建项目。</div>;
 
-  return <><div style={{ padding: '16px 20px 0' }}><WritingQualityContextBanner /></div><WorldProfileEditor projectId={projectId} />{currentProject.type === 'short_story' ? <WorldSimpleView /> : <WorldTabView />}</>;
+  return currentProject.type === 'short_story' ? <WorldSimpleView /> : <WorldTabView />;
 };
 
 export default WorldPage;

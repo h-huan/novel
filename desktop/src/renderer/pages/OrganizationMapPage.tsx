@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import { useOrganizationStore } from '../stores/organizationStore';
 import { useMapPointStore } from '../stores/mapPointStore';
 import MapTreeView from '../components/world/MapTreeView';
-import MapGraphView from '../components/world/MapGraphView';
 import MapDetailCard from '../components/world/MapDetailCard';
 import OrgTreeView from '../components/world/OrgTreeView';
 import OrgDetailCard from '../components/world/OrgDetailCard';
@@ -95,7 +94,7 @@ const OrganizationMapPage: React.FC = () => {
     <div style={styles.container}>
       <header style={styles.header}>
         <div>
-          <h1 style={styles.title}>组织与地图</h1>
+          <h1 style={styles.title}>地点与势力</h1>
           <p style={styles.subtitle}>管理势力层级、地点层级和故事空间关系。</p>
         </div>
         <div style={styles.tabs}>
@@ -161,13 +160,6 @@ const OrganizationMapPage: React.FC = () => {
               }}
             />
           </aside>
-          <main style={styles.centerPane}>
-            <MapGraphView
-              tree={mapTree}
-              selectedId={selectedMapPointId}
-              onSelect={(mapPointId) => setSelectedMapPointId(mapPointId)}
-            />
-          </main>
           <aside style={styles.rightPane}>
             <MapDetailCard
               mapPoint={selectedMapPoint}
@@ -333,21 +325,15 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
   },
   leftPane: {
-    width: 260,
-    minWidth: 260,
+    width: 320,
+    minWidth: 320,
     borderRight: '1px solid rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(0,0,0,0.08)',
     overflow: 'auto',
   },
-  centerPane: {
+  rightPane: {
     flex: 1,
     minWidth: 0,
-    overflow: 'hidden',
-  },
-  rightPane: {
-    width: 340,
-    minWidth: 340,
-    borderLeft: '1px solid rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(0,0,0,0.08)',
     overflow: 'auto',
   },

@@ -1,5 +1,5 @@
 /**
- * 伏笔 Repository
+ * 浼忕瑪 Repository
  */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
@@ -16,6 +16,10 @@ export interface ForeshadowingRow {
   buried_chapter_index: number;
   planned_recovery_at: string | null;
   planned_recovery_chapter_index: number | null;
+  recovery_window_start: number | null;
+  recovery_window_end: number | null;
+  evidence_text: string | null;
+  risk_level: string | null;
   actual_recovery_at: string | null;
   actual_recovery_chapter_index: number | null;
   recovery_trigger: string | null;
@@ -37,14 +41,14 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 按项目ID查询
+   * 鎸夐」鐩甀D鏌ヨ
    */
   findByProjectId(projectId: string): ForeshadowingRow[] {
     return this.findByField('project_id', projectId);
   }
 
   /**
-   * 按状态查�?   */
+   * 鎸夌姸鎬佹煡璇?   */
   findByStatus(projectId: string, status: string): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM foreshadowings WHERE project_id = ? AND status = ?
@@ -54,14 +58,19 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 获取待回收的伏笔 (pending状�?
+   * 鑾峰彇寰呭洖鏀剁殑浼忕瑪 (pending鐘舵€?
    */
   getPending(projectId: string): ForeshadowingRow[] {
-    return this.findByStatus(projectId, 'pending');
+    const stmt = this.db.prepare(`
+      SELECT * FROM foreshadowings
+      WHERE project_id = ? AND status IN ('active', 'reminder', 'pending')
+      ORDER BY importance ASC, created_at ASC
+    `);
+    return stmt.all(projectId) as unknown as ForeshadowingRow[];
   }
 
   /**
-   * 回收伏笔
+   * 鍥炴敹浼忕瑪
    */
   recoverForeshadowing(id: string, chapterIndex: number, method: string, impact: number): ForeshadowingRow | undefined {
     const now = new Date().toISOString();
@@ -79,7 +88,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 取消伏笔
+   * 鍙栨秷浼忕瑪
    */
   cancelForeshadowing(id: string): ForeshadowingRow | undefined {
     const now = new Date().toISOString();
@@ -90,22 +99,22 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 获取过期预警的伏�?(接近计划回收章节但未回收)
+   * 鑾峰彇杩囨湡棰勮鐨勪紡绗?(鎺ヨ繎璁″垝鍥炴敹绔犺妭浣嗘湭鍥炴敹)
    */
   getOverdueWarnings(projectId: string, currentChapterIndex: number): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM foreshadowings
       WHERE project_id = ?
-        AND status = 'pending'
-        AND planned_recovery_chapter_index IS NOT NULL
-        AND (planned_recovery_chapter_index - ?) <= overdue_threshold
-      ORDER BY planned_recovery_chapter_index ASC
+        AND status IN ('active', 'reminder', 'pending')
+        AND COALESCE(recovery_window_end, planned_recovery_chapter_index) IS NOT NULL
+        AND (COALESCE(recovery_window_end, planned_recovery_chapter_index) - ?) <= overdue_threshold
+      ORDER BY COALESCE(recovery_window_end, planned_recovery_chapter_index) ASC
     `);
     return stmt.all(projectId, currentChapterIndex) as unknown as ForeshadowingRow[];
   }
 
   /**
-   * 按角色ID查询伏笔
+   * 鎸夎鑹睮D鏌ヨ浼忕瑪
    */
   findByCharacterId(projectId: string, characterId: string): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
@@ -117,7 +126,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 按关联章节查�?   */
+   * 鎸夊叧鑱旂珷鑺傛煡璇?   */
   findByChapterIndex(projectId: string, chapterIndex: number): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM foreshadowings
@@ -127,11 +136,13 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 获取伏笔统计
+   * 鑾峰彇浼忕瑪缁熻
    */
   getStats(projectId: string): {
     total: number;
     buried: number;
+    active: number;
+    reminder: number;
     pending: number;
     recovered: number;
     cancelled: number;
@@ -167,10 +178,12 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
     return {
       total,
       buried: byStatus.buried || 0,
+      active: byStatus.active || 0,
+      reminder: byStatus.reminder || 0,
       pending: byStatus.pending || 0,
       recovered: byStatus.recovered || 0,
       cancelled: byStatus.cancelled || 0,
-      overdueCount: 0, // 需�?currentChapterIndex 参数
+      overdueCount: 0, // 闇€瑕?currentChapterIndex 鍙傛暟
       byImportance,
       byType,
     };

@@ -65,6 +65,7 @@ export interface IdeaDraft {
   targetPlatform: string;
   targetWords: number;
   description: string;
+  settings: Record<string, unknown>;
   status: 'draft' | 'questioning' | 'answered' | 'refining' | 'refined' | 'confirmed' | 'converted';
   questions: QuestionItem[];
   answers: AnswerItem[];
@@ -84,6 +85,7 @@ export interface CreateDraftData {
   targetWords?: number;
   title?: string;
   description?: string;
+  settings?: Record<string, unknown>;
 }
 
 // ========== Store 定义 ==========
@@ -124,9 +126,10 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
         rawIdea: data.rawIdea,
         projectType: data.projectType,
         targetPlatform: data.targetPlatform,
-        targetWords: data.targetWords || 0,
+        targetWords: data.targetWords,
         title: data.title || '',
         description: data.description || '',
+        settings: data.settings || {},
       });
       const draft = (res as any).data ?? res;
       set({ draft: draft as IdeaDraft, loading: false });

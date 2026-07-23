@@ -69,6 +69,38 @@ export class WorkflowGuardService {
       stageResult = buildLongNovelGuard(assets, currentStage);
     }
 
+    // 创建未完成的项目只能修复和查看已有资产，不能进入正文或调用正文生成。
+    // 资产存在不等于项目已经通过时间线、RAG 与跨模块一致性激活门禁。
+    if (['creating', 'generation_failed'].includes(String(project.status || ''))) {
+      const recoveryReason = project.status === 'creating'
+        ? '项目仍在创建中，完成全部模块校验并激活后才能进入下一阶段'
+        : '项目创建未完整通过，请先按原配置再次生成并通过时间线、RAG与一致性校验';
+      const activationBlockedKeys = new Set(['generate_outline', 'enter_writing', 'generate_body', 'continue_body']);
+      stageResult.allowedActions = stageResult.allowedActions.filter((action: AllowedAction) => (
+        !activationBlockedKeys.has(action.key) && !action.key.startsWith('enter_')
+      ));
+      for (const key of activationBlockedKeys) {
+        if (!stageResult.blockedActions.some((action: BlockedAction) => action.key === key)) {
+          const labels: Record<string, string> = { generate_outline: '重新生成大纲', enter_writing: '进入正文', generate_body: '生成正文', continue_body: '续写正文' };
+          stageResult.blockedActions.push({ key, label: labels[key], reason: recoveryReason });
+        }
+      }
+      if (!stageResult.missingAssets.some((asset: any) => asset.key === 'project_activation')) {
+        stageResult.missingAssets.push({ key: 'project_activation', label: '项目完整激活', severity: 'required', reason: recoveryReason });
+      }
+      stageResult.warnings = [
+        ...(stageResult.warnings || []),
+        { key: 'generation_incomplete', message: recoveryReason },
+      ];
+      stageResult.canProceed = false;
+      stageResult.recommendedNextStage = currentStage;
+      stageResult.recommendedNextAction = recoveryReason;
+      stageResult.stageMap = stageResult.stageMap.map((stage: any) => ({
+        ...stage,
+        status: stage.key === currentStage ? 'warning' : (stage.status === 'next' ? 'locked' : stage.status),
+      }));
+    }
+
     return {
       projectId,
       projectType,
@@ -313,6 +345,10 @@ export class WorkflowGuardService {
     const previousStage = project.current_workflow_stage || 'idea_or_inspiration';
     const projectType = project.type;
 
+    if (!force && ['creating', 'generation_failed'].includes(String(project.status || ''))) {
+      throw new BadRequestException('项目尚未通过完整生成与一致性激活门禁，请先按原配置再次生成');
+    }
+
     // 验证目标阶段是否合法
     if (projectType === 'short_story') {
       if (!['topic', 'outline', 'writing'].includes(targetStage)) {
@@ -404,8 +440,9 @@ export class WorkflowGuardService {
     let bookOutlineCount = 0;
     let volumeOutlineCount = 0;
     let chapterPlanCount = 0;
+    let outlines: any[] = [];
     try {
-      const outlines = this.outlineService.findByProjectId(projectId);
+      outlines = this.outlineService.findByProjectId(projectId);
       outlineCount = outlines.length;
       bookOutlineCount = outlines.filter((o) => o.level === 'book').length;
       volumeOutlineCount = outlines.filter((o) => o.level === 'volume').length;
@@ -413,6 +450,22 @@ export class WorkflowGuardService {
     } catch (e) {
       this.logger.warn(`[WorkflowGuard] 读取大纲失败: ${e}`);
     }
+
+    const shortStoryCards = outlines.filter((outline) => outline.level === 'book');
+    const shortCardPayloads = shortStoryCards.map((outline) => ({
+      ...(outline.bookSkeleton && typeof outline.bookSkeleton === 'object' ? outline.bookSkeleton : {}),
+      ...(typeof outline.content === 'string' && outline.content.trim().startsWith('{')
+        ? this.safeObject(outline.content)
+        : {}),
+      scenes: outline.scenes,
+    }));
+    const hasShortField = (field: string) => shortCardPayloads.some(card => String((card as any)[field] || '').trim().length > 0);
+    const hasShortSceneSequence = shortCardPayloads.some(card => {
+      const scenes = (card as any).scenes;
+      return Array.isArray(scenes) && scenes.length > 0 && scenes.every(scene =>
+        String(scene?.goal || '').trim() && String(scene?.conflict || '').trim() && String(scene?.outcome || '').trim(),
+      );
+    });
 
     // 章节数量
     let chapterCount = 0;
@@ -459,7 +512,21 @@ export class WorkflowGuardService {
       hasVolumeOutline: volumeOutlineCount > 0,
       hasChapterPlan: chapterPlanCount > 0,
       hasBody: chapterWithBodyCount > 0,
+      hasShortCoreConflict: hasShortField('coreConflict'),
+      hasShortProtagonistDesire: hasShortField('protagonistDesire'),
+      hasShortTurningPoint: hasShortField('turningPoint') && hasShortField('reveal'),
+      hasShortEndingClosure: hasShortField('ending'),
+      hasShortSceneSequence,
     };
+  }
+
+  private safeObject(value: string): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
   }
 
   /**
@@ -470,6 +537,25 @@ export class WorkflowGuardService {
     const currentStage = project.current_workflow_stage;
 
     const inferredStage = this.inferStageFromAssets(projectType, assets);
+
+    // Reaching the complete writing prerequisite is itself the transition to
+    // the writing stage.  Previously a persisted "outline" / "chapter" stage
+    // won over the real assets indefinitely, so the writing page displayed
+    // "ready for body" while its generate action was still rejected.
+    // Do not use the mere existence of an outline here: a short story must
+    // still contain its complete closure card, and a long novel must still
+    // have actual chapter plans.
+    const shortStoryReadyForWriting = projectType === 'short_story'
+      && assets.hasOutline
+      && assets.hasShortCoreConflict
+      && assets.hasShortProtagonistDesire
+      && assets.hasShortTurningPoint
+      && assets.hasShortEndingClosure
+      && assets.hasShortSceneSequence;
+    const longNovelReadyForWriting = projectType === 'long_novel' && assets.hasChapterPlan;
+    if (shortStoryReadyForWriting || longNovelReadyForWriting) {
+      return 'writing';
+    }
 
     // The initial inspiration marker is valid only while no project asset has
     // been created. It is a stale persisted value once a project has content.

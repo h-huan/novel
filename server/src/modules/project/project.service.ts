@@ -1,13 +1,14 @@
 /**
  * 项目 Service
  */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { ProjectRepository } from '../../database/repositories/project.repository';
 import type { ProjectRow } from '../../database/repositories/project.repository';
 import type { CreateProjectDto } from './dto/create-project.dto';
 import type { UpdateProjectDto } from './dto/update-project.dto';
 import type { ProjectQueryDto } from './dto/query-project.dto';
+import { DatabaseService } from '../../database/database.service';
 
 export interface ProjectResponse {
   id: string;
@@ -36,7 +37,7 @@ export interface ProjectResponse {
 
 @Injectable()
 export class ProjectService {
-  constructor(private readonly repo: ProjectRepository) {}
+  constructor(private readonly repo: ProjectRepository, @Optional() private readonly database?: DatabaseService) {}
 
   /**
    * 创建项目
@@ -45,16 +46,16 @@ export class ProjectService {
     const now = new Date().toISOString();
     const id = uuid();
 
-    const settings = JSON.stringify({
+    const settings = JSON.stringify(this.normalizePlanningSettings({
       autoSave: true,
       autoSaveInterval: 30,
-      writingMode: dto.writingMode || 'semi_auto',
+      writingMode: dto.writingMode || 'full_auto',
       immersiveModeEnabled: false,
       recapEnabled: true,
       typoCheckEnabled: true,
       sensitiveWordCheckEnabled: false,
       ...this.parseJsonObject(dto.settings),
-    });
+    }));
 
     // 推导默认创作阶段
     const projectType = dto.type || dto.projectMode || 'long_novel';
@@ -151,10 +152,10 @@ export class ProjectService {
 
     if (dto.settings !== undefined) {
       const existingSettings = this.safeParseSettings(existing.settings);
-      updateData.settings = JSON.stringify({
+      updateData.settings = JSON.stringify(this.normalizePlanningSettings({
         ...existingSettings,
         ...this.parseJsonObject(dto.settings),
-      });
+      }));
     }
 
     if (dto.writingMode) {
@@ -162,7 +163,7 @@ export class ProjectService {
         ? JSON.parse(String(updateData.settings))
         : this.safeParseSettings(existing.settings);
       settings.writingMode = dto.writingMode;
-      updateData.settings = JSON.stringify(settings);
+      updateData.settings = JSON.stringify(this.normalizePlanningSettings(settings));
     }
 
     this.repo.update(id, updateData);
@@ -175,7 +176,29 @@ export class ProjectService {
   remove(id: string): { success: boolean } {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Project ${id} not found`);
+    const db = this.database?.getDb();
+    const versionEntityIds = db ? [
+      ...(['characters', 'world_settings', 'outlines', 'foreshadowings', 'organizations', 'map_points', 'chapters'] as const)
+        .flatMap(table => (db.prepare(`SELECT id FROM ${table} WHERE project_id = ?`).all(id) as Array<{ id: string }>).map(row => row.id)),
+      ...(db.prepare(`SELECT id FROM timelines WHERE project_id = ?`).all(id) as Array<{ id: string }>).map(row => row.id),
+      ...(db.prepare(`SELECT event.id FROM timeline_events event JOIN timelines timeline ON timeline.id = event.timeline_id WHERE timeline.project_id = ?`).all(id) as Array<{ id: string }>).map(row => row.id),
+    ] : [];
     this.repo.delete(id);
+    if (db) {
+      if (versionEntityIds.length) {
+        const placeholders = versionEntityIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM version_history WHERE entity_id IN (${placeholders})`).run(...versionEntityIds);
+      }
+      for (const table of [
+        'canonical_entity_sync_states',
+        'chapter_continuity_reviews',
+        'chapter_summaries',
+        'aggregate_summary_states',
+        'chapter_derived_sync_states',
+      ]) {
+        db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(id);
+      }
+    }
     return { success: true };
   }
 
@@ -220,7 +243,7 @@ export class ProjectService {
       currentWords: row.current_words,
       description: row.description || undefined,
       writingStyle: row.writing_style ? JSON.parse(row.writing_style) : undefined,
-      settings: JSON.parse(row.settings),
+      settings: this.normalizePlanningSettings(this.safeParseSettings(row.settings)),
       platformStyle: row.platform_style || 'generic',
       creationSource,
       targetPlatform,
@@ -249,6 +272,16 @@ export class ProjectService {
     } catch {
       return {};
     }
+  }
+
+  private normalizePlanningSettings(settings: Record<string, unknown>): Record<string, unknown> {
+    const normalized = { ...settings };
+    for (const legacyKey of ['perChapterTarget', 'wordsPerChapter', 'chapterWords', 'volumeCount', 'chaptersPerVolume', 'totalChapters', 'chapterCount']) {
+      delete normalized[legacyKey];
+    }
+    normalized.chapterWordRange = { min: 3200, max: 4000 };
+    normalized.structurePlanning = 'dynamic_by_story_rhythm';
+    return normalized;
   }
 
   private parseJsonObject(value: string | Record<string, unknown> | undefined): Record<string, unknown> {

@@ -115,6 +115,18 @@ export class WritingQualityService {
 
   // ====================== 1. ANALYZE CHAPTER QUALITY ======================
 
+  /**
+   * The author-facing "submit quality review" action: create a real quality
+   * report first, then let the chapter state machine run its consistency sync
+   * and transition to reviewing. Neither failure may advance the state.
+   */
+  async submitChapterForQualityReview(projectId: string, dto: AnalyzeChapterDto) {
+    if (!this.chapterService) throw new BadRequestException('Chapter service is not available');
+    const report = await this.analyzeChapterQuality(projectId, { ...dto, scope: dto.scope || 'chapter' });
+    const chapter = await this.chapterService.submitForReview(dto.chapterId);
+    return { success: true, report, chapter };
+  }
+
   async analyzeChapterQuality(projectId: string, dto: AnalyzeChapterDto) {
     const db = this.dbService.getDb();
     const chapterId = dto.chapterId;
@@ -739,7 +751,7 @@ export class WritingQualityService {
     // 大纲（兼容实际 schema：outlines 表有 title/content/level/chapter_function 等）
     try {
       const outlines = db.prepare(
-        'SELECT title, content, level, chapter_function, status FROM outlines WHERE project_id = ? ORDER BY "order" LIMIT 20',
+        'SELECT title, content, level, chapter_function, status FROM outlines WHERE project_id = ? ORDER BY "order"',
       ).all(projectId);
       context.outlines = outlines || [];
     } catch (err) {
@@ -749,7 +761,7 @@ export class WritingQualityService {
     // 角色（兼容实际 schema：characters 表有 name/identity/personality 等，没有 role_type）
     try {
       const characters = db.prepare(
-        'SELECT name, identity, personality, dialogue_style, is_pov_character FROM characters WHERE project_id = ? LIMIT 15',
+        'SELECT name, identity, personality, dialogue_style, is_pov_character FROM characters WHERE project_id = ?',
       ).all(projectId);
       context.characters = characters || [];
     } catch (err) {
@@ -759,7 +771,7 @@ export class WritingQualityService {
     // 世界观（兼容实际 schema：world_settings 表有 name/era/geography/factions/power_system 等）
     try {
       const worldSettings = db.prepare(
-        'SELECT name, era, geography, factions, power_system, economy, society FROM world_settings WHERE project_id = ? LIMIT 10',
+        'SELECT name, era, geography, factions, power_system, economy, society FROM world_settings WHERE project_id = ?',
       ).all(projectId);
       context.worldSettings = worldSettings || [];
     } catch (err) {
@@ -769,7 +781,7 @@ export class WritingQualityService {
     // state_items（仅查询 confirmed 和 pending）
     try {
       const stateItems = db.prepare(
-        'SELECT title, summary, target_type, status FROM state_items WHERE project_id = ? AND status IN (?, ?) LIMIT 20',
+        'SELECT title, summary, target_type, status FROM state_items WHERE project_id = ? AND status IN (?, ?)',
       ).all(projectId, 'confirmed', 'pending');
       context.stateItems = stateItems || [];
     } catch (err) {
@@ -851,7 +863,7 @@ ${content.slice(0, 15000)}
 }`;
 
     const response = await this.realLLM!.generate({
-      prompt, systemPrompt, model: 'deepseek', temperature: 0.3, scenario: 'quality_check',
+      prompt, systemPrompt, temperature: 0.3, scenario: 'quality_check',
     } as any);
 
     const rawContent = response.content || '';
@@ -922,7 +934,7 @@ ${contextText.slice(0, 3000)}
 }`;
 
     const response = await this.realLLM!.generate({
-      prompt, systemPrompt, model: 'deepseek', temperature: 0.4, scenario: 'quality_refine',
+      prompt, systemPrompt, temperature: 0.4, scenario: 'quality_refine',
     } as any);
 
     const result = this.parseJson<LLMRefineOutput>(response.content);
@@ -964,7 +976,7 @@ ${fullContent.slice(0, 3000)}
 { "pass": true/false, "level": "pass|warning|fail", "remainingIssues": 0, "newIssues": 0, "summary": "复查总结，80字内" }`;
 
     const response = await this.realLLM!.generate({
-      prompt, model: 'deepseek', temperature: 0.2, scenario: 'quality_check',
+      prompt, temperature: 0.2, scenario: 'quality_check',
     } as any);
 
     const raw = this.parseJson<Record<string, any>>(response.content);

@@ -17,6 +17,11 @@ interface DiscoveryIdea {
   styleTags?: string[];
   characters?: string[];
   storyCore?: string;
+  estimatedWords?: number | string;
+  plannedChapters?: number;
+  scopeReason?: string;
+  scopeBreakdown?: Array<{ arc: string; chapters: number; reason: string }>;
+  alternateTitles?: string[];
 }
 
 interface ExcludeDetail {
@@ -200,10 +205,6 @@ export const useDiscoveryStore = create<DiscoveryState>()(
         selectedCategory: state.selectedCategory,
         selectedSubCategory: state.selectedSubCategory,
         // === 发现结果（可跨会话保留，用户可回顾）===
-        ideas: state.ideas,
-        generationDone: state.generationDone,
-        prevTitles: state.prevTitles,
-        excludeDetails: state.excludeDetails,
       }),
       // 清理旧版 localStorage 中残留的瞬时状态（partialize 不再写这些字段，
       // 但旧存储中仍有，zustand hydration 时会读回来造成 UI 污染）
@@ -216,10 +217,11 @@ export const useDiscoveryStore = create<DiscoveryState>()(
           state.creationErrors.length > 0 ||
           state.creationWarnings.length > 0 ||
           state.createdProjectId !== null ||
-          state.step >= 2 ||
+          state.step > 0 ||
           state.creationStepStatus.done === 'done'
         );
-        if (hasDirtyCreation) {
+        const hasOldDiscoveryResults = state.ideas.length > 0 || state.generationDone || state.prevTitles.length > 0 || state.excludeDetails.length > 0;
+        if (hasDirtyCreation || hasOldDiscoveryResults) {
           console.log('[discovery-store] 检测到旧版残留数据，清理中...');
           // 只重置瞬时状态，保留用户配置和发现结果
           state.isGenerating = false;
@@ -230,7 +232,11 @@ export const useDiscoveryStore = create<DiscoveryState>()(
           state.creationWarnings = [];
           state.createdProjectId = null;
           state.createdProjectTitle = null;
-          state.step = (state.ideas?.length > 0 && state.generationDone) ? 1 : 0;
+          state.step = 0;
+          state.ideas = [];
+          state.generationDone = false;
+          state.prevTitles = [];
+          state.excludeDetails = [];
           state.creationStepStatus = { ...INITIAL_STEP_STATUS };
           state.hasActiveCreation = false;
           state.activeCreationProjectId = null;

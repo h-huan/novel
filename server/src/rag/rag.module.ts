@@ -12,15 +12,20 @@ import { HybridSearchService } from './hybrid-search.service';
 import { ContextBuilderService } from './context-builder.service';
 import { EmbeddingService } from './embedding.service';
 import { RoutingModule } from '../routing/routing.module';
+import { CanonicalSyncStateService } from './canonical-sync-state.service';
+import { CanonicalSyncStateController } from './canonical-sync-state.controller';
+import { StateModule } from '../state/state.module';
 
 @Module({
-  imports: [RoutingModule],
+  imports: [RoutingModule, StateModule],
+  controllers: [CanonicalSyncStateController],
   providers: [
     ChunkerService,
     VectorIndexService,
     HybridSearchService,
     ContextBuilderService,
     EmbeddingService,
+    CanonicalSyncStateService,
   ],
   exports: [
     ChunkerService,
@@ -28,6 +33,7 @@ import { RoutingModule } from '../routing/routing.module';
     HybridSearchService,
     ContextBuilderService,
     EmbeddingService,
+    CanonicalSyncStateService,
   ],
 })
 export class RagModule {}

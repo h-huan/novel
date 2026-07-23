@@ -9,7 +9,7 @@
  * - ChapterModule
  * - ForeshadowingModule
  */
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { WorkflowGuardController } from './workflow-guard.controller';
 import { WorkflowGuardService } from './workflow-guard.service';
 import { ProjectRepository } from '../../database/repositories/project.repository';
@@ -26,7 +26,7 @@ import { ForeshadowingModule } from '../foreshadowing/foreshadowing.module';
     WorldSettingModule,
     CharacterModule,
     OutlineModule,
-    ChapterModule,
+    forwardRef(() => ChapterModule),
     ForeshadowingModule,
   ],
   controllers: [WorkflowGuardController],

@@ -54,7 +54,6 @@ export class NewsRssService {
       const response = await this.realLLM.generate({
         prompt: llmPrompt,
         temperature: 0.7,
-        maxTokens: 1024,
       });
       let hotTopics: any[] = [];
       try { hotTopics = JSON.parse(response.content.replace(/```json\n?|```\n?/g, '').trim()); } catch { /* fallback */ }

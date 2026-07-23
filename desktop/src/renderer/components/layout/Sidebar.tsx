@@ -59,17 +59,17 @@ const Sidebar: React.FC = () => {
     { id: 'outline', label: '大纲', path: `/project/${pid}/outline`, icon: ICONS.outline },
     { id: 'character', label: '角色', path: `/project/${pid}/characters`, icon: ICONS.character },
     { id: 'world', label: '世界观', path: `/project/${pid}/world`, icon: ICONS.world },
-    { id: 'orgMap', label: '组织与地图', path: `/project/${pid}/organization-map`, icon: ICONS.orgMap },
+    { id: 'orgMap', label: '地点与势力', path: `/project/${pid}/organization-map`, icon: ICONS.orgMap },
     { id: 'foreshadow', label: '伏笔', path: `/project/${pid}/foreshadowing`, icon: ICONS.foreshadow },
     { id: 'timeline', label: '时间线', path: `/project/${pid}/timeline`, icon: ICONS.timeline },
-    { id: 'continuity', label: '连续性驾驶舱', path: `/project/${pid}/continuity`, icon: ICONS.continuity },
-    { id: 'state', label: '状态确稿', path: `/project/${pid}/state`, icon: ICONS.state },
+    { id: 'continuity', label: '全书脉络', path: `/project/${pid}/continuity`, icon: ICONS.continuity },
+    { id: 'state', label: '内容变化', path: `/project/${pid}/state`, icon: ICONS.state },
     { id: 'material', label: '素材', path: `/project/${pid}/material`, icon: ICONS.material },
-    { id: 'conflict', label: '冲突检测', path: `/project/${pid}/conflicts`, icon: ICONS.conflict },
+    { id: 'conflict', label: '前后矛盾', path: `/project/${pid}/conflicts`, icon: ICONS.conflict },
     { id: 'importExport', label: '导入导出', path: `/project/${pid}/import-export`, icon: ICONS.importExport },
     { id: 'refinement', label: '精修', path: `/project/${pid}/refinement`, icon: ICONS.refinement },
-    { id: 'version', label: '版本历史', path: `/project/${pid}/versions`, icon: ICONS.version },
-    { id: 'tools', label: '工具', path: `/project/${pid}/tools`, icon: ICONS.tools },
+    { id: 'version', label: '修改记录', path: `/project/${pid}/versions`, icon: ICONS.version },
+    { id: 'tools', label: '创作工具', path: `/project/${pid}/tools`, icon: ICONS.tools },
   ] : [];
 
   const isActive = (item: NavItem): boolean => {

@@ -155,14 +155,22 @@ export async function streamRequest(
   }
   const decoder = new TextDecoder();
   let buffer = '';
-  const timeoutId = setTimeout(() => {
-    reader.cancel('timeout');
-    onError?.(new Error(`请求超时（${Math.round(timeoutMs / 1000)}秒）`));
-  }, timeoutMs);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  // This is an idle timeout. SSE heartbeats and real node-progress events both
+  // keep a healthy long generation alive instead of expiring it by wall-clock.
+  const refreshIdleTimeout = () => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      reader.cancel('timeout');
+      onError?.(new Error(`生成连接连续${Math.round(timeoutMs / 1000)}秒未收到进度或心跳`));
+    }, timeoutMs);
+  };
+  refreshIdleTimeout();
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      refreshIdleTimeout();
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       // 保留最后一个可能不完整的行

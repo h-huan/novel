@@ -68,6 +68,14 @@ export class ChunkerService {
       minChunkSize: 0,
       maxSize: 1024,
     },
+    timeline: {
+      method: 'whole',
+      chunkSize: 0,
+      overlap: 0,
+      separators: [],
+      minChunkSize: 0,
+      maxSize: 1024,
+    },
   };
 
   /**
@@ -206,20 +214,24 @@ export class ChunkerService {
     strategy: ChunkStrategy,
     parentId?: string,
   ): Chunk[] {
-    const maxSize = strategy.maxSize || 2048;
-    const truncated = content.length > maxSize * 2
-      ? content.slice(0, maxSize * 2)  // 中文字符 ≈ tokens，留余量
-      : content;
+    const maxSize = Number(strategy.maxSize);
+    if (!Number.isFinite(maxSize) || maxSize <= 0) {
+      return [this.createChunk(content, docType, 0, parentId)];
+    }
 
-    return [{
-      id: `${parentId || 'doc'}:0`,
-      text: truncated,
-      docType,
-      metadata: {
-        chunkIndex: 0,
-        parentDocId: parentId,
-      },
-    }];
+    // maxSize 只控制单个向量块，不得截断资料。超长人物、伏笔或时间线
+    // 会按块完整进入索引，确保后续写作仍能检索到尾部信息。
+    const maxCharacters = Math.max(1, Math.floor(maxSize * 2));
+    const chunks: Chunk[] = [];
+    for (let offset = 0; offset < content.length; offset += maxCharacters) {
+      chunks.push(this.createChunk(
+        content.slice(offset, offset + maxCharacters),
+        docType,
+        chunks.length,
+        parentId,
+      ));
+    }
+    return chunks.length > 0 ? chunks : [this.createChunk('', docType, 0, parentId)];
   }
 
   /**

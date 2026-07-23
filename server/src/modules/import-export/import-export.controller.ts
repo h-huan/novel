@@ -59,7 +59,7 @@ export class ImportExportController {
     @Body() body: { chapters: any[]; characters?: any[]; worldElements?: any[] },
   ) {
     // 转换格式后调用 optimization mark 服务
-    return this.optimizationMark.analyze({
+    const suggestions = this.optimizationMark.analyze({
       projectInfo: {
         title: '',
         description: '',
@@ -90,6 +90,7 @@ export class ImportExportController {
         confidence: w.confidence || 'low' as any,
       })),
     });
+    return { suggestions, count: suggestions.length };
   }
 
   /**

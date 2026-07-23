@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
 import { ModuleRef } from '@nestjs/core';
 import { ChapterDerivedDataSyncService } from '../modules/chapter/chapter-derived-data-sync.service';
 import { ChunkerService } from '../rag/chunker.service';
@@ -7,10 +7,13 @@ import { up as derivedUp } from '../database/migrations/026_chapter_derived_data
 import { up as aggregateUp } from '../database/migrations/029_aggregate_summary_content';
 import { up as diagnosticsUp } from '../database/migrations/030_aggregate_summary_diagnostics';
 
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
+
 describe('creation pipeline SQLite acceptance', () => {
   it('persists pending diagnostics, rebuilds volume then novel, and remains idempotent', async () => {
     const db = new DatabaseSync(':memory:'); db.exec('CREATE TABLE chapters (id TEXT PRIMARY KEY, project_id TEXT, volume_index INTEGER, chapter_index INTEGER, content TEXT)'); derivedUp(db); aggregateUp(db); diagnosticsUp(db);
     db.prepare('INSERT INTO chapters VALUES (?,?,?,?,?)').run('c1','p',1,1,'body');
+    expect(db.prepare('SELECT id FROM chapters WHERE project_id=? AND volume_index=?').all('p', 1)).toHaveLength(1);
     const llm = { isAvailable: vi.fn(async () => true), generate: vi.fn(async () => ({ content: 'aggregate' })) };
     const service = new ChapterDerivedDataSyncService({ getDb: () => db } as any, new ChunkerService(), {} as any, {} as any, { get: () => llm } as ModuleRef);
     const pending = await service.rebuildVolumeSummary('p',1); expect(pending.missingChapterIds).toEqual(['c1']); expect(pending.diagnosticReason).toBe('source_summary_missing_or_stale');

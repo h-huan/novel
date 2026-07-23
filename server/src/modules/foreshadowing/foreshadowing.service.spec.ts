@@ -20,6 +20,10 @@ describe('ForeshadowingService', () => {
     buried_chapter_index: 1,
     planned_recovery_at: null,
     planned_recovery_chapter_index: 10,
+    recovery_window_start: 8,
+    recovery_window_end: 12,
+    evidence_text: '旧钥匙上的刻痕',
+    risk_level: 'high',
     actual_recovery_at: null,
     actual_recovery_chapter_index: null,
     recovery_trigger: null,
@@ -72,10 +76,17 @@ describe('ForeshadowingService', () => {
     it('should activate buried foreshadowing', () => {
       (repo.findById as any)
         .mockReturnValueOnce(mockRow)
-        .mockReturnValueOnce({ ...mockRow, status: 'pending' });
+        .mockReturnValueOnce({ ...mockRow, status: 'active' });
 
       const result = service.activate('fs-1');
-      expect(result.status).toBe('pending');
+      expect(result.status).toBe('active');
+    });
+
+    it('moves an active foreshadowing into reminder status', () => {
+      (repo.findById as any)
+        .mockReturnValueOnce({ ...mockRow, status: 'active' })
+        .mockReturnValueOnce({ ...mockRow, status: 'reminder' });
+      expect(service.remind('fs-1').status).toBe('reminder');
     });
 
     it('should throw when activating non-buried foreshadowing', () => {
@@ -103,6 +114,18 @@ describe('ForeshadowingService', () => {
 
       const result = service.cancel('fs-1');
       expect(result.status).toBe('cancelled');
+    });
+
+    it('queues an impact review after a canonical foreshadowing edit', () => {
+      const stateItems = { analyzeImpactTracked: vi.fn() } as any;
+      service = new ForeshadowingService(repo, stateItems);
+      (repo.findById as any)
+        .mockReturnValueOnce(mockRow)
+        .mockReturnValueOnce({ ...mockRow, content: 'changed clue' });
+      service.update('fs-1', { content: 'changed clue' });
+      expect(stateItems.analyzeImpactTracked).toHaveBeenCalledWith('project-1', expect.objectContaining({
+        targetType: 'foreshadowing', targetId: 'fs-1',
+      }));
     });
   });
 

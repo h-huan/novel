@@ -46,29 +46,25 @@ export class MultiModelService {
   async generateWithBestModel(role: ModelRole, prompt: string, chapterFunction?: string): Promise<{ content: string; model: string; tier: ModelTier; latency: number }> {
     const route = this.getRoute(role, chapterFunction);
     const start = Date.now();
+    const scenario = role === 'writer' ? 'writing' : role === 'reviewer' ? 'quality_check' : 'outline';
 
-    this.logger.log(`[${role}] 使用 ${route.modelName} (${route.preferredTier}) 生成`);
+    this.logger.log(`[${role}] 按用户场景配置 ${scenario} 生成`);
     try {
       const response = await this.realLLM.generate({
         prompt,
-        model: route.modelName,
-        temperature: route.temperature,
-        maxTokens: 2048,
+        scenario,
+        chapterFunction,
+        role,
       });
       return {
         content: response.content,
-        model: route.modelName,
+        model: response.model,
         tier: route.preferredTier,
         latency: Date.now() - start,
       };
     } catch (err: any) {
       this.logger.error(`[${role}] 生成失败: ${err.message}`);
-      return {
-        content: `[${role}生成失败: ${err.message}]`,
-        model: route.modelName,
-        tier: route.preferredTier,
-        latency: Date.now() - start,
-      };
+      throw err;
     }
   }
 }

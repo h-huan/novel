@@ -1,7 +1,7 @@
 /**
  * 更新项目 DTO
  */
-import { IsString, IsOptional, IsNumber, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsIn, Min } from 'class-validator';
 import type { ProjectType, ProjectStatus, CreationSource, TargetPlatform, WorkflowStage, IdeaStatus } from '@novel/shared';
 
 export class UpdateProjectDto {
@@ -19,6 +19,7 @@ export class UpdateProjectDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(1)
   targetWords?: number;
 
   @IsOptional()

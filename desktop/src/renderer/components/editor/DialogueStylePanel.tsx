@@ -9,18 +9,24 @@ const DialogueStylePanel: React.FC<{ projectId: string; characterName: string }>
   const [dialogues, setDialogues] = useState('');
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const analyze = useCallback(async () => {
     if (!dialogues.trim()) return;
     setLoading(true);
+    setError('');
     try {
       const res = await api.post('/chain/dialogue-style', {
         projectId, characterName,
         dialogues: dialogues.split('\n').filter(Boolean),
       });
-      setResult((res.data as any).success ? res.data : res.data);
-    } catch { /* */ }
-    setLoading(false);
+      setResult(res.data as any);
+    } catch (reason) {
+      setResult(null);
+      setError(reason instanceof Error ? reason.message : '对话风格分析失败，请检查模型连接后重试。');
+    } finally {
+      setLoading(false);
+    }
   }, [projectId, characterName, dialogues]);
 
   return (
@@ -32,6 +38,7 @@ const DialogueStylePanel: React.FC<{ projectId: string; characterName: string }>
         style={{ marginTop: '8px', padding: '6px 14px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
         {loading ? '分析中...' : '🎯 分析对话风格'}
       </button>
+      {error && <div style={{ marginTop: '8px', color: '#ff9aaa', fontSize: '12px' }}>{error}</div>}
       {result && result.style && (
         <div style={{ marginTop: '10px', padding: '10px', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '6px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>

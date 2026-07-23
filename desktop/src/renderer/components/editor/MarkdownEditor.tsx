@@ -105,6 +105,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
   const [internalValue, setInternalValue] = useState(defaultValue || '');
   const [localWordCount, setLocalWordCount] = useState(0);
+  const [useNativeFallback, setUseNativeFallback] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyrightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const decorationIdsRef = useRef<string[]>([]);
@@ -363,6 +364,16 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   }, [controlledValue, isControlled, externalWordCount]);
 
   useEffect(() => {
+    // Monaco may fail to load in a packaged/offline desktop runtime. The author
+    // must still be able to read and edit the chapter instead of seeing an
+    // indefinite loading indicator.
+    const timer = window.setTimeout(() => {
+      if (!editorRef.current) setUseNativeFallback(true);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
@@ -377,6 +388,31 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
   return (
     <div className={className} style={styles.container}>
+      {useNativeFallback ? (
+        <textarea
+          aria-label="正文编辑器"
+          value={displayValue}
+          readOnly={readOnly}
+          onChange={(event) => handleChange(event.target.value, undefined as any)}
+          style={{
+            flex: 1,
+            width: '100%',
+            minHeight: 0,
+            resize: 'none',
+            boxSizing: 'border-box',
+            border: 'none',
+            outline: 'none',
+            padding: '16px 24px',
+            backgroundColor: '#1a1a2e',
+            color: '#eaeaea',
+            fontSize: '16px',
+            lineHeight: '28px',
+            fontFamily: 'var(--font-family)',
+            whiteSpace: 'pre-wrap',
+            overflow: 'auto',
+          }}
+        />
+      ) : (
       <Editor
         height="100%"
         language="markdown"
@@ -422,6 +458,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           </div>
         }
       />
+      )}
       {/* 底部状态栏：字数 + 版权状态指示器 + 徽章 */}
       <div style={styles.statusBar}>
         {/* 版权状态指示器 */}
@@ -494,7 +531,8 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
               backgroundColor: w.risk === 'high' ? 'rgba(231,76,60,0.12)' : 'rgba(243,156,18,0.12)',
               padding: '4px 10px',
               borderRadius: '4px',
-              border: '1px solid',
+              borderWidth: 1,
+              borderStyle: 'solid',
               borderColor: w.risk === 'high' ? 'rgba(231,76,60,0.2)' : 'rgba(243,156,18,0.2)',
               maxWidth: '300px',
             }}>

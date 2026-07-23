@@ -24,7 +24,7 @@ function normalizeGroups(value: unknown): Record<string, any[]> {
   );
 }
 
-const EMPTY = '待补全';
+const EMPTY = '尚未记录';
 const RISK_KEYWORDS = {
   timeline: ['timeline_conflict', 'causality_gap', 'time_order_error', 'event_sequence_risk'],
   foreshadowing: ['foreshadowing', '伏笔'],
@@ -61,15 +61,6 @@ interface ProjectInfo {
 }
 
 type TabKey = 'overview' | 'focus' | 'characters' | 'relations' | 'foreshadowing' | 'world' | 'timeline' | 'precheck' | 'postupdate';
-
-const PHASE_TASKS = [
-  { id: '7.0', title: '阶段展示与边界收口', status: '已完成' },
-  { id: '7.1', title: '小说全貌总览 + 当前章节创作焦点', status: '已完成' },
-  { id: '7.2', title: '人物状态与人物关系网', status: '已完成' },
-  { id: '7.3', title: '伏笔雷达与伏笔生命周期', status: '已完成' },
-  { id: '7.4', title: '世界观规则与时间线三线模型', status: '本轮实现' },
-  { id: '7.5', title: '写作前检查与写作后更新闭环', status: '本轮实现' },
-];
 
 const STATE_TYPES = ['physical', 'emotion', 'goal', 'identity', 'relationship', 'resource', 'secret', 'ability', 'restriction', 'reputation', 'location', 'arc'];
 const REVIEW_STATUSES = ['pending', 'confirmed', 'ignored', 'conflict'];
@@ -296,10 +287,10 @@ const ContinuityCockpitPage: React.FC = () => {
       setStateItems(stateRes.status === 'fulfilled' ? normalizeArray<any>(payload(stateRes.value)) : []);
       setQualityReports(reportsRes.status === 'fulfilled' ? normalizeArray<any>(payload(reportsRes.value)) : []);
 
-      const eventResults = await Promise.allSettled(timelineData.slice(0, 5).map(t => api.get(`/projects/${projectId}/timelines/${t.id}/events`)));
+      const eventResults = await Promise.allSettled(timelineData.map(t => api.get(`/projects/${projectId}/timelines/${t.id}/events`)));
       setTimelineEvents(eventResults.flatMap(result => result.status === 'fulfilled' ? normalizeArray<any>(payload(result.value)) : []));
     } catch (err: any) {
-      setError(err.message || '连续性驾驶舱加载失败');
+      setError(err.message || '全书脉络加载失败');
     } finally {
       setLoading(false);
     }
@@ -323,7 +314,7 @@ const ContinuityCockpitPage: React.FC = () => {
       if (worldRes.status === 'fulfilled') setContinuityWorldRules(payload<any>(worldRes.value));
       if (timelineRes.status === 'fulfilled') setContinuityTimeline(payload<any>(timelineRes.value));
     } catch (err: any) {
-      setError(err.message || 'Phase 7 连续性数据加载失败');
+      setError(err.message || '小说资料加载失败');
     } finally {
       setContinuityLoading(false);
     }
@@ -341,7 +332,7 @@ const ContinuityCockpitPage: React.FC = () => {
       if (precheckRes.status === 'fulfilled') setPrecheckResult(payload<any>(precheckRes.value));
       if (postupdateRes.status === 'fulfilled') setPostupdateResult(payload<any>(postupdateRes.value));
     } catch (err: any) {
-      setError(err.message || 'Phase 7.5 闭环数据加载失败');
+      setError(err.message || '写作资料加载失败');
     } finally {
       setPhase75Loading(false);
     }
@@ -777,15 +768,15 @@ const ContinuityCockpitPage: React.FC = () => {
     await api.patch(`/projects/${projectId}/continuity/timeline-tasks/${task.id}`, patch); await loadContinuity();
   };
 
-  if (loading) return <div style={styles.loading}>加载小说连续性驾驶舱...</div>;
+  if (loading) return <div style={styles.loading}>正在整理全书脉络...</div>;
   if (!projectId) return <div style={styles.loading}>请先选择项目。</div>;
 
   return (
     <div style={styles.page}>
       <header style={styles.header}>
         <div>
-          <div style={styles.kicker}>Phase 7：小说连续性驾驶舱</div>
-          <h1 style={styles.title}>小说连续性驾驶舱</h1>
+          <div style={styles.kicker}>全书脉络</div>
+          <h1 style={styles.title}>全书脉络</h1>
           <p style={styles.subtitle}>围绕当前创作章节查看全貌、人物状态、关系风险、伏笔雷达、世界观规则、时间线三线模型、写作前检查与写作后更新闭环能力。</p>
         </div>
         <button type="button" style={styles.secondaryButton} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回首页</button>
@@ -793,8 +784,8 @@ const ContinuityCockpitPage: React.FC = () => {
 
       {error && <div style={styles.error}>{error}</div>}
       {notice && <div style={styles.notice}>{notice}</div>}
-      {continuityLoading && <div style={styles.notice}>正在刷新 Phase 7 连续性数据...</div>}
-      {phase75Loading && <div style={styles.notice}>正在刷新 Phase 7.5 写作闭环数据...</div>}
+      {continuityLoading && <div style={styles.notice}>正在刷新小说资料...</div>}
+      {phase75Loading && <div style={styles.notice}>正在整理本章写作资料...</div>}
 
       <section style={styles.focusBar}>
         <label style={styles.label}>当前创作章节</label>
@@ -804,20 +795,7 @@ const ContinuityCockpitPage: React.FC = () => {
             <option key={ch.id} value={ch.id}>第{volumeIndex(ch)}卷 第{chapterIndex(ch)}章 {ch.title} [{ch.status || 'draft'}]</option>
           ))}
         </select>
-        <span style={styles.savedHint}>{sortedChapters.length ? '已保存到本地视图状态，刷新后恢复。' : '当前项目暂无章节，请先创建大纲或章节。'}</span>
-      </section>
-
-      <section style={styles.phasePanel}>
-        <div style={styles.panelTitle}>Phase 7 分期边界</div>
-        <div style={styles.phaseGrid}>
-          {PHASE_TASKS.map(task => (
-            <div key={task.id} style={{ ...styles.phaseItem, borderColor: ['已完成', '本轮实现'].includes(task.status) ? 'rgba(34,197,94,.35)' : 'rgba(148,163,184,.22)' }}>
-              <strong>{task.id}</strong>
-              <span>{task.title}</span>
-              <em>{task.status}</em>
-            </div>
-          ))}
-        </div>
+        <span style={styles.savedHint}>{sortedChapters.length ? '已记住当前选择，重新打开仍会恢复。' : '当前项目暂无章节，请先创建大纲或章节。'}</span>
       </section>
 
       <nav style={styles.tabs}>
@@ -947,11 +925,11 @@ function renderOverview(input: any) {
   ].filter(Boolean);
   return (
     <div>
-      <div style={styles.notice}>当前风险统计为轻量统计：人物状态、关系、伏笔、世界观、时间线统计均来自连续性 API。</div>
+      <div style={styles.notice}>这里汇总人物状态、关系变化、伏笔、世界规则和时间先后，帮助你在动笔前快速发现前后矛盾。</div>
       <section style={styles.cardGrid}>{cards.map(([label, value]) => <StatCard key={label} label={label} value={value} />)}</section>
       <section style={styles.twoColumns}>
         <Panel title="当前创作全貌">
-          <Line label="当前主线阶段" value={input.focusChapter ? '围绕当前章节继续推进，主线阶段待由大纲补全。' : EMPTY} />
+          <Line label="当前主线阶段" value={input.focusChapter ? '围绕当前章节和大纲继续推进。' : EMPTY} />
           <Line label="当前章节标题" value={input.focusChapter?.title || '待选择章节'} />
           <Line label="最近章节" value={input.recentChapters.length ? input.recentChapters.map((ch: any) => ch.title).join(' / ') : EMPTY} />
           <Line label="待作者确认项" value={input.stats.pendingConfirmations ? `${input.stats.pendingConfirmations} 项待确认` : EMPTY} />
@@ -973,10 +951,10 @@ function renderFocus(input: any) {
   const goal = input.manualGoal || extractGoal(input.focusOutline);
   const characterNotes = input.relatedCharacters.length
     ? input.relatedCharacters.map((c: any) => `${c.name}：${c.currentStateSummary || c.identity || EMPTY}`).join('；')
-    : '暂无本章角色状态快照，Phase 7.2 可通过人物 Tab 手动补全。';
+    : '本章尚未记录人物状态，可在人物页或本章写作包中添加。';
   const relationshipNotes = input.relatedRelationships.length
     ? input.relatedRelationships.map((r: any) => `${r.sourceCharacterName} - ${r.targetCharacterName}：${r.publicRelation || EMPTY}，冲突 ${r.conflictScore}`).join('；')
-    : '暂无本章关系数据，Phase 7.2 可通过关系网 Tab 手动补全。';
+    : '本章尚未涉及明确的人物关系变化。';
   const worldNotes = input.relatedWorldTasks?.length
     ? groupWorldTaskNotes(input.relatedWorldTasks)
     : input.relatedWorldRules?.length
@@ -991,12 +969,12 @@ function renderFocus(input: any) {
     ? groupTaskNotes(input.relatedForeshadowingTasks)
     : ch && input.relatedForeshadowings.length
       ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join(' / ')
-      : '暂无本章伏笔任务，Phase 7.3 可通过伏笔 Tab 手动补全。';
+      : '本章尚未安排需要处理的伏笔。';
   const forbiddenBase = [
     ch?.status === 'locked' ? 'locked 章节不可自动修改。' : '',
     '已确认设定不可被当前页面直接覆盖。',
     'AI 生成内容必须进入待确认，不直接写入正式设定库。',
-    !goal ? '当前章节目标待从大纲补全。' : '',
+    !goal ? '当前章纲尚未写明章节目标。' : '',
   ].filter(Boolean);
   return (
     <div>
@@ -1021,22 +999,22 @@ function renderFocus(input: any) {
           <Line label="时间线注意事项" value={timelineNotes} />
           <Line label="禁止写错事项" value={[...forbiddenBase, input.manualForbidden].filter(Boolean).join('；')} />
         </Panel>
-        <Panel title="人工微调区">
+        <Panel title="写作前临时备忘">
           <label style={styles.label}>当前章写作目标</label>
-          <textarea value={input.manualGoal} onChange={(e) => input.setManualGoal(e.target.value)} style={styles.textarea} placeholder="人工补充，仅保存到本地视图状态。" />
+          <textarea value={input.manualGoal} onChange={(e) => input.setManualGoal(e.target.value)} style={styles.textarea} placeholder="仅供本次写作参考，不修改正式大纲。" />
           <label style={styles.label}>禁止写错事项</label>
           <textarea value={input.manualForbidden} onChange={(e) => input.setManualForbidden(e.target.value)} style={styles.textarea} placeholder="每行一条。不会覆盖正式设定库。" />
           <label style={styles.label}>本章备注</label>
           <textarea value={input.manualNotes} onChange={(e) => input.setManualNotes(e.target.value)} style={styles.textarea} />
-          <div style={styles.notice}>人工修改内容尚未写入正式设定库；已确认设定不会被此页面直接覆盖。</div>
+          <div style={styles.notice}>这里是临时备忘，不属于正式微调。需要同步到各模块时，请在大纲、角色、世界观、伏笔或时间线页面保存修改。</div>
         </Panel>
       </section>
-      <Panel title="本章写作前提示词">
+      <Panel title="本章写作准备">
         <textarea value={input.visiblePrompt} onChange={(e) => input.setManualPrompt(e.target.value)} style={{ ...styles.textarea, minHeight: 240 }} disabled={input.promptDisabled} />
         <button type="button" style={styles.copyButton} onClick={input.onCopyPrompt}>
-          {input.copyStatus === 'copied' ? '已复制' : input.copyStatus === 'failed' ? '复制失败，请手动复制' : '复制提示词'}
+          {input.copyStatus === 'copied' ? '已复制' : input.copyStatus === 'failed' ? '复制失败，请手动复制' : '复制写作要求'}
         </button>
-        <div style={styles.notice}>可复制文本用于写作前检查；人物状态与关系只使用真实连续性数据，缺失信息显示“待补全”。</div>
+        <div style={styles.notice}>这里汇总本章目标、人物状态、关系、伏笔和时间顺序，可直接用于动笔前回顾。</div>
       </Panel>
     </div>
   );
@@ -1065,13 +1043,13 @@ function renderCharactersTab(input: any) {
       <section style={styles.twoColumns}>
         <Panel title="当前章节创作辅助区">
           {(groups.focusCharacters || []).length ? groups.focusCharacters.map((c: any) => <CharacterCard key={c.id} character={c} input={input} />) : (
-            <p style={styles.empty}>暂无本章人物数据。可以通过正文、大纲或手动选择人物补全。</p>
+            <p style={styles.empty}>本章尚未安排出场人物，可从章纲或人物页选择。</p>
           )}
         </Panel>
         <Panel title="本章缺失的人物状态信息">
-          <Line label="目标" value={(groups.focusCharacters || []).some((c: any) => c.currentGoal !== EMPTY) ? '已有部分人物目标。' : '待补全'} />
-          <Line label="状态摘要" value={(groups.focusCharacters || []).some((c: any) => c.currentStateSummary !== EMPTY) ? '已有部分人物状态。' : '待补全'} />
-          <Line label="说话方式" value={(groups.focusCharacters || []).some((c: any) => c.dialogueStyle !== EMPTY) ? '已有部分说话方式。' : '待补全'} />
+          <Line label="目标" value={(groups.focusCharacters || []).some((c: any) => c.currentGoal !== EMPTY) ? '已有部分人物目标。' : EMPTY} />
+          <Line label="状态摘要" value={(groups.focusCharacters || []).some((c: any) => c.currentStateSummary !== EMPTY) ? '已有部分人物状态。' : EMPTY} />
+          <Line label="说话方式" value={(groups.focusCharacters || []).some((c: any) => c.dialogueStyle !== EMPTY) ? '已有部分说话方式。' : EMPTY} />
           <div style={styles.notice}>AI 生成或人工微调内容进入待确认，不直接覆盖已确认设定。</div>
         </Panel>
       </section>
@@ -1122,7 +1100,7 @@ function renderCharactersTab(input: any) {
           {!canLock && <div style={styles.hint}>{isEditing ? '先确认后才能锁定。' : '新增模式固定 unlocked，确认后才能锁定。'}</div>}
           <button type="button" style={styles.primaryButton} onClick={input.saveStateSnapshot}>{input.stateForm.stateId ? '保存状态修改' : '新增人物状态快照'}</button>
           <button type="button" style={styles.secondaryButton} onClick={() => input.setStateForm(defaultStateForm)}>清空表单</button>
-          <div style={styles.notice}>人工微调内容写入 Phase 7.2 待确认记录，不直接覆盖已确认设定；locked 状态不能被静默覆盖。</div>
+          <div style={styles.notice}>作者修改会先形成变更记录，不直接覆盖已经确认或锁定的设定。</div>
         </Panel>
       </section>
     </div>
@@ -1150,13 +1128,13 @@ function renderRelationsTab(input: any) {
       <section style={styles.twoColumns}>
         <Panel title="当前章节创作辅助区">
           {(groups.focusRelationships || []).length ? groups.focusRelationships.map((rel: any) => <RelationshipCard key={rel.id} relationship={rel} input={input} />) : (
-            <p style={styles.empty}>暂无本章关系数据。Phase 7.2 可通过手动新增关系或后续写作后更新补全。</p>
+            <p style={styles.empty}>本章尚未记录人物关系变化，可手动添加或在正文完成后更新。</p>
           )}
         </Panel>
         <Panel title="当前章关系注意">
-          <Line label="最紧张关系" value={(groups.focusRelationships || []).sort((a: any, b: any) => b.conflictScore - a.conflictScore)[0]?.changeSummary || '待补全'} />
-          <Line label="隐藏关系" value={(groups.hiddenRelationships || []).length ? `${groups.hiddenRelationships.length} 条隐藏关系` : '待补全'} />
-          <Line label="读者已知" value={(groups.focusRelationships || []).some((r: any) => r.readerKnownState === 'known' && r.sourceKnownState !== 'known') ? '存在读者已知但角色未知的关系。' : '待补全'} />
+          <Line label="最紧张关系" value={(groups.focusRelationships || []).sort((a: any, b: any) => b.conflictScore - a.conflictScore)[0]?.changeSummary || EMPTY} />
+          <Line label="隐藏关系" value={(groups.hiddenRelationships || []).length ? `${groups.hiddenRelationships.length} 条隐藏关系` : EMPTY} />
+          <Line label="读者已知" value={(groups.focusRelationships || []).some((r: any) => r.readerKnownState === 'known' && r.sourceKnownState !== 'known') ? '存在读者已知但角色未知的关系。' : EMPTY} />
           <Line label="禁止写错" value="公开关系、隐藏关系、读者已知状态、双方已知状态需要保持一致。" />
         </Panel>
       </section>
@@ -1223,7 +1201,7 @@ function renderRelationsTab(input: any) {
           <FormTextarea label="影响" value={input.relationshipEventForm.impact} onChange={(value) => input.setRelationshipEventForm({ ...input.relationshipEventForm, impact: value })} />
           <button type="button" style={styles.primaryButton} onClick={input.saveRelationshipEvent}>新增关系变化事件</button>
           <div style={styles.hint}>关系变化事件会进入待确认记录，不直接确认。</div>
-          <div style={styles.notice}>保存后只更新 Phase 7.2 关系记录；不会生成不存在的关系，也不会进入 Phase 7.3。</div>
+          <div style={styles.notice}>保存后只更新这条人物关系，不会自动编造其他关系。</div>
         </Panel>
       </section>
     </div>
@@ -1265,7 +1243,7 @@ function renderForeshadowingTab(input: any) {
           <Line label="逾期风险" value={(groups.overdue || []).length ? groups.overdue.map((t: any) => t.title).join(' / ') : EMPTY} />
           <Line label="高风险伏笔" value={(groups.highRisk || []).length ? groups.highRisk.map((t: any) => `${t.title}:${t.riskLevel}`).join(' / ') : EMPTY} />
           <Line label="待确认伏笔" value={(groups.pendingReview || []).length ? `${groups.pendingReview.length} 项待确认` : EMPTY} />
-          <div style={styles.notice}>伏笔雷达读取 Phase 7.3 新生命周期数据和旧版伏笔。旧版只读展示，不静默迁移。</div>
+          <div style={styles.notice}>伏笔雷达同时展示当前伏笔和旧项目伏笔；旧资料保持只读，避免意外改写。</div>
         </Panel>
       </section>
       <section style={styles.detailGrid}>
@@ -1404,7 +1382,7 @@ function ForeshadowingThreadCard({ thread, input }: { thread: any; input: any })
             return input.patchThread(thread, { locked: !thread.locked, forceUnlock: thread.locked });
           }}>{thread.locked ? '解锁' : '锁定'}</button>
         </div>
-      ) : <div style={styles.hint}>旧版伏笔在 Phase 7.3 中只读展示。</div>}
+      ) : <div style={styles.hint}>旧项目伏笔仅供查看。</div>}
     </details>
   );
 }
@@ -1547,7 +1525,7 @@ function renderWorldTab(input: any) {
       <section style={styles.twoColumns}>
         <Panel title="当前章节创作辅助区">
           {(groups.focusRules || []).length ? groups.focusRules.map((rule: any) => <WorldRuleCard key={rule.id} rule={rule} input={input} />) : (
-            <p style={styles.empty}>暂无本章世界观规则数据，Phase 7.4 可通过世界观 Tab 手动补全。</p>
+            <p style={styles.empty}>本章尚未引用具体世界规则，可从世界观页选择。</p>
           )}
         </Panel>
         <Panel title="世界观创作注意">
@@ -1687,7 +1665,7 @@ function WorldRuleCard({ rule, input }: { rule: any; input: any }) {
         </div>
       )}
       {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
-      {rule.legacy && <div style={styles.hint}>旧版规则在 Phase 7.4 中只读展示。</div>}
+      {rule.legacy && <div style={styles.hint}>旧项目规则仅供查看。</div>}
     </details>
   );
 }
@@ -1751,7 +1729,7 @@ function renderTimelineTab(input: any) {
       <section style={styles.twoColumns}>
         <Panel title="当前章节创作辅助区">
           {(groups.focusEvents || []).length ? groups.focusEvents.map((event: any) => <TimelineEventCard key={event.id} event={event} input={input} />) : (
-            <p style={styles.empty}>暂无本章时间线数据，Phase 7.4 可通过时间线 Tab 手动补全。</p>
+            <p style={styles.empty}>本章尚未安排时间线事件，可在时间线页添加。</p>
           )}
         </Panel>
         <Panel title="时间线创作注意">
@@ -1893,7 +1871,7 @@ function TimelineEventCard({ event, input }: { event: any; input: any }) {
         </div>
       )}
       {isDerived && <div style={styles.hint}>雷达推导任务，仅用于当前章提醒；需要持久化请在人工微调区新增当前章任务。</div>}
-      {isLegacy && <div style={styles.hint}>旧版时间线事件在 Phase 7.4 中只读展示。</div>}
+      {isLegacy && <div style={styles.hint}>旧项目时间线事件仅供查看。</div>}
     </details>
   );
 }
@@ -2247,9 +2225,9 @@ function buildPreWritingPrompt(input: any) {
     `伏笔注意事项：${input.focusForeshadowingTasks?.length ? groupTaskNotes(input.focusForeshadowingTasks) : input.relatedForeshadowings.length ? input.relatedForeshadowings.map((f: any) => f.content || f.title).join('；') : EMPTY}`,
     `世界观注意事项：${input.focusWorldTasks?.length ? groupWorldTaskNotes(input.focusWorldTasks) : input.focusWorldRules?.length ? input.focusWorldRules.map((r: any) => `${r.title || EMPTY}：${r.content || r.explanation || EMPTY}`).join('；') : EMPTY}`,
     `时间线注意事项：${input.focusTimelineTasks?.length ? groupTimelineTaskNotes(input.focusTimelineTasks) : input.focusTimelineEvents?.length ? input.focusTimelineEvents.map((e: any) => `${e.title || EMPTY}（${e.lineType || EMPTY}）：${e.storyTimeText || e.summary || EMPTY}`).join('；') : EMPTY}`,
-    '冲突设计：待补全。',
-    '爽点 / 压迫点：待补全。',
-    '结尾钩子：待补全。',
+    '冲突设计：尚未写入章纲。',
+    '爽点 / 压迫点：尚未写入章纲。',
+    '结尾钩子：尚未写入章纲。',
     `禁止写错事项：${input.manualForbidden || 'locked 章节不可自动修改；已确认设定不可被当前页面直接覆盖；AI 生成内容必须进入待确认。'}`,
     `作者备注：${input.manualNotes || '无'}`,
   ].join('\n');

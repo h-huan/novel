@@ -5,8 +5,11 @@ import { Module } from '@nestjs/common';
 import { TimelineService } from './timeline.service';
 import { TimelineController } from './timeline.controller';
 import { TimelineRepository } from '../../database/repositories/timeline.repository';
+import { StateModule } from '../../state/state.module';
+import { RagModule } from '../../rag/rag.module';
 
 @Module({
+  imports: [StateModule, RagModule],
   controllers: [TimelineController],
   providers: [TimelineService, TimelineRepository],
   exports: [TimelineService],

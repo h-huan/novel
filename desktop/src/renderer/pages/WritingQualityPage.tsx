@@ -391,7 +391,7 @@ const WritingQualityPage: React.FC = () => {
       <div style={styles.header}>
         <div>
           <div style={styles.title}>写作质量诊断中心</div>
-          <div style={styles.subtitle}>Phase 6.9：注意力引擎、单项复检、精修恢复与创作位置跳转</div>
+          <div style={styles.subtitle}>检查情节吸引力、人物一致性、节奏与语言问题，并返回对应创作位置</div>
         </div>
         <button style={styles.ghostButton} onClick={() => navigate(`/project/${projectId}/dashboard`)}>返回项目</button>
       </div>

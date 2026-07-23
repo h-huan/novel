@@ -51,9 +51,19 @@ export class ChapterController {
     return this.service.lock(id);
   }
 
+  @Post(':id/direct-lock')
+  directLock(@Param('id') id: string) {
+    return this.service.directLock(id);
+  }
+
   @Post(':id/unlock')
   unlock(@Param('id') id: string) {
     return this.service.unlock(id);
+  }
+
+  @Post(':id/reject-review')
+  rejectReview(@Param('id') id: string) {
+    return this.service.rejectReview(id);
   }
 
   @Get(':id/versions')

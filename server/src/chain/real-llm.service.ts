@@ -3,7 +3,6 @@ import OpenAI from 'openai';
 import { ILLMService } from './llm.interface';
 import { LLMRequest, LLMResponse } from './chain.types';
 import { ModelRouterService } from '../routing/model-router.service';
-import { FailoverService } from '../routing/failover.service';
 
 type RuntimeModel = {
   provider: string;
@@ -12,14 +11,28 @@ type RuntimeModel = {
   baseUrlNames: string[];
 };
 
+type ModelCallResult = {
+  content: string;
+  finishReason?: string;
+};
+
 @Injectable()
 export class RealLLMService implements ILLMService {
   private readonly logger = new Logger(RealLLMService.name);
 
   constructor(
     private readonly modelRouter: ModelRouterService,
-    private readonly failover: FailoverService,
   ) {}
+
+  getConfiguredMaxTokens(scenario: string): number {
+    const config = this.modelRouter.getConfig();
+    const scenarioConfig = (config.scenarios as any)?.[scenario];
+    const value = Number(scenarioConfig?.maxTokens ?? config.defaults?.maxTokens);
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`模型输出配置无效: scenario=${scenario} 未配置有效的 maxTokens`);
+    }
+    return value;
+  }
 
   async onModuleInit() {
     const available = await this.isAvailable();
@@ -36,6 +49,10 @@ export class RealLLMService implements ILLMService {
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const startTime = Date.now();
+    const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'default');
+    if (!Number.isInteger(configuredMaxTokens) || configuredMaxTokens <= 0) {
+      throw new Error(`模型输出配置无效: scenario=${request.scenario || 'default'} maxTokens=${String(request.maxTokens)}`);
+    }
 
     const routedModel = this.modelRouter.getModelForScenario(
       request.scenario || 'default',
@@ -57,55 +74,38 @@ export class RealLLMService implements ILLMService {
 
     // ⚠️ 关键：用 Promise.race 包裹主 LLM 调用，确保超时一定生效
     // 原因：OpenAI SDK 内置的 timeout 在某些场景（代理/自定义 baseURL/网络异常）不触发 abort
-    // FailoverService.executeWithFailover 有 callWithTimeout（setTimeout 兜底），但主路径没有
+    // 显式包裹超时，超时后直接向上返回配置模型失败，不切换模型。
     try {
-      const content = await Promise.race([
+      const result = await Promise.race([
         this.callModel(
           modelName,
           request.prompt,
           request.systemPrompt,
           routedModel.temperature,
-          request.maxTokens,
+          configuredMaxTokens,
           callTimeout,
+          request.responseFormat,
         ),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error(`LLM 主调用超时 (${callTimeout / 1000}s): model=${modelName}, scenario=${request.scenario || 'default'}`)), callTimeout)
         ),
       ]);
 
-      return this.toResponse(content, modelName, request, startTime);
+      if (request.responseFormat === 'json_object') {
+        if (!result.content.trim()) {
+          throw new Error(`结构化生成返回空内容: model=${modelName}, scenario=${request.scenario || 'default'}`);
+        }
+        if (result.finishReason === 'length') {
+          throw new Error(`结构化生成因输出长度被截断: model=${modelName}, scenario=${request.scenario || 'default'}, maxTokens=${configuredMaxTokens}`);
+        }
+      }
+
+      return this.toResponse(result, modelName, request, startTime);
     } catch (err: any) {
       this.logger.warn(
         `[RealLLM] model ${modelName} failed; configured-model-only mode is enabled`,
       );
       throw err;
-
-      const fallbackContent = await this.failover.executeWithFailover(
-        modelName,
-        async (fallbackModel: string) => {
-          return this.callModel(
-            fallbackModel,
-            request.prompt,
-            request.systemPrompt,
-            routedModel.temperature,
-            request.maxTokens,
-            callTimeout,
-          );
-        },
-        undefined,
-        callTimeout, // 传递超时覆盖给 FailoverService
-      );
-
-      if (!fallbackContent.success) {
-        throw new Error(`all models failed: ${fallbackContent.error}`);
-      }
-
-      return this.toResponse(
-        fallbackContent.data as string,
-        fallbackContent.modelUsed,
-        request,
-        startTime,
-      );
     }
   }
 
@@ -114,6 +114,10 @@ export class RealLLMService implements ILLMService {
    * 用于 SSE 场景，避免长文本生成超时
    */
   async *generateStream(request: LLMRequest): AsyncGenerator<string> {
+    const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'default');
+    if (!Number.isInteger(configuredMaxTokens) || configuredMaxTokens <= 0) {
+      throw new Error(`模型输出配置无效: scenario=${request.scenario || 'default'} maxTokens=${String(request.maxTokens)}`);
+    }
     const routedModel = this.modelRouter.getModelForScenario(
       request.scenario || 'default',
       {
@@ -134,24 +138,12 @@ export class RealLLMService implements ILLMService {
         request.prompt,
         request.systemPrompt,
         routedModel.temperature,
-        request.maxTokens,
+        configuredMaxTokens,
         timeout,
       );
     } catch (err) {
       this.logger.warn(`[RealLLM:Stream] ${modelName} failed, failover disabled`);
       throw err;
-      // 降级：复用 failover 的非流式降级，然后 yield 完整文本
-      const fallback = await this.failover.executeWithFailover(
-        modelName,
-        async (fb) => this.callModel(fb, request.prompt, request.systemPrompt, routedModel.temperature, request.maxTokens, timeout),
-        undefined,
-        timeout,
-      );
-      if (fallback.success) {
-        yield fallback.data as string;
-      } else {
-        throw new Error(`all models failed: ${fallback.error}`);
-      }
     }
   }
 
@@ -163,6 +155,9 @@ export class RealLLMService implements ILLMService {
     maxTokens?: number,
     timeout?: number,
   ): AsyncGenerator<string> {
+    if (!Number.isInteger(maxTokens) || Number(maxTokens) <= 0) {
+      throw new Error(`模型输出配置无效: model=${modelName} 未传入有效的 maxTokens`);
+    }
     const runtimeModel = this.resolveRuntimeModel(modelName);
     const provider = runtimeModel.provider;
 
@@ -174,7 +169,7 @@ export class RealLLMService implements ILLMService {
         prompt,
         systemPrompt,
         temperature,
-        maxTokens,
+        maxTokens as number,
         timeout ?? 600_000,
       );
     } else {
@@ -185,7 +180,7 @@ export class RealLLMService implements ILLMService {
         provider,
         this.buildMessages(systemPrompt, prompt),
         temperature ?? 0.7,
-        maxTokens ?? 4096,
+        maxTokens as number,
         timeout ?? 600_000,
       );
     }
@@ -198,14 +193,17 @@ export class RealLLMService implements ILLMService {
     provider: string,
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     temperature: number,
-    maxTokens: number = 4096,
+    maxTokens: number,
     timeout: number = 600_000,
   ): AsyncGenerator<string> {
     const providerLabel = this.getProviderLabel(provider);
     const client = new OpenAI({
       apiKey,
       baseURL: this.normalizeOpenAIBaseUrl(baseUrl || this.getDefaultBaseUrl(provider), provider),
-      maxRetries: 0,
+      // Keep retries on the configured provider/model.  The SDK retries
+      // transport and transient HTTP failures before the higher-level JSON
+      // retry runs; it never changes the user's configured route.
+      maxRetries: 2,
       timeout,
     });
 
@@ -235,13 +233,16 @@ export class RealLLMService implements ILLMService {
     prompt: string,
     systemPrompt?: string,
     temperature?: number,
-    maxTokens: number = 4096,
+    maxTokens?: number,
     timeoutMs: number = 600_000,
   ): AsyncGenerator<string> {
+    if (!Number.isInteger(maxTokens) || Number(maxTokens) <= 0) {
+      throw new Error(`Claude 输出配置无效: model=${model} 未传入有效的 maxTokens`);
+    }
     const url = this.normalizeClaudeMessagesUrl(baseUrl);
     const body: Record<string, unknown> = {
       model,
-      max_tokens: maxTokens,
+      max_tokens: maxTokens as number,
       messages: [{ role: 'user', content: prompt }],
       stream: true,
     };
@@ -326,7 +327,11 @@ export class RealLLMService implements ILLMService {
     temperature?: number,
     maxTokens?: number,
     timeout?: number,
-  ): Promise<string> {
+    responseFormat: 'text' | 'json_object' = 'text',
+  ): Promise<ModelCallResult> {
+    if (!Number.isInteger(maxTokens) || Number(maxTokens) <= 0) {
+      throw new Error(`模型输出配置无效: model=${modelName} 未传入有效的 maxTokens`);
+    }
     const runtimeModel = this.resolveRuntimeModel(modelName);
     const provider = runtimeModel.provider;
     const userKey =
@@ -356,7 +361,7 @@ export class RealLLMService implements ILLMService {
     const temp = temperature ?? 0.7;
 
     if (provider === 'anthropic') {
-      return this.callClaude(
+      const content = await this.callClaude(
         apiKey,
         baseUrl,
         runtimeModel.apiModel,
@@ -366,6 +371,7 @@ export class RealLLMService implements ILLMService {
         maxTokens,
         timeout,
       );
+      return { content };
     }
 
     return this.callOpenAICompatible(
@@ -375,8 +381,9 @@ export class RealLLMService implements ILLMService {
       provider,
       messages,
       temp,
-      maxTokens,
+      maxTokens as number,
       timeout,
+      responseFormat,
     );
   }
 
@@ -387,9 +394,10 @@ export class RealLLMService implements ILLMService {
     provider: string,
     messages: Array<{ role: 'system' | 'user'; content: string }>,
     temperature: number,
-    maxTokens: number = 4096,
+    maxTokens: number,
     timeout: number = 180_000,  // 默认3分钟，复杂创作节点需要更长时间
-  ): Promise<string> {
+    responseFormat: 'text' | 'json_object' = 'text',
+  ): Promise<ModelCallResult> {
     const providerLabel = this.getProviderLabel(provider);
     const client = new OpenAI({
       apiKey,
@@ -397,7 +405,10 @@ export class RealLLMService implements ILLMService {
         baseUrl || this.getDefaultBaseUrl(provider),
         provider,
       ),
-      maxRetries: 0,
+      // See the streaming variant above. A fresh TCP/TLS connection can be
+      // reset by the upstream gateway even when the model configuration is
+      // valid, so give the same configured request two transport retries.
+      maxRetries: 2,
       timeout,
     });
 
@@ -407,19 +418,31 @@ export class RealLLMService implements ILLMService {
         messages: messages as any,
         temperature,
         max_tokens: maxTokens,
+        ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' as const } } : {}),
       });
 
-      return completion.choices?.[0]?.message?.content || '';
+      const choice = completion.choices?.[0];
+      return {
+        content: choice?.message?.content || '',
+        finishReason: choice?.finish_reason || undefined,
+      };
     } catch (err: any) {
       const status = err?.status ? `${err.status} ` : '';
       const message = err?.message || String(err);
       const errorBody = err?.error ? JSON.stringify(err.error, null, 2) : '';
+      const errorCode = err?.code || err?.cause?.code || '';
+      const causeMessage = err?.cause?.message || '';
       const usedBaseUrl = this.normalizeOpenAIBaseUrl(baseUrl || this.getDefaultBaseUrl(provider), provider);
       this.logger.error(`${providerLabel} API error: ${status}${message}`);
       if (errorBody) {
         this.logger.error(`${providerLabel} API error body: ${errorBody}`);
       }
-      this.logger.error(`${providerLabel} [debug] baseUrl=${usedBaseUrl}, model=${model}, apiKeyPrefix=${apiKey ? apiKey.substring(0, 6) : 'EMPTY'}`);
+      if (errorCode || causeMessage) {
+        this.logger.error(`${providerLabel} transport detail: code=${errorCode || 'unknown'}, cause=${causeMessage || 'unknown'}`);
+      }
+      // Endpoint and model are enough for diagnostics; never write any part
+      // of a user credential to logs.
+      this.logger.error(`${providerLabel} [debug] baseUrl=${usedBaseUrl}, model=${model}, apiKeyConfigured=${apiKey ? 'yes' : 'no'}`);
       throw new Error(`${providerLabel} API error: ${status}${message}`);
     }
   }
@@ -431,14 +454,17 @@ export class RealLLMService implements ILLMService {
     prompt: string,
     systemPrompt?: string,
     temperature?: number,
-    maxTokens: number = 4096,
+    maxTokens?: number,
     timeoutMs: number = 60_000,
   ): Promise<string> {
+    if (!Number.isInteger(maxTokens) || Number(maxTokens) <= 0) {
+      throw new Error(`Claude 输出配置无效: model=${model} 未传入有效的 maxTokens`);
+    }
     const url = this.normalizeClaudeMessagesUrl(baseUrl);
 
     const body: Record<string, unknown> = {
       model,
-      max_tokens: maxTokens,
+      max_tokens: maxTokens as number,
       messages: [{ role: 'user', content: prompt }],
     };
 
@@ -630,14 +656,16 @@ export class RealLLMService implements ILLMService {
   }
 
   private toResponse(
-    content: string,
+    result: ModelCallResult,
     model: string,
     request: LLMRequest,
     startTime: number,
   ): LLMResponse {
+    const content = result.content;
     return {
       content,
       model,
+      finishReason: result.finishReason,
       usage: {
         promptTokens: Math.ceil(request.prompt.length / 4),
         completionTokens: Math.ceil(content.length / 4),

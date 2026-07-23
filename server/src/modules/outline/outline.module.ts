@@ -6,9 +6,10 @@ import { OutlineController } from './outline.controller';
 import { OutlineService } from './outline.service';
 import { OutlineRepository } from '../../database/repositories/outline.repository';
 import { StateModule } from '../../state/state.module';
+import { RagModule } from '../../rag/rag.module';
 
 @Module({
-  imports: [StateModule],
+  imports: [StateModule, RagModule],
   controllers: [OutlineController],
   providers: [OutlineService, OutlineRepository],
   exports: [OutlineService],

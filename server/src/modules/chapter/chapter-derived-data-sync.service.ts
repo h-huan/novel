@@ -259,7 +259,7 @@ export class ChapterDerivedDataSyncService {
     if (!outline) return { status: 'pending', detail: 'Chapter is not linked to an outline; author review is required', issueCount: 0, blockingCount: 0, reviewIds: [], stateItemIds: [] };
     const issues: any[] = [];
     const requirements = [String(outline.content || ''), ...this.jsonStrings(outline.plot_points), ...this.jsonStrings(outline.scenes)].filter((v) => v.length >= 4);
-    for (const requirement of requirements.slice(0, 20)) {
+    for (const requirement of requirements) {
       if (!input.afterContent.includes(requirement)) issues.push({ type: 'missing_requirement', target: outline.id, requirement, old: input.beforeContent.includes(requirement) ? requirement : '', next: '', severity: 'medium', block: false });
     }
     return this.persistReviews(input, checksum, 'outline', issues);
@@ -332,8 +332,7 @@ export class ChapterDerivedDataSyncService {
       const response = await llm.generate({
         scenario: 'summary',
         temperature: 0.2,
-        maxTokens: 900,
-        prompt: `请为以下小说章节生成结构化但简洁的章节摘要。必须覆盖：核心事件、主要人物行动、明确状态变化、关系变化、重要地点、新增信息、伏笔动作、本章结尾状态。只输出摘要正文，不要虚构正文中不存在的信息，不要扩展为文学评论。\n\n章节正文：\n${input.afterContent.slice(0, 24000)}`,
+        prompt: `请为以下小说章节生成结构化但简洁的章节摘要。必须覆盖：核心事件、主要人物行动、明确状态变化、关系变化、重要地点、新增信息、伏笔动作、本章结尾状态。只输出摘要正文，不要虚构正文中不存在的信息，不要扩展为文学评论。\n\n章节正文：\n${input.afterContent}`,
       });
       const summary = response.content.trim();
       if (!summary) throw new Error('Summary model returned empty content');
@@ -474,7 +473,7 @@ export class ChapterDerivedDataSyncService {
       for (const batch of this.summaryBatches(level)) {
         const prompt = `基于以下${scope === 'volume' ? '章节' : '卷'}摘要生成聚合摘要。必须覆盖：${requirement}。只输出摘要，不得编造。\n\n${batch.join('\n\n')}`;
         if (prompt.length > 48000) throw new Error('Aggregate prompt exceeded 48000 characters');
-        const response = await llm.generate({ scenario: 'summary', temperature: 0.2, maxTokens: scope === 'volume' ? 1400 : 2000, prompt });
+        const response = await llm.generate({ scenario: 'summary', temperature: 0.2, prompt });
         if (!response.content.trim()) throw new Error('Aggregate summary model returned empty content');
         next.push(response.content.trim());
       }
@@ -602,7 +601,7 @@ export class ChapterDerivedDataSyncService {
         chapter_id, project_id, content_checksum, summary_sync_status, vector_sync_status,
         foreshadowing_sync_status, timeline_sync_status, outline_sync_status,
         needs_resync, needs_author_review, last_error, last_attempt_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chapter_id) DO UPDATE SET
         project_id = excluded.project_id,
         content_checksum = excluded.content_checksum,

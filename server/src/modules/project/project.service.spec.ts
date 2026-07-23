@@ -65,7 +65,7 @@ describe('ProjectService', () => {
       (repo.findById as any).mockReturnValue(mockRow);
       (repo.insert as any).mockImplementation(() => {});
 
-      const result = service.create({ title: '测试项目' });
+      const result = service.create({ title: '测试项目', targetWords: 200000 });
 
       expect(result.title).toBe('测试项目');
       expect(result.id).toBe('test-id');

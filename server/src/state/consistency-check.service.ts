@@ -52,10 +52,10 @@ export class ConsistencyCheckService {
     let chapters: Array<{ id: string; index: number; content: string }>;
     if (options.chapterIds && options.chapterIds.length > 0) {
       const placeholders = options.chapterIds.map(() => '?').join(',');
-      const stmt = db.prepare(`SELECT id, \`index\`, content FROM chapters WHERE project_id = ? AND \`index\` IN (${placeholders})`);
+      const stmt = db.prepare(`SELECT id, chapter_index AS \`index\`, content FROM chapters WHERE project_id = ? AND chapter_index IN (${placeholders})`);
       chapters = stmt.all(projectId, ...options.chapterIds) as Array<{ id: string; index: number; content: string }>;
     } else {
-      const stmt = db.prepare('SELECT id, `index`, content FROM chapters WHERE project_id = ? ORDER BY `index`');
+      const stmt = db.prepare('SELECT id, chapter_index AS `index`, content FROM chapters WHERE project_id = ? ORDER BY chapter_index');
       chapters = stmt.all(projectId) as Array<{ id: string; index: number; content: string }>;
     }
 
@@ -64,7 +64,7 @@ export class ConsistencyCheckService {
     const worldSetting = worldSettingStmt.get(projectId) as any;
 
     // 获取人物档案
-    const charactersStmt = db.prepare('SELECT id, name, traits, description FROM characters WHERE project_id = ?');
+    const charactersStmt = db.prepare('SELECT id, name, personality AS traits, background AS description FROM characters WHERE project_id = ?');
     const characters = charactersStmt.all(projectId) as Array<{ id: string; name: string; traits: string; description: string }>;
 
     // 逐章检查
@@ -120,11 +120,15 @@ export class ConsistencyCheckService {
     const checks: Array<any> = [];
 
     for (const character of characters) {
-      const traits = JSON.parse(character.traits || '[]');
+      const parsedTraits = this.safeJson(character.traits, []);
+      const traits = Array.isArray(parsedTraits)
+        ? parsedTraits.map(String)
+        : Object.entries(parsedTraits || {})
+          .filter(([, value]) => typeof value === 'string' || (typeof value === 'number' && value >= 0.6))
+          .map(([key, value]) => typeof value === 'string' ? value : key);
 
       // 检查人物性格是否一致
-      // TODO: 使用 LLM 进行深度检查
-      // 临时实现：简单关键词匹配
+      // 规则层负责可解释的确定性冲突；正文语义复查由写作质量与连续性门禁处理。
       const characterContent = this.extractCharacterContent(chapter.content, character.name);
 
       if (characterContent) {
@@ -160,21 +164,32 @@ export class ConsistencyCheckService {
     worldSetting: any,
   ): Promise<Array<any>> {
     const checks: Array<any> = [];
-
-    // TODO: 使用 LLM 检查世界观规则是否被违反
-    // 临时实现：简单检查
-    const rules = worldSetting.rules ? JSON.parse(worldSetting.rules) : [];
+    const rules = this.toRuleList(this.safeJson(worldSetting.rules, []));
 
     for (const rule of rules) {
-      // 检查是否有违反规则的描述
-      if (rule.content && chapter.content.includes(rule.content) === false) {
-        // 这里应该更复杂，需要 LLM 理解
-      }
+      const forbidden = rule.forbiddenWriting || rule.forbidden || rule.prohibitedContent || [];
+      const terms = (Array.isArray(forbidden) ? forbidden.map(String) : String(forbidden || '').split(/[、，,；;]/))
+        .map(item => item.trim()).filter(Boolean);
+      const hits = terms.filter(item => chapter.content.includes(item));
+      if (hits.length === 0) continue;
+      const isBlocking = rule.severity === 'high' || Boolean(rule.locked);
+      checks.push({
+        checkType: 'world_setting',
+        status: isBlocking ? 'error' : 'warning',
+        message: `第${chapter.index}章命中世界观禁写约束：${hits.join('、')}`,
+        severity: isBlocking ? 'high' : 'medium',
+        chapterIndex: chapter.index,
+        details: [{
+          field: rule.name || rule.title || '世界观规则',
+          expected: rule.content || rule.rule || `不得出现：${terms.join('、')}`,
+          actual: hits.join('、'),
+          suggestion: '修改正文，或由作者先更新并确认世界观规则后再复查。',
+        }],
+      });
     }
 
     return checks;
   }
-
   /**
    * 检查时间线一致性
    */
@@ -183,13 +198,27 @@ export class ConsistencyCheckService {
     allChapters: Array<{ id: string; index: number; content: string }>,
   ): Promise<Array<any>> {
     const checks: Array<any> = [];
+    const ordered = [...new Set(allChapters.map(item => item.index))].sort((a, b) => a - b);
+    const position = ordered.indexOf(chapter.index);
 
-    // TODO: 使用 LLM 检查时间线是否合理
-    // 临时实现：检查章节序号是否连续
+    if (position > 0 && ordered[position - 1] !== chapter.index - 1) {
+      checks.push({
+        checkType: 'timeline',
+        status: 'warning',
+        severity: 'medium',
+        chapterIndex: chapter.index,
+        message: `章节时间线存在序号缺口：第${ordered[position - 1]}章后直接到第${chapter.index}章`,
+        details: [{
+          field: 'chapter_index',
+          expected: String(ordered[position - 1] + 1),
+          actual: String(chapter.index),
+          suggestion: '确认是有意跳章，或补齐/重新排序章节。',
+        }],
+      });
+    }
 
     return checks;
   }
-
   /**
    * 检查情节逻辑一致性
    */
@@ -198,13 +227,46 @@ export class ConsistencyCheckService {
     db: any,
   ): Promise<Array<any>> {
     const checks: Array<any> = [];
+    const row = db.prepare('SELECT project_id, outline_id FROM chapters WHERE id = ?').get(chapter.id) as any;
 
-    // TODO: 使用 LLM 检查情节逻辑是否连贯
-    // 临时实现：检查伏笔是否回收
+    if (!row?.outline_id) {
+      checks.push({
+        checkType: 'plot_logic',
+        status: 'error',
+        severity: 'high',
+        chapterIndex: chapter.index,
+        message: `第${chapter.index}章正文没有关联章节大纲`,
+        details: [{
+          field: 'outline_id',
+          expected: '关联已确认的章节大纲',
+          actual: '未关联',
+          suggestion: '先创建或绑定章节大纲，再继续正文创作。',
+        }],
+      });
+    }
+
+    const overdue = db.prepare(`SELECT content, planned_recovery_chapter_index FROM foreshadowings
+      WHERE project_id = ? AND status IN ('buried','active','reminder')
+        AND planned_recovery_chapter_index IS NOT NULL AND planned_recovery_chapter_index < ?`
+    ).all(row?.project_id || '', chapter.index) as any[];
+    for (const item of overdue) {
+      checks.push({
+        checkType: 'plot_logic',
+        status: 'warning',
+        severity: 'medium',
+        chapterIndex: chapter.index,
+        message: `伏笔已超过计划回收章节：${item.content}`,
+        details: [{
+          field: 'foreshadowing',
+          expected: `第${item.planned_recovery_chapter_index}章前回收或重新排期`,
+          actual: `检查到第${chapter.index}章仍未回收`,
+          suggestion: '回收、取消，或由作者明确调整回收窗口。',
+        }],
+      });
+    }
 
     return checks;
   }
-
   /**
    * 保存检查结果到数据库
    */
@@ -264,6 +326,28 @@ export class ConsistencyCheckService {
     }
 
     return false;
+  }
+
+  private safeJson(value: unknown, fallback: any): any {
+    if (value === null || value === undefined || value === '') return fallback;
+    if (typeof value !== 'string') return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+
+  private toRuleList(value: unknown): Array<Record<string, any>> {
+    if (Array.isArray(value)) {
+      return value.map(item => typeof item === 'string' ? { content: item } : item).filter(Boolean);
+    }
+    if (value && typeof value === 'object') {
+      return Object.entries(value as Record<string, unknown>).map(([name, item]) =>
+        typeof item === 'string' ? { name, content: item } : { name, ...(item as Record<string, unknown>) },
+      );
+    }
+    return [];
   }
 
   /**

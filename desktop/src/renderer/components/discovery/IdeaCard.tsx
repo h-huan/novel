@@ -37,7 +37,7 @@ interface IdeaCardProps { idea: any; onClick: (idea: any) => void; }
 
 const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
   const isRawFallback = !!idea.raw && !idea.description && !idea.protagonist && !idea.setting && !idea.hook && !idea.angle;
-  const hasBody = idea.description || idea.coreConflict || idea.tone || idea.uniquePoint || idea.mainReversal || idea.estimatedWords || idea.protagonist || idea.setting || idea.raw;
+  const hasBody = idea.description || idea.coreConflict || idea.tone || idea.uniquePoint || idea.mainReversal || idea.estimatedWords || idea.scopeReason || idea.protagonist || idea.setting || idea.raw;
 
   return (
     <div style={s.card}>
@@ -106,11 +106,30 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
             </div>
           )}
           {idea.estimatedWords && (
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <div style={s.label}>📏 预估字数</div>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={s.label}>📏 动态建议篇幅</div>
               <span style={{ fontSize: '15px', color: '#e94560', fontWeight: 700 }}>
                 🔥 {typeof idea.estimatedWords === 'number' ? idea.estimatedWords.toLocaleString() + '字' : idea.estimatedWords}
               </span>
+              {idea.plannedChapters && <span style={{ fontSize: '12px', color: '#8a8aa0' }}>约 {idea.plannedChapters} 章</span>}
+            </div>
+          )}
+          {idea.scopeReason && (
+            <div style={s.field}>
+              <div style={s.label}>🧭 篇幅规划依据</div>
+              <div style={s.value}>{idea.scopeReason}</div>
+            </div>
+          )}
+          {Array.isArray(idea.scopeBreakdown) && idea.scopeBreakdown.length > 0 && (
+            <div style={s.field}>
+              <div style={s.label}>🧩 剧情线篇幅分配</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {idea.scopeBreakdown.map((item: any, index: number) => (
+                  <div key={`${item.arc || 'arc'}-${index}`} style={s.value}>
+                    <b style={{ color: '#c0c0d0' }}>{item.arc}</b> · {item.chapters}章：{item.reason}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {Array.isArray(idea.characters) && idea.characters.length > 0 && (

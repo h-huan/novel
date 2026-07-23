@@ -167,7 +167,7 @@ export class WorldSettingService {
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
     this.analyzeStateImpact(existing.project_id, id, '世界观资料修改影响分析', {
-      before: { name: existing.name, era: existing.era },
+      before: this.toResponse(existing),
       after: dto,
       priority: 'world_setting',
     });
@@ -177,7 +177,11 @@ export class WorldSettingService {
   remove(id: string): { success: boolean } {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
+    const before = this.toResponse(existing);
     this.repo.delete(id);
+    this.analyzeStateImpact(existing.project_id, id, '世界观删除影响分析', {
+      operation: 'remove', before, priority: 'world_setting', needsReview: true,
+    });
     return { success: true };
   }
 
@@ -189,7 +193,7 @@ export class WorldSettingService {
     if (!row) throw new NotFoundException(`WorldSetting ${id} not found`);
     const response = this.toResponse(row);
     this.analyzeStateImpact(existing.project_id, id, '世界观约束添加影响分析', {
-      before: { constraints: existing.constraints },
+      before: this.toResponse(existing),
       after: { constraints: row.constraints },
       constraintChange: `add_constraint: ${dto.category || 'unknown'}: ${(dto as any).rule || ''}`,
       priority: 'world_setting',
@@ -204,7 +208,7 @@ export class WorldSettingService {
     if (!row) throw new NotFoundException(`WorldSetting ${id} not found`);
     const response = this.toResponse(row);
     this.analyzeStateImpact(existing.project_id, id, '世界观约束删除影响分析', {
-      before: { constraints: existing.constraints },
+      before: this.toResponse(existing),
       after: { constraints: row.constraints },
       constraintChange: `remove_constraint: ${constraintId}`,
       priority: 'world_setting',
@@ -289,13 +293,7 @@ export class WorldSettingService {
 
       this.repo.update(row.id, updateData);
       this.analyzeStateImpact(projectId, row.id, '短篇世界观设定修改影响分析', {
-        before: {
-          storyPremise: row.story_premise,
-          era: row.era,
-          locations: row.locations,
-          socialRules: row.social_rules,
-          specialSettings: row.special_settings,
-        },
+        before: this.toResponse(row),
         after: dto,
         priority: 'world_setting',
       });
@@ -332,15 +330,11 @@ export class WorldSettingService {
 
   private analyzeStateImpact(projectId: string, id: string, summary: string, payload: Record<string, unknown>) {
     if (!this.stateItemService) return;
-    try {
-      this.stateItemService.analyzeImpact(projectId, {
+    this.stateItemService.analyzeImpactTracked(projectId, {
         targetType: 'world_setting',
         targetId: id,
         summary,
         payload: { ...payload, priority: 'world_setting', affects: ['character', 'outline', 'volume', 'chapter_plan', 'chapter'] },
-      });
-    } catch {
-      // 影响分析失败不能阻断资料保存
-    }
+    });
   }
 }

@@ -31,6 +31,11 @@ const SettingsPage: React.FC = () => {
   const [sceneMappings, setSceneMappings] = useState<Record<string, Record<string, string>>>({});
   const [fetchedModels, setFetchedModels] = useState<Array<{ id: string; name: string; provider: string; configured?: boolean }>>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [capabilities, setCapabilities] = useState<{ writing?: { available?: boolean }; embedding?: { available?: boolean; reason?: string }; readyForFullSync?: boolean }>({});
+  const [embeddingApiKey, setEmbeddingApiKey] = useState('');
+  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('https://api.openai.com/v1');
+  const [embeddingModel, setEmbeddingModel] = useState('text-embedding-3-small');
+  const [embeddingConfigured, setEmbeddingConfigured] = useState(false);
   // 偏好设置
   const [autoSaveInterval, setAutoSaveInterval] = useState(() => localStorage.getItem('prefs_autoSave') || '30');
   const [fontSize, setFontSize] = useState(() => localStorage.getItem('prefs_fontSize') || '15');
@@ -87,6 +92,15 @@ const SettingsPage: React.FC = () => {
     }).catch(() => {});
     // 自动获取模型列表
     fetchModels();
+    api.get('/routing/capabilities').then((res: any) => {
+      setCapabilities(res?.data || res || {});
+    }).catch(() => {});
+    api.get('/routing/embedding-config').then((res: any) => {
+      const data = res?.data || res || {};
+      setEmbeddingConfigured(Boolean(data.configured));
+      if (data.baseUrl) setEmbeddingBaseUrl(data.baseUrl);
+      if (data.model) setEmbeddingModel(data.model);
+    }).catch(() => {});
     // 获取场景模型配置
     api.get('/routing/scenario-models').then((res: any) => {
       const data = res?.data || res || {};
@@ -156,6 +170,31 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleSaveEmbedding = async () => {
+    if (!embeddingApiKey.trim() || !embeddingBaseUrl.trim() || !embeddingModel.trim()) {
+      showMessage('Embedding API Key、Base URL 和模型名称都必须填写');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res: any = await api.post('/routing/embedding-config', {
+        apiKey: embeddingApiKey.trim(),
+        baseUrl: embeddingBaseUrl.trim(),
+        model: embeddingModel.trim(),
+      });
+      const data = res?.data || res || {};
+      if (data.success === false) throw new Error(data.error || '保存失败');
+      setEmbeddingApiKey('');
+      setEmbeddingConfigured(true);
+      const caps: any = await api.get('/routing/capabilities');
+      setCapabilities(caps?.data || caps || {});
+      showMessage(`✓ 向量服务已验证并保存${data.dimensions ? `（${data.dimensions}维）` : ''}`);
+    } catch (err: any) {
+      showMessage(`Embedding 配置保存失败：${err.message}`);
+    }
+    setLoading(false);
+  };
+
   const selectStyle: React.CSSProperties = {
     padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none',
@@ -194,6 +233,24 @@ const SettingsPage: React.FC = () => {
       {/* ========= API Key / Token Plan Tab ========= */}
       <div style={{ display: tab === 'byok' ? 'block' : 'none' }}>
         <div>
+          <div style={{ marginBottom: '14px', padding: '10px 12px', borderRadius: '7px', background: capabilities.readyForFullSync ? 'rgba(46,204,113,0.10)' : 'rgba(245,158,11,0.10)', border: `1px solid ${capabilities.readyForFullSync ? 'rgba(46,204,113,0.24)' : 'rgba(245,158,11,0.24)'}`, color: capabilities.readyForFullSync ? '#8df0b2' : '#ffd58a', fontSize: '12px', lineHeight: 1.55 }}>
+            <strong>{capabilities.readyForFullSync ? 'AI 写作与同步已就绪' : 'AI 同步尚未就绪'}</strong>
+            <div>正文/摘要：{capabilities.writing?.available ? '可用' : '未配置'}；向量索引：{capabilities.embedding?.available ? '可用' : `未配置${capabilities.embedding?.reason ? `（${capabilities.embedding.reason}）` : ''}`}</div>
+          </div>
+          <div style={{ padding: '14px', marginBottom: '16px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px' }}>
+            <div style={{ color: '#eaeaea', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>向量索引（Embedding）</div>
+            <div style={{ color: embeddingConfigured ? '#8df0b2' : '#ffd58a', fontSize: '12px', marginBottom: '10px' }}>
+              {embeddingConfigured ? '已配置并验证真实向量服务' : '未配置。创建项目前必须配置，系统不会用假向量或跳过索引。'}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+              <input value={embeddingApiKey} onChange={e => setEmbeddingApiKey(e.target.value)} type="password" placeholder={embeddingConfigured ? '输入新 Key 可更新配置' : 'Embedding API Key'} style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea' }} />
+              <input value={embeddingModel} onChange={e => setEmbeddingModel(e.target.value)} placeholder="Embedding 模型名称" style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input value={embeddingBaseUrl} onChange={e => setEmbeddingBaseUrl(e.target.value)} placeholder="Embedding Base URL" style={{ flex: 1, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea' }} />
+              <button onClick={handleSaveEmbedding} disabled={loading} style={{ padding: '8px 16px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer' }}>{loading ? '正在验证…' : '验证并保存'}</button>
+            </div>
+          </div>
           <div style={{ marginBottom: '12px', color: '#8a8aa0', fontSize: '12px', lineHeight: 1.6 }}>
             添加 API Key，选择对应的 <strong>Token Plan</strong>（各平台预付费套餐）。系统自动按计划类型分配使用。
           </div>
@@ -256,7 +313,7 @@ const SettingsPage: React.FC = () => {
       <div style={{ display: tab === 'mode' ? 'block' : 'none' }}>
         <div>
           <div style={{ color: '#8a8aa0', fontSize: '12px', marginBottom: '14px', lineHeight: 1.6 }}>
-            切换路由模式或按场景指定具体模型。
+            先为当前模式选择日常模型；未在下表单独指定的 AI 任务都会实际使用它。下表仅用于覆盖指定任务。
           </div>
 
           {/* Mode Buttons */}
@@ -281,10 +338,32 @@ const SettingsPage: React.FC = () => {
             ))}
           </div>
 
+          <div style={{ marginBottom: '12px', padding: '12px 14px', backgroundColor: 'rgba(52, 211, 153, 0.06)', border: '1px solid rgba(52, 211, 153, 0.28)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: '#d1fae5', fontSize: '13px', fontWeight: 650 }}>日常模型</div>
+              <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '3px', lineHeight: 1.5 }}>未在“指定任务模型”中单独配置的所有 AI 调用，均使用此模型。</div>
+            </div>
+            <select
+              value={sceneMappings.daily?.[writingMode] || ''}
+              onChange={e => setSceneMappings(prev => ({ ...prev, daily: { ...(prev.daily || {}), [writingMode]: e.target.value } }))}
+              style={{ minWidth: '190px', padding: '7px 9px', borderRadius: '5px', color: '#d1fae5', backgroundColor: '#16213e', border: '1px solid rgba(52, 211, 153, 0.5)', fontFamily: 'inherit', cursor: 'pointer' }}
+            >
+              <option value="" style={{ backgroundColor: '#1a1a2e', color: '#eaeaea' }}>请选择日常模型</option>
+              {(fetchedModels.length > 0 ? fetchedModels : [
+                { id: 'deepseek-chat', name: 'DeepSeek-V3', provider: 'deepseek' },
+                { id: 'deepseek-reasoner', name: 'DeepSeek-R1', provider: 'deepseek' },
+                { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
+                { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic' },
+              ]).map(m => (
+                <option key={m.id} value={m.id} style={{ backgroundColor: '#1a1a2e', color: '#eaeaea' }}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Scene Model Table */}
           <div style={{ padding: '14px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#eaeaea' }}>各场景模型分配</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#eaeaea' }}>指定任务模型</span>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button onClick={fetchModels}
                   style={{
@@ -372,7 +451,7 @@ const SettingsPage: React.FC = () => {
           <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', color: '#8a8aa0', fontSize: '12px', lineHeight: 1.8 }}>
             当前模式：<strong style={{ color: writingMode === 'economy' ? '#2ecc71' : writingMode === 'normal' ? '#3498db' : writingMode === 'premium' ? '#e94560' : '#e94560' }}>
               {writingMode === 'economy' ? '💰 省钱' : writingMode === 'normal' ? '⚖️ 常规' : writingMode === 'premium' ? '🎲 高品质' : `🎲 ${writingMode}`}
-            </strong> · 已添加 {savedKeys.length} 个 Key · 场景模型配置在所有模式下均生效
+            </strong> · 日常模型：<strong style={{ color: '#6ee7b7' }}>{sceneMappings.daily?.[writingMode] || '未设置（沿用原有路由）'}</strong> · 已添加 {savedKeys.length} 个 Key
           </div>
         </div>
       </div>

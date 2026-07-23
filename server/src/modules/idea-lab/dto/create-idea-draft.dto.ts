@@ -1,7 +1,7 @@
 /**
  * 创建想法草稿 DTO
  */
-import { IsString, IsNotEmpty, IsOptional, IsNumber, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, IsIn, IsObject, Min } from 'class-validator';
 
 export class CreateIdeaDraftDto {
   @IsString()
@@ -20,9 +20,13 @@ export class CreateIdeaDraftDto {
   @IsIn(['zhihu', 'fanqie', 'qidian', 'douyin', 'xiaohongshu', 'custom', 'generic'])
   targetPlatform?: string = 'generic';
 
-  @IsOptional()
   @IsNumber()
-  targetWords?: number = 0;
+  @Min(1)
+  targetWords: number;
+
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>;
 
   @IsOptional()
   @IsString()

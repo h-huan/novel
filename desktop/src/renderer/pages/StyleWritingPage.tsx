@@ -68,6 +68,10 @@ const StyleWritingPage: React.FC = () => {
   };
 
   const handleGenerate = async () => {
+    if (!prompt.trim()) {
+      setOutput('请先输入需要润色的原文；该工具不会用示例内容代替你的故事。');
+      return;
+    }
     setLoading(true);
     try {
       let styleLabel = currentStyle?.label || '默认';
@@ -79,20 +83,22 @@ const StyleWritingPage: React.FC = () => {
         extraParams.subStyle = subStyle;
       }
 
-      // 调用后端写作模式API
-      const res = await api.post('/chain/generate', {
-        projectId: projectId || '1',
-        mode: 'semi_auto',
-        prompt: `【${styleLabel}风格】${prompt || '示例创作内容'}`,
+      // This is paragraph rewriting, not chapter generation. It must not enter
+      // the outline-bound body endpoint or create an unsynchronized chapter.
+      const res = await api.post('/chain/style-mix', {
+        primaryStyle: activeStyle || styleLabel,
+        secondaryStyles: mashupEnabled && subStyle ? [subStyle] : [],
+        content: prompt,
         ...extraParams,
       });
       const data = res as any;
-      setOutput(data.content || JSON.stringify(data, null, 2));
-    } catch {
-      const styleLabel = mashupEnabled && subStyle && currentSubStyle
-        ? `${currentStyle?.label}+${currentSubStyle?.label}`
-        : (currentStyle?.label || '默认');
-      setOutput(`【${styleLabel}风格】\n\n${prompt || '示例创作内容...'}\n\n（风格引擎已就绪）`);
+      if (data?.success === false || !String(data?.content || '').trim()) {
+        throw new Error(data?.error || '风格润色未返回可用文本');
+      }
+      setOutput(String(data.content));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '生成失败，未返回可验收正文';
+      setOutput(`生成失败：${message}`);
     }
     setLoading(false);
   };
@@ -171,7 +177,7 @@ const StyleWritingPage: React.FC = () => {
           width: '100%', padding: '12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: '8px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical',
           outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '120px',
-        }} placeholder="输入创作内容或描述..." />
+        }} placeholder="输入要按所选风格润色的已有段落…" />
 
       <button onClick={handleGenerate} disabled={loading}
         style={{
@@ -179,7 +185,7 @@ const StyleWritingPage: React.FC = () => {
           color: '#fff', fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
           fontFamily: 'inherit', width: 'fit-content', opacity: loading ? 0.6 : 1,
         }}>
-        {loading ? '生成中...' : `🎨 按${mashupEnabled && subStyle && currentSubStyle ? `${currentStyle?.label}+${currentSubStyle?.label}` : (currentStyle?.label || '默认')}风格生成`}
+        {loading ? '润色中...' : `🎨 按${mashupEnabled && subStyle && currentSubStyle ? `${currentStyle?.label}+${currentSubStyle?.label}` : (currentStyle?.label || '默认')}风格润色`}
       </button>
 
       {output && (

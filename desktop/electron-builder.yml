@@ -4,24 +4,25 @@ copyright: Copyright © 2026
 
 directories:
   output: dist-elec
-  buildResources: build
+  buildResources: packaging-resources
 
 files:
   - "dist/**/*"
+  - "dist-electron/**/*"
   - "package.json"
 
 extraResources:
-  - from: "../server/dist"
+  - from: "packaging-resources/server-runtime"
     to: "server"
     filter:
       - "**/*"
 
 win:
+  signAndEditExecutable: false
   target:
     - target: nsis
       arch:
         - x64
-  icon: build/icon.ico
 
 mac:
   target:

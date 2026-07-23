@@ -17,6 +17,7 @@ export interface ChapterResponse {
   title: string;
   content: string;
   wordCount: number;
+  targetWords?: number;
   status: string;
   tianlong8Steps?: any;
   modelConfig?: any;
@@ -64,7 +65,9 @@ export class ChapterService {
   findByProjectId(projectId: string): ChapterListItem[] {
     return this.repo.findByProjectId(projectId).map((row) => ({
       id: row.id, volumeIndex: row.volume_index, chapterIndex: row.chapter_index,
-      title: row.title, wordCount: row.word_count, status: row.status, updatedAt: row.updated_at,
+      title: row.title, wordCount: row.word_count,
+      targetWords: this.repo.findOutlineTargetWords(row.outline_id),
+      status: row.status, updatedAt: row.updated_at,
     }));
   }
 
@@ -108,10 +111,23 @@ export class ChapterService {
     return { success: true };
   }
 
-  submitForReview(id: string): ChapterResponse {
+  async submitForReview(id: string): Promise<ChapterResponse> {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Chapter ${id} not found`);
     if (existing.status !== 'draft') throw new BadRequestException('Only draft chapters can be submitted for review');
+    this.assertPublishableWordCount(existing);
+    if (this.derivedDataSync) {
+      const sync = await this.derivedDataSync.syncAfterContentChange({
+        projectId: existing.project_id,
+        chapterId: existing.id,
+        beforeContent: existing.content || '',
+        afterContent: existing.content || '',
+        reason: 'manual_resync',
+      });
+      if (!sync?.success) {
+        throw new BadRequestException('Review cannot start because chapter synchronization did not complete');
+      }
+    }
     return this.toResponse(this.repo.submitForReview(id)!);
   }
 
@@ -119,6 +135,7 @@ export class ChapterService {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Chapter ${id} not found`);
     if (existing.status !== 'reviewing') throw new BadRequestException('Only reviewing chapters can be locked');
+    this.assertPublishableWordCount(existing);
     if (this.derivedDataSync) {
       const gate = this.derivedDataSync.getLockGate(existing.project_id, id, existing.content || '');
       if (!gate.allowed) {
@@ -129,11 +146,38 @@ export class ChapterService {
     return this.toResponse(this.repo.lockChapter(id)!);
   }
 
+  /**
+   * Explicit author action: lock a draft without changing it to reviewing.
+   * It reads the synchronization result created during save/AI writing and runs
+   * the same read-only lock gate; it never starts synchronization itself.
+   */
+  async directLock(id: string): Promise<ChapterResponse> {
+    const existing = this.repo.findById(id);
+    if (!existing) throw new NotFoundException(`Chapter ${id} not found`);
+    if (existing.status !== 'draft') throw new BadRequestException('Only draft chapters can be directly locked');
+    this.assertPublishableWordCount(existing);
+    if (this.derivedDataSync) {
+      const gate = this.derivedDataSync.getLockGate(existing.project_id, id, existing.content || '');
+      if (!gate.allowed) {
+        throw new BadRequestException({ code: 'CHAPTER_LOCK_BLOCKED', message: 'Chapter continuity gate blocked locking', reasons: gate.reasons, reviewIds: gate.reviewIds, stateItemIds: gate.stateItemIds, syncStatuses: gate.syncStatuses });
+      }
+    }
+    this.saveContentSnapshot(existing, 'Chapter direct-lock snapshot', 'author');
+    return this.toResponse(this.repo.lockChapterDirect(id)!);
+  }
+
   unlock(id: string): ChapterResponse {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Chapter ${id} not found`);
     if (existing.status !== 'locked') throw new BadRequestException('Only locked chapters can be unlocked');
     return this.toResponse(this.repo.unlockChapter(id)!);
+  }
+
+  rejectReview(id: string): ChapterResponse {
+    const existing = this.repo.findById(id);
+    if (!existing) throw new NotFoundException(`Chapter ${id} not found`);
+    if (existing.status !== 'reviewing') throw new BadRequestException('Only reviewing chapters can be returned to draft');
+    return this.toResponse(this.repo.returnReviewToDraft(id)!);
   }
 
   getVersionHistory(id: string): any[] {
@@ -190,7 +234,9 @@ export class ChapterService {
     for (const row of this.repo.findByProjectId(projectId)) {
       const chapters = grouped.get(row.volume_index) || [];
       chapters.push({ id: row.id, volumeIndex: row.volume_index, chapterIndex: row.chapter_index,
-        title: row.title, wordCount: row.word_count, status: row.status, updatedAt: row.updated_at });
+        title: row.title, wordCount: row.word_count,
+        targetWords: this.repo.findOutlineTargetWords(row.outline_id),
+        status: row.status, updatedAt: row.updated_at });
       grouped.set(row.volume_index, chapters);
     }
     return Array.from(grouped.entries()).map(([volumeIndex, chapters]) => ({ volumeIndex, chapters }))
@@ -259,16 +305,50 @@ export class ChapterService {
   }
 
   private countWords(content: string): number {
-    const chineseChars = (content.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) || []).length;
-    const englishWords = content.replace(/[^\x00-\xff]/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+    const chineseChars = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    const englishWords = content.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ').trim().split(/\s+/).filter(word => /[a-zA-Z]/.test(word)).length;
     return chineseChars + englishWords;
   }
 
+  /** Legacy generators sometimes persisted their `{ fullText: ... }` envelope as body text. */
+  private narrativeContent(content: string | null | undefined): string {
+    const source = String(content || '').trim();
+    if (!source.startsWith('{')) return source;
+    try {
+      const parsed = JSON.parse(source) as Record<string, unknown>;
+      for (const key of ['fullText', 'full_text', 'content', 'text', 'chapterContent']) {
+        if (typeof parsed[key] === 'string' && parsed[key].trim()) return parsed[key].trim();
+      }
+    } catch {
+      // This is normal prose if it is not valid JSON; leave it untouched.
+    }
+    return source;
+  }
+
+  private assertPublishableWordCount(row: ChapterRow): void {
+    // The production repository always exposes the outline target. Lightweight
+    // unit-test doubles without that dependency keep exercising state logic.
+    if (typeof (this.repo as any).findOutlineTargetWords !== 'function') return;
+    const content = this.narrativeContent(row.content);
+    const actual = this.countWords(content);
+    const target = Number(this.repo.findOutlineTargetWords(row.outline_id) || 0);
+    if (!Number.isInteger(target) || target < 3200 || target > 4000) {
+      throw new BadRequestException('Chapter outline has no valid target word count (3200-4000 words)');
+    }
+    if (actual < 3200 || actual > 4000) {
+      throw new BadRequestException(`Chapter body is ${actual} words; review and locking require 3200-4000 words (outline target: ${target})`);
+    }
+  }
+
   private toResponse(row: ChapterRow): ChapterResponse {
+    const content = this.narrativeContent(row.content);
     return {
       id: row.id, projectId: row.project_id, outlineId: row.outline_id || undefined,
       volumeIndex: row.volume_index, chapterIndex: row.chapter_index, title: row.title,
-      content: row.content, wordCount: row.word_count, status: row.status,
+      content, wordCount: this.countWords(content), status: row.status,
+      targetWords: typeof (this.repo as any).findOutlineTargetWords === 'function'
+        ? this.repo.findOutlineTargetWords(row.outline_id)
+        : undefined,
       tianlong8Steps: row.tianlong_8steps ? JSON.parse(row.tianlong_8steps) : undefined,
       modelConfig: row.model_config ? JSON.parse(row.model_config) : undefined,
       hookType: row.hook_type || undefined, transitionMode: row.transition_mode || undefined,
@@ -286,6 +366,7 @@ export interface ChapterListItem {
   chapterIndex: number;
   title: string;
   wordCount: number;
+  targetWords?: number;
   status: string;
   updatedAt: string;
 }

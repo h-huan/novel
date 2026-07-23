@@ -46,7 +46,7 @@ const QualityStandardsPage: React.FC = () => {
       // 从 API 初始化分数（如果后端返回评分数据）
       const initialScores: Record<string, number> = {};
       data.forEach((s: QualityStandard) => {
-        // TODO: 从后端获取实际评分，暂时使用默认值
+        // 量表页提供人工微调基线；章节实际评分由正文质量分析页保存并展示。
         initialScores[s.key] = 0;
       });
       setScores(initialScores);

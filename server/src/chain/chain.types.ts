@@ -100,12 +100,15 @@ export interface LLMRequest {
   retryCount?: number;
   /** 角色（writer / reviewer / planner） */
   role?: string;
+  /** 要求兼容 OpenAI 协议的提供商返回严格 JSON 对象。 */
+  responseFormat?: 'text' | 'json_object';
 }
 
 /** LLM 调用响应 */
 export interface LLMResponse {
   content: string;
   model: string;
+  finishReason?: string;
   usage?: {
     promptTokens: number;
     completionTokens: number;

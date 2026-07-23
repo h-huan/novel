@@ -36,7 +36,7 @@ export class CreateOutlineDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
-  targetWords?: number = 3000;
+  targetWords?: number;
 
   @IsOptional()
   @IsArray()
@@ -135,6 +135,17 @@ export class SplitOutlineDto {
   @IsOptional()
   @IsNumber()
   splitPoint?: number;
+
+  @IsNumber()
+  originalTargetWords: number;
+
+  @IsNumber()
+  newTargetWords: number;
+}
+
+export class MergeOutlineDto {
+  @IsNumber()
+  targetWords: number;
 }
 
 export class InsertOutlineDto {
@@ -149,6 +160,9 @@ export class InsertOutlineDto {
   @IsOptional()
   @IsString()
   content?: string;
+
+  @IsNumber()
+  targetWords: number;
 }
 
 export class MoveOutlineOrderDto {
@@ -168,6 +182,10 @@ export class ContinueOutlineDto {
 
   @IsOptional()
   planning?: Record<string, unknown>;
+
+  @IsArray()
+  @IsNumber({}, { each: true })
+  chapterTargets: number[];
 }
 
 export class RecommendOutlinePlanDto {

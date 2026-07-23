@@ -14,6 +14,7 @@ export interface Chapter {
   title: string;
   content: string;
   wordCount: number;
+  targetWords?: number;
   status: ChapterStatus;
   chapterFunction?: ChapterFunctionType;
   goalArc?: GoalArcType;
@@ -48,6 +49,8 @@ export interface ChapterListItem {
   chapterIndex: number;
   title: string;
   wordCount: number;
+  /** 来自关联章节大纲的动态目标字数，不是项目级默认值。 */
+  targetWords?: number;
   status: ChapterStatus;
   updatedAt: Date;
 }

@@ -42,6 +42,11 @@ const CREATION_SOURCE_LABELS: Record<CreationSource, string> = {
   blank: '空白',
 };
 
+const CREATION_SOURCE_FALLBACKS: Record<string, string> = {
+  idea_discovery: '灵感发现',
+  inspiration_discovery: '灵感发现',
+};
+
 const TARGET_PLATFORM_LABELS: Record<TargetPlatform, string> = {
   zhihu: '知乎盐选',
   fanqie: '番茄',
@@ -91,6 +96,9 @@ const STATUS_TEXT_COLORS: Record<string, string> = {
 };
 
 const USER_STATUS_LABELS: Record<string, string> = {
+  creating: '资料生成中',
+  generation_failed: '资料待重新生成',
+  active: '可继续创作',
   idea: '构思中',
   world_building: '构思中',
   outlining: '构思中',
@@ -146,9 +154,11 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
   const statusLabel = USER_STATUS_LABELS[project.status] || project.status;
   const statusBgColor = STATUS_COLORS[project.status] || 'rgba(108,108,128,0.2)';
   const statusTextColor = STATUS_TEXT_COLORS[project.status] || '#6c6c80';
-  const creationLabel = CREATION_SOURCE_LABELS[project.creationSource] || project.creationSource;
+  const creationLabel = CREATION_SOURCE_LABELS[project.creationSource]
+    || CREATION_SOURCE_FALLBACKS[String(project.creationSource)]
+    || '作者创建';
   const platformLabel = TARGET_PLATFORM_LABELS[project.targetPlatform] || project.targetPlatform;
-  const stageLabel = WORKFLOW_STAGE_LABELS[project.currentWorkflowStage] || project.currentWorkflowStage;
+  const stageLabel = WORKFLOW_STAGE_LABELS[project.currentWorkflowStage] || '';
 
   return (
     <div
@@ -195,8 +205,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
 
       <div style={cardStyles.metaRow}>
         <span style={cardStyles.metaTag}>{creationLabel}</span>
-        <span style={cardStyles.metaDivider}>·</span>
-        <span style={cardStyles.metaTag}>{stageLabel}</span>
+        {stageLabel && <><span style={cardStyles.metaDivider}>·</span><span style={cardStyles.metaTag}>{stageLabel}</span></>}
         <span style={cardStyles.metaDivider}>·</span>
         <span style={cardStyles.metaTag}>{platformLabel}</span>
       </div>
@@ -393,7 +402,7 @@ const CREATION_SOURCE_OPTIONS: { value: CreationSource; label: string; desc: str
   {
     value: 'idea',
     label: '从想法开始',
-    desc: '适合你已经有一句模糊想法，AI 会通过追问帮你补全题材、主角、冲突、世界观和卖点。',
+    desc: '适合你已经有一句模糊想法，继续明确题材、主角、核心冲突、故事背景和卖点。',
   },
   {
     value: 'import',
@@ -1127,7 +1136,7 @@ const ProjectListPage: React.FC = () => {
           rawIdea: data.ideaSeed || '',
           projectType: data.type,
           targetPlatform: data.targetPlatform,
-          targetWords: data.targetWords || 0,
+          targetWords: data.targetWords,
           title: data.title || '',
           description: data.description || '',
         });

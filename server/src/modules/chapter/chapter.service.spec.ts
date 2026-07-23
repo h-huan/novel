@@ -33,7 +33,9 @@ describe('ChapterService', () => {
         return row;
       }), delete: vi.fn(), findByProjectId: vi.fn(() => []), findByVolumeChapter: vi.fn(),
       findByVolume: vi.fn(), lockChapter: vi.fn(() => { row = { ...row, status: 'locked' }; return row; }),
+      lockChapterDirect: vi.fn(() => { row = { ...row, status: 'locked' }; return row; }),
       unlockChapter: vi.fn(() => { row = { ...row, status: 'draft' }; return row; }),
+      returnReviewToDraft: vi.fn(() => { row = { ...row, status: 'draft' }; return row; }),
       submitForReview: vi.fn(() => { row = { ...row, status: 'reviewing' }; return row; }),
       updateContent: vi.fn(), getPrevChapter: vi.fn(), getStatusStats: vi.fn(), totalWordCount: vi.fn(),
     } as unknown as ChapterRepository;
@@ -89,6 +91,20 @@ describe('ChapterService', () => {
     expect(versionRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
       snapshot: '旧正文', checksum: checksum('旧正文'), change_summary: 'Chapter lock snapshot',
     }));
+  });
+
+  it('directly locks a draft without first submitting it for review', async () => {
+    const result = await service.directLock(row.id);
+    expect(result.status).toBe('locked');
+    expect(repo.submitForReview).not.toHaveBeenCalled();
+    expect((repo as any).lockChapterDirect).toHaveBeenCalledWith(row.id);
+    expect(derivedDataSync.syncAfterContentChange).not.toHaveBeenCalled();
+  });
+
+  it('returns a reviewing chapter to draft without attempting an unlock', () => {
+    row = { ...row, status: 'reviewing' };
+    expect(service.rejectReview(row.id).status).toBe('draft');
+    expect(repo.unlockChapter).not.toHaveBeenCalled();
   });
 
   it('does not duplicate a lock snapshot already stored as the latest version', async () => {
@@ -175,8 +191,24 @@ describe('ChapterService', () => {
     expect(repo.update).not.toHaveBeenCalled();
   });
 
-  it('submits and unlocks chapters through the existing state machine', () => {
-    expect(service.submitForReview(row.id).status).toBe('reviewing');
+  it('unwraps a legacy fullText envelope before returning manuscript content', () => {
+    row = { ...row, content: '{"fullText":"可阅读的正文"}', word_count: 999 };
+    const result = service.findOne(row.id);
+    expect(result.content).toBe('可阅读的正文');
+    expect(result.wordCount).toBe(6);
+  });
+
+  it('rejects review when the actual body is outside the required 3200-4000 range', async () => {
+    (repo as any).findOutlineTargetWords = vi.fn(() => 3200);
+    await expect(service.submitForReview(row.id)).rejects.toThrow('3200-4000 words');
+    expect(repo.submitForReview).not.toHaveBeenCalled();
+  });
+
+  it('submits and unlocks chapters through the existing state machine', async () => {
+    expect((await service.submitForReview(row.id)).status).toBe('reviewing');
+    expect(derivedDataSync.syncAfterContentChange).toHaveBeenCalledWith(expect.objectContaining({
+      chapterId: row.id, reason: 'manual_resync',
+    }));
     row = { ...row, status: 'locked' };
     expect(service.unlock(row.id).status).toBe('draft');
   });

@@ -18,12 +18,22 @@ function fixture(continuityService?: any) {
   syncUp(db);
   continuityUp(db);
   db.exec(`
+    CREATE TABLE projects (
+      id TEXT PRIMARY KEY, title TEXT, type TEXT, target_words INTEGER, target_platform TEXT,
+      platform_style TEXT, writing_style TEXT, settings TEXT
+    );
+    INSERT INTO projects (id,title,type,target_words,target_platform,platform_style,settings)
+      VALUES ('p','测试项目','long_novel',2000000,'qidian','qidian','{"genre":"悬疑","pov":"第三人称限知","chapterWordRange":{"min":3200,"max":4000},"structurePlanning":"dynamic_by_story_rhythm"}');
     CREATE TABLE chapters (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT, status TEXT NOT NULL DEFAULT 'draft',
       content TEXT DEFAULT '', checksum TEXT, volume_index INTEGER DEFAULT 1, chapter_index INTEGER DEFAULT 1
     )
     ;
     CREATE TABLE characters (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, identity TEXT);
+    CREATE TABLE character_extended_profiles (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, character_id TEXT NOT NULL UNIQUE,
+      short_term_goal TEXT, forbidden_writing TEXT, updated_at TEXT
+    );
     CREATE TABLE character_relationships (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, trust_score INTEGER NOT NULL DEFAULT 50,
       review_status TEXT NOT NULL DEFAULT 'pending', locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
@@ -55,9 +65,27 @@ function fixture(continuityService?: any) {
     CREATE TABLE plot_progress (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, emotional_beat TEXT, turning_points TEXT, needs_review INTEGER NOT NULL DEFAULT 1,
       reviewed_by TEXT, reviewed_at TEXT, updated_at TEXT
+    );
+    CREATE TABLE version_history (
+      id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, version INTEGER NOT NULL,
+      snapshot TEXT NOT NULL, checksum TEXT NOT NULL, change_summary TEXT, created_by TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE canonical_entity_sync_states (
+      project_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+      index_status TEXT NOT NULL DEFAULT 'pending', needs_resync INTEGER NOT NULL DEFAULT 1,
+      last_error TEXT, last_attempt_at TEXT, synced_at TEXT, updated_at TEXT,
+      PRIMARY KEY (project_id, entity_type, entity_id)
     )
   `);
-  return { db, service: new StateItemService({ getDb: () => db } as any, continuityService) };
+  const databaseService = {
+    getDb: () => db,
+    transaction: (fn: () => unknown) => {
+      db.exec('BEGIN');
+      try { const result = fn(); db.exec('COMMIT'); return result; }
+      catch (error) { db.exec('ROLLBACK'); throw error; }
+    },
+  };
+  return { db, service: new StateItemService(databaseService as any, continuityService) };
 }
 
 function addState(f: Fixture, id: string, status: string, targetType = 'character', targetId = 'hero') {
@@ -105,6 +133,53 @@ afterEach(() => {
 });
 
 describe('StateItemService impact actions', () => {
+  it('keeps all 350 confirmed facts and all related impacts without fixed truncation', () => {
+    const f = fixture();
+    for (let index = 0; index < 350; index += 1) addState(f, `fact-${index}`, 'confirmed', 'character', 'hero');
+
+    const context = f.service.buildWritingStateContext('p', 301);
+    const report = f.service.analyzeImpact('p', { targetType: 'character', targetId: 'hero', summary: '300+章设定修改' });
+
+    expect(context.confirmed).toHaveLength(350);
+    expect(context.contextText).toContain('fact-349 summary');
+    expect(report.items.filter((item: any) => item.impactType === 'may_make_confirmed_state_stale')).toHaveLength(350);
+  });
+
+  it('restores a canonical version and marks review plus index resync as pending', () => {
+    const f = fixture();
+    f.db.prepare(`INSERT INTO characters (id, project_id, name, identity) VALUES ('hero', 'p', '新名字', '新身份')`).run();
+    f.db.prepare(`INSERT INTO version_history (id, entity_type, entity_id, version, snapshot, checksum, created_at) VALUES ('v1', 'character', 'hero', 1, ?, 'old-checksum', '2000-01-01')`)
+      .run(JSON.stringify({ name: '旧名字', identity: '旧身份' }));
+
+    const result = f.service.restoreCanonicalVersion('p', 'character', 'hero', 1);
+
+    expect(f.db.prepare(`SELECT name, identity FROM characters WHERE id='hero'`).get()).toMatchObject({ name: '旧名字', identity: '旧身份' });
+    expect(result).toMatchObject({ restoredVersion: 1, needsReview: true, needsResync: true });
+    expect(f.db.prepare(`SELECT index_status, needs_resync FROM canonical_entity_sync_states WHERE project_id='p' AND entity_type='character' AND entity_id='hero'`).get())
+      .toMatchObject({ index_status: 'pending', needs_resync: 1 });
+    expect((f.db.prepare(`SELECT COUNT(*) AS count FROM state_impact_reports WHERE project_id='p'`).get() as any).count).toBe(1);
+  });
+
+  it('does not restore a version into an entity owned by another project', () => {
+    const f = fixture();
+    f.db.prepare(`INSERT INTO characters (id, project_id, name) VALUES ('hero', 'other', '新名字')`).run();
+    f.db.prepare(`INSERT INTO version_history (id, entity_type, entity_id, version, snapshot, checksum, created_at) VALUES ('v1', 'character', 'hero', 1, '{"name":"旧名字"}', 'checksum', '2000-01-01')`).run();
+    expect(() => f.service.restoreCanonicalVersion('p', 'character', 'hero', 1)).toThrow(NotFoundException);
+  });
+
+  it('restores a character extended profile instead of writing profile fields into the base row', () => {
+    const f = fixture();
+    f.db.prepare(`INSERT INTO characters (id, project_id, name) VALUES ('hero', 'p', '角色')`).run();
+    f.db.prepare(`INSERT INTO character_extended_profiles (id, project_id, character_id, short_term_goal, forbidden_writing) VALUES ('profile', 'p', 'hero', '新目标', '新禁忌')`).run();
+    f.db.prepare(`INSERT INTO version_history (id, entity_type, entity_id, version, snapshot, checksum, created_at) VALUES ('profile-v1', 'character', 'hero', 1, ?, 'profile-checksum', '2000-01-01')`)
+      .run(JSON.stringify({ short_term_goal: '旧目标', forbidden_writing: '旧禁忌' }));
+
+    f.service.restoreCanonicalVersion('p', 'character', 'hero', 1);
+
+    expect(f.db.prepare(`SELECT short_term_goal, forbidden_writing FROM character_extended_profiles WHERE character_id='hero'`).get())
+      .toMatchObject({ short_term_goal: '旧目标', forbidden_writing: '旧禁忌' });
+  });
+
   it('analyzes impact without making a confirmed state stale', () => {
     const f = fixture();
     addState(f, 'source', 'pending');

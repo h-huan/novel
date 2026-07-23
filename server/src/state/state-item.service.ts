@@ -38,7 +38,8 @@ export class StateItemService {
 
   list(projectId: string, query: { status?: string; targetType?: string; limit?: string | number } = {}) {
     const db = this.databaseService.getDb();
-    const limit = Math.min(Math.max(Number(query.limit || 200) || 200, 1), 500);
+    const limit = query.limit === undefined || query.limit === '' ? undefined : Number(query.limit);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new BadRequestException('limit must be a positive integer');
     const clauses = ['project_id = ?'];
     const params: any[] = [projectId];
 
@@ -51,12 +52,13 @@ export class StateItemService {
       params.push(query.targetType);
     }
 
-    const rows = db.prepare(`
+    const sql = `
       SELECT * FROM state_items
       WHERE ${clauses.join(' AND ')}
       ORDER BY updated_at DESC, created_at DESC
-      LIMIT ?
-    `).all(...params, limit) as any[];
+      ${limit === undefined ? '' : 'LIMIT ?'}
+    `;
+    const rows = db.prepare(sql).all(...params, ...(limit === undefined ? [] : [limit])) as any[];
 
     return rows.map(row => this.mapStateItem(row));
   }
@@ -338,13 +340,33 @@ export class StateItemService {
 
   buildWritingStateContext(projectId: string, chapterNumber?: number) {
     const db = this.databaseService.getDb();
+    const project = db.prepare('SELECT title, type, target_words, target_platform, platform_style, writing_style, settings FROM projects WHERE id = ?').get(projectId) as any;
+    if (!project) throw new Error(`项目 ${projectId} 不存在`);
+    let projectSettings: Record<string, unknown> = {};
+    try { projectSettings = JSON.parse(String(project.settings || '{}')); } catch { throw new Error('项目配置 settings 不是有效 JSON'); }
+    let writingStyle: unknown = project.writing_style || null;
+    if (typeof writingStyle === 'string') {
+      try { writingStyle = JSON.parse(writingStyle); } catch { /* 原始文本也是有效风格配置 */ }
+    }
+    const projectCard = {
+      title: project.title,
+      type: project.type,
+      targetWords: Number(project.target_words),
+      targetPlatform: project.target_platform || project.platform_style,
+      genre: projectSettings.genre || projectSettings.category || null,
+      targetAudience: projectSettings.targetAudience || projectSettings.targetReaders || null,
+      pov: projectSettings.pov || projectSettings.pointOfView || null,
+      writingStyle: projectSettings.style || writingStyle,
+      taboos: projectSettings.taboos || projectSettings.forbiddenContent || [],
+      publishingRhythm: projectSettings.publishingRhythm || projectSettings.publishRhythm || null,
+      planning: projectSettings,
+    };
     const rows = db.prepare(`
       SELECT * FROM state_items
       WHERE project_id = ? AND status IN ('confirmed', 'pending', 'conflict', 'stale')
       ORDER BY
         CASE status WHEN 'confirmed' THEN 1 WHEN 'pending' THEN 2 WHEN 'conflict' THEN 3 ELSE 4 END,
         updated_at DESC
-      LIMIT 120
     `).all(projectId) as any[];
 
     const grouped = {
@@ -355,10 +377,11 @@ export class StateItemService {
     };
 
     const contextSections = [
-      this.formatContextSection('【已确稿状态｜必须遵守】', grouped.confirmed.filter(item => item.authority === 'hard_fact').slice(0, 40)),
-      this.formatContextSection('【待确认状态｜可参考但不要写死】', grouped.pending.filter(item => item.authority === 'soft_candidate').slice(0, 25)),
-      this.formatContextSection('【冲突提醒｜需要避免】', grouped.conflict.filter(item => item.authority === 'warning').slice(0, 15)),
-      this.formatContextSection('【过期风险｜需要复核】', grouped.stale.filter(item => item.authority === 'warning').slice(0, 15)),
+      `【项目卡｜必须按配置执行】\n${JSON.stringify(projectCard, null, 2)}`,
+      this.formatContextSection('【已确稿状态｜必须遵守】', grouped.confirmed.filter(item => item.authority === 'hard_fact')),
+      this.formatContextSection('【待确认状态｜可参考但不要写死】', grouped.pending.filter(item => item.authority === 'soft_candidate')),
+      this.formatContextSection('【冲突提醒｜需要避免】', grouped.conflict.filter(item => item.authority === 'warning')),
+      this.formatContextSection('【过期风险｜需要复核】', grouped.stale.filter(item => item.authority === 'warning')),
     ].filter(Boolean);
 
     const legacy = this.buildLegacyConfirmedContext(projectId, chapterNumber, grouped.pending);
@@ -369,8 +392,9 @@ export class StateItemService {
       conflict: grouped.conflict,
       stale: grouped.stale,
       pendingTotal: grouped.pending.length,
-      pendingSummary: grouped.pending.slice(0, 10).map(item => `${item.targetLabel}: ${item.summary}`),
+      pendingSummary: grouped.pending.map(item => `${item.targetLabel}: ${item.summary}`),
       stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。若提示角色不会自然做出某选择, 必须补充动机、事件或过渡剧情。',
+      projectCard,
     };
   }
 
@@ -394,7 +418,6 @@ export class StateItemService {
       WHERE project_id = ? AND id != IFNULL(?, '') AND status IN ('pending', 'confirmed')
         AND (target_type = ? OR IFNULL(target_id, '') = IFNULL(?, ''))
       ORDER BY updated_at DESC
-      LIMIT 30
     `).all(projectId, body.sourceStateItemId || '', targetType, targetId) as any[];
 
     const items: any[] = related.map(row => ({
@@ -468,14 +491,196 @@ export class StateItemService {
     return this.getImpactReport(projectId, reportId);
   }
 
-  listImpactReports(projectId: string, limit = 100) {
+  /**
+   * Persist the impact-analysis lifecycle beside RAG sync state. A canonical
+   * edit remains saved when analysis fails, but the failure is never hidden:
+   * State Center can display and retry the exact entity.
+   */
+  analyzeImpactTracked(projectId: string, body: {
+    sourceStateItemId?: string;
+    targetType?: string;
+    targetId?: string;
+    summary?: string;
+    payload?: Record<string, unknown>;
+    createdBy?: string;
+  }) {
+    const targetType = this.normalizeTargetType(body.targetType || 'state');
+    const targetId = body.targetId || body.sourceStateItemId || 'project';
+    const syncType = `impact_${targetType}`;
+    this.saveCanonicalVersion(targetType, targetId, body.payload?.before, body.summary || '人工修改前快照', body.createdBy || 'author');
+    this.writeImpactSync(projectId, syncType, targetId, 'pending', true, null, null);
+    try {
+      const report = this.analyzeImpact(projectId, body);
+      const syncedAt = new Date().toISOString();
+      this.writeImpactSync(projectId, syncType, targetId, 'completed', false, null, syncedAt);
+      return { report, sync: { entityType: syncType, entityId: targetId, indexStatus: 'completed', needsResync: false } };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.writeImpactSync(projectId, syncType, targetId, 'warning', true, message, null);
+      this.logger.warn(`Impact analysis pending retry: ${syncType}/${targetId}: ${message}`);
+      return { report: null, sync: { entityType: syncType, entityId: targetId, indexStatus: 'warning', needsResync: true, lastError: message } };
+    }
+  }
+
+  private writeImpactSync(
+    projectId: string,
+    entityType: string,
+    entityId: string,
+    status: string,
+    needsResync: boolean,
+    error: string | null,
+    syncedAt: string | null,
+  ) {
     const db = this.databaseService.getDb();
+    const table = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='canonical_entity_sync_states'`).get();
+    if (!table) return;
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO canonical_entity_sync_states
+        (project_id, entity_type, entity_id, index_status, needs_resync, last_error, last_attempt_at, synced_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, entity_type, entity_id) DO UPDATE SET
+        index_status=excluded.index_status, needs_resync=excluded.needs_resync,
+        last_error=excluded.last_error, last_attempt_at=excluded.last_attempt_at,
+        synced_at=COALESCE(excluded.synced_at, canonical_entity_sync_states.synced_at), updated_at=excluded.updated_at
+    `).run(projectId, entityType, entityId, status, needsResync ? 1 : 0, error, now, syncedAt, now);
+  }
+
+  private saveCanonicalVersion(entityType: string, entityId: string, snapshot: unknown, summary: string, createdBy: string) {
+    if (snapshot === undefined || snapshot === null || !entityId) return;
+    const db = this.databaseService.getDb();
+    const serialized = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot);
+    const checksum = createHash('sha256').update(serialized, 'utf8').digest('hex');
+    const latest = db.prepare(`SELECT version, checksum FROM version_history WHERE entity_type=? AND entity_id=? ORDER BY version DESC LIMIT 1`).get(entityType, entityId) as any;
+    if (latest?.checksum === checksum) return;
+    db.prepare(`INSERT INTO version_history (id,entity_type,entity_id,version,snapshot,checksum,change_summary,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      randomUUID(), entityType, entityId, Number(latest?.version || 0) + 1, serialized, checksum, summary, createdBy, new Date().toISOString(),
+    );
+  }
+
+  listCanonicalVersions(entityType: string, entityId: string) {
+    return this.databaseService.getDb().prepare(`
+      SELECT id,entity_type AS entityType,entity_id AS entityId,version,snapshot,checksum,
+             change_summary AS changeSummary,created_by AS createdBy,created_at AS createdAt
+      FROM version_history WHERE entity_type=? AND entity_id=? ORDER BY version DESC
+    `).all(this.normalizeTargetType(entityType), entityId).map((row: any) => ({ ...row, snapshot: this.parseJson(row.snapshot, row.snapshot) }));
+  }
+
+  restoreCanonicalVersion(projectId: string, entityType: string, entityId: string, version: number) {
+    if (!Number.isInteger(version) || version < 1) throw new BadRequestException('Canonical version must be a positive integer');
+    const db = this.databaseService.getDb();
+    const normalizedType = this.normalizeTargetType(entityType);
+    const versionRow = db.prepare(`
+      SELECT * FROM version_history WHERE entity_type = ? AND entity_id = ? AND version = ?
+    `).get(normalizedType, entityId, version) as any;
+    if (!versionRow) throw new NotFoundException(`Canonical version not found: ${normalizedType}/${entityId}/v${version}`);
+
+    const snapshot = this.parseJson<Record<string, unknown>>(versionRow.snapshot, {});
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      throw new BadRequestException('Canonical version snapshot is invalid');
+    }
+    const target = this.resolveCanonicalRestoreTarget(projectId, normalizedType, entityId, snapshot);
+    if (!target) {
+      if (this.canonicalVersionTable(normalizedType)) throw new NotFoundException(`Canonical target not found in project: ${normalizedType}/${entityId}`);
+      throw new BadRequestException(`Canonical restore is unsupported for type: ${normalizedType}`);
+    }
+    const { table, entityKey, columns, current } = target;
+    if (!current) throw new NotFoundException(`Canonical target not found in project: ${normalizedType}/${entityId}`);
+    if (Number(current.locked || 0) === 1 || String(current.status || '') === 'locked') {
+      throw new BadRequestException(`Cannot restore locked canonical target: ${entityId}`);
+    }
+
+    const excluded = new Set(['id', 'projectId', 'project_id', 'createdAt', 'created_at', 'updatedAt', 'updated_at', 'version']);
+    const updates: Array<[string, unknown]> = [];
+    for (const [key, value] of Object.entries(snapshot)) {
+      if (excluded.has(key) || value === undefined) continue;
+      const column = key.includes('_') ? key : key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+      if (!columns.has(column)) continue;
+      const stored = value !== null && typeof value === 'object'
+        ? JSON.stringify(value)
+        : typeof value === 'boolean' ? (value ? 1 : 0) : value;
+      updates.push([column, stored]);
+    }
+    if (columns.has('updated_at')) updates.push(['updated_at', new Date().toISOString()]);
+    if (columns.has('version')) updates.push(['version', Number(current.version || 0) + 1]);
+    if (!updates.length) throw new BadRequestException('Canonical version contains no restorable fields');
+
+    this.databaseService.transaction(() => {
+      const assignments = updates.map(([column]) => `"${column}" = ?`).join(', ');
+      db.prepare(`UPDATE ${table} SET ${assignments} WHERE "${entityKey}" = ?`).run(...updates.map(([, value]) => value as any), entityId);
+    });
+
+    const restored = db.prepare(`SELECT * FROM ${table} WHERE "${entityKey}" = ?`).get(entityId) as any;
+    const impact = this.analyzeImpactTracked(projectId, {
+      targetType: normalizedType,
+      targetId: entityId,
+      summary: `${normalizedType} restored to version ${version}`,
+      payload: {
+        operation: 'version_restore',
+        restoredVersion: version,
+        before: current,
+        after: snapshot,
+        affects: ['writing_context', 'outline', 'chapter_plan', 'chapter', 'rag_index'],
+        needsReview: true,
+      },
+      createdBy: 'manual-version-restore',
+    });
+    this.writeImpactSync(projectId, normalizedType, entityId, 'pending', true, 'Version restored; canonical index resync required', null);
+    return { entityType: normalizedType, entityId, restoredVersion: version, restored, impact, needsReview: true, needsResync: true };
+  }
+
+  private canonicalVersionTable(entityType: string): string | null {
+    const tables: Record<string, string> = {
+      character: 'characters',
+      world_setting: 'world_settings',
+      outline: 'outlines',
+      volume: 'outlines',
+      chapter_plan: 'outlines',
+      foreshadowing: 'foreshadowings',
+      timeline_state: 'timelines',
+      timeline_event: 'timeline_events',
+      organization: 'organizations',
+      map_point: 'map_points',
+    };
+    return tables[entityType] || null;
+  }
+
+  private resolveCanonicalRestoreTarget(
+    projectId: string,
+    entityType: string,
+    entityId: string,
+    snapshot: Record<string, unknown>,
+  ): { table: string; entityKey: string; columns: Set<string>; current: any } | null {
+    const db = this.databaseService.getDb();
+    const base = this.canonicalVersionTable(entityType);
+    const candidates: Array<{ table: string; entityKey: string }> = [];
+    if (base) candidates.push({ table: base, entityKey: 'id' });
+    if (entityType === 'character') candidates.push({ table: 'character_extended_profiles', entityKey: 'character_id' });
+    if (entityType === 'world_setting') candidates.push({ table: 'world_system_profiles', entityKey: 'world_setting_id' });
+    if (entityType === 'map_point') candidates.push({ table: 'location_knowledge_profiles', entityKey: 'map_point_id' });
+    const mappedKeys = Object.keys(snapshot).map(key => key.includes('_') ? key : key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase());
+    return candidates.map(candidate => {
+      const exists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(candidate.table);
+      if (!exists) return null;
+      const columns = new Set((db.prepare(`PRAGMA table_info(${candidate.table})`).all() as Array<{ name: string }>).map(column => column.name));
+      const current = candidate.table === 'timeline_events'
+        ? db.prepare(`SELECT event.* FROM timeline_events event JOIN timelines timeline ON timeline.id = event.timeline_id WHERE timeline.project_id = ? AND event.id = ?`).get(projectId, entityId)
+        : db.prepare(`SELECT * FROM ${candidate.table} WHERE project_id = ? AND "${candidate.entityKey}" = ?`).get(projectId, entityId);
+      if (!current) return null;
+      const score = mappedKeys.filter(key => columns.has(key) && !['id', 'project_id', candidate.entityKey].includes(key)).length;
+      return { ...candidate, columns, current, score };
+    }).filter(Boolean).sort((a: any, b: any) => b.score - a.score)[0] as any || null;
+  }
+
+  listImpactReports(projectId: string, limit?: number) {
+    const db = this.databaseService.getDb();
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new BadRequestException('limit must be a positive integer');
     const rows = db.prepare(`
       SELECT * FROM state_impact_reports
       WHERE project_id = ?
       ORDER BY created_at DESC
-      LIMIT ?
-    `).all(projectId, Math.min(Math.max(limit, 1), 300)) as any[];
+      ${limit === undefined ? '' : 'LIMIT ?'}
+    `).all(projectId, ...(limit === undefined ? [] : [limit])) as any[];
     return rows.map(row => this.mapImpactReport(row));
   }
 
@@ -841,31 +1046,42 @@ export class StateItemService {
     const sections: string[] = [];
 
     try {
-      const characters = db.prepare(`
+      const characterStateColumns = new Set(
+        (db.prepare('PRAGMA table_info(character_states)').all() as Array<{ name: string }>).map(column => column.name),
+      );
+      const canReadCharacterSnapshots = ['character_id', 'states_json', 'change_summary', 'snapshot_order'].every(
+        column => characterStateColumns.has(column),
+      );
+      const characters = canReadCharacterSnapshots ? db.prepare(`
         SELECT cs.character_id, c.name, cs.states_json, cs.change_summary
         FROM character_states cs
         LEFT JOIN characters c ON c.id = cs.character_id
         WHERE cs.project_id = ? AND COALESCE(cs.needs_review, 0) = 0
         ORDER BY cs.character_id, cs.snapshot_order DESC
-      `).all(projectId) as any[];
+      `).all(projectId) as any[] : [];
       const seen = new Set<string>();
       const latest = characters.filter(row => {
         if (seen.has(row.character_id) || pendingKeys.has(`character:${row.character_id}`)) return false;
         seen.add(row.character_id);
         return true;
-      }).slice(0, 12);
+      });
       if (latest.length) {
         sections.push('【旧状态快照: 已确稿角色】');
         sections.push(latest.map(row => `- ${row.name || row.character_id}: ${JSON.stringify(this.parseJson(row.states_json, {})).slice(0, 220)}${row.change_summary ? `; ${row.change_summary}` : ''}`).join('\n'));
       }
 
-      const plotRows = db.prepare(`
+      const plotColumns = new Set(
+        (db.prepare('PRAGMA table_info(plot_progress)').all() as Array<{ name: string }>).map(column => column.name),
+      );
+      const canReadPlotSnapshots = ['chapter_index', 'main_goal_progress', 'emotional_beat', 'turning_points'].every(
+        column => plotColumns.has(column),
+      );
+      const plotRows = canReadPlotSnapshots ? db.prepare(`
         SELECT chapter_index, main_goal_progress, emotional_beat, turning_points
         FROM plot_progress
         WHERE project_id = ? AND chapter_index < ? AND COALESCE(needs_review, 0) = 0
         ORDER BY chapter_index DESC
-        LIMIT 8
-      `).all(projectId, chapterNumber || 999999) as any[];
+      `).all(projectId, chapterNumber || 999999) as any[] : [];
       if (plotRows.length) {
         sections.push('【旧状态快照: 已确稿剧情进度】');
         sections.push(plotRows.map(row => `- 第${row.chapter_index}章: 主线${row.main_goal_progress || 0}%; ${row.emotional_beat || ''}; 转折${this.parseJson(row.turning_points, []).join('、') || '无'}`).join('\n'));
@@ -1005,7 +1221,6 @@ export class StateItemService {
         CASE WHEN status = 'locked' THEN 0 ELSE 1 END,
         volume_index ASC,
         chapter_index ASC
-      LIMIT 40
     `).all(projectId) as any[];
     if (!rows.length) return [];
 
@@ -1020,7 +1235,6 @@ export class StateItemService {
     const rank = priorityRank[targetType] || 30;
     return rows
       .filter(row => row.status === 'locked' || rank >= 50)
-      .slice(0, 12)
       .map(row => {
         const locked = row.status === 'locked';
         return {

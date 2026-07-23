@@ -31,8 +31,33 @@ export class CreateForeshadowingDto {
   plannedRecoveryChapterIndex?: number;
 
   @IsOptional()
+  @IsNumber()
+  recoveryWindowStart?: number;
+
+  @IsOptional()
+  @IsNumber()
+  recoveryWindowEnd?: number;
+
+  @IsOptional()
+  @IsString()
+  evidenceText?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['low', 'medium', 'high'])
+  riskLevel?: 'low' | 'medium' | 'high';
+
+  @IsOptional()
   @IsString()
   plannedRecoveryAt?: string;
+
+  @IsOptional()
+  @IsString()
+  recoveryCondition?: string;
+
+  @IsOptional()
+  @IsString()
+  payoffDescription?: string;
 
   @IsOptional()
   @IsArray()
@@ -69,6 +94,31 @@ export class UpdateForeshadowingDto {
   @IsOptional()
   @IsNumber()
   plannedRecoveryChapterIndex?: number;
+
+  @IsOptional()
+  @IsNumber()
+  recoveryWindowStart?: number;
+
+  @IsOptional()
+  @IsNumber()
+  recoveryWindowEnd?: number;
+
+  @IsOptional()
+  @IsString()
+  evidenceText?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['low', 'medium', 'high'])
+  riskLevel?: 'low' | 'medium' | 'high';
+
+  @IsOptional()
+  @IsString()
+  recoveryCondition?: string;
+
+  @IsOptional()
+  @IsString()
+  payoffDescription?: string;
 }
 
 export class RecoverForeshadowingDto {

@@ -35,6 +35,12 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
     super(databaseService, 'chapters');
   }
 
+  findOutlineTargetWords(outlineId: string | null): number | undefined {
+    if (!outlineId) return undefined;
+    const row = this.db.prepare('SELECT target_words FROM outlines WHERE id = ?').get(outlineId) as { target_words?: number } | undefined;
+    return row?.target_words == null ? undefined : Number(row.target_words);
+  }
+
   /**
    * 鎸夐」鐩甀D鏌ヨ
    */
@@ -76,7 +82,24 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
     this.db.prepare(`
       UPDATE chapters SET status = 'locked', locked_at = ?, updated_at = ? WHERE id = ? AND status = 'reviewing'
     `).run(now, now, id);
-    return this.findById(id);
+    const chapter = this.findById(id);
+    if (chapter?.status === 'locked' && chapter.outline_id) {
+      this.db.prepare(`UPDATE outlines SET status = 'locked', updated_at = ? WHERE id = ?`).run(now, chapter.outline_id);
+    }
+    return chapter;
+  }
+
+  /** Lock a draft directly after the service has completed required synchronization and gates. */
+  lockChapterDirect(id: string): ChapterRow | undefined {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE chapters SET status = 'locked', locked_at = ?, updated_at = ? WHERE id = ? AND status = 'draft'
+    `).run(now, now, id);
+    const chapter = this.findById(id);
+    if (chapter?.status === 'locked' && chapter.outline_id) {
+      this.db.prepare(`UPDATE outlines SET status = 'locked', updated_at = ? WHERE id = ?`).run(now, chapter.outline_id);
+    }
+    return chapter;
   }
 
   /**
@@ -86,6 +109,18 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
     const now = new Date().toISOString();
     this.db.prepare(`
       UPDATE chapters SET status = 'draft', locked_at = NULL, updated_at = ? WHERE id = ? AND status = 'locked'
+    `).run(now, id);
+    const chapter = this.findById(id);
+    if (chapter?.status === 'draft' && chapter.outline_id) {
+      this.db.prepare(`UPDATE outlines SET status = 'planned', updated_at = ? WHERE id = ?`).run(now, chapter.outline_id);
+    }
+    return chapter;
+  }
+
+  returnReviewToDraft(id: string): ChapterRow | undefined {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE chapters SET status = 'draft', updated_at = ? WHERE id = ? AND status = 'reviewing'
     `).run(now, id);
     return this.findById(id);
   }

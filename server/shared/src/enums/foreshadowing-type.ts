@@ -9,6 +9,9 @@ export type ForeshadowingType = (typeof ForeshadowingTypeEnum)[keyof typeof Fore
 
 export const ForeshadowingStatus = {
   BURIED: 'buried',
+  ACTIVE: 'active',
+  REMINDER: 'reminder',
+  /** Legacy status retained for existing projects and imports. */
   PENDING: 'pending',
   RECOVERED: 'recovered',
   CANCELLED: 'cancelled',

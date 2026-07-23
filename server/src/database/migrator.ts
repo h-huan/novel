@@ -56,7 +56,7 @@ export class Migrator {
 
     const files = fs
       .readdirSync(migDir)
-      .filter((f) => /^\d+_.*\.(ts|js)$/.test(f))
+      .filter((f) => /^\d+_.*\.(ts|js)$/.test(f) && !f.endsWith('.d.ts') && !f.includes('.spec.'))
       .sort();
 
     for (const file of files) {

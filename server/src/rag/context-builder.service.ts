@@ -192,7 +192,7 @@ export class ContextBuilderService {
     ];
 
     if (options.stage === 'drafting') {
-      parts.push('6. 输出字数控制在3000-5000字之间');
+      parts.push('6. 输出字数严格采用调用方提供的项目卡/章节目标，不得使用固定篇幅');
       parts.push('7. 章节结尾设置悬念或钩子');
     }
 

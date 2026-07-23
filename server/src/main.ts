@@ -69,7 +69,7 @@ function getLogLevels(): Array<'log' | 'error' | 'warn' | 'debug' | 'verbose'> {
   }
 }
 
-async function bootstrap() {
+export async function bootstrap(options: { port?: number; host?: string; writePortFile?: boolean } = {}): Promise<NestFastifyApplication> {
   const logLevels = getLogLevels();
 
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -91,6 +91,9 @@ async function bootstrap() {
       logger: logLevels,
     },
   );
+  // Make SIGTERM/SIGINT close database and other module resources. This is
+  // required for repeatable local and Playwright E2E runs.
+  app.enableShutdownHooks();
 
   // CORS 配置 (本地开发)
   app.enableCors({
@@ -126,31 +129,17 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   // 启动服务 — 端口自动递增，避免 EADDRINUSE
-  const basePort = parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
-  const host = process.env.HOST ?? '127.0.0.1';
+  const basePort = options.port ?? parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
+  const host = options.host ?? process.env.HOST ?? '127.0.0.1';
 
-  let port = basePort;
-  const maxRetries = 10;
-  let started = false;
-
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      await app.listen(port, host);
-      started = true;
-      break;
-    } catch (err: any) {
-      if (err.code === 'EADDRINUSE' && i < maxRetries - 1) {
-        console.warn(`[NestJS] Port ${port} occupied, trying ${port + 1}...`);
-        port++;
-      } else {
-        throw err;
-      }
+  const port = basePort;
+  try {
+    await app.listen(port, host);
+  } catch (err: any) {
+    if (err?.code === 'EADDRINUSE') {
+      throw new Error(`端口 ${host}:${port} 已被占用。桌面端只会连接现有服务，不会启动第二个服务；请停止重复启动的服务后再试。`);
     }
-  }
-
-  if (!started) {
-    console.error(`[NestJS] Failed to bind to any port from ${basePort} to ${basePort + maxRetries - 1}`);
-    process.exit(1);
+    throw err;
   }
 
   // 启动后检查 ChromaDB 状态（静默，仅在异常时输出 warning）
@@ -169,16 +158,21 @@ async function bootstrap() {
 
   // 将实际端口写入文件，供 Vite 代理自动发现
   // 使用 process.cwd() 确保文件始终写在 server/ 根目录下
-  try {
-    const portFile = path.resolve(process.cwd(), '.port');
-    fs.writeFileSync(portFile, String(port), 'utf8');
-    console.log(`[NestJS] Port written to .port: ${port}`);
-  } catch (e) {
-    console.warn('[NestJS] Failed to write .port file:', e);
+  if (options.writePortFile !== false) {
+    try {
+      const portFile = path.resolve(process.cwd(), '.port');
+      fs.writeFileSync(portFile, String(port), 'utf8');
+      console.log(`[NestJS] Port written to .port: ${port}`);
+    } catch (e) {
+      console.warn('[NestJS] Failed to write .port file:', e);
+    }
   }
+  return app;
 }
 
-bootstrap().catch((err) => {
-  console.error('[NestJS] Failed to start server:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  bootstrap().catch((err) => {
+    console.error('[NestJS] Failed to start server:', err);
+    process.exit(1);
+  });
+}

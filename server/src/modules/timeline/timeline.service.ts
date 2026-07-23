@@ -1,8 +1,9 @@
 /**
  * TimelineService - 时间线管理
  */
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { TimelineRepository, TimelineRow, TimelineEventRow } from '../../database/repositories/timeline.repository';
+import { StateItemService } from '../../state/state-item.service';
 
 export interface TimelineDto {
   id: string;
@@ -67,7 +68,7 @@ export interface UpdateTimelineEventDto {
 export class TimelineService {
   private readonly logger = new Logger(TimelineService.name);
 
-  constructor(private readonly repo: TimelineRepository) {}
+  constructor(private readonly repo: TimelineRepository, @Optional() private readonly stateItems?: StateItemService) {}
 
   /** 转换为 DTO */
   private toDto(row: TimelineRow): TimelineDto {
@@ -143,6 +144,8 @@ export class TimelineService {
       end_date: dto.endDate,
     });
 
+    this.recordChange(existing, 'timeline_update', { before: this.toDto(existing), after: dto });
+
     this.logger.log(`更新时间线: ${id}`);
     return this.findById(id);
   }
@@ -153,6 +156,7 @@ export class TimelineService {
     if (!existing) throw new NotFoundException(`时间线不存在: ${id}`);
 
     this.repo.delete(id);
+    this.recordChange(existing, 'timeline_remove', { before: this.toDto(existing) });
     this.logger.log(`删除时间线: ${id}`);
   }
 
@@ -192,8 +196,10 @@ export class TimelineService {
       related_chapter_ids: dto.relatedChapterIds,
     });
 
+    const created = this.findEventById(id);
+    this.recordChange(timeline, 'event_create', { after: created }, 'timeline_event', id);
     this.logger.log(`创建时间线事件: ${id} (timeline=${timelineId})`);
-    return this.findEventById(id);
+    return created;
   }
 
   /** 更新事件 */
@@ -211,6 +217,9 @@ export class TimelineService {
       related_chapter_ids: dto.relatedChapterIds,
     });
 
+    const timeline = this.repo.findById(existing.timeline_id);
+    if (timeline) this.recordChange(timeline, 'event_update', { before: this.eventToDto(existing), after: dto }, 'timeline_event', id);
+
     this.logger.log(`更新时间线事件: ${id}`);
     return this.findEventById(id);
   }
@@ -221,6 +230,17 @@ export class TimelineService {
     if (!existing) throw new NotFoundException(`时间线事件不存在: ${id}`);
 
     this.repo.deleteEvent(id);
+    const timeline = this.repo.findById(existing.timeline_id);
+    if (timeline) this.recordChange(timeline, 'event_remove', { before: this.eventToDto(existing) }, 'timeline_event', id);
     this.logger.log(`删除时间线事件: ${id}`);
+  }
+
+  private recordChange(timeline: TimelineRow, operation: string, payload: Record<string, unknown>, targetType = 'timeline_state', targetId = timeline.id) {
+    if (!this.stateItems) return;
+    this.stateItems.analyzeImpactTracked(timeline.project_id, {
+        targetType, targetId,
+        summary: `Timeline ${operation} requires continuity review`,
+        payload: { operation, ...payload, priority: 'timeline', affects: ['outline', 'chapter_plan', 'chapter', 'writing_context'], needsReview: true },
+    });
   }
 }

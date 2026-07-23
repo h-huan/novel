@@ -25,6 +25,7 @@ export interface VectorStore {
     id: string; vector: number[]; metadata: Record<string, unknown>;
   }>>;
   isAvailable(): boolean;
+  getHealthDetail(): string;
 }
 
 @Injectable()
@@ -40,7 +41,7 @@ export class VectorIndexService implements OnModuleInit {
   } as const;
 
   async onModuleInit(): Promise<void> {
-    const dataDir = path.join(process.cwd(), 'data');
+    const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.store = new SqliteVectorStore(path.join(dataDir, 'vectors.db'));
     this.logger.log('向量索引引擎初始化完成。存储模式: SQLite');
@@ -48,7 +49,7 @@ export class VectorIndexService implements OnModuleInit {
 
   getStore(): VectorStore { return this.store; }
   getHealthStatus(): { available: boolean; detail: string } {
-    return { available: this.store.isAvailable(), detail: 'SQLite 向量存储已就绪' };
+    return { available: this.store.isAvailable(), detail: this.store.getHealthDetail() };
   }
   isAvailable(): boolean { return this.store.isAvailable(); }
 
@@ -83,12 +84,20 @@ export class VectorIndexService implements OnModuleInit {
       metadata: { text: chunk.text, docType: chunk.docType, ...chunk.metadata },
     })));
   }
+
+  async indexChunksStrict(collection: string, chunks: Array<{ chunk: Chunk; vector: number[] }>) {
+    await this.store.upsertStrict(collection, chunks.map(({ chunk, vector }) => ({
+      id: chunk.id, vector,
+      metadata: { text: chunk.text, docType: chunk.docType, ...chunk.metadata },
+    })));
+  }
 }
 
 class SqliteVectorStore implements VectorStore {
   private db!: DatabaseSync;
   private available = false;
   private writeCount = 0;
+  private initializationError = '';
 
   constructor(dbPath: string) {
     try {
@@ -102,12 +111,14 @@ class SqliteVectorStore implements VectorStore {
         PRIMARY KEY (collection, id))`);
       this.db.exec('CREATE INDEX IF NOT EXISTS idx_vectors_col ON vectors(collection)');
       this.available = true;
-    } catch { this.available = false; }
+    } catch (error) {
+      this.available = false;
+      this.initializationError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   async upsert(collection: string, chunks: VectorUpsertPayload[]) {
-    if (!this.available) return;
-    try { await this.upsertStrict(collection, chunks); } catch { /* legacy best-effort API */ }
+    await this.upsertStrict(collection, chunks);
   }
 
   async upsertStrict(collection: string, chunks: VectorUpsertPayload[]): Promise<void> {
@@ -136,27 +147,24 @@ class SqliteVectorStore implements VectorStore {
   }
 
   async query(collection: string, qv: number[], limit: number, filters?: SearchFilters) {
-    if (!this.available) return [];
-    try {
-      const rows = this.db.prepare('SELECT id,vector_json,metadata_json FROM vectors WHERE collection=?').all(collection) as any[];
-      const r: Array<{ id: string; score: number; metadata: Record<string, unknown> }> = [];
-      for (const row of rows) {
-        const meta = JSON.parse(row.metadata_json);
-        if (filters) {
-          if (filters.docTypes && !filters.docTypes.includes(meta['docType'] as DocType)) continue;
-          if (filters.priorities && !filters.priorities.includes(meta['priority'] as RTCOTier)) continue;
-          if (filters.locked !== undefined && meta['locked'] !== filters.locked) continue;
-        }
-        const vec = JSON.parse(row.vector_json);
-        r.push({ id: row.id, score: cosineSim(qv, vec), metadata: meta });
+    this.assertAvailable();
+    const rows = this.db.prepare('SELECT id,vector_json,metadata_json FROM vectors WHERE collection=?').all(collection) as any[];
+    const r: Array<{ id: string; score: number; metadata: Record<string, unknown> }> = [];
+    for (const row of rows) {
+      const meta = JSON.parse(row.metadata_json);
+      if (filters) {
+        if (filters.docTypes && !filters.docTypes.includes(meta['docType'] as DocType)) continue;
+        if (filters.priorities && !filters.priorities.includes(meta['priority'] as RTCOTier)) continue;
+        if (filters.locked !== undefined && meta['locked'] !== filters.locked) continue;
       }
-      return r.sort((a, b) => b.score - a.score).slice(0, limit);
-    } catch { return []; }
+      const vec = JSON.parse(row.vector_json);
+      r.push({ id: row.id, score: cosineSim(qv, vec), metadata: meta });
+    }
+    return r.sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
   async delete(collection: string, ids: string[]) {
-    if (!this.available) return;
-    try { await this.deleteStrict(collection, ids); } catch { /* legacy best-effort API */ }
+    await this.deleteStrict(collection, ids);
   }
 
   async deleteStrict(collection: string, ids: string[]): Promise<void> {
@@ -187,11 +195,12 @@ class SqliteVectorStore implements VectorStore {
   }
 
   async count(collection: string): Promise<number> {
-    if (!this.available) return 0;
-    try { return (this.db.prepare('SELECT COUNT(*) as c FROM vectors WHERE collection=?').get(collection) as any)?.c ?? 0; } catch { return 0; }
+    this.assertAvailable();
+    return (this.db.prepare('SELECT COUNT(*) as c FROM vectors WHERE collection=?').get(collection) as any)?.c ?? 0;
   }
 
   isAvailable(): boolean { return this.available; }
+  getHealthDetail(): string { return this.available ? 'SQLite 向量存储已就绪' : `SQLite 向量存储不可用: ${this.initializationError || '未知初始化错误'}`; }
 
   private assertAvailable(): void {
     if (!this.available) throw new Error('Vector store is unavailable');

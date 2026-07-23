@@ -48,7 +48,9 @@ describe('OutlineService', () => {
       updateStatus: vi.fn(),
     } as unknown as OutlineRepository;
 
-    service = new OutlineService(repo);
+    const statement = { get: vi.fn(() => undefined), all: vi.fn(() => []), run: vi.fn(() => ({ changes: 0 })) };
+    const database = { getDb: () => ({ prepare: vi.fn(() => statement) }), transaction: (fn: () => unknown) => fn() };
+    service = new OutlineService(repo, database as any);
   });
 
   describe('create', () => {
@@ -59,6 +61,7 @@ describe('OutlineService', () => {
         title: '第一章大纲',
         chapterFunction: 'breathing',
         characterIds: ['char-1'],
+        targetWords: 3600,
       });
 
       expect(result.title).toBe('第一章大纲');
@@ -87,12 +90,13 @@ describe('OutlineService', () => {
 
   describe('move', () => {
     it('should move node to new parent', () => {
-      (repo.findById as any).mockReturnValue(mockRow);
-      (repo.moveNode as any).mockReturnValue({
+      (repo.findById as any)
+        .mockReturnValueOnce(mockRow)
+        .mockReturnValueOnce({
         ...mockRow,
         parent_id: 'parent-2',
         order: 1,
-      });
+        });
 
       const result = service.move('outline-1', {
         newParentId: 'parent-2',
@@ -106,6 +110,7 @@ describe('OutlineService', () => {
 
   describe('reorder', () => {
     it('should reorder children', () => {
+      (repo.findById as any).mockReturnValue(mockRow);
       const result = service.reorderChildren('outline-1', {
         orderedIds: ['child-3', 'child-1', 'child-2'],
       });

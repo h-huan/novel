@@ -39,6 +39,11 @@ function shortStageMap(currentStage: string, hasOutline: boolean, hasBody: boole
 export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string): ShortStoryStageResult {
   const stage = SHORT_STAGE_LABELS[currentStage] || currentStage;
   const { project } = assets;
+  const hasClosurePackage = assets.hasShortCoreConflict
+    && assets.hasShortProtagonistDesire
+    && assets.hasShortTurningPoint
+    && assets.hasShortEndingClosure
+    && assets.hasShortSceneSequence;
 
   const allowedActions: AllowedAction[] = [];
   const blockedActions: BlockedAction[] = [];
@@ -103,17 +108,27 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
     );
 
     // 如果已有大纲，可以进入正文
-    if (assets.hasOutline) {
-      allowedActions.push({ key: 'enter_writing', label: '进入正文', targetRoute: `/project/${project.id}/writing` });
+    if (assets.hasOutline && hasClosurePackage) {
+      // Keep this branch usable even for callers that still carry an older
+      // persisted stage.  The service promotes it to writing and persists the
+      // result, but the rules must never say both "ready" and "blocked".
+      allowedActions.push(
+        { key: 'enter_writing', label: '进入正文', targetRoute: `/project/${project.id}/writing` },
+        { key: 'generate_body', label: '生成正文', targetRoute: `/project/${project.id}/writing` },
+        { key: 'continue_body', label: '续写正文', targetRoute: `/project/${project.id}/writing` },
+      );
+    } else {
+      blockedActions.push(
+        { key: 'generate_body', label: '生成正文', reason: '请先生成并确认大纲' },
+        { key: 'continue_body', label: '续写正文', reason: '请先生成并确认大纲，再进入正文阶段' },
+      );
     }
-
-    blockedActions.push(
-      { key: 'generate_body', label: '生成正文', reason: '请先生成并确认大纲' },
-      { key: 'continue_body', label: '续写正文', reason: '请先生成并确认大纲，再进入正文阶段' },
-    );
 
     if (!assets.hasOutline) {
       missingAssets.push({ key: 'outline', label: '大纲', severity: 'required', reason: '正文生成前需要先有大纲' });
+    }
+    if (!hasClosurePackage) {
+      missingAssets.push({ key: 'short_closure_package', label: '短篇闭环故事卡', severity: 'required', reason: '正文生成前必须明确核心冲突、主角欲望、关键转折与揭示、结局闭环和场景序列' });
     }
   }
 
@@ -124,16 +139,19 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
       { key: 'refine_body', label: '精修正文', targetRoute: `/project/${project.id}/refinement` },
     );
 
-    if (assets.hasOutline) {
+    if (assets.hasOutline && hasClosurePackage) {
       allowedActions.push(
         { key: 'generate_body', label: '生成正文', targetRoute: `/project/${project.id}/writing` },
         { key: 'continue_body', label: '续写正文', targetRoute: `/project/${project.id}/writing` },
       );
     } else {
       blockedActions.push(
-        { key: 'generate_body', label: '生成正文', reason: '短篇正文生成前必须先有大纲' },
-        { key: 'continue_body', label: '续写正文', reason: '短篇续写前必须先有大纲' },
+        { key: 'generate_body', label: '生成正文', reason: '短篇正文生成前必须先有完整大纲与闭环故事卡' },
+        { key: 'continue_body', label: '续写正文', reason: '短篇续写前必须先有核心冲突、主角欲望、转折揭示、结局闭环和场景序列' },
       );
+      if (!hasClosurePackage) {
+        missingAssets.push({ key: 'short_closure_package', label: '短篇闭环故事卡', severity: 'required', reason: '正文生成前必须完成核心冲突、主角欲望、转折揭示、结局闭环和场景序列' });
+      }
     }
 
     if (!assets.hasBody) {
@@ -158,6 +176,11 @@ function buildShortStoryResult(
 ): ShortStoryStageResult {
   const stageLabel = SHORT_STAGE_LABELS[currentStage] || currentStage;
   const stageMap = shortStageMap(currentStage, assets.hasOutline, assets.hasBody);
+  const hasClosurePackage = assets.hasShortCoreConflict
+    && assets.hasShortProtagonistDesire
+    && assets.hasShortTurningPoint
+    && assets.hasShortEndingClosure
+    && assets.hasShortSceneSequence;
 
   let recommendedNextStage = '';
   let recommendedNextAction = '';
@@ -174,13 +197,13 @@ function buildShortStoryResult(
     recommendedNextAction = assets.hasOutline
       ? '大纲已就绪，可以进入正文阶段'
       : '请先生成大纲后再进入正文阶段';
-    canProceed = assets.hasOutline;
+    canProceed = assets.hasOutline && hasClosurePackage;
   } else if (currentStage === 'writing') {
     recommendedNextStage = 'writing';
     recommendedNextAction = assets.hasBody
       ? '继续写作，完成后进行质量检查'
       : '尚未生成正文，建议先生成第一章';
-    canProceed = true;
+    canProceed = assets.hasOutline && hasClosurePackage;
   }
 
   // 禁止的操作
@@ -411,16 +434,22 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
     );
 
     if (assets.hasChapterPlan) {
-      allowedActions.push({ key: 'enter_writing', label: '进入正文', targetRoute: `/project/${project.id}/writing` });
+      allowedActions.push(
+        { key: 'enter_writing', label: '进入正文', targetRoute: `/project/${project.id}/writing` },
+        { key: 'generate_body', label: '生成正文', targetRoute: `/project/${project.id}/writing` },
+        { key: 'continue_body', label: '续写正文', targetRoute: `/project/${project.id}/writing` },
+      );
     }
 
     if (!assets.hasChapterPlan) {
       missingAssets.push({ key: 'chapter_plan', label: '章节规划', severity: 'required', reason: '需要先规划章节' });
     }
-    blockedActions.push(
-      { key: 'generate_body', label: '生成正文', reason: '请先完成章节规划并进入正文阶段' },
-      { key: 'continue_body', label: '续写正文', reason: '当前还未进入正文阶段，不能续写正文' },
-    );
+    if (!assets.hasChapterPlan) {
+      blockedActions.push(
+        { key: 'generate_body', label: '生成正文', reason: '请先完成章节规划并进入正文阶段' },
+        { key: 'continue_body', label: '续写正文', reason: '当前还未进入正文阶段，不能续写正文' },
+      );
+    }
   }
 
   if (currentStage === 'writing') {

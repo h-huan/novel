@@ -93,7 +93,7 @@ export class ContextInjectorService {
 
     if (stage === 'drafting') {
       parts.push('', '【写作要求】');
-      parts.push('- 输出字数控制在 3000-5000 字');
+      parts.push('- 严格采用【本章大纲·必循】中的本章独立目标字数；该目标必须处于3200-4000字，不得改用项目默认值');
       parts.push('- 章节结尾设置悬念或钩子');
       parts.push('- 保持战斗/日常/情感描写的比例平衡');
     }

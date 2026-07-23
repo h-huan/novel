@@ -7,7 +7,7 @@
  * 3. 选择题材后创建项目，自动生成大纲+角色+世界观+组织+地图
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, getBaseUrl } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
@@ -20,9 +20,34 @@ import IdeaCard from '../components/discovery/IdeaCard';
 // ============================================================
 
 const STORY_TYPES = [
-  { value: 'short_story', label: '短篇', desc: '8,000 - 26,000字', icon: '📄' },
-  { value: 'long_novel', label: '长篇', desc: '20万 - 80万字', icon: '📚' },
+  { value: 'short_story', label: '短篇', desc: '聚焦主线，完整闭环', icon: '📄' },
+  { value: 'long_novel', label: '长篇', desc: '多线发展，持续创作', icon: '📚' },
 ] as const;
+
+const SHORT_STORY_TARGET_WORD_RANGE = { min: 8_000, max: 35_000 } as const;
+
+const getTargetWordsRequirement = (storyType: 'short_story' | 'long_novel'): string => (
+  storyType === 'short_story'
+    ? '短篇目标总字数必须在8,000–35,000字之间，且能由若干个3,200–4,000字章节准确承载。'
+    : '目标总字数必须能由若干个3,200–4,000字章节准确承载。'
+);
+
+const isFeasibleTargetWords = (value: number, storyType: 'short_story' | 'long_novel'): boolean => {
+  if (!Number.isInteger(value) || value < 3200) return false;
+  if (storyType === 'short_story' && (value < SHORT_STORY_TARGET_WORD_RANGE.min || value > SHORT_STORY_TARGET_WORD_RANGE.max)) return false;
+  return Math.ceil(value / 4000) <= Math.floor(value / 3200);
+};
+
+const parseIdeaTargetWords = (value: unknown): number | null => {
+  if (typeof value === 'number') return Number.isInteger(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const text = value.trim().replace(/[,，\s]/g, '').replace(/字$/, '');
+  const match = text.match(/^(\d+(?:\.\d+)?)(万|千)?$/);
+  if (!match) return null;
+  const multiplier = match[2] === '万' ? 10000 : match[2] === '千' ? 1000 : 1;
+  const parsed = Number(match[1]) * multiplier;
+  return Number.isInteger(parsed) ? parsed : null;
+};
 
 const PLATFORMS = [
   { value: 'zhihu', label: '知乎盐选', color: '#60a5fa' },
@@ -467,6 +492,14 @@ const DiscoveryWizardPage: React.FC = () => {
   const [categories, setCategories] = useState<Array<{ name: string; children: string[] }>>([]);
   const [toneTags, setToneTags] = useState<string[]>([]);
   const [writingStyles, setWritingStyles] = useState<string[]>([]);
+  const [configError, setConfigError] = useState('');
+
+  // A new visit starts a new discovery session. Old candidates must never
+  // advance the user into the selection step after a restart or re-entry.
+  useLayoutEffect(() => {
+    store.resetDiscovery();
+    store.setStep(0);
+  }, []);
 
   // 从字典API加载数据
   useEffect(() => {
@@ -573,11 +606,23 @@ const DiscoveryWizardPage: React.FC = () => {
 
   // 配置 → 发现（支持重新生成时传排除列表）
   const handleStartDiscovery = useCallback(async (excludeTitles?: string[], excludeDetailsArg?: Array<{ title: string; hook?: string; description?: string }>) => {
+    const configuredState = useDiscoveryStore.getState();
+    const configuredTarget = configuredState.targetWords.trim();
+    if (configuredTarget) {
+      const value = Number(configuredTarget);
+      if (!isFeasibleTargetWords(value, configuredState.storyType)) {
+        setConfigError(getTargetWordsRequirement(configuredState.storyType));
+        store.setStep(0);
+        return;
+      }
+    }
+    setConfigError('');
+    let generationSucceeded = false;
     store.setStep(1);
     store.setGenerating(true);
     store.setIdeas([]);
     store.setGenerationDone(false);
-    store.setGenProgress('AI正在从多个角度挖掘故事题材...');
+    store.setGenProgress('AI正在逐条生成、质检并去重故事题材...');
 
     // 分步进度动画
     const msgs = [
@@ -617,6 +662,7 @@ const DiscoveryWizardPage: React.FC = () => {
 
       if ((res as any)?.success && (res as any)?.ideas?.length > 0) {
         const newIdeas = (res as any).ideas;
+        generationSucceeded = true;
         store.setIdeas(newIdeas);
         // 记录本次题材标题和完整信息，下次排除用
         const newTitles = newIdeas.map((i: any) => i.title).filter(Boolean);
@@ -627,6 +673,8 @@ const DiscoveryWizardPage: React.FC = () => {
           .map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
         store.addExcludeDetails(newDetails);
         store.setGenProgress(`✨ 发现 ${newIdeas.length} 个故事题材（已排除 ${excludeTitles?.length || 0} 个旧题材）`);
+      } else if ((res as any)?.error) {
+        store.setGenProgress(`❌ ${(res as any).error}`);
       } else {
         store.setGenProgress('⚠️ 暂时没有找到合适的题材，换个配置试试？');
       }
@@ -635,7 +683,7 @@ const DiscoveryWizardPage: React.FC = () => {
       store.setGenProgress(`❌ ${err.message || '生成失败，请重试'}`);
     } finally {
       store.setGenerating(false);
-      store.setGenerationDone(true);
+      store.setGenerationDone(generationSucceeded);
     }
   }, [store]);
 
@@ -683,9 +731,6 @@ const DiscoveryWizardPage: React.FC = () => {
       store.setCreationProgress(0);
     }
     // 如果发现结果存在且已完成，但 step 不对（从 persist 恢复），自动恢复到发现步骤
-    if (ideas.length > 0 && generationDone && step === 0) {
-      store.setStep(1);
-    }
   }, [hasActiveCreation, activeCreationProjectId, step, ideas.length, generationDone, creationErrors.length]);
 
   // 重新连接 SSE（页面切换回来时恢复进度）
@@ -743,6 +788,17 @@ const DiscoveryWizardPage: React.FC = () => {
 
   // 选中题材 → 一键创建项目（异步 + SSE 实时进度，状态存入 store 防丢失）
   const handleSelectIdea = useCallback(async (idea: any) => {
+    const preflightState = useDiscoveryStore.getState();
+    const explicitTarget = preflightState.targetWords.trim()
+      ? Number(preflightState.targetWords)
+      : null;
+    const plannedTarget = explicitTarget ?? parseIdeaTargetWords(idea?.recommendedTargetWords ?? idea?.estimatedWords);
+    if (plannedTarget === null || !isFeasibleTargetWords(plannedTarget, preflightState.storyType)) {
+      setConfigError(`这个题材没有可执行的动态篇幅规划。${getTargetWordsRequirement(preflightState.storyType)}请返回配置填写可执行的目标字数，再重新选择题材。`);
+      store.setStep(0);
+      return;
+    }
+    setConfigError('');
     store.setStep(2);
     store.setCreating(true);
     store.setCreationErrors([]);
@@ -776,7 +832,14 @@ const DiscoveryWizardPage: React.FC = () => {
         title: idea.title,
         storyType: currentState.storyType,
         platformStyle: currentState.platform,
+        targetWords: currentState.targetWords.trim() ? Number(currentState.targetWords) : undefined,
         selectedIdea: idea,
+        settings: {
+          genre: [currentState.selectedCategory, currentState.selectedSubCategory].filter(Boolean).join('/'),
+          style: currentState.selectedTones.join('、'),
+          chapterWordRange: { min: 3200, max: 4000 },
+          structurePlanning: 'dynamic_by_story_rhythm',
+        },
       }, 30_000);
 
       const data = (res as any).data ?? res;
@@ -970,14 +1033,16 @@ const DiscoveryWizardPage: React.FC = () => {
         ))}
       </div>
 
-      {/* 目标字数 */}
-      <div style={s.sectionTitle}>目标字数</div>
+      {/* 目标总字数：填写时严格执行，留空时采用所选题材的动态规划值 */}
+      <div style={s.sectionTitle}>目标总字数（可选）</div>
       <div style={{ marginBottom: '28px' }}>
         <input
           value={targetWords}
-          onChange={(e) => store.setTargetWords(e.target.value)}
-          placeholder={storyType === 'short_story' ? '例如: 8000（短篇建议 5000-20000字）' : '例如: 300000（长篇建议 20万-80万字）'}
+          onChange={(e) => { store.setTargetWords(e.target.value); setConfigError(''); }}
+          placeholder="留空则由AI根据题材规模、剧情节奏和章节任务动态规划"
           type="number"
+          min={storyType === 'short_story' ? SHORT_STORY_TARGET_WORD_RANGE.min : 3200}
+          max={storyType === 'short_story' ? SHORT_STORY_TARGET_WORD_RANGE.max : undefined}
           style={{
             width: '100%', padding: '10px 12px', boxSizing: 'border-box',
             backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
@@ -985,6 +1050,14 @@ const DiscoveryWizardPage: React.FC = () => {
             fontFamily: 'inherit', outline: 'none',
           }}
         />
+        <div style={{ marginTop: '7px', color: '#8d96ad', fontSize: '12px', lineHeight: 1.5 }}>
+          {storyType === 'short_story'
+            ? '短篇为 8,000–35,000 字；仍按每章 3,200–4,000 字和剧情节奏动态规划。'
+            : '长篇不预设总章数或总字数；每章固定执行 3,200–4,000 字，按剧情节奏动态规划。'}
+        </div>
+        {configError && (
+          <div style={{ marginTop: '8px', color: '#e74c3c', fontSize: '12px', lineHeight: 1.5 }}>{configError}</div>
+        )}
       </div>
 
       {/* 故事分类（级联选择） */}
@@ -1184,7 +1257,7 @@ const DiscoveryWizardPage: React.FC = () => {
           </div>
           <div style={{ ...s.genText, marginTop: '8px' }}>{genProgress}</div>
           <div style={{ ...s.genText, fontSize: '12px', opacity: 0.5, marginTop: '4px' }}>
-            预计30秒内完成
+            每条题材都会独立生成并通过结构、吸引力与篇幅一致性检查
             <span style={s.genDot}>&nbsp;</span>
           </div>
         </div>
@@ -1364,7 +1437,7 @@ const DiscoveryWizardPage: React.FC = () => {
           {/* 非关键警告（黄色） */}
           {creationWarnings.length > 0 && (
             <div style={{ marginTop: '16px', padding: '10px', backgroundColor: 'rgba(243,156,18,0.1)', borderRadius: '8px', fontSize: '12px', color: '#f39c12', maxHeight: '120px', overflowY: 'auto' }}>
-              <div style={{ fontWeight: 600, marginBottom: '4px' }}>⚠️ 部分内容生成遇到问题（不影响项目创建）：</div>
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>⚠️ 生成过程记录：</div>
               {creationWarnings.slice(0, 5).map((w, i) => <div key={i} style={{ marginBottom: '2px' }}>• {w}</div>)}
               {creationWarnings.length > 5 && <div style={{ color: '#8a8aa0', fontSize: '11px' }}>...还有 {creationWarnings.length - 5} 条警告</div>}
             </div>

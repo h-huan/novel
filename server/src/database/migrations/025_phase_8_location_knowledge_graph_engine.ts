@@ -26,3 +26,14 @@ export function up(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_location_knowledge_relations_source ON location_knowledge_relations(project_id, source_location_id);
   `);
 }
+
+export function down(db: DatabaseSync): void {
+  db.exec(`
+    DROP INDEX IF EXISTS idx_location_knowledge_relations_source;
+    DROP INDEX IF EXISTS idx_location_knowledge_profiles_project;
+    DROP TABLE IF EXISTS location_knowledge_relations;
+    DROP TABLE IF EXISTS location_knowledge_profiles;
+  `);
+}
+
+export default { up, down };

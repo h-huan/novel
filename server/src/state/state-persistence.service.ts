@@ -82,7 +82,7 @@ export class StatePersistenceService implements OnModuleInit, OnModuleDestroy {
       const path = await import('path');
       const { mkdirSync } = await import('fs');
 
-      const dataDir = path.join(process.cwd(), 'data');
+      const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
       try { mkdirSync(dataDir, { recursive: true }); } catch { /* ignore */ }
 
       this.db = new DatabaseSync(path.join(dataDir, 'state.db'));
@@ -336,7 +336,6 @@ export class StatePersistenceService implements OnModuleInit, OnModuleDestroy {
         SELECT * FROM character_state_snapshots
         WHERE needs_review = 1
         ORDER BY created_at DESC
-        LIMIT 50
       `).all() as SnapshotRow[];
 
       return rows.map(row => this.rowToSnapshot(row));

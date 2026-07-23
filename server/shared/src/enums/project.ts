@@ -1,5 +1,7 @@
 export const ProjectStatus = {
+  CREATING: 'creating',
   ACTIVE: 'active',
+  GENERATION_FAILED: 'generation_failed',
   ARCHIVED: 'archived',
   COMPLETED: 'completed',
 } as const;

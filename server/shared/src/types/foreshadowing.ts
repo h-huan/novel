@@ -11,6 +11,10 @@ export interface Foreshadowing {
   buriedChapterIndex: number;
   plannedRecoveryAt?: string;
   plannedRecoveryChapterIndex: number;
+  recoveryWindowStart?: number;
+  recoveryWindowEnd?: number;
+  evidenceText?: string;
+  riskLevel?: 'low' | 'medium' | 'high';
   actualRecoveryAt?: string;
   actualRecoveryChapterIndex?: number;
   recoveryMethod?: string;

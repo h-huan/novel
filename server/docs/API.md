@@ -237,14 +237,12 @@ GET /api/v1/projects/:projectId/state/characters/:characterId/evolution
 | `POST` | `/chain/templates/validate` | 验证模板结构 |
 | `POST` | `/chain/templates/execute/:id` | 执行模板；大纲类模板带 `projectId` 时执行 Workflow Guard 校验 |
 
-### 版本管理
+### 正文修改记录
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/chain/version/snapshot` | 创建版本快照 |
-| `POST` | `/chain/version/history` | 获取版本历史 |
-| `POST` | `/chain/version/restore` | 恢复版本 |
-| `POST` | `/chain/version/diff` | 版本差异对比 |
+| `GET` | `/projects/:projectId/chapters/:id/versions` | 读取数据库持久化的正文快照 |
+| `POST` | `/projects/:projectId/chapters/:id/versions/:version/restore` | 恢复正文版本；恢复前自动保留当前正文快照并触发同步 |
 
 ### 写作上下文
 

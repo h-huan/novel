@@ -3,8 +3,8 @@
  *
  * 职责：
  * 1. 想法草稿 CRUD
- * 2. AI 追问生成（含 fallback）
- * 3. AI 想法完善 + 成熟度评分（含 fallback）
+ * 2. AI 追问生成（失败时显式报错）
+ * 3. AI 想法完善 + 成熟度评分（失败时显式报错）
  * 4. 想法确认
  * 5. 转换为项目（复用 ProjectService）
  */
@@ -65,6 +65,7 @@ export interface IdeaDraftResponse {
   targetPlatform: string;
   targetWords: number;
   description: string;
+  settings: Record<string, unknown>;
   status: string;
   questions: QuestionItem[];
   answers: AnswerItemData[];
@@ -102,8 +103,9 @@ export class IdeaLabService {
       title: dto.title || '',
       project_type: dto.projectType || 'long_novel',
       target_platform: dto.targetPlatform || 'generic',
-      target_words: dto.targetWords || 0,
+      target_words: dto.targetWords,
       description: dto.description || '',
+      settings_json: JSON.stringify(dto.settings || {}),
       status: 'draft',
       questions_json: '[]',
       answers_json: '[]',
@@ -139,50 +141,10 @@ export class IdeaLabService {
 
   /**
    * 生成追问问题
-   * 优先调用 LLM，失败时使用模板 fallback
+   * 按模型配置调用 LLM，失败时保留错误供用户重试
    */
   generateQuestions(id: string): { questions: QuestionItem[]; status: string; isFallback: boolean } {
-    const row = this.repo.findById(id);
-    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
-
-    let questions: QuestionItem[] = [];
-    let isFallback = false;
-
-    try {
-      // 尝试 LLM 生成
-      const prompt = this.buildQuestionsPrompt(row);
-      // 使用同步方式 - 用 LLM generate
-      const llmPromise = this.llm.generate({
-        prompt,
-        systemPrompt: '你是一个专业的创作编辑，帮助作者完善小说想法。请生成有针对性的追问问题。',
-        temperature: 0.8,
-        maxTokens: 2000,
-        scenario: 'idea_questions',
-      });
-
-      // 注: 由于 RealLLMService.generate 是异步的，我们在调用时 handle 异常
-      // 这里我们只尝试同步路径，异步路径通过 Promise 处理
-      // 实际我们使用 generateQuestionsAsync 方法
-    } catch (err) {
-      this.logger.warn(`[IdeaLab] LLM 追问生成失败，使用 fallback: ${err}`);
-      isFallback = true;
-    }
-
-    // 使用 fallback 模板
-    questions = this.fallbackQuestions(row);
-    isFallback = true;
-
-    this.repo.update(id, {
-      questions_json: JSON.stringify(questions),
-      status: 'questioning',
-      updated_at: new Date().toISOString(),
-    });
-
-    return {
-      questions,
-      status: 'questioning',
-      isFallback,
-    };
+    throw new BadRequestException(`同步追问接口已停用（草稿 ${id}）：必须调用异步AI生成流程，禁止模板降级。`);
   }
 
   /**
@@ -201,7 +163,6 @@ export class IdeaLabService {
         prompt,
         systemPrompt: '你是一个专业的创作编辑，帮助作者完善小说想法。请生成有针对性的追问问题。返回格式为 JSON 数组，每个元素包含 id、question、reason 字段。',
         temperature: 0.8,
-        maxTokens: 3000,
         scenario: 'idea_questions',
       });
 
@@ -210,9 +171,8 @@ export class IdeaLabService {
         throw new Error('LLM 返回的问题为空');
       }
     } catch (err) {
-      this.logger.warn(`[IdeaLab] LLM 追问生成失败，使用 fallback: ${err}`);
-      questions = this.fallbackQuestions(row);
-      isFallback = true;
+      this.logger.warn(`[IdeaLab] LLM 追问生成失败，已停止且未生成模板内容: ${err}`);
+      throw new BadRequestException(`AI追问生成失败，未使用模板降级：${err instanceof Error ? err.message : String(err)}`);
     }
 
     this.repo.update(id, {
@@ -258,7 +218,7 @@ export class IdeaLabService {
   // ==================== 完善想法 + 成熟度评分 ====================
 
   /**
-   * 完善想法（同步 fallback 版本）
+   * 同步完善入口已停用，避免绕过异步 AI 配置链
    */
   refineIdea(id: string): {
     refinedIdea: RefinedIdea;
@@ -267,32 +227,7 @@ export class IdeaLabService {
     status: string;
     isFallback: boolean;
   } {
-    const row = this.repo.findById(id);
-    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
-
-    const answers: AnswerItemData[] = JSON.parse(row.answers_json || '[]');
-    const questions: QuestionItem[] = JSON.parse(row.questions_json || '[]');
-
-    // 生成完善版想法 (使用 fallback)
-    const refinedIdea = this.fallbackRefinedIdea(row, questions, answers);
-    const maturityReport = this.computeMaturityReport(refinedIdea, row);
-    const maturityScore = this.computeMaturityScore(maturityReport);
-
-    this.repo.update(id, {
-      refined_idea_json: JSON.stringify(refinedIdea),
-      maturity_score: maturityScore,
-      maturity_report_json: JSON.stringify(maturityReport),
-      status: 'refined',
-      updated_at: new Date().toISOString(),
-    });
-
-    return {
-      refinedIdea,
-      maturityScore,
-      maturityReport,
-      status: 'refined',
-      isFallback: true,
-    };
+    throw new BadRequestException(`同步完善接口已停用（草稿 ${id}）：必须调用异步AI完善流程，禁止模板降级。`);
   }
 
   /**
@@ -320,7 +255,6 @@ export class IdeaLabService {
         prompt,
         systemPrompt: '你是一个专业的创作编辑，帮助作者把模糊想法完善为可创作的小说设定。输出 JSON 格式的完善结果。',
         temperature: 0.7,
-        maxTokens: 4000,
         scenario: 'idea_refine',
       });
 
@@ -330,9 +264,8 @@ export class IdeaLabService {
       }
       refinedIdea = parsed;
     } catch (err) {
-      this.logger.warn(`[IdeaLab] LLM 完善想法失败，使用 fallback: ${err}`);
-      refinedIdea = this.fallbackRefinedIdea(row, questions, answers);
-      isFallback = true;
+      this.logger.warn(`[IdeaLab] LLM 完善想法失败，已停止且未生成模板内容: ${err}`);
+      throw new BadRequestException(`AI完善想法失败，未使用模板降级：${err instanceof Error ? err.message : String(err)}`);
     }
 
     const maturityReport = this.computeMaturityReport(refinedIdea, row);
@@ -406,6 +339,8 @@ export class IdeaLabService {
     const title = dto.title || row.title ||
       (refinedIdea.titleSuggestions && refinedIdea.titleSuggestions[0]) ||
       '未命名作品';
+    let draftSettings: Record<string, unknown> = {};
+    try { draftSettings = JSON.parse(row.settings_json || '{}'); } catch { throw new BadRequestException('想法草稿的项目配置已损坏，不能转换项目'); }
 
     // 调用 ProjectService.create 复用第一阶段逻辑
     const project = this.projectService.create({
@@ -421,6 +356,11 @@ export class IdeaLabService {
       ideaSeed: row.raw_idea,
       confirmedIdea: confirmedIdea,
       description: row.description || refinedIdea.oneLineHook || '',
+      settings: {
+        ...draftSettings,
+        targetAudience: draftSettings.targetAudience || refinedIdea.targetAudience || null,
+        genre: draftSettings.genre || refinedIdea.storyType || null,
+      },
     });
 
     // 更新草稿状态
@@ -536,97 +476,6 @@ export class IdeaLabService {
     }
 
     return prompt;
-  }
-
-  // ==================== Fallback 逻辑 ====================
-
-  /**
-   * Fallback 追问问题模板
-   */
-  private fallbackQuestions(row: IdeaDraftRow): QuestionItem[] {
-    const isShort = row.project_type === 'short_story';
-    const prefix = isShort ? '短' : '长';
-
-    const questions: QuestionItem[] = [];
-
-    if (isShort) {
-      questions.push(
-        { id: 'sq1', question: '主角"我"是谁？年龄、职业、当前的生活状态是怎样的？', reason: '明确第一人称视角的代入感' },
-        { id: 'sq2', question: '故事发生在什么时间、什么地点？有什么特别的环境氛围？', reason: '确定故事舞台和氛围基调' },
-        { id: 'sq3', question: '是什么异常事件打破了主角的日常生活？', reason: '找到故事的起爆点' },
-        { id: 'sq4', question: '主角内心最强烈的冲突是什么？外在的主要阻力来自哪里？', reason: '明确矛盾推动力' },
-        { id: 'sq5', question: '你希望读者看完后最强烈的情绪是什么？感动、恐惧、愤怒还是释然？', reason: '锁定情绪卖点' },
-        { id: 'sq6', question: '故事有没有预想的反转或意外结局？', reason: '确认故事结构' },
-        { id: 'sq7', question: '结尾想让读者感受到什么？有没有最后一击的冲击力？', reason: '确保结尾力量' },
-      );
-    } else {
-      questions.push(
-        { id: 'lq1', question: '主角是谁？他/她最想改变或实现什么？', reason: '明确主角动机和长期目标' },
-        { id: 'lq2', question: '故事发生在什么时代、地域或世界？有什么独特的世界观设定？', reason: '确定故事背景框架' },
-        { id: 'lq3', question: '主角有什么独特的能力、金手指或核心优势？', reason: '明确爽点来源' },
-        { id: 'lq4', question: '贯穿全书的主要矛盾是什么？主角面临的终极挑战是什么？', reason: '确定长线冲突' },
-        { id: 'lq5', question: '主要的反派或对手是谁？阻力系统如何设计？', reason: '完善对抗体系' },
-        { id: 'lq6', question: '故事世界中有哪些势力、阵营或组织？', reason: '构建势力格局' },
-        { id: 'lq7', question: '故事地图有多大？主角的成长空间和活动范围如何扩展？', reason: '规划故事格局' },
-        { id: 'lq8', question: '开篇前 30 章（或前几万字）用什么快速吸引读者？', reason: '确保开篇抓人' },
-      );
-    }
-
-    return questions;
-  }
-
-  /**
-   * Fallback 完善想法
-   */
-  private fallbackRefinedIdea(row: IdeaDraftRow, questions: QuestionItem[], answers: AnswerItemData[]): RefinedIdea {
-    const isShort = row.project_type === 'short_story';
-    const platform = row.target_platform;
-    const rawIdea = row.raw_idea;
-
-    // 收集用户回答内容
-    const answerTexts = answers.map((a) => a.answer).filter(Boolean);
-
-    return {
-      titleSuggestions: [
-        `${rawIdea.slice(0, 20)}...`,
-        `基于「${rawIdea.slice(0, 10)}」的故事`,
-        `新${isShort ? '短篇' : '长篇'}创作`,
-      ],
-      oneLineHook: rawIdea.length > 50 ? rawIdea.slice(0, 50) + '...' : rawIdea,
-      protagonist: isShort
-        ? '第一人称主角（需要进一步设定身份）'
-        : '主角（需要进一步设定身份和目标）',
-      coreConflict: answerTexts.length > 0
-        ? `基于回答：${answerTexts[0].slice(0, 40)}...`
-        : '核心冲突需要进一步明确',
-      worldSeed: isShort
-        ? '短篇场景设定（需要根据故事具体设定）'
-        : '世界观种子（需要根据故事具体完善）',
-      characterSeed: isShort
-        ? '关键角色设定'
-        : '核心角色与关系网络',
-      organizationSeed: isShort
-        ? ''
-        : '势力/组织设定（长篇建议构建 2-3 个主要势力）',
-      sellingPoints: [
-        isShort ? '强情绪共鸣' : '长线成长与升级',
-        '独特故事视角',
-        platform ? `适配${platform}风格` : '多平台适配',
-      ],
-      platformFit: platform ? `适合在${platform}发布${isShort ? '短篇' : '长篇'}故事` : '需要选择目标平台',
-      storyType: isShort ? '短篇故事' : '长篇小说',
-      targetAudience: isShort ? '喜欢短篇沉浸式阅读的读者' : '喜欢长篇连载的网文读者',
-      shortStoryFit: isShort
-        ? '当前设定适合短篇创作，建议按题材 → 大纲 → 正文流程推进'
-        : '当前设偏长篇叙事，如需改为短篇需要聚焦单一事件和核心反转',
-      longNovelFit: isShort
-        ? '当前设定偏短篇，如需改为长篇需要扩展世界观和角色体系'
-        : '当前设定适合长篇创作，建议按设定 → 世界观 → 角色 → 大纲流程推进',
-      recommendedType: isShort ? 'short_story' : 'long_novel',
-      nextStep: isShort
-        ? '完善题材设定，进入短篇大纲阶段'
-        : '建议进入基础设定阶段，逐步构建世界观和角色体系',
-    };
   }
 
   private parseQuestionsResponse(content: string): QuestionItem[] {
@@ -774,6 +623,7 @@ export class IdeaLabService {
       targetPlatform: row.target_platform,
       targetWords: row.target_words,
       description: row.description || '',
+      settings: (() => { try { return JSON.parse(row.settings_json || '{}'); } catch { return {}; } })(),
       status: row.status,
       questions: JSON.parse(row.questions_json || '[]'),
       answers: JSON.parse(row.answers_json || '[]'),

@@ -330,7 +330,6 @@ ${output.substring(0, 3000)}
       const response = await this.realLLM.generate({
         prompt: judgePrompt,
         temperature: 0.3,
-        maxTokens: 512,
       });
 
       let parsed: any = {};
@@ -351,8 +350,8 @@ ${output.substring(0, 3000)}
         level,
       };
     } catch (err: any) {
-      this.logger.warn(`LLM Judge 调用失败: ${err.message}，使用规则评分`);
-      return { score: 70, reason: `【${criterion.name}】规则评分 70/100`, level: 'INFO' };
+      this.logger.warn(`LLM Judge 调用失败: ${err.message}；不再伪造通过的质检分数`);
+      return { score: 0, reason: `【${criterion.name}】质检模型不可用：${err.message}`, level: 'CRITICAL' };
     }
   }
 

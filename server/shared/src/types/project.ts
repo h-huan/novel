@@ -23,6 +23,10 @@ export interface Project {
   targetPlatform: TargetPlatform;
   /** 目标字数 */
   targetWords: number;
+  /** 项目卡与创作规划配置；所有生成流程必须按此执行 */
+  settings?: Record<string, unknown>;
+  /** 写作风格配置 */
+  writingStyle?: Record<string, unknown> | string;
   /** 当前创作阶段 */
   currentWorkflowStage: WorkflowStage;
   /** 想法孵化状态 */

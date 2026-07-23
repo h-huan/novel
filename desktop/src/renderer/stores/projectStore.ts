@@ -48,6 +48,8 @@ interface ProjectCreateData {
   ideaSeed?: string;
   confirmedIdea?: string;
   description?: string;
+  settings?: Record<string, unknown>;
+  writingStyle?: Record<string, unknown> | string;
 }
 
 interface ProjectState {
@@ -107,6 +109,8 @@ function mapServerProject(raw: any): Project {
     creationSource,
     targetPlatform: (raw.targetPlatform || raw.platformStyle || 'generic') as TargetPlatform,
     targetWords: raw.targetWords ?? raw.target_words ?? 0,
+    settings: typeof raw.settings === 'string' ? (() => { try { return JSON.parse(raw.settings); } catch { return {}; } })() : (raw.settings || {}),
+    writingStyle: raw.writingStyle ?? raw.writing_style,
     currentWorkflowStage: (raw.currentWorkflowStage || defaultStage) as WorkflowStage,
     ideaStatus: (raw.ideaStatus || 'none') as IdeaStatus,
     ideaSeed: raw.ideaSeed || undefined,
@@ -174,6 +178,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (data.ideaSeed) body.ideaSeed = data.ideaSeed;
       if (data.confirmedIdea) body.confirmedIdea = data.confirmedIdea;
       if (data.description) body.description = data.description;
+      if (data.settings) body.settings = data.settings;
+      if (data.writingStyle !== undefined) body.writingStyle = data.writingStyle;
 
       const res = await api.post<any>('/projects', body);
       const raw = (res as any).data ?? res;

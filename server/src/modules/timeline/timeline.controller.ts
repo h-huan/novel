@@ -4,11 +4,14 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { TimelineService, TimelineDto, TimelineEventDto, CreateTimelineDto, UpdateTimelineDto, CreateTimelineEventDto, UpdateTimelineEventDto } from './timeline.service';
+import { VectorIndexService } from '../../rag/vector-index.service';
+import { EmbeddingService } from '../../rag/embedding.service';
+import { CanonicalSyncStateService } from '../../rag/canonical-sync-state.service';
 
 @ApiTags('timeline')
 @Controller('projects/:projectId/timelines')
 export class TimelineController {
-  constructor(private readonly service: TimelineService) {}
+  constructor(private readonly service: TimelineService, private readonly vectorIndex: VectorIndexService, private readonly embedding: EmbeddingService, private readonly syncStates: CanonicalSyncStateService) {}
 
   @Get()
   @ApiOperation({ summary: '获取项目的时间线列表' })
@@ -31,8 +34,8 @@ export class TimelineController {
   async create(
     @Param('projectId') projectId: string,
     @Body() dto: CreateTimelineDto,
-  ): Promise<TimelineDto> {
-    return this.service.create(projectId, dto);
+  ): Promise<any> {
+    const result = this.service.create(projectId, dto); const sync = await this.indexTimeline(projectId, result.id); return { ...result, sync };
   }
 
   @Put(':id')
@@ -40,19 +43,21 @@ export class TimelineController {
   @ApiParam({ name: 'projectId', description: '项目ID' })
   @ApiParam({ name: 'id', description: '时间线ID' })
   async update(
+    @Param('projectId') projectId: string,
     @Param('id') id: string,
     @Body() dto: UpdateTimelineDto,
-  ): Promise<TimelineDto> {
-    return this.service.update(id, dto);
+  ): Promise<any> {
+    const result = this.service.update(id, dto); const sync = await this.indexTimeline(projectId, id); return { ...result, sync };
   }
 
   @Delete(':id')
   @ApiOperation({ summary: '删除时间线' })
   @ApiParam({ name: 'projectId', description: '项目ID' })
   @ApiParam({ name: 'id', description: '时间线ID' })
-  async remove(@Param('id') id: string): Promise<{ success: boolean }> {
+  async remove(@Param('projectId') projectId: string, @Param('id') id: string): Promise<any> {
     this.service.remove(id);
-    return { success: true };
+    const sync = await this.syncStates.run(projectId, 'timeline', id, () => this.vectorIndex.deleteChunksStrict(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [`timeline:${id}`]));
+    return { success: true, sync };
   }
 
   // ============ 时间线事件 ============
@@ -79,10 +84,11 @@ export class TimelineController {
   @ApiParam({ name: 'projectId', description: '项目ID' })
   @ApiParam({ name: 'timelineId', description: '时间线ID' })
   async createEvent(
+    @Param('projectId') projectId: string,
     @Param('timelineId') timelineId: string,
     @Body() dto: CreateTimelineEventDto,
-  ): Promise<TimelineEventDto> {
-    return this.service.createEvent(timelineId, dto);
+  ): Promise<any> {
+    const result = this.service.createEvent(timelineId, dto); const sync = await this.indexTimeline(projectId, timelineId); return { ...result, sync };
   }
 
   @Put(':timelineId/events/:eventId')
@@ -91,10 +97,12 @@ export class TimelineController {
   @ApiParam({ name: 'timelineId', description: '时间线ID' })
   @ApiParam({ name: 'eventId', description: '事件ID' })
   async updateEvent(
+    @Param('projectId') projectId: string,
+    @Param('timelineId') timelineId: string,
     @Param('eventId') eventId: string,
     @Body() dto: UpdateTimelineEventDto,
-  ): Promise<TimelineEventDto> {
-    return this.service.updateEvent(eventId, dto);
+  ): Promise<any> {
+    const result = this.service.updateEvent(eventId, dto); const sync = await this.indexTimeline(projectId, timelineId); return { ...result, sync };
   }
 
   @Delete(':timelineId/events/:eventId')
@@ -102,8 +110,19 @@ export class TimelineController {
   @ApiParam({ name: 'projectId', description: '项目ID' })
   @ApiParam({ name: 'timelineId', description: '时间线ID' })
   @ApiParam({ name: 'eventId', description: '事件ID' })
-  async removeEvent(@Param('eventId') eventId: string): Promise<{ success: boolean }> {
+  async removeEvent(@Param('projectId') projectId: string, @Param('timelineId') timelineId: string, @Param('eventId') eventId: string): Promise<any> {
     this.service.removeEvent(eventId);
-    return { success: true };
+    const sync = await this.indexTimeline(projectId, timelineId);
+    return { success: true, sync };
+  }
+
+  private async indexTimeline(projectId: string, timelineId: string) {
+    return this.syncStates.run(projectId, 'timeline', timelineId, async () => {
+      const timeline = this.service.findById(timelineId);
+      const events = this.service.findEventsByTimelineId(timelineId);
+      const text = [timeline.name, timeline.description || '', ...events.map((event) => `${event.eventDate || ''} ${event.title} ${event.description || ''}`)].join('\n');
+      const [vector] = await this.embedding.embed([text]);
+      await this.vectorIndex.indexChunksStrict(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [{ chunk: { id: `timeline:${timelineId}`, text, docType: 'timeline', metadata: { chunkIndex: 0, parentDocId: timelineId } }, vector }]);
+    });
   }
 }

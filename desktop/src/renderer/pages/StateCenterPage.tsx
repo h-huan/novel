@@ -18,8 +18,36 @@ interface StateItem {
   confidence?: number;
   tags?: string[];
   sourceChapterId?: string | null;
+  payload?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface ChapterReference { id: string; chapterIndex: number; title: string; }
+
+const technicalIdentifier = /^[a-z_]+(?::[a-z_]+)*(?::[0-9a-f-]{16,})?$/i;
+const sourceTypeLabels: Record<string, string> = {
+  outline: '大纲核对', foreshadowing: '伏笔核对', timeline: '时间线核对',
+  character: '人物状态核对', manual_edit: '人工修改后提取', chapter: '正文核对',
+};
+
+function authorTitle(item: StateItem): string {
+  const raw = item.targetLabel || item.title || '';
+  if (raw.startsWith('outline:missing_requirement:')) return '本章大纲要点尚未在正文中找到';
+  if (raw.startsWith('outline:')) return '本章大纲与正文需要核对';
+  if (raw.startsWith('foreshadowing:')) return '伏笔铺垫或回收需要核对';
+  if (raw.startsWith('timeline:')) return '时间顺序需要核对';
+  if (raw.startsWith('character:')) return '人物状态需要核对';
+  return technicalIdentifier.test(raw) ? '待作者核对的写作记录' : (raw || '待作者核对的写作记录');
+}
+
+function authorSummary(item: StateItem): string {
+  const raw = String(item.summary || '').trim();
+  if (!raw || technicalIdentifier.test(raw)) {
+    if (item.title?.startsWith('outline:missing_requirement:')) return '系统未能在本章正文中定位到对应的大纲要求。请对照本章大纲和正文后确认、驳回，或先修改正文。';
+    return '此记录未附可供作者核验的文字说明，不能据此确认设定；请先查看来源正文或重新同步。';
+  }
+  return raw;
 }
 
 interface ImpactReport {
@@ -39,6 +67,14 @@ interface ImpactReport {
     actionHint?: string;
     payload?: Record<string, any>;
   }>;
+}
+
+interface CanonicalSyncState {
+  entityType: string;
+  entityId: string;
+  indexStatus: string;
+  needsResync: boolean;
+  lastError?: string | null;
 }
 
 const apiPayload = (response: any) => response?.data ?? response;
@@ -85,6 +121,8 @@ const StateCenterPage: React.FC = () => {
   const [evolutionEvents, setEvolutionEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [syncStates, setSyncStates] = useState<CanonicalSyncState[]>([]);
+  const [chapters, setChapters] = useState<ChapterReference[]>([]);
 
   const loadStateItems = useCallback(async () => {
     if (!projectId) return;
@@ -109,17 +147,47 @@ const StateCenterPage: React.FC = () => {
     setContextText(payload.context?.contextText || '');
   }, [projectId]);
 
+  const loadSyncStates = useCallback(async () => {
+    if (!projectId) return;
+    const res = await api.get(`/projects/${projectId}/sync-status`);
+    const payload = apiPayload(res) as any;
+    setSyncStates(payload.items || []);
+  }, [projectId]);
+
+  const loadChapters = useCallback(async () => {
+    if (!projectId) return;
+    const res = await api.get(`/projects/${projectId}/chapters`);
+    const data = apiPayload(res) as any;
+    setChapters(Array.isArray(data) ? data : data.chapters || []);
+  }, [projectId]);
+
+  const retrySync = async (item: CanonicalSyncState) => {
+    if (!projectId) return;
+    setMessage('');
+    try {
+      const retryUrl = item.entityType === 'chapter'
+        ? `/projects/${projectId}/chapters/${encodeURIComponent(item.entityId)}/resync-derived-data`
+        : `/projects/${projectId}/sync-status/${encodeURIComponent(item.entityType)}/${encodeURIComponent(item.entityId)}/retry`;
+      const res = await api.post(retryUrl, {});
+      const result = apiPayload(res) as any;
+      setMessage(result.needsResync ? `重试仍未完成：${result.lastError || '未知原因'}` : '写作记忆已更新');
+      await loadSyncStates();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '写作记忆更新失败');
+    }
+  };
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setMessage('');
     try {
-      await Promise.all([loadStateItems(), loadImpactReports(), loadContextPreview()]);
+      await Promise.all([loadStateItems(), loadImpactReports(), loadContextPreview(), loadSyncStates(), loadChapters()]);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '状态中心加载失败');
     } finally {
       setLoading(false);
     }
-  }, [loadStateItems, loadImpactReports, loadContextPreview]);
+  }, [loadStateItems, loadImpactReports, loadContextPreview, loadSyncStates, loadChapters]);
 
   useEffect(() => {
     void loadAll();
@@ -230,7 +298,7 @@ const StateCenterPage: React.FC = () => {
       <header style={styles.header}>
         <div>
           <button style={styles.backButton} onClick={() => navigate(`/project/${projectId}`)}>← 返回项目</button>
-          <h1 style={styles.title}>状态确稿中心</h1>
+          <h1 style={styles.title}>内容变化确认</h1>
         </div>
         <button style={styles.primaryButton} onClick={() => void loadAll()} disabled={loading}>
           {loading ? '刷新中...' : '刷新状态'}
@@ -242,10 +310,22 @@ const StateCenterPage: React.FC = () => {
         <SummaryCard label="已确稿" value={counts.confirmed || 0} color="#1f8a5b" />
         <SummaryCard label="冲突" value={counts.conflict || 0} color="#c0392b" />
         <SummaryCard label="过期" value={counts.stale || 0} color="#7f5fc4" />
+        <SummaryCard label="待同步" value={syncStates.filter(item => item.needsResync).length} color="#c0392b" />
         <SummaryCard label="今日新增" value={todayAdded} color="#2f80ed" />
       </section>
 
       {message && <div style={styles.notice}>{message}</div>}
+      {syncStates.some(item => item.needsResync) && (
+        <div style={styles.notice}>
+          <strong>写作记忆尚未更新</strong>
+          {syncStates.filter(item => item.needsResync).map(item => (
+            <div key={`${item.entityType}:${item.entityId}`} style={{ marginTop: 6 }}>
+              {item.entityType}/{item.entityId}：{item.lastError || '等待重试'}
+              <button style={{ marginLeft: 8 }} onClick={() => void retrySync(item)}>重试</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <nav style={styles.tabs}>
         {tabs.map(tab => (
@@ -292,13 +372,13 @@ const StateCenterPage: React.FC = () => {
                 <span style={{ ...styles.badge, background: statusColor[item.status] || '#607d8b' }}>
                   {statusLabel[item.status] || item.status}
                 </span>
-                <strong style={styles.itemTitle}>{item.targetLabel || item.title || item.targetType}</strong>
+                <strong style={styles.itemTitle}>{authorTitle(item)}</strong>
                 <span style={styles.itemMetaLine}>
                   {item.authority || '-'} · {item.source || '-'} · {item.targetType}
                   {entersWritingContext(item) ? ' · 进入写作上下文' : ' · 不进入写作上下文'}
                 </span>
                 {Boolean(item.tags?.length) && <span style={styles.tagRow}>{item.tags!.map(tag => <b key={tag}>{tag}</b>)}</span>}
-                <span style={styles.itemSummary}>{item.summary}</span>
+                <span style={styles.itemSummary}>{authorSummary(item)}</span>
               </button>
             ))}
           </section>
@@ -309,6 +389,9 @@ const StateCenterPage: React.FC = () => {
             onReject={() => selectedItem && actOnItem(selectedItem.id, 'reject')}
             onArchive={() => selectedItem && actOnItem(selectedItem.id, 'archive')}
             onAnalyzeImpact={analyzeImpact}
+            sourceChapter={chapters.find(chapter => chapter.id === selectedItem?.sourceChapterId)}
+            onOpenWriting={(chapterId) => navigate(`/project/${projectId}/writing?chapter=${chapterId}`)}
+            onOpenHistory={(chapterId) => navigate(`/project/${projectId}/versions?chapter=${chapterId}`)}
           />
         </main>
       )}
@@ -330,7 +413,10 @@ const StateDetailPanel: React.FC<{
   onReject: () => void;
   onArchive: () => void;
   onAnalyzeImpact: () => void;
-}> = ({ item, onConfirm, onReject, onArchive, onAnalyzeImpact }) => {
+  sourceChapter?: ChapterReference;
+  onOpenWriting: (chapterId: string) => void;
+  onOpenHistory: (chapterId: string) => void;
+}> = ({ item, onConfirm, onReject, onArchive, onAnalyzeImpact, sourceChapter, onOpenWriting, onOpenHistory }) => {
   if (!item) return <section style={styles.detailPanel}><div style={styles.empty}>选择一条状态查看详情</div></section>;
 
   return (
@@ -340,7 +426,7 @@ const StateDetailPanel: React.FC<{
           <span style={{ ...styles.badge, background: statusColor[item.status] || '#607d8b' }}>
             {statusLabel[item.status] || item.status}
           </span>
-          <h2 style={styles.detailTitle}>{item.targetLabel || item.title || item.targetType}</h2>
+          <h2 style={styles.detailTitle}>{authorTitle(item)}</h2>
         </div>
         <div style={styles.actionGroup}>
           <button style={styles.primaryButton} onClick={onConfirm} disabled={item.status === 'confirmed'}>确稿</button>
@@ -349,7 +435,7 @@ const StateDetailPanel: React.FC<{
         </div>
       </div>
       <div style={styles.metaGrid}>
-        <Meta label="目标类型" value={item.targetType} />
+        <Meta label="检查类型" value={sourceTypeLabels[item.source || ''] || sourceTypeLabels[item.targetType] || '写作记录'} />
         <Meta label="权威级别" value={item.authority || '-'} />
         <Meta label="来源" value={item.source || '-'} />
         <Meta label="置信度" value={typeof item.confidence === 'number' ? `${Math.round(item.confidence * 100)}%` : '-'} />
@@ -358,11 +444,18 @@ const StateDetailPanel: React.FC<{
       {Boolean(item.tags?.length) && (
         <div style={styles.detailTags}>{item.tags!.map(tag => <span key={tag}>{tag}</span>)}</div>
       )}
-      <h3 style={styles.sectionTitle}>状态摘要</h3>
-      <p style={styles.contentText}>{item.summary}</p>
-      {item.content && item.content !== item.summary && (
+      <h3 style={styles.sectionTitle}>需要核对</h3>
+      <p style={styles.contentText}>{authorSummary(item)}</p>
+      {sourceChapter && (
+        <div style={styles.sourceActions}>
+          <span>来源：第{sourceChapter.chapterIndex}章《{sourceChapter.title || '未命名'}》</span>
+          <button style={styles.secondaryButton} onClick={() => onOpenWriting(sourceChapter.id)}>查看当前正文</button>
+          <button style={styles.secondaryButton} onClick={() => onOpenHistory(sourceChapter.id)}>查看修改记录</button>
+        </div>
+      )}
+      {item.content && item.content !== item.summary && !technicalIdentifier.test(item.content) && (
         <>
-          <h3 style={styles.sectionTitle}>详细内容</h3>
+          <h3 style={styles.sectionTitle}>提取到的原文或说明</h3>
           <p style={styles.contentText}>{item.content}</p>
         </>
       )}
@@ -551,6 +644,7 @@ const styles: Record<string, React.CSSProperties> = {
   itemMetaLine: { color: '#7b8794', fontSize: 12 },
   tagRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   detailTags: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 },
+  sourceActions: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 14, padding: 10, color: '#334e68', background: '#f0f4f8', border: '1px solid #d9e2ec', borderRadius: 6 },
   impactFlags: { display: 'flex', gap: 8, flexWrap: 'wrap', color: '#52606d', fontSize: 12 },
   contextLayers: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(140px, 1fr))', gap: 10, margin: '14px 0' },
   layerBox: { background: '#f5f7f8', border: '1px solid #d9e2ec', borderRadius: 6, padding: 10, display: 'grid', gap: 6 },

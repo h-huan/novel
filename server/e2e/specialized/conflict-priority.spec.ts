@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { createProject, deleteProject, createAuthorNote, uniqueTitle } from '../helpers';
 
-const BASE = 'http://localhost:3100/api/v1';
+const BASE = 'http://127.0.0.1:3100/api/v1';
 
 test.describe('Conflict Priority (7.8)', () => {
   let projectId: string;
 
   test.beforeEach(async ({ request }) => {
     const res = await request.post(`${BASE}/projects`, {
-      data: { title: uniqueTitle('conflict-test'), type: 'long_novel' },
+      data: { title: uniqueTitle('conflict-test'), type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
     });
     projectId = (await res.json()).id;
   });

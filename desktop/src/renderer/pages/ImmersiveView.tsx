@@ -71,7 +71,7 @@ const ImmersiveView: React.FC = () => {
         ]);
         // 大纲简要信息
         const outlineData = (outlineRes as any).data || [];
-        setOutline(outlineData.slice(0, 5).map((o: any) => o.title).join('\n'));
+        setOutline(outlineData.map((o: any) => o.title).join('\n'));
         // 角色状态
         const charData = (charRes as any).data || [];
         setCharacters(charData.slice(0, 8).map((c: any) => ({

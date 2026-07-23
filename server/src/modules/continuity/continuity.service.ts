@@ -41,7 +41,7 @@ export class ContinuityService {
     const responseItems = characters.map((character) => this.characterToResponse(character, snapshots, relationships, focusChapter));
 
     const focusCharacters = responseItems.filter(item => focusIds.has(item.id));
-    const recentlyChanged = responseItems.filter(item => item.sourceChapterId).slice(0, 12);
+    const recentlyChanged = responseItems.filter(item => item.sourceChapterId);
     const pendingReview = responseItems.filter(item => item.pendingReviewCount > 0);
     const conflictRisk = responseItems.filter(item => item.riskTags.length > 0);
     const mainCharacters = responseItems.filter(item => item.isPovCharacter || ['protagonist', 'main'].includes(String(item.role || '')));
@@ -1002,13 +1002,13 @@ export class ContinuityService {
       add('state_item', 'conflict', '当前章已 locked', 'locked 章节不允许自动生成覆盖性更新。', context.focusChapter.title || '', 'critical', context.focusChapter.id, true);
     } else {
       const content = String(context.focusChapter.content || '');
-      for (const character of (context.characters.groups.focusCharacters || []).slice(0, 8)) {
+      for (const character of (context.characters.groups.focusCharacters || [])) {
         if (character.name && content.includes(character.name)) {
           const hasLockedState = (character.latestStateSnapshots || []).some((state: any) => state.locked);
           add('character_state', 'verify', `复核人物状态：${character.name}`, `正文出现 ${character.name}，建议生成待确认人物状态复核项。`, this.evidenceAround(content, character.name), 'medium', character.id, hasLockedState, { characterId: character.id, characterName: character.name });
         }
       }
-      for (const rel of (context.relationships.groups.focusRelationships || []).slice(0, 8)) {
+      for (const rel of (context.relationships.groups.focusRelationships || [])) {
         const a = rel.sourceCharacterName || '';
         const b = rel.targetCharacterName || '';
         if (a && b && content.includes(a) && content.includes(b)) {
@@ -1024,7 +1024,7 @@ export class ContinuityService {
       if (this.hasTimelineKeywords(content)) {
         add('timeline_event', 'verify', '复核时间线 / 因果链', '正文出现时间、先后、因为、所以、导致等关键词，建议补充时间线事件或因果链。', this.keywordEvidence(content, ['时间', '随后', '此前', '因为', '所以', '导致', '后来']), 'medium', undefined, false, { keywordSource: 'chapter_content' });
       }
-      for (const rule of (context.worldRules.groups.activeRules || []).slice(0, 6)) {
+      for (const rule of (context.worldRules.groups.activeRules || [])) {
         const needle = rule.title || rule.content || '';
         if (needle && content.includes(String(needle).slice(0, 8))) {
           add('world_rule', rule.locked ? 'conflict' : 'verify', `验证世界观规则：${rule.title}`, '正文疑似使用已登记世界观规则，需作者确认是否一致。', this.evidenceAround(content, String(needle).slice(0, 8)), rule.locked ? 'high' : 'medium', rule.id, Boolean(rule.locked), { ruleId: rule.id });
@@ -2190,7 +2190,7 @@ export class ContinuityService {
 
   private characterToResponse(character: any, snapshots: any[], relationships: any[], focusChapter: any | null) {
     const charSnapshots = snapshots.filter(s => s.character_id === character.id);
-    const latestSnapshots = charSnapshots.slice(0, 8).map(s => this.stateToResponse(s));
+    const latestSnapshots = charSnapshots.map(s => this.stateToResponse(s));
     const goalState = charSnapshots.find(s => s.state_type === 'goal');
     const statusState = charSnapshots.find(s => s.current_state);
     const charRelationships = relationships.filter(r => r.source_character_id === character.id || r.target_character_id === character.id);
@@ -2210,7 +2210,7 @@ export class ContinuityService {
       currentStateSummary: statusState?.current_state || '待补全',
       latestStateSnapshots: latestSnapshots,
       relationshipSummary: charRelationships.length ? `${charRelationships.length} 条关系` : '待补全',
-      riskTags: Array.from(new Set(riskTags)).slice(0, 8),
+      riskTags: Array.from(new Set(riskTags)),
       pendingReviewCount: charSnapshots.filter(s => s.review_status === 'pending').length,
       sourceChapterId: charSnapshots[0]?.chapter_id || focusChapter?.id || null,
       updatedAt: charSnapshots[0]?.updated_at || character.updated_at,

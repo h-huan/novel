@@ -835,7 +835,7 @@ const WorldTabView: React.FC = () => {
             )}
             {activeTab === 'constraints' && (
               <p className="text-text-secondary text-xs">
-                故事世界的规则约束，确保设定一致性的边界条件（参考游蜂65条约束风格）
+                只记录本书确实存在、后续创作必须遵守的世界规则。
               </p>
             )}
             {activeTab === 'power' && (

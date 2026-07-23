@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
 import { ModuleRef } from '@nestjs/core';
 import { ChapterDerivedDataSyncService } from '../modules/chapter/chapter-derived-data-sync.service';
 import { ChunkerService } from '../rag/chunker.service';
 import { up as derivedUp } from '../database/migrations/026_chapter_derived_data_sync';
 import { up as aggregateUp } from '../database/migrations/029_aggregate_summary_content';
 import { up as diagnosticsUp } from '../database/migrations/030_aggregate_summary_diagnostics';
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
 describe('300 chapter aggregate acceptance', () => {
   it('builds dynamically distributed volume summaries and one novel summary from summaries only, idempotently', async () => {

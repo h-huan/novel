@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const BASE = 'http://localhost:3100/api/v1';
+const BASE = 'http://127.0.0.1:3100/api/v1';
 
 test.describe('Import/Export Basic Flow E2E', () => {
   test('GET /import-export/formats should return supported formats', async ({ request }) => {

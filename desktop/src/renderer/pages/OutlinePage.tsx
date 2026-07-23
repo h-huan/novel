@@ -58,6 +58,7 @@ interface ChapterNode {
   chapterFunction: ChapterFunctionType;
   goalArc: GoalArcType;
   targetWords: number;
+  wordCountReason?: string;
   content: string;
   conflict: string;
   mood: string;
@@ -72,6 +73,19 @@ interface ChapterNode {
   reversals?: any[];
   foreshadows?: any[];
 }
+
+type OperationField = { key: string; label: string; initialValue: string; placeholder?: string; type?: 'text' | 'number' };
+type OperationDialog = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  danger?: boolean;
+  fields: OperationField[];
+  onConfirm: (values: Record<string, string>) => Promise<void>;
+};
+
+const CHAPTER_WORD_MIN = 3200;
+const CHAPTER_WORD_MAX = 4000;
 
 const FUNCTION_COLORS: Record<string, string> = {
   opening: '#e94560',
@@ -141,8 +155,51 @@ const parseJsonObject = (value: unknown): Record<string, any> => {
   }
 };
 
+const readableValue = (value: unknown): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try { return readableValue(JSON.parse(trimmed)); } catch { return trimmed; }
+    }
+    return trimmed;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(readableValue).filter(Boolean).join('；');
+  if (typeof value !== 'object') return '';
+
+  const row = value as Record<string, unknown>;
+  const sceneParts = [
+    ['目标', row.goal],
+    ['冲突', row.conflict],
+    ['结果', row.outcome],
+  ].map(([label, item]) => {
+    const text = readableValue(item);
+    return text ? `${label}：${text}` : '';
+  }).filter(Boolean);
+  if (sceneParts.length) return sceneParts.join('；');
+
+  for (const key of ['summary', 'content', 'description', 'title', 'name', 'text']) {
+    const text = readableValue(row[key]);
+    if (text) return text;
+  }
+
+  const briefParts = [
+    ['核心矛盾', row.coreConflict],
+    ['主角诉求', row.protagonistDesire],
+    ['关键转折', row.turningPoint],
+    ['真相揭示', row.reveal],
+    ['结局方向', row.ending],
+  ].map(([label, item]) => {
+    const text = readableValue(item);
+    return text ? `${label}：${text}` : '';
+  }).filter(Boolean);
+  return briefParts.join('\n');
+};
+
 const splitFieldList = (value: unknown): string[] => {
-  if (Array.isArray(value)) return value.map(String).map(v => v.trim()).filter(Boolean);
+  if (Array.isArray(value)) return value.map(readableValue).map(v => v.trim()).filter(Boolean);
   if (typeof value !== 'string') return [];
   return value.split(/[、，,；;\/]/).map(v => v.trim()).filter(Boolean);
 };
@@ -168,22 +225,19 @@ const parseOutlineContentFields = (content: string, sceneData: Record<string, an
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(content || ''))) fields[aliases[match[1]]] = match[2].trim();
 
-  const actions = fields.actions
-    || (Array.isArray(sceneData.characterActions) ? sceneData.characterActions.join('、') : sceneData.characterActions)
-    || (Array.isArray(chapter.characterActions) ? chapter.characterActions.join('、') : chapter.characterActions)
-    || '';
+  const actions = readableValue(fields.actions || sceneData.characterActions || chapter.characterActions);
 
   return {
-    core: fields.core || sceneData.core || sceneData.summary || chapter.content || '',
+    core: readableValue(fields.core || sceneData.core || sceneData.summary || chapter.content),
     scenes: splitFieldList(fields.scenes).length > 0 ? splitFieldList(fields.scenes) : splitFieldList(sceneData.scenes || chapter.scenes),
     actions,
-    conflict: fields.conflict || sceneData.conflict || chapter.conflict || '',
-    highlight: fields.highlight || sceneData.highlight || chapter.highlight || '',
-    foreshadowing: fields.foreshadowing || sceneData.foreshadowing || sceneData.foreshadowingSet || chapter.foreshadowing || '',
-    foreshadowingRecover: fields.foreshadowingRecover || sceneData.foreshadowingRecover || chapter.foreshadowingRecovery || '',
-    hook: fields.hook || sceneData.hook || chapter.hook || '',
-    mood: fields.mood || sceneData.mood || sceneData.emotionalTone || chapter.mood || chapter.emotionalTone || '',
-    reversalPoint: fields.reversalPoint || sceneData.reversalPoint || chapter.reversalPoint || '',
+    conflict: readableValue(fields.conflict || sceneData.conflict || chapter.conflict),
+    highlight: readableValue(fields.highlight || sceneData.highlight || chapter.highlight),
+    foreshadowing: readableValue(fields.foreshadowing || sceneData.foreshadowing || sceneData.foreshadowingSet || chapter.foreshadowing),
+    foreshadowingRecover: readableValue(fields.foreshadowingRecover || sceneData.foreshadowingRecover || chapter.foreshadowingRecovery),
+    hook: readableValue(fields.hook || sceneData.hook || chapter.hook),
+    mood: readableValue(fields.mood || sceneData.mood || sceneData.emotionalTone || chapter.mood || chapter.emotionalTone),
+    reversalPoint: readableValue(fields.reversalPoint || sceneData.reversalPoint || chapter.reversalPoint),
     targetWordsText: fields.targetWords || '',
   };
 };
@@ -299,22 +353,45 @@ const OutlinePage: React.FC = () => {
   const [syncMessage, setSyncMessage] = useState('');
   const [material, setMaterial] = useState('');
   const [platform, setPlatform] = useState('fanqie');
-  const [targetWords, setTargetWords] = useState('3000');
+  const [targetWords, setTargetWords] = useState('');
   const [workScale, setWorkScale] = useState('ai_recommended');
   const [targetWordsRange, setTargetWordsRange] = useState('');
-  const [chapterWordsMode, setChapterWordsMode] = useState('platform_default');
-  const [volumeMode, setVolumeMode] = useState('ai_recommended');
-  const [chaptersPerVolumeMode, setChaptersPerVolumeMode] = useState('dynamic');
   const [updatePlan, setUpdatePlan] = useState('daily_words');
-  const [generateCount, setGenerateCount] = useState('5');
+  const [generateCount, setGenerateCount] = useState('remaining');
   const [tone, setTone] = useState('neutral');
   const [blockedNotice, setBlockedNotice] = useState<{
     reason: string;
     missingAssets: string[];
     recommendedNextAction?: string;
   } | null>(null);
+  const [operationDialog, setOperationDialog] = useState<OperationDialog | null>(null);
+  const [operationValues, setOperationValues] = useState<Record<string, string>>({});
+  const [operationBusy, setOperationBusy] = useState(false);
 
   const projectType = currentProject?.type === 'long_novel' ? 'long' : 'short';
+  const projectSettings = (currentProject?.settings || {}) as Record<string, any>;
+
+  const openOperationDialog = useCallback((dialog: OperationDialog) => {
+    setOperationValues(Object.fromEntries(dialog.fields.map(field => [field.key, field.initialValue])));
+    setOperationDialog(dialog);
+  }, []);
+
+  const submitOperationDialog = useCallback(async () => {
+    if (!operationDialog || operationBusy) return;
+    setOperationBusy(true);
+    try {
+      await operationDialog.onConfirm(operationValues);
+      setOperationDialog(null);
+    } catch (error: any) {
+      setGenProgress(`操作失败，未写入变更：${error?.message || '未知错误'}`);
+    } finally {
+      setOperationBusy(false);
+    }
+  }, [operationDialog, operationBusy, operationValues]);
+
+  useEffect(() => {
+    if (currentProject?.targetWords && !targetWords) setTargetWords(String(currentProject.targetWords));
+  }, [currentProject?.targetWords, targetWords]);
 
   const toChapterNode = useCallback((ch: any): ChapterNode => {
     const sceneData = parseOutlineScenes(ch);
@@ -326,7 +403,7 @@ const OutlinePage: React.FC = () => {
       title: ch.title || '未命名章节',
       chapterFunction: normalizedFunction === 'paving' && order > 0 ? inferRhythmByOrder(order) : normalizedFunction,
       goalArc: normalizeGoalArc(ch.goalArc || ch.goal_arc || sceneData.goalArc),
-      targetWords: Number(ch.targetWords || ch.target_words || sceneData.targetWords || 3000),
+      targetWords: Number(ch.targetWords || ch.target_words || sceneData.targetWords || 0),
       content: ch.content || '',
       conflict: sceneData.conflict || ch.conflict || '',
       mood: sceneData.emotionalTone || sceneData.mood || ch.mood || '',
@@ -345,17 +422,18 @@ const OutlinePage: React.FC = () => {
 
   const toVolumeNode = useCallback((item: any): VolumeNode => {
     const volumeData = parseOutlineScenes(item);
+    const contentData = parseJsonObject(item.content);
     const children = (item.children || item.chapters || []).filter((child: any) => child.level !== 'volume');
     return {
       id: item.id,
       title: item.title || '正文',
-      description: item.content || item.description || '',
+      description: readableValue(volumeData.description || item.description || contentData.theme || contentData.coreConflict || item.content),
       chapters: children.map(toChapterNode),
-      theme: volumeData.theme || item.volumeTheme || '',
-      goal: volumeData.goal || item.volumeGoal || item.content || '',
-      keyEvents: volumeData.keyEvents || item.keyEvents || [],
-      climax: volumeData.climax || item.volumeClimax || '',
-      climaxDescription: volumeData.climaxDescription || item.climaxDescription || '',
+      theme: readableValue(volumeData.theme || item.volumeTheme),
+      goal: readableValue(volumeData.goal || item.volumeGoal || contentData.goal || contentData.coreConflict || item.content),
+      keyEvents: splitFieldList(volumeData.keyEvents || item.keyEvents),
+      climax: readableValue(volumeData.climax || item.volumeClimax),
+      climaxDescription: readableValue(volumeData.climaxDescription || item.climaxDescription),
       timeline: volumeData.timeline || null,
     };
   }, [toChapterNode]);
@@ -453,7 +531,7 @@ const OutlinePage: React.FC = () => {
   const refreshAfterChange = useCallback(async (nextSelectedId?: string) => {
     await loadVolumes();
     if (nextSelectedId) setSelectedChapterId(nextSelectedId);
-    setSyncMessage('当前仅提供伏笔章节索引基础同步能力；时间线、角色状态、未锁定正文会生成待确认影响项，需要人工复核。');
+    setSyncMessage('大纲修改已保存。受影响的伏笔位置、时间顺序和人物状态会列入修改提醒，由作者决定是否采用。');
   }, [loadVolumes]);
 
   const saveGeneratedOutline = useCallback(async (volumesToSave: VolumeNode[], meta: Record<string, any>) => {
@@ -527,7 +605,13 @@ const OutlinePage: React.FC = () => {
             ? inferRhythmByOrder(chapterIndex + 1)
             : normalizeFunction(chapter.chapterFunction),
           goalArc: chapter.goalArc || 'accumulate_burst',
-          targetWords: chapter.targetWords || 3000,
+          targetWords: (() => {
+            const value = Number(chapter.targetWords);
+            if (!Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX) {
+              throw new Error(`章节“${chapter.title}”的目标字数必须由本章任务动态确定，并处于 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 字`);
+            }
+            return value;
+          })(),
           characterIds: chapter.characterIds || [],
           scenes: {
             conflict: chapter.conflict || '',
@@ -540,6 +624,7 @@ const OutlinePage: React.FC = () => {
             characterActions: chapter.characterActions || '',
             reversals: chapter.reversals || [],
             foreshadows: chapter.foreshadows || [],
+            wordCountReason: chapter.wordCountReason || '',
           },
         });
         totalChapters += 1;
@@ -552,8 +637,21 @@ const OutlinePage: React.FC = () => {
       const project = projectData?.data || projectData || {};
       let settings: Record<string, any> = {};
       try { settings = typeof project.settings === 'string' ? JSON.parse(project.settings) : (project.settings || {}); } catch {}
-      settings.totalChapters = totalChapters;
-      settings.totalVolumes = volumesToSave.length;
+      delete settings.perChapterTarget;
+      delete settings.wordsPerChapter;
+      delete settings.chapterWords;
+      delete settings.volumeCount;
+      delete settings.chaptersPerVolume;
+      delete settings.totalChapters;
+      delete settings.totalVolumes;
+      settings.chapterWordRange = { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX };
+      settings.structurePlanning = 'dynamic_by_story_rhythm';
+      settings.plannedStructureSnapshot = {
+        totalChapters,
+        totalVolumes: volumesToSave.length,
+        mode: 'dynamic_by_story_rhythm',
+        generatedAt: new Date().toISOString(),
+      };
       await api.put(`/projects/${projectId}`, { settings: JSON.stringify(settings) });
     } catch {}
   }, [projectId]);
@@ -567,7 +665,8 @@ const OutlinePage: React.FC = () => {
         ? inferRhythmByOrder(index + 1)
         : normalizeFunction(chapter.chapterFunction || chapter.function),
       goalArc: normalizeGoalArc(chapter.goalArc),
-      targetWords: Number(chapter.targetWords || Math.max(1000, Math.floor(Number(targetWords || 3000) / Math.max(total, 1)))),
+      targetWords: Number(chapter.targetWords || 0),
+      wordCountReason: chapter.wordCountReason || chapter.targetWordsReason || '',
       content,
       conflict: chapter.conflict || '',
       mood: chapter.mood || chapter.tone || chapter.emotion || '',
@@ -648,23 +747,24 @@ const OutlinePage: React.FC = () => {
     setGenProgress('正在生成大纲...');
 
     try {
+      const configuredTotalWords = Number(targetWords || currentProject?.targetWords || 0);
+      if (!Number.isInteger(configuredTotalWords) || configuredTotalWords <= 0) throw new Error('项目未配置有效的目标总字数');
       const result = await api.post('/chain/templates/execute/long-novel-flexible-outline', {
         userInput: {
           projectId,
           story_setting: material || '自动生成',
-          targetWords: targetWordsRange || Math.max(1, Number(targetWords || 3000) / 10000),
-          genre: tone || platform || '自动判断',
+          targetWords: configuredTotalWords / 10000,
+          genre: projectSettings.genre || tone || platform,
           chapterLimit: generateCount === 'remaining' ? undefined : generateCount,
           planning: {
             workScale,
             targetWordsRange,
-            chapterWordsMode,
-            volumeMode,
-            chaptersPerVolumeMode,
+            structureMode: 'dynamic_by_story_rhythm',
+            chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX },
             updatePlan,
             generateCount,
             shortStoryFlow: projectType === 'short'
-              ? ['题材钩子', '完整第一人称大纲', '递进反转表', '伏笔回收表', '每章天龙8步法', '前300-500字强吸引']
+              ? ['题材钩子', '闭环故事卡', '场景序列', '伏笔回收表', '章节写作包', '按项目配置检查开篇吸引力']
               : [],
             ultraLongReferenceOnly: true,
           },
@@ -692,7 +792,7 @@ const OutlinePage: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, material, platform, targetWords, targetWordsRange, tone, generateCount, workScale, chapterWordsMode, volumeMode, chaptersPerVolumeMode, updatePlan, projectType, checkAction]);
+  }, [projectId, material, platform, targetWords, targetWordsRange, tone, generateCount, workScale, updatePlan, projectType, checkAction, currentProject?.targetWords, projectSettings]);
 
   const handleSaveGenerated = useCallback(async () => {
     setGenProgress('正在保存大纲...');
@@ -714,9 +814,18 @@ const OutlinePage: React.FC = () => {
     const parsed = chapter ? parseOutlineContentFields(chapter.content || '', parseJsonObject((chapter as any).scenes), chapter) : null;
     const newTitle = window.prompt('拆分后新章节标题（建议只拆内容过多的一章，降低对角色/伏笔/正文的影响）', chapter ? `${chapter.title}（下）` : '新章节');
     if (!newTitle?.trim()) return;
+    const targetsInput = window.prompt(`请按拆分后的实际任务填写两章目标字数（各${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}，原章,新章）`, '');
+    if (targetsInput === null) return;
+    const [originalTargetWords, newTargetWords, ...extraTargets] = targetsInput.split(/[,，\s]+/).filter(Boolean).map(Number);
+    if (extraTargets.length || [originalTargetWords, newTargetWords].some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) {
+      alert(`必须提供两个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标。`);
+      return;
+    }
     try {
       const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/split`, {
         newTitle: newTitle.trim(),
+        originalTargetWords,
+        newTargetWords,
         newContent: parsed ? formatOutlineFields({
           ...parsed,
           core: `承接上一章未完成的动作与后果，继续展开：${parsed.core || chapter?.content || ''}`.slice(0, 260),
@@ -745,6 +854,13 @@ const OutlinePage: React.FC = () => {
     if (!projectId) return;
     const volume = volumes.find(item => item.id === volumeId);
     const order = (volume?.chapters.length || 0) + 1;
+    const targetInput = window.prompt(`请根据本章事件量、场景复杂度和节奏，确定目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, '3600');
+    if (targetInput === null) return;
+    const chapterTargetWords = Number(targetInput);
+    if (!Number.isInteger(chapterTargetWords) || chapterTargetWords < CHAPTER_WORD_MIN || chapterTargetWords > CHAPTER_WORD_MAX) {
+      alert(`目标字数必须是 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数。`);
+      return;
+    }
     try {
       const res = await api.post(`/projects/${projectId}/outlines`, {
         level: 'chapter',
@@ -762,11 +878,11 @@ const OutlinePage: React.FC = () => {
           hook: '补入下一章牵引。',
           mood: '',
           reversalPoint: '',
-          targetWords: 3000,
+          targetWords: chapterTargetWords,
         }),
         chapterFunction: inferRhythmByOrder(order),
         goalArc: normalizeGoalArc('accumulate_burst'),
-        targetWords: 3000,
+        targetWords: chapterTargetWords,
       });
       const data = (res as any).data ?? res;
       await refreshAfterChange(data?.id || data?.data?.id);
@@ -779,10 +895,18 @@ const OutlinePage: React.FC = () => {
     if (!projectId) return;
     const title = window.prompt(position === 'before' ? '插入前：新章节标题' : '插入后：新章节标题', '新章节细纲');
     if (!title?.trim()) return;
+    const targetInput = window.prompt(`请根据新章任务确定目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, '');
+    if (targetInput === null) return;
+    const targetWords = Number(targetInput);
+    if (!Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_MIN || targetWords > CHAPTER_WORD_MAX) {
+      alert(`目标字数必须是 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数。`);
+      return;
+    }
     try {
       const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/insert`, {
         position,
         title: title.trim(),
+        targetWords,
       });
       const data = (res as any).data ?? res;
       await refreshAfterChange(data?.id);
@@ -794,8 +918,15 @@ const OutlinePage: React.FC = () => {
   const handleMergeNext = useCallback(async (chapterId: string) => {
     if (!projectId) return;
     if (!window.confirm('确定将本章与下一章合并？已锁定节点不会被合并，正文不会被自动改写。')) return;
+    const targetInput = window.prompt(`请根据合并后的事件量与节奏重新确定目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, '');
+    if (targetInput === null) return;
+    const targetWords = Number(targetInput);
+    if (!Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_MIN || targetWords > CHAPTER_WORD_MAX) {
+      alert(`目标字数必须是 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数。`);
+      return;
+    }
     try {
-      const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/merge-next`, {});
+      const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/merge-next`, { targetWords });
       const data = (res as any).data ?? res;
       await refreshAfterChange(data?.id || chapterId);
     } catch (error: any) {
@@ -805,27 +936,39 @@ const OutlinePage: React.FC = () => {
 
   const handleMoveOrder = useCallback(async (chapterId: string, direction: 'up' | 'down') => {
     if (!projectId) return;
+    setGenProgress(direction === 'up' ? '正在上移章节…' : '正在下移章节…');
     try {
       const res = await api.post(`/projects/${projectId}/outlines/${chapterId}/move-order`, { direction });
       const data = (res as any).data ?? res;
       await refreshAfterChange(data?.id || chapterId);
+      setGenProgress(direction === 'up' ? '章节已上移，顺序和待同步状态已更新。' : '章节已下移，顺序和待同步状态已更新。');
     } catch (error: any) {
-      alert(`排序失败：${error?.message || '未知错误'}`);
+      setGenProgress(`排序失败，未写入变更：${error?.message || '未知错误'}`);
     }
   }, [projectId, refreshAfterChange]);
 
   const handleContinueCreate = useCallback(async (count: number) => {
     if (!projectId) return;
+    const targetsInput = window.prompt(
+      `请依次填写 ${count} 个章节的目标字数（每章 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}，逗号分隔；应按各章任务分别决定）`,
+      '',
+    );
+    if (targetsInput === null) return;
+    const chapterTargets = targetsInput.split(/[,，\s]+/).filter(Boolean).map(Number);
+    if (chapterTargets.length !== count || chapterTargets.some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) {
+      alert(`必须提供 ${count} 个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标。`);
+      return;
+    }
     try {
       const res = await api.post(`/projects/${projectId}/outlines/continue`, {
         fromOutlineId: selectedChapter?.id,
         count,
+        chapterTargets,
         planning: {
           workScale,
           targetWordsRange,
-          chapterWordsMode,
-          volumeMode,
-          chaptersPerVolumeMode,
+          structureMode: 'dynamic_by_story_rhythm',
+          chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX },
           updatePlan,
         },
       });
@@ -836,30 +979,141 @@ const OutlinePage: React.FC = () => {
     } catch (error: any) {
       alert(`续创建失败：${error?.message || '未知错误'}`);
     }
-  }, [projectId, selectedChapter, workScale, targetWordsRange, chapterWordsMode, volumeMode, chaptersPerVolumeMode, updatePlan, refreshAfterChange]);
+  }, [projectId, selectedChapter, workScale, targetWordsRange, updatePlan, refreshAfterChange]);
 
   const handleExpandChapter = useCallback(async () => {
     if (!projectId || !selectedChapter) return;
-    const sceneData = parseJsonObject((selectedChapter as any).scenes);
-    const docFields = parseOutlineContentFields(selectedChapter.content || '', sceneData, selectedChapter);
-    const expandedDraft = formatOutlineFields({
-      ...docFields,
-      core: docFields.core || `${selectedChapter.title}需要补足具体事件链：谁在何处做了什么、误判了什么、留下什么后果。`,
-      actions: docFields.actions || '补充主要人物的选择、犹豫、遮掩和代价。',
-      conflict: docFields.conflict || '补充外部阻力与人物内心偏差，避免只有顺滑推进。',
-      highlight: docFields.highlight || '补充一个可被读者记住的具体物件、动作或反常细节。',
-      foreshadowing: docFields.foreshadowing || '补充一个短线线索，并标明后续回收位置。',
-      hook: docFields.hook || '用一个未说透的细节牵引下一章。',
-      targetWords: selectedChapter.targetWords || 3000,
-    });
+    setGenProgress('正在基于已确认资料生成本章详细大纲…');
     try {
-      await api.put(`/projects/${projectId}/outlines/${selectedChapter.id}`, { content: expandedDraft });
-      setGenProgress('已生成更完整的章节大纲草稿，请再手动微调关键细节。');
+      const response = await api.post('/chain/expand-outline-chapter', { projectId, outlineId: selectedChapter.id });
+      const data = (response as any).data ?? response;
+      const draft = data?.outline;
+      if (!draft?.content) throw new Error('模型未返回完整章节大纲');
+      await api.put(`/projects/${projectId}/outlines/${selectedChapter.id}`, {
+        content: formatOutlineFields({
+          core: draft.content,
+          scenes: draft.scenes || [],
+          actions: draft.characterActions,
+          conflict: draft.conflict,
+          highlight: draft.highlight,
+          foreshadowing: draft.foreshadowing,
+          foreshadowingRecover: draft.foreshadowingRecover,
+          hook: draft.hook,
+          mood: draft.mood,
+          targetWords: selectedChapter.targetWords,
+        }),
+        scenes: {
+          scenes: draft.scenes || [], characterActions: draft.characterActions || '', conflict: draft.conflict || '',
+          highlight: draft.highlight || '', foreshadowing: draft.foreshadowing || '',
+          foreshadowingRecover: draft.foreshadowingRecover || '', hook: draft.hook || '', mood: draft.mood || '',
+        },
+      });
+      setGenProgress('本章大纲已由模型扩写并完成保存、索引同步；请复核后再编辑。');
       await refreshAfterChange(selectedChapter.id);
-    } catch {
-      setGenProgress('章节大纲扩写失败，请检查模型或接口配置。');
+    } catch (error: any) {
+      setGenProgress(`章节大纲扩写失败，未写入任何替代内容：${error?.message || '未知错误'}`);
     }
   }, [projectId, selectedChapter, refreshAfterChange]);
+
+  const openInsertDialog = useCallback((chapterId: string, position: 'before' | 'after') => {
+    openOperationDialog({
+      title: position === 'before' ? '在本章前插入章节' : '在本章后插入章节',
+      description: '插入会同步调整后续空白章节、大纲顺序和待同步状态；已写正文或已锁定章节不会被静默改动。',
+      confirmLabel: '确认插入',
+      fields: [
+        { key: 'title', label: '章节标题', initialValue: '新章节细纲' },
+        { key: 'targetWords', label: `目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, initialValue: '3600', type: 'number' },
+      ],
+      onConfirm: async values => {
+        const targetWords = Number(values.targetWords);
+        if (!values.title.trim() || !Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_MIN || targetWords > CHAPTER_WORD_MAX) throw new Error(`请填写标题和 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标字数。`);
+        const response = await api.post(`/projects/${projectId}/outlines/${chapterId}/insert`, { position, title: values.title.trim(), targetWords });
+        const data = (response as any).data ?? response;
+        await refreshAfterChange(data?.id);
+        setGenProgress('章节已插入，相关章节顺序和待同步状态已更新。');
+      },
+    });
+  }, [openOperationDialog, projectId, refreshAfterChange]);
+
+  const openAddDialog = useCallback((volumeId: string) => {
+    openOperationDialog({
+      title: '新增章节', description: '章节不会套用固定篇幅；请按本章事件量和节奏填写目标字数。', confirmLabel: '新增章节',
+      fields: [{ key: 'title', label: '章节标题', initialValue: '新章节细纲' }, { key: 'targetWords', label: `目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, initialValue: '3600', type: 'number' }],
+      onConfirm: async values => {
+        const targetWords = Number(values.targetWords);
+        if (!values.title.trim() || !Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_MIN || targetWords > CHAPTER_WORD_MAX) throw new Error(`请填写标题和 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标字数。`);
+        const volume = volumes.find(item => item.id === volumeId); const order = (volume?.chapters.length || 0) + 1;
+        const response = await api.post(`/projects/${projectId}/outlines`, { level: 'chapter', parentId: volumeId, order, title: values.title.trim(), content: '', chapterFunction: inferRhythmByOrder(order), goalArc: 'accumulate_burst', targetWords });
+        const data = (response as any).data ?? response;
+        await refreshAfterChange(data?.id || data?.data?.id);
+        setGenProgress('章节已新增；请补齐具体事件链后再锁定。');
+      },
+    });
+  }, [openOperationDialog, projectId, refreshAfterChange, volumes]);
+
+  const openMergeDialog = useCallback((chapterId: string) => {
+    openOperationDialog({
+      title: '合并本章与下一章', description: '只允许未锁定、未写正文的相邻章节合并；不会自动改写正文。', confirmLabel: '确认合并', danger: true,
+      fields: [{ key: 'targetWords', label: `合并后目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, initialValue: '4000', type: 'number' }],
+      onConfirm: async values => {
+        const targetWords = Number(values.targetWords);
+        if (!Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_MIN || targetWords > CHAPTER_WORD_MAX) throw new Error(`目标字数必须为 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}。`);
+        const response = await api.post(`/projects/${projectId}/outlines/${chapterId}/merge-next`, { targetWords });
+        const data = (response as any).data ?? response;
+        await refreshAfterChange(data?.id || chapterId);
+        setGenProgress('章节已合并，后续顺序和待同步状态已更新。');
+      },
+    });
+  }, [openOperationDialog, projectId, refreshAfterChange]);
+
+  const openSplitDialog = useCallback((volumeId: string, chapterId: string) => {
+    const chapter = volumes.find(volume => volume.id === volumeId)?.chapters.find(item => item.id === chapterId);
+    openOperationDialog({
+      title: '拆分本章', description: '拆分只允许正文尚未写入的章节。系统会同步新章节、后续顺序和待同步状态，不会拆改已锁定正文。', confirmLabel: '确认拆分',
+      fields: [
+        { key: 'title', label: '新章节标题', initialValue: chapter ? `${chapter.title}（下）` : '新章节细纲' },
+        { key: 'originalTargetWords', label: `原章节目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, initialValue: '3600', type: 'number' },
+        { key: 'newTargetWords', label: `新章节目标字数（${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}）`, initialValue: '3600', type: 'number' },
+      ],
+      onConfirm: async values => {
+        const originalTargetWords = Number(values.originalTargetWords); const newTargetWords = Number(values.newTargetWords);
+        if (!values.title.trim() || [originalTargetWords, newTargetWords].some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) throw new Error(`请填写标题和两个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标字数。`);
+        const response = await api.post(`/projects/${projectId}/outlines/${chapterId}/split`, { newTitle: values.title.trim(), originalTargetWords, newTargetWords });
+        const data = (response as any).data ?? response;
+        await refreshAfterChange(data?.new?.id);
+        setGenProgress('章节已拆分，后续章节顺序和待同步状态已更新。');
+      },
+    });
+  }, [openOperationDialog, projectId, refreshAfterChange, volumes]);
+
+  const openDeleteDialog = useCallback((volumeId: string, chapterId: string) => {
+    const chapter = volumes.find(volume => volume.id === volumeId)?.chapters.find(item => item.id === chapterId);
+    openOperationDialog({
+      title: '删除章节', description: `将删除“${chapter?.title || '该章节'}”。已锁定或已有正文的章节会被服务端拒绝，删除后会同步调整后续章节引用。`, confirmLabel: '确认删除', danger: true,
+      fields: [{ key: 'confirmation', label: '输入 删除 确认操作', initialValue: '' }],
+      onConfirm: async values => {
+        if (values.confirmation.trim() !== '删除') throw new Error('请输入“删除”确认。');
+        await api.delete(`/projects/${projectId}/outlines/${chapterId}`);
+        await refreshAfterChange();
+        setGenProgress('章节已删除，后续顺序和待同步状态已更新。');
+      },
+    });
+  }, [openOperationDialog, projectId, refreshAfterChange, volumes]);
+
+  const openContinueDialog = useCallback((count: number) => {
+    openOperationDialog({
+      title: `续创建 ${count} 章`, description: '请逐章填写目标字数，逗号分隔。系统按实际章节任务创建，不会固定套用章数或字数。', confirmLabel: '确认续创建',
+      fields: [{ key: 'targets', label: `${count} 个目标字数`, initialValue: Array.from({ length: count }, () => '3600').join(',') }],
+      onConfirm: async values => {
+        const chapterTargets = values.targets.split(/[,，\s]+/).filter(Boolean).map(Number);
+        if (chapterTargets.length !== count || chapterTargets.some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) throw new Error(`请填写 ${count} 个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数。`);
+        const response = await api.post(`/projects/${projectId}/outlines/continue`, { fromOutlineId: selectedChapter?.id, count, chapterTargets, planning: { workScale, targetWordsRange, structureMode: 'dynamic_by_story_rhythm', chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX }, updatePlan } });
+        const data = (response as any).data ?? response;
+        await refreshAfterChange(data?.outlines?.at(-1)?.id);
+        setGenProgress(`已续创建 ${data?.outlines?.length || count} 章细纲。`);
+      },
+    });
+  }, [openOperationDialog, projectId, refreshAfterChange, selectedChapter?.id, targetWordsRange, updatePlan, workScale]);
 
   const renderContextPanel = () => {
     if (!selectedChapter || !chapterContext) return null;
@@ -950,9 +1204,9 @@ const OutlinePage: React.FC = () => {
     const outlineQuality = [
       { label: '核心内容', ok: coreLength >= 120, hint: `${coreLength}字，建议120-220字` },
       { label: '主要场景', ok: docFields.scenes.length >= 2, hint: `${docFields.scenes.length}个，建议2-3个` },
-      { label: '人物行动', ok: !!docFields.actions && docFields.actions.length >= 20, hint: docFields.actions ? '已填写' : '缺失' },
-      { label: '冲突/代价', ok: !!docFields.conflict && docFields.conflict.length >= 20, hint: docFields.conflict ? '已填写' : '缺失' },
-      { label: '伏笔/钩子', ok: !!docFields.foreshadowing || !!docFields.hook, hint: docFields.foreshadowing || docFields.hook ? '已填写' : '缺失' },
+      { label: '人物行动', ok: !!docFields.actions && docFields.actions.length >= 20, hint: docFields.actions ? '已写' : '尚未写' },
+      { label: '冲突/代价', ok: !!docFields.conflict && docFields.conflict.length >= 20, hint: docFields.conflict ? '已写' : '尚未写' },
+      { label: '伏笔/钩子', ok: !!docFields.foreshadowing || !!docFields.hook, hint: docFields.foreshadowing || docFields.hook ? '已写' : '尚未写' },
     ];
 
     return (
@@ -982,28 +1236,28 @@ const OutlinePage: React.FC = () => {
         <div style={styles.operationBar}>
           <button type="button" style={styles.operationButton} onClick={handleExpandChapter}>AI扩写</button>
           <button type="button" style={styles.operationButton} onClick={() => { setEditingContentId(selectedChapter.id); setEditContent(formatOutlineFields(docFields)); }}>手动微调</button>
-          <button type="button" style={styles.operationButton} onClick={() => selectedVolume && handleSplitChapter(selectedVolume.id, selectedChapter.id)}>拆分本章</button>
-          <button type="button" style={styles.operationButton} onClick={() => handleMergeNext(selectedChapter.id)}>合并下一章</button>
-          <button type="button" style={styles.operationButton} onClick={() => handleInsertChapter(selectedChapter.id, 'before')}>插入前</button>
-          <button type="button" style={styles.operationButton} onClick={() => handleInsertChapter(selectedChapter.id, 'after')}>插入后</button>
+          <button type="button" style={styles.operationButton} onClick={() => selectedVolume && openSplitDialog(selectedVolume.id, selectedChapter.id)}>拆分本章</button>
+          <button type="button" style={styles.operationButton} onClick={() => openMergeDialog(selectedChapter.id)}>合并下一章</button>
+          <button type="button" style={styles.operationButton} onClick={() => openInsertDialog(selectedChapter.id, 'before')}>插入前</button>
+          <button type="button" style={styles.operationButton} onClick={() => openInsertDialog(selectedChapter.id, 'after')}>插入后</button>
           <button type="button" style={styles.operationButton} onClick={() => handleMoveOrder(selectedChapter.id, 'up')}>上移</button>
           <button type="button" style={styles.operationButton} onClick={() => handleMoveOrder(selectedChapter.id, 'down')}>下移</button>
-          <button type="button" style={styles.operationButton} onClick={() => selectedVolume && handleAddChapter(selectedVolume.id)}>新增章节</button>
-          <button type="button" style={{ ...styles.operationButton, color: '#ef4444', borderColor: 'rgba(239,68,68,0.24)' }} onClick={() => selectedVolume && handleDeleteChapter(selectedVolume.id, selectedChapter.id)}>删除</button>
+          <button type="button" style={styles.operationButton} onClick={() => selectedVolume && openAddDialog(selectedVolume.id)}>新增章节</button>
+          <button type="button" style={{ ...styles.operationButton, color: '#ef4444', borderColor: 'rgba(239,68,68,0.24)' }} onClick={() => selectedVolume && openDeleteDialog(selectedVolume.id, selectedChapter.id)}>删除</button>
         </div>
         <div style={styles.impactNotice}>
-          影响提示：当前仅提供伏笔章节索引基础同步能力；时间线、角色状态、未锁定正文会生成待确认影响项，需要人工复核。
+          修改后，相关伏笔位置、时间顺序和人物状态会出现在修改提醒中；系统不会擅自改写正文。
         </div>
         <div style={styles.impactNotice}>
           续创建：
           {[1, 2, 5, 10].map(count => (
-            <button key={count} type="button" style={{ ...styles.operationButton, marginLeft: 8 }} onClick={() => handleContinueCreate(count)}>
+            <button key={count} type="button" style={{ ...styles.operationButton, marginLeft: 8 }} onClick={() => openContinueDialog(count)}>
               续 {count} 章
             </button>
           ))}
         </div>
         <div style={styles.qualityPanel}>
-          <div style={styles.qualityTitle}>章节大纲完整度</div>
+          <div style={styles.qualityTitle}>本章写作要点</div>
           <div style={styles.qualityList}>
             {outlineQuality.map(item => (
               <span key={item.label} style={{ ...styles.qualityBadge, borderColor: item.ok ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.28)', color: item.ok ? '#22c55e' : '#f59e0b' }}>
@@ -1011,7 +1265,7 @@ const OutlinePage: React.FC = () => {
               </span>
             ))}
           </div>
-          <div style={styles.qualityHint}>AI扩写会先补足结构化草稿，手动微调用来改关键细节；保存后只刷新大纲和索引，不直接改已锁定正文。</div>
+          <div style={styles.qualityHint}>AI扩写会依据本书现有资料完善本章；手动修改关键细节后，会标出受影响的后续内容，不直接改动已锁定正文。</div>
         </div>
         {syncMessage && <div style={styles.syncNotice}>{syncMessage}</div>}
 
@@ -1110,7 +1364,7 @@ const OutlinePage: React.FC = () => {
           <div style={styles.formRow}>
             <div style={{ ...styles.formSection, flex: 1 }}>
               <label style={styles.formLabel}>目标字数</label>
-              <input style={styles.input} value={targetWords} onChange={event => setTargetWords(event.target.value)} placeholder="3000" />
+              <input style={styles.input} value={targetWords} onChange={event => setTargetWords(event.target.value)} placeholder="读取项目目标总字数" />
             </div>
             <div style={{ ...styles.formSection, flex: 1 }}>
               <label style={styles.formLabel}>风格基调</label>
@@ -1134,29 +1388,10 @@ const OutlinePage: React.FC = () => {
               <input style={styles.input} value={targetWordsRange} onChange={event => setTargetWordsRange(event.target.value)} placeholder="可空，例：80000-120000" />
             </div>
           </div>
-          <div style={styles.formRow}>
-            <div style={{ ...styles.formSection, flex: 1 }}>
-              <label style={styles.formLabel}>每章字数</label>
-              <select style={styles.input} value={chapterWordsMode} onChange={event => setChapterWordsMode(event.target.value)}>
-                <option value="platform_default">平台默认</option>
-                <option value="custom">用户自定义</option>
-                <option value="ai_recommended">AI推荐</option>
-              </select>
-            </div>
-            <div style={{ ...styles.formSection, flex: 1 }}>
-              <label style={styles.formLabel}>卷数</label>
-              <select style={styles.input} value={volumeMode} onChange={event => setVolumeMode(event.target.value)}>
-                <option value="ai_recommended">AI推荐</option>
-                <option value="manual">手动指定</option>
-              </select>
-            </div>
-            <div style={{ ...styles.formSection, flex: 1 }}>
-              <label style={styles.formLabel}>每卷章节</label>
-              <select style={styles.input} value={chaptersPerVolumeMode} onChange={event => setChaptersPerVolumeMode(event.target.value)}>
-                <option value="dynamic">AI动态分配</option>
-                <option value="manual">手动指定</option>
-              </select>
-            </div>
+          <div style={{ ...styles.formSection, padding: '12px', border: '1px solid #30304a', borderRadius: '8px', color: '#b8b8ca' }}>
+            <label style={styles.formLabel}>动态结构规则</label>
+            <div>卷数、每卷章数和总章数由故事阶段、人物弧线、冲突升级与节奏动态决定，不预设固定数量。</div>
+            <div style={{ marginTop: '6px' }}>每章必须为 {CHAPTER_WORD_MIN}-{CHAPTER_WORD_MAX} 字；具体目标由该章事件量和场景复杂度单独确定。</div>
           </div>
           <div style={styles.formRow}>
             <div style={{ ...styles.formSection, flex: 1 }}>
@@ -1180,12 +1415,12 @@ const OutlinePage: React.FC = () => {
           </div>
           {projectType === 'short' && (
             <div style={styles.impactNotice}>
-              短故事三步骤：题材钩子、完整第一人称大纲、递进反转表、伏笔回收表、每章天龙8步法，并要求前300-500字强吸引。
+              短故事流程：题材钩子、闭环故事卡、场景序列、伏笔回收表和章节写作包；视角、篇幅与开篇节奏严格采用项目配置。
             </div>
           )}
           <div style={styles.actionRow}>
             <button type="button" style={{ ...styles.genBtn, opacity: isGenerating ? 0.65 : 1 }} onClick={handleGenerateOutline} disabled={isGenerating}>
-              {isGenerating ? '生成中...' : 'AI生成完整大纲'}
+              {isGenerating ? '生成中...' : '按本书资料重写本章大纲'}
             </button>
             {saveGenerated && <button type="button" style={{ ...styles.genBtn, backgroundColor: '#2ecc71' }} onClick={handleSaveGenerated}>保存到数据库</button>}
             {canRegenerate && !isGenerating && <button type="button" style={styles.secondaryButton} onClick={handleGenerateOutline}>重新生成</button>}
@@ -1219,7 +1454,7 @@ const OutlinePage: React.FC = () => {
                       <div style={styles.volumeHeader}>
                         <span style={styles.volumeTitle}>{volume.title}</span>
                         <span style={styles.volumeCount}>{volume.chapters.length}章</span>
-                        <button type="button" onClick={() => handleAddChapter(volume.id)} title="添加章节" style={styles.addButton}>+</button>
+                        <button type="button" onClick={() => openAddDialog(volume.id)} title="添加章节" style={styles.addButton}>+</button>
                       </div>
                       {volume.goal && <div style={styles.volumeHint}>{volume.goal}</div>}
                       {volume.keyEvents?.length ? <div style={styles.volumeTiny}>关键事件：{volume.keyEvents.slice(0, 5).join(' -> ')}</div> : null}
@@ -1231,8 +1466,8 @@ const OutlinePage: React.FC = () => {
                             index={index}
                             selected={selectedChapterId === chapter.id}
                             onSelect={() => setSelectedChapterId(chapter.id)}
-                            onSplit={() => handleSplitChapter(volume.id, chapter.id)}
-                            onDelete={() => handleDeleteChapter(volume.id, chapter.id)}
+                            onSplit={() => openSplitDialog(volume.id, chapter.id)}
+                            onDelete={() => openDeleteDialog(volume.id, chapter.id)}
                           />
                         ))}
                       </div>
@@ -1270,6 +1505,24 @@ const OutlinePage: React.FC = () => {
               <div style={styles.detailPanel}>{selectedChapter ? renderDetail() : <EmptyState title="点击左侧章节查看详情" />}</div>
             </>
           )}
+        </div>
+      )}
+      {operationDialog && (
+        <div style={styles.dialogBackdrop} role="dialog" aria-modal="true" aria-label={operationDialog.title}>
+          <div style={styles.dialogCard}>
+            <div style={styles.dialogTitle}>{operationDialog.title}</div>
+            <div style={styles.dialogDescription}>{operationDialog.description}</div>
+            {operationDialog.fields.map(field => (
+              <label key={field.key} style={styles.formSection}>
+                <span style={styles.formLabel}>{field.label}</span>
+                <input type={field.type || 'text'} style={styles.input} placeholder={field.placeholder} value={operationValues[field.key] || ''} onChange={event => setOperationValues(values => ({ ...values, [field.key]: event.target.value }))} />
+              </label>
+            ))}
+            <div style={styles.dialogActions}>
+              <button type="button" style={styles.secondaryButton} onClick={() => !operationBusy && setOperationDialog(null)}>取消</button>
+              <button type="button" style={{ ...styles.genBtn, backgroundColor: operationDialog.danger ? '#b91c1c' : '#2563eb' }} disabled={operationBusy} onClick={submitOperationDialog}>{operationBusy ? '正在执行…' : operationDialog.confirmLabel}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1331,6 +1584,11 @@ const styles: Record<string, React.CSSProperties> = {
   headerButton: { padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontFamily: 'inherit' },
   generatePanel: { padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', maxWidth: 660 },
   blockedNoticeWrap: { marginTop: -4 },
+  dialogBackdrop: { position: 'fixed', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backgroundColor: 'rgba(2,6,23,0.72)' },
+  dialogCard: { width: 'min(460px, 100%)', padding: 20, borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', backgroundColor: '#17213b', boxShadow: '0 24px 60px rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', gap: 12 },
+  dialogTitle: { fontSize: 16, fontWeight: 700, color: '#f8fafc' },
+  dialogDescription: { fontSize: 12, lineHeight: 1.6, color: '#cbd5e1' },
+  dialogActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
   formSection: { display: 'flex', flexDirection: 'column', gap: 6 },
   formLabel: { fontSize: 11, fontWeight: 600, color: '#8a8aa0' },
   formRow: { display: 'flex', gap: 12 },

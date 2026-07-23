@@ -21,11 +21,11 @@ import { QualityGateService } from './quality-gate.service';
 import { StoryChainService } from './story-chain.service';
 import { RealLLMService } from './real-llm.service';
 import { WritingModeService } from './writing-mode.service';
-import { VersionHistoryService } from './version-history.service';
 import { NewsRssService } from './news-rss.service';
 import { StyleTemplateService } from './style-template.service';
 import { MultiModelService } from './multi-model.service';
 import { SeedEnrichChainService } from './seed-enrich-chain.service';
+import { GenerationRecoveryService } from './generation-recovery.service';
 import { ChainController } from './chain.controller';
 import { StateModule } from '../state/state.module';
 import { FileStorageModule } from '../modules/file-storage/file-storage.module';
@@ -48,7 +48,7 @@ import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.mo
     WorldSettingModule,
     OrganizationModule,
     MapPointModule,
-    WorkflowGuardModule,
+    forwardRef(() => WorkflowGuardModule),
   ],
   controllers: [ChainController],
   providers: [
@@ -59,11 +59,11 @@ import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.mo
     StoryChainService,
     RealLLMService,
     WritingModeService,
-    VersionHistoryService,
     NewsRssService,
     StyleTemplateService,
     MultiModelService,
     SeedEnrichChainService,
+    GenerationRecoveryService,
   ],
   exports: [
     ChainEngineService,
@@ -73,6 +73,7 @@ import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.mo
     RealLLMService,
     WritingModeService,
     SeedEnrichChainService,
+    GenerationRecoveryService,
   ],
 })
 export class ChainModule {}

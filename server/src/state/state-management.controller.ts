@@ -9,7 +9,7 @@
  * 5. 版本历史 API
  * 6. 字段锁定 API
  */
-import { Controller, Get, Post, Put, Patch, Body, Param, Query, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, Logger, HttpException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { StateExtractionService } from './state-extraction.service';
 import { ConsistencyCheckService } from './consistency-check.service';
@@ -160,7 +160,7 @@ export class StateManagementController {
     @Param('projectId') projectId: string,
     @Query('limit') limit?: string,
   ) {
-    return { success: true, reports: this.stateItemService.listImpactReports(projectId, Number(limit || 100) || 100) };
+    return { success: true, reports: this.stateItemService.listImpactReports(projectId, limit === undefined ? undefined : Number(limit)) };
   }
 
   @Get('impact/reports/:id')
@@ -177,6 +177,24 @@ export class StateManagementController {
     @Param('id') id: string,
   ) {
     return { success: true, item: this.stateItemService.applyImpactItem(projectId, id) };
+  }
+
+  @Get('versions/:entityType/:entityId')
+  getCanonicalVersions(
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string,
+  ) {
+    return this.stateItemService.listCanonicalVersions(entityType, entityId);
+  }
+
+  @Post('versions/:entityType/:entityId/:version/restore')
+  restoreCanonicalVersion(
+    @Param('projectId') projectId: string,
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string,
+    @Param('version') version: string,
+  ) {
+    return this.stateItemService.restoreCanonicalVersion(projectId, entityType, entityId, Number(version));
   }
 
   @Get('characters/:characterId/evolution')
@@ -201,20 +219,21 @@ export class StateManagementController {
     @Query('limit') limit?: string,
   ) {
     const db = this.databaseService.getDb();
-    const parsedLimit = Math.min(Math.max(parseInt(limit || '100', 10) || 100, 1), 500);
+    const parsedLimit = limit === undefined ? undefined : parseInt(limit, 10);
+    if (parsedLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) throw new HttpException('limit must be a positive integer', 400);
     const rows = status === 'all'
       ? db.prepare(`
           SELECT * FROM state_confirmations
           WHERE project_id = ?
           ORDER BY created_at DESC
-          LIMIT ?
-        `).all(projectId, parsedLimit) as any[]
+          ${parsedLimit === undefined ? '' : 'LIMIT ?'}
+        `).all(projectId, ...(parsedLimit === undefined ? [] : [parsedLimit])) as any[]
       : db.prepare(`
           SELECT * FROM state_confirmations
           WHERE project_id = ? AND status = ?
           ORDER BY created_at DESC
-          LIMIT ?
-        `).all(projectId, status, parsedLimit) as any[];
+          ${parsedLimit === undefined ? '' : 'LIMIT ?'}
+        `).all(projectId, status, ...(parsedLimit === undefined ? [] : [parsedLimit])) as any[];
 
     return {
       success: true,

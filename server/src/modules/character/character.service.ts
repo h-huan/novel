@@ -113,14 +113,7 @@ export class CharacterService {
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
     this.analyzeStateImpact(existing.project_id, id, '人物资料修改影响分析', {
-      before: {
-        name: existing.name,
-        identity: existing.identity,
-        appearance: existing.appearance,
-        background: existing.background,
-        personality: existing.personality,
-        relationships: existing.relationships,
-      },
+      before: this.toResponse(existing),
       after: dto,
       priority: 'character',
     });
@@ -130,7 +123,11 @@ export class CharacterService {
   remove(id: string): { success: boolean } {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Character ${id} not found`);
+    const before = this.toResponse(existing);
     this.repo.delete(id);
+    this.analyzeStateImpact(existing.project_id, id, '人物删除影响分析', {
+      operation: 'remove', before, priority: 'character', needsReview: true,
+    });
     return { success: true };
   }
 
@@ -142,7 +139,7 @@ export class CharacterService {
     if (!row) throw new NotFoundException(`Character ${id} not found`);
     const response = this.toResponse(row);
     this.analyzeStateImpact(existing.project_id, id, '人物关系添加影响分析', {
-      before: { relationships: existing.relationships },
+      before: this.toResponse(existing),
       after: { relationships: row.relationships },
       relationChange: `add_relationship: ${dto.targetCharacterId || (dto as any).type || 'unknown'}`,
       priority: 'character',
@@ -157,7 +154,7 @@ export class CharacterService {
     if (!row) throw new NotFoundException(`Character ${id} not found`);
     const response = this.toResponse(row);
     this.analyzeStateImpact(existing.project_id, id, '人物关系删除影响分析', {
-      before: { relationships: existing.relationships },
+      before: this.toResponse(existing),
       after: { relationships: row.relationships },
       relationChange: `remove_relationship: ${targetId}`,
       priority: 'character',
@@ -297,15 +294,11 @@ export class CharacterService {
 
   private analyzeStateImpact(projectId: string, id: string, summary: string, payload: Record<string, unknown>) {
     if (!this.stateItemService) return;
-    try {
-      this.stateItemService.analyzeImpact(projectId, {
+    this.stateItemService.analyzeImpactTracked(projectId, {
         targetType: 'character',
         targetId: id,
         summary,
         payload: { ...payload, priority: 'character', affects: ['outline', 'volume', 'chapter_plan', 'chapter'] },
-      });
-    } catch {
-      // 影响分析失败不能阻断人物保存
-    }
+    });
   }
 }

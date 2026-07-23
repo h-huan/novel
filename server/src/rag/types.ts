@@ -3,7 +3,7 @@
  */
 
 /** 文档类型 */
-export type DocType = 'chapter' | 'world_setting' | 'character_profile' | 'outline' | 'foreshadowing';
+export type DocType = 'chapter' | 'world_setting' | 'character_profile' | 'outline' | 'foreshadowing' | 'timeline';
 
 /** 检索场景 */
 export type SearchScene = 'pre_writing' | 'mid_writing' | 'consistency_check' | 'character_query';

@@ -18,6 +18,13 @@ import {
 import path from 'path';
 import fs from 'fs';
 
+// 当前桌面运行环境的 Chromium GPU 子进程可能因图形运行库不可用而
+// 连续崩溃并直接终止整个应用。小说编辑器不依赖 GPU 渲染，启动前关闭
+// 硬件加速以保证窗口能够稳定创建。
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('use-angle', 'swiftshader');
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+
 // ---------- 类型定义 ----------
 
 interface IpcResult<T = unknown> {
@@ -196,7 +203,7 @@ function createLauncherWindow(): void {
     minHeight: 500,
     title: 'AI写作平台',
     backgroundColor: '#1a1a2e',
-    show: false,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -217,12 +224,16 @@ function createLauncherWindow(): void {
     }
   });
 
+  launcherWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => { void connectToServer(); }, 100);
+  });
+
   // 加载引导页
   if (VITE_DEV_SERVER_URL) {
     launcherWindow.loadURL(VITE_DEV_SERVER_URL + 'launcher.html');
     launcherWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    launcherWindow.loadFile(path.join(__dirname, '../../dist/launcher.html'));
+    launcherWindow.loadFile(path.join(__dirname, '../dist/launcher.html'));
   }
 }
 
@@ -242,7 +253,7 @@ function createMainWindow(projectId?: string, projectTitle?: string): void {
     minHeight: 680,
     title: projectTitle ? `${projectTitle} - AI写作平台` : 'AI写作平台',
     backgroundColor: '#1a1a2e',
-    show: false,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -273,6 +284,10 @@ function createMainWindow(projectId?: string, projectTitle?: string): void {
     mainWindow = null;
   });
 
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => { void connectToServer(); }, 100);
+  });
+
   // 加载应用（带 project 参数，方便直接跳转）
   let url: string;
   if (VITE_DEV_SERVER_URL) {
@@ -284,7 +299,7 @@ function createMainWindow(projectId?: string, projectTitle?: string): void {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     // 生产模式用 hash 参数传递项目 ID
-    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'), {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
       hash: projectId ? `/project/${projectId}/dashboard` : '/',
     });
   }
@@ -340,13 +355,14 @@ function setupAutoUpdater(): void {
   }
 }
 
-// ---------- NestJS 服务连接（不 fork，只检测并连接） ----------
+// ---------- NestJS 服务连接（仅检测并连接外部服务） ----------
 
 async function connectToServer(port: number = 3100): Promise<boolean> {
   try {
     const healthUrl = `http://127.0.0.1:${port}/api/v1/health`;
     const res = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
+      serverProcess.port = port;
       console.log(`[server] 已连接后端服务 http://127.0.0.1:${port}`);
       mainWindow?.webContents.send('server-status', { running: true, port });
       launcherWindow?.webContents.send('server-status', { running: true, port });
@@ -356,30 +372,6 @@ async function connectToServer(port: number = 3100): Promise<boolean> {
     // 服务未启动
   }
   return false;
-}
-
-function getServerBinaryPath(): string {
-  if (VITE_DEV_SERVER_URL) {
-    return path.resolve(__dirname, '..', '..', '..', 'server', 'dist', 'src', 'main.js');
-  }
-  return path.join(process.resourcesPath, 'server', 'main.js');
-}
-
-/**
- * 查找系统 Node.js 路径（Electron 内置 Node.js 版本可能过旧）
- * 开发模式下，系统 Node.js 通常支持 node:sqlite；Electron 内置的 v20 不支持
- */
-function findSystemNodePath(): string | undefined {
-  try {
-    const { execSync } = require('child_process');
-    const cmd = process.platform === 'win32' ? 'where node' : 'which node';
-    const nodePath = execSync(cmd, { encoding: 'utf8', timeout: 3000 })
-      .split(/[\r\n]+/)[0]
-      .trim();
-    return nodePath || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 // ---------- IPC 处理器 ----------
@@ -662,21 +654,10 @@ function registerIpcHandlers(): void {
       try {
         const targetPort = port ?? 3100;
 
-        // 只检测后端是否在运行，不 fork
-        try {
-          const healthUrl = `http://127.0.0.1:${targetPort}/api/v1/health`;
-          const healthRes = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
-          if (healthRes.ok) {
-            serverProcess.port = targetPort;
-            serverProcess.process = null;
-            console.log(`[server] 连接后端 http://127.0.0.1:${targetPort} 成功`);
-            mainWindow?.webContents.send('server-status', { running: true, port: targetPort });
-            launcherWindow?.webContents.send('server-status', { running: true, port: targetPort });
-            return { success: true, data: { port: targetPort, status: 'already-running' } };
-          }
-        } catch { /* 无服务 */ }
-
-        return { success: false, error: `后端服务未启动 (http://127.0.0.1:${targetPort})，请先在终端启动 server` };
+        const running = await connectToServer(targetPort);
+        return running
+          ? { success: true, data: { port: targetPort, status: 'already-running' } }
+          : { success: false, error: `后端服务未启动 (http://127.0.0.1:${targetPort})，请先在终端启动 server` };
       } catch (error) {
         return { success: false, error: String(error) };
       }
@@ -731,7 +712,7 @@ function registerIpcHandlers(): void {
 // 开发模式：存到项目根目录的 .appdata 下
 // 生产模式：存到可执行文件所在目录的 .appdata 下（与 C 盘解耦）
 const userDataPath = VITE_DEV_SERVER_URL
-  ? path.resolve(__dirname, '..', '..', '..', '..', '.appdata')  // dev: d:\code\novel\.appdata
+  ? path.resolve(__dirname, '..', '..', '..', '.appdata')  // dev: d:\code\novel\.appdata
   : path.join(path.dirname(app.getPath('exe')), '.appdata');      // prod: 安装目录\.appdata
 try {
   app.setPath('userData', userDataPath);
@@ -745,9 +726,7 @@ app.whenReady().then(() => {
   registerShortcuts();
   registerIpcHandlers();
   setupAutoUpdater();
-
-  // 自动启动后端服务
-  connectToServer();
+  void connectToServer();
 
   // macOS: 点击 dock 图标重新创建窗口
   app.on('activate', () => {

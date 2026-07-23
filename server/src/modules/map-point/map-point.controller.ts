@@ -6,15 +6,24 @@ import { ApiTags } from '@nestjs/swagger';
 import { MapPointService } from './map-point.service';
 import { CreateMapPointDto, UpdateMapPointDto } from './dto/map-point.dto';
 import { VectorIndexService } from '../../rag/vector-index.service';
+import { EmbeddingService } from '../../rag/embedding.service';
+import { CanonicalSyncStateService } from '../../rag/canonical-sync-state.service';
 
 @ApiTags('map-point')
 @Controller('projects/:projectId/map-points')
 export class MapPointController {
-  constructor(private readonly service: MapPointService, private readonly vectorIndex: VectorIndexService) {}
+  constructor(
+    private readonly service: MapPointService,
+    private readonly vectorIndex: VectorIndexService,
+    private readonly embedding: EmbeddingService,
+    private readonly syncStates: CanonicalSyncStateService,
+  ) {}
 
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateMapPointDto) {
-    const result = this.service.create(projectId, dto); await this.indexLocation(projectId, result.id); return result;
+    const result = this.service.create(projectId, dto);
+    const sync = await this.indexLocation(projectId, result.id);
+    return { ...result, sync };
   }
 
   @Get()
@@ -49,11 +58,11 @@ export class MapPointController {
   }
 
   @Get(':id/profile') getProfile(@Param('projectId') projectId: string, @Param('id') id: string) { return this.service.getProfile(projectId, id); }
-  @Put(':id/profile') async updateProfile(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: Record<string, unknown>) { const result = this.service.updateProfile(projectId, id, body); await this.indexLocation(projectId, id); return result; }
+  @Put(':id/profile') async updateProfile(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: Record<string, unknown>) { const result = this.service.updateProfile(projectId, id, body); const sync = await this.indexLocation(projectId, id); return { ...result, sync }; }
   @Get(':id/writing-summary') getWritingSummary(@Param('projectId') projectId: string, @Param('id') id: string) { return this.service.getWritingSummary(projectId, id); }
   @Post('consistency-check') checkConsistency(@Param('projectId') projectId: string, @Body() body: { content?: string }) { return { locationConsistency: this.service.checkConsistency(projectId, body.content || '') }; }
   @Get(':id/relations') getRelations(@Param('projectId') projectId: string, @Param('id') id: string) { return this.service.getRelations(projectId, id); }
-  @Put(':id/relations') async updateRelations(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: { relations?: any[] }) { const relations = this.service.updateRelations(projectId, id, body.relations || []); await this.indexLocation(projectId, id); return { relations }; }
+  @Put(':id/relations') async updateRelations(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: { relations?: any[] }) { const relations = this.service.updateRelations(projectId, id, body.relations || []); const sync = await this.indexLocation(projectId, id); return { relations, sync }; }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
@@ -61,14 +70,33 @@ export class MapPointController {
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateMapPointDto) {
-    return this.service.update(id, dto);
+  async update(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: UpdateMapPointDto) {
+    const result = this.service.update(id, dto);
+    const sync = await this.indexLocation(projectId, id);
+    return { ...result, sync };
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  async remove(@Param('projectId') projectId: string, @Param('id') id: string) {
+    const result = this.service.remove(id);
+    const sync = await this.syncStates.run(projectId, 'map_point', id, () =>
+      this.vectorIndex.deleteChunksStrict(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [`map-point:${id}`]));
+    return { ...result, sync };
   }
 
-  private async indexLocation(projectId: string, id: string) { try { const summary = this.service.getWritingSummary(projectId, id).summary; await this.vectorIndex.indexChunks(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [{ chunk: { id: `map-point:${id}`, text: summary, docType: 'location_profile' as any, metadata: { chunkIndex: 0 } }, vector: [0] }]); } catch {} }
+  private indexLocation(projectId: string, id: string) {
+    return this.syncStates.run(projectId, 'map_point', id, async () => {
+      const summary = this.service.getWritingSummary(projectId, id).summary;
+      const [vector] = await this.embedding.embed([summary]);
+      await this.vectorIndex.indexChunksStrict(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [{
+        chunk: {
+          id: `map-point:${id}`,
+          text: summary,
+          docType: 'world_setting',
+          metadata: { chunkIndex: 0, parentDocId: id },
+        },
+        vector,
+      }]);
+    });
+  }
 }

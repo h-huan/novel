@@ -23,6 +23,12 @@ export class WritingQualityController {
     return this.service.analyzeChapterQuality(projectId, dto);
   }
 
+  /** POST /projects/:projectId/writing-quality/submit-review */
+  @Post('submit-review')
+  submitReview(@Param('projectId') projectId: string, @Body() dto: AnalyzeChapterDto) {
+    return this.service.submitChapterForQualityReview(projectId, dto);
+  }
+
   /** POST /projects/:projectId/writing-quality/attention */
   @Post('attention')
   checkAttention(@Param('projectId') projectId: string, @Body() dto: AttentionCheckDto) {

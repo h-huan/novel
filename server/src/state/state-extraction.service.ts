@@ -67,9 +67,7 @@ export class StateExtractionService {
         totalChapters,
       );
 
-      // TODO: 如果规则引擎置信度不足，调用 LLM 辅助提取
-      // const llmChanges = await this.extractWithLLM(chapterContent, profile, previousSnapshot);
-      // changes.push(...llmChanges);
+      // 人物状态采用确定性 StateEngine 增量提取；伏笔与情节语义在下方独立使用 LLM 提取，避免重复写入人物快照。
 
       // 应用变化
       if (changes.length > 0) {
@@ -444,7 +442,7 @@ export class StateExtractionService {
   ): Promise<Array<{ id: string; status?: string; reason?: string; recoveryMethod?: string }>> {
     if (!this.realLLM || existingForeshadowings.length === 0 || !chapterContent.trim()) return [];
 
-    const candidates = existingForeshadowings.slice(0, 30).map(item => ({
+    const candidates = existingForeshadowings.map(item => ({
       id: item.id,
       description: item.description,
       type: item.type,
@@ -472,11 +470,13 @@ ${chapterContent.slice(-5000)}
     try {
       const response = await this.realLLM.generate({
         prompt,
-        model: 'deepseek',
         temperature: 0.2,
         scenario: 'state_extraction',
       } as any);
       const parsed = this.parseJson<{ mentions?: Array<{ id?: string; status?: string; reason?: string; recoveryMethod?: string }> }>(response.content, {});
+      if (!Array.isArray(parsed.mentions)) {
+        throw new Error('伏笔状态提取结果缺少 mentions 数组');
+      }
       const validIds = new Set(existingForeshadowings.map(item => item.id));
       return (parsed.mentions || [])
         .filter(item => item.id && validIds.has(item.id))
@@ -487,8 +487,7 @@ ${chapterContent.slice(-5000)}
           recoveryMethod: String(item.recoveryMethod || '').slice(0, 200),
         }));
     } catch (error) {
-      this.logger.warn(`LLM foreshadowing extraction failed, fallback to keyword matching: ${error instanceof Error ? error.message : String(error)}`);
-      return [];
+      throw new Error(`伏笔状态提取失败，未使用关键词结果降级：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -515,7 +514,9 @@ ${chapterContent.slice(-5000)}
       pacingScore: 5,
       turningPoints: [] as string[],
     };
-    if (!this.realLLM || !chapterContent.trim()) return fallback;
+    if (!this.realLLM || !chapterContent.trim()) {
+      throw new Error('情节状态提取缺少模型服务或章节正文，未写入默认状态');
+    }
 
     const prompt = `请从章节正文中提取长篇连载所需的情节/时间线状态。
 
@@ -542,11 +543,21 @@ ${chapterContent.slice(-6000)}
     try {
       const response = await this.realLLM.generate({
         prompt,
-        model: 'deepseek',
         temperature: 0.2,
         scenario: 'state_extraction',
       } as any);
       const parsed = this.parseJson<Record<string, any>>(response.content, {});
+      if (
+        !Array.isArray(parsed.activeConflicts) ||
+        !Array.isArray(parsed.resolvedConflicts) ||
+        !Array.isArray(parsed.turningPoints) ||
+        !['calm', 'rising', 'crisis', 'release', 'hook'].includes(String(parsed.emotionalBeat)) ||
+        !Number.isFinite(Number(parsed.mainGoalProgress)) ||
+        !Number.isFinite(Number(parsed.emotionalIntensity)) ||
+        !Number.isFinite(Number(parsed.pacingScore))
+      ) {
+        throw new Error('情节状态提取结果结构不完整');
+      }
       return {
         activeConflicts: this.normalizeStringArray(parsed.activeConflicts, 8),
         resolvedConflicts: this.normalizeStringArray(parsed.resolvedConflicts, 8),
@@ -554,16 +565,13 @@ ${chapterContent.slice(-6000)}
         subGoalProgress: parsed.subGoalProgress && typeof parsed.subGoalProgress === 'object' && !Array.isArray(parsed.subGoalProgress)
           ? parsed.subGoalProgress
           : {},
-        emotionalBeat: ['calm', 'rising', 'crisis', 'release', 'hook'].includes(String(parsed.emotionalBeat))
-          ? String(parsed.emotionalBeat)
-          : fallback.emotionalBeat,
+        emotionalBeat: String(parsed.emotionalBeat),
         emotionalIntensity: this.clampNumber(parsed.emotionalIntensity, 1, 10, 5),
         pacingScore: this.clampNumber(parsed.pacingScore, 1, 10, 5),
         turningPoints: this.normalizeStringArray(parsed.turningPoints, 10),
       };
     } catch (error) {
-      this.logger.warn(`LLM plot extraction failed, fallback to defaults: ${error instanceof Error ? error.message : String(error)}`);
-      return fallback;
+      throw new Error(`情节状态提取失败，未写入默认状态：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
