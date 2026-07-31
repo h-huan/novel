@@ -104,3 +104,6 @@ Desktop.ini
 
 # Local assistant/tooling state
 .codebuddy/
+
+# Runtime project artifacts (legacy/regenerated)
+server/projects/
