@@ -1,6 +1,6 @@
 {
   "version": "1.2.0",
-  "description": "AIÐ´×÷Æ½Ì¨Ä£ÐÍÂ·ÓÉÅäÖÃ",
+  "description": "AIÐ´ï¿½ï¿½Æ½Ì¨Ä£ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½",
 
   "models": {
     "deepseek": {
@@ -22,48 +22,48 @@
   "roles": {
     "writer": {
       "models": [
-        { "model": "deepseek", "priority": 1, "label": "Ö÷Á¦Ð´ÊÖ", "defaultVersion": "deepseek-chat" },
-        { "model": "deepseek", "priority": 2, "label": "¿ìËÙÐ´ÊÖ", "defaultVersion": "deepseek-chat" }
+        { "model": "deepseek", "priority": 1, "label": "ï¿½ï¿½ï¿½ï¿½Ð´ï¿½ï¿½", "defaultVersion": "deepseek-chat" },
+        { "model": "deepseek", "priority": 2, "label": "ï¿½ï¿½ï¿½ï¿½Ð´ï¿½ï¿½", "defaultVersion": "deepseek-chat" }
       ]
     },
     "reviewer": {
       "models": [
-        { "model": "deepseek", "priority": 1, "label": "Éî¶ÈÆÀÉó", "defaultVersion": "deepseek-chat" }
+        { "model": "deepseek", "priority": 1, "label": "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½", "defaultVersion": "deepseek-chat" }
       ]
     },
     "planner": {
       "models": [
-        { "model": "deepseek", "priority": 1, "label": "Éî¶È²ß»®", "defaultVersion": "deepseek-chat" }
+        { "model": "deepseek", "priority": 1, "label": "ï¿½ï¿½È²ß»ï¿½", "defaultVersion": "deepseek-chat" }
       ]
     }
   },
 
   "scenarios": {
-    "idea_generate":        { "model": "deepseek", "temperature": 0.9, "maxTokens": 16384, "label": "Áé¸ÐÉú³É" },
-    "outline":              { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "´ó¸Ù¹æ»®" },
-    "world_building":       { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "ÊÀ½ç¹Û" },
-    "character_design":     { "model": "deepseek", "temperature": 0.7, "maxTokens": 4096, "label": "½ÇÉ«Éè¶¨" },
-    "organization_map":     { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "×éÖ¯ÓëµØÍ¼" },
-    "foreshadowing":        { "model": "deepseek", "temperature": 0.7, "maxTokens": 4096, "label": "·ü±ÊÉè¼Æ" },
-    "timeline":             { "model": "deepseek", "temperature": 0.5, "maxTokens": 4096, "label": "Ê±¼äÏß" },
-    "writing":              { "model": "deepseek", "temperature": 0.7, "maxTokens": 8192, "label": "Ð´×÷" },
-    "writing_daily":        { "model": "deepseek", "temperature": 0.7, "maxTokens": 8192, "label": "ÈÕ³£Ð´×÷" },
-    "writing_climax":       { "model": "deepseek", "temperature": 0.8, "maxTokens": 8192, "label": "¸ß³±ÕÂ½Ú" },
-    "polish":               { "model": "deepseek", "temperature": 0.4, "maxTokens": 4096, "label": "¾«ÐÞÈóÉ«" },
-    "character_review":     { "model": "deepseek", "temperature": 0.3, "maxTokens": 4096, "label": "ÈËÉèÆÀÉó" },
-    "quality_check":        { "model": "deepseek", "temperature": 0.3, "maxTokens": 16384, "label": "ÖÊ¼ì¼ì²é" }
+    "idea_generate":        { "model": "deepseek", "temperature": 0.9, "maxTokens": 32768, "label": "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½" },
+    "outline":              { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "ï¿½ï¿½Ù¹æ»®" },
+    "world_building":       { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "ï¿½ï¿½ï¿½ï¿½ï¿½" },
+    "character_design":     { "model": "deepseek", "temperature": 0.7, "maxTokens": 4096, "label": "ï¿½ï¿½É«ï¿½è¶¨" },
+    "organization_map":     { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "ï¿½ï¿½Ö¯ï¿½ï¿½ï¿½Í¼" },
+    "foreshadowing":        { "model": "deepseek", "temperature": 0.7, "maxTokens": 4096, "label": "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½" },
+    "timeline":             { "model": "deepseek", "temperature": 0.5, "maxTokens": 4096, "label": "Ê±ï¿½ï¿½ï¿½ï¿½" },
+    "writing":              { "model": "deepseek", "temperature": 0.7, "maxTokens": 8192, "label": "Ð´ï¿½ï¿½" },
+    "writing_daily":        { "model": "deepseek", "temperature": 0.7, "maxTokens": 8192, "label": "ï¿½Õ³ï¿½Ð´ï¿½ï¿½" },
+    "writing_climax":       { "model": "deepseek", "temperature": 0.8, "maxTokens": 8192, "label": "ï¿½ß³ï¿½ï¿½Â½ï¿½" },
+    "polish":               { "model": "deepseek", "temperature": 0.4, "maxTokens": 4096, "label": "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É«" },
+    "character_review":     { "model": "deepseek", "temperature": 0.3, "maxTokens": 4096, "label": "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½" },
+    "quality_check":        { "model": "deepseek", "temperature": 0.3, "maxTokens": 16384, "label": "ï¿½Ê¼ï¿½ï¿½ï¿½" }
   },
 
   "chapter_function_routing": {
-    "exposition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "Õ¹¿ª" },
-    "rising":        { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "·¢Õ¹" },
-    "climax":        { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "¸ß³±" },
-    "falling":       { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "»ØÂä" },
-    "resolution":    { "model": "deepseek", "tier": "standard", "temperature": 0.5, "label": "½â¾ö" },
-    "transition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "¹ý¶É" },
-    "foreshadowing": { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "·ü±Ê" },
-    "revelation":    { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "½ÒÂ¶" },
-    "world_building":{ "model": "deepseek", "tier": "standard", "temperature": 0.6, "label": "ÊÀ½ç¹Û" }
+    "exposition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "Õ¹ï¿½ï¿½" },
+    "rising":        { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "ï¿½ï¿½Õ¹" },
+    "climax":        { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "ï¿½ß³ï¿½" },
+    "falling":       { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "ï¿½ï¿½ï¿½ï¿½" },
+    "resolution":    { "model": "deepseek", "tier": "standard", "temperature": 0.5, "label": "ï¿½ï¿½ï¿½" },
+    "transition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "ï¿½ï¿½ï¿½ï¿½" },
+    "foreshadowing": { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "ï¿½ï¿½ï¿½ï¿½" },
+    "revelation":    { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "ï¿½ï¿½Â¶" },
+    "world_building":{ "model": "deepseek", "tier": "standard", "temperature": 0.6, "label": "ï¿½ï¿½ï¿½ï¿½ï¿½" }
   },
 
   "defaults": {

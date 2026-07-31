@@ -4345,12 +4345,6 @@ ${(dto.content || '').substring(0, 3000)}
       const excludeItems: Array<{ title: string; hook?: string; description?: string }> = (dto.excludeDetails && dto.excludeDetails.length > 0)
         ? dto.excludeDetails
         : (dto.excludeTitles || []).map(t => ({ title: t }));
-      const excludeRule = excludeItems.length > 0
-        ? `\n【严禁重复】以下 ${excludeItems.length} 个题材已经生成过，本次输出的所有题材标题、核心设定、切入角度、时代背景、核心钩子都不能与以下任一题材相同或高度相似：\n${excludeItems.map((item, i) => {
-            const detail = item.hook ? ` (钩子: ${item.hook})` : '';
-            return `${i + 1}. 《${item.title}》${detail}`;
-          }).join('\n')}\n\n如同一角度已被使用（如"历史缝隙"），必须换完全不同的角度。如同是食堂题材，必须换完全不同的职业/场景。请确保每个题材之间也互不雷同。`
-        : '\n【不重复】每个题材的标题、核心设定、切入角度、职业场景、时代背景都要完全不同，互相之间不能有任何重复感';
 
       const targetWordsRule = dto.targetWords
         ? `【目标字数】每篇目标字数约为 ${dto.targetWords} 字，题材篇幅需与目标字数匹配`
@@ -4360,7 +4354,15 @@ ${(dto.content || '').substring(0, 3000)}
         ? `【故事分类】题材类型应为 ${dto.storyCategory}，请专注于该分类下的故事构思`
         : '';
 
-      const prompt = `你是网文总编、故事开发编辑和读者转化策划。请为以下配置生成${dto.count || 5}个真正具备追读欲、可持续展开且互不重复的故事题材：
+      // 按批次构建提示词：batchCount 为本批要生成的题材数，batchExcludes 累计已有题材用于去重
+      const buildPrompt = (batchCount: number, batchExcludes: Array<{ title: string; hook?: string; description?: string }>) => {
+        const excludeRule = batchExcludes.length > 0
+          ? `\n【严禁重复】以下 ${batchExcludes.length} 个题材已经生成过，本次输出的所有题材标题、核心设定、切入角度、时代背景、核心钩子都不能与以下任一题材相同或高度相似：\n${batchExcludes.map((item, i) => {
+              const detail = item.hook ? ` (钩子: ${item.hook})` : '';
+              return `${i + 1}. 《${item.title}》${detail}`;
+            }).join('\n')}\n\n如同一角度已被使用（如"历史缝隙"），必须换完全不同的角度。如同是食堂题材，必须换完全不同的职业/场景。请确保每个题材之间也互不雷同。`
+          : '\n【不重复】每个题材的标题、核心设定、切入角度、职业场景、时代背景都要完全不同，互相之间不能有任何重复感';
+        return `你是网文总编、故事开发编辑和读者转化策划。请为以下配置生成${batchCount}个真正具备追读欲、可持续展开且互不重复的故事题材：
 
 创作类型：${dto.storyType === 'short_story' ? '短篇' : '长篇'}
 目标平台：${dto.platform || '通用'}
@@ -4382,7 +4384,7 @@ ${storyTypeRule}
 10. 【篇幅动态规划】根据该题材的事件链、人物弧、必要场景和冲突层级决定建议总字数；每章按3200-4000字承载具体任务，建议总字数必须能被若干个该范围章节完整承载
 ${excludeRule}
 
-输出一个合法JSON对象，格式必须是 {"ideas":[...]}；ideas数组<strong>必须包含${dto.count || 5}个</strong>元素。每个元素包含：
+输出一个合法JSON对象，格式必须是 {"ideas":[...]}；ideas数组<strong>必须包含${batchCount}个</strong>元素。每个元素包含：
 - title: 题材标题（4-16字，最多一个逗号/顿号）
 - alternateTitles: 另外2个同样有冲突感但角度不同的备选标题
 - angle: 切入角度（如'历史缝隙','新闻改编','小人物大历史','穿越新解','职业传奇'等）
@@ -4398,12 +4400,13 @@ ${excludeRule}
 - scopeBreakdown: 篇幅分线数组，每项包含 arc（剧情线/阶段）、chapters（该线实际占用章数整数）、reason（承载的事件与人物任务）；所有 chapters 之和必须严格等于 plannedChapters
 - scopeReason: 为什么该事件链和人物弧需要这个篇幅；用 plannedChapters × 每章3200-4000字核算即可，不得再写一套与 scopeBreakdown 不同的章节数字
 - coreConflict: 核心冲突
-- uniquePoint: 最独特的卖点或创新之处
+- uniquePoint: 最独特的卖点或创新之处（需点明最爽的一点）
 - mainReversal: 会改变目标、关系或胜负条件的核心反转（20-50字）
 
 输出前逐项自检：标题脱离概要后仍能制造悬念；钩子有具体代价；概要不是设定介绍；核心冲突双方都能主动行动；反转不是凭空揭晓；篇幅可被章节范围承载。任何一项不合格都先重写，再输出JSON对象。`;
+      };
 
-      const generateIdeaResponse = async (requestPrompt = prompt, retryCount = 0, temperature = 0.9) => {
+      const generateIdeaResponse = async (requestPrompt: string, retryCount = 0, temperature = 0.9) => {
         let lastError: unknown;
         // Keep the user-selected route/model intact. This only absorbs a
         // transient socket reset before declaring the discovery unavailable.
@@ -4415,6 +4418,8 @@ ${excludeRule}
               temperature,
               timeout: LLM_TUNABLES.timeoutContent(),
               retryCount,
+              // 空内容重试收紧为 1 次：模型对超大输出返回空内容时快速失败，避免白白等待
+              maxEmptyRetries: 1,
               // The prompt and parser require the object wrapper below.  Send
               // the same constraint to OpenAI-compatible providers instead of
               // relying on prose instructions and then paying for a repair.
@@ -4432,34 +4437,63 @@ ${excludeRule}
         throw lastError instanceof Error ? lastError : new Error(String(lastError || '灵感模型调用失败'));
       };
 
-      let response;
-      try {
-        response = await generateIdeaResponse();
-      } catch (firstError) {
-        const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
-        this.logger.warn(`idea-discover first attempt failed, retrying once: ${firstMessage}`);
-        response = await generateIdeaResponse(prompt, 1);
+      // 分批串行生成：每批最多 2 个，避免单次输出超模型上限导致空内容/截断；跨批累计排除去重
+      const batchSize = 2;
+      const batches: number[] = [];
+      let remaining = requestedCount;
+      while (remaining > 0) {
+        const n = Math.min(batchSize, remaining);
+        batches.push(n);
+        remaining -= n;
       }
 
       let ideas: any[] = [];
-      const rawContent = response.content || '';
-      let parsedIdeas = extractIdeaList(rawContent);
-      if (!parsedIdeas) {
-        this.logger.warn('idea-discover: 首轮内容无法解析，按当前模型配置执行一次结构修复');
-        const structureRepair = await generateIdeaResponse(
-          `把下面这份灵感结果修复成合法JSON对象。保留原有创意，但补齐截断或缺失的字段；顶层必须为{"ideas":[...]}，ideas数组必须符合本次要求的完整结构和数量；不要解释，不要Markdown，只输出JSON对象。\n\n原始结果：\n${rawContent}\n\n完整要求：\n${prompt}`,
-          1,
-          0.25,
-        );
-        parsedIdeas = extractIdeaList(structureRepair.content || '');
+      const batchExcludes: Array<{ title: string; hook?: string; description?: string }> = [...excludeItems];
+      for (let b = 0; b < batches.length; b++) {
+        const batchCount = batches[b];
+        const batchPrompt = buildPrompt(batchCount, batchExcludes);
+        let response;
+        try {
+          response = await generateIdeaResponse(batchPrompt);
+        } catch (firstError) {
+          const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
+          this.logger.warn(`idea-discover 第${b + 1}批首次失败，重试一次: ${firstMessage}`);
+          response = await generateIdeaResponse(batchPrompt, 1);
+        }
+        const rawContent = response.content || '';
+        let parsedIdeas = extractIdeaList(rawContent);
+        if (!parsedIdeas) {
+          this.logger.warn(`idea-discover: 第${b + 1}批内容无法解析，按当前模型配置执行一次结构修复`);
+          const structureRepair = await generateIdeaResponse(
+            `把下面这份灵感结果修复成合法JSON对象。保留原有创意，但补齐截断或缺失的字段；顶层必须为{"ideas":[...]}，ideas数组必须符合本次要求的完整结构和数量；不要解释，不要Markdown，只输出JSON对象。\n\n原始结果：\n${rawContent}\n\n完整要求：\n${batchPrompt}`,
+            1,
+            0.25,
+          );
+          parsedIdeas = extractIdeaList(structureRepair.content || '');
+        }
+        if (parsedIdeas && parsedIdeas.length > 0) {
+          ideas.push(...parsedIdeas);
+          const batchDetails = parsedIdeas.filter((i: any) => i.title).map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
+          batchExcludes.push(...batchDetails);
+          this.logger.log(`idea-discover: 第${b + 1}批生成 ${parsedIdeas.length} 个，累计 ${ideas.length} 个`);
+        }
       }
-      if (parsedIdeas && parsedIdeas.length > 0) {
-        ideas = parsedIdeas;
-        this.logger.log(`idea-discover: JSON 解析成功，共 ${ideas.length} 个题材`);
-      } else {
-        this.logger.error(`idea-discover: JSON 解析失败，未把原始文本伪装成灵感结果。内容前200字符: ${rawContent.slice(0, 200)}`);
+
+      if (ideas.length === 0) {
+        this.logger.error('idea-discover: 所有批次均未解析出题材，未把原始文本伪装成灵感结果');
         throw new Error('灵感生成结果无法解析，未创建降级题材，请重试。');
       }
+
+      // 跨批完全重复标题去重，并按请求数量截断
+      const seenTitles = new Set<string>();
+      ideas = ideas.filter((idea: any) => {
+        if (!idea?.title) return true;
+        const clean = String(idea.title).replace(/[《》「」]/g, '').trim();
+        if (seenTitles.has(clean)) return false;
+        seenTitles.add(clean);
+        return true;
+      });
+      if (ideas.length > requestedCount) ideas = ideas.slice(0, requestedCount);
 
       const assessIdeaQuality = (candidate: any): string[] => {
         const issues: string[] = [];
@@ -4507,23 +4541,13 @@ ${excludeRule}
         const issues = candidates.flatMap((candidate, index) => (
           assessIdeaQuality(candidate).map(issue => `第${index + 1}项：${issue}`)
         ));
-        if (candidates.length !== requestedCount) issues.unshift(`数量必须恰好为${requestedCount}项`);
         return issues;
       };
 
-      let qualityIssues = collectQualityIssues(ideas);
+      // 分批生成下不再整批重写（避免再次触发超上限的空内容/截断），改为非致命标记随题材返回
+      const qualityIssues = collectQualityIssues(ideas);
       if (qualityIssues.length > 0) {
-        this.logger.warn(`idea-discover: 首轮质量门禁未通过，重写一次：${qualityIssues.slice(0, 8).join('；')}`);
-        const repairResponse = await generateIdeaResponse(
-          `${prompt}\n\n【质量门禁退回重写】上一次输出存在以下问题：\n${qualityIssues.join('\n')}\n请重新生成完整的${requestedCount}项，不要解释，只输出符合全部字段要求的 {"ideas":[...]} JSON对象。`,
-          1,
-          0.82,
-        );
-        const repaired = extractIdeaList(repairResponse.content || '');
-        if (repaired && repaired.length > 0) {
-          ideas = repaired;
-          qualityIssues = collectQualityIssues(ideas);
-        }
+        this.logger.warn(`idea-discover: 部分题材未通过质量门禁（${qualityIssues.slice(0, 8).join('；')}），以警告随结果返回`);
       }
 
       // 把题材标准化（字数/章数解析）
@@ -4556,9 +4580,10 @@ ${excludeRule}
         qualityIssues: assessIdeaQuality(idea),
       }));
       const remainingIssues = ideasWithQuality.flatMap((i) => i.qualityIssues || []);
-      const qualityWarning = remainingIssues.length > 0
-        ? `部分题材未完全满足质量门禁（共 ${remainingIssues.length} 项提醒），已照常展示；可点“重新发现”换一批，或直接挑选可接受的题材。`
-        : undefined;
+      const qualityWarnings: string[] = [];
+      if (remainingIssues.length > 0) qualityWarnings.push(`部分题材未完全满足质量门禁（共 ${remainingIssues.length} 项提醒），已照常展示；可点“重新发现”换一批，或直接挑选可接受的题材。`);
+      if (ideasWithQuality.length < requestedCount) qualityWarnings.push(`本次实际发现 ${ideasWithQuality.length} 个（请求 ${requestedCount} 个），模型未产足数量；可点“重新发现”补充。`);
+      const qualityWarning = qualityWarnings.join('\n') || undefined;
 
       return { success: true, ideas: ideasWithQuality, totalIdeas: ideasWithQuality.length, qualityWarning };
     } catch (err) {
