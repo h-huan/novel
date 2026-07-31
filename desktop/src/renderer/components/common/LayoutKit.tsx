@@ -2,7 +2,7 @@ import React from 'react';
 
 /**
  * 统一布局工具：深色主题、卡片+列表、按内容/宽度自适应、不拥挤。
- * 所有"核心设定/角色/地点与势力/大纲/伏笔"页面共用，保证视觉与交互一致。
+ * 所有"世界观/角色/地点与势力/大纲/伏笔"页面共用，保证视觉与交互一致。
  */
 
 export const LK: Record<string, React.CSSProperties> = {

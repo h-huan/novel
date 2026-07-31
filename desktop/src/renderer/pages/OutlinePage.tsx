@@ -1391,7 +1391,7 @@ const OutlinePage: React.FC = () => {
           </div>
           <div style={styles.formSection}>
             <label style={styles.formLabel}>题材描述</label>
-            <textarea style={styles.textarea} value={material} onChange={event => setMaterial(event.target.value)} placeholder="输入已有选题、核心设定或灵感素材" rows={4} />
+            <textarea style={styles.textarea} value={material} onChange={event => setMaterial(event.target.value)} placeholder="输入已有选题、世界观或灵感素材" rows={4} />
           </div>
           <div style={styles.formRow}>
             <div style={{ ...styles.formSection, flex: 1 }}>

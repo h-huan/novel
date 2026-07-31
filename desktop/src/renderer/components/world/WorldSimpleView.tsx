@@ -1,14 +1,14 @@
 /**
- * WorldSimpleView - 短篇核心设定极简视图
+ * WorldSimpleView - 短篇世界观极简视图
  * 设计原则：简洁明了、可视化操作
- * 对接短篇核心设定读取与保存接口
+ * 对接短篇世界观读取与保存接口
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 
 /**
- * 短篇核心设定数据结构
+ * 短篇世界观数据结构
  * GET /projects/:id/world-settings?mode=simple
  * PUT /projects/:id/world-settings/simple
  */
@@ -115,7 +115,7 @@ const WorldSimpleView: React.FC = () => {
   const [showSpecialSettings, setShowSpecialSettings] = useState(false);
   const [locationInput, setLocationInput] = useState('');
 
-  // 加载核心设定
+  // 加载世界观
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
@@ -150,7 +150,7 @@ const WorldSimpleView: React.FC = () => {
         setShowSpecialSettings(!!toDisplayText(ws.specialSettings || ws.special_settings));
       }
     } catch (error) {
-      console.error('加载核心设定失败:', error);
+      console.error('加载世界观失败:', error);
     }
     setLoading(false);
   }, [projectId]);
@@ -161,7 +161,7 @@ const WorldSimpleView: React.FC = () => {
     }
   }, [projectId, loadSettings]);
 
-  // 保存核心设定
+  // 保存世界观
   const saveSettings = async () => {
     setSaving(true);
     setSaveMessage(null);
@@ -171,7 +171,7 @@ const WorldSimpleView: React.FC = () => {
       setIsEditing(false);
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
-      console.error('保存核心设定失败:', error);
+      console.error('保存世界观失败:', error);
       setSaveMessage('❌ 保存失败，请重试');
     }
     setSaving(false);
