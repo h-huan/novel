@@ -793,7 +793,7 @@ const OutlinePage: React.FC = () => {
             updatePlan,
             generateCount,
             shortStoryFlow: projectType === 'short'
-              ? ['题材钩子', '闭环故事卡', '场景序列', '伏笔回收表', '章节写作包', '按项目配置检查开篇吸引力']
+              ? ['题材钩子', '故事核心设定', '人物关系表', '章节结构', '递进反转表', '伏笔回收表', '章节写作包', '开篇吸引力检查']
               : [],
             ultraLongReferenceOnly: true,
           },
@@ -1448,7 +1448,7 @@ const OutlinePage: React.FC = () => {
           </div>
           {projectType === 'short' && (
             <div style={styles.impactNotice}>
-              短故事流程：题材钩子、闭环故事卡、场景序列、伏笔回收表和章节写作包；视角、篇幅与开篇节奏严格采用项目配置。
+              短故事流程：题材钩子→故事核心设定→人物关系表→章节结构→递进反转表→伏笔回收表→章节写作包→开篇吸引力检查；视角、篇幅与开篇节奏严格采用项目配置。
             </div>
           )}
           <div style={styles.actionRow}>

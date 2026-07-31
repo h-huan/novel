@@ -55,7 +55,14 @@ const CustomSettingsEditor: React.FC<{ value: string; onChange: (v: string) => v
       return Array.isArray(parsed) ? parsed.map((it: any) => ({ key: String(it?.key ?? ''), val: String(it?.value ?? '') })) : [];
     } catch { return []; }
   }, [value]);
-  const commit = (next: Array<{ key: string; val: string }>) => onChange(JSON.stringify(next.filter(it => it.key || it.val)));
+  const commit = (next: Array<{ key: string; val: string }>) => {
+    // 只移除末尾多余的完全空行，保留一个空行作为"待输入"槽位，避免新增行被立即滤掉
+    const trimmed = [...next];
+    while (trimmed.length > 1 && !(trimmed[trimmed.length - 1].key || trimmed[trimmed.length - 1].val)) {
+      trimmed.pop();
+    }
+    onChange(JSON.stringify(trimmed));
+  };
   const setItem = (idx: number, patch: Partial<{ key: string; val: string }>) => {
     const next = items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
     commit(next);
@@ -94,6 +101,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
 
   const loadProfile = useCallback(async (worldSettingId: string) => {
     if (!worldSettingId) return;
+    setCollapsed({});
     const [profileResponse, summaryResponse] = await Promise.all([
       api.get(`/projects/${projectId}/world-settings/${worldSettingId}/profile`),
       api.get(`/projects/${projectId}/world-settings/${worldSettingId}/writing-summary`),
@@ -132,8 +140,18 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
   const saveProfile = async () => {
     if (!selectedId) return;
     setStatus('正在保存...');
+    const toSend = { ...profile };
+    if (toSend.custom_settings) {
+      try {
+        const parsed = JSON.parse(toSend.custom_settings);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((it: any) => it?.key || it?.value);
+          toSend.custom_settings = cleaned.length ? JSON.stringify(cleaned) : '[]';
+        }
+      } catch { /* 保留原值 */ }
+    }
     try {
-      const response = await api.put(`/projects/${projectId}/world-settings/${selectedId}/profile`, profile);
+      const response = await api.put(`/projects/${projectId}/world-settings/${selectedId}/profile`, toSend);
       const saved = payload<any>(response);
       setProfile(saved.profile || profile);
       const summaryResponse = await api.get(`/projects/${projectId}/world-settings/${selectedId}/writing-summary`);
