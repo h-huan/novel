@@ -5824,7 +5824,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           db.prepare(`INSERT INTO outlines (id,project_id,level,parent_id,"order",title,content,chapter_function,goal_arc,target_words,actual_words,foreshadowing_ids,plot_points,status,character_ids,scenes,volumes,book_skeleton,created_at,updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
             volId, projectId, isShort ? 'book' : 'volume', null, 0, isShort ? '短篇故事卡' : '正文',
-            isShort ? JSON.stringify(shortStoryCard) : '', '', dto.targetWords, 0, '[]', '[]', 'planned', '[]',
+            isShort ? JSON.stringify(shortStoryCard) : '', '', '', dto.targetWords, 0, '[]', '[]', 'planned', '[]',
             isShort ? JSON.stringify(shortStoryCard?.scenes || []) : null, null,
             isShort ? JSON.stringify(shortStoryCard) : null, now(), now());
           for (const chapter of preparedChapters) {
