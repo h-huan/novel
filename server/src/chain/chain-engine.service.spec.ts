@@ -107,7 +107,7 @@ describe('ChainEngineService', () => {
       promptTemplateId: undefined,
     };
     const context = {
-      chainId: 'tianlong-8step',
+      chainId: 'body-by-outline',
       variables: { chapterFunction: 'development', chapterNumber: 1, chapterOutline: '有效详细大纲'.repeat(20) },
       nodeOutputs: {}, retryCounters: {}, qualityGateFailures: {},
       startTime: new Date(), timestamps: {}, metadata: {},

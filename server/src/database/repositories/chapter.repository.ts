@@ -15,7 +15,6 @@ export interface ChapterRow {
   content: string;
   word_count: number;
   status: string;
-  tianlong_8steps: string | null;
   model_config: string | null;
   hook_type: string | null;
   transition_mode: string | null;

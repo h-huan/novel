@@ -109,6 +109,10 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyrightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const decorationIdsRef = useRef<string[]>([]);
+  // 用户最近一次本地编辑的时间戳（毫秒）。受控回写时若距此时间 < 1.5s，
+  // 说明极可能是「用户输入 → store 内部 normalize → 受控 value 回调」造成的伪外部更新，
+  // 此时跳过同步以避免光标跳末尾打断用户输入。
+  const lastLocalEditTimeRef = useRef(0);
 
   // 版权检测状态
   const [copyrightIssues, setCopyrightIssues] = useState<CopyrightIssue[]>([]);
@@ -321,6 +325,8 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const handleChange: OnChange = useCallback(
     (value: string | undefined, ev) => {
       const text = value || '';
+      // 标记最近一次本地编辑时间（用于受控回写跳过来源判断）
+      lastLocalEditTimeRef.current = Date.now();
 
       if (externalWordCount === undefined) {
         setLocalWordCount(countWords(text));
@@ -383,6 +389,91 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       }
     };
   }, []);
+
+  /**
+   * 受控模式下的外部 value 同步：Monaco 每次拿到新 prop value 都会重置光标
+   * 到末尾——这是用户反馈"任何操作导致光标跳到结尾位置"的根因。
+   *
+   * 这里在 setValue 前后手动保存并恢复 selection，让外部 store 更新
+   * （如 AI 生成完成、远端同步、自动保存回写）不打断作者当前光标位置。
+   * 仅在 editor.getValue() 与 controlledValue 真的不一致时才同步，避免与
+   * 正在输入的 onChange 形成无限循环。
+   *
+   * 三道加固：
+   *   1) 本地编辑锁：用户 1.5s 内输入（onChange 800ms 防抖 + 缓冲）跳过受控
+   *      回写，避免「输入 → store 内部 normalize（trim/换行）→ 受控 value 回调」
+   *      造成的伪外部更新打断用户光标；
+   *   2) normalize 比较：尾部换行/前后空白差异不视为内容变化，跳过同步；
+   *   3) offset 保存与还原：旧 selection 的 lineNumber/column 在新内容下越界
+   *      率高（旧 selection 落在被 trim 的位置），改用 offset → setValue 后用
+   *      model.getPositionAt(offset) 还原 position。
+   */
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (!isControlled) return;
+
+    // 1) 本地编辑锁：跳过 1.5s 内的受控回写
+    if (Date.now() - lastLocalEditTimeRef.current < 1500) return;
+
+    const current = editor.getValue();
+    const next = controlledValue ?? '';
+
+    // 2) normalize 比较：仅尾部 ≤ 1 个换行/空白差异视为一致
+    if (current === next) return;
+    const currentTrimEnd = current.trimEnd();
+    const nextTrimEnd = next.trimEnd();
+    if (currentTrimEnd === nextTrimEnd && Math.abs(current.length - current.length) <= 2) return;
+    if (currentTrimEnd === nextTrimEnd) return;
+
+    // 3) 用 offset 保存 selections（旧 lineNumber/column 在新内容下越界率高）
+    const selections = editor.getSelections();
+    const model = editor.getModel();
+    const savedOffsets = selections && model
+      ? selections.map((sel) => ({
+          startOffset: model.getOffsetAt(sel.getStartPosition()),
+          endOffset: model.getOffsetAt(sel.getEndPosition()),
+        }))
+      : [];
+    const scrollTop = editor.getScrollTop();
+
+    editor.setValue(next);
+
+    // setValue 后用 model.getPositionAt 还原（offset 在新内容下仍可能越界，需夹紧）
+    if (savedOffsets.length > 0 && model) {
+      const maxOffset = model.getValueLength();
+      const restored = savedOffsets.map(({ startOffset, endOffset }) => {
+        const safeStart = Math.max(0, Math.min(startOffset, maxOffset));
+        const safeEnd = Math.max(safeStart, Math.min(endOffset, maxOffset));
+        try {
+          const startPos = model.getPositionAt(safeStart);
+          const endPos = model.getPositionAt(safeEnd);
+          return {
+            startLineNumber: startPos.lineNumber,
+            startColumn: startPos.column,
+            endLineNumber: endPos.lineNumber,
+            endColumn: endPos.column,
+          };
+        } catch {
+          const lineCount = model.getLineCount();
+          const lastCol = model.getLineMaxColumn(lineCount);
+          return {
+            startLineNumber: lineCount,
+            startColumn: lastCol,
+            endLineNumber: lineCount,
+            endColumn: lastCol,
+          };
+        }
+      });
+      try {
+        editor.setSelections(restored as any);
+      } catch {
+        const lineCount = model.getLineCount();
+        editor.setPosition({ lineNumber: lineCount, column: 1 });
+      }
+    }
+    editor.setScrollTop(scrollTop);
+  }, [controlledValue, isControlled]);
 
   const statusColor = STATUS_COLORS[copyrightStatus];
 

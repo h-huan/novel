@@ -1,6 +1,5 @@
 export * from './project';
 export * from './character';
-export * from './tianlong';
 export * from './model-config';
 export * from './chapter';
 export * from './outline';

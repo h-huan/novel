@@ -9,7 +9,8 @@ import type { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } f
 import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
 
-const WORLD_PROFILE_FIELDS = ['story_premise','core_theme','reader_promise','genre_type','tone_style','era_background','time_span','calendar_system','historical_stage','current_world_status','geography_structure','major_regions','dangerous_zones','resource_distribution','traffic_routes','distance_logic','social_structure','class_system','family_structure','occupation_system','education_system','social_mobility','political_structure','ruling_system','law_system','bureaucracy','military_system','tax_system','economic_system','currency_system','trade_rules','resource_rules','black_market','scarcity_logic','power_system','power_source','power_levels','power_cost','power_limit','power_growth','power_taboo','power_failure_case','technology_system','technology_level','special_technology','technology_limit','technology_cost','culture_daily_life','food_clothing_housing','festival_customs','religion_belief','language_naming_rules','etiquette_rules','law_and_taboo','forbidden_behaviors','punishment_rules','public_order','hidden_rules','unspoken_rules','history_events','major_disasters','founding_events','wars','dynasty_changes','lost_truths','major_forces','force_relations','force_conflicts','force_resources','force_secrets','world_hooks','main_conflict_source','hidden_truth','final_truth_direction','world_mystery','forbidden_world_rules','must_obey_rules','can_change_rules','easy_to_break_points','current_chapter_usage'] as const;
+// 对齐外部文档《世界观模板》8 类：时代 / 地点 / 氛围基调 / 规则 / 社会结构 / 科技超自然体系 / 文化风俗 / 补充说明
+export const WORLD_PROFILE_FIELDS = ['synopsis','basic_info','era','locations','atmosphere_tone','rules','social_structure','tech_supernatural','system_mechanics','culture_customs','naming_rules','scale_plan','ending','hierarchy_rules','supplementary'] as const;
 
 export interface WorldSettingResponse {
   id: string;
@@ -24,6 +25,14 @@ export interface WorldSettingResponse {
   society: any;
   constraints: any[];
   version: number;
+  namingRules?: string;
+  workIntro?: string;
+  systemSettings?: string;
+  dataPlanning?: string;
+  // 新增字段 (migration 042)
+  culturalSettings?: string;
+  spoilerSettings?: string;
+  censorshipRules?: string;
   createdAt: string;
   updatedAt: string;
   // 短篇世界观字段
@@ -68,6 +77,13 @@ export class WorldSettingService {
       society: '{}',
       constraints: JSON.stringify(constraints),
       version: 1,
+      naming_rules: dto.namingRules || null,
+      work_intro: dto.workIntro || null,
+      system_settings: dto.systemSettings || null,
+      data_planning: dto.dataPlanning || null,
+      cultural_settings: dto.culturalSettings || null,
+      spoiler_settings: dto.spoilerSettings || null,
+      censorship_rules: dto.censorshipRules || null,
       created_at: now,
       updated_at: now,
     });
@@ -112,47 +128,44 @@ export class WorldSettingService {
   private buildWritingSummary(profile: Record<string, string>) {
     const value = (key: string) => profile[key] || '待补全';
     const fields: Array<[string, string]> = [
-      ['故事前提','story_premise'],['核心主题','core_theme'],['读者期待','reader_promise'],['类型定位','genre_type'],['基调风格','tone_style'],
-      ['时代背景','era_background'],['时间跨度','time_span'],['历法系统','calendar_system'],['历史阶段','historical_stage'],['当前世界状态','current_world_status'],
-      ['地理结构','geography_structure'],['主要地区','major_regions'],['危险区域','dangerous_zones'],['资源分布','resource_distribution'],['交通路线','traffic_routes'],['距离逻辑','distance_logic'],
-      ['社会结构','social_structure'],['阶层系统','class_system'],['家族结构','family_structure'],['职业体系','occupation_system'],['教育体系','education_system'],['阶层流动','social_mobility'],
-      ['政治结构','political_structure'],['统治体系','ruling_system'],['法律系统','law_system'],['官僚体系','bureaucracy'],['军事体系','military_system'],['税收体系','tax_system'],
-      ['经济系统','economic_system'],['货币系统','currency_system'],['交易规则','trade_rules'],['资源规则','resource_rules'],['黑市','black_market'],['稀缺逻辑','scarcity_logic'],
-      ['力量体系','power_system'],['力量来源','power_source'],['力量等级','power_levels'],['力量代价','power_cost'],['力量限制','power_limit'],['成长路径','power_growth'],['力量禁忌','power_taboo'],['失败案例','power_failure_case'],
-      ['技术体系','technology_system'],['技术水平','technology_level'],['特殊技术','special_technology'],['技术限制','technology_limit'],['技术代价','technology_cost'],
-      ['文化日常','culture_daily_life'],['衣食住行','food_clothing_housing'],['节日习俗','festival_customs'],['宗教信仰','religion_belief'],['语言命名','language_naming_rules'],['礼仪规则','etiquette_rules'],
-      ['法律禁忌','law_and_taboo'],['禁止行为','forbidden_behaviors'],['惩罚规则','punishment_rules'],['公共秩序','public_order'],['隐藏规则','hidden_rules'],['潜规则','unspoken_rules'],
-      ['历史事件','history_events'],['主要灾难','major_disasters'],['建国事件','founding_events'],['战争','wars'],['王朝更替','dynasty_changes'],['失落真相','lost_truths'],
-      ['主要势力','major_forces'],['势力关系','force_relations'],['势力冲突','force_conflicts'],['势力资源','force_resources'],['势力秘密','force_secrets'],
-      ['世界钩子','world_hooks'],['主冲突来源','main_conflict_source'],['隐藏真相','hidden_truth'],['最终真相方向','final_truth_direction'],['世界谜团','world_mystery'],
-      ['禁止世界观规则','forbidden_world_rules'],['必须遵守','must_obey_rules'],['允许变化','can_change_rules'],['容易写崩点','easy_to_break_points'],['本章可用','current_chapter_usage'],
+      ['作品简介/核心卖点','synopsis'],
+      ['基本信息（书名/类型/时代/结局/字数目标/标签）','basic_info'],
+      ['时代（时间线/历史背景）','era'],
+      ['地点（主要区域/关键地点）','locations'],
+      ['氛围基调','atmosphere_tone'],
+      ['规则','rules'],
+      ['社会结构（政治势力/经济资源/宗教信仰）','social_structure'],
+      ['科技/超自然/力量体系（体系名称/能力来源/约束代价）','tech_supernatural'],
+      ['系统机制（核心机制/金手指/特殊设定）','system_mechanics'],
+      ['文化风俗（语言习俗/禁忌）','culture_customs'],
+      ['命名规则','naming_rules'],
+      ['全文规模/数据规划（人口/势力/资源等量化）','scale_plan'],
+      ['结局设定','ending'],
+      ['核心层级规则（最高优先级·核心设定>大纲>正文）','hierarchy_rules'],
+      ['补充说明','supplementary'],
     ];
-    return ['【世界观写作摘要】', ...fields.map(([label, key]) => `${label}：${value(key)}`)].join('\n');
+    return ['【核心设定写作摘要】（地基型·对齐《核心设定.txt》）', ...fields.map(([label, key]) => `${label}：${value(key)}`)].join('\n');
   }
 
   /* Legacy summary implementation is retained below for source compatibility. */
   private legacyWritingSummary(projectId: string, id: string) {
     const data = this.getProfile(projectId, id); const p = data.profile; const value = (key: string) => p[key] || '待补全';
-    const labels: Array<[string,string]> = [['故事前提','story_premise'],['核心主题','core_theme'],['读者期待','reader_promise'],['时代背景','era_background'],['当前世界状态','current_world_status'],['地理结构','geography_structure'],['主要地区','major_regions'],['危险区域','dangerous_zones'],['社会结构','social_structure'],['政治法律','political_structure'],['经济资源','economic_system'],['力量体系','power_system'],['力量限制','power_limit'],['力量代价','power_cost'],['技术体系','technology_system'],['文化日常','culture_daily_life'],['法律禁忌','law_and_taboo'],['历史真相','lost_truths'],['势力冲突','force_conflicts'],['世界钩子','world_hooks'],['主冲突来源','main_conflict_source'],['AI 写作约束','must_obey_rules'],['禁止世界规则','forbidden_world_rules'],['容易写崩点','easy_to_break_points']];
+    const labels: Array<[string,string]> = [['时代','era'],['地点','locations'],['氛围基调','atmosphere_tone'],['规则','rules'],['社会结构','social_structure'],['科技/超自然体系','tech_supernatural'],['文化风俗','culture_customs'],['补充说明','supplementary']];
     return { summary: ['【世界观写作摘要】', ...labels.map(([label,key]) => `${label}：${value(key)}`)].join('\n'), profile: p };
   }
 
   checkConsistency(projectId: string, content: string) {
     const issues: any[] = []; for (const setting of this.findByProjectId(projectId)) { const p = this.getProfile(projectId, setting.id).profile; const add = (issueType: string, evidence: string, reason: string, suggestion: string, severity: 'low'|'medium'|'high') => issues.push({ worldSettingId: setting.id, worldSettingName: setting.name, issueType, evidence, reason, suggestion, severity });
-      if (p.must_obey_rules && /(?:\u65e0\u89c6\u89c4\u5219|\u6253\u7834\u89c4\u5219|\u4e0d\u53d7\u9650\u5236|\u4e0d\u53d7\u6cd5\u5219\u7ea6\u675f|\u89c4\u5219\u5931\u6548)/.test(content) && !content.includes(p.must_obey_rules)) add('must_obey_rules', p.must_obey_rules, '正文可能违反世界观必须遵守规则', `补充或改写以遵守规则：${p.must_obey_rules}`, 'high');
-      if (p.current_world_status && /(?:\u5929\u4e0b\u592a\u5e73|\u6218\u4e89\u5df2\u7ecf\u7ed3\u675f|\u79e9\u5e8f\u5b8c\u5168\u6062\u590d|\u707e\u96be\u4ece\u672a\u53d1\u751f|\u6240\u6709\u4eba\u90fd\u77e5\u9053\u771f\u76f8)/.test(content) && !content.includes(p.current_world_status)) add('current_world_status', p.current_world_status, '正文可能与当前世界状态冲突', `回扣当前世界状态：${p.current_world_status}`, 'medium');
-      if (p.forbidden_world_rules && content.includes(p.forbidden_world_rules)) add('forbidden_world_rules', p.forbidden_world_rules, '正文命中禁止世界规则', '改写以遵守世界禁令', 'high');
-      if (p.power_limit && /瞬间|轻易|无代价/.test(content) && !content.includes(p.power_limit)) add('power_limit', p.power_limit, '力量表现未体现限制', '补充力量限制或代价', 'medium');
-      if (p.power_cost && /施展|力量|法术/.test(content) && !content.includes(p.power_cost)) add('power_cost', p.power_cost, '力量使用未体现代价', '补充代价', 'medium');
-      if (p.technology_limit && /人工智能|激光枪|互联网/.test(content)) add('technology_limit', p.technology_limit, '正文可能出现超体系技术', '回到当前技术边界', 'medium');
-      if (p.law_and_taboo && /公然违禁|违法/.test(content) && !content.includes(p.punishment_rules)) add('law_and_taboo', p.law_and_taboo, '禁忌行为未体现后果', '补充惩罚或隐蔽代价', 'medium');
-      if (p.distance_logic && /瞬间到达|瞬移/.test(content)) add('distance_logic', p.distance_logic, '地点移动可能违反距离逻辑', '补充路线与时间成本', 'medium');
-      if (p.easy_to_break_points && content.includes(p.easy_to_break_points)) add('easy_to_break_points', p.easy_to_break_points, '正文命中世界观易写崩点', '重写相关设定', 'medium'); }
+      if (p.rules && /(?:\u65e0\u89c6\u89c4\u5219|\u6253\u7834\u89c4\u5219|\u4e0d\u53d7\u9650\u5236|\u4e0d\u53d7\u6cd5\u5219\u7ea6\u675f|\u89c4\u5219\u5931\u6548)/.test(content) && !content.includes(p.rules)) add('rules', p.rules, '正文可能违反世界观规则', `补充或改写以遵守规则：${p.rules}`, 'high');
+      if (p.tech_supernatural && /瞬间|轻易|无代价|不费力气/.test(content) && /力量|能力|体系|施展|法术|科技/.test(content) && !content.includes(p.tech_supernatural)) add('tech_supernatural', p.tech_supernatural, '力量/科技表现未体现约束与代价', '补充体系约束或代价', 'medium');
+      if (p.system_mechanics && /(?:\u7cfb\u7edf\u7834\u89c1|\u91d1\u624b\u6307\u5931\u6548|\u673a\u5236\u7834\u89e3|\u89c4\u5219\u88ab\u7a7f\u8d8a)/.test(content) && !content.includes(p.system_mechanics)) add('system_mechanics', p.system_mechanics, '正文可能破坏已设定的核心机制', `回扣系统机制：${p.system_mechanics}`, 'medium');
+      if (p.culture_customs && /公然违禁|肆无忌惮违法|毫无顾忌/.test(content) && p.culture_customs.includes('禁忌') && !content.includes(p.culture_customs)) add('culture_customs', p.culture_customs, '禁忌行为未体现文化约束', '补充惩罚或隐蔽代价', 'medium');
+      if (p.atmosphere_tone && /祥和|太平|安全无忧/.test(content) && /黑暗|压抑|危险|残酷/.test(p.atmosphere_tone) && !content.includes(p.atmosphere_tone)) add('atmosphere_tone', p.atmosphere_tone, '正文氛围与世界观基调冲突', '回扣整体氛围基调', 'medium'); }
     return { passed: issues.length === 0, score: Math.max(0, 100 - issues.length * 15), issues };
   }
 
   private profileRow(row: any) { return Object.fromEntries(WORLD_PROFILE_FIELDS.map(field => [field, row?.[field] || ''])); }
-  private worldGroups(fields: readonly string[]) { const groups: Record<string,string[]> = { premise:['story_premise','core_theme','reader_promise','genre_type','tone_style'],time:['era_background','time_span','calendar_system','historical_stage','current_world_status'],geography:['geography_structure','major_regions','dangerous_zones','resource_distribution','traffic_routes','distance_logic'],society:['social_structure','class_system','family_structure','occupation_system','education_system','social_mobility'],politics:['political_structure','ruling_system','law_system','bureaucracy','military_system','tax_system'],economy:['economic_system','currency_system','trade_rules','resource_rules','black_market','scarcity_logic'],power:['power_system','power_source','power_levels','power_cost','power_limit','power_growth','power_taboo','power_failure_case'],technology:['technology_system','technology_level','special_technology','technology_limit','technology_cost'],culture:['culture_daily_life','food_clothing_housing','festival_customs','religion_belief','language_naming_rules','etiquette_rules'],law:['law_and_taboo','forbidden_behaviors','punishment_rules','public_order','hidden_rules','unspoken_rules'],history:['history_events','major_disasters','founding_events','wars','dynasty_changes','lost_truths'],forces:['major_forces','force_relations','force_conflicts','force_resources','force_secrets'],hooks:['world_hooks','main_conflict_source','hidden_truth','final_truth_direction','world_mystery'],constraints:['forbidden_world_rules','must_obey_rules','can_change_rules','easy_to_break_points','current_chapter_usage'] }; return Object.entries(groups).filter(([, keys]) => keys.some(key => fields.includes(key))).map(([group]) => group); }
+  private worldGroups(fields: readonly string[]) { const groups: Record<string,string[]> = { synopsis:['synopsis'],basic_info:['basic_info'],era:['era'],locations:['locations'],atmosphere_tone:['atmosphere_tone'],rules:['rules'],social_structure:['social_structure'],tech_supernatural:['tech_supernatural'],system_mechanics:['system_mechanics'],culture_customs:['culture_customs'],naming_rules:['naming_rules'],scale_plan:['scale_plan'],ending:['ending'],hierarchy_rules:['hierarchy_rules'],supplementary:['supplementary'] }; return Object.entries(groups).filter(([, keys]) => keys.some(key => fields.includes(key))).map(([group]) => group); }
 
   update(id: string, dto: UpdateWorldSettingDto): WorldSettingResponse {
     const existing = this.repo.findById(id);
@@ -163,6 +176,13 @@ export class WorldSettingService {
 
     if (dto.name !== undefined) updateData.name = dto.name;
     if (dto.era !== undefined) updateData.era = dto.era;
+    if (dto.namingRules !== undefined) updateData.naming_rules = dto.namingRules;
+    if (dto.workIntro !== undefined) updateData.work_intro = dto.workIntro;
+    if (dto.systemSettings !== undefined) updateData.system_settings = dto.systemSettings;
+    if (dto.dataPlanning !== undefined) updateData.data_planning = dto.dataPlanning;
+    if (dto.culturalSettings !== undefined) updateData.cultural_settings = dto.culturalSettings;
+    if (dto.spoilerSettings !== undefined) updateData.spoiler_settings = dto.spoilerSettings;
+    if (dto.censorshipRules !== undefined) updateData.censorship_rules = dto.censorshipRules;
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
@@ -172,6 +192,68 @@ export class WorldSettingService {
       priority: 'world_setting',
     });
     return response;
+  }
+
+  /**
+   * 生成世界观修改方案（真实）：基于数据库当前设定计算差异，并扫描章节正文与伏笔，
+   * 找出对旧值的具体引用，给出真实的影响分析。不依赖任何内存桩或假数据。
+   */
+  generateChangePlan(projectId: string, settingId: string, proposedChanges: Record<string, unknown>): {
+    changes: Array<{ field: string; oldValue: string; newValue: string }>;
+    impactAnalysis: Array<{ affectedContent: string[]; severity: 'low' | 'medium' | 'high' }>;
+    suggestions: string[];
+    requiresConfirmation: boolean;
+  } {
+    const current = this.repo.findById(settingId);
+    if (!current) throw new NotFoundException(`WorldSetting ${settingId} not found`);
+    if (current.project_id !== projectId) throw new NotFoundException('World setting not found');
+
+    const changes: Array<{ field: string; oldValue: string; newValue: string }> = [];
+    for (const [field, newValue] of Object.entries(proposedChanges || {})) {
+      const oldValue = String((current as any)[field] ?? '');
+      if (oldValue !== String(newValue)) {
+        changes.push({ field, oldValue, newValue: String(newValue) });
+      }
+    }
+
+    // 真实影响分析：扫描章节正文与伏笔描述，查找对旧值的具体引用
+    const db = this.databaseService.getDb();
+    const affectedContent: string[] = [];
+    for (const change of changes) {
+      const oldVal = change.oldValue.trim();
+      if (!oldVal) continue;
+      const chapters = db.prepare('SELECT chapter_index, title, content FROM chapters WHERE project_id = ? AND content LIKE ?').all(projectId, `%${oldVal}%`) as any[];
+      for (const ch of chapters) {
+        affectedContent.push(`第${ch.chapter_index}章${ch.title ? `《${ch.title}》` : ''}：正文引用了“${oldVal}”`);
+      }
+      const fores = db.prepare('SELECT chapter_index, description FROM foreshadowings WHERE project_id = ? AND description LIKE ?').all(projectId, `%${oldVal}%`) as any[];
+      for (const f of fores) {
+        affectedContent.push(`第${f.chapter_index ?? '?'}章伏笔：引用了“${oldVal}”`);
+      }
+    }
+    const uniqueAffected = [...new Set(affectedContent)];
+
+    let severity: 'low' | 'medium' | 'high' = 'low';
+    let requiresConfirmation = false;
+    if (changes.length > 3) { severity = 'high'; requiresConfirmation = true; }
+    else if (changes.length > 1) severity = 'medium';
+    if (uniqueAffected.length > 3) severity = 'high';
+    if (uniqueAffected.length > 0 && severity === 'low') severity = 'medium';
+    if (uniqueAffected.length > 0) requiresConfirmation = true;
+
+    const suggestions: string[] = [];
+    if (changes.length > 0) suggestions.push(`“${current.name}”的修改可能影响依赖该设定的章节与伏笔，建议重新审查相关正文`);
+    if (uniqueAffected.length > 0) suggestions.push(`检测到 ${uniqueAffected.length} 处内容可能需同步修改：${uniqueAffected.slice(0, 3).join('；')}${uniqueAffected.length > 3 ? '…' : ''}`);
+    if (severity === 'high') suggestions.push('此修改影响范围较大，建议分步实施并逐一确认');
+    if (requiresConfirmation) suggestions.push('需要作者确认后才能执行此修改');
+    if (suggestions.length === 0) suggestions.push('此修改未检测到冲突影响，可以安全执行');
+
+    return {
+      changes,
+      impactAnalysis: [{ affectedContent: uniqueAffected.length ? uniqueAffected : ['暂无已检测到的受影响内容'], severity }],
+      suggestions,
+      requiresConfirmation,
+    };
   }
 
   remove(id: string): { success: boolean } {
@@ -236,12 +318,46 @@ export class WorldSettingService {
     }
 
     const row = settings[0];
+    // 解析 world_settings.constraints JSON（7维度数据）
+    let geo = '', social = '', power = '', economy = '', culture = '', history = '', ending = '', factions: any[] = [];
+    try {
+      const c = row.constraints ? JSON.parse(String(row.constraints)) : {};
+      social = c.socialStructure || '';
+      power = c.powerSystem || '';
+      economy = c.economy || '';
+      culture = c.culture || '';
+      history = c.history || '';
+      ending = c.endingDirection || '';
+      factions = c.factions || (Array.isArray(row.factions) ? JSON.parse(String(row.factions)) : []);
+    } catch {}
     return {
       storyPremise: row.story_premise || '',
-      era: row.era || '',
+      era: row.era || history || '',
       locations: row.locations ? JSON.parse(row.locations) : [],
       socialRules: row.social_rules || '',
       specialSettings: row.special_settings || '',
+      // 7维度（per 文档）
+      geography: row.geography ? (() => { try { return JSON.parse(row.geography); } catch { return []; } })() : [],
+      socialStructure: social,
+      powerSystem: power,
+      economy: economy,
+      culture: culture,
+      history: history,
+      factions: factions,
+      endingDirection: ending,
+      // from world_system_profiles（per 世界观模板.txt）
+      ...(() => {
+        try {
+          const db = (this as any).databaseService?.getDb?.() || (this as any).db?.getDb?.();
+          if (!db) return {};
+          const wf = db.prepare(`SELECT atmosphere_tone, rules, supplementary FROM world_system_profiles WHERE project_id=? LIMIT 1`).get(projectId) as any;
+          return {
+            atmosphereTone: wf?.atmosphere_tone || '',
+            rules: wf?.rules || '',
+            supplementary: wf?.supplementary || '',
+          };
+        } catch { return {}; }
+      })(),
     };
   }
 
@@ -268,6 +384,13 @@ export class WorldSettingService {
         society: '{}',
         constraints: '[]',
         version: 1,
+        naming_rules: null,
+        work_intro: null,
+        system_settings: null,
+        data_planning: null,
+        cultural_settings: null,
+        spoiler_settings: null,
+        censorship_rules: null,
         created_at: now,
         updated_at: now,
         story_premise: dto.storyPremise || '',
@@ -289,6 +412,9 @@ export class WorldSettingService {
       if (dto.locations !== undefined) updateData.locations = JSON.stringify(dto.locations);
       if (dto.socialRules !== undefined) updateData.social_rules = dto.socialRules;
       if (dto.specialSettings !== undefined) updateData.special_settings = dto.specialSettings;
+      if (dto.culturalSettings !== undefined) updateData.cultural_settings = dto.culturalSettings;
+      if (dto.spoilerSettings !== undefined) updateData.spoiler_settings = dto.spoilerSettings;
+      if (dto.censorshipRules !== undefined) updateData.censorship_rules = dto.censorshipRules;
       updateData.setting_type = 'short';
 
       this.repo.update(row.id, updateData);
@@ -317,6 +443,14 @@ export class WorldSettingService {
       society: JSON.parse(row.society),
       constraints: JSON.parse(row.constraints),
       version: row.version,
+      namingRules: row.naming_rules || undefined,
+      workIntro: row.work_intro || undefined,
+      systemSettings: row.system_settings || undefined,
+      dataPlanning: row.data_planning || undefined,
+      // 新增字段 (migration 042)
+      culturalSettings: row.cultural_settings || undefined,
+      spoilerSettings: row.spoiler_settings || undefined,
+      censorshipRules: row.censorship_rules || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       // 短篇世界观字段

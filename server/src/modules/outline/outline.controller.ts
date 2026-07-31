@@ -1,7 +1,7 @@
 /**
  * 大纲 Controller
  */
-import { Controller, Get, Post, Put, Delete, Body, Param, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, BadRequestException, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { OutlineService } from './outline.service';
 import {
@@ -60,6 +60,11 @@ export class OutlineController {
   @Post('continue')
   continueCreate(@Param('projectId') projectId: string, @Body() dto: ContinueOutlineDto) {
     return this.service.continueCreate(projectId, dto);
+  }
+
+  @Get(':id/linked-foreshadowings')
+  linkedForeshadowings(@Param('projectId') projectId: string, @Param('id') id: string) {
+    return this.service.getLinkedForeshadowings(id);
   }
 
   @Get(':id')

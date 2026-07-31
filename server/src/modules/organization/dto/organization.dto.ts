@@ -20,6 +20,30 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsString()
   parentId?: string;
+
+  @IsOptional()
+  @IsString()
+  leader?: string;
+
+  @IsOptional()
+  @IsString()
+  strengthLevel?: string;
+
+  @IsOptional()
+  @IsString()
+  territory?: string;
+
+  @IsOptional()
+  @IsString()
+  characteristics?: string;
+
+  @IsOptional()
+  @IsString()
+  relationshipsJson?: string;
+
+  @IsOptional()
+  @IsString()
+  signatureEquipment?: string;
 }
 
 export class UpdateOrganizationDto {
@@ -39,4 +63,28 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsString()
   parentId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  leader?: string;
+
+  @IsOptional()
+  @IsString()
+  strengthLevel?: string;
+
+  @IsOptional()
+  @IsString()
+  territory?: string;
+
+  @IsOptional()
+  @IsString()
+  characteristics?: string;
+
+  @IsOptional()
+  @IsString()
+  relationshipsJson?: string;
+
+  @IsOptional()
+  @IsString()
+  signatureEquipment?: string;
 }

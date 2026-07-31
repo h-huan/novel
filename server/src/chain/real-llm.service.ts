@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import OpenAI from 'openai';
+import OpenAI, { type ClientOptions } from 'openai';
 import { ILLMService } from './llm.interface';
 import { LLMRequest, LLMResponse } from './chain.types';
 import { ModelRouterService } from '../routing/model-router.service';
+import * as net from 'net';
 
 type RuntimeModel = {
   provider: string;
@@ -23,6 +24,140 @@ export class RealLLMService implements ILLMService {
   constructor(
     private readonly modelRouter: ModelRouterService,
   ) {}
+
+  // ==================== 网络健壮性增强 ====================
+  // 代理支持（可选）：若设置了 HTTPS_PROXY/HTTP_PROXY，则将 OpenAI 客户端的
+  // fetch 实现替换为同包 undici 的 fetch + ProxyAgent，使受限网络（防火墙/GFW）
+  // 下的请求能经代理出站。undici 为可选依赖，仅在配置代理时才加载。
+  private proxyExtras: Partial<ClientOptions> | null = null;
+  private proxyResolved = false;
+
+  private hasProxyEnv(): boolean {
+    return !!(
+      process.env.HTTPS_PROXY ||
+      process.env.https_proxy ||
+      process.env.HTTP_PROXY ||
+      process.env.http_proxy
+    );
+  }
+
+  private async resolveProxyExtras(): Promise<Partial<ClientOptions>> {
+    if (this.proxyResolved) return this.proxyExtras ?? {};
+    this.proxyResolved = true;
+    if (!this.hasProxyEnv()) {
+      this.proxyExtras = {};
+      return {};
+    }
+    const proxyUrl =
+      process.env.HTTPS_PROXY ||
+      process.env.https_proxy ||
+      process.env.HTTP_PROXY ||
+      process.env.http_proxy ||
+      '';
+    try {
+      // @ts-ignore undici 为可选依赖，仅在使用代理时需要
+      const undici: any = await import('undici');
+      const agent = new undici.ProxyAgent(proxyUrl);
+      this.proxyExtras = { fetch: undici.fetch, fetchOptions: { dispatcher: agent } };
+      this.logger.log(`[RealLLM] 检测到代理环境变量，已启用 HTTPS 代理: ${proxyUrl}`);
+    } catch (e) {
+      this.logger.warn(
+        `[RealLLM] 已设置代理环境变量但无法加载 undici（请执行 pnpm add undici）：${e instanceof Error ? e.message : e}。代理未生效，将直连。`,
+      );
+      this.proxyExtras = {};
+    }
+    return this.proxyExtras ?? {};
+  }
+
+  /**
+   * 把模糊的 "fetch failed" 网络错误挖到底层真实原因，返回可执行的排查建议。
+   * 仅用于"无 HTTP 状态码"的连接层失败（DNS/防火墙/证书/超时）。
+   */
+  private describeNetworkError(err: any): { code: string; message: string; guidance: string } {
+    let cur: any = err;
+    let deepest: any = err;
+    const codes: string[] = [];
+    while (cur) {
+      const code = cur.code || (typeof cur.errno === 'string' ? cur.errno : '');
+      if (code) codes.push(code);
+      deepest = cur;
+      cur = cur.cause;
+    }
+    const code = codes[codes.length - 1] || '';
+    const message = deepest?.message || err?.message || 'unknown';
+    let guidance = '';
+    if (/ENOTFOUND|EAI_AGAIN/.test(code)) {
+      guidance = 'DNS 解析失败：本机无法解析该域名，请检查 DNS 设置/hosts，或确认 baseUrl 是否正确。';
+    } else if (/ECONNREFUSED/.test(code)) {
+      guidance = '连接被拒绝：目标地址/端口无服务，请检查 baseUrl 与端口是否正确。';
+    } else if (/ETIMEDOUT|ConnectTimeout/.test(code)) {
+      guidance = '连接超时：本机到该 API 的网络不通（可能被防火墙/GFW 拦截）。若身处受限网络，请设置 HTTPS_PROXY 后重启后端。';
+    } else if (/ECONNRESET/.test(code)) {
+      guidance = '连接被重置：请求被中间网络设备中断，可能是代理/防火墙或瞬时抖动，建议重试。';
+    } else if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|DEPTH_ZERO|TLS/i.test(message + code)) {
+      guidance = 'TLS/证书错误：无法验证服务器证书，请检查系统证书或代理的证书配置。';
+    } else {
+      guidance = '网络层连接失败（fetch failed）：可能是瞬时抖动或本机到 API 的网络不通。建议重试；若持续失败且身处受限网络，请设置 HTTPS_PROXY 代理后重启后端。';
+    }
+    return { code, message, guidance };
+  }
+
+  /** 启动网络预检：对配置了 Key 的提供商做一次 DNS+TCP 连通性探测（不阻塞启动）。 */
+  private async probeConnectivity(): Promise<void> {
+    if (this.hasProxyEnv()) return; // 走代理时直连探测不准，跳过
+    const hosts = new Set<string>();
+    const envProviders: Array<[string, string]> = [
+      ['DEEPSEEK', process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'],
+      ['OPENAI', process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'],
+      ['ANTHROPIC', process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'],
+      ['ZHIPU', process.env.ZHIPU_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4'],
+      ['ALIBABA', process.env.QWEN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
+    ];
+    for (const [name, url] of envProviders) {
+      if (process.env[`${name}_API_KEY`]) hosts.add(url);
+    }
+    try {
+      const keys = this.modelRouter.getAllUserKeys?.() || [];
+      for (const k of keys) {
+        const url = k.baseUrl || this.getDefaultBaseUrl(this.resolveRuntimeModel(k.modelName).provider);
+        if (url) hosts.add(url);
+      }
+    } catch { /* ignore */ }
+    for (const url of hosts) {
+      const ok = await this.checkHostReachable(url);
+      if (!ok) {
+        this.logger.warn(
+          `⚠️ 启动网络预检失败：无法连接到 ${url}。若持续失败，请检查本机网络/防火墙，或在受限网络下设置 HTTPS_PROXY 后重启后端。`,
+        );
+      } else {
+        this.logger.log(`网络预检通过：${url}`);
+      }
+    }
+  }
+
+  private checkHostReachable(url: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      let host: string;
+      let port = 443;
+      try {
+        const u = new URL(url);
+        host = u.hostname;
+        port = u.port ? Number(u.port) : u.protocol === 'http:' ? 80 : 443;
+      } catch {
+        return resolve(false);
+      }
+      const socket = new net.Socket();
+      const finish = (res: boolean) => {
+        try { socket.destroy(); } catch { /* noop */ }
+        resolve(res);
+      };
+      socket.setTimeout(5000);
+      socket.once('connect', () => finish(true));
+      socket.once('timeout', () => finish(false));
+      socket.once('error', () => finish(false));
+      socket.connect(port, host);
+    });
+  }
 
   getConfiguredMaxTokens(scenario: string): number {
     const config = this.modelRouter.getConfig();
@@ -45,6 +180,8 @@ export class RealLLMService implements ILLMService {
     } else {
       this.logger.log('LLM API Key 已配置，AI 功能可用');
     }
+    // 不阻塞启动：后台做一次网络预检，连不上立刻告警
+    void this.probeConnectivity();
   }
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
@@ -55,7 +192,7 @@ export class RealLLMService implements ILLMService {
     }
 
     const routedModel = this.modelRouter.getModelForScenario(
-      request.scenario || 'default',
+      request.scenario || 'daily',
       {
         chapterFunction: request.chapterFunction,
         retryCount: request.retryCount,
@@ -72,38 +209,111 @@ export class RealLLMService implements ILLMService {
 
     const callTimeout = request.timeout ?? 600_000; // 默认10分钟
 
-    // ⚠️ 关键：用 Promise.race 包裹主 LLM 调用，确保超时一定生效
-    // 原因：OpenAI SDK 内置的 timeout 在某些场景（代理/自定义 baseURL/网络异常）不触发 abort
-    // 显式包裹超时，超时后直接向上返回配置模型失败，不切换模型。
-    try {
-      const result = await Promise.race([
-        this.callModel(
-          modelName,
-          request.prompt,
-          request.systemPrompt,
-          routedModel.temperature,
-          configuredMaxTokens,
-          callTimeout,
-          request.responseFormat,
-        ),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`LLM 主调用超时 (${callTimeout / 1000}s): model=${modelName}, scenario=${request.scenario || 'default'}`)), callTimeout)
-        ),
-      ]);
+    // ⚠️ 关键：用带清除机制的超时包裹主 LLM 调用，确保超时一定生效，
+    // 且重试时不会留下未处理的 reject 定时器（否则会产生 unhandledRejection）。
+    // 超时后直接向上返回配置模型失败，不切换模型。
+    const withTimeout = async (
+      p: Promise<ModelCallResult>,
+      ms: number,
+    ): Promise<ModelCallResult> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeoutP = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `LLM 主调用超时 (${ms / 1000}s): model=${modelName}, scenario=${request.scenario || 'default'}`,
+              ),
+            ),
+          ms,
+        );
+      });
+      try {
+        return await Promise.race([p, timeoutP]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
 
-      if (request.responseFormat === 'json_object') {
-        if (!result.content.trim()) {
-          throw new Error(`结构化生成返回空内容: model=${modelName}, scenario=${request.scenario || 'default'}`);
+    // JSON 模式下上游（代理/网关）偶发返回空 content 而非报错（已用真实 openai 包
+    // 复现确认：同一模型/端点/json_object/2.8万字 prompt 都正常，空内容属瞬时上游故障）。
+    // 保持"配置怎么配就怎么执行"：用同一配置模型重试，绝不切换模型或去掉 response_format（非降级）。
+    // 调用方可显式传 maxEmptyRetries 提高关键验收器的重试次数。
+    const maxEmptyRetries = request.maxEmptyRetries ?? 2;
+    let lastEmptyError: Error | null = null;
+    try {
+      for (let attempt = 0; attempt <= maxEmptyRetries; attempt++) {
+        // 空内容重试时给一个小幅温度抖动（封顶 0.5），尽量避开上游瞬时空内容 bug，
+        // 温度仍由路由配置主导，绝不替换模型或去掉 response_format。
+        const jitterTemp = attempt === 0
+          ? routedModel.temperature
+          : Math.min(0.5, Number(routedModel.temperature) + 0.1 * attempt);
+        const result = await withTimeout(
+          this.callModel(
+            modelName,
+            request.prompt,
+            request.systemPrompt,
+            jitterTemp,
+            configuredMaxTokens,
+            callTimeout,
+            request.responseFormat,
+          ),
+          callTimeout,
+        );
+
+        if (request.responseFormat === 'json_object') {
+          if (!result.content.trim()) {
+            lastEmptyError = new Error(
+              `结构化生成返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'default'}`,
+            );
+            this.logger.warn(lastEmptyError.message);
+            continue;
+          }
+          if (result.finishReason === 'length') {
+            throw new Error(
+              `结构化生成因输出长度被截断: model=${modelName}, scenario=${request.scenario || 'default'}, maxTokens=${configuredMaxTokens}`,
+            );
+          }
         }
-        if (result.finishReason === 'length') {
-          throw new Error(`结构化生成因输出长度被截断: model=${modelName}, scenario=${request.scenario || 'default'}, maxTokens=${configuredMaxTokens}`);
+
+        return this.toResponse(result, modelName, request, startTime);
+      }
+      throw lastEmptyError!;
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      // 网络级错误（ECONNRESET/ECONNREFUSED/ETIMEDOUT/terminated）整体重试
+      // 现实观测：deepseek-v4-flash 在大陆出口路由下经常被中间设备 RST，需 ≥5 次指数退避才能稳过
+      const isNetworkErr = msg.includes('ECONNRESET') || msg.includes('ECONNREFUSED')
+        || msg.includes('ETIMEDOUT') || msg.includes('terminated') || msg.includes('socket hang up')
+        || msg.includes('aborted') || msg.includes('ENETUNREACH') || msg.includes('EAI_AGAIN')
+        || msg.includes('fetch failed') || msg.includes('UND_ERR_SOCKET') || msg.includes('other side closed')
+        || msg.includes('Connection error');
+      if (isNetworkErr) {
+        const delays = [1500, 3000, 5000, 8000, 12000]; // 累计 ~30s
+        for (let netRetry = 0; netRetry < delays.length; netRetry++) {
+          await new Promise(r => setTimeout(r, delays[netRetry]));
+          this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'default'}`);
+          try {
+            const result = await withTimeout(
+              this.callModel(modelName, request.prompt, request.systemPrompt, routedModel.temperature, configuredMaxTokens, callTimeout, request.responseFormat),
+              callTimeout,
+            );
+            this.logger.log(`[RealLLM] 网络重试 ${netRetry + 1} 成功：model=${modelName}, scenario=${request.scenario || 'default'}`);
+            return this.toResponse(result, modelName, request, startTime);
+          } catch (innerErr: any) {
+            const innerMsg = innerErr?.message || String(innerErr);
+            // 若新错误不再是网络错误，立即停止重试（复用同一判定逻辑）
+            const stillNetwork = innerMsg.includes('ECONNRESET') || innerMsg.includes('ECONNREFUSED') || innerMsg.includes('ETIMEDOUT')
+              || innerMsg.includes('terminated') || innerMsg.includes('socket hang up')
+              || innerMsg.includes('aborted') || innerMsg.includes('ENETUNREACH') || innerMsg.includes('EAI_AGAIN')
+              || innerMsg.includes('fetch failed') || innerMsg.includes('UND_ERR_SOCKET') || innerMsg.includes('other side closed')
+              || innerMsg.includes('Connection error');
+            if (!stillNetwork) throw innerErr;
+          }
         }
       }
-
-      return this.toResponse(result, modelName, request, startTime);
-    } catch (err: any) {
       this.logger.warn(
-        `[RealLLM] model ${modelName} failed; configured-model-only mode is enabled`,
+        `[RealLLM] model ${modelName} failed (${request.scenario || 'default'}); configured-model-only mode is enabled: ${msg}`,
       );
       throw err;
     }
@@ -119,7 +329,7 @@ export class RealLLMService implements ILLMService {
       throw new Error(`模型输出配置无效: scenario=${request.scenario || 'default'} maxTokens=${String(request.maxTokens)}`);
     }
     const routedModel = this.modelRouter.getModelForScenario(
-      request.scenario || 'default',
+      request.scenario || 'daily',
       {
         chapterFunction: request.chapterFunction,
         retryCount: request.retryCount,
@@ -197,6 +407,7 @@ export class RealLLMService implements ILLMService {
     timeout: number = 600_000,
   ): AsyncGenerator<string> {
     const providerLabel = this.getProviderLabel(provider);
+    const proxyExtras = await this.resolveProxyExtras();
     const client = new OpenAI({
       apiKey,
       baseURL: this.normalizeOpenAIBaseUrl(baseUrl || this.getDefaultBaseUrl(provider), provider),
@@ -205,6 +416,7 @@ export class RealLLMService implements ILLMService {
       // retry runs; it never changes the user's configured route.
       maxRetries: 2,
       timeout,
+      ...proxyExtras,
     });
 
     try {
@@ -399,6 +611,7 @@ export class RealLLMService implements ILLMService {
     responseFormat: 'text' | 'json_object' = 'text',
   ): Promise<ModelCallResult> {
     const providerLabel = this.getProviderLabel(provider);
+    const proxyExtras = await this.resolveProxyExtras();
     const client = new OpenAI({
       apiKey,
       baseURL: this.normalizeOpenAIBaseUrl(
@@ -410,21 +623,32 @@ export class RealLLMService implements ILLMService {
       // valid, so give the same configured request two transport retries.
       maxRetries: 2,
       timeout,
+      ...proxyExtras,
     });
 
     try {
-      const completion = await client.chat.completions.create({
+      // ★ 改为流式调用：长生成期间持续收 chunk，防止中间网络设备 RST 空闲连接
+      const stream = await client.chat.completions.create({
         model,
         messages: messages as any,
         temperature,
         max_tokens: maxTokens,
+        stream: true,
         ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' as const } } : {}),
       });
 
-      const choice = completion.choices?.[0];
+      let content = '';
+      let finishReason: string | undefined;
+      for await (const chunk of stream) {
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (delta) content += delta;
+        const fr = chunk.choices?.[0]?.finish_reason;
+        if (fr) finishReason = fr;
+      }
+
       return {
-        content: choice?.message?.content || '',
-        finishReason: choice?.finish_reason || undefined,
+        content: content || '',
+        finishReason: finishReason || undefined,
       };
     } catch (err: any) {
       const status = err?.status ? `${err.status} ` : '';
@@ -439,6 +663,17 @@ export class RealLLMService implements ILLMService {
       }
       if (errorCode || causeMessage) {
         this.logger.error(`${providerLabel} transport detail: code=${errorCode || 'unknown'}, cause=${causeMessage || 'unknown'}`);
+      }
+      // 连接层失败（无 HTTP 状态码）：挖透底层真实原因并给出排查建议
+      if (!err?.status) {
+        const net = this.describeNetworkError(err);
+        this.logger.error(
+          `[RealLLM] 网络连接失败（非 API 错误）：code=${net.code || 'unknown'} | ${net.message}`,
+        );
+        this.logger.error(`[RealLLM] 排查建议：${net.guidance}`);
+        throw new Error(
+          `${providerLabel} 网络连接失败(${net.code || 'connection'}): ${net.guidance}`,
+        );
       }
       // Endpoint and model are enough for diagnostics; never write any part
       // of a user credential to logs.
@@ -569,7 +804,13 @@ export class RealLLMService implements ILLMService {
       return this.createRuntimeModel('alibaba', modelName);
     }
 
-    return this.createRuntimeModel('deepseek', modelName);
+    // 兜底：绝不把未配置的模型名偷偷发送到 DeepSeek 等默认提供商。
+    // 宁可明确报错，也不要"假成功"地调用一个作者并未添加的虚假模型。
+    // 若需在设置中添加自定义模型，请通过 BYOK 配置对应的 API Key 与提供商，
+    // 使其进入 config.models 或被别名/前缀识别。
+    throw new Error(
+      `未配置/无法识别的模型: "${modelName}"。请先在应用「设置」中通过 BYOK 配置该模型的 API Key 与提供商，不要使用未添加的虚假模型。`,
+    );
   }
 
   private createRuntimeModel(provider: string, apiModel: string): RuntimeModel {

@@ -3,7 +3,7 @@
  *
  * 提供完整的链式编排引擎，包含：
  * - Chain 编排引擎（顺序执行/条件分支/重试）
- * - Prompt 模板仓库（短篇三步骤+天龙8步全套模板）
+ * - Prompt 模板仓库（短篇三步骤全套模板；天龙8步已于 2026-07-24 取消，正文改由 /chain/generate 单次 LLM 严格按大纲生成）
  * - QualityGate 质量门（CRITICAL/WARNING/INFO 三级）
  * - 短篇三步骤 Chain 服务（题材→大纲→正文）
  * - WritingMode 写作模式切换（全自动/半自动/自由模式）
@@ -28,6 +28,7 @@ import { SeedEnrichChainService } from './seed-enrich-chain.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
 import { ChainController } from './chain.controller';
 import { StateModule } from '../state/state.module';
+import { StateManagementModule } from '../state/state-management.module';
 import { FileStorageModule } from '../modules/file-storage/file-storage.module';
 
 import { RagModule } from '../rag/rag.module';
@@ -37,10 +38,12 @@ import { WorldSettingModule } from '../modules/world-setting/world-setting.modul
 import { OrganizationModule } from '../modules/organization/organization.module';
 import { MapPointModule } from '../modules/map-point/map-point.module';
 import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.module';
+import { WebSocketModule } from '../modules/websocket/websocket.module';
 
 @Module({
   imports: [
     StateModule,
+    StateManagementModule,
     FileStorageModule,
     RagModule,
     RoutingModule,
@@ -49,6 +52,7 @@ import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.mo
     OrganizationModule,
     MapPointModule,
     forwardRef(() => WorkflowGuardModule),
+    WebSocketModule,
   ],
   controllers: [ChainController],
   providers: [

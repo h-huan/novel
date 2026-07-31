@@ -146,7 +146,7 @@ export const useWorkflowGuardStore = create<WorkflowGuardState>((set, get) => ({
   resetStage: async (projectId: string) => {
     set({ loading: true, error: null });
     try {
-      await api.post(`/projects/${projectId}/workflow-guard/reset`);
+      await api.post(`/projects/${projectId}/workflow-guard/reset`, {});
       set({ data: null, loading: false, lastFetched: 0 });
       await get().fetchGuard(projectId);
     } catch (err: any) {

@@ -85,11 +85,12 @@ export class StateManagementController {
     @Param('projectId') projectId: string,
     @Query('status') status: string = 'all',
     @Query('targetType') targetType?: string,
+    @Query('sourceChapterId') sourceChapterId?: string,
     @Query('limit') limit?: string,
   ) {
     return {
       success: true,
-      items: this.stateItemService.list(projectId, { status, targetType, limit }),
+      items: this.stateItemService.list(projectId, { status, targetType, sourceChapterId, limit }),
     };
   }
 

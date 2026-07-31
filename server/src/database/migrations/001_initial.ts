@@ -126,8 +126,8 @@ export function up(db: DatabaseSync): void {
       scenes TEXT,                         -- JSON: ScenePlan[]
       volumes TEXT,                        -- JSON: VolumePlan[]
       book_skeleton TEXT,                  -- JSON: BookSkeleton
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY (parent_id) REFERENCES outlines(id) ON DELETE SET NULL
     );

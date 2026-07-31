@@ -1,23 +1,29 @@
 /**
- * WorldSimpleView - 短篇世界观极简视图
+ * WorldSimpleView - 短篇核心设定极简视图
  * 设计原则：简洁明了、可视化操作
- * 对接短篇世界观读取与保存接口
+ * 对接短篇核心设定读取与保存接口
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 
 /**
- * 短篇世界观数据结构
+ * 短篇核心设定数据结构
  * GET /projects/:id/world-settings?mode=simple
  * PUT /projects/:id/world-settings/simple
  */
 interface SimpleWorldSettings {
-  storyPremise: string;        // 故事前提
-  era: 'ancient' | 'modern' | 'future' | '';  // 时代背景
-  locations: string[];         // 剧情实际地点
-  socialRules: string;         // 剧情涉及的社会/行业规则
-  specialSettings: string;     // 特殊设定（可选）
+  storyPremise: string;
+  era: 'ancient' | 'modern' | 'future' | '';
+  locations: string[];
+  socialRules: string;
+  specialSettings: string;
+  geography: string; socialStructure: string; powerSystem: string;
+  economy: string; culture: string; history: string;
+  factions: string; endingDirection: string;
+  atmosphereTone: string; rules: string; supplementary: string;
+  extendedDims: any;
+  constraints: any[];
 }
 
 interface WorldConstraint {
@@ -88,6 +94,17 @@ const WorldSimpleView: React.FC = () => {
     locations: [],
     socialRules: '',
     specialSettings: '',
+    geography: '',
+    socialStructure: '',
+    powerSystem: '',
+    economy: '',
+    culture: '',
+    history: '',
+    factions: '',
+    endingDirection: '',
+    atmosphereTone: '',
+    rules: '',
+    supplementary: '',
     extendedDims: null,
     constraints: [],
   });
@@ -98,7 +115,7 @@ const WorldSimpleView: React.FC = () => {
   const [showSpecialSettings, setShowSpecialSettings] = useState(false);
   const [locationInput, setLocationInput] = useState('');
 
-  // 加载世界观设定
+  // 加载核心设定
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
@@ -115,13 +132,25 @@ const WorldSimpleView: React.FC = () => {
           locations: toTextArray(ws.locations).length > 0 ? toTextArray(ws.locations) : toTextArray(ws.geography),
           socialRules: toDisplayText(ws.socialRules || ws.social_rules || ws.rules || ''),
           specialSettings: toDisplayText(ws.specialSettings || ws.special_settings || ''),
+          // 7维度（per 文档）
+          geography: toDisplayText(ws.geography || ''),
+          socialStructure: toDisplayText(ws.socialStructure || ''),
+          powerSystem: toDisplayText(ws.powerSystem || ''),
+          economy: toDisplayText(ws.economy || ''),
+          culture: toDisplayText(ws.culture || ''),
+          history: toDisplayText(ws.history || ''),
+          factions: toDisplayText(Array.isArray(ws.factions) ? ws.factions.map((f:any) => f?.name || f).join('；') : ''),
+          endingDirection: toDisplayText(ws.endingDirection || ''),
+          atmosphereTone: toDisplayText(ws.atmosphereTone || ''),
+          rules: toDisplayText(ws.rules || ''),
+          supplementary: toDisplayText(ws.supplementary || ''),
           extendedDims: constraints && !Array.isArray(constraints) ? constraints : null,
           constraints: constraintList,
         });
         setShowSpecialSettings(!!toDisplayText(ws.specialSettings || ws.special_settings));
       }
     } catch (error) {
-      console.error('加载世界观设定失败:', error);
+      console.error('加载核心设定失败:', error);
     }
     setLoading(false);
   }, [projectId]);
@@ -132,7 +161,7 @@ const WorldSimpleView: React.FC = () => {
     }
   }, [projectId, loadSettings]);
 
-  // 保存世界观设定
+  // 保存核心设定
   const saveSettings = async () => {
     setSaving(true);
     setSaveMessage(null);
@@ -142,7 +171,7 @@ const WorldSimpleView: React.FC = () => {
       setIsEditing(false);
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error) {
-      console.error('保存世界观设定失败:', error);
+      console.error('保存核心设定失败:', error);
       setSaveMessage('❌ 保存失败，请重试');
     }
     setSaving(false);
@@ -181,7 +210,7 @@ const WorldSimpleView: React.FC = () => {
     <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div>
         <h2 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>
-          🌍 世界观设定
+          🌍 世界观
         </h2>
         <p style={{ margin: 0, fontSize: '13px', color: '#8a8aa0' }}>
           只记录这部小说实际用到的时代、环境、地点和规则，不需要的内容不用填写
@@ -419,6 +448,37 @@ const WorldSimpleView: React.FC = () => {
           />
         )}
       </section>
+
+      {/* 6. 7维度世界观设定（per 文档 · 只读展示） */}
+      {!loading && (settings.geography || settings.socialStructure || settings.powerSystem) && (
+        <section style={{ padding: '16px 0' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#a78bfa', marginBottom: '12px' }}>
+            🌍 详细世界观设定（7维度）
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', maxHeight: '500px', overflowY: 'auto' }}>
+            {[
+              { label: '时代（时间线/历史背景）', key: 'history', v: settings.history || settings.era },
+              { label: '地点（主要区域/关键地点）', key: 'geography', v: typeof settings.geography === 'string' ? settings.geography : (Array.isArray(settings.locations) ? settings.locations.join('；') : '') },
+              { label: '氛围基调', key: 'atmosphereTone', v: settings.atmosphereTone || '' },
+              { label: '规则', key: 'rules', v: settings.rules || '' },
+              { label: '社会结构（政治/经济/信仰）', key: 'socialStructure', v: [settings.socialStructure, settings.economy, settings.factions].filter(Boolean).join('\n') },
+              { label: '科技/超自然体系', key: 'powerSystem', v: settings.powerSystem },
+              { label: '文化风俗（语言/习俗/禁忌）', key: 'culture', v: settings.culture },
+              { label: '补充说明', key: 'supplementary', v: settings.supplementary || settings.endingDirection || '' },
+            ].filter(item => item.v).map(item => (
+              <div key={item.key} style={{
+                padding: '10px 12px',
+                backgroundColor: 'rgba(139,92,246,0.05)',
+                border: '1px solid rgba(139,92,246,0.12)',
+                borderRadius: '6px',
+              }}>
+                <div style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 600, marginBottom: '4px' }}>{item.label}</div>
+                <div style={{ fontSize: '12px', color: '#c0c0d0', lineHeight: 1.5, maxHeight: '120px', overflowY: 'auto' }}>{item.v}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 保存按钮 */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '12px' }}>

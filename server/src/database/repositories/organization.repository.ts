@@ -13,6 +13,12 @@ export interface OrganizationRow {
   description: string;
   parent_id: string | null;
   level: string | null;
+  leader: string | null;
+  strength_level: number | null;
+  territory: string | null;
+  characteristics: string | null;
+  relationships_json: string | null;
+  signature_equipment: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -36,7 +36,7 @@ export class StateItemService {
     @Optional() private readonly continuityService?: ContinuityService,
   ) {}
 
-  list(projectId: string, query: { status?: string; targetType?: string; limit?: string | number } = {}) {
+  list(projectId: string, query: { status?: string; targetType?: string; limit?: string | number; sourceChapterId?: string } = {}) {
     const db = this.databaseService.getDb();
     const limit = query.limit === undefined || query.limit === '' ? undefined : Number(query.limit);
     if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new BadRequestException('limit must be a positive integer');
@@ -50,6 +50,10 @@ export class StateItemService {
     if (query.targetType && query.targetType !== 'all') {
       clauses.push('target_type = ?');
       params.push(query.targetType);
+    }
+    if (query.sourceChapterId) {
+      clauses.push('source_chapter_id = ?');
+      params.push(query.sourceChapterId);
     }
 
     const sql = `

@@ -6,8 +6,8 @@ import { DatabaseService } from '../../database/database.service';
 import { ChunkerService } from '../../rag/chunker.service';
 import { EmbeddingService } from '../../rag/embedding.service';
 import { VectorIndexService } from '../../rag/vector-index.service';
-import { ConflictEngineService } from '../conflict-engine/conflict-engine.service';
 import { StateItemService } from '../../state/state-item.service';
+import { ConsistencyCheckService } from '../../state/consistency-check.service';
 
 export type DerivedSyncStepStatus = 'completed' | 'pending' | 'warning';
 export interface DerivedSyncStep { status: DerivedSyncStepStatus; detail: string; }
@@ -72,7 +72,7 @@ export class ChapterDerivedDataSyncService {
     private readonly vectorIndex: VectorIndexService,
     private readonly embedding: EmbeddingService,
     private readonly moduleRef: ModuleRef,
-    @Optional() private readonly conflictEngine?: ConflictEngineService,
+    private readonly consistencyCheck: ConsistencyCheckService,
     @Optional() private readonly stateItems?: StateItemService,
   ) {}
 
@@ -576,10 +576,14 @@ export class ChapterDerivedDataSyncService {
   }
 
   private async runConflictReview(input: SyncInput, warnings: string[]): Promise<DerivedSyncStep> {
-    if (!this.conflictEngine) return { status: 'pending', detail: 'Conflict engine is unavailable' };
     try {
-      const report = await this.conflictEngine.checkOnLock(input.chapterId, input.projectId);
-      return { status: 'completed', detail: `Conflict recheck completed with ${report.summary.total} finding(s)` };
+      const db = this.database.getDb();
+      const chapter = db.prepare('SELECT chapter_index FROM chapters WHERE id = ? AND project_id = ?').get(input.chapterId, input.projectId) as any;
+      const chapterIndex = chapter?.chapter_index != null ? Number(chapter.chapter_index) : undefined;
+      const checks = await this.consistencyCheck.checkConsistency(input.projectId, {
+        chapterIds: chapterIndex != null ? [chapterIndex] : undefined,
+      });
+      return { status: 'completed', detail: `Conflict recheck completed with ${checks.length} finding(s)` };
     } catch (error) {
       const message = this.errorMessage(error);
       warnings.push(`Conflict recheck failed: ${message}`);

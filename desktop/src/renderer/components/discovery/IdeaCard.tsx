@@ -22,6 +22,7 @@ const s: Record<string, React.CSSProperties> = {
   charList: { display: 'flex', flexWrap: 'wrap', gap: '6px' },
   charTag: { display: 'inline-block', padding: '3px 10px', borderRadius: '5px', fontSize: '12px', fontWeight: 500 },
   actions: { padding: '12px 18px 16px', display: 'flex', gap: '8px' },
+  qualityFlag: { fontSize: '12px', fontWeight: 600, padding: '3px 10px', borderRadius: '5px', backgroundColor: 'rgba(245,158,11,0.15)', color: '#f59e0b', whiteSpace: 'nowrap', flexShrink: 0 },
   btn: { flex: 1, padding: '11px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '14px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', transition: 'all 0.15s' },
 };
 
@@ -46,6 +47,9 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
         <div style={s.titleRow}>
           <span style={s.title}>{idea.title}</span>
           {idea.angle && <span style={getAngleBadgeStyle(idea.angle)}>{idea.angle}</span>}
+          {Array.isArray(idea.qualityIssues) && idea.qualityIssues.length > 0 && (
+            <span style={s.qualityFlag} title={idea.qualityIssues.join('；')}>⚠️ {idea.qualityIssues.length} 项待优化</span>
+          )}
         </div>
         {idea.hook && <p style={s.hook}>「{idea.hook}」</p>}
         {Array.isArray(idea.styleTags) && idea.styleTags.length > 0 && (

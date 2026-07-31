@@ -3,10 +3,10 @@
  * 左侧章节列表 | 中央编辑器 | 右侧面板（tab切换，一次只显示一个）
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import ChapterEditorShell from '../components/chapter/ChapterEditorShell';
+import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
+import ChapterEditorShell, { type ChapterEditorShellHandle } from '../components/chapter/ChapterEditorShell';
 import ChapterStatusBadge from '../components/chapter/ChapterStatusBadge';
-import AiWritingPanel, { type GenerationNotice } from '../components/editor/AiWritingPanel';
+import AiWritingPanel, { type GenerationNotice, type AiWritingPanelHandle } from '../components/editor/AiWritingPanel';
 import DiffPanel from '../components/editor/DiffPanel';
 import { useChapterStore } from '../stores/chapterStore';
 import { useProjectStore } from '../stores/projectStore';
@@ -27,8 +27,6 @@ type WritingPackage = {
   chapterPlan?: { context?: { chapterTitle?: string; chapterOutline?: string } };
   canonicalContext?: { characters?: string; world?: string; locations?: string };
 };
-
-const tianlongSteps = ['目标', '诱因', '行动', '阻碍', '误判', '反转', '代价', '钩子'];
 
 function displayedChapterHeadingMismatch(content: string | undefined, expectedIndex: number | undefined): string | null {
   if (!content || !expectedIndex) return null;
@@ -53,10 +51,10 @@ const shortWorkflowStages = [
     prompt: '请按短篇阶段二执行：严格使用当前项目配置的叙事视角和目标字数，生成完整闭环故事卡与场景序列，包含核心冲突、主角欲望、人物关系、关键转折与揭示、结局闭环和伏笔回收；章节与场景数量由故事实际需要决定。',
   },
   {
-    title: '天龙8步正文',
-    desc: '每章必须自然包含目标、诱因、行动、阻碍、误判、反转、代价、钩子。',
-    tools: ['章节正文生成', '主动性检查', '结尾钩子检查'],
-    prompt: '请按短篇阶段三执行：读取当前章节写作包和项目配置，用天龙8步法自然写入正文。节奏、信息变化密度、是否使用小标题及结尾方式必须服从项目配置与本章功能，不得套用固定字数间隔。',
+    title: '正文生成',
+    desc: '严格按本章程绑定的详细大纲单次生成正文，不得偏离角色、场景与伏笔。',
+    tools: ['章节正文生成', '大纲一致性检查', '结尾钩子检查'],
+    prompt: '请按短篇阶段三执行：读取当前章节写作包和项目配置，严格依据已绑定详细大纲单次生成正文。角色身份不可替换、不得新增未列出角色、不得改动前文已确认事实、场景地点必须来自大纲、未标注回收的伏笔不得自行回收。',
   },
 ];
 
@@ -107,6 +105,16 @@ const longPainPoints = [
   '手工写作最费时的是反复翻大纲、核对伏笔、确认角色立场，平台应自动调取上下文。',
   'AI不能直接替作者定稿，所有正文和状态回写都需要作者确稿，避免错误设定污染后文。',
 ];
+
+const STATE_ITEM_TYPE_LABEL: Record<string, string> = {
+  character_state: '角色', character: '角色', relationship_state: '关系',
+  foreshadow_state: '伏笔', foreshadowing: '伏笔',
+  timeline_state: '时间线', plot_logic: '情节',
+  world_rule_state: '世界观', world_setting: '世界观',
+  outline_state: '大纲', organization_state: '组织', organization: '组织',
+};
+
+const stateItemTypeLabel = (t?: string): string => STATE_ITEM_TYPE_LABEL[t || ''] || t || '变化';
 
 const confirmedStateTargets = [
   {
@@ -188,6 +196,7 @@ const confirmBadgeStyle: React.CSSProperties = {
 const WritingPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const chapterIdFromUrl = searchParams.get('chapter') || searchParams.get('chapterId');
 
@@ -206,9 +215,62 @@ const WritingPage: React.FC = () => {
   // drawer therefore never hides, cancels, or strands an active generation.
   const [generationTask, setGenerationTask] = useState<GenerationNotice | null>(null);
   const [stateSyncIssue, setStateSyncIssue] = useState<StateSyncIssue>(null);
-  const [pendingStateSummary, setPendingStateSummary] = useState<PendingStateSummary>(null);
+  // 仅保留 setter：待确稿变更计数现已并入 successBanner.stateCount，不再单独渲染。
+  const [, setPendingStateSummary] = useState<PendingStateSummary>(null);
   const [writingPackage, setWritingPackage] = useState<WritingPackage | null>(null);
   const [writingMode, setWritingMode] = useState<'manual' | 'semi_auto' | 'full_auto'>('full_auto');
+  // 生成成功高亮横幅：AI 写完后顶部常驻 12 秒，附"查看前后矛盾"按钮
+  const [successBanner, setSuccessBanner] = useState<{ wordCount: number; stateCount: number; chapterId: string; conflictCount?: number } | null>(null);
+
+  // 编辑器命令式句柄：让 handleGenerateComplete 可以把 AI 完成的内容强制刷进编辑器，
+  // 避免"用户先前手敲过字"场景下被 ChapterEditorShell 内部的 isDirty 守卫拒收、
+  // 结果作者只看到自己写的几百字而误以为"内容没变化"。
+  const chapterEditorRef = useRef<ChapterEditorShellHandle | null>(null);
+  // AI 写作面板命令式句柄：让「前后矛盾」tab 的「AI 重写正文对齐大纲（推荐）」跳转
+  // 回来后能自动触发一次 AI 生成，不需要作者再手动点「🤖 AI生成」。
+  const aiPanelRef = useRef<AiWritingPanelHandle | null>(null);
+
+  // 本章内容变化（真实 state_items，按章节来源过滤；每条可轻量"忽略"）
+  // 默认折叠为顶部按钮/抽屉——避免在正文下方铺一长串卡片，严重影响阅读体验。
+  // 点击展开后查看历史变化。
+  const [chapterStateItems, setChapterStateItems] = useState<any[]>([]);
+  const [chapterStateLoading, setChapterStateLoading] = useState(false);
+  const [chapterStateExpanded, setChapterStateExpanded] = useState(false);
+  const loadChapterStateItems = useCallback(async (chapterId?: string) => {
+    if (!projectId || !chapterId) {
+      setChapterStateItems([]);
+      return;
+    }
+    try {
+      setChapterStateLoading(true);
+      const res = await api.get(`/projects/${projectId}/state/items?sourceChapterId=${chapterId}&status=all&limit=100`);
+      const data = (res as any).data ?? res;
+      const items: any[] = Array.isArray(data?.items) ? data.items : [];
+      // 只展示仍活跃（未忽略/未归档）的抽取项
+      setChapterStateItems(items.filter((it: any) => it.status !== 'rejected' && it.status !== 'archived'));
+    } catch {
+      setChapterStateItems([]);
+    } finally {
+      setChapterStateLoading(false);
+    }
+  }, [projectId]);
+
+  const ignoreChapterStateItem = useCallback(async (itemId: string) => {
+    if (!projectId) return;
+    // 乐观移除，再异步标记 rejected（仅否决该抽取，不影响已确稿设定）
+    setChapterStateItems(prev => prev.filter(it => it.id !== itemId));
+    try {
+      await api.post(`/projects/${projectId}/state/items/${itemId}/reject`, {});
+    } catch {
+      // 失败不回滚，避免噪音；用户可刷新章节重新加载
+    }
+  }, [projectId]);
+
+  // 切换章节时加载本章的内容变化；新章节默认收起，避免一进来就看到长串卡片
+  useEffect(() => {
+    setChapterStateExpanded(false);
+    if (currentChapter?.id) void loadChapterStateItems(currentChapter.id);
+  }, [currentChapter?.id, loadChapterStateItems]);
 
   const volumes = chapters.reduce<Record<number, typeof chapters>>((acc, ch) => {
     if (!acc[ch.volumeIndex]) acc[ch.volumeIndex] = [];
@@ -236,18 +298,76 @@ const WritingPage: React.FC = () => {
     if (!projectId) return;
     void (async () => {
       try {
-        const repaired = await api.post(`/projects/${projectId}/outlines/ensure-writable-chapters`, {});
-        const created = Number(((repaired as any).data ?? repaired)?.created || 0);
-        await fetchChapters(projectId, true);
+        // 与 fetchChapters 并行：之前串行会阻塞章节列表返回，导致编辑器打开慢。
+        // ensure-writable-chapters 是「按详细大纲自动建可写章节」补建动作，常规项目
+        // 第二次进入时无新章节要建（created=0），耗时极短；真正新建时才走全流程。
+        const [repaired] = await Promise.all([
+          api.post(`/projects/${projectId}/outlines/ensure-writable-chapters`, {}).catch(() => null),
+          fetchChapters(projectId, true),
+        ]);
+        const created = Number(((repaired as any)?.data ?? repaired)?.created || 0);
         if (created > 0) {
           setGenStatus(`✅ 已根据详细大纲自动建立 ${created} 个可写章节`);
           setTimeout(() => setGenStatus(null), 3500);
+          // 真的新建了章节 → 重新拉一次列表，让左侧侧栏反映变化
+          await fetchChapters(projectId, true);
         }
       } catch (error: any) {
         setGenStatus(`❌ 无法根据详细大纲建立可写章节：${error?.message || '请检查大纲完整性'}`);
       }
     })();
   }, [projectId, fetchChapters]);
+
+  // 接收「前后矛盾」tab 跳转过来的「AI 重写正文对齐大纲（推荐）」action：
+  // URL 里带 ?action=regenerate_aligned 表明作者确认要重写。
+  // 必须分两阶段：
+  //   (1) 章节已切到 URL 目标 → 打开右侧 AI 写作面板（让 AiWritingPanel 挂载，ref 才有效）
+  //   (2) rightPanel 变为 'ai' 且 ref 挂载完成 → 通过 ref.runGenerate() 触发一次 AI 生成
+  const pendingAlignedAction = searchParams.get('action') === 'regenerate_aligned';
+  // 标记「面板已打开、等下一拍触发生成」的状态。
+  // 当面板从关闭变为 'ai' 时，AiWritingPanel 才会挂载好 ref，ref.current 才可用。
+  const [alignedPanelOpenTrigger, setAlignedPanelOpenTrigger] = useState(false);
+  const alignedActionFiredRef = useRef(false);
+
+  // (1) 章节就绪 → 打开面板
+  useEffect(() => {
+    if (!pendingAlignedAction) return;
+    if (alignedActionFiredRef.current) return;
+    if (!currentChapter?.id) return;
+    if (!chapterIdFromUrl || chapterIdFromUrl !== currentChapter.id) return;
+    if (rightPanel !== 'ai') {
+      setRightPanel('ai');
+      setAlignedPanelOpenTrigger(true);
+    } else {
+      // 已经在 'ai' → 直接进入阶段 (2)
+      setAlignedPanelOpenTrigger(true);
+    }
+  }, [pendingAlignedAction, currentChapter?.id, chapterIdFromUrl, rightPanel]);
+
+  // (2) 面板已打开（AiWritingPanel 已挂载）→ 触发一次 AI 生成
+  useEffect(() => {
+    if (!pendingAlignedAction) return;
+    if (alignedActionFiredRef.current) return;
+    if (!alignedPanelOpenTrigger) return;
+    if (rightPanel !== 'ai') return;
+    if (!aiPanelRef.current) return; // 等 ref 挂载
+    if (aiPanelRef.current.isBusy()) return;
+    alignedActionFiredRef.current = true;
+    setAlignedPanelOpenTrigger(false);
+    // 给作者一个明确的来意提示，再立刻进入生成
+    setGenerationTask({ tone: 'working', text: '已从「前后矛盾」tab 跳转过来，正在按大纲重写正文对齐…' });
+    setGenStatus('🔄 已从矛盾页跳转，正在按大纲重写正文对齐…');
+    void aiPanelRef.current.runGenerate('已从「前后矛盾」tab 跳转，正在按大纲重写正文对齐大纲…');
+    // 触发后清掉 URL 上的 action 参数，避免刷新或后退时再次触发
+    const next = new URLSearchParams(searchParams);
+    next.delete('action');
+    navigate(`${location.pathname}?${next.toString()}`, { replace: true });
+  }, [alignedPanelOpenTrigger, rightPanel, pendingAlignedAction, searchParams, navigate, location.pathname]);
+
+  // 切到不同章节 → 重置 fired 标记，允许新的「重写对齐」action 再触发一次
+  useEffect(() => {
+    alignedActionFiredRef.current = false;
+  }, [chapterIdFromUrl]);
 
   useEffect(() => {
     if (!projectId || chapters.length === 0) return;
@@ -275,27 +395,35 @@ const WritingPage: React.FC = () => {
 
     setGenerationTask({ tone: 'working', text: '正文已生成，正在保存初稿…' });
     setGenStatus('🔄 初稿保存中...');
-    // 步骤1：保存章节内容（关键步骤，带重试）
+    // 步骤1：保存章节内容（关键步骤，带 3 次重试 + 单次 20 秒超时，避免无谓等待）。
+    // 成功/失败都立即把状态条更新，不依赖后续长步骤，避免"一直显示保存中"的假象。
     let saved = false;
     let saveResult: any = null;
+    let saveError = '';
     for (let attempt = 0; attempt < 3 && !saved; attempt++) {
       try {
-        const response = await api.put(`/projects/${projectId}/chapters/${targetChapterId}`, { content });
+        const response = await api.put(
+          `/projects/${projectId}/chapters/${targetChapterId}`,
+          { content },
+          // 章节保存是单条 SQL 写入，20s 超时足够；过久不回必是网络/锁表，
+          // 让作者看到"超时"远比让"保存中"停留数分钟直观。
+          20000,
+        );
         saveResult = (response as any).data ?? response;
-        // Never replace the visible editor after the author has selected another
-        // chapter while this background generation was running.
+        // 章节若已切换则不强行覆盖当前编辑器（race condition 兜底）。
         if (currentChapter?.id === targetChapterId) setCurrentChapterContent(content);
         saved = true;
-      } catch (e) {
-        if (attempt === 2) {
-          setGenerationTask({ tone: 'error', text: '正文生成完成，但保存失败；原内容未被覆盖。请检查服务后重试。' });
-          setGenStatus('❌ 章节保存失败，请手动保存！');
-          setTimeout(() => setGenStatus(null), 8000);
-          return; // 保存失败则不继续后续步骤
-        }
-        // 等待1秒后重试
-        await new Promise(r => setTimeout(r, 1000));
+        setGenStatus('✅ 初稿已保存');
+      } catch (e: any) {
+        saveError = e?.message || String(e);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
       }
+    }
+    if (!saved) {
+      setGenerationTask({ tone: 'error', text: `正文生成完成，但保存失败：${saveError}` });
+      setGenStatus(`❌ 章节保存失败（${saveError}）；原内容未被覆盖。请检查服务后重试。`);
+      setTimeout(() => setGenStatus(null), 10000);
+      return;
     }
 
     // The chapter save already runs the canonical derived-data pipeline. Calling
@@ -318,15 +446,44 @@ const WritingPage: React.FC = () => {
       setPendingStateSummary(null);
       setGenerationTask({ tone: 'error', text: `正文已保存，但规范同步未完成：${reason}` });
       setGenStatus('⚠️ 正文已保存，但规范同步未完成；请重试同步');
+      // 同步失败时把高亮横幅换成失败态，让作者明确知道"生成成功但下游未跟上"
+      setSuccessBanner({ wordCount: (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length, stateCount: 0, chapterId: targetChapterId });
       return;
     }
 
     setStateSyncIssue(null);
     const candidateCount = Array.isArray(stateCandidates?.created) ? stateCandidates.created.length : 0;
     setPendingStateSummary({ chapterId: targetChapterId, count: candidateCount });
+    // 生成后内容变化内联卡片：拉取本章真实 state_items（含刚抽取的变更）
+    void loadChapterStateItems(targetChapterId);
     setGenerationTask({ tone: 'success', text: '正文、摘要、RAG、伏笔、时间线与连续性状态已同步。' });
-    setGenStatus('✅ 初稿已保存并完成规范同步');
-    setTimeout(() => setGenStatus(null), 5500);
+    // 注意：成功态的提示由 successBanner 独占承载（单行高对比、6 秒自动消失），
+    // 不再 setGenStatus('✅ 本章创建成功...') 避免与顶部横幅同时显示造成"双弹框"错觉。
+    setTimeout(() => setGenerationTask(null), 5500);
+    // 顶部高亮横幅：回填 stateCount，12 秒后自动收起
+    setSuccessBanner(prev => prev && prev.chapterId === targetChapterId
+      ? { ...prev, stateCount: candidateCount }
+      : prev);
+    setTimeout(() => {
+      setSuccessBanner(prev => prev && prev.chapterId === targetChapterId ? null : prev);
+    }, 6000);
+
+    // 真实矛盾检测：章节保存时已跑派生同步的 runConflictReview，把结果写入
+    // consistency_checks 表。这里拉取真实「未解决」矛盾数驱动横幅文案与按钮，
+    // 不再写死「已检测矛盾」造成弹框与实际 tab 不一致的错觉。
+    void (async () => {
+      try {
+        const resp = await api.get(`/conflicts?projectId=${projectId}&status=unresolved`);
+        const data = (resp as any).data ?? resp;
+        const list = Array.isArray(data?.conflicts) ? data.conflicts : [];
+        const count = list.length;
+        setSuccessBanner(prev => prev && prev.chapterId === targetChapterId
+          ? { ...prev, conflictCount: count }
+          : prev);
+      } catch {
+        // 拉取失败不影响主流程；横幅保持「已检测」中性表述
+      }
+    })();
   }, [projectId, currentChapter?.id, setCurrentChapterContent]);
 
   const handleGenerateComplete = useCallback((content: string, targetChapterId: string) => {
@@ -336,13 +493,21 @@ const WritingPage: React.FC = () => {
       setTimeout(() => setGenStatus(null), 8000);
       return;
     }
-    // Render the generated prose immediately. The async persistence path below is
-    // still authoritative and reports any failure instead of silently losing it.
+    // 1) 强制把 AI 完整内容刷进编辑器（绕开 isDirty 守卫；详见 ChapterEditorShellHandle）。
+    if (currentChapter?.id === targetChapterId) {
+      chapterEditorRef.current?.acceptExternalContent(content, { reason: '✅ AI 已写入最新章节正文' });
+    }
+    // 2) 同步写到 store，使其它依赖 chapter.content 的组件（顶部 banner、字数卡片等）也即时刷新。
     if (currentChapter?.id === targetChapterId) setCurrentChapterContent(content);
+    // 3) 创作成功：直接关闭右侧写作面板（生成已在面板内完成，无需保留）。
+    setRightPanel(null);
+    // 顶部高亮横幅：先按字数占位，等同步完成再回填 stateCount
+    const wordCount = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    setSuccessBanner({ wordCount, stateCount: 0, chapterId: targetChapterId });
     setGenerationTask({ tone: 'working', text: '正文已生成，正在保存与同步…' });
     setGenStatus('🔄 正文已生成，正在保存与同步…');
     void syncDraftAndPendingState(content, targetChapterId);
-  }, [syncDraftAndPendingState, setCurrentChapterContent, currentChapter?.id]);
+  }, [syncDraftAndPendingState, setCurrentChapterContent, currentChapter?.id, setRightPanel]);
 
   const retryStateSync = useCallback(() => {
     if (!stateSyncIssue || stateSyncIssue.chapterId !== currentChapter?.id) return;
@@ -422,35 +587,120 @@ const WritingPage: React.FC = () => {
   const modeLabel = { manual: '手动', semi_auto: '半自动', full_auto: '全自动' }[writingMode];
 
   // 每章目标来自该章大纲；项目只规定 3200-4000 的有效范围。
-  const [chapterWarnings, setChapterWarnings] = useState<string[]>([]);
-  const warningFlagRef = useRef(false);
+  // 这里给作者一个**正负向**提示：达成 3200-4000 区间是绿色"已达成"，
+  // 仅在确实没达标（<3200）或硬越界（>4000）时给橙色提示。原先"已超过目标"
+  // 一直显示为橙色警告，3918 字已完成时它仍亮着，让作者误以为出错。
+  type ChapterHint = { tone: 'success' | 'warning' | 'error'; message: string };
+  const [chapterHint, setChapterHint] = useState<ChapterHint | null>(null);
+  const wordCount = useCallback((text: string) => {
+    if (!text || !text.trim()) return 0;
+    const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    const withoutChinese = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
+    const englishWords = withoutChinese
+      .split(/\s+/)
+      .filter((w) => w.length > 0 && /[a-zA-Z]/.test(w)).length;
+    return chineseChars + englishWords;
+  }, []);
 
   useEffect(() => {
     // A project can enter this page before the first writable chapter is
     // selected. That is a loading/empty state, not an invalid outline.
     if (!currentChapter?.id) {
-      warningFlagRef.current = false;
-      setChapterWarnings([]);
+      setChapterHint(null);
       return;
     }
     const content = currentChapter?.content || '';
-    const warnings: string[] = [];
+    const actual = wordCount(content);
     const chapterTarget = Number(currentChapter?.targetWords || 0);
     if (!Number.isInteger(chapterTarget) || chapterTarget < 3200 || chapterTarget > 4000) {
-      warnings.push('本章缺少有效的动态字数目标（必须为3200-4000字），请先完善章节大纲');
-      warningFlagRef.current = false;
-    } else if (content.length > chapterTarget) {
-      const message = `章节已超过本章依据剧情任务确定的${chapterTarget}字目标`;
-      warnings.push(message);
-      if (!warningFlagRef.current) showNotification('warning', message, 5000);
-      warningFlagRef.current = true;
-    } else warningFlagRef.current = false;
-
-    setChapterWarnings(warnings);
-  }, [currentChapter?.id, currentChapter?.content, currentChapter?.targetWords]);
+      setChapterHint({ tone: 'error', message: '本章缺少有效的动态字数目标（必须为3200-4000字），请先完善章节大纲' });
+      return;
+    }
+    if (actual === 0) {
+      // 没正文时只静默等用户动笔；不弹任何提示
+      setChapterHint(null);
+      return;
+    }
+    if (actual < 3200) {
+      setChapterHint({ tone: 'warning', message: `本章正文 ${actual.toLocaleString()} 字，未达 3200 字下限` });
+      return;
+    }
+    if (actual > 4000) {
+      setChapterHint({ tone: 'warning', message: `本章正文 ${actual.toLocaleString()} 字，超过 4000 字上限` });
+      return;
+    }
+    // 3200 ≤ actual ≤ 4000 区间内：始终给绿色正向提示
+    const exceedsTarget = actual > chapterTarget;
+    setChapterHint({
+      tone: 'success',
+      message: exceedsTarget
+        ? `✅ 本章 ${actual.toLocaleString()} 字（已达成 3200-4000 区间，超出大纲目标 ${chapterTarget.toLocaleString()} 字 ${(actual - chapterTarget).toLocaleString()} 字）`
+        : `✅ 本章 ${actual.toLocaleString()} 字（已达成 3200-4000 区间，目标 ${chapterTarget.toLocaleString()} 字）`,
+    });
+  }, [currentChapter?.id, currentChapter?.content, currentChapter?.targetWords, wordCount]);
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', backgroundColor: '#16213e' }}>
+      {/* 生成成功高亮横幅（单行高对比；不再与底部 status bar 重复显示） */}
+      {successBanner && (() => {
+        const isConflict = (successBanner.conflictCount ?? 0) > 0;
+        const isSyncFail = !!(stateSyncIssue && stateSyncIssue.chapterId === successBanner.chapterId);
+        // 暗色主题下高对比度配色（背景与文字对比度 ≥ 7:1，远超 WCAG AA 4.5:1）
+        // 成功：深绿底 + 浅绿字；矛盾：深红底 + 浅红字；同步失败：深琥珀底 + 浅黄字
+        const palette = isSyncFail
+          ? { bg: '#3a2a0a', border: '#f39c12', fg: '#ffd9a3', subFg: '#f6c36a' }
+          : isConflict
+            ? { bg: '#3b1418', border: '#e94560', fg: '#ffd1d8', subFg: '#ff9aa9' }
+            : { bg: '#0d3320', border: '#2ecc71', fg: '#d1f7c4', subFg: '#8df0b2' };
+        return (
+          <div role="status" aria-live="polite" style={{
+            position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 200, maxWidth: 720, width: 'auto', minWidth: 420,
+            padding: '12px 16px', borderRadius: 10,
+            backgroundColor: palette.bg,
+            border: `1px solid ${palette.border}`,
+            color: palette.fg,
+            boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', gap: 12,
+            fontSize: 13, fontWeight: 600, lineHeight: 1.4,
+          }}>
+            <span style={{ fontSize: 18, lineHeight: 1 }}>{isSyncFail ? '⚠️' : isConflict ? '⚠️' : '✅'}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, color: palette.fg }}>
+                {isSyncFail
+                  ? '正文已保存，规范同步未完成'
+                  : isConflict
+                    ? `正文已保存，发现 ${successBanner.conflictCount} 处前后矛盾`
+                    : `本章创建成功！已生成 ${successBanner.wordCount.toLocaleString()} 字`}
+                {successBanner.stateCount > 0 && !isSyncFail && (
+                  <span style={{ fontWeight: 600, color: palette.subFg, marginLeft: 6 }}>
+                    · 已记录 {successBanner.stateCount} 处内容变化
+                  </span>
+                )}
+              </div>
+            </div>
+            {projectId && successBanner.conflictCount !== undefined && (
+              <button
+                onClick={() => navigate(`/project/${projectId}/conflicts`)}
+                disabled={successBanner.conflictCount === 0}
+                style={{
+                  border: `1px solid ${successBanner.conflictCount > 0 ? '#e94560' : 'rgba(255,255,255,0.18)'}`,
+                  backgroundColor: successBanner.conflictCount > 0 ? '#5a1d24' : 'rgba(255,255,255,0.04)',
+                  color: successBanner.conflictCount > 0 ? '#ffd1d8' : 'rgba(255,255,255,0.4)',
+                  padding: '6px 14px', borderRadius: 6,
+                  cursor: successBanner.conflictCount > 0 ? 'pointer' : 'not-allowed',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                }}
+              >{successBanner.conflictCount > 0 ? `查看前后矛盾 (${successBanner.conflictCount}) →` : '前后矛盾已清零'}</button>
+            )}
+            <button
+              onClick={() => setSuccessBanner(null)}
+              style={{ background: 'none', border: 'none', color: palette.subFg, cursor: 'pointer', fontSize: 16, padding: '0 4px', fontFamily: 'inherit' }}
+              aria-label="关闭提示"
+            >✕</button>
+          </div>
+        );
+      })()}
       {/* WebSocket 实时通知栏 */}
       {wsNotifications.length > 0 && (
         <div style={{
@@ -545,16 +795,30 @@ const WritingPage: React.FC = () => {
           </span>
           <span style={{ fontSize: '10px', color: '#4a4a60' }}>F1全自动 F2半自动 F3手动</span>
 
-          {/* 章节/段落长度警告 */}
-          {chapterWarnings.length > 0 && (
-            <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
-              {chapterWarnings.length > 0 && (
-                <span style={{ fontSize: '10px', color: '#f39c12', backgroundColor: 'rgba(243,156,18,0.12)', padding: '2px 8px', borderRadius: '4px' }}>
-                  ⚠ {chapterWarnings[0]}
+          {/* 章节/段落长度提示：达成 3200-4000 区间用绿色正向展示，越界才警告 */}
+          {chapterHint && (() => {
+            const palette = chapterHint.tone === 'success'
+              ? { color: '#1abc9c', backgroundColor: 'rgba(26,188,156,0.14)' }
+              : chapterHint.tone === 'error'
+                ? { color: '#ff9aa9', backgroundColor: 'rgba(231,76,96,0.14)' }
+                : { color: '#f39c12', backgroundColor: 'rgba(243,156,18,0.14)' };
+            return (
+              <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    color: palette.color,
+                    backgroundColor: palette.backgroundColor,
+                    fontWeight: 700,
+                  }}
+                >
+                  {chapterHint.message}
                 </span>
-              )}
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {/* 右侧操作区 */}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -585,6 +849,7 @@ const WritingPage: React.FC = () => {
             )}
           </div>
           <ChapterEditorShell
+            ref={chapterEditorRef}
             chapter={currentChapter}
             projectId={projectId || ''}
             onLock={async id => { await lockChapter(projectId!, id); }}
@@ -608,14 +873,81 @@ const WritingPage: React.FC = () => {
             }}
             onAiWrite={() => togglePanel('ai')}
           />
+
+          {/* 本章内容变化：默认折叠为顶部一行按钮，避免在正文下方铺长串卡片影响阅读；点击展开后查看历史变化 */}
+          {chapterStateItems.length > 0 && (
+            <div style={{ margin: '14px 14px 8px' }}>
+              <button
+                onClick={() => setChapterStateExpanded(v => !v)}
+                title="点击查看本章已抽取的内容变化（角色/伏笔/时间线/世界观等）"
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  backgroundColor: chapterStateExpanded ? 'rgba(52,152,219,0.12)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${chapterStateExpanded ? 'rgba(52,152,219,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                  color: chapterStateExpanded ? '#9bd4ff' : '#c8c8d8',
+                  fontSize: '12px',
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13px' }}>{chapterStateExpanded ? '▾' : '▸'}</span>
+                  <span style={{ fontWeight: 700 }}>本章内容变化</span>
+                  <span style={{
+                    fontSize: '10px',
+                    padding: '1px 7px',
+                    borderRadius: '10px',
+                    backgroundColor: chapterStateExpanded ? 'rgba(52,152,219,0.25)' : 'rgba(255,255,255,0.08)',
+                    color: chapterStateExpanded ? '#9bd4ff' : '#8a8aa0',
+                  }}>{chapterStateItems.length} 条</span>
+                </span>
+                <span style={{ fontSize: '10px', color: '#8a8aa0' }}>
+                  {chapterStateLoading ? '加载中…' : (chapterStateExpanded ? '点击收起' : '点击查看历史变化')}
+                </span>
+              </button>
+              {chapterStateExpanded && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                  {chapterStateItems.map(item => {
+                    // 显示优先级：title > summary > content > targetLabel；
+                    // summary 是机器键（"outline.missing_requirement.xxx" 或纯 UUID）时优先用 content/targetLabel。
+                    const displayText = item.title || item.summary || item.content || item.targetLabel || '（无摘要）';
+                    const looksLikeMachineKey = /^(outline|state|prop|timeline|character|world|setting|location)\.(missing|missing_requirement|requirement|state|change|update)[._-]?\w+/i.test(displayText)
+                      || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(displayText);
+                    const finalText = looksLikeMachineKey
+                      ? (item.content || item.targetLabel || '（大纲级状态项）')
+                      : displayText;
+                    return (
+                      <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '9px 11px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <span style={{ flexShrink: 0, fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', backgroundColor: 'rgba(52,152,219,0.16)', color: '#7ec8ff' }}>{stateItemTypeLabel(item.targetType)}</span>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: '12px', color: '#c8c8d8', lineHeight: 1.5 }}>{finalText}</div>
+                        <button
+                          onClick={() => ignoreChapterStateItem(item.id)}
+                          title="否决该抽取（不影响已确稿设定）"
+                          style={{ flexShrink: 0, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: '#8a8aa0', fontSize: '11px', padding: '3px 9px', borderRadius: '5px', cursor: 'pointer', fontFamily: 'inherit' }}
+                        >忽略</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* 状态栏 */}
-        {(generationTask || genStatus) && (
+        {/* 状态栏（成功态由顶部 successBanner 独占承载，此处隐藏避免双弹框） */}
+        {(generationTask?.tone && generationTask.tone !== 'success' || (genStatus && !genStatus.startsWith('✅'))) && (
           <div style={{
             padding: '6px 14px', fontSize: '12px', textAlign: 'center',
-            backgroundColor: generationTask?.tone === 'success' ? 'rgba(46,204,113,0.08)' : generationTask?.tone === 'error' ? 'rgba(231,76,96,0.12)' : 'rgba(52,152,219,0.08)',
-            color: generationTask?.tone === 'success' ? '#2ecc71' : generationTask?.tone === 'error' ? '#ff9aa9' : '#75bfff',
+            backgroundColor: generationTask?.tone === 'error' ? 'rgba(231,76,96,0.12)' : 'rgba(52,152,219,0.08)',
+            color: generationTask?.tone === 'error' ? '#ff9aa9' : '#75bfff',
             borderTop: '1px solid rgba(255,255,255,0.04)',
           }}>🤖 写作任务：{generationTask?.text || genStatus}</div>
         )}
@@ -633,23 +965,7 @@ const WritingPage: React.FC = () => {
           }}>
             <span>状态同步未完成：{stateSyncIssue.message}</span>
             <button onClick={retryStateSync} style={{ ...workflowButtonStyle('#f39c12'), padding: '5px 8px' }}>重试状态同步</button>
-            <button onClick={() => navigate(`/project/${projectId}/state`)} style={{ ...workflowButtonStyle('#3498db'), padding: '5px 8px' }}>查看待确认</button>
-          </div>
-        )}
-        {!stateSyncIssue && pendingStateSummary && pendingStateSummary.chapterId === currentChapter?.id && pendingStateSummary.count > 0 && (
-          <div style={{
-            padding: '8px 14px',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '10px',
-            fontSize: '12px',
-            backgroundColor: 'rgba(46,204,113,0.07)',
-            color: '#8df0b2',
-            borderTop: '1px solid rgba(46,204,113,0.16)',
-          }}>
-            <span>本章有 {pendingStateSummary.count} 条状态建议待作者确认，确认后才会进入后续章节上下文。</span>
-            <button onClick={() => navigate(`/project/${projectId}/state`)} style={{ ...workflowButtonStyle('#2ecc71'), padding: '5px 8px' }}>去确认状态</button>
+            <button onClick={() => navigate(`/project/${projectId}/conflicts`)} style={{ ...workflowButtonStyle('#e94560'), padding: '5px 8px' }}>查看前后矛盾</button>
           </div>
         )}
       </div>
@@ -688,7 +1004,7 @@ const WritingPage: React.FC = () => {
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {rightPanel === 'ai' && (
                 <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <AiWritingPanel projectId={projectId || ''} chapterId={currentChapter?.id} chapterContent={currentChapter?.content}
+                  <AiWritingPanel ref={aiPanelRef} projectId={projectId || ''} chapterId={currentChapter?.id} chapterContent={currentChapter?.content}
                     volumeIndex={currentChapter?.volumeIndex ?? 1} chapterIndex={currentChapter?.chapterIndex ?? 1}
                     chapters={chapters}
                     onChapterChange={(chapterId) => { if (projectId && chapterId) void selectChapter(projectId, chapterId); }}
@@ -774,10 +1090,10 @@ const WritingPage: React.FC = () => {
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
                           <div style={{ fontSize: '12px', fontWeight: 800, color: '#eaeaea' }}>本章写完后的内容变化</div>
-                          <span style={confirmBadgeStyle}>需作者确认</span>
+                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(46,204,113,0.14)', color: '#8df0b2' }}>自动记录</span>
                         </div>
                         <div style={{ color: '#8a8aa0', fontSize: '11px', lineHeight: 1.55, marginBottom: '10px' }}>
-                          正文完成后，人物、情节、时间和伏笔变化会先列给作者确认；确认后才更新后续写作资料。
+                          正文完成后，人物、情节、时间和伏笔变化会列在正文下方的内联卡片中，自动流入后续写作上下文；你可对不准确的抽取逐条忽略。
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                           {confirmedStateTargets.map(target => (
@@ -786,10 +1102,7 @@ const WritingPage: React.FC = () => {
                               onClick={() => navigate(`/project/${projectId}/${target.route}`)}
                               style={{ ...workflowButtonStyle(target.color), display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'stretch', textAlign: 'left' }}
                             >
-                              <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
-                                <span>{target.label}</span>
-                                <span style={confirmBadgeStyle}>需确认</span>
-                              </span>
+                              <span style={{ color: '#eaeaea', fontSize: '12px', fontWeight: 700 }}>{target.label}</span>
                               <span style={{ color: '#8a8aa0', fontSize: '10px', fontWeight: 500, lineHeight: 1.35 }}>{target.desc}</span>
                             </button>
                           ))}
@@ -839,11 +1152,9 @@ const WritingPage: React.FC = () => {
                       </div>
 
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#eaeaea', marginBottom: '8px' }}>本章天龙8步检查</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                          {tianlongSteps.map(step => (
-                            <span key={step} style={{ padding: '6px 4px', textAlign: 'center', borderRadius: '5px', backgroundColor: 'rgba(233,69,96,0.08)', color: '#c0c0d0', fontSize: '10px' }}>{step}</span>
-                          ))}
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#eaeaea', marginBottom: '8px' }}>正文生成约束</div>
+                        <div style={{ fontSize: '11px', color: '#c0c0d0', lineHeight: 1.7 }}>
+                          按已绑定详细大纲单次生成正文。生成时不会替换角色身份、新增未列出角色、改动前文事实、引入大纲外地点或自行回收未标注伏笔。
                         </div>
                       </div>
                     </div>

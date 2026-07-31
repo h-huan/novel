@@ -13,6 +13,7 @@ import { api, getBaseUrl } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
 import { useDiscoveryStore } from '../stores/discoveryStore';
 import { openProject } from '../lib/openProject';
+import { io, Socket } from 'socket.io-client';
 import IdeaCard from '../components/discovery/IdeaCard';
 
 // ============================================================
@@ -80,8 +81,8 @@ const STEP_LABELS = ['配置', '发现', '创建'];
 const CREATION_STEPS = [
   { label: '创建项目...', key: 'project' },
   { label: '生成世界观...', key: 'world' },
-  { label: '生成大纲...', key: 'outline' },
   { label: '生成角色...', key: 'characters' },
+  { label: '生成大纲...', key: 'outline' },
   { label: '生成伏笔...', key: 'foreshadowing' },
   { label: '生成组织与地点...', key: 'orgs' },
   { label: '生成时间线...', key: 'timeline' },
@@ -672,7 +673,8 @@ const DiscoveryWizardPage: React.FC = () => {
           .filter((i: any) => i.title)
           .map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
         store.addExcludeDetails(newDetails);
-        store.setGenProgress(`✨ 发现 ${newIdeas.length} 个故事题材（已排除 ${excludeTitles?.length || 0} 个旧题材）`);
+        const qualityWarn = (res as any).qualityWarning ? `\n⚠️ ${(res as any).qualityWarning}` : '';
+        store.setGenProgress(`✨ 发现 ${newIdeas.length} 个故事题材（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
         store.setGenProgress(`❌ ${(res as any).error}`);
       } else {
@@ -811,19 +813,18 @@ const DiscoveryWizardPage: React.FC = () => {
       world: 'pending', orgs: 'pending', foreshadowing: 'pending', timeline: 'pending', done: 'pending',
     });
 
-    // 清理上一次的 SSE 连接（如果有）
+    // 清理上一次的连接
     sseRef.current?.close();
 
-    // SSE 整体超时（15分钟，后端已优化并行化+降超时，此为安全网）
-    const SSE_TIMEOUT = 900_000;
-    let sseTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let receivedDone = false;
+    let wsSocket: Socket | null = null;
 
     const cleanup = () => {
       sseRef.current?.close();
       sseRef.current = null;
-      if (sseTimeoutId) { clearTimeout(sseTimeoutId); sseTimeoutId = null; }
+      if (wsSocket) { wsSocket.disconnect(); wsSocket = null; }
     };
+    sseRef.current = { close: () => { if (wsSocket) { wsSocket.disconnect(); wsSocket = null; } } } as any;
 
     try {
       const currentState = useDiscoveryStore.getState();
@@ -862,93 +863,43 @@ const DiscoveryWizardPage: React.FC = () => {
       store.setActiveCreationProjectId(projectId);
       store.setCreationStepStatus((prev) => ({ ...prev, project: 'done', world: 'running' }));
 
-      // 第二步：建立 SSE 连接接收实时进度
-      const baseUrl = getBaseUrl();
-      const sseUrl = `${baseUrl}/chain/project-creation-progress/${projectId}`;
-      console.log(`[SSE] 正在连接 ${sseUrl} ...`);
-      const eventSource = new EventSource(sseUrl);
-      sseRef.current = eventSource;
+      // 第二步：通过 WebSocket 接收实时进度，无硬编码超时
+      // 连接存活 = 进度存活；断开 = 后端出了问题
+      const socketOrigin = getBaseUrl().replace('/api/v1', '');
+      wsSocket = io(`${socketOrigin}/writing`, {
+        transports: ['websocket', 'polling'],
+        reconnection: false,
+        query: { projectId },
+      });
 
-      let reconnectCount = 0;
-      const MAX_RECONNECT = 10;
+      wsSocket.on('connect', () => {
+        console.log(`[WS] 已连接 project=${projectId}`);
+        wsSocket!.emit('join_project', projectId);
+      });
 
-      sseTimeoutId = setTimeout(() => {
+      wsSocket.on('project_creation_progress', (msg: any) => {
+        receivedDone = applyCreationMessage(projectId, msg, cleanup) || receivedDone;
+      });
+
+      wsSocket.on('disconnect', (reason: string) => {
         if (!receivedDone) {
-          store.setCreationErrors(['项目创建超时（15分钟），请稍后重试']);
-          store.setCreationStepStatus((prev) => {
-            const n = { ...prev, done: 'failed' as const };
-            for (const k of Object.keys(n) as Array<keyof typeof n>) {
-              if (n[k] === 'running' || n[k] === 'pending') n[k] = 'failed';
-            }
-            return n;
-          });
+          console.log(`[WS] 连接断开 (reason=${reason})`);
+          store.setCreationErrors([`WebSocket 连接断开（${reason}），请检查后端是否正常运行`]);
           store.setCreating(false);
           store.setHasActiveCreation(false);
           store.setActiveCreationProjectId(null);
-          cleanup();
         }
-      }, SSE_TIMEOUT);
-
-      eventSource.onopen = () => {
-        console.log(`[SSE] 连接已建立 project=${projectId}`);
-        reconnectCount = 0;
-      };
-
-      eventSource.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          receivedDone = applyCreationMessage(projectId, msg, cleanup) || receivedDone;
-        } catch {
-          // 非 JSON 行忽略
-        }
-      };
-
-      eventSource.onerror = () => {
-        if (receivedDone) {
-          cleanup();
-          return;
-        }
-        reconnectCount++;
-        if (reconnectCount > MAX_RECONNECT) {
-          console.error(`[SSE] 重连超过${MAX_RECONNECT}次，放弃`);
-          store.setCreationErrors(['SSE 连接失败，无法接收进度']);
-          store.setCreationStepStatus((prev) => {
-            const n = { ...prev, done: 'failed' as const };
-            for (const k of Object.keys(n) as Array<keyof typeof n>) {
-              if (n[k] === 'running' || n[k] === 'pending') n[k] = 'failed';
-            }
-            return n;
-          });
-          store.setCreating(false);
-          store.setHasActiveCreation(false);
-          store.setActiveCreationProjectId(null);
-          cleanup();
-          return;
-        }
-        console.log(`[SSE] 连接中断，2秒后重连... (${reconnectCount}/${MAX_RECONNECT})`);
-        // 手动关闭旧连接并重建（不依赖浏览器内置的自动重连）
         cleanup();
-        setTimeout(() => {
-          // 如果已经收到 done/error 或者用户已经取消，不再重连
-          const state = useDiscoveryStore.getState();
-          if (!state.isCreating || !state.hasActiveCreation) return;
-          const newEs = new EventSource(sseUrl);
-          sseRef.current = newEs;
-          // 复用相同的消息处理（提取为内部函数避免重复）
-          newEs.onopen = () => { console.log(`[SSE·重连] 成功 project=${projectId}`); };
-          newEs.onmessage = (event) => {
-            try {
-              const msg = JSON.parse(event.data);
-              receivedDone = applyCreationMessage(projectId, msg, () => {
-                newEs.close();
-                if (sseRef.current === newEs) sseRef.current = null;
-                if (sseTimeoutId) { clearTimeout(sseTimeoutId); sseTimeoutId = null; }
-              }) || receivedDone;
-            } catch {}
-          };
-          newEs.onerror = () => { /* 嵌套的 error 由外层 reconnectCount 控制 */ };
-        }, 2000);
-      };
+      });
+
+      wsSocket.on('connect_error', (err: Error) => {
+        console.error(`[WS] 连接失败: ${err.message}`);
+        store.setCreationErrors([`WebSocket 连接失败，请检查后端是否正常运行`]);
+        store.setCreating(false);
+        store.setHasActiveCreation(false);
+        store.setActiveCreationProjectId(null);
+        cleanup();
+      });
     } catch (err: any) {
       store.setCreationErrors([err.message || '创建失败']);
       store.setCreationStepStatus((prev) => {

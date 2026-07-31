@@ -325,8 +325,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
   },
   leftPane: {
-    width: 320,
-    minWidth: 320,
+    width: 260,
+    minWidth: 240,
     borderRight: '1px solid rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(0,0,0,0.08)',
     overflow: 'auto',

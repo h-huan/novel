@@ -50,35 +50,9 @@ export class ChainTemplateService {
     this.seedDefaultTemplates();
   }
 
-  /** 种子数据：预置三个默认 Chain 模板 */
+  /** 种子数据：预置默认 Chain 模板（天龙8步 Chain 已于 2026-07-24 取消，改由 /chain/generate 单次 LLM 严格按大纲生成） */
   private seedDefaultTemplates(): void {
     const now = new Date().toISOString();
-
-    this.templates.set('tianlong-8step', {
-      id: 'tianlong-8step',
-      name: '天龙8步正文生成',
-      version: '1.0.0',
-      description: '天龙8步法生成完整章节正文（目标→诱因→行动→阻碍→误判→反转→代价→钩子→合成→质检）',
-      nodes: [
-        { id: 'node_1_goal', name: '目标设定', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step1-goal', modelConfig: { primary: 'deepseek', temperature: 0.6, tier: 'balanced' }, inputMapping: { chapter_context: 'user_input.chapterContext' }, outputMapping: { goal: 'node_1.goal' }, timeout: 60, retryCount: 0 },
-        { id: 'node_2_trigger', name: '诱因', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step2-trigger', modelConfig: { primary: 'deepseek', temperature: 0.7, tier: 'balanced' }, inputMapping: { goal: 'chain_output.node_1' }, outputMapping: { trigger: 'node_2.trigger' }, timeout: 60, retryCount: 0 },
-        { id: 'node_3_action', name: '行动', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step3-action', modelConfig: { primary: 'deepseek', temperature: 0.8, tier: 'performance' }, inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2' }, outputMapping: { action: 'node_3.action' }, timeout: 120, retryCount: 1 },
-        { id: 'node_4_obstacle', name: '阻碍', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step4-obstacle', modelConfig: { primary: 'deepseek', temperature: 0.7, tier: 'balanced' }, inputMapping: { action: 'chain_output.node_3' }, outputMapping: { obstacle: 'node_4.obstacle' }, timeout: 60, retryCount: 0 },
-        { id: 'node_5_misjudge', name: '误判', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step5-misjudge', modelConfig: { primary: 'deepseek', temperature: 0.7, tier: 'balanced' }, inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2', action: 'chain_output.node_3', obstacle: 'chain_output.node_4' }, outputMapping: { misjudge: 'node_5.misjudge' }, timeout: 60, retryCount: 0 },
-        { id: 'node_6_reversal', name: '反转', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step6-reversal', modelConfig: { primary: 'deepseek', temperature: 0.9, tier: 'performance' }, inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2', action: 'chain_output.node_3', obstacle: 'chain_output.node_4', misjudge: 'chain_output.node_5' }, outputMapping: { reversal: 'node_6.reversal' }, timeout: 120, retryCount: 1 },
-        { id: 'node_7_cost', name: '代价', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step7-cost', modelConfig: { primary: 'deepseek', temperature: 0.6, tier: 'balanced' }, inputMapping: { reversal: 'chain_output.node_6' }, outputMapping: { cost: 'node_7.cost' }, timeout: 60, retryCount: 0 },
-        { id: 'node_8_hook', name: '钩子', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-step8-hook', modelConfig: { primary: 'deepseek', temperature: 0.7, tier: 'balanced' }, inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2', reversal: 'chain_output.node_6', cost: 'chain_output.node_7' }, outputMapping: { hook: 'node_8.hook' }, timeout: 60, retryCount: 0 },
-        { id: 'node_9_synthesis', name: '章节合成', type: 'transform', chainId: 'tianlong-8step', modelConfig: { primary: 'deepseek', temperature: 0.3, tier: 'economy' }, inputMapping: { goal: 'chain_output.node_1', trigger: 'chain_output.node_2', action: 'chain_output.node_3', obstacle: 'chain_output.node_4', misjudge: 'chain_output.node_5', reversal: 'chain_output.node_6', cost: 'chain_output.node_7', hook: 'chain_output.node_8' }, outputMapping: { synthesis: 'node_9.synthesis' }, timeout: 30, retryCount: 0 },
-        { id: 'node_10_qa', name: '章节质检', type: 'prompt', chainId: 'tianlong-8step', promptTemplateId: 'tianlong-chapter-qa', modelConfig: { primary: 'deepseek', temperature: 0.3, tier: 'economy' }, inputMapping: { chapter_outline: 'chain_output.context.chapterOutline', full_text: 'chain_output.node_9' }, outputMapping: { qa: 'node_10.qa' }, timeout: 60, retryCount: 0 },
-      ],
-      variables: [
-        { name: 'chapterContext', source: 'user_input', path: 'user_input.chapterContext', required: true },
-      ],
-      executionMode: 'sequential',
-      config: { timeout: 240, maxRetries: 1, enableLogging: true, enableQualityGate: false, strictMode: false },
-      createdAt: now,
-      updatedAt: now,
-    });
 
     // 灵感种子智能补全 chain
     this.templates.set('inspiration-seed-enrich', {

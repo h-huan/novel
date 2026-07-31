@@ -63,6 +63,47 @@ export class CreateCharacterDto {
   @IsString()
   @IsIn(['protagonist', 'major', 'supporting', 'minor'])
   role?: string;
+
+  /** 阵营/立场，如"主角阵营""北狄诸部""玩家内部·拼命型" */
+  @IsOptional()
+  @IsString()
+  faction?: string;
+
+  /** 目标/动机，外部想要什么+内部真正需要什么 */
+  @IsOptional()
+  @IsString()
+  goals?: string;
+
+  /** 弱点/恐惧 */
+  @IsOptional()
+  @IsString()
+  weaknesses?: string;
+
+  /** 伤口/创伤，过去的创伤事件塑造当前人格 */
+  @IsOptional()
+  @IsString()
+  wound?: string;
+
+  /** 关键台词/场景标记，逗号分隔 */
+  @IsOptional()
+  @IsString()
+  keywords?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  growthStages?: string;
+
+  @IsOptional()
+  @IsString()
+  coreConflictRole?: string;
+
+  /** 统一详细档案 JSON，合并原 character_extended_profiles 的全部字段 */
+  @IsOptional()
+  profile?: Record<string, unknown>;
 }
 
 export class AddRelationshipDto {

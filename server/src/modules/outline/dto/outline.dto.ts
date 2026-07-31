@@ -59,6 +59,61 @@ export class CreateOutlineDto {
 
   @IsOptional()
   plotPoints?: any[] = [];
+
+  /** 章节类型：标准章/高潮章/波折章/过渡章/结局章 */
+  @IsOptional()
+  @IsString()
+  chapterType?: string;
+
+  /** 视角比例，如"主角100%""玩家≥50%" */
+  @IsOptional()
+  @IsString()
+  povRatio?: string;
+
+  /** 热血镜头/爽点场景描述 */
+  @IsOptional()
+  @IsString()
+  hotScenes?: string;
+
+  /** 波折镜头/挫折场景描述 */
+  @IsOptional()
+  @IsString()
+  setbackScenes?: string;
+
+  /** 结尾设置：钩子/悬念/下一章预告 */
+  @IsOptional()
+  @IsString()
+  endingSetup?: string;
+
+  /** 数据追踪JSON：人口/玩家数/贡献点/粮食等关键数据 */
+  @IsOptional()
+  dataTracking?: Record<string, unknown>;
+
+  /** 爽点设置：不少于2个爽点 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  highlightPoints?: string[];
+
+  /** 系统提示 */
+  @IsOptional()
+  @IsString()
+  systemHints?: string;
+
+  /** 时间线描述 */
+  @IsOptional()
+  @IsString()
+  timeline?: string;
+
+  /** 地点摘要 */
+  @IsOptional()
+  @IsString()
+  locationSummary?: string;
+
+  /** 冲突设计 */
+  @IsOptional()
+  @IsString()
+  conflictDesign?: string;
 }
 
 export class UpdateOutlineDto {
@@ -107,6 +162,51 @@ export class UpdateOutlineDto {
 
   @IsOptional()
   plotPoints?: any[];
+
+  @IsOptional()
+  @IsString()
+  chapterType?: string;
+
+  @IsOptional()
+  @IsString()
+  povRatio?: string;
+
+  @IsOptional()
+  @IsString()
+  hotScenes?: string;
+
+  @IsOptional()
+  @IsString()
+  setbackScenes?: string;
+
+  @IsOptional()
+  @IsString()
+  endingSetup?: string;
+
+  @IsOptional()
+  dataTracking?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  highlightPoints?: string[];
+
+  @IsOptional()
+  @IsString()
+  systemHints?: string;
+
+  @IsOptional()
+  @IsString()
+  timeline?: string;
+
+  @IsOptional()
+  @IsString()
+  locationSummary?: string;
+
+  /** 冲突设计 */
+  @IsOptional()
+  @IsString()
+  conflictDesign?: string;
 }
 
 export class MoveOutlineDto {

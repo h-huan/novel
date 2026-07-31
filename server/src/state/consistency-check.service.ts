@@ -273,6 +273,14 @@ export class ConsistencyCheckService {
   private async saveChecks(projectId: string, checks: Array<any>): Promise<void> {
     const db = this.databaseService.getDb();
 
+    // 每次检测前清掉同一批章节的历史结果，避免重复堆积（每个章节保留最新一份快照）
+    const chapterIndices = Array.from(new Set(checks.map(c => c.chapterIndex).filter((v: any) => v != null)));
+    if (chapterIndices.length > 0) {
+      const placeholders = chapterIndices.map(() => '?').join(',');
+      db.prepare(`DELETE FROM consistency_checks WHERE project_id = ? AND chapter_index IN (${placeholders})`)
+        .run(projectId, ...chapterIndices);
+    }
+
     for (const check of checks) {
       const stmt = db.prepare(`
         INSERT INTO consistency_checks (

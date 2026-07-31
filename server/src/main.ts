@@ -135,6 +135,7 @@ export async function bootstrap(options: { port?: number; host?: string; writePo
   const port = basePort;
   try {
     await app.listen(port, host);
+    console.log(`[v20260729-docx] 服务已启动: http://${host}:${port} (世界观7维度/角色5+7字段/大纲conflicts+highlights数组/ECONNRESET×5重试)`);
   } catch (err: any) {
     if (err?.code === 'EADDRINUSE') {
       throw new Error(`端口 ${host}:${port} 已被占用。桌面端只会连接现有服务，不会启动第二个服务；请停止重复启动的服务后再试。`);

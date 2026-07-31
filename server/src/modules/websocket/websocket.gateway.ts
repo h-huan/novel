@@ -97,6 +97,25 @@ export class WritingGateway implements OnGatewayInit, OnGatewayConnection, OnGat
       timestamp: new Date().toISOString(),
     });
   }
+
+  /**
+   * 推送项目创建进度
+   */
+  notifyProjectCreationProgress(projectId: string, data: {
+    type: 'progress' | 'done' | 'error' | 'heartbeat';
+    step?: string;
+    percent?: number;
+    message?: string;
+    status?: string;
+    stats?: Record<string, number>;
+    counts?: Record<string, number>;
+  }) {
+    this.server.to(`project:${projectId}`).emit('project_creation_progress', {
+      projectId,
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }
 
 /**

@@ -7,6 +7,7 @@ import { VersionHistoryRepository } from '../../database/repositories/version-hi
 import { StateItemService } from '../../state/state-item.service';
 import type { CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
 import { ChapterDerivedDataSyncService } from './chapter-derived-data-sync.service';
+import { DatabaseService } from '../../database/database.service';
 
 export interface ChapterResponse {
   id: string;
@@ -19,7 +20,6 @@ export interface ChapterResponse {
   wordCount: number;
   targetWords?: number;
   status: string;
-  tianlong8Steps?: any;
   modelConfig?: any;
   hookType?: string;
   transitionMode?: string;
@@ -32,6 +32,8 @@ export interface ChapterResponse {
   lockedAt?: string;
   stateSync?: any;
   derivedSync?: any;
+  /** 本章在保存时清理掉的过期 conflict 数量（基于旧版本正文的未解决 warning/error 冲突） */
+  staleConflictsCleaned?: number;
 }
 
 @Injectable()
@@ -41,6 +43,7 @@ export class ChapterService {
     private readonly versionRepo: VersionHistoryRepository,
     @Optional() private readonly stateItemService?: StateItemService,
     @Optional() private readonly derivedDataSync?: ChapterDerivedDataSyncService,
+    @Optional() private readonly databaseService?: DatabaseService,
   ) {}
 
   create(projectId: string, dto: CreateChapterDto): ChapterResponse {
@@ -54,7 +57,7 @@ export class ChapterService {
       id, project_id: projectId, outline_id: dto.outlineId || null,
       volume_index: dto.volumeIndex, chapter_index: dto.chapterIndex, title: dto.title,
       content, word_count: this.countWords(content), status: 'draft',
-      tianlong_8steps: null, model_config: null, hook_type: null,
+      model_config: null, hook_type: null,
       transition_mode: null, transition_context: null, authors_notes: null,
       quality_score: null, checksum: this.contentChecksum(content), file_path: null,
       created_at: now, updated_at: now, locked_at: null,
@@ -97,11 +100,44 @@ export class ChapterService {
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
     if (contentChanged) {
+      // 保存新正文后清理本章过期冲突（用户铁律：矛盾点非最新版本和当前正文的矛盾要删除）
+      // 删的是「未解决且非 pass」的（status in warning/error）；保留已通过（pass）和已解决（resolved）的。
+      // 这样避免旧版本正文产生的矛盾叠加，且不影响已通过/已解决的历史记录。
+      const cleaned = this.cleanStaleConflictsForChapter(existing.project_id, existing.chapter_index);
       const sync = await this.syncAfterContentChange(existing, dto.content || '', 'manual_save');
       response.stateSync = sync.stateSync;
       response.derivedSync = sync.derivedSync;
+      if (cleaned > 0) {
+        response.staleConflictsCleaned = cleaned;
+      }
     }
     return response;
+  }
+
+  /**
+   * 清理本章过期冲突：删除本章所有 status='warning'/'error' 且 status != 'resolved' 的 conflict。
+   * 用户铁律：矛盾点非最新版本和当前正文的矛盾要删除，否则会逐渐叠加且修改没任何意义。
+   * 保留：status='resolved'（已解决历史记录）+ status='pass'（已通过的检查）。
+   * 返回删除条数，便于前端展示「已清理 N 条过期矛盾」。
+   */
+  private cleanStaleConflictsForChapter(projectId: string, chapterIndex: number): number {
+    if (!this.databaseService) return 0;
+    try {
+      const db = this.databaseService.getDb();
+      // 状态机：status='resolved'（已解决）/ 'pass'（已通过）/ 'warning'/'error'（未解决冲突）。
+      // 删 status in ('warning','error') 且 status != 'resolved'；保留 pass 与 resolved。
+      const res = db.prepare(
+        `DELETE FROM consistency_checks
+         WHERE project_id = ? AND chapter_index = ?
+           AND status IN ('warning','error') AND status != 'resolved'`,
+      ).run(projectId, chapterIndex);
+      return Number(res.changes || 0);
+    } catch (err: any) {
+      // 不阻断保存：清理失败仅记日志，不抛错
+      // eslint-disable-next-line no-console
+      console.warn(`[ChapterService] cleanStaleConflictsForChapter 失败（已忽略）: ${err?.message ?? err}`);
+      return 0;
+    }
   }
 
   remove(id: string): { success: boolean } {
@@ -349,7 +385,6 @@ export class ChapterService {
       targetWords: typeof (this.repo as any).findOutlineTargetWords === 'function'
         ? this.repo.findOutlineTargetWords(row.outline_id)
         : undefined,
-      tianlong8Steps: row.tianlong_8steps ? JSON.parse(row.tianlong_8steps) : undefined,
       modelConfig: row.model_config ? JSON.parse(row.model_config) : undefined,
       hookType: row.hook_type || undefined, transitionMode: row.transition_mode || undefined,
       transitionContext: row.transition_context ? JSON.parse(row.transition_context) : undefined,

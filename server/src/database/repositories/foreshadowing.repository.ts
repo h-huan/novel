@@ -30,6 +30,8 @@ export interface ForeshadowingRow {
   overdue_threshold: number;
   scope: string | null;
   volume_index: number | null;
+  emotional_impact: string | null;
+  layered_reveal: string | null;
   created_at: string;
   updated_at: string;
 }

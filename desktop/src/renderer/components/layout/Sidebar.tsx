@@ -39,6 +39,7 @@ const ICONS: Record<string, React.ReactNode> = {
   settings:  SVG('<circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1.5 4.5l1.5 2.6M11 8.9l1.5 2.6M14.5 4.5l-1.5 2.6M5 8.9L3.5 11.5"/>'),
   timeline:  SVG('<line x1="2" y1="4" x2="14" y2="4" stroke-width="1.2" fill="none"/><line x1="2" y1="8" x2="10" y2="8" stroke-width="1.2" fill="none"/><line x1="2" y1="12" x2="12" y2="12" stroke-width="1.2" fill="none"/><circle cx="14" cy="4" r="1.5" fill="currentColor"/><circle cx="10" cy="8" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'),
   continuity:SVG('<path d="M2 8a6 6 0 0 1 10.2-4.2"/><path d="M12 2v4H8"/><path d="M14 8a6 6 0 0 1-10.2 4.2"/><path d="M4 14v-4h4" fill="none" stroke-width="1.4"/>'),
+  knowledge: SVG('<path d="M8 1a4 4 0 0 0-2.5 7.1c.5.4.9 1 .9 1.7V11h3.2v-1.2c0-.7.4-1.3.9-1.7A4 4 0 0 0 8 1zM5.5 12h5M6 14h4"/>'),
 };
 
 const Sidebar: React.FC = () => {
@@ -62,10 +63,9 @@ const Sidebar: React.FC = () => {
     { id: 'orgMap', label: '地点与势力', path: `/project/${pid}/organization-map`, icon: ICONS.orgMap },
     { id: 'foreshadow', label: '伏笔', path: `/project/${pid}/foreshadowing`, icon: ICONS.foreshadow },
     { id: 'timeline', label: '时间线', path: `/project/${pid}/timeline`, icon: ICONS.timeline },
-    { id: 'continuity', label: '全书脉络', path: `/project/${pid}/continuity`, icon: ICONS.continuity },
-    { id: 'state', label: '内容变化', path: `/project/${pid}/state`, icon: ICONS.state },
     { id: 'material', label: '素材', path: `/project/${pid}/material`, icon: ICONS.material },
     { id: 'conflict', label: '前后矛盾', path: `/project/${pid}/conflicts`, icon: ICONS.conflict },
+    { id: 'knowledge', label: '知识点', path: `/project/${pid}/knowledge`, icon: ICONS.knowledge },
     { id: 'importExport', label: '导入导出', path: `/project/${pid}/import-export`, icon: ICONS.importExport },
     { id: 'refinement', label: '精修', path: `/project/${pid}/refinement`, icon: ICONS.refinement },
     { id: 'version', label: '修改记录', path: `/project/${pid}/versions`, icon: ICONS.version },

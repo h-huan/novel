@@ -30,6 +30,34 @@ export class CreateWorldSettingDto {
   @ValidateNested({ each: true })
   @Type(() => ConstraintDto)
   constraints?: ConstraintDto[];
+
+  @IsOptional()
+  @IsString()
+  namingRules?: string;
+
+  @IsOptional()
+  @IsString()
+  workIntro?: string;
+
+  @IsOptional()
+  @IsString()
+  systemSettings?: string;
+
+  @IsOptional()
+  @IsString()
+  dataPlanning?: string;
+
+  @IsOptional()
+  @IsString()
+  culturalSettings?: string;
+
+  @IsOptional()
+  @IsString()
+  spoilerSettings?: string;
+
+  @IsOptional()
+  @IsString()
+  censorshipRules?: string;
 }
 
 export class UpdateWorldSettingDto {
@@ -40,6 +68,34 @@ export class UpdateWorldSettingDto {
   @IsOptional()
   @IsString()
   era?: string;
+
+  @IsOptional()
+  @IsString()
+  namingRules?: string;
+
+  @IsOptional()
+  @IsString()
+  workIntro?: string;
+
+  @IsOptional()
+  @IsString()
+  systemSettings?: string;
+
+  @IsOptional()
+  @IsString()
+  dataPlanning?: string;
+
+  @IsOptional()
+  @IsString()
+  culturalSettings?: string;
+
+  @IsOptional()
+  @IsString()
+  spoilerSettings?: string;
+
+  @IsOptional()
+  @IsString()
+  censorshipRules?: string;
 }
 
 export class AddConstraintDto {

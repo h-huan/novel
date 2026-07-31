@@ -34,6 +34,8 @@ export interface ForeshadowingResponse {
   scope: string;
   volumeIndex: number;
   overdueThreshold: number;
+  emotionalImpact?: string;
+  layeredReveal?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -76,6 +78,8 @@ export class ForeshadowingService {
       overdue_threshold: dto.overdueThreshold || 5,
       scope: dto.scope || 'chapter',
       volume_index: dto.volumeIndex || 0,
+      emotional_impact: dto.emotionalImpact || null,
+      layered_reveal: dto.layeredReveal || null,
       created_at: now,
       updated_at: now,
     });
@@ -115,6 +119,8 @@ export class ForeshadowingService {
     if (dto.riskLevel !== undefined) updateData.risk_level = dto.riskLevel;
     if (dto.recoveryCondition !== undefined) updateData.recovery_condition = dto.recoveryCondition;
     if (dto.payoffDescription !== undefined) updateData.payoff_description = dto.payoffDescription;
+    if (dto.emotionalImpact !== undefined) updateData.emotional_impact = dto.emotionalImpact;
+    if (dto.layeredReveal !== undefined) updateData.layered_reveal = dto.layeredReveal;
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
@@ -234,6 +240,8 @@ export class ForeshadowingService {
       scope: row.scope || 'chapter',
       volumeIndex: row.volume_index || 0,
       overdueThreshold: row.overdue_threshold,
+      emotionalImpact: row.emotional_impact || undefined,
+      layeredReveal: row.layered_reveal || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

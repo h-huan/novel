@@ -79,7 +79,6 @@ function mapServerChapter(raw: any): Chapter {
       content: '',
       wordCount: 0,
       status: 'draft',
-      tianLong8Steps: { goal: '', trigger: '', action: '', obstacle: '', misjudge: '', reversal: '', cost: '', hook: '' },
       modelConfig: { writerModel: 'gpt-4', temperature: 0.8, cost: 0 },
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -98,7 +97,6 @@ function mapServerChapter(raw: any): Chapter {
     wordCount: content === String(raw.content || '').trim() ? (raw.wordCount ?? wordCount) : wordCount,
     targetWords: raw.targetWords == null ? undefined : Number(raw.targetWords),
     status: raw.status || 'draft',
-    tianLong8Steps: raw.tianLong8Steps || { goal: '', trigger: '', action: '', obstacle: '', misjudge: '', reversal: '', cost: '', hook: '' },
     modelConfig: raw.modelConfig || { writerModel: 'gpt-4', temperature: 0.8, cost: 0 },
     lockedAt: raw.lockedAt ? new Date(raw.lockedAt) : undefined,
     createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
@@ -176,7 +174,7 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
 
   lockChapter: async (projectId: string, id: string) => {
     try {
-      await api.post(`/projects/${projectId}/chapters/${id}/lock`);
+      await api.post(`/projects/${projectId}/chapters/${id}/lock`, {});
       set((state) => ({
         chapters: state.chapters.map((c) =>
           c.id === id ? { ...c, status: 'locked' as ChapterStatus, lockedAt: new Date() } : c),
@@ -199,7 +197,7 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
 
   unlockChapter: async (projectId: string, id: string) => {
     try {
-      await api.post(`/projects/${projectId}/chapters/${id}/unlock`);
+      await api.post(`/projects/${projectId}/chapters/${id}/unlock`, {});
       set((state) => ({
         chapters: state.chapters.map((c) =>
           c.id === id ? { ...c, status: 'draft' as ChapterStatus, lockedAt: undefined } : c),

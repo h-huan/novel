@@ -8,7 +8,7 @@
 
 | 模块 | 文件数 | 说明 |
 |------|--------|------|
-| **Chain** (prompt-chain) | 9 | Chain编排引擎、Prompt模板仓库(24个)、天龙8步+短篇三步骤Chain、三级质量门、写作模式 |
+| **Chain** (prompt-chain) | 9 | Chain编排引擎、Prompt模板仓库(短篇三步骤+长篇四阶段全套模板)、短篇正文单次 LLM 严格按大纲生成(天龙8步已于 2026-07-24 取消)、三级质量门、写作模式 |
 | **Routing** (ai-routing) | 8 | 模型路由、多模型协作(写手/评审/策划)、成本策略、流式生成(SSE/WebSocket)、故障转移(熔断/降级) |
 | **Refinement** (refinement-qa) | 12 | 去AI味、逐句精修、AI质检、错别字检查、敏感词检测、版权检测、多格式导出、分镜剧本 |
 | **ImportExport** | 7 | 多格式导入、导出引擎、优化点标记 |
@@ -37,4 +37,4 @@
 
 ## app.module.ts 已导入
 
-20个模块全部注册到根模块，包括 `ChainModule`, `RoutingModule`, `RefinementModule`, `ImportExportModule`, `AuthorNoteModule`, `ConflictEngineModule`, `RagModule`, `StateModule`, `RTCOServiceModule`, `MaterialModule` 等。
+20个模块全部注册到根模块，包括 `ChainModule`, `RoutingModule`, `RefinementModule`, `ImportExportModule`, `AuthorNoteModule`, `ConflictModule`, `RagModule`, `StateModule`, `RTCOServiceModule`, `MaterialModule` 等。

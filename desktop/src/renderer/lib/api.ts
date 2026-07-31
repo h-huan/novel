@@ -59,6 +59,12 @@ async function request<T>(
 
   if (body !== undefined) {
     options.body = JSON.stringify(body);
+  } else if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+    // Fastify 在 Content-Type 为 application/json 但请求体为空字节时，会直接返回
+    // 400 "Body cannot be empty when content-type is set to 'application/json'"。
+    // 这三类动词若调用方未传 body，这里补一个合法空对象，确保请求本身有效；
+    // 不影响任何业务逻辑或模型/场景配置（后端对应端点本就允许空 body）。
+    options.body = '{}';
   }
 
   let response: Response;

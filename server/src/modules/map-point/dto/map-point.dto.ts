@@ -38,6 +38,22 @@ export class CreateMapPointDto {
   @IsArray()
   @IsString({ each: true })
   linkedCharacterIds?: string[] = [];
+
+  @IsOptional()
+  @IsString()
+  climate?: string;
+
+  @IsOptional()
+  @IsString()
+  resources?: string;
+
+  @IsOptional()
+  @IsString()
+  significance?: string;
+
+  @IsOptional()
+  @IsString()
+  sensoryDetail?: string;
 }
 
 export class UpdateMapPointDto {
@@ -75,4 +91,20 @@ export class UpdateMapPointDto {
   @IsArray()
   @IsString({ each: true })
   linkedCharacterIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  climate?: string;
+
+  @IsOptional()
+  @IsString()
+  resources?: string;
+
+  @IsOptional()
+  @IsString()
+  significance?: string;
+
+  @IsOptional()
+  @IsString()
+  sensoryDetail?: string;
 }

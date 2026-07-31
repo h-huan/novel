@@ -53,18 +53,15 @@ interface DraftState {
 type ProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
 type ProfileSectionConfig = { title: string; description: string; fields: ProfileFieldConfig[] };
 const profileFields = (keys: string[], labels: string[], hints: string[]): ProfileFieldConfig[] => keys.map((key, index) => ({ key, label: labels[index], hint: hints[index], multiline: true }));
+// 对齐外部文档《人物模板》14 项（姓名在主表，此处 13 项）
 const PROFILE_SECTION_GROUPS: ProfileSectionConfig[] = [
-  { title: '外貌记忆点', description: '用于保持角色视觉辨识度，避免外貌、习惯和标志物漂移。', fields: profileFields(['appearance_memory_points','signature_item','action_habits','clothing_style'], ['外貌记忆点','标志物','动作习惯','穿着风格'], ['读者一眼能记住的外貌点','长期携带或反复出现的物件','习惯性动作','稳定的穿着风格']) },
-  { title: '目标动机', description: '用于判断角色为什么行动，避免无动机行为。', fields: profileFields(['short_term_goal','long_term_goal','core_desire','core_fear','current_problem','failure_cost'], ['短期目标','长期目标','核心欲望','核心恐惧','当前难题','失败代价'], ['当前阶段要解决的事','跨卷持续追求的目标','真正想得到的东西','最怕面对或失去的东西','当前卡住的问题','失败后的具体代价']) },
-  { title: '背景秘密', description: '用于控制身份反转、秘密揭示与长期驱动力。', fields: profileFields(['key_backstory','trauma','obsession','hidden_identity','secret','main_truth_relation'], ['关键往事','创伤','执念','隐藏身份','秘密','主线真相关系'], ['影响当前选择的旧事','避不开的旧伤','反复执着的事','尚未公开的身份','不能过早暴露的信息','与主线真相的关系']) },
-  { title: '能力体系', description: '用于限制能力使用，保证来源、等级、边界与代价一致。', fields: profileFields(['ability_source','ability_level','special_skills','ability_limit','ability_cost','growth_route','cannot_use_reason'], ['能力来源','能力等级','特殊技能','能力限制','能力代价','成长路径','不能使用原因'], ['能力从何而来','当前能力层级','可使用的特殊技能','能力边界','使用能力的代价','后续成长路径','什么情况下不能使用']) },
-  { title: '弱点边界', description: '用于制造冲突、代价与可被击中的位置。', fields: profileFields(['body_weakness','personality_weakness','emotion_weakness','relationship_weakness','moral_boundary','exploitable_point'], ['身体弱点','性格弱点','情感弱点','关系弱点','道德边界','可利用弱点'], ['身体或能力短板','性格缺陷','最容易被击中的情感点','关系软肋','不应轻易跨越的底线','敌人可利用的弱点']) },
-  { title: '性格矛盾', description: '用于维持表层表现、深层性格与价值冲突。', fields: profileFields(['surface_personality','deep_personality','contradiction_point','value_system'], ['表层性格','深层性格','矛盾点','价值系统'], ['别人看到的样子','真实底层性格','自我冲突点','判断对错与取舍的标准']) },
-  { title: '语言风格', description: '用于让不同角色对话不再像同一个 AI。', fields: profileFields(['speech_style','catchphrase','common_words','forbidden_words','tone_to_different_people','emotion_outburst_style'], ['说话风格','口头禅','常用词','禁用词','对不同人的语气','情绪爆发方式'], ['节奏、句式与语气','可重复但不可滥用','习惯表达','不应说出的词','面对不同人的语气差异','失控时的说话方式']) },
-  { title: '行为模式', description: '用于约束角色在关键关系和压力情境中的反应。', fields: profileFields(['danger_reaction','temptation_reaction','betrayal_reaction','weak_person_reaction','strong_person_reaction','principle_break_condition'], ['危险反应','诱惑反应','背叛反应','面对弱者','面对强者','原则破坏条件'], ['遇险的第一反应','面对诱惑时的反应','遭遇背叛时的反应','面对弱者的态度','面对强者的态度','何时会打破原则']) },
-  { title: '剧情用途', description: '用于明确角色如何制造冲突、反转、伏笔和读者期待。', fields: profileFields(['plot_function','conflict_function','reversal_function','foreshadowing_function','reader_empathy_point','reader_expectation'], ['剧情功能','冲突功能','反转功能','伏笔功能','读者共情点','读者期待'], ['结构中的作用','制造或承接的冲突','能制造的反转','承载的伏笔','读者在意的原因','期待其后续发生什么']) },
-  { title: '成长弧光', description: '用于控制成长节奏，避免提前完成成长或突然转变。', fields: profileFields(['initial_arc_state','current_arc_state','volume_arc','midpoint_arc','ending_arc'], ['初始弧光','当前弧光','卷级弧光','中点弧光','结局弧光'], ['初登场状态','当前阶段状态','本卷成长任务','中段转折点','最终变化方向']) },
-  { title: 'AI 写作约束', description: '用于告诉正文生成哪些设定必须遵守、哪些写法禁止出现。', fields: profileFields(['must_obey_rules','can_change_rules','forbidden_writing','easy_to_break_points','current_chapter_usage'], ['必须遵守','可以变化','禁止写法','容易写崩点','本章可用'], ['任何正文都必须遵守的硬规则','允许随剧情变化的部分','禁止出现的写法','AI 容易写崩的点','当前章可用冲突或表达']) },
+  { title: '基本信息', description: '别名/称号、身份职业、阵营立场与角色类型，是角色定位的底图。', fields: profileFields(['alias_title','identity_occupation','faction_stance','role_type'], ['别名 / 称号','身份 / 职业','阵营 / 立场','角色类型（主角/反派/配角/龙套）'], ['其他称呼或代号','具体职业与社会身份','所属阵营与立场倾向','在故事中的角色定位']) },
+  { title: '外貌与性格', description: '可落笔的外貌细节与稳定性格，避免空话。', fields: profileFields(['appearance','personality_traits'], ['外貌特征','性格特点'], ['一眼可识别的外貌细节，而非套话','稳定的性格倾向与反差']) },
+  { title: '能力与背景', description: '能力/技能与背景故事，提供行动资本与动因。', fields: profileFields(['abilities_skills','backstory'], ['能力 / 技能','背景故事'], ['可使用的核心能力与技能','影响当下选择的旧事，写成场景而非履历']) },
+  { title: '关系与目标', description: '人物关系与目标/动机，决定角色为何行动。', fields: profileFields(['relationships','goals_motivation'], ['人物关系','目标 / 动机'], ['与谁的关系及性质','当前想要什么、为什么想要']) },
+  { title: '说话风格与弱点', description: '口头禅/说话风格、弱点/恐惧与补充信息，是冲突与人物质感的来源。', fields: profileFields(['catchphrase_speech_style','weaknesses_fears','supplementary'], ['说话风格','弱点 / 恐惧','补充说明'], ['惯用语、口头禅、语气','被攻击或被利用的地方','其他需记住的设定']) },
+  { title: '弱点与语言', description: '弱点/恐惧与口头禅/说话风格，让角色可被击中、可被辨识。', fields: profileFields(['weaknesses_fears','catchphrase_speech_style'], ['弱点 / 恐惧','口头禅 / 说话风格'], ['可被击中的软肋与最怕的事','口头禅与稳定的说话节奏/语气']) },
+  { title: '补充说明', description: '其他未在以上分类中覆盖的角色设定。', fields: profileFields(['supplementary'], ['补充说明'], ['其他需要固定下来、防止漂移的设定']) },
 ];
 
 const ROLE_META: Record<RoleType, { label: string; hint: string; color: string }> = {
@@ -185,6 +182,7 @@ const CharacterPage: React.FC = () => {
   const [selectedId, setSelectedId] = useState('');
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [newName, setNewName] = useState('');
   const [newIdentity, setNewIdentity] = useState('');
   const [newRole, setNewRole] = useState<RoleType>('supporting');
@@ -194,7 +192,16 @@ const CharacterPage: React.FC = () => {
   const [saveMessage, setSaveMessage] = useState('');
   const [profile, setProfile] = useState<Record<string, string>>({});
   const [writingSummary, setWritingSummary] = useState('');
+  const [summarySections, setSummarySections] = useState<Record<string, Record<string, string>>>({});
+  const [relationships, setRelationships] = useState<any[]>([]);
 
+  useEffect(() => {
+    if (!projectId) return;
+    api.get(`/projects/${projectId}/characters/relationships`).then((res: any) => {
+      const data = apiPayload<any>(res);
+      setRelationships(data?.network || []);
+    }).catch(() => setRelationships([]));
+  }, [projectId]);
   useEffect(() => {
     if (projectId) fetchCharacters(projectId, true);
   }, [projectId, fetchCharacters]);
@@ -240,8 +247,10 @@ const CharacterPage: React.FC = () => {
       setProfile(data.profile || {});
     }).catch(() => setProfile({}));
     api.get(`/projects/${projectId}/characters/${selected.id}/writing-summary`).then((res: any) => {
-      setWritingSummary(apiPayload<any>(res).summary || '');
-    }).catch(() => setWritingSummary(''));
+      const data = apiPayload<any>(res);
+      setWritingSummary(data.summary || '');
+      setSummarySections(data.sections || {});
+    }).catch(() => { setWritingSummary(''); setSummarySections({}); });
   }, [projectId, selected?.id]);
 
   const filtered = useMemo(() => {
@@ -299,11 +308,7 @@ const CharacterPage: React.FC = () => {
       });
       const profilePayload = {
         ...profile,
-        short_term_goal: draft.shortTermGoal,
-        long_term_goal: draft.longTermGoal,
-        core_fear: draft.fear,
-        speech_style: draft.dialogueStyle,
-        current_arc_state: draft.arcTo,
+        goals_motivation: [draft.shortTermGoal, draft.longTermGoal, draft.fear].filter(Boolean).join('；') || profile.goals_motivation || '',
       };
       const profileRes = await api.put(`/projects/${projectId}/characters/${selected.id}/profile`, profilePayload);
       setProfile(apiPayload<any>(profileRes).profile || profilePayload);
@@ -361,8 +366,10 @@ const CharacterPage: React.FC = () => {
 
   return (
     <div style={styles.page}>
+      {sidebarOpen && (
       <aside style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
+          <button type="button" onClick={() => setSidebarOpen(false)} title="收起侧栏" style={{ background:'none',border:'none',color:'#8a8aa0',cursor:'pointer',fontSize:14,lineHeight:1,padding:0 }}>◀</button>
           <input
             value={search}
             onChange={event => setSearch(event.target.value)}
@@ -408,6 +415,15 @@ const CharacterPage: React.FC = () => {
           ))}
         </div>
       </aside>
+      )}
+      {!sidebarOpen && (
+        <button type="button" onClick={() => setSidebarOpen(true)} title="展开角色列表"
+          style={{ position:'absolute', left:8, top:12, zIndex:10, width:28, height:28, borderRadius:6,
+            border:'1px solid rgba(255,255,255,0.1)', backgroundColor:'rgba(0,0,0,0.6)', color:'#c0c0d0',
+            cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+          ▶
+        </button>
+      )}
 
       <main style={styles.main}>
         <WritingQualityContextBanner />
@@ -423,6 +439,11 @@ const CharacterPage: React.FC = () => {
                 </div>
                 <h1 style={styles.title}>{selected.name}</h1>
                 <p style={styles.subtitle}>{selected.identity || '未填写身份'} · {ROLE_META[selected.role].hint}</p>
+                <div style={styles.heroInfoRow}>
+                  <span>{selected.age ? `${selected.age}岁` : '年龄未知'}</span>
+                  <span>{selected.gender || '性别未知'}</span>
+                  <span style={styles.heroInfoTruncated}>{selected.appearance || '外貌未填'}</span>
+                </div>
               </div>
               <div style={styles.heroActions}>
                 <button type="button" onClick={enhanceDraft} style={styles.secondaryButton}>AI完善草稿</button>
@@ -474,16 +495,25 @@ const CharacterPage: React.FC = () => {
             )}
 
             <section style={styles.contentGrid}>
-              <Panel title="角色写作摘要">
-                <div style={styles.mutedBox}>{writingSummary || '保存角色资料后将生成真实写作摘要。'}</div>
-              </Panel>
-              <Panel title="基础信息">
-                <InfoRow label="姓名" value={selected.name} />
-                <InfoRow label="身份" value={selected.identity || '未填写'} />
-                <InfoRow label="年龄/性别" value={`${selected.age || '未知'} / ${selected.gender || '未知'}`} />
-                <InfoRow label="外貌细节" value={selected.appearance || '暂无'} />
-                <InfoRow label="背景" value={selected.background || '暂无'} />
-              </Panel>
+              <div style={styles.summaryPanel}>
+                <div style={styles.panelTitle}>角色速览</div>
+                <div style={styles.panelBody}>
+                  <div style={styles.summaryText}>{writingSummary || '保存角色资料后将生成真实写作摘要。'}</div>
+                  {selected.background && <div style={styles.summaryBackground}><strong>背景：</strong>{selected.background}</div>}
+                  {Object.keys(summarySections).length > 0 && (
+                    <div style={styles.summarySectionGrid}>
+                      {Object.entries(summarySections).slice(0, 6).map(([title, fields]) => (
+                        <div key={title} style={styles.summarySectionCard}>
+                          <h4 style={styles.summarySectionTitle}>{title}</h4>
+                          {Object.entries(fields).slice(0, 4).map(([label, value]) => (
+                            <div key={label} style={styles.summarySectionRow}><strong>{label}：</strong><span>{value}</span></div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <Panel title="3核心 + 1矛盾">
                 <div style={styles.traitWrap}>
@@ -554,6 +584,32 @@ const CharacterPage: React.FC = () => {
                 ))}
               </div>
             </section>
+
+            {relationships.length > 0 && (
+              <section style={{...styles.statusPanel, borderColor: 'rgba(139,92,246,0.18)'}}>
+                <div style={{...styles.panelTitle, color: '#a78bfa'}}>🔗 人物关系网络（per 文档：核心关系图/关系变化/隐藏关系/关系冲突）</div>
+                <div style={styles.statusList}>
+                  {relationships.map((rel: any, idx: number) => (
+                    <div key={idx} style={{...styles.statusRow, gridTemplateColumns: '80px 80px minmax(0,1fr) auto'}}>
+                      <strong style={{color:'#a78bfa'}}>{rel.source_name || '?'}</strong>
+                      <span style={{color:'#8a8aa0'}}>→</span>
+                      <div>
+                        <strong style={{color:'#c0c0d0'}}>{rel.target_name || '?'}</strong>
+                        <div style={{fontSize:11,color:'#8a8aa0',marginTop:2}}>
+                          {rel.public_relation || rel.relation_type || '未知关系'}
+                          {rel.hidden_relation ? ` | 隐藏：${rel.hidden_relation}` : ''}
+                          {rel.change_summary ? ` | 变化：${rel.change_summary}` : ''}
+                          {rel.conflict_score ? ` | 冲突度：${rel.conflict_score}` : ''}
+                        </div>
+                      </div>
+                      <em style={{...styles.sourceBadge, color: rel.reader_known_state === 'known' ? '#22c55e' : '#f59e0b'}}>
+                        {rel.reader_known_state === 'known' ? '读者已知' : '读者未知'}
+                      </em>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
       </main>
@@ -648,13 +704,15 @@ const styles: Record<string, React.CSSProperties> = {
   heroMeta: { display: 'flex', gap: 8, marginBottom: 8 },
   title: { margin: 0, fontSize: 24, lineHeight: 1.2 },
   subtitle: { margin: '6px 0 0', fontSize: 13, color: '#8a8aa0' },
+  heroInfoRow: { display: 'flex', gap: 12, marginTop: 8, fontSize: 12, color: '#c0c0d0', flexWrap: 'wrap' },
+  heroInfoTruncated: { maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   heroActions: { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' },
   roleBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(255,255,255,0.04)', fontSize: 11, fontWeight: 800 },
   povBadge: { padding: '3px 8px', borderRadius: 5, backgroundColor: 'rgba(233,69,96,0.12)', color: '#e94560', fontSize: 11, fontWeight: 800 },
   message: { marginTop: 10, padding: '9px 12px', borderRadius: 6, backgroundColor: 'rgba(96,165,250,0.09)', border: '1px solid rgba(96,165,250,0.16)', color: '#93c5fd', fontSize: 12 },
   impactBox: { marginTop: 10, padding: '10px 12px', borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', color: '#fbbf24', fontSize: 12, lineHeight: 1.6 },
   editorPanel: { marginTop: 12, padding: 14, borderRadius: 8, border: '1px solid rgba(233,69,96,0.22)', backgroundColor: 'rgba(0,0,0,0.16)', display: 'flex', flexDirection: 'column', gap: 10 },
-  editorGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 },
+  editorGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 },
   field: { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: '#8a8aa0' },
   input: { width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 12, fontFamily: 'inherit' },
   textarea: { width: '100%', boxSizing: 'border-box', minHeight: 70, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 12, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.6 },
@@ -662,7 +720,14 @@ const styles: Record<string, React.CSSProperties> = {
   primaryButton: { padding: '8px 14px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 800 },
   secondaryButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontSize: 12, fontWeight: 700 },
   dangerButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.28)', backgroundColor: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: 12, fontWeight: 700 },
-  contentGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginTop: 12 },
+  contentGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginTop: 12 },
+  summaryPanel: { gridColumn: '1 / -1', border: '1px solid rgba(96,165,250,0.18)', borderRadius: 8, backgroundColor: 'rgba(96,165,250,0.06)', overflow: 'hidden' },
+  summaryText: { fontSize: 13, lineHeight: 1.7, color: '#eaeaea' },
+  summaryBackground: { marginTop: 8, padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 12, lineHeight: 1.6, color: '#c0c0d0' },
+  summarySectionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10, marginTop: 12 },
+  summarySectionCard: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', border: '1px solid rgba(255,255,255,0.06)' },
+  summarySectionTitle: { margin: '0 0 8px', fontSize: 12, color: '#93c5fd', fontWeight: 800 },
+  summarySectionRow: { fontSize: 12, lineHeight: 1.55, color: '#c0c0d0', marginBottom: 4 },
   panel: { border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
   panelTitle: { padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', color: '#eaeaea', fontSize: 13, fontWeight: 800 },
   panelBody: { padding: 12, display: 'flex', flexDirection: 'column', gap: 9 },
@@ -677,7 +742,7 @@ const styles: Record<string, React.CSSProperties> = {
   statusPanel: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
   profileArchive: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
   archiveHint: { margin: 0, padding: '10px 12px', color: '#8a8aa0', fontSize: 12, lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.06)' },
-  archiveGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, padding: 12 },
+  archiveGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, padding: 12 },
   archiveSection: { border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.025)', overflow: 'hidden' },
   archiveTitle: { margin: 0, padding: '8px 10px', color: '#eaeaea', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.06)' },
   archiveRow: { padding: '8px 10px', fontSize: 12, lineHeight: 1.55, borderBottom: '1px solid rgba(255,255,255,0.045)' },

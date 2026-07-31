@@ -2,7 +2,6 @@ import {
   ChapterStatus, ChapterFunctionType, GoalArcType, HookType, TransitionMode,
 } from '../enums/chapter';
 import { ForeshadowingType } from '../enums/foreshadowing-type';
-import { TianLong8Steps } from './tianlong';
 import { ModelConfig } from './model-config';
 
 export interface Chapter {
@@ -20,7 +19,6 @@ export interface Chapter {
   goalArc?: GoalArcType;
   hookType?: HookType;
   transitionMode?: TransitionMode;
-  tianLong8Steps: TianLong8Steps;
   modelConfig: ModelConfig;
   foreshadowingIds?: string[];
   lockedAt?: Date;

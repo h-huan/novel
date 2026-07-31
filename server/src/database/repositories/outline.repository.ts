@@ -24,6 +24,17 @@ export interface OutlineRow {
   scenes: string | null;
   volumes: string | null;
   book_skeleton: string | null;
+  chapter_type: string;
+  pov_ratio: string;
+  hot_scenes: string;
+  setback_scenes: string;
+  ending_setup: string;
+  data_tracking: string;
+  highlight_points: string;
+  system_hints: string;
+  timeline: string;
+  location_summary: string;
+  conflict_design: string;
   created_at: string;
   updated_at: string;
 }

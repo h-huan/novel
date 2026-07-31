@@ -76,6 +76,14 @@ export class CreateForeshadowingDto {
   @IsOptional()
   @IsNumber()
   volumeIndex?: number;
+
+  @IsOptional()
+  @IsString()
+  emotionalImpact?: string;
+
+  @IsOptional()
+  @IsString()
+  layeredReveal?: string;
 }
 
 export class UpdateForeshadowingDto {
@@ -119,6 +127,14 @@ export class UpdateForeshadowingDto {
   @IsOptional()
   @IsString()
   payoffDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  emotionalImpact?: string;
+
+  @IsOptional()
+  @IsString()
+  layeredReveal?: string;
 }
 
 export class RecoverForeshadowingDto {

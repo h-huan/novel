@@ -14,13 +14,13 @@ import MaterialPage from './pages/MaterialPage';
 import DiscoveryWizardPage from './pages/DiscoveryWizardPage';
 import PromptChainPage from './pages/PromptChainPage';
 import ConflictDashboard from './pages/ConflictDashboard';
+import KnowledgePoints from './pages/KnowledgePoints';
 import ImportExportPage from './pages/ImportExportPage';
 import RefinementPage from './pages/RefinementPage';
 import StyleWritingPage from './pages/StyleWritingPage';
 import QualityStandardsPage from './pages/QualityStandardsPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import VisualizationPage from './pages/VisualizationPage';
-import StateCenterPage from './pages/StateCenterPage';
 import VersionHistoryPage from './pages/VersionHistoryPage';
 import NewsPage from './pages/NewsPage';
 import ToolsPage from './pages/ToolsPage';
@@ -33,7 +33,6 @@ import TimelinePage from './pages/TimelinePage';
 import OrganizationMapPage from './pages/OrganizationMapPage';
 import IdeaLabPage from './pages/IdeaLabPage';
 import WritingQualityPage from './pages/WritingQualityPage';
-import ContinuityCockpitPage from './pages/ContinuityCockpitPage';
 
 const AppRouter: React.FC = () => {
   return (
@@ -51,16 +50,14 @@ const AppRouter: React.FC = () => {
         <Route path="/project/:id/timeline" element={<TimelinePage />} />
         <Route path="/project/:id/material" element={<MaterialPage />} />
         <Route path="/project/:id/conflicts" element={<ConflictDashboard />} />
+        <Route path="/project/:id/knowledge" element={<KnowledgePoints />} />
         <Route path="/project/:id/import-export" element={<ImportExportPage />} />
         <Route path="/project/:id/publish" element={<ImportExportPage />} />
         <Route path="/project/:id/refinement" element={<RefinementPage />} />
         <Route path="/project/:id/style-writing" element={<StyleWritingPage />} />
-        {/* 状态和可视化已嵌套到各功能页内，保留路由以兼容直接 URL 访问 */}
-        <Route path="/project/:id/state" element={<StateCenterPage />} />
         <Route path="/project/:id/visualization" element={<VisualizationPage />} />
         <Route path="/project/:id/quality-standards" element={<QualityStandardsPage />} />
         <Route path="/project/:id/writing-quality" element={<WritingQualityPage />} />
-        <Route path="/project/:id/continuity" element={<ContinuityCockpitPage />} />
         <Route path="/project/:id/wizard" element={<ProjectDetailRedirect />} />
         <Route path="/project/:id/weekly-summary" element={<WeeklySummaryPage />} />
         <Route path="/project/:id/versions" element={<VersionHistoryPage />} />

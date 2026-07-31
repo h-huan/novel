@@ -5,7 +5,7 @@
  * - 模板版本管理（语义版本）
  * - Handlebars 变量替换（{{title}}, {{characters}} 等）
  * - 模板分类检索
- * - 预置短篇三步骤全套模板和天龙8步法模板
+ * - 预置短篇三步骤全套模板（天龙8步法模板已于 2026-07-24 随正文生成改为单次 LLM 而移除）
  *
  * 当前开发阶段模板内容硬编码在代码中，
  * 后续可迁移到数据库或文件系统中管理
@@ -40,9 +40,8 @@ interface TemplateEntry {
 
 /** 模板分类 */
 type TemplateCategory =
-  // 短篇三步骤
+  // 短篇三步骤（阶段三正文：已取消天龙8步，改由 /chain/generate 单次 LLM 严格按大纲生成）
   | 'short-story-stage3'
-  | 'tianlong-8step'
   // 长篇四阶段
   | 'long-novel-phase1'    // 前期准备
   | 'long-novel-phase2'    // 详细规划
@@ -88,367 +87,6 @@ export class PromptRegistryService {
    * 从短故事三步骤.md 完整提取
    */
   private registerAllTemplates(): void {
-    // ---- 阶段一：题材生成 (5个) ----
-    this.registerTemplate({
-      id: 'tianlong-step1-goal',
-      name: '天龙8步-目标',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '设定本章主角目标',
-      content: `现在进入正文创作阶段。
-
-你是一名成熟的第一人称网络短篇小说写手。
-
-## 当前上下文
-### 故事总设定
-{{json chain_output.outline.coreSetting}}
-
-### 前文摘要
-{{chain_output.context.previousChapterSummary}}
-
-### 当前章节
-第{{chain_output.context.chapterNumber}}章
-
-### 当前章节大纲
-{{chain_output.context.chapterOutline}}
-
-### 本章剧情功能
-{{chain_output.context.chapterFunction}}
-
-### 出场角色
-{{characterRoster chain_output.context.activeCharacters}}
-
-## 第一步：目标设定
-
-在本章开头，"我"必须有一个明确目标。
-
-请设定本章主角的目标：
-{
-  "protagonist": "我",
-  "goal": "本章开头主角要达成什么目标",
-  "motivation": "为什么要达成这个目标",
-  "winCondition": "怎样才算完成目标"
-}
-
-**写作要求：**
-- 目标必须从上一章结尾自然延伸
-- 目标要具体、可行动
-- 匹配角色当前状态和动机
-- 故事必须发生在中国，场景要有中国现实生活细节——写到具体物件：小区门禁的磁卡声、物业群里的@所有人、派出所走廊的消毒水味、医院缴费窗口的排队栏杆、外卖柜的取件码短信、微信群里的撤回提示
-- 开头直接进入事件，不要铺垫天气、背景、自我介绍——第一句就出现冲突或异常
-- 每300字左右必须出现一次新疑点、冲突或信息变化——不让读者有"可以放下手机"的间隙
-- 语言适合手机阅读：段落短（≤3句），节奏快，多用动作和对话驱动剧情
-- 不要提前泄露最终真相——主角和读者应该同步发现信息
-- **去AI味**：避免"内心深处""不禁""仿佛""似乎"等AI高频词；不要用排比句/对仗句；句式长短交错，制造断裂感和意外停顿
-- **具体胜过抽象**：用五感细节（看到了什么颜色/形状，听到了什么声音，闻到了什么气味）代替"紧张""不安"等抽象形容词
-- **角色要有差异**：不同角色说话方式不同（有人啰嗦有人寡言），小动作不同（有人摸鼻子有人转笔），对同一件事的反应不同
-- **不完整才有余味**：不要把所有信息都说完。用一句没说完的话、一个反常的沉默、一个被忽略的物件来暗示，让读者自己去想`,
-      versions: [
-        { templateId: 'tianlong-step1-goal', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步目标'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.outline.coreSetting', 'chain_output.context.previousChapterSummary', 'chain_output.context.chapterNumber', 'chain_output.context.chapterOutline', 'chain_output.context.chapterFunction', 'chain_output.context.activeCharacters'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-step2-trigger',
-      name: '天龙8步-诱因',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '设计刺激主角行动的事件',
-      content: `## 第二步：诱因
-
-基于以下目标，设计一个刺激"我"行动的事件。
-
-### 本章目标
-{{json chain_output.node_1}}
-
-### 执行要求
-- 这个事件必须具体、突然、有压迫感
-- 不能只是"我突然想到"
-- 诱因要打破主角的常规状态
-- 用具体感官细节来呈现：一个电话响了多久才接、一条短信的几个错别字、窗外突然停下的脚步声——而不是"我感到不安"
-- 让诱因自带"不对劲"的质感，但不解释为什么不对劲
-
-### 输出格式
-{
-  "triggerEvent": "触发事件描述",
-  "triggerMethod": "触发方式，如意外发现/电话/短信/目击异常/他人介入",
-  "urgency": "紧急程度，高/中/低"
-}`,
-      versions: [
-        { templateId: 'tianlong-step2-trigger', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步诱因'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.node_1'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-step3-action',
-      name: '天龙8步-行动',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '描写主角的具体行动',
-      content: `## 第三步：行动
-
-"我"必须采取具体行动。
-
-### 诱因
-{{json chain_output.node_2}}
-
-### 本章目标
-{{json chain_output.node_1.goal}}
-
-### 执行要求
-- 要写动作、对话、试探、调查、撒谎、反击、交易、逃跑等
-- 主角不能只在心里想
-- 多写动作、对话、现场细节，少写空泛心理总结
-- 语言适合手机阅读，段落短，节奏快
-- 对话要短、有压迫感，不能解释过多
-- **去AI味**：对话不要用"他说道""她解释道"等标签；用动作代替——他说了一半停下来点烟，她笑了笑没接话；角色说错话、说半截话、被突然打断才是真实的
-- **角色差异**：每个角色有独特的说话方式——有人每句话带"那个"，有人从来不直接回答问题，有人总在别人说完后沉默两秒才开口
-- **具体/五感**：至少2处可感知细节——温度、气味、光线、声音。不要写"办公室很压抑"，写"空调出风口嗡嗡响，没人关，也没人抬头"
-- **留白**：至少1处不说完整——一句被打断的对话、一个主角看到了但没追问的细节、一个反常的安静
-
-### 输出
-直接输出正文片段（600~1000字），第一人称"我"。`,
-      versions: [
-        { templateId: 'tianlong-step3-action', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步行动'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.node_1', 'chain_output.node_2'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-step4-obstacle',
-      name: '天龙8步-阻碍',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '设计主角行动遇到的阻碍',
-      content: `## 第四步：阻碍
-
-行动必须遇到阻碍。
-
-### 行动文本
-{{chain_output.node_3}}
-
-### 执行要求
-- 阻碍可以来自人、规则、环境、舆论、监控、亲情、制度、时间限制、身体伤害等
-- 阻碍要合理且有张力，不能是强行制造困难
-- 思考主角的反应——是正面硬刚、迂回策略还是暂时撤退
-- 最好的阻碍来自角色自身的局限：性格缺陷、知识盲区、过往创伤——不是外部强加的困难，而是角色自己绊倒自己
-- 不要写"他感到很沮丧"，写他重复按了三下打火机没点着，然后把烟放回了口袋
-
-### 输出格式
-{
-  "obstacleType": "阻碍类型",
-  "description": "阻碍的详细描述",
-  "protagonistReaction": "主角的反应"
-}`,
-      versions: [
-        { templateId: 'tianlong-step4-obstacle', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步阻碍'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.node_3'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-step5-misjudge',
-      name: '天龙8步-误判',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '设计主角的误判',
-      content: `## 第五步：误判
-
-"我"根据已有信息做出一个看似合理但错误的判断。
-
-### 本章背景
-目标：{{chain_output.node_1.goal}}
-诱因：{{chain_output.node_2.triggerEvent}}
-行动：{{chain_output.node_3}}
-阻碍：{{chain_output.node_4.description}}
-
-### 执行要求
-- 误判要能推动剧情，而不是单纯降智
-- 误判必须基于前文已有的信息（角色知道什么）
-- 误判的后果需要体现
-- 最好的误判来自角色自己深信不疑的偏见——他看到了几个碎片信息，拼出了一个合理的假象。不要急于告诉读者真相，让他们比主角多知道一点，或少知道一点，在信息差中产生紧张
-
-### 输出格式
-{
-  "protagonistThinks": "主角认为的真相",
-  "actualTruth": "实际真相",
-  "infoGapSource": "信息差的来源",
-  "consequenceOfMisjudgment": "误判将导致的后果"
-}`,
-      versions: [
-        { templateId: 'tianlong-step5-misjudge', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步误判'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.node_1', 'chain_output.node_2', 'chain_output.node_3', 'chain_output.node_4'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-step6-reversal',
-      name: '天龙8步-反转',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '设计本章的信息反转或局势反转',
-      content: `## 第六步：反转（本章核心高潮）
-
-本章必须出现一个信息反转或局势反转。
-
-### 背景信息
-目标：{{chain_output.node_1.goal}}
-诱因：{{chain_output.node_2.triggerEvent}}
-行动：{{chain_output.node_3}}
-阻碍：{{chain_output.node_4.description}}
-误判：{{chain_output.node_5.protagonistThinks}} → {{chain_output.node_5.actualTruth}}
-
-### 执行要求
-- 反转不一定是终极真相，但必须改变当前局面
-- 反转要和前文细节有关，不能凭空出现
-- 反转要有冲击力，让读者意外但觉得合理
-- 严禁使用"做梦""精神病""系统强行解释"等廉价反转
-- 反转的冲击力不在"声光电"，而在一个细节突然被重新照亮——前文随手提到的一个眼神、一个没接的电话、一句被你忽略的对话，此刻突然有了完全不同的含义。让读者倒回去重读才有滋味
-- 不同角色的反应必须不同：有人愣住、有人冷笑、有人第一反应是看手机、有人转身就走——每个反应暴露各自的性格和立场
-- 至少一处不写满——主角发现真相后没说出口的那句话、一个没被追问的疑点、一个对方刻意避开的回答
-### 输出格式
-{
-  "reversalType": "反转类型，如身份反转/动机反转/局势反转/信息反转",
-  "reversalMoment": "反转时刻的详细描写（400~800字），第一人称",
-  "reactions": "各方反应"
-}`,
-      versions: [
-        { templateId: 'tianlong-step6-reversal', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步反转'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.node_1', 'chain_output.node_2', 'chain_output.node_3', 'chain_output.node_4', 'chain_output.node_5'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-step7-cost',
-      name: '天龙8步-代价',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '描述反转后主角付出的代价',
-      content: `## 第七步：代价
-
-反转之后，"我"必须付出代价。
-
-### 反转详情
-{{json chain_output.node_6}}
-
-### 执行要求
-- 代价可以是暴露身份、失去证据、被亲人背叛、被警方怀疑、被公司开除、被困住、被威胁、失去信任等
-- 代价必须与反转匹配，不能过于轻巧
-- 描写200~400字
-- 代价的痛感不在"大"，而在"真"——丢了一把用了十年的钥匙比破产更让人心疼，只要那把钥匙上有只有自己知道的故事。用具体的、私人的、无法替代的损失来呈现代价
-- 写"他后悔了"不如写"他在手机上打出对不起三个字，删了，又打，最后锁屏"——用动作替代心理
-- 不同角色对主角付出代价的反应要有差别：有人假装没看见、有人说风凉话、有人沉默地多做了你的那份工作
-
-### 输出格式
-{
-  "costType": "代价类型",
-  "description": "代价的详细描写（200~400字），第一人称",
-  "subsequentImpact": "对后续剧情的影响"
-}`,
-      versions: [
-        { templateId: 'tianlong-step7-cost', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步代价'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.node_6'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-step8-hook',
-      name: '天龙8步-钩子',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '设计本章结尾的强钩子',
-      content: `## 第八步：钩子
-
-本章最后必须留下强钩子。
-
-### 本章剧情
-目标：{{chain_output.node_1.goal}}
-诱因：{{chain_output.node_2.triggerEvent}}
-反转：{{chain_output.node_6.reversalType}}
-代价：{{chain_output.node_7.costType}}
-
-### 执行要求
-- 钩子可以是一句话、一个物件、一个电话、一段监控、一个反常行为、一个身份暴露
-- 结尾要让读者想继续看下一章
-- 钩子要自然，不能生硬
-- 最好的钩子不是惊叹号，而是逗号——一个没说完的句子，一个正在发生但还没被理解的动作，一个主角看见了但还没反应过来的细节。它的力量在"延迟理解"，不在"当场惊吓"
-
-### 输出格式
-{
-  "hookType": "钩子类型，如物件钩子/对话钩子/动作钩子/情绪钩子/悬念钩子",
-  "hookText": "钩子文本，第一人称",
-  "nextChapterDirection": "下章衔接方向"
-}`,
-      versions: [
-        { templateId: 'tianlong-step8-hook', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步钩子'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.node_1', 'chain_output.node_2', 'chain_output.node_6', 'chain_output.node_7'],
-      isActive: true,
-    });
-
-    this.registerTemplate({
-      id: 'tianlong-chapter-qa',
-      name: '章节质检',
-      category: 'tianlong-8step',
-      version: '1.0.0',
-      description: '生成章节的质量检查报告',
-      content: `请以网络短篇编辑身份审查以下正文。
-
-## 章节大纲
-{{chain_output.context.chapterOutline}}
-
-## 完整正文
-{{chain_output.node_9}}
-
-## 审查维度
-请从以下12个维度审查，每项0-10分：
-1. 开头钩子（前300字是否出现强异常，而非铺垫）
-2. 大纲吻合度（是否按章节大纲推进）
-3. 角色一致性（角色行为是否OOC）
-4. 角色差异性（不同角色是否有不同的说话方式、小动作、思维习惯）
-5. 反转质量（反转是否与前文伏笔有关，是否避免廉价反转）
-6. AI痕迹指数（0-100，越低越好）——重点检查：排比句/对仗句、"内心深处/不禁/仿佛/似乎"等AI高频词、过度完整的解释性叙述、均匀的句长和段落
-7. 情绪冲击力/热血感
-8. 章节结尾吸引力（是否有强钩子，钩子是否自然不刻意）
-9. 手机阅读适配（段落是否短、节奏是否快）
-10. 中国场景真实感（场景是否有中国现实生活细节）
-11. 具体质感（是否用五感细节代替抽象形容词，描写是否可触摸）
-12. 版权风险检测
-
-## 输出格式
-{
-  "passed": true/false,
-  "overallScore": 综合评分0-10,
-  "outlineMatch": 大纲吻合度0-10,
-  "characterConsistency": 角色一致性0-10,
-  "characterDistinctiveness": 角色差异性0-10,
-  "reversalQuality": 反转质量0-10,
-  "aiTraceIndex": "AI痕迹指数0-100",
-  "emotionalImpact": "情绪冲击力0-10",
-  "chapterEndAppeal": "结尾吸引力0-10",
-  "mobileReadability": "手机阅读适配0-10",
-  "chineseAuthenticity": "中国场景真实感0-10",
-  "concreteQuality": "具体质感0-10",
-  "copyrightRisk": false,
-  "issues": [
-    { "type": "error/warning/info", "dimension": "维度名称", "description": "问题描述", "suggestion": "修改建议" }
-  ]
-}`,
-      versions: [
-        { templateId: 'tianlong-chapter-qa', version: '1.0.0', changelog: ['初始版本，基于短故事三步骤.md天龙8步质检'], activeSince: '2026-01-01' },
-      ],
-      variables: ['chain_output.context.chapterOutline', 'chain_output.node_9'],
-      isActive: true,
-    });
 
     // 外挂模板
     this.registerTemplate({
@@ -575,9 +213,15 @@ export class PromptRegistryService {
       id: 'seed-character-enrich',
       name: '角色深度补全',
       category: 'inspiration-seed',
-      version: '1.0.0',
-      description: '基于角色名+hook生成性格五维/背景/对话风格',
-      content: `你是一名资深网文角色设计师，擅长为网络短篇小说/长篇网文设计立体角色。
+      version: '1.1.0',
+      description: '基于角色名+hook生成性格五维/背景/外貌/对话风格/动机弧线',
+      content: `你是一名资深网文角色设计师，擅长为中国网络小说设计有弧光的立体角色。
+
+## 角色设计铁律（必守）
+1. **三要素缺一不可**：每个角色必须明确——想要什么（外部动机）、需要什么（内部动机）、害怕什么（致命缺陷）
+2. **人物弧线**：不是"从A到B"的简单变化，而是具体事件触发→信念动摇→选择代价→新信念确立
+3. **差异化**：不同角色的性格五维必须有明显数值落差（不能全在40-60中间地带）。同一角色内也要有对立面（如：外冷内热、精明但心软）
+4. **钩子潜质**：每个角色的背景必须包含至少一个可后续展开的暗线——隐藏身份/未说出口的秘密/与他人的暗流关系/过去的创伤
 
 ## 灵感信息
 - 钩子: {{user_input.hook}}
@@ -585,18 +229,19 @@ export class PromptRegistryService {
 - 角色名单: {{#each user_input.characters}}{{this}}{{#unless @last}}、{{/unless}}{{/each}}
 
 ## 执行要求
-1. 为每个角色生成完整的性格五维(0-100)、背景故事、外貌、对话风格和口头禅
-2. **钩子思维**: 每个角色的background必须包含一个"钩子潜质"——能埋伏笔或制造冲突的暗线(如隐藏身份/未说出口的秘密/与他人的暗流关系)
-3. **反幻觉**: 所有设定必须与hook和description有逻辑关联，不得凭空捏造与灵感无关的核心设定
-4. 第一个角色(POV视角)的background应直接呼应hook中的核心冲突
-5. dialoguePatterns给出2-4个具体口头禅或说话习惯
-6. **角色差异**: 每个角色必须有一个独特的小习惯（摸耳垂/转笔/紧张时喝水/不接电话只发文字）。不同角色的性格五维不能趋同——要有明显的数值落差。对角色的描述不能互换——如果把角色A的背景套到角色B身上，必须明显感到不合适。
+1. 为每个角色生成完整的性格五维(0-100，须有明显高低落差)、背景故事、外貌、对话风格和口头禅
+2. 第一个角色(POV视角)的background应直接呼应hook中的核心冲突，且要写明其人物弧线起点
+3. dialoguePatterns给出2-4个具体口头禅或说话习惯，必须能通过对话识别说话人
+4. 每个角色配置一个独特的小习惯或身体细节（紧张时摸耳垂/走路数步数/从不接电话只发文字/笑的时候先眯左眼）
+5. 背景故事中必须包含"伤口"——这个角色过去经历了什么，导致他现在的核心恐惧或信念
+6. **字数要求**：每个角色的background不少于150字，appearance不少于30字
 
 ## 输出格式
 输出合法JSON，不要markdown包裹:
-{"characters":[{"name":"角色名","personality":{"extraversion":50,"agreeableness":50,"conscientiousness":50,"neuroticism":50,"openness":50},"background":"背景故事(含钩子潜质)","appearance":"外貌","dialogueStyle":"对话风格","dialoguePatterns":["口头禅1","口头禅2"]}]}`,
+{"characters":[{"name":"角色名","personality":{"extraversion":50,"agreeableness":50,"conscientiousness":50,"neuroticism":50,"openness":50},"background":"背景故事(含钩子潜质+伤口+人物弧线起点)","appearance":"外貌特征(含独特细节)","dialogueStyle":"对话风格","dialoguePatterns":["口头禅1","口头禅2"]}]}`,
       versions: [
         { templateId: 'seed-character-enrich', version: '1.0.0', changelog: ['初始版本，灵感种子智能补全'], activeSince: '2026-06-21' },
+        { templateId: 'seed-character-enrich', version: '1.1.0', changelog: ['增强角色设计铁律、人物弧线要求、伤口设定、差异化约束'], activeSince: '2026-07-26' },
       ],
       variables: ['user_input.hook', 'user_input.description', 'user_input.characters'],
       isActive: true,
@@ -604,11 +249,17 @@ export class PromptRegistryService {
 
     this.registerTemplate({
       id: 'seed-worldview-enrich',
-      name: '世界观补全',
+      name: '核心设定补全',
       category: 'inspiration-seed',
-      version: '1.0.0',
-      description: '基于setting+hook生成地理/历史/规则/势力格局',
-      content: `你是一名资深网文世界观架构师，擅长为中国网络文学构建沉浸式世界观。
+      version: '1.1.0',
+      description: '基于setting+hook生成地理/历史/规则/势力格局（增强版）',
+      content: `你是一名资深网文世界观架构师，擅长为中国网络文学构建沉浸式且自洽的世界观。
+
+## 世界观设计铁律（必守）
+1. **核心矛盾优先**：先确定世界的核心冲突（王朝末路/异族入侵/权力真空/资源枯竭），所有设定围绕这个矛盾展开
+2. **约束即创意**：每个世界必须有不可违背的硬约束和可以打破的软约束。硬约束制造张力，软约束提供破局可能
+3. **具象不抽象**：不写"资源匮乏"，写"矿脉三年前枯竭，连铁钉都要从邻国运"；不写"民不聊生"，写一个具体的、只有这个世界才会发生的场景片段
+4. **钩子埋设**：geography/history/rules中各至少埋一处可后续展开的暗线——禁地/禁忌/历史悬案/规则漏洞/隐藏势力
 
 ## 灵感信息
 - 钩子: {{user_input.hook}}
@@ -616,18 +267,19 @@ export class PromptRegistryService {
 - 世界观种子: {{user_input.setting}}
 
 ## 执行要求
-1. 基于setting种子补全完整的地理环境、历史背景、社会/力量规则、势力格局
-2. **钩子思维**: geography/history/rules中各埋至少一处"钩子潜质"——能后续展开冲突或反转的暗线(如禁地/禁忌/历史悬案/规则漏洞)
-3. **反幻觉**: 世界观必须与hook和description的题材基调一致，不得引入与灵感无关的体系(如都市题材不能凭空加修仙体系)
-4. constraints给出2-3条世界观硬约束(如"修炼者不可跨界""公司内部禁止私联")
-5. 如果setting为空或极简，根据hook推断最合理的中国现实/架空背景
-6. **具体细节**: 地理环境不要泛泛写"繁华都市"，写"小区建成二十年，电梯间广告换了三轮都没人撕"；历史背景不要写"历史悠久"，写一个具体的、只有这个设定下才会发生的事件片段
+1. 基于setting种子补全完整的地理环境、历史背景、社会规则、势力格局
+2. 如果setting为空或极简，根据hook推断最合理的架空/现实背景
+3. 每个维度必须以具体细节支撑——名字、数字、事件片段，拒绝空泛概括
+4. constraints给出4-6条约束：2-3条硬约束（severity:hard，不可打破）+ 2-3条软约束（severity:soft，可打破但有代价）
+5. 历史背景必须包含一个"决定性事件"——这个事件塑造了当今世界的格局
+6. 势力格局不能只列名字，要写明各势力之间的利益冲突点和可能的联盟/背叛线
 
 ## 输出格式
 输出合法JSON，不要markdown包裹:
-{"name":"世界观名","era":"时代背景","geography":"地理环境(含钩子)","history":"历史背景(含钩子)","rules":"社会/力量规则(含钩子)","factionLayout":"势力格局概述","constraints":[{"category":"分类","rule":"规则","description":"说明","severity":"critical/major/minor"}]}`,
+{"name":"世界观名","era":"时代背景","geography":"地理环境(含钩子，不少于150字)","history":"历史背景(含决定性事件和钩子，不少于150字)","rules":"社会/力量规则(含钩子，不少于100字)","factionLayout":"势力格局概述(含冲突线，不少于100字)","constraints":[{"category":"分类","rule":"规则","description":"说明","severity":"hard/soft"}]}`,
       versions: [
         { templateId: 'seed-worldview-enrich', version: '1.0.0', changelog: ['初始版本，灵感种子智能补全'], activeSince: '2026-06-21' },
+        { templateId: 'seed-worldview-enrich', version: '1.1.0', changelog: ['增强设计铁律、具象要求、字数约束、架空历史专项'], activeSince: '2026-07-26' },
       ],
       variables: ['user_input.hook', 'user_input.description', 'user_input.setting'],
       isActive: true,
@@ -635,17 +287,22 @@ export class PromptRegistryService {
 
     this.registerTemplate({
       id: 'seed-organization-gen',
-      name: '组织生成',
+      name: '组织/势力生成',
       category: 'inspiration-seed',
-      version: '1.0.0',
-      description: '基于世界观生成2-3个主要势力',
-      content: `你是一名网文势力设计专家。基于以下世界观，生成2-3个主要势力/组织。
+      version: '1.1.0',
+      description: '基于世界观生成3-5个主要势力（增强版）',
+      content: `你是一名网文势力设计专家。基于以下世界观，生成3-5个主要势力/组织。
+
+## 势力设计铁律（必守）
+1. **冲突驱动**：每个势力必须有其核心利益和与其他势力的冲突点。没有冲突就没有戏剧张力
+2. **内部矛盾**：每个势力内部要有暗流——派系/野心家/隐藏目的。纯粹团结的势力是平面的
+3. **与主角关联**：至少一个势力与hook中的核心冲突有直接关联——是主角的盟友/敌人/摇摆方
 
 ## 世界观设定
 {{json chain_output.node_2_worldview}}
 
 ## 执行要求
-1. 生成2-3个组织，type必须从以下枚举中选择(小写):
+1. 生成3-5个组织，type必须从以下枚举中选择(小写):
    - regime: 政权/朝廷/政府
    - faction: 派系/势力
    - army: 军队/武装力量
@@ -653,15 +310,15 @@ export class PromptRegistryService {
    - camp: 阵营/联盟
    - organization: 组织/机构/公司
    - other: 其他
-2. **钩子思维**: 每个组织的description必须包含"钩子潜质"——组织内部的暗流/与主角的潜在冲突/隐藏目的
-3. **反幻觉**: 组织必须与世界观geography和factionLayout逻辑一致
-4. 至少一个组织与hook中的核心冲突有直接关联
+2. 每个组织的description不少于80字，必须包含：核心利益、与其他势力的冲突点、内部的暗流（一人/一派可能有隐藏目的）
+3. 组织之间的关系要形成"三角博弈"或"多方对峙"格局——不能是简单的二元对立
 
 ## 输出格式
 输出合法JSON，不要markdown包裹:
-{"organizations":[{"name":"组织名","type":"regime","description":"组织描述(含钩子)"}]}`,
+{"organizations":[{"name":"组织名","type":"regime","description":"组织描述(含核心利益+冲突点+内部暗流，不少于80字)"}]}`,
       versions: [
         { templateId: 'seed-organization-gen', version: '1.0.0', changelog: ['初始版本，灵感种子智能补全'], activeSince: '2026-06-21' },
+        { templateId: 'seed-organization-gen', version: '1.1.0', changelog: ['增至3-5个势力、加入势力设计铁律、三角博弈要求'], activeSince: '2026-07-26' },
       ],
       variables: ['chain_output.node_2_worldview'],
       isActive: true,
@@ -671,9 +328,14 @@ export class PromptRegistryService {
       id: 'seed-location-gen',
       name: '地点生成',
       category: 'inspiration-seed',
-      version: '1.0.0',
-      description: '长篇按6层层级/短篇简化生成地点',
-      content: `你是一名网文地图设计师。基于世界观生成故事地点。
+      version: '1.1.0',
+      description: '长篇按6层层级/短篇简化生成地点（增强版）',
+      content: `你是一名网文地图设计师。基于世界观生成故事地点，每个地点必须有"故事感"。
+
+## 地点设计铁律（必守）
+1. **场景即冲突**：每个重要地点应该天然带有冲突潜质——狭窄的巷子适合伏击、开阔的广场适合公开对决、密闭的房间适合秘密谈话
+2. **层级递进**：长篇从小地图逐步展开（新手村→城镇→都城→世界），每次展开都是一次信息增量
+3. **感官描述**：每个地点的description至少包含一种感官细节（气味/声音/温度/触感），让读者"身临其境"
 
 ## 世界观设定
 {{json chain_output.node_2_worldview}}
@@ -682,18 +344,19 @@ export class PromptRegistryService {
 {{#if user_input.isLong}}长篇(按6层层级: world→region→country→city→location→scene，生成8-15个地点){{else}}短篇(简化为1-2层，生成3-5个location/scene级地点){{/if}}
 
 ## 执行要求
-1. **钩子思维**: 每个地点的description必须包含"钩子潜质"——能发生关键剧情/埋伏笔/制造冲突的场所特征
-2. **反幻觉**: 地点必须与世界观geography一致
+1. 每个地点的description不少于50字，必须包含"场景冲突潜质"——能发生什么类型的关键剧情
+2. 至少2个地点带有"钩子潜质"——隐藏的密室/废弃的遗迹/看似普通却暗藏玄机的地方
 3. level必须从以下枚举中选择(小写): world / region / country / city / location / scene
-   - region对应区域(如华北地区、东北地区)，替代"大陆"概念，更贴合中国地理叙事
-4. 长篇: parentId填父级地点name(如"长安城"的parentId为"大唐")
+4. 长篇: parentId填父级地点name(如"并州城"的parentId为"中原")
 5. 短篇: 只生成location/scene级，不需要parentId
+6. 地点命名要符合世界观基调——古代架空用古代地名风格，现代都市用现代地名风格
 
 ## 输出格式
 输出合法JSON，不要markdown包裹:
-{"locations":[{"name":"地点名","level":"world","parentId":"父地点名(短篇不需要)","description":"地点描述(含钩子)"}]}`,
+{"locations":[{"name":"地点名","level":"world","parentId":"父地点名(短篇不需要)","description":"地点描述(含场景冲突潜质+感官细节，不少于50字)"}]}`,
       versions: [
         { templateId: 'seed-location-gen', version: '1.0.0', changelog: ['初始版本，灵感种子智能补全'], activeSince: '2026-06-21' },
+        { templateId: 'seed-location-gen', version: '1.1.0', changelog: ['加入地点设计铁律、场景冲突潜质、感官描述要求、命名风格约束'], activeSince: '2026-07-26' },
       ],
       variables: ['chain_output.node_2_worldview', 'user_input.isLong'],
       isActive: true,

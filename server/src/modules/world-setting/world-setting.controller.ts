@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WorldSettingService } from './world-setting.service';
-import { ConflictEngineService } from '../conflict-engine/conflict-engine.service';
 import { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } from './dto/world-setting.dto';
 import { VectorIndexService } from '../../rag/vector-index.service';
 import { EmbeddingService } from '../../rag/embedding.service';
@@ -24,7 +23,6 @@ import { CanonicalSyncStateService } from '../../rag/canonical-sync-state.servic
 export class WorldSettingController {
   constructor(
     private readonly service: WorldSettingService,
-    private readonly conflictEngine: ConflictEngineService,
     private readonly vectorIndex: VectorIndexService,
     private readonly embedding: EmbeddingService,
     private readonly syncStates: CanonicalSyncStateService,
@@ -94,20 +92,21 @@ export class WorldSettingController {
   }
 
   @Post(':id/change-plan')
-  async generateChangePlan(@Param('id') id: string, @Body() dto: { changes: Record<string, string> }) {
-    const plan = this.conflictEngine.generateWorldChangePlan(id, dto.changes);
-    return plan;
+  async generateChangePlan(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: { changes: Record<string, string> }) {
+    return this.service.generateChangePlan(projectId, id, dto.changes || {});
   }
 
   @Post(':id/apply-change-plan')
-  async applyChangePlan(@Param('id') id: string, @Body() dto: { planId: string; confirmed: boolean }) {
+  async applyChangePlan(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: { changes?: Record<string, string>; confirmed?: boolean }) {
     if (!dto.confirmed) {
       return { applied: false, message: '用户驳回修改申请' };
     }
-    // 应用修改 — 代理到 service 的 update 方法
-    const current = this.service.findOne(id);
-    const updateDto: UpdateWorldSettingDto = {};
-    return this.service.update(id, updateDto);
+    const changes = dto.changes || {};
+    if (!Object.keys(changes).length) {
+      return { applied: false, message: '无修改内容' };
+    }
+    const result = await this.service.update(id, changes as any);
+    return { ...result, applied: true };
   }
 
   /**

@@ -102,6 +102,12 @@ export interface LLMRequest {
   role?: string;
   /** 要求兼容 OpenAI 协议的提供商返回严格 JSON 对象。 */
   responseFormat?: 'text' | 'json_object';
+  /**
+   * 结构化（json_object）场景下空内容的最大重试次数。
+   * 默认 2（≈3 次），对验收器等关键结构化调用建议传 4（≈5 次）以抵御上游瞬时空内容。
+   * 永远不切模型、不降级。
+   */
+  maxEmptyRetries?: number;
 }
 
 /** LLM 调用响应 */
@@ -174,7 +180,7 @@ export interface ExecutionContext {
 
 /** Prompt Chain 定义 */
 export interface PromptChain {
-  id: string;                  // 如 "tianlong-8step"
+  id: string;                  // 如 "inspiration-seed-enrich" / "body-by-outline"
   name: string;                // 人类可读名称
   version: string;             // 语义版本 (major.minor.patch)
   description: string;
@@ -229,44 +235,6 @@ export interface ChainError {
   message: string;
   type: 'quality_gate' | 'timeout' | 'llm_error' | 'template_error' | 'internal';
   recoverable: boolean;
-}
-
-// ==================== 天龙8步专用类型 ====================
-
-/** 天龙8步执行结果片段 */
-export interface TianlongStepResult {
-  stepNumber: number;          // 1-8
-  stepName: string;
-  content: string;
-  qualityScore?: number;
-}
-
-/** 天龙8步章节装配上下文 */
-export interface ChapterContext {
-  outline: string;             // 本章大纲
-  previousChapterEnd: string;  // 上一章结尾
-  characters: CharacterState[];// 出场角色
-  foreshadowings: ForeshadowState[];  // 应回收伏笔
-  previousChaptersSummary: string;    // 前几章摘要
-  chapterNumber: number;
-  totalChapters: number;
-}
-
-/** 角色状态 */
-export interface CharacterState {
-  name: string;
-  identity: string;
-  status: string;
-  motivation: string;
-  relationToProtagonist: string;
-}
-
-/** 伏笔状态 */
-export interface ForeshadowState {
-  content: string;
-  buriedAt: string;
-  recoveredAt?: string;
-  impact: string;
 }
 
 // ==================== 短篇三步骤输出类型 ====================

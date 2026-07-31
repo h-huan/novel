@@ -1,6 +1,6 @@
 {
   "version": "1.2.0",
-  "description": "AIå†™ä½œå¹³å°æ¨¡å‹è·¯ç”±é…ç½® - ä»…ä¿ç•™ DeepSeek å¯ç”¨æ¨¡å‹",
+  "description": "AIĞ´×÷Æ½Ì¨Ä£ĞÍÂ·ÓÉÅäÖÃ",
 
   "models": {
     "deepseek": {
@@ -22,54 +22,53 @@
   "roles": {
     "writer": {
       "models": [
-        { "model": "deepseek", "priority": 1, "label": "ä¸»åŠ›å†™æ‰‹", "defaultVersion": "deepseek-chat" },
-        { "model": "deepseek", "priority": 2, "label": "å¿«é€Ÿå†™æ‰‹", "defaultVersion": "deepseek-chat" }
+        { "model": "deepseek", "priority": 1, "label": "Ö÷Á¦Ğ´ÊÖ", "defaultVersion": "deepseek-chat" },
+        { "model": "deepseek", "priority": 2, "label": "¿ìËÙĞ´ÊÖ", "defaultVersion": "deepseek-chat" }
       ]
     },
     "reviewer": {
       "models": [
-        { "model": "deepseek", "priority": 1, "label": "æ·±åº¦è¯„å®¡", "defaultVersion": "deepseek-chat" }
+        { "model": "deepseek", "priority": 1, "label": "Éî¶ÈÆÀÉó", "defaultVersion": "deepseek-chat" }
       ]
     },
     "planner": {
       "models": [
-        { "model": "deepseek", "priority": 1, "label": "æ·±åº¦ç­–åˆ’", "defaultVersion": "deepseek-chat" }
+        { "model": "deepseek", "priority": 1, "label": "Éî¶È²ß»®", "defaultVersion": "deepseek-chat" }
       ]
     }
   },
 
   "scenarios": {
-    "idea_generate":        { "model": "deepseek", "temperature": 0.9, "label": "çµæ„Ÿç”Ÿæˆ" },
-    "outline":              { "model": "deepseek", "temperature": 0.6, "label": "å¤§çº²è§„åˆ’" },
-    "world_building":       { "model": "deepseek", "temperature": 0.6, "label": "ä¸–ç•Œè§‚" },
-    "character_design":     { "model": "deepseek", "temperature": 0.7, "label": "è§’è‰²è®¾å®š" },
-    "organization_map":     { "model": "deepseek", "temperature": 0.6, "label": "ç»„ç»‡ä¸åœ°å›¾" },
-    "foreshadowing":        { "model": "deepseek", "temperature": 0.7, "label": "ä¼ç¬”è®¾è®¡" },
-    "timeline":             { "model": "deepseek", "temperature": 0.5, "label": "æ—¶é—´çº¿" },
-    "writing":              { "model": "deepseek", "temperature": 0.7, "label": "å†™ä½œ" },
-    "writing_daily":        { "model": "deepseek", "temperature": 0.7, "label": "æ—¥å¸¸å†™ä½œ" },
-    "writing_climax":       { "model": "deepseek", "temperature": 0.8, "label": "é«˜æ½®ç« èŠ‚" },
-    "polish":               { "model": "deepseek", "temperature": 0.4, "label": "ç²¾ä¿®æ¶¦è‰²" },
-    "character_review":     { "model": "deepseek", "temperature": 0.3, "label": "äººè®¾è¯„å®¡" },
-    "quality_check":        { "model": "deepseek", "temperature": 0.3, "label": "è´¨æ£€æ£€æŸ¥" },
-    "tianlong-8step":       { "model": "deepseek", "temperature": 0.7, "label": "å¤©é¾™8æ­¥" }
+    "idea_generate":        { "model": "deepseek", "temperature": 0.9, "maxTokens": 16384, "label": "Áé¸ĞÉú³É" },
+    "outline":              { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "´ó¸Ù¹æ»®" },
+    "world_building":       { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "ÊÀ½ç¹Û" },
+    "character_design":     { "model": "deepseek", "temperature": 0.7, "maxTokens": 4096, "label": "½ÇÉ«Éè¶¨" },
+    "organization_map":     { "model": "deepseek", "temperature": 0.6, "maxTokens": 8192, "label": "×éÖ¯ÓëµØÍ¼" },
+    "foreshadowing":        { "model": "deepseek", "temperature": 0.7, "maxTokens": 4096, "label": "·ü±ÊÉè¼Æ" },
+    "timeline":             { "model": "deepseek", "temperature": 0.5, "maxTokens": 4096, "label": "Ê±¼äÏß" },
+    "writing":              { "model": "deepseek", "temperature": 0.7, "maxTokens": 8192, "label": "Ğ´×÷" },
+    "writing_daily":        { "model": "deepseek", "temperature": 0.7, "maxTokens": 8192, "label": "ÈÕ³£Ğ´×÷" },
+    "writing_climax":       { "model": "deepseek", "temperature": 0.8, "maxTokens": 8192, "label": "¸ß³±ÕÂ½Ú" },
+    "polish":               { "model": "deepseek", "temperature": 0.4, "maxTokens": 4096, "label": "¾«ĞŞÈóÉ«" },
+    "character_review":     { "model": "deepseek", "temperature": 0.3, "maxTokens": 4096, "label": "ÈËÉèÆÀÉó" },
+    "quality_check":        { "model": "deepseek", "temperature": 0.3, "maxTokens": 16384, "label": "ÖÊ¼ì¼ì²é" }
   },
 
   "chapter_function_routing": {
-    "exposition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "å±•å¼€" },
-    "rising":        { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "å‘å±•" },
-    "climax":        { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "é«˜æ½®" },
-    "falling":       { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "å›è½" },
-    "resolution":    { "model": "deepseek", "tier": "standard", "temperature": 0.5, "label": "è§£å†³" },
-    "transition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "è¿‡æ¸¡" },
-    "foreshadowing": { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "ä¼ç¬”" },
-    "revelation":    { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "æ­éœ²" },
-    "world_building":{ "model": "deepseek", "tier": "standard", "temperature": 0.6, "label": "ä¸–ç•Œè§‚" }
+    "exposition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "Õ¹¿ª" },
+    "rising":        { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "·¢Õ¹" },
+    "climax":        { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "¸ß³±" },
+    "falling":       { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "»ØÂä" },
+    "resolution":    { "model": "deepseek", "tier": "standard", "temperature": 0.5, "label": "½â¾ö" },
+    "transition":    { "model": "deepseek", "tier": "fast",    "temperature": 0.6, "label": "¹ı¶É" },
+    "foreshadowing": { "model": "deepseek", "tier": "standard", "temperature": 0.7, "label": "·ü±Ê" },
+    "revelation":    { "model": "deepseek", "tier": "standard", "temperature": 0.8, "label": "½ÒÂ¶" },
+    "world_building":{ "model": "deepseek", "tier": "standard", "temperature": 0.6, "label": "ÊÀ½ç¹Û" }
   },
 
   "defaults": {
     "temperature": 0.7,
-    "maxTokens": 4096,
+    "maxTokens": 8192,
     "timeout": 30000
   }
 }

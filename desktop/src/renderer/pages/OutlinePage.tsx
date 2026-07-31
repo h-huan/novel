@@ -50,7 +50,12 @@ interface VolumeNode {
   climaxDescription?: string;
   climax?: string;
   timeline?: { start?: string; end?: string } | null;
+  volumeForeshadowing?: ForeshadowingBrief[];
+  characterArcs?: CharacterArcBrief[];
+  climaxChapters?: number[];
 }
+interface ForeshadowingBrief { content: string; type?: string; targetChapter?: number; }
+interface CharacterArcBrief { character: string; from: string; to: string; triggerChapter?: number; }
 
 interface ChapterNode {
   id: string;
@@ -204,6 +209,27 @@ const splitFieldList = (value: unknown): string[] => {
   return value.split(/[、，,；;\/]/).map(v => v.trim()).filter(Boolean);
 };
 
+const resolveHighlights = (...sources: any[]): string => {
+  for (const src of sources) {
+    if (Array.isArray(src) && src.length > 0) return src.map((h: any) => typeof h === 'string' ? h : (h?.point || h?.highlight || h?.text || '')).filter(Boolean).join('\n• ');
+    if (typeof src === 'string' && src.trim()) return src;
+  }
+  return '';
+};
+const resolveForeshadowing = (...sources: any[]): string => {
+  for (const src of sources) {
+    if (Array.isArray(src) && src.length > 0) return src.map((f: any) => typeof f === 'string' ? f : `[${f.type || 'hint'}] ${f.content || f.text || ''}`).join('\n');
+    if (typeof src === 'string' && src.trim()) return src;
+  }
+  return '';
+};
+const resolveCharacterStates = (...sources: any[]): string => {
+  for (const src of sources) {
+    if (Array.isArray(src) && src.length > 0) return src.map((cs: any) => typeof cs === 'string' ? cs : `${cs.character || ''}: ${cs.stateBefore || ''} → ${cs.stateAfter || ''}（${cs.trigger || ''}）`).join('\n');
+  }
+  return '';
+};
+
 const parseOutlineContentFields = (content: string, sceneData: Record<string, any>, chapter: any) => {
   const fields: Record<string, string> = {};
   const aliases: Record<string, string> = {
@@ -231,10 +257,11 @@ const parseOutlineContentFields = (content: string, sceneData: Record<string, an
     core: readableValue(fields.core || sceneData.core || sceneData.summary || chapter.content),
     scenes: splitFieldList(fields.scenes).length > 0 ? splitFieldList(fields.scenes) : splitFieldList(sceneData.scenes || chapter.scenes),
     actions,
-    conflict: readableValue(fields.conflict || sceneData.conflict || chapter.conflict),
-    highlight: readableValue(fields.highlight || sceneData.highlight || chapter.highlight),
-    foreshadowing: readableValue(fields.foreshadowing || sceneData.foreshadowing || sceneData.foreshadowingSet || chapter.foreshadowing),
-    foreshadowingRecover: readableValue(fields.foreshadowingRecover || sceneData.foreshadowingRecover || chapter.foreshadowingRecovery),
+    conflict: readableValue(fields.conflict || sceneData.conflict || sceneData.conflicts || chapter.conflict),
+    highlight: resolveHighlights(fields.highlight, sceneData.highlights, sceneData.highlight, chapter.highlight, chapter.highlights),
+    foreshadowing: resolveForeshadowing(fields.foreshadowing, sceneData.foreshadowing, sceneData.foreshadowingSet, chapter.foreshadowing),
+    foreshadowingRecover: resolveForeshadowing(fields.foreshadowingRecover, sceneData.foreshadowingRecover, chapter.foreshadowingRecovery),
+    characterStates: resolveCharacterStates(sceneData.characterStates, chapter.characterStates),
     hook: readableValue(fields.hook || sceneData.hook || chapter.hook),
     mood: readableValue(fields.mood || sceneData.mood || sceneData.emotionalTone || chapter.mood || chapter.emotionalTone),
     reversalPoint: readableValue(fields.reversalPoint || sceneData.reversalPoint || chapter.reversalPoint),
@@ -247,9 +274,10 @@ const formatOutlineFields = (fields: Record<string, any>): string => [
   `主要场景：${Array.isArray(fields.scenes) ? fields.scenes.join('、') : (fields.scenes || '')}`,
   `人物行动：${fields.actions || ''}`,
   `冲突设计：${fields.conflict || ''}`,
-  `爽点设置：${fields.highlight || ''}`,
+  `爽点/记忆点：${fields.highlight ? '\n• ' + fields.highlight : ''}`,
   `伏笔设置：${fields.foreshadowing || ''}`,
   `伏笔回收：${fields.foreshadowingRecover || ''}`,
+  `人物状态变化：${fields.characterStates || ''}`,
   `结尾设置：${fields.hook || ''}`,
   `情绪基调：${fields.mood || ''}`,
   `反转点：${fields.reversalPoint || ''}`,
@@ -995,17 +1023,21 @@ const OutlinePage: React.FC = () => {
           scenes: draft.scenes || [],
           actions: draft.characterActions,
           conflict: draft.conflict,
-          highlight: draft.highlight,
+          highlight: Array.isArray(draft.highlights) ? draft.highlights.map((h:any) => h?.point || h).join('\n• ') : (draft.highlight || ''),
           foreshadowing: draft.foreshadowing,
           foreshadowingRecover: draft.foreshadowingRecover,
+          characterStates: draft.characterStates,
           hook: draft.hook,
-          mood: draft.mood,
+          mood: draft.mood || draft.emotionalTone,
           targetWords: selectedChapter.targetWords,
         }),
         scenes: {
           scenes: draft.scenes || [], characterActions: draft.characterActions || '', conflict: draft.conflict || '',
-          highlight: draft.highlight || '', foreshadowing: draft.foreshadowing || '',
-          foreshadowingRecover: draft.foreshadowingRecover || '', hook: draft.hook || '', mood: draft.mood || '',
+          highlights: draft.highlights || (draft.highlight ? [draft.highlight] : []),
+          foreshadowing: draft.foreshadowing || [],
+          foreshadowingRecover: draft.foreshadowingRecover || [],
+          characterStates: draft.characterStates || [],
+          hook: draft.hook || '', mood: draft.mood || draft.emotionalTone || '',
         },
       });
       setGenProgress('本章大纲已由模型扩写并完成保存、索引同步；请复核后再编辑。');
@@ -1456,8 +1488,12 @@ const OutlinePage: React.FC = () => {
                         <span style={styles.volumeCount}>{volume.chapters.length}章</span>
                         <button type="button" onClick={() => openAddDialog(volume.id)} title="添加章节" style={styles.addButton}>+</button>
                       </div>
-                      {volume.goal && <div style={styles.volumeHint}>{volume.goal}</div>}
-                      {volume.keyEvents?.length ? <div style={styles.volumeTiny}>关键事件：{volume.keyEvents.slice(0, 5).join(' -> ')}</div> : null}
+                      {volume.goal && <div style={styles.volumeHint}>目标：{volume.goal}</div>}
+                      {volume.theme && <div style={styles.volumeTiny}>主题：{volume.theme}</div>}
+                      {volume.keyEvents?.length ? <div style={styles.volumeTiny}>关键事件：{volume.keyEvents.join(' → ')}</div> : null}
+                      {volume.climaxChapters?.length ? <div style={styles.volumeTiny}>🧨 高潮章：{volume.climaxChapters.map(c => `第${c}章`).join('、')}</div> : null}
+                      {volume.volumeForeshadowing?.length ? <div style={{...styles.volumeTiny, color:'#93c5fd'}}>🔮 卷伏笔：{volume.volumeForeshadowing.map((f:any) => f.content || '').slice(0,3).join('；')}</div> : null}
+                      {volume.characterArcs?.length ? <div style={{...styles.volumeTiny, color:'#86efac'}}>👤 人物弧：{volume.characterArcs.map((c:any) => `${c.character||''} ${c.from||''}→${c.to||''}`).join(' | ')}</div> : null}
                       <div style={styles.chapterList}>
                         {volume.chapters.map((chapter, index) => (
                           <ChapterListItem
@@ -1591,7 +1627,7 @@ const styles: Record<string, React.CSSProperties> = {
   dialogActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
   formSection: { display: 'flex', flexDirection: 'column', gap: 6 },
   formLabel: { fontSize: 11, fontWeight: 600, color: '#8a8aa0' },
-  formRow: { display: 'flex', gap: 12 },
+  formRow: { display: 'flex', gap: 12, flexWrap: 'wrap' },
   input: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
   textarea: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box' },
   genBtn: { padding: '10px 18px', backgroundColor: '#e94560', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
@@ -1600,7 +1636,7 @@ const styles: Record<string, React.CSSProperties> = {
   emptyState: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 20px', textAlign: 'center' },
   emptyText: { color: '#8a8aa0', fontSize: 15, margin: 0 },
   emptyHint: { color: '#6c6c80', fontSize: 12, margin: '8px 0 0' },
-  treePanel: { width: 300, minWidth: 300, borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  treePanel: { width: 260, minWidth: 240, borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   treeTitle: { padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#8a8aa0', borderBottom: '1px solid rgba(255,255,255,0.06)' },
   treeContent: { flex: 1, overflow: 'auto', padding: 8 },
   volumeBlock: { marginBottom: 10 },
@@ -1619,7 +1655,7 @@ const styles: Record<string, React.CSSProperties> = {
   chapterActions: { display: 'flex', gap: 4, flexShrink: 0 },
   iconButton: { minWidth: 22, height: 20, fontSize: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontFamily: 'inherit' },
   lockedBadge: { fontSize: 10, color: '#f59e0b', padding: '1px 4px' },
-  shortListPane: { width: 320, minWidth: 320, borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  shortListPane: { width: 260, minWidth: 240, borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   shortMeta: { margin: 8, padding: 10, borderRadius: 6, color: '#8a8aa0', backgroundColor: 'rgba(59,130,246,0.06)', fontSize: 11, lineHeight: 1.45 },
   shortListContent: { flex: 1, overflow: 'auto', padding: 8 },
   shortChapterItem: { width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 5, borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)', backgroundColor: 'rgba(255,255,255,0.02)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' },
@@ -1649,12 +1685,12 @@ const styles: Record<string, React.CSSProperties> = {
   qualityHint: { marginTop: 8, fontSize: 11, color: '#8a8aa0', lineHeight: 1.5 },
   syncNotice: { padding: '8px 16px', color: '#93c5fd', backgroundColor: 'rgba(96,165,250,0.08)', borderBottom: '1px solid rgba(96,165,250,0.12)', fontSize: 11, lineHeight: 1.5 },
   contextPanel: { padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', gap: 10 },
-  contextGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 },
+  contextGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 },
   contextLink: { minHeight: 76, textAlign: 'left', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', backgroundColor: 'rgba(255,255,255,0.025)', color: '#c0c0d0', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' },
   contextLinkLabel: { fontSize: 10, color: '#6c6c80', fontWeight: 700 },
   contextLinkTitle: { fontSize: 12, color: '#d8d8e8', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   contextLinkHint: { fontSize: 11, color: '#8a8aa0', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
-  contextMetaGrid: { display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 8 },
+  contextMetaGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 },
   contextMetaBox: { padding: '9px 10px', borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', minHeight: 66 },
   contextMetaTitle: { display: 'block', fontSize: 10, color: '#6c6c80', fontWeight: 700, marginBottom: 5 },
   contextMetaText: { margin: 0, fontSize: 12, color: '#c0c0d0', lineHeight: 1.5 },

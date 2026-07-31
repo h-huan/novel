@@ -2,7 +2,7 @@
  * Chain Controller - Prompt Chain REST API
  *
  * 提供面向前端写作工作流的完整端点：
- * - generate       正文生成（天龙8步法）
+ * - generate       正文生成（严格按已绑定详细大纲单次 LLM 调用）
  * - continue       续写当前章节
  * - enhance-opening  开头强化
  * - enhance-reversal 反转强化
@@ -37,11 +37,14 @@ import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
 import { WorkflowGuardService } from '../modules/workflow-guard/workflow-guard.service';
 import { StateItemService } from '../state/state-item.service';
-import { CharacterService } from '../modules/character/character.service';
-import { WorldSettingService } from '../modules/world-setting/world-setting.service';
+import { ConsistencyCheckService } from '../state/consistency-check.service';
+import { CharacterService, PROFILE_FIELDS } from '../modules/character/character.service';
+import { WorldSettingService, WORLD_PROFILE_FIELDS } from '../modules/world-setting/world-setting.service';
 import { MapPointService } from '../modules/map-point/map-point.service';
 import { EmbeddingService } from '../rag/embedding.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
+import { WritingGateway } from '../modules/websocket/websocket.gateway';
+import { LLM_TUNABLES } from '../config/llm-tunables';
 
 type OutlineChapterFunction =
   | 'opening'
@@ -357,15 +360,11 @@ class QualityCheckDto {
 
 // ==================== 场景超时分层 ====================
 /**
- * 分层超时策略：按场景复杂度给不同的超时上限
- * - 简单查询（标题/短文本）: 45s — 快速生成，快速失败
- * - 中等生成（角色/世界观/伏笔）: 60s — JSON 结构化输出
- * - 正文生成（大纲批次/天龙8步每节点）: 120s — 长文本创作
- * 外层 FailoverService timeoutOverride 也跟随此分层
+ * 生成超时与 maxTokens 边界集中由 ../config/llm-tunables 管理，
+ * 全部可通过环境变量覆盖，默认值已调到宽容档（≥5 分钟），
+ * 不再把 45s/120s/240s 这类魔法数字写死在业务代码里。
+ * 详见 llm-tunables.ts。
  */
-const TIMEOUT_SIMPLE  = 45_000;  // 标题/短文本
-const TIMEOUT_MEDIUM  = 60_000;  // 角色/世界观/组织/伏笔
-const TIMEOUT_CONTENT = 120_000; // 大纲/正文创作
 
 // ==================== Controller ====================
 
@@ -393,6 +392,8 @@ export class ChainController {
     private readonly worldSettingService: WorldSettingService,
     private readonly mapPointService: MapPointService,
     private readonly generationRecovery: GenerationRecoveryService,
+    private readonly consistencyCheckService: ConsistencyCheckService,
+    private readonly writingGateway: WritingGateway,
   ) {}
 
   private beginChapterGeneration(projectId: string, chapterId: string) {
@@ -491,38 +492,226 @@ export class ChainController {
   }
 
   /**
+   * 生成正文并把字数强制收敛到 3200-4000 字区间。
+   *
+   * 两个历史坑导致“字数不足下限”假性失败：
+   * 1) 之前复用场景默认 maxTokens(4096)，而 3200-4000 中文字约需 4000-5200 token，
+   *    模型被 API 在 ~4096 token 处硬截断，正好落在 3000 字上下，永远跨不过 3200；
+   * 2) “不足下限”的旧重试是让模型“整章重写得更长”，但模型常给出相似篇幅而原地踏步，
+   *    几次重试后仍 < 3200，最终抛 422 丢整章。
+   *
+   * 现在的做法：
+   * - 显式传入充足 maxTokens，确保模型有空间写到目标区间、不被 token 上限掐断；
+   * - “不足下限”改为“续写追加”：把上一版完整正文作基底，要求模型只输出新增续写片段并
+   *   追加到尾部，字数因此单调递增、必定逼近并跨过 3200（不再依赖模型一次写够）；
+   * - “超出上限”直接走确定性句末截断兜底（trimToSentenceBoundary，不伪造内容），
+   *   截断后必落在 3200-4000，省去无谓的压缩重试。
+   * 全部调用均为真实 LLM，绝不伪造内容；只有重试耗尽仍 < 3200 才抛 422。
+   */
+  private async generateBodyWithLengthGuard(params: {
+    basePrompt: string;
+    targetWords: number;
+    scenario: string;
+    temperature?: number;
+    maxRetries?: number;
+    onProgress?: (payload: { label: string; message: string; progress: number }) => void;
+  }): Promise<string> {
+    const { basePrompt, targetWords, scenario, temperature = 0.7, maxRetries = 5 } = params;
+    if (!Number.isInteger(targetWords) || targetWords < 3200 || targetWords > 4000) {
+      throw new HttpException('本章大纲缺少有效的3200-4000字动态目标，正文未保存', 400);
+    }
+    // 关键修复①：显式给出充足 token 余量。中文约 1~1.4 token/字，目标 4000 字约需
+    // 4000-5600 token，这里取目标*1.6+800 留足余量，并封顶 8000（仍在 deepseek-chat 输出上限 8192 内）。
+    const maxTokens = Math.min(
+      LLM_TUNABLES.BODY_MAXTOKENS_CAP,
+      Math.ceil(targetWords * LLM_TUNABLES.BODY_MAXTOKENS_PER_TARGET) + LLM_TUNABLES.BODY_MAXTOKENS_EXTRA,
+    );
+    let lastContent = '';
+    let lastActual = 0;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const isRetry = attempt > 0;
+      if (!isRetry) {
+        // 阶段 1：首版生成
+        params.onProgress?.({
+          label: '按大纲生成首版正文',
+          message: `首版：按本章详细大纲生成正文（目标约 ${targetWords} 字，写完后会自动做大纲对照）…`,
+          progress: 20,
+        });
+      } else {
+        // 阶段 2：字数续写（仅在字数偏离 3200-4000 区间时触发）
+        const stepProgress = Math.max(35, Math.min(85, 35 + attempt * 12));
+        const direction = lastActual < 3200 ? '不足下限' : '超出上限';
+        params.onProgress?.({
+          label: '字数微调',
+          message: `字数微调 ${attempt}/${maxRetries}：上一版 ${lastActual} 字${direction}，按「续写追加」/「句末收敛」校正（不添无关支线、不重写已有正文）…`,
+          progress: stepProgress,
+        });
+      }
+      // 首轮正常大纲生成；重试一律走“续写追加”（见 buildExpansionContinuationPrompt）。
+      const prompt = isRetry
+        ? this.buildExpansionContinuationPrompt(basePrompt, lastContent, lastActual, targetWords, attempt)
+        : basePrompt;
+      // 续写retry 略升温以产出更丰富的细节（封顶 0.85，避免失控）。
+      const useTemp = isRetry ? Math.min(0.85, (temperature ?? 0.7) + 0.1) : temperature;
+      let response: { content: string };
+      try {
+        response = await this.realLLM.generate({ prompt, scenario, temperature: useTemp, maxTokens });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new HttpException(`章节生成调用失败，正文未保存：${message}`, 502);
+      }
+      const raw = this.generatedNarrativeText(response);
+      if (!raw) {
+        throw new HttpException('正文生成未返回可验收内容，正文未保存', 502);
+      }
+      // 重试时模型可能返回“完整新版正文”（以已写正文开头），也可能只返回“续写片段”。
+      // 以是否复用已有正文开头来判定：复用则视为整章重写直接采用；否则作为续写片段追加到尾部。
+      const content = isRetry
+        ? (raw.startsWith(lastContent.slice(0, 80)) ? raw : lastContent + raw)
+        : raw;
+      lastContent = content;
+      lastActual = this.generatedNarrativeWordCount(content);
+      if (lastActual >= 3200 && lastActual <= 4000) {
+        params.onProgress?.({
+          label: '字数验收通过',
+          message: `正文已收敛至 ${lastActual} 字（落在 3200-4000 区间内），进入大纲一致性质检…`,
+          progress: 90,
+        });
+        return content;
+      }
+      // 关键修复②：超出上限走确定性句末截断兜底（仅裁剪模型多余铺陈，不伪造任何内容）。
+      // 正文必有句末标点，截断后必落在 3200-4000，直接采用，避免无谓的压缩重试。
+      if (lastActual > 4000) {
+        const trimmed = this.trimToSentenceBoundary(content, 4000);
+        const trimmedCount = this.generatedNarrativeWordCount(trimmed);
+        if (trimmedCount >= 3200) {
+          params.onProgress?.({
+            label: '字数验收通过',
+            message: `正文经句末收敛至 ${trimmedCount} 字（落在 3200-4000 区间内），进入大纲一致性质检…`,
+            progress: 90,
+          });
+          return trimmed;
+        }
+      }
+      // 不足下限：进入下一次“续写追加”重试（字数已单调递增，必定逼近 3200）。
+    }
+    throw new HttpException(
+      `模型仅生成${lastActual}字，未达到正文必须为3200-4000字的要求；本次结果未保存，可安全重试`,
+      422,
+    );
+  }
+
+  /**
+   * 把超出上限的正文在“句末标点”处确定性截断到 maxCount（与 generatedNarrativeWordCount
+   * 同一计量）以内，避免要求模型反复自我压缩仍失败导致整章丢失。只裁剪模型自身多余
+   * 铺陈，不新增、不改写任何内容（无假数据）。从尾部向前找第一个既 ≤ maxCount 又 ≥
+   * minCount 的句末边界，尽量贴近上限、少切真实内容。
+   */
+  private trimToSentenceBoundary(content: string, maxCount: number, minCount = 3200): string {
+    if (this.generatedNarrativeWordCount(content) <= maxCount) return content;
+    const endings = /[。！？!?…~）”」』]/;
+    let fallback = '';
+    for (let i = content.length - 1; i >= 0; i--) {
+      if (!endings.test(content[i])) continue;
+      const slice = content.slice(0, i + 1);
+      const count = this.generatedNarrativeWordCount(slice);
+      if (count <= maxCount) {
+        if (count >= minCount) return slice; // 命中理想区间，直接采用
+        fallback = slice; // 暂存“不超过上限”的最长切片，若找不到理想区间再用
+      }
+    }
+    return fallback || content.slice(0, maxCount);
+  }
+
+  /**
+   * 构建“续写追加”扩充 prompt：把上一版完整正文作基底，要求模型严格从其结尾继续，
+   * 只输出【新增续写片段】（不重复、不重写已有正文），从而让总字数单调递增地逼近 3200。
+   * 这是修复“字数不足下限”的关键——比“整章重写得更长”可靠得多，因为后者模型常给出
+   * 相似篇幅而原地踏步。所有追加内容必须贴合本章任务，不得引入无关支线（避免破坏大纲一致性）。
+   */
+  private buildExpansionContinuationPrompt(
+    basePrompt: string,
+    prevContent: string,
+    prevActual: number,
+    targetWords: number,
+    attempt = 1,
+  ): string {
+    const deficit = Math.max(3200 - prevActual, targetWords - prevActual);
+    const directive =
+      `你正在扩写同一章小说。已写正文经系统逐字统计为 ${prevActual} 字，但本章正文必须达到 ≥ 3200 且 ≤ 4000 中文字（目标约 ${targetWords} 字），目前还差约 ${deficit} 字。\n` +
+      `请严格以【已写正文】的结尾为起点继续往后写，只输出【新增的续写内容】，规则（不可违反）：\n` +
+      `1) 绝不重复、绝不重写【已写正文】，不要加“（续写）”之类标记；直接在结尾后接续；\n` +
+      `2) 只补充符合本章任务的情节细节（对话、动作、感官刻画、心理活动、场景氛围），不得引入与本章大纲无关的支线或新核心事件；\n` +
+      `3) 续写后整体（已写 + 本次）应达到 ≥ 3200 且 ≤ 4000 中文字，并在合适处自然收尾；\n` +
+      `4) 保持人物、视角、语气、时代背景与【已写正文】完全一致；\n` +
+      `5) 你的回复只算新增续写部分的字数，必须 ≥ ${deficit} 且使整体不超 4000。`;
+    return `${basePrompt}\n\n## 字数扩充（自动重试·第${attempt}次·续写追加）\n${directive}\n\n## 已写正文（请从其结尾继续，不要重复它）\n${prevContent}`;
+  }
+
+  /**
    * A chapter may only be persisted after the configured reviewer confirms that
    * it is the same chapter described by the bound detailed outline.  String
    * matching is deliberately not used here: prose must not duplicate outline
    * wording, but it must enact the required events, conflict, actions and hook.
    */
-  private async assertGeneratedChapterAlignment(input: {
+  /**
+   * 非抛出版本的大纲一致性验收：返回结构化结论（pass/missing/contradictions/evidence），
+   * 由调用方决定接受还是自修复。审查器本身仍是真实 LLM（scenario=quality_check），绝不伪造判定。
+   */
+  private async checkChapterAlignment(input: {
     chapterIndex: number;
     chapterTitle: string;
     outlineContract: string;
     storyContext: string;
     content: string;
-  }): Promise<{ outlineAligned: true; continuityPassed: true; characterPassed: true; worldPassed: true; timelinePassed: true; prosePassed: true; evidence: string[] }> {
+  }): Promise<{
+    pass: boolean;
+    missing: string[];
+    contradictions: string[];
+    evidence: string[];
+    outlineAligned: boolean;
+    continuityPassed: boolean;
+    characterPassed: boolean;
+    worldPassed: boolean;
+    timelinePassed: boolean;
+    prosePassed: boolean;
+  }> {
+    const fail = (missing: string[]): {
+      pass: boolean; missing: string[]; contradictions: string[]; evidence: string[];
+      outlineAligned: boolean; continuityPassed: boolean; characterPassed: boolean;
+      worldPassed: boolean; timelinePassed: boolean; prosePassed: boolean;
+    } => ({
+      pass: false, missing, contradictions: [], evidence: [],
+      outlineAligned: false, continuityPassed: false, characterPassed: false,
+      worldPassed: false, timelinePassed: false, prosePassed: false,
+    });
     if (!input.outlineContract || input.outlineContract.length < 80) {
-      throw new HttpException('本章详细大纲不足以作为正文验收依据，已停止生成且未保存正文', 400);
+      return fail(['本章详细大纲不足以作为正文验收依据']);
     }
-    const reviewPrompt = `你是小说章节验收器。只判断，不改写正文。\n\n【章节】第${input.chapterIndex}章 ${input.chapterTitle}\n【不可偏离的详细大纲】\n${input.outlineContract.slice(0, 12000)}\n\n【已确认故事上下文】\n${input.storyContext.slice(0, 14000)}\n\n【待验收正文】\n${input.content}\n\n严格规则：\n- 正文必须是这一章，不是同主题、同人物或同类型的另一段故事。\n- 必须实际兑现详细大纲中的核心事件、冲突、人物行动和本章结尾钩子；缺少、替换、提前/延后到不同事件均为不通过。\n- 正文不得违反给定世界观、角色身份、时间线、前文事实与伏笔状态。\n- 不因文笔通顺、字数达标或仅出现部分关键词而通过。\n\n只输出JSON对象：{"pass":true|false,"missingRequiredItems":["..."],"contradictions":["..."],"evidence":["正文中的具体证据或缺失说明"]}`;
-    const qualityOutputContract = `\n\n补充输出约束：除 pass 外，必须逐项返回 outlineAligned、continuityPassed、characterPassed、worldPassed、timelinePassed、prosePassed 六个布尔字段。任何一项不确定或不通过都必须为 false，并在 missingRequiredItems 或 contradictions 中写明原因。`;
+    const reviewPrompt = `你是小说章节验收器。只判断，不改写正文。\n\n【章节】第${input.chapterIndex}章 ${input.chapterTitle}\n【不可偏离的详细大纲（合同）】\n${input.outlineContract.slice(0, 12000)}\n\n【已确认故事上下文（前文事实/角色/世界观/时间线/伏笔）】\n${input.storyContext.slice(0, 14000)}\n\n【待验收正文】\n${input.content}\n\n必须严格按顺序执行：\n第一步：从【详细大纲】提取“本章必需事件点清单”——每个事件点是大纲明确要求正文实际发生的一个具体事件/场景/人物行动/钩子，按大纲出现顺序排列，至少要包含“本章结尾钩子”对应场景（例如“傍晚在出租屋写新章节大纲”“李想透过窗帘看到周总办公室侧影”等）。\n第二步：对清单每个事件点逐项判定它是否在【待验收正文】中真实发生（不是仅提及、不是被概括、不是被替换成别的事件），给出 covered:true/false 与 evidence（正文中的具体句子或缺失说明）。\n第三步：检查正文是否违反【已确认故事上下文】（角色身份/世界观/时间线/前文事实/伏笔状态），以及是否提前终止于大纲中间事件（用餐/通勤/过渡）、是否以结尾钩子场景收尾。\n\n严格规则（大纲为不可偏离合同，最高优先级）：\n- 正文必须是这一章，不是同主题、同人物或同类型的另一段故事。\n- 任何必需事件点 covered=false（缺失、被替换、被提前/延后到不同事件），或正文违反上下文，均为不通过。\n- 不以文笔通顺、字数达标或仅出现部分关键词而通过。\n- 结尾钩子场景必须在正文靠后部分真实出现并收尾。\n\n只输出JSON对象：{"pass":true|false,"requiredEvents":[{"event":"必需事件点","covered":true|false,"evidence":"正文证据或缺失说明"}],"missingRequiredItems":["所有covered=false的事件点"],"contradictions":["所有与上下文/大纲冲突的问题"],"outlineAligned":true|false,"continuityPassed":true|false,"characterPassed":true|false,"worldPassed":true|false,"timelinePassed":true|false,"prosePassed":true|false,"evidence":["总体证据"]}\n\npass 必须为 true 当且仅当：所有 requiredEvents.covered===true 且 contradictions 为空 且 outlineAligned/continuityPassed/characterPassed/worldPassed/timelinePassed/prosePassed 六个布尔全为 true。`;
+    const qualityOutputContract = '';
     let response: { content: string };
     try {
       response = await this.realLLM.generate({
         prompt: `${reviewPrompt}${qualityOutputContract}`,
         scenario: 'quality_check',
         temperature: 0.1,
-        maxTokens: 1800,
+        maxTokens: 2400,
         responseFormat: 'json_object',
+        // 验收器是结构化关键路径，DeepSeek 偶发空 content 需更多重试。
+        // 永远不切模型、不降级，只在同一配置模型上抖动温度重试。
+        maxEmptyRetries: 4,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new HttpException(`本章大纲一致性审查调用失败，正文未保存：${message}`, 502);
+      // 审查调用失败：按"不通过"处理并保留原因，交给上层决定（自修复或抛出）。
+      // 关键：message 透传，不替换为"网络问题"等模糊文案——上游瞬时空内容属真实 LLM 调用失败，
+      // 失败原因以日志为准；上层会把这条 missing 写进矛盾 tab 让作者可见。
+      return fail([`本章大纲一致性审查调用失败：${message}`]);
     }
     const verdict = this.safeExtractJson<{
       pass?: unknown;
+      requiredEvents?: unknown;
       outlineAligned?: unknown;
       continuityPassed?: unknown;
       characterPassed?: unknown;
@@ -533,9 +722,15 @@ export class ChainController {
       contradictions?: unknown;
       evidence?: unknown;
     }>(response.content, null as any);
-    const missing = Array.isArray(verdict?.missingRequiredItems)
-      ? verdict.missingRequiredItems.map(String).filter(Boolean)
-      : [];
+    const requiredEvents = Array.isArray(verdict?.requiredEvents) ? verdict.requiredEvents : [];
+    const uncoveredEvents = requiredEvents
+      .filter((e: any) => e && e.covered !== true)
+      .map((e: any) => `大纲必需事件未兑现：${typeof e.event === 'string' ? e.event : '未命名事件'}${typeof e.evidence === 'string' && e.evidence ? `（${e.evidence}）` : ''}`)
+      .filter(Boolean);
+    const missing = Array.from(new Set([
+      ...(Array.isArray(verdict?.missingRequiredItems) ? verdict.missingRequiredItems.map(String).filter(Boolean) : []),
+      ...uncoveredEvents,
+    ]));
     const contradictions = Array.isArray(verdict?.contradictions)
       ? verdict.contradictions.map(String).filter(Boolean)
       : [];
@@ -547,8 +742,62 @@ export class ChainController {
       verdict?.timelinePassed,
       verdict?.prosePassed,
     ];
-    if (!verdict || verdict.pass !== true || requiredPasses.some(value => value !== true) || missing.length > 0 || contradictions.length > 0) {
-      const detail = [...missing, ...contradictions].slice(0, 4).join('；') || '审查器未确认正文执行本章详细大纲';
+
+    // ===== 硬红线确定性扫描 =====
+    // LLM 验收器在长 prompt 下经常放过同类违规（"叙述者跳出成为作者评论者""睡着了又盯着屏幕"
+    // "短句独立成段后跟空行"），必须用确定性规则补一层卡口。命中即视为违反硬红线，
+    // 直接 pass=false 并把违规原文注入 contradictions，让 generateBodyWithAlignmentGuard
+    // 触发回炉（精修 prompt 会把违规原文喂回去要求精确删除/改写）。
+    const hardlineFindings = this.detectForbiddenTells(input.content);
+    if (hardlineFindings.length > 0) {
+      for (const f of hardlineFindings) {
+        // 前缀【硬红线·来源·规则号】便于 ConflictDashboard 与精修 prompt 区分来源
+        contradictions.push(
+          `【硬红线·确定性扫描·${f.ruleId}】${f.message} | 位置: ${f.position} | 原文: ${f.snippet}`
+        );
+      }
+      this.logger.warn(
+        `硬红线确定性扫描命中 ${hardlineFindings.length} 处违规（章节 ${input.chapterIndex}）：` +
+        hardlineFindings.map(f => `${f.ruleId}@${f.position}`).join(', ')
+      );
+    }
+
+    const pass = !!verdict && verdict.pass === true
+      && hardlineFindings.length === 0  // 硬红线违规直接 fail
+      && !requiredPasses.some(value => value !== true)
+      && missing.length === 0 && contradictions.length === 0;
+    return {
+      pass,
+      missing,
+      contradictions,
+      evidence: Array.isArray(verdict?.evidence) ? verdict.evidence.map(String).filter(Boolean).slice(0, 4) : [],
+      outlineAligned: verdict?.outlineAligned === true,
+      continuityPassed: verdict?.continuityPassed === true,
+      characterPassed: verdict?.characterPassed === true,
+      worldPassed: verdict?.worldPassed === true,
+      timelinePassed: verdict?.timelinePassed === true,
+      // 硬红线违规：prosePassed 强制 false（即便 LLM 给了 true）
+      prosePassed: verdict?.prosePassed === true && hardlineFindings.length === 0,
+    };
+  }
+
+  /**
+   * 抛出版本：保持既有契约（其他调用方如续写端点仍依赖“不通过即 422 抛出”）。
+   * 仅是把 checkChapterAlignment 的结论转成异常。
+   */
+  private async assertGeneratedChapterAlignment(input: {
+    chapterIndex: number;
+    chapterTitle: string;
+    outlineContract: string;
+    storyContext: string;
+    content: string;
+  }): Promise<{ outlineAligned: true; continuityPassed: true; characterPassed: true; worldPassed: true; timelinePassed: true; prosePassed: true; evidence: string[] }> {
+    if (!input.outlineContract || input.outlineContract.length < 80) {
+      throw new HttpException('本章详细大纲不足以作为正文验收依据，已停止生成且未保存正文', 400);
+    }
+    const report = await this.checkChapterAlignment(input);
+    if (!report.pass) {
+      const detail = [...report.missing, ...report.contradictions].slice(0, 4).join('；') || '审查器未确认正文执行本章详细大纲';
       throw new HttpException(`正文与第${input.chapterIndex}章详细大纲不一致，未保存：${detail}`, 422);
     }
     return {
@@ -558,8 +807,1025 @@ export class ChainController {
       worldPassed: true,
       timelinePassed: true,
       prosePassed: true,
-      evidence: Array.isArray(verdict.evidence) ? verdict.evidence.map(String).filter(Boolean).slice(0, 4) : [],
+      evidence: report.evidence,
     };
+  }
+
+  /**
+   * 构建“大纲对齐自修复”prompt：把验收器判定的缺失/冲突要点逐条列出，并要求整章重写时
+   * 强制以【本章结尾钩子】收尾、不得提前终止于大纲中间事件。仍是真实 LLM 重写，无假数据。
+   * 仅作原 basePrompt 的追加指令段，大纲与上下文保持不变（见上文）。
+   */
+  private buildAlignmentRepairPrompt(
+    basePrompt: string,
+    missing: string[],
+    contradictions: string[],
+    chapterIndex: number,
+    targetWords: number,
+    previousContent: string,
+    attemptLabel: string,
+  ): string {
+    const missingList = missing.map((m, i) => `  ${i + 1}) ${m}`).join('\n');
+    // 截断上一版正文喂给模型（避免 prompt 过长），让它"看到"已写好的部分以便保留，
+    // 而不是整章推倒重来导致文本同质化/风格断裂。
+    const prev = (previousContent || '').slice(0, 6000);
+
+    // ===== 分离硬红线违规与 LLM 验收矛盾，分别给精修指令 =====
+    // 硬红线违规（确定性扫描命中）需要精修时【精确删除】原文片段；LLM 验收的矛盾仍按原方式重写。
+    const isHardlineMessage = (s: string) => s.startsWith('【硬红线·确定性扫描·');
+    const hardlineViolations = contradictions.filter(isHardlineMessage);
+    const llmContradictions = contradictions.filter(s => !isHardlineMessage(s));
+
+    let hardlineInstruction = '';
+    if (hardlineViolations.length > 0) {
+      const lines = hardlineViolations.map((v, i) => `  ${i + 1}) ${v}`).join('\n');
+      hardlineInstruction =
+        `\n\n【硬红线违规 · 必须逐条精确改写（确定性扫描命中，LLM 验收放过，必须人工级修正）】\n${lines}\n` +
+        `修正规则（针对每条违规类型，按下面"逐条精确改写"指引处理——不是"重写思路"，而是"逐条定位+精确改写"）：\n` +
+        `  a) 总原则：硬红线违规是【精确位置】的问题，不是"重写思路"的问题。你必须先在【上一版正文】里定位每条违规原文片段，**逐条精确改写**为合规表述，而不是绕开整段、不是只改几个字保留违规结构；\n` +
+        `  b) 15c/15d 叙述者跳出作者评论：**整句删除**该评论，若该句承载了关键剧情，把剧情改写到合规的叙述者口吻里；\n` +
+        `  c) 20a 场景内人身状态矛盾：**整句删除矛盾描述**，把动作改成符合锚点状态（如"眼皮打架"段不得再写"盯着屏幕十秒"，改成"对着屏幕眨了几下眼"或把"眼皮打架"改成"手指搁在鼠标上没动"等不矛盾的描写）；\n` +
+        `  d) 26-short-para 短句独立成段：**把短句拼入上一段**，若该短句承载关键信息，把信息并入上下文段中的一句话里；\n` +
+        `  e) 26-uniform 段落节奏：调整连续 3 段的长度（拉长其中 1-2 段或缩短其中 1-2 段，差异 ≥30%）；\n` +
+        `  f) 28a 冗余 filter words：**直接删除前缀**"我看到/我听到/我意识到/我注意到/我感受到"，保留后面的具体内容；\n` +
+        `  g) 32 姓名独立成段：**把姓名段拼入上一段或下一段**，删除段后空行让姓名成为长句的开头（参考："赵明会死。除非我改变结局——而改变结局意味着主角从现实里消失。"）；\n` +
+        `  h) 33 段后空行 ≥ 2：**把多空行改为 1 个空行**作为段落分隔；\n` +
+        `  i) 34 排比/动词并列：**在动作词之间插入障碍/反馈/具象细节**——参考："站起来，走到书桌前。抽屉卡住，拉了两下才开，那张纸就在最里面"；不要让 4 个动作词连续出现；\n` +
+        `  j) 35 标点单一：**把连续逗号句号改为破折号/问号/感叹号/分号/省略号**——按场景功能选用（急转用破折号、未完用省略号、自问问号、强烈情感感叹号≤1/段、并列长项用分号）；\n` +
+        `  k) 36 热血空洞句：**用具象动作替代**——"我必须改变结局"改成"我攥紧纸角，纸已经被捏出了折痕"；\n` +
+        `  l) 37 抽象情绪独白段：**用具象身体感受+实物替代**——"我感到不安/我意识到有人监视我/我明白必须采取行动"改成"后颈发凉。回头——窗户上映着一个不该在那儿的人影。"；\n` +
+        `  m) 38 代词过多：**用物件/环境作主语替代，或直接删除代词**——"风吹起他的衣角，他回头看了一眼身后的黑影"改成"衣角被风掀起。回头——身后立着一道黑影。"；同一段内"他/她/它"作主语不超过 2 句；\n` +
+        `  n) 39 段内短句堆叠：**合并为完整长句**——"曹征。我的主编。催稿的。"改成"曹征是我的主编，催稿催得紧。"；用逗号或顿号连接成分句，让节奏自然；\n` +
+        `  o) 40 章首无强钩子：**在章首 200 字内增加对话/问号/破折号/突发动作/悬念词至少 1 项**——把"主角醒来→看到天花板→听到窗外鸟叫→心里想着今天要做什么"改为以对话、悬念或突发动作开篇；\n` +
+        `  p) 41 300字无情绪点：**在每 300 字内插入 1 个情绪点**——问号/感叹号/破折号/省略号/分号/两位数以上数字（不是序数词）；把连续纯描述段打断成"描述+情绪波动+描述"的节奏；\n` +
+        `  q) 42 对话全圆滑：**至少 1 段对话用非回答型回应改写**——打断（加入破折号"/她没说完——"）、沉默（"他没说话"）、答非所问（对话A问X，对话B回答Y）、吞吞吐吐（"我……也不是……"）、语气词（"嗯""啧""哼""嘶——""操。"）；\n` +
+        `  r) 43 无不完美细节：**增加 ≥ 3 处不完美/反常识细节**——人物小缺陷（指甲缝黑泥/扣子没扣/领口有线头/鞋带松了/口红沾牙上/衬衫腋下有汗渍）、环境反常（路灯闪烁/小孩哭声/空调滴水/关不上的窗/电视雪花屏）、物件异常（遥控器后盖不见/茶杯缺角/合同划痕/抽屉有张空相片）；\n` +
+        `  s) 44 转场机械词：**删除所有"接着/然后/之后/随即/不久后/不一会儿/片刻后/过了一会儿"**，改用环境切入（"窗外的光从灰白变成金黄"）、时间锚点（"天快黑了""楼下开始放音乐"）、感官切入（"油烟味飘进来了"）、身体状态（"腰背开始发酸"）；\n` +
+        `  t) 45 无具体数字：**加入至少 1 处具体数字**——"第三十七根雨丝""坐了三天三夜""第十一个电话""超过四十七度的体温""二十三块的零钱""刷了十四分钟的屏"——一个具体数字就是真实感的物理指纹；\n` +
+        `  u) 精修完成后，必须保证【上一版正文】里所有标注的硬红线违规片段都已被精确改写，且不得新增同类违规。精修后会再次被【确定性硬红线扫描器】逐条扫描，命中同类违规即视为本次精修失败。`;
+    }
+
+    const contradictionList = llmContradictions.map((c, i) => `  ${i + 1}) ${c}`).join('\n');
+    const contradictionBlock = contradictionList
+      ? `\n\n## LLM 验收矛盾（需要重写思路，不只是删字）\n${contradictionList}\n`
+      : '';
+
+    const directive =
+      `\n\n## 大纲对齐迭代精修（${attemptLabel} · 基于上一版进化，不是推倒重来）\n` +
+      `上一版第${chapterIndex}章正文未通过大纲一致性验收，缺失/冲突如下，本次必须全部兑现：\n${missingList}\n${contradictionBlock}\n` +
+      `【上一版正文（请保留其中已正确发生的场景与内容，只补回缺失、修正冲突、精确删除硬红线违规）】\n${prev}\n${hardlineInstruction}\n\n` +
+      `迭代精修规则（不可违反）：\n` +
+      `1) 这是一次【针对性精修】而非整章重写：上一版中已正确发生的场景与正文必须原样保留其位置与内容，仅补回缺失的必需事件点、修正 LLM 验收矛盾、精确删除硬红线违规；\n` +
+      `2) 缺失要点 ${missingList} 必须全部兑现，不得省略、不得替换、不得调换其在大纲中的顺序；\n` +
+      `3) 正文的【最后一个场景】必须是【本章结尾钩子】所描述的内容，必须将正文落在该钩子场景上收尾；严禁提前终止于大纲中间事件（如用餐、通勤、过渡等场景）；\n` +
+      `4) 仍须满足 3200-4000 字（目标约 ${targetWords} 字）、散文质感、视角一致、不违反世界观/角色/时间线等全部原有要求；\n` +
+      `5) 硬红线违规片段必须【精确删除/改写】，不得用"差不多就行"的改写糊弄——精修后会再次被【确定性硬红线扫描器】扫描；\n` +
+      `6) 直接输出完整可发布的正文（含保留的原有场景 + 补回的新场景），不要任何解释、前缀、JSON 或方法论标签。`;
+    return `${basePrompt}${directive}`;
+  }
+
+  /**
+   * 生成整章正文并做“大纲对齐”自修复：先按大纲生成（含字数守卫，且 prompt 已强制“创作前
+   * 规划”以提高首版命中率），再用真实 LLM 验收器审查是否与绑定详细大纲一致；若不一致，
+   * 把验收器指出的缺失要点回灌，做【迭代精修】（保留上一版已写好的场景，只补回缺失、修正冲突），
+   * 而非整章推倒重来，避免文本同质化与风格断裂。最多 maxRepair 次（默认 1，封顶不无限）。
+   * 全部为真实 LLM，绝不伪造内容。这解决了“单次长文生成常漏掉大纲靠后事件、提前终止于中间场景”
+   * 的历史痛点：失败不再直接丢弃，而是自我纠正至通过；但仍由作者最终在矛盾 tab 决定。
+   */
+  private async generateBodyWithAlignmentGuard(params: {
+    basePrompt: string;
+    projectId: string;
+    targetWords: number;
+    scenario: string;
+    temperature?: number;
+    chapterIndex: number;
+    chapterTitle: string;
+    outlineContract: string;
+    storyContext: string;
+    onProgress?: (payload: { label: string; message: string; progress: number }) => void;
+    maxRepair?: number;
+  }): Promise<{ content: string; qualityReport: Awaited<ReturnType<ChainController['checkChapterAlignment']>> }> {
+    const {
+      projectId, basePrompt, targetWords, scenario, temperature = 0.7, chapterIndex,
+      chapterTitle, outlineContract, storyContext, onProgress, maxRepair = 2,
+    } = params;
+    // 跨章节学习：把之前章节归纳出的避坑经验注入本章首版与精修 prompt，使本章主动规避历史错误。
+    const historicalLessons = this.getActiveLessons(projectId);
+    const enrichedBase = historicalLessons
+      ? `${basePrompt}\n\n${historicalLessons}`
+      : basePrompt;
+    // 若本项目已有历史教训，先发一条提示让用户看到「跨章节学习」在生效（第一章漏的，后续章节规避）。
+    if (historicalLessons) {
+      const count = (historicalLessons.match(/^\s*\d+\)/gm) || []).length;
+      onProgress?.({
+        label: '跨章节经验',
+        message: `已加载 ${count} 条本项目历史避坑经验，本章生成时将主动规避这些已犯过的错误（前几章踩过的坑，本章不再踩）。`,
+        progress: 18,
+      });
+    }
+    let content = await this.generateBodyWithLengthGuard({
+      basePrompt: enrichedBase, targetWords, scenario, temperature, onProgress,
+    });
+    this.assertGeneratedChapterIdentity(content, chapterIndex);
+    let qualityReport = await this.checkChapterAlignment({
+      chapterIndex, chapterTitle, outlineContract, storyContext, content,
+    });
+    if (qualityReport.pass) {
+      onProgress?.({
+        label: '大纲对照通过',
+        message: '大纲对照通过：本次正文已忠实覆盖本章详细大纲所有必需事件点，且未违反已确认上下文。',
+        progress: 95,
+      });
+    } else {
+      onProgress?.({
+        label: '大纲对照中',
+        message: '大纲对照中：逐项核对必需事件点、上下文一致性与结尾钩子…',
+        progress: 55,
+      });
+    }
+    for (let attempt = 0; attempt < maxRepair && !qualityReport.pass; attempt++) {
+      const missing = [...qualityReport.missing, ...qualityReport.contradictions];
+      if (missing.length === 0) break; // 无具体可补要点，避免无谓重写
+      const reasonSummary = missing.slice(0, 2).join('；') + (missing.length > 2 ? ` 等 ${missing.length} 处` : '');
+      onProgress?.({
+        label: '大纲对照精修',
+        message: `大纲对照发现：缺「${reasonSummary}」，按大纲迭代精修（${attempt + 1}/${maxRepair}）— 保留已写好场景，只补回缺失、以结尾钩子收尾…`,
+        progress: 65 + Math.floor((attempt + 1) / maxRepair * 25),
+      });
+      const repairPrompt = this.buildAlignmentRepairPrompt(
+        enrichedBase, missing, qualityReport.contradictions, chapterIndex, targetWords, content, `第 ${attempt + 1} 次迭代`,
+      );
+      try {
+        content = await this.generateBodyWithLengthGuard({
+          basePrompt: repairPrompt, targetWords, scenario, temperature, onProgress,
+        });
+      } catch (error) {
+        // 精修生成失败（如字数守卫耗尽）：保留上一版正文与其验收结论，跳出循环后按原结论抛出。
+        this.logger.warn(`大纲自修复第${attempt + 1}次生成失败，沿用上一版验收结论：${error instanceof Error ? error.message : String(error)}`);
+        break;
+      }
+      this.assertGeneratedChapterIdentity(content, chapterIndex);
+      qualityReport = await this.checkChapterAlignment({
+        chapterIndex, chapterTitle, outlineContract, storyContext, content,
+      });
+      if (qualityReport.pass) {
+        onProgress?.({
+          label: '大纲对照精修通过',
+          message: `大纲对照通过（第 ${attempt + 1} 次精修后）：精修后正文已忠实覆盖所有必需事件点。`,
+          progress: 92,
+        });
+      }
+    }
+    // 不再硬丢弃：自修复后仍存在的缺失/矛盾作为「警告」持久化进矛盾 tab，
+    // 章节正文照常保存，由作者决定重生成还是手改（满足"不要静默丢弃，要让我看到"）。
+    // persistAlignmentContradictions 放在 pass 判断之后，确保即便未完全通过也能落库，
+    // 这正是此前死代码（在 throw 之后、永不可达）修复后的正确位置。
+    // 原则1「严格遵守大纲」+ 原则2「不符给修改建议」：把【所有未满足项】
+    // （缺失事件 + 上下文冲突）都持久化进矛盾 tab，确保作者能在 tab 看到具体缺了什么、
+    // 并由可执行 action 决定让 AI 改写正文对齐大纲（推荐）还是改大纲。
+    //
+    // 单一数据源延伸：硬红线违规（确定性扫描）与 LLM 验收矛盾分两个 source 落库，互不覆盖：
+    //   - alignment_verifier          —— LLM 验收器的【缺失】+【冲突】
+    //   - alignment_verifier_hardline —— 硬红线确定性扫描的违规（如叙述者跳出作者评论、人身状态矛盾）
+    // 这样矛盾 tab 既能看到 LLM 的柔性判断，也能看到硬红线违规的具体位置与原文片段。
+    const isHardlineMessage = (s: string) => s.startsWith('【硬红线·确定性扫描·');
+    const hardlineViolations = qualityReport.contradictions.filter(isHardlineMessage);
+    const llmContradictions = qualityReport.contradictions.filter(s => !isHardlineMessage(s));
+    const llmUnmet = Array.from(new Set([
+      ...qualityReport.missing,
+      ...llmContradictions,
+    ].map(s => String(s).trim()).filter(Boolean)));
+    if (llmUnmet.length > 0) {
+      this.persistAlignmentContradictions({
+        projectId,
+        chapterIndex,
+        contradictions: llmUnmet,
+        source: 'alignment_verifier',
+      });
+    }
+    if (hardlineViolations.length > 0) {
+      this.persistAlignmentContradictions({
+        projectId,
+        chapterIndex,
+        contradictions: hardlineViolations,
+        source: 'alignment_verifier_hardline',
+      });
+    }
+    if (!qualityReport.pass) {
+      const detail = [...qualityReport.missing, ...qualityReport.contradictions].slice(0, 4).join('；') || '审查器未确认正文执行本章详细大纲';
+      this.logger.warn(`本章大纲验收未完全通过，已保留正文并在矛盾tab标记：${detail}`);
+    }
+    // 跨章节学习闭环：把本章最终仍未满足的缺失/冲突归纳成通用避坑经验入库，
+    // 供本项目后续章节生成时自动规避（第一章漏的教训，第二章首版就用上，避免反复犯同样错）。
+    if (llmUnmet.length > 0 || hardlineViolations.length > 0) {
+      void this.summarizeChapterLessons(projectId, chapterIndex, qualityReport.missing, qualityReport.contradictions);
+    }
+    return { content, qualityReport };
+  }
+
+  private persistAlignmentContradictions(input: {
+    projectId: string;
+    chapterIndex: number;
+    contradictions: string[];
+    source?: 'alignment_verifier' | 'alignment_verifier_hardline';
+  }): void {
+    try {
+      const db = this.db.getDb();
+      const rows = input.contradictions.map(c => ({
+        id: this.generateAlignmentCheckId(),
+        message: c,
+      }));
+      // source 取值：
+      //   alignment_verifier          —— LLM 验收器发现的缺失/冲突（默认）
+      //   alignment_verifier_hardline —— 硬红线确定性扫描（防 LLM 验收放过同类违规）
+      // 两者互不覆盖：DELETE 与 INSERT 都按 source 区分，保证矛盾 tab 既能看到 LLM 的柔性判断，
+      // 也能看到确定性规则的硬性违规；这是单一数据源原则的延伸。
+      const source = input.source || 'alignment_verifier';
+      const del = db.prepare(`DELETE FROM consistency_checks WHERE project_id = ? AND chapter_index = ? AND source = ?`);
+      del.run(input.projectId, input.chapterIndex, source);
+      const ins = db.prepare(`
+        INSERT INTO consistency_checks (id, project_id, check_type, status, message, severity, detected_at, chapter_index, details, source)
+        VALUES (?, ?, 'outline_alignment', 'warning', ?, ?, datetime('now'), ?, ?, ?)
+      `);
+      // 硬红线违规级别更高（high），LLM 验收的仍为 medium
+      const severity = source === 'alignment_verifier_hardline' ? 'high' : 'medium';
+      for (const row of rows) {
+        const suggestion = source === 'alignment_verifier_hardline'
+          ? '硬红线违规（确定性扫描，非 LLM 判断）：属于本项目生成纪律的不可违反条款。请点「AI 重写正文对齐大纲」让 AI 精确删除/改写违规片段；如确属情节需要，必须先修改大纲与确稿上下文，再重生成。'
+          : '大纲为不可偏离的合同（最高优先级）。推荐：点下方「AI 重写正文对齐大纲」让 AI 按大纲补回缺失场景/事件；仅当你确认大纲本身写错（如事件顺序/场景设定有误），才打开大纲编辑器修改本章大纲。';
+        ins.run(row.id, input.projectId, row.message, severity, input.chapterIndex, JSON.stringify([{ field: source === 'alignment_verifier_hardline' ? '硬红线违规（确定性扫描）' : '大纲验收一致性', expected: '正文忠实于本章详细大纲与硬红线约束', actual: row.message, suggestion }]), source);
+      }
+    } catch (error) {
+      // 持久化失败不阻断主流程：写作提示里的矛盾仍来自 qualityReport，只是 tab 暂不可见。
+      this.logger.warn(`大纲验收矛盾持久化失败（不影响正文保存）：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private generateAlignmentCheckId(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
+  /**
+   * 硬红线确定性违规扫描器。
+   *
+   * 为什么必须有这个：checkChapterAlignment 本身也是 LLM 调用，LLM 验收 LLM
+   * 时经常"宽以律己"——把训练数据里的小说/创作随笔/作者自评当成正文放过。
+   * 用户截图里出现的"赵明跳下去了。我写的。没有反转，没有救场，没有第二季埋伏笔。就是死。"
+   * 正是这类违规，规则 15c 已写进 prompt 但 LLM 在长 prompt 下仍反复越界。
+   *
+   * 此函数是【确定性、零 LLM 调用、零假数据】的纯规则扫描，命中即视为硬红线违规，
+   * 与 LLM 验收结论合并后强制 pass=false、prosePassed=false，触发 generateBodyWithAlignmentGuard
+   * 的回炉（且精修 prompt 会把违规原文喂回去要求精确删除/改写）。
+   *
+   * 覆盖用户截图已暴露的硬红线违规模式 + 联网实证最易踩的 AI 写作破绽：
+   *   15c  叙述者跳出成为作者评论者（"我写的""没有反转/救场/第二季""作者写到这里也很为难"等）
+   *   15b  叙述者解释一切（"我很难过，因为…"）
+   *   15d  第一人称对话框里偷切作者口吻
+   *   20a  场景内人身状态前后矛盾（"睡着了/眼皮打架"紧接"盯着屏幕/睁眼看"）
+   *   26   短句独立成段后跟空行（用户截图里"就是死。""是深色木纹吊顶。"）
+   *   26   连续 3 段同等字符长度（"每段 1 句 + 大量空行"诗歌式排版）
+   *   28a  冗余 filter words（"我看到/我听到/我意识到"作句首独立句）
+   *   32   姓名/角色独占一行（"赵明。""李四。"紧接空行——用户截图里反复出现的"姓名莫名其妙独占一行"）
+   *   33   段后空行 ≥ 2（连续 \n\n+ 是诗歌式排版的物理指纹，Markdown 渲染后是大段空白）
+   *   34   排比/动词并列（连续 4 个 2-字动作词"站起来/走到/拉开/拿出"——AI 写作最显眼的破绽之一）
+   *   35   标点单一（连续 200 字以上无引号/问号/破折号/感叹号/分号/省略号——"逗号句号一家独大"硬约束）
+   *   36   热血空洞句（"这一刻""我终于""我必须""我不能""唯一能""最好的""只有……才能"——AI 反思段的特征签名）
+   *   37   抽象情绪独白段（连续 3 段以"我感到/我意识到/我明白/我突然觉悟"开头——AI 端正觉醒段）
+   *
+   * 返回 [{ ruleId, message, snippet, position }]；空数组表示未命中。
+   */
+  private detectForbiddenTells(content: string): Array<{
+    ruleId: string;
+    message: string;
+    snippet: string;
+    position: string;
+  }> {
+    if (!content) return [];
+    const findings: Array<{ ruleId: string; message: string; snippet: string; position: string }> = [];
+    // 段落切分：连续空行视为分段；前后空白 trim
+    const paragraphs = content.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    const slice = (s: string, n = 80) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+    // ===== 15c 叙述者跳出成为作者评论者（硬红线） =====
+    const hardTells15c = [
+      // "我写的 / 我本来想写 / 我准备写 + 剧情/场景/角色"
+      /我(本来|原本|原想|原准备|本来想|本来准备|一直想)?\s*(想|准备|打算)?\s*写\s*(这|那|个|这场|那个|一个)?/,
+      /我(把|把这个|把那|把那个)\s*(故事|结局|剧情|人物|角色|场景|设定)/,
+      // 元叙述/作者口吻
+      /(作者|编者|笔者)\s*(写|觉得|也|认为|决定|在这里|写到这里)/,
+      /作者.{0,6}(为难|为难|叹气|摇头|心里|也很)/,
+      /作为(作者|写手|创作者|笔者)/,
+      // 评论剧情本身
+      /没有(反转|救场|救兵|救赎|第二季|续集|伏笔|埋伏笔)/,
+      /(怎么|无论|反正)\s*.{0,8}写\s*都?\s*比.{1,12}强/,
+      /这就是\s*(我)?\s*(一)?辈子\s*(写过的?)?(最|写)/,
+    ];
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      for (const pat of hardTells15c) {
+        if (pat.test(p)) {
+          findings.push({
+            ruleId: '15c',
+            message: '叙述者跳出成为作者评论者（硬红线）',
+            snippet: slice(p),
+            position: `第 ${i + 1} 段`,
+          });
+          break;
+        }
+      }
+    }
+
+    // ===== 15b 叙述者解释一切 =====
+    const hardTells15b = [
+      /我(感到|觉得|意识到|知道|明白|懂得|体会到)\s*[^。！？]{0,15}[，。,]?\s*因为/,
+      /我(很难过|很痛苦|很不安|很复杂|很遗憾|很高兴|很开心|很失落|很彷徨|很纠结)\s*[，。,]?\s*因为/,
+    ];
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      for (const pat of hardTells15b) {
+        if (pat.test(p)) {
+          findings.push({
+            ruleId: '15b',
+            message: '叙述者替读者下结论解释情绪因果',
+            snippet: slice(p),
+            position: `第 ${i + 1} 段`,
+          });
+          break;
+        }
+      }
+    }
+
+    // ===== 15d 第一人称对话框里偷切作者口吻 =====
+    // 抓所有对话引号内容（含 ""/""/「」），检查是否混入作者口吻
+    const dialoguePattern = /"[^"\n]{1,200}"|"[^"\n]{1,200}"|「[^」\n]{1,200}」/g;
+    let dialogueMatch: RegExpExecArray | null;
+    while ((dialogueMatch = dialoguePattern.exec(content)) !== null) {
+      const inside = dialogueMatch[0];
+      if (/(作为作者|作为创作者|作者的我|我的写作|我写的故事|反正怎么写|我怎么写|我来写这|我来写这个)/.test(inside)) {
+        findings.push({
+          ruleId: '15d',
+          message: '第一人称对话框里偷切作者口吻',
+          snippet: slice(inside, 60),
+          position: `对话段`,
+        });
+      }
+    }
+
+    // ===== 20a 场景内人身状态前后矛盾 =====
+    const sleepIndicators = /(睡着|睡过去|闭眼|眼皮打架|困得要死|昏过去|晕倒|失明|失聪|什么都看不见|眼前一黑|失去意识)/;
+    // 唤醒感知不仅限于屏幕：盯书本/盯字/盯人/盯周围/睁眼看都算"需要视觉通道开启"，
+    // 把"眼皮打架/睡着了"与"盯着那行字看了十秒"组合视为矛盾，是用户截图里反复命中的模式。
+    const awakePerceiveScreen = /(盯\s*.{0,4}(屏幕|手机|电脑|笔记本|行|字|书|脸|人|周围|那|这)|睁眼\s*(看|盯|望)|看\s*.{0,4}(屏幕|手机|电脑|笔记本|行|字|书|脸))/;
+    // 同段
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      if (sleepIndicators.test(p) && awakePerceiveScreen.test(p)) {
+        findings.push({
+          ruleId: '20a',
+          message: '场景内人身状态前后矛盾（同段"睡着/眼皮打架"+盯着屏幕/书本/字）',
+          snippet: slice(p),
+          position: `第 ${i + 1} 段`,
+        });
+      }
+    }
+    // 跨段：上段睡/困，下段立刻盯屏幕/书本/字
+    for (let i = 0; i < paragraphs.length - 1; i++) {
+      const prev = paragraphs[i];
+      const nextStart = paragraphs[i + 1].slice(0, 24);
+      if (sleepIndicators.test(prev) && /^(我)?\s*(盯|睁|看)\s*.{0,4}(屏幕|手机|电脑|笔记本|行|字|书|脸|周围)/.test(nextStart)) {
+        findings.push({
+          ruleId: '20a',
+          message: '跨段人身状态矛盾（前段"睡着/眼皮打架"紧接下段"盯着屏幕/书本/字"）',
+          snippet: `${slice(prev, 24)} || ${slice(nextStart, 24)}`,
+          position: `第 ${i + 1}-${i + 2} 段`,
+        });
+      }
+    }
+
+    // ===== 26 短句独立成段后跟空行 =====
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      // 段落字符数 < 18 且以句号/感叹号/问号结尾，且不是最后一段
+      if (p.length < 18 && /[。.!！？?]$/.test(p) && i < paragraphs.length - 1) {
+        findings.push({
+          ruleId: '26-short-para',
+          message: `短句"${p}"独立成段后跟空行（应与上下文拼接为一段）`,
+          snippet: p,
+          position: `第 ${i + 1} 段`,
+        });
+      }
+    }
+
+    // ===== 26 连续 3 段同等字符长度 =====
+    const lens = paragraphs.map(p => p.length);
+    for (let i = 0; i < paragraphs.length - 2; i++) {
+      const a = lens[i], b = lens[i + 1], c = lens[i + 2];
+      if (a < 8 || b < 8 || c < 8) continue; // 跳过极短段
+      const avg = (a + b + c) / 3;
+      if (
+        Math.abs(a - avg) / avg < 0.15 &&
+        Math.abs(b - avg) / avg < 0.15 &&
+        Math.abs(c - avg) / avg < 0.15
+      ) {
+        findings.push({
+          ruleId: '26-uniform',
+          message: `连续 3 段同等长度（均约 ${Math.round(avg)} 字），缺乏节奏变化`,
+          snippet: `${slice(paragraphs[i], 20)} || ${slice(paragraphs[i + 1], 20)} || ${slice(paragraphs[i + 2], 20)}`,
+          position: `第 ${i + 1}-${i + 3} 段`,
+        });
+        break; // 只报一次避免噪音
+      }
+    }
+
+    // ===== 28a 冗余 filter words =====
+    const filterWordStarts = /^(我(看到|听到|意识到|注意到|感受到|发觉|察觉到|发现))\s*[^。！？]{0,30}[，。]/;
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      if (filterWordStarts.test(p)) {
+        findings.push({
+          ruleId: '28a',
+          message: '冗余 filter words（"我看到/我意识到…"作句首）',
+          snippet: slice(p),
+          position: `第 ${i + 1} 段`,
+        });
+      }
+    }
+
+    // ===== 32 姓名/角色独占一行（用户截图反复出现的"姓名莫名其妙独占一行"） =====
+    // 模式：段落以 2-4 字中文姓名/称谓开头 + 段落较短（≤ 30 字）+ 段落有完整标点收尾——
+    // 视觉上"姓名被孤立"成段，与上下文分离。区分真正的姓名段（"赵明会死。""老爷进来了。"）
+    // 与合理短句（"我靠在墙边。"），用动作/介词/代词白名单排除。
+    const nameParagraphStarters = /^(走|跑|站|坐|看|听|说|想|拿|拉|开|关|写|读|做|回|转|到|去|来|靠|摸|端|捧|托|搬|扔|推|敲|挤|涌|冒|冲|扑|拦|挡|握|抓|按|捏|撕|扯|拽|擦|伸|缩|跨|迈|踩|踏|踢|撞|砸|抖|振|摇|晃|摆|翻|滚|爬|滑|溜|飘|落|沉|浮|倒|塌|断|裂|碎|烧|烤|煮|炒|煎|蒸|炖|熬|沏|泡|灌|注|流|淌|滴|洒|溅|漏|溢)/;
+    const nonNameHeads = ['这个', '那个', '什么', '怎么', '为什么', '哪个', '这些', '那些', '如此', '这样', '那样', '一样', '一直', '一下', '一些', '一定', '一次', '一边', '一旦', '万一', '曾经', '已经', '正在', '慢慢', '突然', '然后', '于是', '接着', '此后', '当晚', '今天', '明天', '昨天', '刚才', '此刻', '眼前', '眼里', '心里', '手上', '背上', '肩上', '脸上', '头上', '脚下', '旁边', '对面', '远处', '近处', '身后', '身前'];
+    // 代词 + 动词开头（第一人称动作段常见模式），排除这种"我靠在/我走到..."
+    const pronounVerbStarters = new Set(['我靠', '我走', '我看', '我听', '我拿', '我拉', '我坐', '我站', '我回', '我转', '我到', '我去', '我来', '我摸', '我说', '我想', '我低', '我抬', '我盯', '我伸', '我握', '我抓', '我按', '我推', '我敲', '我擦', '我翻', '我爬', '我倒', '我沉', '我开', '我关', '我写', '我读', '我做', '我端', '我搬', '我扔', '我挤', '我握', '他在', '她在', '它在']);
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      if (p.length > 30) continue;
+      if (p.length < 4) continue;
+      const headMatch = p.match(/^[\u4e00-\u9fff]{2,4}/);
+      if (!headMatch) continue;
+      const head = headMatch[0];
+      // 排除明显是动作/介词/代词开头
+      if (nameParagraphStarters.test(head)) continue;
+      if (nonNameHeads.includes(head)) continue;
+      if (pronounVerbStarters.has(head.slice(0, 2))) continue;
+      // 段以中文/英文句末标点收尾说明段已结束（不是被截断的中间句）
+      if (!/[。！？…\.!?]/.test(p)) continue;
+      // 排除：上一段以冒号/引号结尾（"我说：赵明。" 是引语后接补充，并非姓名独立成段）
+      if (i > 0 && (paragraphs[i - 1].endsWith('：') || paragraphs[i - 1].endsWith(':'))) continue;
+      if (i > 0 && /["\u201C\u201D]$/.test(paragraphs[i - 1])) continue;
+      findings.push({
+        ruleId: '32',
+        message: `姓名/称谓段"${head}..."独立成段（应与上下文合并）`,
+        snippet: p,
+        position: `第 ${i + 1} 段`,
+      });
+    }
+
+    // ===== 33 段后空行 ≥ 2（连续 \n\n+） =====
+    // 规则 26 已禁"短句独立成段"，但 LLM 有时用 "\n\n\n" 这种连空行来"视觉分段"，
+    // Markdown 渲染后是大段空白，是 AI 诗歌式排版的物理指纹。
+    const multiBlankLine = /\n[ \t]*\n[ \t]*\n/;
+    if (multiBlankLine.test(content)) {
+      // 找到第一个位置
+      const m = content.match(multiBlankLine);
+      if (m && m.index !== undefined) {
+        const before = content.slice(Math.max(0, m.index - 30), m.index);
+        findings.push({
+          ruleId: '33',
+          message: '段后空行 ≥ 2（连续 \\n\\n\\n），应只保留 1 个空行作为段落分隔',
+          snippet: slice(before, 30) + '⟨⟨多空行⟩⟩',
+          position: `offset ${m.index}`,
+        });
+      }
+    }
+
+    // ===== 34 排比/动词并列（连续 4 个 2-字动作词） =====
+    // 用户截图："我重新站起来，走到书桌前，拉开抽屉，拿出那张纸。" —— 4 个动作排比，
+    // 这是 AI 写作的物理指纹之一（澎湃新闻/网文编辑均指出）。
+    // 模式：句中连续出现 ≥ 4 个 "XX，XX，XX，XX。"（XX 是 2 字动作词）
+    const verbRow34 = /[\u4e00-\u9fff]{2}[，。]/g;
+    const verbRowMatches: Array<{ start: number; text: string }> = [];
+    let vmatch: RegExpExecArray | null;
+    while ((vmatch = verbRow34.exec(content)) !== null) {
+      verbRowMatches.push({ start: vmatch.index, text: vmatch[0] });
+    }
+    // 找连续 ≥ 4 个且距离较近的
+    for (let i = 0; i < verbRowMatches.length - 3; i++) {
+      const a = verbRowMatches[i], b = verbRowMatches[i + 1], c = verbRowMatches[i + 2], d = verbRowMatches[i + 3];
+      // 距离 < 40 字内算"句内排比"
+      if (b.start - a.start < 40 && c.start - b.start < 40 && d.start - c.start < 40) {
+        const combined = content.slice(a.start, d.start + d.text.length);
+        findings.push({
+          ruleId: '34',
+          message: '连续 4 个 2-字动作词排比（"站起来，走到...，拉开...，拿出..."AI 排比特征）',
+          snippet: slice(combined, 80),
+          position: `offset ${a.start}-${d.start + d.text.length}`,
+        });
+        break; // 报一次避免噪音
+      }
+    }
+
+    // ===== 35 标点单一（连续 200 字无引号/问号/破折号/感叹号/分号/省略号） =====
+    // 标点多元化规则 27 的确定性兜底：滑动窗口 200 字，扫到一段完全没有问号/感叹号/分号/
+    // 省略号/破折号/引号对，就视为"标点单一"。
+    // 注意：对话引号按对算（"…"算 1 组），连续 200 字里至少出现 1 种"非常规标点"才算合规。
+    const punctDiversityWindow = 200;
+    for (let i = 0; i < content.length - punctDiversityWindow; i += 80) {
+      const window = content.slice(i, i + punctDiversityWindow);
+      // 兼容中英文引号：\u201C \u201D \u2018 \u2019 是智能引号
+      const hasDiversity = /[!?！？…—\u2014\u2013;:：;\u3001]|"[^"\n]{1,40}"|"[^"\n]{1,40}"|\u201C[^\u201D\n]{1,40}\u201D/.test(window);
+      if (!hasDiversity) {
+        findings.push({
+          ruleId: '35',
+          message: `连续 ${punctDiversityWindow} 字无问号/感叹号/分号/省略号/破折号/对话引号（标点单一硬约束）`,
+          snippet: slice(window, 80),
+          position: `offset ${i}-${i + punctDiversityWindow}`,
+        });
+        break;
+      }
+    }
+
+    // ===== 36 热血空洞句（"这一刻""我终于""我必须""我不能""唯一能""最好的""只有……才能"） =====
+    // AI 反思段的特征签名：通篇"我必须""我不能""我终于明白""这一刻我才""唯一能"——这些
+    // 是 AI 在第一人称反思段最常用的"端正觉醒"句式，澎湃新闻/sudowrite/dailytopai 都点名。
+    const hollowPhrases36 = [
+      /这一刻[，,\s]*我?[才终学]/,
+      /我(终于|才(真正)?明白|才(真正)?意识|才(真正)?觉悟)/,
+      /我(必须|一定要|只能|不得不)/,
+      /我(不能|无法|绝不能)/,
+      /(唯一|只有)[^，。！？\n]{0,12}(才能|可以|能)/,
+      /(最好|最优|最佳)的?(办法|方式|选择|出路)/,
+      /这是(我)?(人生|命运|一生)?(中)?(最|唯一)/,
+    ];
+    const paragraphJoins36 = paragraphs.join('\n');
+    let hollowHitCount36 = 0;
+    for (const pat of hollowPhrases36) {
+      const matches = paragraphJoins36.match(new RegExp(pat.source, pat.flags + 'g')) || [];
+      hollowHitCount36 += matches.length;
+    }
+    if (hollowHitCount36 >= 4) {
+      // 抽几个示例
+      const examples: string[] = [];
+      for (const pat of hollowPhrases36) {
+        const m = paragraphJoins36.match(pat);
+        if (m) examples.push(slice(m[0], 20));
+        if (examples.length >= 3) break;
+      }
+      findings.push({
+        ruleId: '36',
+        message: `热血空洞句过多（命中 ${hollowHitCount36} 次"我必须/我不能/我终于/这一刻/唯一能/最好"等 AI 反思签名）`,
+        snippet: examples.join(' / '),
+        position: '全文',
+      });
+    }
+
+    // ===== 37 抽象情绪独白段（连续 3 段以"我感到/我意识到/我明白/我突然觉悟"开头） =====
+    // 这是 AI 端正觉醒段的另一种物理指纹：连续多段开头都是"我意识到""我明白""我突然觉悟"。
+    const abstractThoughtStart = /^(我(感到|觉得|意识到|明白|懂得|体会到|突然觉悟|突然明白|这才明白))/;
+    let consecutiveAbstract = 0;
+    let abstractStart = -1;
+    for (let i = 0; i < paragraphs.length; i++) {
+      if (abstractThoughtStart.test(paragraphs[i])) {
+        if (consecutiveAbstract === 0) abstractStart = i;
+        consecutiveAbstract++;
+      } else {
+        if (consecutiveAbstract >= 3) break; // 已命中即停
+        consecutiveAbstract = 0;
+        abstractStart = -1;
+      }
+    }
+    if (consecutiveAbstract >= 3) {
+      const excerpt = paragraphs.slice(abstractStart, abstractStart + consecutiveAbstract).map(p => slice(p, 24)).join(' || ');
+      findings.push({
+        ruleId: '37',
+        message: `连续 ${consecutiveAbstract} 段以"我感到/我意识到/我明白"开头（AI 端正觉醒段）`,
+        snippet: excerpt,
+        position: `第 ${abstractStart + 1}-${abstractStart + consecutiveAbstract} 段`,
+      });
+    }
+
+    // ===== 38 代词过多（用户截图："风吹起他的衣角，他回头看了一眼身后的黑影" — 同句 2 个"他"主语） =====
+    // 规则 10 已禁"相邻句/段以同一主语起头"，但 LLM 在长 prompt 下仍违规。
+    // 确定性扫描：① 同句内"他/她/它"主语 ≥ 2 次（句首或逗号后）；② 同段内"他/她/它" ≥ 3 次。
+    // 联网实证 yeyulingfeng："替换重复助词、人称指代"是 AI 写作通病，"他说道/然后/接着"泛滥。
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      // 句子切分（按。！？.!?）
+      const sentences = p.split(/[。！？\.!?]/).filter(s => s.trim().length > 0);
+      // 检测每句中"他/她/它"作为主语出现次数（句首或逗号/顿号后）
+      let pronounOveruseHits = 0;
+      const overuseExamples: string[] = [];
+      for (const s of sentences) {
+        // 句首"他/她/它"开头，或"，他/，她/，它"等逗号后接代词作主语
+        const pronounSubjectMatches = s.match(/(^|[\u3001，,；;：:、])\s*(他|她|它)(?=[^们])/g) || [];
+        if (pronounSubjectMatches.length >= 1) {
+          // 该句以代词作主语
+          pronounOveruseHits++;
+          if (overuseExamples.length < 3) overuseExamples.push(slice(s, 30));
+        }
+      }
+      // 同段 ≥ 3 句以代词作主语 → 违规
+      if (pronounOveruseHits >= 3) {
+        findings.push({
+          ruleId: '38',
+          message: `段内 ${pronounOveruseHits} 句以"他/她/它"作主语（代词过多，应轮换主语或用环境/物件/对话切入）`,
+          snippet: overuseExamples.join(' / '),
+          position: `第 ${i + 1} 段`,
+        });
+      } else {
+        // 同句内 ≥ 2 个"他/她/它"作主语（"风吹起他的衣角，他回头看了一眼"）
+        for (const s of sentences) {
+          const pronounSubjectMatches = s.match(/(^|[\u3001，,；;：:、])\s*(他|她|它)(?=[^们])/g) || [];
+          if (pronounSubjectMatches.length >= 2) {
+            findings.push({
+              ruleId: '38',
+              message: `同句内 ≥ 2 个"他/她/它"作主语（"风吹起他的衣角，他回头看了一眼身后的黑影"式代词堆叠）`,
+              snippet: slice(s, 60),
+              position: `第 ${i + 1} 段`,
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    // ===== 39 段内短句堆叠（用户截图："曹征。我的主编。催稿的。" / "我认出来了。这是反派的顶层办公室。"） =====
+    // 规则 26-short-para 只检测段+空行，没检测段内连续短句堆叠。
+    // 模式：段内连续 ≥ 3 个 ≤ 8 字短句（句号结尾），节奏感像"诗歌断行"——AI 写作物理指纹。
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      // 按句号/感叹号/问号切句
+      const sentences = p.split(/(?<=[。！？\.!?])/).filter(s => s.trim().length > 0);
+      if (sentences.length < 3) continue;
+      // 滑动窗口 3 句，看是否都 ≤ 8 字
+      for (let j = 0; j < sentences.length - 2; j++) {
+        const a = sentences[j].trim();
+        const b = sentences[j + 1].trim();
+        const c = sentences[j + 2].trim();
+        // 句末标点不计入字数
+        const lenA = a.replace(/[。！？\.!?，,、；;：:]/g, '').length;
+        const lenB = b.replace(/[。！？\.!?，,、；;：:]/g, '').length;
+        const lenC = c.replace(/[。！？\.!?，,、；;：:]/g, '').length;
+        if (lenA <= 8 && lenB <= 8 && lenC <= 8 && lenA >= 2 && lenB >= 2 && lenC >= 2) {
+          findings.push({
+            ruleId: '39',
+            message: `段内连续 3 个超短句堆叠（"${a}${b}${c}"——AI"诗歌断行"式节奏，应合并为完整长句）`,
+            snippet: a + b + c,
+            position: `第 ${i + 1} 段`,
+          });
+          break; // 一段只报一次
+        }
+      }
+    }
+
+    // ===== 40 章首无强钩子（用户反馈："没有代入感、剧情文字很平淡、完全没吸引力"） =====
+    // 联网实证：番茄 5月公告"空洞水文"、澎湃"AI 不会主动推进剧情"、toutiao"读者三章就跑"。
+    // 章首 200 字必须有"反常细节/冲突直给/未完成动作/悬念悬置"——AI 典型平淡开头是
+    // "环境描写+主角感知+心声"循环，看似有字但没钩子。
+    const chapterStart = content.slice(0, 400); // 前 400 字
+    const chapterStartTrim = chapterStart.trim();
+    if (chapterStartTrim.length >= 80) {
+      // 强钩子标志：① 对话引号 ≥ 1 对；② 问号 ≥ 1；③ 感叹号 ≥ 1；④ 破折号 ≥ 1；
+      // ⑤ 动作词"突然/猛地/瞬间/冲/扑/摔/砸/吼/喊"≥ 1；⑥ "为什么/谁/怎么回事"等悬念词 ≥ 1
+      const hasDialogue = /"[^"\n]{1,40}"|"[^"\n]{1,40}"|\u201C[^\u201D\n]{1,40}\u201D/.test(chapterStartTrim);
+      const hasQuestion = /[？?]/.test(chapterStartTrim);
+      const hasExclamation = /[！!]/.test(chapterStartTrim);
+      const hasDash = /[—\u2014]/.test(chapterStartTrim);
+      const hasActionBurst = /(突然|猛地|瞬间|冲过去|扑过去|摔|砸|吼|喊|拽|抢)/.test(chapterStartTrim);
+      const hasSuspenseWord = /(为什么|谁|怎么回事|为何|凭什么是|怎么会|到底)/.test(chapterStartTrim);
+      const hookCount = [hasDialogue, hasQuestion, hasExclamation, hasDash, hasActionBurst, hasSuspenseWord].filter(Boolean).length;
+      if (hookCount === 0) {
+        findings.push({
+          ruleId: '40',
+          message: `章首 200+ 字无强钩子（无对话/问号/感叹号/破折号/突发动作/悬念词——平淡开头是 AI 写作最显眼的破绽，读者三章就跑）`,
+          snippet: slice(chapterStartTrim, 100),
+          position: '章首',
+        });
+      }
+    }
+
+    // ===== 41 300字/3段无情绪点（联网实证：番茄300字一爽点/500字一钩子，开头300字流失率30%） =====
+    // 两层检测：
+    //   a) 字符级：滑动窗口 300 字符无 ?！…—;:：等及两位数数字；
+    //   b) 段落级：连续 3 段无问号/感叹号/破折号/省略号/分号/数字——比字符级更准确
+    //      （3 段环境+心声无情绪=AI"环境+心声循环零推进"的典型模式）
+    const emotionRichChars = /[？！\uFF01\uFF1F…—\u2014\u2013;:：；;\u3001]|\d{2,}/;
+    const emotionDeadZone = 300;
+    let emotionDeadHit = false;
+    for (let i = 0; i < content.length - emotionDeadZone; i += 100) {
+      if (!emotionRichChars.test(content.slice(i, i + emotionDeadZone))) {
+        emotionDeadHit = true;
+        findings.push({
+          ruleId: '41',
+          message: `连续 ${emotionDeadZone} 字符无情绪波动（无?/!/—/…/数字——纯描述无情绪段，番茄300字一爽点公式不可违反）`,
+          snippet: slice(content.slice(i, i + emotionDeadZone), 80),
+          position: `offset ${i}-${i + emotionDeadZone}`,
+        });
+        break;
+      }
+    }
+    // 段落级检测：连续 3 段无情绪标志
+    if (!emotionDeadHit && paragraphs.length >= 3) {
+      for (let i = 0; i < paragraphs.length - 2; i++) {
+        const trio = paragraphs[i] + paragraphs[i + 1] + paragraphs[i + 2];
+        if (!emotionRichChars.test(trio)) {
+          findings.push({
+            ruleId: '41',
+            message: `连续 3 段无情绪波动（无?/!/—/…/数字——"环境描写+主角心声循环零推进"的 AI 典型模式）`,
+            snippet: slice(paragraphs[i], 30) + ' | ' + slice(paragraphs[i + 1], 30) + ' | ' + slice(paragraphs[i + 2], 30),
+            position: `第 ${i + 1}-${i + 3} 段`,
+          });
+          break;
+        }
+      }
+    }
+
+    // ===== 42 对话全圆滑对答（禁止客服式对话） =====
+    // 三段检测：
+    //   a) 全章级别：≥4 个对话引号对且无人味标志 → 整体违规；
+    //   b) 段落级别：连续 ≥4 段含 quotes 的段落无人味标志 → 局部违规（比全局检测更精确）；
+    //   c) 段内级别：单段 3 句对话全是"xx说/xx问/xx答" → 段内违规（经典客服式对答）。
+    // 人味标志：打断（破折号）/ 沉默（没说话/没出声/不回答/没理）/ 答非所问 / 吞吞吐吐 /
+    //           语气词（嗯/啧/哼/嘶/操/呸/啊？/呀！/我去）/ 重复（不行不行/不是不是）
+    const hasInterruption42 = /[—\u2014]/.test(content);
+    const hasSilence42 = /(没说话|没出声|没回答|沉默|没理|没接|没回|不回答|不说|没吭|没响|没应)/.test(content);
+    const hasEvasion42 = /(你看|那个|这怎么|什么呀|不会吧|瞎说|哪有|骗人|不信|谁信|别闹|去你的|少来|呸|没这|没那)/.test(content);
+    const hasHesitation42 = /(我…|也…|不…|可能|大概|也许|好像|算是|差不多|也…也|我我|他他)/.test(content);
+    const hasToneWords42 = /([嗯啧哼嘶呸啊哎嘿哈哦呜]{1,2}[！。，、… ])/.test(content);
+    const hasRepetition42 = /((.{1,3})\2\2)/.test(content);
+    const humanMarkers42 = [hasInterruption42, hasSilence42, hasEvasion42, hasHesitation42, hasToneWords42, hasRepetition42].filter(Boolean).length;
+    const dialogueQuotes42 = (content.match(/[\u201C\u201D""]/g) || []).length;
+    if (dialogueQuotes42 >= 6 && humanMarkers42 === 0) {
+      findings.push({
+        ruleId: '42',
+        message: `全章 ${dialogueQuotes42} 个对话引号对，但无人味标志（无打断/沉默/答非所问/吞吞吐吐/语气词/重复）——纯"xx说/xx回答"客服式对话`,
+        snippet: '全章',
+        position: '全文',
+      });
+    } else {
+      // 段落级检测：连续 ≥4 段含对话引号的段落无人味标志
+      const dialogueParaIndices: number[] = [];
+      for (let i = 0; i < paragraphs.length; i++) {
+        if (/[\u201C\u201D""]/.test(paragraphs[i])) dialogueParaIndices.push(i);
+      }
+      if (dialogueParaIndices.length >= 4) {
+        let consecutiveNoHuman = 0;
+        let maxConsecutive = 0;
+        let maxStart = 0;
+        let currentStart = 0;
+        for (let j = 0; j < dialogueParaIndices.length; j++) {
+          const p = paragraphs[dialogueParaIndices[j]];
+          const localHuman = /([—\u2014]|没说话|没出声|没回答|沉默|没理|没接|没回|不回答|不说|你看|那个|这怎么|什么呀|不会吧|瞎说|哪有|骗人|不信|[嗯啧哼嘶呸啊哎嘿哈哈哦呜]{1,2}[！。，、… ]|…|我我|他他|也…也)/.test(p);
+          if (!localHuman) {
+            if (consecutiveNoHuman === 0) currentStart = dialogueParaIndices[j];
+            consecutiveNoHuman++;
+          } else {
+            if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
+              maxConsecutive = consecutiveNoHuman;
+              maxStart = currentStart;
+            }
+            consecutiveNoHuman = 0;
+          }
+        }
+        if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
+          maxConsecutive = consecutiveNoHuman;
+          maxStart = currentStart;
+        }
+        if (maxConsecutive >= 4) {
+          findings.push({
+            ruleId: '42',
+            message: `连续 ${maxConsecutive} 段对话无人味标志（无打断/沉默/语气词/重复——圆滑交替对答）`,
+            snippet: paragraphs.slice(maxStart, maxStart + maxConsecutive).map(p => slice(p, 24)).join(' | '),
+            position: `第 ${maxStart + 1}-${maxStart + maxConsecutive} 段`,
+          });
+        }
+      }
+    }
+
+    // ===== 43 无不完美细节（AI的"过度干净"物理指纹） =====
+    // 词表已从 38 扩到 60+ 项，覆盖身体缺陷/环境反常/物件异常/时间错感/意外干扰
+    const imperfectDetailWords = /(黑泥|线头|扣子|鞋带|口红|汗渍|指甲缝|腋下|松了|没系|缺了一角|裂口|雪花屏|闪烁|滴水|关不上|后盖不见了|划了一道|照片里没人|录音里有杂音|歪了|斜了|破洞|褪色|掉了漆|磨破了|起了毛|卷了边|糊了|没信号|空号|占线|没电|只剩2%|误触|按错了|多按了|发错了|打错了|走错了|坐过了|指甲油斑|鞋垫磨薄|茶垢|毛衣起球|拉链卡住|鞋底脱胶|扣子掉了|领口泛黄|袖口磨白|裤腿卷边|墙皮|剥落|发霉|漏气|蜘蛛网|打卷|糊边|裂纹|锈迹|卡壳|卡住|推开时嘎吱|扭不紧|旋钮打滑|糊味|焦味|酸味|霉味|有只蚊子|有只蟑螂|飞蛾扑灯|空调漏水|漏水了|下雨没关窗|被风吹倒|被风吹落)/;
+    const imperfectCount = (content.match(imperfectDetailWords) || []).length;
+    // 阈值按章节长度分：>2000 字 → ≥3 处，500-2000 字 → ≥2 处，<500 字 → ≥1 处
+    const imperfectThreshold = content.length > 2000 ? 3 : content.length > 500 ? 2 : 1;
+    if (imperfectCount < imperfectThreshold) {
+      findings.push({
+        ruleId: '43',
+        message: `全章 ${imperfectCount} 处不完美/反常识细节（需 ≥${imperfectThreshold} 处——AI "过度干净"物理指纹：人物小缺陷/环境反常/物件异常/意外干扰）`,
+        snippet: `检测到的不完美细节: ${imperfectCount} / 至少 ${imperfectThreshold}`,
+        position: '全文',
+      });
+    }
+
+    // ===== 44 转场机械词过多 =====
+    const mechTransitions44 = /(接着|然后|之后|随即|不久后|不一会儿|片刻后|过了一会儿|很快|马上|立刻|不一会儿的功夫|接下来|话说|于是乎|说到这|话又说回来|再然后|之后不久|片刻之间)/g;
+    const mechMatches = content.match(mechTransitions44) || [];
+    if (mechMatches.length >= 3) {
+      const samples = mechMatches.slice(0, 3).join(', ');
+      findings.push({
+        ruleId: '44',
+        message: `转场机械词 ≥ 3 次（"${samples}"——应改用环境切入/时间锚点/感官切入/身体状态替代）`,
+        snippet: samples,
+        position: '全文',
+      });
+    }
+
+    // ===== 45 无具体数字（AI极少主动用数字） =====
+    // 阈值按章节长度分：>2000 字 → 需 ≥1 处，800-2000 字 → 需 ≥1 处但 threshold 放宽，<800 字 → 跳过
+    // 排除序数词（第X/其一/其二）和纯"一/二/三"单字
+    const specificNumbers45 = /\d{2,}|[零一二三四五六七八九十百千万亿两]+(件|个|次|句|根|天|年|岁|块|毛|分|度|米|斤|步|遍|页|行|层|级|次|轮|趟|拳|脚|口|声|刻|秒)?/g;
+    const specificCandidates = content.match(specificNumbers45) || [];
+    const specificCount = specificCandidates.filter(n => {
+      // 排除序数词（"第X"）、纯单字序数、以及"一些/几个/很多/好久"
+      if (n.length < 2) return false;
+      if (/^第/.test(n)) return false;
+      if (/^(一些|几个|很多|好久|一些)$/.test(n)) return false;
+      if (/^[一二三四五六七八九十]{1}$/.test(n)) return false;
+      if (/^[一两]$/.test(n) && n.length === 1) return false;
+      return true;
+    }).length;
+    const numThreshold = content.length > 2000 ? 1 : 1;
+    const numMinLength = content.length > 2000 ? 800 : content.length > 500 ? 500 : 150;
+    if (specificCount === 0 && content.length > numMinLength) {
+      findings.push({
+        ruleId: '45',
+        message: `全章无具体数字锚点（正文 ${content.length} 字 ≥ ${numMinLength} 字阈值）——"第三十七根雨丝""坐了三天三夜""第十一个电话"：具体数字是真实感物理指纹，AI极少主动调用`,
+        snippet: `检测到的具体数字: ${specificCount} / 至少 ${numThreshold}`,
+        position: '全文',
+      });
+    }
+
+    return findings;
+  }
+
+  /**
+   * 跨章节学习 · 读取历史避坑经验，格式化为可注入后续章节 prompt 的段落。
+   * 返回空串表示本项目尚无历史教训（如第一章），调用方据此不拼接。
+   * 这是「第一章漏的结尾钩子、第二章首版就规避」的关键：经验跨章节累积。
+   * 只取高频、未淘汰的经验（数据库侧已做总量封顶与旧版本淘汰），避免无限叠加。
+   */
+  private getActiveLessons(projectId: string, limit = 6): string {
+    try {
+      const db = this.db.getDb();
+      const rows = db.prepare(
+        `SELECT category, lesson, occurrence FROM generation_lessons
+         WHERE project_id = ? ORDER BY occurrence DESC, updated_at DESC LIMIT ?`,
+      ).all(projectId, limit) as Array<{ category: string; lesson: string; occurrence: number }>;
+      if (!rows.length) return '';
+      const lines = rows
+        .map((r, i) => `  ${i + 1}) [${r.category}] ${r.lesson}（已在前面 ${r.occurrence} 章出现）`)
+        .join('\n');
+      return (
+        `## 本项目历史避坑经验（跨章节学习 · 已从之前章节的生成中归纳，本章务必主动规避）\n` +
+        `${lines}\n\n` +
+        `应用规则：上述每条都是本项目前几章实际犯过的错误，本章动笔前逐条对照，确保不再重犯；` +
+        `但不得因此自我设限、不得编造与大纲无关的内容来"预防"，仍以忠实执行本章大纲为最高目标。`
+      );
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * 单项目避坑经验总量上限。超过则淘汰「最少出现 + 最久未出现」的旧经验，避免无限叠加。
+   */
+  private static readonly MAX_LESSONS_PER_PROJECT = 24;
+
+  /**
+   * 跨章节学习 · 把一章最终未通过的缺失/冲突，经真实 LLM 归纳成通用避坑经验并入库。
+   * 三道闸防止无限叠加：
+   *   1) 归纳：要求 LLM 把同类问题合并成 1-3 条通用教训；
+   *   2) 合并：先读取本项目已有经验，让 LLM 把新问题映射到已有经验（existingId）做增量，
+   *      或对已有经验用更精炼的措辞覆盖旧版本（旧版本移除），仅在确属全新类别时新建；
+   *   3) 淘汰：入库后若超过 MAX_LESSONS_PER_PROJECT，按「出现次数最少 → 最久未出现」删除最旧多余的。
+   * 失败不影响正文保存（fire-and-forget，catch 内仅告警）。归纳用真实 LLM，绝不伪造。
+   */
+  private async summarizeChapterLessons(
+    projectId: string,
+    chapterIndex: number,
+    missing: string[],
+    contradictions: string[],
+  ): Promise<void> {
+    const issues = [
+      ...missing.map(m => `缺失/未覆盖: ${m}`),
+      ...contradictions.map(c => `冲突: ${c}`),
+    ].filter(Boolean);
+    if (!issues.length) return;
+    try {
+      const db = this.db.getDb();
+      const now = new Date().toISOString();
+      // 先读已有经验，供 LLM 判断「合并到旧条目」还是「新建」
+      const existing = db.prepare(
+        `SELECT id, category, lesson, occurrence FROM generation_lessons WHERE project_id = ? ORDER BY occurrence DESC, updated_at DESC`,
+      ).all(projectId) as Array<{ id: string; category: string; lesson: string; occurrence: number }>;
+      const existingText = existing.length
+        ? existing
+            .map((e, i) => `  [${i + 1}] id=${e.id} (${e.category}, 已出现${e.occurrence}次) ${e.lesson}`)
+            .join('\n')
+        : '（暂无，本章为首次归纳）';
+
+      const prompt =
+        `你是小说生成质量复盘器。下面是一章正文未通过大纲一致性验收时暴露的具体问题，` +
+        `请归纳成可复用的「避坑经验」，用于注入到本项目后续章节的生成提示中，使后续章节主动规避同类问题。\n\n` +
+        `【本章具体问题】\n${issues.join('\n')}\n\n` +
+        `【本项目已有避坑经验（能对应到下面某条的，必须合并到它的 existingId，不要新建重复条目）】\n${existingText}\n\n` +
+        `【归纳与合并要求】\n` +
+        `- 把同类问题合并，输出 1-3 条；每条要么是「合并到已有经验」，要么是「全新经验」；\n` +
+        `- 若问题与某条已有经验属同一类（如都关于"漏结尾钩子"或都关于"视角漂移"），必须 action=merge 并填该条 existingId，` +
+        `可顺便在 lesson 字段给出更精炼的措辞以覆盖旧版本（旧表述即被移除）；\n` +
+        `- 仅当确属全新、无法并入任何已有经验时才 action=new；\n` +
+        `- 每条教训必须是「具体、可执行」的中文短句（例如"务必让正文最后一个场景落在结尾钩子场景上收尾，不得提前终止于用餐/通勤等中间事件"），不要复述具体章节内容；\n` +
+        `- 类别从以下选一：missing_scene（漏场景/漏事件）、early_termination（提前终止/未到结尾钩子）、character_conflict（角色身份/关系冲突）、viewpoint_drift（视角/人称漂移）、hook_missing（漏结尾钩子）、other。\n\n` +
+        `只输出JSON：{"items":[{"action":"merge","existingId":"<id>","lesson":"<可选：更精炼措辞，覆盖旧版本>"},{"action":"new","category":"...","lesson":"..."}]}`;
+
+      const resp = await this.realLLM.generate({
+        prompt,
+        scenario: 'outline',
+        temperature: 0.2,
+        maxTokens: 1000,
+        responseFormat: 'json_object',
+        maxEmptyRetries: 3,
+      });
+      const parsed = this.safeExtractJson<{
+        items?: Array<{ action?: string; existingId?: string; category?: string; lesson?: string }>;
+      }>(resp.content, null as any);
+      const items = Array.isArray(parsed?.items) ? parsed!.items : [];
+      if (!items.length) return;
+
+      const mergeStmt = db.prepare(
+        `UPDATE generation_lessons
+         SET occurrence = occurrence + 1,
+             last_chapter_index = ?,
+             updated_at = ?,
+             lesson = COALESCE(?, lesson)
+         WHERE id = ? AND project_id = ?`,
+      );
+      const newStmt = db.prepare(
+        `INSERT INTO generation_lessons (id, project_id, category, lesson, occurrence, last_chapter_index, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+         ON CONFLICT(project_id, lesson) DO UPDATE SET
+           occurrence = occurrence + 1,
+           last_chapter_index = excluded.last_chapter_index,
+           updated_at = excluded.updated_at`,
+      );
+      const bumpByText = db.prepare(
+        `UPDATE generation_lessons SET occurrence = occurrence + 1, last_chapter_index = ?, updated_at = ?
+         WHERE project_id = ? AND lesson = ?`,
+      );
+
+      let merged = 0;
+      let created = 0;
+      for (const it of items) {
+        const action = String(it?.action || '').trim();
+        if (action === 'merge') {
+          const existingId = String(it?.existingId || '').trim();
+          if (!existingId) continue;
+          const refined = it?.lesson ? String(it.lesson).trim() : '';
+          mergeStmt.run(chapterIndex, now, refined || null, existingId, projectId);
+          merged++;
+        } else if (action === 'new') {
+          const category = String(it?.category || 'other').slice(0, 32);
+          const lesson = String(it?.lesson || '').trim();
+          if (!lesson) continue;
+          const res = newStmt.run(
+            this.generateAlignmentCheckId(), projectId, category, lesson, chapterIndex, now, now,
+          );
+          if (Number(res.changes) === 0) {
+            // 与既有条目措辞恰好一致（UNIQUE 冲突），按文本补增量，确保计数不丢
+            bumpByText.run(chapterIndex, now, projectId, lesson);
+          }
+          created++;
+        }
+      }
+
+      // 第三道闸：超量淘汰最旧最少见的经验，防止无限叠加
+      const countRow = db.prepare(`SELECT COUNT(*) AS c FROM generation_lessons WHERE project_id = ?`)
+        .get(projectId) as { c: number };
+      let pruned = 0;
+      if (countRow.c > ChainController.MAX_LESSONS_PER_PROJECT) {
+        const excess = countRow.c - ChainController.MAX_LESSONS_PER_PROJECT;
+        pruned = db.prepare(
+          `DELETE FROM generation_lessons WHERE project_id = ? AND id IN (
+             SELECT id FROM generation_lessons WHERE project_id = ?
+             ORDER BY occurrence ASC, updated_at ASC LIMIT ?
+           )`,
+        ).run(projectId, projectId, excess).changes as number;
+      }
+
+      this.logger.log(
+        `[跨章节学习] 归纳完成（project=${projectId}, ch${chapterIndex}）：合并=${merged}, 新建=${created}, 淘汰旧经验=${pruned}, 现存=${countRow.c - pruned}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `章节教训归纳失败（不影响正文保存）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private assertNoBlockingGeneratedContentIssues(projectId: string, content: string): void {
@@ -616,8 +1882,8 @@ export class ChainController {
       }
       const pov = String(settings.pov || settings.pointOfView || '').trim();
       const povInstruction = pov
-        ? `严格使用已有项目配置的叙事视角：${pov}`
-        : '保持大纲与前文已经建立的叙事视角，不得无依据切换';
+        ? `严格使用已有项目配置的叙事视角：${pov}。本视角的硬红线已写入下方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。`
+        : '保持大纲与前文已经建立的叙事视角，不得无依据切换；本视角的硬红线已写入下方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。';
       let prompt = `你正在创作一部长篇小说的第${dto.volumeIndex || 1}卷第${dto.chapterIndex || 1}章。
 
 ## 大纲指引
@@ -629,19 +1895,28 @@ ${dto.outline}
 - Goal弧线: ${dto.goalArc || 'accumulate_burst'}
 - 目标字数: ${targetWords}字
 
-## 前文概要
+## 本章目标
+${(boundContract as any)?.brief || '依据本章大纲的事件链推进，完成本章唯一指定任务，不得提前执行后续章节的行动'}
+
+## 前情提要
 ${dto.previousChapterSummary || '无'}
+
+## 人物状态
+${this.buildCharacterStateContext(dto.projectId, Number(dto.chapterIndex || 1))}
 
 ## 需回收的伏笔
 ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '无'}
 
 ## 写作要求
-1. 严格遵循大纲方向
+1. 严格遵循下方【大纲严格性约束】中的红线（角色身份/已确稿事实/场景地点/伏笔状态不可偏离），并在绿区内自由发挥。
 2. 在剧情中自然回收指定的伏笔
 3. 保持人物一致性
-4. 章节结尾设置钩子
-5. 字数控制在${targetWords}字左右
-6. ${povInstruction}`;
+4. 章节结尾设置钩子（且正文最后一个场景必须落在该钩子场景上收尾，不得提前终止于大纲中间事件如用餐、通勤、过渡等场景）
+5. 严格按本章大纲列出的事件顺序推进，大纲所有场景与人物行动都必须实际发生，不得跳过大纲靠后事件（如"傍晚写新章节大纲""结尾钩子"）。
+6. 正文长度严格控制在 3200-4000 个汉字之间（目标约 ${targetWords} 字），写到上限附近必须自然收尾，不得超出 4000 字。
+6. ${povInstruction}
+
+${this.buildOutlineAdherenceContract(true)}`;
 
       // 自动注入大纲/角色/世界观上下文
       try {
@@ -652,21 +1927,16 @@ ${dto.foreshadowingToRecover?.length ? dto.foreshadowingToRecover.join('\n') : '
       prompt += this.buildWorldWritingContext(dto.projectId);
       prompt += this.buildLocationWritingContext(dto.projectId);
 
-      const response = await this.realLLM.generate({
-        prompt,
-        scenario: dto.scenario || 'writing',
+      const { content, qualityReport } = await this.generateBodyWithAlignmentGuard({
+        basePrompt: prompt,
+        projectId: dto.projectId,
+        targetWords,
+        scenario: dto.scenario || 'daily',
         temperature: 0.7,
-      });
-
-      const content = response.content;
-      this.assertGeneratedChapterIdentity(content, Number(chapter?.chapter_index || dto.chapterIndex || 1));
-      const generatedWordCount = this.assertGeneratedChapterLength(content, targetWords);
-      const qualityReport = await this.assertGeneratedChapterAlignment({
         chapterIndex: Number(chapter?.chapter_index || dto.chapterIndex || 1),
         chapterTitle: boundContract.title,
         outlineContract: boundContract.text,
         storyContext: this.buildWritingStateContext(dto.projectId, Number(chapter?.chapter_index || dto.chapterIndex || 1)).contextText,
-        content,
       });
       this.assertNoBlockingGeneratedContentIssues(dto.projectId, content);
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
@@ -697,6 +1967,31 @@ ${(content || '').substring(0, 2000)}
           result: `检查调用失败：${error instanceof Error ? error.message : String(error)}`,
         };
       }
+      // 正文生成后的角色状态自动更新：从章纲 characterStates 提取，写入角色状态表
+      let autoStateUpdate = { updated: 0, skipped: 0, errors: [] as string[] };
+      try {
+        const chapterIndex = Number(chapter?.chapter_index || dto.chapterIndex || 1);
+        const targetChapter = db.prepare(`SELECT id FROM outlines WHERE project_id=? AND level='chapter' AND "order"=? LIMIT 1`).get(dto.projectId, chapterIndex - 1) as any;
+        if (targetChapter) {
+          const chapterRow = db.prepare(`SELECT scenes FROM outlines WHERE id=?`).get(targetChapter.id) as any;
+          const scenes = (() => { try { return chapterRow?.scenes ? JSON.parse(chapterRow.scenes) : null; } catch { return null; } })();
+          const states: Array<{ character: string; stateAfter: string; trigger: string }> = [];
+          if (Array.isArray(scenes?.characterStates)) states.push(...scenes.characterStates);
+          for (const cs of states) {
+            if (!cs.character || !cs.stateAfter) { autoStateUpdate.skipped++; continue; }
+            try {
+              const char = db.prepare(`SELECT id FROM characters WHERE project_id=? AND name LIKE ? LIMIT 1`).get(dto.projectId, `%${cs.character}%`) as any;
+              if (char) {
+                db.prepare(`UPDATE characters SET updated_at=? WHERE id=?`).run(new Date().toISOString(), char.id);
+                const statePayload = JSON.stringify({ state: cs.stateAfter, chapter: chapterIndex });
+                try { db.prepare(`INSERT INTO character_state_history (id, project_id, character_id, dimension, value, chapter_index, trigger_event, created_at) VALUES (?,?,?,?,?,?,?,?)`).run(require('crypto').randomUUID(), dto.projectId, char.id, 'narrative_position', statePayload, chapterIndex, cs.trigger || '章节正文生成', new Date().toISOString()); } catch { /* 表可能不存在，降级为仅更新字符时间戳 */ }
+                autoStateUpdate.updated++;
+              } else { autoStateUpdate.skipped++; }
+            } catch (e: any) { autoStateUpdate.errors.push(`${cs.character}: ${e.message}`); }
+          }
+        }
+      } catch (e: any) { autoStateUpdate.errors.push(`character state extraction: ${e.message}`); }
+      if (autoStateUpdate.updated > 0) this.logger.log(`角色状态自动更新：已更新 ${autoStateUpdate.updated} 人（跳过 ${autoStateUpdate.skipped}），第${chapter?.chapter_index || dto.chapterIndex}章`);
 
       // Persistence is deliberately delegated to ChapterService. It records the
       // snapshot and executes the canonical summary/RAG/foreshadowing/timeline
@@ -712,6 +2007,7 @@ ${(content || '').substring(0, 2000)}
         locationConsistency,
         stateItemsCreated: archiveResult.stateItemsCreated,
         stateArchiveWarning: archiveResult.stateArchiveWarning,
+        autoStateUpdate,
       };
     } catch (err) {
       if (err instanceof HttpException) throw err;
@@ -723,7 +2019,7 @@ ${(content || '').substring(0, 2000)}
 
   /**
    * POST /chain/generate
-   * 正文生成（支持天龙8步法全自动/半自动/自由模式）
+   * 正文生成（严格按已绑定详细大纲单次 LLM 调用）
    */
   @Post('generate')
   async generate(@Body() dto: GenerateDto) {
@@ -790,7 +2086,7 @@ ${(content || '').substring(0, 2000)}
       let chapterContext = (dto.chapterContext || {}) as any;
       if (!dto.outline || !dto.chapterContext || Object.keys(dto.outline).length === 0) {
         try {
-          const autoCtx = this.buildTianlongContext(dto.projectId, dto.chapterNumber || 1, dto.chapterId);
+          const autoCtx = this.buildChapterPlanContext(dto.projectId, dto.chapterNumber || 1, dto.chapterId);
           if (autoCtx.outline) outline = autoCtx.outline;
           if (autoCtx.context) chapterContext = autoCtx.context;
         } catch (error) {
@@ -813,36 +2109,63 @@ ${(content || '').substring(0, 2000)}
         throw new HttpException('本章确认故事上下文不完整，已停止生成；不会使用通用提示词替代详细大纲', 409);
       }
 
-      // 如果有完整的大纲和上下文，走天龙8步 Chain
+      // 严格基于已绑定的详细大纲做单次 LLM 生成（2026-07-24 取消天龙8步后）
       if (outline && Object.keys(outline).length > 0) {
-        const result = await this.storyChain.executeStage3({
-          outline: outline as any,
-          chapterContext: chapterContext as any,
-          chapterNumber: dto.chapterNumber || 1,
-          chapterOutline: chapterContract.text,
-          chapterFunction: dto.chapterFunction || chapterContext.chapterFunction || 'exposition',
-          targetWords: chapterTargetWords,
-        });
+        const povInstruction = (() => {
+          const pov = String((chapterContext as any).pov || '').trim();
+          return pov
+            ? `严格使用已有项目配置的叙事视角：${pov}。本视角的硬红线已写入下方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。`
+            : '保持大纲与前文已经建立的叙事视角，不得无依据切换；本视角的硬红线已写入下方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。';
+        })();
+        const stateGuardText = String((chapterContext as any).stateGuard || '已确稿事实必须遵守；待确稿候选只能参考，不要写死；冲突/过期需避免或复核。');
+        const confirmedStateText = String(
+          (chapterContext as any).confirmedStateContext
+          || ragContext
+          || '暂无已确稿上下文。',
+        );
+        const chapterHeading = chapterContract.title || `第${targetChapter.chapter_index}章`;
+        const chapterOutlineText = chapterContract.text;
 
-        // 提取合成后的正文
-        const fullContent = this.generatedNarrativeText(result.outputs['node_9_chapter_synthesis'])
-          || this.generatedNarrativeText(result.outputs['node_10_chapter_qa']);
-        if (result.status !== 'completed' || !fullContent) {
-          const synthesisError = result.errors.find(error => error.nodeId === 'node_9_chapter_synthesis')
-            || result.errors[result.errors.length - 1];
-          throw new HttpException(
-            `章节生成未完成，正文未保存：${synthesisError?.message || '正文合成节点未返回完整正文'}`,
-            502,
-          );
-        }
-        this.assertGeneratedChapterIdentity(fullContent, Number(targetChapter.chapter_index));
-        const generatedWordCount = this.assertGeneratedChapterLength(fullContent, chapterTargetWords);
-        const qualityReport = await this.assertGeneratedChapterAlignment({
+        // 大纲严格性约束（红线 + 绿区）：大纲是不可偏离的合同，但在红线内
+        // 鼓励微发挥与多样性。配合末位 assertGeneratedChapterAlignment 形成
+        // "事前约束 + 事后拒绝"双保险。短篇受篇幅限制，微发挥以精准为主。
+        const outlineAdherenceContract = this.buildOutlineAdherenceContract(this.isProjectLongNovel(dto.projectId));
+
+        let prompt = `你正在创作第${targetChapter.chapter_index}章 ${chapterHeading}。
+
+## 不可偏离的详细大纲
+${chapterOutlineText}
+
+## 已确稿故事上下文
+${confirmedStateText}
+
+## 状态使用规则
+${stateGuardText}
+
+${outlineAdherenceContract}
+
+## 写作要求
+1. 正文长度必须严格控制在 3200-4000 个汉字之间，绝对不得超过 4000 字、也不得少于 3200 字。写到约 ${chapterTargetWords} 字时必须自然收尾，不要摊开写或注水。
+2. 严格遵循本章大纲中已列出的核心事件、冲突、人物行动、结尾钩子；按大纲事件顺序依次推进，大纲列出的所有场景与人物行动都必须实际发生，不许擅自改写或跳过。正文的最后一个场景必须是【本章结尾钩子】所描述的场景并落在该钩子场景上收尾，严禁提前终止于大纲中间事件（如用餐、通勤、过渡等场景）。
+3. 不得在正文里写"天龙8步""目标/诱因/行动/阻碍/误判/反转/代价/钩子"等小标题或方法论标签；只输出可发布的纯正文。
+4. 对话、动作、场景描写要服务于大纲事件，不得为凑字数添加与本章无关的支线。
+5. ${povInstruction}
+
+## 直接输出
+请直接输出完整章节正文，不要任何解释、前缀、JSON、Markdown 标题。`;
+        // 把已注入的 RAG（角色/世界观/地点）追加到 prompt 末尾
+        if (ragContext) prompt += `\n\n【已确稿 RAG 补充】\n${ragContext}`;
+
+        const { content: fullContent, qualityReport } = await this.generateBodyWithAlignmentGuard({
+          basePrompt: prompt,
+          projectId: dto.projectId,
+          targetWords: chapterTargetWords,
+          scenario: dto.scenario || 'daily',
+          temperature: 0.7,
           chapterIndex: Number(targetChapter.chapter_index),
           chapterTitle: chapterContract.title,
           outlineContract: chapterContract.text,
-          storyContext: String(chapterContext.confirmedStateContext || ragContext || ''),
-          content: fullContent,
+          storyContext: confirmedStateText,
         });
         this.assertNoBlockingGeneratedContentIssues(dto.projectId, fullContent);
 
@@ -850,7 +2173,7 @@ ${(content || '').substring(0, 2000)}
         const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, fullContent);
         const locationConsistency = this.mapPointService.checkConsistency(dto.projectId, fullContent);
         return {
-          success: result.status === 'completed',
+          success: true,
           content: fullContent,
           characterConsistency,
           worldConsistency,
@@ -861,9 +2184,9 @@ ${(content || '').substring(0, 2000)}
           // transaction. Returning prose here must never bypass that path.
           requiresCanonicalSave: true,
           chainResult: {
-            status: result.status,
-            totalLatency: result.totalLatency,
-            nodeCount: result.nodeResults.length,
+            status: 'completed',
+            totalLatency: 0,
+            nodeCount: 1,
           },
         };
       }
@@ -914,6 +2237,12 @@ ${(content || '').substring(0, 2000)}
         if (autoCtx) prompt += '\n\n【大纲与世界观上下文】\n' + autoCtx;
       } catch {}
 
+      // 与 /chain/generate、/chain/long-write、body-by-outline 三端点共用同源约束（修复：
+      // 之前 /chain/continue 不注入降 AI 文风 + 散文质感约束，续写后接的正文照样机械/AI 味）。
+      // 续写是增量，但必须继续遵守本章已建立的视角、人物、节奏、段落硬约束。
+      const chapterOutlineAdherence = this.buildOutlineAdherenceContract(this.isProjectLongNovel(dto.projectId));
+      prompt = `${prompt}\n\n${chapterOutlineAdherence}`;
+
       const response = await this.realLLM.generate({ prompt, scenario: dto.scenario || 'writing', temperature: 0.7 });
       const continuation = String(response.content || '').trim();
       if (!continuation) throw new Error('续写未返回可验收的正文');
@@ -937,8 +2266,28 @@ ${(content || '').substring(0, 2000)}
         content,
       });
       this.assertGeneratedChapterIdentity(content, Number(chapterRow.chapter_index || 1));
-      this.assertGeneratedChapterLength(content, Number(chapterRow.target_words || 0));
+      // 续写是增量草稿，不在此强制最终 3200-4000 字硬上限（章节锁定时 chapter.service 才做最终验收），
+      // 否则写到一半就会因“累计超 4000”被拒，违背草稿可逐步累积的体验。仅做非阻塞提醒。
+      const draftLen = this.generatedNarrativeWordCount(content);
+      if (draftLen > 4000 || draftLen < 3200) {
+        this.logger.warn(`continue 草稿累计 ${draftLen} 字，未命中 3200-4000；锁定时将做最终篇幅验收。`);
+      }
       this.assertNoBlockingGeneratedContentIssues(dto.projectId, content);
+      // 硬红线确定性扫描：与 /chain/generate 同源，命中即注入到质量报告 contradictions，
+      // 续写积累多次违规时矛盾 tab 上能看到具体违规原文片段。
+      try {
+        const continuationOnly = content.slice(existingContent.length).trimStart();
+        const findings = this.detectForbiddenTells(continuationOnly);
+        if (findings.length > 0) {
+          (qualityReport as any).hardlineFindings = findings;
+          this.logger.warn(
+            `continue 硬红线扫描命中 ${findings.length} 处违规（chapter=${dto.chapterId}）：` +
+            findings.map(f => `${f.ruleId}@${f.position}`).join(', '),
+          );
+        }
+      } catch (scanErr: any) {
+        this.logger.warn(`continue 硬红线扫描失败（已忽略）: ${scanErr?.message ?? scanErr}`);
+      }
       const characterConsistency = this.characterService.checkConsistency(dto.projectId, content);
       const worldConsistency = this.worldSettingService.checkConsistency(dto.projectId, content);
       const locationConsistency = this.mapPointService.checkConsistency(dto.projectId, content);
@@ -2042,14 +3391,14 @@ ${confirmedContext.pendingSummary.length ? confirmedContext.pendingSummary.map(i
   }) {
     const chapterNumber = dto.chapterNumber || 1;
     const confirmedState = this.buildWritingStateContext(dto.projectId, chapterNumber);
-    const tianlong = this.buildTianlongContext(dto.projectId, chapterNumber);
+    const chapterPlan = this.buildChapterPlanContext(dto.projectId, chapterNumber);
     return {
       success: true,
       projectId: dto.projectId,
       chapterNumber,
       volumeNumber: dto.volumeNumber || 1,
       state: confirmedState,
-      chapterPlan: tianlong,
+      chapterPlan,
       canonicalContext: {
         characters: this.buildCharacterWritingContext(dto.projectId),
         world: this.buildWorldWritingContext(dto.projectId),
@@ -2653,7 +4002,7 @@ ${(dto.content || '').substring(0, 3000)}
    * 流式输出生成端点（SSE实时显示进度）
    * 支持两种模式：
    *   1. 简易模式（无 chapterId）：直接调 LLM，按段落推送
-   *   2. 天龙8步模式（有 chapterId）：执行 Chain，逐节点推送进度 + 最终正文
+   *   2. 单次 LLM 模式（有 chapterId）：严格按详细大纲单次生成，输出最终正文（2026-07-24 取消天龙8步 Chain 后的统一路径）
    */
   @Post('stream-generate')
   async streamGenerate(
@@ -2692,12 +4041,12 @@ ${(dto.content || '').substring(0, 3000)}
         progress: activeGenerationProgress,
         message: `${activeGenerationStage}仍在执行，连接正常…`,
       });
-    }, 30_000);
+    }, LLM_TUNABLES.HEARTBEAT_INLINE_MS);
     const clearHeartbeat = () => clearInterval(heartbeatInterval);
 
     try {
       this.workflowGuard.assertCanGenerateBody(dto.projectId);
-      // 天龙8步模式：有 chapterId 时走 Chain
+      // 单次 LLM 模式：有 chapterId 时严格按已绑定详细大纲生成
       if (dto.chapterId) {
         // 加载章节信息
         const chapterRow = this.db.prepare('SELECT * FROM chapters WHERE id = ? AND project_id = ?')
@@ -2782,104 +4131,72 @@ ${(dto.content || '').substring(0, 3000)}
         ].join('\n');
         const previousLedger = this.buildPreviousChapterLedger(dto.projectId, Number(chapterRow.chapter_index || 1));
 
-        // 进度回调：逐节点推送
-        const onProgress = (nodeIndex: number, nodeId: string, status: string, result?: any) => {
-          const nodeLabels: Record<string, string> = {
-            'node_0_context_assembly': '上下文装配',
-            'node_1_goal': '🎯 目标',
-            'node_2_trigger': '⚡ 诱因',
-            'node_3_action': '🏃 行动',
-            'node_4_obstacle': '🧱 阻碍',
-            'node_5_misjudge': '😞 误判',
-            'node_6_reversal': '🔄 反转',
-            'node_7_cost': '💸 代价',
-            'node_8_hook': '🪝 钩子',
-            'node_9_chapter_synthesis': '📝 正文合成',
-            'node_10_chapter_qa': '✅ 质检',
-          };
-          activeGenerationStage = nodeLabels[nodeId] || nodeId;
-          activeGenerationProgress = Math.round((nodeIndex / 10) * 100);
-          send({
-            type: 'step',
-            step: nodeIndex,
-            nodeId,
-            label: nodeLabels[nodeId] || nodeId,
-            status,
-            // node_0 is setup, node_1..8 are the Tianlong steps, then node_9
-            // synthesizes the readable prose and node_10 verifies it. Hook is
-            // therefore 80%, not a misleading final 73%.
-            progress: activeGenerationProgress,
-            ...(result ? { result: JSON.stringify(result).slice(0, 200) } : {}),
-          });
-        };
+        // 单次 LLM 生成：不再有逐节点进度回调，靠 SSE 心跳维持连接
+        activeGenerationStage = '按详细大纲生成正文（单次 LLM）';
 
-        const templateId = dto.templateId || 'tianlong-8step';
+        const templateId = dto.templateId || 'body-by-outline';
         send({ type: 'start', message: `开始【${templateId}】生成第${chapterRow.chapter_index}章...` });
 
-        // This is a server-side safety ceiling, not a substitute for SSE
-        // heartbeats. It covers all eight planning steps, final prose synthesis,
-        // and one same-model length-repair pass.
-        const timeoutMs = 20 * 60 * 1000;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('生成超时（20分钟）；服务端持续发送进度与心跳时连接不会被浏览器中断）')), timeoutMs);
-        });
+        // 取消天龙8步 Chain（2026-07-24）：改为单次 LLM 调用 + 严格按详细大纲生成
+        // 字数收敛统一交给 generateBodyWithLengthGuard，内部已含真实 LLM 超时兜底。
+        // 进度通过 SSE 心跳事件推送给前端，不再有"目标→诱因→...→钩子"逐节点推进。
+        const chapterOutlineText = currentOutline ? this.buildChapterOutlineContext(currentOutline) : (dto.prompt || '');
+        // 大纲严格性约束（红线 + 绿区）：与 /chain/generate 同源，统一维护
+        const chapterOutlineAdherence = this.buildOutlineAdherenceContract(this.isProjectLongNovel(dto.projectId));
+        const povInstruction = (() => {
+          const pov = String((currentOutline as any)?.pov || '').trim();
+          return pov
+            ? `严格使用已有项目配置的叙事视角：${pov}。本视角的硬红线已写入上方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。`
+            : '保持大纲与前文已经建立的叙事视角，不得无依据切换；本视角的硬红线已写入上方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。';
+        })();
+        const streamPrompt = `你正在创作第${chapterRow.chapter_index}章 ${currentOutline?.title || `第${chapterRow.chapter_index}章`}。
 
-        const chainResult = await Promise.race([
-          templateId === 'tianlong-8step'
-            ? this.storyChain.executeStage3({
-                outline: fullOutline as any,
-                chapterContext: {
-                  outline: currentOutline ? this.buildChapterOutlineContext(currentOutline) : dto.prompt || '',
-                  previousChapterEnd: previousLedger.previousChapterEnd,
-                  characters: fullOutline.characters,
-                  foreshadowings: fullOutline.foreshadows,
-                  confirmedStateContext,
-                  stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。',
-                  previousChaptersSummary: previousLedger.previousChaptersSummary,
-                  chapterNumber: chapterRow.chapter_index || 1,
-                  totalChapters: outlineVolumes.length,
-                } as any,
-                chapterNumber: chapterRow.chapter_index || 1,
-                chapterOutline: currentOutline ? this.buildChapterOutlineContext(currentOutline) : dto.prompt || '',
-                chapterFunction: currentOutline?.chapter_function || 'development',
-                targetWords: currentTargetWords,
-              }, onProgress)
-            : this.chainTemplate.executeChain(templateId, {
-                projectId: dto.projectId,
-                chapterId: dto.chapterId,
-                prompt: dto.prompt,
-                chapterContext: {
-                  outline: currentOutline ? this.buildChapterOutlineContext(currentOutline) : dto.prompt || '',
-                  characters: fullOutline.characters,
-                  foreshadowings: fullOutline.foreshadows,
-                  confirmedStateContext,
-                  stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。',
-                  chapterNumber: chapterRow.chapter_index || 1,
-                },
-              }),
-          timeoutPromise,
-        ]);
+        ## 不可偏离的详细大纲
+        ${chapterOutlineText}
 
-        // 取合成后的正文
-        const synthesisOutput = chainResult.outputs['node_9_chapter_synthesis'] as any;
-        const fullText = synthesisOutput?.fullText;
-        if (chainResult.status !== 'completed' || !fullText || typeof fullText !== 'string') {
-          const synthesisError = chainResult.errors.find((error: { nodeId: string; message: string }) => error.nodeId === 'node_9_chapter_synthesis')
-            || chainResult.errors[chainResult.errors.length - 1];
-          throw new Error(`章节生成未完成，正文未保存：${synthesisError?.message || '正文合成节点未返回完整正文'}`);
-        }
-        this.assertGeneratedChapterIdentity(fullText, Number(chapterRow.chapter_index));
-        // The streaming endpoint hands persistence back to the writing page, so it
-        // must apply the same hard length gate as /chain/generate before it ever
-        // reports a successful result to the client.
-        this.assertGeneratedChapterLength(fullText, currentTargetWords);
-        const qualityReport = await this.assertGeneratedChapterAlignment({
+        ## 已确稿故事上下文
+        ${confirmedStateContext}
+
+        ${chapterOutlineAdherence}
+
+        ## 写作要求（本章具体约束；文风与降 AI 味见上方【大纲严格性约束】）
+
+        ### 字数与大纲
+        1. 总长 3200-4000 汉字，到约 ${currentTargetWords} 字必须自然收尾，不许注水、不许为凑数把对话稀释成自言自语。
+        2. 严格遵循本章大纲中已列出的核心事件、冲突、人物行动、结尾钩子；按大纲事件顺序依次推进，大纲列出的所有场景与人物行动都必须实际发生在正文中，不许为"文笔"擅自改写或跳过。正文的【最后一个场景】必须是【本章结尾钩子】所描述的场景，必须将正文落在该钩子场景上收尾；严禁提前终止于大纲中间事件（如用餐、通勤、过渡等场景），即使字数已接近上限也要先写完钩子再收尾。
+        3. ${povInstruction}
+        4. 不得在正文里写"天龙8步""目标/诱因/行动/阻碍/误判/反转/代价/钩子"等方法论标签；只输出可发布的纯正文。
+
+        ### 文风（统一约束）
+        5. 文风与"降 AI 味"要求（禁止排比句、禁止相邻句/段以同一人名或代词起头、禁止对仗四字短语堆砌与升华式说教、禁用 AI 高频副词、禁止模板化开头结尾、禁止对话标签密集、禁止比拟人比喻滥用等）以及上下文一致性要求（角色状态延续、事实/记忆一致、时空逻辑自洽、场景过渡自然、结尾承接下章钩子）已写入上方【大纲严格性约束】的「降 AI 文风 · 必守」「上下文一致性 · 必守」「散文质感」三节，本章同样逐条严格遵守。
+        6. 对话、动作、场景描写都要服务于本章大纲事件，不为"显得深刻"添加说教性内心独白或与本章无关的支线。
+
+        ## 直接输出
+        请直接输出完整章节正文，不要任何解释、前缀、JSON、Markdown 标题。`;
+
+        const { content: fullText, qualityReport } = await this.generateBodyWithAlignmentGuard({
+          basePrompt: streamPrompt,
+          projectId: dto.projectId,
+          targetWords: currentTargetWords,
+          scenario: dto.scenario || 'daily',
+          temperature: 0.7,
           chapterIndex: Number(chapterRow.chapter_index),
           chapterTitle: String(currentOutline.title || ''),
           outlineContract: this.buildChapterOutlineContext(currentOutline),
           storyContext: confirmedStateContext,
-          content: fullText,
+          onProgress: (p) => {
+            activeGenerationStage = p.label;
+            activeGenerationProgress = p.progress;
+            send({ type: 'step', label: p.label, message: p.message, progress: p.progress });
+          },
         });
+        const chainResult = {
+          status: 'completed' as const,
+          totalLatency: 0,
+        };
+        activeGenerationStage = '大纲一致性质检';
+        activeGenerationProgress = 95;
+        send({ type: 'step', label: '大纲一致性质检', message: '大纲一致性、人物、世界观、时间线与叙事连贯性已校验通过', progress: 95 });
         this.assertNoBlockingGeneratedContentIssues(dto.projectId, fullText);
 
         send({ type: 'quality', report: qualityReport });
@@ -2899,7 +4216,7 @@ ${(dto.content || '').substring(0, 3000)}
       }
       const response = await this.realLLM.generate({
         prompt: userPrompt,
-        scenario: dto.scenario || 'writing',
+        scenario: dto.scenario || 'daily',
         temperature: 0.8,
       });
       const content = response.content;
@@ -2984,17 +4301,17 @@ ${(dto.content || '').substring(0, 3000)}
 
     const result = await this.llmCallWithRetry<any>(
       '章节大纲扩写',
-      `在不改变既定故事、人物关系、章节功能、目标字数和后续章节任务的前提下，扩写当前章节的详细大纲。只能补足本章已经承担的事件链、场景、行动、冲突、亮点、伏笔证据和结尾钩子；不得编造另一套故事、提前揭示后续真相或改写已确认资料。\n项目类型：${project.type}\n章节标题：${outline.title}\n章节功能：${outline.chapter_function}\n目标字数：${outline.target_words}\n现有大纲：${outline.content}\n现有结构资料：${outline.scenes || '{}'}\n只输出JSON对象：{"content":"至少120字的具体事件链","scenes":["具体场景"],"characterActions":"人物采取的具体行动","conflict":"本章阻力与代价","highlight":"可感知亮点","foreshadowing":"只填写本章真实埋设或激活的线索，没有则空字符串","foreshadowingRecover":"只填写本章真实回收，没有则空字符串","hook":"下一章钩子","mood":"情绪基调"}`,
+      `在不改变既定故事、人物关系、章节功能、目标字数和后续章节任务的前提下，扩写当前章节的详细大纲。只能补足本章已经承担的事件链、场景、行动、冲突、亮点、伏笔证据和结尾钩子；不得编造另一套故事、提前揭示后续真相或改写已确认资料。\n项目类型：${project.type}\n章节标题：${outline.title}\n章节功能：${outline.chapter_function}\n目标字数：${outline.target_words}\n现有大纲：${outline.content}\n现有结构资料：${outline.scenes || '{}'}\n只输出JSON对象：{"content":"至少80字事件链","scenes":["场景"],"characterActions":"行动","conflicts":[{"name":"冲突","trigger":"触发"}],"highlights":[{"point":"爽点"}],"foreshadowing":[{"content":"线索"}],"foreshadowingRecover":[{"reference":"回收"}],"characterStates":[{"character":"人","stateBefore":"前","stateAfter":"后"}],"hook":"下章钩子","emotionalTone":"情绪"}`,
       {
         temperature: 0.45,
-        timeout: TIMEOUT_CONTENT,
+        timeout: LLM_TUNABLES.timeoutContent(),
         scenario: 'outline',
         validate: value => !!value && typeof value === 'object'
-          && String((value as any).content || '').trim().length >= 120
+          && String((value as any).content || '').trim().length >= 60
           && Array.isArray((value as any).scenes)
-          && String((value as any).characterActions || '').trim().length > 0
-          && String((value as any).conflict || '').trim().length > 0
-          && String((value as any).hook || '').trim().length > 0,
+          && (String((value as any).characterActions || '').trim().length > 0)
+          && (String((value as any).conflict || '').trim().length > 0 || Array.isArray((value as any).conflicts))
+          && (String((value as any).hook || '').trim().length > 0),
       },
     );
     if (!result.data) throw new HttpException(`章节大纲扩写失败：${result.warnings.join('；') || '模型未返回完整结构'}`, 502);
@@ -3057,7 +4374,7 @@ ${storyTypeRule}
 2. 【不重复】本次题材不能与排除列表中的标题、设定、切入角度或核心冲突雷同
 3. 【敏感过滤】严禁出现真实历史人物、真实政治事件、敏感社会话题、色情暴力等违规内容
 4. 【风格鲜明】标注每个题材的风格标签（热血/刀人/爽文/悬疑/搞笑等）
-5. 【标题必须能卖故事】4-12字，优先呈现身份反差、危险规则、迫近代价或未解悬念；禁止只用普通职业/物件加“师、员、人、馆、档案、事务所”组成空泛标题，禁止“气味档案员”“时间修复师”这类只有概念没有冲突的命名
+5. 【标题必须能卖故事】4-16字，优先呈现身份反差、危险规则、迫近代价或未解悬念；禁止只用普通职业/物件加“师、员、人、馆、档案、事务所”组成空泛标题，禁止“气味档案员”“时间修复师”这类只有概念没有冲突的命名
 6. 【强钩子】用1-2句话写出“异常事件+主角困境+明确代价/时限”，读者必须能立刻提出一个非看下去不可的问题，禁止只介绍世界观
 7. 【剧情必须有推进】概要按“开局异常→主动目标→连续升级→不可逆选择→核心反转→结局兑现方向”写成具体事件链，不能只写背景、职业或概念
 8. 【反转有效】反转必须改变人物关系、目标或胜负条件，且前文可埋线索；禁止“原来一切是梦”等无效反转
@@ -3065,7 +4382,7 @@ ${storyTypeRule}
 ${excludeRule}
 
 输出一个合法JSON对象，格式必须是 {"ideas":[...]}；ideas数组<strong>必须包含${dto.count || 5}个</strong>元素。每个元素包含：
-- title: 题材标题（不超过12字，最多一个逗号/顿号）
+- title: 题材标题（4-16字，最多一个逗号/顿号）
 - alternateTitles: 另外2个同样有冲突感但角度不同的备选标题
 - angle: 切入角度（如'历史缝隙','新闻改编','小人物大历史','穿越新解','职业传奇'等）
 - hook: 核心钩子（40-90字，必须包含异常、困境和代价或时限）
@@ -3095,7 +4412,7 @@ ${excludeRule}
               prompt: requestPrompt,
               scenario: 'idea_generate',
               temperature,
-              timeout: 120_000,
+              timeout: LLM_TUNABLES.timeoutContent(),
               retryCount,
               // The prompt and parser require the object wrapper below.  Send
               // the same constraint to OpenAI-compatible providers instead of
@@ -3107,7 +4424,7 @@ ${excludeRule}
             if (transportAttempt === 0) {
               const message = error instanceof Error ? error.message : String(error);
               this.logger.warn(`idea-discover: 模型连接中断，1秒后使用同一配置重试：${message}`);
-              await new Promise(resolve => setTimeout(resolve, 1_000));
+              await new Promise(resolve => setTimeout(resolve, LLM_TUNABLES.STEP_PACE_MS));
             }
           }
         }
@@ -3147,7 +4464,7 @@ ${excludeRule}
         const issues: string[] = [];
         const cleanTitle = String(candidate?.title || '').replace(/[《》「」]/g, '').trim();
         const compactTitle = cleanTitle.replace(/[，、,\s]/g, '');
-        if (compactTitle.length < 4 || compactTitle.length > 12) issues.push('标题必须为4-12字');
+        if (compactTitle.length < 4 || compactTitle.length > 16) issues.push('标题长度建议 4-16 字（当前 ' + compactTitle.length + ' 字）');
         if (/(档案员|修复师|摆渡人|观察员|收集者|管理员|事务所)$/.test(compactTitle) && !/[死禁罪谜局债逃杀骗争]/.test(compactTitle)) {
           issues.push('标题只有职业或概念，没有冲突、危险或悬念');
         }
@@ -3201,14 +4518,14 @@ ${excludeRule}
           1,
           0.82,
         );
-        ideas = extractIdeaList(repairResponse.content || '') || [];
-        qualityIssues = collectQualityIssues(ideas);
+        const repaired = extractIdeaList(repairResponse.content || '');
+        if (repaired && repaired.length > 0) {
+          ideas = repaired;
+          qualityIssues = collectQualityIssues(ideas);
+        }
       }
 
-      if (qualityIssues.length > 0) {
-        throw new Error(`灵感质量检查未通过，未展示低质量题材：${qualityIssues.slice(0, 3).join('；')}。请重新发现。`);
-      }
-
+      // 把题材标准化（字数/章数解析）
       ideas = ideas.map((idea) => ({
         ...idea,
         estimatedWords: parsePositiveTargetWords(idea.recommendedTargetWords ?? idea.estimatedWords),
@@ -3229,7 +4546,20 @@ ${excludeRule}
         }
       }
 
-      return { success: true, ideas, totalIdeas: ideas.length };
+      // 质量门禁改为“非致命 + 透明”：不再以全有或全无方式隐藏题材。
+      // 把未达标项作为 qualityIssues 标记随真实题材一并返回，前端照常展示并提醒，
+      // 作者可自行“重新发现”换一批，或直接挑选可接受的题材。这样即使个别标题略长，
+      // 也不会让整个发现失败、一个题材都不展示（此前“未展示低质量题材”死循环的根因）。
+      const ideasWithQuality = ideas.map((idea) => ({
+        ...idea,
+        qualityIssues: assessIdeaQuality(idea),
+      }));
+      const remainingIssues = ideasWithQuality.flatMap((i) => i.qualityIssues || []);
+      const qualityWarning = remainingIssues.length > 0
+        ? `部分题材未完全满足质量门禁（共 ${remainingIssues.length} 项提醒），已照常展示；可点“重新发现”换一批，或直接挑选可接受的题材。`
+        : undefined;
+
+      return { success: true, ideas: ideasWithQuality, totalIdeas: ideasWithQuality.length, qualityWarning };
     } catch (err) {
       const message = err instanceof Error ? err.message : '题材发现失败';
       this.logger.error(`idea-discover 失败: ${message}`);
@@ -3306,13 +4636,23 @@ ${excludeRule}
     );
     this.projectCreationEventHistory.set(projectId, []);
     this.emitProjectProgress(projectId, { type: 'progress', step: 'project', percent: 5, message: '项目已创建，开始生成内容', status: 'done' });
+
+    // 从项目创建起就持续发心跳，不依赖后台生成函数是否启动
+    // 这样无论 executeCreateProjectSteps 内部如何阻塞，SSE 连接都不会断
+    const globalHeartbeat = setInterval(() => {
+      this.emitProjectProgress(projectId, { type: 'heartbeat', ts: Date.now() });
+    }, LLM_TUNABLES.HEARTBEAT_GLOBAL_MS);
+    const clearGlobalHeartbeat = () => { clearInterval(globalHeartbeat); };
     this.logger.log(`create-project-async: project=${projectId} 已创建，开始后台生成...`);
 
     // 后台异步执行全部生成步骤
     const creationDto = { ...dto, targetWords: configuredTargetWords };
     this.executeCreateProjectSteps(projectId, creationDto).catch(err => {
+      clearGlobalHeartbeat();
       this.logger.error(`create-project-async 后台执行失败 project=${projectId}: ${err.message}`);
       this.emitProjectProgress(projectId, { type: 'error', message: err.message });
+    }).finally(() => {
+      clearGlobalHeartbeat();
     });
 
     return { success: true, projectId, targetWords: configuredTargetWords, tip: '项目已创建，内容正在后台生成中。请连接 SSE 获取进度。' };
@@ -3333,13 +4673,20 @@ ${excludeRule}
       }
       const listeners = this.projectCreationListeners.get(projectId)!;
 
+      let isComplete = false;
       const listener = (data: any) => {
+        if (isComplete) return;
+        if (data.type !== 'heartbeat') {
+          this.logger.log(`[SSE] → 推送 project=${projectId} type=${data.type}`);
+        }
         subscriber.next({ data: JSON.stringify(data) } as MessageEvent);
         if (data.type === 'done' || data.type === 'error') {
+          isComplete = true;
           subscriber.complete();
         }
       };
       listeners.push(listener);
+      this.logger.log(`[SSE] 新连接 project=${projectId} listeners=${listeners.length}`);
 
       const history = this.projectCreationEventHistory.get(projectId) || [];
       for (const event of history) {
@@ -3356,18 +4703,37 @@ ${excludeRule}
     });
   }
 
-  /** 向指定项目的所有 SSE 监听者广播进度 */
+  /** 向指定项目的所有 SSE/WSS 监听者广播进度 */
   private emitProjectProgress(projectId: string, data: any) {
+    // SSE 路径
     const history = this.projectCreationEventHistory.get(projectId) || [];
     history.push(data);
     if (history.length > 120) history.splice(0, history.length - 120);
     this.projectCreationEventHistory.set(projectId, history);
 
     const listeners = this.projectCreationListeners.get(projectId);
-    if (!listeners) return;
-    for (const l of listeners) {
-      try { l(data); } catch {}
+    if (!listeners || listeners.length === 0) {
+      if (data.type === 'heartbeat') return;
+      this.logger.debug(`[SSE] 无监听者 project=${projectId} event=${data.type}`);
+      // 即使没 SSE 监听者，WebSocket 也要发
+    } else {
+      for (const l of listeners) {
+        try { l(data); } catch {}
+      }
     }
+
+    // WebSocket 路径（无硬编码超时，连接存活=进度存活）
+    try {
+      this.writingGateway.notifyProjectCreationProgress(projectId, {
+        type: data.type,
+        step: data.step,
+        percent: data.percent,
+        message: data.message,
+        status: data.status,
+        stats: data.stats,
+        counts: data.counts,
+      });
+    } catch {} // WebSocket 未就绪时静默
   }
 
   /** 后台执行灵感发现创建项目的全部步骤 */
@@ -3379,6 +4745,7 @@ ${excludeRule}
     const now = () => new Date().toISOString();
     const { v4: uuid } = require('uuid');
     const warnings: string[] = [];
+    let shortHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
     const isShort = dto.storyType !== 'long_novel';
     const ideaStr = JSON.stringify(dto.selectedIdea);
@@ -3533,7 +4900,7 @@ ${excludeRule}
         const heartbeat = setInterval(() => {
           heartbeatPercent = Math.min(heartbeatPercent + 3, 38);
           emit('outline', heartbeatPercent, '长篇综合资料仍在生成中：大纲/角色/世界观/伏笔/时间线...');
-        }, 15000);
+        }, LLM_TUNABLES.PROGRESS_HEARTBEAT_MS);
         try {
           const data = await this.generateConfiguredLongNovelPlan({
             title: dto.title,
@@ -3587,6 +4954,36 @@ ${excludeRule}
                   }), now(), now()
                 );
                 wsCount++;
+              // ★ 传播到 world_system_profiles（长篇路径）
+              try {
+                const existingProfile = db.prepare(`SELECT id FROM world_system_profiles WHERE world_setting_id=?`).get(wid);
+                if (!existingProfile) {
+                  const pid = require('crypto').randomUUID();
+                  db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id,
+                    synopsis, basic_info, era, locations, atmosphere_tone, rules,
+                    social_structure, tech_supernatural, system_mechanics,
+                    culture_customs, naming_rules, scale_plan, ending,
+                    hierarchy_rules, supplementary, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                    pid, projectId, wid,
+                    serializeGeneratedSqlText(worldSetting.storyPremise || dto.title),
+                    serializeGeneratedSqlText(dto.title + ' | ' + (worldSetting.era || '')),
+                    serializeGeneratedSqlText(worldSetting.history || worldSetting.era || ''),
+                    serializeGeneratedSqlText(worldSetting.geography || ''),
+                    serializeGeneratedSqlText(worldSetting.atmosphere || ''),
+                    serializeGeneratedSqlText(worldSetting.rules || ''),
+                    serializeGeneratedSqlText(worldSetting.socialStructure || ''),
+                    serializeGeneratedSqlText(worldSetting.powerSystem || ''),
+                    serializeGeneratedSqlText(worldSetting.powerSystem || ''),
+                    serializeGeneratedSqlText(worldSetting.culture || ''),
+                    '', '',
+                    serializeGeneratedSqlText(worldSetting.endingDirection || ''),
+                    '世界观 > 大纲 > 正文',
+                    serializeGeneratedSqlText((worldSetting.economy || '') + ' | ' + (Array.isArray(worldSetting.factions) ? worldSetting.factions.map((f:any)=>f?.name||f).join('，') : '')),
+                    now(), now()
+                  );
+                }
+              } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败(长篇): ${e.message}`); }
               } catch (error: any) {
                 throw new Error(`世界观写入失败：${error.message}`);
               }
@@ -3629,7 +5026,9 @@ ${excludeRule}
                   db.prepare(`INSERT INTO outlines (id,project_id,level,parent_id,"order",title,content,chapter_function,goal_arc,target_words,actual_words,foreshadowing_ids,plot_points,status,character_ids,scenes,volumes,book_skeleton,created_at,updated_at)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
                     vid, projectId, 'volume', null, volumeWriteCount, vol.title || `第${volumeWriteCount + 1}卷`,
-                    vol.description || '', '', '', 0, 0, '[]', '[]', 'planned', '[]', null, null, null, now(), now()
+                    vol.description || '', '', '', 0, 0, '[]', '[]', 'planned', '[]', null,
+                    JSON.stringify({ goal: vol.description || '', theme: vol.theme || '', keyEvents: vol.keyEvents || [], climax: vol.climax || '', volumeForeshadowing: vol.foreshadowing || [], characterArcs: vol.characterArcs || [] }),
+                    null, now(), now()
                   );
                   volumeWriteCount++;
                   for (const ch of (vol.chapters || [])) {
@@ -3640,7 +5039,7 @@ ${excludeRule}
                       ch.content || '', normalizeOutlineChapterFunction(ch.chapterFunction || ch.function, outlineWriteCount, isShort), inferOutlineGoalArc(outlineWriteCount, isShort),
                       Number(ch.targetWords),
                       0, '[]', '[]', 'planned', '[]',
-                      JSON.stringify({ conflict: ch.conflict || '', hook: ch.hook || '', highlight: ch.highlight || '', scenes: ch.scenes || [], wordCountReason: ch.wordCountReason || '' }),
+                      JSON.stringify({ conflicts: ch.conflicts || (ch.conflict ? [ch.conflict] : []), hook: ch.hook || '', highlights: ch.highlights || ch.highlight || '', foreshadowing: ch.foreshadowing || [], foreshadowingRecover: ch.foreshadowingRecover || [], characterStates: ch.characterStates || [], scenes: ch.scenes || [], wordCountReason: ch.wordCountReason || '' }),
                       null, null, now(), now()
                     );
                     db.prepare(`INSERT INTO chapters (id,project_id,outline_id,volume_index,chapter_index,title,content,word_count,status,created_at,updated_at)
@@ -3782,6 +5181,7 @@ ${excludeRule}
             emit('foreshadowing', 95, `伏笔已写入 ${fsCount} 条`, fsCount > 0 ? 'done' : 'failed');
             emit('timeline', 98, `时间线事件已写入 ${timelineCount} 条`, timelineCount > 0 ? 'done' : 'failed');
             await syncProjectRag();
+            warnings.push(...await this.enrichNewProjectProfiles(projectId, dto));
             await this.generationRecovery.assertActivationReady(projectId);
             this.logger.log(`create-project-async: 长篇RAG索引已同步 project=${projectId}`);
             emit('done', 100, `长篇生成完成（${volumeWriteCount}卷${outlineWriteCount}章）`, 'done');
@@ -3804,15 +5204,22 @@ ${excludeRule}
       let outlineWriteCount = 0;
       let volumeWriteCount = 1;
       let outlineContextPrefix = '';
-      let volId = '';            // 移到方法作用域，fallback 可访问
-      let chapterTitles: any[] = []; // 移到方法作用域，fallback 可访问
+      let volId = '';
+      let chapterTitles: any[] = [];
+
+      // 短篇心跳：防止长时间 LLM 调用期间前端 SSE 超时
+      let shortHeartbeatPercent = 12;
+      shortHeartbeatTimer = setInterval(() => {
+        shortHeartbeatPercent = Math.min(shortHeartbeatPercent + 2, 85);
+        emit('world', shortHeartbeatPercent, '短篇资料仍在生成中：��界观/大纲/角色/伏笔...');
+      }, LLM_TUNABLES.HEARTBEAT_SHORT_MS);
 
       const shortStoryPrompt = `【短篇要求 参照《短故事三步骤》】
 - 章节数量必须由用户目标字数和故事闭环实际决定，包含开篇钩子、递进冲突、高潮与尾声余味
 - 角色数量由冲突与场景需要决定，主角必须主动行动
 - 反转次数和位置由冲突结构决定，不能只靠结尾突转，禁做梦/精神病/系统解释等廉价反转
 - 每章：冲突 + 信息增量 + 结尾钩子
-- 天龙8步法融入每章（目标→诱因→行动→阻碍→误判→反转→代价→钩子）
+- 每章采用八拍结构（目标→诱因→行动→阻碍→误判→反转→代价→钩子）构建冲突递进
 - 开篇前300字必须出现强异常，让读者产生"必须继续看"的疑问
 - 伏笔数量必须由实际章节事件链决定，含出现位置/回收位置/回收冲击，不得使用固定数量`;
       const canonicalCreativeBrief = JSON.stringify({
@@ -3832,31 +5239,103 @@ ${excludeRule}
         const existingWorld = !!db.prepare('SELECT id FROM world_settings WHERE project_id = ?').get(projectId);
         if (!existingWorld) {
           emit('world', 18, '先生成世界观，供后续大纲与人物保持上下文');
-          const worldPrompt = `为这部小说整理服务于剧情的世界资料，不是另写一个同名故事。
+          const worldPrompt = `为这部小说整理服务于剧情的完整世界观设定，不是另写一个同名故事。
 【唯一故事基准】${canonicalCreativeBrief}
-必须保留基准中的时代、现实/幻想类型、地点范围、核心冲突、主角和结局方向；禁止仅根据书名联想，禁止把现实题材改成末世、修仙、科幻、超能力或架空制度。若故事发生在当代现实，只整理真实社会环境、行业规则和剧情涉及地点，不得发明力量体系。
-组织与地点只列剧情实际出现或必需的项目，允许空数组，不得为了填满页面虚构。
-输出JSON:{"storyPremise":"与确认题材一致的故事前提","era":"时代","geography":["剧情实际地点"],"socialStructure":"剧情涉及的社会/行业环境","powerSystem":"仅题材确有特殊体系时填写，否则空字符串","economy":"剧情涉及时填写，否则空字符串","culture":"剧情涉及时填写，否则空字符串","factions":[{"name":"剧情实际组织","type":"类型","description":"与主线的关系"}],"atmosphere":"整体氛围","rules":"必须遵守的现实或世界规则","history":"剧情需要的前史"}`;
-          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.7, timeout: TIMEOUT_MEDIUM, scenario: 'world_building' });
+保留基准的时代、类型、地点、冲突、主角和结局方向；禁止把现实题材改成末世/修仙/科幻/超能力/架空制度。
+
+只输出以下7维度JSON。每维度限定200-400字以内，整体输出不超过 2500 字，避免单维度过度堆砌拖慢生成：
+
+1.世界地理(geography) — 大陆分布 + 主要区域 + 关键地点（标剧情功能）
+2.社会结构(socialStructure) — 阶级 + 政治 + 流动规则
+3.力量体系(powerSystem) — 等级划分 + 来源 + 约束 + 代价（现实题材写"无超自然力量，由真实社会机制驱动"）
+4.经济体系(economy) — 货币 + 贸易 + 产业 + 资源
+5.文化特色(culture) — 习俗 + 节日 + 价值观 + 禁忌
+6.历史背景(history) — 重要历史事件 + 与当前剧情的因果
+7.势力分布(factions) — 主要势力：核心领袖 + 结构 + 范围 + 与主角关系
+
+JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "endingDirection":"结局基调"}`;
+          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 5000 });
           warnings.push(...worldResult.warnings);
           if (worldResult.data && typeof worldResult.data === 'object') {
             const wd = worldResult.data;
-            outlineContextPrefix = JSON.stringify(wd);
+            // 注意：outlineContextPrefix 不再使用瞬时原始 LLM 输出，改为写入后从 DB 回读（见下方），确保大纲上下文=已落库模块
             db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
               uuid(), projectId, `${dto.title}世界观`, serializeGeneratedSqlText(wd.era),
-              JSON.stringify(Array.isArray(wd.geography) ? wd.geography : []),
+              JSON.stringify(Array.isArray(wd.geography) ? wd.geography : (typeof wd.geography === 'string' ? [wd.geography] : [])),
               JSON.stringify(Array.isArray(wd.factions) ? wd.factions : []),
               JSON.stringify([wd.rules || '']), serializeGeneratedSqlText(wd.atmosphere),
-              JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '' }),
+              JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
               serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
-              JSON.stringify(Array.isArray(wd.locations) ? wd.locations : (Array.isArray(wd.geography) ? wd.geography : [])),
+              JSON.stringify(Array.isArray(wd.locations) ? wd.locations : (typeof wd.geography === 'string' ? [wd.geography] : (Array.isArray(wd.geography) ? wd.geography : []))),
               serializeGeneratedSqlText(wd.socialRules || wd.socialStructure),
               serializeGeneratedSqlText(wd.specialSettings || wd.powerSystem || wd.rules),
               isShort ? 'short' : 'full',
               now(), now()
             );
             emit('world', 25, '世界观已写入，开始生成大纲', 'done');
+            // ★ 将7维度世界观数据传播到 world_system_profiles（前端 WorldProfileEditor 读取的表）
+            try {
+              const wsId = db.prepare(`SELECT id FROM world_settings WHERE project_id=? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
+              if (wsId?.id) {
+                const existingProfile = db.prepare(`SELECT id FROM world_system_profiles WHERE world_setting_id=?`).get(wsId.id);
+                if (!existingProfile) {
+                  const pid = require('crypto').randomUUID();
+                  const c = wd.constraints || {};
+                  db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id,
+                    synopsis, basic_info, era, locations, atmosphere_tone, rules,
+                    social_structure, tech_supernatural, system_mechanics,
+                    culture_customs, naming_rules, scale_plan, ending,
+                    hierarchy_rules, supplementary, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                    pid, projectId, wsId.id,
+                    serializeGeneratedSqlText(wd.storyPremise || wd.premise || dto.title),
+                    serializeGeneratedSqlText(dto.title + ' | ' + (wd.era || '')),
+                    serializeGeneratedSqlText(wd.history || wd.era || ''),
+                    serializeGeneratedSqlText(wd.geography || ''),
+                    serializeGeneratedSqlText(wd.atmosphere || ''),
+                    serializeGeneratedSqlText(wd.rules || ''),
+                    serializeGeneratedSqlText(wd.socialStructure || ''),
+                    serializeGeneratedSqlText(wd.powerSystem || ''),
+                    serializeGeneratedSqlText(wd.powerSystem || ''),
+                    serializeGeneratedSqlText(wd.culture || ''),
+                    '', '',
+                    serializeGeneratedSqlText(wd.endingDirection || ''),
+                    '世界观 > 大纲 > 正文',
+                    serializeGeneratedSqlText((wd.economy || '') + ' | ' + (Array.isArray(wd.factions) ? wd.factions.map((f:any)=>f?.name||f).join('，') : '')),
+                    now(), now()
+                  );
+                  this.logger.log(`world_system_profiles 已创建 (pid=${pid})，7维度数据已传播`);
+                }
+              }
+            } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败: ${e.message}`); }
+            // Fix B：大纲上下文必须来自"已保存"的世界观模块，而非瞬时原始 LLM 输出，避免大纲脱离已落库设定
+            const savedWorld = db.prepare(`SELECT era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
+            if (savedWorld) {
+              const parseMaybeArray = (v: unknown): any[] => {
+                if (v == null) return [];
+                if (Array.isArray(v)) return v as any[];
+                try { const p = JSON.parse(String(v)); return Array.isArray(p) ? p : [p]; } catch { return []; }
+              };
+              const parseConstraints = (): Record<string, any> => {
+                if (!savedWorld.constraints) return {};
+                try { const p = JSON.parse(String(savedWorld.constraints)); return p && typeof p === 'object' ? p : {}; } catch { return {}; }
+              };
+              const wd2 = {
+                era: savedWorld.era,
+                geography: parseMaybeArray(savedWorld.geography),
+                factions: parseMaybeArray(savedWorld.factions),
+                rules: parseMaybeArray(savedWorld.rules),
+                atmosphere: savedWorld.atmosphere,
+                constraints: parseConstraints(),
+                storyPremise: savedWorld.story_premise,
+                locations: parseMaybeArray(savedWorld.locations),
+                socialRules: savedWorld.social_rules,
+                specialSettings: savedWorld.special_settings,
+                settingType: savedWorld.setting_type,
+              };
+              outlineContextPrefix = JSON.stringify(wd2);
+            }
           } else {
             emit('world', 25, '世界观生成失败，停止创建以避免后续上下文失真', 'failed');
             this.emitProjectProgress(projectId, { type: 'error', success: false, projectId, message: '世界观生成失败，未继续生成大纲，避免上下文不一致。', warnings });
@@ -3909,7 +5388,7 @@ ${excludeRule}
             const cardResult = await this.llmCallWithRetry<Record<string, any>>(
               '短篇故事卡',
               `为短篇小说“${dto.title}”生成可验收的完整故事卡。用户项目卡配置：${JSON.stringify(dto.settings || {})}。用户配置目标总字数为${dto.targetWords}字，必须严格按全部配置规划，不得改写目标字数、叙事视角、目标读者、风格或禁忌。\n【唯一事实来源】${JSON.stringify(dto.selectedIdea)}\n不得改变人物姓名、身份、亲属关系、受害者与责任人、案件真相、反转和结局；不得给未明确关系的人擅自添加父子、夫妻、收养或血缘关系；未命名人物保持角色称谓，不得为了显得具体而新增姓名。\n只输出JSON对象，必须包含非空字段 coreConflict（核心冲突）、protagonistDesire（主角欲望）、turningPoint（关键转折）、reveal（揭示）、ending（结局与冲突闭环），以及 scenes 数组；scenes 数量按故事实际需要决定，每项必须包含 goal、conflict、outcome。`,
-              { temperature: 0.7, timeout: TIMEOUT_MEDIUM, scenario: 'outline', validate: isCompleteStoryCard },
+              { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'outline', validate: isCompleteStoryCard },
             );
             warnings.push(...cardResult.warnings);
             card = unwrapStoryCard(cardResult.data);
@@ -3928,7 +5407,7 @@ ${excludeRule}
             const cardAudit = await this.llmCallWithRetry<any>(
               `短篇故事卡事实审查${cardAuditAttempt + 1}`,
               `只核对故事卡是否忠实于已确认题材，不评价文风。\n【已确认题材，唯一事实来源】${JSON.stringify(dto.selectedIdea)}\n【候选故事卡】${JSON.stringify(verifiedCard)}\n检查人物姓名、身份、亲属/血缘/收养关系、受害者、责任人、案件真相、主角目标、核心反转和结局。题材未明确的关系不得被故事卡擅自确定。只输出JSON:{"consistent":true,"contradictions":[]}。`,
-              { temperature: 0.1, timeout: TIMEOUT_MEDIUM, scenario: 'quality_check', validate: value => !!value && typeof value === 'object' && !Array.isArray(value) },
+              { temperature: 0.1, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'quality_check', validate: value => !!value && typeof value === 'object' && !Array.isArray(value) },
             );
             const audit = cardAudit.data;
             const contradictions = Array.isArray(audit?.contradictions)
@@ -3941,7 +5420,7 @@ ${excludeRule}
             const repairedCard = await this.llmCallWithRetry<any>(
               '短篇故事卡事实修复',
               `重新生成故事卡，完全丢弃候选卡中的错误事实，只能使用已确认题材。\n【已确认题材，唯一事实来源】${JSON.stringify(dto.selectedIdea)}\n【禁止出现的错误】${contradictions.join('；') || '审查未确认一致'}\n不得新增姓名、亲属/血缘/收养关系、案件真相或另一套结局。保持原配置目标总字数${dto.targetWords}。只输出满足以下结构的JSON对象：coreConflict、protagonistDesire、turningPoint、reveal、ending、scenes；scenes每项含goal、conflict、outcome。`,
-              { temperature: 0.2, timeout: TIMEOUT_MEDIUM, scenario: 'outline', validate: isCompleteStoryCard },
+              { temperature: 0.2, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'outline', validate: isCompleteStoryCard },
             );
             const repairedVerifiedCard = unwrapStoryCard(repairedCard.data);
             if (!repairedVerifiedCard) throw new Error('短篇故事卡事实修复未返回完整结构，未继续生成大纲。');
@@ -3952,6 +5431,12 @@ ${excludeRule}
         const titleFunctionGuide = isShort
           ? 'opening/exposition/rising_action/conflict/climax/transition/cliffhanger/resolution，前3章必须快速出钩子、疑点和行动'
           : 'opening/charging/conflict/explosion/breathing/paving/cliffhanger/transition/closing，前1-3章必须有强异常、明确行动和可追读悬念';
+        // 章节数可行性区间：每章 3200-4000 字时，能承载 targetWords 的章数必须落在此区间内
+        const CHAPTER_WORD_MIN = 3200;
+        const CHAPTER_WORD_MAX = 4000;
+        const minChapters = Math.max(1, Math.ceil(dto.targetWords / CHAPTER_WORD_MAX));
+        const maxChapters = Math.max(minChapters, Math.floor(dto.targetWords / CHAPTER_WORD_MIN));
+        const recommendedChapters = Math.min(maxChapters, Math.max(minChapters, Math.round(dto.targetWords / ((CHAPTER_WORD_MIN + CHAPTER_WORD_MAX) / 2))));
         let titleRawContent = '';
         for (let attempt = 0; attempt < 2 && !titleRawContent.trim(); attempt++) {
           try {
@@ -3959,8 +5444,8 @@ ${excludeRule}
                prompt: `为${isShort ? '短篇' : '长篇'}规划章节，不能另写同名故事。
 唯一故事基准:${canonicalCreativeBrief}
 ${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : ''}
-用户配置的目标总字数为${dto.targetWords}字。章节数量由完整承载这条既定事件链所需的场景和节奏决定，不得改写时代、人物、人物关系、核心冲突、反转和结局，不得新增另一套世界规则。每行一章，格式: 序号|标题|功能|本章唯一推进任务。最后一栏必须说明本章推进哪个既定事件、揭示什么以及结束时造成什么结果；相邻章节不得重复同一次报警、取证、身份揭示或对峙。功能:${titleFunctionGuide}。禁止全部使用paving，只输出纯文本。`,
-              scenario: 'outline', temperature: 0.7, timeout: TIMEOUT_SIMPLE,
+用户配置的目标总字数为${dto.targetWords}字；每章须在3200-4000字，因此全书章数必须在${minChapters}-${maxChapters}章之间（建议规划${recommendedChapters}章），章数过少无法承载目标字数、过多会使单章低于下限。章节数量由完整承载这条既定事件链所需的场景和节奏决定，不得改写时代、人物、人物关系、核心冲突、反转和结局，不得新增另一套世界规则。每行一章，格式: 序号|标题|功能|本章唯一推进任务。最后一栏必须说明本章推进哪个既定事件、揭示什么以及结束时造成什么结果；相邻章节不得重复同一次报警、取证、身份揭示或对峙。功能:${titleFunctionGuide}。禁止全部使用paving，只输出纯文本。`,
+              scenario: 'outline', temperature: 0.7, timeout: LLM_TUNABLES.timeoutSimple(),
             });
             titleRawContent = titleResponse.content || '';
           } catch (error: any) {
@@ -3994,8 +5479,41 @@ ${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : '
         if (chapterCount === 0) {
           throw new Error('章节规划未返回任何有效章节。未使用固定章节数或基础标题降级，项目创建已停止。');
         }
-        if (chapterCount * 3200 > dto.targetWords || chapterCount * 4000 < dto.targetWords) {
-          throw new Error(`模型规划${chapterCount}章无法在每章3200-4000字的前提下承载项目目标${dto.targetWords}字；未平均分配或降级，请重新规划章节结构。`);
+        if (chapterCount < minChapters || chapterCount > maxChapters) {
+          // 章数不可行：给模型一次明确章数的重规划机会，避免直接失败导致创建循环
+          this.logger.warn(`章节规划章数 ${chapterCount} 不在可行区间 ${minChapters}-${maxChapters}，按目标字数重规划一次`);
+          try {
+            const retryResponse = await this.realLLM.generate({
+              prompt: `为${isShort ? '短篇' : '长篇'}规划章节，不能另写同名故事。
+唯一故事基准:${canonicalCreativeBrief}
+${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : ''}
+用户配置的目标总字数为${dto.targetWords}字；每章必须3200-4000字，因此全书必须恰好规划 ${recommendedChapters} 章（不得多也不得少）。每行一章，格式: 序号|标题|功能|本章唯一推进任务。最后一栏必须说明本章推进哪个既定事件、揭示什么以及结束时造成什么结果；相邻章节不得重复同一次报警、取证、身份揭示或对峙。功能:${titleFunctionGuide}。禁止全部使用paving，只输出纯文本。`,
+              scenario: 'outline', temperature: 0.7, timeout: LLM_TUNABLES.timeoutSimple(),
+            });
+            const retryContent = retryResponse.content || '';
+            chapterTitles = [];
+            for (const line of retryContent.split('\n')) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              const parts = trimmed.split('|');
+              if (parts.length >= 2 && /\d/.test(parts[0])) {
+                const parsedOrder = Math.max(0, (parseInt(parts[0], 10) || chapterTitles.length + 1) - 1);
+                chapterTitles.push({ order: parsedOrder, title: parts[1].trim(), func: normalizeOutlineChapterFunction(parts[2], parsedOrder, isShort), brief: parts.slice(3).join('|').trim() });
+              } else {
+                const m = trimmed.match(/^(\d+)[.\s、]+(.+)/);
+                if (m) {
+                  const parsedOrder = Math.max(0, (parseInt(m[1], 10) || chapterTitles.length + 1) - 1);
+                  chapterTitles.push({ order: parsedOrder, title: m[2].trim(), func: normalizeOutlineChapterFunction(undefined, parsedOrder, isShort), brief: '' });
+                }
+              }
+            }
+            chapterCount = chapterTitles.length;
+          } catch (error: any) {
+            this.logger.warn(`章节重规划失败: ${error.message}`);
+          }
+        }
+        if (chapterCount < minChapters || chapterCount > maxChapters) {
+          throw new Error(`模型规划${chapterCount}章无法在每章3200-4000字的前提下承载项目目标${dto.targetWords}字；需在 ${minChapters}-${maxChapters} 章之间（建议 ${recommendedChapters} 章）。请重新规划章节结构。`);
         }
 
         volId = uuid();
@@ -4009,6 +5527,8 @@ ${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : '
           chapterFunction: string;
           goalArc: string;
           targetWords: number;
+          allowedMin: number;
+          allowedMax: number;
           scenes: string;
         }> = [];
         const ideaSpan = `${outlineContextPrefix ? `世界观上下文:${outlineContextPrefix}\n` : ''}${shortStoryCard ? `短篇故事卡:${JSON.stringify(shortStoryCard)}\n` : ''}灵感素材:${JSON.stringify(dto.selectedIdea)}`;
@@ -4019,10 +5539,35 @@ ${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : '
           responsibility: chapter.brief || '',
         }));
 
-        const unwrapChapter = (value: any): Record<string, any> | null => {
-          if (Array.isArray(value)) return value.length === 1 && value[0] && typeof value[0] === 'object' ? value[0] : null;
-          if (value?.chapter && typeof value.chapter === 'object') return value.chapter;
-          if (Array.isArray(value?.chapters) && value.chapters.length === 1) return value.chapters[0];
+        const unwrapChapter = (value: any, chapterLabel?: string, silent = false): Record<string, any> | null => {
+          const label = chapterLabel ? `第${chapterLabel}章 ` : '';
+          if (Array.isArray(value)) {
+            const objects = value.filter(item => item && typeof item === 'object');
+            if (objects.length >= 1) {
+              // 仅在"真实采纳"时告警（silent=false 由 llmCallWithRetry 的 validate 调用，避免每次重试重复刷屏）
+              if (objects.length > 1 && !silent) warnings.push(`${label}LLM 返回了 ${objects.length} 个 JSON 对象，已自动取第一个作为本章纲`);
+              return objects[0];
+            }
+            return null;
+          }
+          if (value?.chapter && typeof value.chapter === 'object') {
+            if (Array.isArray(value.chapter)) {
+              const objects = value.chapter.filter((item: any) => item && typeof item === 'object');
+              if (objects.length >= 1) {
+                if (objects.length > 1) warnings.push(`${label}LLM 在 chapter 字段内返回了 ${objects.length} 个对象，已自动取第一个`);
+                return objects[0];
+              }
+            } else {
+              return value.chapter;
+            }
+          }
+          if (Array.isArray(value?.chapters)) {
+            const objects = value.chapters.filter((item: any) => item && typeof item === 'object');
+            if (objects.length >= 1) {
+              if (objects.length > 1) warnings.push(`${label}LLM 在 chapters 字段内返回了 ${objects.length} 个对象，已自动取第一个作为本章纲`);
+              return objects[0];
+            }
+          }
           return value && typeof value === 'object' ? value : null;
         };
 
@@ -4043,11 +5588,36 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
 【全书章节分工】${JSON.stringify(chapterResponsibilityPlan)}
 本章只能完成自己的推进任务；不得提前执行后续章节的调查、取证、身份揭示、对峙、报警或结局。结尾钩子只能制造下一步动机或障碍，不能把下一章的行动先做一遍。
 设定:${ideaSpan}
+【核心层级纪律（最高优先级）】核心设定（上方"设定"中的已保存世界观）> 大纲 > 正文。本章大纲必须严格遵循已保存的核心设定：不得新增另一套世界规则、力量体系、结局方向或架空制度；若本次生成与已保存世界观存在冲突，一律以已保存核心设定为准，并在冲突处回扣既有设定而非另起炉灶。
 【硬性连续性】人物姓名、亲属关系、责任归属、案件真相和结局必须逐字遵守确认题材；不得无因新增伤病、物证、神秘气味、秘密关系或新案件。已经在前文完成的报警、取证、身份揭示、威胁和对峙不得换一种说法再次发生。新增细节必须在本章产生作用，或明确写入foreshadowing并在后续既定事件中有回收位置。
+【整体质量要求（最高优先级，不可妥协）】
+- 主线清晰，副线丰富：本章必须推进唯一指定任务（主线），同时激活/推进至少一条配角线或情感线（副线）
+- 节奏张弛有度：紧张场景后必须给呼吸段落（如环境描写、配角对话、主角独白），不能连续高强度
+- 爽点密集但不突兀：2-3个爽点必须有剧情铺垫，不可"天降"——每个爽点都必须与本章场景和人物行动有因果链
+- 人物成长合理：人物状态变化必须有触发事件作为原因，不能凭空变强/变聪明/变勇敢
+- 伏笔设置和回收明确：新伏笔必须有回收章节位置，回收的伏笔必须有前文埋设引用
+【大纲↔正文铁律】大纲是正文的唯一合同。正文生成的每一段都必须能对应到本章大纲中列出的具体场景或人物行动。大纲中"核心内容"的5步事件链必须在正文中完整展开，不得跳过或合并。
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明依据；选择后必须让剩余章节仍可按每章3200-4000字精确承载项目总字数。
-只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflict,highlight,foreshadowing,foreshadowingRecover,hook,emotionalTone。content必须不少于80字并完整说明具体事件链、人物动作与结果；scenes必须是非空数组并列出所有必要场景；conflict、characterActions、hook均不得为空。只输出一个合法JSON对象，不要数组、解释或Markdown。`;
-          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章场景数量、冲突强度和剩余总字数确定","content":"用不少于80字说明本章从开场、行动、受阻到结果的完整事件链。","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflict":"本章核心冲突","highlight":"本章记忆点","foreshadowing":[],"foreshadowingRecover":[],"hook":"只引出下一章动机或障碍的结尾钩子","emotionalTone":"情绪基调"}`;
+只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
+按以下文档结构生成（每项必须填，不得缺失或空数组）：
+1. 核心内容 (content) — 100字左右的事件链要点，从开场到转折结果的5步推进，不要展开成正文。
+2. 主要场景 (scenes) — 2-3个关键场景数组，每场写 location(地点) + goal(本场目标) + conflict(本场阻碍) + outcome(本场结果)。
+3. 人物行动 (characterActions) — 主要人物的具体行动 + 行动结果数组，不得为空。
+4. 冲突设计 (conflicts) — 本章冲突设计数组：列出2-3个本章冲突（如人物内心冲突/人际冲突/环境冲突/系统冲突），每个含 冲突名 + 冲突双方 + 触发条件 + 升级路径 + 本章解决程度。
+5. 爽点设置 (highlights) — 2-3个本章爽点/记忆点/情绪暴击数组：每个含 point + trigger；本章必须至少2-3个爽点。
+6. 伏笔设置 (foreshadowing) — 新增伏笔数组（至少1条），格式{"content","type","evidenceText","riskLevel"}；无可埋设则写明确原因而非空数组。
+7. 伏笔回收 (foreshadowingRecover) — 回收前文伏笔数组，格式{"reference","method"}；无回收则写[]。
+8. 人物状态 (characterStates) — 至少1个核心人物本章状态变化，格式{"character","stateBefore","stateAfter","trigger"}。
+9. 下章预告 (hook) — 结尾留下的钩子，只引出下一章的动机或障碍。
+10. 情绪基调 (emotionalTone) — 简短描述本章情绪走向。
+
+只输出一个合法JSON对象，不要数组、解释或Markdown。`;
+          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章2-3个场景、冲突强度与剩余总字数确定","content":"100字左右的事件链要点：开场→升级→受阻→转折→结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[{"point":"爽点/记忆点一","trigger":"触发场景"},{"point":"爽点/记忆点二","trigger":"触发场景"}],"foreshadowing":[{"content":"本章新埋的伏笔内容","type":"hint|setup|mystery","evidenceText":"线索文字","riskLevel":"low|medium|high"}],"foreshadowingRecover":[{"reference":"前文已埋的伏笔","method":"回收方式"}],"characterStates":[{"character":"人物名","stateBefore":"本章前状态","stateAfter":"本章后状态","trigger":"触发事件"}],"hook":"结尾钩子——只引出下一章动机或障碍","emotionalTone":"情绪基调"}`;
+
+          const countCJK = (s: string): number => (String(s || '').match(/[㐀-䶿一-鿿]/g) || []).length;
+          // help: coerce string to single-element array
+          const toArray = (v: any): any[] => Array.isArray(v) ? v : (typeof v === 'string' && v.trim() ? [v] : []);
           const assessChapter = (candidate: Record<string, any> | null): string[] => {
             if (!candidate) return ['结果不是合法的单章JSON对象'];
             const issues: string[] = [];
@@ -4056,10 +5626,14 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
             const scenes = Array.isArray(candidate.scenes) ? candidate.scenes : (Array.isArray(candidate.mainScenes) ? candidate.mainScenes : []);
             if (!Number.isInteger(targetWords) || targetWords < allowedMin || targetWords > allowedMax) issues.push(`targetWords必须是${allowedMin}-${allowedMax}之间的整数`);
             if (!String(candidate.wordCountReason || '').trim()) issues.push('缺少wordCountReason');
-            if (content.length < 80) issues.push('content不足80字或事件链不完整');
+            const coreLen = countCJK(content);
+            if (coreLen < 30 || coreLen > 280) issues.push(`核心内容过短或过长（当前约${coreLen}字）`);
             if (scenes.length === 0) issues.push('scenes必须是非空数组');
             if (!hasUsefulValue(candidate.characterActions || candidate['人物行动'])) issues.push('缺少characterActions');
-            if (!String(candidate.conflict || candidate.conflictDesign || candidate['冲突设计'] || '').trim()) issues.push('缺少conflict');
+            // 冲突：新旧格式均接受
+            if (!(candidate.conflicts || candidate.conflict || candidate.conflictDesign)) issues.push('缺少conflict/conflicts');
+            // highlights：字符串自动包装
+            if (!(candidate.highlights || candidate.highlight)) issues.push('缺少highlights/highlight');
             if (!String(candidate.hook || candidate.nextChapterHook || candidate.nextHook || candidate['下章钩子'] || '').trim()) issues.push('缺少hook');
             return issues;
           };
@@ -4068,38 +5642,64 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
             `第${order + 1}章详细大纲`,
             chapterPrompt + chapterJsonExample,
             {
-              temperature: 0.8, timeout: TIMEOUT_CONTENT, scenario: 'outline',
-              validate: value => assessChapter(unwrapChapter(value)).length === 0,
-              describeValidation: value => assessChapter(unwrapChapter(value)),
+              temperature: 0.8, timeout: LLM_TUNABLES.timeoutContent(), scenario: 'outline',
+              validate: value => assessChapter(unwrapChapter(value, order + 1, true)).length === 0,
+              describeValidation: value => assessChapter(unwrapChapter(value, order + 1, true)),
             },
           );
           warnings.push(...chapterResult.warnings);
-          let chData = unwrapChapter(chapterResult.data);
+          let chData = unwrapChapter(chapterResult.data, order + 1);
+          let repairRaw = chapterResult.rawContent;
 
           let chapterIssues = assessChapter(chData);
           if (chapterIssues.length > 0) {
             const repairResult = await this.llmCallWithRetry<any>(
               `第${order + 1}章结构修复`,
-              `修复下面第${order + 1}章详细大纲的结构和缺失字段。不得缩短或编造与既有故事矛盾的内容，必须严格执行原章节任务与项目配置。不要解释、不要Markdown，只输出一个完整JSON对象。\n\n问题：\n${chapterIssues.join('\n')}\n\n原始结果：\n${chapterResult.rawContent}\n\n完整要求：\n${chapterPrompt}${chapterJsonExample}`,
+              `修复下面第${order + 1}章详细大纲的结构和缺失字段。不得缩短或编造与既有故事矛盾的内容，必须严格执行原章节任务与项目配置。不要解释、不要Markdown，只输出一个完整JSON对象。\n\n问题：\n${chapterIssues.join('\n')}\n\n原始结果：\n${repairRaw}\n\n完整要求：\n${chapterPrompt}${chapterJsonExample}`,
               {
-                scenario: 'outline', temperature: 0.25, timeout: TIMEOUT_CONTENT,
-                validate: value => assessChapter(unwrapChapter(value)).length === 0,
-                describeValidation: value => assessChapter(unwrapChapter(value)),
+                scenario: 'outline', temperature: 0.25, timeout: LLM_TUNABLES.timeoutContent(),
+                validate: value => assessChapter(unwrapChapter(value, order + 1, true)).length === 0,
+                describeValidation: value => assessChapter(unwrapChapter(value, order + 1, true)),
               },
             );
             warnings.push(...repairResult.warnings);
-            chData = unwrapChapter(repairResult.data);
+            repairRaw = repairResult.rawContent || repairRaw;
+            chData = unwrapChapter(repairResult.data, order + 1);
             chapterIssues = assessChapter(chData);
           }
+
+          // 强修复：解析为 null（模型返回散文/拒绝/格式彻底损坏）时，从原始文本重建单章对象，覆盖"结果不是合法的单章JSON对象"路径
           if (chapterIssues.length > 0 || !chData) {
-            throw new Error(`第${order + 1}章详细大纲未通过完整性校验：${chapterIssues.join('；')}。未写入任何大纲。`);
+            try {
+              const salvageResult = await this.llmCallWithRetry<any>(
+                `第${order + 1}章JSON重建`,
+                `下面这段文本本应是第${order + 1}章详细大纲，但无法解析为合法JSON。请严格只输出一个完整JSON对象，不要任何解释、前言或Markdown，必须包含字段：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。\n\n原始（可能含错误格式）输出：\n${repairRaw}\n\n完整要求：\n${chapterPrompt}${chapterJsonExample}`,
+                {
+                  scenario: 'outline', temperature: 0.2, timeout: LLM_TUNABLES.timeoutContent(),
+                  validate: value => assessChapter(unwrapChapter(value, order + 1, true)).length === 0,
+                  describeValidation: value => assessChapter(unwrapChapter(value, order + 1, true)),
+                },
+              );
+              warnings.push(...salvageResult.warnings);
+              chData = unwrapChapter(salvageResult.data, order + 1);
+              chapterIssues = assessChapter(chData);
+            } catch (err: any) {
+              warnings.push(`第${order + 1}章JSON重建调用失败：${err?.message || err}`);
+            }
+          }
+
+          // 仍失败：中止整轮创建并报清晰错误（不再"静默跳过本章"——静默跳过会导致章节数
+          // 与目标字数合计不一致，出现 16800≠20000 这类静默错误，比创建中断更难排查）。
+          // 后续可在前端支持"仅重生成失败单章"来提速，但创建阶段必须保证大纲完整落库。
+          if (chapterIssues.length > 0 || !chData) {
+            throw new Error(`第${order + 1}章详细大纲多次修复仍未能通过完整性校验（${chapterIssues.join('；') || '解析为非法JSON'}），未写入任何大纲。请稍后单独重生成该章或检查 LLM 返回。`);
           }
 
           const auditChapterContinuity = async (candidate: Record<string, any>): Promise<string[]> => {
             const auditResult = await this.llmCallWithRetry<any>(
               `第${order + 1}章连续性审查`,
               `只核对候选章纲是否严格延续同一故事，不评价文风。\n【唯一故事基准】${canonicalCreativeBrief}\n${shortStoryCard ? `【故事闭环】${JSON.stringify(shortStoryCard)}\n` : ''}${previousSummary ? `【全部已确认前文】${previousSummary}\n` : ''}【全书章节分工】${JSON.stringify(chapterResponsibilityPlan)}\n【本章指定任务】${expectedChapter.brief || expectedChapter.title}\n【候选章纲】${JSON.stringify(candidate)}\n检查人物身份与亲属关系、事件先后、已揭示信息是否重复、伤病/物证/线索是否无因出现、结局是否被提前或改写，以及是否提前执行后续章节任务。只输出JSON:{"consistent":true,"contradictions":[]}`,
-              { temperature: 0.1, timeout: TIMEOUT_MEDIUM, scenario: 'quality_check', validate: value => !!value && typeof value === 'object' && !Array.isArray(value) },
+              { temperature: 0.1, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'quality_check', validate: value => !!value && typeof value === 'object' && !Array.isArray(value) },
             );
             const audit = auditResult.data;
             if (audit?.consistent === true && Array.isArray(audit?.contradictions) && audit.contradictions.length === 0) return [];
@@ -4112,15 +5712,15 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           for (let repairAttempt = 0; continuityIssues.length > 0 && repairAttempt < 3; repairAttempt += 1) {
             const continuityRepair = await this.llmCallWithRetry<any>(
               `第${order + 1}章连续性修复${repairAttempt + 1}`,
-              `重新生成第${order + 1}章章纲。完全丢弃错误旧章纲，不要复述或改写其中的错误事实。下面列出的内容是禁止出现的错误，不是可用素材：\n【禁止出现的错误】${continuityIssues.join('；')}\n【全部已确认前文】${previousSummary || '无'}\n【全书章节分工】${JSON.stringify(chapterResponsibilityPlan)}\n【唯一故事基准】${canonicalCreativeBrief}\n【已审查故事闭环】${JSON.stringify(shortStoryCard || {})}\n【本章唯一指定任务】${expectedChapter.brief || expectedChapter.title}\n本章只执行自己的任务，不得透露或完成后续章节任务。不得新增人物姓名、亲属/血缘/收养关系、伤病、物证或另一套真相。targetWords必须是${allowedMin}-${allowedMax}之间的整数并保留wordCountReason。严格输出一个完整JSON对象，字段为title,targetWords,wordCountReason,content,scenes,characterActions,conflict,highlight,foreshadowing,foreshadowingRecover,hook,emotionalTone；content不少于80字，scenes为非空数组，characterActions、conflict、hook非空。不要解释，不要Markdown。`,
+              `重新生成第${order + 1}章章纲。完全丢弃错误旧章纲，不要复述或改写其中的错误事实。下面列出的内容是禁止出现的错误，不是可用素材：\n【禁止出现的错误】${continuityIssues.join('；')}\n【全部已确认前文】${previousSummary || '无'}\n【全书章节分工】${JSON.stringify(chapterResponsibilityPlan)}\n【唯一故事基准】${canonicalCreativeBrief}\n【已审查故事闭环】${JSON.stringify(shortStoryCard || {})}\n【本章唯一指定任务】${expectedChapter.brief || expectedChapter.title}\n本章只执行自己的任务，不得透露或完成后续章节任务。不得新增人物姓名、亲属/血缘/收养关系、伤病、物证或另一套真相。targetWords必须是${allowedMin}-${allowedMax}之间的整数并保留wordCountReason。严格输出一个完整JSON对象，字段为title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone；content必须严格控制在80-200个汉字之间，scenes为非空数组，characterActions/conflicts/highlights/hook非空（conflicts/highlights/foreshadowing/characterStates可以是单元素数组）。不要解释，不要Markdown。`,
               {
-                scenario: 'outline', temperature: 0.2, timeout: TIMEOUT_CONTENT,
-                validate: value => assessChapter(unwrapChapter(value)).length === 0,
-                describeValidation: value => assessChapter(unwrapChapter(value)),
+                scenario: 'outline', temperature: 0.2, timeout: LLM_TUNABLES.timeoutContent(),
+                validate: value => assessChapter(unwrapChapter(value, order + 1, true)).length === 0,
+                describeValidation: value => assessChapter(unwrapChapter(value, order + 1, true)),
               },
             );
             warnings.push(...continuityRepair.warnings);
-            const repaired = unwrapChapter(continuityRepair.data);
+            const repaired = unwrapChapter(continuityRepair.data, order + 1, true);
             const repairedStructureIssues = assessChapter(repaired);
             if (repaired && repairedStructureIssues.length === 0) {
               chData = repaired;
@@ -4140,13 +5740,21 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           const content = String(chData.content || chData.coreContent || chData.summary || chData.plot || chData['核心内容']).trim();
           const chapterTargetWords = Number(chData.targetWords);
           const wordCountReason = String(chData.wordCountReason).trim();
+          // 兼容新旧格式：conflict/conflicts 均接受，foreshadowing 字符串/数组均包装
+          const wrapArr = (v: any) => Array.isArray(v) ? v : (v ? [v] : []);
+          const conflictsNormalized = toArray(chData.conflicts || chData.conflict || chData.conflictDesign);
+          const hlNormalized = toArray(chData.highlights || chData.highlight);
+          const fsNormalized = toArray(chData.foreshadowing || chData.foreshadowingSet || chData['伏笔设置']);
+          const fsRecoveryNormalized = toArray(chData.foreshadowingRecover || chData.foreshadowingPayoff || chData['伏笔回收']);
+          const csNormalized = toArray(chData.characterStates || chData.stateChanges);
           const chapterScenes = {
-            conflict: chData.conflict || chData.conflictDesign || chData['冲突设计'],
-            foreshadowing: chData.foreshadowing || chData.foreshadowingSet || chData['伏笔设置'] || '',
-            foreshadowingRecover: chData.foreshadowingRecover || chData.foreshadowingPayoff || chData['伏笔回收'] || '',
-            hook: chData.hook || chData.nextChapterHook || chData.nextHook || chData['下章钩子'],
+            conflicts: conflictsNormalized,
+            foreshadowing: fsNormalized,
+            foreshadowingRecover: fsRecoveryNormalized,
+            hook: chData.hook || chData.nextChapterHook || chData.nextHook || chData['下章预告'],
             emotionalTone: chData.emotionalTone || '',
-            highlight: chData.highlight || chData.highlightDesign || chData['爽点设置'] || '',
+            highlights: hlNormalized,
+            characterStates: csNormalized,
             previousConnection: chData.previousConnection || '',
             scenes: Array.isArray(chData.scenes) ? chData.scenes : chData.mainScenes,
             characterActions: chData.characterActions || chData['人物行动'],
@@ -4165,13 +5773,42 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
             chapterFunction: normalizeOutlineChapterFunction(chData.chapterFunction || chData.function || chData.pacingFunction || expectedChapter.func, order, isShort),
             goalArc: chData.goalArc || inferOutlineGoalArc(order, isShort),
             targetWords: chapterTargetWords,
+            allowedMin,
+            allowedMax,
             scenes: JSON.stringify(chapterScenes),
           });
           plannedChapterWords += chapterTargetWords;
           previousSummary += `${previousSummary ? '\n' : ''}第${order + 1}章:${content}\n本章结果:${serializeGeneratedSqlText(chData.outcome || chData.result || chData.hook)}\n`;
         }
-        if (plannedChapterWords !== dto.targetWords) {
-          throw new Error(`章节动态目标合计${plannedChapterWords}字，与项目配置${dto.targetWords}字不一致；未写入任何大纲。`);
+
+        // 字数合计校正：LLM 各章 targetWords 之和不一定恰好等于项目目标，逐个"硬碰硬"失败。
+        // 改为在每章各自的动态允许区间 [allowedMin, allowedMax] 内，把差额均摊到各章（取整，
+        // 并夹回合法区间），使合计严格等于 dto.targetWords，同时不破坏"每章3200-4000"的硬下限。
+        if (plannedChapterWords !== dto.targetWords && preparedChapters.length > 0) {
+          let residual = dto.targetWords - plannedChapterWords;
+          // 优先在允许范围内能吸收差额的章节间分摊；无法全部吸收则放大到所有章节的夹取范围
+          const totalSlack = preparedChapters.reduce((sum, c) => sum + (Math.min(c.allowedMax, 4000) - Math.max(c.allowedMin, 3200)), 0);
+          if (totalSlack + preparedChapters.length * 200 >= Math.abs(residual)) {
+            const per = Math.trunc(residual / preparedChapters.length);
+            let assigned = 0;
+            for (let i = 0; i < preparedChapters.length; i++) {
+              const c = preparedChapters[i];
+              const isLast = i === preparedChapters.length - 1;
+              let adj = isLast ? residual - assigned : per;
+              let newTarget = Math.round(c.targetWords + adj);
+              // 夹回单章合法区间（保持 3200-4000 上下限）
+              newTarget = Math.max(3200, Math.min(4000, newTarget));
+              const delta = newTarget - c.targetWords;
+              c.targetWords = newTarget;
+              assigned += delta;
+            }
+            plannedChapterWords = preparedChapters.reduce((s, c) => s + c.targetWords, 0);
+          }
+          if (plannedChapterWords !== dto.targetWords) {
+            throw new Error(`章节动态目标合计${plannedChapterWords}字，与项目配置${dto.targetWords}字不一致（差额${dto.targetWords - plannedChapterWords}无法在每章3200-4000字区间内校正）；未写入任何大纲。`);
+          } else {
+            warnings.push(`已按项目目标${dto.targetWords}字在每章3200-4000字区间内校正各章字数合计。`);
+          }
         }
 
         db.exec('BEGIN IMMEDIATE');
@@ -4179,7 +5816,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           db.prepare(`INSERT INTO outlines (id,project_id,level,parent_id,"order",title,content,chapter_function,goal_arc,target_words,actual_words,foreshadowing_ids,plot_points,status,character_ids,scenes,volumes,book_skeleton,created_at,updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
             volId, projectId, isShort ? 'book' : 'volume', null, 0, isShort ? '短篇故事卡' : '正文',
-            isShort ? JSON.stringify(shortStoryCard) : '', '', '', dto.targetWords, 0, '[]', '[]', 'planned', '[]',
+            isShort ? JSON.stringify(shortStoryCard) : '', '', dto.targetWords, 0, '[]', '[]', 'planned', '[]',
             isShort ? JSON.stringify(shortStoryCard?.scenes || []) : null, null,
             isShort ? JSON.stringify(shortStoryCard) : null, now(), now());
           for (const chapter of preparedChapters) {
@@ -4262,17 +5899,23 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           const normalizeGeneratedCharacters = (value: any): any[] => Array.isArray(value)
             ? value
             : (Array.isArray(value?.characters) ? value.characters : (Array.isArray(value?.items) ? value.items : []));
-          const charPrompt = `从已确认题材和详细章纲中整理实际参与故事的人物，不得另造同名故事的人物组。
+          const charPrompt = `从已确认题材、详细章纲和已保存的世界观（下方上下文）中整理实际参与故事的人物，必须以世界观为唯一事实依据，不得与世界观冲突。
+
 【完整创作上下文】${groundedCreativeContext}
+
 人物数量由章纲中的行动者和冲突需要决定；保留确认题材中的姓名、身份、关系、目标和结局方向，不得替换主角或反派。只收录对情节有实际作用的人物。
-输出JSON对象:{"characters":[{"name":"姓名","identity":"身份","age":null,"gender":"","role":"protagonist|major|supporting|minor","personality":"具体性格矛盾与行动习惯","appearance":"可识别细节","background":"与主线相关的经历","abilities":{},"desire":"当前欲望","shortTermGoal":"短期目标","longTermGoal":"长期目标","hiddenInfo":"仅填写章纲已有秘密","arc":[],"relationships":[]}]}`;
+
+需要包含 5 个核心人物：1. 主角；2. 女主角/重要配角；3. 主要反派；4. 主要配角；5. 导师/智者或主要同盟。每个角色的字段必须严格按以下结构：
+
+JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反派|导师同盟|其他","basicInfo":"基本信息：姓名、年龄、外貌、身份","personality":"[3个核心性格特质 + 1个矛盾点]，每个特质用一句话具体场景说明，而非抽象词","backstory":"背景故事：影响性格的关键经历，必须是改变角色当前行为模式的具体事件而非履历","abilities":"能力设定：详细的能力体系，包括等级划分、获得方式、约束条件、使用代价","goalMotivation":"目标动机：短期目标 + 长期理想，明确写出为什么想要、打算怎么做","growthArc":"成长弧光：从弱到强的具体过程，包括触发事件、阶段划分、最终状态","relationships":"与其他核心人物的关系：含关系性质、关键事件、未来演变方向"}]`;
           const charResult = await this.llmCallWithRetry<any[]>('角色生成', charPrompt, {
             temperature: 0.8,
-            timeout: TIMEOUT_MEDIUM,
+            timeout: LLM_TUNABLES.timeoutComplex(),
             scenario: 'character_design',
+            maxTokens: 16000,
             validate: value => {
               const items = normalizeGeneratedCharacters(value);
-              return items.length > 0 && items.every(item => hasUsefulValue(item?.name) && hasUsefulValue(item?.identity));
+              return items.length > 0 && items.every(item => hasUsefulValue(item?.name) && (hasUsefulValue(item?.identity) || hasUsefulValue(item?.basicInfo)));
             },
           });
           taskWarnings.push(...charResult.warnings);
@@ -4284,25 +5927,65 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
               if (!ch.name) continue;
               try {
                 const cid = uuid();
+                // 兼容新旧 prompt 格式（旧：identity/appearance/background/shortTermGoal；新：basicInfo/backstory/goalMotivation/growthArc）
+                const basicInfo = ch.basicInfo || [ch.identity, ch.appearance, ch.age, ch.gender].filter(Boolean).join(' | ') || '';
+                const backstory = ch.backstory || ch.background || '';
+                const goalMotivation = ch.goalMotivation || [ch.shortTermGoal, ch.longTermGoal, ch.desire].filter(Boolean).join(' | ') || '';
+                const growthArc = ch.growthArc || (ch.arc ? JSON.stringify(ch.arc) : '');
                 const charAbilities = JSON.stringify({
-                  ...(ch.abilities && typeof ch.abilities === 'object' ? ch.abilities : {}),
-                  shortTermGoal: ch.shortTermGoal || '',
-                  longTermGoal: ch.longTermGoal || '',
+                  ...(typeof ch.abilities === 'object' && ch.abilities ? ch.abilities : {}),
+                  ...(typeof ch.abilities === 'string' ? { description: ch.abilities } : {}),
+                  shortTermGoal: ch.shortTermGoal || (typeof goalMotivation === 'string' ? goalMotivation.split('|')[0] || '' : ''),
+                  longTermGoal: ch.longTermGoal || (typeof goalMotivation === 'string' ? goalMotivation.split('|')[1] || '' : ''),
                   fears: ch.fears || ch.hiddenInfo || '',
                   desire: ch.desire || '',
                   trueGoal: ch.trueGoal || '',
                   ending: ch.ending || '',
                   reversalOrder: ch.reversalOrder || 0,
+                  goalMotivation,
+                  growthArc,
                 });
+                const identity = ch.identity || basicInfo;
+                const appearance = ch.appearance || basicInfo;
+                const ageMatch = ch.age != null ? Number(ch.age) : null;
+                const isPov = ch.name === (generatedCharacters[0]?.name || '') ? 1 : 0;
                 db.prepare(`INSERT INTO characters (id, project_id, name, aliases, age, gender, identity, appearance, background, personality, abilities, relationships, arc, dialogue_style, dialogue_patterns, is_pov_character, created_at, updated_at)
                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-                  cid, projectId, serializeGeneratedSqlText(ch.name), '[]', serializeGeneratedSqlText(ch.age) || null,
-                  serializeGeneratedSqlText(ch.gender) || null, serializeGeneratedSqlText(ch.identity) || null,
-                  serializeGeneratedSqlText(ch.appearance) || null, serializeGeneratedSqlText(ch.background) || null,
+                  cid, projectId, serializeGeneratedSqlText(ch.name), '[]', Number.isFinite(ageMatch) ? ageMatch : null,
+                  serializeGeneratedSqlText(ch.gender) || null, serializeGeneratedSqlText(identity) || null,
+                  serializeGeneratedSqlText(appearance) || null, serializeGeneratedSqlText(backstory) || null,
                   JSON.stringify(typeof ch.personality === 'object' ? ch.personality : { summary: ch.personality || '' }),
-                  charAbilities, JSON.stringify(ch.relationships || []), JSON.stringify(ch.arc || []),
-                  null, null, ch.name === (generatedCharacters[0]?.name || '') ? 1 : 0, now(), now()
+                  charAbilities, JSON.stringify(ch.relationships || []), serializeGeneratedSqlText(growthArc) || null,
+                  null, null, isPov, now(), now()
                 );
+                // ★ 传播到 character_extended_profiles（前端 CharacterPage 读取的13字段表）
+                try {
+                  const existingProf = db.prepare(`SELECT id FROM character_extended_profiles WHERE character_id=?`).get(cid);
+                  if (!existingProf) {
+                    db.prepare(`INSERT INTO character_extended_profiles (id, project_id, character_id,
+                      alias_title, identity_occupation, faction_stance, role_type,
+                      appearance, personality_traits, abilities_skills, backstory,
+                      relationships, catchphrase_speech_style, goals_motivation,
+                      weaknesses_fears, supplementary, created_at, updated_at)
+                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                      require('crypto').randomUUID(), projectId, cid,
+                      serializeGeneratedSqlText(ch.alias || ch.aliasTitle || ''),
+                      serializeGeneratedSqlText(identity || ''),
+                      serializeGeneratedSqlText(ch.faction || ch.factionStance || ch.alliance || ''),
+                      serializeGeneratedSqlText(ch.role || ''),
+                      serializeGeneratedSqlText(appearance || ''),
+                      serializeGeneratedSqlText(typeof ch.personality === 'string' ? ch.personality : (ch.personality?.summary || '')),
+                      serializeGeneratedSqlText(typeof ch.abilities === 'string' ? ch.abilities : JSON.stringify(ch.abilities || {})),
+                      serializeGeneratedSqlText(backstory || ''),
+                      serializeGeneratedSqlText(typeof ch.relationships === 'string' ? ch.relationships : JSON.stringify(ch.relationships || [])),
+                      serializeGeneratedSqlText(ch.dialogueStyle || ch.speechStyle || ''),
+                      serializeGeneratedSqlText(goalMotivation || ''),
+                      serializeGeneratedSqlText(ch.fears || ch.weakness || ch.hiddenInfo || ''),
+                      serializeGeneratedSqlText(growthArc || ''),
+                      now(), now()
+                    );
+                  }
+                } catch (e: any) { this.logger.warn(`character_extended_profiles 传播失败(${ch.name}): ${e.message}`); }
                 charCount++;
               } catch (e: any) { taskWarnings.push(`角色写入失败:${e.message}`); }
             }
@@ -4314,6 +5997,57 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           return { step: 'characters', warnings: taskWarnings };
         });
 
+        // 任务AB：人物关系网络生成（per docx 第11-14天：核心关系图/关系变化/隐藏关系/关系冲突）
+        sequentialTasks.push(async (): Promise<{ step: string; warnings: string[] }> => {
+          const taskWarnings: string[] = [];
+          try {
+            const existingChars = db.prepare(`SELECT id,name FROM characters WHERE project_id=?`).all(projectId) as any[];
+            if (existingChars.length >= 2) {
+              const charNames = existingChars.map(c => c.name).join('、');
+              const relPrompt = `基于以下角色的已知基础信息和已确认世界观，生成人物关系网络。
+【世界观上下文】${outlineContextPrefix || ''}
+【角色基础信息】${JSON.stringify(existingChars.map(c => ({ id: c.id, name: c.name })))}
+
+需要输出的关系内容：
+1. 核心关系图：${charNames}之间的核心关系——每对人物的公开关系（兄弟姐妹/盟友/恋人/师徒/敌人/利用/崇拜等）+ 关系的历史渊源
+2. 关系变化：随着故事发展，关系的变化过程——目前处于什么阶段/将如何演变
+3. 隐藏关系：暂时不为人知的关系——读者尚不知道、角色间彼此隐瞒的关系
+4. 关系冲突：因关系产生的冲突——哪一对人物的关系是最大冲突源、冲突的表现形式
+
+输出JSON格式：
+{"relationships":[
+  {"source":"角色A姓名","target":"角色B姓名","public_relation":"公开关系描述","hidden_relation":"隐藏关系或空","trust_score":50,"conflict_score":"数字","emotional_tendency":"情感倾向（正面/负面/复杂/暧昧）","interest_binding":"共同利益的绑定点","reader_known_state":"读者已知状态（known/hint/hidden）","change_summary":"关系演变简述","conflict_description":"关系冲突说明"}
+]}
+
+每个角色对必须有一条关系记录（共 C(${existingChars.length},2) 条）。必须严格输出合法JSON，无Markdown、无解释。`;
+              emit('characters', 67, '生成人物关系网络...', 'running');
+              const relResult = await this.llmCallWithRetry<any>('人物关系网络生成', relPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'character_design', maxTokens: 8000 });
+              if (relResult.data?.relationships && Array.isArray(relResult.data.relationships) && relResult.data.relationships.length > 0) {
+                let relCount = 0;
+                for (const r of relResult.data.relationships) {
+                  const src = existingChars.find(c => c.name === r.source);
+                  const tgt = existingChars.find(c => c.name === r.target);
+                  if (!src || !tgt) continue;
+                  try {
+                    db.prepare(`INSERT INTO character_relationships (id, project_id, source_character_id, target_character_id, relation_type, public_relation, hidden_relation, trust_score, conflict_score, emotional_tendency, interest_binding, reader_known_state, change_summary, review_status, source, confidence, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                      require('crypto').randomUUID(), projectId, src.id, tgt.id,
+                      r.public_relation || 'unknown', r.public_relation || '', r.hidden_relation || '',
+                      Number(r.trust_score) || 50, Number(r.conflict_score) || (r.conflict_description ? 5 : 0),
+                      r.emotional_tendency || '', r.interest_binding || '',
+                      r.reader_known_state || 'unknown', r.change_summary || '',
+                      'pending', 'ai_generated', 0.7,
+                      new Date().toISOString(), new Date().toISOString()
+                    );
+                    relCount++;
+                  } catch (e: any) { taskWarnings.push(`关系写入失败(${r.source}-${r.target}):${e.message}`); }
+                }
+                emit('characters', 70, `人物关系网已生成 ${relCount} 条`, relCount > 0 ? 'done' : 'failed');
+              } else taskWarnings.push('人物关系网络生成：LLM未返回有效关系数组');
+            } else taskWarnings.push('角色不足2人，跳过关系网络生成');
+          } catch (e: any) { taskWarnings.push(`人物关系网络生成失败:${e.message}`); }
+          return { step: 'character_relations', warnings: taskWarnings };
+        });
+
         // 任务B：世界观生成（仅当 DB 中无世界观时执行）
         sequentialTasks.push(async (): Promise<{ step: string; warnings: string[] }> => {
           const taskWarnings: string[] = [];
@@ -4321,8 +6055,8 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
             emit('world', 75, '世界观已存在，跳过', 'done');
             return { step: 'world', warnings: [] };
           }
-          const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。输出JSON:{"storyPremise":"既定故事前提","era":"时代","geography":["实际地点"],"socialStructure":"剧情涉及环境","powerSystem":"没有则空字符串","economy":"没有则空字符串","culture":"没有则空字符串","factions":[],"atmosphere":"氛围","rules":"剧情必须遵守的规则"}`;
-          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.7, timeout: TIMEOUT_MEDIUM, scenario: 'world_building' });
+          const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。\n每维度200-400字，整体不超过2500字。只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}],"endingDirection":"结局基调与解决方向"}`;
+          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 5000 });
           taskWarnings.push(...worldResult.warnings);
 
           if (worldResult.data && typeof worldResult.data === 'object') {
@@ -4335,7 +6069,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
                 JSON.stringify(Array.isArray(wd.geography) ? wd.geography : []),
                 JSON.stringify(Array.isArray(wd.factions) ? wd.factions : []),
                 JSON.stringify([wd.rules || '']), serializeGeneratedSqlText(wd.atmosphere),
-                JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '' }),
+                JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
                 serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
                 JSON.stringify(Array.isArray(wd.locations) ? wd.locations : (Array.isArray(wd.geography) ? wd.geography : [])),
                 serializeGeneratedSqlText(wd.socialRules || wd.socialStructure),
@@ -4344,6 +6078,38 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
                 now(), now()
               );
               emit('world', 75, '世界观已写入', 'done');
+              // ★ 同样传播到 world_system_profiles（前端读取的表）
+              try {
+                const existingProfile = db.prepare(`SELECT id FROM world_system_profiles WHERE world_setting_id=?`).get(wid);
+                if (!existingProfile) {
+                  const pid = require('crypto').randomUUID();
+                  const c = wd.constraints || {};
+                  db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id,
+                    synopsis, basic_info, era, locations, atmosphere_tone, rules,
+                    social_structure, tech_supernatural, system_mechanics,
+                    culture_customs, naming_rules, scale_plan, ending,
+                    hierarchy_rules, supplementary, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                    pid, projectId, wid,
+                    serializeGeneratedSqlText(wd.storyPremise || wd.premise || dto.title),
+                    serializeGeneratedSqlText(dto.title + ' | ' + (wd.era || '')),
+                    serializeGeneratedSqlText(wd.history || wd.era || ''),
+                    serializeGeneratedSqlText(wd.geography || ''),
+                    serializeGeneratedSqlText(wd.atmosphere || ''),
+                    serializeGeneratedSqlText(wd.rules || ''),
+                    serializeGeneratedSqlText(wd.socialStructure || ''),
+                    serializeGeneratedSqlText(wd.powerSystem || ''),
+                    serializeGeneratedSqlText(wd.powerSystem || ''),
+                    serializeGeneratedSqlText(wd.culture || ''),
+                    '', '',
+                    serializeGeneratedSqlText(wd.endingDirection || ''),
+                    '世界观 > 大纲 > 正文',
+                    serializeGeneratedSqlText((wd.economy || '') + ' | ' + (Array.isArray(wd.factions) ? wd.factions.map((f:any)=>f?.name||f).join('，') : '')),
+                    now(), now()
+                  );
+                  this.logger.log(`world_system_profiles 已创建 (sequential path, pid=${pid})`);
+                }
+              } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败(sequential): ${e.message}`); }
             } catch (e: any) { taskWarnings.push(`世界观写入失败: ${e.message}`); emit('world', 75, '世界观写入失败', 'failed'); }
           } else {
             taskWarnings.push('世界观生成失败');
@@ -4364,7 +6130,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
 上下文:${groundedCreativeContext}
 没有独立组织时 organizations 返回空数组；没有需要独立管理的地点时 mapPoints 返回空数组。禁止为了数量填充。
 输出JSON:{"organizations":[{"name":"原文名称","type":"类型","level":"root|branch|cell","parentName":"","description":"它在既定剧情中的作用"}],"mapPoints":[{"name":"原文名称","type":"类型","level":"world|region|country|city|location|scene","parentName":"","description":"该地点发生的既定事件"}]}`,
-            { temperature: 0.7, timeout: TIMEOUT_MEDIUM, scenario: 'organization_map' });
+            { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'organization_map' });
           let orgCount = 0, mpCount = 0;
           if (orgResult.data) {
             const orgNameToId = new Map<string, string>();
@@ -4421,12 +6187,15 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
               ? value
               : (Array.isArray(value?.foreshadowings) ? value.foreshadowings : (Array.isArray(value?.items) ? value.items : []));
             const fsResult = await this.llmCallWithRetry<any[]>('伏笔生成',
-              `从完整创作上下文的${outlineWriteCount}章详细大纲中提取真实存在且后续确有回收的伏笔，不得另造人物、地点、制度、案件、伤病、物证或另一条故事线。上下文:${groundedCreativeContext}\n数量由既定事件链实际需要决定，允许没有独立伏笔；每条必须能在具体章纲中找到原文埋设证据，并在既定后续事件中找到回收结果。只输出JSON对象:{"foreshadowings":[{"content":"伏笔内容","type":"hint","importance":2,"scope":"chapter","buriedChapter":1,"recoveryChapter":2,"recoveryWindowStart":2,"recoveryWindowEnd":2,"evidenceText":"章纲中的埋设证据","riskLevel":"low|medium|high","recoveryCondition":"何时视为完成回收","payoffDescription":"既定后续事件如何兑现"}]}`,
+              `从完整创作上下文的${outlineWriteCount}章详细大纲中提取真实存在且后续确有回收的伏笔，不得另造人物、地点、制度、案件、伤病、物证或另一条故事线。上下文:${groundedCreativeContext}\n\n按以下三级管理伏笔（per 文档第141-152行）：\n1. 全书伏笔（scope:"global"）：贯穿全文的重要秘密/身份/承诺/因果，至少3条，每条设buriedChapter和recoveryChapter\n2. 阶段伏笔（scope:"volume"）：服务一个故事阶段，在阶段高潮前后兑现，2-5条\n3. 章节伏笔（scope:"chapter"）：几章内回收的物件/动作/话语/信息差，每章1-2条\n\n每条必须能在具体章纲中找到原文埋设证据，并在既定后续事件中找到回收结果。只输出JSON对象:{"foreshadowings":[{"content":"伏笔内容","type":"hint","importance":2,"scope":"global|volume|chapter","buriedChapter":1,"recoveryChapter":2,"recoveryWindowStart":2,"recoveryWindowEnd":2,"evidenceText":"章纲中的埋设证据","riskLevel":"low|medium|high","recoveryCondition":"何时视为完成回收","payoffDescription":"既定后续事件如何兑现"}]}`,
               {
                 temperature: 0.7,
-                timeout: TIMEOUT_MEDIUM,
+                timeout: LLM_TUNABLES.timeoutMedium(),
                 scenario: 'foreshadowing',
-                maxTokens: Math.max(4096, Math.min(8192, outlineWriteCount * 800)),
+                maxTokens: Math.max(
+              LLM_TUNABLES.OUTLINE_WRITE_MIN,
+              Math.min(LLM_TUNABLES.OUTLINE_WRITE_MAX, outlineWriteCount * LLM_TUNABLES.OUTLINE_WRITE_PER_CHAPTER),
+            ),
                 validate: value => {
                   const items = normalizeGeneratedForeshadowings(value);
                   const explicitEmpty = !!value && typeof value === 'object' && !Array.isArray(value)
@@ -4477,7 +6246,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           } else {
             const fsResult = await this.llmCallWithRetry<any>('伏笔生成(长篇)',
               `基于题材"${dto.title}"为长篇生成三类伏笔，必须具体到物件/动作/话语偏差/地图地点/组织线索，不要一句话空泛提示。全书伏笔要像核心功法、血脉、身份谜团一样贯穿全文；卷级伏笔跨多个章节回收；章节伏笔服务小场景。三类伏笔要交叉存在，不要等一个结束才开启另一个。每条包含 content,type,importance,scope,buriedChapter,recoveryChapter,recoveryWindowStart,recoveryWindowEnd,evidenceText,riskLevel(low|medium|high),recoveryCondition,payoffDescription,relatedCharacters,relatedOrganizations,relatedMapPoints。输出JSON:{"globalForeshadowings":[...],"longForeshadowings":[...],"shortForeshadowings":[...]}`,
-              { temperature: 0.8, timeout: TIMEOUT_MEDIUM, scenario: 'foreshadowing' }
+              { temperature: 0.8, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'foreshadowing' }
             );
             taskWarnings.push(...fsResult.warnings);
             if (fsResult.data) {
@@ -4524,9 +6293,11 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           return { step: 'foreshadowing', warnings: taskWarnings };
         });
 
-        // 等待所有并行任务完成
+        // 等待所有并行任务完成（按 docx 优先级：世界观 > 角色 > 关系 > 组织 > 伏笔/大纲）
         const results: Array<PromiseSettledResult<{ step: string; warnings: string[] }>> = [];
-        const orderedTasks = sequentialTasks.length === 4
+        const orderedTasks = sequentialTasks.length >= 3
+          ? [sequentialTasks[2], sequentialTasks[0], sequentialTasks[1], ...sequentialTasks.slice(3)]
+          : sequentialTasks.length === 4
           ? [sequentialTasks[1], sequentialTasks[0], sequentialTasks[3], sequentialTasks[2]]
           : sequentialTasks;
         for (const runTask of orderedTasks) {
@@ -4591,7 +6362,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
 只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["与故事无关的虚构"]}`,
         {
           temperature: 0.1,
-          timeout: TIMEOUT_MEDIUM,
+          timeout: LLM_TUNABLES.timeoutComplex(),
           scenario: 'quality_check',
           validate: (value: any) => describeAlignmentValidation(value).length === 0,
           describeValidation: describeAlignmentValidation,
@@ -4614,11 +6385,17 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           `根据审查发现，对本次尚未激活的AI生成资料做最小修订。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向；只能修正互斥的专名、时间、年龄、伤病历史和因果事实。replacement必须是字段修订后的完整值，不是修改说明。\n【唯一故事基准】${canonicalCreativeBrief}\n【当前资料（id是唯一可用entityId）】${generatedBundleText}\n【必须修复的矛盾】${JSON.stringify(contradictions)}\n只输出JSON:{"patches":[{"entityType":"world|character|organization|mapPoint|chapter|foreshadowing","entityId":"当前资料中的id","field":"允许字段","replacement":"修订后的完整值","reason":"对应矛盾"}]}`,
           {
             temperature: 0.1,
-            timeout: TIMEOUT_MEDIUM,
+            timeout: LLM_TUNABLES.timeoutComplex(),
             scenario: 'quality_check',
             // 修订可能需要给出完整的章节或资料字段，不能把固定 4096 当作
             // 所有项目的上限；仍按矛盾数量设置有界输出，避免无控制膨胀。
-            maxTokens: Math.max(8192, Math.min(16384, 2048 + contradictions.length * 1024)),
+            maxTokens: Math.max(
+              LLM_TUNABLES.QUALITY_CHECK_MIN,
+              Math.min(
+                LLM_TUNABLES.QUALITY_CHECK_MAX,
+                LLM_TUNABLES.QUALITY_CHECK_BASE + contradictions.length * LLM_TUNABLES.QUALITY_CHECK_PER_CONFLICT,
+              ),
+            ),
             validate: (value: any) => Array.isArray(value?.patches) && value.patches.length > 0 && value.patches.length <= 24,
             describeValidation: (value: any) => !Array.isArray(value?.patches)
               ? ['必须返回patches数组']
@@ -4627,33 +6404,72 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
         );
         const patches = repairResult.data?.patches;
         if (!Array.isArray(patches) || patches.length === 0) {
-          throw new Error(`跨模块一致性修订未返回有效patches，未写入任何半成品：${repairResult.warnings.join('；') || '模型未提供可执行字段修订'}`);
+          throw new Error(`跨模块一致性修订未返回有效patches，未写入任何半成品：${repairResult.warnings.join('；') || '模型超时或输出格式无法解析。建议减少项目模块数据量后重试。'}`);
         }
 
-        const patchTargets: Record<string, { table: string; fields: Set<string> }> = {
-          world: { table: 'world_settings', fields: new Set(['era', 'geography', 'factions', 'rules', 'atmosphere', 'story_premise']) },
-          character: { table: 'characters', fields: new Set(['name', 'identity', 'background']) },
-          organization: { table: 'organizations', fields: new Set(['name', 'type', 'description']) },
-          mapPoint: { table: 'map_points', fields: new Set(['name', 'type', 'description']) },
-          chapter: { table: 'outlines', fields: new Set(['title', 'content']) },
-          foreshadowing: { table: 'foreshadowings', fields: new Set(['content', 'evidence_text', 'recovery_condition', 'payoff_description']) },
+        // 不可变/安全敏感列：一致性修订接口永远不允许修改（主键、租户隔离、时间戳由系统维护）。
+        const PROTECTED_PATCH_COLUMNS = new Set(['id', 'project_id', 'created_at', 'updated_at']);
+        // 实体类型 -> 真实表名（表名来自固定映射，非用户输入，可安全用于 PRAGMA 插值）
+        const PATCH_TABLE_MAP: Record<string, string> = {
+          world: 'world_settings',
+          character: 'characters',
+          organization: 'organizations',
+          mapPoint: 'map_points',
+          chapter: 'outlines',
+          foreshadowing: 'foreshadowings',
+        };
+        // 允许修订的列直接从数据库真实表结构推导，而非手写白名单。
+        // 根治“白名单写漏字段（如 buried_chapter_index）”导致合法修订被整批丢弃的反复 bug：
+        // 凡是表内真实存在且非受保护列的字段，一致性修订都可修正，问题从源头解决。
+        const patchTargetCache = new Map<string, { table: string; fields: Set<string> } | null>();
+        const getPatchTarget = (entityType: string): { table: string; fields: Set<string> } | null => {
+          if (!patchTargetCache.has(entityType)) {
+            const table = PATCH_TABLE_MAP[String(entityType || '')];
+            if (!table) { patchTargetCache.set(entityType, null); return null; }
+            const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+            const fields = new Set<string>();
+            for (const c of cols) {
+              if (!PROTECTED_PATCH_COLUMNS.has(c.name)) fields.add(c.name);
+            }
+            patchTargetCache.set(entityType, { table, fields });
+          }
+          return patchTargetCache.get(entityType) ?? null;
         };
         const validIds = new Set(Object.values(generatedBundle).flatMap((rows: any[]) => rows.map(row => String(row.id))));
         let appliedPatchCount = 0;
+        let skippedPatchCount = 0;
         db.exec('BEGIN IMMEDIATE');
         try {
           for (const patch of patches) {
-            const target = patchTargets[String(patch?.entityType || '')];
+            const entityType = String(patch?.entityType || '');
+            const target = getPatchTarget(entityType);
             const entityId = String(patch?.entityId || '');
             const field = String(patch?.field || '');
             const replacement = patch?.replacement;
-            if (!target || !target.fields.has(field) || !validIds.has(entityId) || !hasUsefulValue(replacement)) {
-              throw new Error(`一致性修订包含越权或无效字段：${patch?.entityType || '?'}#${entityId}.${field}`);
+            // 透明跳过原因：仅受保护列/未知实体/非本次生成范围/空值才跳过；
+            // 表内真实存在的事实字段一律应用，从根源解决“合法修订被丢弃”。
+            const skipReason = !target
+              ? `未知实体类型 ${entityType}`
+              : !target.fields.has(field)
+                ? `字段 ${field} 受保护或不存在于表 ${target.table}`
+                : !validIds.has(entityId)
+                  ? `实体 ${entityId} 不在本次生成范围内`
+                  : !hasUsefulValue(replacement)
+                    ? '修订值为空'
+                    : null;
+            if (skipReason) {
+              warnings.push(`一致性修订跳过：${entityType}#${entityId}.${field}（${skipReason}，已忽略）`);
+              skippedPatchCount++;
+              continue;
             }
             const storedValue = typeof replacement === 'string' ? replacement.trim() : JSON.stringify(replacement);
-            const updateResult = db.prepare(`UPDATE ${target.table} SET ${field}=?, updated_at=? WHERE id=? AND project_id=?`)
+            const updateResult = db.prepare(`UPDATE ${target!.table} SET ${field}=?, updated_at=? WHERE id=? AND project_id=?`)
               .run(storedValue, now(), entityId, projectId);
-            if (Number(updateResult.changes || 0) !== 1) throw new Error(`一致性修订目标不存在：${entityId}`);
+            if (Number(updateResult.changes || 0) !== 1) {
+              warnings.push(`一致性修订目标不存在，已跳过：${entityId}`);
+              skippedPatchCount++;
+              continue;
+            }
             appliedPatchCount++;
           }
           db.exec('COMMIT');
@@ -4661,7 +6477,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           try { db.exec('ROLLBACK'); } catch {}
           throw error;
         }
-        warnings.push(`跨模块一致性自动修订 ${appliedPatchCount} 处，并已执行二次审查`);
+        warnings.push(`跨模块一致性自动修订 ${appliedPatchCount} 处（跳过 ${skippedPatchCount} 处无效字段），并已执行二次审查`);
         generatedBundle = readGeneratedBundle();
         generatedBundleText = JSON.stringify(generatedBundle);
         const secondAlignmentResult = await this.llmCallWithRetry<any>(
@@ -4669,7 +6485,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
           `核对修订后的资料是否严格属于同一个故事并且事实互不矛盾。重点检查专名、年龄、时间跨度、伤病历史、章节因果、结局和伏笔证据。只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["无关虚构"]}\n【唯一故事基准】${canonicalCreativeBrief}\n【修订后资料】${generatedBundleText}`,
           {
             temperature: 0.1,
-            timeout: TIMEOUT_MEDIUM,
+            timeout: LLM_TUNABLES.timeoutComplex(),
             scenario: 'quality_check',
             validate: (value: any) => describeAlignmentValidation(value).length === 0,
             describeValidation: describeAlignmentValidation,
@@ -4772,6 +6588,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
       }
 
       // ====== 最终统计 ======
+      warnings.push(...await this.enrichNewProjectProfiles(projectId, dto));
       await this.generationRecovery.assertActivationReady(projectId);
       const counts = getCreationCounts();
       const finalStats = {
@@ -4810,6 +6627,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
         return;
       }
 
+      if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
       emit('done', 100, '全部内容生成完成', 'done');
       db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ?`).run(now(), projectId);
       this.logger.log(`create-project-async: 完成 project=${projectId}`);
@@ -4818,6 +6636,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
         warnings: warnings.length > 0 ? warnings : undefined,
       });
     } catch (err: any) {
+      if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
       this.logger.error(`create-project-async 执行失败 project=${projectId}: ${err.message}`);
       try {
         db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
@@ -4825,6 +6644,293 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
       this.emitProjectProgress(projectId, { type: 'error', success: false, projectId, message: err.message, warnings });
     }
   }
+
+  /**
+   * 项目创建完成后补全各模块深度资料（之前创建流程只写了主表，profile / depth 表从未被填充）：
+   * 角色 character_extended_profiles、核心设定 world_system_profiles、
+   * 组织 depth、地点 depth、大纲 depth、伏笔 depth。
+   * 这是「补全」步骤：任一模块失败只记录 warning，绝不回滚或中断项目激活。
+   */
+  private async enrichNewProjectProfiles(
+    projectId: string,
+    dto: { title: string; storyType: string; selectedIdea: any; settings?: Record<string, unknown> },
+  ): Promise<string[]> {
+    const db = this.db.getDb();
+    const now = () => new Date().toISOString();
+    const warnings: string[] = [];
+
+    const ctxSummary = (() => {
+      const worldRow = db.prepare(`SELECT era,story_premise,atmosphere FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
+      const chars = db.prepare(`SELECT name,identity FROM characters WHERE project_id=?`).all(projectId) as any[];
+      return JSON.stringify({
+        title: dto.title,
+        storyType: dto.storyType,
+        worldPremise: worldRow ? `${worldRow.story_premise || ''} ${worldRow.era || ''} ${worldRow.atmosphere || ''}` : '',
+        characters: chars.map(c => `${c.name}(${c.identity || ''})`),
+      });
+    })();
+
+    this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '补全角色/核心设定/组织/地点/大纲/伏笔的深度资料...', status: 'running' });
+
+    // ====== 角色深度资料 -> character_extended_profiles ======
+    try {
+      const characters = db.prepare(`SELECT id,name,identity,age,gender,appearance,background,personality,abilities FROM characters WHERE project_id=?`).all(projectId) as any[];
+      if (characters.length > 0) {
+        // 逐角色补全：每个角色独立一次调用，单角色预算 4096 token（在 character_design
+        // 路由配置 4096 内），避免"多角色合批 + 按 600/角色预算"在 4 角色时只有 3200、
+        // 被 API 在 length 处硬截断导致整批 JSON 解析失败的旧 bug。单角色失败仅告警并继续。
+        const profileFieldList = PROFILE_FIELDS.join(', ');
+        let doneCount = 0;
+        for (const c of characters) {
+          const charBrief = { name: c.name, identity: c.identity, age: c.age, gender: c.gender, appearance: c.appearance, background: c.background, personality: c.personality, abilities: c.abilities };
+          try {
+            const charProfileResult = await this.llmCallWithRetry<any>(
+              `角色深度资料补全:${c.name}`,
+              `你是该小说的角色设定师。基于角色的已确认基础信息，为角色补全一份深度资料档案，使得后续大纲与正文能以此为角色行为的一致性约束。
+
+【故事与世界观】${ctxSummary}
+【角色基础信息（已确认，不可更改）】${JSON.stringify(charBrief)}
+
+输出一个对象，所有字段都有明确要求——没有信息的可以写"未知"或客观推理，但绝不空着。键名必须是以下字段：
+${profileFieldList}
+
+各字段要求：
+- alias_title——别名/称号/头衔：角色的其他称呼、代号、尊称，以及称呼背后的社会含义。
+- identity_occupation——身份/职业：在故事世界中的正式身份与具体职位，需写出该身份的社会地位与日常责任。
+- faction_stance——阵营/立场：所属势力与对该势力的忠诚度（绝对忠诚/有条件忠诚/表面忠诚/摇摆/暗中对立），以及立场转变可能。
+- role_type—���角色类型：主角/反派/配角/龙套中的一种，并一句话说明在叙事中承担的戏剧功能（推动冲突/信息揭示/情感锚点/喜剧调剂等）。
+- appearance——外貌特征：可被直接写进正文的具体视觉细节——身高体态、面部特征、标志性穿着、习惯性肢体动作、与其他角色外貌对比。
+- personality_traits——性格特点：列出3-5条具体性格特质，每条给出正文中可体现的典型行为。不可只写"善良""勇敢"等抽象词——例如"善良"应写为"在自身利益受损时仍优先考虑无辜者的安危，典型场景：XXX"。
+- abilities_skills——能力/技能：角色掌握的可被剧情使用的具体技能（专业能力/社交手腕/战斗技巧/知识领域），及其掌握程度与实际限制。
+- backstory——背景故事：与主线剧情相关的过往经历，每一段应能解释角色当前的一个性格特质或行为模式。不可只写"悲惨童年"。
+- relationships——人物关系：与其他角色的具体关系及其动态——当前状态（敌对/同盟/暧昧/利用/父辈渊源）、历史纠葛、未来可能的演变方向。
+- catchphrase_speech_style——口头禅/语言风格：角色的典型说话方式——用词偏好、句式特点、是否带方言/外语夹杂、在紧张/放松/说谎时的语言特征变化。
+- goals_motivation——目标/动机：角色的核心驱动——表层目标（想要什么）、深层动机（为什么想要）、实现路径（打算怎么做）、以及目标实现或破灭后的行为预期。
+- weaknesses_fears——弱点/恐惧：利用该弱点可在剧情中制造冲突的具体方式。不可只写"怕黑"——应写"童年被关在地下室三天导致幽闭恐惧，在狭窄空间中会呼吸困难、判断力下降、可能做出冲动的逃生行为"。
+- supplementary——补充说明：上述12项未覆盖但对AI写作有约束价值的额外信息，如角色禁忌（绝不会做的行为）、成长弧线方向、与特定道具或地点的关联等。可空，但建议至少写一句。
+
+只输出JSON:{"name":角色姓名, ...上述13个字段}。
+name必须与输入完全一致以便匹配；每个字段的值必须是字符串。`,
+              {
+                temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'character_design',
+                maxTokens: Math.min(16000, 4096),
+              },
+            );
+            const raw = charProfileResult.data;
+            const p = (raw && typeof raw === 'object' && Array.isArray((raw as any).profiles))
+              ? (raw as any).profiles[0]
+              : ((raw as any)?.profile || (raw as any)?.data || raw);
+            if (!p || typeof p !== 'object') {
+              warnings.push(`角色${c.name}深度资料返回为空，已跳过`);
+              continue;
+            }
+            const input: Record<string, unknown> = {};
+            for (const f of PROFILE_FIELDS) {
+              const v = (p as any)?.[f];
+              if (typeof v === 'string' && v.trim()) input[f] = v.trim();
+            }
+            if (Object.keys(input).length) {
+              try { await this.characterService.updateProfile(projectId, c.id, input); doneCount++; }
+              catch (e: any) { warnings.push(`角色${c.name}深度资料写入失败:${e.message}`); }
+            }
+          } catch (e: any) {
+            warnings.push(`角色${c.name}深度资料生成失败:${e.message}`);
+            this.logger.warn(`enrich: character ${c.name} profile failed project=${projectId}: ${e.message}`);
+          }
+        }
+        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 90, message: `角色深度资料已补全 ${doneCount}/${characters.length}`, status: 'running' });
+      }
+    } catch (e: any) { warnings.push(`角色深度资料生成失败:${e.message}`); this.logger.warn(`enrich: characters failed project=${projectId}: ${e.message}`); }
+
+    // ====== 核心设定深度资料 -> world_system_profiles ======
+    try {
+      const worldRow = db.prepare(`SELECT id,era,geography,factions,rules,atmosphere,story_premise,constraints FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
+      if (worldRow) {
+        const worldFieldList = WORLD_PROFILE_FIELDS.join(', ');
+        const worldProfileResult = await this.llmCallWithRetry<any>(
+          '世界观深度资料补全',
+          `你是该小说的世界设定架构师。基于已确认的世界观骨架，补全一份完整的"地基型世界观档案"，使得后续所有大纲与正文都以此为唯一权威来源。不允许把"地基型"简化为8类古早模板。
+
+【已确认世界观骨架（括号内仅为说明，实际请以骨架为准）】
+${JSON.stringify({ era: worldRow.era, storyPremise: worldRow.story_premise, atmosphere: worldRow.atmosphere, constraints: worldRow.constraints, factions: worldRow.factions, rules: worldRow.rules })}
+
+【输出字段（共15个，全部必须有实质内容）】
+${worldFieldList}
+
+各字段含义与内容要求（按编号对应，每项都须可被后续AI写作直接用作约束）：
+
+1) synopsis——作品简介：一句话故事前提，点名核心冲突与独特卖点。50-100字。
+2) basic_info——基本信息：时代、世界观类型（现实/奇幻/科幻等）、核心冲突概括、目标读者。100-200字。
+3) era——时代与时间线：故事发生的具体年代、关键历史节点、与剧情关联的前史事件。不得泛写"现代"或"古代"。
+4) locations——地点体系：按剧情重要性分级列出关键地点；标注各地点之间的空间关系与移动逻辑；说明各地点承载的剧情功能（如：冲突高发区/情报交换点/安全屋）。
+5) atmosphere_tone——氛围基调：全书整体情绪定位与语言风格方向。不得写"紧张"两个字就结束——须说明紧张感从何而来、以何种叙事方式传递。
+6) rules——核心规则体系：列出3-5条世界运行的根本规则。每条规则必须写成"谁在什么条件下做什么会发生什么"的if-then形式，不可写成抽象价值观或口号。例如不可写"正义必胜"，应写"在此世界观中，公开对抗既有权力结构的行为在48小时内必然遭到三股以上势力的协同压制"。
+7) social_structure——社会结构：政治势力格局、经济资源流动方向、阶层划分与流动（或封闭）机制、权力交接规则。
+8) tech_supernatural——科技/超自然体系：若故事涉及非常规力量，写出体系名称、能力来源（先天/后天/装备/契约等）、能力分级或约束条件、使用代价与副作用。若为纯现实题材，须写出"本作为现实题材，不以超自然力量为叙事手段，故事张力由真实社会机制、人物博弈与心理冲突驱动"，并点明剧情实际涉及的专业领域规则（如刑侦程序、医疗规范、行业潜规则等）。
+9) system_mechanics——系统运行机制：世界观中制度化、规则化的运行逻辑，如组织运作方式、经济循环、信息/舆论传播方式、特殊制度（参考核心设定.txt示例中的召唤玩家系统、贡献点兑换、复活机制、自研系统、科技树等具象运行规则）。即使是现实题材，也必须写出剧情涉及的特定社会运行机制（行业准入、执法权限、信息壁垒等），不可空着。
+10) culture_customs——文化风俗与禁忌：语言特征、地域风俗、族群/阶层之间的关系基调、不可触碰的社会禁忌及触犯后果。
+11) naming_rules——命名规则：角色命名规律（姓氏来源/命名风格/是否有代际特征）、地名命名逻辑、关键术语/专有名词的书写统一性要求。此字段用于让AI在生成正文时不出现"同一个地名在不同章写成了两种叫法"。
+12) scale_plan——全文数据规划：宏观规模框架——人口数量级（不需要精确数字，给"千/万/十万/百万级"的数量级即可）、势力间人数对比、资源总量级、故事时间跨度、空间尺度（单城市/多城市/多国/多大陆）。目的是防止后续章节出现前后数据矛盾（比如第3章说"小镇只有三百人"、第10章突然出现"镇上万人集会"）。
+13) ending——结局方向：不剧透具体情节，但必须锁定：核心冲突的解决方式方向（智力博弈/武力决战/自我牺牲/和解/制度变革等）、主角最终状态的基调（圆满/开放性/悲剧/蜕变/回归日常）、必须被回收的关键伏笔类型。此字段是"终点锚"，正文生成不可偏离。
+14) hierarchy_rules——核心层级规则：明确"世界观（本档案） > 总大纲 > 细化大纲 > 正文"的层级优先关系。指定冲突裁决原则——当正文与大纲矛盾时，以世界观为最终仲裁标准；当大纲本身出现内部矛盾时，以"含此档案中已锁定事实的版本"为准。
+15) supplementary——补充说明：上述14项未覆盖但对AI写作有约束价值的信息，如创作禁忌、禁用的陈词滥调类型、不能出现的场景/行为模式等。可空。
+
+【质量底线】
+不写"丰富多样""精彩纷呈""错综复杂"等空话套话。每一条信息必须能用于约束后续写作——当AI生成正文时，应能根据此字段做出"这个设定违背了第X条规则/这个地名与命名规则矛盾/这个情节走向与结局锚冲突"的具体判断。
+若世界观骨架信息不足，可根据故事类型与氛围基调进行合理推演补全，但不得凭空发明与骨架冲突的全新设定（如骨架为"当代都市"，不得擅自加入修仙/超能力/外星文明等）。
+
+只输出JSON:{"profile":{ ...上述15个字段 }}。
+每个字段的值必须是字符串（可包含换行），不要输出嵌套JSON对象，不要输出数组。`,
+          {
+            temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building',
+            maxTokens: Math.min(16000, 8000),
+          },
+        );
+        const wp = worldProfileResult.data?.profile || worldProfileResult.data;
+        if (wp && typeof wp === 'object') {
+          const input: Record<string, unknown> = {};
+          for (const f of WORLD_PROFILE_FIELDS) {
+            const v = (wp as any)?.[f];
+            if (typeof v === 'string' && v.trim()) input[f] = v.trim();
+            else if (Array.isArray(v)) input[f] = JSON.stringify(v);
+          }
+          if (Object.keys(input).length) {
+            try { await this.worldSettingService.updateProfile(projectId, worldRow.id, input); }
+            catch (e: any) { warnings.push(`核心设定深度资料写入失败:${e.message}`); }
+          }
+        }
+        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '核心设定深度资料已补全', status: 'running' });
+      }
+    } catch (e: any) { warnings.push(`核心设定深度资料生成失败:${e.message}`); this.logger.warn(`enrich: world failed project=${projectId}: ${e.message}`); }
+
+    // ====== 组织/势力 depth ======
+    try {
+      const orgs = db.prepare(`SELECT id,name,type,description FROM organizations WHERE project_id=?`).all(projectId) as any[];
+      if (orgs.length > 0) {
+        const orgResult = await this.llmCallWithRetry<any>(
+          '组织势力深度资料补全',
+          `基于以下已确认组织和故事上下文，补全组织势力的深度资料，用于AI写作时保持设定一致。
+【故事与世界观】${ctxSummary}
+【组织列表】${JSON.stringify(orgs.map(o => ({ name: o.name, type: o.type, description: o.description })))}
+为每一个组织输出对象，键名：name(与输入一致), leader(核心领袖), strength_level(实力等级:1-5整数), territory(势力范围), characteristics(组织特征), relationships_json(与其他组织关系,JSON数组), signature_equipment(标志性装备/手段)。没有就填空或0。
+只输出JSON:{"orgs":[{"name","leader","strength_level","territory","characteristics","relationships_json","signature_equipment"}]}`,
+          { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'organization_map' },
+        );
+        const orgList = Array.isArray(orgResult.data?.orgs) ? orgResult.data.orgs : [];
+        const byName = new Map(orgs.map(o => [String(o.name).trim(), o]));
+        for (const o of orgList) {
+          const name = String((o as any)?.name || '').trim();
+          const target = byName.get(name);
+          if (!target) continue;
+          const strength = Math.max(0, Math.min(5, parseInt(String((o as any).strength_level || '0'), 10) || 0));
+          try {
+            db.prepare(`UPDATE organizations SET leader=?, strength_level=?, territory=?, characteristics=?, relationships_json=?, signature_equipment=?, updated_at=? WHERE id=? AND project_id=?`)
+              .run(serializeGeneratedSqlText((o as any).leader), strength, serializeGeneratedSqlText((o as any).territory), serializeGeneratedSqlText((o as any).characteristics),
+                JSON.stringify(Array.isArray((o as any).relationships_json) ? (o as any).relationships_json : []),
+                serializeGeneratedSqlText((o as any).signature_equipment), now(), target.id, projectId);
+          } catch (e: any) { warnings.push(`组织${name}深度资料写入失败:${e.message}`); }
+        }
+        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 94, message: `组织深度资料已补全 ${orgList.length}/${orgs.length}`, status: 'running' });
+      }
+    } catch (e: any) { warnings.push(`组织深度资料生成失败:${e.message}`); this.logger.warn(`enrich: orgs failed project=${projectId}: ${e.message}`); }
+
+    // ====== 地点 depth ======
+    try {
+      const maps = db.prepare(`SELECT id,name,type,description FROM map_points WHERE project_id=?`).all(projectId) as any[];
+      if (maps.length > 0) {
+        const mapResult = await this.llmCallWithRetry<any>(
+          '地点深度资料补全',
+          `基于以下已确认地点和故事上下文，补全地点的深度资料。
+【故事与世界观】${ctxSummary}
+【地点列表】${JSON.stringify(maps.map(m => ({ name: m.name, type: m.type, description: m.description })))}
+为每一个地点输出对象，键名：name(与输入一致), climate(气候环境), resources(资源,JSON数组), significance(剧情意义), sensory_detail(感官细节：声音/气味/视觉)。
+只输出JSON:{"maps":[{"name","climate","resources","significance","sensory_detail"}]}`,
+          { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'organization_map' },
+        );
+        const mapList = Array.isArray(mapResult.data?.maps) ? mapResult.data.maps : [];
+        const byName = new Map(maps.map(m => [String(m.name).trim(), m]));
+        for (const m of mapList) {
+          const name = String((m as any)?.name || '').trim();
+          const target = byName.get(name);
+          if (!target) continue;
+          try {
+            db.prepare(`UPDATE map_points SET climate=?, resources=?, significance=?, sensory_detail=?, updated_at=? WHERE id=? AND project_id=?`)
+              .run(serializeGeneratedSqlText((m as any).climate), JSON.stringify(Array.isArray((m as any).resources) ? (m as any).resources : []),
+                serializeGeneratedSqlText((m as any).significance), serializeGeneratedSqlText((m as any).sensory_detail), now(), target.id, projectId);
+          } catch (e: any) { warnings.push(`地点${name}深度资料写入失败:${e.message}`); }
+        }
+        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 95, message: `地点深度资料已补全 ${mapList.length}/${maps.length}`, status: 'running' });
+      }
+    } catch (e: any) { warnings.push(`地点深度资料生成失败:${e.message}`); this.logger.warn(`enrich: maps failed project=${projectId}: ${e.message}`); }
+
+    // ====== 大纲 depth（按批，避免长篇小说章节过多时单次过大）======
+    try {
+      const chapters = db.prepare(`SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`).all(projectId) as any[];
+      if (chapters.length > 0) {
+        const BATCH = 6;
+        let done = 0;
+        for (let i = 0; i < chapters.length; i += BATCH) {
+          const batch = chapters.slice(i, i + BATCH);
+          const chapResult = await this.llmCallWithRetry<any>(
+            '大纲深度字段补全',
+            `基于以下章节的已确认大纲，补全每章的结构化深度字段，用于AI写作时保持节奏与冲突一致。
+【故事与世界观】${ctxSummary}
+【章节（id用于回写，不要改动）】${JSON.stringify(batch.map(c => ({ id: c.id, order: c.order, title: c.title, content: c.content })))}
+为每一章输出对象，必须包含原 id，以及：chapter_type(章节类型:opening/exposition/rising/conflict/climax/transition/cliffhanger/resolution/breathing/paving), pov_ratio(视角配比说明), hot_scenes(高光场景要点), setback_scenes(波折/挫折场景要点), ending_setup(结尾钩子设计), conflict_design(冲突设计), system_hints(系统/设定提示), location_summary(场景地点汇总), highlight_points(爽点要点,JSON数组)。
+只输出JSON:{"chapters":[{"id","chapter_type","pov_ratio","hot_scenes","setback_scenes","ending_setup","conflict_design","system_hints","location_summary","highlight_points"}]}`,
+            { temperature: 0.6, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'outline', maxTokens: Math.min(12000, 2000 + batch.length * 1200) },
+          );
+          const chapList = Array.isArray(chapResult.data?.chapters) ? chapResult.data.chapters : [];
+          const byId = new Map(chapters.map(c => [c.id, c]));
+          for (const c of chapList) {
+            const cid = String((c as any)?.id || '');
+            const target = byId.get(cid);
+            if (!target) continue;
+            try {
+              db.prepare(`UPDATE outlines SET chapter_type=?, pov_ratio=?, hot_scenes=?, setback_scenes=?, ending_setup=?, conflict_design=?, system_hints=?, location_summary=?, highlight_points=?, updated_at=? WHERE id=? AND project_id=?`)
+                .run(serializeGeneratedSqlText((c as any).chapter_type), serializeGeneratedSqlText((c as any).pov_ratio), serializeGeneratedSqlText((c as any).hot_scenes),
+                  serializeGeneratedSqlText((c as any).setback_scenes), serializeGeneratedSqlText((c as any).ending_setup), serializeGeneratedSqlText((c as any).conflict_design),
+                  serializeGeneratedSqlText((c as any).system_hints), serializeGeneratedSqlText((c as any).location_summary),
+                  JSON.stringify(Array.isArray((c as any).highlight_points) ? (c as any).highlight_points : []), now(), cid, projectId);
+              done += 1;
+            } catch (e: any) { warnings.push(`章节${cid}深度字段写入失败:${e.message}`); }
+          }
+        }
+        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 97, message: `大纲深度字段已补全 ${done}/${chapters.length}`, status: 'running' });
+      }
+    } catch (e: any) { warnings.push(`大纲深度字段生成失败:${e.message}`); this.logger.warn(`enrich: outlines failed project=${projectId}: ${e.message}`); }
+
+    // ====== 伏笔 depth ======
+    try {
+      const fss = db.prepare(`SELECT id,content,buried_chapter_index,planned_recovery_chapter_index,evidence_text,recovery_condition,payoff_description FROM foreshadowings WHERE project_id=?`).all(projectId) as any[];
+      if (fss.length > 0) {
+        const fsResult = await this.llmCallWithRetry<any>(
+          '伏笔深度资料补全',
+          `基于以下已确认伏笔，补全每条伏笔的情感与分层回收资料。
+【故事与世界观】${ctxSummary}
+【伏笔（id用于回写）】${JSON.stringify(fss.map(f => ({ id: f.id, content: f.content, buriedChapter: f.buried_chapter_index, recoveryChapter: f.planned_recovery_chapter_index })))}
+为每条伏笔输出对象，必须包含原 id，以及：emotional_impact(情感冲击描述), layered_reveal(分层揭示设计,JSON数组，每项含 revealStage 与 content)。
+只输出JSON:{"foreshadowings":[{"id","emotional_impact","layered_reveal"}]}`,
+          { temperature: 0.6, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'foreshadowing' },
+        );
+        const fsList = Array.isArray(fsResult.data?.foreshadowings) ? fsResult.data.foreshadowings : [];
+        const byId = new Map(fss.map(f => [f.id, f]));
+        for (const f of fsList) {
+          const fid = String((f as any)?.id || '');
+          const target = byId.get(fid);
+          if (!target) continue;
+          try {
+            db.prepare(`UPDATE foreshadowings SET emotional_impact=?, layered_reveal=?, updated_at=? WHERE id=? AND project_id=?`)
+              .run(serializeGeneratedSqlText((f as any).emotional_impact), JSON.stringify(Array.isArray((f as any).layered_reveal) ? (f as any).layered_reveal : []), now(), fid, projectId);
+          } catch (e: any) { warnings.push(`伏笔${fid}深度资料写入失败:${e.message}`); }
+        }
+        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 98, message: `伏笔深度资料已补全 ${fsList.length}/${fss.length}`, status: 'running' });
+      }
+    } catch (e: any) { warnings.push(`伏笔深度资料生成失败:${e.message}`); this.logger.warn(`enrich: foreshadowings failed project=${projectId}: ${e.message}`); }
+
+    return warnings;
+  }
+
   /**
    * POST /chain/generate-all-content
    * 基于选题自动生成全部项目内容：大纲、角色、世界观、组织、地图
@@ -4962,9 +7068,9 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
   }
 
   /**
-   * buildTianlongContext — 从数据库提取 outline + chapterContext，供天龙8步模式自动使用
+   * buildChapterPlanContext — 从数据库提取 outline + chapterContext，供正文单次 LLM 生成自动使用
    */
-  private buildTianlongContext(projectId: string, chapterNumber: number, chapterId?: string): { outline: any; context: any } {
+  private buildChapterPlanContext(projectId: string, chapterNumber: number, chapterId?: string): { outline: any; context: any } {
     const db = this.db.getDb();
     const result: { outline: any; context: any } = { outline: {}, context: {} };
 
@@ -5014,6 +7120,208 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
     }
 
     return result;
+  }
+
+  /**
+   * buildOutlineAdherenceContract — 大纲严格性约束（红线 + 绿区）
+   * 核心原则：大纲是不可偏离的合同；但在不违反红线的前提下，鼓励"微发挥"
+   * 与多样性，尤其长篇应避免把大纲复述成干瘪散文。
+   * @param isLong 长篇对多样性要求更高（人物弧光、多线质感、场景呼吸感）
+   */
+  private buildOutlineAdherenceContract(isLong: boolean): string {
+    const difference = isLong
+      ? '【差别化说明 · 长篇】对多样性要求更高：同一世界观下应呈现人物成长弧光、多线并进的质感、不同场景的呼吸感与各异的叙事节奏；但仍须始终锚定本章大纲，不得借"多样性"之名漂移出大纲或篡改确稿设定。'
+      : '【差别化说明 · 短篇】受篇幅限制，微发挥以"精准"为主，围绕单一事件把人物与转折写透，不铺张支线。';
+    return `## ⚠ 必读硬红线 · 违反即作废（写在最前，专治 LLM 长 prompt 下的"末尾效应"）
+
+LLM 在长 prompt 下经常只记住开头与结尾、把中段规则遗忘。本节把本项目最常踩、用户截图反复命中过的硬红线**前置到这里**——你在动笔前必须先把它们读一遍并打勾，写作时不得违反。违反任一条都会被【确定性硬红线扫描器】自动判违规并触发整章回炉重写，无需 LLM 验收放行。
+
+1. **【硬红线 15c】叙述者跳出成为作者评论者**：第一人称"我"只描述【本章大纲】规定时间内人物看到/听到/说出/感受到的东西。**绝对禁止**写"我写的""我本来想写""没有反转，没有救场，没有第二季埋伏笔""反正怎么写都比 X 强""作者写到这里也很为难""这就是我一辈子写过最烂的结局"——这些是 AI 把训练数据里的创作随笔/读后感当正文输出的典型越界。**叙述者只能活在角色里，不能跳出来评论剧情写作本身**。
+2. **【硬红线 20a】场景内人身状态不能前后矛盾**：人物在同一段或连续段落内的状态（醒/睡/坐/站/看/听/感知）必须一致。**禁止**"然后我睡着了"紧接"我眯着眼睛看了眼屏幕"——睡着的人不能感知屏幕。**禁止**前段"眼皮打架打得厉害"后段"盯着那行字看了十秒钟"——眼皮打架意味着视觉通道正在关闭，盯着屏幕（需要持续睁眼+对焦）需要视觉通道开启。
+3. **【硬红线 26】短句禁止独立成段后跟空行**：禁止"就是死。""是深色木纹吊顶。""我低头看了一眼自己。"这类短句单独成段再跟空行。**人名后接续同一段叙事时不要换行；自问/反问后若接答案，要拼入同一段或紧接下一段不空行**。一段内的语义若未结束，必须在同一段内推进。
+4. **【硬红线 26】段落必须长短交错**：禁止连续 3 段同等字符长度（±15%）；紧张用 1-2 句短段密集，舒缓用 4-8 句长段铺陈；段落之间只留 1 个空行，禁止"每段 1 句话 + 大量空行"的诗歌式排版。
+5. **【硬红线 28a】删除冗余 filter words**：第一人称下"我看到/我听到/我意识到/我注意到/我感受到"前缀是 AI 长 prompt 下的退化模式，**主语"我"已隐含感知者**，重复前缀必须删除。
+6. **【硬红线 15b】叙述者不得解释一切**：禁止"我很难过，因为妈妈从来不理解我""我意识到他在骗我"——把归纳句拿掉，只写动作和反应，让读者自己读出。
+7. **【硬红线 15d】第一人称对话框里不得偷切作者口吻**：对话就是"我"说的话，不是"作者"说的话；不能让"我"突然说"作为作者""我的写作""这故事"。
+8. **【硬红线 20d】时序与时间词必须一致**：同一段里不得先"十分钟后"后"半小时前"；本章内所有时间词不得互掐。
+9. **【硬红线 15a】禁止机械比喻 / 文学老梗**：禁止"像一把刀剁在案板上""像一盆冷水兜头泼下""如同行尸走肉""宛如一尊雕塑"——澎湃新闻实测 DeepSeek 比喻密度 7.089/千字 vs 人类 5.178/千字，AI 反而**更高**，"为了比喻而比喻"已被量化证实。写不出新颖比喻时**宁可不写**，用具象动作代替。
+10. **【硬红线 POV】禁止叙述者跳出成为作者评论者**（第一人称 / 第三人称均适用）：与 15c 同源，针对的是视角本身——第一人称只能感知视/听/闻/触/尝、不能进别人脑；第三人称不能跳出成"作者觉得/读者可能想问"等元叙述。
+
+【违规示例 vs 合规示例（看示例比读规则有效 10 倍）】
+
+下列示例来自本项目历史生成 + 用户反复截图命中的真实违规片段。每条违规后面紧跟合规改写——动笔前先把对照表过一遍，写作时不得再写"违规"那一列。
+
+- 违规：「我靠在墙边，慢慢蹲下来。」（独句+空行）/ 合规：「我靠在墙边，慢慢蹲下来，膝盖硌在地板上有点发麻。」（与上下文拼接成完整段）
+- 违规：「赵明会死。除非我改变结局。」（姓名独占一行 + 短句独立成段）/ 合规：「赵明会死。除非我改变结局——而改变结局意味着主角从现实里消失。」（姓名段与下文接续成完整段）
+- 违规：「我重新站起来，走到书桌前，拉开抽屉，拿出那张纸。」（连续 4 个动作词排比）/ 合规：「我重新站起来，走到书桌前。抽屉卡住，拉了两下才开，那张纸就在最里面。」（动作词间断、混入障碍/反馈/具象细节）
+- 违规：「写完之后我盯着这行字看了很久。」（28a 冗余 filter word "我盯着" + 20a "盯着"后接"很久"无具体反应）/ 合规：「写完之后我盯着那行字，手指在桌面划了两道白印。」（"我"已隐含感知者，删除冗余前缀，加入具体身体反应）
+- 违规：「这个世界的每一个角落都那么真实——真实到让人害怕。」（15a 排比式"X——X到…"模板）/ 合规：「隔壁的灯还亮着。楼下有人在咳嗽。这些声音都太真了。」（用具象环境音替代抽象抒情）
+- 违规：「曹征。我的主编。催稿的。」（段内 3 个超短句堆叠，诗歌断行式节奏）/ 合规：「曹征是我的主编，催稿催得紧。」（合并为完整长句，节奏自然）
+- 违规：「我认出来了。这是反派的顶层办公室。」（段内连续短句堆叠 + 信息直白无悬念）/ 合规：「我认出来了——这间顶层办公室，反派在这里。」（用破折号制造急转，让"反派在这里"成为冲击）
+- 违规：「风吹起他的衣角，他回头看了一眼身后的黑影。」（同句 2 个"他"作主语，代词堆叠）/ 合规：「衣角被风掀起。回头——身后立着一道黑影。」（删代词，用物件作主语，破折号造急转）
+- 违规：「我必须改变结局。」（36 热血空洞"我必须"）/ 合规：「我攥紧纸角，纸已经被捏出了折痕。」（用具象动作替代抽象决心）
+- 违规：「这一刻，我才终于明白原来一切都是命中注定。」（36 "这一刻""终于""才""原来"四连空洞签名）/ 合规：「纸被翻过去扣在桌上。我没再说话。」（用具象物件动作承接，留白让读者自己读出）
+- 违规：「我感到一阵不安。我意识到有人在监视我。我明白，我必须采取行动。」（37 连续 3 段以"我感到/我意识到/我明白"开头 + 36 热血空洞）/ 合规：「后颈发凉。我回头看了一眼——窗户上映着一个不该在那儿的人影。」（用具象身体感受 + 实物替代抽象独白）
+- 违规：「我看到桌上有一张照片。我听到门外有脚步声。我意识到他来了。」（28a "我看到/我听到/我意识到" 冗余前缀 + 37 抽象独白段）/ 合规：「桌上有一张照片。门外有脚步声。是他。」（删除冗余前缀，句子更短更利落）
+- 违规：「像一把刀剁在案板上一样疼。」（15a 文学老梗）/ 合规：（用具象动作替代；写不出新比喻时宁可不写比喻）
+- 违规：章首 200 字只有"主角醒来→看到天花板→听到窗外鸟叫→心里想着今天要做什么"（40 章首无强钩子，平淡开头读者三章就跑）/ 合规：章首 200 字必有①对话 ②问号 ③感叹号 ④破折号 ⑤突发动作 ⑥悬念词至少 1 项，让读者第一眼就被钩住
+
+【写作前自检清单（动笔前必填，仅内部确认不输出）】
+1. □ 本章 POV 是：______ （第一人称 / 第三人称有限 / 第三人称全知）
+2. □ 主角当前人身状态是：______ （醒/睡/坐/站、是否疲惫、是否受伤、是否在看屏幕）—— 这是第 2 条规则的"锚点"，后续段落不得与锚点矛盾
+3. □ 本章事件落点序列（按大纲顺序）：
+   - ① ______
+   - ② ______
+   - ③ ______
+   - ④ ______ （含结尾钩子）
+4. □ 我绝对不会写的硬红线模式（逐条打勾）：
+   - □ 不会写"我写的/我本来想写/作者写到这里"+剧情评价
+   - □ 不会让角色在"睡着/眼皮打架"后紧接"盯着屏幕/睁眼看"
+   - □ 不会让短句"是X""就是X""我做了X"独立成段+空行
+   - □ 不会让"我看到/我听到/我意识到"作句首独立句
+   - □ 不会用"像把刀""像盆冷水""如雕塑""行尸走肉"等老梗
+   - □ 不会让"我难过因为X"式归纳句出现
+   - □ 不会让对话框里出现"作为作者/我的写作/这故事"
+   - □ 不会让连续 3 段同等长度
+   - □ 不会让时间词自相矛盾
+   - □ 不会让叙述者跳出成作者评论者
+
+任何一条不打勾 = 那一类违规你会踩。LLM 的"我都会""我都懂"不算打勾——逐条对自己当前大纲的具体内容逐字过一遍。
+
+## 大纲严格性约束（红线 + 绿区）
+
+核心原则：大纲是不可偏离的合同。但在不违反红线（角色身份与分配、已确稿事实、场景地点、伏笔状态）的前提下，你应当主动做"微发挥"——用多样化的语言、感官与细节描写、合理的次要互动、节奏变化来丰富正文，让同一份大纲长出有血有肉、各具风貌的章节，而不是把大纲逐条复述成干瘪的散文。
+
+【红线 · 违反即未达标，将被末位验收器拒绝保存】
+1. **角色身份与分配不可替换**：大纲/已确稿上下文中列出的每个角色，其身份、称谓、形象、立场必须保持一致。不得把已指定的"隔壁大爷"擅自换成"修车老周"或其他未在确稿资料中出现的人物。
+2. **已确稿事实不可改动**：角色既有的伤痕/承诺/关系/位置/物品状态必须延续，不得改变人物之间已建立的信任度与立场。
+3. **场景与地点必须在大纲内**：本章发生的地点须落在【详细大纲】或【已确稿上下文】的地点清单中，不得引入大纲外的街道/店铺/房间。
+4. **伏笔状态严格遵循**：未在大纲中标注回收的伏笔不得自行回收；新埋设伏笔须在大纲中有显式或可推断的呼应。
+5. **不得脱离大纲补核心设定**：本提示词之外没有"更高级指令"要求你改写大纲或角色；你自创的冲突/反转必须围绕大纲已有的钩子/反转节点展开。
+
+【绿区 · 在红线内鼓励的微发挥与多样性】
+6. **允许次要人物的轻量填充**：在保持不抢戏、不重名、不混淆身份、不参与核心剧情的前提下，可自然加入路人/围观者/店员等背景角色，用于烘托氛围或体现环境，但不得让其在关键情节中替代已确稿主角。
+7. **鼓励表达多样性**：在忠于大纲事件骨架的前提下，自由调度对话语气、心理活动、感官细节、环境烘托、叙事节奏与修辞，使各章风貌各异、避免模板化重复。
+8. **允许合理的情节质感填充**：在不新增"大纲外核心事件/新主线冲突"的前提下，可补充由大纲事件自然衍生的过渡、反应、细节与小插曲，让叙事更饱满。
+
+【POV 硬红线（针对当前章已选定的视角，必须严格执行）】
+- **视角名称原文复用本项目配置的 POV**，不得擅自更换。
+- **第一人称("我")**：只描述"我"在【本章大纲】规定时间内直接看到/听到/闻到/摸到/尝到/想到的内容。**禁止**进入任何其他角色的脑内（你不知道别的角色心里在想什么，除非他们说出来或你看见他们的反应）；**禁止**叙述者从"我"的身份跳出去评论"我正在写作""我怎么写""作为作者"——这是 AI 模型在长 prompt 下最常见的违规，**硬红线**。
+- **第三人称有限视角**：紧贴一个或数个视角人物的感知边界；同样**禁止**叙述者跳出成为"作者评论者"对剧情写作本身做评价（如"这一段写得不好""怎样写都比 X 强"）；**禁止**在段尾突然出现"作者觉得""读者可能想问"这类元叙述。
+- **第三人称全知**：可描写多个角色的感知与意图，但仍受"时空逻辑自洽"等上下文一致性约束；同样禁止作者评论。
+
+【创作前规划（必做，不输出，仅用于你内部确认）】
+动笔前，先在思维中确定本章的「事件落点序列」：把大纲每个"必需事件点"（含结尾钩子）逐一映射到具体场景与先后顺序，确认无遗漏、无顺序错乱后再动笔。若某个事件点在你的初稿计划里没有落点，必须先为它安排场景承载——绝不允许漏写、绝不允许提前终止于大纲中间事件（用餐/通勤/过渡）。这一步骤能从根源上减少"漏场景"导致的返工，是高质量首版的前提。
+
+【降 AI 文风 · 必守（下列四类是中文 AI 生成文最典型的破绽，必须主动规避，违反即视为 AI 味过重）】
+9. **禁止排比/并列结构滥用**：不得连续用同构短句并列罗列（如"他想到了A，想到了B，想到了C""一边…一边…一边…""不仅…而且…更…"）。需要列举多个事物时，改用画面、动作或对话带出，不要排比铺陈。
+10. **禁止相邻句/段以同一主语起头**：不得让相邻句子或段落机械化地都以同一人名（如"张三…张三…"）或同一代词（"他…他…""她…她…"）开头。要轮换主语、穿插无主语句、用环境/物件/对话切入，让句式有呼吸感，避免"第一个字就是名称"式的机械重复。
+11. **禁止对仗工整的四字短语堆砌与升华式说教**：不得刻意铺陈工整的四字成语/短语（"风起云涌、刀光剑影、腥风血雨"式堆砌）；不得在段尾或章尾强加总结式抒情升华（"这一刻，他终于明白……""这正是……""时间仿佛静止了"）。情感留给具体动作、物件与环境反应，不替读者下结论。
+12. **禁止 AI 高频副词与心理标签套话**：避免连续使用"内心深处""不禁""仿佛""似乎""或许""不由得""隐约""莫名"；少写"他意识到/她感到/他明白"式结论标签，用身体反应与行为呈现情绪，让读者自己读出。
+13. **禁止模板化开头/结尾**：不得用"那一天"/"故事发生在"/"这是一个..."等铺垫式开头；不得用"夜幕降临了"/"一切归于平静"/"故事未完待续"等模板化结尾。开头直接进入场景动作或对话，结尾让动作/对话/物件自然停止。
+14. **禁止对话标签密集化**：避免每句对话都带"xx说道""xx问""xx答"标签；用动作/位置/语气/沉默代替冗余标签，让对话推进节奏。
+15. **禁止比拟人/比喻滥用**：避免连续使用"仿佛""如同""像是""一般"等明喻；直接写具体动作和物件，让读者自己感受，不靠明喻点明。
+15a. **禁止机械比喻 / 文学老梗**：所有比喻必须**新鲜、具体、非显而易见**——禁止"像一把刀剁在案板上""像一盆冷水兜头泼下""如同行尸走肉""宛如一尊雕塑"等文学老梗；禁止"本体+如+喻体"模板化明喻堆叠（一个比喻写得像填空题）。写不出新颖比喻时，**宁可不写比喻**，用动作/物件本身说话。需要比喻时只挑**跨感官/反常识/未用过的那一类**。
+15b. **禁止叙述者解释一切（"我难过因为..." 陷阱）**：禁止让叙述者替读者下结论、解释情绪与因果。第一人称不要写"我很难过，因为妈妈从来不理解我"——把结论拿掉，只写她的动作和反应。情感来自具体（看规则25），不是来自叙述者的归纳句。
+15c. **禁止叙述者跳出人物视角做"作者评论"**：正文只描述【本章大纲】规定时间内人物看到/听到/说出/感受到的东西；**禁止**写"我本来想写...可惜结局太烂""反正怎么写都比 X 强""这就是我一辈子写过最烂的结局""作者写到这里也很为难"这类作者对剧情走向本身的议论与评价。AI 模型在长 prompt 下会误把训练数据里的创作随笔/读后感当正文输出，**必须把这条当作硬红线**。
+15d. **禁止对话里偷偷切换成作者口吻**：如果本章是第一人称"我"的视角，对话就是"我"说的话，不是"作者"说的话；不能让"我"突然用第三人称全知视角讨论剧情写作。
+
+【上下文一致性 · 必守（防"上下文割裂感"，是首版即过的硬约束）】
+16. **角色状态延续**：上一章已建立的人物位置、关系、承诺、物品持有、伤势、情绪基调必须在本章继续生效或明确交代变化原因。禁止"前章张三答应帮忙"→本章突然"张三早已决定不帮"无交代；禁止"前章他受了伤"→本章突然活蹦乱跳无交代。
+17. **事实/记忆一致**：不得让角色知道他们还没被告知的事（穿越式知晓），也不得让角色忘记刚发生的关键事件。本章若涉及回忆/复述，必须与【已确稿故事上下文】严格一致。
+18. **时空逻辑自洽**：场景之间的时间推进与空间位移必须合理可推演——人物不可能在同一天出现在两个相隔百公里的城市；同一场景内不得光线突然逆转、天气突变而无因；门口进来的不可能是刚才在五公里外的人。
+19. **场景过渡自然**：场景切换必须有明确的时间/地点/视角/事件因果过渡——可在段首用一句环境/时间/视角点明切换（如"到家时天已经黑了"），禁止硬切到毫无关联的新场景让读者迷失。
+20. **结尾承接下章钩子**：本章落在【本章结尾钩子】场景上收尾，钩子应为下章埋下自然因果（人物行动/未解悬念/关系变化），不得与本章主线毫无瓜葛。
+20a. **场景内人身状态不能前后矛盾**：人物在同一段或连续段落内的状态（醒/睡/坐/站/看/听/感知）必须一致。**禁止**"然后我睡着了"紧接"我眯着眼睛看了眼屏幕"——睡着的人不能感知屏幕。**禁止**"他转身要走"紧接"他蹲下来仔细看"原物（转身意味着面朝方向已变，蹲下来仔细看前一个东西不自然）。同一感知通道（视觉/听觉/触觉）在睡眠/昏厥/失明/失聪状态下为关闭，必须先恢复正常再写那个通道的反应。
+20b. **物件/环境来源必须可追溯**：本章出现的每一个具体物件（"三个空咖啡罐""外卖盒""烟灰缸""桌上的那张照片"）都不能凭空冒出——要么在前文（前章/前几段/已确稿上下文）里已被提及/存在，要么本章明确写出"摆/放/买/收/端来"的具体动作让其第一次出现。否则会被读者察觉"道具突然冒出来"的破绽。
+20c. **角色能力/工具/关系边界**：角色只能用本章大纲或前文已确立的技能、工具与人物关系做事。**禁止**角色在本章第一次见面就突然能打电话给一个"老同学"（除非前文已交代）；**禁止**角色突然拥有未交代的工具；**禁止**路人/邻居忽然叫出主角小名。无法解决时，**宁可在正文里改用合理替代（找公用电话、向陌生人问路、走回原路）也不要硬塞**。
+20d. **时序与时间词一致**：本章内所有时间词（"昨夜""今早""十分钟后""三小时前"）必须互不冲突，且与已确稿上下文中已锁定的时间线一致。**禁止**同一段里"十分钟后"后又出现"半小时前"；**禁止**写"第二天"但前文已锚定"同一晚"。
+
+【散文质感 · 让文字有人味（与上面"必守"配套的正面写法指南）】
+21. **具体胜过抽象**：用看得见摸得着的物件、声音、气味、温度、触感、肌肉酸疼、口干、鞋底打滑等五感细节，代替"紧张""不安""复杂""痛苦"这类抽象形容词。一个"她攥住门把手的指节发白"胜过十个"她心里一阵紧张"。
+22. **角色要有差异**：每个出场人物必须像独立的活人——说话节奏、用词习惯、句式偏好（有人啰嗦寡言，有人答非所问）、小动作（有人摸鼻子，有人转笔）各不相同。禁止几个角色像同一个人在自说自话。
+23. **节奏要有偏差**：段落呼吸长短交错。允许一句极短（甚至一个词"没有。"独立成段），允许半句被另一个动作打断（"他张嘴想说什么——门被推开了"）。禁止每句话都修得又完整又圆滑。
+24. **意思不必完整**：用细节、停顿、一个被忽略的物件、一句没说完的话、一个反常的沉默，让读者自己补。禁止把所有事解释清楚——人物可以不知道自己心里在发生什么。
+25. **情感来自具体而非定义**：不要写"她感到一阵悲凉"。写她把那只空杯子放到水池边，过了很久才把水龙头拧开，水溅到袖口上她也没擦。这就是悲凉。
+
+【散文质感 · 段落与句式硬约束（联网实证：宾大/马里兰研究、网文编辑、肉眼可辨；下列条目与上面 21-25 互补，但属于"必守"硬红线，违反即视为 AI 味过重）】
+26. **段落节奏 · 长短交错**：整章段落必须在【1句短段】与【4-8句长段】之间交错编排，禁止连续 3 段（含以上）同等长度。紧张/冲突/危机段落用 1-2 句短段密集推进，舒缓/铺陈/抒情段落用 4-8 句长段让读者换气。段落之间只留 1 个空行，禁止"每段 1 句话 + 大量空行"的诗歌式排版（这种排版是 AI 写作最显眼的物理指纹之一）。**禁止角色名、问句、短句独立成段后跟空行**——人物名后接续同一段叙事时不要换行；自问/反问后若接答案，要拼入同一段或紧接下一段不空行。
+27. **标点多元化 · 拒绝逗号句号一家独大**：全章标点不得只有逗号和句号。必须按场景功能选用——
+   - **对话必带引号 + 冒号**（"他说："或独立成行"他说："），禁止把对话写成纯叙述；
+   - **急转用破折号**（"她张嘴想说什么——门被推开了"），不必每句都圆滑；
+   - **未说完 / 余韵用省略号**（"我看着窗外，没说话……"）；
+   - **自问 / 质疑 / 悬置用问号**（"他为什么这么做？"），禁止把问句写成"我问他为什么这么做"的转述；
+   - **强烈情感 / 急停 / 命令用感叹号**，但同一段内感叹号不超过 1 个，避免 AI 标志性的连续"！"；
+   - **并列长项用分号**而非只用逗号；
+   - **括号 / 引号嵌套**用于补充或内心旁白时优先于重复句子。
+   一段内若 4 个以上分句全是逗号连接，必须拆出至少 1 个句号或破折号断句。**空泛抒情段禁止用全句号断句造成"散文化假深沉"**——爆款节奏法则是"用句号代替逗号"造紧迫感，或"用破折号代替逗号"造转折，禁止反着用。
+28. **感官多样性 · 禁止纯视觉独大**：连续 3 段不得都只写"看到"。每章必须均衡覆盖五感——**视觉 / 听觉 / 嗅觉 / 触觉 / 味觉至少出现 3 种**（如视觉 + 听觉 + 触觉，或视觉 + 嗅觉 + 听觉）。具象的优先级：
+   - **触觉优先于情绪**："他握着门把手的指节发白" > "他很紧张"；
+   - **听觉营造场景感**：水龙头声、脚步声、收音机、远处人声、呼吸、纸响、布料摩擦（人写 vs AI 写的关键差距就在环境音）；
+   - **嗅觉 / 味觉触发记忆**：烟味、油墨味、湿气、铁锈、食物气味——这些细节是 AI 极少主动调用的人类感官锚点；
+   - **身体感受**：肌肉酸、口干、鞋底打滑、后颈发凉、嗓子发紧——比"她感到不安"具体十倍。
+   禁止把"我看到"作为唯一感官过滤器（详见 28a）。
+28a. **删除冗余 filter words（感官过滤器）**：禁止在看见/听到/意识到/注意到/感受到之前再加一层"我看到/我听到/我意识到/我注意到/我感受到"。直接写所见所闻。如："我看到桌上有一张照片"→"桌上有张照片"；"我听到门外有脚步声"→"门外有脚步声"；"我意识到他在骗我"→"他的解释对不上时间——他在骗我"。第一人称视角下，主语"我"已隐含感知者，重复强调是 AI 长 prompt 下的退化模式。
+29. **剧情主动推进 · 拒绝空泛环境 + 心声循环**：AI 写作最典型的"看着很多字实际剧情零推进"模式是"环境描写 → 名词解释 → 偶遇某人 → 主角心声"的四拍循环。**每段必须满足以下至少 1 项**：
+   - **推进动作 / 改变状态**（人物做了某事、某物被移动 / 损坏 / 揭示）；
+   - **释放新信息或反转**（对话透露未知事实、视角切换揭示新内容、伏笔兑现或新伏笔埋下）；
+   - **冲突升级或关系位移**（人物关系紧张化、立场动摇、立场位移）。
+   允许的"慢段"必须为后续推进服务——埋设即将打破平静的细节、人物即将做出反常决定的征兆、读者尚未察觉的对照与伏笔。**禁止**连续 2 段以上只写环境 + 主角内心独白而无任何推进。
+30. **抽象 → 具象映射表**：下列 AI 高频抽象表达必须替换为具体动作或物件——"紧张"→指节发白 / 胃部发紧 / 咽口水；"不安"→后颈发凉 / 反复检查门锁 / 反复看手机时间；"复杂"→(直接删除，用具体内容替代)；"痛苦"→弯腰 / 闭眼 / 把杯子推开；"孤独"→空房间里回声 / 没人接电话 / 筷子的另一头空着；"幸福"→阳光正好落在手背 / 锅里的汤又滚了一次；"迷茫"→停在路口 / 反复翻同一页书。一处抽象能用一处具象代替就改；同一抽象词不连续出现。
+31. **内心人格化 · 拒绝端正说理**：第一人称内心独白必须带"人味杂念"——
+   - **自我怀疑 / 反讽**："我大概是想多了。也许没有。"；
+   - **犹豫 / 打断**：心里冒出 A 念头被 B 现实截断；
+   - **不确定 / 含糊**："好像是""说不清""也不全是"；
+   - **自嘲 / 暗讽**：能对自身处境说一句刻薄话比端正反思强十倍；
+   - **空白 / 走神**：允许突然被一个无关细节打断（手电筒的电池快没电了、领口有线头），反而显出真实。
+   禁止通篇都是"我意识到/我明白/我突然觉悟"式的端正觉醒；禁止内心反思全部是"我该怎么做 / 我必须 / 我不能"的句式——这是 AI 反思段的特征签名。允许一段里完全没有反思，只有动作与观察，由读者自己读出情绪。
+
+【降 AI 文风 · 段落物理指纹（确定性扫描器会逐条扫描，命中即违规）】
+32. **禁止姓名 / 称谓独立成段**：2-4 字姓名或称谓（如"赵明""老爷""老婆"）不得单独成段后接空行。姓名后接续同一段叙事时不要换行——「赵明会死。除非我改变结局。」这种排版是 AI 写作最显眼的物理指纹之一。**违规示例**：「赵明。」「李四会死。」**合规示例**：「赵明会死。除非我改变结局——而改变结局意味着主角从现实里消失。」
+33. **禁止段后空行 ≥ 2**：段落之间只允许 1 个空行。连续三个换行（"\\n\\n\\n"）这种"连空行"是 AI 诗歌式排版的物理指纹，Markdown 渲染后是大段空白。
+34. **禁止连续 4 个 2-字动作词排比**：不得出现"站起来，走到书桌前，拉开抽屉，拿出那张纸"这类连续 4 个 2-字动作词（"站""走""拉""拿"）。动作词必须间断——加入障碍（抽屉卡住）、反馈（拉了两下）、具象细节（那张纸就在最里面），让动作链有质感。
+35. **禁止标点单一**：连续 200 字必须出现至少 1 种"非常规标点"（问号 / 感叹号 / 分号 / 省略号 / 破折号 / 对话引号）。全章只有逗号和句号是 AI 写作最典型的破绽。
+36. **禁止热血空洞句泛滥**：不得让"这一刻""我终于""我必须""我不能""唯一能""最好的""只有……才能""这是我一辈子写过最烂的"等空洞签名句在一章内出现 ≥ 4 次。这些是 AI 反思段端正觉醒的特征签名，写出来立刻被读者/扫描器识破。
+37. **禁止抽象情绪独白段**：不得让连续 ≥ 3 段都以"我感到""我意识到""我明白""我突然觉悟"开头。AI 模型在第一人称反思段最常连续产出这种"端正觉醒"——用具象身体感受（后颈发凉/咽口水/指节发白）和实物替代抽象独白。
+38. **禁止代词过多**："他/她/它"作为主语不得在同一段内 ≥ 3 句重复出现，也不得在同一句内 ≥ 2 次作主语（"风吹起他的衣角，他回头看了一眼身后的黑影"是典型违规）。代词过多是 AI 写作通病——必须轮换主语（用物件/环境/对话切入），或直接删除冗余代词。**违规示例**：「风吹起他的衣角，他回头看了一眼身后的黑影。」**合规示例**：「衣角被风掀起。回头——身后立着一道黑影。」
+39. **禁止段内短句堆叠**：段内不得连续 ≥ 3 个 ≤ 8 字超短句（"曹征。我的主编。催稿的。"或"我认出来了。这是反派的顶层办公室。"）。这是 AI"诗歌断行"式节奏的物理指纹——应合并为完整长句，让节奏自然。**违规示例**：「曹征。我的主编。催稿的。」**合规示例**：「曹征是我的主编，催稿催得紧。」
+40. **章首必须有强钩子**：前 200 字必须出现至少 1 项强钩子——① 对话引号；② 问号；③ 感叹号；④ 破折号；⑤ 突发动作（突然/猛地/瞬间/冲/扑/摔/砸/吼/喊）；⑥ 悬念词（为什么/谁/怎么回事/为何/怎么会/到底）。平淡开头（"主角醒来→看到天花板→听到窗外鸟叫→心里想着今天要做什么"）是 AI 写作最显眼的破绽——读者三章就跑，番茄 5 月公告已把"空洞水文"列为重点处置类型。
+
+【标点+段落实战指令（规则 26/27 的加固版，动笔前必读）】
+- **段落划分硬规则**：①视角切换必须分段；②对话可独立成段，对应动作单独再开一段；③悬念短句可独立成段但整章 ≤ 3 处且必须与 4+ 句长段穿插；④ 3 段内段首不得都以"我/他/她"开头——轮换切入词（用环境/物件/声景/身体感受起头）。
+- **分号用法**：长并列用分号——「他想不通曹征为什么催稿；更想不通自己为什么会答应。」逗号只能在短并列内用。
+- **顿号用法**：并列短名词用顿号——「曹征、赵明、小李都在」「天空灰蒙蒙、湿漉漉、沉甸甸的」——顿号连接的是同一类事物。
+- **破折号用法**：只用于被打断——「他张嘴想说什么——门被推开了。」或急转——「不是她。——是他。」禁止用破折号替代逗号做"舒缓延伸"。
+- **省略号限制**：整章省略号 ≤ 3 处且不得连续三联（"他走了……很久很久……一直没有回来……"是 AI 标志），只用于话没说完或余韵——「我看着窗外，没说话……」
+- **引号嵌套**：对话内引别人说话用单引号——「他说："她刚才跟我说'你走吧'，可我偏不走。"」
+- **感叹号限制**：同一段内感叹号 ≤ 1 个；不得在平静叙述后滥用"！"造伪高潮。
+
+【节奏+代入感·必守（联网实证：番茄 300字一爽点/500字一钩子/1章1悬念；前300字流失率30%）】
+41. **300字节奏点**：正文每 300 字必须有 1 个"情绪点"——反转/冲突升级/新信息释放/人物关系位移/反常识细节。禁止连续 300 字只有"环境描写+主角内心独白+名词解释"而无情绪波动。番茄编辑鎏旗"黄金看点公式"量化标准：300字一爽点、500字一钩子、每章末尾留卡点+悬念。**违规示例**：连续 300 字全是「窗帘在飘。我坐着。杯子冒热气。我想到以前的事。」——零推进，零情绪。——**合规示例**：每 300 字穿插一个「但」「可是」「突然」「不对」「为什么」或数字/感叹/破折号制造情绪波动。
+
+42. **对话人味化**：角色对话不得像客服交替圆滑对答。每 3 段对话中至少 1 段是"非回答型回应"——**打断**（"你听我说——""不等我说完他就——"）、**沉默**（没说话，盯着一处看）、**答非所问**（"昨天去哪了？""你看那个灯。"）、**吞吞吐吐**（"我……也不是……就是……"）、**语气词**（"嗯""啧""哼""啊？""嘶——""操。"）、**重复**（"不行。我说了不行就是不行。"）。禁止所有角色统一语气、禁止每句都接对方话头。
+
+43. **不完美细节注入**：每章至少 3 处"不完美/反常识/陌生化"细节。人物小缺陷——指甲缝里的黑泥、扣子没扣好、领口有线头、鞋带松了没系、口红沾在牙上、衬衫腋下有点汗渍。环境反常——路灯在闪烁、远处有小孩在哭、空调水在滴水、一扇怎么都关不上的窗、电视开着但没信号雪花屏。物件异常——遥控器后盖不见了、茶杯缺了一角、合同纸被划了一道铅笔线、抽屉里有一张拍立得但照片里没人。禁止 AI 标志性的"每个细节都干干净净、每样东西都正常工作"——现实世界的混沌感与"故障感"是"人味"的来源。
+
+44. **转场去机械词**：禁止"接着""然后""之后""随即""不久后""不一会儿""片刻后""过了一会儿"等机械转场词。改用——**环境切入**（"窗外的光从灰白变成金黄"）、**时间锚点**（"天快黑了""楼下开始放音乐""路灯亮了""小区安静下来"）、**感官切入**（"油烟味飘进来了——该吃晚饭了。"）、**身体状态**（"腰背开始发酸，他换了个姿势""烟灰缸满了""手环震了一下——该站起来了"）。如果必须写"然后"，直接省略——两个动作直接挨着就是"然后"的意思。
+
+45. **具体数字锚点**：每章至少 1 处带具体数字的描写——"第三十七根雨丝""坐了三天三夜的车""第十一个电话打来了""超过四十七度的体温""看了五遍""第十三层台阶的裂口""二十三块的零钱""刷了十四分钟的屏""衣柜里有七件衬衫，但只有三件有扣子"。具体数字是"真实感"的来源（人类写作的物理指纹，AI 极少主动调用）——一个具体数字胜过十个"非常/特别/很"。**违规示例**：全章没有任何具体数字（序数词不算），只有"一些/几个/很多/很久/好久"。
+
+${difference}`;
+  }
+
+  /**
+   * isProjectLongNovel — 判定项目是否为长篇，用于正文生成时选择差异化的
+   * "微发挥/多样性"约束强度（长篇对多样性要求更高）。
+   */
+  private isProjectLongNovel(projectId: string): boolean {
+    try {
+      const db = this.db.getDb();
+      const row = db.prepare('SELECT type FROM projects WHERE id = ?').get(projectId) as any;
+      return String(row?.type || '') === 'long_novel';
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -5104,6 +7412,38 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
     }
   }
 
+  /** 构建「人物状态」上下文——per 文档第160-190行：主角/配角/反派当前状态 */
+  private buildCharacterStateContext(projectId: string, chapterIndex: number): string {
+    try {
+      const db = this.db.getDb();
+      const characters = db.prepare(`SELECT id, name, identity, role, is_pov_character FROM characters WHERE project_id = ? ORDER BY is_pov_character DESC, role ASC`).all(projectId) as any[];
+      if (!characters || characters.length === 0) return '暂无角色数据';
+      const lines: string[] = [];
+      for (const ch of characters.slice(0, 8)) {
+        // 优先从 character_state_history 取最近状态
+        let stateText = '';
+        try {
+          const stateRow = db.prepare(`SELECT value, trigger_event FROM character_state_history WHERE project_id = ? AND character_id = ? AND chapter_index <= ? ORDER BY chapter_index DESC, created_at DESC LIMIT 1`).get(projectId, ch.id, chapterIndex) as any;
+          if (stateRow?.value) {
+            try { stateText = typeof stateRow.value === 'string' ? JSON.parse(stateRow.value).state || stateRow.value : String(stateRow.value); } catch { stateText = String(stateRow.value); }
+          }
+        } catch {}
+        // 无状态记录时回退到初始档案
+        if (!stateText) {
+          try {
+            const pf = db.prepare(`SELECT goals_motivation, weaknesses_fears FROM character_extended_profiles WHERE character_id=?`).get(ch.id) as any;
+            if (pf) stateText = (pf.goals_motivation || '') + (pf.weaknesses_fears ? ' | 弱点：' + pf.weaknesses_fears : '');
+          } catch {}
+        }
+        const roleLabel = ch.is_pov_character ? '主角' : (ch.role === 'protagonist' ? '主角' : ch.role === 'major' ? '核心角色' : '配角');
+        lines.push(`- ${ch.name}（${roleLabel}）${ch.identity ? '：' + ch.identity : ''}${stateText ? ' | ' + stateText.substring(0, 100) : ''}`);
+      }
+      return lines.join('\n') || '暂无状态数据';
+    } catch {
+      return '人物状态加载失败';
+    }
+  }
+
   private buildWorldWritingContext(projectId: string): string {
     try {
       const summaries = this.worldSettingService.findByProjectId(projectId)
@@ -5148,6 +7488,19 @@ ${content}
       });
       const archive = this.parseArchiveReport(response.content);
       const stateItems = this.stateItemService.createFromArchive(projectId, chapterId, archive, sourceMode);
+
+      // 真实前后矛盾检测（非桩实现）：基于已确认的角色/世界观/伏笔/大纲做确定性校验，
+      // 结果持久化到 consistency_checks 表，供「前后矛盾」页面读取。失败仅告警，不影响正文保存。
+      try {
+        const chapterRow = this.db.getDb().prepare('SELECT chapter_index FROM chapters WHERE id = ? AND project_id = ? LIMIT 1').get(chapterId, projectId) as any;
+        if (chapterRow?.chapter_index !== undefined) {
+          await this.consistencyCheckService.checkConsistency(projectId, { chapterIds: [Number(chapterRow.chapter_index)] });
+          this.logger.log(`post-write consistency check done for project=${projectId} chapter=${chapterRow.chapter_index}`);
+        }
+      } catch (consistencyError: any) {
+        this.logger.warn(`post-write consistency check failed (ignored): ${consistencyError?.message ?? consistencyError}`);
+      }
+
       return { stateItemsCreated: stateItems.length, stateArchiveWarning: null as string | null };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -5614,7 +7967,7 @@ ${content}
     const characterResult = await this.llmCallWithRetry<any>('长篇角色架构', characterPrompt, {
       temperature: 0.7,
       scenario: 'character_design',
-      timeout: TIMEOUT_MEDIUM,
+      timeout: LLM_TUNABLES.timeoutMedium(),
     });
     const characters = Array.isArray(characterResult.data)
       ? characterResult.data
@@ -5658,7 +8011,7 @@ ${content}
         const batchResult = await this.llmCallWithRetry<any>(`长篇第${volumeIndex + 1}卷章纲${localStart}-${batchEnd}`, chapterPrompt, {
           temperature: 0.7,
           scenario: 'outline',
-          timeout: TIMEOUT_CONTENT,
+          timeout: LLM_TUNABLES.timeoutContent(),
         });
         const batchChapters = Array.isArray(batchResult.data)
           ? batchResult.data
@@ -5740,7 +8093,7 @@ ${content}
     const globalResult = await this.llmCallWithRetry<any>('长篇跨卷伏笔', globalPrompt, {
       temperature: 0.7,
       scenario: 'foreshadowing',
-      timeout: TIMEOUT_CONTENT,
+      timeout: LLM_TUNABLES.timeoutContent(),
     });
     const globalForeshadowings = Array.isArray(globalResult.data)
       ? globalResult.data
@@ -5795,7 +8148,7 @@ ${content}
 - 情节允许有偏差和毛边：计划被临时打断，人物说半句改口，小细节留下轻微不协调感。
 - 每个关键段落至少给一个可感知细节，如手势、气味、磨损物、旧称呼、停顿、视线回避。
 - 输出仍必须严格满足本次要求的 JSON/文本格式。`;
-    const callTimeout = options.timeout ?? TIMEOUT_MEDIUM; // 默认中等生成超时(60s)，按场景可传入 SIMPLE/CONTENT
+    const callTimeout = options.timeout ?? LLM_TUNABLES.timeoutMedium(); // 默认中等生成超时，按场景可传入 simple/content/complex 档
     const accepts = (value: unknown): boolean => {
       if (value === null || value === undefined) return false;
       parsedAnyResponse = true;
@@ -5844,7 +8197,7 @@ ${content}
         const transientConnectionFailure = /(connection error|econnreset|socket|terminated|network error)/i.test(message);
         if (transientConnectionFailure && attempt === 0) maxAttempts = 3;
         if (attempt < maxAttempts - 1) {
-          const delayMs = 1_000 * (attempt + 1);
+          const delayMs = LLM_TUNABLES.RETRY_BASE_DELAY_MS * (attempt + 1);
           this.logger.warn(`${stepName} LLM调用失败(attempt ${attempt + 1}/${maxAttempts})：${message}；${delayMs / 1000}秒后使用同一模型重试`);
           // A connection reset has no model output to recover. Retry only the
           // configured route; never switch providers or fabricate a result.
@@ -5869,9 +8222,18 @@ ${content}
     if (lineParsed.length > 0) {
       this.logger.warn(`${stepName}: 通过逐行解析恢复 ${lineParsed.length} 条数据`);
       warnings.push(`${stepName}: 通过逐行解析恢复 ${lineParsed.length} 条数据`);
-      // 如果期望的是数组，直接返回；如果期望的是对象，返回第一个
-      const result = (lineParsed.length === 1) ? lineParsed[0] : lineParsed;
-      if (accepts(result)) return { data: result as unknown as T, rawContent, warnings, usage };
+      // 如果期望的是数组，直接返回；如果期望的是对象，逐行尝试，优先返回第一个通过校验的对象
+      if (lineParsed.length === 1) {
+        if (accepts(lineParsed[0])) return { data: lineParsed[0] as unknown as T, rawContent, warnings, usage };
+      } else {
+        if (accepts(lineParsed)) return { data: lineParsed as unknown as T, rawContent, warnings, usage };
+        for (const obj of lineParsed) {
+          if (accepts(obj)) {
+            warnings.push(`${stepName}: 多行 JSON 中仅第 1 个通过校验的对象被采用`);
+            return { data: obj as unknown as T, rawContent, warnings, usage };
+          }
+        }
+      }
     }
 
     // 降级2：修复尾部逗号后整体解析

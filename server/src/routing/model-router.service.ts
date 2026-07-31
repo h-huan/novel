@@ -104,7 +104,6 @@ const SCENARIO_ALIASES: Record<string, string> = {
   writing_daily: 'writing',
   writing_climax: 'writing',
   chapter_synthesis: 'writing',
-  'tianlong-8step': 'writing',
   polish: 'polish',
   refinement: 'polish',
   enhance_opening: 'polish',
@@ -116,13 +115,7 @@ const SCENARIO_ALIASES: Record<string, string> = {
   review: 'quality_check',
 };
 
-/** 写作模式配置：各成本 tier 映射到具体模型版本（严格使用版本号，确保配置生效） */
-const WRITING_MODE_PROFILES: Record<'economy'|'normal'|'premium', Record<string, string>> = {
-  economy: { standard: 'deepseek-chat', fast: 'deepseek-chat' },
-  normal:  { standard: 'deepseek-chat', fast: 'deepseek-chat' },
-  premium: { standard: 'deepseek-chat', fast: 'deepseek-chat' },
-};
-
+/** 写作模式标签（模式本身只影响温度/成本说明，绝不改变"设置里配置的模型"） */
 const WRITING_MODE_LABELS: Record<'economy'|'normal'|'premium', string> = {
   economy: '省钱模式',
   normal:  '常规模式',
@@ -348,6 +341,25 @@ export class ModelRouterService implements OnModuleInit {
       role?: string;                 // 指定角色（writer/reviewer/planner）
     },
   ): RoutedModel {
+    // 未指定场景（或显式 'default'/'daily'）：优先使用作者在设置中配置的"日常模型"。
+    // 这是"没有设置场景的地方使用日常场景模型"的硬性落地——日常模型未配置时，
+    // 才回退到下方按场景的正常路由（默认写作模型）。绝不跳到未配置的虚假模型。
+    if (!scenario || scenario === 'default' || scenario === 'daily') {
+      const dailyModel = this.customScenes[`daily:${this.currentMode}`] || this.customScenes.daily;
+      if (dailyModel) {
+        const dailyVersion = this.resolveModelVersion(dailyModel);
+        const dailyInfo = this.config.models[dailyModel];
+        this.logger.debug(`[日常模型] 未指定场景 → ${dailyVersion}`);
+        return {
+          modelName: dailyVersion,
+          modelVersion: dailyVersion,
+          temperature: this.config.scenarios.writing?.temperature ?? this.config.defaults.temperature,
+          tier: dailyInfo?.tier || 'low',
+          role: options?.role || 'writer',
+        };
+      }
+    }
+
     const routeScenario = SCENARIO_ALIASES[scenario] || 'writing';
     if (!SCENARIO_ALIASES[scenario]) {
       this.logger.debug(`未知场景 ${scenario}，归入写作`);
@@ -415,39 +427,15 @@ export class ModelRouterService implements OnModuleInit {
       };
     }
 
-    // “日常模型”是作者为当前写作模式选择的默认执行模型。
-    // 只有在场景模型表中明确指定了任务模型时才会覆盖它；未单独指定
-    // 的灵感、资料整理、写作、润色和审查调用都必须实际走这里的模型。
-    const dailyKey = `daily:${this.currentMode}`;
-    const dailyModel = this.customScenes[dailyKey] || this.customScenes.daily;
-    if (dailyModel) {
-      const dailyVersion = this.resolveModelVersion(dailyModel);
-      const dailyInfo = this.config.models[dailyModel];
-      this.logger.debug(`[日常模型] ${scenario}(${this.currentMode}) → ${dailyVersion}`);
-      return {
-        modelName: dailyVersion,
-        modelVersion: dailyVersion,
-        temperature,
-        tier: dailyInfo?.tier || 'low',
-        role: options?.role || 'writer',
-      };
-    }
-
-    // 写作模式覆盖：根据模型的 cost tier 映射到具体版本号
-    const modeProfile = WRITING_MODE_PROFILES[this.currentMode];
-    if (modeProfile && modelInfo?.tier) {
-      const modeVersion = modeProfile[modelInfo.tier];
-      if (modeVersion) {
-        this.logger.debug(`[${WRITING_MODE_LABELS[this.currentMode]}] ${targetModel}(${modelInfo.tier}) → ${modeVersion}`);
-        return {
-          modelName: modeVersion,
-          modelVersion: modeVersion,
-          temperature,
-          tier: modelInfo.tier,
-          role: options?.role || 'writer',
-        };
-      }
-    }
+    // 注：不再按写作模式硬编码模型版本（旧 WRITING_MODE_PROFILES 会把所有
+    // 模型偷偷替换成 deepseek-chat，违背"遵守设置内配置的模型"）。模型版本
+    // 一律由 resolveModelVersion(targetModel) 从路由配置中解析，确保调用的是
+    // 作者在设置里实际选定的模型。
+    //
+    // 重要：对于已显式配置场景模型（如 quality_check → deepseek）的场景，
+    // 严格按 route-config 的 scenarios[场景].model 执行，绝不套用"日常模型"覆盖。
+    // "日常模型"仅在调用方未指定场景（scenario 为空 / 'default' / 'daily'）时
+    // 通过上方 early-return 生效，不得二次劫持已配置的场景模型。
 
     const finalInfo = this.config.models[targetModel];
     const defaultVersion = this.resolveModelVersion(targetModel);

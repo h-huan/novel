@@ -17,6 +17,12 @@ export interface OrganizationResponse {
   description: string;
   parentId: string | null;
   level: string;
+  leader?: string;
+  strengthLevel?: number;
+  territory?: string;
+  characteristics?: string;
+  relationshipsJson?: string;
+  signatureEquipment?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,6 +43,12 @@ export class OrganizationService {
       description: dto.description || '',
       parent_id: dto.parentId || null,
       level: '',
+      leader: dto.leader || null,
+      strength_level: dto.strengthLevel ? Number(dto.strengthLevel) : null,
+      territory: dto.territory || null,
+      characteristics: dto.characteristics || null,
+      relationships_json: dto.relationshipsJson || null,
+      signature_equipment: dto.signatureEquipment || null,
       created_at: now,
       updated_at: now,
     });
@@ -65,6 +77,12 @@ export class OrganizationService {
     if (dto.type !== undefined) updateData.type = dto.type;
     if (dto.description !== undefined) updateData.description = dto.description;
     if (dto.parentId !== undefined) updateData.parent_id = dto.parentId || null;
+    if (dto.leader !== undefined) updateData.leader = dto.leader;
+    if (dto.strengthLevel !== undefined) updateData.strength_level = dto.strengthLevel ? Number(dto.strengthLevel) : null;
+    if (dto.territory !== undefined) updateData.territory = dto.territory;
+    if (dto.characteristics !== undefined) updateData.characteristics = dto.characteristics;
+    if (dto.relationshipsJson !== undefined) updateData.relationships_json = dto.relationshipsJson;
+    if (dto.signatureEquipment !== undefined) updateData.signature_equipment = dto.signatureEquipment;
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
@@ -132,6 +150,12 @@ export class OrganizationService {
       description: row.description || '',
       parentId: row.parent_id || null,
       level: row.level || '',
+      leader: row.leader || undefined,
+      strengthLevel: row.strength_level ?? undefined,
+      territory: row.territory || undefined,
+      characteristics: row.characteristics || undefined,
+      relationshipsJson: row.relationships_json || undefined,
+      signatureEquipment: row.signature_equipment || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

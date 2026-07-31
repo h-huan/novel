@@ -22,7 +22,7 @@ import { RoutingModule } from './routing/routing.module';
 import { RefinementModule } from './modules/refinement/refinement.module';
 import { ImportExportModule } from './modules/import-export/import-export.module';
 import { AuthorNoteModule } from './modules/author-note/author-note.module';
-import { ConflictEngineModule } from './modules/conflict-engine/conflict.module';
+import { ConflictModule } from './modules/conflict-engine/conflict.module';
 import { RagModule } from './rag/rag.module';
 import { StateModule } from './state/state.module';
 import { StateManagementModule } from './state/state-management.module';
@@ -37,6 +37,7 @@ import { IdeaLabModule } from './modules/idea-lab/idea-lab.module';
 import { WorkflowGuardModule } from './modules/workflow-guard/workflow-guard.module';
 import { WritingQualityModule } from './modules/writing-quality/writing-quality.module';
 import { ContinuityModule } from './modules/continuity/continuity.module';
+import { GenerationLessonsModule } from './modules/generation-lessons/generation-lessons.module';
 
 @Module({
   imports: [
@@ -55,7 +56,7 @@ import { ContinuityModule } from './modules/continuity/continuity.module';
     RefinementModule,
     ImportExportModule,
     AuthorNoteModule,
-    ConflictEngineModule,
+    ConflictModule,
     RagModule,
     StateModule,
     StateManagementModule,
@@ -70,6 +71,7 @@ import { ContinuityModule } from './modules/continuity/continuity.module';
     WorkflowGuardModule,
     WritingQualityModule,
     ContinuityModule,
+    GenerationLessonsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

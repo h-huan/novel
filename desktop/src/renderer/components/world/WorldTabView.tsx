@@ -1,5 +1,5 @@
 /**
- * WorldTabView - 长篇世界观完整视图
+ * WorldTabView - 长篇核心设定完整视图
  * 复用现有 WorldPage 的6个Tab，优化交互
  * 用于 project.type === 'long_novel'
  */
@@ -247,7 +247,7 @@ const ConfirmChangePlanModal: React.FC<{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <h2 style={{ fontSize: '15px', fontWeight: 700, color: '#eaeaea', margin: 0 }}>
-            确认世界观修改
+            确认核心设定修改
           </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: '16px', padding: '4px' }}>✕</button>
         </div>
@@ -380,6 +380,9 @@ const WorldTabView: React.FC = () => {
   const [changePlanOpen, setChangePlanOpen] = useState(false);
   const [changePlan, setChangePlan] = useState<ChangePlan | null>(null);
   const [modifyLoading, setModifyLoading] = useState(false);
+  const [modifyOpen, setModifyOpen] = useState(false);
+  const [modifyName, setModifyName] = useState('');
+  const [modifyEra, setModifyEra] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newSettingName, setNewSettingName] = useState('');
   const [newSettingDesc, setNewSettingDesc] = useState('');
@@ -497,15 +500,16 @@ const WorldTabView: React.FC = () => {
 
   const handleGenerateChangePlan = async () => {
     if (!id) return;
+    const worldSettingId = apiData?.id || id;
     setModifyLoading(true);
     try {
-      const worldSettingId = apiData?.id || id;
       const res = await api.post(`/projects/${id}/world-settings/${worldSettingId}/change-plan`, {
-        changes: { name: '修改后的世界观名称', era: '修改后的时代设定' },
+        changes: { name: modifyName, era: modifyEra },
       });
       const plan = res.data as unknown as ChangePlan;
       setChangePlan(plan);
       setChangePlanOpen(true);
+      setModifyOpen(false);
     } catch {
       const el = document.createElement('div');
       el.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 px-6 py-3 bg-bg-card border border-accent/30 rounded-lg text-text-primary text-sm shadow-xl';
@@ -518,18 +522,25 @@ const WorldTabView: React.FC = () => {
   };
 
   const handleConfirmChangePlan = async () => {
-    if (!id) return;
+    if (!id || !changePlan) return;
     try {
       const worldSettingId = apiData?.id || id;
+      const changes: Record<string, string> = {};
+      for (const item of changePlan.changes) changes[item.field] = item.newValue;
       await api.post(`/projects/${id}/world-settings/${worldSettingId}/apply-change-plan`, {
-        planId: '1',
+        changes,
         confirmed: true,
       });
       setChangePlanOpen(false);
       setChangePlan(null);
+      // 刷新世界观数据，显示真实应用后的新值
+      const res = await api.get(`/projects/${id}/world-settings`);
+      const data = res.data as any;
+      const worldData = Array.isArray(data) ? data[0] : data;
+      if (worldData) setApiData(worldData);
       const el = document.createElement('div');
       el.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 px-6 py-3 bg-bg-card border border-accent/30 rounded-lg text-text-primary text-sm shadow-xl';
-      el.textContent = '✅ 世界观修改已应用';
+      el.textContent = '✅ 核心设定修改已应用';
       document.body.appendChild(el);
       setTimeout(() => el.remove(), 2000);
     } catch {
@@ -740,7 +751,7 @@ const WorldTabView: React.FC = () => {
           ))}
         </div>
         <button
-          onClick={handleGenerateChangePlan}
+          onClick={() => { setModifyName(apiData?.name || ''); setModifyEra(apiData?.era || ''); setModifyOpen(true); }}
           disabled={modifyLoading}
           style={{
             padding: '6px 14px', marginRight: '8px',
@@ -753,7 +764,7 @@ const WorldTabView: React.FC = () => {
             fontFamily: 'inherit', fontVariantNumeric: 'tabular-nums',
           }}
         >
-          {modifyLoading ? '⏳ 生成中...' : '✏️ 修改世界观'}
+          {modifyLoading ? '⏳ 生成中...' : '✏️ 修改核心设定'}
         </button>
         <button
           onClick={() => setShowCreateForm(!showCreateForm)}
@@ -765,11 +776,34 @@ const WorldTabView: React.FC = () => {
         </button>
       </div>
 
+      {/* 修改核心设定表单（真实输入） */}
+      {modifyOpen && (
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(46,204,113,0.04)', display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '11px', color: '#8a8aa0' }}>核心设定名称</label>
+            <input value={modifyName} onChange={e => setModifyName(e.target.value)} placeholder="新的核心设定名称"
+              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', backgroundColor: '#0f172a', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', minWidth: '200px' }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '11px', color: '#8a8aa0' }}>时代设定</label>
+            <input value={modifyEra} onChange={e => setModifyEra(e.target.value)} placeholder="新的时代设定"
+              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', backgroundColor: '#0f172a', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', minWidth: '200px' }} />
+          </div>
+          <button onClick={handleGenerateChangePlan} disabled={modifyLoading}
+            style={{ padding: '6px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#2ecc71', color: '#06281a', fontSize: '12px', fontWeight: 700, cursor: modifyLoading ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+            {modifyLoading ? '⏳ 生成中...' : '生成修改方案'}
+          </button>
+          <button onClick={() => setModifyOpen(false)} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', backgroundColor: 'transparent', color: '#c0c0d0', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+            取消
+          </button>
+        </div>
+      )}
+
       {/* 创建新设定表单 */}
       {showCreateForm && (
         <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(233,69,96,0.04)' }}>
           <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '8px' }}>
-            {activeTab === 'factions' ? '添加势力/组织' : activeTab === 'geography' ? '添加地点' : '添加世界观设定'}
+            {activeTab === 'factions' ? '添加势力/组织' : activeTab === 'geography' ? '添加地点' : '添加核心设定'}
           </div>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
             <select value={newSettingType} onChange={e => setNewSettingType(e.target.value)}
@@ -860,7 +894,7 @@ const WorldTabView: React.FC = () => {
           try {
             const { api } = await import('../../lib/api');
             const res = await api.post('/chain/world-impact', {
-              projectId: id, modifiedElement: '某世界观设定', oldValue: '旧值', newValue: '新值',
+              projectId: id, modifiedElement: '核心设定项', oldValue: '旧值', newValue: '新值',
             });
             alert(JSON.stringify((res.data as any).suggestion || '分析完成', null, 2));
           } catch {}

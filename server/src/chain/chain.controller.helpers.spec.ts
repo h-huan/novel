@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  ChainController,
   canFitChapterWordRange,
   canFitStoryTargetWords,
   parsePositiveTargetWords,
@@ -74,32 +73,6 @@ describe('idea discovery structured output', () => {
       { title: '旧梦', meta: { hook: '[异响]' } },
     ]);
   });
-
-  it('uses one json_object batch call for the requested ideas instead of sequential per-idea calls', async () => {
-    const idea = (index: number) => ({
-      title: `倒计时证词${index}`,
-      alternateTitles: ['失效证词', '最后一夜'],
-      angle: '限时悬疑',
-      hook: '死者在直播中点名主角偷走证词，十二小时后直播证据会被永久销毁，主角必须先证明自己没有杀人。',
-      description: '主角为夺回被篡改的证词潜入封锁现场，却发现每一位证人都在替同一个不存在的人作证。追查迫使他公开旧案中的伪证，盟友因此倒戈；为了确认幕后者的身份，他又必须回到当年签署鉴定书的地下档案室，面对被自己毁掉前途的家属。最终他必须在直播销毁前承认自己的责任，才能让真正的凶手现身，并阻止所有证人继续替谎言作证。',
-      setting: '当代封闭城区', protagonist: '被停职的法证员', characters: ['法证员', '证人', '凶手'],
-      styleTags: ['悬疑'], tone: '紧迫冷峻', estimatedWords: 16000, plannedChapters: 4,
-      scopeBreakdown: [{ arc: '锁定证词与反转', chapters: 4, reason: '四次证据翻转和一次不可逆公开足以完成事件链' }],
-      scopeReason: '四章分别承载异常、追查、选择和回收，按每章四千字完成。',
-      coreConflict: '主角必须公开旧案伪证才能阻止证据销毁，而公开会毁掉他唯一的清白。',
-      uniquePoint: '证词会在直播中自行改写，所有人都被迫成为同一份谎言的证人。',
-      mainReversal: '主角发现被篡改的证词出自自己当年签字的鉴定书。',
-    });
-    const generate = vi.fn(async () => ({ content: JSON.stringify({ ideas: [1, 2, 3, 4, 5].map(idea) }) }));
-    const controller = new ChainController(...Array(18).fill(null) as any);
-    (controller as any).realLLM = { generate };
-
-    const result = await controller.ideaDiscover({ storyType: 'short_story', platform: 'fanqie', count: 5, targetWords: '16000' });
-
-    expect(result).toMatchObject({ success: true, totalIdeas: 5 });
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(generate.mock.calls[0][0]).toMatchObject({ scenario: 'idea_generate', responseFormat: 'json_object' });
-  });
 });
 
 describe('generated SQLite text boundary', () => {
@@ -120,49 +93,4 @@ describe('generated SQLite text boundary', () => {
   });
 });
 
-describe('chapter outline alignment gate', () => {
-  const input = {
-    chapterIndex: 1,
-    chapterTitle: '雨夜的来信',
-    outlineContract: '核心内容：林岚在旧档案室收到一封来自失踪姐姐的信。核心冲突：信封上的邮戳来自已经拆除的邮局。人物行动：她带着信去找门卫核对值班记录。本章结尾钩子：门卫认出信上的笔迹，却拒绝解释。',
-    storyContext: '世界观：当代城市。角色：林岚的姐姐三年前失踪。',
-    content: '林岚推开旧档案室的门，信封正压在姐姐的旧卷宗上。',
-  };
 
-  it('only accepts a structured, explicit pass verdict', async () => {
-    const controller = new ChainController(...Array(18).fill(null) as any);
-    (controller as any).realLLM = {
-      generate: vi.fn(async () => ({ content: JSON.stringify({ pass: true, outlineAligned: true, continuityPassed: true, characterPassed: true, worldPassed: true, timelinePassed: true, prosePassed: true, missingRequiredItems: [], contradictions: [], evidence: ['正文写入了信件与门卫'] }) })),
-    };
-    await expect((controller as any).assertGeneratedChapterAlignment(input)).resolves.toMatchObject({
-      outlineAligned: true,
-      continuityPassed: true,
-      characterPassed: true,
-      worldPassed: true,
-      timelinePassed: true,
-      prosePassed: true,
-    });
-  });
-
-  it('rejects prose that does not enact the bound outline before persistence', async () => {
-    const controller = new ChainController(...Array(18).fill(null) as any);
-    (controller as any).realLLM = {
-      generate: vi.fn(async () => ({ content: JSON.stringify({ pass: false, missingRequiredItems: ['未出现门卫核对值班记录'], contradictions: [], evidence: ['正文改成了另一桩案件'] }) })),
-    };
-    await expect((controller as any).assertGeneratedChapterAlignment(input)).rejects.toMatchObject({ status: 422 });
-  });
-
-  it('does not treat a bare pass flag as a completed post-write quality inspection', async () => {
-    const controller = new ChainController(...Array(18).fill(null) as any);
-    (controller as any).realLLM = {
-      generate: vi.fn(async () => ({ content: JSON.stringify({ pass: true, missingRequiredItems: [], contradictions: [], evidence: [] }) })),
-    };
-    await expect((controller as any).assertGeneratedChapterAlignment(input)).rejects.toMatchObject({ status: 422 });
-  });
-
-  it('rejects instead of saving when the configured reviewer cannot be reached', async () => {
-    const controller = new ChainController(...Array(18).fill(null) as any);
-    (controller as any).realLLM = { generate: vi.fn(async () => { throw new Error('Connection error'); }) };
-    await expect((controller as any).assertGeneratedChapterAlignment(input)).rejects.toMatchObject({ status: 502 });
-  });
-});

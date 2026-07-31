@@ -1,6 +1,13 @@
 /**
  * 角色 Service
  */
+
+/** 安全 JSON 解析：解析失败时返回 fallback，不抛异常 */
+function safeJsonParse<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value !== 'string') return value as T;
+  try { return JSON.parse(value) as T; } catch { return fallback; }
+}
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { CharacterRepository } from '../../database/repositories/character.repository';
@@ -10,7 +17,8 @@ import type { CreateCharacterDto, AddRelationshipDto } from './dto/character.dto
 import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
 
-const PROFILE_FIELDS = ['appearance_memory_points','signature_item','action_habits','clothing_style','short_term_goal','long_term_goal','core_desire','core_fear','current_problem','failure_cost','key_backstory','trauma','obsession','hidden_identity','secret','main_truth_relation','ability_source','ability_level','special_skills','ability_limit','ability_cost','growth_route','cannot_use_reason','body_weakness','personality_weakness','emotion_weakness','relationship_weakness','moral_boundary','exploitable_point','surface_personality','deep_personality','contradiction_point','value_system','speech_style','catchphrase','common_words','forbidden_words','tone_to_different_people','emotion_outburst_style','danger_reaction','temptation_reaction','betrayal_reaction','weak_person_reaction','strong_person_reaction','principle_break_condition','plot_function','conflict_function','reversal_function','foreshadowing_function','reader_empathy_point','reader_expectation','initial_arc_state','current_arc_state','volume_arc','midpoint_arc','ending_arc','must_obey_rules','can_change_rules','forbidden_writing','easy_to_break_points','current_chapter_usage'] as const;
+// 对齐外部文档《人物模板》14 项（姓名已在 characters 主表，此处为其余 13 项）
+export const PROFILE_FIELDS = ['alias_title','identity_occupation','faction_stance','role_type','appearance','personality_traits','abilities_skills','backstory','relationships','catchphrase_speech_style','goals_motivation','weaknesses_fears','supplementary'] as const;
 
 export interface CharacterResponse {
   id: string;
@@ -30,6 +38,17 @@ export interface CharacterResponse {
   dialoguePatterns?: string[];
   isPovCharacter: boolean;
   role: string;
+  faction?: string;
+  goals?: string;
+  weaknesses?: string;
+  wound?: string;
+  keywords?: string;
+  // 新增字段 (migration 042)
+  notes?: string;
+  growthStages?: string;
+  coreConflictRole?: string;
+  /** 统一详细档案: motivation/personality_detail/weaknesses_detail/abilities_detail/background_detail/dialogue_detail/arc_detail/writing_rules */
+  profile?: Record<string, unknown>;
   latestState?: any;
   createdAt: string;
   updatedAt: string;
@@ -71,6 +90,15 @@ export class CharacterService {
       dialogue_patterns: JSON.stringify(dto.dialoguePatterns || []),
       is_pov_character: dto.isPovCharacter ? 1 : 0,
       role: dto.role || 'supporting',
+      faction: dto.faction || '',
+      goals: dto.goals || '',
+      weaknesses: dto.weaknesses || '',
+      wound: dto.wound || '',
+      keywords: dto.keywords || '',
+      notes: dto.notes || null,
+      growth_stages_json: dto.growthStages || null,
+      core_conflict_role: dto.coreConflictRole || null,
+      profile_json: dto.profile ? (typeof dto.profile === 'string' ? dto.profile : JSON.stringify(dto.profile)) : '{}',
       created_at: now,
       updated_at: now,
     });
@@ -107,6 +135,15 @@ export class CharacterService {
     if (dto.dialoguePatterns) updateData.dialogue_patterns = JSON.stringify(dto.dialoguePatterns);
     if (dto.isPovCharacter !== undefined) updateData.is_pov_character = dto.isPovCharacter ? 1 : 0;
     if (dto.role !== undefined) updateData.role = dto.role;
+    if (dto.faction !== undefined) updateData.faction = dto.faction;
+    if (dto.goals !== undefined) updateData.goals = dto.goals;
+    if (dto.weaknesses !== undefined) updateData.weaknesses = dto.weaknesses;
+    if (dto.wound !== undefined) updateData.wound = dto.wound;
+    if (dto.keywords !== undefined) updateData.keywords = dto.keywords;
+    if (dto.notes !== undefined) updateData.notes = dto.notes;
+    if (dto.growthStages !== undefined) updateData.growth_stages_json = dto.growthStages;
+    if (dto.coreConflictRole !== undefined) updateData.core_conflict_role = dto.coreConflictRole;
+    if (dto.profile !== undefined) updateData.profile_json = typeof dto.profile === 'string' ? dto.profile : JSON.stringify(dto.profile);
     if (dto.abilities !== undefined) updateData.abilities = typeof dto.abilities === 'string' ? dto.abilities : JSON.stringify(dto.abilities);
     if (dto.arc !== undefined) updateData.arc = typeof dto.arc === 'string' ? dto.arc : JSON.stringify(dto.arc);
 
@@ -162,6 +199,22 @@ export class CharacterService {
     return response;
   }
 
+  /** 获取项目完整人物关系网络（来自 character_relationships 表） */
+  getProjectRelationships(projectId: string): { network: any[] } {
+    const db = (this as any).databaseService?.getDb() || (this as any).db?.getDb?.();
+    if (!db) return { network: [] };
+    try {
+      const rows = db.prepare(`
+        SELECT cr.*, sc.name AS source_name, tc.name AS target_name
+        FROM character_relationships cr
+        JOIN characters sc ON sc.id = cr.source_character_id
+        JOIN characters tc ON tc.id = cr.target_character_id
+        WHERE cr.project_id = ?
+      `).all(projectId) as any[];
+      return { network: rows || [] };
+    } catch { return { network: [] }; }
+  }
+
   getLatestState(id: string): any {
     const state = this.stateRepo.getLatestState(id);
     if (!state) return null;
@@ -198,7 +251,82 @@ export class CharacterService {
     const db = this.databaseService.getDb();
     const profile = db.prepare('SELECT * FROM character_extended_profiles WHERE project_id = ? AND character_id = ?').get(projectId, id) as any;
     const stateContext = this.stateItemService?.buildWritingStateContext(projectId);
-    return { character, profile: this.profileRow(profile), currentState: this.getLatestState(id), warnings: stateContext?.pendingSummary || [], relationships: character.relationships };
+
+    // 合并 extended profile 到 characters.profile_json，保持单表查询可用
+    const profileData = this.profileRow(profile);
+    const unifiedProfile = {
+      motivation: {
+        shortTermGoal: profileData.short_term_goal,
+        longTermGoal: profileData.long_term_goal,
+        coreDesire: profileData.core_desire,
+        coreFear: profileData.core_fear,
+        currentProblem: profileData.current_problem,
+        failureCost: profileData.failure_cost,
+      },
+      backgroundDetail: {
+        keyBackstory: profileData.key_backstory,
+        trauma: profileData.trauma,
+        obsession: profileData.obsession,
+        hiddenIdentity: profileData.hidden_identity,
+        secret: profileData.secret,
+        mainTruthRelation: profileData.main_truth_relation,
+      },
+      abilitiesDetail: {
+        source: profileData.ability_source,
+        level: profileData.ability_level,
+        specialSkills: profileData.special_skills,
+        limit: profileData.ability_limit,
+        cost: profileData.ability_cost,
+        cannotUseReason: profileData.cannot_use_reason,
+      },
+      weaknessesDetail: {
+        body: profileData.body_weakness,
+        personality: profileData.personality_weakness,
+        emotion: profileData.emotion_weakness,
+        moralBoundary: profileData.moral_boundary,
+      },
+      personalityDetail: {
+        surface: profileData.surface_personality,
+        deep: profileData.deep_personality,
+        contradiction: profileData.contradiction_point,
+        values: profileData.value_system,
+      },
+      dialogueDetail: {
+        speechStyle: profileData.speech_style,
+        catchphrase: profileData.catchphrase,
+        commonWords: profileData.common_words,
+        forbiddenWords: profileData.forbidden_words,
+        dangerReaction: profileData.danger_reaction,
+        betrayalReaction: profileData.betrayal_reaction,
+      },
+      arcDetail: {
+        initial: profileData.initial_arc_state,
+        current: profileData.current_arc_state,
+        volume: profileData.volume_arc,
+        ending: profileData.ending_arc,
+      },
+      plotFunction: {
+        plot: profileData.plot_function,
+      },
+      writingRules: {
+        forbidden: profileData.forbidden_writing,
+        breakPoints: profileData.easy_to_break_points,
+      },
+    };
+
+    // 同步回 characters 表
+    try {
+      db.prepare(`UPDATE characters SET profile_json = ? WHERE id = ?`)
+        .run(JSON.stringify(unifiedProfile), id);
+    } catch {}
+
+    return {
+      character: { ...character, profile: unifiedProfile },
+      profile: profileData,
+      currentState: this.getLatestState(id),
+      warnings: stateContext?.pendingSummary || [],
+      relationships: character.relationships,
+    };
   }
 
   updateProfile(projectId: string, id: string, input: Record<string, unknown>) {
@@ -226,22 +354,51 @@ export class CharacterService {
     return this.getProfile(projectId, id);
   }
 
-  getWritingSummary(projectId: string, id: string): { summary: string; profile: any } {
+  getWritingSummary(projectId: string, id: string): { summary: string; sections: Record<string, Record<string, string>>; profile: any } {
     const data = this.getProfile(projectId, id);
     const p = data.profile;
-    const lines = [
-      '【角色写作摘要】', `姓名：${data.character.name}`, `当前身份：${data.character.identity || '待补全'}`,
-      `当前目标：${p.short_term_goal || '待补全'}`, `长期目标：${p.long_term_goal || '待补全'}`, `核心欲望：${p.core_desire || '待补全'}`, `底层恐惧：${p.core_fear || '待补全'}`, `当前难题：${p.current_problem || '待补全'}`, `失败代价：${p.failure_cost || '待补全'}`,
-      `背景秘密：${[p.key_backstory, p.trauma, p.obsession, p.hidden_identity, p.secret, p.main_truth_relation].filter(Boolean).join('；') || '待补全'}`,
-      `能力来源：${p.ability_source || '待补全'}`, `能力等级：${p.ability_level || '待补全'}`, `特殊技能：${p.special_skills || '待补全'}`, `能力限制：${p.ability_limit || '待补全'}`, `能力代价：${p.ability_cost || '待补全'}`,
-      `身体弱点：${p.body_weakness || '待补全'}`, `性格弱点：${p.personality_weakness || '待补全'}`, `情感弱点：${p.emotion_weakness || '待补全'}`, `道德边界：${p.moral_boundary || '待补全'}`,
-      `表层性格：${p.surface_personality || '待补全'}`, `深层性格：${p.deep_personality || '待补全'}`, `性格矛盾：${p.contradiction_point || '待补全'}`, `价值系统：${p.value_system || '待补全'}`,
-      `说话风格：${p.speech_style || data.character.dialogueStyle || '待补全'}`, `口头禅：${p.catchphrase || '待补全'}`, `常用词：${p.common_words || '待补全'}`, `禁用词：${p.forbidden_words || '待补全'}`, `危险反应：${p.danger_reaction || '待补全'}`, `背叛反应：${p.betrayal_reaction || '待补全'}`,
-      `剧情功能：${p.plot_function || '待补全'}`, `冲突功能：${p.conflict_function || '待补全'}`, `反转功能：${p.reversal_function || '待补全'}`, `伏笔功能：${p.foreshadowing_function || '待补全'}`,
-      `初始弧光：${p.initial_arc_state || '待补全'}`, `当前弧光：${p.current_arc_state || '待补全'}`, `卷级弧光：${p.volume_arc || '待补全'}`, `结局弧光：${p.ending_arc || '待补全'}`,
-      `必须遵守：${p.must_obey_rules || '待补全'}`, `可以变化：${p.can_change_rules || '待补全'}`, `禁止写法：${p.forbidden_writing || '待补全'}`, `容易写崩的点：${p.easy_to_break_points || '待补全'}`, `本章可用：${p.current_chapter_usage || '待补全'}`,
+    const c = data.character;
+
+    // 按《人物模板》14 项分组（姓名在主表，此处 13 项），只保留非空字段，避免满屏"待补全"
+    const sectionDefs = [
+      { title: '基本信息', fields: ['alias_title','identity_occupation','faction_stance','role_type'], labels: { alias_title:'别名/称号', identity_occupation:'身份/职业', faction_stance:'阵营/立场', role_type:'角色类型' } },
+      { title: '外貌与性格', fields: ['appearance','personality_traits'], labels: { appearance:'外貌特征', personality_traits:'性格特点' } },
+      { title: '能力与背景', fields: ['abilities_skills','backstory'], labels: { abilities_skills:'能力/技能', backstory:'背景故事' } },
+      { title: '关系与目标', fields: ['relationships','goals_motivation'], labels: { relationships:'人物关系', goals_motivation:'目标/动机' } },
+      { title: '弱点与语言', fields: ['weaknesses_fears','catchphrase_speech_style'], labels: { weaknesses_fears:'弱点/恐惧', catchphrase_speech_style:'口头禅/说话风格' } },
+      { title: '补充说明', fields: ['supplementary'], labels: { supplementary:'补充说明' } },
     ];
-    return { summary: lines.join('\n'), profile: p };
+    const profile = p as Record<string, any>;
+    const sections: Record<string, Record<string, string>> = {};
+    for (const def of sectionDefs) {
+      const entries: Record<string, string> = {};
+      const labels = def.labels as unknown as Record<string, string>;
+      for (const field of def.fields) {
+        const v = profile[field];
+        if (typeof v === 'string' && v.trim()) entries[labels[field]] = v.trim();
+      }
+      if (Object.keys(entries).length) sections[def.title] = entries;
+    }
+
+    // 顶部速览：只取最关键的非空字段，合并基础信息与 profile
+    const narrativeParts = [
+      c.name && `姓名：${c.name}`,
+      p.identity_occupation && `身份职业：${p.identity_occupation}`,
+      p.role_type && `角色类型：${p.role_type}`,
+      p.faction_stance && `阵营立场：${p.faction_stance}`,
+      p.goals_motivation && `目标动机：${p.goals_motivation}`,
+      p.personality_traits && `性格：${p.personality_traits}`,
+      p.appearance && `外貌：${p.appearance}`,
+      p.backstory && `背景：${p.backstory}`,
+      p.abilities_skills && `能力技能：${p.abilities_skills}`,
+      p.catchphrase_speech_style && `说话风格：${p.catchphrase_speech_style}`,
+      p.weaknesses_fears && `弱点恐惧：${p.weaknesses_fears}`,
+    ].filter(Boolean);
+    const summary = narrativeParts.length
+      ? `【角色速览】${narrativeParts.join('；')}。`
+      : '角色资料较简略，建议补充目标、矛盾与背景后再生成写作摘要。';
+
+    return { summary, sections, profile: p };
   }
 
   checkConsistency(projectId: string, content: string) {
@@ -251,17 +408,10 @@ export class CharacterService {
       const evidence = content.includes(character.name) ? character.name : '';
       if (!evidence) continue;
       const add = (issueType: string, evidence: string, reason: string, suggestion: string, severity: 'low' | 'medium' | 'high') => issues.push({ characterId: character.id, characterName: character.name, issueType, evidence, reason, suggestion, severity });
-      if (profile.forbidden_writing && content.includes(profile.forbidden_writing)) {
-        issues.push({ characterId: character.id, characterName: character.name, issueType: 'forbidden_writing', evidence: profile.forbidden_writing, reason: '正文命中了角色禁止写法', suggestion: '重写该段行为或对白以遵守角色约束', severity: 'high' });
-      }
-      if (profile.forbidden_words && content.includes(profile.forbidden_words)) add('forbidden_words', profile.forbidden_words, '对白命中禁用词', '替换为符合角色语气的表达', 'medium');
-      if (profile.easy_to_break_points && content.includes(profile.easy_to_break_points)) add('easy_to_break_points', profile.easy_to_break_points, '正文命中角色易写崩点', '补充动机、过渡或改写行为', 'medium');
-      if ((profile.core_desire || profile.short_term_goal) && evidence && /毫无理由|无缘无故|突然背叛/.test(content)) add('motivation', evidence, '正文出现缺少动机的行动信号', `回扣目标或欲望：${profile.short_term_goal || profile.core_desire}`, 'medium');
-      if (profile.moral_boundary && /杀害无辜|背叛同伴/.test(content) && !content.includes(profile.moral_boundary)) add('moral_boundary', evidence, '正文可能无铺垫突破道德边界', `补充边界被突破的条件：${profile.moral_boundary}`, 'high');
-      if (profile.ending_arc && content.includes(profile.ending_arc)) add('arc_premature', profile.ending_arc, '正文可能提前完成结局弧光', `保留当前弧光：${profile.current_arc_state || '待补全'}`, 'low');
-      if (profile.ability_limit && profile.ability_limit.length > 0 && !content.includes(profile.ability_limit) && /轻易|瞬间|毫无代价/.test(content)) {
-        issues.push({ characterId: character.id, characterName: character.name, issueType: 'ability_limit', evidence, reason: '正文出现无代价能力表达，但未体现能力限制', suggestion: `补充限制或代价：${profile.ability_limit}`, severity: 'medium' });
-      }
+      if (profile.weaknesses_fears && /无敌|毫无弱点|永远胜利|从不出错/.test(content) && !content.includes(profile.weaknesses_fears)) add('weaknesses_fears', profile.weaknesses_fears, '正文把角色写成无弱点，违背角色设定', `回扣弱点/恐惧：${profile.weaknesses_fears}`, 'medium');
+      if (profile.goals_motivation && /毫无理由|无缘无故|突然背叛|莫名其妙/.test(content)) add('goals_motivation', profile.goals_motivation, '正文出现缺少动机的行动信号', `回扣目标/动机：${profile.goals_motivation}`, 'medium');
+      if (profile.faction_stance && /倒戈|叛变|投敌|易主/.test(content) && !content.includes(profile.faction_stance)) add('faction_stance', profile.faction_stance, '正文可能无铺垫改变阵营立场', `补充立场转变的铺垫：${profile.faction_stance}`, 'high');
+      if (profile.role_type === '主角' && /死亡|牺牲|下线/.test(content) && !content.includes('假死') && !content.includes('幸存')) add('role_type', profile.role_type, '主角可能在中段非正常退场', '确认是否符合整体规划', 'low');
     }
     return { passed: issues.length === 0, score: Math.max(0, 100 - issues.length * 25), issues };
   }
@@ -279,14 +429,24 @@ export class CharacterService {
       identity: row.identity || undefined,
       appearance: row.appearance || undefined,
       background: row.background || undefined,
-      personality: JSON.parse(row.personality),
-      abilities: JSON.parse(row.abilities),
-      relationships: JSON.parse(row.relationships),
-      arc: JSON.parse(row.arc),
+      personality: safeJsonParse(row.personality, { summary: '' }),
+      abilities: safeJsonParse(row.abilities, {}),
+      relationships: safeJsonParse(row.relationships, []),
+      arc: safeJsonParse(row.arc, row.arc ? [String(row.arc)] : []),
       dialogueStyle: row.dialogue_style || undefined,
-      dialoguePatterns: row.dialogue_patterns ? JSON.parse(row.dialogue_patterns) : [],
+      dialoguePatterns: safeJsonParse(row.dialogue_patterns, []),
       isPovCharacter: row.is_pov_character === 1,
       role: row.role || 'supporting',
+      faction: row.faction || undefined,
+      goals: row.goals || undefined,
+      weaknesses: row.weaknesses || undefined,
+      wound: row.wound || undefined,
+      keywords: row.keywords || undefined,
+      // 新增字段 (migration 042)
+      notes: row.notes || undefined,
+      growthStages: row.growth_stages_json || undefined,
+      coreConflictRole: row.core_conflict_role || undefined,
+      profile: row.profile_json ? (() => { try { return JSON.parse(row.profile_json); } catch { return {}; } })() : undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

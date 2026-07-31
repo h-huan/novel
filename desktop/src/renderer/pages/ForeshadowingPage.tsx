@@ -210,7 +210,7 @@ const ForeshadowingPage: React.FC = () => {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
         {[
           { key: 'global', title: '全书伏笔', hint: '贯穿主线的重要秘密、身份、承诺或因果，跨阶段埋设与回收', color: '#e94560' },
           { key: 'volume', title: '阶段伏笔', hint: '服务一个故事阶段或一条支线，在阶段高潮前后兑现', color: '#3b82f6' },
@@ -256,11 +256,11 @@ const ForeshadowingPage: React.FC = () => {
         <div style={{ padding: '14px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <textarea value={newItem.content} onChange={e => setNewItem(p => ({ ...p, content: e.target.value }))} placeholder="伏笔内容..."
             style={{ padding: '8px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', resize: 'vertical', outline: 'none', minHeight: '40px' }} />
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <input value={newItem.buriedChapterIndex} onChange={e => setNewItem(p => ({ ...p, buriedChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="埋设章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
             <input value={newItem.plannedRecoveryChapterIndex} onChange={e => setNewItem(p => ({ ...p, plannedRecoveryChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="计划回收章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <input value={newItem.recoveryWindowStart} onChange={e => setNewItem(p => ({ ...p, recoveryWindowStart: parseInt(e.target.value) || 0 }))} placeholder="回收区间开始" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
             <input value={newItem.recoveryWindowEnd} onChange={e => setNewItem(p => ({ ...p, recoveryWindowEnd: parseInt(e.target.value) || 0 }))} placeholder="回收区间结束" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
             <input value={newItem.evidenceText} onChange={e => setNewItem(p => ({ ...p, evidenceText: e.target.value }))} placeholder="证据文本/埋设细节" style={{ flex: 2, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
@@ -268,7 +268,7 @@ const ForeshadowingPage: React.FC = () => {
               <option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option>
             </select>
           </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <select value={newItem.scope} onChange={e => setNewItem(p => ({ ...p, scope: e.target.value as any }))}
               style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
               <option value="global">贯穿全文</option>
@@ -344,7 +344,7 @@ const ForeshadowingPage: React.FC = () => {
               ) : (
                 <span style={{ flex: 1, fontSize: '13px', color: '#c0c0d0', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setEditingId(item.id); setEditContent(item.content); }}>{item.content}</span>
               )}
-              <span style={{ fontSize: '11px', color: '#6c6c80' }}>#{item.buriedChapterIndex} → #{item.plannedRecoveryChapterIndex}</span>
+              <span style={{ fontSize: '11px', color: '#6c6c80' }}>埋设：第{item.buriedChapterIndex || '?'}章 → 回收：第{item.plannedRecoveryChapterIndex || '?'}章</span>
               {isUnpaved(item) && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(239,68,68,0.12)', color: '#f87171', fontSize: '10px', fontWeight: 600 }}>缺少铺垫</span>}
               {item.status === 'recovered' && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(34,197,94,0.12)', color: '#86efac', fontSize: '10px', fontWeight: 600 }}>{item.actualRecoveryChapterIndex ? `实际第${item.actualRecoveryChapterIndex}章回收` : '回收章节未记录'}</span>}
               {item.status === 'buried' && item.plannedRecoveryChapterIndex > 0 && (

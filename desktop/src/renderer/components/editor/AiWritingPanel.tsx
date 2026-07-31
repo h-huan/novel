@@ -2,14 +2,14 @@
  * AiWritingPanel - AI写作控制面板
  *
  * 三标签设计：
- *   [写作] 主写作控制 - 模式切换、Prompt输入、天龙8步进度、生成/续写
+ *   [写作] 主写作控制 - 模式切换、Prompt输入、生成进度、生成/续写
  *   [外挂] 外挂功能 - 开头强化、反转分析、平台改写、标题生成
  *   [质检] 质检报告 - 质量检测、AI痕迹评估
  *
  * 后端对接: /api/v1/chain/*
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, streamRequest } from '../../lib/api';
 import AuthorNotePanel from './AuthorNotePanel';
@@ -19,7 +19,7 @@ import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
 // ==================== Types ====================
 
 export type WritingMode = 'manual' | 'semi_auto' | 'full_auto';
-export type GenerationNotice = { tone: 'working' | 'success' | 'error'; text: string };
+export type GenerationNotice = { tone: 'working' | 'success' | 'error' | 'warning'; text: string };
 
 /** 章节类型：日常写作 或 高潮章节 */
 export type ChapterScenario = 'daily' | 'climax';
@@ -64,30 +64,16 @@ interface AiWritingPanelProps {
   onGenerationStatus?: (notice: GenerationNotice) => void;
 }
 
+/** Imperative handle 暴露给父组件（WritingPage）：用于「从外部触发 AI 生成」，
+ *  典型场景：作者在「前后矛盾」tab 点「AI 重写正文对齐大纲（推荐）」按钮，
+ *  ConflictDashboard 用 query 跳转回写作页，写作页加载完目标章节后调一次 runGenerate()
+ *  即可真正开始重写，而不是让作者再手动点「🤖 AI生成」。 */
+export interface AiWritingPanelHandle {
+  runGenerate: (reason?: string) => Promise<void>;
+  isBusy: () => boolean;
+}
+
 // ==================== Constants ====================
-
-const TIANLONG_STEPS = [
-  { key: 'goal', label: '目标', short: '目标' },
-  { key: 'trigger', label: '诱因', short: '诱因' },
-  { key: 'action', label: '行动', short: '行动' },
-  { key: 'obstacle', label: '阻碍', short: '阻碍' },
-  { key: 'misjudge', label: '误判', short: '误判' },
-  { key: 'reversal', label: '反转', short: '反转' },
-  { key: 'cost', label: '代价', short: '代价' },
-  { key: 'hook', label: '钩子', short: '钩子' },
-  { key: 'synthesis', label: '正文合成', short: '合成' },
-  { key: 'qa', label: '篇幅核验', short: '核验' },
-];
-
-const GENERATE_METHOD_LABELS: Record<'tianlong' | 'direct', string> = {
-  tianlong: '天龙8步 Chain',
-  direct: '直接生成',
-};
-
-const GENERATE_METHOD_DESCRIPTIONS: Record<'tianlong' | 'direct', string> = {
-  tianlong: '逐节点生成（目标→诱因→行动→...→合成）',
-  direct: '单次 LLM 调用，快速生成正文',
-};
 
 const MODE_LABELS: Record<WritingMode, string> = {
   manual: '手动',
@@ -118,7 +104,7 @@ const ENHANCE_STYLE_LABELS: Record<string, string> = {
 
 // ==================== Component ====================
 
-const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
+const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(function AiWritingPanel({
   projectId,
   chapterId,
   chapterContent,
@@ -131,16 +117,14 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
   onError,
   generationNotice: externalGenerationNotice,
   onGenerationStatus,
-}) => {
+}, ref) {
   const navigate = useNavigate();
 
   // ========== 写作 Tab State ==========
   const [activeTab, setActiveTab] = useState<TabType>('writing');
   const [writingMode, setWritingMode] = useState<WritingMode>('full_auto');
-  const [generateMethod, setGenerateMethod] = useState<'tianlong' | 'direct'>('tianlong');
   const [chapterScenario, setChapterScenario] = useState<ChapterScenario | null>(null);
   const [isGenerating, setIsGenerating] = useState(() => isChapterGenerationActive(projectId, chapterId));
-  const [currentStep, setCurrentStep] = useState(-1);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [blockedNotice, setBlockedNotice] = useState<{
@@ -230,7 +214,6 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
     const finishGeneration = () => {
       activeChapterGenerations.delete(generationKey);
       setIsGenerating(false);
-      setCurrentStep(-1);
     };
     setIsGenerating(true);
     publishGenerationNotice({ tone: 'working', text: '正在校验本章大纲与写作条件…' });
@@ -246,19 +229,18 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
       return;
     }
     setBlockedNotice(null);
-    setCurrentStep(0);
     setStreamContent('');
     setStreamProgress(0);
     publishGenerationNotice({ tone: 'working', text: '已开始生成，正在等待服务端进度…' });
     onGenerateStart?.();
 
     if (streamMode) {
-      // SSE 流式输出（真实天龙8步进度）— 使用 fetch 流解析（POST 模式）
+      // SSE 流式输出（单次 LLM 严格按大纲生成）— 使用 fetch 流解析（POST 模式）
       try {
         const body: Record<string, unknown> = { projectId, chapterId, chapterNumber: chapterIndex, mode: writingMode, prompt, scenario: getScenarioKey() };
         // Keep every visible chapter-generation action on the single verified
         // path, including its terminal event and hard acceptance gates.
-        body.templateId = 'tianlong-8step';
+        body.templateId = 'body-by-outline';
         let receivedTerminalEvent = false;
         void streamRequest(
           '/chain/stream-generate',
@@ -270,12 +252,13 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
               setStreamProgress(Number(data.progress || 0));
               publishGenerationNotice({ tone: 'working', text: String(data.message || '生成仍在执行，连接正常…') });
             } else if (data.type === 'step') {
-              // Server node_0 is context assembly; author-facing stages begin at
-              // node_1 (目标), and continue through synthesis and verification.
-              const authorStage = Math.max(0, Math.min(TIANLONG_STEPS.length - 1, Number(data.step || 1) - 1));
-              setCurrentStep(authorStage);
+              // 单次 LLM 不走逐节点进度，这里更新真实进度百分比与阶段文案。
+              // 优先展示 message（后端会随字数自愈重试逐步推送「在做什么」）。
               setStreamProgress((data.progress as number) || 0);
-              publishGenerationNotice({ tone: 'working', text: `${String(data.label || '正在生成')}（${Number(data.progress || 0)}%）` });
+              const stepMsg = data.message
+                ? String(data.message)
+                : `${String(data.label || '正在生成')}（${Number(data.progress || 0)}%）`;
+              publishGenerationNotice({ tone: 'working', text: stepMsg });
             } else if (data.type === 'quality') {
               const report = (data.report || {}) as Record<string, unknown>;
               const evidence = Array.isArray(report.evidence) ? report.evidence.filter(Boolean).slice(0, 2).join('；') : '';
@@ -294,9 +277,13 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
               }
               const report = (data.qualityReport || {}) as Record<string, unknown>;
               const evidence = Array.isArray(report.evidence) ? report.evidence.filter(Boolean).slice(0, 2).join('；') : '';
+              const contradictions = Array.isArray(report.contradictions) ? report.contradictions.filter(Boolean) : [];
+              const hasContradiction = contradictions.length > 0;
               publishGenerationNotice({
-                tone: 'success',
-                text: `正文质检通过（大纲、人物、世界观、时间线、叙事连贯性），正在保存并同步创作资料…${evidence ? ` 证据：${evidence}` : ''}`,
+                tone: hasContradiction ? 'warning' : 'success',
+                text: hasContradiction
+                  ? `正文已生成并保存，但大纲验收发现 ${contradictions.length} 处矛盾，已标记到「前后矛盾」tab，请核对后修订。`
+                  : `正文质检通过（大纲、人物、世界观、时间线、叙事连贯性），正在保存并同步创作资料…${evidence ? ` 证据：${evidence}` : ''}`,
               });
               onGenerateComplete?.(content, chapterId);
             } else if (data.type === 'error') {
@@ -335,9 +322,8 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
     }
 
     try {
-      // 调用 Chain API（天龙8步），等待完整结果
-      setCurrentStep(0);
-      const response = await api.post('/chain/generate', {
+      // 调用单次生成 API（严格按已绑定详细大纲），等待完整结果
+        const response = await api.post('/chain/generate', {
         projectId,
         chapterId: chapterId || undefined,
         chapterNumber: chapterIndex || undefined,
@@ -346,7 +332,6 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
         scenario: getScenarioKey(),
       });
 
-      setCurrentStep(-1);
       const data = ((response as any).data ?? response) as any;
       if (data?.success === false || !String(data?.content || '').trim()) {
         throw new Error(data?.error || '生成未返回可写入的正文');
@@ -360,7 +345,23 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
     } finally {
       finishGeneration();
     }
-  }, [projectId, chapterId, writingMode, prompt, isGenerating, generateMethod, getScenarioKey, checkAction, onGenerateStart, onGenerateComplete, onError, publishGenerationNotice]);
+  }, [projectId, chapterId, writingMode, prompt, isGenerating, getScenarioKey, checkAction, onGenerateStart, onGenerateComplete, onError, publishGenerationNotice]);
+
+  // 对外暴露「从外部触发 AI 生成」入口：写作页父组件可通过 ref 调一次
+  // runGenerate() 来启动一次正文生成（典型用法：用户从「前后矛盾」tab 点
+  // 「AI 重写正文对齐大纲（推荐）」后跳回写作页，加载完目标章节后自动触发）。
+  // 放在 handleGenerate 之后，确保闭包能拿到稳定的 handleGenerate 引用。
+  useImperativeHandle(ref, () => ({
+    runGenerate: async (reason?: string) => {
+      // 父组件触发时也走同一条 handleGenerate 链路，确保 SSE 进度、保存、
+      // 验收、章节入库等行为与作者手动点「🤖 AI生成」完全一致。
+      if (reason) {
+        publishGenerationNotice({ tone: 'working', text: reason });
+      }
+      await handleGenerate();
+    },
+    isBusy: () => isGenerating || isChapterGenerationActive(projectId, chapterId),
+  }), [handleGenerate, isGenerating, projectId, chapterId, publishGenerationNotice]);
 
   const handleContinue = useCallback(async () => {
     if (!projectId || !chapterId || isGenerating || isChapterGenerationActive(projectId, chapterId)) {
@@ -578,31 +579,8 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
               ))}
             </select>
             <p style={{ fontSize: '11px', color: '#8a8aa0', margin: '4px 0 0', lineHeight: 1.5 }}>
-              每次只生成当前选定章节，并严格使用该章节绑定的大纲、已确认设定与前文状态；不会自动生成后续章节。
+              本面板只生成当前选定的章节，每次生成都会重读本章大纲、已确稿设定与前文状态。
             </p>
-          </div>
-          {/* 生成方式 */}
-          <div style={styles.section}>
-            <div style={styles.sectionHeader}>
-              <span style={styles.sectionTitle}>生成方式</span>
-            </div>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {(['tianlong'] as const).map((method) => (
-                <button
-                  key={method}
-                  onClick={() => setGenerateMethod(method)}
-                  style={{
-                    padding: '6px 12px', borderRadius: '6px', borderWidth: 1, borderStyle: 'solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: '12px',
-                    backgroundColor: generateMethod === method ? (method === 'tianlong' ? 'rgba(233,69,96,0.12)' : 'rgba(46,204,113,0.12)') : 'transparent',
-                    borderColor: generateMethod === method ? (method === 'tianlong' ? '#e94560' : '#2ecc71') : 'rgba(255,255,255,0.08)',
-                    color: generateMethod === method ? (method === 'tianlong' ? '#e94560' : '#2ecc71') : '#8a8aa0',
-                  }}
-                >
-                  {method === 'tianlong' ? '🐉 天龙8步 Chain' : '⚡ 直接生成'}
-                </button>
-              ))}
-            </div>
-            <p style={{ fontSize: '11px', color: '#8a8aa0', margin: '4px 0 0 0', lineHeight: 1.6 }}>{GENERATE_METHOD_DESCRIPTIONS[generateMethod]}</p>
           </div>
 
           {/* 写作模式 */}
@@ -702,39 +680,16 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
             />
           </div>
 
-          {/* 天龙8步进度 */}
-          {isGenerating && currentStep >= 0 && (
+          {/* 生成进度 */}
+          {isGenerating && streamProgress > 0 && (
             <div style={styles.section}>
               <div style={styles.sectionHeader}>
-                <span style={styles.sectionTitle}>天龙8步 - 生成进度</span>
+                <span style={styles.sectionTitle}>生成进度</span>
               </div>
-              <div style={styles.stepsContainer}>
-                {TIANLONG_STEPS.map((step, idx) => (
-                  <div
-                    key={step.key}
-                    style={{
-                      ...styles.stepItem,
-                      opacity: idx <= currentStep ? 1 : 0.35,
-                      backgroundColor:
-                        idx === currentStep
-                          ? 'rgba(233, 69, 96, 0.12)'
-                          : idx < currentStep
-                            ? 'rgba(46, 204, 113, 0.1)'
-                            : 'transparent',
-                    }}
-                  >
-                    <span
-                      style={{
-                        ...styles.stepIcon,
-                        color: idx === currentStep ? '#e94560' : idx < currentStep ? '#2ecc71' : '#6c6c80',
-                      }}
-                    >
-                      {idx < currentStep ? '✓' : idx === currentStep ? '●' : '○'}
-                    </span>
-                    <span style={styles.stepLabel}>{step.label}</span>
-                  </div>
-                ))}
+              <div style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                <div style={{ width: `${Math.min(100, Math.max(0, streamProgress))}%`, height: '100%', backgroundColor: '#2ecc71', transition: 'width 0.3s ease' }} />
               </div>
+              <div style={{ fontSize: '11px', color: '#8a8aa0', marginTop: '4px' }}>{streamProgress}%</div>
             </div>
           )}
 
@@ -1022,7 +977,7 @@ const AiWritingPanel: React.FC<AiWritingPanelProps> = ({
       )}
     </div>
   );
-};
+});
 
 // ==================== Styles ====================
 

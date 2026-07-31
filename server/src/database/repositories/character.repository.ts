@@ -23,8 +23,17 @@ export interface CharacterRow {
   dialogue_patterns: string | null;
   is_pov_character: number;
   role: string | null;
+  faction: string;
+  goals: string;
+  weaknesses: string;
+  wound: string;
+  keywords: string;
   created_at: string;
   updated_at: string;
+  notes?: string;
+  growth_stages_json?: string;
+  core_conflict_role?: string;
+  profile_json?: string;
 }
 
 @Injectable()

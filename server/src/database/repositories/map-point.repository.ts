@@ -16,6 +16,10 @@ export interface MapPointRow {
   coordinates: string | null;
   linked_chapter_ids: string;
   linked_character_ids: string;
+  climate: string | null;
+  resources: string | null;
+  significance: string | null;
+  sensory_detail: string | null;
   created_at: string;
   updated_at: string;
 }

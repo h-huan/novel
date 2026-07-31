@@ -85,6 +85,12 @@ export class CharacterController {
     return this.service.removeRelationship(id, targetId);
   }
 
+  /** 获取项目所有人物关系网络 */
+  @Get('relationships')
+  getRelationships(@Param('projectId') projectId: string) {
+    return this.service.getProjectRelationships(projectId);
+  }
+
   @Get(':id/state')
   getLatestState(@Param('id') id: string) {
     return this.service.getLatestState(id);

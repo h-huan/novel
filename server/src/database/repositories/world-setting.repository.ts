@@ -18,6 +18,10 @@ export interface WorldSettingRow {
   society: string;
   constraints: string;
   version: number;
+  naming_rules: string | null;
+  work_intro: string | null;
+  system_settings: string | null;
+  data_planning: string | null;
   created_at: string;
   updated_at: string;
   // Short-story world setting fields
@@ -26,6 +30,9 @@ export interface WorldSettingRow {
   social_rules?: string;
   special_settings?: string;
   setting_type?: string;
+  cultural_settings?: string;
+  spoiler_settings?: string;
+  censorship_rules?: string;
 }
 
 @Injectable()

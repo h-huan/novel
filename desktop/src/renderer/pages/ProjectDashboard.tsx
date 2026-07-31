@@ -162,7 +162,7 @@ const ProjectDashboard: React.FC = () => {
     return stage;
   });
   const quickActions = [
-    { label: '🧭 查看全书脉络', path: `/project/${projectId}/continuity`, color: '#60a5fa' },
+    { label: '🕒 查看时间线', path: `/project/${projectId}/timeline`, color: '#60a5fa' },
     ...(!needsRecovery ? [{ label: '✍️ 继续写作', path: `/project/${projectId}/writing`, color: '#e94560' }] : []),
     { label: '📋 查看大纲', path: `/project/${projectId}/outline`, color: '#3498db' },
     { label: '⚡ 检查前后矛盾', path: `/project/${projectId}/conflicts`, color: '#f39c12', badge: stats.unresolvedConflicts },
@@ -227,14 +227,14 @@ const ProjectDashboard: React.FC = () => {
       <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.22)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#bfdbfe', marginBottom: '4px' }}>全书脉络</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#bfdbfe', marginBottom: '4px' }}>时间线脉络</div>
             <div style={{ fontSize: '12px', color: '#93c5fd', lineHeight: 1.6 }}>
-              集中查看故事主线、当前章节、人物关系、伏笔、世界规则和时间先后。手动修改后会标出受影响的内容。
+              按时间先后查看故事主线、章节推进、伏笔埋设与回收、世界规则变更。可在此核对前后一致性。
             </div>
           </div>
-          <button type="button" onClick={() => navigate(`/project/${projectId}/continuity`)}
+          <button type="button" onClick={() => navigate(`/project/${projectId}/timeline`)}
             style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid rgba(147,197,253,0.36)', backgroundColor: '#0f172a', color: '#dbeafe', cursor: 'pointer', fontWeight: 600 }}>
-            查看全书脉络
+            查看时间线
           </button>
         </div>
       </div>
@@ -306,10 +306,10 @@ const ProjectDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ===== 世界观（按文档格式：7维度表）===== */}
+      {/* ===== 世界观 ===== */}
       {(Object.keys(worldview).length > 0) && (
         <div style={{ marginTop: '24px' }}>
-          <div style={sectionTitleStyle}>🌍 世界观设定</div>
+          <div style={sectionTitleStyle}>🌍 世界观</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
             {worldview.geography && Array.isArray(worldview.geography) && worldview.geography.length > 0 && (
               <div style={dimBlockStyle}>

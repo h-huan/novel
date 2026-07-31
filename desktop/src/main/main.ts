@@ -355,22 +355,41 @@ function setupAutoUpdater(): void {
   }
 }
 
-// ---------- NestJS 服务连接（仅检测并连接外部服务） ----------
+// ---------- NestJS 服务连接（尝试 3100；占用时按 3101/3102 顺延，最多 3 个端口） ----------
 
-async function connectToServer(port: number = 3100): Promise<boolean> {
+async function tryConnectPort(port: number): Promise<boolean> {
   try {
     const healthUrl = `http://127.0.0.1:${port}/api/v1/health`;
-    const res = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
-    if (res.ok) {
+    const res = await fetch(healthUrl, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) return true;
+  } catch { /* 服务未起或被占 */ }
+  return false;
+}
+
+async function connectToServer(startPort: number = 3100): Promise<boolean> {
+  // 顺延上限 3 个端口（3100 → 3101 → 3102），覆盖上一会话遗留进程占用 3100 的场景
+  for (let delta = 0; delta <= 2; delta++) {
+    const port = startPort + delta;
+    if (await tryConnectPort(port)) {
       serverProcess.port = port;
-      console.log(`[server] 已连接后端服务 http://127.0.0.1:${port}`);
-      mainWindow?.webContents.send('server-status', { running: true, port });
-      launcherWindow?.webContents.send('server-status', { running: true, port });
+      if (delta > 0) {
+        console.warn(`[server] 端口 ${startPort} 被占用，已回退到 ${port}`);
+        const msg = `端口 ${startPort} 已被占用（可能是上一次会话未完全退出），已自动连接 ${port}`;
+        mainWindow?.webContents.send('server-status', { running: true, port, warning: msg });
+        launcherWindow?.webContents.send('server-status', { running: true, port, warning: msg });
+      } else {
+        console.log(`[server] 已连接后端服务 http://127.0.0.1:${port}`);
+        mainWindow?.webContents.send('server-status', { running: true, port });
+        launcherWindow?.webContents.send('server-status', { running: true, port });
+      }
       return true;
     }
-  } catch {
-    // 服务未启动
   }
+  // 都连不上：给用户明确提示而不是静默
+  const msg = `未能连接任何端口 ${startPort}~${startPort + 2} 的后端服务。请确认 NestJS 是否已启动（或上一次会话的进程是否已退出）。`;
+  console.error(`[server] ${msg}`);
+  mainWindow?.webContents.send('server-status', { running: false, port: startPort, error: msg });
+  launcherWindow?.webContents.send('server-status', { running: false, port: startPort, error: msg });
   return false;
 }
 

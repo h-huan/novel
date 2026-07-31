@@ -39,6 +39,17 @@ export interface OutlineResponse {
   detail?: Record<string, unknown>;
   attention?: Record<string, unknown>;
   plan?: Record<string, unknown>;
+  chapterType?: string;
+  povRatio?: string;
+  hotScenes?: string;
+  setbackScenes?: string;
+  endingSetup?: string;
+  dataTracking?: Record<string, unknown>;
+  highlightPoints?: string[];
+  systemHints?: string;
+  timeline?: string;
+  locationSummary?: string;
+  conflictDesign?: string;
   children?: OutlineResponse[];
   createdAt: string;
   updatedAt: string;
@@ -79,6 +90,17 @@ export class OutlineService {
       scenes: dto.scenes ? JSON.stringify(dto.scenes) : null,
       volumes: dto.volumes ? JSON.stringify(dto.volumes) : null,
       book_skeleton: dto.bookSkeleton ? JSON.stringify(dto.bookSkeleton) : null,
+      chapter_type: dto.chapterType || '',
+      pov_ratio: dto.povRatio || '',
+      hot_scenes: dto.hotScenes || '',
+      setback_scenes: dto.setbackScenes || '',
+      ending_setup: dto.endingSetup || '',
+      data_tracking: dto.dataTracking ? JSON.stringify(dto.dataTracking) : '',
+      highlight_points: dto.highlightPoints ? JSON.stringify(dto.highlightPoints) : '[]',
+      system_hints: dto.systemHints || '',
+      timeline: dto.timeline || '',
+      location_summary: dto.locationSummary || '',
+      conflict_design: dto.conflictDesign || '',
       created_at: now,
       updated_at: now,
     });
@@ -163,6 +185,17 @@ export class OutlineService {
     if (dto.scenes !== undefined) updateData.scenes = dto.scenes ? JSON.stringify(dto.scenes) : null;
     if (dto.volumes !== undefined) updateData.volumes = dto.volumes ? JSON.stringify(dto.volumes) : null;
     if (dto.bookSkeleton !== undefined) updateData.book_skeleton = dto.bookSkeleton ? JSON.stringify(dto.bookSkeleton) : null;
+    if (dto.chapterType !== undefined) updateData.chapter_type = dto.chapterType;
+    if (dto.povRatio !== undefined) updateData.pov_ratio = dto.povRatio;
+    if (dto.hotScenes !== undefined) updateData.hot_scenes = dto.hotScenes;
+    if (dto.setbackScenes !== undefined) updateData.setback_scenes = dto.setbackScenes;
+    if (dto.endingSetup !== undefined) updateData.ending_setup = dto.endingSetup;
+    if (dto.dataTracking !== undefined) updateData.data_tracking = dto.dataTracking ? JSON.stringify(dto.dataTracking) : '';
+    if (dto.highlightPoints !== undefined) updateData.highlight_points = JSON.stringify(dto.highlightPoints);
+    if (dto.systemHints !== undefined) updateData.system_hints = dto.systemHints;
+    if (dto.timeline !== undefined) updateData.timeline = dto.timeline;
+    if (dto.locationSummary !== undefined) updateData.location_summary = dto.locationSummary;
+    if (dto.conflictDesign !== undefined) updateData.conflict_design = dto.conflictDesign;
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
@@ -751,6 +784,33 @@ export class OutlineService {
     return this.repo.findChildren(id).map((r) => this.toResponse(r));
   }
 
+  /** 获取大纲关联的伏笔详情（含埋入/回收章节信息） */
+  getLinkedForeshadowings(id: string): any[] {
+    const outline = this.repo.findById(id);
+    if (!outline) throw new NotFoundException(`Outline ${id} not found`);
+    const ids = JSON.parse(outline.foreshadowing_ids || '[]') as string[];
+    if (ids.length === 0) return [];
+    const db = this.db.getDb();
+    const placeholders = ids.map(() => '?').join(',');
+    return (db.prepare(
+      `SELECT id, content, type, status, importance, buried_chapter_index, planned_recovery_chapter_index,
+              recovery_condition, payoff_description, scope, risk_level
+       FROM foreshadowings WHERE id IN (${placeholders})`
+    ).all(...ids) as any[]).map((r: any) => ({
+      id: r.id,
+      content: r.content,
+      type: r.type,
+      status: r.status,
+      importance: r.importance,
+      buriedChapterIndex: r.buried_chapter_index,
+      plannedRecoveryChapterIndex: r.planned_recovery_chapter_index,
+      recoveryCondition: r.recovery_condition,
+      payoffDescription: r.payoff_description,
+      scope: r.scope,
+      riskLevel: r.risk_level,
+    }));
+  }
+
   private toResponse(row: OutlineRow & { children?: OutlineRow[] }): OutlineResponse {
     const result: OutlineResponse = {
       id: row.id,
@@ -774,6 +834,17 @@ export class OutlineService {
       detail: safeJson(row as any, 'detail_json', {}),
       attention: safeJson(row as any, 'attention_json', {}),
       plan: safeJson(row as any, 'plan_json', {}),
+      chapterType: row.chapter_type || undefined,
+      povRatio: row.pov_ratio || undefined,
+      hotScenes: row.hot_scenes || undefined,
+      setbackScenes: row.setback_scenes || undefined,
+      endingSetup: row.ending_setup || undefined,
+      dataTracking: safeJson(row as any, 'data_tracking', undefined),
+      highlightPoints: safeJson(row as any, 'highlight_points', []),
+      systemHints: (row as any).system_hints || undefined,
+      timeline: (row as any).timeline || undefined,
+      locationSummary: (row as any).location_summary || undefined,
+      conflictDesign: (row as any).conflict_design || undefined,
       children: row.children ? row.children.map((c) => this.toResponse(c as any)) : undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
