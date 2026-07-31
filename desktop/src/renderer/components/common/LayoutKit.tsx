@@ -112,3 +112,29 @@ export const darkField: React.CSSProperties = {
   resize: 'vertical',
 };
 
+/** 内容自适应高度文本域（随内容增高，超 400px 滚动） */
+export const AutoTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = ({ style, ...props }) => {
+  const ref = React.useRef<HTMLTextAreaElement>(null);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 400)}px`;
+  }, [props.value]);
+  return <textarea ref={ref} {...props} style={{ ...darkField, resize: 'none', overflowY: 'auto', minHeight: 80, maxHeight: 400, ...style }} />;
+};
+
+/** 响应式侧栏宽度：窄窗口收缩、宽窗口受限 */
+export const clampSidebar = (min = 220, vw = 22, max = 320): React.CSSProperties => ({
+  width: `clamp(${min}px, ${vw}vw, ${max}px)`,
+  minWidth: min,
+  maxWidth: max,
+});
+
+/** 模态框宽度保护，窄窗口不溢出 */
+export const modalBox = (width = 640): React.CSSProperties => ({
+  width: `min(${width}px, 95vw)`,
+  maxHeight: '80vh',
+  overflow: 'auto',
+});
+
