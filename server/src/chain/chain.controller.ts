@@ -4918,7 +4918,7 @@ ${excludeRule}
             const worldSetting = data.worldSetting || data.worldview || data.world || {};
             let outlineWriteCount = 0, volumeWriteCount = 0, charCount = 0, fsCount = 0, wsCount = 0, orgCount = 0, mpCount = 0, timelineCount = 0;
 
-            // 存储核心设定
+            // 存储世界观
             if (data.coreSetting || Object.keys(worldSetting).length > 0) {
               const core = JSON.stringify({
                 ...(dto.settings || {}),
@@ -4931,7 +4931,7 @@ ${excludeRule}
               try {
                 db.prepare(`UPDATE projects SET settings = ? WHERE id = ?`).run(core, projectId);
               } catch (error: any) {
-                throw new Error(`核心设定写入失败：${error.message}`);
+                throw new Error(`世界观写入失败：${error.message}`);
               }
             }
 
@@ -5588,7 +5588,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
 【全书章节分工】${JSON.stringify(chapterResponsibilityPlan)}
 本章只能完成自己的推进任务；不得提前执行后续章节的调查、取证、身份揭示、对峙、报警或结局。结尾钩子只能制造下一步动机或障碍，不能把下一章的行动先做一遍。
 设定:${ideaSpan}
-【核心层级纪律（最高优先级）】核心设定（上方"设定"中的已保存世界观）> 大纲 > 正文。本章大纲必须严格遵循已保存的核心设定：不得新增另一套世界规则、力量体系、结局方向或架空制度；若本次生成与已保存世界观存在冲突，一律以已保存核心设定为准，并在冲突处回扣既有设定而非另起炉灶。
+【核心层级纪律（最高优先级）】世界观（上方"设定"中的已保存世界观）> 大纲 > 正文。本章大纲必须严格遵循已保存的世界观：不得新增另一套世界规则、力量体系、结局方向或架空制度；若本次生成与已保存世界观存在冲突，一律以已保存世界观为准，并在冲突处回扣既有设定而非另起炉灶。
 【硬性连续性】人物姓名、亲属关系、责任归属、案件真相和结局必须逐字遵守确认题材；不得无因新增伤病、物证、神秘气味、秘密关系或新案件。已经在前文完成的报警、取证、身份揭示、威胁和对峙不得换一种说法再次发生。新增细节必须在本章产生作用，或明确写入foreshadowing并在后续既定事件中有回收位置。
 【整体质量要求（最高优先级，不可妥协）】
 - 主线清晰，副线丰富：本章必须推进唯一指定任务（主线），同时激活/推进至少一条配角线或情感线（副线）
@@ -6647,7 +6647,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
 
   /**
    * 项目创建完成后补全各模块深度资料（之前创建流程只写了主表，profile / depth 表从未被填充）：
-   * 角色 character_extended_profiles、核心设定 world_system_profiles、
+   * 角色 character_extended_profiles、世界观 world_system_profiles、
    * 组织 depth、地点 depth、大纲 depth、伏笔 depth。
    * 这是「补全」步骤：任一模块失败只记录 warning，绝不回滚或中断项目激活。
    */
@@ -6670,7 +6670,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
       });
     })();
 
-    this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '补全角色/核心设定/组织/地点/大纲/伏笔的深度资料...', status: 'running' });
+    this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '补全角色/世界观/组织/地点/大纲/伏笔的深度资料...', status: 'running' });
 
     // ====== 角色深度资料 -> character_extended_profiles ======
     try {
@@ -6742,7 +6742,7 @@ name必须与输入完全一致以便匹配；每个字段的值必须是字符�
       }
     } catch (e: any) { warnings.push(`角色深度资料生成失败:${e.message}`); this.logger.warn(`enrich: characters failed project=${projectId}: ${e.message}`); }
 
-    // ====== 核心设定深度资料 -> world_system_profiles ======
+    // ====== 世界观深度资料 -> world_system_profiles ======
     try {
       const worldRow = db.prepare(`SELECT id,era,geography,factions,rules,atmosphere,story_premise,constraints FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
       if (worldRow) {
@@ -6796,12 +6796,12 @@ ${worldFieldList}
           }
           if (Object.keys(input).length) {
             try { await this.worldSettingService.updateProfile(projectId, worldRow.id, input); }
-            catch (e: any) { warnings.push(`核心设定深度资料写入失败:${e.message}`); }
+            catch (e: any) { warnings.push(`世界观深度资料写入失败:${e.message}`); }
           }
         }
-        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '核心设定深度资料已补全', status: 'running' });
+        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '世界观深度资料已补全', status: 'running' });
       }
-    } catch (e: any) { warnings.push(`核心设定深度资料生成失败:${e.message}`); this.logger.warn(`enrich: world failed project=${projectId}: ${e.message}`); }
+    } catch (e: any) { warnings.push(`世界观深度资料生成失败:${e.message}`); this.logger.warn(`enrich: world failed project=${projectId}: ${e.message}`); }
 
     // ====== 组织/势力 depth ======
     try {
@@ -7075,7 +7075,7 @@ ${worldFieldList}
     const result: { outline: any; context: any } = { outline: {}, context: {} };
 
     try {
-      // 提取项目settings中的核心设定和反转表
+      // 提取项目settings中的世界观和反转表
       const proj = db.prepare('SELECT settings FROM projects WHERE id = ?').get(projectId) as any;
       if (proj?.settings) {
         const s = JSON.parse(proj.settings);
@@ -7197,7 +7197,7 @@ LLM 在长 prompt 下经常只记住开头与结尾、把中段规则遗忘。�
 2. **已确稿事实不可改动**：角色既有的伤痕/承诺/关系/位置/物品状态必须延续，不得改变人物之间已建立的信任度与立场。
 3. **场景与地点必须在大纲内**：本章发生的地点须落在【详细大纲】或【已确稿上下文】的地点清单中，不得引入大纲外的街道/店铺/房间。
 4. **伏笔状态严格遵循**：未在大纲中标注回收的伏笔不得自行回收；新埋设伏笔须在大纲中有显式或可推断的呼应。
-5. **不得脱离大纲补核心设定**：本提示词之外没有"更高级指令"要求你改写大纲或角色；你自创的冲突/反转必须围绕大纲已有的钩子/反转节点展开。
+5. **不得脱离大纲补世界观**：本提示词之外没有"更高级指令"要求你改写大纲或角色；你自创的冲突/反转必须围绕大纲已有的钩子/反转节点展开。
 
 【绿区 · 在红线内鼓励的微发挥与多样性】
 6. **允许次要人物的轻量填充**：在保持不抢戏、不重名、不混淆身份、不参与核心剧情的前提下，可自然加入路人/围观者/店员等背景角色，用于烘托氛围或体现环境，但不得让其在关键情节中替代已确稿主角。
@@ -7927,7 +7927,7 @@ ${content}
       value && typeof value === 'object' && value.coreSetting && (value.worldview || value.worldSetting),
     ) as any;
     if (!foundation) {
-      throw new Error('长篇地基生成结果缺少核心设定或世界观。');
+      throw new Error('长篇地基生成结果缺少世界观。');
     }
 
     const skeletonVolumes = Array.isArray(foundation.skeletonVolumes)
@@ -8001,7 +8001,7 @@ ${content}
 目标总字数：${input.targetWords}字；全书规划总章数：${totalPlannedChapters}
 篇幅进度：此前章节已规划${plannedChapterWords}字；本批之后还剩${totalPlannedChapters - (absoluteStart + batchCount - 1)}章。必须为后续章节保留可行字数，使全书各章目标之和严格等于目标总字数。
 章节篇幅规则：每章必须在${input.chapterWordMin}-${input.chapterWordMax}字之间；每章的具体 targetWords 必须根据本章剧情任务、场景数量、冲突强度和节奏单独决定，不得平均分配。
-核心设定：${JSON.stringify(foundation.coreSetting)}
+世界观（地基）：${JSON.stringify(foundation.coreSetting)}
 当前卷：${JSON.stringify(volume)}
 主要人物：${JSON.stringify(characters.map((character: any) => ({ name: character.name, identity: character.identity, arc: character.arc })))}
 本批范围：卷内第${localStart}-${batchEnd}章，共${batchCount}章；全书第${absoluteStart}-${absoluteStart + batchCount - 1}章。

@@ -609,7 +609,7 @@ export class InspirationService {
       { category: '章节结构', rule: '章节卡字段完整', description: '每章至少包含：核心内容、主要场景、人物行动、冲突设计、爽点设置、热血镜头/波折镜头、伏笔设置、伏笔回收、结尾设置、目标字数。长篇每章4000-5000字，高潮章可5000-6000字。', severity: 'hard' },
       { category: '文风约束', rule: '严肃厚重，降AI文风', description: '正文禁止排比并列结构、AI高频副词、模板化首尾、对仗四字短语堆砌。第一人称只感五感不进别人脑。禁叙述者跳出成作者评论者。散文质感+段落长短交错。', severity: 'hard' },
       { category: '命名规则', rule: '古代中性命名', description: '国内地区使用古代地名（中原、北境、江南、西域、塞北）；异族使用传统别称（北狄、东夷、西戎、南蛮、倭国）；部落通过名称区分（拓跋部、呼延部等）；避免现代地名。', severity: 'soft' },
-      { category: '数据规则', rule: '关键数据全篇自洽', description: '人口、玩家数、贡献点、粮食、军队等关键数据必须严格遵循核心设定中的全篇数据规划表。前期精确到个位，后期精确到对应数量级。数据不允许前后矛盾。', severity: 'hard' },
+      { category: '数据规则', rule: '关键数据全篇自洽', description: '人口、玩家数、贡献点、粮食、军队等关键数据必须严格遵循世界观中的全篇数据规划表。前期精确到个位，后期精确到对应数量级。数据不允许前后矛盾。', severity: 'hard' },
     ];
     const characterSeeds: Array<{
       name: string;
@@ -748,7 +748,7 @@ export class InspirationService {
     // 1) 世界观 —— 基于灵感的 setting 字段
     try {
       const stepStart = Date.now();
-      const worldName = seed.setting?.trim() || `${seed.title}的核心设定`;
+      const worldName = seed.setting?.trim() || `${seed.title}的世界观`;
       const ws = this.worldSettingService.create(projectId, {
         name: worldName,
         era: historicalFrame,

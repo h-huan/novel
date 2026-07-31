@@ -79,14 +79,14 @@ export class ChainTemplateService {
       updatedAt: now,
     });
 
-    // 长篇初始地基 chain (v1.0: 创建时仅生成核心设定+世界观+卷骨架)
+    // 长篇初始地基 chain (v1.0: 创建时仅生成世界观+卷骨架)
     this.templates.set('long-novel-init-foundation', {
       id: 'long-novel-init-foundation',
       name: '长篇初始地基',
       version: '1.0.0',
-      description: '创建长篇项目时生成核心设定（14字段）+世界观（7维详细）+卷骨架（供后续增删改查）',
+      description: '创建长篇项目时生成世界观（含故事核心设定14字段+详细世界观7维）+卷骨架（供后续增删改查）',
       nodes: [
-        { id: 'node_1_foundation', name: '核心设定+世界观生成', type: 'prompt', chainId: 'long-novel-init-foundation', promptTemplateId: 'long-novel-init-foundation', modelConfig: { primary: 'deepseek', temperature: 0.7, tier: 'performance' }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' }, outputMapping: { coreSetting: 'node_1.coreSetting', worldview: 'node_1.worldview', skeletonVolumes: 'node_1.skeletonVolumes' }, timeout: 120, retryCount: 1 },
+        { id: 'node_1_foundation', name: '世界观生成', type: 'prompt', chainId: 'long-novel-init-foundation', promptTemplateId: 'long-novel-init-foundation', modelConfig: { primary: 'deepseek', temperature: 0.7, tier: 'performance' }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' }, outputMapping: { coreSetting: 'node_1.coreSetting', worldview: 'node_1.worldview', skeletonVolumes: 'node_1.skeletonVolumes' }, timeout: 120, retryCount: 1 },
       ],
       variables: [
         { name: 'story_setting', source: 'user_input', path: 'user_input.story_setting', required: true },

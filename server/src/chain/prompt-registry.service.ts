@@ -249,7 +249,7 @@ export class PromptRegistryService {
 
     this.registerTemplate({
       id: 'seed-worldview-enrich',
-      name: '核心设定补全',
+      name: '世界观补全',
       category: 'inspiration-seed',
       version: '1.1.0',
       description: '基于setting+hook生成地理/历史/规则/势力格局（增强版）',
@@ -476,7 +476,7 @@ export class PromptRegistryService {
 ## 执行要求
 请生成以下完整大纲，每个部分都必须详细、具体、可落地：
 
-### 一、核心设定
+### 一、故事核心设定
 - title: 书名（≤15字，有冲击力）
 - type: 小说类型
 - coreSellingPoints: 核心卖点（3-5个关键词）
@@ -614,13 +614,13 @@ export class PromptRegistryService {
       isActive: false,
     });
 
-    // ==================== 长篇初始地基 (创建时仅生成核心设定+世界观) ====================
+    // ==================== 长篇初始地基 (创建时仅生成世界观) ====================
     this.registerTemplate({
       id: 'long-novel-init-foundation',
-      name: '长篇初始地基（核心设定+世界观）',
+      name: '长篇初始地基（世界观）',
       category: 'long-novel-outline',
       version: '1.0.0',
-      description: '创建长篇项目时生成核心设定和世界观（按两百万字指南标准，非常详细）。大纲/角色/伏笔后续增删改查。',
+      description: '创建长篇项目时生成世界观（含故事核心设定与详细世界观，按两百万字指南标准，非常详细）。大纲/角色/伏笔后续增删改查。',
       content: `你是一名资深网络小说世界观架构师，参考《两百万字小说创作全流程指南》为长篇小说搭建初始地基。
 
 ## 参考标准
@@ -638,7 +638,7 @@ export class PromptRegistryService {
 
 ---
 
-### 模块一：核心设定 (coreSetting)
+### 模块一：故事核心设定 (coreSetting)
 务必详细，不能只有一两句。每个字段至少20字。
 
 1. **title**：书名（有冲击力，适合网文平台）
@@ -695,7 +695,7 @@ export class PromptRegistryService {
 }
 
 ## 质量要求
-1. 核心设定每个字段必须详细（≥20字），不能敷衍
+1. 故事核心设定每个字段必须详细（≥20字），不能敷衍
 2. 世界观每个维度必须详细（≥30字），地理位置和势力必须有 name+description
 3. 输出时必须把示例中的 estimatedChapters:null 替换为根据题材、主线阶段、冲突升级和人物弧光动态计算出的正整数，并说明理由；不得套用固定卷数、固定章数或平均分配
 4. 参照魂穿北洋实例的质量水准`,
@@ -917,7 +917,7 @@ export class PromptRegistryService {
 ## 执行要求
 请生成完整的小说大纲，包含以下部分：
 
-### 1. 核心设定
+### 1. 故事核心设定
 - **核心冲突**：全书的主矛盾是什么？
 - **主线任务**：主角要达成什么目标？
 - **主题思想**：小说想表达什么？

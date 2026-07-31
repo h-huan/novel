@@ -1121,7 +1121,7 @@ export class StateItemService {
       { pattern: /道具|钥匙|戒指|剑|手机|信物|归属|交给|拿走/, targetType: 'prop', targetLabel: '道具归属', title: '道具归属变化', tags: ['prop_ownership'] },
       { pattern: /组织|门派|公司|家族|阵营|联盟|敌对/, targetType: 'organization', targetLabel: '组织关系', title: '组织关系变化', tags: ['organization'] },
       { pattern: /第二天|当天|随后|此前|之后|时间|三年|一夜|清晨|黄昏/, targetType: 'timeline_state', targetLabel: '时间线', title: '时间线推进', tags: ['timeline'] },
-      { pattern: /不像他|反常|突然变得|毫无理由|性格大变/, targetType: 'character', targetLabel: '角色一致性', title: '角色行为可能违背核心设定', tags: ['character', 'out_of_character', 'needs_transition', 'needs_review'] },
+      { pattern: /不像他|反常|突然变得|毫无理由|性格大变/, targetType: 'character', targetLabel: '角色一致性', title: '角色行为可能违背世界观', tags: ['character', 'out_of_character', 'needs_transition', 'needs_review'] },
     ];
     const matched = rules.filter(rule => rule.pattern.test(text));
     return (matched.length ? matched : [{
