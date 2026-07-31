@@ -9,8 +9,8 @@ import type { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } f
 import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
 
-// 对齐外部文档《世界观模板》8 类：时代 / 地点 / 氛围基调 / 规则 / 社会结构 / 科技超自然体系 / 文化风俗 / 补充说明
-export const WORLD_PROFILE_FIELDS = ['synopsis','basic_info','era','locations','atmosphere_tone','rules','social_structure','tech_supernatural','system_mechanics','culture_customs','naming_rules','scale_plan','ending','hierarchy_rules','supplementary'] as const;
+// 对齐《两百万字小说创作全流程指南》世界观 7 类 + 作品地基字段；custom_settings 为按小说自定义设定（JSON 键值对）
+export const WORLD_PROFILE_FIELDS = ['synopsis','basic_info','era','locations','atmosphere_tone','rules','social_structure','tech_supernatural','system_mechanics','economy_system','culture_customs','naming_rules','factions','scale_plan','ending','hierarchy_rules','supplementary','custom_settings'] as const;
 
 export interface WorldSettingResponse {
   id: string;
@@ -135,16 +135,20 @@ export class WorldSettingService {
       ['氛围基调','atmosphere_tone'],
       ['规则','rules'],
       ['社会结构（政治势力/经济资源/宗教信仰）','social_structure'],
+      ['经济体系（货币/贸易/产业）','economy_system'],
       ['科技/超自然/力量体系（体系名称/能力来源/约束代价）','tech_supernatural'],
       ['系统机制（核心机制/金手指/特殊设定）','system_mechanics'],
       ['文化风俗（语言习俗/禁忌）','culture_customs'],
       ['命名规则','naming_rules'],
+      ['势力分布（主要势力/组织）','factions'],
       ['全文规模/数据规划（人口/势力/资源等量化）','scale_plan'],
       ['结局设定','ending'],
-      ['核心层级规则（最高优先级·核心设定>大纲>正文）','hierarchy_rules'],
+      ['核心层级规则（最高优先级·世界观>大纲>正文）','hierarchy_rules'],
       ['补充说明','supplementary'],
     ];
-    return ['【核心设定写作摘要】（地基型·对齐《核心设定.txt》）', ...fields.map(([label, key]) => `${label}：${value(key)}`)].join('\n');
+    const custom = (profile['custom_settings'] || '').trim();
+    const customLines = custom ? [`自定义设定：${custom}`] : [];
+    return ['【世界观写作摘要】', ...fields.map(([label, key]) => `${label}：${value(key)}`), ...customLines].join('\n');
   }
 
   /* Legacy summary implementation is retained below for source compatibility. */
@@ -165,7 +169,7 @@ export class WorldSettingService {
   }
 
   private profileRow(row: any) { return Object.fromEntries(WORLD_PROFILE_FIELDS.map(field => [field, row?.[field] || ''])); }
-  private worldGroups(fields: readonly string[]) { const groups: Record<string,string[]> = { synopsis:['synopsis'],basic_info:['basic_info'],era:['era'],locations:['locations'],atmosphere_tone:['atmosphere_tone'],rules:['rules'],social_structure:['social_structure'],tech_supernatural:['tech_supernatural'],system_mechanics:['system_mechanics'],culture_customs:['culture_customs'],naming_rules:['naming_rules'],scale_plan:['scale_plan'],ending:['ending'],hierarchy_rules:['hierarchy_rules'],supplementary:['supplementary'] }; return Object.entries(groups).filter(([, keys]) => keys.some(key => fields.includes(key))).map(([group]) => group); }
+  private worldGroups(fields: readonly string[]) { const groups: Record<string,string[]> = { synopsis:['synopsis'],basic_info:['basic_info'],era:['era'],locations:['locations'],atmosphere_tone:['atmosphere_tone'],rules:['rules'],social_structure:['social_structure'],economy_system:['economy_system'],tech_supernatural:['tech_supernatural'],system_mechanics:['system_mechanics'],culture_customs:['culture_customs'],naming_rules:['naming_rules'],factions:['factions'],scale_plan:['scale_plan'],ending:['ending'],hierarchy_rules:['hierarchy_rules'],supplementary:['supplementary'],custom_settings:['custom_settings'] }; return Object.entries(groups).filter(([, keys]) => keys.some(key => fields.includes(key))).map(([group]) => group); }
 
   update(id: string, dto: UpdateWorldSettingDto): WorldSettingResponse {
     const existing = this.repo.findById(id);
