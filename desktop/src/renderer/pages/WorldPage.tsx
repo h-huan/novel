@@ -55,14 +55,8 @@ const CustomSettingsEditor: React.FC<{ value: string; onChange: (v: string) => v
       return Array.isArray(parsed) ? parsed.map((it: any) => ({ key: String(it?.key ?? ''), val: String(it?.value ?? '') })) : [];
     } catch { return []; }
   }, [value]);
-  const commit = (next: Array<{ key: string; val: string }>) => {
-    // 只移除末尾多余的完全空行，保留一个空行作为"待输入"槽位，避免新增行被立即滤掉
-    const trimmed = [...next];
-    while (trimmed.length > 1 && !(trimmed[trimmed.length - 1].key || trimmed[trimmed.length - 1].val)) {
-      trimmed.pop();
-    }
-    onChange(JSON.stringify(trimmed));
-  };
+  const commit = (next: Array<{ key: string; val: string }>) => onChange(JSON.stringify(next));
+  const lastRowEmpty = items.length > 0 && !items[items.length - 1].key && !items[items.length - 1].val;
   const setItem = (idx: number, patch: Partial<{ key: string; val: string }>) => {
     const next = items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
     commit(next);
@@ -75,7 +69,7 @@ const CustomSettingsEditor: React.FC<{ value: string; onChange: (v: string) => v
           <input value={it.val} placeholder="设定内容" onChange={e => setItem(idx, { val: e.target.value })} style={darkField} />
         </div>
       ))}
-      <button type="button" onClick={() => commit([...items, { key: '', val: '' }])}>+ 添加自定义设定</button>
+      <button type="button" disabled={lastRowEmpty} style={lastRowEmpty ? { opacity: 0.5, cursor: 'not-allowed' } : undefined} onClick={() => commit([...items, { key: '', val: '' }])}>+ 添加自定义设定</button>
     </div>
   );
 };
