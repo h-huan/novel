@@ -4437,63 +4437,36 @@ ${excludeRule}
         throw lastError instanceof Error ? lastError : new Error(String(lastError || '灵感模型调用失败'));
       };
 
-      // 分批串行生成：每批最多 2 个，避免单次输出超模型上限导致空内容/截断；跨批累计排除去重
-      const batchSize = 2;
-      const batches: number[] = [];
-      let remaining = requestedCount;
-      while (remaining > 0) {
-        const n = Math.min(batchSize, remaining);
-        batches.push(n);
-        remaining -= n;
+      // 单次生成全部题材（保持原始流程结构，减少网络调用次数；maxTokens 已提升避免截断）
+      const prompt = buildPrompt(requestedCount, excludeItems);
+      let response;
+      try {
+        response = await generateIdeaResponse(prompt);
+      } catch (firstError) {
+        const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
+        this.logger.warn(`idea-discover first attempt failed, retrying once: ${firstMessage}`);
+        response = await generateIdeaResponse(prompt, 1);
       }
 
       let ideas: any[] = [];
-      const batchExcludes: Array<{ title: string; hook?: string; description?: string }> = [...excludeItems];
-      for (let b = 0; b < batches.length; b++) {
-        const batchCount = batches[b];
-        const batchPrompt = buildPrompt(batchCount, batchExcludes);
-        let response;
-        try {
-          response = await generateIdeaResponse(batchPrompt);
-        } catch (firstError) {
-          const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
-          this.logger.warn(`idea-discover 第${b + 1}批首次失败，重试一次: ${firstMessage}`);
-          response = await generateIdeaResponse(batchPrompt, 1);
-        }
-        const rawContent = response.content || '';
-        let parsedIdeas = extractIdeaList(rawContent);
-        if (!parsedIdeas) {
-          this.logger.warn(`idea-discover: 第${b + 1}批内容无法解析，按当前模型配置执行一次结构修复`);
-          const structureRepair = await generateIdeaResponse(
-            `把下面这份灵感结果修复成合法JSON对象。保留原有创意，但补齐截断或缺失的字段；顶层必须为{"ideas":[...]}，ideas数组必须符合本次要求的完整结构和数量；不要解释，不要Markdown，只输出JSON对象。\n\n原始结果：\n${rawContent}\n\n完整要求：\n${batchPrompt}`,
-            1,
-            0.25,
-          );
-          parsedIdeas = extractIdeaList(structureRepair.content || '');
-        }
-        if (parsedIdeas && parsedIdeas.length > 0) {
-          ideas.push(...parsedIdeas);
-          const batchDetails = parsedIdeas.filter((i: any) => i.title).map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
-          batchExcludes.push(...batchDetails);
-          this.logger.log(`idea-discover: 第${b + 1}批生成 ${parsedIdeas.length} 个，累计 ${ideas.length} 个`);
-        }
+      const rawContent = response.content || '';
+      let parsedIdeas = extractIdeaList(rawContent);
+      if (!parsedIdeas) {
+        this.logger.warn('idea-discover: 首轮内容无法解析，按当前模型配置执行一次结构修复');
+        const structureRepair = await generateIdeaResponse(
+          `把下面这份灵感结果修复成合法JSON对象。保留原有创意，但补齐截断或缺失的字段；顶层必须为{"ideas":[...]}，ideas数组必须符合本次要求的完整结构和数量；不要解释，不要Markdown，只输出JSON对象。\n\n原始结果：\n${rawContent}\n\n完整要求：\n${prompt}`,
+          1,
+          0.25,
+        );
+        parsedIdeas = extractIdeaList(structureRepair.content || '');
       }
-
-      if (ideas.length === 0) {
-        this.logger.error('idea-discover: 所有批次均未解析出题材，未把原始文本伪装成灵感结果');
+      if (parsedIdeas && parsedIdeas.length > 0) {
+        ideas = parsedIdeas;
+        this.logger.log(`idea-discover: JSON 解析成功，共 ${ideas.length} 个题材`);
+      } else {
+        this.logger.error(`idea-discover: JSON 解析失败，未把原始文本伪装成灵感结果。内容前200字符: ${rawContent.slice(0, 200)}`);
         throw new Error('灵感生成结果无法解析，未创建降级题材，请重试。');
       }
-
-      // 跨批完全重复标题去重，并按请求数量截断
-      const seenTitles = new Set<string>();
-      ideas = ideas.filter((idea: any) => {
-        if (!idea?.title) return true;
-        const clean = String(idea.title).replace(/[《》「」]/g, '').trim();
-        if (seenTitles.has(clean)) return false;
-        seenTitles.add(clean);
-        return true;
-      });
-      if (ideas.length > requestedCount) ideas = ideas.slice(0, requestedCount);
 
       const assessIdeaQuality = (candidate: any): string[] => {
         const issues: string[] = [];
@@ -4544,10 +4517,19 @@ ${excludeRule}
         return issues;
       };
 
-      // 分批生成下不再整批重写（避免再次触发超上限的空内容/截断），改为非致命标记随题材返回
-      const qualityIssues = collectQualityIssues(ideas);
+      let qualityIssues = collectQualityIssues(ideas);
       if (qualityIssues.length > 0) {
-        this.logger.warn(`idea-discover: 部分题材未通过质量门禁（${qualityIssues.slice(0, 8).join('；')}），以警告随结果返回`);
+        this.logger.warn(`idea-discover: 首轮质量门禁未通过，重写一次：${qualityIssues.slice(0, 8).join('；')}`);
+        const repairResponse = await generateIdeaResponse(
+          `${prompt}\n\n【质量门禁退回重写】上一次输出存在以下问题：\n${qualityIssues.join('\n')}\n请重新生成完整的${requestedCount}项，不要解释，只输出符合全部字段要求的 {"ideas":[...]} JSON对象。`,
+          1,
+          0.82,
+        );
+        const repaired = extractIdeaList(repairResponse.content || '');
+        if (repaired && repaired.length > 0) {
+          ideas = repaired;
+          qualityIssues = collectQualityIssues(ideas);
+        }
       }
 
       // 把题材标准化（字数/章数解析）
