@@ -8,38 +8,70 @@ import { PageShell, Card, CardGrid, EmptyHint, darkField } from '../components/c
 type WorldProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
 type WorldProfileSectionConfig = { title: string; description: string; fields: WorldProfileFieldConfig[] };
 
-// 地基型世界观：对齐《核心设定.txt》+《世界观模板》。15 个板块，覆盖简介/基本信息/系统机制/命名/规模/结局/层级规则等"地基"内容。
+// 世界观：以《两百万字小说创作全流程指南》世界观 7 类为主，保留作品地基字段（对应长篇手动编写结构），可按本书补充自定义设定。
 const WORLD_FIELD_LABELS: Record<string, string> = {
   synopsis: '作品简介 / 核心卖点',
   basic_info: '基本信息（书名 / 类型 / 时代 / 结局 / 字数目标 / 标签）',
   era: '时代（时间线 / 历史背景）',
-  locations: '地点（主要区域 / 关键地点）',
+  locations: '地点（主要区域 / 关键地点 / 大陆分布）',
   atmosphere_tone: '氛围基调（整体氛围与基调）',
-  rules: '规则（核心规则一 / 二 / 三）',
-  social_structure: '社会结构（政治势力 / 经济资源 / 宗教信仰）',
+  rules: '规则（世界运行核心规则一 / 二 / 三）',
+  social_structure: '社会结构（阶级 / 政治 / 经济资源 / 宗教信仰）',
+  economy_system: '经济体系（货币 / 贸易 / 产业）',
   tech_supernatural: '科技 / 超自然 / 力量体系（体系名称 / 能力来源 / 约束代价）',
   system_mechanics: '系统机制（核心机制 / 金手指 / 特殊设定）',
-  culture_customs: '文化风俗（语言习俗 / 禁忌）',
+  culture_customs: '文化风俗（语言习俗 / 节日 / 禁忌）',
   naming_rules: '命名规则（人名 / 地名 / 组织名规律）',
+  factions: '势力分布（主要势力 / 组织 / 目标与关系）',
   scale_plan: '全文规模 / 数据规划（人口 / 势力 / 资源等量化）',
   ending: '结局设定（结局类型 / 走向 / 收束方式）',
   hierarchy_rules: '核心层级规则（最高优先级：世界观 > 大纲 > 正文）',
   supplementary: '补充说明',
+  custom_settings: '自定义设定（按本书补充的键值对，如金手指规则、专有名词表）',
 };
-const WORLD_FIELD_META: Record<string, { label: string; hint: string }> = Object.fromEntries(Object.entries(WORLD_FIELD_LABELS).map(([key, label]) => [key, { label, hint: `按《核心设定.txt》地基型与《世界观模板》写下与本书剧情有关的${label}；不需要时可以留空。` }]));
+const WORLD_FIELD_META: Record<string, { label: string; hint: string }> = Object.fromEntries(Object.entries(WORLD_FIELD_LABELS).map(([key, label]) => [key, { label, hint: `按《两百万字小说创作全流程指南》世界观结构与本书剧情需要写下${label}；不需要时可以留空。` }]));
 const field = (key: string): WorldProfileFieldConfig => ({ key, ...(WORLD_FIELD_META[key] || { label: key, hint: '写下与本书有关的设定；不需要时可以留空。' }), multiline: true });
 const section = (title: string, description: string, keys: string[]): WorldProfileSectionConfig => ({ title, description, fields: keys.map(field) });
 
-// 地基型分组：把"地基"板块（简介/基本信息/系统/命名/规模/结局/层级）与"世界"板块（时代/地点/基调/规则/社会/体系/文化）分层组织
+// 指南为主（7 类世界观）+ 作品地基（长篇手动编写结构）为辅 + 补充与自定义（按小说添加）
 export const PROFILE_SECTION_GROUPS: WorldProfileSectionConfig[] = [
-  section('作品地基', '小说的��：简介、类型、结局方向与规模规划，约束一切后续设定。', ['synopsis', 'basic_info', 'scale_plan', 'ending']),
-  section('时代与地点', '时间线与历史背景，以及主要区域与关键地点，奠定年代感与空间逻辑。', ['era', 'locations']),
-  section('基调与规则', '全书整体氛围，以及世界运行必须遵守的核心规则。', ['atmosphere_tone', 'rules']),
-  section('社会与体系', '政治势力、经济与信仰格局；力量/科技体系与特殊系统机制（含金手指）。', ['social_structure', 'tech_supernatural', 'system_mechanics']),
-  section('文化与命名', '语言习俗与禁忌；人名、地名、组织名的统一命名规律。', ['culture_customs', 'naming_rules']),
-  section('核心层级规则', '最高优先级纪律：世界观 > 大纲 > 正文。所有生成都必须服从已保存的世界观。', ['hierarchy_rules']),
-  section('补充说明', '其他未在以上分类中覆盖的设定。', ['supplementary']),
+  section('作品地基', '小说的简介、类型、结局方向与规模规划，约束一切后续设定。', ['synopsis', 'basic_info', 'scale_plan', 'ending']),
+  section('历史背景', '时间线与历史背景，奠定年代感。', ['era']),
+  section('世界地理', '主要区域与关键地点（大陆/国家/城市分层）。', ['locations']),
+  section('社会结构', '阶级、政治、经济资源与宗教信仰格局。', ['social_structure']),
+  section('经济体系', '货币、贸易、产业等经济运行规则。', ['economy_system']),
+  section('力量与科技体系', '力量/科技/超自然体系与系统机制（含金手指）。', ['tech_supernatural', 'system_mechanics']),
+  section('文化特色', '氛围基调、文化风俗与命名规则。', ['atmosphere_tone', 'culture_customs', 'naming_rules']),
+  section('势力分布', '主要势力、组织及其目标与关系。', ['factions']),
+  section('核心规则', '世界运行必须遵守的核心规则与层级纪律。', ['rules', 'hierarchy_rules']),
+  section('补充与自定义', '其他设定与按本书补充的自定义设定。', ['supplementary', 'custom_settings']),
 ];
+
+/** 自定义设定键值编辑器：JSON 数组 [{key, value}]，供按小说补充专属设定 */
+const CustomSettingsEditor: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+  const items = React.useMemo<Array<{ key: string; val: string }>>(() => {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      return Array.isArray(parsed) ? parsed.map((it: any) => ({ key: String(it?.key ?? ''), val: String(it?.value ?? '') })) : [];
+    } catch { return []; }
+  }, [value]);
+  const commit = (next: Array<{ key: string; val: string }>) => onChange(JSON.stringify(next.filter(it => it.key || it.val)));
+  const setItem = (idx: number, patch: Partial<{ key: string; val: string }>) => {
+    const next = items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+    commit(next);
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {items.map((it, idx) => (
+        <div key={idx} style={{ display: 'grid', gridTemplateColumns: '120px minmax(0,1fr)', gap: 6 }}>
+          <input value={it.key} placeholder="设定名" onChange={e => setItem(idx, { key: e.target.value })} style={darkField} />
+          <input value={it.val} placeholder="设定内容" onChange={e => setItem(idx, { val: e.target.value })} style={darkField} />
+        </div>
+      ))}
+      <button type="button" onClick={() => commit([...items, { key: '', val: '' }])}>+ 添加自定义设定</button>
+    </div>
+  );
+};
 
 function payload<T = any>(response: any): T { return (response?.data?.data ?? response?.data ?? response ?? {}) as T; }
 function normalizeArray<T = any>(value: unknown): T[] {
@@ -137,7 +169,12 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
                   {group.fields.map(item => {
                     const contentLen = (profile[item.key] || '').length;
                     const rows = Math.max(3, Math.min(14, Math.ceil(contentLen / 65)));
-                    return (
+                    return item.key === 'custom_settings' ? (
+                      <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 13, gridColumn: '1 / -1' }}>
+                        <span style={{ color: '#c0c0d0' }}>{item.label}</span>
+                        <CustomSettingsEditor value={profile['custom_settings'] || '[]'} onChange={v => setProfile(current => ({ ...current, custom_settings: v }))} />
+                      </label>
+                    ) : (
                     <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 13 }}>
                       <span style={{ color: '#c0c0d0' }}>{item.label}</span>
                       <textarea rows={rows} value={profile[item.key] || ''} placeholder={item.hint} onChange={event => setProfile(current => ({ ...current, [item.key]: event.target.value }))} style={darkField} />
