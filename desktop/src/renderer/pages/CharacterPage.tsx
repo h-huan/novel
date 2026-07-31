@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useCharacterStore } from '../stores/characterStore';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
+import { clampSidebar } from '../components/common/LayoutKit';
 
 type RoleType = 'protagonist' | 'major' | 'supporting' | 'minor';
 
@@ -686,7 +687,7 @@ const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) =
 
 const styles: Record<string, React.CSSProperties> = {
   page: { height: '100%', display: 'flex', overflow: 'hidden', backgroundColor: '#16213e', color: '#eaeaea' },
-  sidebar: { width: 300, minWidth: 300, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#101a33' },
+  sidebar: { ...clampSidebar(240, 25, 360), display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#101a33' },
   sidebarHeader: { display: 'flex', gap: 8, padding: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' },
   searchInput: { flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 12 },
   addButton: { padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700 },
@@ -705,7 +706,7 @@ const styles: Record<string, React.CSSProperties> = {
   title: { margin: 0, fontSize: 24, lineHeight: 1.2 },
   subtitle: { margin: '6px 0 0', fontSize: 13, color: '#8a8aa0' },
   heroInfoRow: { display: 'flex', gap: 12, marginTop: 8, fontSize: 12, color: '#c0c0d0', flexWrap: 'wrap' },
-  heroInfoTruncated: { maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  heroInfoTruncated: { maxWidth: 'min(320px, 40vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   heroActions: { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' },
   roleBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(255,255,255,0.04)', fontSize: 11, fontWeight: 800 },
   povBadge: { padding: '3px 8px', borderRadius: 5, backgroundColor: 'rgba(233,69,96,0.12)', color: '#e94560', fontSize: 11, fontWeight: 800 },

@@ -6,6 +6,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
+import { clampSidebar } from '../components/common/LayoutKit';
 
 interface Timeline {
   id: string;
@@ -499,7 +500,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
   },
   timelineList: {
-    width: '300px',
+    ...clampSidebar(200, 25, 320),
     borderRight: '1px solid rgba(255,255,255,0.06)',
     padding: '16px',
     overflow: 'auto',

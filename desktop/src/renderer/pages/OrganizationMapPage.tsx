@@ -6,6 +6,7 @@ import MapTreeView from '../components/world/MapTreeView';
 import MapDetailCard from '../components/world/MapDetailCard';
 import OrgTreeView from '../components/world/OrgTreeView';
 import OrgDetailCard from '../components/world/OrgDetailCard';
+import { clampSidebar } from '../components/common/LayoutKit';
 import { LocationKnowledgePanelV2 as LocationKnowledgePanel } from '../components/world/LocationKnowledgePanelV2';
 
 type WorkbenchTab = 'map' | 'organization';
@@ -312,7 +313,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#eaeaea',
   },
   overviewHint: {
-    minWidth: 260,
+    minWidth: 180,
     flex: 1,
     padding: '8px 10px',
     color: '#8a8aa0',
@@ -325,8 +326,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
   },
   leftPane: {
-    width: 260,
-    minWidth: 240,
+    ...clampSidebar(220, 22, 320),
     borderRight: '1px solid rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(0,0,0,0.08)',
     overflow: 'auto',
