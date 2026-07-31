@@ -625,7 +625,7 @@ const DiscoveryWizardPage: React.FC = () => {
     store.setGenerationDone(false);
     store.setGenProgress('AI正在逐条生成、质检并去重故事题材...');
 
-    // 分步进度动画
+    // 分步进度动画：前 5 步轮转文案，之后切换为真实等待计时，避免用户以为卡死
     const msgs = [
       '🤖 AI 正在思考故事角度...',
       '🔍 挖掘独特切入点...',
@@ -634,10 +634,16 @@ const DiscoveryWizardPage: React.FC = () => {
       '✨ 打磨题材细节...',
     ];
     let msgIdx = 0;
+    const startTime = Date.now();
     const msgInterval = setInterval(() => {
       if (msgIdx < msgs.length) {
         store.setGenProgress(msgs[msgIdx]);
         msgIdx++;
+      } else {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，AI 正在一次生成 5 个题材并质检（通常需 2-5 分钟，请勿关闭窗口）...`);
       }
     }, 5000);
 
