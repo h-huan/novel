@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
 import WorldSimpleView from '../components/world/WorldSimpleView';
-import WorldTabView from '../components/world/WorldTabView';
 import { PageShell, Card, CardGrid, EmptyHint, darkField } from '../components/common/LayoutKit';
 
 type WorldProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
