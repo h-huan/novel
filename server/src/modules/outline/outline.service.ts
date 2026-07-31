@@ -474,7 +474,7 @@ export class OutlineService {
       requiresStructurePlanning: existingChapters.length === 0,
       structureValid: existingChapters.length > 0 && invalidTargets.length === 0,
       invalidChapterTargets: invalidTargets.length,
-      shortStoryFlow: isShort ? ['题材钩子', '闭环故事卡', '场景序列', '伏笔回收表', '章节写作包', '开篇吸引力检查'] : [],
+      shortStoryFlow: isShort ? ['题材钩子', '故事核心设定', '人物关系表', '章节结构', '递进反转表', '伏笔回收表', '章节写作包', '开篇吸引力检查'] : [],
       ultraLongReference: {
         note: '严格遵守指南的流程和资料结构；卷数、每卷章数和总章数不得套用示例数量。每章按剧情任务在3200-4000字内动态规划。',
       },

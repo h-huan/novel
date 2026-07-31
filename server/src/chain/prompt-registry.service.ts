@@ -528,7 +528,7 @@ export class PromptRegistryService {
 - scenes: 主要场景（1-3个）
 - characterActions: 人物行动
 - conflict: 冲突设计
-- highlight: 爽点设置
+- highlight: 爽点设置（必须写出本章具体爽点与热点元素/读者偏好：热门设定、强情绪点、打脸/逆袭/高能名场面、反转冲击；不能写空话）
 - foreshadowing: 伏笔设置
 - foreshadowingRecovery: 伏笔回收
 - hook: 下章钩子
