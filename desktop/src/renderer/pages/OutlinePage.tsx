@@ -14,6 +14,7 @@ import { useForeshadowingStore } from '../stores/foreshadowingStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useWorkflowGuardStore } from '../stores/workflowGuardStore';
 import WorkflowBlockedNotice from '../components/workflow/WorkflowBlockedNotice';
+import { clampSidebar } from '../components/common/LayoutKit';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 
 type ChapterFunctionType =
@@ -1616,7 +1617,7 @@ const styles: Record<string, React.CSSProperties> = {
   tab: { padding: '8px 14px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', borderBottom: '2px solid transparent', color: '#8a8aa0', cursor: 'pointer', fontFamily: 'inherit' },
   tabActive: { color: '#e94560', borderBottomColor: '#e94560' },
   headerActions: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
-  headerMessage: { color: '#8a8aa0', fontSize: 12, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  headerMessage: { color: '#8a8aa0', fontSize: 12, maxWidth: 'min(420px, 50vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerButton: { padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontFamily: 'inherit' },
   generatePanel: { padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', maxWidth: 660 },
   blockedNoticeWrap: { marginTop: -4 },
@@ -1636,7 +1637,7 @@ const styles: Record<string, React.CSSProperties> = {
   emptyState: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 20px', textAlign: 'center' },
   emptyText: { color: '#8a8aa0', fontSize: 15, margin: 0 },
   emptyHint: { color: '#6c6c80', fontSize: 12, margin: '8px 0 0' },
-  treePanel: { width: 260, minWidth: 240, borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  treePanel: { ...clampSidebar(220, 20, 320), borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   treeTitle: { padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#8a8aa0', borderBottom: '1px solid rgba(255,255,255,0.06)' },
   treeContent: { flex: 1, overflow: 'auto', padding: 8 },
   volumeBlock: { marginBottom: 10 },
@@ -1655,7 +1656,7 @@ const styles: Record<string, React.CSSProperties> = {
   chapterActions: { display: 'flex', gap: 4, flexShrink: 0 },
   iconButton: { minWidth: 22, height: 20, fontSize: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontFamily: 'inherit' },
   lockedBadge: { fontSize: 10, color: '#f59e0b', padding: '1px 4px' },
-  shortListPane: { width: 260, minWidth: 240, borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  shortListPane: { ...clampSidebar(220, 20, 320), borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   shortMeta: { margin: 8, padding: 10, borderRadius: 6, color: '#8a8aa0', backgroundColor: 'rgba(59,130,246,0.06)', fontSize: 11, lineHeight: 1.45 },
   shortListContent: { flex: 1, overflow: 'auto', padding: 8 },
   shortChapterItem: { width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 5, borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)', backgroundColor: 'rgba(255,255,255,0.02)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' },

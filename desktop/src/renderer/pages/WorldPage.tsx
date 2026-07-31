@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
 import WorldSimpleView from '../components/world/WorldSimpleView';
-import { PageShell, Card, CardGrid, EmptyHint, darkField } from '../components/common/LayoutKit';
+import { PageShell, Card, CardGrid, EmptyHint, darkField, AutoTextarea } from '../components/common/LayoutKit';
 
 type WorldProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
 type WorldProfileSectionConfig = { title: string; description: string; fields: WorldProfileFieldConfig[] };
@@ -90,6 +90,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
   const [summary, setSummary] = useState('');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const loadProfile = useCallback(async (worldSettingId: string) => {
     if (!worldSettingId) return;
@@ -163,27 +164,29 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
             <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: '#c0c0d0', fontSize: 13, lineHeight: 1.6, maxHeight: 400, overflow: 'auto' }}>{summary || '保存后，这里会汇总正文真正需要遵守的世界规则。'}</pre>
           </Card>
           <CardGrid min={340} gap={16}>
-            {PROFILE_SECTION_GROUPS.map(group => (
-              <Card key={group.title} title={group.title} subtitle={group.description}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
-                  {group.fields.map(item => {
-                    const contentLen = (profile[item.key] || '').length;
-                    const rows = Math.max(3, Math.min(14, Math.ceil(contentLen / 65)));
-                    return item.key === 'custom_settings' ? (
-                      <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 13, gridColumn: '1 / -1' }}>
-                        <span style={{ color: '#c0c0d0' }}>{item.label}</span>
-                        <CustomSettingsEditor value={profile['custom_settings'] || '[]'} onChange={v => setProfile(current => ({ ...current, custom_settings: v }))} />
-                      </label>
-                    ) : (
-                    <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 13 }}>
-                      <span style={{ color: '#c0c0d0' }}>{item.label}</span>
-                      <textarea rows={rows} value={profile[item.key] || ''} placeholder={item.hint} onChange={event => setProfile(current => ({ ...current, [item.key]: event.target.value }))} style={darkField} />
-                    </label>
-                    );
-                  })}
-                </div>
-              </Card>
-            ))}
+            {PROFILE_SECTION_GROUPS.map(group => {
+              const groupEmpty = group.fields.every(item => !(profile[item.key] || '').trim());
+              const isCollapsed = collapsed[group.title] ?? groupEmpty;
+              return (
+                <Card key={group.title} title={group.title} subtitle={group.description}
+                  actions={<button type="button" onClick={() => setCollapsed(cur => ({ ...cur, [group.title]: !isCollapsed }))}>{isCollapsed ? '展开 ▸' : '收起 ▾'}</button>}>
+                  {!isCollapsed && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+                      {group.fields.map(item => (
+                        <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 13, ...(item.key === 'custom_settings' ? { gridColumn: '1 / -1' } : null) }}>
+                          <span style={{ color: '#c0c0d0' }}>{item.label}</span>
+                          {item.key === 'custom_settings' ? (
+                            <CustomSettingsEditor value={profile['custom_settings'] || '[]'} onChange={v => setProfile(current => ({ ...current, custom_settings: v }))} />
+                          ) : (
+                            <AutoTextarea value={profile[item.key] || ''} placeholder={item.hint} onChange={event => setProfile(current => ({ ...current, [item.key]: event.target.value }))} />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
           </CardGrid>
           <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '20px 0' }}>
             <button type="button" onClick={saveProfile}>保存世界观资料</button>

@@ -207,7 +207,7 @@ const WorldSimpleView: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ padding: '20px', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div>
         <h2 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>
           🌍 世界观
@@ -455,7 +455,7 @@ const WorldSimpleView: React.FC = () => {
           <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#a78bfa', marginBottom: '12px' }}>
             🌍 详细世界观设定（7维度）
           </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', maxHeight: '500px', overflowY: 'auto' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', maxHeight: '500px', overflowY: 'auto' }}>
             {[
               { label: '时代（时间线/历史背景）', key: 'history', v: settings.history || settings.era },
               { label: '地点（主要区域/关键地点）', key: 'geography', v: typeof settings.geography === 'string' ? settings.geography : (Array.isArray(settings.locations) ? settings.locations.join('；') : '') },
