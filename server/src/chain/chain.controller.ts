@@ -4407,46 +4407,32 @@ ${excludeRule}
       };
 
       const generateIdeaResponse = async (requestPrompt: string, retryCount = 0, temperature = 0.9) => {
-        let lastError: unknown;
-        // Keep the user-selected route/model intact. This only absorbs a
-        // transient socket reset before declaring the discovery unavailable.
-        for (let transportAttempt = 0; transportAttempt < 2; transportAttempt++) {
-          try {
-            return await this.realLLM.generate({
-              prompt: requestPrompt,
-              scenario: 'idea_generate',
-              temperature,
-              timeout: LLM_TUNABLES.timeoutContent(),
-              retryCount,
-              // 空内容重试收紧为 1 次：模型对超大输出返回空内容时快速失败，避免白白等待
-              maxEmptyRetries: 1,
-              // The prompt and parser require the object wrapper below.  Send
-              // the same constraint to OpenAI-compatible providers instead of
-              // relying on prose instructions and then paying for a repair.
-              responseFormat: 'json_object',
-            });
-          } catch (error) {
-            lastError = error;
-            if (transportAttempt === 0) {
-              const message = error instanceof Error ? error.message : String(error);
-              this.logger.warn(`idea-discover: 模型连接中断，1秒后使用同一配置重试：${message}`);
-              await new Promise(resolve => setTimeout(resolve, LLM_TUNABLES.STEP_PACE_MS));
-            }
-          }
+        // 只尝试一次（不级联重试）：模型空返回/挂起时快速失败并给明确提示，
+        // 避免外层×传输×空内容最多 8 次调用、每次最长 540s 超时导致"发现灵感卡 16 分钟"。
+        try {
+          return await this.realLLM.generate({
+            prompt: requestPrompt,
+            scenario: 'idea_generate',
+            temperature,
+            timeout: LLM_TUNABLES.timeoutSimple(),
+            retryCount,
+            // 空内容不重试：返回空即判定失败，让用户立即看到错误并可重试
+            maxEmptyRetries: 0,
+            // The prompt and parser require the object wrapper below.  Send
+            // the same constraint to OpenAI-compatible providers instead of
+            // relying on prose instructions and then paying for a repair.
+            responseFormat: 'json_object',
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`idea-discover: 模型调用失败（不再级联重试）: ${message}`);
+          throw error instanceof Error ? error : new Error(String(error || '灵感模型调用失败'));
         }
-        throw lastError instanceof Error ? lastError : new Error(String(lastError || '灵感模型调用失败'));
       };
 
-      // 单次生成全部题材（保持原始流程结构，减少网络调用次数；maxTokens 已提升避免截断）
+      // 单次生成全部题材（保持原始流程结构，减少网络调用次数）
       const prompt = buildPrompt(requestedCount, excludeItems);
-      let response;
-      try {
-        response = await generateIdeaResponse(prompt);
-      } catch (firstError) {
-        const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
-        this.logger.warn(`idea-discover first attempt failed, retrying once: ${firstMessage}`);
-        response = await generateIdeaResponse(prompt, 1);
-      }
+      const response = await generateIdeaResponse(prompt);
 
       let ideas: any[] = [];
       const rawContent = response.content || '';
