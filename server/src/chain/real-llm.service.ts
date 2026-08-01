@@ -636,8 +636,9 @@ export class RealLLMService implements ILLMService {
         stream: true,
         ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' as const } } : {}),
         // deepseek-v4-flash 默认先思考再输出，reasoning 实测可占 7500+ token（慢且挤占输出预算）。
-        // 关闭 thinking 后直接输出：速度快、输出预算完整（已实测复杂 JSON 完整生成）。
-        ...(provider === 'deepseek' ? { thinking: { type: 'disabled' as const } } : {}),
+        // 关闭 thinking 可大幅提速，但会降低"严格遵循基线、不新增角色/地点"的谨慎度（曾导致跨模块一致性拦截）。
+        // 默认保留思考以保证内容一致；如需追求速度，可设环境变量 LLM_DISABLE_THINKING=1 关闭。
+        ...(provider === 'deepseek' && process.env.LLM_DISABLE_THINKING === '1' ? { thinking: { type: 'disabled' as const } } : {}),
       });
 
       let content = '';
