@@ -635,6 +635,9 @@ export class RealLLMService implements ILLMService {
         max_tokens: maxTokens,
         stream: true,
         ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' as const } } : {}),
+        // deepseek-v4-flash 默认先思考再输出，reasoning 实测可占 7500+ token（慢且挤占输出预算）。
+        // 关闭 thinking 后直接输出：速度快、输出预算完整（已实测复杂 JSON 完整生成）。
+        ...(provider === 'deepseek' ? { thinking: { type: 'disabled' as const } } : {}),
       });
 
       let content = '';
