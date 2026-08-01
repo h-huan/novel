@@ -5262,7 +5262,7 @@ ${excludeRule}
 7.势力分布(factions) — 主要势力：核心领袖 + 结构 + 范围 + 与主角关系
 
 JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "endingDirection":"结局基调"}`;
-          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
+          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 5000 });
           warnings.push(...worldResult.warnings);
           if (worldResult.data && typeof worldResult.data === 'object') {
             const wd = worldResult.data;
@@ -6029,7 +6029,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
 
 每个角色对必须有一条关系记录（共 C(${existingChars.length},2) 条）。必须严格输出合法JSON，无Markdown、无解释。`;
               emit('characters', 67, '生成人物关系网络...', 'running');
-              const relResult = await this.llmCallWithRetry<any>('人物关系网络生成', relPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'character_design', maxTokens: 24576 });
+              const relResult = await this.llmCallWithRetry<any>('人物关系网络生成', relPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'character_design', maxTokens: 8000 });
               if (relResult.data?.relationships && Array.isArray(relResult.data.relationships) && relResult.data.relationships.length > 0) {
                 let relCount = 0;
                 for (const r of relResult.data.relationships) {
@@ -6064,7 +6064,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
             return { step: 'world', warnings: [] };
           }
           const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。\n每维度200-400字，整体不超过2500字。只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}],"endingDirection":"结局基调与解决方向"}`;
-          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
+          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 5000 });
           taskWarnings.push(...worldResult.warnings);
 
           if (worldResult.data && typeof worldResult.data === 'object') {
@@ -6721,7 +6721,7 @@ ${profileFieldList}
 name必须与输入完全一致以便匹配；每个字段的值必须是字符串。`,
               {
                 temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'character_design',
-                maxTokens: Math.min(32768, 16384),
+                maxTokens: Math.min(16000, 4096),
               },
             );
             const raw = charProfileResult.data;
@@ -6791,7 +6791,7 @@ ${worldFieldList}
 每个字段的值必须是字符串（可包含换行），不要输出嵌套JSON对象，不要输出数组。`,
           {
             temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building',
-            maxTokens: Math.min(32768, 24576),
+            maxTokens: Math.min(16000, 8000),
           },
         );
         const wp = worldProfileResult.data?.profile || worldProfileResult.data;
@@ -6886,7 +6886,7 @@ ${worldFieldList}
 【章节（id用于回写，不要改动）】${JSON.stringify(batch.map(c => ({ id: c.id, order: c.order, title: c.title, content: c.content })))}
 为每一章输出对象，必须包含原 id，以及：chapter_type(章节类型:opening/exposition/rising/conflict/climax/transition/cliffhanger/resolution/breathing/paving), pov_ratio(视角配比说明), hot_scenes(高光场景要点), setback_scenes(波折/挫折场景要点), ending_setup(结尾钩子设计), conflict_design(冲突设计), system_hints(系统/设定提示), location_summary(场景地点汇总), highlight_points(爽点要点,JSON数组)。
 只输出JSON:{"chapters":[{"id","chapter_type","pov_ratio","hot_scenes","setback_scenes","ending_setup","conflict_design","system_hints","location_summary","highlight_points"}]}`,
-            { temperature: 0.6, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'outline', maxTokens: Math.min(32768, 4000 + batch.length * 2000) },
+            { temperature: 0.6, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'outline', maxTokens: Math.min(12000, 2000 + batch.length * 1200) },
           );
           const chapList = Array.isArray(chapResult.data?.chapters) ? chapResult.data.chapters : [];
           const byId = new Map(chapters.map(c => [c.id, c]));

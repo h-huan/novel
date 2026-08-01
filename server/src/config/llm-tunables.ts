@@ -45,14 +45,12 @@ export const LLM_TUNABLES = {
   QUALITY_CHECK_PER_CONFLICT: envInt('LLM_QC_MAXTOKENS_PER_CONFLICT', 1024),
 
   // ============ outline 写入 maxTokens 边界 ============
-  // deepseek-v4-flash 为推理模型，复杂提取的 reasoning_tokens 实测可达 7500+；
-  // 上限必须给"思考 + 输出"留足预算，否则 finish:length 截断导致生成失败。
-  OUTLINE_WRITE_MIN: envInt('LLM_OW_MAXTOKENS_MIN', 8192),
-  OUTLINE_WRITE_MAX: envInt('LLM_OW_MAXTOKENS_MAX', 32768),
-  OUTLINE_WRITE_PER_CHAPTER: envInt('LLM_OW_MAXTOKENS_PER_CHAPTER', 1200),
+  OUTLINE_WRITE_MIN: envInt('LLM_OW_MAXTOKENS_MIN', 4096),
+  OUTLINE_WRITE_MAX: envInt('LLM_OW_MAXTOKENS_MAX', 8192),
+  OUTLINE_WRITE_PER_CHAPTER: envInt('LLM_OW_MAXTOKENS_PER_CHAPTER', 800),
 
   // ============ 正文生成 maxTokens 公式参数 ============
-  BODY_MAXTOKENS_CAP: envInt('LLM_BODY_MAXTOKENS_CAP', 32768),
+  BODY_MAXTOKENS_CAP: envInt('LLM_BODY_MAXTOKENS_CAP', 8000),
   BODY_MAXTOKENS_PER_TARGET: envFloat('LLM_BODY_MAXTOKENS_PER_TARGET', 1.6),
   BODY_MAXTOKENS_EXTRA: envInt('LLM_BODY_MAXTOKENS_EXTRA', 800),
 
