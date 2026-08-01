@@ -4380,8 +4380,7 @@ ${storyTypeRule}
 6. 【强钩子】用1-2句话写出“异常事件+主角困境+明确代价/时限”，读者必须能立刻提出一个非看下去不可的问题，禁止只介绍世界观
 7. 【剧情必须有推进】概要按“开局异常→主动目标→连续升级→不可逆选择→核心反转→结局兑现方向”写成具体事件链，不能只写背景、职业或概念
 8. 【反转有效】反转必须改变人物关系、目标或胜负条件，且前文可埋线索；禁止“原来一切是梦”等无效反转
-9. 【热点与爽点】不新增输出字段，把热点与爽点写进现有字段：uniquePoint 需点明读者看完第一章最爽的一点（打脸/逆袭/高能名场面/反转冲击，不能写空话）；短篇的 description 需体现与近期社会议题/情绪痛点的关联（长篇可弱化）
-10. 【篇幅动态规划】根据该题材的事件链、人物弧、必要场景和冲突层级决定建议总字数；每章按3200-4000字承载具体任务，建议总字数必须能被若干个该范围章节完整承载
+9. 【篇幅动态规划】根据该题材的事件链、人物弧、必要场景和冲突层级决定建议总字数；每章按3200-4000字承载具体任务，建议总字数必须能被若干个该范围章节完整承载
 ${excludeRule}
 
 输出一个合法JSON对象，格式必须是 {"ideas":[...]}；ideas数组<strong>必须包含${batchCount}个</strong>元素。每个元素包含：
@@ -4406,9 +4405,9 @@ ${excludeRule}
 输出前逐项自检：标题脱离概要后仍能制造悬念；钩子有具体代价；概要不是设定介绍；核心冲突双方都能主动行动；反转不是凭空揭晓；篇幅可被章节范围承载。任何一项不合格都先重写，再输出JSON对象。`;
       };
 
-      const generateIdeaResponse = async (requestPrompt: string, retryCount = 0, temperature = 0.9, maxTokens = LLM_TUNABLES.OUTLINE_WRITE_MAX) => {
+      const generateIdeaResponse = async (requestPrompt: string, retryCount = 0, temperature = 0.9, maxTokens?: number) => {
         let lastError: unknown;
-        // 保留传输级重试（不降级）。
+        // 保留传输级重试（不降级）。不传 maxTokens 时由路由配置决定（idea_generate=16384）。
         for (let transportAttempt = 0; transportAttempt < 2; transportAttempt++) {
           try {
             return await this.realLLM.generate({
@@ -4417,9 +4416,7 @@ ${excludeRule}
               temperature,
               timeout: LLM_TUNABLES.timeoutContent(),
               retryCount,
-              // 按批次传 maxTokens：单次输出量小（如 2 个题材）就用匹配的预算，
-              // 避免 32768 放开生成导致巨量输出（8 分钟 + 截断）。
-              maxTokens,
+              ...(maxTokens ? { maxTokens } : {}),
               // The prompt and parser require the object wrapper below.  Send
               // the same constraint to OpenAI-compatible providers instead of
               // relying on prose instructions and then paying for a repair.
@@ -4437,65 +4434,36 @@ ${excludeRule}
         throw lastError instanceof Error ? lastError : new Error(String(lastError || '灵感模型调用失败'));
       };
 
-      // 分批生成：每批最多 2 个题材，单次输出量小、每批按量配 maxTokens，
-      // 避免一次请求 5 个完整题材（32768 都被截断）+ 巨量推理导致的 8 分钟卡顿。
-      const batchSize = 2;
-      const batches: number[] = [];
-      let remainingCount = requestedCount;
-      while (remainingCount > 0) {
-        const n = Math.min(batchSize, remainingCount);
-        batches.push(n);
-        remainingCount -= n;
+      // 单次生成全部题材（恢复原始流程，maxTokens 由路由配置 idea_generate=16384 决定）
+      const prompt = buildPrompt(requestedCount, excludeItems);
+      let response;
+      try {
+        response = await generateIdeaResponse(prompt);
+      } catch (firstError) {
+        const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
+        this.logger.warn(`idea-discover first attempt failed, retrying once: ${firstMessage}`);
+        response = await generateIdeaResponse(prompt, 1);
       }
 
       let ideas: any[] = [];
-      const batchExcludes: Array<{ title: string; hook?: string; description?: string }> = [...excludeItems];
-      for (let b = 0; b < batches.length; b++) {
-        const batchCount = batches[b];
-        const batchPrompt = buildPrompt(batchCount, batchExcludes);
-        let response;
-        try {
-          response = await generateIdeaResponse(batchPrompt, 0, 0.9, batchCount * 8192);
-        } catch (firstError) {
-          const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
-          this.logger.warn(`idea-discover 第${b + 1}批首次失败，重试一次: ${firstMessage}`);
-          response = await generateIdeaResponse(batchPrompt, 1, 0.9, batchCount * 8192);
-        }
-        const rawContent = response.content || '';
-        let parsedIdeas = extractIdeaList(rawContent);
-        if (!parsedIdeas) {
-          this.logger.warn(`idea-discover: 第${b + 1}批内容无法解析，执行一次结构修复`);
-          const structureRepair = await generateIdeaResponse(
-            `把下面这份灵感结果修复成合法JSON对象。保留原有创意，但补齐截断或缺失的字段；顶层必须为{"ideas":[...]}，ideas数组必须符合本次要求的完整结构和数量；不要解释，不要Markdown，只输出JSON对象。\n\n原始结果：\n${rawContent}\n\n完整要求：\n${batchPrompt}`,
-            1,
-            0.25,
-            batchCount * 8192,
-          );
-          parsedIdeas = extractIdeaList(structureRepair.content || '');
-        }
-        if (parsedIdeas && parsedIdeas.length > 0) {
-          ideas.push(...parsedIdeas);
-          const batchDetails = parsedIdeas.filter((i: any) => i.title).map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
-          batchExcludes.push(...batchDetails);
-          this.logger.log(`idea-discover: 第${b + 1}批生成 ${parsedIdeas.length} 个，累计 ${ideas.length} 个`);
-        }
+      const rawContent = response.content || '';
+      let parsedIdeas = extractIdeaList(rawContent);
+      if (!parsedIdeas) {
+        this.logger.warn('idea-discover: 首轮内容无法解析，按当前模型配置执行一次结构修复');
+        const structureRepair = await generateIdeaResponse(
+          `把下面这份灵感结果修复成合法JSON对象。保留原有创意，但补齐截断或缺失的字段；顶层必须为{"ideas":[...]}，ideas数组必须符合本次要求的完整结构和数量；不要解释，不要Markdown，只输出JSON对象。\n\n原始结果：\n${rawContent}\n\n完整要求：\n${prompt}`,
+          1,
+          0.25,
+        );
+        parsedIdeas = extractIdeaList(structureRepair.content || '');
       }
-
-      if (ideas.length === 0) {
-        this.logger.error('idea-discover: 所有批次均未解析出题材');
+      if (parsedIdeas && parsedIdeas.length > 0) {
+        ideas = parsedIdeas;
+        this.logger.log(`idea-discover: JSON 解析成功，共 ${ideas.length} 个题材`);
+      } else {
+        this.logger.error(`idea-discover: JSON 解析失败，未把原始文本伪装成灵感结果`);
         throw new Error('灵感生成结果无法解析，未创建降级题材，请重试。');
       }
-
-      // 跨批完全重复标题去重，并按请求数量截断
-      const seenTitles = new Set<string>();
-      ideas = ideas.filter((idea: any) => {
-        if (!idea?.title) return true;
-        const clean = String(idea.title).replace(/[《》「」]/g, '').trim();
-        if (seenTitles.has(clean)) return false;
-        seenTitles.add(clean);
-        return true;
-      });
-      if (ideas.length > requestedCount) ideas = ideas.slice(0, requestedCount);
 
       const assessIdeaQuality = (candidate: any): string[] => {
         const issues: string[] = [];
@@ -4546,8 +4514,6 @@ ${excludeRule}
         return issues;
       };
 
-      // 供质量门禁重写使用的全量提示词
-      const prompt = buildPrompt(requestedCount, batchExcludes);
       let qualityIssues = collectQualityIssues(ideas);
       if (qualityIssues.length > 0) {
         this.logger.warn(`idea-discover: 首轮质量门禁未通过，重写一次：${qualityIssues.slice(0, 8).join('；')}`);

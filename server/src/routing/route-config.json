@@ -72,7 +72,7 @@
     "idea_generate": {
       "model": "deepseek",
       "temperature": 0.9,
-      "maxTokens": 32768,
+      "maxTokens": 16384,
       "label": "�������"
     },
     "outline": {
