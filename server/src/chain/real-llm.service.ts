@@ -635,10 +635,15 @@ export class RealLLMService implements ILLMService {
         max_tokens: maxTokens,
         stream: true,
         ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' as const } } : {}),
-        // deepseek-v4-flash 默认先思考再输出，reasoning 实测可占 7500+ token（慢且挤占输出预算）。
-        // 关闭 thinking 可大幅提速，但会降低"严格遵循基线、不新增角色/地点"的谨慎度（曾导致跨模块一致性拦截）。
-        // 默认保留思考以保证内容一致；如需追求速度，可设环境变量 LLM_DISABLE_THINKING=1 关闭。
-        ...(provider === 'deepseek' && process.env.LLM_DISABLE_THINKING === '1' ? { thinking: { type: 'disabled' as const } } : {}),
+        // deepseek-v4-flash 默认先思考再输出，reasoning 实测可占 7500+ token（单次调用 60-120s，是主要耗时）。
+        // 默认用 reasoning_effort=low：保留推理以保证内容一致性（严格遵循基线/不新增角色地点），
+        // 同时把推理量降到约 1/5（实测 reasoning≈1545、约 17s/次）——速度与一致性最佳平衡。
+        // 如需极致速度可设 LLM_DISABLE_THINKING=1 完全关闭（会降低对基线的遵循度）。
+        ...(provider === 'deepseek'
+          ? process.env.LLM_DISABLE_THINKING === '1'
+            ? { thinking: { type: 'disabled' as const } }
+            : { reasoning_effort: 'low' as const }
+          : {}),
       });
 
       let content = '';
