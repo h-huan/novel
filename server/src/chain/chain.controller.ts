@@ -4386,6 +4386,7 @@ ${excludeRule}
 
 输出一个合法JSON对象，格式必须是 {"ideas":[...]}；ideas数组<strong>必须包含${batchCount}个</strong>元素。每个元素包含：
 - title: 题材标题（4-16字，最多一个逗号/顿号）
+- alternateTitles: 另外2个同样有冲突感但角度不同的备选标题
 - angle: 切入角度（如'历史缝隙','新闻改编','小人物大历史','穿越新解','职业传奇'等）
 - hook: 核心钩子（40-90字，必须包含异常、困境和代价或时限）
 - description: 故事概要（180-300字，必须是有因果和升级的具体事件链）
@@ -4434,23 +4435,15 @@ ${excludeRule}
         throw lastError instanceof Error ? lastError : new Error(String(lastError || '灵感模型调用失败'));
       };
 
-      // 单次生成全部题材（maxTokens 由路由配置 idea_generate 决定）
+      // 单次生成全部题材（恢复原始流程，maxTokens 由路由配置 idea_generate=16384 决定）
       const prompt = buildPrompt(requestedCount, excludeItems);
       let response;
       try {
         response = await generateIdeaResponse(prompt);
       } catch (firstError) {
         const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
-        const isTruncation = /输出长度被截断|finish_reason.{0,20}length|length.{0,20}limit/i.test(firstMessage);
-        if (isTruncation) {
-          // 截断 = 输出超预算：同配置重试必然再次截断且耗时翻倍。改为缩减数量重试（更小输出→能完成）
-          const reducedCount = Math.max(1, Math.ceil(requestedCount / 2));
-          this.logger.warn(`idea-discover 输出被截断，改为一次只生成 ${reducedCount} 个题材重试：${firstMessage}`);
-          response = await generateIdeaResponse(buildPrompt(reducedCount, excludeItems), 1);
-        } else {
-          this.logger.warn(`idea-discover first attempt failed, retrying once: ${firstMessage}`);
-          response = await generateIdeaResponse(prompt, 1);
-        }
+        this.logger.warn(`idea-discover first attempt failed, retrying once: ${firstMessage}`);
+        response = await generateIdeaResponse(prompt, 1);
       }
 
       let ideas: any[] = [];
