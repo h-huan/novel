@@ -5934,8 +5934,10 @@ ${(() => {
 ${dto.selectedIdea?.protagonist ? `【必须包含的主角（不可省略或改名）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}
 
 需要包含 5 个核心人物：1. 主角；2. 女主角/重要配角；3. 主要反派；4. 主要配角；5. 导师/智者或主要同盟。每个角色的字段必须严格按以下结构：
+【读者代入钩子（必填）】每个角色必须写明至少 2 类读者代入钩子并写入 readerEmpathyPoint：悲惨经历 / 反转设定 / 热血高光 / 牺牲瞬间（主角至少覆盖热血与牺牲之一）。例如"被最信任的人背叛后仍选择相信（悲惨+反转）"。
+【成长标签（必填）】每个角色给出 2-3 个"从→到"成长标签（如"隐忍→爆发""冷漠→守护""轻信→审慎"），写入 growthTags 数组。
 
-JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反派|导师同盟|其他","basicInfo":"基本信息：姓名、年龄、外貌、身份","personality":"[3个核心性格特质 + 1个矛盾点]，每个特质用一句话具体场景说明，而非抽象词","backstory":"背景故事：影响性格的关键经历，必须是改变角色当前行为模式的具体事件而非履历","abilities":"能力设定：详细的能力体系，包括等级划分、获得方式、约束条件、使用代价","goalMotivation":"目标动机：短期目标 + 长期理想，明确写出为什么想要、打算怎么做","growthArc":"成长弧光：从弱到强的具体过程，包括触发事件、阶段划分、最终状态","relationships":"与其他核心人物的关系：含关系性质、关键事件、未来演变方向"}]`;
+JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反派|导师同盟|其他","basicInfo":"基本信息：姓名、年龄、外貌、身份","personality":"[3个核心性格特质 + 1个矛盾点]，每个特质用一句话具体场景说明，而非抽象词","backstory":"背景故事：影响性格的关键经历，必须是改变角色当前行为模式的具体事件而非履历","abilities":"能力设定：详细的能力体系，包括等级划分、获得方式、约束条件、使用代价","goalMotivation":"目标动机：短期目标 + 长期理想，明确写出为什么想要、打算怎么做","growthArc":"成长弧光：从弱到强的具体过程，包括触发事件、阶段划分、最终状态","relationships":"与其他核心人物的关系：含关系性质、关键事件、未来演变方向","readerEmpathyPoint":"读者代入钩子：至少2类（悲惨/反转/热血/牺牲）","growthTags":["成长标签：2-3个从→到"]}]`;
           const charResult = await this.llmCallWithRetry<any[]>('角色生成', charPrompt, {
             temperature: 0.8,
             timeout: LLM_TUNABLES.timeoutComplex(),
@@ -5977,14 +5979,15 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                 const appearance = ch.appearance || basicInfo;
                 const ageMatch = ch.age != null ? Number(ch.age) : null;
                 const isPov = ch.name === (generatedCharacters[0]?.name || '') ? 1 : 0;
-                db.prepare(`INSERT INTO characters (id, project_id, name, aliases, age, gender, identity, appearance, background, personality, abilities, relationships, arc, dialogue_style, dialogue_patterns, is_pov_character, created_at, updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                const growthTags = Array.isArray(ch.growthTags) ? ch.growthTags.map((t: any) => serializeGeneratedSqlText(t)).filter(Boolean) : [];
+                db.prepare(`INSERT INTO characters (id, project_id, name, aliases, age, gender, identity, appearance, background, personality, abilities, relationships, arc, dialogue_style, dialogue_patterns, is_pov_character, tags, created_at, updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
                   cid, projectId, serializeGeneratedSqlText(ch.name), '[]', Number.isFinite(ageMatch) ? ageMatch : null,
                   serializeGeneratedSqlText(ch.gender) || null, serializeGeneratedSqlText(identity) || null,
                   serializeGeneratedSqlText(appearance) || null, serializeGeneratedSqlText(backstory) || null,
                   JSON.stringify(typeof ch.personality === 'object' ? ch.personality : { summary: ch.personality || '' }),
                   charAbilities, JSON.stringify(ch.relationships || []), serializeGeneratedSqlText(growthArc) || null,
-                  null, null, isPov, now(), now()
+                  null, null, isPov, JSON.stringify(growthTags), now(), now()
                 );
                 // ★ 传播到 character_extended_profiles（前端 CharacterPage 读取的13字段表）
                 try {
@@ -5994,8 +5997,8 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                       alias_title, identity_occupation, faction_stance, role_type,
                       appearance, personality_traits, abilities_skills, backstory,
                       relationships, catchphrase_speech_style, goals_motivation,
-                      weaknesses_fears, supplementary, created_at, updated_at)
-                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                      weaknesses_fears, supplementary, reader_empathy_point, created_at, updated_at)
+                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
                       require('crypto').randomUUID(), projectId, cid,
                       serializeGeneratedSqlText(ch.alias || ch.aliasTitle || ''),
                       serializeGeneratedSqlText(identity || ''),
@@ -6010,6 +6013,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                       serializeGeneratedSqlText(goalMotivation || ''),
                       serializeGeneratedSqlText(ch.fears || ch.weakness || ch.hiddenInfo || ''),
                       serializeGeneratedSqlText(growthArc || ''),
+                      serializeGeneratedSqlText(ch.readerEmpathyPoint || ''),
                       now(), now()
                     );
                   }

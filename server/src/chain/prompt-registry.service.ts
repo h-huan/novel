@@ -869,6 +869,12 @@ export class PromptRegistryService {
 - 中期变化（挫折、领悟、蜕变）
 - 最终状态（故事结束时的性格/能力）
 
+### 7. 读者代入钩子（必填）
+每个角色写明至少 2 类：悲惨经历 / 反转设定 / 热血高光 / 牺牲瞬间，写入 readerEmpathyPoint（主角至少覆盖热血与牺牲之一）。
+
+### 8. 成长标签（必填）
+给出 2-3 个"从→到"成长标签（如"隐忍→爆发""冷漠→守护""轻信→审慎"），写入 growthTags。
+
 ## 输出格式
 输出合法JSON，不要markdown包裹：
 {
@@ -884,7 +890,9 @@ export class PromptRegistryService {
       "motivation": {"surfaceGoal": "表层目标", "deepNeed": "深层需求", "fear": "恐惧与弱点"},
       "dialogueStyle": "对话风格描述",
       "dialoguePatterns": ["口头禅1", "口头禅2"],
-      "growthArc": {"initial": "初始状态", "trigger": "成长触发", "midChange": "中期变化", "final": "最终状态"}
+      "growthArc": {"initial": "初始状态", "trigger": "成长触发", "midChange": "中期变化", "final": "最终状态"},
+      "readerEmpathyPoint": "读者代入钩子（至少2类：悲惨/反转/热血/牺牲）",
+      "growthTags": ["从→到成长标签1", "从→到成长标签2"]
     }
   ]
 }
