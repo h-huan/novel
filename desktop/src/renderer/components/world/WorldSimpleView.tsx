@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { SectionHeading, FieldList, ChipList } from '../common/ListBlocks';
 
 /**
  * 短篇世界观数据结构
@@ -198,6 +199,42 @@ const WorldSimpleView: React.FC = () => {
     updateSetting('locations', settings.locations.filter((_, i) => i !== index));
   };
 
+  const readMode = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* 非详细速览层 */}
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <SectionHeading title="故事速览" accent="#e94560" hint="一句话背景 · 时代 · 核心地点 · 核心规则" />
+        {settings.storyPremise && <div style={{ fontSize: 14, lineHeight: 1.7, color: '#eaeaea' }}>{settings.storyPremise}</div>}
+        <div><span style={{ fontSize: 12, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>时代</span><ChipList items={settings.era ? [settings.era] : []} color="#f59e0b" /></div>
+        <div><span style={{ fontSize: 12, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>核心地点</span><ChipList items={settings.locations} color="#60a5fa" /></div>
+        <FieldList label="社会与行业规则" value={settings.socialRules} accent="#a78bfa" />
+        <FieldList label="特殊设定" value={settings.specialSettings} accent="#f59e0b" />
+      </section>
+
+      {/* 详细设定层 */}
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <SectionHeading title="详细设定" accent="#a855f7" hint="仅展示已填写维度" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          {[
+            { label: '时代（时间线/历史背景）', v: settings.history || settings.era, c: '#f59e0b' },
+            { label: '地点（主要区域/关键地点）', v: settings.geography, c: '#60a5fa' },
+            { label: '氛围基调', v: settings.atmosphereTone, c: '#22c55e' },
+            { label: '规则', v: settings.rules, c: '#e94560' },
+            { label: '社会结构', v: settings.socialStructure, c: '#a78bfa' },
+            { label: '经济体系', v: settings.economy, c: '#38bdf8' },
+            { label: '科技/超自然体系', v: settings.powerSystem, c: '#f472b6' },
+            { label: '文化风俗（语言/习俗/禁忌）', v: settings.culture, c: '#34d399' },
+            { label: '补充说明', v: settings.supplementary, c: '#8a8aa0' },
+          ].filter(item => item.v).map(item => (
+            <div key={item.label} style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(139,92,246,0.14)', backgroundColor: 'rgba(139,92,246,0.05)' }}>
+              <FieldList label={item.label} value={item.v} accent={item.c} />
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+
   if (loading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#6c6c80' }}>
@@ -240,7 +277,8 @@ const WorldSimpleView: React.FC = () => {
         </div>
       )}
 
-      <fieldset disabled={!isEditing} style={{ border: 0, padding: 0, margin: 0, minInlineSize: 0, display: 'flex', flexDirection: 'column', gap: '20px', opacity: isEditing ? 1 : 0.78 }}>
+      {isEditing ? (
+      <fieldset style={{ border: 0, padding: 0, margin: 0, minInlineSize: 0, display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* 1. 故事背景 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
@@ -449,36 +487,7 @@ const WorldSimpleView: React.FC = () => {
         )}
       </section>
 
-      {/* 6. 7维度世界观设定（per 文档 · 只读展示） */}
-      {!loading && (settings.geography || settings.socialStructure || settings.powerSystem) && (
-        <section style={{ padding: '16px 0' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#a78bfa', marginBottom: '12px' }}>
-            🌍 详细世界观设定（7维度）
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', maxHeight: '500px', overflowY: 'auto' }}>
-            {[
-              { label: '时代（时间线/历史背景）', key: 'history', v: settings.history || settings.era },
-              { label: '地点（主要区域/关键地点）', key: 'geography', v: typeof settings.geography === 'string' ? settings.geography : (Array.isArray(settings.locations) ? settings.locations.join('；') : '') },
-              { label: '氛围基调', key: 'atmosphereTone', v: settings.atmosphereTone || '' },
-              { label: '规则', key: 'rules', v: settings.rules || '' },
-              { label: '社会结构（政治/经济/信仰）', key: 'socialStructure', v: [settings.socialStructure, settings.economy, settings.factions].filter(Boolean).join('\n') },
-              { label: '科技/超自然体系', key: 'powerSystem', v: settings.powerSystem },
-              { label: '文化风俗（语言/习俗/禁忌）', key: 'culture', v: settings.culture },
-              { label: '补充说明', key: 'supplementary', v: settings.supplementary || settings.endingDirection || '' },
-            ].filter(item => item.v).map(item => (
-              <div key={item.key} style={{
-                padding: '10px 12px',
-                backgroundColor: 'rgba(139,92,246,0.05)',
-                border: '1px solid rgba(139,92,246,0.12)',
-                borderRadius: '6px',
-              }}>
-                <div style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 600, marginBottom: '4px' }}>{item.label}</div>
-                <div style={{ fontSize: '12px', color: '#c0c0d0', lineHeight: 1.5, maxHeight: '120px', overflowY: 'auto' }}>{item.v}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* 6. 详细设定 已在阅读模式 readMode 展示（列表化），编辑区不再重复展示 */}
 
       {/* 保存按钮 */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '12px' }}>
@@ -518,6 +527,9 @@ const WorldSimpleView: React.FC = () => {
       </div>
 
       </fieldset>
+      ) : (
+        readMode
+      )}
     </div>
   );
 };
