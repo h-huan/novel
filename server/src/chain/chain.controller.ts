@@ -5671,10 +5671,18 @@ ${(() => {
             if (coreLen < 30 || coreLen > 280) issues.push(`核心内容过短或过长（当前约${coreLen}字）`);
             if (scenes.length === 0) issues.push('scenes必须是非空数组');
             if (!hasUsefulValue(candidate.characterActions || candidate['人物行动'])) issues.push('缺少characterActions');
-            // 冲突：新旧格式均接受
-            if (!(candidate.conflicts || candidate.conflict || candidate.conflictDesign)) issues.push('缺少conflict/conflicts');
-            // highlights：字符串自动包装
-            if (!(candidate.highlights || candidate.highlight)) issues.push('缺少highlights/highlight');
+            // 冲突：至少 2 个（新旧格式均接受）
+            const conflicts = Array.isArray(candidate.conflicts)
+              ? candidate.conflicts
+              : (String(candidate.conflict || '').trim() ? [candidate.conflict] : []);
+            if (conflicts.length < 2) issues.push(`conflicts必须至少2个（当前${conflicts.length}个）`);
+            // highlights：至少 2 个且每项含类型与 point
+            const highlights = Array.isArray(candidate.highlights)
+              ? candidate.highlights
+              : (Array.isArray(candidate.highlight) ? candidate.highlight : (String(candidate.highlight || '').trim() ? [candidate.highlight] : []));
+            if (highlights.length < 2) issues.push(`highlights必须至少2个（当前${highlights.length}个）`);
+            const typedHighlights = highlights.filter((h: any) => h && typeof h === 'object' && (h.type || h.point));
+            if (highlights.length >= 2 && typedHighlights.length < 2) issues.push('highlights每项需含 type（打脸/逆袭/热血/反转/情感暴击/信息爆点）与 point');
             if (!String(candidate.hook || candidate.nextChapterHook || candidate.nextHook || candidate['下章钩子'] || '').trim()) issues.push('缺少hook');
             return issues;
           };
