@@ -5852,6 +5852,12 @@ ${(() => {
           }
         }
 
+        // 防御：无论模型/上游给出什么功能值，短篇落库前统一按节奏兜底，避免全 paving 或非法值入库
+        preparedChapters.forEach((c, i) => {
+          const fn = normalizeOutlineChapterFunction(c.chapterFunction, c.order, isShort);
+          if (fn !== c.chapterFunction) preparedChapters[i] = { ...c, chapterFunction: fn };
+        });
+
         db.exec('BEGIN IMMEDIATE');
         try {
           db.prepare(`INSERT INTO outlines (id,project_id,level,parent_id,"order",title,content,chapter_function,goal_arc,target_words,actual_words,foreshadowing_ids,plot_points,status,character_ids,scenes,volumes,book_skeleton,created_at,updated_at)
