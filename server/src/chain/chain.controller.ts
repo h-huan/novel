@@ -6358,20 +6358,21 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
           return { step: 'foreshadowing', warnings: taskWarnings };
         });
 
-        // 等待所有并行任务完成（按 docx 优先级：世界观 > 角色 > 关系 > 组织 > 伏笔/大纲）
+        // 各任务只依赖已生成的世界观+章纲（静态上下文），写入互不相同的表，彼此独立——并行执行以提速。
+        // （docx 优先级仅用于展示顺序，不构成依赖；角色→关系 在同一任务内自洽完成。）
         const results: Array<PromiseSettledResult<{ step: string; warnings: string[] }>> = [];
         const orderedTasks = sequentialTasks.length >= 3
           ? [sequentialTasks[2], sequentialTasks[0], sequentialTasks[1], ...sequentialTasks.slice(3)]
           : sequentialTasks.length === 4
           ? [sequentialTasks[1], sequentialTasks[0], sequentialTasks[3], sequentialTasks[2]]
           : sequentialTasks;
-        for (const runTask of orderedTasks) {
+        await Promise.all(orderedTasks.map(async (runTask) => {
           try {
             results.push({ status: 'fulfilled', value: await runTask() });
           } catch (reason) {
             results.push({ status: 'rejected', reason });
           }
-        }
+        }));
         const rejectedReasons: string[] = [];
         for (const result of results) {
           if (result.status === 'fulfilled') {
