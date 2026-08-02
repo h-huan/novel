@@ -388,23 +388,18 @@ export class CharacterService {
       if (Object.keys(entries).length) sections[def.title] = entries;
     }
 
-    // 顶部速览：只取最关键的非空字段，合并基础信息与 profile
-    const narrativeParts = [
+    // 顶部一句话：只取最关键的 4 项，避免与下方分区列表重复
+    const firstTrait = String(p.personality_traits || '').trim().split(/[、，,；;]/)[0] || '';
+    const hookParts = [
       c.name && `姓名：${c.name}`,
-      p.identity_occupation && `身份职业：${p.identity_occupation}`,
-      p.role_type && `角色类型：${p.role_type}`,
-      p.faction_stance && `阵营立场：${p.faction_stance}`,
-      p.goals_motivation && `目标动机：${p.goals_motivation}`,
-      p.personality_traits && `性格：${p.personality_traits}`,
-      p.appearance && `外貌：${p.appearance}`,
-      p.backstory && `背景：${p.backstory}`,
-      p.abilities_skills && `能力技能：${p.abilities_skills}`,
-      p.catchphrase_speech_style && `说话风格：${p.catchphrase_speech_style}`,
-      p.weaknesses_fears && `弱点恐惧：${p.weaknesses_fears}`,
+      p.identity_occupation && `身份：${p.identity_occupation}`,
+      firstTrait && `性格：${firstTrait}`,
+      p.goals_motivation && `目标：${String(p.goals_motivation).trim().split(/[。；;\n]/)[0]}`,
+      p.weaknesses_fears && `软肋：${String(p.weaknesses_fears).trim().split(/[。；;\n]/)[0]}`,
     ].filter(Boolean);
-    const summary = narrativeParts.length
-      ? `【角色速览】${narrativeParts.join('；')}。`
-      : '角色资料较简略，建议补充目标、矛盾与背景后再生成写作摘要。';
+    const summary = hookParts.length
+      ? `【人物一句话】${hookParts.join('；')}。`
+      : '角色资料较简略，建议补充目标、性格与背景后再生成写作摘要。';
 
     return { summary, sections, profile: p };
   }
