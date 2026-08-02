@@ -5963,7 +5963,7 @@ ${dto.selectedIdea?.protagonist ? `【必须包含的主角（不可省略或改
 【读者代入钩子（必填）】每个角色必须写明至少 2 类读者代入钩子并写入 readerEmpathyPoint：悲惨经历 / 反转设定 / 热血高光 / 牺牲瞬间（主角至少覆盖热血与牺牲之一）。例如"被最信任的人背叛后仍选择相信（悲惨+反转）"。
 【成长标签（必填）】每个角色给出 2-3 个"从→到"成长标签（如"隐忍→爆发""冷漠→守护""轻信→审慎"），写入 growthTags 数组。
 
-JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反派|导师同盟|其他","basicInfo":"基本信息：姓名、年龄、外貌、身份","personality":"[3个核心性格特质 + 1个矛盾点]，每个特质用一句话具体场景说明，而非抽象词","backstory":"背景故事：影响性格的关键经历，必须是改变角色当前行为模式的具体事件而非履历","abilities":"能力设定：详细的能力体系，包括等级划分、获得方式、约束条件、使用代价","goalMotivation":"目标动机：短期目标 + 长期理想，明确写出为什么想要、打算怎么做","growthArc":"成长弧光：从弱到强的具体过程，包括触发事件、阶段划分、最终状态","relationships":"与其他核心人物的关系：含关系性质、关键事件、未来演变方向","readerEmpathyPoint":"读者代入钩子：至少2类（悲惨/反转/热血/牺牲）","growthTags":["成长标签：2-3个从→到"]}]`;
+JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反派|导师同盟|其他","basicInfo":"基本信息：姓名、年龄、外貌、身份","personality":"[3个核心性格特质 + 1个矛盾点]，每个特质用一句话具体场景说明，而非抽象词","backstory":"背景故事：影响性格的关键经历，必须是改变角色当前行为模式的具体事件而非履历","abilities":"能力设定：详细的能力体系，包括等级划分、获得方式、约束条件、使用代价","goalMotivation":"目标动机：短期目标 + 长期理想，明确写出为什么想要、打算怎么做","growthArc":"成长弧光：从弱到强的具体过程，包括触发事件、阶段划分、最终状态","relationships":"与其他核心人物的关系：含关系性质、关键事件、未来演变方向","readerEmpathyPoint":"读者代入钩子：至少2类（悲惨/反转/热血/牺牲）","growthTags":["成长标签：2-3个从→到"],"aliasTitle":"别名/称号/头衔（可空）","faction":"所属阵营/势力与忠诚度（可空）","catchphrase":"口头禅/说话风格/用词习惯（可空）","fears":"弱点/恐惧：可被对手利用的具体软肋，不写'怕黑'而写'童年被关地下室导致幽闭恐惧，狭窄空间会呼吸困难、判断力下降'（可空）"}]`;
           const charResult = await this.llmCallWithRetry<any[]>('角色生成', charPrompt, {
             temperature: 0.8,
             timeout: LLM_TUNABLES.timeoutComplex(),
@@ -6035,7 +6035,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                       serializeGeneratedSqlText(typeof ch.abilities === 'string' ? ch.abilities : JSON.stringify(ch.abilities || {})),
                       serializeGeneratedSqlText(backstory || ''),
                       serializeGeneratedSqlText(typeof ch.relationships === 'string' ? ch.relationships : JSON.stringify(ch.relationships || [])),
-                      serializeGeneratedSqlText(ch.dialogueStyle || ch.speechStyle || ''),
+                      serializeGeneratedSqlText(ch.catchphrase || ch.dialogueStyle || ch.speechStyle || ''),
                       serializeGeneratedSqlText(goalMotivation || ''),
                       serializeGeneratedSqlText(ch.fears || ch.weakness || ch.hiddenInfo || ''),
                       serializeGeneratedSqlText(growthArc || ''),
@@ -6738,83 +6738,27 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
     this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '补全角色/世界观/组织/地点/大纲/伏笔的深度资料...', status: 'running' });
 
     // ====== 角色深度资料 -> character_extended_profiles ======
-    try {
-      const characters = db.prepare(`SELECT id,name,identity,age,gender,appearance,background,personality,abilities FROM characters WHERE project_id=?`).all(projectId) as any[];
-      if (characters.length > 0) {
-        // 逐角色补全：每个角色独立一次调用，单角色预算 4096 token（在 character_design
-        // 路由配置 4096 内），避免"多角色合批 + 按 600/角色预算"在 4 角色时只有 3200、
-        // 被 API 在 length 处硬截断导致整批 JSON 解析失败的旧 bug。单角色失败仅告警并继续。
-        const profileFieldList = PROFILE_FIELDS.join(', ');
-        let doneCount = 0;
-        for (const c of characters) {
-          const charBrief = { name: c.name, identity: c.identity, age: c.age, gender: c.gender, appearance: c.appearance, background: c.background, personality: c.personality, abilities: c.abilities };
-          try {
-            const charProfileResult = await this.llmCallWithRetry<any>(
-              `角色深度资料补全:${c.name}`,
-              `你是该小说的角色设定师。基于角色的已确认基础信息，为角色补全一份深度资料档案，使得后续大纲与正文能以此为角色行为的一致性约束。
+    // 角色 13 字段档案已在主流程任务A生成（含 aliasTitle/faction/catchphrase/fears 等补齐字段），
+    // 不再逐角色重复调用一次完整生成，避免重复执行步骤。
+    this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 90, message: '角色深度资料已由主流程生成，跳过重复补全', status: 'done' });
 
-【故事与世界观】${ctxSummary}
-【角色基础信息（已确认，不可更改）】${JSON.stringify(charBrief)}
+    // ====== 五个深度子步骤并行执行（各步骤已补全则跳过，避免重复执行步骤）======
+    const enrichTasks: Array<() => Promise<void>> = [];
 
-输出一个对象，所有字段都有明确要求——没有信息的可以写"未知"或客观推理，但绝不空着。键名必须是以下字段：
-${profileFieldList}
-
-各字段要求：
-- alias_title——别名/称号/头衔：角色的其他称呼、代号、尊称，以及称呼背后的社会含义。
-- identity_occupation——身份/职业：在故事世界中的正式身份与具体职位，需写出该身份的社会地位与日常责任。
-- faction_stance——阵营/立场：所属势力与对该势力的忠诚度（绝对忠诚/有条件忠诚/表面忠诚/摇摆/暗中对立），以及立场转变可能。
-- role_type——角色类型：主角/反派/配角/龙套中的一种，并一句话说明在叙事中承担的戏剧功能（推动冲突/信息揭示/情感锚点/喜剧调剂等）。
-- appearance——外貌特征：可被直接写进正文的具体视觉细节——身高体态、面部特征、标志性穿着、习惯性肢体动作、与其他角色外貌对比。
-- personality_traits——性格特点：列出3-5条具体性格特质，每条给出正文中可体现的典型行为。不可只写"善良""勇敢"等抽象词——例如"善良"应写为"在自身利益受损时仍优先考虑无辜者的安危，典型场景：XXX"。
-- abilities_skills——能力/技能：角色掌握的可被剧情使用的具体技能（专业能力/社交手腕/战斗技巧/知识领域），及其掌握程度与实际限制。
-- backstory——背景故事：与主线剧情相关的过往经历，每一段应能解释角色当前的一个性格特质或行为模式。不可只写"悲惨童年"。
-- relationships——人物关系：与其他角色的具体关系及其动态——当前状态（敌对/同盟/暧昧/利用/父辈渊源）、历史纠葛、未来可能的演变方向。
-- catchphrase_speech_style——口头禅/语言风格：角色的典型说话方式——用词偏好、句式特点、是否带方言/外语夹杂、在紧张/放松/说谎时的语言特征变化。
-- goals_motivation——目标/动机：角色的核心驱动——表层目标（想要什么）、深层动机（为什么想要）、实现路径（打算怎么做）、以及目标实现或破灭后的行为预期。
-- weaknesses_fears——弱点/恐惧：利用该弱点可在剧情中制造冲突的具体方式。不可只写"怕黑"——应写"童年被关在地下室三天导致幽闭恐惧，在狭窄空间中会呼吸困难、判断力下降、可能做出冲动的逃生行为"。
-- supplementary——补充说明：上述12项未覆盖但对AI写作有约束价值的额外信息，如角色禁忌（绝不会做的行为）、成长弧线方向、与特定道具或地点的关联等。可空，但建议至少写一句。
-
-只输出JSON:{"name":角色姓名, ...上述13个字段}。
-name必须与输入完全一致以便匹配；每个字段的值必须是字符串。`,
-              {
-                temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'character_design',
-                maxTokens: Math.min(32768, 16384),
-              },
-            );
-            const raw = charProfileResult.data;
-            const p = (raw && typeof raw === 'object' && Array.isArray((raw as any).profiles))
-              ? (raw as any).profiles[0]
-              : ((raw as any)?.profile || (raw as any)?.data || raw);
-            if (!p || typeof p !== 'object') {
-              warnings.push(`角色${c.name}深度资料返回为空，已跳过`);
-              continue;
-            }
-            const input: Record<string, unknown> = {};
-            for (const f of PROFILE_FIELDS) {
-              const v = (p as any)?.[f];
-              if (typeof v === 'string' && v.trim()) input[f] = v.trim();
-            }
-            if (Object.keys(input).length) {
-              try { await this.characterService.updateProfile(projectId, c.id, input); doneCount++; }
-              catch (e: any) { warnings.push(`角色${c.name}深度资料写入失败:${e.message}`); }
-            }
-          } catch (e: any) {
-            warnings.push(`角色${c.name}深度资料生成失败:${e.message}`);
-            this.logger.warn(`enrich: character ${c.name} profile failed project=${projectId}: ${e.message}`);
-          }
+    // 世界观 depth
+    enrichTasks.push(async () => {
+      try {
+        const existingProfile = db.prepare(`SELECT naming_rules, scale_plan, ending FROM world_system_profiles WHERE project_id=? LIMIT 1`).get(projectId) as any;
+        if (existingProfile && (existingProfile.naming_rules || '').trim() && (existingProfile.scale_plan || '').trim() && (existingProfile.ending || '').trim()) {
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '世界观深度资料已存在，跳过', status: 'done' });
+          return;
         }
-        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 90, message: `角色深度资料已补全 ${doneCount}/${characters.length}`, status: 'running' });
-      }
-    } catch (e: any) { warnings.push(`角色深度资料生成失败:${e.message}`); this.logger.warn(`enrich: characters failed project=${projectId}: ${e.message}`); }
-
-    // ====== 世界观深度资料 -> world_system_profiles ======
-    try {
-      const worldRow = db.prepare(`SELECT id,era,geography,factions,rules,atmosphere,story_premise,constraints FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
-      if (worldRow) {
-        const worldFieldList = WORLD_PROFILE_FIELDS.join(', ');
-        const worldProfileResult = await this.llmCallWithRetry<any>(
-          '世界观深度资料补全',
-          `你是该小说的世界设定架构师。基于已确认的世界观骨架，补全一份完整的"地基型世界观档案"，使得后续所有大纲与正文都以此为唯一权威来源。不允许把"地基型"简化为8类古早模板。
+        const worldRow = db.prepare(`SELECT id,era,geography,factions,rules,atmosphere,story_premise,constraints FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
+        if (worldRow) {
+          const worldFieldList = WORLD_PROFILE_FIELDS.join(', ');
+          const worldProfileResult = await this.llmCallWithRetry<any>(
+            '世界观深度资料补全',
+            `你是该小说的世界设定架构师。基于已确认的世界观骨架，补全一份完整的"地基型世界观档案"，使得后续所有大纲与正文都以此为唯一权威来源。不允许把"地基型"简化为8类古早模板。
 
 【已确认世界观骨架（括号内仅为说明，实际请以骨架为准）】
 ${JSON.stringify({ era: worldRow.era, storyPremise: worldRow.story_premise, atmosphere: worldRow.atmosphere, constraints: worldRow.constraints, factions: worldRow.factions, rules: worldRow.rules })}
@@ -6846,152 +6790,183 @@ ${worldFieldList}
 
 只输出JSON:{"profile":{ ...上述15个字段 }}。
 每个字段的值必须是字符串（可包含换行），不要输出嵌套JSON对象，不要输出数组。`,
-          {
-            temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building',
-            maxTokens: Math.min(32768, 24576),
-          },
-        );
-        const wp = worldProfileResult.data?.profile || worldProfileResult.data;
-        if (wp && typeof wp === 'object') {
-          const input: Record<string, unknown> = {};
-          for (const f of WORLD_PROFILE_FIELDS) {
-            const v = (wp as any)?.[f];
-            if (typeof v === 'string' && v.trim()) input[f] = v.trim();
-            else if (Array.isArray(v)) input[f] = JSON.stringify(v);
+            {
+              temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building',
+              maxTokens: Math.min(32768, 24576),
+            },
+          );
+          const wp = worldProfileResult.data?.profile || worldProfileResult.data;
+          if (wp && typeof wp === 'object') {
+            const input: Record<string, unknown> = {};
+            for (const f of WORLD_PROFILE_FIELDS) {
+              const v = (wp as any)?.[f];
+              if (typeof v === 'string' && v.trim()) input[f] = v.trim();
+              else if (Array.isArray(v)) input[f] = JSON.stringify(v);
+            }
+            if (Object.keys(input).length) {
+              try { await this.worldSettingService.updateProfile(projectId, worldRow.id, input); }
+              catch (e: any) { warnings.push(`世界观深度资料写入失败:${e.message}`); }
+            }
           }
-          if (Object.keys(input).length) {
-            try { await this.worldSettingService.updateProfile(projectId, worldRow.id, input); }
-            catch (e: any) { warnings.push(`世界观深度资料写入失败:${e.message}`); }
-          }
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '世界观深度资料已补全', status: 'running' });
         }
-        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '世界观深度资料已补全', status: 'running' });
-      }
-    } catch (e: any) { warnings.push(`世界观深度资料生成失败:${e.message}`); this.logger.warn(`enrich: world failed project=${projectId}: ${e.message}`); }
+      } catch (e: any) { warnings.push(`世界观深度资料生成失败:${e.message}`); this.logger.warn(`enrich: world failed project=${projectId}: ${e.message}`); }
+    });
 
-    // ====== 组织/势力 depth ======
-    try {
-      const orgs = db.prepare(`SELECT id,name,type,description FROM organizations WHERE project_id=?`).all(projectId) as any[];
-      if (orgs.length > 0) {
-        const orgResult = await this.llmCallWithRetry<any>(
-          '组织势力深度资料补全',
-          `基于以下已确认组织和故事上下文，补全组织势力的深度资料，用于AI写作时保持设定一致。
+    // 组织/势力 depth
+    enrichTasks.push(async () => {
+      try {
+        const missingLeader = db.prepare(`SELECT COUNT(*) as c FROM organizations WHERE project_id=? AND (leader IS NULL OR leader='')`).get(projectId) as any;
+        if ((missingLeader?.c || 0) === 0) {
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 94, message: '组织深度资料已存在，跳过', status: 'done' });
+          return;
+        }
+        const orgs = db.prepare(`SELECT id,name,type,description FROM organizations WHERE project_id=?`).all(projectId) as any[];
+        if (orgs.length > 0) {
+          const orgResult = await this.llmCallWithRetry<any>(
+            '组织势力深度资料补全',
+            `基于以下已确认组织和故事上下文，补全组织势力的深度资料，用于AI写作时保持设定一致。
 【故事与世界观】${ctxSummary}
 【组织列表】${JSON.stringify(orgs.map(o => ({ name: o.name, type: o.type, description: o.description })))}
 为每一个组织输出对象，键名：name(与输入一致), leader(核心领袖), strength_level(实力等级:1-5整数), territory(势力范围), characteristics(组织特征), relationships_json(与其他组织关系,JSON数组), signature_equipment(标志性装备/手段)。没有就填空或0。
 只输出JSON:{"orgs":[{"name","leader","strength_level","territory","characteristics","relationships_json","signature_equipment"}]}`,
-          { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'organization_map' },
-        );
-        const orgList = Array.isArray(orgResult.data?.orgs) ? orgResult.data.orgs : [];
-        const byName = new Map(orgs.map(o => [String(o.name).trim(), o]));
-        for (const o of orgList) {
-          const name = String((o as any)?.name || '').trim();
-          const target = byName.get(name);
-          if (!target) continue;
-          const strength = Math.max(0, Math.min(5, parseInt(String((o as any).strength_level || '0'), 10) || 0));
-          try {
-            db.prepare(`UPDATE organizations SET leader=?, strength_level=?, territory=?, characteristics=?, relationships_json=?, signature_equipment=?, updated_at=? WHERE id=? AND project_id=?`)
-              .run(serializeGeneratedSqlText((o as any).leader), strength, serializeGeneratedSqlText((o as any).territory), serializeGeneratedSqlText((o as any).characteristics),
-                JSON.stringify(Array.isArray((o as any).relationships_json) ? (o as any).relationships_json : []),
-                serializeGeneratedSqlText((o as any).signature_equipment), now(), target.id, projectId);
-          } catch (e: any) { warnings.push(`组织${name}深度资料写入失败:${e.message}`); }
+            { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'organization_map' },
+          );
+          const orgList = Array.isArray(orgResult.data?.orgs) ? orgResult.data.orgs : [];
+          const byName = new Map(orgs.map(o => [String(o.name).trim(), o]));
+          for (const o of orgList) {
+            const name = String((o as any)?.name || '').trim();
+            const target = byName.get(name);
+            if (!target) continue;
+            const strength = Math.max(0, Math.min(5, parseInt(String((o as any).strength_level || '0'), 10) || 0));
+            try {
+              db.prepare(`UPDATE organizations SET leader=?, strength_level=?, territory=?, characteristics=?, relationships_json=?, signature_equipment=?, updated_at=? WHERE id=? AND project_id=?`)
+                .run(serializeGeneratedSqlText((o as any).leader), strength, serializeGeneratedSqlText((o as any).territory), serializeGeneratedSqlText((o as any).characteristics),
+                  JSON.stringify(Array.isArray((o as any).relationships_json) ? (o as any).relationships_json : []),
+                  serializeGeneratedSqlText((o as any).signature_equipment), now(), target.id, projectId);
+            } catch (e: any) { warnings.push(`组织${name}深度资料写入失败:${e.message}`); }
+          }
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 94, message: `组织深度资料已补全 ${orgList.length}/${orgs.length}`, status: 'running' });
         }
-        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 94, message: `组织深度资料已补全 ${orgList.length}/${orgs.length}`, status: 'running' });
-      }
-    } catch (e: any) { warnings.push(`组织深度资料生成失败:${e.message}`); this.logger.warn(`enrich: orgs failed project=${projectId}: ${e.message}`); }
+      } catch (e: any) { warnings.push(`组织深度资料生成失败:${e.message}`); this.logger.warn(`enrich: orgs failed project=${projectId}: ${e.message}`); }
+    });
 
-    // ====== 地点 depth ======
-    try {
-      const maps = db.prepare(`SELECT id,name,type,description FROM map_points WHERE project_id=?`).all(projectId) as any[];
-      if (maps.length > 0) {
-        const mapResult = await this.llmCallWithRetry<any>(
-          '地点深度资料补全',
-          `基于以下已确认地点和故事上下文，补全地点的深度资料。
+    // 地点 depth
+    enrichTasks.push(async () => {
+      try {
+        const missingClimate = db.prepare(`SELECT COUNT(*) as c FROM map_points WHERE project_id=? AND (climate IS NULL OR climate='')`).get(projectId) as any;
+        if ((missingClimate?.c || 0) === 0) {
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 95, message: '地点深度资料已存在，跳过', status: 'done' });
+          return;
+        }
+        const maps = db.prepare(`SELECT id,name,type,description FROM map_points WHERE project_id=?`).all(projectId) as any[];
+        if (maps.length > 0) {
+          const mapResult = await this.llmCallWithRetry<any>(
+            '地点深度资料补全',
+            `基于以下已确认地点和故事上下文，补全地点的深度资料。
 【故事与世界观】${ctxSummary}
 【地点列表】${JSON.stringify(maps.map(m => ({ name: m.name, type: m.type, description: m.description })))}
 为每一个地点输出对象，键名：name(与输入一致), climate(气候环境), resources(资源,JSON数组), significance(剧情意义), sensory_detail(感官细节：声音/气味/视觉)。
 只输出JSON:{"maps":[{"name","climate","resources","significance","sensory_detail"}]}`,
-          { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'organization_map' },
-        );
-        const mapList = Array.isArray(mapResult.data?.maps) ? mapResult.data.maps : [];
-        const byName = new Map(maps.map(m => [String(m.name).trim(), m]));
-        for (const m of mapList) {
-          const name = String((m as any)?.name || '').trim();
-          const target = byName.get(name);
-          if (!target) continue;
-          try {
-            db.prepare(`UPDATE map_points SET climate=?, resources=?, significance=?, sensory_detail=?, updated_at=? WHERE id=? AND project_id=?`)
-              .run(serializeGeneratedSqlText((m as any).climate), JSON.stringify(Array.isArray((m as any).resources) ? (m as any).resources : []),
-                serializeGeneratedSqlText((m as any).significance), serializeGeneratedSqlText((m as any).sensory_detail), now(), target.id, projectId);
-          } catch (e: any) { warnings.push(`地点${name}深度资料写入失败:${e.message}`); }
+            { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'organization_map' },
+          );
+          const mapList = Array.isArray(mapResult.data?.maps) ? mapResult.data.maps : [];
+          const byName = new Map(maps.map(m => [String(m.name).trim(), m]));
+          for (const m of mapList) {
+            const name = String((m as any)?.name || '').trim();
+            const target = byName.get(name);
+            if (!target) continue;
+            try {
+              db.prepare(`UPDATE map_points SET climate=?, resources=?, significance=?, sensory_detail=?, updated_at=? WHERE id=? AND project_id=?`)
+                .run(serializeGeneratedSqlText((m as any).climate), JSON.stringify(Array.isArray((m as any).resources) ? (m as any).resources : []),
+                  serializeGeneratedSqlText((m as any).significance), serializeGeneratedSqlText((m as any).sensory_detail), now(), target.id, projectId);
+            } catch (e: any) { warnings.push(`地点${name}深度资料写入失败:${e.message}`); }
+          }
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 95, message: `地点深度资料已补全 ${mapList.length}/${maps.length}`, status: 'running' });
         }
-        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 95, message: `地点深度资料已补全 ${mapList.length}/${maps.length}`, status: 'running' });
-      }
-    } catch (e: any) { warnings.push(`地点深度资料生成失败:${e.message}`); this.logger.warn(`enrich: maps failed project=${projectId}: ${e.message}`); }
+      } catch (e: any) { warnings.push(`地点深度资料生成失败:${e.message}`); this.logger.warn(`enrich: maps failed project=${projectId}: ${e.message}`); }
+    });
 
-    // ====== 大纲 depth（按批，避免长篇小说章节过多时单次过大）======
-    try {
-      const chapters = db.prepare(`SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`).all(projectId) as any[];
-      if (chapters.length > 0) {
-        const BATCH = 6;
-        let done = 0;
-        for (let i = 0; i < chapters.length; i += BATCH) {
-          const batch = chapters.slice(i, i + BATCH);
-          const chapResult = await this.llmCallWithRetry<any>(
-            '大纲深度字段补全',
-            `基于以下章节的已确认大纲，补全每章的结构化深度字段，用于AI写作时保持节奏与冲突一致。
+    // 大纲 depth（按批，避免长篇小说章节过多时单次过大）
+    enrichTasks.push(async () => {
+      try {
+        const missingType = db.prepare(`SELECT COUNT(*) as c FROM outlines WHERE project_id=? AND level='chapter' AND (chapter_type IS NULL OR chapter_type='')`).get(projectId) as any;
+        if ((missingType?.c || 0) === 0) {
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 97, message: '大纲深度字段已存在，跳过', status: 'done' });
+          return;
+        }
+        const chapters = db.prepare(`SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`).all(projectId) as any[];
+        if (chapters.length > 0) {
+          const BATCH = 6;
+          let done = 0;
+          for (let i = 0; i < chapters.length; i += BATCH) {
+            const batch = chapters.slice(i, i + BATCH);
+            const chapResult = await this.llmCallWithRetry<any>(
+              '大纲深度字段补全',
+              `基于以下章节的已确认大纲，补全每章的结构化深度字段，用于AI写作时保持节奏与冲突一致。
 【故事与世界观】${ctxSummary}
 【章节（id用于回写，不要改动）】${JSON.stringify(batch.map(c => ({ id: c.id, order: c.order, title: c.title, content: c.content })))}
 为每一章输出对象，必须包含原 id，以及：chapter_type(章节类型:opening/exposition/rising/conflict/climax/transition/cliffhanger/resolution/breathing/paving), pov_ratio(视角配比说明), hot_scenes(高光场景要点), setback_scenes(波折/挫折场景要点), ending_setup(结尾钩子设计), conflict_design(冲突设计), system_hints(系统/设定提示), location_summary(场景地点汇总), highlight_points(爽点要点,JSON数组)。
 只输出JSON:{"chapters":[{"id","chapter_type","pov_ratio","hot_scenes","setback_scenes","ending_setup","conflict_design","system_hints","location_summary","highlight_points"}]}`,
-            { temperature: 0.6, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'outline', maxTokens: Math.min(32768, 4000 + batch.length * 2000) },
-          );
-          const chapList = Array.isArray(chapResult.data?.chapters) ? chapResult.data.chapters : [];
-          const byId = new Map(chapters.map(c => [c.id, c]));
-          for (const c of chapList) {
-            const cid = String((c as any)?.id || '');
-            const target = byId.get(cid);
-            if (!target) continue;
-            try {
-              db.prepare(`UPDATE outlines SET chapter_type=?, pov_ratio=?, hot_scenes=?, setback_scenes=?, ending_setup=?, conflict_design=?, system_hints=?, location_summary=?, highlight_points=?, updated_at=? WHERE id=? AND project_id=?`)
-                .run(serializeGeneratedSqlText((c as any).chapter_type), serializeGeneratedSqlText((c as any).pov_ratio), serializeGeneratedSqlText((c as any).hot_scenes),
-                  serializeGeneratedSqlText((c as any).setback_scenes), serializeGeneratedSqlText((c as any).ending_setup), serializeGeneratedSqlText((c as any).conflict_design),
-                  serializeGeneratedSqlText((c as any).system_hints), serializeGeneratedSqlText((c as any).location_summary),
-                  JSON.stringify(Array.isArray((c as any).highlight_points) ? (c as any).highlight_points : []), now(), cid, projectId);
-              done += 1;
-            } catch (e: any) { warnings.push(`章节${cid}深度字段写入失败:${e.message}`); }
+              { temperature: 0.6, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'outline', maxTokens: Math.min(32768, 4000 + batch.length * 2000) },
+            );
+            const chapList = Array.isArray(chapResult.data?.chapters) ? chapResult.data.chapters : [];
+            const byId = new Map(chapters.map(c => [c.id, c]));
+            for (const c of chapList) {
+              const cid = String((c as any)?.id || '');
+              const target = byId.get(cid);
+              if (!target) continue;
+              try {
+                db.prepare(`UPDATE outlines SET chapter_type=?, pov_ratio=?, hot_scenes=?, setback_scenes=?, ending_setup=?, conflict_design=?, system_hints=?, location_summary=?, highlight_points=?, updated_at=? WHERE id=? AND project_id=?`)
+                  .run(serializeGeneratedSqlText((c as any).chapter_type), serializeGeneratedSqlText((c as any).pov_ratio), serializeGeneratedSqlText((c as any).hot_scenes),
+                    serializeGeneratedSqlText((c as any).setback_scenes), serializeGeneratedSqlText((c as any).ending_setup), serializeGeneratedSqlText((c as any).conflict_design),
+                    serializeGeneratedSqlText((c as any).system_hints), serializeGeneratedSqlText((c as any).location_summary),
+                    JSON.stringify(Array.isArray((c as any).highlight_points) ? (c as any).highlight_points : []), now(), cid, projectId);
+                done += 1;
+              } catch (e: any) { warnings.push(`章节${cid}深度字段写入失败:${e.message}`); }
+            }
           }
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 97, message: `大纲深度字段已补全 ${done}/${chapters.length}`, status: 'running' });
         }
-        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 97, message: `大纲深度字段已补全 ${done}/${chapters.length}`, status: 'running' });
-      }
-    } catch (e: any) { warnings.push(`大纲深度字段生成失败:${e.message}`); this.logger.warn(`enrich: outlines failed project=${projectId}: ${e.message}`); }
+      } catch (e: any) { warnings.push(`大纲深度字段生成失败:${e.message}`); this.logger.warn(`enrich: outlines failed project=${projectId}: ${e.message}`); }
+    });
 
-    // ====== 伏笔 depth ======
-    try {
-      const fss = db.prepare(`SELECT id,content,buried_chapter_index,planned_recovery_chapter_index,evidence_text,recovery_condition,payoff_description FROM foreshadowings WHERE project_id=?`).all(projectId) as any[];
-      if (fss.length > 0) {
-        const fsResult = await this.llmCallWithRetry<any>(
-          '伏笔深度资料补全',
-          `基于以下已确认伏笔，补全每条伏笔的情感与分层回收资料。
+    // 伏笔 depth
+    enrichTasks.push(async () => {
+      try {
+        const missingImpact = db.prepare(`SELECT COUNT(*) as c FROM foreshadowings WHERE project_id=? AND (emotional_impact IS NULL OR emotional_impact='')`).get(projectId) as any;
+        if ((missingImpact?.c || 0) === 0) {
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 98, message: '伏笔深度资料已存在，跳过', status: 'done' });
+          return;
+        }
+        const fss = db.prepare(`SELECT id,content,buried_chapter_index,planned_recovery_chapter_index,evidence_text,recovery_condition,payoff_description FROM foreshadowings WHERE project_id=?`).all(projectId) as any[];
+        if (fss.length > 0) {
+          const fsResult = await this.llmCallWithRetry<any>(
+            '伏笔深度资料补全',
+            `基于以下已确认伏笔，补全每条伏笔的情感与分层回收资料。
 【故事与世界观】${ctxSummary}
 【伏笔（id用于回写）】${JSON.stringify(fss.map(f => ({ id: f.id, content: f.content, buriedChapter: f.buried_chapter_index, recoveryChapter: f.planned_recovery_chapter_index })))}
 为每条伏笔输出对象，必须包含原 id，以及：emotional_impact(情感冲击描述), layered_reveal(分层揭示设计,JSON数组，每项含 revealStage 与 content)。
 只输出JSON:{"foreshadowings":[{"id","emotional_impact","layered_reveal"}]}`,
-          { temperature: 0.6, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'foreshadowing' },
-        );
-        const fsList = Array.isArray(fsResult.data?.foreshadowings) ? fsResult.data.foreshadowings : [];
-        const byId = new Map(fss.map(f => [f.id, f]));
-        for (const f of fsList) {
-          const fid = String((f as any)?.id || '');
-          const target = byId.get(fid);
-          if (!target) continue;
-          try {
-            db.prepare(`UPDATE foreshadowings SET emotional_impact=?, layered_reveal=?, updated_at=? WHERE id=? AND project_id=?`)
-              .run(serializeGeneratedSqlText((f as any).emotional_impact), JSON.stringify(Array.isArray((f as any).layered_reveal) ? (f as any).layered_reveal : []), now(), fid, projectId);
-          } catch (e: any) { warnings.push(`伏笔${fid}深度资料写入失败:${e.message}`); }
+            { temperature: 0.6, timeout: LLM_TUNABLES.timeoutMedium(), scenario: 'foreshadowing' },
+          );
+          const fsList = Array.isArray(fsResult.data?.foreshadowings) ? fsResult.data.foreshadowings : [];
+          const byId = new Map(fss.map(f => [f.id, f]));
+          for (const f of fsList) {
+            const fid = String((f as any)?.id || '');
+            const target = byId.get(fid);
+            if (!target) continue;
+            try {
+              db.prepare(`UPDATE foreshadowings SET emotional_impact=?, layered_reveal=?, updated_at=? WHERE id=? AND project_id=?`)
+                .run(serializeGeneratedSqlText((f as any).emotional_impact), JSON.stringify(Array.isArray((f as any).layered_reveal) ? (f as any).layered_reveal : []), now(), fid, projectId);
+            } catch (e: any) { warnings.push(`伏笔${fid}深度资料写入失败:${e.message}`); }
+          }
+          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 98, message: `伏笔深度资料已补全 ${fsList.length}/${fss.length}`, status: 'running' });
         }
-        this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 98, message: `伏笔深度资料已补全 ${fsList.length}/${fss.length}`, status: 'running' });
-      }
-    } catch (e: any) { warnings.push(`伏笔深度资料生成失败:${e.message}`); this.logger.warn(`enrich: foreshadowings failed project=${projectId}: ${e.message}`); }
+      } catch (e: any) { warnings.push(`伏笔深度资料生成失败:${e.message}`); this.logger.warn(`enrich: foreshadowings failed project=${projectId}: ${e.message}`); }
+    });
+
+    await Promise.all(enrichTasks.map(task => task()));
 
     return warnings;
   }
