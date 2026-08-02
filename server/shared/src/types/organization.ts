@@ -20,6 +20,13 @@ export interface Organization {
   description: string;
   parentId?: string | null;
   level?: string;
+  /** 富详情字段（DB 已存，前端详情卡展示用） */
+  leader?: string;
+  strength_level?: string;
+  territory?: string;
+  characteristics?: string;
+  relationships_json?: string | Array<{ name?: string; type?: string; description?: string; target?: string }>;
+  signature_equipment?: string;
   createdAt: string;
   updatedAt: string;
 }

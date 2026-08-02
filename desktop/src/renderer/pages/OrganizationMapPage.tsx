@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useOrganizationStore } from '../stores/organizationStore';
 import { useMapPointStore } from '../stores/mapPointStore';
+import { useCharacterStore } from '../stores/characterStore';
+import { api } from '../lib/api';
 import MapTreeView from '../components/world/MapTreeView';
 import MapDetailCard from '../components/world/MapDetailCard';
 import OrgTreeView from '../components/world/OrgTreeView';
@@ -16,6 +18,8 @@ const OrganizationMapPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<WorkbenchTab>('map');
   const [selectedMapPointId, setSelectedMapPointId] = useState<string | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const { characters, fetchCharacters } = useCharacterStore();
+  const [chapterMap, setChapterMap] = useState<Record<string, string>>({});
 
   const {
     mapPoints,
@@ -45,7 +49,20 @@ const OrganizationMapPage: React.FC = () => {
     fetchMapTree(projectId);
     fetchOrganizations(projectId);
     fetchOrgTree(projectId);
-  }, [projectId, fetchMapPoints, fetchMapTree, fetchOrganizations, fetchOrgTree]);
+    fetchCharacters(projectId);
+    api.get(`/projects/${projectId}/outlines/tree`).then((res: any) => {
+      const data = (res as any).data ?? res;
+      const map: Record<string, string> = {};
+      const walk = (nodes: any[]) => nodes.forEach(n => {
+        if (n?.title) map[n.id] = n.title;
+        if (Array.isArray(n.children)) walk(n.children);
+      });
+      if (Array.isArray(data)) walk(data);
+      setChapterMap(map);
+    }).catch(() => {});
+  }, [projectId, fetchMapPoints, fetchMapTree, fetchOrganizations, fetchOrgTree, fetchCharacters]);
+
+  const characterNameById = Object.fromEntries((characters || []).map((c: any) => [c.id, c.name]));
 
   const selectedMapPoint = mapPoints.find((mp) => mp.id === selectedMapPointId) || null;
   const selectedOrg = organizations.find((org) => org.id === selectedOrgId) || null;
@@ -164,6 +181,8 @@ const OrganizationMapPage: React.FC = () => {
           <aside style={styles.rightPane}>
             <MapDetailCard
               mapPoint={selectedMapPoint}
+              characterNameById={characterNameById}
+              chapterTitleById={chapterMap}
               onUpdate={async (mapPointId, data) => {
                 await updateMapPoint(mapPointId, projectId, data);
                 await refreshMap();
@@ -206,6 +225,7 @@ const OrganizationMapPage: React.FC = () => {
             <OrgDetailCard
               organization={selectedOrg}
               allOrganizations={organizations}
+              characterNameById={characterNameById}
               onUpdate={async (organizationId, data) => {
                 await updateOrganization(organizationId, projectId, data);
                 await refreshOrg();

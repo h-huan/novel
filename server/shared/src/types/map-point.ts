@@ -28,6 +28,11 @@ export interface MapPoint {
   coordinates?: string; // "x,y" 格式
   linkedChapterIds: string[];
   linkedCharacterIds: string[];
+  /** 富详情字段（DB 已存，前端详情卡展示用） */
+  climate?: string;
+  resources?: string;
+  significance?: string;
+  sensory_detail?: string;
   createdAt: string;
   updatedAt: string;
 }
