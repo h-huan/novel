@@ -9,6 +9,7 @@ import { useCharacterStore } from '../stores/characterStore';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 import { clampSidebar } from '../components/common/LayoutKit';
 import { SectionHeading, FieldList } from '../components/common/ListBlocks';
+import { ChangeHistoryPanel } from '../components/character/ChangeHistoryPanel';
 
 type RoleType = 'protagonist' | 'major' | 'supporting' | 'minor';
 
@@ -196,6 +197,10 @@ const CharacterPage: React.FC = () => {
   const [writingSummary, setWritingSummary] = useState('');
   const [summarySections, setSummarySections] = useState<Record<string, Record<string, string>>>({});
   const [relationships, setRelationships] = useState<any[]>([]);
+  const [historyField, setHistoryField] = useState<string | null>(null);
+  const historyLabel = historyField
+    ? (PROFILE_SECTION_GROUPS.flatMap(s => s.fields).find(f => f.key === historyField)?.label ?? historyField)
+    : '';
 
   useEffect(() => {
     if (!projectId) return;
@@ -561,7 +566,14 @@ const CharacterPage: React.FC = () => {
                       <SectionHeading title={section.title} accent="#e94560" hint={section.description} />
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 4 }}>
                         {entries.map(({ field, value }) => (
-                          <div key={field.key}>
+                          <div
+                            key={field.key}
+                            onClick={() => setHistoryField(field.key)}
+                            title="点击查看/记录变动历史"
+                            style={{ cursor: 'pointer', padding: '6px 8px', borderRadius: 6, border: '1px solid transparent' }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(233,69,96,0.25)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
+                          >
                             <FieldList label={field.label} value={value} accent="#93c5fd" />
                           </div>
                         ))}
@@ -570,6 +582,9 @@ const CharacterPage: React.FC = () => {
                   );
                 })}
               </div>
+              {historyField && (
+                <ChangeHistoryPanel projectId={projectId || ''} characterId={selected.id} fieldKey={historyField} fieldLabel={historyLabel} onClose={() => setHistoryField(null)} />
+              )}
             </section>
 
             <section style={styles.statusPanel}>
