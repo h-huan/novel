@@ -5218,7 +5218,7 @@ ${excludeRule}
       let shortHeartbeatPercent = 12;
       shortHeartbeatTimer = setInterval(() => {
         shortHeartbeatPercent = Math.min(shortHeartbeatPercent + 2, 85);
-        emit('world', shortHeartbeatPercent, '短篇资料仍在生成中：��界观/大纲/角色/伏笔...');
+        emit('world', shortHeartbeatPercent, '短篇资料仍在生成中：世界观/大纲/角色/伏笔...');
       }, LLM_TUNABLES.HEARTBEAT_SHORT_MS);
 
       const shortStoryPrompt = `【短篇要求 参照《短故事三步骤》】
@@ -5249,6 +5249,7 @@ ${excludeRule}
           const worldPrompt = `为这部小说整理服务于剧情的完整世界观设定，不是另写一个同名故事。
 【唯一故事基准】${canonicalCreativeBrief}
 保留基准的时代、类型、地点、冲突、主角和结局方向；禁止把现实题材改成末世/修仙/科幻/超能力/架空制度。
+${dto.selectedIdea?.protagonist ? `【必须保留的主角（不得改名、不得换成别人）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
 
 只输出以下7维度JSON。每维度限定200-400字以内，整体输出不超过 2500 字，避免单维度过度堆砌拖慢生成：
 
@@ -5261,8 +5262,17 @@ ${excludeRule}
 7.势力分布(factions) — 主要势力：核心领袖 + 结构 + 范围 + 与主角关系
 
 JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "endingDirection":"结局基调"}`;
-          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
-          warnings.push(...worldResult.warnings);
+          // 确定性主角名（首段，用于校验世界观是否保留主角，防止模型改名导致后续全偏）
+          const protagonistName = (dto.selectedIdea?.protagonist || '').split(/[，,。：:；;\s（(]/)[0].trim();
+          let worldResult: any = null;
+          for (let worldAttempt = 0; worldAttempt < 2; worldAttempt++) {
+            const wr = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
+            warnings.push(...wr.warnings);
+            const wText = wr.data && typeof wr.data === 'object' ? JSON.stringify(wr.data) : '';
+            if (!protagonistName || wText.includes(protagonistName) || worldAttempt === 1) { worldResult = wr; break; }
+            this.logger.warn(`世界观生成未包含主角名“${protagonistName}”（模型可能改名），第${worldAttempt + 1}次重试`);
+          }
+          if (!worldResult) throw new Error('世界观生成未返回有效结构，停止创建以避免后续上下文失真。');
           if (worldResult.data && typeof worldResult.data === 'object') {
             const wd = worldResult.data;
             // 注意：outlineContextPrefix 不再使用瞬时原始 LLM 输出，改为写入后从 DB 回读（见下方），确保大纲上下文=已落库模块
@@ -5597,6 +5607,10 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
 设定:${ideaSpan}
 【核心层级纪律（最高优先级）】世界观（上方"设定"中的已保存世界观）> 大纲 > 正文。本章大纲必须严格遵循已保存的世界观：不得新增另一套世界规则、力量体系、结局方向或架空制度；若本次生成与已保存世界观存在冲突，一律以已保存世界观为准，并在冲突处回扣既有设定而非另起炉灶。
 【硬性连续性】人物姓名、亲属关系、责任归属、案件真相和结局必须逐字遵守确认题材；不得无因新增伤病、物证、神秘气味、秘密关系或新案件。已经在前文完成的报警、取证、身份揭示、威胁和对峙不得换一种说法再次发生。新增细节必须在本章产生作用，或明确写入foreshadowing并在后续既定事件中有回收位置。
+${(() => {
+  const ideaNames = [dto.selectedIdea?.protagonist, ...(Array.isArray(dto.selectedIdea?.characters) ? dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')) : [])].filter(Boolean);
+  return ideaNames.length > 0 ? `【允许出现的人物（禁止新增任何不在列的人物或神秘角色）】${ideaNames.join('、')}\n` : '';
+})()}【允许出现的地点】仅限已确认世界观中明确存在的地点；禁止新增拍卖行、码头仓库、工厂等未确认地点。
 【整体质量要求（最高优先级，不可妥协）】
 - 主线清晰，副线丰富：本章必须推进唯一指定任务（主线），同时激活/推进至少一条配角线或情感线（副线）
 - 节奏张弛有度：紧张场景后必须给呼吸段落（如环境描写、配角对话、主角独白），不能连续高强度
@@ -5891,9 +5905,9 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
         emit('orgs', 85, `${hasOrganizations && hasMapPoints ? '✓' : ''}组织与地图已就绪`, hasOrganizations && hasMapPoints ? 'done' : 'failed');
         emit('foreshadowing', 95, `${hasForeshadowings ? '✓' : ''}伏笔已就绪`, hasForeshadowings ? 'done' : 'failed');
       } else {
-        emit('characters', 50, '并行生成角色/世界观/组织/伏笔...');
+        emit('characters', 50, '顺序生成角色/世界观/组织/伏笔...');
 
-        // --- 并行执行4个独立生成任务 ---
+        // --- 按文档层级顺序执行：世界观→角色→关系→组织→伏笔→时间线（每步在上一步落库后生成，保证一致）---
         const sequentialTasks: Array<() => Promise<{ step: string; warnings: string[] }>> = [];
 
         // 任务A：角色生成（仅当 DB 中无角色时执行）
@@ -5911,6 +5925,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
 【完整创作上下文】${groundedCreativeContext}
 
 人物数量由章纲中的行动者和冲突需要决定；保留确认题材中的姓名、身份、关系、目标和结局方向，不得替换主角或反派。只收录对情节有实际作用的人物。
+${dto.selectedIdea?.protagonist ? `【必须包含的主角（不可省略或改名）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}
 
 需要包含 5 个核心人物：1. 主角；2. 女主角/重要配角；3. 主要反派；4. 主要配角；5. 导师/智者或主要同盟。每个角色的字段必须严格按以下结构：
 
@@ -6058,10 +6073,10 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
         // 任务B：世界观生成（仅当 DB 中无世界观时执行）
         sequentialTasks.push(async (): Promise<{ step: string; warnings: string[] }> => {
           const taskWarnings: string[] = [];
-          if (hasWorldSetting) {
-            emit('world', 75, '世界观已存在，跳过', 'done');
-            return { step: 'world', warnings: [] };
-          }
+          // 始终生成（不跳过）：若已有世界观（先生成的那条），合并去重到第 1 条，不新增重复
+          const existingWorldRow = hasWorldSetting
+            ? (db.prepare('SELECT * FROM world_settings WHERE project_id=?').get(projectId) as any)
+            : null;
           const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。\n每维度200-400字，整体不超过2500字。只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}],"endingDirection":"结局基调与解决方向"}`;
           const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
           taskWarnings.push(...worldResult.warnings);
@@ -6069,6 +6084,30 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
           if (worldResult.data && typeof worldResult.data === 'object') {
             try {
               const wd = worldResult.data;
+              // 合并：已有世界观则把第 2 次的不同内容并进第 1 条，相同则丢弃
+              const mergeText = (a: string | null | undefined, b: string | null | undefined) => {
+                const A = (a || '').trim(); const B = (b || '').trim();
+                if (!B || B === '[]' || B === '[""]') return A;
+                if (!A || A === '[]' || A === '[""]') return B;
+                return A === B ? A : `${A}；${B}`;
+              };
+              if (existingWorldRow) {
+                db.prepare(`UPDATE world_settings SET era=?, geography=?, factions=?, rules=?, atmosphere=?, constraints=?, story_premise=?, locations=?, social_rules=?, special_settings=?, updated_at=? WHERE id=?`).run(
+                  mergeText(existingWorldRow.era, serializeGeneratedSqlText(wd.era)),
+                  mergeText(existingWorldRow.geography, JSON.stringify(Array.isArray(wd.geography) ? wd.geography : [])),
+                  mergeText(existingWorldRow.factions, JSON.stringify(Array.isArray(wd.factions) ? wd.factions : [])),
+                  mergeText(existingWorldRow.rules, JSON.stringify([wd.rules || ''])),
+                  mergeText(existingWorldRow.atmosphere, serializeGeneratedSqlText(wd.atmosphere)),
+                  mergeText(existingWorldRow.constraints, JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' })),
+                  mergeText(existingWorldRow.story_premise, serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title)),
+                  mergeText(existingWorldRow.locations, JSON.stringify(Array.isArray(wd.locations) ? wd.locations : (Array.isArray(wd.geography) ? wd.geography : []))),
+                  mergeText(existingWorldRow.social_rules, serializeGeneratedSqlText(wd.socialRules || wd.socialStructure)),
+                  mergeText(existingWorldRow.special_settings, serializeGeneratedSqlText(wd.specialSettings || wd.powerSystem || wd.rules)),
+                  now(), existingWorldRow.id
+                );
+                emit('world', 75, '世界观已生成并与已有内容合并去重', 'done');
+                return { step: 'world', warnings: taskWarnings };
+              }
               const wid = uuid();
               db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
@@ -6383,12 +6422,18 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
         ...(Array.isArray(alignment?.contradictions) ? alignment.contradictions : []),
         ...(Array.isArray(alignment?.unrelatedInventions) ? alignment.unrelatedInventions : []),
       ].map((item: any) => String(item || '').trim()).filter(Boolean);
-      if (!alignment || alignment.consistent !== true || contradictions.length > 0) {
+      // 一致性修订迭代：最多 3 次"修订→复查"，每次把最新矛盾反馈给修订，
+      // 尽量让生成资料收敛到与基准一致（不降低最终一致性检查强度）。
+      let repairAttempt = 0;
+      const MAX_CONSISTENCY_REPAIRS = 3;
+      while (!alignment || alignment.consistent !== true || contradictions.length > 0) {
         if (contradictions.length === 0) {
           throw new Error('跨模块故事一致性审查未确认通过，但没有提供可修订的具体矛盾；项目未激活，请重新生成。');
         }
+        if (repairAttempt >= MAX_CONSISTENCY_REPAIRS) break;
+        repairAttempt++;
         const repairResult = await this.llmCallWithRetry<any>(
-          '跨模块故事一致性修订',
+          `跨模块故事一致性修订（第${repairAttempt}次）`,
           `根据审查发现，对本次尚未激活的AI生成资料做最小修订。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向；只能修正互斥的专名、时间、年龄、伤病历史和因果事实。replacement必须是字段修订后的完整值，不是修改说明。\n【唯一故事基准】${canonicalCreativeBrief}\n【当前资料（id是唯一可用entityId）】${generatedBundleText}\n【必须修复的矛盾】${JSON.stringify(contradictions)}\n只输出JSON:{"patches":[{"entityType":"world|character|organization|mapPoint|chapter|foreshadowing","entityId":"当前资料中的id","field":"允许字段","replacement":"修订后的完整值","reason":"对应矛盾"}]}`,
           {
             temperature: 0.1,
@@ -6488,7 +6533,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
         generatedBundle = readGeneratedBundle();
         generatedBundleText = JSON.stringify(generatedBundle);
         const secondAlignmentResult = await this.llmCallWithRetry<any>(
-          '跨模块故事一致性二次审查',
+          `跨模块故事一致性第${repairAttempt}次复查`,
           `核对修订后的资料是否严格属于同一个故事并且事实互不矛盾。重点检查专名、年龄、时间跨度、伤病历史、章节因果、结局和伏笔证据。只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["无关虚构"]}\n【唯一故事基准】${canonicalCreativeBrief}\n【修订后资料】${generatedBundleText}`,
           {
             temperature: 0.1,
@@ -6705,7 +6750,7 @@ ${profileFieldList}
 - alias_title——别名/称号/头衔：角色的其他称呼、代号、尊称，以及称呼背后的社会含义。
 - identity_occupation——身份/职业：在故事世界中的正式身份与具体职位，需写出该身份的社会地位与日常责任。
 - faction_stance——阵营/立场：所属势力与对该势力的忠诚度（绝对忠诚/有条件忠诚/表面忠诚/摇摆/暗中对立），以及立场转变可能。
-- role_type—���角色类型：主角/反派/配角/龙套中的一种，并一句话说明在叙事中承担的戏剧功能（推动冲突/信息揭示/情感锚点/喜剧调剂等）。
+- role_type——角色类型：主角/反派/配角/龙套中的一种，并一句话说明在叙事中承担的戏剧功能（推动冲突/信息揭示/情感锚点/喜剧调剂等）。
 - appearance——外貌特征：可被直接写进正文的具体视觉细节——身高体态、面部特征、标志性穿着、习惯性肢体动作、与其他角色外貌对比。
 - personality_traits——性格特点：列出3-5条具体性格特质，每条给出正文中可体现的典型行为。不可只写"善良""勇敢"等抽象词——例如"善良"应写为"在自身利益受损时仍优先考虑无辜者的安危，典型场景：XXX"。
 - abilities_skills——能力/技能：角色掌握的可被剧情使用的具体技能（专业能力/社交手腕/战斗技巧/知识领域），及其掌握程度与实际限制。

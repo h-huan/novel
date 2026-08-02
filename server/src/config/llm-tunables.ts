@@ -47,7 +47,7 @@ export const LLM_TUNABLES = {
   // ============ outline 写入 maxTokens 边界 ============
   // deepseek-v4-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算返回空内容。
   // 实测复杂任务 reasoning 可达 7500+，故上限给足预算（这修复了"空返回"根因）。
-  OUTLINE_WRITE_MIN: envInt('LLM_OW_MAXTOKENS_MIN', 8192),
+  OUTLINE_WRITE_MIN: envInt('LLM_OW_MAXTOKENS_MIN', 24576),
   OUTLINE_WRITE_MAX: envInt('LLM_OW_MAXTOKENS_MAX', 32768),
   OUTLINE_WRITE_PER_CHAPTER: envInt('LLM_OW_MAXTOKENS_PER_CHAPTER', 1200),
 

@@ -1,6 +1,6 @@
 {
   "version": "1.2.0",
-  "description": "AIд��ƽ̨ģ��·������",
+  "description": "AI写作平台模型路由配置",
   "models": {
     "deepseek": {
       "name": "DeepSeek",
@@ -36,13 +36,13 @@
         {
           "model": "deepseek",
           "priority": 1,
-          "label": "����д��",
+          "label": "智能写作",
           "defaultVersion": "deepseek-chat"
         },
         {
           "model": "deepseek",
           "priority": 2,
-          "label": "����д��",
+          "label": "快速写作",
           "defaultVersion": "deepseek-chat"
         }
       ]
@@ -52,7 +52,7 @@
         {
           "model": "deepseek",
           "priority": 1,
-          "label": "�������",
+          "label": "智能审查",
           "defaultVersion": "deepseek-chat"
         }
       ]
@@ -62,7 +62,7 @@
         {
           "model": "deepseek",
           "priority": 1,
-          "label": "��Ȳ߻�",
+          "label": "智能策划",
           "defaultVersion": "deepseek-chat"
         }
       ]
@@ -72,80 +72,80 @@
     "idea_generate": {
       "model": "deepseek",
       "temperature": 0.9,
-      "maxTokens": 16384,
-      "label": "�������"
+      "maxTokens": 24576,
+      "label": "题材生成"
     },
     "outline": {
       "model": "deepseek",
       "temperature": 0.6,
       "maxTokens": 24576,
-      "label": "��ٹ滮"
+      "label": "大纲规划"
     },
     "world_building": {
       "model": "deepseek",
       "temperature": 0.6,
       "maxTokens": 24576,
-      "label": "�����"
+      "label": "世界观"
     },
     "character_design": {
       "model": "deepseek",
       "temperature": 0.7,
       "maxTokens": 16384,
-      "label": "��ɫ�趨"
+      "label": "角色设计"
     },
     "organization_map": {
       "model": "deepseek",
       "temperature": 0.6,
       "maxTokens": 16384,
-      "label": "��֯���ͼ"
+      "label": "组织地图"
     },
     "foreshadowing": {
       "model": "deepseek",
       "temperature": 0.7,
       "maxTokens": 16384,
-      "label": "�������"
+      "label": "伏笔"
     },
     "timeline": {
       "model": "deepseek",
       "temperature": 0.5,
       "maxTokens": 16384,
-      "label": "ʱ����"
+      "label": "时间线"
     },
     "writing": {
       "model": "deepseek",
       "temperature": 0.7,
       "maxTokens": 32768,
-      "label": "д��"
+      "label": "写作"
     },
     "writing_daily": {
       "model": "deepseek",
       "temperature": 0.7,
       "maxTokens": 32768,
-      "label": "�ճ�д��"
+      "label": "日常写作"
     },
     "writing_climax": {
       "model": "deepseek",
       "temperature": 0.8,
       "maxTokens": 32768,
-      "label": "�߳��½�"
+      "label": "高潮章节"
     },
     "polish": {
       "model": "deepseek",
       "temperature": 0.4,
       "maxTokens": 16384,
-      "label": "������ɫ"
+      "label": "润色"
     },
     "character_review": {
       "model": "deepseek",
       "temperature": 0.3,
       "maxTokens": 16384,
-      "label": "��������"
+      "label": "角色审查"
     },
     "quality_check": {
       "model": "deepseek",
       "temperature": 0.3,
       "maxTokens": 24576,
-      "label": "�ʼ���"
+      "label": "质检"
     }
   },
   "chapter_function_routing": {
@@ -153,55 +153,55 @@
       "model": "deepseek",
       "tier": "fast",
       "temperature": 0.6,
-      "label": "չ��"
+      "label": "展开"
     },
     "rising": {
       "model": "deepseek",
       "tier": "standard",
       "temperature": 0.7,
-      "label": "��չ"
+      "label": "发展"
     },
     "climax": {
       "model": "deepseek",
       "tier": "standard",
       "temperature": 0.8,
-      "label": "�߳�"
+      "label": "高潮"
     },
     "falling": {
       "model": "deepseek",
       "tier": "fast",
       "temperature": 0.6,
-      "label": "����"
+      "label": "回落"
     },
     "resolution": {
       "model": "deepseek",
       "tier": "standard",
       "temperature": 0.5,
-      "label": "���"
+      "label": "结局"
     },
     "transition": {
       "model": "deepseek",
       "tier": "fast",
       "temperature": 0.6,
-      "label": "����"
+      "label": "过渡"
     },
     "foreshadowing": {
       "model": "deepseek",
       "tier": "standard",
       "temperature": 0.7,
-      "label": "����"
+      "label": "铺垫"
     },
     "revelation": {
       "model": "deepseek",
       "tier": "standard",
       "temperature": 0.8,
-      "label": "��¶"
+      "label": "揭示"
     },
     "world_building": {
       "model": "deepseek",
       "tier": "standard",
       "temperature": 0.6,
-      "label": "�����"
+      "label": "世界观"
     }
   },
   "defaults": {

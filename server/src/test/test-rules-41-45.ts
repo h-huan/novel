@@ -42,7 +42,7 @@ function detect41to45(content: string) {
 
   // 45
   const re45 = /\d{2,}|[零一二三四五六七八九十百千万亿两]+(件|个|次|句|根|天|年|岁|块|毛|分|度|米|斤|步|遍|页|行|层|级)?/g;
-  const m45 = (content.match(re45) || []).filter((n: string) => n.length >= 2 && !/^第/.test(n) && !/^[一二三四��六七八九十]$/.test(n));
+  const m45 = (content.match(re45) || []).filter((n: string) => n.length >= 2 && !/^第/.test(n) && !/^[一二三四五六七八九十]$/.test(n));
   if (m45.length === 0 && content.length > 800) {
     findings.push({ r: '45', msg: 'no specific numbers' });
   }
