@@ -217,6 +217,15 @@ const resolveHighlights = (...sources: any[]): string => {
   }
   return '';
 };
+const countHighlights = (chapter: ChapterNode): number => {
+  const sceneData = parseJsonObject((chapter as any).scenes);
+  const parsed = sceneData.highlights || sceneData.highlight;
+  if (Array.isArray(parsed)) return parsed.length;
+  const raw = resolveHighlights(chapter.highlight, parsed);
+  if (!raw) return 0;
+  return raw.split(/\n•\s*/).filter(Boolean).length || 1;
+};
+const isRousing = (fn: ChapterFunctionType): boolean => ['conflict', 'explosion', 'climax'].includes(fn);
 const resolveForeshadowing = (...sources: any[]): string => {
   for (const src of sources) {
     if (Array.isArray(src) && src.length > 0) return src.map((f: any) => typeof f === 'string' ? f : `[${f.type || 'hint'}] ${f.content || f.text || ''}`).join('\n');
@@ -1492,6 +1501,20 @@ const OutlinePage: React.FC = () => {
                       {volume.goal && <div style={styles.volumeHint}>目标：{volume.goal}</div>}
                       {volume.theme && <div style={styles.volumeTiny}>主题：{volume.theme}</div>}
                       {volume.keyEvents?.length ? <div style={styles.volumeTiny}>关键事件：{volume.keyEvents.join(' → ')}</div> : null}
+                      {volume.chapters.length > 0 && (
+                        <div style={{ padding: '0 10px 6px', fontSize: 10, color: '#8a8aa0', lineHeight: 1.5 }}>
+                          爽点节奏：
+                          {volume.chapters.map((c, i) => {
+                            const n = countHighlights(c);
+                            const rousing = isRousing(c.chapterFunction);
+                            return (
+                              <span key={c.id} style={{ marginRight: 5, color: rousing ? '#e94560' : '#8a8aa0' }} title={`${c.title}：${n}个爽点${rousing ? '（热血/高潮）' : ''}`}>
+                                {i + 1}·{n}{rousing ? '🔥' : ''}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                       {volume.climaxChapters?.length ? <div style={styles.volumeTiny}>🧨 高潮章：{volume.climaxChapters.map(c => `第${c}章`).join('、')}</div> : null}
                       {volume.volumeForeshadowing?.length ? <div style={{...styles.volumeTiny, color:'#93c5fd'}}>🔮 卷伏笔：{volume.volumeForeshadowing.map((f:any) => f.content || '').slice(0,3).join('；')}</div> : null}
                       {volume.characterArcs?.length ? <div style={{...styles.volumeTiny, color:'#86efac'}}>👤 人物弧：{volume.characterArcs.map((c:any) => `${c.character||''} ${c.from||''}→${c.to||''}`).join(' | ')}</div> : null}
