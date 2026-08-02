@@ -5267,7 +5267,7 @@ ${dto.selectedIdea?.protagonist ? `【必须保留的主角（不得改名、不
 - socialRules（若有）只写行业规则/法律边界/社会行为规范，用短句列表。
 - powerSystem 只写力量/科技/超自然体系；economy 只写货币/贸易/产业。
 
-JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "endingDirection":"结局基调"}`;
+JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "locations":["核心地点名"], "socialRules":"行业规则/法律边界/社会行为规范（短句列表，不含社会结构与地点）", "specialSettings":"特殊设定（无则空字符串）", "endingDirection":"结局基调"}`;
           // 确定性主角名（首段，用于校验世界观是否保留主角，防止模型改名导致后续全偏）
           const protagonistName = (dto.selectedIdea?.protagonist || '').split(/[，,。：:；;\s（(]/)[0].trim();
           let worldResult: any = null;
@@ -5290,9 +5290,9 @@ JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","econo
               JSON.stringify([wd.rules || '']), serializeGeneratedSqlText(wd.atmosphere),
               JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
               serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
-              JSON.stringify(Array.isArray(wd.locations) ? wd.locations : (typeof wd.geography === 'string' ? [wd.geography] : (Array.isArray(wd.geography) ? wd.geography : []))),
-              serializeGeneratedSqlText(wd.socialRules || wd.socialStructure),
-              serializeGeneratedSqlText(wd.specialSettings || wd.powerSystem || wd.rules),
+              JSON.stringify(Array.isArray(wd.locations) ? wd.locations : []),
+              serializeGeneratedSqlText(wd.socialRules),
+              serializeGeneratedSqlText(wd.specialSettings),
               isShort ? 'short' : 'full',
               now(), now()
             );
@@ -5332,38 +5332,38 @@ JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","econo
                 }
               }
             } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败: ${e.message}`); }
-            // Fix B：大纲上下文必须来自"已保存"的世界观模块，而非瞬时原始 LLM 输出，避免大纲脱离已落库设定
-            const savedWorld = db.prepare(`SELECT era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
-            if (savedWorld) {
-              const parseMaybeArray = (v: unknown): any[] => {
-                if (v == null) return [];
-                if (Array.isArray(v)) return v as any[];
-                try { const p = JSON.parse(String(v)); return Array.isArray(p) ? p : [p]; } catch { return []; }
-              };
-              const parseConstraints = (): Record<string, any> => {
-                if (!savedWorld.constraints) return {};
-                try { const p = JSON.parse(String(savedWorld.constraints)); return p && typeof p === 'object' ? p : {}; } catch { return {}; }
-              };
-              const wd2 = {
-                era: savedWorld.era,
-                geography: parseMaybeArray(savedWorld.geography),
-                factions: parseMaybeArray(savedWorld.factions),
-                rules: parseMaybeArray(savedWorld.rules),
-                atmosphere: savedWorld.atmosphere,
-                constraints: parseConstraints(),
-                storyPremise: savedWorld.story_premise,
-                locations: parseMaybeArray(savedWorld.locations),
-                socialRules: savedWorld.social_rules,
-                specialSettings: savedWorld.special_settings,
-                settingType: savedWorld.setting_type,
-              };
-              outlineContextPrefix = JSON.stringify(wd2);
-            }
           } else {
             emit('world', 25, '世界观生成失败，停止创建以避免后续上下文失真', 'failed');
             this.emitProjectProgress(projectId, { type: 'error', success: false, projectId, message: '世界观生成失败，未继续生成大纲，避免上下文不一致。', warnings });
             return;
           }
+        }
+        // 无论新建还是已存在，都把已保存世界观回读为大纲上下文（世界严格先于大纲；重跑时若已有世界观，大纲也必须有世界观上下文，不得为空）
+        const savedWorld = db.prepare(`SELECT era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
+        if (savedWorld) {
+          const parseMaybeArray = (v: unknown): any[] => {
+            if (v == null) return [];
+            if (Array.isArray(v)) return v as any[];
+            try { const p = JSON.parse(String(v)); return Array.isArray(p) ? p : [p]; } catch { return []; }
+          };
+          const parseConstraints = (): Record<string, any> => {
+            if (!savedWorld.constraints) return {};
+            try { const p = JSON.parse(String(savedWorld.constraints)); return p && typeof p === 'object' ? p : {}; } catch { return {}; }
+          };
+          const wd2 = {
+            era: savedWorld.era,
+            geography: parseMaybeArray(savedWorld.geography),
+            factions: parseMaybeArray(savedWorld.factions),
+            rules: parseMaybeArray(savedWorld.rules),
+            atmosphere: savedWorld.atmosphere,
+            constraints: parseConstraints(),
+            storyPremise: savedWorld.story_premise,
+            locations: parseMaybeArray(savedWorld.locations),
+            socialRules: savedWorld.social_rules,
+            specialSettings: savedWorld.special_settings,
+            settingType: savedWorld.setting_type,
+          };
+          outlineContextPrefix = JSON.stringify(wd2);
         }
       }
 
@@ -5654,7 +5654,7 @@ ${(() => {
 10. 情绪基调 (emotionalTone) — 简短描述本章情绪走向。
 
 只输出一个合法JSON对象，不要数组、解释或Markdown。`;
-          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章2-3个场景、冲突强度与剩余总字数确定","content":"100字左右的事件链要点：开场→升级→受阻→转折→结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[{"point":"爽点/记忆点一","trigger":"触发场景"},{"point":"爽点/记忆点二","trigger":"触发场景"}],"foreshadowing":[{"content":"本章新埋的伏笔内容","type":"hint|setup|mystery","evidenceText":"线索文字","riskLevel":"low|medium|high"}],"foreshadowingRecover":[{"reference":"前文已埋的伏笔","method":"回收方式"}],"characterStates":[{"character":"人物名","stateBefore":"本章前状态","stateAfter":"本章后状态","trigger":"触发事件"}],"hook":"结尾钩子——只引出下一章动机或障碍","emotionalTone":"情绪基调"}`;
+          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章2-3个场景、冲突强度与剩余总字数确定","content":"100字左右的事件链要点：开场→升级→受阻→转折→结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[{"type":"打脸/逆袭/热血名场面/反转冲击/情感暴击/信息爆点","point":"爽点/记忆点一","trigger":"触发场景"},{"type":"打脸/逆袭/热血名场面/反转冲击/情感暴击/信息爆点","point":"爽点/记忆点二","trigger":"触发场景"}],"foreshadowing":[{"content":"本章新埋的伏笔内容","type":"hint|setup|mystery","evidenceText":"线索文字","riskLevel":"low|medium|high"}],"foreshadowingRecover":[{"reference":"前文已埋的伏笔","method":"回收方式"}],"characterStates":[{"character":"人物名","stateBefore":"本章前状态","stateAfter":"本章后状态","trigger":"触发事件"}],"hook":"结尾钩子——只引出下一章动机或障碍","emotionalTone":"情绪基调"}`;
 
           const countCJK = (s: string): number => (String(s || '').match(/[㐀-䶿一-鿿]/g) || []).length;
           // help: coerce string to single-element array
@@ -5671,18 +5671,16 @@ ${(() => {
             if (coreLen < 30 || coreLen > 280) issues.push(`核心内容过短或过长（当前约${coreLen}字）`);
             if (scenes.length === 0) issues.push('scenes必须是非空数组');
             if (!hasUsefulValue(candidate.characterActions || candidate['人物行动'])) issues.push('缺少characterActions');
-            // 冲突：至少 2 个（新旧格式均接受）
+            // 冲突：至少 1 个（presence 校验，避免单冲突章节触发修复循环；prompt 仍要求 2-3 个）
             const conflicts = Array.isArray(candidate.conflicts)
               ? candidate.conflicts
               : (String(candidate.conflict || '').trim() ? [candidate.conflict] : []);
-            if (conflicts.length < 2) issues.push(`conflicts必须至少2个（当前${conflicts.length}个）`);
-            // highlights：至少 2 个且每项含类型与 point
+            if (conflicts.length < 1) issues.push('缺少conflict/conflicts');
+            // highlights：至少 1 个（presence 校验；type 为 prompt 软要求，不硬校验，防止与示例结构不一致导致循环）
             const highlights = Array.isArray(candidate.highlights)
               ? candidate.highlights
               : (Array.isArray(candidate.highlight) ? candidate.highlight : (String(candidate.highlight || '').trim() ? [candidate.highlight] : []));
-            if (highlights.length < 2) issues.push(`highlights必须至少2个（当前${highlights.length}个）`);
-            const typedHighlights = highlights.filter((h: any) => h && typeof h === 'object' && (h.type || h.point));
-            if (highlights.length >= 2 && typedHighlights.length < 2) issues.push('highlights每项需含 type（打脸/逆袭/热血/反转/情感暴击/信息爆点）与 point');
+            if (highlights.length < 1) issues.push('缺少highlights/highlight');
             if (!String(candidate.hook || candidate.nextChapterHook || candidate.nextHook || candidate['下章钩子'] || '').trim()) issues.push('缺少hook');
             return issues;
           };
@@ -6108,44 +6106,20 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
           return { step: 'character_relations', warnings: taskWarnings };
         });
 
-        // 任务B：世界观生成（仅当 DB 中无世界观时执行）
+        // 任务B：世界观生成（仅当 DB 中无世界观时执行；已有则不重复生成，避免耗时）
         sequentialTasks.push(async (): Promise<{ step: string; warnings: string[] }> => {
           const taskWarnings: string[] = [];
-          // 始终生成（不跳过）：若已有世界观（先生成的那条），合并去重到第 1 条，不新增重复
-          const existingWorldRow = hasWorldSetting
-            ? (db.prepare('SELECT * FROM world_settings WHERE project_id=?').get(projectId) as any)
-            : null;
-          const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。\n每维度200-400字，整体不超过2500字。只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\n字段职责边界（禁止互相包含）：socialStructure只写阶级/政治/经济/信仰格局，不得写行业规则或地点；geography只写地理与地点分布；socialRules（若有）只写行业规则/法律边界/社会行为规范；powerSystem只写力量/科技体系；economy只写货币/贸易/产业。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}],"endingDirection":"结局基调与解决方向"}`;
+          if (hasWorldSetting) {
+            emit('world', 75, '世界观已存在，跳过（不重复生成）', 'done');
+            return { step: 'world', warnings: [] };
+          }
+          const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。\n每维度200-400字，整体不超过2500字。只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\n字段职责边界（禁止互相包含）：socialStructure只写阶级/政治/经济/信仰格局，不得写行业规则或地点；geography只写地理与地点分布；socialRules（若有）只写行业规则/法律边界/社会行为规范；powerSystem只写力量/科技体系；economy只写货币/贸易/产业。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "locations":["核心地点名"], "socialRules":"行业规则/法律边界/社会行为规范（短句列表，不含社会结构与地点）", "specialSettings":"特殊设定（无则空字符串）", "endingDirection":"结局基调与解决方向"}`;
           const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
           taskWarnings.push(...worldResult.warnings);
 
           if (worldResult.data && typeof worldResult.data === 'object') {
             try {
               const wd = worldResult.data;
-              // 合并：已有世界观则把第 2 次的不同内容并进第 1 条，相同则丢弃
-              const mergeText = (a: string | null | undefined, b: string | null | undefined) => {
-                const A = (a || '').trim(); const B = (b || '').trim();
-                if (!B || B === '[]' || B === '[""]') return A;
-                if (!A || A === '[]' || A === '[""]') return B;
-                return A === B ? A : `${A}；${B}`;
-              };
-              if (existingWorldRow) {
-                db.prepare(`UPDATE world_settings SET era=?, geography=?, factions=?, rules=?, atmosphere=?, constraints=?, story_premise=?, locations=?, social_rules=?, special_settings=?, updated_at=? WHERE id=?`).run(
-                  mergeText(existingWorldRow.era, serializeGeneratedSqlText(wd.era)),
-                  mergeText(existingWorldRow.geography, JSON.stringify(Array.isArray(wd.geography) ? wd.geography : [])),
-                  mergeText(existingWorldRow.factions, JSON.stringify(Array.isArray(wd.factions) ? wd.factions : [])),
-                  mergeText(existingWorldRow.rules, JSON.stringify([wd.rules || ''])),
-                  mergeText(existingWorldRow.atmosphere, serializeGeneratedSqlText(wd.atmosphere)),
-                  mergeText(existingWorldRow.constraints, JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' })),
-                  mergeText(existingWorldRow.story_premise, serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title)),
-                  mergeText(existingWorldRow.locations, JSON.stringify(Array.isArray(wd.locations) ? wd.locations : [])),
-                  mergeText(existingWorldRow.social_rules, serializeGeneratedSqlText(wd.socialRules)),
-                  mergeText(existingWorldRow.special_settings, serializeGeneratedSqlText(wd.specialSettings)),
-                  now(), existingWorldRow.id
-                );
-                emit('world', 75, '世界观已生成并与已有内容合并去重', 'done');
-                return { step: 'world', warnings: taskWarnings };
-              }
               const wid = uuid();
               db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
