@@ -5555,12 +5555,22 @@ ${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : '
           scenes: string;
         }> = [];
         const ideaSpan = `${outlineContextPrefix ? `世界观上下文:${outlineContextPrefix}\n` : ''}${shortStoryCard ? `短篇故事卡:${JSON.stringify(shortStoryCard)}\n` : ''}灵感素材:${JSON.stringify(dto.selectedIdea)}`;
-        const chapterResponsibilityPlan = chapterTitles.map((chapter, index) => ({
-          chapter: index + 1,
-          title: chapter.title,
-          function: chapter.func,
-          responsibility: chapter.brief || '',
-        }));
+        // 跨章爽点弧：每 3 章为一段弧，段内最后一章为"爆发/高潮"章；埋设与蓄力由各章按弧序号承接。
+        const ARC_LEN = 3;
+        const chapterResponsibilityPlan = chapterTitles.map((chapter, index) => {
+          const arcIndex = Math.floor(index / ARC_LEN);
+          const inArcPos = index % ARC_LEN;
+          const arcRole = inArcPos === ARC_LEN - 1 ? 'burst' : 'build';
+          return {
+            chapter: index + 1,
+            title: chapter.title,
+            function: chapter.func,
+            responsibility: chapter.brief || '',
+            arcIndex,
+            arcRole,
+            arcLabel: `第${arcIndex + 1}条跨章爽点弧（第${arcIndex * ARC_LEN + 1}-${Math.min(arcIndex * ARC_LEN + ARC_LEN, chapterTitles.length)}章）${arcRole === 'burst' ? '·爆发章' : '·埋设/蓄力章'}`,
+          };
+        });
 
         const unwrapChapter = (value: any, chapterLabel?: string, silent = false): Record<string, any> | null => {
           const label = chapterLabel ? `第${chapterLabel}章 ` : '';
@@ -5609,6 +5619,7 @@ ${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n$
 第${order + 1}章"${expectedChapter.title}"（功能:${expectedChapter.func}）
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
 【全书章节分工】${JSON.stringify(chapterResponsibilityPlan)}
+当前章所属爽点弧：${JSON.stringify(chapterResponsibilityPlan[chapterIndex]?.arcLabel || '')}
 本章只能完成自己的推进任务；不得提前执行后续章节的调查、取证、身份揭示、对峙、报警或结局。结尾钩子只能制造下一步动机或障碍，不能把下一章的行动先做一遍。
 设定:${ideaSpan}
 【核心层级纪律（最高优先级）】世界观（上方"设定"中的已保存世界观）> 大纲 > 正文。本章大纲必须严格遵循已保存的世界观：不得新增另一套世界规则、力量体系、结局方向或架空制度；若本次生成与已保存世界观存在冲突，一律以已保存世界观为准，并在冲突处回扣既有设定而非另起炉灶。
@@ -5620,7 +5631,10 @@ ${(() => {
 【整体质量要求（最高优先级，不可妥协）】
 - 主线清晰，副线丰富：本章必须推进唯一指定任务（主线），同时激活/推进至少一条配角线或情感线（副线）
 - 节奏张弛有度：紧张场景后必须给呼吸段落（如环境描写、配角对话、主角独白），不能连续高强度
-- 爽点密集但不突兀：2-3个爽点必须有剧情铺垫，不可"天降"——每个爽点都必须与本章场景和人物行动有因果链
+- 爽点密集但不突兀：本章 2-3 个爽点必须混合至少 2 类（打脸/逆袭/热血名场面/反转冲击/情感暴击/信息爆点），在 highlights 中标明类型；其中 1 个为本章"高能记忆点"（最容易被读者记住的瞬间）。每个爽点必须有剧情铺垫、与本章场景和人物行动有因果链，不可"天降"
+- 跨章爽点弧：本章属于【全书章节分工】中标注的爽点弧——若是"埋设/蓄力章"，只埋设与蓄力（伏笔+铺垫），不得提前爆发；若是"爆发章"，必须兑现该弧此前埋设的爽点，形成打脸/逆袭/热血/名场面高潮
+- 热血/高光镜头：题材允许时，本章应包含至少 1 个可落笔的高光动作/对峙/宣言场景（热血燃点），写入 conflicts 或 scenes
+- 频率兜底：每 2-3 章至少 1 个反转或强钩子；每卷至少 2 条跨章爽点弧，不得整卷平铺
 - 人物成长合理：人物状态变化必须有触发事件作为原因，不能凭空变强/变聪明/变勇敢
 - 伏笔设置和回收明确：新伏笔必须有回收章节位置，回收的伏笔必须有前文埋设引用
 【大纲↔正文铁律】大纲是正文的唯一合同。正文生成的每一段都必须能对应到本章大纲中列出的具体场景或人物行动。大纲中"核心内容"的5步事件链必须在正文中完整展开，不得跳过或合并。
