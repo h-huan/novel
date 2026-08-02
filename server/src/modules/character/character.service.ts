@@ -20,6 +20,13 @@ import { DatabaseService } from '../../database/database.service';
 // 对齐外部文档《人物模板》14 项（姓名已在 characters 主表，此处为其余 13 项）
 export const PROFILE_FIELDS = ['alias_title','identity_occupation','faction_stance','role_type','appearance','personality_traits','abilities_skills','backstory','relationships','catchphrase_speech_style','goals_motivation','weaknesses_fears','supplementary'] as const;
 
+export const PROFILE_FIELD_LABELS: Record<string, string> = {
+  alias_title: '别名/称号', identity_occupation: '身份/职业', faction_stance: '阵营/立场', role_type: '角色类型',
+  appearance: '外貌特征', personality_traits: '性格特点', abilities_skills: '能力/技能', backstory: '背景故事',
+  relationships: '人物关系', catchphrase_speech_style: '口头禅/说话风格', goals_motivation: '目标/动机',
+  weaknesses_fears: '弱点/恐惧', supplementary: '补充说明',
+};
+
 export interface CharacterResponse {
   id: string;
   projectId: string;
@@ -341,6 +348,7 @@ export class CharacterService {
       ON CONFLICT(character_id) DO UPDATE SET ${PROFILE_FIELDS.map(field => `${field}=excluded.${field}`).join(', ')}, updated_at=excluded.updated_at`)
       .run(before?.id || uuid(), projectId, id, ...values, before?.created_at || now, now);
     const changed = PROFILE_FIELDS.filter(field => String(before?.[field] ?? '') !== String(input[field] ?? before?.[field] ?? ''));
+    if (changed.length) this.recordAutoProfileChanges(projectId, id, before ?? {}, input);
     if (changed.length) {
       const groups = {
         motivation: ['short_term_goal', 'long_term_goal', 'core_desire'], ability: ['ability_limit', 'ability_cost', 'cannot_use_reason'],
@@ -399,6 +407,59 @@ export class CharacterService {
       : '角色资料较简略，建议补充目标、矛盾与背景后再生成写作摘要。';
 
     return { summary, sections, profile: p };
+  }
+
+  /** 角色字段级变动历史 */
+  listProfileChanges(projectId: string, characterId: string): any[] {
+    const db = this.databaseService.getDb();
+    return db.prepare(
+      `SELECT * FROM character_profile_changes WHERE project_id = ? AND character_id = ? ORDER BY created_at DESC, rowid DESC`,
+    ).all(projectId, characterId) as any[];
+  }
+
+  createProfileChange(projectId: string, characterId: string, input: {
+    fieldKey: string; fieldLabel?: string; beforeValue?: string; afterValue?: string; chapterIndex?: number; reason?: string;
+  }): any {
+    const db = this.databaseService.getDb();
+    const now = new Date().toISOString();
+    const id = uuid();
+    db.prepare(`INSERT INTO character_profile_changes (id, project_id, character_id, field_key, field_label, before_value, after_value, chapter_index, reason, source, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'manual',?,?)`)
+      .run(id, projectId, characterId, input.fieldKey, input.fieldLabel || input.fieldKey, input.beforeValue || '', input.afterValue || '',
+        input.chapterIndex ?? null, input.reason || '', now, now);
+    return db.prepare(`SELECT * FROM character_profile_changes WHERE id = ?`).get(id);
+  }
+
+  updateProfileChange(projectId: string, characterId: string, id: string, patch: { chapterIndex?: number; reason?: string; afterValue?: string }): any {
+    const db = this.databaseService.getDb();
+    const row = db.prepare(`SELECT * FROM character_profile_changes WHERE id = ? AND project_id = ? AND character_id = ?`).get(id, projectId, characterId) as any;
+    if (!row) throw new NotFoundException('变动记录不存在');
+    db.prepare(`UPDATE character_profile_changes SET chapter_index = ?, reason = ?, after_value = ?, updated_at = ? WHERE id = ?`)
+      .run(patch.chapterIndex ?? row.chapter_index ?? null, patch.reason ?? row.reason ?? '', patch.afterValue ?? row.after_value ?? '', new Date().toISOString(), id);
+    return db.prepare(`SELECT * FROM character_profile_changes WHERE id = ?`).get(id);
+  }
+
+  deleteProfileChange(projectId: string, characterId: string, id: string): void {
+    const db = this.databaseService.getDb();
+    db.prepare(`DELETE FROM character_profile_changes WHERE id = ? AND project_id = ? AND character_id = ?`).run(id, projectId, characterId);
+  }
+
+  /** 自动记录：对比 before/after 的 PROFILE_FIELDS 差异，逐个写一条 auto 记录 */
+  recordAutoProfileChanges(projectId: string, characterId: string, before: Record<string, unknown>, after: Record<string, unknown>): number {
+    let count = 0;
+    for (const field of PROFILE_FIELDS) {
+      const b = String(before[field] ?? '');
+      const a = String(after[field] ?? '');
+      if (b !== a && (a || b)) {
+        this.createProfileChange(projectId, characterId, {
+          fieldKey: field,
+          fieldLabel: PROFILE_FIELD_LABELS[field] || field,
+          beforeValue: b, afterValue: a, reason: '',
+        });
+        count++;
+      }
+    }
+    return count;
   }
 
   checkConsistency(projectId: string, content: string) {

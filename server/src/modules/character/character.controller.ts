@@ -101,6 +101,27 @@ export class CharacterController {
     return this.service.getStateHistory(id);
   }
 
+  @Get(':id/profile-changes')
+  getProfileChanges(@Param('projectId') projectId: string, @Param('id') id: string) {
+    return this.service.listProfileChanges(projectId, id);
+  }
+
+  @Post(':id/profile-changes')
+  createProfileChange(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: any) {
+    return this.service.createProfileChange(projectId, id, body);
+  }
+
+  @Put(':id/profile-changes/:changeId')
+  updateProfileChange(@Param('projectId') projectId: string, @Param('id') id: string, @Param('changeId') changeId: string, @Body() body: any) {
+    return this.service.updateProfileChange(projectId, id, changeId, body);
+  }
+
+  @Delete(':id/profile-changes/:changeId')
+  deleteProfileChange(@Param('projectId') projectId: string, @Param('id') id: string, @Param('changeId') changeId: string) {
+    this.service.deleteProfileChange(projectId, id, changeId);
+    return { success: true };
+  }
+
   /** 将角色数据索引到 RAG 向量库 */
   private async indexCharacter(projectId: string, char: any) {
     return this.syncStates.run(projectId, 'character', char.id, async () => {
