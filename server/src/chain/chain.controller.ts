@@ -5261,6 +5261,12 @@ ${dto.selectedIdea?.protagonist ? `【必须保留的主角（不得改名、不
 6.历史背景(history) — 重要历史事件 + 与当前剧情的因果
 7.势力分布(factions) — 主要势力：核心领袖 + 结构 + 范围 + 与主角关系
 
+字段职责边界（必须严格遵守，禁止互相包含）：
+- socialStructure 只写阶级/政治/经济资源/宗教信仰格局；不得写行业规则或具体地点。
+- geography 只写地理与地点分布；不得在社会结构或社会规则中重复地点。
+- socialRules（若有）只写行业规则/法律边界/社会行为规范，用短句列表。
+- powerSystem 只写力量/科技/超自然体系；economy 只写货币/贸易/产业。
+
 JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "endingDirection":"结局基调"}`;
           // 确定性主角名（首段，用于校验世界观是否保留主角，防止模型改名导致后续全偏）
           const protagonistName = (dto.selectedIdea?.protagonist || '').split(/[，,。：:；;\s（(]/)[0].trim();
@@ -6077,7 +6083,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
           const existingWorldRow = hasWorldSetting
             ? (db.prepare('SELECT * FROM world_settings WHERE project_id=?').get(projectId) as any)
             : null;
-          const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。\n每维度200-400字，整体不超过2500字。只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}],"endingDirection":"结局基调与解决方向"}`;
+          const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n保持确认题材的时代、类型、主角和冲突；现实题材不得生成架空力量、末世制度或奇幻势力。\n每维度200-400字，整体不超过2500字。只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\n字段职责边界（禁止互相包含）：socialStructure只写阶级/政治/经济/信仰格局，不得写行业规则或地点；geography只写地理与地点分布；socialRules（若有）只写行业规则/法律边界/社会行为规范；powerSystem只写力量/科技体系；economy只写货币/贸易/产业。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}],"endingDirection":"结局基调与解决方向"}`;
           const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
           taskWarnings.push(...worldResult.warnings);
 
@@ -6100,9 +6106,9 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                   mergeText(existingWorldRow.atmosphere, serializeGeneratedSqlText(wd.atmosphere)),
                   mergeText(existingWorldRow.constraints, JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' })),
                   mergeText(existingWorldRow.story_premise, serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title)),
-                  mergeText(existingWorldRow.locations, JSON.stringify(Array.isArray(wd.locations) ? wd.locations : (Array.isArray(wd.geography) ? wd.geography : []))),
-                  mergeText(existingWorldRow.social_rules, serializeGeneratedSqlText(wd.socialRules || wd.socialStructure)),
-                  mergeText(existingWorldRow.special_settings, serializeGeneratedSqlText(wd.specialSettings || wd.powerSystem || wd.rules)),
+                  mergeText(existingWorldRow.locations, JSON.stringify(Array.isArray(wd.locations) ? wd.locations : [])),
+                  mergeText(existingWorldRow.social_rules, serializeGeneratedSqlText(wd.socialRules)),
+                  mergeText(existingWorldRow.special_settings, serializeGeneratedSqlText(wd.specialSettings)),
                   now(), existingWorldRow.id
                 );
                 emit('world', 75, '世界观已生成并与已有内容合并去重', 'done');
@@ -6117,9 +6123,9 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                 JSON.stringify([wd.rules || '']), serializeGeneratedSqlText(wd.atmosphere),
                 JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
                 serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
-                JSON.stringify(Array.isArray(wd.locations) ? wd.locations : (Array.isArray(wd.geography) ? wd.geography : [])),
-                serializeGeneratedSqlText(wd.socialRules || wd.socialStructure),
-                serializeGeneratedSqlText(wd.specialSettings || wd.powerSystem || wd.rules),
+                JSON.stringify(Array.isArray(wd.locations) ? wd.locations : []),
+                serializeGeneratedSqlText(wd.socialRules),
+                serializeGeneratedSqlText(wd.specialSettings),
                 isShort ? 'short' : 'full',
                 now(), now()
               );
