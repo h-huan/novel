@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
 import WorldSimpleView from '../components/world/WorldSimpleView';
 import { PageShell, Card, CardGrid, EmptyHint, darkField, AutoTextarea } from '../components/common/LayoutKit';
+import { FieldList } from '../components/common/ListBlocks';
 
 type WorldProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
 type WorldProfileSectionConfig = { title: string; description: string; fields: WorldProfileFieldConfig[] };
@@ -92,6 +93,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [viewMode, setViewMode] = useState<'edit' | 'read'>('read');
 
   const loadProfile = useCallback(async (worldSettingId: string) => {
     if (!worldSettingId) return;
@@ -151,6 +153,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
       const summaryResponse = await api.get(`/projects/${projectId}/world-settings/${selectedId}/writing-summary`);
       setSummary(payload<any>(summaryResponse).summary || '');
       setStatus('已保存。');
+      setViewMode('read');
     } catch { setStatus('保存失败，请重试。'); }
   };
 
@@ -163,6 +166,9 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
           <select value={selectedId} onChange={async event => { setSelectedId(event.target.value); await loadProfile(event.target.value); }}>
             {worldSettings.map(item => <option key={item.id} value={item.id}>{item.name || '未命名世界观'}</option>)}
           </select>
+          <button type="button" onClick={() => setViewMode(mode => mode === 'edit' ? 'read' : 'edit')}>
+            {viewMode === 'edit' ? '阅读视图' : '编辑视图'}
+          </button>
           <button type="button" onClick={saveProfile}>保存世界观资料</button>
         </>
       ) : undefined}
@@ -175,6 +181,31 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
           <Card title="写作摘要" span style={{ marginBottom: 16 }}>
             <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: '#c0c0d0', fontSize: 13, lineHeight: 1.6, maxHeight: 400, overflow: 'auto' }}>{summary || '保存后，这里会汇总正文真正需要遵守的世界规则。'}</pre>
           </Card>
+          {viewMode === 'read' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Card title="作品速览" span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 6 }}>
+                  <FieldList label="作品简介 / 核心卖点" value={profile.synopsis} accent="#e94560" />
+                  <FieldList label="基本信息" value={profile.basic_info} accent="#60a5fa" />
+                  <FieldList label="全文规模 / 数据规划" value={profile.scale_plan} accent="#22c55e" />
+                  <FieldList label="结局设定" value={profile.ending} accent="#f59e0b" />
+                </div>
+              </Card>
+              {PROFILE_SECTION_GROUPS.map(group => {
+                const entries = group.fields
+                  .map(f => ({ f, value: profile[f.key] || '' }))
+                  .filter(e => (e.value || '').trim());
+                if (!entries.length) return null;
+                return (
+                  <Card key={group.title} title={group.title} subtitle={group.description}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 6 }}>
+                      {entries.map(({ f, value }) => <FieldList key={f.key} label={f.label} value={value} accent="#93c5fd" />)}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
           <CardGrid min={340} gap={16}>
             {PROFILE_SECTION_GROUPS.map(group => {
               const groupEmpty = group.fields.every(item => !(profile[item.key] || '').trim());
@@ -200,6 +231,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
               );
             })}
           </CardGrid>
+          )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '20px 0' }}>
             <button type="button" onClick={saveProfile}>保存世界观资料</button>
           </div>
