@@ -5246,30 +5246,32 @@ ${excludeRule}
         const existingWorld = !!db.prepare('SELECT id FROM world_settings WHERE project_id = ?').get(projectId);
         if (!existingWorld) {
           emit('world', 18, '先生成世界观，供后续大纲与人物保持上下文');
+          // 确定性主角名（首段，用于校验世界观是否保留主角，防止模型改名导致后续全偏）
+          const protagonistName = (dto.selectedIdea?.protagonist || '').split(/[，,。：:；;\s（(]/)[0].trim();
           const worldPrompt = `为这部小说整理服务于剧情的完整世界观设定，不是另写一个同名故事。
 【唯一故事基准】${canonicalCreativeBrief}
 保留基准的时代、类型、地点、冲突、主角和结局方向；禁止把现实题材改成末世/修仙/科幻/超能力/架空制度。
-${dto.selectedIdea?.protagonist ? `【必须保留的主角（不得改名、不得换成别人）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
+${protagonistName ? `【必须保留的主角（不得改名、不得换成别人）】${protagonistName}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
 
-只输出以下7维度JSON。每维度限定200-400字以内，整体输出不超过 2500 字，避免单维度过度堆砌拖慢生成：
+输出一个 JSON 对象，字段与内容要求如下（每个字段 50-150 字，整体不超过 1500 字，避免过度堆砌导致截断；每个字段都必须有实质内容，不允许空）：
 
-1.世界地理(geography) — 大陆分布 + 主要区域 + 关键地点（标剧情功能）
-2.社会结构(socialStructure) — 阶级 + 政治 + 流动规则
-3.力量体系(powerSystem) — 等级划分 + 来源 + 约束 + 代价（现实题材写"无超自然力量，由真实社会机制驱动"）
-4.经济体系(economy) — 货币 + 贸易 + 产业 + 资源
-5.文化特色(culture) — 习俗 + 节日 + 价值观 + 禁忌
-6.历史背景(history) — 重要历史事件 + 与当前剧情的因果
-7.势力分布(factions) — 主要势力：核心领袖 + 结构 + 范围 + 与主角关系
+- era——时代/时间线：具体年代、关键历史节点、与剧情的因果。
+- storyPremise——故事前提：一句话，**必须出现主角「${protagonistName || '主角'}」的姓名与身份，不得改名**。
+- atmosphere——氛围基调：全书情绪定位，说明紧张/悬疑等从何而来、如何传递。
+- rules——核心规则数组：2-3 条，每条写成"谁在什么条件下做什么会发生什么"的 if-then 形式。
+- geography——地理：大陆/区域分布 + 关键地点（标剧情功能）。
+- locations——核心地点名数组（3-5 个，简短）。
+- socialRules——行业规则/法律边界/社会行为规范数组（简短；**不得写社会结构或地点**）。
+- specialSettings——特殊设定（无则空字符串）。
+- socialStructure——社会结构：阶级/政治/经济资源/信仰格局（**不得写行业规则或地点**）。
+- powerSystem——力量/科技/超自然体系（现实题材写"由真实社会机制驱动"）。
+- economy——经济：货币/贸易/产业/资源。
+- culture——文化：习俗/节日/价值观/禁忌。
+- history——历史：重要事件 + 与当前剧情的因果。
+- factions——势力数组：名称/核心领袖/范围/与主角关系。
+- endingDirection——结局基调与解决方向。
 
-字段职责边界（必须严格遵守，禁止互相包含）：
-- socialStructure 只写阶级/政治/经济资源/宗教信仰格局；不得写行业规则或具体地点。
-- geography 只写地理与地点分布；不得在社会结构或社会规则中重复地点。
-- socialRules（若有）只写行业规则/法律边界/社会行为规范，用短句列表。
-- powerSystem 只写力量/科技/超自然体系；economy 只写货币/贸易/产业。
-
-JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "locations":["核心地点名"], "socialRules":"行业规则/法律边界/社会行为规范（短句列表，不含社会结构与地点）", "specialSettings":"特殊设定（无则空字符串）", "endingDirection":"结局基调"}`;
-          // 确定性主角名（首段，用于校验世界观是否保留主角，防止模型改名导致后续全偏）
-          const protagonistName = (dto.selectedIdea?.protagonist || '').split(/[，,。：:；;\s（(]/)[0].trim();
+JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName || '主角'}」姓名...","atmosphere":"...","rules":["..."],"geography":"...","locations":["..."],"socialRules":["..."],"specialSettings":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{"name":"...","leader":"..."}],"endingDirection":"..."}`;
           let worldResult: any = null;
           for (let worldAttempt = 0; worldAttempt < 2; worldAttempt++) {
             const wr = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), scenario: 'world_building', maxTokens: 24576 });
@@ -5287,7 +5289,7 @@ JSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","econo
               uuid(), projectId, `${dto.title}世界观`, serializeGeneratedSqlText(wd.era),
               JSON.stringify(Array.isArray(wd.geography) ? wd.geography : (typeof wd.geography === 'string' ? [wd.geography] : [])),
               JSON.stringify(Array.isArray(wd.factions) ? wd.factions : []),
-              JSON.stringify([wd.rules || '']), serializeGeneratedSqlText(wd.atmosphere),
+              JSON.stringify(Array.isArray(wd.rules) ? wd.rules : (wd.rules ? [wd.rules] : [])), serializeGeneratedSqlText(wd.atmosphere),
               JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
               serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
               JSON.stringify(Array.isArray(wd.locations) ? wd.locations : []),

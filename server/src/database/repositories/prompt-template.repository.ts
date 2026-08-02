@@ -1,5 +1,5 @@
 /**
- * 提示词模�?Repository
+ * 提示词模板Repository
  */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
@@ -30,7 +30,7 @@ export class PromptTemplateRepository extends BaseRepository<PromptTemplateRow> 
   }
 
   /**
-   * 获取内置模板 + 项目自定义模�?   */
+   * 获取内置模板 + 项目自定义模板   */
   findByProjectOrBuiltin(projectId: string): PromptTemplateRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM prompt_templates
@@ -41,7 +41,7 @@ export class PromptTemplateRepository extends BaseRepository<PromptTemplateRow> 
   }
 
   /**
-   * 按类型查�?   */
+   * 按类型查询   */
   findByType(projectId: string, type: string): PromptTemplateRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM prompt_templates

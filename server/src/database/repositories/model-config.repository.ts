@@ -55,7 +55,7 @@ export class ModelConfigRepository extends BaseRepository<ModelConfigRow> {
   }
 
   /**
-   * 设置为默�?   */
+   * 设置为默认   */
   setDefault(projectId: string, configId: string): void {
     try {
       this.db.exec('BEGIN');

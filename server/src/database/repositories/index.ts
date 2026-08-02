@@ -1,5 +1,5 @@
 /**
- * 所�?Repository 统一导出
+ * 所有 Repository 统一导出
  */
 export { BaseRepository } from './base.repository';
 export { ProjectRepository } from './project.repository';

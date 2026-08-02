@@ -53,7 +53,7 @@ export class OutlineRepository extends BaseRepository<OutlineRow> {
   }
 
   /**
-   * 按层级查�?   */
+   * 按层级查询   */
   findByLevel(projectId: string, level: string): OutlineRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM outlines
@@ -64,7 +64,7 @@ export class OutlineRepository extends BaseRepository<OutlineRow> {
   }
 
   /**
-   * 查询子节�?   */
+   * 查询子节点   */
   findChildren(parentId: string): OutlineRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM outlines
@@ -94,7 +94,7 @@ export class OutlineRepository extends BaseRepository<OutlineRow> {
   }
 
   /**
-   * 移动节点到新父节�?(拖拽排序)
+   * 移动节点到新父节点(拖拽排序)
    */
   moveNode(nodeId: string, newParentId: string | null, newOrder: number): OutlineRow | undefined {
     this.db.prepare(
@@ -132,7 +132,7 @@ export class OutlineRepository extends BaseRepository<OutlineRow> {
   }
 
   /**
-   * 更新章节状�?   */
+   * 更新章节状态   */
   updateStatus(id: string, status: string): void {
     this.db.prepare(
       `UPDATE outlines SET status = ?, updated_at = ? WHERE id = ?`

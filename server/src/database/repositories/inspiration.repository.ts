@@ -1,5 +1,5 @@
 /**
- * InspirationRepository - 灵感数据持久�? */
+ * InspirationRepository - 灵感数据持久化 */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
 import { BaseRepository } from './base.repository';

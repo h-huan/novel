@@ -56,7 +56,7 @@ export class ConflictLogRepository extends BaseRepository<ConflictLogRow> {
   }
 
   /**
-   * 按章节查询冲�?   */
+   * 按章节查询冲突   */
   findByChapter(chapterId: string): ConflictLogRow[] {
     return this.findByField('chapter_id', chapterId);
   }

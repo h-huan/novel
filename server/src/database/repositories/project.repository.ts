@@ -33,7 +33,7 @@ export class ProjectRepository extends BaseRepository<ProjectRow> {
   }
 
   /**
-   * 按状态查�?   */
+   * 按状态查询   */
   findByStatus(status: string): ProjectRow[] {
     return this.findByField('status', status);
   }
@@ -75,7 +75,7 @@ export class ProjectRepository extends BaseRepository<ProjectRow> {
   }
 
   /**
-   * 统计总字�?   */
+   * 统计总字数   */
   totalWords(): number {
     const result = this.db.prepare(`
       SELECT COALESCE(SUM(current_words), 0) as total FROM projects
@@ -93,7 +93,7 @@ export class ProjectRepository extends BaseRepository<ProjectRow> {
   }
 
   /**
-   * 更新项目状�?   */
+   * 更新项目状态   */
   updateStatus(id: string, status: string): void {
     this.db.prepare(
       `UPDATE projects SET status = ?, updated_at = ? WHERE id = ?`

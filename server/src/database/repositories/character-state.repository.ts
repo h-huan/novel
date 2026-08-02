@@ -1,5 +1,5 @@
 /**
- * 角色状�?Repository
+ * 角色状态Repository
  */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
@@ -31,7 +31,7 @@ export class CharacterStateRepository extends BaseRepository<CharacterStateRow> 
   }
 
   /**
-   * 获取角色最新状态快�?   */
+   * 获取角色最新状态快照   */
   getLatestState(characterId: string): CharacterStateRow | undefined {
     const stmt = this.db.prepare(`
       SELECT * FROM character_states
@@ -43,7 +43,7 @@ export class CharacterStateRepository extends BaseRepository<CharacterStateRow> 
   }
 
   /**
-   * 获取角色的所有快�?   */
+   * 获取角色的所有快照   */
   getStateHistory(characterId: string): CharacterStateRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM character_states
@@ -66,13 +66,13 @@ export class CharacterStateRepository extends BaseRepository<CharacterStateRow> 
   }
 
   /**
-   * 根据章节获取相关状态快�?   */
+   * 根据章节获取相关状态快照   */
   getByChapter(chapterId: string): CharacterStateRow[] {
     return this.findByField('chapter_id', chapterId);
   }
 
   /**
-   * 获取下一个快照序�?   */
+   * 获取下一个快照顺序   */
   getNextSnapshotOrder(characterId: string): number {
     const stmt = this.db.prepare(`
       SELECT COALESCE(MAX(snapshot_order), 0) as max_order
