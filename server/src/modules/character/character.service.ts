@@ -261,6 +261,9 @@ export class CharacterService {
 
     // 合并 extended profile 到 characters.profile_json，保持单表查询可用
     const profileData = this.profileRow(profile);
+    // 附上 PROFILE_FIELDS 之外的读者向字段（前端"读者共鸣点/成长标签"展示用）
+    profileData.reader_empathy_point = (profile as any)?.reader_empathy_point || '';
+    profileData.reader_expectation = (profile as any)?.reader_expectation || '';
     const unifiedProfile = {
       motivation: {
         shortTermGoal: profileData.short_term_goal,

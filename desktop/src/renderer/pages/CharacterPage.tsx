@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { useCharacterStore } from '../stores/characterStore';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 import { clampSidebar } from '../components/common/LayoutKit';
+import { SectionHeading, FieldList } from '../components/common/ListBlocks';
 
 type RoleType = 'protagonist' | 'major' | 'supporting' | 'minor';
 
@@ -496,25 +497,16 @@ const CharacterPage: React.FC = () => {
             )}
 
             <section style={styles.contentGrid}>
-              <div style={styles.summaryPanel}>
-                <div style={styles.panelTitle}>角色速览</div>
+              <section style={styles.summaryPanel}>
+                <div style={styles.panelTitle}>人物一句话</div>
                 <div style={styles.panelBody}>
-                  <div style={styles.summaryText}>{writingSummary || '保存角色资料后将生成真实写作摘要。'}</div>
-                  {selected.background && <div style={styles.summaryBackground}><strong>背景：</strong>{selected.background}</div>}
-                  {Object.keys(summarySections).length > 0 && (
-                    <div style={styles.summarySectionGrid}>
-                      {Object.entries(summarySections).slice(0, 6).map(([title, fields]) => (
-                        <div key={title} style={styles.summarySectionCard}>
-                          <h4 style={styles.summarySectionTitle}>{title}</h4>
-                          {Object.entries(fields).slice(0, 4).map(([label, value]) => (
-                            <div key={label} style={styles.summarySectionRow}><strong>{label}：</strong><span>{value}</span></div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <div style={styles.summaryText}>{writingSummary || '保存角色资料后将生成写作摘要。'}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginTop: 10 }}>
+                    <FieldList label="读者共鸣点" value={profile['reader_empathy_point']} accent="#f472b6" empty="建议补充悲惨/反转/热血/牺牲等代入钩子" />
+                    <FieldList label="角色标签" value={Array.isArray(selected.tags) ? selected.tags.join('、') : selected.tags} accent="#60a5fa" />
+                  </div>
                 </div>
-              </div>
+              </section>
 
               <Panel title="3核心 + 1矛盾">
                 <div style={styles.traitWrap}>
@@ -556,18 +548,26 @@ const CharacterPage: React.FC = () => {
             </section>
 
             <section style={styles.profileArchive}>
-              <div style={styles.panelTitle}>人物设定档案</div>
-              <p style={styles.archiveHint}>按创作指南核对人物关系、动机、能力、成长和剧情功能；只展示已确认资料，不用空白模板冒充设定。</p>
-              <div style={styles.archiveGrid}>
+              <div style={styles.panelTitle}>人物设定</div>
+              <p style={styles.archiveHint}>基础信息、外貌与性格等均为列表；二级标题区分设定名与内容。点击性格/能力等字段标签可查看或记录变动历史。</p>
+              <div style={{ padding: 12 }}>
                 {PROFILE_SECTION_GROUPS.map(section => {
                   const entries = section.fields
-                    .map(field => ({ ...field, value: profile[field.key] || '' }))
-                    .filter(field => field.value.trim());
+                    .map(field => ({ field, value: profile[field.key] || '' }))
+                    .filter(e => (e.value || '').trim());
                   if (!entries.length) return null;
-                  return <section key={section.title} style={styles.archiveSection}>
-                    <h3 style={styles.archiveTitle}>{section.title}</h3>
-                    {entries.map(field => <div key={field.key} style={styles.archiveRow}><strong>{field.label}</strong><p>{field.value}</p></div>)}
-                  </section>;
+                  return (
+                    <section key={section.title} style={{ marginBottom: 6 }}>
+                      <SectionHeading title={section.title} accent="#e94560" hint={section.description} />
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 4 }}>
+                        {entries.map(({ field, value }) => (
+                          <div key={field.key}>
+                            <FieldList label={field.label} value={value} accent="#93c5fd" />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  );
                 })}
               </div>
             </section>
