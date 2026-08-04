@@ -4594,6 +4594,8 @@ ${excludeRule}
   // SSE 进度广播：projectId → [{resolve, reject}] (多客户端可同时监听)
   private projectCreationListeners = new Map<string, Array<(data: any) => void>>();
   private projectCreationEventHistory = new Map<string, any[]>();
+  /** 每个项目的已发最大进度，用于把总进度钳制成单调不降（避免步骤回退导致前端进度条倒走） */
+  private projectLastPercent = new Map<string, number>();
 
   /**
    * POST /chain/create-project-async
@@ -4728,6 +4730,15 @@ ${excludeRule}
 
   /** 向指定项目的所有 SSE/WSS 监听者广播进度 */
   private emitProjectProgress(projectId: string, data: any) {
+    // 总进度单调不降：progress 事件的 percent 只升不降，避免步骤回退导致前端进度条倒走
+    if (data?.type === 'progress' && typeof data.percent === 'number') {
+      const prev = this.projectLastPercent.get(projectId) || 0;
+      const clamped = Math.max(prev, Math.min(100, data.percent));
+      if (clamped !== data.percent) data.percent = clamped;
+      this.projectLastPercent.set(projectId, clamped);
+    } else if (data?.type === 'error' || (data?.status === 'failed' && data?.type === 'progress')) {
+      // 失败/错误事件标记该步为失败，进度保持已到达值
+    }
     // SSE 路径
     const history = this.projectCreationEventHistory.get(projectId) || [];
     history.push(data);
@@ -5384,6 +5395,11 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
           outlineContextPrefix = JSON.stringify(wd2);
         }
       }
+
+      // 世界观步骤到此结束：停掉 short heartbeat，避免它持续把 world 刷成 running/高进度，
+      // 覆盖"世界观已完成"状态，并导致总进度在大纲阶段暴跌。连接存活由 global heartbeat 负责。
+      if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
+      emit('world', 25, '世界观已完成，进入大纲生成', 'done');
 
       emit('outline', 30, '批量生成大纲...');
 
