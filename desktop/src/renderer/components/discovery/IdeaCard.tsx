@@ -33,6 +33,17 @@ function getAngleBadgeStyle(angle: string): React.CSSProperties {
 function getStyleTagStyle(): React.CSSProperties {
   return { fontSize: '12px', fontWeight: 500, padding: '3px 10px', borderRadius: '5px', backgroundColor: 'rgba(255,255,255,0.05)', color: '#8a8aa0' };
 }
+/** 把数组项（字符串或 {name,desc} 等对象）归一化为可渲染的显示字符串 */
+function toStr(item: unknown): string {
+  if (item === null || item === undefined) return '';
+  if (typeof item === 'string') return item;
+  if (typeof item === 'number' || typeof item === 'boolean') return String(item);
+  if (typeof item === 'object') {
+    const o = item as Record<string, unknown>;
+    return String(o.name ?? o.title ?? o.label ?? o.desc ?? o.text ?? '');
+  }
+  return String(item);
+}
 
 interface IdeaCardProps { idea: any; onClick: (idea: any) => void; }
 
@@ -54,7 +65,7 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
         {idea.hook && <p style={s.hook}>「{idea.hook}」</p>}
         {Array.isArray(idea.styleTags) && idea.styleTags.length > 0 && (
           <div style={s.tags}>
-            {idea.styleTags.map((tag: string) => <span key={tag} style={getStyleTagStyle()}>{tag}</span>)}
+            {idea.styleTags.map((tag: unknown, ti: number) => <span key={`${toStr(tag)}-${ti}`} style={getStyleTagStyle()}>{toStr(tag)}</span>)}
           </div>
         )}
         {/* 主角+地点 单行 */}
@@ -140,9 +151,9 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
             <div style={s.field}>
               <div style={s.label}>👥 主要人物</div>
               <div style={s.charList}>
-                {idea.characters.map((c: string, ci: number) => (
-                  <span key={c} style={{ ...s.charTag, backgroundColor: ci === 0 ? 'rgba(233,69,96,0.14)' : 'rgba(255,255,255,0.05)', color: ci === 0 ? '#e94560' : '#8a8aa0' }}>
-                    {c}
+                {idea.characters.map((c: unknown, ci: number) => (
+                  <span key={`${toStr(c)}-${ci}`} style={{ ...s.charTag, backgroundColor: ci === 0 ? 'rgba(233,69,96,0.14)' : 'rgba(255,255,255,0.05)', color: ci === 0 ? '#e94560' : '#8a8aa0' }}>
+                    {toStr(c)}
                   </span>
                 ))}
               </div>
