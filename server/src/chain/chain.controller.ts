@@ -4370,6 +4370,7 @@ ${(dto.content || '').substring(0, 3000)}
 ${targetWordsRule}
 ${categoryRule}
 ${storyTypeRule}
+【平台趋势参考】构思时可参考当前主流平台受读者欢迎的题材方向（悬疑/逆袭/情感共鸣/社会议题/强冲突开篇/职业揭秘等），但必须结合本配置的创作类型与分类，不得脱离故事闭环，不得变成纯概念堆砌。
 
 要求：
 1. 【先有戏再有设定】每个题材必须从一个立刻改变主角命运的具体事件开始，清楚交代主角想要什么、谁或什么阻止他、失败会失去什么、为什么现在必须行动
@@ -4435,36 +4436,38 @@ ${excludeRule}
         throw lastError instanceof Error ? lastError : new Error(String(lastError || '灵感模型调用失败'));
       };
 
-      // 单次生成全部题材（恢复原始流程，maxTokens 由路由配置 idea_generate=16384 决定）
-      const prompt = buildPrompt(requestedCount, excludeItems);
-      let response;
-      try {
-        response = await generateIdeaResponse(prompt);
-      } catch (firstError) {
-        const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
-        this.logger.warn(`idea-discover first attempt failed, retrying once: ${firstMessage}`);
-        response = await generateIdeaResponse(prompt, 1);
-      }
+      // ====== 并行生成 requestedCount 个题材：每个一次独立调用（单条输出更小、可并行、更快）======
+      const singlePrompt = buildPrompt(1, excludeItems);
+      const generateOne = async (slot: number, retryHint = ''): Promise<any | null> => {
+        try {
+          const resp = await generateIdeaResponse(
+            `${singlePrompt}\n\n【本批第 ${slot} 个题材】切入角度请与同批其他题材尽量错开（时代/职业/冲突类型/叙事视角均不同）。${retryHint}`,
+          );
+          const parsed = extractIdeaList(resp.content || '');
+          return (parsed && parsed.length > 0) ? parsed[0] : null;
+        } catch (err: any) {
+          this.logger.warn(`idea-discover: 第 ${slot} 个题材生成失败（将补跑）：${err?.message || err}`);
+          return null;
+        }
+      };
 
       let ideas: any[] = [];
-      const rawContent = response.content || '';
-      let parsedIdeas = extractIdeaList(rawContent);
-      if (!parsedIdeas) {
-        this.logger.warn('idea-discover: 首轮内容无法解析，按当前模型配置执行一次结构修复');
-        const structureRepair = await generateIdeaResponse(
-          `把下面这份灵感结果修复成合法JSON对象。保留原有创意，但补齐截断或缺失的字段；顶层必须为{"ideas":[...]}，ideas数组必须符合本次要求的完整结构和数量；不要解释，不要Markdown，只输出JSON对象。\n\n原始结果：\n${rawContent}\n\n完整要求：\n${prompt}`,
-          1,
-          0.25,
-        );
-        parsedIdeas = extractIdeaList(structureRepair.content || '');
+      const firstRound = await Promise.all(Array.from({ length: requestedCount }, (_, i) => generateOne(i + 1)));
+      ideas = firstRound.filter((idea): idea is any => idea != null);
+
+      // 补足缺失（生成失败/解析失败的单条）：只补缺的数量，不整批重跑；补跑加温度与多样性提示
+      let guard = 0;
+      while (ideas.length < requestedCount && guard < 2) {
+        const need = requestedCount - ideas.length;
+        const fill = await Promise.all(Array.from({ length: Math.min(need, requestedCount) }, (_, i) => generateOne(ideas.length + i + 1, '（补跑：请选一个与已生成题材不同的新角度）')));
+        ideas.push(...fill.filter((idea): idea is any => idea != null));
+        guard++;
       }
-      if (parsedIdeas && parsedIdeas.length > 0) {
-        ideas = parsedIdeas;
-        this.logger.log(`idea-discover: JSON 解析成功，共 ${ideas.length} 个题材`);
-      } else {
-        this.logger.error(`idea-discover: JSON 解析失败，未把原始文本伪装成灵感结果`);
+      if (ideas.length === 0) {
+        this.logger.error(`idea-discover: 并行生成全部失败，未把原始文本伪装成灵感结果`);
         throw new Error('灵感生成结果无法解析，未创建降级题材，请重试。');
       }
+      this.logger.log(`idea-discover: 并行生成完成，共 ${ideas.length} 个题材（请求 ${requestedCount} 个）`);
 
       const assessIdeaQuality = (candidate: any): string[] => {
         const issues: string[] = [];
@@ -4517,18 +4520,27 @@ ${excludeRule}
 
       let qualityIssues = collectQualityIssues(ideas);
       if (qualityIssues.length > 0) {
-        this.logger.warn(`idea-discover: 首轮质量门禁未通过，重写一次：${qualityIssues.slice(0, 8).join('；')}`);
-        const repairResponse = await generateIdeaResponse(
-          `${prompt}\n\n【质量门禁退回重写】上一次输出存在以下问题：\n${qualityIssues.join('\n')}\n请重新生成完整的${requestedCount}项，不要解释，只输出符合全部字段要求的 {"ideas":[...]} JSON对象。`,
-          1,
-          0.82,
-          requestedCount * 8192,
-        );
-        const repaired = extractIdeaList(repairResponse.content || '');
-        if (repaired && repaired.length > 0) {
-          ideas = repaired;
-          qualityIssues = collectQualityIssues(ideas);
-        }
+        // 只修复不达标的单条：先写明失败原因再重跑该条，不整批重写；达标条原样保留
+        this.logger.warn(`idea-discover: ${qualityIssues.length} 项质量未达标，仅逐条修复，不整批重跑`);
+        const fixed = await Promise.all(ideas.map(async (idea, index) => {
+          const issues = assessIdeaQuality(idea);
+          if (issues.length === 0) return idea;
+          try {
+            const fixResp = await generateIdeaResponse(
+              `${singlePrompt}\n\n【上一版第 ${index + 1} 项未达标，仅修复这一条】未达标原因：\n${issues.join('\n')}\n请重新生成一个完全合格、不与排除列表重复的新题材，不要解释，只输出单个 {"ideas":[{...}]} JSON对象。`,
+              1,
+              0.82,
+            );
+            const parsed = extractIdeaList(fixResp.content || '');
+            if (parsed && parsed.length > 0) {
+              const candidate = parsed[0];
+              return assessIdeaQuality(candidate).length < issues.length ? candidate : idea;
+            }
+          } catch {}
+          return idea;
+        }));
+        ideas = fixed;
+        qualityIssues = collectQualityIssues(ideas);
       }
 
       // 把题材标准化（字数/章数解析）
@@ -4538,17 +4550,21 @@ ${excludeRule}
         plannedChapters: Number(idea.plannedChapters),
       }));
 
-      // ----- 标题精确去重（只去掉完全重复标题）-----
-      if (ideas.length > 0 && excludeItems.length > 0) {
-        const excludeTitles = new Set(excludeItems.map(i => i.title?.replace(/[《》「」]/g, '').trim()).filter(Boolean));
+      // ----- 标题去重：排除既有题材 + 本批相互去重（并行生成可能出现重复标题）-----
+      if (ideas.length > 1) {
+        const excludeTitles = new Set(excludeItems.map(i => String(i.title || '').replace(/[《》「」]/g, '').trim()).filter(Boolean));
+        const seenTitles = new Set<string>();
         const before = ideas.length;
         ideas = ideas.filter(idea => {
-          if (!idea.title) return true;
-          const clean = idea.title.replace(/[《》「」]/g, '').trim();
-          return !excludeTitles.has(clean);
+          const clean = String(idea?.title || '').replace(/[《》「」]/g, '').trim();
+          if (!clean) return true;
+          if (excludeTitles.has(clean)) return false;
+          if (seenTitles.has(clean)) return false;
+          seenTitles.add(clean);
+          return true;
         });
         if (ideas.length < before) {
-          this.logger.log(`idea-discover: 标题去重过滤 ${before - ideas.length} 个完全重复题材`);
+          this.logger.log(`idea-discover: 去重过滤 ${before - ideas.length} 个重复题材（含既有与本批相互重复）`);
         }
       }
 
