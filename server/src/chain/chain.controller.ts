@@ -6758,16 +6758,20 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
     const now = () => new Date().toISOString();
     const warnings: string[] = [];
 
-    const ctxSummary = (() => {
+    // 上下文可重算：世界观深度补全完成后，重新计算以包含补全后的世界观档案，供后续组织/地点/大纲/伏笔使用
+    const buildCtxSummary = () => {
       const worldRow = db.prepare(`SELECT era,story_premise,atmosphere FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
+      const profile = db.prepare(`SELECT synopsis, atmosphere_tone, rules, social_structure, locations FROM world_system_profiles WHERE project_id=? LIMIT 1`).get(projectId) as any;
       const chars = db.prepare(`SELECT name,identity FROM characters WHERE project_id=?`).all(projectId) as any[];
       return JSON.stringify({
         title: dto.title,
         storyType: dto.storyType,
         worldPremise: worldRow ? `${worldRow.story_premise || ''} ${worldRow.era || ''} ${worldRow.atmosphere || ''}` : '',
+        worldProfile: profile ? `${profile.synopsis || ''} ${profile.atmosphere_tone || ''} ${profile.rules || ''} ${profile.social_structure || ''}` : '',
         characters: chars.map(c => `${c.name}(${c.identity || ''})`),
       });
-    })();
+    };
+    let ctxSummary = buildCtxSummary();
 
     this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '补全角色/世界观/组织/地点/大纲/伏笔的深度资料...', status: 'running' });
 
@@ -6776,7 +6780,8 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
     // 不再逐角色重复调用一次完整生成，避免重复执行步骤。
     this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 90, message: '角色深度资料已由主流程生成，跳过重复补全', status: 'done' });
 
-    // ====== 五个深度子步骤并行执行（各步骤已补全则跳过，避免重复执行步骤）======
+    // ====== 五个深度子步骤按层级顺序执行（各步骤已补全则跳过，避免重复执行步骤）======
+    // 顺序：世界观 → 组织 → 地点 → 大纲 → 伏笔；世界观深度先生成并回写上下文，后续步骤基于它生成。
     const enrichTasks: Array<() => Promise<void>> = [];
 
     // 世界观 depth
@@ -7000,7 +7005,14 @@ ${worldFieldList}
       } catch (e: any) { warnings.push(`伏笔深度资料生成失败:${e.message}`); this.logger.warn(`enrich: foreshadowings failed project=${projectId}: ${e.message}`); }
     });
 
-    await Promise.all(enrichTasks.map(task => task()));
+    // ====== 按层级顺序执行（不并行）：先补全世界观深度 → 更新上下文 → 再依次生成组织/地点/大纲/伏笔 ======
+    if (enrichTasks.length > 0) {
+      await enrichTasks[0]();               // 世界观 depth 必须先完成
+      ctxSummary = buildCtxSummary();       // 世界观已补全，更新上下文供后续步骤使用
+      for (let i = 1; i < enrichTasks.length; i++) {
+        await enrichTasks[i]();             // 组织 → 地点 → 大纲 → 伏笔
+      }
+    }
 
     return warnings;
   }
