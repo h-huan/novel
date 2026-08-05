@@ -228,7 +228,15 @@ const countHighlights = (chapter: ChapterNode): number => {
 const isRousing = (fn: ChapterFunctionType): boolean => ['conflict', 'explosion', 'climax'].includes(fn);
 const resolveForeshadowing = (...sources: any[]): string => {
   for (const src of sources) {
-    if (Array.isArray(src) && src.length > 0) return src.map((f: any) => typeof f === 'string' ? f : `[${f.type || 'hint'}] ${f.content || f.text || ''}`).join('\n');
+    if (Array.isArray(src) && src.length > 0) return src.map((f: any) => {
+      if (typeof f === 'string') return f;
+      // 回收对象格式：{ reference, method }；设置对象格式：{ content, type }
+      if (f?.reference != null || f?.method != null) {
+        const ref = typeof f.reference === 'string' ? f.reference : (f.reference?.content || f.reference?.text || '');
+        return `回收「${ref || '未指明伏笔'}」${f.method ? `·方式：${f.method}` : ''}`;
+      }
+      return `[${f.type || 'hint'}] ${f.content || f.text || f.summary || ''}`;
+    }).filter(Boolean).join('\n');
     if (typeof src === 'string' && src.trim()) return src;
   }
   return '';

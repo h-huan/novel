@@ -800,7 +800,9 @@ const DiscoveryWizardPage: React.FC = () => {
     const explicitTarget = preflightState.targetWords.trim()
       ? Number(preflightState.targetWords)
       : null;
-    const plannedTarget = explicitTarget ?? parseIdeaTargetWords(idea?.recommendedTargetWords ?? idea?.estimatedWords);
+    // 以所选题材的规划字数为主（卡片显示值），配置字数仅作题材缺少规划时的兜底，保证项目与所选灵感一致
+    const ideaTarget = parseIdeaTargetWords(idea?.recommendedTargetWords ?? idea?.estimatedWords);
+    const plannedTarget = ideaTarget ?? explicitTarget;
     if (plannedTarget === null || !isFeasibleTargetWords(plannedTarget, preflightState.storyType)) {
       setConfigError(`这个题材没有可执行的动态篇幅规划。${getTargetWordsRequirement(preflightState.storyType)}请返回配置填写可执行的目标字数，再重新选择题材。`);
       store.setStep(0);
@@ -839,7 +841,7 @@ const DiscoveryWizardPage: React.FC = () => {
         title: idea.title,
         storyType: currentState.storyType,
         platformStyle: currentState.platform,
-        targetWords: currentState.targetWords.trim() ? Number(currentState.targetWords) : undefined,
+        targetWords: parseIdeaTargetWords(idea?.recommendedTargetWords ?? idea?.estimatedWords) ?? (currentState.targetWords.trim() ? Number(currentState.targetWords) : undefined),
         selectedIdea: idea,
         settings: {
           genre: [currentState.selectedCategory, currentState.selectedSubCategory].filter(Boolean).join('/'),
