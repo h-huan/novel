@@ -6002,7 +6002,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
             temperature: 0.8,
             timeout: LLM_TUNABLES.timeoutComplex(),
             scenario: 'character_design',
-            maxTokens: 16000,
+            maxTokens: 24576,
             validate: value => {
               const items = normalizeGeneratedCharacters(value);
               return items.length > 0 && items.every(item => hasUsefulValue(item?.name) && (hasUsefulValue(item?.identity) || hasUsefulValue(item?.basicInfo)));
@@ -6040,7 +6040,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                 const ageMatch = ch.age != null ? Number(ch.age) : null;
                 const isPov = ch.name === (generatedCharacters[0]?.name || '') ? 1 : 0;
                 const growthTags = Array.isArray(ch.growthTags) ? ch.growthTags.map((t: any) => serializeGeneratedSqlText(t)).filter(Boolean) : [];
-                db.prepare(`INSERT INTO characters (id, project_id, name, aliases, age, gender, identity, appearance, background, personality, abilities, relationships, arc, dialogue_style, dialogue_patterns, is_pov_character, tags, created_at, updated_at)
+                db.prepare(`INSERT INTO characters (id, project_id, name, aliases, age, gender, identity, appearance, background, personality, abilities, relationships, arc, dialogue_style, dialogue_patterns, is_pov_character, keywords, created_at, updated_at)
                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
                   cid, projectId, serializeGeneratedSqlText(ch.name), '[]', Number.isFinite(ageMatch) ? ageMatch : null,
                   serializeGeneratedSqlText(ch.gender) || null, serializeGeneratedSqlText(identity) || null,
@@ -6561,8 +6561,14 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
               skippedPatchCount++;
               continue;
             }
+            // 字段名来自数据库 PRAGMA 真实列名，但可能含保留字（如 outlines.order），必须加引号 + 标识符合法性校验
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
+              warnings.push(`一致性修订跳过：字段名非法（${field}，已忽略）`);
+              skippedPatchCount++;
+              continue;
+            }
             const storedValue = typeof replacement === 'string' ? replacement.trim() : JSON.stringify(replacement);
-            const updateResult = db.prepare(`UPDATE ${target!.table} SET ${field}=?, updated_at=? WHERE id=? AND project_id=?`)
+            const updateResult = db.prepare(`UPDATE ${target!.table} SET "${field}"=?, updated_at=? WHERE id=? AND project_id=?`)
               .run(storedValue, now(), entityId, projectId);
             if (Number(updateResult.changes || 0) !== 1) {
               warnings.push(`一致性修订目标不存在，已跳过：${entityId}`);

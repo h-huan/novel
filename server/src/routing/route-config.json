@@ -90,7 +90,7 @@
     "character_design": {
       "model": "deepseek",
       "temperature": 0.7,
-      "maxTokens": 16384,
+      "maxTokens": 24576,
       "label": "角色设计"
     },
     "organization_map": {
