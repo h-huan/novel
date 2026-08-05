@@ -184,7 +184,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
           {viewMode === 'read' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <Card title="作品速览" span>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <FieldList label="作品简介 / 核心卖点" value={profile.synopsis} accent="#e94560" />
                   <FieldList label="基本信息" value={profile.basic_info} accent="#60a5fa" />
                   <FieldList label="全文规模 / 数据规划" value={profile.scale_plan} accent="#22c55e" />
@@ -198,7 +198,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
                 if (!entries.length) return null;
                 return (
                   <Card key={group.title} title={group.title} subtitle={group.description}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 6 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {entries.map(({ f, value }) => <FieldList key={f.key} label={f.label} value={value} accent="#93c5fd" />)}
                     </div>
                   </Card>

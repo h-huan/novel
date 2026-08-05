@@ -564,7 +564,7 @@ const CharacterPage: React.FC = () => {
                   return (
                     <section key={section.title} style={{ marginBottom: 6 }}>
                       <SectionHeading title={section.title} accent="#e94560" hint={section.description} />
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 4 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {entries.map(({ field, value }) => (
                           <div
                             key={field.key}

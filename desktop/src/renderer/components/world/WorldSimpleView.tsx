@@ -214,7 +214,7 @@ const WorldSimpleView: React.FC = () => {
       {/* 详细设定层 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <SectionHeading title="详细设定" accent="#a855f7" hint="仅展示已填写维度" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[
             { label: '时代（时间线/历史背景）', v: settings.history || settings.era, c: '#f59e0b' },
             { label: '地点（主要区域/关键地点）', v: settings.geography, c: '#60a5fa' },

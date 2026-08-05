@@ -254,6 +254,9 @@ const parseOutlineContentFields = (content: string, sceneData: Record<string, an
     结尾设置: 'hook',
     情绪基调: 'mood',
     反转点: 'reversalPoint',
+    热血镜头: 'rousing',
+    '热血/高光': 'rousing',
+    高光镜头: 'rousing',
     目标字数: 'targetWords',
   };
   const labels = Object.keys(aliases).join('|');
@@ -275,6 +278,7 @@ const parseOutlineContentFields = (content: string, sceneData: Record<string, an
     hook: readableValue(fields.hook || sceneData.hook || chapter.hook),
     mood: readableValue(fields.mood || sceneData.mood || sceneData.emotionalTone || chapter.mood || chapter.emotionalTone),
     reversalPoint: readableValue(fields.reversalPoint || sceneData.reversalPoint || chapter.reversalPoint),
+    rousing: readableValue(fields.rousing || sceneData.hot_scenes || sceneData.rousing || (Array.isArray(sceneData.hotScenes) ? sceneData.hotScenes.join('；') : sceneData.hotScenes) || (Array.isArray(chapter.hot_scenes) ? chapter.hot_scenes.join('；') : chapter.hot_scenes)),
     targetWordsText: fields.targetWords || '',
   };
 };
@@ -1365,14 +1369,15 @@ const OutlinePage: React.FC = () => {
             </div>
           )}
 
-          {docFields.actions && <DocSection label="人物行动" text={docFields.actions} />}
-          {docFields.conflict && <DocSection label="冲突设计" text={docFields.conflict} tone="danger" />}
-          {docFields.highlight && <DocSection label="爽点设置" text={docFields.highlight} tone="warm" />}
-          {docFields.foreshadowing && <DocSection label="伏笔设置" text={docFields.foreshadowing} tone="purple" />}
-          {docFields.foreshadowingRecover && <DocSection label="伏笔回收" text={docFields.foreshadowingRecover} tone="green" />}
-          {docFields.hook && <DocSection label="结尾设置" text={docFields.hook} tone="danger" />}
-          {docFields.mood && <DocSection label="情绪基调" text={docFields.mood} tone="warm" />}
-          {docFields.reversalPoint && <DocSection label="反转点" text={docFields.reversalPoint} tone="purple" />}
+          <DocSection label="人物行动" text={docFields.actions} />
+          <DocSection label="冲突设计" text={docFields.conflict} tone="danger" />
+          <DocSection label="热血/高光镜头" text={docFields.rousing} tone="danger" />
+          <DocSection label="爽点设置" text={docFields.highlight} tone="warm" />
+          <DocSection label="伏笔设置" text={docFields.foreshadowing} tone="purple" />
+          <DocSection label="伏笔回收" text={docFields.foreshadowingRecover} tone="green" />
+          <DocSection label="结尾设置" text={docFields.hook} tone="danger" />
+          <DocSection label="情绪基调" text={docFields.mood} tone="warm" />
+          <DocSection label="反转点" text={docFields.reversalPoint} tone="purple" />
           {(selectedChapter.targetWords || docFields.targetWordsText) && <DocSection label="目标字数" text={docFields.targetWordsText || `${selectedChapter.targetWords}字`} tone="green" />}
         </div>
       </div>
@@ -1625,10 +1630,13 @@ const ChapterListItem: React.FC<{
 
 const DocSection: React.FC<{ label: string; text: string; tone?: 'danger' | 'warm' | 'purple' | 'green' }> = ({ label, text, tone }) => {
   const color = tone === 'danger' ? '#e94560' : tone === 'warm' ? '#f59e0b' : tone === 'purple' ? '#a855f7' : tone === 'green' ? '#22c55e' : '#c0c0d0';
+  const isEmpty = !String(text || '').trim();
   return (
     <div style={styles.detailSection}>
       <span style={styles.detailLabel}>{label}</span>
-      <div style={{ ...styles.noteBox, color, borderLeftColor: color }}>{text}</div>
+      <div style={{ ...styles.noteBox, color: isEmpty ? '#6c6c80' : color, borderLeftColor: isEmpty ? '#3a3a50' : color }}>
+        {isEmpty ? <em style={{ color: '#6c6c80', fontStyle: 'normal' }}>暂无内容（该项允许为空，后续生成时可补）</em> : text}
+      </div>
     </div>
   );
 };
