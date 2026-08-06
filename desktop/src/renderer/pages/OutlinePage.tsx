@@ -1385,7 +1385,6 @@ const OutlinePage: React.FC = () => {
           <DocSection label="伏笔回收" text={docFields.foreshadowingRecover} tone="green" />
           <DocSection label="结尾设置" text={docFields.hook} tone="danger" />
           <DocSection label="情绪基调" text={docFields.mood} tone="warm" />
-          <DocSection label="反转点" text={docFields.reversalPoint} tone="purple" />
           {(selectedChapter.targetWords || docFields.targetWordsText) && <DocSection label="目标字数" text={docFields.targetWordsText || `${selectedChapter.targetWords}字`} tone="green" />}
         </div>
       </div>
@@ -1643,7 +1642,7 @@ const DocSection: React.FC<{ label: string; text: string; tone?: 'danger' | 'war
     <div style={styles.detailSection}>
       <span style={styles.detailLabel}>{label}</span>
       <div style={{ ...styles.noteBox, color: isEmpty ? '#6c6c80' : color, borderLeftColor: isEmpty ? '#3a3a50' : color }}>
-        {isEmpty ? <em style={{ color: '#6c6c80', fontStyle: 'normal' }}>暂无内容（该项允许为空，后续生成时可补）</em> : text}
+        {isEmpty ? <em style={{ color: '#6c6c80', fontStyle: 'normal' }}>无</em> : text}
       </div>
     </div>
   );
