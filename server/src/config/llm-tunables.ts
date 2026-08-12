@@ -52,9 +52,12 @@ export const LLM_TUNABLES = {
   OUTLINE_WRITE_PER_CHAPTER: envInt('LLM_OW_MAXTOKENS_PER_CHAPTER', 1200),
 
   // ============ 正文生成 maxTokens 公式参数 ============
+  // deepseek-v4-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算
+  // 返回空内容或把正文截断在 3200 字以下。实测复杂任务 reasoning 可达 7500+，故 EXTRA 预留
+  // 足够推理预算（与 OUTLINE_WRITE 同策略）；封顶 32768 已覆盖"推理+3200-4000字正文"。
   BODY_MAXTOKENS_CAP: envInt('LLM_BODY_MAXTOKENS_CAP', 32768),
   BODY_MAXTOKENS_PER_TARGET: envFloat('LLM_BODY_MAXTOKENS_PER_TARGET', 1.6),
-  BODY_MAXTOKENS_EXTRA: envInt('LLM_BODY_MAXTOKENS_EXTRA', 800),
+  BODY_MAXTOKENS_EXTRA: envInt('LLM_BODY_MAXTOKENS_EXTRA', 10000),
 
   // ============ 进度心跳 / 重试节奏 ============
   PROGRESS_HEARTBEAT_MS: envInt('LLM_PROGRESS_HEARTBEAT_MS', 15000), // 长篇综合生成心跳

@@ -146,7 +146,7 @@ const STATUS_COLORS: Record<string, string> = {
   planned: '#8a8aa0',
   writing: '#f59e0b',
   completed: '#22c55e',
-  locked: '#f59e0b',
+  locked: '#2ecc71',
 };
 
 const parseJsonObject = (value: unknown): Record<string, any> => {
@@ -1623,7 +1623,7 @@ const ChapterListItem: React.FC<{
       <span style={{ ...styles.chapterItemTitle, color: selected ? '#e94560' : '#c0c0d0' }}>{chapter.title}</span>
       <div style={styles.chapterActions}>
         {chapter.status === 'locked' ? (
-          <span title="已锁定" style={styles.lockedBadge}>锁</span>
+          <span title="已锁定（正文只读）" style={styles.lockedBadge}>🔒</span>
         ) : (
           <>
             <button type="button" onClick={event => { event.stopPropagation(); onSplit(); }} title="拆分" style={styles.iconButton}>拆</button>
@@ -1693,7 +1693,7 @@ const styles: Record<string, React.CSSProperties> = {
   chapterItemTitle: { fontSize: 12, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   chapterActions: { display: 'flex', gap: 4, flexShrink: 0 },
   iconButton: { minWidth: 22, height: 20, fontSize: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontFamily: 'inherit' },
-  lockedBadge: { fontSize: 10, color: '#f59e0b', padding: '1px 4px' },
+  lockedBadge: { fontSize: 10, color: '#2ecc71', padding: '1px 4px' },
   shortListPane: { ...clampSidebar(220, 20, 320), borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   shortMeta: { margin: 8, padding: 10, borderRadius: 6, color: '#8a8aa0', backgroundColor: 'rgba(59,130,246,0.06)', fontSize: 11, lineHeight: 1.45 },
   shortListContent: { flex: 1, overflow: 'auto', padding: 8 },

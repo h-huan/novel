@@ -122,9 +122,31 @@ export class WritingQualityService {
    */
   async submitChapterForQualityReview(projectId: string, dto: AnalyzeChapterDto) {
     if (!this.chapterService) throw new BadRequestException('Chapter service is not available');
+    // 快速前置校验：正文为空/字数不达标时立即反馈，不先跑慢速 LLM 质检再被字数门禁拦下。
+    const db = this.dbService.getDb();
+    const row = db.prepare('SELECT content FROM chapters WHERE id = ? AND project_id = ?').get(dto.chapterId, projectId) as { content?: string } | undefined;
+    if (!row) throw new NotFoundException(`Chapter ${dto.chapterId} not found`);
+    const content = (dto.content ?? row.content ?? '').trim();
+    if (!content) {
+      throw new BadRequestException('本章正文为空（0 字）。请先写作或生成正文后再提交质检。');
+    }
+    const words = this.countCjkWords(content);
+    if (words < 3200) {
+      throw new BadRequestException(`本章正文仅 ${words} 字，未达到 3200 字下限，暂不能提交质检。`);
+    }
+    if (words > 4000) {
+      throw new BadRequestException(`本章正文已达 ${words} 字，超过 4000 字上限，需精简后再提交质检。`);
+    }
     const report = await this.analyzeChapterQuality(projectId, { ...dto, scope: dto.scope || 'chapter' });
     const chapter = await this.chapterService.submitForReview(dto.chapterId);
     return { success: true, report, chapter };
+  }
+
+  /** 与正文字数门禁同口径：中文字符数 + 英文词数 */
+  private countCjkWords(content: string): number {
+    const chinese = (content.match(/[一-鿿㐀-䶿]/g) || []).length;
+    const english = content.replace(/[一-鿿㐀-䶿]/g, ' ').split(/\s+/).filter(token => /[a-zA-Z]/.test(token)).length;
+    return chinese + english;
   }
 
   async analyzeChapterQuality(projectId: string, dto: AnalyzeChapterDto) {

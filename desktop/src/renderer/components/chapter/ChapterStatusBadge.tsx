@@ -1,6 +1,6 @@
 /**
  * ChapterStatusBadge - 章节状态徽章组件
- * 根据状态显示不同颜色：draft(黄色)、reviewing(蓝色)、locked(绿色)
+ * 三态颜色文字统一区分：未锁定(琥珀)、质检中(蓝)、已锁定(绿)
  */
 
 import React from 'react';
@@ -17,7 +17,7 @@ export interface ChapterStatusBadgeProps {
 
 const STATUS_CONFIG: Record<ChapterStatus, { label: string; color: string; bgColor: string }> = {
   draft: {
-    label: '草稿',
+    label: '未锁定',
     color: '#f39c12',
     bgColor: 'rgba(243, 156, 18, 0.12)',
   },

@@ -110,6 +110,10 @@ export class ChapterService {
       if (cleaned > 0) {
         response.staleConflictsCleaned = cleaned;
       }
+    } else {
+      // 内容未变化：派生数据本已与已保存内容一致，无需重新同步。
+      // 明确返回 fullSyncSuccess=true，避免前端误报「状态同步未完成」。
+      response.derivedSync = { success: true, fullSyncSuccess: true, skipped: true, reason: 'no_content_change' };
     }
     return response;
   }
@@ -371,8 +375,15 @@ export class ChapterService {
     if (!Number.isInteger(target) || target < 3200 || target > 4000) {
       throw new BadRequestException('Chapter outline has no valid target word count (3200-4000 words)');
     }
-    if (actual < 3200 || actual > 4000) {
-      throw new BadRequestException(`Chapter body is ${actual} words; review and locking require 3200-4000 words (outline target: ${target})`);
+    // 门禁文案区分「空正文 / 不足 / 超限」，避免把"无法送审/锁定"误读成"已被锁定"。
+    if (actual === 0) {
+      throw new BadRequestException(`本章正文为空（0 字）。请先写作或生成正文，达到约 ${target} 字（3200-4000 字区间）后再提交质检或锁定。`);
+    }
+    if (actual < 3200) {
+      throw new BadRequestException(`本章正文仅 ${actual} 字，未达到 3200 字下限（本章目标 ${target} 字），暂不能提交质检或锁定。`);
+    }
+    if (actual > 4000) {
+      throw new BadRequestException(`本章正文已达 ${actual} 字，超过 4000 字上限（本章目标 ${target} 字），需精简后才能提交质检或锁定。`);
     }
   }
 

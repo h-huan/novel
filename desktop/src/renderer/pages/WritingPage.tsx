@@ -20,7 +20,7 @@ const PANEL_WIDTH = 420;
 
 type RightPanel = 'ai' | 'diff' | 'workflow' | null;
 type WorkflowFocus = 'short' | 'long';
-type StateSyncIssue = { chapterId: string; content: string; message: string } | null;
+type StateSyncIssue = { chapterId: string; content: string; message: string; chapterLabel?: string } | null;
 type PendingStateSummary = { chapterId: string; count: number } | null;
 type WritingPackage = {
   state?: { contextText?: string; pendingTotal?: number; stateGuard?: string };
@@ -442,7 +442,9 @@ const WritingPage: React.FC = () => {
 
     if (!fullSyncOk) {
       const reason = [...warnings, ...incompleteSteps].join('；') || '服务端未返回完整同步结果';
-      setStateSyncIssue({ chapterId: targetChapterId, content, message: reason });
+      const syncTarget = chapters.find(ch => ch.id === targetChapterId);
+      const chapterLabel = syncTarget ? `第${syncTarget.volumeIndex}-${syncTarget.chapterIndex}章 ${syncTarget.title}` : undefined;
+      setStateSyncIssue({ chapterId: targetChapterId, content, message: reason, chapterLabel });
       setPendingStateSummary(null);
       setGenerationTask({ tone: 'error', text: `正文已保存，但规范同步未完成：${reason}` });
       setGenStatus('⚠️ 正文已保存，但规范同步未完成；请重试同步');
@@ -510,7 +512,7 @@ const WritingPage: React.FC = () => {
   }, [syncDraftAndPendingState, setCurrentChapterContent, currentChapter?.id, setRightPanel]);
 
   const retryStateSync = useCallback(() => {
-    if (!stateSyncIssue || stateSyncIssue.chapterId !== currentChapter?.id) return;
+    if (!stateSyncIssue) return;
     void (async () => {
       setGenerationTask({ tone: 'working', text: '正在重试摘要、RAG、伏笔、时间线与连续性同步…' });
       try {
@@ -951,7 +953,7 @@ const WritingPage: React.FC = () => {
             borderTop: '1px solid rgba(255,255,255,0.04)',
           }}>🤖 写作任务：{generationTask?.text || genStatus}</div>
         )}
-        {stateSyncIssue && stateSyncIssue.chapterId === currentChapter?.id && (
+        {stateSyncIssue && (
           <div style={{
             padding: '8px 14px',
             display: 'flex',
@@ -963,7 +965,7 @@ const WritingPage: React.FC = () => {
             color: '#f6c36a',
             borderTop: '1px solid rgba(243,156,18,0.18)',
           }}>
-            <span>状态同步未完成：{stateSyncIssue.message}</span>
+            <span>状态同步未完成{stateSyncIssue.chapterLabel ? `（${stateSyncIssue.chapterLabel}）` : ''}：{stateSyncIssue.message}</span>
             <button onClick={retryStateSync} style={{ ...workflowButtonStyle('#f39c12'), padding: '5px 8px' }}>重试状态同步</button>
             <button onClick={() => navigate(`/project/${projectId}/conflicts`)} style={{ ...workflowButtonStyle('#e94560'), padding: '5px 8px' }}>查看前后矛盾</button>
           </div>

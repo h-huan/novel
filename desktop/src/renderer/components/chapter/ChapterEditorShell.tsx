@@ -17,7 +17,6 @@
 import React, { forwardRef, useEffect, useRef, useState, useCallback, useImperativeHandle } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MarkdownEditor from '../editor/MarkdownEditor';
-import ChapterStatusBadge from './ChapterStatusBadge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { showNotification } from '../common/Notification';
 import { useChapterStore } from '../../stores/chapterStore';
@@ -385,7 +384,6 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
           <span style={styles.titleSeparator}>|</span>
           <span style={styles.title}>{chapter.title}</span>
         </div>
-        <ChapterStatusBadge status={chapter.status} showLockIcon={true} />
       </div>
 
       {/* 状态侧栏按钮 busy 时禁用 + 显示「⏳」；持续可见 banner 展示结果（用户铁律：动作必须可见） */}
@@ -436,27 +434,27 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
         <div style={styles.toolbarLeft}>
           {isLocked ? (
             <button
-              style={styles.unlockBtn}
+              style={styles.warnBtn}
               onClick={() => setUnlockDialogOpen(true)}
-              title="解锁章节（将变为草稿状态）"
+              title="解锁章节（将变为未锁定/草稿状态）"
             >
               🔓 取消锁定
             </button>
           ) : chapter.status === 'reviewing' ? (
             <>
               <button
-                style={styles.lockBtn}
+                style={styles.confirmBtn}
                 onClick={handleLock}
                 disabled={busyAction !== null}
-                title={busyAction === 'qa-lock' ? '锁定中…' : '质检通过，锁定章节'}
+                title={busyAction === 'qa-lock' ? '锁定中…' : '质检通过，锁定章节（正文将只读）'}
               >
                 {busyAction === 'qa-lock' ? '⏳ 锁定中…' : '✅ 通过质检 · 锁定'}
               </button>
               <button
-                style={styles.unlockBtn}
+                style={styles.warnBtn}
                 onClick={handleRejectReview}
                 disabled={busyAction !== null}
-                title={busyAction === 'reject-review' ? '驳回中…' : '驳回质检，返回草稿'}
+                title={busyAction === 'reject-review' ? '驳回中…' : '驳回质检，返回未锁定/草稿'}
               >
                 {busyAction === 'reject-review' ? '⏳ 处理中…' : '↩️ 驳回 · 返回草稿'}
               </button>
@@ -464,7 +462,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
           ) : (
             <>
               <button
-                style={styles.lockBtn}
+                style={styles.primaryBtn}
                 onClick={handleSubmitForReview}
                 disabled={busyAction !== null}
                 title={busyAction === 'submit-review' ? '正在提交质检…' : '提交质检，进入审核流程'}
@@ -472,12 +470,12 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
                 {busyAction === 'submit-review' ? '⏳ 提交中…' : '📋 提交质检'}
               </button>
               <button
-                style={styles.lockBtn}
+                style={styles.warnBtn}
                 onClick={handleLock}
                 disabled={busyAction !== null}
-                title={busyAction === 'direct-lock' ? '直接锁定中…' : '直接锁定章节（跳过质检）'}
+                title={busyAction === 'direct-lock' ? '直接锁定中…' : '直接锁定章节（跳过质检，仅限特殊场景）'}
               >
-                {busyAction === 'direct-lock' ? '⏳ 锁定中…' : '🔒 直接锁定'}
+                {busyAction === 'direct-lock' ? '⏳ 锁定中…' : '🔓 直接锁定'}
               </button>
             </>
           )}
@@ -621,24 +619,38 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
   },
-  lockBtn: {
+  /** 普通正向动作（提交质检）：蓝色，通往「质检中」 */
+  primaryBtn: {
     padding: '6px 14px',
     fontSize: '12px',
     fontWeight: 600,
-    color: '#e74c3c',
-    backgroundColor: 'rgba(231, 76, 60, 0.1)',
-    border: '1px solid rgba(231, 76, 60, 0.2)',
+    color: '#3498db',
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+    border: '1px solid rgba(52, 152, 219, 0.22)',
     borderRadius: '6px',
     cursor: 'pointer',
     transition: 'all 0.2s',
   },
-  unlockBtn: {
+  /** 确认动作（通过质检·锁定）：绿色，通往「已锁定」 */
+  confirmBtn: {
     padding: '6px 14px',
     fontSize: '12px',
     fontWeight: 600,
     color: '#2ecc71',
     backgroundColor: 'rgba(46, 204, 113, 0.1)',
-    border: '1px solid rgba(46, 204, 113, 0.2)',
+    border: '1px solid rgba(46, 204, 113, 0.22)',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  /** 需谨慎/回退的动作（直接锁定·跳过质检、驳回、取消锁定）：橙色警告 */
+  warnBtn: {
+    padding: '6px 14px',
+    fontSize: '12px',
+    fontWeight: 600,
+    color: '#f39c12',
+    backgroundColor: 'rgba(243, 156, 18, 0.1)',
+    border: '1px solid rgba(243, 156, 18, 0.22)',
     borderRadius: '6px',
     cursor: 'pointer',
     transition: 'all 0.2s',

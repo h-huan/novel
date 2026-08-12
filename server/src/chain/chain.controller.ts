@@ -520,8 +520,10 @@ export class ChainController {
     if (!Number.isInteger(targetWords) || targetWords < 3200 || targetWords > 4000) {
       throw new HttpException('本章大纲缺少有效的3200-4000字动态目标，正文未保存', 400);
     }
-    // 关键修复①：显式给出充足 token 余量。中文约 1~1.4 token/字，目标 4000 字约需
-    // 4000-5600 token，这里取目标*1.6+800 留足余量，并封顶 8000（仍在 deepseek-chat 输出上限 8192 内）。
+    // 关键修复：显式给出充足 token 余量。目标*1.6 覆盖正文本身（中文约 1~1.4 token/字，
+    // 4000 字约 5600 token），EXTRA=10000 覆盖 deepseek-v4-flash 的"思考(reasoning)"预算
+    // （实测可达 7500+ token）。若不预留推理预算，思考会吃光 max_tokens，正文被截断在
+    // 3200 字以下或直接返回空内容——这是"空返回/被截断"的根因。封顶 BODY_MAXTOKENS_CAP。
     const maxTokens = Math.min(
       LLM_TUNABLES.BODY_MAXTOKENS_CAP,
       Math.ceil(targetWords * LLM_TUNABLES.BODY_MAXTOKENS_PER_TARGET) + LLM_TUNABLES.BODY_MAXTOKENS_EXTRA,
@@ -862,7 +864,13 @@ export class ChainController {
         `  r) 43 无不完美细节：**增加 ≥ 3 处不完美/反常识细节**——人物小缺陷（指甲缝黑泥/扣子没扣/领口有线头/鞋带松了/口红沾牙上/衬衫腋下有汗渍）、环境反常（路灯闪烁/小孩哭声/空调滴水/关不上的窗/电视雪花屏）、物件异常（遥控器后盖不见/茶杯缺角/合同划痕/抽屉有张空相片）；\n` +
         `  s) 44 转场机械词：**删除所有"接着/然后/之后/随即/不久后/不一会儿/片刻后/过了一会儿"**，改用环境切入（"窗外的光从灰白变成金黄"）、时间锚点（"天快黑了""楼下开始放音乐"）、感官切入（"油烟味飘进来了"）、身体状态（"腰背开始发酸"）；\n` +
         `  t) 45 无具体数字：**加入至少 1 处具体数字**——"第三十七根雨丝""坐了三天三夜""第十一个电话""超过四十七度的体温""二十三块的零钱""刷了十四分钟的屏"——一个具体数字就是真实感的物理指纹；\n` +
-        `  u) 精修完成后，必须保证【上一版正文】里所有标注的硬红线违规片段都已被精确改写，且不得新增同类违规。精修后会再次被【确定性硬红线扫描器】逐条扫描，命中同类违规即视为本次精修失败。`;
+        `  u) 精修完成后，必须保证【上一版正文】里所有标注的硬红线违规片段都已被精确改写，且不得新增同类违规。精修后会再次被【确定性硬红线扫描器】逐条扫描，命中同类违规即视为本次精修失败。\n` +
+        `  v) formula-sentence 公式句型：**直接陈述正面意思**——"这不是X而是Y"改成直接写"这是Y"；删掉"不仅X而且Y""与其X不如Y"；\n` +
+        `  w) dash-density 破折号过密：**删掉多余破折号**，改用逗号/句号/冒号拆分或直接删——一段内破折号不超过 1 个；\n` +
+        `  x) simile-density 比喻过密：**删掉多余比喻**（"像/仿佛/如同/好像…"），一段最多 1 个且必须服务情绪或画面；用直白动作、具体事件替代（"红色倒计时扎在七月的黑夜里"这类"为修辞而修辞"的比喻必须删/改直白）；\n` +
+        `  y) time-density 时间标签过密：**删掉多余时间词**（"X点/X月X日/凌晨/傍晚/还剩X分钟"），让读者从光线、动作、对话自然感知时间流逝；同一地址/专名（"建设路十七号""302室"）不重复超过 2 次；\n` +
+        `  z) list-enumeration 顿号排比：**删到只剩 2 个核心动作**，其余换成有具体结果的细节，避免"罗列动作清单"；\n` +
+        `  aa) dialogue-ratio 对话过少：**增加对话**——把关键信息/冲突/设定放进人物对话（打电话、他人搭话、自言自语、两人以上场面），用对话推进剧情；`;
     }
 
     const contradictionList = llmContradictions.map((c, i) => `  ${i + 1}) ${c}`).join('\n');
@@ -1143,6 +1151,11 @@ export class ChainController {
     const hardTells15b = [
       /我(感到|觉得|意识到|知道|明白|懂得|体会到)\s*[^。！？]{0,15}[，。,]?\s*因为/,
       /我(很难过|很痛苦|很不安|很复杂|很遗憾|很高兴|很开心|很失落|很彷徨|很纠结)\s*[，。,]?\s*因为/,
+      // 第三人称"叙述者解释一切"变体：手册/规则解释 + 回溯式"曾经…从那以后"前情交代
+      /手册上写(过|着)|维修手册|说明书|操作规范|按照规定|按照规则|从那以后|从此以后/,
+      // 叙述者宣布"本该/就该…但…还是"的逻辑洞（"半年前系统就该把这栋楼标成灰色区域，
+      // 送单路线自动绕开，但订单还是推了过来"）——刻意制造悬念却留下未交代的因果缺口。
+      /(本该|就该|应该|本应|理应|按理).{0,30}(但|却|可).{0,20}(还是|依然|仍然|居然|竟)/,
     ];
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
@@ -1157,6 +1170,86 @@ export class ChainController {
           break;
         }
       }
+    }
+
+    // ===== AI 公式句型密度（"不是X而是Y""不仅X而且Y""与其X不如Y"） =====
+    // 经济学人/网文编辑：这类公式句是 AI 第一指纹。偶现 1-2 处尚可，全文 ≥3 处即判违规回炉。
+    const formulaPatterns = [
+      /不是[^，。！？]{1,18}而是/,
+      /不仅[^，。！？]{1,18}而且/,
+      /与其[^，。！？]{1,18}不如/,
+    ];
+    const formulaJoins = paragraphs.join('\n');
+    const formulaAll = new RegExp(`(${formulaPatterns.map(p => p.source).join('|')})`, 'g');
+    let formulaHits = 0;
+    const formulaExamples: string[] = [];
+    let fmat: RegExpExecArray | null;
+    while ((fmat = formulaAll.exec(formulaJoins)) !== null) {
+      formulaHits++;
+      if (formulaExamples.length < 3) formulaExamples.push(fmat[0].trim().slice(0, 30));
+    }
+    if (formulaHits >= 3) {
+      findings.push({
+        ruleId: 'formula-sentence',
+        message: `AI 公式句型过多（命中 ${formulaHits} 次"不是X而是Y/不仅X而且Y/与其X不如Y"，应直接陈述正面意思）`,
+        snippet: formulaExamples.join(' / '),
+        position: '全文',
+      });
+    }
+
+    // ===== 密度类 AI 指纹（破折号/比喻/时间戳过密，联网实证：人类破折号 1-2/千字，
+    //       AI 3-8 倍；比喻"一段最多一个"。密度超阈值即回炉，禁止以标点/修辞堆砌充字数） =====
+    const dashCount = (content.match(/——/g) || []).length;
+    if (dashCount > 20) {
+      findings.push({
+        ruleId: 'dash-density',
+        message: `破折号过密（${dashCount} 处，人类约 1-2/千字）。每处应自问：能否改用逗号/句号/冒号拆分，或直接删掉让句子自然承接`,
+        snippet: slice(content.slice(0, content.length), 60),
+        position: '全文',
+      });
+    }
+    const simileDensity = (content.match(/(像|仿佛|如同|宛如|犹如|好像|好似)[^，。；：！？\n]{2,12}/g) || []).length;
+    if (simileDensity > 15) {
+      const simExamples = (content.match(/(像|仿佛|如同|宛如|犹如|好像|好似)[^，。；：！？\n]{2,12}/g) || []).slice(0, 3).map(s => s.trim()).join(' / ');
+      findings.push({
+        ruleId: 'simile-density',
+        message: `比喻过密（${simileDensity} 处"像/仿佛/如同…"，一段最多 1 个且须服务情绪或画面）。删掉为修辞而修辞的比喻，优先具体动作`,
+        snippet: simExamples,
+        position: '全文',
+      });
+    }
+    const timeDensity = (content.match(/\d+月\d+日|\d+:\d+|\d+点|凌晨|傍晚|午夜|深夜|上午|下午|早晨|中午|还剩\d+分钟/g) || []).length;
+    if (timeDensity > 15) {
+      findings.push({
+        ruleId: 'time-density',
+        message: `时间标签过密（${timeDensity} 处"X点/X月X日/凌晨/傍晚…"）。不必每幕都报时间，让读者从光线/动作/对话自然感知时间流逝；同一地址/专名重复 >5 次也须删改`,
+        snippet: slice(content, 60),
+        position: '全文',
+      });
+    }
+    // 顿号排比列表：连续 4 个以上"XX、"（"取餐、核对编号、骑车、等灯、敲门、递出去"）是 AI 列举指纹
+    const listEnumeration = (content.match(/([一-鿿]{2,4}[、]){4,}/g) || []).length;
+    if (listEnumeration >= 1) {
+      const listEx = (content.match(/([一-鿿]{2,4}[、]){4,}/g) || []).slice(0, 2).map(s => s.trim().slice(0, 30));
+      findings.push({
+        ruleId: 'list-enumeration',
+        message: `顿号排比列表 ${listEnumeration} 处（连续 ≥4 个"XX、"动作列举）。把 2 个核心动作写成具体细节，其余删掉，避免"罗列动作清单"`,
+        snippet: listEx.join(' / '),
+        position: '全文',
+      });
+    }
+    // 对话占比过低：爆款网文对话占比高（用对话推进剧情/交代设定/制造冲突）。
+    // 全章几乎无对话=大段独白+环境描写，是 AI 文的典型形态。阈值 8%。
+    const dialogueContent = (content.match(/[“"「][^”"」]{1,80}[”"」]/g) || []).join('').replace(/\s/g, '');
+    const plainTotal = content.replace(/\s/g, '');
+    const dialogueRatio = plainTotal.length > 0 ? dialogueContent.length / plainTotal.length : 0;
+    if (dialogueRatio < 0.08) {
+      findings.push({
+        ruleId: 'dialogue-ratio',
+        message: `对话占比仅 ${(dialogueRatio * 100).toFixed(1)}%（网文应大幅提高，用对话推进剧情、交代设定、制造冲突）。当前大段内心独白+环境描写，应把关键信息/冲突放进人物对话（电话、他人搭话、自言自语）`,
+        snippet: slice(content, 60),
+        position: '全文',
+      });
     }
 
     // ===== 15d 第一人称对话框里偷切作者口吻 =====
@@ -1242,17 +1335,24 @@ export class ChainController {
     }
 
     // ===== 28a 冗余 filter words =====
-    const filterWordStarts = /^(我(看到|听到|意识到|注意到|感受到|发觉|察觉到|发现))\s*[^。！？]{0,30}[，。]/;
-    for (let i = 0; i < paragraphs.length; i++) {
-      const p = paragraphs[i];
-      if (filterWordStarts.test(p)) {
-        findings.push({
-          ruleId: '28a',
-          message: '冗余 filter words（"我看到/我意识到…"作句首）',
-          snippet: slice(p),
-          position: `第 ${i + 1} 段`,
-        });
-      }
+    // 含第三人称变体（"他记得…""她看到…"）并纳入"记得"，且在全文子句级检测（不限于段首）：
+    // AI 常用"X记得/看到…"给前情加滤镜，删掉后信息照样成立（"这个信号的节奏——是那个人
+    // 惯用的发报习惯"），保留反而拖沓。命中 ≥1 处即回炉。
+    const filterWordUse = /(我|他|她)\s*(看到|听到|意识到|注意到|感受到|发觉|察觉到|发现|记得)\s*[^。！？]{0,25}[，。]/g;
+    let fwMatch: RegExpExecArray | null;
+    let fwCount = 0;
+    const fwExamples: string[] = [];
+    while ((fwMatch = filterWordUse.exec(content)) !== null) {
+      fwCount++;
+      if (fwExamples.length < 3) fwExamples.push(fwMatch[0].trim().slice(0, 40));
+    }
+    if (fwCount >= 1) {
+      findings.push({
+        ruleId: '28a',
+        message: `冗余 filter words（"X记得/看到/意识到…"作主语框架，命中 ${fwCount} 处）`,
+        snippet: fwExamples.join(' / '),
+        position: '全文',
+      });
     }
 
     // ===== 32 姓名/角色独占一行（用户截图反复出现的"姓名莫名其妙独占一行"） =====
@@ -4087,13 +4187,15 @@ ${(dto.content || '').substring(0, 3000)}
           identity: c.identity || '',
           age: c.age || 0,
           gender: c.gender || '',
-          personality: c.personality ? JSON.parse(c.personality) : {},
+          // 这些字段可能被存成纯正文（如 LLM 直接把 arc 写成叙述文字而非 JSON），
+          // 必须容错解析：解析失败时保留原文，避免"Unexpected token"崩溃且不丢信息。
+          personality: this.safeJson(c.personality, c.personality ? { summary: String(c.personality) } : {}),
           background: c.background || '',
           affiliations: c.identity || '',
           goals: '',
           fears: '',
-          relationships: c.relationships ? JSON.parse(c.relationships) : [],
-          arc: c.arc ? JSON.parse(c.arc) : [],
+          relationships: this.safeJson(c.relationships, c.relationships ? [String(c.relationships)] : []),
+          arc: this.safeJson(c.arc, c.arc ? [String(c.arc)] : []),
         }));
 
         // 加载伏笔
@@ -4106,7 +4208,7 @@ ${(dto.content || '').substring(0, 3000)}
           setupChapter: f.buried_chapter_index || 0,
           payoffChapter: f.planned_recovery_chapter_index || 0,
           description: f.content || '',
-          relatedCharacters: f.related_character_ids ? JSON.parse(f.related_character_ids) : [],
+          relatedCharacters: this.safeJson(f.related_character_ids, []),
         }));
 
         // 当前章大纲
@@ -7226,6 +7328,27 @@ ${worldFieldList}
       : '【差别化说明 · 短篇】受篇幅限制，微发挥以"精准"为主，围绕单一事件把人物与转折写透，不铺张支线。';
     return `## ⚠ 必读硬红线 · 违反即作废（写在最前，专治 LLM 长 prompt 下的"末尾效应"）
 
+【正文 15 条铁律 · 合并总纲与全部反 AI 规则（最高优先 · 一条都不能违背 · 与下文任何旧规则冲突时以本条为准）】
+你写的是**网文（连载小说）**：读者要情绪和爽感，不是文学性。每句要么推进剧情 / 给新信息 / 制造情绪，三者至少占一样，否则删。
+1. **开篇前 300 字必须出事**：第一句就进反常/危机/冲突（对话、突发动作、悬念词）。**禁先铺环境**（雨、灯光、街道）再进剧情——开头就是异常，环境后补。
+2. **每 300 字一个钩子/情绪点**：情节持续推进，禁注水——"数台阶、十二、十三""看窗外""早中晚流水账"全删，细节只留对情节/人物有用的。
+3. **逻辑自洽，禁上帝视角说设定**：设定靠对话和事件透露；**禁**叙述者宣布"本不该/早该/理应/系统该"的逻辑洞（要么本章交代为什么，要么删掉）。
+4. **禁总结/点题/升华结尾**：停在动作、画面或未说完的话上；**禁**"这一刻他终于明白/总而言之"式点题与复述前文作总结。
+
+5. **对话推进，占比 ≥30%**：关键信息/冲突/设定放进对话；**禁**大段内心独白 + 环境描写的"四拍循环"。
+6. **对话有人味**：打断、沉默、答非所问、潜台词、口头禅；**禁**"他说"+完整回答的客服式往返；说出口的不等于真想的。
+7. **主语切换点名**：叙述主语换人就写姓名，**禁**"他/她"指代不明（"三个月了。他本该躺在河底"的两个"他"是反面例）。
+8. **叙述者不得解释一切**：情绪靠动作/身体反应暗示，**禁**"我很难过因为…""他曾经…从那以后""手册上写过"式归纳与解释。
+
+9. **禁文学性堆砌**：删掉为修辞而修辞的比喻，一段最多 1 个且须服务情绪/画面；**禁**机械比喻/文学老梗（"红色倒计时扎在七月的黑夜里"是反面例）。
+10. **禁公式句型与排比**：**禁**"不是X而是Y/不仅X而且Y/与其X不如Y"；**禁**连续 ≥4 个顿号排比；列举禁凑三样。
+11. **标点克制多元**：破折号一段≤1，改逗号/句号/冒号；问号/感叹号/省略号/分号按场景功能用；**禁**只逗号句号；**禁**短句独立成段后跟空行。
+12. **句式要活**：**禁**连续段同主语开头（"我"开头占比 ≤30%）；**禁**"接着/然后/随即/之后"转场机械词；同句**禁**≥2 个"他/她/它"作主语。
+
+13. **时间/地点克制**：**禁**时间标签过密（"X点/X月X日/凌晨/傍晚"堆叠）；同一地址/专名重复 ≤2。
+14. **上下文一致**：与大纲、前文确稿、本章前文不漂移；**禁**章内回卷重复已写场景；场景内人身状态不矛盾；物件来源可追溯。
+15. **不完美细节 + 具体数字**：至少 3 处人物小缺陷/环境反常（指甲缝黑泥、扣子没扣、灯管闪烁）；至少 1 处具体数字（"二十三块""还剩十四分钟"）。
+
 LLM 在长 prompt 下经常只记住开头与结尾、把中段规则遗忘。本节把本项目最常踩、用户截图反复命中过的硬红线**前置到这里**——你在动笔前必须先把它们读一遍并打勾，写作时不得违反。违反任一条都会被【确定性硬红线扫描器】自动判违规并触发整章回炉重写，无需 LLM 验收放行。
 
 1. **【硬红线 15c】叙述者跳出成为作者评论者**：第一人称"我"只描述【本章大纲】规定时间内人物看到/听到/说出/感受到的东西。**绝对禁止**写"我写的""我本来想写""没有反转，没有救场，没有第二季埋伏笔""反正怎么写都比 X 强""作者写到这里也很为难""这就是我一辈子写过最烂的结局"——这些是 AI 把训练数据里的创作随笔/读后感当正文输出的典型越界。**叙述者只能活在角色里，不能跳出来评论剧情写作本身**。
@@ -7328,6 +7451,8 @@ LLM 在长 prompt 下经常只记住开头与结尾、把中段规则遗忘。�
 20b. **物件/环境来源必须可追溯**：本章出现的每一个具体物件（"三个空咖啡罐""外卖盒""烟灰缸""桌上的那张照片"）都不能凭空冒出——要么在前文（前章/前几段/已确稿上下文）里已被提及/存在，要么本章明确写出"摆/放/买/收/端来"的具体动作让其第一次出现。否则会被读者察觉"道具突然冒出来"的破绽。
 20c. **角色能力/工具/关系边界**：角色只能用本章大纲或前文已确立的技能、工具与人物关系做事。**禁止**角色在本章第一次见面就突然能打电话给一个"老同学"（除非前文已交代）；**禁止**角色突然拥有未交代的工具；**禁止**路人/邻居忽然叫出主角小名。无法解决时，**宁可在正文里改用合理替代（找公用电话、向陌生人问路、走回原路）也不要硬塞**。
 20d. **时序与时间词一致**：本章内所有时间词（"昨夜""今早""十分钟后""三小时前"）必须互不冲突，且与已确稿上下文中已锁定的时间线一致。**禁止**同一段里"十分钟后"后又出现"半小时前"；**禁止**写"第二天"但前文已锚定"同一晚"。
+20e. **前情事实与主语指代**：① **禁止**用"X本该在Y""都X个月了""那天之后"这类判定句凭空抛出读者毫无上下文的前情事实（如"三个月了。他本该躺在河底"——读者不知"他"为何该在河底、河在哪、死了多久）。涉及这类前情，必须先在本章前文交代清楚"谁、在哪、为什么"。② **主语切换必须点名**：叙述主语从一人换到另一人时，后者首次出现必须用姓名/身份（如"林超""覃岩"），**禁止**直接用"他/她"续写（如"林超站在灯下…三个月了。他本该躺在河底。他沿着人行道向西走"——两个"他"会被读者误读成林超，实际指覃岩）。宁可重复姓名，也不让"他"指代不明。
+20f. **禁止章内回卷重复已写内容**：正文推进必须是单向的，**禁止**在章内重复已写过的场景、段落或开头（如全章临近结尾又原样重写开头的"路灯的光是从……开始不正常的"）。一旦意识到要重写前面已写过的场景，直接继续推进剧情，不要回卷；生成完成后自查首段与末段，若高度重复即违规，改为继续推进。
 
 【散文质感 · 让文字有人味（与上面"必守"配套的正面写法指南）】
 21. **具体胜过抽象**：用看得见摸得着的物件、声音、气味、温度、触感、肌肉酸疼、口干、鞋底打滑等五感细节，代替"紧张""不安""复杂""痛苦"这类抽象形容词。一个"她攥住门把手的指节发白"胜过十个"她心里一阵紧张"。

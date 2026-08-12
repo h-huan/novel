@@ -208,6 +208,7 @@ export class RealLLMService implements ILLMService {
     );
 
     const callTimeout = request.timeout ?? 600_000; // 默认10分钟
+    const reasoningEffort = this.resolveReasoningEffort(request.scenario);
 
     // ⚠️ 关键：用带清除机制的超时包裹主 LLM 调用，确保超时一定生效，
     // 且重试时不会留下未处理的 reject 定时器（否则会产生 unhandledRejection）。
@@ -257,23 +258,24 @@ export class RealLLMService implements ILLMService {
             configuredMaxTokens,
             callTimeout,
             request.responseFormat,
+            reasoningEffort,
           ),
           callTimeout,
         );
 
-        if (request.responseFormat === 'json_object') {
-          if (!result.content.trim()) {
-            lastEmptyError = new Error(
-              `结构化生成返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'default'}`,
-            );
-            this.logger.warn(lastEmptyError.message);
-            continue;
-          }
-          if (result.finishReason === 'length') {
-            throw new Error(
-              `结构化生成因输出长度被截断: model=${modelName}, scenario=${request.scenario || 'default'}, maxTokens=${configuredMaxTokens}`,
-            );
-          }
+        // 空内容重试适用于所有请求（正文生成/结构化）：上游网关对任意请求都可能偶发返回空 content，
+        // 正文生成因此被误报"未返回可验收内容"而整章失败。结构化仍额外校验输出被截断。
+        if (!result.content.trim()) {
+          lastEmptyError = new Error(
+            `模型返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'default'}`,
+          );
+          this.logger.warn(lastEmptyError.message);
+          continue;
+        }
+        if (request.responseFormat === 'json_object' && result.finishReason === 'length') {
+          throw new Error(
+            `结构化生成因输出长度被截断: model=${modelName}, scenario=${request.scenario || 'default'}, maxTokens=${configuredMaxTokens}`,
+          );
         }
 
         return this.toResponse(result, modelName, request, startTime);
@@ -295,7 +297,7 @@ export class RealLLMService implements ILLMService {
           this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'default'}`);
           try {
             const result = await withTimeout(
-              this.callModel(modelName, request.prompt, request.systemPrompt, routedModel.temperature, configuredMaxTokens, callTimeout, request.responseFormat),
+              this.callModel(modelName, request.prompt, request.systemPrompt, routedModel.temperature, configuredMaxTokens, callTimeout, request.responseFormat, reasoningEffort),
               callTimeout,
             );
             this.logger.log(`[RealLLM] 网络重试 ${netRetry + 1} 成功：model=${modelName}, scenario=${request.scenario || 'default'}`);
@@ -342,6 +344,7 @@ export class RealLLMService implements ILLMService {
 
     const timeout = request.timeout || 600_000;
 
+    const reasoningEffort = this.resolveReasoningEffort(request.scenario);
     try {
       yield* this.callModelStream(
         modelName,
@@ -350,6 +353,7 @@ export class RealLLMService implements ILLMService {
         routedModel.temperature,
         configuredMaxTokens,
         timeout,
+        reasoningEffort,
       );
     } catch (err) {
       this.logger.warn(`[RealLLM:Stream] ${modelName} failed, failover disabled`);
@@ -364,6 +368,7 @@ export class RealLLMService implements ILLMService {
     temperature?: number,
     maxTokens?: number,
     timeout?: number,
+    reasoningEffort?: 'low' | 'medium' | 'high',
   ): AsyncGenerator<string> {
     if (!Number.isInteger(maxTokens) || Number(maxTokens) <= 0) {
       throw new Error(`模型输出配置无效: model=${modelName} 未传入有效的 maxTokens`);
@@ -392,6 +397,7 @@ export class RealLLMService implements ILLMService {
         temperature ?? 0.7,
         maxTokens as number,
         timeout ?? 600_000,
+        reasoningEffort,
       );
     }
   }
@@ -405,6 +411,7 @@ export class RealLLMService implements ILLMService {
     temperature: number,
     maxTokens: number,
     timeout: number = 600_000,
+    reasoningEffort?: 'low' | 'medium' | 'high',
   ): AsyncGenerator<string> {
     const providerLabel = this.getProviderLabel(provider);
     const proxyExtras = await this.resolveProxyExtras();
@@ -426,6 +433,13 @@ export class RealLLMService implements ILLMService {
         temperature,
         max_tokens: maxTokens,
         stream: true,
+        ...(provider === 'deepseek'
+          ? process.env.LLM_DISABLE_THINKING === '1'
+            ? { thinking: { type: 'disabled' as const } }
+            : (reasoningEffort
+              ? { reasoning_effort: reasoningEffort as 'low' | 'medium' | 'high' }
+              : {})
+          : {}),
       });
 
       for await (const chunk of stream) {
@@ -532,6 +546,18 @@ export class RealLLMService implements ILLMService {
     return messages;
   }
 
+  /** 解析 deepseek 推理强度。正文生成默认 'low'：推理模型先思考再输出，思考吃光 max_tokens
+   *  就返回空正文/被截断（"返回内容为空/过长被截断"根因），限制思考量才能保证正文有输出空间。
+   *  用户显式设 LLM_REASONING_EFFORT 时以其为准。 */
+  private resolveReasoningEffort(scenario?: string): 'low' | 'medium' | 'high' | undefined {
+    if (process.env.LLM_REASONING_EFFORT) {
+      const v = process.env.LLM_REASONING_EFFORT as string;
+      return v === 'low' || v === 'medium' || v === 'high' ? v : undefined;
+    }
+    const bodyScenarios = new Set(['daily', 'writing', 'writing_daily', 'writing_climax', 'body', 'body_by_outline', 'polish']);
+    return bodyScenarios.has(scenario || '') ? 'low' : undefined;
+  }
+
   private async callModel(
     modelName: string,
     prompt: string,
@@ -540,6 +566,7 @@ export class RealLLMService implements ILLMService {
     maxTokens?: number,
     timeout?: number,
     responseFormat: 'text' | 'json_object' = 'text',
+    reasoningEffort?: 'low' | 'medium' | 'high',
   ): Promise<ModelCallResult> {
     if (!Number.isInteger(maxTokens) || Number(maxTokens) <= 0) {
       throw new Error(`模型输出配置无效: model=${modelName} 未传入有效的 maxTokens`);
@@ -596,6 +623,7 @@ export class RealLLMService implements ILLMService {
       maxTokens as number,
       timeout,
       responseFormat,
+      reasoningEffort,
     );
   }
 
@@ -609,6 +637,7 @@ export class RealLLMService implements ILLMService {
     maxTokens: number,
     timeout: number = 180_000,  // 默认3分钟，复杂创作节点需要更长时间
     responseFormat: 'text' | 'json_object' = 'text',
+    reasoningEffort?: 'low' | 'medium' | 'high',
   ): Promise<ModelCallResult> {
     const providerLabel = this.getProviderLabel(provider);
     const proxyExtras = await this.resolveProxyExtras();
@@ -642,8 +671,8 @@ export class RealLLMService implements ILLMService {
         ...(provider === 'deepseek'
           ? process.env.LLM_DISABLE_THINKING === '1'
             ? { thinking: { type: 'disabled' as const } }
-            : (process.env.LLM_REASONING_EFFORT
-              ? { reasoning_effort: process.env.LLM_REASONING_EFFORT as 'low' | 'medium' | 'high' }
+            : (reasoningEffort
+              ? { reasoning_effort: reasoningEffort as 'low' | 'medium' | 'high' }
               : {})
           : {}),
       });
