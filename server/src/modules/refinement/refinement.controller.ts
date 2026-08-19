@@ -13,6 +13,7 @@ import { CopyrightCheckService } from './copyright-check.service';
 import { ExportService } from './export.service';
 import { ScriptExportService } from './script-export.service';
 import { SocialExportService } from './social-export.service';
+import { RealLLMService } from '../../chain/real-llm.service';
 import {
   GetTemplatesQueryDto,
   ApplyTemplateDto,
@@ -44,6 +45,7 @@ export class RefinementController {
     private readonly exportService: ExportService,
     private readonly scriptExport: ScriptExportService,
     private readonly socialExport: SocialExportService,
+    private readonly realLLM: RealLLMService,
   ) {}
 
   // ─── 精修模板 ───
@@ -92,6 +94,28 @@ export class RefinementController {
   @Post('de-ai/polish')
   polishDeAi(@Body() dto: DeAIPolishDto) {
     return this.deAiEngine.polish(dto.content, dto.intensity, dto.focusTags);
+  }
+
+  /**
+   * LLM驱动的局部降AI改写
+   * 先用detect找到AI特征段落，然后只改写问题段落+上下文各100字
+   * 不改动全文结构，只做局部精修
+   */
+  @Post('de-ai/llm-rewrite')
+  async llmRewriteDeAi(@Body() dto: { content: string; maxRewrites?: number }) {
+    if (!dto.content || dto.content.length < 100) {
+      return { result: dto.content || '', changes: [] };
+    }
+    const llmGenerate = async (prompt: string): Promise<string> => {
+      const resp = await this.realLLM.generate({
+        prompt,
+        scenario: 'refinement',
+        temperature: 0.6,
+        maxTokens: 2000,
+      });
+      return resp?.content || '';
+    };
+    return this.deAiEngine.llmLocalRewrite(dto.content, llmGenerate, dto.maxRewrites || 3);
   }
 
   // ─── Describe逐句精修 ───

@@ -43,7 +43,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 鎸夐」鐩甀D鏌ヨ
+   * 按项目ID查询
    */
   findByProjectId(projectId: string): ForeshadowingRow[] {
     return this.findByField('project_id', projectId);
@@ -101,7 +101,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 鑾峰彇杩囨湡棰勮鐨勪紡绗?(鎺ヨ繎璁″垝鍥炴敹绔犺妭浣嗘湭鍥炴敹)
+   * 获取过期预警的伏笔（接近计划回收章节但未回收）
    */
   getOverdueWarnings(projectId: string, currentChapterIndex: number): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
@@ -116,7 +116,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 鎸夎鑹睮D鏌ヨ浼忕瑪
+   * 按角色ID查询伏笔
    */
   findByCharacterId(projectId: string, characterId: string): ForeshadowingRow[] {
     const stmt = this.db.prepare(`

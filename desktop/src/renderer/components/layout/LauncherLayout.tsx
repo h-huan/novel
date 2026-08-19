@@ -1,4 +1,4 @@
-/**
+﻿/**
  * LauncherLayout - 引导窗口布局
  *
  * 极简设计，类似 IDEA 欢迎窗口：
@@ -119,7 +119,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
           <div className="flex items-center gap-1 no-drag">
             <button
               onClick={() => navigate('/')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
+              className={`px-3 py-1 text-sm rounded transition-colors ${
                 isHome ? 'text-accent bg-accent/10' : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
               }`}
             >
@@ -127,7 +127,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
             </button>
             <button
               onClick={() => navigate('/discover')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
+              className={`px-3 py-1 text-sm rounded transition-colors ${
                 location.pathname.startsWith('/discover') ? 'text-accent bg-accent/10' : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
               }`}
             >

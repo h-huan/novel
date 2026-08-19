@@ -45,7 +45,7 @@ export const PROFILE_SECTION_GROUPS: WorldProfileSectionConfig[] = [
   section('文化特色', '氛围基调、文化风俗与命名规则。', ['atmosphere_tone', 'culture_customs', 'naming_rules']),
   section('势力分布', '主要势力、组织及其目标与关系。', ['factions']),
   section('核心规则', '世界运行必须遵守的核心规则与层级纪律。', ['rules', 'hierarchy_rules']),
-  section('补充与自定义', '其他设定与按本书补充的自定义设定。', ['supplementary', 'custom_settings']),
+  section('补充与自定义', '按本书补充的自定义设定。', ['custom_settings']),
 ];
 
 /** 自定义设定键值编辑器：JSON 数组 [{key, value}]，供按小说补充专属设定 */
@@ -102,7 +102,15 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
       api.get(`/projects/${projectId}/world-settings/${worldSettingId}/profile`),
       api.get(`/projects/${projectId}/world-settings/${worldSettingId}/writing-summary`),
     ]);
-    setProfile(payload<any>(profileResponse).profile || {});
+    const rawProfile = payload<any>(profileResponse).profile || {};
+    // 补充说明合并到核心规则字段，不独立显示
+    if (rawProfile.supplementary && String(rawProfile.supplementary).trim()) {
+      rawProfile.rules = rawProfile.rules
+        ? `${rawProfile.rules}\n${rawProfile.supplementary}`
+        : rawProfile.supplementary;
+      delete rawProfile.supplementary;
+    }
+    setProfile(rawProfile);
     setSummary(payload<any>(summaryResponse).summary || '');
   }, [projectId]);
 
@@ -160,7 +168,6 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
   return (
     <PageShell
       title="世界观"
-      subtitle="写作和前后矛盾检查会引用这些规则；与本书无关的部分可以留空。"
       actions={worldSettings.length > 0 ? (
         <>
           <select value={selectedId} onChange={async event => { setSelectedId(event.target.value); await loadProfile(event.target.value); }}>
@@ -179,7 +186,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
         <>
           {status && <p style={{ color: status === '已保存。' ? '#34d399' : '#8a8aa0', margin: '0 0 12px' }}>{status}</p>}
           <Card title="写作摘要" span style={{ marginBottom: 16 }}>
-            <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: '#c0c0d0', fontSize: 13, lineHeight: 1.6, maxHeight: 400, overflow: 'auto' }}>{summary || '保存后，这里会汇总正文真正需要遵守的世界规则。'}</pre>
+            <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: '#c0c0d0', fontSize: 14, lineHeight: 1.6, maxHeight: 400, overflow: 'auto' }}>{summary || '暂无写作摘要'}</pre>
           </Card>
           {viewMode === 'read' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -216,7 +223,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
                   {!isCollapsed && (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
                       {group.fields.map(item => (
-                        <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 13, ...(item.key === 'custom_settings' ? { gridColumn: '1 / -1' } : null) }}>
+                        <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 14, ...(item.key === 'custom_settings' ? { gridColumn: '1 / -1' } : null) }}>
                           <span style={{ color: '#c0c0d0' }}>{item.label}</span>
                           {item.key === 'custom_settings' ? (
                             <CustomSettingsEditor value={profile['custom_settings'] || '[]'} onChange={v => setProfile(current => ({ ...current, custom_settings: v }))} />

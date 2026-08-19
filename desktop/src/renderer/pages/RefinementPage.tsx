@@ -23,8 +23,9 @@ const TOOLS: ToolTab[] = [
   { id: 'deai', label: '去AI味', icon: '🧹',
     endpoints: [
       { label: 'AI痕迹检测', method: 'post', path: '/refinement/de-ai/detect', body: { content: '' } },
-      { label: '降AI处理', method: 'post', path: '/refinement/de-ai/polish', body: { content: '', intensity: 50 } },
-    ], desc: 'AI痕迹检测引擎+降AI处理(轻度/中度/重度滑块)' },
+      { label: '正则降AI处理', method: 'post', path: '/refinement/de-ai/polish', body: { content: '', intensity: 50 } },
+      { label: 'LLM局部改写(推荐)', method: 'post', path: '/refinement/de-ai/llm-rewrite', body: { content: '', maxRewrites: 3 } },
+    ], desc: 'AI痕迹检测+正则降AI+LLM局部改写(只改问题段落，不破坏全文逻辑)' },
   { id: 'describe', label: '逐句精修', icon: '🎨',
     endpoints: [
       { label: '可用风格', method: 'get', path: '/refinement/describe/styles' },

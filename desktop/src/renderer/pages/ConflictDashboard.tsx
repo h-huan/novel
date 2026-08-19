@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ConflictDashboard - 冲突优先级可视化面板
  * 对接后端 /conflict-engine/* API
  *
@@ -12,6 +12,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import EmptyState from '../components/common/EmptyState';
 
 type ConflictActionKind =
   | 'view_chapter'
@@ -69,6 +70,7 @@ const ConflictDashboard: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [recheckMessage, setRecheckMessage] = useState<string | null>(null);
   const [cleaningStale, setCleaningStale] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
 
   const loadConflicts = useCallback(async () => {
     setLoading(true);
@@ -161,7 +163,7 @@ const ConflictDashboard: React.FC = () => {
   const selected = conflicts.find(c => c.id === selectedId);
 
   return (
-    <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#1a1a2e' }}>
       {/* 顶部 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>⚡ 冲突优先级</h1>
@@ -213,15 +215,56 @@ const ConflictDashboard: React.FC = () => {
         ))}
       </div>
 
+      {/* 按来源筛选（P2-1：质检结果按source分组展示） */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '12px', color: '#8a8aa0', fontWeight: 600 }}>按来源筛选：</span>
+        {[
+          { key: 'all', label: '全部', count: conflicts.length },
+          { key: 'deterministic', label: '确定性检查', count: conflicts.filter(c => !c.source || c.source === 'deterministic').length },
+          { key: 'alignment_verifier', label: 'LLM大纲验收', count: conflicts.filter(c => c.source === 'alignment_verifier').length },
+          { key: 'alignment_verifier_hardline', label: '硬红线扫描', count: conflicts.filter(c => c.source === 'alignment_verifier_hardline' || c.source === 'hardline').length },
+        ].map(s => (
+          <button
+            key={s.key}
+            onClick={() => setSourceFilter(s.key)}
+            style={{
+              padding: '4px 12px',
+              borderRadius: '14px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              border: `1px solid ${sourceFilter === s.key ? '#e94560' : 'rgba(255,255,255,0.12)'}`,
+              backgroundColor: sourceFilter === s.key ? 'rgba(233,69,96,0.15)' : 'rgba(255,255,255,0.03)',
+              color: sourceFilter === s.key ? '#e94560' : '#c0c0d0',
+            }}
+          >
+            {s.label} ({s.count})
+          </button>
+        ))}
+      </div>
+
       {/* 列表+详情 */}
       <div style={{ display: 'flex', gap: '16px', flex: 1, overflow: 'hidden' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', overflow: 'auto' }}>
           {conflicts.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#c0c0d0' }}>
-              <p>暂无冲突，点击刷新按钮加载</p>
-            </div>
+            <EmptyState
+              icon="⚡"
+              title="暂无冲突"
+              description="点击刷新按钮加载冲突数据，或继续写作让系统自动检测前后矛盾。"
+              actionLabel="刷新"
+              onAction={loadConflicts}
+            />
           )}
-          {conflicts.map(c => (
+          {conflicts
+            .filter(c => {
+              if (sourceFilter === 'all') return true;
+              if (sourceFilter === 'deterministic') return !c.source || c.source === 'deterministic';
+              if (sourceFilter === 'alignment_verifier') return c.source === 'alignment_verifier';
+              if (sourceFilter === 'alignment_verifier_hardline') return c.source === 'alignment_verifier_hardline' || c.source === 'hardline';
+              return true;
+            })
+            .map((c, idx) => (
             <div key={c.id} onClick={() => setSelectedId(c.id)}
               style={{
                 padding: '10px 14px', borderRadius: '8px', cursor: 'pointer', border: '1px solid',
@@ -229,6 +272,7 @@ const ConflictDashboard: React.FC = () => {
                 borderColor: selectedId === c.id ? 'rgba(233,69,96,0.3)' : 'rgba(255,255,255,0.06)',
               }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
                 <span style={{ padding: '2px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 700, backgroundColor: `${LEVEL_COLORS[c.level]}25`, color: LEVEL_COLORS[c.level] }}>{c.level}</span>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: PRIORITY_COLORS[c.priority], flexShrink: 0 }} />
                 <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: `${PRIORITY_COLORS[c.priority]}25`, color: PRIORITY_COLORS[c.priority], fontWeight: 600 }}>{c.type}</span>
@@ -278,7 +322,7 @@ const ConflictDashboard: React.FC = () => {
                           style={{
                             padding: '8px 12px', borderRadius: 6, cursor: busyAction === null ? 'pointer' : 'not-allowed',
                             backgroundColor: tone.bg, border: `1px solid ${tone.border}`, color: tone.color,
-                            fontSize: 12, fontWeight: 700, textAlign: 'left',
+                            fontSize: 14, fontWeight: 700, textAlign: 'left',
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                             fontFamily: 'inherit', opacity: busyAction !== null && !isBusy ? 0.45 : 1,
                             transition: 'background-color 0.15s',
@@ -291,7 +335,7 @@ const ConflictDashboard: React.FC = () => {
                     })}
                   </div>
                   {selected.level === 'P0' && (
-                    <div style={{ marginTop: 8, padding: '8px 10px', backgroundColor: '#3b1418', border: '1px solid #e94560', borderRadius: 6, color: '#ffd1d8', fontSize: 11, fontWeight: 600, lineHeight: 1.5 }}>
+                    <div style={{ marginTop: 8, padding: '8px 10px', backgroundColor: '#3b1418', border: '1px solid #e94560', borderRadius: 6, color: '#ffd1d8', fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>
                       ⚠️ 本章已锁定。按文档 R1 金字塔，锁定正文（P0）优先级最高，AI 不可改；如需重写请先解锁。
                     </div>
                   )}
@@ -299,12 +343,12 @@ const ConflictDashboard: React.FC = () => {
               )}
 
               {actionError && (
-                <div style={{ marginTop: 8, padding: '8px 10px', backgroundColor: '#3b1418', border: '1px solid #e94560', borderRadius: 6, color: '#ffd1d8', fontSize: 11, fontWeight: 600, lineHeight: 1.5 }}>
+                <div style={{ marginTop: 8, padding: '8px 10px', backgroundColor: '#3b1418', border: '1px solid #e94560', borderRadius: 6, color: '#ffd1d8', fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>
                   {actionError}
                 </div>
               )}
               {recheckMessage && (
-                <div style={{ marginTop: 8, padding: '8px 10px', backgroundColor: 'rgba(46,204,113,0.10)', border: '1px solid rgba(46,204,113,0.25)', borderRadius: 6, color: '#d1f7c4', fontSize: 11, fontWeight: 600, lineHeight: 1.5 }}>
+                <div style={{ marginTop: 8, padding: '8px 10px', backgroundColor: 'rgba(46,204,113,0.10)', border: '1px solid rgba(46,204,113,0.25)', borderRadius: 6, color: '#d1f7c4', fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>
                   {recheckMessage}
                 </div>
               )}

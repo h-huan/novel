@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { useAppStore } from '../../stores/appStore';
 
 const StatusBar: React.FC = () => {
@@ -18,7 +18,7 @@ const StatusBar: React.FC = () => {
   };
 
   return (
-    <footer className="h-statusbar bg-bg-secondary border-t border-border flex items-center justify-between px-3 text-xs select-none">
+    <footer className="h-statusbar bg-bg-secondary border-t border-border flex items-center justify-between px-3 text-sm select-none">
       {/* Left: Auto-save status */}
       <div className="flex items-center gap-1.5 min-w-0">
         {autoSaveStatus !== 'idle' && (

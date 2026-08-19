@@ -39,6 +39,7 @@ import { OrganizationModule } from '../modules/organization/organization.module'
 import { MapPointModule } from '../modules/map-point/map-point.module';
 import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.module';
 import { WebSocketModule } from '../modules/websocket/websocket.module';
+import { QualityInspectionService } from '../modules/refinement/quality-inspection.service';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { WebSocketModule } from '../modules/websocket/websocket.module';
     MultiModelService,
     SeedEnrichChainService,
     GenerationRecoveryService,
+    QualityInspectionService,
   ],
   exports: [
     ChainEngineService,

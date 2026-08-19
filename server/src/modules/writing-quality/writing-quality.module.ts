@@ -9,9 +9,10 @@ import { WritingQualityController } from './writing-quality.controller';
 import { WritingQualityService } from './writing-quality.service';
 import { ChapterModule } from '../chapter/chapter.module';
 import { ChainModule } from '../../chain/chain.module';
+import { RefinementModule } from '../refinement/refinement.module';
 
 @Module({
-  imports: [ChapterModule, ChainModule],
+  imports: [ChapterModule, ChainModule, RefinementModule],
   controllers: [WritingQualityController],
   providers: [WritingQualityService],
   exports: [WritingQualityService],

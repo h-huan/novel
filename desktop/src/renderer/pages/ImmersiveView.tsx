@@ -18,6 +18,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useChapterStore } from '../stores/chapterStore';
 import { useProjectStore } from '../stores/projectStore';
 import { api } from '../lib/api';
+import { parseJsonToReadable } from '../lib/textList';
 
 const ImmersiveView: React.FC = () => {
   const { id: projectId, chapterId } = useParams<{ id: string; chapterId: string }>();
@@ -193,11 +194,11 @@ const ImmersiveView: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#8a8aa0', marginBottom: '8px', letterSpacing: '0.05em' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#8a8aa0', marginBottom: '8px', letterSpacing: '0.05em' }}>
             大纲
           </div>
-          <pre style={{ fontSize: '12px', color: '#a0a0b0', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-            {outline || '暂无大纲'}
+          <pre style={{ fontSize: '14px', color: '#a0a0b0', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+            {parseJsonToReadable(outline) || '暂无大纲'}
           </pre>
         </div>
       )}

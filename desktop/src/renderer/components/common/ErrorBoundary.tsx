@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -62,7 +62,7 @@ export class ErrorBoundary extends React.Component<
                 background: '#0f0f23',
                 padding: 12,
                 borderRadius: 6,
-                fontSize: 12,
+                fontSize: 14,
                 overflow: 'auto',
                 maxHeight: 160,
                 color: '#ff6b6b',

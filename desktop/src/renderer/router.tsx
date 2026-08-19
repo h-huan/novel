@@ -4,7 +4,6 @@ import AppLayout from './components/layout/AppLayout';
 
 // Pages
 import ProjectListPage from './pages/ProjectListPage';
-import ProjectDetailPage from './pages/ProjectDetailPage';
 import WritingPage from './pages/WritingPage';
 import CharacterPage from './pages/CharacterPage';
 import WorldPage from './pages/WorldPage';

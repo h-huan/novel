@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MapTreeView - 地图树状导航组件
  * 左侧面板，显示地点层级树
  */
@@ -66,11 +66,11 @@ const TreeNode: React.FC<{
         <span style={{ fontSize: '12px' }}>{LEVEL_ICONS[node.level] || '📍'}</span>
 
         {/* 名称 */}
-        <span className="flex-1 text-xs truncate">{node.name}</span>
+        <span className="flex-1 text-sm truncate">{node.name}</span>
 
         {/* 子节点数量 */}
         {hasChildren && (
-          <span className="text-text-muted text-xs px-1">{node.children.length}</span>
+          <span className="text-text-muted text-sm px-1">{node.children.length}</span>
         )}
 
         {/* 操作按钮（悬停显示） */}
@@ -118,12 +118,12 @@ const MapTreeView: React.FC<MapTreeViewProps> = ({
   return (
     <div className="h-full flex flex-col bg-bg-secondary border-r border-border">
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-        <span className="text-text-primary text-xs font-medium">地点层级</span>
-        <span className="text-text-muted text-xs">{tree.length} 个根节点</span>
+        <span className="text-text-primary text-sm font-medium">地点层级</span>
+        <span className="text-text-muted text-sm">{tree.length} 个根节点</span>
       </div>
       <div className="flex-1 overflow-y-auto custom-scrollbar p-1">
         {tree.length === 0 ? (
-          <div className="text-center text-text-muted text-xs py-8">
+          <div className="text-center text-text-muted text-sm py-8">
             暂无地点数据
             <br />
             点击右上角"+"创建

@@ -61,6 +61,7 @@ export class MapPointController {
   @Put(':id/profile') async updateProfile(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: Record<string, unknown>) { const result = this.service.updateProfile(projectId, id, body); const sync = await this.indexLocation(projectId, id); return { ...result, sync }; }
   @Get(':id/writing-summary') getWritingSummary(@Param('projectId') projectId: string, @Param('id') id: string) { return this.service.getWritingSummary(projectId, id); }
   @Post('consistency-check') checkConsistency(@Param('projectId') projectId: string, @Body() body: { content?: string }) { return { locationConsistency: this.service.checkConsistency(projectId, body.content || '') }; }
+  @Post('resync-links') resyncLinks(@Param('projectId') projectId: string) { return this.service.resyncLinks(projectId); }
   @Get(':id/relations') getRelations(@Param('projectId') projectId: string, @Param('id') id: string) { return this.service.getRelations(projectId, id); }
   @Put(':id/relations') async updateRelations(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: { relations?: any[] }) { const relations = this.service.updateRelations(projectId, id, body.relations || []); const sync = await this.indexLocation(projectId, id); return { relations, sync }; }
 

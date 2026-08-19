@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useOrganizationStore } from '../stores/organizationStore';
 import { useMapPointStore } from '../stores/mapPointStore';
@@ -145,11 +145,6 @@ const OrganizationMapPage: React.FC = () => {
             <strong style={styles.overviewCount}>{item.count}</strong>
           </div>
         ))}
-        <div style={styles.overviewHint}>
-          {activeTab === 'map'
-            ? '地图按宏观世界、区域、据点、具体场景交叉查看；同一章节可以同时引用多个层级。'
-            : '组织按势力范围和从属关系查看；角色身份变化、伏笔回收和地图据点应在这里互相对齐。'}
-        </div>
       </section>
 
       {activeTab === 'map' ? (
@@ -249,7 +244,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
-    backgroundColor: '#16213e',
+    backgroundColor: '#1a1a2e',
   },
   header: {
     minHeight: 72,
@@ -270,7 +265,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   subtitle: {
     margin: '4px 0 0',
-    fontSize: 12,
+    fontSize: 14,
     color: '#8a8aa0',
   },
   tabs: {
@@ -289,7 +284,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'transparent',
     color: '#8a8aa0',
     cursor: 'pointer',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 600,
     fontFamily: 'inherit',
   },
@@ -301,7 +296,7 @@ const styles: Record<string, React.CSSProperties> = {
   loading: {
     padding: '8px 20px',
     color: '#8a8aa0',
-    fontSize: 12,
+    fontSize: 14,
     borderBottom: '1px solid rgba(255,255,255,0.05)',
   },
   overview: {
@@ -322,7 +317,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   overviewLabel: {
     display: 'block',
-    fontSize: 11,
+    fontSize: 14,
     color: '#8a8aa0',
     whiteSpace: 'nowrap',
   },
@@ -337,7 +332,7 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     padding: '8px 10px',
     color: '#8a8aa0',
-    fontSize: 12,
+    fontSize: 14,
     lineHeight: 1.5,
   },
   workbench: {

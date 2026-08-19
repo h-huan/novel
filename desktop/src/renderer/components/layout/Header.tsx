@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+﻿import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from '../../stores/appStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -269,7 +269,7 @@ const Header: React.FC = () => {
               {/* 使用手册弹框 */}
               <button
                 onClick={() => setHelpOpen(true)}
-                className={`px-2.5 py-1 text-xs rounded transition-colors duration-150 ${
+                className={`px-2.5 py-1 text-sm rounded transition-colors duration-150 ${
                   helpOpen
                     ? 'text-green-400 bg-green-400/10'
                     : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
@@ -293,7 +293,7 @@ const Header: React.FC = () => {
         {/* Auto-save indicator */}
         {autoSaveStatus !== 'idle' && (
           <span
-            className={`text-xs px-2 py-0.5 rounded ${
+            className={`text-sm px-2 py-0.5 rounded ${
               autoSaveStatus === 'saved'
                 ? 'text-success bg-success/10'
                 : autoSaveStatus === 'saving'

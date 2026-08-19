@@ -4,6 +4,7 @@
  */
 import React, { useState, useCallback } from 'react';
 import { api } from '../lib/api';
+import EmptyState from '../components/common/EmptyState';
 
 interface MaterialItem {
   id: string;
@@ -106,8 +107,11 @@ const MaterialPage: React.FC = () => {
   }, [downloadedIds]);
 
   return (
-    <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>📚 素材库</h1>
+    <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#1a1a2e' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>📚 素材库</h1>
+        <span style={{ fontSize: '12px', color: '#8a8aa0' }}>共 {materials.length} 条素材</span>
+      </div>
 
       <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         {(['browse', 'import', 'search', 'market'] as const).map(tab => (
@@ -168,10 +172,24 @@ const MaterialPage: React.FC = () => {
               </button>
             ))}
           </div>
+          {searchResults.length === 0 && searchQuery && (
+            <EmptyState
+              icon="🔍"
+              title="未找到相关素材"
+              description="尝试更换关键词，或调整融合模式后重新搜索。"
+            />
+          )}
           {searchResults.map((r, i) => (
-            <div key={i} style={{ padding: '10px 14px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ fontSize: '12px', color: '#eaeaea' }}>{r.content}</div>
-              <div style={{ fontSize: '10px', color: '#6c6c80', marginTop: '4px' }}>{TYPE_ICONS[r.type]} {TYPE_LABELS[r.type]} | 标签: {r.tags.join(', ')}</div>
+            <div key={i} style={{ padding: '12px 16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{i + 1}</span>
+                <span style={{ fontSize: '16px' }}>{TYPE_ICONS[r.type]}</span>
+                <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', backgroundColor: 'rgba(233,69,96,0.1)', color: '#e94560', fontWeight: 600 }}>{TYPE_LABELS[r.type]}</span>
+              </div>
+              <div style={{ fontSize: '13px', color: '#eaeaea', lineHeight: 1.6 }}>{r.content}</div>
+              {r.tags && r.tags.length > 0 && (
+                <div style={{ fontSize: '11px', color: '#6c6c80', marginTop: '8px' }}>标签: {r.tags.join(', ')}</div>
+              )}
             </div>
           ))}
         </div>
@@ -236,20 +254,23 @@ const MaterialPage: React.FC = () => {
             <div style={{ textAlign: 'center', padding: '30px', color: '#6c6c80', fontSize: '13px' }}>加载中...</div>
           )}
           {!marketLoading && marketMaterials.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#6c6c80', fontSize: '13px' }}>
-              暂无内置素材，请检查后端服务是否运行
-            </div>
+            <EmptyState
+              icon="🏪"
+              title="暂无内置素材"
+              description="请检查后端服务是否运行，或选择其他分类查看素材。"
+            />
           )}
           <div style={{ gap: '8px', display: 'flex', flexDirection: 'column' }}>
             {marketMaterials.map((m, i) => {
               const isDownloaded = downloadedIds.has(m.id);
               return (
                 <div key={m.id || i} style={{
-                  padding: '10px 14px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px',
+                  padding: '12px 16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px',
                   border: '1px solid rgba(255,255,255,0.06)', position: 'relative',
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ padding: '2px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: 'rgba(233,69,96,0.1)', color: '#e94560' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{i + 1}</span>
+                    <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', backgroundColor: 'rgba(233,69,96,0.1)', color: '#e94560', fontWeight: 600 }}>
                       内置
                     </span>
                     <span style={{ fontSize: '11px', color: '#6c6c80' }}>{m.source || '素材市场'}</span>
@@ -264,12 +285,14 @@ const MaterialPage: React.FC = () => {
                       {isDownloaded ? '✅ 已导入' : '📥 导入'}
                     </button>
                   </div>
-                  <p style={{ margin: '6px 0 0 0', fontSize: '13px', color: '#c0c0d0', lineHeight: 1.5 }}>{m.content}</p>
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                    {(m.tags || []).map((t, ti) => (
-                      <span key={ti} style={{ padding: '2px 6px', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '3px', fontSize: '10px', color: '#6c6c80' }}>#{t}</span>
-                    ))}
-                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#c0c0d0', lineHeight: 1.6 }}>{m.content}</p>
+                  {(m.tags || []).length > 0 && (
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                      {(m.tags || []).map((t, ti) => (
+                        <span key={ti} style={{ padding: '2px 8px', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '4px', fontSize: '11px', color: '#8a8aa0' }}>#{t}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -293,23 +316,30 @@ const MaterialPage: React.FC = () => {
           </div>
           <div style={{ gap: '8px', display: 'flex', flexDirection: 'column' }}>
             {filtered.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '40px', color: '#6c6c80', fontSize: '13px' }}>
-                暂无素材，切换到「拆书导入」标签导入文本
-              </div>
+              <EmptyState
+                icon="📂"
+                title="暂无素材"
+                description="切换到「拆书导入」标签粘贴小说文本，或从「素材市场」一键导入。"
+                actionLabel="去拆书导入"
+                onAction={() => setActiveTab('import')}
+              />
             )}
-            {filtered.map(m => (
-              <div key={m.id} style={{ padding: '10px 14px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {filtered.map((m, idx) => (
+              <div key={m.id} style={{ padding: '12px 16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
                   <span style={{ fontSize: '16px' }}>{TYPE_ICONS[m.type]}</span>
-                  <span style={{ padding: '2px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: 'rgba(233,69,96,0.1)', color: '#e94560' }}>{TYPE_LABELS[m.type]}</span>
+                  <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', backgroundColor: 'rgba(233,69,96,0.1)', color: '#e94560', fontWeight: 600 }}>{TYPE_LABELS[m.type]}</span>
                   <span style={{ fontSize: '11px', color: '#6c6c80' }}>{m.source}</span>
                 </div>
-                <p style={{ margin: '6px 0 0 0', fontSize: '13px', color: '#c0c0d0', lineHeight: 1.5 }}>{m.content}</p>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                  {Array.isArray(m.tags) && m.tags.map((t, i) => (
-                    <span key={i} style={{ padding: '2px 6px', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '3px', fontSize: '10px', color: '#6c6c80' }}>#{t}</span>
-                  ))}
-                </div>
+                <p style={{ margin: 0, fontSize: '13px', color: '#c0c0d0', lineHeight: 1.6 }}>{m.content}</p>
+                {Array.isArray(m.tags) && m.tags.length > 0 && (
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                    {m.tags.map((t, i) => (
+                      <span key={i} style={{ padding: '2px 8px', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '4px', fontSize: '11px', color: '#8a8aa0' }}>#{t}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

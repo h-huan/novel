@@ -1,5 +1,5 @@
-﻿/**
- * 绔犺妭 Repository
+/**
+ * 章节 Repository
  */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
@@ -41,7 +41,7 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 鎸夐」鐩甀D鏌ヨ
+   * 按项目ID查询
    */
   findByProjectId(projectId: string): ChapterRow[] {
     const stmt = this.db.prepare(`
@@ -74,7 +74,7 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 閿佸畾绔犺妭
+   * 锁定章节
    */
   lockChapter(id: string): ChapterRow | undefined {
     const now = new Date().toISOString();
@@ -102,7 +102,7 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 瑙ｉ攣绔犺妭
+   * 解锁章节
    */
   unlockChapter(id: string): ChapterRow | undefined {
     const now = new Date().toISOString();
@@ -136,7 +136,7 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 鏇存柊绔犺妭鍐呭
+   * 更新章节内容
    */
   updateContent(id: string, content: string, wordCount: number): ChapterRow | undefined {
     const now = new Date().toISOString();
@@ -171,7 +171,8 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 缁熻鍚勭姸鎬佺殑绔犺妭鏁?   */
+   * 统计各状态的章节数
+   */
   getStatusStats(projectId: string): Record<string, number> {
     const rows = this.db.prepare(`
       SELECT status, COUNT(*) as count FROM chapters

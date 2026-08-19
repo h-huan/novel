@@ -81,10 +81,10 @@ const STEP_LABELS = ['配置', '发现', '创建'];
 const CREATION_STEPS = [
   { label: '创建项目...', key: 'project' },
   { label: '生成世界观...', key: 'world' },
-  { label: '生成角色...', key: 'characters' },
   { label: '生成大纲...', key: 'outline' },
-  { label: '生成伏笔...', key: 'foreshadowing' },
+  { label: '生成角色...', key: 'characters' },
   { label: '生成组织与地点...', key: 'orgs' },
+  { label: '生成伏笔...', key: 'foreshadowing' },
   { label: '生成时间线...', key: 'timeline' },
   { label: '完成！', key: 'done' },
 ];
@@ -493,6 +493,7 @@ const DiscoveryWizardPage: React.FC = () => {
   const [categories, setCategories] = useState<Array<{ name: string; children: string[] }>>([]);
   const [toneTags, setToneTags] = useState<string[]>([]);
   const [writingStyles, setWritingStyles] = useState<string[]>([]);
+  const [webNovelGenres, setWebNovelGenres] = useState<string[]>([]);
   const [configError, setConfigError] = useState('');
 
   // A new visit starts a new discovery session. Old candidates must never
@@ -518,6 +519,10 @@ const DiscoveryWizardPage: React.FC = () => {
     api.get('/dict/writing_style').then(r => {
       const styles = (r as any)?.items || [];
       setWritingStyles(styles.map((s: any) => s.label));
+    }).catch(() => {});
+    api.get('/dict/web_novel_genre').then(r => {
+      const genres = (r as any)?.items || [];
+      setWebNovelGenres(genres.map((g: any) => g.label));
     }).catch(() => {});
   }, []);
 
@@ -836,6 +841,17 @@ const DiscoveryWizardPage: React.FC = () => {
 
     try {
       const currentState = useDiscoveryStore.getState();
+      // 将用户选择的标签按维度分类
+      const userStoryTones = currentState.selectedTones.filter((t: string) => toneTags.includes(t));
+      const userWritingStyles = currentState.selectedTones.filter((t: string) => writingStyles.includes(t));
+      const userGenres = currentState.selectedTones.filter((t: string) => webNovelGenres.includes(t));
+      // AI推荐的标签（优先用AI推荐，用户选择作为补充）
+      const aiStoryTone = idea.storyTone ? (Array.isArray(idea.storyTone) ? idea.storyTone : [idea.storyTone]) : [];
+      const aiWritingStyle = idea.writingStyle ? (Array.isArray(idea.writingStyle) ? idea.writingStyle : [idea.writingStyle]) : [];
+      const aiGenre = idea.webNovelGenre ? (Array.isArray(idea.webNovelGenre) ? idea.webNovelGenre : [idea.webNovelGenre]) : [];
+      const finalStoryTones = [...new Set([...aiStoryTone, ...userStoryTones])];
+      const finalWritingStyles = [...new Set([...aiWritingStyle, ...userWritingStyles])];
+      const finalGenres = [...new Set([...aiGenre, ...userGenres])];
       // 第一步：调用异步 API 创建项目
       const res = await api.post<any>('/chain/create-project-async', {
         title: idea.title,
@@ -846,6 +862,10 @@ const DiscoveryWizardPage: React.FC = () => {
         settings: {
           genre: [currentState.selectedCategory, currentState.selectedSubCategory].filter(Boolean).join('/'),
           style: currentState.selectedTones.join('、'),
+          storyTone: finalStoryTones,
+          writingStyle: finalWritingStyles,
+          webNovelGenre: finalGenres,
+          recommendedPlatform: idea.recommendedPlatform || currentState.platform,
           chapterWordRange: { min: 3200, max: 4000 },
           structurePlanning: 'dynamic_by_story_rhythm',
         },
@@ -1080,6 +1100,24 @@ const DiscoveryWizardPage: React.FC = () => {
                 onClick={() => toggleTone(style)}
               >
                 {style}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* 网文流派 */}
+      {webNovelGenres.length > 0 && (
+        <>
+          <div style={s.sectionTitle}>网文流派（可多选，题材设定方向）</div>
+          <div style={s.toneGrid}>
+            {webNovelGenres.map((genre) => (
+              <button
+                key={genre}
+                style={getToneBtnStyle(selectedTones.includes(genre))}
+                onClick={() => toggleTone(genre)}
+              >
+                {genre}
               </button>
             ))}
           </div>

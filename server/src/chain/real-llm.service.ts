@@ -242,13 +242,16 @@ export class RealLLMService implements ILLMService {
     // 调用方可显式传 maxEmptyRetries 提高关键验收器的重试次数。
     const maxEmptyRetries = request.maxEmptyRetries ?? 2;
     let lastEmptyError: Error | null = null;
+    // 温度优先级：调用方显式传入的 temperature > 路由配置的 temperature
+    // 这样既保持了route-config的统一管理，又允许关键场景（如高潮章节）动态调整温度
+    const baseTemperature = request.temperature !== undefined ? request.temperature : routedModel.temperature;
     try {
       for (let attempt = 0; attempt <= maxEmptyRetries; attempt++) {
         // 空内容重试时给一个小幅温度抖动（封顶 0.5），尽量避开上游瞬时空内容 bug，
-        // 温度仍由路由配置主导，绝不替换模型或去掉 response_format。
+        // 温度仍由路由配置或调用方指定值主导，绝不替换模型或去掉 response_format。
         const jitterTemp = attempt === 0
-          ? routedModel.temperature
-          : Math.min(0.5, Number(routedModel.temperature) + 0.1 * attempt);
+          ? baseTemperature
+          : Math.min(0.5, Number(baseTemperature) + 0.1 * attempt);
         const result = await withTimeout(
           this.callModel(
             modelName,

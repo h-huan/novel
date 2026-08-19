@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { SectionHeading, FieldList, ChipList } from '../common/ListBlocks';
+import { parseJsonToReadable } from '../../lib/textList';
 
 /**
  * 短篇世界观数据结构
@@ -48,19 +49,14 @@ const parseMaybeJson = (value: unknown): unknown => {
 };
 
 const toDisplayText = (value: unknown): string => {
+  if (typeof value === 'string') return parseJsonToReadable(value);
   const parsed = parseMaybeJson(value);
   if (parsed === null || parsed === undefined) return '';
-  if (typeof parsed === 'string') return parsed;
+  if (typeof parsed === 'string') return parseJsonToReadable(parsed);
   if (typeof parsed === 'number' || typeof parsed === 'boolean') return String(parsed);
-  if (Array.isArray(parsed)) return parsed.map(toDisplayText).filter(Boolean).join('、');
+  if (Array.isArray(parsed)) return parsed.map(toDisplayText).filter(Boolean).join('\n');
   if (typeof parsed === 'object') {
-    const item = parsed as Record<string, unknown>;
-    const name = toDisplayText(item.name || item.title);
-    const type = toDisplayText(item.type || item.level || item.category);
-    const description = toDisplayText(item.description || item.rule || item.content);
-    if (name && description) return type ? `${name}（${type}）：${description}` : `${name}：${description}`;
-    const parts = Object.values(item).map(toDisplayText).filter(Boolean);
-    return name || description || parts.join('；');
+    return parseJsonToReadable(parsed);
   }
   return '';
 };
@@ -140,7 +136,7 @@ const WorldSimpleView: React.FC = () => {
           economy: toDisplayText(ws.economy || ''),
           culture: toDisplayText(ws.culture || ''),
           history: toDisplayText(ws.history || ''),
-          factions: toDisplayText(Array.isArray(ws.factions) ? ws.factions.map((f:any) => f?.name || f).join('；') : ''),
+          factions: toDisplayText(ws.factions || ''),
           endingDirection: toDisplayText(ws.endingDirection || ''),
           atmosphereTone: toDisplayText(ws.atmosphereTone || ''),
           rules: toDisplayText(ws.rules || ''),
@@ -205,8 +201,8 @@ const WorldSimpleView: React.FC = () => {
       <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <SectionHeading title="故事速览" accent="#e94560" hint="一句话背景 · 时代 · 核心地点 · 核心规则" />
         {settings.storyPremise && <div style={{ fontSize: 14, lineHeight: 1.7, color: '#eaeaea' }}>{settings.storyPremise}</div>}
-        <div><span style={{ fontSize: 12, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>时代</span><ChipList items={settings.era ? [settings.era] : []} color="#f59e0b" /></div>
-        <div><span style={{ fontSize: 12, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>核心地点</span><ChipList items={settings.locations} color="#60a5fa" /></div>
+        <div><span style={{ fontSize: 14, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>时代</span><ChipList items={settings.era ? [settings.era] : []} color="#f59e0b" /></div>
+        <div><span style={{ fontSize: 14, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>核心地点</span><ChipList items={settings.locations} color="#60a5fa" /></div>
         <FieldList label="社会与行业规则" value={settings.socialRules} accent="#a78bfa" />
         <FieldList label="特殊设定" value={settings.specialSettings} accent="#f59e0b" />
       </section>
@@ -245,25 +241,21 @@ const WorldSimpleView: React.FC = () => {
 
   return (
     <div style={{ padding: '20px', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div>
-        <h2 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>
           🌍 世界观
         </h2>
-        <p style={{ margin: 0, fontSize: '13px', color: '#8a8aa0' }}>
-          只记录这部小说实际用到的时代、环境、地点和规则，不需要的内容不用填写
-        </p>
+        <button
+          type="button"
+          onClick={() => {
+            if (isEditing) { void loadSettings(); setIsEditing(false); }
+            else setIsEditing(true);
+          }}
+          style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid rgba(233,69,96,0.45)', background: isEditing ? 'rgba(255,255,255,0.04)' : 'rgba(233,69,96,0.12)', color: isEditing ? '#c0c0d0' : '#ff9aaa', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}
+        >
+          {isEditing ? '取消编辑' : '编辑'}
+        </button>
       </div>
-
-      <button
-        type="button"
-        onClick={() => {
-          if (isEditing) { void loadSettings(); setIsEditing(false); }
-          else setIsEditing(true);
-        }}
-        style={{ alignSelf: 'flex-end', padding: '8px 14px', borderRadius: '6px', border: '1px solid rgba(233,69,96,0.45)', background: isEditing ? 'rgba(255,255,255,0.04)' : 'rgba(233,69,96,0.12)', color: isEditing ? '#c0c0d0' : '#ff9aaa', cursor: 'pointer', fontFamily: 'inherit' }}
-      >
-        {isEditing ? '取消编辑' : '编辑世界观'}
-      </button>
 
       {saveMessage && (
         <div style={{

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PromptChainPage - Prompt Chain 可视化编辑器
  *
  * 使用 React Flow 构建拖拽式 Chain 编辑器：
@@ -125,22 +125,22 @@ const ChainNodeComponent: React.FC<NodeProps<ChainNodeData>> = ({ data, selected
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{ fontSize: 16 }}>{icons[data.nodeType] || '📦'}</span>
-        <span style={{ fontSize: 10, padding: '2px 6px', background: `${color}22`, borderRadius: 4, color }}>{data.nodeType.toUpperCase()}</span>
+        <span style={{ fontSize: 14, padding: '2px 6px', background: `${color}22`, borderRadius: 4, color }}>{data.nodeType.toUpperCase()}</span>
       </div>
 
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#eaeaea', marginBottom: 4 }}>{data.label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea', marginBottom: 4 }}>{data.label}</div>
 
       {data.templateId && (
-        <div style={{ fontSize: 10, color: '#8a8aa0', marginBottom: 2 }}>模板: {data.templateId}</div>
+        <div style={{ fontSize: 14, color: '#8a8aa0', marginBottom: 2 }}>模板: {data.templateId}</div>
       )}
       {data.conditionExpression && (
-        <div style={{ fontSize: 10, color: '#f59e0b' }}>条件: {data.conditionExpression}</div>
+        <div style={{ fontSize: 14, color: '#f59e0b' }}>条件: {data.conditionExpression}</div>
       )}
       {data.maxIterations && (
-        <div style={{ fontSize: 10, color: '#ec4899' }}>最大迭代: {data.maxIterations}</div>
+        <div style={{ fontSize: 14, color: '#ec4899' }}>最大迭代: {data.maxIterations}</div>
       )}
 
-      <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 10 }}>{statusDot}</div>
+      <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 14 }}>{statusDot}</div>
     </div>
   );
 };
@@ -180,8 +180,8 @@ const SidePanel: React.FC = () => {
       height: '100%',
       overflow: 'auto',
     }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#8a8aa0', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>节点面板</div>
-      <div style={{ fontSize: 10, color: '#6c6c80', marginBottom: 8 }}>拖拽节点到画布</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#8a8aa0', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>节点面板</div>
+      <div style={{ fontSize: 14, color: '#6c6c80', marginBottom: 8 }}>拖拽节点到画布</div>
 
       {NODE_PALETTE_ITEMS.map(item => (
         <div
@@ -204,14 +204,14 @@ const SidePanel: React.FC = () => {
         >
           <span style={{ fontSize: 16 }}>{item.icon}</span>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#eaeaea' }}>{item.label}</div>
-            <div style={{ fontSize: 10, color: item.color }}>{item.type}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea' }}>{item.label}</div>
+            <div style={{ fontSize: 14, color: item.color }}>{item.type}</div>
           </div>
         </div>
       ))}
 
       <div style={{ marginTop: 'auto', padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-        <div style={{ fontSize: 10, color: '#6c6c80', lineHeight: 1.6 }}>
+        <div style={{ fontSize: 14, color: '#6c6c80', lineHeight: 1.6 }}>
           快捷键:<br />
           Delete = 删除选中节点/连线<br />
           Ctrl+S = 保存<br />
@@ -247,8 +247,8 @@ const PropertiesPanel: React.FC<{
         color: '#6c6c80',
       }}>
         <span style={{ fontSize: 32, marginBottom: 12 }}>👈</span>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>选择一个节点</div>
-        <div style={{ fontSize: 11 }}>点击画布中的节点查看属性</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>选择一个节点</div>
+        <div style={{ fontSize: 14 }}>点击画布中的节点查看属性</div>
       </div>
     );
   }
@@ -271,14 +271,14 @@ const PropertiesPanel: React.FC<{
     border: '1px solid rgba(255,255,255,0.1)',
     borderRadius: 6,
     color: '#eaeaea',
-    fontSize: 12,
+    fontSize: 14,
     outline: 'none',
     fontFamily: 'inherit',
     boxSizing: 'border-box',
   };
 
   const labelStyle: React.CSSProperties = {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: 600,
     color: '#8a8aa0',
     marginBottom: 4,
@@ -299,8 +299,8 @@ const PropertiesPanel: React.FC<{
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <span style={{ fontSize: 18 }}>{icons[data.nodeType] || '📦'}</span>
         <div>
-          <div style={{ fontSize: 11, color, fontWeight: 600 }}>{data.nodeType.toUpperCase()}</div>
-          <div style={{ fontSize: 13, color: '#eaeaea', fontWeight: 700 }}>{data.label || '未命名节点'}</div>
+          <div style={{ fontSize: 14, color, fontWeight: 600 }}>{data.nodeType.toUpperCase()}</div>
+          <div style={{ fontSize: 14, color: '#eaeaea', fontWeight: 700 }}>{data.label || '未命名节点'}</div>
         </div>
       </div>
 
@@ -351,7 +351,7 @@ const PropertiesPanel: React.FC<{
             </div>
             <div>
               <div style={labelStyle}>分支目标</div>
-              <div style={{ fontSize: 10, color: '#6c6c80' }}>通过连线连接目标和条件分支</div>
+              <div style={{ fontSize: 14, color: '#6c6c80' }}>通过连线连接目标和条件分支</div>
             </div>
           </>
         )}
@@ -380,7 +380,7 @@ const PropertiesPanel: React.FC<{
         {/* 节点 ID */}
         <div>
           <div style={labelStyle}>节点 ID</div>
-          <div style={{ fontSize: 11, color: '#6c6c80', padding: '6px 0' }}>{node.id}</div>
+          <div style={{ fontSize: 14, color: '#6c6c80', padding: '6px 0' }}>{node.id}</div>
         </div>
 
       </div>
@@ -434,7 +434,7 @@ const ChainEditor: React.FC = () => {
       animated: true,
       style: { stroke: '#6366f1', strokeWidth: 2 },
       label: 'success',
-      labelStyle: { fill: '#8a8aa0', fontSize: 10 },
+      labelStyle: { fill: '#8a8aa0', fontSize: 14 },
     }, eds));
   }, [setEdges]);
 
@@ -585,7 +585,7 @@ const ChainEditor: React.FC = () => {
                 animated: true,
                 style: { stroke: '#6366f1', strokeWidth: 2 },
                 label: 'success',
-                labelStyle: { fill: '#8a8aa0', fontSize: 10 },
+                labelStyle: { fill: '#8a8aa0', fontSize: 14 },
               });
             });
           }
@@ -680,7 +680,7 @@ const ChainEditor: React.FC = () => {
                 animated: true,
                 style: { stroke: '#6366f1', strokeWidth: 2 },
                 label: 'success',
-                labelStyle: { fill: '#8a8aa0', fontSize: 10 },
+                labelStyle: { fill: '#8a8aa0', fontSize: 14 },
               });
             });
           }
@@ -734,7 +734,7 @@ const ChainEditor: React.FC = () => {
       zIndex: 9999,
       padding: '10px 24px',
       borderRadius: 8,
-      fontSize: 13,
+      fontSize: 14,
       fontWeight: 600,
       background: toast.type === 'success' ? 'rgba(16,185,129,0.9)' : toast.type === 'error' ? 'rgba(239,68,68,0.9)' : 'rgba(99,102,241,0.9)',
       color: '#fff',
@@ -777,8 +777,8 @@ const ChainEditor: React.FC = () => {
         <button onClick={handleImport} style={toolBtnStyle}>📥 导入 JSON</button>
 
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#eaeaea' }}>{chainName}</span>
-        <span style={{ fontSize: 10, color: '#6c6c80' }}>{nodes.length} 个节点 / {edges.length} 条连线</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea' }}>{chainName}</span>
+        <span style={{ fontSize: 14, color: '#6c6c80' }}>{nodes.length} 个节点 / {edges.length} 条连线</span>
       </div>
 
       {/* ===== Main Content ===== */}
@@ -860,7 +860,7 @@ const ChainEditor: React.FC = () => {
           <div style={{ ...dialogStyle, maxHeight: 400, overflow: 'auto' }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#eaeaea' }}>加载 Chain</h3>
             {savedChains.length === 0 && (
-              <div style={{ color: '#6c6c80', fontSize: 12, textAlign: 'center', padding: 20 }}>暂无保存的 Chain</div>
+              <div style={{ color: '#6c6c80', fontSize: 14, textAlign: 'center', padding: 20 }}>暂无保存的 Chain</div>
             )}
             {savedChains.map(c => (
               <div
@@ -878,9 +878,9 @@ const ChainEditor: React.FC = () => {
                 onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
               >
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#eaeaea' }}>{c.name}</div>
-                <div style={{ fontSize: 10, color: '#8a8aa0', marginTop: 2 }}>{c.nodes} 个节点 · v{c.version}</div>
-                <div style={{ fontSize: 10, color: '#6c6c80', marginTop: 2 }}>{c.description}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea' }}>{c.name}</div>
+                <div style={{ fontSize: 14, color: '#8a8aa0', marginTop: 2 }}>{c.nodes} 个节点 · v{c.version}</div>
+                <div style={{ fontSize: 14, color: '#6c6c80', marginTop: 2 }}>{c.description}</div>
               </div>
             ))}
             <button
@@ -904,7 +904,7 @@ const toolBtnStyle: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 6,
   color: '#eaeaea',
-  fontSize: 11,
+  fontSize: 14,
   fontWeight: 600,
   cursor: 'pointer',
   fontFamily: 'inherit',
@@ -938,7 +938,7 @@ const dialogInputStyle: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 6,
   color: '#eaeaea',
-  fontSize: 12,
+  fontSize: 14,
   outline: 'none',
   fontFamily: 'inherit',
   marginBottom: 8,
@@ -951,7 +951,7 @@ const dialogBtnStyle: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 6,
   color: '#eaeaea',
-  fontSize: 12,
+  fontSize: 14,
   fontWeight: 600,
   cursor: 'pointer',
   fontFamily: 'inherit',

@@ -80,4 +80,9 @@ export class ChapterController {
   resyncDerivedData(@Param('projectId') projectId: string, @Param('id') id: string) {
     return this.service.resyncDerivedData(projectId, id);
   }
+
+  @Post('resync-foreshadowings')
+  resyncAllForeshadowings(@Param('projectId') projectId: string) {
+    return this.service.resyncAllForeshadowings(projectId);
+  }
 }

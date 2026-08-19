@@ -1,5 +1,5 @@
-﻿/**
- * 涓栫晫瑙傝缃?Repository
+/**
+ * 世界观设定 Repository
  */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
@@ -42,7 +42,7 @@ export class WorldSettingRepository extends BaseRepository<WorldSettingRow> {
   }
 
   /**
-   * 鎸夐」鐩甀D鏌ヨ
+   * 按项目ID查询
    */
   findByProjectId(projectId: string): WorldSettingRow[] {
     return this.findByField('project_id', projectId);
@@ -67,7 +67,7 @@ export class WorldSettingRepository extends BaseRepository<WorldSettingRow> {
   }
 
   /**
-   * 鍒犻櫎绾︽潫
+   * 删除约束
    */
   removeConstraint(worldId: string, constraintId: string): WorldSettingRow | undefined {
     const row = this.findById(worldId);
@@ -85,7 +85,7 @@ export class WorldSettingRepository extends BaseRepository<WorldSettingRow> {
   }
 
   /**
-   * 鏇存柊绾︽潫
+   * 更新约束
    */
   updateConstraint(worldId: string, constraintId: string, update: unknown): WorldSettingRow | undefined {
     const row = this.findById(worldId);

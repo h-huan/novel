@@ -1,5 +1,5 @@
-﻿/**
- * 鍦板浘鍦扮偣 Repository
+/**
+ * 地图地点 Repository
  */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
@@ -31,7 +31,7 @@ export class MapPointRepository extends BaseRepository<MapPointRow> {
   }
 
   /**
-   * 鎸夐」鐩甀D鏌ヨ
+   * 按项目ID查询
    */
   findByProjectId(projectId: string): MapPointRow[] {
     return this.findByField('project_id', projectId);
@@ -48,7 +48,8 @@ export class MapPointRepository extends BaseRepository<MapPointRow> {
   }
 
   /**
-   * 鎸夌埗鍦扮偣鏌ヨ瀛愬湴鐐?   */
+   * 按父地点查询子地点
+   */
   findByParentId(projectId: string, parentId: string): MapPointRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM map_points WHERE project_id = ? AND parent_id = ?
@@ -58,7 +59,8 @@ export class MapPointRepository extends BaseRepository<MapPointRow> {
   }
 
   /**
-   * 鏌ヨ鏍瑰湴鐐癸紙鏃犵埗鍦扮偣锛?   */
+   * 查询根地点（无父地点）
+   */
   findRoots(projectId: string): MapPointRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM map_points
@@ -69,7 +71,7 @@ export class MapPointRepository extends BaseRepository<MapPointRow> {
   }
 
   /**
-   * 鎼滅储鍦扮偣
+   * 搜索地点
    */
   search(projectId: string, query: string): MapPointRow[] {
     const stmt = this.db.prepare(`

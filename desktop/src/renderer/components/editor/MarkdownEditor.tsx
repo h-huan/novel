@@ -515,7 +515,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         onMount={handleMount}
         options={{
           fontSize: 16,
-          lineHeight: 28,
+          lineHeight: 22,
           fontFamily: 'var(--font-family)',
           wordWrap: 'on',
           minimap: { enabled: false },

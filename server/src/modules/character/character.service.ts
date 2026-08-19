@@ -68,6 +68,7 @@ export class CharacterService {
     private readonly stateRepo: CharacterStateRepository,
     private readonly databaseService: DatabaseService,
     @Optional() private readonly stateItemService?: StateItemService,
+    @Optional() private readonly mapPointService?: any,
   ) {}
 
   create(projectId: string, dto: CreateCharacterDto): CharacterResponse {
@@ -156,6 +157,11 @@ export class CharacterService {
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
+    // 角色身份/外貌/背景变化时，自动更新地点关联
+    if (this.mapPointService && (dto.identity !== undefined || dto.appearance !== undefined || dto.background !== undefined)) {
+      const characterText = `${response.identity || ''} ${response.appearance || ''} ${response.background || ''}`;
+      this.mapPointService.updateLinksForCharacter(existing.project_id, id, characterText);
+    }
     this.analyzeStateImpact(existing.project_id, id, '人物资料修改影响分析', {
       before: this.toResponse(existing),
       after: dto,
@@ -376,8 +382,7 @@ export class CharacterService {
       { title: '外貌与性格', fields: ['appearance','personality_traits'], labels: { appearance:'外貌特征', personality_traits:'性格特点' } },
       { title: '能力与背景', fields: ['abilities_skills','backstory'], labels: { abilities_skills:'能力/技能', backstory:'背景故事' } },
       { title: '关系与目标', fields: ['relationships','goals_motivation'], labels: { relationships:'人物关系', goals_motivation:'目标/动机' } },
-      { title: '弱点与语言', fields: ['weaknesses_fears','catchphrase_speech_style'], labels: { weaknesses_fears:'弱点/恐惧', catchphrase_speech_style:'口头禅/说话风格' } },
-      { title: '补充说明', fields: ['supplementary'], labels: { supplementary:'补充说明' } },
+      { title: '说话风格与弱点', fields: ['catchphrase_speech_style','weaknesses_fears'], labels: { catchphrase_speech_style:'口头禅/说话风格', weaknesses_fears:'弱点/恐惧' } },
     ];
     const profile = p as Record<string, any>;
     const sections: Record<string, Record<string, string>> = {};

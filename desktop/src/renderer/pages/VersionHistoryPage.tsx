@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import EmptyState from '../components/common/EmptyState';
 
 type Chapter = { id: string; volumeIndex: number; chapterIndex: number; title: string; content?: string; wordCount?: number };
 type Version = { id: string; version: number; snapshot: string; checksum?: string; changeSummary?: string; createdBy?: string; createdAt?: string };
@@ -85,7 +86,6 @@ const VersionHistoryPage: React.FC = () => {
         <div>
           <button style={styles.link} onClick={() => navigate(`/project/${projectId}/writing${chapterId ? `?chapter=${chapterId}` : ''}`)}>返回正文</button>
           <h1 style={styles.title}>修改记录</h1>
-          <p style={styles.subtitle}>这里读取数据库中该章节的真实正文快照；不会创建内存里的临时版本。</p>
         </div>
         <button style={styles.refresh} onClick={() => void loadHistory()} disabled={loading || !chapterId}>{loading ? '读取中…' : '刷新'}</button>
       </header>
@@ -105,10 +105,16 @@ const VersionHistoryPage: React.FC = () => {
           <button style={{ ...styles.version, ...(selectedVersion === null ? styles.activeVersion : {}) }} onClick={() => setSelectedVersion(null)}>
             <strong>当前正文</strong><span>{wordCount(currentContent)} 字</span>
           </button>
-          {versions.length === 0 ? <p style={styles.empty}>尚无历史快照。正文每次保存、送审或锁定前会自动保存已有内容。</p> : versions.map(version => (
+          {versions.length === 0 ? (
+            <EmptyState
+              icon="📜"
+              title="尚无历史快照"
+              description="保存正文后会自动生成版本快照。"
+            />
+          ) : versions.map((version, idx) => (
             <div key={version.id} style={{ ...styles.version, ...(selectedVersion === version.version ? styles.activeVersion : {}) }}>
               <button style={styles.versionSelect} onClick={() => setSelectedVersion(version.version)}>
-                <strong>版本 {version.version}</strong><span>{new Date(version.createdAt || '').toLocaleString()} · {wordCount(version.snapshot || '')} 字</span>
+                <strong>#{idx + 1} 版本 {version.version}</strong><span>{new Date(version.createdAt || '').toLocaleString()} · {wordCount(version.snapshot || '')} 字</span>
                 <small>{version.changeSummary || '正文快照'}</small>
               </button>
               <button style={styles.restore} onClick={() => void restore(version.version)} disabled={loading}>恢复</button>
@@ -125,14 +131,14 @@ const VersionHistoryPage: React.FC = () => {
 };
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { height: '100%', overflow: 'auto', padding: 24, color: '#e9ecf6', background: '#11162a' },
+  page: { height: '100%', overflow: 'auto', padding: 24, color: '#e9ecf6', background: '#1a1a2e' },
   header: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 18 },
-  link: { padding: 0, color: '#9db5ff', border: 0, background: 'transparent', cursor: 'pointer' }, title: { margin: '8px 0 4px', fontSize: 22 }, subtitle: { margin: 0, color: '#9ea8c6', fontSize: 13 },
-  refresh: { padding: '8px 14px', borderRadius: 6, color: '#fff', border: '1px solid #e94560', background: '#e94560', cursor: 'pointer' }, label: { display: 'grid', gap: 6, maxWidth: 560, fontSize: 13, color: '#aeb8d7' },
+  link: { padding: 0, color: '#9db5ff', border: 0, background: 'transparent', cursor: 'pointer' }, title: { margin: '8px 0 4px', fontSize: 22 }, subtitle: { margin: 0, color: '#9ea8c6', fontSize: 14 },
+  refresh: { padding: '8px 14px', borderRadius: 6, color: '#fff', border: '1px solid #e94560', background: '#e94560', cursor: 'pointer' }, label: { display: 'grid', gap: 6, maxWidth: 560, fontSize: 14, color: '#aeb8d7' },
   select: { padding: '9px 10px', color: '#edf0fb', background: '#1b213a', border: '1px solid #3a456d', borderRadius: 6 }, notice: { margin: '14px 0', padding: 10, color: '#ffd891', border: '1px solid #7d5e28', background: '#2d261c', borderRadius: 6 }, chapterInfo: { margin: '14px 0', color: '#aab5d3' },
   grid: { display: 'grid', gridTemplateColumns: 'minmax(250px, 34%) minmax(0, 1fr)', gap: 16, minHeight: 520 }, history: { display: 'grid', alignContent: 'start', gap: 8 }, version: { display: 'flex', border: '1px solid #303b60', borderRadius: 8, overflow: 'hidden', background: '#181e34' }, activeVersion: { borderColor: '#e94560', background: '#29203a' },
   versionSelect: { minWidth: 0, flex: 1, display: 'grid', gap: 4, textAlign: 'left', padding: 12, border: 0, color: '#ecf0ff', background: 'transparent', cursor: 'pointer' }, restore: { margin: 10, padding: '4px 10px', alignSelf: 'center', color: '#ffd37a', border: '1px solid #8c682c', borderRadius: 5, background: 'transparent', cursor: 'pointer' },
-  reader: { border: '1px solid #303b60', borderRadius: 8, background: '#171c31', minWidth: 0 }, readerHeader: { display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #303b60', color: '#c6d0eb' }, prose: { margin: 0, padding: 22, whiteSpace: 'pre-wrap', fontSize: 16, lineHeight: 2, color: '#f2f4fc' }, empty: { padding: 18, color: '#95a0c0', fontSize: 13, lineHeight: 1.7 },
+  reader: { border: '1px solid #303b60', borderRadius: 8, background: '#171c31', minWidth: 0 }, readerHeader: { display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #303b60', color: '#c6d0eb' }, prose: { margin: 0, padding: 22, whiteSpace: 'pre-wrap', fontSize: 16, lineHeight: 2, color: '#f2f4fc' }, empty: { padding: 18, color: '#95a0c0', fontSize: 14, lineHeight: 1.7 },
 };
 
 export default VersionHistoryPage;

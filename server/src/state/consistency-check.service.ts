@@ -10,6 +10,7 @@
  */
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { RealLLMService } from '../chain/real-llm.service';
 
 @Injectable()
 export class ConsistencyCheckService {
@@ -17,6 +18,7 @@ export class ConsistencyCheckService {
 
   constructor(
     private readonly databaseService: DatabaseService,
+    private readonly realLLM: RealLLMService,
   ) {}
 
   /**
@@ -132,23 +134,60 @@ export class ConsistencyCheckService {
       const characterContent = this.extractCharacterContent(chapter.content, character.name);
 
       if (characterContent) {
-        // 检查是否有性格反转
+        // 检查是否有性格反转（关键词初筛）
         const hasPersonalityConflict = this.detectPersonalityConflict(traits, characterContent);
 
         if (hasPersonalityConflict) {
-          checks.push({
-            checkType: 'character',
-            status: 'warning',
-            message: `人物 ${character.name} 的性格可能与设定不一致`,
-            severity: 'medium',
-            chapterIndex: chapter.index,
-            details: [{
-              field: `${character.name}.性格标签`,
-              expected: traits.join('、'),
-              actual: '本章表现出不一致的性格特征',
-              suggestion: '建议修改正文或更新人物设定',
-            }],
-          });
+          // P1-1：关键词初筛后用LLM语义二次确认，减少误报
+          let llmConfirmed = true;
+          let llmReason = '';
+          try {
+            const confirmPrompt = `请判断以下人物在正文中的表现是否与设定性格真正冲突。
+
+人物设定性格标签：${traits.join('、')}
+
+人物在本章正文中的相关片段：
+${characterContent.substring(0, 500)}
+
+判断标准：
+- 如果正文确实表现出与设定性格相反的行为或语言，返回true
+- 如果只是中性描述、上下文特殊情况、或关键词巧合匹配，返回false
+- 注意：人物可以有情绪波动，但核心性格不应反转
+
+以JSON格式输出：{"confirmed": boolean, "reason": string}`;
+            const confirmResponse = await this.realLLM.generate({
+              prompt: confirmPrompt,
+              scenario: 'quality_check',
+              temperature: 0.1,
+              maxTokens: 200,
+            });
+            const confirmText = String(confirmResponse.content || '').trim();
+            const jsonMatch = confirmText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              llmConfirmed = parsed.confirmed === true;
+              llmReason = parsed.reason || '';
+            }
+          } catch (e) {
+            // LLM确认失败时，保守保留关键词检测结果
+            this.logger.warn(`人物性格冲突LLM确认失败，保留关键词结果: ${e instanceof Error ? e.message : String(e)}`);
+          }
+
+          if (llmConfirmed) {
+            checks.push({
+              checkType: 'character',
+              status: 'warning',
+              message: `人物 ${character.name} 的性格可能与设定不一致${llmReason ? `（${llmReason}）` : ''}`,
+              severity: 'medium',
+              chapterIndex: chapter.index,
+              details: [{
+                field: `${character.name}.性格标签`,
+                expected: traits.join('、'),
+                actual: '本章表现出不一致的性格特征',
+                suggestion: '建议修改正文或更新人物设定',
+              }],
+            });
+          }
         }
       }
     }
@@ -273,11 +312,11 @@ export class ConsistencyCheckService {
   private async saveChecks(projectId: string, checks: Array<any>): Promise<void> {
     const db = this.databaseService.getDb();
 
-    // 每次检测前清掉同一批章节的历史结果，避免重复堆积（每个章节保留最新一份快照）
+    // 每次检测前只清掉同一批章节的"确定性检查"历史结果，避免删除LLM验收器/硬红线等其他来源的记录
     const chapterIndices = Array.from(new Set(checks.map(c => c.chapterIndex).filter((v: any) => v != null)));
     if (chapterIndices.length > 0) {
       const placeholders = chapterIndices.map(() => '?').join(',');
-      db.prepare(`DELETE FROM consistency_checks WHERE project_id = ? AND chapter_index IN (${placeholders})`)
+      db.prepare(`DELETE FROM consistency_checks WHERE project_id = ? AND chapter_index IN (${placeholders}) AND source = 'deterministic'`)
         .run(projectId, ...chapterIndices);
     }
 
@@ -285,8 +324,8 @@ export class ConsistencyCheckService {
       const stmt = db.prepare(`
         INSERT INTO consistency_checks (
           id, project_id, check_type, status, message, severity,
-          detected_at, chapter_index, details
-        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
+          detected_at, chapter_index, details, source
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, 'deterministic')
       `);
 
       stmt.run(
@@ -317,14 +356,23 @@ export class ConsistencyCheckService {
 
   /**
    * 检测性格冲突
+   * 扩展：从4对反义词扩展到12对，覆盖更多常见性格维度
    */
   private detectPersonalityConflict(traits: string[], characterContent: string): boolean {
-    // 简化版：检查是否有相反的性格描述
+    // 扩展版：12对常见性格反义词（原4对）
     const conflictPairs = [
-      ['勇敢', '胆小'],
-      ['正直', '狡诈'],
-      ['善良', '邪恶'],
-      ['乐观', '悲观'],
+      ['勇敢', '胆小'], ['勇敢', '怯懦'], ['勇敢', '懦弱'],
+      ['正直', '狡诈'], ['正直', '阴险'], ['正直', '虚伪'],
+      ['善良', '邪恶'], ['善良', '恶毒'], ['善良', '残忍'],
+      ['乐观', '悲观'], ['乐观', '消极'], ['乐观', '绝望'],
+      ['冷静', '冲动'], ['冷静', '暴躁'], ['冷静', '急躁'],
+      ['谨慎', '鲁莽'], ['谨慎', '莽撞'], ['谨慎', '轻率'],
+      ['慷慨', '吝啬'], ['慷慨', '小气'], ['慷慨', '抠门'],
+      ['忠诚', '背叛'], ['忠诚', '不忠'], ['忠诚', '叛变'],
+      ['谦虚', '傲慢'], ['谦虚', '骄傲'], ['谦虚', '自负'],
+      ['坚强', '脆弱'], ['坚强', '软弱'], ['坚强', '懦弱'],
+      ['热情', '冷漠'], ['热情', '冷淡'], ['热情', '冷酷'],
+      ['诚实', '说谎'], ['诚实', '欺骗'], ['诚实', '撒谎'],
     ];
 
     for (const [trait1, trait2] of conflictPairs) {

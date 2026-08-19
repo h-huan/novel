@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OrgTreeView - 组织树状导航组件
  * 左侧面板，显示组织层级树
  */
@@ -64,10 +64,10 @@ const OrgTreeNode: React.FC<{
         </button>
 
         <span style={{ fontSize: '12px' }}>{TYPE_ICONS[node.type] || '📋'}</span>
-        <span className="flex-1 text-xs truncate">{node.name}</span>
+        <span className="flex-1 text-sm truncate">{node.name}</span>
 
         {hasChildren && (
-          <span className="text-text-muted text-xs px-1">{node.children.length}</span>
+          <span className="text-text-muted text-sm px-1">{node.children.length}</span>
         )}
 
         <div className="hidden group-hover:flex items-center gap-1">
@@ -113,12 +113,12 @@ const OrgTreeView: React.FC<OrgTreeViewProps> = ({
   return (
     <div className="h-full flex flex-col bg-bg-secondary border-r border-border">
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-        <span className="text-text-primary text-xs font-medium">组织层级</span>
-        <span className="text-text-muted text-xs">{tree.length} 个根组织</span>
+        <span className="text-text-primary text-sm font-medium">组织层级</span>
+        <span className="text-text-muted text-sm">{tree.length} 个根组织</span>
       </div>
       <div className="flex-1 overflow-y-auto custom-scrollbar p-1">
         {tree.length === 0 ? (
-          <div className="text-center text-text-muted text-xs py-8">
+          <div className="text-center text-text-muted text-sm py-8">
             暂无组织数据
             <br />
             点击右上角"+"创建

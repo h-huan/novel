@@ -1,5 +1,5 @@
-﻿/**
- * 缁勭粐/鍔垮姏 Repository
+/**
+ * 组织/势力 Repository
  */
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
@@ -30,14 +30,15 @@ export class OrganizationRepository extends BaseRepository<OrganizationRow> {
   }
 
   /**
-   * 鎸夐」鐩甀D鏌ヨ
+   * 按项目ID查询
    */
   findByProjectId(projectId: string): OrganizationRow[] {
     return this.findByField('project_id', projectId);
   }
 
   /**
-   * 鎸夌埗缁勭粐ID鏌ヨ瀛愮粍缁?   */
+   * 按父组织ID查询子组织
+   */
   findByParentId(projectId: string, parentId: string): OrganizationRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM organizations WHERE project_id = ? AND parent_id = ?
@@ -47,7 +48,8 @@ export class OrganizationRepository extends BaseRepository<OrganizationRow> {
   }
 
   /**
-   * 鏌ヨ鏍圭粍缁囷紙鏃犵埗缁勭粐锛?   */
+   * 查询根组织（无父组织）
+   */
   findRoots(projectId: string): OrganizationRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM organizations
@@ -58,7 +60,7 @@ export class OrganizationRepository extends BaseRepository<OrganizationRow> {
   }
 
   /**
-   * 鎼滅储缁勭粐
+   * 搜索组织
    */
   search(projectId: string, query: string): OrganizationRow[] {
     const stmt = this.db.prepare(`

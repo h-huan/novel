@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ChapterEditorShell - 章节编辑器外壳组件
  * 整合 MarkdownEditor + 章节信息 + 工具栏 + 自动保存 + 字数统计
  * 
@@ -65,7 +65,8 @@ export interface ChapterEditorShellProps {
   onAiWrite?: () => void;
 }
 
-const AUTOSAVE_INTERVAL = 60000; // 60秒
+const AUTOSAVE_INTERVAL = 60000; // 60秒兜底自动保存
+const AUTOSAVE_DEBOUNCE = 3000; // 停止输入后3秒自动保存
 
 const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShellProps>(function ChapterEditorShell({
   chapter,
@@ -91,6 +92,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
   const [qcBanner, setQcBanner] = useState<QcBanner>(null);
   const wordCountRef = useRef<HTMLSpanElement>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoSaveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef('');
   // 跟踪上次从 store 同步到编辑器的 content，用于判断本次 chapter.content 变化是
   // (a) store 外部主动更新（AI 生成完成、远端同步），还是 (b) 编辑器回写到 store 引起的。
@@ -164,6 +166,9 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
       if (autoSaveTimerRef.current) {
         clearInterval(autoSaveTimerRef.current);
       }
+      if (autoSaveDebounceRef.current) {
+        clearTimeout(autoSaveDebounceRef.current);
+      }
     };
   }, [isDirty, chapter?.id]);
 
@@ -219,14 +224,24 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
       setLocalContent(value);
       contentRef.current = value;
       setIsDirty(true);
+      // 停止输入后3秒自动保存（debounce）
+      if (autoSaveDebounceRef.current) {
+        clearTimeout(autoSaveDebounceRef.current);
+      }
+      autoSaveDebounceRef.current = setTimeout(() => {
+        if (chapter) {
+          handleSave();
+        }
+      }, AUTOSAVE_DEBOUNCE);
     },
-    [],
+    [chapter],
   );
 
   // 保存
   const handleSave = useCallback(async () => {
     if (!chapter) return;
-
+    if (busyAction) return; // 已在忙，禁止并发
+    setBusyAction('saving');
     try {
       const content = contentRef.current;
       // 写回 store 前先同步 lastSyncedFromStoreRef，避免 useEffect 把这次回写误判为
@@ -252,8 +267,10 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     } catch (err) {
       console.error('保存失败:', err);
       showNotification('error', `保存失败：${err instanceof Error ? err.message : '请检查服务连接后重试'}`);
+    } finally {
+      setBusyAction(null);
     }
-  }, [chapter, updateChapter, onSave, projectId]);
+  }, [chapter, updateChapter, onSave, projectId, busyAction]);
 
   // 锁定
   const actionError = (error: unknown) => error instanceof Error ? error.message : '请检查服务连接后重试';
@@ -353,6 +370,42 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     }
   }, [chapter, onUnlock]);
 
+  // 去AI味：直接对当前章节内容进行降AI处理，不需要手动复制
+  const handleDeAi = useCallback(async () => {
+    if (!chapter || busyAction) return;
+    setBusyAction('de-ai');
+    setQcBanner(null);
+    try {
+      const content = contentRef.current;
+      const { api } = await import('../../lib/api');
+      const res = await api.post('/refinement/de-ai/polish', { content, intensity: 50 });
+      const data = (res as any)?.data ?? res;
+      const polished = data?.content || data?.result || data?.polishedContent;
+      if (polished && typeof polished === 'string') {
+        contentRef.current = polished;
+        setLocalContent(polished);
+        setIsDirty(true);
+        lastSyncedFromStoreRef.current = polished;
+        const changes = data?.changes || [];
+        const changeCount = Array.isArray(changes) ? changes.length : 0;
+        setQcBanner({
+          tone: 'success',
+          message: `去AI味完成，已自动应用到正文${changeCount > 0 ? `（共${changeCount}处修改）` : ''}。记得点保存。`,
+          at: Date.now(),
+        });
+        showNotification('success', `去AI味完成${changeCount > 0 ? `，${changeCount}处修改` : ''}`);
+      } else {
+        setQcBanner({ tone: 'warning', message: '去AI味处理完成，但未返回可应用的内容，请检查结果。', at: Date.now() });
+      }
+    } catch (err) {
+      console.error('去AI味失败:', err);
+      setQcBanner({ tone: 'error', message: `去AI味失败：${err instanceof Error ? err.message : '请检查服务连接后重试'}`, at: Date.now() });
+      showNotification('error', '去AI味失败');
+    } finally {
+      setBusyAction(null);
+    }
+  }, [chapter, busyAction]);
+
   // 距上次保存的时间文本
   const getLastSavedText = (): string => {
     if (!lastSaved) return '尚未保存';
@@ -394,7 +447,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
             margin: '0 16px',
             padding: '10px 14px',
             borderRadius: 8,
-            fontSize: 13,
+            fontSize: 14,
             fontWeight: 500,
             display: 'flex',
             alignItems: 'center',
@@ -462,6 +515,14 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
           ) : (
             <>
               <button
+                style={styles.saveBtn}
+                onClick={handleSave}
+                disabled={!isDirty || busyAction !== null}
+                title="保存当前章节内容（停止输入后也会自动保存）"
+              >
+                {busyAction === 'saving' ? '⏳ 保存中…' : '💾 保存'}
+              </button>
+              <button
                 style={styles.primaryBtn}
                 onClick={handleSubmitForReview}
                 disabled={busyAction !== null}
@@ -492,6 +553,14 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
             title="AI辅助续写当前章节"
           >
             ✨ AI续写
+          </button>
+          <button
+            style={styles.toolBtn}
+            onClick={handleDeAi}
+            disabled={busyAction !== null || isLocked}
+            title={busyAction === 'de-ai' ? '去AI味处理中…' : '一键去AI味（直接处理当前正文，无需复制）'}
+          >
+            {busyAction === 'de-ai' ? '⏳ 去AI味中…' : '🧹 去AI味'}
           </button>
         </div>
         <div style={styles.toolbarRight}>
@@ -631,6 +700,18 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     transition: 'all 0.2s',
   },
+  /** 保存按钮：灰色，最常用的基础动作 */
+  saveBtn: {
+    padding: '6px 14px',
+    fontSize: '12px',
+    fontWeight: 600,
+    color: '#c0c0d0',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
   /** 确认动作（通过质检·锁定）：绿色，通往「已锁定」 */
   confirmBtn: {
     padding: '6px 14px',
@@ -743,7 +824,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(243, 156, 18, 0.18)',
     border: '1px solid rgba(243, 156, 18, 0.55)',
     color: '#ffd891',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 600,
     boxShadow: '0 6px 20px rgba(0, 0, 0, 0.35)',
     zIndex: 50,
@@ -757,7 +838,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '5px 10px',
     borderRadius: 6,
     cursor: 'pointer',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 700,
     fontFamily: 'inherit',
   },
@@ -768,7 +849,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '5px 10px',
     borderRadius: 6,
     cursor: 'pointer',
-    fontSize: 12,
+    fontSize: 14,
     fontFamily: 'inherit',
   },
 };

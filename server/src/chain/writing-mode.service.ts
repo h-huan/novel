@@ -801,6 +801,9 @@ export class WritingModeService {
   /**
    * 半自动模式逐节点执行
    * 每个 prompt 节点执行后，等待用户确认/调整后继续
+   *
+   * 注意：当前为占位实现，真正的逐节点确认需要 SSE 长连接支持。
+   * 为避免展示假功能，前端已禁用半自动选项。
    */
   private async executeWithConfirmation(
     chain: PromptChain,
@@ -808,25 +811,9 @@ export class WritingModeService {
     stage: StageName,
     onUserConfirmation: (request: UserConfirmationRequest) => Promise<UserAdjustment>,
   ): Promise<ChainResult> {
-    this.logger.log(`[半自动模式] 开始逐节点执行 ${chain.id}`);
+    this.logger.warn(`[半自动模式] 当前为占位实现，将退化为全自动执行。chain=${chain.id}`);
 
-    // 人工模拟 ChainEngine 的逐节点执行，在每个节点后插入确认步骤
-    // 实际使用中可通过监听 NodeResult 实现
-
-    // 模拟：发出确认请求给用户
-    const mockRequest: UserConfirmationRequest = {
-      mode: 'semi_auto',
-      stage,
-      nodeId: 'all',
-      nodeName: chain.name,
-      aiOutput: '将在每个节点执行后请求确认',
-      suggestions: ['请选择下一步操作：确认通过 / 调整内容 / 重新生成'],
-      timestamp: new Date(),
-    };
-
-    this.confirmationQueue.push(mockRequest);
-
-    // 继续执行（实际会等待用户确认回调）
+    // 退化为全自动执行（保持向后兼容）
     return this.chainEngine.execute(chain, userInput);
   }
 

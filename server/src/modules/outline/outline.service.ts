@@ -61,6 +61,7 @@ export class OutlineService {
     private readonly repo: OutlineRepository,
     private readonly db: DatabaseService,
     @Optional() private readonly stateItemService?: StateItemService,
+    @Optional() private readonly mapPointService?: any,
   ) {}
 
   create(projectId: string, dto: CreateOutlineDto): OutlineResponse {
@@ -199,6 +200,11 @@ export class OutlineService {
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
+    // 大纲标题/内容/场景变化时，自动更新地点关联
+    if (this.mapPointService && (dto.title !== undefined || dto.content !== undefined || dto.scenes !== undefined)) {
+      const outlineText = `${response.title || ''} ${response.content || ''} ${JSON.stringify(response.scenes || '')}`;
+      this.mapPointService.updateLinksForOutline(existing.project_id, id, outlineText);
+    }
     this.analyzeStateImpact(existing, dto);
     return response;
   }

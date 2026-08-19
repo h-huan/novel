@@ -63,11 +63,50 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
           )}
         </div>
         {idea.hook && <p style={s.hook}>「{idea.hook}」</p>}
-        {Array.isArray(idea.styleTags) && idea.styleTags.length > 0 && (
-          <div style={s.tags}>
-            {idea.styleTags.map((tag: unknown, ti: number) => <span key={`${toStr(tag)}-${ti}`} style={getStyleTagStyle()}>{toStr(tag)}</span>)}
-          </div>
-        )}
+        {/* 风格配置标签：按权重 平台→流派→写作风格→基调 排列，明确标注类型，跨维度去重 */}
+        {(() => {
+          // 统一处理为字符串数组：支持数组、字符串（按·或,或、分割）
+          const toTagArray = (val: unknown): string[] => {
+            if (!val) return [];
+            if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
+            return String(val).split(/[·,，、]/).map(s => s.trim()).filter(Boolean);
+          };
+          const tone = toTagArray(idea.storyTone);
+          const style = toTagArray(idea.writingStyle);
+          const genre = toTagArray(idea.webNovelGenre);
+          const platform = idea.recommendedPlatform || '';
+          // 跨维度去重：按权重 流派→风格→基调，后面维度中已出现的词过滤掉
+          const usedInGenre = new Set(genre);
+          const filteredStyle = style.filter(s => !usedInGenre.has(s));
+          const usedInStyleGenre = new Set([...filteredStyle, ...genre]);
+          const filteredTone = tone.filter(t => !usedInStyleGenre.has(t));
+          const hasAny = platform || genre.length > 0 || filteredStyle.length > 0 || filteredTone.length > 0;
+          if (!hasAny) return null;
+          return (
+            <div style={{ ...s.tags, marginTop: '10px' }}>
+              {platform && (
+                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(46,204,113,0.15)', color: '#2ecc71', fontWeight: 600 }}>
+                  平台：{platform}
+                </span>
+              )}
+              {genre.length > 0 && (
+                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontWeight: 600 }}>
+                  流派：{genre.join('·')}
+                </span>
+              )}
+              {filteredStyle.length > 0 && (
+                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(168,85,247,0.15)', color: '#c084fc', fontWeight: 600 }}>
+                  风格：{filteredStyle.join('·')}
+                </span>
+              )}
+              {filteredTone.length > 0 && (
+                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(233,69,96,0.15)', color: '#ff8fa3', fontWeight: 600 }}>
+                  基调：{filteredTone.join('·')}
+                </span>
+              )}
+            </div>
+          );
+        })()}
         {/* 主角+地点 单行 */}
         {(idea.protagonist || idea.setting) && (
           <div style={{ fontSize: '13px', color: '#8a8aa0', marginTop: '10px', lineHeight: 1.6 }}>

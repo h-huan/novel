@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 interface WorkflowBlockedNoticeProps {
   title?: string;
@@ -73,7 +73,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(239,68,68,0.35)',
     backgroundColor: 'rgba(239,68,68,0.06)',
     color: '#eaeaea',
-    fontSize: 12,
+    fontSize: 14,
     lineHeight: 1.6,
   },
   header: {
@@ -85,7 +85,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   title: {
     minWidth: 0,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 700,
     color: '#ef4444',
   },
@@ -110,18 +110,18 @@ const styles: Record<string, React.CSSProperties> = {
     width: 34,
     flexShrink: 0,
     color: '#8a8aa0',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 700,
   },
   value: {
     color: '#eaeaea',
-    fontSize: 12,
+    fontSize: 14,
     lineHeight: 1.6,
     minWidth: 0,
   },
   valueStrong: {
     color: '#f59e0b',
-    fontSize: 12,
+    fontSize: 14,
     lineHeight: 1.6,
     fontWeight: 600,
     minWidth: 0,
@@ -138,7 +138,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(239,68,68,0.32)',
     backgroundColor: 'rgba(239,68,68,0.08)',
     color: '#ef4444',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 600,
   },
 };

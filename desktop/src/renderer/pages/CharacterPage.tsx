@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { parseJsonToReadable } from '../lib/textList';
 import { useCharacterStore } from '../stores/characterStore';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 import { clampSidebar } from '../components/common/LayoutKit';
@@ -62,9 +63,7 @@ const PROFILE_SECTION_GROUPS: ProfileSectionConfig[] = [
   { title: '外貌与性格', description: '可落笔的外貌细节与稳定性格，避免空话。', fields: profileFields(['appearance','personality_traits'], ['外貌特征','性格特点'], ['一眼可识别的外貌细节，而非套话','稳定的性格倾向与反差']) },
   { title: '能力与背景', description: '能力/技能与背景故事，提供行动资本与动因。', fields: profileFields(['abilities_skills','backstory'], ['能力 / 技能','背景故事'], ['可使用的核心能力与技能','影响当下选择的旧事，写成场景而非履历']) },
   { title: '关系与目标', description: '人物关系与目标/动机，决定角色为何行动。', fields: profileFields(['relationships','goals_motivation'], ['人物关系','目标 / 动机'], ['与谁的关系及性质','当前想要什么、为什么想要']) },
-  { title: '说话风格与弱点', description: '口头禅/说话风格、弱点/恐惧与补充信息，是冲突与人物质感的来源。', fields: profileFields(['catchphrase_speech_style','weaknesses_fears','supplementary'], ['说话风格','弱点 / 恐惧','补充说明'], ['惯用语、口头禅、语气','被攻击或被利用的地方','其他需记住的设定']) },
-  { title: '弱点与语言', description: '弱点/恐惧与口头禅/说话风格，让角色可被击中、可被辨识。', fields: profileFields(['weaknesses_fears','catchphrase_speech_style'], ['弱点 / 恐惧','口头禅 / 说话风格'], ['可被击中的软肋与最怕的事','口头禅与稳定的说话节奏/语气']) },
-  { title: '补充说明', description: '其他未在以上分类中覆盖的角色设定。', fields: profileFields(['supplementary'], ['补充说明'], ['其他需要固定下来、防止漂移的设定']) },
+  { title: '说话风格与弱点', description: '口头禅/说话风格、弱点/恐惧，是冲突与人物质感的来源。', fields: profileFields(['catchphrase_speech_style','weaknesses_fears'], ['说话风格','弱点 / 恐惧'], ['惯用语、口头禅、语气','被攻击或被利用的地方']) },
 ];
 
 const ROLE_META: Record<RoleType, { label: string; hint: string; color: string }> = {
@@ -111,27 +110,83 @@ function parseJsonSafe(value: any, fallback: any) {
   try { return JSON.parse(value); } catch { return fallback; }
 }
 
+/**
+ * 兼容存量角色数据：personality 可能是 JSON 字符串、纯文本描述或已结构化对象。
+ * 纯文本不会被丢弃——原文归入 summary，同时尝试提取核心特质与矛盾句。
+ */
+function coercePersonality(raw: any): Record<string, any> {
+  if (raw === null || raw === undefined || raw === '') return {};
+  if (typeof raw === 'object') {
+    // 对象只有 summary 但没有 coreTraits/contradiction 时，把 summary 当纯文本重新解析
+    if (raw.summary && !raw.coreTraits && !raw.contradiction && !raw.traits) {
+      const parsed = coercePersonality(raw.summary);
+      return { ...raw, ...parsed };
+    }
+    return raw;
+  }
+  if (typeof raw !== 'string') return {};
+  const text = raw.trim();
+  if (!text) return {};
+  // 1) 合法 JSON 字符串
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch { /* 非 JSON，继续降级 */ }
+  // 2) key: value 多行格式（每行一个字段）
+  const lineObj: Record<string, string> = {};
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const kvLines = lines.filter(l => /^[A-Za-z_\u4e00-\u9fa5][A-Za-z0-9_\u4e00-\u9fa5]*\s*[:：]/.test(l));
+  if (kvLines.length > 0 && kvLines.length >= Math.ceil(lines.length / 2)) {
+    // 中文键名 → 英文键名映射，确保 createDraft 能取到对应字段
+    const keyMap: Record<string, string> = {
+      '矛盾': 'contradiction', '冲突': 'contradiction', '缺陷': 'flaw', '弱点': 'flaw',
+      '核心特质': 'coreTraits', '特质': 'coreTraits', '性格': 'coreTraits', '特点': 'coreTraits',
+      '摘要': 'summary', '简介': 'summary', '描述': 'summary',
+      '目标': 'goal', '欲望': 'desire', '恐惧': 'fears', '害怕': 'fears',
+      '口头禅': 'catchphrase', '别名': 'aliasTitle', '称号': 'aliasTitle',
+    };
+    for (const line of kvLines) {
+      const m = line.match(/^([A-Za-z_\u4e00-\u9fa5][A-Za-z0-9_\u4e00-\u9fa5]*)\s*[:：]\s*(.+)$/);
+      if (m) {
+        const rawKey = m[1].trim();
+        const engKey = keyMap[rawKey] || rawKey;
+        lineObj[engKey] = m[2].trim();
+      }
+    }
+    if (Object.keys(lineObj).length > 0) return lineObj;
+  }
+  // 3) 纯文本：原文归入 summary，按标点切分提取核心特质与矛盾句
+  const sentences = text.split(/[。！？!?；;\n]+/).map(s => s.trim()).filter(Boolean);
+  const contradictionKeywords = ['但', '却', '然而', '矛盾', '偏偏', '反而', '虽然', '可是', '不过', '另一面', '另一方面'];
+  const contradiction = sentences.find(s => contradictionKeywords.some(k => s.includes(k))) || '';
+  const traitSentences = sentences.filter(s => !contradictionKeywords.some(k => s.includes(k)));
+  const coreTraits = traitSentences.slice(0, 3);
+  return {
+    summary: text,
+    coreTraits,
+    contradiction,
+  };
+}
+
 function textOf(value: any): string {
   if (value === null || value === undefined || value === '') return '';
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map(textOf).filter(Boolean).join('、');
-  if (typeof value === 'object') {
-    const preferred = value.summary || value.description || value.core || value.traits || value.desire || value.hiddenInfo || value.fears;
-    if (preferred) return textOf(preferred);
-    return Object.entries(value)
-      .filter(([, item]) => typeof item === 'string' || typeof item === 'number')
-      .map(([key, item]) => `${key}: ${item}`)
-      .join('；');
-  }
+  if (typeof value === 'string') return parseJsonToReadable(value);
+  if (Array.isArray(value)) return value.map(textOf).filter(Boolean).join('\n');
+  if (typeof value === 'object') return parseJsonToReadable(value);
   return String(value);
 }
 
 function normalizeCharacter(raw: any): CharacterView {
-  const personality = parseJsonSafe(raw.personality, raw.personality || {});
-  const abilities = parseJsonSafe(raw.abilities, raw.abilities || {});
-  const relationships = parseJsonSafe(raw.relationships, raw.relationships || []);
-  const arc = parseJsonSafe(raw.arc, raw.arc || {});
-  const tags = parseJsonSafe(raw.tags, raw.tags || []);
+  let personality = coercePersonality(raw.personality);
+  if (typeof personality !== 'object' || personality === null) personality = {};
+  let abilities = parseJsonSafe(raw.abilities, {});
+  if (typeof abilities !== 'object' || abilities === null) abilities = {};
+  const relationships = parseJsonSafe(raw.relationships, []);
+  const arc = parseJsonSafe(raw.arc, {});
+  const tags = parseJsonSafe(raw.tags, []);
+  // 兜底：角色生成时 tags 与 growthTags 合并存储在 keywords 列
+  const keywords = parseJsonSafe(raw.keywords, []);
+  const resolvedTags = Array.isArray(tags) && tags.length > 0 ? tags : (Array.isArray(keywords) ? keywords : []);
 
   return {
     id: raw.id,
@@ -149,7 +204,7 @@ function normalizeCharacter(raw: any): CharacterView {
     arc,
     dialogueStyle: raw.dialogueStyle || '',
     role: (raw.role || 'supporting') as RoleType,
-    tags: Array.isArray(tags) ? tags : [],
+    tags: Array.isArray(resolvedTags) ? resolvedTags : [],
     isPov: !!raw.isPovCharacter || !!raw.isPov,
   };
 }
@@ -445,7 +500,6 @@ const CharacterPage: React.FC = () => {
                   {selected.isPov && <span style={styles.povBadge}>POV</span>}
                 </div>
                 <h1 style={styles.title}>{selected.name}</h1>
-                <p style={styles.subtitle}>{selected.identity || '未填写身份'} · {ROLE_META[selected.role].hint}</p>
                 <div style={styles.heroInfoRow}>
                   <span>{selected.age ? `${selected.age}岁` : '年龄未知'}</span>
                   <span>{selected.gender || '性别未知'}</span>
@@ -460,10 +514,6 @@ const CharacterPage: React.FC = () => {
             </header>
 
             {saveMessage && <div style={styles.message}>{saveMessage}</div>}
-
-            <section style={styles.impactBox}>
-              修改角色后，系统会列出受影响的大纲、关系、伏笔和章节；已经锁定的正文不会被自动改写。
-            </section>
 
             {editing && (
               <section style={styles.editorPanel}>
@@ -505,9 +555,9 @@ const CharacterPage: React.FC = () => {
               <section style={styles.summaryPanel}>
                 <div style={styles.panelTitle}>人物一句话</div>
                 <div style={styles.panelBody}>
-                  <div style={styles.summaryText}>{writingSummary || '保存角色资料后将生成写作摘要。'}</div>
+                  <div style={styles.summaryText}>{writingSummary || '暂无写作摘要'}</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginTop: 10 }}>
-                    <FieldList label="读者共鸣点" value={profile['reader_empathy_point']} accent="#f472b6" empty="建议补充悲惨/反转/热血/牺牲等代入钩子" />
+                    <FieldList label="读者共鸣点" value={profile['reader_empathy_point']} accent="#f472b6" empty="暂无" />
                     <FieldList label="角色标签" value={Array.isArray(selected.tags) ? selected.tags.join('、') : selected.tags} accent="#60a5fa" />
                   </div>
                 </div>
@@ -522,7 +572,7 @@ const CharacterPage: React.FC = () => {
                     .slice(0, 3)
                     .map((item, index) => <span key={index} style={styles.traitTag}>{item}</span>)}
                 </div>
-                <div style={styles.contradictionBox}>{draft.contradiction || '暂无矛盾/偏差。建议补一个会影响章节判断的具体细节。'}</div>
+                <div style={styles.contradictionBox}>{draft.contradiction || '暂无矛盾/偏差'}</div>
               </Panel>
 
               <Panel title="状态时间线">
@@ -530,14 +580,20 @@ const CharacterPage: React.FC = () => {
                   <div style={styles.timeline}>
                     {stateHistory.slice(0, 8).map((item, index) => (
                       <div key={item.id || index} style={styles.timelineItem}>
-                        <strong>第{item.order || index + 1}次状态快照</strong>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <strong>第{item.order || index + 1}次状态快照</strong>
+                          {(item.source === 'auto_extract' || item.trigger) && (
+                            <span style={{ fontSize: 14, padding: '2px 6px', borderRadius: 4, background: '#1e3a5f', color: '#7dd3fc' }}>正文自动提取</span>
+                          )}
+                        </div>
                         <span>{item.timestamp || '无时间'}</span>
                         <p>{Array.isArray(item.changedDimensions) && item.changedDimensions.length > 0 ? `变化：${item.changedDimensions.join('、')}` : '暂无显著变化记录'}</p>
+                        {item.trigger && <p style={{ fontSize: 14, color: '#94a3b8' }}>触发：{item.trigger}</p>}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div style={styles.mutedBox}>暂无已审核状态历史。正文草稿抽取后应先进入“待审核”，确认后再成为角色时间线。</div>
+                  <div style={styles.mutedBox}>暂无状态历史</div>
                 )}
               </Panel>
 
@@ -548,13 +604,12 @@ const CharacterPage: React.FC = () => {
                     <span>{rel.type || 'neutral'}</span>
                     <p>{rel.description || '暂无说明'}</p>
                   </div>
-                )) : <div style={styles.mutedBox}>暂无人际关系。后续可从正文抽取或手动补充。</div>}
+                )) : <div style={styles.mutedBox}>暂无人际关系</div>}
               </Panel>
             </section>
 
             <section style={styles.profileArchive}>
               <div style={styles.panelTitle}>人物设定</div>
-              <p style={styles.archiveHint}>基础信息、外貌与性格等均为列表；二级标题区分设定名与内容。点击性格/能力等字段标签可查看或记录变动历史。</p>
               <div style={{ padding: 12 }}>
                 {PROFILE_SECTION_GROUPS.map(section => {
                   const entries = section.fields
@@ -611,7 +666,7 @@ const CharacterPage: React.FC = () => {
                       <span style={{color:'#8a8aa0'}}>→</span>
                       <div>
                         <strong style={{color:'#c0c0d0'}}>{rel.target_name || '?'}</strong>
-                        <div style={{fontSize:11,color:'#8a8aa0',marginTop:2}}>
+                        <div style={{fontSize: 14,color:'#8a8aa0',marginTop:2}}>
                           {rel.public_relation || rel.relation_type || '未知关系'}
                           {rel.hidden_relation ? ` | 隐藏：${rel.hidden_relation}` : ''}
                           {rel.change_summary ? ` | 变化：${rel.change_summary}` : ''}
@@ -696,79 +751,79 @@ const Panel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, 
 const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <div style={styles.infoRow}>
     <span>{label}</span>
-    <p>{value}</p>
+    <p>{parseJsonToReadable(value)}</p>
   </div>
 );
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { height: '100%', display: 'flex', overflow: 'hidden', backgroundColor: '#16213e', color: '#eaeaea' },
-  sidebar: { ...clampSidebar(240, 25, 360), display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#101a33' },
+  page: { height: '100%', display: 'flex', overflow: 'hidden', backgroundColor: '#1a1a2e', color: '#eaeaea' },
+  sidebar: { ...clampSidebar(240, 25, 360), display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#161628' },
   sidebarHeader: { display: 'flex', gap: 8, padding: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' },
-  searchInput: { flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 12 },
-  addButton: { padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700 },
+  searchInput: { flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 14 },
+  addButton: { padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
   createBox: { margin: 10, padding: 10, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.035)', display: 'flex', flexDirection: 'column', gap: 8 },
   list: { flex: 1, overflow: 'auto', padding: 10 },
   group: { marginBottom: 12 },
-  groupTitle: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 4px', fontSize: 12, fontWeight: 800 },
+  groupTitle: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 4px', fontSize: 14, fontWeight: 800 },
   characterItem: { width: '100%', display: 'flex', flexDirection: 'column', gap: 3, padding: '9px 10px', marginBottom: 4, borderRadius: 7, border: '1px solid transparent', backgroundColor: 'transparent', color: '#c0c0d0', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' },
   characterItemActive: { backgroundColor: 'rgba(233,69,96,0.12)', borderColor: 'rgba(233,69,96,0.32)' },
-  characterName: { fontSize: 13, fontWeight: 800 },
-  characterIdentity: { fontSize: 11, color: '#8a8aa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  characterName: { fontSize: 14, fontWeight: 800 },
+  characterIdentity: { fontSize: 14, color: '#8a8aa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   main: { flex: 1, overflow: 'auto', padding: 18 },
   empty: { height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a8aa0' },
   hero: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', padding: '16px 18px', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.12)' },
   heroMeta: { display: 'flex', gap: 8, marginBottom: 8 },
   title: { margin: 0, fontSize: 24, lineHeight: 1.2 },
-  subtitle: { margin: '6px 0 0', fontSize: 13, color: '#8a8aa0' },
-  heroInfoRow: { display: 'flex', gap: 12, marginTop: 8, fontSize: 12, color: '#c0c0d0', flexWrap: 'wrap' },
+  subtitle: { margin: '6px 0 0', fontSize: 14, color: '#8a8aa0' },
+  heroInfoRow: { display: 'flex', gap: 12, marginTop: 8, fontSize: 14, color: '#c0c0d0', flexWrap: 'wrap' },
   heroInfoTruncated: { maxWidth: 'min(320px, 40vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   heroActions: { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' },
-  roleBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(255,255,255,0.04)', fontSize: 11, fontWeight: 800 },
-  povBadge: { padding: '3px 8px', borderRadius: 5, backgroundColor: 'rgba(233,69,96,0.12)', color: '#e94560', fontSize: 11, fontWeight: 800 },
-  message: { marginTop: 10, padding: '9px 12px', borderRadius: 6, backgroundColor: 'rgba(96,165,250,0.09)', border: '1px solid rgba(96,165,250,0.16)', color: '#93c5fd', fontSize: 12 },
-  impactBox: { marginTop: 10, padding: '10px 12px', borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', color: '#fbbf24', fontSize: 12, lineHeight: 1.6 },
+  roleBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(255,255,255,0.04)', fontSize: 14, fontWeight: 800 },
+  povBadge: { padding: '3px 8px', borderRadius: 5, backgroundColor: 'rgba(233,69,96,0.12)', color: '#e94560', fontSize: 14, fontWeight: 800 },
+  message: { marginTop: 10, padding: '9px 12px', borderRadius: 6, backgroundColor: 'rgba(96,165,250,0.09)', border: '1px solid rgba(96,165,250,0.16)', color: '#93c5fd', fontSize: 14 },
+  impactBox: { marginTop: 10, padding: '10px 12px', borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', color: '#fbbf24', fontSize: 14, lineHeight: 1.6 },
   editorPanel: { marginTop: 12, padding: 14, borderRadius: 8, border: '1px solid rgba(233,69,96,0.22)', backgroundColor: 'rgba(0,0,0,0.16)', display: 'flex', flexDirection: 'column', gap: 10 },
   editorGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 },
-  field: { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: '#8a8aa0' },
-  input: { width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 12, fontFamily: 'inherit' },
-  textarea: { width: '100%', boxSizing: 'border-box', minHeight: 70, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 12, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.6 },
+  field: { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 14, color: '#8a8aa0' },
+  input: { width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 14, fontFamily: 'inherit' },
+  textarea: { width: '100%', boxSizing: 'border-box', minHeight: 70, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.6 },
   row: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  primaryButton: { padding: '8px 14px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 800 },
-  secondaryButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontSize: 12, fontWeight: 700 },
-  dangerButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.28)', backgroundColor: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: 12, fontWeight: 700 },
+  primaryButton: { padding: '8px 14px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 800 },
+  secondaryButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
+  dangerButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.28)', backgroundColor: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
   contentGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginTop: 12 },
   summaryPanel: { gridColumn: '1 / -1', border: '1px solid rgba(96,165,250,0.18)', borderRadius: 8, backgroundColor: 'rgba(96,165,250,0.06)', overflow: 'hidden' },
-  summaryText: { fontSize: 13, lineHeight: 1.7, color: '#eaeaea' },
-  summaryBackground: { marginTop: 8, padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 12, lineHeight: 1.6, color: '#c0c0d0' },
+  summaryText: { fontSize: 14, lineHeight: 1.7, color: '#eaeaea' },
+  summaryBackground: { marginTop: 8, padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 14, lineHeight: 1.6, color: '#c0c0d0' },
   summarySectionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10, marginTop: 12 },
   summarySectionCard: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', border: '1px solid rgba(255,255,255,0.06)' },
-  summarySectionTitle: { margin: '0 0 8px', fontSize: 12, color: '#93c5fd', fontWeight: 800 },
-  summarySectionRow: { fontSize: 12, lineHeight: 1.55, color: '#c0c0d0', marginBottom: 4 },
+  summarySectionTitle: { margin: '0 0 8px', fontSize: 14, color: '#93c5fd', fontWeight: 800 },
+  summarySectionRow: { fontSize: 14, lineHeight: 1.55, color: '#c0c0d0', marginBottom: 4 },
   panel: { border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
-  panelTitle: { padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', color: '#eaeaea', fontSize: 13, fontWeight: 800 },
+  panelTitle: { padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', color: '#eaeaea', fontSize: 14, fontWeight: 800 },
   panelBody: { padding: 12, display: 'flex', flexDirection: 'column', gap: 9 },
-  infoRow: { display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', gap: 10, fontSize: 12, lineHeight: 1.6 },
+  infoRow: { display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', gap: 10, fontSize: 14, lineHeight: 1.6 },
   traitWrap: { display: 'flex', flexWrap: 'wrap', gap: 7 },
-  traitTag: { padding: '4px 8px', borderRadius: 5, border: '1px solid rgba(96,165,250,0.18)', backgroundColor: 'rgba(96,165,250,0.08)', color: '#93c5fd', fontSize: 12 },
-  contradictionBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', borderLeft: '3px solid #f59e0b', color: '#fbbf24', fontSize: 12, lineHeight: 1.6 },
+  traitTag: { padding: '4px 8px', borderRadius: 5, border: '1px solid rgba(96,165,250,0.18)', backgroundColor: 'rgba(96,165,250,0.08)', color: '#93c5fd', fontSize: 14 },
+  contradictionBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', borderLeft: '3px solid #f59e0b', color: '#fbbf24', fontSize: 14, lineHeight: 1.6 },
   timeline: { display: 'flex', flexDirection: 'column', gap: 8 },
-  timelineItem: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 12 },
-  mutedBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', color: '#8a8aa0', fontSize: 12, lineHeight: 1.6 },
-  relationshipRow: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 12 },
+  timelineItem: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 14 },
+  mutedBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', color: '#8a8aa0', fontSize: 14, lineHeight: 1.6 },
+  relationshipRow: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 14 },
   statusPanel: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
   profileArchive: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
-  archiveHint: { margin: 0, padding: '10px 12px', color: '#8a8aa0', fontSize: 12, lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  archiveHint: { margin: 0, padding: '10px 12px', color: '#8a8aa0', fontSize: 14, lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.06)' },
   archiveGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, padding: 12 },
   archiveSection: { border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.025)', overflow: 'hidden' },
-  archiveTitle: { margin: 0, padding: '8px 10px', color: '#eaeaea', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.06)' },
-  archiveRow: { padding: '8px 10px', fontSize: 12, lineHeight: 1.55, borderBottom: '1px solid rgba(255,255,255,0.045)' },
+  archiveTitle: { margin: 0, padding: '8px 10px', color: '#eaeaea', fontSize: 14, borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  archiveRow: { padding: '8px 10px', fontSize: 14, lineHeight: 1.55, borderBottom: '1px solid rgba(255,255,255,0.045)' },
   statusList: { display: 'flex', flexDirection: 'column', gap: 6, padding: 12 },
-  statusRow: { display: 'grid', gridTemplateColumns: '100px minmax(0, 1fr) auto auto', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.055)', fontSize: 12 },
+  statusRow: { display: 'grid', gridTemplateColumns: '100px minmax(0, 1fr) auto auto', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.055)', fontSize: 14 },
   statusLabel: { color: '#8a8aa0', fontWeight: 700 },
   statusValue: { color: '#eaeaea', fontWeight: 600 },
-  sourceBadge: { fontStyle: 'normal', color: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 10 },
-  reviewedBadge: { fontStyle: 'normal', color: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 10 },
-  pendingBadge: { fontStyle: 'normal', color: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 10 },
+  sourceBadge: { fontStyle: 'normal', color: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
+  reviewedBadge: { fontStyle: 'normal', color: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
+  pendingBadge: { fontStyle: 'normal', color: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
 };
 
 export default CharacterPage;

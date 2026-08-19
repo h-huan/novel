@@ -33,9 +33,13 @@ export class ProjectRepository extends BaseRepository<ProjectRow> {
   }
 
   /**
-   * 按状态查询   */
+   * 按状态查询（按创建时间升序：先生成的项目放前面）
+   */
   findByStatus(status: string): ProjectRow[] {
-    return this.findByField('status', status);
+    const stmt = this.db.prepare(`
+      SELECT * FROM projects WHERE status = ? ORDER BY created_at ASC
+    `);
+    return stmt.all(status) as unknown as ProjectRow[];
   }
 
   /**

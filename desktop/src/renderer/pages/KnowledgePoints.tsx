@@ -1,4 +1,4 @@
-/**
+﻿/**
  * KnowledgePoints - 知识点（写作经验 / 避坑经验）面板
  *
  * 与「前后矛盾」面板并列的 tab。数据来自后端 generation_lessons 表：
@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import EmptyState from '../components/common/EmptyState';
 
 interface Lesson {
   id: string;
@@ -175,7 +176,7 @@ const KnowledgePoints: React.FC = () => {
     iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '—';
 
   return (
-    <div style={{ minHeight: '100vh', background: '#15151c', color: '#eaeaea', padding: '24px 32px' }}>
+    <div style={{ minHeight: '100vh', background: '#1a1a2e', color: '#eaeaea', padding: '24px 32px' }}>
       <div style={{ maxWidth: 960, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>💡 知识点（写作经验 / 避坑经验）</h1>
@@ -195,11 +196,6 @@ const KnowledgePoints: React.FC = () => {
             </button>
           </div>
         </div>
-
-        <p style={{ fontSize: '12px', color: '#9a9ab0', margin: '0 0 14px' }}>
-          这里汇总本项目自动归纳的避坑经验与你手动沉淀的写作经验；它们会被注入后续章节的生成提示，
-          让 AI 在写作时主动规避已知问题。支持逐条手动新增、修改、删除（不可批量）。
-        </p>
 
         {notice && (
           <div style={{ background: '#1d2a3a', color: '#bcd9ff', border: '1px solid #3a6ea5', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: '13px' }}>
@@ -240,7 +236,7 @@ const KnowledgePoints: React.FC = () => {
               onChange={e => setNewLesson(e.target.value)}
               placeholder="输入一条经验，例如：正文最后一个场景必须落在结尾钩子场景上收尾，不得提前终止于用餐/通勤等中间事件。"
               rows={3}
-              style={{ width: '100%', background: '#15151c', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 13 }}
+              style={{ width: '100%', background: '#15151c', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 14 }}
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
               <button onClick={() => setAdding(false)} style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>取消</button>
@@ -251,25 +247,30 @@ const KnowledgePoints: React.FC = () => {
 
         {/* 列表 */}
         {!loading && !error && lessons.length === 0 && (
-          <div style={{ textAlign: 'center', color: '#9a9ab0', padding: 40 }}>
-            暂无知识点。点击下方「+ 添加知识点」手动沉淀经验，或继续写作让系统自动归纳避坑经验。
-          </div>
+          <EmptyState
+            icon="💡"
+            title="暂无知识点"
+            description="点击「+ 添加知识点」手动沉淀，或继续写作让系统自动归纳。"
+            actionLabel="+ 添加知识点"
+            onAction={() => setAdding(true)}
+          />
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {lessons.map(row => {
+          {lessons.map((row, idx) => {
             const isEditing = editingId === row.id;
             return (
               <div key={row.id} style={{ background: '#1e1e28', border: '1px solid #2e2e3a', borderRadius: 8, padding: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
                   <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 10, color: '#15151c', background: CATEGORY_COLOR[row.category] || '#8a8aa0', fontWeight: 600 }}>
                     {CATEGORY_LABEL[row.category] || row.category}
                   </span>
                   <span style={{ fontSize: '11px', color: '#9a9ab0' }}>出现 {row.occurrence} 次</span>
                   {!isEditing && (
                     <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-                      <button onClick={() => startEdit(row)} style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>编辑</button>
-                      <button onClick={() => handleDelete(row.id)} style={{ background: '#3b1418', color: '#ffd1d8', border: '1px solid #e94560', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>删除</button>
+                      <button onClick={() => startEdit(row)} style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 14 }}>编辑</button>
+                      <button onClick={() => handleDelete(row.id)} style={{ background: '#3b1418', color: '#ffd1d8', border: '1px solid #e94560', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 14 }}>删除</button>
                     </div>
                   )}
                 </div>
@@ -289,7 +290,7 @@ const KnowledgePoints: React.FC = () => {
                       value={editLesson}
                       onChange={e => setEditLesson(e.target.value)}
                       rows={3}
-                      style={{ width: '100%', background: '#15151c', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 13 }}
+                      style={{ width: '100%', background: '#15151c', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 14 }}
                     />
                     <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }}>
                       <button onClick={cancelEdit} style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>取消</button>
@@ -299,7 +300,7 @@ const KnowledgePoints: React.FC = () => {
                 ) : (
                   <>
                     <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: '#eaeaea', whiteSpace: 'pre-wrap' }}>{row.lesson}</p>
-                    <div style={{ marginTop: 8, fontSize: 11, color: '#7a7a90' }}>
+                    <div style={{ marginTop: 8, fontSize: 14, color: '#7a7a90' }}>
                       最近更新：{fmt(row.updated_at)}
                       {row.last_chapter_index != null ? ` · 最近关联章节 ${row.last_chapter_index}` : ''}
                     </div>

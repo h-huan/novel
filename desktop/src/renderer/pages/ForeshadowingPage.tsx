@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ForeshadowingPage - 伏笔看板
  * 对接后端 /foreshadowing/* API
  * 状态机: buried → active → reminder → recovered | cancelled
@@ -8,6 +8,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useForeshadowingStore } from '../stores/foreshadowingStore';
 import { useProjectStore } from '../stores/projectStore';
+import EmptyState from '../components/common/EmptyState';
 
 type ForeshadowingStatus = 'buried' | 'active' | 'reminder' | 'pending' | 'recovered' | 'cancelled';
 
@@ -169,7 +170,7 @@ const ForeshadowingPage: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '20px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ padding: '20px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#1a1a2e' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>🔍 伏笔看板</h1>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -246,8 +247,8 @@ const ForeshadowingPage: React.FC = () => {
             backgroundColor: traceFilter === card.key ? `${card.color}14` : 'rgba(255,255,255,0.025)',
             border: `1px solid ${traceFilter === card.key ? `${card.color}55` : 'rgba(255,255,255,0.06)'}`,
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong style={{ color: card.color, fontSize: 12 }}>{card.title}</strong><strong style={{ color: '#eaeaea' }}>{card.value}</strong></div>
-            <div style={{ marginTop: 4, color: '#8a8aa0', fontSize: 11, lineHeight: 1.45 }}>{card.hint}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong style={{ color: card.color, fontSize: 14 }}>{card.title}</strong><strong style={{ color: '#eaeaea' }}>{card.value}</strong></div>
+            <div style={{ marginTop: 4, color: '#8a8aa0', fontSize: 14, lineHeight: 1.45 }}>{card.hint}</div>
           </button>
         ))}
       </div>
@@ -301,33 +302,22 @@ const ForeshadowingPage: React.FC = () => {
             ⏳ 加载中...
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#6c6c80' }}>
-            <div style={{ fontSize: '36px', marginBottom: '8px' }}>🔍</div>
-            <p style={{ fontSize: '14px', color: '#8a8aa0', marginBottom: '4px' }}>
-              {items.length === 0 ? '暂无伏笔' : '没有匹配的伏笔'}
-            </p>
-            <p style={{ fontSize: '12px', color: '#6c6c80', marginBottom: '16px' }}>
-              {items.length === 0
-                ? '请在灵感发现中创建项目时自动生成，或手动新建'
-                : '尝试切换筛选条件'}
-            </p>
-            {items.length === 0 && (
-              <button onClick={() => setShowCreate(true)} style={{
-                padding: '8px 18px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px',
-                color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              }}>
-                + 新建伏笔
-              </button>
-            )}
-          </div>
+          <EmptyState
+            icon="🔍"
+            title={items.length === 0 ? '暂无伏笔' : '没有匹配的伏笔'}
+            description={items.length === 0 ? '请在灵感发现中创建项目时自动生成，或手动新建伏笔。' : '尝试切换筛选条件查看其他伏笔。'}
+            actionLabel={items.length === 0 ? '+ 新建伏笔' : undefined}
+            onAction={items.length === 0 ? () => setShowCreate(true) : undefined}
+          />
         ) : (
-          filtered.map(item => (
+          filtered.map((item, idx) => (
           <div key={item.id} style={{
             padding: '12px 14px', borderRadius: '8px', cursor: 'pointer', border: '1px solid',
             backgroundColor: expandedId === item.id ? `${STATUS_COLORS[item.status]}08` : 'rgba(255,255,255,0.02)',
             borderColor: expandedId === item.id ? `${STATUS_COLORS[item.status]}25` : 'rgba(255,255,255,0.06)',
           }} onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
               <span style={{ fontSize: item.importance >= 3 ? '14px' : item.importance === 2 ? '12px' : '10px' }}>
                 {'⭐'.repeat(item.importance)}
               </span>
@@ -338,11 +328,15 @@ const ForeshadowingPage: React.FC = () => {
                 {item.scope === 'global' ? '全文' : item.scope === 'volume' ? '卷级' : '章节'}
               </span>
               {editingId === item.id ? (
-                <input value={editContent} onChange={e => setEditContent(e.target.value)} autoFocus
-                  style={{ flex: 1, padding: '4px 8px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(233,69,96,0.3)', borderRadius: '4px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }}
-                  onKeyDown={e => { if (e.key === 'Enter') updateContent(item.id); if (e.key === 'Escape') setEditingId(null); }} />
+                <div style={{ flex: 1, display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <input value={editContent} onChange={e => setEditContent(e.target.value)} autoFocus
+                    style={{ flex: 1, padding: '4px 8px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(233,69,96,0.3)', borderRadius: '4px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }}
+                    onKeyDown={e => { if (e.key === 'Enter') updateContent(item.id); if (e.key === 'Escape') setEditingId(null); }} />
+                  <button onClick={(e) => { e.stopPropagation(); updateContent(item.id); }} style={{ padding: '4px 8px', backgroundColor: 'rgba(46,204,113,0.15)', border: '1px solid rgba(46,204,113,0.3)', borderRadius: '4px', color: '#2ecc71', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>保存</button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditingId(null); }} style={{ padding: '4px 8px', backgroundColor: 'rgba(149,165,166,0.1)', border: '1px solid rgba(149,165,166,0.2)', borderRadius: '4px', color: '#95a5a6', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>取消</button>
+                </div>
               ) : (
-                <span style={{ flex: 1, fontSize: '13px', color: '#c0c0d0', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setEditingId(item.id); setEditContent(item.content); }}>{item.content}</span>
+                <span style={{ flex: 1, fontSize: '13px', color: '#c0c0d0' }}>{item.content}</span>
               )}
               <span style={{ fontSize: '11px', color: '#6c6c80' }}>埋设：第{item.buriedChapterIndex || '?'}章 → 回收：第{item.plannedRecoveryChapterIndex || '?'}章</span>
               {isUnpaved(item) && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(239,68,68,0.12)', color: '#f87171', fontSize: '10px', fontWeight: 600 }}>缺少铺垫</span>}
@@ -366,28 +360,14 @@ const ForeshadowingPage: React.FC = () => {
                 {item.payoffDescription && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>回收结果：{item.payoffDescription}</p>}
                 {item.notes && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>{item.notes}</p>}
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  {item.status === 'buried' && (
-                    <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'activate'); }}
-                      style={{ padding: '4px 10px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '4px', color: '#f39c12', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                      激活伏笔
-                    </button>
-                  )}
-                  {(item.status === 'active' || item.status === 'pending') && (
-                    <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'remind'); }}
-                      style={{ padding: '4px 10px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '4px', color: '#f39c12', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                      提醒回收
-                    </button>
-                  )}
-                  {(item.status === 'active' || item.status === 'reminder' || item.status === 'pending') && (
+                  <button onClick={(e) => { e.stopPropagation(); setEditingId(item.id); setEditContent(item.content); }}
+                    style={{ padding: '4px 10px', backgroundColor: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: '4px', color: '#60a5fa', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                    编辑
+                  </button>
+                  {(item.status === 'active' || item.status === 'reminder' || item.status === 'pending' || item.status === 'buried') && (
                     <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'recover'); }}
                       style={{ padding: '4px 10px', backgroundColor: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.2)', borderRadius: '4px', color: '#2ecc71', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
                       标记已回收
-                    </button>
-                  )}
-                  {item.status !== 'cancelled' && (
-                    <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'cancel'); }}
-                      style={{ padding: '4px 10px', backgroundColor: 'rgba(149,165,166,0.1)', border: '1px solid rgba(149,165,166,0.2)', borderRadius: '4px', color: '#95a5a6', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                      取消
                     </button>
                   )}
                   <button onClick={(e) => { e.stopPropagation(); deleteItem(item.id); }}
@@ -455,8 +435,6 @@ const ForeshadowingPage: React.FC = () => {
         ) : (
           <div style={{ textAlign: 'center', padding: '16px', color: '#6c6c80', fontSize: '12px' }}>
             暂无递进反转规划数据
-            <br />
-            <span style={{ fontSize: '11px' }}>在大纲生成时会自动生成反转表，或前往大纲页手动添加</span>
           </div>
         )}
       </div>

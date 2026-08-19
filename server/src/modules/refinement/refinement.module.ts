@@ -13,8 +13,10 @@ import { CopyrightCheckService } from './copyright-check.service';
 import { ExportService } from './export.service';
 import { ScriptExportService } from './script-export.service';
 import { SocialExportService } from './social-export.service';
+import { ChainModule } from '../../chain/chain.module';
 
 @Module({
+  imports: [ChainModule],
   controllers: [RefinementController],
   providers: [
     RefinementTemplatesService,

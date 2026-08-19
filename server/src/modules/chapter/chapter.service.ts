@@ -269,6 +269,17 @@ export class ChapterService {
     });
   }
 
+  /**
+   * 全量重算项目伏笔状态（存量项目兼容入口）。
+   * 扫描所有已有正文的章节，自动推进 reminder / recovered 状态。
+   */
+  resyncAllForeshadowings(projectId: string): { reminded: number; recovered: number; scanned: number } {
+    if (!this.derivedDataSync) {
+      return { reminded: 0, recovered: 0, scanned: 0 };
+    }
+    return this.derivedDataSync.resyncAllForeshadowings(projectId);
+  }
+
   getVolumes(projectId: string): { volumeIndex: number; chapters: ChapterListItem[] }[] {
     const grouped = new Map<number, ChapterListItem[]>();
     for (const row of this.repo.findByProjectId(projectId)) {

@@ -55,7 +55,7 @@ export class ForeshadowingService {
       id,
       project_id: projectId,
       content: dto.content,
-      status: 'buried',
+      status: 'active',
       type: dto.type || 'hint',
       importance: dto.importance || 2,
       buried_at: dto.buriedAt || null,

@@ -8,9 +8,10 @@ import { CharacterRepository } from '../../database/repositories/character.repos
 import { CharacterStateRepository } from '../../database/repositories/character-state.repository';
 import { RagModule } from '../../rag/rag.module';
 import { StateModule } from '../../state/state.module';
+import { MapPointModule } from '../map-point/map-point.module';
 
 @Module({
-  imports: [RagModule, StateModule],
+  imports: [RagModule, StateModule, MapPointModule],
   controllers: [CharacterController],
   providers: [CharacterService, CharacterRepository, CharacterStateRepository],
   exports: [CharacterService],

@@ -272,25 +272,60 @@ export class QualityGateService {
 
   /**
    * 执行单条规则检查
+   * 重写：默认分从85改为60（及格线），根据criterion的field/minLength等语义做真实检查，
+   * 不再"有字段就加分"的敷衍逻辑。
    */
   private checkRule(
     criterion: GateCriterion,
     output: Record<string, unknown>,
   ): { score: number; reason: string; level: GateLevel } {
-    // ${criterion.name} 规则检查
     const outputText = JSON.stringify(output);
-    let score = 85;
+    let score = 60; // 及格线默认分，不再无脑给85
     const reasons: string[] = [];
 
-    // 内容长度检查
+    // 1. 内容长度检查（基础门槛）
     if (outputText.length < 50) {
-      score -= 20; reasons.push('内容过短');
+      score -= 30;
+      reasons.push('输出内容过短（<50字符）');
+    } else if (outputText.length < 200) {
+      score -= 10;
+      reasons.push('输出内容偏短');
     }
-    // 结构化检查（存在必要字段）
-    if (output.title || output.content) score += 5;
+
+    // 2. 必要字段检查：如果criterion指定了field，必须存在且非空
+    const requiredField = (criterion as any).field;
+    if (requiredField) {
+      const value = output[requiredField];
+      if (value === undefined || value === null || value === '') {
+        score -= 25;
+        reasons.push(`缺少必要字段：${requiredField}`);
+      } else {
+        score += 10;
+      }
+    }
+
+    // 3. 最小长度检查：如果criterion指定了minLength
+    const minLength = (criterion as any).minLength;
+    if (minLength && typeof output.content === 'string') {
+      if (output.content.length < minLength) {
+        score -= 20;
+        reasons.push(`内容长度不足：${output.content.length}/${minLength}`);
+      } else {
+        score += 5;
+      }
+    }
+
+    // 4. 完整性检查：名称含"完整"时，检查outline/chapters等结构化字段
     if (criterion.name.includes('完整')) {
-      if (output.outline || output.chapters) score += 5;
+      const hasStructure = output.outline || output.chapters || output.scenes || output.structure;
+      if (!hasStructure) {
+        score -= 15;
+        reasons.push('缺少结构化内容（outline/chapters/scenes）');
+      } else {
+        score += 5;
+      }
     }
+
     score = Math.min(100, Math.max(0, score));
     const level: GateLevel = score >= criterion.minScore ? 'INFO' : 'CRITICAL';
 

@@ -88,6 +88,12 @@ export class MapPointService {
   create(projectId: string, dto: CreateMapPointDto): MapPointResponse {
     const now = new Date().toISOString();
     const id = uuid();
+    const name = String(dto.name || '').trim();
+
+    // 创建时自动扫描大纲与角色，建立关联（用户手动指定的优先）
+    const autoLinks = name ? this.computeLinksForLocation(projectId, name) : { chapterIds: [], characterIds: [] };
+    const linkedChapterIds = dto.linkedChapterIds && dto.linkedChapterIds.length > 0 ? dto.linkedChapterIds : autoLinks.chapterIds;
+    const linkedCharacterIds = dto.linkedCharacterIds && dto.linkedCharacterIds.length > 0 ? dto.linkedCharacterIds : autoLinks.characterIds;
 
     this.repo.insert({
       id,
@@ -98,8 +104,8 @@ export class MapPointService {
       parent_id: dto.parentId || null,
       level: dto.level || 'location',
       coordinates: dto.coordinates || null,
-      linked_chapter_ids: JSON.stringify(dto.linkedChapterIds || []),
-      linked_character_ids: JSON.stringify(dto.linkedCharacterIds || []),
+      linked_chapter_ids: JSON.stringify(linkedChapterIds),
+      linked_character_ids: JSON.stringify(linkedCharacterIds),
       climate: dto.climate || null,
       resources: dto.resources || null,
       significance: dto.significance || null,
@@ -144,6 +150,17 @@ export class MapPointService {
     if (dto.resources !== undefined) updateData.resources = dto.resources;
     if (dto.significance !== undefined) updateData.significance = dto.significance;
     if (dto.sensoryDetail !== undefined) updateData.sensory_detail = dto.sensoryDetail;
+
+    // 地点名称变更时，自动重新扫描关联（除非用户手动指定了新的关联）
+    if (dto.name !== undefined && String(dto.name).trim() !== String(existing.name || '').trim()) {
+      const newName = String(dto.name).trim();
+      if (newName && dto.linkedChapterIds === undefined) {
+        updateData.linked_chapter_ids = JSON.stringify(this.computeLinksForLocation(existing.project_id, newName).chapterIds);
+      }
+      if (newName && dto.linkedCharacterIds === undefined) {
+        updateData.linked_character_ids = JSON.stringify(this.computeLinksForLocation(existing.project_id, newName).characterIds);
+      }
+    }
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
@@ -206,6 +223,111 @@ export class MapPointService {
   /** 按关联章节查询 */
   findByChapter(projectId: string, chapterId: string): MapPointResponse[] {
     return this.repo.findByChapterId(projectId, chapterId).map((r) => this.toResponse(r));
+  }
+
+  /**
+   * 计算单个地点名在当前项目中的关联章节与角色。
+   * 扫描大纲标题/内容/场景匹配章节，扫描角色身份/外貌/背景匹配角色。
+   */
+  private computeLinksForLocation(projectId: string, locationName: string): { chapterIds: string[]; characterIds: string[] } {
+    const db = this.databaseService.getDb();
+    const name = locationName.trim();
+    if (!name) return { chapterIds: [], characterIds: [] };
+    const outlines = db.prepare(
+      `SELECT id FROM outlines WHERE project_id=? AND level='chapter' AND (title LIKE ? OR content LIKE ? OR scenes LIKE ?)`
+    ).all(projectId, `%${name}%`, `%${name}%`, `%${name}%`) as Array<{ id: string }>;
+    const characters = db.prepare(
+      `SELECT id FROM characters WHERE project_id=? AND (identity LIKE ? OR appearance LIKE ? OR background LIKE ?)`
+    ).all(projectId, `%${name}%`, `%${name}%`, `%${name}%`) as Array<{ id: string }>;
+    return { chapterIds: outlines.map(o => o.id), characterIds: characters.map(c => c.id) };
+  }
+
+  /**
+   * 大纲修改后增量更新地点关联：根据大纲文本决定该大纲是否关联到每个地点。
+   * 由 OutlineService.update 在 title/content/scenes 变化时调用。
+   */
+  updateLinksForOutline(projectId: string, outlineId: string, outlineText: string): void {
+    const db = this.databaseService.getDb();
+    const now = new Date().toISOString();
+    const locations = db.prepare('SELECT id, name, linked_chapter_ids FROM map_points WHERE project_id=?').all(projectId) as Array<{ id: string; name: string; linked_chapter_ids: string }>;
+    for (const loc of locations) {
+      const name = String(loc.name || '').trim();
+      if (!name) continue;
+      const linked = JSON.parse(loc.linked_chapter_ids || '[]') as string[];
+      const hasLink = linked.includes(outlineId);
+      const shouldLink = outlineText.includes(name);
+      if (hasLink && !shouldLink) {
+        db.prepare('UPDATE map_points SET linked_chapter_ids=?, updated_at=? WHERE id=?').run(JSON.stringify(linked.filter(id => id !== outlineId)), now, loc.id);
+      } else if (!hasLink && shouldLink) {
+        linked.push(outlineId);
+        db.prepare('UPDATE map_points SET linked_chapter_ids=?, updated_at=? WHERE id=?').run(JSON.stringify(linked), now, loc.id);
+      }
+    }
+  }
+
+  /**
+   * 角色修改后增量更新地点关联：根据角色文本决定该角色是否关联到每个地点。
+   * 由 CharacterService.update 在 identity/appearance/background 变化时调用。
+   */
+  updateLinksForCharacter(projectId: string, characterId: string, characterText: string): void {
+    const db = this.databaseService.getDb();
+    const now = new Date().toISOString();
+    const locations = db.prepare('SELECT id, name, linked_character_ids FROM map_points WHERE project_id=?').all(projectId) as Array<{ id: string; name: string; linked_character_ids: string }>;
+    for (const loc of locations) {
+      const name = String(loc.name || '').trim();
+      if (!name) continue;
+      const linked = JSON.parse(loc.linked_character_ids || '[]') as string[];
+      const hasLink = linked.includes(characterId);
+      const shouldLink = characterText.includes(name);
+      if (hasLink && !shouldLink) {
+        db.prepare('UPDATE map_points SET linked_character_ids=?, updated_at=? WHERE id=?').run(JSON.stringify(linked.filter(id => id !== characterId)), now, loc.id);
+      } else if (!hasLink && shouldLink) {
+        linked.push(characterId);
+        db.prepare('UPDATE map_points SET linked_character_ids=?, updated_at=? WHERE id=?').run(JSON.stringify(linked), now, loc.id);
+      }
+    }
+  }
+
+  /**
+   * 全量重算地点关联（存量项目兼容入口）。
+   * 扫描大纲标题/内容/场景匹配章节，扫描角色身份/外貌/背景匹配角色，
+   * 更新每个地点的 linked_chapter_ids / linked_character_ids。
+   */
+  resyncLinks(projectId: string): { updated: number; totalLocations: number; totalChapters: number; totalCharacters: number } {
+    const db = this.databaseService.getDb();
+    const now = new Date().toISOString();
+    const outlines = db.prepare(`SELECT id, title, content, scenes FROM outlines WHERE project_id=? AND level='chapter'`).all(projectId) as any[];
+    const characters = db.prepare(`SELECT id, name, identity, appearance, background FROM characters WHERE project_id=?`).all(projectId) as any[];
+    const locations = this.repo.findByProjectId(projectId);
+    let updated = 0;
+    for (const loc of locations) {
+      const name = String(loc.name || '').trim();
+      if (!name) continue;
+      const linkedChapterIds: string[] = [];
+      for (const ol of outlines) {
+        const searchText = `${ol.title || ''} ${ol.content || ''} ${ol.scenes || ''}`;
+        if (searchText.includes(name)) linkedChapterIds.push(ol.id);
+      }
+      const linkedCharacterIds: string[] = [];
+      for (const ch of characters) {
+        const searchText = `${ch.name || ''} ${ch.identity || ''} ${ch.appearance || ''} ${ch.background || ''}`;
+        if (searchText.includes(name)) linkedCharacterIds.push(ch.id);
+      }
+      const existing = this.repo.findById(loc.id);
+      const existingChapters = existing ? JSON.parse(existing.linked_chapter_ids || '[]') : [];
+      const existingCharacters = existing ? JSON.parse(existing.linked_character_ids || '[]') : [];
+      const chaptersChanged = JSON.stringify(existingChapters.sort()) !== JSON.stringify(linkedChapterIds.sort());
+      const charactersChanged = JSON.stringify(existingCharacters.sort()) !== JSON.stringify(linkedCharacterIds.sort());
+      if (chaptersChanged || charactersChanged) {
+        this.repo.update(loc.id, {
+          linked_chapter_ids: JSON.stringify(linkedChapterIds),
+          linked_character_ids: JSON.stringify(linkedCharacterIds),
+          updated_at: now,
+        });
+        updated++;
+      }
+    }
+    return { updated, totalLocations: locations.length, totalChapters: outlines.length, totalCharacters: characters.length };
   }
 
   private toResponse(row: MapPointRow): MapPointResponse {

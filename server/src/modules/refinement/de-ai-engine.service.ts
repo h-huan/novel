@@ -108,11 +108,60 @@ export class DeAiEngineService {
     { pattern: /不是[^，]{2,8}[，,](?:而是|就是)[^，]{2,8}/g, category: 'structure', description: 'AI典型对比句式' },
     { pattern: /一[^，]{2,6}[，,]一[^，]{2,6}[，,]一[^，]{2,6}/g, category: 'structure', description: 'AI排比句式干扰阅读节奏' },
 
+    // ─── 无信息量形容词堆砌（新增） ───
+    { pattern: /美丽的/g, category: 'adjective', description: '无信息量形容词"美丽的"，用具体描写代替' },
+    { pattern: /帅气的/g, category: 'adjective', description: '无信息量形容词"帅气的"，用具体描写代替' },
+    { pattern: /漂亮的/g, category: 'adjective', description: '无信息量形容词"漂亮的"，用具体描写代替' },
+    { pattern: /英俊的/g, category: 'adjective', description: '无信息量形容词"英俊的"，用具体描写代替' },
+    { pattern: /深邃的/g, category: 'adjective', description: '无信息量形容词"深邃的"，用具体描写代替' },
+    { pattern: /冰冷的/g, category: 'adjective', description: '无信息量形容词"冰冷的"，用具体描写代替' },
+    { pattern: /孤独的/g, category: 'adjective', description: '无信息量形容词"孤独的"，用动作/场景体现' },
+    { pattern: /无尽的/g, category: 'adjective', description: '无信息量形容词"无尽的"，用具体数量/场景代替' },
+    { pattern: /璀璨的/g, category: 'adjective', description: '无信息量形容词"璀璨的"，用具体描写代替' },
+    { pattern: /华丽的/g, category: 'adjective', description: '无信息量形容词"华丽的"，用具体描写代替' },
+    { pattern: /优雅的/g, category: 'adjective', description: '无信息量形容词"优雅的"，用动作描写代替' },
+    { pattern: /高贵的/g, category: 'adjective', description: '无信息量形容词"高贵的"，用细节/身份体现' },
+    { pattern: /神秘的/g, category: 'adjective', description: '无信息量形容词"神秘的"，用悬念/未知体现' },
+    { pattern: /强大的/g, category: 'adjective', description: '无信息量形容词"强大的"，用具体能力/战绩体现' },
+    { pattern: /微弱的/g, category: 'adjective', description: '无信息量形容词"微弱的"，用具体程度代替' },
+    { pattern: /沉重的/g, category: 'adjective', description: '无信息量形容词"沉重的"，用动作/生理反应体现' },
+    { pattern: /轻盈的/g, category: 'adjective', description: '无信息量形容词"轻盈的"，用动作描写代替' },
+    { pattern: /温暖的/g, category: 'adjective', description: '无信息量形容词"温暖的"，用具体触感/场景代替' },
+    { pattern: /寒冷的/g, category: 'adjective', description: '无信息量形容词"寒冷的"，用具体温度/生理反应代替' },
+
     // ─── 过度完整的解释（新增） ───
     { pattern: /这意[味识]着/g, category: 'overExplain', description: 'AI过度解释"这意味着"' },
     { pattern: /可以[理看]出/g, category: 'overExplain', description: 'AI替读者总结' },
     { pattern: /从这里不难/g, category: 'overExplain', description: 'AI过度引导读者' },
     { pattern: /由此可[见知]/g, category: 'overExplain', description: 'AI推导句式' },
+
+    // ─── 刻意感官描写（新增） ───
+    { pattern: /(凉意|暖意|寒意|热气|冷气|风)[^。]{0,8}(贴着|顺着|沿着|爬上|漫上)[^。]{0,8}(皮肤|脊背|后背|身体|手臂|小腿|脖子|脸颊)[^。]{0,8}(往上|往下|向上|向下)?(爬|蔓延|窜|流)/g, category: 'sensory', description: 'AI刻意感官描写"X贴着皮肤往上爬"' },
+    { pattern: /(炸开|绽放|绽开|迸开)[^。]{0,8}(一朵|一片|一团)?(光|光芒|光亮|白光|红光)/g, category: 'sensory', description: 'AI刻意比喻"炸开一朵光"' },
+    { pattern: /过电似的|过电一样|触电似的|触电一样/g, category: 'sensory', description: 'AI刻意感官描写"过电似的"' },
+    { pattern: /(心跳|心脏|心)[^。]{0,6}(漏了一拍|漏掉一拍|骤停|猛地一跳|咯噔一下)/g, category: 'sensory', description: 'AI套路化生理反应"心跳漏了一拍"' },
+    { pattern: /(喉咙|嗓子|喉头)[^。]{0,6}(发紧|发紧|一紧|哽住|哽咽)/g, category: 'sensory', description: 'AI套路化生理反应"喉咙发紧"' },
+    { pattern: /(手心|手掌|额头|后背|脊背)[^。]{0,6}(冒汗|出汗|渗汗|浸出冷汗)/g, category: 'sensory', description: 'AI套路化生理反应"手心冒汗"' },
+
+    // ─── 拟人化比喻（新增） ───
+    { pattern: /(回音|回声|声音|声响)[^。]{0,6}(吞掉|吃掉|吞噬|吞没|淹没)/g, category: 'personification', description: 'AI拟人化比喻"回音吞掉了尾音"' },
+    { pattern: /(风|风声|风)[^。]{0,6}(绕了道|绕道|躲开|避开|绕开)/g, category: 'personification', description: 'AI拟人化比喻"风声绕了道"' },
+    { pattern: /(黑暗|夜色|夜)[^。]{0,6}(吞噬|吞没|包裹|笼罩|张开大嘴)/g, category: 'personification', description: 'AI拟人化比喻"黑暗吞噬了一切"' },
+    { pattern: /(时间|时光|岁月)[^。]{0,6}(流逝|溜走|飞逝|匆匆|奔跑)/g, category: 'personification', description: 'AI拟人化比喻"时间飞逝"' },
+    { pattern: /(雨|雨水|雨点)[^。]{0,6}(敲打|敲击|拍打|砸|捶打)/g, category: 'personification', description: 'AI拟人化比喻"雨水敲打窗户"' },
+
+    // ─── 情绪外化/解释过度（新增） ───
+    { pattern: /(空气|气氛|氛围)[^。]{0,6}(沉下去|压下来|凝固|凝重|变得沉重)/g, category: 'emotionExternalize', description: 'AI情绪外化"空气沉下去"' },
+    { pattern: /(压在|压得|压着)[^。]{0,6}(肩膀|肩头|胸口|心头|心上|身上)/g, category: 'emotionExternalize', description: 'AI情绪外化"压在肩膀上"' },
+    { pattern: /没怎么用力[^。]{0,10}却让(我|他|她)[^。]{0,10}(不太容易|难以|无法|不能)/g, category: 'emotionExternalize', description: 'AI过度解释"没怎么用力却让我..."' },
+    { pattern: /(仿佛|好像|似乎)[^。]{0,10}(能感受到|能感觉到|能体会到)[^。]{0,10}(情绪|氛围|气息|感觉)/g, category: 'emotionExternalize', description: 'AI模糊情绪表达"仿佛能感受到..."' },
+
+    // ─── 套路化表达（新增） ───
+    { pattern: /(记忆|回忆|画面)[^。]{0,6}(清晰得像|清晰如同|清楚得像|清楚如同)[^。]{0,10}(刚发生|昨天|眼前)/g, category: 'cliche', description: 'AI套路化表达"记忆清晰得像刚发生的事"' },
+    { pattern: /不像梦|不是梦|不是做梦|不像做梦/g, category: 'cliche', description: 'AI套路化表达"不像梦"' },
+    { pattern: /(那一刻|这一瞬间|就在这时)[^。]{0,10}(我|他|她)[^。]{0,10}(突然|忽然|猛地)[^。]{0,10}(明白|懂得|知道|意识到)/g, category: 'cliche', description: 'AI套路化顿悟"那一刻我突然明白"' },
+    { pattern: /(时间|世界|一切)[^。]{0,6}(仿佛|好像|似乎)[^。]{0,6}(静止|停止|凝固|定格)/g, category: 'cliche', description: 'AI套路化表达"时间仿佛静止"' },
+    { pattern: /(眼中|眼里|眼眶)[^。]{0,6}(闪过|掠过|浮现|露出)[^。]{0,10}(一丝|一抹|一缕)?(复杂|异样|不明|难以言喻)/g, category: 'cliche', description: 'AI套路化表情"眼中闪过一丝复杂"' },
   ];
 
   /**
@@ -162,6 +211,23 @@ export class DeAiEngineService {
     { pattern: /这就是[^。]*的原因/g, category: 'conclusion', description: '结论句', suggestions: ['之所以X，是因为', 'X的根子在', '归根结底'] },
     { pattern: /非常非常/g, category: 'modifier', description: '重复修饰', suggestions: ['极其', '万分', '无比'] },
     { pattern: /真的太/g, category: 'modifier', description: '冗余表达', suggestions: ['太', '过分', '格外'] },
+    // ─── 无信息量形容词堆砌（新增，建议直接删除） ───
+    { pattern: /美丽的/g, category: 'adjective', description: '无信息量形容词，用具体描写代替', suggestions: ['', '好看的', '入眼的'] },
+    { pattern: /帅气的/g, category: 'adjective', description: '无信息量形容词，用具体描写代替', suggestions: ['', '精神的', '利落的'] },
+    { pattern: /漂亮的/g, category: 'adjective', description: '无信息量形容词，用具体描写代替', suggestions: ['', '好看的', '齐整的'] },
+    { pattern: /深邃的/g, category: 'adjective', description: '无信息量形容词，用具体描写代替', suggestions: ['', '深的', '黑的'] },
+    { pattern: /冰冷的/g, category: 'adjective', description: '无信息量形容词，用具体温度/触感代替', suggestions: ['', '凉的', '冰的'] },
+    { pattern: /孤独的/g, category: 'adjective', description: '无信息量形容词，用动作/场景体现', suggestions: ['', '一个人的', '落单的'] },
+    { pattern: /无尽的/g, category: 'adjective', description: '无信息量形容词，用具体数量/场景代替', suggestions: ['', '没头的', '看不到头的'] },
+    { pattern: /璀璨的/g, category: 'adjective', description: '无信息量形容词，用具体描写代替', suggestions: ['', '亮的', '闪的'] },
+    { pattern: /华丽的/g, category: 'adjective', description: '无信息量形容词，用具体描写代替', suggestions: ['', '花哨的', '讲究的'] },
+    { pattern: /优雅的/g, category: 'adjective', description: '无信息量形容词，用动作描写代替', suggestions: ['', '从容的', '稳的'] },
+    { pattern: /高贵的/g, category: 'adjective', description: '无信息量形容词，用细节/身份体现', suggestions: ['', '体面的', '端着的'] },
+    { pattern: /神秘的/g, category: 'adjective', description: '无信息量形容词，用悬念/未知体现', suggestions: ['', '说不清的', '摸不透的'] },
+    { pattern: /强大的/g, category: 'adjective', description: '无信息量形容词，用具体能力/战绩体现', suggestions: ['', '厉害的', '能打的'] },
+    { pattern: /沉重的/g, category: 'adjective', description: '无信息量形容词，用动作/生理反应体现', suggestions: ['', '沉的', '重的'] },
+    { pattern: /温暖的/g, category: 'adjective', description: '无信息量形容词，用具体触感/场景代替', suggestions: ['', '暖的', '热乎的'] },
+    { pattern: /寒冷的/g, category: 'adjective', description: '无信息量形容词，用具体温度/生理反应代替', suggestions: ['', '冷的', '冻人的'] },
     { pattern: /复杂的[^。]{1,10}心情/g, category: 'emotion', description: '模糊情感', suggestions: ['五味杂陈', '百感交集', '说不清是X还是Y'] },
     { pattern: /我们需要/g, category: 'tone', description: '集体视角', suggestions: ['你得', '你必须', '你要'] },
     { pattern: /因此/g, category: 'transition', description: '因果连接', suggestions: ['所以', '于是', '这才'] },
@@ -169,6 +235,23 @@ export class DeAiEngineService {
     { pattern: /此外/g, category: 'transition', description: '补充连接', suggestions: ['还有', '另外', '再说'] },
     { pattern: /与此同时/g, category: 'transition', description: '并列连接', suggestions: ['同一时间', '这时候', '另一边'] },
     { pattern: /事实上/g, category: 'transition', description: 'AI插入语', suggestions: ['其实', '说白了', ''] },
+    // ─── 刻意感官描写（新增，建议简化或删除） ───
+    { pattern: /过电似的|过电一样|触电似的|触电一样/g, category: 'sensory', description: '刻意感官描写', suggestions: ['', '麻了一下', '一激灵'] },
+    { pattern: /(心跳|心脏|心)漏了一拍|漏掉一拍/g, category: 'sensory', description: '套路化生理反应', suggestions: ['心一紧', '心里咯噔一下', ''] },
+    { pattern: /(喉咙|嗓子|喉头)发紧|一紧|哽住/g, category: 'sensory', description: '套路化生理反应', suggestions: ['嗓子堵', '说不出话', ''] },
+    { pattern: /(手心|手掌)冒汗|出汗|渗汗/g, category: 'sensory', description: '套路化生理反应', suggestions: ['手心湿', '攥紧拳头', ''] },
+    // ─── 拟人化比喻（新增，建议改为直白描写） ───
+    { pattern: /(回音|回声|声音)(吞掉|吃掉|吞噬|吞没|淹没)/g, category: 'personification', description: '拟人化比喻', suggestions: ['回音很大', '声音被盖住', ''] },
+    { pattern: /(风|风声)(绕了道|绕道|躲开|避开|绕开)/g, category: 'personification', description: '拟人化比喻', suggestions: ['风停了', '没风', ''] },
+    { pattern: /(黑暗|夜色|夜)(吞噬|吞没|包裹|笼罩)/g, category: 'personification', description: '拟人化比喻', suggestions: ['天黑了', '四周很黑', ''] },
+    { pattern: /(时间|时光|岁月)(流逝|溜走|飞逝|匆匆|奔跑)/g, category: 'personification', description: '拟人化比喻', suggestions: ['时间过去', '日子久了', ''] },
+    // ─── 情绪外化/解释过度（新增，建议删除或改为动作） ───
+    { pattern: /(空气|气氛|氛围)(沉下去|压下来|凝固|凝重|变得沉重)/g, category: 'emotionExternalize', description: '情绪外化', suggestions: ['没人说话', '安静下来', ''] },
+    { pattern: /(压在|压得|压着)(肩膀|肩头|胸口|心头|心上|身上)/g, category: 'emotionExternalize', description: '情绪外化', suggestions: ['心里沉', '喘不过气', ''] },
+    // ─── 套路化表达（新增，建议删除或改写） ───
+    { pattern: /不像梦|不是梦|不是做梦|不像做梦/g, category: 'cliche', description: '套路化表达', suggestions: ['', '真的发生了', '确实是真的'] },
+    { pattern: /(时间|世界|一切)(仿佛|好像|似乎)(静止|停止|凝固|定格)/g, category: 'cliche', description: '套路化表达', suggestions: ['周围静下来', '没人动', ''] },
+    { pattern: /(眼中|眼里|眼眶)(闪过|掠过|浮现|露出)(一丝|一抹|一缕)?(复杂|异样|不明|难以言喻)/g, category: 'cliche', description: '套路化表情', suggestions: ['他看了我一眼', '眼神变了', ''] },
   ];
 
   /**
@@ -209,21 +292,24 @@ export class DeAiEngineService {
   }
 
   /**
-   * 去AI味润色
+   * 去AI味润色（正则替换版）
+   * 替换规则为确定性替换（不再使用 Math.random 随机决定），
+   * 仅替换明确的AI高频词，保留原文语义和结构。
+   * 注意：此方法仅做简单正则替换，复杂降AI请使用 llmLocalRewrite。
    */
   polish(content: string, intensity: number = 5, focusTags?: string[]): { result: string; changes: string[] } {
     let result = content;
     const changes: string[] = [];
 
-    // 1. 替换AI特征词
+    // 1. 替换AI特征词（确定性替换，不再随机）
     for (const rule of this.replacementRules) {
       if (focusTags && focusTags.length > 0 && !focusTags.includes(rule.category)) {
         continue;
       }
 
       const matches = result.match(rule.pattern);
-      if (matches && Math.random() < intensity / 10) {
-        const suggestion = this.randomChoice(rule.suggestions);
+      if (matches && matches.length > 0) {
+        const suggestion = rule.suggestions[0]; // 始终使用第一个建议，不随机
         if (suggestion) {
           result = result.replace(rule.pattern, suggestion);
           changes.push(`[替换] ${rule.description}: "${matches[0]}" → "${suggestion}"`);
@@ -234,16 +320,72 @@ export class DeAiEngineService {
       }
     }
 
-    // 2. 打乱完美结构 (随机化句子长度)
-    if (intensity >= 4) {
-      result = this.randomizeStructure(result);
-      changes.push('[结构] 随机化了句子长度和段落结构');
+    return { result, changes };
+  }
+
+  /**
+   * llmLocalRewrite — LLM驱动的局部改写（降AI味）
+   * 先用detect找到AI特征段落，然后只改写问题段落+上下文各100字
+   * 不改动全文结构，只做局部精修
+   * @param content 原文
+   * @param llmGenerate LLM生成函数（由调用方传入，避免循环依赖）
+   * @param maxRewrites 最多改写多少处问题（默认3处，避免过度改写）
+   */
+  async llmLocalRewrite(
+    content: string,
+    llmGenerate: (prompt: string) => Promise<string>,
+    maxRewrites: number = 3,
+  ): Promise<{ result: string; changes: Array<{ before: string; after: string; reason: string }> }> {
+    if (!content || content.length < 100) return { result: content, changes: [] };
+
+    const detectResult = this.detect(content);
+    if (!detectResult.found || detectResult.matches.length === 0) {
+      return { result: content, changes: [] };
     }
 
-    // 3. 注入个性化表达
-    if (intensity >= 6) {
-      result = this.injectPersonality(result);
-      changes.push('[风格] 注入了个性化表达');
+    // 按位置排序，取前maxRewrites处
+    const targets = detectResult.matches
+      .sort((a, b) => a.position - b.position)
+      .slice(0, maxRewrites);
+
+    let result = content;
+    const changes: Array<{ before: string; after: string; reason: string }> = [];
+
+    for (const target of targets) {
+      // 取问题段落+上下文各100字
+      const start = Math.max(0, target.position - 100);
+      const end = Math.min(result.length, target.position + target.text.length + 100);
+      const context = result.substring(start, end);
+
+      const rewritePrompt = `请对以下小说片段进行局部降AI味改写，只改写有AI痕迹的部分，保留原文的叙事逻辑、人物性格和情节走向。
+
+AI痕迹说明：${target.description}
+原文片段（含上下文）：
+${context}
+
+改写要求：
+1. 去掉AI常用的过渡词、形容词堆砌、排比句
+2. 增加具体的动作细节和五感描写
+3. 对话要有人味，允许打断、沉默、答非所问
+4. 不要改变情节和人物关系
+5. 只输出改写后的完整片段，不要解释
+
+改写后的片段：`;
+
+      try {
+        const rewritten = await llmGenerate(rewritePrompt);
+        const cleanRewritten = rewritten.trim().replace(/^["'"'"']|["'"'"']$/g, '');
+        if (cleanRewritten && cleanRewritten.length > 20 && cleanRewritten !== context) {
+          result = result.substring(0, start) + cleanRewritten + result.substring(end);
+          changes.push({
+            before: context,
+            after: cleanRewritten,
+            reason: target.description,
+          });
+        }
+      } catch {
+        // LLM调用失败，跳过这一处
+      }
     }
 
     return { result, changes };
@@ -311,37 +453,4 @@ export class DeAiEngineService {
     return suggestions;
   }
 
-  private randomizeStructure(content: string): string {
-    const paragraphs = content.split('\n');
-    return paragraphs
-      .map((para) => {
-        if (para.trim().length === 0) return para;
-        const sentences = para.split(/(?<=[。！？])/);
-        if (sentences.length < 3) return para;
-        // 随机调整句子顺序（仅限某些非关键段落）
-        if (Math.random() > 0.6) return para;
-        // 交换相邻句子的部分结构
-        for (let i = 0; i < sentences.length - 1; i += 2) {
-          if (Math.random() > 0.5) continue;
-          const temp = sentences[i];
-          sentences[i] = sentences[i + 1];
-          sentences[i + 1] = temp;
-        }
-        return sentences.join('');
-      })
-      .join('\n');
-  }
-
-  private injectPersonality(content: string): string {
-    // 在对话标签注入个性化表达
-    return content
-      .replace(/他说/g, () => this.randomChoice(['他压低嗓子说', '他闷声道', '他嘀咕道', '他嚷嚷道', '他慢悠悠地说']))
-      .replace(/她说/g, () => this.randomChoice(['她嗔道', '她怯生生地说', '她爽快地说', '她咬着嘴唇说', '她笑眯眯地说']))
-      .replace(/他问/g, () => this.randomChoice(['他试探着问', '他小心翼翼地问', '他劈头就问', '他纳闷地问']))
-      .replace(/她问/g, () => this.randomChoice(['她好奇地问', '她疑惑地问', '她追问', '她漫不经心地问']));
-  }
-
-  private randomChoice<T>(arr: T[]): T {
-    return arr[Math.floor(Math.random() * arr.length)];
-  }
 }

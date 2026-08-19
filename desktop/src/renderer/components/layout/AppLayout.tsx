@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -14,12 +14,25 @@ interface AppLayoutProps {
 
 const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { serverStatus, serverError, startHealthPolling } = useAppStore();
-  const { currentProject } = useProjectStore();
+  const { currentProject, fetchProject } = useProjectStore();
   const location = useLocation();
   const navigate = useNavigate();
   const [recovery, setRecovery] = useState<{ canResume: boolean; running: boolean; recommendedAction: string; missingModules: string[]; consistencyIssues: string[]; protectionReasons: string[] } | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState('');
+
+  // 从 URL 提取项目 ID
+  const urlProjectId = useMemo(() => {
+    const match = location.pathname.match(/^\/project\/([^/]+)/);
+    return match ? match[1] : null;
+  }, [location.pathname]);
+
+  // 如果 URL 包含项目 ID 但 currentProject 为空，自动加载项目信息（确保侧边栏显示）
+  useEffect(() => {
+    if (urlProjectId && !currentProject) {
+      void fetchProject(urlProjectId);
+    }
+  }, [urlProjectId, currentProject, fetchProject]);
 
   // 判断是否有打开的项目（侧边栏应该始终显示）
   const hasProject = Boolean(currentProject);
@@ -118,7 +131,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             <div style={{
               margin: '12px 16px 0', padding: '12px 14px', borderRadius: 8,
               backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.34)',
-              color: '#fbd38d', fontSize: 12, lineHeight: 1.55,
+              color: '#fbd38d', fontSize: 14, lineHeight: 1.55,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
             }}>
               <div style={{ minWidth: 260, flex: '1 1 520px' }}>

@@ -234,6 +234,18 @@ export interface InspectionResult {
   logicIssues: LogicIssue[];
   characterDrift: CharacterDriftIssue[];
   foreshadowingMisses: ForeshadowingMiss[];
+  /** 确定性AI物理指纹检测结果（毫秒级，无需LLM） */
+  aiFingerprints?: {
+    overallScore: number;
+    parallelism: { score: number; count: number; examples: string[] };
+    adjectiveDensity: { score: number; density: number; overLimitSentences: number };
+    paragraphUniformity: { score: number; uniformGroups: number; avgVariance: number };
+    aiWordDensity: { score: number; count: number; perThousand: number };
+    sentenceLengthUniformity: { score: number; variance: number; cv: number };
+    dialogueRatio: { score: number; ratio: number };
+    punctuationDiversity: { score: number; uniqueTypes: number; ratio: number };
+    clicheExpression: { score: number; count: number; perThousand: number; examples: string[] };
+  };
 }
 
 export interface LogicIssue {

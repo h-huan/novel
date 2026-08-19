@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 interface QualityRouteState {
@@ -61,7 +61,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     gap: 12,
     flexWrap: 'wrap',
-    fontSize: 13,
+    fontSize: 14,
   },
   content: {
     display: 'flex',

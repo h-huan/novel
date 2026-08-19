@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
+import { parseJsonToReadable } from '../lib/textList';
 
 interface DashboardStats {
   totalChapters: number; completedChapters: number; writingChapters: number;
@@ -32,16 +33,10 @@ const STATS_CACHE_TTL = 30_000; // 30秒内不重复请求
 
 const dashboardText = (value: unknown): string => {
   if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return parseJsonToReadable(value);
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) return value.map(dashboardText).filter(Boolean).join(' · ');
-  if (typeof value === 'object') {
-    const row = value as Record<string, unknown>;
-    const name = dashboardText(row.name || row.title || row.date);
-    const detail = dashboardText(row.description || row.content || row.event || row.coreGoal || row.goal);
-    if (name && detail) return `${name}：${detail}`;
-    return name || detail || Object.values(row).map(dashboardText).filter(Boolean).join('；');
-  }
+  if (Array.isArray(value)) return value.map(dashboardText).filter(Boolean).join('\n');
+  if (typeof value === 'object') return parseJsonToReadable(value);
   return '';
 };
 
@@ -170,7 +165,7 @@ const ProjectDashboard: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: '800px', margin: '0 auto', overflow: 'auto', height: '100%' }}>
+    <div style={{ padding: '28px 32px', maxWidth: '800px', margin: '0 auto', overflow: 'auto', height: '100%', background: '#1a1a2e' }}>
       <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#eaeaea', marginBottom: '24px' }}>🏠 首页</h1>
       {(needsRecovery || recovery?.protectedHumanWork || recoveryMessage) && (
         <div style={{ padding: '16px', marginBottom: '20px', borderRadius: '10px', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}>
@@ -314,7 +309,7 @@ const ProjectDashboard: React.FC = () => {
             {worldview.geography && Array.isArray(worldview.geography) && worldview.geography.length > 0 && (
               <div style={dimBlockStyle}>
                 <div style={dimLabelStyle}>🗺️ 世界地理</div>
-                <div style={dimContentStyle}>{worldview.geography.map(dashboardText).filter(Boolean).join(' · ')}</div>
+                <div style={dimContentStyle}>{worldview.geography.map(dashboardText).filter(Boolean).join('\n')}</div>
               </div>
             )}
             {worldview.geography && typeof worldview.geography === 'string' && <DimRow icon="🗺️" label="世界地理" val={worldview.geography} />}
@@ -325,14 +320,14 @@ const ProjectDashboard: React.FC = () => {
             {worldview.history && Array.isArray(worldview.history) && worldview.history.length > 0 && (
               <div style={dimBlockStyle}>
                 <div style={dimLabelStyle}>📜 历史背景</div>
-                <div style={dimContentStyle}>{worldview.history.map(dashboardText).filter(Boolean).join(' · ')}</div>
+                <div style={dimContentStyle}>{worldview.history.map(dashboardText).filter(Boolean).join('\n')}</div>
               </div>
             )}
             {worldview.history && typeof worldview.history === 'string' && <DimRow icon="📜" label="历史背景" val={worldview.history} />}
             {worldview.factions && Array.isArray(worldview.factions) && worldview.factions.length > 0 && (
               <div style={dimBlockStyle}>
                 <div style={dimLabelStyle}>🏴 势力分布</div>
-                <div style={dimContentStyle}>{worldview.factions.map((f: any) => typeof f === 'string' ? f : (f.name || f.title || '') + (f.coreGoal ? `(${f.coreGoal})` : '')).filter(Boolean).join(' · ')}</div>
+                <div style={dimContentStyle}>{worldview.factions.map(dashboardText).filter(Boolean).join('\n')}</div>
               </div>
             )}
             {worldview.factions && typeof worldview.factions === 'string' && <DimRow icon="🏴" label="势力分布" val={worldview.factions} />}
@@ -470,6 +465,6 @@ const DimRow: React.FC<{ icon: string; label: string; val: string }> = ({ icon, 
 const sectionTitleStyle: React.CSSProperties = { fontSize: '12px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' };
 const dimBlockStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' };
 const dimLabelStyle: React.CSSProperties = { fontSize: '9px', color: '#6c6c80', marginBottom: '3px', textTransform: 'uppercase' };
-const dimContentStyle: React.CSSProperties = { fontSize: '11px', color: '#c0c0d0', lineHeight: 1.5 };
+const dimContentStyle: React.CSSProperties = { fontSize: '14px', color: '#c0c0d0', lineHeight: 1.6, whiteSpace: 'pre-wrap' };
 
 export default ProjectDashboard;

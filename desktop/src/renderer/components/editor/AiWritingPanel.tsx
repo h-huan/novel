@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AiWritingPanel - AI写作控制面板
  *
  * 三标签设计：
@@ -58,7 +58,7 @@ interface AiWritingPanelProps {
   chapters?: ChapterTarget[];
   onChapterChange?: (chapterId: string) => void;
   onGenerateStart?: () => void;
-  onGenerateComplete?: (content: string, generatedChapterId: string) => void;
+  onGenerateComplete?: (content: string, generatedChapterId: string, metadata?: { previousSummary?: string; autoStateUpdate?: any; continuityCheck?: any }) => void;
   onError?: (error: string) => void;
   generationNotice?: GenerationNotice | null;
   onGenerationStatus?: (notice: GenerationNotice) => void;
@@ -337,7 +337,11 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
         throw new Error(data?.error || '生成未返回可写入的正文');
       }
       publishGenerationNotice({ tone: 'success', text: '正文已生成，正在保存并同步创作资料…' });
-      onGenerateComplete?.(String(data.content), chapterId);
+      onGenerateComplete?.(String(data.content), chapterId, {
+        previousSummary: data.previousSummary,
+        autoStateUpdate: data.autoStateUpdate,
+        continuityCheck: data.continuityCheck,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : '生成失败';
       publishGenerationNotice({ tone: 'error', text: `生成失败：${message}` });
@@ -597,23 +601,33 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
             <p style={styles.modeDesc}>{MODE_DESCRIPTIONS[writingMode]}</p>
             {showModeSelector && (
               <div style={styles.modeList}>
-                {(Object.keys(MODE_LABELS) as WritingMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    style={{
-                      ...styles.modeOption,
-                      backgroundColor: mode === writingMode ? 'rgba(233, 69, 96, 0.15)' : 'transparent',
-                      borderColor: mode === writingMode ? '#e94560' : 'rgba(255,255,255,0.08)',
-                    }}
-                    onClick={() => {
-                      setWritingMode(mode);
-                      setShowModeSelector(false);
-                    }}
-                  >
-                    <span style={styles.modeOptionLabel}>{MODE_LABELS[mode]}</span>
-                    <span style={styles.modeOptionDesc}>{MODE_DESCRIPTIONS[mode]}</span>
-                  </button>
-                ))}
+                {(Object.keys(MODE_LABELS) as WritingMode[]).map((mode) => {
+                  const disabled = mode === 'semi_auto';
+                  return (
+                    <button
+                      key={mode}
+                      disabled={disabled}
+                      style={{
+                        ...styles.modeOption,
+                        backgroundColor: mode === writingMode ? 'rgba(233, 69, 96, 0.15)' : 'transparent',
+                        borderColor: mode === writingMode ? '#e94560' : 'rgba(255,255,255,0.08)',
+                        opacity: disabled ? 0.4 : 1,
+                        cursor: disabled ? 'not-allowed' : 'pointer',
+                      }}
+                      onClick={() => {
+                        if (disabled) return;
+                        setWritingMode(mode);
+                        setShowModeSelector(false);
+                      }}
+                    >
+                      <span style={styles.modeOptionLabel}>
+                        {MODE_LABELS[mode]}
+                        {disabled && <span style={{ marginLeft: 8, fontSize: 14, color: '#f59e0b' }}>（开发中）</span>}
+                      </span>
+                      <span style={styles.modeOptionDesc}>{MODE_DESCRIPTIONS[mode]}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -711,7 +725,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                 marginBottom: 10,
                 padding: '9px 10px',
                 borderRadius: 6,
-                fontSize: 12,
+                fontSize: 14,
                 lineHeight: 1.5,
                 color: generationNotice.tone === 'error' ? '#ff9aa9' : generationNotice.tone === 'success' ? '#8fe3a2' : '#f4cf72',
                 backgroundColor: generationNotice.tone === 'error' ? 'rgba(231, 76, 96, .12)' : generationNotice.tone === 'success' ? 'rgba(46, 204, 113, .10)' : 'rgba(243, 156, 18, .10)',

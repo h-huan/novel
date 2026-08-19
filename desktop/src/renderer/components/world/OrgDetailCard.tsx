@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OrgDetailCard - 组织详情卡片组件
  * 右侧面板，显示选中组织的详细信息（含富字段与关联名字解析）
  */
@@ -21,8 +21,8 @@ interface OrgDetailCardProps {
 
 const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div style={{ marginBottom: 10 }}>
-    <div style={{ fontSize: 11, fontWeight: 700, color: '#a78bfa', marginBottom: 3 }}>{label}</div>
-    <div style={{ fontSize: 12, color: '#c0c0d0', lineHeight: 1.6 }}>{children}</div>
+    <div style={{ fontSize: 14, fontWeight: 700, color: '#a78bfa', marginBottom: 3 }}>{label}</div>
+    <div style={{ fontSize: 14, color: '#c0c0d0', lineHeight: 1.6 }}>{children}</div>
   </div>
 );
 
@@ -37,7 +37,7 @@ const OrgDetailCard: React.FC<OrgDetailCardProps> = ({
 }) => {
   if (!organization) {
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8a8aa0', fontSize: 12 }}>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8a8aa0', fontSize: 14 }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>⚔️</div>
         <div>选择组织查看详情</div>
       </div>
@@ -57,12 +57,12 @@ const OrgDetailCard: React.FC<OrgDetailCardProps> = ({
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#131b36', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)' }}>
       <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#eaeaea' }}>组织详情</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: '#eaeaea' }}>组织详情</span>
         <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#8a8aa0', cursor: 'pointer', fontSize: 14 }}>×</button>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: '#eaeaea', marginBottom: 4 }}>{organization.name}</div>
-        <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, color: '#a855f7', backgroundColor: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)' }}>
+        <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 14, color: '#a855f7', backgroundColor: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)' }}>
           {TYPE_LABELS[organization.type] || organization.type}
         </span>
         {organization.description && <Row label="描述">{organization.description}</Row>}
@@ -87,12 +87,12 @@ const OrgDetailCard: React.FC<OrgDetailCardProps> = ({
         {parentOrg && <Row label="上级组织">{parentOrg.name}</Row>}
         {childOrgs.length > 0 && (
           <Row label={`下属组织 (${childOrgs.length})`}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{childOrgs.map(c => <span key={c.id} style={{ padding: '2px 7px', borderRadius: 4, fontSize: 11, color: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)' }}>{c.name}</span>)}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{childOrgs.map(c => <span key={c.id} style={{ padding: '2px 7px', borderRadius: 4, fontSize: 14, color: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)' }}>{c.name}</span>)}</div>
           </Row>
         )}
       </div>
       <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-        <button type="button" onClick={() => onDelete(organization.id)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', backgroundColor: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}>删除</button>
+        <button type="button" onClick={() => onDelete(organization.id)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', backgroundColor: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: 14 }}>删除</button>
       </div>
     </div>
   );

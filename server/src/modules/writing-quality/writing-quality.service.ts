@@ -13,6 +13,7 @@ import { DatabaseService } from '../../database/database.service';
 import { RealLLMService } from '../../chain/real-llm.service';
 import { WRITING_QUALITY_TAGS } from '../../state/writing-quality-tags';
 import { ChapterService } from '../chapter/chapter.service';
+import { QualityInspectionService } from '../refinement/quality-inspection.service';
 import type {
   AnalyzeChapterDto,
   AttentionCheckDto,
@@ -111,6 +112,7 @@ export class WritingQualityService {
     private readonly dbService: DatabaseService,
     @Optional() private readonly chapterService?: ChapterService,
     @Optional() private readonly realLLM?: RealLLMService,
+    @Optional() private readonly qualityInspection?: QualityInspectionService,
   ) {}
 
   // ====================== 1. ANALYZE CHAPTER QUALITY ======================
@@ -131,11 +133,15 @@ export class WritingQualityService {
       throw new BadRequestException('本章正文为空（0 字）。请先写作或生成正文后再提交质检。');
     }
     const words = this.countCjkWords(content);
-    if (words < 3200) {
-      throw new BadRequestException(`本章正文仅 ${words} 字，未达到 3200 字下限，暂不能提交质检。`);
+    // 动态字数范围：长篇3200-4000，短篇1500-8000
+    const projectRow = db.prepare('SELECT type FROM projects WHERE id = ?').get(projectId) as { type?: string } | undefined;
+    const isLongNovel = projectRow?.type === 'long_novel';
+    const wordRange = isLongNovel ? { min: 3200, max: 4000 } : { min: 1500, max: 8000 };
+    if (words < wordRange.min) {
+      throw new BadRequestException(`本章正文仅 ${words} 字，未达到 ${wordRange.min} 字下限，暂不能提交质检。`);
     }
-    if (words > 4000) {
-      throw new BadRequestException(`本章正文已达 ${words} 字，超过 4000 字上限，需精简后再提交质检。`);
+    if (words > wordRange.max) {
+      throw new BadRequestException(`本章正文已达 ${words} 字，超过 ${wordRange.max} 字上限，需精简后再提交质检。`);
     }
     const report = await this.analyzeChapterQuality(projectId, { ...dto, scope: dto.scope || 'chapter' });
     const chapter = await this.chapterService.submitForReview(dto.chapterId);
@@ -207,7 +213,30 @@ export class WritingQualityService {
       mode: this.inferAttentionMode(context?.project),
     });
 
+    // 物理指纹检测（确定性，毫秒级）
+    let aiFingerprints: any = null;
+    let fingerprintScore = 0;
+    if (this.qualityInspection) {
+      try {
+        aiFingerprints = this.qualityInspection.detectAiFingerprints(content);
+        fingerprintScore = Math.max(0, 100 - (aiFingerprints?.overallScore || 0));
+      } catch (err) {
+        this.logger.warn(`AI fingerprint detection failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // 统一综合评分：物理指纹30% + LLM语义评审70%（设定一致性由chain层负责）
+    const llmScore = llmResult.overallScore ?? 70;
+    const unifiedScore = aiFingerprints
+      ? Math.round(fingerprintScore * 0.3 + llmScore * 0.7)
+      : llmScore;
+
     const reportPayload: Record<string, any> = { attention };
+    if (aiFingerprints) {
+      reportPayload.aiFingerprints = aiFingerprints;
+      reportPayload.fingerprintScore = fingerprintScore;
+      reportPayload.unifiedScore = unifiedScore;
+    }
     if (parseWarning) {
       reportPayload.parseWarning = true;
       reportPayload.rawContentPreview = rawContentPreview;
@@ -216,9 +245,11 @@ export class WritingQualityService {
 
     const summary = parseWarning
       ? `质量诊断解析失败：${parseWarning}。请重试。`
-      : llmResult.summary;
+      : aiFingerprints
+        ? `${llmResult.summary}（物理指纹分：${fingerprintScore}，统一综合分：${unifiedScore}）`
+        : llmResult.summary;
     const overallLevel = llmResult.overallLevel || 'medium';
-    const overallScore = llmResult.overallScore ?? null;
+    const overallScore = unifiedScore;
 
     db.prepare(`
       INSERT INTO writing_quality_reports (

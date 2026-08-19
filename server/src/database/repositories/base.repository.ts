@@ -1,6 +1,6 @@
-﻿/**
- * Repository 鍩虹被
- * 鎻愪緵閫氱敤鐨勬暟鎹簱鎿嶄綔灏佽
+/**
+ * Repository 基类
+ * 提供通用的数据库操作封装
  */
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { DatabaseService } from '../database.service';
@@ -26,7 +26,7 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 鏍规嵁ID鏌ヨ鍗曟潯璁板綍
+   * 根据ID查询单条记录
    */
   findById(id: string): T | undefined {
     const stmt = this.db.prepare(`SELECT * FROM ${this.tableName} WHERE id = ?`);
@@ -34,21 +34,23 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 鏌ヨ鎵€鏈夎褰?   */
+   * 查询所有记录
+   */
   findAll(): T[] {
     const stmt = this.db.prepare(`SELECT * FROM ${this.tableName} ORDER BY created_at DESC`);
     return stmt.all() as unknown as T[];
   }
 
   /**
-   * 鎸夋潯浠舵煡璇?   */
+   * 按条件查询
+   */
   findByField(field: string, value: unknown): T[] {
     const stmt = this.db.prepare(`SELECT * FROM ${this.tableName} WHERE ${field} = ? ORDER BY created_at DESC`);
     return stmt.all(this.toSqlInput(value)) as unknown as T[];
   }
 
   /**
-   * 鎻掑叆璁板綍
+   * 插入记录
    */
   insert(data: Record<string, unknown>): T {
     const keys = Object.keys(data);
@@ -65,7 +67,7 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 鏇存柊璁板綍
+   * 更新记录
    */
   update(id: string, data: Record<string, unknown>): T | undefined {
     const keys = Object.keys(data).filter((k) => k !== 'id');
@@ -83,7 +85,7 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 鍒犻櫎璁板綍
+   * 删除记录
    */
   delete(id: string): boolean {
     const stmt = this.db.prepare(`DELETE FROM ${this.tableName} WHERE id = ?`);
@@ -92,7 +94,7 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 璁℃暟
+   * 计数
    */
   count(field?: string, value?: unknown): number {
     if (field && value !== undefined) {
@@ -106,7 +108,7 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 鍒嗛〉鏌ヨ
+   * 分页查询
    */
   paginate(offset: number, limit: number, orderBy = 'created_at', orderDir = 'DESC'): T[] {
     const stmt = this.db.prepare(
@@ -116,7 +118,7 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 鏉′欢鍒犻櫎
+   * 条件删除
    */
   deleteByField(field: string, value: unknown): number {
     const stmt = this.db.prepare(`DELETE FROM ${this.tableName} WHERE ${field} = ?`);
@@ -125,7 +127,8 @@ export abstract class BaseRepository<T> {
   }
 
   /**
-   * 浜嬪姟鍐呮搷浣?   */
+   * 事务内操作
+   */
   transaction<T>(fn: () => T): T {
     return this.databaseService.transaction(() => fn());
   }

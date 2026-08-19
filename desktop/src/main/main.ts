@@ -785,7 +785,9 @@ app.on('before-quit', () => {
   }
 
   // 注销快捷键
-  globalShortcut.unregisterAll();
+  if (app.isReady()) {
+    globalShortcut.unregisterAll();
+  }
 });
 
 // 防止多实例

@@ -67,9 +67,7 @@ const Sidebar: React.FC = () => {
     { id: 'conflict', label: '前后矛盾', path: `/project/${pid}/conflicts`, icon: ICONS.conflict },
     { id: 'knowledge', label: '知识点', path: `/project/${pid}/knowledge`, icon: ICONS.knowledge },
     { id: 'importExport', label: '导入导出', path: `/project/${pid}/import-export`, icon: ICONS.importExport },
-    { id: 'refinement', label: '精修', path: `/project/${pid}/refinement`, icon: ICONS.refinement },
     { id: 'version', label: '修改记录', path: `/project/${pid}/versions`, icon: ICONS.version },
-    { id: 'tools', label: '创作工具', path: `/project/${pid}/tools`, icon: ICONS.tools },
   ] : [];
 
   const isActive = (item: NavItem): boolean => {

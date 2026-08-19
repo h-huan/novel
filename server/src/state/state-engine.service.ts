@@ -419,21 +419,33 @@ export class StateEngineService {
   /**
    * 根据规则和建议值推测变化后的值
    */
+  /**
+   * 根据触发词推断新的状态值
+   * 修复：numeric/numeric_delta 不再直接返回 currentValue，而是根据触发词方向推断变化
+   */
   private suggestValue(
     dimId: string,
     rules: UpdateRule,
-    _context: string,
+    context: string,
     currentValue: unknown,
   ): unknown {
     const meta = DIMENSION_METADATA[dimId];
+    const trigger = rules.detectedTrigger || '';
 
     switch (meta.type) {
       case 'numeric':
-      case 'numeric_delta':
-        return currentValue as number;
+      case 'numeric_delta': {
+        const cur = typeof currentValue === 'number' ? currentValue : 50;
+        // 根据触发词判断增减方向和幅度
+        const delta = this.estimateNumericDelta(dimId, trigger, context);
+        if (meta.type === 'numeric_delta') {
+          return delta; // delta类型返回变化量
+        }
+        return Math.max(0, Math.min(100, cur + delta));
+      }
 
       case 'enum':
-        return currentValue as string;
+        return trigger || (currentValue as string);
 
       case 'list':
         return rules.detectedTrigger || '';
@@ -450,12 +462,76 @@ export class StateEngineService {
   }
 
   /**
-   * 计算检测置信度
+   * 根据维度和触发词估算数值变化量
    */
-  private calculateConfidence(_context: string, _trigger: string): number {
-    // 简化版：规则匹配置信度固定为 0.85
-    // 实际场景建议接入 LLM 辅助计算
-    return 0.85;
+  private estimateNumericDelta(dimId: string, trigger: string, context: string): number {
+    // 正向触发词（增加）和负向触发词（减少）映射
+    const directionMap: Record<string, { increase: string[]; decrease: string[]; baseDelta: number }> = {
+      hp_injury: {
+        increase: ['治愈', '恢复', '治疗', '痊愈', '轻伤'],
+        decrease: ['受伤', '受伤较重', '重伤', '致命伤'],
+        baseDelta: 15,
+      },
+      reputation: {
+        increase: ['声望', '名望', '名震', '威名'],
+        decrease: ['臭名', '名誉扫地'],
+        baseDelta: 20,
+      },
+      relationship: {
+        increase: ['好感', '信任', '结盟', '和解', '亲近'],
+        decrease: ['厌恶', '背叛', '决裂', '疏远'],
+        baseDelta: 25,
+      },
+      wealth: {
+        increase: ['获得金币', '赚取', '赏赐', '缴获'],
+        decrease: ['花费', '亏损', '变卖'],
+        baseDelta: 30,
+      },
+      skill_level: {
+        increase: ['突破', '晋级', '修炼', '领悟', '掌握', '学会', '精进'],
+        decrease: [],
+        baseDelta: 1,
+      },
+    };
+
+    const config = directionMap[dimId];
+    if (!config) return 0;
+
+    // 根据上下文中的程度词调整幅度
+    let multiplier = 1;
+    if (/严重|致命|极度|非常|十分/.test(context)) multiplier = 1.5;
+    if (/轻微|稍微|有点|略微/.test(context)) multiplier = 0.5;
+
+    if (config.increase.some(t => trigger.includes(t))) {
+      return Math.round(config.baseDelta * multiplier);
+    }
+    if (config.decrease.some(t => trigger.includes(t))) {
+      return -Math.round(config.baseDelta * multiplier);
+    }
+    return 0;
+  }
+
+  /**
+   * 计算检测置信度
+   * 修复：不再固定0.85，根据触发词明确程度和上下文匹配度计算
+   */
+  private calculateConfidence(context: string, trigger: string): number {
+    if (!trigger) return 0.5;
+
+    let confidence = 0.7; // 基础置信度
+
+    // 触发词越长越具体，置信度越高
+    if (trigger.length >= 4) confidence += 0.1;
+    if (trigger.length >= 6) confidence += 0.05;
+
+    // 上下文中角色名附近有触发词，置信度更高
+    // （context已由extractContext截取为角色名附近文本）
+    if (context.length > 0 && context.length < 100) confidence += 0.05;
+
+    // 明确的数值/程度词提升置信度
+    if (/(严重|致命|完全|彻底|终于|成功|突破|晋升|痊愈|决裂)/.test(context)) confidence += 0.1;
+
+    return Math.min(0.95, Math.max(0.3, confidence));
   }
 
   /**

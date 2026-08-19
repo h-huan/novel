@@ -7,6 +7,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 import { clampSidebar } from '../components/common/LayoutKit';
+import EmptyState from '../components/common/EmptyState';
 
 interface Timeline {
   id: string;
@@ -205,7 +206,7 @@ const TimelinePage: React.FC = () => {
           {timelines.length === 0 ? (
             <div style={styles.empty}>暂无时间线，点击上方按钮创建</div>
           ) : (
-            timelines.map((timeline) => (
+            timelines.map((timeline, idx) => (
               <div
                 key={timeline.id}
                 style={{
@@ -214,7 +215,10 @@ const TimelinePage: React.FC = () => {
                 }}
                 onClick={() => handleSelectTimeline(timeline)}
               >
-                <div style={styles.timelineName}>{timeline.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600 }}>#{idx + 1}</span>
+                  <div style={styles.timelineName}>{timeline.name}</div>
+                </div>
                 {timeline.description && (
                   <div style={styles.timelineDesc}>{timeline.description}</div>
                 )}
@@ -271,10 +275,13 @@ const TimelinePage: React.FC = () => {
                 <div style={styles.empty}>暂无事件，点击上方按钮添加</div>
               ) : (
                 <div style={styles.eventTimeline}>
-                  {events.map((event) => (
+                  {events.map((event, idx) => (
                     <div key={event.id} style={styles.eventCard}>
-                      <div style={styles.eventDate}>
-                        {event.eventDate || '未知日期'}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600 }}>#{idx + 1}</span>
+                        <div style={styles.eventDate}>
+                          {event.eventDate || '未知日期'}
+                        </div>
                       </div>
                       <div style={styles.eventContent}>
                         <div style={styles.eventTitle}>{event.title}</div>
@@ -451,7 +458,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    backgroundColor: '#16213e',
+    backgroundColor: '#1a1a2e',
     color: '#eaeaea',
     overflow: 'hidden',
   },

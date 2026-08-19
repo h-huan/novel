@@ -223,6 +223,61 @@ export class ChapterDerivedDataSyncService {
     return results;
   }
 
+  /**
+   * 全量重算项目伏笔状态（存量项目兼容入口）。
+   * 按章节顺序扫描：达到计划回收章节的 active/buried → reminder；
+   * reminder 状态且正文命中回收关键词 → recovered。
+   * 不依赖单章正文保存触发，老项目一键即可补齐状态。
+   */
+  resyncAllForeshadowings(projectId: string): { reminded: number; recovered: number; scanned: number } {
+    const db = this.database.getDb();
+    const now = new Date().toISOString();
+    let reminded = 0;
+    let recovered = 0;
+    const chapters = db.prepare(
+      `SELECT id, chapter_index, content FROM chapters WHERE project_id=? AND content IS NOT NULL AND content != '' ORDER BY chapter_index, id`
+    ).all(projectId) as any[];
+    for (const chapter of chapters) {
+      const currentChapterIndex = Number(chapter.chapter_index) || 0;
+      if (currentChapterIndex <= 0) continue;
+      // 1) 达到回收章节 → reminder
+      const due = db.prepare(
+        `SELECT id FROM foreshadowings WHERE project_id=? AND status IN ('active','buried') AND planned_recovery_chapter_index IS NOT NULL AND planned_recovery_chapter_index <= ?`
+      ).all(projectId, currentChapterIndex) as any[];
+      for (const fs of due) {
+        const r = db.prepare(`UPDATE foreshadowings SET status='reminder', updated_at=? WHERE id=? AND status IN ('active','buried')`).run(now, fs.id);
+        reminded += Number(r.changes) || 0;
+      }
+      // 2) reminder 命中正文回收 → recovered
+      const reminders = db.prepare(
+        `SELECT id, content, payoff_description, recovery_condition FROM foreshadowings WHERE project_id=? AND status='reminder'`
+      ).all(projectId) as any[];
+      const afterContent = String(chapter.content || '');
+      for (const fs of reminders) {
+        const payoff = String(fs.payoff_description || '').trim();
+        const condition = String(fs.recovery_condition || '').trim();
+        const content = String(fs.content || '').trim();
+        const recoveryText = payoff || condition || '';
+        let hit = false;
+        if (recoveryText && afterContent.includes(recoveryText.substring(0, Math.min(20, recoveryText.length)))) {
+          hit = true;
+        } else {
+          const keywords = this.extractRecoveryKeywords([payoff, condition, content].filter(Boolean).join(' '));
+          if (keywords.length > 0) {
+            const hitCount = keywords.filter(k => afterContent.includes(k)).length;
+            if (keywords.length === 1 && hitCount === 1) hit = true;
+            else if (keywords.length >= 2 && hitCount >= 2) hit = true;
+          }
+        }
+        if (hit) {
+          const r = db.prepare(`UPDATE foreshadowings SET status='recovered', actual_recovery_chapter_index=?, updated_at=? WHERE id=? AND status='reminder'`).run(currentChapterIndex, now, fs.id);
+          recovered += Number(r.changes) || 0;
+        }
+      }
+    }
+    return { reminded, recovered, scanned: chapters.length };
+  }
+
   private reviewForeshadowing(input: SyncInput, checksum: string): ContinuityReviewStep {
     const rows = this.database.getDb().prepare(`SELECT t.*, e.id event_id, e.event_type, e.evidence
       FROM foreshadowing_threads t JOIN foreshadowing_lifecycle_events e ON e.thread_id=t.id
@@ -235,6 +290,47 @@ export class ChapterDerivedDataSyncService {
       if (was && !is) issues.push({ type: row.event_type === 'recovered' ? 'removed_recovery' : 'missing_evidence', target: row.id, requirement: row.title, old: evidence, next: '', severity: row.event_type === 'recovered' ? 'high' : 'medium', block: row.event_type === 'recovered' });
       if (!was && is) issues.push({ type: 'evidence_added', target: row.id, requirement: row.title, old: '', next: evidence, severity: 'low', block: false });
     }
+    // 自动提醒回收：检查foreshadowings表中达到回收章节的伏笔，自动改为reminder状态
+    // 自动检测回收：如果正文中包含伏笔的回收结果或回收条件，自动标记为recovered
+    try {
+      const chapter = this.database.getDb().prepare('SELECT chapter_index FROM chapters WHERE id=? AND project_id=?').get(input.chapterId, input.projectId) as any;
+      const currentChapterIndex = chapter?.chapter_index || 0;
+      if (currentChapterIndex > 0) {
+        const dueForeshadowings = this.database.getDb().prepare(
+          `SELECT id FROM foreshadowings WHERE project_id=? AND status IN ('active','buried') AND planned_recovery_chapter_index IS NOT NULL AND planned_recovery_chapter_index <= ?`
+        ).all(input.projectId, currentChapterIndex) as any[];
+        for (const fs of dueForeshadowings) {
+          this.database.getDb().prepare(`UPDATE foreshadowings SET status='reminder', updated_at=? WHERE id=? AND status IN ('active','buried')`).run(new Date().toISOString(), fs.id);
+        }
+        // 自动检测回收：检查reminder状态的伏笔，正文中是否包含回收内容
+        // 分层匹配：① payoff前20字精确匹配（高置信度）② 从payoff+condition+content提取≥3字关键词，命中≥2个判定回收
+        const reminderForeshadowings = this.database.getDb().prepare(
+          `SELECT id, content, payoff_description, recovery_condition FROM foreshadowings WHERE project_id=? AND status='reminder'`
+        ).all(input.projectId) as any[];
+        for (const fs of reminderForeshadowings) {
+          const payoff = String(fs.payoff_description || '').trim();
+          const condition = String(fs.recovery_condition || '').trim();
+          const content = String(fs.content || '').trim();
+          const recoveryText = payoff || condition || '';
+          let recovered = false;
+          // 路径①：前20字精确匹配
+          if (recoveryText && input.afterContent.includes(recoveryText.substring(0, Math.min(20, recoveryText.length)))) {
+            recovered = true;
+          } else {
+            // 路径②：关键词匹配（≥3字中文/英文词，过滤量词虚词）
+            const keywords = this.extractRecoveryKeywords([payoff, condition, content].filter(Boolean).join(' '));
+            if (keywords.length > 0) {
+              const hitCount = keywords.filter(k => input.afterContent.includes(k)).length;
+              if (keywords.length === 1 && hitCount === 1) recovered = true;
+              else if (keywords.length >= 2 && hitCount >= 2) recovered = true;
+            }
+          }
+          if (recovered) {
+            this.database.getDb().prepare(`UPDATE foreshadowings SET status='recovered', actual_recovery_chapter_index=?, updated_at=? WHERE id=? AND status='reminder'`).run(currentChapterIndex, new Date().toISOString(), fs.id);
+          }
+        }
+      }
+    } catch (e) { /* 自动提醒/回收失败不影响主流程 */ }
     return this.persistReviews(input, checksum, 'foreshadowing', issues);
   }
 
@@ -290,6 +386,18 @@ export class ChapterDerivedDataSyncService {
   }
 
   private jsonStrings(raw: string): string[] { try { const value=JSON.parse(raw||'[]'); const out:string[]=[]; const walk=(v:any)=>{ if(typeof v==='string') out.push(v.trim()); else if(Array.isArray(v)) v.forEach(walk); else if(v&&typeof v==='object') Object.values(v).forEach(walk); }; walk(value); return out; } catch { return []; } }
+
+  /**
+   * 从伏笔回收描述中提取≥3字的中文/英文实词关键词，用于正文回收检测。
+   * 过滤掉"一把""一个""这个"等短量词和常见虚词，降低误判率。
+   */
+  private extractRecoveryKeywords(text: string): string[] {
+    if (!text) return [];
+    const stopWords = new Set(['这个', '那个', '一个', '一些', '一种', '一样', '一直', '已经', '可以', '因为', '所以', '但是', '然后', '于是', '如果', '虽然', '然而', '并且', '或者', '不是', '没有', '什么', '怎么', '为什么', '这样', '那样', '自己', '他们', '她们', '它们', '我们', '你们']);
+    const segments = text.split(/[^\u4e00-\u9fa5A-Za-z0-9]+/)
+      .filter(s => s.length >= 3 && !stopWords.has(s));
+    return [...new Set(segments)].slice(0, 10);
+  }
 
   private async syncChapterSummary(
     input: SyncInput,

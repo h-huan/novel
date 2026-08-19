@@ -222,6 +222,9 @@ const WritingPage: React.FC = () => {
   // 生成成功高亮横幅：AI 写完后顶部常驻 12 秒，附"查看前后矛盾"按钮
   const [successBanner, setSuccessBanner] = useState<{ wordCount: number; stateCount: number; chapterId: string; conflictCount?: number } | null>(null);
 
+  // 生成元数据：前情自动摘要、角色状态自动更新等，供页面展示
+  const [generationMetadata, setGenerationMetadata] = useState<{ previousSummary?: string; autoStateUpdate?: any; continuityCheck?: any } | null>(null);
+
   // 编辑器命令式句柄：让 handleGenerateComplete 可以把 AI 完成的内容强制刷进编辑器，
   // 避免"用户先前手敲过字"场景下被 ChapterEditorShell 内部的 isDirty 守卫拒收、
   // 结果作者只看到自己写的几百字而误以为"内容没变化"。
@@ -287,7 +290,7 @@ const WritingPage: React.FC = () => {
       if (isInput || isMonaco) return;
 
       if (e.key === 'F1') { e.preventDefault(); setWritingMode('full_auto'); setGenStatus('🔄 全自动模式'); setTimeout(() => setGenStatus(null), 1500); }
-      if (e.key === 'F2') { e.preventDefault(); setWritingMode('semi_auto'); setGenStatus('🔄 半自动模式'); setTimeout(() => setGenStatus(null), 1500); }
+      if (e.key === 'F2') { e.preventDefault(); setGenStatus('⚠️ 半自动模式开发中，暂不可用'); setTimeout(() => setGenStatus(null), 2000); }
       if (e.key === 'F3') { e.preventDefault(); setWritingMode('manual'); setGenStatus('🔄 手动模式'); setTimeout(() => setGenStatus(null), 1500); }
     };
     window.addEventListener('keydown', handler);
@@ -488,7 +491,7 @@ const WritingPage: React.FC = () => {
     })();
   }, [projectId, currentChapter?.id, setCurrentChapterContent]);
 
-  const handleGenerateComplete = useCallback((content: string, targetChapterId: string) => {
+  const handleGenerateComplete = useCallback((content: string, targetChapterId: string, metadata?: { previousSummary?: string; autoStateUpdate?: any; continuityCheck?: any }) => {
     if (!content.trim()) {
       setGenerationTask({ tone: 'error', text: '生成未返回正文，当前内容未变更。' });
       setGenStatus('❌ 生成未返回正文，当前内容未变更');
@@ -505,9 +508,11 @@ const WritingPage: React.FC = () => {
     setRightPanel(null);
     // 顶部高亮横幅：先按字数占位，等同步完成再回填 stateCount
     const wordCount = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-    setSuccessBanner({ wordCount, stateCount: 0, chapterId: targetChapterId });
+    setSuccessBanner({ wordCount, stateCount: metadata?.autoStateUpdate?.updated || 0, chapterId: targetChapterId });
     setGenerationTask({ tone: 'working', text: '正文已生成，正在保存与同步…' });
     setGenStatus('🔄 正文已生成，正在保存与同步…');
+    // 存储生成元数据（前情摘要、自动状态更新）供页面展示
+    setGenerationMetadata(metadata || null);
     void syncDraftAndPendingState(content, targetChapterId);
   }, [syncDraftAndPendingState, setCurrentChapterContent, currentChapter?.id, setRightPanel]);
 
@@ -664,7 +669,7 @@ const WritingPage: React.FC = () => {
             color: palette.fg,
             boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
             display: 'flex', alignItems: 'center', gap: 12,
-            fontSize: 13, fontWeight: 600, lineHeight: 1.4,
+            fontSize: 14, fontWeight: 600, lineHeight: 1.4,
           }}>
             <span style={{ fontSize: 18, lineHeight: 1 }}>{isSyncFail ? '⚠️' : isConflict ? '⚠️' : '✅'}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -680,6 +685,11 @@ const WritingPage: React.FC = () => {
                   </span>
                 )}
               </div>
+              {generationMetadata?.previousSummary && !isSyncFail && !isConflict && (
+                <div style={{ fontSize: 14, color: palette.subFg, marginTop: 4, fontWeight: 500 }}>
+                  前情摘要已自动生成 · 角色状态从正文自动提取
+                </div>
+              )}
             </div>
             {projectId && successBanner.conflictCount !== undefined && (
               <button
@@ -691,7 +701,7 @@ const WritingPage: React.FC = () => {
                   color: successBanner.conflictCount > 0 ? '#ffd1d8' : 'rgba(255,255,255,0.4)',
                   padding: '6px 14px', borderRadius: 6,
                   cursor: successBanner.conflictCount > 0 ? 'pointer' : 'not-allowed',
-                  fontSize: 12, fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                  fontSize: 14, fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap',
                 }}
               >{successBanner.conflictCount > 0 ? `查看前后矛盾 (${successBanner.conflictCount}) →` : '前后矛盾已清零'}</button>
             )}
@@ -709,13 +719,13 @@ const WritingPage: React.FC = () => {
           position: 'fixed', top: 8, right: 16, zIndex: 100,
           maxWidth: 360, borderRadius: 8, backgroundColor: 'rgba(26,26,46,0.95)',
           border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-          fontSize: 11, overflow: 'hidden',
+          fontSize: 14, overflow: 'hidden',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
             <span style={{ color: wsConnected ? '#2ecc71' : '#e74c3c', fontWeight: 600 }}>
               {wsConnected ? '🟢 实时连接' : '🔴 已断开'}
             </span>
-            <button onClick={clearWsNotifications} style={{ background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: 12 }}>✕</button>
+            <button onClick={clearWsNotifications} style={{ background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: 14 }}>✕</button>
           </div>
           <div style={{ maxHeight: 120, overflow: 'auto' }}>
             {wsNotifications.slice(0, 3).map((n, i) => (
@@ -844,7 +854,7 @@ const WritingPage: React.FC = () => {
           <div style={{ padding: '10px 14px 0' }}>
             <WritingQualityContextBanner />
             {displayedChapterHeadingMismatch(currentChapter?.content, currentChapter?.chapterIndex) && (
-              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, color: '#ffd891', background: 'rgba(130,83,24,0.25)', border: '1px solid rgba(243,156,18,0.55)', fontSize: 12 }}>
+              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, color: '#ffd891', background: 'rgba(130,83,24,0.25)', border: '1px solid rgba(243,156,18,0.55)', fontSize: 14 }}>
                 {displayedChapterHeadingMismatch(currentChapter?.content, currentChapter?.chapterIndex)}
                 <button onClick={() => navigate(`/project/${projectId}/versions?chapter=${currentChapter?.id}`)} style={{ marginLeft: 10, border: 0, background: 'transparent', color: '#ffe1a2', textDecoration: 'underline', cursor: 'pointer' }}>查看修改记录</button>
               </div>

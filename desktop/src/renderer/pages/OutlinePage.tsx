@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { parseJsonToReadable } from '../lib/textList';
 import { useCharacterStore } from '../stores/characterStore';
 import { useForeshadowingStore } from '../stores/foreshadowingStore';
 import { useProjectStore } from '../stores/projectStore';
@@ -164,15 +165,10 @@ const parseJsonObject = (value: unknown): Record<string, any> => {
 const readableValue = (value: unknown): string => {
   if (value === null || value === undefined) return '';
   if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return '';
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try { return readableValue(JSON.parse(trimmed)); } catch { return trimmed; }
-    }
-    return trimmed;
+    return parseJsonToReadable(value);
   }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) return value.map(readableValue).filter(Boolean).join('；');
+  if (Array.isArray(value)) return value.map(readableValue).filter(Boolean).join('\n');
   if (typeof value !== 'object') return '';
 
   const row = value as Record<string, unknown>;
@@ -184,7 +180,7 @@ const readableValue = (value: unknown): string => {
     const text = readableValue(item);
     return text ? `${label}：${text}` : '';
   }).filter(Boolean);
-  if (sceneParts.length) return sceneParts.join('；');
+  if (sceneParts.length) return sceneParts.join('\n');
 
   for (const key of ['summary', 'content', 'description', 'title', 'name', 'text']) {
     const text = readableValue(row[key]);
@@ -212,8 +208,10 @@ const splitFieldList = (value: unknown): string[] => {
 
 const resolveHighlights = (...sources: any[]): string => {
   for (const src of sources) {
-    if (Array.isArray(src) && src.length > 0) return src.map((h: any) => typeof h === 'string' ? h : (h?.point || h?.highlight || h?.text || '')).filter(Boolean).join('\n• ');
-    if (typeof src === 'string' && src.trim()) return src;
+    if (src === null || src === undefined) continue;
+    if (Array.isArray(src) && src.length > 0) return parseJsonToReadable(src);
+    if (typeof src === 'string' && src.trim()) return parseJsonToReadable(src);
+    if (typeof src === 'object') return parseJsonToReadable(src);
   }
   return '';
 };
@@ -228,22 +226,19 @@ const countHighlights = (chapter: ChapterNode): number => {
 const isRousing = (fn: ChapterFunctionType): boolean => ['conflict', 'explosion', 'climax'].includes(fn);
 const resolveForeshadowing = (...sources: any[]): string => {
   for (const src of sources) {
-    if (Array.isArray(src) && src.length > 0) return src.map((f: any) => {
-      if (typeof f === 'string') return f;
-      // 回收对象格式：{ reference, method }；设置对象格式：{ content, type }
-      if (f?.reference != null || f?.method != null) {
-        const ref = typeof f.reference === 'string' ? f.reference : (f.reference?.content || f.reference?.text || '');
-        return `回收「${ref || '未指明伏笔'}」${f.method ? `·方式：${f.method}` : ''}`;
-      }
-      return `[${f.type || 'hint'}] ${f.content || f.text || f.summary || ''}`;
-    }).filter(Boolean).join('\n');
-    if (typeof src === 'string' && src.trim()) return src;
+    if (src === null || src === undefined) continue;
+    if (Array.isArray(src) && src.length > 0) return parseJsonToReadable(src);
+    if (typeof src === 'string' && src.trim()) return parseJsonToReadable(src);
+    if (typeof src === 'object') return parseJsonToReadable(src);
   }
   return '';
 };
 const resolveCharacterStates = (...sources: any[]): string => {
   for (const src of sources) {
-    if (Array.isArray(src) && src.length > 0) return src.map((cs: any) => typeof cs === 'string' ? cs : `${cs.character || ''}: ${cs.stateBefore || ''} → ${cs.stateAfter || ''}（${cs.trigger || ''}）`).join('\n');
+    if (src === null || src === undefined) continue;
+    if (Array.isArray(src) && src.length > 0) return parseJsonToReadable(src);
+    if (typeof src === 'string' && src.trim()) return parseJsonToReadable(src);
+    if (typeof src === 'object') return parseJsonToReadable(src);
   }
   return '';
 };
@@ -272,21 +267,28 @@ const parseOutlineContentFields = (content: string, sceneData: Record<string, an
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(content || ''))) fields[aliases[match[1]]] = match[2].trim();
 
-  const actions = readableValue(fields.actions || sceneData.characterActions || chapter.characterActions);
+  // 统一JSON解析：所有字段值使用通用parseJsonToReadable
+  for (const key of Object.keys(fields)) {
+    if (typeof fields[key] === 'string' && fields[key].trim()) {
+      fields[key] = parseJsonToReadable(fields[key]);
+    }
+  }
+
+  const actions = parseJsonToReadable(fields.actions || sceneData.characterActions || chapter.characterActions);
 
   return {
-    core: readableValue(fields.core || sceneData.core || sceneData.summary || chapter.content),
+    core: parseJsonToReadable(fields.core || sceneData.core || sceneData.summary || chapter.content),
     scenes: splitFieldList(fields.scenes).length > 0 ? splitFieldList(fields.scenes) : splitFieldList(sceneData.scenes || chapter.scenes),
     actions,
-    conflict: readableValue(fields.conflict || sceneData.conflict || sceneData.conflicts || chapter.conflict),
+    conflict: parseJsonToReadable(fields.conflict || sceneData.conflict || sceneData.conflicts || chapter.conflict),
     highlight: resolveHighlights(fields.highlight, sceneData.highlights, sceneData.highlight, chapter.highlight, chapter.highlights),
     foreshadowing: resolveForeshadowing(fields.foreshadowing, sceneData.foreshadowing, sceneData.foreshadowingSet, chapter.foreshadowing),
     foreshadowingRecover: resolveForeshadowing(fields.foreshadowingRecover, sceneData.foreshadowingRecover, chapter.foreshadowingRecovery),
     characterStates: resolveCharacterStates(sceneData.characterStates, chapter.characterStates),
-    hook: readableValue(fields.hook || sceneData.hook || chapter.hook),
-    mood: readableValue(fields.mood || sceneData.mood || sceneData.emotionalTone || chapter.mood || chapter.emotionalTone),
-    reversalPoint: readableValue(fields.reversalPoint || sceneData.reversalPoint || chapter.reversalPoint),
-    rousing: readableValue(fields.rousing || sceneData.hot_scenes || sceneData.rousing || (Array.isArray(sceneData.hotScenes) ? sceneData.hotScenes.join('；') : sceneData.hotScenes) || (Array.isArray(chapter.hot_scenes) ? chapter.hot_scenes.join('；') : chapter.hot_scenes)),
+    hook: parseJsonToReadable(fields.hook || sceneData.hook || chapter.hook),
+    mood: parseJsonToReadable(fields.mood || sceneData.mood || sceneData.emotionalTone || chapter.mood || chapter.emotionalTone),
+    reversalPoint: parseJsonToReadable(fields.reversalPoint || sceneData.reversalPoint || chapter.reversalPoint),
+    rousing: parseJsonToReadable(fields.rousing || sceneData.hot_scenes || sceneData.rousing || (Array.isArray(sceneData.hotScenes) ? sceneData.hotScenes.join('；') : sceneData.hotScenes) || (Array.isArray(chapter.hot_scenes) ? chapter.hot_scenes.join('；') : chapter.hot_scenes)),
     targetWordsText: fields.targetWords || '',
   };
 };
@@ -1366,7 +1368,7 @@ const OutlinePage: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <p style={styles.detailText}>{docFields.core || '暂无内容'}</p>
+              <p style={styles.detailText}>{parseJsonToReadable(docFields.core) || '暂无内容'}</p>
             )}
           </div>
 
@@ -1442,11 +1444,6 @@ const OutlinePage: React.FC = () => {
               <input style={styles.input} value={targetWordsRange} onChange={event => setTargetWordsRange(event.target.value)} placeholder="可空，例：80000-120000" />
             </div>
           </div>
-          <div style={{ ...styles.formSection, padding: '12px', border: '1px solid #30304a', borderRadius: '8px', color: '#b8b8ca' }}>
-            <label style={styles.formLabel}>动态结构规则</label>
-            <div>卷数、每卷章数和总章数由故事阶段、人物弧线、冲突升级与节奏动态决定，不预设固定数量。</div>
-            <div style={{ marginTop: '6px' }}>每章必须为 {CHAPTER_WORD_MIN}-{CHAPTER_WORD_MAX} 字；具体目标由该章事件量和场景复杂度单独确定。</div>
-          </div>
           <div style={styles.formRow}>
             <div style={{ ...styles.formSection, flex: 1 }}>
               <label style={styles.formLabel}>更新计划</label>
@@ -1467,11 +1464,6 @@ const OutlinePage: React.FC = () => {
               </select>
             </div>
           </div>
-          {projectType === 'short' && (
-            <div style={styles.impactNotice}>
-              短故事流程：题材钩子→故事核心设定→人物关系表→章节结构→递进反转表→伏笔回收表→章节写作包→开篇吸引力检查；视角、篇幅与开篇节奏严格采用项目配置。
-            </div>
-          )}
           <div style={styles.actionRow}>
             <button type="button" style={{ ...styles.genBtn, opacity: isGenerating ? 0.65 : 1 }} onClick={handleGenerateOutline} disabled={isGenerating}>
               {isGenerating ? '生成中...' : '按本书资料重写本章大纲'}
@@ -1514,7 +1506,7 @@ const OutlinePage: React.FC = () => {
                       {volume.theme && <div style={styles.volumeTiny}>主题：{volume.theme}</div>}
                       {volume.keyEvents?.length ? <div style={styles.volumeTiny}>关键事件：{volume.keyEvents.join(' → ')}</div> : null}
                       {volume.chapters.length > 0 && (
-                        <div style={{ padding: '0 10px 6px', fontSize: 10, color: '#8a8aa0', lineHeight: 1.5 }}>
+                        <div style={{ padding: '0 10px 6px', fontSize: 14, color: '#8a8aa0', lineHeight: 1.5 }}>
                           爽点节奏：
                           {volume.chapters.map((c, i) => {
                             const n = countHighlights(c);
@@ -1637,119 +1629,121 @@ const ChapterListItem: React.FC<{
 
 const DocSection: React.FC<{ label: string; text: string; tone?: 'danger' | 'warm' | 'purple' | 'green' }> = ({ label, text, tone }) => {
   const color = tone === 'danger' ? '#e94560' : tone === 'warm' ? '#f59e0b' : tone === 'purple' ? '#a855f7' : tone === 'green' ? '#22c55e' : '#c0c0d0';
-  const isEmpty = !String(text || '').trim();
+  // 通用JSON解析：处理纯JSON数组/对象、分号分隔多对象、内联JSON
+  const displayText = parseJsonToReadable(text);
+  const isEmpty = !displayText.trim();
   return (
     <div style={styles.detailSection}>
       <span style={styles.detailLabel}>{label}</span>
       <div style={{ ...styles.noteBox, color: isEmpty ? '#6c6c80' : color, borderLeftColor: isEmpty ? '#3a3a50' : color }}>
-        {isEmpty ? <em style={{ color: '#6c6c80', fontStyle: 'normal' }}>无</em> : text}
+        {isEmpty ? <em style={{ color: '#6c6c80', fontStyle: 'normal' }}>无</em> : displayText}
       </div>
     </div>
   );
 };
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: '#16213e', overflow: 'hidden' },
+  container: { display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: '#1a1a2e', overflow: 'hidden' },
   header: { padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: '#1a1a2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   tabs: { display: 'flex', gap: 8 },
-  tab: { padding: '8px 14px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', borderBottom: '2px solid transparent', color: '#8a8aa0', cursor: 'pointer', fontFamily: 'inherit' },
+  tab: { padding: '8px 14px', fontSize: 14, fontWeight: 600, background: 'none', border: 'none', borderBottom: '2px solid transparent', color: '#8a8aa0', cursor: 'pointer', fontFamily: 'inherit' },
   tabActive: { color: '#e94560', borderBottomColor: '#e94560' },
   headerActions: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
-  headerMessage: { color: '#8a8aa0', fontSize: 12, maxWidth: 'min(420px, 50vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  headerMessage: { color: '#8a8aa0', fontSize: 14, maxWidth: 'min(420px, 50vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerButton: { padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontFamily: 'inherit' },
   generatePanel: { padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', maxWidth: 660 },
   blockedNoticeWrap: { marginTop: -4 },
   dialogBackdrop: { position: 'fixed', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backgroundColor: 'rgba(2,6,23,0.72)' },
   dialogCard: { width: 'min(460px, 100%)', padding: 20, borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', backgroundColor: '#17213b', boxShadow: '0 24px 60px rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', gap: 12 },
   dialogTitle: { fontSize: 16, fontWeight: 700, color: '#f8fafc' },
-  dialogDescription: { fontSize: 12, lineHeight: 1.6, color: '#cbd5e1' },
+  dialogDescription: { fontSize: 14, lineHeight: 1.6, color: '#cbd5e1' },
   dialogActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
   formSection: { display: 'flex', flexDirection: 'column', gap: 6 },
-  formLabel: { fontSize: 11, fontWeight: 600, color: '#8a8aa0' },
+  formLabel: { fontSize: 14, fontWeight: 600, color: '#8a8aa0' },
   formRow: { display: 'flex', gap: 12, flexWrap: 'wrap' },
-  input: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
-  textarea: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box' },
-  genBtn: { padding: '10px 18px', backgroundColor: '#e94560', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
-  secondaryButton: { padding: '10px 18px', borderRadius: 8, border: '1px solid rgba(243,156,18,0.3)', backgroundColor: 'rgba(243,156,18,0.12)', color: '#f59e0b', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
+  input: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
+  textarea: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box' },
+  genBtn: { padding: '10px 18px', backgroundColor: '#e94560', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
+  secondaryButton: { padding: '10px 18px', borderRadius: 8, border: '1px solid rgba(243,156,18,0.3)', backgroundColor: 'rgba(243,156,18,0.12)', color: '#f59e0b', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
   browseContainer: { flex: 1, display: 'flex', overflow: 'hidden' },
   emptyState: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 20px', textAlign: 'center' },
   emptyText: { color: '#8a8aa0', fontSize: 15, margin: 0 },
-  emptyHint: { color: '#6c6c80', fontSize: 12, margin: '8px 0 0' },
+  emptyHint: { color: '#6c6c80', fontSize: 14, margin: '8px 0 0' },
   treePanel: { ...clampSidebar(220, 20, 320), borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  treeTitle: { padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#8a8aa0', borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  treeTitle: { padding: '12px 16px', fontSize: 14, fontWeight: 700, color: '#8a8aa0', borderBottom: '1px solid rgba(255,255,255,0.06)' },
   treeContent: { flex: 1, overflow: 'auto', padding: 8 },
   volumeBlock: { marginBottom: 10 },
   volumeHeader: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.035)', borderRadius: 6, marginBottom: 4 },
-  volumeTitle: { fontSize: 12, fontWeight: 700, color: '#eaeaea', flex: 1, minWidth: 0 },
-  volumeCount: { fontSize: 11, color: '#6c6c80' },
-  volumeHint: { padding: '0 10px 5px', fontSize: 10, color: '#8a8aa0', lineHeight: 1.45 },
-  volumeTiny: { padding: '0 10px 6px', fontSize: 10, color: '#6c6c80', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  volumeTitle: { fontSize: 14, fontWeight: 700, color: '#eaeaea', flex: 1, minWidth: 0 },
+  volumeCount: { fontSize: 14, color: '#6c6c80' },
+  volumeHint: { padding: '0 10px 5px', fontSize: 14, color: '#8a8aa0', lineHeight: 1.45 },
+  volumeTiny: { padding: '0 10px 6px', fontSize: 14, color: '#6c6c80', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   addButton: { width: 22, height: 22, borderRadius: 4, border: '1px solid rgba(46,204,113,0.24)', backgroundColor: 'rgba(46,204,113,0.1)', color: '#2ecc71', cursor: 'pointer' },
   chapterList: { paddingLeft: 8 },
   chapterItem: { padding: '6px 8px', borderRadius: 6, cursor: 'pointer', border: '1px solid transparent', marginBottom: 3 },
   chapterItemActive: { backgroundColor: 'rgba(233,69,96,0.1)', borderColor: 'rgba(233,69,96,0.3)' },
   chapterItemRow: { display: 'flex', alignItems: 'center', gap: 6 },
-  chapterIndex: { fontSize: 11, color: '#6c6c80', width: 28, flexShrink: 0 },
-  chapterItemTitle: { fontSize: 12, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  chapterIndex: { fontSize: 14, color: '#6c6c80', width: 28, flexShrink: 0 },
+  chapterItemTitle: { fontSize: 14, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   chapterActions: { display: 'flex', gap: 4, flexShrink: 0 },
-  iconButton: { minWidth: 22, height: 20, fontSize: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontFamily: 'inherit' },
-  lockedBadge: { fontSize: 10, color: '#2ecc71', padding: '1px 4px' },
+  iconButton: { minWidth: 22, height: 20, fontSize: 14, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontFamily: 'inherit' },
+  lockedBadge: { fontSize: 14, color: '#2ecc71', padding: '1px 4px' },
   shortListPane: { ...clampSidebar(220, 20, 320), borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  shortMeta: { margin: 8, padding: 10, borderRadius: 6, color: '#8a8aa0', backgroundColor: 'rgba(59,130,246,0.06)', fontSize: 11, lineHeight: 1.45 },
+  shortMeta: { margin: 8, padding: 10, borderRadius: 6, color: '#8a8aa0', backgroundColor: 'rgba(59,130,246,0.06)', fontSize: 14, lineHeight: 1.45 },
   shortListContent: { flex: 1, overflow: 'auto', padding: 8 },
   shortChapterItem: { width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 5, borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)', backgroundColor: 'rgba(255,255,255,0.02)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' },
   shortChapterItemActive: { backgroundColor: 'rgba(233,69,96,0.1)', borderColor: 'rgba(233,69,96,0.25)' },
-  shortChapterIndex: { fontSize: 11, color: '#8a8aa0', fontWeight: 700, width: 24 },
+  shortChapterIndex: { fontSize: 14, color: '#8a8aa0', fontWeight: 700, width: 24 },
   shortChapterMain: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 },
-  shortChapterTitle: { fontSize: 13, color: '#c0c0d0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  shortChapterPreview: { fontSize: 11, color: '#6c6c80', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  fnBadge: { padding: '2px 6px', borderRadius: 4, fontSize: 10, border: '1px solid', fontWeight: 600, whiteSpace: 'nowrap' },
+  shortChapterTitle: { fontSize: 14, color: '#c0c0d0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  shortChapterPreview: { fontSize: 14, color: '#6c6c80', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  fnBadge: { padding: '2px 6px', borderRadius: 4, fontSize: 14, border: '1px solid', fontWeight: 600, whiteSpace: 'nowrap' },
   detailPanel: { flex: 1, overflow: 'auto', padding: 16 },
   detailCard: { border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.06)' },
   volumeMetaStrip: { padding: '10px 14px', backgroundColor: 'rgba(59,130,246,0.06)', borderBottom: '1px solid rgba(59,130,246,0.1)' },
-  volumeMetaTitle: { fontSize: 11, color: '#60a5fa', fontWeight: 700, marginBottom: 4 },
-  volumeMetaLine: { fontSize: 12, color: '#93c5fd', marginBottom: 3 },
-  volumeMetaHint: { fontSize: 11, color: '#8a8aa0' },
-  volumeMetaClimax: { fontSize: 11, color: '#e94560', marginTop: 3 },
+  volumeMetaTitle: { fontSize: 14, color: '#60a5fa', fontWeight: 700, marginBottom: 4 },
+  volumeMetaLine: { fontSize: 14, color: '#93c5fd', marginBottom: 3 },
+  volumeMetaHint: { fontSize: 14, color: '#8a8aa0' },
+  volumeMetaClimax: { fontSize: 14, color: '#e94560', marginTop: 3 },
   detailHeader: { padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   detailTitle: { margin: 0, fontSize: 16, fontWeight: 700, color: '#eaeaea' },
-  detailMeta: { display: 'flex', gap: 10, fontSize: 11, color: '#8a8aa0', flexWrap: 'wrap' },
+  detailMeta: { display: 'flex', gap: 10, fontSize: 14, color: '#8a8aa0', flexWrap: 'wrap' },
   operationBar: { padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'rgba(0,0,0,0.1)' },
-  operationButton: { padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' },
-  impactNotice: { padding: '8px 16px', color: '#fbbf24', backgroundColor: 'rgba(245,158,11,0.08)', borderBottom: '1px solid rgba(245,158,11,0.12)', fontSize: 11, lineHeight: 1.5 },
+  operationButton: { padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' },
+  impactNotice: { padding: '8px 16px', color: '#fbbf24', backgroundColor: 'rgba(245,158,11,0.08)', borderBottom: '1px solid rgba(245,158,11,0.12)', fontSize: 14, lineHeight: 1.5 },
   qualityPanel: { padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(255,255,255,0.025)' },
-  qualityTitle: { fontSize: 12, color: '#eaeaea', fontWeight: 700, marginBottom: 8 },
+  qualityTitle: { fontSize: 14, color: '#eaeaea', fontWeight: 700, marginBottom: 8 },
   qualityList: { display: 'flex', flexWrap: 'wrap', gap: 6 },
-  qualityBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 11, fontWeight: 700 },
-  qualityHint: { marginTop: 8, fontSize: 11, color: '#8a8aa0', lineHeight: 1.5 },
-  syncNotice: { padding: '8px 16px', color: '#93c5fd', backgroundColor: 'rgba(96,165,250,0.08)', borderBottom: '1px solid rgba(96,165,250,0.12)', fontSize: 11, lineHeight: 1.5 },
+  qualityBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 14, fontWeight: 700 },
+  qualityHint: { marginTop: 8, fontSize: 14, color: '#8a8aa0', lineHeight: 1.5 },
+  syncNotice: { padding: '8px 16px', color: '#93c5fd', backgroundColor: 'rgba(96,165,250,0.08)', borderBottom: '1px solid rgba(96,165,250,0.12)', fontSize: 14, lineHeight: 1.5 },
   contextPanel: { padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', gap: 10 },
   contextGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 },
   contextLink: { minHeight: 76, textAlign: 'left', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', backgroundColor: 'rgba(255,255,255,0.025)', color: '#c0c0d0', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' },
-  contextLinkLabel: { fontSize: 10, color: '#6c6c80', fontWeight: 700 },
-  contextLinkTitle: { fontSize: 12, color: '#d8d8e8', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  contextLinkHint: { fontSize: 11, color: '#8a8aa0', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
+  contextLinkLabel: { fontSize: 14, color: '#6c6c80', fontWeight: 700 },
+  contextLinkTitle: { fontSize: 14, color: '#d8d8e8', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  contextLinkHint: { fontSize: 14, color: '#8a8aa0', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
   contextMetaGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 },
   contextMetaBox: { padding: '9px 10px', borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', minHeight: 66 },
-  contextMetaTitle: { display: 'block', fontSize: 10, color: '#6c6c80', fontWeight: 700, marginBottom: 5 },
-  contextMetaText: { margin: 0, fontSize: 12, color: '#c0c0d0', lineHeight: 1.5 },
-  contextMetaHint: { margin: '5px 0 0', fontSize: 11, color: '#8a8aa0', lineHeight: 1.4 },
+  contextMetaTitle: { display: 'block', fontSize: 14, color: '#6c6c80', fontWeight: 700, marginBottom: 5 },
+  contextMetaText: { margin: 0, fontSize: 14, color: '#c0c0d0', lineHeight: 1.5 },
+  contextMetaHint: { margin: '5px 0 0', fontSize: 14, color: '#8a8aa0', lineHeight: 1.4 },
   contextTagWrap: { display: 'flex', flexWrap: 'wrap', gap: 5 },
-  contextTag: { padding: '3px 7px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.03)', color: '#c0c0d0', fontSize: 11, lineHeight: 1.4 },
-  contextTagEm: { marginLeft: 5, color: '#6c6c80', fontStyle: 'normal', fontSize: 10 },
+  contextTag: { padding: '3px 7px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.03)', color: '#c0c0d0', fontSize: 14, lineHeight: 1.4 },
+  contextTagEm: { marginLeft: 5, color: '#6c6c80', fontStyle: 'normal', fontSize: 14 },
   detailBody: { padding: 16, display: 'flex', flexDirection: 'column', gap: 16 },
   detailSection: { display: 'flex', flexDirection: 'column', gap: 6 },
   sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  detailLabel: { fontSize: 11, fontWeight: 700, color: '#8a8aa0' },
-  detailText: { margin: 0, fontSize: 13, color: '#c0c0d0', lineHeight: 1.7 },
-  inlineButton: { padding: '3px 8px', backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4, color: '#8a8aa0', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' },
-  editTextarea: { width: '100%', padding: 10, backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(233,69,96,0.2)', borderRadius: 6, color: '#eaeaea', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.8, boxSizing: 'border-box', minHeight: 140 },
+  detailLabel: { fontSize: 14, fontWeight: 700, color: '#8a8aa0' },
+  detailText: { margin: 0, fontSize: 14, color: '#c0c0d0', lineHeight: 1.7 },
+  inlineButton: { padding: '3px 8px', backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4, color: '#8a8aa0', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
+  editTextarea: { width: '100%', padding: 10, backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(233,69,96,0.2)', borderRadius: 6, color: '#eaeaea', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.8, boxSizing: 'border-box', minHeight: 140 },
   actionRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  primarySmallButton: { padding: '6px 14px', backgroundColor: '#e94560', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
-  secondarySmallButton: { padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: '#8a8aa0', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' },
+  primarySmallButton: { padding: '6px 14px', backgroundColor: '#e94560', border: 'none', borderRadius: 6, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
+  secondarySmallButton: { padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: '#8a8aa0', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
   tagWrap: { display: 'flex', flexWrap: 'wrap', gap: 5 },
-  sceneTag: { padding: '2px 8px', borderRadius: 4, fontSize: 11, backgroundColor: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.15)' },
-  noteBox: { fontSize: 13, backgroundColor: 'rgba(255,255,255,0.035)', padding: '8px 10px', borderRadius: 6, borderLeft: '3px solid #c0c0d0', lineHeight: 1.6 },
+  sceneTag: { padding: '2px 8px', borderRadius: 4, fontSize: 14, backgroundColor: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.15)' },
+  noteBox: { fontSize: 14, backgroundColor: 'rgba(255,255,255,0.035)', padding: '8px 10px', borderRadius: 6, borderLeft: '3px solid #c0c0d0', lineHeight: 1.6 },
 };
 
 export default OutlinePage;
