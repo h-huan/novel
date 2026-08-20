@@ -176,6 +176,24 @@ function textOf(value: any): string {
   return String(value);
 }
 
+type ProfileRelationship = {
+  targetName?: string;
+  characterName?: string;
+  name?: string;
+  type?: string;
+  description?: string;
+  future?: string;
+};
+
+/** Decode the legacy JSON string used by the profile API without making an
+ * unreadable JSON dump the fallback for the reading view. */
+function profileRelationships(value: unknown): ProfileRelationship[] | null {
+  const parsed = parseJsonSafe(value, null);
+  if (!Array.isArray(parsed)) return null;
+  const rows = parsed.filter(item => item && typeof item === 'object') as ProfileRelationship[];
+  return rows.length ? rows : null;
+}
+
 function normalizeCharacter(raw: any): CharacterView {
   let personality = coercePersonality(raw.personality);
   if (typeof personality !== 'object' || personality === null) personality = {};
@@ -629,7 +647,9 @@ const CharacterPage: React.FC = () => {
                             onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(233,69,96,0.25)'; }}
                             onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
                           >
-                            <FieldList label={field.label} value={value} accent="#93c5fd" />
+                            {field.key === 'relationships'
+                              ? <ProfileRelationshipField value={value} />
+                              : <FieldList label={field.label} value={value} accent="#93c5fd" />}
                           </div>
                         ))}
                       </div>
@@ -699,6 +719,31 @@ const ProfileSection: React.FC<{ section: ProfileSectionConfig; profile: Record<
     </div>
   </section>
 );
+
+const ProfileRelationshipField: React.FC<{ value: string }> = ({ value }) => {
+  const relationships = profileRelationships(value);
+  if (!relationships) return <FieldList label="人物关系" value={value} accent="#93c5fd" />;
+  return (
+    <div style={{ padding: '10px 12px', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#93c5fd', marginBottom: 8 }}>人物关系 · {relationships.length}项</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {relationships.map((relationship, index) => {
+          const name = relationship.targetName || relationship.characterName || relationship.name || '未命名角色';
+          return (
+            <div key={`${name}-${index}`} style={{ padding: '8px 10px', borderRadius: 5, backgroundColor: 'rgba(147,197,253,0.06)', borderLeft: '3px solid #60a5fa' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <strong style={{ color: '#eaeaea' }}>{name}</strong>
+                {relationship.type && <span style={{ padding: '2px 6px', borderRadius: 4, color: '#93c5fd', backgroundColor: 'rgba(96,165,250,0.14)', fontSize: 12 }}>{relationship.type}</span>}
+              </div>
+              {relationship.description && <p style={{ margin: '6px 0 0', color: '#c0c0d0', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{relationship.description}</p>}
+              {relationship.future && <p style={{ margin: '5px 0 0', color: '#a78bfa', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>后续：{relationship.future}</p>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 function roleOptions() {
   return (Object.keys(ROLE_META) as RoleType[]).map(role => <option key={role} value={role}>{ROLE_META[role].label}</option>);

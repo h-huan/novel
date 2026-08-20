@@ -9,6 +9,7 @@
  * - WritingMode 写作模式切换（全自动/半自动/自由模式）
  * - RealLLM 服务（真实 LLM API 调用）
  * - ChainController (REST API /chain/*)
+ * - NovelStrategyService（平台+题材+风格+章节职责的动态网文策略）
  *
  * ⚠️ MockLLMService 已移除 — 研发中禁用模拟数据，必须接入真实 LLM
  */
@@ -27,6 +28,7 @@ import { MultiModelService } from './multi-model.service';
 import { SeedEnrichChainService } from './seed-enrich-chain.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
 import { ChainController } from './chain.controller';
+import { NovelStrategyService } from './novel-strategy.service';
 import { StateModule } from '../state/state.module';
 import { StateManagementModule } from '../state/state-management.module';
 import { FileStorageModule } from '../modules/file-storage/file-storage.module';
@@ -70,6 +72,7 @@ import { QualityInspectionService } from '../modules/refinement/quality-inspecti
     SeedEnrichChainService,
     GenerationRecoveryService,
     QualityInspectionService,
+    NovelStrategyService,
   ],
   exports: [
     ChainEngineService,
@@ -80,6 +83,7 @@ import { QualityInspectionService } from '../modules/refinement/quality-inspecti
     WritingModeService,
     SeedEnrichChainService,
     GenerationRecoveryService,
+    NovelStrategyService,
   ],
 })
 export class ChainModule {}

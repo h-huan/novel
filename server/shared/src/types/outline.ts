@@ -1,5 +1,6 @@
 import { ChapterFunctionType, GoalArcType } from '../enums/chapter';
 import { ForeshadowingType } from '../enums/foreshadowing-type';
+import type { ChapterPlan } from './content-contract';
 
 export type OutlineLevel = 'book' | 'volume' | 'chapter' | 'scene';
 
@@ -19,6 +20,7 @@ export interface OutlineNode {
   level: OutlineLevel;
   order: number;
   title: string;
+  /** Human-readable summary only. Structured chapter planning lives in plan. */
   content: string;
   chapterFunction?: ChapterFunctionType;
   goalArc?: GoalArcType;
@@ -28,6 +30,8 @@ export interface OutlineNode {
   plotPoints: PlotPoint[];
   status: 'planned' | 'writing' | 'completed';
   characterIds: string[];
+  /** Canonical structured chapter plan for chapter nodes. */
+  plan?: ChapterPlan;
   children: OutlineNode[];
   createdAt: Date;
   updatedAt: Date;

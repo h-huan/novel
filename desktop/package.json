@@ -10,7 +10,7 @@
     "build:vite": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'lint ok'",
+    "lint": "tsc --noEmit --pretty false",
     "clean": "rm -rf dist dist-electron release",
     "prepare:server-runtime": "node scripts/prepare-server-runtime.js",
     "pack:win": "npm run prepare:server-runtime && electron-builder --win --x64",

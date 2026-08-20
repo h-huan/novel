@@ -1635,7 +1635,7 @@ const DocSection: React.FC<{ label: string; text: string; tone?: 'danger' | 'war
   return (
     <div style={styles.detailSection}>
       <span style={styles.detailLabel}>{label}</span>
-      <div style={{ ...styles.noteBox, color: isEmpty ? '#6c6c80' : color, borderLeftColor: isEmpty ? '#3a3a50' : color }}>
+      <div style={{ ...styles.noteBox, color: isEmpty ? '#6c6c80' : color, borderLeftColor: isEmpty ? '#3a3a50' : color, whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>
         {isEmpty ? <em style={{ color: '#6c6c80', fontStyle: 'normal' }}>无</em> : displayText}
       </div>
     </div>
