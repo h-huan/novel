@@ -5,7 +5,7 @@
  * 1. 不把超时/边界写死在业务代码里。任何一处生成调用都从这里取值。
  * 2. 默认值足够宽容（≥5 分钟），避免慢模型或复杂跨模块修订被过早掐断。
  *    此前把 TIMEOUT 写死成 45s/120s/180s/240s，导致复杂修订在 240s 被掐断、
- *    quality_check 输出被 maxTokens=8192 截断——这正是"写死时间"引发的故障。
+ *    结构化审查输出被 maxTokens=8192 截断——这正是"写死时间"引发的故障。
  * 3. 连接层（WebSocket）本身无超时，进度靠长连接推送；这里的 timeout 只是
  *    LLM HTTP 调用的安全网，不是给用户的"无响应报错"计时器。
  * 4. 所有值可由环境变量覆盖，无需重新编译即可调参。设为 0 表示不传该 timeout，
@@ -38,11 +38,11 @@ export const LLM_TUNABLES = {
   TIMEOUT_CONTENT: envInt('LLM_TIMEOUT_CONTENT_MS', 540_000), // 大纲/正文：9 分钟
   TIMEOUT_COMPLEX: envInt('LLM_TIMEOUT_COMPLEX_MS', 600_000), // 跨模块修订/全扫描：10 分钟
 
-  // ============ quality_check 场景 maxTokens 边界 ============
-  QUALITY_CHECK_MIN: envInt('LLM_QC_MAXTOKENS_MIN', 16384),
-  QUALITY_CHECK_MAX: envInt('LLM_QC_MAXTOKENS_MAX', 24576),
-  QUALITY_CHECK_BASE: envInt('LLM_QC_MAXTOKENS_BASE', 4096),
-  QUALITY_CHECK_PER_CONFLICT: envInt('LLM_QC_MAXTOKENS_PER_CONFLICT', 1024),
+  // ============ 跨模块一致性检查 maxTokens 边界 ============
+  CONSISTENCY_CHECK_MIN: envInt('LLM_CC_MAXTOKENS_MIN', 16384),
+  CONSISTENCY_CHECK_MAX: envInt('LLM_CC_MAXTOKENS_MAX', 24576),
+  CONSISTENCY_CHECK_BASE: envInt('LLM_CC_MAXTOKENS_BASE', 4096),
+  CONSISTENCY_CHECK_PER_CONFLICT: envInt('LLM_CC_MAXTOKENS_PER_CONFLICT', 1024),
 
   // ============ outline 写入 maxTokens 边界 ============
   // deepseek-v4-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算返回空内容。

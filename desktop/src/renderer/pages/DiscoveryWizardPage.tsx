@@ -51,21 +51,21 @@ const parseIdeaTargetWords = (value: unknown): number | null => {
 };
 
 const PLATFORMS = [
-  { value: 'zhihu', label: '知乎盐选', color: '#60a5fa' },
-  { value: 'fanqie', label: '番茄小说', color: '#e94560' },
-  { value: 'qidian', label: '起点中文网', color: '#f59e0b' },
-  { value: 'douyin', label: '抖音故事', color: '#a855f7' },
-  { value: 'jinjiang', label: '晋江文学城', color: '#ec4899' },
-  { value: 'rules_horror', label: '规则怪谈', color: '#22c55e' },
-  { value: 'generic', label: '通用', color: '#6c6c80' },
+  { value: 'zhihu', label: '知乎盐选', color: 'var(--color-info-light)' },
+  { value: 'fanqie', label: '番茄小说', color: 'var(--color-accent)' },
+  { value: 'qidian', label: '起点中文网', color: 'var(--color-warning)' },
+  { value: 'douyin', label: '抖音故事', color: 'var(--color-purple)' },
+  { value: 'jinjiang', label: '晋江文学城', color: 'var(--color-pink)' },
+  { value: 'rules_horror', label: '规则怪谈', color: 'var(--color-success)' },
+  { value: 'generic', label: '通用', color: 'var(--color-text-muted)' },
 ] as const;
 
 const ANGLE_COLORS: Record<string, string> = {
-  '历史缝隙': '#60a5fa',
-  '新闻改编': '#e94560',
-  '小人物大历史': '#22c55e',
-  '穿越新解': '#a855f7',
-  '职业传奇': '#f59e0b',
+  '历史缝隙': 'var(--color-info-light)',
+  '新闻改编': 'var(--color-accent)',
+  '小人物大历史': 'var(--color-success)',
+  '穿越新解': 'var(--color-purple)',
+  '职业传奇': 'var(--color-warning)',
 };
 
 const ANGLE_LABELS: Record<string, string> = {
@@ -100,10 +100,10 @@ const getStepDotStyle = (active: boolean, done: boolean): React.CSSProperties =>
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: '13px',
+  fontSize: 'var(--font-size-xs)',
   fontWeight: 700,
-  backgroundColor: done ? '#2ecc71' : active ? '#e94560' : 'rgba(255,255,255,0.06)',
-  color: done || active ? '#fff' : '#6c6c80',
+  backgroundColor: done ? 'var(--color-success)' : active ? 'var(--color-accent)' : 'rgba(255,255,255,0.06)',
+  color: done || active ? 'var(--color-white)' : 'var(--color-text-muted)',
   transition: 'all 0.3s',
   cursor: 'default',
 });
@@ -111,7 +111,7 @@ const getStepDotStyle = (active: boolean, done: boolean): React.CSSProperties =>
 const getStepLineStyle = (done: boolean): React.CSSProperties => ({
   width: '60px',
   height: '2px',
-  backgroundColor: done ? '#2ecc71' : 'rgba(255,255,255,0.08)',
+  backgroundColor: done ? 'var(--color-success)' : 'rgba(255,255,255,0.08)',
   transition: 'all 0.3s',
 });
 
@@ -120,7 +120,7 @@ const getTypeCardStyle = (selected: boolean): React.CSSProperties => ({
   padding: '16px',
   borderRadius: '10px',
   cursor: 'pointer',
-  border: `1px solid ${selected ? '#e94560' : 'rgba(255,255,255,0.08)'}`,
+  border: `1px solid ${selected ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)'}`,
   backgroundColor: selected ? 'rgba(233,69,96,0.1)' : 'rgba(255,255,255,0.02)',
   transition: 'all 0.2s',
   textAlign: 'center' as const,
@@ -131,11 +131,11 @@ const getPlatformBtnStyle = (selected: boolean, color: string): React.CSSPropert
   borderRadius: '8px',
   cursor: 'pointer',
   fontFamily: 'inherit',
-  fontSize: '13px',
+  fontSize: 'var(--font-size-xs)',
   fontWeight: 600,
   border: `1px solid ${selected ? color : 'rgba(255,255,255,0.08)'}`,
   backgroundColor: selected ? `${color}22` : 'rgba(255,255,255,0.04)',
-  color: selected ? color : '#8a8aa0',
+  color: selected ? color : 'var(--color-text-dim)',
   transition: 'all 0.15s',
 });
 
@@ -144,18 +144,18 @@ const getToneBtnStyle = (selected: boolean): React.CSSProperties => ({
   borderRadius: '20px',
   cursor: 'pointer',
   fontFamily: 'inherit',
-  fontSize: '12px',
+  fontSize: 'var(--font-size-xs)',
   fontWeight: 600,
-  border: `1px solid ${selected ? '#e94560' : 'rgba(255,255,255,0.08)'}`,
+  border: `1px solid ${selected ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)'}`,
   backgroundColor: selected ? 'rgba(233,69,96,0.15)' : 'rgba(255,255,255,0.04)',
-  color: selected ? '#e94560' : '#8a8aa0',
+  color: selected ? 'var(--color-accent)' : 'var(--color-text-dim)',
   transition: 'all 0.15s',
 });
 
 const getIdeaCardStyle = (expanded: boolean): React.CSSProperties => ({
   backgroundColor: 'rgba(255,255,255,0.02)',
   borderRadius: '12px',
-  border: `1px solid ${expanded ? '#e94560' : 'rgba(255,255,255,0.06)'}`,
+  border: `1px solid ${expanded ? 'var(--color-accent)' : 'rgba(255,255,255,0.06)'}`,
   overflow: 'hidden',
   transition: 'all 0.2s',
   cursor: 'pointer',
@@ -163,18 +163,18 @@ const getIdeaCardStyle = (expanded: boolean): React.CSSProperties => ({
 });
 
 const getAngleBadgeStyle = (angle: string): React.CSSProperties => ({
-  fontSize: '10px',
+  fontSize: 'var(--font-size-xs)',
   fontWeight: 600,
   padding: '2px 8px',
   borderRadius: '4px',
-  backgroundColor: (ANGLE_COLORS[angle] || '#6c6c80') + '22',
-  color: ANGLE_COLORS[angle] || '#6c6c80',
+  backgroundColor: (ANGLE_COLORS[angle] || 'var(--color-text-muted)') + '22',
+  color: ANGLE_COLORS[angle] || 'var(--color-text-muted)',
   whiteSpace: 'nowrap' as const,
   flexShrink: 0,
 });
 
 const getStyleTagStyle = (tag: string): React.CSSProperties => ({
-  fontSize: '10px',
+  fontSize: 'var(--font-size-xs)',
   fontWeight: 600,
   padding: '2px 8px',
   borderRadius: '10px',
@@ -182,10 +182,10 @@ const getStyleTagStyle = (tag: string): React.CSSProperties => ({
                    tag === '刀人' ? 'rgba(46,204,113,0.12)' :
                    tag === '爽文' ? 'rgba(245,158,11,0.12)' :
                    tag === '悬疑' ? 'rgba(96,165,250,0.12)' : 'rgba(255,255,255,0.06)',
-  color: tag === '热血' ? '#e94560' :
-         tag === '刀人' ? '#2ecc71' :
-         tag === '爽文' ? '#f59e0b' :
-         tag === '悬疑' ? '#60a5fa' : '#8a8aa0',
+  color: tag === '热血' ? 'var(--color-accent)' :
+         tag === '刀人' ? 'var(--color-success)' :
+         tag === '爽文' ? 'var(--color-warning)' :
+         tag === '悬疑' ? 'var(--color-info-light)' : 'var(--color-text-dim)',
 });
 
 // ============================================================
@@ -197,23 +197,23 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: 'var(--color-bg-primary)',
     overflow: 'hidden',
   },
   header: {
     padding: '16px 24px',
     borderBottom: '1px solid rgba(255,255,255,0.06)',
-    backgroundColor: '#16213e',
+    backgroundColor: 'var(--color-bg-secondary)',
   },
   headerTitle: {
     fontSize: '18px',
     fontWeight: 700,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     margin: 0,
   },
   headerSub: {
-    fontSize: '12px',
-    color: '#6c6c80',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted)',
     margin: '4px 0 0',
   },
 
@@ -230,8 +230,8 @@ const s: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     gap: '82px',
     padding: '6px 0 16px',
-    fontSize: '11px',
-    color: '#6c6c80',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted)',
     fontWeight: 500,
   },
 
@@ -248,9 +248,9 @@ const s: Record<string, React.CSSProperties> = {
     margin: '0 auto',
   },
   sectionTitle: {
-    fontSize: '13px',
+    fontSize: 'var(--font-size-xs)',
     fontWeight: 600,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     marginBottom: '12px',
@@ -267,11 +267,11 @@ const s: Record<string, React.CSSProperties> = {
   typeLabel: {
     fontSize: '15px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
   },
   typeDesc: {
-    fontSize: '11px',
-    color: '#6c6c80',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted)',
     marginTop: '4px',
   },
 
@@ -292,10 +292,10 @@ const s: Record<string, React.CSSProperties> = {
   startBtn: {
     width: '100%',
     padding: '14px',
-    backgroundColor: '#e94560',
+    backgroundColor: 'var(--color-accent)',
     border: 'none',
     borderRadius: '10px',
-    color: '#fff',
+    color: 'var(--color-white)',
     fontSize: '15px',
     fontWeight: 700,
     fontFamily: 'inherit',
@@ -317,13 +317,13 @@ const s: Record<string, React.CSSProperties> = {
     width: '48px',
     height: '48px',
     border: '3px solid rgba(233,69,96,0.2)',
-    borderTopColor: '#e94560',
+    borderTopColor: 'var(--color-accent)',
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
   },
   genText: {
     fontSize: '14px',
-    color: '#c0c0d0',
+    color: 'var(--color-text-soft)',
   },
   progressBarOuter: {
     width: '280px',
@@ -334,7 +334,7 @@ const s: Record<string, React.CSSProperties> = {
   },
   progressBarInner: {
     height: '100%',
-    background: 'linear-gradient(90deg, #e94560, #f5a623)',
+    background: 'linear-gradient(90deg, var(--color-accent), var(--color-warning))',
     borderRadius: '2px',
     animation: 'progressAnim 5s ease-in-out infinite',
   },
@@ -342,7 +342,7 @@ const s: Record<string, React.CSSProperties> = {
     width: '6px',
     height: '6px',
     borderRadius: '50%',
-    backgroundColor: '#e94560',
+    backgroundColor: 'var(--color-accent)',
     display: 'inline-block',
     animation: 'dotPulse 1.4s ease-in-out infinite',
   },
@@ -365,15 +365,15 @@ const s: Record<string, React.CSSProperties> = {
   ideaTitle: {
     fontSize: '15px',
     fontWeight: 700,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     flex: 1,
     lineHeight: 1.4,
     wordBreak: 'break-word',
     whiteSpace: 'normal',
   },
   ideaHook: {
-    fontSize: '13px',
-    color: '#a0a0b0',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-secondary)',
     lineHeight: 1.5,
     margin: 0,
     fontStyle: 'italic',
@@ -395,16 +395,16 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
   },
   detailLabel: {
-    fontSize: '10px',
+    fontSize: 'var(--font-size-xs)',
     fontWeight: 600,
-    color: '#6c6c80',
+    color: 'var(--color-text-muted)',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     marginBottom: '6px',
   },
   detailText: {
-    fontSize: '12px',
-    color: '#c0c0d0',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-soft)',
     lineHeight: 1.6,
     margin: 0,
   },
@@ -414,8 +414,8 @@ const s: Record<string, React.CSSProperties> = {
     margin: '2px',
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: '4px',
-    fontSize: '11px',
-    color: '#8a8aa0',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-dim)',
   },
   ideaActions: {
     padding: '12px 16px',
@@ -426,11 +426,11 @@ const s: Record<string, React.CSSProperties> = {
   selectBtn: {
     flex: 1,
     padding: '10px',
-    backgroundColor: '#e94560',
+    backgroundColor: 'var(--color-accent)',
     border: 'none',
     borderRadius: '8px',
-    color: '#fff',
-    fontSize: '13px',
+    color: 'var(--color-white)',
+    fontSize: 'var(--font-size-xs)',
     fontWeight: 600,
     fontFamily: 'inherit',
     cursor: 'pointer',
@@ -441,8 +441,8 @@ const s: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(255,255,255,0.06)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '8px',
-    color: '#8a8aa0',
-    fontSize: '13px',
+    color: 'var(--color-text-dim)',
+    fontSize: 'var(--font-size-xs)',
     fontWeight: 500,
     fontFamily: 'inherit',
     cursor: 'pointer',
@@ -466,7 +466,7 @@ const s: Record<string, React.CSSProperties> = {
   progressTitle: {
     fontSize: '16px',
     fontWeight: 700,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     marginBottom: '20px',
     textAlign: 'center',
   },
@@ -496,11 +496,22 @@ const DiscoveryWizardPage: React.FC = () => {
   const [webNovelGenres, setWebNovelGenres] = useState<string[]>([]);
   const [configError, setConfigError] = useState('');
 
-  // A new visit starts a new discovery session. Old candidates must never
-  // advance the user into the selection step after a restart or re-entry.
+  // 挂载/重新进入时按 store 现状恢复，而不是无条件清空。
+  // 发现灵感走普通 HTTP 长请求，组件卸载（路由切走）不会中断它，完成后仍写回全局 store，
+  // 所以切走再回来要保留进行中/已完成状态；只有真正全新进入（无进行中任务、无结果）才重置回配置步。
   useLayoutEffect(() => {
-    store.resetDiscovery();
-    store.setStep(0);
+    const current = useDiscoveryStore.getState();
+    if (current.isCreating || current.hasActiveCreation) {
+      store.setStep(2); // 创建进行中：恢复创建步，后续 effect 重连 SSE/WS
+    } else if (current.isGenerating) {
+      store.setStep(1); // 发现进行中：后台请求仍在跑，回发现步等待
+    } else if (current.generationDone && current.ideas.length > 0) {
+      store.setStep(1); // 已有结果：回发现步展示
+    } else {
+      store.resetDiscovery();
+      store.setStep(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 从字典API加载数据
@@ -972,7 +983,7 @@ const DiscoveryWizardPage: React.FC = () => {
       </div>
       <div style={s.stepLabel}>
         {STEP_LABELS.map((label, i) => (
-          <span key={label} style={{ color: step >= i ? '#8a8aa0' : '#6c6c80' }}>
+          <span key={label} style={{ color: step >= i ? 'var(--color-text-dim)' : 'var(--color-text-muted)' }}>
             {label}
           </span>
         ))}
@@ -1025,17 +1036,17 @@ const DiscoveryWizardPage: React.FC = () => {
           style={{
             width: '100%', padding: '10px 12px', boxSizing: 'border-box',
             backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '8px', color: '#eaeaea', fontSize: '13px',
+            borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)',
             fontFamily: 'inherit', outline: 'none',
           }}
         />
-        <div style={{ marginTop: '7px', color: '#8d96ad', fontSize: '12px', lineHeight: 1.5 }}>
+        <div style={{ marginTop: '7px', color: '#8d96ad', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>
           {storyType === 'short_story'
             ? '短篇为 8,000–35,000 字；仍按每章 3,200–4,000 字和剧情节奏动态规划。'
             : '长篇不预设总章数或总字数；每章固定执行 3,200–4,000 字，按剧情节奏动态规划。'}
         </div>
         {configError && (
-          <div style={{ marginTop: '8px', color: '#e74c3c', fontSize: '12px', lineHeight: 1.5 }}>{configError}</div>
+          <div style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>{configError}</div>
         )}
       </div>
 
@@ -1048,12 +1059,12 @@ const DiscoveryWizardPage: React.FC = () => {
           style={{
             flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)',
             border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
-            color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none',
+            color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
           }}
         >
-          <option value="" style={{ backgroundColor: '#1a1a2e' }}>选择大类...</option>
+          <option value="" style={{ backgroundColor: 'var(--color-bg-primary)' }}>选择大类...</option>
           {categories.map((cat) => (
-            <option key={cat.name} value={cat.name} style={{ backgroundColor: '#1a1a2e' }}>{cat.name}</option>
+            <option key={cat.name} value={cat.name} style={{ backgroundColor: 'var(--color-bg-primary)' }}>{cat.name}</option>
           ))}
         </select>
         <select
@@ -1062,14 +1073,14 @@ const DiscoveryWizardPage: React.FC = () => {
           style={{
             flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)',
             border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
-            color: selectedSubCategory ? '#eaeaea' : '#6c6c80',
-            fontSize: '13px', fontFamily: 'inherit', outline: 'none',
+            color: selectedSubCategory ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+            fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
           }}
           disabled={!selectedCategory}
         >
-          <option value="" style={{ backgroundColor: '#1a1a2e' }}>选择子类...</option>
+          <option value="" style={{ backgroundColor: 'var(--color-bg-primary)' }}>选择子类...</option>
           {categories.find((c) => c.name === selectedCategory)?.children.map((sub) => (
-            <option key={sub} value={sub} style={{ backgroundColor: '#1a1a2e' }}>{sub}</option>
+            <option key={sub} value={sub} style={{ backgroundColor: 'var(--color-bg-primary)' }}>{sub}</option>
           ))}
         </select>
       </div>
@@ -1127,17 +1138,17 @@ const DiscoveryWizardPage: React.FC = () => {
       {/* 开始按钮 */}
       <button
         style={s.startBtn}
-        onClick={() => handleStartDiscovery()}
-        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#ff6b81'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#e94560'; }}
+        onClick={() => { if (isGenerating) { store.setStep(1); return; } handleStartDiscovery(); }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-accent)'; }}
       >
-        🚀 AI深度发现题材
+        {isGenerating ? '⏳ 返回发现进度（生成中…）' : '🚀 AI深度发现题材'}
       </button>
 
       {/* 自定义题材入口 */}
       <div style={{ marginTop: '16px', marginBottom: '8px' }}>
         <div
-          style={{ fontSize: '13px', color: '#8a8aa0', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+          style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
           onClick={() => setShowCustom(!showCustom)}
         >
           {showCustom ? '▼' : '▶'} 或者，自己输入题材 →
@@ -1145,72 +1156,72 @@ const DiscoveryWizardPage: React.FC = () => {
       </div>
       {showCustom && (
         <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', padding: '16px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#eaeaea', marginBottom: '12px' }}>✍️ 自定义题材</div>
+          <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '12px' }}>✍️ 自定义题材</div>
 
           {/* 题材标题（必填） */}
           <div style={{ marginBottom: '10px' }}>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>题材标题 *</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', marginBottom: '4px' }}>题材标题 *</div>
             <input
               value={customTitle}
               onChange={(e) => setCustomTitle(e.target.value)}
               placeholder="例如：魂穿北洋，领众破局"
-              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }}
+              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
 
           {/* 钩子 */}
           <div style={{ marginBottom: '10px' }}>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>故事钩子</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', marginBottom: '4px' }}>故事钩子</div>
             <input
               value={customHook}
               onChange={(e) => setCustomHook(e.target.value)}
               placeholder="一句话吸引读者，例如：一睁眼，我成了北洋军阀的弃子"
-              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }}
+              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
 
           {/* 故事描述 */}
           <div style={{ marginBottom: '10px' }}>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>故事描述</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', marginBottom: '4px' }}>故事描述</div>
             <textarea
               value={customDesc}
               onChange={(e) => setCustomDesc(e.target.value)}
               placeholder="详细描述你的故事创意..."
               rows={3}
-              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none', resize: 'vertical' }}
+              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none', resize: 'vertical' }}
             />
           </div>
 
           {/* 主角设定 */}
           <div style={{ marginBottom: '10px' }}>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>主角设定</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', marginBottom: '4px' }}>主角设定</div>
             <input
               value={customProtagonist}
               onChange={(e) => setCustomProtagonist(e.target.value)}
               placeholder="例如：现代历史系研究生，魂穿北洋"
-              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }}
+              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
 
           {/* 核心冲突 */}
           <div style={{ marginBottom: '10px' }}>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>核心冲突</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', marginBottom: '4px' }}>核心冲突</div>
             <input
               value={customConflict}
               onChange={(e) => setCustomConflict(e.target.value)}
               placeholder="例如：要在军阀混战中活下来，还要改变历史走向"
-              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }}
+              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
 
           {/* 独特卖点 */}
           <div style={{ marginBottom: '14px' }}>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>独特卖点</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', marginBottom: '4px' }}>独特卖点</div>
             <input
               value={customUnique}
               onChange={(e) => setCustomUnique(e.target.value)}
               placeholder="例如：历史考据+系统金手指+群像叙事"
-              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }}
+              style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
 
@@ -1218,8 +1229,8 @@ const DiscoveryWizardPage: React.FC = () => {
           <button
             disabled={!customTitle.trim()}
             style={{
-              width: '100%', padding: '10px', backgroundColor: customTitle.trim() ? '#2ecc71' : 'rgba(255,255,255,0.04)',
-              border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
+              width: '100%', padding: '10px', backgroundColor: customTitle.trim() ? 'var(--color-success)' : 'rgba(255,255,255,0.04)',
+              border: 'none', borderRadius: '8px', color: 'var(--color-white)', fontSize: 'var(--font-size-xs)', fontWeight: 600, fontFamily: 'inherit',
               cursor: customTitle.trim() ? 'pointer' : 'not-allowed', transition: 'all 0.2s', opacity: customTitle.trim() ? 1 : 0.5,
             }}
             onClick={() => {
@@ -1234,8 +1245,8 @@ const DiscoveryWizardPage: React.FC = () => {
                 angle: '自定义',
               });
             }}
-            onMouseEnter={(e) => { if (customTitle.trim()) e.currentTarget.style.backgroundColor = '#27ae60'; }}
-            onMouseLeave={(e) => { if (customTitle.trim()) e.currentTarget.style.backgroundColor = '#2ecc71'; }}
+            onMouseEnter={(e) => { if (customTitle.trim()) e.currentTarget.style.backgroundColor = 'var(--color-success)'; }}
+            onMouseLeave={(e) => { if (customTitle.trim()) e.currentTarget.style.backgroundColor = 'var(--color-success)'; }}
           >
             ✨ 使用自定义题材创建项目
           </button>
@@ -1253,7 +1264,7 @@ const DiscoveryWizardPage: React.FC = () => {
             <div style={s.progressBarInner} />
           </div>
           <div style={{ ...s.genText, marginTop: '8px' }}>{genProgress}</div>
-          <div style={{ ...s.genText, fontSize: '12px', opacity: 0.5, marginTop: '4px' }}>
+          <div style={{ ...s.genText, fontSize: 'var(--font-size-xs)', opacity: 0.5, marginTop: '4px' }}>
             每条题材都会独立生成并通过结构、吸引力与篇幅一致性检查
             <span style={s.genDot}>&nbsp;</span>
           </div>
@@ -1276,7 +1287,7 @@ const DiscoveryWizardPage: React.FC = () => {
                 ...s.retryBtn,
                 backgroundColor: 'transparent',
                 border: '1px solid rgba(255,255,255,0.12)',
-                color: '#8a8aa0',
+                color: 'var(--color-text-dim)',
               }}
             >
               ← 返回修改配置
@@ -1287,7 +1298,7 @@ const DiscoveryWizardPage: React.FC = () => {
                 ...s.retryBtn,
                 backgroundColor: 'transparent',
                 border: '1px solid rgba(255,255,255,0.08)',
-                color: '#6c6c80',
+                color: 'var(--color-text-muted)',
               }}
             >
               返回首页
@@ -1300,10 +1311,10 @@ const DiscoveryWizardPage: React.FC = () => {
     return (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <div style={{ fontSize: '13px', color: '#6c6c80' }}>
+          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
             AI从不同角度生成了以下 {ideas.length} 个题材，点击卡片可查看详情
             {prevTitles.length > ideas.length && (
-              <span style={{ color: '#f59e0b', marginLeft: '8px' }}>
+              <span style={{ color: 'var(--color-warning)', marginLeft: '8px' }}>
                 （已累计排除 {prevTitles.length - ideas.length} 个旧题材）
               </span>
             )}
@@ -1315,8 +1326,8 @@ const DiscoveryWizardPage: React.FC = () => {
                 backgroundColor: isGenerating ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.06)',
                 border: '1px solid rgba(255,255,255,0.08)',
                 borderRadius: '6px',
-                color: '#c0c0d0',
-                fontSize: '12px',
+                color: 'var(--color-text-soft)',
+                fontSize: 'var(--font-size-xs)',
                 fontFamily: 'inherit',
                 cursor: isGenerating ? 'not-allowed' : 'pointer',
                 transition: 'all 0.15s',
@@ -1353,11 +1364,11 @@ const DiscoveryWizardPage: React.FC = () => {
         {/* 总体进度条 */}
         <div style={{ marginBottom: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span style={{ fontSize: '11px', color: '#8a8aa0' }}>总进度</span>
-            <span style={{ fontSize: '11px', color: '#e94560', fontWeight: 600 }}>{creationProgress}%</span>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)' }}>总进度</span>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-accent)', fontWeight: 600 }}>{creationProgress}%</span>
           </div>
           <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${creationProgress}%`, backgroundColor: isDone ? '#2ecc71' : '#e94560', borderRadius: '2px', transition: 'width 0.5s ease' }} />
+            <div style={{ height: '100%', width: `${creationProgress}%`, backgroundColor: isDone ? 'var(--color-success)' : 'var(--color-accent)', borderRadius: '2px', transition: 'width 0.5s ease' }} />
           </div>
         </div>
 
@@ -1377,9 +1388,9 @@ const DiscoveryWizardPage: React.FC = () => {
               {/* 状态图标 */}
               <div style={{
                 width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '12px', fontWeight: 700, flexShrink: 0,
+                fontSize: 'var(--font-size-xs)', fontWeight: 700, flexShrink: 0,
                 backgroundColor: isFailed ? 'rgba(231,76,60,0.16)' : isStepDone ? 'rgba(46,204,113,0.15)' : isRunning ? 'rgba(233,69,96,0.15)' : 'rgba(255,255,255,0.04)',
-                color: isFailed ? '#e74c3c' : isStepDone ? '#2ecc71' : isRunning ? '#e94560' : '#6c6c80',
+                color: isFailed ? 'var(--color-danger)' : isStepDone ? 'var(--color-success)' : isRunning ? 'var(--color-accent)' : 'var(--color-text-muted)',
               }}>
                 {isStepDone ? '✓' : isFailed ? '!' : isRunning ? (
                   <span style={{ animation: 'spin 0.8s linear infinite', display: 'inline-block' }}>⟳</span>
@@ -1389,10 +1400,10 @@ const DiscoveryWizardPage: React.FC = () => {
               {/* 步骤名 + 进度条 */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '13px', color: isRunning ? '#eaeaea' : isStepDone ? '#c0c0d0' : '#6c6c80', fontWeight: isRunning ? 600 : 400 }}>
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: isRunning ? 'var(--color-text-primary)' : isStepDone ? 'var(--color-text-soft)' : 'var(--color-text-muted)', fontWeight: isRunning ? 600 : 400 }}>
                     {cs.label}
                   </span>
-                  <span style={{ fontSize: '10px', color: isFailed ? '#e74c3c' : isStepDone ? '#2ecc71' : isRunning ? '#e94560' : '#6c6c80' }}>
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: isFailed ? 'var(--color-danger)' : isStepDone ? 'var(--color-success)' : isRunning ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
                     {isFailed ? '未写入' : isStepDone ? '完成' : isRunning ? '进行中...' : '等待中'}
                   </span>
                 </div>
@@ -1400,7 +1411,7 @@ const DiscoveryWizardPage: React.FC = () => {
                   <div style={{
                     height: '100%', borderRadius: '2px',
                     width: isStepDone ? '100%' : isFailed ? '100%' : isRunning ? '60%' : '0%',
-                    backgroundColor: isStepDone ? '#2ecc71' : isFailed ? '#e74c3c' : '#e94560',
+                    backgroundColor: isStepDone ? 'var(--color-success)' : isFailed ? 'var(--color-danger)' : 'var(--color-accent)',
                     transition: isRunning ? 'width 3s ease-in-out' : 'width 0.3s ease',
                     ...(isRunning ? { animation: 'progressAnim 3s ease-in-out infinite' } : {}),
                   }} />
@@ -1412,7 +1423,7 @@ const DiscoveryWizardPage: React.FC = () => {
 
         {isWaiting && (
           <div style={{ textAlign: 'center', padding: '12px 0 0' }}>
-            <span style={{ color: '#6c6c80', fontSize: '11px' }}>AI 正在调用大模型，通常需要 2-5 分钟...</span>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>AI 正在调用大模型，通常需要 2-5 分钟...</span>
           </div>
         )}
       </div>
@@ -1433,15 +1444,15 @@ const DiscoveryWizardPage: React.FC = () => {
 
           {/* 非关键警告（黄色） */}
           {creationWarnings.length > 0 && (
-            <div style={{ marginTop: '16px', padding: '10px', backgroundColor: 'rgba(243,156,18,0.1)', borderRadius: '8px', fontSize: '12px', color: '#f39c12', maxHeight: '120px', overflowY: 'auto' }}>
+            <div style={{ marginTop: '16px', padding: '10px', backgroundColor: 'rgba(243,156,18,0.1)', borderRadius: '8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-warning)', maxHeight: '120px', overflowY: 'auto' }}>
               <div style={{ fontWeight: 600, marginBottom: '4px' }}>⚠️ 生成过程记录：</div>
               {creationWarnings.slice(0, 5).map((w, i) => <div key={i} style={{ marginBottom: '2px' }}>• {w}</div>)}
-              {creationWarnings.length > 5 && <div style={{ color: '#8a8aa0', fontSize: '11px' }}>...还有 {creationWarnings.length - 5} 条警告</div>}
+              {creationWarnings.length > 5 && <div style={{ color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)' }}>...还有 {creationWarnings.length - 5} 条警告</div>}
             </div>
           )}
 
           {creationErrors.length > 0 && (
-            <div style={{ marginTop: '16px', padding: '10px', backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: '8px', fontSize: '12px', color: '#e74c3c' }}>
+            <div style={{ marginTop: '16px', padding: '10px', backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: '8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)' }}>
               {creationErrors.map((err, i) => <div key={i}>❌ {err}</div>)}
             </div>
           )}
@@ -1454,8 +1465,8 @@ const DiscoveryWizardPage: React.FC = () => {
                   {/* 失败状态：提供重试、返回、回家三个选项 */}
                   {createdProjectId && (
                     <button style={{
-                      width: '100%', padding: '12px', backgroundColor: '#e94560',
-                      border: 'none', borderRadius: '8px', color: '#fff',
+                      width: '100%', padding: '12px', backgroundColor: 'var(--color-accent)',
+                      border: 'none', borderRadius: '8px', color: 'var(--color-white)',
                       fontSize: '14px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
                     }}
                       onClick={() => openProject(createdProjectId, createdProjectTitle || `灵感项目-${createdProjectId.slice(0, 8)}`, navigate)}>
@@ -1466,7 +1477,7 @@ const DiscoveryWizardPage: React.FC = () => {
                     <button style={{
                       flex: 1, padding: '10px', backgroundColor: 'rgba(233,69,96,0.15)',
                       border: '1px solid rgba(233,69,96,0.3)', borderRadius: '8px',
-                      color: '#e94560', fontSize: '13px', fontWeight: 600,
+                      color: 'var(--color-accent)', fontSize: 'var(--font-size-xs)', fontWeight: 600,
                       fontFamily: 'inherit', cursor: 'pointer',
                     }}
                       onClick={() => {
@@ -1484,7 +1495,7 @@ const DiscoveryWizardPage: React.FC = () => {
                     <button style={{
                       flex: 1, padding: '10px', backgroundColor: 'rgba(255,255,255,0.06)',
                       border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px',
-                      color: '#8a8aa0', fontSize: '13px', fontWeight: 600,
+                      color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', fontWeight: 600,
                       fontFamily: 'inherit', cursor: 'pointer',
                     }}
                       onClick={() => navigate('/')}>
@@ -1496,8 +1507,8 @@ const DiscoveryWizardPage: React.FC = () => {
                 <>
                   {/* 成功状态 */}
                 <button style={{
-                  width: '100%', padding: '12px', backgroundColor: '#e94560',
-                  border: 'none', borderRadius: '8px', color: '#fff',
+                  width: '100%', padding: '12px', backgroundColor: 'var(--color-accent)',
+                  border: 'none', borderRadius: '8px', color: 'var(--color-white)',
                   fontSize: '14px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
                 }}
                   onClick={() => { if (createdProjectId) openProject(createdProjectId, createdProjectTitle || `灵感项目-${createdProjectId.slice(0, 8)}`, navigate); }}>
@@ -1528,8 +1539,8 @@ const DiscoveryWizardPage: React.FC = () => {
                 backgroundColor: 'rgba(255,255,255,0.06)',
                 border: '1px solid rgba(255,255,255,0.08)',
                 borderRadius: '6px',
-                color: '#8a8aa0',
-                fontSize: '12px',
+                color: 'var(--color-text-dim)',
+                fontSize: 'var(--font-size-xs)',
                 fontFamily: 'inherit',
                 cursor: 'pointer',
               }}

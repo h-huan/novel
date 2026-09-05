@@ -83,13 +83,41 @@ export class Migrator {
   }
 
   /**
+   * squash 基线自愈对齐（一次性）。
+   *
+   * 背景：历史上 001..053 的增量迁移已被整体收敛为单一 001 初始 schema。
+   * - 全新库：_migrations 为空，没有 id 大于磁盘最大迁移号的记录，直接返回，走正常建表；
+   * - 老库：_migrations 里残留 id>1 的历史记录，而磁盘上只剩 001。此时幂等执行一次 001
+   *   （全部 CREATE IF NOT EXISTS + PRAGMA 补列，不改动任何业务数据），再把迁移记录收敛为仅 id=1；
+   * - 已对齐库：只剩 id=1，无 id>1 记录，直接返回。
+   */
+  private alignSquashedBaseline(migrations: Migration[]): void {
+    const initial = migrations.find((m) => m.id === 1);
+    if (!initial) return;
+    const maxFileId = migrations.reduce((mx, m) => Math.max(mx, m.id), 0);
+    const legacy = this.db
+      .prepare('SELECT COUNT(*) AS c FROM _migrations WHERE id > ?')
+      .get(maxFileId) as { c: number };
+    if (!legacy || legacy.c === 0) return;
+
+    console.log(
+      `[Migration] 检测到 ${legacy.c} 条历史增量迁移记录（迁移已 squash 为单一初始 schema），执行一次幂等对齐：补齐缺失列/索引，不改动业务数据…`,
+    );
+    initial.up(this.db);
+    this.db.exec('DELETE FROM _migrations');
+    this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(initial.id, initial.name);
+    console.log('[Migration] squash 对齐完成，迁移基线已收敛为 001 初始 schema。');
+  }
+
+  /**
    * 运行待执行的迁移
    */
   async runMigrations(): Promise<void> {
     this.ensureMigrationTable();
 
-    const executed = this.getExecutedMigrations();
     const migrations = this.loadMigrations();
+    this.alignSquashedBaseline(migrations);
+    const executed = this.getExecutedMigrations();
 
     for (const migration of migrations) {
       if (!executed.has(migration.id)) {

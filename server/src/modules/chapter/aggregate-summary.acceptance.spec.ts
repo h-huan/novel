@@ -6,7 +6,7 @@ import { DatabaseService } from '../../database/database.service';
 import { ChunkerService } from '../../rag/chunker.service';
 import { VectorIndexService } from '../../rag/vector-index.service';
 import { EmbeddingService } from '../../rag/embedding.service';
-import { up } from '../../database/migrations/030_aggregate_summary_diagnostics';
+import { up as initSchema } from '../../database/migrations/001_initial';
 
 function service(llm: any) {
   return new ChapterDerivedDataSyncService({ getDb: () => ({}) } as DatabaseService, new ChunkerService(), {} as VectorIndexService, {} as EmbeddingService, { get: () => llm } as ModuleRef);
@@ -23,7 +23,7 @@ describe('aggregate summary acceptance', () => {
     expect(batches.flat().join('').length).toBe(90000); expect(batches.flat().every((part: string) => part.length <= 44000)).toBe(true);
   });
   it('migration 030 is idempotent', () => {
-    const db = new DatabaseSync(':memory:'); db.exec('CREATE TABLE aggregate_summary_states (id TEXT)'); up(db); up(db);
+    const db = new DatabaseSync(':memory:'); initSchema(db); initSchema(db);
     expect(() => db.prepare('SELECT diagnostics FROM aggregate_summary_states').all()).not.toThrow();
   });
 });

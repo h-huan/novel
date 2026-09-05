@@ -1,6 +1,7 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useChapterStore } from '../stores/chapterStore';
 
 const apiPayload = <T,>(res: any): T => res?.data ?? res;
 
@@ -105,8 +106,6 @@ const WritingQualityPage: React.FC = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [busyIssueId, setBusyIssueId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [quickCheckResult, setQuickCheckResult] = useState<any>(null);
-  const [quickChecking, setQuickChecking] = useState(false);
 
   const persistView = useCallback((patch: Record<string, unknown>) => {
     try {
@@ -231,6 +230,8 @@ const WritingQualityPage: React.FC = () => {
     try {
       const res = await api.post<any>(`/projects/${projectId}/writing-quality/analyze`, { chapterId: selectedChapterId });
       const data = apiPayload<any>(res);
+      // 统一回写章节质检状态，保证编辑器顶栏/列表的分数与待改数同步（多入口一致）
+      useChapterStore.getState().applyQualityAnalyzeResult(selectedChapterId, data);
       await loadReports();
       if (data?.report) await selectReport(data.report as QualityReport);
     } catch (err: any) {
@@ -264,34 +265,6 @@ const WritingQualityPage: React.FC = () => {
       }
     } catch (err: any) {
       setError(`注意力检查失败：${err.message || String(err)}`);
-    }
-  };
-
-  // 统一快速质检：物理指纹检测 + LLM语义评审 + 设定一致性
-  const handleQuickCheck = async () => {
-    if (!selectedChapterId || !projectId) return;
-    setQuickChecking(true);
-    setError(null);
-    try {
-      // 先获取章节正文
-      const chapterRes = await api.get<any>(`/projects/${projectId}/chapters/${selectedChapterId}`);
-      const chapterData = apiPayload<any>(chapterRes);
-      const content = chapterData?.content || chapterData?.body || '';
-      if (!content || content.length < 50) {
-        setError('该章节暂无正文，无法进行质检');
-        return;
-      }
-      const res = await api.post<any>(`/chain/quality-check`, {
-        projectId,
-        chapterId: selectedChapterId,
-        content,
-      });
-      const data = apiPayload<any>(res);
-      setQuickCheckResult(data);
-    } catch (err: any) {
-      setError(`快速质检失败：${err.message || String(err)}`);
-    } finally {
-      setQuickChecking(false);
     }
   };
 
@@ -388,31 +361,31 @@ const WritingQualityPage: React.FC = () => {
   }[status] || status);
 
   const severityColor = (severity: string) => ({
-    critical: '#ef4444',
+    critical: 'var(--color-danger)',
     high: '#f97316',
-    medium: '#eab308',
-    low: '#22c55e',
-  }[severity] || '#94a3b8');
+    medium: 'var(--color-warning)',
+    low: 'var(--color-success)',
+  }[severity] || 'var(--color-text-secondary)');
 
   const styles: Record<string, React.CSSProperties> = {
-    container: { padding: 24, maxWidth: 1440, margin: '0 auto', color: '#e2e8f0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' },
+    container: { padding: 24, maxWidth: 1440, margin: '0 auto', color: '#e2e8f0', minHeight: '100vh', fontFamily: 'var(--font-sans)' },
     header: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 20 },
     title: { fontSize: 24, fontWeight: 700 },
-    subtitle: { fontSize: 14, color: '#94a3b8', marginTop: 4 },
+    subtitle: { fontSize: 14, color: 'var(--color-text-secondary)', marginTop: 4 },
     row: { display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' },
-    panel: { background: '#111827', border: '1px solid #334155', borderRadius: 8, padding: 16, marginBottom: 16 },
-    card: { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: 14, marginBottom: 12 },
-    selectedCard: { borderColor: '#60a5fa' },
-    select: { background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 6, padding: '8px 10px', minWidth: 180 },
-    button: { background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontWeight: 600 },
-    ghostButton: { background: '#0f172a', color: '#dbeafe', border: '1px solid #334155', borderRadius: 6, padding: '8px 12px', cursor: 'pointer' },
-    smallButton: { background: '#0f172a', color: '#dbeafe', border: '1px solid #334155', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', fontSize: 14 },
-    muted: { color: '#94a3b8', fontSize: 14 },
-    text: { color: '#cbd5e1', fontSize: 14, lineHeight: 1.7 },
+    panel: { background: 'var(--color-bg-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 8, padding: 16, marginBottom: 16 },
+    card: { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 8, padding: 14, marginBottom: 12 },
+    selectedCard: { borderColor: 'var(--color-info-light)' },
+    select: { background: 'var(--color-bg-primary)', color: '#e2e8f0', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '8px 10px', minWidth: 180 },
+    button: { background: '#2563eb', color: 'var(--color-white)', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontWeight: 600 },
+    ghostButton: { background: 'var(--color-bg-primary)', color: '#dbeafe', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '8px 12px', cursor: 'pointer' },
+    smallButton: { background: 'var(--color-bg-primary)', color: '#dbeafe', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', fontSize: 14 },
+    muted: { color: 'var(--color-text-secondary)', fontSize: 14 },
+    text: { color: 'var(--color-text-soft)', fontSize: 14, lineHeight: 1.7 },
     badge: { display: 'inline-flex', alignItems: 'center', padding: '2px 7px', borderRadius: 4, fontSize: 14, fontWeight: 700 },
-    block: { background: '#020617', border: '1px solid #1e293b', borderRadius: 6, padding: 10, whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 },
+    block: { background: 'var(--color-bg-primary)', border: '1px solid var(--color-bg-secondary)', borderRadius: 6, padding: 10, whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 },
     error: { background: 'rgba(239,68,68,.12)', color: '#fecaca', border: '1px solid rgba(239,68,68,.35)', borderRadius: 8, padding: 12, marginBottom: 16 },
-    stat: { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px 16px', minWidth: 130 },
+    stat: { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 8, padding: '12px 16px', minWidth: 130 },
     statValue: { fontSize: 24, fontWeight: 800 },
   };
 
@@ -442,9 +415,6 @@ const WritingQualityPage: React.FC = () => {
           <button style={{ ...styles.button, opacity: analyzing || !selectedChapterId ? .55 : 1 }} disabled={analyzing || !selectedChapterId} onClick={handleAnalyze}>
             {analyzing ? '诊断中...' : '诊断当前章节'}
           </button>
-          <button style={{ ...styles.ghostButton, opacity: quickChecking || !selectedChapterId ? .55 : 1 }} disabled={quickChecking || !selectedChapterId} onClick={handleQuickCheck}>
-            {quickChecking ? '快速质检中...' : '统一快速质检'}
-          </button>
           <button style={styles.ghostButton} onClick={handleAttention} disabled={!selectedChapterId}>前三屏生死线检查</button>
           <button style={styles.ghostButton} onClick={loadReports}>刷新报告</button>
         </div>
@@ -455,11 +425,11 @@ const WritingQualityPage: React.FC = () => {
       <div style={{ ...styles.row, marginBottom: 16 }}>
         <div style={styles.stat}><div style={styles.statValue}>{stats.totalReports}</div><div style={styles.muted}>报告</div></div>
         <div style={styles.stat}><div style={{ ...styles.statValue, color: '#f97316' }}>{stats.openIssues}</div><div style={styles.muted}>待处理</div></div>
-        <div style={styles.stat}><div style={{ ...styles.statValue, color: '#ef4444' }}>{stats.highIssues}</div><div style={styles.muted}>高风险</div></div>
-        <div style={styles.stat}><div style={{ ...styles.statValue, color: '#22c55e' }}>{stats.resolvedIssues}</div><div style={styles.muted}>已闭环</div></div>
+        <div style={styles.stat}><div style={{ ...styles.statValue, color: 'var(--color-danger)' }}>{stats.highIssues}</div><div style={styles.muted}>高风险</div></div>
+        <div style={styles.stat}><div style={{ ...styles.statValue, color: 'var(--color-success)' }}>{stats.resolvedIssues}</div><div style={styles.muted}>已闭环</div></div>
       </div>
 
-      <div style={{ ...styles.row, borderBottom: '1px solid #334155', marginBottom: 16 }}>
+      <div style={{ ...styles.row, borderBottom: '1px solid var(--color-bg-elevated)', marginBottom: 16 }}>
         <button style={activeTab === 'reports' ? styles.button : styles.ghostButton} onClick={() => setActiveTab('reports')}>报告列表</button>
         <button style={activeTab === 'detail' ? styles.button : styles.ghostButton} onClick={() => setActiveTab('detail')} disabled={!selectedReport}>问题详情</button>
       </div>
@@ -468,86 +438,21 @@ const WritingQualityPage: React.FC = () => {
         <div style={styles.panel}>
           <div style={{ ...styles.row, justifyContent: 'space-between' }}>
             <div style={{ fontWeight: 700 }}>前三屏生死线</div>
-            <span style={{ ...styles.badge, background: attention.level === 'high' ? '#7f1d1d' : attention.level === 'medium' ? '#713f12' : '#14532d', color: '#fff' }}>
+            <span style={{ ...styles.badge, background: attention.level === 'high' ? '#7f1d1d' : attention.level === 'medium' ? '#713f12' : '#14532d', color: 'var(--color-white)' }}>
               滑走风险 {attention.slipAwayRiskScore}
             </span>
           </div>
           <div style={{ ...styles.row, marginTop: 10 }}>
-            {attention.checkpoints.map(item => (
-              <span key={item.name} style={{ ...styles.badge, background: item.pass ? '#064e3b' : '#7f1d1d', color: '#fff' }}>
+            {(attention.checkpoints || []).map(item => (
+              <span key={item.name} style={{ ...styles.badge, background: item.pass ? '#064e3b' : '#7f1d1d', color: 'var(--color-white)' }}>
                 {item.name} {item.score}
               </span>
             ))}
           </div>
-          {attention.reasons.length > 0 && <div style={{ ...styles.text, marginTop: 10 }}>{attention.reasons.slice(0, 4).join('；')}</div>}
+          {(attention.reasons || []).length > 0 && <div style={{ ...styles.text, marginTop: 10 }}>{(attention.reasons || []).slice(0, 4).join('；')}</div>}
           <div style={{ ...styles.row, alignItems: 'stretch', marginTop: 12 }}>
-            <div style={{ flex: 1, minWidth: 260 }}><div style={styles.muted}>修改方案</div><div style={styles.block}>{attention.revisionPlan.join('\n')}</div></div>
-            <div style={{ flex: 1, minWidth: 260 }}><div style={styles.muted}>替代开头建议</div><div style={styles.block}>{attention.alternativeOpenings.join('\n')}</div></div>
-          </div>
-        </div>
-      )}
-
-      {quickCheckResult && (
-        <div style={styles.panel}>
-          <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>统一快速质检结果</div>
-            <span style={{
-              ...styles.badge,
-              background: quickCheckResult.unifiedGrade === '优秀' ? '#14532d' : quickCheckResult.unifiedGrade === '合格' ? '#713f12' : '#7f1d1d',
-              color: '#fff',
-              fontSize: 14,
-              padding: '4px 12px',
-            }}>
-              {quickCheckResult.unifiedGrade} {quickCheckResult.unifiedScore}分
-            </span>
-          </div>
-          <div style={{ ...styles.row, marginBottom: 12, gap: 16 }}>
-            <div style={{ flex: 1, textAlign: 'center', padding: 8, background: '#0f172a', borderRadius: 6 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#22c55e' }}>{quickCheckResult.fingerprintScore}</div>
-              <div style={styles.muted}>物理指纹分</div>
-            </div>
-            <div style={{ flex: 1, textAlign: 'center', padding: 8, background: '#0f172a', borderRadius: 6 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#3b82f6' }}>{quickCheckResult.llmScore}</div>
-              <div style={styles.muted}>LLM语义评审</div>
-            </div>
-            <div style={{ flex: 1, textAlign: 'center', padding: 8, background: '#0f172a', borderRadius: 6 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#f59e0b' }}>{quickCheckResult.consistencyScore}</div>
-              <div style={styles.muted}>设定一致性</div>
-            </div>
-          </div>
-          {quickCheckResult.aiFingerprints && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>AI物理指纹检测（越低越好）</div>
-              <div style={{ ...styles.row, flexWrap: 'wrap', gap: 8 }}>
-                <span style={styles.badge}>排比句: {quickCheckResult.aiFingerprints.parallelism.count}处</span>
-                <span style={styles.badge}>AI高频词: {quickCheckResult.aiFingerprints.aiWordDensity.count}个</span>
-                <span style={styles.badge}>段落均匀: {quickCheckResult.aiFingerprints.paragraphUniformity.uniformGroups}组</span>
-                <span style={styles.badge}>对话占比: {(quickCheckResult.aiFingerprints.dialogueRatio.ratio * 100).toFixed(0)}%</span>
-                <span style={styles.badge}>标点种类: {quickCheckResult.aiFingerprints.punctuationDiversity.uniqueTypes}种</span>
-                <span style={styles.badge}>套路化表达: {quickCheckResult.aiFingerprints.clicheExpression?.count || 0}处</span>
-              </div>
-            </div>
-          )}
-          {quickCheckResult.llmReview?.summary && (
-            <div style={{ marginTop: 8 }}>
-              <div style={styles.muted}>质检总结</div>
-              <div style={styles.block}>{quickCheckResult.llmReview.summary}</div>
-            </div>
-          )}
-          {quickCheckResult.llmReview?.weaknesses?.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <div style={styles.muted}>主要问题</div>
-              <div style={styles.block}>{quickCheckResult.llmReview.weaknesses.join('；')}</div>
-            </div>
-          )}
-          <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-            <button
-              style={{ ...styles.button, background: '#1e40af', opacity: analyzing || !selectedChapterId ? .55 : 1 }}
-              disabled={analyzing || !selectedChapterId}
-              onClick={handleAnalyze}
-            >
-              {analyzing ? '生成完整报告中...' : '生成完整质检报告（含问题清单+精修方案）'}
-            </button>
+            <div style={{ flex: 1, minWidth: 260 }}><div style={styles.muted}>修改方案</div><div style={styles.block}>{(attention.revisionPlan || []).join('\n') || '—'}</div></div>
+            <div style={{ flex: 1, minWidth: 260 }}><div style={styles.muted}>替代开头建议</div><div style={styles.block}>{(attention.alternativeOpenings || []).join('\n') || '—'}</div></div>
           </div>
         </div>
       )}
@@ -562,8 +467,8 @@ const WritingQualityPage: React.FC = () => {
               <div style={{ ...styles.row, justifyContent: 'space-between' }}>
                 <div>
                   <strong>{report.title}</strong>
-                  <span style={{ ...styles.badge, marginLeft: 8, background: '#0f172a', color: '#bfdbfe' }}>{report.overallLevel}</span>
-                  {report.chapterLocked && <span style={{ ...styles.badge, marginLeft: 8, background: '#7f1d1d', color: '#fff' }}>LOCKED</span>}
+                  <span style={{ ...styles.badge, marginLeft: 8, background: 'var(--color-bg-primary)', color: '#bfdbfe' }}>{report.overallLevel}</span>
+                  {report.chapterLocked && <span style={{ ...styles.badge, marginLeft: 8, background: '#7f1d1d', color: 'var(--color-white)' }}>LOCKED</span>}
                 </div>
                 <span style={styles.muted}>{new Date(report.createdAt).toLocaleString()}</span>
               </div>
@@ -586,32 +491,38 @@ const WritingQualityPage: React.FC = () => {
               <span style={{
                 ...styles.badge,
                 background: (selectedReport.overallScore || 0) >= 80 ? '#14532d' : (selectedReport.overallScore || 0) >= 60 ? '#713f12' : '#7f1d1d',
-                color: '#fff',
+                color: 'var(--color-white)',
                 fontSize: 14,
                 padding: '4px 12px',
               }}>
                 {selectedReport.overallLevel} {selectedReport.overallScore || 0}分
               </span>
             </div>
-            {(selectedReport as any).payload?.aiFingerprints && (
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #334155' }}>
+            {(() => {
+              const payload = (selectedReport as any).payload || {};
+              const fp = payload.aiFingerprints;
+              if (!fp) return null;
+              const num = (v: any, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+              return (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--color-bg-elevated)' }}>
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>
                   AI物理指纹检测（越低越好）
-                  <span style={{ marginLeft: 8, color: '#22c55e' }}>指纹分: {(selectedReport as any).payload.fingerprintScore}</span>
-                  <span style={{ marginLeft: 8, color: '#3b82f6' }}>统一综合分: {(selectedReport as any).payload.unifiedScore}</span>
+                  <span style={{ marginLeft: 8, color: 'var(--color-success)' }}>指纹分: {payload.fingerprintScore ?? '—'}</span>
+                  <span style={{ marginLeft: 8, color: 'var(--color-info)' }}>统一综合分: {payload.unifiedScore ?? '—'}</span>
                 </div>
                 <div style={{ ...styles.row, flexWrap: 'wrap', gap: 8 }}>
-                  <span style={styles.badge}>排比句: {(selectedReport as any).payload.aiFingerprints.parallelism.count}处</span>
-                  <span style={styles.badge}>AI高频词: {(selectedReport as any).payload.aiFingerprints.aiWordDensity.count}个</span>
-                  <span style={styles.badge}>形容词堆砌: {(selectedReport as any).payload.aiFingerprints.adjectiveDensity.overloadedSentences}句</span>
-                  <span style={styles.badge}>段落均匀: {(selectedReport as any).payload.aiFingerprints.paragraphUniformity.uniformGroups}组</span>
-                  <span style={styles.badge}>句长CV: {((selectedReport as any).payload.aiFingerprints.sentenceLengthCV.cv * 100).toFixed(0)}%</span>
-                  <span style={styles.badge}>对话占比: {((selectedReport as any).payload.aiFingerprints.dialogueRatio.ratio * 100).toFixed(0)}%</span>
-                  <span style={styles.badge}>标点种类: {(selectedReport as any).payload.aiFingerprints.punctuationDiversity.uniqueTypes}种</span>
-                  <span style={styles.badge}>套路化表达: {(selectedReport as any).payload.aiFingerprints.clicheExpression?.count || 0}处</span>
+                  <span style={styles.badge}>排比句: {num(fp.parallelism?.count)}处</span>
+                  <span style={styles.badge}>AI高频词: {num(fp.aiWordDensity?.count)}个</span>
+                  <span style={styles.badge}>形容词堆砌: {num(fp.adjectiveDensity?.overloadedSentences)}句</span>
+                  <span style={styles.badge}>段落均匀: {num(fp.paragraphUniformity?.uniformGroups)}组</span>
+                  <span style={styles.badge}>句长CV: {(num(fp.sentenceLengthCV?.cv) * 100).toFixed(0)}%</span>
+                  <span style={styles.badge}>对话占比: {(num(fp.dialogueRatio?.ratio) * 100).toFixed(0)}%</span>
+                  <span style={styles.badge}>标点种类: {num(fp.punctuationDiversity?.uniqueTypes)}种</span>
+                  <span style={styles.badge}>套路化表达: {num(fp.clicheExpression?.count)}处</span>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </div>
 
           <div style={{ ...styles.row, marginBottom: 12, marginTop: 16 }}>
@@ -629,13 +540,20 @@ const WritingQualityPage: React.FC = () => {
             <span style={styles.muted}>显示 {filteredIssues.length} / {issues.length}</span>
           </div>
 
+          {filteredIssues.length === 0 && (
+            <div style={{ ...styles.card, color: 'var(--color-text-secondary)' }}>
+              {(selectedReport as any)?.sourceType === 'attention_check'
+                ? '本报告是「前三屏注意力检查」，只评估开篇留存与滑走风险，不产出逐条问题；切换到普通七维质检报告即可查看可逐条精修的问题清单。'
+                : '当前筛选下没有问题项。'}
+            </div>
+          )}
           {filteredIssues.map(issue => (
             <div key={issue.id} style={{ ...styles.card, ...(selectedIssueId === issue.id ? styles.selectedCard : {}) }} onClick={() => selectIssue(issue)}>
               <div style={{ ...styles.row, justifyContent: 'space-between' }}>
                 <div>
                   <strong>{issue.title}</strong>
                   <span style={{ ...styles.badge, marginLeft: 8, background: `${severityColor(issue.severity)}22`, color: severityColor(issue.severity) }}>{issue.severity}</span>
-                  <span style={{ ...styles.badge, marginLeft: 6, background: OPEN_STATUSES.has(issue.status) ? '#713f12' : '#14532d', color: '#fff' }}>{statusLabel(issue.status)}</span>
+                  <span style={{ ...styles.badge, marginLeft: 6, background: OPEN_STATUSES.has(issue.status) ? '#713f12' : '#14532d', color: 'var(--color-white)' }}>{statusLabel(issue.status)}</span>
                 </div>
                 <span style={styles.muted}>{issue.issueType}</span>
               </div>
@@ -659,7 +577,7 @@ const WritingQualityPage: React.FC = () => {
         <div style={styles.panel}>
           <div style={{ ...styles.row, justifyContent: 'space-between' }}>
             <strong>精修建议</strong>
-            <span style={{ ...styles.badge, background: revisionResult.canApply ? '#064e3b' : '#7f1d1d', color: '#fff' }}>
+            <span style={{ ...styles.badge, background: revisionResult.canApply ? '#064e3b' : '#7f1d1d', color: 'var(--color-white)' }}>
               {revisionResult.locked ? 'locked 只读' : revisionResult.canApply ? '可应用' : '建议模式'}
             </span>
           </div>
@@ -670,7 +588,7 @@ const WritingQualityPage: React.FC = () => {
           </div>
           <div style={{ ...styles.row, marginTop: 12 }}>
             {!revisionResult.applied && revisionResult.canApply && <button style={styles.button} onClick={() => handleApplyRevision(revisionResult.id)}>应用精修</button>}
-            {revisionResult.applied && <span style={{ ...styles.badge, background: '#14532d', color: '#fff' }}>已应用</span>}
+            {revisionResult.applied && <span style={{ ...styles.badge, background: '#14532d', color: 'var(--color-white)' }}>已应用</span>}
             {!revisionResult.canApply && <span style={styles.muted}>locked 章节只能诊断和建议，不能 apply。</span>}
           </div>
         </div>
@@ -679,7 +597,7 @@ const WritingQualityPage: React.FC = () => {
       {recheckResult && (
         <div style={styles.panel}>
           <strong>复检结果</strong>
-          <span style={{ ...styles.badge, marginLeft: 8, background: recheckResult.level === 'pass' ? '#14532d' : '#713f12', color: '#fff' }}>{recheckResult.level}</span>
+          <span style={{ ...styles.badge, marginLeft: 8, background: recheckResult.level === 'pass' ? '#14532d' : '#713f12', color: 'var(--color-white)' }}>{recheckResult.level}</span>
           <div style={{ ...styles.text, marginTop: 8 }}>{recheckResult.summary}</div>
         </div>
       )}

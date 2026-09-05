@@ -214,17 +214,15 @@ GET /api/v1/projects/:projectId/state/characters/:characterId/evolution
 |------|------|------|
 | `POST` | `/chain/idea-generate` | 灵感生成（3-5个故事题材） |
 | `POST` | `/chain/outline-generate` | 大纲生成 |
-| `POST` | `/chain/long-outline-generate` | 长篇大纲生成 |
-| `POST` | `/chain/long-write` | 长篇正文生成，执行 Workflow Guard 强校验 |
 | `POST` | `/chain/generate` | 正文生成（天龙8步法），执行 Workflow Guard 强校验 |
 | `POST` | `/chain/continue` | 续写正文，执行 Workflow Guard 强校验 |
 | `POST` | `/chain/enhance-opening` | 开头强化 |
 | `POST` | `/chain/enhance-reversal` | 反转强化 |
 | `POST` | `/chain/adapt-platform` | 平台风格改写 |
 | `POST` | `/chain/generate-title` | 标题/简介生成 |
-| `POST` | `/chain/quality-check` | 质检评分 |
+| `POST` | `/refinement/quality/inspect` | 确定性质量检测（物理指纹/问题扫描，毫秒级） |
+| `POST` | `/projects/:projectId/writing-quality/analyze` | 统一质检：LLM 语义评审+物理指纹，落库质量报告与问题清单 |
 | `POST` | `/chain/stream-generate` | 流式生成（SSE） |
-| `POST` | `/chain/multi-model-generate` | 多模型协作生成 |
 
 ### 模板管理
 
@@ -423,8 +421,7 @@ Workflow Guard 提供流程判断和阶段管理能力，根据项目类型、�
 |------|----------|------|
 | `POST /chain/generate` | `generate_body` | 短篇必须处于 `writing` 且有大纲；长篇必须处于 `writing` 且有章节规划 |
 | `POST /chain/continue` | `continue_body` | 必须处于 `writing`，长篇至少已有章节规划或正文上下文 |
-| `POST /chain/long-write` | `generate_body` | 长篇必须处于 `writing` 且有章节规划 |
-| `POST /chain/long-outline-generate` | `generate_outline` | 长篇必须完成世界观和主角设定，处于总纲阶段或由流程推进后进入总纲阶段 |
+| `POST /chain/rollout-outline` | `generate_outline` | 长篇滚动补纲：正文推进前把详细细纲窗口向前滚动（自动/手动） |
 | `POST /chain/templates/execute/:id` | `generate_outline` | 模板 id 包含 `outline` 且输入含 `projectId` 时校验 |
 | `POST /chain/stream-generate` | `generate_body` | 流式正文生成同样校验正文生成条件 |
 

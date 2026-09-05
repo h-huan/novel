@@ -83,9 +83,9 @@ const QualityStandardsPage: React.FC = () => {
 
   const getScoreBarColor = (key: string, score: number): string => {
     const rating = getRating(key, score);
-    if (rating === '优秀') return '#22c55e';
-    if (rating === '及格') return '#eab308';
-    return '#ef4444';
+    if (rating === '优秀') return 'var(--color-success)';
+    if (rating === '及格') return 'var(--color-warning)';
+    return 'var(--color-danger)';
   };
 
   const maxScore = (key: string): number => {
@@ -118,15 +118,15 @@ const QualityStandardsPage: React.FC = () => {
       {/* 评分规则说明 */}
       <div style={styles.legendContainer}>
         <div style={styles.legendItem}>
-          <span style={{ ...styles.legendDot, backgroundColor: '#22c55e' }} />
+          <span style={{ ...styles.legendDot, backgroundColor: 'var(--color-success)' }} />
           <span>优秀（≥8分 / AI痕迹≤25）</span>
         </div>
         <div style={styles.legendItem}>
-          <span style={{ ...styles.legendDot, backgroundColor: '#eab308' }} />
+          <span style={{ ...styles.legendDot, backgroundColor: 'var(--color-warning)' }} />
           <span>及格（6-7分 / AI痕迹≤40）</span>
         </div>
         <div style={styles.legendItem}>
-          <span style={{ ...styles.legendDot, backgroundColor: '#ef4444' }} />
+          <span style={{ ...styles.legendDot, backgroundColor: 'var(--color-danger)' }} />
           <span>不及格（&lt;6分 / AI痕迹&gt;40）</span>
         </div>
       </div>
@@ -202,8 +202,8 @@ const QualityStandardsPage: React.FC = () => {
                         style={{
                           ...styles.ratingBadge,
                           backgroundColor:
-                            rating === '优秀' ? '#22c55e' :
-                            rating === '及格' ? '#eab308' : '#ef4444',
+                            rating === '优秀' ? 'var(--color-success)' :
+                            rating === '及格' ? 'var(--color-warning)' : 'var(--color-danger)',
                         }}
                       >
                         {rating}
@@ -254,8 +254,8 @@ const QualityStandardsPage: React.FC = () => {
         .row-yellow:hover { background-color: rgba(234, 179, 8, 0.15); }
         .row-red:hover { background-color: rgba(239, 68, 68, 0.15); }
         input[type='range'] { cursor: pointer; }
-        input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #6366f1; cursor: pointer; }
-        input[type='range']::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #6366f1; cursor: pointer; border: none; }
+        input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--color-purple); cursor: pointer; }
+        input[type='range']::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--color-purple); cursor: pointer; border: none; }
       `}</style>
     </div>
   );
@@ -268,13 +268,13 @@ const styles: Record<string, React.CSSProperties> = {
     margin: '0 auto',
     fontFamily: "'PingFang SC', 'Microsoft YaHei', sans-serif",
     color: '#e2e8f0',
-    background: '#0f172a',
+    background: 'var(--color-bg-primary)',
     minHeight: '100vh',
   },
   header: { marginBottom: '24px' },
   title: { fontSize: '24px', fontWeight: 700, color: '#f1f5f9', margin: '0 0 8px 0' },
-  subtitle: { fontSize: '14px', color: '#94a3b8', margin: 0 },
-  loading: { textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '16px' },
+  subtitle: { fontSize: '14px', color: 'var(--color-text-secondary)', margin: 0 },
+  loading: { textAlign: 'center', padding: '40px', color: 'var(--color-text-secondary)', fontSize: '16px' },
   error: {
     padding: '12px 16px',
     background: 'rgba(239, 68, 68, 0.15)',
@@ -287,7 +287,7 @@ const styles: Record<string, React.CSSProperties> = {
   emptyState: {
     textAlign: 'center',
     padding: '40px',
-    color: '#94a3b8',
+    color: 'var(--color-text-secondary)',
     fontSize: '14px',
     background: 'rgba(255, 255, 255, 0.02)',
     borderRadius: '8px',
@@ -298,48 +298,48 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '24px',
     marginBottom: '16px',
     padding: '12px 16px',
-    background: '#1e293b',
+    background: 'var(--color-bg-secondary)',
     borderRadius: '8px',
   },
-  legendItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1' },
+  legendItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: 'var(--color-text-soft)' },
   legendDot: { width: '12px', height: '12px', borderRadius: '50%', display: 'inline-block' },
-  tableWrapper: { overflowX: 'auto', borderRadius: '8px', border: '1px solid #334155' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' },
+  tableWrapper: { overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--color-bg-elevated)' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
   th: {
     padding: '12px 12px',
     textAlign: 'left',
-    background: '#1e293b',
-    color: '#94a3b8',
+    background: 'var(--color-bg-secondary)',
+    color: 'var(--color-text-secondary)',
     fontWeight: 600,
-    borderBottom: '2px solid #334155',
+    borderBottom: '2px solid var(--color-bg-elevated)',
     whiteSpace: 'nowrap',
   },
-  tr: { borderBottom: '1px solid #1e293b' },
+  tr: { borderBottom: '1px solid var(--color-bg-secondary)' },
   td: { padding: '12px 12px', verticalAlign: 'middle' },
   scoreControl: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' },
-  slider: { flex: 1, height: '4px', accentColor: '#6366f1' },
+  slider: { flex: 1, height: '4px', accentColor: 'var(--color-purple)' },
   scoreValue: { fontWeight: 700, fontSize: '15px', minWidth: '36px', textAlign: 'right' as const },
-  barBg: { height: '4px', background: '#334155', borderRadius: '2px', overflow: 'hidden' },
+  barBg: { height: '4px', background: 'var(--color-bg-elevated)', borderRadius: '2px', overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: '2px', transition: 'width 0.2s, background-color 0.2s' },
   ratingBadge: {
     display: 'inline-block',
     padding: '3px 10px',
     borderRadius: '12px',
-    color: '#fff',
-    fontSize: '12px',
+    color: 'var(--color-white)',
+    fontSize: '14px',
     fontWeight: 600,
   },
-  thresholdInfo: { fontSize: '12px', lineHeight: 1.8 },
-  thresholdGreen: { color: '#4ade80' },
-  thresholdYellow: { color: '#facc15' },
-  thresholdRed: { color: '#f87171' },
+  thresholdInfo: { fontSize: '14px', lineHeight: 1.8 },
+  thresholdGreen: { color: 'var(--color-success)' },
+  thresholdYellow: { color: 'var(--color-warning)' },
+  thresholdRed: { color: 'var(--color-danger)' },
   aiBadge: {
     display: 'inline-block',
     marginLeft: '6px',
     padding: '0 6px',
     borderRadius: '3px',
-    background: '#6366f1',
-    color: '#fff',
+    background: 'var(--color-purple)',
+    color: 'var(--color-white)',
     fontSize: '10px',
     fontWeight: 700,
     verticalAlign: 'middle',
@@ -348,9 +348,9 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: '24px',
     padding: '12px',
     textAlign: 'center',
-    color: '#64748b',
-    fontSize: '12px',
-    borderTop: '1px solid #334155',
+    color: 'var(--color-text-muted)',
+    fontSize: '14px',
+    borderTop: '1px solid var(--color-bg-elevated)',
   },
 };
 

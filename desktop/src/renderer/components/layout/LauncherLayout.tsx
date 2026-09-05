@@ -15,6 +15,14 @@ import { setBaseUrl } from '../../lib/api';
 /** 是否运行在 Electron 中（有 IPC 通道）*/
 const isElectron = !!window.electronAPI?.invoke;
 
+/** 引导窗口顶部全局导航（落地页=工作台，项目管理独立到 /projects） */
+const LAUNCHER_NAV: Array<{ to: string; label: string }> = [
+  { to: '/', label: '工作台' },
+  { to: '/projects', label: '我的项目' },
+  { to: '/discover', label: '灵感发现' },
+  { to: '/module-standards', label: '执行标准' },
+];
+
 interface LauncherLayoutProps {
   children: React.ReactNode;
 }
@@ -62,8 +70,6 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
     }
   }, []);
 
-  const isHome = location.pathname === '/';
-
   // 判断是否显示服务状态横幅
   const showServerBanner = isElectron
     ? serverStatus === 'offline' || serverStatus === 'connecting'
@@ -82,10 +88,10 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
             ? (serverStatus === 'connecting' ? 'rgba(245,158,11,0.2)' : 'rgba(231,76,60,0.3)')
             : 'rgba(231,76,60,0.3)'}`,
           textAlign: 'center',
-          fontSize: '12px',
+          fontSize: 'var(--font-size-xs)',
           color: isElectron
-            ? (serverStatus === 'connecting' ? '#f59e0b' : '#e74c3c')
-            : '#e74c3c',
+            ? (serverStatus === 'connecting' ? 'var(--color-warning)' : 'var(--color-danger)')
+            : 'var(--color-danger)',
           display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px',
         }}>
           {isElectron ? (
@@ -94,7 +100,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
               {serverStatus === 'offline' && (
                 <button onClick={() => startHealthPolling()} style={{
                   padding: '2px 10px', backgroundColor: 'rgba(231,76,60,0.2)', border: '1px solid rgba(231,76,60,0.3)',
-                  borderRadius: '4px', color: '#e74c3c', cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
+                  borderRadius: '4px', color: 'var(--color-danger)', cursor: 'pointer', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit',
                 }}>重试</button>
               )}
             </>
@@ -105,7 +111,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
                 fetch('/api/v1/health').then(r => setWebBackendOk(r.ok)).catch(() => setWebBackendOk(false));
               }} style={{
                 padding: '2px 10px', backgroundColor: 'rgba(231,76,60,0.2)', border: '1px solid rgba(231,76,60,0.3)',
-                borderRadius: '4px', color: '#e74c3c', cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
+                borderRadius: '4px', color: 'var(--color-danger)', cursor: 'pointer', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit',
               }}>重试</button>
             </>
           )}
@@ -115,24 +121,24 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
       {/* 极简 Header */}
       <header className="drag-region h-12 bg-bg-secondary border-b border-border flex items-center justify-between px-4 select-none flex-shrink-0">
         <div className="flex items-center gap-4">
-          <h1 className="text-text-primary text-sm font-medium">AI 写作平台</h1>
+          <span className="text-accent font-bold text-sm select-none">✦ 写作工作台</span>
           <div className="flex items-center gap-1 no-drag">
-            <button
-              onClick={() => navigate('/')}
-              className={`px-3 py-1 text-sm rounded transition-colors ${
-                isHome ? 'text-accent bg-accent/10' : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
-              }`}
-            >
-              项目
-            </button>
-            <button
-              onClick={() => navigate('/discover')}
-              className={`px-3 py-1 text-sm rounded transition-colors ${
-                location.pathname.startsWith('/discover') ? 'text-accent bg-accent/10' : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
-              }`}
-            >
-              灵感发现
-            </button>
+            {LAUNCHER_NAV.map(tab => {
+              const active = tab.to === '/'
+                ? location.pathname === '/'
+                : location.pathname.startsWith(tab.to);
+              return (
+                <button
+                  key={tab.to}
+                  onClick={() => navigate(tab.to)}
+                  className={`px-3 py-1 text-[13px] rounded-md transition-colors duration-150 ${
+                    active ? 'text-accent bg-accent/10 font-semibold' : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 

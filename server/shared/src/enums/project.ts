@@ -29,7 +29,10 @@ export const TargetPlatform = {
   FANQIE: 'fanqie',
   QIDIAN: 'qidian',
   DOUYIN: 'douyin',
+  QIMAO: 'qimao',
   XIAOHONGSHU: 'xiaohongshu',
+  JINJIANG: 'jinjiang',
+  RULES_HORROR: 'rules_horror',
   CUSTOM: 'custom',
   GENERIC: 'generic',
 } as const;

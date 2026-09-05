@@ -126,31 +126,31 @@ const RefinementPage: React.FC = () => {
 
   return (
     <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>
+      <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>
         🛠️ 精修工具
         <button onClick={() => { setBatchMode(p => !p); setResult(null); setBatchStatus(''); }}
-          style={{ marginLeft: '12px', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'inherit', border: '1px solid', fontSize: '11px', backgroundColor: batchMode ? 'rgba(233,69,96,0.1)' : 'rgba(255,255,255,0.04)', borderColor: batchMode ? '#e94560' : 'rgba(255,255,255,0.08)', color: batchMode ? '#e94560' : '#8a8aa0' }}>
+          style={{ marginLeft: '12px', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'inherit', border: '1px solid', fontSize: '14px', backgroundColor: batchMode ? 'rgba(233,69,96,0.1)' : 'rgba(255,255,255,0.04)', borderColor: batchMode ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)', color: batchMode ? 'var(--color-accent)' : 'var(--color-text-dim)' }}>
           {batchMode ? '📦 批量模式 (开)' : '📦 批量模式'}
         </button>
       </h1>
 
       {batchMode && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '14px', backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ fontSize: '12px', fontWeight: 600, color: '#c0c0d0' }}>📦 批量精修 · 选择章节和模板</div>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-soft)' }}>📦 批量精修 · 选择章节和模板</div>
           {chaptersLoading ? (
-            <div style={{ fontSize: '11px', color: '#6c6c80' }}>加载章节中...</div>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>加载章节中...</div>
           ) : chapters.length === 0 ? (
-            <div style={{ fontSize: '11px', color: '#6c6c80' }}>暂无章节数据</div>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>暂无章节数据</div>
           ) : (
           <>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {chapters.map(ch => (
               <button key={ch.index} onClick={() => setSelectedChapters(p => p.includes(ch.index) ? p.filter(i => i !== ch.index) : [...p, ch.index])}
                 style={{
-                  padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontFamily: 'inherit', border: '1px solid', fontSize: '11px', transition: 'all 0.1s',
+                  padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontFamily: 'inherit', border: '1px solid', fontSize: '14px', transition: 'all 0.1s',
                   backgroundColor: selectedChapters.includes(ch.index) ? 'rgba(233,69,96,0.1)' : 'rgba(255,255,255,0.02)',
-                  borderColor: selectedChapters.includes(ch.index) ? '#e94560' : 'rgba(255,255,255,0.08)',
-                  color: ch.status === 'locked' ? '#e74c3c' : selectedChapters.includes(ch.index) ? '#eaeaea' : '#6c6c80',
+                  borderColor: selectedChapters.includes(ch.index) ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)',
+                  color: ch.status === 'locked' ? 'var(--color-danger)' : selectedChapters.includes(ch.index) ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
                   opacity: ch.status === 'locked' ? 0.6 : 1,
                   textDecoration: ch.status === 'locked' ? 'line-through' : 'none',
                 }}>
@@ -159,9 +159,9 @@ const RefinementPage: React.FC = () => {
             ))}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '11px', color: '#8a8aa0' }}>模板:</span>
+            <span style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>模板:</span>
             <select value={batchTemplate} onChange={e => setBatchTemplate(e.target.value)}
-              style={{ padding: '5px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '5px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
+              style={{ padding: '5px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '5px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }}>
               <option value="concise">简洁版</option><option value="vivid">生动版</option><option value="dialogue">对话强化版</option>
               <option value="suspense">悬念版</option><option value="emotional">情绪版</option><option value="commercial">网文爽感版</option>
             </select>
@@ -182,11 +182,11 @@ const RefinementPage: React.FC = () => {
               setLoading(false);
               setTimeout(() => setBatchStatus(''), 3000);
             }} disabled={loading}
-              style={{ padding: '6px 14px', backgroundColor: '#e94560', border: 'none', borderRadius: '5px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
+              style={{ padding: '6px 14px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '5px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
               {loading ? '处理中...' : `🚀 应用精修 (${selectedChapters.length}章)`}
             </button>
           </div>
-          {batchStatus && <div style={{ fontSize: '11px', color: batchStatus.startsWith('✅') ? '#2ecc71' : batchStatus.startsWith('⚠️') ? '#f39c12' : '#e74c3c' }}>{batchStatus}</div>}
+          {batchStatus && <div style={{ fontSize: '14px', color: batchStatus.startsWith('✅') ? 'var(--color-success)' : batchStatus.startsWith('⚠️') ? 'var(--color-warning)' : 'var(--color-danger)' }}>{batchStatus}</div>}
         </>
         )}
         </div>
@@ -199,20 +199,20 @@ const RefinementPage: React.FC = () => {
             style={{
               padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontFamily: 'inherit', border: '1px solid',
               backgroundColor: activeTool === t.id ? 'rgba(233,69,96,0.12)' : 'rgba(255,255,255,0.02)',
-              borderColor: activeTool === t.id ? '#e94560' : 'rgba(255,255,255,0.06)', color: activeTool === t.id ? '#e94560' : '#c0c0d0',
-              fontSize: '12px', fontWeight: 500,
+              borderColor: activeTool === t.id ? 'var(--color-accent)' : 'rgba(255,255,255,0.06)', color: activeTool === t.id ? 'var(--color-accent)' : 'var(--color-text-soft)',
+              fontSize: '14px', fontWeight: 500,
             }}
           >{t.icon} {t.label}</button>
         ))}
       </div>
-      <p style={{ margin: 0, fontSize: '11px', color: '#6c6c80' }}>{tool?.desc}</p>
+      <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-muted)' }}>{tool?.desc}</p>
 
       {/* 输入区 */}
       {(activeTool !== 'templates') && (
         <textarea value={content} onChange={e => setContent(e.target.value)}
           style={{
             width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '8px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical',
+            borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical',
             outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '120px',
           }} placeholder="输入需要处理的文本..." />
       )}
@@ -220,10 +220,10 @@ const RefinementPage: React.FC = () => {
       {/* 去AI味滑块 */}
       {activeTool === 'deai' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '11px', color: '#8a8aa0' }}>降AI力度:</span>
+          <span style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>降AI力度:</span>
           <input type="range" min={10} max={90} value={intensity} onChange={e => setIntensity(parseInt(e.target.value))}
             style={{ flex: 1 }} />
-          <span style={{ fontSize: '12px', color: intensity > 70 ? '#e74c3c' : intensity > 40 ? '#f39c12' : '#2ecc71', fontWeight: 600 }}>
+          <span style={{ fontSize: '14px', color: intensity > 70 ? 'var(--color-danger)' : intensity > 40 ? 'var(--color-warning)' : 'var(--color-success)', fontWeight: 600 }}>
             {intensity < 30 ? '轻度' : intensity < 60 ? '中度' : '重度'} ({intensity}%)
           </span>
         </div>
@@ -235,10 +235,10 @@ const RefinementPage: React.FC = () => {
           <button key={i} onClick={() => { setActiveEndpoint(i); setResult(null); }}
             style={{
               padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', fontFamily: 'inherit',
-              border: '1px solid', fontSize: '11px',
+              border: '1px solid', fontSize: '14px',
               backgroundColor: activeEndpoint === i ? 'rgba(233,69,96,0.1)' : 'rgba(255,255,255,0.04)',
-              borderColor: activeEndpoint === i ? '#e94560' : 'rgba(255,255,255,0.06)',
-              color: activeEndpoint === i ? '#e94560' : '#8a8aa0',
+              borderColor: activeEndpoint === i ? 'var(--color-accent)' : 'rgba(255,255,255,0.06)',
+              color: activeEndpoint === i ? 'var(--color-accent)' : 'var(--color-text-dim)',
             }}>{e.label}</button>
         ))}
       </div>
@@ -246,8 +246,8 @@ const RefinementPage: React.FC = () => {
       {/* 执行按钮 */}
       <button onClick={callApi} disabled={loading}
         style={{
-          padding: '10px 24px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px',
-          color: '#fff', fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+          padding: '10px 24px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px',
+          color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
           fontFamily: 'inherit', width: 'fit-content', opacity: loading ? 0.6 : 1,
         }}>{loading ? '调用中...' : `▶ 调用 ${ep?.path || ''}`}</button>
 
@@ -255,23 +255,23 @@ const RefinementPage: React.FC = () => {
       {result && (
         <div style={{
           padding: '14px', backgroundColor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)',
-          borderRadius: '8px', fontSize: '13px', color: '#c0c0d0', lineHeight: 1.6, overflow: 'auto', maxHeight: '400px',
+          borderRadius: '8px', fontSize: '14px', color: 'var(--color-text-soft)', lineHeight: 1.6, overflow: 'auto', maxHeight: '400px',
         }}>
           {/* 根据工具类型可视化展示结果 */}
           {activeTool === 'proofread' && result.errors && (
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#e94560', marginBottom: '8px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-accent)', marginBottom: '8px' }}>
                 ❌ 发现 {result.errors.length} 个错别字
               </div>
               {result.errors.map((err: any, idx: number) => (
                 <div key={idx} style={{ padding: '8px 10px', backgroundColor: 'rgba(233,69,96,0.08)', borderRadius: '6px', marginBottom: '6px', border: '1px solid rgba(233,69,96,0.2)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <span style={{ color: '#e94560', fontWeight: 700 }}>{err.wrong}</span>
-                    <span style={{ color: '#6c6c80' }}>→</span>
-                    <span style={{ color: '#2ecc71', fontWeight: 700 }}>{err.correct}</span>
-                    <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#8a8aa0' }}>位置: {err.position}字</span>
+                    <span style={{ color: 'var(--color-accent)', fontWeight: 700 }}>{err.wrong}</span>
+                    <span style={{ color: 'var(--color-text-muted)' }}>→</span>
+                    <span style={{ color: 'var(--color-success)', fontWeight: 700 }}>{err.correct}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--color-text-dim)' }}>位置: {err.position}字</span>
                   </div>
-                  <div style={{ fontSize: '11px', color: '#8a8aa0' }}>建议: {err.suggestion}</div>
+                  <div style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>建议: {err.suggestion}</div>
                 </div>
               ))}
             </div>
@@ -279,20 +279,20 @@ const RefinementPage: React.FC = () => {
 
           {activeTool === 'sensitive' && result.words && (
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#f39c12', marginBottom: '8px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-warning)', marginBottom: '8px' }}>
                 ⚠️ 发现 {result.words.length} 个敏感词
               </div>
               {result.words.map((word: any, idx: number) => (
                 <div key={idx} style={{ padding: '8px 10px', backgroundColor: 'rgba(243,156,18,0.08)', borderRadius: '6px', marginBottom: '6px', border: '1px solid rgba(243,156,18,0.2)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <span style={{ color: '#f39c12', fontWeight: 700 }}>{word.word}</span>
-                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '3px', backgroundColor: `rgba(${word.severity === 'high' ? '233,69,96' : word.severity === 'medium' ? '243,156,18' : '46,204,113'},0.2)`, color: word.severity === 'high' ? '#e94560' : word.severity === 'medium' ? '#f39c12' : '#2ecc71' }}>
+                    <span style={{ color: 'var(--color-warning)', fontWeight: 700 }}>{word.word}</span>
+                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '3px', backgroundColor: `rgba(${word.severity === 'high' ? '233,69,96' : word.severity === 'medium' ? '243,156,18' : '46,204,113'},0.2)`, color: word.severity === 'high' ? 'var(--color-accent)' : word.severity === 'medium' ? 'var(--color-warning)' : 'var(--color-success)' }}>
                       {word.severity === 'high' ? '高危' : word.severity === 'medium' ? '中危' : '低危'}
                     </span>
-                    <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#8a8aa0' }}>位置: {word.position}字</span>
+                    <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--color-text-dim)' }}>位置: {word.position}字</span>
                   </div>
                   {word.suggestion && (
-                    <div style={{ fontSize: '11px', color: '#2ecc71' }}>建议替换为: {word.suggestion}</div>
+                    <div style={{ fontSize: '14px', color: 'var(--color-success)' }}>建议替换为: {word.suggestion}</div>
                   )}
                 </div>
               ))}
@@ -301,31 +301,31 @@ const RefinementPage: React.FC = () => {
 
           {activeTool === 'ai-trace' && result.score !== undefined && (
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#9b59b6', marginBottom: '12px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-purple)', marginBottom: '12px' }}>
                 🤖 AI痕迹检测报告
               </div>
               {/* AI痕迹评分仪表盘 */}
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>AI痕迹指数</div>
+                    <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginBottom: '4px' }}>AI痕迹指数</div>
                     <div style={{ height: '24px', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '12px', overflow: 'hidden', position: 'relative' }}>
                       <div style={{
                         height: '100%', width: `${result.score}%`,
-                        background: result.score <= 25 ? 'linear-gradient(90deg, #22c55e, #2ecc71)' :
-                                   result.score <= 40 ? 'linear-gradient(90deg, #f39c12, #eab308)' :
-                                   'linear-gradient(90deg, #e94560, #ef4444)',
+                        background: result.score <= 25 ? 'linear-gradient(90deg, var(--color-success), var(--color-success))' :
+                                   result.score <= 40 ? 'linear-gradient(90deg, var(--color-warning), var(--color-warning))' :
+                                   'linear-gradient(90deg, var(--color-accent), var(--color-danger))',
                         borderRadius: '12px',
                         transition: 'width 0.5s ease-out',
                       }} />
-                      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '12px', fontWeight: 700, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '14px', fontWeight: 700, color: 'var(--color-white)', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
                         {result.score}%
                       </div>
                     </div>
                   </div>
                 </div>
-                <div style={{ fontSize: '11px', color: '#8a8aa0' }}>
-                  评级: <span style={{ color: result.score <= 25 ? '#2ecc71' : result.score <= 40 ? '#f39c12' : '#e94560', fontWeight: 600 }}>
+                <div style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>
+                  评级: <span style={{ color: result.score <= 25 ? 'var(--color-success)' : result.score <= 40 ? 'var(--color-warning)' : 'var(--color-accent)', fontWeight: 600 }}>
                     {result.score <= 25 ? '✅ 优秀 (AI痕迹低)' : result.score <= 40 ? '⚠️ 及格 (需优化)' : '❌ 不及格 (AI痕迹重)'}
                   </span>
                 </div>
@@ -333,10 +333,10 @@ const RefinementPage: React.FC = () => {
               {/* 详细分析 */}
               {result.details && result.details.length > 0 && (
                 <div>
-                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#8a8aa0', marginBottom: '6px' }}>问题片段:</div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-dim)', marginBottom: '6px' }}>问题片段:</div>
                   {result.details.map((detail: any, idx: number) => (
-                    <div key={idx} style={{ padding: '6px 8px', backgroundColor: 'rgba(155,89,182,0.08)', borderRadius: '4px', marginBottom: '4px', fontSize: '11px' }}>
-                      <span style={{ color: '#9b59b6' }}>{detail.type}</span>: {detail.text}
+                    <div key={idx} style={{ padding: '6px 8px', backgroundColor: 'rgba(155,89,182,0.08)', borderRadius: '4px', marginBottom: '4px', fontSize: '14px' }}>
+                      <span style={{ color: 'var(--color-purple)' }}>{detail.type}</span>: {detail.text}
                     </div>
                   ))}
                 </div>
@@ -346,7 +346,7 @@ const RefinementPage: React.FC = () => {
 
           {/* 其他工具：模板应用、版权审查、质检报告、批量模式 - 显示格式化的JSON */}
           {!['proofread', 'sensitive', 'ai-trace'].includes(activeTool) && (
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px' }}>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '14px' }}>
               {JSON.stringify(result, null, 2)}
             </pre>
           )}

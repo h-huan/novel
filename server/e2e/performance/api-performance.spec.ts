@@ -111,22 +111,20 @@ describe('API Performance', () => {
       expect(durationMs).toBeLessThan(10000);
     });
 
-    it('POST /chain/quality-check should respond within 2000ms', async () => {
+    it('POST /refinement/quality/inspect should respond within 2000ms', async () => {
       const { durationMs, passed } = await timeOperation(
-        'POST /chain/quality-check',
-        () => fetchWithTimeout(`${BASE_URL}/chain/quality-check`, {
+        'POST /refinement/quality/inspect',
+        () => fetchWithTimeout(`${BASE_URL}/refinement/quality/inspect`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            projectId: 'perf-test',
-            chapterId: 'ch-1',
             content: '这是一段用于性能测试的章节内容。',
           }),
         }),
         2000,
       );
 
-      console.log(`[PERF] POST /chain/quality-check: ${durationMs}ms (target: <2000ms) ${passed ? 'PASS' : 'FAIL'}`);
+      console.log(`[PERF] POST /refinement/quality/inspect: ${durationMs}ms (target: <2000ms) ${passed ? 'PASS' : 'FAIL'}`);
       expect(durationMs).toBeLessThan(10000);
     });
   });

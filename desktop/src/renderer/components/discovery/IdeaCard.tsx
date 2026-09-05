@@ -1,6 +1,6 @@
 import React from 'react';
 
-const ANGLE_COLORS: Record<string, string> = { '历史缝隙': '#60a5fa', '新闻改编': '#e94560', '小人物大历史': '#22c55e', '穿越新解': '#a855f7', '职业传奇': '#f59e0b' };
+const ANGLE_COLORS: Record<string, string> = { '历史缝隙': 'var(--color-info-light)', '新闻改编': 'var(--color-accent)', '小人物大历史': 'var(--color-success)', '穿越新解': 'var(--color-purple)', '职业传奇': 'var(--color-warning)' };
 
 const CARD_BG = 'rgba(255,255,255,0.03)';
 const BORDER = '1px solid rgba(255,255,255,0.08)';
@@ -11,27 +11,27 @@ const s: Record<string, React.CSSProperties> = {
   card: { backgroundColor: CARD_BG, borderRadius: '12px', border: BORDER, overflow: 'hidden', transition: 'all 0.2s', cursor: 'pointer', minWidth: 0, },
   header: { padding: '18px 18px 0' },
   titleRow: { display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' },
-  title: { fontSize: '17px', fontWeight: 700, color: '#eaeaea', lineHeight: 1.3, flex: 1 },
-  hook: { margin: '0', padding: '0 0 12px 0', fontSize: '14px', color: '#8a8aa0', fontStyle: 'italic', lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.05)' },
+  title: { fontSize: '17px', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1.3, flex: 1 },
+  hook: { margin: '0', padding: '0 0 12px 0', fontSize: '14px', color: 'var(--color-text-dim)', fontStyle: 'italic', lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.05)' },
   tags: { display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' },
   body: { padding: '10px 18px 8px', display: 'flex', flexDirection: 'column', gap: '4px' },
   row: { display: 'flex', gap: '12px', flexWrap: 'wrap' },
   field: { display: 'flex', flexDirection: 'column' as const, flex: '1 1 auto', minWidth: 0 },
-  label: { fontSize: LABEL_SIZE, fontWeight: 600, color: '#6c6c80', marginBottom: '1px' },
-  value: { fontSize: VALUE_SIZE, color: '#c0c0d0', lineHeight: 1.5, wordBreak: 'break-word' as const },
+  label: { fontSize: LABEL_SIZE, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '1px' },
+  value: { fontSize: VALUE_SIZE, color: 'var(--color-text-soft)', lineHeight: 1.5, wordBreak: 'break-word' as const },
   charList: { display: 'flex', flexWrap: 'wrap', gap: '6px' },
-  charTag: { display: 'inline-block', padding: '3px 10px', borderRadius: '5px', fontSize: '12px', fontWeight: 500 },
+  charTag: { display: 'inline-block', padding: '3px 10px', borderRadius: '5px', fontSize: '14px', fontWeight: 500 },
   actions: { padding: '12px 18px 16px', display: 'flex', gap: '8px' },
-  qualityFlag: { fontSize: '12px', fontWeight: 600, padding: '3px 10px', borderRadius: '5px', backgroundColor: 'rgba(245,158,11,0.15)', color: '#f59e0b', whiteSpace: 'nowrap', flexShrink: 0 },
-  btn: { flex: 1, padding: '11px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '14px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', transition: 'all 0.15s' },
+  qualityFlag: { fontSize: '14px', fontWeight: 600, padding: '3px 10px', borderRadius: '5px', backgroundColor: 'rgba(245,158,11,0.15)', color: 'var(--color-warning)', whiteSpace: 'nowrap', flexShrink: 0 },
+  btn: { flex: 1, padding: '11px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', transition: 'all 0.15s' },
 };
 
 function getAngleBadgeStyle(angle: string): React.CSSProperties {
-  return { fontSize: '12px', fontWeight: 600, padding: '3px 10px', borderRadius: '5px',
-    backgroundColor: (ANGLE_COLORS[angle] || '#6c6c80') + '22', color: ANGLE_COLORS[angle] || '#6c6c80', whiteSpace: 'nowrap', flexShrink: 0 };
+  return { fontSize: '14px', fontWeight: 600, padding: '3px 10px', borderRadius: '5px',
+    backgroundColor: (ANGLE_COLORS[angle] || 'var(--color-text-muted)') + '22', color: ANGLE_COLORS[angle] || 'var(--color-text-muted)', whiteSpace: 'nowrap', flexShrink: 0 };
 }
 function getStyleTagStyle(): React.CSSProperties {
-  return { fontSize: '12px', fontWeight: 500, padding: '3px 10px', borderRadius: '5px', backgroundColor: 'rgba(255,255,255,0.05)', color: '#8a8aa0' };
+  return { fontSize: '14px', fontWeight: 500, padding: '3px 10px', borderRadius: '5px', backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--color-text-dim)' };
 }
 /** 把数组项（字符串或 {name,desc} 等对象）归一化为可渲染的显示字符串 */
 function toStr(item: unknown): string {
@@ -85,17 +85,17 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
           return (
             <div style={{ ...s.tags, marginTop: '10px' }}>
               {platform && (
-                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(46,204,113,0.15)', color: '#2ecc71', fontWeight: 600 }}>
+                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(46,204,113,0.15)', color: 'var(--color-success)', fontWeight: 600 }}>
                   平台：{platform}
                 </span>
               )}
               {genre.length > 0 && (
-                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontWeight: 600 }}>
+                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(59,130,246,0.15)', color: 'var(--color-info-light)', fontWeight: 600 }}>
                   流派：{genre.join('·')}
                 </span>
               )}
               {filteredStyle.length > 0 && (
-                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(168,85,247,0.15)', color: '#c084fc', fontWeight: 600 }}>
+                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(168,85,247,0.15)', color: 'var(--color-purple)', fontWeight: 600 }}>
                   风格：{filteredStyle.join('·')}
                 </span>
               )}
@@ -109,9 +109,9 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
         })()}
         {/* 主角+地点 单行 */}
         {(idea.protagonist || idea.setting) && (
-          <div style={{ fontSize: '13px', color: '#8a8aa0', marginTop: '10px', lineHeight: 1.6 }}>
-            {idea.protagonist && <span>👤 <b style={{ color: '#c0c0d0' }}>{idea.protagonist}</b></span>}
-            {idea.protagonist && idea.setting && <span style={{ margin: '0 8px', color: '#5c5c70' }}>|</span>}
+          <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginTop: '10px', lineHeight: 1.6 }}>
+            {idea.protagonist && <span>👤 <b style={{ color: 'var(--color-text-soft)' }}>{idea.protagonist}</b></span>}
+            {idea.protagonist && idea.setting && <span style={{ margin: '0 8px', color: 'var(--color-text-muted)' }}>|</span>}
             {idea.setting && <span>📍 {idea.setting}</span>}
           </div>
         )}
@@ -123,8 +123,8 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
           {/* raw 回退：显示 AI 原始输出 */}
           {isRawFallback && idea.raw && (
             <div style={s.field}>
-              <div style={{ ...s.label, color: '#f59e0b' }}>⚠️ AI 返回了非结构化内容（原始输出）</div>
-              <div style={{ ...s.value, whiteSpace: 'pre-wrap', maxHeight: '280px', overflowY: 'auto', padding: '10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px', fontSize: '12px', lineHeight: '1.8' }}>
+              <div style={{ ...s.label, color: 'var(--color-warning)' }}>⚠️ AI 返回了非结构化内容（原始输出）</div>
+              <div style={{ ...s.value, whiteSpace: 'pre-wrap', maxHeight: '280px', overflowY: 'auto', padding: '10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px', fontSize: '14px', lineHeight: '1.8' }}>
                 {idea.raw}
               </div>
             </div>
@@ -138,7 +138,7 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
           {idea.coreConflict && (
             <div style={{ ...s.field }}>
               <div style={s.label}>⚔️ 核心冲突</div>
-              <div style={{ ...s.value, color: '#e94560' }}>{idea.coreConflict}</div>
+              <div style={{ ...s.value, color: 'var(--color-accent)' }}>{idea.coreConflict}</div>
             </div>
           )}
           {idea.tone && (
@@ -156,16 +156,16 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
           {idea.mainReversal && (
             <div style={{ ...s.field }}>
               <div style={s.label}>🔄 核心反转</div>
-              <div style={{ ...s.value, color: '#a855f7', fontStyle: 'italic' }}>{idea.mainReversal}</div>
+              <div style={{ ...s.value, color: 'var(--color-purple)', fontStyle: 'italic' }}>{idea.mainReversal}</div>
             </div>
           )}
           {idea.estimatedWords && (
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={s.label}>📏 动态建议篇幅</div>
-              <span style={{ fontSize: '15px', color: '#e94560', fontWeight: 700 }}>
+              <span style={{ fontSize: '15px', color: 'var(--color-accent)', fontWeight: 700 }}>
                 🔥 {typeof idea.estimatedWords === 'number' ? idea.estimatedWords.toLocaleString() + '字' : idea.estimatedWords}
               </span>
-              {idea.plannedChapters && <span style={{ fontSize: '12px', color: '#8a8aa0' }}>约 {idea.plannedChapters} 章</span>}
+              {idea.plannedChapters && <span style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>约 {idea.plannedChapters} 章</span>}
             </div>
           )}
           {idea.scopeReason && (
@@ -180,7 +180,7 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {idea.scopeBreakdown.map((item: any, index: number) => (
                   <div key={`${item.arc || 'arc'}-${index}`} style={s.value}>
-                    <b style={{ color: '#c0c0d0' }}>{item.arc}</b> · {item.chapters}章：{item.reason}
+                    <b style={{ color: 'var(--color-text-soft)' }}>{item.arc}</b> · {item.chapters}章：{item.reason}
                   </div>
                 ))}
               </div>
@@ -191,7 +191,7 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
               <div style={s.label}>👥 主要人物</div>
               <div style={s.charList}>
                 {idea.characters.map((c: unknown, ci: number) => (
-                  <span key={`${toStr(c)}-${ci}`} style={{ ...s.charTag, backgroundColor: ci === 0 ? 'rgba(233,69,96,0.14)' : 'rgba(255,255,255,0.05)', color: ci === 0 ? '#e94560' : '#8a8aa0' }}>
+                  <span key={`${toStr(c)}-${ci}`} style={{ ...s.charTag, backgroundColor: ci === 0 ? 'rgba(233,69,96,0.14)' : 'rgba(255,255,255,0.05)', color: ci === 0 ? 'var(--color-accent)' : 'var(--color-text-dim)' }}>
                     {toStr(c)}
                   </span>
                 ))}
@@ -206,8 +206,8 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
         <button
           style={s.btn}
           onClick={(e) => { e.stopPropagation(); onClick(idea); }}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#ff6b81'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#e94560'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-accent)'; }}
         >
           ✨ 选这个，创建项目
         </button>

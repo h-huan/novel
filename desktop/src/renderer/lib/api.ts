@@ -98,9 +98,42 @@ async function request<T>(
   return json as ApiResponse<T>;
 }
 
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * 只读 GET 的有限自动重试（仅用于幂等的查询/看板/轮询，严禁用于 POST 等写操作）。
+ * 只对“连不上后端（status=0，典型为后端正在重启）/ 5xx / 响应解析失败”重试，
+ * 采用指数退避；4xx 属于真实业务错误，立即抛出不重试。
+ * 解决：后端重启的几十秒内看板请求失败后永久停在空白/全 0，必须手动刷新的问题。
+ */
+async function requestGetWithRetry<T>(
+  path: string,
+  attempts = 4,
+  baseDelayMs = 800,
+  timeoutMs = 15_000,
+): Promise<ApiResponse<T>> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await request<T>('GET', path, undefined, timeoutMs);
+    } catch (err) {
+      lastErr = err;
+      const retryable = err instanceof ApiError && (err.status === 0 || err.status >= 500);
+      if (!retryable || i === attempts - 1) throw err;
+      await sleep(baseDelayMs * Math.pow(2, i)); // 0.8s → 1.6s → 3.2s
+    }
+  }
+  throw lastErr;
+}
+
 export const api = {
   get<T = unknown>(path: string, timeoutMs?: number): Promise<ApiResponse<T>> {
     return request<T>('GET', path, undefined, timeoutMs);
+  },
+
+  /** 只读查询专用：后端短暂不可达（如重启）时自动有限重试，看板/轮询使用避免假死空白 */
+  getWithRetry<T = unknown>(path: string, attempts?: number, baseDelayMs?: number): Promise<ApiResponse<T>> {
+    return requestGetWithRetry<T>(path, attempts, baseDelayMs);
   },
 
   post<T = unknown>(path: string, body?: unknown, timeoutMs?: number): Promise<ApiResponse<T>> {

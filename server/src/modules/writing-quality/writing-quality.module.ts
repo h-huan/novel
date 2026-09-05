@@ -1,7 +1,7 @@
 /**
  * WritingQuality Module - Phase 6.1 / 6.2
  *
- * 依赖 ChainModule（提供 RealLLMService/RoutingModule 的 ModelRouterService/FailoverService）
+ * 依赖 ChainModule（提供 RealLLMService）/RoutingModule 的 ModelRouterService
  * 依赖 ChapterModule（提供 ChapterService）
  */
 import { Module } from '@nestjs/common';

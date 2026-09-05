@@ -211,12 +211,12 @@ const TimelinePage: React.FC = () => {
                 key={timeline.id}
                 style={{
                   ...styles.timelineCard,
-                  borderColor: currentTimeline?.id === timeline.id ? '#e94560' : 'rgba(255,255,255,0.06)',
+                  borderColor: currentTimeline?.id === timeline.id ? 'var(--color-accent)' : 'rgba(255,255,255,0.06)',
                 }}
                 onClick={() => handleSelectTimeline(timeline)}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600 }}>#{idx + 1}</span>
+                  <span style={{ fontSize: '14px', color: 'var(--color-text-muted)', fontWeight: 600 }}>#{idx + 1}</span>
                   <div style={styles.timelineName}>{timeline.name}</div>
                 </div>
                 {timeline.description && (
@@ -240,7 +240,7 @@ const TimelinePage: React.FC = () => {
                     编辑
                   </button>
                   <button
-                    style={{ ...styles.actionBtn, color: '#e74c3c' }}
+                    style={{ ...styles.actionBtn, color: 'var(--color-danger)' }}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleDeleteTimeline(timeline.id);
@@ -278,7 +278,7 @@ const TimelinePage: React.FC = () => {
                   {events.map((event, idx) => (
                     <div key={event.id} style={styles.eventCard}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600 }}>#{idx + 1}</span>
+                        <span style={{ fontSize: '14px', color: 'var(--color-text-muted)', fontWeight: 600 }}>#{idx + 1}</span>
                         <div style={styles.eventDate}>
                           {event.eventDate || '未知日期'}
                         </div>
@@ -310,7 +310,7 @@ const TimelinePage: React.FC = () => {
                             编辑
                           </button>
                           <button
-                            style={{ ...styles.actionBtn, color: '#e74c3c' }}
+                            style={{ ...styles.actionBtn, color: 'var(--color-danger)' }}
                             onClick={() => handleDeleteEvent(event.id)}
                           >
                             删除
@@ -458,8 +458,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    backgroundColor: '#1a1a2e',
-    color: '#eaeaea',
+    backgroundColor: 'var(--color-bg-primary)',
+    color: 'var(--color-text-primary)',
     overflow: 'hidden',
   },
   loading: {
@@ -468,7 +468,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     height: '100%',
     fontSize: '14px',
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
   },
   header: {
     display: 'flex',
@@ -476,7 +476,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     padding: '16px 24px',
     borderBottom: '1px solid rgba(255,255,255,0.06)',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: 'var(--color-bg-primary)',
   },
   title: {
     margin: 0,
@@ -485,11 +485,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   createBtn: {
     padding: '8px 16px',
-    backgroundColor: '#e94560',
+    backgroundColor: 'var(--color-accent)',
     border: 'none',
     borderRadius: '6px',
-    color: '#fff',
-    fontSize: '13px',
+    color: 'var(--color-white)',
+    fontSize: '14px',
     fontWeight: 600,
     cursor: 'pointer',
     fontFamily: 'inherit',
@@ -498,8 +498,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '12px 24px',
     backgroundColor: 'rgba(231,76,60,0.1)',
     borderBottom: '1px solid rgba(231,76,60,0.2)',
-    color: '#e74c3c',
-    fontSize: '13px',
+    color: 'var(--color-danger)',
+    fontSize: '14px',
   },
   content: {
     display: 'flex',
@@ -516,13 +516,13 @@ const styles: Record<string, React.CSSProperties> = {
     margin: '0 0 12px 0',
     fontSize: '14px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
   },
   empty: {
     padding: '20px',
     textAlign: 'center',
-    color: '#8a8aa0',
-    fontSize: '13px',
+    color: 'var(--color-text-dim)',
+    fontSize: '14px',
   },
   timelineCard: {
     padding: '12px',
@@ -536,12 +536,12 @@ const styles: Record<string, React.CSSProperties> = {
   timelineName: {
     fontSize: '14px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     marginBottom: '4px',
   },
   timelineDesc: {
-    fontSize: '12px',
-    color: '#8a8aa0',
+    fontSize: '14px',
+    color: 'var(--color-text-dim)',
     marginBottom: '8px',
   },
   timelineActions: {
@@ -552,8 +552,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '4px 8px',
     backgroundColor: 'transparent',
     border: 'none',
-    color: '#8a8aa0',
-    fontSize: '11px',
+    color: 'var(--color-text-dim)',
+    fontSize: '14px',
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
@@ -583,8 +583,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   eventDate: {
     minWidth: '100px',
-    fontSize: '12px',
-    color: '#8a8aa0',
+    fontSize: '14px',
+    color: 'var(--color-text-dim)',
     fontWeight: 600,
   },
   eventContent: {
@@ -593,12 +593,12 @@ const styles: Record<string, React.CSSProperties> = {
   eventTitle: {
     fontSize: '14px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     marginBottom: '4px',
   },
   eventDesc: {
-    fontSize: '12px',
-    color: '#8a8aa0',
+    fontSize: '14px',
+    color: 'var(--color-text-dim)',
     marginBottom: '8px',
   },
   eventMeta: {
@@ -610,12 +610,12 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '2px 8px',
     backgroundColor: 'rgba(233,69,96,0.1)',
     borderRadius: '4px',
-    fontSize: '11px',
-    color: '#e94560',
+    fontSize: '14px',
+    color: 'var(--color-accent)',
   },
   eventImportance: {
-    fontSize: '11px',
-    color: '#f59e0b',
+    fontSize: '14px',
+    color: 'var(--color-warning)',
   },
   eventActions: {
     display: 'flex',
@@ -634,7 +634,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 1000,
   },
   dialog: {
-    backgroundColor: '#1e1e32',
+    backgroundColor: 'var(--color-bg-primary)',
     borderRadius: '12px',
     padding: '24px',
     width: '90%',
@@ -646,7 +646,7 @@ const styles: Record<string, React.CSSProperties> = {
     margin: '0 0 16px 0',
     fontSize: '16px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
   },
   formGroup: {
     display: 'flex',
@@ -659,9 +659,9 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '12px',
   },
   label: {
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
   },
   input: {
     width: '100%',
@@ -669,8 +669,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(0,0,0,0.2)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '6px',
-    color: '#eaeaea',
-    fontSize: '13px',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
     fontFamily: 'inherit',
     outline: 'none',
     boxSizing: 'border-box',
@@ -681,8 +681,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(0,0,0,0.2)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '6px',
-    color: '#eaeaea',
-    fontSize: '13px',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
     fontFamily: 'inherit',
     outline: 'none',
     resize: 'vertical',
@@ -695,8 +695,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(0,0,0,0.2)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '6px',
-    color: '#eaeaea',
-    fontSize: '13px',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
     fontFamily: 'inherit',
     outline: 'none',
     boxSizing: 'border-box',
@@ -711,7 +711,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px 20px',
     fontSize: '14px',
     fontWeight: 500,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     background: 'transparent',
     border: '1px solid rgba(255,255,255,0.1)',
     borderRadius: '6px',
@@ -722,8 +722,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px 20px',
     fontSize: '14px',
     fontWeight: 600,
-    color: '#fff',
-    backgroundColor: '#e94560',
+    color: 'var(--color-white)',
+    backgroundColor: 'var(--color-accent)',
     border: 'none',
     borderRadius: '6px',
     cursor: 'pointer',

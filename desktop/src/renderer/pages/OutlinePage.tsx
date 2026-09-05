@@ -95,19 +95,19 @@ const CHAPTER_WORD_MIN = 3200;
 const CHAPTER_WORD_MAX = 4000;
 
 const FUNCTION_COLORS: Record<string, string> = {
-  opening: '#e94560',
-  breathing: '#22c55e',
-  charging: '#3b82f6',
-  explosion: '#ef4444',
-  paving: '#a855f7',
-  transition: '#f59e0b',
-  closing: '#ec4899',
+  opening: 'var(--color-accent)',
+  breathing: 'var(--color-success)',
+  charging: 'var(--color-info)',
+  explosion: 'var(--color-danger)',
+  paving: 'var(--color-purple)',
+  transition: 'var(--color-warning)',
+  closing: 'var(--color-pink)',
   cliffhanger: '#f97316',
-  exposition: '#60a5fa',
+  exposition: 'var(--color-info-light)',
   rising_action: '#38bdf8',
-  conflict: '#ef4444',
-  climax: '#f43f5e',
-  resolution: '#22c55e',
+  conflict: 'var(--color-danger)',
+  climax: 'var(--color-accent)',
+  resolution: 'var(--color-success)',
 };
 
 const CHAPTER_FUNCTION_LABELS: Record<string, string> = {
@@ -144,10 +144,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  planned: '#8a8aa0',
-  writing: '#f59e0b',
-  completed: '#22c55e',
-  locked: '#2ecc71',
+  planned: 'var(--color-text-dim)',
+  writing: 'var(--color-warning)',
+  completed: 'var(--color-success)',
+  locked: 'var(--color-success)',
 };
 
 const parseJsonObject = (value: unknown): Record<string, any> => {
@@ -1071,6 +1071,23 @@ const OutlinePage: React.FC = () => {
     }
   }, [projectId, selectedChapter, refreshAfterChange]);
 
+  const handleRolloutOutline = useCallback(async () => {
+    if (!projectId) return;
+    setGenProgress('正在结合已写正文滚动补全后续约20章详细章纲…');
+    try {
+      const res = await api.post('/chain/rollout-outline', { projectId });
+      const data = (res as any).data ?? res;
+      setGenProgress(
+        data?.added > 0
+          ? `已结合最新剧情滚动新增 ${data.added} 章详细章纲（当前细纲 ${data.detailedTotal}/${data.totalEstimated} 章）。`
+          : '详细章纲已足够领先当前正文，无需补充。',
+      );
+      await refreshAfterChange();
+    } catch (error: any) {
+      setGenProgress(`滚动补纲失败，未写入内容：${error?.message || '未知错误'}`);
+    }
+  }, [projectId, refreshAfterChange]);
+
   const openInsertDialog = useCallback((chapterId: string, position: 'before' | 'after') => {
     openOperationDialog({
       title: position === 'before' ? '在本章前插入章节' : '在本章后插入章节',
@@ -1203,7 +1220,7 @@ const OutlinePage: React.FC = () => {
           {renderChapterLink('上一章遗留', chapterContext.previous)}
           <div style={{ ...styles.contextLink, borderColor: 'rgba(233,69,96,0.28)', backgroundColor: 'rgba(233,69,96,0.08)' }}>
             <span style={styles.contextLinkLabel}>本章承接</span>
-            <span style={{ ...styles.contextLinkTitle, color: '#e94560' }}>{selectedChapter.title}</span>
+            <span style={{ ...styles.contextLinkTitle, color: 'var(--color-accent)' }}>{selectedChapter.title}</span>
             {selectedVolume?.goal && <span style={styles.contextLinkHint}>{selectedVolume.goal}</span>}
           </div>
           {renderChapterLink('下一章牵引', chapterContext.next)}
@@ -1280,12 +1297,12 @@ const OutlinePage: React.FC = () => {
           <h2 style={styles.detailTitle}>{selectedChapter.title}</h2>
           <div style={styles.detailMeta}>
             <span style={{ color: STATUS_COLORS[selectedChapter.status] }}>{STATUS_LABELS[selectedChapter.status] || selectedChapter.status}</span>
-            <span style={{ ...styles.fnBadge, color: FUNCTION_COLORS[selectedChapter.chapterFunction] || '#6c6c80', borderColor: FUNCTION_COLORS[selectedChapter.chapterFunction] || 'rgba(255,255,255,0.08)' }}>
+            <span style={{ ...styles.fnBadge, color: FUNCTION_COLORS[selectedChapter.chapterFunction] || 'var(--color-text-muted)', borderColor: FUNCTION_COLORS[selectedChapter.chapterFunction] || 'rgba(255,255,255,0.08)' }}>
               {CHAPTER_FUNCTION_LABELS[selectedChapter.chapterFunction] || selectedChapter.chapterFunction}
             </span>
-            <span style={{ color: '#a855f7' }}>{GOAL_ARC_LABELS[selectedChapter.goalArc] || selectedChapter.goalArc}</span>
-            {docFields.mood && <span style={{ color: '#f59e0b' }}>{docFields.mood}</span>}
-            <span style={{ color: '#22c55e' }}>{selectedChapter.targetWords}字</span>
+            <span style={{ color: 'var(--color-purple)' }}>{GOAL_ARC_LABELS[selectedChapter.goalArc] || selectedChapter.goalArc}</span>
+            {docFields.mood && <span style={{ color: 'var(--color-warning)' }}>{docFields.mood}</span>}
+            <span style={{ color: 'var(--color-success)' }}>{selectedChapter.targetWords}字</span>
           </div>
         </div>
 
@@ -1299,7 +1316,7 @@ const OutlinePage: React.FC = () => {
           <button type="button" style={styles.operationButton} onClick={() => handleMoveOrder(selectedChapter.id, 'up')}>上移</button>
           <button type="button" style={styles.operationButton} onClick={() => handleMoveOrder(selectedChapter.id, 'down')}>下移</button>
           <button type="button" style={styles.operationButton} onClick={() => selectedVolume && openAddDialog(selectedVolume.id)}>新增章节</button>
-          <button type="button" style={{ ...styles.operationButton, color: '#ef4444', borderColor: 'rgba(239,68,68,0.24)' }} onClick={() => selectedVolume && openDeleteDialog(selectedVolume.id, selectedChapter.id)}>删除</button>
+          <button type="button" style={{ ...styles.operationButton, color: 'var(--color-danger)', borderColor: 'rgba(239,68,68,0.24)' }} onClick={() => selectedVolume && openDeleteDialog(selectedVolume.id, selectedChapter.id)}>删除</button>
         </div>
         <div style={styles.impactNotice}>
           修改后，相关伏笔位置、时间顺序和人物状态会出现在修改提醒中；系统不会擅自改写正文。
@@ -1312,11 +1329,25 @@ const OutlinePage: React.FC = () => {
             </button>
           ))}
         </div>
+
+        {projectType === 'long' && (
+          <div style={styles.impactNotice}>
+            长篇渐进式大纲：创建时只细排前20章，之后在正文生成时自动结合剧情滚动补全；也可现在手动
+            <button
+              type="button"
+              style={{ ...styles.operationButton, marginLeft: 8 }}
+              onClick={handleRolloutOutline}
+              title="结合最新已写正文，把后续详细章纲补到领先约20章"
+            >
+              立即滚动补纲
+            </button>
+          </div>
+        )}
         <div style={styles.qualityPanel}>
           <div style={styles.qualityTitle}>本章写作要点</div>
           <div style={styles.qualityList}>
             {outlineQuality.map(item => (
-              <span key={item.label} style={{ ...styles.qualityBadge, borderColor: item.ok ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.28)', color: item.ok ? '#22c55e' : '#f59e0b' }}>
+              <span key={item.label} style={{ ...styles.qualityBadge, borderColor: item.ok ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.28)', color: item.ok ? 'var(--color-success)' : 'var(--color-warning)' }}>
                 {item.label}: {item.ok ? '通过' : item.hint}
               </span>
             ))}
@@ -1468,7 +1499,7 @@ const OutlinePage: React.FC = () => {
             <button type="button" style={{ ...styles.genBtn, opacity: isGenerating ? 0.65 : 1 }} onClick={handleGenerateOutline} disabled={isGenerating}>
               {isGenerating ? '生成中...' : '按本书资料重写本章大纲'}
             </button>
-            {saveGenerated && <button type="button" style={{ ...styles.genBtn, backgroundColor: '#2ecc71' }} onClick={handleSaveGenerated}>保存到数据库</button>}
+            {saveGenerated && <button type="button" style={{ ...styles.genBtn, backgroundColor: 'var(--color-success)' }} onClick={handleSaveGenerated}>保存到数据库</button>}
             {canRegenerate && !isGenerating && <button type="button" style={styles.secondaryButton} onClick={handleGenerateOutline}>重新生成</button>}
           </div>
           {blockedNotice && (
@@ -1506,13 +1537,13 @@ const OutlinePage: React.FC = () => {
                       {volume.theme && <div style={styles.volumeTiny}>主题：{volume.theme}</div>}
                       {volume.keyEvents?.length ? <div style={styles.volumeTiny}>关键事件：{volume.keyEvents.join(' → ')}</div> : null}
                       {volume.chapters.length > 0 && (
-                        <div style={{ padding: '0 10px 6px', fontSize: 14, color: '#8a8aa0', lineHeight: 1.5 }}>
+                        <div style={{ padding: '0 10px 6px', fontSize: 14, color: 'var(--color-text-dim)', lineHeight: 1.5 }}>
                           爽点节奏：
                           {volume.chapters.map((c, i) => {
                             const n = countHighlights(c);
                             const rousing = isRousing(c.chapterFunction);
                             return (
-                              <span key={c.id} style={{ marginRight: 5, color: rousing ? '#e94560' : '#8a8aa0' }} title={`${c.title}：${n}个爽点${rousing ? '（热血/高潮）' : ''}`}>
+                              <span key={c.id} style={{ marginRight: 5, color: rousing ? 'var(--color-accent)' : 'var(--color-text-dim)' }} title={`${c.title}：${n}个爽点${rousing ? '（热血/高潮）' : ''}`}>
                                 {i + 1}·{n}{rousing ? '🔥' : ''}
                               </span>
                             );
@@ -1520,8 +1551,8 @@ const OutlinePage: React.FC = () => {
                         </div>
                       )}
                       {volume.climaxChapters?.length ? <div style={styles.volumeTiny}>🧨 高潮章：{volume.climaxChapters.map(c => `第${c}章`).join('、')}</div> : null}
-                      {volume.volumeForeshadowing?.length ? <div style={{...styles.volumeTiny, color:'#93c5fd'}}>🔮 卷伏笔：{volume.volumeForeshadowing.map((f:any) => f.content || '').slice(0,3).join('；')}</div> : null}
-                      {volume.characterArcs?.length ? <div style={{...styles.volumeTiny, color:'#86efac'}}>👤 人物弧：{volume.characterArcs.map((c:any) => `${c.character||''} ${c.from||''}→${c.to||''}`).join(' | ')}</div> : null}
+                      {volume.volumeForeshadowing?.length ? <div style={{...styles.volumeTiny, color:'var(--color-info-light)'}}>🔮 卷伏笔：{volume.volumeForeshadowing.map((f:any) => f.content || '').slice(0,3).join('；')}</div> : null}
+                      {volume.characterArcs?.length ? <div style={{...styles.volumeTiny, color:'var(--color-success)'}}>👤 人物弧：{volume.characterArcs.map((c:any) => `${c.character||''} ${c.from||''}→${c.to||''}`).join(' | ')}</div> : null}
                       <div style={styles.chapterList}>
                         {volume.chapters.map((chapter, index) => (
                           <ChapterListItem
@@ -1559,7 +1590,7 @@ const OutlinePage: React.FC = () => {
                         <strong style={styles.shortChapterTitle}>{chapter.title}</strong>
                         <span style={styles.shortChapterPreview}>{chapterPreviewText(chapter).slice(0, 60)}</span>
                       </span>
-                      <span style={{ ...styles.fnBadge, color: FUNCTION_COLORS[chapter.chapterFunction] || '#6c6c80', borderColor: FUNCTION_COLORS[chapter.chapterFunction] || 'rgba(255,255,255,0.08)' }}>
+                      <span style={{ ...styles.fnBadge, color: FUNCTION_COLORS[chapter.chapterFunction] || 'var(--color-text-muted)', borderColor: FUNCTION_COLORS[chapter.chapterFunction] || 'rgba(255,255,255,0.08)' }}>
                         {CHAPTER_FUNCTION_LABELS[chapter.chapterFunction] || chapter.chapterFunction}
                       </span>
                     </button>
@@ -1584,7 +1615,7 @@ const OutlinePage: React.FC = () => {
             ))}
             <div style={styles.dialogActions}>
               <button type="button" style={styles.secondaryButton} onClick={() => !operationBusy && setOperationDialog(null)}>取消</button>
-              <button type="button" style={{ ...styles.genBtn, backgroundColor: operationDialog.danger ? '#b91c1c' : '#2563eb' }} disabled={operationBusy} onClick={submitOperationDialog}>{operationBusy ? '正在执行…' : operationDialog.confirmLabel}</button>
+              <button type="button" style={{ ...styles.genBtn, backgroundColor: operationDialog.danger ? 'var(--color-danger)' : '#2563eb' }} disabled={operationBusy} onClick={submitOperationDialog}>{operationBusy ? '正在执行…' : operationDialog.confirmLabel}</button>
             </div>
           </div>
         </div>
@@ -1612,14 +1643,14 @@ const ChapterListItem: React.FC<{
   <div style={{ ...styles.chapterItem, ...(selected ? styles.chapterItemActive : null) }} onClick={onSelect}>
     <div style={styles.chapterItemRow}>
       <span style={styles.chapterIndex}>#{index + 1}</span>
-      <span style={{ ...styles.chapterItemTitle, color: selected ? '#e94560' : '#c0c0d0' }}>{chapter.title}</span>
+      <span style={{ ...styles.chapterItemTitle, color: selected ? 'var(--color-accent)' : 'var(--color-text-soft)' }}>{chapter.title}</span>
       <div style={styles.chapterActions}>
         {chapter.status === 'locked' ? (
           <span title="已锁定（正文只读）" style={styles.lockedBadge}>🔒</span>
         ) : (
           <>
             <button type="button" onClick={event => { event.stopPropagation(); onSplit(); }} title="拆分" style={styles.iconButton}>拆</button>
-            <button type="button" onClick={event => { event.stopPropagation(); onDelete(); }} title="删除" style={{ ...styles.iconButton, color: '#e74c3c', borderColor: 'rgba(231,76,60,0.24)' }}>删</button>
+            <button type="button" onClick={event => { event.stopPropagation(); onDelete(); }} title="删除" style={{ ...styles.iconButton, color: 'var(--color-danger)', borderColor: 'rgba(231,76,60,0.24)' }}>删</button>
           </>
         )}
       </div>
@@ -1628,122 +1659,122 @@ const ChapterListItem: React.FC<{
 );
 
 const DocSection: React.FC<{ label: string; text: string; tone?: 'danger' | 'warm' | 'purple' | 'green' }> = ({ label, text, tone }) => {
-  const color = tone === 'danger' ? '#e94560' : tone === 'warm' ? '#f59e0b' : tone === 'purple' ? '#a855f7' : tone === 'green' ? '#22c55e' : '#c0c0d0';
+  const color = tone === 'danger' ? 'var(--color-accent)' : tone === 'warm' ? 'var(--color-warning)' : tone === 'purple' ? 'var(--color-purple)' : tone === 'green' ? 'var(--color-success)' : 'var(--color-text-soft)';
   // 通用JSON解析：处理纯JSON数组/对象、分号分隔多对象、内联JSON
   const displayText = parseJsonToReadable(text);
   const isEmpty = !displayText.trim();
   return (
     <div style={styles.detailSection}>
       <span style={styles.detailLabel}>{label}</span>
-      <div style={{ ...styles.noteBox, color: isEmpty ? '#6c6c80' : color, borderLeftColor: isEmpty ? '#3a3a50' : color, whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>
-        {isEmpty ? <em style={{ color: '#6c6c80', fontStyle: 'normal' }}>无</em> : displayText}
+      <div style={{ ...styles.noteBox, color: isEmpty ? 'var(--color-text-muted)' : color, borderLeftColor: isEmpty ? 'var(--color-bg-elevated)' : color, whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>
+        {isEmpty ? <em style={{ color: 'var(--color-text-muted)', fontStyle: 'normal' }}>无</em> : displayText}
       </div>
     </div>
   );
 };
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: '#1a1a2e', overflow: 'hidden' },
-  header: { padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: '#1a1a2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  container: { display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--color-bg-primary)', overflow: 'hidden' },
+  header: { padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'var(--color-bg-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   tabs: { display: 'flex', gap: 8 },
-  tab: { padding: '8px 14px', fontSize: 14, fontWeight: 600, background: 'none', border: 'none', borderBottom: '2px solid transparent', color: '#8a8aa0', cursor: 'pointer', fontFamily: 'inherit' },
-  tabActive: { color: '#e94560', borderBottomColor: '#e94560' },
+  tab: { padding: '8px 14px', fontSize: 14, fontWeight: 600, background: 'none', border: 'none', borderBottom: '2px solid transparent', color: 'var(--color-text-dim)', cursor: 'pointer', fontFamily: 'inherit' },
+  tabActive: { color: 'var(--color-accent)', borderBottomColor: 'var(--color-accent)' },
   headerActions: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
-  headerMessage: { color: '#8a8aa0', fontSize: 14, maxWidth: 'min(420px, 50vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  headerButton: { padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontFamily: 'inherit' },
+  headerMessage: { color: 'var(--color-text-dim)', fontSize: 14, maxWidth: 'min(420px, 50vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  headerButton: { padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.04)', color: 'var(--color-text-soft)', cursor: 'pointer', fontFamily: 'inherit' },
   generatePanel: { padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', maxWidth: 660 },
   blockedNoticeWrap: { marginTop: -4 },
   dialogBackdrop: { position: 'fixed', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backgroundColor: 'rgba(2,6,23,0.72)' },
-  dialogCard: { width: 'min(460px, 100%)', padding: 20, borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', backgroundColor: '#17213b', boxShadow: '0 24px 60px rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', gap: 12 },
+  dialogCard: { width: 'min(460px, 100%)', padding: 20, borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', backgroundColor: 'var(--color-bg-secondary)', boxShadow: '0 24px 60px rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', gap: 12 },
   dialogTitle: { fontSize: 16, fontWeight: 700, color: '#f8fafc' },
-  dialogDescription: { fontSize: 14, lineHeight: 1.6, color: '#cbd5e1' },
+  dialogDescription: { fontSize: 14, lineHeight: 1.6, color: 'var(--color-text-soft)' },
   dialogActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
   formSection: { display: 'flex', flexDirection: 'column', gap: 6 },
-  formLabel: { fontSize: 14, fontWeight: 600, color: '#8a8aa0' },
+  formLabel: { fontSize: 14, fontWeight: 600, color: 'var(--color-text-dim)' },
   formRow: { display: 'flex', gap: 12, flexWrap: 'wrap' },
-  input: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
-  textarea: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#eaeaea', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box' },
-  genBtn: { padding: '10px 18px', backgroundColor: '#e94560', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
-  secondaryButton: { padding: '10px 18px', borderRadius: 8, border: '1px solid rgba(243,156,18,0.3)', backgroundColor: 'rgba(243,156,18,0.12)', color: '#f59e0b', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
+  input: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
+  textarea: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box' },
+  genBtn: { padding: '10px 18px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: 8, color: 'var(--color-white)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
+  secondaryButton: { padding: '10px 18px', borderRadius: 8, border: '1px solid rgba(243,156,18,0.3)', backgroundColor: 'rgba(243,156,18,0.12)', color: 'var(--color-warning)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },
   browseContainer: { flex: 1, display: 'flex', overflow: 'hidden' },
   emptyState: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 20px', textAlign: 'center' },
-  emptyText: { color: '#8a8aa0', fontSize: 15, margin: 0 },
-  emptyHint: { color: '#6c6c80', fontSize: 14, margin: '8px 0 0' },
+  emptyText: { color: 'var(--color-text-dim)', fontSize: 15, margin: 0 },
+  emptyHint: { color: 'var(--color-text-muted)', fontSize: 14, margin: '8px 0 0' },
   treePanel: { ...clampSidebar(220, 20, 320), borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  treeTitle: { padding: '12px 16px', fontSize: 14, fontWeight: 700, color: '#8a8aa0', borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  treeTitle: { padding: '12px 16px', fontSize: 14, fontWeight: 700, color: 'var(--color-text-dim)', borderBottom: '1px solid rgba(255,255,255,0.06)' },
   treeContent: { flex: 1, overflow: 'auto', padding: 8 },
   volumeBlock: { marginBottom: 10 },
   volumeHeader: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.035)', borderRadius: 6, marginBottom: 4 },
-  volumeTitle: { fontSize: 14, fontWeight: 700, color: '#eaeaea', flex: 1, minWidth: 0 },
-  volumeCount: { fontSize: 14, color: '#6c6c80' },
-  volumeHint: { padding: '0 10px 5px', fontSize: 14, color: '#8a8aa0', lineHeight: 1.45 },
-  volumeTiny: { padding: '0 10px 6px', fontSize: 14, color: '#6c6c80', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  addButton: { width: 22, height: 22, borderRadius: 4, border: '1px solid rgba(46,204,113,0.24)', backgroundColor: 'rgba(46,204,113,0.1)', color: '#2ecc71', cursor: 'pointer' },
+  volumeTitle: { fontSize: 14, fontWeight: 700, color: 'var(--color-text-primary)', flex: 1, minWidth: 0 },
+  volumeCount: { fontSize: 14, color: 'var(--color-text-muted)' },
+  volumeHint: { padding: '0 10px 5px', fontSize: 14, color: 'var(--color-text-dim)', lineHeight: 1.45 },
+  volumeTiny: { padding: '0 10px 6px', fontSize: 14, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  addButton: { width: 22, height: 22, borderRadius: 4, border: '1px solid rgba(46,204,113,0.24)', backgroundColor: 'rgba(46,204,113,0.1)', color: 'var(--color-success)', cursor: 'pointer' },
   chapterList: { paddingLeft: 8 },
   chapterItem: { padding: '6px 8px', borderRadius: 6, cursor: 'pointer', border: '1px solid transparent', marginBottom: 3 },
   chapterItemActive: { backgroundColor: 'rgba(233,69,96,0.1)', borderColor: 'rgba(233,69,96,0.3)' },
   chapterItemRow: { display: 'flex', alignItems: 'center', gap: 6 },
-  chapterIndex: { fontSize: 14, color: '#6c6c80', width: 28, flexShrink: 0 },
+  chapterIndex: { fontSize: 14, color: 'var(--color-text-muted)', width: 28, flexShrink: 0 },
   chapterItemTitle: { fontSize: 14, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   chapterActions: { display: 'flex', gap: 4, flexShrink: 0 },
-  iconButton: { minWidth: 22, height: 20, fontSize: 14, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontFamily: 'inherit' },
-  lockedBadge: { fontSize: 14, color: '#2ecc71', padding: '1px 4px' },
+  iconButton: { minWidth: 22, height: 20, fontSize: 14, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: 'var(--color-info-light)', cursor: 'pointer', fontFamily: 'inherit' },
+  lockedBadge: { fontSize: 14, color: 'var(--color-success)', padding: '1px 4px' },
   shortListPane: { ...clampSidebar(220, 20, 320), borderRight: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  shortMeta: { margin: 8, padding: 10, borderRadius: 6, color: '#8a8aa0', backgroundColor: 'rgba(59,130,246,0.06)', fontSize: 14, lineHeight: 1.45 },
+  shortMeta: { margin: 8, padding: 10, borderRadius: 6, color: 'var(--color-text-dim)', backgroundColor: 'rgba(59,130,246,0.06)', fontSize: 14, lineHeight: 1.45 },
   shortListContent: { flex: 1, overflow: 'auto', padding: 8 },
   shortChapterItem: { width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 5, borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)', backgroundColor: 'rgba(255,255,255,0.02)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' },
   shortChapterItemActive: { backgroundColor: 'rgba(233,69,96,0.1)', borderColor: 'rgba(233,69,96,0.25)' },
-  shortChapterIndex: { fontSize: 14, color: '#8a8aa0', fontWeight: 700, width: 24 },
+  shortChapterIndex: { fontSize: 14, color: 'var(--color-text-dim)', fontWeight: 700, width: 24 },
   shortChapterMain: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 },
-  shortChapterTitle: { fontSize: 14, color: '#c0c0d0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  shortChapterPreview: { fontSize: 14, color: '#6c6c80', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  shortChapterTitle: { fontSize: 14, color: 'var(--color-text-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  shortChapterPreview: { fontSize: 14, color: 'var(--color-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   fnBadge: { padding: '2px 6px', borderRadius: 4, fontSize: 14, border: '1px solid', fontWeight: 600, whiteSpace: 'nowrap' },
   detailPanel: { flex: 1, overflow: 'auto', padding: 16 },
   detailCard: { border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.06)' },
   volumeMetaStrip: { padding: '10px 14px', backgroundColor: 'rgba(59,130,246,0.06)', borderBottom: '1px solid rgba(59,130,246,0.1)' },
-  volumeMetaTitle: { fontSize: 14, color: '#60a5fa', fontWeight: 700, marginBottom: 4 },
-  volumeMetaLine: { fontSize: 14, color: '#93c5fd', marginBottom: 3 },
-  volumeMetaHint: { fontSize: 14, color: '#8a8aa0' },
-  volumeMetaClimax: { fontSize: 14, color: '#e94560', marginTop: 3 },
+  volumeMetaTitle: { fontSize: 14, color: 'var(--color-info-light)', fontWeight: 700, marginBottom: 4 },
+  volumeMetaLine: { fontSize: 14, color: 'var(--color-info-light)', marginBottom: 3 },
+  volumeMetaHint: { fontSize: 14, color: 'var(--color-text-dim)' },
+  volumeMetaClimax: { fontSize: 14, color: 'var(--color-accent)', marginTop: 3 },
   detailHeader: { padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
-  detailTitle: { margin: 0, fontSize: 16, fontWeight: 700, color: '#eaeaea' },
-  detailMeta: { display: 'flex', gap: 10, fontSize: 14, color: '#8a8aa0', flexWrap: 'wrap' },
+  detailTitle: { margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--color-text-primary)' },
+  detailMeta: { display: 'flex', gap: 10, fontSize: 14, color: 'var(--color-text-dim)', flexWrap: 'wrap' },
   operationBar: { padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'rgba(0,0,0,0.1)' },
-  operationButton: { padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' },
-  impactNotice: { padding: '8px 16px', color: '#fbbf24', backgroundColor: 'rgba(245,158,11,0.08)', borderBottom: '1px solid rgba(245,158,11,0.12)', fontSize: 14, lineHeight: 1.5 },
+  operationButton: { padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: 'var(--color-text-soft)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' },
+  impactNotice: { padding: '8px 16px', color: 'var(--color-warning)', backgroundColor: 'rgba(245,158,11,0.08)', borderBottom: '1px solid rgba(245,158,11,0.12)', fontSize: 14, lineHeight: 1.5 },
   qualityPanel: { padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(255,255,255,0.025)' },
-  qualityTitle: { fontSize: 14, color: '#eaeaea', fontWeight: 700, marginBottom: 8 },
+  qualityTitle: { fontSize: 14, color: 'var(--color-text-primary)', fontWeight: 700, marginBottom: 8 },
   qualityList: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   qualityBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 14, fontWeight: 700 },
-  qualityHint: { marginTop: 8, fontSize: 14, color: '#8a8aa0', lineHeight: 1.5 },
-  syncNotice: { padding: '8px 16px', color: '#93c5fd', backgroundColor: 'rgba(96,165,250,0.08)', borderBottom: '1px solid rgba(96,165,250,0.12)', fontSize: 14, lineHeight: 1.5 },
+  qualityHint: { marginTop: 8, fontSize: 14, color: 'var(--color-text-dim)', lineHeight: 1.5 },
+  syncNotice: { padding: '8px 16px', color: 'var(--color-info-light)', backgroundColor: 'rgba(96,165,250,0.08)', borderBottom: '1px solid rgba(96,165,250,0.12)', fontSize: 14, lineHeight: 1.5 },
   contextPanel: { padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', gap: 10 },
   contextGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 },
-  contextLink: { minHeight: 76, textAlign: 'left', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', backgroundColor: 'rgba(255,255,255,0.025)', color: '#c0c0d0', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' },
-  contextLinkLabel: { fontSize: 14, color: '#6c6c80', fontWeight: 700 },
+  contextLink: { minHeight: 76, textAlign: 'left', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', backgroundColor: 'rgba(255,255,255,0.025)', color: 'var(--color-text-soft)', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' },
+  contextLinkLabel: { fontSize: 14, color: 'var(--color-text-muted)', fontWeight: 700 },
   contextLinkTitle: { fontSize: 14, color: '#d8d8e8', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  contextLinkHint: { fontSize: 14, color: '#8a8aa0', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
+  contextLinkHint: { fontSize: 14, color: 'var(--color-text-dim)', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
   contextMetaGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 },
   contextMetaBox: { padding: '9px 10px', borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', minHeight: 66 },
-  contextMetaTitle: { display: 'block', fontSize: 14, color: '#6c6c80', fontWeight: 700, marginBottom: 5 },
-  contextMetaText: { margin: 0, fontSize: 14, color: '#c0c0d0', lineHeight: 1.5 },
-  contextMetaHint: { margin: '5px 0 0', fontSize: 14, color: '#8a8aa0', lineHeight: 1.4 },
+  contextMetaTitle: { display: 'block', fontSize: 14, color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: 5 },
+  contextMetaText: { margin: 0, fontSize: 14, color: 'var(--color-text-soft)', lineHeight: 1.5 },
+  contextMetaHint: { margin: '5px 0 0', fontSize: 14, color: 'var(--color-text-dim)', lineHeight: 1.4 },
   contextTagWrap: { display: 'flex', flexWrap: 'wrap', gap: 5 },
-  contextTag: { padding: '3px 7px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.03)', color: '#c0c0d0', fontSize: 14, lineHeight: 1.4 },
-  contextTagEm: { marginLeft: 5, color: '#6c6c80', fontStyle: 'normal', fontSize: 14 },
+  contextTag: { padding: '3px 7px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.03)', color: 'var(--color-text-soft)', fontSize: 14, lineHeight: 1.4 },
+  contextTagEm: { marginLeft: 5, color: 'var(--color-text-muted)', fontStyle: 'normal', fontSize: 14 },
   detailBody: { padding: 16, display: 'flex', flexDirection: 'column', gap: 16 },
   detailSection: { display: 'flex', flexDirection: 'column', gap: 6 },
   sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  detailLabel: { fontSize: 14, fontWeight: 700, color: '#8a8aa0' },
-  detailText: { margin: 0, fontSize: 14, color: '#c0c0d0', lineHeight: 1.7 },
-  inlineButton: { padding: '3px 8px', backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4, color: '#8a8aa0', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
-  editTextarea: { width: '100%', padding: 10, backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(233,69,96,0.2)', borderRadius: 6, color: '#eaeaea', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.8, boxSizing: 'border-box', minHeight: 140 },
+  detailLabel: { fontSize: 14, fontWeight: 700, color: 'var(--color-text-dim)' },
+  detailText: { margin: 0, fontSize: 14, color: 'var(--color-text-soft)', lineHeight: 1.7 },
+  inlineButton: { padding: '3px 8px', backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4, color: 'var(--color-text-dim)', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
+  editTextarea: { width: '100%', padding: 10, backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(233,69,96,0.2)', borderRadius: 6, color: 'var(--color-text-primary)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.8, boxSizing: 'border-box', minHeight: 140 },
   actionRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  primarySmallButton: { padding: '6px 14px', backgroundColor: '#e94560', border: 'none', borderRadius: 6, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
-  secondarySmallButton: { padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: '#8a8aa0', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
+  primarySmallButton: { padding: '6px 14px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: 6, color: 'var(--color-white)', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
+  secondarySmallButton: { padding: '6px 14px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: 'var(--color-text-dim)', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
   tagWrap: { display: 'flex', flexWrap: 'wrap', gap: 5 },
-  sceneTag: { padding: '2px 8px', borderRadius: 4, fontSize: 14, backgroundColor: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.15)' },
-  noteBox: { fontSize: 14, backgroundColor: 'rgba(255,255,255,0.035)', padding: '8px 10px', borderRadius: 6, borderLeft: '3px solid #c0c0d0', lineHeight: 1.6 },
+  sceneTag: { padding: '2px 8px', borderRadius: 4, fontSize: 14, backgroundColor: 'rgba(59,130,246,0.1)', color: 'var(--color-info-light)', border: '1px solid rgba(59,130,246,0.15)' },
+  noteBox: { fontSize: 14, backgroundColor: 'rgba(255,255,255,0.035)', padding: '8px 10px', borderRadius: 6, borderLeft: '3px solid var(--color-text-soft)', lineHeight: 1.6 },
 };
 
 export default OutlinePage;

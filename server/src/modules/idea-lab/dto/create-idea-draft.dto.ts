@@ -17,7 +17,7 @@ export class CreateIdeaDraftDto {
   projectType?: string = 'long_novel';
 
   @IsOptional()
-  @IsIn(['zhihu', 'fanqie', 'qidian', 'douyin', 'xiaohongshu', 'custom', 'generic'])
+  @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
   targetPlatform?: string = 'generic';
 
   @IsNumber()

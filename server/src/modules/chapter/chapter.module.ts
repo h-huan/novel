@@ -13,9 +13,10 @@ import { RagModule } from '../../rag/rag.module';
 import { ChainModule } from '../../chain/chain.module';
 import { AggregateSummaryController } from './aggregate-summary.controller';
 import { DatabaseModule } from '../../database/database.module';
+import { OriginalityModule } from '../originality/originality.module';
 
 @Module({
-  imports: [StateModule, StateManagementModule, RagModule, ChainModule, DatabaseModule],
+  imports: [StateModule, StateManagementModule, RagModule, ChainModule, DatabaseModule, OriginalityModule],
   controllers: [ChapterController, AggregateSummaryController],
   providers: [ChapterService, ChapterDerivedDataSyncService, ChapterRepository, VersionHistoryRepository],
   exports: [ChapterService, ChapterDerivedDataSyncService],

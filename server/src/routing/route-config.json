@@ -15,20 +15,20 @@
       ],
       "versions": [
         {
-          "id": "deepseek-chat",
-          "label": "DeepSeek Chat",
+          "id": "deepseek-v4-flash",
+          "label": "DeepSeek V4 Flash",
           "tier": "standard"
         },
         {
-          "id": "deepseek-chat",
-          "label": "DeepSeek Chat (Fast)",
-          "tier": "fast"
+          "id": "deepseek-v4-pro",
+          "label": "DeepSeek V4 Pro",
+          "tier": "high"
         }
       ]
     }
   },
   "model_versions": {
-    "deepseek": "deepseek-chat"
+    "deepseek": "deepseek-v4-flash"
   },
   "roles": {
     "writer": {
@@ -36,14 +36,12 @@
         {
           "model": "deepseek",
           "priority": 1,
-          "label": "智能写作",
-          "defaultVersion": "deepseek-chat"
+          "label": "智能写作"
         },
         {
           "model": "deepseek",
           "priority": 2,
-          "label": "快速写作",
-          "defaultVersion": "deepseek-chat"
+          "label": "快速写作"
         }
       ]
     },
@@ -52,8 +50,7 @@
         {
           "model": "deepseek",
           "priority": 1,
-          "label": "智能审查",
-          "defaultVersion": "deepseek-chat"
+          "label": "智能审查"
         }
       ]
     },
@@ -62,8 +59,7 @@
         {
           "model": "deepseek",
           "priority": 1,
-          "label": "智能策划",
-          "defaultVersion": "deepseek-chat"
+          "label": "智能策划"
         }
       ]
     }
@@ -140,12 +136,6 @@
       "temperature": 0.3,
       "maxTokens": 16384,
       "label": "角色审查"
-    },
-    "quality_check": {
-      "model": "deepseek",
-      "temperature": 0.3,
-      "maxTokens": 24576,
-      "label": "质检"
     }
   },
   "chapter_function_routing": {

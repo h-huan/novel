@@ -11,8 +11,8 @@ interface CharacterInfo { id: string; name: string; }
 interface RelationData { characterName: string; type: string; description: string; }
 interface ChapterData { id: string; title: string; chapterNumber?: number; content?: string; }
 
-const TYPE_COLORS: Record<string, string> = { enemy: '#e74c3c', ally: '#2ecc71', mentor: '#3498db', neutral: '#95a5a6' };
-const EVENT_COLORS: Record<string, string> = { plot: '#e94560', character: '#3498db', setup: '#f39c12', reveal: '#9b59b6' };
+const TYPE_COLORS: Record<string, string> = { enemy: 'var(--color-danger)', ally: 'var(--color-success)', mentor: 'var(--color-info)', neutral: 'var(--color-text-muted)' };
+const EVENT_COLORS: Record<string, string> = { plot: 'var(--color-accent)', character: 'var(--color-info)', setup: 'var(--color-warning)', reveal: 'var(--color-purple)' };
 
 const VisualizationPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
@@ -167,31 +167,31 @@ const VisualizationPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ padding: '24px', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ color: '#8a8aa0', fontSize: '14px' }}>加载数据中...</span>
+        <span style={{ color: 'var(--color-text-dim)', fontSize: '14px' }}>加载数据中...</span>
       </div>
     );
   }
 
   return (
     <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>
+      <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>
         {activeTab === 'graph' ? '🔗 关系图谱' : '📅 时序线'}
       </h1>
       <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         <button onClick={() => setActiveTab('graph')}
-          style={{ padding: '8px 14px', fontSize: '13px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-            color: activeTab === 'graph' ? '#e94560' : '#8a8aa0', borderBottom: activeTab === 'graph' ? '2px solid #e94560' : '2px solid transparent' }}>
+          style={{ padding: '8px 14px', fontSize: '14px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+            color: activeTab === 'graph' ? 'var(--color-accent)' : 'var(--color-text-dim)', borderBottom: activeTab === 'graph' ? '2px solid var(--color-accent)' : '2px solid transparent' }}>
           🔗 关系图谱</button>
         <button onClick={() => setActiveTab('timeline')}
-          style={{ padding: '8px 14px', fontSize: '13px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-            color: activeTab === 'timeline' ? '#e94560' : '#8a8aa0', borderBottom: activeTab === 'timeline' ? '2px solid #e94560' : '2px solid transparent' }}>
+          style={{ padding: '8px 14px', fontSize: '14px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+            color: activeTab === 'timeline' ? 'var(--color-accent)' : 'var(--color-text-dim)', borderBottom: activeTab === 'timeline' ? '2px solid var(--color-accent)' : '2px solid transparent' }}>
           📅 时序线</button>
       </div>
 
       {activeTab === 'graph' && (
         <div style={{ display: 'flex', gap: '16px', flex: 1 }}>
           {uniqueChars.length === 0 ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c6c80', fontSize: '13px' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: '14px' }}>
               暂无角色数据，请先创建角色和关系
             </div>
           ) : (
@@ -207,20 +207,20 @@ const VisualizationPage: React.FC = () => {
                   if (!pos) return null;
                   return (
                     <g key={name} onClick={() => setSelectedChar(selectedChar === name ? null : name)} style={{ cursor: 'pointer' }}>
-                      <circle cx={pos.x} cy={pos.y} r="22" fill={selectedChar === name ? '#e94560' : '#1a1a2e'} stroke={selectedChar === name ? '#e94560' : '#e94560'} strokeWidth="2" />
-                      <text x={pos.x} y={pos.y + 1} textAnchor="middle" fill="#fff" fontSize="11" fontWeight={600}>{name.charAt(0)}</text>
-                      <text x={pos.x} y={pos.y + 38} textAnchor="middle" fill="#c0c0d0" fontSize="10">{name}</text>
+                      <circle cx={pos.x} cy={pos.y} r="22" fill={selectedChar === name ? 'var(--color-accent)' : 'var(--color-bg-primary)'} stroke={selectedChar === name ? 'var(--color-accent)' : 'var(--color-accent)'} strokeWidth="2" />
+                      <text x={pos.x} y={pos.y + 1} textAnchor="middle" fill="var(--color-white)" fontSize="11" fontWeight={600}>{name.charAt(0)}</text>
+                      <text x={pos.x} y={pos.y + 38} textAnchor="middle" fill="var(--color-text-soft)" fontSize="10">{name}</text>
                     </g>
                   );
                 })}
               </svg>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: '#8a8aa0', marginBottom: '8px' }}>{selectedChar ? `"${selectedChar}" 的关系` : '全部关系 (点击节点筛选)'}</div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-dim)', marginBottom: '8px' }}>{selectedChar ? `"${selectedChar}" 的关系` : '全部关系 (点击节点筛选)'}</div>
                 {filteredRels.map((r, i) => (
                   <div key={i} style={{ padding: '8px 10px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span style={{ color: '#c0c0d0', fontSize: '12px' }}>{r.source}</span>
+                    <span style={{ color: 'var(--color-text-soft)', fontSize: '14px' }}>{r.source}</span>
                     <span style={{ margin: '0 6px', padding: '2px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: `${TYPE_COLORS[r.type]}20`, color: TYPE_COLORS[r.type] }}>{r.label}</span>
-                    <span style={{ color: '#c0c0d0', fontSize: '12px' }}>{r.target}</span>
+                    <span style={{ color: 'var(--color-text-soft)', fontSize: '14px' }}>{r.target}</span>
                   </div>
                 ))}
               </div>
@@ -232,7 +232,7 @@ const VisualizationPage: React.FC = () => {
       {activeTab === 'timeline' && (
         <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
           {events.length === 0 ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c6c80', fontSize: '13px' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: '14px' }}>
               暂无章节数据
             </div>
           ) : (
@@ -240,7 +240,7 @@ const VisualizationPage: React.FC = () => {
               <div style={{ flex: 1, position: 'relative', paddingLeft: '80px' }}>
                 <div style={{ position: 'absolute', left: '70px', top: 0, bottom: 0, width: '2px', backgroundColor: 'rgba(255,255,255,0.1)' }} />
                 {[...new Set(events.map(e => e.chapter))].sort().map(ch => (
-                  <div key={ch} style={{ position: 'absolute', left: '50px', top: `${(ch - 1) * 100 + 20}px`, fontSize: '10px', color: '#6c6c80', fontWeight: 600 }}>第{ch}章</div>
+                  <div key={ch} style={{ position: 'absolute', left: '50px', top: `${(ch - 1) * 100 + 20}px`, fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 600 }}>第{ch}章</div>
                 ))}
                 {events.map((ev, idx) => (
                   <div key={ev.id} onMouseEnter={() => setHoveredEvent(ev.id)} onMouseLeave={() => setHoveredEvent(null)}
@@ -248,23 +248,23 @@ const VisualizationPage: React.FC = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: EVENT_COLORS[ev.type], flexShrink: 0 }} />
                       <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: `${EVENT_COLORS[ev.type]}20`, color: EVENT_COLORS[ev.type] }}>{ev.type}</span>
-                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#eaeaea' }}>{ev.title}</span>
-                      <span style={{ fontSize: '10px', color: '#6c6c80', marginLeft: 'auto' }}>第{ev.chapter}章</span>
+                      <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{ev.title}</span>
+                      <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>第{ev.chapter}章</span>
                     </div>
-                    {hoveredEvent === ev.id && <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#c0c0d0', lineHeight: 1.4 }}>{ev.desc}</p>}
+                    {hoveredEvent === ev.id && <p style={{ margin: '6px 0 0 0', fontSize: '14px', color: 'var(--color-text-soft)', lineHeight: 1.4 }}>{ev.desc}</p>}
                   </div>
                 ))}
               </div>
 
               <div style={{ width: '200px', padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)', height: 'fit-content' }}>
-                <div style={{ fontWeight: 600, color: '#8a8aa0', marginBottom: '8px', textTransform: 'uppercase', fontSize: '10px' }}>🔗 因果链</div>
+                <div style={{ fontWeight: 600, color: 'var(--color-text-dim)', marginBottom: '8px', textTransform: 'uppercase', fontSize: '10px' }}>🔗 因果链</div>
                 {events.map((ev, i) => i < events.length - 1 && (
                   <div key={i} style={{ marginBottom: '4px' }}>
-                    <div style={{ padding: '4px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px', color: '#c0c0d0', fontSize: '10px' }}>
+                    <div style={{ padding: '4px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px', color: 'var(--color-text-soft)', fontSize: '10px' }}>
                       <span style={{ color: EVENT_COLORS[ev.type] }}>{ev.title}</span>
                     </div>
-                    <div style={{ textAlign: 'center', color: '#3a3a50', fontSize: '14px', lineHeight: '1.2' }}>↓</div>
-                    <div style={{ padding: '4px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px', color: '#c0c0d0', fontSize: '10px' }}>
+                    <div style={{ textAlign: 'center', color: 'var(--color-bg-elevated)', fontSize: '14px', lineHeight: '1.2' }}>↓</div>
+                    <div style={{ padding: '4px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px', color: 'var(--color-text-soft)', fontSize: '10px' }}>
                       <span style={{ color: EVENT_COLORS[events[i + 1].type] }}>{events[i + 1].title}</span>
                     </div>
                   </div>

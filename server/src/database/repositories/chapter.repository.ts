@@ -26,6 +26,10 @@ export interface ChapterRow {
   created_at: string;
   updated_at: string;
   locked_at: string | null;
+  // 自动质检可观测状态（053 迁移）：running/ok/failed/NULL
+  auto_quality_status: string | null;
+  auto_quality_message: string | null;
+  auto_quality_at: string | null;
 }
 
 @Injectable()
@@ -53,7 +57,27 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 鎸夊嵎/绔犲簭鍙疯幏鍙?   */
+   * 一次性取项目内「每章最新一条质检报告」的综合分，供章节列表带出（避免 N+1）。
+   * 旧报告在新报告产生时已标 superseded 且 created_at 更早，MAX(created_at) 选中的即当前有效报告。
+   */
+  latestQualityScoreByProject(projectId: string): Map<string, number> {
+    const rows = this.db.prepare(`
+      SELECT r.chapter_id AS cid, r.overall_score AS score
+      FROM writing_quality_reports r
+      WHERE r.project_id = ?
+        AND r.created_at = (
+          SELECT MAX(x.created_at) FROM writing_quality_reports x WHERE x.chapter_id = r.chapter_id
+        )
+    `).all(projectId) as Array<{ cid: string; score: number | null }>;
+    const map = new Map<string, number>();
+    for (const row of rows) {
+      if (row.score != null && Number.isFinite(Number(row.score))) map.set(row.cid, Number(row.score));
+    }
+    return map;
+  }
+
+  /**
+   * 按卷号 / 章序号获取章节。 */
   findByVolumeChapter(projectId: string, volumeIndex: number, chapterIndex: number): ChapterRow | undefined {
     const stmt = this.db.prepare(`
       SELECT * FROM chapters
@@ -63,7 +87,7 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 鑾峰彇鍗峰唴鎵€鏈夌珷鑺?   */
+   * 获取某一卷内的所有章节（按章序号升序）。 */
   findByVolume(projectId: string, volumeIndex: number): ChapterRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM chapters
@@ -125,7 +149,7 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 鎻愪氦瀹℃牳
+   * 提交审核（draft → reviewing）。
    */
   submitForReview(id: string): ChapterRow | undefined {
     const now = new Date().toISOString();
@@ -147,11 +171,11 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 鑾峰彇涓婁竴绔犵殑涓婁笅鏂?(鐢ㄤ簬琛旀帴)
+   * 获取上一章（用于章节衔接）；若当前为本卷第一章，则回退到上一卷末章。
    */
   getPrevChapter(projectId: string, volumeIndex: number, chapterIndex: number): ChapterRow | undefined {
     if (chapterIndex <= 1) {
-      // 妫€鏌ヤ笂涓€鍗?
+      // 当前为本卷第一章：回退查找上一卷的末章
       if (volumeIndex > 1) {
         const stmt = this.db.prepare(`
           SELECT * FROM chapters
@@ -189,5 +213,16 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
       WHERE project_id = ?
     `).get(projectId) as { total: number };
     return result.total;
+  }
+
+  /**
+   * 回写章节自动质检状态（running/ok/failed），让前端与看板能看到质检是否真正跑成。
+   */
+  markAutoQuality(id: string, status: 'running' | 'ok' | 'failed', message: string | null): ChapterRow | undefined {
+    const now = new Date().toISOString();
+    this.db.prepare(
+      'UPDATE chapters SET auto_quality_status = ?, auto_quality_message = ?, auto_quality_at = ?, updated_at = ? WHERE id = ?',
+    ).run(status, message, now, now, id);
+    return this.findById(id);
   }
 }

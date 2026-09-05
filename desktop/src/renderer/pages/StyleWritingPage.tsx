@@ -138,22 +138,22 @@ const StyleWritingPage: React.FC = () => {
 
   return (
     <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>🎨 多风格写作引擎</h1>
+      <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>🎨 多风格写作引擎</h1>
 
       {/* 风格融合模式开关 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', color: '#c0c0d0' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '14px', color: 'var(--color-text-soft)' }}>
           <input type="checkbox" checked={mashupEnabled} onChange={e => { setMashupEnabled(e.target.checked); setSubStyle(null); }}
-            style={{ accentColor: '#e94560' }} />
+            style={{ accentColor: 'var(--color-accent)' }} />
           风格融合模式
         </label>
         {mashupEnabled && (
-          <span style={{ fontSize: '11px', color: '#6c6c80' }}>
+          <span style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
             先点击选择主风格，再点击选择辅风格
           </span>
         )}
         {mashupEnabled && subStyle && (
-          <span style={{ fontSize: '11px', color: '#2ecc71' }}>
+          <span style={{ fontSize: '14px', color: 'var(--color-success)' }}>
             已选择: {currentStyle?.label} + {currentSubStyle?.label}
           </span>
         )}
@@ -169,10 +169,10 @@ const StyleWritingPage: React.FC = () => {
               transition: 'all 0.15s',
             }}>
             <div style={{ fontSize: '24px', marginBottom: '6px' }}>{STYLE_ICONS[s.label] || '✍️'}</div>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: isStyleSelected(s.id) ? '#e94560' : '#eaeaea' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: isStyleSelected(s.id) ? 'var(--color-accent)' : 'var(--color-text-primary)' }}>
               {s.label}{getStyleLabel(s.id)}
             </div>
-            <div style={{ fontSize: '11px', color: '#6c6c80', marginTop: '4px' }}>{STYLE_DESCS[s.label] || '写作风格'}</div>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginTop: '4px' }}>{STYLE_DESCS[s.label] || '写作风格'}</div>
           </button>
         ))}
       </div>
@@ -180,14 +180,14 @@ const StyleWritingPage: React.FC = () => {
       <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
         style={{
           width: '100%', padding: '12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '8px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical',
+          borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical',
           outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '120px',
         }} placeholder="输入要按所选风格润色的已有段落…" />
 
       <button onClick={handleGenerate} disabled={loading}
         style={{
-          padding: '10px 24px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px',
-          color: '#fff', fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+          padding: '10px 24px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px',
+          color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
           fontFamily: 'inherit', width: 'fit-content', opacity: loading ? 0.6 : 1,
         }}>
         {loading ? '润色中...' : `🎨 按${mashupEnabled && subStyle && currentSubStyle ? `${currentStyle?.label}+${currentSubStyle?.label}` : (currentStyle?.label || '默认')}风格润色`}
@@ -196,7 +196,7 @@ const StyleWritingPage: React.FC = () => {
       {output && (
         <div style={{
           padding: '16px', backgroundColor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)',
-          borderRadius: '8px', whiteSpace: 'pre-wrap', fontSize: '13px', color: '#c0c0d0', lineHeight: 1.8, minHeight: '100px',
+          borderRadius: '8px', whiteSpace: 'pre-wrap', fontSize: '14px', color: 'var(--color-text-soft)', lineHeight: 1.8, minHeight: '100px',
         }}>{output}</div>
       )}
     </div>

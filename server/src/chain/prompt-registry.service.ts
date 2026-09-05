@@ -2826,18 +2826,6 @@ export class PromptRegistryService {
       return (str || '').replace(/\s/g, '').length;
     });
 
-    // 平台风格映射
-    Handlebars.registerHelper('platformLabel', (key: string) => {
-      const map: Record<string, string> = {
-        zhihu: '知乎盐选',
-        tomato: '番茄短篇',
-        qidian: '起点脑洞',
-        douyin: '抖音故事',
-        rule_horror: '规则怪谈',
-      };
-      return map[key] || key;
-    });
-
     // 加法
     Handlebars.registerHelper('add', (a: number, b: number) => {
       return a + b;

@@ -27,19 +27,19 @@ const TitleCheckPage: React.FC = () => {
     setLoading(false);
   };
 
-  const riskColor = result?.risk === 'high' || result?.sameName === 'red' ? '#e74c3c' : result?.risk === 'medium' || result?.sameName === 'yellow' ? '#f39c12' : '#2ecc71';
+  const riskColor = result?.risk === 'high' || result?.sameName === 'red' ? 'var(--color-danger)' : result?.risk === 'medium' || result?.sameName === 'yellow' ? 'var(--color-warning)' : 'var(--color-success)';
 
   return (
     <div style={{ padding: '24px', maxWidth: '500px', margin: '0 auto', height: '100%', overflow: 'auto' }}>
-      <h1 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>🏷️ 标题原创性检测</h1>
-      <p style={{ fontSize: '12px', color: '#8a8aa0', marginBottom: '16px' }}>自动检测与知名作品的重名/近似风险</p>
+      <h1 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>🏷️ 标题原创性检测</h1>
+      <p style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginBottom: '16px' }}>自动检测与知名作品的重名/近似风险</p>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
         <input value={title} onChange={e => setTitle(e.target.value)} onKeyDown={e => e.key === 'Enter' && check()}
           placeholder="输入小说标题..."
-          style={{ flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', color: '#eaeaea', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+          style={{ flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
         <button onClick={check} disabled={loading}
-          style={{ padding: '10px 20px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
+          style={{ padding: '10px 20px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
           {loading ? '检查中...' : '检测'}
         </button>
       </div>
@@ -50,17 +50,17 @@ const TitleCheckPage: React.FC = () => {
             {result.sameName === 'green' ? '✅ 安全' : result.sameName === 'yellow' ? '⚠️ 需注意' : '🔴 建议修改'}
           </div>
           <div style={{ padding: '10px', backgroundColor: `${riskColor}10`, borderRadius: '6px', border: `1px solid ${riskColor}30`, marginBottom: '12px' }}>
-            <span style={{ fontSize: '14px', color: '#eaeaea', fontWeight: 600 }}>「{result.title}」</span>
+            <span style={{ fontSize: '14px', color: 'var(--color-text-primary)', fontWeight: 600 }}>「{result.title}」</span>
           </div>
           {result.similar && result.similar.length > 0 && (
             <div style={{ marginBottom: '10px' }}>
-              <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '6px' }}>相似作品：</div>
+              <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginBottom: '6px' }}>相似作品：</div>
               {result.similar.map((s: string, i: number) => (
-                <div key={i} style={{ padding: '6px 10px', backgroundColor: 'rgba(243,156,18,0.06)', borderRadius: '4px', marginBottom: '4px', fontSize: '12px', color: '#f39c12' }}>{s}</div>
+                <div key={i} style={{ padding: '6px 10px', backgroundColor: 'rgba(243,156,18,0.06)', borderRadius: '4px', marginBottom: '4px', fontSize: '14px', color: 'var(--color-warning)' }}>{s}</div>
               ))}
             </div>
           )}
-          <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px', fontSize: '12px', color: '#c0c0d0' }}>{result.suggestion}</div>
+          <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px', fontSize: '14px', color: 'var(--color-text-soft)' }}>{result.suggestion}</div>
         </div>
       )}
     </div>

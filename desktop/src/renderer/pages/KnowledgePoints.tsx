@@ -35,13 +35,13 @@ const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   CATEGORY_OPTIONS.map(o => [o.value, o.label]),
 );
 const CATEGORY_COLOR: Record<string, string> = {
-  missing_scene: '#f39c12',
-  early_termination: '#e67e22',
-  character_conflict: '#e94560',
-  viewpoint_drift: '#9b59b6',
-  hook_missing: '#3498db',
-  writing_tip: '#2ecc71',
-  other: '#8a8aa0',
+  missing_scene: 'var(--color-warning)',
+  early_termination: 'var(--color-warning)',
+  character_conflict: 'var(--color-accent)',
+  viewpoint_drift: 'var(--color-purple)',
+  hook_missing: 'var(--color-info)',
+  writing_tip: 'var(--color-success)',
+  other: 'var(--color-text-dim)',
 };
 
 const KnowledgePoints: React.FC = () => {
@@ -176,21 +176,21 @@ const KnowledgePoints: React.FC = () => {
     iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '—';
 
   return (
-    <div style={{ minHeight: '100vh', background: '#1a1a2e', color: '#eaeaea', padding: '24px 32px' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', padding: '24px 32px' }}>
       <div style={{ maxWidth: 960, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>💡 知识点（写作经验 / 避坑经验）</h1>
+          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>💡 知识点（写作经验 / 避坑经验）</h1>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={load}
               disabled={loading}
-              style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+              style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
             >
               {loading ? '刷新中…' : '刷新'}
             </button>
             <button
               onClick={() => { setAdding(v => !v); setNotice(null); }}
-              style={{ background: '#0d3320', color: '#d1f7c4', border: '1px solid #2ecc71', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontWeight: 600 }}
+              style={{ background: '#0d3320', color: '#d1f7c4', border: '1px solid var(--color-success)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontWeight: 600 }}
             >
               {adding ? '取消新增' : '+ 添加知识点'}
             </button>
@@ -198,33 +198,33 @@ const KnowledgePoints: React.FC = () => {
         </div>
 
         {notice && (
-          <div style={{ background: '#1d2a3a', color: '#bcd9ff', border: '1px solid #3a6ea5', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: '13px' }}>
+          <div style={{ background: 'var(--color-bg-secondary)', color: '#bcd9ff', border: '1px solid var(--color-info)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: '14px' }}>
             {notice}
           </div>
         )}
 
         <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
           {[
-            { label: '知识点总数', value: lessons.length, color: '#eaeaea' },
-            { label: '最高出现频次', value: topOccurrence, color: '#f39c12' },
+            { label: '知识点总数', value: lessons.length, color: 'var(--color-text-primary)' },
+            { label: '最高出现频次', value: topOccurrence, color: 'var(--color-warning)' },
           ].map(s => (
-            <div key={s.label} style={{ background: '#1e1e28', border: '1px solid #2e2e3a', borderRadius: 8, padding: '10px 16px', minWidth: 120 }}>
-              <div style={{ fontSize: '11px', color: '#9a9ab0' }}>{s.label}</div>
+            <div key={s.label} style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 8, padding: '10px 16px', minWidth: 120 }}>
+              <div style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>{s.label}</div>
               <div style={{ fontSize: '22px', fontWeight: 700, color: s.color }}>{s.value}</div>
             </div>
           ))}
         </div>
 
-        {error && <div style={{ color: '#ffd1d8', background: '#3b1418', border: '1px solid #e94560', borderRadius: 6, padding: '10px 12px' }}>{error}</div>}
+        {error && <div style={{ color: '#ffd1d8', background: '#3b1418', border: '1px solid var(--color-accent)', borderRadius: 6, padding: '10px 12px' }}>{error}</div>}
 
         {/* 新增表单 */}
         {adding && (
-          <div style={{ background: '#1e1e28', border: '1px solid #2ecc71', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+          <div style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-success)', borderRadius: 8, padding: 14, marginBottom: 16 }}>
             <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
               <select
                 value={newCategory}
                 onChange={e => setNewCategory(e.target.value)}
-                style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '6px 8px' }}
+                style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '6px 8px' }}
               >
                 {CATEGORY_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
@@ -236,11 +236,11 @@ const KnowledgePoints: React.FC = () => {
               onChange={e => setNewLesson(e.target.value)}
               placeholder="输入一条经验，例如：正文最后一个场景必须落在结尾钩子场景上收尾，不得提前终止于用餐/通勤等中间事件。"
               rows={3}
-              style={{ width: '100%', background: '#15151c', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 14 }}
+              style={{ width: '100%', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 14 }}
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
-              <button onClick={() => setAdding(false)} style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>取消</button>
-              <button onClick={handleAdd} style={{ background: '#0d3320', color: '#d1f7c4', border: '1px solid #2ecc71', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontWeight: 600 }}>保存</button>
+              <button onClick={() => setAdding(false)} style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>取消</button>
+              <button onClick={handleAdd} style={{ background: '#0d3320', color: '#d1f7c4', border: '1px solid var(--color-success)', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontWeight: 600 }}>保存</button>
             </div>
           </div>
         )}
@@ -260,17 +260,17 @@ const KnowledgePoints: React.FC = () => {
           {lessons.map((row, idx) => {
             const isEditing = editingId === row.id;
             return (
-              <div key={row.id} style={{ background: '#1e1e28', border: '1px solid #2e2e3a', borderRadius: 8, padding: 14 }}>
+              <div key={row.id} style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 8, padding: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
-                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 10, color: '#15151c', background: CATEGORY_COLOR[row.category] || '#8a8aa0', fontWeight: 600 }}>
+                  <span style={{ fontSize: '14px', color: 'var(--color-text-muted)', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
+                  <span style={{ fontSize: '14px', padding: '2px 8px', borderRadius: 10, color: 'var(--color-bg-primary)', background: CATEGORY_COLOR[row.category] || 'var(--color-text-dim)', fontWeight: 600 }}>
                     {CATEGORY_LABEL[row.category] || row.category}
                   </span>
-                  <span style={{ fontSize: '11px', color: '#9a9ab0' }}>出现 {row.occurrence} 次</span>
+                  <span style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>出现 {row.occurrence} 次</span>
                   {!isEditing && (
                     <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-                      <button onClick={() => startEdit(row)} style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 14 }}>编辑</button>
-                      <button onClick={() => handleDelete(row.id)} style={{ background: '#3b1418', color: '#ffd1d8', border: '1px solid #e94560', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 14 }}>删除</button>
+                      <button onClick={() => startEdit(row)} style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 14 }}>编辑</button>
+                      <button onClick={() => handleDelete(row.id)} style={{ background: '#3b1418', color: '#ffd1d8', border: '1px solid var(--color-accent)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 14 }}>删除</button>
                     </div>
                   )}
                 </div>
@@ -280,7 +280,7 @@ const KnowledgePoints: React.FC = () => {
                     <select
                       value={editCategory}
                       onChange={e => setEditCategory(e.target.value)}
-                      style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '6px 8px', marginBottom: 8 }}
+                      style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '6px 8px', marginBottom: 8 }}
                     >
                       {CATEGORY_OPTIONS.map(o => (
                         <option key={o.value} value={o.value}>{o.label}</option>
@@ -290,17 +290,17 @@ const KnowledgePoints: React.FC = () => {
                       value={editLesson}
                       onChange={e => setEditLesson(e.target.value)}
                       rows={3}
-                      style={{ width: '100%', background: '#15151c', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 14 }}
+                      style={{ width: '100%', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: 10, resize: 'vertical', fontSize: 14 }}
                     />
                     <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }}>
-                      <button onClick={cancelEdit} style={{ background: '#2a2a36', color: '#eaeaea', border: '1px solid #3a3a48', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>取消</button>
-                      <button onClick={() => handleSaveEdit(row.id)} style={{ background: '#0d3320', color: '#d1f7c4', border: '1px solid #2ecc71', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontWeight: 600 }}>保存</button>
+                      <button onClick={cancelEdit} style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-primary)', border: '1px solid var(--color-bg-elevated)', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>取消</button>
+                      <button onClick={() => handleSaveEdit(row.id)} style={{ background: '#0d3320', color: '#d1f7c4', border: '1px solid var(--color-success)', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontWeight: 600 }}>保存</button>
                     </div>
                   </>
                 ) : (
                   <>
-                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: '#eaeaea', whiteSpace: 'pre-wrap' }}>{row.lesson}</p>
-                    <div style={{ marginTop: 8, fontSize: 14, color: '#7a7a90' }}>
+                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: 'var(--color-text-primary)', whiteSpace: 'pre-wrap' }}>{row.lesson}</p>
+                    <div style={{ marginTop: 8, fontSize: 14, color: 'var(--color-text-dim)' }}>
                       最近更新：{fmt(row.updated_at)}
                       {row.last_chapter_index != null ? ` · 最近关联章节 ${row.last_chapter_index}` : ''}
                     </div>

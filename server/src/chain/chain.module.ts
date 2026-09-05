@@ -6,10 +6,8 @@
  * - Prompt 模板仓库（短篇三步骤全套模板；天龙8步已于 2026-07-24 取消，正文改由 /chain/generate 单次 LLM 严格按大纲生成）
  * - QualityGate 质量门（CRITICAL/WARNING/INFO 三级）
  * - 短篇三步骤 Chain 服务（题材→大纲→正文）
- * - WritingMode 写作模式切换（全自动/半自动/自由模式）
  * - RealLLM 服务（真实 LLM API 调用）
  * - ChainController (REST API /chain/*)
- * - NovelStrategyService（平台+题材+风格+章节职责的动态网文策略）
  *
  * ⚠️ MockLLMService 已移除 — 研发中禁用模拟数据，必须接入真实 LLM
  */
@@ -19,16 +17,10 @@ import { ChainTemplateService } from './chain-template.service';
 import { ChainEngineService } from './chain-engine.service';
 import { PromptRegistryService } from './prompt-registry.service';
 import { QualityGateService } from './quality-gate.service';
-import { StoryChainService } from './story-chain.service';
 import { RealLLMService } from './real-llm.service';
-import { WritingModeService } from './writing-mode.service';
 import { NewsRssService } from './news-rss.service';
-import { StyleTemplateService } from './style-template.service';
-import { MultiModelService } from './multi-model.service';
-import { SeedEnrichChainService } from './seed-enrich-chain.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
 import { ChainController } from './chain.controller';
-import { NovelStrategyService } from './novel-strategy.service';
 import { StateModule } from '../state/state.module';
 import { StateManagementModule } from '../state/state-management.module';
 import { FileStorageModule } from '../modules/file-storage/file-storage.module';
@@ -41,7 +33,8 @@ import { OrganizationModule } from '../modules/organization/organization.module'
 import { MapPointModule } from '../modules/map-point/map-point.module';
 import { WorkflowGuardModule } from '../modules/workflow-guard/workflow-guard.module';
 import { WebSocketModule } from '../modules/websocket/websocket.module';
-import { QualityInspectionService } from '../modules/refinement/quality-inspection.service';
+import { GenerationMetricsModule } from '../modules/generation-metrics/generation-metrics.module';
+import { OriginalityModule } from '../modules/originality/originality.module';
 
 @Module({
   imports: [
@@ -56,6 +49,8 @@ import { QualityInspectionService } from '../modules/refinement/quality-inspecti
     MapPointModule,
     forwardRef(() => WorkflowGuardModule),
     WebSocketModule,
+    GenerationMetricsModule,
+    OriginalityModule,
   ],
   controllers: [ChainController],
   providers: [
@@ -63,27 +58,16 @@ import { QualityInspectionService } from '../modules/refinement/quality-inspecti
     ChainTemplateService,
     PromptRegistryService,
     QualityGateService,
-    StoryChainService,
     RealLLMService,
-    WritingModeService,
     NewsRssService,
-    StyleTemplateService,
-    MultiModelService,
-    SeedEnrichChainService,
     GenerationRecoveryService,
-    QualityInspectionService,
-    NovelStrategyService,
   ],
   exports: [
     ChainEngineService,
     PromptRegistryService,
     QualityGateService,
-    StoryChainService,
     RealLLMService,
-    WritingModeService,
-    SeedEnrichChainService,
     GenerationRecoveryService,
-    NovelStrategyService,
   ],
 })
 export class ChainModule {}

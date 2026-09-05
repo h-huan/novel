@@ -74,31 +74,6 @@ export class FileStorageService implements OnModuleInit {
   }
 
   /**
-   * 同步世界观到可读 Markdown 文件
-   */
-  syncWorldBuilding(projectId: string, data: Record<string, any>): string {
-    const content = `# 世界观设定\n\n> 自动生成于 ${new Date().toISOString()}\n\n---\n\n${Object.entries(data).map(([category, items]) => {
-      const arr = Array.isArray(items) ? items : [items];
-      return `## ${category}\n\n${arr.map((item: any) => `### ${item.name || item.title || '未命名'}\n${item.description || item.desc || ''}\n${item.detail ? `- 详情: ${item.detail}\n` : ''}${item.leader ? `- 领袖: ${item.leader}\n` : ''}`).join('\n')}`;
-    }).join('\n\n')}`;
-
-    const filePath = path.join(this.getProjectDir(projectId), 'world-building.md');
-    fs.writeFileSync(filePath, content, 'utf-8');
-    return filePath;
-  }
-
-  /**
-   * 同步角色卡到可读 Markdown 文件
-   */
-  syncCharacters(projectId: string, characters: any[]): string {
-    const content = `# 角色设定\n\n> 自动生成于 ${new Date().toISOString()}\n\n---\n\n${characters.map(c => `## ${c.name || '未命名角色'}\n\n- 身份: ${c.identity || '未知'}\n- 年龄: ${c.age || '未知'}\n- 性别: ${c.gender || '未知'}\n- 外貌: ${c.appearance || '未知'}\n- 背景: ${c.background || '未知'}\n\n### 五维图谱\n- 战力: ${c.personality?.combat || 0}/100\n- 智力: ${c.personality?.intelligence || 0}/100\n- 领导: ${c.personality?.leadership || 0}/100\n- 魅力: ${c.personality?.charisma || 0}/100\n- 意志: ${c.personality?.willpower || 0}/100\n\n### 人际关系\n${(c.relationships || []).map((r: any) => `- ${r.name || '未知'}（${r.type || '未知'}）: ${r.description || ''}`).join('\n')}\n\n### 弧光\n- 起点: ${c.arc?.from || '无'}\n- 终点: ${c.arc?.to || '无'}\n- 描述: ${c.arc?.description || '无'}\n`).join('\n---\n')}`;
-
-    const filePath = path.join(this.getProjectDir(projectId), 'characters.md');
-    fs.writeFileSync(filePath, content, 'utf-8');
-    return filePath;
-  }
-
-  /**
    * 生成章节文件路径
    */
   getChapterFilePath(projectId: string, volumeIndex: number, chapterIndex: number): string {

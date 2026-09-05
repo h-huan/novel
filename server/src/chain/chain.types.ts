@@ -108,6 +108,21 @@ export interface LLMRequest {
    * 永远不切模型、不降级。
    */
   maxEmptyRetries?: number;
+  /**
+   * 埋点上下文（业务步骤语义，可选）。由调用方透传，用于全链路步骤遥测：
+   * 哪个业务步骤、第几轮（0=首版）、目标/上一版字数，供首页透明展示与首版自优化。
+   * 不传时按 scenario 自动归类，仍会被埋点覆盖。
+   */
+  metrics?: {
+    projectId?: string | null;
+    chapterIndex?: number | null;
+    stepKey?: string | null;
+    attempt?: number;
+    targetWords?: number | null;
+    prevWords?: number | null;
+  };
+  /** 是否注入"当前功能模块标准"（默认注入；标准归纳等元任务显式关闭以防递归污染） */
+  injectStandard?: boolean;
 }
 
 /** LLM 调用响应 */

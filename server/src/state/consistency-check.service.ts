@@ -157,7 +157,7 @@ ${characterContent.substring(0, 500)}
 以JSON格式输出：{"confirmed": boolean, "reason": string}`;
             const confirmResponse = await this.realLLM.generate({
               prompt: confirmPrompt,
-              scenario: 'quality_check',
+              scenario: 'daily',
               temperature: 0.1,
               maxTokens: 200,
             });

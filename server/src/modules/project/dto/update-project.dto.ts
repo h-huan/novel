@@ -33,7 +33,7 @@ export class UpdateProjectDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['zhihu', 'fanqie', 'qidian', 'douyin', 'xiaohongshu', 'custom', 'generic', 'rules_horror', 'jinjiang'])
+  @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
   platformStyle?: string;
 
   @IsOptional()
@@ -49,7 +49,7 @@ export class UpdateProjectDto {
   creationSource?: CreationSource;
 
   @IsOptional()
-  @IsIn(['zhihu', 'fanqie', 'qidian', 'douyin', 'xiaohongshu', 'custom', 'generic'])
+  @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
   targetPlatform?: TargetPlatform;
 
   @IsOptional()

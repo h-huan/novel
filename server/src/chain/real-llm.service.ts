@@ -1,8 +1,11 @@
+import { currentCreationProjectId, expectsProjectId } from '../common/creation-context';
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI, { type ClientOptions } from 'openai';
 import { ILLMService } from './llm.interface';
 import { LLMRequest, LLMResponse } from './chain.types';
 import { ModelRouterService } from '../routing/model-router.service';
+import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import * as net from 'net';
 
 type RuntimeModel = {
@@ -23,6 +26,7 @@ export class RealLLMService implements ILLMService {
 
   constructor(
     private readonly modelRouter: ModelRouterService,
+    private readonly metrics: GenerationMetricsService,
   ) {}
 
   // ==================== 网络健壮性增强 ====================
@@ -184,11 +188,21 @@ export class RealLLMService implements ILLMService {
     void this.probeConnectivity();
   }
 
+  /**
+   * 检查指定场景的模型是否已配置。配置什么模型就用什么模型；
+   * 场景未配置时用日常模型兜底；日常模型也未配置时抛出明确错误，绝不静默降级。
+   * 在创建项目等关键操作前调用，提前提醒用户配置，而不是生成到一半才失败。
+   */
+  assertScenarioModelConfigured(scenario: string): { modelName: string; modelVersion: string } {
+    const routed = this.modelRouter.getModelForScenario(scenario || 'daily');
+    return { modelName: routed.modelName, modelVersion: routed.modelVersion };
+  }
+
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const startTime = Date.now();
-    const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'default');
+    const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'daily');
     if (!Number.isInteger(configuredMaxTokens) || configuredMaxTokens <= 0) {
-      throw new Error(`模型输出配置无效: scenario=${request.scenario || 'default'} maxTokens=${String(request.maxTokens)}`);
+      throw new Error(`模型输出配置无效: scenario=${request.scenario || 'daily'} maxTokens=${String(request.maxTokens)}`);
     }
 
     const routedModel = this.modelRouter.getModelForScenario(
@@ -204,7 +218,7 @@ export class RealLLMService implements ILLMService {
     const modelName = routedModel.modelName;
 
     this.logger.log(
-      `[RealLLM] calling model: ${modelName} (version: ${routedModel.modelVersion}), scenario: ${request.scenario || 'default'}`,
+      `[RealLLM] calling model: ${modelName} (version: ${routedModel.modelVersion}), scenario: ${request.scenario || 'daily'}`,
     );
 
     const callTimeout = request.timeout ?? 600_000; // 默认10分钟
@@ -223,7 +237,7 @@ export class RealLLMService implements ILLMService {
           () =>
             reject(
               new Error(
-                `LLM 主调用超时 (${ms / 1000}s): model=${modelName}, scenario=${request.scenario || 'default'}`,
+                `LLM 主调用超时 (${ms / 1000}s): model=${modelName}, scenario=${request.scenario || 'daily'}`,
               ),
             ),
           ms,
@@ -242,9 +256,31 @@ export class RealLLMService implements ILLMService {
     // 调用方可显式传 maxEmptyRetries 提高关键验收器的重试次数。
     const maxEmptyRetries = request.maxEmptyRetries ?? 2;
     let lastEmptyError: Error | null = null;
+    // 结构化输出被 finish_reason=length 截断时的"同模型扩容"状态：模型与 json_object 模式都不变（非降级），
+    // 只把输出上限翻倍后用同一 prompt 重试。硬顶与现有最大场景配置(writing=32768)对齐，不申请未验证的更大值。
+    const STRUCTURED_EXPAND_CEILING = 32768;
+    let currentMaxTokens = configuredMaxTokens;
     // 温度优先级：调用方显式传入的 temperature > 路由配置的 temperature
     // 这样既保持了route-config的统一管理，又允许关键场景（如高潮章节）动态调整温度
     const baseTemperature = request.temperature !== undefined ? request.temperature : routedModel.temperature;
+    let internalRetries = 0;
+    // 保证一次物理调用只落一条遥测：主循环内已 emit 的业务失败（空/截断）throw 后会被外层 catch 接住，
+    // 外层最终出口据此跳过，避免同一次失败重复记 truncated + failed 两条。
+    let metricEmitted = false;
+    const emit = (
+      status: 'success' | 'empty' | 'truncated' | 'network_error' | 'failed',
+      extra?: { resp?: LLMResponse; reason?: string },
+    ) => {
+      metricEmitted = true;
+      this.recordStepMetric(request, modelName, status, Date.now() - startTime, internalRetries, extra);
+    };
+    // 统一注入"当前生效功能模块标准 + 原创横切标准"（由 ModuleStandardsService 归纳维护，与具体模型版本解耦）；
+    // 标准自身归纳等元任务以 injectStandard=false 关闭，避免递归污染。
+    const standardDirective = request.injectStandard === false
+      ? ''
+      : standardDirectiveCache.get(request.scenario || 'daily');
+    const effectiveSystemPrompt = [request.systemPrompt, standardDirective]
+      .filter(s => typeof s === 'string' && s.trim()).join('\n\n');
     try {
       for (let attempt = 0; attempt <= maxEmptyRetries; attempt++) {
         // 空内容重试时给一个小幅温度抖动（封顶 0.5），尽量避开上游瞬时空内容 bug，
@@ -256,9 +292,9 @@ export class RealLLMService implements ILLMService {
           this.callModel(
             modelName,
             request.prompt,
-            request.systemPrompt,
+            effectiveSystemPrompt,
             jitterTemp,
-            configuredMaxTokens,
+            currentMaxTokens,
             callTimeout,
             request.responseFormat,
             reasoningEffort,
@@ -270,19 +306,35 @@ export class RealLLMService implements ILLMService {
         // 正文生成因此被误报"未返回可验收内容"而整章失败。结构化仍额外校验输出被截断。
         if (!result.content.trim()) {
           lastEmptyError = new Error(
-            `模型返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'default'}`,
+            `模型返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'daily'}`,
           );
           this.logger.warn(lastEmptyError.message);
+          internalRetries++;
           continue;
         }
         if (request.responseFormat === 'json_object' && result.finishReason === 'length') {
+          // 关键修复：截断根因是输出配额不足，用相同 maxTokens 重试必然再次截断。
+          // 在模型输出上限内把 maxTokens 翻倍，用【同一模型/同一 prompt/同一 json 模式】重试（不换模型、不去 json，非降级）。
+          const expanded = Math.min(STRUCTURED_EXPAND_CEILING, Math.floor(currentMaxTokens * 2));
+          if (expanded > currentMaxTokens && attempt < maxEmptyRetries) {
+            this.logger.warn(
+              `结构化输出被长度截断，同模型扩容输出上限重试（不换模型/非降级）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens ${currentMaxTokens}→${expanded}`,
+            );
+            currentMaxTokens = expanded;
+            internalRetries++;
+            continue;
+          }
+          emit('truncated', { reason: '结构化输出被长度截断，扩容后仍不足' });
           throw new Error(
-            `结构化生成因输出长度被截断: model=${modelName}, scenario=${request.scenario || 'default'}, maxTokens=${configuredMaxTokens}`,
+            `结构化生成因输出长度被截断（已扩容至 ${currentMaxTokens} 仍不足，请减小单次结构化批量）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
           );
         }
 
-        return this.toResponse(result, modelName, request, startTime);
+        const __resp = this.toResponse(result, modelName, request, startTime);
+        emit('success', { resp: __resp });
+        return __resp;
       }
+      emit('empty', { reason: lastEmptyError?.message || '模型多次返回空内容' });
       throw lastEmptyError!;
     } catch (err: any) {
       const msg = err?.message || String(err);
@@ -297,14 +349,16 @@ export class RealLLMService implements ILLMService {
         const delays = [1500, 3000, 5000, 8000, 12000]; // 累计 ~30s
         for (let netRetry = 0; netRetry < delays.length; netRetry++) {
           await new Promise(r => setTimeout(r, delays[netRetry]));
-          this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'default'}`);
+          this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'daily'}`);
           try {
             const result = await withTimeout(
-              this.callModel(modelName, request.prompt, request.systemPrompt, routedModel.temperature, configuredMaxTokens, callTimeout, request.responseFormat, reasoningEffort),
+              this.callModel(modelName, request.prompt, effectiveSystemPrompt, routedModel.temperature, configuredMaxTokens, callTimeout, request.responseFormat, reasoningEffort),
               callTimeout,
             );
-            this.logger.log(`[RealLLM] 网络重试 ${netRetry + 1} 成功：model=${modelName}, scenario=${request.scenario || 'default'}`);
-            return this.toResponse(result, modelName, request, startTime);
+            this.logger.log(`[RealLLM] 网络重试 ${netRetry + 1} 成功：model=${modelName}, scenario=${request.scenario || 'daily'}`);
+            const __respNet = this.toResponse(result, modelName, request, startTime);
+            emit('success', { resp: __respNet });
+            return __respNet;
           } catch (innerErr: any) {
             const innerMsg = innerErr?.message || String(innerErr);
             // 若新错误不再是网络错误，立即停止重试（复用同一判定逻辑）
@@ -313,14 +367,66 @@ export class RealLLMService implements ILLMService {
               || innerMsg.includes('aborted') || innerMsg.includes('ENETUNREACH') || innerMsg.includes('EAI_AGAIN')
               || innerMsg.includes('fetch failed') || innerMsg.includes('UND_ERR_SOCKET') || innerMsg.includes('other side closed')
               || innerMsg.includes('Connection error');
-            if (!stillNetwork) throw innerErr;
+            if (!stillNetwork) {
+              emit('failed', { reason: innerMsg });
+              throw innerErr;
+            }
+            internalRetries++;
           }
         }
       }
+      const isNetFinal = msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('socket hang up');
       this.logger.warn(
-        `[RealLLM] model ${modelName} failed (${request.scenario || 'default'}); configured-model-only mode is enabled: ${msg}`,
+        `[RealLLM] model ${modelName} failed (${request.scenario || 'daily'}); configured-model-only mode is enabled: ${msg}`,
       );
+      if (!metricEmitted) emit(isNetFinal ? 'network_error' : 'failed', { reason: msg });
       throw err;
+    }
+  }
+
+  /**
+   * 统一步骤埋点：每次物理 LLM 调用结束（成功/空/截断/网络错误/失败）记录一条，全容错，绝不影响生成主流程。
+   */
+  private recordStepMetric(
+    request: LLMRequest,
+    modelName: string,
+    status: 'success' | 'empty' | 'truncated' | 'network_error' | 'failed',
+    durationMs: number,
+    internalRetries: number,
+    extra?: { resp?: LLMResponse; reason?: string },
+  ): void {
+    try {
+      const ctx = request.metrics;
+      const finalProjectId = ctx?.projectId ?? currentCreationProjectId();
+      if (!finalProjectId && expectsProjectId(request.scenario, ctx?.stepKey)) {
+        this.logger.warn(`[埋点] 项目内场景 ${request.scenario || ctx?.stepKey || 'daily'} 缺少 projectId（未处于项目请求上下文、metrics 也未显式传入），该条只计入平台级、不计入任何单本书`);
+      }
+      const outputText = extra?.resp?.content;
+      const outputWords = GenerationMetricsService.countWords(outputText);
+      const target = ctx?.targetWords ?? null;
+      this.metrics.record({
+        projectId: finalProjectId,
+        chapterIndex: ctx?.chapterIndex ?? null,
+        stepKey: ctx?.stepKey ?? null,
+        scenario: request.scenario || 'daily',
+        modelVersion: modelName,
+        attempt: ctx?.attempt ?? 0,
+        phase: (ctx?.attempt ?? 0) === 0 ? 'first' : 'retry',
+        status,
+        failReason: extra?.reason ?? null,
+        durationMs,
+        promptChars: request.prompt?.length ?? 0,
+        outputText,
+        outputWords,
+        targetWords: target,
+        deficitWords: target ? Math.max(0, target - outputWords) : null,
+        promptTokens: extra?.resp?.usage?.promptTokens ?? null,
+        completionTokens: extra?.resp?.usage?.completionTokens ?? null,
+        totalTokens: extra?.resp?.usage?.totalTokens ?? null,
+        internalRetries,
+      });
+    } catch {
+      /* 埋点永不影响生成 */
     }
   }
 
@@ -329,9 +435,9 @@ export class RealLLMService implements ILLMService {
    * 用于 SSE 场景，避免长文本生成超时
    */
   async *generateStream(request: LLMRequest): AsyncGenerator<string> {
-    const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'default');
+    const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'daily');
     if (!Number.isInteger(configuredMaxTokens) || configuredMaxTokens <= 0) {
-      throw new Error(`模型输出配置无效: scenario=${request.scenario || 'default'} maxTokens=${String(request.maxTokens)}`);
+      throw new Error(`模型输出配置无效: scenario=${request.scenario || 'daily'} maxTokens=${String(request.maxTokens)}`);
     }
     const routedModel = this.modelRouter.getModelForScenario(
       request.scenario || 'daily',
@@ -800,15 +906,6 @@ export class RealLLMService implements ILLMService {
   private resolveRuntimeModel(modelName: string): RuntimeModel {
     const normalized = modelName.toLowerCase();
     const aliases: Record<string, RuntimeModel> = {
-      deepseek: this.createRuntimeModel('deepseek', 'deepseek-chat'),
-      'deepseek-v4-pro': this.createRuntimeModel(
-        'deepseek',
-        'deepseek-chat',
-      ),
-      'deepseek-v4-flash': this.createRuntimeModel(
-        'deepseek',
-        'deepseek-v4-flash',  // 代理服务常用模型名，保持原样不硬编码
-      ),
       gpt4o: this.createRuntimeModel('openai', 'gpt-4o'),
       'gpt-4o': this.createRuntimeModel('openai', 'gpt-4o'),
       openai: this.createRuntimeModel('openai', 'gpt-4o'),
@@ -826,12 +923,22 @@ export class RealLLMService implements ILLMService {
       return aliases[normalized];
     }
 
+    // DeepSeek 任意具体版本（deepseek-v4-flash / deepseek-v4-pro / 代理侧其它 deepseek-* 名称）
+    // 一律原样透传：配置/场景里是什么模型名，就向接口发什么名，绝不改写成任何固定默认版本，也不逐个硬编码。
+    if (normalized.startsWith('deepseek-')) {
+      return this.createRuntimeModel('deepseek', modelName);
+    }
+    // 只给了笼统提供商名 deepseek、没有具体版本：明确报错要求选择具体版本，绝不替用户默认。
+    if (normalized === 'deepseek') {
+      throw new Error(
+        '模型只填了提供商名 "deepseek"、缺少具体版本（如 deepseek-v4-flash / deepseek-v4-pro）。' +
+        '请到「设置 → 模型配置」选择具体模型版本，系统不会替你默认成任何其它版本。',
+      );
+    }
+
     const modelInfo = this.modelRouter.getModelInfo(modelName);
     if (modelInfo?.provider) {
-      return this.createRuntimeModel(
-        modelInfo.provider,
-        this.modelRouter.resolveModelVersion(modelName),
-      );
+      return this.createRuntimeModel(modelInfo.provider, modelName);
     }
 
     if (normalized.startsWith('claude-')) {

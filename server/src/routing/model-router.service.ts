@@ -109,10 +109,9 @@ const SCENARIO_ALIASES: Record<string, string> = {
   enhance_opening: 'polish',
   enhance_reversal: 'polish',
   adapt_platform: 'polish',
-  quality_check: 'quality_check',
   quality_refine: 'polish',
-  character_review: 'quality_check',
-  review: 'quality_check',
+  character_review: 'daily',
+  review: 'daily',
 };
 
 /** 写作模式标签（模式本身只影响温度/成本说明，绝不改变"设置里配置的模型"） */
@@ -346,18 +345,22 @@ export class ModelRouterService implements OnModuleInit {
     // 才回退到下方按场景的正常路由（默认写作模型）。绝不跳到未配置的虚假模型。
     if (!scenario || scenario === 'default' || scenario === 'daily') {
       const dailyModel = this.customScenes[`daily:${this.currentMode}`] || this.customScenes.daily;
-      if (dailyModel) {
-        const dailyVersion = this.resolveModelVersion(dailyModel);
-        const dailyInfo = this.config.models[dailyModel];
-        this.logger.debug(`[日常模型] 未指定场景 → ${dailyVersion}`);
-        return {
-          modelName: dailyVersion,
-          modelVersion: dailyVersion,
-          temperature: this.config.scenarios.writing?.temperature ?? this.config.defaults.temperature,
-          tier: dailyInfo?.tier || 'low',
-          role: options?.role || 'writer',
-        };
+      if (!dailyModel) {
+        throw new Error(
+          `未配置日常模型（场景: daily, 模式: ${this.currentMode}）。` +
+          `请在「设置 → 模型配置」中为日常场景选择模型后再使用。` +
+          `日常模型是所有未单独配置场景的兜底，必须先配置。`
+        );
       }
+      const dailyVersion = dailyModel; // 配置什么版本就原样用什么名称，不做版本映射/别名
+      this.logger.debug(`[日常模型] 未指定场景 → ${dailyVersion}`);
+      return {
+        modelName: dailyVersion,
+        modelVersion: dailyVersion,
+        temperature: this.config.scenarios.writing?.temperature ?? this.config.defaults.temperature,
+        tier: 'low',
+        role: options?.role || 'writer',
+      };
     }
 
     const routeScenario = SCENARIO_ALIASES[scenario] || 'writing';
@@ -396,56 +399,47 @@ export class ModelRouterService implements OnModuleInit {
       }
     }
 
-    const modelInfo = this.config.models[targetModel];
+    // 【模型选择规则 · 严格按配置，不降级】
+    // 1. 指定场景优先用该场景的自定义模型（customScenes）
+    // 2. 场景未配置时，用日常模型（符合文档：不确定和常规场景使用日常场景配置）
+    // 3. 日常模型也未配置时，明确报错提醒用户配置，绝不静默降级到 route-config 默认模型
+    // 配置什么模型就用什么模型，这是不同场景 tab 存在的意义。
+    const dailyModel = this.customScenes[`daily:${this.currentMode}`] || this.customScenes.daily;
 
     // 自定义场景模型：不管当前模式是什么，有自定义分配就优先使用
-    // customScenes 使用扁平格式 { "场景:模式": "模型id" }，需按当前模式匹配
     const customKey = `${routeScenario}:${this.currentMode}`;
-    if (this.customScenes[customKey]) {
-      const customModel = this.customScenes[customKey];
-      const customVersion = this.resolveModelVersion(customModel);
-      this.logger.debug(`[自定义] ${scenario}(${this.currentMode}) → ${customVersion}`);
+    const customModel = this.customScenes[customKey] || this.customScenes[routeScenario];
+    if (customModel) {
+      const customVersion = customModel; // 配置什么版本就原样用什么名称，不做版本映射/别名
+      this.logger.debug(`[场景自定义] ${scenario}(${this.currentMode}) → ${customVersion}`);
       return {
         modelName: customVersion,
         modelVersion: customVersion,
         temperature,
-        tier: modelInfo?.tier || 'low',
+        tier: 'low',
         role: options?.role || 'writer',
       };
     }
-    // 向后兼容：旧格式只存了场景名 → 模型（无模式后缀）
-    if (this.customScenes[routeScenario]) {
-      const customModel = this.customScenes[routeScenario];
-      const customVersion = this.resolveModelVersion(customModel);
-      this.logger.debug(`[自定义·旧格式] ${scenario} → ${customVersion}`);
+
+    // 场景未配置：用日常模型兜底（文档规定：不确定和常规场景使用日常场景配置）
+    if (dailyModel) {
+      const dailyVersion = dailyModel; // 配置什么版本就原样用什么名称，不做版本映射/别名
+      this.logger.debug(`[场景未配置·用日常模型] ${scenario}(${this.currentMode}) → ${dailyVersion}`);
       return {
-        modelName: customVersion,
-        modelVersion: customVersion,
+        modelName: dailyVersion,
+        modelVersion: dailyVersion,
         temperature,
-        tier: modelInfo?.tier || 'low',
+        tier: 'low',
         role: options?.role || 'writer',
       };
     }
 
-    // 注：不再按写作模式硬编码模型版本（旧 WRITING_MODE_PROFILES 会把所有
-    // 模型偷偷替换成 deepseek-chat，违背"遵守设置内配置的模型"）。模型版本
-    // 一律由 resolveModelVersion(targetModel) 从路由配置中解析，确保调用的是
-    // 作者在设置里实际选定的模型。
-    //
-    // 重要：对于已显式配置场景模型（如 quality_check → deepseek）的场景，
-    // 严格按 route-config 的 scenarios[场景].model 执行，绝不套用"日常模型"覆盖。
-    // "日常模型"仅在调用方未指定场景（scenario 为空 / 'default' / 'daily'）时
-    // 通过上方 early-return 生效，不得二次劫持已配置的场景模型。
-
-    const finalInfo = this.config.models[targetModel];
-    const defaultVersion = this.resolveModelVersion(targetModel);
-    return {
-      modelName: defaultVersion,
-      modelVersion: defaultVersion,
-      temperature,
-      tier: finalInfo?.tier || 'low',
-      role: options?.role || 'writer',
-    };
+    // 日常模型也未配置：明确报错，绝不降级到 route-config 默认模型
+    throw new Error(
+      `场景「${scenario}」未配置模型，且日常模型也未配置（模式: ${this.currentMode}）。` +
+      `请在「设置 → 模型配置」中为该场景或日常场景选择模型后再使用。` +
+      `配置什么模型就用什么模型，未配置不自动降级——这是不同场景 tab 存在的意义。`
+    );
   }
 
   /**
@@ -710,20 +704,6 @@ export class ModelRouterService implements OnModuleInit {
    */
   isLowTier(modelName: string): boolean {
     return this.config.models[modelName]?.tier === 'low';
-  }
-
-  /**
-   * 获取默认模型
-   */
-  private getDefaultModel(): RoutedModel {
-    const defaultVersion = this.resolveModelVersion('deepseek');
-    return {
-      modelName: defaultVersion,
-      modelVersion: defaultVersion,
-      temperature: this.config.defaults.temperature,
-      tier: 'low',
-      role: 'writer',
-    };
   }
 
   /**

@@ -55,7 +55,7 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ open, onClose }) => {
     }} onClick={onClose}>
       <div style={{
         width: '420px', maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto',
-        backgroundColor: '#1a1a2e', borderRadius: '12px',
+        backgroundColor: 'var(--color-bg-primary)', borderRadius: '12px',
         border: '1px solid rgba(255,255,255,0.08)',
         boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
       }} onClick={e => e.stopPropagation()}>
@@ -64,11 +64,11 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ open, onClose }) => {
           padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <h2 style={{ fontSize: '15px', fontWeight: 700, color: '#eaeaea', margin: 0 }}>
+          <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
             快捷参考
           </h2>
           <button onClick={onClose} style={{
-            background: 'none', border: 'none', color: '#6c6c80',
+            background: 'none', border: 'none', color: 'var(--color-text-muted)',
             cursor: 'pointer', fontSize: '16px', padding: '4px',
           }}>
             ✕
@@ -80,7 +80,7 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ open, onClose }) => {
           {SECTIONS.map((section, si) => (
             <div key={si} style={{ marginBottom: '14px' }}>
               <div style={{
-                fontSize: '11px', fontWeight: 600, color: '#8a8aa0',
+                fontSize: '14px', fontWeight: 600, color: 'var(--color-text-dim)',
                 textTransform: 'uppercase', marginBottom: '6px',
               }}>
                 {section.title}
@@ -95,13 +95,13 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ open, onClose }) => {
                     display: 'inline-block', minWidth: '70px',
                     padding: '1px 8px', borderRadius: '4px',
                     backgroundColor: 'rgba(233,69,96,0.1)',
-                    color: '#e94560', fontSize: '11px',
+                    color: 'var(--color-accent)', fontSize: '14px',
                     fontFamily: 'var(--font-mono, monospace)',
                     fontWeight: 600, textAlign: 'center',
                   }}>
                     {item.key}
                   </span>
-                  <span style={{ fontSize: '12px', color: '#c0c0d0' }}>
+                  <span style={{ fontSize: '14px', color: 'var(--color-text-soft)' }}>
                     {item.desc}
                   </span>
                 </div>

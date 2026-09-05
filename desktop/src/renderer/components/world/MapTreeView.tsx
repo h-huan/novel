@@ -63,7 +63,7 @@ const TreeNode: React.FC<{
         </button>
 
         {/* 层级图标 */}
-        <span style={{ fontSize: '12px' }}>{LEVEL_ICONS[node.level] || '📍'}</span>
+        <span style={{ fontSize: '14px' }}>{LEVEL_ICONS[node.level] || '📍'}</span>
 
         {/* 名称 */}
         <span className="flex-1 text-sm truncate">{node.name}</span>

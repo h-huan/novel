@@ -5,6 +5,7 @@
 import React, { useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { countNarrativeWords } from '../lib/wordCount';
 import { showNotification } from '../components/common/Notification';
 
 const ImportExportPage: React.FC = () => {
@@ -27,8 +28,8 @@ const ImportExportPage: React.FC = () => {
 
   const platformMeta: Record<string, { name: string; icon: string; accent: string; url: string }> = {
     douyin: { name: '抖音', icon: '🎵', accent: '#00d4ff', url: 'https://creator.douyin.com' },
-    xiaohongshu: { name: '小红书', icon: '📕', accent: '#ff6b6b', url: 'https://creator.xiaohongshu.com' },
-    wechat: { name: '微信公众号', icon: '💬', accent: '#07c160', url: 'https://mp.weixin.qq.com' },
+    xiaohongshu: { name: '小红书', icon: '📕', accent: 'var(--color-danger)', url: 'https://creator.xiaohongshu.com' },
+    wechat: { name: '微信公众号', icon: '💬', accent: 'var(--color-success)', url: 'https://mp.weixin.qq.com' },
   };
 
   const loadFormats = useCallback(async () => {
@@ -223,7 +224,7 @@ const ImportExportPage: React.FC = () => {
       if (idx === -1) continue;
       if (idx > 0) parts.push(<span key={`pre-${tag}`}>{remaining.substring(0, idx)}</span>);
       parts.push(
-        <span key={tag} style={{ color: '#2ecc71', fontWeight: 600, backgroundColor: 'rgba(46,204,113,0.1)', borderRadius: '3px', padding: '0 2px' }}>
+        <span key={tag} style={{ color: 'var(--color-success)', fontWeight: 600, backgroundColor: 'rgba(46,204,113,0.1)', borderRadius: '3px', padding: '0 2px' }}>
           {tag}
         </span>
       );
@@ -234,18 +235,18 @@ const ImportExportPage: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#1a1a2e' }}>
+    <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: 'var(--color-bg-primary)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>📦 导入导出</h1>
+        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>📦 导入导出</h1>
       </div>
 
       <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         {(['import', 'export', 'publish'] as const).map(tab => (
           <button key={tab} onClick={() => { setActiveTab(tab); setExportResult(null); }}
             style={{
-              padding: '8px 16px', fontSize: '13px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              color: activeTab === tab ? '#e94560' : '#8a8aa0',
-              borderBottom: activeTab === tab ? '2px solid #e94560' : '2px solid transparent',
+              padding: '8px 16px', fontSize: '14px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              color: activeTab === tab ? 'var(--color-accent)' : 'var(--color-text-dim)',
+              borderBottom: activeTab === tab ? '2px solid var(--color-accent)' : '2px solid transparent',
             }}>{tab === 'import' ? '📥 导入' : tab === 'export' ? '📤 导出' : '🌐 发布到平台'}</button>
         ))}
       </div>
@@ -253,16 +254,16 @@ const ImportExportPage: React.FC = () => {
       {/* 导入 */}
       {activeTab === 'import' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <p style={{ margin: 0, fontSize: '13px', color: '#c0c0d0', fontWeight: 500 }}>粘贴文本或上传文件，AI 自动拆解为章节/角色/世界观/伏笔</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)', fontWeight: 500 }}>粘贴文本或上传文件，AI 自动拆解为章节/角色/世界观/伏笔</p>
           <textarea value={content} onChange={e => setContent(e.target.value)}
             style={{
               width: '100%', padding: '16px', backgroundColor: 'rgba(0,0,0,0.25)', border: '2px dashed rgba(255,255,255,0.12)',
-              borderRadius: '10px', color: '#eaeaea', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical',
+              borderRadius: '10px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical',
               outline: 'none', lineHeight: 1.8, boxSizing: 'border-box', minHeight: '240px',
             }} placeholder="在此粘贴小说文本内容，或点击下方按钮选择文件..." />
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={handleImportText} disabled={loading || !content}
-              style={{ padding: '10px 28px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading || !content ? 0.5 : 1 }}>
+              style={{ padding: '10px 28px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading || !content ? 0.5 : 1 }}>
               {loading ? '⏳ AI拆解中...' : '📥 AI智能拆解导入'}
             </button>
             <input type="file" accept=".txt,.md,.docx,.epub" id="fileUpload"
@@ -275,7 +276,7 @@ const ImportExportPage: React.FC = () => {
               }} />
             <label htmlFor="fileUpload" style={{
               padding: '10px 20px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '8px', color: '#c0c0d0', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit',
+              borderRadius: '8px', color: 'var(--color-text-soft)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit',
             }}>📁 选择文件 (.txt/.md)</label>
             {/* .novel 项目包导入 */}
             <input type="file" accept=".novel,.json" id="novelUpload"
@@ -303,11 +304,11 @@ const ImportExportPage: React.FC = () => {
               }} />
             <label htmlFor="novelUpload" style={{
               padding: '10px 20px', backgroundColor: 'rgba(46,204,113,0.08)', border: '1px solid rgba(46,204,113,0.25)',
-              borderRadius: '8px', color: '#2ecc71', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit',
+              borderRadius: '8px', color: 'var(--color-success)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit',
             }}>📦 导入 .novel 包</label>
           </div>
           {exportResult && (
-            <div style={{ padding: '12px', backgroundColor: exportResult.error ? 'rgba(231,76,60,0.1)' : 'rgba(46,204,113,0.08)', borderRadius: '8px', fontSize: '13px', color: exportResult.error ? '#e74c3c' : '#2ecc71' }}>
+            <div style={{ padding: '12px', backgroundColor: exportResult.error ? 'rgba(231,76,60,0.1)' : 'rgba(46,204,113,0.08)', borderRadius: '8px', fontSize: '14px', color: exportResult.error ? 'var(--color-danger)' : 'var(--color-success)' }}>
               {exportResult.error || `✅ ${exportResult.message || '导入完成！AI 已拆解为章节、角色和世界观'}`}
             </div>
           )}
@@ -317,34 +318,34 @@ const ImportExportPage: React.FC = () => {
       {/* 导出 */}
       {activeTab === 'export' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <p style={{ margin: 0, fontSize: '12px', color: '#8a8aa0' }}>选择格式和内容，支持Markdown/TXT/EPUB/PDF/DOCX/分镜/剧本</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-dim)' }}>选择格式和内容，支持Markdown/TXT/EPUB/PDF/DOCX/分镜/剧本</p>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {['markdown', 'txt', 'novel', 'epub', 'pdf', 'docx', 'script', 'storyboard'].map(f => (
               <button key={f} onClick={() => { setFormat(f); setExportResult(null); }}
                 style={{
-                  padding: '8px 14px', borderRadius: '8px', border: '1px solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: '12px',
+                  padding: '8px 14px', borderRadius: '8px', border: '1px solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: '14px',
                   backgroundColor: format === f ? 'rgba(233,69,96,0.12)' : 'rgba(255,255,255,0.04)',
-                  borderColor: format === f ? '#e94560' : 'rgba(255,255,255,0.08)',
-                  color: format === f ? '#e94560' : '#c0c0d0',
+                  borderColor: format === f ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)',
+                  color: format === f ? 'var(--color-accent)' : 'var(--color-text-soft)',
                 }}>{f === 'novel' ? '📦 .novel' : f}</button>
             ))}
           </div>
           <textarea value={content} onChange={e => setContent(e.target.value)}
             style={{
               width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '8px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical',
+              borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical',
               outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '150px',
             }} placeholder="输入要导出的内容..." />
 
           {/* 短剧剧本预览 */}
           {format === 'script' && content && (
-            <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)', fontSize: '12px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', marginBottom: '8px' }}>🎬 短剧剧本预览</div>
-              <div style={{ color: '#c0c0d0', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+            <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)', fontSize: '14px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>🎬 短剧剧本预览</div>
+              <div style={{ color: 'var(--color-text-soft)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                 {content.split('\n').map((line, i) => {
-                  if (line.startsWith('第') && line.includes('章')) return <div key={i} style={{ color: '#e94560', fontWeight: 700, fontSize: '13px', margin: '8px 0 4px' }}>{line}</div>;
-                  if (line.includes('：') && line.length < 15) return <div key={i} style={{ color: '#3498db', margin: '2px 0' }}><strong>{line.split('：')[0]}</strong>：{line.split('：').slice(1).join('：')}</div>;
-                  if (line.includes('【')) return <div key={i} style={{ color: '#9b59b6', fontStyle: 'italic' }}>{line}</div>;
+                  if (line.startsWith('第') && line.includes('章')) return <div key={i} style={{ color: 'var(--color-accent)', fontWeight: 700, fontSize: '14px', margin: '8px 0 4px' }}>{line}</div>;
+                  if (line.includes('：') && line.length < 15) return <div key={i} style={{ color: 'var(--color-info)', margin: '2px 0' }}><strong>{line.split('：')[0]}</strong>：{line.split('：').slice(1).join('：')}</div>;
+                  if (line.includes('【')) return <div key={i} style={{ color: 'var(--color-purple)', fontStyle: 'italic' }}>{line}</div>;
                   return <div key={i} style={{ margin: '1px 0' }}>{line}</div>;
                 })}
               </div>
@@ -354,22 +355,22 @@ const ImportExportPage: React.FC = () => {
           {/* 分镜脚本预览 */}
           {format === 'storyboard' && content && (
             <div style={{ overflow: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                 <thead>
                   <tr style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
-                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: '#8a8aa0', textAlign: 'left' }}>镜头</th>
-                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: '#8a8aa0', textAlign: 'left' }}>画面描述</th>
-                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: '#8a8aa0', textAlign: 'left' }}>对白</th>
-                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: '#8a8aa0', textAlign: 'left' }}>AI生图提示词</th>
+                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--color-text-dim)', textAlign: 'left' }}>镜头</th>
+                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--color-text-dim)', textAlign: 'left' }}>画面描述</th>
+                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--color-text-dim)', textAlign: 'left' }}>对白</th>
+                    <th style={{ padding: '8px', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--color-text-dim)', textAlign: 'left' }}>AI生图提示词</th>
                   </tr>
                 </thead>
                 <tbody>
                   {content.split('\n').filter(l => l.trim()).slice(0, 8).map((line, i) => (
                     <tr key={i}>
-                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: '#6c6c80' }}>#{i + 1}</td>
-                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: '#c0c0d0' }}>{line.substring(0, 60)}</td>
-                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: '#3498db' }}>对白占位</td>
-                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: '#9b59b6', fontSize: '10px' }}>镜头描述: {line.substring(0, 30)}...</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--color-text-muted)' }}>#{i + 1}</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--color-text-soft)' }}>{line.substring(0, 60)}</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--color-info)' }}>对白占位</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--color-purple)', fontSize: '10px' }}>镜头描述: {line.substring(0, 30)}...</td>
                     </tr>
                   ))}
                 </tbody>
@@ -378,11 +379,11 @@ const ImportExportPage: React.FC = () => {
           )}
           <div style={{ display: 'flex', gap: '10px' }}>
             <button onClick={handlePreview} disabled={loading}
-              style={{ padding: '10px 20px', backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', color: '#eaeaea', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ padding: '10px 20px', backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}>
               👁️ 预览
             </button>
             <button onClick={handleExport} disabled={loading}
-              style={{ padding: '10px 24px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
+              style={{ padding: '10px 24px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
               {loading ? '导出中...' : `📤 导出 ${format}`}
             </button>
           </div>
@@ -392,27 +393,27 @@ const ImportExportPage: React.FC = () => {
             <div style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', overflow: 'hidden' }}>
               <div style={{
                 padding: '8px 12px', backgroundColor: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.06)',
-                display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11px',
+                display: 'flex', alignItems: 'center', gap: '12px', fontSize: '14px',
               }}>
-                <span style={{ color: '#8a8aa0', fontWeight: 600 }}>排版预览</span>
-                <span style={{ color: '#6c6c80' }}>|</span>
-                <label style={{ color: '#6c6c80' }}>字号</label>
+                <span style={{ color: 'var(--color-text-dim)', fontWeight: 600 }}>排版预览</span>
+                <span style={{ color: 'var(--color-text-muted)' }}>|</span>
+                <label style={{ color: 'var(--color-text-muted)' }}>字号</label>
                 <input type="number" value={previewFontSize} onChange={e => setPreviewFontSize(parseInt(e.target.value) || 14)}
-                  style={{ width: '50px', padding: '2px 6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-                <label style={{ color: '#6c6c80' }}>行距</label>
+                  style={{ width: '50px', padding: '2px 6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+                <label style={{ color: 'var(--color-text-muted)' }}>行距</label>
                 <input type="number" step="0.1" value={previewLineHeight} onChange={e => setPreviewLineHeight(parseFloat(e.target.value) || 1.8)}
-                  style={{ width: '50px', padding: '2px 6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-                <label style={{ color: '#6c6c80' }}>边距</label>
+                  style={{ width: '50px', padding: '2px 6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+                <label style={{ color: 'var(--color-text-muted)' }}>边距</label>
                 <input type="number" value={previewMargin} onChange={e => setPreviewMargin(parseInt(e.target.value) || 20)}
-                  style={{ width: '50px', padding: '2px 6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-                <span style={{ marginLeft: 'auto', color: '#5a5a70' }}>预览内容: {content.length} 字</span>
+                  style={{ width: '50px', padding: '2px 6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+                <span style={{ marginLeft: 'auto', color: 'var(--color-text-muted)' }}>预览内容: {countNarrativeWords(content)} 字</span>
               </div>
               <div style={{
                 padding: `${previewMargin}px`, maxHeight: '400px', overflow: 'auto',
-                fontSize: `${previewFontSize}px`, lineHeight: previewLineHeight, color: '#d0d0e0',
+                fontSize: `${previewFontSize}px`, lineHeight: previewLineHeight, color: 'var(--color-text-soft)',
                 fontFamily: 'Georgia, "Noto Serif SC", serif', whiteSpace: 'pre-wrap',
               }}>
-                {content || <span style={{ color: '#5a5a70', fontStyle: 'italic' }}>无内容预览</span>}
+                {content || <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>无内容预览</span>}
               </div>
             </div>
           )}
@@ -422,27 +423,27 @@ const ImportExportPage: React.FC = () => {
       {/* 发布到平台 */}
       {activeTab === 'publish' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
-          <p style={{ margin: 0, fontSize: '12px', color: '#8a8aa0' }}>将内容适配到各平台格式，一键复制发布</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-dim)' }}>将内容适配到各平台格式，一键复制发布</p>
 
           {/* 内容输入 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <textarea value={content} onChange={e => setContent(e.target.value)}
               style={{
                 width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '8px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical',
+                borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical',
                 outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '120px',
               }} placeholder="粘贴要发布的小说内容..." />
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <button onClick={handleAdaptAll} disabled={adapting || !content}
                 style={{
-                  padding: '10px 24px', backgroundColor: '#e94560', border: 'none', borderRadius: '8px', color: '#fff',
-                  fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  padding: '10px 24px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px', color: 'var(--color-white)',
+                  fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                   opacity: (adapting || !content) ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '6px',
                 }}>
                 {adapting ? '⏳ 适配中...' : '🚀 一键适配所有平台'}
               </button>
-              <span style={{ fontSize: '11px', color: '#6c6c80' }}>
-                {content ? `${content.length} 字` : ''}
+              <span style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
+                {content ? `${countNarrativeWords(content)} 字` : ''}
               </span>
             </div>
           </div>
@@ -474,8 +475,8 @@ const ImportExportPage: React.FC = () => {
                   {/* 头部 */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '18px' }}>{meta.icon}</span>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#eaeaea' }}>{meta.name}</span>
-                    {!data && <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#5a5a70' }}>待适配</span>}
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{meta.name}</span>
+                    {!data && <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--color-text-muted)' }}>待适配</span>}
                     {data && (
                       <span style={{ marginLeft: 'auto', fontSize: '10px', color: meta.accent }}>
                         {wordCount} 字
@@ -487,7 +488,7 @@ const ImportExportPage: React.FC = () => {
                   {data && (
                     <>
                       <div style={{
-                        fontSize: '11px', color: '#a0a0b0', lineHeight: 1.5,
+                        fontSize: '14px', color: 'var(--color-text-secondary)', lineHeight: 1.5,
                         maxHeight: '60px', overflow: 'hidden',
                         backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '4px', padding: '6px 8px',
                       }}>
@@ -504,7 +505,7 @@ const ImportExportPage: React.FC = () => {
                             }}>#{tag}</span>
                           ))}
                           {hashtags.length > 4 && (
-                            <span style={{ fontSize: '10px', color: '#6c6c80' }}>+{hashtags.length - 4}</span>
+                            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>+{hashtags.length - 4}</span>
                           )}
                         </div>
                       )}
@@ -514,7 +515,7 @@ const ImportExportPage: React.FC = () => {
                         <button onClick={(e) => { e.stopPropagation(); handleCopyToClipboard(key); }}
                           style={{
                             flex: 1, padding: '7px 0', backgroundColor: meta.accent, border: 'none',
-                            borderRadius: '6px', color: '#fff', fontSize: '11px', fontWeight: 600,
+                            borderRadius: '6px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600,
                             cursor: 'pointer', fontFamily: 'inherit',
                           }}>
                           📋 一键复制
@@ -522,7 +523,7 @@ const ImportExportPage: React.FC = () => {
                         <button onClick={(e) => { e.stopPropagation(); handleCopyAndOpen(key); }}
                           style={{
                             padding: '7px 10px', backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
-                            borderRadius: '6px', color: '#c0c0d0', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit',
+                            borderRadius: '6px', color: 'var(--color-text-soft)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit',
                             whiteSpace: 'nowrap',
                           }}>
                           复制+打开 ↗
@@ -536,7 +537,7 @@ const ImportExportPage: React.FC = () => {
                     <button onClick={(e) => { e.stopPropagation(); handleAdaptSingle(key); }} disabled={!content}
                       style={{
                         padding: '7px 0', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
-                        borderRadius: '6px', color: '#8a8aa0', fontSize: '11px', fontWeight: 600,
+                        borderRadius: '6px', color: 'var(--color-text-dim)', fontSize: '14px', fontWeight: 600,
                         cursor: content ? 'pointer' : 'default', fontFamily: 'inherit',
                         opacity: content ? 1 : 0.5,
                       }}>
@@ -558,25 +559,25 @@ const ImportExportPage: React.FC = () => {
                 padding: '8px 12px',
                 backgroundColor: `rgba(0,0,0,0.25)`,
                 borderBottom: `1px solid ${platformMeta[selectedPlatform]?.accent}30`,
-                display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px',
+                display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px',
               }}>
                 <span style={{ fontSize: '16px' }}>{platformMeta[selectedPlatform]?.icon}</span>
-                <span style={{ color: '#eaeaea', fontWeight: 600 }}>{platformMeta[selectedPlatform]?.name} 适配预览</span>
-                <span style={{ color: '#6c6c80', fontSize: '11px' }}>
+                <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{platformMeta[selectedPlatform]?.name} 适配预览</span>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>
                   {getAdaptPreview(selectedPlatform).length} 字
                 </span>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
                   <button onClick={() => handleCopyToClipboard(selectedPlatform)}
                     style={{
                       padding: '5px 12px', backgroundColor: platformMeta[selectedPlatform]?.accent, border: 'none',
-                      borderRadius: '5px', color: '#fff', fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                      borderRadius: '5px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                     }}>
                     📋 一键复制
                   </button>
                   <button onClick={() => handleCopyAndOpen(selectedPlatform)}
                     style={{
                       padding: '5px 12px', backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: '5px', color: '#c0c0d0', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit',
+                      borderRadius: '5px', color: 'var(--color-text-soft)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit',
                     }}>
                     复制+打开平台 ↗
                   </button>
@@ -586,13 +587,13 @@ const ImportExportPage: React.FC = () => {
                 <textarea value={editableContent} onChange={e => setEditableContent(e.target.value)}
                   style={{
                     width: '100%', minHeight: '200px', padding: '12px', backgroundColor: 'rgba(0,0,0,0.15)',
-                    border: 'none', color: '#d0d0e0', fontSize: '13px', fontFamily: 'inherit',
+                    border: 'none', color: 'var(--color-text-soft)', fontSize: '14px', fontFamily: 'inherit',
                     resize: 'vertical', outline: 'none', lineHeight: 1.7, boxSizing: 'border-box',
                   }} />
                 {/* 变更高亮叠加层 */}
                 <div style={{
                   position: 'absolute', bottom: '8px', right: '8px',
-                  fontSize: '10px', color: '#2ecc71', backgroundColor: 'rgba(0,0,0,0.6)',
+                  fontSize: '10px', color: 'var(--color-success)', backgroundColor: 'rgba(0,0,0,0.6)',
                   padding: '3px 8px', borderRadius: '4px', pointerEvents: 'none',
                 }}>
                   ✨ 新增标签/格式已高亮
@@ -607,7 +608,7 @@ const ImportExportPage: React.FC = () => {
       {exportResult && (
         <div style={{
           padding: '14px', backgroundColor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)',
-          borderRadius: '8px', fontSize: '12px', color: '#c0c0d0', overflow: 'auto', maxHeight: '300px',
+          borderRadius: '8px', fontSize: '14px', color: 'var(--color-text-soft)', overflow: 'auto', maxHeight: '300px',
         }}>
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(exportResult, null, 2)}</pre>
         </div>

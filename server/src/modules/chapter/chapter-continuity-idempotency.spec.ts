@@ -1,8 +1,6 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
-import { up as stateUp } from '../../database/migrations/017_state_items_and_evolution';
-import { up as syncUp } from '../../database/migrations/026_chapter_derived_data_sync';
-import { up as continuityUp } from '../../database/migrations/027_chapter_continuity_rechecks';
+import { up as initSchema } from '../../database/migrations/001_initial';
 import { StateItemService } from '../../state/state-item.service';
 import { ChapterDerivedDataSyncService } from './chapter-derived-data-sync.service';
 import { createHash } from 'node:crypto';
@@ -10,7 +8,7 @@ import { createHash } from 'node:crypto';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
 function fixture() {
-  const db = new DatabaseSync(':memory:'); stateUp(db); syncUp(db); continuityUp(db);
+  const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys=OFF;'); initSchema(db);
   const database = { getDb: () => db } as any;
   const stateItems = new StateItemService(database);
   const service = new ChapterDerivedDataSyncService(database, {} as any, {} as any, {} as any, {} as any, undefined, stateItems);

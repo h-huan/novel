@@ -1,8 +1,9 @@
-﻿/**
+/**
  * WritingPage - 写作页面（极简设计版）
  * 左侧章节列表 | 中央编辑器 | 右侧面板（tab切换，一次只显示一个）
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { countNarrativeWords } from '../lib/wordCount';
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import ChapterEditorShell, { type ChapterEditorShellHandle } from '../components/chapter/ChapterEditorShell';
 import ChapterStatusBadge from '../components/chapter/ChapterStatusBadge';
@@ -120,31 +121,31 @@ const confirmedStateTargets = [
   {
     label: '世界观',
     route: 'world',
-    color: '#3498db',
+    color: 'var(--color-info)',
     desc: '时代规则、技术边界、地理格局、历史约束',
   },
   {
     label: '角色',
     route: 'characters',
-    color: '#2ecc71',
+    color: 'var(--color-success)',
     desc: '人物立场、能力变化、心理状态、关系变化',
   },
   {
     label: '组织',
     route: 'world',
-    color: '#f39c12',
+    color: 'var(--color-warning)',
     desc: '派系结构、权力变化、组织目标、资源调配',
   },
   {
     label: '时间线/状态',
     route: 'state',
-    color: '#9b59b6',
+    color: 'var(--color-purple)',
     desc: '章节事件、状态快照、时间顺序、一致性检查',
   },
   {
     label: '大纲',
     route: 'outline',
-    color: '#e94560',
+    color: 'var(--color-accent)',
     desc: '分卷主线、章节功能、冲突推进、下章计划',
   },
   {
@@ -161,7 +162,7 @@ const workflowButtonStyle = (color: string): React.CSSProperties => ({
   border: `1px solid ${color}35`,
   backgroundColor: `${color}12`,
   color,
-  fontSize: '12px',
+  fontSize: '14px',
   fontWeight: 700,
   cursor: 'pointer',
   fontFamily: 'inherit',
@@ -173,7 +174,7 @@ const workflowActionStyle = (color: string): React.CSSProperties => ({
   border: `1px solid ${color}35`,
   backgroundColor: `${color}10`,
   color,
-  fontSize: '11px',
+  fontSize: '14px',
   fontWeight: 700,
   cursor: 'pointer',
   fontFamily: 'inherit',
@@ -407,7 +408,7 @@ const WritingPage: React.FC = () => {
       try {
         const response = await api.put(
           `/projects/${projectId}/chapters/${targetChapterId}`,
-          { content },
+          { content, source: 'ai_generated' as const },
           // 章节保存是单条 SQL 写入，20s 超时足够；过久不回必是网络/锁表，
           // 让作者看到"超时"远比让"保存中"停留数分钟直观。
           20000,
@@ -452,7 +453,7 @@ const WritingPage: React.FC = () => {
       setGenerationTask({ tone: 'error', text: `正文已保存，但规范同步未完成：${reason}` });
       setGenStatus('⚠️ 正文已保存，但规范同步未完成；请重试同步');
       // 同步失败时把高亮横幅换成失败态，让作者明确知道"生成成功但下游未跟上"
-      setSuccessBanner({ wordCount: (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length, stateCount: 0, chapterId: targetChapterId });
+      setSuccessBanner({ wordCount: countNarrativeWords(content), stateCount: 0, chapterId: targetChapterId });
       return;
     }
 
@@ -507,7 +508,7 @@ const WritingPage: React.FC = () => {
     // 3) 创作成功：直接关闭右侧写作面板（生成已在面板内完成，无需保留）。
     setRightPanel(null);
     // 顶部高亮横幅：先按字数占位，等同步完成再回填 stateCount
-    const wordCount = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    const wordCount = countNarrativeWords(content);
     setSuccessBanner({ wordCount, stateCount: metadata?.autoStateUpdate?.updated || 0, chapterId: targetChapterId });
     setGenerationTask({ tone: 'working', text: '正文已生成，正在保存与同步…' });
     setGenStatus('🔄 正文已生成，正在保存与同步…');
@@ -599,15 +600,7 @@ const WritingPage: React.FC = () => {
   // 一直显示为橙色警告，3918 字已完成时它仍亮着，让作者误以为出错。
   type ChapterHint = { tone: 'success' | 'warning' | 'error'; message: string };
   const [chapterHint, setChapterHint] = useState<ChapterHint | null>(null);
-  const wordCount = useCallback((text: string) => {
-    if (!text || !text.trim()) return 0;
-    const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-    const withoutChinese = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
-    const englishWords = withoutChinese
-      .split(/\s+/)
-      .filter((w) => w.length > 0 && /[a-zA-Z]/.test(w)).length;
-    return chineseChars + englishWords;
-  }, []);
+  const wordCount = useCallback((text: string) => countNarrativeWords(text), []);
 
   useEffect(() => {
     // A project can enter this page before the first writable chapter is
@@ -647,7 +640,7 @@ const WritingPage: React.FC = () => {
   }, [currentChapter?.id, currentChapter?.content, currentChapter?.targetWords, wordCount]);
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', backgroundColor: '#16213e' }}>
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', backgroundColor: 'var(--color-bg-secondary)' }}>
       {/* 生成成功高亮横幅（单行高对比；不再与底部 status bar 重复显示） */}
       {successBanner && (() => {
         const isConflict = (successBanner.conflictCount ?? 0) > 0;
@@ -655,10 +648,10 @@ const WritingPage: React.FC = () => {
         // 暗色主题下高对比度配色（背景与文字对比度 ≥ 7:1，远超 WCAG AA 4.5:1）
         // 成功：深绿底 + 浅绿字；矛盾：深红底 + 浅红字；同步失败：深琥珀底 + 浅黄字
         const palette = isSyncFail
-          ? { bg: '#3a2a0a', border: '#f39c12', fg: '#ffd9a3', subFg: '#f6c36a' }
+          ? { bg: '#3a2a0a', border: 'var(--color-warning)', fg: '#ffd9a3', subFg: '#f6c36a' }
           : isConflict
-            ? { bg: '#3b1418', border: '#e94560', fg: '#ffd1d8', subFg: '#ff9aa9' }
-            : { bg: '#0d3320', border: '#2ecc71', fg: '#d1f7c4', subFg: '#8df0b2' };
+            ? { bg: '#3b1418', border: 'var(--color-accent)', fg: '#ffd1d8', subFg: '#ff9aa9' }
+            : { bg: '#0d3320', border: 'var(--color-success)', fg: '#d1f7c4', subFg: '#8df0b2' };
         return (
           <div role="status" aria-live="polite" style={{
             position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)',
@@ -696,7 +689,7 @@ const WritingPage: React.FC = () => {
                 onClick={() => navigate(`/project/${projectId}/conflicts`)}
                 disabled={successBanner.conflictCount === 0}
                 style={{
-                  border: `1px solid ${successBanner.conflictCount > 0 ? '#e94560' : 'rgba(255,255,255,0.18)'}`,
+                  border: `1px solid ${successBanner.conflictCount > 0 ? 'var(--color-accent)' : 'rgba(255,255,255,0.18)'}`,
                   backgroundColor: successBanner.conflictCount > 0 ? '#5a1d24' : 'rgba(255,255,255,0.04)',
                   color: successBanner.conflictCount > 0 ? '#ffd1d8' : 'rgba(255,255,255,0.4)',
                   padding: '6px 14px', borderRadius: 6,
@@ -722,14 +715,14 @@ const WritingPage: React.FC = () => {
           fontSize: 14, overflow: 'hidden',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            <span style={{ color: wsConnected ? '#2ecc71' : '#e74c3c', fontWeight: 600 }}>
+            <span style={{ color: wsConnected ? 'var(--color-success)' : 'var(--color-danger)', fontWeight: 600 }}>
               {wsConnected ? '🟢 实时连接' : '🔴 已断开'}
             </span>
-            <button onClick={clearWsNotifications} style={{ background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: 14 }}>✕</button>
+            <button onClick={clearWsNotifications} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: 14 }}>✕</button>
           </div>
           <div style={{ maxHeight: 120, overflow: 'auto' }}>
             {wsNotifications.slice(0, 3).map((n, i) => (
-              <div key={i} style={{ padding: '4px 10px', color: '#c0c0d0', borderBottom: i < wsNotifications.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
+              <div key={i} style={{ padding: '4px 10px', color: 'var(--color-text-soft)', borderBottom: i < wsNotifications.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
                 {n.type === 'chapter_progress' ? `📝 章节进度` :
                  n.type === 'chapter_status' ? `📋 状态变更` :
                  n.type === 'content_update' ? `✏️ 内容更新` :
@@ -744,22 +737,22 @@ const WritingPage: React.FC = () => {
       {/* 左侧章节列表 */}
       <div style={{
         width: sidebarOpen ? SIDEBAR_WIDTH : 0, minWidth: sidebarOpen ? SIDEBAR_WIDTH : 0,
-        borderRight: '1px solid rgba(255,255,255,0.06)', backgroundColor: '#1a1a2e',
+        borderRight: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'var(--color-bg-primary)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'width 0.15s',
       }}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', letterSpacing: '0.5px' }}>分卷 / 章节</span>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>分卷 / 章节</span>
           <div style={{ display: 'flex', gap: '4px' }}>
             <button onClick={() => navigate(`/project/${projectId}/outline`)} title="章节与分卷由大纲统一管理"
-              style={{ padding: '2px 8px', backgroundColor: 'rgba(52,152,219,0.1)', border: 'none', borderRadius: '4px', color: '#60a5fa', fontSize: '11px', fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}>编辑大纲</button>
-            <button onClick={() => setSidebarOpen(false)} style={{ padding: '2px 4px', background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: '12px' }}>◀</button>
+              style={{ padding: '2px 8px', backgroundColor: 'rgba(52,152,219,0.1)', border: 'none', borderRadius: '4px', color: 'var(--color-info-light)', fontSize: '14px', fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}>编辑大纲</button>
+            <button onClick={() => setSidebarOpen(false)} style={{ padding: '2px 4px', background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '14px' }}>◀</button>
           </div>
         </div>
         <div style={{ flex: 1, overflow: 'auto', padding: '6px' }}>
           {Object.entries(volumes).sort(([a],[b]) => Number(a)-Number(b)).map(([volIdx, volChapters]) => (
             <div key={volIdx} style={{ marginBottom: '4px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px 2px' }}>
-                <span style={{ fontSize: '11px', color: '#8a8aa0', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>📖 卷{volIdx}</span>
+                <span style={{ fontSize: '14px', color: 'var(--color-text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>📖 卷{volIdx}</span>
               </div>
               {volChapters.sort((a, b) => a.chapterIndex - b.chapterIndex).map(ch => (
                 <div key={ch.id} style={{ position: 'relative' }}>
@@ -769,9 +762,9 @@ const WritingPage: React.FC = () => {
                         width: '100%', display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', marginBottom: '2px',
                         borderRadius: '6px', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
                         backgroundColor: currentChapter?.id === ch.id ? 'rgba(233,69,96,0.12)' : 'transparent',
-                        color: currentChapter?.id === ch.id ? '#e94560' : '#c0c0d0',
+                        color: currentChapter?.id === ch.id ? 'var(--color-accent)' : 'var(--color-text-soft)',
                       }}>
-                      <span style={{ fontSize: '12px', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         第{ch.chapterIndex}章 {ch.title}
                       </span>
                       <ChapterStatusBadge status={ch.status} size="small" showLockIcon={false} />
@@ -780,14 +773,14 @@ const WritingPage: React.FC = () => {
               ))}
             </div>
           ))}
-          {chapters.length === 0 && <p style={{ textAlign: 'center', color: '#5a5a70', fontSize: '12px', padding: '20px' }}>暂无大纲章节，请先在大纲中规划章节</p>}
+          {chapters.length === 0 && <p style={{ textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '14px', padding: '20px' }}>暂无大纲章节，请先在大纲中规划章节</p>}
         </div>
       </div>
 
       {/* 侧边栏收起按钮（当侧边栏隐藏时显示） */}
       {!sidebarOpen && (
         <button onClick={() => setSidebarOpen(true)}
-          style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 10, padding: '6px 4px', backgroundColor: '#1a1a2e', border: '1px solid rgba(255,255,255,0.06)', borderLeft: 'none', borderRadius: '0 6px 6px 0', color: '#6c6c80', cursor: 'pointer', fontSize: '10px' }}>
+          style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 10, padding: '6px 4px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid rgba(255,255,255,0.06)', borderLeft: 'none', borderRadius: '0 6px 6px 0', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '10px' }}>
           ▶
         </button>
       )}
@@ -797,15 +790,15 @@ const WritingPage: React.FC = () => {
         {/* 顶部工具栏 */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px',
-          borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: '#1a1a2e',
+          borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'var(--color-bg-primary)',
         }}>
           {/* 左侧 */}
-          <button onClick={() => setSidebarOpen(p => !p)} style={{ background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: '12px', padding: '4px' }} title="切换章节列表">☰</button>
-          <span style={{ fontSize: '12px', color: '#6c6c80' }}>|</span>
-          <span style={{ fontSize: '11px', color: '#8a8aa0' }}>
-            模式: <span style={{ color: '#e94560', fontWeight: 600 }}>{modeLabel}</span>
+          <button onClick={() => setSidebarOpen(p => !p)} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '14px', padding: '4px' }} title="切换章节列表">☰</button>
+          <span style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>|</span>
+          <span style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>
+            模式: <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{modeLabel}</span>
           </span>
-          <span style={{ fontSize: '10px', color: '#4a4a60' }}>F1全自动 F2半自动 F3手动</span>
+          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>F1全自动 F2半自动 F3手动</span>
 
           {/* 章节/段落长度提示：达成 3200-4000 区间用绿色正向展示，越界才警告 */}
           {chapterHint && (() => {
@@ -813,7 +806,7 @@ const WritingPage: React.FC = () => {
               ? { color: '#1abc9c', backgroundColor: 'rgba(26,188,156,0.14)' }
               : chapterHint.tone === 'error'
                 ? { color: '#ff9aa9', backgroundColor: 'rgba(231,76,96,0.14)' }
-                : { color: '#f39c12', backgroundColor: 'rgba(243,156,18,0.14)' };
+                : { color: 'var(--color-warning)', backgroundColor: 'rgba(243,156,18,0.14)' };
             return (
               <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
                 <span
@@ -835,15 +828,15 @@ const WritingPage: React.FC = () => {
           {/* 右侧操作区 */}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px', alignItems: 'center' }}>
             <button onClick={() => togglePanel('ai')}
-              style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', backgroundColor: rightPanel === 'ai' ? '#e94560' : 'rgba(255,255,255,0.06)', color: rightPanel === 'ai' ? '#fff' : '#c0c0d0' }}>
+              style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', fontSize: '14px', fontFamily: 'inherit', backgroundColor: rightPanel === 'ai' ? 'var(--color-accent)' : 'rgba(255,255,255,0.06)', color: rightPanel === 'ai' ? 'var(--color-white)' : 'var(--color-text-soft)' }}>
               🤖 AI写作
             </button>
             <button onClick={() => togglePanel('diff')}
-              style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', backgroundColor: rightPanel === 'diff' ? 'rgba(46,204,113,0.15)' : 'rgba(255,255,255,0.06)', color: rightPanel === 'diff' ? '#2ecc71' : '#c0c0d0' }}>
+              style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', fontSize: '14px', fontFamily: 'inherit', backgroundColor: rightPanel === 'diff' ? 'rgba(46,204,113,0.15)' : 'rgba(255,255,255,0.06)', color: rightPanel === 'diff' ? 'var(--color-success)' : 'var(--color-text-soft)' }}>
               ✏️ 精修
             </button>
             <button onClick={() => togglePanel('workflow')}
-              style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', backgroundColor: rightPanel === 'workflow' ? 'rgba(52,152,219,0.15)' : 'rgba(255,255,255,0.06)', color: rightPanel === 'workflow' ? '#3498db' : '#c0c0d0' }}>
+              style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', fontSize: '14px', fontFamily: 'inherit', backgroundColor: rightPanel === 'workflow' ? 'rgba(52,152,219,0.15)' : 'rgba(255,255,255,0.06)', color: rightPanel === 'workflow' ? 'var(--color-info)' : 'var(--color-text-soft)' }}>
               📊 工作流
             </button>
           </div>
@@ -903,7 +896,7 @@ const WritingPage: React.FC = () => {
                   backgroundColor: chapterStateExpanded ? 'rgba(52,152,219,0.12)' : 'rgba(255,255,255,0.03)',
                   border: `1px solid ${chapterStateExpanded ? 'rgba(52,152,219,0.35)' : 'rgba(255,255,255,0.08)'}`,
                   color: chapterStateExpanded ? '#9bd4ff' : '#c8c8d8',
-                  fontSize: '12px',
+                  fontSize: '14px',
                   fontFamily: 'inherit',
                   cursor: 'pointer',
                   textAlign: 'left',
@@ -911,17 +904,17 @@ const WritingPage: React.FC = () => {
                 }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '13px' }}>{chapterStateExpanded ? '▾' : '▸'}</span>
+                  <span style={{ fontSize: '14px' }}>{chapterStateExpanded ? '▾' : '▸'}</span>
                   <span style={{ fontWeight: 700 }}>本章内容变化</span>
                   <span style={{
                     fontSize: '10px',
                     padding: '1px 7px',
                     borderRadius: '10px',
                     backgroundColor: chapterStateExpanded ? 'rgba(52,152,219,0.25)' : 'rgba(255,255,255,0.08)',
-                    color: chapterStateExpanded ? '#9bd4ff' : '#8a8aa0',
+                    color: chapterStateExpanded ? '#9bd4ff' : 'var(--color-text-dim)',
                   }}>{chapterStateItems.length} 条</span>
                 </span>
-                <span style={{ fontSize: '10px', color: '#8a8aa0' }}>
+                <span style={{ fontSize: '10px', color: 'var(--color-text-dim)' }}>
                   {chapterStateLoading ? '加载中…' : (chapterStateExpanded ? '点击收起' : '点击查看历史变化')}
                 </span>
               </button>
@@ -939,11 +932,11 @@ const WritingPage: React.FC = () => {
                     return (
                       <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '9px 11px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.05)' }}>
                         <span style={{ flexShrink: 0, fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', backgroundColor: 'rgba(52,152,219,0.16)', color: '#7ec8ff' }}>{stateItemTypeLabel(item.targetType)}</span>
-                        <div style={{ flex: 1, minWidth: 0, fontSize: '12px', color: '#c8c8d8', lineHeight: 1.5 }}>{finalText}</div>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: '14px', color: '#c8c8d8', lineHeight: 1.5 }}>{finalText}</div>
                         <button
                           onClick={() => ignoreChapterStateItem(item.id)}
                           title="否决该抽取（不影响已确稿设定）"
-                          style={{ flexShrink: 0, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: '#8a8aa0', fontSize: '11px', padding: '3px 9px', borderRadius: '5px', cursor: 'pointer', fontFamily: 'inherit' }}
+                          style={{ flexShrink: 0, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'var(--color-text-dim)', fontSize: '14px', padding: '3px 9px', borderRadius: '5px', cursor: 'pointer', fontFamily: 'inherit' }}
                         >忽略</button>
                       </div>
                     );
@@ -957,7 +950,7 @@ const WritingPage: React.FC = () => {
         {/* 状态栏（成功态由顶部 successBanner 独占承载，此处隐藏避免双弹框） */}
         {(generationTask?.tone && generationTask.tone !== 'success' || (genStatus && !genStatus.startsWith('✅'))) && (
           <div style={{
-            padding: '6px 14px', fontSize: '12px', textAlign: 'center',
+            padding: '6px 14px', fontSize: '14px', textAlign: 'center',
             backgroundColor: generationTask?.tone === 'error' ? 'rgba(231,76,96,0.12)' : 'rgba(52,152,219,0.08)',
             color: generationTask?.tone === 'error' ? '#ff9aa9' : '#75bfff',
             borderTop: '1px solid rgba(255,255,255,0.04)',
@@ -970,14 +963,14 @@ const WritingPage: React.FC = () => {
             justifyContent: 'center',
             alignItems: 'center',
             gap: '10px',
-            fontSize: '12px',
+            fontSize: '14px',
             backgroundColor: 'rgba(243,156,18,0.08)',
             color: '#f6c36a',
             borderTop: '1px solid rgba(243,156,18,0.18)',
           }}>
             <span>状态同步未完成{stateSyncIssue.chapterLabel ? `（${stateSyncIssue.chapterLabel}）` : ''}：{stateSyncIssue.message}</span>
-            <button onClick={retryStateSync} style={{ ...workflowButtonStyle('#f39c12'), padding: '5px 8px' }}>重试状态同步</button>
-            <button onClick={() => navigate(`/project/${projectId}/conflicts`)} style={{ ...workflowButtonStyle('#e94560'), padding: '5px 8px' }}>查看前后矛盾</button>
+            <button onClick={retryStateSync} style={{ ...workflowButtonStyle('var(--color-warning)'), padding: '5px 8px' }}>重试状态同步</button>
+            <button onClick={() => navigate(`/project/${projectId}/conflicts`)} style={{ ...workflowButtonStyle('var(--color-accent)'), padding: '5px 8px' }}>查看前后矛盾</button>
           </div>
         )}
       </div>
@@ -999,18 +992,18 @@ const WritingPage: React.FC = () => {
           {/* 面板本体 */}
           <div style={{
             position: 'relative', width: PANEL_WIDTH, minWidth: PANEL_WIDTH,
-            backgroundColor: '#1a1a2e', borderLeft: '1px solid rgba(255,255,255,0.06)',
+            backgroundColor: 'var(--color-bg-primary)', borderLeft: '1px solid rgba(255,255,255,0.06)',
             display: 'flex', flexDirection: 'column', height: '100%',
             boxShadow: '-4px 0 24px rgba(0,0,0,0.3)',
           }}>
             {/* 面板头部 */}
             <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: '#eaeaea' }}>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
                 {rightPanel === 'ai' && '🤖 AI 写作'}
                 {rightPanel === 'diff' && '✏️ 逐段精修'}
                 {rightPanel === 'workflow' && '📊 写作工作流'}
               </span>
-              <button onClick={() => setRightPanel(null)} style={{ background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: '14px', padding: '2px 6px' }}>✕</button>
+              <button onClick={() => setRightPanel(null)} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '14px', padding: '2px 6px' }}>✕</button>
             </div>
             {/* 面板内容 */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -1042,10 +1035,10 @@ const WritingPage: React.FC = () => {
                       <button key={focus} onClick={() => setWorkflowFocus(focus)}
                         style={{
                           flex: 1, padding: '8px 10px', borderRadius: '7px', borderWidth: 1, borderStyle: 'solid',
-                          borderColor: workflowFocus === focus ? '#e94560' : 'rgba(255,255,255,0.08)',
+                          borderColor: workflowFocus === focus ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)',
                           backgroundColor: workflowFocus === focus ? 'rgba(233,69,96,0.12)' : 'rgba(255,255,255,0.03)',
-                          color: workflowFocus === focus ? '#e94560' : '#8a8aa0',
-                          fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                          color: workflowFocus === focus ? 'var(--color-accent)' : 'var(--color-text-dim)',
+                          fontSize: '14px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
                         }}>
                         {focus === 'long' ? '长篇连载' : '短篇流程'}
                       </button>
@@ -1055,36 +1048,36 @@ const WritingPage: React.FC = () => {
                   {workflowFocus === 'short' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(52,152,219,0.08)', border: '1px solid rgba(52,152,219,0.18)' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#cfe8ff', marginBottom: '4px' }}>短篇三阶段 + 阶段优化工具</div>
-                        <div style={{ fontSize: '11px', color: '#8a8aa0', lineHeight: 1.6 }}>适合知乎盐选、番茄短篇、抖音故事、规则怪谈等第一人称高钩子短故事。</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#cfe8ff', marginBottom: '4px' }}>短篇三阶段 + 阶段优化工具</div>
+                        <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', lineHeight: 1.6 }}>适合知乎盐选、番茄短篇、抖音故事、规则怪谈等第一人称高钩子短故事。</div>
                       </div>
 
                       {shortWorkflowStages.map((stage, idx) => (
                         <div key={stage.title} style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                            <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: 'rgba(233,69,96,0.14)', color: '#e94560', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700 }}>{idx + 1}</span>
-                            <span style={{ color: '#eaeaea', fontWeight: 700, fontSize: '13px' }}>{stage.title}</span>
+                            <span style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: 'rgba(233,69,96,0.14)', color: 'var(--color-accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 700 }}>{idx + 1}</span>
+                            <span style={{ color: 'var(--color-text-primary)', fontWeight: 700, fontSize: '14px' }}>{stage.title}</span>
                           </div>
-                          <div style={{ fontSize: '11px', color: '#8a8aa0', lineHeight: 1.6, marginBottom: '8px' }}>{stage.desc}</div>
+                          <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', lineHeight: 1.6, marginBottom: '8px' }}>{stage.desc}</div>
                           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
                             {stage.tools.map(tool => (
-                              <span key={tool} style={{ padding: '3px 7px', borderRadius: '5px', backgroundColor: 'rgba(255,255,255,0.05)', color: '#c0c0d0', fontSize: '10px' }}>{tool}</span>
+                              <span key={tool} style={{ padding: '3px 7px', borderRadius: '5px', backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--color-text-soft)', fontSize: '10px' }}>{tool}</span>
                             ))}
                           </div>
                           <button onClick={() => applyWorkflowPrompt(stage.prompt)}
-                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid rgba(233,69,96,0.25)', backgroundColor: 'rgba(233,69,96,0.08)', color: '#e94560', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid rgba(233,69,96,0.25)', backgroundColor: 'rgba(233,69,96,0.08)', color: 'var(--color-accent)', fontSize: '14px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                             填入AI提示
                           </button>
                         </div>
                       ))}
 
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(46,204,113,0.06)', border: '1px solid rgba(46,204,113,0.16)' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#8df0b2', marginBottom: '8px' }}>阶段优化工具</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#8df0b2', marginBottom: '8px' }}>阶段优化工具</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                           {shortOptimizationTools.map(tool => (
                             <div key={tool.name} style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(0,0,0,0.14)' }}>
-                              <div style={{ fontSize: '12px', color: '#eaeaea', fontWeight: 700 }}>{tool.name}</div>
-                              <div style={{ fontSize: '10px', color: '#8a8aa0', lineHeight: 1.5, marginTop: '2px' }}>{tool.desc}</div>
+                              <div style={{ fontSize: '14px', color: 'var(--color-text-primary)', fontWeight: 700 }}>{tool.name}</div>
+                              <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', lineHeight: 1.5, marginTop: '2px' }}>{tool.desc}</div>
                             </div>
                           ))}
                         </div>
@@ -1095,16 +1088,16 @@ const WritingPage: React.FC = () => {
                   {workflowFocus === 'long' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(233,69,96,0.08)', border: '1px solid rgba(233,69,96,0.18)' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#ffd6dd', marginBottom: '4px' }}>长篇连载生产线</div>
-                        <div style={{ fontSize: '11px', color: '#8a8aa0', lineHeight: 1.6 }}>AI可自动生成初稿和上下文，但作者必须手动确认后才归档，避免错误设定污染后续章节。</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#ffd6dd', marginBottom: '4px' }}>长篇连载生产线</div>
+                        <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', lineHeight: 1.6 }}>AI可自动生成初稿和上下文，但作者必须手动确认后才归档，避免错误设定污染后续章节。</div>
                       </div>
 
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-                          <div style={{ fontSize: '12px', fontWeight: 800, color: '#eaeaea' }}>本章写完后的内容变化</div>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--color-text-primary)' }}>本章写完后的内容变化</div>
                           <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(46,204,113,0.14)', color: '#8df0b2' }}>自动记录</span>
                         </div>
-                        <div style={{ color: '#8a8aa0', fontSize: '11px', lineHeight: 1.55, marginBottom: '10px' }}>
+                        <div style={{ color: 'var(--color-text-dim)', fontSize: '14px', lineHeight: 1.55, marginBottom: '10px' }}>
                           正文完成后，人物、情节、时间和伏笔变化会列在正文下方的内联卡片中，自动流入后续写作上下文；你可对不准确的抽取逐条忽略。
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1114,8 +1107,8 @@ const WritingPage: React.FC = () => {
                               onClick={() => navigate(`/project/${projectId}/${target.route}`)}
                               style={{ ...workflowButtonStyle(target.color), display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'stretch', textAlign: 'left' }}
                             >
-                              <span style={{ color: '#eaeaea', fontSize: '12px', fontWeight: 700 }}>{target.label}</span>
-                              <span style={{ color: '#8a8aa0', fontSize: '10px', fontWeight: 500, lineHeight: 1.35 }}>{target.desc}</span>
+                              <span style={{ color: 'var(--color-text-primary)', fontSize: '14px', fontWeight: 700 }}>{target.label}</span>
+                              <span style={{ color: 'var(--color-text-dim)', fontSize: '10px', fontWeight: 500, lineHeight: 1.35 }}>{target.desc}</span>
                             </button>
                           ))}
                         </div>
@@ -1123,10 +1116,10 @@ const WritingPage: React.FC = () => {
 
                       {longWorkflowStages.map((stage, idx) => (
                         <div key={stage.title} style={{ display: 'flex', gap: '10px', padding: '11px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                          <div style={{ width: '24px', height: '24px', borderRadius: '6px', backgroundColor: idx === 4 ? 'rgba(46,204,113,0.14)' : 'rgba(233,69,96,0.12)', color: idx === 4 ? '#2ecc71' : '#e94560', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '12px', flexShrink: 0 }}>{idx + 1}</div>
+                          <div style={{ width: '24px', height: '24px', borderRadius: '6px', backgroundColor: idx === 4 ? 'rgba(46,204,113,0.14)' : 'rgba(233,69,96,0.12)', color: idx === 4 ? 'var(--color-success)' : 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '14px', flexShrink: 0 }}>{idx + 1}</div>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ color: '#eaeaea', fontWeight: 700, fontSize: '13px' }}>{stage.title}</div>
-                            <div style={{ color: '#8a8aa0', fontSize: '11px', lineHeight: 1.55, marginTop: '3px' }}>{stage.desc}</div>
+                            <div style={{ color: 'var(--color-text-primary)', fontWeight: 700, fontSize: '14px' }}>{stage.title}</div>
+                            <div style={{ color: 'var(--color-text-dim)', fontSize: '14px', lineHeight: 1.55, marginTop: '3px' }}>{stage.desc}</div>
                             <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '8px' }}>
                               {stage.chips.map(chip => (
                                 <span key={chip} style={{ padding: '3px 6px', borderRadius: '5px', backgroundColor: 'rgba(255,255,255,0.05)', color: '#b8b8c8', fontSize: '10px' }}>{chip}</span>
@@ -1137,15 +1130,15 @@ const WritingPage: React.FC = () => {
                       ))}
 
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(52,152,219,0.06)', border: '1px solid rgba(52,152,219,0.16)' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#9bd4ff', marginBottom: '8px' }}>每日写作操作</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#9bd4ff', marginBottom: '8px' }}>每日写作操作</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                          <button onClick={loadWritingContext} style={workflowActionStyle('#3498db')}>动笔前 · 读取最新设定、大纲和前文</button>
-                          <button onClick={() => setRightPanel('ai')} style={workflowActionStyle('#e94560')}>生成初稿 · 同步生成待确稿状态建议</button>
-                          <button onClick={archiveConfirmedDraft} style={workflowActionStyle('#2ecc71')}>作者确稿 · 回写正文与统一状态</button>
-                          <button onClick={() => navigate(`/project/${projectId}/weekly-summary`)} style={workflowActionStyle('#f39c12')}>周复盘 · 连贯性和下周计划</button>
+                          <button onClick={loadWritingContext} style={workflowActionStyle('var(--color-info)')}>动笔前 · 读取最新设定、大纲和前文</button>
+                          <button onClick={() => setRightPanel('ai')} style={workflowActionStyle('var(--color-accent)')}>生成初稿 · 同步生成待确稿状态建议</button>
+                          <button onClick={archiveConfirmedDraft} style={workflowActionStyle('var(--color-success)')}>作者确稿 · 回写正文与统一状态</button>
+                          <button onClick={() => navigate(`/project/${projectId}/weekly-summary`)} style={workflowActionStyle('var(--color-warning)')}>周复盘 · 连贯性和下周计划</button>
                         </div>
                         {writingPackage && (
-                          <div style={{ marginTop: '10px', padding: '9px', borderRadius: '6px', background: 'rgba(52,152,219,0.08)', color: '#b9dfff', fontSize: '11px', lineHeight: 1.55 }}>
+                          <div style={{ marginTop: '10px', padding: '9px', borderRadius: '6px', background: 'rgba(52,152,219,0.08)', color: '#b9dfff', fontSize: '14px', lineHeight: 1.55 }}>
                             <div style={{ fontWeight: 800, marginBottom: '4px' }}>已加载权威写作包</div>
                             <div>章节：{writingPackage.chapterPlan?.context?.chapterTitle || '未配置章节大纲'}</div>
                             <div>待确认状态：{writingPackage.state?.pendingTotal || 0}；待确认内容不会作为既定事实写入。</div>
@@ -1154,18 +1147,18 @@ const WritingPage: React.FC = () => {
                       </div>
 
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(0,0,0,0.16)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#eaeaea', marginBottom: '8px' }}>《魂穿北洋，领众破局》类长篇痛点</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>《魂穿北洋，领众破局》类长篇痛点</div>
                         {longPainPoints.map(point => (
-                          <div key={point} style={{ display: 'flex', gap: '7px', color: '#8a8aa0', fontSize: '11px', lineHeight: 1.55, marginBottom: '6px' }}>
-                            <span style={{ color: '#e94560' }}>•</span>
+                          <div key={point} style={{ display: 'flex', gap: '7px', color: 'var(--color-text-dim)', fontSize: '14px', lineHeight: 1.55, marginBottom: '6px' }}>
+                            <span style={{ color: 'var(--color-accent)' }}>•</span>
                             <span>{point}</span>
                           </div>
                         ))}
                       </div>
 
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#eaeaea', marginBottom: '8px' }}>正文生成约束</div>
-                        <div style={{ fontSize: '11px', color: '#c0c0d0', lineHeight: 1.7 }}>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>正文生成约束</div>
+                        <div style={{ fontSize: '14px', color: 'var(--color-text-soft)', lineHeight: 1.7 }}>
                           按已绑定详细大纲单次生成正文。生成时不会替换角色身份、新增未列出角色、改动前文事实、引入大纲外地点或自行回收未标注伏笔。
                         </div>
                       </div>

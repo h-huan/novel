@@ -8,6 +8,14 @@ import DictionaryModal from './DictionaryModal';
 import PromptChainModal from './PromptChainModal';
 import SettingsPage from '../../pages/SettingsPage';
 
+// 非项目内（工作台/项目管理/平台级页面）的顶部全局导航
+const GLOBAL_NAV: Array<{ to: string; label: string }> = [
+  { to: '/', label: '工作台' },
+  { to: '/projects', label: '我的项目' },
+  { to: '/discover', label: '灵感发现' },
+  { to: '/module-standards', label: '执行标准' },
+];
+
 /**
  * Header - 顶部导航栏
  *
@@ -154,7 +162,7 @@ const Header: React.FC = () => {
     minWidth: '280px',
     maxHeight: '400px',
     overflowY: 'auto',
-    backgroundColor: '#1e1e36',
+    backgroundColor: 'var(--color-bg-primary)',
     border: '1px solid rgba(255,255,255,0.1)',
     borderRadius: '10px',
     boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
@@ -171,8 +179,8 @@ const Header: React.FC = () => {
       display: 'flex', alignItems: 'center', gap: '8px',
       padding: '8px 10px', borderRadius: '6px',
       cursor: hoverable ? 'pointer' : 'default',
-      fontSize: '13px', fontWeight: isActive ? 600 : 400,
-      color: danger ? '#e94560' : isActive ? '#e94560' : '#c0c0d0',
+      fontSize: 'var(--font-size-xs)', fontWeight: isActive ? 600 : 400,
+      color: danger ? 'var(--color-accent)' : isActive ? 'var(--color-accent)' : 'var(--color-text-soft)',
       backgroundColor: isActive ? 'rgba(233,69,96,0.08)' : 'transparent',
       transition: 'background-color 0.12s, color 0.12s',
     };
@@ -220,13 +228,13 @@ const Header: React.FC = () => {
                     style={{ ...itemStyle({ isActive: true, hoverable: false }), paddingBottom: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '4px' }}
                   >
                     <span style={{ flex: 1 }}>{currentProject?.title || '未命名'}</span>
-                    <span style={{ fontSize: '11px', color: '#e94560' }}>✓ 当前</span>
+                    <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-accent)' }}>✓ 当前</span>
                   </div>
 
                   {/* ② 最近打开的项目 */}
                   {recentProjects.length > 0 && (
                     <>
-                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#6c6c80', padding: '4px 6px 2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: 'var(--color-text-muted)', padding: '4px 6px 2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                         最近打开
                       </div>
                       {recentProjects.map((p) => (
@@ -238,7 +246,7 @@ const Header: React.FC = () => {
                           onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                         >
                           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title}</span>
-                          <span style={{ fontSize: '10px', color: '#6c6c80', flexShrink: 0 }}>
+                          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>
                             {p.wordCount >= 1000 ? `${(p.wordCount / 1000).toFixed(1)}k` : `${p.wordCount}`}字
                           </span>
                         </div>
@@ -251,14 +259,14 @@ const Header: React.FC = () => {
                   <div
                     onClick={() => { setDropdownOpen(false); goBackToLauncher(); }}
                     style={itemStyle()}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(233,69,96,0.08)'; e.currentTarget.style.color = '#e94560'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#c0c0d0'; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(233,69,96,0.08)'; e.currentTarget.style.color = 'var(--color-accent)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--color-text-soft)'; }}
                   >
                     <svg viewBox="0 0 14 14" className="w-3.5 h-3.5" style={{ flexShrink: 0 }}>
-                      <path d="M7 1v12M1 7h12" stroke="#e94560" strokeWidth="1.5" strokeLinecap="round" />
+                      <path d="M7 1v12M1 7h12" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" />
                     </svg>
                     <span style={{ color: 'inherit' }}>创建新项目</span>
-                    <span style={{ fontSize: '9px', color: '#6c6c80', marginLeft: 'auto' }}>从灵感开始</span>
+                    <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>从灵感开始</span>
                   </div>
                 </div>
               )}
@@ -281,10 +289,26 @@ const Header: React.FC = () => {
             </div>
           </>
         ) : (
-          /* 不在项目内时：只显示平台名 */
-          <h1 className="text-text-primary text-sm font-medium truncate max-w-[300px]">
-            AI 写作平台
-          </h1>
+          /* 不在项目内时：品牌 + 全局导航 */
+          <div className="flex items-center gap-0.5 no-drag">
+            <span className="text-accent font-bold text-sm mr-2 select-none">✦ 写作工作台</span>
+            {GLOBAL_NAV.map(tab => {
+              const active = tab.to === '/'
+                ? location.pathname === '/'
+                : location.pathname.startsWith(tab.to);
+              return (
+                <button
+                  key={tab.to}
+                  onClick={() => navigate(tab.to)}
+                  className={`px-2.5 py-1 text-[13px] rounded-md transition-colors duration-150 ${
+                    active ? 'text-accent bg-accent/10 font-semibold' : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -341,11 +365,11 @@ const Header: React.FC = () => {
           onClick={() => setSettingsOpen(false)}
         >
           <div
-            style={{ width: 'min(920px, 92vw)', maxHeight: '88vh', overflow: 'auto', backgroundColor: '#1a1a2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', boxShadow: '0 24px 80px rgba(0,0,0,0.55)' }}
+            style={{ width: 'min(920px, 92vw)', maxHeight: '88vh', overflow: 'auto', backgroundColor: 'var(--color-bg-primary)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', boxShadow: '0 24px 80px rgba(0,0,0,0.55)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 12px 0' }}>
-              <button onClick={() => setSettingsOpen(false)} style={{ width: '28px', height: '28px', border: 'none', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.06)', color: '#c0c0d0', cursor: 'pointer' }}>×</button>
+              <button onClick={() => setSettingsOpen(false)} style={{ width: '28px', height: '28px', border: 'none', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--color-text-soft)', cursor: 'pointer' }}>×</button>
             </div>
             <SettingsPage />
           </div>
@@ -359,21 +383,21 @@ const Header: React.FC = () => {
           onClick={cancelLeave}
         >
           <div
-            style={{ width: '420px', maxWidth: '90vw', backgroundColor: '#1a1a2e', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)', overflow: 'hidden' }}
+            style={{ width: '420px', maxWidth: '90vw', backgroundColor: 'var(--color-bg-primary)', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)', overflow: 'hidden' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ padding: '20px 24px 16px', textAlign: 'center' }}>
               <div style={{ fontSize: '32px', marginBottom: '10px' }}>⚠️</div>
-              <h2 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 700, color: '#eaeaea' }}>有任务正在运行</h2>
-              <p style={{ margin: 0, fontSize: '13px', color: '#c0c0d0', lineHeight: 1.6 }}>
+              <h2 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 700, color: 'var(--color-text-primary)' }}>有任务正在运行</h2>
+              <p style={{ margin: 0, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-soft)', lineHeight: 1.6 }}>
                 {runningTaskLabel}，切换页面可能会导致任务中断或进度丢失。<br />确定要离开吗？
               </p>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <button onClick={cancelLeave} style={{ padding: '8px 20px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', backgroundColor: 'transparent', color: '#8a8aa0', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <button onClick={cancelLeave} style={{ padding: '8px 20px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', backgroundColor: 'transparent', color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
                 继续留在当前页面
               </button>
-              <button onClick={confirmLeave} style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', backgroundColor: '#e94560', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <button onClick={confirmLeave} style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', backgroundColor: 'var(--color-accent)', color: 'var(--color-white)', fontSize: 'var(--font-size-xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
                 确定离开
               </button>
             </div>

@@ -1,9 +1,6 @@
 import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it } from 'vitest';
 import { up as initialUp } from '../../database/migrations/001_initial';
-import { up as timelineUp } from '../../database/migrations/014_timeline';
-import { up as writingQualityUp } from '../../database/migrations/018_writing_quality_engine';
-import { up as creativeCoreUp } from '../../database/migrations/019_phase_6_9_creative_core';
 import { OutlineRepository } from '../../database/repositories/outline.repository';
 import { OutlineService } from './outline.service';
 
@@ -15,9 +12,6 @@ function fixture() {
   databases.push(db);
   db.exec('PRAGMA foreign_keys = ON');
   initialUp(db);
-  timelineUp(db);
-  writingQualityUp(db);
-  creativeCoreUp(db);
   db.prepare(`INSERT INTO projects (id,type,title,status,target_words,current_words,settings,created_at,updated_at)
     VALUES ('p','long_novel','结构同步','active',2000000,0,'{"chapterWordRange":{"min":3200,"max":4000},"structurePlanning":"dynamic_by_story_rhythm"}','2000-01-01','2000-01-01')`).run();
   const database = {

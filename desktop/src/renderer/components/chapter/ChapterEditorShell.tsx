@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ChapterEditorShell - 章节编辑器外壳组件
  * 整合 MarkdownEditor + 章节信息 + 工具栏 + 自动保存 + 字数统计
  * 
@@ -15,6 +15,7 @@
  */
 
 import React, { forwardRef, useEffect, useRef, useState, useCallback, useImperativeHandle } from 'react';
+import { countNarrativeWords } from '../../lib/wordCount';
 import { useNavigate } from 'react-router-dom';
 import MarkdownEditor from '../editor/MarkdownEditor';
 import ConfirmDialog from '../common/ConfirmDialog';
@@ -80,7 +81,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
   onAiWrite,
 }, ref) {
   const navigate = useNavigate();
-  const { updateChapter, submitForReview } = useChapterStore();
+  const { updateChapter, submitForReview, rerunAutoQuality, syncChapterQuality } = useChapterStore();
   const [localContent, setLocalContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -115,6 +116,15 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [chapter?.id, projectId]);
+
+  // 兜底同步：质检可从编辑器、质量诊断页、AI 续写面板或后端自动流程多处触发。
+  // 挂载/切章/从其它页返回编辑器时，以后端章节行为权威刷新质检状态条（只更新质检字段，不碰正文），
+  // 保证分数与待改数自动跟随最新一次质检，杜绝「后端已 78、顶栏仍停在 77」。
+  useEffect(() => {
+    if (chapter?.id && projectId) {
+      void syncChapterQuality(projectId, chapter.id);
+    }
+  }, [chapter?.id, projectId, syncChapterQuality]);
 
   // 同步 store 章节内容到编辑器：
   // - 切换章节 → 强制覆盖，重置脏标记
@@ -207,16 +217,8 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     };
   }, [chapter?.id]);
 
-  // 字数计算
-  const wordCount = useCallback((text: string) => {
-    if (!text || !text.trim()) return 0;
-    const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-    const withoutChinese = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
-    const englishWords = withoutChinese
-      .split(/\s+/)
-      .filter((w) => w.length > 0 && /[a-zA-Z]/.test(w)).length;
-    return chineseChars + englishWords;
-  }, []);
+  // 字数计算（统一口径：汉字+英文词，与后端一致）
+  const wordCount = useCallback((text: string) => countNarrativeWords(text), []);
 
   // 内容变更处理
   const handleContentChange = useCallback(
@@ -258,7 +260,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
           projectId, chapterId: chapter.id,
           volumeIndex: chapter.volumeIndex, chapterIndex: chapter.chapterIndex,
           title: chapter.title, content,
-          wordCount: content.replace(/\s/g, '').length,
+          wordCount: countNarrativeWords(content),
           status: chapter.status,
         });
       } catch {}
@@ -356,6 +358,19 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     }
   }, [chapter, onRejectReview, busyAction]);
 
+  const handleRerunQuality = useCallback(async () => {
+    if (!chapter || busyAction) return;
+    setBusyAction('rerun-qc');
+    try {
+      await rerunAutoQuality(projectId, chapter.id);
+      setQcBanner({ tone: 'success', message: '本章已重新完成七维质检，质量分与待改问题已更新。', at: Date.now() });
+    } catch (err: any) {
+      setQcBanner({ tone: 'error', message: `重新质检失败：${err?.message || err}，可稍后重试。`, at: Date.now() });
+    } finally {
+      setBusyAction(null);
+    }
+  }, [chapter, busyAction, rerunAutoQuality, projectId]);
+
   // 解锁（先确认）
   const handleUnlock = useCallback(async () => {
     if (!chapter) return;
@@ -439,6 +454,65 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
         </div>
       </div>
 
+      {/* 自动质检状态（持久可见：进行中 / 达标 / 未达标待精修 / 失败可重跑；点「查看问题」直达本章质检明细，杜绝“39分却显示绿色正常、还点不进详情”） */}
+      {chapter.autoQualityStatus ? (
+        <div
+          data-test="auto-quality-bar"
+          style={{
+            margin: '0 16px',
+            padding: '8px 14px',
+            fontSize: 14,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background:
+              chapter.autoQualityStatus === 'ok' ? 'rgba(46,204,113,0.12)'
+              : chapter.autoQualityStatus === 'needs_rewrite' ? 'rgba(243,156,18,0.14)'
+              : chapter.autoQualityStatus === 'failed' ? 'rgba(231,76,60,0.14)'
+              : 'rgba(52,152,219,0.14)',
+            border:
+              chapter.autoQualityStatus === 'ok' ? '1px solid rgba(46,204,113,0.45)'
+              : chapter.autoQualityStatus === 'needs_rewrite' ? '1px solid rgba(243,156,18,0.50)'
+              : chapter.autoQualityStatus === 'failed' ? '1px solid rgba(231,76,60,0.50)'
+              : '1px solid rgba(52,152,219,0.45)',
+            color:
+              chapter.autoQualityStatus === 'ok' ? '#9bf2c3'
+              : chapter.autoQualityStatus === 'needs_rewrite' ? '#ffd891'
+              : chapter.autoQualityStatus === 'failed' ? '#ffd1d8' : '#bcd9ff',
+          }}
+        >
+          <span>{chapter.autoQualityStatus === 'ok' ? '✅' : chapter.autoQualityStatus === 'needs_rewrite' ? '🟠' : chapter.autoQualityStatus === 'failed' ? '⚠️' : '⏳'}</span>
+          <span style={{ flex: 1 }}>
+            {chapter.autoQualityStatus === 'running'
+              ? '正在自动质检…'
+              : (chapter.autoQualityMessage || (chapter.autoQualityStatus === 'ok' ? '自动质检完成' : '自动质检未完成'))}
+          </span>
+          {(chapter.autoQualityStatus === 'ok' || chapter.autoQualityStatus === 'needs_rewrite') && (
+            <button
+              data-test="view-quality-detail"
+              onClick={() => navigate(`/project/${projectId}/writing-quality?chapterId=${chapter.id}`)}
+              style={{ ...styles.primaryBtn, padding: '4px 10px', fontSize: 13 }}
+              title="查看本章七维质检的问题明细，并可逐条定向精修"
+            >
+              查看问题
+            </button>
+          )}
+          {/* 仅 failed（质检过程失败、没出分）才允许重跑；needs_rewrite 是已成功出分但未达标，
+              重跑只会得到相近分数、对正文毫无改善——此时只保留「查看问题」进去逐条定向精修 */}
+          {chapter.autoQualityStatus === 'failed' && (
+            <button
+              data-test="rerun-auto-quality"
+              onClick={handleRerunQuality}
+              disabled={busyAction !== null}
+              style={{ ...styles.confirmBtn, padding: '4px 10px', fontSize: 13 }}
+              title="重新对本章跑一次七维质检"
+            >
+              {busyAction === 'rerun-qc' ? '⏳ 质检中…' : '重新质检'}
+            </button>
+          )}
+        </div>
+      ) : null}
+
       {/* 状态侧栏按钮 busy 时禁用 + 显示「⏳」；持续可见 banner 展示结果（用户铁律：动作必须可见） */}
       {qcBanner && (
         <div
@@ -514,14 +588,6 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
             </>
           ) : (
             <>
-              <button
-                style={styles.saveBtn}
-                onClick={handleSave}
-                disabled={!isDirty || busyAction !== null}
-                title="保存当前章节内容（停止输入后也会自动保存）"
-              >
-                {busyAction === 'saving' ? '⏳ 保存中…' : '💾 保存'}
-              </button>
               <button
                 style={styles.primaryBtn}
                 onClick={handleSubmitForReview}
@@ -613,7 +679,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
           字数: <strong>{wordCount(localContent).toLocaleString()}</strong>
         </span>
         <span style={styles.statusDivider}>|</span>
-        <span style={{ ...styles.statusItem, color: isDirty ? 'var(--color-warning, #f39c12)' : 'var(--color-text-muted, #6c6c80)' }}>
+        <span style={{ ...styles.statusItem, color: isDirty ? 'var(--color-warning, var(--color-warning))' : 'var(--color-text-muted, var(--color-text-muted))' }}>
           上次保存: {getLastSavedText()}
         </span>
       </div>
@@ -638,7 +704,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    backgroundColor: '#16162a',
+    backgroundColor: 'var(--color-bg-primary)',
   },
   // 头部
   header: {
@@ -647,7 +713,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     padding: '12px 20px',
     borderBottom: '1px solid rgba(255,255,255,0.06)',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: 'var(--color-bg-primary)',
   },
   headerLeft: {
     display: 'flex',
@@ -655,17 +721,17 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '10px',
   },
   volumeChapter: {
-    fontSize: '13px',
-    color: '#8a8aa0',
+    fontSize: '14px',
+    color: 'var(--color-text-dim)',
     fontWeight: 500,
   },
   titleSeparator: {
-    color: '#3a3a50',
+    color: 'var(--color-bg-elevated)',
     fontSize: '14px',
   },
   title: {
     fontSize: '15px',
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     fontWeight: 600,
   },
   // 工具栏
@@ -675,7 +741,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     padding: '8px 20px',
     borderBottom: '1px solid rgba(255,255,255,0.06)',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: 'var(--color-bg-primary)',
     gap: '12px',
     flexWrap: 'wrap' as const,
   },
@@ -691,9 +757,9 @@ const styles: Record<string, React.CSSProperties> = {
   /** 普通正向动作（提交质检）：蓝色，通往「质检中」 */
   primaryBtn: {
     padding: '6px 14px',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#3498db',
+    color: 'var(--color-info)',
     backgroundColor: 'rgba(52, 152, 219, 0.1)',
     border: '1px solid rgba(52, 152, 219, 0.22)',
     borderRadius: '6px',
@@ -703,9 +769,9 @@ const styles: Record<string, React.CSSProperties> = {
   /** 保存按钮：灰色，最常用的基础动作 */
   saveBtn: {
     padding: '6px 14px',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#c0c0d0',
+    color: 'var(--color-text-soft)',
     backgroundColor: 'rgba(255,255,255,0.06)',
     border: '1px solid rgba(255,255,255,0.12)',
     borderRadius: '6px',
@@ -715,9 +781,9 @@ const styles: Record<string, React.CSSProperties> = {
   /** 确认动作（通过质检·锁定）：绿色，通往「已锁定」 */
   confirmBtn: {
     padding: '6px 14px',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#2ecc71',
+    color: 'var(--color-success)',
     backgroundColor: 'rgba(46, 204, 113, 0.1)',
     border: '1px solid rgba(46, 204, 113, 0.22)',
     borderRadius: '6px',
@@ -727,9 +793,9 @@ const styles: Record<string, React.CSSProperties> = {
   /** 需谨慎/回退的动作（直接锁定·跳过质检、驳回、取消锁定）：橙色警告 */
   warnBtn: {
     padding: '6px 14px',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#f39c12',
+    color: 'var(--color-warning)',
     backgroundColor: 'rgba(243, 156, 18, 0.1)',
     border: '1px solid rgba(243, 156, 18, 0.22)',
     borderRadius: '6px',
@@ -738,9 +804,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   toolBtn: {
     padding: '6px 14px',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 500,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     backgroundColor: 'rgba(255,255,255,0.04)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '6px',
@@ -748,18 +814,18 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'all 0.2s',
   },
   saveIndicator: {
-    fontSize: '12px',
-    color: '#6c6c80',
+    fontSize: '14px',
+    color: 'var(--color-text-muted)',
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
   },
   unsavedDot: {
-    color: '#f39c12',
+    color: 'var(--color-warning)',
     fontSize: '10px',
   },
   savedDot: {
-    color: '#2ecc71',
+    color: 'var(--color-success)',
     fontSize: '10px',
   },
   // 编辑器
@@ -773,24 +839,24 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     padding: '8px 20px',
     borderTop: '1px solid rgba(255,255,255,0.06)',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: 'var(--color-bg-primary)',
     gap: '10px',
   },
   statusItem: {
-    fontSize: '12px',
-    color: '#6c6c80',
+    fontSize: '14px',
+    color: 'var(--color-text-muted)',
   },
   statusDivider: {
     color: '#2a2a40',
-    fontSize: '12px',
+    fontSize: '14px',
   },
   checkmark: {
-    color: '#2ecc71',
+    color: 'var(--color-success)',
     fontWeight: 700,
   },
   incomplete: {
-    color: '#f39c12',
-    fontSize: '11px',
+    color: 'var(--color-warning)',
+    fontSize: '14px',
   },
   // 空状态
   emptyState: {
@@ -799,7 +865,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     height: '100%',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: 'var(--color-bg-primary)',
   },
   emptyIcon: {
     fontSize: '48px',
@@ -808,7 +874,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   emptyText: {
     fontSize: '14px',
-    color: '#6c6c80',
+    color: 'var(--color-text-muted)',
     margin: 0,
   },
   externalUpdateBar: {
@@ -845,7 +911,7 @@ const styles: Record<string, React.CSSProperties> = {
   externalUpdateKeep: {
     border: '1px solid rgba(255,255,255,0.18)',
     backgroundColor: 'rgba(255,255,255,0.04)',
-    color: '#c0c0d0',
+    color: 'var(--color-text-soft)',
     padding: '5px 10px',
     borderRadius: 6,
     cursor: 'pointer',

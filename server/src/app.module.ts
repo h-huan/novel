@@ -3,7 +3,8 @@
  * 导入所有业务模块
  */
 
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
+import { CreationContextMiddleware } from './common/creation-context.middleware';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -26,9 +27,7 @@ import { ConflictModule } from './modules/conflict-engine/conflict.module';
 import { RagModule } from './rag/rag.module';
 import { StateModule } from './state/state.module';
 import { StateManagementModule } from './state/state-management.module';
-import { RTCOServiceModule } from './rtco/rtco.module';
 import { MaterialModule } from './material/material.module';
-import { InspirationModule } from './modules/inspiration/inspiration.module';
 import { StoryDictModule } from './modules/story-dict/story-dict.module';
 import { OrganizationModule } from './modules/organization/organization.module';
 import { MapPointModule } from './modules/map-point/map-point.module';
@@ -38,6 +37,10 @@ import { WorkflowGuardModule } from './modules/workflow-guard/workflow-guard.mod
 import { WritingQualityModule } from './modules/writing-quality/writing-quality.module';
 import { ContinuityModule } from './modules/continuity/continuity.module';
 import { GenerationLessonsModule } from './modules/generation-lessons/generation-lessons.module';
+import { GenerationMetricsModule } from './modules/generation-metrics/generation-metrics.module';
+import { ModuleStandardsModule } from './modules/module-standards/module-standards.module';
+import { PlatformAnalyticsModule } from './modules/platform-analytics/platform-analytics.module';
+import { OriginalityModule } from './modules/originality/originality.module';
 
 @Module({
   imports: [
@@ -60,9 +63,7 @@ import { GenerationLessonsModule } from './modules/generation-lessons/generation
     RagModule,
     StateModule,
     StateManagementModule,
-    RTCOServiceModule,
     MaterialModule,
-    InspirationModule,
     StoryDictModule,
     OrganizationModule,
     MapPointModule,
@@ -72,8 +73,17 @@ import { GenerationLessonsModule } from './modules/generation-lessons/generation
     WritingQualityModule,
     ContinuityModule,
     GenerationLessonsModule,
+    GenerationMetricsModule,
+    ModuleStandardsModule,
+    PlatformAnalyticsModule,
+    OriginalityModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // 全局绑定“当前创作项目”上下文，供 LLM 埋点兜底归属（灵感发现等创建前请求自然为 null）
+    consumer.apply(CreationContextMiddleware).forRoutes('*');
+  }
+}

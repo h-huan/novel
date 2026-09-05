@@ -37,7 +37,7 @@ const STATUS_LABELS: Record<ForeshadowingStatus, string> = {
   buried: '已埋设', active: '已激活', reminder: '临近回收', pending: '待回收', recovered: '已回收', cancelled: '已取消',
 };
 const STATUS_COLORS: Record<ForeshadowingStatus, string> = {
-  buried: '#3498db', active: '#8b5cf6', reminder: '#f39c12', pending: '#f39c12', recovered: '#2ecc71', cancelled: '#95a5a6',
+  buried: 'var(--color-info)', active: 'var(--color-purple)', reminder: 'var(--color-warning)', pending: 'var(--color-warning)', recovered: 'var(--color-success)', cancelled: 'var(--color-text-muted)',
 };
 const TYPE_LABELS: Record<string, string> = {
   hint: '提示线索', clue: '关键线索', object: '物件伏笔', identity: '身份伏笔',
@@ -170,52 +170,52 @@ const ForeshadowingPage: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '20px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#1a1a2e' }}>
+    <div style={{ padding: '20px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: 'var(--color-bg-primary)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>🔍 伏笔看板</h1>
+        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>🔍 伏笔看板</h1>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={load} style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#8a8aa0', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>🔄</button>
-          <button onClick={() => setShowCreate(true)} style={{ padding: '8px 14px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>+ 新建伏笔</button>
+          <button onClick={load} style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-dim)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}>🔄</button>
+          <button onClick={() => setShowCreate(true)} style={{ padding: '8px 14px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>+ 新建伏笔</button>
         </div>
       </div>
 
       {/* 统计 */}
       <div style={{ display: 'flex', gap: '12px' }}>
-        {[{ k: 'all', l: '全部', c: '#eaeaea' }, { k: 'buried', l: '已埋设', c: '#3498db' }, { k: 'active', l: '已激活', c: '#8b5cf6' }, { k: 'reminder', l: '提醒回收', c: '#f39c12' }, { k: 'recovered', l: '已回收', c: '#2ecc71' }].map(s => (
+        {[{ k: 'all', l: '全部', c: 'var(--color-text-primary)' }, { k: 'buried', l: '已埋设', c: 'var(--color-info)' }, { k: 'active', l: '已激活', c: 'var(--color-purple)' }, { k: 'reminder', l: '提醒回收', c: 'var(--color-warning)' }, { k: 'recovered', l: '已回收', c: 'var(--color-success)' }].map(s => (
           <div key={s.k} onClick={() => setFilter(s.k as any)} style={{
             flex: 1, padding: '10px', borderRadius: '8px', cursor: 'pointer', textAlign: 'center',
             backgroundColor: filter === s.k ? `${s.c}15` : 'rgba(255,255,255,0.02)',
             border: '1px solid', borderColor: filter === s.k ? `${s.c}30` : 'rgba(255,255,255,0.06)',
           }}>
             <div style={{ fontSize: '20px', fontWeight: 700, color: s.c }}>{(stats as any)[s.k]}</div>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginTop: '2px' }}>{s.l}</div>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginTop: '2px' }}>{s.l}</div>
           </div>
         ))}
       </div>
 
       {/* 作用范围筛选 + 统计 */}
       <div style={{ display: 'flex', gap: '6px' }}>
-        {[{ k: 'all', l: '全部范围', c: '#eaeaea' }, { k: 'global', l: '贯穿全文', c: '#e94560' }, { k: 'volume', l: '卷级', c: '#3b82f6' }, { k: 'chapter', l: '章节级', c: '#a855f7' }].map(s => (
+        {[{ k: 'all', l: '全部范围', c: 'var(--color-text-primary)' }, { k: 'global', l: '贯穿全文', c: 'var(--color-accent)' }, { k: 'volume', l: '卷级', c: 'var(--color-info)' }, { k: 'chapter', l: '章节级', c: 'var(--color-purple)' }].map(s => (
           <button key={s.k} onClick={() => setScopeFilter(s.k as any)} style={{
-            flex: 1, padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
+            flex: 1, padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', fontFamily: 'inherit',
             backgroundColor: scopeFilter === s.k ? `${s.c}12` : 'rgba(255,255,255,0.02)',
             border: '1px solid', borderColor: scopeFilter === s.k ? `${s.c}30` : 'rgba(255,255,255,0.06)',
-            color: scopeFilter === s.k ? s.c : '#8a8aa0',
+            color: scopeFilter === s.k ? s.c : 'var(--color-text-dim)',
           }}>{s.l} <span style={{ fontSize: '10px', opacity: 0.7 }}>{(stats as any)[s.k]}</span></button>
         ))}
       </div>
 
       {genProgress && (
-        <div style={{ padding: '8px 14px', backgroundColor: genProgress.startsWith('❌') ? 'rgba(231,76,60,0.08)' : genProgress.startsWith('🔍') ? 'rgba(243,156,18,0.08)' : 'rgba(46,204,113,0.08)', borderRadius: '6px', color: genProgress.startsWith('❌') ? '#e74c3c' : genProgress.startsWith('🔍') ? '#f39c12' : '#2ecc71', fontSize: '12px' }}>
+        <div style={{ padding: '8px 14px', backgroundColor: genProgress.startsWith('❌') ? 'rgba(231,76,60,0.08)' : genProgress.startsWith('🔍') ? 'rgba(243,156,18,0.08)' : 'rgba(46,204,113,0.08)', borderRadius: '6px', color: genProgress.startsWith('❌') ? 'var(--color-danger)' : genProgress.startsWith('🔍') ? 'var(--color-warning)' : 'var(--color-success)', fontSize: '14px' }}>
           {genProgress}
         </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
         {[
-          { key: 'global', title: '全书伏笔', hint: '贯穿主线的重要秘密、身份、承诺或因果，跨阶段埋设与回收', color: '#e94560' },
-          { key: 'volume', title: '阶段伏笔', hint: '服务一个故事阶段或一条支线，在阶段高潮前后兑现', color: '#3b82f6' },
-          { key: 'chapter', title: '章节伏笔', hint: '几章内回收的物件、动作、话语和信息差', color: '#a855f7' },
+          { key: 'global', title: '全书伏笔', hint: '贯穿主线的重要秘密、身份、承诺或因果，跨阶段埋设与回收', color: 'var(--color-accent)' },
+          { key: 'volume', title: '阶段伏笔', hint: '服务一个故事阶段或一条支线，在阶段高潮前后兑现', color: 'var(--color-info)' },
+          { key: 'chapter', title: '章节伏笔', hint: '几章内回收的物件、动作、话语和信息差', color: 'var(--color-purple)' },
         ].map(card => {
           const count = (stats as any)[card.key] || 0;
           return (
@@ -223,13 +223,13 @@ const ForeshadowingPage: React.FC = () => {
               textAlign: 'left', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontFamily: 'inherit',
               backgroundColor: scopeFilter === card.key ? `${card.color}14` : 'rgba(255,255,255,0.025)',
               border: '1px solid', borderColor: scopeFilter === card.key ? `${card.color}40` : 'rgba(255,255,255,0.06)',
-              color: '#c0c0d0',
+              color: 'var(--color-text-soft)',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
-                <span style={{ fontSize: '13px', color: card.color, fontWeight: 700 }}>{card.title}</span>
-                <span style={{ fontSize: '12px', color: '#eaeaea', fontWeight: 700 }}>{count}</span>
+                <span style={{ fontSize: '14px', color: card.color, fontWeight: 700 }}>{card.title}</span>
+                <span style={{ fontSize: '14px', color: 'var(--color-text-primary)', fontWeight: 700 }}>{count}</span>
               </div>
-              <div style={{ fontSize: '11px', color: '#8a8aa0', lineHeight: 1.5 }}>{card.hint}</div>
+              <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', lineHeight: 1.5 }}>{card.hint}</div>
             </button>
           );
         })}
@@ -238,17 +238,17 @@ const ForeshadowingPage: React.FC = () => {
       {/* 新建表单 */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
         {[
-          { key: 'all', title: '全部伏笔', value: stats.all, hint: '按范围和状态查看完整链路', color: '#c0c0d0' },
-          { key: 'unpaved', title: '缺少铺垫', value: stats.unpaved, hint: '没有埋设章节或章纲证据，不能视为已铺垫', color: '#ef4444' },
-          { key: 'recovered', title: '已回收', value: stats.recovered, hint: '显示实际回收章节与埋设跨度', color: '#22c55e' },
+          { key: 'all', title: '全部伏笔', value: stats.all, hint: '按范围和状态查看完整链路', color: 'var(--color-text-soft)' },
+          { key: 'unpaved', title: '缺少铺垫', value: stats.unpaved, hint: '没有埋设章节或章纲证据，不能视为已铺垫', color: 'var(--color-danger)' },
+          { key: 'recovered', title: '已回收', value: stats.recovered, hint: '显示实际回收章节与埋设跨度', color: 'var(--color-success)' },
         ].map(card => (
           <button key={card.key} type="button" onClick={() => setTraceFilter(card.key as typeof traceFilter)} style={{
             flex: 1, textAlign: 'left', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontFamily: 'inherit',
             backgroundColor: traceFilter === card.key ? `${card.color}14` : 'rgba(255,255,255,0.025)',
             border: `1px solid ${traceFilter === card.key ? `${card.color}55` : 'rgba(255,255,255,0.06)'}`,
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong style={{ color: card.color, fontSize: 14 }}>{card.title}</strong><strong style={{ color: '#eaeaea' }}>{card.value}</strong></div>
-            <div style={{ marginTop: 4, color: '#8a8aa0', fontSize: 14, lineHeight: 1.45 }}>{card.hint}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong style={{ color: card.color, fontSize: 14 }}>{card.title}</strong><strong style={{ color: 'var(--color-text-primary)' }}>{card.value}</strong></div>
+            <div style={{ marginTop: 4, color: 'var(--color-text-dim)', fontSize: 14, lineHeight: 1.45 }}>{card.hint}</div>
           </button>
         ))}
       </div>
@@ -256,28 +256,28 @@ const ForeshadowingPage: React.FC = () => {
       {showCreate && (
         <div style={{ padding: '14px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <textarea value={newItem.content} onChange={e => setNewItem(p => ({ ...p, content: e.target.value }))} placeholder="伏笔内容..."
-            style={{ padding: '8px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', resize: 'vertical', outline: 'none', minHeight: '40px' }} />
+            style={{ padding: '8px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical', outline: 'none', minHeight: '40px' }} />
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <input value={newItem.buriedChapterIndex} onChange={e => setNewItem(p => ({ ...p, buriedChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="埋设章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-            <input value={newItem.plannedRecoveryChapterIndex} onChange={e => setNewItem(p => ({ ...p, plannedRecoveryChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="计划回收章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
+            <input value={newItem.buriedChapterIndex} onChange={e => setNewItem(p => ({ ...p, buriedChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="埋设章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+            <input value={newItem.plannedRecoveryChapterIndex} onChange={e => setNewItem(p => ({ ...p, plannedRecoveryChapterIndex: parseInt(e.target.value) || 0 }))} placeholder="计划回收章节(数字)" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <input value={newItem.recoveryWindowStart} onChange={e => setNewItem(p => ({ ...p, recoveryWindowStart: parseInt(e.target.value) || 0 }))} placeholder="回收区间开始" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-            <input value={newItem.recoveryWindowEnd} onChange={e => setNewItem(p => ({ ...p, recoveryWindowEnd: parseInt(e.target.value) || 0 }))} placeholder="回收区间结束" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-            <input value={newItem.evidenceText} onChange={e => setNewItem(p => ({ ...p, evidenceText: e.target.value }))} placeholder="证据文本/埋设细节" style={{ flex: 2, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-            <select value={newItem.riskLevel} onChange={e => setNewItem(p => ({ ...p, riskLevel: e.target.value as 'low'|'medium'|'high' }))} style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
+            <input value={newItem.recoveryWindowStart} onChange={e => setNewItem(p => ({ ...p, recoveryWindowStart: parseInt(e.target.value) || 0 }))} placeholder="回收区间开始" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+            <input value={newItem.recoveryWindowEnd} onChange={e => setNewItem(p => ({ ...p, recoveryWindowEnd: parseInt(e.target.value) || 0 }))} placeholder="回收区间结束" type="number" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+            <input value={newItem.evidenceText} onChange={e => setNewItem(p => ({ ...p, evidenceText: e.target.value }))} placeholder="证据文本/埋设细节" style={{ flex: 2, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+            <select value={newItem.riskLevel} onChange={e => setNewItem(p => ({ ...p, riskLevel: e.target.value as 'low'|'medium'|'high' }))} style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }}>
               <option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option>
             </select>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <select value={newItem.scope} onChange={e => setNewItem(p => ({ ...p, scope: e.target.value as any }))}
-              style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
+              style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }}>
               <option value="global">贯穿全文</option>
               <option value="volume">卷级</option>
               <option value="chapter">章节级</option>
             </select>
             <select value={newItem.type} onChange={e => setNewItem(p => ({ ...p, type: e.target.value }))}
-              style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
+              style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }}>
               <option value="hint">暗示伏笔</option>
               <option value="setup">铺垫伏笔</option>
               <option value="mystery">谜团伏笔</option>
@@ -285,12 +285,12 @@ const ForeshadowingPage: React.FC = () => {
               <option value="relationship">关系伏笔</option>
             </select>
             <select value={newItem.importance} onChange={e => setNewItem(p => ({ ...p, importance: parseInt(e.target.value) as 1|2|3 }))}
-              style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }}>
+              style={{ padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }}>
               <option value={1}>⭐</option><option value={2}>⭐⭐</option><option value={3}>⭐⭐⭐</option>
             </select>
-            <input value={newItem.relatedCharacterIds} onChange={e => setNewItem(p => ({ ...p, relatedCharacterIds: e.target.value }))} placeholder="关联角色(逗号分隔)" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#eaeaea', fontSize: '11px', fontFamily: 'inherit', outline: 'none' }} />
-            <button onClick={createItem} style={{ padding: '6px 14px', backgroundColor: '#e94560', border: 'none', borderRadius: '4px', color: '#fff', fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>添加</button>
-            <button onClick={() => setShowCreate(false)} style={{ padding: '6px 10px', backgroundColor: 'transparent', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit' }}>✕</button>
+            <input value={newItem.relatedCharacterIds} onChange={e => setNewItem(p => ({ ...p, relatedCharacterIds: e.target.value }))} placeholder="关联角色(逗号分隔)" style={{ flex: 1, padding: '6px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
+            <button onClick={createItem} style={{ padding: '6px 14px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '4px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>添加</button>
+            <button onClick={() => setShowCreate(false)} style={{ padding: '6px 10px', backgroundColor: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '14px', fontFamily: 'inherit' }}>✕</button>
           </div>
         </div>
       )}
@@ -298,7 +298,7 @@ const ForeshadowingPage: React.FC = () => {
       {/* 伏笔列表 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#8a8aa0', fontSize: '13px' }}>
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-dim)', fontSize: '14px' }}>
             ⏳ 加载中...
           </div>
         ) : filtered.length === 0 ? (
@@ -317,32 +317,32 @@ const ForeshadowingPage: React.FC = () => {
             borderColor: expandedId === item.id ? `${STATUS_COLORS[item.status]}25` : 'rgba(255,255,255,0.06)',
           }} onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: '#6c6c80', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
+              <span style={{ fontSize: '14px', color: 'var(--color-text-muted)', fontWeight: 600, minWidth: '24px' }}>#{idx + 1}</span>
               <span style={{ fontSize: item.importance >= 3 ? '14px' : item.importance === 2 ? '12px' : '10px' }}>
                 {'⭐'.repeat(item.importance)}
               </span>
               <span style={{ padding: '2px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: `${STATUS_COLORS[item.status]}15`, color: STATUS_COLORS[item.status], fontWeight: 600 }}>
                 {STATUS_LABELS[item.status]}
               </span>
-              <span style={{ padding: '2px 6px', borderRadius: '3px', fontSize: '9px', backgroundColor: item.scope === 'global' ? 'rgba(233,69,96,0.1)' : item.scope === 'volume' ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.03)', color: item.scope === 'global' ? '#e94560' : item.scope === 'volume' ? '#60a5fa' : '#6c6c80', fontWeight: 500 }}>
+              <span style={{ padding: '2px 6px', borderRadius: '3px', fontSize: '9px', backgroundColor: item.scope === 'global' ? 'rgba(233,69,96,0.1)' : item.scope === 'volume' ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.03)', color: item.scope === 'global' ? 'var(--color-accent)' : item.scope === 'volume' ? 'var(--color-info-light)' : 'var(--color-text-muted)', fontWeight: 500 }}>
                 {item.scope === 'global' ? '全文' : item.scope === 'volume' ? '卷级' : '章节'}
               </span>
               {editingId === item.id ? (
                 <div style={{ flex: 1, display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <input value={editContent} onChange={e => setEditContent(e.target.value)} autoFocus
-                    style={{ flex: 1, padding: '4px 8px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(233,69,96,0.3)', borderRadius: '4px', color: '#eaeaea', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }}
+                    style={{ flex: 1, padding: '4px 8px', backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(233,69,96,0.3)', borderRadius: '4px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }}
                     onKeyDown={e => { if (e.key === 'Enter') updateContent(item.id); if (e.key === 'Escape') setEditingId(null); }} />
-                  <button onClick={(e) => { e.stopPropagation(); updateContent(item.id); }} style={{ padding: '4px 8px', backgroundColor: 'rgba(46,204,113,0.15)', border: '1px solid rgba(46,204,113,0.3)', borderRadius: '4px', color: '#2ecc71', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>保存</button>
-                  <button onClick={(e) => { e.stopPropagation(); setEditingId(null); }} style={{ padding: '4px 8px', backgroundColor: 'rgba(149,165,166,0.1)', border: '1px solid rgba(149,165,166,0.2)', borderRadius: '4px', color: '#95a5a6', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>取消</button>
+                  <button onClick={(e) => { e.stopPropagation(); updateContent(item.id); }} style={{ padding: '4px 8px', backgroundColor: 'rgba(46,204,113,0.15)', border: '1px solid rgba(46,204,113,0.3)', borderRadius: '4px', color: 'var(--color-success)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}>保存</button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditingId(null); }} style={{ padding: '4px 8px', backgroundColor: 'rgba(149,165,166,0.1)', border: '1px solid rgba(149,165,166,0.2)', borderRadius: '4px', color: 'var(--color-text-muted)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}>取消</button>
                 </div>
               ) : (
-                <span style={{ flex: 1, fontSize: '13px', color: '#c0c0d0' }}>{item.content}</span>
+                <span style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-soft)' }}>{item.content}</span>
               )}
-              <span style={{ fontSize: '11px', color: '#6c6c80' }}>埋设：第{item.buriedChapterIndex || '?'}章 → 回收：第{item.plannedRecoveryChapterIndex || '?'}章</span>
-              {isUnpaved(item) && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(239,68,68,0.12)', color: '#f87171', fontSize: '10px', fontWeight: 600 }}>缺少铺垫</span>}
-              {item.status === 'recovered' && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(34,197,94,0.12)', color: '#86efac', fontSize: '10px', fontWeight: 600 }}>{item.actualRecoveryChapterIndex ? `实际第${item.actualRecoveryChapterIndex}章回收` : '回收章节未记录'}</span>}
+              <span style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>埋设：第{item.buriedChapterIndex || '?'}章 → 回收：第{item.plannedRecoveryChapterIndex || '?'}章</span>
+              {isUnpaved(item) && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(239,68,68,0.12)', color: 'var(--color-danger)', fontSize: '10px', fontWeight: 600 }}>缺少铺垫</span>}
+              {item.status === 'recovered' && <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(34,197,94,0.12)', color: 'var(--color-success)', fontSize: '10px', fontWeight: 600 }}>{item.actualRecoveryChapterIndex ? `实际第${item.actualRecoveryChapterIndex}章回收` : '回收章节未记录'}</span>}
               {item.status === 'buried' && item.plannedRecoveryChapterIndex > 0 && (
-                <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(231,76,60,0.1)', color: '#e74c3c', fontSize: '10px', fontWeight: 600 }}>
+                <span style={{ padding: '1px 5px', borderRadius: '3px', backgroundColor: 'rgba(231,76,60,0.1)', color: 'var(--color-danger)', fontSize: '10px', fontWeight: 600 }}>
                   ⏰ 第{item.plannedRecoveryChapterIndex}章回收
                 </span>
               )}
@@ -350,28 +350,28 @@ const ForeshadowingPage: React.FC = () => {
 
             {expandedId === item.id && (
               <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ fontSize: '11px', color: '#8a8aa0' }}>类型：{TYPE_LABELS[item.type] || item.type || '未分类'} · 关联角色：{item.relatedCharacterIds?.length ? `${item.relatedCharacterIds.length}人` : '无'}</div>
-                <div style={{ fontSize: '11px', color: '#8a8aa0' }}>计划回收：第{item.recoveryWindowStart || item.plannedRecoveryChapterIndex || '?'}—{item.recoveryWindowEnd || item.plannedRecoveryChapterIndex || '?'}章 · 遗漏风险：{RISK_LABELS[item.riskLevel || 'medium']}</div>
-                {item.evidenceText && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>证据：{item.evidenceText}</p>}
-                {item.status === 'recovered' && <div style={{ fontSize: '11px', color: '#86efac' }}>实际回收：{item.actualRecoveryChapterIndex ? `第${item.actualRecoveryChapterIndex}章` : '未记录章节'}{chapterSpan(item) !== null ? ` · 跨 ${chapterSpan(item)} 章` : ''}{item.recoveryMethod ? ` · ${item.recoveryMethod}` : ''}</div>}
-                {item.status !== 'recovered' && chapterSpan(item) !== null && <div style={{ fontSize: '11px', color: '#8a8aa0' }}>计划跨度：从埋设到回收约跨 {chapterSpan(item)} 章</div>}
-                {!item.evidenceText && <p style={{ margin: 0, fontSize: '12px', color: '#f87171' }}>尚未记录章纲中的埋设证据；这条不能作为已铺垫伏笔使用。</p>}
-                {item.recoveryCondition && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>回收条件：{item.recoveryCondition}</p>}
-                {item.payoffDescription && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>回收结果：{item.payoffDescription}</p>}
-                {item.notes && <p style={{ margin: 0, fontSize: '12px', color: '#c0c0d0' }}>{item.notes}</p>}
+                <div style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>类型：{TYPE_LABELS[item.type] || item.type || '未分类'} · 关联角色：{item.relatedCharacterIds?.length ? `${item.relatedCharacterIds.length}人` : '无'}</div>
+                <div style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>计划回收：第{item.recoveryWindowStart || item.plannedRecoveryChapterIndex || '?'}—{item.recoveryWindowEnd || item.plannedRecoveryChapterIndex || '?'}章 · 遗漏风险：{RISK_LABELS[item.riskLevel || 'medium']}</div>
+                {item.evidenceText && <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)' }}>证据：{item.evidenceText}</p>}
+                {item.status === 'recovered' && <div style={{ fontSize: '14px', color: 'var(--color-success)' }}>实际回收：{item.actualRecoveryChapterIndex ? `第${item.actualRecoveryChapterIndex}章` : '未记录章节'}{chapterSpan(item) !== null ? ` · 跨 ${chapterSpan(item)} 章` : ''}{item.recoveryMethod ? ` · ${item.recoveryMethod}` : ''}</div>}
+                {item.status !== 'recovered' && chapterSpan(item) !== null && <div style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>计划跨度：从埋设到回收约跨 {chapterSpan(item)} 章</div>}
+                {!item.evidenceText && <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-danger)' }}>尚未记录章纲中的埋设证据；这条不能作为已铺垫伏笔使用。</p>}
+                {item.recoveryCondition && <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)' }}>回收条件：{item.recoveryCondition}</p>}
+                {item.payoffDescription && <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)' }}>回收结果：{item.payoffDescription}</p>}
+                {item.notes && <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)' }}>{item.notes}</p>}
                 <div style={{ display: 'flex', gap: '6px' }}>
                   <button onClick={(e) => { e.stopPropagation(); setEditingId(item.id); setEditContent(item.content); }}
-                    style={{ padding: '4px 10px', backgroundColor: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: '4px', color: '#60a5fa', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                    style={{ padding: '4px 10px', backgroundColor: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: '4px', color: 'var(--color-info-light)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}>
                     编辑
                   </button>
                   {(item.status === 'active' || item.status === 'reminder' || item.status === 'pending' || item.status === 'buried') && (
                     <button onClick={(e) => { e.stopPropagation(); changeStatus(item.id, 'recover'); }}
-                      style={{ padding: '4px 10px', backgroundColor: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.2)', borderRadius: '4px', color: '#2ecc71', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      style={{ padding: '4px 10px', backgroundColor: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.2)', borderRadius: '4px', color: 'var(--color-success)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}>
                       标记已回收
                     </button>
                   )}
                   <button onClick={(e) => { e.stopPropagation(); deleteItem(item.id); }}
-                    style={{ padding: '4px 10px', backgroundColor: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.2)', borderRadius: '4px', color: '#e74c3c', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>
+                    style={{ padding: '4px 10px', backgroundColor: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.2)', borderRadius: '4px', color: 'var(--color-danger)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>
                     删除
                   </button>
                 </div>
@@ -395,13 +395,13 @@ const ForeshadowingPage: React.FC = () => {
             setGenProgress?.('✅ 暂无需要回收的伏笔');
           }
         } catch {}
-      }} style={{ padding: '8px 16px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '6px', color: '#f39c12', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit', width: 'fit-content' }}>
+      }} style={{ padding: '8px 16px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '6px', color: 'var(--color-warning)', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', width: 'fit-content' }}>
         🔍 伏笔回收推荐
       </button>
 
       {/* 递进反转规划 */}
       <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(155,89,182,0.05)', borderRadius: '8px', border: '1px solid rgba(155,89,182,0.1)' }}>
-        <div style={{ fontSize: '12px', fontWeight: 600, color: '#c0c0d0', marginBottom: '8px' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-soft)', marginBottom: '8px' }}>
           🔄 递进反转规划 {reversals.length > 0 ? `(${reversals.length}次→逐步加深)` : ''}
         </div>
         {reversals.length > 0 ? (
@@ -411,21 +411,21 @@ const ForeshadowingPage: React.FC = () => {
               backgroundColor: `rgba(233,69,96,${0.04 + i * 0.02})`,
               border: `1px solid rgba(233,69,96,${0.08 + i * 0.03})`,
             }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#e94560', marginBottom: '6px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-accent)', marginBottom: '6px' }}>
                 反转 {i + 1} · {r.position || r.id || ''}
-                <span style={{ color: '#6c6c80', fontSize: '11px', marginLeft: '8px' }}>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '14px', marginLeft: '8px' }}>
                   {i === 0 ? '引导悬念' : i === reversals.length - 1 ? '终局真相' : '层层递进'}
                 </span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: '11px' }}>
-                <span style={{ color: '#6c6c80' }}>表面真相: <span style={{ color: '#c0c0d0' }}>{r.surfaceTruth || r.surface || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>实际真相: <span style={{ color: '#e94560' }}>{r.actualTruth || r.truth || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>支撑伏笔: <span style={{ color: '#f59e0b' }}>{r.foreshadowRef || r.foreshadowId || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>揭露方式: <span style={{ color: '#c0c0d0' }}>{r.revealMethod || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>对主角打击: <span style={{ color: '#e74c3c' }}>{r.impactOnCharacter || r.impact || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>对读者冲击: <span style={{ color: '#f39c12' }}>{r.impactOnReader || r.readerShock || ''}</span></span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: '14px' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>表面真相: <span style={{ color: 'var(--color-text-soft)' }}>{r.surfaceTruth || r.surface || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>实际真相: <span style={{ color: 'var(--color-accent)' }}>{r.actualTruth || r.truth || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>支撑伏笔: <span style={{ color: 'var(--color-warning)' }}>{r.foreshadowRef || r.foreshadowId || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>揭露方式: <span style={{ color: 'var(--color-text-soft)' }}>{r.revealMethod || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>对主角打击: <span style={{ color: 'var(--color-danger)' }}>{r.impactOnCharacter || r.impact || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>对读者冲击: <span style={{ color: 'var(--color-warning)' }}>{r.impactOnReader || r.readerShock || ''}</span></span>
                 {(r.changesUnderstanding !== undefined) && (
-                  <span style={{ color: '#6c6c80', gridColumn: '1 / -1', fontSize: '10px' }}>
+                  <span style={{ color: 'var(--color-text-muted)', gridColumn: '1 / -1', fontSize: '10px' }}>
                     改变前文理解: {r.changesUnderstanding ? '✅ 是' : '否'}
                   </span>
                 )}
@@ -433,7 +433,7 @@ const ForeshadowingPage: React.FC = () => {
             </div>
           ))
         ) : (
-          <div style={{ textAlign: 'center', padding: '16px', color: '#6c6c80', fontSize: '12px' }}>
+          <div style={{ textAlign: 'center', padding: '16px', color: 'var(--color-text-muted)', fontSize: '14px' }}>
             暂无递进反转规划数据
           </div>
         )}

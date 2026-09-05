@@ -25,6 +25,8 @@ export const WRITING_QUALITY_TAGS = [
   'causality_gap',
   'time_order_error',
   'event_sequence_risk',
+  'label_fit',
+  'punctuation',
 ] as const;
 
 export type WritingQualityTag = typeof WRITING_QUALITY_TAGS[number];

@@ -18,7 +18,7 @@ const overlayStyle: React.CSSProperties = {
 
 const modalStyle: React.CSSProperties = {
   width: '95vw', height: '90vh', maxWidth: '1400px', maxHeight: '900px',
-  backgroundColor: '#12121f', borderRadius: '14px',
+  backgroundColor: 'var(--color-bg-primary)', borderRadius: '14px',
   border: '1px solid rgba(255,255,255,0.08)',
   boxShadow: '0 32px 100px rgba(0,0,0,0.6)',
   display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -51,7 +51,7 @@ const LazyPromptChainEditor: React.FC = () => {
     return (
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100%', color: '#6c6c80', fontSize: '13px', gap: '8px',
+        height: '100%', color: 'var(--color-text-muted)', fontSize: '14px', gap: '8px',
       }}>
         <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⚙️</span>
         加载编辑器...
@@ -83,8 +83,8 @@ const PromptChainModal: React.FC<PromptChainModalProps> = ({ open, onClose }) =>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '18px' }}>⛓</span>
             <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#eaeaea' }}>Prompt Chain 编辑器</h3>
-              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#6c6c80' }}>可视化编排 AI 提示词链</p>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--color-text-primary)' }}>Prompt Chain 编辑器</h3>
+              <p style={{ margin: '2px 0 0', fontSize: '14px', color: 'var(--color-text-muted)' }}>可视化编排 AI 提示词链</p>
             </div>
           </div>
           <button
@@ -92,7 +92,7 @@ const PromptChainModal: React.FC<PromptChainModalProps> = ({ open, onClose }) =>
             style={{
               padding: '5px 10px', borderRadius: '6px', background: 'rgba(255,255,255,0.05)',
               border: '1px solid rgba(255,255,255,0.1)',
-              color: '#8a8aa0', cursor: 'pointer', fontSize: '14px',
+              color: 'var(--color-text-dim)', cursor: 'pointer', fontSize: '14px',
             }}
             title="关闭 (ESC)"
           >

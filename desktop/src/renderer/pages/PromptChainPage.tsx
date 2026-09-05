@@ -76,19 +76,19 @@ interface SavedChain {
 // ============================================================
 
 const NODE_PALETTE_ITEMS: { type: ChainNodeType; label: string; color: string; icon: string }[] = [
-  { type: 'prompt', label: 'Prompt 节点', color: '#6366f1', icon: '📝' },
-  { type: 'condition', label: '条件节点', color: '#f59e0b', icon: '🔀' },
-  { type: 'parallel', label: '并行节点', color: '#10b981', icon: '⚡' },
-  { type: 'loop', label: '循环节点', color: '#ec4899', icon: '🔄' },
-  { type: 'transform', label: '转换节点', color: '#8b5cf6', icon: '🔧' },
+  { type: 'prompt', label: 'Prompt 节点', color: 'var(--color-purple)', icon: '📝' },
+  { type: 'condition', label: '条件节点', color: 'var(--color-warning)', icon: '🔀' },
+  { type: 'parallel', label: '并行节点', color: 'var(--color-success)', icon: '⚡' },
+  { type: 'loop', label: '循环节点', color: 'var(--color-pink)', icon: '🔄' },
+  { type: 'transform', label: '转换节点', color: 'var(--color-purple)', icon: '🔧' },
 ];
 
 const NODE_COLORS: Record<ChainNodeType, string> = {
-  prompt: '#6366f1',
-  condition: '#f59e0b',
-  parallel: '#10b981',
-  loop: '#ec4899',
-  transform: '#8b5cf6',
+  prompt: 'var(--color-purple)',
+  condition: 'var(--color-warning)',
+  parallel: 'var(--color-success)',
+  loop: 'var(--color-pink)',
+  transform: 'var(--color-purple)',
 };
 
 const CHAIN_DEFAULTS: Record<ChainNodeType, Partial<ChainNodeData>> = {
@@ -104,7 +104,7 @@ const CHAIN_DEFAULTS: Record<ChainNodeType, Partial<ChainNodeData>> = {
 // ============================================================
 
 const ChainNodeComponent: React.FC<NodeProps<ChainNodeData>> = ({ data, selected }) => {
-  const color = NODE_COLORS[data.nodeType] || '#6366f1';
+  const color = NODE_COLORS[data.nodeType] || 'var(--color-purple)';
   const icons: Record<string, string> = { prompt: '📝', condition: '🔀', parallel: '⚡', loop: '🔄', transform: '🔧' };
 
   const statusDot = selected ? '🟢' : '⚪';
@@ -120,24 +120,24 @@ const ChainNodeComponent: React.FC<NodeProps<ChainNodeData>> = ({ data, selected
       transition: 'border-color 0.2s, box-shadow 0.2s',
       position: 'relative',
     }}>
-      <Handle type="target" position={Position.Top} style={{ background: color, width: 10, height: 10, border: '2px solid #1a1a2e' }} />
-      <Handle type="source" position={Position.Bottom} style={{ background: color, width: 10, height: 10, border: '2px solid #1a1a2e' }} />
+      <Handle type="target" position={Position.Top} style={{ background: color, width: 10, height: 10, border: '2px solid var(--color-bg-primary)' }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: color, width: 10, height: 10, border: '2px solid var(--color-bg-primary)' }} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{ fontSize: 16 }}>{icons[data.nodeType] || '📦'}</span>
         <span style={{ fontSize: 14, padding: '2px 6px', background: `${color}22`, borderRadius: 4, color }}>{data.nodeType.toUpperCase()}</span>
       </div>
 
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea', marginBottom: 4 }}>{data.label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>{data.label}</div>
 
       {data.templateId && (
-        <div style={{ fontSize: 14, color: '#8a8aa0', marginBottom: 2 }}>模板: {data.templateId}</div>
+        <div style={{ fontSize: 14, color: 'var(--color-text-dim)', marginBottom: 2 }}>模板: {data.templateId}</div>
       )}
       {data.conditionExpression && (
-        <div style={{ fontSize: 14, color: '#f59e0b' }}>条件: {data.conditionExpression}</div>
+        <div style={{ fontSize: 14, color: 'var(--color-warning)' }}>条件: {data.conditionExpression}</div>
       )}
       {data.maxIterations && (
-        <div style={{ fontSize: 14, color: '#ec4899' }}>最大迭代: {data.maxIterations}</div>
+        <div style={{ fontSize: 14, color: 'var(--color-pink)' }}>最大迭代: {data.maxIterations}</div>
       )}
 
       <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 14 }}>{statusDot}</div>
@@ -180,8 +180,8 @@ const SidePanel: React.FC = () => {
       height: '100%',
       overflow: 'auto',
     }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: '#8a8aa0', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>节点面板</div>
-      <div style={{ fontSize: 14, color: '#6c6c80', marginBottom: 8 }}>拖拽节点到画布</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>节点面板</div>
+      <div style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 8 }}>拖拽节点到画布</div>
 
       {NODE_PALETTE_ITEMS.map(item => (
         <div
@@ -204,14 +204,14 @@ const SidePanel: React.FC = () => {
         >
           <span style={{ fontSize: 16 }}>{item.icon}</span>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea' }}>{item.label}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text-primary)' }}>{item.label}</div>
             <div style={{ fontSize: 14, color: item.color }}>{item.type}</div>
           </div>
         </div>
       ))}
 
       <div style={{ marginTop: 'auto', padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-        <div style={{ fontSize: 14, color: '#6c6c80', lineHeight: 1.6 }}>
+        <div style={{ fontSize: 14, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
           快捷键:<br />
           Delete = 删除选中节点/连线<br />
           Ctrl+S = 保存<br />
@@ -244,7 +244,7 @@ const PropertiesPanel: React.FC<{
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        color: '#6c6c80',
+        color: 'var(--color-text-muted)',
       }}>
         <span style={{ fontSize: 32, marginBottom: 12 }}>👈</span>
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>选择一个节点</div>
@@ -254,7 +254,7 @@ const PropertiesPanel: React.FC<{
   }
 
   const data = node.data;
-  const color = NODE_COLORS[data.nodeType] || '#6366f1';
+  const color = NODE_COLORS[data.nodeType] || 'var(--color-purple)';
   const icons: Record<string, string> = { prompt: '📝', condition: '🔀', parallel: '⚡', loop: '🔄', transform: '🔧' };
 
   const setLabel = (val: string) => onUpdate(node.id, { label: val });
@@ -270,7 +270,7 @@ const PropertiesPanel: React.FC<{
     background: 'rgba(255,255,255,0.05)',
     border: '1px solid rgba(255,255,255,0.1)',
     borderRadius: 6,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     fontSize: 14,
     outline: 'none',
     fontFamily: 'inherit',
@@ -280,7 +280,7 @@ const PropertiesPanel: React.FC<{
   const labelStyle: React.CSSProperties = {
     fontSize: 14,
     fontWeight: 600,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -300,7 +300,7 @@ const PropertiesPanel: React.FC<{
         <span style={{ fontSize: 18 }}>{icons[data.nodeType] || '📦'}</span>
         <div>
           <div style={{ fontSize: 14, color, fontWeight: 600 }}>{data.nodeType.toUpperCase()}</div>
-          <div style={{ fontSize: 14, color: '#eaeaea', fontWeight: 700 }}>{data.label || '未命名节点'}</div>
+          <div style={{ fontSize: 14, color: 'var(--color-text-primary)', fontWeight: 700 }}>{data.label || '未命名节点'}</div>
         </div>
       </div>
 
@@ -351,7 +351,7 @@ const PropertiesPanel: React.FC<{
             </div>
             <div>
               <div style={labelStyle}>分支目标</div>
-              <div style={{ fontSize: 14, color: '#6c6c80' }}>通过连线连接目标和条件分支</div>
+              <div style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>通过连线连接目标和条件分支</div>
             </div>
           </>
         )}
@@ -380,7 +380,7 @@ const PropertiesPanel: React.FC<{
         {/* 节点 ID */}
         <div>
           <div style={labelStyle}>节点 ID</div>
-          <div style={{ fontSize: 14, color: '#6c6c80', padding: '6px 0' }}>{node.id}</div>
+          <div style={{ fontSize: 14, color: 'var(--color-text-muted)', padding: '6px 0' }}>{node.id}</div>
         </div>
 
       </div>
@@ -432,9 +432,9 @@ const ChainEditor: React.FC = () => {
     setEdges(eds => addEdge({
       ...connection,
       animated: true,
-      style: { stroke: '#6366f1', strokeWidth: 2 },
+      style: { stroke: 'var(--color-purple)', strokeWidth: 2 },
       label: 'success',
-      labelStyle: { fill: '#8a8aa0', fontSize: 14 },
+      labelStyle: { fill: 'var(--color-text-dim)', fontSize: 14 },
     }, eds));
   }, [setEdges]);
 
@@ -583,9 +583,9 @@ const ChainEditor: React.FC = () => {
                 source: n.id,
                 target: targetId,
                 animated: true,
-                style: { stroke: '#6366f1', strokeWidth: 2 },
+                style: { stroke: 'var(--color-purple)', strokeWidth: 2 },
                 label: 'success',
-                labelStyle: { fill: '#8a8aa0', fontSize: 14 },
+                labelStyle: { fill: 'var(--color-text-dim)', fontSize: 14 },
               });
             });
           }
@@ -678,9 +678,9 @@ const ChainEditor: React.FC = () => {
                 source: n.id,
                 target: targetId,
                 animated: true,
-                style: { stroke: '#6366f1', strokeWidth: 2 },
+                style: { stroke: 'var(--color-purple)', strokeWidth: 2 },
                 label: 'success',
-                labelStyle: { fill: '#8a8aa0', fontSize: 14 },
+                labelStyle: { fill: 'var(--color-text-dim)', fontSize: 14 },
               });
             });
           }
@@ -737,7 +737,7 @@ const ChainEditor: React.FC = () => {
       fontSize: 14,
       fontWeight: 600,
       background: toast.type === 'success' ? 'rgba(16,185,129,0.9)' : toast.type === 'error' ? 'rgba(239,68,68,0.9)' : 'rgba(99,102,241,0.9)',
-      color: '#fff',
+      color: 'var(--color-white)',
       boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
       pointerEvents: 'none',
     }}>
@@ -777,8 +777,8 @@ const ChainEditor: React.FC = () => {
         <button onClick={handleImport} style={toolBtnStyle}>📥 导入 JSON</button>
 
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea' }}>{chainName}</span>
-        <span style={{ fontSize: 14, color: '#6c6c80' }}>{nodes.length} 个节点 / {edges.length} 条连线</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text-primary)' }}>{chainName}</span>
+        <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>{nodes.length} 个节点 / {edges.length} 条连线</span>
       </div>
 
       {/* ===== Main Content ===== */}
@@ -801,10 +801,10 @@ const ChainEditor: React.FC = () => {
             snapToGrid
             snapGrid={[20, 20]}
             deleteKeyCode={['Backspace', 'Delete']}
-            style={{ background: '#0a0a12' }}
+            style={{ background: 'var(--color-bg-primary)' }}
             defaultEdgeOptions={{
               animated: true,
-              style: { stroke: '#6366f1', strokeWidth: 2 },
+              style: { stroke: 'var(--color-purple)', strokeWidth: 2 },
             }}
           >
             <Controls
@@ -821,7 +821,7 @@ const ChainEditor: React.FC = () => {
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: 8,
               }}
-              nodeColor={(n) => NODE_COLORS[n.data?.nodeType as ChainNodeType] || '#6366f1'}
+              nodeColor={(n) => NODE_COLORS[n.data?.nodeType as ChainNodeType] || 'var(--color-purple)'}
               maskColor="rgba(0,0,0,0.6)"
             />
           </ReactFlow>
@@ -833,7 +833,7 @@ const ChainEditor: React.FC = () => {
       {showNewDialog && (
         <div style={overlayStyle}>
           <div style={dialogStyle}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#eaeaea' }}>新建 Prompt Chain</h3>
+            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--color-text-primary)' }}>新建 Prompt Chain</h3>
             <input
               style={dialogInputStyle}
               placeholder="Chain 名称"
@@ -848,7 +848,7 @@ const ChainEditor: React.FC = () => {
             />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
               <button onClick={() => setShowNewDialog(false)} style={dialogBtnStyle}>取消</button>
-              <button onClick={handleNew} style={{ ...dialogBtnStyle, background: '#6366f1', color: '#fff' }}>创建</button>
+              <button onClick={handleNew} style={{ ...dialogBtnStyle, background: 'var(--color-purple)', color: 'var(--color-white)' }}>创建</button>
             </div>
           </div>
         </div>
@@ -858,9 +858,9 @@ const ChainEditor: React.FC = () => {
       {showLoadDialog && (
         <div style={overlayStyle}>
           <div style={{ ...dialogStyle, maxHeight: 400, overflow: 'auto' }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#eaeaea' }}>加载 Chain</h3>
+            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--color-text-primary)' }}>加载 Chain</h3>
             {savedChains.length === 0 && (
-              <div style={{ color: '#6c6c80', fontSize: 14, textAlign: 'center', padding: 20 }}>暂无保存的 Chain</div>
+              <div style={{ color: 'var(--color-text-muted)', fontSize: 14, textAlign: 'center', padding: 20 }}>暂无保存的 Chain</div>
             )}
             {savedChains.map(c => (
               <div
@@ -878,9 +878,9 @@ const ChainEditor: React.FC = () => {
                 onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
               >
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#eaeaea' }}>{c.name}</div>
-                <div style={{ fontSize: 14, color: '#8a8aa0', marginTop: 2 }}>{c.nodes} 个节点 · v{c.version}</div>
-                <div style={{ fontSize: 14, color: '#6c6c80', marginTop: 2 }}>{c.description}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text-primary)' }}>{c.name}</div>
+                <div style={{ fontSize: 14, color: 'var(--color-text-dim)', marginTop: 2 }}>{c.nodes} 个节点 · v{c.version}</div>
+                <div style={{ fontSize: 14, color: 'var(--color-text-muted)', marginTop: 2 }}>{c.description}</div>
               </div>
             ))}
             <button
@@ -903,7 +903,7 @@ const toolBtnStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 6,
-  color: '#eaeaea',
+  color: 'var(--color-text-primary)',
   fontSize: 14,
   fontWeight: 600,
   cursor: 'pointer',
@@ -923,7 +923,7 @@ const overlayStyle: React.CSSProperties = {
 };
 
 const dialogStyle: React.CSSProperties = {
-  background: '#1a1a2e',
+  background: 'var(--color-bg-primary)',
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 12,
   padding: 24,
@@ -937,7 +937,7 @@ const dialogInputStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 6,
-  color: '#eaeaea',
+  color: 'var(--color-text-primary)',
   fontSize: 14,
   outline: 'none',
   fontFamily: 'inherit',
@@ -950,7 +950,7 @@ const dialogBtnStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.08)',
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 6,
-  color: '#eaeaea',
+  color: 'var(--color-text-primary)',
   fontSize: 14,
   fontWeight: 600,
   cursor: 'pointer',

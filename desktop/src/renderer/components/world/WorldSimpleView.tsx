@@ -199,28 +199,28 @@ const WorldSimpleView: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* 非详细速览层 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <SectionHeading title="故事速览" accent="#e94560" hint="一句话背景 · 时代 · 核心地点 · 核心规则" />
-        {settings.storyPremise && <div style={{ fontSize: 14, lineHeight: 1.7, color: '#eaeaea' }}>{settings.storyPremise}</div>}
-        <div><span style={{ fontSize: 14, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>时代</span><ChipList items={settings.era ? [settings.era] : []} color="#f59e0b" /></div>
-        <div><span style={{ fontSize: 14, fontWeight: 700, color: '#93c5fd', marginRight: 8 }}>核心地点</span><ChipList items={settings.locations} color="#60a5fa" /></div>
-        <FieldList label="社会与行业规则" value={settings.socialRules} accent="#a78bfa" />
-        <FieldList label="特殊设定" value={settings.specialSettings} accent="#f59e0b" />
+        <SectionHeading title="故事速览" accent="var(--color-accent)" hint="一句话背景 · 时代 · 核心地点 · 核心规则" />
+        {settings.storyPremise && <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--color-text-primary)' }}>{settings.storyPremise}</div>}
+        <div><span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-info-light)', marginRight: 8 }}>时代</span><ChipList items={settings.era ? [settings.era] : []} color="var(--color-warning)" /></div>
+        <div><span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-info-light)', marginRight: 8 }}>核心地点</span><ChipList items={settings.locations} color="var(--color-info-light)" /></div>
+        <FieldList label="社会与行业规则" value={settings.socialRules} accent="var(--color-purple)" />
+        <FieldList label="特殊设定" value={settings.specialSettings} accent="var(--color-warning)" />
       </section>
 
       {/* 详细设定层 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <SectionHeading title="详细设定" accent="#a855f7" hint="仅展示已填写维度" />
+        <SectionHeading title="详细设定" accent="var(--color-purple)" hint="仅展示已填写维度" />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[
-            { label: '时代（时间线/历史背景）', v: settings.history || settings.era, c: '#f59e0b' },
-            { label: '地点（主要区域/关键地点）', v: settings.geography, c: '#60a5fa' },
-            { label: '氛围基调', v: settings.atmosphereTone, c: '#22c55e' },
-            { label: '规则', v: settings.rules, c: '#e94560' },
-            { label: '社会结构', v: settings.socialStructure, c: '#a78bfa' },
+            { label: '时代（时间线/历史背景）', v: settings.history || settings.era, c: 'var(--color-warning)' },
+            { label: '地点（主要区域/关键地点）', v: settings.geography, c: 'var(--color-info-light)' },
+            { label: '氛围基调', v: settings.atmosphereTone, c: 'var(--color-success)' },
+            { label: '规则', v: settings.rules, c: 'var(--color-accent)' },
+            { label: '社会结构', v: settings.socialStructure, c: 'var(--color-purple)' },
             { label: '经济体系', v: settings.economy, c: '#38bdf8' },
-            { label: '科技/超自然体系', v: settings.powerSystem, c: '#f472b6' },
+            { label: '科技/超自然体系', v: settings.powerSystem, c: 'var(--color-pink)' },
             { label: '文化风俗（语言/习俗/禁忌）', v: settings.culture, c: '#34d399' },
-            { label: '补充说明', v: settings.supplementary, c: '#8a8aa0' },
+            { label: '补充说明', v: settings.supplementary, c: 'var(--color-text-dim)' },
           ].filter(item => item.v).map(item => (
             <div key={item.label} style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(139,92,246,0.14)', backgroundColor: 'rgba(139,92,246,0.05)' }}>
               <FieldList label={item.label} value={item.v} accent={item.c} />
@@ -233,7 +233,7 @@ const WorldSimpleView: React.FC = () => {
 
   if (loading) {
     return (
-      <div style={{ padding: '40px', textAlign: 'center', color: '#6c6c80' }}>
+      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
         加载中...
       </div>
     );
@@ -242,7 +242,7 @@ const WorldSimpleView: React.FC = () => {
   return (
     <div style={{ padding: '20px', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#eaeaea' }}>
+        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>
           🌍 世界观
         </h2>
         <button
@@ -251,7 +251,7 @@ const WorldSimpleView: React.FC = () => {
             if (isEditing) { void loadSettings(); setIsEditing(false); }
             else setIsEditing(true);
           }}
-          style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid rgba(233,69,96,0.45)', background: isEditing ? 'rgba(255,255,255,0.04)' : 'rgba(233,69,96,0.12)', color: isEditing ? '#c0c0d0' : '#ff9aaa', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}
+          style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid rgba(233,69,96,0.45)', background: isEditing ? 'rgba(255,255,255,0.04)' : 'rgba(233,69,96,0.12)', color: isEditing ? 'var(--color-text-soft)' : '#ff9aaa', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}
         >
           {isEditing ? '取消编辑' : '编辑'}
         </button>
@@ -262,8 +262,8 @@ const WorldSimpleView: React.FC = () => {
           padding: '10px 14px',
           borderRadius: '6px',
           backgroundColor: saveMessage.includes('✅') ? 'rgba(46,204,113,0.1)' : 'rgba(231,76,60,0.1)',
-          color: saveMessage.includes('✅') ? '#2ecc71' : '#e74c3c',
-          fontSize: '13px',
+          color: saveMessage.includes('✅') ? 'var(--color-success)' : 'var(--color-danger)',
+          fontSize: '14px',
         }}>
           {saveMessage}
         </div>
@@ -273,7 +273,7 @@ const WorldSimpleView: React.FC = () => {
       <fieldset style={{ border: 0, padding: 0, margin: 0, minInlineSize: 0, display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* 1. 故事背景 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
+        <label style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-soft)' }}>
           📖 故事背景
         </label>
         <textarea
@@ -287,7 +287,7 @@ const WorldSimpleView: React.FC = () => {
             backgroundColor: 'rgba(255,255,255,0.03)',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: '8px',
-            color: '#eaeaea',
+            color: 'var(--color-text-primary)',
             fontFamily: 'inherit',
             resize: 'vertical',
             outline: 'none',
@@ -298,7 +298,7 @@ const WorldSimpleView: React.FC = () => {
 
       {/* 2. 时代背景选择器 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
+        <label style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-soft)' }}>
           🕐 时代背景
         </label>
         <div style={{ display: 'flex', gap: '12px' }}>
@@ -314,13 +314,13 @@ const WorldSimpleView: React.FC = () => {
                   : 'rgba(255,255,255,0.03)',
                 border: `2px solid ${
                   settings.era === option.value 
-                    ? '#e94560' 
+                    ? 'var(--color-accent)' 
                     : 'rgba(255,255,255,0.1)'
                 }`,
                 borderRadius: '8px',
                 cursor: 'pointer',
                 fontSize: '14px',
-                color: '#eaeaea',
+                color: 'var(--color-text-primary)',
                 fontFamily: 'inherit',
                 transition: 'all 0.2s',
               }}
@@ -334,9 +334,9 @@ const WorldSimpleView: React.FC = () => {
 
       {/* 3. 核心地点标签 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
+        <label style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-soft)' }}>
           📍 核心地点
-          <span style={{ fontSize: '11px', color: '#6c6c80', marginLeft: '8px' }}>
+          <span style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginLeft: '8px' }}>
             {settings.locations.length} 个
           </span>
         </label>
@@ -349,8 +349,8 @@ const WorldSimpleView: React.FC = () => {
                 backgroundColor: 'rgba(233,69,96,0.1)',
                 border: '1px solid rgba(233,69,96,0.3)',
                 borderRadius: '6px',
-                fontSize: '12px',
-                color: '#e94560',
+                fontSize: '14px',
+                color: 'var(--color-accent)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
@@ -362,7 +362,7 @@ const WorldSimpleView: React.FC = () => {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#e94560',
+                  color: 'var(--color-accent)',
                   cursor: 'pointer',
                   fontSize: '14px',
                   padding: '0 2px',
@@ -385,8 +385,8 @@ const WorldSimpleView: React.FC = () => {
                 backgroundColor: 'rgba(255,255,255,0.03)',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: '6px',
-                color: '#eaeaea',
-                fontSize: '12px',
+                color: 'var(--color-text-primary)',
+                fontSize: '14px',
                 fontFamily: 'inherit',
                 outline: 'none',
               }}
@@ -396,11 +396,11 @@ const WorldSimpleView: React.FC = () => {
               disabled={!locationInput.trim()}
               style={{
                 padding: '8px 14px',
-                backgroundColor: locationInput.trim() ? '#e94560' : 'rgba(255,255,255,0.06)',
+                backgroundColor: locationInput.trim() ? 'var(--color-accent)' : 'rgba(255,255,255,0.06)',
                 border: 'none',
                 borderRadius: '6px',
-                color: locationInput.trim() ? '#fff' : '#6c6c80',
-                fontSize: '12px',
+                color: locationInput.trim() ? 'var(--color-white)' : 'var(--color-text-muted)',
+                fontSize: '14px',
                 cursor: locationInput.trim() ? 'pointer' : 'default',
                 fontFamily: 'inherit',
               }}
@@ -412,7 +412,7 @@ const WorldSimpleView: React.FC = () => {
 
       {/* 4. 社会规则文本域 */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <label style={{ fontSize: '13px', fontWeight: 600, color: '#c0c0d0' }}>
+        <label style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-soft)' }}>
           ⚖️ 社会与行业规则
         </label>
         <textarea
@@ -421,12 +421,12 @@ const WorldSimpleView: React.FC = () => {
           placeholder="只写与剧情有关的行业规则、法律边界、社会关系或生活常识"
           style={{
             padding: '12px',
-            fontSize: '13px',
+            fontSize: '14px',
             lineHeight: 1.6,
             backgroundColor: 'rgba(255,255,255,0.03)',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: '8px',
-            color: '#eaeaea',
+            color: 'var(--color-text-primary)',
             fontFamily: 'inherit',
             resize: 'vertical',
             outline: 'none',
@@ -444,8 +444,8 @@ const WorldSimpleView: React.FC = () => {
             backgroundColor: 'transparent',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: '6px',
-            color: '#8a8aa0',
-            fontSize: '12px',
+            color: 'var(--color-text-dim)',
+            fontSize: '14px',
             cursor: 'pointer',
             fontFamily: 'inherit',
             textAlign: 'left',
@@ -464,12 +464,12 @@ const WorldSimpleView: React.FC = () => {
             placeholder="描述魔法体系、科技水平、特殊能力等特殊设定..."
             style={{
               padding: '12px',
-              fontSize: '13px',
+              fontSize: '14px',
               lineHeight: 1.6,
               backgroundColor: 'rgba(255,255,255,0.03)',
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: '8px',
-              color: '#eaeaea',
+              color: 'var(--color-text-primary)',
               fontFamily: 'inherit',
               resize: 'vertical',
               outline: 'none',
@@ -491,8 +491,8 @@ const WorldSimpleView: React.FC = () => {
             backgroundColor: 'rgba(255,255,255,0.03)',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: '6px',
-            color: '#8a8aa0',
-            fontSize: '13px',
+            color: 'var(--color-text-dim)',
+            fontSize: '14px',
             cursor: loading ? 'default' : 'pointer',
             fontFamily: 'inherit',
           }}
@@ -504,11 +504,11 @@ const WorldSimpleView: React.FC = () => {
           disabled={saving}
           style={{
             padding: '10px 24px',
-            backgroundColor: saving ? 'rgba(233,69,96,0.5)' : '#e94560',
+            backgroundColor: saving ? 'rgba(233,69,96,0.5)' : 'var(--color-accent)',
             border: 'none',
             borderRadius: '6px',
-            color: '#fff',
-            fontSize: '13px',
+            color: 'var(--color-white)',
+            fontSize: '14px',
             fontWeight: 600,
             cursor: saving ? 'default' : 'pointer',
             fontFamily: 'inherit',

@@ -6,15 +6,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 
 const PLAN_OPTIONS = [
-  { value: 'deepseek', label: 'DeepSeek 按量', color: '#60a5fa' },
-  { value: 'deepseek_bundle', label: 'DeepSeek Token包', color: '#3b82f6' },
-  { value: 'ali_bailian', label: '阿里百炼 Token包', color: '#e94560' },
-  { value: 'tencent_hunyuan', label: '腾讯混元 Token包', color: '#22c55e' },
-  { value: 'openai_paygo', label: 'OpenAI 按量', color: '#10b981' },
-  { value: 'openai_bundle', label: 'OpenAI Token包', color: '#059669' },
-  { value: 'claude_paygo', label: 'Claude 按量', color: '#a855f7' },
-  { value: 'gemini_free', label: 'Gemini 免费', color: '#f59e0b' },
-  { value: 'other_bundle', label: '其他 Token包', color: '#6c6c80' },
+  { value: 'deepseek', label: 'DeepSeek 按量', color: 'var(--color-info-light)' },
+  { value: 'deepseek_bundle', label: 'DeepSeek Token包', color: 'var(--color-info)' },
+  { value: 'ali_bailian', label: '阿里百炼 Token包', color: 'var(--color-accent)' },
+  { value: 'tencent_hunyuan', label: '腾讯混元 Token包', color: 'var(--color-success)' },
+  { value: 'openai_paygo', label: 'OpenAI 按量', color: 'var(--color-success)' },
+  { value: 'openai_bundle', label: 'OpenAI Token包', color: 'var(--color-success)' },
+  { value: 'claude_paygo', label: 'Claude 按量', color: 'var(--color-purple)' },
+  { value: 'gemini_free', label: 'Gemini 免费', color: 'var(--color-warning)' },
+  { value: 'other_bundle', label: '其他 Token包', color: 'var(--color-text-muted)' },
 ];
 
 const SettingsPage: React.FC = () => {
@@ -197,12 +197,12 @@ const SettingsPage: React.FC = () => {
 
   const selectStyle: React.CSSProperties = {
     padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none',
+    borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
   };
 
   return (
     <div style={{ padding: '24px', maxWidth: '720px' }}>
-      <h1 style={{ margin: '0 0 16px 0', fontSize: '20px', fontWeight: 700, color: '#eaeaea' }}>⚙️ 系统设置</h1>
+      <h1 style={{ margin: '0 0 16px 0', fontSize: '20px', fontWeight: 700, color: 'var(--color-text-primary)' }}>⚙️ 系统设置</h1>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '8px' }}>
@@ -215,7 +215,7 @@ const SettingsPage: React.FC = () => {
             style={{
               padding: '8px 14px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               backgroundColor: tab === t.id ? 'rgba(233,69,96,0.12)' : 'transparent',
-              color: tab === t.id ? '#e94560' : '#8a8aa0', fontSize: '12px', fontWeight: tab === t.id ? 600 : 400,
+              color: tab === t.id ? 'var(--color-accent)' : 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', fontWeight: tab === t.id ? 600 : 400,
               textAlign: 'left',
             }}>
             {t.label}
@@ -225,7 +225,7 @@ const SettingsPage: React.FC = () => {
 
       {/* Message */}
       {message && (
-        <div style={{ padding: '10px 14px', backgroundColor: message.startsWith('✅') ? 'rgba(46,204,113,0.1)' : 'rgba(231,76,60,0.1)', borderRadius: '8px', color: message.startsWith('✅') ? '#2ecc71' : '#e74c3c', fontSize: '13px', marginBottom: '16px', border: `1px solid ${message.startsWith('✅') ? 'rgba(46,204,113,0.2)' : 'rgba(231,76,60,0.2)'}` }}>
+        <div style={{ padding: '10px 14px', backgroundColor: message.startsWith('✅') ? 'rgba(46,204,113,0.1)' : 'rgba(231,76,60,0.1)', borderRadius: '8px', color: message.startsWith('✅') ? 'var(--color-success)' : 'var(--color-danger)', fontSize: 'var(--font-size-xs)', marginBottom: '16px', border: `1px solid ${message.startsWith('✅') ? 'rgba(46,204,113,0.2)' : 'rgba(231,76,60,0.2)'}` }}>
           {message}
         </div>
       )}
@@ -233,25 +233,25 @@ const SettingsPage: React.FC = () => {
       {/* ========= API Key / Token Plan Tab ========= */}
       <div style={{ display: tab === 'byok' ? 'block' : 'none' }}>
         <div>
-          <div style={{ marginBottom: '14px', padding: '10px 12px', borderRadius: '7px', background: capabilities.readyForFullSync ? 'rgba(46,204,113,0.10)' : 'rgba(245,158,11,0.10)', border: `1px solid ${capabilities.readyForFullSync ? 'rgba(46,204,113,0.24)' : 'rgba(245,158,11,0.24)'}`, color: capabilities.readyForFullSync ? '#8df0b2' : '#ffd58a', fontSize: '12px', lineHeight: 1.55 }}>
+          <div style={{ marginBottom: '14px', padding: '10px 12px', borderRadius: '7px', background: capabilities.readyForFullSync ? 'rgba(46,204,113,0.10)' : 'rgba(245,158,11,0.10)', border: `1px solid ${capabilities.readyForFullSync ? 'rgba(46,204,113,0.24)' : 'rgba(245,158,11,0.24)'}`, color: capabilities.readyForFullSync ? '#8df0b2' : '#ffd58a', fontSize: 'var(--font-size-xs)', lineHeight: 1.55 }}>
             <strong>{capabilities.readyForFullSync ? 'AI 写作与同步已就绪' : 'AI 同步尚未就绪'}</strong>
             <div>正文/摘要：{capabilities.writing?.available ? '可用' : '未配置'}；向量索引：{capabilities.embedding?.available ? '可用' : `未配置${capabilities.embedding?.reason ? `（${capabilities.embedding.reason}）` : ''}`}</div>
           </div>
           <div style={{ padding: '14px', marginBottom: '16px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px' }}>
-            <div style={{ color: '#eaeaea', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>向量索引（Embedding）</div>
-            <div style={{ color: embeddingConfigured ? '#8df0b2' : '#ffd58a', fontSize: '12px', marginBottom: '10px' }}>
+            <div style={{ color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, marginBottom: '6px' }}>向量索引（Embedding）</div>
+            <div style={{ color: embeddingConfigured ? '#8df0b2' : '#ffd58a', fontSize: 'var(--font-size-xs)', marginBottom: '10px' }}>
               {embeddingConfigured ? '已配置并验证真实向量服务' : '未配置。创建项目前必须配置，系统不会用假向量或跳过索引。'}
             </div>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-              <input value={embeddingApiKey} onChange={e => setEmbeddingApiKey(e.target.value)} type="password" placeholder={embeddingConfigured ? '输入新 Key 可更新配置' : 'Embedding API Key'} style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea' }} />
-              <input value={embeddingModel} onChange={e => setEmbeddingModel(e.target.value)} placeholder="Embedding 模型名称" style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea' }} />
+              <input value={embeddingApiKey} onChange={e => setEmbeddingApiKey(e.target.value)} type="password" placeholder={embeddingConfigured ? '输入新 Key 可更新配置' : 'Embedding API Key'} style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
+              <input value={embeddingModel} onChange={e => setEmbeddingModel(e.target.value)} placeholder="Embedding 模型名称" style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <input value={embeddingBaseUrl} onChange={e => setEmbeddingBaseUrl(e.target.value)} placeholder="Embedding Base URL" style={{ flex: 1, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea' }} />
-              <button onClick={handleSaveEmbedding} disabled={loading} style={{ padding: '8px 16px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer' }}>{loading ? '正在验证…' : '验证并保存'}</button>
+              <input value={embeddingBaseUrl} onChange={e => setEmbeddingBaseUrl(e.target.value)} placeholder="Embedding Base URL" style={{ flex: 1, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
+              <button onClick={handleSaveEmbedding} disabled={loading} style={{ padding: '8px 16px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', cursor: 'pointer' }}>{loading ? '正在验证…' : '验证并保存'}</button>
             </div>
           </div>
-          <div style={{ marginBottom: '12px', color: '#8a8aa0', fontSize: '12px', lineHeight: 1.6 }}>
+          <div style={{ marginBottom: '12px', color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', lineHeight: 1.6 }}>
             添加 API Key，选择对应的 <strong>Token Plan</strong>（各平台预付费套餐）。系统自动按计划类型分配使用。
           </div>
 
@@ -259,49 +259,49 @@ const SettingsPage: React.FC = () => {
           <div style={{ padding: '16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '16px' }}>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
               <input value={keyName} onChange={e => setKeyName(e.target.value)} placeholder="备注 (如: 我的DeepSeek)"
-                style={{ flex: 1, minWidth: '120px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }} />
+                style={{ flex: 1, minWidth: '120px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
               <input value={model} onChange={e => setModel(e.target.value)} placeholder="提供商 (如: DeepSeek)"
-                style={{ flex: 1, minWidth: '100px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }} />
+                style={{ flex: 1, minWidth: '100px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <input value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="API Key (sk-...)"
-                type="password" style={{ flex: 2, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }} />
+                type="password" style={{ flex: 2, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
               <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="Base URL (默认自动)"
-                style={{ flex: 3, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }} />
+                style={{ flex: 3, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
             {/* Token Plan Selector */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ color: '#8a8aa0', fontSize: '11px' }}>Token Plan：</span>
+              <span style={{ color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)' }}>Token Plan：</span>
               <select value={plan} onChange={e => setPlan(e.target.value)} style={selectStyle}>
                 {PLAN_OPTIONS.map(p => (
-                  <option key={p.value} value={p.value} style={{ backgroundColor: '#1a1a2e', color: '#eaeaea' }}>{p.label}</option>
+                  <option key={p.value} value={p.value} style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>{p.label}</option>
                 ))}
               </select>
             </div>
             <button onClick={handleSaveKey} disabled={loading}
-              style={{ padding: '8px 20px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
+              style={{ padding: '8px 20px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', fontSize: 'var(--font-size-xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
               保存
             </button>
           </div>
 
           {/* Saved Keys */}
           <div>
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#eaeaea', margin: '0 0 10px 0' }}>已保存的 Key</h3>
+            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-primary)', margin: '0 0 10px 0' }}>已保存的 Key</h3>
             {savedKeys.length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#6c6c80', fontSize: '13px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.06)' }}>还没有保存的 Key</div>
+              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.06)' }}>还没有保存的 Key</div>
             ) : (
               savedKeys.map((k: any, i: number) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px', marginBottom: '6px', border: '1px solid rgba(255,255,255,0.04)' }}>
                   <div>
-                    <div style={{ color: '#eaeaea', fontSize: '13px', fontWeight: 500 }}>{k.name || k.model}</div>
-                    <div style={{ color: '#6c6c80', fontSize: '11px' }}>
+                    <div style={{ color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontWeight: 500 }}>{k.name || k.model}</div>
+                    <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
                       {k.model} · {k.maskedKey}
-                      {k.plan && <span style={{ color: '#a855f7', marginLeft: '6px' }}>· {PLAN_OPTIONS.find(p => p.value === k.plan)?.label || k.plan}</span>}
-                      {k.baseUrl && <span style={{ color: '#6c6c80', marginLeft: '6px' }}>· {k.baseUrl}</span>}
+                      {k.plan && <span style={{ color: 'var(--color-purple)', marginLeft: '6px' }}>· {PLAN_OPTIONS.find(p => p.value === k.plan)?.label || k.plan}</span>}
+                      {k.baseUrl && <span style={{ color: 'var(--color-text-muted)', marginLeft: '6px' }}>· {k.baseUrl}</span>}
                     </div>
                   </div>
                   <button onClick={() => handleRemoveKey(k.name)}
-                    style={{ padding: '4px 10px', backgroundColor: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.2)', borderRadius: '4px', color: '#e74c3c', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>移除</button>
+                    style={{ padding: '4px 10px', backgroundColor: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.2)', borderRadius: '4px', color: 'var(--color-danger)', fontSize: 'var(--font-size-xs)', cursor: 'pointer', fontFamily: 'inherit' }}>移除</button>
                 </div>
               ))
             )}
@@ -312,16 +312,16 @@ const SettingsPage: React.FC = () => {
       {/* ========= 模式切换 Tab ========= */}
       <div style={{ display: tab === 'mode' ? 'block' : 'none' }}>
         <div>
-          <div style={{ color: '#8a8aa0', fontSize: '12px', marginBottom: '14px', lineHeight: 1.6 }}>
+          <div style={{ color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', marginBottom: '14px', lineHeight: 1.6 }}>
             先为当前模式选择日常模型；未在下表单独指定的 AI 任务都会实际使用它。下表仅用于覆盖指定任务。
           </div>
 
           {/* Mode Buttons */}
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
             {[
-              { key: 'economy', label: '💰 省钱模式', color: '#2ecc71', desc: '全用低成本模型' },
-              { key: 'normal', label: '⚖️ 常规模式', color: '#3498db', desc: '平衡质量与成本' },
-              { key: 'premium', label: '🎲 高品质模式', color: '#e94560', desc: '全用最强模型' },
+              { key: 'economy', label: '💰 省钱模式', color: 'var(--color-success)', desc: '全用低成本模型' },
+              { key: 'normal', label: '⚖️ 常规模式', color: 'var(--color-info)', desc: '平衡质量与成本' },
+              { key: 'premium', label: '🎲 高品质模式', color: 'var(--color-accent)', desc: '全用最强模型' },
             ].map(m => (
               <button key={m.key}
                 onClick={() => { api.post('/routing/mode', { mode: m.key }).then(() => setWritingMode(m.key)).catch(() => {}); }}
@@ -329,33 +329,31 @@ const SettingsPage: React.FC = () => {
                   flex: 1, padding: '10px', borderRadius: '8px', cursor: 'pointer', fontFamily: 'inherit',
                   border: `2px solid ${writingMode === m.key ? m.color : 'rgba(255,255,255,0.08)'}`,
                   backgroundColor: writingMode === m.key ? `${m.color}15` : 'rgba(255,255,255,0.02)',
-                  color: writingMode === m.key ? m.color : '#eaeaea',
-                  fontSize: '13px', fontWeight: 600,
+                  color: writingMode === m.key ? m.color : 'var(--color-text-primary)',
+                  fontSize: 'var(--font-size-xs)', fontWeight: 600,
                 }}>
                 <div>{m.label}</div>
-                <div style={{ fontSize: '10px', fontWeight: 400, color: writingMode === m.key ? m.color : '#6c6c80', marginTop: '2px' }}>{m.desc}</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 400, color: writingMode === m.key ? m.color : 'var(--color-text-muted)', marginTop: '2px' }}>{m.desc}</div>
               </button>
             ))}
           </div>
 
           <div style={{ marginBottom: '12px', padding: '12px 14px', backgroundColor: 'rgba(52, 211, 153, 0.06)', border: '1px solid rgba(52, 211, 153, 0.28)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ color: '#d1fae5', fontSize: '13px', fontWeight: 650 }}>日常模型</div>
-              <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '3px', lineHeight: 1.5 }}>未在“指定任务模型”中单独配置的所有 AI 调用，均使用此模型。</div>
+              <div style={{ color: '#d1fae5', fontSize: 'var(--font-size-xs)', fontWeight: 650 }}>日常模型</div>
+              <div style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '3px', lineHeight: 1.5 }}>未在“指定任务模型”中单独配置的所有 AI 调用，均使用此模型。</div>
             </div>
             <select
               value={sceneMappings.daily?.[writingMode] || ''}
               onChange={e => setSceneMappings(prev => ({ ...prev, daily: { ...(prev.daily || {}), [writingMode]: e.target.value } }))}
-              style={{ minWidth: '190px', padding: '7px 9px', borderRadius: '5px', color: '#d1fae5', backgroundColor: '#16213e', border: '1px solid rgba(52, 211, 153, 0.5)', fontFamily: 'inherit', cursor: 'pointer' }}
+              style={{ minWidth: '190px', padding: '7px 9px', borderRadius: '5px', color: '#d1fae5', backgroundColor: 'var(--color-bg-secondary)', border: '1px solid rgba(52, 211, 153, 0.5)', fontFamily: 'inherit', cursor: 'pointer' }}
             >
-              <option value="" style={{ backgroundColor: '#1a1a2e', color: '#eaeaea' }}>请选择日常模型</option>
-              {(fetchedModels.length > 0 ? fetchedModels : [
-                { id: 'deepseek-chat', name: 'DeepSeek-V3', provider: 'deepseek' },
-                { id: 'deepseek-reasoner', name: 'DeepSeek-R1', provider: 'deepseek' },
-                { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
-                { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic' },
-              ]).map(m => (
-                <option key={m.id} value={m.id} style={{ backgroundColor: '#1a1a2e', color: '#eaeaea' }}>{m.name}</option>
+              <option value="" style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>请选择日常模型</option>
+              {fetchedModels.length === 0 && (
+                <option value="" disabled style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-muted)' }}>未获取到模型，请点“获取模型列表”或在密钥管理中添加</option>
+              )}
+              {fetchedModels.map(m => (
+                <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>{m.name}</option>
               ))}
             </select>
           </div>
@@ -363,14 +361,14 @@ const SettingsPage: React.FC = () => {
           {/* Scene Model Table */}
           <div style={{ padding: '14px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#eaeaea' }}>指定任务模型</span>
+              <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>指定任务模型</span>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button onClick={fetchModels}
                   style={{
                     padding: '5px 10px', backgroundColor: isFetchingModels ? 'rgba(255,255,255,0.04)' : 'rgba(46,204,113,0.1)',
                     border: `1px solid ${isFetchingModels ? 'rgba(255,255,255,0.08)' : 'rgba(46,204,113,0.2)'}`,
-                    borderRadius: '4px', color: isFetchingModels ? '#6c6c80' : '#2ecc71',
-                    fontSize: '11px', cursor: isFetchingModels ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                    borderRadius: '4px', color: isFetchingModels ? 'var(--color-text-muted)' : 'var(--color-success)',
+                    fontSize: 'var(--font-size-xs)', cursor: isFetchingModels ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
                   }} disabled={isFetchingModels}>
                   {isFetchingModels ? '获取中...' : fetchedModels.length > 0 ? `🔄 刷新模型列表 (${fetchedModels.length})` : '🔄 获取模型列表'}
                 </button>
@@ -388,55 +386,52 @@ const SettingsPage: React.FC = () => {
                     } catch { showMessage('❌ 保存失败'); }
                   }}
                   style={{
-                    padding: '5px 12px', backgroundColor: '#a855f7', border: 'none', borderRadius: '4px',
-                    color: '#fff', fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    padding: '5px 12px', backgroundColor: 'var(--color-purple)', border: 'none', borderRadius: '4px',
+                    color: 'var(--color-white)', fontSize: 'var(--font-size-xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                   }}>
                   保存配置
                 </button>
               </div>
             </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-size-xs)' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: '#8a8aa0', fontWeight: 500 }}>场景</th>
-                  <th style={{ textAlign: 'center', padding: '6px 8px', color: '#2ecc71', fontWeight: 500 }}>💰 省钱</th>
-                  <th style={{ textAlign: 'center', padding: '6px 8px', color: '#3498db', fontWeight: 500 }}>⚖️ 常规</th>
-                  <th style={{ textAlign: 'center', padding: '6px 8px', color: '#e94560', fontWeight: 500 }}>🎲 高品质</th>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--color-text-dim)', fontWeight: 500 }}>场景</th>
+                  <th style={{ textAlign: 'center', padding: '6px 8px', color: 'var(--color-success)', fontWeight: 500 }}>💰 省钱</th>
+                  <th style={{ textAlign: 'center', padding: '6px 8px', color: 'var(--color-info)', fontWeight: 500 }}>⚖️ 常规</th>
+                  <th style={{ textAlign: 'center', padding: '6px 8px', color: 'var(--color-accent)', fontWeight: 500 }}>🎲 高品质</th>
                 </tr>
               </thead>
               <tbody>
                 {[
-                  { key: 'idea_generate', scene: '灵感生成' },
-                  { key: 'outline', scene: '大纲概览' },
-                  { key: 'writing', scene: '写作' },
-                  { key: 'polish', scene: '优化' },
-                  { key: 'quality_check', scene: '质检' },
+                  { key: 'idea_generate', scene: '灵感发现' },
+                  { key: 'outline', scene: '大纲/架构（角色·组织·伏笔·时间线）' },
+                  { key: 'writing', scene: '正文写作（日常/高潮）' },
+                  { key: 'polish', scene: '优化精修/质检' },
+                  { key: 'daily', scene: '日常（其它杂项）' },
                 ].map((row, i) => {
                   const modes = sceneMappings[row.key] || { economy: '', normal: '', premium: '' };
                   const colKeys = ['economy', 'normal', 'premium'] as const;
-                  const colColors = ['#2ecc71', '#3498db', '#e94560'];
+                  const colColors = ['var(--color-success)', 'var(--color-info)', 'var(--color-accent)'];
                   return (
                     <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                      <td style={{ padding: '6px 8px', color: '#eaeaea' }}>{row.scene}</td>
+                      <td style={{ padding: '6px 8px', color: 'var(--color-text-primary)' }}>{row.scene}</td>
                       {colKeys.map((ck, ci) => (
                         <td key={ck} style={{ padding: '6px 8px', textAlign: 'center' }}>
                           <select value={modes[ck]}
                             onChange={e => setSceneMappings(prev => ({ ...prev, [row.key]: { ...(prev[row.key] || {}), [ck]: e.target.value } }))}
                             style={{
-                              padding: '4px 6px', borderRadius: '4px', fontSize: '11px', maxWidth: '130px',
+                              padding: '4px 6px', borderRadius: '4px', fontSize: 'var(--font-size-xs)', maxWidth: '130px',
                               backgroundColor: `${colColors[ci]}12`, border: `1px solid ${colColors[ci]}40`, color: colColors[ci],
                               fontFamily: 'inherit', cursor: 'pointer', outline: 'none',
                             }}>
-                            <option value="" style={{ backgroundColor: '#1a1a2e', color: '#eaeaea' }}>—</option>
-                            {(fetchedModels.length > 0 ? fetchedModels : [
-                              { id: 'deepseek-chat', name: 'DeepSeek-V3', provider: 'deepseek' },
-                              { id: 'deepseek-reasoner', name: 'DeepSeek-R1', provider: 'deepseek' },
-                              { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
-                              { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic' },
-                              { id: 'glm-4-plus', name: 'GLM-4-Plus', provider: 'zhipu' },
-                            ]).map(m => (
-                              <option key={m.id} value={m.id} style={{ backgroundColor: '#1a1a2e', color: m.configured === false ? '#6c6c80' : colColors[ci] }}>{m.name}{m.configured === false ? ' (未配置)' : ''}</option>
+                            <option value="" style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>—</option>
+                            {fetchedModels.length === 0 && (
+                              <option value="" disabled>未获取到模型，请点上方“获取模型列表”</option>
+                            )}
+                            {fetchedModels.map(m => (
+                              <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-bg-primary)', color: m.configured === false ? 'var(--color-text-muted)' : colColors[ci] }}>{m.name}{m.configured === false ? ' (未配置)' : ''}</option>
                             ))}
                           </select>
                         </td>
@@ -448,8 +443,8 @@ const SettingsPage: React.FC = () => {
             </table>
           </div>
 
-          <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', color: '#8a8aa0', fontSize: '12px', lineHeight: 1.8 }}>
-            当前模式：<strong style={{ color: writingMode === 'economy' ? '#2ecc71' : writingMode === 'normal' ? '#3498db' : writingMode === 'premium' ? '#e94560' : '#e94560' }}>
+          <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', lineHeight: 1.8 }}>
+            当前模式：<strong style={{ color: writingMode === 'economy' ? 'var(--color-success)' : writingMode === 'normal' ? 'var(--color-info)' : writingMode === 'premium' ? 'var(--color-accent)' : 'var(--color-accent)' }}>
               {writingMode === 'economy' ? '💰 省钱' : writingMode === 'normal' ? '⚖️ 常规' : writingMode === 'premium' ? '🎲 高品质' : `🎲 ${writingMode}`}
             </strong> · 日常模型：<strong style={{ color: '#6ee7b7' }}>{sceneMappings.daily?.[writingMode] || '未设置（沿用原有路由）'}</strong> · 已添加 {savedKeys.length} 个 Key
           </div>
@@ -459,7 +454,7 @@ const SettingsPage: React.FC = () => {
       {/* ========= 偏好设置 Tab ========= */}
       <div style={{ display: tab === 'prefs' ? 'block' : 'none' }}>
         <div>
-          <div style={{ color: '#8a8aa0', fontSize: '12px', marginBottom: '14px' }}>编辑器行为和界面偏好。</div>
+          <div style={{ color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', marginBottom: '14px' }}>编辑器行为和界面偏好。</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <SettingRow label="自动保存间隔">
               <select value={autoSaveInterval} onChange={e => { setAutoSaveInterval(e.target.value); localStorage.setItem('prefs_autoSave', e.target.value); }} style={selectStyle}>
@@ -485,7 +480,7 @@ const SettingsPage: React.FC = () => {
 
 const SettingRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-    <div style={{ color: '#eaeaea', fontSize: '13px', fontWeight: 500 }}>{label}</div>
+    <div style={{ color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontWeight: 500 }}>{label}</div>
     {children}
   </div>
 );

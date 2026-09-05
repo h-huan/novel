@@ -76,7 +76,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '6px 10px',
     borderRadius: 6,
     border: '1px solid rgba(147,197,253,0.36)',
-    background: '#0f172a',
+    background: 'var(--color-bg-primary)',
     color: '#dbeafe',
     cursor: 'pointer',
   },

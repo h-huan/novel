@@ -11,8 +11,10 @@ export async function openProject(
   projectId: string,
   projectTitle: string,
   navigate?: (path: string) => void,
+  // 落地子页（默认项目总览）。看板问题下钻传 'writing-quality' / 'conflicts'，可带 ?chapterId= 定位章节。
+  subPath = 'dashboard',
 ): Promise<void> {
-  const dashboardRoute = `/project/${projectId}/dashboard`;
+  const dashboardRoute = `/project/${projectId}/${subPath}`;
   // Opening a project always starts from its real project overview. This avoids
   // restoring a stale global discovery route from a different project.
   clearProjectFlowState(projectId);
@@ -21,7 +23,7 @@ export async function openProject(
   // 如果 electronAPI 存在且有 open-project 通道，说明在引导窗口中
   if (window.electronAPI?.invoke) {
     try {
-      await window.electronAPI.invoke('open-project', { projectId, projectTitle });
+      await window.electronAPI.invoke('open-project', { projectId, projectTitle, subPath });
       // IPC 成功后引导窗口会被主进程关闭，不需要后续操作
       return;
     } catch (ipcErr) {

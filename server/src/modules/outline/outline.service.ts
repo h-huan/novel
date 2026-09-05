@@ -16,6 +16,7 @@ import type {
   UpdateOutlineDto,
 } from './dto/outline.dto';
 import { StateItemService } from '../../state/state-item.service';
+import { ConsistencyCheckService } from '../../state/consistency-check.service';
 
 export interface OutlineResponse {
   id: string;
@@ -51,6 +52,8 @@ export interface OutlineResponse {
   locationSummary?: string;
   conflictDesign?: string;
   children?: OutlineResponse[];
+  /** 章节大纲改动后是否已排队做一致性微同步（标题同步/矛盾复查/相邻衔接提示） */
+  reconcileScheduled?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,6 +65,7 @@ export class OutlineService {
     private readonly db: DatabaseService,
     @Optional() private readonly stateItemService?: StateItemService,
     @Optional() private readonly mapPointService?: any,
+    @Optional() private readonly consistencyCheck?: ConsistencyCheckService,
   ) {}
 
   create(projectId: string, dto: CreateOutlineDto): OutlineResponse {
@@ -206,7 +210,78 @@ export class OutlineService {
       this.mapPointService.updateLinksForOutline(existing.project_id, id, outlineText);
     }
     this.analyzeStateImpact(existing, dto);
+    // 章节大纲内容/标题/场景变更后做确定性微同步（异步、不阻断保存、不擅自改正文）。
+    if (existing.level === 'chapter' && (dto.content !== undefined || dto.scenes !== undefined || dto.title !== undefined)) {
+      queueMicrotask(() => { void this.reconcileOutlineAfterChange(existing, dto, response).catch(() => {}); });
+      response.reconcileScheduled = true;
+    }
     return response;
+  }
+
+
+  /**
+   * 章节大纲被修改后的确定性“微同步”（不调用 LLM、不自动改写正文/其它章纲）：
+   * 1) 标题变更 → 同步到未锁定的绑定章节行（纯派生字段）；
+   * 2) 本章已有正文 → 用一致性规则复查“新大纲 vs 已写正文”，矛盾落 consistency_checks（前端矛盾页可见）；
+   * 3) 内容/场景变更 → 给相邻下一章留一条 soft 待核对项（衔接钩子/时间线），由作者决定是否采用。
+   * 全程容错，绝不阻断作者保存大纲。
+   */
+  private async reconcileOutlineAfterChange(
+    existing: OutlineRow,
+    dto: UpdateOutlineDto,
+    updated: OutlineResponse,
+  ): Promise<{ conflictFindings: number; synced: string[] }> {
+    const result = { conflictFindings: 0, synced: [] as string[] };
+    if (existing.level !== 'chapter') return result;
+    const projectId = existing.project_id;
+    const db = this.db.getDb();
+    const ts = new Date().toISOString();
+
+    // 1) 标题同步到未锁定的绑定章节（已锁定章节不被动）
+    if (dto.title !== undefined && updated.title) {
+      const r = db.prepare(`UPDATE chapters SET title=?, updated_at=? WHERE outline_id=? AND status!='locked'`)
+        .run(updated.title, ts, existing.id);
+      if (Number(r.changes || 0) > 0) result.synced.push('chapter_title');
+    }
+
+    const linked = db.prepare(
+      `SELECT id, chapter_index, word_count, status FROM chapters WHERE outline_id=? AND project_id=? LIMIT 1`,
+    ).get(existing.id, projectId) as { id: string; chapter_index: number; word_count: number; status: string } | undefined;
+
+    // 2) 已有正文：新大纲与已写正文做确定性矛盾复查
+    if (linked && Number(linked.word_count || 0) > 0 && this.consistencyCheck) {
+      const findings = await this.consistencyCheck.checkConsistency(projectId, {
+        chapterIds: [Number(linked.chapter_index)],
+      });
+      result.conflictFindings = Array.isArray(findings) ? findings.length : 0;
+    }
+
+    // 3) 相邻下一章衔接待核对（仅提示，不改写后续章纲）
+    if ((dto.content !== undefined || dto.scenes !== undefined) && this.stateItemService && linked) {
+      const nextOutline = db.prepare(
+        `SELECT id,title FROM outlines WHERE project_id=? AND level='chapter' AND "order"=? LIMIT 1`,
+      ).get(projectId, existing.order + 1) as { id: string; title: string } | undefined;
+      if (nextOutline) {
+        this.stateItemService.create(projectId, {
+          sourceType: 'outline_change_ripple',
+          sourceId: existing.id,
+          sourceChapterId: linked.id,
+          targetType: 'outline',
+          targetId: nextOutline.id,
+          title: `上一章《${updated.title}》大纲已修改，请核对本章衔接`,
+          summary: '前一章大纲的事件链/场景发生变化，请核对本章开头承接、章尾钩子与时间线、伏笔是否仍然一致。',
+          content: '',
+          payload: { changedOutlineId: existing.id, nextOutlineId: nextOutline.id },
+          status: 'pending',
+          authority: 'soft_candidate',
+          source: 'outline-reconcile',
+          createdBy: 'outline-reconcile',
+        });
+        result.synced.push('next_hand_off_flag');
+      }
+    }
+
+    return result;
   }
 
   remove(id: string): { success: boolean } {

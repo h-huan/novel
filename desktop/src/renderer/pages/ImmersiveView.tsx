@@ -19,6 +19,7 @@ import { useChapterStore } from '../stores/chapterStore';
 import { useProjectStore } from '../stores/projectStore';
 import { api } from '../lib/api';
 import { parseJsonToReadable } from '../lib/textList';
+import { countNarrativeWords } from '../lib/wordCount';
 
 const ImmersiveView: React.FC = () => {
   const { id: projectId, chapterId } = useParams<{ id: string; chapterId: string }>();
@@ -115,7 +116,7 @@ const ImmersiveView: React.FC = () => {
 
   const handleContentChange = (value: string) => {
     setContent(value);
-    setWordCount(value.replace(/\s/g, '').length);
+    setWordCount(countNarrativeWords(value)); // 与后端/全站统一叙事字数口径，禁止再用去空白字符数
     setSaveStatus('unsaved');
   };
 
@@ -160,13 +161,13 @@ const ImmersiveView: React.FC = () => {
       if (line.trim() === '') {
         return <br key={i} />;
       }
-      return <p key={i} style={{ margin: '0 0 8px', lineHeight: 1.8, color: '#c8c8d0' }}>{line}</p>;
+      return <p key={i} style={{ margin: '0 0 8px', lineHeight: 1.8, color: 'var(--color-text-soft)' }}>{line}</p>;
     });
   };
 
   if (loading) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0f', color: '#8a8aa0' }}>
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-dim)' }}>
         加载中...
       </div>
     );
@@ -177,8 +178,8 @@ const ImmersiveView: React.FC = () => {
       style={{
         height: '100vh',
         display: 'flex',
-        backgroundColor: '#0a0a0f',
-        color: '#c8c8d0',
+        backgroundColor: 'var(--color-bg-primary)',
+        color: 'var(--color-text-soft)',
         fontFamily: "'Noto Serif SC', 'Source Han Serif SC', serif",
         overflow: 'hidden',
       }}
@@ -194,10 +195,10 @@ const ImmersiveView: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#8a8aa0', marginBottom: '8px', letterSpacing: '0.05em' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-dim)', marginBottom: '8px', letterSpacing: '0.05em' }}>
             大纲
           </div>
-          <pre style={{ fontSize: '14px', color: '#a0a0b0', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+          <pre style={{ fontSize: '14px', color: 'var(--color-text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
             {parseJsonToReadable(outline) || '暂无大纲'}
           </pre>
         </div>
@@ -222,7 +223,7 @@ const ImmersiveView: React.FC = () => {
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#8a8aa0',
+                color: 'var(--color-text-dim)',
                 cursor: 'pointer',
                 fontSize: '16px',
                 padding: '4px',
@@ -231,12 +232,12 @@ const ImmersiveView: React.FC = () => {
             >
               ☰
             </button>
-            <span style={{ fontSize: '12px', color: '#6c6c80' }}>
+            <span style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
               {currentProject?.title || '未命名项目'}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '11px', color: saveStatus === 'saved' ? '#2ecc71' : saveStatus === 'saving' ? '#f39c12' : '#e94560' }}>
+            <span style={{ fontSize: '14px', color: saveStatus === 'saved' ? 'var(--color-success)' : saveStatus === 'saving' ? 'var(--color-warning)' : 'var(--color-accent)' }}>
               {saveStatus === 'saved' ? '✓ 已保存' : saveStatus === 'saving' ? '保存中...' : '未保存'}
             </span>
             <button
@@ -244,7 +245,7 @@ const ImmersiveView: React.FC = () => {
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#8a8aa0',
+                color: 'var(--color-text-dim)',
                 cursor: 'pointer',
                 fontSize: '16px',
                 padding: '4px',
@@ -266,7 +267,7 @@ const ImmersiveView: React.FC = () => {
             style={{
               flex: 1,
               backgroundColor: 'transparent',
-              color: '#c8c8d0',
+              color: 'var(--color-text-soft)',
               border: 'none',
               outline: 'none',
               resize: 'none',
@@ -288,8 +289,8 @@ const ImmersiveView: React.FC = () => {
             justifyContent: 'space-between',
             padding: '6px 16px',
             borderTop: '1px solid rgba(255,255,255,0.04)',
-            fontSize: '11px',
-            color: '#6c6c80',
+            fontSize: '14px',
+            color: 'var(--color-text-muted)',
             flexShrink: 0,
           }}
         >
@@ -315,11 +316,11 @@ const ImmersiveView: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#8a8aa0', marginBottom: '8px', letterSpacing: '0.05em' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-dim)', marginBottom: '8px', letterSpacing: '0.05em' }}>
             出场角色
           </div>
           {characters.length === 0 ? (
-            <div style={{ fontSize: '12px', color: '#6c6c80' }}>暂无角色</div>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>暂无角色</div>
           ) : (
             characters.map((char, idx) => (
               <div
@@ -329,7 +330,7 @@ const ImmersiveView: React.FC = () => {
                   marginBottom: '4px',
                   borderRadius: '4px',
                   backgroundColor: 'rgba(255,255,255,0.03)',
-                  fontSize: '12px',
+                  fontSize: '14px',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -338,10 +339,10 @@ const ImmersiveView: React.FC = () => {
                       width: '6px',
                       height: '6px',
                       borderRadius: '50%',
-                      backgroundColor: char.status === '正常' ? '#2ecc71' : '#e94560',
+                      backgroundColor: char.status === '正常' ? 'var(--color-success)' : 'var(--color-accent)',
                     }}
                   />
-                  <span style={{ color: '#c0c0d0' }}>{char.name}</span>
+                  <span style={{ color: 'var(--color-text-soft)' }}>{char.name}</span>
                 </div>
               </div>
             ))

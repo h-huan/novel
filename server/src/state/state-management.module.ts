@@ -13,10 +13,11 @@ import { CharacterStateRepository } from '../database/repositories/character-sta
 import { DatabaseModule } from '../database/database.module';
 import { RoutingModule } from '../routing/routing.module';
 import { RealLLMService } from '../chain/real-llm.service';
+import { GenerationMetricsModule } from '../modules/generation-metrics/generation-metrics.module';
 import { StateModule } from './state.module';
 
 @Module({
-  imports: [DatabaseModule, RoutingModule, StateModule],
+  imports: [DatabaseModule, RoutingModule, StateModule, GenerationMetricsModule],
   controllers: [StateManagementController],
   providers: [
     StateEngineService,

@@ -12,6 +12,7 @@
 import React, { useState, useCallback, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, streamRequest } from '../../lib/api';
+import { useChapterStore } from '../../stores/chapterStore';
 import AuthorNotePanel from './AuthorNotePanel';
 import WorkflowBlockedNotice from '../workflow/WorkflowBlockedNotice';
 import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
@@ -517,17 +518,39 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
     setQaResult(null);
 
     try {
-      const response = await api.post('/chain/quality-check', {
-        projectId,
+      // 统一走 writing-quality 质检体系：LLM 语义评审 + 物理指纹，结果落库为质量报告（统一质检体系）
+      const analyzeResp = await api.post(`/projects/${projectId}/writing-quality/analyze`, {
         chapterId,
         content: chapterContent,
       });
-      const data = response.data as any;
-      if (data.success) {
-        setQaResult(data);
-      } else {
-        setQaResult({ error: data.error || '质检失败' });
+      const analyzeBody = (analyzeResp.data as any)?.data ?? analyzeResp.data;
+      const created = analyzeBody?.report;
+      if (!created?.id) {
+        setQaResult({ error: analyzeBody?.error || analyzeBody?.message || '质检失败' });
+        return;
       }
+      // 统一回写章节质检状态，编辑器顶栏分数即时跟随（质检多入口一致）
+      useChapterStore.getState().applyQualityAnalyzeResult(chapterId, analyzeBody);
+      // 拉取报告详情（含问题清单 issues）
+      const detailResp = await api.get(`/projects/${projectId}/writing-quality/reports/${created.id}`);
+      const detailBody = (detailResp.data as any)?.data ?? detailResp.data;
+      const report = detailBody?.report ?? created;
+      const issues = Array.isArray(detailBody?.issues) ? detailBody.issues : [];
+      let payload = report.payload;
+      if (typeof payload === 'string') {
+        try { payload = JSON.parse(payload); } catch { payload = {}; }
+      }
+      payload = payload || {};
+      const fingerprints = payload.aiFingerprints || null;
+      const score = Number(report.overallScore ?? payload.unifiedScore ?? 0);
+      setQaResult({
+        reportId: report.id,
+        overallScore: score,
+        passed: score >= 60,
+        aiTraceIndex: fingerprints && typeof fingerprints.overallScore === 'number' ? fingerprints.overallScore : undefined,
+        issues,
+        summary: report.summary || '',
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : '质检请求失败';
       setQaResult({ error: message });
@@ -552,8 +575,8 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
             key={tab.key}
             style={{
               ...styles.tab,
-              color: activeTab === tab.key ? '#e94560' : '#8a8aa0',
-              borderBottom: activeTab === tab.key ? '2px solid #e94560' : '2px solid transparent',
+              color: activeTab === tab.key ? 'var(--color-accent)' : 'var(--color-text-dim)',
+              borderBottom: activeTab === tab.key ? '2px solid var(--color-accent)' : '2px solid transparent',
             }}
             onClick={() => setActiveTab(tab.key)}
           >
@@ -573,7 +596,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
               value={chapterId || ''}
               onChange={(event) => onChapterChange?.(event.target.value)}
               disabled={isGenerating || chapters.length === 0}
-              style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', background: '#17172a', color: '#eaeaea', fontFamily: 'inherit', fontSize: '12px' }}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontFamily: 'inherit', fontSize: '14px' }}
             >
               {chapters.length === 0 && <option value="">请先在章节列表选择章节</option>}
               {chapters.map((chapter) => (
@@ -582,7 +605,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                 </option>
               ))}
             </select>
-            <p style={{ fontSize: '11px', color: '#8a8aa0', margin: '4px 0 0', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '14px', color: 'var(--color-text-dim)', margin: '4px 0 0', lineHeight: 1.5 }}>
               本面板只生成当前选定的章节，每次生成都会重读本章大纲、已确稿设定与前文状态。
             </p>
           </div>
@@ -610,7 +633,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                       style={{
                         ...styles.modeOption,
                         backgroundColor: mode === writingMode ? 'rgba(233, 69, 96, 0.15)' : 'transparent',
-                        borderColor: mode === writingMode ? '#e94560' : 'rgba(255,255,255,0.08)',
+                        borderColor: mode === writingMode ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)',
                         opacity: disabled ? 0.4 : 1,
                         cursor: disabled ? 'not-allowed' : 'pointer',
                       }}
@@ -622,7 +645,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                     >
                       <span style={styles.modeOptionLabel}>
                         {MODE_LABELS[mode]}
-                        {disabled && <span style={{ marginLeft: 8, fontSize: 14, color: '#f59e0b' }}>（开发中）</span>}
+                        {disabled && <span style={{ marginLeft: 8, fontSize: 14, color: 'var(--color-warning)' }}>（开发中）</span>}
                       </span>
                       <span style={styles.modeOptionDesc}>{MODE_DESCRIPTIONS[mode]}</span>
                     </button>
@@ -653,16 +676,16 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                     borderStyle: 'solid',
                     cursor: 'default',
                     fontFamily: 'inherit',
-                    fontSize: '12px',
+                    fontSize: '14px',
                     backgroundColor: chapterScenario === s.key
                       ? (s.key === 'climax' ? 'rgba(233,69,96,0.12)' : 'rgba(46,204,113,0.1)')
                       : 'transparent',
                     borderColor: chapterScenario === s.key
-                      ? (s.key === 'climax' ? '#e94560' : '#2ecc71')
+                      ? (s.key === 'climax' ? 'var(--color-accent)' : 'var(--color-success)')
                       : 'rgba(255,255,255,0.08)',
                     color: chapterScenario === s.key
-                      ? (s.key === 'climax' ? '#e94560' : '#2ecc71')
-                      : '#8a8aa0',
+                      ? (s.key === 'climax' ? 'var(--color-accent)' : 'var(--color-success)')
+                      : 'var(--color-text-dim)',
                   }}
                   title={s.desc}
                 >
@@ -670,10 +693,10 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                 </button>
               ))}
             </div>
-            <div style={{ padding: '8px 12px', borderRadius: '6px', border: `1px solid ${chapterScenario === 'climax' ? 'rgba(233,69,96,0.35)' : chapterScenario === 'daily' ? 'rgba(46,204,113,0.32)' : 'rgba(255,255,255,0.12)'}`, backgroundColor: chapterScenario === 'climax' ? 'rgba(233,69,96,0.12)' : chapterScenario === 'daily' ? 'rgba(46,204,113,0.1)' : 'rgba(255,255,255,0.03)', color: chapterScenario === 'climax' ? '#e94560' : chapterScenario === 'daily' ? '#2ecc71' : '#8a8aa0', fontSize: '12px', fontWeight: 700 }}>
+            <div style={{ padding: '8px 12px', borderRadius: '6px', border: `1px solid ${chapterScenario === 'climax' ? 'rgba(233,69,96,0.35)' : chapterScenario === 'daily' ? 'rgba(46,204,113,0.32)' : 'rgba(255,255,255,0.12)'}`, backgroundColor: chapterScenario === 'climax' ? 'rgba(233,69,96,0.12)' : chapterScenario === 'daily' ? 'rgba(46,204,113,0.1)' : 'rgba(255,255,255,0.03)', color: chapterScenario === 'climax' ? 'var(--color-accent)' : chapterScenario === 'daily' ? 'var(--color-success)' : 'var(--color-text-dim)', fontSize: '14px', fontWeight: 700 }}>
               {chapterScenario === null ? '等待选择章节并读取详细大纲' : chapterScenario === 'climax' ? '🔥 高潮章节（自动识别）' : '📝 日常章节（自动识别）'}
             </div>
-            <p style={{ fontSize: '11px', color: '#8a8aa0', margin: '4px 0 0 0', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '14px', color: 'var(--color-text-dim)', margin: '4px 0 0 0', lineHeight: 1.5 }}>
               {chapterScenario === 'climax'
                 ? '依据本章大纲的功能、冲突与场景自动识别，使用配置的高潮模型。'
                 : '依据本章详细大纲自动识别，使用配置的日常模型。'}
@@ -701,9 +724,9 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                 <span style={styles.sectionTitle}>生成进度</span>
               </div>
               <div style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                <div style={{ width: `${Math.min(100, Math.max(0, streamProgress))}%`, height: '100%', backgroundColor: '#2ecc71', transition: 'width 0.3s ease' }} />
+                <div style={{ width: `${Math.min(100, Math.max(0, streamProgress))}%`, height: '100%', backgroundColor: 'var(--color-success)', transition: 'width 0.3s ease' }} />
               </div>
-              <div style={{ fontSize: '11px', color: '#8a8aa0', marginTop: '4px' }}>{streamProgress}%</div>
+              <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginTop: '4px' }}>{streamProgress}%</div>
             </div>
           )}
 
@@ -881,7 +904,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
           <button
             style={{
               ...styles.qaBtn,
-              background: '#3b82f6',
+              background: 'var(--color-info)',
               marginTop: '8px',
             }}
             onClick={() => navigate(`/project/${projectId}/writing-quality`)}
@@ -895,7 +918,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
               {/* 总体得分 */}
               <div style={styles.qaScoreSection}>
                 <div style={styles.qaScoreCircle}>
-                  <span style={styles.qaScoreNumber}>{qaResult.overallScore || '--'}</span>
+                  <span style={styles.qaScoreNumber}>{qaResult.overallScore ?? '--'}</span>
                   <span style={styles.qaScoreLabel}>综合分</span>
                 </div>
                 <div style={styles.qaPassBadge}>
@@ -906,7 +929,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                     <span style={styles.qaAiTraceLabel}>AI痕迹: </span>
                     <span
                       style={{
-                        color: (qaResult.aiTraceIndex || 0) > 40 ? '#e74c3c' : (qaResult.aiTraceIndex || 0) > 25 ? '#f39c12' : '#2ecc71',
+                        color: (qaResult.aiTraceIndex || 0) > 40 ? 'var(--color-danger)' : (qaResult.aiTraceIndex || 0) > 25 ? 'var(--color-warning)' : 'var(--color-success)',
                         fontWeight: 700,
                       }}
                     >
@@ -919,56 +942,38 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                 )}
               </div>
 
-              {/* 各维度评分 */}
-              {qaResult.dimensions && qaResult.dimensions.length > 0 && (
+              {/* 问题清单（统一质检 issues，替代旧十大维度/优缺点） */}
+              {qaResult.issues && qaResult.issues.length > 0 && (
                 <div style={styles.qaDimensions}>
                   <div style={styles.sectionHeader}>
-                    <span style={styles.sectionTitle}>十大维度评分</span>
+                    <span style={styles.sectionTitle}>问题清单（{qaResult.issues.length}）</span>
                   </div>
-                  {qaResult.dimensions.map((dim: any, idx: number) => (
-                    <div key={idx} style={styles.qaDimensionItem}>
-                      <div style={styles.qaDimensionHeader}>
-                        <span style={styles.qaDimensionName}>{dim.name}</span>
-                        <span
-                          style={{
-                            ...styles.qaDimensionScore,
-                            color: dim.score >= 7 ? '#2ecc71' : dim.score >= 5 ? '#f39c12' : '#e74c3c',
-                          }}
-                        >
-                          {dim.score}/10
-                        </span>
+                  {qaResult.issues.map((iss: any, idx: number) => {
+                    const sevColor = iss.severity === 'critical' || iss.severity === 'high'
+                      ? 'var(--color-danger)'
+                      : iss.severity === 'medium'
+                        ? 'var(--color-warning)'
+                        : 'var(--color-success)';
+                    return (
+                      <div key={iss.id || idx} style={styles.qaDimensionItem}>
+                        <div style={styles.qaDimensionHeader}>
+                          <span style={styles.qaDimensionName}>[{iss.severity || 'low'}] {iss.title}</span>
+                          <span style={{ ...styles.qaDimensionScore, color: sevColor }}>{iss.issueType}</span>
+                        </div>
+                        {iss.summary && (
+                          <p style={styles.qaDimensionSuggestion}>{iss.summary}</p>
+                        )}
+                        {iss.suggestion && (
+                          <p style={styles.qaDimensionSuggestion}>建议：{iss.suggestion}</p>
+                        )}
                       </div>
-                      {dim.suggestion && (
-                        <p style={styles.qaDimensionSuggestion}>{dim.suggestion}</p>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
-
-              {/* 优点/弱点 */}
-              <div style={styles.qaLists}>
-                {qaResult.strengths && qaResult.strengths.length > 0 && (
-                  <div style={styles.qaListSection}>
-                    <span style={styles.qaListTitle}>✅ 优点</span>
-                    <ul style={styles.qaList}>
-                      {qaResult.strengths.map((s: string, i: number) => (
-                        <li key={i} style={styles.qaListItem}>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {qaResult.weaknesses && qaResult.weaknesses.length > 0 && (
-                  <div style={styles.qaListSection}>
-                    <span style={styles.qaListTitle}>⚠️ 待改进</span>
-                    <ul style={styles.qaList}>
-                      {qaResult.weaknesses.map((w: string, i: number) => (
-                        <li key={i} style={styles.qaListItem}>{w}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
+              {qaResult.issues && qaResult.issues.length === 0 && (
+                <div style={{ padding: '8px 0', color: 'var(--color-success)', fontSize: 14 }}>未发现结构性问题，可在“写作质量诊断中心”查看完整报告</div>
+              )}
 
               {qaResult.summary && (
                 <p style={styles.qaSummary}>{qaResult.summary}</p>
@@ -999,7 +1004,7 @@ const styles: Record<string, React.CSSProperties> = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    fontSize: '13px',
+    fontSize: '14px',
     height: '100%',
     overflow: 'hidden',
   },
@@ -1013,7 +1018,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tab: {
     padding: '10px 14px',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
     background: 'none',
     border: 'none',
@@ -1042,9 +1047,9 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
   },
   sectionTitle: {
-    fontSize: '11px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     textTransform: 'uppercase' as const,
     letterSpacing: '0.5px',
   },
@@ -1055,15 +1060,15 @@ const styles: Record<string, React.CSSProperties> = {
     borderStyle: 'solid',
     borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: '4px',
-    color: '#eaeaea',
-    fontSize: '12px',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
   modeDesc: {
     margin: 0,
-    fontSize: '11px',
-    color: '#6c6c80',
+    fontSize: '14px',
+    color: 'var(--color-text-muted)',
     lineHeight: 1.4,
   },
   modeList: {
@@ -1084,13 +1089,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'inherit',
   },
   modeOptionLabel: {
-    fontSize: '13px',
+    fontSize: '14px',
     fontWeight: 500,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
   },
   modeOptionDesc: {
-    fontSize: '11px',
-    color: '#6c6c80',
+    fontSize: '14px',
+    color: 'var(--color-text-muted)',
   },
   promptInput: {
     width: '100%',
@@ -1098,8 +1103,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(0,0,0,0.2)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '6px',
-    color: '#eaeaea',
-    fontSize: '12px',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
     fontFamily: 'inherit',
     resize: 'vertical' as const,
     outline: 'none',
@@ -1117,7 +1122,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '4px',
     padding: '4px 8px',
     borderRadius: '4px',
-    fontSize: '11px',
+    fontSize: '14px',
     transition: 'all 0.2s',
   },
   stepIcon: {
@@ -1126,7 +1131,7 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center' as const,
   },
   stepLabel: {
-    color: '#c0c0d0',
+    color: 'var(--color-text-soft)',
   },
   actions: {
     display: 'flex',
@@ -1136,11 +1141,11 @@ const styles: Record<string, React.CSSProperties> = {
   genBtn: {
     flex: 1,
     padding: '8px 12px',
-    backgroundColor: '#e94560',
+    backgroundColor: 'var(--color-accent)',
     border: 'none',
     borderRadius: '6px',
-    color: '#fff',
-    fontSize: '13px',
+    color: 'var(--color-white)',
+    fontSize: '14px',
     fontWeight: 600,
     fontFamily: 'inherit',
     transition: 'all 0.15s',
@@ -1151,8 +1156,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(255,255,255,0.08)',
     border: '1px solid rgba(255,255,255,0.12)',
     borderRadius: '6px',
-    color: '#eaeaea',
-    fontSize: '13px',
+    color: 'var(--color-text-primary)',
+    fontSize: '14px',
     fontWeight: 500,
     fontFamily: 'inherit',
     cursor: 'pointer',
@@ -1169,14 +1174,14 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '6px',
   },
   pluginTitle: {
-    fontSize: '13px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
   },
   pluginDesc: {
     margin: 0,
-    fontSize: '11px',
-    color: '#6c6c80',
+    fontSize: '14px',
+    color: 'var(--color-text-muted)',
   },
   pluginActions: {
     display: 'flex',
@@ -1188,8 +1193,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(255,255,255,0.06)',
     border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '5px',
-    color: '#c0c0d0',
-    fontSize: '11px',
+    color: 'var(--color-text-soft)',
+    fontSize: '14px',
     fontFamily: 'inherit',
     cursor: 'pointer',
     transition: 'all 0.15s',
@@ -1208,24 +1213,24 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: '1px solid rgba(255,255,255,0.06)',
   },
   pluginResultTitle: {
-    fontSize: '11px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     textTransform: 'uppercase' as const,
   },
   pluginResultClose: {
     background: 'none',
     border: 'none',
-    color: '#6c6c80',
+    color: 'var(--color-text-muted)',
     cursor: 'pointer',
-    fontSize: '12px',
+    fontSize: '14px',
     padding: '2px 4px',
   },
   pluginResultContent: {
     margin: 0,
     padding: '10px 12px',
-    fontSize: '11px',
-    color: '#c0c0d0',
+    fontSize: '14px',
+    color: 'var(--color-text-soft)',
     whiteSpace: 'pre-wrap' as const,
     wordBreak: 'break-word' as const,
     maxHeight: '200px',
@@ -1240,7 +1245,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(46, 204, 113, 0.1)',
     border: '1px solid rgba(46, 204, 113, 0.2)',
     borderRadius: '8px',
-    color: '#2ecc71',
+    color: 'var(--color-success)',
     fontSize: '14px',
     fontWeight: 600,
     fontFamily: 'inherit',
@@ -1268,34 +1273,34 @@ const styles: Record<string, React.CSSProperties> = {
     width: '72px',
     height: '72px',
     borderRadius: '50%',
-    border: '3px solid #e94560',
+    border: '3px solid var(--color-accent)',
   },
   qaScoreNumber: {
     fontSize: '24px',
     fontWeight: 700,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     lineHeight: 1,
   },
   qaScoreLabel: {
     fontSize: '10px',
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     marginTop: '2px',
   },
   qaPassBadge: {
     fontSize: '14px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
   },
   qaAiTrace: {
-    fontSize: '12px',
-    color: '#c0c0d0',
+    fontSize: '14px',
+    color: 'var(--color-text-soft)',
   },
   qaAiTraceLabel: {
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
   },
   qaAiTraceHint: {
     fontSize: '10px',
-    color: '#6c6c80',
+    color: 'var(--color-text-muted)',
   },
   qaDimensions: {
     display: 'flex',
@@ -1313,46 +1318,22 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
   },
   qaDimensionName: {
-    fontSize: '12px',
-    color: '#c0c0d0',
+    fontSize: '14px',
+    color: 'var(--color-text-soft)',
   },
   qaDimensionScore: {
-    fontSize: '13px',
+    fontSize: '14px',
     fontWeight: 700,
   },
   qaDimensionSuggestion: {
     margin: '4px 0 0 0',
-    fontSize: '11px',
-    color: '#6c6c80',
+    fontSize: '14px',
+    color: 'var(--color-text-muted)',
     lineHeight: 1.4,
   },
-  qaLists: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  qaListSection: {
-    padding: '8px 10px',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderRadius: '6px',
-  },
-  qaListTitle: {
-    fontSize: '12px',
-    fontWeight: 600,
-    color: '#c0c0d0',
-  },
-  qaList: {
-    margin: '6px 0 0 0',
-    paddingLeft: '16px',
-  },
-  qaListItem: {
-    fontSize: '11px',
-    color: '#8a8aa0',
-    lineHeight: 1.6,
-  },
   qaSummary: {
-    fontSize: '12px',
-    color: '#c0c0d0',
+    fontSize: '14px',
+    color: 'var(--color-text-soft)',
     lineHeight: 1.5,
     padding: '8px 10px',
     backgroundColor: 'rgba(255,255,255,0.02)',
@@ -1363,8 +1344,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '12px',
     backgroundColor: 'rgba(231, 76, 60, 0.1)',
     borderRadius: '8px',
-    fontSize: '12px',
-    color: '#e74c3c',
+    fontSize: '14px',
+    color: 'var(--color-danger)',
   },
 };
 

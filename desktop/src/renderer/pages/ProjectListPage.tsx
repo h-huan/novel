@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../stores/projectStore';
 import { useIdeaLabStore } from '../stores/ideaLabStore';
 import { openProject } from '../lib/openProject';
@@ -30,9 +30,9 @@ const TYPE_LABELS: Record<ProjectType, string> = {
 };
 
 const TYPE_COLORS: Record<ProjectType, string> = {
-  short_story: '#2ecc71',
-  long_novel: '#e94560',
-  script: '#f39c12',
+  short_story: 'var(--color-success)',
+  long_novel: 'var(--color-accent)',
+  script: 'var(--color-warning)',
 };
 
 const CREATION_SOURCE_LABELS: Record<CreationSource, string> = {
@@ -50,9 +50,12 @@ const CREATION_SOURCE_FALLBACKS: Record<string, string> = {
 const TARGET_PLATFORM_LABELS: Record<TargetPlatform, string> = {
   zhihu: '知乎盐选',
   fanqie: '番茄',
+  qimao: '七猫',
   qidian: '起点',
   douyin: '抖音',
   xiaohongshu: '小红书',
+  jinjiang: '晋江',
+  rules_horror: '规则怪谈',
   custom: '自定义',
   generic: '通用',
 };
@@ -87,12 +90,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_TEXT_COLORS: Record<string, string> = {
-  idea: '#f39c12',
-  world_building: '#f39c12',
-  outlining: '#f39c12',
-  writing: '#e94560',
-  editing: '#e94560',
-  published: '#2ecc71',
+  idea: 'var(--color-warning)',
+  world_building: 'var(--color-warning)',
+  outlining: 'var(--color-warning)',
+  writing: 'var(--color-accent)',
+  editing: 'var(--color-accent)',
+  published: 'var(--color-success)',
 };
 
 const USER_STATUS_LABELS: Record<string, string> = {
@@ -153,7 +156,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
   const progress = 0;
   const statusLabel = USER_STATUS_LABELS[project.status] || project.status;
   const statusBgColor = STATUS_COLORS[project.status] || 'rgba(108,108,128,0.2)';
-  const statusTextColor = STATUS_TEXT_COLORS[project.status] || '#6c6c80';
+  const statusTextColor = STATUS_TEXT_COLORS[project.status] || 'var(--color-text-muted)';
   const creationLabel = CREATION_SOURCE_LABELS[project.creationSource]
     || CREATION_SOURCE_FALLBACKS[String(project.creationSource)]
     || '作者创建';
@@ -166,12 +169,12 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
       onClick={() => onSelect(project.id)}
       onMouseEnter={(e) => {
         setIsHovered(true);
-        e.currentTarget.style.borderColor = 'var(--color-accent, #e94560)';
+        e.currentTarget.style.borderColor = 'var(--color-accent, var(--color-accent))';
         e.currentTarget.style.transform = 'translateY(-2px)';
       }}
       onMouseLeave={(e) => {
         setIsHovered(false);
-        e.currentTarget.style.borderColor = 'var(--color-border, #2a2a4a)';
+        e.currentTarget.style.borderColor = 'var(--color-border, var(--color-border))';
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
@@ -181,7 +184,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
           <span
             style={{
               ...cardStyles.typeBadge,
-              backgroundColor: TYPE_COLORS[project.type] || '#6c6c80',
+              backgroundColor: TYPE_COLORS[project.type] || 'var(--color-text-muted)',
             }}
           >
             {TYPE_LABELS[project.type] || project.type}
@@ -220,7 +223,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
             style={{
               ...cardStyles.progressFill,
               width: `${progress}%`,
-              backgroundColor: progress >= 100 ? '#2ecc71' : 'var(--color-accent, #e94560)',
+              backgroundColor: progress >= 100 ? 'var(--color-success)' : 'var(--color-accent, var(--color-accent))',
             }}
           />
         </div>
@@ -251,9 +254,9 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
 
 const cardStyles: Record<string, React.CSSProperties> = {
   card: {
-    backgroundColor: 'var(--color-bg-secondary, #16213e)',
+    backgroundColor: 'var(--color-bg-secondary, var(--color-bg-secondary))',
     borderRadius: 'var(--radius-lg, 12px)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     padding: '20px',
     cursor: 'pointer',
     transition: 'border-color 0.2s, transform 0.15s',
@@ -276,7 +279,7 @@ const cardStyles: Record<string, React.CSSProperties> = {
   title: {
     fontSize: '16px',
     fontWeight: 600,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     margin: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -285,10 +288,10 @@ const cardStyles: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   typeBadge: {
-    fontSize: '11px',
+    fontSize: 'var(--font-size-xs)',
     padding: '2px 8px',
     borderRadius: 'var(--radius-sm, 4px)',
-    color: '#fff',
+    color: 'var(--color-white)',
     fontWeight: 500,
     flexShrink: 0,
   },
@@ -299,19 +302,19 @@ const cardStyles: Record<string, React.CSSProperties> = {
     flexWrap: 'wrap',
   },
   metaTag: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     fontWeight: 400,
   },
   metaDivider: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     opacity: 0.4,
   },
   deleteBtn: {
     background: 'none',
     border: 'none',
-    color: 'var(--color-accent, #e94560)',
+    color: 'var(--color-accent, var(--color-accent))',
     fontSize: '16px',
     cursor: 'pointer',
     padding: '2px 4px',
@@ -321,8 +324,8 @@ const cardStyles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   description: {
-    fontSize: '13px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     lineHeight: 1.5,
     margin: 0,
     display: '-webkit-box',
@@ -347,8 +350,8 @@ const cardStyles: Record<string, React.CSSProperties> = {
     transition: 'width 0.3s ease',
   },
   wordCount: {
-    fontSize: '12px',
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
     fontFamily: 'var(--font-mono, monospace)',
   },
   footer: {
@@ -361,14 +364,14 @@ const cardStyles: Record<string, React.CSSProperties> = {
     gap: '6px',
   },
   statusTag: {
-    fontSize: '11px',
+    fontSize: 'var(--font-size-xs)',
     padding: '2px 8px',
     borderRadius: 'var(--radius-sm, 4px)',
     fontWeight: 500,
   },
   time: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
   },
 };
 
@@ -432,9 +435,12 @@ const PROJECT_TYPE_OPTIONS: { value: ProjectType; label: string; desc: string }[
 const PLATFORM_OPTIONS_WIZARD: { value: TargetPlatform; label: string }[] = [
   { value: 'zhihu', label: '知乎盐选' },
   { value: 'fanqie', label: '番茄' },
+  { value: 'qimao', label: '七猫' },
   { value: 'qidian', label: '起点' },
   { value: 'douyin', label: '抖音故事' },
   { value: 'xiaohongshu', label: '小红书' },
+  { value: 'jinjiang', label: '晋江' },
+  { value: 'rules_horror', label: '规则怪谈' },
   { value: 'custom', label: '自定义' },
   { value: 'generic', label: '通用' },
 ];
@@ -556,8 +562,8 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
               <div
                 style={{
                   ...dialogStyles.stepDot,
-                  backgroundColor: step > i + 1 ? '#2ecc71' : step === i + 1 ? 'var(--color-accent, #e94560)' : 'rgba(255,255,255,0.1)',
-                  color: step > i + 1 ? '#fff' : step === i + 1 ? '#fff' : 'var(--color-text-muted, #6c6c80)',
+                  backgroundColor: step > i + 1 ? 'var(--color-success)' : step === i + 1 ? 'var(--color-accent, var(--color-accent))' : 'rgba(255,255,255,0.1)',
+                  color: step > i + 1 ? 'var(--color-white)' : step === i + 1 ? 'var(--color-white)' : 'var(--color-text-muted, var(--color-text-muted))',
                 }}
               >
                 {step > i + 1 ? '✓' : i + 1}
@@ -565,7 +571,7 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
               <span
                 style={{
                   ...dialogStyles.stepLabel,
-                  color: step === i + 1 ? 'var(--color-text-primary, #eaeaea)' : 'var(--color-text-muted, #6c6c80)',
+                  color: step === i + 1 ? 'var(--color-text-primary, var(--color-text-primary))' : 'var(--color-text-muted, var(--color-text-muted))',
                 }}
               >
                 {label}
@@ -586,8 +592,8 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
                     key={opt.value}
                     style={{
                       ...dialogStyles.selectCard,
-                      borderColor: creationSource === opt.value ? 'var(--color-accent, #e94560)' : 'var(--color-border, #2a2a4a)',
-                      backgroundColor: creationSource === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, #1a1a2e)',
+                      borderColor: creationSource === opt.value ? 'var(--color-accent, var(--color-accent))' : 'var(--color-border, var(--color-border))',
+                      backgroundColor: creationSource === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, var(--color-bg-primary))',
                     }}
                     onClick={() => setCreationSource(opt.value)}
                   >
@@ -609,8 +615,8 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
                     key={opt.value}
                     style={{
                       ...dialogStyles.selectCard,
-                      borderColor: projectType === opt.value ? 'var(--color-accent, #e94560)' : 'var(--color-border, #2a2a4a)',
-                      backgroundColor: projectType === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, #1a1a2e)',
+                      borderColor: projectType === opt.value ? 'var(--color-accent, var(--color-accent))' : 'var(--color-border, var(--color-border))',
+                      backgroundColor: projectType === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, var(--color-bg-primary))',
                     }}
                     onClick={() => setProjectType(opt.value)}
                   >
@@ -632,8 +638,8 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
                     key={opt.value}
                     style={{
                       ...dialogStyles.platformCard,
-                      borderColor: targetPlatform === opt.value ? 'var(--color-accent, #e94560)' : 'var(--color-border, #2a2a4a)',
-                      backgroundColor: targetPlatform === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, #1a1a2e)',
+                      borderColor: targetPlatform === opt.value ? 'var(--color-accent, var(--color-accent))' : 'var(--color-border, var(--color-border))',
+                      backgroundColor: targetPlatform === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, var(--color-bg-primary))',
                     }}
                     onClick={() => setTargetPlatform(opt.value)}
                   >
@@ -744,9 +750,9 @@ const dialogStyles: Record<string, React.CSSProperties> = {
     zIndex: 1000,
   },
   dialog: {
-    backgroundColor: 'var(--color-bg-secondary, #16213e)',
+    backgroundColor: 'var(--color-bg-secondary, var(--color-bg-secondary))',
     borderRadius: 'var(--radius-lg, 12px)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     padding: '24px',
     width: '600px',
     maxWidth: '90vw',
@@ -763,19 +769,19 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   title: {
     fontSize: '20px',
     fontWeight: 600,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     margin: 0,
   },
   subtitle: {
-    fontSize: '13px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     margin: '6px 0 0 0',
     lineHeight: 1.4,
   },
   closeBtn: {
     background: 'none',
     border: 'none',
-    color: 'var(--color-text-muted, #6c6c80)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     fontSize: '18px',
     cursor: 'pointer',
     padding: '4px 8px',
@@ -801,12 +807,12 @@ const dialogStyles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '12px',
+    fontSize: 'var(--font-size-xs)',
     fontWeight: 600,
     flexShrink: 0,
   },
   stepLabel: {
-    fontSize: '12px',
+    fontSize: 'var(--font-size-xs)',
     fontWeight: 500,
     marginLeft: '6px',
     marginRight: '4px',
@@ -814,7 +820,7 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   stepLine: {
     width: '36px',
     height: '1px',
-    backgroundColor: 'var(--color-border, #2a2a4a)',
+    backgroundColor: 'var(--color-border, var(--color-border))',
     margin: '0 2px',
   },
   stepContent: {
@@ -828,7 +834,7 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   stepTitle: {
     fontSize: '15px',
     fontWeight: 600,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     margin: 0,
   },
   cardGrid: {
@@ -838,7 +844,7 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   },
   selectCard: {
     padding: '14px 16px',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
     cursor: 'pointer',
     transition: 'border-color 0.15s, background-color 0.15s',
@@ -849,11 +855,11 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   cardLabel: {
     fontSize: '14px',
     fontWeight: 600,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
   },
   cardDesc: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     lineHeight: 1.4,
   },
   platformGrid: {
@@ -863,13 +869,13 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   },
   platformCard: {
     padding: '12px',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
     cursor: 'pointer',
     textAlign: 'center',
-    fontSize: '13px',
+    fontSize: 'var(--font-size-xs)',
     fontWeight: 500,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     transition: 'border-color 0.15s, background-color 0.15s',
   },
   form: {
@@ -883,30 +889,30 @@ const dialogStyles: Record<string, React.CSSProperties> = {
     gap: '6px',
   },
   label: {
-    fontSize: '13px',
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
     fontWeight: 500,
   },
   input: {
     padding: '8px 12px',
-    backgroundColor: 'var(--color-bg-primary, #1a1a2e)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    backgroundColor: 'var(--color-bg-primary, var(--color-bg-primary))',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     fontSize: '14px',
     fontFamily: 'var(--font-family, sans-serif)',
     outline: 'none',
     transition: 'border-color 0.15s',
   },
   inputError: {
-    borderColor: 'var(--color-accent, #e94560)',
+    borderColor: 'var(--color-accent, var(--color-accent))',
   },
   textarea: {
     padding: '8px 12px',
-    backgroundColor: 'var(--color-bg-primary, #1a1a2e)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    backgroundColor: 'var(--color-bg-primary, var(--color-bg-primary))',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     fontSize: '14px',
     fontFamily: 'var(--font-family, sans-serif)',
     outline: 'none',
@@ -914,10 +920,10 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   },
   select: {
     padding: '10px 12px',
-    backgroundColor: '#1a1a2e',
-    border: '1px solid #2a2a4a',
+    backgroundColor: 'var(--color-bg-primary)',
+    border: '1px solid var(--color-border)',
     borderRadius: '8px',
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
     fontSize: '14px',
     fontFamily: 'inherit',
     outline: 'none',
@@ -926,8 +932,8 @@ const dialogStyles: Record<string, React.CSSProperties> = {
     WebkitAppearance: 'menulist',
   },
   error: {
-    fontSize: '12px',
-    color: 'var(--color-accent, #e94560)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-accent, var(--color-accent))',
   },
   actions: {
     display: 'flex',
@@ -938,19 +944,19 @@ const dialogStyles: Record<string, React.CSSProperties> = {
   secondaryBtn: {
     padding: '8px 20px',
     backgroundColor: 'transparent',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
     fontSize: '14px',
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
   },
   submitBtn: {
     padding: '8px 24px',
-    backgroundColor: 'var(--color-accent, #e94560)',
+    backgroundColor: 'var(--color-accent, var(--color-accent))',
     border: 'none',
     borderRadius: 'var(--radius-md, 8px)',
-    color: '#fff',
+    color: 'var(--color-white)',
     fontSize: '14px',
     fontWeight: 600,
     cursor: 'pointer',
@@ -1048,10 +1054,10 @@ const filterStyles: Record<string, React.CSSProperties> = {
   searchInput: {
     width: '100%',
     padding: '10px 36px 10px 36px',
-    backgroundColor: 'var(--color-bg-secondary, #16213e)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    backgroundColor: 'var(--color-bg-secondary, var(--color-bg-secondary))',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     fontSize: '14px',
     fontFamily: 'var(--font-family, sans-serif)',
     outline: 'none',
@@ -1061,7 +1067,7 @@ const filterStyles: Record<string, React.CSSProperties> = {
     right: '8px',
     background: 'none',
     border: 'none',
-    color: 'var(--color-text-muted, #6c6c80)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     cursor: 'pointer',
     fontSize: '14px',
     padding: '4px',
@@ -1074,21 +1080,20 @@ const filterStyles: Record<string, React.CSSProperties> = {
   typeBtn: {
     padding: '4px 14px',
     backgroundColor: 'transparent',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-sm, 4px)',
-    color: 'var(--color-text-secondary, #a0a0b0)',
-    fontSize: '12px',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
+    fontSize: 'var(--font-size-xs)',
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
     transition: 'all 0.15s',
   },
   typeBtnActive: {
-    backgroundColor: 'var(--color-accent, #e94560)',
-    borderColor: 'var(--color-accent, #e94560)',
-    color: '#fff',
+    backgroundColor: 'var(--color-accent, var(--color-accent))',
+    borderColor: 'var(--color-accent, var(--color-accent))',
+    color: 'var(--color-white)',
   },
 };
-
 
 // ============================================================
 // 主组件
@@ -1109,11 +1114,17 @@ const ProjectListPage: React.FC = () => {
   } = useProjectStore();
 
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const { createDraft } = useIdeaLabStore();
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
+
+  // 从工作台“新建项目”跳入（/projects?new=1）时自动打开创建弹窗
+  useEffect(() => {
+    if (searchParams.get('new') === '1') setIsDialogOpen(true);
+  }, [searchParams]);
 
   const filteredProjects = getFilteredProjects();
 
@@ -1193,7 +1204,9 @@ const ProjectListPage: React.FC = () => {
   return (
     <div style={pageStyles.container}>
       <div style={pageStyles.header}>
-        <h1 style={pageStyles.pageTitle}>我的项目</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h1 style={pageStyles.pageTitle}>我的项目</h1>
+        </div>
         <button
           style={pageStyles.createBtn}
           onClick={() => setIsDialogOpen(true)}
@@ -1271,15 +1284,15 @@ const pageStyles: Record<string, React.CSSProperties> = {
   pageTitle: {
     fontSize: '24px',
     fontWeight: 700,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     margin: 0,
   },
   createBtn: {
     padding: '10px 24px',
-    backgroundColor: 'var(--color-accent, #e94560)',
+    backgroundColor: 'var(--color-accent, var(--color-accent))',
     border: 'none',
     borderRadius: 'var(--radius-md, 8px)',
-    color: '#fff',
+    color: 'var(--color-white)',
     fontSize: '14px',
     fontWeight: 600,
     cursor: 'pointer',
@@ -1294,7 +1307,7 @@ const pageStyles: Record<string, React.CSSProperties> = {
   noResults: {
     textAlign: 'center',
     padding: '40px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     fontSize: '14px',
   },
 };

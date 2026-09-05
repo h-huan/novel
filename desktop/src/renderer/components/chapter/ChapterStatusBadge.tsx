@@ -18,17 +18,17 @@ export interface ChapterStatusBadgeProps {
 const STATUS_CONFIG: Record<ChapterStatus, { label: string; color: string; bgColor: string }> = {
   draft: {
     label: '未锁定',
-    color: '#f39c12',
+    color: 'var(--color-warning)',
     bgColor: 'rgba(243, 156, 18, 0.12)',
   },
   reviewing: {
     label: '质检中',
-    color: '#3498db',
+    color: 'var(--color-info)',
     bgColor: 'rgba(52, 152, 219, 0.12)',
   },
   locked: {
     label: '已锁定',
-    color: '#2ecc71',
+    color: 'var(--color-success)',
     bgColor: 'rgba(46, 204, 113, 0.12)',
   },
 };
@@ -38,7 +38,8 @@ const ChapterStatusBadge: React.FC<ChapterStatusBadgeProps> = ({
   showLockIcon = true,
   size = 'medium',
 }) => {
-  const config = STATUS_CONFIG[status];
+  // 后端可能返回未枚举的状态，回退到 draft，避免 STATUS_CONFIG[status] 为 undefined 后访问 .color 崩溃
+  const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.draft;
   const isSmall = size === 'small';
 
   return (

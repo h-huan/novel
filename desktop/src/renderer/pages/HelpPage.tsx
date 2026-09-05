@@ -118,8 +118,8 @@ Prompt Chain (/prompt-chains) — AI写作链节点配置
 const HelpPage: React.FC = () => {
   return (
     <div style={{ padding: '24px', maxWidth: '780px' }}>
-      <h1 style={{ margin: '0 0 4px 0', fontSize: '20px', fontWeight: 700, color: '#eaeaea' }}>📘 使用手册</h1>
-      <p style={{ fontSize: '12px', color: '#8a8aa0', marginBottom: '20px' }}>
+      <h1 style={{ margin: '0 0 4px 0', fontSize: '20px', fontWeight: 700, color: 'var(--color-text-primary)' }}>📘 使用手册</h1>
+      <p style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginBottom: '20px' }}>
         平台功能概览与操作指引 · 共 {sections.length} 个章节
       </p>
 
@@ -129,13 +129,13 @@ const HelpPage: React.FC = () => {
           borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)',
           marginBottom: '12px',
         }}>
-          <div style={{ fontSize: '15px', fontWeight: 700, color: '#eaeaea', marginBottom: '10px' }}>{s.title}</div>
-          <div style={{ fontSize: '12px', color: '#c0c0d0', lineHeight: 1.8 }}>
+          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '10px' }}>{s.title}</div>
+          <div style={{ fontSize: '14px', color: 'var(--color-text-soft)', lineHeight: 1.8 }}>
             {s.content.split('\n').map((line, j) => (
               <div key={j} style={{
                 marginBottom: line.trim() ? '4px' : '8px',
                 color: line.trim().startsWith('提示') || line.trim().startsWith('要点')
-                  ? '#f59e0b' : line.trim().startsWith('•') ? '#d0d0e0' : '#c0c0d0',
+                  ? 'var(--color-warning)' : line.trim().startsWith('•') ? 'var(--color-text-soft)' : 'var(--color-text-soft)',
               }}>
                 {line.trim() || ''}
               </div>

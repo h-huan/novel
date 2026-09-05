@@ -42,30 +42,30 @@ export class ErrorBoundary extends React.Component<
           height: '100vh',
           padding: 24,
           fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-          background: '#1a1a2e',
-          color: '#e0e0e0',
+          background: 'var(--color-bg-primary)',
+          color: 'var(--color-text-primary)',
         }}>
           <div style={{
-            background: '#16213e',
+            background: 'var(--color-bg-secondary)',
             borderRadius: 12,
             padding: '32px 40px',
             maxWidth: 560,
             width: '100%',
             boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
           }}>
-            <h2 style={{ color: '#ff6b6b', marginTop: 0, fontSize: 20 }}>⚠️ 应用出错了</h2>
+            <h2 style={{ color: 'var(--color-danger)', marginTop: 0, fontSize: 20 }}>⚠️ 应用出错了</h2>
             <p style={{ color: '#aaa', fontSize: 14, marginBottom: 16 }}>
               渲染组件时发生错误，已阻止整页崩溃。请尝试重置或重启应用。
             </p>
             {this.state.error && (
               <pre style={{
-                background: '#0f0f23',
+                background: 'var(--color-bg-primary)',
                 padding: 12,
                 borderRadius: 6,
                 fontSize: 14,
                 overflow: 'auto',
                 maxHeight: 160,
-                color: '#ff6b6b',
+                color: 'var(--color-danger)',
                 marginBottom: 16,
               }}>
                 {this.state.error.toString()}
@@ -80,7 +80,7 @@ export class ErrorBoundary extends React.Component<
                   borderRadius: 6,
                   border: 'none',
                   background: '#4a9eff',
-                  color: '#fff',
+                  color: 'var(--color-white)',
                   cursor: 'pointer',
                   fontSize: 14,
                 }}

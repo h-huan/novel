@@ -26,5 +26,3 @@ export { ImportExportLogRepository } from './import-export-log.repository';
 export type { ImportExportLogRow } from './import-export-log.repository';
 export { PromptTemplateRepository } from './prompt-template.repository';
 export type { PromptTemplateRow } from './prompt-template.repository';
-export { InspirationRepository } from './inspiration.repository';
-export type { InspirationRow } from './inspiration.repository';

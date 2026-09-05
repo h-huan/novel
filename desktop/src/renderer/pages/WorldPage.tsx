@@ -180,22 +180,22 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
         </>
       ) : undefined}
     >
-      {loading ? <p style={{ color: '#8a8aa0' }}>正在加载世界观资料...</p> : worldSettings.length === 0 ? (
+      {loading ? <p style={{ color: 'var(--color-text-dim)' }}>正在加载世界观资料...</p> : worldSettings.length === 0 ? (
         <EmptyHint>当前项目还没有世界观。<div style={{ marginTop: 12 }}><button type="button" onClick={createWorldSetting}>创建世界观</button></div></EmptyHint>
       ) : (
         <>
-          {status && <p style={{ color: status === '已保存。' ? '#34d399' : '#8a8aa0', margin: '0 0 12px' }}>{status}</p>}
+          {status && <p style={{ color: status === '已保存。' ? '#34d399' : 'var(--color-text-dim)', margin: '0 0 12px' }}>{status}</p>}
           <Card title="写作摘要" span style={{ marginBottom: 16 }}>
-            <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: '#c0c0d0', fontSize: 14, lineHeight: 1.6, maxHeight: 400, overflow: 'auto' }}>{summary || '暂无写作摘要'}</pre>
+            <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: 'var(--color-text-soft)', fontSize: 14, lineHeight: 1.6, maxHeight: 400, overflow: 'auto' }}>{summary || '暂无写作摘要'}</pre>
           </Card>
           {viewMode === 'read' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <Card title="作品速览" span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <FieldList label="作品简介 / 核心卖点" value={profile.synopsis} accent="#e94560" />
-                  <FieldList label="基本信息" value={profile.basic_info} accent="#60a5fa" />
-                  <FieldList label="全文规模 / 数据规划" value={profile.scale_plan} accent="#22c55e" />
-                  <FieldList label="结局设定" value={profile.ending} accent="#f59e0b" />
+                  <FieldList label="作品简介 / 核心卖点" value={profile.synopsis} accent="var(--color-accent)" />
+                  <FieldList label="基本信息" value={profile.basic_info} accent="var(--color-info-light)" />
+                  <FieldList label="全文规模 / 数据规划" value={profile.scale_plan} accent="var(--color-success)" />
+                  <FieldList label="结局设定" value={profile.ending} accent="var(--color-warning)" />
                 </div>
               </Card>
               {PROFILE_SECTION_GROUPS.map(group => {
@@ -206,7 +206,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
                 return (
                   <Card key={group.title} title={group.title} subtitle={group.description}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {entries.map(({ f, value }) => <FieldList key={f.key} label={f.label} value={value} accent="#93c5fd" />)}
+                      {entries.map(({ f, value }) => <FieldList key={f.key} label={f.label} value={value} accent="var(--color-info-light)" />)}
                     </div>
                   </Card>
                 );
@@ -224,7 +224,7 @@ const WorldProfileEditor: React.FC<{ projectId: string }> = ({ projectId }) => {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
                       {group.fields.map(item => (
                         <label key={item.key} style={{ display: 'grid', gap: 4, fontSize: 14, ...(item.key === 'custom_settings' ? { gridColumn: '1 / -1' } : null) }}>
-                          <span style={{ color: '#c0c0d0' }}>{item.label}</span>
+                          <span style={{ color: 'var(--color-text-soft)' }}>{item.label}</span>
                           {item.key === 'custom_settings' ? (
                             <CustomSettingsEditor value={profile['custom_settings'] || '[]'} onChange={v => setProfile(current => ({ ...current, custom_settings: v }))} />
                           ) : (
@@ -253,7 +253,7 @@ const WorldPage: React.FC = () => {
   const { currentProject } = useProjectStore();
   const projectId = routeProjectId || currentProject?.id;
 
-  if (!currentProject || !projectId) return <div style={{ padding: '40px', textAlign: 'center', color: '#6c6c80', fontSize: '14px' }}>请先选择或创建项目。</div>;
+  if (!currentProject || !projectId) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '14px' }}>请先选择或创建项目。</div>;
 
   return currentProject.type === 'short_story' ? <WorldSimpleView /> : <WorldProfileEditor projectId={projectId} />;
 };

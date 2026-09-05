@@ -6,8 +6,10 @@
  */
 
 import React, { useRef, useCallback, useEffect, useState } from 'react';
+import { countNarrativeWords } from '../../lib/wordCount';
 import Editor, { OnMount, OnChange } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
+import { COLORS, INFO_ALPHA, SCROLLBAR_ALPHA } from '../../styles/theme';
 
 export interface MarkdownEditorProps {
   /** 编辑内容（受控模式） */
@@ -42,51 +44,63 @@ const CUSTOM_THEME = 'novel-dark';
 
 const themeDefinition: editor.IStandaloneThemeData = {
   base: 'vs-dark',
-  inherit: true,
+  // 小说正文是中文纯文本，不继承 vs-dark 的代码语法配色
+  // （vs-dark 默认 string token 为砖红色 #ce9178，会把中文对话/标点误染成红色）
+  inherit: false,
   rules: [
     { token: 'comment', foreground: '6c6c80', fontStyle: 'italic' },
-    { token: 'string', foreground: 'e94560' },
-    { token: 'number', foreground: 'f39c12' },
-    { token: 'keyword', foreground: 'e94560' },
-    { token: 'type', foreground: '2ecc71' },
+    { token: 'string', foreground: 'eaeaea' },
+    { token: 'number', foreground: 'eaeaea' },
+    { token: 'keyword', foreground: 'eaeaea' },
+    { token: 'type', foreground: 'eaeaea' },
     { token: 'heading', foreground: 'eaeaea', fontStyle: 'bold' },
+    // 兜底：其余所有 token（含 markdown 的 string.quoted/emphasis 等）统一为正文白色
+    { token: '', foreground: 'eaeaea' },
   ],
   colors: {
-    'editor.background': '#1a1a2e',
-    'editor.foreground': '#eaeaea',
-    'editor.lineHighlightBackground': '#16213e',
-    'editor.selectionBackground': 'rgba(233,69,96,0.2)',
-    'editorCursor.foreground': '#e94560',
-    'editorLineNumber.foreground': '#6c6c80',
-    'editorLineNumber.activeForeground': '#eaeaea',
-    'editor.inactiveSelectionBackground': 'rgba(233,69,96,0.1)',
-    'editor.selectionHighlightBackground': 'rgba(233,69,96,0.1)',
-    'editor.wordHighlightBackground': 'rgba(233,69,96,0.1)',
-    'editor.findMatchBackground': 'rgba(233,69,96,0.3)',
-    'editor.findMatchHighlightBackground': 'rgba(233,69,96,0.1)',
-    'editorBracketMatch.background': 'rgba(233,69,96,0.1)',
-    'editorBracketMatch.border': '#e94560',
-    'scrollbarSlider.background': 'rgba(108,108,128,0.3)',
-    'scrollbarSlider.hoverBackground': 'rgba(108,108,128,0.5)',
-    'scrollbarSlider.activeBackground': 'rgba(108,108,128,0.7)',
+    // 注意：Monaco 自定义主题 colors 只认 #RRGGBB / #RRGGBBAA 十六进制，
+    // 写 rgba(r,g,b,a) 会解析失败并回退成纯红 #ff0000（选中、滚动条、词高亮都会变红）。
+    // 写 var(--color-xxx) 同样不被 Monaco 识别！必须用具体十六进制值。
+    // 颜色值统一从 styles/theme.ts 的 COLORS / INFO_ALPHA / SCROLLBAR_ALPHA 引用，
+    // 与平台 tokens.css 保持一致，禁止在此处硬编码散落的颜色值。
+    'editor.background': COLORS.bg.primary,
+    'editor.foreground': COLORS.text.primary,
+    'editor.lineHighlightBackground': COLORS.bg.secondary,
+    'editor.selectionBackground': INFO_ALPHA[35],
+    'editorCursor.foreground': COLORS.info.light,
+    'editorLineNumber.foreground': COLORS.text.muted,
+    'editorLineNumber.activeForeground': COLORS.text.primary,
+    'editor.inactiveSelectionBackground': INFO_ALPHA[18],
+    'editor.selectionHighlightBackground': INFO_ALPHA[15],
+    // 单词高亮系列必须显式定义，缺项同样会回退纯红
+    'editor.wordHighlightBackground': INFO_ALPHA[15],
+    'editor.wordHighlightStrongBackground': INFO_ALPHA[22],
+    'editor.wordHighlightTextBackground': INFO_ALPHA[15],
+    'editor.wordHighlightBorder': COLORS.transparent,
+    'editor.wordHighlightStrongBorder': COLORS.transparent,
+    'editor.wordHighlightTextBorder': COLORS.transparent,
+    'editorOverviewRuler.wordHighlightForeground': INFO_ALPHA[50],
+    'editorOverviewRuler.wordHighlightStrongForeground': INFO_ALPHA[60],
+    'editorOverviewRuler.wordHighlightTextForeground': INFO_ALPHA[50],
+    'editorOverviewRuler.selectionHighlightForeground': INFO_ALPHA[50],
+    'editor.findMatchBackground': INFO_ALPHA[40],
+    'editor.findMatchHighlightBackground': INFO_ALPHA[15],
+    'editorBracketMatch.background': INFO_ALPHA[15],
+    'editorBracketMatch.border': COLORS.info.primary,
+    'scrollbarSlider.background': SCROLLBAR_ALPHA[30],
+    'scrollbarSlider.hoverBackground': SCROLLBAR_ALPHA[50],
+    'scrollbarSlider.activeBackground': SCROLLBAR_ALPHA[70],
   },
 };
 
-function countWords(text: string): number {
-  if (!text || !text.trim()) return 0;
-  const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-  const withoutChinese = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
-  const englishWords = withoutChinese
-    .split(/\s+/)
-    .filter((w) => w.length > 0 && /[a-zA-Z]/.test(w)).length;
-  return chineseChars + englishWords;
-}
+// 正文字数统一走 lib/wordCount（与后端 generatedNarrativeWordCount 同口径），禁止本地另算
+const countWords = countNarrativeWords;
 
 // 版权状态颜色映射
 const STATUS_COLORS: Record<CopyrightStatus, { bg: string; fg: string; label: string }> = {
-  clear: { bg: 'rgba(46,204,113,0.12)', fg: '#2ecc71', label: '版权安全' },
-  warning: { bg: 'rgba(243,156,18,0.12)', fg: '#f39c12', label: '版权提醒' },
-  violation: { bg: 'rgba(231,76,60,0.12)', fg: '#e74c3c', label: '版权风险' },
+  clear: { bg: 'rgba(46,204,113,0.12)', fg: 'var(--color-success)', label: '版权安全' },
+  warning: { bg: 'rgba(243,156,18,0.12)', fg: 'var(--color-warning)', label: '版权提醒' },
+  violation: { bg: 'rgba(231,76,60,0.12)', fg: 'var(--color-danger)', label: '版权风险' },
 };
 
 // 装饰器 className key
@@ -247,10 +261,10 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         setCopyrightStatus('clear');
       }
 
-      // 应用内联装饰器
-      if (editorRef.current && monacoRef.current) {
-        applyCopyrightDecorations(issues, text, monacoRef.current, editorRef.current);
-      }
+      // 应用内联装饰器（临时禁用，检测红色背景来源）
+      // if (editorRef.current && monacoRef.current) {
+      //   applyCopyrightDecorations(issues, text, monacoRef.current, editorRef.current);
+      // }
     } catch {
       // 静默失败，不影响编辑体验
     }
@@ -272,9 +286,18 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   }, []);
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
+    // 重新定义并应用主题，确保热更新后主题修改生效（beforeMount 只在首次挂载执行）
+    monaco.editor.defineTheme(CUSTOM_THEME, themeDefinition);
+    monaco.editor.setTheme(CUSTOM_THEME);
     editorRef.current = editor;
     monacoRef.current = monaco;
-    editor.focus();
+    // 只读模式下不聚焦、不显示光标；编辑模式才聚焦
+    const editorDom = editor.getDomNode();
+    if (readOnly) {
+      if (editorDom) editorDom.classList.add('monaco-readonly');
+    } else {
+      editor.focus();
+    }
     const text = editor.getValue();
     setLocalWordCount(countWords(text));
     realtimeCheck(text, monaco, editor);
@@ -320,7 +343,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         setPopupPosition(null);
       }
     });
-  }, [realtimeCheck, copyrightIssues]);
+  }, [realtimeCheck, copyrightIssues, readOnly]);
 
   const handleChange: OnChange = useCallback(
     (value: string | undefined, ev) => {
@@ -388,6 +411,23 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         clearTimeout(copyrightDebounceRef.current);
       }
     };
+  }, []);
+
+  // 强制应用自定义主题，确保热更新后主题修改生效
+  useEffect(() => {
+    const applyTheme = () => {
+      if (monacoRef.current && editorRef.current) {
+        try {
+          monacoRef.current.editor.defineTheme(CUSTOM_THEME, themeDefinition);
+          monacoRef.current.editor.setTheme(CUSTOM_THEME);
+        } catch {}
+      }
+    };
+    // 立即尝试一次
+    applyTheme();
+    // 延迟再试一次，确保编辑器完全初始化后主题生效
+    const timer = window.setTimeout(applyTheme, 100);
+    return () => window.clearTimeout(timer);
   }, []);
 
   /**
@@ -494,8 +534,8 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             border: 'none',
             outline: 'none',
             padding: '16px 24px',
-            backgroundColor: '#1a1a2e',
-            color: '#eaeaea',
+            backgroundColor: 'var(--color-bg-primary)',
+            color: 'var(--color-text-primary)',
             fontSize: '16px',
             lineHeight: '28px',
             fontFamily: 'var(--font-family)',
@@ -520,13 +560,15 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           wordWrap: 'on',
           minimap: { enabled: false },
           readOnly,
+          // 只读模式下隐藏光标，避免用户误以为可以编辑
+          cursorStyle: readOnly ? 'line-thin' : 'line',
+          cursorBlinking: readOnly ? 'solid' : 'smooth',
           scrollBeyondLastLine: false,
           lineNumbers: 'on',
-          renderWhitespace: 'selection',
+          renderWhitespace: 'none',
           tabSize: 2,
           padding: { top: 16, bottom: 16 },
           smoothScrolling: true,
-          cursorBlinking: 'smooth',
           cursorSmoothCaretAnimation: 'on',
           bracketPairColorization: { enabled: true },
           guides: { bracketPairs: false },
@@ -542,6 +584,17 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           acceptSuggestionOnEnter: 'off',
           tabCompletion: 'off',
           wordBasedSuggestions: 'off',
+          // 小说写作不需要代码式的"相同词高亮"：光标停在词上时全文同词会被加背景，
+          // 且缺色时回退成纯红。直接关闭这两类高亮。
+          occurrencesHighlight: 'off',
+          selectionHighlight: false,
+          // 关闭 Unicode 字符高亮：Monaco 默认把中文全角标点（，。？！等）
+          // 判定为"模糊/可疑 Unicode 字符"并加金黄色边框（cdr unicode-highlight），
+          // 小说正文全是中文标点，这个功能纯属干扰，必须关闭。
+          unicodeHighlight: {
+            ambiguousCharacters: false,
+            invisibleCharacters: false,
+          },
         }}
         loading={
           <div style={styles.loading}>
@@ -562,7 +615,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             borderRadius: '4px',
             backgroundColor: statusColor.bg,
             color: statusColor.fg,
-            fontSize: '11px',
+            fontSize: '14px',
             fontWeight: 600,
             fontFamily: 'var(--font-mono, monospace)',
           }}
@@ -586,8 +639,8 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
               height: '16px',
               borderRadius: '8px',
               padding: '0 4px',
-              backgroundColor: copyrightStatus === 'violation' ? '#e74c3c' : '#f39c12',
-              color: '#fff',
+              backgroundColor: copyrightStatus === 'violation' ? 'var(--color-danger)' : 'var(--color-warning)',
+              color: 'var(--color-white)',
               fontSize: '10px',
               fontWeight: 700,
               lineHeight: '16px',
@@ -617,8 +670,8 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         }}>
           {copyrightIssues.slice(0, 3).map((w, i) => (
             <div key={i} style={{
-              fontSize: '11px',
-              color: w.risk === 'high' ? '#e74c3c' : '#f39c12',
+              fontSize: '14px',
+              color: w.risk === 'high' ? 'var(--color-danger)' : 'var(--color-warning)',
               backgroundColor: w.risk === 'high' ? 'rgba(231,76,60,0.12)' : 'rgba(243,156,18,0.12)',
               padding: '4px 10px',
               borderRadius: '4px',
@@ -632,7 +685,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           ))}
           {copyrightIssues.length > 3 && (
             <div style={{
-              fontSize: '10px', color: '#6c6c80', textAlign: 'center',
+              fontSize: '10px', color: 'var(--color-text-muted)', textAlign: 'center',
             }}>
               +{copyrightIssues.length - 3} 项更多
             </div>
@@ -648,7 +701,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             left: popupPosition.x,
             top: popupPosition.y,
             zIndex: 1000,
-            backgroundColor: '#12122a',
+            backgroundColor: 'var(--color-bg-primary)',
             border: '1px solid rgba(231,76,60,0.3)',
             borderRadius: '8px',
             padding: '12px 14px',
@@ -659,21 +712,21 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           }}
           onClick={() => { setPopupIssue(null); setPopupPosition(null); }}
         >
-          <div style={{ fontSize: '11px', fontWeight: 700, color: '#e74c3c', marginBottom: '6px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-danger)', marginBottom: '6px' }}>
             {popupIssue.risk === 'high' ? '🔴 高风险版权冲突' : '🟡 中风险版权提醒'}
           </div>
-          <div style={{ fontSize: '12px', color: '#c0c0d0', marginBottom: '4px', lineHeight: 1.6 }}>
+          <div style={{ fontSize: '14px', color: 'var(--color-text-soft)', marginBottom: '4px', lineHeight: 1.6 }}>
             {popupIssue.message}
           </div>
-          <div style={{ fontSize: '11px', color: '#6c6c80' }}>
-            匹配作品: <span style={{ color: '#eaeaea' }}>{popupIssue.matchedItem}</span>
-            &nbsp;|&nbsp;相似度: <span style={{ color: '#f39c12' }}>{popupIssue.similarity}%</span>
+          <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
+            匹配作品: <span style={{ color: 'var(--color-text-primary)' }}>{popupIssue.matchedItem}</span>
+            &nbsp;|&nbsp;相似度: <span style={{ color: 'var(--color-warning)' }}>{popupIssue.similarity}%</span>
           </div>
           <button
             style={{
-              marginTop: '8px', padding: '4px 12px', fontSize: '11px',
+              marginTop: '8px', padding: '4px 12px', fontSize: '14px',
               backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '4px', color: '#8a8aa0', cursor: 'pointer', fontFamily: 'inherit',
+              borderRadius: '4px', color: 'var(--color-text-dim)', cursor: 'pointer', fontFamily: 'inherit',
             }}
             onClick={() => { setPopupIssue(null); setPopupPosition(null); }}
           >
@@ -691,14 +744,14 @@ const styles: Record<string, React.CSSProperties> = {
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: 'var(--color-bg-primary)',
   },
   loading: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     height: '100%',
-    color: 'var(--color-text-muted, #6c6c80)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     fontSize: '14px',
   },
   statusBar: {
@@ -711,8 +764,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '8px',
   },
   wordCountText: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: '14px',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     backgroundColor: 'rgba(26, 26, 46, 0.85)',
     padding: '2px 8px',
     borderRadius: '4px',

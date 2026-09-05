@@ -36,6 +36,71 @@ export interface MapPointResponse {
 export class MapPointService {
   constructor(private readonly repo: MapPointRepository, private readonly databaseService: DatabaseService, @Optional() private readonly stateItemService?: StateItemService) {}
 
+  /**
+   * 地点“内部功能空间”后缀：出现这些词说明它是某主地点内部的子场景（大堂/门口/办公室…），
+   * 应作为 scene 挂到主地点下，而不是平铺成又一个一级地点（用户反馈：同一地点生成一堆重复点）。
+   * 注意“大厦/大楼/总部/集团”是主点名的一部分，不能当后缀剥离。
+   */
+  private static readonly FUNCTION_SUFFIX = /(一楼|二楼|三楼|[0-9]+楼|一层|二层|[0-9]+层|大堂|大厅|前台|门口|门外|靠窗|卡座|卡座区|办公室|会议室|卧室|客厅|书房|厨房|卫生间|登记区|登记处|外广场|单元门口|单元|走廊|电梯间|电梯|停车场|顶楼|天台|露台|包间|工位)$/;
+
+  /**
+   * 计算地点“核心名”，用于判断两个名字是否指向同一物理地点（零 LLM、可单测）：
+   * 去括号补充说明（如“（前夫炫耀处）”）→ 取“的”之后的核心地点（“林薇与陆沉的婚房”→婚房）
+   * → 反复剥离内部功能空间后缀（“辰风科技办公室”→辰风科技）。
+   */
+  static coreLocationName(raw: string): string {
+    let s = String(raw || '').replace(/[（(][^）)]*[）)]/g, '').replace(/\s+/g, '').trim();
+    const de = s.lastIndexOf('的');
+    if (de >= 0 && de < s.length - 1) s = s.slice(de + 1);
+    let prev = '';
+    while (prev !== s) { prev = s; s = s.replace(MapPointService.FUNCTION_SUFFIX, ''); }
+    return s.trim();
+  }
+
+  /**
+   * 入库前对 LLM 返回的地点做确定性归并（零 LLM、可单测），根治“同一地点被不同修饰名重复建点、
+   * 子场景被平铺成一级点”：
+   *  - 核心名相同 = 同一物理地点：纯重复（人物修饰/括号注释不同）只保留一条并合并描述；
+   *  - 带内部功能空间后缀（或原 level=scene）的，降为 scene 并把 parentName 指向核心主地点，同名子场景只留一条；
+   *  - 主地点首次出现保留为一级点。返回归并后数组与被合并名清单（供日志/进度警告，作者可见）。
+   */
+  static dedupeRawMapPoints<T extends { name?: string; level?: string; parentName?: string; description?: string; type?: string }>(raw: T[]): { points: T[]; merged: string[] } {
+    const out: T[] = [];
+    const merged: string[] = [];
+    const coreIndex = new Map<string, number>();
+    const childKey = new Set<string>();
+    for (const item of Array.isArray(raw) ? raw : []) {
+      const name = String(item?.name || '').replace(/\s+/g, '').trim();
+      if (!name) continue;
+      const core = MapPointService.coreLocationName(name);
+      if (!core) continue;
+      const suffixMatch = name.match(MapPointService.FUNCTION_SUFFIX);
+      const isFunctional = Boolean(suffixMatch) || item.level === 'scene';
+      const existed = coreIndex.get(core);
+      if (existed === undefined) {
+        out.push({ ...item, name });
+        coreIndex.set(core, out.length - 1);
+        // 主点自身就带功能后缀（如“辰风科技办公室”）时，为该后缀占位，后来同后缀的重复名直接合并而非另立子点
+        const selfSuffix = name.match(MapPointService.FUNCTION_SUFFIX);
+        if (selfSuffix) childKey.add(`${core}::${selfSuffix[0]}`);
+        continue;
+      }
+      const parent = out[existed];
+      if (isFunctional) {
+        const key = `${core}::${suffixMatch ? suffixMatch[0] : name}`;
+        if (childKey.has(key)) { merged.push(name); continue; }
+        childKey.add(key);
+        out.push({ ...item, name, level: 'scene', parentName: String(parent.name) });
+      } else {
+        merged.push(name);
+        const extra = String(item.description || '').trim();
+        const base = String(parent.description || '').trim();
+        if (extra && !base.includes(extra)) (parent as any).description = base ? `${base}；${extra}` : extra;
+      }
+    }
+    return { points: out, merged };
+  }
+
   getProfile(projectId: string, id: string) {
     const mapPoint = this.findOne(id); if (mapPoint.projectId !== projectId) throw new NotFoundException('Map point not found');
     const db = this.databaseService.getDb(); const row = db.prepare('SELECT * FROM location_knowledge_profiles WHERE project_id = ? AND map_point_id = ?').get(projectId, id) as any;

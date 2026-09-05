@@ -1895,8 +1895,11 @@ export class ContinuityService {
   }
 
   private allLegacyTimelines(projectId: string): any[] {
+    // timeline_events 本身无 project_id，必须经 timelines JOIN 按书过滤（此前直查 project_id 必报错并被 catch 吞掉，导致按书时间线恒为空）
     try {
-      return this.database.prepare('SELECT * FROM timeline_events WHERE project_id = ? ORDER BY event_date ASC, updated_at DESC').all(projectId) as any[];
+      return this.database.prepare(
+        'SELECT e.* FROM timeline_events e JOIN timelines t ON t.id = e.timeline_id WHERE t.project_id = ? ORDER BY e.event_date ASC, e.updated_at DESC',
+      ).all(projectId) as any[];
     } catch {
       return [];
     }

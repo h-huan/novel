@@ -27,9 +27,12 @@ const TYPE_LABELS: Record<string, string> = {
 const PLATFORM_LABELS: Record<string, string> = {
   zhihu: '知乎盐选',
   fanqie: '番茄',
+  qimao: '七猫',
   qidian: '起点',
   douyin: '抖音',
   xiaohongshu: '小红书',
+  jinjiang: '晋江',
+  rules_horror: '规则怪谈',
   custom: '自定义',
   generic: '通用',
 };
@@ -45,13 +48,13 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: '#6c6c80',
-  questioning: '#f39c12',
-  answered: '#3498db',
-  refining: '#e67e22',
-  refined: '#2ecc71',
-  confirmed: '#27ae60',
-  converted: '#95a5a6',
+  draft: 'var(--color-text-muted)',
+  questioning: 'var(--color-warning)',
+  answered: 'var(--color-info)',
+  refining: 'var(--color-warning)',
+  refined: 'var(--color-success)',
+  confirmed: 'var(--color-success)',
+  converted: 'var(--color-text-muted)',
 };
 
 // ========== 子组件: 追问区 ==========
@@ -152,7 +155,7 @@ const RefinedIdeaSection: React.FC<RefinedIdeaSectionProps> = ({ refinedIdea }) 
             <span style={refinedStyles.label}>卖点</span>
             <div style={refinedStyles.tagList}>
               {refinedIdea.sellingPoints.map((sp, i) => (
-                <span key={i} style={{ ...refinedStyles.tag, backgroundColor: 'rgba(233,69,96,0.15)', color: '#e94560' }}>{sp}</span>
+                <span key={i} style={{ ...refinedStyles.tag, backgroundColor: 'rgba(233,69,96,0.15)', color: 'var(--color-accent)' }}>{sp}</span>
               ))}
             </div>
           </div>
@@ -196,7 +199,7 @@ interface MaturitySectionProps {
 const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
   if (!report) return null;
 
-  const scoreColor = score >= 70 ? '#2ecc71' : score >= 40 ? '#f39c12' : '#e94560';
+  const scoreColor = score >= 70 ? 'var(--color-success)' : score >= 40 ? 'var(--color-warning)' : 'var(--color-accent)';
 
   return (
     <div style={sectionStyles.container}>
@@ -215,15 +218,15 @@ const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
         </div>
         <div style={maturityStyles.scoreInfo}>
           {score >= 70 ? (
-            <p style={{ ...maturityStyles.scoreLabel, color: '#2ecc71' }}>
+            <p style={{ ...maturityStyles.scoreLabel, color: 'var(--color-success)' }}>
               ✅ 想法已成熟，可以创建项目
             </p>
           ) : score >= 40 ? (
-            <p style={{ ...maturityStyles.scoreLabel, color: '#f39c12' }}>
+            <p style={{ ...maturityStyles.scoreLabel, color: 'var(--color-warning)' }}>
               ⚠️ 想法有一定基础，建议继续完善后再创建项目
             </p>
           ) : (
-            <p style={{ ...maturityStyles.scoreLabel, color: '#e94560' }}>
+            <p style={{ ...maturityStyles.scoreLabel, color: 'var(--color-accent)' }}>
               ❌ 想法还不够成熟，建议继续完善
             </p>
           )}
@@ -235,7 +238,7 @@ const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
           <h4 style={maturityStyles.listTitle}>✅ 优势</h4>
           <ul style={maturityStyles.list}>
             {report.strengths.map((s, i) => (
-              <li key={i} style={{ ...maturityStyles.listItem, color: '#2ecc71' }}>{s}</li>
+              <li key={i} style={{ ...maturityStyles.listItem, color: 'var(--color-success)' }}>{s}</li>
             ))}
           </ul>
         </div>
@@ -246,7 +249,7 @@ const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
           <h4 style={maturityStyles.listTitle}>📋 缺失项</h4>
           <ul style={maturityStyles.list}>
             {report.missingItems.map((m, i) => (
-              <li key={i} style={{ ...maturityStyles.listItem, color: '#f39c12' }}>{m}</li>
+              <li key={i} style={{ ...maturityStyles.listItem, color: 'var(--color-warning)' }}>{m}</li>
             ))}
           </ul>
         </div>
@@ -257,7 +260,7 @@ const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
           <h4 style={maturityStyles.listTitle}>⚠️ 风险点</h4>
           <ul style={maturityStyles.list}>
             {report.risks.map((r, i) => (
-              <li key={i} style={{ ...maturityStyles.listItem, color: '#e94560' }}>{r}</li>
+              <li key={i} style={{ ...maturityStyles.listItem, color: 'var(--color-accent)' }}>{r}</li>
             ))}
           </ul>
         </div>
@@ -472,14 +475,14 @@ const IdeaLabPage: React.FC = () => {
             <span
               style={{
                 ...pageStyles.badge,
-                backgroundColor: STATUS_COLORS[draft.status] || '#6c6c80',
-                color: '#fff',
+                backgroundColor: STATUS_COLORS[draft.status] || 'var(--color-text-muted)',
+                color: 'var(--color-white)',
               }}
             >
               {STATUS_LABELS[draft.status] || draft.status}
             </span>
             {isConverted && (
-              <span style={{ ...pageStyles.badge, backgroundColor: '#2ecc71', color: '#fff' }}>
+              <span style={{ ...pageStyles.badge, backgroundColor: 'var(--color-success)', color: 'var(--color-white)' }}>
                 已创建项目
               </span>
             )}
@@ -688,7 +691,7 @@ const pageStyles: Record<string, React.CSSProperties> = {
   pageTitle: {
     fontSize: '24px',
     fontWeight: 700,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     margin: 0,
   },
   badges: {
@@ -699,27 +702,27 @@ const pageStyles: Record<string, React.CSSProperties> = {
   badge: {
     padding: '3px 10px',
     borderRadius: 'var(--radius-sm, 4px)',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 500,
     backgroundColor: 'rgba(255,255,255,0.08)',
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
   },
   rawIdeaCard: {
-    backgroundColor: 'var(--color-bg-secondary, #16213e)',
+    backgroundColor: 'var(--color-bg-secondary, var(--color-bg-secondary))',
     borderRadius: 'var(--radius-lg, 12px)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     padding: '20px',
     marginBottom: '16px',
   },
   rawIdeaLabel: {
     fontSize: '14px',
     fontWeight: 600,
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
     margin: '0 0 8px 0',
   },
   rawIdeaText: {
     fontSize: '15px',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     lineHeight: 1.6,
     margin: 0,
   },
@@ -729,41 +732,41 @@ const pageStyles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: '80px 0',
-    color: 'var(--color-text-muted, #6c6c80)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     gap: '16px',
   },
   spinner: {
     width: '32px',
     height: '32px',
     border: '3px solid rgba(255,255,255,0.1)',
-    borderTopColor: 'var(--color-accent, #e94560)',
+    borderTopColor: 'var(--color-accent, var(--color-accent))',
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
   },
   errorBox: {
     textAlign: 'center',
     padding: '60px 0',
-    color: 'var(--color-text-muted, #6c6c80)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
   },
   confirmedBanner: {
     padding: '12px 16px',
     backgroundColor: 'rgba(46,204,113,0.1)',
     border: '1px solid rgba(46,204,113,0.3)',
     borderRadius: 'var(--radius-md, 8px)',
-    color: '#2ecc71',
+    color: 'var(--color-success)',
     fontSize: '14px',
     fontWeight: 600,
     marginBottom: '12px',
   },
   confirmedIdeaBox: {
-    backgroundColor: 'var(--color-bg-secondary, #16213e)',
+    backgroundColor: 'var(--color-bg-secondary, var(--color-bg-secondary))',
     borderRadius: 'var(--radius-md, 8px)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     padding: '16px',
   },
   confirmedIdeaText: {
     fontSize: '14px',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     lineHeight: 1.6,
     margin: 0,
     whiteSpace: 'pre-wrap',
@@ -786,16 +789,16 @@ const pageStyles: Record<string, React.CSSProperties> = {
     gap: '6px',
   },
   fieldLabel: {
-    fontSize: '13px',
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    fontSize: '14px',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
     fontWeight: 500,
   },
   fieldInput: {
     padding: '8px 12px',
-    backgroundColor: 'var(--color-bg-primary, #1a1a2e)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    backgroundColor: 'var(--color-bg-primary, var(--color-bg-primary))',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     fontSize: '14px',
     fontFamily: 'var(--font-family, sans-serif)',
     outline: 'none',
@@ -816,22 +819,22 @@ const pageStyles: Record<string, React.CSSProperties> = {
     padding: '8px 12px',
     backgroundColor: 'rgba(233,69,96,0.1)',
     borderRadius: 'var(--radius-sm, 4px)',
-    color: '#e94560',
-    fontSize: '13px',
+    color: 'var(--color-accent)',
+    fontSize: '14px',
   },
   successMessage: {
     padding: '8px 12px',
     backgroundColor: 'rgba(46,204,113,0.1)',
     borderRadius: 'var(--radius-sm, 4px)',
-    color: '#2ecc71',
-    fontSize: '13px',
+    color: 'var(--color-success)',
+    fontSize: '14px',
   },
   primaryBtn: {
     padding: '10px 24px',
-    backgroundColor: 'var(--color-accent, #e94560)',
+    backgroundColor: 'var(--color-accent, var(--color-accent))',
     border: 'none',
     borderRadius: 'var(--radius-md, 8px)',
-    color: '#fff',
+    color: 'var(--color-white)',
     fontSize: '14px',
     fontWeight: 600,
     cursor: 'pointer',
@@ -841,9 +844,9 @@ const pageStyles: Record<string, React.CSSProperties> = {
   secondaryBtn: {
     padding: '10px 24px',
     backgroundColor: 'transparent',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
     fontSize: '14px',
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
@@ -851,19 +854,19 @@ const pageStyles: Record<string, React.CSSProperties> = {
   dangerBtn: {
     padding: '10px 24px',
     backgroundColor: 'rgba(233,69,96,0.2)',
-    border: '1px solid #e94560',
+    border: '1px solid var(--color-accent)',
     borderRadius: 'var(--radius-md, 8px)',
-    color: '#e94560',
+    color: 'var(--color-accent)',
     fontSize: '14px',
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
   },
   createBtn: {
     padding: '12px 32px',
-    backgroundColor: '#2ecc71',
+    backgroundColor: 'var(--color-success)',
     border: 'none',
     borderRadius: 'var(--radius-md, 8px)',
-    color: '#fff',
+    color: 'var(--color-white)',
     fontSize: '15px',
     fontWeight: 700,
     cursor: 'pointer',
@@ -873,10 +876,10 @@ const pageStyles: Record<string, React.CSSProperties> = {
   backBtn: {
     padding: '8px 16px',
     backgroundColor: 'transparent',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-secondary, #a0a0b0)',
-    fontSize: '13px',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
+    fontSize: '14px',
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
     marginBottom: '12px',
@@ -886,29 +889,29 @@ const pageStyles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(243,156,18,0.1)',
     border: '1px solid rgba(243,156,18,0.3)',
     borderRadius: 'var(--radius-md, 8px)',
-    color: '#f39c12',
-    fontSize: '13px',
+    color: 'var(--color-warning)',
+    fontSize: '14px',
     marginBottom: '16px',
   },
 };
 
 const sectionStyles: Record<string, React.CSSProperties> = {
   container: {
-    backgroundColor: 'var(--color-bg-secondary, #16213e)',
+    backgroundColor: 'var(--color-bg-secondary, var(--color-bg-secondary))',
     borderRadius: 'var(--radius-lg, 12px)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     padding: '20px',
     marginBottom: '16px',
   },
   title: {
     fontSize: '16px',
     fontWeight: 600,
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     margin: '0 0 8px 0',
   },
   subtitle: {
-    fontSize: '13px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: '14px',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     margin: '0 0 16px 0',
     lineHeight: 1.4,
   },
@@ -918,9 +921,9 @@ const sectionStyles: Record<string, React.CSSProperties> = {
     gap: '12px',
   },
   card: {
-    backgroundColor: 'var(--color-bg-primary, #1a1a2e)',
+    backgroundColor: 'var(--color-bg-primary, var(--color-bg-primary))',
     borderRadius: 'var(--radius-md, 8px)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    border: '1px solid var(--color-border, var(--color-border))',
     padding: '14px',
   },
   questionHeader: {
@@ -930,32 +933,32 @@ const sectionStyles: Record<string, React.CSSProperties> = {
     marginBottom: '6px',
   },
   questionNumber: {
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: 'var(--color-accent, #e94560)',
+    color: 'var(--color-accent, var(--color-accent))',
     flexShrink: 0,
     marginTop: '2px',
   },
   questionText: {
     fontSize: '14px',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     fontWeight: 500,
     lineHeight: 1.4,
   },
   reason: {
-    fontSize: '12px',
-    color: 'var(--color-text-muted, #6c6c80)',
+    fontSize: '14px',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     margin: '0 0 10px 18px',
     lineHeight: 1.4,
   },
   textarea: {
     width: '100%',
     padding: '8px 12px',
-    backgroundColor: 'var(--color-bg-primary, #1a1a2e)',
-    border: '1px solid var(--color-border, #2a2a4a)',
+    backgroundColor: 'var(--color-bg-primary, var(--color-bg-primary))',
+    border: '1px solid var(--color-border, var(--color-border))',
     borderRadius: 'var(--radius-sm, 4px)',
-    color: 'var(--color-text-primary, #eaeaea)',
-    fontSize: '13px',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
+    fontSize: '14px',
     fontFamily: 'var(--font-family, sans-serif)',
     outline: 'none',
     resize: 'vertical',
@@ -965,10 +968,10 @@ const sectionStyles: Record<string, React.CSSProperties> = {
   confirmTextarea: {
     width: '100%',
     padding: '10px 14px',
-    backgroundColor: 'var(--color-bg-primary, #1a1a2e)',
-    border: '1px solid var(--color-accent, #e94560)',
+    backgroundColor: 'var(--color-bg-primary, var(--color-bg-primary))',
+    border: '1px solid var(--color-accent, var(--color-accent))',
     borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     fontSize: '14px',
     fontFamily: 'var(--font-family, sans-serif)',
     outline: 'none',
@@ -990,15 +993,15 @@ const refinedStyles: Record<string, React.CSSProperties> = {
     gap: '4px',
   },
   label: {
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: 'var(--color-text-muted, #6c6c80)',
+    color: 'var(--color-text-muted, var(--color-text-muted))',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
   },
   value: {
     fontSize: '14px',
-    color: 'var(--color-text-primary, #eaeaea)',
+    color: 'var(--color-text-primary, var(--color-text-primary))',
     lineHeight: 1.5,
     margin: 0,
   },
@@ -1011,10 +1014,10 @@ const refinedStyles: Record<string, React.CSSProperties> = {
   tag: {
     padding: '3px 10px',
     borderRadius: 'var(--radius-sm, 4px)',
-    fontSize: '12px',
+    fontSize: '14px',
     fontWeight: 500,
     backgroundColor: 'rgba(46,204,113,0.1)',
-    color: '#2ecc71',
+    color: 'var(--color-success)',
   },
 };
 
@@ -1029,7 +1032,7 @@ const maturityStyles: Record<string, React.CSSProperties> = {
     width: '80px',
     height: '80px',
     borderRadius: '50%',
-    border: '3px solid #2ecc71',
+    border: '3px solid var(--color-success)',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
@@ -1042,7 +1045,7 @@ const maturityStyles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
   },
   scoreUnit: {
-    fontSize: '11px',
+    fontSize: '14px',
     opacity: 0.6,
   },
   scoreInfo: {
@@ -1057,9 +1060,9 @@ const maturityStyles: Record<string, React.CSSProperties> = {
     marginBottom: '12px',
   },
   listTitle: {
-    fontSize: '13px',
+    fontSize: '14px',
     fontWeight: 600,
-    color: 'var(--color-text-secondary, #a0a0b0)',
+    color: 'var(--color-text-secondary, var(--color-text-secondary))',
     margin: '0 0 8px 0',
   },
   list: {
@@ -1067,7 +1070,7 @@ const maturityStyles: Record<string, React.CSSProperties> = {
     padding: '0 0 0 20px',
   },
   listItem: {
-    fontSize: '13px',
+    fontSize: '14px',
     lineHeight: 1.6,
     marginBottom: '4px',
   },

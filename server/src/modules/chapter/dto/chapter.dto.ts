@@ -1,7 +1,7 @@
 /**
  * 章节 DTO
  */
-import { IsString, IsOptional, IsNumber, IsArray, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray, Min, Max, IsIn } from 'class-validator';
 import type { ChapterStatus, HookType, TransitionMode } from '@novel/shared';
 
 export class CreateChapterDto {
@@ -39,6 +39,11 @@ export class UpdateChapterDto {
   @IsOptional()
   @IsString()
   transitionMode?: TransitionMode;
+
+  /** 本次保存来源：ai_generated=AI 生成正文 canonical 保存（触发自动质检）；manual=作者手动编辑（默认，不触发） */
+  @IsOptional()
+  @IsIn(['manual', 'ai_generated'])
+  source?: 'manual' | 'ai_generated';
 }
 
 export class ChapterQueryDto {

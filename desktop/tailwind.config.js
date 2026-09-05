@@ -8,33 +8,23 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'bg-primary': '#1a1a2e',
-        'bg-secondary': '#16213e',
-        'bg-card': '#0f3460',
-        accent: '#e94560',
-        'accent-hover': '#ff6b81',
-        'text-primary': '#eaeaea',
-        'text-secondary': '#a0a0b0',
-        'text-muted': '#6c6c80',
-        border: '#2a2a4a',
-        success: '#2ecc71',
-        warning: '#f39c12',
+        // 颜色统一引用 styles/tokens.css 中的 CSS 变量，作为单一来源
+        'bg-primary': 'var(--color-bg-primary)',
+        'bg-secondary': 'var(--color-bg-secondary)',
+        'bg-card': 'var(--color-bg-card)',
+        accent: 'var(--color-accent)',
+        'accent-hover': 'var(--color-accent-hover)',
+        'text-primary': 'var(--color-text-primary)',
+        'text-secondary': 'var(--color-text-secondary)',
+        'text-muted': 'var(--color-text-muted)',
+        border: 'var(--color-border)',
+        success: 'var(--color-success)',
+        warning: 'var(--color-warning)',
+        danger: 'var(--color-danger)',
       },
       fontFamily: {
-        sans: [
-          '-apple-system',
-          'BlinkMacSystemFont',
-          '"Segoe UI"',
-          '"PingFang SC"',
-          '"Microsoft YaHei"',
-          'sans-serif',
-        ],
-        mono: [
-          '"Cascadia Code"',
-          '"Fira Code"',
-          '"JetBrains Mono"',
-          'monospace',
-        ],
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)'],
       },
       borderRadius: {
         sm: '4px',

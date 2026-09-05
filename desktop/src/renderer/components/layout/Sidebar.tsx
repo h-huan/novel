@@ -65,6 +65,7 @@ const Sidebar: React.FC = () => {
     { id: 'timeline', label: '时间线', path: `/project/${pid}/timeline`, icon: ICONS.timeline },
     { id: 'material', label: '素材', path: `/project/${pid}/material`, icon: ICONS.material },
     { id: 'conflict', label: '前后矛盾', path: `/project/${pid}/conflicts`, icon: ICONS.conflict },
+    { id: 'quality', label: '质量诊断', path: `/project/${pid}/writing-quality`, icon: ICONS.viz },
     { id: 'knowledge', label: '知识点', path: `/project/${pid}/knowledge`, icon: ICONS.knowledge },
     { id: 'importExport', label: '导入导出', path: `/project/${pid}/import-export`, icon: ICONS.importExport },
     { id: 'version', label: '修改记录', path: `/project/${pid}/versions`, icon: ICONS.version },
@@ -73,7 +74,8 @@ const Sidebar: React.FC = () => {
   const isActive = (item: NavItem): boolean => {
     if (!item.path) return false;
     if (item.path === '/') return location.pathname === '/';
-    return location.pathname.startsWith(item.path);
+    // 精确到段：/writing 不得误匹配 /writing-quality（质量诊断独立入口）
+    return location.pathname === item.path || location.pathname.startsWith(item.path + '/');
   };
 
   return (

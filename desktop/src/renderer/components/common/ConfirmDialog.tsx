@@ -27,18 +27,18 @@ export interface ConfirmDialogProps {
 const VARIANTS = {
   danger: {
     icon: '⚠',
-    confirmBg: '#e74c3c',
-    confirmHover: '#c0392b',
+    confirmBg: 'var(--color-danger)',
+    confirmHover: 'var(--color-danger)',
   },
   warning: {
     icon: '⚡',
-    confirmBg: '#f39c12',
-    confirmHover: '#d68910',
+    confirmBg: 'var(--color-warning)',
+    confirmHover: 'var(--color-warning)',
   },
   info: {
     icon: 'ℹ',
-    confirmBg: '#3498db',
-    confirmHover: '#2980b9',
+    confirmBg: 'var(--color-info)',
+    confirmHover: 'var(--color-info)',
   },
 };
 
@@ -136,7 +136,7 @@ const styles: Record<string, React.CSSProperties> = {
     backdropFilter: 'blur(2px)',
   },
   dialog: {
-    backgroundColor: '#1e1e32',
+    backgroundColor: 'var(--color-bg-primary)',
     borderRadius: '12px',
     padding: '24px',
     maxWidth: '420px',
@@ -158,13 +158,13 @@ const styles: Record<string, React.CSSProperties> = {
     margin: 0,
     fontSize: '18px',
     fontWeight: 600,
-    color: '#eaeaea',
+    color: 'var(--color-text-primary)',
   },
   description: {
     margin: '0 0 24px 0',
     fontSize: '14px',
     lineHeight: 1.6,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
   },
   actions: {
     display: 'flex',
@@ -175,7 +175,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px 20px',
     fontSize: '14px',
     fontWeight: 500,
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     background: 'transparent',
     border: '1px solid rgba(255,255,255,0.1)',
     borderRadius: '8px',
@@ -186,7 +186,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px 20px',
     fontSize: '14px',
     fontWeight: 600,
-    color: '#fff',
+    color: 'var(--color-white)',
     border: 'none',
     borderRadius: '8px',
     cursor: 'pointer',

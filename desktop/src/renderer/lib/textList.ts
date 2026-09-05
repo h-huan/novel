@@ -9,9 +9,10 @@ export function splitToLines(text: string | readonly string[] | null | undefined
   if (text === null || text === undefined) return [];
   const raw = String(text).trim();
   if (!raw) return [];
+  // 按换行、中文顿号/分号（、；）与斜杠（/）拆分；再去掉行首列表符号（- * ・ 或“1.”“1、”“1）”）
   return raw
-    .split(/\r?\n|[；;]/)
-    .map(item => item.replace(/^\s*(?:[-*•]|\d+[.、])\s*/, '').trim())
+    .split(/\r?\n|[、；;/]/)
+    .map(item => item.replace(/^\s*(?:[-*・]|\d+[.、）)])\s*/, '').trim())
     .filter(Boolean);
 }
 

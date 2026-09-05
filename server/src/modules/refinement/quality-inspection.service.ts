@@ -485,10 +485,10 @@ export class QualityInspectionService {
     }
 
     // 1. 排比句检测：连续同构短句（"他想到了A，想到了B，想到了C"模式）
-    const parallelismPattern = /([^，。！？；：""''\n]{2,8})[，,]([^，。！？；：""''\n]{2,8})[，,]([^，。！？；：""''\n]{2,8})(?=[，,。！？；])/g;
+    const parallelismPattern = /([^，。！？；：、""''\n]{2,8})[，,、]([^，。！？；：、""''\n]{2,8})[，,、]([^，。！？；：、""''\n]{2,8})(?=[，,、。！？；])/g;
     const parallelismMatches = content.match(parallelismPattern) || [];
     // 额外检测：连续3个以上"的"字短语排比
-    const dePattern = /([^，。！？\n]{2,6}的[^，。！？\n]{1,4})[，,]([^，。！？\n]{2,6}的[^，。！？\n]{1,4})[，,]([^，。！？\n]{2,6}的[^，。！？\n]{1,4})/g;
+    const dePattern = /([^，。！？、\n]{2,6}的[^，。！？、\n]{1,4})[，,、]([^，。！？、\n]{2,6}的[^，。！？、\n]{1,4})[，,、]([^，。！？、\n]{2,6}的[^，。！？、\n]{1,4})/g;
     const deMatches = content.match(dePattern) || [];
     const totalParallelism = parallelismMatches.length + deMatches.length;
     const parallelismScore = Math.min(10, totalParallelism * 2);

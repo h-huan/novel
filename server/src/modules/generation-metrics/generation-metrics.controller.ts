@@ -1,0 +1,43 @@
+/**
+ * 生成步骤遥测 Controller —— 把"系统内部哪一步卡、重试几轮、多久、为什么"透明地暴露给作者。
+ *   GET /generation-metrics/flow?projectId=&days=30      步骤级聚合（项目仪表盘）
+ *   GET /generation-metrics/overview?days=30             全局概览（首页）
+ *   GET /generation-metrics/recent?projectId=&limit=20   最近卡点明细
+ *   GET /generation-metrics/calibration?projectId=       字数产出比自校准结果
+ */
+import { Controller, Get, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import { GenerationMetricsService } from './generation-metrics.service';
+
+@ApiTags('generation-metrics')
+@Controller('generation-metrics')
+export class GenerationMetricsController {
+  constructor(private readonly metrics: GenerationMetricsService) {}
+
+  @Get('flow')
+  flow(@Query('projectId') projectId?: string, @Query('days') days?: string) {
+    return this.metrics.getFlowSummary(projectId || undefined, Number(days) || 30);
+  }
+
+  @Get('overview')
+  overview(@Query('days') days?: string) {
+    return this.metrics.getOverview(Number(days) || 30);
+  }
+
+  @Get('recent')
+  recent(
+    @Query('projectId') projectId?: string,
+    @Query('limit') limit?: string,
+    @Query('days') days?: string,
+  ) {
+    return {
+      items: this.metrics.getRecentBottlenecks(projectId || undefined, Number(limit) || 20, Number(days) || 30),
+    };
+  }
+
+  @Get('calibration')
+  calibration(@Query('projectId') projectId?: string) {
+    const calib = this.metrics.getLengthCalibration(projectId || undefined);
+    return { calibration: calib };
+  }
+}

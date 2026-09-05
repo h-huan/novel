@@ -16,8 +16,6 @@ export interface ContinuityReviewStep extends DerivedSyncStep {
   blockingCount: number;
   reviewIds: string[];
   stateItemIds: string[];
-  /** @deprecated use reviewIds and stateItemIds */
-  reviewItemIds?: string[];
 }
 export interface ChapterSummaryStep extends DerivedSyncStep { entityId?: string; checksum?: string; }
 export interface AggregateSummaryStep extends DerivedSyncStep { staleTargets?: string[]; }

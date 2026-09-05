@@ -40,9 +40,9 @@ const STYLE_LABELS: Record<string, string> = {
 };
 
 const CONFLICT_COLORS: Record<string, string> = {
-  critical: '#e74c3c',
-  warning: '#f39c12',
-  pass: '#2ecc71',
+  critical: 'var(--color-danger)',
+  warning: 'var(--color-warning)',
+  pass: 'var(--color-success)',
 };
 
 const CONFLICT_BG: Record<string, string> = {
@@ -163,9 +163,9 @@ const DiffPanel: React.FC<{
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'hidden' }}>
       {/* Tab */}
       <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <button onClick={() => setActiveTab('polish')} style={{ padding: '8px 14px', fontSize: '12px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: activeTab === 'polish' ? '#e94560' : '#8a8aa0', borderBottom: activeTab === 'polish' ? '2px solid #e94560' : '2px solid transparent' }}>✏️ 精修</button>
-        <button onClick={() => setActiveTab('diff')} disabled={variants.length === 0} style={{ padding: '8px 14px', fontSize: '12px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: activeTab === 'diff' ? '#e94560' : variants.length === 0 ? '#3a3a50' : '#8a8aa0', borderBottom: activeTab === 'diff' ? '2px solid #e94560' : '2px solid transparent' }}>📊 逐段对比</button>
-        <button onClick={() => setActiveTab('conflicts')} style={{ padding: '8px 14px', fontSize: '12px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: activeTab === 'conflicts' ? '#e94560' : '#8a8aa0', borderBottom: activeTab === 'conflicts' ? '2px solid #e94560' : '2px solid transparent' }}>
+        <button onClick={() => setActiveTab('polish')} style={{ padding: '8px 14px', fontSize: '14px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: activeTab === 'polish' ? 'var(--color-accent)' : 'var(--color-text-dim)', borderBottom: activeTab === 'polish' ? '2px solid var(--color-accent)' : '2px solid transparent' }}>✏️ 精修</button>
+        <button onClick={() => setActiveTab('diff')} disabled={variants.length === 0} style={{ padding: '8px 14px', fontSize: '14px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: activeTab === 'diff' ? 'var(--color-accent)' : variants.length === 0 ? 'var(--color-bg-elevated)' : 'var(--color-text-dim)', borderBottom: activeTab === 'diff' ? '2px solid var(--color-accent)' : '2px solid transparent' }}>📊 逐段对比</button>
+        <button onClick={() => setActiveTab('conflicts')} style={{ padding: '8px 14px', fontSize: '14px', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', color: activeTab === 'conflicts' ? 'var(--color-accent)' : 'var(--color-text-dim)', borderBottom: activeTab === 'conflicts' ? '2px solid var(--color-accent)' : '2px solid transparent' }}>
           ⚡ 冲突 {conflicts.filter(c => c.level !== 'pass').length > 0 ? `(${conflicts.filter(c => c.level !== 'pass').length})` : ''}
         </button>
       </div>
@@ -174,15 +174,15 @@ const DiffPanel: React.FC<{
       {activeTab === 'polish' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', overflow: 'auto' }}>
           <textarea value={text} onChange={e => setText(e.target.value)}
-            style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', color: '#eaeaea', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '100px' }}
+            style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '100px' }}
             placeholder="输入需要精修的段落..." />
           <div style={{ display: 'flex', gap: '8px' }}>
             <button onClick={handlePolish} disabled={loading || !text.trim()}
-              style={{ padding: '8px 16px', backgroundColor: '#e94560', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
+              style={{ padding: '8px 16px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
               {loading ? '精修中...' : '✏️ 生成5种风格变体'}
             </button>
             <button onClick={handleConflictCheck} disabled={loading || !text.trim()}
-              style={{ padding: '8px 16px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '6px', color: '#f39c12', fontSize: '13px', fontWeight: 500, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+              style={{ padding: '8px 16px', backgroundColor: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.2)', borderRadius: '6px', color: 'var(--color-warning)', fontSize: '14px', fontWeight: 500, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
               ⚡ 冲突检测
             </button>
           </div>
@@ -198,10 +198,10 @@ const DiffPanel: React.FC<{
               {variants.map((v, i) => (
                 <button key={v.style} onClick={() => switchVariant(i)}
                   style={{
-                    padding: '4px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: '11px',
+                    padding: '4px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: '14px',
                     backgroundColor: selectedVariant === i ? 'rgba(233,69,96,0.12)' : 'rgba(255,255,255,0.04)',
-                    borderColor: selectedVariant === i ? '#e94560' : 'rgba(255,255,255,0.08)',
-                    color: selectedVariant === i ? '#e94560' : '#8a8aa0',
+                    borderColor: selectedVariant === i ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)',
+                    color: selectedVariant === i ? 'var(--color-accent)' : 'var(--color-text-dim)',
                   }}>{STYLE_LABELS[v.style] || v.style}</button>
               ))}
             </div>
@@ -218,15 +218,15 @@ const DiffPanel: React.FC<{
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {/* 三栏对比 */}
-                    <div style={{ display: 'flex', gap: '8px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', gap: '8px', fontSize: '14px' }}>
                       <div style={{ flex: 1, padding: '4px 6px', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '4px' }}>
-                        <span style={{ fontSize: '9px', color: '#6c6c80', fontWeight: 600 }}>原文: </span>
-                        <span style={{ color: '#c0c0d0' }}>{seg.original || <span style={{ color: '#5a5a70', fontStyle: 'italic' }}>(空)</span>}</span>
+                        <span style={{ fontSize: '9px', color: 'var(--color-text-muted)', fontWeight: 600 }}>原文: </span>
+                        <span style={{ color: 'var(--color-text-soft)' }}>{seg.original || <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>(空)</span>}</span>
                       </div>
                       {seg.type !== 'keep' && (
                         <div style={{ flex: 1, padding: '4px 6px', backgroundColor: 'rgba(233,69,96,0.05)', borderRadius: '4px' }}>
-                          <span style={{ fontSize: '9px', color: '#e94560', fontWeight: 600 }}>修改: </span>
-                          <span style={{ color: '#eaeaea' }}>{seg.modified || <span style={{ color: '#5a5a70', fontStyle: 'italic' }}>(已删除)</span>}</span>
+                          <span style={{ fontSize: '9px', color: 'var(--color-accent)', fontWeight: 600 }}>修改: </span>
+                          <span style={{ color: 'var(--color-text-primary)' }}>{seg.modified || <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>(已删除)</span>}</span>
                         </div>
                       )}
                     </div>
@@ -236,7 +236,7 @@ const DiffPanel: React.FC<{
                   <span style={{
                     marginLeft: '8px', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 600, whiteSpace: 'nowrap',
                     backgroundColor: seg.accepted === null ? 'rgba(52,152,219,0.1)' : seg.accepted ? 'rgba(46,204,113,0.1)' : 'rgba(231,76,60,0.1)',
-                    color: seg.accepted === null ? '#3498db' : seg.accepted ? '#2ecc71' : '#e74c3c',
+                    color: seg.accepted === null ? 'var(--color-info)' : seg.accepted ? 'var(--color-success)' : 'var(--color-danger)',
                   }}>
                     {seg.accepted === null ? '待确认' : seg.accepted ? '已确认' : '已驳回'}
                   </span>
@@ -248,11 +248,11 @@ const DiffPanel: React.FC<{
           {/* 全部确认 */}
           <div style={{ display: 'flex', gap: '8px' }}>
             <button onClick={acceptAll}
-              style={{ flex: 1, padding: '8px 16px', backgroundColor: '#2ecc71', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ flex: 1, padding: '8px 16px', backgroundColor: 'var(--color-success)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
               ✅ 确认所有修改
             </button>
             <button onClick={handlePostConflictQA} disabled={loading}
-              style={{ padding: '8px 16px', backgroundColor: 'rgba(52,152,219,0.1)', border: '1px solid rgba(52,152,219,0.2)', borderRadius: '6px', color: '#3498db', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ padding: '8px 16px', backgroundColor: 'rgba(52,152,219,0.1)', border: '1px solid rgba(52,152,219,0.2)', borderRadius: '6px', color: 'var(--color-info)', fontSize: '14px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
               🔍 冲突后质检
             </button>
           </div>
@@ -260,7 +260,7 @@ const DiffPanel: React.FC<{
           {/* 质检结果 */}
           {qaResult && (
             <div style={{ padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <pre style={{ margin: 0, fontSize: '11px', color: '#c0c0d0', whiteSpace: 'pre-wrap' }}>{JSON.stringify(qaResult, null, 2)}</pre>
+              <pre style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)', whiteSpace: 'pre-wrap' }}>{JSON.stringify(qaResult, null, 2)}</pre>
             </div>
           )}
         </div>
@@ -270,7 +270,7 @@ const DiffPanel: React.FC<{
       {activeTab === 'conflicts' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'auto' }}>
           {conflicts.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '30px', color: '#6c6c80', fontSize: '13px' }}>
+            <div style={{ textAlign: 'center', padding: '30px', color: 'var(--color-text-muted)', fontSize: '14px' }}>
               暂无冲突检测结果，请先在"精修"tab点击冲突检测
             </div>
           )}
@@ -283,21 +283,21 @@ const DiffPanel: React.FC<{
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{
-                  padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#fff',
+                  padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: 'var(--color-white)',
                   backgroundColor: CONFLICT_COLORS[c.level],
                 }}>
                   {c.level === 'critical' ? '🔴 致命' : c.level === 'warning' ? '🟡 警告' : '🟢 通过'}
                 </span>
-                <span style={{ fontSize: '11px', color: '#6c6c80' }}>第{c.lineIndex + 1}段</span>
+                <span style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>第{c.lineIndex + 1}段</span>
               </div>
-              <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#c0c0d0', lineHeight: 1.5 }}>
+              <p style={{ margin: '6px 0 0 0', fontSize: '14px', color: 'var(--color-text-soft)', lineHeight: 1.5 }}>
                 <span style={{ fontWeight: 600 }}>内容: </span>{c.text}
               </p>
-              <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#8a8aa0', lineHeight: 1.4 }}>
-                <span style={{ fontWeight: 600, color: '#e94560' }}>原因: </span>{c.reason}
+              <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--color-text-dim)', lineHeight: 1.4 }}>
+                <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>原因: </span>{c.reason}
               </p>
               {c.suggestion && (
-                <div style={{ marginTop: '6px', padding: '6px 10px', backgroundColor: 'rgba(46,204,113,0.08)', borderRadius: '4px', fontSize: '11px', color: '#2ecc71' }}>
+                <div style={{ marginTop: '6px', padding: '6px 10px', backgroundColor: 'rgba(46,204,113,0.08)', borderRadius: '4px', fontSize: '14px', color: 'var(--color-success)' }}>
                   💡 {c.suggestion}
                 </div>
               )}

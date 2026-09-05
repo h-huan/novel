@@ -7,13 +7,14 @@
  * - LLM JSON 解析失败时 payload 记录 parseWarning
  * - applyRevision 返回 needsStateReview
  */
-import { Injectable, Logger, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Optional, OnModuleInit } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { DatabaseService } from '../../database/database.service';
 import { RealLLMService } from '../../chain/real-llm.service';
 import { WRITING_QUALITY_TAGS } from '../../state/writing-quality-tags';
 import { ChapterService } from '../chapter/chapter.service';
 import { QualityInspectionService } from '../refinement/quality-inspection.service';
+import { detectForbiddenTells } from '../../chain/hardline-scanner';
 import type {
   AnalyzeChapterDto,
   AttentionCheckDto,
@@ -104,8 +105,18 @@ interface IssueCounts {
   resolved: number;
 }
 
+/** 正文/大纲统一质量目标分（90+）：综合分达到该线才算进入优秀区间。 */
+export const BODY_QUALITY_TARGET_SCORE = 90;
+
+/** 由统一综合分确定性推导质量等级（不采用 LLM 自报等级，避免分数与等级打架）：>=90 high，60-89 medium，<60 low。 */
+export function levelByQualityScore(score: number): 'high' | 'medium' | 'low' {
+  if (score >= BODY_QUALITY_TARGET_SCORE) return 'high';
+  if (score >= 60) return 'medium';
+  return 'low';
+}
+
 @Injectable()
-export class WritingQualityService {
+export class WritingQualityService implements OnModuleInit {
   private readonly logger = new Logger(WritingQualityService.name);
 
   constructor(
@@ -114,6 +125,147 @@ export class WritingQualityService {
     @Optional() private readonly realLLM?: RealLLMService,
     @Optional() private readonly qualityInspection?: QualityInspectionService,
   ) {}
+
+  /**
+   * 反向依赖用「注册回调」而非构造注入（ChapterModule 被本模块依赖，不能再反向 import）。
+   * AI 生成正文走 canonical 保存（source='ai_generated'）后，ChapterService 会回调这里自动跑一次
+   * 七维质检 + 标签契合并落库；手动逐字编辑不触发，避免无谓 LLM 调用。全程 try/catch，绝不阻断保存。
+   */
+  onModuleInit(): void {
+    this.chapterService?.registerAutoQualityRunner?.(async (input) => {
+      try {
+        await this.analyzeChapterQuality(input.projectId, {
+          chapterId: input.chapterId,
+          content: input.content,
+          scope: 'chapter',
+        } as AnalyzeChapterDto);
+        this.logger.log(`AI 生成正文已自动完成质检（章节 ${input.chapterId}）：七维问题与标签契合已落库并同步看板`);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`AI 生成正文自动质检失败（不影响正文保存）：${reason}`);
+        // 失败必须落到章节上：前端编辑器与看板据此提示“自动质检未完成，可重跑”，不再静默。
+        this.markChapterAutoQuality(input.chapterId, 'failed', `自动质检未完成：${reason}（可点“重新质检”）`);
+      }
+    });
+  }
+
+  /**
+   * 把自动质检结果回写到章节行，保证质检失败也对作者可见、可手动重跑（不再静默吞掉）。
+   */
+  private markChapterAutoQuality(chapterId: string | undefined, status: 'running' | 'ok' | 'needs_rewrite' | 'failed', message: string | null): void {
+    if (!chapterId) return;
+    try {
+      const now = new Date().toISOString();
+      this.dbService.getDb()
+        .prepare('UPDATE chapters SET auto_quality_status = ?, auto_quality_message = ?, auto_quality_at = ?, updated_at = ? WHERE id = ?')
+        .run(status, message, now, now, chapterId);
+    } catch (err) {
+      this.logger.warn(`回写章节自动质检状态失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * 把本次质检仍存在的问题【确定性沉淀】为跨章节避坑经验（generation_lessons），
+   * 让下一章/重生成的首版 prompt 经 getActiveLessons 读到并主动规避。
+   *
+   * 修复断点：此前只有「大纲验收」问题会归纳教训，质检发现的 AI 痕迹/标签偏离/平台节奏/
+   * 语言硬伤只写进面板展示、从不回灌，导致同类问题在后续章节反复出现。
+   * 不调用任何 LLM（零额外额度）：按问题类型归并为固定可执行教训，同文案 occurrence+1，
+   * 复用单项目 24 条封顶淘汰；达标且无未决问题时不写；任何失败都不阻断质检。
+   */
+  private recordQualityLessons(input: {
+    projectId: string; chapterId?: string; score: number;
+    issueTypes: string[]; hardlineRuleIds?: string[]; hasTagGap?: boolean;
+  }): void {
+    const { projectId, chapterId } = input;
+    if (!projectId) return;
+    try {
+      const issueTypes = Array.from(new Set((input.issueTypes || []).map(String)));
+      const hardlineRuleIds = Array.from(new Set((input.hardlineRuleIds || []).map(String)));
+      if (input.score >= BODY_QUALITY_TARGET_SCORE && issueTypes.length === 0
+        && hardlineRuleIds.length === 0 && !input.hasTagGap) return;
+      const db = this.dbService.getDb();
+      let chapterIndex = 0;
+      if (chapterId) {
+        const c = db.prepare('SELECT chapter_index FROM chapters WHERE id=?').get(chapterId) as { chapter_index?: number } | undefined;
+        chapterIndex = Number(c?.chapter_index ?? 0) || 0;
+      }
+      // 问题类型 → 面向「下一章首版如何主动规避」的可执行教训（跨平台/长短篇通用，不含本书具体情节）
+      const HOOK_OPEN = '开篇第一屏直接落在冲突/反常/强悬念上，删掉环境与履历铺垫，前几百字内让主角面对具体威胁或抉择';
+      const PACING = '按目标平台节奏密度安排有效推进或反转，删掉不推进剧情的重复铺陈，每个场景结束时局面必须发生变化';
+      const PAYOFF = '情绪与爽点必须明面兑现：用具体结果、对手反应、旁观者态度落地，不靠旁白宣称，关键情绪点给足场面';
+      const AI_TELL = '禁用AI模板句与程式化渲染（“像……一样/眼底闪过一丝/空气凝固/喉咙发紧”等），用不可替换的具体细节替代套路比喻';
+      const SPECIFIC = '抽象判断必须落到可感知的具体动作、物件、数字或对话，不写“复杂/精彩/气氛紧张”这类空泛概括';
+      const SHOW = '减少直接说明与作者旁白，把背景、设定、因果拆进人物动作和对话里带出，禁止大段内心解释';
+      const DIALOGUE = '对话要像真人：加入打断、沉默、省略、答非所问和身体动作，不同人物腔调必须有区分，禁止一来一回工整对答';
+      const LOGIC = '严格按时间与因果顺序写，每个行动有前因后果，不得出现与已确认时间线或大纲矛盾的事件顺序';
+      const LESSON_BY_TYPE: Record<string, { category: string; lesson: string }> = {
+        reader_hook: { category: 'hook', lesson: HOOK_OPEN },
+        retention_point: { category: 'hook', lesson: HOOK_OPEN },
+        low_retention: { category: 'hook', lesson: HOOK_OPEN },
+        needs_hook: { category: 'hook', lesson: HOOK_OPEN },
+        chapter_hook: { category: 'hook', lesson: '每章结尾落在未解问题、反转、新威胁或关键动作/对话上，禁止平淡收尾或“他不知道的是”式作者旁白假钩' },
+        pacing_risk: { category: 'pacing', lesson: PACING },
+        needs_payoff: { category: 'pacing', lesson: PACING },
+        emotional_payoff: { category: 'payoff', lesson: PAYOFF },
+        meme_point: { category: 'payoff', lesson: PAYOFF },
+        ai_pattern_risk: { category: 'ai_tell', lesson: AI_TELL },
+        template_repetition: { category: 'ai_tell', lesson: AI_TELL },
+        repeated_emotion_action: { category: 'ai_tell', lesson: '同一类情绪、生理反应或环境意象不在相邻段落重复，换用不同外化动作或直接删掉重复渲染' },
+        too_abstract: { category: 'specificity', lesson: SPECIFIC },
+        low_specificity: { category: 'specificity', lesson: SPECIFIC },
+        needs_detail: { category: 'specificity', lesson: SPECIFIC },
+        too_expository: { category: 'show_not_tell', lesson: SHOW },
+        over_explained: { category: 'show_not_tell', lesson: SHOW },
+        flat_dialogue: { category: 'dialogue', lesson: DIALOGUE },
+        same_voice_characters: { category: 'dialogue', lesson: DIALOGUE },
+        needs_character_voice: { category: 'dialogue', lesson: DIALOGUE },
+        lack_of_subtext: { category: 'dialogue', lesson: DIALOGUE },
+        needs_asymmetry: { category: 'dialogue', lesson: DIALOGUE },
+        timeline_conflict: { category: 'logic', lesson: LOGIC },
+        causality_gap: { category: 'logic', lesson: LOGIC },
+        time_order_error: { category: 'logic', lesson: LOGIC },
+        event_sequence_risk: { category: 'logic', lesson: LOGIC },
+        label_fit: { category: 'label_fit', lesson: '叙事节奏、对话方式、情绪密度与人称必须主动贴合本书选定的平台/基调/写作风格/流派标签，最弱维度尤其对齐' },
+        punctuation: { category: 'punctuation', lesson: '统一中文全角标点，省略号用“……”，连贯动作写完整句、不切成两字残句，克制句末语气词' },
+      };
+      const items: Array<{ category: string; lesson: string }> = [];
+      const seen = new Set<string>();
+      const add = (category: string, lesson: string) => {
+        if (lesson && !seen.has(lesson)) { seen.add(lesson); items.push({ category, lesson }); }
+      };
+      for (const t of issueTypes) {
+        const hit = LESSON_BY_TYPE[t];
+        if (hit) add(hit.category, hit.lesson);
+      }
+      if (input.hasTagGap && !issueTypes.includes('label_fit')) {
+        add('label_fit', LESSON_BY_TYPE.label_fit.lesson);
+      }
+      if (hardlineRuleIds.length) {
+        add('language_hardline', '上一版命中确定性语言硬伤：成稿前自检——连贯动作写完整句、删掉相同动词/前缀的同构排比、量词与名词正确搭配、不用“X了，Y了”两字残句链、统一中文标点');
+      }
+      if (!items.length) return;
+      const now = new Date().toISOString();
+      const upsert = db.prepare(
+        `INSERT INTO generation_lessons (id, project_id, category, lesson, occurrence, last_chapter_index, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+         ON CONFLICT(project_id, lesson) DO UPDATE SET
+           occurrence = occurrence + 1, last_chapter_index = excluded.last_chapter_index, updated_at = excluded.updated_at`,
+      );
+      for (const it of items) upsert.run(uuid(), projectId, it.category, it.lesson, chapterIndex, now, now);
+      const countRow = db.prepare('SELECT COUNT(*) AS c FROM generation_lessons WHERE project_id = ?').get(projectId) as { c: number };
+      const MAX_LESSONS = 24;
+      if (countRow.c > MAX_LESSONS) {
+        db.prepare(
+          `DELETE FROM generation_lessons WHERE project_id = ? AND id IN (
+             SELECT id FROM generation_lessons WHERE project_id = ? ORDER BY occurrence ASC, updated_at ASC LIMIT ?)`,
+        ).run(projectId, projectId, countRow.c - MAX_LESSONS);
+      }
+      this.logger.log(`[质检教训沉淀] project=${projectId} ch${chapterIndex} score=${input.score} 沉淀${items.length}条（问题类型${issueTypes.length}/硬伤${hardlineRuleIds.length}）`);
+    } catch (err) {
+      this.logger.warn(`质检问题沉淀为跨章节教训失败（不影响质检）：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   // ====================== 1. ANALYZE CHAPTER QUALITY ======================
 
@@ -195,7 +347,7 @@ export class WritingQualityService {
     let parseWarning: string | null = null;
     let rawContentPreview: string | null = null;
     try {
-      const response = await this.callQualityLLM(content, chapterTitle, context, dto);
+      const response = await this.callQualityLLM(content, chapterTitle, context, dto, projectId);
       llmResult = response.result;
       parseWarning = response.parseWarning;
       rawContentPreview = response.rawPreview;
@@ -206,6 +358,13 @@ export class WritingQualityService {
 
     const now = new Date().toISOString();
     const reportId = uuid();
+    // 单一事实源：同一章节重新质检（正文被重写/重新生成）时，旧报告及其下仍 open 的问题
+    // 一律标记 superseded（被本次质检取代，属关闭态）：新报告没有的问题视为已解决，
+    // 新报告新发现的才是当前 open，避免反复质检问题只增不减、改完数量不同步。
+    const superseded = this.supersedeChapterReports(db, chapterId, now);
+    if (superseded.reports > 0) {
+      this.logger.log(`章节 ${chapterId} 重新质检：作废旧报告 ${superseded.reports} 份、失效旧问题 ${superseded.issues} 条`);
+    }
     const attention = this.buildAttentionAnalysis({
       title: chapterTitle,
       intro: context?.project?.description || '',
@@ -227,15 +386,72 @@ export class WritingQualityService {
 
     // 统一综合评分：物理指纹30% + LLM语义评审70%（设定一致性由chain层负责）
     const llmScore = llmResult.overallScore ?? 70;
-    const unifiedScore = aiFingerprints
+    const blendedScore = aiFingerprints
       ? Math.round(fingerprintScore * 0.3 + llmScore * 0.7)
       : llmScore;
 
+    // 确定性硬红线扣分（与生成链共用同一扫描器 hardline-scanner，单一事实源）：
+    // LLM 语义评分对同构排比/量词错配/残句链等语言硬伤容易手软给虚高分，这里用零 LLM 的
+    // 确定性扫描只对“跨平台真硬伤”（非平台分化的排版类）逐项扣分，让这类问题无法靠 LLM 印象混到 90+。
+    const hardlineProfile = {
+      platform: context?.project?.target_platform || context?.project?.tagProfile?.platform || undefined,
+      storyType: context?.project?.type || undefined,
+    };
+    const HARDLINE_PENALTY: Record<string, number> = {
+      '15c': 12, '15b': 8, '15d': 8, '20a': 8,
+      '34': 5, 'list-enumeration': 5,
+      '50-fragment-action-chain': 6, '51-modal-particle-density': 4,
+      '52-env-imagery-repeat': 4, '53-same-structure-parallel': 6,
+      '54-measure-word-mismatch': 6,
+    };
+    const hardlineHits = detectForbiddenTells(content, hardlineProfile)
+      .filter(f => Object.prototype.hasOwnProperty.call(HARDLINE_PENALTY, f.ruleId));
+    const hardlinePenalty = Math.min(25, hardlineHits.reduce((sum, f) => sum + (HARDLINE_PENALTY[f.ruleId] || 0), 0));
+
+    // 标签契合（平台/基调/风格/流派）实质纳入达标判定，而不是只展示：
+    // tagFit 由质检 LLM 对照项目所选标签四维打分；明显偏离即确定性扣分，让“选了番茄却写成盐选、
+    // 基调/流派不符”无法靠语言分蒙混到 90+。跨全部平台与长短篇同一规则，不针对任何一本书。
+    const TAG_LABEL: Record<string, string> = { platform: '平台', tone: '基调', style: '写作风格', genre: '流派' };
+    const rawTagFit = (llmResult as any).tagFit;
+    const tagDimArr: Array<{ key: string; label: string; score: number }> = rawTagFit
+      ? (['platform', 'tone', 'style', 'genre'] as const)
+        .map(k => ({ key: k, label: TAG_LABEL[k], score: rawTagFit[k] }))
+        .filter(d => typeof d.score === 'number' && Number.isFinite(d.score))
+      : [];
+    const tagAvg = tagDimArr.length
+      ? Math.round(tagDimArr.reduce((a, d) => a + d.score, 0) / tagDimArr.length)
+      : null;
+    // 标签契合是 LLM 主观分、天然偏保守：≥75 视为契合不扣；70–74 属轻度偏离，只生成改进提示、不扣综合分；
+    // 仅当均值 <70（确实写成另一平台/基调）才线性轻扣，每低 1 分扣 0.5、单章封顶 8。
+    // 目的：让客观语言硬伤照常扣分，但主观契合分不再与硬红线双重重罚，把 LLM 自评"中上"的章节砸到不及格
+    // （历史问题：融合 73 −硬线11−标签12 = 50 判 low，与"中上"实际严重背离）。
+    const tagPenalty = tagAvg === null
+      ? 0
+      : tagAvg >= 70 ? 0 : Math.min(8, Math.round((70 - tagAvg) * 0.5));
+    const weakestTag = tagDimArr.slice().sort((a, b) => a.score - b.score)[0] || null;
+    const unifiedScore = Math.max(0, blendedScore - hardlinePenalty - tagPenalty);
+
     const reportPayload: Record<string, any> = { attention };
+    if ((llmResult as any).tagFit) reportPayload.tagFit = (llmResult as any).tagFit;
     if (aiFingerprints) {
       reportPayload.aiFingerprints = aiFingerprints;
       reportPayload.fingerprintScore = fingerprintScore;
       reportPayload.unifiedScore = unifiedScore;
+    }
+    if (hardlineHits.length > 0) {
+      reportPayload.hardlinePenalty = {
+        points: hardlinePenalty,
+        blendedScore,
+        hits: hardlineHits.map(h => ({ ruleId: h.ruleId, message: h.message, position: h.position, snippet: h.snippet })),
+      };
+    }
+    if (tagAvg !== null && tagAvg < 75) {
+      reportPayload.tagFitPenalty = {
+        points: tagPenalty,
+        avg: tagAvg,
+        dims: tagDimArr.map(d => ({ dim: d.key, label: d.label, score: d.score })),
+        weakest: weakestTag ? `${weakestTag.label}(${weakestTag.score})` : '',
+      };
     }
     if (parseWarning) {
       reportPayload.parseWarning = true;
@@ -243,12 +459,21 @@ export class WritingQualityService {
       reportPayload.reason = parseWarning;
     }
 
+    const hardlineNote = hardlineHits.length > 0
+      ? `；确定性硬红线命中${hardlineHits.length}处、扣${hardlinePenalty}分（${hardlineHits.slice(0, 3).map(h => h.ruleId).join('/')}${hardlineHits.length > 3 ? '等' : ''}）`
+      : '';
+    const tagNote = tagAvg !== null && tagAvg < 75
+      ? tagPenalty > 0
+        ? `；标签契合均值${tagAvg}分、扣${tagPenalty}分（最弱：${weakestTag?.label || ''}）`
+        : `；标签契合均值${tagAvg}分（最弱：${weakestTag?.label || ''}，轻度偏离、提示改进但不扣分）`
+      : '';
     const summary = parseWarning
       ? `质量诊断解析失败：${parseWarning}。请重试。`
       : aiFingerprints
-        ? `${llmResult.summary}（物理指纹分：${fingerprintScore}，统一综合分：${unifiedScore}）`
-        : llmResult.summary;
-    const overallLevel = llmResult.overallLevel || 'medium';
+        ? `${llmResult.summary}（物理指纹分：${fingerprintScore}，融合分：${blendedScore}${hardlineNote}${tagNote}，统一综合分：${unifiedScore}）`
+        : `${llmResult.summary}${hardlineNote}${tagNote}（统一综合分：${unifiedScore}）`;
+    // 等级以统一综合分确定性推导为准（90+ 为 high），不再直接采用 LLM 自报等级，避免分与级不一致。
+    const overallLevel = levelByQualityScore(unifiedScore);
     const overallScore = unifiedScore;
 
     db.prepare(`
@@ -265,9 +490,22 @@ export class WritingQualityService {
 
     const issues: IssueRow[] = [];
     const validTags = new Set(WRITING_QUALITY_TAGS as readonly string[]);
-    for (const issue of llmResult.issues || []) {
+    // 确定性标点扫描（不依赖 LLM），与语义问题一并入库
+    const punctIssues = this.detectPunctuation(content);
+    // 标签契合不足时确定性补一条待改问题（跨平台/长短篇通用），让"平台/基调/风格/流派不符"像其它问题一样可逐条定向精修
+    const labelFitIssue = tagAvg !== null && tagAvg < 75 && weakestTag ? [{
+      issueType: 'label_fit',
+      severity: tagAvg < 60 ? 'high' : (tagAvg < 70 ? 'medium' : 'low'),
+      title: `正文与所选标签契合度不足（平均 ${tagAvg} 分，最弱：${weakestTag.label} ${weakestTag.score} 分）`,
+      summary: `项目选定的平台/基调/风格/流派与本章实际写法存在偏离（四维：${tagDimArr.map(d => `${d.label}${d.score}`).join('、')}）。按目标平台读者口味与所选基调/风格/流派调整：节奏、爽点或情绪密度、叙述人称、对话方式都要向标签靠拢，但不改变剧情事实。`,
+      evidence: `最偏离维度：${weakestTag.label} = ${weakestTag.score}/100`,
+      suggestion: '对照目标平台风格红线与故事基调重写相关段落，只调叙述方式、节奏与情绪浓度，不改事件与人物。',
+      tags: ['label_fit'],
+    } as any] : [];
+    const allInputIssues = [...(llmResult.issues || []), ...punctIssues, ...labelFitIssue];
+    for (const issue of allInputIssues) {
       const issueType = validTags.has(issue.issueType) ? issue.issueType : 'needs_hook';
-      const tags = (issue.tags || []).filter(t => validTags.has(t));
+      const tags = (issue.tags || []).filter((t: string) => validTags.has(t));
       if (!tags.includes(issueType)) tags.unshift(issueType);
 
       const issueId = uuid();
@@ -330,8 +568,37 @@ export class WritingQualityService {
 
     const counts = this.calcIssueCounts(issues);
 
+    // 质检成功（含手动重跑）回写章节状态：只有综合分≥90且无高危未决问题才算 ok；
+    // 否则标 needs_rewrite（未达标·待精修），杜绝“39 分却显示绿色 ok”的假合格（用户点名）。
+    // 同一结论同时随返回值回传前端，避免前端再无条件乐观置 ok（手动重跑也必须显示真实状态）。
+    let autoQualityStatus: 'ok' | 'needs_rewrite' = 'needs_rewrite';
+    let autoQualityMessage = '';
+    if (chapterId) {
+      const reachedTarget = overallScore >= BODY_QUALITY_TARGET_SCORE && counts.high === 0;
+      if (reachedTarget) {
+        autoQualityStatus = 'ok';
+        autoQualityMessage = `自动质检完成：综合分 ${overallScore}（已达 ${BODY_QUALITY_TARGET_SCORE} 分目标），待改问题 ${counts.open} 个`;
+      } else {
+        const highPart = counts.high > 0 ? `、其中高危 ${counts.high} 个` : '';
+        autoQualityStatus = 'needs_rewrite';
+        autoQualityMessage = `自动质检完成但未达标：综合分 ${overallScore}（距 ${BODY_QUALITY_TARGET_SCORE} 分目标差 ${BODY_QUALITY_TARGET_SCORE - overallScore} 分${highPart}），待改问题 ${counts.open} 个，建议点「查看问题」定向精修或重新生成`;
+      }
+      this.markChapterAutoQuality(chapterId, autoQualityStatus, autoQualityMessage);
+      // 质检问题确定性沉淀为跨章节教训（零额外 LLM），让后续章节/重生成首版主动规避，而不是只在面板展示
+      this.recordQualityLessons({
+        projectId,
+        chapterId,
+        score: overallScore,
+        issueTypes: allInputIssues.map((i: any) => i.issueType),
+        hardlineRuleIds: hardlineHits.map(h => h.ruleId),
+        hasTagGap: tagAvg !== null && tagAvg < 70,
+      });
+    }
+
     return {
       success: true,
+      autoQualityStatus,
+      autoQualityMessage,
       report: {
         id: reportId, projectId, chapterId,
         title: `Chapter Quality: ${chapterTitle}`,
@@ -791,12 +1058,23 @@ export class WritingQualityService {
       stateItems: [],
     };
 
-    // 项目信息（兼容实际 schema）
+    // 项目信息（兼容实际 schema）；解析 settings 里的平台/基调/风格/流派/目标字数，供标签契合评分
     try {
       const project = db.prepare(
-        'SELECT title, description, platform_style, type, target_words FROM projects WHERE id = ?',
-      ).get(projectId);
-      if (project) context.project = project;
+        'SELECT title, description, platform_style, type, target_platform, target_words, settings FROM projects WHERE id = ?',
+      ).get(projectId) as any;
+      if (project) {
+        let settings: any = {};
+        try { settings = JSON.parse(project.settings || '{}'); } catch { settings = {}; }
+        project.tagProfile = {
+          platform: project.target_platform || settings.recommendedPlatform || '',
+          tone: settings.storyTone || [],
+          style: settings.writingStyle || [],
+          genre: settings.webNovelGenre || [],
+          chapterWordRange: settings.chapterWordRange || null,
+        };
+        context.project = project;
+      }
     } catch (err) {
       this.logger.warn(`buildProjectContext: failed to query projects - ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -850,9 +1128,18 @@ export class WritingQualityService {
     content: string,
     chapterTitle: string,
     context: Record<string, any>,
-    _dto: AnalyzeChapterDto,
+    dto: AnalyzeChapterDto,
+    projectId: string,
   ): Promise<{ result: LLMQualityOutput; parseWarning: string | null; rawPreview: string | null }> {
     const tagsList = WRITING_QUALITY_TAGS.join(', ');
+    const tp = (context as any)?.project?.tagProfile || {};
+    const PLATFORM_CN: Record<string, string> = { fanqie: '番茄', zhihu: '知乎盐选', qimao: '七猫', qidian: '起点', douyin: '抖音', xiaohongshu: '小红书', jinjiang: '晋江', rules_horror: '规则怪谈', custom: '自定义' };
+    const tagProfileText = [
+      tp.platform ? `目标平台：${PLATFORM_CN[tp.platform] || tp.platform}` : '',
+      (tp.tone || []).length ? `基调：${(tp.tone || []).join('、')}` : '',
+      (tp.style || []).length ? `写作风格：${(tp.style || []).join('、')}` : '',
+      (tp.genre || []).length ? `流派：${(tp.genre || []).join('、')}` : '',
+    ].filter(Boolean).join('；') || '未设置';
     const timelineCheck = `
 额外检查时间线与因果链：
 - 时间顺序冲突：使用 issueType timeline_conflict 或 time_order_error。
@@ -876,8 +1163,16 @@ export class WritingQualityService {
 - 结尾钩子（needs_hook / needs_payoff）
 - 潜台词缺乏（lack_of_subtext / repeated_emotion_action）
 
+【重要：区分当前状态与回忆/背景，禁止误判】
+- 角色在回忆、闪回、背景介绍、他人转述中出现的行为/状态，不与角色当前状态矛盾。
+- 例如：角色设定是"失踪"，但正文中写"她回忆起妈妈缝扣子的时候"或"她记得妈妈以前总弓着食指"——这是合理的回忆，不是矛盾。
+- 只有当角色在当前叙事时间线中（不是回忆/闪回/背景）出现了与设定矛盾的行为/状态时，才是真正的一致性问题。
+- 判断方法：看这段描述是"现在发生的"还是"回忆/以前/记得/据说/听说"。如果是后者，不算矛盾。
+
 可用质量标签：${tagsList}
 ${timelineCheck}
+
+【标签契合度评分 tagFit】对照项目设定标签给本章打分（0-100，越高越贴合）：platform=目标平台读者口味、tone=基调、style=写作风格、genre=流派；结果写入输出 JSON 的 tagFit 字段，不要写进 issues。
 
 你必须只输出严格JSON，不输出任何其他内容。`;
 
@@ -885,6 +1180,7 @@ ${timelineCheck}
     const prompt = `请对以下网文章节进行专业质量诊断。
 
 章节标题：${chapterTitle}
+作品标签：${tagProfileText}
 
 项目上下文（大纲/角色/世界观等）：${contextSerialized}
 
@@ -912,11 +1208,18 @@ ${content.slice(0, 15000)}
       "suggestedText": "建议改写片段",
       "tags": ["needs_hook"]
     }
-  ]
+  ],
+  "tagFit": { "platform": 0, "tone": 0, "style": 0, "genre": 0, "note": "一句话说明最贴合或最偏离哪个标签" }
 }`;
 
     const response = await this.realLLM!.generate({
-      prompt, systemPrompt, temperature: 0.3, scenario: 'quality_check',
+      prompt,
+      systemPrompt,
+      temperature: 0.3,
+      scenario: 'daily',
+      // 质检需输出整章 issues 数组 + tagFit，给足输出上限，避免长章节 JSON 被截断导致解析失败、质检空跑。
+      maxTokens: 16000,
+      metrics: { projectId, stepKey: 'quality_auto' },
     } as any);
 
     const rawContent = response.content || '';
@@ -941,8 +1244,47 @@ ${content.slice(0, 15000)}
     parsed.overallScore = typeof parsed.overallScore === 'number'
       ? Math.max(0, Math.min(100, Math.round(parsed.overallScore))) : 60;
     parsed.summary = String(parsed.summary || '').slice(0, 200);
+    (parsed as any).tagFit = this.normalizeTagFit((parsed as any).tagFit);
 
     return { result: parsed, parseWarning: null, rawPreview: null };
+  }
+
+  // 规范化标签契合分（0-100 整数，非法维度为 undefined；全空则 undefined）
+  private normalizeTagFit(raw: any): LLMQualityOutput['tagFit'] | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const clamp = (v: any) => {
+      const n = Math.round(Number(v));
+      return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : undefined;
+    };
+    const fit: any = { platform: clamp(raw.platform), tone: clamp(raw.tone), style: clamp(raw.style), genre: clamp(raw.genre) };
+    fit.note = typeof raw.note === 'string' ? String(raw.note).slice(0, 120) : undefined;
+    if ([fit.platform, fit.tone, fit.style, fit.genre].every(v => v === undefined)) return undefined;
+    return fit;
+  }
+
+  // 确定性标点规范扫描（不依赖 LLM），返回一条聚合 issue；感叹/问号重复属修辞，不判错
+  private detectPunctuation(content: string): any[] {
+    const found: string[] = [];
+    const repeat = content.match(/[，。；,;]{2,}/g);
+    if (repeat && repeat.length) found.push('连续重复句读标点 ' + repeat.length + ' 处（如「' + repeat[0] + '」）');
+    const mixed = content.match(/[一-龥][,.;][一-龥]/g);
+    if (mixed && mixed.length) found.push('中英文标点混用 ' + mixed.length + ' 处');
+    const left = (content.match(/[“「『]/g) || []).length;
+    const right = (content.match(/[”」』]/g) || []).length;
+    if (left !== right) found.push('引号不配对（左 ' + left + ' / 右 ' + right + '）');
+    const noEnd = content.split(/\n+/).filter(p => /[一-龥A-Za-z]$/.test(p.trim())).length;
+    if (noEnd > 0) found.push(noEnd + ' 个段落句末缺标点');
+    if (!found.length) return [];
+    return [{
+      issueType: 'punctuation',
+      severity: found.length >= 3 ? 'high' : 'medium',
+      title: '标点符号不规范',
+      summary: found.join('；'),
+      evidence: found[0],
+      suggestion: '统一使用中文全角标点；省略号用……、破折号用——；补全句末标点与成对引号。',
+      paragraphIndex: 0, sentenceIndex: 0, startOffset: 0, endOffset: 0,
+      originalText: '', suggestedText: '', tags: ['punctuation'],
+    }];
   }
 
   private async callRefineLLM(
@@ -1029,7 +1371,7 @@ ${fullContent.slice(0, 3000)}
 { "pass": true/false, "level": "pass|warning|fail", "remainingIssues": 0, "newIssues": 0, "summary": "复查总结，80字内" }`;
 
     const response = await this.realLLM!.generate({
-      prompt, temperature: 0.2, scenario: 'quality_check',
+      prompt, temperature: 0.2, scenario: 'daily',
     } as any);
 
     const raw = this.parseJson<Record<string, any>>(response.content);
@@ -1329,7 +1671,40 @@ ${fullContent.slice(0, 3000)}
   }
 
   private isClosedIssueStatus(status: string): boolean {
-    return ['resolved', 'applied', 'recheck_passed', 'ignored', 'archived'].includes(status);
+    return ['resolved', 'applied', 'recheck_passed', 'ignored', 'archived', 'superseded'].includes(status);
+  }
+
+  /**
+   * 作废旧质检结论：同一章节重新质检前调用。
+   * - 该章所有尚未 superseded 的旧报告 → status='superseded'；
+   * - 其下仍处于 open 态（open/planned/refined/recheck_failed）的问题 → status='superseded' 并留痕；
+   *   作者已解决/忽略的终态问题保持不变。纯确定性、不调用 LLM。
+   */
+  private supersedeChapterReports(db: any, chapterId: string, now: string): { reports: number; issues: number } {
+    const oldReports = db
+      .prepare(`SELECT id FROM writing_quality_reports WHERE chapter_id = ? AND COALESCE(status,'open') <> 'superseded'`)
+      .all(chapterId) as Array<{ id: string }>;
+    if (!oldReports.length) return { reports: 0, issues: 0 };
+    const openStates = ['open', 'planned', 'refined', 'recheck_failed'];
+    const ph = oldReports.map(() => '?').join(',');
+    const oldIssueRows = db
+      .prepare(`SELECT id, status, status_history_json FROM writing_quality_issues WHERE report_id IN (${ph})`)
+      .all(...oldReports.map(r => r.id)) as Array<{ id: string; status: string; status_history_json: string | null }>;
+    let issues = 0;
+    const updIssue = db.prepare(
+      `UPDATE writing_quality_issues SET status='superseded', status_history_json=?, updated_at=? WHERE id=?`,
+    );
+    for (const iss of oldIssueRows) {
+      if (!openStates.includes(iss.status)) continue;
+      const history = safeJsonParse(iss.status_history_json || '[]', []);
+      history.push({ from: iss.status, to: 'superseded', reason: 'chapter_reanalyzed', at: now });
+      updIssue.run(JSON.stringify(history), now, iss.id);
+      issues++;
+    }
+    const res = db
+      .prepare(`UPDATE writing_quality_reports SET status='superseded', updated_at=? WHERE chapter_id=? AND COALESCE(status,'open') <> 'superseded'`)
+      .run(now, chapterId);
+    return { reports: Number(res.changes || oldReports.length), issues };
   }
 
   private parseJson<T>(content: string | null | undefined): T | null {

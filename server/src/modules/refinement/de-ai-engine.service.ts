@@ -104,9 +104,9 @@ export class DeAiEngineService {
     { pattern: /原来[，,]一切/g, category: 'flatness', description: 'AI过度使用的"原来一切"反转句式' },
 
     // ─── 均匀句长/排比（新增） ───
-    { pattern: /(?:有[的时]候|有时候)[^，]{3,10}[，,][^，]{3,10}[，,][^，]{3,10}/g, category: 'structure', description: '排比/对仗式句组，过于工整' },
-    { pattern: /不是[^，]{2,8}[，,](?:而是|就是)[^，]{2,8}/g, category: 'structure', description: 'AI典型对比句式' },
-    { pattern: /一[^，]{2,6}[，,]一[^，]{2,6}[，,]一[^，]{2,6}/g, category: 'structure', description: 'AI排比句式干扰阅读节奏' },
+    { pattern: /(?:有[的时]候|有时候)[^，、]{3,10}[，,、][^，、]{3,10}[，,、][^，、]{3,10}/g, category: 'structure', description: '排比/对仗式句组，过于工整' },
+    { pattern: /不是[^，、]{2,8}[，,、](?:而是|就是)[^，、]{2,8}/g, category: 'structure', description: 'AI典型对比句式' },
+    { pattern: /一[^，、]{2,6}[，,、]一[^，、]{2,6}[，,、]一[^，、]{2,6}/g, category: 'structure', description: 'AI排比句式干扰阅读节奏' },
 
     // ─── 无信息量形容词堆砌（新增） ───
     { pattern: /美丽的/g, category: 'adjective', description: '无信息量形容词"美丽的"，用具体描写代替' },

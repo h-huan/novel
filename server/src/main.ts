@@ -10,6 +10,7 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 import { VectorIndexService } from './rag/vector-index.service';
 import * as fs from 'fs';
@@ -104,6 +105,11 @@ export async function bootstrap(options: { port?: number; host?: string; writePo
 
   // 全局前缀
   app.setGlobalPrefix('api/v1');
+
+  // 显式注册 Socket.IO 适配器（NestJS + Fastify 下必须手动注册，
+  // 否则 WebSocket 网关不会正确挂载，前端连接会报 "WebSocket is closed
+  // before the connection is established"）
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   // Swagger / OpenAPI 文档配置
   const config = new DocumentBuilder()

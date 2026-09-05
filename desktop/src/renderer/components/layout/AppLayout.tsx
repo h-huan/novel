@@ -98,12 +98,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <div style={{
           padding: '6px 16px', backgroundColor: 'rgba(231,76,60,0.15)',
           borderBottom: '1px solid rgba(231,76,60,0.3)', textAlign: 'center',
-          fontSize: '12px', color: '#e74c3c', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px',
+          fontSize: '14px', color: 'var(--color-danger)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px',
         }}>
           🔴 {serverError || '服务器未连接'} — 尝试启动中...&nbsp;
           <button onClick={() => startHealthPolling()} style={{
             padding: '2px 10px', backgroundColor: 'rgba(231,76,60,0.2)', border: '1px solid rgba(231,76,60,0.3)',
-            borderRadius: '4px', color: '#e74c3c', cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
+            borderRadius: '4px', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '14px', fontFamily: 'inherit',
           }}>重试</button>
         </div>
       )}
@@ -111,7 +111,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <div style={{
           padding: '6px 16px', backgroundColor: 'rgba(245,158,11,0.1)',
           borderBottom: '1px solid rgba(245,158,11,0.2)', textAlign: 'center',
-          fontSize: '12px', color: '#f59e0b',
+          fontSize: '14px', color: 'var(--color-warning)',
         }}>
           🟡 正在连接服务器...
         </div>
@@ -146,11 +146,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <button type="button" onClick={resumeFailedGeneration} disabled={!recovery?.canResume || recoveryBusy} style={{
                   padding: '7px 11px', borderRadius: 6, border: '1px solid rgba(251,211,141,0.45)',
-                  backgroundColor: recovery?.canResume && !recoveryBusy ? '#b45309' : '#374151', color: '#fff', cursor: recovery?.canResume && !recoveryBusy ? 'pointer' : 'not-allowed',
+                  backgroundColor: recovery?.canResume && !recoveryBusy ? 'var(--color-warning)' : 'var(--color-bg-elevated)', color: 'var(--color-white)', cursor: recovery?.canResume && !recoveryBusy ? 'pointer' : 'not-allowed',
                 }}>{recoveryBusy ? '正在恢复…' : '继续准备创作资料'}</button>
                 <button type="button" onClick={() => navigate(`/project/${currentProject.id}/dashboard`)} style={{
                   padding: '7px 11px', borderRadius: 6, border: '1px solid rgba(251,211,141,0.45)',
-                  backgroundColor: 'rgba(0,0,0,0.18)', color: '#fff', cursor: 'pointer',
+                  backgroundColor: 'rgba(0,0,0,0.18)', color: 'var(--color-white)', cursor: 'pointer',
                 }}>查看完整诊断</button>
               </div>
             </div>

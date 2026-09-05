@@ -69,7 +69,7 @@ interface ElectronAPI {
   /** 停止后端服务 */
   invoke(channel: 'stop-server'): Promise<{ success: boolean }>;
   /** 打开项目（引导窗口 → 主窗口切换） */
-  invoke(channel: 'open-project', projectData: { projectId: string; projectTitle: string }): Promise<{ success: boolean }>;
+  invoke(channel: 'open-project', projectData: { projectId: string; projectTitle: string; subPath?: string }): Promise<{ success: boolean }>;
   /** 关闭项目（主窗口 → 引导窗口切换） */
   invoke(channel: 'close-project'): Promise<{ success: boolean }>;
 

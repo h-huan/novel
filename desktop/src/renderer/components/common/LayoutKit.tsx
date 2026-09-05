@@ -8,17 +8,17 @@
 export const LK: Record<string, React.CSSProperties> = {
   page: { padding: '20px 24px', maxWidth: 1280, margin: '0 auto', width: '100%', boxSizing: 'border-box' as const },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' as const, marginBottom: 18 },
-  title: { margin: 0, fontSize: 20, color: '#e8e8f0', fontWeight: 600 },
-  subtitle: { color: '#8a8aa0', margin: '6px 0 0', fontSize: 14, lineHeight: 1.5 },
+  title: { margin: 0, fontSize: 20, color: 'var(--color-text-primary)', fontWeight: 600 },
+  subtitle: { color: 'var(--color-text-dim)', margin: '6px 0 0', fontSize: 14, lineHeight: 1.5 },
   card: { border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.02)', overflow: 'hidden', marginBottom: 12 },
   cardHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'rgba(255,255,255,0.015)' },
-  cardTitle: { margin: 0, fontSize: 14, color: '#e8e8f0', fontWeight: 600 },
+  cardTitle: { margin: 0, fontSize: 14, color: 'var(--color-text-primary)', fontWeight: 600 },
   cardBody: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 },
   kvRow: { display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', gap: 10, fontSize: 14, lineHeight: 1.6 },
-  kvKey: { color: '#8a8aa0', flexShrink: 0 },
-  kvVal: { color: '#d0d0e0', whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const },
-  tag: { display: 'inline-flex', alignItems: 'center', padding: '2px 9px', borderRadius: 999, fontSize: 14, border: '1px solid rgba(255,255,255,0.12)', color: '#c0c0d0', backgroundColor: 'rgba(255,255,255,0.04)' },
-  muted: { color: '#8a8aa0', fontSize: 14 },
+  kvKey: { color: 'var(--color-text-dim)', flexShrink: 0 },
+  kvVal: { color: 'var(--color-text-soft)', whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const },
+  tag: { display: 'inline-flex', alignItems: 'center', padding: '2px 9px', borderRadius: 999, fontSize: 14, border: '1px solid rgba(255,255,255,0.12)', color: 'var(--color-text-soft)', backgroundColor: 'rgba(255,255,255,0.04)' },
+  muted: { color: 'var(--color-text-dim)', fontSize: 14 },
 };
 
 export const gridStyle = (min = 260, gap = 14): React.CSSProperties => ({
@@ -95,7 +95,7 @@ export const Tag: React.FC<{ children: React.ReactNode; color?: string }> = ({ c
 );
 
 export const EmptyHint: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div style={{ padding: '28px 20px', textAlign: 'center', color: '#8a8aa0', fontSize: 14, border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.02)' }}>
+  <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--color-text-dim)', fontSize: 14, border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.02)' }}>
     {children}
   </div>
 );

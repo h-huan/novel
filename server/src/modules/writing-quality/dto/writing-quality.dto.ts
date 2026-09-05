@@ -95,6 +95,14 @@ export class LLMQualityOutput {
   overallLevel: 'low' | 'medium' | 'high' | 'critical';
   overallScore: number;
   issues: LLMQualityIssue[];
+  // 与作品标签的契合度评分（0-100），用于看板“平台/基调/风格/流派契合”
+  tagFit?: {
+    platform?: number; // 与目标平台（番茄/知乎/七猫…）读者口味的契合
+    tone?: number;     // 与设定基调（storyTone，如悬疑/逆袭）的契合
+    style?: number;    // 与写作风格（writingStyle，如第一人称/爽文）的契合
+    genre?: number;    // 与流派（webNovelGenre，如马甲流）的契合
+    note?: string;
+  };
 }
 
 export interface LLMQualityIssue {

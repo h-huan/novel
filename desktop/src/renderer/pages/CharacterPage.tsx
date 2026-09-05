@@ -67,10 +67,10 @@ const PROFILE_SECTION_GROUPS: ProfileSectionConfig[] = [
 ];
 
 const ROLE_META: Record<RoleType, { label: string; hint: string; color: string }> = {
-  protagonist: { label: '全书贯穿', hint: '跨卷成长，状态、关系和伏笔长期跟踪', color: '#e94560' },
-  major: { label: '卷级核心', hint: '服务一卷或一条主线，影响大纲和势力关系', color: '#60a5fa' },
-  supporting: { label: '阶段辅助', hint: '出场几十章或一个阶段，推动局部冲突', color: '#22c55e' },
-  minor: { label: '短线功能', hint: '服务几章内的事件，避免过度膨胀', color: '#f59e0b' },
+  protagonist: { label: '全书贯穿', hint: '跨卷成长，状态、关系和伏笔长期跟踪', color: 'var(--color-accent)' },
+  major: { label: '卷级核心', hint: '服务一卷或一条主线，影响大纲和势力关系', color: 'var(--color-info-light)' },
+  supporting: { label: '阶段辅助', hint: '出场几十章或一个阶段，推动局部冲突', color: 'var(--color-success)' },
+  minor: { label: '短线功能', hint: '服务几章内的事件，避免过度膨胀', color: 'var(--color-warning)' },
 };
 
 const STATUS_DIMENSIONS = [
@@ -449,7 +449,7 @@ const CharacterPage: React.FC = () => {
       {sidebarOpen && (
       <aside style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
-          <button type="button" onClick={() => setSidebarOpen(false)} title="收起侧栏" style={{ background:'none',border:'none',color:'#8a8aa0',cursor:'pointer',fontSize:14,lineHeight:1,padding:0 }}>◀</button>
+          <button type="button" onClick={() => setSidebarOpen(false)} title="收起侧栏" style={{ background:'none',border:'none',color:'var(--color-text-dim)',cursor:'pointer',fontSize:14,lineHeight:1,padding:0 }}>◀</button>
           <input
             value={search}
             onChange={event => setSearch(event.target.value)}
@@ -499,7 +499,7 @@ const CharacterPage: React.FC = () => {
       {!sidebarOpen && (
         <button type="button" onClick={() => setSidebarOpen(true)} title="展开角色列表"
           style={{ position:'absolute', left:8, top:12, zIndex:10, width:28, height:28, borderRadius:6,
-            border:'1px solid rgba(255,255,255,0.1)', backgroundColor:'rgba(0,0,0,0.6)', color:'#c0c0d0',
+            border:'1px solid rgba(255,255,255,0.1)', backgroundColor:'rgba(0,0,0,0.6)', color:'var(--color-text-soft)',
             cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
           ▶
         </button>
@@ -514,7 +514,7 @@ const CharacterPage: React.FC = () => {
             <header style={styles.hero}>
               <div>
                 <div style={styles.heroMeta}>
-                  <span style={{ ...styles.roleBadge, color: ROLE_META[selected.role].color, borderColor: `${ROLE_META[selected.role].color}55` }}>{ROLE_META[selected.role].label}</span>
+                  <span style={{ ...styles.roleBadge, color: (ROLE_META[selected.role] ?? ROLE_META.supporting).color, borderColor: `${(ROLE_META[selected.role] ?? ROLE_META.supporting).color}55` }}>{(ROLE_META[selected.role] ?? ROLE_META.supporting).label}</span>
                   {selected.isPov && <span style={styles.povBadge}>POV</span>}
                 </div>
                 <h1 style={styles.title}>{selected.name}</h1>
@@ -575,8 +575,8 @@ const CharacterPage: React.FC = () => {
                 <div style={styles.panelBody}>
                   <div style={styles.summaryText}>{writingSummary || '暂无写作摘要'}</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginTop: 10 }}>
-                    <FieldList label="读者共鸣点" value={profile['reader_empathy_point']} accent="#f472b6" empty="暂无" />
-                    <FieldList label="角色标签" value={Array.isArray(selected.tags) ? selected.tags.join('、') : selected.tags} accent="#60a5fa" />
+                    <FieldList label="读者共鸣点" value={profile['reader_empathy_point']} accent="var(--color-pink)" empty="暂无" />
+                    <FieldList label="角色标签" value={Array.isArray(selected.tags) ? selected.tags.join('、') : selected.tags} accent="var(--color-info-light)" />
                   </div>
                 </div>
               </section>
@@ -606,7 +606,7 @@ const CharacterPage: React.FC = () => {
                         </div>
                         <span>{item.timestamp || '无时间'}</span>
                         <p>{Array.isArray(item.changedDimensions) && item.changedDimensions.length > 0 ? `变化：${item.changedDimensions.join('、')}` : '暂无显著变化记录'}</p>
-                        {item.trigger && <p style={{ fontSize: 14, color: '#94a3b8' }}>触发：{item.trigger}</p>}
+                        {item.trigger && <p style={{ fontSize: 14, color: 'var(--color-text-secondary)' }}>触发：{item.trigger}</p>}
                       </div>
                     ))}
                   </div>
@@ -636,7 +636,7 @@ const CharacterPage: React.FC = () => {
                   if (!entries.length) return null;
                   return (
                     <section key={section.title} style={{ marginBottom: 6 }}>
-                      <SectionHeading title={section.title} accent="#e94560" hint={section.description} />
+                      <SectionHeading title={section.title} accent="var(--color-accent)" hint={section.description} />
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {entries.map(({ field, value }) => (
                           <div
@@ -649,7 +649,7 @@ const CharacterPage: React.FC = () => {
                           >
                             {field.key === 'relationships'
                               ? <ProfileRelationshipField value={value} />
-                              : <FieldList label={field.label} value={value} accent="#93c5fd" />}
+                              : <FieldList label={field.label} value={value} accent="var(--color-info-light)" />}
                           </div>
                         ))}
                       </div>
@@ -678,22 +678,22 @@ const CharacterPage: React.FC = () => {
 
             {relationships.length > 0 && (
               <section style={{...styles.statusPanel, borderColor: 'rgba(139,92,246,0.18)'}}>
-                <div style={{...styles.panelTitle, color: '#a78bfa'}}>🔗 人物关系网络（per 文档：核心关系图/关系变化/隐藏关系/关系冲突）</div>
+                <div style={{...styles.panelTitle, color: 'var(--color-purple)'}}>🔗 人物关系网络（per 文档：核心关系图/关系变化/隐藏关系/关系冲突）</div>
                 <div style={styles.statusList}>
                   {relationships.map((rel: any, idx: number) => (
                     <div key={idx} style={{...styles.statusRow, gridTemplateColumns: '80px 80px minmax(0,1fr) auto'}}>
-                      <strong style={{color:'#a78bfa'}}>{rel.source_name || '?'}</strong>
-                      <span style={{color:'#8a8aa0'}}>→</span>
+                      <strong style={{color:'var(--color-purple)'}}>{rel.source_name || '?'}</strong>
+                      <span style={{color:'var(--color-text-dim)'}}>→</span>
                       <div>
-                        <strong style={{color:'#c0c0d0'}}>{rel.target_name || '?'}</strong>
-                        <div style={{fontSize: 14,color:'#8a8aa0',marginTop:2}}>
+                        <strong style={{color:'var(--color-text-soft)'}}>{rel.target_name || '?'}</strong>
+                        <div style={{fontSize: 14,color:'var(--color-text-dim)',marginTop:2}}>
                           {rel.public_relation || rel.relation_type || '未知关系'}
                           {rel.hidden_relation ? ` | 隐藏：${rel.hidden_relation}` : ''}
                           {rel.change_summary ? ` | 变化：${rel.change_summary}` : ''}
                           {rel.conflict_score ? ` | 冲突度：${rel.conflict_score}` : ''}
                         </div>
                       </div>
-                      <em style={{...styles.sourceBadge, color: rel.reader_known_state === 'known' ? '#22c55e' : '#f59e0b'}}>
+                      <em style={{...styles.sourceBadge, color: rel.reader_known_state === 'known' ? 'var(--color-success)' : 'var(--color-warning)'}}>
                         {rel.reader_known_state === 'known' ? '读者已知' : '读者未知'}
                       </em>
                     </div>
@@ -722,21 +722,21 @@ const ProfileSection: React.FC<{ section: ProfileSectionConfig; profile: Record<
 
 const ProfileRelationshipField: React.FC<{ value: string }> = ({ value }) => {
   const relationships = profileRelationships(value);
-  if (!relationships) return <FieldList label="人物关系" value={value} accent="#93c5fd" />;
+  if (!relationships) return <FieldList label="人物关系" value={value} accent="var(--color-info-light)" />;
   return (
     <div style={{ padding: '10px 12px', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: '#93c5fd', marginBottom: 8 }}>人物关系 · {relationships.length}项</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-info-light)', marginBottom: 8 }}>人物关系 · {relationships.length}项</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {relationships.map((relationship, index) => {
           const name = relationship.targetName || relationship.characterName || relationship.name || '未命名角色';
           return (
-            <div key={`${name}-${index}`} style={{ padding: '8px 10px', borderRadius: 5, backgroundColor: 'rgba(147,197,253,0.06)', borderLeft: '3px solid #60a5fa' }}>
+            <div key={`${name}-${index}`} style={{ padding: '8px 10px', borderRadius: 5, backgroundColor: 'rgba(147,197,253,0.06)', borderLeft: '3px solid var(--color-info-light)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <strong style={{ color: '#eaeaea' }}>{name}</strong>
-                {relationship.type && <span style={{ padding: '2px 6px', borderRadius: 4, color: '#93c5fd', backgroundColor: 'rgba(96,165,250,0.14)', fontSize: 12 }}>{relationship.type}</span>}
+                <strong style={{ color: 'var(--color-text-primary)' }}>{name}</strong>
+                {relationship.type && <span style={{ padding: '2px 6px', borderRadius: 4, color: 'var(--color-info-light)', backgroundColor: 'rgba(96,165,250,0.14)', fontSize: 14 }}>{relationship.type}</span>}
               </div>
-              {relationship.description && <p style={{ margin: '6px 0 0', color: '#c0c0d0', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{relationship.description}</p>}
-              {relationship.future && <p style={{ margin: '5px 0 0', color: '#a78bfa', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>后续：{relationship.future}</p>}
+              {relationship.description && <p style={{ margin: '6px 0 0', color: 'var(--color-text-soft)', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{relationship.description}</p>}
+              {relationship.future && <p style={{ margin: '5px 0 0', color: 'var(--color-purple)', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>后续：{relationship.future}</p>}
             </div>
           );
         })}
@@ -801,74 +801,74 @@ const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) =
 );
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { height: '100%', display: 'flex', overflow: 'hidden', backgroundColor: '#1a1a2e', color: '#eaeaea' },
-  sidebar: { ...clampSidebar(240, 25, 360), display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#161628' },
+  page: { height: '100%', display: 'flex', overflow: 'hidden', backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' },
+  sidebar: { ...clampSidebar(240, 25, 360), display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'var(--color-bg-primary)' },
   sidebarHeader: { display: 'flex', gap: 8, padding: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' },
-  searchInput: { flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 14 },
-  addButton: { padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
+  searchInput: { flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: 'var(--color-text-primary)', outline: 'none', fontSize: 14 },
+  addButton: { padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: 'var(--color-accent)', color: 'var(--color-white)', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
   createBox: { margin: 10, padding: 10, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.035)', display: 'flex', flexDirection: 'column', gap: 8 },
   list: { flex: 1, overflow: 'auto', padding: 10 },
   group: { marginBottom: 12 },
   groupTitle: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 4px', fontSize: 14, fontWeight: 800 },
-  characterItem: { width: '100%', display: 'flex', flexDirection: 'column', gap: 3, padding: '9px 10px', marginBottom: 4, borderRadius: 7, border: '1px solid transparent', backgroundColor: 'transparent', color: '#c0c0d0', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' },
+  characterItem: { width: '100%', display: 'flex', flexDirection: 'column', gap: 3, padding: '9px 10px', marginBottom: 4, borderRadius: 7, border: '1px solid transparent', backgroundColor: 'transparent', color: 'var(--color-text-soft)', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' },
   characterItemActive: { backgroundColor: 'rgba(233,69,96,0.12)', borderColor: 'rgba(233,69,96,0.32)' },
   characterName: { fontSize: 14, fontWeight: 800 },
-  characterIdentity: { fontSize: 14, color: '#8a8aa0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  characterIdentity: { fontSize: 14, color: 'var(--color-text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   main: { flex: 1, overflow: 'auto', padding: 18 },
-  empty: { height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a8aa0' },
+  empty: { height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-dim)' },
   hero: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', padding: '16px 18px', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.12)' },
   heroMeta: { display: 'flex', gap: 8, marginBottom: 8 },
   title: { margin: 0, fontSize: 24, lineHeight: 1.2 },
-  subtitle: { margin: '6px 0 0', fontSize: 14, color: '#8a8aa0' },
-  heroInfoRow: { display: 'flex', gap: 12, marginTop: 8, fontSize: 14, color: '#c0c0d0', flexWrap: 'wrap' },
+  subtitle: { margin: '6px 0 0', fontSize: 14, color: 'var(--color-text-dim)' },
+  heroInfoRow: { display: 'flex', gap: 12, marginTop: 8, fontSize: 14, color: 'var(--color-text-soft)', flexWrap: 'wrap' },
   heroInfoTruncated: { maxWidth: 'min(320px, 40vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   heroActions: { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' },
   roleBadge: { padding: '3px 8px', borderRadius: 5, border: '1px solid', backgroundColor: 'rgba(255,255,255,0.04)', fontSize: 14, fontWeight: 800 },
-  povBadge: { padding: '3px 8px', borderRadius: 5, backgroundColor: 'rgba(233,69,96,0.12)', color: '#e94560', fontSize: 14, fontWeight: 800 },
-  message: { marginTop: 10, padding: '9px 12px', borderRadius: 6, backgroundColor: 'rgba(96,165,250,0.09)', border: '1px solid rgba(96,165,250,0.16)', color: '#93c5fd', fontSize: 14 },
-  impactBox: { marginTop: 10, padding: '10px 12px', borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', color: '#fbbf24', fontSize: 14, lineHeight: 1.6 },
+  povBadge: { padding: '3px 8px', borderRadius: 5, backgroundColor: 'rgba(233,69,96,0.12)', color: 'var(--color-accent)', fontSize: 14, fontWeight: 800 },
+  message: { marginTop: 10, padding: '9px 12px', borderRadius: 6, backgroundColor: 'rgba(96,165,250,0.09)', border: '1px solid rgba(96,165,250,0.16)', color: 'var(--color-info-light)', fontSize: 14 },
+  impactBox: { marginTop: 10, padding: '10px 12px', borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', color: 'var(--color-warning)', fontSize: 14, lineHeight: 1.6 },
   editorPanel: { marginTop: 12, padding: 14, borderRadius: 8, border: '1px solid rgba(233,69,96,0.22)', backgroundColor: 'rgba(0,0,0,0.16)', display: 'flex', flexDirection: 'column', gap: 10 },
   editorGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 },
-  field: { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 14, color: '#8a8aa0' },
-  input: { width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 14, fontFamily: 'inherit' },
-  textarea: { width: '100%', boxSizing: 'border-box', minHeight: 70, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: '#eaeaea', outline: 'none', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.6 },
+  field: { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 14, color: 'var(--color-text-dim)' },
+  input: { width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: 'var(--color-text-primary)', outline: 'none', fontSize: 14, fontFamily: 'inherit' },
+  textarea: { width: '100%', boxSizing: 'border-box', minHeight: 70, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(0,0,0,0.22)', color: 'var(--color-text-primary)', outline: 'none', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.6 },
   row: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  primaryButton: { padding: '8px 14px', borderRadius: 6, border: 'none', backgroundColor: '#e94560', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 800 },
-  secondaryButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#c0c0d0', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
-  dangerButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.28)', backgroundColor: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
+  primaryButton: { padding: '8px 14px', borderRadius: 6, border: 'none', backgroundColor: 'var(--color-accent)', color: 'var(--color-white)', cursor: 'pointer', fontSize: 14, fontWeight: 800 },
+  secondaryButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: 'var(--color-text-soft)', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
+  dangerButton: { padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.28)', backgroundColor: 'rgba(239,68,68,0.08)', color: 'var(--color-danger)', cursor: 'pointer', fontSize: 14, fontWeight: 700 },
   contentGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginTop: 12 },
   summaryPanel: { gridColumn: '1 / -1', border: '1px solid rgba(96,165,250,0.18)', borderRadius: 8, backgroundColor: 'rgba(96,165,250,0.06)', overflow: 'hidden' },
-  summaryText: { fontSize: 14, lineHeight: 1.7, color: '#eaeaea' },
-  summaryBackground: { marginTop: 8, padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 14, lineHeight: 1.6, color: '#c0c0d0' },
+  summaryText: { fontSize: 14, lineHeight: 1.7, color: 'var(--color-text-primary)' },
+  summaryBackground: { marginTop: 8, padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', fontSize: 14, lineHeight: 1.6, color: 'var(--color-text-soft)' },
   summarySectionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10, marginTop: 12 },
   summarySectionCard: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.12)', border: '1px solid rgba(255,255,255,0.06)' },
-  summarySectionTitle: { margin: '0 0 8px', fontSize: 14, color: '#93c5fd', fontWeight: 800 },
-  summarySectionRow: { fontSize: 14, lineHeight: 1.55, color: '#c0c0d0', marginBottom: 4 },
+  summarySectionTitle: { margin: '0 0 8px', fontSize: 14, color: 'var(--color-info-light)', fontWeight: 800 },
+  summarySectionRow: { fontSize: 14, lineHeight: 1.55, color: 'var(--color-text-soft)', marginBottom: 4 },
   panel: { border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
-  panelTitle: { padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', color: '#eaeaea', fontSize: 14, fontWeight: 800 },
+  panelTitle: { padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 800 },
   panelBody: { padding: 12, display: 'flex', flexDirection: 'column', gap: 9 },
   infoRow: { display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', gap: 10, fontSize: 14, lineHeight: 1.6 },
   traitWrap: { display: 'flex', flexWrap: 'wrap', gap: 7 },
-  traitTag: { padding: '4px 8px', borderRadius: 5, border: '1px solid rgba(96,165,250,0.18)', backgroundColor: 'rgba(96,165,250,0.08)', color: '#93c5fd', fontSize: 14 },
-  contradictionBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', borderLeft: '3px solid #f59e0b', color: '#fbbf24', fontSize: 14, lineHeight: 1.6 },
+  traitTag: { padding: '4px 8px', borderRadius: 5, border: '1px solid rgba(96,165,250,0.18)', backgroundColor: 'rgba(96,165,250,0.08)', color: 'var(--color-info-light)', fontSize: 14 },
+  contradictionBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(245,158,11,0.08)', borderLeft: '3px solid var(--color-warning)', color: 'var(--color-warning)', fontSize: 14, lineHeight: 1.6 },
   timeline: { display: 'flex', flexDirection: 'column', gap: 8 },
   timelineItem: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 14 },
-  mutedBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', color: '#8a8aa0', fontSize: 14, lineHeight: 1.6 },
+  mutedBox: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', color: 'var(--color-text-dim)', fontSize: 14, lineHeight: 1.6 },
   relationshipRow: { padding: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 14 },
   statusPanel: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
   profileArchive: { marginTop: 12, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' },
-  archiveHint: { margin: 0, padding: '10px 12px', color: '#8a8aa0', fontSize: 14, lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  archiveHint: { margin: 0, padding: '10px 12px', color: 'var(--color-text-dim)', fontSize: 14, lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.06)' },
   archiveGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, padding: 12 },
   archiveSection: { border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.025)', overflow: 'hidden' },
-  archiveTitle: { margin: 0, padding: '8px 10px', color: '#eaeaea', fontSize: 14, borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  archiveTitle: { margin: 0, padding: '8px 10px', color: 'var(--color-text-primary)', fontSize: 14, borderBottom: '1px solid rgba(255,255,255,0.06)' },
   archiveRow: { padding: '8px 10px', fontSize: 14, lineHeight: 1.55, borderBottom: '1px solid rgba(255,255,255,0.045)' },
   statusList: { display: 'flex', flexDirection: 'column', gap: 6, padding: 12 },
   statusRow: { display: 'grid', gridTemplateColumns: '100px minmax(0, 1fr) auto auto', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.055)', fontSize: 14 },
-  statusLabel: { color: '#8a8aa0', fontWeight: 700 },
-  statusValue: { color: '#eaeaea', fontWeight: 600 },
-  sourceBadge: { fontStyle: 'normal', color: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
-  reviewedBadge: { fontStyle: 'normal', color: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
-  pendingBadge: { fontStyle: 'normal', color: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
+  statusLabel: { color: 'var(--color-text-dim)', fontWeight: 700 },
+  statusValue: { color: 'var(--color-text-primary)', fontWeight: 600 },
+  sourceBadge: { fontStyle: 'normal', color: 'var(--color-info-light)', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
+  reviewedBadge: { fontStyle: 'normal', color: 'var(--color-success)', backgroundColor: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
+  pendingBadge: { fontStyle: 'normal', color: 'var(--color-warning)', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.14)', borderRadius: 4, padding: '2px 6px', fontSize: 14 },
 };
 
 export default CharacterPage;

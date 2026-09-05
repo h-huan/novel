@@ -3,6 +3,7 @@
  * 通过 REST API 管理真实章节数据
  */
 import { create } from 'zustand';
+import { countNarrativeWords } from '../lib/wordCount';
 import { api } from '../lib/api';
 import type { Chapter, ChapterStatus } from '@novel/shared';
 
@@ -35,6 +36,12 @@ interface ChapterState {
   rejectReview: (projectId: string, id: string) => Promise<void>;
   selectChapter: (projectId: string, id: string) => Promise<void>;
   setCurrentChapterContent: (content: string) => void;
+  /** 手动重跑本章七维质检（自动质检失败/想刷新时用），成功后本地同步为 ok 状态 */
+  rerunAutoQuality: (projectId: string, id: string) => Promise<void>;
+  /** 用任一 /writing-quality/analyze 返回体统一回写本章质检状态（编辑器/质量页/AI面板多入口共用，避免顶栏停在旧分数） */
+  applyQualityAnalyzeResult: (id: string, payload: any) => void;
+  /** 以后端章节行为权威，仅同步质检三字段（不覆盖正在编辑的正文）；挂载/切章/从其它页返回时兜底调用 */
+  syncChapterQuality: (projectId: string, id: string) => Promise<void>;
 }
 
 /**
@@ -85,7 +92,8 @@ function mapServerChapter(raw: any): Chapter {
     };
   }
   const content = narrativeContent(raw.content);
-  const wordCount = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  // 以后端 toResponse 的 wordCount（同一口径）为权威，缺失时本地按同口径兜底
+  const wordCount = Number.isFinite(Number(raw.wordCount)) ? Number(raw.wordCount) : countNarrativeWords(content);
   return {
     id: raw.id || '',
     projectId: raw.projectId || '',
@@ -99,6 +107,9 @@ function mapServerChapter(raw: any): Chapter {
     status: raw.status || 'draft',
     modelConfig: raw.modelConfig || { writerModel: 'gpt-4', temperature: 0.8, cost: 0 },
     lockedAt: raw.lockedAt ? new Date(raw.lockedAt) : undefined,
+    autoQualityStatus: raw.autoQualityStatus || undefined,
+    autoQualityMessage: raw.autoQualityMessage || undefined,
+    autoQualityAt: raw.autoQualityAt || undefined,
     createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
     updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : new Date(),
   };
@@ -159,6 +170,60 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
     } catch (error) {
       throw error;
       // silent fail — content is saved locally by WritingPage auto-save
+    }
+  },
+
+  rerunAutoQuality: async (projectId: string, id: string) => {
+    const res = await api.post<any>(`/projects/${projectId}/writing-quality/analyze`, { chapterId: id, scope: 'chapter' });
+    const payload = unwrapApiPayload<any>(res);
+    get().applyQualityAnalyzeResult(id, payload);
+  },
+
+  // 统一回写：任何入口（编辑器重跑 / 质量诊断页 / AI 续写面板内 analyze）拿到结果后都走这里，
+  // 保证 chapters 列表与当前章节的质检状态同时更新，杜绝「后端已 78、顶栏还停在 77」。
+  applyQualityAnalyzeResult: (id: string, payload: any) => {
+    const report = payload?.report;
+    // 状态以后端同口径结论为准（≥90且无高危=ok，否则 needs_rewrite）；后端缺字段时用分数现场推导，绝不无条件乐观置 ok。
+    const score = Number(report?.overallScore);
+    const highCount = Number(report?.highIssueCount || 0);
+    const derived: Chapter['autoQualityStatus'] = Number.isFinite(score)
+      ? (score >= 90 && highCount === 0 ? 'ok' : 'needs_rewrite')
+      : 'needs_rewrite';
+    const patch: Partial<Chapter> = {
+      autoQualityStatus: (payload?.autoQualityStatus as Chapter['autoQualityStatus']) || derived,
+      autoQualityMessage: payload?.autoQualityMessage
+        || (report
+          ? `自动质检完成：综合分 ${report.overallScore}，待改问题 ${report.openIssueCount ?? 0} 个`
+          : '自动质检完成'),
+      autoQualityAt: new Date().toISOString(),
+    };
+    set((state) => ({
+      chapters: state.chapters.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      currentChapter: state.currentChapter?.id === id ? { ...state.currentChapter, ...patch } : state.currentChapter,
+    }));
+  },
+
+  // 兜底同步：质检可能从质量诊断页、AI 面板或后端自动流程触发，编辑器不一定经过 applyQualityAnalyzeResult。
+  // 挂载/切章/返回编辑器时拉一次后端章节行，只覆盖质检三字段，绝不碰 content（避免冲掉未保存正文）。
+  syncChapterQuality: async (projectId: string, id: string) => {
+    try {
+      const res = await api.get<any>(`/projects/${projectId}/chapters`);
+      const payload = unwrapApiPayload<unknown>(res);
+      const rows = Array.isArray(payload) ? payload : [];
+      const raw = rows.find((r: any) => r && r.id === id);
+      // 只有后端确实带了质检状态才覆盖；字段缺失时保留现有值，绝不把状态条/评分清空（接口字段不全也不能导致「不显示」）
+      if (!raw || !raw.autoQualityStatus) return;
+      const patch: Partial<Chapter> = {
+        autoQualityStatus: raw.autoQualityStatus,
+        autoQualityMessage: raw.autoQualityMessage || undefined,
+        autoQualityAt: raw.autoQualityAt || undefined,
+      };
+      set((state) => ({
+        chapters: state.chapters.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        currentChapter: state.currentChapter?.id === id ? { ...state.currentChapter, ...patch } : state.currentChapter,
+      }));
+    } catch {
+      // 兜底同步失败不打断编辑，下一次切章/动作仍会再试
     }
   },
 
@@ -247,7 +312,7 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
   setCurrentChapterContent: (content: string) => {
     const ch = get().currentChapter;
     if (!ch) return;
-    const wordCount = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    const wordCount = countNarrativeWords(content);
     set({
       currentChapter: { ...ch, content, wordCount, updatedAt: new Date() },
       // 编辑期间不同步 chapters 数组，避免每次击键 .map() 全量数据

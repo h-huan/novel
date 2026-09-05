@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout';
 
 // Pages
+import WorkbenchPage from './pages/WorkbenchPage';
 import ProjectListPage from './pages/ProjectListPage';
 import WritingPage from './pages/WritingPage';
 import CharacterPage from './pages/CharacterPage';
@@ -32,12 +33,15 @@ import TimelinePage from './pages/TimelinePage';
 import OrganizationMapPage from './pages/OrganizationMapPage';
 import IdeaLabPage from './pages/IdeaLabPage';
 import WritingQualityPage from './pages/WritingQualityPage';
+import PlatformStandardsPage from './pages/PlatformStandardsPage';
+import StandardsHistoryPage from './pages/StandardsHistoryPage';
 
 const AppRouter: React.FC = () => {
   return (
     <AppLayout>
       <Routes>
-        <Route path="/" element={<ProjectListPage />} />
+        <Route path="/" element={<WorkbenchPage />} />
+        <Route path="/projects" element={<ProjectListPage />} />
         <Route path="/project/:id" element={<ProjectDetailRedirect />} />
         <Route path="/project/:id/dashboard" element={<ProjectDashboard />} />
         <Route path="/project/:id/writing" element={<WritingPage />} />
@@ -67,6 +71,8 @@ const AppRouter: React.FC = () => {
         <Route path="/prompt-chains" element={<PromptChainPage />} />
         <Route path="/style-writing" element={<StyleWritingPage />} />
         <Route path="/news" element={<NewsPage />} />
+        <Route path="/module-standards" element={<PlatformStandardsPage />} />
+        <Route path="/standards-history" element={<StandardsHistoryPage />} />
         <Route path="/title-check" element={<TitleCheckPage />} />
         <Route path="/settings" element={<Navigate to="/" replace />} />
         <Route path="/dictionary" element={<DictionaryPage />} />

@@ -2,6 +2,9 @@
    AI写作平台 - TailwindCSS + 自定义样式
    ============================================ */
 
+/* 设计令牌单一来源：所有颜色/字体/间距变量定义于此 */
+@import './styles/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -22,8 +25,8 @@
   }
 
   ::selection {
-    background-color: rgba(233, 69, 96, 0.3);
-    color: white;
+    background-color: var(--color-selection);
+    color: var(--color-white);
   }
 }
 
@@ -55,13 +58,13 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 4px;
+    background: var(--color-scrollbar-thumb);
+    border-radius: var(--radius-sm);
     border: 1px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--color-scrollbar-thumb-hover);
   }
 
   .custom-scrollbar::-webkit-scrollbar {
@@ -74,14 +77,14 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 4px;
+    background: var(--color-scrollbar-thumb);
+    border-radius: var(--radius-sm);
     border: 1px solid transparent;
     background-clip: content-box;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--color-scrollbar-thumb-hover);
   }
 
   /* 侧边栏过渡 */
@@ -95,4 +98,28 @@
   .text-balance {
     text-wrap: balance;
   }
+}
+
+/* Monaco 编辑器版权检测装饰器样式 */
+.monaco-editor .copyright-inline-highlight {
+  background-color: transparent !important;
+  border-bottom: 2px solid var(--color-danger);
+}
+
+.monaco-editor .copyright-inline-warning {
+  background-color: transparent !important;
+  border-bottom: 2px solid var(--color-warning);
+}
+
+/* Monaco 编辑器选中背景：确保蓝色生效（主题颜色可能未正确应用到 DOM） */
+.monaco-editor .selected-text {
+  background-color: var(--color-selection) !important;
+}
+
+/* 只读模式下完全隐藏光标（配合 JS 添加的 monaco-readonly 类） */
+.monaco-editor.monaco-readonly .cursor {
+  display: none !important;
+}
+.monaco-editor.monaco-readonly .cursors-layer {
+  display: none !important;
 }

@@ -64,13 +64,15 @@ const WeeklySummaryPage: React.FC = () => {
 
       // 2. 获取大纲（用于下周计划）
       try {
-        const outlineRes = await api.get(`/outlines?projectId=${projectId}&level=chapter`);
-        setOutline((outlineRes.data as any[]) || []);
+        const outlineRes = await api.get(`/projects/${projectId}/outlines`);
+        const allOutlines = (outlineRes.data as any[]) || [];
+        // 后端根列表返回全部层级，这里只保留章节级大纲用于周计划与完成度统计
+        setOutline(allOutlines.filter((o: any) => o.level === 'chapter'));
       } catch (e) { /* 大纲可能为空 */ }
 
       // 3. 获取伏笔
       try {
-        const fsRes = await api.get(`/foreshadowings?projectId=${projectId}`);
+        const fsRes = await api.get(`/projects/${projectId}/foreshadowings`);
         setForeshadowings((fsRes.data as any[]) || []);
       } catch (e) { /* 伏笔可能为空 */ }
 
@@ -139,7 +141,7 @@ const WeeklySummaryPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div style={{ padding: '40px', textAlign: 'center', color: '#8a8aa0' }}>
+      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-dim)' }}>
         加载中...
       </div>
     );
@@ -153,8 +155,8 @@ const WeeklySummaryPage: React.FC = () => {
           <button onClick={() => navigate(`/project/${projectId}/dashboard`)} style={styles.backButton}>
             ← 返回首页
           </button>
-          <h2 style={{ margin: '8px 0 4px 0', color: '#e0e0e0' }}>📅 每周写作总结</h2>
-          <p style={{ margin: 0, color: '#8a8aa0', fontSize: '14px' }}>
+          <h2 style={{ margin: '8px 0 4px 0', color: 'var(--color-text-primary)' }}>📅 每周写作总结</h2>
+          <p style={{ margin: 0, color: 'var(--color-text-dim)', fontSize: '14px' }}>
             {weekRange.start} ~ {weekRange.end}
           </p>
         </div>
@@ -236,7 +238,7 @@ const WeeklySummaryPage: React.FC = () => {
         <div>
           <div style={styles.sectionBox}>
             <h3 style={styles.sectionTitle}>🔍 连贯性检查</h3>
-            <p style={{ color: '#8a8aa0', fontSize: '14px', marginBottom: '12px' }}>
+            <p style={{ color: 'var(--color-text-dim)', fontSize: '14px', marginBottom: '12px' }}>
               检查最近章节的命名一致性、时间线连贯性、伏笔回收情况
             </p>
             <button
@@ -249,19 +251,19 @@ const WeeklySummaryPage: React.FC = () => {
 
             {checkResult && (
               <div style={styles.checkResult}>
-                <h4 style={{ margin: '12px 0 8px 0', color: '#e0e0e0' }}>检查结果</h4>
+                <h4 style={{ margin: '12px 0 8px 0', color: 'var(--color-text-primary)' }}>检查结果</h4>
                 {(checkResult.issues || []).length === 0 ? (
                   <p style={{ color: '#00ff88' }}>✅ 未发现连贯性问题</p>
                 ) : (
                   <ul style={styles.issueList}>
                     {(checkResult.issues || []).map((issue: any, idx: number) => (
                       <li key={idx} style={styles.issueItem}>
-                        <span style={{ color: issue.severity === 'high' ? '#ff4444' : '#ffd700' }}>
+                        <span style={{ color: issue.severity === 'high' ? 'var(--color-danger)' : '#ffd700' }}>
                           {issue.type}：
                         </span>
                         {issue.description}
                         {issue.suggestion && (
-                          <span style={{ color: '#8a8aa0', marginLeft: '8px' }}>
+                          <span style={{ color: 'var(--color-text-dim)', marginLeft: '8px' }}>
                             → {issue.suggestion}
                           </span>
                         )}
@@ -282,25 +284,25 @@ const styles: Record<string, React.CSSProperties> = {
   backButton: {
     background: 'none',
     border: 'none',
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     cursor: 'pointer',
     padding: '4px 0',
     fontSize: '14px',
   },
   weekButton: {
     padding: '6px 12px',
-    background: '#2a2a3e',
-    border: '1px solid #3a3a5e',
+    background: 'var(--color-bg-elevated)',
+    border: '1px solid var(--color-border-strong)',
     borderRadius: '6px',
-    color: '#e0e0e0',
+    color: 'var(--color-text-primary)',
     cursor: 'pointer',
   },
   errorBox: {
     padding: '12px',
     background: 'rgba(255,68,68,0.1)',
-    border: '1px solid #ff4444',
+    border: '1px solid var(--color-danger)',
     borderRadius: '8px',
-    color: '#ff4444',
+    color: 'var(--color-danger)',
     marginBottom: '16px',
   },
   statsGrid: {
@@ -309,7 +311,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '16px',
   },
   statCard: {
-    background: '#1a1a2e',
+    background: 'var(--color-bg-primary)',
     border: '1px solid #2a2a4e',
     borderRadius: '12px',
     padding: '20px',
@@ -318,16 +320,16 @@ const styles: Record<string, React.CSSProperties> = {
   statNumber: {
     fontSize: '32px',
     fontWeight: 'bold',
-    color: '#e94560',
+    color: 'var(--color-accent)',
     margin: '0 0 4px 0',
   },
   statLabel: {
     fontSize: '14px',
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     margin: 0,
   },
   sectionBox: {
-    background: '#1a1a2e',
+    background: 'var(--color-bg-primary)',
     border: '1px solid #2a2a4e',
     borderRadius: '12px',
     padding: '20px',
@@ -335,11 +337,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   sectionTitle: {
     margin: '0 0 16px 0',
-    color: '#e0e0e0',
+    color: 'var(--color-text-primary)',
     fontSize: '18px',
   },
   emptyText: {
-    color: '#8a8aa0',
+    color: 'var(--color-text-dim)',
     fontSize: '14px',
   },
   chapterList: {
@@ -349,19 +351,19 @@ const styles: Record<string, React.CSSProperties> = {
   },
   chapterItem: {
     padding: '8px 12px',
-    background: '#2a2a3e',
+    background: 'var(--color-bg-elevated)',
     borderRadius: '6px',
     marginBottom: '8px',
     display: 'flex',
     justifyContent: 'space-between',
   },
   chapterNumber: {
-    color: '#e94560',
+    color: 'var(--color-accent)',
     fontWeight: 'bold',
     marginRight: '12px',
   },
   chapterTitle: {
-    color: '#e0e0e0',
+    color: 'var(--color-text-primary)',
   },
   fsStats: {
     display: 'flex',
@@ -375,25 +377,25 @@ const styles: Record<string, React.CSSProperties> = {
   fsStatNumber: {
     fontSize: '24px',
     fontWeight: 'bold',
-    color: '#e0e0e0',
+    color: 'var(--color-text-primary)',
   },
   fsStatLabel: {
-    fontSize: '12px',
-    color: '#8a8aa0',
+    fontSize: '14px',
+    color: 'var(--color-text-dim)',
   },
   checkButton: {
     padding: '10px 20px',
-    background: 'linear-gradient(135deg, #e94560, #ff6b6b)',
+    background: 'linear-gradient(135deg, var(--color-accent), var(--color-danger))',
     border: 'none',
     borderRadius: '8px',
-    color: '#fff',
+    color: 'var(--color-white)',
     fontWeight: 'bold',
     cursor: 'pointer',
   },
   checkResult: {
     marginTop: '16px',
     padding: '12px',
-    background: '#2a2a3e',
+    background: 'var(--color-bg-elevated)',
     borderRadius: '8px',
   },
   issueList: {
@@ -407,7 +409,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '6px',
     marginBottom: '6px',
     fontSize: '14px',
-    color: '#e0e0e0',
+    color: 'var(--color-text-primary)',
   },
 };
 

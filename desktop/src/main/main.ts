@@ -241,7 +241,9 @@ function createLauncherWindow(): void {
  * 创建主编辑窗口
  * 用户选择/创建项目后打开，包含侧边栏、Header 菜单、编辑器等
  */
-function createMainWindow(projectId?: string, projectTitle?: string): void {
+function createMainWindow(projectId?: string, projectTitle?: string, subPath = 'dashboard'): void {
+  // 子页白名单：只允许 小写字母/连字符 路径 + 可选 query，防止 IPC 入参拼进 hash / executeJavaScript 造成注入
+  const safeSub = /^[a-z-]+(\?[A-Za-z0-9=&_%\-]+)?$/.test(String(subPath || '')) ? subPath : 'dashboard';
   const savedBounds = loadWindowBounds();
 
   mainWindow = new BrowserWindow({
@@ -293,14 +295,14 @@ function createMainWindow(projectId?: string, projectTitle?: string): void {
   if (VITE_DEV_SERVER_URL) {
     url = VITE_DEV_SERVER_URL;
     if (projectId) {
-      url += `#/project/${projectId}/dashboard`;
+      url += `#/project/${projectId}/${safeSub}`;
     }
     mainWindow.loadURL(url);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     // 生产模式用 hash 参数传递项目 ID
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
-      hash: projectId ? `/project/${projectId}/dashboard` : '/',
+      hash: projectId ? `/project/${projectId}/${safeSub}` : '/',
     });
   }
 }
@@ -400,20 +402,22 @@ function registerIpcHandlers(): void {
 
   // ===== 窗口管理：引导窗口 → 主窗口切换 =====
 
-  ipcMain.handle('open-project', (_event, projectData: { projectId: string; projectTitle: string }): IpcResult => {
-    const { projectId, projectTitle } = projectData;
+  ipcMain.handle('open-project', (_event, projectData: { projectId: string; projectTitle: string; subPath?: string }): IpcResult => {
+    const { projectId, projectTitle, subPath } = projectData;
+    // 子页白名单（与 createMainWindow 同一规则），缺省回项目总览
+    const safeSub = /^[a-z-]+(\?[A-Za-z0-9=&_%\-]+)?$/.test(String(subPath || '')) ? (subPath as string) : 'dashboard';
 
     // 守卫：如果主窗口已存在，不重复创建，仅通过路由跳转
     if (mainWindow) {
-      // 主窗口中直接通过 hash 导航到目标项目
+      // 主窗口中直接通过 hash 导航到目标项目的指定子页
       mainWindow.webContents.executeJavaScript(
-        `window.location.hash = '#/project/${projectId}/dashboard'`
+        `window.location.hash = '#/project/${projectId}/${safeSub}'`
       ).catch(() => {});
       return { success: true };
     }
 
-    // 1. 创建主窗口
-    createMainWindow(projectId, projectTitle);
+    // 1. 创建主窗口（直接落到指定子页，如 writing-quality / conflicts）
+    createMainWindow(projectId, projectTitle, safeSub);
 
     // 2. 关闭引导窗口
     if (launcherWindow) {

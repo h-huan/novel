@@ -63,7 +63,7 @@ const OrgTreeNode: React.FC<{
           <span style={{ fontSize: '10px' }}>{expanded ? '▼' : '▶'}</span>
         </button>
 
-        <span style={{ fontSize: '12px' }}>{TYPE_ICONS[node.type] || '📋'}</span>
+        <span style={{ fontSize: '14px' }}>{TYPE_ICONS[node.type] || '📋'}</span>
         <span className="flex-1 text-sm truncate">{node.name}</span>
 
         {hasChildren && (

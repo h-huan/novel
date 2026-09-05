@@ -1,9 +1,7 @@
 import { createRequire } from 'node:module';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { up as stateUp } from '../database/migrations/017_state_items_and_evolution';
-import { up as syncUp } from '../database/migrations/026_chapter_derived_data_sync';
-import { up as continuityUp } from '../database/migrations/027_chapter_continuity_rechecks';
+import { up as initSchema } from '../database/migrations/001_initial';
 import { StateItemService } from './state-item.service';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
@@ -14,63 +12,62 @@ const openDatabases: Array<InstanceType<typeof DatabaseSync>> = [];
 function fixture(continuityService?: any) {
   const db = new DatabaseSync(':memory:');
   openDatabases.push(db);
-  stateUp(db);
-  syncUp(db);
-  continuityUp(db);
+  db.exec('PRAGMA foreign_keys=OFF;'); // 单元测试聚焦 service 逻辑，不强制完整引用完整性
+  initSchema(db);
   db.exec(`
-    CREATE TABLE projects (
+    CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY, title TEXT, type TEXT, target_words INTEGER, target_platform TEXT,
       platform_style TEXT, writing_style TEXT, settings TEXT
     );
-    INSERT INTO projects (id,title,type,target_words,target_platform,platform_style,settings)
-      VALUES ('p','测试项目','long_novel',2000000,'qidian','qidian','{"genre":"悬疑","pov":"第三人称限知","chapterWordRange":{"min":3200,"max":4000},"structurePlanning":"dynamic_by_story_rhythm"}');
-    CREATE TABLE chapters (
+    INSERT INTO projects (id,title,type,target_words,target_platform,platform_style,settings,created_at,updated_at)
+      VALUES ('p','测试项目','long_novel',2000000,'qidian','qidian','{"genre":"悬疑","pov":"第三人称限知","chapterWordRange":{"min":3200,"max":4000},"structurePlanning":"dynamic_by_story_rhythm"}','2000-01-01T00:00:00.000Z','2000-01-01T00:00:00.000Z');
+    CREATE TABLE IF NOT EXISTS chapters (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT, status TEXT NOT NULL DEFAULT 'draft',
       content TEXT DEFAULT '', checksum TEXT, volume_index INTEGER DEFAULT 1, chapter_index INTEGER DEFAULT 1
     )
     ;
-    CREATE TABLE characters (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, identity TEXT);
-    CREATE TABLE character_extended_profiles (
+    CREATE TABLE IF NOT EXISTS characters (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, identity TEXT);
+    CREATE TABLE IF NOT EXISTS character_extended_profiles (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, character_id TEXT NOT NULL UNIQUE,
       short_term_goal TEXT, forbidden_writing TEXT, updated_at TEXT
     );
-    CREATE TABLE character_relationships (
+    CREATE TABLE IF NOT EXISTS character_relationships (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, trust_score INTEGER NOT NULL DEFAULT 50,
       review_status TEXT NOT NULL DEFAULT 'pending', locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
     );
-    CREATE TABLE character_state_snapshots (
+    CREATE TABLE IF NOT EXISTS character_state_snapshots (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, current_state TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
       locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
     );
-    CREATE TABLE foreshadowing_threads (
+    CREATE TABLE IF NOT EXISTS foreshadowing_threads (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, summary TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
       locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
     );
-    CREATE TABLE world_rules (
+    CREATE TABLE IF NOT EXISTS world_rules (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, content TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
       locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
     );
-    CREATE TABLE timeline_three_line_events (
+    CREATE TABLE IF NOT EXISTS timeline_three_line_events (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, summary TEXT, review_status TEXT NOT NULL DEFAULT 'pending',
       locked INTEGER NOT NULL DEFAULT 0, updated_at TEXT
     );
-    CREATE TABLE character_states (
+    CREATE TABLE IF NOT EXISTS character_states (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, states_json TEXT, needs_review INTEGER NOT NULL DEFAULT 1,
       reviewed_by TEXT, reviewed_at TEXT, updated_at TEXT
     );
-    CREATE TABLE foreshadowing_states (
+    CREATE TABLE IF NOT EXISTS foreshadowing_states (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT, recovery_method TEXT, needs_review INTEGER NOT NULL DEFAULT 1,
       reviewed_by TEXT, reviewed_at TEXT, updated_at TEXT
     );
-    CREATE TABLE plot_progress (
+    CREATE TABLE IF NOT EXISTS plot_progress (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, emotional_beat TEXT, turning_points TEXT, needs_review INTEGER NOT NULL DEFAULT 1,
       reviewed_by TEXT, reviewed_at TEXT, updated_at TEXT
     );
-    CREATE TABLE version_history (
+    CREATE TABLE IF NOT EXISTS version_history (
       id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, version INTEGER NOT NULL,
       snapshot TEXT NOT NULL, checksum TEXT NOT NULL, change_summary TEXT, created_by TEXT, created_at TEXT NOT NULL
     );
-    CREATE TABLE canonical_entity_sync_states (
+    CREATE TABLE IF NOT EXISTS canonical_entity_sync_states (
       project_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
       index_status TEXT NOT NULL DEFAULT 'pending', needs_resync INTEGER NOT NULL DEFAULT 1,
       last_error TEXT, last_attempt_at TEXT, synced_at TEXT, updated_at TEXT,
@@ -100,8 +97,8 @@ function addState(f: Fixture, id: string, status: string, targetType = 'characte
 
 function addChapter(f: Fixture, id: string, status = 'draft') {
   f.db.prepare(`
-    INSERT INTO chapters (id, project_id, title, status, content, volume_index, chapter_index)
-    VALUES (?, 'p', ?, ?, 'chapter content', 1, 1)
+    INSERT INTO chapters (id, project_id, title, status, content, volume_index, chapter_index, created_at, updated_at)
+    VALUES (?, 'p', ?, ?, 'chapter content', 1, 1, 't', 't')
   `).run(id, id, status);
 }
 
@@ -147,7 +144,7 @@ describe('StateItemService impact actions', () => {
 
   it('restores a canonical version and marks review plus index resync as pending', () => {
     const f = fixture();
-    f.db.prepare(`INSERT INTO characters (id, project_id, name, identity) VALUES ('hero', 'p', '新名字', '新身份')`).run();
+    f.db.prepare(`INSERT INTO characters (id, project_id, name, identity, created_at, updated_at) VALUES ('hero', 'p', '新名字', '新身份', 't', 't')`).run();
     f.db.prepare(`INSERT INTO version_history (id, entity_type, entity_id, version, snapshot, checksum, created_at) VALUES ('v1', 'character', 'hero', 1, ?, 'old-checksum', '2000-01-01')`)
       .run(JSON.stringify({ name: '旧名字', identity: '旧身份' }));
 
@@ -162,15 +159,15 @@ describe('StateItemService impact actions', () => {
 
   it('does not restore a version into an entity owned by another project', () => {
     const f = fixture();
-    f.db.prepare(`INSERT INTO characters (id, project_id, name) VALUES ('hero', 'other', '新名字')`).run();
+    f.db.prepare(`INSERT INTO characters (id, project_id, name, created_at, updated_at) VALUES ('hero', 'other', '新名字', 't', 't')`).run();
     f.db.prepare(`INSERT INTO version_history (id, entity_type, entity_id, version, snapshot, checksum, created_at) VALUES ('v1', 'character', 'hero', 1, '{"name":"旧名字"}', 'checksum', '2000-01-01')`).run();
     expect(() => f.service.restoreCanonicalVersion('p', 'character', 'hero', 1)).toThrow(NotFoundException);
   });
 
   it('restores a character extended profile instead of writing profile fields into the base row', () => {
     const f = fixture();
-    f.db.prepare(`INSERT INTO characters (id, project_id, name) VALUES ('hero', 'p', '角色')`).run();
-    f.db.prepare(`INSERT INTO character_extended_profiles (id, project_id, character_id, short_term_goal, forbidden_writing) VALUES ('profile', 'p', 'hero', '新目标', '新禁忌')`).run();
+    f.db.prepare(`INSERT INTO characters (id, project_id, name, created_at, updated_at) VALUES ('hero', 'p', '角色', 't', 't')`).run();
+    f.db.prepare(`INSERT INTO character_extended_profiles (id, project_id, character_id, short_term_goal, forbidden_writing, created_at, updated_at) VALUES ('profile', 'p', 'hero', '新目标', '新禁忌', 't', 't')`).run();
     f.db.prepare(`INSERT INTO version_history (id, entity_type, entity_id, version, snapshot, checksum, created_at) VALUES ('profile-v1', 'character', 'hero', 1, ?, 'profile-checksum', '2000-01-01')`)
       .run(JSON.stringify({ short_term_goal: '旧目标', forbidden_writing: '旧禁忌' }));
 
@@ -315,7 +312,7 @@ describe('StateItemService impact actions', () => {
 describe('StateItemService confirmation semantics', () => {
   it('confirms review_only without changing canonical core content', () => {
     const f = fixture();
-    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('rel', 'p', 25, 'pending', 'old')`).run();
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, source_character_id, target_character_id, trust_score, review_status, created_at, updated_at) VALUES ('rel', 'p', 'a', 'b', 25, 'pending', 't', 'old')`).run();
     addState(f, 'state', 'pending', 'relationship', 'rel');
     setPayload(f, 'state', { intent: 'review_only', relationshipId: 'rel' });
 
@@ -349,7 +346,7 @@ describe('StateItemService confirmation semantics', () => {
   it('uses ContinuityService and rereads a canonical target before confirming', () => {
     const continuity = { updateRelationship: vi.fn() };
     const f = fixture(continuity);
-    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('rel', 'p', 20, 'pending', 'old')`).run();
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, source_character_id, target_character_id, trust_score, review_status, created_at, updated_at) VALUES ('rel', 'p', 'a', 'b', 20, 'pending', 't', 'old')`).run();
     continuity.updateRelationship.mockImplementation((_projectId: string, id: string, values: any) => {
       f.db.prepare(`UPDATE character_relationships SET trust_score = ?, updated_at = 'new' WHERE id = ?`).run(values.trustScore, id);
       return { id };
@@ -367,7 +364,7 @@ describe('StateItemService confirmation semantics', () => {
   it('does not let canonical_change overwrite a locked entity', () => {
     const continuity = { updateRelationship: vi.fn() };
     const f = fixture(continuity);
-    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, locked, updated_at) VALUES ('rel', 'p', 20, 'pending', 1, 'old')`).run();
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, source_character_id, target_character_id, trust_score, review_status, locked, created_at, updated_at) VALUES ('rel', 'p', 'a', 'b', 20, 'pending', 1, 't', 'old')`).run();
     addState(f, 'state', 'pending', 'relationship', 'rel');
     setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'relationship', action: 'update', targetId: 'rel', values: { trustScore: 91 } } });
 
@@ -388,7 +385,7 @@ describe('StateItemService confirmation semantics', () => {
     const continuity = { createRelationship: vi.fn() };
     const f = fixture(continuity);
     continuity.createRelationship.mockImplementation(() => {
-      f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('created', 'p', 50, 'pending', 'now')`).run();
+      f.db.prepare(`INSERT INTO character_relationships (id, project_id, source_character_id, target_character_id, trust_score, review_status, created_at, updated_at) VALUES ('created', 'p', 'a', 'b', 50, 'pending', 't', 'now')`).run();
       return { id: 'created' };
     });
     addState(f, 'state', 'pending', 'relationship');
@@ -404,9 +401,9 @@ describe('StateItemService confirmation semantics', () => {
   });
 
   it.each([
-    ['character_state', 'character_states', `INSERT INTO character_states (id, project_id, states_json, needs_review, updated_at) VALUES ('legacy', 'p', '{"hp":1}', 1, 'old')`, 'states_json'],
-    ['foreshadowing_state', 'foreshadowing_states', `INSERT INTO foreshadowing_states (id, project_id, status, recovery_method, needs_review, updated_at) VALUES ('legacy', 'p', 'planted', 'method', 1, 'old')`, 'recovery_method'],
-    ['plot_progress', 'plot_progress', `INSERT INTO plot_progress (id, project_id, emotional_beat, turning_points, needs_review, updated_at) VALUES ('legacy', 'p', 'calm', '["turn"]', 1, 'old')`, 'emotional_beat'],
+    ['character_state', 'character_states', `INSERT INTO character_states (id, project_id, character_id, timestamp, snapshot_order, states_json, created_at, needs_review, updated_at) VALUES ('legacy', 'p', 'hero', 't', 0, '{"hp":1}', 't', 1, 'old')`, 'states_json'],
+    ['foreshadowing_state', 'foreshadowing_states', `INSERT INTO foreshadowing_states (id, project_id, foreshadowing_id, status, recovery_method, needs_review, updated_at) VALUES ('legacy', 'p', 'f', 'planted', 'method', 1, 'old')`, 'recovery_method'],
+    ['plot_progress', 'plot_progress', `INSERT INTO plot_progress (id, project_id, chapter_index, emotional_beat, turning_points, needs_review, updated_at) VALUES ('legacy', 'p', 1, 'calm', '["turn"]', 1, 'old')`, 'emotional_beat'],
   ])('confirms legacy %s review target without changing core fields', (entityType, table, insertSql, coreColumn) => {
     const f = fixture(); f.db.prepare(insertSql).run(); addState(f, 'state', 'pending');
     setPayload(f, 'state', { intent: 'review_only', legacyReviewTarget: { entityType, targetId: 'legacy' } });
@@ -422,7 +419,7 @@ describe('StateItemService confirmation semantics', () => {
   it('rolls back canonical confirmation when a submitted value is not persisted', () => {
     const continuity = { updateRelationship: vi.fn(() => ({ id: 'rel' })) };
     const f = fixture(continuity);
-    f.db.prepare(`INSERT INTO character_relationships (id, project_id, trust_score, review_status, updated_at) VALUES ('rel', 'p', 20, 'pending', 'old')`).run();
+    f.db.prepare(`INSERT INTO character_relationships (id, project_id, source_character_id, target_character_id, trust_score, review_status, created_at, updated_at) VALUES ('rel', 'p', 'a', 'b', 20, 'pending', 't', 'old')`).run();
     addState(f, 'state', 'pending', 'relationship', 'rel');
     setPayload(f, 'state', { intent: 'canonical_change', canonicalChange: { entityType: 'relationship', action: 'update', targetId: 'rel', values: { trustScore: 99 } } });
 

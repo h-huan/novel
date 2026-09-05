@@ -9,7 +9,7 @@ import { useProjectStore } from '../stores/projectStore';
 import { parseJsonToReadable } from '../lib/textList';
 
 interface DashboardStats {
-  totalChapters: number; completedChapters: number; writingChapters: number;
+  totalChapters: number; completedChapters: number; writingChapters: number; writtenChapters?: number;
   totalWords: number; targetWords: number; totalCharacters: number;
   totalConflicts: number; unresolvedConflicts: number;
   _loadError?: boolean;
@@ -26,6 +26,7 @@ interface GenerationRecoveryAudit {
   running: boolean;
   recommendedAction: string;
 }
+
 
 /** 轻量全局缓存：同一项目短时间内不重复请求 stats */
 const statsCache: Record<string, { data: DashboardStats; ts: number }> = {};
@@ -49,6 +50,7 @@ const ProjectDashboard: React.FC = () => {
   const [recovery, setRecovery] = useState<GenerationRecoveryAudit | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [ov, setOv] = useState<any>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -74,16 +76,25 @@ const ProjectDashboard: React.FC = () => {
         if (statsData) setStats(statsData);
         if (projectId) {
           try {
-            const recoveryRes = await api.get(`/chain/generation-recovery/${projectId}`);
+            const recoveryRes = await api.getWithRetry(`/chain/generation-recovery/${projectId}`);
             const recoveryData = (recoveryRes as any).data ?? recoveryRes;
             setRecovery(recoveryData.audit || null);
           } catch (recoveryError: any) {
             console.warn('恢复诊断加载失败:', recoveryError?.message);
           }
         }
+        if (projectId) {
+          try {
+            const ovRes = await api.getWithRetry(`/platform-analytics/overview?projectId=${projectId}&days=30`);
+            const ovData = (ovRes as any).data ?? ovRes;
+            setOv(ovData);
+          } catch (ovError: any) {
+            console.warn('本书看板加载失败:', ovError?.message);
+          }
+        }
       } catch (e: any) {
         console.warn('Dashboard 加载失败:', e?.message);
-        setStats({ totalChapters: 0, completedChapters: 0, writingChapters: 0, totalWords: 0, targetWords: 0, totalCharacters: 0, totalConflicts: 0, unresolvedConflicts: 0, _loadError: true } as any);
+        setStats({ totalChapters: 0, completedChapters: 0, writingChapters: 0, writtenChapters: 0, totalWords: 0, targetWords: 0, totalCharacters: 0, totalConflicts: 0, unresolvedConflicts: 0, _loadError: true } as any);
       }
       setLoading(false);
     };
@@ -98,7 +109,7 @@ const ProjectDashboard: React.FC = () => {
     settingsParsed = typeof rawSettings === 'string' ? JSON.parse(rawSettings) : (rawSettings || {});
   } catch {}
 
-  if (loading || !stats) return <div style={{ padding: '40px', textAlign: 'center', color: '#6c6c80' }}>加载中...</div>;
+  if (loading || !stats) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>加载中...</div>;
   const baseSettings = settingsParsed?.coreSetting || settingsParsed?.baseSettings || {};
   const worldview = settingsParsed?.worldview || {};
   const timeline = settingsParsed?.timeline || [];
@@ -156,40 +167,25 @@ const ProjectDashboard: React.FC = () => {
     if (stage.id === 'outline') return { ...stage, done: outlineReady };
     return stage;
   });
-  const quickActions = [
-    { label: '🕒 查看时间线', path: `/project/${projectId}/timeline`, color: '#60a5fa' },
-    ...(!needsRecovery ? [{ label: '✍️ 继续写作', path: `/project/${projectId}/writing`, color: '#e94560' }] : []),
-    { label: '📋 查看大纲', path: `/project/${projectId}/outline`, color: '#3498db' },
-    { label: '⚡ 检查前后矛盾', path: `/project/${projectId}/conflicts`, color: '#f39c12', badge: stats.unresolvedConflicts },
-    { label: '📤 导出', path: `/project/${projectId}/import-export`, color: '#2ecc71' },
-  ];
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: '800px', margin: '0 auto', overflow: 'auto', height: '100%', background: '#1a1a2e' }}>
-      <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#eaeaea', marginBottom: '24px' }}>🏠 首页</h1>
-      {(needsRecovery || recovery?.protectedHumanWork || recoveryMessage) && (
+    <div style={{ padding: '28px 32px', maxWidth: '800px', margin: '0 auto', overflow: 'auto', height: '100%', background: 'var(--color-bg-primary)' }}>
+      <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '24px' }}>🏠 首页</h1>
+      {(needsRecovery || recoveryMessage) && (
         <div style={{ padding: '16px', marginBottom: '20px', borderRadius: '10px', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#fbbf24', marginBottom: '7px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-warning)', marginBottom: '7px' }}>
             {needsRecovery ? '创作资料尚未准备好' : '创作资料提醒'}
           </div>
-          <div style={{ fontSize: '12px', color: '#d1d5db', lineHeight: 1.65 }}>
-            {recovery?.protectedHumanWork
-              ? `已保留创作内容：${recovery.protectionReasons.join('；')}。系统不会自动覆盖。`
-              : recoveryMessage || '继续整理时会严格沿用已确认题材，原有内容会在成功前保留。'}
+          <div style={{ fontSize: 14, color: '#d1d5db', lineHeight: 1.65 }}>
+            {recoveryMessage || '继续整理时会严格沿用已确认题材，原有内容会在成功前保留。'}
           </div>
-          {recovery?.protectedHumanWork && (
-            <button type="button" onClick={() => navigate(`/project/${projectId}/writing`)}
-              style={{ marginTop: '10px', padding: '8px 12px', borderRadius: '7px', border: '1px solid rgba(147,197,253,0.36)', backgroundColor: '#0f172a', color: '#dbeafe', cursor: 'pointer', fontWeight: 600 }}>
-              查看已保留正文
-            </button>
-          )}
           {!!recovery?.missingModules?.length && (
-            <div style={{ marginTop: '6px', fontSize: '12px', color: '#fca5a5' }}>尚未准备：{recovery.missingModules.join('、')}</div>
+            <div style={{ marginTop: '6px', fontSize: 'var(--font-size-xs)', color: '#fca5a5' }}>尚未准备：{recovery.missingModules.join('、')}</div>
           )}
-          {recoveryMessage && <div style={{ marginTop: '7px', fontSize: '12px', color: '#bfdbfe' }}>{recoveryMessage}</div>}
+          {recoveryMessage && <div style={{ marginTop: '7px', fontSize: 'var(--font-size-xs)', color: '#bfdbfe' }}>{recoveryMessage}</div>}
           {needsRecovery && (
             <button type="button" onClick={resumeGeneration} disabled={!recovery?.canResume || recovering}
-              style={{ marginTop: '12px', padding: '9px 15px', borderRadius: '8px', border: '1px solid rgba(251,191,36,0.45)', backgroundColor: recovery?.canResume && !recovering ? '#b45309' : '#374151', color: '#fff', cursor: recovery?.canResume && !recovering ? 'pointer' : 'not-allowed', fontWeight: 700 }}>
+              style={{ marginTop: '12px', padding: '9px 15px', borderRadius: '8px', border: '1px solid rgba(251,191,36,0.45)', backgroundColor: recovery?.canResume && !recovering ? 'var(--color-warning)' : 'var(--color-bg-elevated)', color: 'var(--color-white)', cursor: recovery?.canResume && !recovering ? 'pointer' : 'not-allowed', fontWeight: 700 }}>
               {recovering ? '正在整理创作资料…' : '继续准备创作资料'}
             </button>
           )}
@@ -197,57 +193,94 @@ const ProjectDashboard: React.FC = () => {
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '28px' }}>
         {[
-          { label: '总字数', value: `${(stats.totalWords / 1000).toFixed(1)}k`, sub: `目标 ${(stats.targetWords / 1000).toFixed(0)}k`, color: '#eaeaea' },
-          { label: '章节', value: `${stats.completedChapters}/${stats.totalChapters}`, sub: `${stats.writingChapters}章写作中`, color: '#3498db' },
-          { label: '完成度', value: `${progress}%`, sub: `${stats.targetWords - stats.totalWords > 0 ? '剩余' : '超出'} ${Math.abs(stats.targetWords - stats.totalWords) / 1000}k`, color: progress > 80 ? '#2ecc71' : '#f39c12' },
-          { label: '冲突', value: `${stats.unresolvedConflicts}`, sub: `共${stats.totalConflicts}个`, color: stats.unresolvedConflicts > 0 ? '#e74c3c' : '#2ecc71' },
+          { label: '总字数', value: `${(stats.totalWords / 1000).toFixed(1)}k`, sub: `目标 ${(stats.targetWords / 1000).toFixed(0)}k`, color: 'var(--color-text-primary)' },
+          { label: '章节', value: `${stats.writtenChapters ?? stats.completedChapters}/${stats.totalChapters}`, sub: `已定稿${stats.completedChapters}章`, color: 'var(--color-info)' },
+          { label: '完成度', value: `${progress}%`, sub: `${stats.targetWords - stats.totalWords > 0 ? '剩余' : '超出'} ${Math.abs(stats.targetWords - stats.totalWords) / 1000}k`, color: progress > 80 ? 'var(--color-success)' : 'var(--color-warning)' },
+          { label: '冲突', value: `${stats.unresolvedConflicts}`, sub: `共${stats.totalConflicts}个`, color: stats.unresolvedConflicts > 0 ? 'var(--color-danger)' : 'var(--color-success)' },
         ].map(s => (
           <div key={s.label} style={{ padding: '16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <div style={{ fontSize: '11px', color: '#8a8aa0', marginBottom: '4px' }}>{s.label}</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)', marginBottom: '4px' }}>{s.label}</div>
             <div style={{ fontSize: '24px', fontWeight: 700, color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: '10px', color: '#6c6c80', marginTop: '2px' }}>{s.sub}</div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px' }}>{s.sub}</div>
           </div>
         ))}
       </div>
       <div style={{ marginBottom: '28px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-          <span style={{ fontSize: '12px', color: '#8a8aa0' }}>字数进度</span>
-          <span style={{ fontSize: '12px', color: '#8a8aa0' }}>{progress}%</span>
+          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)' }}>字数进度</span>
+          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-dim)' }}>{progress}%</span>
         </div>
         <div style={{ height: '6px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${Math.min(progress, 100)}%`, backgroundColor: progress > 80 ? '#2ecc71' : '#e94560', borderRadius: '3px' }} />
+          <div style={{ height: '100%', width: `${Math.min(progress, 100)}%`, backgroundColor: progress > 80 ? 'var(--color-success)' : 'var(--color-accent)', borderRadius: '3px' }} />
         </div>
       </div>
 
-      <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.22)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#bfdbfe', marginBottom: '4px' }}>时间线脉络</div>
-            <div style={{ fontSize: '12px', color: '#93c5fd', lineHeight: 1.6 }}>
-              按时间先后查看故事主线、章节推进、伏笔埋设与回收、世界规则变更。可在此核对前后一致性。
-            </div>
+
+      {ov && ov.process && (
+        <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text-primary)' }}>📊 本书生成效率（正文按“章”统计，补字/重写不算多次生成）</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: flowRateColor(ov.process.firstPassRate) }}>
+              {'整体一次成功率 ' + Math.round((ov.process.firstPassRate ?? 0) * 100) + '%'}
+            </span>
           </div>
-          <button type="button" onClick={() => navigate(`/project/${projectId}/timeline`)}
-            style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid rgba(147,197,253,0.36)', backgroundColor: '#0f172a', color: '#dbeafe', cursor: 'pointer', fontWeight: 600 }}>
-            查看时间线
-          </button>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <th style={flowThStyle}>环节</th>
+                <th style={flowThR}>章数/次数</th>
+                <th style={flowThR}>一次成功率</th>
+                <th style={flowThStyle}>平均尝试</th>
+                <th style={flowThR}>产出/目标</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ov.process.steps.map((s: any) => (
+                <tr key={s.scenario} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', backgroundColor: s.isBody ? 'rgba(59,118,195,0.08)' : 'transparent' }}>
+                  <td style={flowTdStyle}>{s.scenarioName}{s.isBody ? '（本书正文）' : ''}{s.failCount > 0 ? <span style={{ color: 'var(--color-danger)', marginLeft: 6 }}>{'失败' + s.failCount}</span> : null}</td>
+                  <td style={flowTdR}>{s.isBody ? (s.calls + ' 章' + (s.llmCalls ? '（前后 ' + s.llmCalls + ' 版）' : '')) : (s.calls + ' 次')}</td>
+                  <td style={{ ...flowTdR, color: flowRateColor(s.firstPassRate), fontWeight: 600 }}>{s.firstPassRate == null ? '—' : Math.round(s.firstPassRate * 100) + '%'}</td>
+                  <td style={flowTdStyle}>{s.isBody
+                    ? (s.avgAttempts + ' 版/章（补字 ' + s.avgLengthRetry + ' · 对齐重写 ' + s.avgAlignmentRepair + ' · 基准精修 ' + s.avgBenchmarkRefine + '）')
+                    : (s.avgAttempts + ' 次')}</td>
+                  <td style={flowTdR}>{s.avgTargetWords ? (s.avgOutputWords + ' / ' + s.avgTargetWords) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
+      )}
 
-      <div style={{ marginBottom: '28px' }}>
-        <div style={{ fontSize: '12px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>快捷操作</div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {quickActions.map(a => (
-            <button key={a.label} onClick={() => navigate(a.path)}
-              style={{ padding: '10px 18px', borderRadius: '8px', border: `1px solid ${a.color}30`, cursor: 'pointer', backgroundColor: `${a.color}10`, color: a.color, fontSize: '13px', fontWeight: 500, fontFamily: 'inherit', position: 'relative' }}>
-              {a.label}
-              {a.badge ? <span style={{ position: 'absolute', top: '-6px', right: '-6px', padding: '2px 6px', borderRadius: '10px', backgroundColor: a.color, color: '#fff', fontSize: '10px', fontWeight: 700 }}>{a.badge}</span> : null}
-            </button>
-          ))}
+      {ov && ov.chapterMatrix && ov.chapterMatrix.available && (
+        <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>📖 逐章质量（对照本书平台基准，点任意一行去正文改）</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                {['章节', '字数', '对话占比', '平均段长', '开篇钩', '章尾钩', '返工', '追读风险', '质检分'].map(h => <th key={h} style={flowThStyle}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {ov.chapterMatrix.rows.map((r: any) => (
+                <tr key={r.chapterId} onClick={() => navigate('/project/' + projectId + '/writing')} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', cursor: 'pointer' }}>
+                  <td style={flowTdStyle}>{'第' + r.chapterIndex + '章 ' + (r.title || '')}</td>
+                  <td style={flowTdR}>{r.words}{r.wordStatus !== 'ok' ? '（应 ' + r.wordMin + '-' + r.wordMax + '）' : ''}</td>
+                  <td style={flowTdR}>{Math.round(r.dialogueRatio * 100) + '%'}</td>
+                  <td style={flowTdR}>{r.avgParaChars} 字</td>
+                  <td style={flowTdR}>{r.openingHook ? '有' : '无'}</td>
+                  <td style={flowTdR}>{r.endingHook ? '有' : '无'}</td>
+                  <td style={flowTdR}>{r.repairCount}</td>
+                  <td style={{ ...flowTdR, color: r.retentionRisk === 0 ? 'var(--color-success)' : r.retentionRisk === 1 ? 'var(--color-warning)' : 'var(--color-danger)' }} title={(r.retentionReasons || []).join('；')}>{r.retentionRisk === 0 ? '安全' : r.retentionRisk === 1 ? '注意' : '高风险'}</td>
+                  <td style={flowTdR}>{r.qualityScore == null ? '待质检' : r.qualityScore}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
+      )}
+
       <div>
-        <div style={{ fontSize: '12px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>创作流程</div>
+        <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>创作流程</div>
         <div style={{ display: 'flex', gap: '8px' }}>
           {stages.map(s => (
             <div
@@ -270,11 +303,11 @@ const ProjectDashboard: React.FC = () => {
               }}
             >
               <div style={{ fontSize: '20px', marginBottom: '4px' }}>{s.icon}</div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: s.done ? '#2ecc71' : '#6c6c80' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: s.done ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
                 {s.label}
               </div>
-              {s.progress !== undefined && <div style={{ marginTop: '6px', height: '3px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}><div style={{ height: '100%', width: `${s.progress}%`, backgroundColor: '#e94560', borderRadius: '2px' }} /></div>}
-              {s.done && <div style={{ fontSize: '10px', color: '#2ecc71', marginTop: '4px' }}>✓</div>}
+              {s.progress !== undefined && <div style={{ marginTop: '6px', height: '3px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}><div style={{ height: '100%', width: `${s.progress}%`, backgroundColor: 'var(--color-accent)', borderRadius: '2px' }} /></div>}
+              {s.done && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success)', marginTop: '4px' }}>✓</div>}
             </div>
           ))}
         </div>
@@ -341,16 +374,16 @@ const ProjectDashboard: React.FC = () => {
           <div style={sectionTitleStyle}>👥 角色体系 ({dashboardCharacters.length}人)</div>
           {dashboardCharacters.map((c: any, i: number) => (
             <div key={i} style={{ padding: '10px', marginBottom: '6px', borderRadius: '8px', backgroundColor: 'rgba(52,152,219,0.05)', border: '1px solid rgba(52,152,219,0.1)' }}>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#3498db', marginBottom: '4px' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-info)', marginBottom: '4px' }}>
                 {c.name || `角色${i + 1}`}
-                <span style={{ fontSize: '10px', color: '#6c6c80', marginLeft: '8px' }}>{c.identity || ''}</span>
+                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginLeft: '8px' }}>{c.identity || ''}</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px', fontSize: '11px' }}>
-                <span style={{ color: '#6c6c80' }}>性格: <span style={{ color: '#c0c0d0' }}>{c.personality || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>目标: <span style={{ color: '#c0c0d0' }}>{c.shortTermGoal || c.longTermGoal || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>背景: <span style={{ color: '#c0c0d0' }}>{truncate(c.background, 40)}</span></span>
-                <span style={{ color: '#6c6c80' }}>弧光: <span style={{ color: '#c0c0d0' }}>{c.growthArc || ''}</span></span>
-                {c.fear && <span style={{ color: '#6c6c80', gridColumn: '1 / -1' }}>恐惧: <span style={{ color: '#e74c3c' }}>{c.fear}</span></span>}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px', fontSize: 'var(--font-size-xs)' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>性格: <span style={{ color: 'var(--color-text-soft)' }}>{c.personality || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>目标: <span style={{ color: 'var(--color-text-soft)' }}>{c.shortTermGoal || c.longTermGoal || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>背景: <span style={{ color: 'var(--color-text-soft)' }}>{truncate(c.background, 40)}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>弧光: <span style={{ color: 'var(--color-text-soft)' }}>{c.growthArc || ''}</span></span>
+                {c.fear && <span style={{ color: 'var(--color-text-muted)', gridColumn: '1 / -1' }}>恐惧: <span style={{ color: 'var(--color-danger)' }}>{c.fear}</span></span>}
               </div>
             </div>
           ))}
@@ -361,20 +394,20 @@ const ProjectDashboard: React.FC = () => {
       {Array.isArray(timeline) && timeline.length > 0 && (
         <div style={{ marginTop: '24px' }}>
           <div style={sectionTitleStyle}>📅 时间线 ({timeline.length}个节点)</div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-size-xs)' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <th style={{ textAlign: 'left', padding: '6px 10px', color: '#8a8aa0', fontWeight: 600 }}>日期</th>
-                <th style={{ textAlign: 'left', padding: '6px 10px', color: '#8a8aa0', fontWeight: 600 }}>事件</th>
-                <th style={{ textAlign: 'right', padding: '6px 10px', color: '#8a8aa0', fontWeight: 600 }}>章节</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', color: 'var(--color-text-dim)', fontWeight: 600 }}>日期</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', color: 'var(--color-text-dim)', fontWeight: 600 }}>事件</th>
+                <th style={{ textAlign: 'right', padding: '6px 10px', color: 'var(--color-text-dim)', fontWeight: 600 }}>章节</th>
               </tr>
             </thead>
             <tbody>
               {timeline.map((t: any, i: number) => (
                 <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                  <td style={{ padding: '5px 10px', color: '#e94560', fontWeight: 500 }}>{t.date || ''}</td>
-                  <td style={{ padding: '5px 10px', color: '#c0c0d0' }}>{t.event || ''}</td>
-                  <td style={{ padding: '5px 10px', color: '#6c6c80', textAlign: 'right' }}>{t.chapterReference || t.chapter || ''}</td>
+                  <td style={{ padding: '5px 10px', color: 'var(--color-accent)', fontWeight: 500 }}>{t.date || ''}</td>
+                  <td style={{ padding: '5px 10px', color: 'var(--color-text-soft)' }}>{t.event || ''}</td>
+                  <td style={{ padding: '5px 10px', color: 'var(--color-text-muted)', textAlign: 'right' }}>{t.chapterReference || t.chapter || ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -388,17 +421,17 @@ const ProjectDashboard: React.FC = () => {
           <div style={sectionTitleStyle}>🔄 递进反转表 ({reversals.length}次→逐步加深)</div>
           {reversals.map((r: any, i: number) => (
             <div key={i} style={{ padding: '12px', marginBottom: '6px', borderRadius: '8px', backgroundColor: 'rgba(233,69,96,0.05)', border: '1px solid rgba(233,69,96,0.1)' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#e94560', marginBottom: '6px' }}>反转 {i + 1} · {r.position || r.id || ''}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: '11px' }}>
-                <span style={{ color: '#6c6c80' }}>表面真相: <span style={{ color: '#c0c0d0' }}>{r.surfaceTruth || r.surface || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>实际真相: <span style={{ color: '#e94560' }}>{r.actualTruth || r.truth || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>支撑伏笔: <span style={{ color: '#f59e0b' }}>{r.foreshadowRef || r.foreshadowId || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>揭露方式: <span style={{ color: '#c0c0d0' }}>{r.revealMethod || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>对主角打击: <span style={{ color: '#e74c3c' }}>{r.impactOnCharacter || r.impact || ''}</span></span>
-                <span style={{ color: '#6c6c80' }}>对读者冲击: <span style={{ color: '#f39c12' }}>{r.impactOnReader || r.readerShock || ''}</span></span>
+              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-accent)', marginBottom: '6px' }}>反转 {i + 1} · {r.position || r.id || ''}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 'var(--font-size-xs)' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>表面真相: <span style={{ color: 'var(--color-text-soft)' }}>{r.surfaceTruth || r.surface || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>实际真相: <span style={{ color: 'var(--color-accent)' }}>{r.actualTruth || r.truth || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>支撑伏笔: <span style={{ color: 'var(--color-warning)' }}>{r.foreshadowRef || r.foreshadowId || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>揭露方式: <span style={{ color: 'var(--color-text-soft)' }}>{r.revealMethod || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>对主角打击: <span style={{ color: 'var(--color-danger)' }}>{r.impactOnCharacter || r.impact || ''}</span></span>
+                <span style={{ color: 'var(--color-text-muted)' }}>对读者冲击: <span style={{ color: 'var(--color-warning)' }}>{r.impactOnReader || r.readerShock || ''}</span></span>
                 {(r.changesUnderstanding !== undefined) && (
-                  <span style={{ color: '#6c6c80', gridColumn: '1 / -1' }}>
-                    改变前文理解: <span style={{ color: r.changesUnderstanding ? '#2ecc71' : '#6c6c80' }}>{r.changesUnderstanding ? '是' : '否'}</span>
+                  <span style={{ color: 'var(--color-text-muted)', gridColumn: '1 / -1' }}>
+                    改变前文理解: <span style={{ color: r.changesUnderstanding ? 'var(--color-success)' : 'var(--color-text-muted)' }}>{r.changesUnderstanding ? '是' : '否'}</span>
                   </span>
                 )}
               </div>
@@ -413,21 +446,21 @@ const ProjectDashboard: React.FC = () => {
           <div style={sectionTitleStyle}>🎯 伏笔网络 ({dashboardForeshadows.length}条)</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '8px' }}>
             {[
-              { label: '贯穿全文', count: dashboardForeshadows.filter((f: any) => f.scope === 'global').length, color: '#e94560' },
-              { label: '卷级', count: dashboardForeshadows.filter((f: any) => f.scope === 'volume').length, color: '#f39c12' },
-              { label: '章级', count: dashboardForeshadows.filter((f: any) => f.scope === 'chapter').length, color: '#3498db' },
+              { label: '贯穿全文', count: dashboardForeshadows.filter((f: any) => f.scope === 'global').length, color: 'var(--color-accent)' },
+              { label: '卷级', count: dashboardForeshadows.filter((f: any) => f.scope === 'volume').length, color: 'var(--color-warning)' },
+              { label: '章级', count: dashboardForeshadows.filter((f: any) => f.scope === 'chapter').length, color: 'var(--color-info)' },
             ].map(s => (
               <div key={s.label} style={{ padding: '6px 10px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', textAlign: 'center' }}>
                 <div style={{ fontSize: '18px', fontWeight: 700, color: s.color }}>{s.count}</div>
-                <div style={{ fontSize: '9px', color: '#6c6c80' }}>{s.label}</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{s.label}</div>
               </div>
             ))}
           </div>
           {dashboardForeshadows.map((f: any, i: number) => (
             <div key={i} style={{ display: 'flex', gap: '8px', padding: '5px 10px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.01)', marginBottom: '3px', alignItems: 'center' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: f.scope === 'global' ? '#e94560' : f.scope === 'volume' ? '#f39c12' : '#3498db', flexShrink: 0 }} />
-              <span style={{ color: '#c0c0d0', fontSize: '11px', flex: 1 }}>{truncate(f.content, 50)}</span>
-              <span style={{ color: '#6c6c80', fontSize: '9px' }}>#{f.setupChapter}→#{f.recoveryChapter}</span>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: f.scope === 'global' ? 'var(--color-accent)' : f.scope === 'volume' ? 'var(--color-warning)' : 'var(--color-info)', flexShrink: 0 }} />
+              <span style={{ color: 'var(--color-text-soft)', fontSize: 'var(--font-size-xs)', flex: 1 }}>{truncate(f.content, 50)}</span>
+              <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>#{f.setupChapter}→#{f.recoveryChapter}</span>
             </div>
           ))}
         </div>
@@ -439,8 +472,8 @@ const ProjectDashboard: React.FC = () => {
 
 const InfoBlock: React.FC<{ label: string; val: string }> = ({ label, val }) => (
   <div style={{ padding: '8px 10px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
-    <div style={{ fontSize: '9px', color: '#6c6c80', marginBottom: '2px', textTransform: 'uppercase' }}>{label}</div>
-    <div style={{ fontSize: '12px', color: '#c0c0d0', lineHeight: 1.4 }}>{val}</div>
+    <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: '2px', textTransform: 'uppercase' }}>{label}</div>
+    <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-soft)', lineHeight: 1.4 }}>{val}</div>
   </div>
 );
 
@@ -456,15 +489,21 @@ const truncate = (str: string, max: number) => {
 
 const DimRow: React.FC<{ icon: string; label: string; val: string }> = ({ icon, label, val }) => (
   <div style={{ display: 'flex', gap: '8px', padding: '6px 10px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', alignItems: 'flex-start' }}>
-    <span style={{ fontSize: '12px', flexShrink: 0 }}>{icon}</span>
-    <span style={{ color: '#8a8aa0', fontSize: '10px', fontWeight: 600, flexShrink: 0, minWidth: '56px' }}>{label}</span>
-    <span style={{ color: '#c0c0d0', fontSize: '11px', lineHeight: 1.5 }}>{val}</span>
+    <span style={{ fontSize: 'var(--font-size-xs)', flexShrink: 0 }}>{icon}</span>
+    <span style={{ color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', fontWeight: 600, flexShrink: 0, minWidth: '56px' }}>{label}</span>
+    <span style={{ color: 'var(--color-text-soft)', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>{val}</span>
   </div>
 );
 
-const sectionTitleStyle: React.CSSProperties = { fontSize: '12px', fontWeight: 600, color: '#8a8aa0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' };
+const flowThStyle: React.CSSProperties = { textAlign: 'left', padding: '6px 8px', color: 'var(--color-text-dim)', fontWeight: 600, fontSize: 'var(--font-size-xs)' };
+const flowThR: React.CSSProperties = { textAlign: 'right', padding: '6px 8px', color: 'var(--color-text-dim)', fontWeight: 600, fontSize: 'var(--font-size-xs)', whiteSpace: 'nowrap' };
+const flowTdStyle: React.CSSProperties = { padding: '6px 8px', color: 'var(--color-text-soft)' };
+const flowTdR: React.CSSProperties = { padding: '6px 8px', color: 'var(--color-text-soft)', textAlign: 'right', whiteSpace: 'nowrap' };
+const flowRateColor = (r: number): string => (r >= 0.85 ? 'var(--color-success)' : r >= 0.6 ? 'var(--color-warning)' : 'var(--color-danger)');
+
+const sectionTitleStyle: React.CSSProperties = { fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' };
 const dimBlockStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' };
-const dimLabelStyle: React.CSSProperties = { fontSize: '9px', color: '#6c6c80', marginBottom: '3px', textTransform: 'uppercase' };
-const dimContentStyle: React.CSSProperties = { fontSize: '14px', color: '#c0c0d0', lineHeight: 1.6, whiteSpace: 'pre-wrap' };
+const dimLabelStyle: React.CSSProperties = { fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: '3px', textTransform: 'uppercase' };
+const dimContentStyle: React.CSSProperties = { fontSize: '14px', color: 'var(--color-text-soft)', lineHeight: 1.6, whiteSpace: 'pre-wrap' };
 
 export default ProjectDashboard;

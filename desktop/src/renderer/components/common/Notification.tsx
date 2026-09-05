@@ -19,15 +19,16 @@ interface NotificationContainerProps {
 }
 
 const typeStyles: Record<NotificationType, { bg: string; border: string; icon: string; color: string }> = {
-  success: { bg: '#0d3b2c', border: '#1a8c5c', icon: '✓', color: '#2ecc71' },
-  error: { bg: '#3b0d1a', border: '#8c1a3a', icon: '✕', color: '#e74c3c' },
-  warning: { bg: '#3b2e0d', border: '#8c751a', icon: '⚡', color: '#f39c12' },
-  info: { bg: '#0d1f3b', border: '#1a4a8c', icon: 'ℹ', color: '#3498db' },
+  success: { bg: '#0d3b2c', border: 'var(--color-success)', icon: '✓', color: 'var(--color-success)' },
+  error: { bg: '#3b0d1a', border: '#8c1a3a', icon: '✕', color: 'var(--color-danger)' },
+  warning: { bg: '#3b2e0d', border: '#8c751a', icon: '⚡', color: 'var(--color-warning)' },
+  info: { bg: '#0d1f3b', border: '#1a4a8c', icon: 'ℹ', color: 'var(--color-info)' },
 };
 
 const NotificationItem: React.FC<{ item: NotificationItem; onRemove: (id: string) => void }> = ({ item, onRemove }) => {
   const [exiting, setExiting] = useState(false);
-  const ts = typeStyles[item.type];
+  // 兜底：任何未识别的通知类型回退 info，避免 typeStyles[type] 为 undefined 后 .color 崩溃
+  const ts = typeStyles[item.type] ?? typeStyles.info;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -47,8 +48,8 @@ const NotificationItem: React.FC<{ item: NotificationItem; onRemove: (id: string
         backgroundColor: ts.bg,
         border: `1px solid ${ts.border}`,
         borderRadius: '8px',
-        color: '#eaeaea',
-        fontSize: '13px',
+        color: 'var(--color-text-primary)',
+        fontSize: '14px',
         lineHeight: 1.5,
         minWidth: '260px',
         maxWidth: '400px',
@@ -62,7 +63,7 @@ const NotificationItem: React.FC<{ item: NotificationItem; onRemove: (id: string
       <span style={{ flex: 1 }}>{item.message}</span>
       <button
         onClick={() => { setExiting(true); setTimeout(() => onRemove(item.id), 300); }}
-        style={{ background: 'none', border: 'none', color: '#6c6c80', cursor: 'pointer', fontSize: '12px', padding: '2px', flexShrink: 0 }}
+        style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '14px', padding: '2px', flexShrink: 0 }}
       >
         ✕
       </button>

@@ -8,6 +8,7 @@ import { StateItemService } from '../../state/state-item.service';
 import type { CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
 import { ChapterDerivedDataSyncService } from './chapter-derived-data-sync.service';
 import { DatabaseService } from '../../database/database.service';
+import { OriginalityGuardService } from '../originality/originality-guard.service';
 
 export interface ChapterResponse {
   id: string;
@@ -34,6 +35,12 @@ export interface ChapterResponse {
   derivedSync?: any;
   /** 本章在保存时清理掉的过期 conflict 数量（基于旧版本正文的未解决 warning/error 冲突） */
   staleConflictsCleaned?: number;
+  /** AI 生成正文保存后是否已排队自动质检 */
+  autoQualityScheduled?: boolean;
+  /** 本章最近一次自动质检状态：running/ok/failed（让作者看得见质检是否真正跑成） */
+  autoQualityStatus?: 'running' | 'ok' | 'needs_rewrite' | 'failed';
+  autoQualityMessage?: string;
+  autoQualityAt?: string;
 }
 
 @Injectable()
@@ -44,7 +51,19 @@ export class ChapterService {
     @Optional() private readonly stateItemService?: StateItemService,
     @Optional() private readonly derivedDataSync?: ChapterDerivedDataSyncService,
     @Optional() private readonly databaseService?: DatabaseService,
+    @Optional() private readonly originalityGuard?: OriginalityGuardService,
   ) {}
+
+  /**
+   * AI 生成正文 canonical 保存后的自动质检回调，由 WritingQualityService.onModuleInit 注册。
+   * 反向依赖用「注册式」而非构造注入，避免 ChapterModule <-> WritingQualityModule 循环依赖。
+   */
+  private autoQualityRunner?: (input: { projectId: string; chapterId: string; content: string }) => Promise<void> | void;
+  registerAutoQualityRunner(
+    fn: (input: { projectId: string; chapterId: string; content: string }) => Promise<void> | void,
+  ): void {
+    this.autoQualityRunner = fn;
+  }
 
   create(projectId: string, dto: CreateChapterDto): ChapterResponse {
     const now = new Date().toISOString();
@@ -66,11 +85,18 @@ export class ChapterService {
   }
 
   findByProjectId(projectId: string): ChapterListItem[] {
+    // 列表一次性带出每章最新质检状态与综合分：编辑器状态条同步、项目表格/工作台评分列都以这里为权威，
+    // 杜绝「列表项缺质检字段 → 前端同步把状态覆盖成空、评分列永远『待质检』」。
+    const scoreMap = this.repo.latestQualityScoreByProject(projectId);
     return this.repo.findByProjectId(projectId).map((row) => ({
       id: row.id, volumeIndex: row.volume_index, chapterIndex: row.chapter_index,
       title: row.title, wordCount: row.word_count,
       targetWords: this.repo.findOutlineTargetWords(row.outline_id),
       status: row.status, updatedAt: row.updated_at,
+      autoQualityStatus: (row.auto_quality_status as ChapterResponse['autoQualityStatus']) || undefined,
+      autoQualityMessage: row.auto_quality_message || undefined,
+      autoQualityAt: row.auto_quality_at || undefined,
+      qualityScore: scoreMap.get(row.id),
     }));
   }
 
@@ -104,11 +130,28 @@ export class ChapterService {
       // 删的是「未解决且非 pass」的（status in warning/error）；保留已通过（pass）和已解决（resolved）的。
       // 这样避免旧版本正文产生的矛盾叠加，且不影响已通过/已解决的历史记录。
       const cleaned = this.cleanStaleConflictsForChapter(existing.project_id, existing.chapter_index);
+      // 原创性后置检测（在清理旧冲突之后执行，避免被当作过期矛盾清掉；检测本身不阻断保存，命中落矛盾表）
+      this.originalityGuard?.checkChapter({
+        projectId: existing.project_id,
+        chapterIndex: existing.chapter_index,
+        title: (dto.title ?? existing.title) || '',
+        content: dto.content || '',
+      });
       const sync = await this.syncAfterContentChange(existing, dto.content || '', 'manual_save');
       response.stateSync = sync.stateSync;
       response.derivedSync = sync.derivedSync;
       if (cleaned > 0) {
         response.staleConflictsCleaned = cleaned;
+      }
+      // AI 生成正文 canonical 保存：异步自动跑一次七维质检 + 标签契合（质量分/问题落库并同步看板）。
+      // fire-and-forget，不阻塞保存返回；runner 内部已全容错。手动逐字编辑（source!=='ai_generated'）不触发。
+      if (dto.source === 'ai_generated' && this.autoQualityRunner && this.countWords(dto.content || '') > 0) {
+        const saved = { projectId: existing.project_id, chapterId: existing.id, content: dto.content || '' };
+        this.repo.markAutoQuality(existing.id, 'running', '正在自动质检…');
+        queueMicrotask(() => { try { void this.autoQualityRunner?.(saved); } catch { /* 不影响保存 */ } });
+        response.autoQualityScheduled = true;
+        response.autoQualityStatus = 'running';
+        response.autoQualityMessage = '正在自动质检…';
       }
     } else {
       // 内容未变化：派生数据本已与已保存内容一致，无需重新同步。
@@ -413,6 +456,9 @@ export class ChapterService {
       qualityScore: row.quality_score ? JSON.parse(row.quality_score) : undefined,
       checksum: row.checksum || undefined, filePath: row.file_path || undefined,
       createdAt: row.created_at, updatedAt: row.updated_at, lockedAt: row.locked_at || undefined,
+      autoQualityStatus: (row.auto_quality_status as any) || undefined,
+      autoQualityMessage: row.auto_quality_message || undefined,
+      autoQualityAt: row.auto_quality_at || undefined,
     };
   }
 }
@@ -426,4 +472,10 @@ export interface ChapterListItem {
   targetWords?: number;
   status: string;
   updatedAt: string;
+  /** 最新自动质检状态/消息/时间（与章节行同权威，列表带出供前端即时同步，无需再请求单章详情） */
+  autoQualityStatus?: 'running' | 'ok' | 'needs_rewrite' | 'failed';
+  autoQualityMessage?: string;
+  autoQualityAt?: string;
+  /** 最新一条质检报告综合分（数字），无报告时为 undefined */
+  qualityScore?: number;
 }
