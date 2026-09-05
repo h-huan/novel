@@ -1,3 +1,5 @@
+import { qualityIssue } from './quality-issue';
+import { readConstitution } from '../project/creative-constitution';
 /**
  * WritingQualityService - Phase 6.2 稳定修复版
  *
@@ -378,14 +380,15 @@ export class WritingQualityService implements OnModuleInit {
     if (this.qualityInspection) {
       try {
         aiFingerprints = this.qualityInspection.detectAiFingerprints(content);
-        fingerprintScore = Math.max(0, 100 - (aiFingerprints?.overallScore || 0));
+        if (typeof aiFingerprints?.overallScore !== 'number') aiFingerprints = null;
+        else fingerprintScore = Math.max(0, 100 - aiFingerprints.overallScore);
       } catch (err) {
         this.logger.warn(`AI fingerprint detection failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     // 统一综合评分：物理指纹30% + LLM语义评审70%（设定一致性由chain层负责）
-    const llmScore = llmResult.overallScore ?? 70;
+    const llmScore = llmResult.overallScore;
     const blendedScore = aiFingerprints
       ? Math.round(fingerprintScore * 0.3 + llmScore * 0.7)
       : llmScore;
@@ -394,7 +397,7 @@ export class WritingQualityService implements OnModuleInit {
     // LLM 语义评分对同构排比/量词错配/残句链等语言硬伤容易手软给虚高分，这里用零 LLM 的
     // 确定性扫描只对“跨平台真硬伤”（非平台分化的排版类）逐项扣分，让这类问题无法靠 LLM 印象混到 90+。
     const hardlineProfile = {
-      platform: context?.project?.target_platform || context?.project?.tagProfile?.platform || undefined,
+      platform: context?.project?.tagProfile?.platform || undefined,
       storyType: context?.project?.type || undefined,
     };
     const HARDLINE_PENALTY: Record<string, number> = {
@@ -1066,12 +1069,13 @@ export class WritingQualityService implements OnModuleInit {
       if (project) {
         let settings: any = {};
         try { settings = JSON.parse(project.settings || '{}'); } catch { settings = {}; }
+        const constitution = readConstitution(project);
+        project.creativeConstitution = constitution;
+        project.target_platform = constitution.targetPlatform;
         project.tagProfile = {
-          platform: project.target_platform || settings.recommendedPlatform || '',
-          tone: settings.storyTone || [],
-          style: settings.writingStyle || [],
-          genre: settings.webNovelGenre || [],
-          chapterWordRange: settings.chapterWordRange || null,
+          platform: constitution.targetPlatform, tone: constitution.storyTone,
+          style: constitution.writingStyle, genre: constitution.webNovelGenre,
+          chapterWordRange: constitution.chapterWordRange,
         };
         context.project = project;
       }
@@ -1225,24 +1229,11 @@ ${content.slice(0, 15000)}
     const rawContent = response.content || '';
     const parsed = this.parseJson<LLMQualityOutput>(rawContent);
 
-    if (!parsed) {
-      this.logger.warn('Failed to parse LLM quality output JSON');
-      return {
-        result: {
-          summary: '质量诊断解析失败，请重试',
-          overallLevel: 'medium',
-          overallScore: 60,
-          issues: [],
-        },
-        parseWarning: 'LLM returned non-JSON or malformed JSON output',
-        rawPreview: rawContent.slice(0, 1000),
-      };
+    if (!parsed || typeof parsed.overallScore !== 'number' || !Number.isFinite(parsed.overallScore) || parsed.overallScore < 0 || parsed.overallScore > 100) {
+      throw new BadRequestException('质量评审未评估：返回内容或分数无效，请重试；不生成默认评分');
     }
-
-    parsed.overallLevel = ['low', 'medium', 'high', 'critical'].includes(parsed.overallLevel)
-      ? parsed.overallLevel : 'medium';
-    parsed.overallScore = typeof parsed.overallScore === 'number'
-      ? Math.max(0, Math.min(100, Math.round(parsed.overallScore))) : 60;
+    parsed.overallScore = Math.round(parsed.overallScore);
+    parsed.overallLevel = levelByQualityScore(parsed.overallScore);
     parsed.summary = String(parsed.summary || '').slice(0, 200);
     (parsed as any).tagFit = this.normalizeTagFit((parsed as any).tagFit);
 
@@ -1758,6 +1749,9 @@ ${fullContent.slice(0, 3000)}
     return {
       id: r.id, reportId: r.report_id, projectId: r.project_id, chapterId: r.chapter_id,
       issueType: r.issue_type, severity: r.severity,
+      qualityIssue: safeJsonParse(r.payload)?.qualityIssue || qualityIssue({ id: r.id, projectId: r.project_id, entityId: r.chapter_id,
+        stage: 'chapter', ruleId: r.issue_type, severity: r.severity, status: r.status,
+        message: r.summary || r.title, quote: r.evidence, source: 'writing_quality_issues' }),
       title: r.title, summary: r.summary,
       evidence: r.evidence, suggestion: r.suggestion,
       paragraphIndex: r.paragraph_index, sentenceIndex: r.sentence_index,

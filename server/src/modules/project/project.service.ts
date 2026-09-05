@@ -1,3 +1,4 @@
+import { readConstitution, updateConstitution, constitutionColumns, constitutionSettings, type CreativeConstitution } from './creative-constitution';
 /**
  * 项目 Service
  */
@@ -11,6 +12,7 @@ import type { ProjectQueryDto } from './dto/query-project.dto';
 import { DatabaseService } from '../../database/database.service';
 
 export interface ProjectResponse {
+  creativeConstitution: CreativeConstitution;
   id: string;
   type: string;
   /** 作品类型别名（与 type 一致） */
@@ -63,23 +65,17 @@ export class ProjectService {
     const currentWorkflowStage = dto.currentWorkflowStage ||
       this.defaultWorkflowStage(projectType, creationSource);
 
-    // target_platform 兼容逻辑：优先 dto.targetPlatform，否则 dto.platformStyle，否则 generic
-    const targetPlatform = dto.targetPlatform || dto.platformStyle || 'generic';
-    const platformStyle = dto.platformStyle || dto.targetPlatform || 'generic';
+    const constitution = updateConstitution({ type: projectType, settings: '{}' }, dto);
+    constitution.revision = 1;
 
     const row = {
       id,
-      type: projectType,
+      ...constitutionColumns(JSON.parse(settings), constitution),
       title: dto.title,
       status: dto.status || 'active',
-      target_words: dto.targetWords || 0,
       current_words: 0,
-      platform_style: platformStyle,
       description: dto.description || null,
-      writing_style: dto.writingStyle !== undefined ? this.stringifyJsonValue(dto.writingStyle) : null,
-      settings,
       creation_source: creationSource,
-      target_platform: targetPlatform,
       current_workflow_stage: currentWorkflowStage,
       idea_status: dto.ideaStatus || 'none',
       idea_seed: dto.ideaSeed || null,
@@ -135,37 +131,21 @@ export class ProjectService {
     const updateData: Record<string, unknown> = { updated_at: now };
 
     if (dto.title !== undefined) updateData.title = dto.title;
-    if (dto.type !== undefined) updateData.type = dto.type;
     if (dto.status !== undefined) updateData.status = dto.status;
-    if (dto.targetWords !== undefined) updateData.target_words = dto.targetWords;
     if (dto.description !== undefined) updateData.description = dto.description;
-    if (dto.platformStyle !== undefined) updateData.platform_style = dto.platformStyle;
-    if (dto.writingStyle !== undefined) updateData.writing_style = this.stringifyJsonValue(dto.writingStyle);
 
     // 第一阶段新增字段
     if (dto.creationSource !== undefined) updateData.creation_source = dto.creationSource;
-    if (dto.targetPlatform !== undefined) updateData.target_platform = dto.targetPlatform;
     if (dto.currentWorkflowStage !== undefined) updateData.current_workflow_stage = dto.currentWorkflowStage;
     if (dto.ideaStatus !== undefined) updateData.idea_status = dto.ideaStatus;
     if (dto.ideaSeed !== undefined) updateData.idea_seed = dto.ideaSeed || null;
     if (dto.confirmedIdea !== undefined) updateData.confirmed_idea = dto.confirmedIdea || null;
 
-    if (dto.settings !== undefined) {
-      const existingSettings = this.safeParseSettings(existing.settings);
-      updateData.settings = JSON.stringify(this.normalizePlanningSettings({
-        ...existingSettings,
-        ...this.parseJsonObject(dto.settings),
-      }));
-    }
-
-    if (dto.writingMode) {
-      const settings = updateData.settings
-        ? JSON.parse(String(updateData.settings))
-        : this.safeParseSettings(existing.settings);
-      settings.writingMode = dto.writingMode;
-      updateData.settings = JSON.stringify(this.normalizePlanningSettings(settings));
-    }
-
+    const constitution = updateConstitution(existing, dto);
+    Object.assign(updateData, constitutionColumns(
+      this.normalizePlanningSettings({ ...this.safeParseSettings(existing.settings), ...this.parseJsonObject(dto.settings), ...(dto.writingMode ? { writingMode: dto.writingMode } : {}) }),
+      constitution,
+    ));
     this.repo.update(id, updateData);
     return this.toResponse(this.repo.findById(id)!);
   }
@@ -227,24 +207,26 @@ export class ProjectService {
    */
   private toResponse(row: ProjectRow): ProjectResponse {
     const creationSource = row.creation_source || 'blank';
-    const targetPlatform = row.target_platform || row.platform_style || 'generic';
+    const constitution = readConstitution(row);
+    const targetPlatform = constitution.targetPlatform;
     const currentWorkflowStage = row.current_workflow_stage ||
       this.defaultWorkflowStage(row.type, creationSource);
     const ideaStatus = row.idea_status || 'none';
 
     return {
       id: row.id,
-      type: row.type,
-      projectMode: row.type,
+      creativeConstitution: constitution,
+      type: constitution.projectType,
+      projectMode: constitution.projectType,
       title: row.title,
       status: row.status,
-      targetWords: row.target_words,
-      targetWordCount: row.target_words,
+      targetWords: constitution.targetWords,
+      targetWordCount: constitution.targetWords,
       currentWords: row.current_words,
       description: row.description || undefined,
-      writingStyle: row.writing_style ? JSON.parse(row.writing_style) : undefined,
-      settings: this.normalizePlanningSettings(this.safeParseSettings(row.settings)),
-      platformStyle: row.platform_style || 'generic',
+      writingStyle: constitution.writingStyle,
+      settings: constitutionSettings(this.normalizePlanningSettings(this.safeParseSettings(row.settings)), constitution),
+      platformStyle: constitution.targetPlatform,
       creationSource,
       targetPlatform,
       currentWorkflowStage,
@@ -279,7 +261,7 @@ export class ProjectService {
     for (const legacyKey of ['perChapterTarget', 'wordsPerChapter', 'chapterWords', 'volumeCount', 'chaptersPerVolume', 'totalChapters', 'chapterCount']) {
       delete normalized[legacyKey];
     }
-    normalized.chapterWordRange = { min: 3200, max: 4000 };
+
     normalized.structurePlanning = 'dynamic_by_story_rhythm';
     return normalized;
   }
@@ -290,7 +272,4 @@ export class ProjectService {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
 
-  private stringifyJsonValue(value: string | Record<string, unknown>): string {
-    return typeof value === 'string' ? value : JSON.stringify(value);
-  }
 }

@@ -1,3 +1,5 @@
+import { qualityIssue } from '../modules/writing-quality/quality-issue';
+import { readConstitution, constitutionSettings } from '../modules/project/creative-constitution';
 import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { randomUUID, createHash } from 'crypto';
 import { DatabaseService } from '../database/database.service';
@@ -346,25 +348,15 @@ export class StateItemService {
     const db = this.databaseService.getDb();
     const project = db.prepare('SELECT title, type, target_words, target_platform, platform_style, writing_style, settings FROM projects WHERE id = ?').get(projectId) as any;
     if (!project) throw new Error(`项目 ${projectId} 不存在`);
-    let projectSettings: Record<string, unknown> = {};
-    try { projectSettings = JSON.parse(String(project.settings || '{}')); } catch { throw new Error('项目配置 settings 不是有效 JSON'); }
-    let writingStyle: unknown = project.writing_style || null;
-    if (typeof writingStyle === 'string') {
-      try { writingStyle = JSON.parse(writingStyle); } catch { /* 原始文本也是有效风格配置 */ }
-    }
+    const constitution = readConstitution(project);
+    const projectSettings = constitutionSettings(JSON.parse(project.settings || '{}'), constitution);
     const projectCard = {
-      title: project.title,
-      type: project.type,
-      targetWords: Number(project.target_words),
-      targetPlatform: project.target_platform || project.platform_style,
-      genre: projectSettings.genre || projectSettings.category || null,
-      targetAudience: projectSettings.targetAudience || projectSettings.targetReaders || null,
-      pov: projectSettings.pov || projectSettings.pointOfView || null,
-      writingStyle: projectSettings.style || writingStyle,
-      storyTone: projectSettings.storyTone || [],
-      writingStyles: projectSettings.writingStyle || [],
-      webNovelGenre: projectSettings.webNovelGenre || [],
-      recommendedPlatform: projectSettings.recommendedPlatform || null,
+      title: project.title, type: constitution.projectType,
+      targetWords: constitution.targetWords, targetPlatform: constitution.targetPlatform,
+      genre: constitution.category, targetAudience: constitution.targetAudience,
+      pov: constitution.pov, writingStyle: constitution.writingStyle,
+      storyTone: constitution.storyTone, writingStyles: constitution.writingStyle,
+      webNovelGenre: constitution.webNovelGenre, creativeConstitution: constitution,
       taboos: projectSettings.taboos || projectSettings.forbiddenContent || [],
       publishingRhythm: projectSettings.publishingRhythm || projectSettings.publishRhythm || null,
       planning: projectSettings,
@@ -1301,6 +1293,7 @@ export class StateItemService {
 
   private mapStateItem(row: any) {
     return {
+      qualityIssue: ['conflict', 'stale'].includes(row.status) ? qualityIssue({ id: row.id, projectId: row.project_id, entityId: row.target_id, stage: 'project', ruleId: row.state_key || row.target_type, severity: row.status === 'conflict' ? 'blocking' : 'high', message: row.summary || row.title, quote: row.content, source: 'state_items' }) : null,
       id: row.id,
       projectId: row.project_id,
       sourceType: row.source_type,

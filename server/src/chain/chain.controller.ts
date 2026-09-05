@@ -1,3 +1,4 @@
+import { readConstitution, updateConstitution, constitutionSettings } from '../modules/project/creative-constitution';
 ﻿/**
  * Chain Controller - Prompt Chain REST API
  *
@@ -517,7 +518,7 @@ export class ChainController {
       let response: { content: string };
       try {
         response = await this.realLLM.generate({
-          prompt, scenario, temperature: useTemp, maxTokens,
+          prompt, scenario, temperature: useTemp, maxTokens, deferQualityGate: true,
           metrics: {
             projectId: metricsProjectId,
             chapterIndex: params.metricsContext?.chapterIndex,
@@ -1102,7 +1103,7 @@ export class ChainController {
     }
     if (!qualityReport.pass) {
       const detail = [...qualityReport.missing, ...qualityReport.contradictions].slice(0, 4).join('；') || '审查器未确认正文执行本章详细大纲';
-      this.logger.warn(`本章大纲验收未完全通过，已保留正文并在矛盾tab标记：${detail}`);
+      throw new HttpException(`本章大纲一致性 Gate 未通过，正文未保存：${detail}`, 422);
     }
     // 跨章节学习闭环：把本章最终仍未满足的缺失/冲突归纳成通用避坑经验入库，
     // 供本项目后续章节生成时自动规避（第一章漏的教训，第二章首版就用上，避免反复犯同样错）。
@@ -1116,6 +1117,7 @@ export class ChainController {
       characterNames: this.getProjectCharacterNames(projectId),
       lessons: historicalLessons,
     });
+    content = await this.realLLM.validateGeneratedContent(projectId, chapterIndex, content, [outlineContract, storyContext, chapterTitle].filter(Boolean).join('\n'));
     return { content, qualityReport };
   }
 
@@ -1141,7 +1143,8 @@ export class ChainController {
         .prepare('SELECT target_platform,type,title,settings FROM projects WHERE id=?')
         .get(params.projectId) as any;
       if (!projRow) return content;
-      const profile = getPlatform(String(projRow.target_platform || ''));
+      const constitution = readConstitution(projRow);
+      const profile = getPlatform(constitution.targetPlatform);
       if (profile.id === 'generic') return content;
       const target = targetForLength(profile, String(projRow.type || ''));
       const characterNames = params.characterNames && params.characterNames.length
@@ -1151,9 +1154,9 @@ export class ChainController {
       try { settings = JSON.parse(String(projRow.settings || '{}')) || {}; } catch { settings = {}; }
       const tagText = [
         profile.label,
-        Array.isArray(settings.storyTone) ? settings.storyTone.join('、') : '',
-        Array.isArray(settings.writingStyle) ? settings.writingStyle.join('、') : '',
-        Array.isArray(settings.webNovelGenre) ? settings.webNovelGenre.join('、') : '',
+        constitution.storyTone.join('、'),
+        Array.isArray(constitution.writingStyle) ? constitution.writingStyle.join('、') : JSON.stringify(constitution.writingStyle),
+        constitution.webNovelGenre.join('、'),
       ].filter(Boolean).join('；');
       const maxRound = 2;
       for (let round = 1; round <= maxRound; round++) {
@@ -1313,10 +1316,9 @@ export class ChainController {
       if (!row) return {};
       let settings: Record<string, any> = {};
       try { settings = JSON.parse(String(row.settings || '{}')) || {}; } catch { /* 保持空配置 */ }
-      const platform = String(
-        row.target_platform || row.platform_style || settings.recommendedPlatform || settings.platform || '',
-      ).trim();
-      const storyType = String(row.type || '').trim();
+      const constitution = readConstitution(row);
+      const platform = constitution.targetPlatform;
+      const storyType = constitution.projectType;
       return { platform: platform || undefined, storyType: storyType || undefined };
     } catch {
       return {};
@@ -4215,11 +4217,13 @@ ${excludeRule}
       chapterCount: _legacyChapterCount,
       ...currentProjectSettings
     } = projectSettings;
-    const normalizedProjectSettings = {
-      ...currentProjectSettings,
-      chapterWordRange: { min: 3200, max: 4000 },
-      structurePlanning: 'dynamic_by_story_rhythm',
-    };
+    const constitution = updateConstitution({ type: dto.storyType || 'short_story', settings: '{}' }, {
+      type: dto.storyType || 'short_story', targetWords: configuredTargetWords,
+      targetPlatform: dto.platformStyle || 'generic', settings: currentProjectSettings,
+    });
+    constitution.revision = 1;
+    const normalizedProjectSettings = constitutionSettings({ ...currentProjectSettings,
+      structurePlanning: 'dynamic_by_story_rhythm' }, constitution);
     dto.settings = normalizedProjectSettings;
 
     const projectId = uuid();
@@ -6999,7 +7003,7 @@ ${enrichToneDirective}
       await this.executeCreateProjectSteps(projectId, {
         title: String(project.title || ''),
         storyType: String(project.type || 'short_story'),
-        platformStyle: String(project.target_platform || project.platform_style || 'generic'),
+        platformStyle: readConstitution(project).targetPlatform,
         targetWords: Number(project.target_words),
         selectedIdea,
         settings,
@@ -7586,16 +7590,17 @@ AI喜欢直接告诉读者角色什么感受。真人写法是：角色做了一
   private resolvePlatformToneDirective(projectId: string, dtoPlatformStyle?: string): string {
     try {
       const db = this.db.getDb();
-      const row = db.prepare('SELECT target_platform, settings FROM projects WHERE id = ?').get(projectId) as any;
+      const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
       if (!row) return '';
       const settings = this.safeExtractJson<Record<string, any>>(String(row.settings || '{}'), {});
-      const platformKey = String(dtoPlatformStyle || row.target_platform || settings.targetPlatform || settings.platform || '').trim().toLowerCase();
+      const constitution = readConstitution(row);
+      const platformKey = constitution.targetPlatform;
       // 长短篇在解析平台基准时即精确传入，让正文拿到对应体量的对话/段落/字数区间，而非长短篇合并区间
-      const isLong = this.isProjectLongNovel(projectId);
+      const isLong = constitution.projectType === 'long_novel';
       const platformDirective = platformKey ? this.buildPlatformStyleDirective(platformKey, isLong ? 'long_novel' : 'short_story') : '';
-      const tones = Array.isArray(settings.storyTone) ? settings.storyTone : [];
-      const styles = Array.isArray(settings.writingStyle) ? settings.writingStyle : [];
-      const genres = Array.isArray(settings.webNovelGenre) ? settings.webNovelGenre : [];
+      const tones = constitution.storyTone;
+      const styles = Array.isArray(constitution.writingStyle) ? constitution.writingStyle : [JSON.stringify(constitution.writingStyle)];
+      const genres = constitution.webNovelGenre;
       const toneParts = [
         tones.length > 0 ? '故事基调：' + tones.join('、') : '',
         styles.length > 0 ? '写作风格：' + styles.join('、') : '',
@@ -7612,7 +7617,7 @@ AI喜欢直接告诉读者角色什么感受。真人写法是：角色做了一
       return '【目标平台与风格定位 · 最高优先级，必须贯穿本次全部生成内容】\n'
         + (platformDirective ? platformDirective + '\n' : '')
         + (toneDirective ? toneDirective + '\n' : '')
-        + lengthNote + '\n\n';
+        + lengthNote + '\n【项目创作宪法】\n' + JSON.stringify(constitution) + '\n\n';
     } catch {
       return '';
     }

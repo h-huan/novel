@@ -1,3 +1,8 @@
+import { applyLocalPatches, compareRepair } from '../modules/writing-quality/local-repair';
+import { qualityGate } from '../modules/writing-quality/quality-issue';
+import { styleFingerprint } from '../modules/writing-quality/style-fingerprint';
+import { parseStageScore, stageJudgePrompt } from '../modules/writing-quality/stage-score';
+import type { QualityStage } from '../modules/writing-quality/quality-issue';
 import { currentCreationProjectId, expectsProjectId } from '../common/creation-context';
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI, { type ClientOptions } from 'openai';
@@ -199,6 +204,100 @@ export class RealLLMService implements ILLMService {
   }
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
+    const start = Date.now();
+    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex);
+    const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
+      '【项目唯一创作宪法；所有生成内容必须继承】', JSON.stringify(run.constitution), ...(run.lessons || [])].filter(Boolean).join('\n') , metrics: { ...request.metrics, runId: run.id } } : request;
+    let generatedOutput: string | undefined;
+    try {
+      const response = await this.generateInternal(enriched);
+      generatedOutput = response.content;
+      if (!request.deferQualityGate && run?.constitution && ['world', 'character', 'outline', 'chapter', 'refinement'].includes(run.stage)) {
+        response.content = await this.evaluateGeneratedRun(run, request, response.content);
+        generatedOutput = response.content;
+      }
+      if (run) this.metrics.finishRun(run.id, 'success', start, response.content, undefined, response.model);
+      return response;
+    } catch (error) {
+      if (run) this.metrics.finishRun(run.id, 'failed', start, generatedOutput, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  async validateGeneratedContent(projectId: string, chapterIndex: number, content: string, context: string): Promise<string> {
+    const start = Date.now();
+    const run = this.metrics.beginRun(projectId, 'writing', context, undefined, 'body_final_gate', chapterIndex);
+    try {
+      const checked = await this.evaluateGeneratedRun(run, { prompt: context, scenario: 'writing', metrics: { projectId, chapterIndex } }, content);
+      this.metrics.finishRun(run.id, 'success', start, checked);
+      return checked;
+    } catch (error) {
+      this.metrics.finishRun(run.id, 'failed', start, content, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  private async evaluateGeneratedRun(run: ReturnType<GenerationMetricsService['beginRun']>, request: LLMRequest, content: string): Promise<string> {
+    const before = await this.assessGeneratedRun(run, request, content);
+    const gate = this.metrics.saveRunScore(run.id, run.projectId!, before);
+    const repairable = this.metrics.runIsCurrent(run.id, run.projectId!) && before.status === 'evaluated' && before.issues.some(i => ['blocking', 'high'].includes(i.severity));
+    if (repairable) {
+      let candidate: string | null = null;
+      let after: typeof before | null = null;
+      let accepted = false;
+      let reason = '';
+      try {
+        const repaired = await this.generateInternal({ ...request, scenario: 'refinement', responseFormat: 'json_object',
+          prompt: '只修复列出的质量问题，不改变已确认事实、情节、人物身份和JSON结构。返回至多8处局部替换，每处original必须在原文中唯一匹配；总范围不得超过全文30%。输出JSON：{"patches":[{"original":"原文","replacement":"替换"}]}\n创作宪法：'
+            + JSON.stringify(run.constitution) + '\n已确认上下文：' + run.context
+            + '\n质量问题：' + JSON.stringify(before.issues) + '\n原文：' + content,
+          metrics: { ...request.metrics, runId: run.id, stepKey: 'quality_local_repair' },
+        });
+        candidate = applyLocalPatches(content, JSON.parse(repaired.content).patches, request.responseFormat === 'json_object');
+        after = await this.assessGeneratedRun(run, request, candidate);
+        ({ accepted, reason } = compareRepair(before, after));
+        if (!this.metrics.runIsCurrent(run.id, run.projectId!)) { accepted = false; reason = '生成期间创作配置或上下文变化，回滚'; }
+      } catch (error) { reason = error instanceof Error ? error.message : String(error); }
+      const repairId = this.metrics.recordRepair(run.id, run.projectId!, content, candidate, before, after, accepted, reason);
+      if (accepted && candidate !== null && after) {
+        this.metrics.saveRunScore(run.id, run.projectId!, after);
+        this.metrics.learnAcceptedRepair(run.projectId!, repairId, before, after);
+        return candidate;
+      }
+    }
+    if (!gate.passed) throw new Error('质量 Gate ' + gate.status + '：' + (before.issues.map(i => i.message).join('；') || '评审证据不足'));
+    return content;
+  }
+
+  private async assessGeneratedRun(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string) {
+    if (!run.constitution) throw new Error('缺少创作宪法');
+    const input = { projectId: run.projectId!, runId: run.id,
+      stage: run.stage as QualityStage, content, constitution: run.constitution };
+    let raw: unknown = null;
+    try {
+      const judged = await this.generateInternal({
+        prompt: stageJudgePrompt(content, run.context + '\n' + request.prompt
+          + (['chapter', 'refinement'].includes(run.stage)
+            ? '\n最近三章文体比较材料（仅依据提供范围比较人物声音、段落结构及叙述习惯；未提供的章节不可推断）：'
+              + JSON.stringify(run.previousChapters.slice(0, 3)) : ''), run.constitution, run.stage as QualityStage),
+        scenario: 'review', responseFormat: 'json_object', temperature: 0,
+        metrics: { ...request.metrics, runId: run.id, stepKey: 'quality_gate' },
+      });
+      raw = JSON.parse(judged.content);
+    } catch (error) {
+      const score = parseStageScore(null, input);
+      return score;
+    }
+    const score = parseStageScore(raw, input);
+    if (['chapter', 'refinement'].includes(run.stage)) {
+      const fingerprint = styleFingerprint({ ...input, previousChapters: run.previousChapters, characterNames: run.characterNames });
+      score.issues.push(...fingerprint.issues);
+      (score as any).styleFingerprint = fingerprint;
+    }
+    return score;
+  }
+
+  private async generateInternal(request: LLMRequest): Promise<LLMResponse> {
     const startTime = Date.now();
     const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'daily');
     if (!Number.isInteger(configuredMaxTokens) || configuredMaxTokens <= 0) {
@@ -406,6 +505,7 @@ export class RealLLMService implements ILLMService {
       const target = ctx?.targetWords ?? null;
       this.metrics.record({
         projectId: finalProjectId,
+        runId: ctx?.runId,
         chapterIndex: ctx?.chapterIndex ?? null,
         stepKey: ctx?.stepKey ?? null,
         scenario: request.scenario || 'daily',
@@ -435,6 +535,27 @@ export class RealLLMService implements ILLMService {
    * 用于 SSE 场景，避免长文本生成超时
    */
   async *generateStream(request: LLMRequest): AsyncGenerator<string> {
+    const start = Date.now();
+    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex);
+    const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
+      '【项目唯一创作宪法；所有生成内容必须继承】', JSON.stringify(run.constitution), ...(run.lessons || [])].filter(Boolean).join('\n') , metrics: { ...request.metrics, runId: run.id } } : request;
+    let output = '';
+    let status: 'success' | 'failed' | 'cancelled' = 'cancelled';
+    let reason: string | undefined;
+    try {
+      const guarded = !request.deferQualityGate && !!run?.constitution && ['world', 'character', 'outline', 'chapter', 'refinement'].includes(run.stage);
+      for await (const token of this.generateStreamInternal(enriched)) { output += token; if (!guarded) yield token; }
+      if (guarded && run) { output = await this.evaluateGeneratedRun(run, request, output); yield output; }
+      status = output.trim() ? 'success' : 'failed';
+      if (status === 'failed') reason = '模型返回空内容';
+    } catch (error) {
+      status = 'failed'; reason = error instanceof Error ? error.message : String(error); throw error;
+    } finally {
+      if (run) this.metrics.finishRun(run.id, status, start, output, reason);
+    }
+  }
+
+  private async *generateStreamInternal(request: LLMRequest): AsyncGenerator<string> {
     const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'daily');
     if (!Number.isInteger(configuredMaxTokens) || configuredMaxTokens <= 0) {
       throw new Error(`模型输出配置无效: scenario=${request.scenario || 'daily'} maxTokens=${String(request.maxTokens)}`);

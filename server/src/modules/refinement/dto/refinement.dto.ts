@@ -204,30 +204,32 @@ export interface PolishResult {
 }
 
 export interface InspectionResult {
-  overallScore: number;
+  overallScore: number | null;
+  evaluation: { status: 'not_evaluated' | 'partial'; reason: string };
+  dimensionEvidence: Record<string, { status: 'not_evaluated' | 'heuristic'; reason: string }>;
   dimensions: {
     /** 开头钩子 — 前500字的代入感+悬念张力 */
-    openingHook: number;
+    openingHook: number | null;
     /** 热血感 — 爽点密度/对抗张力/读起来是否"燃" */
-    passion: number;
+    passion: number | null;
     /** 短伏笔密度 — 2~3章回收密度 */
-    shortForeshadowingDensity: number;
+    shortForeshadowingDensity: number | null;
     /** 长伏笔密度 — 10章以上回收密度 */
-    longForeshadowingDensity: number;
+    longForeshadowingDensity: number | null;
     /** 章节结尾吸引力 — 钩子是否让人"非要看下一章" */
-    chapterEnding: number;
+    chapterEnding: number | null;
     /** 代入感 — 角色共鸣度 */
-    immersion: number;
+    immersion: number | null;
     /** 悬念密度 — 伏笔密度 */
-    suspenseDensity: number;
+    suspenseDensity: number | null;
     /** 反转力度 — 反转是否意外又合理 */
-    reversalPower: number;
+    reversalPower: number | null;
     /** 人物动机 — 行为逻辑 */
-    characterMotivation: number;
+    characterMotivation: number | null;
     /** 伏笔回收 — 回收率/及时性 */
-    foreshadowingRecovery: number;
+    foreshadowingRecovery: number | null;
     /** AI痕迹指数 0~100 (≤25过关, >40必降AI) */
-    aiTraceIndex: number;
+    aiTraceIndex: number | null;
   };
   /** 每项附1~3条具体改进建议 */
   suggestions: string[];
@@ -236,7 +238,7 @@ export interface InspectionResult {
   foreshadowingMisses: ForeshadowingMiss[];
   /** 确定性AI物理指纹检测结果（毫秒级，无需LLM） */
   aiFingerprints?: {
-    overallScore: number;
+    overallScore: number | null;
     parallelism: { score: number; count: number; examples: string[] };
     adjectiveDensity: { score: number; density: number; overLimitSentences: number };
     paragraphUniformity: { score: number; uniformGroups: number; avgVariance: number };

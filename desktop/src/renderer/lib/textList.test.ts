@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitToLines } from './textList';
+import { splitToLines, parseJsonToReadable } from './textList';
 
 describe('splitToLines', () => {
   it('按 、；/ 与换行拆分并去空', () => {
@@ -14,6 +14,6 @@ describe('splitToLines', () => {
     expect(splitToLines(undefined)).toEqual([]);
   });
   it('对象摘要输入取其 summary 字段', () => {
-    expect(splitToLines({ summary: 'a。b。' })).toEqual(['a。b。']);
+    expect(splitToLines(parseJsonToReadable({ summary: 'a。b。' }))).toEqual(['a。b。']);
   });
 });

@@ -20,7 +20,7 @@ describe('ConsistencyCheckService native SQLite acceptance', () => {
       CREATE TABLE consistency_checks (
         id TEXT PRIMARY KEY, project_id TEXT, check_type TEXT, status TEXT, message TEXT,
         severity TEXT, detected_at TEXT, chapter_index INTEGER, details TEXT, resolved INTEGER DEFAULT 0,
-        resolved_by TEXT, resolved_at TEXT, created_at TEXT
+        resolved_by TEXT, resolved_at TEXT, created_at TEXT, source TEXT DEFAULT 'deterministic'
       );
     `);
     localDb.prepare('INSERT INTO chapters VALUES (?,?,?,?,?)').run('c1', 'p1', 1, '主角发现禁术痕迹', 'o1');

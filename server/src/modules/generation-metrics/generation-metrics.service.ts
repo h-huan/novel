@@ -1,3 +1,6 @@
+import { aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
+import { qualityGate, qualityIssue } from '../writing-quality/quality-issue';
+import { readConstitution } from '../project/creative-constitution';
 /**
  * GenerationMetricsService — 全链路生成步骤遥测与"首版一次到位"自优化
  *
@@ -17,6 +20,7 @@ import * as crypto from 'crypto';
 
 /** 一次 LLM 调用的遥测输入 */
 export interface StepMetricInput {
+  runId?: string;
   projectId?: string | null;
   chapterIndex?: number | null;
   stepKey?: string | null;
@@ -101,6 +105,134 @@ export class GenerationMetricsService {
 
   constructor(private readonly databaseService: DatabaseService) {}
 
+  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null) {
+    const db = this.databaseService.getDb();
+    const row = projectId ? db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any : null;
+    if (projectId && !row) throw new Error('生成项目不存在');
+    const constitution = row ? readConstitution(row) : null;
+    const id = crypto.randomUUID();
+    const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+    const stageKey = `${scenario} ${stepKey || ''}`;
+    const stage = /world/.test(stageKey) ? 'world' : /character/.test(stageKey) ? 'character'
+      : /outline/.test(stageKey) ? 'outline' : /polish|refin|repair|de.?ai/.test(stageKey) ? 'refinement'
+      : /writ|body|chapter/.test(stageKey) ? 'chapter' : 'project';
+    db.prepare(`INSERT INTO generation_runs (id, project_id, stage, scenario, status, constitution_revision,
+      constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      id, projectId ?? null, stage, scenario, 'running', constitution?.revision ?? null,
+      constitution ? JSON.stringify(constitution) : null, digest(systemPrompt || ''), digest(prompt), new Date().toISOString());
+    const context = row ? this.qualityContext(projectId!) : '';
+    db.prepare('UPDATE generation_runs SET context_snapshot=?,context_version=?,prompt_version=?,chapter_index=? WHERE id=?').run(context, digest(prompt + context), digest((systemPrompt || '') + JSON.stringify(constitution)), chapterIndex ?? null, id);
+    const previousChapters = row ? db.prepare("SELECT id,content FROM chapters WHERE project_id=? AND content IS NOT NULL AND (? IS NULL OR chapter_index < ?) ORDER BY chapter_index DESC LIMIT 12").all(projectId!, chapterIndex ?? null, chapterIndex ?? null) as Array<{ id: string; content: string }> : [];
+    const characterNames = row ? (db.prepare('SELECT name FROM characters WHERE project_id=?').all(projectId!) as Array<{ name: string }>).map(c => c.name) : [];
+    const lessons = row ? (db.prepare("SELECT lesson FROM generation_lessons WHERE project_id=? AND category='verified_quality_repair' ORDER BY occurrence DESC,updated_at DESC LIMIT 8").all(projectId!) as Array<{ lesson: string }>).map(r => r.lesson) : [];
+    return { id, constitution, stage, context, projectId, previousChapters, characterNames, lessons };
+  }
+
+  private qualityContext(projectId: string): string {
+    const db = this.databaseService.getDb();
+    return JSON.stringify({
+      world: db.prepare('SELECT * FROM world_settings WHERE project_id=? ORDER BY id').all(projectId),
+      characters: db.prepare('SELECT * FROM characters WHERE project_id=? ORDER BY id').all(projectId),
+      outlines: db.prepare('SELECT * FROM outlines WHERE project_id=? ORDER BY id').all(projectId),
+      confirmedState: db.prepare("SELECT * FROM state_items WHERE project_id=? AND status='confirmed' ORDER BY id").all(projectId),
+    });
+  }
+
+  runIsCurrent(runId: string, projectId: string): boolean {
+    const db = this.databaseService.getDb();
+    const run = db.prepare('SELECT constitution_json,context_snapshot FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
+    const row = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
+    return !!run && !!row && run.constitution_json === JSON.stringify(readConstitution(row)) && run.context_snapshot === this.qualityContext(projectId);
+  }
+
+  finishRun(id: string, status: 'success' | 'failed' | 'cancelled', started: number, output?: string, error?: string, model?: string) {
+    this.databaseService.getDb().prepare(`UPDATE generation_runs SET status=?, finished_at=?, duration_ms=?,
+      output_text=?, error=?, model=? WHERE id=? AND status='running'`).run(
+      status, new Date().toISOString(), Date.now() - started, output ?? null, error ?? null, model ?? null, id);
+  }
+
+  saveRunScore(runId: string, projectId: string, score: StageScore) {
+    const db = this.databaseService.getDb();
+    if (!this.runIsCurrent(runId, projectId)) {
+      score.issues.push(qualityIssue({ projectId, runId, stage: score.stage, ruleId: 'constitution.stale_context',
+        severity: 'blocking', message: '生成期间创作宪法或前序资料已变化，必须基于最新上下文重新生成', source: 'version_gate' }));
+      score.overallScore = null;
+    }
+    const gate = qualityGate(score.issues, score.status === 'evaluated');
+    const now = new Date().toISOString();
+    db.prepare('UPDATE generation_runs SET gate_status=? WHERE id=?').run(gate.status, runId);
+    db.prepare(`INSERT INTO writing_quality_reports (id,project_id,source_type,source_id,scope,title,summary,overall_level,overall_score,payload,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, overall_score=excluded.overall_score,
+      overall_level=excluded.overall_level, summary=excluded.summary, updated_at=excluded.updated_at`).run(
+      runId, projectId, 'generation_run', runId, score.stage, score.stage + '质量评分', gate.status,
+      gate.passed ? (score.overallScore !== null && score.overallScore >= 90 ? 'high' : 'medium') : 'low', score.overallScore, JSON.stringify({ stageScore: score, gate }), now, now);
+    db.prepare("UPDATE writing_quality_issues SET status='superseded',updated_at=? WHERE report_id=? AND status='open'").run(now, runId);
+    db.prepare(`UPDATE writing_quality_reports SET chapter_id=(SELECT c.id FROM chapters c JOIN generation_runs r
+      ON c.project_id=r.project_id AND c.chapter_index=r.chapter_index WHERE r.id=? LIMIT 1) WHERE id=?`).run(runId, runId);
+    for (const issue of score.issues) db.prepare(`INSERT INTO writing_quality_issues
+      (id,report_id,project_id,issue_type,severity,title,summary,evidence,payload,status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,payload=excluded.payload,updated_at=excluded.updated_at`).run(
+      issue.id, runId, projectId, issue.ruleId, issue.severity, issue.message, issue.message,
+      issue.evidence.quote, JSON.stringify({ qualityIssue: issue }), issue.status, now, now);
+    db.prepare('UPDATE writing_quality_issues SET chapter_id=(SELECT chapter_id FROM writing_quality_reports WHERE id=?) WHERE report_id=?').run(runId, runId);
+    return gate;
+  }
+
+  learnAcceptedRepair(projectId: string, repairId: string, before: StageScore, after: StageScore) {
+    const db = this.databaseService.getDb();
+    const repair = db.prepare("SELECT status FROM generation_repairs WHERE id=? AND project_id=?").get(repairId, projectId) as any;
+    if (repair?.status !== 'accepted' || after.status !== 'evaluated') return;
+    for (const rule of [...new Set(before.issues.map(issue => issue.ruleId))]) {
+      if (after.issues.some(issue => issue.ruleId === rule && issue.status === 'open')) continue;
+      const lesson = '已验证策略：遇到 ' + rule + ' 问题，只替换原文中唯一匹配的局部片段；对照创作宪法复检全部维度，无退步且问题消除才接受。';
+      const now = new Date().toISOString();
+      db.prepare(`INSERT INTO generation_lessons (id,project_id,category,lesson,occurrence,last_chapter_index,created_at,updated_at)
+        VALUES (?,?,?,?,1,0,?,?) ON CONFLICT(project_id,lesson) DO UPDATE SET occurrence=occurrence+1,updated_at=excluded.updated_at`).run(
+        crypto.randomUUID(), projectId, 'verified_quality_repair', lesson, now, now);
+    }
+  }
+
+  recordRepair(runId: string, projectId: string, beforeText: string, afterText: string | null,
+    before: StageScore, after: StageScore | null, accepted: boolean, reason: string) {
+    const id = crypto.randomUUID();
+    const db = this.databaseService.getDb();
+    db.prepare(`INSERT INTO generation_repairs (id,run_id,project_id,stage,status,strategy,before_text,after_text,
+      before_score,after_score,before_report,after_report,reason,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, runId, projectId, before.stage, accepted ? 'accepted' : 'rolled_back', 'unique_local_replacement',
+      beforeText, afterText, before.overallScore, after?.overallScore ?? null, JSON.stringify(before), after ? JSON.stringify(after) : null, reason, new Date().toISOString());
+    return id;
+  }
+
+  getCockpit(projectId: string) {
+    const db = this.databaseService.getDb();
+    const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
+    const currentConstitution = project ? JSON.stringify(readConstitution(project)) : null;
+    const runs = db.prepare(`SELECT r.*, q.payload AS quality_payload, q.overall_score, (SELECT SUM(m.total_tokens) FROM generation_step_metrics m WHERE m.run_id=r.id) AS total_tokens FROM generation_runs r
+      LEFT JOIN writing_quality_reports q ON q.id=r.id WHERE r.project_id=? ORDER BY r.started_at DESC LIMIT 100`).all(projectId) as any[];
+    const issues = db.prepare("SELECT * FROM writing_quality_issues WHERE project_id=? AND status='open' ORDER BY created_at DESC LIMIT 100").all(projectId);
+    const scores: Record<string, any> = {};
+    for (const run of runs) {
+      const payload = run.quality_payload ? JSON.parse(run.quality_payload) : {};
+      run.score = payload.stageScore ?? null;
+      run.currentConstitution = run.constitution_json === currentConstitution;
+      if (!(run.stage in scores)) scores[run.stage] = run.currentConstitution ? run.score : null;
+      delete run.quality_payload; delete run.output_text; delete run.constitution_json; delete run.context_snapshot;
+    }
+    scores.project = aggregateProjectScore(scores);
+    const repairs = db.prepare('SELECT id,stage,status,reason,before_score,after_score,before_text,after_text FROM generation_repairs WHERE project_id=? ORDER BY created_at DESC LIMIT 100').all(projectId);
+    return { runs, issues, scores, repairs, scope: '最近100次生成与100条未解决问题',
+      bottlenecks: runs.filter(r => r.status === 'running' || r.status === 'failed' || r.gate_status === 'blocked'),
+      trend: runs.filter(r => r.score).map(r => ({ at: r.started_at, stage: r.stage, score: r.score.overallScore, coverage: r.score.coverage })).reverse() };
+  }
+
+  getRuns(projectId?: string, limit = 50) {
+    const db = this.databaseService.getDb();
+    const bounded = Math.max(1, Math.min(200, Number.isFinite(limit) ? Math.floor(limit) : 50));
+    return projectId
+      ? db.prepare('SELECT * FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT ?').all(projectId, bounded)
+      : db.prepare('SELECT * FROM generation_runs ORDER BY started_at DESC LIMIT ?').all(bounded);
+  }
+
   /** 与正文 generatedNarrativeWordCount 同口径：汉字数 + 英文词数。 */
   static countWords(text: string | null | undefined): number {
     if (!text) return 0;
@@ -130,8 +262,8 @@ export class GenerationMetricsService {
             (id, project_id, chapter_index, step_key, scenario, model_version, attempt, phase,
              status, fail_reason, duration_ms, prompt_chars, output_chars, output_words,
              target_words, deficit_words, prompt_tokens, completion_tokens, total_tokens,
-             internal_retries, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             internal_retries, created_at, run_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           id,
@@ -154,7 +286,7 @@ export class GenerationMetricsService {
           input.completionTokens ?? null,
           input.totalTokens ?? null,
           Math.max(0, Math.floor(input.internalRetries ?? 0)),
-          now,
+          now, input.runId ?? null,
         );
     } catch (err) {
       this.logger.debug?.(`record 埋点失败（不影响生成）: ${err instanceof Error ? err.message : String(err)}`);

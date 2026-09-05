@@ -10,7 +10,7 @@ export class CreateProjectDto {
 
   @IsOptional()
   @IsIn(['short_story', 'long_novel', 'script'])
-  type?: ProjectType = 'long_novel';
+  type?: ProjectType;
 
   @IsOptional()
   @IsIn(['active', 'archived', 'completed'])
@@ -32,7 +32,7 @@ export class CreateProjectDto {
   @IsOptional()
   @IsString()
   @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
-  platformStyle?: string = 'generic';
+  platformStyle?: string;
 
   @IsOptional()
   settings?: string | Record<string, unknown>;
@@ -55,7 +55,7 @@ export class CreateProjectDto {
   /** 目标平台 */
   @IsOptional()
   @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
-  targetPlatform?: TargetPlatform = 'generic';
+  targetPlatform?: TargetPlatform;
 
   /** 当前创作阶段 */
   @IsOptional()

@@ -139,17 +139,17 @@ export class RefinementController {
 
   @Post('quality/logic')
   checkLogic(@Body() dto: QualityInspectDto) {
-    return this.qualityInspection.checkLogic(dto.content, dto.context);
+    return { status: 'not_evaluated', reason: '尚未完成有证据的上下文语义评审', issues: this.qualityInspection.checkLogic(dto.content, dto.context) };
   }
 
   @Post('quality/character-drift')
   checkCharacterDrift(@Body() dto: QualityInspectDto) {
-    return this.qualityInspection.checkCharacterDrift(dto.content, dto.context);
+    return { status: 'not_evaluated', reason: '尚未完成有证据的上下文语义评审', issues: this.qualityInspection.checkCharacterDrift(dto.content, dto.context) };
   }
 
   @Post('quality/foreshadowing')
   checkForeshadowing(@Body() dto: QualityInspectDto) {
-    return this.qualityInspection.checkForeshadowing(dto.content, dto.context);
+    return { status: 'not_evaluated', reason: '尚未完成有证据的上下文语义评审', issues: this.qualityInspection.checkForeshadowing(dto.content, dto.context) };
   }
 
   @Get('quality/standards')

@@ -1,3 +1,4 @@
+import { QualityCockpit } from '../components/quality/QualityCockpit';
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -362,6 +363,7 @@ const WritingQualityPage: React.FC = () => {
 
   const severityColor = (severity: string) => ({
     critical: 'var(--color-danger)',
+    blocking: 'var(--color-danger)',
     high: '#f97316',
     medium: 'var(--color-warning)',
     low: 'var(--color-success)',
@@ -391,6 +393,7 @@ const WritingQualityPage: React.FC = () => {
 
   return (
     <div style={styles.container}>
+      {projectId && <QualityCockpit projectId={projectId} />}
       <div style={styles.header}>
         <div>
           <div style={styles.title}>写作质量诊断中心</div>

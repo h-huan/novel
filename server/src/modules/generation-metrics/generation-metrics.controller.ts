@@ -5,7 +5,7 @@
  *   GET /generation-metrics/recent?projectId=&limit=20   最近卡点明细
  *   GET /generation-metrics/calibration?projectId=       字数产出比自校准结果
  */
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, BadRequestException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { GenerationMetricsService } from './generation-metrics.service';
 
@@ -13,6 +13,17 @@ import { GenerationMetricsService } from './generation-metrics.service';
 @Controller('generation-metrics')
 export class GenerationMetricsController {
   constructor(private readonly metrics: GenerationMetricsService) {}
+
+  @Get('cockpit')
+  cockpit(@Query('projectId') projectId: string) {
+    if (!projectId) throw new BadRequestException('缺少项目ID');
+    return this.metrics.getCockpit(projectId);
+  }
+
+  @Get('runs')
+  runs(@Query('projectId') projectId?: string, @Query('limit') limit?: string) {
+    return { items: this.metrics.getRuns(projectId, Number(limit) || 50) };
+  }
 
   @Get('flow')
   flow(@Query('projectId') projectId?: string, @Query('days') days?: string) {

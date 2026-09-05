@@ -86,6 +86,8 @@ export interface ModelSpec {
 
 /** LLM 调用请求 */
 export interface LLMRequest {
+  /** Internal only: partial body fragments are evaluated after assembly. */
+  deferQualityGate?: boolean;
   prompt: string;
   systemPrompt?: string;
   model?: string;
@@ -114,6 +116,7 @@ export interface LLMRequest {
    * 不传时按 scenario 自动归类，仍会被埋点覆盖。
    */
   metrics?: {
+    runId?: string;
     projectId?: string | null;
     chapterIndex?: number | null;
     stepKey?: string | null;

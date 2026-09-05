@@ -44,7 +44,7 @@ describe('QualityInspectionService', () => {
 
     it('should return default results when no characters provided', () => {
       const issues = service.checkCharacterDrift('测试内容');
-      expect(issues.length).toBeGreaterThan(0); // default sample results
+      expect(issues).toEqual([]);
     });
 
     it('each issue should have expected fields', () => {
@@ -64,7 +64,7 @@ describe('QualityInspectionService', () => {
 
     it('should return default results when no clues provided', () => {
       const misses = service.checkForeshadowing('测试内容');
-      expect(misses.length).toBeGreaterThan(0);
+      expect(misses).toEqual([]);
     });
   });
 
@@ -80,6 +80,7 @@ describe('QualityInspectionService', () => {
       const values = Object.values(dimensions);
       expect(values.length).toBeGreaterThan(0);
       for (const [key, score] of Object.entries(dimensions)) {
+        if (score === null) continue;
         expect(typeof score).toBe('number');
         if (key === 'aiTraceIndex') {
           // AI痕迹指数0~100, 其余维度0~10
@@ -110,8 +111,8 @@ describe('QualityInspectionService', () => {
 
     it('overallScore should be between 0 and 100', () => {
       const result = service.inspect('测试内容');
-      expect(result.overallScore).toBeGreaterThanOrEqual(0);
-      expect(result.overallScore).toBeLessThanOrEqual(100);
+      expect(result.overallScore).toBeNull();
+      expect(result.evaluation.status).toBe('not_evaluated');
     });
 
     it('should accept context with characters and foreshadowing clues', () => {
@@ -119,7 +120,7 @@ describe('QualityInspectionService', () => {
         characters: [{ name: '陆川', traits: ['勇敢'] }],
         foreshadowingClues: ['刀'],
       });
-      expect(result.overallScore).toBeGreaterThanOrEqual(0);
+      expect(result.overallScore).toBeNull();
     });
   });
 });

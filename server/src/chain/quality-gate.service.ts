@@ -60,8 +60,8 @@ export class QualityGateService {
       totalWeight += criterion.weight;
     }
 
-    const finalScore = totalWeight > 0 ? Math.round(totalScore / totalWeight) : 100;
-    const passed = finalScore >= config.threshold;
+    const finalScore = totalWeight > 0 ? Math.round(totalScore / totalWeight) : 0;
+    const passed = details.length > 0 && finalScore >= config.threshold && !details.some(d => d.level === 'CRITICAL');
 
     return {
       passed,
@@ -112,8 +112,8 @@ export class QualityGateService {
       totalWeight += criterion.weight;
     }
 
-    const finalScore = totalWeight > 0 ? Math.round(totalScore / totalWeight) : 100;
-    const passed = finalScore >= config.threshold;
+    const finalScore = totalWeight > 0 ? Math.round(totalScore / totalWeight) : 0;
+    const passed = details.length > 0 && finalScore >= config.threshold && !details.some(d => d.level === 'CRITICAL');
 
     return {
       passed,
@@ -367,12 +367,11 @@ ${output.substring(0, 3000)}
         temperature: 0.3,
       });
 
-      let parsed: any = {};
-      try { parsed = JSON.parse(response.content.replace(/```json\n?|```\n?/g, '').trim()); } catch {
-        parsed = { score: 70, reason: '无法解析评审结果' };
+      const parsed = JSON.parse(response.content.replace(/```json\n?|```\n?/g, '').trim());
+      if (typeof parsed.score !== 'number' || !Number.isFinite(parsed.score) || parsed.score < 0 || parsed.score > 100 || typeof parsed.reason !== 'string' || !parsed.reason.trim()) {
+        throw new Error('评审证据不足或分数无效');
       }
-
-      const score = Math.min(100, Math.max(0, parsed.score || 70));
+      const score = parsed.score;
       const level: GateLevel = score >= criterion.minScore
         ? 'INFO'
         : score >= criterion.minScore * 0.7
@@ -422,8 +421,4 @@ ${output.substring(0, 3000)}
     return merged;
   }
 
-  private async simulateDelay(min: number, max: number): Promise<void> {
-    const delay = Math.floor(Math.random() * (max - min + 1)) + min;
-    return new Promise((resolve) => setTimeout(resolve, delay));
-  }
 }

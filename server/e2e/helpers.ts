@@ -1,6 +1,6 @@
 import { APIRequestContext, test } from '@playwright/test';
 
-const BASE = 'http://127.0.0.1:3100/api/v1';
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1`;
 
 /** Generate a unique project title using timestamp */
 export function uniqueTitle(prefix = 'test'): string {
