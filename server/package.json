@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude **/*.acceptance.spec.ts",
     "test:e2e": "npm run build && playwright test --config=e2e/playwright.config.ts",
-    "test:acceptance": "vitest run --config vitest.acceptance.config.ts",
+    "test:acceptance": "vitest run --config vitest.acceptance.config.mts",
     "lint": "tsc --noEmit --pretty false",
     "clean": "rm -rf dist"
   },

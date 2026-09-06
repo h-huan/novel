@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+const configDirectory = fileURLToPath(new URL('.', import.meta.url));
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
 
@@ -5,7 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // Mock node:sqlite for vitest (Vite can't resolve Node built-ins)
-      "node:sqlite": resolve(__dirname, "src/__mocks__/node-sqlite.ts"),
+      "node:sqlite": resolve(configDirectory, "src/__mocks__/node-sqlite.ts"),
     },
   },
   test: {
@@ -14,7 +16,7 @@ export default defineConfig({
     root: ".",
 
     alias: {
-      "@novel/shared": resolve(__dirname, "packages/shared/src"),
+      "@novel/shared": resolve(configDirectory, "packages/shared/src"),
     },
 
     exclude: [

@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+const configDirectory = fileURLToPath(new URL('.', import.meta.url));
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -24,8 +26,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src/renderer'),
-      '@novel/shared': path.resolve(__dirname, '../server/shared/src'),
+      '@': path.resolve(configDirectory, './src/renderer'),
+      '@novel/shared': path.resolve(configDirectory, '../server/shared/src'),
     },
   },
 });

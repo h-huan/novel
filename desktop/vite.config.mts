@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+const configDirectory = fileURLToPath(new URL('.', import.meta.url));
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -9,7 +11,7 @@ import { readFileSync, existsSync } from 'fs';
 // ============================================================
 function getBackendPort(): string {
   try {
-    const portFile = path.resolve(__dirname, '..', 'server', '.port');
+    const portFile = path.resolve(configDirectory, '..', 'server', '.port');
     if (existsSync(portFile)) {
       const port = readFileSync(portFile, 'utf8').trim();
       if (/^\d+$/.test(port)) {
@@ -64,7 +66,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src/renderer'),
+      '@': path.resolve(configDirectory, 'src/renderer'),
     },
   },
   root: '.',

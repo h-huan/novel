@@ -30,7 +30,7 @@
 # server 目录
 npm run build
 npx vitest run src/modules/project/creative-constitution.spec.ts src/modules/project/project.service.spec.ts src/modules/writing-quality/stage-score.spec.ts src/modules/writing-quality/quality-issue.spec.ts src/modules/writing-quality/local-repair.spec.ts src/modules/writing-quality/style-fingerprint.spec.ts src/modules/refinement/quality-inspection.service.spec.ts src/chain/quality-gate.service.spec.ts src/chain/real-llm.structured-output.spec.ts src/modules/writing-quality/writing-quality.supersede.spec.ts
-npx vitest run --config vitest.acceptance.config.ts src/acceptance/creative-constitution.acceptance.spec.ts src/acceptance/generation-runs.acceptance.spec.ts src/acceptance/quality-repair.acceptance.spec.ts src/state/consistency-check.service.acceptance.spec.ts src/chain/long-novel-configured-plan.acceptance.spec.ts
+npx vitest run --config vitest.acceptance.config.mts src/acceptance/creative-constitution.acceptance.spec.ts src/acceptance/generation-runs.acceptance.spec.ts src/acceptance/quality-repair.acceptance.spec.ts src/state/consistency-check.service.acceptance.spec.ts src/chain/long-novel-configured-plan.acceptance.spec.ts
 $env:E2E_PORT='33193'
 npx playwright test --config=e2e/playwright.config.ts creative-constitution quality-evidence project-crud
 # desktop 目录

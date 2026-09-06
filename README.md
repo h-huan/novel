@@ -99,7 +99,7 @@ novel-ai-platform/
 │   │       └── components/        # 20 个可复用组件
 │   ├── e2e/                       # Playwright E2E 测试
 │   ├── electron-builder.yml       # 打包配置
-│   ├── vitest.config.ts           # 单元测试配置
+│   ├── vitest.config.mts           # 单元测试配置
 │   ├── playwright.config.ts       # E2E 测试配置
 │   └── package.json
 ├── server/                        # NestJS 后端服务
@@ -669,7 +669,7 @@ novel-ai-platform/
 │   │       └── components/        # 20 个可复用组件
 │   ├── e2e/                       # Playwright E2E 测试
 │   ├── electron-builder.yml       # 打包配置
-│   ├── vitest.config.ts           # 单元测试配置
+│   ├── vitest.config.mts           # 单元测试配置
 │   ├── playwright.config.ts       # E2E 测试配置
 │   └── package.json
 ├── server/                        # NestJS 后端服务
