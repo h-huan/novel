@@ -28,14 +28,18 @@ test('workbench shows failures before any project exists and reports unknown his
   await page.route('**/api/v1/module-standards/status', route => route.fulfill({ json: { data: { running: [] } } }));
   await page.route('**/api/v1/platform-analytics/overview?**', route => route.fulfill({ json: { data: {
     generationRuns: { available: true, total: 60, failed: 60, succeeded: 0, running: 0, cancelled: 0,
-      recent: [{ id: 'failed', label: '题材/灵感生成', status: 'failed', started_at: '2026-09-06T04:00:00Z',
-        error: '灵感场景未配置模型，请前往设置', standards: {} }] },
+      recent: Array.from({ length: 20 }, (_, i) => ({ id: 'failed-' + i, label: '题材/灵感生成', status: 'failed', started_at: '2026-09-06T04:00:00Z',
+        error: '灵感场景未配置模型，请前往设置', standards: {} })) },
   } } }));
   await page.goto('/e2e/quality-harness.html?workbench');
   const runs = page.getByRole('region', { name: '生成运行记录' });
   await expect(runs.getByText(/共 60 次/)).toBeVisible();
   await expect(runs.getByText('灵感场景未配置模型，请前往设置')).toBeVisible();
-  await expect(runs.getByText(/未记录，不能据此认定已执行/)).toBeVisible();
+  await expect(runs.getByText(/此历史记录未保存标准版本/)).toBeVisible();
+  await expect(runs.getByText('本次展示范围内重复 20 次')).toBeVisible();
+  await expect(runs.getByText('灵感场景未配置模型，请前往设置')).toHaveCount(1);
+  await runs.getByText('展开 20 条原始记录').click();
+  await expect(runs.getByText(/failed-19/)).toBeVisible();
   expect(errors).toEqual([]);
   await runs.screenshot({ path: testInfo.outputPath('workbench-failures.png') });
 });

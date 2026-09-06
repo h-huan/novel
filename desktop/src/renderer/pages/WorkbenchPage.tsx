@@ -14,6 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { groupGenerationRuns } from '../lib/generationRunGroups';
 import { openProject } from '../lib/openProject';
 import SearchableSelect, { SearchOption } from '../components/common/SearchableSelect';
 import { RadarChart, Donut, GaugeRing, TrendChart, HBars } from '../components/common/charts';
@@ -232,12 +233,15 @@ const WorkbenchPage: React.FC = () => {
           <p>共 {data.generationRuns.total} 次 · 完成 {data.generationRuns.succeeded} 次 · 失败 {data.generationRuns.failed} 次 · 进行中 {data.generationRuns.running} 次 · 取消 {data.generationRuns.cancelled} 次</p>
           <p style={{ color: 'var(--color-text-muted)' }}>包含创建作品前的灵感生成与模型配置预检；预检失败不计为模型调用或已消耗 Token。尚未生成作品时，作品质量评分保持未评估。</p>
           {data.generationRuns.recent.length === 0 ? <p>当前范围内暂无生成记录</p> : <details open={data.generationRuns.failed > 0}>
-            <summary>最近生成及失败原因（最多 20 次）</summary>
-            {data.generationRuns.recent.map((r: any) => <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
+            <summary>最近生成及失败原因（最多 20 条记录，相同失败合并展示）</summary>
+            {groupGenerationRuns(data.generationRuns.recent).map(({ run: r, records, firstAt, lastAt }) => <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
               <strong>{r.label} · {({ failed: '失败', running: '进行中', success: '完成', cancelled: '已取消' } as Record<string,string>)[r.status] || r.status}</strong>
-              <span style={{ marginLeft: 12 }}>{new Date(r.started_at).toLocaleString()}</span>
+              {records.length > 1 && <strong style={{ marginLeft: 12 }}>本次展示范围内重复 {records.length} 次</strong>}
+              <p>记录时间：{new Date(firstAt).toLocaleString()}{firstAt !== lastAt && ` 至 ${new Date(lastAt).toLocaleString()}`}</p>
               {r.error && <p style={{ color: 'var(--color-danger)', overflowWrap: 'anywhere' }}>{r.error}</p>}
-              <p>执行标准：{r.standards?.modules?.length ? r.standards.modules.map((s: any) => `${s.key} v${s.version}（基线 ${s.baseline}）`).join('、') : '未记录，不能据此认定已执行'}</p>
+              {r.error?.includes('未配置模型') && <button style={linkBtn} onClick={() => navigate('/settings')}>前往模型配置</button>}
+              <p>标准快照：{r.standards?.modules?.length ? r.standards.modules.map((s: any) => `${s.key} v${s.version}（基线 ${s.baseline}）`).join('、') : '此历史记录未保存标准版本；不代表当前标准未启用'}</p>
+              {records.length > 1 && <details><summary>展开 {records.length} 条原始记录</summary>{records.map(record => <p key={record.id}>{new Date(record.started_at).toLocaleString()} · {record.id}</p>)}</details>}
             </div>)}
           </details>}
         </>}
