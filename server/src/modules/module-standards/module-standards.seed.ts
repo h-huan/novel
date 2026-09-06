@@ -14,7 +14,7 @@
  * ModuleStandardsService 启动时若发现代码基线版本高于库内记录，会用新基线更新当前标准并把旧版归档
  * （trigger=seed_upgrade），保证"改了标准代码、重启即生效且留发展历程"，不必等自归纳周期。
  */
-export const SEED_BASELINE_VERSION = 3;
+export const SEED_BASELINE_VERSION = 4;
 
 export interface SeedModuleStandard {
   module_key: string;
@@ -33,6 +33,30 @@ export interface SeedModuleStandard {
 
 export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
   {
+    module_key: 'quality_loop', module_name: '小说质量闭环', category: 'crosscut',
+    scenarios: ['idea_generate', 'world_building', 'character_design', 'outline', 'writing', 'refinement', 'review'],
+    business_tables: ['generation_runs', 'writing_quality_reports', 'writing_quality_issues', 'generation_repairs', 'generation_lessons'],
+    purpose: '将项目唯一创作约束、证据评分、阻断、局部修复及真实学习贯通。',
+    steps: [
+      { name: '继承约束', goal: '以 Creative Constitution 为权威，读取长短篇、平台、字数、分类、基调、风格、流派、POV及前序事实' },
+      { name: '逐维评审', goal: '各维分数附逐字证据，未知返回 null，Blocking 不被总分抵消' },
+      { name: '局部修复', goal: 'Issue→Repair→Recheck→Compare→Accept/Rollback，只接受无维度退步的可验证改善' },
+    ],
+    requirements: [
+      '生成内容遵守创作宪法和当前任务输出结构；推荐平台不得改写用户选定平台',
+      '评审结果缺上下文、引用或有效分数时标记未评估，不能用随机数、示例诊断或默认高分补齐',
+      '正文检查词汇、句式、跨段结构、人物声音及已有章节；只能评估实际提供的材料范围',
+    ],
+    rules: [
+      'Blocking 或评审证据不足阻断交付；配置或上下文变更使旧评审失效',
+      '局部替换至多八处、原文范围不超过30%；任一已评分维度退步、新增严重问题或复检不完整必须回滚',
+      '只从已接受的真实修复沉淀经验；标准版本和生成状态留痕，注入标准不等于内容已通过验收',
+    ],
+    quality_bar: '阶段维度、证据、问题与复检结果可追溯；没有证据的结论不能认定通过。',
+    inputs: ['Creative Constitution', '已确认前序上下文', '当前生成结果'],
+    outputs: ['多维评分', 'QualityIssue', 'Gate结果', '修复前后比较'],
+  },
+  {
     module_key: 'inspiration',
     module_name: '灵感/题材发现',
     category: 'creation',
@@ -46,7 +70,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       { name: '平台适配', goal: '按目标平台读者口味校准题材卡的爽点与节奏取向' },
     ],
     requirements: [
-      '一次产出多张（默认≥4）方向明显不同的题材卡，不许只换措辞',
+      '严格按本次请求的数量输出题材卡；批次可拆为多次单条调用，单条调用只输出一个 ideas 元素，不许擅自扩为四张',
       '每张卡必须显式标注目标平台、长短篇、题材标签、预估字数与开篇钩子',
       '题材卡面就展示平台/基调/标签，创建项目时自动带入而非让用户重填',
     ],
@@ -56,7 +80,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       '题材母题（穿越/重生/系统等）是公共类型可复用，但具体设定、人物、世界观组合必须原创差异化，不得撞知名作品',
       '短篇题材卡聚焦单一高浓度冲突与反转；长篇题材卡必须预留可扩展的成长/势力/伏笔空间',
     ],
-    quality_bar: '每张卡钩子在一句话内制造信息差或欲望缺口；4 张卡的核心冲突互不重复；平台定位准确到一眼能判断发哪里。',
+    quality_bar: '每张卡钩子在一句话内制造信息差或欲望缺口；同批题材核心冲突互不重复；目标平台优先于模型推荐；配置缺失直接报告，不得误报为解析失败。',
     inputs: ['用户原始想法/关键词', '目标平台', '长短篇类型', '目标字数'],
     outputs: ['多张题材卡（钩子/冲突/卖点/平台/标签/预估字数）'],
   },
@@ -295,7 +319,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       'AI文检测四维：语言（同一情绪词500字内>5次、形容词堆砌、非人感比喻）、句型（过分规整、几个字一句地短句连用、节奏无呼吸）、逻辑（只抛梗不回收、吃书、违生活常识）、情感（标准化概括而非细节展现），命中必须给出具体降味改写',
       '正文重写并重新质检后，上一版报告问题自动不再计入“当前待改”；看板/任何统计都以最新报告为唯一当前事实来源',
     ],
-    quality_bar: '问题零漏报、定位到具体位置、修复路径可一键执行；同类问题在后续章节出现率逐章下降；七维画像与标签契合分能一眼看出短板维度，且数字与最新报告严格一致、不做历史累加。',
+    quality_bar: '问题必须定位到实际证据，证据不足标记未评估；不得承诺零漏报或伪造分数。评分与当前报告一致，修复效果必须复检后再认定。',
     inputs: ['正文', '大纲合同', '已确认状态/前文摘要', '作品标签（平台/基调/风格/流派/目标字数区间）'],
     outputs: ['质量报告', '分级问题清单（带七维标签）', '标签契合分 tagFit', '一致性矛盾与避坑经验'],
   },

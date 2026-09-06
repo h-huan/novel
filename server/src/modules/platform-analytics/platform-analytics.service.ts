@@ -152,6 +152,7 @@ export class PlatformAnalyticsService {
       wordCompliance,
       revision: this.revision(scope),
       process: processAgg,
+      generationRuns: this.generationRuns(days, scope),
       // 正文首版一次到位率 / 平均补字轮次 / 平均对齐回炉次数（解释少字补几轮、为何反复重写）
       bodyConvergence: this.bodyConvergence(days, scope),
       // 正文反复回炉的具体原因分布（硬红线规则号 / 大纲不符，大白话）
@@ -177,6 +178,24 @@ export class PlatformAnalyticsService {
       firstPassRate: k.firstPassRate,
       openIssues: k.currentIssues + k.currentConsistency,
     };
+  }
+
+  /** Generation attempts include failures before a provider call; never count these as LLM usage. */
+  private generationRuns(days: number, scope: Scope) {
+    const sc = this.scopeClause(scope);
+    const params = [new Date(Date.now() - days * DAY).toISOString(), ...sc.params];
+    try {
+      const totals = this.db().prepare(`SELECT COUNT(*) total,
+        SUM(status='failed') failed,SUM(status='running') running,SUM(status='success') succeeded,
+        SUM(status='cancelled') cancelled FROM generation_runs WHERE started_at>=?${sc.clause}`).get(...params) as any;
+      const recent = this.db().prepare(`SELECT id,project_id,scenario,status,error,started_at,gate_status,standards_snapshot
+        FROM generation_runs WHERE started_at>=?${sc.clause} ORDER BY started_at DESC LIMIT 20`).all(...params) as any[];
+      return { available: true, total: Number(totals.total), failed: Number(totals.failed), running: Number(totals.running),
+        succeeded: Number(totals.succeeded), cancelled: Number(totals.cancelled),
+        recent: recent.map(r => ({ ...r, label: scenarioLabel(r.scenario), standards: this.parseJson(r.standards_snapshot) })) };
+    } catch (error) {
+      return { available: false, error: '生成运行记录读取失败，请检查数据库迁移', recent: [] };
+    }
   }
 
   filterOptions() {

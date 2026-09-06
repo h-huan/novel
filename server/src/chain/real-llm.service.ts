@@ -199,13 +199,20 @@ export class RealLLMService implements ILLMService {
    * 在创建项目等关键操作前调用，提前提醒用户配置，而不是生成到一半才失败。
    */
   assertScenarioModelConfigured(scenario: string): { modelName: string; modelVersion: string } {
-    const routed = this.modelRouter.getModelForScenario(scenario || 'daily');
-    return { modelName: routed.modelName, modelVersion: routed.modelVersion };
+    try {
+      const routed = this.modelRouter.getModelForScenario(scenario || 'daily');
+      return { modelName: routed.modelName, modelVersion: routed.modelVersion };
+    } catch (error) {
+      const started = Date.now();
+      const run = this.metrics?.beginRun?.(currentCreationProjectId() ?? undefined, scenario, '模型配置预检', undefined, 'configuration_check');
+      if (run) this.metrics.finishRun(run.id, 'failed', started, undefined, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   }
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const start = Date.now();
-    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex);
+    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false);
     const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
       '【项目唯一创作宪法；所有生成内容必须继承】', JSON.stringify(run.constitution), ...(run.lessons || [])].filter(Boolean).join('\n') , metrics: { ...request.metrics, runId: run.id } } : request;
     let generatedOutput: string | undefined;
@@ -536,7 +543,7 @@ export class RealLLMService implements ILLMService {
    */
   async *generateStream(request: LLMRequest): AsyncGenerator<string> {
     const start = Date.now();
-    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex);
+    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false);
     const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
       '【项目唯一创作宪法；所有生成内容必须继承】', JSON.stringify(run.constitution), ...(run.lessons || [])].filter(Boolean).join('\n') , metrics: { ...request.metrics, runId: run.id } } : request;
     let output = '';
@@ -579,7 +586,7 @@ export class RealLLMService implements ILLMService {
       yield* this.callModelStream(
         modelName,
         request.prompt,
-        request.systemPrompt,
+        [request.systemPrompt, request.injectStandard === false ? '' : standardDirectiveCache.get(request.scenario || 'daily')].filter(Boolean).join('\n\n'),
         routedModel.temperature,
         configuredMaxTokens,
         timeout,

@@ -7,7 +7,11 @@
  * RealLLMService 只单向读取它——依赖方向为 ModuleStandardsService → RealLLMService（单向），无环。
  */
 
+import { createHash } from 'node:crypto';
+
 interface CacheStandard {
+  version?: number;
+  seed_baseline_version?: number;
   module_key: string;
   module_name: string;
   scenarios: string[];
@@ -25,9 +29,11 @@ class StandardDirectiveCacheClass {
   /** 横切标准（如原创性），对所有创作场景注入 */
   private crosscut = '';
   private rebuiltAt = 0;
+  private standards: CacheStandard[] = [];
 
   /** 由 ModuleStandardsService 用当前 active 标准全量重建。 */
   rebuild(standards: CacheStandard[]): void {
+    this.standards = structuredClone(standards);
     this.byScenario.clear();
     const crosscutParts: string[] = [];
     for (const s of standards) {
@@ -81,7 +87,18 @@ class StandardDirectiveCacheClass {
     return this.rebuiltAt;
   }
 
+  snapshot(scenario: string, enabled = true) {
+    const directive = enabled ? this.get(scenario) : '';
+    return {
+      enabled, available: !!directive,
+      digest: createHash('sha256').update(directive).digest('hex'),
+      modules: enabled ? this.standards.filter(s => s.scenarios.includes(scenario) || (s.category === 'crosscut' && scenario !== 'daily'))
+        .map(s => ({ key: s.module_key, version: s.version ?? null, baseline: s.seed_baseline_version ?? null })) : [],
+    };
+  }
+
   clear(): void {
+    this.standards = [];
     this.byScenario.clear();
     this.crosscut = '';
     this.rebuiltAt = 0;

@@ -22,3 +22,20 @@ test('shows missing evidence, blocking issues and repair rollback without fake t
   expect(errors).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('quality-cockpit.png'), fullPage: true });
 });
+test('workbench shows failures before any project exists and reports unknown historical standards', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.route('**/api/v1/module-standards/status', route => route.fulfill({ json: { data: { running: [] } } }));
+  await page.route('**/api/v1/platform-analytics/overview?**', route => route.fulfill({ json: { data: {
+    generationRuns: { available: true, total: 60, failed: 60, succeeded: 0, running: 0, cancelled: 0,
+      recent: [{ id: 'failed', label: '题材/灵感生成', status: 'failed', started_at: '2026-09-06T04:00:00Z',
+        error: '灵感场景未配置模型，请前往设置', standards: {} }] },
+  } } }));
+  await page.goto('/e2e/quality-harness.html?workbench');
+  const runs = page.getByRole('region', { name: '生成运行记录' });
+  await expect(runs.getByText(/共 60 次/)).toBeVisible();
+  await expect(runs.getByText('灵感场景未配置模型，请前往设置')).toBeVisible();
+  await expect(runs.getByText(/未记录，不能据此认定已执行/)).toBeVisible();
+  expect(errors).toEqual([]);
+  await runs.screenshot({ path: testInfo.outputPath('workbench-failures.png') });
+});

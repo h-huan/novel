@@ -197,6 +197,7 @@ export class ModuleStandardsService implements OnModuleInit {
     standardDirectiveCache.rebuild(
       rows.map(r => ({
         module_key: r.module_key, module_name: r.module_name, category: r.category,
+        version: r.version, seed_baseline_version: r.seed_baseline_version,
         scenarios: this.safeArr(r.scenarios), purpose: r.purpose, steps_json: r.steps_json,
         requirements_json: r.requirements_json, rules_json: r.rules_json, quality_bar: r.quality_bar,
       })) as any,

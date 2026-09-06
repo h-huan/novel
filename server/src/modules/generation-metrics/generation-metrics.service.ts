@@ -15,6 +15,7 @@ import { readConstitution } from '../project/creative-constitution';
  * 4) 埋点绝不影响主流程：record 内部全容错，任何异常都静默吞掉。
  */
 import { Injectable, Logger } from '@nestjs/common';
+import { standardDirectiveCache } from '../module-standards/standard-directive.cache';
 import { DatabaseService } from '../../database/database.service';
 import * as crypto from 'crypto';
 
@@ -105,7 +106,7 @@ export class GenerationMetricsService {
 
   constructor(private readonly databaseService: DatabaseService) {}
 
-  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null) {
+  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true) {
     const db = this.databaseService.getDb();
     const row = projectId ? db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any : null;
     if (projectId && !row) throw new Error('生成项目不存在');
@@ -121,7 +122,9 @@ export class GenerationMetricsService {
       id, projectId ?? null, stage, scenario, 'running', constitution?.revision ?? null,
       constitution ? JSON.stringify(constitution) : null, digest(systemPrompt || ''), digest(prompt), new Date().toISOString());
     const context = row ? this.qualityContext(projectId!) : '';
-    db.prepare('UPDATE generation_runs SET context_snapshot=?,context_version=?,prompt_version=?,chapter_index=? WHERE id=?').run(context, digest(prompt + context), digest((systemPrompt || '') + JSON.stringify(constitution)), chapterIndex ?? null, id);
+    const standards = standardDirectiveCache.snapshot(scenario, injectStandard);
+    db.prepare('UPDATE generation_runs SET standards_snapshot=? WHERE id=?').run(JSON.stringify(standards), id);
+    db.prepare('UPDATE generation_runs SET context_snapshot=?,context_version=?,prompt_version=?,chapter_index=? WHERE id=?').run(context, digest(prompt + context), digest((systemPrompt || '') + JSON.stringify(constitution) + standards.digest), chapterIndex ?? null, id);
     const previousChapters = row ? db.prepare("SELECT id,content FROM chapters WHERE project_id=? AND content IS NOT NULL AND (? IS NULL OR chapter_index < ?) ORDER BY chapter_index DESC LIMIT 12").all(projectId!, chapterIndex ?? null, chapterIndex ?? null) as Array<{ id: string; content: string }> : [];
     const characterNames = row ? (db.prepare('SELECT name FROM characters WHERE project_id=?').all(projectId!) as Array<{ name: string }>).map(c => c.name) : [];
     const lessons = row ? (db.prepare("SELECT lesson FROM generation_lessons WHERE project_id=? AND category='verified_quality_repair' ORDER BY occurrence DESC,updated_at DESC LIMIT 8").all(projectId!) as Array<{ lesson: string }>).map(r => r.lesson) : [];

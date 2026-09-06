@@ -1,0 +1,20 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { RealLLMService } from './real-llm.service';
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
+afterEach(() => standardDirectiveCache.clear());
+it('injects the same active standard into ordinary and streaming provider requests', async () => {
+  standardDirectiveCache.rebuild([{ module_key: 'inspiration', module_name: '灵感', category: 'creation', scenarios: ['idea_generate'],
+    version: 2, seed_baseline_version: 4, purpose: '测试当前生效规则', steps_json: '[]', requirements_json: '[]', rules_json: '[]', quality_bar: '' }]);
+  const service = new RealLLMService({ getConfig: () => ({ defaults: { maxTokens: 4096 } }),
+    getModelForScenario: () => ({ modelName: 'fixture', modelVersion: 'fixture', temperature: 0 }) } as any);
+  const call = vi.fn(async () => ({ content: '结果', finishReason: 'stop' }));
+  (service as any).callModel = call;
+  await service.generate({ prompt: '题材', scenario: 'idea_generate' });
+  let streamedSystem = '';
+  (service as any).callModelStream = async function* (_model: string, _prompt: string, system: string) { streamedSystem = system; yield '结果'; };
+  for await (const _token of service.generateStream({ prompt: '题材', scenario: 'idea_generate' })) { /* drain */ }
+  expect(streamedSystem).toBe((call.mock.calls[0] as any)[2]);
+  expect(streamedSystem).toContain('测试当前生效规则');
+  for await (const _token of service.generateStream({ prompt: '题材', scenario: 'idea_generate', injectStandard: false })) { /* drain */ }
+  expect(streamedSystem).toBe('');
+});

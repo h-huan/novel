@@ -74,7 +74,11 @@ const WorkbenchPage: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(days, projectId, storyType, platform); }, [days, projectId, storyType, platform, load]);
+  useEffect(() => {
+    load(days, projectId, storyType, platform);
+    const timer = setInterval(() => load(days, projectId, storyType, platform), 15000);
+    return () => clearInterval(timer);
+  }, [days, projectId, storyType, platform, load]);
 
   // 后端重启恢复后，切回本窗口/标签会立即重拉一次，实现自愈、无需手动刷新整页
   useEffect(() => {
@@ -221,6 +225,23 @@ const WorkbenchPage: React.FC = () => {
             style={{ padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 'var(--font-size-sm)', fontWeight: 600, border: '1px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}>重新加载</button>
         </div>
       )}
+
+      {data?.generationRuns && <section aria-label="生成运行记录" style={card}>
+        <h3 style={h3}>生成运行记录</h3>
+        {!data.generationRuns.available ? <p role="alert">{data.generationRuns.error}</p> : <>
+          <p>共 {data.generationRuns.total} 次 · 完成 {data.generationRuns.succeeded} 次 · 失败 {data.generationRuns.failed} 次 · 进行中 {data.generationRuns.running} 次 · 取消 {data.generationRuns.cancelled} 次</p>
+          <p style={{ color: 'var(--color-text-muted)' }}>包含创建作品前的灵感生成与模型配置预检；预检失败不计为模型调用或已消耗 Token。尚未生成作品时，作品质量评分保持未评估。</p>
+          {data.generationRuns.recent.length === 0 ? <p>当前范围内暂无生成记录</p> : <details open={data.generationRuns.failed > 0}>
+            <summary>最近生成及失败原因（最多 20 次）</summary>
+            {data.generationRuns.recent.map((r: any) => <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
+              <strong>{r.label} · {({ failed: '失败', running: '进行中', success: '完成', cancelled: '已取消' } as Record<string,string>)[r.status] || r.status}</strong>
+              <span style={{ marginLeft: 12 }}>{new Date(r.started_at).toLocaleString()}</span>
+              {r.error && <p style={{ color: 'var(--color-danger)', overflowWrap: 'anywhere' }}>{r.error}</p>}
+              <p>执行标准：{r.standards?.modules?.length ? r.standards.modules.map((s: any) => `${s.key} v${s.version}（基线 ${s.baseline}）`).join('、') : '未记录，不能据此认定已执行'}</p>
+            </div>)}
+          </details>}
+        </>}
+      </section>}
 
       {/* 核心 KPI */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 12 }}>

@@ -3883,10 +3883,12 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     this.logger.log(`idea-discover: type=${dto.storyType} platform=${dto.platform}`);
 
     const requestedCount = Number.isInteger(Number(dto.count)) && Number(dto.count) > 0
-      ? Number(dto.count)
+      ? Math.min(Number(dto.count), 10)
       : 5;
 
     try {
+      // Configuration errors cannot be repaired by JSON parsing or parallel retries.
+      this.realLLM.assertScenarioModelConfigured('idea_generate');
       const storyTypeRule = dto.storyType === 'short_story'
         ? '【短篇特性】建议总字数必须在8000–35000字之间；聚焦一条核心事件链，开局尽快出现异常或冲突，用有限人物和场景完成升级、选择、反转与结局闭环。开篇必须给出不可忽视的代价，中段必须迫使主角作出不可逆选择，结局既兑现开局问题也留下情绪余波；篇幅由题材承载量决定，不套固定章节模板'
         : '【长篇特性】允许完整世界观、多线叙事和渐进式成长，但每条线必须服务核心矛盾；开篇要以具体危机建立追读问题，随后用目标受阻、代价升级、关系变化和阶段性反转持续兑现并刷新悬念。卷章与总篇幅由事件密度、人物弧和节奏动态决定，不预设固定规模';
@@ -4000,6 +4002,7 @@ ${excludeRule}
 
       // ====== 并行生成 requestedCount 个题材：每个一次独立调用（单条输出更小、可并行、更快）======
       const singlePrompt = buildPrompt(1, excludeItems);
+      const generationErrors: string[] = [];
       const generateOne = async (slot: number, retryHint = ''): Promise<any | null> => {
         try {
           const resp = await generateIdeaResponse(
@@ -4008,6 +4011,7 @@ ${excludeRule}
           const parsed = extractIdeaList(resp.content || '');
           return (parsed && parsed.length > 0) ? parsed[0] : null;
         } catch (err: any) {
+          generationErrors.push(err instanceof Error ? err.message : String(err));
           this.logger.warn(`idea-discover: 第 ${slot} 个题材生成失败（将补跑）：${err?.message || err}`);
           return null;
         }
@@ -4027,7 +4031,9 @@ ${excludeRule}
       }
       if (ideas.length === 0) {
         this.logger.error(`idea-discover: 并行生成全部失败，未把原始文本伪装成灵感结果`);
-        throw new Error('灵感生成结果无法解析，未创建降级题材，请重试。');
+        throw new Error(generationErrors.length
+          ? `灵感生成失败：${[...new Set(generationErrors)].join('；')}`
+          : '模型已返回内容，但缺少有效的 ideas 数组。未创建题材，请重试。');
       }
       this.logger.log(`idea-discover: 并行生成完成，共 ${ideas.length} 个题材（请求 ${requestedCount} 个）`);
 
