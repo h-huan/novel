@@ -55,6 +55,8 @@ export interface MaturityReport {
   missingItems: string[];
   risks: string[];
   canConvertToProject: boolean;
+  evaluatedItems: number;
+  satisfiedItems: number;
 }
 
 export interface IdeaDraftResponse {
@@ -65,7 +67,6 @@ export interface IdeaDraftResponse {
   targetPlatform: string;
   targetWords: number;
   description: string;
-  settings: Record<string, unknown>;
   status: string;
   questions: QuestionItem[];
   answers: AnswerItemData[];
@@ -105,7 +106,6 @@ export class IdeaLabService {
       target_platform: dto.targetPlatform || 'generic',
       target_words: dto.targetWords,
       description: dto.description || '',
-      settings_json: JSON.stringify(dto.settings || {}),
       status: 'draft',
       questions_json: '[]',
       answers_json: '[]',
@@ -139,24 +139,11 @@ export class IdeaLabService {
 
   // ==================== AI 追问生成 ====================
 
-  /**
-   * 生成追问问题
-   * 按模型配置调用 LLM，失败时保留错误供用户重试
-   */
-  generateQuestions(id: string): { questions: QuestionItem[]; status: string; isFallback: boolean } {
-    throw new BadRequestException(`同步追问接口已停用（草稿 ${id}）：必须调用异步AI生成流程，禁止模板降级。`);
-  }
-
-  /**
-   * 异步生成追问（推荐路径）
-   */
-  async generateQuestionsAsync(id: string): Promise<{ questions: QuestionItem[]; status: string; isFallback: boolean }> {
+  async generateQuestionsAsync(id: string): Promise<{ questions: QuestionItem[]; status: string }> {
     const row = this.repo.findById(id);
     if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
 
     let questions: QuestionItem[] = [];
-    let isFallback = false;
-
     try {
       const prompt = this.buildQuestionsPrompt(row);
       const response = await this.llm.generate({
@@ -184,7 +171,6 @@ export class IdeaLabService {
     return {
       questions,
       status: 'questioning',
-      isFallback,
     };
   }
 
@@ -217,28 +203,11 @@ export class IdeaLabService {
 
   // ==================== 完善想法 + 成熟度评分 ====================
 
-  /**
-   * 同步完善入口已停用，避免绕过异步 AI 配置链
-   */
-  refineIdea(id: string): {
-    refinedIdea: RefinedIdea;
-    maturityScore: number;
-    maturityReport: MaturityReport;
-    status: string;
-    isFallback: boolean;
-  } {
-    throw new BadRequestException(`同步完善接口已停用（草稿 ${id}）：必须调用异步AI完善流程，禁止模板降级。`);
-  }
-
-  /**
-   * 异步完善想法（推荐路径 - 使用 LLM）
-   */
   async refineIdeaAsync(id: string): Promise<{
     refinedIdea: RefinedIdea;
     maturityScore: number;
     maturityReport: MaturityReport;
     status: string;
-    isFallback: boolean;
   }> {
     const row = this.repo.findById(id);
     if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
@@ -247,8 +216,6 @@ export class IdeaLabService {
     const questions: QuestionItem[] = JSON.parse(row.questions_json || '[]');
 
     let refinedIdea: RefinedIdea;
-    let isFallback = false;
-
     try {
       const prompt = this.buildRefinePrompt(row, questions, answers);
       const response = await this.llm.generate({
@@ -284,7 +251,6 @@ export class IdeaLabService {
       maturityScore,
       maturityReport,
       status: 'refined',
-      isFallback,
     };
   }
 
@@ -333,34 +299,40 @@ export class IdeaLabService {
       throw new BadRequestException(`该想法草稿已转换为项目: ${row.converted_project_id}`);
     }
 
+    const maturityReport = this.parseMaturityReportSafe(row.maturity_report_json);
+    if (!maturityReport?.canConvertToProject) {
+      const unresolved = [
+        ...(maturityReport?.missingItems ?? []),
+        ...(maturityReport?.risks ?? []),
+      ];
+      const detail = unresolved.length > 0 ? `：${unresolved.join('；')}` : '';
+      throw new BadRequestException(`想法尚未通过成熟度检查，不能创建作品${detail}`);
+    }
+
     const refinedIdea: RefinedIdea = JSON.parse(row.refined_idea_json || '{}');
     const confirmedIdea = dto.confirmedIdea || row.confirmed_idea ||
       refinedIdea.oneLineHook || row.raw_idea;
     const title = dto.title || row.title ||
       (refinedIdea.titleSuggestions && refinedIdea.titleSuggestions[0]) ||
       '未命名作品';
-    let draftSettings: Record<string, unknown> = {};
-    try { draftSettings = JSON.parse(row.settings_json || '{}'); } catch { throw new BadRequestException('想法草稿的项目配置已损坏，不能转换项目'); }
-
     // 调用 ProjectService.create 复用第一阶段逻辑
     const project = this.projectService.create({
       title,
       type: row.project_type as any,
-      projectMode: row.project_type as any,
       creationSource: 'idea',
       targetPlatform: row.target_platform as any,
-      platformStyle: row.target_platform,
       targetWords: row.target_words,
+      category: refinedIdea.storyType || '',
+      storyTone: [],
+      webNovelGenre: [],
+      pov: '',
+      targetAudience: refinedIdea.targetAudience || undefined,
       currentWorkflowStage: row.project_type === 'short_story' ? 'topic' : 'idea_or_inspiration',
       ideaStatus: 'converted',
       ideaSeed: row.raw_idea,
       confirmedIdea: confirmedIdea,
       description: row.description || refinedIdea.oneLineHook || '',
-      settings: {
-        ...draftSettings,
-        targetAudience: draftSettings.targetAudience || refinedIdea.targetAudience || null,
-        genre: draftSettings.genre || refinedIdea.storyType || null,
-      },
+      settings: {},
     });
 
     // 更新草稿状态
@@ -578,13 +550,19 @@ export class IdeaLabService {
       }
     }
 
-    const canConvertToProject = missingItems.length <= 2;
+    const satisfiedItems = strengths.length;
+    const evaluatedItems = satisfiedItems + missingItems.length + risks.length;
+    const canConvertToProject = evaluatedItems > 0
+      && missingItems.length === 0
+      && risks.length === 0;
 
     return {
       strengths,
       missingItems,
       risks,
       canConvertToProject,
+      evaluatedItems,
+      satisfiedItems,
     };
   }
 
@@ -592,24 +570,8 @@ export class IdeaLabService {
    * 计算成熟度总分
    */
   private computeMaturityScore(report: MaturityReport): number {
-    let score = 50; // 基础分
-
-    // 每个优势 +5
-    score += report.strengths.length * 5;
-
-    // 每个缺失项 -10
-    score -= report.missingItems.length * 10;
-
-    // 每个风险 -5
-    score -= report.risks.length * 5;
-
-    // 可以创建项目 +10
-    if (report.canConvertToProject) {
-      score += 10;
-    }
-
-    // 限制范围 0-100
-    return Math.max(0, Math.min(100, score));
+    if (report.evaluatedItems <= 0) return 0;
+    return Math.round((report.satisfiedItems / report.evaluatedItems) * 100);
   }
 
   // ==================== 响应转换 ====================
@@ -623,13 +585,12 @@ export class IdeaLabService {
       targetPlatform: row.target_platform,
       targetWords: row.target_words,
       description: row.description || '',
-      settings: (() => { try { return JSON.parse(row.settings_json || '{}'); } catch { return {}; } })(),
       status: row.status,
       questions: JSON.parse(row.questions_json || '[]'),
       answers: JSON.parse(row.answers_json || '[]'),
       refinedIdea: this.parseRefinedIdeaSafe(row.refined_idea_json),
       maturityScore: row.maturity_score,
-      maturityReport: JSON.parse(row.maturity_report_json || '{}'),
+      maturityReport: this.parseMaturityReportSafe(row.maturity_report_json),
       confirmedIdea: row.confirmed_idea || '',
       convertedProjectId: row.converted_project_id || null,
       createdAt: row.created_at,
@@ -644,6 +605,33 @@ export class IdeaLabService {
         return parsed as RefinedIdea;
       }
       return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private parseMaturityReportSafe(json: string): MaturityReport | null {
+    try {
+      const parsed = JSON.parse(json);
+      if (!parsed || !Array.isArray(parsed.strengths) || !Array.isArray(parsed.missingItems) || !Array.isArray(parsed.risks)) {
+        return null;
+      }
+      const satisfiedItems = Number.isFinite(parsed.satisfiedItems)
+        ? Math.max(0, Number(parsed.satisfiedItems))
+        : parsed.strengths.length;
+      const evaluatedItems = Number.isFinite(parsed.evaluatedItems)
+        ? Math.max(satisfiedItems, Number(parsed.evaluatedItems))
+        : satisfiedItems + parsed.missingItems.length + parsed.risks.length;
+      return {
+        strengths: parsed.strengths,
+        missingItems: parsed.missingItems,
+        risks: parsed.risks,
+        canConvertToProject: parsed.canConvertToProject === true
+          && parsed.missingItems.length === 0
+          && parsed.risks.length === 0,
+        evaluatedItems,
+        satisfiedItems,
+      };
     } catch {
       return null;
     }

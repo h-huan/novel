@@ -38,10 +38,8 @@ export function clearProjectFlowState(projectId: string): void {
 interface ProjectCreateData {
   title: string;
   type?: Project['type'];
-  projectMode?: Project['type'];
   creationSource?: CreationSource;
   targetPlatform?: TargetPlatform;
-  platformStyle?: string;
   targetWords?: number;
   currentWorkflowStage?: WorkflowStage;
   ideaStatus?: IdeaStatus;
@@ -49,7 +47,13 @@ interface ProjectCreateData {
   confirmedIdea?: string;
   description?: string;
   settings?: Record<string, unknown>;
+  category?: string;
+  storyTone?: string[];
   writingStyle?: Record<string, unknown> | string;
+  webNovelGenre?: string[];
+  pov?: string;
+  targetAudience?: string | Record<string, unknown>;
+  chapterWordRange?: { min: number; max: number };
 }
 
 interface ProjectState {
@@ -72,45 +76,32 @@ interface ProjectState {
 
 function mapServerProject(raw: any): Project {
   if (!raw) {
-    console.warn('[mapServerProject] raw is null/undefined, using defaults');
-    return {
-      id: '',
-      title: '数据异常',
-      type: 'long_novel' as ProjectType,
-      status: 'active' as ProjectStatus,
-      description: '',
-      wordCount: 0,
-      chapterCount: 0,
-      platforms: [],
-      creationSource: 'blank' as CreationSource,
-      targetPlatform: 'generic' as TargetPlatform,
-      targetWords: 0,
-      currentWorkflowStage: 'idea_or_inspiration' as WorkflowStage,
-      ideaStatus: 'none' as IdeaStatus,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    throw new Error('项目接口返回了空数据');
+  }
+
+  const constitution = raw.creativeConstitution;
+  if (!constitution || constitution.schemaVersion !== 1) {
+    throw new Error(`项目 ${raw.id || '(未知)'} 缺少有效创作宪法`);
   }
 
   // 推导默认阶段
   const creationSource = (raw.creationSource || 'blank') as CreationSource;
-  const rawType = raw.type || 'long_novel';
-  const defaultStage = rawType === 'short_story' ? 'topic' : 'idea_or_inspiration';
+  const defaultStage = constitution.projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';
 
   return {
     id: raw.id || '',
     title: raw.title || '未命名项目',
-    type: raw.type || 'long_novel',
+    type: constitution.projectType,
     status: raw.status || 'active',
     description: raw.description || '',
     wordCount: raw.currentWords ?? raw.wordCount ?? 0,
     chapterCount: raw.chapterCount ?? 0,
     platforms: Array.isArray(raw.platforms) ? raw.platforms : [],
     creationSource,
-    targetPlatform: (raw.targetPlatform || raw.platformStyle || 'generic') as TargetPlatform,
-    targetWords: raw.targetWords ?? raw.target_words ?? 0,
+    targetPlatform: constitution.targetPlatform as TargetPlatform,
+    targetWords: constitution.targetWords,
     settings: typeof raw.settings === 'string' ? (() => { try { return JSON.parse(raw.settings); } catch { return {}; } })() : (raw.settings || {}),
-    writingStyle: raw.writingStyle ?? raw.writing_style,
+    creativeConstitution: constitution,
     currentWorkflowStage: (raw.currentWorkflowStage || defaultStage) as WorkflowStage,
     ideaStatus: (raw.ideaStatus || 'none') as IdeaStatus,
     ideaSeed: raw.ideaSeed || undefined,
@@ -166,10 +157,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const body: Record<string, unknown> = {
         title: data.title,
-        type: data.type || data.projectMode || 'long_novel',
-        platformStyle: data.platformStyle || data.targetPlatform || 'generic',
+        type: data.type || 'long_novel',
+        targetPlatform: data.targetPlatform || 'generic',
       };
-      if (data.projectMode) body.projectMode = data.projectMode;
       if (data.creationSource) body.creationSource = data.creationSource;
       if (data.targetPlatform) body.targetPlatform = data.targetPlatform;
       if (data.targetWords !== undefined) body.targetWords = data.targetWords;
@@ -180,6 +170,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (data.description) body.description = data.description;
       if (data.settings) body.settings = data.settings;
       if (data.writingStyle !== undefined) body.writingStyle = data.writingStyle;
+      if (data.category !== undefined) body.category = data.category;
+      if (data.storyTone !== undefined) body.storyTone = data.storyTone;
+      if (data.webNovelGenre !== undefined) body.webNovelGenre = data.webNovelGenre;
+      if (data.pov !== undefined) body.pov = data.pov;
+      if (data.targetAudience !== undefined) body.targetAudience = data.targetAudience;
+      if (data.chapterWordRange !== undefined) body.chapterWordRange = data.chapterWordRange;
 
       const res = await api.post<any>('/projects', body);
       const raw = (res as any).data ?? res;

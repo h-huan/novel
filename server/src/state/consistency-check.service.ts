@@ -11,6 +11,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { RealLLMService } from '../chain/real-llm.service';
+import { replaceQualityIssues } from '../modules/writing-quality/quality-issue';
 
 @Injectable()
 export class ConsistencyCheckService {
@@ -106,7 +107,7 @@ export class ConsistencyCheckService {
     }
 
     // 保存检查结果到数据库
-    await this.saveChecks(projectId, checks);
+    await this.saveChecks(projectId, checks, chapters);
 
     return checks;
   }
@@ -309,35 +310,32 @@ ${characterContent.substring(0, 500)}
   /**
    * 保存检查结果到数据库
    */
-  private async saveChecks(projectId: string, checks: Array<any>): Promise<void> {
+  private async saveChecks(
+    projectId: string,
+    checks: Array<any>,
+    chapters: Array<{ id: string; index: number; content: string }>,
+  ): Promise<void> {
     const db = this.databaseService.getDb();
-
-    // 每次检测前只清掉同一批章节的"确定性检查"历史结果，避免删除LLM验收器/硬红线等其他来源的记录
-    const chapterIndices = Array.from(new Set(checks.map(c => c.chapterIndex).filter((v: any) => v != null)));
-    if (chapterIndices.length > 0) {
-      const placeholders = chapterIndices.map(() => '?').join(',');
-      db.prepare(`DELETE FROM consistency_checks WHERE project_id = ? AND chapter_index IN (${placeholders}) AND source = 'deterministic'`)
-        .run(projectId, ...chapterIndices);
-    }
-
-    for (const check of checks) {
-      const stmt = db.prepare(`
-        INSERT INTO consistency_checks (
-          id, project_id, check_type, status, message, severity,
-          detected_at, chapter_index, details, source
-        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, 'deterministic')
-      `);
-
-      stmt.run(
-        this.generateId(),
+    for (const chapter of chapters) {
+      const chapterChecks = checks.filter(check => check.chapterIndex === chapter.index);
+      replaceQualityIssues(db, {
         projectId,
-        check.checkType,
-        check.status,
-        check.message,
-        check.severity,
-        check.chapterIndex || null,
-        JSON.stringify(check.details),
-      );
+        stage: 'chapter',
+        source: 'deterministic_consistency',
+        scopeKey: `chapter:${chapter.id}`,
+        chapterId: chapter.id,
+        title: `第${chapter.index}章一致性检查`,
+        issues: chapterChecks.map(check => ({
+          ruleId: `consistency.${check.checkType}`,
+          severity: check.status === 'error' ? 'blocking' : check.severity,
+          message: check.message,
+          quote: String(check.details?.[0]?.actual || check.message || ''),
+          content: chapter.content,
+          evidenceVerified: true,
+          suggestion: check.details?.[0]?.suggestion,
+          details: { checkType: check.checkType, chapterIndex: check.chapterIndex, items: check.details },
+        })),
+      });
     }
   }
 

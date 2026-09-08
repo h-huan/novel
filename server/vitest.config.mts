@@ -14,6 +14,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     root: ".",
+    poolOptions: { forks: { execArgv: ['--no-warnings'] } },
 
     alias: {
       "@novel/shared": resolve(configDirectory, "packages/shared/src"),

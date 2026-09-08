@@ -1,20 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 
 /**
- * 001 初始数据库 schema（squash 单一基线）
- *
- * 历史：平台曾以 001..053 共 53 个增量迁移逐步演进。因产品尚未发布、只有本地单库，
- * 为消除“增量叠加出几十个迁移文件/历史流程反复重构”的冗余，现将【最终结构】整体收敛为
- * 这一个初始迁移，作为之后所有增量迁移的新基线（后续改动从 002 开始）。
- *
- * 幂等与老库对齐（关键）：
- *  - 全部 CREATE 均带 IF NOT EXISTS，可安全重复执行，不会清空/覆盖任何已有数据；
- *  - 对历史上靠 ALTER 新增、而老库可能缺失的列（如 chapters.auto_quality_*），在末尾做
- *    PRAGMA 检查后幂等 ADD COLUMN；
- *  - Migrator 检测到“老库残留 id>1 的历史迁移记录、而磁盘只剩该初始迁移”时，会执行一次
- *    本迁移做自愈对齐，并把 _migrations 收敛为仅 id=1（见 migrator.alignSquashedBaseline）。
- *
- * 本文件由现有库 sqlite_master 反向导出后生成，DDL 即当前真实最终结构；改表结构请新增 002+，不要直接改本基线。
+ * 当前唯一数据库基线。新库直接建立最终结构；已有本地库幂等补列，
+ * 并在保留数据的前提下把旧冲突表迁入统一 QualityIssue 后删除。
  */
 const SCHEMA_SQL = `
 -- [table] aggregate_summary_states
@@ -297,42 +286,6 @@ CREATE TABLE IF NOT EXISTS characters (
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
--- [table] conflict_logs
-CREATE TABLE IF NOT EXISTS conflict_logs (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      chapter_id TEXT,
-      type TEXT NOT NULL,
-      priority INTEGER NOT NULL DEFAULT 3,
-      description TEXT NOT NULL,
-      source_entity_type TEXT,
-      source_entity_id TEXT,
-      conflict_entity_type TEXT,
-      conflict_entity_id TEXT,
-      resolution TEXT,
-      resolution_by TEXT,
-      resolved_at TEXT,
-      created_at TEXT NOT NULL
-    );
-
--- [table] consistency_checks
-CREATE TABLE IF NOT EXISTS consistency_checks (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      check_type TEXT NOT NULL, -- character/world_setting/timeline/plot_logic
-      status TEXT DEFAULT 'pass', -- pass/warning/error
-      message TEXT NOT NULL,
-      severity TEXT DEFAULT 'low', -- low/medium/high
-      detected_at TEXT DEFAULT (datetime('now')),
-      chapter_index INTEGER,
-      details TEXT NOT NULL, -- JSON string
-      resolved INTEGER DEFAULT 0,
-      resolved_by TEXT,
-      resolved_at TEXT,
-      
-      created_at TEXT DEFAULT (datetime('now'))
-    , source TEXT NOT NULL DEFAULT 'deterministic');
-
 -- [table] dual_write_store
 CREATE TABLE IF NOT EXISTS dual_write_store (
       id TEXT PRIMARY KEY,
@@ -496,6 +449,48 @@ CREATE TABLE IF NOT EXISTS generation_lessons (
       UNIQUE(project_id, lesson)
     );
 
+-- [table] generation_runs
+CREATE TABLE IF NOT EXISTS generation_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      stage TEXT NOT NULL,
+      scenario TEXT NOT NULL,
+      status TEXT NOT NULL,
+      constitution_revision INTEGER,
+      constitution_json TEXT,
+      prompt_version TEXT NOT NULL,
+      context_version TEXT NOT NULL,
+      context_snapshot TEXT,
+      chapter_index INTEGER,
+      standards_snapshot TEXT,
+      quality_payload TEXT,
+      model TEXT,
+      output_text TEXT,
+      error TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      duration_ms INTEGER,
+      gate_status TEXT NOT NULL DEFAULT 'not_evaluated'
+    );
+
+-- [table] generation_repairs
+CREATE TABLE IF NOT EXISTS generation_repairs (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES generation_runs(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      stage TEXT NOT NULL,
+      status TEXT NOT NULL,
+      strategy TEXT NOT NULL,
+      before_text TEXT NOT NULL,
+      after_text TEXT,
+      before_score INTEGER,
+      after_score INTEGER,
+      before_report TEXT NOT NULL,
+      after_report TEXT,
+      reason TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
 -- [table] generation_step_metrics
 CREATE TABLE IF NOT EXISTS generation_step_metrics (
       id TEXT PRIMARY KEY,
@@ -518,7 +513,8 @@ CREATE TABLE IF NOT EXISTS generation_step_metrics (
       completion_tokens INTEGER,
       total_tokens INTEGER,
       internal_retries INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      run_id TEXT REFERENCES generation_runs(id) ON DELETE SET NULL
     );
 
 -- [table] idea_drafts
@@ -540,7 +536,7 @@ CREATE TABLE IF NOT EXISTS idea_drafts (
       converted_project_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
-    , settings_json TEXT NOT NULL DEFAULT '{}');
+    );
 
 -- [table] import_export_logs
 CREATE TABLE IF NOT EXISTS import_export_logs (
@@ -1200,15 +1196,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_aggregate_summary_states_project_scope_key
 CREATE INDEX IF NOT EXISTS idx_canonical_sync_project_status
       ON canonical_entity_sync_states(project_id, needs_resync, index_status);
 
--- [index] idx_cc_chapter
-CREATE INDEX IF NOT EXISTS idx_cc_chapter ON consistency_checks(chapter_index);
-
--- [index] idx_cc_project
-CREATE INDEX IF NOT EXISTS idx_cc_project ON consistency_checks(project_id);
-
--- [index] idx_cc_status
-CREATE INDEX IF NOT EXISTS idx_cc_status ON consistency_checks(status);
-
 -- [index] idx_ch_project
 CREATE INDEX IF NOT EXISTS idx_ch_project ON chapters(project_id);
 
@@ -1289,9 +1276,6 @@ CREATE INDEX IF NOT EXISTS idx_character_state_project_character
 CREATE INDEX IF NOT EXISTS idx_character_state_review
       ON character_state_snapshots(project_id, review_status);
 
--- [index] idx_cl_project
-CREATE INDEX IF NOT EXISTS idx_cl_project ON conflict_logs(project_id);
-
 -- [index] idx_cs_char
 CREATE INDEX IF NOT EXISTS idx_cs_char ON character_states(character_id, snapshot_order);
 
@@ -1363,6 +1347,15 @@ CREATE INDEX IF NOT EXISTS idx_fss_review
 
 -- [index] idx_generation_lessons_project
 CREATE INDEX IF NOT EXISTS idx_generation_lessons_project ON generation_lessons(project_id);
+
+-- [index] idx_generation_runs_project
+CREATE INDEX IF NOT EXISTS idx_generation_runs_project ON generation_runs(project_id, started_at);
+
+-- [index] idx_generation_repairs_project
+CREATE INDEX IF NOT EXISTS idx_generation_repairs_project ON generation_repairs(project_id, created_at);
+
+-- [index] idx_generation_step_run
+CREATE INDEX IF NOT EXISTS idx_generation_step_run ON generation_step_metrics(run_id);
 
 -- [index] idx_gsm_created
 CREATE INDEX IF NOT EXISTS idx_gsm_created
@@ -1611,10 +1604,90 @@ function ensureBackfilledColumns(db: DatabaseSync): void {
   if (!chapterCols.includes('auto_quality_status')) db.exec('ALTER TABLE chapters ADD COLUMN auto_quality_status TEXT;');
   if (!chapterCols.includes('auto_quality_message')) db.exec('ALTER TABLE chapters ADD COLUMN auto_quality_message TEXT;');
   if (!chapterCols.includes('auto_quality_at')) db.exec('ALTER TABLE chapters ADD COLUMN auto_quality_at TEXT;');
+  const runCols = (db.prepare('PRAGMA table_info(generation_runs)').all() as Array<{ name: string }>).map(c => c.name);
+  for (const [name, sqlType] of [['context_snapshot', 'TEXT'], ['chapter_index', 'INTEGER'], ['standards_snapshot', 'TEXT'], ['quality_payload', 'TEXT']] as const) {
+    if (!runCols.includes(name)) db.exec(`ALTER TABLE generation_runs ADD COLUMN ${name} ${sqlType};`);
+  }
+  const metricCols = (db.prepare('PRAGMA table_info(generation_step_metrics)').all() as Array<{ name: string }>).map(c => c.name);
+  if (!metricCols.includes('run_id')) db.exec('ALTER TABLE generation_step_metrics ADD COLUMN run_id TEXT;');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_generation_step_run ON generation_step_metrics(run_id);');
+  migrateLegacyConsistency(db);
+  migrateLegacyConflictLogs(db);
   // 已废弃、无任何代码读写的历史表：老库对齐基线时幂等清除，全新库本就不再创建。
   for (const legacyTable of ['api_keys','chain_execution_logs','data_directory','prompt_chain_definitions','inspirations']) {
     db.exec(`DROP TABLE IF EXISTS "${legacyTable}";`);
   }
+}
+
+function migrateLegacyConsistency(db: DatabaseSync): void {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='consistency_checks'").get();
+  if (!exists) return;
+  const rows = db.prepare('SELECT * FROM consistency_checks').all() as any[];
+  const reports = new Set<string>();
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    const source = String(row.source || 'deterministic_consistency');
+    const scopeKey = `${row.project_id}:${row.chapter_index ?? 'project'}:${source}`;
+    const reportId = `quality_${createHash('sha256').update(scopeKey).digest('hex')}`;
+    const chapter = row.chapter_index == null ? null : db.prepare(
+      'SELECT id FROM chapters WHERE project_id=? AND chapter_index=? ORDER BY created_at DESC LIMIT 1',
+    ).get(row.project_id, row.chapter_index) as { id: string } | undefined;
+    if (!reports.has(reportId)) {
+      db.prepare(`INSERT OR IGNORE INTO writing_quality_reports
+        (id,project_id,chapter_id,source_type,source_id,scope,title,summary,overall_level,status,payload,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        reportId, row.project_id, chapter?.id ?? null, `quality:${source}`, scopeKey, chapter ? 'chapter' : 'project',
+        '历史一致性问题', '由旧冲突记录迁入', 'medium', 'open', JSON.stringify({ source, migrated: true }), now, now,
+      );
+      reports.add(reportId);
+    }
+    let details: unknown = null;
+    try { details = JSON.parse(row.details || 'null'); } catch { details = null; }
+    const issueType = ['originality', 'outline_alignment'].includes(row.check_type)
+      ? row.check_type : `consistency.${row.check_type}`;
+    const severity = row.severity === 'high' ? 'blocking' : row.severity === 'low' ? 'low' : 'medium';
+    const status = row.resolved || row.status === 'resolved' ? 'resolved' : 'open';
+    db.prepare(`INSERT OR IGNORE INTO writing_quality_issues
+      (id,report_id,project_id,chapter_id,issue_type,severity,title,summary,status,payload,created_at,updated_at,resolved_at,resolved_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      row.id, reportId, row.project_id, chapter?.id ?? null, issueType, severity, row.message, row.message, status,
+      JSON.stringify({ qualityIssue: { source, evaluation: 'insufficient_evidence' }, details }),
+      row.created_at || row.detected_at || now, now, row.resolved_at || null, row.resolved_by || null,
+    );
+  }
+  db.exec('DROP TABLE consistency_checks;');
+}
+
+function migrateLegacyConflictLogs(db: DatabaseSync): void {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='conflict_logs'").get();
+  if (!exists) return;
+  const rows = db.prepare('SELECT * FROM conflict_logs').all() as any[];
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    const scopeKey = `${row.project_id}:${row.chapter_id || 'project'}:legacy_conflict_log`;
+    const reportId = `quality_${createHash('sha256').update(scopeKey).digest('hex')}`;
+    db.prepare(`INSERT OR IGNORE INTO writing_quality_reports
+      (id,project_id,chapter_id,source_type,source_id,scope,title,summary,overall_level,status,payload,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      reportId, row.project_id, row.chapter_id || null, 'quality:legacy_conflict_log', scopeKey,
+      row.chapter_id ? 'chapter' : 'project', '历史冲突记录', '由旧冲突日志迁入', 'medium', 'open',
+      JSON.stringify({ source: 'legacy_conflict_log', migrated: true }), now, now,
+    );
+    const priority = Number(row.priority || 3);
+    const severity = priority <= 1 ? 'blocking' : priority === 2 ? 'high' : priority >= 4 ? 'low' : 'medium';
+    const status = row.resolution ? 'resolved' : 'open';
+    db.prepare(`INSERT OR IGNORE INTO writing_quality_issues
+      (id,report_id,project_id,chapter_id,issue_type,severity,title,summary,status,payload,created_at,updated_at,resolved_at,resolved_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      row.id, reportId, row.project_id, row.chapter_id || null, `consistency.${row.type || 'legacy'}`,
+      severity, row.description, row.description, status,
+      JSON.stringify({ qualityIssue: { source: 'legacy_conflict_log', evaluation: 'insufficient_evidence' },
+        entities: { sourceType: row.source_entity_type, sourceId: row.source_entity_id,
+          conflictType: row.conflict_entity_type, conflictId: row.conflict_entity_id }, resolution: row.resolution || null }),
+      row.created_at || now, now, row.resolved_at || null, row.resolution_by || null,
+    );
+  }
+  db.exec('DROP TABLE conflict_logs;');
 }
 
 export function up(db: DatabaseSync): void {
@@ -1639,8 +1712,6 @@ export function down(db: DatabaseSync): void {
   DROP TABLE IF EXISTS "character_state_snapshots";
   DROP TABLE IF EXISTS "character_states";
   DROP TABLE IF EXISTS "characters";
-  DROP TABLE IF EXISTS "conflict_logs";
-  DROP TABLE IF EXISTS "consistency_checks";
   DROP TABLE IF EXISTS "dual_write_store";
   DROP TABLE IF EXISTS "field_locks";
   DROP TABLE IF EXISTS "foreshadowing_chapter_tasks";
@@ -1649,7 +1720,9 @@ export function down(db: DatabaseSync): void {
   DROP TABLE IF EXISTS "foreshadowing_threads";
   DROP TABLE IF EXISTS "foreshadowings";
   DROP TABLE IF EXISTS "generation_lessons";
+  DROP TABLE IF EXISTS "generation_repairs";
   DROP TABLE IF EXISTS "generation_step_metrics";
+  DROP TABLE IF EXISTS "generation_runs";
   DROP TABLE IF EXISTS "idea_drafts";
   DROP TABLE IF EXISTS "import_export_logs";
   DROP TABLE IF EXISTS "location_knowledge_profiles";

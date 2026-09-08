@@ -33,6 +33,7 @@ const INVOKE_CHANNELS = [
   'exists-path',
   'mkdir-path',
   'start-server',
+  'get-server-status',
   'stop-server',
   'open-project',
   'close-project',

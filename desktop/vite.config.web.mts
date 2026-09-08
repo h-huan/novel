@@ -1,34 +1,11 @@
 import { fileURLToPath } from 'node:url';
 const configDirectory = fileURLToPath(new URL('.', import.meta.url));
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { readFileSync, existsSync } from 'fs';
 
-// ============================================================
-// 自动发现后端端口：优先读 server/.port 文件，
-// 如果文件不存在则 fallback 到 3100
-// ============================================================
-function getBackendPort(): string {
-  try {
-    const portFile = path.resolve(configDirectory, '..', 'server', '.port');
-    if (existsSync(portFile)) {
-      const port = readFileSync(portFile, 'utf8').trim();
-      if (/^\d+$/.test(port)) {
-        console.log(`[Vite] Read backend port from .port file: ${port}`);
-        return port;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  const envPort = loadEnv('development', process.cwd(), 'VITE_').VITE_BACKEND_PORT;
-  if (envPort) return envPort;
-  console.log('[Vite] No .port file found, using default port 3100');
-  return '3100';
-}
-
-const backendPort = getBackendPort();
+// 固定端口职责：管理端 5173，服务端 API 3100。
+const backendPort = 3100;
 
 export default defineConfig({
   plugins: [
@@ -37,10 +14,15 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
-    strictPort: false,
+    strictPort: true,
     proxy: {
       '/api': {
         target: `http://localhost:${backendPort}`,
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: `http://localhost:${backendPort}`,
+        ws: true,
         changeOrigin: true,
       },
     },

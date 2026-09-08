@@ -13,7 +13,7 @@ interface AppLayoutProps {
 }
 
 const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
-  const { serverStatus, serverError, startHealthPolling } = useAppStore();
+  const { serverStatus, serverError, startHealthPolling, stopHealthPolling } = useAppStore();
   const { currentProject, fetchProject } = useProjectStore();
   const location = useLocation();
   const navigate = useNavigate();
@@ -40,7 +40,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   useEffect(() => {
     startHealthPolling();
 
-    // 监听服务端实际端口（支持端口 fallback 场景）
+    // 监听固定服务端的就绪状态
     const handleServerStatus = (status: { running: boolean; port?: number }) => {
       if (status.port) {
         setBaseUrl(status.port);
@@ -50,9 +50,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     window.electronAPI?.on('server-status', handleServerStatus);
 
     return () => {
+      stopHealthPolling();
       window.electronAPI?.removeAllListeners('server-status');
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [startHealthPolling, stopHealthPolling]);
 
   useEffect(() => {
     if (currentProject?.status !== 'generation_failed') {

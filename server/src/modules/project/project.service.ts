@@ -15,18 +15,12 @@ export interface ProjectResponse {
   creativeConstitution: CreativeConstitution;
   id: string;
   type: string;
-  /** 作品类型别名（与 type 一致） */
-  projectMode: string;
   title: string;
   status: string;
   targetWords: number;
-  /** 目标字数别名（与 targetWords 一致） */
-  targetWordCount: number;
   currentWords: number;
   description?: string;
-  writingStyle?: any;
   settings: any;
-  platformStyle?: string;
   creationSource: string;
   targetPlatform: string;
   currentWorkflowStage: string;
@@ -60,7 +54,7 @@ export class ProjectService {
     }));
 
     // 推导默认创作阶段
-    const projectType = dto.type || dto.projectMode || 'long_novel';
+    const projectType = dto.type || 'long_novel';
     const creationSource = dto.creationSource || 'blank';
     const currentWorkflowStage = dto.currentWorkflowStage ||
       this.defaultWorkflowStage(projectType, creationSource);
@@ -217,16 +211,12 @@ export class ProjectService {
       id: row.id,
       creativeConstitution: constitution,
       type: constitution.projectType,
-      projectMode: constitution.projectType,
       title: row.title,
       status: row.status,
       targetWords: constitution.targetWords,
-      targetWordCount: constitution.targetWords,
       currentWords: row.current_words,
       description: row.description || undefined,
-      writingStyle: constitution.writingStyle,
       settings: constitutionSettings(this.normalizePlanningSettings(this.safeParseSettings(row.settings)), constitution),
-      platformStyle: constitution.targetPlatform,
       creationSource,
       targetPlatform,
       currentWorkflowStage,

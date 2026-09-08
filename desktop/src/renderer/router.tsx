@@ -34,7 +34,6 @@ import OrganizationMapPage from './pages/OrganizationMapPage';
 import IdeaLabPage from './pages/IdeaLabPage';
 import WritingQualityPage from './pages/WritingQualityPage';
 import PlatformStandardsPage from './pages/PlatformStandardsPage';
-import StandardsHistoryPage from './pages/StandardsHistoryPage';
 
 const AppRouter: React.FC = () => {
   return (
@@ -72,7 +71,6 @@ const AppRouter: React.FC = () => {
         <Route path="/style-writing" element={<StyleWritingPage />} />
         <Route path="/news" element={<NewsPage />} />
         <Route path="/module-standards" element={<PlatformStandardsPage />} />
-        <Route path="/standards-history" element={<StandardsHistoryPage />} />
         <Route path="/title-check" element={<TitleCheckPage />} />
         <Route path="/settings" element={<Navigate to="/" replace />} />
         <Route path="/dictionary" element={<DictionaryPage />} />

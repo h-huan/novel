@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import type { DatabaseSync } from 'node:sqlite';
 import { getPlatform, targetForLength } from '../../chain/platform-benchmarks';
 
 export interface CreativeConstitution {
@@ -35,7 +36,7 @@ function tags(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : typeof value === 'string' && value ? [value] : [];
 }
 
-/** Legacy aliases are resolved only here. Persisted constitutions always win on reads. */
+/** Read the persisted authority. The migration/create boundary supplies it before normal reads. */
 export function readConstitution(row: Record<string, any>): CreativeConstitution {
   const s = settingsObject(row.settings);
   const saved = s.creativeConstitution;
@@ -52,19 +53,17 @@ export function readConstitution(row: Record<string, any>): CreativeConstitution
     return structuredClone(saved);
   }
   const projectType = row.type || 'long_novel';
-  // Old DTOs wrote generic even when the user selected a legacy platform.
-  const candidates = [row.target_platform, row.platform_style, s.targetPlatform, s.platform];
-  const targetPlatform = candidates.find(v => typeof v === 'string' && v && v !== 'generic') || 'generic';
+  const targetPlatform = typeof row.target_platform === 'string' && row.target_platform
+    ? row.target_platform
+    : 'generic';
   const range = targetForLength(getPlatform(targetPlatform), projectType).chapterWords;
   return {
     schemaVersion: 1, revision: 1, projectType, targetPlatform,
     targetWords: Number(row.target_words) || 0,
     platformRules: targetForLength(getPlatform(targetPlatform), projectType),
-    category: String(s.storyCategory ?? s.category ?? s.genre ?? ''),
-    storyTone: tags(s.storyTone), writingStyle: style(s.writingStyle ?? s.style ?? row.writing_style),
-    webNovelGenre: tags(s.webNovelGenre), pov: String(s.pov ?? s.pointOfView ?? ''),
-    targetAudience: s.targetAudience ?? s.targetReaders ?? null,
-    chapterWordRange: s.chapterWordRange ?? { min: range[0], max: range[1] },
+    category: '', storyTone: [], writingStyle: style(row.writing_style),
+    webNovelGenre: [], pov: '', targetAudience: null,
+    chapterWordRange: { min: range[0], max: range[1] },
   };
 }
 
@@ -73,28 +72,23 @@ export function updateConstitution(row: Record<string, any>, dto: Record<string,
   const current = readConstitution(row);
   const next = structuredClone(current);
   const s = settingsObject(dto.settings);
-  if (s.creativeConstitution !== undefined && JSON.stringify(s.creativeConstitution) !== JSON.stringify(current)) {
-    throw new BadRequestException('不能通过 settings 覆盖创作宪法；请使用项目配置字段');
-  }
-  const select = (label: string, values: unknown[]): unknown => {
-    const supplied = values.filter(v => v !== undefined);
-    if (new Set(supplied.map(v => JSON.stringify(v))).size > 1) throw new BadRequestException(`${label}存在冲突来源`);
-    return supplied[0];
-  };
+  const forbidden = ['creativeConstitution', 'targetPlatform', 'platform', 'recommendedPlatform', 'storyCategory', 'category', 'genre', 'storyTone', 'writingStyle', 'style', 'webNovelGenre', 'pov', 'pointOfView', 'targetAudience', 'targetReaders', 'chapterWordRange'];
+  const duplicate = forbidden.find(key => s[key] !== undefined);
+  if (duplicate) throw new BadRequestException(`项目配置 ${duplicate} 必须使用创作宪法字段，不能写入 settings`);
   const fields: [keyof CreativeConstitution, unknown][] = [
-    ['projectType', select('作品形态', [dto.type, dto.projectMode])],
-    ['targetPlatform', select('目标平台', [dto.targetPlatform, dto.platformStyle, s.targetPlatform, s.platform])],
+    ['projectType', dto.type],
+    ['targetPlatform', dto.targetPlatform],
     ['targetWords', dto.targetWords],
-    ['category', select('分类', [s.storyCategory, s.category, s.genre])],
-    ['storyTone', s.storyTone === undefined ? undefined : tags(s.storyTone)],
-    ['writingStyle', select('写作风格', [dto.writingStyle, s.writingStyle, s.style].map(v => v === undefined ? undefined : style(v)))],
-    ['webNovelGenre', s.webNovelGenre === undefined ? undefined : tags(s.webNovelGenre)],
-    ['pov', select('POV', [s.pov, s.pointOfView])],
-    ['targetAudience', select('目标读者', [s.targetAudience, s.targetReaders])],
-    ['chapterWordRange', s.chapterWordRange],
+    ['category', dto.category],
+    ['storyTone', dto.storyTone === undefined ? undefined : tags(dto.storyTone)],
+    ['writingStyle', dto.writingStyle === undefined ? undefined : style(dto.writingStyle)],
+    ['webNovelGenre', dto.webNovelGenre === undefined ? undefined : tags(dto.webNovelGenre)],
+    ['pov', dto.pov],
+    ['targetAudience', dto.targetAudience],
+    ['chapterWordRange', dto.chapterWordRange],
   ];
   for (const [key, value] of fields) if (value !== undefined) (next as any)[key] = value;
-  if (!s.chapterWordRange && (next.projectType !== current.projectType || next.targetPlatform !== current.targetPlatform)) {
+  if (!dto.chapterWordRange && (next.projectType !== current.projectType || next.targetPlatform !== current.targetPlatform)) {
     const range = targetForLength(getPlatform(next.targetPlatform), next.projectType).chapterWords;
     next.chapterWordRange = { min: range[0], max: range[1] };
   }
@@ -109,10 +103,75 @@ export function updateConstitution(row: Record<string, any>, dto: Record<string,
 /** Compatibility fields are projections, never independent authorities. */
 export function constitutionSettings(settings: Record<string, any>, c: CreativeConstitution): Record<string, any> {
   const result = { ...settings };
-  for (const key of ['targetPlatform', 'platform', 'recommendedPlatform', 'style', 'genre', 'category', 'pointOfView', 'targetReaders']) delete result[key];
-  return { ...result, creativeConstitution: c, storyCategory: c.category, storyTone: c.storyTone,
-    writingStyle: c.writingStyle, webNovelGenre: c.webNovelGenre, pov: c.pov,
-    targetAudience: c.targetAudience, chapterWordRange: c.chapterWordRange };
+  for (const key of ['targetPlatform', 'platform', 'recommendedPlatform', 'storyCategory', 'category', 'genre', 'storyTone', 'writingStyle', 'style', 'webNovelGenre', 'pov', 'pointOfView', 'targetAudience', 'targetReaders', 'chapterWordRange']) delete result[key];
+  return { ...result, creativeConstitution: c };
+}
+
+const CREATIVE_SETTING_KEYS = [
+  'targetPlatform', 'platform', 'recommendedPlatform', 'storyCategory', 'category', 'genre',
+  'storyTone', 'writingStyle', 'style', 'webNovelGenre', 'pov', 'pointOfView',
+  'targetAudience', 'targetReaders', 'chapterWordRange',
+];
+
+/** Consolidate existing aliases into the same persisted constitution used by new projects. */
+export function normalizeStoredConstitutions(db: DatabaseSync): void {
+  const rows = db.prepare(
+    'SELECT id,type,target_platform,platform_style,target_words,writing_style,settings FROM projects',
+  ).all() as any[];
+  const update = db.prepare(`UPDATE projects
+    SET type=?,target_platform=?,platform_style=?,target_words=?,writing_style=?,settings=? WHERE id=?`);
+
+  for (const row of rows) {
+    let settings: Record<string, any>;
+    try {
+      const parsed = JSON.parse(row.settings || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+      settings = parsed;
+    } catch {
+      continue;
+    }
+
+    const saved = settings.creativeConstitution && typeof settings.creativeConstitution === 'object'
+      ? settings.creativeConstitution as Record<string, any>
+      : null;
+    const projectType = String(saved?.projectType || row.type || 'long_novel');
+    const targetPlatform = String(saved?.targetPlatform || row.target_platform || row.platform_style
+      || settings.targetPlatform || settings.platform || settings.recommendedPlatform || 'generic');
+    const targetWords = Math.max(0, Number(saved?.targetWords ?? row.target_words) || 0);
+    const benchmarkRange = targetForLength(getPlatform(targetPlatform), projectType).chapterWords;
+    const requestedRange = saved?.chapterWordRange || settings.chapterWordRange;
+    const chapterWordRange = Number.isInteger(requestedRange?.min) && Number.isInteger(requestedRange?.max)
+      && requestedRange.min > 0 && requestedRange.max >= requestedRange.min
+      ? { min: requestedRange.min, max: requestedRange.max }
+      : { min: benchmarkRange[0], max: benchmarkRange[1] };
+    const savedRevision = Number(saved?.revision);
+    const baseRevision = Number.isInteger(savedRevision) && savedRevision > 0 ? savedRevision : 1;
+    const constitution: CreativeConstitution = {
+      schemaVersion: 1,
+      revision: baseRevision,
+      projectType,
+      targetPlatform,
+      targetWords,
+      platformRules: {
+        ...targetForLength(getPlatform(targetPlatform), projectType),
+        chapterWords: [chapterWordRange.min, chapterWordRange.max],
+      },
+      category: String(saved?.category ?? settings.category ?? settings.storyCategory ?? settings.genre ?? ''),
+      storyTone: tags(saved?.storyTone ?? settings.storyTone),
+      writingStyle: style(saved?.writingStyle ?? settings.writingStyle ?? settings.style ?? row.writing_style),
+      webNovelGenre: tags(saved?.webNovelGenre ?? settings.webNovelGenre),
+      pov: String(saved?.pov ?? settings.pov ?? settings.pointOfView ?? ''),
+      targetAudience: saved?.targetAudience ?? settings.targetAudience ?? settings.targetReaders ?? null,
+      chapterWordRange,
+    };
+    if (saved && JSON.stringify({ ...constitution, revision: saved.revision }) !== JSON.stringify(saved)) {
+      constitution.revision = baseRevision + 1;
+    }
+    for (const key of CREATIVE_SETTING_KEYS) delete settings[key];
+    settings.creativeConstitution = constitution;
+    update.run(projectType, targetPlatform, targetPlatform, targetWords,
+      JSON.stringify(constitution.writingStyle), JSON.stringify(settings), row.id);
+  }
 }
 
 export function constitutionColumns(settings: Record<string, any>, c: CreativeConstitution) {

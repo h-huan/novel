@@ -1,7 +1,7 @@
 /**
  * 创建想法草稿 DTO
  */
-import { IsString, IsNotEmpty, IsOptional, IsNumber, IsIn, IsObject, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, IsIn, Min } from 'class-validator';
 
 export class CreateIdeaDraftDto {
   @IsString()
@@ -23,10 +23,6 @@ export class CreateIdeaDraftDto {
   @IsNumber()
   @Min(1)
   targetWords: number;
-
-  @IsOptional()
-  @IsObject()
-  settings?: Record<string, unknown>;
 
   @IsOptional()
   @IsString()

@@ -26,7 +26,7 @@ export interface ChapterRow {
   created_at: string;
   updated_at: string;
   locked_at: string | null;
-  // 自动质检可观测状态（053 迁移）：running/ok/failed/NULL
+  // 自动质检可观测状态：running/ok/failed/NULL
   auto_quality_status: string | null;
   auto_quality_message: string | null;
   auto_quality_at: string | null;
@@ -206,7 +206,8 @@ export class ChapterRepository extends BaseRepository<ChapterRow> {
   }
 
   /**
-   * 璁＄畻鎬诲瓧鏁?   */
+   * 计算总字数
+   */
   totalWordCount(projectId: string): number {
     const result = this.db.prepare(`
       SELECT COALESCE(SUM(word_count), 0) as total FROM chapters

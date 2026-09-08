@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { getBaseUrl, setBaseUrl } from '../lib/api';
+import { getBaseUrl, initializeApiBaseUrl } from '../lib/api';
 
 type ServerStatus = 'online' | 'offline' | 'connecting';
 type AutoSaveStatus = 'saved' | 'saving' | 'error' | 'idle';
@@ -18,7 +18,10 @@ interface AppState {
   setServerError: (error: string | null) => void;
   checkServerHealth: () => Promise<void>;
   startHealthPolling: () => void;
+  stopHealthPolling: () => void;
 }
+
+let healthPollInterval: ReturnType<typeof setInterval> | null = null;
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -41,6 +44,7 @@ export const useAppStore = create<AppState>()(
 
       checkServerHealth: async () => {
         try {
+          await initializeApiBaseUrl();
           const baseUrl = getBaseUrl();
           const res = await fetch(`${baseUrl}/health`);
           if (res.ok) {
@@ -54,11 +58,19 @@ export const useAppStore = create<AppState>()(
       },
 
       startHealthPolling: () => {
-        get().checkServerHealth();
-        const interval = setInterval(() => {
+        if (healthPollInterval) clearInterval(healthPollInterval);
+        const initialize = async () => {
+          await get().checkServerHealth();
+        };
+        void initialize();
+        healthPollInterval = setInterval(() => {
           get().checkServerHealth();
         }, 5000);
-        (window as any).__healthPollInterval = interval;
+      },
+
+      stopHealthPolling: () => {
+        if (healthPollInterval) clearInterval(healthPollInterval);
+        healthPollInterval = null;
       },
     }),
     {

@@ -62,3 +62,26 @@ it('blocks stale constitution output even when the evaluator gives high scores',
     expect((metrics.getRuns(project.id)[0] as any).gate_status).toBe('blocked');
   } finally { db.close(); }
 });
+
+it('keeps physical generation runs but updates one artifact report across retries', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    await new Migrator(db).runMigrations();
+    const database = { getDb: () => db } as any;
+    const project = new ProjectService(new ProjectRepository(database)).create({ title: '报告边界', targetPlatform: 'fanqie' });
+    const metrics = new GenerationMetricsService(database);
+    const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, {
+      score: ['category', 'tone', 'style', 'genre', 'pov', 'prose'].includes(key) ? null : 90,
+      status: ['category', 'tone', 'style', 'genre', 'pov', 'prose'].includes(key) ? 'not_applicable' : 'evaluated',
+      reason: '有当前证据', evidence: ['证据'],
+    }])) as any;
+    const score = { stage: 'world' as const, overallScore: 90, coverage: 1, dimensions, issues: [], status: 'evaluated' as const };
+    for (const prompt of ['第一次', '第二次']) {
+      const run = metrics.beginRun(project.id, 'world_building', prompt);
+      metrics.saveRunScore(run.id, project.id, score);
+      metrics.finishRun(run.id, 'success', Date.now(), '证据');
+    }
+    expect((db.prepare('SELECT COUNT(*) n FROM generation_runs').get() as any).n).toBe(2);
+    expect((db.prepare("SELECT COUNT(*) n FROM writing_quality_reports WHERE source_type='artifact_quality'").get() as any).n).toBe(1);
+  } finally { db.close(); }
+});

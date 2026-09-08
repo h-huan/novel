@@ -3,15 +3,55 @@
  * 封装 fetch，提供类型安全的 REST 调用
  */
 
-/** 默认端口，收到服务端实际端口前使用 */
-let BASE_URL = 'http://localhost:3100/api/v1';
+/** Web 开发模式走同源代理；打包后的 Electron 通过 IPC 确认固定服务端端口。 */
+let BASE_URL = typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)
+  ? '/api/v1'
+  : 'http://127.0.0.1:3100/api/v1';
+
+interface DesktopServerStatus {
+  running: boolean;
+  port: number;
+  error?: string;
+}
+
+let apiBaseInitialization: Promise<DesktopServerStatus | null> | null = null;
 
 /**
  * 设置 API 基础地址（端口变化时调用）
- * 桌面端从 server-status IPC 获取实际端口后调用此函数
+ * 桌面端从 server-status IPC 确认服务端就绪后调用此函数
  */
 export function setBaseUrl(port: number): void {
-  BASE_URL = `http://localhost:${port}/api/v1`;
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return;
+  BASE_URL = `http://127.0.0.1:${port}/api/v1`;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('api-base-url-changed', { detail: { baseUrl: BASE_URL } }));
+  }
+}
+
+/**
+ * Electron 首屏的所有请求共用这一项初始化，避免服务端就绪前发出请求。
+ * Web 模式不需要 IPC，直接使用 Vite 同源代理。
+ */
+export function initializeApiBaseUrl(): Promise<DesktopServerStatus | null> {
+  if (typeof window === 'undefined' || !window.electronAPI?.invoke) {
+    return Promise.resolve(null);
+  }
+  if (!apiBaseInitialization) {
+    apiBaseInitialization = window.electronAPI.invoke('get-server-status')
+      .then((result) => {
+        const status = result?.data;
+        if (!result?.success || !status?.running || !status.port) {
+          throw new ApiError(0, status?.error || '服务器未启动');
+        }
+        setBaseUrl(status.port);
+        return status;
+      })
+      .catch((error) => {
+        apiBaseInitialization = null;
+        throw error;
+      });
+  }
+  return apiBaseInitialization;
 }
 
 /** 获取当前 API 基础地址 */
@@ -42,6 +82,7 @@ async function request<T>(
   body?: unknown,
   timeoutMs: number = 1_800_000,
 ): Promise<ApiResponse<T>> {
+  await initializeApiBaseUrl();
   const url = `${BASE_URL}${path}`;
 
   const headers: Record<string, string> = {
@@ -170,6 +211,12 @@ export async function streamRequest(
   onComplete?: () => void,
   timeoutMs: number = 600_000,
 ): Promise<void> {
+  try {
+    await initializeApiBaseUrl();
+  } catch (err) {
+    onError?.(err instanceof Error ? err : new Error(String(err)));
+    return;
+  }
   const url = `${BASE_URL}${path}`;
   let response: Response;
   try {

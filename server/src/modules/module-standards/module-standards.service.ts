@@ -11,7 +11,7 @@
  * - 手动归纳：默认只在该模块"检测到变化(dirty)"时才允许（前端按钮默认禁用，dirty 才点亮并提示原因）；
  * - 归纳输入 = 当前标准 + 该模块近期埋点指标 + 跨章节避坑经验，用【配置的日常模型 scenario=daily】
  *   （走 RealLLM 统一配置路由，绝不自由选模型/降级）产出新版标准；
- * - 归纳前把旧标准整体快照进 module_standard_versions（发展历程，只读、不参与执行），再更新当前标准并刷新注入缓存；
+ * - 归纳前把旧标准保存为内部审计快照，再更新当前标准并刷新注入缓存；前端和公开 API 只读取当前标准；
  * - 任何归纳失败都保留旧标准、只记 run=failed，绝不影响正常生成。
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -243,25 +243,6 @@ export class ModuleStandardsService implements OnModuleInit {
       .prepare(`SELECT * FROM module_standards WHERE module_key=?`)
       .get(moduleKey) as StandardRow | undefined;
     return row ? this.parseRow(row) : null;
-  }
-
-  /** 发展历程（历史版本，只读）。 */
-  versions(moduleKey?: string) {
-    const database = this.db.getDb();
-    const rows = moduleKey
-      ? (database
-          .prepare(`SELECT * FROM module_standard_versions WHERE module_key=? ORDER BY created_at DESC, version DESC`)
-          .all(moduleKey) as any[])
-      : (database
-          .prepare(`SELECT * FROM module_standard_versions ORDER BY created_at DESC, version DESC`)
-          .all() as any[]);
-    return rows.map(r => ({
-      id: r.id, moduleKey: r.module_key, moduleName: r.module_name, version: r.version,
-      changeNote: r.change_note, trigger: r.trigger,
-      snapshot: (() => { try { return JSON.parse(r.snapshot_json); } catch { return null; } })(),
-      metricsSnapshot: (() => { try { return JSON.parse(r.metrics_snapshot_json || 'null'); } catch { return null; } })(),
-      createdAt: r.created_at,
-    }));
   }
 
   /** 避坑经验总量与最高出现次数（用于判断是否沉淀了新经验）。 */

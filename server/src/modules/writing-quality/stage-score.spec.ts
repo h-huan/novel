@@ -8,6 +8,18 @@ it('does not count missing or fabricated evidence as high scores', () => {
   expect(score.dimensions.context.status).toBe('not_evaluated');
 });
 
+it('anchors evidence when the quoted JSON differs only in whitespace', () => {
+  const content = '{\n  "platform": "番茄",\n  "tone": "热血"\n}';
+  const score = parseStageScore({
+    dimensions: {
+      context: { score: 88, reason: '遵守设定', evidence: ['"platform":"番茄"'] },
+    },
+  }, { ...input, content });
+
+  expect(score.dimensions.context.status).toBe('evaluated');
+  expect(content).toContain(score.dimensions.context.evidence[0]);
+});
+
 it('keeps the project unassessed until all prerequisite stages are assessed', () => {
   const world = parseStageScore({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 90, reason: '满足', evidence: ['真实引用'] }])) }, input);
   expect(aggregateProjectScore({ world }).overallScore).toBeNull();

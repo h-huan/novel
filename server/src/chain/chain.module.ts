@@ -4,7 +4,6 @@
  * 提供完整的链式编排引擎，包含：
  * - Chain 编排引擎（顺序执行/条件分支/重试）
  * - Prompt 模板仓库（短篇三步骤全套模板；天龙8步已于 2026-07-24 取消，正文改由 /chain/generate 单次 LLM 严格按大纲生成）
- * - QualityGate 质量门（CRITICAL/WARNING/INFO 三级）
  * - 短篇三步骤 Chain 服务（题材→大纲→正文）
  * - RealLLM 服务（真实 LLM API 调用）
  * - ChainController (REST API /chain/*)
@@ -16,7 +15,6 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ChainTemplateService } from './chain-template.service';
 import { ChainEngineService } from './chain-engine.service';
 import { PromptRegistryService } from './prompt-registry.service';
-import { QualityGateService } from './quality-gate.service';
 import { RealLLMService } from './real-llm.service';
 import { NewsRssService } from './news-rss.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
@@ -57,7 +55,6 @@ import { OriginalityModule } from '../modules/originality/originality.module';
     ChainEngineService,
     ChainTemplateService,
     PromptRegistryService,
-    QualityGateService,
     RealLLMService,
     NewsRssService,
     GenerationRecoveryService,
@@ -65,7 +62,6 @@ import { OriginalityModule } from '../modules/originality/originality.module';
   exports: [
     ChainEngineService,
     PromptRegistryService,
-    QualityGateService,
     RealLLMService,
     GenerationRecoveryService,
   ],

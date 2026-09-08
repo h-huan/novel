@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ConflictDashboard - 冲突优先级可视化面板
  * 对接后端 /conflict-engine/* API
  *
@@ -73,12 +73,12 @@ const ConflictDashboard: React.FC = () => {
   const [sourceFilter, setSourceFilter] = useState<string>('all');
 
   const loadConflicts = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setActionError(null);
     try {
       const res = await api.get(`/conflicts?priority=&type=&status=&projectId=${projectId}`);
       const data = (res as any).data ?? res;
       if (data.conflicts) setConflicts(data.conflicts as ConflictItem[]);
-    } catch { /* 后端未就绪 */ }
+    } catch { setActionError('矛盾查询失败，请重试。'); }
     setLoading(false);
   }, [projectId]);
 
@@ -215,14 +215,14 @@ const ConflictDashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* 按来源筛选（P2-1：质检结果按source分组展示） */}
+      {/* 内容问题类别 */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '14px', color: 'var(--color-text-dim)', fontWeight: 600 }}>按来源筛选：</span>
         {[
           { key: 'all', label: '全部', count: conflicts.length },
-          { key: 'deterministic', label: '确定性检查', count: conflicts.filter(c => !c.source || c.source === 'deterministic').length },
-          { key: 'alignment_verifier', label: 'LLM大纲验收', count: conflicts.filter(c => c.source === 'alignment_verifier').length },
-          { key: 'alignment_verifier_hardline', label: '硬红线扫描', count: conflicts.filter(c => c.source === 'alignment_verifier_hardline' || c.source === 'hardline').length },
+          { key: 'deterministic', label: '叙事逻辑', count: conflicts.filter(c => !c.source || c.source === 'deterministic').length },
+          { key: 'alignment_verifier', label: '大纲一致性', count: conflicts.filter(c => c.source === 'alignment_verifier').length },
+          { key: 'alignment_verifier_hardline', label: '语言与内容规范', count: conflicts.filter(c => c.source === 'alignment_verifier_hardline' || c.source === 'hardline').length },
         ].map(s => (
           <button
             key={s.key}
@@ -294,8 +294,8 @@ const ConflictDashboard: React.FC = () => {
               <div><span style={{ color: 'var(--color-text-soft)' }}>状态: </span><span style={{ color: STATUS_COLORS[selected.status], fontWeight: 700 }}>{STATUS_LABELS[selected.status]}</span></div>
               {selected.source && (
                 <div><span style={{ color: 'var(--color-text-soft)' }}>来源: </span><span style={{ color: 'var(--color-text-soft)', fontWeight: 600 }}>
-                  {selected.source === 'alignment_verifier' ? '大纲一致性验收器（LLM）'
-                    : selected.source === 'alignment_verifier_hardline' ? '硬红线违规（确定性扫描）'
+                  {selected.source === 'alignment_verifier' ? '大纲一致性'
+                    : selected.source === 'alignment_verifier_hardline' ? '语言与内容规范问题'
                     : '确定性一致性检测'}
                 </span></div>
               )}

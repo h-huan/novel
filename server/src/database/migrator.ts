@@ -5,6 +5,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import * as path from 'path';
 import * as fs from 'fs';
+import { normalizeStoredConstitutions } from '../modules/project/creative-constitution';
 
 export interface Migration {
   id: number;
@@ -82,15 +83,7 @@ export class Migrator {
     return migrations.sort((a, b) => a.id - b.id);
   }
 
-  /**
-   * squash 基线自愈对齐（一次性）。
-   *
-   * 背景：历史上 001..053 的增量迁移已被整体收敛为单一 001 初始 schema。
-   * - 全新库：_migrations 为空，没有 id 大于磁盘最大迁移号的记录，直接返回，走正常建表；
-   * - 老库：_migrations 里残留 id>1 的历史记录，而磁盘上只剩 001。此时幂等执行一次 001
-   *   （全部 CREATE IF NOT EXISTS + PRAGMA 补列，不改动任何业务数据），再把迁移记录收敛为仅 id=1；
-   * - 已对齐库：只剩 id=1，无 id>1 记录，直接返回。
-   */
+  /** Apply the single current baseline once to databases carrying old migration ids. */
   private alignSquashedBaseline(migrations: Migration[]): void {
     const initial = migrations.find((m) => m.id === 1);
     if (!initial) return;
@@ -118,6 +111,7 @@ export class Migrator {
     const migrations = this.loadMigrations();
     this.alignSquashedBaseline(migrations);
     const executed = this.getExecutedMigrations();
+    const applied = new Set<number>();
 
     for (const migration of migrations) {
       if (!executed.has(migration.id)) {
@@ -127,6 +121,7 @@ export class Migrator {
           this.db
             .prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)')
             .run(migration.id, migration.name);
+          applied.add(migration.id);
           console.log(`[Migration] ${migration.id}_${migration.name} completed.`);
         } catch (err) {
           console.error(`[Migration] ${migration.id}_${migration.name} FAILED:`, err);
@@ -134,6 +129,12 @@ export class Migrator {
         }
       }
     }
+
+    // The squashed baseline also owns idempotent schema/data invariants. Run it on
+    // existing id=1 databases so fixes do not require another historical migration file.
+    const initial = migrations.find((migration) => migration.id === 1);
+    if (initial && executed.has(1) && !applied.has(1)) initial.up(this.db);
+    normalizeStoredConstitutions(this.db);
   }
 
   /**

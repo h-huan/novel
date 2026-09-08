@@ -8,6 +8,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { standardScene } from '../../routing/scenario-taxonomy';
 
 interface CacheStandard {
   version?: number;
@@ -24,31 +25,12 @@ interface CacheStandard {
 }
 
 class StandardDirectiveCacheClass {
-  /** scenario → 该场景应注入的标准指令文本 */
-  private readonly byScenario = new Map<string, string>();
-  /** 横切标准（如原创性），对所有创作场景注入 */
-  private crosscut = '';
   private rebuiltAt = 0;
   private standards: CacheStandard[] = [];
 
   /** 由 ModuleStandardsService 用当前 active 标准全量重建。 */
   rebuild(standards: CacheStandard[]): void {
     this.standards = structuredClone(standards);
-    this.byScenario.clear();
-    const crosscutParts: string[] = [];
-    for (const s of standards) {
-      const directive = this.format(s);
-      if (s.category === 'crosscut') {
-        crosscutParts.push(directive);
-        continue;
-      }
-      for (const scenario of s.scenarios) {
-        // 一个场景可能对应多个模块标准，追加合并
-        const existing = this.byScenario.get(scenario);
-        this.byScenario.set(scenario, existing ? `${existing}\n\n${directive}` : directive);
-      }
-    }
-    this.crosscut = crosscutParts.join('\n\n');
     this.rebuiltAt = Date.now();
   }
 
@@ -74,13 +56,11 @@ class StandardDirectiveCacheClass {
 
   /** 取某场景需注入的全部标准（场景专属 + 横切）。 */
   get(scenario?: string | null): string {
-    const parts: string[] = [];
-    const key = scenario || 'daily';
-    const own = this.byScenario.get(key);
-    // 日常兜底场景不重复叠加（其本身可能就是某模块场景）
-    if (own) parts.push(own);
-    if (this.crosscut && key !== 'daily') parts.push(this.crosscut);
-    return parts.filter(Boolean).join('\n\n');
+    const key = standardScene(scenario);
+    return this.standards
+      .filter(s => s.scenarios.includes(key))
+      .map(s => this.format(s))
+      .join('\n\n');
   }
 
   getRebuiltAt(): number {
@@ -92,15 +72,13 @@ class StandardDirectiveCacheClass {
     return {
       enabled, available: !!directive,
       digest: createHash('sha256').update(directive).digest('hex'),
-      modules: enabled ? this.standards.filter(s => s.scenarios.includes(scenario) || (s.category === 'crosscut' && scenario !== 'daily'))
+      modules: enabled ? this.standards.filter(s => s.scenarios.includes(standardScene(scenario)))
         .map(s => ({ key: s.module_key, version: s.version ?? null, baseline: s.seed_baseline_version ?? null })) : [],
     };
   }
 
   clear(): void {
     this.standards = [];
-    this.byScenario.clear();
-    this.crosscut = '';
     this.rebuiltAt = 0;
   }
 }

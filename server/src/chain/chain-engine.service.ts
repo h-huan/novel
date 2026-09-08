@@ -5,14 +5,12 @@
  * - PromptChain 链定义加载与校验
  * - ChainExecutor 顺序执行/条件分支/重试逻辑
  * - Handlebars 模板变量注入
- * - 节点级别质量门检查
  * - 执行上下文管理
  *
  * 设计基于 Prompt Chain 架构文档的引擎层规范
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { PromptRegistryService } from './prompt-registry.service';
-import { QualityGateService } from './quality-gate.service';
 import { RealLLMService } from './real-llm.service';
 import {
   PromptChain,
@@ -23,8 +21,6 @@ import {
   ChainError,
   ChainState,
   NodeType,
-  QualityGateConfig,
-  GateCheckType,
 } from './chain.types';
 
 /**
@@ -52,7 +48,6 @@ export class ChainEngineService {
 
   constructor(
     private readonly promptRegistry: PromptRegistryService,
-    private readonly qualityGate: QualityGateService,
     private readonly llm: RealLLMService,
   ) {}
 
@@ -123,25 +118,8 @@ export class ChainEngineService {
             break;
           }
 
-          // 降级执行
-          if (node.nextOnFailure) {
-            const fallbackNodeIndex = chain.nodes.findIndex(
-              (n) => n.id === node.nextOnFailure,
-            );
-            if (fallbackNodeIndex > -1) {
-              i = fallbackNodeIndex - 1; // 循环会 +1
-              continue;
-            }
-          }
         }
 
-        // 处理质量门失败
-        if (nodeResult.gateResult && !nodeResult.gateResult.passed) {
-          if (chain.config.strictMode) {
-            overallState = node.qualityGate?.level === 'CRITICAL' ? 'failed' : 'partial';
-            if (overallState === 'failed') break;
-          }
-        }
       }
 
       // 检查是否有分支跳转
@@ -161,14 +139,6 @@ export class ChainEngineService {
       const endTime = new Date();
       const totalLatency = endTime.getTime() - startTime.getTime();
 
-      // 收集所有质量门结果
-      const gateResults: Record<string, any> = {};
-      for (const nr of nodeResults) {
-        if (nr.gateResult) {
-          gateResults[nr.nodeId] = nr.gateResult;
-        }
-      }
-
       this.logger.log(
         `Chain ${chain.id} 执行完成，状态: ${overallState}，耗时: ${totalLatency}ms`,
       );
@@ -179,7 +149,6 @@ export class ChainEngineService {
         status: overallState,
         outputs: { ...context.nodeOutputs },
         nodeResults,
-        gateResults,
         errors,
         totalLatency,
         startTime,
@@ -203,7 +172,6 @@ export class ChainEngineService {
         status: overallState,
         outputs: { ...context.nodeOutputs },
         nodeResults,
-        gateResults: {},
         errors,
         totalLatency: new Date().getTime() - startTime.getTime(),
         startTime,
@@ -225,7 +193,7 @@ export class ChainEngineService {
     this.logger.log(`${nodeLog} 开始执行`);
 
     let currentRetryCount = 0;
-    const maxRetries = node.qualityGate?.maxRetries ?? node.retryCount;
+    const maxRetries = node.retryCount;
     let lastOutput: unknown = null;
     let lastError: string | null = null;
 
@@ -267,67 +235,6 @@ export class ChainEngineService {
 
         lastOutput = output;
 
-        // 4. 质量门检查
-        if (node.qualityGate && chain.config.enableQualityGate) {
-          const gateResult = await this.runQualityGate(
-            node.qualityGate,
-            output,
-            node.id,
-          );
-
-          if (!gateResult.passed) {
-            // 更新重试计数器
-            context.retryCounters[node.id] = (context.retryCounters[node.id] || 0) + 1;
-            context.qualityGateFailures[node.id] = [
-              ...(context.qualityGateFailures[node.id] || []),
-              gateResult,
-            ];
-
-            const shouldRetry = this.qualityGate.shouldRetry(
-              gateResult,
-              node.qualityGate.level,
-              maxRetries,
-              currentRetryCount,
-            );
-
-            if (shouldRetry) {
-              currentRetryCount++;
-              this.logger.warn(
-                `${nodeLog} 质量门未通过(得分:${gateResult.score})，第${currentRetryCount}次重试`,
-              );
-              continue;
-            }
-
-            // 重试用尽
-            const status = node.qualityGate.level === 'CRITICAL' ? 'failed' : 'partial';
-            return {
-              nodeId: node.id,
-              nodeName: node.name,
-              status,
-              output,
-              gateResult,
-              error: `质量门未通过: ${gateResult.summary}`,
-              latency: Date.now() - startTime,
-              retryCount: currentRetryCount,
-              timestamp: new Date(),
-            };
-          }
-
-          this.logger.debug(`${nodeLog} 质量门通过(得分:${gateResult.score})`);
-
-          return {
-            nodeId: node.id,
-            nodeName: node.name,
-            status: 'success',
-            output,
-            gateResult,
-            latency: Date.now() - startTime,
-            retryCount: currentRetryCount,
-            timestamp: new Date(),
-          };
-        }
-
-        // 无质量门配置，直接返回成功
         return {
           nodeId: node.id,
           nodeName: node.name,
@@ -632,7 +539,6 @@ ${fullText}`;
       },
       nodeOutputs: {},
       retryCounters: {},
-      qualityGateFailures: {},
       startTime: new Date(),
       timestamps: {},
       metadata: {},
@@ -722,43 +628,6 @@ ${fullText}`;
 
     if (parts.length > 1) {
       current[parts[parts.length - 1]] = value;
-    }
-  }
-
-  /**
-   * 执行质量门检查
-   */
-  private async runQualityGate(
-    config: QualityGateConfig,
-    output: unknown,
-    nodeId: string,
-  ) {
-    switch (config.checkType) {
-      case 'rule':
-        return this.qualityGate.evaluateByRule(
-          config,
-          (typeof output === 'object' ? output : {}) as Record<string, unknown>,
-          nodeId,
-        );
-      case 'llm_judge':
-        return this.qualityGate.evaluateByLLM(
-          config,
-          typeof output === 'string' ? output : JSON.stringify(output),
-          nodeId,
-        );
-      case 'rule_and_llm':
-        return this.qualityGate.evaluateCombined(
-          config,
-          (typeof output === 'object' ? output : {}) as Record<string, unknown>,
-          typeof output === 'string' ? output : JSON.stringify(output),
-          nodeId,
-        );
-      default:
-        return this.qualityGate.evaluateByRule(
-          config,
-          (typeof output === 'object' ? output : {}) as Record<string, unknown>,
-          nodeId,
-        );
     }
   }
 

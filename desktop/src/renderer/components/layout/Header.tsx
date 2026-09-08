@@ -4,8 +4,6 @@ import { useAppStore } from '../../stores/appStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDiscoveryStore } from '../../stores/discoveryStore';
 import HelpPanel from '../common/HelpPanel';
-import DictionaryModal from './DictionaryModal';
-import PromptChainModal from './PromptChainModal';
 import SettingsPage from '../../pages/SettingsPage';
 
 // 非项目内（工作台/项目管理/平台级页面）的顶部全局导航
@@ -22,7 +20,7 @@ const GLOBAL_NAV: Array<{ to: string; label: string }> = [
  * 设计理念（VSCode / iDEA 风格）：
  *  1. 左上角 = 项目下拉选择器（最近打开项目 + 创建新项目）
  *  2. 灵感发现 → 统一走 close-project 回引导窗口（不在顶部单独放按钮）
- *  3. 字典 / Prompt Chain / 使用手册 → 弹框（Modal）
+ *  3. 使用手册 → 弹框（Modal）
  *  4. 切换到引导窗口前检测后台任务
  */
 const Header: React.FC = () => {
@@ -33,8 +31,6 @@ const Header: React.FC = () => {
   const { isCreating, hasActiveCreation, creationProgress, creationStepStatus } = useDiscoveryStore();
 
   const [helpOpen, setHelpOpen] = useState(false);
-  const [dictOpen, setDictOpen] = useState(false);
-  const [promptChainOpen, setPromptChainOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 项目下拉选择器状态
@@ -357,8 +353,6 @@ const Header: React.FC = () => {
 
       {/* ═══════ 弹框组件 ═══════ */}
       <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <DictionaryModal open={dictOpen} onClose={() => setDictOpen(false)} />
-      <PromptChainModal open={promptChainOpen} onClose={() => setPromptChainOpen(false)} />
       {settingsOpen && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 1900, backgroundColor: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '28px' }}

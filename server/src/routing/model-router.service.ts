@@ -3,7 +3,7 @@
  *
  * 核心职责：
  * - 模型注册表管理（写手/评审/策划 三类角色，覆盖6模型）
- * - 按场景（9种写作阶段）自动选择模型
+ * - 五个用户配置场景覆盖全部内部写作阶段
  * - Temperature 动态调节（基础温度+重试升温+爆发章降温）
  * - BYOK 接口（用户自己的 API Key 管理）
  *
@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { cwd } from 'process';
+import { modelSceneTab } from './scenario-taxonomy';
 
 // ==================== 类型定义 ====================
 
@@ -60,7 +61,6 @@ export interface UserKeyEntry {
   modelName: string;
   apiKey: string;
   baseUrl?: string;
-  embeddingModel?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -89,31 +89,6 @@ export interface RouteConfig {
 /** 写作模式（custom 已废弃，场景模型在所有模式下均生效） */
 export type WritingMode = 'economy' | 'normal' | 'premium';
 
-const SCENARIO_ALIASES: Record<string, string> = {
-  idea_generate: 'idea_generate',
-  inspiration: 'idea_generate',
-  outline: 'outline',
-  world_building: 'outline',
-  character_design: 'outline',
-  organization_map: 'outline',
-  foreshadowing: 'outline',
-  timeline: 'outline',
-  'long-novel-flexible-outline': 'outline',
-  'inspiration-seed-enrich': 'outline',
-  writing: 'writing',
-  writing_daily: 'writing',
-  writing_climax: 'writing',
-  chapter_synthesis: 'writing',
-  polish: 'polish',
-  refinement: 'polish',
-  enhance_opening: 'polish',
-  enhance_reversal: 'polish',
-  adapt_platform: 'polish',
-  quality_refine: 'polish',
-  character_review: 'daily',
-  review: 'daily',
-};
-
 /** 写作模式标签（模式本身只影响温度/成本说明，绝不改变"设置里配置的模型"） */
 const WRITING_MODE_LABELS: Record<'economy'|'normal'|'premium', string> = {
   economy: '省钱模式',
@@ -130,6 +105,9 @@ export class ModelRouterService implements OnModuleInit {
 
   /** 当前写作模式 */
   private currentMode: WritingMode = 'normal';
+
+  /** 当前模式是否来自持久化配置，而非进程默认值 */
+  private hasPersistedMode = false;
 
   /** 模式持久化文件路径 */
   private readonly modePath: string;
@@ -186,6 +164,7 @@ export class ModelRouterService implements OnModuleInit {
         }
         if (data.mode && ['economy', 'normal', 'premium'].includes(data.mode)) {
           this.currentMode = data.mode;
+          this.hasPersistedMode = true;
           this.logger.log(`已恢复写作模式: ${data.mode}`);
         }
       }
@@ -212,9 +191,17 @@ export class ModelRouterService implements OnModuleInit {
         const raw = fs.readFileSync(this.userKeysPath, 'utf-8');
         const arr: UserKeyEntry[] = JSON.parse(raw);
         for (const entry of arr) {
-          const key = `${entry.projectId}_${entry.modelName}`;
+          const projectId = String(entry.projectId || 'global').trim() || 'global';
+          const modelName = String(entry.modelName || '').trim();
+          const apiKey = String(entry.apiKey || '').trim();
+          if (!modelName || !apiKey) continue;
+          const key = `${projectId}_${modelName}`;
           this.userKeys.set(key, {
             ...entry,
+            projectId,
+            modelName,
+            apiKey,
+            baseUrl: typeof entry.baseUrl === 'string' && entry.baseUrl.trim() ? entry.baseUrl.trim() : undefined,
             createdAt: new Date(entry.createdAt),
             updatedAt: new Date(entry.updatedAt),
           });
@@ -271,7 +258,22 @@ export class ModelRouterService implements OnModuleInit {
     try {
       if (fs.existsSync(this.customScenesPath)) {
         const raw = fs.readFileSync(this.customScenesPath, 'utf-8');
-        this.customScenes = JSON.parse(raw);
+        const stored = JSON.parse(raw) as Record<string, unknown>;
+        if (!this.hasPersistedMode) {
+          const configuredModes = new Set(
+            Object.keys(stored)
+              .map(key => key.includes(':') ? key.slice(key.lastIndexOf(':') + 1) : '')
+              .filter(mode => ['economy', 'normal', 'premium'].includes(mode)),
+          );
+          if (configuredModes.size === 1) {
+            this.currentMode = [...configuredModes][0] as WritingMode;
+            this.hasPersistedMode = true;
+            this.persistMode();
+            this.logger.log(`根据现有场景配置恢复写作模式: ${this.currentMode}`);
+          }
+        }
+        this.customScenes = this.normalizeSceneMappings(stored);
+        if (JSON.stringify(stored) !== JSON.stringify(this.customScenes)) this.persistCustomScenes();
         this.logger.log(`已从磁盘恢复 ${Object.keys(this.customScenes).length} 个自定义场景模型映射`);
       }
     } catch (e) {
@@ -312,21 +314,6 @@ export class ModelRouterService implements OnModuleInit {
   // ==================== 核心路由方法 ====================
 
   /**
-   * 解析模型的具体版本号（公开方法，供外部调用）
-   */
-  public resolveModelVersion(modelKey: string): string {
-    const versionMap = this.config.model_versions || {};
-    if (versionMap[modelKey]) {
-      return versionMap[modelKey];
-    }
-    const modelInfo = this.config.models[modelKey];
-    if (modelInfo?.versions?.length) {
-      return modelInfo.versions[0].id;
-    }
-    return modelKey;
-  }
-
-  /**
    * 根据场景获取路由模型
    * @param scenario 写作场景名称
    * @param options 附加选项
@@ -340,16 +327,14 @@ export class ModelRouterService implements OnModuleInit {
       role?: string;                 // 指定角色（writer/reviewer/planner）
     },
   ): RoutedModel {
-    // 未指定场景（或显式 'default'/'daily'）：优先使用作者在设置中配置的"日常模型"。
-    // 这是"没有设置场景的地方使用日常场景模型"的硬性落地——日常模型未配置时，
-    // 才回退到下方按场景的正常路由（默认写作模型）。绝不跳到未配置的虚假模型。
+    // 未指定场景（或显式 'default'/'daily'）只使用当前模式的日常模型。
     if (!scenario || scenario === 'default' || scenario === 'daily') {
-      const dailyModel = this.customScenes[`daily:${this.currentMode}`] || this.customScenes.daily;
+      const dailyModel = this.customScenes[`daily:${this.currentMode}`];
       if (!dailyModel) {
         throw new Error(
           `未配置日常模型（场景: daily, 模式: ${this.currentMode}）。` +
           `请在「设置 → 模型配置」中为日常场景选择模型后再使用。` +
-          `日常模型是所有未单独配置场景的兜底，必须先配置。`
+          `未单独配置任务模型时会使用日常模型，因此必须先配置。`
         );
       }
       const dailyVersion = dailyModel; // 配置什么版本就原样用什么名称，不做版本映射/别名
@@ -358,57 +343,36 @@ export class ModelRouterService implements OnModuleInit {
         modelName: dailyVersion,
         modelVersion: dailyVersion,
         temperature: this.config.scenarios.writing?.temperature ?? this.config.defaults.temperature,
-        tier: 'low',
+        tier: 'configured',
         role: options?.role || 'writer',
       };
     }
 
-    const routeScenario = SCENARIO_ALIASES[scenario] || 'writing';
-    if (!SCENARIO_ALIASES[scenario]) {
-      this.logger.debug(`未知场景 ${scenario}，归入写作`);
+    const routeScenario = modelSceneTab(scenario);
+    if (routeScenario === 'daily' && !['daily', 'default'].includes(scenario)) {
+      this.logger.debug(`未单独配置的场景 ${scenario} 使用日常场景模型`);
     }
-    const scenarioRoute = this.config.scenarios[routeScenario];
+    const scenarioRoute = routeScenario === 'daily'
+      ? this.config.scenarios.writing
+      : this.config.scenarios[routeScenario];
     if (!scenarioRoute) {
-      this.logger.warn(`未知场景: ${scenario}，使用默认模型`);
-      throw new Error(`模型场景 ${routeScenario} 未配置`);
-    }
-
-    // 动态路由：正文生成时按章节功能路由
-    let targetModel = scenarioRoute.model;
-    if (targetModel === 'dynamic' && options?.chapterFunction) {
-      const funcRoute = this.config.chapter_function_routing[options.chapterFunction];
-      if (funcRoute) {
-        targetModel = funcRoute.model;
-      } else {
-        this.logger.warn(`未知章节功能: ${options.chapterFunction}，使用场景默认`);
-      }
+      throw new Error(`模型场景 ${routeScenario} 缺少温度配置`);
     }
 
     // Temperature 动态调节
     let temperature = scenarioRoute.temperature;
     temperature = this.adjustTemperature(temperature, options);
 
-    // 如果指定角色，检查该模型是否符合角色
-    if (options?.role) {
-      const roleModels = this.config.roles[options.role];
-      if (roleModels) {
-        const hasModel = roleModels.models.some((m) => m.model === targetModel);
-        if (!hasModel) {
-          throw new Error(`模型配置冲突：场景要求模型 ${targetModel}，但角色 ${options.role} 未允许该模型。未自动切换模型。`);
-        }
-      }
-    }
-
     // 【模型选择规则 · 严格按配置，不降级】
     // 1. 指定场景优先用该场景的自定义模型（customScenes）
-    // 2. 场景未配置时，用日常模型（符合文档：不确定和常规场景使用日常场景配置）
+    // 2. 场景未配置时，按当前模式明确继承日常模型
     // 3. 日常模型也未配置时，明确报错提醒用户配置，绝不静默降级到 route-config 默认模型
     // 配置什么模型就用什么模型，这是不同场景 tab 存在的意义。
-    const dailyModel = this.customScenes[`daily:${this.currentMode}`] || this.customScenes.daily;
+    const dailyModel = this.customScenes[`daily:${this.currentMode}`];
 
     // 自定义场景模型：不管当前模式是什么，有自定义分配就优先使用
     const customKey = `${routeScenario}:${this.currentMode}`;
-    const customModel = this.customScenes[customKey] || this.customScenes[routeScenario];
+    const customModel = this.customScenes[customKey];
     if (customModel) {
       const customVersion = customModel; // 配置什么版本就原样用什么名称，不做版本映射/别名
       this.logger.debug(`[场景自定义] ${scenario}(${this.currentMode}) → ${customVersion}`);
@@ -416,20 +380,20 @@ export class ModelRouterService implements OnModuleInit {
         modelName: customVersion,
         modelVersion: customVersion,
         temperature,
-        tier: 'low',
+        tier: 'configured',
         role: options?.role || 'writer',
       };
     }
 
-    // 场景未配置：用日常模型兜底（文档规定：不确定和常规场景使用日常场景配置）
+    // 场景未配置：按当前模式继承日常模型
     if (dailyModel) {
       const dailyVersion = dailyModel; // 配置什么版本就原样用什么名称，不做版本映射/别名
-      this.logger.debug(`[场景未配置·用日常模型] ${scenario}(${this.currentMode}) → ${dailyVersion}`);
+      this.logger.debug(`[场景继承日常模型] ${scenario}(${this.currentMode}) → ${dailyVersion}`);
       return {
         modelName: dailyVersion,
         modelVersion: dailyVersion,
         temperature,
-        tier: 'low',
+        tier: 'configured',
         role: options?.role || 'writer',
       };
     }
@@ -465,6 +429,7 @@ export class ModelRouterService implements OnModuleInit {
    */
   setWritingMode(mode: WritingMode): void {
     this.currentMode = mode;
+    this.hasPersistedMode = true;
     this.persistMode();
     this.logger.log(`写作模式已切换: ${WRITING_MODE_LABELS[mode]}`);
   }
@@ -546,19 +511,21 @@ export class ModelRouterService implements OnModuleInit {
     modelName: string,
     apiKey: string,
     baseUrl?: string,
-    embeddingModel?: string,
   ): void {
-    const key = `${projectId}_${modelName}`;
+    const normalizedProjectId = projectId.trim() || 'global';
+    const normalizedModelName = modelName.trim();
+    const normalizedApiKey = apiKey.trim();
+    if (!normalizedModelName || !normalizedApiKey) throw new Error('提供商和 API Key 不能为空');
+    const key = `${normalizedProjectId}_${normalizedModelName}`;
     this.userKeys.set(key, {
-      projectId,
-      modelName,
-      apiKey,
-      baseUrl,
-      embeddingModel,
+      projectId: normalizedProjectId,
+      modelName: normalizedModelName,
+      apiKey: normalizedApiKey,
+      baseUrl: baseUrl?.trim() || undefined,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    this.logger.log(`已注册用户 Key: 项目=${projectId}, 模型=${modelName}`);
+    this.logger.log(`已注册用户 Key: 项目=${normalizedProjectId}, 模型=${normalizedModelName}`);
     this.persistUserKeys();
   }
 
@@ -733,8 +700,37 @@ export class ModelRouterService implements OnModuleInit {
    * 保存自定义场景模型映射
    */
   setCustomScenes(scenes: Record<string, string>): void {
-    this.customScenes = { ...scenes };
-    this.logger.log(`自定义场景模型已保存: ${Object.keys(scenes).length} 个场景`);
+    this.customScenes = this.normalizeSceneMappings(scenes, true);
+    this.logger.log(`自定义场景模型已保存: ${Object.keys(this.customScenes).length} 个场景模式`);
     this.persistCustomScenes();
+  }
+
+  private normalizeSceneMappings(raw: Record<string, unknown>, strict = false): Record<string, string> {
+    const result: Record<string, string> = {};
+    const allowedScenes = new Set(['idea_generate', 'outline', 'writing', 'polish', 'daily']);
+    const modes: WritingMode[] = ['economy', 'normal', 'premium'];
+    for (const [key, value] of Object.entries(raw || {})) {
+      const separator = key.lastIndexOf(':');
+      if (separator > 0 && typeof value === 'string' && value.trim()) {
+        const scene = key.slice(0, separator);
+        const mode = key.slice(separator + 1) as WritingMode;
+        if (allowedScenes.has(scene) && modes.includes(mode)) result[`${scene}:${mode}`] = value.trim();
+        else if (strict) throw new Error(`无效场景模型配置: ${key}`);
+        continue;
+      }
+      // One-time in-memory migration of historical flat/nested storage. Only
+      // the canonical scene:mode form is persisted and used afterwards.
+      if (!strict && allowedScenes.has(key) && typeof value === 'string' && value.trim()) {
+        for (const mode of modes) result[`${key}:${mode}`] = value.trim();
+      } else if (!strict && allowedScenes.has(key) && value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const mode of modes) {
+          const model = (value as Record<string, unknown>)[mode];
+          if (typeof model === 'string' && model.trim()) result[`${key}:${mode}`] = model.trim();
+        }
+      } else if (strict) {
+        throw new Error(`无效场景模型配置: ${key}`);
+      }
+    }
+    return result;
   }
 }

@@ -35,6 +35,34 @@ describe('模型名纪律：配什么版本就原样使用什么名称', () => {
     expect(JSON.stringify([daily, outline, writing])).not.toContain('deepseek-chat');
   });
 
+  it('routes auxiliary and unknown scenes only to the configured daily model', async () => {
+    const router = new ModelRouterService({ get: () => undefined } as any);
+    await router.onModuleInit();
+    (router as any).currentMode = 'economy';
+    (router as any).customScenes = {
+      'daily:economy': 'daily-exact-model',
+      'writing:economy': 'writing-exact-model',
+    };
+    expect(router.getModelForScenario('summary').modelName).toBe('daily-exact-model');
+    expect(router.getModelForScenario('state_extraction').modelName).toBe('daily-exact-model');
+    expect(router.getModelForScenario('unregistered_internal_task').modelName).toBe('daily-exact-model');
+  });
+
+  it('仅存在一个模式的已保存配置时恢复该模式，不误用进程默认模式', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'novel-route-mode-'));
+    fs.writeFileSync(path.join(dataDir, 'custom-scenes.json'), JSON.stringify({
+      'idea_generate:economy': 'deepseek-v4-flash',
+      'daily:economy': 'deepseek-v4-flash',
+    }));
+    process.env.DATA_DIR = dataDir;
+    const router = new ModelRouterService({ get: () => undefined } as any);
+    await router.onModuleInit();
+
+    expect(router.getWritingMode()).toBe('economy');
+    expect(router.getModelForScenario('idea_generate').modelVersion).toBe('deepseek-v4-flash');
+    expect(JSON.parse(fs.readFileSync(path.join(dataDir, 'writing-mode.json'), 'utf8'))).toEqual({ mode: 'economy' });
+  });
+
   it('RealLLM 运行时：deepseek-* 原样透传，笼统 deepseek 直接报错', () => {
     const llm = new RealLLMService({
       getConfig: () => ({ defaults: { maxTokens: 4096 }, scenarios: {} }),
@@ -47,5 +75,21 @@ describe('模型名纪律：配什么版本就原样使用什么名称', () => {
       expect(rt.apiModel).toBe(name);
     }
     expect(() => resolve('deepseek')).toThrow(/具体版本/);
+  });
+
+  it('加载 BYOK 时清理输入空格，并让具体 DeepSeek 模型读取提供商 Key', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'novel-route-key-'));
+    fs.writeFileSync(path.join(dataDir, 'user-keys.json'), JSON.stringify([{
+      projectId: 'global', modelName: ' deepseek ', apiKey: ' secret-key ',
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]));
+    process.env.DATA_DIR = dataDir;
+    const router = new ModelRouterService({ get: () => undefined } as any);
+    await router.onModuleInit();
+    const llm = new RealLLMService(router, {} as any);
+    const runtime = (llm as any).resolveRuntimeModel('deepseek-v4-flash');
+
+    expect(router.getUserKey('global', 'deepseek')?.apiKey).toBe('secret-key');
+    expect((llm as any).getApiKey(runtime)).toBe('secret-key');
   });
 });

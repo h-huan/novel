@@ -33,7 +33,10 @@ describe('configured long novel planning acceptance', () => {
 
     const result = await controller.generateConfiguredLongNovelPlan({
       title: '长篇验证', storySetting: '调查员追查旧站循环', targetWords: 2_000_000,
-      targetWanZi: 200, genre: '悬疑', chapterWordMin: 3200, chapterWordMax: 4000, onProgress: vi.fn(),
+      targetWanZi: 200, genre: '悬疑', chapterWordMin: 3200, chapterWordMax: 4000,
+      targetPlatform: 'fanqie',
+      styleTags: { storyTone: ['紧张'], writingStyle: ['白描'], webNovelGenre: ['悬疑流'] },
+      onProgress: vi.fn(),
     });
 
     const chapters = result.volumes.flatMap((volume: any) => volume.chapters);

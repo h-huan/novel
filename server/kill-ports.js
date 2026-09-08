@@ -3,24 +3,27 @@
  * 用法: node kill-ports.js [ports...]
  */
 
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 function killPort(port) {
   try {
-    const out = execSync(`netstat -ano | findstr :${port}`, {
+    const query = spawnSync('netstat.exe', ['-ano'], {
       encoding: 'utf8',
-      shell: 'cmd.exe',
       timeout: 5000,
+      windowsHide: true,
     });
+    const out = query.stdout || '';
     const lines = out.split('\n').filter(l => l.includes('LISTENING'));
     const pids = new Set();
     for (const line of lines) {
-      const m = line.trim().match(/(\d+)$/);
-      if (m) pids.add(m[1]);
+      const columns = line.trim().split(/\s+/);
+      const address = columns[1] || '';
+      const m = address.match(/:(\d+)$/);
+      if (m?.[1] === String(port) && columns.at(-1)) pids.add(columns.at(-1));
     }
     for (const pid of pids) {
       try {
-        spawnSync('taskkill', ['/F', '/PID', pid], { shell: true });
+        spawnSync('taskkill.exe', ['/F', '/PID', pid], { windowsHide: true, shell: false });
         console.log(`✓ Killed PID ${pid} on port ${port}`);
       } catch (e) {
         console.log(`  PID ${pid}: ${e.message}`);

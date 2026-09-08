@@ -15,6 +15,12 @@ import { useDiscoveryStore } from '../stores/discoveryStore';
 import { openProject } from '../lib/openProject';
 import { io, Socket } from 'socket.io-client';
 import IdeaCard from '../components/discovery/IdeaCard';
+import {
+  STORY_TARGET_WORD_RANGES,
+  canFitTargetWordsToChapters,
+  storyTargetWordsRequirement,
+  type SupportedStoryType,
+} from '@novel/shared';
 
 // ============================================================
 // 常量
@@ -25,18 +31,16 @@ const STORY_TYPES = [
   { value: 'long_novel', label: '长篇', desc: '多线发展，持续创作', icon: '📚' },
 ] as const;
 
-const SHORT_STORY_TARGET_WORD_RANGE = { min: 8_000, max: 35_000 } as const;
+const chapterRangeFor = (storyType: SupportedStoryType) => (
+  storyType === 'short_story' ? { min: 1500, max: 8000 } : { min: 3200, max: 4000 }
+);
 
 const getTargetWordsRequirement = (storyType: 'short_story' | 'long_novel'): string => (
-  storyType === 'short_story'
-    ? '短篇目标总字数必须在8,000–35,000字之间，且能由若干个3,200–4,000字章节准确承载。'
-    : '目标总字数必须能由若干个3,200–4,000字章节准确承载。'
+  storyTargetWordsRequirement(storyType, chapterRangeFor(storyType))
 );
 
 const isFeasibleTargetWords = (value: number, storyType: 'short_story' | 'long_novel'): boolean => {
-  if (!Number.isInteger(value) || value < 3200) return false;
-  if (storyType === 'short_story' && (value < SHORT_STORY_TARGET_WORD_RANGE.min || value > SHORT_STORY_TARGET_WORD_RANGE.max)) return false;
-  return Math.ceil(value / 4000) <= Math.floor(value / 3200);
+  return canFitTargetWordsToChapters(value, storyType, chapterRangeFor(storyType));
 };
 
 const parseIdeaTargetWords = (value: unknown): number | null => {
@@ -495,6 +499,7 @@ const DiscoveryWizardPage: React.FC = () => {
   const [writingStyles, setWritingStyles] = useState<string[]>([]);
   const [webNovelGenres, setWebNovelGenres] = useState<string[]>([]);
   const [configError, setConfigError] = useState('');
+  const ideaRequestInFlightRef = useRef(false);
 
   // 挂载/重新进入时按 store 现状恢复，而不是无条件清空。
   // 发现灵感走普通 HTTP 长请求，组件卸载（路由切走）不会中断它，完成后仍写回全局 store，
@@ -623,6 +628,11 @@ const DiscoveryWizardPage: React.FC = () => {
 
   // 配置 → 发现（支持重新生成时传排除列表）
   const handleStartDiscovery = useCallback(async (excludeTitles?: string[], excludeDetailsArg?: Array<{ title: string; hook?: string; description?: string }>) => {
+    if (ideaRequestInFlightRef.current) {
+      store.setStep(1);
+      return;
+    }
+    ideaRequestInFlightRef.current = true;
     const configuredState = useDiscoveryStore.getState();
     const configuredTarget = configuredState.targetWords.trim();
     if (configuredTarget) {
@@ -630,6 +640,7 @@ const DiscoveryWizardPage: React.FC = () => {
       if (!isFeasibleTargetWords(value, configuredState.storyType)) {
         setConfigError(getTargetWordsRequirement(configuredState.storyType));
         store.setStep(0);
+        ideaRequestInFlightRef.current = false;
         return;
       }
     }
@@ -639,7 +650,7 @@ const DiscoveryWizardPage: React.FC = () => {
     store.setGenerating(true);
     store.setIdeas([]);
     store.setGenerationDone(false);
-    store.setGenProgress('AI正在逐条生成、质检并去重故事题材...');
+    store.setGenProgress('AI正在批量生成、校验并去重故事题材...');
 
     // 分步进度动画：前 5 步轮转文案，之后切换为真实等待计时，避免用户以为卡死
     const msgs = [
@@ -659,7 +670,7 @@ const DiscoveryWizardPage: React.FC = () => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         const minutes = Math.floor(elapsed / 60);
         const secs = elapsed % 60;
-        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，AI 正在一次生成 5 个题材并质检（通常需 2-5 分钟，请勿关闭窗口）...`);
+        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，当前模型正在生成并校验 5 个题材，请勿重复点击...`);
       }
     }, 5000);
 
@@ -706,6 +717,7 @@ const DiscoveryWizardPage: React.FC = () => {
       clearInterval(msgInterval);
       store.setGenProgress(`❌ ${err.message || '生成失败，请重试'}`);
     } finally {
+      ideaRequestInFlightRef.current = false;
       store.setGenerating(false);
       store.setGenerationDone(generationSucceeded);
     }
@@ -867,17 +879,14 @@ const DiscoveryWizardPage: React.FC = () => {
       const res = await api.post<any>('/chain/create-project-async', {
         title: idea.title,
         storyType: currentState.storyType,
-        platformStyle: currentState.platform,
+        targetPlatform: currentState.platform,
         targetWords: parseIdeaTargetWords(idea?.recommendedTargetWords ?? idea?.estimatedWords) ?? (currentState.targetWords.trim() ? Number(currentState.targetWords) : undefined),
         selectedIdea: idea,
+        category: [currentState.selectedCategory, currentState.selectedSubCategory].filter(Boolean).join('/'),
+        storyTone: finalStoryTones,
+        writingStyle: finalWritingStyles,
+        webNovelGenre: finalGenres,
         settings: {
-          genre: [currentState.selectedCategory, currentState.selectedSubCategory].filter(Boolean).join('/'),
-          style: currentState.selectedTones.join('、'),
-          storyTone: finalStoryTones,
-          writingStyle: finalWritingStyles,
-          webNovelGenre: finalGenres,
-          recommendedPlatform: idea.recommendedPlatform || currentState.platform,
-          chapterWordRange: { min: 3200, max: 4000 },
           structurePlanning: 'dynamic_by_story_rhythm',
         },
       }, 30_000);
@@ -1031,8 +1040,8 @@ const DiscoveryWizardPage: React.FC = () => {
           onChange={(e) => { store.setTargetWords(e.target.value); setConfigError(''); }}
           placeholder="留空则由AI根据题材规模、剧情节奏和章节任务动态规划"
           type="number"
-          min={storyType === 'short_story' ? SHORT_STORY_TARGET_WORD_RANGE.min : 3200}
-          max={storyType === 'short_story' ? SHORT_STORY_TARGET_WORD_RANGE.max : undefined}
+          min={STORY_TARGET_WORD_RANGES[storyType].min}
+          max={STORY_TARGET_WORD_RANGES[storyType].max ?? undefined}
           style={{
             width: '100%', padding: '10px 12px', boxSizing: 'border-box',
             backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
@@ -1042,8 +1051,8 @@ const DiscoveryWizardPage: React.FC = () => {
         />
         <div style={{ marginTop: '7px', color: '#8d96ad', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>
           {storyType === 'short_story'
-            ? '短篇为 8,000–35,000 字；仍按每章 3,200–4,000 字和剧情节奏动态规划。'
-            : '长篇不预设总章数或总字数；每章固定执行 3,200–4,000 字，按剧情节奏动态规划。'}
+            ? '短篇目标总字数为 8,000–35,000 字；章节字数按所选平台规则动态规划。'
+            : '长篇目标总字数不少于 100,000 字；章节字数按所选平台规则动态规划。'}
         </div>
         {configError && (
           <div style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>{configError}</div>

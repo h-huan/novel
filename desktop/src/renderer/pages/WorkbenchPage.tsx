@@ -14,7 +14,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { groupGenerationRuns } from '../lib/generationRunGroups';
 import { openProject } from '../lib/openProject';
 import SearchableSelect, { SearchOption } from '../components/common/SearchableSelect';
 import { RadarChart, Donut, GaugeRing, TrendChart, HBars } from '../components/common/charts';
@@ -44,14 +43,13 @@ const pill = (active: boolean): React.CSSProperties => ({
 const colorBar = (color: string): React.CSSProperties => ({ width: 3, height: 16, borderRadius: 2, background: color, display: 'inline-block' });
 const linkBtn: React.CSSProperties = { fontSize: 'var(--font-size-sm)', fontFamily: 'inherit', borderRadius: 7, padding: '4px 10px', cursor: 'pointer', border: '1px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent', whiteSpace: 'nowrap' };
 
-type TabKey = 'quality' | 'daily' | 'rework';
-type TrendKey = 'issues' | 'llmCalls' | 'outputWords' | 'newChapters';
+type TabKey = 'quality' | 'daily';
+type TrendKey = 'issues' | 'outputWords' | 'newChapters';
 
 const WorkbenchPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [data, setData] = useState<any>(null);
-  const [stdStatus, setStdStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [days, setDays] = useState(30);
@@ -90,15 +88,7 @@ const WorkbenchPage: React.FC = () => {
     return () => { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', reload); };
   }, [load, days, projectId, storyType, platform]);
 
-  useEffect(() => {
-    const pull = () => api.get('/module-standards/status')
-      .then(r => setStdStatus((r as any).data ?? r))
-      // 轮询失败说明后端正在重启/不可达：进程一旦重启，旧的“归纳中”不可能延续，清掉假转圈
-      .catch(() => setStdStatus((prev: any) => (prev ? { ...prev, running: [] } : prev)));
-    pull();
-    const t = setInterval(pull, 8000);
-    return () => clearInterval(t);
-  }, []);
+
 
   // 跳转到某本书的具体处理页（引导窗口走 IPC 开主窗口，主窗口内直接路由）
   const gotoProjectPage = useCallback((pid: string, ptitle: string | undefined, subPath: string) => {
@@ -141,7 +131,6 @@ const WorkbenchPage: React.FC = () => {
 
   const TREND_CONF: Record<TrendKey, { label: string; series: any[] }> = {
     issues: { label: '问题', series: [{ key: 'newIssues', label: '新增问题', color: '#f39c12' }, { key: 'resolvedIssues', label: '解决问题', color: '#2ecc71' }] },
-    llmCalls: { label: 'AI 生成次数', series: [{ key: 'llmCalls', label: 'AI 生成次数', color: '#60a5fa', area: true }] },
     outputWords: { label: '产出字数', series: [{ key: 'outputWords', label: '产出字数', color: '#34d399', area: true }] },
     newChapters: { label: '新建章节', series: [{ key: 'newChapters', label: '新建章节', color: '#a855f7', area: true }] },
   };
@@ -150,8 +139,6 @@ const WorkbenchPage: React.FC = () => {
   const tagRadar = tagFit.available ? tagFit.items.map((it: any) => ({ label: TAG_SHORT[it.dim] || it.name, value: it.score ?? 0 })) : [];
   const activeDim = drilldown.find(d => d.dim === openDim);
 
-  const running: any[] = stdStatus?.running || [];
-  const dirtyCount: number = stdStatus?.dirtyCount || 0;
 
   const kpis = [
     { label: '作品', value: num(k.projectCount) },
@@ -179,19 +166,6 @@ const WorkbenchPage: React.FC = () => {
         <button onClick={() => navigate('/discover')} style={{ padding: '8px 16px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 'var(--font-size-sm)', fontWeight: 600, border: '1px solid var(--color-border-strong)', color: 'var(--color-text-primary)', backgroundColor: 'rgba(255,255,255,0.06)' }}>✨ 灵感发现</button>
         <button onClick={() => navigate('/projects?new=1')} style={{ padding: '8px 16px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 'var(--font-size-sm)', fontWeight: 700, border: 'none', color: '#fff', background: 'linear-gradient(135deg,var(--color-accent),var(--color-accent-hover))' }}>＋ 新建项目</button>
       </div>
-
-      {running.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 10, backgroundColor: 'rgba(59,118,195,0.12)', border: '1px solid rgba(59,118,195,0.35)', fontSize: 'var(--font-size-sm)' }}>
-          <span className="spin" style={{ width: 13, height: 13, border: '2px solid rgba(108,182,255,0.35)', borderTopColor: 'var(--color-info-light)', borderRadius: '50%', display: 'inline-block', animation: 'wbSpin 0.9s linear infinite' }} />
-          正在自归纳 {running.map(x => x.moduleName).join('、')} 的执行标准…
-          <style>{`@keyframes wbSpin{to{transform:rotate(360deg)}}`}</style>
-        </div>
-      )}
-      {!running.length && dirtyCount > 0 && (
-        <div onClick={() => navigate('/module-standards')} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 10, backgroundColor: 'rgba(243,156,18,0.10)', border: '1px solid rgba(243,156,18,0.35)', fontSize: 'var(--font-size-sm)', color: 'var(--color-warning)', cursor: 'pointer' }}>
-          ⚙️ {dirtyCount} 个模块有新生成变化，将自动归纳（点击查看）
-        </div>
-      )}
 
       {/* 范围筛选条 */}
       <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '14px 16px' }}>
@@ -227,26 +201,6 @@ const WorkbenchPage: React.FC = () => {
         </div>
       )}
 
-      {data?.generationRuns && <section aria-label="生成运行记录" style={card}>
-        <h3 style={h3}>生成运行记录</h3>
-        {!data.generationRuns.available ? <p role="alert">{data.generationRuns.error}</p> : <>
-          <p>共 {data.generationRuns.total} 次 · 完成 {data.generationRuns.succeeded} 次 · 失败 {data.generationRuns.failed} 次 · 进行中 {data.generationRuns.running} 次 · 取消 {data.generationRuns.cancelled} 次</p>
-          <p style={{ color: 'var(--color-text-muted)' }}>包含创建作品前的灵感生成与模型配置预检；预检失败不计为模型调用或已消耗 Token。尚未生成作品时，作品质量评分保持未评估。</p>
-          {data.generationRuns.recent.length === 0 ? <p>当前范围内暂无生成记录</p> : <details open={data.generationRuns.failed > 0}>
-            <summary>最近生成及失败原因（最多 20 条记录，相同失败合并展示）</summary>
-            {groupGenerationRuns(data.generationRuns.recent).map(({ run: r, records, firstAt, lastAt }) => <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
-              <strong>{r.label} · {({ failed: '失败', running: '进行中', success: '完成', cancelled: '已取消' } as Record<string,string>)[r.status] || r.status}</strong>
-              {records.length > 1 && <strong style={{ marginLeft: 12 }}>本次展示范围内重复 {records.length} 次</strong>}
-              <p>记录时间：{new Date(firstAt).toLocaleString()}{firstAt !== lastAt && ` 至 ${new Date(lastAt).toLocaleString()}`}</p>
-              {r.error && <p style={{ color: 'var(--color-danger)', overflowWrap: 'anywhere' }}>{r.error}</p>}
-              {r.error?.includes('未配置模型') && <button style={linkBtn} onClick={() => navigate('/settings')}>前往模型配置</button>}
-              <p>标准快照：{r.standards?.modules?.length ? r.standards.modules.map((s: any) => `${s.key} v${s.version}（基线 ${s.baseline}）`).join('、') : '此历史记录未保存标准版本；不代表当前标准未启用'}</p>
-              {records.length > 1 && <details><summary>展开 {records.length} 条原始记录</summary>{records.map(record => <p key={record.id}>{new Date(record.started_at).toLocaleString()} · {record.id}</p>)}</details>}
-            </div>)}
-          </details>}
-        </>}
-      </section>}
-
       {/* 核心 KPI */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 12 }}>
         {kpis.map((it, i) => (
@@ -259,7 +213,7 @@ const WorkbenchPage: React.FC = () => {
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
-        {([['quality', '📊 质量画像'], ['daily', '📈 每日变化'], ['rework', '🔁 返工与效率']] as Array<[TabKey, string]>).map(([key, label]) => (
+        {([['quality', '📊 质量画像'], ['daily', '📈 每日变化']] as Array<[TabKey, string]>).map(([key, label]) => (
           <button key={key} style={pill(tab === key)} onClick={() => setTab(key)}>{label}</button>
         ))}
       </div>
@@ -479,7 +433,7 @@ const WorkbenchPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
             <h3 style={h3}><span style={colorBar('#60a5fa')} />每日变化</h3>
             <div style={{ flex: 1 }} />
-            {([['issues', '问题新增 vs 解决'], ['llmCalls', 'AI 生成次数'], ['outputWords', '产出字数'], ['newChapters', '新建章节']] as Array<[TrendKey, string]>).map(([key, label]) => (
+            {([['issues', '问题新增 vs 解决'], ['outputWords', '产出字数'], ['newChapters', '新建章节']] as Array<[TrendKey, string]>).map(([key, label]) => (
               <button key={key} style={pill(trendKey === key)} onClick={() => setTrendKey(key)}>{label}</button>
             ))}
           </div>
@@ -493,74 +447,7 @@ const WorkbenchPage: React.FC = () => {
       )}
 
       {/* ───────── 返工与效率 ───────── */}
-      {tab === 'rework' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', justifyContent: 'space-around' }}>
-            <GaugeRing value={pct(process.firstPassRate)} label="一次成功率" sub="越高越少返工" />
-            <Mini label="正文平均成稿版数" value={bodyConv.chapterCount ? `${bodyConv.avgVersions} 版/章` : '—'} sub="首版+补字+对齐+基准，越接近1越好" tone={bodyConv.avgVersions > 2 ? 'var(--color-warning)' : undefined} />
-            <Mini label="失败 / 截断 / 空白" value={`${num(process.failCount)} / ${num(process.truncatedCount)} / ${num(process.emptyCount)}`} tone={process.failCount ? 'var(--color-danger)' : undefined} />
-            <Mini label="正文首版产出 / 目标" value={(() => { const b = process.steps.find((x: any) => x.isBody); return b ? `${b.avgOutputWords ?? '—'} / ${b.avgTargetWords ?? '—'}` : '—'; })()} />
-            <Mini label="章节修订总数" value={num(revision.totalRevisions)} sub={`${revision.revisedChapters} 章改过 · 章均 ${revision.avgPerChapter}`} />
-          </div>
 
-          {/* 正文收敛效率：回答"少字要补几轮、为何反复重写" */}
-          <div style={card}>
-            <h3 style={{ ...h3, marginBottom: 12 }}><span style={colorBar('#3b76c3')} />正文一次写到位的能力（首版 vs 补字/回炉）</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12 }}>
-              <Mini label="正文首版一次到位率" value={bodyConv.firstHitRate == null ? '—' : `${pct(bodyConv.firstHitRate)}%`} sub={bodyConv.firstCount ? `${bodyConv.firstHitCount}/${bodyConv.firstCount} 章首版就落在目标篇幅` : '近段暂无正文生成'} tone={bodyConv.firstHitRate == null ? undefined : bodyConv.firstHitRate >= 0.8 ? 'var(--color-success)' : 'var(--color-warning)'} />
-              <Mini label="平均补字轮次" value={bodyConv.bodyCallCount ? `${bodyConv.avgLengthRetry} 轮/章` : '—'} sub={`${num(bodyConv.chaptersNeedLengthRetry)} 章需要补字`} tone={bodyConv.avgLengthRetry > 1 ? 'var(--color-warning)' : undefined} />
-              <Mini label="平均对齐回炉" value={bodyConv.bodyCallCount ? `${bodyConv.avgAlignmentRepair} 次/章` : '—'} sub={`${num(bodyConv.chaptersNeedRepair)} 章被大纲/红线打回重写`} tone={bodyConv.avgAlignmentRepair > 1 ? 'var(--color-danger)' : undefined} />
-              <Mini label="平均基准提升" value={bodyConv.bodyCallCount ? `${bodyConv.avgBenchmarkRefine} 轮/章` : '—'} sub={`${num(bodyConv.chaptersNeedBenchmarkRefine)} 章首版未达平台爆款线、被自动精修`} tone={bodyConv.avgBenchmarkRefine != null && bodyConv.avgBenchmarkRefine > 1 ? 'var(--color-warning)' : undefined} />
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 14 }}>
-            <div style={card}>
-              <h3 style={{ ...h3, marginBottom: 12 }}><span style={colorBar('#e94560')} />正文为什么反复回炉</h3>
-              <HBars data={repairReasons.map((x: any) => ({ key: x.key, count: x.count }))} color="#e94560" empty="当前没有被打回的正文" />
-            </div>
-            <div style={card}>
-              <h3 style={{ ...h3, marginBottom: 12 }}><span style={colorBar('#f39c12')} />章节修订次数分布</h3>
-              <Donut segments={revision.distribution.filter((d: any) => d.count > 0).map((d: any, i: number) => ({ label: `${d.key} 次`, value: d.count, color: ['#2ecc71', '#f39c12', '#e74c3c'][i] || '#7f8c9b' }))} centerTop={revision.revisedChapters} centerBottom="章改过" />
-            </div>
-            <div style={card}>
-              <h3 style={{ ...h3, marginBottom: 12 }}><span style={colorBar('#e74c3c')} />生成失败原因</h3>
-              {process.errorKinds.length ? <Donut segments={process.errorKinds.map((d: any, i: number) => ({ label: d.key, value: d.count, color: PALETTE[i % PALETTE.length] }))} /> : <Empty text="近段时间没有失败" />}
-            </div>
-            <div style={card}>
-              <h3 style={{ ...h3, marginBottom: 12 }}><span style={colorBar('#e94560')} />反复修改最多的章节</h3>
-              <HBars data={revision.heavyChapters.map((c: any) => ({ key: `第${c.chapterIndex ?? '?'}章 ${c.title || ''}`, count: c.count, tone: '#e74c3c' }))} color="#e74c3c" empty="没有修订 3 次及以上的章节" />
-            </div>
-          </div>
-
-          <div style={{ ...card, overflowX: 'auto' }}>
-            <h3 style={{ ...h3, marginBottom: 12 }}><span style={colorBar('var(--color-success)')} />各环节生成情况（正文按“章”聚合，补字/重写不重复计数）</h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 880 }}>
-              <thead><tr style={{ textAlign: 'left', color: 'var(--color-text-muted)' }}>
-                {['环节', '章数/次数', '一次成功率', '平均尝试', '内部补轮 补字/对齐/基准', '失败', '截断', '空白', '首版产出/目标'].map(x => <th key={x} style={{ padding: '8px', borderBottom: '1px solid var(--color-border)', whiteSpace: 'nowrap' }}>{x}</th>)}
-              </tr></thead>
-              <tbody>
-                {process.steps.length === 0 ? <tr><td colSpan={9} style={{ padding: '18px 8px', color: 'var(--color-text-muted)' }}>近{days}天暂无生成记录</td></tr>
-                  : process.steps.map((m: any) => {
-                    const rate = pct(m.firstPassRate);
-                    return (
-                      <tr key={m.scenario} style={{ borderBottom: '1px solid rgba(127,127,127,0.08)', backgroundColor: m.isBody ? 'rgba(59,118,195,0.08)' : 'transparent' }}>
-                        <Td strong>{m.scenarioName}{m.isBody ? '（正文）' : ''}</Td>
-                        <Td>{m.isBody ? `${m.calls} 章（前后 ${m.llmCalls} 版）` : `${m.calls} 次`}</Td>
-                        <Td tone={rate == null ? undefined : rate >= 80 ? 'var(--color-success)' : 'var(--color-warning)'}>{rate == null ? '—' : `${rate}%`}</Td>
-                        <Td>{m.isBody ? `${m.avgAttempts} 版/章` : `${m.avgAttempts} 次`}</Td>
-                        <Td tone={m.isBody && m.avgAlignmentRepair > 1 ? 'var(--color-danger)' : undefined}>{m.isBody ? `${m.avgLengthRetry} / ${m.avgAlignmentRepair} / ${m.avgBenchmarkRefine}` : '—'}</Td>
-                        <Td tone={m.failCount > 0 ? 'var(--color-danger)' : undefined}>{num(m.failCount)}</Td>
-                        <Td>{num(m.truncatedCount)}</Td><Td>{num(m.emptyCount)}</Td>
-                        <Td>{m.avgOutputWords == null ? '—' : `${m.avgOutputWords}${m.avgTargetWords ? ' / ' + m.avgTargetWords : ''}`}</Td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

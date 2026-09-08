@@ -953,13 +953,11 @@ export class ContinuityService {
     const warnings = items.filter(i => i.level === 'warning');
     const passes = items.filter(i => i.level === 'pass');
     const suggestions = items.filter(i => i.level === 'suggestion');
-    const score = Math.max(0, 100 - blockers.length * 25 - warnings.length * 8 - suggestions.length * 2);
     return {
       success: true,
       focusChapter: context.focusChapter || null,
       summary: {
         riskLevel: blockers.length ? 'blocked' : warnings.length ? 'warning' : 'pass',
-        score,
         blockCount: blockers.length,
         warningCount: warnings.length,
         passCount: passes.length,

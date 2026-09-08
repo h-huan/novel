@@ -385,7 +385,6 @@ interface CreateDialogProps {
   onCreate: (data: {
     title: string;
     type: ProjectType;
-    platformStyle: string;
     creationSource: CreationSource;
     targetPlatform: TargetPlatform;
     targetWords: number;
@@ -498,7 +497,6 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
         onCreate({
           title: title.trim() || '',
           type: projectType,
-          platformStyle: targetPlatform,
           creationSource,
           targetPlatform,
           targetWords: parseInt(targetWords) || 0,
@@ -511,7 +509,6 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
         onCreate({
           title: title.trim(),
           type: projectType,
-          platformStyle: targetPlatform,
           creationSource,
           targetPlatform,
           targetWords: parseInt(targetWords) || 0,
@@ -542,10 +539,10 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
 
   return (
     <div style={dialogStyles.backdrop} onClick={handleBackdrop}>
-      <div style={dialogStyles.dialog}>
+      <div style={dialogStyles.dialog} role="dialog" aria-modal="true" aria-labelledby="create-project-title">
         <div style={dialogStyles.header}>
           <div>
-            <h2 style={dialogStyles.title}>创建新作品</h2>
+            <h2 id="create-project-title" style={dialogStyles.title}>创建新作品</h2>
             <p style={dialogStyles.subtitle}>
               选择一个开始方式，后续将根据短篇或长篇自动进入对应创作流程。
             </p>
@@ -1131,7 +1128,6 @@ const ProjectListPage: React.FC = () => {
   const handleCreate = async (data: {
     title: string;
     type: ProjectType;
-    platformStyle: string;
     creationSource: CreationSource;
     targetPlatform: TargetPlatform;
     targetWords: number;

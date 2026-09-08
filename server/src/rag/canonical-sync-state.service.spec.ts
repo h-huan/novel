@@ -8,7 +8,10 @@ function fixture() {
   const db = new RealDatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys=OFF;');
   initSchema(db);
-  const embedding = { embed: vi.fn(async () => [[0.1, 0.2]]) };
+  const embedding = {
+    getAvailability: vi.fn(() => ({ available: true })),
+    embed: vi.fn(async () => [[0.1, 0.2]]),
+  };
   const vectorIndex = { indexChunksStrict: vi.fn(async () => undefined) };
   const service = new CanonicalSyncStateService({ getDb: () => db } as any, embedding as any, vectorIndex as any);
   return { db, embedding, vectorIndex, service };
@@ -29,5 +32,15 @@ describe('CanonicalSyncStateService', () => {
     expect(result).toMatchObject({ indexStatus: 'completed', needsResync: false });
     expect(vectorIndex.indexChunksStrict).toHaveBeenCalledOnce();
     expect(service.list('p')[0]).toMatchObject({ indexStatus: 'completed', needsResync: false, lastError: null });
+  });
+
+  it('skips the optional semantic index without blocking canonical writes', async () => {
+    const { service, embedding, vectorIndex } = fixture();
+    embedding.getAvailability.mockReturnValue({ available: false });
+    const work = vi.fn(async () => undefined);
+    const result = await service.run('p', 'character', 'c', work);
+    expect(result).toMatchObject({ indexStatus: 'skipped', needsResync: false });
+    expect(work).not.toHaveBeenCalled();
+    expect(vectorIndex.indexChunksStrict).not.toHaveBeenCalled();
   });
 });

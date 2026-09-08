@@ -9,3 +9,4 @@ export * from './inspiration';
 export * from './organization';
 export * from './map-point';
 export * from './content-contract';
+export * from './story-length';

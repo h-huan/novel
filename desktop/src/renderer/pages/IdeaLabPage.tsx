@@ -193,13 +193,15 @@ interface MaturitySectionProps {
     missingItems: string[];
     risks: string[];
     canConvertToProject: boolean;
+    evaluatedItems: number;
+    satisfiedItems: number;
   } | null;
 }
 
 const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
   if (!report) return null;
 
-  const scoreColor = score >= 70 ? 'var(--color-success)' : score >= 40 ? 'var(--color-warning)' : 'var(--color-accent)';
+  const scoreColor = report.canConvertToProject ? 'var(--color-success)' : score >= 40 ? 'var(--color-warning)' : 'var(--color-accent)';
 
   return (
     <div style={sectionStyles.container}>
@@ -217,13 +219,16 @@ const MaturitySection: React.FC<MaturitySectionProps> = ({ score, report }) => {
           <span style={maturityStyles.scoreUnit}>/100</span>
         </div>
         <div style={maturityStyles.scoreInfo}>
-          {score >= 70 ? (
+          <p style={sectionStyles.subtitle}>
+            已满足 {report.satisfiedItems}/{report.evaluatedItems} 项可核验条件
+          </p>
+          {report.canConvertToProject ? (
             <p style={{ ...maturityStyles.scoreLabel, color: 'var(--color-success)' }}>
-              ✅ 想法已成熟，可以创建项目
+              ✅ 所有可核验条件已满足，可以创建项目
             </p>
           ) : score >= 40 ? (
             <p style={{ ...maturityStyles.scoreLabel, color: 'var(--color-warning)' }}>
-              ⚠️ 想法有一定基础，建议继续完善后再创建项目
+              ⚠️ 仍有缺失项或风险，完善后才能创建项目
             </p>
           ) : (
             <p style={{ ...maturityStyles.scoreLabel, color: 'var(--color-accent)' }}>
@@ -299,7 +304,7 @@ const ConfirmSection: React.FC<ConfirmSectionProps> = ({ value, onValueChange })
 const IdeaLabPage: React.FC = () => {
   const { draftId } = useParams<{ draftId: string }>();
   const navigate = useNavigate();
-  const { draft, loading, error, questionsIsFallback, refineIsFallback, fetchDraft, generateQuestions, saveAnswers, refineIdea, confirmIdea, convertToProject } = useIdeaLabStore();
+  const { draft, loading, error, fetchDraft, generateQuestions, saveAnswers, refineIdea, confirmIdea, convertToProject } = useIdeaLabStore();
 
   const [localAnswers, setLocalAnswers] = useState<AnswerItem[]>([]);
   const [confirmedText, setConfirmedText] = useState('');
@@ -373,7 +378,7 @@ const IdeaLabPage: React.FC = () => {
     if (!draft) return;
 
     // 检查成熟度
-    if (draft.maturityScore < 70 && !showLowScoreWarning) {
+    if (!draft.maturityReport?.canConvertToProject && !showLowScoreWarning) {
       setShowLowScoreWarning(true);
       return;
     }
@@ -495,13 +500,6 @@ const IdeaLabPage: React.FC = () => {
         <h3 style={pageStyles.rawIdeaLabel}>📝 原始想法</h3>
         <p style={pageStyles.rawIdeaText}>{draft.rawIdea}</p>
       </div>
-
-      {/* Fallback 提示 */}
-      {(questionsIsFallback || refineIsFallback) && (
-        <div style={pageStyles.fallbackBanner}>
-          ℹ️ 当前使用本地兜底结果，可稍后重新生成。
-        </div>
-      )}
 
       {/* 追问区 */}
       {hasQuestions && (
@@ -883,15 +881,6 @@ const pageStyles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
     marginBottom: '12px',
-  },
-  fallbackBanner: {
-    padding: '10px 16px',
-    backgroundColor: 'rgba(243,156,18,0.1)',
-    border: '1px solid rgba(243,156,18,0.3)',
-    borderRadius: 'var(--radius-md, 8px)',
-    color: 'var(--color-warning)',
-    fontSize: '14px',
-    marginBottom: '16px',
   },
 };
 

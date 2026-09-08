@@ -8,7 +8,7 @@ export default async function globalSetup(_config: FullConfig) {
   process.env.NODE_ENV = 'test';
   process.env.DATA_DIR = path.join(__dirname, `.runtime-data-${port}`);
   const { bootstrap } = await import('../dist/src/main');
-  const app = await bootstrap({ port, host: '127.0.0.1', writePortFile: false });
+  const app = await bootstrap({ port, host: '127.0.0.1' });
   return async () => {
     await app.close();
   };

@@ -1,11 +1,10 @@
 /**
  * PlatformStandardsPage — 最新执行标准（当前生效，唯一参与执行）
- * 与"标准发展历程"物理分页：本页只展示 status=active 的最新标准。
+ * 本页只展示并维护 status=active 的唯一最新标准。
  * 归纳为【变化驱动】：后端检测到某模块有新生成变化（新增样本+指标实质变化/新避坑经验/代码基线升级）时
  * 会自动归纳；手动"立即重新归纳"按钮默认禁用，只有该模块 dirty 时才点亮并展示原因。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 
 interface Step { name: string; goal: string }
@@ -30,7 +29,6 @@ const categoryLabel: Record<string, string> = {
 };
 
 const PlatformStandardsPage: React.FC = () => {
-  const navigate = useNavigate();
   const [list, setList] = useState<Standard[]>([]);
   const [statusMap, setStatusMap] = useState<Record<string, ModuleStatus>>({});
   const [dirtyCount, setDirtyCount] = useState(0);
@@ -106,11 +104,10 @@ const PlatformStandardsPage: React.FC = () => {
         <span style={{ ...tag, background: 'rgba(34,197,94,0.14)', color: '#16a34a' }}>● 当前唯一生效 · 所有模型版本统一执行</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button onClick={load} style={{ padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 'var(--font-size-xs)' }}>刷新</button>
-          <button onClick={() => navigate('/standards-history')} style={{ padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 'var(--font-size-xs)' }}>标准发展历程 →</button>
         </div>
       </div>
       <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 0, marginBottom: 14 }}>
-        归纳为<b>变化驱动</b>，不按固定时间：某模块自上次归纳以来新增足够真实生成、且指标出现实质变化（一次到位率下降/失败或截断增多/字数缺口扩大/出现新卡点/新增避坑经验），或代码标准基线升级时，系统会<b>自动归纳</b>并立即注入所有对应生成场景；旧版归档到「发展历程」，仅作回顾、不参与执行。手动按钮仅在该模块检测到变化时可用。
+        归纳为<b>变化驱动</b>，不按固定时间：某模块自上次归纳以来新增足够真实生成、且指标出现实质变化（一次到位率下降/失败或截断增多/字数缺口扩大/出现新卡点/新增避坑经验），或代码标准基线升级时，系统会<b>自动更新当前标准</b>并立即注入所有对应生成场景。手动按钮仅在该模块检测到变化时可用。
       </p>
       {dirtyCount > 0 && (
         <div style={{ padding: '9px 14px', marginBottom: 14, borderRadius: 8, backgroundColor: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.3)', fontSize: 'var(--font-size-xs)', color: '#b45309' }}>

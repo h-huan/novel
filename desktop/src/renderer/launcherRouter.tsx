@@ -6,7 +6,6 @@
  *   /projects           → 项目管理（搜索/筛选/新建/删除；/projects?new=1 自动打开新建弹窗）
  *   /discover           → 灵感发现向导
  *   /module-standards   → 最新执行标准（唯一参与执行）
- *   /standards-history  → 标准发展历程（只读回顾）
  *   /settings           → 设置
  */
 import React from 'react';
@@ -16,7 +15,6 @@ import WorkbenchPage from './pages/WorkbenchPage';
 import ProjectListPage from './pages/ProjectListPage';
 import DiscoveryWizardPage from './pages/DiscoveryWizardPage';
 import PlatformStandardsPage from './pages/PlatformStandardsPage';
-import StandardsHistoryPage from './pages/StandardsHistoryPage';
 import SettingsPage from './pages/SettingsPage';
 
 const LauncherRouter: React.FC = () => {
@@ -27,7 +25,6 @@ const LauncherRouter: React.FC = () => {
         <Route path="/projects" element={<ProjectListPage />} />
         <Route path="/discover" element={<DiscoveryWizardPage />} />
         <Route path="/module-standards" element={<PlatformStandardsPage />} />
-        <Route path="/standards-history" element={<StandardsHistoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

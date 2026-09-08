@@ -7,7 +7,7 @@ import { StateItemService } from '../state/state-item.service';
 export interface CanonicalSyncResult {
   entityType: string;
   entityId: string;
-  indexStatus: 'completed' | 'warning';
+  indexStatus: 'completed' | 'skipped' | 'warning';
   needsResync: boolean;
   lastError?: string;
 }
@@ -27,6 +27,10 @@ export class CanonicalSyncStateService {
     entityId: string,
     work: () => Promise<void>,
   ): Promise<CanonicalSyncResult> {
+    if (!this.embedding.getAvailability().available) {
+      this.write(projectId, entityType, entityId, 'skipped', false, null, null);
+      return { entityType, entityId, indexStatus: 'skipped', needsResync: false };
+    }
     this.write(projectId, entityType, entityId, 'pending', true, null, null);
     try {
       await work();

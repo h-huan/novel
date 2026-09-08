@@ -475,7 +475,7 @@ const WritingPage: React.FC = () => {
     }, 6000);
 
     // 真实矛盾检测：章节保存时已跑派生同步的 runConflictReview，把结果写入
-    // consistency_checks 表。这里拉取真实「未解决」矛盾数驱动横幅文案与按钮，
+    // 统一 QualityIssue。这里拉取真实「未解决」矛盾数驱动横幅文案与按钮，
     // 不再写死「已检测矛盾」造成弹框与实际 tab 不一致的错觉。
     void (async () => {
       try {

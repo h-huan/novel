@@ -35,7 +35,7 @@ const field = (key: string): WorldProfileFieldConfig => ({ key, ...(WORLD_FIELD_
 const section = (title: string, description: string, keys: string[]): WorldProfileSectionConfig => ({ title, description, fields: keys.map(field) });
 
 // 指南为主（7 类世界观）+ 作品地基（长篇手动编写结构）为辅 + 补充与自定义（按小说添加）
-export const PROFILE_SECTION_GROUPS: WorldProfileSectionConfig[] = [
+const PROFILE_SECTION_GROUPS: WorldProfileSectionConfig[] = [
   section('作品地基', '小说的简介、类型、结局方向与规模规划，约束一切后续设定。', ['synopsis', 'basic_info', 'scale_plan', 'ending']),
   section('历史背景', '时间线与历史背景，奠定年代感。', ['era']),
   section('世界地理', '主要区域与关键地点（大陆/国家/城市分层）。', ['locations']),

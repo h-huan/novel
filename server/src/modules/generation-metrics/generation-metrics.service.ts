@@ -1,6 +1,7 @@
-import { aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
+import { aggregateArtifactScores, aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
 import { qualityGate, qualityIssue } from '../writing-quality/quality-issue';
 import { readConstitution } from '../project/creative-constitution';
+import { qualityStage } from '../../routing/scenario-taxonomy';
 /**
  * GenerationMetricsService — 全链路生成步骤遥测与"首版一次到位"自优化
  *
@@ -14,7 +15,7 @@ import { readConstitution } from '../project/creative-constitution';
  *    同类机制可泛化到任何"首版不到位、靠多轮重试"的步骤。
  * 4) 埋点绝不影响主流程：record 内部全容错，任何异常都静默吞掉。
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { standardDirectiveCache } from '../module-standards/standard-directive.cache';
 import { DatabaseService } from '../../database/database.service';
 import * as crypto from 'crypto';
@@ -113,10 +114,7 @@ export class GenerationMetricsService {
     const constitution = row ? readConstitution(row) : null;
     const id = crypto.randomUUID();
     const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
-    const stageKey = `${scenario} ${stepKey || ''}`;
-    const stage = /world/.test(stageKey) ? 'world' : /character/.test(stageKey) ? 'character'
-      : /outline/.test(stageKey) ? 'outline' : /polish|refin|repair|de.?ai/.test(stageKey) ? 'refinement'
-      : /writ|body|chapter/.test(stageKey) ? 'chapter' : 'project';
+    const stage = qualityStage(scenario, stepKey);
     db.prepare(`INSERT INTO generation_runs (id, project_id, stage, scenario, status, constitution_revision,
       constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
       id, projectId ?? null, stage, scenario, 'running', constitution?.revision ?? null,
@@ -156,28 +154,40 @@ export class GenerationMetricsService {
 
   saveRunScore(runId: string, projectId: string, score: StageScore) {
     const db = this.databaseService.getDb();
-    if (!this.runIsCurrent(runId, projectId)) {
+    const run = db.prepare('SELECT stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
+    if (!run) throw new Error('生成记录不存在');
+    const currentRun = this.runIsCurrent(runId, projectId);
+    if (!currentRun) {
       score.issues.push(qualityIssue({ projectId, runId, stage: score.stage, ruleId: 'constitution.stale_context',
         severity: 'blocking', message: '生成期间创作宪法或前序资料已变化，必须基于最新上下文重新生成', source: 'version_gate' }));
       score.overallScore = null;
     }
     const gate = qualityGate(score.issues, score.status === 'evaluated');
     const now = new Date().toISOString();
-    db.prepare('UPDATE generation_runs SET gate_status=? WHERE id=?').run(gate.status, runId);
+    // A physical model call is a generation_run. A quality report belongs to the
+    // current artifact scope and is updated in place across retries/regenerations.
+    const artifactKey = `${projectId}:${run.stage}:${run.chapter_index ?? 'project'}`;
+    const reportId = `artifact_${crypto.createHash('sha256').update(artifactKey).digest('hex')}`;
+    db.prepare('UPDATE generation_runs SET gate_status=?,quality_payload=? WHERE id=?')
+      .run(gate.status, JSON.stringify({ stageScore: score, gate }), runId);
+    if (!currentRun) return gate;
     db.prepare(`INSERT INTO writing_quality_reports (id,project_id,source_type,source_id,scope,title,summary,overall_level,overall_score,payload,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, overall_score=excluded.overall_score,
-      overall_level=excluded.overall_level, summary=excluded.summary, updated_at=excluded.updated_at`).run(
-      runId, projectId, 'generation_run', runId, score.stage, score.stage + '质量评分', gate.status,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id,payload=excluded.payload,
+      overall_score=excluded.overall_score,overall_level=excluded.overall_level,summary=excluded.summary,updated_at=excluded.updated_at`).run(
+      reportId, projectId, 'artifact_quality', runId, score.stage, score.stage + '质量评分', gate.status,
       gate.passed ? (score.overallScore !== null && score.overallScore >= 90 ? 'high' : 'medium') : 'low', score.overallScore, JSON.stringify({ stageScore: score, gate }), now, now);
-    db.prepare("UPDATE writing_quality_issues SET status='superseded',updated_at=? WHERE report_id=? AND status='open'").run(now, runId);
+    db.prepare("UPDATE writing_quality_issues SET status='superseded',updated_at=? WHERE report_id=? AND status='open'").run(now, reportId);
     db.prepare(`UPDATE writing_quality_reports SET chapter_id=(SELECT c.id FROM chapters c JOIN generation_runs r
-      ON c.project_id=r.project_id AND c.chapter_index=r.chapter_index WHERE r.id=? LIMIT 1) WHERE id=?`).run(runId, runId);
-    for (const issue of score.issues) db.prepare(`INSERT INTO writing_quality_issues
+      ON c.project_id=r.project_id AND c.chapter_index=r.chapter_index WHERE r.id=? LIMIT 1) WHERE id=?`).run(runId, reportId);
+    for (const issue of score.issues) {
+      const issueId = crypto.createHash('sha256').update(JSON.stringify([reportId, issue.ruleId, issue.evidence.quote, issue.message])).digest('hex');
+      db.prepare(`INSERT INTO writing_quality_issues
       (id,report_id,project_id,issue_type,severity,title,summary,evidence,payload,status,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,payload=excluded.payload,updated_at=excluded.updated_at`).run(
-      issue.id, runId, projectId, issue.ruleId, issue.severity, issue.message, issue.message,
+      issueId, reportId, projectId, issue.ruleId, issue.severity, issue.message, issue.message,
       issue.evidence.quote, JSON.stringify({ qualityIssue: issue }), issue.status, now, now);
-    db.prepare('UPDATE writing_quality_issues SET chapter_id=(SELECT chapter_id FROM writing_quality_reports WHERE id=?) WHERE report_id=?').run(runId, runId);
+    }
+    db.prepare('UPDATE writing_quality_issues SET chapter_id=(SELECT chapter_id FROM writing_quality_reports WHERE id=?) WHERE report_id=?').run(reportId, reportId);
     return gate;
   }
 
@@ -210,22 +220,94 @@ export class GenerationMetricsService {
     const db = this.databaseService.getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     const currentConstitution = project ? JSON.stringify(readConstitution(project)) : null;
-    const runs = db.prepare(`SELECT r.*, q.payload AS quality_payload, q.overall_score, (SELECT SUM(m.total_tokens) FROM generation_step_metrics m WHERE m.run_id=r.id) AS total_tokens FROM generation_runs r
-      LEFT JOIN writing_quality_reports q ON q.id=r.id WHERE r.project_id=? ORDER BY r.started_at DESC LIMIT 100`).all(projectId) as any[];
-    const issues = db.prepare("SELECT * FROM writing_quality_issues WHERE project_id=? AND status='open' ORDER BY created_at DESC LIMIT 100").all(projectId);
-    const scores: Record<string, any> = {};
+    const currentContext = project ? this.qualityContext(projectId) : null;
+    const runs = db.prepare(`SELECT r.*,(SELECT SUM(m.total_tokens) FROM generation_step_metrics m WHERE m.run_id=r.id) AS total_tokens
+      FROM generation_runs r WHERE r.project_id=? ORDER BY r.started_at DESC LIMIT 100`).all(projectId) as any[];
+    const issues = db.prepare(`SELECT i.* FROM writing_quality_issues i JOIN writing_quality_reports q ON q.id=i.report_id
+      LEFT JOIN generation_runs r ON q.source_type='artifact_quality' AND r.id=q.source_id
+      WHERE i.project_id=? AND i.status='open' AND (q.source_type!='artifact_quality'
+        OR (r.constitution_json=? AND r.context_snapshot=?)) ORDER BY i.created_at DESC LIMIT 100`)
+      .all(projectId, currentConstitution, currentContext);
     for (const run of runs) {
       const payload = run.quality_payload ? JSON.parse(run.quality_payload) : {};
       run.score = payload.stageScore ?? null;
-      run.currentConstitution = run.constitution_json === currentConstitution;
-      if (!(run.stage in scores)) scores[run.stage] = run.currentConstitution ? run.score : null;
+      run.currentConstitution = run.constitution_json === currentConstitution && run.context_snapshot === currentContext;
       delete run.quality_payload; delete run.output_text; delete run.constitution_json; delete run.context_snapshot;
     }
+    const reportRows = db.prepare(`SELECT q.payload,r.stage FROM writing_quality_reports q JOIN generation_runs r ON r.id=q.source_id
+      WHERE q.project_id=? AND q.source_type='artifact_quality' AND r.constitution_json=? AND r.context_snapshot=?`).all(
+      projectId, currentConstitution, currentContext,
+    ) as Array<{ payload: string; stage: string }>;
+    const byStage = new Map<string, StageScore[]>();
+    for (const row of reportRows) {
+      try {
+        const score = JSON.parse(row.payload || '{}').stageScore as StageScore | undefined;
+        if (score) byStage.set(row.stage, [...(byStage.get(row.stage) || []), score]);
+      } catch { /* malformed historical report remains unscored */ }
+    }
+    const scores: Record<string, any> = {};
+    for (const [stage, values] of byStage) scores[stage] = aggregateArtifactScores(stage as any, values);
     scores.project = aggregateProjectScore(scores);
     const repairs = db.prepare('SELECT id,stage,status,reason,before_score,after_score,before_text,after_text FROM generation_repairs WHERE project_id=? ORDER BY created_at DESC LIMIT 100').all(projectId);
     return { runs, issues, scores, repairs, scope: '最近100次生成与100条未解决问题',
       bottlenecks: runs.filter(r => r.status === 'running' || r.status === 'failed' || r.gate_status === 'blocked'),
       trend: runs.filter(r => r.score).map(r => ({ at: r.started_at, stage: r.stage, score: r.score.overallScore, coverage: r.score.coverage })).reverse() };
+  }
+
+  queryContentReports(query: Record<string, string | undefined>) {
+    const db = this.databaseService.getDb();
+    const page = Math.max(1, Math.floor(Number(query.page) || 1));
+    const limit = Math.max(1, Math.min(50, Math.floor(Number(query.limit) || 10)));
+    if (!Number.isFinite(page)) throw new BadRequestException('页码无效');
+    const clauses: string[] = []; const params: any[] = [];
+    const add = (sql: string, value: unknown) => { clauses.push(sql); params.push(value); };
+    if (query.history !== 'true') clauses.push('r.position=1');
+    if (query.projectId) add('r.project_id=?', query.projectId);
+    if (query.storyType) add('r.project_type=?', query.storyType);
+    if (query.platform) add('r.platform=?', query.platform);
+    if (query.stage) add('r.stage=?', query.stage);
+    for (const [key, operator] of [['from', '>='], ['to', '<=']] as const) {
+      if (!query[key]) continue;
+      const date = new Date(query[key]! + (query[key]!.length === 10 ? (key === 'to' ? 'T23:59:59.999Z' : 'T00:00:00.000Z') : ''));
+      if (!Number.isFinite(date.getTime())) throw new BadRequestException('查询日期无效');
+      add(`r.created_at${operator}?`, date.toISOString());
+    }
+    const issueClauses = ['i.report_id=r.id'];
+    if (query.severity) { issueClauses.push('i.severity=?'); params.push(query.severity); }
+    if (query.issueStatus) { issueClauses.push('i.status=?'); params.push(query.issueStatus); }
+    if (issueClauses.length > 1) clauses.push(`EXISTS(SELECT 1 FROM writing_quality_issues i WHERE ${issueClauses.join(' AND ')})`);
+    if (query.q?.trim()) {
+      clauses.push(`(r.project_title LIKE ? OR r.chapter_title LIKE ? OR r.title LIKE ? OR r.summary LIKE ? OR EXISTS
+        (SELECT 1 FROM writing_quality_issues i WHERE i.report_id=r.id AND (i.summary LIKE ? OR i.evidence LIKE ?)))`);
+      params.push(...Array(6).fill('%' + query.q.trim() + '%'));
+    }
+    const cte = `WITH ranked AS (SELECT q.*, p.title project_title,p.type project_type,p.target_platform platform,
+      p.settings project_settings,p.writing_style,p.target_words,p.platform_style,
+      c.title chapter_title,COALESCE(c.chapter_index,g.chapter_index) chapter_index,
+      COALESCE(g.stage,'chapter') stage,g.constitution_json,
+      ROW_NUMBER() OVER(PARTITION BY q.project_id,COALESCE(g.stage,'chapter'),COALESCE(q.chapter_id,CAST(g.chapter_index AS TEXT),'')
+        ORDER BY q.created_at DESC,q.id DESC) position
+      FROM writing_quality_reports q JOIN projects p ON p.id=q.project_id
+      LEFT JOIN chapters c ON c.id=q.chapter_id LEFT JOIN generation_runs g ON g.id=q.source_id)
+      `;
+    const where = clauses.length ? ' WHERE ' + clauses.join(' AND ') : '';
+    const total = Number((db.prepare(cte + 'SELECT COUNT(*) n FROM ranked r' + where).get(...params) as any).n);
+    const rows = db.prepare(cte + 'SELECT * FROM ranked r' + where + ' ORDER BY r.created_at DESC,r.id DESC LIMIT ? OFFSET ?')
+      .all(...params, limit, (page - 1) * limit) as any[];
+    const parse = (value: string | null) => { try { return JSON.parse(value || '{}'); } catch { return {}; } };
+    return { total, page, limit, items: rows.map(r => {
+      const score = parse(r.payload).stageScore ?? null;
+      const current = !r.constitution_json || r.constitution_json === JSON.stringify(readConstitution({
+        type: r.project_type, target_platform: r.platform, platform_style: r.platform_style,
+        settings: r.project_settings, writing_style: r.writing_style, target_words: r.target_words,
+      }));
+      return { id: r.id, projectId: r.project_id, projectTitle: r.project_title, chapterId: r.chapter_id,
+        chapterTitle: r.chapter_title, chapterIndex: r.chapter_index, stage: r.stage, createdAt: r.created_at,
+        current, score: current ? score : null, overallScore: current ? r.overall_score : null,
+        issues: db.prepare('SELECT id,severity,title,summary,evidence,suggestion,status FROM writing_quality_issues WHERE report_id=? ORDER BY created_at DESC').all(r.id),
+        repairs: db.prepare('SELECT id,status,reason,before_score,after_score,before_text,after_text FROM generation_repairs WHERE run_id=? ORDER BY created_at DESC LIMIT 10').all(r.id),
+      };
+    }) };
   }
 
   getRuns(projectId?: string, limit = 50) {

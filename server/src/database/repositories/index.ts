@@ -20,8 +20,6 @@ export { ModelConfigRepository } from './model-config.repository';
 export type { ModelConfigRow } from './model-config.repository';
 export { VersionHistoryRepository } from './version-history.repository';
 export type { VersionHistoryRow } from './version-history.repository';
-export { ConflictLogRepository } from './conflict-log.repository';
-export type { ConflictLogRow } from './conflict-log.repository';
 export { ImportExportLogRepository } from './import-export-log.repository';
 export type { ImportExportLogRow } from './import-export-log.repository';
 export { PromptTemplateRepository } from './prompt-template.repository';

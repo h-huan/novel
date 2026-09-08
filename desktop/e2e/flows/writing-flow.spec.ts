@@ -3,82 +3,26 @@
  * 测试核心写作功能：编辑、大纲、章节管理
  */
 import { test, expect } from '@playwright/test';
-import { goToProjectList, assertHasText } from '../helpers/test-utils';
+import { createTestProject } from '../helpers/test-utils';
 
 test.describe('写作流程', () => {
-  test('进入写作页面', async ({ page }) => {
-    await goToProjectList(page);
+  test('世界观、角色、大纲、正文、质量诊断使用同一项目流程', async ({ page }) => {
+    await createTestProject(page, 'E2E测试项目-写作流程');
+    const match = page.url().match(/\/project\/([^/]+)\/dashboard$/);
+    expect(match?.[1]).toBeTruthy();
+    const projectId = match![1];
+    const stages = [
+      ['世界观', 'world'],
+      ['角色', 'characters'],
+      ['大纲', 'outline'],
+      ['写作', 'writing'],
+      ['质量诊断', 'writing-quality'],
+    ] as const;
 
-    // 进入任意项目
-    const projectCard = page.locator('[data-testid="project-card"]').first();
-    if (await projectCard.isVisible()) {
-      await projectCard.click();
-      await page.waitForLoadState('networkidle');
-    }
-  });
-
-  test('大纲页面可访问', async ({ page }) => {
-    await goToProjectList(page);
-
-    const projectCard = page.locator('[data-testid="project-card"]').first();
-    if (await projectCard.isVisible()) {
-      await projectCard.click();
-      await page.waitForTimeout(500);
-
-      // 点击大纲标签
-      const outlineTab = page.getByText('大纲').first();
-      if (await outlineTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await outlineTab.click();
-        await page.waitForTimeout(500);
-      }
-    }
-  });
-
-  test('角色管理页面可访问', async ({ page }) => {
-    await goToProjectList(page);
-
-    const projectCard = page.locator('[data-testid="project-card"]').first();
-    if (await projectCard.isVisible()) {
-      await projectCard.click();
-      await page.waitForTimeout(500);
-
-      const charTab = page.getByText('角色').first();
-      if (await charTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await charTab.click();
-        await page.waitForTimeout(500);
-      }
-    }
-  });
-
-  test('伏笔管理页面可访问', async ({ page }) => {
-    await goToProjectList(page);
-
-    const projectCard = page.locator('[data-testid="project-card"]').first();
-    if (await projectCard.isVisible()) {
-      await projectCard.click();
-      await page.waitForTimeout(500);
-
-      const foreshadowTab = page.getByText('伏笔').first();
-      if (await foreshadowTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await foreshadowTab.click();
-        await page.waitForTimeout(500);
-      }
-    }
-  });
-
-  test('冲突检测页面可访问', async ({ page }) => {
-    await goToProjectList(page);
-
-    const projectCard = page.locator('[data-testid="project-card"]').first();
-    if (await projectCard.isVisible()) {
-      await projectCard.click();
-      await page.waitForTimeout(500);
-
-      const conflictTab = page.getByText('冲突').first();
-      if (await conflictTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await conflictTab.click();
-        await page.waitForTimeout(500);
-      }
+    for (const [label, path] of stages) {
+      await page.getByRole('button', { name: label, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/project/${projectId}/${path}$`));
+      await expect(page.getByText('加载失败', { exact: true })).toHaveCount(0);
     }
   });
 });

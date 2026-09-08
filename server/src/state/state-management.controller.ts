@@ -15,6 +15,7 @@ import { StateExtractionService } from './state-extraction.service';
 import { ConsistencyCheckService } from './consistency-check.service';
 import { CharacterStateRepository } from '../database/repositories/character-state.repository';
 import { StateItemService } from './state-item.service';
+import { replaceQualityIssues } from '../modules/writing-quality/quality-issue';
 
 @Controller('projects/:projectId/state')
 export class StateManagementController {
@@ -588,34 +589,37 @@ export class StateManagementController {
     this.logger.log(`Getting consistency checks for project ${projectId}`);
     const db = this.databaseService.getDb();
 
-    let query = 'SELECT * FROM consistency_checks WHERE project_id = ?';
+    let query = `SELECT i.*,c.chapter_index FROM writing_quality_issues i
+      LEFT JOIN chapters c ON c.id=i.chapter_id
+      WHERE i.project_id=? AND i.issue_type LIKE 'consistency.%'`;
     const params: any[] = [projectId];
 
     if (status) {
-      query += ' AND status = ?';
-      params.push(status);
+      if (status === 'error') query += " AND i.status='open' AND i.severity='blocking'";
+      else if (status === 'warning') query += " AND i.status='open' AND i.severity!='blocking'";
+      else query += ' AND 1=0';
     }
 
     if (chapterIndex) {
-      query += ' AND chapter_index = ?';
+      query += ' AND c.chapter_index = ?';
       params.push(parseInt(chapterIndex));
     }
 
-    query += ' ORDER BY detected_at DESC';
+    query += ' ORDER BY i.created_at DESC';
 
     const stmt = db.prepare(query);
     const rows = stmt.all(...params) as any[];
 
     const checks = rows.map(row => ({
       id: row.id,
-      checkType: row.check_type,
-      status: row.status,
-      message: row.message,
+      checkType: String(row.issue_type).replace(/^consistency\./, ''),
+      status: row.status === 'resolved' ? 'resolved' : row.severity === 'blocking' ? 'error' : 'warning',
+      message: row.summary,
       severity: row.severity,
-      detectedAt: row.detected_at,
+      detectedAt: row.created_at,
       chapterIndex: row.chapter_index,
-      details: JSON.parse(row.details),
-      resolved: row.resolved === 1,
+      details: (() => { try { return JSON.parse(row.payload || '{}')?.details?.items || []; } catch { return []; } })(),
+      resolved: row.status === 'resolved',
     }));
 
     return {
@@ -1312,24 +1316,20 @@ export class StateManagementController {
       }
 
       case 'plot_logic': {
-        db.prepare(`
-          INSERT INTO consistency_checks (
-            id, project_id, check_type, status, message, severity,
-            detected_at, chapter_index, details, resolved, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          this.generateId(),
+        const chapter = chapterIndex ? db.prepare('SELECT id,content FROM chapters WHERE project_id=? AND chapter_index=? ORDER BY created_at DESC LIMIT 1')
+          .get(projectId, chapterIndex) as { id: string; content: string } | undefined : undefined;
+        replaceQualityIssues(db, {
           projectId,
-          'plot_logic',
-          'warning',
-          summary,
-          'medium',
-          now,
-          chapterIndex || null,
-          JSON.stringify([{ field: title, expected: '与已确稿设定一致', actual: summary }]),
-          0,
-          now,
-        );
+          stage: 'chapter',
+          source: 'state_confirmation',
+          scopeKey: `state:${row.id}`,
+          chapterId: chapter?.id ?? null,
+          issues: [{
+            ruleId: 'consistency.plot_logic', severity: 'medium', message: summary,
+            quote: summary, content: chapter?.content, suggestion: '对照已确稿设定复查并修正。',
+            details: { checkType: 'plot_logic', chapterIndex, items: [{ field: title, expected: '与已确稿设定一致', actual: summary }] },
+          }],
+        });
         break;
       }
     }

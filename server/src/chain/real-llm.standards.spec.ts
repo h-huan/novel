@@ -18,3 +18,16 @@ it('injects the same active standard into ordinary and streaming provider reques
   for await (const _token of service.generateStream({ prompt: '题材', scenario: 'idea_generate', injectStandard: false })) { /* drain */ }
   expect(streamedSystem).toBe('');
 });
+
+it('injects only standards declared for the normalized functional scene', () => {
+  standardDirectiveCache.rebuild([
+    { module_key: 'quality_loop', module_name: '质量闭环', category: 'crosscut', scenarios: ['writing', 'review'],
+      version: 1, seed_baseline_version: 5, purpose: '闭环规则', steps_json: '[]', requirements_json: '[]', rules_json: '[]', quality_bar: '' },
+    { module_key: 'title', module_name: '标题', category: 'creation', scenarios: ['idea_generate', 'outline'],
+      version: 1, seed_baseline_version: 5, purpose: '标题规则', steps_json: '[]', requirements_json: '[]', rules_json: '[]', quality_bar: '' },
+  ]);
+  expect(standardDirectiveCache.get('chapter_synthesis')).toContain('闭环规则');
+  expect(standardDirectiveCache.get('summary')).toBe('');
+  expect(standardDirectiveCache.get('review')).toContain('闭环规则');
+  expect(standardDirectiveCache.get('review')).not.toContain('标题规则');
+});

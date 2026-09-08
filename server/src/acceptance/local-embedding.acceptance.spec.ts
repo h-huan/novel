@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { EmbeddingService } from '../rag/embedding.service';
-import { LOCAL_EMBEDDING_MODEL_NAME } from '../rag/local-embedding';
+import { hasLocalEmbeddingModel, LOCAL_EMBEDDING_MODEL_NAME } from '../rag/local-embedding';
 
 describe('local Chinese embedding acceptance', () => {
-  it('produces normalized non-zero semantic vectors without a remote API key', async () => {
-    const router = { getUserKey: () => null };
-    const service = new EmbeddingService(router as any);
-
+  it('uses only the bundled local model and never requires a remote key', async () => {
+    const service = new EmbeddingService();
+    if (!hasLocalEmbeddingModel()) {
+      expect(service.getAvailability()).toMatchObject({ available: false });
+      await expect(service.embed(['小说人物关系'])).rejects.toThrow('Bundled local semantic-index model is unavailable');
+      return;
+    }
     expect(service.getAvailability()).toEqual({ available: true, model: LOCAL_EMBEDDING_MODEL_NAME });
     const vectors = await service.embed(['小说人物关系', '故事角色联系', '天气晴朗']);
 

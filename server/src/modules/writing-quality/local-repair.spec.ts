@@ -13,3 +13,25 @@ it('rejects an improved total when a single dimension regresses', () => {
   expect(compareRepair(make(90, 60), make(80, 99)).accepted).toBe(false);
   expect(compareRepair(make(40, 80), make(90, 80)).accepted).toBe(true);
 });
+
+it('accepts a fully verified repair of an evidenced blocker even when the first review was partial', () => {
+  const constitution = readConstitution({ targetPlatform: '番茄' });
+  const before = parseStageScore({
+    dimensions: {
+      context: { score: 30, reason: '新增未授权人物', evidence: ['律师'] },
+    },
+    issues: [{ ruleId: 'context.allowed_characters', severity: 'blocking', message: '新增未授权人物', evidence: '律师' }],
+  }, { projectId: 'p', runId: 'before', stage: 'outline', content: '律师参与签署。', constitution });
+  const afterContent = '林铎本人完成签署。';
+  const after = parseStageScore({
+    dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, {
+      score: 90,
+      reason: '已按创作宪法修复',
+      evidence: [afterContent],
+    }])),
+    issues: [],
+  }, { projectId: 'p', runId: 'after', stage: 'outline', content: afterContent, constitution });
+
+  expect(before.status).toBe('partial');
+  expect(compareRepair(before, after).accepted).toBe(true);
+});

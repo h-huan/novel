@@ -14,7 +14,6 @@ export interface GenerationRecoveryAudit {
   protectionReasons: string[];
   missingModules: string[];
   consistencyIssues: string[];
-  indexCounts: Record<string, number>;
   canResume: boolean;
   running: boolean;
   recommendedAction: string;
@@ -136,24 +135,6 @@ export class GenerationRecoveryService {
       : 0;
     if (invalidForeshadowRefs) consistencyIssues.push(`${invalidForeshadowRefs}条伏笔章节引用无效`);
 
-    const indexCounts: Record<string, number> = { characters: 0, outlines: 0, foreshadowings: 0 };
-    try {
-      indexCounts.characters = (await this.vectorIndex.getChunksByMetadata(
-        VectorIndexService.COLLECTIONS.CHARACTERS, { projectId },
-      )).length;
-      indexCounts.outlines = (await this.vectorIndex.getChunksByMetadata(
-        VectorIndexService.COLLECTIONS.CHAPTERS_ROLLING, { projectId },
-      )).length;
-      indexCounts.foreshadowings = (await this.vectorIndex.getChunksByMetadata(
-        VectorIndexService.COLLECTIONS.FORESHADOWINGS, { projectId },
-      )).length;
-    } catch {
-      consistencyIssues.push('RAG索引不可读取');
-    }
-    if (indexCounts.characters < counts.characters) consistencyIssues.push('人物RAG索引不完整');
-    if (indexCounts.outlines < counts.outlineChapters) consistencyIssues.push('大纲RAG索引不完整');
-    if (indexCounts.foreshadowings < counts.foreshadowings) consistencyIssues.push('伏笔RAG索引不完整');
-
     const hasConfirmedSource = Boolean(String(project.confirmed_idea || project.idea_seed || '').trim());
     if (!hasConfirmedSource) consistencyIssues.push('缺少确认灵感/项目种子，无法按原配置恢复');
     const protectedHumanWork = protectionReasons.length > 0;
@@ -173,7 +154,6 @@ export class GenerationRecoveryService {
       protectionReasons,
       missingModules,
       consistencyIssues,
-      indexCounts,
       canResume,
       running,
       recommendedAction: running

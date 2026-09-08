@@ -38,7 +38,8 @@ export class MapPointRepository extends BaseRepository<MapPointRow> {
   }
 
   /**
-   * 鎸夊眰绾ф煡璇?   */
+   * 按层级查询
+   */
   findByLevel(projectId: string, level: string): MapPointRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM map_points WHERE project_id = ? AND level = ?
@@ -84,7 +85,8 @@ export class MapPointRepository extends BaseRepository<MapPointRow> {
   }
 
   /**
-   * 鎸夊叧鑱旇鑹叉煡璇?   */
+   * 按关联角色查询
+   */
   findByCharacterId(projectId: string, characterId: string): MapPointRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM map_points
@@ -95,7 +97,8 @@ export class MapPointRepository extends BaseRepository<MapPointRow> {
   }
 
   /**
-   * 鎸夊叧鑱旂珷鑺傛煡璇?   */
+   * 按关联章节查询
+   */
   findByChapterId(projectId: string, chapterId: string): MapPointRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM map_points

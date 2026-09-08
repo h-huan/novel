@@ -2,8 +2,8 @@
  * 功能模块初始标准基线（seed）
  *
  * 这是平台第一次运行、尚未积累自归纳数据时的【权威标准基线】，从现行代码中的平台策略、
- * 硬红线、格式合同、模型场景与创作层级确定性抽取，不依赖任何 LLM。之后每 1-2 天首次运行时，
- * ModuleStandardsService 会结合埋点指标 + 避坑经验，用【配置的日常模型】归纳出新版并归档旧版。
+ * 硬红线、格式合同、模型场景与创作层级确定性抽取，不依赖任何 LLM。之后仅在真实样本
+ * 达到阈值且指标发生实质变化时，由 ModuleStandardsService 归纳更新。
  *
  * 约定：每条 steps/requirements/rules 都是一句可直接执行的话，会被摘要注入到对应场景的生成提示，
  * 因此保持精炼、可操作，不写空泛口号。长篇/短篇差异、平台风格差异在对应模块内显式区分。
@@ -11,10 +11,10 @@
 
 /**
  * 标准基线版本号：每当开发者/AI 扩充或修改本文件的初始标准时 +1。
- * ModuleStandardsService 启动时若发现代码基线版本高于库内记录，会用新基线更新当前标准并把旧版归档
- * （trigger=seed_upgrade），保证"改了标准代码、重启即生效且留发展历程"，不必等自归纳周期。
+ * ModuleStandardsService 启动时若发现代码基线版本高于库内记录，会更新当前标准并保留内部审计快照，
+ * 保证代码标准修改后重启即生效，不必等待自归纳周期。
  */
-export const SEED_BASELINE_VERSION = 4;
+export const SEED_BASELINE_VERSION = 7;
 
 export interface SeedModuleStandard {
   module_key: string;
@@ -34,7 +34,7 @@ export interface SeedModuleStandard {
 export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
   {
     module_key: 'quality_loop', module_name: '小说质量闭环', category: 'crosscut',
-    scenarios: ['idea_generate', 'world_building', 'character_design', 'outline', 'writing', 'refinement', 'review'],
+    scenarios: ['idea_generate', 'world_building', 'character_design', 'organization_map', 'foreshadowing', 'timeline', 'outline', 'writing', 'polish', 'review'],
     business_tables: ['generation_runs', 'writing_quality_reports', 'writing_quality_issues', 'generation_repairs', 'generation_lessons'],
     purpose: '将项目唯一创作约束、证据评分、阻断、局部修复及真实学习贯通。',
     steps: [
@@ -61,7 +61,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     module_name: '灵感/题材发现',
     category: 'creation',
     scenarios: ['idea_generate'],
-    business_tables: ['inspirations'],
+    business_tables: ['generation_runs', 'idea_drafts'],
     purpose: '根据用户的模糊想法或指定方向，产出多张差异化、可直接发展成书的原创题材卡（含平台定位、核心钩子、卖点）。',
     steps: [
       { name: '解析意图', goal: '识别题材母题、目标平台、长短篇、情绪基调与受众' },
@@ -70,8 +70,9 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       { name: '平台适配', goal: '按目标平台读者口味校准题材卡的爽点与节奏取向' },
     ],
     requirements: [
-      '严格按本次请求的数量输出题材卡；批次可拆为多次单条调用，单条调用只输出一个 ideas 元素，不许擅自扩为四张',
+      '严格按本次请求数量一次批量输出题材卡；只在首批缺项或未通过质量 Gate 时使用同一场景模型补跑一次缺项，一次操作最多两次逻辑调用，不得逐条并发或无限重试',
       '每张卡必须显式标注目标平台、长短篇、题材标签、预估字数与开篇钩子',
+      '短篇总字数为8000–35000字；长篇总字数不少于100000字且不设固定上限；章节范围只从目标平台基准与项目创作宪法读取，字数和章数必须可互相核算',
       '题材卡面就展示平台/基调/标签，创建项目时自动带入而非让用户重填',
     ],
     rules: [
@@ -98,7 +99,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       { name: '标题同步', goal: '大纲阶段同步产出书名与分章标题，不后置到正文之后' },
     ],
     requirements: [
-      '层级完整：灵感→大纲→世界观→角色→组织→伏笔→时间线→正文，不得跳层或漏层',
+      '层级完整：创作宪法→灵感→世界观→角色→大纲→组织/地点→伏笔→时间线→正文，不得跳层或漏层',
       '每章必须带可验收字段：核心内容、场景、人物行动、冲突、爽点、伏笔埋设/回收、人物状态变化、下章钩子、目标字数',
       '章节目标字数必须落在该平台/长短篇动态区间，正文按此收敛',
     ],
@@ -236,7 +237,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     ],
     quality_bar: '90+方向：开篇即冲突、每300-500字一个推进或信息差、对话承担剧情、场景具体可感、结尾强钩子；硬红线0违规、大纲必需事件全覆盖、字数一次到位率持续提升。',
     inputs: ['本章详细大纲', '已确认上下文/状态', '历史避坑经验', '目标字数与平台策略'],
-    outputs: ['达标正文', '大纲对齐报告', '硬红线/矛盾记录'],
+    outputs: ['达标正文', '大纲对齐结论', '统一 QualityIssue'],
   },
   {
     module_key: 'continuation',
@@ -278,7 +279,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     module_key: 'title',
     module_name: '标题生成',
     category: 'creation',
-    scenarios: ['idea_generate', 'daily'],
+    scenarios: ['idea_generate', 'outline'],
     business_tables: ['projects'],
     purpose: '在大纲阶段同步产出符合平台调性、有点击欲且原创不撞名的书名与章节标题。',
     steps: [
@@ -296,8 +297,8 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     module_key: 'review',
     module_name: '质检与一致性',
     category: 'quality',
-    scenarios: ['character_review', 'daily'],
-    business_tables: ['writing_quality_reports', 'writing_quality_issues', 'consistency_checks', 'chapter_continuity_reviews'],
+    scenarios: ['review'],
+    business_tables: ['writing_quality_reports', 'writing_quality_issues', 'chapter_continuity_reviews'],
     purpose: '用确定性硬红线扫描 + LLM 验收双重机制，发现正文与大纲、设定、前后章节的偏差并落库可见。',
     steps: [
       { name: '硬红线扫描', goal: '确定性规则机检（段落/对话占比/开篇/视角/标点规范等）' },
@@ -310,14 +311,14 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       '确定性扫描与LLM判断分来源存储、互不覆盖',
       '问题必须可见、可定位到段落、给修复建议，不静默丢弃；跨章节归纳避坑经验供后续首版规避',
       '每次质检必须产出标签契合分 tagFit（平台/基调/风格/流派四维）与确定性标点检查，问题统一归入七个固定质量维度，供质量看板聚合',
-      '统计口径（防虚假累计的历史教训）：质量看板的“当前待改问题”只统计每章【最新一份】质检报告下仍 open 的问题，旧报告随正文重写失效、绝不跨报告累加（曾因把历次报告全部相加，把实际 25 个问题累加成 128、矛盾 1 累加成 55 的虚假值）；矛盾按(章节,类型)只留最新未解决；章节区分“有正文”与“空壳(word_count=0)”，空壳不计质量问题与字数达标；无数据的维度如实留空，禁止用历史值或默认值填充',
+      '质量看板只统计每个当前内容范围最新质检中仍 open 的问题；正文或上下文变化会使旧问题失效；空壳章节不计质量问题和字数达标；无数据维度保持未评估',
     ],
     rules: [
       '平台硬红线按目标平台分档，各平台用各平台阈值，不搞一刀切',
       '质检只标问题与建议，不擅自篡改作者已确认内容',
       '状态权威分级：已确稿=事实、待确稿=候选、冲突=待处理、过期=仅风险；正文完稿只抽取状态变化进确稿中心，作者确认后才回写长期事实，不自动覆盖；影响已锁定章节只出影响报告，不自动改写其既定事实',
       'AI文检测四维：语言（同一情绪词500字内>5次、形容词堆砌、非人感比喻）、句型（过分规整、几个字一句地短句连用、节奏无呼吸）、逻辑（只抛梗不回收、吃书、违生活常识）、情感（标准化概括而非细节展现），命中必须给出具体降味改写',
-      '正文重写并重新质检后，上一版报告问题自动不再计入“当前待改”；看板/任何统计都以最新报告为唯一当前事实来源',
+      '正文重写并重新质检后，上一版问题自动 superseded；看板和统计以当前内容范围的最新质检为准',
     ],
     quality_bar: '问题必须定位到实际证据，证据不足标记未评估；不得承诺零漏报或伪造分数。评分与当前报告一致，修复效果必须复检后再认定。',
     inputs: ['正文', '大纲合同', '已确认状态/前文摘要', '作品标签（平台/基调/风格/流派/目标字数区间）'],
@@ -327,7 +328,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     module_key: 'originality',
     module_name: '原创性（横切）',
     category: 'crosscut',
-    scenarios: ['idea_generate', 'outline', 'world_building', 'character_design', 'writing', 'writing_daily', 'writing_climax'],
+    scenarios: ['idea_generate', 'outline', 'world_building', 'character_design', 'organization_map', 'foreshadowing', 'timeline', 'writing', 'polish'],
     business_tables: [],
     purpose: '在所有创作环节保证原创：类型母题可用，但具体设定、人物、情节与表达必须原创，并对知名作品做撞名/相似度后置校验。',
     steps: [

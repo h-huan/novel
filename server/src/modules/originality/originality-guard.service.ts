@@ -3,16 +3,16 @@
  *
  * 前置：各创作场景已通过 standardDirectiveCache 注入"原创性（横切）标准"，从生成源头要求原创。
  * 后置：正文每次经唯一持久化收口 ChapterService.update 落库后，用知名作品库做标题/内容/角色撞名相似检测，
- *       high/medium 命中写入 consistency_checks（source=originality_check），在矛盾面板可见、可处理；检测永不阻断保存。
+ *       high/medium 命中写入统一 QualityIssue，在矛盾面板可见、可处理。
  *
  * 解耦：CopyrightCheckService 构造无参、仅依赖纯数据 KNOWN_WORKS，这里直接实例化，
  *       避免 OriginalityModule → RefinementModule → ChainModule 的模块循环依赖。
  */
 import { Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { DatabaseService } from '../../database/database.service';
 import { CopyrightCheckService } from '../refinement/copyright-check.service';
 import type { CopyrightMatch } from '../refinement/dto/refinement.dto';
+import { replaceQualityIssues } from '../writing-quality/quality-issue';
 
 @Injectable()
 export class OriginalityGuardService {
@@ -37,30 +37,30 @@ export class OriginalityGuardService {
       if (!content || content.trim().length < 50) return null; // 过短内容无检测意义
       const result = this.copyright.checkFull(content, title || undefined, characterNames);
       const notable = result.matches.filter(m => m.risk === 'high' || m.risk === 'medium');
-      if (notable.length === 0) return { risk: result.risk, matches: [] };
       const db = this.database.getDb();
-      const now = new Date().toISOString();
-      const ins = db.prepare(
-        `INSERT INTO consistency_checks
-          (id, project_id, check_type, status, message, severity, detected_at, chapter_index, details, resolved, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,0,?)`,
-      );
-      // 同一章同一命中项去重：先清掉本章该项未解决的旧记录，避免重复保存叠加
-      const dedup = db.prepare(
-        `DELETE FROM consistency_checks WHERE project_id=? AND chapter_index=? AND check_type='originality' AND status IN ('warning','error')`,
-      );
-      dedup.run(projectId, chapterIndex);
-      for (const m of notable.slice(0, 10)) {
-        const status = m.risk === 'high' ? 'error' : 'warning';
-        const severity = m.risk === 'high' ? 'high' : 'medium';
+      const chapter = db.prepare('SELECT id FROM chapters WHERE project_id=? AND chapter_index=? ORDER BY created_at DESC LIMIT 1')
+        .get(projectId, chapterIndex) as { id: string } | undefined;
+      replaceQualityIssues(db, {
+        projectId,
+        stage: 'chapter',
+        source: 'originality_check',
+        scopeKey: `chapter:${chapter?.id || chapterIndex}`,
+        chapterId: chapter?.id ?? null,
+        title: `第${chapterIndex}章原创性检查`,
+        issues: notable.slice(0, 10).map(m => {
         const typeLabel = m.type === 'title' ? '标题撞名' : m.type === 'content' ? '内容相似' : '角色撞名';
         const message = `【原创性·后置检测·${typeLabel}】${m.suggestion || m.matchedItem}（相似度${m.similarity}%，来源：${m.source || '知名作品库'}）。原创要求：类型母题可用，但具体设定/人物/情节/表达必须差异化原创。`;
-        ins.run(
-          randomUUID(), projectId, 'originality', status, message, severity, now, chapterIndex,
-          JSON.stringify({ source: 'originality_check', matchedItem: m.matchedItem, similarity: m.similarity, risk: m.risk, matchType: m.type, referenceSource: m.source }),
-          now,
-        );
-      }
+          return {
+            ruleId: 'originality',
+            severity: m.risk === 'high' ? 'blocking' : 'medium',
+            message,
+            quote: m.matchedItem,
+            evidenceVerified: true,
+            suggestion: m.suggestion,
+            details: { chapterIndex, matchedItem: m.matchedItem, similarity: m.similarity, risk: m.risk, matchType: m.type, referenceSource: m.source },
+          };
+        }),
+      });
       return { risk: result.risk, matches: notable };
     } catch (err) {
       this.logger.warn?.(`原创后置检测失败（不阻断保存）: ${err instanceof Error ? err.message : String(err)}`);

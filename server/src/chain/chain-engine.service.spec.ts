@@ -5,7 +5,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ChainEngineService, chapterSynthesisMaxTokens } from './chain-engine.service';
 import { PromptRegistryService } from './prompt-registry.service';
-import { QualityGateService } from './quality-gate.service';
 import { RealLLMService } from './real-llm.service';
 
 describe('ChainEngineService', () => {
@@ -20,7 +19,7 @@ describe('ChainEngineService', () => {
     type: 'prompt' as const,
     chainId: 'test-chain',
     promptTemplateId: 'test-template',
-    modelConfig: { primary: 'deepseek', temperature: 0.5, tier: 'economy' as const },
+    modelConfig: { temperature: 0.5 },
     inputMapping: { test: 'user_input.test' },
     outputMapping: { result: 'test_node.result' },
     timeout: 30,
@@ -36,7 +35,7 @@ describe('ChainEngineService', () => {
     nodes: [mockNode],
     variables: [],
     executionMode: 'sequential' as const,
-    config: { timeout: 60, maxRetries: 2, enableLogging: false, enableQualityGate: false, strictMode: false },
+    config: { timeout: 60, maxRetries: 2, enableLogging: false, strictMode: false },
   };
 
   beforeEach(async () => {
@@ -53,13 +52,6 @@ describe('ChainEngineService', () => {
           },
         },
         {
-          provide: QualityGateService,
-          useValue: {
-            evaluateByRule: vi.fn().mockResolvedValue({ passed: true, score: 100, summary: 'pass', details: [] }),
-            shouldRetry: vi.fn().mockReturnValue(false),
-          },
-        },
-        {
           provide: RealLLMService,
           useValue: { generate },
         },
@@ -73,10 +65,6 @@ describe('ChainEngineService', () => {
     (service as any).promptRegistry = {
       render: vi.fn().mockReturnValue('rendered prompt'),
       getTemplate: vi.fn().mockReturnValue({ id: 'test-template', content: 'template {{test}}' }),
-    };
-    (service as any).qualityGate = {
-      evaluateByRule: vi.fn().mockResolvedValue({ passed: true, score: 100, summary: 'pass', details: [] }),
-      shouldRetry: vi.fn().mockReturnValue(false),
     };
     (service as any).llm = { generate };
   });
@@ -109,7 +97,7 @@ describe('ChainEngineService', () => {
     const context = {
       chainId: 'body-by-outline',
       variables: { chapterFunction: 'development', chapterNumber: 1, chapterOutline: '有效详细大纲'.repeat(20) },
-      nodeOutputs: {}, retryCounters: {}, qualityGateFailures: {},
+      nodeOutputs: {}, retryCounters: {},
       startTime: new Date(), timestamps: {}, metadata: {},
     };
     const result = await (service as any).executeTransformNode(node, {
@@ -147,7 +135,6 @@ describe('ChainEngineService', () => {
         variables: { user_input: { test: 'hello' }, test: 'hello' },
         nodeOutputs: {},
         retryCounters: {},
-        qualityGateFailures: {},
         startTime: new Date(),
         timestamps: {},
         metadata: {},

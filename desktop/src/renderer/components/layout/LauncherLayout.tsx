@@ -7,7 +7,7 @@
  * - 中间：内容区
  * - 没有侧边栏，没有复杂 Header
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from '../../stores/appStore';
 import { setBaseUrl } from '../../lib/api';
@@ -30,9 +30,7 @@ interface LauncherLayoutProps {
 const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { serverStatus, serverError, startHealthPolling } = useAppStore();
-  const startHealthPollingRef = useRef(startHealthPolling);
-  startHealthPollingRef.current = startHealthPolling;
+  const { serverStatus, serverError, startHealthPolling, stopHealthPolling } = useAppStore();
 
   // Web 模式下的后端健康检查状态
   const [webBackendOk, setWebBackendOk] = useState<boolean | null>(null);
@@ -40,7 +38,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
   useEffect(() => {
     if (isElectron) {
       // Electron 模式：通过 IPC 监听服务器状态
-      startHealthPollingRef.current();
+      startHealthPolling();
 
       const handleServerStatus = (status: { running: boolean; port?: number }) => {
         if (status.port) {
@@ -51,6 +49,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
       window.electronAPI?.on('server-status', handleServerStatus);
 
       return () => {
+        stopHealthPolling();
         window.electronAPI?.removeAllListeners('server-status');
       };
     } else {
@@ -68,7 +67,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
       const timer = setInterval(check, 15_000);
       return () => { cancelled = true; clearInterval(timer); }
     }
-  }, []);
+  }, [startHealthPolling, stopHealthPolling]);
 
   // 判断是否显示服务状态横幅
   const showServerBanner = isElectron

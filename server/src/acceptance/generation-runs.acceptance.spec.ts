@@ -32,3 +32,24 @@ it('records success, provider failure, stream cancellation and constitution snap
     expect(runs.find(r => r.status === 'success').gate_status).toBe('passed');
   } finally { db.close(); }
 });
+
+it('inherits the constitution and stores evidence-based scores through five writing stages', async()=>{
+ const db=new DatabaseSync(':memory:');
+ try {
+  await new Migrator(db).runMigrations();
+  const database={getDb:()=>db} as any;
+  const project=new ProjectService(new ProjectRepository(database)).create({title:'全流程验收',targetPlatform:'fanqie'});
+  const metrics=new GenerationMetricsService(database);
+  const service=new RealLLMService({} as any,metrics);
+  (service as any).generateInternal=vi.fn(async(r:any)=>{
+   if(r.scenario==='review') return {content:JSON.stringify({dimensions:Object.fromEntries(['platform','category','tone','style','genre','pov','context','logic','completeness','prose'].map(k=>[k,{score:90,reason:'验收固定证据',evidence:['钟楼']}]))})};
+   expect(r.systemPrompt).toContain('fanqie');
+   return {content:'钟楼',model:'fixture'};
+  });
+  for(const scenario of ['world_building','character_design','outline','writing','refinement']) await service.generate({prompt:'钟楼',scenario,metrics:{projectId:project.id}});
+  const reports=metrics.queryContentReports({projectId:project.id});
+  expect(reports.items.map(r=>r.stage).sort()).toEqual(['chapter','character','outline','refinement','world']);
+  expect(reports.items.every(r=>r.score && r.current)).toBe(true);
+  expect((metrics.getRuns(project.id) as any[]).every(r=>r.gate_status==='passed')).toBe(true);
+ } finally {db.close()}
+});

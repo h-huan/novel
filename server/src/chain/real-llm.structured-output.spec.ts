@@ -38,6 +38,22 @@ describe('RealLLMService structured output guard', () => {
       .rejects.toThrow('结构化生成因输出长度被截断');
   });
 
+  it('expands an empty length-truncated response before treating it as a generic empty response', async () => {
+    const service = createService();
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ content: '', finishReason: 'length' })
+      .mockResolvedValueOnce({ content: '{"ideas":[]}', finishReason: 'stop' });
+    (service as any).callModel = callModel;
+
+    const response = await service.generate({
+      prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxEmptyRetries: 1,
+    });
+
+    expect(response.content).toBe('{"ideas":[]}');
+    expect(callModel.mock.calls[0][4]).toBe(4096);
+    expect(callModel.mock.calls[1][4]).toBe(8192);
+  });
+
   it('honors a caller-provided output budget instead of replacing it with the scenario default', async () => {
     const service = createService();
     const callModel = vi.fn().mockResolvedValue({ content: '{"foreshadowings":[]}', finishReason: 'stop' });
@@ -50,14 +66,31 @@ describe('RealLLMService structured output guard', () => {
     expect(callModel).toHaveBeenCalledWith('deepseek-v4-flash', '输出JSON对象', '', 0.4, 7200, 600_000, 'json_object', undefined);
   });
 
-  it('bounds deepseek reasoning for body-writing scenarios (low) so content is not eaten by thinking', async () => {
+  it('keeps the expanded budget and explicit temperature during a network retry', async () => {
+    const service = createService();
+    const callModel = vi.fn()
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
+      .mockResolvedValueOnce({ content: '{"ok":true}', finishReason: 'stop' });
+    (service as any).callModel = callModel;
+
+    const response = await service.generate({
+      prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object',
+      maxTokens: 32768, temperature: 0,
+    });
+
+    expect(response.content).toBe('{"ok":true}');
+    expect(callModel.mock.calls[1][3]).toBe(0);
+    expect(callModel.mock.calls[1][4]).toBe(32768);
+  }, 10_000);
+
+  it('does not silently lower the configured model reasoning level', async () => {
     const service = createService();
     const callModel = vi.fn().mockResolvedValue({ content: '正文...', finishReason: 'stop' });
     (service as any).callModel = callModel;
 
     await service.generate({ prompt: '生成正文', scenario: 'daily' });
 
-    expect(callModel).toHaveBeenCalledWith('deepseek-v4-flash', '生成正文', '', 0.4, 4096, 600_000, undefined, 'low');
+    expect(callModel).toHaveBeenCalledWith('deepseek-v4-flash', '生成正文', '', 0.4, 4096, 600_000, undefined, undefined);
   });
 
   it('rejects an empty plain-text (body generation) response instead of returning it empty', async () => {

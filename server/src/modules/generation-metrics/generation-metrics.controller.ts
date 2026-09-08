@@ -14,6 +14,11 @@ import { GenerationMetricsService } from './generation-metrics.service';
 export class GenerationMetricsController {
   constructor(private readonly metrics: GenerationMetricsService) {}
 
+  @Get('content-reports')
+  contentReports(@Query() query: Record<string, string | undefined>) {
+    return this.metrics.queryContentReports(query);
+  }
+
   @Get('cockpit')
   cockpit(@Query('projectId') projectId: string) {
     if (!projectId) throw new BadRequestException('缺少项目ID');

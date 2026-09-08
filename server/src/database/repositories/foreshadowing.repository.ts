@@ -50,7 +50,8 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 鎸夌姸鎬佹煡璇?   */
+   * 按状态查询
+   */
   findByStatus(projectId: string, status: string): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM foreshadowings WHERE project_id = ? AND status = ?
@@ -128,7 +129,8 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 鎸夊叧鑱旂珷鑺傛煡璇?   */
+   * 按关联章节查询
+   */
   findByChapterIndex(projectId: string, chapterIndex: number): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM foreshadowings
@@ -138,7 +140,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   }
 
   /**
-   * 鑾峰彇浼忕瑪缁熻
+   * 获取伏笔统计
    */
   getStats(projectId: string): {
     total: number;

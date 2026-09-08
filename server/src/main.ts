@@ -12,7 +12,6 @@ import {
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
-import { VectorIndexService } from './rag/vector-index.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -42,7 +41,7 @@ if (fs.existsSync(envPath)) {
   }
   // 启动日志静默，仅记录错误
 } else {
-  console.error(`[dotenv] ❌ .env 文件不存在: ${envPath}`);
+  // .env is optional; saved model configuration and process variables remain valid.
 }
 
 /**
@@ -70,7 +69,7 @@ function getLogLevels(): Array<'log' | 'error' | 'warn' | 'debug' | 'verbose'> {
   }
 }
 
-export async function bootstrap(options: { port?: number; host?: string; writePortFile?: boolean } = {}): Promise<NestFastifyApplication> {
+export async function bootstrap(options: { port?: number; host?: string } = {}): Promise<NestFastifyApplication> {
   const logLevels = getLogLevels();
 
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -92,13 +91,13 @@ export async function bootstrap(options: { port?: number; host?: string; writePo
       logger: logLevels,
     },
   );
-  // Make SIGTERM/SIGINT close database and other module resources. This is
-  // required for repeatable local and Playwright E2E runs.
-  app.enableShutdownHooks();
+  // 独立运行时使用系统信号关闭；桌面托管进程改走 Node IPC。Electron 的
+  // Node 运行时在 Windows 上重新发送 SIGTERM 会抛 kill ENOSYS。
+  if (process.env.NOVEL_MANAGED_SERVER !== '1') app.enableShutdownHooks();
 
   // CORS 配置 (本地开发)
   app.enableCors({
-    origin: ['http://localhost:5173', 'app://.'],
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'app://.'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     credentials: true,
   });
@@ -134,51 +133,67 @@ export async function bootstrap(options: { port?: number; host?: string; writePo
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  // 启动服务 — 端口自动递增，避免 EADDRINUSE
-  const basePort = options.port ?? parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
+  // 服务端固定使用 3100。端口被占用时明确失败，避免前端和后端连接到不同实例。
+  const port = options.port ?? parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
   const host = options.host ?? process.env.HOST ?? '127.0.0.1';
-
-  const port = basePort;
   try {
     await app.listen(port, host);
-    console.log(`[v20260729-docx] 服务已启动: http://${host}:${port} (世界观7维度/角色5+7字段/大纲conflicts+highlights数组/ECONNRESET×5重试)`);
   } catch (err: any) {
     if (err?.code === 'EADDRINUSE') {
-      throw new Error(`端口 ${host}:${port} 已被占用。桌面端只会连接现有服务，不会启动第二个服务；请停止重复启动的服务后再试。`);
+      throw new Error(`服务端口 ${port} 已被占用，请先关闭重复启动的服务。`);
     }
     throw err;
   }
-
-  // 启动后检查 ChromaDB 状态（静默，仅在异常时输出 warning）
-  try {
-    const vectorIndex = app.get(VectorIndexService);
-    const health = vectorIndex.getHealthStatus();
-    if (!health.available) {
-      console.warn(`[ChromaDB] 未连接，向量检索使用内存存储`);
-    }
-  } catch {
-    // 静默
-  }
-
-  // Desktop 主进程通过此标记提取实际端口
-  console.log(`[PORT] ${port}`);
-
-  // 将实际端口写入文件，供 Vite 代理自动发现
-  // 使用 process.cwd() 确保文件始终写在 server/ 根目录下
-  if (options.writePortFile !== false) {
-    try {
-      const portFile = path.resolve(process.cwd(), '.port');
-      fs.writeFileSync(portFile, String(port), 'utf8');
-      console.log(`[NestJS] Port written to .port: ${port}`);
-    } catch (e) {
-      console.warn('[NestJS] Failed to write .port file:', e);
-    }
-  }
+  console.log(`[server] 服务已启动: http://${host}:${port}`);
   return app;
 }
 
+async function existingNovelServer(port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!response.ok) return false;
+    const body = await response.json() as { status?: string };
+    return body.status === 'ok';
+  } catch {
+    return false;
+  }
+}
+
 if (require.main === module) {
-  bootstrap().catch((err) => {
+  const cliPort = parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
+  existingNovelServer(cliPort).then((running) => {
+    if (running) {
+      console.log(`[server] already running at http://127.0.0.1:${cliPort}; duplicate start skipped`);
+      return null;
+    }
+    return bootstrap();
+  }).then((app) => {
+    if (!app) return;
+    if (process.env.NOVEL_MANAGED_SERVER !== '1') return;
+
+    let closing = false;
+    const closeManagedServer = async () => {
+      if (closing) return;
+      closing = true;
+      try {
+        await app.close();
+        if (process.connected) process.disconnect();
+        process.exit(0);
+      } catch (err) {
+        console.error('[NestJS] Failed to close managed server:', err);
+        process.exit(1);
+      }
+    };
+
+    process.on('message', (message: unknown) => {
+      if (message && typeof message === 'object' && (message as { type?: string }).type === 'shutdown') {
+        void closeManagedServer();
+      }
+    });
+    process.once('disconnect', () => { void closeManagedServer(); });
+  }).catch((err) => {
     console.error('[NestJS] Failed to start server:', err);
     process.exit(1);
   });

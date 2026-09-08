@@ -1,7 +1,7 @@
 /**
  * Electron 主进程入口
  * 负责窗口管理、系统托盘、IPC通信、文件系统操作、
- * 自动更新检测、NestJS后端服务管理
+ * 自动更新检测、NestJS 后端连接状态
  */
 
 import {
@@ -47,18 +47,15 @@ interface WindowBounds {
   height: number;
 }
 
-interface ServerProcess {
-  process: import('child_process').ChildProcess | null;
-  port: number;
-}
-
 // ---------- 全局状态 ----------
 
 let launcherWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
-let serverProcess: ServerProcess = { process: null, port: 3100 };
+const SERVER_PORT = 3100;
+let lastServerStatus: { running: boolean; port: number; error?: string } = { running: false, port: SERVER_PORT };
+let serverCheckPromise: Promise<boolean> | null = null;
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 function getWindowStatePath(): string {
@@ -225,13 +222,12 @@ function createLauncherWindow(): void {
   });
 
   launcherWindow.webContents.once('did-finish-load', () => {
-    setTimeout(() => { void connectToServer(); }, 100);
+    setTimeout(() => { void ensureServerRunning(); }, 100);
   });
 
   // 加载引导页
   if (VITE_DEV_SERVER_URL) {
     launcherWindow.loadURL(VITE_DEV_SERVER_URL + 'launcher.html');
-    launcherWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     launcherWindow.loadFile(path.join(__dirname, '../dist/launcher.html'));
   }
@@ -273,21 +269,13 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
   mainWindow.on('resize', saveWindowBounds);
   mainWindow.on('move', saveWindowBounds);
 
-  // 关闭行为：最小化到托盘而非退出
-  mainWindow.on('close', (event) => {
-    if (!isQuitting) {
-      event.preventDefault();
-      mainWindow?.hide();
-    }
-  });
-
   // 窗口关闭后清理
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 
   mainWindow.webContents.once('did-finish-load', () => {
-    setTimeout(() => { void connectToServer(); }, 100);
+    setTimeout(() => { void ensureServerRunning(); }, 100);
   });
 
   // 加载应用（带 project 参数，方便直接跳转）
@@ -298,7 +286,6 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
       url += `#/project/${projectId}/${safeSub}`;
     }
     mainWindow.loadURL(url);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     // 生产模式用 hash 参数传递项目 ID
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
@@ -357,42 +344,46 @@ function setupAutoUpdater(): void {
   }
 }
 
-// ---------- NestJS 服务连接（尝试 3100；占用时按 3101/3102 顺延，最多 3 个端口） ----------
+// ---------- NestJS 服务连接（服务端固定 3100） ----------
 
 async function tryConnectPort(port: number): Promise<boolean> {
   try {
     const healthUrl = `http://127.0.0.1:${port}/api/v1/health`;
     const res = await fetch(healthUrl, { signal: AbortSignal.timeout(2000) });
-    if (res.ok) return true;
+    if (!res.ok) return false;
+    const body = await res.json() as { status?: string };
+    return body.status === 'ok';
   } catch { /* 服务未起或被占 */ }
   return false;
 }
 
-async function connectToServer(startPort: number = 3100): Promise<boolean> {
-  // 顺延上限 3 个端口（3100 → 3101 → 3102），覆盖上一会话遗留进程占用 3100 的场景
-  for (let delta = 0; delta <= 2; delta++) {
-    const port = startPort + delta;
-    if (await tryConnectPort(port)) {
-      serverProcess.port = port;
-      if (delta > 0) {
-        console.warn(`[server] 端口 ${startPort} 被占用，已回退到 ${port}`);
-        const msg = `端口 ${startPort} 已被占用（可能是上一次会话未完全退出），已自动连接 ${port}`;
-        mainWindow?.webContents.send('server-status', { running: true, port, warning: msg });
-        launcherWindow?.webContents.send('server-status', { running: true, port, warning: msg });
-      } else {
-        console.log(`[server] 已连接后端服务 http://127.0.0.1:${port}`);
-        mainWindow?.webContents.send('server-status', { running: true, port });
-        launcherWindow?.webContents.send('server-status', { running: true, port });
-      }
-      return true;
-    }
+async function connectToServer(port: number = SERVER_PORT): Promise<boolean> {
+  if (await tryConnectPort(port)) {
+    lastServerStatus = { running: true, port };
+    console.log(`[server] backend ready at http://127.0.0.1:${port}`);
+    mainWindow?.webContents.send('server-status', { running: true, port });
+    launcherWindow?.webContents.send('server-status', { running: true, port });
+    return true;
   }
-  // 都连不上：给用户明确提示而不是静默
-  const msg = `未能连接任何端口 ${startPort}~${startPort + 2} 的后端服务。请确认 NestJS 是否已启动（或上一次会话的进程是否已退出）。`;
-  console.error(`[server] ${msg}`);
-  mainWindow?.webContents.send('server-status', { running: false, port: startPort, error: msg });
-  launcherWindow?.webContents.send('server-status', { running: false, port: startPort, error: msg });
   return false;
+}
+
+function reportServerUnavailable(port: number, detail?: string): void {
+  const msg = detail || `服务端未运行，请在 server 目录单独启动服务端（固定端口 ${port}）。`;
+  lastServerStatus = { running: false, port, error: msg };
+  console.warn(`[server] backend unavailable on port ${port}`);
+  mainWindow?.webContents.send('server-status', { running: false, port, error: msg });
+  launcherWindow?.webContents.send('server-status', { running: false, port, error: msg });
+}
+
+function ensureServerRunning(port = SERVER_PORT): Promise<boolean> {
+  if (!serverCheckPromise) {
+    serverCheckPromise = connectToServer(port).then(running => {
+      if (!running) reportServerUnavailable(port);
+      return running;
+    }).finally(() => { serverCheckPromise = null; });
+  }
+  return serverCheckPromise;
 }
 
 // ---------- IPC 处理器 ----------
@@ -429,16 +420,14 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('close-project', (): IpcResult => {
-    // 1. 关闭主窗口
-    if (mainWindow) {
-      mainWindow.close();
-      mainWindow = null;
-    }
-
-    // 2. 重新打开引导窗口
+    // 先创建引导窗口，再销毁项目窗口，确保切换过程中始终有窗口存在。
+    // destroy() 明确销毁旧窗口，不再把一个隐藏窗口遗留在后台并丢失引用。
     if (!launcherWindow) {
       createLauncherWindow();
     }
+    const previousMainWindow = mainWindow;
+    mainWindow = null;
+    previousMainWindow?.destroy();
 
     return { success: true };
   });
@@ -669,48 +658,32 @@ function registerIpcHandlers(): void {
     },
   );
 
-  // ===== NestJS 服务管理 =====
+  // ===== 独立 NestJS 服务连接状态 =====
+
+  ipcMain.handle('get-server-status', async (): Promise<IpcResult> => {
+    await ensureServerRunning(SERVER_PORT);
+    return { success: true, data: lastServerStatus };
+  });
 
   ipcMain.handle(
     'start-server',
-    async (_event, port?: number): Promise<IpcResult> => {
+    async (): Promise<IpcResult> => {
       try {
-        const targetPort = port ?? 3100;
-
-        const running = await connectToServer(targetPort);
+        const targetPort = SERVER_PORT;
+        const running = await ensureServerRunning(targetPort);
         return running
-          ? { success: true, data: { port: targetPort, status: 'already-running' } }
-          : { success: false, error: `后端服务未启动 (http://127.0.0.1:${targetPort})，请先在终端启动 server` };
+          ? { success: true, data: { port: targetPort, status: 'connected' } }
+          : { success: false, error: lastServerStatus.error || `服务端未运行 (http://127.0.0.1:${targetPort})` };
       } catch (error) {
         return { success: false, error: String(error) };
       }
     },
   );
 
-  ipcMain.handle('stop-server', async (): Promise<IpcResult> => {
-    try {
-      if (!serverProcess.process) {
-        return { success: true, data: { status: 'not-running' } };
-      }
-
-      serverProcess.process.kill('SIGTERM');
-
-      // 给进程一点时间优雅关闭，然后强制杀掉
-      setTimeout(() => {
-        if (serverProcess.process) {
-          serverProcess.process.kill('SIGKILL');
-          serverProcess.process = null;
-        }
-      }, 5000);
-
-      mainWindow?.webContents.send('server-status', { running: false });
-      launcherWindow?.webContents.send('server-status', { running: false });
-
-      return { success: true, data: { status: 'stopping' } };
-    } catch (error) {
-      return { success: false, error: String(error) };
-    }
-  });
+  ipcMain.handle('stop-server', async (): Promise<IpcResult> => ({
+    success: false,
+    error: '服务端独立运行，管理端不负责关闭服务端。',
+  }));
 
   // ===== 项目事件发送 (渲染进程通过 IPC 触发) =====
   // 这些通道由渲染进程调用，向其他渲染进程广播事件
@@ -735,7 +708,7 @@ function registerIpcHandlers(): void {
 // 开发模式：存到项目根目录的 .appdata 下
 // 生产模式：存到可执行文件所在目录的 .appdata 下（与 C 盘解耦）
 const userDataPath = VITE_DEV_SERVER_URL
-  ? path.resolve(__dirname, '..', '..', '..', '.appdata')  // dev: d:\code\novel\.appdata
+  ? path.resolve(__dirname, '..', '..', '.appdata')
   : path.join(path.dirname(app.getPath('exe')), '.appdata');      // prod: 安装目录\.appdata
 try {
   app.setPath('userData', userDataPath);
@@ -743,30 +716,35 @@ try {
   // setPath 在 ready 后调用会抛异常，忽略
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  createTray();
-  registerShortcuts();
-  registerIpcHandlers();
-  setupAutoUpdater();
-  void connectToServer();
+function restoreApplicationWindow(): void {
+  const target = mainWindow ?? launcherWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (!target) {
+    if (app.isReady()) createWindow();
+    return;
+  }
+  if (target.isMinimized()) target.restore();
+  target.show();
+  target.focus();
+}
 
-  // macOS: 点击 dock 图标重新创建窗口
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(); // 创建引导窗口
-    } else {
-      // 优先显示主窗口，否则显示引导窗口
-      if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-      } else if (launcherWindow) {
-        launcherWindow.show();
-        launcherWindow.focus();
-      }
-    }
+// 必须在 app ready 和窗口创建之前取得单实例锁。第二次启动只负责恢复
+// 已有窗口，不能再创建新的 BrowserWindow 或留下另一组 Electron 进程。
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', restoreApplicationWindow);
+  app.whenReady().then(() => {
+    registerIpcHandlers();
+    createWindow();
+    createTray();
+    registerShortcuts();
+    setupAutoUpdater();
+    void ensureServerRunning();
+
+    app.on('activate', restoreApplicationWindow);
   });
-});
+}
 
 // 所有窗口关闭时退出 (macOS 除外)
 app.on('window-all-closed', () => {
@@ -775,40 +753,15 @@ app.on('window-all-closed', () => {
   }
 });
 
-// 退出前清理
+// 退出前只清理管理端自身资源；独立服务端不受影响。
 app.on('before-quit', () => {
   isQuitting = true;
 
   // 保存窗口状态
   saveWindowBounds();
 
-  // 停止服务器
-  if (serverProcess.process) {
-    serverProcess.process.kill('SIGTERM');
-    serverProcess.process = null;
-  }
-
   // 注销快捷键
   if (app.isReady()) {
     globalShortcut.unregisterAll();
   }
 });
-
-// 防止多实例
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    // 优先恢复主窗口，否则恢复引导窗口
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    } else if (launcherWindow) {
-      if (launcherWindow.isMinimized()) launcherWindow.restore();
-      launcherWindow.show();
-      launcherWindow.focus();
-    }
-  });
-}

@@ -1,21 +1,9 @@
 /**
  * SettingsPage - 系统设置
- * API Key管理 + Token Plan + 模式切换
+ * API Key 管理 + 精确模型场景配置
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
-
-const PLAN_OPTIONS = [
-  { value: 'deepseek', label: 'DeepSeek 按量', color: 'var(--color-info-light)' },
-  { value: 'deepseek_bundle', label: 'DeepSeek Token包', color: 'var(--color-info)' },
-  { value: 'ali_bailian', label: '阿里百炼 Token包', color: 'var(--color-accent)' },
-  { value: 'tencent_hunyuan', label: '腾讯混元 Token包', color: 'var(--color-success)' },
-  { value: 'openai_paygo', label: 'OpenAI 按量', color: 'var(--color-success)' },
-  { value: 'openai_bundle', label: 'OpenAI Token包', color: 'var(--color-success)' },
-  { value: 'claude_paygo', label: 'Claude 按量', color: 'var(--color-purple)' },
-  { value: 'gemini_free', label: 'Gemini 免费', color: 'var(--color-warning)' },
-  { value: 'other_bundle', label: '其他 Token包', color: 'var(--color-text-muted)' },
-];
 
 const SettingsPage: React.FC = () => {
   const [tab, setTab] = useState('byok');
@@ -23,19 +11,14 @@ const SettingsPage: React.FC = () => {
   const [keyName, setKeyName] = useState('');
   const [model, setModel] = useState('deepseek');
   const [baseUrl, setBaseUrl] = useState('');
-  const [plan, setPlan] = useState('deepseek');
   const [writingMode, setWritingMode] = useState('normal');
+  const [editingMode, setEditingMode] = useState('normal');
   const [savedKeys, setSavedKeys] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [sceneMappings, setSceneMappings] = useState<Record<string, Record<string, string>>>({});
   const [fetchedModels, setFetchedModels] = useState<Array<{ id: string; name: string; provider: string; configured?: boolean }>>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
-  const [capabilities, setCapabilities] = useState<{ writing?: { available?: boolean }; embedding?: { available?: boolean; reason?: string }; readyForFullSync?: boolean }>({});
-  const [embeddingApiKey, setEmbeddingApiKey] = useState('');
-  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('https://api.openai.com/v1');
-  const [embeddingModel, setEmbeddingModel] = useState('text-embedding-3-small');
-  const [embeddingConfigured, setEmbeddingConfigured] = useState(false);
   // 偏好设置
   const [autoSaveInterval, setAutoSaveInterval] = useState(() => localStorage.getItem('prefs_autoSave') || '30');
   const [fontSize, setFontSize] = useState(() => localStorage.getItem('prefs_fontSize') || '15');
@@ -88,19 +71,13 @@ const SettingsPage: React.FC = () => {
     // 获取当前模式
     api.get('/routing/mode').then((res: any) => {
       const mode = res?.data?.mode || res?.mode;
-      if (mode) setWritingMode(mode);
+      if (mode) {
+        setWritingMode(mode);
+        setEditingMode(mode);
+      }
     }).catch(() => {});
     // 自动获取模型列表
     fetchModels();
-    api.get('/routing/capabilities').then((res: any) => {
-      setCapabilities(res?.data || res || {});
-    }).catch(() => {});
-    api.get('/routing/embedding-config').then((res: any) => {
-      const data = res?.data || res || {};
-      setEmbeddingConfigured(Boolean(data.configured));
-      if (data.baseUrl) setEmbeddingBaseUrl(data.baseUrl);
-      if (data.model) setEmbeddingModel(data.model);
-    }).catch(() => {});
     // 获取场景模型配置
     api.get('/routing/scenario-models').then((res: any) => {
       const data = res?.data || res || {};
@@ -116,15 +93,6 @@ const SettingsPage: React.FC = () => {
             const mode = key.substring(colonIdx + 1);
             if (!mappings[sceneKey]) mappings[sceneKey] = {};
             mappings[sceneKey][mode] = val;
-          } else if (typeof val === 'string' && !key.includes(':')) {
-            // 兼容旧格式（无冒号的纯场景名）
-            if (!mappings[key]) mappings[key] = {};
-            mappings[key].economy = val;
-            mappings[key].normal = val;
-            mappings[key].premium = val;
-          } else if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-            // 已经是嵌套格式
-            mappings[key] = val as Record<string, string>;
           }
         }
       }
@@ -140,6 +108,20 @@ const SettingsPage: React.FC = () => {
     } catch {}
   };
 
+  const flattenSceneMappings = (): Record<string, string> => {
+    const scenes: Record<string, string> = {};
+    for (const [scene, modes] of Object.entries(sceneMappings)) {
+      for (const mode of ['economy', 'normal', 'premium'] as const) {
+        if (modes[mode]) scenes[`${scene}:${mode}`] = modes[mode];
+      }
+    }
+    return scenes;
+  };
+
+  const saveSceneMappings = async (): Promise<void> => {
+    await api.post('/routing/scenario-models', { scenes: flattenSceneMappings() });
+  };
+
   const handleSaveKey = async () => {
     if (!apiKey.trim()) { showMessage('请输入API Key'); return; }
     setLoading(true);
@@ -149,9 +131,8 @@ const SettingsPage: React.FC = () => {
         model,
         key: apiKey,
         baseUrl: baseUrl || undefined,
-        plan,
       });
-      showMessage(`✅ 已保存（${model} · ${PLAN_OPTIONS.find(p => p.value === plan)?.label}）`);
+      showMessage(`✅ ${model} API Key 已保存`);
       setApiKey(''); setBaseUrl('');
       loadKeys();
     } catch (err: any) {
@@ -170,31 +151,6 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleSaveEmbedding = async () => {
-    if (!embeddingApiKey.trim() || !embeddingBaseUrl.trim() || !embeddingModel.trim()) {
-      showMessage('Embedding API Key、Base URL 和模型名称都必须填写');
-      return;
-    }
-    setLoading(true);
-    try {
-      const res: any = await api.post('/routing/embedding-config', {
-        apiKey: embeddingApiKey.trim(),
-        baseUrl: embeddingBaseUrl.trim(),
-        model: embeddingModel.trim(),
-      });
-      const data = res?.data || res || {};
-      if (data.success === false) throw new Error(data.error || '保存失败');
-      setEmbeddingApiKey('');
-      setEmbeddingConfigured(true);
-      const caps: any = await api.get('/routing/capabilities');
-      setCapabilities(caps?.data || caps || {});
-      showMessage(`✓ 向量服务已验证并保存${data.dimensions ? `（${data.dimensions}维）` : ''}`);
-    } catch (err: any) {
-      showMessage(`Embedding 配置保存失败：${err.message}`);
-    }
-    setLoading(false);
-  };
-
   const selectStyle: React.CSSProperties = {
     padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
@@ -207,8 +163,8 @@ const SettingsPage: React.FC = () => {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '8px' }}>
         {[
-          { id: 'byok', label: '🔑 API Key / Token Plan', desc: '管理密钥和套餐' },
-          { id: 'mode', label: '🎯 模式切换', desc: '省钱/常规/高品质' },
+          { id: 'byok', label: '🔑 API Key', desc: '管理模型密钥' },
+          { id: 'mode', label: '🎯 模型配置', desc: '按场景指定模型' },
           { id: 'prefs', label: '🎨 偏好设置', desc: '主题/编辑器' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -230,59 +186,32 @@ const SettingsPage: React.FC = () => {
         </div>
       )}
 
-      {/* ========= API Key / Token Plan Tab ========= */}
+      {/* ========= API Key Tab ========= */}
       <div style={{ display: tab === 'byok' ? 'block' : 'none' }}>
         <div>
-          <div style={{ marginBottom: '14px', padding: '10px 12px', borderRadius: '7px', background: capabilities.readyForFullSync ? 'rgba(46,204,113,0.10)' : 'rgba(245,158,11,0.10)', border: `1px solid ${capabilities.readyForFullSync ? 'rgba(46,204,113,0.24)' : 'rgba(245,158,11,0.24)'}`, color: capabilities.readyForFullSync ? '#8df0b2' : '#ffd58a', fontSize: 'var(--font-size-xs)', lineHeight: 1.55 }}>
-            <strong>{capabilities.readyForFullSync ? 'AI 写作与同步已就绪' : 'AI 同步尚未就绪'}</strong>
-            <div>正文/摘要：{capabilities.writing?.available ? '可用' : '未配置'}；向量索引：{capabilities.embedding?.available ? '可用' : `未配置${capabilities.embedding?.reason ? `（${capabilities.embedding.reason}）` : ''}`}</div>
-          </div>
-          <div style={{ padding: '14px', marginBottom: '16px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px' }}>
-            <div style={{ color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, marginBottom: '6px' }}>向量索引（Embedding）</div>
-            <div style={{ color: embeddingConfigured ? '#8df0b2' : '#ffd58a', fontSize: 'var(--font-size-xs)', marginBottom: '10px' }}>
-              {embeddingConfigured ? '已配置并验证真实向量服务' : '未配置。创建项目前必须配置，系统不会用假向量或跳过索引。'}
-            </div>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-              <input value={embeddingApiKey} onChange={e => setEmbeddingApiKey(e.target.value)} type="password" placeholder={embeddingConfigured ? '输入新 Key 可更新配置' : 'Embedding API Key'} style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
-              <input value={embeddingModel} onChange={e => setEmbeddingModel(e.target.value)} placeholder="Embedding 模型名称" style={{ flex: 1, minWidth: '180px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input value={embeddingBaseUrl} onChange={e => setEmbeddingBaseUrl(e.target.value)} placeholder="Embedding Base URL" style={{ flex: 1, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)' }} />
-              <button onClick={handleSaveEmbedding} disabled={loading} style={{ padding: '8px 16px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', cursor: 'pointer' }}>{loading ? '正在验证…' : '验证并保存'}</button>
-            </div>
-          </div>
           <div style={{ marginBottom: '12px', color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', lineHeight: 1.6 }}>
-            添加 API Key，选择对应的 <strong>Token Plan</strong>（各平台预付费套餐）。系统自动按计划类型分配使用。
+            API Key 只用于你在模型配置中明确选择的模型。系统不会自动替换模型或提供商。
           </div>
 
           {/* Add Form */}
-          <div style={{ padding: '16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '16px' }}>
+          <form onSubmit={(event) => { event.preventDefault(); void handleSaveKey(); }} style={{ padding: '16px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '16px' }}>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
               <input value={keyName} onChange={e => setKeyName(e.target.value)} placeholder="备注 (如: 我的DeepSeek)"
                 style={{ flex: 1, minWidth: '120px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
-              <input value={model} onChange={e => setModel(e.target.value)} placeholder="提供商 (如: DeepSeek)"
+              <input value={model} onChange={e => setModel(e.target.value)} placeholder="提供商 (如: DeepSeek)" autoComplete="username"
                 style={{ flex: 1, minWidth: '100px', padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <input value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="API Key (sk-...)"
-                type="password" style={{ flex: 2, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
+                type="password" autoComplete="new-password" style={{ flex: 2, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
               <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="Base URL (默认自动)"
                 style={{ flex: 3, padding: '8px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
-            {/* Token Plan Selector */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)' }}>Token Plan：</span>
-              <select value={plan} onChange={e => setPlan(e.target.value)} style={selectStyle}>
-                {PLAN_OPTIONS.map(p => (
-                  <option key={p.value} value={p.value} style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            <button onClick={handleSaveKey} disabled={loading}
+            <button type="submit" disabled={loading}
               style={{ padding: '8px 20px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', fontSize: 'var(--font-size-xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
               保存
             </button>
-          </div>
+          </form>
 
           {/* Saved Keys */}
           <div>
@@ -296,7 +225,6 @@ const SettingsPage: React.FC = () => {
                     <div style={{ color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontWeight: 500 }}>{k.name || k.model}</div>
                     <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
                       {k.model} · {k.maskedKey}
-                      {k.plan && <span style={{ color: 'var(--color-purple)', marginLeft: '6px' }}>· {PLAN_OPTIONS.find(p => p.value === k.plan)?.label || k.plan}</span>}
                       {k.baseUrl && <span style={{ color: 'var(--color-text-muted)', marginLeft: '6px' }}>· {k.baseUrl}</span>}
                     </div>
                   </div>
@@ -309,31 +237,33 @@ const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ========= 模式切换 Tab ========= */}
+      {/* ========= 模型配置 Tab ========= */}
       <div style={{ display: tab === 'mode' ? 'block' : 'none' }}>
         <div>
           <div style={{ color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', marginBottom: '14px', lineHeight: 1.6 }}>
-            先为当前模式选择日常模型；未在下表单独指定的 AI 任务都会实际使用它。下表仅用于覆盖指定任务。
+            先选择要配置的模式。日常模型是该模式的必填项；指定任务未单独配置时使用该模式的日常模型。保存配置后，再明确启用该模式。
           </div>
 
           {/* Mode Buttons */}
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
             {[
-              { key: 'economy', label: '💰 省钱模式', color: 'var(--color-success)', desc: '全用低成本模型' },
-              { key: 'normal', label: '⚖️ 常规模式', color: 'var(--color-info)', desc: '平衡质量与成本' },
-              { key: 'premium', label: '🎲 高品质模式', color: 'var(--color-accent)', desc: '全用最强模型' },
+              { key: 'economy', label: '💰 省钱模式', color: 'var(--color-success)', desc: '使用本列配置' },
+              { key: 'normal', label: '⚖️ 常规模式', color: 'var(--color-info)', desc: '使用本列配置' },
+              { key: 'premium', label: '🎲 高品质模式', color: 'var(--color-accent)', desc: '使用本列配置' },
             ].map(m => (
               <button key={m.key}
-                onClick={() => { api.post('/routing/mode', { mode: m.key }).then(() => setWritingMode(m.key)).catch(() => {}); }}
+                onClick={() => setEditingMode(m.key)}
                 style={{
                   flex: 1, padding: '10px', borderRadius: '8px', cursor: 'pointer', fontFamily: 'inherit',
-                  border: `2px solid ${writingMode === m.key ? m.color : 'rgba(255,255,255,0.08)'}`,
-                  backgroundColor: writingMode === m.key ? `${m.color}15` : 'rgba(255,255,255,0.02)',
-                  color: writingMode === m.key ? m.color : 'var(--color-text-primary)',
+                  border: `2px solid ${editingMode === m.key ? m.color : 'rgba(255,255,255,0.08)'}`,
+                  backgroundColor: editingMode === m.key ? `${m.color}15` : 'rgba(255,255,255,0.02)',
+                  color: editingMode === m.key ? m.color : 'var(--color-text-primary)',
                   fontSize: 'var(--font-size-xs)', fontWeight: 600,
                 }}>
                 <div>{m.label}</div>
-                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 400, color: writingMode === m.key ? m.color : 'var(--color-text-muted)', marginTop: '2px' }}>{m.desc}</div>
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 400, color: editingMode === m.key ? m.color : 'var(--color-text-muted)', marginTop: '2px' }}>
+                  {writingMode === m.key ? '当前已启用' : m.desc}
+                </div>
               </button>
             ))}
           </div>
@@ -344,8 +274,8 @@ const SettingsPage: React.FC = () => {
               <div style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '3px', lineHeight: 1.5 }}>未在“指定任务模型”中单独配置的所有 AI 调用，均使用此模型。</div>
             </div>
             <select
-              value={sceneMappings.daily?.[writingMode] || ''}
-              onChange={e => setSceneMappings(prev => ({ ...prev, daily: { ...(prev.daily || {}), [writingMode]: e.target.value } }))}
+              value={sceneMappings.daily?.[editingMode] || ''}
+              onChange={e => setSceneMappings(prev => ({ ...prev, daily: { ...(prev.daily || {}), [editingMode]: e.target.value } }))}
               style={{ minWidth: '190px', padding: '7px 9px', borderRadius: '5px', color: '#d1fae5', backgroundColor: 'var(--color-bg-secondary)', border: '1px solid rgba(52, 211, 153, 0.5)', fontFamily: 'inherit', cursor: 'pointer' }}
             >
               <option value="" style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>请选择日常模型</option>
@@ -374,14 +304,7 @@ const SettingsPage: React.FC = () => {
                 </button>
                 <button onClick={async () => {
                     try {
-                      // 展平嵌套结构为后端需要的 { "场景:mode": "modelId" } 格式
-                      const customScenes: Record<string, string> = {};
-                      for (const [sk, modes] of Object.entries(sceneMappings)) {
-                        for (const mk of ['economy', 'normal', 'premium'] as const) {
-                          if (modes[mk]) customScenes[`${sk}:${mk}`] = modes[mk];
-                        }
-                      }
-                      await api.post('/routing/scenario-models', { scenes: customScenes });
+                      await saveSceneMappings();
                       showMessage('✅ 场景模型配置已保存');
                     } catch { showMessage('❌ 保存失败'); }
                   }}
@@ -390,6 +313,27 @@ const SettingsPage: React.FC = () => {
                     color: 'var(--color-white)', fontSize: 'var(--font-size-xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                   }}>
                   保存配置
+                </button>
+                <button onClick={async () => {
+                    const dailyModel = sceneMappings.daily?.[editingMode];
+                    if (!dailyModel) {
+                      showMessage('❌ 请先选择并保存该模式的日常模型');
+                      return;
+                    }
+                    try {
+                      await saveSceneMappings();
+                      await api.post('/routing/mode', { mode: editingMode });
+                      setWritingMode(editingMode);
+                      showMessage(`✅ 已启用${editingMode === 'economy' ? '省钱' : editingMode === 'normal' ? '常规' : '高品质'}模式`);
+                    } catch {
+                      showMessage('❌ 模式启用失败，请检查服务连接');
+                    }
+                  }}
+                  style={{
+                    padding: '5px 12px', backgroundColor: 'var(--color-info)', border: 'none', borderRadius: '4px',
+                    color: 'var(--color-white)', fontSize: 'var(--font-size-xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                  启用此模式
                 </button>
               </div>
             </div>
@@ -409,7 +353,6 @@ const SettingsPage: React.FC = () => {
                   { key: 'outline', scene: '大纲/架构（角色·组织·伏笔·时间线）' },
                   { key: 'writing', scene: '正文写作（日常/高潮）' },
                   { key: 'polish', scene: '优化精修/质检' },
-                  { key: 'daily', scene: '日常（其它杂项）' },
                 ].map((row, i) => {
                   const modes = sceneMappings[row.key] || { economy: '', normal: '', premium: '' };
                   const colKeys = ['economy', 'normal', 'premium'] as const;
@@ -446,7 +389,7 @@ const SettingsPage: React.FC = () => {
           <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', color: 'var(--color-text-dim)', fontSize: 'var(--font-size-xs)', lineHeight: 1.8 }}>
             当前模式：<strong style={{ color: writingMode === 'economy' ? 'var(--color-success)' : writingMode === 'normal' ? 'var(--color-info)' : writingMode === 'premium' ? 'var(--color-accent)' : 'var(--color-accent)' }}>
               {writingMode === 'economy' ? '💰 省钱' : writingMode === 'normal' ? '⚖️ 常规' : writingMode === 'premium' ? '🎲 高品质' : `🎲 ${writingMode}`}
-            </strong> · 日常模型：<strong style={{ color: '#6ee7b7' }}>{sceneMappings.daily?.[writingMode] || '未设置（沿用原有路由）'}</strong> · 已添加 {savedKeys.length} 个 Key
+            </strong> · 日常模型：<strong style={{ color: '#6ee7b7' }}>{sceneMappings.daily?.[writingMode] || '未配置'}</strong> · 正在配置：<strong>{editingMode === 'economy' ? '省钱' : editingMode === 'normal' ? '常规' : '高品质'}</strong> · 已添加 {savedKeys.length} 个 Key
           </div>
         </div>
       </div>

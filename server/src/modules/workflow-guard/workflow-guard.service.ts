@@ -70,11 +70,11 @@ export class WorkflowGuardService {
     }
 
     // 创建未完成的项目只能修复和查看已有资产，不能进入正文或调用正文生成。
-    // 资产存在不等于项目已经通过时间线、RAG 与跨模块一致性激活门禁。
+    // 资产存在不等于项目已经通过时间线与跨模块一致性激活门禁。
     if (['creating', 'generation_failed'].includes(String(project.status || ''))) {
       const recoveryReason = project.status === 'creating'
         ? '项目仍在创建中，完成全部模块校验并激活后才能进入下一阶段'
-        : '项目创建未完整通过，请先按原配置再次生成并通过时间线、RAG与一致性校验';
+        : '项目创建未完整通过，请先按原配置再次生成并通过时间线与一致性校验';
       const activationBlockedKeys = new Set(['generate_outline', 'enter_writing', 'generate_body', 'continue_body']);
       stageResult.allowedActions = stageResult.allowedActions.filter((action: AllowedAction) => (
         !activationBlockedKeys.has(action.key) && !action.key.startsWith('enter_')

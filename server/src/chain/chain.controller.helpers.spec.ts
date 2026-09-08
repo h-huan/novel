@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  ChainController,
   canFitChapterWordRange,
   canFitStoryTargetWords,
   parsePositiveTargetWords,
@@ -8,6 +9,37 @@ import {
   extractBalancedJson,
   extractIdeaList,
 } from './chain.controller';
+
+describe('structured generation quality retry', () => {
+  it('feeds the real Gate issue back to the same structured task instead of reporting a parse failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const gateError = Object.assign(new Error('质量 Gate blocked：新增未授权人物“律师”'), {
+        generatedContent: '{"title":"第一章","character":"律师"}',
+      });
+      const generate = vi.fn()
+        .mockRejectedValueOnce(gateError)
+        .mockResolvedValueOnce({ content: '{"title":"第一章","character":"林铎"}' });
+      const controller = Object.create(ChainController.prototype) as any;
+      controller.realLLM = { generate };
+      controller.logger = { warn: vi.fn(), error: vi.fn() };
+
+      const pending = controller.llmCallWithRetry('第1章详细大纲', '只输出JSON', {
+        scenario: 'outline',
+        validate: (value: any) => value?.character === '林铎',
+      });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+
+      expect(result.data.character).toBe('林铎');
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(generate.mock.calls[1][0].prompt).toContain('新增未授权人物“律师”');
+      expect(result.warnings).not.toContain('第1章详细大纲生成结果无法解析');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('discovery target word planning helpers', () => {
   it('parses configured and AI-planned target word formats', () => {
@@ -30,6 +62,8 @@ describe('discovery target word planning helpers', () => {
     expect(canFitStoryTargetWords(35_000, 'short_story')).toBe(true);
     expect(canFitStoryTargetWords(7_999, 'short_story')).toBe(false);
     expect(canFitStoryTargetWords(35_001, 'short_story')).toBe(false);
+    expect(canFitStoryTargetWords(99_999, 'long_novel')).toBe(false);
+    expect(canFitStoryTargetWords(100_000, 'long_novel')).toBe(true);
     expect(canFitStoryTargetWords(2_000_000, 'long_novel')).toBe(true);
   });
 
@@ -68,10 +102,8 @@ describe('idea discovery structured output', () => {
     ]);
   });
 
-  it('repairs valid legacy array output without truncating nested objects', () => {
-    expect(extractIdeaList('[{"title":"旧梦","meta":{"hook":"[异响]"}}]')).toEqual([
-      { title: '旧梦', meta: { hook: '[异响]' } },
-    ]);
+  it('rejects obsolete top-level array output instead of maintaining a second response contract', () => {
+    expect(extractIdeaList('[{"title":"旧梦","meta":{"hook":"[异响]"}}]')).toBeNull();
   });
 });
 

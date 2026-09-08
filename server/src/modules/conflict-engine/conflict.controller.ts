@@ -2,9 +2,7 @@
  * 冲突检测 Controller
  * API: 检测 / 报告列表 / 解决冲突 / 统计
  *
- * 真实数据来源：consistency_checks 表（由 ConsistencyCheckService 在生成/锁章后写入，
- * 基于已确认的角色设定、世界观规则、时间线、伏笔与大纲做确定性校验）。
- * 旧的 ConflictEngineService 内存桩已彻底移除，本 Controller 直接读取真实 consistency_checks 数据。
+ * 数据来源为统一 QualityIssue；这里只保留面向“前后矛盾”页面的查询视图。
  */
 import { Controller, Get, Post, Body, Param, Query, Inject, Delete } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
@@ -28,7 +26,7 @@ export class ConflictController {
   ) {}
 
   /**
-   * 运行检测（真实）：基于已确认设定对指定章节做确定性一致性校验，结果写入 consistency_checks。
+   * 基于已确认设定对指定章节做确定性一致性校验。
    */
   @Post('detect')
   async runDetection(@Body() dto: { chapterIndex?: number; projectId?: string } = {}) {
@@ -40,7 +38,7 @@ export class ConflictController {
   }
 
   /**
-   * 获取冲突报告列表（真实）：直接读取 consistency_checks 表。
+   * 获取统一质量问题中的一致性问题。
    */
   @Get()
   getConflicts(@Query() query: { priority?: string; type?: string; status?: string; chapterIndex?: string; projectId?: string }) {
@@ -52,22 +50,24 @@ export class ConflictController {
   @Get(':id')
   getConflict(@Param('id') id: string, @Query('projectId') projectId?: string) {
     const db = this.databaseService.getDb();
-    const row = db.prepare('SELECT * FROM consistency_checks WHERE id = ? AND project_id = ?').get(id, projectId || '') as any;
+    const row = db.prepare(`SELECT i.*,c.chapter_index,c.status chapter_status FROM writing_quality_issues i
+      LEFT JOIN chapters c ON c.id=i.chapter_id WHERE i.id=? AND i.project_id=?`).get(id, projectId || '') as any;
     if (!row) return { error: 'Conflict not found' };
     return this.mapRow(row);
   }
 
   /**
-   * 解决冲突（真实）：将 consistency_checks 行标记为 resolved。
+   * 解决统一质量问题。
    */
   @Post(':id/resolve')
   resolveConflict(@Param('id') id: string, @Query('projectId') projectId?: string, @Body() dto: { resolution?: string; note?: string } = {}) {
     const db = this.databaseService.getDb();
-    const row = db.prepare('SELECT * FROM consistency_checks WHERE id = ? AND project_id = ?').get(id, projectId || '') as any;
+    const row = db.prepare('SELECT * FROM writing_quality_issues WHERE id = ? AND project_id = ?').get(id, projectId || '') as any;
     if (!row) return { error: 'Conflict not found' };
-    db.prepare("UPDATE consistency_checks SET status = 'resolved', resolved = 1, resolved_at = datetime('now'), resolved_by = ? WHERE id = ? AND project_id = ?")
+    db.prepare("UPDATE writing_quality_issues SET status='resolved',resolved_at=datetime('now'),resolved_by=?,updated_at=datetime('now') WHERE id=? AND project_id=?")
       .run(dto.note || dto.resolution || 'author', id, projectId || '');
-    const updated = db.prepare('SELECT * FROM consistency_checks WHERE id = ? AND project_id = ?').get(id, projectId || '') as any;
+    const updated = db.prepare(`SELECT i.*,c.chapter_index,c.status chapter_status FROM writing_quality_issues i
+      LEFT JOIN chapters c ON c.id=i.chapter_id WHERE i.id=? AND i.project_id=?`).get(id, projectId || '') as any;
     return this.mapRow(updated);
   }
 
@@ -77,7 +77,9 @@ export class ConflictController {
   @Post('auto-resolve')
   autoResolve(@Query('projectId') projectId?: string) {
     const db = this.databaseService.getDb();
-    const res = db.prepare("UPDATE consistency_checks SET status = 'resolved', resolved = 1, resolved_at = datetime('now'), resolved_by = 'auto' WHERE project_id = ? AND status != 'resolved' AND severity = 'low'")
+    const res = db.prepare(`UPDATE writing_quality_issues SET status='resolved',resolved_at=datetime('now'),
+      resolved_by='auto',updated_at=datetime('now') WHERE project_id=? AND status='open' AND severity='low'
+      AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')`)
       .run(projectId || '');
     return { autoResolved: res.changes };
   }
@@ -105,16 +107,13 @@ export class ConflictController {
       ? Number(chapterIndex)
       : null;
     const removed = idx != null
-      ? db.prepare(
-          `DELETE FROM consistency_checks
-           WHERE project_id = ? AND chapter_index = ?
-             AND status IN ('warning','error') AND status != 'resolved'`,
-        ).run(projectId, idx).changes
-      : db.prepare(
-          `DELETE FROM consistency_checks
-           WHERE project_id = ?
-             AND status IN ('warning','error') AND status != 'resolved'`,
-        ).run(projectId).changes;
+      ? db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND chapter_id IN
+          (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?) AND status IN ('open','superseded')
+          AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')`)
+        .run(projectId, projectId, idx).changes
+      : db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND status IN ('open','superseded')
+          AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')`)
+        .run(projectId).changes;
     return { removed: Number(removed || 0) };
   }
 
@@ -124,9 +123,10 @@ export class ConflictController {
   @Get('stats')
   getStats(@Query('projectId') projectId?: string) {
     const db = this.databaseService.getDb();
-    const total = (db.prepare('SELECT COUNT(*) AS c FROM consistency_checks WHERE project_id = ?').get(projectId || '') as any).c;
-    const resolved = (db.prepare("SELECT COUNT(*) AS c FROM consistency_checks WHERE project_id = ? AND status = 'resolved'").get(projectId || '') as any).c;
-    const p0 = (db.prepare("SELECT COUNT(*) AS c FROM consistency_checks WHERE project_id = ? AND severity = 'high' AND status != 'resolved'").get(projectId || '') as any).c;
+    const category = "(issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')";
+    const total = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND status IN ('open','resolved')`).get(projectId || '') as any).c;
+    const resolved = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND status='resolved'`).get(projectId || '') as any).c;
+    const p0 = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND severity='blocking' AND status='open'`).get(projectId || '') as any).c;
     return {
       total,
       resolved,
@@ -141,30 +141,33 @@ export class ConflictController {
   private queryRows(projectId?: string, chapterIndex?: number, filter?: { priority?: string; type?: string; status?: string }) {
     if (!projectId) return [];
     const db = this.databaseService.getDb();
-    const clauses = ['project_id = ?'];
+    const clauses = ['i.project_id = ?', "(i.issue_type LIKE 'consistency.%' OR i.issue_type='originality' OR i.issue_type='outline_alignment')"];
     const params: any[] = [projectId];
     if (chapterIndex !== undefined && !Number.isNaN(chapterIndex)) {
-      clauses.push('chapter_index = ?');
+      clauses.push('c.chapter_index = ?');
       params.push(chapterIndex);
     }
     if (filter?.status) {
       if (filter.status === 'resolved') {
-        clauses.push("status = 'resolved'");
+        clauses.push("i.status = 'resolved'");
       } else if (filter.status === 'unresolved') {
-        clauses.push("status != 'resolved'");
+        clauses.push("i.status = 'open'");
       }
     }
     if (filter?.priority) {
       const severity = { critical: 'high', high: 'high', medium: 'medium', low: 'low' }[filter.priority] || filter.priority;
-      clauses.push('severity = ?');
+      clauses.push('i.severity = ?');
       params.push(severity);
     }
     if (filter?.type) {
       const raw = CHECK_TYPE_LABEL[filter.type] ? filter.type : Object.keys(CHECK_TYPE_LABEL).find(k => CHECK_TYPE_LABEL[k] === filter.type) || filter.type;
-      clauses.push('check_type = ?');
-      params.push(raw);
+      clauses.push('i.issue_type = ?');
+      params.push(['outline_alignment', 'originality'].includes(raw) || raw.startsWith('hardline.')
+        ? raw : raw.startsWith('consistency.') ? raw : `consistency.${raw}`);
     }
-    const sql = `SELECT * FROM consistency_checks WHERE ${clauses.join(' AND ')} ORDER BY detected_at DESC, chapter_index ASC`;
+    const sql = `SELECT i.*,c.chapter_index,c.status chapter_status FROM writing_quality_issues i
+      LEFT JOIN chapters c ON c.id=i.chapter_id WHERE ${clauses.join(' AND ')}
+      ORDER BY i.created_at DESC,c.chapter_index ASC`;
     return db.prepare(sql).all(...params) as any[];
   }
 
@@ -173,12 +176,12 @@ export class ConflictController {
   }
 
   private mapRow(row: any): any {
-    const severity: 'high' | 'medium' | 'low' = row.severity === 'high' ? 'high' : row.severity === 'low' ? 'low' : 'medium';
+    const severity: 'high' | 'medium' | 'low' = ['blocking','high'].includes(row.severity) ? 'high' : row.severity === 'low' ? 'low' : 'medium';
     const status = row.status === 'resolved' ? 'resolved' : 'unresolved';
     let details: any[] = [];
-    try { details = JSON.parse(row.details || '[]'); } catch { details = []; }
+    try { details = JSON.parse(row.payload || '{}')?.details?.items || []; } catch { details = []; }
     // 关联查询 chapter_id / chapter_status（按文档 R1 锁定正文优先级最高 P0）
-    const chapterInfo = this.lookupChapter(row.project_id, row.chapter_index);
+    const chapterInfo = row.chapter_id ? { id: row.chapter_id, status: row.chapter_status || '' } : this.lookupChapter(row.project_id, row.chapter_index);
     const chapterId: string | null = chapterInfo?.id ?? null;
     const chapterStatus: string | null = chapterInfo?.status ?? null;
     // P0 优先级（按 R1 金字塔）：当 chapter 状态为 locked 时，所有与之相关的冲突都视为 P0 锁定正文冲突
@@ -187,12 +190,13 @@ export class ConflictController {
       : severity === 'high' ? 'P1'
       : severity === 'low' ? 'P3'
       : 'P2';
-    const checkType = row.check_type;
-    const source: string = row.source || 'deterministic';
+    const checkType = String(row.issue_type || '').replace(/^consistency\./, '');
+    let source = 'quality_issue';
+    try { source = JSON.parse(row.payload || '{}')?.qualityIssue?.source || source; } catch { /* keep canonical source */ }
     return {
       id: row.id,
       type: CHECK_TYPE_LABEL[checkType] || checkType,
-      description: row.message,
+      description: row.summary || row.title,
       priority: severity,
       status,
       level,

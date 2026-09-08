@@ -61,10 +61,10 @@ export class ChainTemplateService {
       version: '1.2.0',
       description: '灵感转项目时自动丰富骨架种子实体（角色→世界观→组织→地点）',
       nodes: [
-        { id: 'node_1_character', name: '角色深度补全', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-character-enrich', modelConfig: { primary: 'deepseek', fallback: 'deepseek-v4-flash', temperature: 0.6, tier: 'economy' }, inputMapping: { hook: 'user_input.hook', description: 'user_input.description', characters: 'user_input.characters' }, outputMapping: {}, timeout: 30, retryCount: 2, skipOnEmptyInput: true, description: '基于角色名+hook生成性格五维/背景/对话风格' },
-        { id: 'node_2_worldview', name: '世界观补全', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-worldview-enrich', modelConfig: { primary: 'deepseek', fallback: 'deepseek-v4-flash', temperature: 0.5, tier: 'economy' }, inputMapping: { hook: 'user_input.hook', description: 'user_input.description', setting: 'user_input.setting' }, outputMapping: {}, timeout: 30, retryCount: 2, description: '基于setting+hook生成地理/历史/规则/势力格局' },
-        { id: 'node_3_organization', name: '组织生成', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-organization-gen', modelConfig: { primary: 'deepseek', fallback: 'deepseek-v4-pro', temperature: 0.6, tier: 'economy' }, inputMapping: { worldview: 'chain_output.node_2_worldview' }, outputMapping: {}, timeout: 20, retryCount: 1, description: '基于世界观生成2-3个主要势力' },
-        { id: 'node_4_location', name: '地点生成', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-location-gen', modelConfig: { primary: 'deepseek', fallback: 'deepseek-v4-flash', temperature: 0.6, tier: 'economy' }, inputMapping: { worldview: 'chain_output.node_2_worldview', isLong: 'user_input.isLong' }, outputMapping: {}, timeout: 30, retryCount: 2, description: '长篇按6层层级/短篇简化生成地点' },
+        { id: 'node_1_character', name: '角色深度补全', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-character-enrich', modelConfig: { temperature: 0.6 }, inputMapping: { hook: 'user_input.hook', description: 'user_input.description', characters: 'user_input.characters' }, outputMapping: {}, timeout: 30, retryCount: 2, skipOnEmptyInput: true, description: '基于角色名+hook生成性格五维/背景/对话风格' },
+        { id: 'node_2_worldview', name: '世界观补全', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-worldview-enrich', modelConfig: { temperature: 0.5 }, inputMapping: { hook: 'user_input.hook', description: 'user_input.description', setting: 'user_input.setting' }, outputMapping: {}, timeout: 30, retryCount: 2, description: '基于setting+hook生成地理/历史/规则/势力格局' },
+        { id: 'node_3_organization', name: '组织生成', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-organization-gen', modelConfig: { temperature: 0.6 }, inputMapping: { worldview: 'chain_output.node_2_worldview' }, outputMapping: {}, timeout: 20, retryCount: 1, description: '基于世界观生成必要的主要势力' },
+        { id: 'node_4_location', name: '地点生成', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-location-gen', modelConfig: { temperature: 0.6 }, inputMapping: { worldview: 'chain_output.node_2_worldview', isLong: 'user_input.isLong' }, outputMapping: {}, timeout: 30, retryCount: 2, description: '按作品形态生成必要地点' },
       ],
       variables: [
         { name: 'hook', source: 'user_input', path: 'user_input.hook', required: false },
@@ -74,7 +74,7 @@ export class ChainTemplateService {
         { name: 'isLong', source: 'user_input', path: 'user_input.isLong', required: false },
       ],
       executionMode: 'sequential',
-      config: { timeout: 120, maxRetries: 2, enableLogging: true, enableQualityGate: false, strictMode: false },
+      config: { timeout: 120, maxRetries: 2, enableLogging: true, strictMode: false },
       createdAt: now,
       updatedAt: now,
     });
@@ -86,7 +86,7 @@ export class ChainTemplateService {
       version: '1.0.0',
       description: '创建长篇项目时生成世界观（含故事核心设定14字段+详细世界观7维）+卷骨架（供后续增删改查）',
       nodes: [
-        { id: 'node_1_foundation', name: '世界观生成', type: 'prompt', chainId: 'long-novel-init-foundation', promptTemplateId: 'long-novel-init-foundation', modelConfig: { primary: 'deepseek', temperature: 0.7, tier: 'performance' }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' }, outputMapping: { coreSetting: 'node_1.coreSetting', worldview: 'node_1.worldview', skeletonVolumes: 'node_1.skeletonVolumes' }, timeout: 120, retryCount: 1 },
+        { id: 'node_1_foundation', name: '世界观生成', type: 'prompt', chainId: 'long-novel-init-foundation', promptTemplateId: 'long-novel-init-foundation', modelConfig: { temperature: 0.7 }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' }, outputMapping: { coreSetting: 'node_1.coreSetting', worldview: 'node_1.worldview', skeletonVolumes: 'node_1.skeletonVolumes' }, timeout: 120, retryCount: 1 },
       ],
       variables: [
         { name: 'story_setting', source: 'user_input', path: 'user_input.story_setting', required: true },
@@ -94,7 +94,7 @@ export class ChainTemplateService {
         { name: 'genre', source: 'user_input', path: 'user_input.genre', required: false },
       ],
       executionMode: 'sequential',
-      config: { timeout: 150, maxRetries: 2, enableLogging: true, enableQualityGate: false, strictMode: false },
+      config: { timeout: 150, maxRetries: 2, enableLogging: true, strictMode: false },
       createdAt: now,
       updatedAt: now,
     });
@@ -155,7 +155,6 @@ export class ChainTemplateService {
         timeout: data.config?.timeout ?? 300,
         maxRetries: data.config?.maxRetries ?? 1,
         enableLogging: data.config?.enableLogging ?? true,
-        enableQualityGate: data.config?.enableQualityGate ?? false,
         strictMode: data.config?.strictMode ?? false,
       },
       createdAt: existing?.createdAt || now,

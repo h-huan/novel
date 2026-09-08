@@ -35,8 +35,8 @@ export class HealthController {
   }
 
   @Get()
-  check(): { status: string; timestamp: string } {
-    return { status: "ok", timestamp: new Date().toISOString() };
+  check(): { status: string; timestamp: string; instanceId: string | null } {
+    return { status: "ok", timestamp: new Date().toISOString(), instanceId: process.env.NOVEL_INSTANCE_ID || null };
   }
 
   @Get("full")

@@ -22,12 +22,15 @@ export function applyLocalPatches(content: string, raw: unknown, structured = fa
 }
 
 export function compareRepair(before: StageScore, after: StageScore): { accepted: boolean; reason: string } {
-  if (before.status !== 'evaluated' || !qualityGate(after.issues, after.status === 'evaluated').passed) return { accepted: false, reason: '复检未通过或评估证据不足' };
+  if (!qualityGate(after.issues, after.status === 'evaluated').passed) return { accepted: false, reason: '复检未通过或评估证据不足' };
   if (SCORE_DIMENSIONS.some(k => before.dimensions[k].score !== null && (after.dimensions[k].score === null || after.dimensions[k].score! < before.dimensions[k].score!))) {
     return { accepted: false, reason: '至少一个已评估维度退步，回滚' };
   }
   const beforeRules = new Set(before.issues.map(i => i.ruleId));
   if (after.issues.some(i => !beforeRules.has(i.ruleId) && ['blocking', 'high'].includes(i.severity))) return { accepted: false, reason: '引入新的严重问题，回滚' };
-  const improved = after.overallScore! > before.overallScore! || after.issues.length < before.issues.length;
+  const beforeSevere = before.issues.filter(i => ['blocking', 'high'].includes(i.severity)).length;
+  const afterSevere = after.issues.filter(i => ['blocking', 'high'].includes(i.severity)).length;
+  const scoreImproved = before.overallScore !== null && after.overallScore !== null && after.overallScore > before.overallScore;
+  const improved = scoreImproved || afterSevere < beforeSevere || after.issues.length < before.issues.length;
   return { accepted: improved, reason: improved ? '复检通过，维度无退步且问题减少或评分提高' : '未证明改善，回滚' };
 }

@@ -1061,7 +1061,7 @@ export class WritingQualityService implements OnModuleInit {
       stateItems: [],
     };
 
-    // 项目信息（兼容实际 schema）；解析 settings 里的平台/基调/风格/流派/目标字数，供标签契合评分
+    // 项目信息；标签契合评分只读取项目创作宪法。
     try {
       const project = db.prepare(
         'SELECT title, description, platform_style, type, target_platform, target_words, settings FROM projects WHERE id = ?',

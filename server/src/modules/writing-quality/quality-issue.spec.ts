@@ -6,6 +6,7 @@ it('normalizes severity, anchors real evidence, and blocks independently of scor
     severity: 'CRITICAL', message: '冲突', quote: '太阳从西边升起', content: '清晨，太阳从西边升起。' });
   expect(issue.evidence).toMatchObject({ verified: true, start: 3 });
   expect(qualityGate([issue], true).passed).toBe(false);
+  expect(qualityGate([issue], false).status).toBe('blocked');
   expect(qualityGate([{ ...issue, status: 'resolved' }], true).passed).toBe(true);
   expect(qualityGate([], false).passed).toBe(false);
 });

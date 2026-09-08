@@ -31,12 +31,15 @@ const modelFiles = [
   'vocab.txt',
   path.join('onnx', 'model.onnx'),
 ];
-for (const relativePath of modelFiles) {
-  const source = path.join(modelSource, relativePath);
-  if (!fs.existsSync(source)) throw new Error(`Local embedding model file is missing: ${source}`);
-  const target = path.join(modelTarget, relativePath);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.copyFileSync(source, target);
+// Semantic indexing is optional. Bundle it only when the complete local model
+// is present; packaging and the writing workflow never require a remote key.
+if (modelFiles.every(relativePath => fs.existsSync(path.join(modelSource, relativePath)))) {
+  for (const relativePath of modelFiles) {
+    const source = path.join(modelSource, relativePath);
+    const target = path.join(modelTarget, relativePath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+  }
 }
 
 const copied = new Set();

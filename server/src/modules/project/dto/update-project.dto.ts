@@ -32,11 +32,6 @@ export class UpdateProjectDto {
   writingMode?: string;
 
   @IsOptional()
-  @IsString()
-  @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
-  platformStyle?: string;
-
-  @IsOptional()
   settings?: string | Record<string, unknown>;
 
   @IsOptional()
@@ -51,6 +46,26 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
   targetPlatform?: TargetPlatform;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  storyTone?: string[];
+
+  @IsOptional()
+  webNovelGenre?: string[];
+
+  @IsOptional()
+  @IsString()
+  pov?: string;
+
+  @IsOptional()
+  targetAudience?: string | Record<string, unknown>;
+
+  @IsOptional()
+  chapterWordRange?: { min: number; max: number };
 
   @IsOptional()
   @IsString()

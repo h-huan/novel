@@ -16,6 +16,21 @@ export function styleFingerprint(input: {
     severity: 'blocking', source: 'style_fingerprint_v2', quote: repeats[0],
     message: `与已写章节逐字重复至少 ${repeats.length} 个长句，须核对是否为有意引用并局部修订` }));
 
+  // Cross-chapter fragments catch recycled templates even when punctuation or
+  // sentence boundaries changed. Only literal 18-character evidence is used.
+  const normalizedPrevious = input.previousChapters.map(chapter => chapter.content.replace(/[\s，。！？；：“”「」]/g, ''));
+  const compact = input.content.replace(/[\s，。！？；：“”「」]/g, '');
+  const fragmentHits: string[] = [];
+  for (let index = 0; index + 18 <= compact.length; index += 9) {
+    const fragment = compact.slice(index, index + 18);
+    if (normalizedPrevious.some(chapter => chapter.includes(fragment))) fragmentHits.push(fragment);
+  }
+  const uniqueFragments = [...new Set(fragmentHits)];
+  if (uniqueFragments.length >= 2) issues.push(qualityIssue({ ...input, stage: input.stage ?? 'chapter',
+    ruleId: 'style.cross_chapter_fragments', severity: 'high', source: 'style_fingerprint_v2',
+    quote: uniqueFragments[0], content: compact,
+    message: `与已有章节重复 ${uniqueFragments.length} 个连续长片段，需检查模板复用或误复制` }));
+
   const paragraphs = input.content.split(/\n+/).map(p => p.trim()).filter(p => p.length >= 20);
   const starts = new Map<string, string[]>();
   for (const p of paragraphs) {
@@ -25,6 +40,16 @@ export function styleFingerprint(input: {
   for (const group of starts.values()) if (group.length >= 3) issues.push(qualityIssue({ ...input,
     stage: input.stage ?? 'chapter', ruleId: 'style.paragraph_opening', severity: 'high', source: 'style_fingerprint_v2',
     quote: group[0], message: `${group.length} 段使用相同开头，需核对叙事结构是否机械重复` }));
+
+  const transitionGroups = new Map<string, string[]>();
+  for (const paragraph of paragraphs) {
+    const transition = paragraph.match(/^(然而|与此同时|就在这时|下一秒|紧接着|不知过了多久|片刻之后)/)?.[1];
+    if (transition) transitionGroups.set(transition, [...(transitionGroups.get(transition) || []), paragraph]);
+  }
+  for (const [transition, group] of transitionGroups) if (group.length >= 3) issues.push(qualityIssue({ ...input,
+    stage: input.stage ?? 'chapter', ruleId: 'style.cross_paragraph_transition', severity: 'high',
+    source: 'style_fingerprint_v2', quote: group[0],
+    message: `${group.length} 段用“${transition}”启动，跨段推进方式机械重复` }));
 
   // Attribute dialogue only when a known speaker is explicitly named on the same line.
   const voices = new Map<string, Set<string>>();
@@ -40,7 +65,34 @@ export function styleFingerprint(input: {
   for (const [quote, speakers] of voices) if (speakers.size >= 2) issues.push(qualityIssue({ ...input,
     stage: input.stage ?? 'chapter', ruleId: 'style.character_voice', severity: 'high', source: 'style_fingerprint_v2', quote,
     message: `${[...speakers].join('、')}使用逐字相同的长台词，需核对角色声音或有意复述` }));
+
+  // Compare voice profiles only with enough explicitly attributed dialogue.
+  const attributed = new Map<string, string[]>();
+  for (const line of input.content.split(/\n+/)) {
+    const speaker = input.characterNames.find(name => line.startsWith(name));
+    if (!speaker) continue;
+    const quotes = [...line.matchAll(/[“「]([^”」]{8,})[”」]/g)].map(match => match[1]);
+    if (quotes.length) attributed.set(speaker, [...(attributed.get(speaker) || []), ...quotes]);
+  }
+  const profiles = [...attributed.entries()].filter(([, quotes]) => quotes.length >= 5 && quotes.join('').length >= 80)
+    .map(([name, quotes]) => {
+      const joined = quotes.join('');
+      return { name, quotes, vector: [
+        quotes.reduce((sum, quote) => sum + quote.length, 0) / quotes.length / 40,
+        (joined.match(/[？！!?]/g) || []).length / quotes.length,
+        (joined.match(/[啊吧呢嘛呀]/g) || []).length / quotes.length,
+        (joined.match(/[我俺咱]/g) || []).length / Math.max(1, joined.length),
+      ] };
+    });
+  for (let left = 0; left < profiles.length; left += 1) for (let right = left + 1; right < profiles.length; right += 1) {
+    const distance = profiles[left].vector.reduce((sum, value, index) => sum + Math.abs(value - profiles[right].vector[index]), 0);
+    if (distance <= 0.12) issues.push(qualityIssue({ ...input, stage: input.stage ?? 'chapter',
+      ruleId: 'style.character_voice_profile', severity: 'medium', source: 'style_fingerprint_v2',
+      quote: profiles[right].quotes[0],
+      message: `${profiles[left].name}与${profiles[right].name}在足量台词中的句长、语气和口头词高度同构，需结合角色设定复核声音区分` }));
+  }
   return { version: 2, status: input.content.trim().length >= 200 ? 'heuristic' : 'insufficient_evidence',
     base, issues, coverage: { paragraphs: paragraphs.length, previousChapters: input.previousChapters.length,
-      namedCharacters: input.characterNames.length }, repeatedSentences: repeats };
+      namedCharacters: input.characterNames.length, attributedVoiceProfiles: profiles.length },
+    repeatedSentences: repeats, repeatedFragments: uniqueFragments };
 }

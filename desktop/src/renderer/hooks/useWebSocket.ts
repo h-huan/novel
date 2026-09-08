@@ -14,10 +14,20 @@ interface WsEvent {
 
 function getSocketServerOrigin(): string {
   try {
-    return new URL(getBaseUrl()).origin;
+    return new URL(getBaseUrl(), window.location.origin).origin;
   } catch {
-    return 'http://localhost:3100';
+    return window.location.origin;
   }
+}
+
+function useSocketServerOrigin(): string {
+  const [origin, setOrigin] = useState(getSocketServerOrigin);
+  useEffect(() => {
+    const refresh = () => setOrigin(getSocketServerOrigin());
+    window.addEventListener('api-base-url-changed', refresh);
+    return () => window.removeEventListener('api-base-url-changed', refresh);
+  }, []);
+  return origin;
 }
 
 export function useWritingWebSocket(projectId: string | undefined) {
@@ -25,12 +35,13 @@ export function useWritingWebSocket(projectId: string | undefined) {
   const [lastEvent, setLastEvent] = useState<WsEvent | null>(null);
   const [notifications, setNotifications] = useState<WsEvent[]>([]);
   const socketRef = useRef<Socket | null>(null);
+  const serverOrigin = useSocketServerOrigin();
 
   useEffect(() => {
     if (!projectId) return;
 
     // Always connect to the API server, never the Vite renderer origin.
-    const socket = io(`${getSocketServerOrigin()}/writing`, {
+    const socket = io(`${serverOrigin}/writing`, {
       transports: ['websocket', 'polling'],
       query: { projectId },
       reconnection: true,
@@ -70,7 +81,7 @@ export function useWritingWebSocket(projectId: string | undefined) {
       }
       socket.disconnect();
     };
-  }, [projectId]);
+  }, [projectId, serverOrigin]);
 
   const clearNotifications = useCallback(() => {
     setNotifications([]);
@@ -86,9 +97,10 @@ export function useSystemWebSocket() {
   const [connected, setConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<WsEvent | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const serverOrigin = useSocketServerOrigin();
 
   useEffect(() => {
-    const socket = io(`${getSocketServerOrigin()}/system`, {
+    const socket = io(`${serverOrigin}/system`, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 5000,
@@ -115,7 +127,7 @@ export function useSystemWebSocket() {
       }
       socket.disconnect();
     };
-  }, []);
+  }, [serverOrigin]);
 
   return { connected, lastEvent };
 }

@@ -173,11 +173,10 @@ export class ChapterService {
       const db = this.databaseService.getDb();
       // 状态机：status='resolved'（已解决）/ 'pass'（已通过）/ 'warning'/'error'（未解决冲突）。
       // 删 status in ('warning','error') 且 status != 'resolved'；保留 pass 与 resolved。
-      const res = db.prepare(
-        `DELETE FROM consistency_checks
-         WHERE project_id = ? AND chapter_index = ?
-           AND status IN ('warning','error') AND status != 'resolved'`,
-      ).run(projectId, chapterIndex);
+      const res = db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND status IN ('open','superseded')
+        AND chapter_id IN (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?)
+        AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment' OR issue_type LIKE 'hardline.%')`)
+        .run(projectId, projectId, chapterIndex);
       return Number(res.changes || 0);
     } catch (err: any) {
       // 不阻断保存：清理失败仅记日志，不抛错

@@ -216,40 +216,7 @@ const ProjectDashboard: React.FC = () => {
       </div>
 
 
-      {ov && ov.process && (
-        <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text-primary)' }}>📊 本书生成效率（正文按“章”统计，补字/重写不算多次生成）</span>
-            <span style={{ fontSize: 14, fontWeight: 600, color: flowRateColor(ov.process.firstPassRate) }}>
-              {'整体一次成功率 ' + Math.round((ov.process.firstPassRate ?? 0) * 100) + '%'}
-            </span>
-          </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <th style={flowThStyle}>环节</th>
-                <th style={flowThR}>章数/次数</th>
-                <th style={flowThR}>一次成功率</th>
-                <th style={flowThStyle}>平均尝试</th>
-                <th style={flowThR}>产出/目标</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ov.process.steps.map((s: any) => (
-                <tr key={s.scenario} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', backgroundColor: s.isBody ? 'rgba(59,118,195,0.08)' : 'transparent' }}>
-                  <td style={flowTdStyle}>{s.scenarioName}{s.isBody ? '（本书正文）' : ''}{s.failCount > 0 ? <span style={{ color: 'var(--color-danger)', marginLeft: 6 }}>{'失败' + s.failCount}</span> : null}</td>
-                  <td style={flowTdR}>{s.isBody ? (s.calls + ' 章' + (s.llmCalls ? '（前后 ' + s.llmCalls + ' 版）' : '')) : (s.calls + ' 次')}</td>
-                  <td style={{ ...flowTdR, color: flowRateColor(s.firstPassRate), fontWeight: 600 }}>{s.firstPassRate == null ? '—' : Math.round(s.firstPassRate * 100) + '%'}</td>
-                  <td style={flowTdStyle}>{s.isBody
-                    ? (s.avgAttempts + ' 版/章（补字 ' + s.avgLengthRetry + ' · 对齐重写 ' + s.avgAlignmentRepair + ' · 基准精修 ' + s.avgBenchmarkRefine + '）')
-                    : (s.avgAttempts + ' 次')}</td>
-                  <td style={flowTdR}>{s.avgTargetWords ? (s.avgOutputWords + ' / ' + s.avgTargetWords) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+
 
       {ov && ov.chapterMatrix && ov.chapterMatrix.available && (
         <div style={{ padding: '16px', marginBottom: '24px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>

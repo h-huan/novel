@@ -9,7 +9,7 @@ import { VectorIndexService } from '../../rag/vector-index.service';
 import { StateItemService } from '../../state/state-item.service';
 import { ConsistencyCheckService } from '../../state/consistency-check.service';
 
-export type DerivedSyncStepStatus = 'completed' | 'pending' | 'warning';
+export type DerivedSyncStepStatus = 'completed' | 'skipped' | 'pending' | 'warning';
 export interface DerivedSyncStep { status: DerivedSyncStepStatus; detail: string; }
 export interface ContinuityReviewStep extends DerivedSyncStep {
   issueCount: number;
@@ -109,13 +109,14 @@ export class ChapterDerivedDataSyncService {
       outlineDeviation,
       conflictReview,
     };
+    const completedOrOptional = (step: DerivedSyncStep) => step.status === 'completed' || step.status === 'skipped';
     const coreSyncSuccess = [chapterSummary, aggregateSummaries, vectorIndex]
-      .every((step) => step.status === 'completed') && warnings.length === 0;
-    const fullSyncSuccess = Object.values(steps).every((step) => step.status === 'completed') && warnings.length === 0;
+      .every(completedOrOptional) && warnings.length === 0;
+    const fullSyncSuccess = Object.values(steps).every(completedOrOptional) && warnings.length === 0;
     const needsAuthorReview = foreshadowingReview.issueCount > 0 || timelineReview.issueCount > 0
       || outlineDeviation.issueCount > 0 || outlineDeviation.status === 'pending';
     const needsResync = !fullSyncSuccess && !(outlineDeviation.status === 'pending'
-      && Object.entries(steps).filter(([key]) => key !== 'outlineDeviation').every(([, step]) => step.status === 'completed')
+      && Object.entries(steps).filter(([key]) => key !== 'outlineDeviation').every(([, step]) => completedOrOptional(step))
       && warnings.length === 0);
     this.persistSyncState(
       input,
@@ -638,10 +639,8 @@ export class ChapterDerivedDataSyncService {
 
     const availability = this.embedding.getAvailability();
     if (!availability.available) {
-      const detail = `Embedding provider unavailable: ${availability.reason}; old index retained`;
-      warnings.push(detail);
       return {
-        status: 'warning', detail, checksum: contentChecksum, deletedChunks: 0,
+        status: 'skipped', detail: 'Optional semantic index is not installed', checksum: contentChecksum, deletedChunks: 0,
         createdChunks: 0, retainedOldIndex: true,
         previousChecksum: oldChunks[0]?.metadata.contentChecksum as string | undefined,
       };

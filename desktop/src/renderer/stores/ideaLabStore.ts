@@ -55,6 +55,8 @@ export interface MaturityReport {
   missingItems: string[];
   risks: string[];
   canConvertToProject: boolean;
+  evaluatedItems: number;
+  satisfiedItems: number;
 }
 
 export interface IdeaDraft {
@@ -65,7 +67,6 @@ export interface IdeaDraft {
   targetPlatform: string;
   targetWords: number;
   description: string;
-  settings: Record<string, unknown>;
   status: 'draft' | 'questioning' | 'answered' | 'refining' | 'refined' | 'confirmed' | 'converted';
   questions: QuestionItem[];
   answers: AnswerItem[];
@@ -85,7 +86,6 @@ export interface CreateDraftData {
   targetWords?: number;
   title?: string;
   description?: string;
-  settings?: Record<string, unknown>;
 }
 
 // ========== Store 定义 ==========
@@ -94,11 +94,6 @@ interface IdeaLabState {
   draft: IdeaDraft | null;
   loading: boolean;
   error: string | null;
-  /** 追问是否使用了 fallback 模板 */
-  questionsIsFallback: boolean;
-  /** 完善想法是否使用了 fallback 模板 */
-  refineIsFallback: boolean;
-
   createDraft: (data: CreateDraftData) => Promise<IdeaDraft>;
   fetchDraft: (id: string) => Promise<IdeaDraft>;
   generateQuestions: (id: string) => Promise<void>;
@@ -113,8 +108,6 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
   draft: null,
   loading: false,
   error: null,
-  questionsIsFallback: false,
-  refineIsFallback: false,
 
   /**
    * 创建想法草稿
@@ -129,7 +122,6 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
         targetWords: data.targetWords,
         title: data.title || '',
         description: data.description || '',
-        settings: data.settings || {},
       });
       const draft = (res as any).data ?? res;
       set({ draft: draft as IdeaDraft, loading: false });
@@ -162,13 +154,12 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
    * 生成追问问题
    */
   generateQuestions: async (id: string) => {
-    set({ loading: true, error: null, questionsIsFallback: false });
+    set({ loading: true, error: null });
     try {
       const res = await api.post<any>(`/idea-lab/drafts/${id}/questions`);
       const result = (res as any).data ?? res;
       set((state) => ({
         loading: false,
-        questionsIsFallback: result.isFallback === true,
         draft: state.draft
           ? {
               ...state.draft,
@@ -213,13 +204,12 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
    * 完善想法
    */
   refineIdea: async (id: string) => {
-    set({ loading: true, error: null, refineIsFallback: false });
+    set({ loading: true, error: null });
     try {
       const res = await api.post<any>(`/idea-lab/drafts/${id}/refine`);
       const result = (res as any).data ?? res;
       set((state) => ({
         loading: false,
-        refineIsFallback: result.isFallback === true,
         draft: state.draft
           ? {
               ...state.draft,
@@ -297,6 +287,6 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
    * 重置状态
    */
   reset: () => {
-    set({ draft: null, loading: false, error: null, questionsIsFallback: false, refineIsFallback: false });
+    set({ draft: null, loading: false, error: null });
   },
 }));

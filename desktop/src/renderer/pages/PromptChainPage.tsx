@@ -519,7 +519,7 @@ const ChainEditor: React.FC = () => {
       description: chainDescription,
       nodes: chainNodes,
       executionMode: 'sequential',
-      config: { timeout: 300, maxRetries: 1, enableLogging: true, enableQualityGate: false, strictMode: false },
+      config: { timeout: 300, maxRetries: 1, enableLogging: true, strictMode: false },
     };
   }, [nodes, edges, chainName, chainDescription]);
 

@@ -66,6 +66,8 @@ interface ElectronAPI {
   invoke(channel: 'mkdir-path', dirPath: string): Promise<void>;
   /** 启动后端服务 */
   invoke(channel: 'start-server'): Promise<{ success: boolean; port?: number }>;
+  /** 获取当前实际后端端口 */
+  invoke(channel: 'get-server-status'): Promise<{ success: boolean; data?: { running: boolean; port: number; error?: string } }>;
   /** 停止后端服务 */
   invoke(channel: 'stop-server'): Promise<{ success: boolean }>;
   /** 打开项目（引导窗口 → 主窗口切换） */

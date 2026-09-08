@@ -1,7 +1,6 @@
 /**
  * 功能模块标准库 Controller
  *   GET  /module-standards                     当前生效标准（最新标准页）
- *   GET  /module-standards/history             发展历程（历史版本，只读回顾）
  *   GET  /module-standards/status              归纳运行状态（首页"正在归纳"弹框）
  *   GET  /module-standards/:key                单个模块当前标准
  *   POST /module-standards/:key/summarize       手动触发某模块归纳
@@ -18,11 +17,6 @@ export class ModuleStandardsController {
   @Get()
   list() {
     return { standards: this.service.list() };
-  }
-
-  @Get('history')
-  history(@Query('moduleKey') moduleKey?: string) {
-    return { versions: this.service.versions(moduleKey || undefined) };
   }
 
   @Get('status')

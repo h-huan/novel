@@ -1,11 +1,9 @@
 /**
  * RoutingController - 模型配置与连通性测试
  */
-import { Controller, Get, Post, Delete, Body, Param, Logger } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Delete, Body, Param, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ModelRouterService } from './model-router.service';
-import OpenAI from 'openai';
-import { hasLocalEmbeddingModel, LOCAL_EMBEDDING_MODEL_NAME } from '../rag/local-embedding';
 
 @ApiTags('routing')
 @Controller('routing')
@@ -13,64 +11,6 @@ export class RoutingController {
   private readonly logger = new Logger(RoutingController.name);
   
   constructor(private readonly modelRouter: ModelRouterService) {}
-
-  @Get('capabilities')
-  @ApiOperation({ summary: '获取正文生成、摘要与向量索引的可用状态' })
-  async getCapabilities() {
-    const writingAvailable = this.modelRouter.getAllUserKeys().length > 0 || [
-      'LLM_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'CLAUDE_API_KEY',
-      'ANTHROPIC_API_KEY', 'GLM_API_KEY', 'ZHIPU_API_KEY', 'QWEN_API_KEY', 'ALIBABA_API_KEY', 'CUSTOM_API_KEY',
-    ].some((name) => Boolean(process.env[name]));
-    const embeddingConfig = this.modelRouter.getUserKey('global', 'embedding');
-    const embeddingKey = embeddingConfig?.apiKey || this.modelRouter.getUserKey('global', 'openai')?.apiKey || process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY;
-    const embedding = embeddingKey
-      ? { available: true, model: process.env.EMBEDDING_MODEL || embeddingConfig?.embeddingModel || 'text-embedding-3-small' }
-      : hasLocalEmbeddingModel()
-        ? { available: true, model: LOCAL_EMBEDDING_MODEL_NAME, local: true }
-        : { available: false, reason: 'No remote embedding service or local embedding model is available' };
-    return {
-      writing: {
-        available: writingAvailable,
-        ...(writingAvailable ? {} : { reason: 'Configure a provider API key in Settings to enable generation and summaries.' }),
-      },
-      embedding,
-      readyForFullSync: writingAvailable && embedding.available,
-    };
-  }
-
-  @Get('embedding-config')
-  getEmbeddingConfig() {
-    const config = this.modelRouter.getUserKey('global', 'embedding');
-    return {
-      configured: Boolean(config?.apiKey || process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY),
-      maskedKey: config?.apiKey ? this.maskKey(config.apiKey) : undefined,
-      baseUrl: config?.baseUrl || process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL,
-      model: process.env.EMBEDDING_MODEL || config?.embeddingModel || 'text-embedding-3-small',
-    };
-  }
-
-  @Post('embedding-config')
-  async saveEmbeddingConfig(@Body() dto: { apiKey: string; baseUrl: string; model: string }) {
-    const apiKey = String(dto.apiKey || '').trim();
-    const baseUrl = String(dto.baseUrl || '').trim().replace(/\/+$/, '');
-    const model = String(dto.model || '').trim();
-    if (!apiKey || !baseUrl || !model) {
-      return { success: false, error: 'Embedding API Key、Base URL 和模型名称都必须填写' };
-    }
-    try {
-      const client = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0, timeout: 30_000 });
-      const response = await client.embeddings.create({ model, input: ['小说创作向量服务连通性验证'] });
-      const vector = response.data?.[0]?.embedding;
-      if (!Array.isArray(vector) || vector.length === 0 || vector.every(value => value === 0)) {
-        return { success: false, error: '服务返回了无效向量，配置未保存' };
-      }
-      this.modelRouter.registerUserKey('global', 'embedding', apiKey, baseUrl, model);
-      return { success: true, model, dimensions: vector.length };
-    } catch (error: any) {
-      this.logger.warn(`Embedding 配置验证失败: ${error?.message || error}`);
-      return { success: false, error: `向量服务验证失败，配置未保存：${error?.message || '无法连接服务'}` };
-    }
-  }
 
   @Get('keys')
   @ApiOperation({ summary: '获取已保存的 API Key 列表（含环境变量）' })
@@ -309,7 +249,11 @@ export class RoutingController {
   setWritingMode(@Body() dto: { mode: string }) {
     const validModes = ['economy', 'normal', 'premium'];
     if (!validModes.includes(dto.mode)) {
-      return { success: false, message: `无效模式: ${dto.mode}，可选: ${validModes.join(', ')}` };
+      throw new BadRequestException(`无效模式: ${dto.mode}，可选: ${validModes.join(', ')}`);
+    }
+    const dailyModel = this.modelRouter.getCustomScenes()[`daily:${dto.mode}`];
+    if (!dailyModel) {
+      throw new BadRequestException(`模式「${dto.mode}」尚未配置日常模型，不能启用`);
     }
     this.modelRouter.setWritingMode(dto.mode as any);
     return { success: true, message: `写作模式已切换为 ${dto.mode}` };
@@ -328,9 +272,6 @@ export class RoutingController {
   @ApiOperation({ summary: '保存自定义场景模型映射' })
   saveScenarioModels(@Body() dto: { scenes: Record<string, string> }) {
     this.modelRouter.setCustomScenes(dto.scenes);
-    // 注意：不再强制切换到 custom 模式。
-    // 场景模型配置在 getModelForScenario() 中拥有最高优先级，
-    // 无论当前是 economy/normal/premium 哪种模式都会优先匹配。
     return { success: true, message: '场景模型配置已保存' };
   }
 

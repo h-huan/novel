@@ -44,6 +44,12 @@ export const LLM_TUNABLES = {
   CONSISTENCY_CHECK_BASE: envInt('LLM_CC_MAXTOKENS_BASE', 4096),
   CONSISTENCY_CHECK_PER_CONFLICT: envInt('LLM_CC_MAXTOKENS_PER_CONFLICT', 1024),
 
+  // ============ 质量评审与局部修复输出预算 ============
+  // 推理模型会把内部推理计入 max_tokens。8192 会在复杂评审输出 JSON
+  // 之前耗尽，因此评审从第一次调用就使用完整预算，不再先失败再扩容。
+  QUALITY_REVIEW_MAXTOKENS: envInt('LLM_QUALITY_REVIEW_MAXTOKENS', 32768),
+  QUALITY_REPAIR_MAXTOKENS: envInt('LLM_QUALITY_REPAIR_MAXTOKENS', 32768),
+
   // ============ outline 写入 maxTokens 边界 ============
   // deepseek-v4-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算返回空内容。
   // 实测复杂任务 reasoning 可达 7500+，故上限给足预算（这修复了"空返回"根因）。

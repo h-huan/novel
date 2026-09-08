@@ -83,7 +83,7 @@ export const SCENARIO_GROUP_DESC: Record<ScenarioGroupKey, string> = {
   architecture: '动笔前的骨架：题材灵感、大纲、世界观、角色、组织、伏笔、时间线、标题',
   writing: '正文首版生成与续写（含日常章、高潮章）',
   polish: '写完后的打磨：润色、质检、一致性修订、各类精修',
-  daily: '未归入上述三类的常规/兜底调用',
+  daily: '未单独指定任务模型、按日常模型执行的调用',
 };
 export const SCENARIO_GROUP_ORDER: ScenarioGroupKey[] = ['architecture', 'writing', 'polish', 'daily'];
 

@@ -1,6 +1,6 @@
 import { QualityCockpit } from '../components/quality/QualityCockpit';
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useChapterStore } from '../stores/chapterStore';
 
@@ -89,6 +89,8 @@ const OPEN_STATUSES = new Set(['open', 'planned', 'refined', 'recheck_failed']);
 const WritingQualityPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const linkedChapterId = searchParams.get('chapterId') || '';
   const storageKey = projectId ? `phase69:wq:${projectId}` : 'phase69:wq';
 
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
@@ -131,12 +133,13 @@ const WritingQualityPage: React.FC = () => {
     const data = apiPayload<ChapterSummary[]>(res) || [];
     setChapters(data);
     const saved = restoreView();
-    if (saved.selectedChapterId && data.some(ch => ch.id === saved.selectedChapterId)) {
-      setSelectedChapterId(saved.selectedChapterId);
-    } else if (!selectedChapterId && data[0]) {
-      setSelectedChapterId(data[0].id);
-    }
-  }, [projectId, restoreView, selectedChapterId]);
+    setSelectedChapterId(current => {
+      if (linkedChapterId && data.some(ch => ch.id === linkedChapterId)) return linkedChapterId;
+      if (current && data.some(ch => ch.id === current)) return current;
+      if (saved.selectedChapterId && data.some(ch => ch.id === saved.selectedChapterId)) return saved.selectedChapterId;
+      return data[0]?.id || '';
+    });
+  }, [projectId, restoreView, linkedChapterId]);
 
   const loadReports = useCallback(async () => {
     if (!projectId || !selectedChapterId) return;
@@ -531,10 +534,11 @@ const WritingQualityPage: React.FC = () => {
           <div style={{ ...styles.row, marginBottom: 12, marginTop: 16 }}>
             <select style={styles.select} value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}>
               <option value="all">全部严重度</option>
-              <option value="critical">critical</option>
-              <option value="high">high</option>
-              <option value="medium">medium</option>
-              <option value="low">low</option>
+              <option value="blocking">阻断</option>
+              <option value="critical">严重冲突</option>
+              <option value="high">严重</option>
+              <option value="medium">一般</option>
+              <option value="low">轻微</option>
             </select>
             <select style={styles.select} value={filterType} onChange={e => setFilterType(e.target.value)}>
               <option value="all">全部类型</option>

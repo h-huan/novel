@@ -74,7 +74,7 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
           const tone = toTagArray(idea.storyTone);
           const style = toTagArray(idea.writingStyle);
           const genre = toTagArray(idea.webNovelGenre);
-          const platform = idea.recommendedPlatform || '';
+          const platform = idea.targetPlatform || '';
           // 跨维度去重：按权重 流派→风格→基调，后面维度中已出现的词过滤掉
           const usedInGenre = new Set(genre);
           const filteredStyle = style.filter(s => !usedInGenre.has(s));

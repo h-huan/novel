@@ -222,7 +222,7 @@ export class OutlineService {
   /**
    * 章节大纲被修改后的确定性“微同步”（不调用 LLM、不自动改写正文/其它章纲）：
    * 1) 标题变更 → 同步到未锁定的绑定章节行（纯派生字段）；
-   * 2) 本章已有正文 → 用一致性规则复查“新大纲 vs 已写正文”，矛盾落 consistency_checks（前端矛盾页可见）；
+   * 2) 本章已有正文 → 用一致性规则复查“新大纲 vs 已写正文”，问题写入统一 QualityIssue；
    * 3) 内容/场景变更 → 给相邻下一章留一条 soft 待核对项（衔接钩子/时间线），由作者决定是否采用。
    * 全程容错，绝不阻断作者保存大纲。
    */
@@ -718,7 +718,6 @@ export class OutlineService {
       shiftColumn('foreshadowing_states', 'planted_chapter');
       shiftColumn('foreshadowing_states', 'recovered_chapter');
       shiftColumn('plot_progress', 'chapter_index');
-      shiftColumn('consistency_checks', 'chapter_index');
       shiftColumn('timeline_three_line_events', 'chapter_index');
       shiftColumn('character_evolution_events', 'chapter_index');
     });

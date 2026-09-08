@@ -1,7 +1,7 @@
 import { applyLocalPatches, compareRepair } from '../modules/writing-quality/local-repair';
 import { qualityGate } from '../modules/writing-quality/quality-issue';
 import { styleFingerprint } from '../modules/writing-quality/style-fingerprint';
-import { parseStageScore, stageJudgePrompt } from '../modules/writing-quality/stage-score';
+import { missingDimensionJudgePrompt, parseStageScore, SCORE_DIMENSIONS, stageJudgePrompt } from '../modules/writing-quality/stage-score';
 import type { QualityStage } from '../modules/writing-quality/quality-issue';
 import { currentCreationProjectId, expectsProjectId } from '../common/creation-context';
 import { Injectable, Logger } from '@nestjs/common';
@@ -11,6 +11,7 @@ import { LLMRequest, LLMResponse } from './chain.types';
 import { ModelRouterService } from '../routing/model-router.service';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
+import { LLM_TUNABLES } from '../config/llm-tunables';
 import * as net from 'net';
 
 type RuntimeModel = {
@@ -24,6 +25,13 @@ type ModelCallResult = {
   content: string;
   finishReason?: string;
 };
+
+class GeneratedQualityGateError extends Error {
+  constructor(message: string, readonly generatedContent: string) {
+    super(message);
+    this.name = 'GeneratedQualityGateError';
+  }
+}
 
 @Injectable()
 export class RealLLMService implements ILLMService {
@@ -195,7 +203,7 @@ export class RealLLMService implements ILLMService {
 
   /**
    * 检查指定场景的模型是否已配置。配置什么模型就用什么模型；
-   * 场景未配置时用日常模型兜底；日常模型也未配置时抛出明确错误，绝不静默降级。
+   * 场景未配置时按当前模式继承日常模型；日常模型也未配置时抛出明确错误。
    * 在创建项目等关键操作前调用，提前提醒用户配置，而不是生成到一半才失败。
    */
   assertScenarioModelConfigured(scenario: string): { modelName: string; modelVersion: string } {
@@ -247,14 +255,15 @@ export class RealLLMService implements ILLMService {
   private async evaluateGeneratedRun(run: ReturnType<GenerationMetricsService['beginRun']>, request: LLMRequest, content: string): Promise<string> {
     const before = await this.assessGeneratedRun(run, request, content);
     const gate = this.metrics.saveRunScore(run.id, run.projectId!, before);
-    const repairable = this.metrics.runIsCurrent(run.id, run.projectId!) && before.status === 'evaluated' && before.issues.some(i => ['blocking', 'high'].includes(i.severity));
+    const repairable = this.metrics.runIsCurrent(run.id, run.projectId!)
+      && before.issues.some(i => ['blocking', 'high'].includes(i.severity) && i.evaluation === 'evidenced');
     if (repairable) {
       let candidate: string | null = null;
       let after: typeof before | null = null;
       let accepted = false;
       let reason = '';
       try {
-        const repaired = await this.generateInternal({ ...request, scenario: 'refinement', responseFormat: 'json_object',
+        const repaired = await this.generateInternal({ ...request, scenario: 'refinement', responseFormat: 'json_object', maxTokens: LLM_TUNABLES.QUALITY_REPAIR_MAXTOKENS,
           prompt: '只修复列出的质量问题，不改变已确认事实、情节、人物身份和JSON结构。返回至多8处局部替换，每处original必须在原文中唯一匹配；总范围不得超过全文30%。输出JSON：{"patches":[{"original":"原文","replacement":"替换"}]}\n创作宪法：'
             + JSON.stringify(run.constitution) + '\n已确认上下文：' + run.context
             + '\n质量问题：' + JSON.stringify(before.issues) + '\n原文：' + content,
@@ -272,7 +281,10 @@ export class RealLLMService implements ILLMService {
         return candidate;
       }
     }
-    if (!gate.passed) throw new Error('质量 Gate ' + gate.status + '：' + (before.issues.map(i => i.message).join('；') || '评审证据不足'));
+    if (!gate.passed) throw new GeneratedQualityGateError(
+      '质量 Gate ' + gate.status + '：' + (before.issues.map(i => i.message).join('；') || '评审证据不足'),
+      content,
+    );
     return content;
   }
 
@@ -280,22 +292,39 @@ export class RealLLMService implements ILLMService {
     if (!run.constitution) throw new Error('缺少创作宪法');
     const input = { projectId: run.projectId!, runId: run.id,
       stage: run.stage as QualityStage, content, constitution: run.constitution };
-    let raw: unknown = null;
-    try {
-      const judged = await this.generateInternal({
-        prompt: stageJudgePrompt(content, run.context + '\n' + request.prompt
-          + (['chapter', 'refinement'].includes(run.stage)
-            ? '\n最近三章文体比较材料（仅依据提供范围比较人物声音、段落结构及叙述习惯；未提供的章节不可推断）：'
-              + JSON.stringify(run.previousChapters.slice(0, 3)) : ''), run.constitution, run.stage as QualityStage),
-        scenario: 'review', responseFormat: 'json_object', temperature: 0,
-        metrics: { ...request.metrics, runId: run.id, stepKey: 'quality_gate' },
-      });
-      raw = JSON.parse(judged.content);
-    } catch (error) {
-      const score = parseStageScore(null, input);
-      return score;
+    const reviewContext = run.context + '\n' + request.prompt
+      + (['chapter', 'refinement'].includes(run.stage)
+        ? '\n最近三章文体比较材料（仅依据提供范围比较人物声音、段落结构及叙述习惯；未提供的章节不可推断）：'
+          + JSON.stringify(run.previousChapters.slice(0, 3)) : '');
+    let combinedRaw: any = null;
+    let score = parseStageScore(null, input);
+    for (let reviewAttempt = 0; reviewAttempt < 2; reviewAttempt += 1) {
+      const missing = SCORE_DIMENSIONS.filter(key => score.dimensions[key].status === 'not_evaluated');
+      if (reviewAttempt > 0 && missing.length === 0) break;
+      try {
+        const judged = await this.generateInternal({
+          prompt: reviewAttempt === 0
+            ? stageJudgePrompt(content, reviewContext, run.constitution, run.stage as QualityStage)
+            : missingDimensionJudgePrompt(content, reviewContext, run.constitution, run.stage as QualityStage, missing),
+          scenario: 'review', responseFormat: 'json_object', temperature: 0, maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,
+          maxEmptyRetries: 2,
+          metrics: { ...request.metrics, runId: run.id, stepKey: reviewAttempt === 0 ? 'quality_gate' : 'quality_gate_evidence_completion' },
+        });
+        const parsed = JSON.parse(judged.content) as any;
+        combinedRaw = combinedRaw && typeof combinedRaw === 'object'
+          ? {
+              ...combinedRaw,
+              dimensions: { ...(combinedRaw.dimensions || {}), ...(parsed?.dimensions || {}) },
+              issues: [...(Array.isArray(combinedRaw.issues) ? combinedRaw.issues : []), ...(Array.isArray(parsed?.issues) ? parsed.issues : [])],
+            }
+          : parsed;
+        score = parseStageScore(combinedRaw, input);
+        if (score.status === 'evaluated') break;
+      } catch {
+        // One targeted same-model evidence completion is allowed below. If it
+        // also fails, the result correctly remains not_evaluated.
+      }
     }
-    const score = parseStageScore(raw, input);
     if (['chapter', 'refinement'].includes(run.stage)) {
       const fingerprint = styleFingerprint({ ...input, previousChapters: run.previousChapters, characterNames: run.characterNames });
       score.issues.push(...fingerprint.issues);
@@ -408,16 +437,6 @@ export class RealLLMService implements ILLMService {
           callTimeout,
         );
 
-        // 空内容重试适用于所有请求（正文生成/结构化）：上游网关对任意请求都可能偶发返回空 content，
-        // 正文生成因此被误报"未返回可验收内容"而整章失败。结构化仍额外校验输出被截断。
-        if (!result.content.trim()) {
-          lastEmptyError = new Error(
-            `模型返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'daily'}`,
-          );
-          this.logger.warn(lastEmptyError.message);
-          internalRetries++;
-          continue;
-        }
         if (request.responseFormat === 'json_object' && result.finishReason === 'length') {
           // 关键修复：截断根因是输出配额不足，用相同 maxTokens 重试必然再次截断。
           // 在模型输出上限内把 maxTokens 翻倍，用【同一模型/同一 prompt/同一 json 模式】重试（不换模型、不去 json，非降级）。
@@ -434,6 +453,17 @@ export class RealLLMService implements ILLMService {
           throw new Error(
             `结构化生成因输出长度被截断（已扩容至 ${currentMaxTokens} 仍不足，请减小单次结构化批量）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
           );
+        }
+
+        // 必须在 length 之后判断空内容。推理模型可能把预算耗尽后返回
+        // content="" + finish_reason=length；把它当普通空响应会用原预算白跑一次。
+        if (!result.content.trim()) {
+          lastEmptyError = new Error(
+            `模型返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'daily'}`,
+          );
+          this.logger.warn(lastEmptyError.message);
+          internalRetries++;
+          continue;
         }
 
         const __resp = this.toResponse(result, modelName, request, startTime);
@@ -458,9 +488,19 @@ export class RealLLMService implements ILLMService {
           this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'daily'}`);
           try {
             const result = await withTimeout(
-              this.callModel(modelName, request.prompt, effectiveSystemPrompt, routedModel.temperature, configuredMaxTokens, callTimeout, request.responseFormat, reasoningEffort),
+              this.callModel(modelName, request.prompt, effectiveSystemPrompt, baseTemperature, currentMaxTokens, callTimeout, request.responseFormat, reasoningEffort),
               callTimeout,
             );
+            if (request.responseFormat === 'json_object' && result.finishReason === 'length') {
+              throw new Error(
+                `结构化生成因输出长度被截断（网络重试后仍不足）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+              );
+            }
+            if (!result.content.trim()) {
+              throw new Error(
+                `模型返回空内容（网络重试后）: model=${modelName}, scenario=${request.scenario || 'daily'}`,
+              );
+            }
             this.logger.log(`[RealLLM] 网络重试 ${netRetry + 1} 成功：model=${modelName}, scenario=${request.scenario || 'daily'}`);
             const __respNet = this.toResponse(result, modelName, request, startTime);
             emit('success', { resp: __respNet });
@@ -783,16 +823,13 @@ export class RealLLMService implements ILLMService {
     return messages;
   }
 
-  /** 解析 deepseek 推理强度。正文生成默认 'low'：推理模型先思考再输出，思考吃光 max_tokens
-   *  就返回空正文/被截断（"返回内容为空/过长被截断"根因），限制思考量才能保证正文有输出空间。
-   *  用户显式设 LLM_REASONING_EFFORT 时以其为准。 */
-  private resolveReasoningEffort(scenario?: string): 'low' | 'medium' | 'high' | undefined {
+  /** 推理强度只接受用户显式配置；系统不自行降低已选模型的推理等级。 */
+  private resolveReasoningEffort(_scenario?: string): 'low' | 'medium' | 'high' | undefined {
     if (process.env.LLM_REASONING_EFFORT) {
       const v = process.env.LLM_REASONING_EFFORT as string;
       return v === 'low' || v === 'medium' || v === 'high' ? v : undefined;
     }
-    const bodyScenarios = new Set(['daily', 'writing', 'writing_daily', 'writing_climax', 'body', 'body_by_outline', 'polish']);
-    return bodyScenarios.has(scenario || '') ? 'low' : undefined;
+    return undefined;
   }
 
   private async callModel(

@@ -30,22 +30,10 @@ export class CreateProjectDto {
   writingMode?: string = 'full_auto';
 
   @IsOptional()
-  @IsString()
-  @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
-  platformStyle?: string;
-
-  @IsOptional()
   settings?: string | Record<string, unknown>;
 
   @IsOptional()
   writingStyle?: string | Record<string, unknown>;
-
-  // ======== 第一阶段新增字段 ========
-
-  /** 作品类型（与 type 兼容，不重复；以 type 为准） */
-  @IsOptional()
-  @IsIn(['short_story', 'long_novel', 'script'])
-  projectMode?: ProjectType;
 
   /** 创建来源 */
   @IsOptional()
@@ -56,6 +44,26 @@ export class CreateProjectDto {
   @IsOptional()
   @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
   targetPlatform?: TargetPlatform;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  storyTone?: string[];
+
+  @IsOptional()
+  webNovelGenre?: string[];
+
+  @IsOptional()
+  @IsString()
+  pov?: string;
+
+  @IsOptional()
+  targetAudience?: string | Record<string, unknown>;
+
+  @IsOptional()
+  chapterWordRange?: { min: number; max: number };
 
   /** 当前创作阶段 */
   @IsOptional()

@@ -115,11 +115,11 @@ export class PlatformAnalyticsService {
   private latestReportIds(scope: Scope): string[] {
     const sc = this.scopeClause(scope);
     const rows = this.safeAll(
-      `SELECT id, chapter_id, created_at FROM writing_quality_reports WHERE chapter_id IS NOT NULL${sc.clause} ORDER BY created_at ASC`,
+      `SELECT id, chapter_id,source_type,scope,created_at FROM writing_quality_reports WHERE chapter_id IS NOT NULL${sc.clause} ORDER BY created_at ASC`,
       sc.params,
     );
     const latest = new Map<string, string>();
-    for (const r of rows) latest.set(String(r.chapter_id), String(r.id)); // 升序遍历，后者覆盖前者=最新
+    for (const r of rows) latest.set(`${r.chapter_id}:${r.source_type}:${r.scope}`, String(r.id));
     return [...latest.values()];
   }
 
@@ -176,7 +176,7 @@ export class PlatformAnalyticsService {
       totalWords: k.totalWords,
       llmCalls: k.llmCalls,
       firstPassRate: k.firstPassRate,
-      openIssues: k.currentIssues + k.currentConsistency,
+      openIssues: k.currentIssues,
     };
   }
 
@@ -355,13 +355,19 @@ export class PlatformAnalyticsService {
   // ───────────────────────── 当前一致性问题（每章每类只留最新未解决） ─────────────────────────
 
   private currentConsistencyRows(scope: Scope): any[] {
-    const sc = this.scopeClause(scope);
+    const sc = this.scopeClause(scope, 'i.project_id');
     const rows = this.safeAll(
-      `SELECT check_type, severity, chapter_index, detected_at FROM consistency_checks
-       WHERE COALESCE(resolved,0)=0${sc.clause} ORDER BY detected_at ASC`, sc.params,
+      `SELECT i.issue_type check_type,i.severity,c.chapter_index,i.created_at detected_at
+       FROM writing_quality_issues i LEFT JOIN chapters c ON c.id=i.chapter_id
+       WHERE i.status='open' AND (i.issue_type LIKE 'consistency.%' OR i.issue_type='originality'
+         OR i.issue_type='outline_alignment' OR i.issue_type LIKE 'hardline.%')${sc.clause}
+       ORDER BY i.created_at ASC`, sc.params,
     );
     const latest = new Map<string, any>();
-    for (const r of rows) latest.set(`${r.chapter_index}::${r.check_type}`, r); // 升序覆盖=最新
+    for (const r of rows) {
+      r.check_type = String(r.check_type).replace(/^consistency\./, '');
+      latest.set(`${r.chapter_index}::${r.check_type}`, r);
+    }
     return [...latest.values()];
   }
 
@@ -518,19 +524,23 @@ export class PlatformAnalyticsService {
 
   // ───────────────────────── 正文反复回炉的原因分布（大白话） ─────────────────────────
   private repairReasons(scope: Scope) {
-    const sc = this.scopeClause(scope);
+    const sc = this.scopeClause(scope, 'i.project_id');
     const rows = this.safeAll(
-      `SELECT source, check_type, message FROM consistency_checks
-       WHERE COALESCE(resolved,0)=0${sc.clause}`, sc.params,
+      `SELECT i.issue_type check_type,i.summary message,i.payload FROM writing_quality_issues i
+       WHERE i.status='open' AND (i.issue_type LIKE 'consistency.%' OR i.issue_type='originality'
+         OR i.issue_type='outline_alignment' OR i.issue_type LIKE 'hardline.%')${sc.clause}`, sc.params,
     );
     const m = new Map<string, number>();
     for (const r of rows) {
       let label: string;
-      if (r.source === 'alignment_verifier_hardline') {
+      let source = '';
+      try { source = this.parseJson(r.payload)?.qualityIssue?.source || ''; } catch { /* ignore malformed legacy payload */ }
+      const checkType = String(r.check_type).replace(/^consistency\./, '');
+      if (source === 'alignment_verifier_hardline' || checkType.startsWith('hardline.')) {
         const mm = String(r.message || '').match(/【硬红线·确定性扫描·([^】]+)】/);
         label = mm ? hardlineRuleLabel(mm[1]) : '硬红线违规';
       } else {
-        label = checkTypeLabel(r.check_type);
+        label = checkTypeLabel(checkType);
       }
       m.set(label, (m.get(label) || 0) + 1);
     }

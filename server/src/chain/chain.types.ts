@@ -24,64 +24,12 @@ export type VariableSource =
   | 'state_engine'
   | 'constant';
 
-// ==================== Quality Gate ====================
-
-/** 质量门级别 */
-export type GateLevel = 'CRITICAL' | 'WARNING' | 'INFO';
-
-/** 质量门检查类型 */
-export type GateCheckType = 'rule' | 'llm_judge' | 'rule_and_llm';
-
-/** 失败处理方式 */
-export type OnFailure = 'retry' | 'skip' | 'fallback' | 'stop';
-
-/** 质量门配置 */
-export interface QualityGateConfig {
-  nodeId: string;
-  checkType: GateCheckType;
-  criteria: GateCriterion[];
-  threshold: number;           // 0-100 分，低于此值触发失败
-  level: GateLevel;
-  onFailure: OnFailure;
-  maxRetries: number;          // 最大重试次数
-  fallbackNodeId?: string;     // fallback 时执行的节点 ID
-}
-
-/** 质量门检查标准 */
-export interface GateCriterion {
-  name: string;                // 检查项名称
-  description: string;         // 检查项描述
-  weight: number;              // 权重 (0-1)
-  minScore: number;            // 最低分 (0-100)
-}
-
-/** 质量门检查结果 */
-export interface GateResult {
-  passed: boolean;
-  score: number;              // 总分 0-100
-  details: GateDetail[];
-  summary: string;            // 总结信息
-  retryCount: number;
-  retrySuggestions?: string[];// 重试建议
-}
-
-/** 质量门单项详情 */
-export interface GateDetail {
-  criterion: string;
-  score: number;
-  reason: string;
-  level: GateLevel;
-}
-
 // ==================== 模型配置 ====================
 
 /** 模型规格 */
 export interface ModelSpec {
-  primary: string;
-  fallback?: string;
   temperature: number;
-  tier: 'performance' | 'balanced' | 'economy';
-  maxTokens?: number;  // 新增：限制模型输出长度，加快速度
+  maxTokens?: number;
 }
 
 /** LLM 调用请求 */
@@ -160,10 +108,8 @@ export interface ChainNode {
   modelConfig: ModelSpec;
   inputMapping: Record<string, string>;   // 变量路径 → 节点输入
   outputMapping: Record<string, string>;  // 节点输出 → 上下文路径
-  qualityGate?: QualityGateConfig;
   branches?: Branch[];
   nextOnSuccess?: string[];   // 成功后的下一个节点 ID，默认按序
-  nextOnFailure?: string;     // 失败后的降级节点 ID
   timeout: number;            // 超时秒数
   retryCount: number;         // 最大重试次数
   skipOnEmptyInput?: boolean; // 输入为空时是否跳过此节点
@@ -188,7 +134,6 @@ export interface ExecutionContext {
   variables: Record<string, unknown>;    // 当前所有变量
   nodeOutputs: Record<string, unknown>;  // 各节点的输出缓存
   retryCounters: Record<string, number>; // 各节点的重试计数
-  qualityGateFailures: Record<string, GateResult[]>;  // 各节点的质量门失败记录
   startTime: Date;
   timestamps: Record<string, Date>;       // 各节点的执行时间戳
   metadata: Record<string, unknown>;      // 扩展元数据
@@ -213,8 +158,7 @@ export interface ChainConfig {
   timeout: number;             // 全局超时秒数
   maxRetries: number;
   enableLogging: boolean;
-  enableQualityGate: boolean;
-  strictMode: boolean;         // 严格模式：质量门失败即停止
+  strictMode: boolean;
 }
 
 // ==================== 执行结果 ====================
@@ -225,7 +169,6 @@ export interface NodeResult {
   nodeName: string;
   status: 'success' | 'failed' | 'skipped' | 'partial';
   output: unknown;
-  gateResult?: GateResult;
   error?: string;
   latency: number;             // 毫秒
   retryCount: number;
@@ -239,7 +182,6 @@ export interface ChainResult {
   status: ChainState;
   outputs: Record<string, unknown>;    // 最终输出（各节点输出汇总）
   nodeResults: NodeResult[];           // 各节点执行详情
-  gateResults: Record<string, GateResult>;  // 各节点质量门结果
   errors: ChainError[];
   totalLatency: number;                // 总耗时 ms
   startTime: Date;
@@ -251,7 +193,7 @@ export interface ChainResult {
 export interface ChainError {
   nodeId: string;
   message: string;
-  type: 'quality_gate' | 'timeout' | 'llm_error' | 'template_error' | 'internal';
+  type: 'timeout' | 'llm_error' | 'template_error' | 'internal';
   recoverable: boolean;
 }
 
