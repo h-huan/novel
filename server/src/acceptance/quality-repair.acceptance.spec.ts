@@ -37,6 +37,10 @@ for (const regression of [false, true]) it(`repairs, rechecks, compares and ${re
     expect(repair.before_text).toBe(original);
     const lessons = db.prepare("SELECT * FROM generation_lessons WHERE category='verified_quality_repair'").all();
     expect(lessons.length).toBe(regression ? 0 : 1);
+    const strategy = db.prepare('SELECT * FROM repair_strategy_stats').get() as any;
+    expect(strategy.attempts).toBe(1);
+    expect(strategy.accepted).toBe(regression ? 0 : 1);
+    expect(strategy.rollbacks).toBe(regression ? 1 : 0);
     const cockpit = metrics.getCockpit(project.id);
     expect(cockpit.repairs).toHaveLength(1);
     expect((metrics.getRuns(project.id)[0] as any).status).toBe(regression ? 'failed' : 'success');

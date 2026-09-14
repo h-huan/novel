@@ -5,7 +5,7 @@
  *   GET /generation-metrics/recent?projectId=&limit=20   最近卡点明细
  *   GET /generation-metrics/calibration?projectId=       字数产出比自校准结果
  */
-import { Controller, Get, Query, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, BadRequestException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { GenerationMetricsService } from './generation-metrics.service';
 
@@ -28,6 +28,26 @@ export class GenerationMetricsController {
   @Get('runs')
   runs(@Query('projectId') projectId?: string, @Query('limit') limit?: string) {
     return { items: this.metrics.getRuns(projectId, Number(limit) || 50) };
+  }
+
+  @Get('benchmark')
+  benchmark() {
+    return this.metrics.getBenchmarkFramework();
+  }
+
+  @Post('benchmark/samples')
+  addBenchmarkSample(@Body() body: { projectId?: string; storyType: string; platform: string; content: string; sourceRef?: string }) {
+    return this.metrics.addBenchmarkSample(body);
+  }
+
+  @Put('benchmark/samples/:id/annotation')
+  annotateBenchmarkSample(@Param('id') id: string, @Body('labels') labels: string[]) {
+    return this.metrics.annotateBenchmarkSample(id, labels);
+  }
+
+  @Post('benchmark/evaluations')
+  recordBenchmarkEvaluation(@Body() body: Parameters<GenerationMetricsService['recordBenchmarkEvaluation']>[0]) {
+    return this.metrics.recordBenchmarkEvaluation(body);
   }
 
   @Get('flow')

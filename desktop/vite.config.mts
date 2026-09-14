@@ -7,7 +7,6 @@ import { createRequire } from 'node:module';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
-const electronExecutable = require('electron') as string;
 let electronChild: ChildProcess | null = null;
 const expectedElectronExits = new Set<number>();
 
@@ -26,6 +25,7 @@ function stopElectronChild(): void {
 }
 
 function startElectronHidden(): void {
+  const electronExecutable = require('electron') as string;
   stopElectronChild();
   const child = spawn(electronExecutable, ['.', '--no-sandbox'], {
     cwd: configDirectory,

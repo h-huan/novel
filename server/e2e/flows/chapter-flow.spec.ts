@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createProject, deleteProject, createChapter, uniqueTitle } from '../helpers';
+import { createProject, deleteProject, createChapter, createReviewableChapter, uniqueTitle } from '../helpers';
 
 const BASE = 'http://127.0.0.1:3100/api/v1';
 
@@ -8,7 +8,7 @@ test.describe('Chapter flow', () => {
 
   test.beforeEach(async ({ request }) => {
     const res = await request.post(`${BASE}/projects`, {
-      data: { title: uniqueTitle('chapter-flow'), type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
+      data: { title: uniqueTitle('chapter-flow'), type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
     });
     projectId = (await res.json()).id;
   });
@@ -36,26 +36,26 @@ test.describe('Chapter flow', () => {
     expect((await updateRes.json()).wordCount).toBeGreaterThan(0);
   });
 
-  test('review synchronizes derived data and allows locking when no continuity issue remains', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
+  test('review stays blocked when the required summary model is unavailable', async ({ request }) => {
+    const chapter = await createReviewableChapter(request, projectId);
     const reviewRes = await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/review`);
-    expect(reviewRes.status()).toBe(201);
-    expect((await reviewRes.json()).status).toBe('reviewing');
+    expect(reviewRes.status()).toBe(400);
+    expect((await reviewRes.json()).message).toContain('synchronization did not complete');
 
     const lockRes = await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/lock`);
-    expect(lockRes.status()).toBe(201);
-    expect((await lockRes.json()).status).toBe('locked');
+    expect(lockRes.status()).toBe(400);
+    expect((await lockRes.json()).message).toContain('Only reviewing');
   });
 
-  test('keeps a chapter editable during review so the author can correct it', async ({ request }) => {
-    const chapter = await createChapter(request, projectId);
+  test('keeps a chapter editable after blocked review', async ({ request }) => {
+    const chapter = await createReviewableChapter(request, projectId);
     await request.post(`${BASE}/projects/${projectId}/chapters/${chapter.id}/review`);
     const updateRes = await request.put(`${BASE}/projects/${projectId}/chapters/${chapter.id}`, {
       data: { content: 'Author correction after a continuity warning.' },
     });
     expect(updateRes.status()).toBe(200);
     const updated = await updateRes.json();
-    expect(updated.status).toBe('reviewing');
+    expect(updated.status).toBe('draft');
     expect(updated.derivedSync).toBeDefined();
   });
 

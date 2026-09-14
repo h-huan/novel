@@ -491,6 +491,57 @@ CREATE TABLE IF NOT EXISTS generation_repairs (
       created_at TEXT NOT NULL
     );
 
+-- [table] repair_strategy_stats
+CREATE TABLE IF NOT EXISTS repair_strategy_stats (
+      id TEXT PRIMARY KEY,
+      rule_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      genre TEXT NOT NULL,
+      story_type TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_version TEXT NOT NULL,
+      strategy_id TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      accepted INTEGER NOT NULL DEFAULT 0,
+      rollbacks INTEGER NOT NULL DEFAULT 0,
+      before_score_sum REAL NOT NULL DEFAULT 0,
+      after_score_sum REAL NOT NULL DEFAULT 0,
+      improvement_sum REAL NOT NULL DEFAULT 0,
+      introduced_issue_count INTEGER NOT NULL DEFAULT 0,
+      tokens_sum INTEGER NOT NULL DEFAULT 0,
+      latency_ms_sum INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      UNIQUE(rule_id,platform,genre,story_type,model,prompt_version,strategy_id)
+    );
+
+-- [table] quality_benchmark_samples
+CREATE TABLE IF NOT EXISTS quality_benchmark_samples (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      story_type TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source_ref TEXT,
+      annotation_status TEXT NOT NULL DEFAULT 'pending',
+      human_labels_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+-- [table] quality_benchmark_evaluations
+CREATE TABLE IF NOT EXISTS quality_benchmark_evaluations (
+      id TEXT PRIMARY KEY,
+      sample_id TEXT NOT NULL REFERENCES quality_benchmark_samples(id) ON DELETE CASCADE,
+      run_id TEXT,
+      predicted_labels_json TEXT NOT NULL,
+      repair_attempted INTEGER NOT NULL DEFAULT 0,
+      repair_accepted INTEGER NOT NULL DEFAULT 0,
+      introduced_issue INTEGER NOT NULL DEFAULT 0,
+      before_score REAL,
+      after_score REAL,
+      created_at TEXT NOT NULL
+    );
+
 -- [table] generation_step_metrics
 CREATE TABLE IF NOT EXISTS generation_step_metrics (
       id TEXT PRIMARY KEY,
@@ -1354,6 +1405,12 @@ CREATE INDEX IF NOT EXISTS idx_generation_runs_project ON generation_runs(projec
 -- [index] idx_generation_repairs_project
 CREATE INDEX IF NOT EXISTS idx_generation_repairs_project ON generation_repairs(project_id, created_at);
 
+CREATE INDEX IF NOT EXISTS idx_repair_strategy_lookup
+      ON repair_strategy_stats(rule_id,platform,genre,story_type,model,prompt_version);
+
+CREATE INDEX IF NOT EXISTS idx_quality_benchmark_group
+      ON quality_benchmark_samples(story_type,platform,annotation_status);
+
 -- [index] idx_generation_step_run
 CREATE INDEX IF NOT EXISTS idx_generation_step_run ON generation_step_metrics(run_id);
 
@@ -1721,6 +1778,9 @@ export function down(db: DatabaseSync): void {
   DROP TABLE IF EXISTS "foreshadowings";
   DROP TABLE IF EXISTS "generation_lessons";
   DROP TABLE IF EXISTS "generation_repairs";
+  DROP TABLE IF EXISTS "repair_strategy_stats";
+  DROP TABLE IF EXISTS "quality_benchmark_evaluations";
+  DROP TABLE IF EXISTS "quality_benchmark_samples";
   DROP TABLE IF EXISTS "generation_step_metrics";
   DROP TABLE IF EXISTS "generation_runs";
   DROP TABLE IF EXISTS "idea_drafts";

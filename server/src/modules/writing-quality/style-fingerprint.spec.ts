@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { styleFingerprint } from './style-fingerprint';
 
-describe('styleFingerprint v2', () => {
+describe('styleFingerprint v3', () => {
   it('uses literal evidence for cross-paragraph and cross-chapter patterns', () => {
     const repeated = '他推开生锈的铁门看见台阶尽头仍亮着一盏灯';
     const content = [
@@ -12,7 +12,7 @@ describe('styleFingerprint v2', () => {
     ].join('\n\n').repeat(3);
     const result = styleFingerprint({ projectId: 'p', runId: 'r', content, characterNames: [],
       previousChapters: [{ id: 'c0', content: `昨夜，${repeated}，随后钟声响了。另一处${repeated}` }] });
-    expect(result.version).toBe(2);
+    expect(result.version).toBe(3);
     expect(result.issues.map(issue => issue.ruleId)).toContain('style.cross_paragraph_transition');
     expect(result.issues.every(issue => issue.evidence.verified)).toBe(true);
   });

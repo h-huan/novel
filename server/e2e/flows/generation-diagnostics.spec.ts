@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { SEED_BASELINE_VERSION } from '../../src/modules/module-standards/module-standards.seed';
 test('unconfigured idea discovery preserves its cause and adds one visible failed run', async ({ request }) => {
   const base = `http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1`;
   const before = await (await request.get(`${base}/platform-analytics/overview`)).json();
@@ -12,5 +13,5 @@ test('unconfigured idea discovery preserves its cause and adds one visible faile
   expect(after.generationRuns.total).toBe(before.generationRuns.total + 1);
   expect(after.generationRuns.recent[0].error).toBe(result.error);
   expect(after.kpis.llmCalls).toBe(before.kpis.llmCalls);
-  expect(after.generationRuns.recent[0].standards.modules.some((s: any) => s.key === 'quality_loop' && s.baseline === 4)).toBe(true);
+  expect(after.generationRuns.recent[0].standards.modules.some((s: any) => s.key === 'quality_loop' && s.baseline === SEED_BASELINE_VERSION)).toBe(true);
 });

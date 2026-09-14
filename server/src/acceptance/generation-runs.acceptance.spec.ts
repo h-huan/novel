@@ -5,6 +5,7 @@ import { ProjectService } from '../modules/project/project.service';
 import { ProjectRepository } from '../database/repositories/project.repository';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
 import { RealLLMService } from '../chain/real-llm.service';
+import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 it('records success, provider failure, stream cancellation and constitution snapshots', async () => {
   const db = new DatabaseSync(':memory:');
@@ -18,7 +19,7 @@ it('records success, provider failure, stream cancellation and constitution snap
     (service as any).generateInternal = vi.fn(async (r: any) => {
       if (r.scenario !== 'review') expect(r.systemPrompt).toContain('fanqie');
       return { content: r.scenario === 'review' ? JSON.stringify({ dimensions: Object.fromEntries(
-        ['platform','tone','style','genre','pov','context','logic','completeness','prose'].map(k => [k, { score: 90, reason: '满足已确认约束', evidence: ['角色'] }])) }) : '角色', model: 'fixture', latency: 1 };
+        SCORE_DIMENSIONS.map(k => [k, { score: 90, reason: '满足已确认约束', evidence: ['角色'] }])) }) : '角色', model: 'fixture', latency: 1 };
     });
     await service.generate(request);
     (service as any).generateInternal = vi.fn(async () => { throw new Error('provider failed'); });
@@ -41,10 +42,13 @@ it('inherits the constitution and stores evidence-based scores through five writ
   const project=new ProjectService(new ProjectRepository(database)).create({title:'全流程验收',targetPlatform:'fanqie'});
   const metrics=new GenerationMetricsService(database);
   const service=new RealLLMService({} as any,metrics);
+  const chapterContent = Array.from({ length: 70 }, (_, index) => index % 2
+    ? `“钟楼突然响了！我们必须立刻穿过广场找到钥匙，否则城门关闭后所有人都会被困在这里！”`
+    : `钟楼突然响了！林岚冲过广场，推开挡路的木箱，拿到钥匙后继续奔向正在关闭的城门。`).join('\n') + '\n门后站着的人究竟是谁？';
   (service as any).generateInternal=vi.fn(async(r:any)=>{
-   if(r.scenario==='review') return {content:JSON.stringify({dimensions:Object.fromEntries(['platform','category','tone','style','genre','pov','context','logic','completeness','prose'].map(k=>[k,{score:90,reason:'验收固定证据',evidence:['钟楼']}]))})};
+   if(r.scenario==='review') return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'验收固定证据',evidence:['钟楼']}]))})};
    expect(r.systemPrompt).toContain('fanqie');
-   return {content:'钟楼',model:'fixture'};
+   return {content:['writing','refinement'].includes(r.scenario) ? chapterContent : '钟楼',model:'fixture'};
   });
   for(const scenario of ['world_building','character_design','outline','writing','refinement']) await service.generate({prompt:'钟楼',scenario,metrics:{projectId:project.id}});
   const reports=metrics.queryContentReports({projectId:project.id});

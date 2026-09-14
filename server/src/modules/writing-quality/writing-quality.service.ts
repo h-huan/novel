@@ -16,6 +16,7 @@ import { RealLLMService } from '../../chain/real-llm.service';
 import { WRITING_QUALITY_TAGS } from '../../state/writing-quality-tags';
 import { ChapterService } from '../chapter/chapter.service';
 import { QualityInspectionService } from '../refinement/quality-inspection.service';
+import { compileContext } from '../generation-metrics/context-compiler';
 import { detectForbiddenTells } from '../../chain/hardline-scanner';
 import type {
   AnalyzeChapterDto,
@@ -1167,6 +1168,14 @@ export class WritingQualityService implements OnModuleInit {
 - 结尾钩子（needs_hook / needs_payoff）
 - 潜台词缺乏（lack_of_subtext / repeated_emotion_action）
 
+【Character Voice Contract】
+- 对正文中可明确归属的角色，逐人核对上下文内 speech_style、catchphrase、common_words、forbidden_words、tone_to_different_people、emotion_outburst_style、danger_reaction、betrayal_reaction、weak_person_reaction、strong_person_reaction、must_obey_rules、forbidden_writing。
+- 台词与行为偏移必须引用该角色的连续原文；无法确认说话人时不得归因，不得伪造角色违规。
+
+【AI Trace 3.0 语义审查】
+- 分别检查情绪解释过度、因果/作者解释过度、段落功能同构、场景结构同构、对白过度功能化或过度完整、潜台词不足、人物认知过度透明、抽象总结、跨章叙事模板重复。
+- 关键词与句式统计只能作为风险线索；issues 必须给出逐字证据和语义解释，不得把启发式命中直接当结论。
+
 【重要：区分当前状态与回忆/背景，禁止误判】
 - 角色在回忆、闪回、背景介绍、他人转述中出现的行为/状态，不与角色当前状态矛盾。
 - 例如：角色设定是"失踪"，但正文中写"她回忆起妈妈缝扣子的时候"或"她记得妈妈以前总弓着食指"——这是合理的回忆，不是矛盾。
@@ -1180,7 +1189,11 @@ ${timelineCheck}
 
 你必须只输出严格JSON，不输出任何其他内容。`;
 
-    const contextSerialized = JSON.stringify(context, null, 0);
+    const chapter = this.dbService.getDb().prepare('SELECT chapter_index FROM chapters WHERE id=? AND project_id=?')
+      .get(dto.chapterId, projectId) as { chapter_index?: number } | undefined;
+    const contextSerialized = compileContext(this.dbService.getDb(), {
+      projectId, stage: 'chapter', chapterIndex: chapter?.chapter_index ?? null,
+    }).snapshot;
     const prompt = `请对以下网文章节进行专业质量诊断。
 
 章节标题：${chapterTitle}

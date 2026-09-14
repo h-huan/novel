@@ -14,7 +14,7 @@ test.describe('Project CRUD E2E', () => {
   test('should create a new project via API', async ({ request }) => {
     projectTitle = uniqueTitle('crud-project');
     const res = await request.post(`http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1/projects`, {
-      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
+      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
     });
     expect(res.status()).toBe(201);
 
@@ -30,7 +30,7 @@ test.describe('Project CRUD E2E', () => {
     // Create a project first
     projectTitle = uniqueTitle('list-project');
     const createRes = await request.post(`http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1/projects`, {
-      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
+      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
     });
     projectId = (await createRes.json()).id;
 
@@ -51,7 +51,7 @@ test.describe('Project CRUD E2E', () => {
     // Create a project
     projectTitle = uniqueTitle('update-project');
     const createRes = await request.post(`http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1/projects`, {
-      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
+      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
     });
     projectId = (await createRes.json()).id;
 
@@ -75,7 +75,7 @@ test.describe('Project CRUD E2E', () => {
     // Create a project
     projectTitle = uniqueTitle('delete-project');
     const createRes = await request.post(`http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1/projects`, {
-      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
+      data: { title: projectTitle, type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
     });
     const created = await createRes.json();
     projectId = created.id;

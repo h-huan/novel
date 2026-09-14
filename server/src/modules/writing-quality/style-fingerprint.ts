@@ -10,6 +10,10 @@ export function styleFingerprint(input: {
 }) {
   const base = new QualityInspectionService().detectAiFingerprints(input.content);
   const issues: QualityIssue[] = [];
+  const risk = (ruleId: string, quote: string, message: string) => issues.push(qualityIssue({
+    ...input, stage: input.stage ?? 'chapter', ruleId, severity: 'medium', source: 'ai_trace_heuristic_v3',
+    quote, message: `${message}；这是启发式风险，须由证据化语义评审确认`,
+  }));
   const sentences = input.content.match(/[^。！？\n]+[。！？]/g)?.map(s => s.trim()).filter(s => s.length >= 20) || [];
   const repeats = [...new Set(sentences)].filter(s => input.previousChapters.some(c => c.content.includes(s)));
   if (repeats.length >= 3) issues.push(qualityIssue({ ...input, stage: input.stage ?? 'chapter', ruleId: 'style.cross_chapter_repetition',
@@ -74,6 +78,30 @@ export function styleFingerprint(input: {
     const quotes = [...line.matchAll(/[“「]([^”」]{8,})[”」]/g)].map(match => match[1]);
     if (quotes.length) attributed.set(speaker, [...(attributed.get(speaker) || []), ...quotes]);
   }
+  const heuristicPatterns: Array<[string, RegExp, string]> = [
+    ['ai_trace.emotion_overexplanation_risk', /[^。！？\n]{0,30}(?:感到|情绪|内心|心中)[^。！？\n]{0,20}(?:因为|意味着|说明)[^。！？\n]{0,35}[。！？]?/, '情绪后紧跟解释性归因'],
+    ['ai_trace.causal_author_explanation_risk', /[^。！？\n]{0,20}(?:之所以|显然|毫无疑问)[^。！？\n]{0,60}[。！？]?/, '叙述者可能直接替读者解释因果'],
+    ['ai_trace.functional_complete_dialogue_risk', /[“「][^”」]{0,20}(?:首先|其次|最后|总之)[^”」]{20,120}[”」]/, '对白可能过度完整地传递功能信息'],
+    ['ai_trace.transparent_character_cognition_risk', /[^。！？\n]{0,25}(?:他|她|他们)(?:清楚地知道|完全明白|立刻意识到)[^。！？\n]{0,60}[。！？]?/, '人物认知可能被叙述得过度透明'],
+    ['ai_trace.abstract_summary_risk', /[^。！？\n]{0,20}(?:这就是|归根结底|人生|命运|意义在于)[^。！？\n]{10,70}[。！？]?/, '段落可能以抽象总结替代具体行动或感受'],
+  ];
+  for (const [ruleId, pattern, message] of heuristicPatterns) {
+    const match = input.content.match(pattern)?.[0]?.trim();
+    if (match) risk(ruleId, match, message);
+  }
+  const functions = paragraphs.map(paragraph => ({
+    paragraph,
+    signature: [
+      /[“「]/.test(paragraph) ? 'dialogue' : 'narration',
+      /(突然|忽然|下一秒|就在这时)/.test(paragraph) ? 'turn' : 'steady',
+      /(因为|所以|意味着|说明)/.test(paragraph) ? 'explain' : 'show',
+    ].join(':'),
+  }));
+  const functionGroups = new Map<string, string[]>();
+  for (const item of functions) functionGroups.set(item.signature, [...(functionGroups.get(item.signature) || []), item.paragraph]);
+  for (const [signature, group] of functionGroups) if (group.length >= 5 && group.length / paragraphs.length >= 0.7) {
+    risk('ai_trace.paragraph_function_homology_risk', group[0], `${group.length} 段呈现相同的“${signature}”粗粒度功能结构`);
+  }
   const profiles = [...attributed.entries()].filter(([, quotes]) => quotes.length >= 5 && quotes.join('').length >= 80)
     .map(([name, quotes]) => {
       const joined = quotes.join('');
@@ -91,7 +119,7 @@ export function styleFingerprint(input: {
       quote: profiles[right].quotes[0],
       message: `${profiles[left].name}与${profiles[right].name}在足量台词中的句长、语气和口头词高度同构，需结合角色设定复核声音区分` }));
   }
-  return { version: 2, status: input.content.trim().length >= 200 ? 'heuristic' : 'insufficient_evidence',
+  return { version: 3, status: input.content.trim().length >= 200 ? 'heuristic' : 'insufficient_evidence',
     base, issues, coverage: { paragraphs: paragraphs.length, previousChapters: input.previousChapters.length,
       namedCharacters: input.characterNames.length, attributedVoiceProfiles: profiles.length },
     repeatedSentences: repeats, repeatedFragments: uniqueFragments };

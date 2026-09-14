@@ -19,6 +19,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { standardDirectiveCache } from '../module-standards/standard-directive.cache';
 import { DatabaseService } from '../../database/database.service';
 import * as crypto from 'crypto';
+import { compileContext } from './context-compiler';
 
 /** 一次 LLM 调用的遥测输入 */
 export interface StepMetricInput {
@@ -119,31 +120,30 @@ export class GenerationMetricsService {
       constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
       id, projectId ?? null, stage, scenario, 'running', constitution?.revision ?? null,
       constitution ? JSON.stringify(constitution) : null, digest(systemPrompt || ''), digest(prompt), new Date().toISOString());
-    const context = row ? this.qualityContext(projectId!) : '';
+    const compiled = row ? compileContext(db, { projectId: projectId!, stage, chapterIndex }) : null;
+    const context = compiled?.snapshot || '';
     const standards = standardDirectiveCache.snapshot(scenario, injectStandard);
     db.prepare('UPDATE generation_runs SET standards_snapshot=? WHERE id=?').run(JSON.stringify(standards), id);
-    db.prepare('UPDATE generation_runs SET context_snapshot=?,context_version=?,prompt_version=?,chapter_index=? WHERE id=?').run(context, digest(prompt + context), digest((systemPrompt || '') + JSON.stringify(constitution) + standards.digest), chapterIndex ?? null, id);
+    db.prepare('UPDATE generation_runs SET context_snapshot=?,context_version=?,prompt_version=?,chapter_index=? WHERE id=?')
+      .run(context, compiled?.version || digest(''), digest((systemPrompt || '') + JSON.stringify(constitution) + standards.digest), chapterIndex ?? null, id);
     const previousChapters = row ? db.prepare("SELECT id,content FROM chapters WHERE project_id=? AND content IS NOT NULL AND (? IS NULL OR chapter_index < ?) ORDER BY chapter_index DESC LIMIT 12").all(projectId!, chapterIndex ?? null, chapterIndex ?? null) as Array<{ id: string; content: string }> : [];
     const characterNames = row ? (db.prepare('SELECT name FROM characters WHERE project_id=?').all(projectId!) as Array<{ name: string }>).map(c => c.name) : [];
     const lessons = row ? (db.prepare("SELECT lesson FROM generation_lessons WHERE project_id=? AND category='verified_quality_repair' ORDER BY occurrence DESC,updated_at DESC LIMIT 8").all(projectId!) as Array<{ lesson: string }>).map(r => r.lesson) : [];
     return { id, constitution, stage, context, projectId, previousChapters, characterNames, lessons };
   }
 
-  private qualityContext(projectId: string): string {
-    const db = this.databaseService.getDb();
-    return JSON.stringify({
-      world: db.prepare('SELECT * FROM world_settings WHERE project_id=? ORDER BY id').all(projectId),
-      characters: db.prepare('SELECT * FROM characters WHERE project_id=? ORDER BY id').all(projectId),
-      outlines: db.prepare('SELECT * FROM outlines WHERE project_id=? ORDER BY id').all(projectId),
-      confirmedState: db.prepare("SELECT * FROM state_items WHERE project_id=? AND status='confirmed' ORDER BY id").all(projectId),
-    });
+  private qualityContext(projectId: string, stage: string = 'project', chapterIndex?: number | null): string {
+    return compileContext(this.databaseService.getDb(), {
+      projectId, stage: stage as any, chapterIndex,
+    }).snapshot;
   }
 
   runIsCurrent(runId: string, projectId: string): boolean {
     const db = this.databaseService.getDb();
-    const run = db.prepare('SELECT constitution_json,context_snapshot FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
+    const run = db.prepare('SELECT constitution_json,context_snapshot,stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
     const row = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
-    return !!run && !!row && run.constitution_json === JSON.stringify(readConstitution(row)) && run.context_snapshot === this.qualityContext(projectId);
+    return !!run && !!row && run.constitution_json === JSON.stringify(readConstitution(row))
+      && run.context_snapshot === this.qualityContext(projectId, run.stage, run.chapter_index);
   }
 
   finishRun(id: string, status: 'success' | 'failed' | 'cancelled', started: number, output?: string, error?: string, model?: string) {
@@ -205,14 +205,56 @@ export class GenerationMetricsService {
     }
   }
 
+  selectRepairStrategy(projectId: string, issues: StageScore['issues']): string {
+    const rules = [...new Set(issues.filter(issue => ['blocking', 'high'].includes(issue.severity)).map(issue => issue.ruleId))];
+    const defaults = rules.some(rule => rule.includes('character_voice')) ? 'character_voice_contract_patch'
+      : rules.some(rule => rule.startsWith('ai_trace.') || rule.includes('structure')) ? 'scene_structure_patch'
+      : rules.some(rule => rule.startsWith('platform.')) ? 'platform_metric_patch'
+      : 'unique_local_replacement';
+    if (!rules.length) return defaults;
+    const marks = rules.map(() => '?').join(',');
+    const rows = this.databaseService.getDb().prepare(`SELECT strategy_id,SUM(attempts) attempts,SUM(accepted) accepted
+      FROM repair_strategy_stats WHERE rule_id IN (${marks}) GROUP BY strategy_id`).all(...rules) as any[];
+    if (!rows.length) return defaults;
+    return rows.sort((left, right) => ((Number(right.accepted) + 1) / (Number(right.attempts) + 2))
+      - ((Number(left.accepted) + 1) / (Number(left.attempts) + 2)))[0].strategy_id || defaults;
+  }
+
   recordRepair(runId: string, projectId: string, beforeText: string, afterText: string | null,
-    before: StageScore, after: StageScore | null, accepted: boolean, reason: string) {
+    before: StageScore, after: StageScore | null, accepted: boolean, reason: string,
+    strategyId = 'unique_local_replacement', latencyMs = 0) {
     const id = crypto.randomUUID();
     const db = this.databaseService.getDb();
     db.prepare(`INSERT INTO generation_repairs (id,run_id,project_id,stage,status,strategy,before_text,after_text,
       before_score,after_score,before_report,after_report,reason,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      id, runId, projectId, before.stage, accepted ? 'accepted' : 'rolled_back', 'unique_local_replacement',
+      id, runId, projectId, before.stage, accepted ? 'accepted' : 'rolled_back', strategyId,
       beforeText, afterText, before.overallScore, after?.overallScore ?? null, JSON.stringify(before), after ? JSON.stringify(after) : null, reason, new Date().toISOString());
+    const run = db.prepare(`SELECT r.prompt_version,COALESCE(r.model,
+      (SELECT model_version FROM generation_step_metrics m WHERE m.run_id=r.id AND m.model_version IS NOT NULL ORDER BY m.created_at DESC LIMIT 1),'unknown') model,
+      COALESCE((SELECT SUM(total_tokens) FROM generation_step_metrics m WHERE m.run_id=r.id),0) tokens
+      FROM generation_runs r WHERE r.id=?`).get(runId) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
+    const constitution = readConstitution(project || {});
+    const genre = constitution.webNovelGenre.join('|') || constitution.category || 'generic';
+    const introduced = after ? after.issues.some(issue => !before.issues.some(old => old.ruleId === issue.ruleId)) : false;
+    const improvement = before.overallScore !== null && after?.overallScore != null ? after.overallScore - before.overallScore : 0;
+    const now = new Date().toISOString();
+    for (const ruleId of [...new Set(before.issues.map(issue => issue.ruleId))]) {
+      const statId = crypto.createHash('sha256').update(JSON.stringify([
+        ruleId, constitution.targetPlatform, genre, constitution.projectType, run?.model || 'unknown', run?.prompt_version || 'unknown', strategyId,
+      ])).digest('hex');
+      db.prepare(`INSERT INTO repair_strategy_stats (id,rule_id,platform,genre,story_type,model,prompt_version,strategy_id,
+        attempts,accepted,rollbacks,before_score_sum,after_score_sum,improvement_sum,introduced_issue_count,tokens_sum,latency_ms_sum,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET attempts=attempts+1,
+        accepted=accepted+excluded.accepted,rollbacks=rollbacks+excluded.rollbacks,before_score_sum=before_score_sum+excluded.before_score_sum,
+        after_score_sum=after_score_sum+excluded.after_score_sum,improvement_sum=improvement_sum+excluded.improvement_sum,
+        introduced_issue_count=introduced_issue_count+excluded.introduced_issue_count,tokens_sum=tokens_sum+excluded.tokens_sum,
+        latency_ms_sum=latency_ms_sum+excluded.latency_ms_sum,updated_at=excluded.updated_at`).run(
+        statId, ruleId, constitution.targetPlatform, genre, constitution.projectType, run?.model || 'unknown', run?.prompt_version || 'unknown', strategyId,
+        accepted ? 1 : 0, accepted ? 0 : 1, before.overallScore ?? 0, after?.overallScore ?? 0, improvement,
+        introduced ? 1 : 0, Number(run?.tokens) || 0, Math.max(0, latencyMs), now,
+      );
+    }
     return id;
   }
 
@@ -220,27 +262,37 @@ export class GenerationMetricsService {
     const db = this.databaseService.getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     const currentConstitution = project ? JSON.stringify(readConstitution(project)) : null;
-    const currentContext = project ? this.qualityContext(projectId) : null;
+    const currentContexts = new Map<string, string>();
+    const currentContext = (stage: string, chapterIndex?: number | null) => {
+      const key = `${stage}:${chapterIndex ?? ''}`;
+      if (!currentContexts.has(key)) currentContexts.set(key, this.qualityContext(projectId, stage, chapterIndex));
+      return currentContexts.get(key)!;
+    };
     const runs = db.prepare(`SELECT r.*,(SELECT SUM(m.total_tokens) FROM generation_step_metrics m WHERE m.run_id=r.id) AS total_tokens
       FROM generation_runs r WHERE r.project_id=? ORDER BY r.started_at DESC LIMIT 100`).all(projectId) as any[];
-    const issues = db.prepare(`SELECT i.* FROM writing_quality_issues i JOIN writing_quality_reports q ON q.id=i.report_id
+    const issueRows = db.prepare(`SELECT i.*,q.source_type,r.stage run_stage,r.chapter_index run_chapter,r.context_snapshot run_context
+      FROM writing_quality_issues i JOIN writing_quality_reports q ON q.id=i.report_id
       LEFT JOIN generation_runs r ON q.source_type='artifact_quality' AND r.id=q.source_id
       WHERE i.project_id=? AND i.status='open' AND (q.source_type!='artifact_quality'
-        OR (r.constitution_json=? AND r.context_snapshot=?)) ORDER BY i.created_at DESC LIMIT 100`)
-      .all(projectId, currentConstitution, currentContext);
+        OR r.constitution_json=?) ORDER BY i.created_at DESC LIMIT 100`)
+      .all(projectId, currentConstitution) as any[];
+    const issues = issueRows.filter(issue => issue.source_type !== 'artifact_quality'
+      || issue.run_context === currentContext(issue.run_stage, issue.run_chapter));
     for (const run of runs) {
       const payload = run.quality_payload ? JSON.parse(run.quality_payload) : {};
       run.score = payload.stageScore ?? null;
-      run.currentConstitution = run.constitution_json === currentConstitution && run.context_snapshot === currentContext;
+      run.currentConstitution = run.constitution_json === currentConstitution
+        && run.context_snapshot === currentContext(run.stage, run.chapter_index);
       delete run.quality_payload; delete run.output_text; delete run.constitution_json; delete run.context_snapshot;
     }
-    const reportRows = db.prepare(`SELECT q.payload,r.stage FROM writing_quality_reports q JOIN generation_runs r ON r.id=q.source_id
-      WHERE q.project_id=? AND q.source_type='artifact_quality' AND r.constitution_json=? AND r.context_snapshot=?`).all(
-      projectId, currentConstitution, currentContext,
-    ) as Array<{ payload: string; stage: string }>;
+    const reportRows = db.prepare(`SELECT q.payload,r.stage,r.chapter_index,r.context_snapshot FROM writing_quality_reports q JOIN generation_runs r ON r.id=q.source_id
+      WHERE q.project_id=? AND q.source_type='artifact_quality' AND r.constitution_json=?`).all(
+      projectId, currentConstitution,
+    ) as Array<{ payload: string; stage: string; chapter_index: number | null; context_snapshot: string }>;
     const byStage = new Map<string, StageScore[]>();
     for (const row of reportRows) {
       try {
+        if (row.context_snapshot !== currentContext(row.stage, row.chapter_index)) continue;
         const score = JSON.parse(row.payload || '{}').stageScore as StageScore | undefined;
         if (score) byStage.set(row.stage, [...(byStage.get(row.stage) || []), score]);
       } catch { /* malformed historical report remains unscored */ }
@@ -248,10 +300,77 @@ export class GenerationMetricsService {
     const scores: Record<string, any> = {};
     for (const [stage, values] of byStage) scores[stage] = aggregateArtifactScores(stage as any, values);
     scores.project = aggregateProjectScore(scores);
-    const repairs = db.prepare('SELECT id,stage,status,reason,before_score,after_score,before_text,after_text FROM generation_repairs WHERE project_id=? ORDER BY created_at DESC LIMIT 100').all(projectId);
-    return { runs, issues, scores, repairs, scope: '最近100次生成与100条未解决问题',
+    const repairs = db.prepare('SELECT id,stage,status,strategy,reason,before_score,after_score,before_text,after_text FROM generation_repairs WHERE project_id=? ORDER BY created_at DESC LIMIT 100').all(projectId) as any[];
+    const issuePareto = db.prepare(`SELECT issue_type ruleId,COUNT(*) count FROM writing_quality_issues
+      WHERE project_id=? AND status='open' GROUP BY issue_type ORDER BY count DESC,issue_type LIMIT 20`).all(projectId);
+    const issueStageDistribution = db.prepare(`SELECT q.scope stage,COUNT(*) count FROM writing_quality_issues i
+      JOIN writing_quality_reports q ON q.id=i.report_id WHERE i.project_id=? AND i.status='open' GROUP BY q.scope ORDER BY count DESC`).all(projectId);
+    const strategyStats = db.prepare(`SELECT strategy_id strategyId,SUM(attempts) attempts,SUM(accepted) accepted,SUM(rollbacks) rollbacks,
+      ROUND(CASE WHEN SUM(attempts)>0 THEN 1.0*SUM(accepted)/SUM(attempts) END,3) successRate,
+      ROUND(CASE WHEN SUM(attempts)>0 THEN 1.0*SUM(introduced_issue_count)/SUM(attempts) END,3) destructionRate,
+      ROUND(CASE WHEN SUM(attempts)>0 THEN SUM(improvement_sum)/SUM(attempts) END,2) avgImprovement
+      FROM repair_strategy_stats WHERE platform=? GROUP BY strategy_id ORDER BY successRate DESC`).all(project ? readConstitution(project).targetPlatform : 'generic');
+    const modelPromptCompare = db.prepare(`SELECT COALESCE(model,'unknown') model,prompt_version promptVersion,COUNT(*) runs,
+      ROUND(AVG(CASE WHEN gate_status='passed' THEN 1.0 ELSE 0 END),3) passRate,ROUND(AVG(duration_ms)) avgLatencyMs
+      FROM generation_runs WHERE project_id=? AND status!='running' GROUP BY model,prompt_version ORDER BY runs DESC LIMIT 20`).all(projectId);
+    return { runs, issues, scores, repairs, issuePareto, issueStageDistribution, strategyStats, modelPromptCompare,
+      benchmark: this.getBenchmarkFramework(), scope: '最近100次生成与100条未解决问题',
       bottlenecks: runs.filter(r => r.status === 'running' || r.status === 'failed' || r.gate_status === 'blocked'),
       trend: runs.filter(r => r.score).map(r => ({ at: r.started_at, stage: r.stage, score: r.score.overallScore, coverage: r.score.coverage })).reverse() };
+  }
+
+  addBenchmarkSample(input: { projectId?: string; storyType: string; platform: string; content: string; sourceRef?: string }) {
+    const allowed = new Set(['short_story:fanqie', 'short_story:zhihu', 'long_novel:fanqie', 'long_novel:qidian', 'long_novel:qimao']);
+    if (!allowed.has(`${input.storyType}:${input.platform}`) || !input.content?.trim()) throw new BadRequestException('Benchmark 样本组合或正文无效');
+    const id = crypto.randomUUID(); const now = new Date().toISOString();
+    this.databaseService.getDb().prepare(`INSERT INTO quality_benchmark_samples
+      (id,project_id,story_type,platform,content,source_ref,annotation_status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,'pending',?,?)`).run(id, input.projectId ?? null, input.storyType, input.platform, input.content, input.sourceRef ?? null, now, now);
+    return { id, annotationStatus: 'pending' };
+  }
+
+  annotateBenchmarkSample(id: string, labels: string[]) {
+    if (!Array.isArray(labels) || labels.some(label => typeof label !== 'string' || !label.trim())) throw new BadRequestException('人工标签无效');
+    const result = this.databaseService.getDb().prepare(`UPDATE quality_benchmark_samples
+      SET human_labels_json=?,annotation_status='labeled',updated_at=? WHERE id=?`).run(JSON.stringify([...new Set(labels)]), new Date().toISOString(), id);
+    if (!result.changes) throw new BadRequestException('Benchmark 样本不存在');
+    return { id, annotationStatus: 'labeled', labels: [...new Set(labels)] };
+  }
+
+  recordBenchmarkEvaluation(input: { sampleId: string; runId?: string; predictedLabels: string[]; repairAttempted?: boolean; repairAccepted?: boolean; introducedIssue?: boolean; beforeScore?: number; afterScore?: number }) {
+    const id = crypto.randomUUID();
+    this.databaseService.getDb().prepare(`INSERT INTO quality_benchmark_evaluations
+      (id,sample_id,run_id,predicted_labels_json,repair_attempted,repair_accepted,introduced_issue,before_score,after_score,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(id, input.sampleId, input.runId ?? null, JSON.stringify([...new Set(input.predictedLabels || [])]),
+      input.repairAttempted ? 1 : 0, input.repairAccepted ? 1 : 0, input.introducedIssue ? 1 : 0,
+      input.beforeScore ?? null, input.afterScore ?? null, new Date().toISOString());
+    return { id };
+  }
+
+  getBenchmarkFramework() {
+    const db = this.databaseService.getDb();
+    const combinations = [
+      ['short_story', 'fanqie'], ['short_story', 'zhihu'], ['long_novel', 'fanqie'], ['long_novel', 'qidian'], ['long_novel', 'qimao'],
+    ] as const;
+    const groups = combinations.map(([storyType, platform]) => {
+      const samples = db.prepare(`SELECT s.*,e.predicted_labels_json,e.repair_attempted,e.repair_accepted,e.introduced_issue
+        FROM quality_benchmark_samples s LEFT JOIN quality_benchmark_evaluations e ON e.id=(SELECT id FROM quality_benchmark_evaluations
+        WHERE sample_id=s.id ORDER BY created_at DESC LIMIT 1) WHERE s.story_type=? AND s.platform=?`).all(storyType, platform) as any[];
+      let tp = 0; let fp = 0; let fn = 0; let attempts = 0; let accepted = 0; let damaged = 0;
+      for (const sample of samples.filter(item => item.annotation_status === 'labeled' && item.predicted_labels_json)) {
+        const human = new Set(JSON.parse(sample.human_labels_json || '[]') as string[]);
+        const predicted = new Set(JSON.parse(sample.predicted_labels_json || '[]') as string[]);
+        for (const label of predicted) human.has(label) ? tp++ : fp++;
+        for (const label of human) if (!predicted.has(label)) fn++;
+        attempts += Number(sample.repair_attempted) || 0; accepted += Number(sample.repair_accepted) || 0; damaged += Number(sample.introduced_issue) || 0;
+      }
+      const labeled = samples.filter(item => item.annotation_status === 'labeled').length;
+      return { storyType, platform, samples: samples.length, labeled, pending: samples.length - labeled,
+        precision: tp + fp ? tp / (tp + fp) : null, recall: tp + fn ? tp / (tp + fn) : null,
+        falsePositives: fp, falseNegatives: fn, repairSuccessRate: attempts ? accepted / attempts : null,
+        destructionRate: attempts ? damaged / attempts : null, status: samples.length ? (labeled ? 'measuring' : 'pending_annotation') : 'waiting_for_samples' };
+    });
+    return { available: groups.some(group => group.samples > 0), resultStatus: groups.some(group => group.samples > 0) ? 'real_samples_only' : 'waiting_for_real_samples', groups };
   }
 
   queryContentReports(query: Record<string, string | undefined>) {

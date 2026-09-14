@@ -8,7 +8,7 @@ test.describe('Conflict Priority (7.8)', () => {
 
   test.beforeEach(async ({ request }) => {
     const res = await request.post(`${BASE}/projects`, {
-      data: { title: uniqueTitle('conflict-test'), type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
+      data: { title: uniqueTitle('conflict-test'), type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
     });
     projectId = (await res.json()).id;
   });
@@ -26,7 +26,7 @@ test.describe('Conflict Priority (7.8)', () => {
       ruleType: 'plot_constraint',
       content: '主角必须存活到最后',
       scope: 'chapter',
-      chapterIndex: 1,
+      projectId, chapterIndex: 1,
       priority: 80,
     });
     expect(rule1).toHaveProperty('id');
@@ -37,7 +37,7 @@ test.describe('Conflict Priority (7.8)', () => {
       ruleType: 'setting_override',
       content: '不能主角必须存活',
       scope: 'chapter',
-      chapterIndex: 1,
+      projectId, chapterIndex: 1,
       priority: 90,
     });
     expect(rule2).toHaveProperty('id');
@@ -82,7 +82,7 @@ test.describe('Conflict Priority (7.8)', () => {
       ruleType: 'plot_constraint',
       content: '新的剧情约束',
       scope: 'chapter',
-      chapterIndex: 1,
+      projectId, chapterIndex: 1,
     });
 
     // Detect conflicts with locked chapters
@@ -100,7 +100,7 @@ test.describe('Conflict Priority (7.8)', () => {
     // POST /conflicts/detect with mode=realtime
     const res = await request.post(`${BASE}/conflicts/detect`, {
       data: {
-        chapterIndex: 1,
+        projectId, chapterIndex: 1,
         paragraphContent: '陆川勇敢地冲向前线，但他内心充满了恐惧。',
         mode: 'realtime',
       },
@@ -110,14 +110,14 @@ test.describe('Conflict Priority (7.8)', () => {
 
     // May return empty or with conflicts depending on service state
     // but should always return an array
-    expect(Array.isArray(body)).toBe(true);
+    expect(Array.isArray(body.conflicts)).toBe(true);
   });
 
   test('should detect conflicts with deep mode', async ({ request }) => {
     // POST /conflicts/detect with mode=deep (default)
     const res = await request.post(`${BASE}/conflicts/detect`, {
       data: {
-        chapterIndex: 1,
+        projectId, chapterIndex: 1,
         paragraphContent: '第一章的内容\n\n早上，阳光明媚。\n\n下午，下起了大雨。',
         mode: 'deep',
       },
@@ -126,16 +126,16 @@ test.describe('Conflict Priority (7.8)', () => {
     const body = await res.json();
 
     // Should return an array of conflict records
-    expect(Array.isArray(body)).toBe(true);
+    expect(Array.isArray(body.conflicts)).toBe(true);
 
     // Deep mode detects timeline conflicts, logic jumps, etc.
     // All returned conflicts should have proper structure
-    for (const conflict of body) {
+    for (const conflict of body.conflicts) {
       expect(conflict).toHaveProperty('id');
       expect(conflict).toHaveProperty('type');
       expect(conflict).toHaveProperty('priority');
       expect(conflict).toHaveProperty('description');
-      expect(conflict).toHaveProperty('detectionMode');
+      expect(conflict).toHaveProperty('level');
     }
   });
 
@@ -157,7 +157,7 @@ test.describe('Conflict Priority (7.8)', () => {
       ruleType: 'custom',
       content: '一些建议',
       scope: 'chapter',
-      chapterIndex: 1,
+      projectId, chapterIndex: 1,
       priority: 20,
     });
 
@@ -166,7 +166,7 @@ test.describe('Conflict Priority (7.8)', () => {
       ruleType: 'plot_constraint',
       content: '严格约束',
       scope: 'chapter',
-      chapterIndex: 1,
+      projectId, chapterIndex: 1,
       priority: 90,
     });
 
@@ -196,57 +196,36 @@ test.describe('Conflict Priority (7.8)', () => {
     }
   });
 
-  test('GET /conflicts should return sorted by priority', async ({ request }) => {
+  test('GET /conflicts returns project-scoped quality issues', async ({ request }) => {
     // Run a deep detection to populate conflicts
     await request.post(`${BASE}/conflicts/detect`, {
       data: {
-        chapterIndex: 1,
+        projectId, chapterIndex: 1,
         paragraphContent: '早上出发。下午到达。晚上休息。第二天继续赶路。',
         mode: 'deep',
       },
     });
 
     // Get all conflicts
-    const getRes = await request.get(`${BASE}/conflicts`);
+    const getRes = await request.get(`${BASE}/conflicts?projectId=${projectId}`);
     expect(getRes.status()).toBe(200);
-    const conflicts = await getRes.json();
+    const { conflicts } = await getRes.json();
     expect(Array.isArray(conflicts)).toBe(true);
 
-    // Verify conflicts are sorted by priority descending (P0=100 > P1=80 > P2=50 > P3=20)
-    if (conflicts.length > 1) {
-      for (let i = 1; i < conflicts.length; i++) {
-        const prev = conflicts[i - 1].priority;
-        const curr = conflicts[i].priority;
-        expect(prev).toBeGreaterThanOrEqual(curr);
-      }
+    for (const conflict of conflicts) {
+      expect(['P0', 'P1', 'P2', 'P3']).toContain(conflict.level);
+      expect(['high', 'medium', 'low']).toContain(conflict.priority);
     }
   });
 
   test('GET /conflicts/stats should return conflict statistics', async ({ request }) => {
-    const res = await request.get(`${BASE}/conflicts/stats`);
+    const res = await request.get(`${BASE}/conflicts/stats?projectId=${projectId}`);
     expect(res.status()).toBe(200);
     const stats = await res.json();
 
     expect(stats).toHaveProperty('total');
-    expect(stats).toHaveProperty('byType');
-    expect(stats).toHaveProperty('byPriority');
-    expect(stats).toHaveProperty('byStatus');
-
-    // Verify byType contains all conflict types
-    expect(stats.byType).toHaveProperty('character_ooc');
-    expect(stats.byType).toHaveProperty('setting_contradiction');
-    expect(stats.byType).toHaveProperty('timeline_conflict');
-    expect(stats.byType).toHaveProperty('foreshadowing_loss');
-    expect(stats.byType).toHaveProperty('logic_jump');
-
-    // Verify priority keys exist
-    expect(stats.byPriority).toHaveProperty('100'); // P0
-    expect(stats.byPriority).toHaveProperty('80');  // P1
-    expect(stats.byPriority).toHaveProperty('50');  // P2
-    expect(stats.byPriority).toHaveProperty('20');  // P3
-
-    // Total should match sum of byPriority
-    const prioritySum = Object.values(stats.byPriority as Record<string, number>).reduce((a: number, b: number) => a + b, 0);
-    expect(stats.total).toBe(prioritySum);
+    expect(stats.total).toBe(stats.resolved + stats.unresolved);
+    expect(stats.p0Pending).toBeLessThanOrEqual(stats.unresolved);
+    expect(stats.resolveRate).toBe(stats.total ? Math.round(stats.resolved / stats.total * 100) : 0);
   });
 });

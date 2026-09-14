@@ -8,7 +8,7 @@ test.describe('Import/Export Detailed (7.7)', () => {
 
   test.beforeEach(async ({ request }) => {
     const res = await request.post(`${BASE}/projects`, {
-      data: { title: uniqueTitle('import-export-detailed'), type: 'long_novel', targetWords: 200000, settings: { genre: '测试', targetAudience: '测试读者', pov: '第三人称限知', perChapterTarget: 5000, volumeCount: 4 } },
+      data: { title: uniqueTitle('import-export-detailed'), type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
     });
     projectId = (await res.json()).id;
   });

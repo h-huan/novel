@@ -2,6 +2,7 @@ import { applyLocalPatches, compareRepair } from '../modules/writing-quality/loc
 import { qualityGate } from '../modules/writing-quality/quality-issue';
 import { styleFingerprint } from '../modules/writing-quality/style-fingerprint';
 import { missingDimensionJudgePrompt, parseStageScore, SCORE_DIMENSIONS, stageJudgePrompt } from '../modules/writing-quality/stage-score';
+import { deterministicPlatformReview } from '../modules/writing-quality/platform-quality-rules';
 import type { QualityStage } from '../modules/writing-quality/quality-issue';
 import { currentCreationProjectId, expectsProjectId } from '../common/creation-context';
 import { Injectable, Logger } from '@nestjs/common';
@@ -258,13 +259,15 @@ export class RealLLMService implements ILLMService {
     const repairable = this.metrics.runIsCurrent(run.id, run.projectId!)
       && before.issues.some(i => ['blocking', 'high'].includes(i.severity) && i.evaluation === 'evidenced');
     if (repairable) {
+      const repairStarted = Date.now();
+      const strategyId = this.metrics.selectRepairStrategy(run.projectId!, before.issues);
       let candidate: string | null = null;
       let after: typeof before | null = null;
       let accepted = false;
       let reason = '';
       try {
         const repaired = await this.generateInternal({ ...request, scenario: 'refinement', responseFormat: 'json_object', maxTokens: LLM_TUNABLES.QUALITY_REPAIR_MAXTOKENS,
-          prompt: '只修复列出的质量问题，不改变已确认事实、情节、人物身份和JSON结构。返回至多8处局部替换，每处original必须在原文中唯一匹配；总范围不得超过全文30%。输出JSON：{"patches":[{"original":"原文","replacement":"替换"}]}\n创作宪法：'
+          prompt: `修复策略：${strategyId}。只修复列出的质量问题，不改变已确认事实、情节、人物身份和JSON结构。返回至多8处局部替换，每处original必须在原文中唯一匹配；总范围不得超过全文30%。输出JSON：{"patches":[{"original":"原文","replacement":"替换"}]}\n创作宪法：`
             + JSON.stringify(run.constitution) + '\n已确认上下文：' + run.context
             + '\n质量问题：' + JSON.stringify(before.issues) + '\n原文：' + content,
           metrics: { ...request.metrics, runId: run.id, stepKey: 'quality_local_repair' },
@@ -274,7 +277,8 @@ export class RealLLMService implements ILLMService {
         ({ accepted, reason } = compareRepair(before, after));
         if (!this.metrics.runIsCurrent(run.id, run.projectId!)) { accepted = false; reason = '生成期间创作配置或上下文变化，回滚'; }
       } catch (error) { reason = error instanceof Error ? error.message : String(error); }
-      const repairId = this.metrics.recordRepair(run.id, run.projectId!, content, candidate, before, after, accepted, reason);
+      const repairId = this.metrics.recordRepair(run.id, run.projectId!, content, candidate, before, after, accepted, reason,
+        strategyId, Date.now() - repairStarted);
       if (accepted && candidate !== null && after) {
         this.metrics.saveRunScore(run.id, run.projectId!, after);
         this.metrics.learnAcceptedRepair(run.projectId!, repairId, before, after);
@@ -329,6 +333,9 @@ export class RealLLMService implements ILLMService {
       const fingerprint = styleFingerprint({ ...input, previousChapters: run.previousChapters, characterNames: run.characterNames });
       score.issues.push(...fingerprint.issues);
       (score as any).styleFingerprint = fingerprint;
+      const platform = deterministicPlatformReview(input);
+      score.issues.push(...platform.issues);
+      (score as any).platformMeasurements = platform.measurements;
     }
     return score;
   }
