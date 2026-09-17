@@ -1,3 +1,6 @@
+import { reviewCharacterContracts } from '../modules/writing-quality/character-contract';
+import { narrativeTrace } from '../modules/writing-quality/narrative-trace';
+import { repairPrompt, executeRepair } from '../modules/writing-quality/repair-strategy-registry';
 import { applyLocalPatches, compareRepair } from '../modules/writing-quality/local-repair';
 import { qualityGate } from '../modules/writing-quality/quality-issue';
 import { styleFingerprint } from '../modules/writing-quality/style-fingerprint';
@@ -227,6 +230,7 @@ export class RealLLMService implements ILLMService {
     let generatedOutput: string | undefined;
     try {
       const response = await this.generateInternal(enriched);
+      if (run && response.model) this.metrics.setRunModel?.(run.id, response.model);
       generatedOutput = response.content;
       if (!request.deferQualityGate && run?.constitution && ['world', 'character', 'outline', 'chapter', 'refinement'].includes(run.stage)) {
         response.content = await this.evaluateGeneratedRun(run, request, response.content);
@@ -253,6 +257,36 @@ export class RealLLMService implements ILLMService {
     }
   }
 
+  /** Uses the production assessor/executors, without replacing live chapter reports or learning from benchmark repairs. */
+  async evaluateBenchmarkSample(projectId: string, chapterIndex: number | null, content: string, repair: boolean) {
+    const started = Date.now();
+    const run = this.metrics.beginRun(projectId, 'writing', 'benchmark-v1', undefined, 'benchmark', chapterIndex);
+    const request: LLMRequest = { prompt: '对真实人工标注样本独立评审；人工标签不会传给评审器。', scenario: 'writing', metrics: { projectId, chapterIndex: chapterIndex ?? undefined } };
+    try {
+      const before = await this.assessGeneratedRun(run, request, content);
+      let after: typeof before | null = null; let accepted = false; let introducedIssue = false;
+      const repairAttempted = repair && before.issues.some(i => i.evaluation === 'evidenced' && ['high','blocking'].includes(i.severity));
+      if (repairAttempted) {
+        const strategyId = this.metrics.selectRepairStrategy(projectId, before.issues, run.id);
+        try {
+          const response = await this.generateInternal({ ...request, scenario: 'refinement', responseFormat: 'json_object',
+            prompt: repairPrompt(strategyId) + '\n创作宪法：' + JSON.stringify(run.constitution) + '\n上下文：' + run.context + '\n问题：' + JSON.stringify(before.issues) + '\n原文：' + content });
+          const candidate = executeRepair(strategyId, { content, issues: before.issues, contracts: JSON.parse(run.context).characterContracts || [] }, JSON.parse(response.content).patches);
+          after = await this.assessGeneratedRun(run, request, candidate);
+          accepted = compareRepair(before, after).accepted;
+          if (strategyId === 'platform_metric_patch' && after.issues.filter(i => i.ruleId.startsWith('platform.')).length >= before.issues.filter(i => i.ruleId.startsWith('platform.')).length) accepted = false;
+          introducedIssue = after.issues.some(i => i.evaluation === 'evidenced' && !before.issues.some(old => old.ruleId === i.ruleId));
+        } catch { accepted = false; }
+      }
+      if (!this.metrics.runIsCurrent(run.id, projectId)) throw new Error('评测期间项目上下文发生变化');
+      this.metrics.finishRun(run.id, 'success', started, content);
+      return { runId: run.id, before, after, repairAttempted, accepted, introducedIssue };
+    } catch (error) {
+      this.metrics.finishRun(run.id, 'failed', started, content, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
   private async evaluateGeneratedRun(run: ReturnType<GenerationMetricsService['beginRun']>, request: LLMRequest, content: string): Promise<string> {
     const before = await this.assessGeneratedRun(run, request, content);
     const gate = this.metrics.saveRunScore(run.id, run.projectId!, before);
@@ -260,21 +294,25 @@ export class RealLLMService implements ILLMService {
       && before.issues.some(i => ['blocking', 'high'].includes(i.severity) && i.evaluation === 'evidenced');
     if (repairable) {
       const repairStarted = Date.now();
-      const strategyId = this.metrics.selectRepairStrategy(run.projectId!, before.issues);
+      const strategyId = this.metrics.selectRepairStrategy(run.projectId!, before.issues, run.id);
       let candidate: string | null = null;
       let after: typeof before | null = null;
       let accepted = false;
       let reason = '';
       try {
         const repaired = await this.generateInternal({ ...request, scenario: 'refinement', responseFormat: 'json_object', maxTokens: LLM_TUNABLES.QUALITY_REPAIR_MAXTOKENS,
-          prompt: `修复策略：${strategyId}。只修复列出的质量问题，不改变已确认事实、情节、人物身份和JSON结构。返回至多8处局部替换，每处original必须在原文中唯一匹配；总范围不得超过全文30%。输出JSON：{"patches":[{"original":"原文","replacement":"替换"}]}\n创作宪法：`
+          prompt: repairPrompt(strategyId) + '\n创作宪法：'
             + JSON.stringify(run.constitution) + '\n已确认上下文：' + run.context
             + '\n质量问题：' + JSON.stringify(before.issues) + '\n原文：' + content,
           metrics: { ...request.metrics, runId: run.id, stepKey: 'quality_local_repair' },
         });
-        candidate = applyLocalPatches(content, JSON.parse(repaired.content).patches, request.responseFormat === 'json_object');
+        candidate = executeRepair(strategyId, { content, issues: before.issues, contracts: JSON.parse(run.context || '{}').characterContracts || [], structured: request.responseFormat === 'json_object' }, JSON.parse(repaired.content).patches);
         after = await this.assessGeneratedRun(run, request, candidate);
         ({ accepted, reason } = compareRepair(before, after));
+        if (accepted && strategyId === 'platform_metric_patch'
+          && after.issues.filter(i => i.ruleId.startsWith('platform.')).length >= before.issues.filter(i => i.ruleId.startsWith('platform.')).length) {
+          accepted = false; reason = '平台确定性指标未改善，回滚';
+        }
         if (!this.metrics.runIsCurrent(run.id, run.projectId!)) { accepted = false; reason = '生成期间创作配置或上下文变化，回滚'; }
       } catch (error) { reason = error instanceof Error ? error.message : String(error); }
       const repairId = this.metrics.recordRepair(run.id, run.projectId!, content, candidate, before, after, accepted, reason,
@@ -295,8 +333,11 @@ export class RealLLMService implements ILLMService {
   private async assessGeneratedRun(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string) {
     if (!run.constitution) throw new Error('缺少创作宪法');
     const input = { projectId: run.projectId!, runId: run.id,
-      stage: run.stage as QualityStage, content, constitution: run.constitution };
-    const reviewContext = run.context + '\n' + request.prompt
+      stage: run.stage as QualityStage, content, constitution: run.constitution,
+      contracts: JSON.parse(run.context || '{}').characterContracts || [] };
+    const contractReview = reviewCharacterContracts(input, JSON.parse(run.context || '{}').characterContracts || []);
+    const trace = narrativeTrace(content, run.previousChapters);
+    const reviewContext = '\n角色归属证据与契约：' + JSON.stringify(contractReview) + '\n叙事风险模型（不是结论）：' + JSON.stringify(trace) + '\n' + run.context + '\n' + request.prompt
       + (['chapter', 'refinement'].includes(run.stage)
         ? '\n最近三章文体比较材料（仅依据提供范围比较人物声音、段落结构及叙述习惯；未提供的章节不可推断）：'
           + JSON.stringify(run.previousChapters.slice(0, 3)) : '');
@@ -337,6 +378,9 @@ export class RealLLMService implements ILLMService {
       score.issues.push(...platform.issues);
       (score as any).platformMeasurements = platform.measurements;
     }
+    score.issues.push(...contractReview.issues);
+    (score as any).characterContractReview = contractReview;
+    (score as any).narrativeTrace = trace;
     return score;
   }
 

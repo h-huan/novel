@@ -12,6 +12,8 @@
  */
 
 import { Module, forwardRef } from '@nestjs/common';
+import { BenchmarkController } from './benchmark.controller';
+import { DatabaseModule } from '../database/database.module';
 import { ChainTemplateService } from './chain-template.service';
 import { ChainEngineService } from './chain-engine.service';
 import { PromptRegistryService } from './prompt-registry.service';
@@ -36,6 +38,7 @@ import { OriginalityModule } from '../modules/originality/originality.module';
 
 @Module({
   imports: [
+    DatabaseModule,
     StateModule,
     StateManagementModule,
     FileStorageModule,
@@ -50,7 +53,7 @@ import { OriginalityModule } from '../modules/originality/originality.module';
     GenerationMetricsModule,
     OriginalityModule,
   ],
-  controllers: [ChainController],
+  controllers: [ChainController, BenchmarkController],
   providers: [
     ChainEngineService,
     ChainTemplateService,

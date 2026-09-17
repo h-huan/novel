@@ -24,6 +24,11 @@ test('writing quality shows evidence without operational diagnostics', async ({ 
   await expect(panel.getByText('测试引用', { exact: true }).first()).toBeVisible();
   await expect(panel.getByText('Issue Pareto 与阶段分布')).toBeVisible();
   await expect(panel.getByText('真实 Benchmark')).toBeVisible();
+  await expect(panel.getByText('角色契约、依赖上下文与叙事风险')).toBeVisible();
+  await page.route('**/api/v1/generation-metrics/benchmark/run', route => route.fulfill({json:{status:'waiting_for_real_samples',completed:0,evaluations:[]}}));
+  await panel.getByText('真实 Benchmark',{exact:true}).click();
+  await panel.getByRole('button',{name:'运行已标注样本',exact:true}).click();
+  await expect(panel.getByRole('status')).toHaveText('等待有来源、已标注的真实样本');
   await expect(panel.getByText(/生成进度|Token|模型配置/)).toHaveCount(0);
 });
 

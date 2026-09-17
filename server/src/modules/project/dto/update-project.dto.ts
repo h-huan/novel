@@ -68,6 +68,9 @@ export class UpdateProjectDto {
   chapterWordRange?: { min: number; max: number };
 
   @IsOptional()
+  qualityPolicy?: import('../../writing-quality/score-policy').ScorePolicy;
+
+  @IsOptional()
   @IsString()
   currentWorkflowStage?: WorkflowStage;
 

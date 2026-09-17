@@ -1,3 +1,4 @@
+import { defaultRepairStrategy, repairStrategies } from '../writing-quality/repair-strategy-registry';
 import { aggregateArtifactScores, aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
 import { qualityGate, qualityIssue } from '../writing-quality/quality-issue';
 import { readConstitution } from '../project/creative-constitution';
@@ -152,6 +153,10 @@ export class GenerationMetricsService {
       status, new Date().toISOString(), Date.now() - started, output ?? null, error ?? null, model ?? null, id);
   }
 
+  setRunModel(id: string, model: string) {
+    this.databaseService.getDb().prepare('UPDATE generation_runs SET model=? WHERE id=?').run(model,id);
+  }
+
   saveRunScore(runId: string, projectId: string, score: StageScore) {
     const db = this.databaseService.getDb();
     const run = db.prepare('SELECT stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
@@ -205,19 +210,21 @@ export class GenerationMetricsService {
     }
   }
 
-  selectRepairStrategy(projectId: string, issues: StageScore['issues']): string {
-    const rules = [...new Set(issues.filter(issue => ['blocking', 'high'].includes(issue.severity)).map(issue => issue.ruleId))];
-    const defaults = rules.some(rule => rule.includes('character_voice')) ? 'character_voice_contract_patch'
-      : rules.some(rule => rule.startsWith('ai_trace.') || rule.includes('structure')) ? 'scene_structure_patch'
-      : rules.some(rule => rule.startsWith('platform.')) ? 'platform_metric_patch'
-      : 'unique_local_replacement';
-    if (!rules.length) return defaults;
-    const marks = rules.map(() => '?').join(',');
-    const rows = this.databaseService.getDb().prepare(`SELECT strategy_id,SUM(attempts) attempts,SUM(accepted) accepted
-      FROM repair_strategy_stats WHERE rule_id IN (${marks}) GROUP BY strategy_id`).all(...rules) as any[];
-    if (!rows.length) return defaults;
-    return rows.sort((left, right) => ((Number(right.accepted) + 1) / (Number(right.attempts) + 2))
-      - ((Number(left.accepted) + 1) / (Number(left.attempts) + 2)))[0].strategy_id || defaults;
+  selectRepairStrategy(projectId: string, issues: StageScore['issues'], runId?: string): string {
+    const blocking = issues.filter(i => i.severity === 'blocking' && i.status === 'open');
+    const focus = blocking.length ? blocking : issues.filter(i => i.severity === 'high' && i.status === 'open');
+    const rules = [...new Set(focus.map(i => i.ruleId))];
+    const fallback = defaultRepairStrategy(rules);
+    if (!rules.length || !runId) return fallback;
+    const db = this.databaseService.getDb();
+    const run = db.prepare("SELECT prompt_version,COALESCE(model,(SELECT model_version FROM generation_step_metrics WHERE run_id=r.id AND model_version IS NOT NULL ORDER BY created_at DESC LIMIT 1)) model FROM generation_runs r WHERE id=? AND project_id=?").get(runId,projectId) as any;
+    if (!run?.model || !run.prompt_version) return fallback;
+    const c = readConstitution(db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any);
+    const rows = db.prepare("SELECT strategy_id,SUM(attempts) attempts,SUM(accepted) accepted,SUM(introduced_issue_count) damage FROM repair_strategy_stats WHERE rule_id=? AND platform=? AND genre=? AND story_type=? AND model=? AND prompt_version=? GROUP BY strategy_id HAVING SUM(attempts)>=5")
+      .all(rules[0],c.targetPlatform,c.webNovelGenre.join('|') || c.category || 'generic',c.projectType,run.model,run.prompt_version) as any[];
+    const eligible = rows.filter(r => r.strategy_id in repairStrategies);
+    eligible.sort((a,b) => (b.accepted-b.damage+1)/(b.attempts+2)-(a.accepted-a.damage+1)/(a.attempts+2) || a.strategy_id.localeCompare(b.strategy_id));
+    return eligible[0]?.strategy_id || fallback;
   }
 
   recordRepair(runId: string, projectId: string, beforeText: string, afterText: string | null,
@@ -314,18 +321,28 @@ export class GenerationMetricsService {
       ROUND(AVG(CASE WHEN gate_status='passed' THEN 1.0 ELSE 0 END),3) passRate,ROUND(AVG(duration_ms)) avgLatencyMs
       FROM generation_runs WHERE project_id=? AND status!='running' GROUP BY model,prompt_version ORDER BY runs DESC LIMIT 20`).all(projectId);
     return { runs, issues, scores, repairs, issuePareto, issueStageDistribution, strategyStats, modelPromptCompare,
-      benchmark: this.getBenchmarkFramework(), scope: '最近100次生成与100条未解决问题',
+      benchmark: this.getBenchmarkFramework(),
+      benchmarkRuns: db.prepare('SELECT id,status,sample_count,completed_count,failed_count,started_at FROM quality_benchmark_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 10').all(projectId),
+      execution: runs.filter(r => r.score && r.currentConstitution).map(r => ({ runId: r.id, stage: r.stage, contextVersion: r.context_version,
+        contracts: r.score.characterContractReview?.contracts?.map((c: any) => ({ characterId: c.characterId, name: c.name, version: c.version })) || [],
+        attributionCount: r.score.characterContractReview?.evidence?.length || 0, narrativeTrace: r.score.narrativeTrace,
+        policy: r.score.policy, gateStatus: r.gate_status })),
+      scope: '最近100次生成与100条未解决问题',
       bottlenecks: runs.filter(r => r.status === 'running' || r.status === 'failed' || r.gate_status === 'blocked'),
       trend: runs.filter(r => r.score).map(r => ({ at: r.started_at, stage: r.stage, score: r.score.overallScore, coverage: r.score.coverage })).reverse() };
   }
 
-  addBenchmarkSample(input: { projectId?: string; storyType: string; platform: string; content: string; sourceRef?: string }) {
+  addBenchmarkSample(input: { projectId?: string; storyType: string; platform: string; content: string; sourceRef?: string; chapterIndex?: number }) {
     const allowed = new Set(['short_story:fanqie', 'short_story:zhihu', 'long_novel:fanqie', 'long_novel:qidian', 'long_novel:qimao']);
     if (!allowed.has(`${input.storyType}:${input.platform}`) || !input.content?.trim()) throw new BadRequestException('Benchmark 样本组合或正文无效');
+    if (input.chapterIndex !== undefined && (!Number.isInteger(input.chapterIndex) || input.chapterIndex < 0)) throw new BadRequestException('章节索引无效');
     const id = crypto.randomUUID(); const now = new Date().toISOString();
     this.databaseService.getDb().prepare(`INSERT INTO quality_benchmark_samples
       (id,project_id,story_type,platform,content,source_ref,annotation_status,created_at,updated_at)
       VALUES (?,?,?,?,?,?,'pending',?,?)`).run(id, input.projectId ?? null, input.storyType, input.platform, input.content, input.sourceRef ?? null, now, now);
+    if (input.chapterIndex !== undefined) {
+      this.databaseService.getDb().prepare('UPDATE quality_benchmark_samples SET chapter_index=? WHERE id=?').run(input.chapterIndex,id);
+    }
     return { id, annotationStatus: 'pending' };
   }
 

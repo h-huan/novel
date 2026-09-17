@@ -36,7 +36,7 @@ export class GenerationMetricsController {
   }
 
   @Post('benchmark/samples')
-  addBenchmarkSample(@Body() body: { projectId?: string; storyType: string; platform: string; content: string; sourceRef?: string }) {
+  addBenchmarkSample(@Body() body: { projectId?: string; storyType: string; platform: string; content: string; sourceRef?: string; chapterIndex?: number }) {
     return this.metrics.addBenchmarkSample(body);
   }
 

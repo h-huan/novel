@@ -17,6 +17,8 @@ import { WRITING_QUALITY_TAGS } from '../../state/writing-quality-tags';
 import { ChapterService } from '../chapter/chapter.service';
 import { QualityInspectionService } from '../refinement/quality-inspection.service';
 import { compileContext } from '../generation-metrics/context-compiler';
+import { reviewCharacterContracts } from './character-contract';
+import { narrativeTrace } from './narrative-trace';
 import { detectForbiddenTells } from '../../chain/hardline-scanner';
 import type {
   AnalyzeChapterDto,
@@ -436,6 +438,8 @@ export class WritingQualityService implements OnModuleInit {
     const unifiedScore = Math.max(0, blendedScore - hardlinePenalty - tagPenalty);
 
     const reportPayload: Record<string, any> = { attention };
+    reportPayload.characterContractReview = (llmResult as any).characterContractReview;
+    reportPayload.narrativeTrace = (llmResult as any).narrativeTrace;
     if ((llmResult as any).tagFit) reportPayload.tagFit = (llmResult as any).tagFit;
     if (aiFingerprints) {
       reportPayload.aiFingerprints = aiFingerprints;
@@ -1194,12 +1198,17 @@ ${timelineCheck}
     const contextSerialized = compileContext(this.dbService.getDb(), {
       projectId, stage: 'chapter', chapterIndex: chapter?.chapter_index ?? null,
     }).snapshot;
+    const contractReview = reviewCharacterContracts({ projectId, runId: dto.chapterId, content }, JSON.parse(contextSerialized).characterContracts || []);
+    const trace = narrativeTrace(content, this.dbService.getDb().prepare('SELECT id,content FROM chapters WHERE project_id=? AND chapter_index<? AND content IS NOT NULL ORDER BY chapter_index DESC LIMIT 3').all(projectId,chapter?.chapter_index ?? 0) as Array<{id:string;content:string}>);
     const prompt = `请对以下网文章节进行专业质量诊断。
 
 章节标题：${chapterTitle}
 作品标签：${tagProfileText}
 
 项目上下文（大纲/角色/世界观等）：${contextSerialized}
+逐角色归属证据：${JSON.stringify(contractReview.evidence)}
+跨章/跨场景叙事风险（只作线索，必须原文证据确认）：${JSON.stringify(trace)}
+角色问题必须附 characterId、contractVersion、contractField；没有明确归属证据不得归因。
 
 章节正文：
 ${content.slice(0, 15000)}
@@ -1249,6 +1258,17 @@ ${content.slice(0, 15000)}
     parsed.overallLevel = levelByQualityScore(parsed.overallScore);
     parsed.summary = String(parsed.summary || '').slice(0, 200);
     (parsed as any).tagFit = this.normalizeTagFit((parsed as any).tagFit);
+    parsed.issues = (parsed.issues || []).filter((issue: any) => {
+      if (!String(issue.issueType).includes('character_voice')) return true;
+      const contract = contractReview.contracts.find(c => c.characterId === issue.characterId && c.version === issue.contractVersion);
+      return !!contract && !!(contract as any)[issue.contractField]
+        && contractReview.evidence.some(e => e.characterId === issue.characterId && typeof issue.evidence === 'string' && e.quote.includes(issue.evidence));
+    });
+    parsed.issues.push(...contractReview.issues.map(issue => ({ issueType: issue.ruleId, severity: 'high', title: issue.message,
+      summary: issue.message, evidence: issue.evidence.quote, originalText: issue.evidence.quote,
+      characterId: issue.entityId, contractVersion: issue.contractVersion, contractField: issue.contractField, suggestion: '按角色契约修复并复检' } as any)));
+    (parsed as any).characterContractReview = contractReview;
+    (parsed as any).narrativeTrace = trace;
 
     return { result: parsed, parseWarning: null, rawPreview: null };
   }

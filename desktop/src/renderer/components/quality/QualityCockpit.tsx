@@ -10,8 +10,15 @@ const labels: Record<string, string> = {
   blocking: '阻断', high: '严重', medium: '一般', low: '轻微', info: '提示',
 };
 type Dimension = { score: number | null; status: string; reason: string; evidence: string[] };
-type Score = { overallScore: number | null; coverage: number; dimensions: Record<string, Dimension> };
+type Score = { overallScore: number | null; coverage: number; dimensions: Record<string, Dimension>; gateStatus?: string };
 type Cockpit = {
+  benchmarkRuns?: Array<{ id: string; status: string; sample_count: number; completed_count: number; failed_count: number }>;
+  execution?: Array<{ runId: string; stage: string; contextVersion: string; attributionCount: number; gateStatus: string;
+    contracts: Array<{ characterId: string; name: string; version: string }>;
+    policy?: { floors: Record<string, number>; weights: Record<string, number> };
+    narrativeTrace?: { status: string; fingerprints: unknown[]; comparisons: unknown[];
+      dialogueFunction: { total: number; distribution: Record<string, number>; informationRatio: number | null };
+      showExplain: { ratio: number | null; show: number; explain: number }; risks: Array<{ ruleId: string; quote: string; reason: string }> } }>;
   scope: string;
   scores: Record<string, Score | null>;
   issues: Array<{ id: string; severity: string; summary: string; evidence: string }>;
@@ -31,9 +38,21 @@ export function QualityCockpit({ projectId }: { projectId: string }) {
   const [data, setData] = useState<Cockpit | null>(null);
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [benchmarkStatus, setBenchmarkStatus] = useState('');
+  useEffect(() => { setData(null); setBenchmarkStatus(''); }, [projectId]);
+  const runBenchmark = async (repair: boolean) => {
+    setRunning(true); setBenchmarkStatus('评测运行中…');
+    try {
+      const response = await api.post<any>('/generation-metrics/benchmark/run', { projectId, repair });
+      const result = response?.data ?? response;
+      setBenchmarkStatus(result.status === 'waiting_for_real_samples' ? '等待有来源、已标注的真实样本' : `评测状态：${result.status} · 完成 ${result.completed ?? 0} · 失败 ${result.failed ?? 0}`);
+      setRefresh(v => v + 1);
+    } catch { setBenchmarkStatus('评测失败，请检查样本上下文和模型连接。'); }
+    finally { setRunning(false); }
+  };
   useEffect(() => {
     let active = true;
-    setData(null);
     api.get<any>(`/generation-metrics/cockpit?projectId=${encodeURIComponent(projectId)}`)
       .then(res => { if (active) { setData(res?.data ?? res); setError(''); } })
       .catch(() => { if (active) setError('质量数据加载失败，请重试。'); });
@@ -52,7 +71,7 @@ export function QualityCockpit({ projectId }: { projectId: string }) {
       {['project', 'world', 'character', 'outline', 'chapter', 'refinement'].map(stage => {
         const score = data.scores[stage];
         return <details key={stage} open={!!score} style={{ margin: '12px 0' }}>
-          <summary>{labels[stage]} · {score?.overallScore == null ? '未评估' : `${score.overallScore} 分`}{score && ` · 覆盖 ${Math.round(score.coverage * 100)}%`}</summary>
+          <summary>{labels[stage]} · {score?.overallScore == null ? '未评估' : `${score.overallScore} 分`}{score && ` · 覆盖 ${Math.round(score.coverage * 100)}%`}{score?.gateStatus === 'blocked' && ' · 未通过门禁'}</summary>
           {score && <table style={{ width: '100%', textAlign: 'left' }}>
             <thead><tr><th>维度</th><th>分数</th><th>依据</th></tr></thead>
             <tbody>{Object.entries(score.dimensions).map(([key, dimension]) => <tr key={key}>
@@ -95,10 +114,29 @@ export function QualityCockpit({ projectId }: { projectId: string }) {
         {data.bottlenecks?.length ? data.bottlenecks.map(item => <p key={item.id}>{labels[item.stage] || item.stage} · {item.status} · {item.gate_status}{item.error ? ` · ${item.error}` : ''}</p>) : <p>暂无运行卡点。</p>}
       </details>
       <details><summary>真实 Benchmark</summary>
+        <button disabled={running} onClick={() => runBenchmark(false)}>运行已标注样本</button>{' '}
+        <button disabled={running} onClick={() => runBenchmark(true)}>评测并验证修复</button>
+        <p role="status">{benchmarkStatus}</p>
+        {data.benchmarkRuns?.map(run => <p key={run.id}>运行状态：{run.status} · 样本 {run.sample_count} · 完成 {run.completed_count} · 失败 {run.failed_count}</p>)}
         <p>{data.benchmark?.available ? '仅统计已录入的真实样本。' : '尚无真实样本，框架已就绪，结果标记为待样本。'}</p>
         {data.benchmark?.groups.map(group => <p key={`${group.storyType}-${group.platform}`}>
           {group.storyType === 'long_novel' ? '长篇' : '短篇'} × {group.platform} · 样本 {group.samples} · 已标注 {group.labeled} · precision {pct(group.precision)} · recall {pct(group.recall)} · 误报 {group.falsePositives} · 漏报 {group.falseNegatives} · 修复成功 {pct(group.repairSuccessRate)} · 破坏率 {pct(group.destructionRate)}
         </p>)}
+      </details>
+      <details><summary>角色契约、依赖上下文与叙事风险</summary>
+        <p>叙事模型只标记启发式风险；结论以原文证据和语义评审为准。总分采用加权评分，关键维度最低分与阻断问题单独把关。</p>
+        {data.execution?.length ? data.execution.map(item => <details key={item.runId}>
+          <summary>{labels[item.stage]} · 门禁 {item.gateStatus} · 归属证据 {item.attributionCount}</summary>
+          <p>上下文版本：{item.contextVersion}</p>
+          {item.contracts.map(c => <p key={c.characterId}>{c.name} · 契约版本 {c.version.slice(0,12)}</p>)}
+          {item.policy && <p>最低分：{Object.entries(item.policy.floors).map(([k,v]) => `${labels[k] || k} ${v}`).join('；')}。权重：{Object.entries(item.policy.weights).map(([k,v]) => `${labels[k] || k} ${v}`).join('；')}</p>}
+          {item.narrativeTrace && <>
+            <p>场景指纹 {item.narrativeTrace.fingerprints.length} · 对比章节 {item.narrativeTrace.comparisons.length}</p>
+            <p>对白信息功能候选比例 {pct(item.narrativeTrace.dialogueFunction.informationRatio)} · 具体呈现比例 {pct(item.narrativeTrace.showExplain.ratio)}</p>
+            <p>对白分布：{Object.entries(item.narrativeTrace.dialogueFunction.distribution).map(([k,v]) => `${k} ${v}`).join('；')}</p>
+            {item.narrativeTrace.risks.map((risk,index) => <p key={index}>{risk.reason} <q>{risk.quote}</q></p>)}
+          </>}
+        </details>) : <p>暂无新版本评审记录。</p>}
       </details>
     </>}
   </section>;

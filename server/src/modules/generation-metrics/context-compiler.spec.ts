@@ -28,6 +28,35 @@ function fixture() {
 }
 
 describe('Context Compiler', () => {
+  it('recalls distant dependencies and characters beyond the old 40-person limit', () => {
+    const db = fixture();
+    try {
+      for (let n=0;n<100;n++) db.prepare("INSERT INTO characters(id,project_id,name,role,profile_json) VALUES (?,'p',?,'support','{}')").run(`extra${n}`,`角色${n}`);
+      db.exec(`UPDATE outlines SET character_ids='["extra99"]',foreshadowing_ids='["ancient"]' WHERE id='o';
+        INSERT INTO foreshadowings(id,project_id,content,status,buried_chapter_index,importance) VALUES ('ancient','p','千章前的铜钥匙','active',1,0);
+        CREATE TABLE world_rules(id TEXT,project_id TEXT,title TEXT,content TEXT,scope TEXT,related_character_ids TEXT);
+        INSERT INTO world_rules VALUES ('old-law','p','古老禁令','铜钥匙只能在月食开启','character','["extra99"]');
+        UPDATE chapters SET chapter_index=1005 WHERE id='ch5'; UPDATE outlines SET "order"=1005 WHERE id='o';`);
+      for (let n=20;n<1000;n++) db.prepare("INSERT INTO chapters(id,project_id,chapter_index,title,content) VALUES (?,'p',?,'近期',?)").run(`late${n}`,n,'填充'.repeat(100));
+      const result = compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:1005,maxChars:8000});
+      const data = JSON.parse(result.snapshot);
+      expect(data.characterContracts.some((c:any)=>c.characterId==='extra99')).toBe(true);
+      expect(result.snapshot).toContain('千章前的铜钥匙'); expect(result.snapshot).toContain('铜钥匙只能在月食开启');
+      expect(result.size).toBeLessThanOrEqual(8000);
+      db.exec("UPDATE world_rules SET content='铜钥匙不能使用' WHERE id='old-law'");
+      expect(compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:1005,maxChars:8000}).version).not.toBe(result.version);
+    } finally { db.close(); }
+  });
+
+  it('bounds pathological contracts and explains truncation with valid JSON', () => {
+    const db=fixture();
+    try {
+      db.prepare('UPDATE character_extended_profiles SET speech_style=?').run('长描述'.repeat(30000));
+      const result=compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:5,maxChars:4000});
+      expect(result.size).toBeLessThanOrEqual(4000); expect(result.truncated).toBe(true);
+      expect(JSON.parse(result.snapshot).meta.truncation.length).toBeGreaterThan(0);
+    } finally { db.close(); }
+  });
   it('selects chapter-relevant canonical facts and produces a stable bounded version', () => {
     const db = fixture();
     try {

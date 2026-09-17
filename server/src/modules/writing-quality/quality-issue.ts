@@ -17,6 +17,8 @@ export interface QualityIssue {
   evidence: { quote: string; start: number | null; end: number | null; verified: boolean };
   evaluation: 'evidenced' | 'insufficient_evidence';
   source: string;
+  contractVersion?: string;
+  contractField?: string;
 }
 
 /** Adapts warning/contradiction/hardline and persisted issues without inventing evidence. */

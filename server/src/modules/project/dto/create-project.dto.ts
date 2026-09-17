@@ -65,6 +65,9 @@ export class CreateProjectDto {
   @IsOptional()
   chapterWordRange?: { min: number; max: number };
 
+  @IsOptional()
+  qualityPolicy?: import('../../writing-quality/score-policy').ScorePolicy;
+
   /** 当前创作阶段 */
   @IsOptional()
   @IsString()

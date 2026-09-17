@@ -1,8 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import type { DatabaseSync } from 'node:sqlite';
 import { getPlatform, targetForLength } from '../../chain/platform-benchmarks';
+import { scorePolicy } from '../writing-quality/score-policy';
 
 export interface CreativeConstitution {
+  qualityPolicy?: import('../writing-quality/score-policy').ScorePolicy;
   schemaVersion: 1;
   revision: number;
   projectType: string;
@@ -88,6 +90,10 @@ export function updateConstitution(row: Record<string, any>, dto: Record<string,
     ['chapterWordRange', dto.chapterWordRange],
   ];
   for (const [key, value] of fields) if (value !== undefined) (next as any)[key] = value;
+  if (dto.qualityPolicy !== undefined) {
+    try { next.qualityPolicy = scorePolicy(next, dto.qualityPolicy); }
+    catch { throw new BadRequestException('评分权重或最低阈值无效'); }
+  }
   if (!dto.chapterWordRange && (next.projectType !== current.projectType || next.targetPlatform !== current.targetPlatform)) {
     const range = targetForLength(getPlatform(next.targetPlatform), next.projectType).chapterWords;
     next.chapterWordRange = { min: range[0], max: range[1] };

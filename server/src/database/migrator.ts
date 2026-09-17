@@ -77,6 +77,7 @@ export class Migrator {
         }
       } catch (err) {
         console.error(`Failed to load migration ${file}:`, err);
+        throw err;
       }
     }
 
@@ -87,18 +88,20 @@ export class Migrator {
   private alignSquashedBaseline(migrations: Migration[]): void {
     const initial = migrations.find((m) => m.id === 1);
     if (!initial) return;
-    const maxFileId = migrations.reduce((mx, m) => Math.max(mx, m.id), 0);
-    const legacy = this.db
-      .prepare('SELECT COUNT(*) AS c FROM _migrations WHERE id > ?')
-      .get(maxFileId) as { c: number };
+    const recorded = this.db.prepare('SELECT id,name FROM _migrations WHERE id>1').all() as Array<{id:number;name:string}>;
+    const legacy = { c: recorded.filter(row => !migrations.some(m => m.id === row.id && m.name === row.name)).length };
     if (!legacy || legacy.c === 0) return;
 
     console.log(
       `[Migration] 检测到 ${legacy.c} 条历史增量迁移记录（迁移已 squash 为单一初始 schema），执行一次幂等对齐：补齐缺失列/索引，不改动业务数据…`,
     );
-    initial.up(this.db);
-    this.db.exec('DELETE FROM _migrations');
-    this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(initial.id, initial.name);
+    this.db.exec('BEGIN');
+    try {
+      initial.up(this.db);
+      this.db.exec('DELETE FROM _migrations');
+      this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(initial.id, initial.name);
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     console.log('[Migration] squash 对齐完成，迁移基线已收敛为 001 初始 schema。');
   }
 
@@ -117,23 +120,23 @@ export class Migrator {
       if (!executed.has(migration.id)) {
         console.log(`[Migration] Running ${migration.id}_${migration.name}...`);
         try {
+          this.db.exec('BEGIN');
           migration.up(this.db);
           this.db
             .prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)')
             .run(migration.id, migration.name);
+          this.db.exec('COMMIT');
           applied.add(migration.id);
           console.log(`[Migration] ${migration.id}_${migration.name} completed.`);
         } catch (err) {
+          this.db.exec('ROLLBACK');
           console.error(`[Migration] ${migration.id}_${migration.name} FAILED:`, err);
           throw err;
         }
       }
     }
 
-    // The squashed baseline also owns idempotent schema/data invariants. Run it on
-    // existing id=1 databases so fixes do not require another historical migration file.
-    const initial = migrations.find((migration) => migration.id === 1);
-    if (initial && executed.has(1) && !applied.has(1)) initial.up(this.db);
+    // Released baselines are immutable. All subsequent schema changes use new migrations.
     normalizeStoredConstitutions(this.db);
   }
 

@@ -1,0 +1,91 @@
+import { it, expect, vi } from 'vitest';
+import { createRequire } from 'node:module';
+import { Migrator } from '../database/migrator';
+import baseline from '../database/migrations/001_initial';
+import { ProjectService } from '../modules/project/project.service';
+import { ProjectRepository } from '../database/repositories/project.repository';
+import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
+import { RealLLMService } from '../chain/real-llm.service';
+import { BenchmarkController } from '../chain/benchmark.controller';
+import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
+import { qualityIssue } from '../modules/writing-quality/quality-issue';
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
+
+it('fresh and baseline/legacy upgrades have schema parity and preserve business data', async () => {
+  const fresh=new DatabaseSync(':memory:'); const existing=new DatabaseSync(':memory:'); const legacy=new DatabaseSync(':memory:');
+  try {
+    await new Migrator(fresh).runMigrations();
+    for (const db of [existing,legacy]) {
+      baseline.up(db);
+      db.exec("CREATE TABLE _migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,executed_at TEXT NOT NULL DEFAULT(datetime('now'))); INSERT INTO _migrations(id,name) VALUES(1,'initial');");
+      new ProjectService(new ProjectRepository({getDb:()=>db} as any)).create({title:'不可丢失的小说'});
+    }
+    legacy.exec("INSERT INTO _migrations(id,name) VALUES(2,'generation_runs')");
+    for(const db of [existing,legacy]) {
+      await new Migrator(db).runMigrations(); await new Migrator(db).runMigrations();
+      expect(db.prepare('SELECT title FROM projects').get().title).toBe('不可丢失的小说');
+      expect(db.prepare("SELECT name FROM _migrations WHERE id=2").get().name).toBe('quality_execution');
+      const schema=(d:any)=>d.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r:any)=>({...r,sql:r.sql?.replace(/\s+/g,'')}));
+      expect(schema(db)).toEqual(schema(fresh));
+    }
+  } finally { fresh.close();existing.close();legacy.close(); }
+});
+
+it('conditions strategy history on all six axes and falls back with insufficient samples', async () => {
+  const db=new DatabaseSync(':memory:');
+  try {
+    await new Migrator(db).runMigrations(); const database={getDb:()=>db} as any;
+    const p=new ProjectService(new ProjectRepository(database)).create({title:'策略验收',targetPlatform:'fanqie'});
+    const metrics=new GenerationMetricsService(database); const run=metrics.beginRun(p.id,'writing','x');
+    db.prepare("UPDATE generation_runs SET model='test-model' WHERE id=?").run(run.id);
+    const issue=qualityIssue({projectId:p.id,runId:run.id,stage:'chapter',ruleId:'platform.dialogue_ratio',severity:'high',message:'测试',quote:'原文',content:'原文',source:'test'});
+    const row=db.prepare('SELECT prompt_version FROM generation_runs WHERE id=?').get(run.id);
+    const insert=db.prepare(`INSERT INTO repair_strategy_stats(id,rule_id,platform,genre,story_type,model,prompt_version,strategy_id,attempts,accepted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'test')`);
+    insert.run('other',issue.ruleId,'qidian','generic','long_novel','test-model',row.prompt_version,'unique_local_replacement',100,100);
+    expect(metrics.selectRepairStrategy(p.id,[issue],run.id)).toBe('platform_metric_patch');
+    insert.run('same',issue.ruleId,'fanqie','generic','long_novel','test-model',row.prompt_version,'unique_local_replacement',4,4);
+    expect(metrics.selectRepairStrategy(p.id,[issue],run.id)).toBe('platform_metric_patch');
+    db.exec("UPDATE repair_strategy_stats SET attempts=5,accepted=5 WHERE id='same'");
+    expect(metrics.selectRepairStrategy(p.id,[issue],run.id)).toBe('unique_local_replacement');
+    for(const field of ['genre','story_type','model','prompt_version']) {
+      const original=db.prepare(`SELECT ${field} value FROM repair_strategy_stats WHERE id='same'`).get().value;
+      db.prepare(`UPDATE repair_strategy_stats SET ${field}='different' WHERE id='same'`).run();
+      expect(metrics.selectRepairStrategy(p.id,[issue],run.id)).toBe('platform_metric_patch');
+      db.prepare(`UPDATE repair_strategy_stats SET ${field}=? WHERE id='same'`).run(original);
+    }
+  } finally { db.close(); }
+});
+
+it('runner calls the production pipeline, isolates labels, and keeps empty state honest (test fixture only)', async () => {
+  const db=new DatabaseSync(':memory:');
+  try {
+    await new Migrator(db).runMigrations(); const database={getDb:()=>db} as any;
+    const metrics=new GenerationMetricsService(database); const llm=new RealLLMService({} as any,metrics);
+    const controller=new BenchmarkController(database,metrics,llm);
+    expect((await controller.run({})).status).toBe('waiting_for_real_samples');
+    const p=new ProjectService(new ProjectRepository(database)).create({title:'隔离测试样本',type:'long_novel',targetPlatform:'fanqie',chapterWordRange:{min:1,max:10000}});
+    const content='林岚推开铁门，冷风吹过衣领。她决定在天黑前离开，门外却传来脚步声。';
+    const sample=metrics.addBenchmarkSample({projectId:p.id,storyType:'long_novel',platform:'fanqie',content,sourceRef:'test-fixture:isolated-in-memory-only'});
+    metrics.annotateBenchmarkSample(sample.id,['human_secret_label']);
+    const spy=vi.fn(async(r:any)=>{
+      expect(r.prompt).not.toContain('human_secret_label');
+      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'测试评审',evidence:[content]}]))})};
+    });
+    (llm as any).generateInternal=spy;
+    const result:any=await controller.run({projectId:p.id,sampleIds:[sample.id]});
+    expect(result.status).toBe('completed');expect(spy).toHaveBeenCalled();expect(result.evaluations[0].falseNegatives).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) n FROM quality_benchmark_evaluations').get().n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) n FROM writing_quality_reports').get().n).toBe(0);
+    (llm as any).generateInternal=vi.fn(async(r:any)=>{
+      if(r.scenario==='refinement') return {content:JSON.stringify({patches:[{original:'铁门',replacement:'木门'}]})};
+      const current=r.prompt.split('当前生成结果：')[1];
+      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:k==='logic'&&!current.includes('木门')?40:90,reason:'按事实修正门材质',evidence:[current]}]))})};
+    });
+    const repaired:any=await controller.run({projectId:p.id,sampleIds:[sample.id],repair:true});
+    expect(repaired.status).toBe('completed');
+    expect(repaired.evaluations[0].repairAttempted).toBe(true);
+    expect(repaired.evaluations[0].repairAccepted).toBe(true);
+    expect(db.prepare('SELECT content FROM quality_benchmark_samples WHERE id=?').get(sample.id).content).toBe(content);
+    expect(db.prepare('SELECT COUNT(*) n FROM generation_lessons').get().n).toBe(0);
+  } finally { db.close(); }
+});
