@@ -525,7 +525,8 @@ CREATE TABLE IF NOT EXISTS quality_benchmark_samples (
       annotation_status TEXT NOT NULL DEFAULT 'pending',
       human_labels_json TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      chapter_index INTEGER
     );
 
 -- [table] quality_benchmark_evaluations
@@ -540,6 +541,28 @@ CREATE TABLE IF NOT EXISTS quality_benchmark_evaluations (
       before_score REAL,
       after_score REAL,
       created_at TEXT NOT NULL
+    );
+
+-- [table] quality_benchmark_runs
+CREATE TABLE IF NOT EXISTS quality_benchmark_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      status TEXT NOT NULL,
+      repair_requested INTEGER NOT NULL DEFAULT 0,
+      sample_count INTEGER NOT NULL DEFAULT 0,
+      completed_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      results_json TEXT NOT NULL DEFAULT '[]',
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+
+-- [table] quality_execution_schema
+CREATE TABLE IF NOT EXISTS quality_execution_schema (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      reconciled_at TEXT NOT NULL
     );
 
 -- [table] generation_step_metrics
@@ -1411,6 +1434,9 @@ CREATE INDEX IF NOT EXISTS idx_repair_strategy_lookup
 CREATE INDEX IF NOT EXISTS idx_quality_benchmark_group
       ON quality_benchmark_samples(story_type,platform,annotation_status);
 
+CREATE INDEX IF NOT EXISTS idx_benchmark_runs_project
+      ON quality_benchmark_runs(project_id,started_at);
+
 -- [index] idx_generation_step_run
 CREATE INDEX IF NOT EXISTS idx_generation_step_run ON generation_step_metrics(run_id);
 
@@ -1779,6 +1805,8 @@ export function down(db: DatabaseSync): void {
   DROP TABLE IF EXISTS "generation_lessons";
   DROP TABLE IF EXISTS "generation_repairs";
   DROP TABLE IF EXISTS "repair_strategy_stats";
+  DROP TABLE IF EXISTS "quality_execution_schema";
+  DROP TABLE IF EXISTS "quality_benchmark_runs";
   DROP TABLE IF EXISTS "quality_benchmark_evaluations";
   DROP TABLE IF EXISTS "quality_benchmark_samples";
   DROP TABLE IF EXISTS "generation_step_metrics";

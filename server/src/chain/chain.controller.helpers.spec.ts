@@ -39,6 +39,33 @@ describe('structured generation quality retry', () => {
       vi.useRealTimers();
     }
   });
+
+  it('allows a third constrained attempt when a Gate error has no attached candidate', async () => {
+    vi.useFakeTimers();
+    try {
+      const generate = vi.fn()
+        .mockRejectedValueOnce(new Error('质量 Gate blocked：本章重复前章事件'))
+        .mockRejectedValueOnce(new Error('质量 Gate blocked：本章提前执行下一章任务'))
+        .mockResolvedValueOnce({ content: '{"title":"第二章","boundary":"ok"}' });
+      const controller = Object.create(ChainController.prototype) as any;
+      controller.realLLM = { generate };
+      controller.logger = { warn: vi.fn(), error: vi.fn() };
+
+      const pending = controller.llmCallWithRetry('第2章详细大纲', '只输出JSON', {
+        scenario: 'outline',
+        validate: (value: any) => value?.boundary === 'ok',
+      });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+
+      expect(result.data.boundary).toBe('ok');
+      expect(generate).toHaveBeenCalledTimes(3);
+      expect(generate.mock.calls[1][0].prompt).toContain('本章重复前章事件');
+      expect(generate.mock.calls[2][0].prompt).toContain('本章提前执行下一章任务');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('discovery target word planning helpers', () => {

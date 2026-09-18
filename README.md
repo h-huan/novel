@@ -19,7 +19,7 @@
 - `/projects`：项目管理和新建项目。
 - `/discover`：灵感发现。
 - `/module-standards`：当前生效的执行标准。
-- `/settings`：API Key、写作模式和五个模型场景配置。
+- `/settings`：API Key、写作模式和五个模型场景配置。刷新模型时以提供商实时返回的 API 模型 ID 完整替换列表；内置模型仅在实时获取失败时兜底，不与实时结果合并。
 - `/project/:id/dashboard`：单本作品质量看板。
 - `/project/:id/world`、`characters`、`outline`、`writing`、`refinement`：创作全流程。
 - `/project/:id/conflicts`、`writing-quality`：统一问题和质量查询。

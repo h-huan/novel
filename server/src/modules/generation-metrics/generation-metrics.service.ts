@@ -212,7 +212,18 @@ export class GenerationMetricsService {
 
   selectRepairStrategy(projectId: string, issues: StageScore['issues'], runId?: string): string {
     const blocking = issues.filter(i => i.severity === 'blocking' && i.status === 'open');
-    const focus = blocking.length ? blocking : issues.filter(i => i.severity === 'high' && i.status === 'open');
+    const severe = issues.filter(i => ['blocking', 'high'].includes(i.severity) && i.status === 'open');
+    // A blocking issue is often only the visible symptom of the same local
+    // defect (for example, a logic lapse plus a missing scene and a repeated
+    // beat). Keep the blocking rule first for historical lookup, but let the
+    // fallback executor see the whole open issue cluster so it can choose the
+    // structural repair that is capable of fixing every occurrence together.
+    const structuralCompanions = issues.filter(i => i.status === 'open'
+      && (i.ruleId.includes('structure') || i.ruleId.includes('pacing')
+        || i.ruleId.includes('timeline.repetition') || i.ruleId.startsWith('ai_trace.')));
+    const focus = blocking.length
+      ? [...blocking, ...structuralCompanions.filter(i => !blocking.includes(i))]
+      : severe.length ? severe : issues.filter(i => i.status === 'open');
     const rules = [...new Set(focus.map(i => i.ruleId))];
     const fallback = defaultRepairStrategy(rules);
     if (!rules.length || !runId) return fallback;

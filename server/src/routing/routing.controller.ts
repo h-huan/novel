@@ -138,7 +138,7 @@ export class RoutingController {
           const url = p.baseUrl.replace(/\/+$/, '') + '/models';
           const response = await fetch(url, {
             headers: { 'Authorization': `Bearer ${p.apiKey}` },
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(15000),
           });
           if (response.ok) {
             const data: any = await response.json();
@@ -219,7 +219,8 @@ export class RoutingController {
         !!process.env.LLM_API_KEY;
       if (model.versions && Array.isArray(model.versions)) {
         for (const v of model.versions) {
-          flat.push({ id: v.id, name: v.label, provider: model.provider || key, configured: isConfigured });
+          // 模型选择统一使用提供商 API ID；版本展示名会随官网更新，不能作为调用值。
+          flat.push({ id: v.id, name: v.id, provider: model.provider || key, configured: isConfigured });
         }
       } else {
         flat.push({ id: key, name: model.name || key, provider: model.provider || key, configured: isConfigured });

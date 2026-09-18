@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import * as path from 'path';
 import * as fs from 'fs';
 import { normalizeStoredConstitutions } from '../modules/project/creative-constitution';
+import { reconcileSchema } from './schema-reconciler';
 
 export interface Migration {
   id: number;
@@ -84,7 +85,7 @@ export class Migrator {
     return migrations.sort((a, b) => a.id - b.id);
   }
 
-  /** Apply the single current baseline once to databases carrying old migration ids. */
+  /** Collapse historical numbered records into the single current baseline. */
   private alignSquashedBaseline(migrations: Migration[]): void {
     const initial = migrations.find((m) => m.id === 1);
     if (!initial) return;
@@ -92,9 +93,7 @@ export class Migrator {
     const legacy = { c: recorded.filter(row => !migrations.some(m => m.id === row.id && m.name === row.name)).length };
     if (!legacy || legacy.c === 0) return;
 
-    console.log(
-      `[Migration] 检测到 ${legacy.c} 条历史增量迁移记录（迁移已 squash 为单一初始 schema），执行一次幂等对齐：补齐缺失列/索引，不改动业务数据…`,
-    );
+    console.log(`[Schema] 检测到 ${legacy.c} 条旧版结构记录，正在收敛为单一 001 基线…`);
     this.db.exec('BEGIN');
     try {
       initial.up(this.db);
@@ -102,7 +101,7 @@ export class Migrator {
       this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(initial.id, initial.name);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
-    console.log('[Migration] squash 对齐完成，迁移基线已收敛为 001 初始 schema。');
+    console.log('[Schema] 历史记录已收敛，业务数据保持不变。');
   }
 
   /**
@@ -114,8 +113,6 @@ export class Migrator {
     const migrations = this.loadMigrations();
     this.alignSquashedBaseline(migrations);
     const executed = this.getExecutedMigrations();
-    const applied = new Set<number>();
-
     for (const migration of migrations) {
       if (!executed.has(migration.id)) {
         console.log(`[Migration] Running ${migration.id}_${migration.name}...`);
@@ -126,7 +123,6 @@ export class Migrator {
             .prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)')
             .run(migration.id, migration.name);
           this.db.exec('COMMIT');
-          applied.add(migration.id);
           console.log(`[Migration] ${migration.id}_${migration.name} completed.`);
         } catch (err) {
           this.db.exec('ROLLBACK');
@@ -136,7 +132,10 @@ export class Migrator {
       }
     }
 
-    // Released baselines are immutable. All subsequent schema changes use new migrations.
+    const reconciliation = reconcileSchema(this.db);
+    if (reconciliation.actions.length > 0) {
+      console.log(`[Schema] 已校准当前结构：${reconciliation.actions.join(', ')}`);
+    }
     normalizeStoredConstitutions(this.db);
   }
 

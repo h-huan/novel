@@ -52,7 +52,7 @@ it('generates a complete idea batch with one configured-model call and reuses an
     mainReversal: '主角的旧错其实是识破调包手法的唯一钥匙',
   });
   const realLLM = {
-    assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-v4-flash', modelVersion: 'deepseek-v4-flash' })),
+    assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
     generate: vi.fn(async () => {
       await new Promise(resolve => setTimeout(resolve, 10));
       return { content: JSON.stringify({ ideas: [1, 2, 3, 4, 5].map(makeIdea) }) };

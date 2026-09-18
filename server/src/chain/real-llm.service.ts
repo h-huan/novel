@@ -526,7 +526,7 @@ export class RealLLMService implements ILLMService {
     } catch (err: any) {
       const msg = err?.message || String(err);
       // 网络级错误（ECONNRESET/ECONNREFUSED/ETIMEDOUT/terminated）整体重试
-      // 现实观测：deepseek-v4-flash 在大陆出口路由下经常被中间设备 RST，需 ≥5 次指数退避才能稳过
+      // 现实观测：deepseek-flash 在大陆出口路由下经常被中间设备 RST，需 ≥5 次指数退避才能稳过
       const isNetworkErr = msg.includes('ECONNRESET') || msg.includes('ECONNREFUSED')
         || msg.includes('ETIMEDOUT') || msg.includes('terminated') || msg.includes('socket hang up')
         || msg.includes('aborted') || msg.includes('ENETUNREACH') || msg.includes('EAI_AGAIN')
@@ -989,7 +989,7 @@ export class RealLLMService implements ILLMService {
         max_tokens: maxTokens,
         stream: true,
         ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' as const } } : {}),
-        // deepseek-v4-flash 默认先思考再输出（reasoning 可占 7500+ token，慢但保证对基线/一致性的遵循度）。
+        // deepseek-flash 默认先思考再输出（reasoning 可占 7500+ token，慢但保证对基线/一致性的遵循度）。
         // 用户硬性要求：质量和一致性优先。因此默认保留完整推理，不做任何削弱。
         // 速度是可选优化：LLM_REASONING_EFFORT=low/medium 可降推理量提速（一致性风险略升）；
         // LLM_DISABLE_THINKING=1 完全关闭（最快，但显著降低对基线的遵循度，不推荐）。
@@ -1139,7 +1139,7 @@ export class RealLLMService implements ILLMService {
       return aliases[normalized];
     }
 
-    // DeepSeek 任意具体版本（deepseek-v4-flash / deepseek-v4-pro / 代理侧其它 deepseek-* 名称）
+    // DeepSeek 任意具体模型 ID（deepseek-flash / deepseek-v4-pro / 代理侧其它 deepseek-* 名称）
     // 一律原样透传：配置/场景里是什么模型名，就向接口发什么名，绝不改写成任何固定默认版本，也不逐个硬编码。
     if (normalized.startsWith('deepseek-')) {
       return this.createRuntimeModel('deepseek', modelName);
@@ -1147,8 +1147,8 @@ export class RealLLMService implements ILLMService {
     // 只给了笼统提供商名 deepseek、没有具体版本：明确报错要求选择具体版本，绝不替用户默认。
     if (normalized === 'deepseek') {
       throw new Error(
-        '模型只填了提供商名 "deepseek"、缺少具体版本（如 deepseek-v4-flash / deepseek-v4-pro）。' +
-        '请到「设置 → 模型配置」选择具体模型版本，系统不会替你默认成任何其它版本。',
+        '模型只填了提供商名 "deepseek"、缺少具体模型 ID（如 deepseek-flash / deepseek-v4-pro）。' +
+        '请到「设置 → 模型配置」选择提供商返回的具体模型 ID。',
       );
     }
 

@@ -15,20 +15,20 @@
       ],
       "versions": [
         {
-          "id": "deepseek-v4-flash",
-          "label": "DeepSeek V4 Flash",
+          "id": "deepseek-flash",
+          "label": "deepseek-flash",
           "tier": "standard"
         },
         {
           "id": "deepseek-v4-pro",
-          "label": "DeepSeek V4 Pro",
+          "label": "deepseek-v4-pro",
           "tier": "high"
         }
       ]
     }
   },
   "model_versions": {
-    "deepseek": "deepseek-v4-flash"
+    "deepseek": "deepseek-flash"
   },
   "roles": {
     "writer": {
@@ -202,7 +202,7 @@
   },
   "defaults": {
     "temperature": 0.7,
-    "maxTokens": 8192,
+    "maxTokens": 16384,
     "timeout": 30000
   }
 }

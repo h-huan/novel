@@ -11,7 +11,7 @@ const s: Record<string, React.CSSProperties> = {
   card: { backgroundColor: CARD_BG, borderRadius: '12px', border: BORDER, overflow: 'hidden', transition: 'all 0.2s', cursor: 'pointer', minWidth: 0, },
   header: { padding: '18px 18px 0' },
   titleRow: { display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' },
-  title: { fontSize: '17px', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1.3, flex: 1 },
+  title: { fontSize: '17px', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1.3, flex: '1 1 220px', minWidth: 'min(220px, 100%)', overflowWrap: 'break-word' },
   hook: { margin: '0', padding: '0 0 12px 0', fontSize: '14px', color: 'var(--color-text-dim)', fontStyle: 'italic', lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.05)' },
   tags: { display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' },
   body: { padding: '10px 18px 8px', display: 'flex', flexDirection: 'column', gap: '4px' },
@@ -28,7 +28,8 @@ const s: Record<string, React.CSSProperties> = {
 
 function getAngleBadgeStyle(angle: string): React.CSSProperties {
   return { fontSize: '14px', fontWeight: 600, padding: '3px 10px', borderRadius: '5px',
-    backgroundColor: (ANGLE_COLORS[angle] || 'var(--color-text-muted)') + '22', color: ANGLE_COLORS[angle] || 'var(--color-text-muted)', whiteSpace: 'nowrap', flexShrink: 0 };
+    backgroundColor: (ANGLE_COLORS[angle] || 'var(--color-text-muted)') + '22', color: ANGLE_COLORS[angle] || 'var(--color-text-muted)',
+    whiteSpace: 'normal', overflowWrap: 'break-word', flex: '0 1 auto', maxWidth: '100%' };
 }
 function getStyleTagStyle(): React.CSSProperties {
   return { fontSize: '14px', fontWeight: 500, padding: '3px 10px', borderRadius: '5px', backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--color-text-dim)' };

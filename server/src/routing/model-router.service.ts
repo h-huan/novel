@@ -709,23 +709,27 @@ export class ModelRouterService implements OnModuleInit {
     const result: Record<string, string> = {};
     const allowedScenes = new Set(['idea_generate', 'outline', 'writing', 'polish', 'daily']);
     const modes: WritingMode[] = ['economy', 'normal', 'premium'];
+    const canonicalModelId = (value: string) => {
+      const modelId = value.trim();
+      return modelId === 'deepseek-v4-flash' ? 'deepseek-flash' : modelId;
+    };
     for (const [key, value] of Object.entries(raw || {})) {
       const separator = key.lastIndexOf(':');
       if (separator > 0 && typeof value === 'string' && value.trim()) {
         const scene = key.slice(0, separator);
         const mode = key.slice(separator + 1) as WritingMode;
-        if (allowedScenes.has(scene) && modes.includes(mode)) result[`${scene}:${mode}`] = value.trim();
+        if (allowedScenes.has(scene) && modes.includes(mode)) result[`${scene}:${mode}`] = canonicalModelId(value);
         else if (strict) throw new Error(`无效场景模型配置: ${key}`);
         continue;
       }
       // One-time in-memory migration of historical flat/nested storage. Only
       // the canonical scene:mode form is persisted and used afterwards.
       if (!strict && allowedScenes.has(key) && typeof value === 'string' && value.trim()) {
-        for (const mode of modes) result[`${key}:${mode}`] = value.trim();
+        for (const mode of modes) result[`${key}:${mode}`] = canonicalModelId(value);
       } else if (!strict && allowedScenes.has(key) && value && typeof value === 'object' && !Array.isArray(value)) {
         for (const mode of modes) {
           const model = (value as Record<string, unknown>)[mode];
-          if (typeof model === 'string' && model.trim()) result[`${key}:${mode}`] = model.trim();
+          if (typeof model === 'string' && model.trim()) result[`${key}:${mode}`] = canonicalModelId(model);
         }
       } else if (strict) {
         throw new Error(`无效场景模型配置: ${key}`);

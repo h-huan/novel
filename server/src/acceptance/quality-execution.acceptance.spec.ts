@@ -2,6 +2,7 @@ import { it, expect, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { Migrator } from '../database/migrator';
 import baseline from '../database/migrations/001_initial';
+import { CURRENT_SCHEMA_VERSION, reconcileSchema } from '../database/schema-reconciler';
 import { ProjectService } from '../modules/project/project.service';
 import { ProjectRepository } from '../database/repositories/project.repository';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
@@ -11,22 +12,58 @@ import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
 import { qualityIssue } from '../modules/writing-quality/quality-issue';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 
+function schemaShape(db: any) {
+  return db.prepare("SELECT type,name,tbl_name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")
+    .all().map((object: any) => {
+      const quoted = `"${object.name.replaceAll('"', '""')}"`;
+      return {
+        ...object,
+        columns: object.type === 'table' ? db.prepare(`PRAGMA table_info(${quoted})`).all() : [],
+        foreignKeys: object.type === 'table' ? db.prepare(`PRAGMA foreign_key_list(${quoted})`).all() : [],
+        indexColumns: object.type === 'index' ? db.prepare(`PRAGMA index_info(${quoted})`).all() : [],
+      };
+    });
+}
+
 it('fresh and baseline/legacy upgrades have schema parity and preserve business data', async () => {
   const fresh=new DatabaseSync(':memory:'); const existing=new DatabaseSync(':memory:'); const legacy=new DatabaseSync(':memory:');
   try {
     await new Migrator(fresh).runMigrations();
     for (const db of [existing,legacy]) {
       baseline.up(db);
+      db.exec(`
+        DROP INDEX IF EXISTS idx_benchmark_runs_project;
+        DROP TABLE IF EXISTS quality_benchmark_runs;
+        DROP TABLE IF EXISTS quality_execution_schema;
+        ALTER TABLE quality_benchmark_samples DROP COLUMN chapter_index;
+      `);
       db.exec("CREATE TABLE _migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,executed_at TEXT NOT NULL DEFAULT(datetime('now'))); INSERT INTO _migrations(id,name) VALUES(1,'initial');");
       new ProjectService(new ProjectRepository({getDb:()=>db} as any)).create({title:'不可丢失的小说'});
+      db.prepare(`INSERT INTO quality_benchmark_samples
+        (id,project_id,story_type,platform,content,source_ref,annotation_status,human_labels_json,created_at,updated_at)
+        VALUES('kept-sample',NULL,'long_novel','fanqie','保留正文','real-source','labeled','["kept"]','now','now')`).run();
     }
-    legacy.exec("INSERT INTO _migrations(id,name) VALUES(2,'generation_runs')");
+    legacy.exec(`
+      CREATE TABLE quality_benchmark_runs (
+        id TEXT PRIMARY KEY, project_id TEXT, status TEXT NOT NULL,
+        repair_requested INTEGER NOT NULL DEFAULT 0, sample_count INTEGER NOT NULL DEFAULT 0,
+        completed_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0,
+        results_json TEXT NOT NULL DEFAULT '[]', started_at TEXT NOT NULL, finished_at TEXT
+      );
+      INSERT INTO quality_benchmark_runs(id,status,started_at) VALUES('kept-run','completed','now');
+      CREATE TABLE quality_execution_schema(version INTEGER PRIMARY KEY, description TEXT NOT NULL);
+      INSERT INTO quality_execution_schema VALUES(2,'old numbered migration');
+      INSERT INTO _migrations(id,name) VALUES(2,'quality_execution');
+    `);
     for(const db of [existing,legacy]) {
       await new Migrator(db).runMigrations(); await new Migrator(db).runMigrations();
       expect(db.prepare('SELECT title FROM projects').get().title).toBe('不可丢失的小说');
-      expect(db.prepare("SELECT name FROM _migrations WHERE id=2").get().name).toBe('quality_execution');
-      const schema=(d:any)=>d.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r:any)=>({...r,sql:r.sql?.replace(/\s+/g,'')}));
-      expect(schema(db)).toEqual(schema(fresh));
+      expect(db.prepare("SELECT content FROM quality_benchmark_samples WHERE id='kept-sample'").get().content).toBe('保留正文');
+      expect(db.prepare("SELECT COUNT(*) count FROM quality_benchmark_runs WHERE id='kept-run'").get().count).toBe(db === legacy ? 1 : 0);
+      expect(db.prepare('SELECT id,name FROM _migrations ORDER BY id').all()).toEqual([{id:1,name:'initial'}]);
+      expect(db.prepare('SELECT version FROM quality_execution_schema WHERE id=1').get().version).toBe(CURRENT_SCHEMA_VERSION);
+      expect(reconcileSchema(db).actions).toEqual([]);
+      expect(schemaShape(db)).toEqual(schemaShape(fresh));
     }
   } finally { fresh.close();existing.close();legacy.close(); }
 });
@@ -39,6 +76,9 @@ it('conditions strategy history on all six axes and falls back with insufficient
     const metrics=new GenerationMetricsService(database); const run=metrics.beginRun(p.id,'writing','x');
     db.prepare("UPDATE generation_runs SET model='test-model' WHERE id=?").run(run.id);
     const issue=qualityIssue({projectId:p.id,runId:run.id,stage:'chapter',ruleId:'platform.dialogue_ratio',severity:'high',message:'测试',quote:'原文',content:'原文',source:'test'});
+    const blockingLogic=qualityIssue({projectId:p.id,runId:run.id,stage:'outline',ruleId:'constitution.logic',severity:'blocking',message:'人物失去防备',quote:'原文',content:'原文',source:'test'});
+    const relatedStructure=qualityIssue({projectId:p.id,runId:run.id,stage:'outline',ruleId:'structure.scene_event_mismatch',severity:'medium',message:'事件缺少场景',quote:'原文',content:'原文',source:'test'});
+    expect(metrics.selectRepairStrategy(p.id,[blockingLogic,relatedStructure],run.id)).toBe('scene_structure_patch');
     const row=db.prepare('SELECT prompt_version FROM generation_runs WHERE id=?').get(run.id);
     const insert=db.prepare(`INSERT INTO repair_strategy_stats(id,rule_id,platform,genre,story_type,model,prompt_version,strategy_id,attempts,accepted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'test')`);
     insert.run('other',issue.ruleId,'qidian','generic','long_novel','test-model',row.prompt_version,'unique_local_replacement',100,100);

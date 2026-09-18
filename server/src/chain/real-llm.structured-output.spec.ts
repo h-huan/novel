@@ -4,7 +4,7 @@ import { RealLLMService } from './real-llm.service';
 const createService = () => {
   const router = {
     getConfig: () => ({ defaults: { maxTokens: 4096 }, scenarios: { outline: { maxTokens: 4096 } } }),
-    getModelForScenario: () => ({ modelName: 'deepseek-v4-flash', modelVersion: 'deepseek-v4-flash', temperature: 0.4 }),
+    getModelForScenario: () => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash', temperature: 0.4 }),
   };
   return new RealLLMService(router as any);
 };
@@ -17,7 +17,7 @@ describe('RealLLMService structured output guard', () => {
 
     const response = await service.generate({ prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object' });
 
-    expect(callModel).toHaveBeenCalledWith('deepseek-v4-flash', '输出JSON对象', '', 0.4, 4096, 600_000, 'json_object', undefined);
+    expect(callModel).toHaveBeenCalledWith('deepseek-flash', '输出JSON对象', '', 0.4, 4096, 600_000, 'json_object', undefined);
     expect(response.content).toBe('{"ok":true}');
     expect(response.finishReason).toBe('stop');
   });
@@ -63,7 +63,7 @@ describe('RealLLMService structured output guard', () => {
       prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxTokens: 7200,
     });
 
-    expect(callModel).toHaveBeenCalledWith('deepseek-v4-flash', '输出JSON对象', '', 0.4, 7200, 600_000, 'json_object', undefined);
+    expect(callModel).toHaveBeenCalledWith('deepseek-flash', '输出JSON对象', '', 0.4, 7200, 600_000, 'json_object', undefined);
   });
 
   it('keeps the expanded budget and explicit temperature during a network retry', async () => {
@@ -90,7 +90,7 @@ describe('RealLLMService structured output guard', () => {
 
     await service.generate({ prompt: '生成正文', scenario: 'daily' });
 
-    expect(callModel).toHaveBeenCalledWith('deepseek-v4-flash', '生成正文', '', 0.4, 4096, 600_000, undefined, undefined);
+    expect(callModel).toHaveBeenCalledWith('deepseek-flash', '生成正文', '', 0.4, 4096, 600_000, undefined, undefined);
   });
 
   it('rejects an empty plain-text (body generation) response instead of returning it empty', async () => {

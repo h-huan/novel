@@ -5,7 +5,7 @@ import { attributeCharacterEvidence, type CharacterVoiceContract } from './chara
 type Input = { content: string; issues: QualityIssue[]; contracts?: CharacterVoiceContract[]; structured?: boolean };
 const definitions = {
   character_voice_contract_patch: { maxPatches: 4, ratio: 0.15, prompt: '逐角色对照版本化契约，只修改已明确归属该角色的对白或行为；保留说话人、动作结果、事实和所有其他角色声音。不可把契约偏好机械添加为口头禅。' },
-  scene_structure_patch: { maxPatches: 3, ratio: 0.3, prompt: '对照 Scene Fingerprint、Dialogue Function 和 Show/Explain 风险及语义证据，修复单个场景内的揭示、冲突、反应与决策组织。用具体动作或潜台词替代冗余解释，保留场景因果、起终点和情节结果。' },
+  scene_structure_patch: { maxPatches: 6, ratio: 0.4, prompt: '对照 Scene Fingerprint、Dialogue Function、Show/Explain 风险及全部同根质量问题，修复场景内的揭示、冲突、反应与决策组织。结构化大纲必须同步修改 content、scenes、characterActions、conflicts、highlights、hook 等受影响字段，消除事件链错位和重复动作；用具体动作或潜台词替代冗余解释，保留场景因果、起终点和情节结果。' },
   platform_metric_patch: { maxPatches: 6, ratio: 0.2, prompt: '只调整段落划分、对白密度或已有开篇/章尾钩子的表达，以创作宪法平台指标为目标；禁止新增人物或剧情，禁止为凑字数重复内容。复检平台测量必须改善。' },
   unique_local_replacement: { maxPatches: 8, ratio: 0.3, prompt: '只修复问题证据附近的局部文字，保留事实、身份、情节和JSON结构。禁止无关润色。' },
 } as const;
@@ -13,7 +13,7 @@ export type RepairStrategyId = keyof typeof definitions;
 export const repairStrategies = definitions;
 export function defaultRepairStrategy(rules: string[]): RepairStrategyId {
   return rules.some(r => r.includes('character_voice')) ? 'character_voice_contract_patch'
-    : rules.some(r => r.startsWith('ai_trace.') || r.includes('structure')) ? 'scene_structure_patch'
+    : rules.some(r => r.startsWith('ai_trace.') || r.includes('structure') || r.includes('pacing') || r.includes('timeline.repetition')) ? 'scene_structure_patch'
     : rules.some(r => r.startsWith('platform.')) ? 'platform_metric_patch' : 'unique_local_replacement';
 }
 export function repairPrompt(id: string): string {

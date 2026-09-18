@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { compileCharacterContract, reviewCharacterContracts, attributeCharacterEvidence } from './character-contract';
 import { narrativeTrace } from './narrative-trace';
-import { parseStageScore, SCORE_DIMENSIONS } from './stage-score';
+import { parseStageScore, SCORE_DIMENSIONS, stageJudgePrompt } from './stage-score';
 import { readConstitution } from '../project/creative-constitution';
 import { qualityGate } from './quality-issue';
-import { executeRepair, repairPrompt } from './repair-strategy-registry';
+import { defaultRepairStrategy, executeRepair, repairPrompt } from './repair-strategy-registry';
 
 const contract = compileCharacterContract({ id: 'lin', name: '林岚', forbidden_words: '["保证"]', profile_json: JSON.stringify({ voiceContract: { sentenceLength: { max: 20 }, directness: 'direct', moralBoundary: ['不可杀人'] } }) });
 const content = '林岚说：“我保证明日归来。”\n' + '风吹过旧城的石墙，铁门上爬满暗红色的锈迹。'.repeat(10);
@@ -28,6 +28,20 @@ describe('executable character contracts', () => {
     expect(() => executeRepair('character_voice_contract_patch',{content,issues,contracts:[contract]},[{original:'铁门',replacement:'木门'}])).toThrow();
     expect(repairPrompt('platform_metric_patch')).not.toBe(repairPrompt('scene_structure_patch'));
   });
+  it('repairs a blocking logic issue together with its structural root cause', () => {
+    expect(defaultRepairStrategy(['constitution.logic', 'structure.scene_event_mismatch', 'pacing.missing_breathing_beat']))
+      .toBe('scene_structure_patch');
+    const outline = JSON.stringify({
+      content: '李明拍下合同，又在回店后拍下合同。',
+      scenes: [{ location: '门店', outcome: '倒计时开始' }],
+      hook: '再次拍下合同。',
+    });
+    const repaired = executeRepair('scene_structure_patch', { content: outline, issues: [], structured: true }, [
+      { original: '李明拍下合同，又在回店后拍下合同。', replacement: '李明递出合同，倒计时开始。' },
+      { original: '再次拍下合同。', replacement: '许苗决定重返1402。' },
+    ]);
+    expect(JSON.parse(repaired)).toMatchObject({ content: '李明递出合同，倒计时开始。', hook: '许苗决定重返1402。' });
+  });
 });
 describe('non-dilutable scoring and semantic attribution', () => {
   const input = {projectId:'p',runId:'r',stage:'chapter' as const,content,constitution:readConstitution({}),contracts:[contract]};
@@ -40,6 +54,12 @@ describe('non-dilutable scoring and semantic attribution', () => {
     const issue = {ruleId:'character_voice.directness',message:'偏移',evidence:'林岚说：“我保证明日归来。”',characterId:'lin',contractVersion:contract.version,contractField:'directness'};
     expect(parseStageScore({issues:[issue]},input).issues).toHaveLength(1);
     expect(parseStageScore({issues:[{...issue,characterId:'invented'}]},input).issues).toHaveLength(0);
+  });
+  it('asks the judge only for dimensions applicable to the current stage', () => {
+    const prompt = stageJudgePrompt(content, 'ctx', readConstitution({ target_platform: 'fanqie' }), 'world');
+    expect(prompt).toContain('platform、context、logic、completeness、world_rules');
+    expect(prompt).not.toContain('"prose":');
+    expect(prompt).not.toContain('"character_voice":');
   });
 });
 it('compares scenes and chapters without claiming semantic certainty', () => {

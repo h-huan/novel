@@ -33,6 +33,6 @@ Only labeled samples with a nonempty source reference are eligible. A valid proj
 
 ## Migrations and verification
 
-`001_initial` is unchanged. `002_quality_execution` adds run persistence and sample chapter scope. Migrations fail fast and apply transactionally; normal startup no longer replays the baseline. Old squashed migration histories are aligned once before applying the new migration. Destructive downgrade is refused so benchmark records are not silently dropped.
+`001_initial` is the complete schema for a fresh database. Existing databases run one fixed, idempotent `schema-reconciler` on startup; it adds only missing structures and records the current schema version in a singleton metadata row. Future schema work updates this same reconciler instead of adding `002`, `003`, and further numbered files. Historical numbered records are collapsed to the single `001` baseline without deleting business data. Both the baseline and reconciler run transactionally and fail fast.
 
 Automated checks cover contract attribution, critical floors, distant dependency retrieval beyond 1,000 chapters/100 characters, pathological budget limits, conditioned strategy fallback, real SQLite fresh/existing/legacy schema parity, benchmark runner and optional repairs, API validation/empty states and cockpit operation. Run the existing server typecheck/build/unit/acceptance/E2E and desktop typecheck/unit/build/quality E2E commands; CI executes the same matrix.

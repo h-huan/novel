@@ -51,14 +51,14 @@ export const LLM_TUNABLES = {
   QUALITY_REPAIR_MAXTOKENS: envInt('LLM_QUALITY_REPAIR_MAXTOKENS', 32768),
 
   // ============ outline 写入 maxTokens 边界 ============
-  // deepseek-v4-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算返回空内容。
+  // deepseek-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算返回空内容。
   // 实测复杂任务 reasoning 可达 7500+，故上限给足预算（这修复了"空返回"根因）。
   OUTLINE_WRITE_MIN: envInt('LLM_OW_MAXTOKENS_MIN', 24576),
   OUTLINE_WRITE_MAX: envInt('LLM_OW_MAXTOKENS_MAX', 32768),
   OUTLINE_WRITE_PER_CHAPTER: envInt('LLM_OW_MAXTOKENS_PER_CHAPTER', 1200),
 
   // ============ 正文生成 maxTokens 公式参数 ============
-  // deepseek-v4-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算
+  // deepseek-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算
   // 返回空内容或把正文截断在 3200 字以下。实测复杂任务 reasoning 可达 7500+，故 EXTRA 预留
   // 足够推理预算（与 OUTLINE_WRITE 同策略）；封顶 32768 已覆盖"推理+3200-4000字正文"。
   BODY_MAXTOKENS_CAP: envInt('LLM_BODY_MAXTOKENS_CAP', 32768),

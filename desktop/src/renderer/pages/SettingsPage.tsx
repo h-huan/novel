@@ -19,6 +19,7 @@ const SettingsPage: React.FC = () => {
   const [sceneMappings, setSceneMappings] = useState<Record<string, Record<string, string>>>({});
   const [fetchedModels, setFetchedModels] = useState<Array<{ id: string; name: string; provider: string; configured?: boolean }>>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [modelListSource, setModelListSource] = useState<'idle' | 'live' | 'fallback'>('idle');
   // 偏好设置
   const [autoSaveInterval, setAutoSaveInterval] = useState(() => localStorage.getItem('prefs_autoSave') || '30');
   const [fontSize, setFontSize] = useState(() => localStorage.getItem('prefs_fontSize') || '15');
@@ -33,36 +34,34 @@ const SettingsPage: React.FC = () => {
   const fetchModels = useCallback(async () => {
     setIsFetchingModels(true);
     try {
-      const res: any = await api.get('/routing/models');
-      const configModels = res?.data?.models || res?.models || [];
-      let providerModels: any[] = [];
-      try {
-        const res2: any = await api.get('/routing/all-available-models');
-        const providers = res2?.data?.providers || res2?.providers || [];
-        for (const p of providers) { if (p.models) providerModels.push(...p.models); }
-      } catch {}
-      const merged = new Map<string, any>();
-      for (const m of [...configModels, ...providerModels]) {
-        if (m?.id) merged.set(m.id, { ...merged.get(m.id), ...m });
-      }
-      const models = Array.from(merged.values());
-      setFetchedModels(models);
-      if (models.length > 0) {
-        showMessage(`✅ 已获取 ${models.length} 个模型`);
-      }
-    } catch {
-      try {
-        const res2: any = await api.get('/routing/all-available-models');
-        const providers = res2?.data?.providers || res2?.providers || [];
-        if (providers.length > 0) {
-          const all: any[] = [];
-          for (const p of providers) { if (p.models) all.push(...p.models); }
-          setFetchedModels(all);
-          showMessage(`✅ 已获取 ${all.length} 个模型（从提供商 API）`);
+      const response: any = await api.get('/routing/all-available-models');
+      const providers = response?.data?.providers || response?.providers || [];
+      const live = new Map<string, any>();
+      for (const provider of providers) {
+        for (const item of provider.models || []) {
+          if (item?.id) live.set(item.id, { ...item, name: item.id, configured: true });
         }
-      } catch {}
+      }
+      if (live.size > 0) {
+        setFetchedModels(Array.from(live.values()));
+        setModelListSource('live');
+        showMessage(`✅ 已从提供商获取 ${live.size} 个可调用模型`);
+        return;
+      }
+      throw new Error('提供商没有返回可调用模型');
+    } catch {
+      const response: any = await api.get('/routing/models').catch(() => null);
+      const fallback = response?.data?.models || response?.models || [];
+      const unique = new Map<string, any>();
+      for (const item of fallback) {
+        if (item?.id) unique.set(item.id, { ...item, name: item.id });
+      }
+      setFetchedModels(Array.from(unique.values()));
+      setModelListSource('fallback');
+      showMessage(`⚠️ 实时模型获取失败，显示 ${unique.size} 个内置兜底模型`);
+    } finally {
+      setIsFetchingModels(false);
     }
-    setIsFetchingModels(false);
   }, [showMessage]);
 
   // 初始化：只挂载时执行一次
@@ -293,6 +292,11 @@ const SettingsPage: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-primary)' }}>指定任务模型</span>
               <div style={{ display: 'flex', gap: '6px' }}>
+                {modelListSource !== 'idle' && (
+                  <span style={{ alignSelf: 'center', fontSize: 'var(--font-size-xs)', color: modelListSource === 'live' ? 'var(--color-success)' : 'var(--color-warning)' }}>
+                    {modelListSource === 'live' ? '● 提供商实时列表' : '● 内置兜底列表'}
+                  </span>
+                )}
                 <button onClick={fetchModels}
                   style={{
                     padding: '5px 10px', backgroundColor: isFetchingModels ? 'rgba(255,255,255,0.04)' : 'rgba(46,204,113,0.1)',
@@ -300,7 +304,7 @@ const SettingsPage: React.FC = () => {
                     borderRadius: '4px', color: isFetchingModels ? 'var(--color-text-muted)' : 'var(--color-success)',
                     fontSize: 'var(--font-size-xs)', cursor: isFetchingModels ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
                   }} disabled={isFetchingModels}>
-                  {isFetchingModels ? '获取中...' : fetchedModels.length > 0 ? `🔄 刷新模型列表 (${fetchedModels.length})` : '🔄 获取模型列表'}
+                  {isFetchingModels ? '正在从提供商获取...' : fetchedModels.length > 0 ? `🔄 刷新实时模型 (${fetchedModels.length})` : '🔄 获取实时模型'}
                 </button>
                 <button onClick={async () => {
                     try {

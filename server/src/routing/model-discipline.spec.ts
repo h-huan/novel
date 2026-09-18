@@ -10,25 +10,25 @@ import { RealLLMService } from '../chain/real-llm.service';
  * 不做别名映射、不降级、不偷偷改成任何固定默认版本）。
  * 防止 deepseek-chat 之类“内置默认模型名”问题再次出现。
  */
-describe('模型名纪律：配什么版本就原样使用什么名称', () => {
+describe('模型 ID 纪律：使用提供商返回的准确 ID', () => {
   beforeAll(() => {
     process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'novel-route-'));
   });
 
-  it('ModelRouter 场景配置原样透传，不做版本映射', async () => {
+  it('ModelRouter 将已退役的 Flash 别名收敛为当前 API ID，其它名称原样透传', async () => {
     const router = new ModelRouterService({ get: () => undefined } as any);
     await router.onModuleInit();
     (router as any).currentMode = 'economy';
-    (router as any).customScenes = {
+    router.setCustomScenes({
       'daily:economy': 'deepseek-v4-flash',
       'outline:economy': 'deepseek-v4-flash',
       'writing:economy': 'deepseek-my-proxy-name',
-    };
+    });
     const daily = await router.getModelForScenario('daily');
-    expect(daily.modelName).toBe('deepseek-v4-flash');
-    expect(daily.modelVersion).toBe('deepseek-v4-flash');
+    expect(daily.modelName).toBe('deepseek-flash');
+    expect(daily.modelVersion).toBe('deepseek-flash');
     const outline = await router.getModelForScenario('outline');
-    expect(outline.modelVersion).toBe('deepseek-v4-flash');
+    expect(outline.modelVersion).toBe('deepseek-flash');
     // 任意代理自定义版本名也原样透传
     const writing = await router.getModelForScenario('writing');
     expect(writing.modelVersion).toBe('deepseek-my-proxy-name');
@@ -59,7 +59,8 @@ describe('模型名纪律：配什么版本就原样使用什么名称', () => {
     await router.onModuleInit();
 
     expect(router.getWritingMode()).toBe('economy');
-    expect(router.getModelForScenario('idea_generate').modelVersion).toBe('deepseek-v4-flash');
+    expect(router.getModelForScenario('idea_generate').modelVersion).toBe('deepseek-flash');
+    expect(JSON.parse(fs.readFileSync(path.join(dataDir, 'custom-scenes.json'), 'utf8'))['daily:economy']).toBe('deepseek-flash');
     expect(JSON.parse(fs.readFileSync(path.join(dataDir, 'writing-mode.json'), 'utf8'))).toEqual({ mode: 'economy' });
   });
 
@@ -74,7 +75,7 @@ describe('模型名纪律：配什么版本就原样使用什么名称', () => {
       expect(rt.provider).toBe('deepseek');
       expect(rt.apiModel).toBe(name);
     }
-    expect(() => resolve('deepseek')).toThrow(/具体版本/);
+    expect(() => resolve('deepseek')).toThrow(/具体模型 ID/);
   });
 
   it('加载 BYOK 时清理输入空格，并让具体 DeepSeek 模型读取提供商 Key', async () => {
