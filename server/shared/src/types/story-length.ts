@@ -1,5 +1,8 @@
 export type SupportedStoryType = 'short_story' | 'long_novel';
 
+/** Canonical chapter prose range shared by server and desktop. */
+export const CHAPTER_WORD_RANGE = { min: 3_000, max: 5_000 } as const;
+
 /** 全端共用的作品总字数口径。章节字数由目标平台基准决定。 */
 export const STORY_TARGET_WORD_RANGES = {
   short_story: { min: 8_000, max: 35_000 },

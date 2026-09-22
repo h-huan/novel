@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitToLines, parseJsonToReadable } from './textList';
+import { splitDisplayList, splitToLines, parseJsonToReadable } from './textList';
 
 describe('splitToLines', () => {
   it('按 、；/ 与换行拆分并去空', () => {
@@ -15,5 +15,15 @@ describe('splitToLines', () => {
   });
   it('对象摘要输入取其 summary 字段', () => {
     expect(splitToLines(parseJsonToReadable({ summary: 'a。b。' }))).toEqual(['a。b。']);
+  });
+});
+
+describe('splitDisplayList', () => {
+  it('numbers explicit rows without splitting punctuation inside a row', () => {
+    expect(splitDisplayList('第一条，包含逗号。\n- 第二条\n3、第三条')).toEqual([
+      '第一条，包含逗号。',
+      '第二条',
+      '第三条',
+    ]);
   });
 });

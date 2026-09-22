@@ -46,16 +46,15 @@ export interface LLMRequest {
   scenario?: string;
   /** 章节功能，用于动态路由（如 exposition, climax 等） */
   chapterFunction?: string;
-  /** 当前重试次数，用于 temperature 动态调节 */
+  /** 当前修订次数，仅用于遥测或模板上下文；不得据此自动升温 */
   retryCount?: number;
   /** 角色（writer / reviewer / planner） */
   role?: string;
   /** 要求兼容 OpenAI 协议的提供商返回严格 JSON 对象。 */
   responseFormat?: 'text' | 'json_object';
   /**
-   * 结构化（json_object）场景下空内容的最大重试次数。
-   * 默认 2（≈3 次），对验收器等关键结构化调用建议传 4（≈5 次）以抵御上游瞬时空内容。
-   * 永远不切模型、不降级。
+   * 空内容允许补发的次数。运行时统一封顶为 1：空内容没有可修订材料，
+   * 可补发一次；再次为空立即停止，避免与网络层/业务层重试叠加。
    */
   maxEmptyRetries?: number;
   /**
@@ -111,7 +110,7 @@ export interface ChainNode {
   branches?: Branch[];
   nextOnSuccess?: string[];   // 成功后的下一个节点 ID，默认按序
   timeout: number;            // 超时秒数
-  retryCount: number;         // 最大重试次数
+  retryCount: number;         // 兼容旧模板；通用引擎不据此原样重放节点
   skipOnEmptyInput?: boolean; // 输入为空时是否跳过此节点
   description?: string;
 }

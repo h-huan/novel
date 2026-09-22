@@ -11,9 +11,12 @@ const definitions = {
 } as const;
 export type RepairStrategyId = keyof typeof definitions;
 export const repairStrategies = definitions;
+const hasRuleSegment = (rule: string, segment: string): boolean =>
+  rule === segment || rule.startsWith(`${segment}.`) || rule.endsWith(`.${segment}`) || rule.includes(`.${segment}.`);
 export function defaultRepairStrategy(rules: string[]): RepairStrategyId {
   return rules.some(r => r.includes('character_voice')) ? 'character_voice_contract_patch'
-    : rules.some(r => r.startsWith('ai_trace.') || r.includes('structure') || r.includes('pacing') || r.includes('timeline.repetition')) ? 'scene_structure_patch'
+    : rules.some(r => r.startsWith('ai_trace.') || hasRuleSegment(r, 'structure') || hasRuleSegment(r, 'pacing')
+      || hasRuleSegment(r, 'timeline') || hasRuleSegment(r, 'world_rules') || hasRuleSegment(r, 'context') || hasRuleSegment(r, 'logic')) ? 'scene_structure_patch'
     : rules.some(r => r.startsWith('platform.')) ? 'platform_metric_patch' : 'unique_local_replacement';
 }
 export function repairPrompt(id: string): string {

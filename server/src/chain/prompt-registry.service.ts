@@ -12,6 +12,7 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import * as Handlebars from 'handlebars';
+import { CHAPTER_WORD_RANGE } from '../../shared/src';
 
 // ==================== 模板版本管理 ====================
 
@@ -534,7 +535,7 @@ export class PromptRegistryService {
 - foreshadowingRecovery: 伏笔回收
 - hook: 下章钩子
 - mood: 情感基调（紧张/悬疑/热血/悲伤/轻松等）
-- targetWords: 目标字数（必须为3200-4000，按本章任务和场景复杂度单独确定）
+- targetWords: 目标字数（必须为${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}，按本章任务和场景复杂度单独确定）
 - wordCountReason: 本章为何需要该目标字数
 
 ### 六、伏笔网络（数量由主线、人物弧、世界规则与回收需要决定，每条必须可回收）
@@ -627,7 +628,7 @@ export class PromptRegistryService {
 ## 参考标准
 - 严格遵守《两百万字小说创作全流程指南》的阶段、资料字段和创作门禁，不照抄其中示例数量。
 - 卷数、每卷章数和总章数由主线阶段、冲突升级、人物弧光、世界展开和阅读节奏动态决定，不得预设固定数量或平均分配。
-- 每章篇幅为3200-4000字，具体目标由该章任务与场景复杂度决定。
+- 每章篇幅为${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，具体目标由该章任务与场景复杂度决定。
 - 世界观必须覆盖下方各维度；条目数量由故事实际需要决定。
 
 ## 输入信息
@@ -996,7 +997,7 @@ export class PromptRegistryService {
 
 ## 重要提示
 - 卷数、每卷章数和总章数均从实际内容推导，不允许预设区间或平均分配
-- 每章目标必须处于3200-4000字，并说明该章具体目标的理由
+- 每章目标必须处于${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，并说明该章具体目标的理由
 - 伏笔必须有埋设位置和回收位置`,
       versions: [
         { templateId: 'long-novel-outline-initial', version: '1.0.0', changelog: ['初始版本，基于两百万字指南Phase 1'], activeSince: '2026-06-23' },

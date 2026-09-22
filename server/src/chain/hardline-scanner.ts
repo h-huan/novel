@@ -17,7 +17,13 @@ export interface HardlineFinding { ruleId: string; message: string; snippet: str
 export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
   '15b', '15c', '15d', '20a', '34', 'list-enumeration',
   '50-fragment-action-chain', '51-modal-particle-density', '52-env-imagery-repeat',
-  '53-same-structure-parallel', '54-measure-word-mismatch',
+  '53-same-structure-parallel', '54-measure-word-mismatch', '56-punct-stacking', '57-ellipsis-density',
+  // AI 痕迹指纹：公式句、破折号/比喻过密、热血空洞反思、觉醒段、超短句堆叠、
+  // 客服式对话、机械转场、刻意感官、拟人比喻、套路化表达、密集生理反应、AI 高频模糊词。
+  // 这类命中在生成验收与质检中都按"语言硬伤"处理（阻断保存 + 精修精确改写），
+  // 不再是只进建议、可被保存的 AI 腔。段落节奏类（短段堆叠、等长段、标点单一）仍走 advisory。
+  'formula-sentence', 'dash-density', 'simile-density',
+  '36', '37', '39', '42', '44', '46', '47', '48', '49', '55',
 ];
 
 /** 判断某条扫描命中是否属于跨平台语言硬伤（兼容规则号带后缀的情况） */
@@ -67,10 +73,18 @@ export function detectForbiddenTells(
     const slice = (s: string, n = 80) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
     // ===== 15c 叙述者跳出成为作者评论者（硬红线） =====
+    // 判定收紧（本轮修复根因）：旧正则把"我写"裸匹配当元叙述，导致故事内人物的
+    // 写字/记录/笔迹辨认动作（"我写的，横画都往上抬""那一笔我写不出来"）被误判为
+    // "作者跳出评论"。真元叙述只可能是：①创作反思修饰+写（我本来想写…）；
+    // ②写+创作宾语（我写这个结局/我写的这个故事）；③把/将故事元素如何（我把结局改了）。
+    // 故事内"写字动作"（写号码/写不出来/写了两行字）全部放行。
     const hardTells15c = [
-      // "我写的 / 我本来想写 / 我准备写 + 剧情/场景/角色"
-      /我(本来|原本|原想|原准备|本来想|本来准备|一直想)?\s*(想|准备|打算)?\s*写\s*(这|那|个|这场|那个|一个)?/,
-      /我(把|把这个|把那|把那个)\s*(故事|结局|剧情|人物|角色|场景|设定)/,
+      // 元叙述①：创作反思修饰 + 写（"我本来想写""我原本打算写"——作者反思语气，故事内人物不会这样说话）
+      /我\s*(本来|原本|原想|原准备|本来想|本来准备|一直想|也曾想|想过要)\s*(想|准备|打算)?\s*写/,
+      // 元叙述②：写 + 创作对象（"我写这个结局""我写的这个故事""我准备写一场对峙"）
+      /我\s*写\s*的?\s*(这|那)?\s*(个|篇|本|场)?\s*(结局|故事|剧情|开头|结尾|章节|番外|续集|小说|文章|伏笔|反转|对峙|场景|设定|人物|角色)/,
+      // 元叙述③：把/将故事元素如何（"我把结局改成了""我把这个故事写完了"）
+      /我\s*(把|将)\s*(这|那|个|这场|那个|一个)?\s*(故事|结局|剧情|人物|角色|场景|设定)/,
       // 元叙述/作者口吻
       /(作者|编者|笔者)\s*(写|觉得|也|认为|决定|在这里|写到这里)/,
       /作者.{0,6}(为难|为难|叹气|摇头|心里|也很)/,
@@ -179,17 +193,32 @@ export function detectForbiddenTells(
       });
     }
     // 顿号排比列表：连续 ≥5 项"XX、"（"取餐、核对编号、骑车、等灯、敲门、递出去"）是 AI 动作清单指纹。
-    // 阈值保持 {4,}=5 项（N 项并列只有 N-1 个顿号）：4 项同构由规则53专管，此处若降到 4 项会误伤
-    // “苹果、香蕉、橘子、葡萄”这类正常名词并列；片段放宽到 2-6 字以容纳动宾短语。
-    const listEnumeration = (content.match(/([一-鿿]{2,6}[、]){4,}/g) || []).length;
-    if (listEnumeration >= 1) {
-      const listEx = (content.match(/([一-鿿]{2,6}[、]){4,}/g) || []).slice(0, 2).map(s => s.trim().slice(0, 30));
-      findings.push({
-        ruleId: 'list-enumeration',
-        message: `顿号动作清单 ${listEnumeration} 处（连续 ≥5 项"XX、"罗列）。只保留 2 个核心项并写出具体结果，其余删掉，避免"罗列清单"；相同动词前缀的同构排比（带了A、带了B…）见规则53`,
-        snippet: listEx.join(' / '),
-        position: '全文',
-      });
+    // 本轮修复根因：旧实现只按"顿号并列 ≥5 项"判，把点名/花名册等人名清单（"周雨、贺小满、莫婷…
+    // 韦家宝、陶然、龙秀、简宁、石佳、殷宇"）误判成"动作清单"——人名/物品/地名等名词并列是合法
+    // 叙事元素。因此必须验证并列项中"动作项"过半才算动作清单：动作项 = 项以动作动词领起（复用规则34
+    // 的动作动词表，刻意不含姓氏字，避免人名单误伤）。纯名词清单一律放行。
+    {
+      const LIST_ACTION_HEADS = new Set(
+        '站起来|站起身|站起|起身|坐下|坐回|坐|走过去|走到|走进|走上|迈步|迈出|迈|跨|退|冲|跑|转身|回过头|回头|转过|抬|低|点|摇|伸|缩|举|放|抓|握|接|推|拉开|拉|抽出|抽|拿出|取出|拿|取|掏|摸|按|靠|蹲|跪|趴|迎|躲|闪|翻|合上|关上|关|打开|掀开|掀|抹|擦|搓|攥|捏|递|塞|拽|拖|扛|抱|搂|牵|挽|核对|骑车|骑|等灯|等|敲门|敲|写|画|记|数|签|付|收|递出去|拾|捡|拆|装|拧|撕|叠|铺|盖|扔|丢|抛|投|掷|拍|揉|扎|钉|缝|补|剪|裁|切|剁|削|刮|挖|铲|浇|灌|洒|泼|倒|泡|沏|煮|炒|煎|蒸|炖|烤|烧|炸|搬|运|扛|挑|驮|驾|驶|蹬|滑|漂|游|潜|爬|攀|登|跃|蹦|弹|射|发|传|抢|夺|偷|骗|哄|劝|诱|逼|催|盯|瞅|瞄|瞟|瞥|望|瞧|看|观|察|探|访|拜|会|见|约|邀|请|送|迎|陪|跟|随|领|带|引|导|教|授|学|练|习|试|验|测|量|称|算|计|估|料|想|思|谋|划|规|设|建|造|修|理|组|解|析|辨|别|认|懂|悟|醒|感|体|审|批|准|许|允|诺|应|答|复|谢|骂|吼|嚷|呼|唤|挥|扬|摇|晃|舞|动|移|挪|改|调|整|正|纠|删|除|加|增|减|缩|扩|张|合|闭|启|止|歇|息|睡|眠|梦|幻|念|忆|忘|失|寻|觅|搜|索|询|阅|读|览|抄|录|述|讲|谈|论|议|辩|争|吵|闹|斗|击|攻|防|守|护|救|援|助|帮|扶|携|持|执|掌|控|制|管|理|治|置|玩|耍|戏|逗|乐|笑|哭|泣|嚎|啼|鸣|吠|啸|吸|吐|纳|咽|吞|嚼|咬|啃|饮|喝|品|尝|闻|嗅|触|碰|撞|压|扭|扳|撬|掘|凿|钻|穿|刺|插|拔|扯|裂|破|碎|断|折|弯|曲|直|展|摊|衬|托|架|支|撑|顶|搂|拥|揽|攥|掐|搓|磨|蹭|拭|拂|刷|涤|冲|淋|浴|浸|润|湿|滴|淌|流|涌|喷|射|溅|落|坠|跌|摔|倒|伏|卧|倚|靠|立|滚|腾|窜|蹿|闯|挤|拥|簇|围|拢|聚|散|离|行|步|奔|驰|骋|御|乘|翔|翱|泅|浮|沉|荡|悠|旋|绕|环|巡|逛|踏|践|履|涉|渡|趟|蹚|踹|踢|碾|轧|磕|划|割|锯|砍|劈|斩|截|拦|堵|塞|遮|掩|蔽|覆|裹|包|缠|捆|绑|扎|结|拴|套|罩|蒙|捂|填|补|更|替|代|轮|值|卫|抵|抗|袭|杀|戮|屠|宰|绞|勒|扼|牵|挈|拎|挎|担|擎|捧|端|摘|采|揪|掰|启|揭|掀|撩|拨|挑|剔|剥|褪|卸|解|拆|散|分|离|别|隔|锯|剪|纫|绣|织|编|扣|缚|盘|折|返|归|还|撤|趋|赴|往|升|降|抖|颤|震|输|寄|邮|甩|弃|陈|列|整|拾|清|除|抹|涂|订|改|易|充|藏|隐|匿|避|让|防|维|持|坚|继|延|终|结|了|算|量|检|验|复|校|对|较|鉴|认|证|核|实|求|探|究|调|研|剖|释|阐|讲|介|描|叙|陈|报|汇|呈|交|移|手|承|任|负|经|营|运|操|执|实|施|落|贯|遵|服|从|顺|依|据|基|着|立|抓|紧|加|快|推|深|完|健|促|升|引|牵|组|举|办|召|进|启|程|赴|达|返|归'.split('|')
+      );
+      const listMatches = content.match(/([一-鿿]{2,6}[、]){4,}[一-鿿]{2,6}/g) || [];
+      const actionListHits: string[] = [];
+      for (const lm of listMatches) {
+        const items = lm.split('、').map(s => s.trim()).filter(Boolean);
+        // 动作项 = 项以动作动词领起（先 2 字动词再 1 字动词）；并列项 ≥5 且动作项过半才判动作清单
+        const actionItems = items.filter(it => LIST_ACTION_HEADS.has(it.slice(0, 2)) || LIST_ACTION_HEADS.has(it.slice(0, 1)));
+        if (items.length >= 5 && actionItems.length >= Math.ceil(items.length / 2)) {
+          actionListHits.push(lm);
+        }
+      }
+      if (actionListHits.length > 0) {
+        findings.push({
+          ruleId: 'list-enumeration',
+          message: `顿号动作清单 ${actionListHits.length} 处（连续 ≥5 项动作"XX、"罗列：${actionListHits[0].slice(0, 24)}）。只保留 2 个核心动作并写出具体结果，其余删掉，避免"罗列动作清单"；相同动词前缀的同构排比（带了A、带了B…）见规则53；人名/物品/地名等名词并列（点名、菜单、花名册）是合法叙事，不是动作清单，不得改动`,
+          snippet: actionListHits.slice(0, 2).map(s => s.trim().slice(0, 30)).join(' / '),
+          position: '全文',
+        });
+      }
     }
     // 对话占比过低：爆款网文对话占比高（用对话推进剧情/交代设定/制造冲突）。
     // 全章几乎无对话=大段独白+环境描写，是 AI 文的典型形态。阈值 8%。
@@ -367,7 +396,11 @@ export function detectForbiddenTells(
     {
       // 多字词优先（站起来 先于 站）；均为“人能直接做出的动作动词”，名词/方位/状态词不入表
       const ACTION_HEAD = '(?:站起来|站起身|站起|起身|坐下|坐回|坐|走过去|走到|走进|走上|迈步|迈出|迈|跨|退|冲|跑|转身|回过头|回头|转过|抬|低|点|摇|伸|缩|举|放|抓|握|接|推|拉开|拉|抽出|抽|拿出|取出|拿|取|掏|摸|按|靠|蹲|跪|趴|迎|躲|闪|翻|合上|关上|关|打开|掀开|掀|抹|擦|搓|攥|捏|递|塞|拽|拖|扛|抱|搂|牵|挽)';
-      const actionSeg = new RegExp(ACTION_HEAD + '[一-龥]{0,8}[，,。！？!?]', 'g');
+      // 片段只匹配动作词+后续汉字（不吞结尾标点）：标点留给 between 隔断检查。
+      // 修复误报根因：旧实现吞掉结尾标点（"坐下。"），使"坐下。坐下以后"两个独立句
+      // 因 end=start 被误判为同一动作流；标点不吞后，句号/感叹号/问号恢复为隔断，
+      // 逗号连接的紧凑动作链（"站起来，走到桌前，拉开抽屉，拿出纸"）仍正常命中。
+      const actionSeg = new RegExp(ACTION_HEAD + '[一-龥]{0,8}', 'g');
       const segs34: Array<{ start: number; end: number }> = [];
       let vm34: RegExpExecArray | null;
       while ((vm34 = actionSeg.exec(content)) !== null) {
@@ -413,6 +446,56 @@ export function detectForbiddenTells(
         });
         break;
       }
+    }
+
+    // ===== 35b 叙述标点平板（引号外叙述连续 300 字无问号/感叹/破折号/省略号/分号） =====
+    // 规则 35 的盲区：对话引号算"多样性"，导致"满篇对话 + 平板叙述"漏检。本规则只看
+    // 引号外的叙述文本：连续 300 字叙述只用逗号句号、无任何情绪/停顿标点，读起来平板机械
+    // （AI 收敛标点的指纹）。属 advisory（不阻断保存），提示精修时在情绪点用标点制造节奏；
+    // 压抑白描风格允许整体低频，因此不做硬红线。
+    const narrationOnly = content
+      .replace(/[\u201C][^\u201D\n]{1,60}[\u201D]/g, '“”')   // 中文引号内容替换为空引号
+      .replace(/["][^"\n]{1,60}["]/g, '""');                     // 英文引号内容
+    const narrationWindow = 300;
+    for (let i = 0; i < narrationOnly.length - narrationWindow; i += 100) {
+      const w = narrationOnly.slice(i, i + narrationWindow);
+      const hasNarrationDiversity = /[!?！？…—\u2014;:：;]/.test(w);
+      if (!hasNarrationDiversity) {
+        findings.push({
+          ruleId: '35b',
+          message: `叙述段连续 ${narrationWindow} 字只用逗号句号、无问号/感叹号/破折号/省略号/分号（标点平板，节奏机械）。在情绪转折处用感叹、停顿（省略号/破折号）或问句制造节奏，不要全章只用逗号句号`,
+          snippet: slice(w, 80),
+          position: `offset ${i}-${i + narrationWindow}`,
+        });
+        break;
+      }
+    }
+
+    // ===== 56 标点连用滥用（！！！/？？/！？/？！，叠用标点非规范用法） =====
+    // GB/T 15834 规定感叹号/问号不得叠用；网络 AI 输出常用"！！""？？""！？"渲染色调，
+    // 是机器情绪化的物理指纹。任何一处叠用即阻断。
+    const stackedPunct = content.match(/[！？!?]{2,}/g) || [];
+    if (stackedPunct.length > 0) {
+      findings.push({
+        ruleId: '56-punct-stacking',
+        message: `标点叠用 ${stackedPunct.length} 处（"！！""？？""！？"等，感叹号/问号叠用非规范用法，是 AI 情绪渲染指纹）。全部改单标点，用句子本身传达情绪`,
+        snippet: slice(stackedPunct[0] ?? '', 20),
+        position: '全文',
+      });
+    }
+
+    // ===== 57 省略号过密（>5 处/千字 = AI 欲言又止指纹） =====
+    // 人类网文省略号 0-2 处/千字；AI 惯用"……"制造沉默/意味深长，密度常达 8-15/千字。
+    // 阈值 5/千字（约人类 2.5 倍）才阻断，正常写作不会触线；只保留真正需要中断/沉默处。
+    const ellipsisCount = (content.match(/……/g) || []).length;
+    const ellipsisPerKilo = ellipsisCount / (content.length / 1000);
+    if (ellipsisPerKilo > 5) {
+      findings.push({
+        ruleId: '57-ellipsis-density',
+        message: `省略号过密（${ellipsisCount} 处、约 ${ellipsisPerKilo.toFixed(1)} 处/千字，人类约 0-2 处/千字）。绝大多数停顿改用逗号/句号或直接写动作，只保留真正欲言又止/中断的 1-2 处`,
+        snippet: slice((content.match(/[^。！？\n]*……[^。！？\n]*/g) || [''])[0], 40),
+        position: '全文',
+      });
     }
 
     // ===== 36 热血空洞句（"这一刻""我终于""我必须""我不能""唯一能""最好的""只有……才能"） =====
@@ -534,6 +617,19 @@ export function detectForbiddenTells(
         const stack = sentences.slice(j, j + stackNeed).map(s => s.trim());
         const lens = stack.map(s => s.replace(/[。！？\.!?，,、；;：:]/g, '').length);
         if (lens.every(l => l >= 2 && l <= stackMaxLen)) {
+          // 并列清单豁免（修复误杀根因）：整组短句都是"名称+逗号/顿号+名称。"式名词对
+          // （名单/账目/对照表，如"周雨，周红。贺小满，贺家。"）属正文需要的信息清单，
+          // 不是 AI"诗歌断行"节奏；含谓语/虚词的叙事短句（"我认出来了。这是反派的办公室。"）不豁免。
+          const isListStack = stack.every(s => {
+            const t = s.trim().replace(/[。！？.!?]$/, '');
+            const parts = t.split(/[，,、]/);
+            if (parts.length !== 2) return false;
+            const a = parts[0].trim(), b = parts[1].trim();
+            if (!a || !b) return false;
+            if (/[的了地得是有了也又还不就都正在把被给向为对从和与及或但则吗呢吧啊]/.test(t)) return false;
+            return t.length <= 14;
+          });
+          if (isListStack) break; // 名单清单不判 39
           const joined = stack.join('');
           findings.push({
             ruleId: '39',
@@ -673,45 +769,107 @@ export function detectForbiddenTells(
     const hasHesitation42 = /(我…|也…|不…|可能|大概|也许|好像|算是|差不多|也…也|我我|他他)/.test(content);
     const hasToneWords42 = /([嗯啧哼嘶呸啊哎嘿哈哦呜]{1,2}[！。，、… ])/.test(content);
     const hasRepetition42 = /((.{1,3})\2\2)/.test(content);
-    const humanMarkers42 = [hasInterruption42, hasSilence42, hasEvasion42, hasHesitation42, hasToneWords42, hasRepetition42].filter(Boolean).length;
-    const dialogueQuotes42 = (content.match(/[\u201C\u201D""]/g) || []).length;
-    if (dialogueQuotes42 >= 6 && humanMarkers42 === 0) {
+    // 动作介入（对话伴随身体动作，是人类书写的强信号；AI 圆滑客服对话不会出现）
+    const hasAction42 = /(磨了半天|磨了磨|抬起脸|抬起头|低下头|顿了一下|顿了顿|愣住|愣了愣|愣了半天|没动|张了张嘴|张张嘴|欲言又止|别过脸|侧过身|背过身|转过身|站住|停住|停下|清了清嗓子|咳了一声|看了一眼|看了看|瞄了一眼|盯着|摸了摸|攥紧|握了握|扯了扯|拉了拉|拽了拽|按了按|揉了揉|推了推|撞了一下|推了一下|拍了拍|咬了咬|咽了口|咽了咽|吸了口气|深吸一口气|叹了口气)/.test(content);
+    const humanMarkers42 = [hasInterruption42, hasSilence42, hasEvasion42, hasHesitation42, hasToneWords42, hasRepetition42, hasAction42].filter(Boolean).length;
+    // 真对话段判定（本轮修复根因）：旧实现只要段落里出现任意引号就计入"对话段落"，把叙述段中的
+    // 引用称呼/记录词（"2016年秋季那一张，'贺小满'后面写着'叔叔'"）误判成对话，导致"连续 N 段
+    // 对话无人味"大面积误报。真对话段只有两种：① 段首即引语（"…"开头）；② 段内成对引号且
+    // 引号前紧邻说话动词（他说："…"）。"写着/改成/叫做"等记录性动词不是说话，一律不计入。
+    const isDialoguePara42 = (p: string): boolean => {
+      if (/^[\u201C"「]/.test(p)) return true;
+      // 转述/称谓引用（"一个说'我姨妈'，另一个说'我姑姑'"）：说话者非具体人物，
+      // 属叙述性转述而非现场对答，不算对话段。
+      if (/(?:一个|另一个|有人说?|有人|别人|谁都没|没人|大家)[^。！？\n]{0,10}?(?:说|答|应|回|叫|喊|问)[：:，,]?\s*[\u201C"「][^\u201C"「\n]{1,6}[\u201D"」]/.test(p)) return false;
+      return /(说|问|答|道|喊|叫|吼|嚷|应|回|念|读|讲|骂|哭|笑|叹|叹口气)[：:，,]?\s*[\u201C"「][^\u201C"「\n]{1,80}[\u201D"」]/.test(p);
+    };
+    const dialogueParaIndices: number[] = [];
+    for (let i = 0; i < paragraphs.length; i++) {
+      if (isDialoguePara42(paragraphs[i])) dialogueParaIndices.push(i);
+    }
+    // 全局：真对话段 ≥3 且全章无人味标志 → 客服式对话整体违规。
+    // 追问推进豁免：全章对话中【去重问句 ≥3】说明存在信息推进的追问/对峙场景，不判"客服式"。
+    let globalEvasion = false;
+    const globalEvasionRe = /(那边|这边|就那样|那样|不知道|不清楚|说不清|说不上|忘了|记不清|没记住|再说吧|再说|随便|都行|看情况|外头|里头|别问了|别问|不想说|不记得|没听清|在镇上|在乡下|在城里|在厂里|在外面|来不了|没空|忙着呢|走不开|说不准|没准|说不定|说不好)/;
+  const tautologyRe = /^([^，。！？、；：\s]{1,8})(?:就是|还是|不还是|不就是)\1/;
+      for (const di of dialogueParaIndices) {
+        const inner = (paragraphs[di].match(/[\u201C"「][^\u201C"「\n]{1,60}[\u201D"」]/) || [''])[0];
+        if (!(/[？?]$/.test(inner) || /(谁|什么|哪儿|哪里|哪|怎么|为什么|多少|几|吗|呢|啥)/.test(inner)) && (globalEvasionRe.test(inner) || tautologyRe.test(inner))) {
+          globalEvasion = true;
+        }
+      }
+    const globalProbing = globalEvasion;
+    if (dialogueParaIndices.length >= 3 && humanMarkers42 === 0 && !globalProbing) {
       findings.push({
         ruleId: '42',
-        message: `全章 ${dialogueQuotes42} 个对话引号对，但无人味标志（无打断/沉默/答非所问/吞吞吐吐/语气词/重复）——纯"xx说/xx回答"客服式对话`,
+        message: `全章 ${dialogueParaIndices.length} 段真实对话，但无人味标志（无打断/沉默/答非所问/吞吞吐吐/语气词/重复）——纯"xx说/xx回答"客服式对话`,
         snippet: '全章',
         position: '全文',
       });
-    } else {
-      // 段落级检测：连续 ≥4 段含对话引号的段落无人味标志
-      const dialogueParaIndices: number[] = [];
-      for (let i = 0; i < paragraphs.length; i++) {
-        if (/[\u201C\u201D""]/.test(paragraphs[i])) dialogueParaIndices.push(i);
+    } else if (dialogueParaIndices.length >= 4) {
+      // 段落级检测：连续 ≥4 段真实对话无人味标志。
+      // 关键口径（本轮修复）：只统计【物理相邻】的对话段——中间只要插入叙述/动作段，
+      // 对话就被打断（叙述本身即场景感/人味），连续计数立即重置，而不是按对话段列表
+      // 相邻跳过叙述段继续累加（旧口径把隔段对话误判为"连续圆滑对答"，是 42 反复
+      // 误报的根因）。
+      let consecutiveNoHuman = 0;
+      let maxConsecutive = 0;
+      let maxStart = 0;
+      let currentStart = 0;
+      for (let j = 0; j < dialogueParaIndices.length; j++) {
+        // 物理相邻检查：当前对话段与上一对话段之间若隔着非对话段，视为被打断
+        if (j > 0 && dialogueParaIndices[j] !== dialogueParaIndices[j - 1] + 1) {
+          if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
+            maxConsecutive = consecutiveNoHuman;
+            maxStart = currentStart;
+          }
+          consecutiveNoHuman = 0;
+        }
+        const p = paragraphs[dialogueParaIndices[j]];
+        // 混合段人味（修复误报根因）：对话段内【引号外叙述文字 ≥6 个汉字】（去掉标点后）即视为
+        // 动作/场景/心理叙述介入，天然具有叙事人味——"小满的目光往窗外偏了一下。然后她把书包带子
+        // 往肩上一提，说：'老师，阿岩来了。'"属动作介入的叙事段，不是"纯客服式对答"；
+        // 纯"他说：'…'""她问：'…'"（引号外仅说话标签，<6 字）仍按原逻辑判无人味。
+        const quoteOutside = p.replace(/[\u201C\u201D"「」][^\u201C\u201D"「」]*[\u201C\u201D"「」]/g, '');
+        const narrationLen = quoteOutside.replace(/[，。！？、；：…\s]/g, '').length;
+        const hasMixedNarration = narrationLen >= 6;
+        const localHuman = hasMixedNarration || /([—\u2014]|没说话|没出声|没回答|沉默|没理|没接|没回|不回答|不说|你看|那个|这怎么|什么呀|不会吧|瞎说|哪有|骗人|不信|[嗯啧哼嘶呸啊哎嘿哈哈哦呜]{1,2}[！。，、… ]|…|我我|他他|也…也|磨了半天|磨了磨|抬起脸|抬起头|低下头|顿了一下|顿了顿|愣住|愣了愣|愣了半天|没动|张了张嘴|张张嘴|欲言又止|别过脸|侧过身|背过身|转过身|站住|停住|停下|清了清嗓子|咳了一声|看了一眼|看了看|瞄了一眼|盯着|摸了摸|攥紧|握了握|扯了扯|拉了拉|拽了拽|按了按|揉了揉|推了推|撞了一下|推了一下|拍了拍|咬了咬|咽了口|咽了咽|吸了口气|深吸一口气|叹了口气)/.test(p);
+        if (!localHuman) {
+          if (consecutiveNoHuman === 0) currentStart = dialogueParaIndices[j];
+          consecutiveNoHuman++;
+        } else {
+          if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
+            maxConsecutive = consecutiveNoHuman;
+            maxStart = currentStart;
+          }
+          consecutiveNoHuman = 0;
+        }
       }
-      if (dialogueParaIndices.length >= 4) {
-        let consecutiveNoHuman = 0;
-        let maxConsecutive = 0;
-        let maxStart = 0;
-        let currentStart = 0;
-        for (let j = 0; j < dialogueParaIndices.length; j++) {
-          const p = paragraphs[dialogueParaIndices[j]];
-          const localHuman = /([—\u2014]|没说话|没出声|没回答|沉默|没理|没接|没回|不回答|不说|你看|那个|这怎么|什么呀|不会吧|瞎说|哪有|骗人|不信|[嗯啧哼嘶呸啊哎嘿哈哈哦呜]{1,2}[！。，、… ]|…|我我|他他|也…也)/.test(p);
-          if (!localHuman) {
-            if (consecutiveNoHuman === 0) currentStart = dialogueParaIndices[j];
-            consecutiveNoHuman++;
-          } else {
-            if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
-              maxConsecutive = consecutiveNoHuman;
-              maxStart = currentStart;
+      if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
+        maxConsecutive = consecutiveNoHuman;
+        maxStart = currentStart;
+      }
+      if (maxConsecutive >= 4) {
+        // 追问推进豁免（修复误杀根因）：规则 42 本意是拦截"无信息推进的客服式寒暄对答"；
+        // 而"信息推进的追问/对峙"——老师连续换问句逼问、对方敷衍回避（如"就来接你的是谁。/
+        // 我姨妈。/她在哪儿住。/在那边。/哪边。"）——每轮问句都在推进新信息，是有戏剧张力的
+        // 正文，LLM 评审确认合格。判定口径：连续区内【去重问句 ≥3 个】即视为追问推进区，豁免 42；
+        // 问句少（<3）的机械套问（"你妈在哪儿？""广东。""你爸呢？""也在外头。"）不豁免。
+        let hasEvasionAnswer = false;
+        {
+          const evasionAnswerRe = /(那边|这边|就那样|那样|不知道|不清楚|说不清|说不上|忘了|记不清|没记住|再说吧|再说|随便|都行|看情况|外头|里头|别问了|别问|不想说|不记得|没听清|在镇上|在乡下|在城里|在厂里|在外面|来不了|没空|忙着呢|走不开|说不准|没准|说不定|说不好)/;
+          const tautologyRe = /^([^，。！？、；：\s]{1,8})(?:就是|还是|不还是|不就是)\1/;
+          for (let k = maxStart; k < maxStart + maxConsecutive; k++) {
+            const inner = (paragraphs[k].match(/[\u201C"「][^\u201C"「\n]{1,60}[\u201D"」]/) || [''])[0];
+            if (!(/[？?]$/.test(inner) || /(谁|什么|哪儿|哪里|哪|怎么|为什么|多少|几|吗|呢|啥)/.test(inner)) && (evasionAnswerRe.test(inner) || tautologyRe.test(inner))) {
+              hasEvasionAnswer = true;
             }
-            consecutiveNoHuman = 0;
           }
         }
-        if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
-          maxConsecutive = consecutiveNoHuman;
-          maxStart = currentStart;
-        }
-        if (maxConsecutive >= 4) {
+        // 豁免条件：连续区内至少一个答句为模糊/闪避（"那边""不知道"——有对抗张力，是追问/对峙
+        // 场景的物理指纹，不是客服式配合回答）。登记式一问一答（"你叫什么名字？""周雨。"）无
+        // 闪避，仍判圆滑交替对答。
+        if (!hasEvasionAnswer) {
           findings.push({
             ruleId: '42',
             message: `连续 ${maxConsecutive} 段对话无人味标志（无打断/沉默/语气词/重复——圆滑交替对答）`,
@@ -971,6 +1129,38 @@ export function detectForbiddenTells(
           ruleId: '54-measure-word-mismatch',
           message: `量词与名词搭配错误 ${measureHits.length} 处（如“${measureHits[0].slice(0, 14)}”——“束”只用于花、光、发丝、柴草等成束细长物，蛋糕/文件/戒指等块状、个状物要用“个/只/份”）。逐处核对量词与名词是否匹配，禁止把甲物的量词套到乙物`,
           snippet: measureHits.slice(0, 3).join(' / '),
+          position: '全文',
+        });
+      }
+    }
+
+
+    // ===== 55 AI 高频模糊词密度（用户反馈"正文 AI 痕迹太重"的感知层：仿佛/似乎/不禁/缓缓/微微…） =====
+    // 统计时剥离对话引号内容（口语里"仿佛/似乎"合法），只统计叙述层；
+    // 阈值保守：每千字 ≥5 处、或同一词单章 ≥4 处才判，避免误伤正常文笔。
+    {
+      const aiVagueWords55 = [
+        '仿佛', '似乎', '不禁', '不由得', '不由', '缓缓', '微微', '静静', '默默', '悄然', '无声',
+        '一丝', '一缕', '一抹', '某种', '些许', '莫名', '隐约', '隐隐', '略带',
+      ];
+      const narrativeOnly = content.replace(/[“"「][^”"」]{1,80}[”"」]/g, '');
+      const hanLen55 = (narrativeOnly.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length || 1;
+      let totalHits55 = 0;
+      let maxWord55 = 0;
+      let maxWordName55 = '';
+      const hitExamples55: string[] = [];
+      for (const w of aiVagueWords55) {
+        const cnt = (narrativeOnly.match(new RegExp(w, 'g')) || []).length;
+        totalHits55 += cnt;
+        if (cnt > maxWord55) { maxWord55 = cnt; maxWordName55 = w; }
+        if (cnt > 0 && hitExamples55.length < 3) hitExamples55.push(`${w}×${cnt}`);
+      }
+      const perKilo55 = totalHits55 / (hanLen55 / 1000);
+      if ((perKilo55 >= 5 && totalHits55 >= 8) || maxWord55 >= 4) {
+        findings.push({
+          ruleId: '55',
+          message: `AI 高频模糊词过密（叙述层 ${totalHits55} 处、约 ${perKilo55.toFixed(1)} 处/千字${maxWordName55 ? `，最多是“${maxWordName55}”${maxWord55} 次` : ''}）。仿佛/似乎/不禁/缓缓/微微/一丝/一缕/某种/莫名/隐约这类模糊渲染是 AI 腔指纹：能用具体动作、数字、物件与对话说清的，一律删掉模糊词直说；同一情绪点最多保留 1 处`,
+          snippet: hitExamples55.join(' / '),
           position: '全文',
         });
       }

@@ -1,7 +1,7 @@
 /**
  * AI质检系统
  * 逻辑检测、人设漂移检测、伏笔遗漏检测、写作专属十一维度评分
- * 维度标准见：AI写作平台研发计划.md 模块H4/H5
+ * 维度口径以项目执行标准为唯一事实源（module-standards seed / QUALITY_EXECUTION.md）
  */
 import { Injectable } from '@nestjs/common';
 import type {
@@ -16,17 +16,6 @@ const DIMENSION_KEYS: (keyof InspectionResult['dimensions'])[] = [
   'chapterEnding', 'immersion', 'suspenseDensity', 'reversalPower',
   'characterMotivation', 'foreshadowingRecovery', 'aiTraceIndex',
 ];
-
-/** 质量维度标准条目 */
-export interface QualityStandard {
-  name: string;
-  key: string;
-  excellent: number;
-  pass: number;
-  fail: number;
-  description: string;
-  suggestion: string;
-}
 
 @Injectable()
 export class QualityInspectionService {
@@ -121,114 +110,6 @@ export class QualityInspectionService {
     const dimensions = Object.fromEntries(DIMENSION_KEYS.map(key => [key, null])) as InspectionResult['dimensions'];
     if (content.trim().length >= 200) dimensions.aiTraceIndex = this.detectAiFingerprints(content).overallScore;
     return dimensions;
-  }
-
-  /**
-   * 获取质量维度量化标准表
-   * H5标准：10个写作维度 + AI痕迹指数，每个维度含评分阈值和描述
-   */
-  getStandards(): QualityStandard[] {
-    return [
-      {
-        name: '开头钩子',
-        key: 'openingHook',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '前500字的代入感与悬念张力，评估开篇能否快速吸引读者',
-        suggestion: '建议加入冲突、疑问或意外事件开场，避免平铺直叙',
-      },
-      {
-        name: '热血感',
-        key: 'passion',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '爽点密度与对抗张力，评估内容是否"燃"、是否有高光时刻',
-        suggestion: '增加逆袭、对决或爆发场景，提升情绪起伏',
-      },
-      {
-        name: '短伏笔密度',
-        key: 'shortForeshadowingDensity',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '2~3章内回收的短伏笔密度，评估节奏紧凑度',
-        suggestion: '每2~3章埋设并回收至少一条伏笔线索',
-      },
-      {
-        name: '长伏笔密度',
-        key: 'longForeshadowingDensity',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '10章以上回收的长伏笔密度，评估长篇布局能力',
-        suggestion: '规划贯穿全文的伏笔主线，保持悬念连贯性',
-      },
-      {
-        name: '章节结尾吸引力',
-        key: 'chapterEnding',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '章节结尾钩子强度，评估是否让读者"非看下一章不可"',
-        suggestion: '以本章行动造成的新问题或未完成选择收束章节，避免模板化转折句',
-      },
-      {
-        name: '代入感',
-        key: 'immersion',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '角色共鸣度与五感描写丰富度，评估读者沉浸体验',
-        suggestion: '增加环境、身体感知细节和角色内心活动描写',
-      },
-      {
-        name: '悬念密度',
-        key: 'suspenseDensity',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '未解之谜与伏笔线索的分布密度',
-        suggestion: '埋设更多未解答的疑问，增加神秘元素',
-      },
-      {
-        name: '反转力度',
-        key: 'reversalPower',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '情节反转是否意外又合理，评估转折设计质量',
-        suggestion: '铺垫后突然揭露真相，避免无铺垫的反转',
-      },
-      {
-        name: '人物动机',
-        key: 'characterMotivation',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '角色行为逻辑与动机合理性',
-        suggestion: '补充角色行动的前因后果，避免为剧情服务而行动',
-      },
-      {
-        name: '伏笔回收',
-        key: 'foreshadowingRecovery',
-        excellent: 8,
-        pass: 6,
-        fail: 0,
-        description: '伏笔回收率与回收及时性',
-        suggestion: '确保重要伏笔在合适的节点得到回收',
-      },
-      {
-        name: 'AI痕迹指数',
-        key: 'aiTraceIndex',
-        excellent: 25,
-        pass: 40,
-        fail: 100,
-        description: 'AI生成痕迹检测，越低越好（≤25过关，>40必须降AI处理）',
-        suggestion: '使用降AI处理工具优化句式多样性，减少AI常用表达',
-      },
-    ];
   }
 
   /**

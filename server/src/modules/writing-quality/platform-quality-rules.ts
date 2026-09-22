@@ -52,3 +52,65 @@ export function deterministicPlatformReview(input: {
   ));
   return { issues, measurements };
 }
+
+/**
+ * 确定性平台问题（platform.*）→ 落库用的质检标签。
+ * 同一份 measurement 在生成侧 Gate 与质检侧共用，这里只做词汇映射，保证
+ * "不符合目标平台"在所有书、所有章都能逐条定向精修，并被 LESSON_BY_TYPE 沉淀成跨章教训。
+ */
+export const PLATFORM_ISSUE_TAGS: Record<string, string> = {
+  'platform.chapter_length': 'platform_chapter_length',
+  'platform.avgParaChars': 'platform_paragraph_length',
+  'platform.longParaRatio': 'platform_paragraph_length',
+  'platform.dialogue_ratio': 'platform_dialogue_ratio',
+  'platform.opening_hook_position': 'platform_opening_hook',
+  'platform.ending_hook': 'platform_ending_hook',
+  'platform.payoff_emotion_gap_risk': 'platform_payoff_gap',
+};
+
+const PLATFORM_ISSUE_TITLES: Record<string, string> = {
+  platform_chapter_length: '单章字数不符合目标平台篇幅',
+  platform_paragraph_length: '段落长度不符合目标平台阅读节奏',
+  platform_dialogue_ratio: '对话占比偏离目标平台区间',
+  platform_opening_hook: '开篇钩子位置不符合目标平台要求',
+  platform_ending_hook: '章尾留钩不符合目标平台要求',
+  platform_payoff_gap: '推进/爽点间隔超出目标平台密度',
+};
+
+const PLATFORM_ISSUE_SUGGESTIONS: Record<string, string> = {
+  platform_chapter_length: '按目标平台单章字数区间增删：补足有效情节或压缩冗余铺陈，不改变本章大纲契约。',
+  platform_paragraph_length: '拆长短段：单段不超过平台上限，长段之间插入短句或对话，避免大段密排。',
+  platform_dialogue_ratio: '提高对话密度：把说明性叙述改成人物之间的一来一回，加入打断、沉默与动作，使对话占比进入平台区间。',
+  platform_opening_hook: '重写开篇：前几百字直接落在冲突/反常/强悬念上，删掉环境与履历铺垫。',
+  platform_ending_hook: '重写章尾：落在未解问题、反转、新威胁或关键动作/对话上，不要平淡收尾。',
+  platform_payoff_gap: '在长间隔中补有效推进或情绪兑现（反转、进展、对手反应、关键抉择），缩短无推进段落。',
+};
+
+export interface PlatformQualityRow {
+  issueType: string;
+  severity: string;
+  title: string;
+  summary: string;
+  evidence: string;
+  suggestion: string;
+  tags: string[];
+}
+
+/** 把 deterministicPlatformReview 的发现映射成 writing_quality_issues 可直接入库的问题行。 */
+export function platformReviewToRows(review: { issues: QualityIssue[] }): PlatformQualityRow[] {
+  const rows: PlatformQualityRow[] = [];
+  for (const issue of review.issues) {
+    const issueType = PLATFORM_ISSUE_TAGS[issue.ruleId];
+    if (!issueType) continue;
+    rows.push({
+      issueType,
+      severity: issue.severity,
+      title: PLATFORM_ISSUE_TITLES[issueType] || issue.message,
+      summary: issue.message,
+      evidence: issue.evidence.quote || issue.message,
+      suggestion: PLATFORM_ISSUE_SUGGESTIONS[issueType] || '按目标平台指标调整本章写法，只改叙述方式与节奏，不改剧情事实。',
+      tags: [issueType],
+    });
+  }
+  return rows;
+}

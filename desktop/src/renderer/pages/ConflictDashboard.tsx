@@ -2,7 +2,7 @@
  * ConflictDashboard - 冲突优先级可视化面板
  * 对接后端 /conflict-engine/* API
  *
- * 行为依据（AI写作平台研发计划.md 模块 R 冲突优先级体系）：
+ * 行为依据（项目执行标准：module-standards seed / QUALITY_EXECUTION.md 的冲突优先级与章节职责先于措辞）：
  * - R1 金字塔：锁定正文(P0) > 世界观(P1) > 基础设定/大纲(P2) > 未锁定正文(P3)
  * - R2 处理：高优先级可改 → 评估+用户确认；锁定 → 以高优先级为准自动修改低优先级
  * - R4 流程：高优先级不可变 → 自动修正低优先级；高优先级可改 → AI生成方案+用户确认
@@ -45,6 +45,7 @@ interface ConflictItem {
   chapterStatus?: string | null;
   checkType?: string;
   source?: string;
+  sourceLabel?: string;
   actions?: ConflictAction[];
 }
 
@@ -223,6 +224,8 @@ const ConflictDashboard: React.FC = () => {
           { key: 'deterministic', label: '叙事逻辑', count: conflicts.filter(c => !c.source || c.source === 'deterministic').length },
           { key: 'alignment_verifier', label: '大纲一致性', count: conflicts.filter(c => c.source === 'alignment_verifier').length },
           { key: 'alignment_verifier_hardline', label: '语言与内容规范', count: conflicts.filter(c => c.source === 'alignment_verifier_hardline' || c.source === 'hardline').length },
+          { key: 'alignment_verifier_advisory', label: '文风建议', count: conflicts.filter(c => c.source === 'alignment_verifier_advisory').length },
+          { key: 'alignment_verifier_source_conflict', label: '资料源冲突', count: conflicts.filter(c => c.source === 'alignment_verifier_source_conflict').length },
         ].map(s => (
           <button
             key={s.key}
@@ -262,6 +265,8 @@ const ConflictDashboard: React.FC = () => {
               if (sourceFilter === 'deterministic') return !c.source || c.source === 'deterministic';
               if (sourceFilter === 'alignment_verifier') return c.source === 'alignment_verifier';
               if (sourceFilter === 'alignment_verifier_hardline') return c.source === 'alignment_verifier_hardline' || c.source === 'hardline';
+              if (sourceFilter === 'alignment_verifier_advisory') return c.source === 'alignment_verifier_advisory';
+              if (sourceFilter === 'alignment_verifier_source_conflict') return c.source === 'alignment_verifier_source_conflict';
               return true;
             })
             .map((c, idx) => (
@@ -276,6 +281,9 @@ const ConflictDashboard: React.FC = () => {
                 <span style={{ padding: '2px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 700, backgroundColor: `${LEVEL_COLORS[c.level]}25`, color: LEVEL_COLORS[c.level] }}>{c.level}</span>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: PRIORITY_COLORS[c.priority], flexShrink: 0 }} />
                 <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: `${PRIORITY_COLORS[c.priority]}25`, color: PRIORITY_COLORS[c.priority], fontWeight: 600 }}>{c.type}</span>
+                {c.sourceLabel && c.sourceLabel !== c.type && (
+                  <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--color-text-soft)', fontWeight: 600 }}>{c.sourceLabel}</span>
+                )}
                 <span style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{c.description}</span>
                 <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', backgroundColor: `${STATUS_COLORS[c.status]}25`, color: STATUS_COLORS[c.status], fontWeight: 700 }}>{STATUS_LABELS[c.status]}</span>
               </div>
@@ -296,6 +304,8 @@ const ConflictDashboard: React.FC = () => {
                 <div><span style={{ color: 'var(--color-text-soft)' }}>来源: </span><span style={{ color: 'var(--color-text-soft)', fontWeight: 600 }}>
                   {selected.source === 'alignment_verifier' ? '大纲一致性'
                     : selected.source === 'alignment_verifier_hardline' ? '语言与内容规范问题'
+                    : selected.source === 'alignment_verifier_advisory' ? '文风建议（非阻断，不影响保存）'
+                    : selected.source === 'alignment_verifier_source_conflict' ? '资料源冲突（世界档案 vs 详细大纲）'
                     : '确定性一致性检测'}
                 </span></div>
               )}

@@ -16,6 +16,7 @@ import { openProject } from '../lib/openProject';
 import { io, Socket } from 'socket.io-client';
 import IdeaCard from '../components/discovery/IdeaCard';
 import {
+  CHAPTER_WORD_RANGE,
   STORY_TARGET_WORD_RANGES,
   canFitTargetWordsToChapters,
   storyTargetWordsRequirement,
@@ -31,9 +32,7 @@ const STORY_TYPES = [
   { value: 'long_novel', label: '长篇', desc: '多线发展，持续创作', icon: '📚' },
 ] as const;
 
-const chapterRangeFor = (storyType: SupportedStoryType) => (
-  storyType === 'short_story' ? { min: 1500, max: 8000 } : { min: 3200, max: 4000 }
-);
+const chapterRangeFor = (_storyType: SupportedStoryType) => CHAPTER_WORD_RANGE;
 
 const getTargetWordsRequirement = (storyType: 'short_story' | 'long_novel'): string => (
   storyTargetWordsRequirement(storyType, chapterRangeFor(storyType))

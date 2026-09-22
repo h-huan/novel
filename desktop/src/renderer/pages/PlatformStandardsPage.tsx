@@ -1,8 +1,7 @@
 /**
  * PlatformStandardsPage — 最新执行标准（当前生效，唯一参与执行）
  * 本页只展示并维护 status=active 的唯一最新标准。
- * 归纳为【变化驱动】：后端检测到某模块有新生成变化（新增样本+指标实质变化/新避坑经验/代码基线升级）时
- * 会自动归纳；手动"立即重新归纳"按钮默认禁用，只有该模块 dirty 时才点亮并展示原因。
+ * 后端只做确定性的变化检测；模型归纳必须由用户明确点击触发。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
@@ -15,7 +14,7 @@ interface Standard {
 }
 interface ModuleStatus {
   moduleKey: string; moduleName: string; category: string; version: number;
-  running: boolean; dirty: boolean; autoEligible: boolean; reasons: string[]; lastSummarizedAt: string | null;
+  running: boolean; dirty: boolean; reasons: string[]; lastSummarizedAt: string | null;
 }
 
 const card: React.CSSProperties = {
@@ -83,7 +82,7 @@ const PlatformStandardsPage: React.FC = () => {
 
   const summarize = async (key: string) => {
     const ds = statusMap[key];
-    if (!ds?.dirty) { setMsg('该模块暂无新变化，系统检测到变化后会自动归纳、也才允许手动归纳。'); return; }
+    if (!ds?.dirty) { setMsg('该模块暂无需要归纳的新变化。'); return; }
     setBusyKey(key); setMsg(null);
     try {
       const res = await api.post(`/module-standards/${key}/summarize`, {});
@@ -107,11 +106,11 @@ const PlatformStandardsPage: React.FC = () => {
         </div>
       </div>
       <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 0, marginBottom: 14 }}>
-        归纳为<b>变化驱动</b>，不按固定时间：某模块自上次归纳以来新增足够真实生成、且指标出现实质变化（一次到位率下降/失败或截断增多/字数缺口扩大/出现新卡点/新增避坑经验），或代码标准基线升级时，系统会<b>自动更新当前标准</b>并立即注入所有对应生成场景。手动按钮仅在该模块检测到变化时可用。
+        系统只用本地指标检测变化，不会在启动、打开页面或状态轮询时调用模型。某模块积累足够真实生成且出现实质变化后，会提示你手动归纳；只有点击“立即重新归纳”才会调用模型并更新标准。
       </p>
       {dirtyCount > 0 && (
         <div style={{ padding: '9px 14px', marginBottom: 14, borderRadius: 8, backgroundColor: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.3)', fontSize: 'var(--font-size-xs)', color: '#b45309' }}>
-          检测到 {dirtyCount} 个模块出现新的生成变化，将自动归纳；也可展开对应卡片，在原因提示处手动立即归纳。
+          检测到 {dirtyCount} 个模块出现新的生成变化。系统不会自动消耗模型额度；请展开对应卡片，按需手动归纳。
         </div>
       )}
       {msg && <div style={{ padding: '10px 14px', marginBottom: 14, borderRadius: 8, backgroundColor: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.25)', fontSize: 'var(--font-size-xs)' }}>{msg}</div>}
@@ -165,7 +164,7 @@ const PlatformStandardsPage: React.FC = () => {
                   <button
                     disabled={!isDirty || isRunning}
                     onClick={() => summarize(s.moduleKey)}
-                    title={isDirty ? (ds?.reasons?.join('；') || '检测到新变化，可立即归纳') : '默认禁用：系统检测到该模块有新生成变化后才允许手动归纳（正常情况会自动归纳）'}
+                    title={isDirty ? (ds?.reasons?.join('；') || '检测到新变化，可立即归纳') : '系统检测到该模块有实质变化后才允许手动归纳'}
                     style={{
                       marginLeft: 'auto', padding: '5px 12px', borderRadius: 8, fontSize: 'var(--font-size-xs)',
                       cursor: isDirty && !isRunning ? 'pointer' : 'not-allowed',

@@ -18,8 +18,11 @@ import { ChapterService } from '../chapter/chapter.service';
 import { QualityInspectionService } from '../refinement/quality-inspection.service';
 import { compileContext } from '../generation-metrics/context-compiler';
 import { reviewCharacterContracts } from './character-contract';
+import { deterministicPlatformReview, platformReviewToRows, type PlatformQualityRow } from './platform-quality-rules';
 import { narrativeTrace } from './narrative-trace';
 import { detectForbiddenTells } from '../../chain/hardline-scanner';
+import { LLM_TUNABLES } from '../../config/llm-tunables';
+import { CHAPTER_WORD_RANGE } from '../../../shared/src';
 import type {
   AnalyzeChapterDto,
   AttentionCheckDto,
@@ -113,6 +116,9 @@ interface IssueCounts {
 /** 正文/大纲统一质量目标分（90+）：综合分达到该线才算进入优秀区间。 */
 export const BODY_QUALITY_TARGET_SCORE = 90;
 
+/** 并发质检租约上限：running 超过该时长视为陈旧（进程被杀/异常重启），允许重新发起，避免章节被永久锁死。 */
+export const QUALITY_RUN_LEASE_MS = 30 * 60 * 1000;
+
 /** 由统一综合分确定性推导质量等级（不采用 LLM 自报等级，避免分数与等级打架）：>=90 high，60-89 medium，<60 low。 */
 export function levelByQualityScore(score: number): 'high' | 'medium' | 'low' {
   if (score >= BODY_QUALITY_TARGET_SCORE) return 'high';
@@ -143,7 +149,7 @@ export class WritingQualityService implements OnModuleInit {
           chapterId: input.chapterId,
           content: input.content,
           scope: 'chapter',
-        } as AnalyzeChapterDto);
+        } as AnalyzeChapterDto, { leaseAlreadyHeld: true });
         this.logger.log(`AI 生成正文已自动完成质检（章节 ${input.chapterId}）：七维问题与标签契合已落库并同步看板`);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
@@ -152,6 +158,21 @@ export class WritingQualityService implements OnModuleInit {
         this.markChapterAutoQuality(input.chapterId, 'failed', `自动质检未完成：${reason}（可点“重新质检”）`);
       }
     });
+    // 进程重启/崩溃会把章节永久留在 running：没有进程再去回写终态，前端「正在自动质检」
+    // 与「提交质检被禁用」就都卡死。启动时把上一进程残留的 running 重置成可重跑的 failed。
+    try {
+      const now = new Date().toISOString();
+      const res = this.dbService.getDb().prepare(
+        `UPDATE chapters SET auto_quality_status = 'failed',
+           auto_quality_message = '上次自动质检因服务重启中断，可点“重新质检”重跑',
+           auto_quality_at = ?, updated_at = ?
+         WHERE auto_quality_status = 'running'`,
+      ).run(now, now);
+      const changed = Number(res?.changes ?? 0);
+      if (changed > 0) this.logger.warn(`启动清理：${changed} 个章节的自动质检状态由 running 重置为 failed（服务重启中断）`);
+    } catch (err) {
+      this.logger.warn(`启动清理残留自动质检状态失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -232,6 +253,14 @@ export class WritingQualityService implements OnModuleInit {
         time_order_error: { category: 'logic', lesson: LOGIC },
         event_sequence_risk: { category: 'logic', lesson: LOGIC },
         label_fit: { category: 'label_fit', lesson: '叙事节奏、对话方式、情绪密度与人称必须主动贴合本书选定的平台/基调/写作风格/流派标签，最弱维度尤其对齐' },
+        // 平台指标问题（deterministicPlatformReview 落库的 platform.*）同样沉淀成跨章教训，
+        // 否则下一章首版 prompt 读不到「本章哪里不符合目标平台」，同类问题会一直复发。
+        platform_chapter_length: { category: 'platform', lesson: '按目标平台单章字数区间写足有效情节：过短先补推进与冲突，过长先砍不推进剧情的铺陈，不靠灌水凑数' },
+        platform_paragraph_length: { category: 'platform', lesson: '按目标平台阅读节奏切段：单段不超上限，长段拆开并穿插短句或对话，避免整屏密排大段' },
+        platform_dialogue_ratio: { category: 'platform', lesson: '对话占比必须落在目标平台区间：把说明性叙述改成一来一回的对话，加入打断、沉默与动作，不要大段转述' },
+        platform_opening_hook: { category: 'platform', lesson: HOOK_OPEN + '，开篇钩子必须落在平台要求的字位之前' },
+        platform_ending_hook: { category: 'platform', lesson: '章尾必须落在未解问题、反转、新威胁或关键动作/对话上，并按目标平台的留钩要求处理，禁止平淡收尾' },
+        platform_payoff_gap: { category: 'platform', lesson: PACING + '，并按目标平台的爽点/情绪间隔上限补足推进与兑现' },
         punctuation: { category: 'punctuation', lesson: '统一中文全角标点，省略号用“……”，连贯动作写完整句、不切成两字残句，克制句末语气词' },
       };
       const items: Array<{ category: string; lesson: string }> = [];
@@ -290,10 +319,7 @@ export class WritingQualityService implements OnModuleInit {
       throw new BadRequestException('本章正文为空（0 字）。请先写作或生成正文后再提交质检。');
     }
     const words = this.countCjkWords(content);
-    // 动态字数范围：长篇3200-4000，短篇1500-8000
-    const projectRow = db.prepare('SELECT type FROM projects WHERE id = ?').get(projectId) as { type?: string } | undefined;
-    const isLongNovel = projectRow?.type === 'long_novel';
-    const wordRange = isLongNovel ? { min: 3200, max: 4000 } : { min: 1500, max: 8000 };
+    const wordRange = CHAPTER_WORD_RANGE;
     if (words < wordRange.min) {
       throw new BadRequestException(`本章正文仅 ${words} 字，未达到 ${wordRange.min} 字下限，暂不能提交质检。`);
     }
@@ -312,7 +338,50 @@ export class WritingQualityService implements OnModuleInit {
     return chinese + english;
   }
 
-  async analyzeChapterQuality(projectId: string, dto: AnalyzeChapterDto) {
+  async analyzeChapterQuality(projectId: string, dto: AnalyzeChapterDto, options?: { leaseAlreadyHeld?: boolean }) {
+    if (!options?.leaseAlreadyHeld) this.claimQualityRun(dto.chapterId);
+    try {
+      return await this.runChapterQualityAnalysis(projectId, dto);
+    } catch (error) {
+      if (!options?.leaseAlreadyHeld) this.releaseQualityRun(dto.chapterId, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 并发质检闸门（规则级：作用于所有小说、所有章节、所有入口）。
+   *
+   * 修复断点：手动「提交质检 / 重新质检」此前不检查本章是否已有质检在跑，
+   * 两条流水线会对同一章同时跑 LLM 并各写一份报告与章节状态
+   * （用户点名的「上面显示自动质检在跑、下面的还能提交质检」）。
+   * 现在同一章任一质检在跑时拒绝第二次，并把「进行中」写进 chapters.auto_quality_status，
+   * 让前端顶栏、按钮与服务端看到同一份权威状态。
+   */
+  private claimQualityRun(chapterId?: string): void {
+    if (!chapterId) return;
+    const db = this.dbService.getDb();
+    const row = db.prepare('SELECT auto_quality_status, auto_quality_at FROM chapters WHERE id = ?')
+      .get(chapterId) as { auto_quality_status?: string | null; auto_quality_at?: string | null } | undefined;
+    if (row?.auto_quality_status === 'running') {
+      const startedAt = row.auto_quality_at ? Date.parse(row.auto_quality_at) : Number.NaN;
+      const ageMs = Number.isFinite(startedAt) ? Date.now() - startedAt : Number.POSITIVE_INFINITY;
+      if (ageMs < QUALITY_RUN_LEASE_MS) {
+        const seconds = Math.max(0, Math.round(ageMs / 1000));
+        throw new BadRequestException(`本章正在质检中（已运行 ${seconds} 秒），请等本次质检结束后再提交，避免并发质检互相覆盖结果。`);
+      }
+      this.logger.warn(`章节 ${chapterId} 的质检状态已 running ${Math.round(ageMs / 1000)} 秒，超过租约上限，视为陈旧并允许重新发起`);
+    }
+    this.markChapterAutoQuality(chapterId, 'running', '正在质检…');
+  }
+
+  /** 质检失败时释放租约：把章节从 running 落到 failed，否则前端会永久停在「正在质检」且按钮一直不可点。 */
+  private releaseQualityRun(chapterId: string | undefined, error: unknown): void {
+    if (!chapterId) return;
+    const reason = error instanceof Error ? error.message : String(error);
+    this.markChapterAutoQuality(chapterId, 'failed', `质检未完成：${reason}（可点“重新质检”重跑）`);
+  }
+
+  private async runChapterQualityAnalysis(projectId: string, dto: AnalyzeChapterDto) {
     const db = this.dbService.getDb();
     const chapterId = dto.chapterId;
 
@@ -414,6 +483,14 @@ export class WritingQualityService implements OnModuleInit {
       .filter(f => Object.prototype.hasOwnProperty.call(HARDLINE_PENALTY, f.ruleId));
     const hardlinePenalty = Math.min(25, hardlineHits.reduce((sum, f) => sum + (HARDLINE_PENALTY[f.ruleId] || 0), 0));
 
+    // 平台标准（目标平台的目标度量）在质检侧的落地点：复用生成侧 Gate 的确定性评审，
+    // 把「本章不符合目标平台」变成可逐条精修的质检问题并计入统一综合分。
+    // 此前该评审只在生成侧 Gate 调用，质检报告里看不到任何 platform.* 问题，平台标准等于没生效。
+    const platformReview = this.buildPlatformReview(projectId, content, context, reportId);
+    const platformRows = platformReview.rows;
+    const PLATFORM_SEVERITY_PENALTY: Record<string, number> = { blocking: 6, high: 4, medium: 2, low: 0, info: 0 };
+    const platformPenalty = Math.min(12, platformRows.reduce((sum, row) => sum + (PLATFORM_SEVERITY_PENALTY[row.severity] || 0), 0));
+
     // 标签契合（平台/基调/风格/流派）实质纳入达标判定，而不是只展示：
     // tagFit 由质检 LLM 对照项目所选标签四维打分；明显偏离即确定性扣分，让“选了番茄却写成盐选、
     // 基调/流派不符”无法靠语言分蒙混到 90+。跨全部平台与长短篇同一规则，不针对任何一本书。
@@ -435,7 +512,7 @@ export class WritingQualityService implements OnModuleInit {
       ? 0
       : tagAvg >= 70 ? 0 : Math.min(8, Math.round((70 - tagAvg) * 0.5));
     const weakestTag = tagDimArr.slice().sort((a, b) => a.score - b.score)[0] || null;
-    const unifiedScore = Math.max(0, blendedScore - hardlinePenalty - tagPenalty);
+    const unifiedScore = Math.max(0, blendedScore - hardlinePenalty - tagPenalty - platformPenalty);
 
     const reportPayload: Record<string, any> = { attention };
     reportPayload.characterContractReview = (llmResult as any).characterContractReview;
@@ -461,6 +538,13 @@ export class WritingQualityService implements OnModuleInit {
         weakest: weakestTag ? `${weakestTag.label}(${weakestTag.score})` : '',
       };
     }
+    if (platformRows.length > 0) {
+      reportPayload.platformPenalty = {
+        points: platformPenalty,
+        hits: platformRows.map(r => ({ issueType: r.issueType, severity: r.severity, summary: r.summary })),
+      };
+    }
+    if (platformReview.measurements) reportPayload.platformMeasurements = platformReview.measurements;
     if (parseWarning) {
       reportPayload.parseWarning = true;
       reportPayload.rawContentPreview = rawContentPreview;
@@ -475,11 +559,14 @@ export class WritingQualityService implements OnModuleInit {
         ? `；标签契合均值${tagAvg}分、扣${tagPenalty}分（最弱：${weakestTag?.label || ''}）`
         : `；标签契合均值${tagAvg}分（最弱：${weakestTag?.label || ''}，轻度偏离、提示改进但不扣分）`
       : '';
+    const platformNote = platformRows.length > 0
+      ? `；不符合目标平台${platformRows.length}处、扣${platformPenalty}分（${platformRows.slice(0, 3).map(r => r.issueType.replace('platform_', '')).join('/')}${platformRows.length > 3 ? '等' : ''}）`
+      : '';
     const summary = parseWarning
       ? `质量诊断解析失败：${parseWarning}。请重试。`
       : aiFingerprints
-        ? `${llmResult.summary}（物理指纹分：${fingerprintScore}，融合分：${blendedScore}${hardlineNote}${tagNote}，统一综合分：${unifiedScore}）`
-        : `${llmResult.summary}${hardlineNote}${tagNote}（统一综合分：${unifiedScore}）`;
+        ? `${llmResult.summary}（物理指纹分：${fingerprintScore}，融合分：${blendedScore}${hardlineNote}${tagNote}${platformNote}，统一综合分：${unifiedScore}）`
+        : `${llmResult.summary}${hardlineNote}${tagNote}${platformNote}（统一综合分：${unifiedScore}）`;
     // 等级以统一综合分确定性推导为准（90+ 为 high），不再直接采用 LLM 自报等级，避免分与级不一致。
     const overallLevel = levelByQualityScore(unifiedScore);
     const overallScore = unifiedScore;
@@ -510,7 +597,9 @@ export class WritingQualityService implements OnModuleInit {
       suggestion: '对照目标平台风格红线与故事基调重写相关段落，只调叙述方式、节奏与情绪浓度，不改事件与人物。',
       tags: ['label_fit'],
     } as any] : [];
-    const allInputIssues = [...(llmResult.issues || []), ...punctIssues, ...labelFitIssue];
+    // 平台度量问题与 LLM/标点/标签问题同列：和生成侧 Gate 共用同一份确定性度量，
+    // 保证「不符合目标平台」在所有书、所有章都能逐条定向精修并被教训沉淀。
+    const allInputIssues = [...(llmResult.issues || []), ...punctIssues, ...labelFitIssue, ...platformRows];
     for (const issue of allInputIssues) {
       const issueType = validTags.has(issue.issueType) ? issue.issueType : 'needs_hook';
       const tags = (issue.tags || []).filter((t: string) => validTags.has(t));
@@ -1242,9 +1331,13 @@ ${content.slice(0, 15000)}
       prompt,
       systemPrompt,
       temperature: 0.3,
-      scenario: 'daily',
+      // 与生成侧 Gate 保持同一评审场景（review）+ 强制 JSON：daily 不带评审标准，
+      // 且实测同一 prompt 在 daily 下会瞬时返回空内容，而 review 场景（quality_gate）稳定成功。
+      scenario: 'review',
+      responseFormat: 'json_object',
       // 质检需输出整章 issues 数组 + tagFit，给足输出上限，避免长章节 JSON 被截断导致解析失败、质检空跑。
-      maxTokens: 16000,
+      maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,
+      maxEmptyRetries: 1,
       metrics: { projectId, stepKey: 'quality_auto' },
     } as any);
 
@@ -1260,9 +1353,18 @@ ${content.slice(0, 15000)}
     (parsed as any).tagFit = this.normalizeTagFit((parsed as any).tagFit);
     parsed.issues = (parsed.issues || []).filter((issue: any) => {
       if (!String(issue.issueType).includes('character_voice')) return true;
-      const contract = contractReview.contracts.find(c => c.characterId === issue.characterId && c.version === issue.contractVersion);
-      return !!contract && !!(contract as any)[issue.contractField]
-        && contractReview.evidence.some(e => e.characterId === issue.characterId && typeof issue.evidence === 'string' && e.quote.includes(issue.evidence));
+      // 契约锚定：模型给出角色/契约标识时，必须能对上契约字段与引用证据（防臆造）。
+      if (issue.characterId && issue.contractVersion) {
+        const contract = contractReview.contracts.find(c => c.characterId === issue.characterId && c.version === issue.contractVersion);
+        return !!contract && !!(contract as any)[issue.contractField]
+          && contractReview.evidence.some(e => e.characterId === issue.characterId && typeof issue.evidence === 'string' && e.quote.includes(issue.evidence));
+      }
+      // 未锚定契约时此前一律丢弃，导致「角色口吻」整类问题在契约字段为空时全部消失（质检看着没作用）。
+      // 改为要求证据能在正文中原样命中：既保留可直接核验的问题，又挡住臆造引用。
+      const quote = typeof issue.evidence === 'string' ? issue.evidence.trim() : '';
+      const original = typeof issue.originalText === 'string' ? issue.originalText.trim() : '';
+      const needle = quote.length >= 6 ? quote : original;
+      return needle.length >= 6 && content.includes(needle);
     });
     parsed.issues.push(...contractReview.issues.map(issue => ({ issueType: issue.ruleId, severity: 'high', title: issue.message,
       summary: issue.message, evidence: issue.evidence.quote, originalText: issue.evidence.quote,
@@ -1296,7 +1398,13 @@ ${content.slice(0, 15000)}
     const left = (content.match(/[“「『]/g) || []).length;
     const right = (content.match(/[”」』]/g) || []).length;
     if (left !== right) found.push('引号不配对（左 ' + left + ' / 右 ' + right + '）');
-    const noEnd = content.split(/\n+/).filter(p => /[一-龥A-Za-z]$/.test(p.trim())).length;
+    // 首行章节标题（第1章/第一章/第3节…）本来就不带句末标点，恒定误报「缺标点」会污染
+    // 每一章的问题列表；扫描时只跳过第一个非空行，其余段落照常判定。
+    const paragraphs = content.split(/\n+/).map(p => p.trim()).filter(p => p.length > 0);
+    const headingLine = paragraphs.length > 0 && /^第\s*[0-9一二三四五六七八九十百千零两]+\s*[章节回卷]/.test(paragraphs[0])
+      ? paragraphs[0]
+      : null;
+    const noEnd = paragraphs.filter(p => /[一-龥A-Za-z]$/.test(p) && p !== headingLine).length;
     if (noEnd > 0) found.push(noEnd + ' 个段落句末缺标点');
     if (!found.length) return [];
     return [{
@@ -1309,6 +1417,32 @@ ${content.slice(0, 15000)}
       paragraphIndex: 0, sentenceIndex: 0, startOffset: 0, endOffset: 0,
       originalText: '', suggestedText: '', tags: ['punctuation'],
     }];
+  }
+
+  /**
+   * 平台标准（目标平台的目标度量）在质检侧的确定性入口。
+   *
+   * 复用生成侧 Gate 的同一份 deterministicPlatformReview：同一内容、同一创作宪法，
+   * 保证「生成时被判不合格、质检时却看不见」这种两套口径不再出现。零 LLM 调用，
+   * 任何失败只降级为「本次没有平台问题」，绝不阻断 LLM 质检主流程。
+   */
+  private buildPlatformReview(
+    projectId: string,
+    content: string,
+    context: Record<string, any>,
+    runId: string,
+  ): { rows: PlatformQualityRow[]; measurements: any } {
+    try {
+      const constitution = context?.project?.creativeConstitution;
+      if (!constitution) return { rows: [], measurements: null };
+      const review = deterministicPlatformReview({
+        projectId, runId, stage: 'chapter', content, constitution,
+      });
+      return { rows: platformReviewToRows(review), measurements: review.measurements };
+    } catch (err) {
+      this.logger.warn(`平台度量评审失败（本次不产出平台问题，不影响质检主流程）：${err instanceof Error ? err.message : String(err)}`);
+      return { rows: [], measurements: null };
+    }
   }
 
   private async callRefineLLM(

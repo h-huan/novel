@@ -22,7 +22,7 @@ Content-Type: application/json
 
 服务只调用 `idea_generate` 当前模式所配置的具体模型。一次请求先批量生成，缺项时最多使用同一模型补齐一次；不会切换模型、提供商或模式，也不会创建占位题材。相同配置仍在执行时复用同一任务。
 
-短篇总字数为 8,000–35,000 字，章节采用平台短篇基准；长篇不少于 100,000 字且不设固定上限，章节采用平台长篇基准。返回题材必须同时给出 `storyType`、`targetPlatform`、`estimatedWords`、`plannedChapters` 与 `scopeBreakdown`，否则不能通过质量 Gate。
+篇幅口径只在执行标准一处定义（机器权威为 module-standards seed，见桌面端 `/module-standards`），短篇与长篇的目标总字数区间以那里为准，本文档不另写一套。返回题材必须同时给出 `storyType`、`targetPlatform`、`estimatedWords`、`plannedChapters` 与 `scopeBreakdown`，否则不能通过质量 Gate。
 
 ### 创建项目
 

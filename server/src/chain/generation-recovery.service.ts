@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
+import { CHAPTER_WORD_RANGE } from '../../shared/src';
 
 export interface GenerationRecoveryAudit {
   projectId: string;
@@ -76,7 +77,7 @@ export class GenerationRecoveryService {
     };
 
     const chapterPlan = db.prepare(`SELECT COUNT(*) count,
-      SUM(CASE WHEN target_words < 3200 OR target_words > 4000 THEN 1 ELSE 0 END) invalid,
+      SUM(CASE WHEN target_words < ${CHAPTER_WORD_RANGE.min} OR target_words > ${CHAPTER_WORD_RANGE.max} THEN 1 ELSE 0 END) invalid,
       COALESCE(SUM(target_words),0) planned
       FROM outlines WHERE project_id=? AND level='chapter'`).get(projectId) as any;
     const mappingProblems = scalar(`SELECT COUNT(*) count FROM outlines o
@@ -119,7 +120,7 @@ export class GenerationRecoveryService {
     const consistencyIssues: string[] = [];
     const invalidChapterTargets = Number(chapterPlan?.invalid || 0);
     const plannedChapterWords = Number(chapterPlan?.planned || 0);
-    if (invalidChapterTargets) consistencyIssues.push(`${invalidChapterTargets}章目标字数不在3200-4000`);
+    if (invalidChapterTargets) consistencyIssues.push(`${invalidChapterTargets}章目标字数不在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}`);
     if (counts.outlineChapters && plannedChapterWords !== Number(project.target_words)) {
       consistencyIssues.push(`章节目标合计${plannedChapterWords}字，与项目目标${project.target_words}字不一致`);
     }

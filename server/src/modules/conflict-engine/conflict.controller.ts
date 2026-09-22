@@ -17,6 +17,17 @@ const CHECK_TYPE_LABEL: Record<string, string> = {
   outline_alignment: '大纲矛盾',
 };
 
+// 同一 check_type（outline_alignment）由不同来源产出，严重度与处置方式完全不同：
+// 缺事件/事实冲突要改正文，文风建议不用改，资料源冲突要改的是资料源而不是正文。
+// 因此在前端行数据里补一个显式来源标签，避免列表里全部显示成「大纲矛盾」而误导作者。
+const SOURCE_LABEL: Record<string, string> = {
+  deterministic: '叙事逻辑',
+  alignment_verifier: '大纲一致性',
+  alignment_verifier_hardline: '语言与内容规范',
+  alignment_verifier_advisory: '文风建议（非阻断）',
+  alignment_verifier_source_conflict: '资料源冲突',
+};
+
 @ApiTags('conflict')
 @Controller('conflicts')
 export class ConflictController {
@@ -207,6 +218,7 @@ export class ConflictController {
       chapterStatus,
       checkType,
       source,
+      sourceLabel: SOURCE_LABEL[source] || '确定性一致性检测',
       // 可执行动作（按文档 R1/R4 流程 + 来源/类型决定默认推荐动作）
       actions: this.buildActions({ checkType, source, level, chapterId, severity, status }),
     };
@@ -257,18 +269,32 @@ export class ConflictController {
     }
     // 2) 按 checkType 给针对性动作
     if (input.checkType === 'outline_alignment') {
-      actions.push({
-        kind: 'regenerate_aligned_body',
-        label: 'AI 重写正文对齐大纲（推荐）',
-        tone: 'primary',
-        reason: '按文档 R2 规则，大纲（P2 基础设定）优先级高于未锁定正文（P3），以大纲为准让 AI 重新生成本章',
-      });
-      actions.push({
-        kind: 'open_outline_editor',
-        label: '打开大纲编辑器',
-        tone: 'secondary',
-        reason: '若你确认本章节内容好而大纲写错了，可在大纲中调整本章事件；但会同时影响后续章节生成（按 R2 提示）',
-      });
+      // 来源分层：只有「缺事件 / 有证据的事实冲突」（alignment_verifier / _hardline）才值得整章重写。
+      // 文风建议（advisory）是非阻断的措辞问题，给整章重写按钮会误导作者白烧 token；
+      // 资料源冲突（source_conflict）要改的是资料源本身，正文按大纲执行即可，同样不该重写正文。
+      const isAdvisory = input.source === 'alignment_verifier_advisory';
+      const isSourceConflict = input.source === 'alignment_verifier_source_conflict';
+      if (isSourceConflict) {
+        actions.push({
+          kind: 'open_outline_editor',
+          label: '打开大纲编辑器确认权威源',
+          tone: 'primary',
+          reason: '资料源互相矛盾（世界档案/简介 vs 详细大纲）：正文按大纲执行即可，先确认哪一份写错，再修正那一份资料。',
+        });
+      } else if (!isAdvisory) {
+        actions.push({
+          kind: 'regenerate_aligned_body',
+          label: 'AI 重写正文对齐大纲（推荐）',
+          tone: 'primary',
+          reason: '按文档 R2 规则，大纲（P2 基础设定）优先级高于未锁定正文（P3），以大纲为准让 AI 重新生成本章',
+        });
+        actions.push({
+          kind: 'open_outline_editor',
+          label: '打开大纲编辑器',
+          tone: 'secondary',
+          reason: '若你确认本章节内容好而大纲写错了，可在大纲中调整本章事件；但会同时影响后续章节生成（按 R2 提示）',
+        });
+      }
     } else if (input.checkType === 'world_setting') {
       actions.push({
         kind: 'edit_world_setting',

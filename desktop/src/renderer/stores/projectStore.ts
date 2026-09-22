@@ -68,6 +68,7 @@ interface ProjectState {
   fetchProject: (id: string) => Promise<Project | null>;
   createProject: (data: ProjectCreateData) => Promise<Project>;
   deleteProject: (id: string) => Promise<void>;
+  deleteProjects: (ids: string[]) => Promise<{ deleted: string[]; failed: Array<{ id: string; message: string }> }>;
   selectProject: (id: string | null) => Promise<void>;
   setSearchQuery: (query: string) => void;
   setTypeFilter: (filter: Project['type'] | 'all') => void;
@@ -202,6 +203,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (err: any) {
       set({ error: err.message || '删除失败' });
     }
+  },
+
+  deleteProjects: async (ids: string[]) => {
+    const uniqueIds = [...new Set(ids.map(id => String(id).trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) return { deleted: [], failed: [] };
+    set({ loading: true, error: null });
+    const outcomes = await Promise.allSettled(uniqueIds.map(id => api.delete(`/projects/${id}`)));
+    const deleted: string[] = [];
+    const failed: Array<{ id: string; message: string }> = [];
+    outcomes.forEach((outcome, index) => {
+      const id = uniqueIds[index];
+      if (outcome.status === 'fulfilled') deleted.push(id);
+      else failed.push({ id, message: outcome.reason?.message || '删除失败' });
+    });
+    set((state) => ({
+      projects: state.projects.filter(project => !deleted.includes(project.id)),
+      currentProject: state.currentProject && deleted.includes(state.currentProject.id) ? null : state.currentProject,
+      loading: false,
+      error: failed.length > 0 ? `${failed.length} 个项目删除失败` : null,
+    }));
+    return { deleted, failed };
   },
 
   selectProject: async (id: string | null) => {

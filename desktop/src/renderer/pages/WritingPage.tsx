@@ -15,6 +15,7 @@ import { api } from '../lib/api';
 import { showNotification } from '../components/common/Notification';
 import { useWritingWebSocket } from '../hooks/useWebSocket';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
+import { CHAPTER_WORD_RANGE } from '@novel/shared';
 
 const SIDEBAR_WIDTH = 180;
 const PANEL_WIDTH = 420;
@@ -594,9 +595,9 @@ const WritingPage: React.FC = () => {
 
   const modeLabel = { manual: '手动', semi_auto: '半自动', full_auto: '全自动' }[writingMode];
 
-  // 每章目标来自该章大纲；项目只规定 3200-4000 的有效范围。
-  // 这里给作者一个**正负向**提示：达成 3200-4000 区间是绿色"已达成"，
-  // 仅在确实没达标（<3200）或硬越界（>4000）时给橙色提示。原先"已超过目标"
+  // 每章目标来自该章大纲；项目只规定 CHAPTER_WORD_RANGE 的有效范围。
+  // 这里给作者一个**正负向**提示：达成 CHAPTER_WORD_RANGE 区间是绿色"已达成"，
+  // 仅在确实没达标（< CHAPTER_WORD_RANGE.min）或硬越界（> CHAPTER_WORD_RANGE.max）时给橙色提示。原先"已超过目标"
   // 一直显示为橙色警告，3918 字已完成时它仍亮着，让作者误以为出错。
   type ChapterHint = { tone: 'success' | 'warning' | 'error'; message: string };
   const [chapterHint, setChapterHint] = useState<ChapterHint | null>(null);
@@ -612,8 +613,8 @@ const WritingPage: React.FC = () => {
     const content = currentChapter?.content || '';
     const actual = wordCount(content);
     const chapterTarget = Number(currentChapter?.targetWords || 0);
-    if (!Number.isInteger(chapterTarget) || chapterTarget < 3200 || chapterTarget > 4000) {
-      setChapterHint({ tone: 'error', message: '本章缺少有效的动态字数目标（必须为3200-4000字），请先完善章节大纲' });
+    if (!Number.isInteger(chapterTarget) || chapterTarget < CHAPTER_WORD_RANGE.min || chapterTarget > CHAPTER_WORD_RANGE.max) {
+      setChapterHint({ tone: 'error', message: `本章缺少有效的动态字数目标（必须为${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字），请先完善章节大纲` });
       return;
     }
     if (actual === 0) {
@@ -621,21 +622,21 @@ const WritingPage: React.FC = () => {
       setChapterHint(null);
       return;
     }
-    if (actual < 3200) {
-      setChapterHint({ tone: 'warning', message: `本章正文 ${actual.toLocaleString()} 字，未达 3200 字下限` });
+    if (actual < CHAPTER_WORD_RANGE.min) {
+      setChapterHint({ tone: 'warning', message: `本章正文 ${actual.toLocaleString()} 字，未达 ${CHAPTER_WORD_RANGE.min} 字下限` });
       return;
     }
-    if (actual > 4000) {
-      setChapterHint({ tone: 'warning', message: `本章正文 ${actual.toLocaleString()} 字，超过 4000 字上限` });
+    if (actual > CHAPTER_WORD_RANGE.max) {
+      setChapterHint({ tone: 'warning', message: `本章正文 ${actual.toLocaleString()} 字，超过 ${CHAPTER_WORD_RANGE.max} 字上限` });
       return;
     }
-    // 3200 ≤ actual ≤ 4000 区间内：始终给绿色正向提示
+    // CHAPTER_WORD_RANGE 区间内：始终给绿色正向提示
     const exceedsTarget = actual > chapterTarget;
     setChapterHint({
       tone: 'success',
       message: exceedsTarget
-        ? `✅ 本章 ${actual.toLocaleString()} 字（已达成 3200-4000 区间，超出大纲目标 ${chapterTarget.toLocaleString()} 字 ${(actual - chapterTarget).toLocaleString()} 字）`
-        : `✅ 本章 ${actual.toLocaleString()} 字（已达成 3200-4000 区间，目标 ${chapterTarget.toLocaleString()} 字）`,
+        ? `✅ 本章 ${actual.toLocaleString()} 字（已达成 ${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max} 区间，超出大纲目标 ${chapterTarget.toLocaleString()} 字 ${(actual - chapterTarget).toLocaleString()} 字）`
+        : `✅ 本章 ${actual.toLocaleString()} 字（已达成 ${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max} 区间，目标 ${chapterTarget.toLocaleString()} 字）`,
     });
   }, [currentChapter?.id, currentChapter?.content, currentChapter?.targetWords, wordCount]);
 
@@ -800,7 +801,7 @@ const WritingPage: React.FC = () => {
           </span>
           <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>F1全自动 F2半自动 F3手动</span>
 
-          {/* 章节/段落长度提示：达成 3200-4000 区间用绿色正向展示，越界才警告 */}
+          {/* 章节/段落长度提示：达成 CHAPTER_WORD_RANGE 区间用绿色正向展示，越界才警告 */}
           {chapterHint && (() => {
             const palette = chapterHint.tone === 'success'
               ? { color: '#1abc9c', backgroundColor: 'rgba(26,188,156,0.14)' }

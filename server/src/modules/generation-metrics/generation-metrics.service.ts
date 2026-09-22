@@ -16,11 +16,39 @@ import { qualityStage } from '../../routing/scenario-taxonomy';
  *    同类机制可泛化到任何"首版不到位、靠多轮重试"的步骤。
  * 4) 埋点绝不影响主流程：record 内部全容错，任何异常都静默吞掉。
  */
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, type OnModuleInit } from '@nestjs/common';
 import { standardDirectiveCache } from '../module-standards/standard-directive.cache';
 import { DatabaseService } from '../../database/database.service';
 import * as crypto from 'crypto';
 import { compileContext } from './context-compiler';
+import { repairStrategyUtility } from './repair-learning';
+
+export const CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES = [
+  'constraint_matrix',
+  'dependency_cascade',
+  'full_replan',
+] as const;
+export type ChapterResponsibilityRepairStrategy = typeof CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES[number];
+
+export function chapterResponsibilityIssueSignature(issues: string[]): string {
+  const categories = new Set<string>();
+  for (const raw of issues) {
+    const issue = String(raw || '');
+    if (/触发条件|何时触发|超过|尚未|提前|时点|第\s*\d+\s*日/.test(issue)) categories.add('trigger_timing');
+    if (/吃下|前提|未安排|不能执行|须经|条件未满足/.test(issue)) categories.add('missing_prerequisite');
+    if (/份|人数|人证|分配|名额|不在.{0,8}人/.test(issue)) categories.add('allocation');
+    if (/重复|重演|再次执行/.test(issue)) categories.add('repetition');
+    if (/跨章|后续章|下一章|提前完成/.test(issue)) categories.add('chapter_boundary');
+    if (/预知|信息来源|后来才|尚未知/.test(issue)) categories.add('information_timing');
+    if (/继承|所有权|权限移交|生效文书|亲属关系|失踪登记|法律程序/.test(issue)) categories.add('authority_procedure');
+    if (/立场|倒向|相助|关键材料|转变触发|动机/.test(issue)) categories.add('motivation_transition');
+    if (/旧授权|高权限|远程授权|自动响应|持续机制/.test(issue)) categories.add('authorization_timing');
+    if (/超自然|现实物证|门禁|档案|监控|手机|设备|改写|作用范围/.test(issue)) categories.add('reality_boundary');
+    if (/影子|替身|痕迹|模仿|诱导|交涉|能力|未赋予|未授权/.test(issue)) categories.add('capability_scope');
+  }
+  if (categories.size === 0) categories.add('semantic_consistency');
+  return `chapter_responsibility.${[...categories].sort().join('+')}`;
+}
 
 /** 一次 LLM 调用的遥测输入 */
 export interface StepMetricInput {
@@ -104,10 +132,31 @@ const STEP_LABELS: Record<string, string> = {
 const BOTTLENECK_MIN_CALLS = 2;
 
 @Injectable()
-export class GenerationMetricsService {
+export class GenerationMetricsService implements OnModuleInit {
   private readonly logger = new Logger(GenerationMetricsService.name);
 
   constructor(private readonly databaseService: DatabaseService) {}
+
+  onModuleInit(): void {
+    const recovered = this.recoverInterruptedRuns();
+    if (recovered > 0) {
+      this.logger.warn(`检测到 ${recovered} 条服务重启前未结束的生成记录，已标记为 cancelled`);
+    }
+  }
+
+  /**
+   * A process cannot have a genuinely active persisted run before its modules
+   * finish booting. Keep the history, but close leftovers from a prior crash or
+   * forced restart so dashboards never show them as permanently running.
+   */
+  recoverInterruptedRuns(): number {
+    const now = new Date().toISOString();
+    const result = this.databaseService.getDb().prepare(`UPDATE generation_runs
+      SET status='cancelled', finished_at=?,
+          error=COALESCE(NULLIF(error,''), '服务重启前生成未正常结束，已自动标记为中断')
+      WHERE status='running'`).run(now);
+    return Number(result.changes || 0);
+  }
 
   beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true) {
     const db = this.databaseService.getDb();
@@ -231,11 +280,87 @@ export class GenerationMetricsService {
     const run = db.prepare("SELECT prompt_version,COALESCE(model,(SELECT model_version FROM generation_step_metrics WHERE run_id=r.id AND model_version IS NOT NULL ORDER BY created_at DESC LIMIT 1)) model FROM generation_runs r WHERE id=? AND project_id=?").get(runId,projectId) as any;
     if (!run?.model || !run.prompt_version) return fallback;
     const c = readConstitution(db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any);
-    const rows = db.prepare("SELECT strategy_id,SUM(attempts) attempts,SUM(accepted) accepted,SUM(introduced_issue_count) damage FROM repair_strategy_stats WHERE rule_id=? AND platform=? AND genre=? AND story_type=? AND model=? AND prompt_version=? GROUP BY strategy_id HAVING SUM(attempts)>=5")
+    const rows = db.prepare("SELECT strategy_id,SUM(attempts) attempts,SUM(accepted) accepted,SUM(rollbacks) rollbacks,SUM(introduced_issue_count) damage,SUM(tokens_sum) tokens,SUM(latency_ms_sum) latencyMs FROM repair_strategy_stats WHERE rule_id=? AND platform=? AND genre=? AND story_type=? AND model=? AND prompt_version=? GROUP BY strategy_id HAVING SUM(attempts)>=5")
       .all(rules[0],c.targetPlatform,c.webNovelGenre.join('|') || c.category || 'generic',c.projectType,run.model,run.prompt_version) as any[];
     const eligible = rows.filter(r => r.strategy_id in repairStrategies);
-    eligible.sort((a,b) => (b.accepted-b.damage+1)/(b.attempts+2)-(a.accepted-a.damage+1)/(a.attempts+2) || a.strategy_id.localeCompare(b.strategy_id));
+    eligible.sort((a,b) => repairStrategyUtility(b) - repairStrategyUtility(a) || a.strategy_id.localeCompare(b.strategy_id));
     return eligible[0]?.strategy_id || fallback;
+  }
+
+  selectChapterResponsibilityRepairStrategies(
+    projectId: string,
+    issues: string[],
+  ): ChapterResponsibilityRepairStrategy[] {
+    const fallback = [...CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES];
+    try {
+      const db = this.databaseService.getDb();
+      const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
+      const constitution = readConstitution(project || {});
+      const genre = constitution.webNovelGenre.join('|') || constitution.category || 'generic';
+      const ruleId = chapterResponsibilityIssueSignature(issues);
+      const rows = db.prepare(`SELECT strategy_id,SUM(attempts) attempts,SUM(accepted) accepted,SUM(rollbacks) rollbacks,
+          SUM(improvement_sum) improvement_sum,SUM(introduced_issue_count) damage,
+          SUM(tokens_sum) tokens,SUM(latency_ms_sum) latencyMs
+        FROM repair_strategy_stats
+        WHERE rule_id=? AND platform=? AND genre=? AND story_type=? AND model='adaptive' AND prompt_version='chapter-responsibility-v2'
+        GROUP BY strategy_id`).all(
+        ruleId, constitution.targetPlatform, genre, constitution.projectType,
+      ) as Array<{ strategy_id: string; attempts: number; accepted: number; rollbacks: number; improvement_sum: number; damage: number; tokens: number; latencyMs: number }>;
+      const known = new Set<string>(CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES);
+      const learned = rows
+        .filter(row => known.has(row.strategy_id) && Number(row.attempts) > 0)
+        .sort((a, b) => {
+          const scoreA = repairStrategyUtility(a);
+          const scoreB = repairStrategyUtility(b);
+          return scoreB - scoreA
+            || Number(b.accepted) - Number(a.accepted)
+            || Number(a.attempts) - Number(b.attempts)
+            || fallback.indexOf(a.strategy_id as ChapterResponsibilityRepairStrategy)
+              - fallback.indexOf(b.strategy_id as ChapterResponsibilityRepairStrategy);
+        })
+        .map(row => row.strategy_id as ChapterResponsibilityRepairStrategy);
+      return [...learned, ...fallback.filter(strategy => !learned.includes(strategy))];
+    } catch {
+      return fallback;
+    }
+  }
+
+  recordChapterResponsibilityRepairAttempt(
+    projectId: string,
+    issues: string[],
+    strategyId: ChapterResponsibilityRepairStrategy,
+    accepted: boolean,
+    remainingIssues: string[] = [],
+  ): void {
+    try {
+      const db = this.databaseService.getDb();
+      const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
+      const constitution = readConstitution(project || {});
+      const genre = constitution.webNovelGenre.join('|') || constitution.category || 'generic';
+      const ruleId = chapterResponsibilityIssueSignature(issues);
+      const dimensions = [
+        ruleId, constitution.targetPlatform, genre, constitution.projectType,
+        'adaptive', 'chapter-responsibility-v2', strategyId,
+      ];
+      const statId = crypto.createHash('sha256').update(JSON.stringify(dimensions)).digest('hex');
+      const now = new Date().toISOString();
+      const resolvedRatio = issues.length > 0
+        ? Math.max(0, issues.length - remainingIssues.length) / issues.length
+        : 0;
+      const noProgress = !accepted && remainingIssues.length >= issues.length;
+      const introduced = Math.max(0, remainingIssues.length - issues.length);
+      db.prepare(`INSERT INTO repair_strategy_stats (id,rule_id,platform,genre,story_type,model,prompt_version,strategy_id,
+        attempts,accepted,rollbacks,before_score_sum,after_score_sum,improvement_sum,introduced_issue_count,tokens_sum,latency_ms_sum,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,1,?,?,0,0,?,?,0,0,?)
+        ON CONFLICT(id) DO UPDATE SET attempts=attempts+1,accepted=accepted+excluded.accepted,
+          rollbacks=rollbacks+excluded.rollbacks,improvement_sum=improvement_sum+excluded.improvement_sum,
+          introduced_issue_count=introduced_issue_count+excluded.introduced_issue_count,updated_at=excluded.updated_at`).run(
+        statId, ...dimensions, accepted ? 1 : 0, noProgress ? 1 : 0, resolvedRatio, introduced, now,
+      );
+    } catch (error) {
+      // Telemetry and learning must never interrupt project creation.
+      this.logger.debug(`章节分工策略学习记录失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   recordRepair(runId: string, projectId: string, beforeText: string, afterText: string | null,

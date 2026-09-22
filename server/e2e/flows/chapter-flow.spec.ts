@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createProject, deleteProject, createChapter, createReviewableChapter, uniqueTitle } from '../helpers';
 
-const BASE = 'http://127.0.0.1:3100/api/v1';
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1`;
 
 test.describe('Chapter flow', () => {
   let projectId: string;

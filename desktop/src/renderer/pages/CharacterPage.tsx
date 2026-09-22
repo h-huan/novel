@@ -11,6 +11,7 @@ import WritingQualityContextBanner from '../components/quality/WritingQualityCon
 import { clampSidebar } from '../components/common/LayoutKit';
 import { SectionHeading, FieldList } from '../components/common/ListBlocks';
 import { ChangeHistoryPanel } from '../components/character/ChangeHistoryPanel';
+import { normalizeCharacterRole } from '../lib/characterRole';
 
 type RoleType = 'protagonist' | 'major' | 'supporting' | 'minor';
 
@@ -221,7 +222,7 @@ function normalizeCharacter(raw: any): CharacterView {
     relationships: Array.isArray(relationships) ? relationships : [],
     arc,
     dialogueStyle: raw.dialogueStyle || '',
-    role: (raw.role || 'supporting') as RoleType,
+    role: normalizeCharacterRole(raw.role),
     tags: Array.isArray(resolvedTags) ? resolvedTags : [],
     isPov: !!raw.isPovCharacter || !!raw.isPov,
   };

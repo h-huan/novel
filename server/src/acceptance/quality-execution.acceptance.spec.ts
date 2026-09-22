@@ -5,7 +5,11 @@ import baseline from '../database/migrations/001_initial';
 import { CURRENT_SCHEMA_VERSION, reconcileSchema } from '../database/schema-reconciler';
 import { ProjectService } from '../modules/project/project.service';
 import { ProjectRepository } from '../database/repositories/project.repository';
-import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
+import {
+  CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES,
+  GenerationMetricsService,
+  chapterResponsibilityIssueSignature,
+} from '../modules/generation-metrics/generation-metrics.service';
 import { RealLLMService } from '../chain/real-llm.service';
 import { BenchmarkController } from '../chain/benchmark.controller';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
@@ -96,6 +100,40 @@ it('conditions strategy history on all six axes and falls back with insufficient
   } finally { db.close(); }
 });
 
+it('promotes the strategy that previously resolved the same chapter-responsibility conflict', async () => {
+  const db=new DatabaseSync(':memory:');
+  try {
+    await new Migrator(db).runMigrations(); const database={getDb:()=>db} as any;
+    const projects=new ProjectService(new ProjectRepository(database));
+    const first=projects.create({title:'第一次修复',type:'short_story',targetPlatform:'fanqie'});
+    const metrics=new GenerationMetricsService(database);
+    const issues=[
+      '第三日尚未超过三日，触发条件提前',
+      '师兄未吃下锅气菜，前提未满足',
+      '九人份中没有明确师兄名额，人数分配不清',
+    ];
+      expect(chapterResponsibilityIssueSignature(issues)).toBe(
+        'chapter_responsibility.allocation+missing_prerequisite+trigger_timing',
+      );
+      expect(chapterResponsibilityIssueSignature([
+        '亲属关系证明和失踪登记不等同法定继承权，权限移交缺少生效文书',
+        '强哥突然倒向主角并提供关键材料，缺少转变触发与动机',
+        '三年前远程授权为何此刻自动响应，缺少持续机制',
+      ])).toBe(
+        'chapter_responsibility.authority_procedure+authorization_timing+motivation_transition',
+      );
+    expect(metrics.selectChapterResponsibilityRepairStrategies(first.id,issues)).toEqual(
+      [...CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES],
+    );
+    metrics.recordChapterResponsibilityRepairAttempt(first.id,issues,'constraint_matrix',false);
+    metrics.recordChapterResponsibilityRepairAttempt(first.id,issues,'dependency_cascade',false);
+    metrics.recordChapterResponsibilityRepairAttempt(first.id,issues,'full_replan',true);
+
+    const second=projects.create({title:'第二次修复',type:'short_story',targetPlatform:'fanqie'});
+    expect(metrics.selectChapterResponsibilityRepairStrategies(second.id,issues)[0]).toBe('full_replan');
+  } finally { db.close(); }
+});
+
 it('runner calls the production pipeline, isolates labels, and keeps empty state honest (test fixture only)', async () => {
   const db=new DatabaseSync(':memory:');
   try {
@@ -103,7 +141,7 @@ it('runner calls the production pipeline, isolates labels, and keeps empty state
     const metrics=new GenerationMetricsService(database); const llm=new RealLLMService({} as any,metrics);
     const controller=new BenchmarkController(database,metrics,llm);
     expect((await controller.run({})).status).toBe('waiting_for_real_samples');
-    const p=new ProjectService(new ProjectRepository(database)).create({title:'隔离测试样本',type:'long_novel',targetPlatform:'fanqie',chapterWordRange:{min:1,max:10000}});
+    const p=new ProjectService(new ProjectRepository(database)).create({title:'隔离测试样本',type:'long_novel',targetPlatform:'fanqie',chapterWordRange:{min:3000,max:5000}});
     const content='林岚推开铁门，冷风吹过衣领。她决定在天黑前离开，门外却传来脚步声。';
     const sample=metrics.addBenchmarkSample({projectId:p.id,storyType:'long_novel',platform:'fanqie',content,sourceRef:'test-fixture:isolated-in-memory-only'});
     metrics.annotateBenchmarkSample(sample.id,['human_secret_label']);

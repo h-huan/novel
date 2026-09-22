@@ -15,8 +15,10 @@
  *
  * 数值来源：番茄官方作家专区/行业公开拆解（2025-2026）+ 平台读者调研，属【行业经验基线】；
  * module-standards 自归纳产出更贴合本平台数据的阈值时，在调用层覆盖，不改死这里。
- * 章节字数与系统口径一致（短篇 1500-8000、长篇 3200-4000，书级 settings.chapterWordRange 优先）。
+ * 章节字数为系统口径 CHAPTER_WORD_RANGE（短篇与长篇统一，书级 settings.chapterWordRange 优先）。
  */
+
+import { CHAPTER_WORD_RANGE } from '../../shared/src';
 
 // ───────────────────────── 类型：平台枚举与节奏画像 ─────────────────────────
 
@@ -91,11 +93,14 @@ export interface PlatformProfile {
 }
 
 export type ResolvedNovelStrategy = PlatformProfile & {
-  version: 1;
+  version: number;
   storyType: string;
   storyCategory: string;
   tags: string[];
 };
+
+// 章节字数沿用系统口径 CHAPTER_WORD_RANGE（单一来源：shared/src/types/story-length.ts）。
+const CHAPTER_WORDS: [number, number] = [CHAPTER_WORD_RANGE.min, CHAPTER_WORD_RANGE.max];
 
 const S = (
   dialogueRatio: [number, number],
@@ -130,9 +135,10 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '约 3 秒、开篇约七行决定去留；前三章流失普遍过半',
     },
     distribution: { first3FinishRate: 0.45, note: '算法赛马：前三章完读率高（经验阈值约 45%）才进下一波推荐，开篇即生死' },
-    short: S([0.35, 0.65], 45, 90, 0.15, 300, [400, 600], true, true, [1500, 8000]),
-    long: S([0.30, 0.55], 55, 110, 0.20, 500, [600, 900], true, true, [3200, 4000]),
+    short: S([0.35, 0.65], 45, 90, 0.15, 300, [400, 600], true, true, CHAPTER_WORDS),
+    long: S([0.30, 0.55], 55, 110, 0.20, 500, [600, 900], true, true, CHAPTER_WORDS),
     styleMust: [
+      '开篇前300字直接出现本章核心矛盾、危机或反常事件本身（或一段冲突对话），职业身份、履历、家庭环境、日常动作一律后移，由后文动作和对话带出',
       '爽点必须写到明面：打脸/反转/身份反差/结果兑现用旁观者反应、对手变脸、结果落定直接呈现；本条优先级高于通用“白描/克制/去戏剧化”基准，禁止用留白把爽点写没',
       '前三章主角不许纯受气，每章至少一次主角的主动、反击、掌控或亮牌',
       '专业设定与术语用下沉读者秒懂的口语带出，不堆未解释名词',
@@ -154,8 +160,8 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '开篇几百字内要见冲突，连续铺垫极易划走',
     },
     distribution: { first3FinishRate: 0.45, note: '免费流量分发，完读与追更权重高，冲突升级不能靠重复打脸凑数' },
-    short: S([0.35, 0.60], 45, 90, 0.15, 300, [450, 700], true, true, [1500, 8000]),
-    long: S([0.30, 0.55], 55, 110, 0.20, 500, [650, 950], true, true, [3200, 4000]),
+    short: S([0.35, 0.60], 45, 90, 0.15, 300, [450, 700], true, true, CHAPTER_WORDS),
+    long: S([0.30, 0.55], 55, 110, 0.20, 500, [650, 950], true, true, CHAPTER_WORDS),
     styleMust: [
       '开篇前300字直接进冲突/反常/危机，背景后移并用动作对话带出',
       '主角不憋屈，每章至少一次主动掌控或反击；冲突升级靠新信息/新局面，不靠重复打脸',
@@ -177,8 +183,8 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '可接受黄金三章内铺陈，但第一章仍要抛出核心奇点或目标',
     },
     distribution: { first3FinishRate: null, note: '长线精品，签约/推荐看设定新颖度与稳定更新，允许蓄力但不能停滞' },
-    short: S([0.25, 0.50], 70, 150, 0.32, 600, [800, 1300], true, false, [1500, 8000]),
-    long: S([0.25, 0.50], 75, 160, 0.35, 800, [900, 1500], true, false, [3200, 4000]),
+    short: S([0.25, 0.50], 70, 150, 0.32, 600, [800, 1300], true, false, CHAPTER_WORDS),
+    long: S([0.25, 0.50], 75, 160, 0.35, 800, [900, 1500], true, false, CHAPTER_WORDS),
     styleMust: [
       '以世界观纵深、成长弧光与伏笔回收兑现回报，允许蓄力但每章必须有可感知进展，不原地踏步',
     ],
@@ -199,8 +205,8 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '开头三句就要定调立悬念，但能接受成段心理与推理',
     },
     distribution: { first3FinishRate: null, note: '盐选专栏靠开篇钩子与完读付费，去戏剧化、重逻辑闭环' },
-    short: S([0.20, 0.45], 70, 140, 0.30, 200, [700, 1100], true, false, [1500, 8000]),
-    long: S([0.20, 0.45], 75, 150, 0.32, 300, [900, 1400], true, false, [3200, 4000]),
+    short: S([0.20, 0.45], 70, 140, 0.30, 200, [700, 1100], true, false, CHAPTER_WORDS),
+    long: S([0.20, 0.45], 75, 150, 0.32, 300, [900, 1400], true, false, CHAPTER_WORDS),
     styleMust: [
       '坚持第一人称纪实感与白描克制，去戏剧化、重信息差与逻辑闭环，不靠强行打脸制造爽感',
     ],
@@ -221,10 +227,10 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '约 200 字、甚至第一屏就要有冲突或反常',
     },
     distribution: { first3FinishRate: 0.5, note: '信息流赛马，完播/读完率极关键，信息与情绪密度要高' },
-    short: S([0.40, 0.70], 35, 70, 0.10, 200, [300, 500], true, true, [1500, 8000]),
-    long: S([0.35, 0.65], 40, 80, 0.12, 300, [450, 700], true, true, [3200, 4000]),
+    short: S([0.40, 0.70], 35, 70, 0.10, 200, [300, 500], true, true, CHAPTER_WORDS),
+    long: S([0.35, 0.65], 40, 80, 0.12, 300, [450, 700], true, true, CHAPTER_WORDS),
     styleMust: [
-      '前200字定生死，冲突直给、情绪外放、适合口播；约每500字一个小反转或新信息，结尾持续制造下一步观看理由',
+      '前200字尽快建立冲突或反常，情绪外放、适合口播；用新信息、关系变化、压力升级或结果兑现维持高密度，不能按固定字数硬塞反转',
     ],
     original: '短剧化节奏可学，故事核与反转链必须原创，禁止搬运短剧/网文剧情。',
   },
@@ -243,8 +249,8 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '开头即抛冲突或反常，短段口语，情绪要快起',
     },
     distribution: { first3FinishRate: null, note: '靠共鸣、收藏与评论扩散，真实感与情绪浓度优先' },
-    short: S([0.30, 0.55], 40, 80, 0.12, 300, [400, 700], true, true, [1500, 8000]),
-    long: S([0.28, 0.52], 48, 95, 0.16, 400, [600, 900], true, true, [3200, 4000]),
+    short: S([0.30, 0.55], 40, 80, 0.12, 300, [400, 700], true, true, CHAPTER_WORDS),
+    long: S([0.28, 0.52], 48, 95, 0.16, 400, [600, 900], true, true, CHAPTER_WORDS),
     styleMust: [
       '生活化第一人称、真实细节密、情绪共鸣强，段落收尾可用一句有共鸣的金句，但不堆辞藻',
     ],
@@ -265,8 +271,8 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '比番茄能容细腻描写，但关系与情绪必须持续推进',
     },
     distribution: { first3FinishRate: null, note: '看人物魅力与感情线推进，文笔与潜台词加分，但拒绝拖沓' },
-    short: S([0.30, 0.55], 65, 130, 0.28, 500, [700, 1200], true, false, [1500, 8000]),
-    long: S([0.30, 0.55], 68, 135, 0.30, 600, [800, 1300], true, false, [3200, 4000]),
+    short: S([0.30, 0.55], 65, 130, 0.28, 500, [700, 1200], true, false, CHAPTER_WORDS),
+    long: S([0.30, 0.55], 68, 135, 0.30, 600, [800, 1300], true, false, CHAPTER_WORDS),
     styleMust: [
       '以人物关系拉扯、情绪推进与人设魅力为主要回报，台词留潜台词，不套战力/打脸式爽点',
     ],
@@ -287,8 +293,8 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '开篇就要抛异常或规则，但允许中低对话、靠叙述制造不安',
     },
     distribution: { first3FinishRate: null, note: '靠悬念与规则自洽留人，漏洞会被读者立刻指出' },
-    short: S([0.15, 0.40], 60, 120, 0.25, 300, [500, 900], true, false, [1500, 8000]),
-    long: S([0.15, 0.40], 62, 125, 0.27, 400, [700, 1100], true, false, [3200, 4000]),
+    short: S([0.15, 0.40], 60, 120, 0.25, 300, [500, 900], true, false, CHAPTER_WORDS),
+    long: S([0.15, 0.40], 62, 125, 0.27, 400, [700, 1100], true, false, CHAPTER_WORDS),
     styleMust: [
       '规则必须具体、可验证、有代价，逐条推进并暴露规则间的矛盾漏洞；克制感叹号与煽情，靠“不对劲”的冷静细节累积压迫',
     ],
@@ -308,8 +314,8 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
       patience: '开篇尽快立目标或问题，拒绝长段背景说明',
     },
     distribution: { first3FinishRate: null, note: '遵循商业网文普遍规律，按题材动态调整' },
-    short: S([0.25, 0.55], 60, 120, 0.28, 400, [600, 1000], true, false, [1500, 8000]),
-    long: S([0.25, 0.55], 68, 140, 0.32, 600, [800, 1300], true, false, [3200, 4000]),
+    short: S([0.25, 0.55], 60, 120, 0.28, 400, [600, 1000], true, false, CHAPTER_WORDS),
+    long: S([0.25, 0.55], 68, 140, 0.32, 600, [800, 1300], true, false, CHAPTER_WORDS),
     original: '结构可类型化，人物、设定、情节与文字必须原创。',
   },
 };
@@ -373,7 +379,7 @@ export function resolveNovelStrategy(input: StoryStrategyInput): ResolvedNovelSt
 
   return {
     ...base,
-    version: 1,
+    version: 2,
     storyType: String(input.storyType || 'short_story'),
     storyCategory: String(input.storyCategory || ''),
     tags,
@@ -514,14 +520,14 @@ export function buildBenchmarkDirective(platform?: string | null, length?: strin
     const t = targetForLength(b, length);
     const lenLabel = length === 'long_novel' ? '长篇' : '短篇';
     body = `（${lenLabel}）对话占比约 ${pct(t.dialogueRatio[0])}–${pct(t.dialogueRatio[1])}；平均段落不超过 ${t.avgParaCharsMax} 字，${t.shortParagraph ? '一句/短句意群成段' : '允许成段但不写大墙'}；` +
-      `开篇 ${t.openingHookChars} 字内出现钩子/冲突/异常；每 ${t.payoffGapChars[0]}–${t.payoffGapChars[1]} 字一次有效推进或反转${t.endingHook ? '；章尾必须留钩子' : ''}；本章 ${t.chapterWords[0]}–${t.chapterWords[1]} 字。`;
+      `开篇约 ${t.openingHookChars} 字内建立阅读承诺；${t.payoffGapChars[0]}–${t.payoffGapChars[1]} 字是平台常见推进密度参考，可由场景职责和张力曲线偏离，禁止按固定字数硬塞反转${t.endingHook ? '；非终章章尾提供继续阅读理由，终章完成收束或余韵' : ''}；本章 ${t.chapterWords[0]}–${t.chapterWords[1]} 字。`;
   } else {
     const dLo = Math.min(b.short.dialogueRatio[0], b.long.dialogueRatio[0]);
     const dHi = Math.max(b.short.dialogueRatio[1], b.long.dialogueRatio[1]);
     const paraMax = Math.max(b.short.avgParaCharsMax, b.long.avgParaCharsMax);
     body = `对话占比约 ${pct(dLo)}–${pct(dHi)}；平均段落不超过 ${paraMax} 字、拒绝大段厚段落；` +
-      `短篇开篇 ${b.short.openingHookChars} 字内、长篇开篇 ${b.long.openingHookChars} 字内必须出现钩子/冲突/异常；` +
-      `短篇每 ${b.short.payoffGapChars[0]}–${b.short.payoffGapChars[1]} 字、长篇每 ${b.long.payoffGapChars[0]}–${b.long.payoffGapChars[1]} 字一次有效推进或反转；章尾留钩子；` +
+      `短篇开篇约 ${b.short.openingHookChars} 字内、长篇开篇约 ${b.long.openingHookChars} 字内建立阅读承诺；` +
+      `短篇 ${b.short.payoffGapChars[0]}–${b.short.payoffGapChars[1]} 字、长篇 ${b.long.payoffGapChars[0]}–${b.long.payoffGapChars[1]} 字仅作为常见推进密度参考，按场景职责动态调整；非终章章尾提供继续阅读理由，终章负责收束；` +
       `章节字数：短篇 ${b.short.chapterWords[0]}–${b.short.chapterWords[1]}、长篇 ${b.long.chapterWords[0]}–${b.long.chapterWords[1]}。`;
   }
   const styleMustLine = b.styleMust && b.styleMust.length

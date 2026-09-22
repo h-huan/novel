@@ -5,10 +5,8 @@
  * - 启动时幂等写入 seed 基线（module-standards.seed），并把当前标准装入 standardDirectiveCache；
  * - 代码基线升级：seed 文件 SEED_BASELINE_VERSION 高于库内记录时，启动即用新基线确定性覆盖当前标准、
  *   旧版归档（trigger=seed_upgrade，不调用模型），保证"改了标准代码、重启即生效且留历史"；
- * - 自动归纳（不看固定时长）：每当某模块自上次归纳以来【积累足够新样本且指标出现实质变化】
- *   （新增调用≥阈值、失败/截断率上升、首版到位率下降、字数缺口扩大、出现新卡点、新增避坑经验），
- *   即在启动后或前端轮询 status 时异步自动归纳一次；自动归纳有 10 分钟防抖冷却；
- * - 手动归纳：默认只在该模块"检测到变化(dirty)"时才允许（前端按钮默认禁用，dirty 才点亮并提示原因）；
+ * - 变化检测只读取指标，不调用模型：模块积累足够新样本且指标出现实质变化时标为 dirty；
+ * - 归纳必须由用户在标准页明确触发。启动、状态查询和页面轮询均不得隐式调用模型；
  * - 归纳输入 = 当前标准 + 该模块近期埋点指标 + 跨章节避坑经验，用【配置的日常模型 scenario=daily】
  *   （走 RealLLM 统一配置路由，绝不自由选模型/降级）产出新版标准；
  * - 归纳前把旧标准保存为内部审计快照，再更新当前标准并刷新注入缓存；前端和公开 API 只读取当前标准；
@@ -25,9 +23,6 @@ import { standardDirectiveCache } from './standard-directive.cache';
 const ACTIVITY_LOOKBACK_DAYS = 7;
 /** 自上次归纳以来，该模块场景至少新增多少次真实生成，才具备归纳的样本前提 */
 const MIN_NEW_CALLS = 3;
-/** 自动归纳防抖冷却：同一模块两次自动归纳至少间隔，避免指标小幅波动反复调用模型 */
-const AUTO_COOLDOWN_MS = 10 * 60 * 1000;
-
 interface MetricsAgg {
   calls: number;
   failRate: number;
@@ -41,7 +36,6 @@ interface MetricsAgg {
 interface DirtyState {
   dirty: boolean;
   reasons: string[];
-  autoEligible: boolean;
 }
 
 interface StandardRow {
@@ -72,7 +66,6 @@ interface StandardRow {
 export class ModuleStandardsService implements OnModuleInit {
   private readonly logger = new Logger(ModuleStandardsService.name);
   private readonly running = new Set<string>();
-  private scheduled = false;
 
   constructor(
     private readonly db: DatabaseService,
@@ -86,8 +79,6 @@ export class ModuleStandardsService implements OnModuleInit {
       this.recoverInterruptedRuns();
       this.ensureSeeded();
       this.loadToCache();
-      // 启动后自检一次：有"检测到变化"的模块即自动归纳（4s 后异步，避开启动高峰），不完全依赖前端轮询
-      this.runDueSummarizations();
     } catch (err) {
       this.logger.warn(`标准库初始化失败（不影响生成）: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -155,7 +146,7 @@ export class ModuleStandardsService implements OnModuleInit {
           s.module_key, s.module_name, s.category, JSON.stringify(s.scenarios), JSON.stringify(s.business_tables),
           s.purpose, JSON.stringify(s.steps), JSON.stringify(s.requirements), JSON.stringify(s.rules),
           s.quality_bar, JSON.stringify(s.inputs), JSON.stringify(s.outputs),
-          // 初始基线从未经过归纳：last_summarized_at 置 NULL，使首次积累足够样本即可自动归纳（不被冷却误挡）
+          // 初始基线从未经过归纳：last_summarized_at 置 NULL，达到样本条件后在页面提示可手动归纳
           null, SEED_BASELINE_VERSION, now, now,
         );
         insVer.run(this.id(), s.module_key, s.module_name, 1, JSON.stringify(this.seedToSnapshot(s)), '初始标准基线', 'seed', null, now);
@@ -304,14 +295,14 @@ export class ModuleStandardsService implements OnModuleInit {
   }
 
   /**
-   * 变化驱动判定：该模块当前是否"有值得归纳的新变化(dirty)"，以及是否已过自动冷却(autoEligible)。
+   * 变化驱动判定：该模块当前是否有值得归纳的新变化（dirty）。
    * 不看固定时长，只看：样本量 + 指标实质变化（失败率/首版率/字数缺口/卡点/避坑经验）。
    */
   private computeDirty(row: StandardRow): DirtyState {
     const scenarios = this.safeArr(row.scenarios);
     const brief = this.buildMetricsBrief(scenarios);
     const agg = brief.agg;
-    if (agg.calls <= 0) return { dirty: false, reasons: ['该模块近期还没有真实生成，暂不归纳'], autoEligible: false };
+    if (agg.calls <= 0) return { dirty: false, reasons: ['该模块近期还没有真实生成，暂不归纳'] };
 
     let prevAgg: MetricsAgg | null = null;
     try {
@@ -321,14 +312,14 @@ export class ModuleStandardsService implements OnModuleInit {
 
     if (!prevAgg) {
       if (agg.calls < MIN_NEW_CALLS) {
-        return { dirty: false, reasons: [`样本不足（${agg.calls}/${MIN_NEW_CALLS} 次），积累到阈值再首次归纳`], autoEligible: false };
+        return { dirty: false, reasons: [`样本不足（${agg.calls}/${MIN_NEW_CALLS} 次），积累到阈值再首次归纳`] };
       }
-      return this.withCooldown(row, true, [`已积累 ${agg.calls} 次真实生成，达到首次归纳条件`]);
+      return { dirty: true, reasons: [`已积累 ${agg.calls} 次真实生成，达到首次归纳条件`] };
     }
 
     const newCalls = agg.calls - (prevAgg.calls || 0);
     if (newCalls < MIN_NEW_CALLS) {
-      return { dirty: false, reasons: [`自上次归纳仅新增 ${Math.max(0, newCalls)} 次（需≥${MIN_NEW_CALLS}）`], autoEligible: false };
+      return { dirty: false, reasons: [`自上次归纳仅新增 ${Math.max(0, newCalls)} 次（需≥${MIN_NEW_CALLS}）`] };
     }
     const reasons: string[] = [`自上次归纳新增 ${newCalls} 次真实生成`];
     if (agg.failRate - (prevAgg.failRate || 0) > 0.02) {
@@ -348,16 +339,9 @@ export class ModuleStandardsService implements OnModuleInit {
     }
     // 第一条只是样本前提；必须再有至少一条"实质变化"才归纳，避免无意义调用模型
     if (reasons.length === 1) {
-      return { dirty: false, reasons: ['新增样本但指标无实质变化，暂不归纳'], autoEligible: false };
+      return { dirty: false, reasons: ['新增样本但指标无实质变化，暂不归纳'] };
     }
-    return this.withCooldown(row, true, reasons);
-  }
-
-  /** 叠加自动归纳防抖冷却（不影响手动：手动只看 dirty）。 */
-  private withCooldown(row: StandardRow, dirty: boolean, reasons: string[]): DirtyState {
-    const last = row.last_summarized_at ? Date.parse(row.last_summarized_at) : NaN;
-    const autoEligible = dirty && (!Number.isFinite(last) || Date.now() - last >= AUTO_COOLDOWN_MS);
-    return { dirty, reasons, autoEligible };
+    return { dirty: true, reasons };
   }
 
   /**
@@ -497,50 +481,8 @@ export class ModuleStandardsService implements OnModuleInit {
     return input.map(x => String(x ?? '').trim()).filter(Boolean);
   }
 
-  /** 自动到期模块：检测到变化(dirty)且已过防抖冷却；用于懒触发自动归纳。 */
-  private dueModules(): StandardRow[] {
-    const rows = this.db.getDb().prepare(`SELECT * FROM module_standards WHERE status='active'`).all() as unknown as StandardRow[];
-    return rows.filter(r => {
-      if (this.running.has(r.module_key)) return false;
-      try {
-        return this.computeDirty(r).autoEligible;
-      } catch {
-        return false;
-      }
-    });
-  }
-
-  /**
-   * 懒触发：后端启动后或前端轮询 status 时调用。异步、逐个自动归纳，不阻塞调用方，防重入。
-   */
-  runDueSummarizations(): void {
-    if (this.scheduled) return;
-    this.scheduled = true;
-    setTimeout(() => {
-      this.runDueAsync().finally(() => { this.scheduled = false; });
-    }, 4000); // 启动 4s 后再跑，避开服务启动高峰
-  }
-
-  private async runDueAsync(): Promise<void> {
-    let due: StandardRow[] = [];
-    try {
-      due = this.dueModules();
-    } catch (err) {
-      this.logger.debug?.('变化模块检查失败: ' + (err instanceof Error ? err.message : String(err)));
-      return;
-    }
-    for (const row of due) {
-      try {
-        await this.summarizeModule(row.module_key, 'scheduled');
-      } catch {
-        /* 单模块失败不影响其它模块 */
-      }
-    }
-  }
-
-  /** 前端状态：正在归纳的模块 + 最近运行记录 + 每模块 dirty 状态（用于按钮启停与提醒）。 */
+  /** 前端状态：只读。正在归纳的模块 + 最近运行记录 + 每模块 dirty 状态。 */
   status() {
-    this.runDueSummarizations(); // 懒触发自动归纳
     const database = this.db.getDb();
     const running = (database
       .prepare(`SELECT * FROM standard_summarization_runs WHERE status='running' ORDER BY started_at DESC`)
@@ -552,7 +494,7 @@ export class ModuleStandardsService implements OnModuleInit {
       .all() as any[];
     const rows = database.prepare(`SELECT * FROM module_standards WHERE status='active'`).all() as unknown as StandardRow[];
     const modules = rows.map(r => {
-      let d: DirtyState = { dirty: false, reasons: [], autoEligible: false };
+      let d: DirtyState = { dirty: false, reasons: [] };
       try { d = this.computeDirty(r); } catch { /* ignore */ }
       return {
         moduleKey: r.module_key,
@@ -561,7 +503,6 @@ export class ModuleStandardsService implements OnModuleInit {
         version: r.version,
         running: this.running.has(r.module_key),
         dirty: d.dirty,
-        autoEligible: d.autoEligible,
         reasons: d.reasons,
         lastSummarizedAt: r.last_summarized_at,
       };
@@ -575,10 +516,8 @@ export class ModuleStandardsService implements OnModuleInit {
         error: r.error, startedAt: r.started_at, finishedAt: r.finished_at,
       })),
       modules,
-      /** 检测到变化、待归纳的模块数（含处于自动冷却中的） */
+      /** 检测到变化、可由用户手动归纳的模块数 */
       dirtyCount: modules.filter(m => m.dirty).length,
-      /** 已过冷却、本轮会被自动归纳的模块数 */
-      dueCount: modules.filter(m => m.autoEligible && !m.running).length,
       cacheRebuiltAt: standardDirectiveCache.getRebuiltAt(),
     };
   }

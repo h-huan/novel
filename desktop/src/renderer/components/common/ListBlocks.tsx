@@ -1,5 +1,5 @@
 import React from 'react';
-import { splitToLines } from '../../lib/textList';
+import { splitDisplayList, splitToLines } from '../../lib/textList';
 
 const cardStyle: React.CSSProperties = {
   marginBottom: 10,
@@ -90,9 +90,13 @@ export const TimelineField: React.FC<{ label: string; value: readonly { label: s
  */
 export const FieldList: React.FC<{ label: string; value: string | readonly string[] | null | undefined; accent?: string; empty?: string }> = ({
   label, value, accent = 'var(--color-info-light)', empty = '未填写',
-}) => Array.isArray(value)
-  ? <StringListField label={label} value={value as readonly string[]} accent={accent} empty={empty} />
-  : <ParagraphField label={label} value={String(value ?? '')} accent={accent} empty={empty} />;
+}) => {
+  const text = String(value ?? '').trim();
+  const lines = splitDisplayList(value);
+  return lines.length > 1 || Array.isArray(value)
+    ? <StringListField label={label} value={lines} accent={accent} empty={empty} />
+    : <ParagraphField label={label} value={text} accent={accent} empty={empty} />;
+};
 
 export const LegacyTextListField: React.FC<{ label: string; value: string; accent?: string; empty?: string }> = ({ label, value, accent, empty }) => (
   <StringListField label={label} value={splitToLines(value)} accent={accent} empty={empty} />

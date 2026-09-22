@@ -27,6 +27,14 @@ export const WRITING_QUALITY_TAGS = [
   'event_sequence_risk',
   'label_fit',
   'punctuation',
+  // 平台标准（番茄/七猫/起点/知乎盐选…）确定性度量落库用标签：与生成侧 Gate 共用同一份
+  // platform-benchmarks 基准，让"不符合目标平台"像其它问题一样可逐条定向精修，而不是只存在于生成侧。
+  'platform_chapter_length',
+  'platform_paragraph_length',
+  'platform_dialogue_ratio',
+  'platform_opening_hook',
+  'platform_ending_hook',
+  'platform_payoff_gap',
 ] as const;
 
 export type WritingQualityTag = typeof WRITING_QUALITY_TAGS[number];

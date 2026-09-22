@@ -8,6 +8,7 @@ import type { WorldSettingRow } from '../../database/repositories/world-setting.
 import type { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } from './dto/world-setting.dto';
 import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
+import { maskForeshadowAnswers } from '../../chain/foreshadow-mask';
 
 // 对齐《两百万字小说创作全流程指南》世界观 7 类 + 作品地基字段；custom_settings 为按小说自定义设定（JSON 键值对）
 export const WORLD_PROFILE_FIELDS = ['synopsis','basic_info','era','locations','atmosphere_tone','rules','social_structure','tech_supernatural','system_mechanics','economy_system','culture_customs','naming_rules','factions','scale_plan','ending','hierarchy_rules','supplementary','custom_settings'] as const;
@@ -120,12 +121,12 @@ export class WorldSettingService {
     return this.getProfile(projectId, id);
   }
 
-  getWritingSummary(projectId: string, id: string) {
+  getWritingSummary(projectId: string, id: string, maskForeshadow = false) {
     const profileData = this.getProfile(projectId, id);
-    return { summary: this.buildWritingSummary(profileData.profile), profile: profileData.profile };
+    return { summary: this.buildWritingSummary(profileData.profile, maskForeshadow), profile: profileData.profile };
   }
 
-  private buildWritingSummary(profile: Record<string, string>) {
+  private buildWritingSummary(profile: Record<string, string>, maskForeshadow = false) {
     const value = (key: string) => profile[key] || '待补全';
     const fields: Array<[string, string]> = [
       ['作品简介/核心卖点','synopsis'],
@@ -147,8 +148,64 @@ export class WorldSettingService {
       ['补充说明','supplementary'],
     ];
     const custom = (profile['custom_settings'] || '').trim();
-    const customLines = custom ? [`自定义设定：${custom}`] : [];
+    // 收尾反转脱敏（仅生成侧 maskForeshadow=true 时）：custom_settings 中凡命中
+    // “收尾/变脸/反转/才揭示/归属”的锁定句，抹去具体归属/答案（如“笔迹一属沈月兰，
+    // 笔迹二属贺德山——这是老贺变脸的依据”），只保留“该信息锁定在收尾揭示”的提示，
+    // 防止模型把世界观锁定事实当可写信息直接写进正文。评审侧 maskForeshadow=false
+    // 拿完整档案，才能判定正文是否提前消费收尾反转——两端信息不对称是结构性保障。
+    const customLines = maskForeshadow
+      ? (custom
+        ? [`自定义设定（收尾反转信息已脱敏，正文不得提前点名归属/结果）：${this.sanitizeCustomSettings(custom, profile['ending'])}`]
+        : [])
+      : (custom ? [`自定义设定：${custom}`] : []);
     return ['【世界观写作摘要】', ...fields.map(([label, key]) => `${label}：${value(key)}`), ...customLines].join('\n');
+  }
+
+  /**
+   * 收尾反转脱敏：把 custom_settings 中命中“收尾/变脸/反转/才揭示/归属锁定”的条目改写为
+   * 不含答案的提示（如“接送签到表家长栏两种笔迹的具体归属锁定在收尾对峙时揭示”），
+   * 其余普通设定原样保留。规则层价值：正文生成侧必须拿不到收尾反转答案，
+   * 评审侧仍用完整档案判错，两端信息不对称是防提前消费的结构性保障。
+   */
+  private sanitizeCustomSettings(custom: string, ending?: string): string {
+    if (!custom) return '';
+    // 脱敏触发关键词：收尾反转词 + ending「必须回收的伏笔」清单关键词（通用提取，不硬编码单本小说）
+    const foreshadowKeywords = new Set<string>();
+    if (ending) {
+      const m = ending.match(/必须回收的伏笔[：:]([^\n]+)/);
+      if (m) {
+        for (const item of m[1].split(/[①②③④⑤⑥⑦⑧⑨⑩]/).filter(Boolean)) {
+          const clean = item.replace(/[，。；、\s"“”'（）()]/g, '').trim();
+          // 取每个伏笔条目的核心名词短语（前 12 字）作为触发词
+          if (clean.length >= 2) foreshadowKeywords.add(clean.slice(0, 12));
+        }
+      }
+    }
+    const triggerPattern = /(收尾|变脸|反转|才揭示|才回收|揭破|在收尾)/;
+    // 触发判定：反转词命中，或任一伏笔关键词的任一 ≥3 字连续片段命中（覆盖“担保栏写沈青禾”这类
+    // 关键词顺序不完全一致的情形，通用不硬编码）。
+    const foreshadowTriggers = [...foreshadowKeywords].flatMap(k => {
+      const trigs: string[] = [];
+      for (let i = 0; i + 3 <= k.length; i++) trigs.push(k.slice(i, i + 3));
+      return trigs;
+    });
+    const segments = custom.split(/\n+|(?=[0-9]+[）)])/);
+    const out: string[] = [];
+    for (const seg of segments) {
+      const t = seg.trim();
+      if (!t) continue;
+      const hitForeshadow = foreshadowTriggers.some(f => f.length >= 3 && t.includes(f));
+      if (triggerPattern.test(t) || hitForeshadow) {
+        const masked = maskForeshadowAnswers(t)
+
+          // 兜底：担保/教师证明/档案等伏笔载体出现名字时也抹除（排除括号防贪吃）
+          .replace(/(担保|证明|档案|台账|名单|签名)[^，。；\n（(]{0,20}?[“「]?[沈贺郭周宁简石殷覃祝陶龙韦莫][^”」，。；\n（)]{0,8}/g, '$1（署名锁定在收尾揭示）');
+        out.push(`【收尾锁定，正文只留线索】${masked.slice(0, 160)}`);
+      } else {
+        out.push(t);
+      }
+    }
+    return out.join('\n');
   }
 
   /* Legacy summary implementation is retained below for source compatibility. */

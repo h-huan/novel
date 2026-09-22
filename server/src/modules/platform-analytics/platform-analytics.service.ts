@@ -15,6 +15,7 @@ import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DatabaseService } from '../../database/database.service';
+import { CHAPTER_WORD_RANGE } from '../../../shared/src';
 import {
   platformLabel, storyTypeLabel,
   qualityIssueLabel, checkTypeLabel, severityLabel, errorKindLabel,
@@ -561,12 +562,8 @@ export class PlatformAnalyticsService {
       if (w <= 0) continue; // 空壳章节不参与字数达标
       written++;
       sumWords += w;
-      const settings = this.parseJson(r.settings);
-      const range = settings.chapterWordRange || {};
-      // 缺省区间按长短篇分化：短篇 1500-8000，长篇 3200-4000（书级自定义区间优先）
-      const isShort = String(r.ptype || '') === 'short_story';
-      const min = Number(range.min) || (isShort ? 1500 : 3200);
-      const max = Number(range.max) || (isShort ? 8000 : 4000);
+      const min = CHAPTER_WORD_RANGE.min;
+      const max = CHAPTER_WORD_RANGE.max;
       if (w < min) { short++; deficitSum += (min - w); }
       else if (w > max) long++;
       else ok++;
@@ -610,11 +607,8 @@ export class PlatformAnalyticsService {
       const b = getPlatform(c.platform);
       const t = targetForLength(b, c.ptype);
       const measured = measureAgainstTarget(String(c.content || ''), t);
-      const settings = this.parseJson(c.settings);
-      const range = settings.chapterWordRange || {};
-      const isShort = String(c.ptype || '') !== 'long_novel';
-      const wMin = Number(range.min) || (isShort ? 1500 : 3200);
-      const wMax = Number(range.max) || (isShort ? 8000 : 4000);
+      const wMin = CHAPTER_WORD_RANGE.min;
+      const wMax = CHAPTER_WORD_RANGE.max;
       const checks: Record<string, string> = {};
       for (const x of measured.rows) checks[x.key] = x.status;
       const m = measured.metrics;

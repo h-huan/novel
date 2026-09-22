@@ -9,6 +9,7 @@ import type { CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
 import { ChapterDerivedDataSyncService } from './chapter-derived-data-sync.service';
 import { DatabaseService } from '../../database/database.service';
 import { OriginalityGuardService } from '../originality/originality-guard.service';
+import { CHAPTER_WORD_RANGE } from '../../../shared/src';
 
 export interface ChapterResponse {
   id: string;
@@ -425,18 +426,18 @@ export class ChapterService {
     const content = this.narrativeContent(row.content);
     const actual = this.countWords(content);
     const target = Number(this.repo.findOutlineTargetWords(row.outline_id) || 0);
-    if (!Number.isInteger(target) || target < 3200 || target > 4000) {
-      throw new BadRequestException('Chapter outline has no valid target word count (3200-4000 words)');
+    if (!Number.isInteger(target) || target < CHAPTER_WORD_RANGE.min || target > CHAPTER_WORD_RANGE.max) {
+      throw new BadRequestException(`Chapter outline has no valid target word count (${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max} words)`);
     }
     // 门禁文案区分「空正文 / 不足 / 超限」，避免把"无法送审/锁定"误读成"已被锁定"。
     if (actual === 0) {
-      throw new BadRequestException(`本章正文为空（0 字）。请先写作或生成正文，达到约 ${target} 字（3200-4000 字区间）后再提交质检或锁定。`);
+      throw new BadRequestException(`本章正文为空（0 字）。请先写作或生成正文，达到约 ${target} 字（${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max} 字区间）后再提交质检或锁定。`);
     }
-    if (actual < 3200) {
-      throw new BadRequestException(`本章正文仅 ${actual} 字，未达到 3200 字下限（本章目标 ${target} 字），暂不能提交质检或锁定。`);
+    if (actual < CHAPTER_WORD_RANGE.min) {
+      throw new BadRequestException(`本章正文仅 ${actual} 字，未达到 ${CHAPTER_WORD_RANGE.min} 字下限（本章目标 ${target} 字），暂不能提交质检或锁定。`);
     }
-    if (actual > 4000) {
-      throw new BadRequestException(`本章正文已达 ${actual} 字，超过 4000 字上限（本章目标 ${target} 字），需精简后才能提交质检或锁定。`);
+    if (actual > CHAPTER_WORD_RANGE.max) {
+      throw new BadRequestException(`本章正文已达 ${actual} 字，超过 ${CHAPTER_WORD_RANGE.max} 字上限（本章目标 ${target} 字），需精简后才能提交质检或锁定。`);
     }
   }
 

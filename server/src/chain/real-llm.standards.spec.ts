@@ -16,7 +16,8 @@ it('injects the same active standard into ordinary and streaming provider reques
   expect(streamedSystem).toBe((call.mock.calls[0] as any)[2]);
   expect(streamedSystem).toContain('测试当前生效规则');
   for await (const _token of service.generateStream({ prompt: '题材', scenario: 'idea_generate', injectStandard: false })) { /* drain */ }
-  expect(streamedSystem).toBe('');
+  expect(streamedSystem).toContain('执行前置规则');
+  expect(streamedSystem).not.toContain('测试当前生效规则');
 });
 
 it('injects only standards declared for the normalized functional scene', () => {

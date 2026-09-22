@@ -149,9 +149,11 @@ interface ProjectCardProps {
   project: Project;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  selected: boolean;
+  onSelectionChange: (id: string, selected: boolean) => void;
 }
 
-const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }) => {
+const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete, selected, onSelectionChange }) => {
   const [isHovered, setIsHovered] = useState(false);
   const progress = 0;
   const statusLabel = USER_STATUS_LABELS[project.status] || project.status;
@@ -179,6 +181,19 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete }
       }}
     >
       <div style={cardStyles.header}>
+        <label
+          style={cardStyles.selection}
+          title={`选择“${project.title}”`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={`选择项目 ${project.title}`}
+            onChange={(event) => onSelectionChange(project.id, event.target.checked)}
+            style={cardStyles.checkbox}
+          />
+        </label>
         <h3 style={cardStyles.title}>{project.title}</h3>
         <div style={cardStyles.headerRight}>
           <span
@@ -275,6 +290,23 @@ const cardStyles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: '8px',
     flexShrink: 0,
+  },
+  selection: {
+    width: 24,
+    height: 24,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    flexShrink: 0,
+    cursor: 'pointer',
+  },
+  checkbox: {
+    width: 16,
+    height: 16,
+    accentColor: 'var(--color-accent)',
+    cursor: 'pointer',
   },
   title: {
     fontSize: '16px',
@@ -1106,14 +1138,16 @@ const ProjectListPage: React.FC = () => {
     setTypeFilter,
     createProject,
     selectProject,
-    deleteProject,
+    deleteProjects,
     getFilteredProjects,
   } = useProjectStore();
 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleteTargets, setDeleteTargets] = useState<string[]>([]);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => new Set());
+  const [deleting, setDeleting] = useState(false);
   const { createDraft } = useIdeaLabStore();
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
@@ -1124,6 +1158,8 @@ const ProjectListPage: React.FC = () => {
   }, [searchParams]);
 
   const filteredProjects = getFilteredProjects();
+  const filteredIds = filteredProjects.map(project => project.id);
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => selectedProjectIds.has(id));
 
   const handleCreate = async (data: {
     title: string;
@@ -1187,14 +1223,41 @@ const ProjectListPage: React.FC = () => {
   };
 
   const handleDeleteRequest = (id: string) => {
-    setDeleteTargetId(id);
+    setDeleteTargets([id]);
   };
 
   const handleDeleteConfirm = async () => {
-    if (deleteTargetId) {
-      await deleteProject(deleteTargetId);
-      setDeleteTargetId(null);
+    if (deleteTargets.length === 0 || deleting) return;
+    setDeleting(true);
+    const result = await deleteProjects(deleteTargets);
+    setDeleting(false);
+    setDeleteTargets([]);
+    setSelectedProjectIds(current => {
+      const next = new Set(current);
+      result.deleted.forEach(id => next.delete(id));
+      return next;
+    });
+    if (result.failed.length > 0) {
+      alert(`已删除 ${result.deleted.length} 个项目，${result.failed.length} 个删除失败。请稍后重试失败项。`);
     }
+  };
+
+  const setProjectSelected = (id: string, selected: boolean) => {
+    setSelectedProjectIds(current => {
+      const next = new Set(current);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleAllFiltered = () => {
+    setSelectedProjectIds(current => {
+      const next = new Set(current);
+      if (allFilteredSelected) filteredIds.forEach(id => next.delete(id));
+      else filteredIds.forEach(id => next.add(id));
+      return next;
+    });
   };
 
   return (
@@ -1218,6 +1281,31 @@ const ProjectListPage: React.FC = () => {
         onTypeChange={setTypeFilter}
       />
 
+      {projects.length > 0 && (
+        <div style={pageStyles.selectionBar}>
+          <label style={pageStyles.selectAllLabel}>
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleAllFiltered}
+              disabled={filteredIds.length === 0}
+              aria-label="全选当前项目列表"
+              style={cardStyles.checkbox}
+            />
+            <span>{searchQuery || typeFilter !== 'all' ? `全选当前筛选（${filteredIds.length}）` : `全选（${filteredIds.length}）`}</span>
+          </label>
+          <span style={pageStyles.selectionCount}>已选 {selectedProjectIds.size} 个</span>
+          <button
+            type="button"
+            style={{ ...pageStyles.bulkDeleteBtn, opacity: selectedProjectIds.size > 0 ? 1 : 0.45 }}
+            disabled={selectedProjectIds.size === 0 || deleting}
+            onClick={() => setDeleteTargets([...selectedProjectIds])}
+          >
+            删除所选
+          </button>
+        </div>
+      )}
+
       {filteredProjects.length === 0 ? (
         projects.length === 0 ? (
           <EmptyState
@@ -1240,6 +1328,8 @@ const ProjectListPage: React.FC = () => {
               project={project}
               onSelect={handleSelectProject}
               onDelete={handleDeleteRequest}
+              selected={selectedProjectIds.has(project.id)}
+              onSelectionChange={setProjectSelected}
             />
           ))}
         </div>
@@ -1252,14 +1342,16 @@ const ProjectListPage: React.FC = () => {
       />
 
       <ConfirmDialog
-        open={deleteTargetId !== null}
-        title="删除项目"
-        description="确定要删除这个项目吗？所有章节和设定数据将被永久删除，此操作不可撤销。"
-        confirmText="确认删除"
+        open={deleteTargets.length > 0}
+        title={deleteTargets.length > 1 ? `删除 ${deleteTargets.length} 个项目` : '删除项目'}
+        description={deleteTargets.length > 1
+          ? `确定删除选中的 ${deleteTargets.length} 个项目吗？所有章节和设定数据将被永久删除，此操作不可撤销。`
+          : '确定要删除这个项目吗？所有章节和设定数据将被永久删除，此操作不可撤销。'}
+        confirmText={deleting ? '删除中…' : '确认删除'}
         cancelText="取消"
         variant="danger"
         onConfirm={handleDeleteConfirm}
-        onCancel={() => setDeleteTargetId(null)}
+        onCancel={() => { if (!deleting) setDeleteTargets([]); }}
       />
     </div>
   );
@@ -1294,6 +1386,40 @@ const pageStyles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontFamily: 'var(--font-family, sans-serif)',
     transition: 'background-color 0.15s',
+  },
+  selectionBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 44,
+    padding: '8px 12px',
+    margin: '12px 0 16px',
+    border: '1px solid var(--color-border)',
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.025)',
+  },
+  selectAllLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    color: 'var(--color-text-secondary)',
+    fontSize: 14,
+    cursor: 'pointer',
+  },
+  selectionCount: {
+    marginLeft: 'auto',
+    color: 'var(--color-text-muted)',
+    fontSize: 13,
+  },
+  bulkDeleteBtn: {
+    padding: '7px 14px',
+    border: '1px solid rgba(239,68,68,0.45)',
+    borderRadius: 7,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    color: '#f87171',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
   },
   grid: {
     display: 'grid',

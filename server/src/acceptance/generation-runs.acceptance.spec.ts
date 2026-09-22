@@ -34,6 +34,26 @@ it('records success, provider failure, stream cancellation and constitution snap
   } finally { db.close(); }
 });
 
+it('closes persisted running rows when a restarted service boots', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    await new Migrator(db).runMigrations();
+    const database = { getDb: () => db } as any;
+    const metrics = new GenerationMetricsService(database);
+    const interrupted = metrics.beginRun(undefined, 'daily', 'unfinished internal task');
+
+    const restarted = new GenerationMetricsService(database);
+    restarted.onModuleInit();
+
+    const row = db.prepare('SELECT status,finished_at,error FROM generation_runs WHERE id=?')
+      .get(interrupted.id) as any;
+    expect(row.status).toBe('cancelled');
+    expect(row.finished_at).toBeTruthy();
+    expect(row.error).toContain('服务重启前生成未正常结束');
+    expect(restarted.recoverInterruptedRuns()).toBe(0);
+  } finally { db.close(); }
+});
+
 it('inherits the constitution and stores evidence-based scores through five writing stages', async()=>{
  const db=new DatabaseSync(':memory:');
  try {

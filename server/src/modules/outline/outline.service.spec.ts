@@ -67,6 +67,14 @@ describe('OutlineService', () => {
       expect(result.title).toBe('第一章大纲');
       expect(result.chapterFunction).toBe('breathing');
     });
+
+    it('accepts both 3000 and 5000 word boundaries and rejects values outside them', () => {
+      (repo.findById as any).mockReturnValue(mockRow);
+      expect(() => service.create('project-1', { title: '下限章', targetWords: 3000 })).not.toThrow();
+      expect(() => service.create('project-1', { title: '上限章', targetWords: 5000 })).not.toThrow();
+      expect(() => service.create('project-1', { title: '过短章', targetWords: 2999 })).toThrow();
+      expect(() => service.create('project-1', { title: '过长章', targetWords: 5001 })).toThrow();
+    });
   });
 
   describe('tree operations', () => {

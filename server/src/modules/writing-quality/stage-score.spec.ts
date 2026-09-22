@@ -34,3 +34,19 @@ it('preserves all dimensions and marks a low consistency dimension blocking', ()
   expect(result.dimensions.platform.status).toBe('not_applicable');
   expect(result.dimensions.context.score).toBe(20);
 });
+
+it('downgrades a blocking expressive verdict but keeps fact and voice verdicts blocking', () => {
+  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 99, reason: '满足', evidence: ['真实引用'] }]));
+  const result = parseStageScore({ dimensions, issues: [
+    { ruleId: 'constitution.style', severity: 'blocking', message: '文风偏平，缺少具体动作', evidence: '真实引用' },
+    { ruleId: 'constitution.tone', severity: 'BLOCKING', message: '基调偏冷', evidence: '真实引用' },
+    { ruleId: 'ai_trace.abstract_summary', severity: 'blocking', message: '以抽象总结收尾', evidence: '真实引用' },
+    { ruleId: 'constitution.timeline', severity: 'blocking', message: '时间线与前文互斥', evidence: '真实引用' },
+    { ruleId: 'constitution.world_rules', severity: 'blocking', message: '违反已确认世界规则', evidence: '真实引用' },
+  ] }, input);
+  expect(result.issues.find(i => i.ruleId === 'constitution.style')?.severity).toBe('high');
+  expect(result.issues.find(i => i.ruleId === 'constitution.tone')?.severity).toBe('high');
+  expect(result.issues.find(i => i.ruleId === 'ai_trace.abstract_summary')?.severity).toBe('high');
+  expect(result.issues.find(i => i.ruleId === 'constitution.timeline')?.severity).toBe('blocking');
+  expect(result.issues.find(i => i.ruleId === 'constitution.world_rules')?.severity).toBe('blocking');
+});

@@ -14,6 +14,39 @@ it('rejects an improved total when a single dimension regresses', () => {
   expect(compareRepair(make(40, 80), make(90, 80)).accepted).toBe(true);
 });
 
+it('accepts removal of an evidenced blocker despite small judge score noise', () => {
+  const constitution = readConstitution({ targetPlatform: '番茄' });
+  const content = '贺兰看到原始签名后才承认地下库的位置。';
+  const dimensions = (context: number) => Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, {
+    score: key === 'context' ? context : 88,
+    reason: '有逐字证据',
+    evidence: [content],
+  }]));
+  const before = parseStageScore({
+    dimensions: dimensions(90),
+    issues: [{ ruleId: 'character.intelligence', severity: 'blocking', message: '人物无诱因泄密', evidence: content }],
+  }, { projectId: 'p', runId: 'before', stage: 'outline', content, constitution });
+  const after = parseStageScore({ dimensions: dimensions(87), issues: [] }, {
+    projectId: 'p', runId: 'after', stage: 'outline', content, constitution,
+  });
+
+  expect(compareRepair(before, after)).toMatchObject({ accepted: true });
+});
+
+it('still rejects a repair when a dimension crosses its quality floor', () => {
+  const constitution = readConstitution({ targetPlatform: '番茄' });
+  const content = '证据段落';
+  const make = (context: number) => parseStageScore({
+    dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, {
+      score: key === 'context' ? context : 88,
+      reason: '有逐字证据',
+      evidence: [content],
+    }])),
+  }, { projectId: 'p', runId: String(context), stage: 'outline', content, constitution });
+
+  expect(compareRepair(make(75), make(55))).toMatchObject({ accepted: false });
+});
+
 it('accepts a fully verified repair of an evidenced blocker even when the first review was partial', () => {
   const constitution = readConstitution({ targetPlatform: '番茄' });
   const before = parseStageScore({

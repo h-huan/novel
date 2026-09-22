@@ -17,6 +17,7 @@ import type {
 } from './dto/outline.dto';
 import { StateItemService } from '../../state/state-item.service';
 import { ConsistencyCheckService } from '../../state/consistency-check.service';
+import { CHAPTER_WORD_RANGE } from '../../../shared/src';
 
 export interface OutlineResponse {
   id: string;
@@ -537,7 +538,7 @@ export class OutlineService {
     const isShort = workScale.includes('short') || project?.type?.includes('short');
     const target = Number(project?.target_words || 0);
     if (!Number.isInteger(target) || target <= 0) throw new Error('项目未配置有效的目标总字数，不能使用固定篇幅代替。');
-    const chapterWordRange = { min: 3200, max: 4000 };
+    const chapterWordRange = { ...CHAPTER_WORD_RANGE };
     const chapterRange = { min: Math.ceil(target / chapterWordRange.max), max: Math.ceil(target / chapterWordRange.min) };
     const existing = d.prepare(`SELECT level, parent_id, target_words FROM outlines WHERE project_id = ?`).all(projectId) as any[];
     const existingChapters = existing.filter(row => row.level === 'chapter');
@@ -557,7 +558,7 @@ export class OutlineService {
       invalidChapterTargets: invalidTargets.length,
       shortStoryFlow: isShort ? ['题材钩子', '故事核心设定', '人物关系表', '章节结构', '递进反转表', '伏笔回收表', '章节写作包', '开篇吸引力检查'] : [],
       ultraLongReference: {
-        note: '严格遵守指南的流程和资料结构；卷数、每卷章数和总章数不得套用示例数量。每章按剧情任务在3200-4000字内动态规划。',
+        note: `严格遵守指南的流程和资料结构；卷数、每卷章数和总章数不得套用示例数量。每章按剧情任务在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字内动态规划。`,
       },
     };
   }
@@ -653,16 +654,16 @@ export class OutlineService {
 
   private resolveChapterTargetWords(projectId: string, explicit?: number): number {
     const direct = Number(explicit || 0);
-    if (Number.isInteger(direct) && direct >= 3200 && direct <= 4000) return direct;
+    if (Number.isInteger(direct) && direct >= CHAPTER_WORD_RANGE.min && direct <= CHAPTER_WORD_RANGE.max) return direct;
     const row = this.db.getDb().prepare('SELECT settings FROM projects WHERE id = ?').get(projectId) as any;
     if (!row) throw new NotFoundException(`Project ${projectId} not found`);
-    throw new BadRequestException('请根据本章剧情任务、场景数量和节奏，为该章单独规划3200-4000字的目标；不得使用项目级固定单章字数。');
+    throw new BadRequestException(`请根据本章剧情任务、场景数量和节奏，为该章单独规划${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字的目标；不得使用项目级固定单章字数。`);
   }
 
   private resolveChapterTargetWordsFromValue(explicit?: number): number {
     const direct = Number(explicit || 0);
-    if (Number.isInteger(direct) && direct >= 3200 && direct <= 4000) return direct;
-    throw new BadRequestException('章节目标字数必须根据本章任务单独确定，并处于3200-4000字。');
+    if (Number.isInteger(direct) && direct >= CHAPTER_WORD_RANGE.min && direct <= CHAPTER_WORD_RANGE.max) return direct;
+    throw new BadRequestException(`章节目标字数必须根据本章任务单独确定，并处于${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字。`);
   }
 
   private renderChapterDetail(detail: Record<string, any>): string {

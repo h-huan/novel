@@ -74,11 +74,12 @@ describe('ChainEngineService', () => {
   });
 
   describe('chapter synthesis token budget', () => {
-    it('keeps a 3200-4000 character chapter within a single-chapter output budget', () => {
-      expect(chapterSynthesisMaxTokens(3200)).toBe(3800);
+    it('keeps a 3000-5000 character chapter within a single-chapter output budget', () => {
+      expect(chapterSynthesisMaxTokens(3000)).toBe(3600);
       expect(chapterSynthesisMaxTokens(3600)).toBe(4140);
       expect(chapterSynthesisMaxTokens(4000)).toBe(4600);
-      expect(chapterSynthesisMaxTokens(4000)).toBeLessThan(6000);
+      expect(chapterSynthesisMaxTokens(5000)).toBe(5750);
+      expect(chapterSynthesisMaxTokens(5000)).toBeLessThan(6000);
     });
   });
 
@@ -142,6 +143,22 @@ describe('ChainEngineService', () => {
       const result = await service.executeNode(mockNode, context, testChain);
       expect(result.status).toBeDefined();
       expect(result.nodeId).toBe('test_node');
+    });
+
+    it('does not replay the same prompt when a node fails without corrective evidence', async () => {
+      generate.mockRejectedValue(new Error('schema mismatch'));
+      const context = {
+        chainId: 'test-chain',
+        variables: { user_input: { test: 'hello' }, test: 'hello' },
+        nodeOutputs: {}, retryCounters: {},
+        startTime: new Date(), timestamps: {}, metadata: {},
+      };
+
+      const result = await service.executeNode({ ...mockNode, retryCount: 5 }, context, testChain);
+
+      expect(result.status).toBe('failed');
+      expect(result.retryCount).toBe(0);
+      expect(generate).toHaveBeenCalledTimes(1);
     });
   });
 });

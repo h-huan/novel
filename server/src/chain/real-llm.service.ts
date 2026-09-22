@@ -18,6 +18,8 @@ import { standardDirectiveCache } from '../modules/module-standards/standard-dir
 import { LLM_TUNABLES } from '../config/llm-tunables';
 import * as net from 'net';
 
+const EXECUTION_PREFLIGHT_DIRECTIVE = `【执行前置规则】输出前先在内部一次性核对任务目标、全部硬约束、已确认上下文、输出结构和禁止事项，再组织完整结果。不要输出思考过程。已有候选内容时先判断能否基于证据局部修订；不得用重复生成、升温碰运气或无新信息的再次评审代替规划。`;
+
 type RuntimeModel = {
   provider: string;
   apiModel: string;
@@ -352,7 +354,7 @@ export class RealLLMService implements ILLMService {
             ? stageJudgePrompt(content, reviewContext, run.constitution, run.stage as QualityStage)
             : missingDimensionJudgePrompt(content, reviewContext, run.constitution, run.stage as QualityStage, missing),
           scenario: 'review', responseFormat: 'json_object', temperature: 0, maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,
-          maxEmptyRetries: 2,
+          maxEmptyRetries: 1,
           metrics: { ...request.metrics, runId: run.id, stepKey: reviewAttempt === 0 ? 'quality_gate' : 'quality_gate_evidence_completion' },
         });
         const parsed = JSON.parse(judged.content) as any;
@@ -439,8 +441,10 @@ export class RealLLMService implements ILLMService {
     // JSON 模式下上游（代理/网关）偶发返回空 content 而非报错（已用真实 openai 包
     // 复现确认：同一模型/端点/json_object/2.8万字 prompt 都正常，空内容属瞬时上游故障）。
     // 保持"配置怎么配就怎么执行"：用同一配置模型重试，绝不切换模型或去掉 response_format（非降级）。
-    // 调用方可显式传 maxEmptyRetries 提高关键验收器的重试次数。
-    const maxEmptyRetries = request.maxEmptyRetries ?? 2;
+    // 空内容没有可修订材料，可以按同一计划补发一次；再次为空即停止。
+    // 即使旧调用点传入更大数字，也在这里统一封顶，避免业务层、SDK 与空响应重试相乘。
+    const maxEmptyRetries = request.maxEmptyRetries === 0 ? 0 : 1;
+    let thinkingDisabledAttempted = false;
     let lastEmptyError: Error | null = null;
     // 结构化输出被 finish_reason=length 截断时的"同模型扩容"状态：模型与 json_object 模式都不变（非降级），
     // 只把输出上限翻倍后用同一 prompt 重试。硬顶与现有最大场景配置(writing=32768)对齐，不申请未验证的更大值。
@@ -465,21 +469,16 @@ export class RealLLMService implements ILLMService {
     const standardDirective = request.injectStandard === false
       ? ''
       : standardDirectiveCache.get(request.scenario || 'daily');
-    const effectiveSystemPrompt = [request.systemPrompt, standardDirective]
+    const effectiveSystemPrompt = [EXECUTION_PREFLIGHT_DIRECTIVE, request.systemPrompt, standardDirective]
       .filter(s => typeof s === 'string' && s.trim()).join('\n\n');
     try {
       for (let attempt = 0; attempt <= maxEmptyRetries; attempt++) {
-        // 空内容重试时给一个小幅温度抖动（封顶 0.5），尽量避开上游瞬时空内容 bug，
-        // 温度仍由路由配置或调用方指定值主导，绝不替换模型或去掉 response_format。
-        const jitterTemp = attempt === 0
-          ? baseTemperature
-          : Math.min(0.5, Number(baseTemperature) + 0.1 * attempt);
         const result = await withTimeout(
           this.callModel(
             modelName,
             request.prompt,
             effectiveSystemPrompt,
-            jitterTemp,
+            baseTemperature,
             currentMaxTokens,
             callTimeout,
             request.responseFormat,
@@ -509,11 +508,52 @@ export class RealLLMService implements ILLMService {
         // 必须在 length 之后判断空内容。推理模型可能把预算耗尽后返回
         // content="" + finish_reason=length；把它当普通空响应会用原预算白跑一次。
         if (!result.content.trim()) {
+          // 预算耗尽型空响应（content 空 + finish_reason=length，推理模型常见）：先扩容再重发，
+          // 用原预算重放必然再次耗尽；模型/prompt/json 模式都不变（非降级）。
+          if (result.finishReason === 'length') {
+            const expanded = Math.min(STRUCTURED_EXPAND_CEILING, Math.floor(currentMaxTokens * 2));
+            if (expanded > currentMaxTokens && attempt < maxEmptyRetries) {
+              this.logger.warn(
+                `空内容且输出被长度截断，同模型扩容重试（不换模型/非降级）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens ${currentMaxTokens}→${expanded}`,
+              );
+              currentMaxTokens = expanded;
+              internalRetries++;
+              continue;
+            }
+          }
+          // 空响应的最后手段：扩容已到硬顶/已用完扩容机会（length 型），或最后一次机会仍空
+          // （非 length 型）时，关闭思考补发一次。故障恢复而非降级——此时模型已无法产出正文，
+          // 关闭思考是让它能输出的唯一手段；正常路径仍保留完整推理。
+          if (!thinkingDisabledAttempted && (result.finishReason === 'length' || attempt >= maxEmptyRetries)) {
+            thinkingDisabledAttempted = true;
+            this.logger.warn(
+              `空内容且扩容后仍被思考耗尽，关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+            );
+            internalRetries++;
+            const noThinkResult = await withTimeout(
+              this.callModel(modelName, request.prompt, effectiveSystemPrompt, baseTemperature, currentMaxTokens, callTimeout, request.responseFormat, reasoningEffort, true),
+              callTimeout,
+            );
+            if (noThinkResult.content.trim()) {
+              const __respNoThink = this.toResponse(noThinkResult, modelName, request, startTime);
+              emit('success', { resp: __respNoThink });
+              return __respNoThink;
+            }
+            lastEmptyError = new Error(
+              `模型返回空内容(关闭思考补发后仍为空): model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+            );
+            this.logger.warn(lastEmptyError.message);
+            emit('empty', { reason: lastEmptyError.message });
+            throw lastEmptyError;
+          }
           lastEmptyError = new Error(
             `模型返回空内容(第${attempt + 1}次, 共 ${maxEmptyRetries + 1} 次机会): model=${modelName}, scenario=${request.scenario || 'daily'}`,
           );
           this.logger.warn(lastEmptyError.message);
           internalRetries++;
+          // 空内容实测是上游瞬时故障（同 prompt/同模型时好时坏）：立刻重放命中率低，
+          // 退避一次再重发，避免一次抖动就把整章质检判失败。
+          if (attempt < maxEmptyRetries) await new Promise(resolve => setTimeout(resolve, LLM_TUNABLES.RETRY_BASE_DELAY_MS));
           continue;
         }
 
@@ -525,15 +565,15 @@ export class RealLLMService implements ILLMService {
       throw lastEmptyError!;
     } catch (err: any) {
       const msg = err?.message || String(err);
-      // 网络级错误（ECONNRESET/ECONNREFUSED/ETIMEDOUT/terminated）整体重试
-      // 现实观测：deepseek-flash 在大陆出口路由下经常被中间设备 RST，需 ≥5 次指数退避才能稳过
+      // 网络错误发生在拿到创作结果之前，可补发一次；重复网络错误交还调用方，
+      // 不再与 SDK 和业务节点叠加成多轮隐式运行。
       const isNetworkErr = msg.includes('ECONNRESET') || msg.includes('ECONNREFUSED')
         || msg.includes('ETIMEDOUT') || msg.includes('terminated') || msg.includes('socket hang up')
         || msg.includes('aborted') || msg.includes('ENETUNREACH') || msg.includes('EAI_AGAIN')
         || msg.includes('fetch failed') || msg.includes('UND_ERR_SOCKET') || msg.includes('other side closed')
         || msg.includes('Connection error');
       if (isNetworkErr) {
-        const delays = [1500, 3000, 5000, 8000, 12000]; // 累计 ~30s
+        const delays = [1500];
         for (let netRetry = 0; netRetry < delays.length; netRetry++) {
           await new Promise(r => setTimeout(r, delays[netRetry]));
           this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'daily'}`);
@@ -546,6 +586,36 @@ export class RealLLMService implements ILLMService {
               throw new Error(
                 `结构化生成因输出长度被截断（网络重试后仍不足）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
               );
+            }
+            if (!result.content.trim() && result.finishReason === 'length') {
+              // 对齐主循环 512-521：网络重试也可能命中"预算耗尽型空内容"（推理模型把 max_tokens
+              // 全部用于 reasoning 后返回 content="" + finish_reason=length）。用原预算重放必然再次
+              // 耗尽，故同模型扩容补发一次（不换模型/prompt/json 模式，非降级）。
+              const expanded = Math.min(STRUCTURED_EXPAND_CEILING, Math.floor(currentMaxTokens * 2));
+              if (expanded > currentMaxTokens) {
+                this.logger.warn(
+                  `网络重试返回空内容且输出被长度截断，同模型扩容补发（不换模型/非降级）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens ${currentMaxTokens}→${expanded}`,
+                );
+                currentMaxTokens = expanded;
+                internalRetries++;
+                const expandedResult = await withTimeout(
+                  this.callModel(modelName, request.prompt, effectiveSystemPrompt, baseTemperature, currentMaxTokens, callTimeout, request.responseFormat, reasoningEffort),
+                  callTimeout,
+                );
+                if (request.responseFormat === 'json_object' && expandedResult.finishReason === 'length') {
+                  throw new Error(
+                    `结构化生成因输出长度被截断（网络重试+扩容后仍不足）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+                  );
+                }
+                if (!expandedResult.content.trim()) {
+                  throw new Error(
+                    `模型返回空内容（网络重试+扩容后仍为空）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+                  );
+                }
+                const __respExpanded = this.toResponse(expandedResult, modelName, request, startTime);
+                emit('success', { resp: __respExpanded });
+                return __respExpanded;
+              }
             }
             if (!result.content.trim()) {
               throw new Error(
@@ -677,7 +747,7 @@ export class RealLLMService implements ILLMService {
       yield* this.callModelStream(
         modelName,
         request.prompt,
-        [request.systemPrompt, request.injectStandard === false ? '' : standardDirectiveCache.get(request.scenario || 'daily')].filter(Boolean).join('\n\n'),
+        [EXECUTION_PREFLIGHT_DIRECTIVE, request.systemPrompt, request.injectStandard === false ? '' : standardDirectiveCache.get(request.scenario || 'daily')].filter(Boolean).join('\n\n'),
         routedModel.temperature,
         configuredMaxTokens,
         timeout,
@@ -746,10 +816,10 @@ export class RealLLMService implements ILLMService {
     const client = new OpenAI({
       apiKey,
       baseURL: this.normalizeOpenAIBaseUrl(baseUrl || this.getDefaultBaseUrl(provider), provider),
-      // Keep retries on the configured provider/model.  The SDK retries
-      // transport and transient HTTP failures before the higher-level JSON
-      // retry runs; it never changes the user's configured route.
-      maxRetries: 2,
+      // Retry policy is handled once at the orchestration layer. Streaming
+      // cannot be replayed safely after partial output, so the SDK must not
+      // start hidden duplicate requests.
+      maxRetries: 0,
       timeout,
       ...proxyExtras,
     });
@@ -892,6 +962,7 @@ export class RealLLMService implements ILLMService {
     timeout?: number,
     responseFormat: 'text' | 'json_object' = 'text',
     reasoningEffort?: 'low' | 'medium' | 'high',
+    disableThinking?: boolean,
   ): Promise<ModelCallResult> {
     if (!Number.isInteger(maxTokens) || Number(maxTokens) <= 0) {
       throw new Error(`模型输出配置无效: model=${modelName} 未传入有效的 maxTokens`);
@@ -949,6 +1020,7 @@ export class RealLLMService implements ILLMService {
       timeout,
       responseFormat,
       reasoningEffort,
+      disableThinking,
     );
   }
 
@@ -963,6 +1035,7 @@ export class RealLLMService implements ILLMService {
     timeout: number = 180_000,  // 默认3分钟，复杂创作节点需要更长时间
     responseFormat: 'text' | 'json_object' = 'text',
     reasoningEffort?: 'low' | 'medium' | 'high',
+    disableThinking?: boolean,
   ): Promise<ModelCallResult> {
     const providerLabel = this.getProviderLabel(provider);
     const proxyExtras = await this.resolveProxyExtras();
@@ -972,10 +1045,9 @@ export class RealLLMService implements ILLMService {
         baseUrl || this.getDefaultBaseUrl(provider),
         provider,
       ),
-      // See the streaming variant above. A fresh TCP/TLS connection can be
-      // reset by the upstream gateway even when the model configuration is
-      // valid, so give the same configured request two transport retries.
-      maxRetries: 2,
+      // Avoid hidden SDK retries multiplying the explicit, measured retry
+      // policy in generateInternal.
+      maxRetries: 0,
       timeout,
       ...proxyExtras,
     });
@@ -994,7 +1066,7 @@ export class RealLLMService implements ILLMService {
         // 速度是可选优化：LLM_REASONING_EFFORT=low/medium 可降推理量提速（一致性风险略升）；
         // LLM_DISABLE_THINKING=1 完全关闭（最快，但显著降低对基线的遵循度，不推荐）。
         ...(provider === 'deepseek'
-          ? process.env.LLM_DISABLE_THINKING === '1'
+          ? (process.env.LLM_DISABLE_THINKING === '1' || disableThinking === true)
             ? { thinking: { type: 'disabled' as const } }
             : (reasoningEffort
               ? { reasoning_effort: reasoningEffort as 'low' | 'medium' | 'high' }

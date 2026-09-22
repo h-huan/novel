@@ -17,6 +17,7 @@ import { useWorkflowGuardStore } from '../stores/workflowGuardStore';
 import WorkflowBlockedNotice from '../components/workflow/WorkflowBlockedNotice';
 import { clampSidebar } from '../components/common/LayoutKit';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
+import { CHAPTER_WORD_RANGE } from '@novel/shared';
 
 type ChapterFunctionType =
   | 'opening'
@@ -91,8 +92,8 @@ type OperationDialog = {
   onConfirm: (values: Record<string, string>) => Promise<void>;
 };
 
-const CHAPTER_WORD_MIN = 3200;
-const CHAPTER_WORD_MAX = 4000;
+const CHAPTER_WORD_MIN = CHAPTER_WORD_RANGE.min;
+const CHAPTER_WORD_MAX = CHAPTER_WORD_RANGE.max;
 
 const FUNCTION_COLORS: Record<string, string> = {
   opening: 'var(--color-accent)',

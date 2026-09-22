@@ -12,6 +12,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PromptRegistryService } from './prompt-registry.service';
 import { RealLLMService } from './real-llm.service';
+import { CHAPTER_WORD_RANGE } from '../../shared/src';
 import {
   PromptChain,
   ChainNode,
@@ -26,10 +27,10 @@ import {
 /**
  * Chinese prose is close to one token per character for the configured models.
  * Keep a small completion margin, but never advertise enough budget for a
- * second full chapter when the chapter contract is 3200–4000 words.
+ * second full chapter when the chapter contract is 3000–5000 words.
  */
 export const chapterSynthesisMaxTokens = (targetWords: number): number => (
-  Math.min(4_800, Math.max(3_800, Math.ceil(targetWords * 1.15)))
+  Math.min(6_000, Math.max(3_600, Math.ceil(targetWords * 1.15)))
 );
 
 /** 节点执行上下文（运行时） */
@@ -193,7 +194,10 @@ export class ChainEngineService {
     this.logger.log(`${nodeLog} 开始执行`);
 
     let currentRetryCount = 0;
-    const maxRetries = node.retryCount;
+    // A generic node retry has no validator feedback and would replay the same
+    // prompt. Transport recovery is already handled once inside RealLLMService;
+    // content corrections belong to the evidence-aware business workflow.
+    const maxRetries = 0;
     let lastOutput: unknown = null;
     let lastError: string | null = null;
 
@@ -314,7 +318,7 @@ export class ChainEngineService {
     // 调用 LLM
     const response = await this.llm.generate({
       prompt,
-      temperature: this.calculateTemperature(node.modelConfig.temperature, retryCount),
+      temperature: this.calculateTemperature(node.modelConfig.temperature),
       timeout: node.timeout * 1000,
       scenario: chain.id,
       retryCount,
@@ -386,8 +390,8 @@ export class ChainEngineService {
       const costText = extractText(input['cost']);
       const hookText = extractText(input['hook']);
       const targetWords = Number(input['targetWords']);
-      if (!Number.isInteger(targetWords) || targetWords < 3200 || targetWords > 4000) {
-        throw new Error('本章缺少有效的3200-4000字动态目标，拒绝生成正文');
+      if (!Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_RANGE.min || targetWords > CHAPTER_WORD_RANGE.max) {
+        throw new Error(`本章缺少有效的${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字动态目标，拒绝生成正文`);
       }
       const countNarrativeWords = (text: string) => {
         const chinese = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
@@ -424,7 +428,7 @@ export class ChainEngineService {
           : JSON.stringify(chapterContext || {});
         const chapterContract = `【本章不可偏离的创作合同】\n章节：第${input['chapterNumber'] || context.variables['chapterNumber'] || ''}章\n详细大纲：\n${chapterOutline}\n\n确认的故事上下文（人物、世界观、时间线、前文与伏笔）：\n${serializedContext}\n\n合同执行规则：正文必须把详细大纲中的核心事件、冲突、人物行动和结尾钩子写成实际发生的叙事；不得用同主题的另一件事替代，不得引入合同外的主线人物、设定、案件或结局。若八步草稿与合同冲突，以合同为准并重写草稿。`;
         const stylePrompt = `你是中文小说作者。请将以下8步草稿扩写并重写为连贯、完整、可直接阅读的章节正文。不要分段加小标题，自然融合为连续叙事。
-本章动态目标为${targetWords}字；最终正文必须在3200-4000字之间。不得概述、压缩、跳过场景或以提纲代替叙事；请用事件推进、行动、对话、细节和心理变化自然达到篇幅。只输出正文，不输出字数、说明或JSON。
+本章动态目标为${targetWords}字；最终正文必须在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字之间。不得概述、压缩、跳过场景或以提纲代替叙事；请用事件推进、行动、对话、细节和心理变化自然达到篇幅。只输出正文，不输出字数、说明或JSON。
 
 要求：
 1. 正文必须服从已确认的大纲、角色状态、世界观规则、时间线和伏笔；八步法只作为内部骨架，正文不得出现步骤标识，也不得为了文风改写既有事实。
@@ -452,9 +456,9 @@ ${fullText}`;
         }
         polishedText = llmResp.content;
         const generatedWords = countNarrativeWords(polishedText);
-        if (generatedWords < 3200) {
+        if (generatedWords < CHAPTER_WORD_RANGE.min) {
           const expansion = await this.llm.generate({
-            prompt: `以下章节初稿只有${generatedWords}字，未达到本章${targetWords}字的写作合同。请在不改变既有角色、世界观规则、事件顺序、时间线、伏笔和结局钩子的前提下，输出一篇完整重写后的正文，不是续写片段。必须通过补足可感知的行动、场景转换、人物对话、细节、心理与因果推进，将全文控制在3200-4000字，目标约${targetWords}字。
+            prompt: `以下章节初稿只有${generatedWords}字，未达到本章${targetWords}字的写作合同。请在不改变既有角色、世界观规则、事件顺序、时间线、伏笔和结局钩子的前提下，输出一篇完整重写后的正文，不是续写片段。必须通过补足可感知的行动、场景转换、人物对话、细节、心理与因果推进，将全文控制在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，目标约${targetWords}字。
 人物不许同声同气：让每人按自己的立场、习惯与信息量说话、回避或行动；不要把动机和真相替读者解释完，用停顿、错答、物件、未被追问的细节保留推想空间。允许节奏有毛边，但不得偏离章节大纲或制造新设定。只输出正文，不要解释。\n\n${chapterContract}\n\n初稿：\n${polishedText}`,
             scenario: 'chapter_synthesis',
             temperature: 0.7,
@@ -464,9 +468,9 @@ ${fullText}`;
           polishedText = expansion.content;
         }
         const expandedWords = countNarrativeWords(polishedText);
-        if (expandedWords > 4000) {
+        if (expandedWords > CHAPTER_WORD_RANGE.max) {
           const compression = await this.llm.generate({
-            prompt: `以下完整章节为${expandedWords}字，超过本章${targetWords}字的写作合同。请在不删除详细大纲要求的核心事件、冲突、人物行动、因果、伏笔和结尾钩子的前提下，输出一篇完整精炼重写后的正文，不是摘要、删节片段或续写。删去重复解释、同义反复和无效场景，保留可感知的动作、对话和关键细节。全文必须严格为3200-4000字，目标约${targetWords}字。只输出正文，不要解释。\n\n${chapterContract}\n\n待精炼全文：\n${polishedText}`,
+            prompt: `以下完整章节为${expandedWords}字，超过本章${targetWords}字的写作合同。请在不删除详细大纲要求的核心事件、冲突、人物行动、因果、伏笔和结尾钩子的前提下，输出一篇完整精炼重写后的正文，不是摘要、删节片段或续写。删去重复解释、同义反复和无效场景，保留可感知的动作、对话和关键细节。全文必须严格为${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，目标约${targetWords}字。只输出正文，不要解释。\n\n${chapterContract}\n\n待精炼全文：\n${polishedText}`,
             scenario: 'chapter_synthesis',
             temperature: 0.55,
             maxTokens: outputMaxTokens,
@@ -475,8 +479,8 @@ ${fullText}`;
           polishedText = compression.content;
         }
         const finalWords = countNarrativeWords(polishedText);
-        if (finalWords < 3200 || finalWords > 4000) {
-          throw new Error(`章节合成后的正文为${finalWords}字，不符合3200-4000字要求`);
+        if (finalWords < CHAPTER_WORD_RANGE.min || finalWords > CHAPTER_WORD_RANGE.max) {
+          throw new Error(`章节合成后的正文为${finalWords}字，不符合${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字要求`);
         }
       } catch (e) {
         throw new Error(`章节合成失败，未使用原始步骤拼接内容降级：${e instanceof Error ? e.message : String(e)}`);
@@ -631,15 +635,9 @@ ${fullText}`;
     }
   }
 
-  /**
-   * 计算执行温度（支持重试升温）
-   */
-  private calculateTemperature(baseTemp: number, retryCount: number): number {
-    let temp = baseTemp;
-    if (retryCount > 0) {
-      temp += 0.05 * retryCount; // 每次重试 +0.05
-    }
-    return Math.max(0.2, Math.min(1.2, temp));
+  /** 保持调用方配置温度；重复运行不得靠升温碰运气。 */
+  private calculateTemperature(baseTemp: number): number {
+    return Math.max(0.2, Math.min(1.2, baseTemp));
   }
 
   /**

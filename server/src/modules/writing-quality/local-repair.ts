@@ -23,14 +23,32 @@ export function applyLocalPatches(content: string, raw: unknown, structured = fa
 
 export function compareRepair(before: StageScore, after: StageScore): { accepted: boolean; reason: string } {
   if (!qualityGate(after.issues, after.status === 'evaluated').passed) return { accepted: false, reason: '复检未通过或评估证据不足' };
-  if (SCORE_DIMENSIONS.some(k => before.dimensions[k].score !== null && (after.dimensions[k].score === null || after.dimensions[k].score! < before.dimensions[k].score!))) {
-    return { accepted: false, reason: '至少一个已评估维度退步，回滚' };
+  const issueKey = (issue: StageScore['issues'][number]) => `${issue.ruleId}:${issue.entityId || ''}`;
+  const beforeSevereIssues = before.issues.filter(i => i.status === 'open' && i.evaluation === 'evidenced' && ['blocking', 'high'].includes(i.severity));
+  const afterSevereIssues = after.issues.filter(i => i.status === 'open' && i.evaluation === 'evidenced' && ['blocking', 'high'].includes(i.severity));
+  const beforeSevereKeys = new Set(beforeSevereIssues.map(issueKey));
+  if (afterSevereIssues.some(i => !beforeSevereKeys.has(issueKey(i)))) {
+    return { accepted: false, reason: '引入新的有证据严重问题，回滚' };
   }
-  const beforeRules = new Set(before.issues.map(i => i.ruleId));
-  if (after.issues.some(i => !beforeRules.has(i.ruleId) && ['blocking', 'high'].includes(i.severity))) return { accepted: false, reason: '引入新的严重问题，回滚' };
-  const beforeSevere = before.issues.filter(i => ['blocking', 'high'].includes(i.severity)).length;
-  const afterSevere = after.issues.filter(i => ['blocking', 'high'].includes(i.severity)).length;
+
+  // Judge scores fluctuate slightly even when the cited defect is gone. Keep
+  // hard floors and material regressions, but do not roll back a verified fix
+  // because one otherwise healthy dimension moved by a few points.
+  const materialRegression = SCORE_DIMENSIONS.find(key => {
+    const beforeScore = before.dimensions[key].score;
+    const afterScore = after.dimensions[key].score;
+    if (beforeScore === null) return false;
+    if (afterScore === null) return true;
+    const floor = after.policy?.floors?.[key] ?? before.policy?.floors?.[key] ?? 60;
+    return (beforeScore >= floor && afterScore < floor) || beforeScore - afterScore > 8;
+  });
+  if (materialRegression) return { accepted: false, reason: `${materialRegression}维度跌破质量下限或出现显著退步，回滚` };
+
+  const beforeSevere = beforeSevereIssues.length;
+  const afterSevere = afterSevereIssues.length;
   const scoreImproved = before.overallScore !== null && after.overallScore !== null && after.overallScore > before.overallScore;
-  const improved = scoreImproved || afterSevere < beforeSevere || after.issues.length < before.issues.length;
-  return { accepted: improved, reason: improved ? '复检通过，维度无退步且问题减少或评分提高' : '未证明改善，回滚' };
+  const beforeBlocking = beforeSevereIssues.filter(issue => issue.severity === 'blocking').length;
+  const afterBlocking = afterSevereIssues.filter(issue => issue.severity === 'blocking').length;
+  const improved = scoreImproved || afterBlocking < beforeBlocking || afterSevere < beforeSevere || after.issues.length < before.issues.length;
+  return { accepted: improved, reason: improved ? '复检通过，阻断或严重问题减少且关键质量下限保持' : '未证明改善，回滚' };
 }

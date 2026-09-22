@@ -16,6 +16,16 @@ export function splitToLines(text: string | readonly string[] | null | undefined
     .filter(Boolean);
 }
 
+/** Split only explicit list rows for reading views. Punctuation inside one
+ * paragraph stays intact; existing bullets/numbers are removed before the UI
+ * renders one stable ordered sequence. */
+export function splitDisplayList(value: string | readonly string[] | null | undefined): string[] {
+  const rows = Array.isArray(value) ? value.map(String) : String(value ?? '').split(/\r?\n+/);
+  return rows
+    .map(item => item.replace(/^\s*(?:[-*・]|\d+[.、）)])\s*/, '').trim())
+    .filter(Boolean);
+}
+
 /**
  * @deprecated Diagnostic compatibility only. Do not use this to decide layout.
  * JSON values are decoded at the server boundary; the desktop should receive

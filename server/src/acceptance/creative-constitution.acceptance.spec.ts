@@ -19,6 +19,7 @@ describe('constitution SQLite acceptance', () => {
       expect(row.target_platform).toBe('zhihu');
       expect(row.platform_style).toBe('zhihu');
       expect(updated.creativeConstitution.revision).toBe(2);
+      expect(updated.creativeConstitution.chapterWordRange).toEqual({ min: 3000, max: 5000 });
       const context = new StateItemService(database).buildWritingStateContext(p.id);
       expect(context.projectCard.targetPlatform).toBe('zhihu');
       expect(context.projectCard.storyTone).toEqual(['克制']);
@@ -49,6 +50,7 @@ describe('constitution SQLite acceptance', () => {
       expect(settings.storyTone).toBeUndefined();
       expect(settings.style).toBeUndefined();
       expect(settings.creativeConstitution).toMatchObject({ targetPlatform: 'fanqie', storyTone: ['克制'], writingStyle: ['白描'] });
+      expect(settings.creativeConstitution.chapterWordRange).toEqual({ min: 3000, max: 5000 });
 
       const normalized = row.settings;
       const revision = settings.creativeConstitution.revision;

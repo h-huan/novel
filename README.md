@@ -2,16 +2,15 @@
 
 这是一个 Electron + React 桌面写作应用，后端使用 NestJS 和 SQLite。当前开发主线是小说质量闭环：所有生成内容继承同一份创作宪法，生成过程有可查询记录，质量判断必须有证据，阻断问题会停止交付或进入自动修复。
 
-## 当前唯一执行规则
+## 执行标准（唯一入口）
 
-1. 每个项目只有一份 `Creative Constitution`。长短篇、目标平台、目标字数、分类、基调、写作风格、网文流派、POV、读者和章节字数范围都从这里读取。
-2. `target_platform`、`platform_style`、`writing_style` 等数据库列只是创作宪法的同步投影，不能成为第二套配置来源。`settings` 不能保存重复创作字段。
-3. 模型路由只有五个用户配置场景：灵感、大纲/架构、正文、精修/质检、日常。每种写作模式分别保存配置。
-4. 某场景有配置时使用该模型；没有时使用当前模式配置的日常模型；两者都没有时停止并明确提示。模型、提供商和推理强度都不会自动降级。
-5. 世界观、角色、大纲、正文和精修都会写入 `generation_runs`。一次实际模型调用对应一条运行记录；同一内容的质量复检更新当前质量报告，不会为每次回答创建新报告。
-6. 所有自动诊断统一写入 `writing_quality_reports` 和 `writing_quality_issues`。缺材料或缺逐字证据时返回未评估/证据不足，禁止随机分数、示例伏笔、占位问题和默认高分。
-7. Blocking 问题会阻断交付。可修复问题按 Issue → Repair → Recheck → Compare → Accept/Rollback 执行，只从被接受的真实修复沉淀经验。
-8. RAG 是项目内部的可选语义检索能力。它优先使用随应用提供的本地模型；本地模型不可用时跳过语义索引，不要求用户填写 Embedding Key，也不阻断创建、写作或保存。
+写作与质量规则只在执行标准一处维护与列举，本文件不再重复罗列条目。
+
+**机器权威**：代码侧可执行标准在 `server/src/modules/module-standards/module-standards.seed.ts`（当前 `SEED_BASELINE_VERSION=15`），启动时由 ensureSeeded 确定性覆盖，全项目继承，桌面端 `/module-standards`「执行标准」页面展示的就是它。确定性扫描与验收分流见 `server/src/chain/hardline-scanner.ts`，首稿规则见 `server/src/chain/chain.controller.ts`，修复循环见 `server/src/chain/adaptive-repair.ts`，模型容错见 `server/src/chain/real-llm.service.ts`。
+
+**全量说明**：可执行质量控制的全量说明在根目录 `QUALITY_EXECUTION.md`（英文，与代码和 seed 版本对应，是执行标准的完整英文镜像，另含项目不变量）；平台风格设计见 `server/docs/platform-style-system.md`。规则只沉淀在项目文件内，不维护外部文档副本。
+
+修订顺序：seed（机器）→ `QUALITY_EXECUTION.md`（全量镜像）→ 桌面端 `/module-standards` 展示。
 
 ## 页面
 
@@ -56,7 +55,6 @@ npm run typecheck
 npm test
 npm run test:acceptance
 npm run build
-
 cd ..\desktop
 npm run typecheck
 npm test

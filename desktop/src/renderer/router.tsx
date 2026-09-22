@@ -18,7 +18,6 @@ import KnowledgePoints from './pages/KnowledgePoints';
 import ImportExportPage from './pages/ImportExportPage';
 import RefinementPage from './pages/RefinementPage';
 import StyleWritingPage from './pages/StyleWritingPage';
-import QualityStandardsPage from './pages/QualityStandardsPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import VisualizationPage from './pages/VisualizationPage';
 import VersionHistoryPage from './pages/VersionHistoryPage';
@@ -26,7 +25,6 @@ import NewsPage from './pages/NewsPage';
 import ToolsPage from './pages/ToolsPage';
 import TitleCheckPage from './pages/TitleCheckPage';
 import DictionaryPage from './pages/DictionaryPage';
-import HelpPage from './pages/HelpPage';
 import ImmersiveView from './pages/ImmersiveView';
 import WeeklySummaryPage from './pages/WeeklySummaryPage';
 import TimelinePage from './pages/TimelinePage';
@@ -58,7 +56,6 @@ const AppRouter: React.FC = () => {
         <Route path="/project/:id/refinement" element={<RefinementPage />} />
         <Route path="/project/:id/style-writing" element={<StyleWritingPage />} />
         <Route path="/project/:id/visualization" element={<VisualizationPage />} />
-        <Route path="/project/:id/quality-standards" element={<QualityStandardsPage />} />
         <Route path="/project/:id/writing-quality" element={<WritingQualityPage />} />
         <Route path="/project/:id/wizard" element={<ProjectDetailRedirect />} />
         <Route path="/project/:id/weekly-summary" element={<WeeklySummaryPage />} />
@@ -74,7 +71,6 @@ const AppRouter: React.FC = () => {
         <Route path="/title-check" element={<TitleCheckPage />} />
         <Route path="/settings" element={<Navigate to="/" replace />} />
         <Route path="/dictionary" element={<DictionaryPage />} />
-        <Route path="/help" element={<HelpPage />} />
         <Route path="/idea-lab/:draftId" element={<IdeaLabPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

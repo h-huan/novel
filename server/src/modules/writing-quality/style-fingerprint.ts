@@ -17,7 +17,9 @@ export function styleFingerprint(input: {
   const sentences = input.content.match(/[^。！？\n]+[。！？]/g)?.map(s => s.trim()).filter(s => s.length >= 20) || [];
   const repeats = [...new Set(sentences)].filter(s => input.previousChapters.some(c => c.content.includes(s)));
   if (repeats.length >= 3) issues.push(qualityIssue({ ...input, stage: input.stage ?? 'chapter', ruleId: 'style.cross_chapter_repetition',
-    severity: 'blocking', source: 'style_fingerprint_v2', quote: repeats[0],
+    // 跨章逐字重复是文风/模板复用风险，不是与大纲互斥的事实错误：保持 P1 可见并参与一次局部修复，
+    // 但不作为阻断项。否则它会绕过「文风建议不阻断保存」的收敛设计，在最终统一质量 Gate 直接卡死整章。
+    severity: 'high', source: 'style_fingerprint_v2', quote: repeats[0],
     message: `与已写章节逐字重复至少 ${repeats.length} 个长句，须核对是否为有意引用并局部修订` }));
 
   // Cross-chapter fragments catch recycled templates even when punctuation or

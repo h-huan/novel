@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
 
 describe('configured long novel planning acceptance', () => {
-  it('dynamically plans enough 3200-4000 word chapters for two million words and uses token configuration only as batch size', async () => {
+  it('dynamically plans enough 3000-5000 word chapters for two million words and uses token configuration only as batch size', async () => {
     const controller: any = Object.create(ChainController.prototype);
     controller.logger = { log: vi.fn(), warn: vi.fn() };
     controller.chainTemplate = {
@@ -24,7 +24,7 @@ describe('configured long novel planning acceptance', () => {
       const count = Number(prompt.match(/共(\d+)章；全书第/)?.[1]);
       const start = Number(prompt.match(/全书第(\d+)-/)?.[1]);
       return { data: { chapters: Array.from({ length: count }, (_, index) => ({
-        title: `第${start + index}章`, targetWords: start + index === 501 ? 4000 : 3992, wordCountReason: index % 2 ? '双场景冲突升级需要完整铺陈' : '证据发现与人物选择需要完整因果链', content: `第${start + index}章的具体事件链和结果`, chapterFunction: index % 2 ? 'rising' : 'conflict',
+        title: `第${start + index}章`, targetWords: start + index === 501 ? 5000 : 3992, wordCountReason: index % 2 ? '双场景冲突升级需要完整铺陈' : '证据发现与人物选择需要完整因果链', content: `第${start + index}章的具体事件链和结果`, chapterFunction: index % 2 ? 'rising' : 'conflict',
         scenes: ['现场', '值班室'], characterActions: '调查', conflict: '阻止与追查', highlight: '证据反转',
         foreshadowings: [{ content: `线索${start + index}`, type: 'clue', action: '埋设', recoveryChapter: Math.min(501, start + index + 2), recoveryWindowStart: Math.min(501, start + index + 1), recoveryWindowEnd: Math.min(501, start + index + 2), evidenceText: `现场证据${start + index}`, riskLevel: 'medium', recoveryCondition: '再次见到证人', payoffDescription: '推进真相' }],
         hook: '门后传来旧称呼', timelineEvent: { title: `事件${start + index}`, description: '调查推进' },
@@ -33,7 +33,7 @@ describe('configured long novel planning acceptance', () => {
 
     const result = await controller.generateConfiguredLongNovelPlan({
       title: '长篇验证', storySetting: '调查员追查旧站循环', targetWords: 2_000_000,
-      targetWanZi: 200, genre: '悬疑', chapterWordMin: 3200, chapterWordMax: 4000,
+      targetWanZi: 200, genre: '悬疑', chapterWordMin: 3000, chapterWordMax: 5000,
       targetPlatform: 'fanqie',
       styleTags: { storyTone: ['紧张'], writingStyle: ['白描'], webNovelGenre: ['悬疑流'] },
       onProgress: vi.fn(),
@@ -43,9 +43,9 @@ describe('configured long novel planning acceptance', () => {
     expect(chapters).toHaveLength(20);
     expect(result.volumes.map((volume: any) => volume.chapters.length)).toEqual([20, 0]);
     expect(result.volumes.map((volume: any) => volume.estimatedChapters)).toEqual([251, 250]);
-    expect(chapters.every((chapter: any) => chapter.targetWords >= 3200 && chapter.targetWords <= 4000 && chapter.wordCountReason)).toBe(true);
-    expect(501 * 3200).toBeLessThanOrEqual(2_000_000);
-    expect(501 * 4000).toBeGreaterThanOrEqual(2_000_000);
+    expect(chapters.every((chapter: any) => chapter.targetWords >= 3000 && chapter.targetWords <= 5000 && chapter.wordCountReason)).toBe(true);
+    expect(501 * 3000).toBeLessThanOrEqual(2_000_000);
+    expect(501 * 5000).toBeGreaterThanOrEqual(2_000_000);
     expect(result.timeline).toHaveLength(20);
     expect(outlineCalls).toHaveLength(11);
     expect(outlineCalls[0]).toContain('1-1');

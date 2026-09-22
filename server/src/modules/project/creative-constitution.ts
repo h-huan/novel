@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { DatabaseSync } from 'node:sqlite';
 import { getPlatform, targetForLength } from '../../chain/platform-benchmarks';
 import { scorePolicy } from '../writing-quality/score-policy';
+import { CHAPTER_WORD_RANGE } from '../../../shared/src';
 
 export interface CreativeConstitution {
   qualityPolicy?: import('../writing-quality/score-policy').ScorePolicy;
@@ -52,20 +53,23 @@ export function readConstitution(row: Record<string, any>): CreativeConstitution
       || saved.chapterWordRange.min <= 0 || saved.chapterWordRange.max < saved.chapterWordRange.min) {
       throw new BadRequestException('创作宪法版本无效，需修复配置');
     }
-    return structuredClone(saved);
+    return {
+      ...structuredClone(saved),
+      chapterWordRange: { ...CHAPTER_WORD_RANGE },
+      platformRules: { ...saved.platformRules, chapterWords: [CHAPTER_WORD_RANGE.min, CHAPTER_WORD_RANGE.max] },
+    };
   }
   const projectType = row.type || 'long_novel';
   const targetPlatform = typeof row.target_platform === 'string' && row.target_platform
     ? row.target_platform
     : 'generic';
-  const range = targetForLength(getPlatform(targetPlatform), projectType).chapterWords;
   return {
     schemaVersion: 1, revision: 1, projectType, targetPlatform,
     targetWords: Number(row.target_words) || 0,
     platformRules: targetForLength(getPlatform(targetPlatform), projectType),
     category: '', storyTone: [], writingStyle: style(row.writing_style),
     webNovelGenre: [], pov: '', targetAudience: null,
-    chapterWordRange: { min: range[0], max: range[1] },
+    chapterWordRange: { ...CHAPTER_WORD_RANGE },
   };
 }
 
@@ -74,6 +78,12 @@ export function updateConstitution(row: Record<string, any>, dto: Record<string,
   const current = readConstitution(row);
   const next = structuredClone(current);
   const s = settingsObject(dto.settings);
+  if (dto.chapterWordRange !== undefined && (
+    dto.chapterWordRange?.min !== CHAPTER_WORD_RANGE.min
+    || dto.chapterWordRange?.max !== CHAPTER_WORD_RANGE.max
+  )) {
+    throw new BadRequestException(`单章字数范围固定为${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字`);
+  }
   const forbidden = ['creativeConstitution', 'targetPlatform', 'platform', 'recommendedPlatform', 'storyCategory', 'category', 'genre', 'storyTone', 'writingStyle', 'style', 'webNovelGenre', 'pov', 'pointOfView', 'targetAudience', 'targetReaders', 'chapterWordRange'];
   const duplicate = forbidden.find(key => s[key] !== undefined);
   if (duplicate) throw new BadRequestException(`项目配置 ${duplicate} 必须使用创作宪法字段，不能写入 settings`);
@@ -94,12 +104,8 @@ export function updateConstitution(row: Record<string, any>, dto: Record<string,
     try { next.qualityPolicy = scorePolicy(next, dto.qualityPolicy); }
     catch { throw new BadRequestException('评分权重或最低阈值无效'); }
   }
-  if (!dto.chapterWordRange && (next.projectType !== current.projectType || next.targetPlatform !== current.targetPlatform)) {
-    const range = targetForLength(getPlatform(next.targetPlatform), next.projectType).chapterWords;
-    next.chapterWordRange = { min: range[0], max: range[1] };
-  }
+  next.chapterWordRange = { ...CHAPTER_WORD_RANGE };
   const r = next.chapterWordRange;
-  if (!r || !Number.isInteger(r.min) || !Number.isInteger(r.max) || r.min <= 0 || r.max < r.min) throw new BadRequestException('章节字数区间无效');
   next.platformRules = { ...targetForLength(getPlatform(next.targetPlatform), next.projectType), chapterWords: [next.chapterWordRange.min, next.chapterWordRange.max] };
   if (!Number.isFinite(next.targetWords) || next.targetWords < 0) throw new BadRequestException('目标字数无效');
   if (JSON.stringify(next) !== JSON.stringify(current)) next.revision++;
@@ -144,12 +150,7 @@ export function normalizeStoredConstitutions(db: DatabaseSync): void {
     const targetPlatform = String(saved?.targetPlatform || row.target_platform || row.platform_style
       || settings.targetPlatform || settings.platform || settings.recommendedPlatform || 'generic');
     const targetWords = Math.max(0, Number(saved?.targetWords ?? row.target_words) || 0);
-    const benchmarkRange = targetForLength(getPlatform(targetPlatform), projectType).chapterWords;
-    const requestedRange = saved?.chapterWordRange || settings.chapterWordRange;
-    const chapterWordRange = Number.isInteger(requestedRange?.min) && Number.isInteger(requestedRange?.max)
-      && requestedRange.min > 0 && requestedRange.max >= requestedRange.min
-      ? { min: requestedRange.min, max: requestedRange.max }
-      : { min: benchmarkRange[0], max: benchmarkRange[1] };
+    const chapterWordRange = { ...CHAPTER_WORD_RANGE };
     const savedRevision = Number(saved?.revision);
     const baseRevision = Number.isInteger(savedRevision) && savedRevision > 0 ? savedRevision : 1;
     const constitution: CreativeConstitution = {

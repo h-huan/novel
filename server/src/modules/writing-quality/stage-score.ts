@@ -8,6 +8,28 @@ export const SCORE_DIMENSIONS = [
   'length', 'structure', 'pacing', 'payoff', 'retention', 'character_voice', 'world_rules', 'timeline',
 ] as const;
 export type ScoreDimension = typeof SCORE_DIMENSIONS[number];
+
+/**
+ * 事实/忠实度维度：低于下限意味着与已确认设定、大纲或角色既定声音互斥，必须阻断保存
+ * （人物声音有独立契约与 character_voice_contract_patch 修复执行器，属于内容缺陷而非润色）。
+ * 表达性维度（platform/category/tone/style/genre/pov）低于下限时记为 high：
+ * 仍然可见、仍然触发一次局部修复，但不作为 Gate 阻断项——文风分差不该把整章永久卡在保存之外。
+ */
+export const BLOCKING_SCORE_DIMENSIONS: ScoreDimension[] = ['context', 'logic', 'timeline', 'world_rules', 'character_voice'];
+
+/**
+ * 表达层规则：即使评审模型把它们标成 blocking，也一律降级为 high。
+ * 它们必须可见、必须参与一次局部修复，但不得阻断整章保存——这是「文风建议不阻断」的确定性兜底，
+ * 不依赖模型是否遵守 prompt。事实/忠实度规则（已确认事实、逻辑、时间线、世界规则、上下文、人物声音契约）保留模型判断。
+ */
+export const EXPRESSIVE_RULE_IDS = /^(?:ai_trace|style|platform|prose|pacing|retention)\.|^constitution\.(?:platform|category|tone|style|genre|pov)$/;
+
+export function capExpressiveSeverity(ruleId: unknown, severity: unknown): string | undefined {
+  const id = typeof ruleId === 'string' ? ruleId : '';
+  return EXPRESSIVE_RULE_IDS.test(id) && String(severity || '').toLowerCase() === 'blocking'
+    ? 'high' : (severity as string | undefined);
+}
+
 export interface DimensionScore {
   score: number | null;
   status: 'evaluated' | 'not_evaluated' | 'not_applicable';
@@ -125,7 +147,7 @@ export function parseStageScore(raw: unknown, input: {
       status: !applicable[key] ? 'not_applicable' : valid ? 'evaluated' : 'not_evaluated',
       reason: !applicable[key] ? '项目未选择该约束或当前阶段不适用' : valid ? d.reason : '证据不足：评审缺失、分数无效或引用不在生成结果中', evidence };
     if (valid && d.score < (policy.floors[key] ?? 60)) issues.push(qualityIssue({ ...input, constitutionRevision: c.revision,
-      ruleId: `constitution.${key}`, severity: ['platform', 'category', 'tone', 'style', 'genre', 'pov', 'context', 'logic', 'character_voice', 'world_rules', 'timeline'].includes(key) ? 'blocking' : 'high',
+      ruleId: `constitution.${key}`, severity: BLOCKING_SCORE_DIMENSIONS.includes(key) ? 'blocking' : 'high',
       message: d.reason, quote: evidence[0], source: 'semantic_judge' }));
   }
   // Explicit semantic contradictions must not be averaged away by otherwise high scores.
@@ -139,7 +161,8 @@ export function parseStageScore(raw: unknown, input: {
     }
     const normalized = qualityIssue({ ...input, constitutionRevision: c.revision,
       entityId: issue.characterId ?? null,
-      ruleId: typeof issue.ruleId === 'string' ? issue.ruleId : 'semantic', severity: issue.severity,
+      ruleId: typeof issue.ruleId === 'string' ? issue.ruleId : 'semantic',
+      severity: capExpressiveSeverity(issue.ruleId, issue.severity),
       message: issue.message, quote: issue.evidence, source: 'semantic_judge' });
     if (issue.characterId) { normalized.contractVersion = issue.contractVersion; normalized.contractField = issue.contractField; }
     issues.push(normalized);
@@ -164,7 +187,7 @@ ${stage === 'outline' ? '章纲中的scenes、goal、conflict、outcome等字段
 结构化契约字段为 sentenceLength、speechRegister、directness、questionFrequency、explanationTolerance、preferredVocabulary、forbiddenVocabulary、catchphrases、speechRhythm、toneToDifferentPeople、authorityBehavior、dangerBehavior、betrayalBehavior、intimacyBehavior、conflictBehavior、weakPersonBehavior、moralBoundary、behaviorForbidden。字段为null或空数组表示没有该约束，不可推断偏好。逐角色先抽取归属对白/行为，再比较具体字段；说明该证据如何违反字段，不得仅凭关键词或统计量下语义结论。
 AI Trace 语义问题使用以下 ruleId：ai_trace.emotion_overexplanation、ai_trace.causal_author_explanation、ai_trace.paragraph_function_homology、ai_trace.scene_structure_homology、ai_trace.functional_complete_dialogue、ai_trace.insufficient_subtext、ai_trace.transparent_character_cognition、ai_trace.abstract_summary、ai_trace.cross_chapter_template_repetition。启发式信号只表示风险；你必须依据原文和前序章节解释语义问题，不能把关键词命中直接判成问题。
 不能用词语计数代替语义判断；不能捏造引用或分数。无证据时 score=null。每项有分数必须提供生成结果中的逐字引用及解释。每维只给1-2段10-60字的连续原文，reason控制在120字内；issues最多8条，合并同一根因，避免重复长篇解释。
-明显违反平台/基调/标签/已确认事实时对应分数必须低于60，并记录 blocking 问题。高分不能抵消 Blocking。
+明显违反已确认事实、逻辑、时间线、世界规则或人物声音契约时对应分数必须低于60，并记录 blocking 问题（高分不能抵消 Blocking）。平台/基调/标签/文体/视角属于表达层问题：分数低于60时记为 high，不得记为 blocking——表达层分差只触发一次局部修复，不阻断整章保存。
 只输出JSON：${JSON.stringify({ dimensions: shape, issues: [{ ruleId: '规则', severity: 'blocking|high|medium|low', message: '问题', evidence: '逐字引用', characterId: '角色ID（角色问题必填）', contractVersion: '契约版本', contractField: '违背的契约字段' }] })}
 创作宪法：${JSON.stringify(constitution)}
 前序上下文：${context}

@@ -126,6 +126,16 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     }
   }, [chapter?.id, projectId, syncChapterQuality]);
 
+  // 质检进行中时定时复查后端：自动质检/别处触发的质检跑完后，「提交质检」按钮要立刻恢复可用，
+  // 而不是等作者切换章节才刷新（用户点名：当前有质检就不让点，跑完必须能点回来）。
+  useEffect(() => {
+    if (!chapter?.id || chapter.autoQualityStatus !== 'running') return;
+    const timer = setInterval(() => {
+      void syncChapterQuality(projectId, chapter.id);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [chapter?.id, chapter?.autoQualityStatus, projectId, syncChapterQuality]);
+
   // 同步 store 章节内容到编辑器：
   // - 切换章节 → 强制覆盖，重置脏标记
   // - 同一章但 store.content 变化（且不是本编辑器回写造成）→ 外部更新；
@@ -286,9 +296,28 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     setLastSaved(new Date());
   }, [chapter, updateChapter, onSave]);
 
+  /** 提交质检前以后端为权威复查本章质检状态：store 可能是数秒前的快照，仅凭 props 会漏判「刚被别处触发的质检」。 */
+  const readFreshAutoQuality = useCallback(async (chapterId: string) => {
+    await syncChapterQuality(projectId, chapterId);
+    const state = useChapterStore.getState();
+    const fresh = state.chapters.find((item) => item.id === chapterId)
+      || (state.currentChapter?.id === chapterId ? state.currentChapter : null);
+    return fresh?.autoQualityStatus;
+  }, [projectId, syncChapterQuality]);
+
   const handleSubmitForReview = useCallback(async () => {
     if (!chapter) return;
     if (busyAction) return; // 已在忙，禁止并发
+    // 本章已有质检在跑时不允许再提交（服务端也会拒绝并发质检，这里前置拦截并给出可见提示）。
+    // 先以后端为权威复查一次，杜绝「上面显示自动质检在跑、下面还能点提交质检」。
+    if (chapter.autoQualityStatus === 'running' || (await readFreshAutoQuality(chapter.id)) === 'running') {
+      setQcBanner({
+        tone: 'warning',
+        message: `第 ${chapter.volumeIndex}-${chapter.chapterIndex} 章正在质检中，请等自动质检结束后再提交。`,
+        at: Date.now(),
+      });
+      return;
+    }
     setBusyAction('submit-review');
     setQcBanner(null);
     const submitStartedAt = performance.now();
@@ -312,7 +341,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     } finally {
       setBusyAction(null);
     }
-  }, [chapter, busyAction, ensureCurrentContentSaved, submitForReview, projectId]);
+  }, [chapter, busyAction, ensureCurrentContentSaved, submitForReview, projectId, readFreshAutoQuality]);
 
   const handleLock = useCallback(async () => {
     if (!chapter) return;
@@ -440,6 +469,8 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
   }
 
   const isLocked = chapter.status === 'locked';
+  // 本章正在跑自动质检时，禁止再次提交质检，避免同一章出现两条并发质检流水线
+  const autoQualityRunning = chapter.autoQualityStatus === 'running';
 
   return (
     <div style={styles.container}>
@@ -484,8 +515,8 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
           <span>{chapter.autoQualityStatus === 'ok' ? '✅' : chapter.autoQualityStatus === 'needs_rewrite' ? '🟠' : chapter.autoQualityStatus === 'failed' ? '⚠️' : '⏳'}</span>
           <span style={{ flex: 1 }}>
             {chapter.autoQualityStatus === 'running'
-              ? '正在自动质检…'
-              : (chapter.autoQualityMessage || (chapter.autoQualityStatus === 'ok' ? '自动质检完成' : '自动质检未完成'))}
+              ? (chapter.autoQualityMessage || '正在质检中…')
+              : (chapter.autoQualityMessage || (chapter.autoQualityStatus === 'ok' ? '质检完成' : '质检未完成'))}
           </span>
           {(chapter.autoQualityStatus === 'ok' || chapter.autoQualityStatus === 'needs_rewrite') && (
             <button
@@ -591,10 +622,14 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
               <button
                 style={styles.primaryBtn}
                 onClick={handleSubmitForReview}
-                disabled={busyAction !== null}
-                title={busyAction === 'submit-review' ? '正在提交质检…' : '提交质检，进入审核流程'}
+                disabled={busyAction !== null || autoQualityRunning}
+                title={
+                  autoQualityRunning ? '本章质检进行中，请等本次质检结束后再提交'
+                  : busyAction === 'submit-review' ? '正在提交质检…'
+                  : '提交质检，进入审核流程'
+                }
               >
-                {busyAction === 'submit-review' ? '⏳ 提交中…' : '📋 提交质检'}
+                {autoQualityRunning ? '⏳ 质检进行中' : busyAction === 'submit-review' ? '⏳ 提交中…' : '📋 提交质检'}
               </button>
               <button
                 style={styles.warnBtn}

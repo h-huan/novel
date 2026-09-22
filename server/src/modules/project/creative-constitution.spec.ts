@@ -8,12 +8,20 @@ describe('creative constitution boundary', () => {
     const dto = plainToInstance(CreateProjectDto, { title: 'test', type: 'short_story', targetPlatform: 'zhihu' });
     const c = updateConstitution({ settings: '{}' }, dto);
     expect(c).toMatchObject({ projectType: 'short_story', targetPlatform: 'zhihu' });
-    expect(c.chapterWordRange).toEqual({ min: 1500, max: 8000 });
+    expect(c.chapterWordRange).toEqual({ min: 3000, max: 5000 });
   });
   it('uses a saved constitution even when old mirrors disagree', () => {
     const c = updateConstitution({}, { targetPlatform: 'fanqie', storyTone: ['热血'], pov: '第一人称' });
     const row = constitutionColumns({}, c);
     expect(readConstitution({ ...row, target_platform: 'zhihu', type: 'short_story' })).toEqual(c);
+  });
+  it('normalizes a legacy saved chapter range when it is read', () => {
+    const c = updateConstitution({}, { targetPlatform: 'fanqie' });
+    const legacy = { ...c, chapterWordRange: { min: 1500, max: 8000 }, platformRules: { ...c.platformRules, chapterWords: [1500, 8000] } };
+    expect(readConstitution({ settings: JSON.stringify({ creativeConstitution: legacy }) })).toMatchObject({
+      chapterWordRange: { min: 3000, max: 5000 },
+      platformRules: { chapterWords: [3000, 5000] },
+    });
   });
   it('rejects duplicate settings sources and invalid configuration', () => {
     expect(() => updateConstitution({}, { targetPlatform: 'fanqie', settings: { targetPlatform: 'zhihu' } })).toThrow('必须使用创作宪法字段');

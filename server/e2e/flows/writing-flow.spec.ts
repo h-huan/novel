@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createChapter, createProject, deleteProject } from '../helpers';
 
-const BASE = 'http://127.0.0.1:3100/api/v1';
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1`;
 
 test.describe('Writing Flow E2E', () => {
   let projectId: string;
