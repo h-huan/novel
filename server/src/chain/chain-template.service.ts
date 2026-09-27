@@ -144,12 +144,37 @@ export class ChainTemplateService {
     return this.chainEngine.execute(chain, userInput, onProgress);
   }
 
-  /** 以下方法只为旧 Controller 编译期过渡；运行时能力已经删除。 */
-  save(): never { throw this.removed(); }
-  delete(): never { throw this.removed(); }
-  duplicate(): never { throw this.removed(); }
-  validate(): never { throw this.removed(); }
-  executeTest(): never { throw this.removed(); }
+  /** 旧 HTTP 路由还在巨型 Controller 中，能力本体已删除；签名保留到 Controller 拆分时一起删掉。 */
+  save(_data: {
+    id?: string;
+    name: string;
+    description: string;
+    nodes: any[];
+    variables?: any[];
+    executionMode?: ChainTemplate['executionMode'];
+    config?: Partial<ChainTemplate['config']>;
+  }): ChainTemplate {
+    throw this.removed();
+  }
+
+  delete(_id: string): void { throw this.removed(); }
+  duplicate(_id: string): ChainTemplate { throw this.removed(); }
+
+  validate(_chainData: { nodes: any[]; executionMode?: string }): {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+  } {
+    throw this.removed();
+  }
+
+  async executeTest(_id: string, _testData?: Record<string, unknown>): Promise<{
+    success: boolean;
+    result?: any;
+    error?: string;
+  }> {
+    throw this.removed();
+  }
 
   private assertFixed(id: string): void {
     if (!FIXED_CHAIN_IDS.has(id)) {
