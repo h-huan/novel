@@ -1,8 +1,5 @@
 import { readConstitution, updateConstitution, constitutionColumns, constitutionSettings, categoryPlacementProblem, categoryPlacementMessage, missingConstitutionStandards, genreFitProblem, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, type CreativeConstitution } from './creative-constitution';
 import { platformDisplayName } from '../../../shared/src';
-/**
- * 项目 Service
- */
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { ProjectRepository } from '../../database/repositories/project.repository';
@@ -22,32 +19,16 @@ export interface ProjectResponse {
   currentWords: number;
   description?: string;
   settings: any;
+  /** Historical provenance only. New UI no longer branches on it. */
   creationSource: string;
   targetPlatform: string;
   currentWorkflowStage: string;
+  /** Transitional read-only projections; project CRUD can no longer mutate these fields. */
   ideaStatus: string;
   ideaSeed?: string;
   confirmedIdea?: string;
   createdAt: string;
   updatedAt: string;
-}
-
-/**
- * confirmed_idea remains a compatibility/audit column, but runtime generation
- * reads the story from creativeConstitution.confirmedStory. Normalize strings
- * to a structured object so old IdeaLab rows and new discovery cards share one
- * authority shape without inventing any additional facts.
- */
-function normalizeConfirmedStory(value: unknown): unknown | null {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value !== 'string') return value;
-  const text = value.trim();
-  if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object') return parsed;
-  } catch { /* plain idea text */ }
-  return { summary: text };
 }
 
 function confirmedStoryForResponse(value: unknown): string | undefined {
@@ -64,7 +45,11 @@ function confirmedStoryForResponse(value: unknown): string | undefined {
 export class ProjectService {
   constructor(private readonly repo: ProjectRepository, @Optional() private readonly database?: DatabaseService) {}
 
-  /** 创建项目 */
+  /**
+   * Direct project CRUD is no longer an idea-incubation path. It can create a
+   * standards-complete project shell only; confirmed story authority belongs
+   * to the /discover creation chain and Creative Constitution.
+   */
   create(dto: CreateProjectDto): ProjectResponse {
     const now = new Date().toISOString();
     const id = uuid();
@@ -81,15 +66,8 @@ export class ProjectService {
     }));
 
     const projectType = dto.type || 'long_novel';
-    const creationSource = dto.creationSource || 'blank';
-    const currentWorkflowStage = dto.currentWorkflowStage ||
-      this.defaultWorkflowStage(projectType, creationSource);
-
+    const currentWorkflowStage = dto.currentWorkflowStage || this.defaultWorkflowStage(projectType);
     const constitution = updateConstitution({ type: projectType, settings: '{}' }, dto);
-    const confirmedStory = normalizeConfirmedStory(dto.confirmedIdea ?? dto.ideaSeed);
-    if (confirmedStory !== null) {
-      (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory = confirmedStory;
-    }
     constitution.revision = 1;
 
     const missingStandards = missingConstitutionStandards(constitution);
@@ -127,12 +105,7 @@ export class ProjectService {
       status: dto.status || 'active',
       current_words: 0,
       description: dto.description || null,
-      creation_source: creationSource,
       current_workflow_stage: currentWorkflowStage,
-      idea_status: dto.ideaStatus || 'none',
-      idea_seed: dto.ideaSeed || null,
-      // Compatibility projection only. Generation/review use constitution.confirmedStory.
-      confirmed_idea: dto.confirmedIdea || null,
       created_at: now,
       updated_at: now,
     };
@@ -170,28 +143,13 @@ export class ProjectService {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Project ${id} not found`);
 
-    const now = new Date().toISOString();
-    const updateData: Record<string, unknown> = { updated_at: now };
-
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (dto.title !== undefined) updateData.title = dto.title;
     if (dto.status !== undefined) updateData.status = dto.status;
     if (dto.description !== undefined) updateData.description = dto.description;
-    if (dto.creationSource !== undefined) updateData.creation_source = dto.creationSource;
     if (dto.currentWorkflowStage !== undefined) updateData.current_workflow_stage = dto.currentWorkflowStage;
-    if (dto.ideaStatus !== undefined) updateData.idea_status = dto.ideaStatus;
-    if (dto.ideaSeed !== undefined) updateData.idea_seed = dto.ideaSeed || null;
 
-    const currentConstitution = readConstitution(existing);
     const constitution = updateConstitution(existing, dto);
-    if (dto.confirmedIdea !== undefined) {
-      const story = normalizeConfirmedStory(dto.confirmedIdea);
-      const currentStory = (currentConstitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;
-      if (JSON.stringify(story) !== JSON.stringify(currentStory)) constitution.revision += 1;
-      if (story === null) delete (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;
-      else (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory = story;
-      updateData.confirmed_idea = dto.confirmedIdea || null;
-    }
-
     if (dto.targetPlatform !== undefined || dto.category !== undefined || dto.webNovelGenre !== undefined || dto.submissionTags !== undefined || dto.genreFitNote !== undefined
       || dto.targetWords !== undefined || dto.categoryWordScaleDeviation !== undefined) {
       const fitProblem = genreFitProblem(constitution);
@@ -211,8 +169,13 @@ export class ProjectService {
         );
       }
     }
+
     Object.assign(updateData, constitutionColumns(
-      this.normalizePlanningSettings({ ...this.safeParseSettings(existing.settings), ...this.parseJsonObject(dto.settings), ...(dto.writingMode ? { writingMode: dto.writingMode } : {}) }),
+      this.normalizePlanningSettings({
+        ...this.safeParseSettings(existing.settings),
+        ...this.parseJsonObject(dto.settings),
+        ...(dto.writingMode ? { writingMode: dto.writingMode } : {}),
+      }),
       constitution,
     ));
     this.repo.update(id, updateData);
@@ -263,12 +226,9 @@ export class ProjectService {
   }
 
   private toResponse(row: ProjectRow): ProjectResponse {
-    const creationSource = row.creation_source || 'blank';
     const constitution = readConstitution(row);
     const targetPlatform = constitution.targetPlatform;
-    const currentWorkflowStage = row.current_workflow_stage ||
-      this.defaultWorkflowStage(row.type, creationSource);
-    const ideaStatus = row.idea_status || 'none';
+    const currentWorkflowStage = row.current_workflow_stage || this.defaultWorkflowStage(row.type);
     const canonicalStory = (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;
 
     return {
@@ -281,20 +241,19 @@ export class ProjectService {
       currentWords: row.current_words,
       description: row.description || undefined,
       settings: constitutionSettings(this.normalizePlanningSettings(this.safeParseSettings(row.settings)), constitution),
-      creationSource,
+      creationSource: row.creation_source || 'legacy',
       targetPlatform,
       currentWorkflowStage,
-      ideaStatus,
-      ideaSeed: row.idea_seed || undefined,
-      confirmedIdea: confirmedStoryForResponse(canonicalStory) ?? (row.confirmed_idea || undefined),
+      ideaStatus: 'none',
+      ideaSeed: undefined,
+      confirmedIdea: confirmedStoryForResponse(canonicalStory),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
-  private defaultWorkflowStage(type: string, _creationSource: string): string {
-    if (type === 'short_story') return 'topic';
-    return 'idea_or_inspiration';
+  private defaultWorkflowStage(type: string): string {
+    return type === 'short_story' ? 'topic' : 'world_setting';
   }
 
   private safeParseSettings(value: string | null | undefined): Record<string, unknown> {
