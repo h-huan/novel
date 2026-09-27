@@ -137,7 +137,7 @@ it('uses read-only code standards and records their exact code version on genera
       dirtyCount: 0,
       running: [],
     });
-    expect(standardDirectiveCache.get('idea_generate')).toContain('灵感/题材发现');
+    expect(standardDirectiveCache.get('idea_generate')).toContain('灵感发现·执行标准');
     expect(standardDirectiveCache.get('writing')).toContain('Creative Constitution');
 
     const run = metrics.beginRun(undefined, 'idea_generate', '测试');
