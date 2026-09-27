@@ -15,12 +15,12 @@ const digest = (value: string) => crypto.createHash('sha256').update(value).dige
 const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
 
 /**
- * The public provider token is still RealLLMService. This subclass keeps two
- * runtime invariants at the single LLM boundary without adding a second router
- * or quality system:
+ * The public provider token is still RealLLMService. This subclass keeps runtime
+ * invariants at the single LLM boundary without adding a second router or quality system:
  * 1) exact successful creation/planning calls may be reused after recovery;
- * 2) the historical automatic whole-chapter alignment rewrite is physically
- *    blocked, so only evidence-anchored local repair can run automatically.
+ * 2) the historical automatic whole-chapter alignment rewrite is physically blocked;
+ * 3) project-scoped outputs carry their generation_runs.id so downstream Canon commits
+ *    can prove which exact gated generation produced the artifact.
  */
 @Injectable()
 export class IdempotentRealLLMService extends RealLLMService {
@@ -39,17 +39,25 @@ export class IdempotentRealLLMService extends RealLLMService {
     }
 
     const projectId = request.metrics?.projectId ?? currentCreationProjectId() ?? undefined;
-    if (!projectId || !this.isReusableCreationCall(request, projectId)) return super.generate(request);
+    const scenario = String(request.scenario || 'daily');
+
+    // 非可复用调用仍走同一个真实 LLM/Gate，只在返回后补回这次物理生成的 runId。
+    if (!projectId || !this.isReusableCreationCall(request, projectId)) {
+      const response = await super.generate(request);
+      return projectId ? this.attachLatestRunId(projectId, scenario, response) : response;
+    }
 
     const db = this.database.getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
-    if (!project) return super.generate(request);
+    if (!project) {
+      const response = await super.generate(request);
+      return this.attachLatestRunId(projectId, scenario, response);
+    }
 
     const constitution = readConstitution(project);
     const constitutionRevision = Number.isFinite(Number(constitution.revision))
       ? Number(constitution.revision)
       : null;
-    const scenario = String(request.scenario || 'daily');
     const stage = qualityStage(scenario, stepKey);
     const compiled = compileContext(db, { projectId, stage, chapterIndex: null });
     const contextVersion = String(compiled.version || digest(''));
@@ -74,21 +82,18 @@ export class IdempotentRealLLMService extends RealLLMService {
       evaluationUnit: request.evaluationUnit || 'chapter',
       injectStandard: request.injectStandard !== false,
     }));
-    // beginRun persists a hash of systemPrompt + constitution + standard digest.
-    // Put the full-request fingerprint into systemPrompt only for idempotent
-    // structured creation calls so a different prompt/model can never collide.
     const fingerprintDirective = `【内部运行恢复指纹】${requestFingerprint}；仅用于幂等恢复，禁止在输出中复述。`;
     const systemPrompt = [request.systemPrompt, fingerprintDirective].filter(Boolean).join('\n');
     const promptVersion = digest(systemPrompt + JSON.stringify(constitution) + standards.digest);
 
-    const cached = db.prepare(`SELECT output_text,model,finished_at FROM generation_runs
+    const cached = db.prepare(`SELECT id,output_text,model,finished_at FROM generation_runs
       WHERE project_id=? AND stage=? AND scenario=? AND status='success'
         AND constitution_revision IS ? AND context_version=? AND prompt_version=?
         AND COALESCE(chapter_index,-1)=-1
         AND LENGTH(TRIM(COALESCE(output_text,'')))>0
       ORDER BY finished_at DESC,id DESC LIMIT 1`).get(
         projectId, stage, scenario, constitutionRevision, contextVersion, promptVersion,
-      ) as { output_text: string; model?: string | null; finished_at?: string | null } | undefined;
+      ) as { id: string; output_text: string; model?: string | null; finished_at?: string | null } | undefined;
 
     if (cached?.output_text) {
       return {
@@ -96,10 +101,26 @@ export class IdempotentRealLLMService extends RealLLMService {
         model: String(cached.model || request.model || routedModel || 'cached'),
         finishReason: 'cached_successful_stage',
         latency: 0,
+        runId: cached.id,
       };
     }
 
-    return super.generate({ ...request, systemPrompt });
+    const response = await super.generate({ ...request, systemPrompt });
+    return this.attachLatestRunId(projectId, scenario, response);
+  }
+
+  /**
+   * RealLLMService finishes generation_runs before returning. Match the exact final
+   * output text and scenario, newest first. Exact text avoids accidentally attaching
+   * a review/repair run that produced a different candidate. If no row exists, leave
+   * runId empty: downstream AI-to-Canon code must fail closed rather than invent provenance.
+   */
+  private attachLatestRunId(projectId: string, scenario: string, response: LLMResponse): LLMResponse {
+    if (response.runId || !String(response.content || '').trim()) return response;
+    const row = this.database.getDb().prepare(`SELECT id FROM generation_runs
+      WHERE project_id=? AND scenario=? AND status='success' AND output_text=?
+      ORDER BY finished_at DESC,id DESC LIMIT 1`).get(projectId, scenario, response.content) as { id: string } | undefined;
+    return row?.id ? { ...response, runId: row.id } : response;
   }
 
   private isReusableCreationCall(request: LLMRequest, projectId?: string): boolean {
@@ -108,9 +129,6 @@ export class IdempotentRealLLMService extends RealLLMService {
     const stepKey = String(request.metrics?.stepKey || '').trim();
     if (!stepKey) return false;
     const identity = `${String(request.scenario || '')} ${stepKey}`.toLowerCase();
-    // Creative prose, review and repair need a fresh judgment/output when the
-    // caller explicitly invokes them. Only deterministic creation/planning
-    // artifacts are safe to reuse by exact frozen-input identity.
     if (/idea|inspiration|writ|body|chapter|review|repair|refin|polish|enhance|adapt/.test(identity)) return false;
     return /world|outline|character|organization|foreshadow|timeline|entity|foundation|skeleton|planning|plan/.test(identity);
   }
