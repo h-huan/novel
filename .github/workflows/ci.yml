@@ -31,6 +31,17 @@ jobs:
         run: npm run test:acceptance
       - name: API E2E
         run: npm run test:e2e
+      - name: Real LLM golden path
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          REAL_LLM_MODEL: ${{ vars.REAL_LLM_MODEL }}
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "DEEPSEEK_API_KEY secret not configured; real-model golden path skipped."
+            exit 0
+          fi
+          RUN_REAL_LLM_E2E=1 npm run test:e2e -- --grep "Real novel golden path"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
