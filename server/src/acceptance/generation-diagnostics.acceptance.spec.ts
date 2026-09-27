@@ -118,24 +118,37 @@ it('generates a complete idea batch with one configured-model call and reuses an
   }));
 });
 
-it('upgrades current standards, keeps an internal audit snapshot, and records active versions on generation runs', async () => {
+it('uses read-only code standards and records their exact code version on generation runs', async () => {
   const db = new DatabaseSync(':memory:');
   try {
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
     const metrics = new GenerationMetricsService(database);
-    const standards = new ModuleStandardsService(database, {} as any, metrics);
-    standards.ensureSeeded();
-    db.prepare("UPDATE module_standards SET seed_baseline_version=3,requirements_json='[\"旧要求\"]' WHERE module_key='inspiration'").run();
-    standards.ensureSeeded(); standards.loadToCache();
-    expect(db.prepare("SELECT COUNT(*) n FROM module_standard_versions WHERE module_key='inspiration' AND trigger='seed_upgrade'").get().n).toBe(1);
-    expect(standardDirectiveCache.get('idea_generate')).toContain('一次操作最多两次逻辑调用');
-    expect(standardDirectiveCache.get('idea_generate')).toContain('长篇总字数不少于100000字');
+    const standards = new ModuleStandardsService();
+    standards.loadToCache();
+
+    // 运行期标准数据库已经删除：切换机器/模型/对话不能再从旧表恢复另一套 hard rules。
+    const legacyTables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table'
+      AND name IN ('module_standards','module_standard_versions','standard_summarization_runs') ORDER BY name`).all();
+    expect(legacyTables).toEqual([]);
+    expect(standards.status()).toMatchObject({
+      standardSource: 'code_seed',
+      seedBaselineVersion: SEED_BASELINE_VERSION,
+      dirtyCount: 0,
+      running: [],
+    });
+    expect(standardDirectiveCache.get('idea_generate')).toContain('灵感/题材发现');
     expect(standardDirectiveCache.get('writing')).toContain('Creative Constitution');
+
     const run = metrics.beginRun(undefined, 'idea_generate', '测试');
     const snapshot = JSON.parse(db.prepare('SELECT standards_snapshot FROM generation_runs WHERE id=?').get(run.id).standards_snapshot);
-    expect(snapshot.modules).toContainEqual({ key: 'inspiration', version: 2, baseline: SEED_BASELINE_VERSION });
-    expect(snapshot.modules).toContainEqual({ key: 'quality_loop', version: 1, baseline: SEED_BASELINE_VERSION });
+    expect(snapshot.modules).toContainEqual({
+      key: 'inspiration', version: SEED_BASELINE_VERSION, baseline: SEED_BASELINE_VERSION,
+    });
+    expect(snapshot.modules).toContainEqual({
+      key: 'quality_loop', version: SEED_BASELINE_VERSION, baseline: SEED_BASELINE_VERSION,
+    });
+
     const noStandards = metrics.beginRun(undefined, 'daily', '测试', undefined, undefined, undefined, false);
     expect(JSON.parse(db.prepare('SELECT standards_snapshot FROM generation_runs WHERE id=?').get(noStandards.id).standards_snapshot).enabled).toBe(false);
   } finally { db.close(); }
