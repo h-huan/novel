@@ -5,6 +5,7 @@ import { IdempotentRealLLMService } from './idempotent-real-llm.service';
 import { compileContext } from '../modules/generation-metrics/context-compiler';
 import { qualityStage } from '../routing/scenario-taxonomy';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
+import { readConstitution } from '../modules/project/creative-constitution';
 import { getPlatform, targetForLength } from './platform-benchmarks';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
@@ -42,15 +43,16 @@ function fixture() {
     confirmedStory: { title: '失踪档案', coreConflict: '档案每天增加一名不存在的失踪者' },
   };
   db.prepare('INSERT INTO projects VALUES (?,?,?)').run('p', 'short_story', JSON.stringify({ creativeConstitution: constitution }));
-  return { db, constitution };
+  return { db };
 }
 
 describe('IdempotentRealLLMService', () => {
   it('returns an exact successful creation-stage run without another model call', async () => {
-    const { db, constitution } = fixture();
+    const { db } = fixture();
     try {
       const router = {
         getModelForScenario: () => ({ modelName: 'test-model', modelVersion: 'v1' }),
+        getConfig: () => ({ scenarios: { outline: { maxTokens: 4096 } }, defaults: { maxTokens: 4096 } }),
       } as any;
       const database = { getDb: () => db } as any;
       const metrics = {} as any;
@@ -81,9 +83,11 @@ describe('IdempotentRealLLMService', () => {
         injectStandard: true,
       }));
       const systemPrompt = `${request.systemPrompt}\n【内部运行恢复指纹】${requestFingerprint}；仅用于幂等恢复，禁止在输出中复述。`;
-      const promptVersion = digest(systemPrompt + JSON.stringify(constitution) + standards.digest);
+      const project = db.prepare('SELECT * FROM projects WHERE id=?').get('p') as any;
+      const runtimeConstitution = readConstitution(project);
+      const promptVersion = digest(systemPrompt + JSON.stringify(runtimeConstitution) + standards.digest);
       db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        'run-1','p',stage,'world_building','success',1,contextVersion,promptVersion,null,
+        'run-1','p',stage,'world_building','success',runtimeConstitution.revision ?? null,contextVersion,promptVersion,null,
         '{"world":"cached"}','test-model','2026-09-27T00:00:00.000Z',
       );
 
