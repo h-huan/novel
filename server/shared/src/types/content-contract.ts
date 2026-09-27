@@ -23,6 +23,14 @@ export interface CharacterActionPlan {
   result?: string;
 }
 
+/**
+ * ChapterPlan is also the chapter execution contract.
+ *
+ * Older projects only contain the original planning fields below. The contract
+ * fields are optional for backward compatibility, but once present they are
+ * authoritative constraints for drafting/review rather than another parallel
+ * “chapter contract” object. This keeps one chapter-level source of truth.
+ */
 export interface ChapterPlan {
   core: string;
   scenes: ScenePlan[];
@@ -37,6 +45,25 @@ export interface ChapterPlan {
   reversalPoint?: string;
   hotScenes: string[];
   targetWords?: number;
+
+  /** State that must already be true when the chapter starts. */
+  entryState?: string[];
+  /** The single irreversible narrative job of this chapter. */
+  objective?: string;
+  /** Beats that must occur in the body. */
+  mandatoryBeats?: string[];
+  /** Facts/events the body must not introduce or contradict. */
+  forbiddenFacts?: string[];
+  /** Character knowledge boundaries at chapter start/end. */
+  characterKnowledge?: string[];
+  /** Canon state changes that this chapter is allowed/required to cause. */
+  stateTransitions?: string[];
+  /** Foreshadowing actions to plant/remind/recover in this chapter. */
+  foreshadowTasks?: string[];
+  /** State that must be true when the chapter ends. */
+  exitState?: string[];
+  /** Concrete hand-off/hook required for the next chapter. */
+  nextHook?: string;
 }
 
 export interface KeyValueSetting {
@@ -103,6 +130,14 @@ const expectStringArray = (obj: Record<string, unknown>, key: string, issues: st
   if (!isStringArray(obj[key])) issues.push(`${key}: expected string[]`);
 };
 
+const expectOptionalString = (obj: Record<string, unknown>, key: string, issues: string[]) => {
+  if (obj[key] !== undefined && typeof obj[key] !== 'string') issues.push(`${key}: expected string`);
+};
+
+const expectOptionalStringArray = (obj: Record<string, unknown>, key: string, issues: string[]) => {
+  if (obj[key] !== undefined && !isStringArray(obj[key])) issues.push(`${key}: expected string[]`);
+};
+
 export function validateChapterPlan(value: unknown): ContractValidationResult<ChapterPlan> {
   if (!isRecord(value)) return { ok: false, issues: ['chapter_plan: expected object'] };
   const issues: string[] = [];
@@ -110,6 +145,12 @@ export function validateChapterPlan(value: unknown): ContractValidationResult<Ch
   for (const key of ['highlights', 'foreshadowing', 'foreshadowingRecoveries', 'characterStateChanges', 'hotScenes']) {
     expectStringArray(value, key, issues);
   }
+  for (const key of ['objective', 'nextHook']) expectOptionalString(value, key, issues);
+  for (const key of [
+    'entryState', 'mandatoryBeats', 'forbiddenFacts', 'characterKnowledge',
+    'stateTransitions', 'foreshadowTasks', 'exitState',
+  ]) expectOptionalStringArray(value, key, issues);
+
   if (!Array.isArray(value.scenes)) {
     issues.push('scenes: expected ScenePlan[]');
   } else {
