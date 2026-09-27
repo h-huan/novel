@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { QualityStage } from '../writing-quality/quality-issue';
 import { canonical, compileCharacterContract, object } from '../writing-quality/character-contract';
+import { chapterContractFromOutline } from './chapter-contract-context';
 
 function ids(v: any): string[] {
   try {
@@ -59,7 +60,8 @@ export function dependencyContext(
   }
 
   const detail = { ...object(outline?.detail_json), ...object(outline?.plan_json) };
-  const currentText = `${String(current?.content || '')}\n${String(outline?.content || '')}\n${canonical(detail)}`;
+  const chapterContract = chapterContractFromOutline(outline, detail);
+  const currentText = `${String(current?.content || '')}\n${String(outline?.content || '')}\n${canonical(detail)}\n${canonical(chapterContract || {})}`;
 
   // The chapter plan is the primary dependency selector. Explicit IDs are never
   // lost because of table size; name-based discovery is a bounded fallback only.
@@ -191,7 +193,8 @@ export function dependencyContext(
   }
 
   const sections: Record<string, any> = {
-    meta: { schemaVersion: 2, stage, chapterIndex, selection: 'current_plan_then_recent_canon_then_dependencies', truncation: [] },
+    meta: { schemaVersion: 3, stage, chapterIndex, selection: 'chapter_contract_then_recent_canon_then_dependencies', truncation: [] },
+    chapterContract: [],
     outline: [],
     recentChapters: [],
     characterContracts: [],
@@ -230,6 +233,9 @@ export function dependencyContext(
     }
   };
 
+  // One persisted outline, one executable contract. Drafting and review compile
+  // the same object; no parallel ChapterContract record is introduced.
+  add('chapterContract', chapterContract ? [chapterContract] : []);
   add('outline', outline ? [outline] : []);
   add('recentChapters', recent);
   add('characterContracts', characters.map(compileCharacterContract));
@@ -248,7 +254,7 @@ export function dependencyContext(
   sections.meta.truncation = omitted ? [`${omitted} items/fields omitted or clipped; budget=${max}`, ...truncation] : [];
   const snapshot = canonical(sections);
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: 3 as const,
     version: createHash('sha256').update(snapshot).digest('hex'),
     snapshot,
     size: snapshot.length,
