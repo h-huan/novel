@@ -42,6 +42,11 @@ interface NodeExecutionContext {
   retryCount: number;
 }
 
+interface PromptNodeExecutionResult {
+  output: unknown;
+  runId?: string;
+}
+
 @Injectable()
 export class ChainEngineService {
   private readonly logger = new Logger(ChainEngineService.name);
@@ -227,19 +232,27 @@ export class ChainEngineService {
 
         // 3. 根据节点类型执行
         let output: unknown;
+        let runId: string | undefined;
 
         switch (node.type) {
-          case 'prompt':
-            output = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
+          case 'prompt': {
+            const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
+            output = promptResult.output;
+            runId = promptResult.runId;
             break;
+          }
           case 'transform':
             output = await this.executeTransformNode(node, resolvedInput, context);
             break;
           case 'condition':
             output = this.executeConditionNode(node, resolvedInput, context);
             break;
-          default:
-            output = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
+          default: {
+            const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
+            output = promptResult.output;
+            runId = promptResult.runId;
+            break;
+          }
         }
 
         lastOutput = output;
@@ -249,6 +262,7 @@ export class ChainEngineService {
           nodeName: node.name,
           status: 'success',
           output,
+          ...(runId ? { runId } : {}),
           latency: Date.now() - startTime,
           retryCount: currentRetryCount,
           timestamp: new Date(),
@@ -303,7 +317,7 @@ export class ChainEngineService {
    * 执行 Prompt 节点
    * 1. 获取模板并渲染
    * 2. 调用 LLM
-   * 3. 尝试解析 JSON 输出
+   * 3. 尝试解析 JSON 输出，同时保留 generation_runs.id
    */
   private async executePromptNode(
     node: ChainNode,
@@ -311,7 +325,7 @@ export class ChainEngineService {
     context: ExecutionContext,
     retryCount: number,
     chain: PromptChain,
-  ): Promise<unknown> {
+  ): Promise<PromptNodeExecutionResult> {
     // 获取并渲染 Prompt 模板
     let prompt: string;
     if (node.promptTemplateId) {
@@ -363,7 +377,7 @@ export class ChainEngineService {
         + `head=${JSON.stringify(raw.slice(0, 300))}, tail=${JSON.stringify(raw.slice(-300))}`,
       );
     }
-    return parsedOutput;
+    return { output: parsedOutput, ...(response.runId ? { runId: response.runId } : {}) };
   }
 
   /**
