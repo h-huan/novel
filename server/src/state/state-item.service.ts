@@ -346,7 +346,7 @@ export class StateItemService {
 
   buildWritingStateContext(projectId: string, chapterNumber?: number) {
     const db = this.databaseService.getDb();
-    const project = db.prepare('SELECT title, type, target_words, target_platform, platform_style, writing_style, settings FROM projects WHERE id = ?').get(projectId) as any;
+    const project = db.prepare('SELECT title, type, target_words, target_platform, writing_style, settings FROM projects WHERE id = ?').get(projectId) as any;
     if (!project) throw new Error(`项目 ${projectId} 不存在`);
     const constitution = readConstitution(project);
     const projectSettings = constitutionSettings(JSON.parse(project.settings || '{}'), constitution);

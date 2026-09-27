@@ -9,8 +9,14 @@ import { standardDirectiveCache } from '../modules/module-standards/standard-dir
 import { RealLLMService } from '../chain/real-llm.service';
 import { ChainController } from '../chain/chain.controller';
 import { updateConstitution } from '../modules/project/creative-constitution';
+import { HttpException } from '@nestjs/common';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 afterEach(() => standardDirectiveCache.clear());
+
+// 这里曾有只填平台/分类的旧版灵感请求，结果绕过四维创作设定；验收样例必须和正式入口同一硬门。
+const discoveryStandards = {
+  storyTone: ['悬疑'], writingStyle: ['白描/朴素'], webNovelGenre: ['悬疑'], plotTags: ['探案'], pov: '第三人称限知',
+};
 
 it('learns partial chapter-responsibility progress for future strategy ordering', async () => {
   const db = new DatabaseSync(':memory:');
@@ -27,7 +33,7 @@ it('learns partial chapter-responsibility progress for future strategy ordering'
       now, now, 'fanqie',
     );
     const metrics = new GenerationMetricsService({ getDb: () => db } as any);
-    const before = ['现实门禁记录被超自然改写', '影子获得未授权的主动诱导能力'];
+    const before = ['CR-1 能力授权边界：现实记录被超自然改写，未获逐字授权', 'CR-1 能力授权边界：痕迹被扩展出规则未授予的主动诱导能力'];
     metrics.recordChapterResponsibilityRepairAttempt('p-learning', before, 'constraint_matrix', false, [before[1]]);
     const row = db.prepare(`SELECT attempts,accepted,rollbacks,improvement_sum,introduced_issue_count
       FROM repair_strategy_stats WHERE rule_id=?`).get(chapterResponsibilityIssueSignature(before)) as any;
@@ -49,7 +55,7 @@ it('reports one model configuration failure and shows it on the workbench before
     const generate = vi.spyOn(llm, 'generate');
     const controller = Object.create(ChainController.prototype);
     Object.assign(controller, { realLLM: llm, logger: { log: vi.fn(), error: vi.fn() } });
-    const result = await controller.ideaDiscover({ storyType: 'short_story', platform: 'fanqie', count: 5 });
+    const result = await controller.ideaDiscover({ storyType: 'short_story', platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards });
     expect(result).toMatchObject({ success: false, ideas: [], error: '灵感场景未配置模型，请前往设置' });
     expect(generate).not.toHaveBeenCalled();
     expect(router.getModelForScenario).toHaveBeenCalledTimes(1);
@@ -78,7 +84,7 @@ it('generates a complete idea batch with one configured-model call and reuses an
     hook: `第${index}位主角在截止日前发现关键证据异常，若不能及时查清，他会失去工作、重要关系和最后的申诉机会。`,
     description: `${premises[index - 1].description}随着截止时间逼近，${premises[index - 1].hero}还要用该职业独有的现场方法验证每个结论，并为最后的公开选择承担不可撤回的关系代价。`,
     setting: premises[index - 1].setting, protagonist: premises[index - 1].hero, characters: ['主角', '对手', '证人'],
-    styleTags: ['现实', '悬疑'], storyTone: ['悬疑'], writingStyle: ['白描'], webNovelGenre: ['现实/无流派'],
+    styleTags: ['现实', '悬疑'], ...discoveryStandards,
     targetPlatform: 'fanqie', tone: '冲突直接且适合移动阅读', estimatedWords: 20_000, plannedChapters: 4,
     scopeBreakdown: [{ arc: '危机与追查', chapters: 4, reason: '完成调查、选择、反转与收束' }],
     scopeReason: '四章分别承担危机、追查、选择与反转收束',
@@ -101,7 +107,7 @@ it('generates a complete idea batch with one configured-model call and reuses an
   const controller = Object.create(ChainController.prototype);
   const db = { prepare: vi.fn(() => ({ all: vi.fn(() => []) })) };
   Object.assign(controller, { realLLM, db: { getDb: () => db }, logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
-  const request = { storyType: 'short_story' as const, platform: 'fanqie', count: 5 };
+  const request = { storyType: 'short_story' as const, platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards };
 
   const [first, duplicate] = await Promise.all([controller.ideaDiscover(request), controller.ideaDiscover(request)]) as any[];
   expect(first).toMatchObject({ success: true, totalIdeas: 5 });
@@ -133,4 +139,57 @@ it('upgrades current standards, keeps an internal audit snapshot, and records ac
     const noStandards = metrics.beginRun(undefined, 'daily', '测试', undefined, undefined, undefined, false);
     expect(JSON.parse(db.prepare('SELECT standards_snapshot FROM generation_runs WHERE id=?').get(noStandards.id).standards_snapshot).enabled).toBe(false);
   } finally { db.close(); }
+});
+
+it('blocks idea discovery without a platform/category execution standard instead of silently generating on generic web-fiction defaults', async () => {
+  const database = { getDb: () => ({ prepare: () => ({ all: () => [] }) }) } as any;
+  const realLLM = { assertScenarioModelConfigured: vi.fn(), generate: vi.fn(async () => ({ content: '{}' })) };
+  const controller = Object.create(ChainController.prototype);
+  Object.assign(controller, { realLLM, db: database, logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+
+  const blocked = async (payload: Record<string, unknown>, expected: string) => {
+    const error = await controller.ideaDiscover(payload as any).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(422);
+    expect((error as HttpException).message).toContain(expected);
+  };
+  // 没选平台：generic 等价于没选，不得按通用网文基准生成
+  await blocked({ storyType: 'short_story', platform: '', storyCategory: '现实悬疑' }, '未选择具体目标平台');
+  await blocked({ storyType: 'short_story', platform: 'generic', storyCategory: '现实悬疑' }, '未选择具体目标平台');
+  await blocked({ storyType: 'short_story', platform: 'rules_horror', storyCategory: '现实悬疑' }, '规则怪谈是题材标签');
+  // 选了自定义平台却没写说明：系统不掌握该平台基准，这份说明就是标准本身
+  await blocked({ storyType: 'short_story', platform: 'custom', storyCategory: '现实悬疑' }, '自定义平台说明');
+  // 自定义平台没有可用分类字典时，不能从别的平台借用分类。
+  await blocked({ storyType: 'short_story', platform: 'custom', customPlatformNote: '短故事每篇以一次明确的冲突与回报收束。', storyCategory: '   ' }, '没有可用的分类候选');
+  // 阻断必须发生在花掉模型调用之前，标准不齐备不能靠一次模型调用蒙混过去
+  expect(realLLM.assertScenarioModelConfigured).not.toHaveBeenCalled();
+  expect(realLLM.generate).not.toHaveBeenCalled();
+});
+
+it('injects the user-declared custom platform standard into the idea prompt as the platform authority', async () => {
+  const prompts: string[] = [];
+  const realLLM = {
+    assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
+    generate: vi.fn(async (input: any) => {
+      prompts.push(String(input.prompt));
+      return { content: JSON.stringify({ ideas: [] }) };
+    }),
+  };
+  const db = { prepare: vi.fn(() => ({ all: vi.fn(() => []) })) };
+  const controller = Object.create(ChainController.prototype);
+  Object.assign(controller, { realLLM, db: { getDb: () => db }, logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+
+  const result: any = await controller.ideaDiscover({
+    storyType: 'short_story', platform: 'custom', storyCategory: '现实悬疑',
+    customPlatformNote: '每章末尾必须留一个可验证的实物线索；回报以关系变化为主，不用打脸爽点。',
+    ...discoveryStandards,
+  });
+  // 说明已进入 prompt（上面断言），后续质量 Gate 才有资格判定这批题材不合格
+  expect(result.success).toBe(false);
+  expect(String(result.error)).toContain('缺少有效的 ideas 数组');
+  expect(realLLM.generate).toHaveBeenCalledTimes(1);
+  const prompt = prompts.join('\n');
+  expect(prompt).toContain('每章末尾必须留一个可验证的实物线索');
+  expect(prompt).toContain('用户填写的「自定义平台说明」是该平台节奏、回报类型、段落与对话区间的唯一事实源');
+  expect(prompt).toContain('不是该平台的既定基准');
 });

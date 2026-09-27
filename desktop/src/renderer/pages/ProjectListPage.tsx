@@ -8,16 +8,26 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../stores/projectStore';
 import { useIdeaLabStore } from '../stores/ideaLabStore';
 import { openProject } from '../lib/openProject';
+import { getGenerationRecovery, startFailedProjectRecovery } from '../lib/generationRecovery';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import type {
   Project,
   ProjectType,
   CreationSource,
-  TargetPlatform,
   WorkflowStage,
   IdeaStatus,
 } from '@novel/shared';
+import {
+  EMPTY_EXECUTION_STANDARDS,
+  missingExecutionStandards,
+  targetWordsBlockingReason,
+  toExecutionStandardsPayload,
+  platformLabel as platformLabelOf,
+  type ExecutionStandardsValue,
+  type ExecutionStandardsPayload,
+} from '../lib/executionStandards';
+import ExecutionStandardsForm from '../components/ExecutionStandardsForm';
 
 // ============================================================
 // 常量
@@ -37,28 +47,17 @@ const TYPE_COLORS: Record<ProjectType, string> = {
 
 const CREATION_SOURCE_LABELS: Record<CreationSource, string> = {
   inspiration: '灵感',
+  idea_discovery: '灵感发现',
   idea: '想法',
   import: '导入',
   blank: '空白',
 };
 
 const CREATION_SOURCE_FALLBACKS: Record<string, string> = {
-  idea_discovery: '灵感发现',
+  // 这里曾有过第二份 idea_discovery 创建来源定义，后果是已创建项目只靠回退文案识别；现由共享枚举统一管理。
   inspiration_discovery: '灵感发现',
 };
 
-const TARGET_PLATFORM_LABELS: Record<TargetPlatform, string> = {
-  zhihu: '知乎盐选',
-  fanqie: '番茄',
-  qimao: '七猫',
-  qidian: '起点',
-  douyin: '抖音',
-  xiaohongshu: '小红书',
-  jinjiang: '晋江',
-  rules_horror: '规则怪谈',
-  custom: '自定义',
-  generic: '通用',
-};
 
 const WORKFLOW_STAGE_LABELS: Record<string, string> = {
   topic: '题材',
@@ -81,6 +80,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
+  generation_failed: 'rgba(248, 113, 113, 0.16)',
   idea: 'rgba(243, 156, 18, 0.2)',
   world_building: 'rgba(243, 156, 18, 0.2)',
   outlining: 'rgba(243, 156, 18, 0.2)',
@@ -90,6 +90,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_TEXT_COLORS: Record<string, string> = {
+  generation_failed: '#fca5a5',
   idea: 'var(--color-warning)',
   world_building: 'var(--color-warning)',
   outlining: 'var(--color-warning)',
@@ -100,7 +101,7 @@ const STATUS_TEXT_COLORS: Record<string, string> = {
 
 const USER_STATUS_LABELS: Record<string, string> = {
   creating: '资料生成中',
-  generation_failed: '资料待重新生成',
+  generation_failed: '生成失败 · 不可写作',
   active: '可继续创作',
   idea: '构思中',
   world_building: '构思中',
@@ -149,34 +150,40 @@ interface ProjectCardProps {
   project: Project;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRetry: (id: string) => void;
+  retryBusy: boolean;
+  retryDisabled: boolean;
+  recoveryRunning?: boolean;
+  retryMessage?: string;
   selected: boolean;
   onSelectionChange: (id: string, selected: boolean) => void;
 }
 
-const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete, selected, onSelectionChange }) => {
+export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete, onRetry, retryBusy, retryDisabled, recoveryRunning = false, retryMessage, selected, onSelectionChange }) => {
   const [isHovered, setIsHovered] = useState(false);
+  const failed = project.status === 'generation_failed';
   const progress = 0;
-  const statusLabel = USER_STATUS_LABELS[project.status] || project.status;
+  const statusLabel = recoveryRunning ? '正在重新生成 · 查看进度' : USER_STATUS_LABELS[project.status] || project.status;
   const statusBgColor = STATUS_COLORS[project.status] || 'rgba(108,108,128,0.2)';
   const statusTextColor = STATUS_TEXT_COLORS[project.status] || 'var(--color-text-muted)';
   const creationLabel = CREATION_SOURCE_LABELS[project.creationSource]
     || CREATION_SOURCE_FALLBACKS[String(project.creationSource)]
     || '作者创建';
-  const platformLabel = TARGET_PLATFORM_LABELS[project.targetPlatform] || project.targetPlatform;
+  const platformText = platformLabelOf(project.targetPlatform) || project.targetPlatform;
   const stageLabel = WORKFLOW_STAGE_LABELS[project.currentWorkflowStage] || '';
 
   return (
     <div
-      style={cardStyles.card}
+      style={{ ...cardStyles.card, ...(failed ? cardStyles.failedCard : {}) }}
       onClick={() => onSelect(project.id)}
       onMouseEnter={(e) => {
         setIsHovered(true);
-        e.currentTarget.style.borderColor = 'var(--color-accent, var(--color-accent))';
-        e.currentTarget.style.transform = 'translateY(-2px)';
+        e.currentTarget.style.borderColor = failed ? 'rgba(248,113,113,0.55)' : 'var(--color-accent)';
+        e.currentTarget.style.transform = failed ? 'none' : 'translateY(-2px)';
       }}
       onMouseLeave={(e) => {
         setIsHovered(false);
-        e.currentTarget.style.borderColor = 'var(--color-border, var(--color-border))';
+        e.currentTarget.style.borderColor = failed ? 'rgba(148,163,184,0.28)' : 'var(--color-border)';
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
@@ -194,7 +201,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete, 
             style={cardStyles.checkbox}
           />
         </label>
-        <h3 style={cardStyles.title}>{project.title}</h3>
+        <h3 style={{ ...cardStyles.title, ...(failed ? cardStyles.failedTitle : {}) }}>{project.title}</h3>
         <div style={cardStyles.headerRight}>
           <span
             style={{
@@ -207,8 +214,8 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete, 
           <button
             style={{
               ...cardStyles.deleteBtn,
-              opacity: isHovered ? 1 : 0,
-              pointerEvents: isHovered ? 'auto' : 'none',
+              opacity: isHovered || failed ? 1 : 0,
+              pointerEvents: isHovered || failed ? 'auto' : 'none',
             }}
             onClick={(e) => {
               e.stopPropagation();
@@ -225,7 +232,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete, 
         <span style={cardStyles.metaTag}>{creationLabel}</span>
         {stageLabel && <><span style={cardStyles.metaDivider}>·</span><span style={cardStyles.metaTag}>{stageLabel}</span></>}
         <span style={cardStyles.metaDivider}>·</span>
-        <span style={cardStyles.metaTag}>{platformLabel}</span>
+        <span style={cardStyles.metaTag}>{platformText}</span>
       </div>
 
       {project.description && (
@@ -263,6 +270,20 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onSelect, onDelete, 
           {formatRelativeTime(project.updatedAt)}
         </span>
       </div>
+
+      {failed && (
+        <div style={cardStyles.failedActions} onClick={(event) => event.stopPropagation()}>
+          <span style={cardStyles.failedHint}>{recoveryRunning ? '创作资料正在生成，可随时查看实时进度。' : '创建未完成；可查看诊断或重新生成。'}</span>
+          <button
+            type="button"
+            style={{ ...cardStyles.retryBtn, opacity: retryDisabled ? 0.55 : 1 }}
+            disabled={retryDisabled && !recoveryRunning}
+            onClick={() => onRetry(project.id)}
+            aria-label={`${recoveryRunning ? '查看进度' : '重新生成'} ${project.title}`}
+          >{recoveryRunning ? '查看进度' : retryBusy ? '正在启动…' : '重新生成'}</button>
+          {retryMessage && <span role="alert" style={cardStyles.retryMessage}>{retryMessage}</span>}
+        </div>
+      )}
     </div>
   );
 };
@@ -278,6 +299,42 @@ const cardStyles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: '12px',
+  },
+  failedCard: {
+    backgroundColor: 'rgba(29,34,48,0.72)',
+    borderColor: 'rgba(148,163,184,0.28)',
+    borderStyle: 'dashed',
+  },
+  failedTitle: {
+    color: 'var(--color-text-muted)',
+  },
+  failedActions: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    borderTop: '1px solid rgba(148,163,184,0.18)',
+    paddingTop: 12,
+  },
+  failedHint: {
+    color: 'var(--color-text-muted)',
+    fontSize: 12,
+    flex: '1 1 180px',
+  },
+  retryBtn: {
+    border: '1px solid rgba(248,113,113,0.52)',
+    borderRadius: 7,
+    backgroundColor: 'rgba(248,113,113,0.13)',
+    color: '#fecaca',
+    fontSize: 13,
+    fontWeight: 700,
+    padding: '7px 12px',
+    cursor: 'pointer',
+  },
+  retryMessage: {
+    color: '#fca5a5',
+    fontSize: 12,
+    flexBasis: '100%',
   },
   header: {
     display: 'flex',
@@ -418,12 +475,16 @@ interface CreateDialogProps {
     title: string;
     type: ProjectType;
     creationSource: CreationSource;
-    targetPlatform: TargetPlatform;
-    targetWords: number;
     currentWorkflowStage: WorkflowStage;
     ideaStatus: IdeaStatus;
     ideaSeed?: string;
     description?: string;
+    /**
+     * 六维执行标准（平台/分类/基调/文风/流派/视角 + 目标总字数 + 分类体量取舍依据）。
+     * 创建载荷里不再有「只带平台 + 一个字数」的旧形状：那不是执行标准，
+     * 按它建出来的项目从一开始就缺标准，只能在项目卡片事后补救。
+     */
+    standards: ExecutionStandardsPayload;
   }) => void;
 }
 
@@ -463,29 +524,24 @@ const PROJECT_TYPE_OPTIONS: { value: ProjectType; label: string; desc: string }[
   },
 ];
 
-const PLATFORM_OPTIONS_WIZARD: { value: TargetPlatform; label: string }[] = [
-  { value: 'zhihu', label: '知乎盐选' },
-  { value: 'fanqie', label: '番茄' },
-  { value: 'qimao', label: '七猫' },
-  { value: 'qidian', label: '起点' },
-  { value: 'douyin', label: '抖音故事' },
-  { value: 'xiaohongshu', label: '小红书' },
-  { value: 'jinjiang', label: '晋江' },
-  { value: 'rules_horror', label: '规则怪谈' },
-  { value: 'custom', label: '自定义' },
-  { value: 'generic', label: '通用' },
-];
 
 const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }) => {
   const [step, setStep] = useState(1);
   const [creationSource, setCreationSource] = useState<CreationSource>('blank');
   const [projectType, setProjectType] = useState<ProjectType>('long_novel');
-  const [targetPlatform, setTargetPlatform] = useState<TargetPlatform>('generic');
+  // 执行标准：与创建向导、项目执行标准页共用同一份控件与同一份判据（components/ExecutionStandardsForm）。
+  // 这里不再自建「平台卡片 + 目标字数输入框」那一套：那是第二份标准，也是两套口径的来源。
+  const [standards, setStandards] = useState<ExecutionStandardsValue>(EMPTY_EXECUTION_STANDARDS);
   const [title, setTitle] = useState('');
-  const [targetWords, setTargetWords] = useState('');
   const [ideaSeed, setIdeaSeed] = useState('');
   const [description, setDescription] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // 成稿单元（短篇/长篇）不是六维之一，但它是「分类」维体量判据的适用前提：
+  // 平台实测体量是按成稿单元分开采集的，不带它，判据会按「未知即从严」拿长篇区间拦短篇。
+  useEffect(() => {
+    setStandards((prev) => (prev.projectType === projectType ? prev : { ...prev, projectType }));
+  }, [projectType]);
 
   if (!isOpen) return null;
 
@@ -493,12 +549,26 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
     setStep(1);
     setCreationSource('blank');
     setProjectType('long_novel');
-    setTargetPlatform('generic');
+    setStandards(EMPTY_EXECUTION_STANDARDS);
     setTitle('');
-    setTargetWords('');
     setIdeaSeed('');
     setDescription('');
     setErrors({});
+  };
+
+  // 第 3 步（执行标准）就是执行前提本身：六维缺任何一维、或「分类」维体量判据未满足，
+  // 都不允许往下走 —— 用的就是后端创建入口的那两份判据（missingExecutionStandards / targetWordsVerdict），
+  // 不是前端自算的第二套规则。
+  const standardsProblems = (): string[] => {
+    const problems = missingExecutionStandards(standards);
+    const block = targetWordsBlockingReason(standards);
+    return block ? [...problems, block] : problems;
+  };
+
+  const validateStep3 = (): boolean => {
+    const problems = standardsProblems();
+    setErrors((prev) => ({ ...prev, standards: problems.join('；') }));
+    return problems.length === 0;
   };
 
   const validateStep4 = (): boolean => {
@@ -519,39 +589,26 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
   };
 
   const handleCreate = () => {
-    if (validateStep4()) {
-      const workflowStage =
-        projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';
-      const ideaStatusValue = creationSource === 'idea' ? 'draft' : 'none';
-
-      if (creationSource === 'idea') {
-        // 从想法开始：rawIdea 必须来自 ideaSeed，不能回退到 description 或 title
-        onCreate({
-          title: title.trim() || '',
-          type: projectType,
-          creationSource,
-          targetPlatform,
-          targetWords: parseInt(targetWords) || 0,
-          currentWorkflowStage: workflowStage,
-          ideaStatus: ideaStatusValue,
-          ideaSeed: ideaSeed.trim(),
-          description: description.trim() || undefined,
-        });
-      } else {
-        onCreate({
-          title: title.trim(),
-          type: projectType,
-          creationSource,
-          targetPlatform,
-          targetWords: parseInt(targetWords) || 0,
-          currentWorkflowStage: workflowStage,
-          ideaStatus: ideaStatusValue,
-          ideaSeed: undefined,
-          description: description.trim() || undefined,
-        });
-      }
-      reset();
+    // 标准是被反复改动过的：这里再判一次并退回第 3 步，而不是让一个已经缺标准的载荷发出去。
+    if (!validateStep3()) {
+      setStep(3);
+      return;
     }
+    if (!validateStep4()) return;
+    const workflowStage =
+      projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';
+    const ideaStatusValue = creationSource === 'idea' ? 'draft' : 'none';
+    onCreate({
+      title: title.trim(),
+      type: projectType,
+      creationSource,
+      currentWorkflowStage: workflowStage,
+      ideaStatus: ideaStatusValue,
+      ideaSeed: creationSource === 'idea' ? ideaSeed.trim() : undefined,
+      description: description.trim() || undefined,
+      standards: toExecutionStandardsPayload(standards),
+    });
+    reset();
   };
 
   const handleBackdrop = (e: React.MouseEvent) => {
@@ -566,7 +623,13 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
     onClose();
   };
 
-  const handleNext = () => setStep((s) => Math.min(s + 1, 4));
+  const handleNext = () => {
+    // 第 3 步（执行标准）和最终创建共用同一份判据 validateStep3：
+    // 六维缺任何一维、或「分类」维体量判据未满足，都不允许进入下一步 ——
+    // 这里不再有前端自算的第二套「平台」规则（旧 platformStandardProblem 已并入六维校验）。
+    if (step === 3 && !validateStep3()) return;
+    setStep((s) => Math.min(s + 1, 4));
+  };
   const handlePrev = () => setStep((s) => Math.max(s - 1, 1));
 
   return (
@@ -586,7 +649,7 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
 
         {/* 步骤指示器 */}
         <div style={dialogStyles.steps}>
-          {['开始方式', '作品类型', '目标平台', '基础信息'].map((label, i) => (
+          {['开始方式', '作品类型', '执行标准', '基础信息'].map((label, i) => (
             <div key={i} style={dialogStyles.stepItem}>
               <div
                 style={{
@@ -657,25 +720,20 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
             </div>
           )}
 
-          {/* Step 3: 目标平台 */}
+          {/* Step 3: 执行标准（平台/分类/基调/文风/流派/视角）—— 与创建向导、项目执行标准页同一份控件 */}
           {step === 3 && (
             <div style={dialogStyles.stepBody}>
-              <h3 style={dialogStyles.stepTitle}>目标平台？</h3>
-              <div style={dialogStyles.platformGrid}>
-                {PLATFORM_OPTIONS_WIZARD.map((opt) => (
-                  <div
-                    key={opt.value}
-                    style={{
-                      ...dialogStyles.platformCard,
-                      borderColor: targetPlatform === opt.value ? 'var(--color-accent, var(--color-accent))' : 'var(--color-border, var(--color-border))',
-                      backgroundColor: targetPlatform === opt.value ? 'rgba(233,69,96,0.08)' : 'var(--color-bg-primary, var(--color-bg-primary))',
-                    }}
-                    onClick={() => setTargetPlatform(opt.value)}
-                  >
-                    {opt.label}
-                  </div>
-                ))}
-              </div>
+              <h3 style={dialogStyles.stepTitle}>执行标准</h3>
+              <ExecutionStandardsForm
+                value={standards}
+                onChange={(next) => {
+                  setStandards(next);
+                  setErrors((prev) => ({ ...prev, standards: '' }));
+                }}
+                heading="这六项是创建前提，不是封面信息"
+                note="它们随创建请求写进创作宪法，框架层与正文层都按它们执行：换了平台或分类，体量区间、写作口径、读者预期就跟着换。缺任何一维都建不出项目。"
+              />
+              {errors.standards && <span style={dialogStyles.error}>{errors.standards}</span>}
             </div>
           )}
 
@@ -700,18 +758,6 @@ const CreateDialog: React.FC<CreateDialogProps> = ({ isOpen, onClose, onCreate }
                     autoFocus
                   />
                   {errors.title && <span style={dialogStyles.error}>{errors.title}</span>}
-                </div>
-
-                <div style={dialogStyles.field}>
-                  <label style={dialogStyles.label}>目标字数（可选）</label>
-                  <input
-                    style={dialogStyles.input}
-                    type="number"
-                    value={targetWords}
-                    onChange={(e) => setTargetWords(e.target.value)}
-                    placeholder="例如：200000"
-                    min={0}
-                  />
                 </div>
 
                 {creationSource === 'idea' && (
@@ -1148,9 +1194,25 @@ const ProjectListPage: React.FC = () => {
   const [deleteTargets, setDeleteTargets] = useState<string[]>([]);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => new Set());
   const [deleting, setDeleting] = useState(false);
+  const [retryingProjectId, setRetryingProjectId] = useState<string | null>(null);
+  const [retryMessages, setRetryMessages] = useState<Record<string, string>>({});
+  const [runningRecoveries, setRunningRecoveries] = useState<Record<string, boolean>>({});
   const { createDraft } = useIdeaLabStore();
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
+
+  // 服务端审计是运行状态唯一来源；从进度页返回或重开窗口后仍可找回当前任务。
+  useEffect(() => {
+    const failedIds = projects.filter(project => project.status === 'generation_failed').map(project => project.id);
+    let cancelled = false;
+    void Promise.all(failedIds.map(async id => {
+      try { return [id, Boolean((await getGenerationRecovery(id))?.running)] as const; }
+      catch { return [id, false] as const; }
+    })).then(entries => {
+      if (!cancelled) setRunningRecoveries(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
+  }, [projects]);
 
   // 从工作台“新建项目”跳入（/projects?new=1）时自动打开创建弹窗
   useEffect(() => {
@@ -1165,21 +1227,31 @@ const ProjectListPage: React.FC = () => {
     title: string;
     type: ProjectType;
     creationSource: CreationSource;
-    targetPlatform: TargetPlatform;
-    targetWords: number;
     currentWorkflowStage: WorkflowStage;
     ideaStatus: IdeaStatus;
     ideaSeed?: string;
     description?: string;
+    standards: ExecutionStandardsPayload;
   }) => {
+    if (data.creationSource === 'inspiration') {
+      // 「从灵感开始」的唯一入口是发现向导（/discover）：热点/题材/脑洞/灵感卡都在那里，
+      // 六维执行标准也在同一步选全，并由 /chain/create-project-async 在创建前一次判完。
+      // 此前这里还留着一条「只选平台就直接建项目」的老路径：同一个意图两个入口、两套标准，
+      // 项目库里就会混进没有执行标准的项目，所以那条路删掉，不再保留。
+      setIsDialogOpen(false);
+      navigate('/discover');
+      return;
+    }
+
     if (data.creationSource === 'idea') {
-      // 从想法开始 → 创建 Idea Draft 并跳转 Idea Lab
+      // 从想法开始 → 创建 Idea Draft 并跳转 Idea Lab（那里收齐其余四维后再转项目）
       try {
         const draft = await createDraft({
           rawIdea: data.ideaSeed || '',
           projectType: data.type,
-          targetPlatform: data.targetPlatform,
-          targetWords: data.targetWords,
+          targetPlatform: data.standards.targetPlatform,
+          customPlatformNote: data.standards.customPlatformNote,
+          targetWords: data.standards.targetWords || 0,
           title: data.title || '',
           description: data.description || '',
         });
@@ -1192,13 +1264,26 @@ const ProjectListPage: React.FC = () => {
       return;
     }
 
-    // 非 idea 来源保持原有创建逻辑
-    const project = await createProject(data);
+    // 直接创建（空白 / 导入资料）：带齐六维执行标准，与创建向导同一份载荷。
+    const project = await createProject({
+      title: data.title,
+      type: data.type,
+      creationSource: data.creationSource,
+      currentWorkflowStage: data.currentWorkflowStage,
+      ideaStatus: data.ideaStatus,
+      description: data.description,
+      ...data.standards,
+    });
     setIsDialogOpen(false);
     await openProject(project.id, project.title, navigate);
   };
 
   const handleSelectProject = async (id: string) => {
+    if (runningRecoveries[id]) {
+      const project = projects.find(item => item.id === id);
+      navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
+      return;
+    }
     try {
       await selectProject(id);
       // selectProject 设置 currentProject 到 store，从中获取标题
@@ -1224,6 +1309,33 @@ const ProjectListPage: React.FC = () => {
 
   const handleDeleteRequest = (id: string) => {
     setDeleteTargets([id]);
+  };
+
+  const handleRetryProject = async (id: string) => {
+    const project = projects.find(item => item.id === id);
+    if (runningRecoveries[id]) {
+      navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
+      return;
+    }
+    if (retryingProjectId) return;
+    setRetryingProjectId(id);
+    setRetryMessages(current => ({ ...current, [id]: '' }));
+    try {
+      await startFailedProjectRecovery(id);
+      setRunningRecoveries(current => ({ ...current, [id]: true }));
+      navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
+    } catch (error: any) {
+      const audit = await getGenerationRecovery(id).catch(() => null);
+      if (audit?.running) {
+        setRunningRecoveries(current => ({ ...current, [id]: true }));
+        navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
+        return;
+      }
+      setRetryMessages(current => ({ ...current, [id]: `启动失败：${error?.message || '请查看项目诊断'}` }));
+      await fetchProjects();
+    } finally {
+      setRetryingProjectId(null);
+    }
   };
 
   const handleDeleteConfirm = async () => {
@@ -1281,6 +1393,7 @@ const ProjectListPage: React.FC = () => {
         onTypeChange={setTypeFilter}
       />
 
+
       {projects.length > 0 && (
         <div style={pageStyles.selectionBar}>
           <label style={pageStyles.selectAllLabel}>
@@ -1328,6 +1441,11 @@ const ProjectListPage: React.FC = () => {
               project={project}
               onSelect={handleSelectProject}
               onDelete={handleDeleteRequest}
+              onRetry={handleRetryProject}
+              retryBusy={retryingProjectId === project.id}
+              retryDisabled={retryingProjectId !== null}
+              recoveryRunning={Boolean(runningRecoveries[project.id])}
+              retryMessage={retryMessages[project.id]}
               selected={selectedProjectIds.has(project.id)}
               onSelectionChange={setProjectSelected}
             />

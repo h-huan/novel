@@ -17,7 +17,7 @@ import type { CreateCharacterDto, AddRelationshipDto } from './dto/character.dto
 import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
 
-// 对齐外部文档《人物模板》14 项（姓名已在 characters 主表，此处为其余 13 项）
+// 角色档案字段：14 项里的其余 13 项（姓名在 characters 主表），分组与中文标签见 buildCharacterSections
 export const PROFILE_FIELDS = ['alias_title','identity_occupation','faction_stance','role_type','appearance','personality_traits','abilities_skills','backstory','relationships','catchphrase_speech_style','goals_motivation','weaknesses_fears','supplementary'] as const;
 
 export const PROFILE_FIELD_LABELS: Record<string, string> = {
@@ -376,7 +376,7 @@ export class CharacterService {
     const p = data.profile;
     const c = data.character;
 
-    // 按《人物模板》14 项分组（姓名在主表，此处 13 项），只保留非空字段，避免满屏"待补全"
+    // 角色档案 14 项分组（姓名在主表，此处 13 项），只保留非空字段，避免满屏"待补全"
     const sectionDefs = [
       { title: '基本信息', fields: ['alias_title','identity_occupation','faction_stance','role_type'], labels: { alias_title:'别名/称号', identity_occupation:'身份/职业', faction_stance:'阵营/立场', role_type:'角色类型' } },
       { title: '外貌与性格', fields: ['appearance','personality_traits'], labels: { appearance:'外貌特征', personality_traits:'性格特点' } },

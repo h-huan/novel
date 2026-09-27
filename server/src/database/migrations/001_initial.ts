@@ -598,6 +598,7 @@ CREATE TABLE IF NOT EXISTS idea_drafts (
       title TEXT DEFAULT '',
       project_type TEXT NOT NULL DEFAULT 'long_novel',
       target_platform TEXT DEFAULT 'generic',
+      custom_platform_note TEXT DEFAULT '',
       target_words INTEGER DEFAULT 0,
       description TEXT DEFAULT '',
       status TEXT DEFAULT 'draft',
@@ -821,7 +822,10 @@ CREATE TABLE IF NOT EXISTS projects (
       status TEXT NOT NULL DEFAULT 'idea',
       target_words INTEGER NOT NULL DEFAULT 0,
       current_words INTEGER NOT NULL DEFAULT 0,
-      platform_style TEXT DEFAULT 'fantasy',
+      -- 历史列：platform 维的旧列名，已由 target_platform 取代，只作为写入投影存在（口径见 creative-constitution.ts）。
+      -- 默认值必须与 target_platform 的 DEFAULT 同值（'generic'）：曾误留旧默认 'fantasy'，
+      -- 任何未显式赋值的插入都会让旧列与新列分叉，旧导出包/旧脚本会读到"玄幻"。
+      platform_style TEXT DEFAULT 'generic',
       description TEXT,
       writing_style TEXT,           -- JSON: WritingStyleConfig
       settings TEXT NOT NULL,       -- JSON: ProjectSettings

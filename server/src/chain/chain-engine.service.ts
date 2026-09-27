@@ -13,6 +13,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PromptRegistryService } from './prompt-registry.service';
 import { RealLLMService } from './real-llm.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
+import { gateFailureLabel, isGateRejection, type GateFailureReport } from '../modules/writing-quality/gate-failure';
+import { standardScene } from '../routing/scenario-taxonomy';
 import {
   PromptChain,
   ChainNode,
@@ -200,6 +202,9 @@ export class ChainEngineService {
     const maxRetries = 0;
     let lastOutput: unknown = null;
     let lastError: string | null = null;
+    // Gate 拒绝的结构化报告：Error 实例跨节点边界会退化成字符串，报告必须单独留住，
+    // 否则上游只能看到「缺少世界观/volumes 为空」这类下游症状，真实成因被吞掉。
+    let lastGateReport: GateFailureReport | undefined;
 
     while (currentRetryCount <= maxRetries) {
       try {
@@ -250,7 +255,12 @@ export class ChainEngineService {
         };
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
-        this.logger.error(`${nodeLog} 执行错误: ${lastError}`);
+        if (isGateRejection(error)) {
+          lastGateReport = error.report;
+          this.logger.error(`${nodeLog} 被质量 Gate 拒绝（${gateFailureLabel(error.report)}）: ${lastError}`);
+        } else {
+          this.logger.error(`${nodeLog} 执行错误: ${lastError}`);
+        }
 
         if (currentRetryCount < maxRetries) {
           currentRetryCount++;
@@ -265,6 +275,7 @@ export class ChainEngineService {
           status: 'failed',
           output: lastOutput,
           error: lastError,
+          gateReport: lastGateReport,
           latency: Date.now() - startTime,
           retryCount: currentRetryCount,
           timestamp: new Date(),
@@ -279,6 +290,7 @@ export class ChainEngineService {
       status: 'failed',
       output: lastOutput,
       error: lastError || '达到最大重试次数',
+      gateReport: lastGateReport,
       latency: Date.now() - startTime,
       retryCount: currentRetryCount,
       timestamp: new Date(),
@@ -320,12 +332,38 @@ export class ChainEngineService {
       prompt,
       temperature: this.calculateTemperature(node.modelConfig.temperature),
       timeout: node.timeout * 1000,
-      scenario: chain.id,
+      scenario: node.chainId || chain.id,
+      // 项目归属必须显式声明，不能只靠请求上下文兜底：
+      // 三条链都由后台任务执行（长篇创建、模板执行），ALS 里没有项目 id，
+      // 缺了它 beginRun 拿不到创作宪法，埋点也只进平台级（静默空值）。
+      // stepKey 走唯一别名表 standardScene，使质量阶段 / 中文标签 / 归属判定同口径；
+      // 平台级链路（context.projectId 为空）保持原样，不强行归属。
+      metrics: {
+        stepKey: standardScene(node.chainId || chain.id),
+        ...(context.projectId ? { projectId: context.projectId } : {}),
+      },
       retryCount,
+      // 本引擎的节点输出契约就是 JSON（三个链的每个节点都要求"输出合法JSON"）。
+      // 显式声明 JSON 模式后，real-llm 会在 finish_reason=length（输出被截断）时
+      // 用同一模型、同一 prompt、更大输出上限重发；这是同模型扩容，不是降级。
+      responseFormat: 'json_object',
+      // 节点显式配置的输出上限优先；未配置时由 real-llm 按 scenario 经
+      // resolveScenarioRoute 解析，绝不静默落到 defaults。
+      maxTokens: node.modelConfig.maxTokens,
     });
 
-    // 尝试解析 JSON
-    return this.tryParseJSON(response.content);
+    // 尝试解析 JSON。解析失败必须留下可诊断证据（长度/首尾片段/finishReason），
+    // 否则调用方只会看到"缺少某字段"，真实故障（截断/非法 JSON/字段名不符）被掩盖。
+    const parsedOutput = this.tryParseJSON(response.content);
+    if (typeof parsedOutput !== 'object' || parsedOutput === null) {
+      const raw = typeof response.content === 'string' ? response.content : String(response.content);
+      this.logger.error(
+        `[${chain.id}/${node.id}] LLM 输出不是合法 JSON：contentLength=${raw.length}, `
+        + `finishReason=${response.finishReason ?? 'unknown'}, `
+        + `head=${JSON.stringify(raw.slice(0, 300))}, tail=${JSON.stringify(raw.slice(-300))}`,
+      );
+    }
+    return parsedOutput;
   }
 
   /**
@@ -447,6 +485,7 @@ ${fullText}`;
 
         const llmResp = await this.llm.generate({
           prompt: stylePrompt,
+          metrics: { projectId: context.projectId, stepKey: 'chapter_synthesis' },
           scenario: 'chapter_synthesis',
           temperature: 0.7,
           maxTokens: outputMaxTokens,
@@ -460,6 +499,7 @@ ${fullText}`;
           const expansion = await this.llm.generate({
             prompt: `以下章节初稿只有${generatedWords}字，未达到本章${targetWords}字的写作合同。请在不改变既有角色、世界观规则、事件顺序、时间线、伏笔和结局钩子的前提下，输出一篇完整重写后的正文，不是续写片段。必须通过补足可感知的行动、场景转换、人物对话、细节、心理与因果推进，将全文控制在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，目标约${targetWords}字。
 人物不许同声同气：让每人按自己的立场、习惯与信息量说话、回避或行动；不要把动机和真相替读者解释完，用停顿、错答、物件、未被追问的细节保留推想空间。允许节奏有毛边，但不得偏离章节大纲或制造新设定。只输出正文，不要解释。\n\n${chapterContract}\n\n初稿：\n${polishedText}`,
+            metrics: { projectId: context.projectId, stepKey: 'chapter_synthesis' },
             scenario: 'chapter_synthesis',
             temperature: 0.7,
             maxTokens: outputMaxTokens,
@@ -471,6 +511,7 @@ ${fullText}`;
         if (expandedWords > CHAPTER_WORD_RANGE.max) {
           const compression = await this.llm.generate({
             prompt: `以下完整章节为${expandedWords}字，超过本章${targetWords}字的写作合同。请在不删除详细大纲要求的核心事件、冲突、人物行动、因果、伏笔和结尾钩子的前提下，输出一篇完整精炼重写后的正文，不是摘要、删节片段或续写。删去重复解释、同义反复和无效场景，保留可感知的动作、对话和关键细节。全文必须严格为${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，目标约${targetWords}字。只输出正文，不要解释。\n\n${chapterContract}\n\n待精炼全文：\n${polishedText}`,
+            metrics: { projectId: context.projectId, stepKey: 'chapter_synthesis' },
             scenario: 'chapter_synthesis',
             temperature: 0.55,
             maxTokens: outputMaxTokens,
@@ -546,6 +587,8 @@ ${fullText}`;
       startTime: new Date(),
       timestamps: {},
       metadata: {},
+      // 项目归属：项目内节点的埋点/宪法注入必须能定位到这本书；平台级链路（无 projectId）保持 undefined。
+      projectId: typeof userInput.projectId === 'string' ? userInput.projectId : undefined,
     };
   }
 

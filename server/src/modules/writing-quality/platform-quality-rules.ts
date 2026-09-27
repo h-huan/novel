@@ -1,13 +1,32 @@
 import { measureAgainstTarget } from '../../chain/platform-benchmarks';
+import { categoryWordScaleMessage, categoryWordScaleStanding } from '../../../shared/src';
 import type { CreativeConstitution } from '../project/creative-constitution';
 import { qualityIssue, type QualityIssue, type QualityStage } from './quality-issue';
 
 const PROGRESS_SIGNAL = /(反转|真相|赢|胜|成功|得到|获得|揭开|发现|决定|拒绝|答应|危机|危险|愤怒|哭|笑|震惊|恐惧|绝望|希望|！|!|？|\?)/g;
 
+/**
+ * 判定单元层级：这些指标只在「整章」这个单元上成立。
+ *
+ * 为什么必须分单元：片段（红线段落级精修、模板二次改写的一段）拿不到整章的开篇字位、章尾留钩、
+ * 情绪间隔语义。对片段套用会产出「片段不满 3000 字」「片段没有章尾钩」这类作者无法执行的假问题；
+ * 而它们又不属于执行标准在该单元上的要求。注意：这是「本单元不成立」，不是把严重度调低——
+ * 同一内容在整章单元上仍逐条产出，severity 一字不动。
+ */
+const CHAPTER_UNIT_RULES = new Set<string>([
+  'platform.chapter_length',
+  'platform.dialogue_ratio',
+  'platform.opening_hook_position',
+  'platform.ending_hook',
+  'platform.payoff_emotion_gap_risk',
+]);
+
 export function deterministicPlatformReview(input: {
   projectId: string;
   runId: string;
   stage: QualityStage;
+  /** 判定单元：整章 / 片段。缺省按整章处理（调用方不声明就不放宽任何整章级指标）。 */
+  unit?: 'chapter' | 'segment';
   content: string;
   constitution: CreativeConstitution;
 }): { issues: QualityIssue[]; measurements: ReturnType<typeof measureAgainstTarget> | null } {
@@ -50,7 +69,32 @@ export function deterministicPlatformReview(input: {
     `连续约 ${maxGap} 字未检测到推进/爽点/情绪候选信号；这是确定性风险标记，需语义评审确认`,
     quoteAt(gapStart, Math.min(100, maxGap)), 'medium',
   ));
-  return { issues, measurements };
+  // 「按平台分类执行」在确定性层的落点：分类体量是平台侧已核实过的实测口径，不是提示词装饰。
+  // 目标总字数落在该分类头部实测区间之外时不得静默通过；未采集到该分类实测数据时不产出本判据
+  // （缺失即缺失，由执行标准如实写「未核验」，不得拿别的区间顶）。
+  // 判据本体只有一份 —— shared 的 categoryWordScaleStanding（category-word-scale.ts），
+  // 与创建入口、生成入口、执行标准提示词、前端 targetWordsVerdict 同源。
+  // 此前这里自算一遍 metric/targetWords，后果是：作者在项目卡片写明「刻意偏离」的取舍依据，
+  // 前端提示认这条路径、这里却不认，于是同一本书在生成末尾被判 platform.category_word_scale 阻断，
+  // 而正文精修在架构上永远改不动项目卡片级的判据 —— 必然回滚，每章白烧一次 LLM 调用。
+  // 现在按同一份 standing 出判据：within / deviation_declared / no_metric 不产出问题（后两者分别是
+  // 「已按标准声明取舍」与「该分类未采集实测体量，缺失即缺失」）；unset / out_of_range 仍然硬阻断，
+  // severity 一字不动。
+  if (input.unit !== 'segment') {
+    const standing = categoryWordScaleStanding(input.constitution);
+    if (standing.status === 'unset' || standing.status === 'out_of_range') {
+      issues.push(issue(
+        standing.status === 'unset' ? 'platform.category_word_scale_unset' : 'platform.category_word_scale',
+        categoryWordScaleMessage(standing, '该平台分类')
+          + '；这是执行标准「分类」维的确定性判据',
+        quoteAt(), 'high',
+      ));
+    }
+  }
+  return {
+    issues: input.unit === 'segment' ? issues.filter(entry => !CHAPTER_UNIT_RULES.has(entry.ruleId)) : issues,
+    measurements,
+  };
 }
 
 /**
@@ -66,6 +110,8 @@ export const PLATFORM_ISSUE_TAGS: Record<string, string> = {
   'platform.opening_hook_position': 'platform_opening_hook',
   'platform.ending_hook': 'platform_ending_hook',
   'platform.payoff_emotion_gap_risk': 'platform_payoff_gap',
+  'platform.category_word_scale': 'platform_category_word_scale',
+  'platform.category_word_scale_unset': 'platform_category_word_scale',
 };
 
 const PLATFORM_ISSUE_TITLES: Record<string, string> = {
@@ -75,6 +121,7 @@ const PLATFORM_ISSUE_TITLES: Record<string, string> = {
   platform_opening_hook: '开篇钩子位置不符合目标平台要求',
   platform_ending_hook: '章尾留钩不符合目标平台要求',
   platform_payoff_gap: '推进/爽点间隔超出目标平台密度',
+  platform_category_word_scale: '目标总字数与该平台分类的实测体量分布不符（或未设定，无法对照）',
 };
 
 const PLATFORM_ISSUE_SUGGESTIONS: Record<string, string> = {
@@ -84,6 +131,7 @@ const PLATFORM_ISSUE_SUGGESTIONS: Record<string, string> = {
   platform_opening_hook: '重写开篇：前几百字直接落在冲突/反常/强悬念上，删掉环境与履历铺垫。',
   platform_ending_hook: '重写章尾：落在未解问题、反转、新威胁或关键动作/对话上，不要平淡收尾。',
   platform_payoff_gap: '在长间隔中补有效推进或情绪兑现（反转、进展、对手反应、关键抉择），缩短无推进段落。',
+  platform_category_word_scale: '回到项目卡片对齐该平台分类的体量分布：要么按该分类头部实测区间调整目标总字数与分卷节奏，要么写明本作为何刻意偏离该区间（不得默认通过）。',
 };
 
 export interface PlatformQualityRow {

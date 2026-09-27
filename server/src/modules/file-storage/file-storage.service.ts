@@ -8,6 +8,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
+import { resolveDataDir } from '../../config/data-dir';
 
 export interface ChapterFrontMatter {
   id: string;
@@ -31,7 +32,7 @@ export class FileStorageService implements OnModuleInit {
   private baseDir: string;
 
   constructor() {
-    this.baseDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+    this.baseDir = resolveDataDir();
   }
 
   onModuleInit() {

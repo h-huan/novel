@@ -19,6 +19,9 @@ describe('GenerationRecoveryService', () => {
       CREATE TABLE chapters (id TEXT PRIMARY KEY,project_id TEXT,outline_id TEXT,content TEXT,locked_at TEXT,status TEXT);
       CREATE TABLE characters (id TEXT PRIMARY KEY,project_id TEXT);
       CREATE TABLE world_settings (id TEXT PRIMARY KEY,project_id TEXT);
+      CREATE TABLE world_system_profiles (id TEXT PRIMARY KEY,project_id TEXT,world_setting_id TEXT,rules TEXT);
+      CREATE TABLE character_extended_profiles (id TEXT PRIMARY KEY,project_id TEXT,character_id TEXT,details TEXT);
+      CREATE TABLE character_relationships (id TEXT PRIMARY KEY,project_id TEXT,source_character_id TEXT,target_character_id TEXT);
       CREATE TABLE organizations (id TEXT PRIMARY KEY,project_id TEXT);
       CREATE TABLE map_points (id TEXT PRIMARY KEY,project_id TEXT);
       CREATE TABLE foreshadowings (id TEXT PRIMARY KEY,project_id TEXT,buried_chapter_index INTEGER,planned_recovery_chapter_index INTEGER);
@@ -79,6 +82,29 @@ describe('GenerationRecoveryService', () => {
     await expect(service.clearFailedGeneratedAssets('p1')).rejects.toThrow('受保护资料');
   });
 
+  it('rebuilds an explicitly requested zero-body project even when its conflicting outline has author history', async () => {
+    db.prepare("UPDATE projects SET status='active' WHERE id='p1'").run();
+    db.prepare(`INSERT INTO outlines VALUES ('o1','p1','chapter',3200,'draft',1)`).run();
+    db.prepare(`INSERT INTO chapters VALUES ('c1','p1','o1','',NULL,'draft')`).run();
+    db.prepare(`INSERT INTO version_history VALUES ('v1','o1','author')`).run();
+    db.prepare(`INSERT INTO world_settings VALUES ('w1','p1')`).run();
+    db.prepare(`INSERT INTO world_system_profiles VALUES ('wp1','p1','w1','旧规则')`).run();
+    const snapshot = await service.captureSnapshot('p1');
+    await service.clearForExplicitSourceRebuild('p1');
+    expect((db.prepare('SELECT COUNT(*) count FROM outlines').get() as any).count).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) count FROM world_system_profiles').get() as any).count).toBe(0);
+    await service.restoreSnapshot(snapshot);
+    expect((db.prepare('SELECT rules FROM world_system_profiles WHERE id=?').get('wp1') as any).rules).toBe('旧规则');
+    expect((db.prepare('SELECT created_by FROM version_history WHERE id=?').get('v1') as any).created_by).toBe('author');
+  });
+
+  it('never rebuilds a project with saved body text through the explicit source route', async () => {
+    db.prepare("UPDATE projects SET status='active' WHERE id='p1'").run();
+    db.prepare(`INSERT INTO outlines VALUES ('o1','p1','chapter',3200,'draft',1)`).run();
+    db.prepare(`INSERT INTO chapters VALUES ('c1','p1','o1','作者正文',NULL,'draft')`).run();
+    await expect(service.clearForExplicitSourceRebuild('p1')).rejects.toThrow('已有正文');
+  });
+
   it('clears untrusted generated assets and their RAG chunks in one recovery preparation', async () => {
     db.prepare(`INSERT INTO outlines VALUES ('o1','p1','chapter',3200,'draft',1)`).run();
     db.prepare(`INSERT INTO chapters VALUES ('c1','p1','o1','',NULL,'draft')`).run();
@@ -98,18 +124,28 @@ describe('GenerationRecoveryService', () => {
     db.prepare(`INSERT INTO outlines VALUES ('o1','p1','chapter',3200,'draft',1)`).run();
     db.prepare(`INSERT INTO chapters VALUES ('c1','p1','o1','',NULL,'draft')`).run();
     db.prepare(`INSERT INTO characters VALUES ('char1','p1')`).run();
+    db.prepare(`INSERT INTO world_settings VALUES ('w1','p1')`).run();
+    db.prepare(`INSERT INTO world_system_profiles VALUES ('wp1','p1','w1','旧世界规则')`).run();
+    db.prepare(`INSERT INTO character_extended_profiles VALUES ('cp1','p1','char1','旧人物档案')`).run();
+    db.prepare(`INSERT INTO character_relationships VALUES ('cr1','p1','char1','char1')`).run();
     vectors[VectorIndexService.COLLECTIONS.CHARACTERS].push({
       id: 'char1', metadata: { projectId: 'p1', text: 'original character' }, vector: [0.1, 0.2],
     } as any);
 
     const snapshot = await service.captureSnapshot('p1');
     await service.clearFailedGeneratedAssets('p1');
+    expect((db.prepare('SELECT COUNT(*) count FROM world_system_profiles').get() as any).count).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) count FROM character_extended_profiles').get() as any).count).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) count FROM character_relationships').get() as any).count).toBe(0);
     db.prepare(`INSERT INTO characters VALUES ('bad-char','p1')`).run();
     await service.restoreSnapshot(snapshot);
 
     expect((db.prepare('SELECT id FROM characters WHERE project_id=?').all('p1') as any[]).map(row => row.id)).toEqual(['char1']);
     expect((db.prepare('SELECT id FROM outlines WHERE project_id=?').all('p1') as any[]).map(row => row.id)).toEqual(['o1']);
     expect((db.prepare('SELECT id FROM chapters WHERE project_id=?').all('p1') as any[]).map(row => row.id)).toEqual(['c1']);
+    expect((db.prepare('SELECT rules FROM world_system_profiles WHERE project_id=?').get('p1') as any).rules).toBe('旧世界规则');
+    expect((db.prepare('SELECT details FROM character_extended_profiles WHERE project_id=?').get('p1') as any).details).toBe('旧人物档案');
+    expect((db.prepare('SELECT COUNT(*) count FROM character_relationships WHERE project_id=?').get('p1') as any).count).toBe(1);
     expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p1') as any).status).toBe('generation_failed');
     expect(vectors[VectorIndexService.COLLECTIONS.CHARACTERS]).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'char1', vector: [0.1, 0.2] }),

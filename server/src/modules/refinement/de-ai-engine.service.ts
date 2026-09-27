@@ -2,7 +2,7 @@
  * 去AI味引擎
  * 检测并消除AI生成文本的特征模式
  */
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 
 interface AiPattern {
   pattern: RegExp;
@@ -330,11 +330,14 @@ export class DeAiEngineService {
    * @param content 原文
    * @param llmGenerate LLM生成函数（由调用方传入，避免循环依赖）
    * @param maxRewrites 最多改写多少处问题（默认3处，避免过度改写）
+   * @param standardBlock 执行标准块（平台/分类/基调/文风/流派/视角），由
+   *   resolveProjectStandardDirective 解析后注入；改写不得偏离这一定位。
    */
   async llmLocalRewrite(
     content: string,
     llmGenerate: (prompt: string) => Promise<string>,
     maxRewrites: number = 3,
+    standardBlock: string = '',
   ): Promise<{ result: string; changes: Array<{ before: string; after: string; reason: string }> }> {
     if (!content || content.length < 100) return { result: content, changes: [] };
 
@@ -350,6 +353,9 @@ export class DeAiEngineService {
 
     let result = content;
     const changes: Array<{ before: string; after: string; reason: string }> = [];
+    // 改写失败、返回空片段或原样返回，都要留下记录：这些位置是 detect 认定的 AI 痕迹，
+    // 没有改掉就等于「降AI」这条执行标准没有完成，不能悄悄返回一个看起来成功的结果。
+    const failures: Array<{ position: number; description: string; upstream: boolean; reason: string }> = [];
 
     for (const target of targets) {
       // 取问题段落+上下文各100字
@@ -357,7 +363,9 @@ export class DeAiEngineService {
       const end = Math.min(result.length, target.position + target.text.length + 100);
       const context = result.substring(start, end);
 
-      const rewritePrompt = `请对以下小说片段进行局部降AI味改写，只改写有AI痕迹的部分，保留原文的叙事逻辑、人物性格和情节走向。
+      const rewritePrompt = `${standardBlock}【降AI改写边界】只做语言层降AI，不得改变平台/分类/基调/文风/流派/视角设定；不得改变情节、人物关系与叙事视角。
+
+请对以下小说片段进行局部降AI味改写，只改写有AI痕迹的部分，保留原文的叙事逻辑、人物性格和情节走向。
 
 AI痕迹说明：${target.description}
 原文片段（含上下文）：
@@ -382,10 +390,46 @@ ${context}
             after: cleanRewritten,
             reason: target.description,
           });
+        } else {
+          // 模型没改（空返回 / 过短 / 原样返回）同样是「降AI」未完成，
+          // 一并计入失败，绝不当作「这处不需要改」悄悄放过。
+          failures.push({
+            position: target.position,
+            description: target.description,
+            upstream: false,
+            reason: !cleanRewritten
+              ? '模型返回空片段'
+              : cleanRewritten.length <= 20
+                ? `模型返回片段过短（${cleanRewritten.length}字），无法覆盖原上下文`
+                : '模型原样返回，未产生任何改动',
+          });
         }
-      } catch {
-        // LLM调用失败，跳过这一处
+      } catch (error) {
+        failures.push({
+          position: target.position,
+          description: target.description,
+          upstream: true,
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
+    }
+
+    // 不降级：只要有一处该改没改，就把失败位置和原因抛出去，绝不返回「部分降AI」的成功结果。
+    if (failures.length > 0) {
+      const upstream = failures.some((f) => f.upstream);
+      const detail = failures
+        .map((f) => `第${f.position}字附近「${f.description}」：${f.reason}`)
+        .join('；');
+      throw new HttpException(
+        {
+          code: 'DE_AI_REWRITE_INCOMPLETE',
+          message:
+            `降AI改写未完成：${failures.length}/${targets.length} 处执行失败，已停止返回改写结果（避免把没改干净的稿子当成成功）。失败位置：${detail}`,
+          failures,
+          succeeded: changes.length,
+        },
+        upstream ? 502 : 422,
+      );
     }
 
     return { result, changes };

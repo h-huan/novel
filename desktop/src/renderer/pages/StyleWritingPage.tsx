@@ -5,27 +5,21 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { STYLE_GUIDES } from '@novel/shared';
 
 const STYLE_ICONS: Record<string, string> = {
-  '白描/朴素': '✍️', '爽文': '🔥', '悬疑': '🔍', '情感': '💔', '宏大叙事': '🏔️',
-  '群像叙事': '👥', '第一人称': '👤', '第三人称': '👁️',
+  '白描/朴素': '✍️', '情感': '💔', '宏大叙事': '🏔️',
+  '群像叙事': '👥',
   '倒叙': '🔄', '多线叙事': '🧵', '日记体': '📖', '对话体': '💬',
 };
 
-const STYLE_DESCS: Record<string, string> = {
-  '白描/朴素': '动词名词为主，少形容词，情绪藏在事里，参考余华/王朔',
-  '爽文': '主角强势，打脸频繁，升级快速，每300字一个情绪点',
-  '悬疑': '悬念密集，信息差控制精准，反转频繁，第一人称带身体感',
-  '情感': '细腻心理描写，关系拉扯，情绪共鸣，对话有潜台词',
-  '宏大叙事': '世界观完整，群像塑造，伏笔精巧三层交叉，允许铺垫',
-  '群像叙事': '多视角叙事，角色群像塑造',
-  '第一人称': '以"我"的视角叙述，代入感强',
-  '第三人称': '上帝视角叙述，全方位展示',
-  '倒叙': '从结果回溯过程，悬念层层揭开',
-  '多线叙事': '多条故事线并行，交汇于高潮',
-  '日记体': '以日记/笔记形式推进剧情',
-  '对话体': '以对话驱动剧情，轻快明快',
-};
+/**
+ * 文风说明的唯一来源是 @novel/shared 的 STYLE_GUIDES —— 与生成侧注入 prompt 的操作定义是同一份。
+ * 为什么必须同源：这里曾另写 8 条文案（其中「参考余华/王朔」还属于点名作者，会诱导模型复刻特定文本），
+ * 与生成侧各说各话：页面承诺「少形容词」，模型收到的却只有一个标签名，用户看到的效果和承诺对不上。
+ * 现在页面显示什么、模型执行什么，是同一份定义；未收录的自建标签没有定义就显示兜底词，不编造。
+ */
+const STYLE_DESCS: Record<string, string> = STYLE_GUIDES;
 
 const StyleWritingPage: React.FC = () => {
   const { id: projectId } = useParams<{ id: string }>();
@@ -37,7 +31,7 @@ const StyleWritingPage: React.FC = () => {
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 从字典API加载写作风格
+  // 从字典API加载文风
   useEffect(() => {
     api.get('/dict/writing_style').then(r => {
       const items = (r as any)?.items || [];
@@ -172,7 +166,7 @@ const StyleWritingPage: React.FC = () => {
             <div style={{ fontSize: '14px', fontWeight: 600, color: isStyleSelected(s.id) ? 'var(--color-accent)' : 'var(--color-text-primary)' }}>
               {s.label}{getStyleLabel(s.id)}
             </div>
-            <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginTop: '4px' }}>{STYLE_DESCS[s.label] || '写作风格'}</div>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginTop: '4px' }}>{STYLE_DESCS[s.label] || '文风'}</div>
           </button>
         ))}
       </div>

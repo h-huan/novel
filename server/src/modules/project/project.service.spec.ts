@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ProjectService } from './project.service';
 import { ProjectRepository } from '../../database/repositories/project.repository';
+import { STANDARD_PRECONDITIONS } from '../../acceptance/test-standards';
 
 describe('ProjectService', () => {
   let service: ProjectService;
@@ -46,28 +47,77 @@ describe('ProjectService', () => {
   });
 
   describe('create', () => {
-    it('should create a project with defaults', () => {
-      const mockRow = {
-        id: 'test-id',
-        type: 'long_novel',
-        title: '测试项目',
-        status: 'idea',
-        target_words: 0,
-        current_words: 0,
-        platform_style: 'fantasy',
-        description: null,
-        writing_style: null,
-        settings: JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'semi_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false }),
-        created_at: '2025-01-01',
-        updated_at: '2025-01-01',
-      };
+    // 执行前提（平台/分类/基调/文风/流派/视角 + 目标总字数）与验收用例共用同一份 fixture，
+    // 不再在这里手写第二份：create() 已把「六维齐备 → 分类归位 → 分类体量」三道判据提到写库之前，
+    // 与 chain 的 create-project-async、生成入口 assertExecutionStandardsComplete 共用同一份判据、同一句文案，
+    // 所以缺前提的裸 payload 必然被抛 —— 用例若还想验证「创建成功」，就必须显式给出完整前提。
+    const createdRow = () => ({
+      id: 'test-id',
+      type: 'long_novel',
+      title: '测试项目',
+      status: 'idea',
+      target_words: 0,
+      current_words: 0,
+      target_platform: 'fanqie', platform_style: 'fanqie',
+      description: null,
+      writing_style: null,
+      settings: JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'semi_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false }),
+      created_at: '2025-01-01',
+      updated_at: '2025-01-01',
+    });
 
-      (repo.findById as any).mockReturnValue(mockRow);
+    it('should create a project with defaults', () => {
+      (repo.findById as any).mockReturnValue(createdRow());
       (repo.insert as any).mockImplementation(() => {});
 
-      const result = service.create({ title: '测试项目', targetWords: 200000 });
+      const result = service.create({ ...STANDARD_PRECONDITIONS, title: '测试项目' });
 
       expect(result.title).toBe('测试项目');
+      expect(result.id).toBe('test-id');
+      expect(repo.insert).toHaveBeenCalled();
+    });
+
+    it('六维缺项一律不落库，文案与生成入口逐字一致', () => {
+      (repo.insert as any).mockImplementation(() => {});
+
+      expect(() => service.create({ title: '无执行标准', targetWords: 461658 }))
+        .toThrow('创作宪法未设置平台：属未执行标准，必须补齐后才能继续（不得用默认值或平台推荐替代）');
+      expect(repo.insert).not.toHaveBeenCalled();
+    });
+
+    it('generic 不算选定平台：平台维必须落到具体投放平台', () => {
+      expect(() => service.create({ ...STANDARD_PRECONDITIONS, targetPlatform: 'generic' }))
+        .toThrow('创作宪法未设置平台');
+    });
+
+    it('分类必须归位到该平台的投稿分类，归不了位就不落库', () => {
+      (repo.insert as any).mockImplementation(() => {});
+
+      expect(() => service.create({ ...STANDARD_PRECONDITIONS, category: '不存在的分类' }))
+        .toThrow('作品未创建，请先改选该平台的投稿分类。');
+      expect(repo.insert).not.toHaveBeenCalled();
+    });
+
+    it('目标总字数越界且未写取舍依据 -> 阻断', () => {
+      expect(() => service.create({ ...STANDARD_PRECONDITIONS, targetWords: 300000 }))
+        .toThrow('项目未创建，请调整目标总字数，或补齐「分类体量取舍依据」。');
+    });
+
+    it('未设定目标总字数 -> 阻断（空值不是「不适用」）', () => {
+      expect(() => service.create({ ...STANDARD_PRECONDITIONS, targetWords: 0 }))
+        .toThrow('目标总字数');
+    });
+
+    it('写了取舍依据 -> 放行（执行标准自己给出的合规路径必须被认）', () => {
+      (repo.findById as any).mockReturnValue(createdRow());
+      (repo.insert as any).mockImplementation(() => {});
+
+      const result = service.create({
+        ...STANDARD_PRECONDITIONS,
+        targetWords: 300000,
+        categoryWordScaleDeviation: '本项目刻意写 30 万字，按短平快节奏取舍，不与头部体量对齐',
+      });
+
       expect(result.id).toBe('test-id');
       expect(repo.insert).toHaveBeenCalled();
     });
@@ -82,7 +132,7 @@ describe('ProjectService', () => {
         status: 'idea',
         target_words: 100000,
         current_words: 5000,
-        platform_style: 'fantasy',
+        target_platform: 'fanqie', platform_style: 'fanqie',
         description: null,
         writing_style: null,
         settings: JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'semi_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false }),
@@ -112,7 +162,7 @@ describe('ProjectService', () => {
         status: 'idea',
         target_words: 0,
         current_words: 0,
-        platform_style: 'fantasy',
+        target_platform: 'fanqie', platform_style: 'fanqie',
         description: null,
         writing_style: null,
         settings: '{"autoSave":true}',

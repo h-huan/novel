@@ -1,5 +1,8 @@
 # 平台独有风格系统
 
+> 活跃实现落点（每个概念都有代码，不是只写在文档里）：平台风格指纹 `server/src/modules/writing-quality/style-fingerprint.ts`；平台基准与四项确定性扣分 `server/src/chain/platform-benchmarks.ts`；自适应修复与自适应叙事 `server/src/chain/adaptive-repair.ts`、`server/src/chain/adaptive-narrative.ts`；章节分工审查、题材差异审查与历史作品自动题材去重 `server/src/chain/chain.controller.ts`（历史题材自动去重 `:4793`；`noveltyProof` 结构 `:4815`、指令 `:4855`、读取校验 `:4889`）；规则文本唯一来源 `server/src/modules/module-standards/module-standards.seed.ts`；策略成功率/耗时/token/回滚/新增问题统计 `server/src/modules/generation-metrics/generation-metrics.service.ts`（最低样本量 `SUM(attempts)>=5`，`:293`）。
+> 本文件不含第二套阈值或规则清单；数值与规则的唯一来源见 `PROGRESS.md` §1。
+
 ## 目标
 
 平台学习公开作品的结构规律，同时保持故事、人物、设定和文字原创。它不把“每三章一个爽点”或“每固定字数一个反转”当作硬规则，而是根据平台、题材、篇幅、章节职责和当前张力选择节拍。
@@ -11,12 +14,9 @@
 - 番茄作家课堂：https://fanqienovel.com/writer/zone/tutorial?tab=1
 - 番茄小说榜单：https://fanqienovel.com/rank/1
 - 中国作家网《2024中国网络文学蓝皮书》：https://wyb.chinawriter.com.cn/Pad/content/202506/30/content79852.html
-- 长篇样本《我的青春，好似一摊烂泥》：https://fanqienovel.com/keyword/7528537133997639680
-- 长篇样本《九域凡仙》：https://fanqienovel.com/keyword/7548180575486605375
-- 长篇样本《灵气复苏：我觉醒了神级武魂》：https://fanqienovel.com/keyword/7546409011052259347
-- 长篇样本《剑道余烬》：https://www.qidian.com/book/1039487345/
+- 长篇样本只用平台公开榜单/关键词入口定位，**不记录具体书名或作者** —— 点名会诱导模型复刻特定文本（书籍污染，口径见 server/shared/src/execution-standard-dimensions.ts）
 
-这些样本支持以下归纳：标题可以用身份反差、能力承诺、核心困境、意象悬念或人物口吻；开篇要尽快建立阅读承诺，但不必立即完成打脸；章节可以通过新信息、选择、代价、关系变化、压力升级、伏笔回收、情绪落点或阶段兑现产生价值；长篇需要张弛和滚动规划，不能把单一短周期公式复制几百次。
+以上公开样本入口支持以下归纳：标题可以用身份反差、能力承诺、核心困境、意象悬念或人物口吻；开篇要尽快建立阅读承诺，但不必立即完成打脸；章节可以通过新信息、选择、代价、关系变化、压力升级、伏笔回收、情绪落点或阶段兑现产生价值；长篇需要张弛和滚动规划，不能把单一短周期公式复制几百次。
 
 ## 平台风格指纹
 

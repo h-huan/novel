@@ -3,8 +3,8 @@
  *
  * 提供完整的链式编排引擎，包含：
  * - Chain 编排引擎（顺序执行/条件分支/重试）
- * - Prompt 模板仓库（短篇三步骤全套模板；天龙8步已于 2026-07-24 取消，正文改由 /chain/generate 单次 LLM 严格按大纲生成）
- * - 短篇三步骤 Chain 服务（题材→大纲→正文）
+ * - Prompt 模板仓库（只注册有真实消费者的模板；清单与理由见 prompt-registry.service 的 registerAllTemplates）
+ * - 天龙8步已于 2026-07-24 取消，短篇与长篇正文统一由 /chain/generate 单次 LLM 严格按大纲生成
  * - RealLLM 服务（真实 LLM API 调用）
  * - ChainController (REST API /chain/*)
  *

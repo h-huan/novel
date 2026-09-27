@@ -2,32 +2,39 @@
  * 200+ 知名网络作品库
  * 按平台分组：起点/番茄/晋江/七猫/飞卢
  */
-export type Platform = 'qidian' | 'fanqie' | 'jinjiang' | 'qimao' | 'feilu';
+import { platformDisplayName, type TargetPlatform } from '../../../shared/src';
+
+// 这里曾有过第二份 Platform union，与项目平台枚举分叉，导致版权库与项目卡片的平台口径混淆。
+// 飞卢仅是参考作品的出处，不是可选投放平台；其余 id 一律使用共享枚举。
+export type ReferencePlatform = TargetPlatform | 'feilu';
 
 export interface KnownWork {
   title: string;
   author: string;
   type: 'novel' | 'film' | 'game';
   characters: string[];
-  platform: Platform;
+  platform: ReferencePlatform;
   keywords: string[];
   contentFingerprints: string[];
 }
 
-export const PLATFORM_NAMES: Record<Platform, string> = {
-  qidian: '起点中文网',
-  fanqie: '番茄小说',
-  jinjiang: '晋江文学城',
-  qimao: '七猫小说',
-  feilu: '飞卢小说',
-};
+/**
+ * 作品库的平台口径 = 「参考作品库覆盖了哪些平台」，不是系统投放平台清单，
+ * 所以允许出现注册表之外的补充项（feilu 飞卢暂未纳入投放平台）。
+ *
+ * 这里曾有过第二份 PLATFORM_NAMES 名称表，后果是版权页与项目卡片平台名漂移。
+ * 注册平台统一使用共享显示名；飞卢仅作为作品出处保留独立标签。
+ */
+export function referencePlatformDisplayName(platform: ReferencePlatform): string {
+  return platform === 'feilu' ? '飞卢小说' : platformDisplayName(platform);
+}
 
 // Helper to create unique fingerprints
 const fp = (prefix: string, suffix: string = '') => [`sha256_${prefix}${suffix}`];
 
 function w(
   title: string, author: string, chars: string[], kws: string[],
-  platform: Platform = 'qidian', suffix: string = ''
+  platform: ReferencePlatform = 'qidian', suffix: string = ''
 ): KnownWork {
   const pf = platform.substring(0, 1);
   const tag = title.length >= 2 ? title.substring(0, 2) : title;

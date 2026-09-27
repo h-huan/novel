@@ -1,6 +1,6 @@
 /**
  * DictionaryPage - 通用字典管理
- * 管理平台级字典数据：故事分类、写作风格、以及用户自定义的任意字典类型
+ * 管理平台级字典数据：故事分类、文风、以及用户自定义的任意字典类型
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
@@ -16,6 +16,18 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: '14px', color: 'var(--color-text-dim)', marginBottom: '16px',
   },
 };
+
+// 这里曾只罗列字典类型，后果是分类、氛围、流派、标签和情节看起来像同义选项。
+// 释义仅用于界面；具体候选仍由创作字典和唯一的平台分类事实源提供。
+const dimensionGuide = [
+  { name: '分类', purpose: '决定投向平台的哪个题材/频道，以及该分类的篇幅与读者预期。', example: '都市日常' },
+  { name: '情绪氛围', purpose: '决定读者读完一段后的主要感受。', example: '轻松、压抑' },
+  { name: '文风', purpose: '决定句子、叙述和描写的表达方式。', example: '白描朴素' },
+  { name: '创作流派', purpose: '决定故事采用的世界规则或类型机制。', example: '都市、悬疑' },
+  { name: '作品标签', purpose: '用于对应平台的作品展示与读者检索；以该平台可用项为准。', example: '平台标签' },
+  { name: '情节取向', purpose: '决定人物行动与冲突的发展方向。', example: '逆袭、权谋' },
+  { name: '叙事视角', purpose: '决定由谁讲述，以及读者能知道多少。', example: '第一人称' },
+];
 
 const DictionaryPage: React.FC = () => {
   const [dictTypes, setDictTypes] = useState<string[]>([]);
@@ -82,9 +94,9 @@ const DictionaryPage: React.FC = () => {
 
   return (
     <div style={s.container}>
-      <h1 style={s.title}>📖 字典管理</h1>
+      <h1 style={s.title}>📖 创作字典</h1>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-        <p style={{ ...s.subtitle, marginBottom: 0 }}>管理平台级的字典数据，所有项目共享。可自定义任意字典类型。</p>
+        <p style={{ ...s.subtitle, marginBottom: 0 }}>管理情绪氛围、文风、创作流派、情节取向和视角；投稿分类与作品标签按目标平台展示。</p>
         <button onClick={handleSeed}
           style={{
             padding: '5px 12px', backgroundColor: 'rgba(46,204,113,0.1)', border: '1px solid rgba(46,204,113,0.2)',
@@ -93,6 +105,17 @@ const DictionaryPage: React.FC = () => {
           🔄 恢复默认
         </button>
       </div>
+
+      <section aria-label="创作选项的区别和作用" style={{ marginBottom: 20, padding: '14px 16px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, background: 'rgba(255,255,255,0.025)' }}>
+        <div style={{ color: 'var(--color-text-primary)', fontWeight: 700, marginBottom: 6 }}>这些选项分别控制什么？</div>
+        <p style={{ margin: '0 0 12px', color: 'var(--color-text-dim)', fontSize: 13, lineHeight: 1.6 }}>目标平台必须选择。下面六项和叙事视角可留空；发现题材时会按所选平台组合，并把结果写在题材卡和本书创作设定中。</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(84px, 110px) minmax(0, 1fr)', columnGap: 14, rowGap: 9, fontSize: 13, lineHeight: 1.5 }}>
+          {dimensionGuide.map(item => <React.Fragment key={item.name}>
+            <strong style={{ color: 'var(--color-text-primary)' }}>{item.name}</strong>
+            <span style={{ color: 'var(--color-text-dim)' }}>{item.purpose} <span style={{ opacity: 0.75 }}>如：{item.example}</span></span>
+          </React.Fragment>)}
+        </div>
+      </section>
 
       {/* Type Selector */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '16px', alignItems: 'center' }}>
@@ -104,7 +127,7 @@ const DictionaryPage: React.FC = () => {
               backgroundColor: activeType === t ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.03)',
               color: activeType === t ? 'var(--color-purple)' : 'var(--color-text-dim)',
             }}>
-            {t === 'story_category' ? '📚 故事分类' : t === 'writing_style' ? '✍️ 写作风格' : t === 'tone_tag' ? '🎭 故事基调' : `🏷️ ${t}`}
+            {t === 'story_category' ? '📚 全局故事分类' : t === 'writing_style' ? '✍️ 文风' : t === 'tone_tag' ? '🎭 情绪氛围' : t === 'plot_tag' ? '🧭 情节取向' : t === 'web_novel_genre' ? '📖 创作流派' : t === 'narrative_pov' ? '👁️ 叙事视角' : `🏷️ ${t}`}
           </button>
         ))}
         {/* 新建类型 */}
@@ -131,7 +154,7 @@ const DictionaryPage: React.FC = () => {
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
         <input value={newLabel} onChange={e => setNewLabel(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleAdd()}
-          placeholder={`添加${activeType === 'story_category' ? '故事大类' : activeType === 'writing_style' ? '写作风格' : '字典项'}`}
+          placeholder={`添加${activeType === 'story_category' ? '故事大类' : activeType === 'writing_style' ? '文风' : '字典项'}`}
           style={{ flex: 1, padding: '8px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }} />
         <button onClick={handleAdd}
           style={{ padding: '8px 16px', backgroundColor: 'var(--color-purple)', border: 'none', borderRadius: '6px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>

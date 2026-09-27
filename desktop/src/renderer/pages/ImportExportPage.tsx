@@ -43,14 +43,14 @@ const ImportExportPage: React.FC = () => {
       const deconstructRes = await api.post('/chain/ai-deconstruct', { content });
       const deconstructData = deconstructRes.data as any;
       const res = await api.post('/import-export/import/text', { projectId: id, content, fileName: 'import.txt' });
-      const optimizeRes = await api.post('/chain/import-optimize', { projectId: id, content });
-      const optimizeData = optimizeRes.data as any;
       const resData = res.data as any;
       setExportResult({
         import: resData,
         deconstruction: deconstructData.deconstruction,
-        optimizations: optimizeData.optimizations,
       });
+      // 【防复发】这里曾经调用 POST /chain/import-optimize 并把返回的 optimizations 一起展示。
+      // 该端点无视入参内容，固定返回 3 条编造优化项（还引用了并不存在的角色「陆川」），已删除。
+      // 导入后的真实分析由 POST /chain/ai-deconstruct 承担，不要再引入与入参无关的「优化建议」。
       if (resData?.projectId) setImportId(resData.projectId);
     } catch (err: any) { setExportResult({ error: err.message }); }
     setLoading(false);

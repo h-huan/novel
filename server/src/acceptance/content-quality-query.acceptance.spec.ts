@@ -4,6 +4,7 @@ import { Migrator } from '../database/migrator';
 import { ProjectService } from '../modules/project/project.service';
 import { ProjectRepository } from '../database/repositories/project.repository';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
+import { STANDARD_PRECONDITIONS } from './test-standards';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 it('queries all content reports with pagination, combined filters and honest missing scores', async()=>{
  const db=new DatabaseSync(':memory:');
@@ -11,8 +12,8 @@ it('queries all content reports with pagination, combined filters and honest mis
   await new Migrator(db).runMigrations();
   const database={getDb:()=>db} as any;
   const projects=new ProjectService(new ProjectRepository(database));
-  const p=projects.create({title:'钟楼作品',targetPlatform:'fanqie'});
-  const other=projects.create({title:'其他作品',targetPlatform:'fanqie'});
+  const p=projects.create({...STANDARD_PRECONDITIONS,title:'钟楼作品'});
+  const other=projects.create({...STANDARD_PRECONDITIONS,title:'其他作品'});
   const metrics=new GenerationMetricsService(database);
   for(let i=0;i<121;i++) db.prepare('INSERT INTO writing_quality_reports(id,project_id,title,created_at) VALUES(?,?,?,?)').run('r'+i,p.id,'报告'+i,'2026-09-06T04:00:00.000Z');
   db.prepare('INSERT INTO writing_quality_reports(id,project_id) VALUES(?,?)').run('other',other.id);

@@ -51,6 +51,13 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       actions.push('quality_benchmark_samples.chapter_index');
     }
 
+    // 自定义平台的执行标准说明必须跟着草稿走，否则「从想法开始」的链路会在
+    // 创建草稿时丢掉用户填的平台标准，转项目时只能报「平台未执行」。
+    if (!hasColumn(db, 'idea_drafts', 'custom_platform_note')) {
+      db.exec("ALTER TABLE idea_drafts ADD COLUMN custom_platform_note TEXT DEFAULT ''");
+      actions.push('idea_drafts.custom_platform_note');
+    }
+
     const schemaTableIsCurrent =
       hasColumn(db, 'quality_execution_schema', 'id') &&
       hasColumn(db, 'quality_execution_schema', 'version') &&

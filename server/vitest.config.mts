@@ -17,7 +17,7 @@ export default defineConfig({
     poolOptions: { forks: { execArgv: ['--no-warnings'] } },
 
     alias: {
-      "@novel/shared": resolve(configDirectory, "packages/shared/src"),
+      "@novel/shared": resolve(configDirectory, "shared/src"),
     },
 
     exclude: [
@@ -33,7 +33,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html", "lcov"],
       reportsDirectory: "./coverage",
-      include: ["server/src/**", "desktop/src/**", "packages/**/src/**"],
+      include: ["src/**", "shared/src/**"],
       exclude: [
         "**/*.test.*",
         "**/*.spec.*",
@@ -49,6 +49,7 @@ export default defineConfig({
       },
     },
 
-    setupFiles: [],
+    // 全局隔离：见 vitest.setup.ts（把 DATA_DIR 指到 os.tmpdir()，防止测试写进仓库数据目录）
+    setupFiles: [resolve(configDirectory, "vitest.setup.ts")],
   },
 });

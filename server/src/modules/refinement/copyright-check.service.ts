@@ -4,7 +4,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import type { CopyrightMatch } from './dto/refinement.dto';
-import { KNOWN_WORKS, PLATFORM_NAMES, type KnownWork, type Platform } from './known-works.data';
+import { KNOWN_WORKS, referencePlatformDisplayName, type KnownWork, type ReferencePlatform } from './known-works.data';
 
 export interface CheckResult {
   risk: 'high' | 'medium' | 'low';
@@ -78,15 +78,17 @@ export class CopyrightCheckService {
   /**
    * 获取平台列表（含中文名）
    */
-  getPlatforms(): Array<{ id: Platform; name: string; count: number }> {
-    const countMap = new Map<Platform, number>();
+  getPlatforms(): Array<{ id: ReferencePlatform; name: string; count: number }> {
+    const countMap = new Map<ReferencePlatform, number>();
     for (const w of this.knownWorks) {
       countMap.set(w.platform, (countMap.get(w.platform) || 0) + 1);
     }
-    return Object.entries(PLATFORM_NAMES).map(([id, name]) => ({
-      id: id as Platform,
-      name,
-      count: countMap.get(id as Platform) || 0,
+    // 这里曾按第二份 PLATFORM_NAMES 清单返回平台，作品库新增出处后列表会漏项或保留空项。
+    // 现在由实际作品集合决定覆盖范围，名称仍由共享注册表（飞卢出处除外）给出。
+    return [...countMap].map(([id, count]) => ({
+      id,
+      name: referencePlatformDisplayName(id),
+      count,
     }));
   }
 

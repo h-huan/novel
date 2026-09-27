@@ -11,30 +11,29 @@
  * 4. 成熟度评分区
  * 5. 底部操作区
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useIdeaLabStore } from '../stores/ideaLabStore';
 import { openProject } from '../lib/openProject';
 import type { AnswerItem } from '../stores/ideaLabStore';
+import ExecutionStandardsForm from '../components/ExecutionStandardsForm';
+// 平台显示名只有 lib/executionStandards 一份：这里曾经自建 PLATFORM_LABELS，
+// 与「执行标准」表单里的写法不一致（「番茄」vs「番茄小说」），用户无法判断卡片和标准是不是同一个平台。
+import {
+  EMPTY_EXECUTION_STANDARDS,
+  GENERIC_PLATFORM_VALUE,
+  missingExecutionStandards,
+  platformLabel,
+  toExecutionStandardsPayload,
+  targetWordsBlockingReason,
+  type ExecutionStandardsValue,
+} from '../lib/executionStandards';
 
 // ========== 常量 ==========
 
 const TYPE_LABELS: Record<string, string> = {
   short_story: '短篇',
   long_novel: '长篇',
-};
-
-const PLATFORM_LABELS: Record<string, string> = {
-  zhihu: '知乎盐选',
-  fanqie: '番茄',
-  qimao: '七猫',
-  qidian: '起点',
-  douyin: '抖音',
-  xiaohongshu: '小红书',
-  jinjiang: '晋江',
-  rules_horror: '规则怪谈',
-  custom: '自定义',
-  generic: '通用',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -313,6 +312,15 @@ const IdeaLabPage: React.FC = () => {
   const [confirmSuccess, setConfirmSuccess] = useState(false);
   const [showLowScoreWarning, setShowLowScoreWarning] = useState(false);
 
+  // 执行标准（平台/分类/基调/文风/流派/视角）是创建作品时的【执行前提】，随创建请求写进创作宪法。
+  // 这里不预设默认值：草稿上只有用户在创建草稿时选的平台，其余五维必须由用户显式选定；
+  // 缺项不会放行，也不会被平台推荐替代——空值等于这项标准不存在。
+  const [standards, setStandards] = useState<ExecutionStandardsValue>(EMPTY_EXECUTION_STANDARDS);
+  const [standardsError, setStandardsError] = useState('');
+  const missingStandards = useMemo(() => missingExecutionStandards(standards), [standards]);
+  // 「分类」维目标总字数的确定性判据（与后端同一份数据）：非 null 即该维未执行，创建前阻断。
+  const targetWordsBlock = useMemo(() => targetWordsBlockingReason(standards), [standards]);
+
   // 加载草稿
   useEffect(() => {
     if (draftId) {
@@ -338,6 +346,22 @@ const IdeaLabPage: React.FC = () => {
       setProjectTitle(draft.title || draft.rawIdea.slice(0, 30));
     }
   }, [draft, projectTitle]);
+
+  // 草稿的平台与成稿单元（短篇/长篇）是用户在创建草稿时自己选的，属于已存在的选择，直接带入；
+  // 平台实测体量是按成稿单元分开采集的，所以 projectType 不只是「类型」，它是「分类」维体量判据的适用前提：
+  // 不带它，shared 就走「未知即从严」，拿长篇区间去拦合规短篇（已有实测：短篇被按长篇 min 461658 判未达标）。
+  // 其余四维草稿里没有（RefinedIdea 接口本身不含分类/视角/基调/文风/流派），只能由用户显式选定，不猜、不填默认。
+  useEffect(() => {
+    if (!draft) return;
+    setStandards((prev) => {
+      const nextPlatform = prev.targetPlatform || !draft.targetPlatform || draft.targetPlatform === GENERIC_PLATFORM_VALUE
+        ? prev.targetPlatform
+        : draft.targetPlatform;
+      const nextProjectType = String(draft.projectType || '');
+      if (nextPlatform === prev.targetPlatform && nextProjectType === prev.projectType) return prev;
+      return { ...prev, targetPlatform: nextPlatform, projectType: nextProjectType };
+    });
+  }, [draft?.targetPlatform, draft?.projectType]);
 
   // 回答变更处理
   const handleAnswerChange = useCallback((questionId: string, answer: string) => {
@@ -397,10 +421,23 @@ const IdeaLabPage: React.FC = () => {
   const handleCreateProject = async () => {
     if (!draft) return;
 
+    // 提交前复检六维：缺项直接阻断，不发请求。后端用同一份判据再拦一次，
+    // 前端先拦是为了不让用户在「等了半天才被告知标准没设置」上白付一次往返。
+    if (missingStandards.length > 0) {
+      setStandardsError(`请先选择：${missingStandards.join('、')}。`);
+      return;
+    }
+    if (targetWordsBlock) {
+      setStandardsError(`未执行标准（分类）：${targetWordsBlock}`);
+      return;
+    }
+    setStandardsError('');
+
     try {
       const result = await convertToProject(draft.id, {
         title: projectTitle || undefined,
         confirmedIdea: confirmedText || undefined,
+        ...toExecutionStandardsPayload(standards),
       });
       if (result && result.id) {
         await openProject(result.id, result.title, navigate);
@@ -475,7 +512,7 @@ const IdeaLabPage: React.FC = () => {
               {TYPE_LABELS[draft.projectType] || draft.projectType}
             </span>
             <span style={pageStyles.badge}>
-              {PLATFORM_LABELS[draft.targetPlatform] || draft.targetPlatform}
+              {platformLabel(draft.targetPlatform)}
             </span>
             <span
               style={{
@@ -644,15 +681,35 @@ const IdeaLabPage: React.FC = () => {
             </button>
           )}
 
-          {/* 已确认：创建作品 */}
+          {/* 已确认：创建作品（创建前必须选定执行标准） */}
           {isConfirmed && !isConverted && (
-            <button
-              style={pageStyles.createBtn}
-              onClick={handleCreateProject}
-              disabled={loading || !projectTitle.trim()}
-            >
-              {loading ? '创建中...' : '🚀 创建作品'}
-            </button>
+            <div style={pageStyles.standardsBlock}>
+              <ExecutionStandardsForm
+                value={standards}
+                onChange={(next) => { setStandards(next); setStandardsError(''); }}
+                disabled={loading}
+                heading="本书创作设定（创建前必须选定）"
+              />
+              {targetWordsBlock && (
+                <div style={pageStyles.blockingBox}>
+                  <div style={{ fontWeight: 600, marginBottom: '6px' }}>未执行标准（分类）</div>
+                  <div>{targetWordsBlock}</div>
+                </div>
+              )}
+              {missingStandards.length > 0 && (
+                <div style={pageStyles.blockingBox}>
+                  <div style={{ fontWeight: 600, marginBottom: '6px' }}>未执行标准：{missingStandards.join('、')}</div>
+                </div>
+              )}
+              {standardsError && <div style={pageStyles.errorMessage}>{standardsError}</div>}
+              <button
+                style={pageStyles.createBtn}
+                onClick={handleCreateProject}
+                disabled={loading || !projectTitle.trim() || missingStandards.length > 0 || Boolean(targetWordsBlock)}
+              >
+                {loading ? '创建中...' : '🚀 创建作品'}
+              </button>
+            </div>
           )}
 
           {/* 已转换：查看项目 */}
@@ -812,6 +869,24 @@ const pageStyles: Record<string, React.CSSProperties> = {
     gap: '12px',
     flexWrap: 'wrap',
     alignItems: 'center',
+  },
+  standardsBlock: {
+    flexBasis: '100%',
+    width: '100%',
+    padding: '16px',
+    borderRadius: '10px',
+    border: '1px solid rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(0,0,0,0.16)',
+    textAlign: 'left' as const,
+  },
+  blockingBox: {
+    marginTop: '16px',
+    padding: '12px 14px',
+    borderRadius: '8px',
+    border: '1px solid rgba(248,81,73,0.45)',
+    backgroundColor: 'rgba(248,81,73,0.10)',
+    fontSize: 'var(--font-size-xs)',
+    lineHeight: 1.7,
   },
   errorMessage: {
     padding: '8px 12px',

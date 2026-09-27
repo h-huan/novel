@@ -44,7 +44,16 @@ export function currentCreationProjectId(): string | null {
 }
 
 /** 一定发生在某本书内的创作场景（创建前的灵感发现、平台级定时自归纳用 daily/idea_*，不在内） */
-const PROJECT_SCOPED_RE = /^(outline|world_building|character_design|organization_map|foreshadowing|timeline|title|writing|body_|chapter_synthesis|summary|continuation|refinement|quality_refine|consistency|character_review|cross_chapter)/;
+// review（Gate 拒绝/正文评审）、state_extract（情节与伏笔状态提取）、__body_writing__（正文写作场景）
+// 此前漏在名单外：这些场景缺 projectId 时只写平台级、不进任何一本书的单书看板，
+// 且 recordStepMetric 的告警永不触发——即「静默空值」。补全后缺 projectId 会被显式暴露。
+// long-novel-* 是【长篇创建】的两条链（地基 / 弹性大纲）：由创建流程在后台任务里调用，
+// 那时项目行已落库，但 AsyncLocalStorage 里没有 projectId（创建请求发出时项目还不存在），
+// 只靠请求上下文兜底必然为 null —— beginRun 既拿不到创作宪法，埋点又退化成平台级。
+// 纳入名单后这类调用缺 projectId 会显式阻断，而不是静默写成 NULL。
+// inspiration-seed-enrich 是灵感阶段的原料补全（项目尚未创建），刻意留在名单外。
+const PROJECT_SCOPED_RE = /^(outline|world_building|character_design|organization_map|foreshadowing|timeline|title|writing|body_|chapter_synthesis|summary|continuation|refinement|quality_refine|consistency|character_review|review|state_extract|__body_writing__|cross_chapter|long-novel-)/;
+const PROJECT_SCOPED_STEP_RE = /^(body_|__body_writing__|state_extract)/;
 export function expectsProjectId(scenario?: string | null, stepKey?: string | null): boolean {
-  return PROJECT_SCOPED_RE.test(String(scenario || '')) || /^body_/.test(String(stepKey || ''));
+  return PROJECT_SCOPED_RE.test(String(scenario || '')) || PROJECT_SCOPED_STEP_RE.test(String(stepKey || ''));
 }

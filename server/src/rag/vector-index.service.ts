@@ -9,6 +9,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DatabaseSync } from 'node:sqlite';
 import * as path from 'path';
 import * as fs from 'fs';
+import { resolveDataDir } from '../config/data-dir';
 import type { DocType, RTCOTier, SearchFilters, VectorUpsertPayload } from './types';
 import type { Chunk } from './chunker.service';
 
@@ -41,7 +42,7 @@ export class VectorIndexService implements OnModuleInit {
   } as const;
 
   async onModuleInit(): Promise<void> {
-    const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+    const dataDir = resolveDataDir();
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.store = new SqliteVectorStore(path.join(dataDir, 'vectors.db'));
     this.logger.log('向量索引引擎初始化完成。存储模式: SQLite');

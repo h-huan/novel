@@ -107,3 +107,7 @@ Desktop.ini
 
 # Runtime project artifacts (legacy/regenerated)
 server/projects/
+
+# 临时脚本与轮次归档（非源码）
+archive/
+r[0-9]*/

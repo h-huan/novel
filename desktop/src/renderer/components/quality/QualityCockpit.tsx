@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 
 const labels: Record<string, string> = {
   project: '项目', world: '世界观', character: '角色', outline: '大纲', chapter: '正文', refinement: '精修',
-  platform: '平台', category: '分类', tone: '基调', style: '风格', genre: '流派', pov: '视角',
+  platform: '平台', category: '分类', tone: '基调', style: '文风', genre: '流派', pov: '视角',
   context: '上下文', logic: '逻辑', completeness: '完整度', prose: '文体',
   length: '字数', structure: '结构', pacing: '节奏', payoff: '回报', retention: '留存',
   character_voice: '人物声音', world_rules: '世界规则', timeline: '时间线',
@@ -33,6 +33,13 @@ type Cockpit = {
 };
 
 const pct = (value: number | null | undefined) => value == null ? '待样本' : `${Math.round(value * 100)}%`;
+// 「未执行标准」与「不适用」必须分开显示：前者是执行标准本身为空（必须补齐），
+// 后者是当前阶段确实不需要该维度。混在一起会把「没设过」显示成「查过了、没问题」。
+const dimensionLabel = (dimension: Dimension): string => {
+  if (dimension.status === 'missing_standard') return '未执行标准';
+  if (dimension.status === 'not_applicable') return '不适用';
+  return dimension.score == null ? '未评估' : String(dimension.score);
+};
 
 export function QualityCockpit({ projectId }: { projectId: string }) {
   const [data, setData] = useState<Cockpit | null>(null);
@@ -76,7 +83,7 @@ export function QualityCockpit({ projectId }: { projectId: string }) {
             <thead><tr><th>维度</th><th>分数</th><th>依据</th></tr></thead>
             <tbody>{Object.entries(score.dimensions).map(([key, dimension]) => <tr key={key}>
               <td>{labels[key] || key}</td>
-              <td>{dimension.status === 'not_applicable' ? '不适用' : dimension.score ?? '未评估'}</td>
+              <td>{dimensionLabel(dimension)}</td>
               <td>{dimension.reason}{dimension.evidence.length > 0 && <blockquote>{dimension.evidence.join('；')}</blockquote>}</td>
             </tr>)}</tbody>
           </table>}

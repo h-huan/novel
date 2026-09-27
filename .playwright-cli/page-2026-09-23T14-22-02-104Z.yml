@@ -1,0 +1,113 @@
+- generic [ref=e3]:
+  - generic [ref=e4]: 🟡 正在连接服务器...
+  - banner [ref=e5]:
+    - generic [ref=e7]:
+      - generic [ref=e8]: ✦ 写作工作台
+      - button "工作台" [ref=e9] [cursor=pointer]
+      - button "我的项目" [ref=e10] [cursor=pointer]
+      - button "灵感发现" [ref=e11] [cursor=pointer]
+      - button "系统创作规则" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - button "设置" [ref=e14] [cursor=pointer]
+      - generic [ref=e18]:
+        - button "最小化" [ref=e19] [cursor=pointer]
+        - button "最大化" [ref=e22] [cursor=pointer]
+        - button "关闭" [ref=e25] [cursor=pointer]
+  - main [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: 创作质量看板
+        - button "✨ 灵感发现" [ref=e33] [cursor=pointer]
+        - button "＋ 新建项目" [ref=e34] [cursor=pointer]
+      - generic [ref=e35]:
+        - generic [ref=e36]: 查看范围
+        - generic [ref=e37]:
+          - textbox "搜索作品名…" [ref=e38]: 平台总览（全部作品）
+          - generic: ▾
+        - generic [ref=e39]: 类型
+        - generic [ref=e40]:
+          - textbox "全部类型" [ref=e41]
+          - generic: ▾
+        - generic [ref=e42]: 平台
+        - generic [ref=e43]:
+          - textbox "全部平台" [ref=e44]
+          - generic: ▾
+        - generic [ref=e45]:
+          - button "今天" [ref=e46] [cursor=pointer]
+          - button "近7天" [ref=e47] [cursor=pointer]
+          - button "近14天" [ref=e48] [cursor=pointer]
+          - button "近30天" [ref=e49] [cursor=pointer]
+      - generic [ref=e50]: 正在加载看板数据…（若后端刚重启，会自动重试连接）
+      - generic [ref=e51]:
+        - generic [ref=e52]:
+          - generic [ref=e53]: 作品
+          - generic [ref=e54]: "0"
+        - generic [ref=e55]:
+          - generic [ref=e56]: 有正文章节
+          - generic [ref=e57]: "0"
+        - generic [ref=e58]:
+          - generic [ref=e59]: 累计字数
+          - generic [ref=e60]: 0 字
+        - generic [ref=e61]:
+          - generic [ref=e62]: 当前待改问题
+          - generic [ref=e63]: "0"
+        - generic [ref=e64]:
+          - generic [ref=e65]: 当前矛盾
+          - generic [ref=e66]: "0"
+        - generic [ref=e67]:
+          - generic [ref=e68]: 返工过的章节
+          - generic [ref=e69]: "0"
+        - generic [ref=e70]:
+          - generic [ref=e71]: 质检达标章节(≥90)
+          - generic [ref=e72]: "0"
+      - generic [ref=e73]:
+        - button "📊 质量画像" [ref=e74] [cursor=pointer]
+        - button "📈 每日变化" [ref=e75] [cursor=pointer]
+      - generic [ref=e76]:
+        - generic [ref=e77]:
+          - generic [ref=e78]:
+            - heading "质量总览" [level=3] [ref=e79]
+            - generic [ref=e81]:
+              - generic [ref=e82]:
+                - img [ref=e83]:
+                  - generic [ref=e85]: —
+                - generic [ref=e86]: 平均质量分
+                - generic [ref=e87]: 满分 100
+              - generic [ref=e88]:
+                - img [ref=e89]:
+                  - generic [ref=e91]: —
+                - generic [ref=e92]: 字数达标率
+                - generic [ref=e93]: 按目标区间
+              - generic [ref=e94]:
+                - img [ref=e95]:
+                  - generic [ref=e97]: —
+                - generic [ref=e98]: 一次成功率
+                - generic [ref=e99]: 近30天
+          - generic [ref=e100]:
+            - heading "七大写作维度·问题分布" [level=3] [ref=e101]
+            - generic [ref=e103]: 当前没有待改问题（AI 生成正文会自动质检，或手动提交质检后这里画出短板维度）
+          - generic [ref=e104]:
+            - heading "与所选标签的契合度" [level=3] [ref=e105]
+            - generic [ref=e107]: AI 生成正文自动质检后，这里展示平台、分类、基调、文风、流派、视角六个契合分（满分100），越饱满越贴合；模型未评的维度会单独列出，不静默省略、不折算 0 分
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - heading "章节字数达标" [level=3] [ref=e110]
+            - generic [ref=e112]: 还没有写出正文的章节
+          - generic [ref=e113]:
+            - heading "上下文 / 大纲矛盾" [level=3] [ref=e114]
+            - generic [ref=e116]: 当前没有未解决的矛盾
+          - generic [ref=e117]:
+            - heading "作品构成" [level=3] [ref=e118]
+            - generic [ref=e120]:
+              - generic [ref=e121]:
+                - generic [ref=e122]: 目标平台
+                - generic [ref=e123]: 暂无作品
+              - generic [ref=e124]:
+                - generic [ref=e125]: 长短篇
+                - generic [ref=e126]: 暂无作品
+        - generic [ref=e127]:
+          - heading "具体问题排行（最新质检，越靠前越该优先改）" [level=3] [ref=e128]
+          - generic [ref=e130]: 暂无质检问题（AI 生成正文后会自动质检并在此汇总）
+  - contentinfo [ref=e131]:
+    - generic [ref=e132]: 0 / 0 字
+    - generic [ref=e134]: 连接中...

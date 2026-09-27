@@ -55,8 +55,8 @@ class StandardDirectiveCacheClass {
   }
 
   /** 取某场景需注入的全部标准（场景专属 + 横切）。 */
-  get(scenario?: string | null): string {
-    const key = standardScene(scenario);
+  get(scenario?: string | null, stepKey?: string | null): string {
+    const key = standardScene(scenario, stepKey);
     return this.standards
       .filter(s => s.scenarios.includes(key))
       .map(s => this.format(s))
@@ -67,12 +67,12 @@ class StandardDirectiveCacheClass {
     return this.rebuiltAt;
   }
 
-  snapshot(scenario: string, enabled = true) {
-    const directive = enabled ? this.get(scenario) : '';
+  snapshot(scenario: string, enabled = true, stepKey?: string | null) {
+    const directive = enabled ? this.get(scenario, stepKey) : '';
     return {
       enabled, available: !!directive,
       digest: createHash('sha256').update(directive).digest('hex'),
-      modules: enabled ? this.standards.filter(s => s.scenarios.includes(standardScene(scenario)))
+      modules: enabled ? this.standards.filter(s => s.scenarios.includes(standardScene(scenario, stepKey)))
         .map(s => ({ key: s.module_key, version: s.version ?? null, baseline: s.seed_baseline_version ?? null })) : [],
     };
   }

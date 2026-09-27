@@ -5,9 +5,14 @@ import { parseStageScore, SCORE_DIMENSIONS, stageJudgePrompt } from './stage-sco
 import { readConstitution } from '../project/creative-constitution';
 import { qualityGate } from './quality-issue';
 import { defaultRepairStrategy, executeRepair, repairPrompt } from './repair-strategy-registry';
+import { repairStrategies } from './repair-strategy-registry';
 
 const contract = compileCharacterContract({ id: 'lin', name: '林岚', forbidden_words: '["保证"]', profile_json: JSON.stringify({ voiceContract: { sentenceLength: { max: 20 }, directness: 'direct', moralBoundary: ['不可杀人'] } }) });
 const content = '林岚说：“我保证明日归来。”\n' + '风吹过旧城的石墙，铁门上爬满暗红色的锈迹。'.repeat(10);
+const COMPLETE_STANDARDS = {
+  target_platform: 'fanqie',
+  settings: { category: '悬疑', storyTone: ['冷峻'], writingStyle: ['简练'], webNovelGenre: ['都市'], pov: '第三人称限知' },
+};
 describe('executable character contracts', () => {
   it('compiles stable versions from existing fields and preserves unknowns', () => {
     expect(contract.directness).toBe('direct'); expect(contract.explanationTolerance).toBeNull();
@@ -28,6 +33,15 @@ describe('executable character contracts', () => {
     expect(() => executeRepair('character_voice_contract_patch',{content,issues,contracts:[contract]},[{original:'铁门',replacement:'木门'}])).toThrow();
     expect(repairPrompt('platform_metric_patch')).not.toBe(repairPrompt('scene_structure_patch'));
   });
+  it('states the change budget as a hard limit identical to the executor enforcement', () => {
+    // 提示词必须与 applyLocalPatches 的硬闸门同口径：写「尽量控制在…以内」会让模型超预算输出，
+    // 执行器直接拒绝 → 整轮精修作废，同一批缺陷还得再跑一轮（用户问题 2「减少重复流程」）。
+    for (const id of Object.keys(repairStrategies) as Array<keyof typeof repairStrategies>) {
+      const prompt = repairPrompt(id);
+      expect(prompt).toContain(`不得超过全文${repairStrategies[id].ratio * 100}%`);
+      expect(prompt).not.toContain('尽量把总改动范围控制在');
+    }
+  });
   it('repairs a blocking logic issue together with its structural root cause', () => {
     expect(defaultRepairStrategy(['constitution.logic', 'structure.scene_event_mismatch', 'pacing.missing_breathing_beat']))
       .toBe('scene_structure_patch');
@@ -44,7 +58,7 @@ describe('executable character contracts', () => {
   });
 });
 describe('non-dilutable scoring and semantic attribution', () => {
-  const input = {projectId:'p',runId:'r',stage:'chapter' as const,content,constitution:readConstitution({}),contracts:[contract]};
+  const input = {projectId:'p',runId:'r',stage:'chapter' as const,content,constitution:readConstitution(COMPLETE_STANDARDS),contracts:[contract]};
   const raw = (low: string) => ({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k => [k,{score:k===low?65:100,reason:'测试证据',evidence:[content]}]))});
   for (const key of ['character_voice','world_rules','context','logic']) it(`blocks ${key} below its floor despite high weighted score`, () => {
     const score = parseStageScore(raw(key),input); expect(score.overallScore).toBeGreaterThan(90);
@@ -57,7 +71,9 @@ describe('non-dilutable scoring and semantic attribution', () => {
   });
   it('asks the judge only for dimensions applicable to the current stage', () => {
     const prompt = stageJudgePrompt(content, 'ctx', readConstitution({ target_platform: 'fanqie' }), 'world');
-    expect(prompt).toContain('platform、context、logic、completeness、world_rules');
+    // 六维创作前提与本阶段适用的质量维度都进入评审。
+    expect(prompt).toContain('platform、category、tone、style、genre、context、logic、completeness、world_rules');
+    expect(prompt).toContain('本阶段未设置标准的维度：分类、基调、文风、流派');
     expect(prompt).not.toContain('"prose":');
     expect(prompt).not.toContain('"character_voice":');
   });

@@ -101,15 +101,37 @@ const WeeklySummaryPage: React.FC = () => {
     setChecking(true);
     setCheckResult(null);
     try {
-      // 调用 stage2-consistency-check 模板
-      const result = await api.post('/chain/templates/execute/stage2-consistency-check', {
-        user_input: {
-          projectId,
-          chapters: chapters.slice(-3), // 检查最近3章
-          checkItems: ['name_consistency', 'timeline_consistency', 'foreshadowing_consistency'],
-        },
+      // 走状态管理的一致性检查权威入口（/chain/templates/execute/stage2-consistency-check 这个模板 id
+      // 在后端模板表里不存在，调用必 404）。返回的 checks 在这里归一到本页 issues 的展示形状。
+      const result = await api.post(`/projects/${projectId}/state/consistency/check`, {
+        chapterIds: chapters.slice(-3).map((c: any) => c.chapterIndex), // 检查最近3章
+        checkTypes: ['character', 'world_setting', 'timeline', 'plot_logic'],
       });
-      setCheckResult(result.data);
+      const body = (result.data as any)?.data ?? result.data;
+      if (body?.success === false) {
+        setError(body.error || '检查失败');
+        return;
+      }
+      const checkTypeLabels: Record<string, string> = {
+        character: '人物一致性',
+        world_setting: '世界观一致性',
+        timeline: '时间线',
+        plot_logic: '情节逻辑',
+      };
+      const checks: any[] = body?.checks || [];
+      setCheckResult({
+        issues: checks
+          .filter((c: any) => c.status !== 'pass')
+          .map((c: any) => ({
+            type: checkTypeLabels[c.checkType] || c.checkType,
+            description: c.message,
+            severity: c.severity,
+            suggestion: (c.details || [])
+              .map((d: any) => d.suggestion || `${d.field}：期望「${d.expected}」，实际「${d.actual}」`)
+              .filter(Boolean)
+              .join('；') || undefined,
+          })),
+      });
     } catch (err: any) {
       setError(err.message || '检查失败');
     } finally {

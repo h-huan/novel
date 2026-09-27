@@ -5,7 +5,8 @@
  *  - 口径真实：质检问题只统计每章「最新一份报告」仍 open 的项（旧报告随正文重写失效，不再累加虚高）；
  *    章节区分「有正文」与「空壳（word_count=0，仅大纲占位）」；一致性问题按(章节,类型)只留最新未解决；
  *  - 质量画像：20+ 机器 issue_type 经 labels.qualityDimensionOf 归并成 7 大写作维度（开篇钩子/节奏/对话/AI痕迹/逻辑/细节/标点）；
- *  - 标签契合：平台/基调/风格/流派 四维契合分（来自质检报告 payload.tagFit）；
+ *  - 标签契合：平台/分类/基调/文风/流派/视角 六维契合分（来自质检报告 payload.tagFit；维度与
+ *    生成侧执行标准共用 shared/src/execution-standard-dimensions.ts 唯一来源，未评维度单独列出）；
  *  - 字数达标：对照每本书 settings.chapterWordRange 判断达标/偏短/偏长与缺口；
  *  - 返工：writing_revision_records 每章修订次数、≥3 次的章节；生成步骤一次成功率/平均返工（generation_step_metrics）；
  *  - 每日变化：产出字数、生成、问题新增/解决趋势。
@@ -15,7 +16,7 @@ import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DatabaseService } from '../../database/database.service';
-import { CHAPTER_WORD_RANGE } from '../../../shared/src';
+import { CHAPTER_WORD_RANGE, EXECUTION_STANDARD_DIMENSIONS, EXECUTION_STANDARD_DIMENSION_LABELS } from '../../../shared/src';
 import {
   platformLabel, storyTypeLabel,
   qualityIssueLabel, checkTypeLabel, severityLabel, errorKindLabel,
@@ -391,32 +392,48 @@ export class PlatformAnalyticsService {
     };
   }
 
-  // ───────────────────────── 标签契合（平台/基调/风格/流派） ─────────────────────────
+  // ─────────── 标签契合（平台/分类/基调/文风/流派/视角，六维） ───────────
+  // 维度列表不在看板侧手写：与生成侧执行标准、质检评分共用 shared 的唯一来源
+  // （shared/src/execution-standard-dimensions.ts）。否则会出现「生成按六维执行、
+  // 看板只统计四维」——分类与视角用户设了却看不见。
 
   private tagFit(latestIds: string[]) {
-    const dims = ['platform', 'tone', 'style', 'genre'] as const;
-    const NAME: Record<string, string> = { platform: '目标平台', tone: '基调', style: '写作风格', genre: '流派' };
-    if (!latestIds.length) return { available: false, items: [], best: null, worst: null, chapterWorst: [], chapterBest: null };
+    if (!latestIds.length) return { available: false, items: [], best: null, worst: null, missingDims: [], dimensionCount: 0, chapterWorst: [], chapterBest: null };
     const ph = latestIds.map(() => '?').join(',');
     const reports = this.safeAll(`SELECT payload FROM writing_quality_reports WHERE id IN (${ph})`, latestIds);
-    const sums: Record<string, { sum: number; n: number }> = { platform: { sum: 0, n: 0 }, tone: { sum: 0, n: 0 }, style: { sum: 0, n: 0 }, genre: { sum: 0, n: 0 } };
+    const requiredFor = (payload: any): string[] => Array.isArray(payload?.tagFitCoverage?.required)
+      ? payload.tagFitCoverage.required
+      : EXECUTION_STANDARD_DIMENSIONS.map(d => d.dimension); // 旧报告没有范围快照，沿用当时六维口径。
+    // 这里曾有过第二份固定六维看板口径，后果是新项目没有的投稿字段被报成“漏评”。
+    const requiredKeys = new Set(reports.flatMap(r => requiredFor(this.parseJson(r.payload))));
+    const dims = EXECUTION_STANDARD_DIMENSIONS.filter(d => requiredKeys.has(d.dimension));
+    const sums: Record<string, { sum: number; n: number }> = {};
+    const missingTally: Record<string, number> = {};
+    for (const d of dims) { sums[d.dimension] = { sum: 0, n: 0 }; missingTally[d.dimension] = 0; }
     for (const r of reports) {
-      const fit = this.parseJson(r.payload)?.tagFit;
-      if (!fit) continue;
+      const payload = this.parseJson(r.payload);
+      const fit = payload?.tagFit;
       for (const d of dims) {
-        const v = Number(fit[d]);
-        if (Number.isFinite(v)) { sums[d].sum += v; sums[d].n++; }
+        if (!requiredFor(payload).includes(d.dimension)) continue;
+        const raw = fit ? fit[d.dimension] : null;
+        const v = Number(raw);
+        if (raw !== null && raw !== undefined && Number.isFinite(v)) { sums[d.dimension].sum += v; sums[d.dimension].n++; }
+        else missingTally[d.dimension]++;
       }
     }
-    const items = dims.map(d => sums[d].n
-      ? { dim: d, name: NAME[d], score: Math.round(sums[d].sum / sums[d].n) }
-      : { dim: d, name: NAME[d], score: null });
+    const items = dims.map(d => sums[d.dimension].n
+      ? { dim: d.dimension, name: EXECUTION_STANDARD_DIMENSION_LABELS[d.dimension], score: Math.round(sums[d.dimension].sum / sums[d.dimension].n) }
+      : { dim: d.dimension, name: EXECUTION_STANDARD_DIMENSION_LABELS[d.dimension], score: null });
     const scored = items.filter(x => x.score != null) as Array<{ dim: string; name: string; score: number }>;
     const best = scored.length ? scored.reduce((a, b) => (b.score > a.score ? b : a)) : null;
     const worst = scored.length ? scored.reduce((a, b) => (b.score < a.score ? b : a)) : null;
-    // 每章标签契合明细（找最贴合 / 最需加强的具体章节，供下钻跳转）
+    // 未评维度显式列出：既不折算 0 分，也不从分母里消失（那等于把「没评」静默算成「评得好」）。
+    const missingDims = dims
+      .filter(d => missingTally[d.dimension] > 0)
+      .map(d => ({ dim: d.dimension, name: EXECUTION_STANDARD_DIMENSION_LABELS[d.dimension], reports: missingTally[d.dimension] }));
+    // 每章标签契合明细（找最贴合 / 最需加强的具体章节，供下钻跳转；必须带 chapterId，否则跳不过去）
     const chRows = this.safeAll(
-      `SELECT r.payload payload, c.chapter_index cidx, c.title ctitle, p.id pid, p.title ptitle
+      `SELECT r.payload payload, c.id cid, c.chapter_index cidx, c.title ctitle, p.id pid, p.title ptitle
        FROM writing_quality_reports r
        LEFT JOIN chapters c ON c.id=r.chapter_id
        LEFT JOIN projects p ON p.id=r.project_id
@@ -424,19 +441,28 @@ export class PlatformAnalyticsService {
     );
     const chapters: any[] = [];
     for (const r of chRows) {
-      const fit = this.parseJson(r.payload).tagFit;
+      const payload = this.parseJson(r.payload);
+      const fit = payload.tagFit;
       if (!fit) continue;
-      const vals = dims.map(d => Number(fit[d])).filter(Number.isFinite);
-      if (!vals.length) continue;
+      const scores: Record<string, number | null> = {};
+      let sum = 0;
+      let n = 0;
+      for (const d of dims) {
+        if (!requiredFor(payload).includes(d.dimension)) continue;
+        const raw = fit[d.dimension];
+        const v = Number(raw);
+        if (raw !== null && raw !== undefined && Number.isFinite(v)) { scores[d.dimension] = v; sum += v; n++; }
+        else scores[d.dimension] = null;
+      }
+      if (!n) continue;
       chapters.push({
-        projectId: r.pid, projectTitle: r.ptitle, chapterIndex: r.cidx, chapterTitle: r.ctitle,
-        scores: { platform: fit.platform ?? null, tone: fit.tone ?? null, style: fit.style ?? null, genre: fit.genre ?? null },
-        avg: Math.round(vals.reduce((a: number, b: number) => a + b, 0) / vals.length),
+        projectId: r.pid, projectTitle: r.ptitle, chapterId: r.cid, chapterIndex: r.cidx, chapterTitle: r.ctitle,
+        scores, avg: Math.round(sum / n),
       });
     }
     chapters.sort((a, b) => a.avg - b.avg);
     return {
-      available: scored.length > 0, items, best, worst,
+      available: scored.length > 0, items, best, worst, missingDims, dimensionCount: dims.length,
       chapterWorst: chapters.slice(0, 5),
       chapterBest: chapters.length ? chapters[chapters.length - 1] : null,
     };

@@ -1,5 +1,6 @@
-import { qualityIssue } from './quality-issue';
+import { qualityIssue, type QualityStage } from './quality-issue';
 import { readConstitution } from '../project/creative-constitution';
+import { scorePolicy } from './score-policy';
 /**
  * WritingQualityService - Phase 6.2 稳定修复版
  *
@@ -19,10 +20,14 @@ import { QualityInspectionService } from '../refinement/quality-inspection.servi
 import { compileContext } from '../generation-metrics/context-compiler';
 import { reviewCharacterContracts } from './character-contract';
 import { deterministicPlatformReview, platformReviewToRows, type PlatformQualityRow } from './platform-quality-rules';
+// 平台显示名只有 platform-analytics/labels 一份（含看板短名别名）：这里曾内联 PLATFORM_CN 第二份，
+// 结果是同一次质检里生成侧用「番茄小说」、质检提示用「番茄」，用户无法确认两处说的是不是同一件事。
+import { PLATFORM_LABELS } from '../platform-analytics/labels';
 import { narrativeTrace } from './narrative-trace';
-import { detectForbiddenTells } from '../../chain/hardline-scanner';
+import { detectForbiddenTells, isLanguageHardline, type HardlineFinding } from '../../chain/hardline-scanner';
+import { loadCharacterNames } from '../character/character-names';
 import { LLM_TUNABLES } from '../../config/llm-tunables';
-import { CHAPTER_WORD_RANGE } from '../../../shared/src';
+import { CHAPTER_WORD_RANGE, EXECUTION_STANDARD_DIMENSIONS, executionDimensionsForProject, platformCategoryWritingBrief, resolveSubmissionCategory, type ExecutionStandardDimensionKey } from '../../../shared/src';
 import type {
   AnalyzeChapterDto,
   AttentionCheckDto,
@@ -252,7 +257,7 @@ export class WritingQualityService implements OnModuleInit {
         causality_gap: { category: 'logic', lesson: LOGIC },
         time_order_error: { category: 'logic', lesson: LOGIC },
         event_sequence_risk: { category: 'logic', lesson: LOGIC },
-        label_fit: { category: 'label_fit', lesson: '叙事节奏、对话方式、情绪密度与人称必须主动贴合本书选定的平台/基调/写作风格/流派标签，最弱维度尤其对齐' },
+        label_fit: { category: 'label_fit', lesson: '叙事节奏、对话方式、情绪密度与人称必须主动贴合本书选定的执行标准（平台/分类/基调/文风/流派/视角）六维，最弱维度尤其对齐' },
         // 平台指标问题（deterministicPlatformReview 落库的 platform.*）同样沉淀成跨章教训，
         // 否则下一章首版 prompt 读不到「本章哪里不符合目标平台」，同类问题会一直复发。
         platform_chapter_length: { category: 'platform', lesson: '按目标平台单章字数区间写足有效情节：过短先补推进与冲突，过长先砍不推进剧情的铺陈，不靠灌水凑数' },
@@ -261,6 +266,7 @@ export class WritingQualityService implements OnModuleInit {
         platform_opening_hook: { category: 'platform', lesson: HOOK_OPEN + '，开篇钩子必须落在平台要求的字位之前' },
         platform_ending_hook: { category: 'platform', lesson: '章尾必须落在未解问题、反转、新威胁或关键动作/对话上，并按目标平台的留钩要求处理，禁止平淡收尾' },
         platform_payoff_gap: { category: 'platform', lesson: PACING + '，并按目标平台的爽点/情绪间隔上限补足推进与兑现' },
+        platform_category_word_scale: { category: 'platform', lesson: '目标总字数必须与该平台投稿分类的实测体量分布对照后取舍：要么调整总字数与分卷节奏对齐区间，要么写明刻意偏离的依据，不得默认通过' },
         punctuation: { category: 'punctuation', lesson: '统一中文全角标点，省略号用“……”，连贯动作写完整句、不切成两字残句，克制句末语气词' },
       };
       const items: Array<{ category: string; lesson: string }> = [];
@@ -411,6 +417,14 @@ export class WritingQualityService implements OnModuleInit {
     }
 
     const context = this.buildProjectContext(projectId, db);
+    const reportId = uuid();
+    // 平台与项目执行标准先验有效才能付费评审；旧流程在 LLM 调用和旧报告作废后
+    // 才算平台度量，异常又吞成空问题，后果是未执行平台标准却可能显示合格。
+    const platformReview = this.buildPlatformReview(
+      projectId, content, context, reportId,
+      dto.scope === 'paragraph' ? 'segment' : 'chapter',
+      (dto.stage as QualityStage) || undefined,
+    );
 
     if (!this.realLLM) {
       throw new BadRequestException('LLM service is not available. Please configure an API key.');
@@ -431,7 +445,6 @@ export class WritingQualityService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    const reportId = uuid();
     // 单一事实源：同一章节重新质检（正文被重写/重新生成）时，旧报告及其下仍 open 的问题
     // 一律标记 superseded（被本次质检取代，属关闭态）：新报告没有的问题视为已解决，
     // 新报告新发现的才是当前 open，避免反复质检问题只增不减、改完数量不同步。
@@ -466,12 +479,25 @@ export class WritingQualityService implements OnModuleInit {
       : llmScore;
 
     // 确定性硬红线扣分（与生成链共用同一扫描器 hardline-scanner，单一事实源）：
-    // LLM 语义评分对同构排比/量词错配/残句链等语言硬伤容易手软给虚高分，这里用零 LLM 的
-    // 确定性扫描只对“跨平台真硬伤”（非平台分化的排版类）逐项扣分，让这类问题无法靠 LLM 印象混到 90+。
+    // 「哪些算硬线」的唯一判据 = hardline-scanner 的 LANGUAGE_HARDLINE_RULE_IDS（语言硬伤 + 文笔/排版硬伤）；
+    // 「扣多少分」才由下面的权重表决定。LLM 语义评分对同构排比/量词错配/残句链等语言硬伤容易手软给虚高分，
+    // 这里用零 LLM 的确定性扫描逐项扣分，让这类问题无法靠 LLM 印象混到 90+。
     const hardlineProfile = {
       platform: context?.project?.tagProfile?.platform || undefined,
       storyType: context?.project?.type || undefined,
+      // 执行标准单一来源：质检侧的确定性扫描必须与生成侧拿到同一份项目卡片标准
+      // （分类/基调/文风/流派/视角），否则同一段正文在生成链与质检链会得到两套阈值。
+      storyCategory: context?.project?.tagProfile?.category || context?.project?.creativeConstitution?.category || undefined,
+      storyTone: context?.project?.tagProfile?.tone || context?.project?.creativeConstitution?.storyTone || undefined,
+      writingStyle: context?.project?.tagProfile?.style || undefined,
+      webNovelGenre: context?.project?.tagProfile?.genre || undefined,
+      // 规则 32 的判据依赖本书人名白名单。质检侧此前【完全没有】这份白名单（生成侧有、指标侧有、
+      // 这里没有），于是同一段正文在生成链与质检链得到两套结论。现统一取 character-names 唯一实现。
+      characterNames: loadCharacterNames(db, projectId),
     };
+    // 权重表只决定「扣多少分」；「算不算硬线」由 hardline-scanner 的 LANGUAGE_HARDLINE_RULE_IDS 决定。
+    // 未显式列出的硬线规则一律按 HARDLINE_DEFAULT_PENALTY 计分——杜绝「已进阻断清单却在质检侧扣 0 分」
+    // 的第二套口径（此前本表只覆盖 11 条，其余 20+ 条硬线在质检侧完全不计分，等于质检静默放行）。
     const HARDLINE_PENALTY: Record<string, number> = {
       '15c': 12, '15b': 8, '15d': 8, '20a': 8,
       '34': 5, 'list-enumeration': 5,
@@ -479,31 +505,60 @@ export class WritingQualityService implements OnModuleInit {
       '52-env-imagery-repeat': 4, '53-same-structure-parallel': 6,
       '54-measure-word-mismatch': 6,
     };
+    const HARDLINE_DEFAULT_PENALTY = 4;
+    const hardlinePenaltyOf = (ruleId: string): number =>
+      Object.prototype.hasOwnProperty.call(HARDLINE_PENALTY, ruleId)
+        ? HARDLINE_PENALTY[ruleId]
+        : HARDLINE_DEFAULT_PENALTY;
     const hardlineHits = detectForbiddenTells(content, hardlineProfile)
-      .filter(f => Object.prototype.hasOwnProperty.call(HARDLINE_PENALTY, f.ruleId));
-    const hardlinePenalty = Math.min(25, hardlineHits.reduce((sum, f) => sum + (HARDLINE_PENALTY[f.ruleId] || 0), 0));
+      .filter(f => isLanguageHardline(f.ruleId));
+    const hardlinePenalty = Math.min(25, hardlineHits.reduce((sum, f) => sum + hardlinePenaltyOf(f.ruleId), 0));
 
     // 平台标准（目标平台的目标度量）在质检侧的落地点：复用生成侧 Gate 的确定性评审，
     // 把「本章不符合目标平台」变成可逐条精修的质检问题并计入统一综合分。
     // 此前该评审只在生成侧 Gate 调用，质检报告里看不到任何 platform.* 问题，平台标准等于没生效。
-    const platformReview = this.buildPlatformReview(projectId, content, context, reportId);
     const platformRows = platformReview.rows;
     const PLATFORM_SEVERITY_PENALTY: Record<string, number> = { blocking: 6, high: 4, medium: 2, low: 0, info: 0 };
     const platformPenalty = Math.min(12, platformRows.reduce((sum, row) => sum + (PLATFORM_SEVERITY_PENALTY[row.severity] || 0), 0));
 
-    // 标签契合（平台/基调/风格/流派）实质纳入达标判定，而不是只展示：
-    // tagFit 由质检 LLM 对照项目所选标签四维打分；明显偏离即确定性扣分，让“选了番茄却写成盐选、
-    // 基调/流派不符”无法靠语言分蒙混到 90+。跨全部平台与长短篇同一规则，不针对任何一本书。
-    const TAG_LABEL: Record<string, string> = { platform: '平台', tone: '基调', style: '写作风格', genre: '流派' };
+    // 标签契合（平台/分类/基调/文风/流派/视角）实质纳入达标判定，而不是只展示：
+    // tagFit 由质检 LLM 对照项目所选执行标准逐维打分，维度列表与生成侧共用同一份唯一来源
+    // （shared/src/execution-standard-dimensions.ts）；不再手写四维副本——否则分类与视角
+    // 既不评分也不进看板，用户设了等于没设。跨全部平台与长短篇同一规则，不针对任何一本书。
+    const tagProfile = context?.project?.tagProfile || {};
+    const tagDimensions = executionDimensionsForProject({
+      targetPlatform: tagProfile.platform || '', projectType: tagProfile.projectType || '',
+      category: tagProfile.category || '', targetAudience: tagProfile.targetAudience || '',
+      storyTone: tagProfile.tone || [], writingStyle: tagProfile.style || [],
+      webNovelGenre: tagProfile.genre || [], pov: tagProfile.pov || '',
+    });
     const rawTagFit = (llmResult as any).tagFit;
-    const tagDimArr: Array<{ key: string; label: string; score: number }> = rawTagFit
-      ? (['platform', 'tone', 'style', 'genre'] as const)
-        .map(k => ({ key: k, label: TAG_LABEL[k], score: rawTagFit[k] }))
-        .filter(d => typeof d.score === 'number' && Number.isFinite(d.score))
-      : [];
-    const tagAvg = tagDimArr.length
+    const rawTagEvidence = (llmResult as any).tagFitEvidence;
+    const tagPolicy = scorePolicy(context.project.creativeConstitution, context.project.creativeConstitution.qualityPolicy);
+    const tagDimArr: Array<{ key: ExecutionStandardDimensionKey; label: string; score: number; evidence: string }> = [];
+    // 未返回分数的维度绝不静默丢弃（filter 掉会同时缩小分母，让契合度看起来更好）：
+    // 单独记录，写进报告 payload 并告警，由看板显式呈现「哪几维没评」。
+    const tagMissingDims: Array<{ key: ExecutionStandardDimensionKey; label: string }> = [];
+    for (const dim of tagDimensions) {
+      const dimScore = rawTagFit ? rawTagFit[dim.dimension] : undefined;
+      const quote = typeof rawTagEvidence?.[dim.dimension] === 'string'
+        ? rawTagEvidence[dim.dimension].trim() : '';
+      if (typeof dimScore === 'number' && Number.isFinite(dimScore) && quote && content.includes(quote)) {
+        tagDimArr.push({ key: dim.dimension, label: dim.label, score: dimScore, evidence: quote });
+      } else {
+        tagMissingDims.push({ key: dim.dimension, label: dim.label });
+      }
+    }
+    const tagBelowFloor = tagDimArr.filter(dim => dim.score < (tagPolicy.floors[dim.key] ?? 60));
+    const tagAvg = tagDimArr.length && tagMissingDims.length === 0
       ? Math.round(tagDimArr.reduce((a, d) => a + d.score, 0) / tagDimArr.length)
       : null;
+    if (tagMissingDims.length > 0) {
+      this.logger.warn(
+        'tagFit 覆盖不全（项目 ' + projectId + '）：' + tagMissingDims.map(d => d.label).join('/')
+        + ' 缺少有效契合分或正文逐字证据；已按未评估记录并阻断合格状态。',
+      );
+    }
     // 标签契合是 LLM 主观分、天然偏保守：≥75 视为契合不扣；70–74 属轻度偏离，只生成改进提示、不扣综合分；
     // 仅当均值 <70（确实写成另一平台/基调）才线性轻扣，每低 1 分扣 0.5、单章封顶 8。
     // 目的：让客观语言硬伤照常扣分，但主观契合分不再与硬红线双重重罚，把 LLM 自评"中上"的章节砸到不及格
@@ -518,6 +573,16 @@ export class WritingQualityService implements OnModuleInit {
     reportPayload.characterContractReview = (llmResult as any).characterContractReview;
     reportPayload.narrativeTrace = (llmResult as any).narrativeTrace;
     if ((llmResult as any).tagFit) reportPayload.tagFit = (llmResult as any).tagFit;
+    if (rawTagEvidence) reportPayload.tagFitEvidence = rawTagEvidence;
+    // 覆盖范围每次都入库；否则“本项目不设该投稿字段”会在看板被误报成“漏评”。
+    reportPayload.tagFitCoverage = {
+        required: tagDimensions.map(d => d.dimension),
+        requiredLabels: tagDimensions.map(d => d.label),
+        scored: tagDimArr.map(d => d.key),
+        missing: tagMissingDims.map(d => d.key),
+        missingLabels: tagMissingDims.map(d => d.label),
+        belowFloor: tagBelowFloor.map(d => d.key),
+    };
     if (aiFingerprints) {
       reportPayload.aiFingerprints = aiFingerprints;
       reportPayload.fingerprintScore = fingerprintScore;
@@ -554,11 +619,11 @@ export class WritingQualityService implements OnModuleInit {
     const hardlineNote = hardlineHits.length > 0
       ? `；确定性硬红线命中${hardlineHits.length}处、扣${hardlinePenalty}分（${hardlineHits.slice(0, 3).map(h => h.ruleId).join('/')}${hardlineHits.length > 3 ? '等' : ''}）`
       : '';
-    const tagNote = tagAvg !== null && tagAvg < 75
-      ? tagPenalty > 0
-        ? `；标签契合均值${tagAvg}分、扣${tagPenalty}分（最弱：${weakestTag?.label || ''}）`
-        : `；标签契合均值${tagAvg}分（最弱：${weakestTag?.label || ''}，轻度偏离、提示改进但不扣分）`
-      : '';
+    const tagNote = tagMissingDims.length
+      ? `；执行维度未评估：${tagMissingDims.map(d => d.label).join('、')}`
+      : tagBelowFloor.length
+        ? `；执行维度低于最低线：${tagBelowFloor.map(d => `${d.label}${d.score}`).join('、')}`
+        : tagAvg !== null && tagAvg < 75 ? `；标签契合均值${tagAvg}分` : '';
     const platformNote = platformRows.length > 0
       ? `；不符合目标平台${platformRows.length}处、扣${platformPenalty}分（${platformRows.slice(0, 3).map(r => r.issueType.replace('platform_', '')).join('/')}${platformRows.length > 3 ? '等' : ''}）`
       : '';
@@ -587,19 +652,32 @@ export class WritingQualityService implements OnModuleInit {
     const validTags = new Set(WRITING_QUALITY_TAGS as readonly string[]);
     // 确定性标点扫描（不依赖 LLM），与语义问题一并入库
     const punctIssues = this.detectPunctuation(content);
-    // 标签契合不足时确定性补一条待改问题（跨平台/长短篇通用），让"平台/基调/风格/流派不符"像其它问题一样可逐条定向精修
-    const labelFitIssue = tagAvg !== null && tagAvg < 75 && weakestTag ? [{
-      issueType: 'label_fit',
-      severity: tagAvg < 60 ? 'high' : (tagAvg < 70 ? 'medium' : 'low'),
-      title: `正文与所选标签契合度不足（平均 ${tagAvg} 分，最弱：${weakestTag.label} ${weakestTag.score} 分）`,
-      summary: `项目选定的平台/基调/风格/流派与本章实际写法存在偏离（四维：${tagDimArr.map(d => `${d.label}${d.score}`).join('、')}）。按目标平台读者口味与所选基调/风格/流派调整：节奏、爽点或情绪密度、叙述人称、对话方式都要向标签靠拢，但不改变剧情事实。`,
-      evidence: `最偏离维度：${weakestTag.label} = ${weakestTag.score}/100`,
-      suggestion: '对照目标平台风格红线与故事基调重写相关段落，只调叙述方式、节奏与情绪浓度，不改事件与人物。',
-      tags: ['label_fit'],
-    } as any] : [];
+    // 这里曾有第二份“六维契合”口径：按平均分发 low/medium/high，单维严重偏离
+    // 被其它五维高分掩盖，还可能让章节显示 ok。逐维使用项目 scorePolicy 最低线。
+    const labelFitIssue = [
+      ...tagMissingDims.map(dim => ({
+        issueType: 'label_fit', severity: 'blocking',
+        title: `${dim.label}执行标准未完成评估`,
+        summary: `质检缺少${dim.label}的有效分数或正文逐字证据，不能判定本章符合项目设定。`,
+        evidence: '缺少可在本章正文中逐字定位的证据',
+        suggestion: '重新质检并提供该维的正文逐字证据，确认后再判断是否达标。',
+        tags: ['label_fit'],
+      })),
+      ...tagBelowFloor.map(dim => ({
+        issueType: 'label_fit', severity: 'blocking',
+        title: `${dim.label}与本书设定不符（${dim.score} 分，最低 ${tagPolicy.floors[dim.key] ?? 60} 分）`,
+        summary: `本章${dim.label}低于本项目执行标准最低线；不得用六维平均分或综合分抵消。`,
+        evidence: dim.evidence,
+        suggestion: `对照本书${dim.label}设定精确修改证据段落，保留人物与情节事实，复检后才能标为合格。`,
+        tags: ['label_fit'],
+      })),
+    ];
     // 平台度量问题与 LLM/标点/标签问题同列：和生成侧 Gate 共用同一份确定性度量，
     // 保证「不符合目标平台」在所有书、所有章都能逐条定向精修并被教训沉淀。
-    const allInputIssues = [...(llmResult.issues || []), ...punctIssues, ...labelFitIssue, ...platformRows];
+    // 这里曾只有第二份“硬红线扣分”口径：质检报告扣了分却没有阻断问题，
+    // 高基础分仍可能把命中硬红线的章节标成 ok。与生成 Gate 共用扫描结果并逐条阻断。
+    const hardlineIssues = this.buildHardlineIssues(content, hardlineHits);
+    const allInputIssues = [...(llmResult.issues || []), ...punctIssues, ...hardlineIssues, ...labelFitIssue, ...platformRows];
     for (const issue of allInputIssues) {
       const issueType = validTags.has(issue.issueType) ? issue.issueType : 'needs_hook';
       const tags = (issue.tags || []).filter((t: string) => validTags.has(t));
@@ -688,7 +766,7 @@ export class WritingQualityService implements OnModuleInit {
         score: overallScore,
         issueTypes: allInputIssues.map((i: any) => i.issueType),
         hardlineRuleIds: hardlineHits.map(h => h.ruleId),
-        hasTagGap: tagAvg !== null && tagAvg < 70,
+        hasTagGap: tagMissingDims.length > 0 || tagBelowFloor.length > 0,
       });
     }
 
@@ -730,7 +808,7 @@ export class WritingQualityService implements OnModuleInit {
     }
 
     const project = db.prepare(
-      'SELECT title, description, type, target_words, platform_style FROM projects WHERE id = ?',
+      'SELECT title, description, type, target_words FROM projects WHERE id = ?',
     ).get(projectId) as Record<string, any> | undefined;
 
     const result = this.buildAttentionAnalysis({
@@ -798,7 +876,7 @@ export class WritingQualityService implements OnModuleInit {
           entry.total += stat.cnt;
           if (this.isOpenIssueStatus(stat.status)) {
             entry.open += stat.cnt;
-            if (stat.severity === 'high' || stat.severity === 'critical') {
+            if (stat.severity === 'blocking' || stat.severity === 'high' || stat.severity === 'critical') {
               entry.high += stat.cnt;
             }
           }
@@ -1040,8 +1118,8 @@ export class WritingQualityService implements OnModuleInit {
 
     // Writing quality revisions are local prose fixes. They must not enter the
     // state extraction pipeline, otherwise quality issues can create state_items.
-    db.prepare('UPDATE chapters SET content = ?, word_count = ?, updated_at = ? WHERE id = ?')
-      .run(newContent, newWordCount, now, revision.chapter_id);
+    db.prepare('UPDATE chapters SET content = ?, word_count = ?, auto_quality_status = ?, auto_quality_message = ?, auto_quality_at = ?, updated_at = ? WHERE id = ?')
+      .run(newContent, newWordCount, 'needs_rewrite', '局部精修已应用，须重新质检后才能判定合格', now, now, revision.chapter_id);
 
     // 更新 revision 记录
     db.prepare(`
@@ -1053,12 +1131,12 @@ export class WritingQualityService implements OnModuleInit {
     if (revision.issue_id) {
       const issue = db.prepare('SELECT * FROM writing_quality_issues WHERE id = ?').get(revision.issue_id) as IssueRow | undefined;
       const history = issue ? safeJsonParse(issue.status_history_json || '[]', []) : [];
-      if (issue) history.push({ from: issue.status, to: 'applied', reason: 'revision_applied', at: now });
+      if (issue) history.push({ from: issue.status, to: 'refined', reason: 'revision_applied_pending_recheck', at: now });
       db.prepare(`
         UPDATE writing_quality_issues
-        SET status = 'applied', latest_revision_id = ?, status_history_json = ?, resolved_at = ?, resolved_by = 'system', updated_at = ?
+        SET status = 'refined', latest_revision_id = ?, status_history_json = ?, resolved_at = NULL, resolved_by = NULL, updated_at = ?
         WHERE id = ?
-      `).run(revisionId, JSON.stringify(history), now, now, revision.issue_id);
+      `).run(revisionId, JSON.stringify(history), now, revision.issue_id);
     }
 
     return {
@@ -1084,29 +1162,20 @@ export class WritingQualityService implements OnModuleInit {
       ? db.prepare('SELECT * FROM writing_quality_issues WHERE id = ?').get(revision.issue_id) as IssueRow | undefined
       : null;
 
-    const remainingCount = issue
-      ? (db.prepare(
-          'SELECT COUNT(*) as cnt FROM writing_quality_issues WHERE chapter_id = ? AND status = ?',
-        ).get(issue.chapter_id, 'open') as { cnt: number }).cnt
-      : 0;
-
-    let result: RecheckResult;
-    if (this.realLLM && issue) {
-      try {
-        const chapterRow = db.prepare(
-          'SELECT content FROM chapters WHERE id = ?',
-        ).get(revision.chapter_id) as { content: string } | undefined;
-        const content = chapterRow?.content || '';
-        result = await this.callRecheckLLM(issue, revision.after_text, content);
-      } catch (err) {
-        this.logger.warn(`LLM recheck failed, fallback: ${err instanceof Error ? err.message : String(err)}`);
-        result = this.simpleRecheck(remainingCount);
-      }
-    } else {
-      result = this.simpleRecheck(remainingCount);
+    if (!issue) throw new BadRequestException('复检缺少关联质量问题，不能判定通过');
+    if (!this.realLLM) throw new BadRequestException('复检模型不可用，问题保持未通过，请稍后重试');
+    if (!revision.applied || !revision.after_text) throw new BadRequestException('修订稿尚未应用，不能复检通过');
+    const chapterRow = db.prepare(
+      'SELECT content FROM chapters WHERE id = ?',
+    ).get(revision.chapter_id) as { content: string } | undefined;
+    if (!chapterRow?.content || !chapterRow.content.includes(revision.after_text)) {
+      throw new BadRequestException('修订稿未写入章节正文，不能复检通过');
     }
+    // 这里曾有第二份“复检通过”口径：模型异常时按剩余问题数推断 pass，
+    // 甚至 JSON 解析失败也默认通过，导致未验证的硬红线被标成 recheck_passed。
+    const result = await this.callRecheckLLM(issue, revision.after_text, chapterRow.content);
 
-    this.persistRecheckResult(db, revision, issue || null, result);
+    this.persistRecheckResult(db, revision, issue, result);
     return { success: true, result };
   }
 
@@ -1128,20 +1197,7 @@ export class WritingQualityService implements OnModuleInit {
       }));
     }
 
-    const openCount = (db.prepare(
-      'SELECT COUNT(*) as cnt FROM writing_quality_issues WHERE chapter_id = ? AND status IN (?, ?, ?, ?)',
-    ).get(issue.chapter_id, 'open', 'planned', 'refined', 'recheck_failed') as { cnt: number }).cnt;
-    const result = this.simpleRecheck(openCount);
-    const now = new Date().toISOString();
-    const nextStatus = result.pass ? 'recheck_passed' : 'recheck_failed';
-    const history = safeJsonParse(issue.status_history_json || '[]', []);
-    history.push({ from: issue.status, to: nextStatus, reason: 'issue_recheck', at: now });
-    db.prepare(`
-      UPDATE writing_quality_issues
-      SET status = ?, recheck_result_json = ?, status_history_json = ?, updated_at = ?
-      WHERE id = ?
-    `).run(nextStatus, JSON.stringify(result), JSON.stringify(history), now, issueId);
-    return { success: true, result, revisionId: null };
+    throw new BadRequestException('该问题尚无已应用的修订稿；请先修订正文，再复检');
   }
 
   // ====================== HELPER: Project Context ======================
@@ -1158,7 +1214,7 @@ export class WritingQualityService implements OnModuleInit {
     // 项目信息；标签契合评分只读取项目创作宪法。
     try {
       const project = db.prepare(
-        'SELECT title, description, platform_style, type, target_platform, target_words, settings FROM projects WHERE id = ?',
+        'SELECT title, description, type, target_platform, target_words, settings FROM projects WHERE id = ?',
       ).get(projectId) as any;
       if (project) {
         let settings: any = {};
@@ -1169,6 +1225,9 @@ export class WritingQualityService implements OnModuleInit {
         project.tagProfile = {
           platform: constitution.targetPlatform, tone: constitution.storyTone,
           style: constitution.writingStyle, genre: constitution.webNovelGenre,
+          category: constitution.category, pov: constitution.pov,
+          projectType: constitution.projectType,
+          targetAudience: constitution.targetAudience,
           chapterWordRange: constitution.chapterWordRange,
         };
         context.project = project;
@@ -1231,12 +1290,29 @@ export class WritingQualityService implements OnModuleInit {
   ): Promise<{ result: LLMQualityOutput; parseWarning: string | null; rawPreview: string | null }> {
     const tagsList = WRITING_QUALITY_TAGS.join(', ');
     const tp = (context as any)?.project?.tagProfile || {};
-    const PLATFORM_CN: Record<string, string> = { fanqie: '番茄', zhihu: '知乎盐选', qimao: '七猫', qidian: '起点', douyin: '抖音', xiaohongshu: '小红书', jinjiang: '晋江', rules_horror: '规则怪谈', custom: '自定义' };
+    const tagDimensions = executionDimensionsForProject({
+      targetPlatform: tp.platform || '', projectType: tp.projectType || '',
+      category: tp.category || '', targetAudience: tp.targetAudience || '',
+      storyTone: tp.tone || [], writingStyle: tp.style || [],
+      webNovelGenre: tp.genre || [], pov: tp.pov || '',
+    });
+    const tagFitExample = Object.fromEntries(tagDimensions.map(dim => [dim.dimension, 0]));
+    const tagEvidenceExample = Object.fromEntries(tagDimensions.map(dim => [dim.dimension, '正文逐字片段']));
+    // 标签契合的基准必须与生成侧执行标准同源：平台给这个投稿分类写的官方定义 + 该分类头部官方标签。
+    // 否则会出现两套判据——生成按番茄投稿分类写，质检却按系统内部题材分类打分。
+    const categoryResolution = resolveSubmissionCategory(tp.platform, tp.category, tp.projectType, tp.targetAudience);
+    const categoryWritingBrief = categoryResolution.status === 'resolved'
+      ? platformCategoryWritingBrief(tp.platform, categoryResolution.value, tp.projectType)
+      : '';
     const tagProfileText = [
-      tp.platform ? `目标平台：${PLATFORM_CN[tp.platform] || tp.platform}` : '',
+      categoryWritingBrief ? '平台分类口径（评分基准，与本项目执行标准同一份来源）：' + categoryWritingBrief : '',
+      tp.platform ? `目标平台：${PLATFORM_LABELS[tp.platform] || tp.platform}` : '',
+      tp.category ? `分类：${tp.category}` : '',
       (tp.tone || []).length ? `基调：${(tp.tone || []).join('、')}` : '',
-      (tp.style || []).length ? `写作风格：${(tp.style || []).join('、')}` : '',
+      (tp.style || []).length ? `文风：${(tp.style || []).join('、')}` : '',
       (tp.genre || []).length ? `流派：${(tp.genre || []).join('、')}` : '',
+      tp.pov ? `叙事视角：${tp.pov}` : '',
+      tp.targetAudience ? `目标读者：${typeof tp.targetAudience === 'string' ? tp.targetAudience : JSON.stringify(tp.targetAudience)}` : '',
     ].filter(Boolean).join('；') || '未设置';
     const timelineCheck = `
 额外检查时间线与因果链：
@@ -1278,7 +1354,7 @@ export class WritingQualityService implements OnModuleInit {
 可用质量标签：${tagsList}
 ${timelineCheck}
 
-【标签契合度评分 tagFit】对照项目设定标签给本章打分（0-100，越高越贴合）：platform=目标平台读者口味、tone=基调、style=写作风格、genre=流派；结果写入输出 JSON 的 tagFit 字段，不要写进 issues。
+【标签契合度评分 tagFit】只对本项目真实填写的执行设定逐维打分（0-100，越高越贴合）：${tagDimensions.map(dim => `${dim.dimension}=${dim.label}`).join('、')}。这些维度必须全部给出分数，并在 tagFitEvidence 中为每维给出一段本章正文逐字原文（不可改写、不可引用大纲）；缺分或证据不能逐字定位均属未评估，不能标为合格。未选择的非投稿写作维度不得臆造评分。分类口径未核验时不得编造，也不得套用其他分类的口径；按本项目已选分类和标签本身判断。结果写入输出 JSON 的 tagFit 与 tagFitEvidence 字段，不要写进 issues。
 
 你必须只输出严格JSON，不输出任何其他内容。`;
 
@@ -1324,7 +1400,8 @@ ${content.slice(0, 15000)}
       "tags": ["needs_hook"]
     }
   ],
-  "tagFit": { "platform": 0, "tone": 0, "style": 0, "genre": 0, "note": "一句话说明最贴合或最偏离哪个标签" }
+  "tagFit": ${JSON.stringify({ ...tagFitExample, note: '一句话说明最贴合或最偏离哪个标签' })},
+  "tagFitEvidence": ${JSON.stringify(tagEvidenceExample)}
 }`;
 
     const response = await this.realLLM!.generate({
@@ -1375,17 +1452,43 @@ ${content.slice(0, 15000)}
     return { result: parsed, parseWarning: null, rawPreview: null };
   }
 
-  // 规范化标签契合分（0-100 整数，非法维度为 undefined；全空则 undefined）
+  // 规范化标签契合分（六维，0-100 整数；未返回的维度保持缺失，不折算 0、不缩小分母）
   private normalizeTagFit(raw: any): LLMQualityOutput['tagFit'] | undefined {
     if (!raw || typeof raw !== 'object') return undefined;
     const clamp = (v: any) => {
+      // 只接受明确的数值（含数字字符串）；null / undefined / 空串 / 布尔一律视为「该维未返回」。
+      // 历史实现用 Number(v) 把 null 折成 0 分，等于把「没评」伪装成「评了 0 分」并静默拉低契合度。
+      if (typeof v !== 'number' && typeof v !== 'string') return undefined;
+      if (typeof v === 'string' && v.trim().length === 0) return undefined;
       const n = Math.round(Number(v));
       return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : undefined;
     };
-    const fit: any = { platform: clamp(raw.platform), tone: clamp(raw.tone), style: clamp(raw.style), genre: clamp(raw.genre) };
+    const fit: any = {};
+    for (const dim of EXECUTION_STANDARD_DIMENSIONS) fit[dim.dimension] = clamp(raw[dim.dimension]);
     fit.note = typeof raw.note === 'string' ? String(raw.note).slice(0, 120) : undefined;
-    if ([fit.platform, fit.tone, fit.style, fit.genre].every(v => v === undefined)) return undefined;
+    // 六维全缺但有说明时仍返回对象：覆盖缺口必须在报告里显式可见，而不是让 tagFit 整个消失。
+    if (EXECUTION_STANDARD_DIMENSIONS.every(dim => fit[dim.dimension] === undefined) && !fit.note) return undefined;
     return fit;
+  }
+
+  private buildHardlineIssues(content: string, findings: HardlineFinding[]): any[] {
+    return findings.map(finding => {
+      const paragraph = finding.paragraphs?.find(value => value.length > 0 && content.includes(value));
+      const offset = finding.hitCharOffsets?.find(value => Number.isInteger(value) && value >= 0 && value < content.length);
+      const snippet = finding.snippet && content.includes(finding.snippet) ? finding.snippet : '';
+      const evidence = paragraph || snippet || (offset !== undefined ? content.slice(offset, Math.min(content.length, offset + 100)) : '');
+      return {
+        issueType: 'ai_pattern_risk', severity: 'blocking',
+        title: `正文硬红线 ${finding.ruleId}`,
+        summary: `${finding.message}（${finding.position}）`,
+        evidence,
+        originalText: evidence,
+        suggestion: '按本条命中规则精确修订原文，并重新运行正文硬红线与上下文一致性检查。',
+        startOffset: evidence ? content.indexOf(evidence) : undefined,
+        endOffset: evidence ? content.indexOf(evidence) + evidence.length : undefined,
+        tags: ['ai_pattern_risk'],
+      };
+    });
   }
 
   // 确定性标点规范扫描（不依赖 LLM），返回一条聚合 issue；感叹/问号重复属修辞，不判错
@@ -1424,25 +1527,24 @@ ${content.slice(0, 15000)}
    *
    * 复用生成侧 Gate 的同一份 deterministicPlatformReview：同一内容、同一创作宪法，
    * 保证「生成时被判不合格、质检时却看不见」这种两套口径不再出现。零 LLM 调用，
-   * 任何失败只降级为「本次没有平台问题」，绝不阻断 LLM 质检主流程。
+   * 这里曾有第二份平台失败口径：异常返回空问题集合，后果是质检报告
+   * 把未执行平台标准的章节显示为合格。缺标准或计算失败必须显式中止。
    */
   private buildPlatformReview(
     projectId: string,
     content: string,
     context: Record<string, any>,
     runId: string,
+    unit: 'chapter' | 'segment' = 'chapter',
+    stage: QualityStage = unit === 'segment' ? 'refinement' : 'chapter',
   ): { rows: PlatformQualityRow[]; measurements: any } {
-    try {
-      const constitution = context?.project?.creativeConstitution;
-      if (!constitution) return { rows: [], measurements: null };
-      const review = deterministicPlatformReview({
-        projectId, runId, stage: 'chapter', content, constitution,
-      });
-      return { rows: platformReviewToRows(review), measurements: review.measurements };
-    } catch (err) {
-      this.logger.warn(`平台度量评审失败（本次不产出平台问题，不影响质检主流程）：${err instanceof Error ? err.message : String(err)}`);
-      return { rows: [], measurements: null };
-    }
+    const constitution = context?.project?.creativeConstitution;
+    if (!constitution) throw new BadRequestException('项目执行标准不可用：平台度量未评估，质检不能标为合格');
+    // unit/stage 由调用方声明：片段单元不套整章级指标，且问题落库的 stage 必须如实反映本单元。
+    const review = deterministicPlatformReview({
+      projectId, runId, stage, unit, content, constitution,
+    });
+    return { rows: platformReviewToRows(review), measurements: review.measurements };
   }
 
   private async callRefineLLM(
@@ -1487,7 +1589,10 @@ ${contextText.slice(0, 3000)}
 }`;
 
     const response = await this.realLLM!.generate({
-      prompt, systemPrompt, temperature: 0.4, scenario: 'quality_refine',
+      prompt, systemPrompt, temperature: 0.4, metrics: { projectId: issue.project_id, stepKey: 'quality_refine' }, scenario: 'quality_refine',
+      // 输出 beforeText/afterText/diff 是「问题段落」级片段（systemPrompt 明确「只修改问题相关的段落，
+      // 不要全文重写」），所以判定单元是 segment；整章口径由 stage='chapter' 的整章 Gate 承担。
+      evaluationUnit: 'segment',
     } as any);
 
     const result = this.parseJson<LLMRefineOutput>(response.content);
@@ -1529,20 +1634,26 @@ ${fullContent.slice(0, 3000)}
 { "pass": true/false, "level": "pass|warning|fail", "remainingIssues": 0, "newIssues": 0, "summary": "复查总结，80字内" }`;
 
     const response = await this.realLLM!.generate({
-      prompt, temperature: 0.2, scenario: 'daily',
+      prompt, temperature: 0.2, scenario: 'review', responseFormat: 'json_object',
     } as any);
 
-    const raw = this.parseJson<Record<string, any>>(response.content);
-    if (raw) {
-      return {
-        pass: Boolean(raw.pass) || raw.level === 'pass',
-        level: ['pass', 'warning', 'fail'].includes(raw.level) ? raw.level : 'warning',
-        remainingIssues: Number(raw.remainingIssues) || 0,
-        newIssues: Number(raw.newIssues) || 0,
-        summary: String(raw.summary || '复查完成').slice(0, 120),
-      };
+    const raw = this.parseJson<Record<string, any>>(response.content || '');
+    if (!raw || typeof raw.pass !== 'boolean'
+      || !['pass', 'warning', 'fail'].includes(raw.level)
+      || !Number.isInteger(raw.remainingIssues) || raw.remainingIssues < 0
+      || !Number.isInteger(raw.newIssues) || raw.newIssues < 0
+      || typeof raw.summary !== 'string' || !raw.summary.trim()) {
+      throw new BadRequestException('复检未评估：模型结果缺失或格式无效，问题保持未通过');
     }
-    return { pass: true, level: 'pass', remainingIssues: 0, newIssues: 0, summary: '复查完成（自动判断）' };
+    const pass = raw.pass === true && raw.level === 'pass'
+      && raw.remainingIssues === 0 && raw.newIssues === 0;
+    return {
+      pass,
+      level: pass ? 'pass' : raw.level === 'pass' ? 'fail' : raw.level,
+      remainingIssues: raw.remainingIssues,
+      newIssues: raw.newIssues,
+      summary: raw.summary.trim().slice(0, 120),
+    };
   }
 
   // ====================== HELPERS ======================
@@ -1801,16 +1912,6 @@ ${fullContent.slice(0, 3000)}
     return content.slice(0, 3000);
   }
 
-  private simpleRecheck(remainingCount: number): RecheckResult {
-    return {
-      pass: remainingCount <= 1,
-      level: remainingCount === 0 ? 'pass' : remainingCount <= 2 ? 'warning' : 'fail',
-      remainingIssues: remainingCount,
-      newIssues: 0,
-      summary: remainingCount === 0 ? '该章节所有问题已解决' : `该章节还有 ${remainingCount} 个问题待处理`,
-    };
-  }
-
   private calcIssueCounts(issueRows: IssueRow[]): IssueCounts {
     let total = 0, open = 0, high = 0, resolved = 0;
     for (const i of issueRows) {
@@ -1818,7 +1919,7 @@ ${fullContent.slice(0, 3000)}
       if (this.isClosedIssueStatus(i.status)) resolved++;
       if (this.isOpenIssueStatus(i.status)) {
         open++;
-        if (i.severity === 'high' || i.severity === 'critical') high++;
+        if (i.severity === 'blocking' || i.severity === 'high' || i.severity === 'critical') high++;
       }
     }
     return { total, open, high, resolved };

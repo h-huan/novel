@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0",
-  "description": "AI写作平台模型路由配置",
+  "version": "1.3.1",
+  "description": "AI写作平台模型路由配置。scenarios 只允许出现「模型 tab」键（idea_generate / outline / writing / polish）：daily tab 与所有未单独配置的场景都由 routing/scenario-taxonomy.ts 的 modelSceneTab 归到这几键之一，再按 resolveScenarioRoute 取温度与输出上限。outline 的 maxTokens 与 chain/structured-truncation.ts 的 STRUCTURED_JSON_OUTPUT_CEILING 同为 32768：推理模型把 reasoning 计入 max_tokens，24576 时实测出现「reasoning 吃光预算 -> content 为空 + finish_reason=length」，白烧一次 265s 调用后才同模型扩容到 32768；首版即给到硬顶，从源头消除这一轮（与 QUALITY_REVIEW_MAXTOKENS / LLM_TUNABLES.BODY_MAXTOKENS 同一策略：正文首版预算也已收敛为单值 32768，不再有 CAP/MIN 组合式）。",
   "models": {
     "deepseek": {
       "name": "DeepSeek",
@@ -27,43 +27,6 @@
       ]
     }
   },
-  "model_versions": {
-    "deepseek": "deepseek-flash"
-  },
-  "roles": {
-    "writer": {
-      "models": [
-        {
-          "model": "deepseek",
-          "priority": 1,
-          "label": "智能写作"
-        },
-        {
-          "model": "deepseek",
-          "priority": 2,
-          "label": "快速写作"
-        }
-      ]
-    },
-    "reviewer": {
-      "models": [
-        {
-          "model": "deepseek",
-          "priority": 1,
-          "label": "智能审查"
-        }
-      ]
-    },
-    "planner": {
-      "models": [
-        {
-          "model": "deepseek",
-          "priority": 1,
-          "label": "智能策划"
-        }
-      ]
-    }
-  },
   "scenarios": {
     "idea_generate": {
       "model": "deepseek",
@@ -74,38 +37,8 @@
     "outline": {
       "model": "deepseek",
       "temperature": 0.6,
-      "maxTokens": 24576,
+      "maxTokens": 32768,
       "label": "大纲规划"
-    },
-    "world_building": {
-      "model": "deepseek",
-      "temperature": 0.6,
-      "maxTokens": 24576,
-      "label": "世界观"
-    },
-    "character_design": {
-      "model": "deepseek",
-      "temperature": 0.7,
-      "maxTokens": 24576,
-      "label": "角色设计"
-    },
-    "organization_map": {
-      "model": "deepseek",
-      "temperature": 0.6,
-      "maxTokens": 16384,
-      "label": "组织地图"
-    },
-    "foreshadowing": {
-      "model": "deepseek",
-      "temperature": 0.7,
-      "maxTokens": 16384,
-      "label": "伏笔"
-    },
-    "timeline": {
-      "model": "deepseek",
-      "temperature": 0.5,
-      "maxTokens": 16384,
-      "label": "时间线"
     },
     "writing": {
       "model": "deepseek",
@@ -113,96 +46,15 @@
       "maxTokens": 32768,
       "label": "写作"
     },
-    "writing_daily": {
-      "model": "deepseek",
-      "temperature": 0.7,
-      "maxTokens": 32768,
-      "label": "日常写作"
-    },
-    "writing_climax": {
-      "model": "deepseek",
-      "temperature": 0.8,
-      "maxTokens": 32768,
-      "label": "高潮章节"
-    },
     "polish": {
       "model": "deepseek",
       "temperature": 0.4,
       "maxTokens": 16384,
       "label": "润色"
-    },
-    "character_review": {
-      "model": "deepseek",
-      "temperature": 0.3,
-      "maxTokens": 16384,
-      "label": "角色审查"
-    },
-    "review": {
-      "model": "deepseek",
-      "temperature": 0,
-      "maxTokens": 32768,
-      "label": "质量评审"
-    }
-  },
-  "chapter_function_routing": {
-    "exposition": {
-      "model": "deepseek",
-      "tier": "fast",
-      "temperature": 0.6,
-      "label": "展开"
-    },
-    "rising": {
-      "model": "deepseek",
-      "tier": "standard",
-      "temperature": 0.7,
-      "label": "发展"
-    },
-    "climax": {
-      "model": "deepseek",
-      "tier": "standard",
-      "temperature": 0.8,
-      "label": "高潮"
-    },
-    "falling": {
-      "model": "deepseek",
-      "tier": "fast",
-      "temperature": 0.6,
-      "label": "回落"
-    },
-    "resolution": {
-      "model": "deepseek",
-      "tier": "standard",
-      "temperature": 0.5,
-      "label": "结局"
-    },
-    "transition": {
-      "model": "deepseek",
-      "tier": "fast",
-      "temperature": 0.6,
-      "label": "过渡"
-    },
-    "foreshadowing": {
-      "model": "deepseek",
-      "tier": "standard",
-      "temperature": 0.7,
-      "label": "铺垫"
-    },
-    "revelation": {
-      "model": "deepseek",
-      "tier": "standard",
-      "temperature": 0.8,
-      "label": "揭示"
-    },
-    "world_building": {
-      "model": "deepseek",
-      "tier": "standard",
-      "temperature": 0.6,
-      "label": "世界观"
     }
   },
   "defaults": {
     "temperature": 0.7,
-    "maxTokens": 16384,
-    "timeout": 30000
+    "maxTokens": 16384
   }
 }

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * LauncherLayout - 引导窗口布局
  *
  * 极简设计，类似 IDEA 欢迎窗口：
@@ -20,7 +20,7 @@ const LAUNCHER_NAV: Array<{ to: string; label: string }> = [
   { to: '/', label: '工作台' },
   { to: '/projects', label: '我的项目' },
   { to: '/discover', label: '灵感发现' },
-  { to: '/module-standards', label: '执行标准' },
+  { to: '/module-standards', label: '系统工作流规则' },
 ];
 
 interface LauncherLayoutProps {

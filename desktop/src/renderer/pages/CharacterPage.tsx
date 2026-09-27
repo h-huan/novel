@@ -58,7 +58,7 @@ interface DraftState {
 type ProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
 type ProfileSectionConfig = { title: string; description: string; fields: ProfileFieldConfig[] };
 const profileFields = (keys: string[], labels: string[], hints: string[]): ProfileFieldConfig[] => keys.map((key, index) => ({ key, label: labels[index], hint: hints[index], multiline: true }));
-// 对齐外部文档《人物模板》14 项（姓名在主表，此处 13 项）
+// 角色档案 14 项（姓名在主表，此处 13 项）：与后端 PROFILE_FIELDS 同序，改一处必须两处同步
 const PROFILE_SECTION_GROUPS: ProfileSectionConfig[] = [
   { title: '基本信息', description: '别名/称号、身份职业、阵营立场与角色类型，是角色定位的底图。', fields: profileFields(['alias_title','identity_occupation','faction_stance','role_type'], ['别名 / 称号','身份 / 职业','阵营 / 立场','角色类型（主角/反派/配角/龙套）'], ['其他称呼或代号','具体职业与社会身份','所属阵营与立场倾向','在故事中的角色定位']) },
   { title: '外貌与性格', description: '可落笔的外貌细节与稳定性格，避免空话。', fields: profileFields(['appearance','personality_traits'], ['外貌特征','性格特点'], ['一眼可识别的外貌细节，而非套话','稳定的性格倾向与反差']) },

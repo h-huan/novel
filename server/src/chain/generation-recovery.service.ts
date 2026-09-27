@@ -27,6 +27,8 @@ export interface GenerationRecoverySnapshot {
   vectors: Record<string, Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>>;
 }
 
+const RECOVERY_PROFILE_TABLES = ['world_system_profiles', 'character_extended_profiles', 'character_relationships'] as const;
+
 @Injectable()
 export class GenerationRecoveryService {
   private readonly runningProjects = new Set<string>();
@@ -178,8 +180,36 @@ export class GenerationRecoveryService {
       throw new ConflictException(`检测到受保护资料：${audit.protectionReasons.join('；')}。已停止自动覆盖。`);
     }
 
-    await this.deleteProjectVectors(projectId);
+    await this.clearGeneratedAssets(projectId);
+  }
 
+  async clearForExplicitSourceRebuild(projectId: string): Promise<void> {
+    const db = this.database.getDb();
+    const project = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status: string } | undefined;
+    if (!project) throw new NotFoundException('项目不存在');
+    if (!['active', 'generation_failed'].includes(String(project.status))) {
+      throw new ConflictException('项目仍在创建或运行，不能同时按原题材重建。');
+    }
+    const protectedBodies = Number((db.prepare(`SELECT COUNT(*) AS n FROM chapters WHERE project_id=?
+      AND (length(trim(COALESCE(content,'')))>0 OR locked_at IS NOT NULL OR status IN ('reviewing','locked','completed'))`)
+      .get(projectId) as { n: number }).n);
+    if (protectedBodies) throw new ConflictException('已有正文或锁定章节，不能按原题材覆盖。');
+    const lockedOutlines = Number((db.prepare("SELECT COUNT(*) AS n FROM outlines WHERE project_id=? AND status='locked'")
+      .get(projectId) as { n: number }).n);
+    if (lockedOutlines) throw new ConflictException('已有锁定大纲，不能按原题材覆盖。');
+    const otherManual = Number((db.prepare(`SELECT COUNT(*) AS n FROM version_history v
+      WHERE lower(COALESCE(v.created_by,'')) IN ('author','manual','manual_edit','manual-version-restore')
+      AND v.entity_id IN (
+        SELECT id FROM characters WHERE project_id=? UNION SELECT id FROM world_settings WHERE project_id=?
+        UNION SELECT id FROM organizations WHERE project_id=? UNION SELECT id FROM map_points WHERE project_id=?
+        UNION SELECT id FROM foreshadowings WHERE project_id=?
+      )`).get(projectId, projectId, projectId, projectId, projectId) as { n: number }).n);
+    if (otherManual) throw new ConflictException('世界观、角色或伏笔有作者修改，不能自动覆盖。');
+    await this.clearGeneratedAssets(projectId);
+  }
+
+  private async clearGeneratedAssets(projectId: string): Promise<void> {
+    await this.deleteProjectVectors(projectId);
     const db = this.database.getDb();
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -210,6 +240,12 @@ export class GenerationRecoveryService {
       timeline_events: db.prepare(`SELECT e.* FROM timeline_events e
         JOIN timelines t ON t.id=e.timeline_id WHERE t.project_id=? ORDER BY e.id`).all(projectId) as any[],
     };
+    for (const table of RECOVERY_PROFILE_TABLES) {
+      // 这里曾只快照主表，漏掉第二份世界规则和人物扩展档案；恢复后旧事实残留，
+      // 而失败回滚又无法还原它们。快照与清理必须覆盖同一组生成资料。
+      const present = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+      tables[table] = present ? db.prepare(`SELECT * FROM ${table} WHERE project_id=?`).all(projectId) as any[] : [];
+    }
     const vectors: GenerationRecoverySnapshot['vectors'] = {};
     for (const collection of this.recoveryCollections()) {
       vectors[collection] = await this.vectorIndex.getChunksByMetadata(collection, { projectId });
@@ -226,8 +262,11 @@ export class GenerationRecoveryService {
       for (const table of [
         'world_settings', 'characters', 'organizations', 'map_points', 'outlines',
         'chapters', 'foreshadowings', 'timelines', 'timeline_events',
+        ...RECOVERY_PROFILE_TABLES,
       ]) {
-        this.insertRows(table, snapshot.tables[table] || []);
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+          this.insertRows(table, snapshot.tables[table] || []);
+        }
       }
       db.prepare('UPDATE projects SET status=?,updated_at=? WHERE id=?')
         .run(snapshot.status, new Date().toISOString(), snapshot.projectId);
@@ -261,6 +300,11 @@ export class GenerationRecoveryService {
 
   private deleteProjectRows(projectId: string): void {
     const db = this.database.getDb();
+    for (const table of RECOVERY_PROFILE_TABLES) {
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+        db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(projectId);
+      }
+    }
     db.prepare('DELETE FROM timeline_events WHERE timeline_id IN (SELECT id FROM timelines WHERE project_id=?)').run(projectId);
     db.prepare('DELETE FROM timelines WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM chapters WHERE project_id=?').run(projectId);

@@ -10,8 +10,16 @@
  *  - 未命中字典时回退为原始 key，绝不抛错、绝不伪造数据。
  */
 
+import { PLATFORM_REGISTRY } from '../../../shared/src';
+
 // ───────────────────────── 目标平台 ─────────────────────────
-export const PLATFORM_LABELS: Record<string, string> = {
+// 平台 id 与长显示名来自 shared PLATFORM_REGISTRY（唯一一份），这里不再抄一份平台清单：
+// 抄一份的结果就是「番茄 / 番茄小说」「起点 / 起点中文网」两个口径并存，
+// 用户在项目卡片上看到的平台名与看板上的对不上。
+//
+// 看板历史上用的是短名（番茄/起点/晋江/抖音），短名是【看板专用别名】而非另一份平台清单，
+// 因此显式登记在这里并覆盖长名；新增平台只改 PLATFORM_REGISTRY，这里自动跟上。
+const PLATFORM_SHORT_LABELS: Record<string, string> = {
   fanqie: '番茄',
   qimao: '七猫',
   qidian: '起点',
@@ -22,6 +30,12 @@ export const PLATFORM_LABELS: Record<string, string> = {
   rules_horror: '规则怪谈',
   custom: '自定义',
   generic: '通用',
+};
+
+export const PLATFORM_LABELS: Record<string, string> = {
+  ...Object.fromEntries(PLATFORM_REGISTRY.map(p => [p.id, p.label])),
+  ...PLATFORM_SHORT_LABELS,
+  // manual / 未标注 不是平台，是「这条记录没有平台信息」的两种来源，必须保留。
   manual: '手动创建',
   '未标注': '未标注',
 };
@@ -179,7 +193,7 @@ export const QUALITY_ISSUE_LABELS: Record<string, string> = {
   time_order_error: '时间顺序错误',
   timeline_conflict: '时间线冲突',
   causality_gap: '因果链断裂',
-  label_fit: '平台/基调/风格/流派契合不足',
+  label_fit: '与所选执行标准契合不足',
   punctuation: '标点符号不规范',
 };
 export function qualityIssueLabel(key: string | null | undefined): string {
@@ -281,12 +295,25 @@ export const HARDLINE_RULE_LABELS: Record<string, string> = {
   '43': '缺不完美/反常识细节',
   '44': '转场机械词（接着/然后）',
   '45': '缺具体数字、不真实',
+  '46': '刻意感官描写（凉意上爬/炸开光/过电）',
+  '47': '拟人化比喻（回音吞掉尾音/黑暗吞噬）',
+  '48': '套路化表达（不像梦/那一刻突然明白）',
+  '49': '同类生理反应在短距离内密集重复',
   'dialogue-ratio': '对话占比过低',
   'dash-density': '破折号过密',
   'simile-density': '比喻过密',
   'time-density': '时间标签过密',
   'formula-sentence': '公式化句型（不是X而是Y）',
   'list-enumeration': '顿号排比罗列',
+  '35b': '叙述只用逗号句号、读着平板',
+  '50-fragment-action-chain': '两字残句动作链（X了，Y了）',
+  '51-modal-particle-density': '句末语气词堆过密（嗯/啊/吧）',
+  '52-env-imagery-repeat': '同一环境意象反复铺陈',
+  '53-same-structure-parallel': '同构排比（V了A、V了B…）',
+  '54-measure-word-mismatch': '量词与名词搭配错',
+  '55': 'AI 高频模糊词过密（仿佛/似乎/缓缓）',
+  '56-punct-stacking': '标点叠用（！！！/？？）',
+  '57-ellipsis-density': '省略号过密',
 };
 export function hardlineRuleLabel(ruleId: string | null | undefined): string {
   const k = String(ruleId || '').trim();

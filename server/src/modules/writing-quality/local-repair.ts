@@ -1,7 +1,46 @@
 import { SCORE_DIMENSIONS, type StageScore } from './stage-score';
 import { qualityGate } from './quality-issue';
 
-export function applyLocalPatches(content: string, raw: unknown, structured = false): string {
+export interface AnchoredPatchSelection {
+  patches: Array<{ original: string; replacement: string }>;
+  rejected: Array<{ index: number; reason: string }>;
+}
+
+/** Keep exact, unique, nonoverlapping patches within one local-change budget. */
+export function selectAnchoredLocalPatchBatch(content: string, raw: unknown, maxRatio = 0.2): AnchoredPatchSelection {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) throw new Error('局部修复需要1至8处明确替换');
+  const patches: AnchoredPatchSelection['patches'] = [];
+  const rejected: AnchoredPatchSelection['rejected'] = [];
+  const ranges: Array<{ start: number; end: number }> = [];
+  let touched = 0;
+  for (const [index, patch] of raw.entries()) {
+    if (typeof patch?.original !== 'string' || !patch.original || typeof patch.replacement !== 'string') {
+      rejected.push({ index, reason: '格式无效' });
+      continue;
+    }
+    const start = content.indexOf(patch.original);
+    if (start < 0 || content.indexOf(patch.original, start + 1) >= 0) {
+      rejected.push({ index, reason: '原文缺失或匹配不唯一' });
+      continue;
+    }
+    const end = start + patch.original.length;
+    if (ranges.some(range => start < range.end && end > range.start)) {
+      rejected.push({ index, reason: '与已选片段重叠' });
+      continue;
+    }
+    const cost = Math.max(patch.original.length, patch.replacement.length);
+    if (touched + cost > content.length * maxRatio) {
+      rejected.push({ index, reason: '超出本批改动预算' });
+      continue;
+    }
+    patches.push({ original: patch.original, replacement: patch.replacement });
+    ranges.push({ start, end });
+    touched += cost;
+  }
+  return { patches, rejected };
+}
+
+export function applyLocalPatches(content: string, raw: unknown, structured = false, maxRatio = 0.3): string {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) throw new Error('局部修复需要1至8处明确替换');
   const ranges: Array<{ start: number; end: number; replacement: string }> = [];
   for (const patch of raw) {
@@ -13,7 +52,7 @@ export function applyLocalPatches(content: string, raw: unknown, structured = fa
   ranges.sort((a, b) => a.start - b.start);
   if (ranges.some((r, i) => i > 0 && r.start < ranges[i - 1].end)) throw new Error('修复片段重叠');
   const touched = ranges.reduce((sum, r) => sum + Math.max(r.end - r.start, r.replacement.length), 0);
-  if (touched > content.length * 0.3) throw new Error('局部修复范围超过全文30%，需人工处理');
+  if (touched > content.length * maxRatio) throw new Error(`局部修复范围超过全文${Math.round(maxRatio * 100)}%，需人工处理`);
   let result = content;
   for (const r of ranges.reverse()) result = result.slice(0, r.start) + r.replacement + result.slice(r.end);
   if (!result.trim()) throw new Error('修复后内容为空');

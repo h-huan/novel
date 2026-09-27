@@ -32,7 +32,7 @@ API Key 以提供商保存，例如 DeepSeek Key 对应 `deepseek`；场景中�
 - 目标总字数
 - 分类
 - 故事基调
-- 写作风格
+- 文风
 - 网文流派
 - POV
 - 目标读者
@@ -66,7 +66,7 @@ Blocking 问题不能被总分抵消。世界观、角色、大纲、正文或�
 - 当前问题和严重度
 - ProjectScore、WorldScore、CharacterScore、OutlineScore、ChapterScore
 - 字数达标情况
-- 平台、基调、风格、流派契合度
+- 平台、分类、基调、文风、流派、视角六维契合度
 - 生成成功、失败、重试和卡点
 - 自动修复前后结果
 - 问题新增与解决趋势

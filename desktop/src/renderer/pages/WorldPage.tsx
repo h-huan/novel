@@ -9,7 +9,7 @@ import { FieldList } from '../components/common/ListBlocks';
 type WorldProfileFieldConfig = { key: string; label: string; hint: string; multiline?: boolean };
 type WorldProfileSectionConfig = { title: string; description: string; fields: WorldProfileFieldConfig[] };
 
-// 世界观：以《两百万字小说创作全流程指南》世界观 7 类为主，保留作品地基字段（对应长篇手动编写结构），可按本书补充自定义设定。
+// 世界观：以世界运行规则为主体，保留作品地基字段（对应长篇手动编写结构），可按本书补充自定义设定。
 const WORLD_FIELD_LABELS: Record<string, string> = {
   synopsis: '作品简介 / 核心卖点',
   basic_info: '基本信息（书名 / 类型 / 时代 / 结局 / 字数目标 / 标签）',
@@ -30,7 +30,7 @@ const WORLD_FIELD_LABELS: Record<string, string> = {
   supplementary: '补充说明',
   custom_settings: '自定义设定（按本书补充的键值对，如金手指规则、专有名词表）',
 };
-const WORLD_FIELD_META: Record<string, { label: string; hint: string }> = Object.fromEntries(Object.entries(WORLD_FIELD_LABELS).map(([key, label]) => [key, { label, hint: `按《两百万字小说创作全流程指南》世界观结构与本书剧情需要写下${label}；不需要时可以留空。` }]));
+const WORLD_FIELD_META: Record<string, { label: string; hint: string }> = Object.fromEntries(Object.entries(WORLD_FIELD_LABELS).map(([key, label]) => [key, { label, hint: `按本书世界观结构与剧情需要写下${label}；不需要时可以留空。` }]));
 const field = (key: string): WorldProfileFieldConfig => ({ key, ...(WORLD_FIELD_META[key] || { label: key, hint: '写下与本书有关的设定；不需要时可以留空。' }), multiline: true });
 const section = (title: string, description: string, keys: string[]): WorldProfileSectionConfig => ({ title, description, fields: keys.map(field) });
 

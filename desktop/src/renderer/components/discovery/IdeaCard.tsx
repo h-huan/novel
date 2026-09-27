@@ -46,9 +46,14 @@ function toStr(item: unknown): string {
   return String(item);
 }
 
-interface IdeaCardProps { idea: any; onClick: (idea: any) => void; }
+interface IdeaCardProps {
+  idea: any;
+  onClick: (idea: any) => void;
+  existingProject?: { id: string; status: string };
+  onOpenProject?: (id: string) => void;
+}
 
-const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
+const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick, existingProject, onOpenProject }) => {
   const isRawFallback = !!idea.raw && !idea.description && !idea.protagonist && !idea.setting && !idea.hook && !idea.angle;
   const hasBody = idea.description || idea.coreConflict || idea.tone || idea.uniquePoint || idea.mainReversal || idea.estimatedWords || idea.scopeReason || idea.protagonist || idea.setting || idea.raw;
 
@@ -58,13 +63,15 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
       <div style={s.header}>
         <div style={s.titleRow}>
           <span style={s.title}>{idea.title}</span>
+          {idea.storyType && <span style={s.qualityFlag}>{idea.storyType === 'short_story' ? '短篇' : '长篇'}</span>}
+          {existingProject && <span style={s.qualityFlag}>{existingProject.status === 'generation_failed' ? '已创建 · 生成失败' : existingProject.status === 'creating' ? '已创建 · 生成中' : '已创建'}</span>}
           {idea.angle && <span style={getAngleBadgeStyle(idea.angle)}>{idea.angle}</span>}
           {Array.isArray(idea.qualityIssues) && idea.qualityIssues.length > 0 && (
             <span style={s.qualityFlag} title={idea.qualityIssues.join('；')}>⚠️ {idea.qualityIssues.length} 项待优化</span>
           )}
         </div>
         {idea.hook && <p style={s.hook}>「{idea.hook}」</p>}
-        {/* 风格配置标签：按权重 平台→流派→写作风格→基调 排列，明确标注类型，跨维度去重 */}
+        {/* 这里曾跨维度按同名去重，后果是“权谋”等词只显示一次，作者无法看出它同时承担哪两个设定。 */}
         {(() => {
           // 统一处理为字符串数组：支持数组、字符串（按·或,或、分割）
           const toTagArray = (val: unknown): string[] => {
@@ -76,12 +83,13 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
           const style = toTagArray(idea.writingStyle);
           const genre = toTagArray(idea.webNovelGenre);
           const platform = idea.targetPlatform || '';
-          // 跨维度去重：按权重 流派→风格→基调，后面维度中已出现的词过滤掉
-          const usedInGenre = new Set(genre);
-          const filteredStyle = style.filter(s => !usedInGenre.has(s));
-          const usedInStyleGenre = new Set([...filteredStyle, ...genre]);
-          const filteredTone = tone.filter(t => !usedInStyleGenre.has(t));
-          const hasAny = platform || genre.length > 0 || filteredStyle.length > 0 || filteredTone.length > 0;
+          const groups: Array<[string, string[]]> = [
+            ['分类', toTagArray(idea.storyCategory ?? idea.category)],
+            ['情绪氛围', tone], ['文风', style], ['流派', genre],
+            ['作品标签', toTagArray(idea.submissionTags)],
+            ['情节', toTagArray(idea.plotTags)], ['视角', toTagArray(idea.pov)],
+          ];
+          const hasAny = platform || groups.some(([, tags]) => tags.length > 0);
           if (!hasAny) return null;
           return (
             <div style={{ ...s.tags, marginTop: '10px' }}>
@@ -90,21 +98,11 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
                   平台：{platform}
                 </span>
               )}
-              {genre.length > 0 && (
-                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(59,130,246,0.15)', color: 'var(--color-info-light)', fontWeight: 600 }}>
-                  流派：{genre.join('·')}
+              {groups.filter(([, tags]) => tags.length > 0).map(([label, tags]) => (
+                <span key={label} style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(59,130,246,0.15)', color: 'var(--color-info-light)', fontWeight: 600 }}>
+                  {label}：{tags.join('·')}
                 </span>
-              )}
-              {filteredStyle.length > 0 && (
-                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(168,85,247,0.15)', color: 'var(--color-purple)', fontWeight: 600 }}>
-                  风格：{filteredStyle.join('·')}
-                </span>
-              )}
-              {filteredTone.length > 0 && (
-                <span style={{ ...getStyleTagStyle(), backgroundColor: 'rgba(233,69,96,0.15)', color: '#ff8fa3', fontWeight: 600 }}>
-                  基调：{filteredTone.join('·')}
-                </span>
-              )}
+              ))}
             </div>
           );
         })()}
@@ -206,11 +204,11 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick }) => {
       <div style={s.actions}>
         <button
           style={s.btn}
-          onClick={(e) => { e.stopPropagation(); onClick(idea); }}
+          onClick={(e) => { e.stopPropagation(); if (existingProject) onOpenProject?.(existingProject.id); else onClick(idea); }}
           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-accent)'; }}
         >
-          ✨ 选这个，创建项目
+          {existingProject ? '查看已创建项目与诊断 →' : '✨ 选这个，创建项目'}
         </button>
       </div>
     </div>

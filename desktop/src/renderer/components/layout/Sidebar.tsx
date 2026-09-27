@@ -56,6 +56,7 @@ const Sidebar: React.FC = () => {
   // 仅项目功能 tab（非项目 tab 已移到顶部 Header）
   const projectItems: NavItem[] = pid ? [
     { id: 'dashboard', label: '首页', path: `/project/${pid}/dashboard`, icon: ICONS.dashboard },
+    { id: 'standards', label: '本书创作设定', path: `/project/${pid}/standards`, icon: ICONS.settings },
     { id: 'writing', label: '写作', path: `/project/${pid}/writing`, icon: ICONS.writing },
     { id: 'outline', label: '大纲', path: `/project/${pid}/outline`, icon: ICONS.outline },
     { id: 'character', label: '角色', path: `/project/${pid}/characters`, icon: ICONS.character },

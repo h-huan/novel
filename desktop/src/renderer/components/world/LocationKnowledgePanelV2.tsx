@@ -10,7 +10,7 @@ const relationFields = ['target_location_id','relation_description','distance_co
 const labels: Record<string, string> = { target_location_id:'目标地点', relation_description:'关系说明', distance_cost:'距离成本', travel_time:'移动时间', travel_method:'交通方式', risk_level:'风险等级', access_condition:'通行条件' };
 const payload = (value: any) => value?.data?.data ?? value?.data ?? value ?? {};
 
-// 对齐《世界观模板》的地点 / 氛围 / 势力段落（聚焦 10 项）
+// 地点档案字段（聚焦 10 项），与后端 LOCATION_PROFILE_FIELDS 同序，改一处必须两处同步
 const profileSections: Array<[string, string, string[]]> = [
   ['基础定位','定义地点类型与地理位置。',['location_type','geography_position']],
   ['描述与氛围','可直接用于正文的基础描述、氛围与关键地标。',['basic_description','atmosphere','key_landmarks']],

@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from '../../stores/appStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -11,7 +11,8 @@ const GLOBAL_NAV: Array<{ to: string; label: string }> = [
   { to: '/', label: '工作台' },
   { to: '/projects', label: '我的项目' },
   { to: '/discover', label: '灵感发现' },
-  { to: '/module-standards', label: '执行标准' },
+  { to: '/dictionary', label: '创作字典' },
+  { to: '/module-standards', label: '系统工作流规则' },
 ];
 
 /**

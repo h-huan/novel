@@ -65,6 +65,7 @@ export interface IdeaDraftResponse {
   title: string;
   projectType: string;
   targetPlatform: string;
+  customPlatformNote: string;
   targetWords: number;
   description: string;
   status: string;
@@ -103,7 +104,10 @@ export class IdeaLabService {
       raw_idea: dto.rawIdea,
       title: dto.title || '',
       project_type: dto.projectType || 'long_novel',
-      target_platform: dto.targetPlatform || 'generic',
+      // 空平台如实存成空串（= 未设置），不写 'generic' 冒充「已选平台」；
+      // 真正的阻断在转项目时由 ProjectService.create 的三道判统一执行。
+      target_platform: dto.targetPlatform || '',
+      custom_platform_note: dto.customPlatformNote || '',
       target_words: dto.targetWords,
       description: dto.description || '',
       status: 'draft',
@@ -315,25 +319,54 @@ export class IdeaLabService {
     const title = dto.title || row.title ||
       (refinedIdea.titleSuggestions && refinedIdea.titleSuggestions[0]) ||
       '未命名作品';
-    // 调用 ProjectService.create 复用第一阶段逻辑
-    const project = this.projectService.create({
+    // 执行标准（平台/分类/基调/文风/流派/视角）是框架层与正文层共同的验收前提，必须由创建入口原样接收。
+    // 此前这里硬编码 category: refinedIdea.storyType（那是短篇/长篇的类型值，不是分类）、storyTone: []、
+    // webNovelGenre: []、pov: ''，等于无论用户在向导里选了什么，落库的创作宪法都是空值，直到生成时才以
+    // 422 暴露。RefinedIdea 接口本身也确实没有这些字段（见上方定义），所以标准只能来自 DTO。
+    const creationInput: Record<string, any> = {
       title,
       type: row.project_type as any,
       creationSource: 'idea',
-      targetPlatform: row.target_platform as any,
-      targetWords: row.target_words,
-      category: refinedIdea.storyType || '',
-      storyTone: [],
-      webNovelGenre: [],
-      pov: '',
-      targetAudience: refinedIdea.targetAudience || undefined,
+      targetPlatform: dto.targetPlatform || row.target_platform,
+      // 自定义平台说明 = 「平台」这一维的执行值本身（custom 时必填，为空即未执行标准，创建入口已阻断）。
+      // 草稿阶段已经填过说明就直接沿用，用户不必在转项目时重填一遍。
+      customPlatformNote: dto.customPlatformNote ?? row.custom_platform_note,
+      // 目标总字数同属「分类」维的执行值输入：转项目时填过就以本次为准，否则沿用草稿值（不填默认值）。
+      targetWords: dto.targetWords ?? row.target_words,
+      // 取舍依据同属「分类」维的执行值输入。它只写在项目卡片上：草稿表没有这一列，
+      // 也没有更新草稿执行标准的入口，所以这里不设「沿用草稿值」的兜底，直接用本次传值。
+      categoryWordScaleDeviation: dto.categoryWordScaleDeviation,
+      category: dto.category,
+      storyTone: dto.storyTone,
+      writingStyle: dto.writingStyle,
+      webNovelGenre: dto.webNovelGenre,
+      submissionTags: dto.submissionTags,
+      plotTags: dto.plotTags,
+      genreFitNote: dto.genreFitNote,
+      pov: dto.pov,
+      targetAudience: dto.targetAudience ?? refinedIdea.targetAudience ?? undefined,
       currentWorkflowStage: row.project_type === 'short_story' ? 'topic' : 'idea_or_inspiration',
       ideaStatus: 'converted',
       ideaSeed: row.raw_idea,
       confirmedIdea: confirmedIdea,
       description: row.description || refinedIdea.oneLineHook || '',
       settings: {},
-    });
+    };
+
+    // 「六维齐备 → 分类归位 → 分类体量」三道判在全平台只有 ProjectService.create 一处。
+    // 这里曾并行维护第二份「六维判」，判据与文案各写一份 —— 两份一旦漂移，同一套执行标准
+    // 从不同入口进来就会得到不同结论，表现就是用户反复看到「同一个 Gate 又没过」。
+    // 判据只留一份：交给 create 抛；本入口只补 create 拿不到的「草稿号」审计日志。
+    // 不降级：异常类型、文案、阻断时机与 create 完全一致（BadRequestException，且都在写库之前）。
+    let project: ReturnType<ProjectService['create']>;
+    try {
+      project = this.projectService.create(creationInput as any);
+    } catch (err) {
+      if (err instanceof BadRequestException) {
+        this.logger.error(`想法转项目前置阻断 draft=${id} 原因=${err.message}`);
+      }
+      throw err;
+    }
 
     // 更新草稿状态
     this.repo.update(id, {
@@ -583,6 +616,7 @@ export class IdeaLabService {
       title: row.title || '',
       projectType: row.project_type,
       targetPlatform: row.target_platform,
+      customPlatformNote: row.custom_platform_note || '',
       targetWords: row.target_words,
       description: row.description || '',
       status: row.status,

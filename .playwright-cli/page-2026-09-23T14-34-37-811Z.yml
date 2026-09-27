@@ -1,0 +1,155 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - generic [ref=f1e6]:
+      - generic [ref=f1e7]: ✦ 写作工作台
+      - button "工作台" [ref=f1e8] [cursor=pointer]
+      - button "我的项目" [ref=f1e9] [cursor=pointer]
+      - button "灵感发现" [ref=f1e10] [cursor=pointer]
+      - button "系统创作规则" [ref=f1e11] [cursor=pointer]
+    - generic [ref=f1e12]:
+      - button "设置" [ref=f1e13] [cursor=pointer]
+      - generic [ref=f1e17]:
+        - button "最小化" [ref=f1e18] [cursor=pointer]
+        - button "最大化" [ref=f1e21] [cursor=pointer]
+        - button "关闭" [ref=f1e24] [cursor=pointer]
+  - main [ref=f1e28]:
+    - generic [ref=f1e29]:
+      - generic [ref=f1e30]:
+        - generic [ref=f1e32]:
+          - heading "💡 灵感发现" [level=1] [ref=f1e33]
+          - paragraph [ref=f1e34]: 从多个角度挖掘故事题材，三分钟搭建完整创作框架
+        - generic [ref=f1e35]:
+          - generic [ref=f1e36]: "1"
+          - generic [ref=f1e38]: "2"
+          - generic [ref=f1e40]: "3"
+        - generic [ref=f1e41]:
+          - generic [ref=f1e42]: 配置
+          - generic [ref=f1e43]: 发现
+          - generic [ref=f1e44]: 创建
+      - generic [ref=f1e46]:
+        - generic [ref=f1e47]: 故事类型
+        - generic [ref=f1e48]:
+          - generic [ref=f1e49] [cursor=pointer]:
+            - generic [ref=f1e50]: 📄
+            - generic [ref=f1e51]: 短篇
+            - generic [ref=f1e52]: 聚焦主线，完整闭环
+          - generic [ref=f1e53] [cursor=pointer]:
+            - generic [ref=f1e54]: 📚
+            - generic [ref=f1e55]: 长篇
+            - generic [ref=f1e56]: 多线发展，持续创作
+        - generic [ref=f1e57]: 目标平台
+        - generic [ref=f1e58]:
+          - button "知乎盐选" [ref=f1e59] [cursor=pointer]
+          - button "番茄小说" [ref=f1e60] [cursor=pointer]
+          - button "起点中文网" [ref=f1e61] [cursor=pointer]
+          - button "抖音故事" [ref=f1e62] [cursor=pointer]
+          - button "晋江文学城" [ref=f1e63] [cursor=pointer]
+          - button "七猫小说" [ref=f1e64] [cursor=pointer]
+          - button "小红书故事" [ref=f1e65] [cursor=pointer]
+          - button "规则怪谈" [ref=f1e66] [cursor=pointer]
+          - button "自定义平台" [ref=f1e67] [cursor=pointer]
+        - generic [ref=f1e68]: 目标总字数
+        - generic [ref=f1e69]:
+          - spinbutton "留空则由AI根据题材规模、剧情节奏和章节任务动态规划" [ref=f1e70]
+          - generic [ref=f1e71]: 长篇目标总字数不少于 100,000 字；章节字数按所选平台规则动态规划。
+        - generic [ref=f1e73]: 故事分类
+        - generic [ref=f1e74]:
+          - combobox [ref=f1e76]:
+            - option "选择该平台投稿大类..."
+            - option "男频·西方奇幻"
+            - option "男频·东方仙侠"
+            - option "男频·科幻末世"
+            - option "男频·都市日常" [selected]
+            - option "男频·都市修真"
+            - option "男频·都市高武"
+            - option "男频·历史古代"
+            - option "男频·战神赘婿"
+            - option "男频·都市种田"
+            - option "男频·传统玄幻"
+            - option "男频·历史脑洞"
+            - option "男频·悬疑脑洞"
+            - option "男频·都市脑洞"
+            - option "男频·玄幻脑洞"
+            - option "男频·悬疑灵异"
+            - option "男频·抗战谍战"
+            - option "男频·游戏体育"
+            - option "男频·动漫衍生"
+            - option "男频·男频衍生"
+            - option "女频·古风世情"
+            - option "女频·科幻末世"
+            - option "女频·游戏体育"
+            - option "女频·女频衍生"
+            - option "女频·玄幻言情"
+            - option "女频·种田"
+            - option "女频·年代"
+            - option "女频·现言脑洞"
+            - option "女频·宫斗宅斗"
+            - option "女频·悬疑脑洞"
+            - option "女频·古言脑洞"
+            - option "女频·快穿"
+            - option "女频·青春甜宠"
+            - option "女频·星光璀璨"
+            - option "女频·女频悬疑"
+            - option "女频·职场婚恋"
+            - option "女频·豪门总裁"
+            - option "女频·民国言情"
+          - generic [ref=f1e77]: 已选 番茄小说 投稿分类，灵感、大纲和正文将沿用这一项。
+          - generic [ref=f1e78]: 已匹配 男频·都市日常；下方题材标签来自该分类的平台数据。
+        - generic [ref=f1e79]: 叙事视角
+        - generic [ref=f1e80]:
+          - combobox [ref=f1e81]:
+            - option "选择叙事视角..." [selected]
+            - option "第三人称限知"
+            - option "第三人称全知"
+            - option "第一人称"
+            - option "多视角轮换"
+          - generic [ref=f1e82]: 决定故事由谁来讲，以及读者能知道多少。
+        - generic [ref=f1e83]: 目标读者（可选）
+        - combobox [ref=f1e85]:
+          - option "不限定" [selected]
+          - option "男频"
+          - option "女频"
+        - generic [ref=f1e86]: 故事基调（可多选）
+        - generic [ref=f1e87]: 作者设定的情绪方向，创作时按所选平台分类执行。
+        - generic [ref=f1e88]:
+          - button "热血" [ref=f1e89] [cursor=pointer]
+          - button "爽文" [ref=f1e90] [cursor=pointer]
+          - button "搞笑" [ref=f1e91] [cursor=pointer]
+          - button "悬疑" [ref=f1e92] [cursor=pointer]
+          - button "甜宠" [ref=f1e93] [cursor=pointer]
+          - button "虐恋" [ref=f1e94] [cursor=pointer]
+          - button "权谋" [ref=f1e95] [cursor=pointer]
+          - button "爆笑" [ref=f1e96] [cursor=pointer]
+          - button "烧脑" [ref=f1e97] [cursor=pointer]
+          - button "无敌" [ref=f1e98] [cursor=pointer]
+          - button "逆袭" [ref=f1e99] [cursor=pointer]
+          - button "刀人" [ref=f1e100] [cursor=pointer]
+          - button "治愈" [ref=f1e101] [cursor=pointer]
+          - button "女强" [ref=f1e102] [cursor=pointer]
+          - button "轻松" [ref=f1e103] [cursor=pointer]
+          - button "压抑" [ref=f1e104] [cursor=pointer]
+        - generic [ref=f1e105]: 文风（可多选）
+        - generic [ref=f1e106]: 作者设定的表达方式；发现灵感和创建作品使用同一选择。
+        - generic [ref=f1e107]:
+          - button "白描/朴素" [ref=f1e108] [cursor=pointer]
+          - button "情感" [ref=f1e109] [cursor=pointer]
+          - button "宏大叙事" [ref=f1e110] [cursor=pointer]
+          - button "群像叙事" [ref=f1e111] [cursor=pointer]
+          - button "倒叙" [ref=f1e112] [cursor=pointer]
+          - button "多线叙事" [ref=f1e113] [cursor=pointer]
+          - button "日记体" [ref=f1e114] [cursor=pointer]
+          - button "对话体" [ref=f1e115] [cursor=pointer]
+        - generic [ref=f1e116]: 平台分类题材标签（可多选）
+        - generic [ref=f1e117]: 取自所选分类的头部作品标签；选择后作为本书流派设定。
+        - generic [ref=f1e118]:
+          - button "多女主" [ref=f1e145] [cursor=pointer]
+          - button "穿越" [ref=f1e121] [cursor=pointer]
+          - button "都市" [ref=f1e146] [cursor=pointer]
+          - button "魂穿" [ref=f1e147] [cursor=pointer]
+          - button "穿书" [ref=f1e148] [cursor=pointer]
+          - button "单女主" [ref=f1e149] [cursor=pointer]
+        - button "🚀 AI深度发现题材" [ref=f1e136] [cursor=pointer]
+        - generic [ref=f1e137]: ▶ 或者，自己输入题材 →
+  - contentinfo [ref=f1e139]:
+    - generic [ref=f1e140]: 0 / 0 字
+    - generic [ref=f1e142]: 服务器在线

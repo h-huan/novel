@@ -2,6 +2,7 @@
  * 创建想法草稿 DTO
  */
 import { IsString, IsNotEmpty, IsOptional, IsNumber, IsIn, Min } from 'class-validator';
+import { PLATFORM_IDS, SUPPORTED_STORY_TYPE_IDS } from '../../../../shared/src';
 
 export class CreateIdeaDraftDto {
   @IsString()
@@ -13,12 +14,17 @@ export class CreateIdeaDraftDto {
   title?: string = '';
 
   @IsOptional()
-  @IsIn(['short_story', 'long_novel'])
+  @IsIn([...SUPPORTED_STORY_TYPE_IDS])
   projectType?: string = 'long_novel';
 
   @IsOptional()
-  @IsIn(['zhihu', 'fanqie', 'qimao', 'qidian', 'douyin', 'xiaohongshu', 'jinjiang', 'rules_horror', 'custom', 'generic'])
-  targetPlatform?: string = 'generic';
+  @IsIn([...PLATFORM_IDS])
+  targetPlatform?: string;
+
+  /** 自定义平台说明：targetPlatform === 'custom' 时它就是平台维度的执行标准本身。 */
+  @IsOptional()
+  @IsString()
+  customPlatformNote?: string;
 
   @IsNumber()
   @Min(1)

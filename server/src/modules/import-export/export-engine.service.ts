@@ -169,7 +169,7 @@ export class ExportEngineService {
         status: project.status,
         target_words: project.target_words,
         current_words: project.current_words,
-        platform_style: project.platform_style,
+        target_platform: project.target_platform,
         description: project.description,
         writing_style: project.writing_style,
         settings: project.settings,

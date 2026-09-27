@@ -1,4 +1,5 @@
 import { it, expect, vi } from 'vitest';
+import { STANDARD_PRECONDITIONS } from './test-standards';
 import { createRequire } from 'node:module';
 import { Migrator } from '../database/migrator';
 import { ProjectService } from '../modules/project/project.service';
@@ -14,7 +15,7 @@ for (const regression of [false, true]) it(`repairs, rechecks, compares and ${re
   try {
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
-    const project = new ProjectService(new ProjectRepository(database)).create({ title: '验收', targetPlatform: 'fanqie' });
+    const project = new ProjectService(new ProjectRepository(database)).create({ ...STANDARD_PRECONDITIONS, title: '验收' });
     const metrics = new GenerationMetricsService(database);
     const llm = new RealLLMService({} as any, metrics);
     (llm as any).generateInternal = vi.fn(async (r: any) => {
@@ -54,7 +55,7 @@ it('blocks stale constitution output even when the evaluator gives high scores',
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
     const projects = new ProjectService(new ProjectRepository(database));
-    const project = projects.create({ title: 'stale', targetPlatform: 'fanqie' });
+    const project = projects.create({ ...STANDARD_PRECONDITIONS, title: 'stale' });
     const metrics = new GenerationMetricsService(database);
     const llm = new RealLLMService({} as any, metrics);
     (llm as any).generateInternal = vi.fn(async (r: any) => {
@@ -72,7 +73,7 @@ it('keeps physical generation runs but updates one artifact report across retrie
   try {
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
-    const project = new ProjectService(new ProjectRepository(database)).create({ title: '报告边界', targetPlatform: 'fanqie' });
+    const project = new ProjectService(new ProjectRepository(database)).create({ ...STANDARD_PRECONDITIONS, title: '报告边界' });
     const metrics = new GenerationMetricsService(database);
     const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, {
       score: ['category', 'tone', 'style', 'genre', 'pov', 'prose'].includes(key) ? null : 90,

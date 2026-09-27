@@ -21,6 +21,50 @@ export interface QualityIssue {
   contractField?: string;
 }
 
+/**
+ * 唯一标记：该问题的成因是「项目创作宪法里这一维的执行标准本身为空」。
+ * 语义是【未执行标准】——用户创建项目时没有确认这一维，不是「正文写得不好」。
+ * 任何地方判断「这是不是未执行标准」都必须调用 isMissingStandardIssue（结构化问题侧）
+ * 或 chain.controller 的 isMissingStandardFinding（审查器文本侧），禁止各自再拼一份
+ * 字符串/正则：口径分叉成两套判据，正是此前 Gate 文案把「标准没设」和「写得不好」
+ * 混成一条报错的根因。
+ */
+export const MISSING_STANDARD_SOURCE = 'constitution_missing_standard';
+
+/** 唯一判别函数：只做归类，不降级、不静默、不发明第二套判据。 */
+export function isMissingStandardIssue(issue: Pick<QualityIssue, 'source' | 'ruleId'>): boolean {
+  return issue.source === MISSING_STANDARD_SOURCE || issue.ruleId.endsWith('.missing_standard');
+}
+
+/**
+ * 文本侧同一判据。审查器与 Gate 把结论作为字符串传下去（missing / contradictions 数组），
+ * 这条文本便是一串「创作宪法里这一维为空」的说明，而不是结构化 issue，所以必须有一条字符串判据。
+ *
+ * 【为什么判据要写成宽口径】实测三类同义文本描述的是同一件事——标准没设：
+ *   · 创作宪法未设置分类：属未执行标准，必须补齐后才能继续（不得用默认值或平台推荐替代）
+ *   · 项目卡 creativeConstitution 中 category、pov、targetAudience 为空，而世界观档案与本章详细大纲…
+ *   · 创作宪法 category 为空，无法核对本章分类归属；修复动作：补全分类字段后重评 category 维度。
+ * 只认第一种严措辞，后两种会被判成「本章大纲不一致」：用户照着报错去改大纲，改完仍然失败，
+ * 这才是「同一个 Gate 反反复复出现」的真正来源。
+ *
+ * 【为什么这条不能删】partitionAlignmentFindings 里这条判据排在 sourceConflicts 之前；
+ * 后两种文本同时含「世界观档案」与「详细大纲」，一旦不在此拦下就会被来源冲突通道吸走、静默放行。
+ *
+ * 【为什么主体锚点是必要条件】「为空 / 缺失」这类词正文里也会出现；必须同时点到
+ * 创作宪法 / 项目卡 / creativeConstitution 才算标准缺失，否则会把正文质量问题误判成未执行标准。
+ * 判据只有这一份：chain.controller 与 gate-failure 都必须调用本函数，禁止各自再拼正则。
+ */
+export function isMissingStandardFinding(text: string): boolean {
+  const value = String(text || '');
+  if (!value) return false;
+  // 严措辞：历史文本形态，两串同时出现才成立。
+  if (value.includes('创作宪法未设置') && value.includes('未执行标准')) return true;
+  // 宽措辞：主体锚点（必要条件）+ 状态词。
+  const namesStandard = /creativeConstitution|创作宪法|项目卡/.test(value);
+  const namesVacancy = /为空|缺失|未设置|未配置|未填写|未确认|未指定|not set|missing/i.test(value);
+  return namesStandard && namesVacancy;
+}
+
 /** Adapts warning/contradiction/hardline and persisted issues without inventing evidence. */
 export function qualityIssue(input: {
   id?: string; projectId: string; entityId?: string | null; runId?: string | null;
@@ -28,9 +72,12 @@ export function qualityIssue(input: {
   severity?: string; status?: string; message: string; quote?: string; content?: string;
   evidenceVerified?: boolean; source: string;
 }): QualityIssue {
-  const severity: QualitySeverity = ({ critical: 'blocking', CRITICAL: 'blocking', contradiction: 'blocking',
-    warning: 'medium', WARNING: 'medium', INFO: 'info' } as Record<string, QualitySeverity>)[input.severity || '']
-    || (['blocking', 'high', 'medium', 'low', 'info'].includes(input.severity || '') ? input.severity as QualitySeverity : 'medium');
+  // 严重度大小写不敏感归一：评审模型经常返回 "BLOCKING"/"HIGH"。此前大写 BLOCKING 不在映射表、
+  // 也不在小写白名单，会落到默认值 medium —— 等于把阻断静默降级，是必须消除的降级路径。
+  const rawSeverity = String(input.severity ?? '').toLowerCase();
+  const severity: QualitySeverity = ({ critical: 'blocking', contradiction: 'blocking', warning: 'medium',
+    info: 'info' } as Record<string, QualitySeverity>)[rawSeverity]
+    || (['blocking', 'high', 'medium', 'low', 'info'].includes(rawSeverity) ? rawSeverity as QualitySeverity : 'medium');
   const quote = typeof input.quote === 'string' ? input.quote.trim() : '';
   const start = quote && input.content ? input.content.indexOf(quote) : -1;
   const verified = input.evidenceVerified === true || start >= 0;

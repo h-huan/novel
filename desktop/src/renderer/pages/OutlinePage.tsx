@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { parseJsonToReadable } from '../lib/textList';
 import { useCharacterStore } from '../stores/characterStore';
@@ -18,6 +18,13 @@ import WorkflowBlockedNotice from '../components/workflow/WorkflowBlockedNotice'
 import { clampSidebar } from '../components/common/LayoutKit';
 import WritingQualityContextBanner from '../components/quality/WritingQualityContextBanner';
 import { CHAPTER_WORD_RANGE } from '@novel/shared';
+import {
+  missingExecutionStandards,
+  platformLabel,
+  targetWordsBlockingReason,
+  toStandardsTags,
+  type ExecutionStandardsValue,
+} from '../lib/executionStandards';
 
 type ChapterFunctionType =
   | 'opening'
@@ -405,13 +412,11 @@ const OutlinePage: React.FC = () => {
   const [editContent, setEditContent] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [material, setMaterial] = useState('');
-  const [platform, setPlatform] = useState('fanqie');
   const [targetWords, setTargetWords] = useState('');
   const [workScale, setWorkScale] = useState('ai_recommended');
   const [targetWordsRange, setTargetWordsRange] = useState('');
   const [updatePlan, setUpdatePlan] = useState('daily_words');
   const [generateCount, setGenerateCount] = useState('remaining');
-  const [tone, setTone] = useState('neutral');
   const [blockedNotice, setBlockedNotice] = useState<{
     reason: string;
     missingAssets: string[];
@@ -423,6 +428,37 @@ const OutlinePage: React.FC = () => {
 
   const projectType = currentProject?.type === 'long_novel' ? 'long' : 'short';
   const projectSettings = (currentProject?.settings || {}) as Record<string, any>;
+
+  // 执行标准是【执行前提】，来源只有项目卡片上的创作宪法一份。
+  // 这里曾经有一对「目标平台 / 风格基调」自由文本框：它们不参与 /chain/generate-outline
+  // 的请求体，服务端也只认项目卡片上的标准，于是成了「改了以为生效、其实无效」的假配置。
+  // 现在只读展示项目卡片上的标准；缺项直接阻断生成，并指向执行标准页补齐。
+  const executionStandards = useMemo<ExecutionStandardsValue>(() => {
+    const c = (currentProject?.creativeConstitution || {}) as Record<string, any>;
+    return {
+      targetPlatform: String(c.targetPlatform || ''),
+      customPlatformNote: String(c.customPlatformNote || ''),
+      category: String(c.category || ''),
+      storyTone: Array.isArray(c.storyTone) ? c.storyTone.map(String) : [],
+      writingStyle: toStandardsTags(c.writingStyle),
+      webNovelGenre: Array.isArray(c.webNovelGenre) ? c.webNovelGenre.map(String) : [],
+      submissionTags: Array.isArray(c.submissionTags) ? c.submissionTags.map(String) : [],
+      plotTags: Array.isArray(c.plotTags) ? c.plotTags.map(String) : [],
+      genreFitNote: String(c.genreFitNote || ''),
+      // 目标总字数是「分类」维的平台侧判据输入：0/空 = 未设定，不是「不适用」。
+      targetWords: Number(c.targetWords) > 0 ? String(c.targetWords) : '',
+      // 成稿单元（项目类型）是「分类」维体量判据的适用前提：漏传会被按「未知即从严」处理，
+      // 合规短篇会在这里先被前端拦下（后端判据由此拿到 projectType 才认得出短篇）。
+      projectType: String(currentProject?.type || ''),
+      pov: String(c.pov || ''),
+      targetAudience: typeof c.targetAudience === 'string' ? c.targetAudience : '',
+      categoryWordScaleDeviation: String(c.categoryWordScaleDeviation || ''),
+    };
+  }, [currentProject?.creativeConstitution, currentProject?.type]);
+  const missingStandards = useMemo(() => missingExecutionStandards(executionStandards), [executionStandards]);
+  // 六维之外，「分类」维的目标总字数同样来自项目卡片：非 null 即该维未执行，生成前阻断。
+  const targetWordsBlock = useMemo(() => targetWordsBlockingReason(executionStandards), [executionStandards]);
+  const standardsBlocked = missingStandards.length > 0 || Boolean(targetWordsBlock);
 
   const openOperationDialog = useCallback((dialog: OperationDialog) => {
     setOperationValues(Object.fromEntries(dialog.fields.map(field => [field.key, field.initialValue])));
@@ -784,6 +820,24 @@ const OutlinePage: React.FC = () => {
 
   const handleGenerateOutline = useCallback(async () => {
     if (!projectId) return;
+    if (missingStandards.length > 0) {
+      setBlockedNotice({
+        reason: `执行标准未完成：${missingStandards.join('、')} 仍为空。空值等于这项标准不存在，服务端会直接阻断，不会用默认值或平台推荐替代。`,
+        missingAssets: missingStandards.map((dimension) => `执行标准·${dimension}`),
+        recommendedNextAction: '前往「项目执行标准」补齐后再生成大纲',
+      });
+      setGenProgress('大纲生成已阻断：执行标准未完成。');
+      return;
+    }
+    if (targetWordsBlock) {
+      setBlockedNotice({
+        reason: `未执行标准（分类）：${targetWordsBlock}`,
+        missingAssets: ['执行标准·分类（目标总字数）'],
+        recommendedNextAction: '前往「项目执行标准」补齐目标总字数后再生成大纲',
+      });
+      setGenProgress('大纲生成已阻断：分类维的目标总字数未执行。');
+      return;
+    }
     const guard = await checkAction(projectId, 'generate_outline');
     if (!guard.allowed) {
       setBlockedNotice({
@@ -802,29 +856,17 @@ const OutlinePage: React.FC = () => {
     try {
       const configuredTotalWords = Number(targetWords || currentProject?.targetWords || 0);
       if (!Number.isInteger(configuredTotalWords) || configuredTotalWords <= 0) throw new Error('项目未配置有效的目标总字数');
-      const result = await api.post('/chain/templates/execute/long-novel-flexible-outline', {
-        userInput: {
-          projectId,
-          story_setting: material || '自动生成',
-          targetWords: configuredTotalWords / 10000,
-          genre: projectSettings.genre || tone || platform,
-          chapterLimit: generateCount === 'remaining' ? undefined : generateCount,
-          planning: {
-            workScale,
-            targetWordsRange,
-            structureMode: 'dynamic_by_story_rhythm',
-            chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX },
-            updatePlan,
-            generateCount,
-            shortStoryFlow: projectType === 'short'
-              ? ['题材钩子', '故事核心设定', '人物关系表', '章节结构', '递进反转表', '伏笔回收表', '章节写作包', '开篇吸引力检查']
-              : [],
-            ultraLongReferenceOnly: true,
-          },
-        },
+      // 走服务端权威入口：服务端先校验项目卡片上的执行标准（平台/分类/基调/文风/流派/视角/题材标签），
+      // 再把同一份标准注入大纲链。直连 /chain/templates/execute/:id 会跳过这道闸门，
+      // 产出的大纲与创建前选定的平台/标签无关；且该端点失败时被包装成 HTTP 200，
+      // 前端只能看到「没有解析到可保存的章节结构」，掩盖真实原因。
+      const result = await api.post('/chain/generate-outline', {
+        projectId,
+        storySetting: material,
+        chapterLimit: generateCount === 'remaining' ? undefined : generateCount,
       });
       const data = (result as any).data ?? result;
-      const normalized = normalizeGeneratedOutline(data.outputs || data);
+      const normalized = normalizeGeneratedOutline(data);
       if (normalized.volumes.length === 0) {
         setGenProgress('大纲生成完成，但没有解析到可保存的章节结构。');
         setCanRegenerate(true);
@@ -845,7 +887,7 @@ const OutlinePage: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, material, platform, targetWords, targetWordsRange, tone, generateCount, workScale, updatePlan, projectType, checkAction, currentProject?.targetWords, projectSettings]);
+  }, [projectId, material, targetWords, targetWordsRange, generateCount, workScale, updatePlan, projectType, checkAction, currentProject?.targetWords, projectSettings, missingStandards, targetWordsBlock]);
 
   const handleSaveGenerated = useCallback(async () => {
     setGenProgress('正在保存大纲...');
@@ -1442,8 +1484,31 @@ const OutlinePage: React.FC = () => {
       {activeView === 'generate' && (
         <div style={styles.generatePanel}>
           <div style={styles.formSection}>
-            <label style={styles.formLabel}>目标平台</label>
-            <input style={styles.input} value={platform} onChange={event => setPlatform(event.target.value)} placeholder="fanqie / zhihu / qidian" />
+            <label style={styles.formLabel}>执行标准（生成时按项目卡片执行）</label>
+            {standardsBlocked ? (
+              <div style={styles.standardsCardMissing}>
+                {missingStandards.length > 0 && (
+                  <>
+                    <div style={styles.standardsMissingTitle}>执行标准未完成：{missingStandards.join('、')}</div>
+                    <div style={styles.standardsMissingBody}>空值等于这项标准不存在。生成会被服务端阻断，不会用默认值或平台推荐替代。</div>
+                  </>
+                )}
+                {targetWordsBlock && (
+                  <div style={styles.standardsMissingBody}>未执行标准（分类）：{targetWordsBlock}</div>
+                )}
+                <Link style={styles.standardsLink} to={`/project/${projectId}/standards`}>前往「项目执行标准」补齐</Link>
+              </div>
+            ) : (
+              <div style={styles.standardsCard}>
+                <div style={styles.standardsRow}><span style={styles.standardsKey}>平台</span><span style={styles.standardsValue}>{platformLabel(executionStandards.targetPlatform) || '（空）'}</span></div>
+                <div style={styles.standardsRow}><span style={styles.standardsKey}>分类</span><span style={styles.standardsValue}>{executionStandards.category || '（空）'}</span></div>
+                <div style={styles.standardsRow}><span style={styles.standardsKey}>目标总字数</span><span style={styles.standardsValue}>{executionStandards.targetWords ? `${Number(executionStandards.targetWords).toLocaleString()} 字` : '（空）'}</span></div>
+                <div style={styles.standardsRow}><span style={styles.standardsKey}>基调</span><span style={styles.standardsValue}>{executionStandards.storyTone.join('、') || '（空）'}</span></div>
+                <div style={styles.standardsRow}><span style={styles.standardsKey}>文风</span><span style={styles.standardsValue}>{executionStandards.writingStyle.join('、') || '（空）'}</span></div>
+                <div style={styles.standardsRow}><span style={styles.standardsKey}>流派</span><span style={styles.standardsValue}>{executionStandards.webNovelGenre.join('、') || '（空）'}</span></div>
+                <div style={styles.standardsRow}><span style={styles.standardsKey}>视角</span><span style={styles.standardsValue}>{executionStandards.pov || '（空）'}</span></div>
+              </div>
+            )}
           </div>
           <div style={styles.formSection}>
             <label style={styles.formLabel}>题材描述</label>
@@ -1453,10 +1518,6 @@ const OutlinePage: React.FC = () => {
             <div style={{ ...styles.formSection, flex: 1 }}>
               <label style={styles.formLabel}>目标字数</label>
               <input style={styles.input} value={targetWords} onChange={event => setTargetWords(event.target.value)} placeholder="读取项目目标总字数" />
-            </div>
-            <div style={{ ...styles.formSection, flex: 1 }}>
-              <label style={styles.formLabel}>风格基调</label>
-              <input style={styles.input} value={tone} onChange={event => setTone(event.target.value)} placeholder="neutral / dark / light" />
             </div>
           </div>
           <div style={styles.formRow}>
@@ -1693,6 +1754,14 @@ const styles: Record<string, React.CSSProperties> = {
   formSection: { display: 'flex', flexDirection: 'column', gap: 6 },
   formLabel: { fontSize: 14, fontWeight: 600, color: 'var(--color-text-dim)' },
   formRow: { display: 'flex', gap: 12, flexWrap: 'wrap' },
+  standardsCard: { display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.03)' },
+  standardsCardMissing: { display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(243,156,18,0.45)', backgroundColor: 'rgba(243,156,18,0.1)' },
+  standardsRow: { display: 'flex', gap: 8, fontSize: 13, lineHeight: 1.5 },
+  standardsKey: { flex: '0 0 44px', color: 'var(--color-text-muted)' },
+  standardsValue: { flex: 1, minWidth: 0, color: 'var(--color-text-primary)', wordBreak: 'break-word' },
+  standardsMissingTitle: { fontSize: 13, fontWeight: 700, color: 'var(--color-warning)' },
+  standardsMissingBody: { fontSize: 13, lineHeight: 1.6, color: 'var(--color-text-soft)' },
+  standardsLink: { alignSelf: 'flex-start', fontSize: 13, fontWeight: 600, color: 'var(--color-warning)', textDecoration: 'underline' },
   input: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' },
   textarea: { width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box' },
   genBtn: { padding: '10px 18px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: 8, color: 'var(--color-white)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' },

@@ -109,7 +109,7 @@ export class StateExtractionService {
     const chapter = chapterStmt.get(chapterId) as { chapter_index: number } | undefined;
     const chapterIndex = chapter?.chapter_index ?? 0;
 
-    const llmMentions = await this.extractForeshadowingWithLLM(chapterContent, existingForeshadowings);
+    const llmMentions = await this.extractForeshadowingWithLLM(projectId, chapterContent, existingForeshadowings);
 
     for (const fs of existingForeshadowings) {
       const llmMention = llmMentions.find(item => item.id === fs.id);
@@ -176,7 +176,7 @@ export class StateExtractionService {
     const chapter = chapterStmt.get(chapterId) as { chapter_index: number } | undefined;
     const chapterIndex = chapter?.chapter_index ?? 0;
 
-    const extracted = await this.extractPlotWithLLM(chapterContent, previousSummary);
+    const extracted = await this.extractPlotWithLLM(projectId, chapterContent, previousSummary);
     const plotProgress = {
       id: this.generateId(),
       project_id: projectId,
@@ -437,6 +437,7 @@ export class StateExtractionService {
   }
 
   private async extractForeshadowingWithLLM(
+    projectId: string,
     chapterContent: string,
     existingForeshadowings: Array<{ id: string; description: string; type: string }>,
   ): Promise<Array<{ id: string; status?: string; reason?: string; recoveryMethod?: string }>> {
@@ -471,6 +472,7 @@ ${chapterContent.slice(-5000)}
       const response = await this.realLLM.generate({
         prompt,
         temperature: 0.2,
+        metrics: { projectId, stepKey: 'state_extraction' },
         scenario: 'state_extraction',
       } as any);
       const parsed = this.parseJson<{ mentions?: Array<{ id?: string; status?: string; reason?: string; recoveryMethod?: string }> }>(response.content, {});
@@ -492,6 +494,7 @@ ${chapterContent.slice(-5000)}
   }
 
   private async extractPlotWithLLM(
+    projectId: string,
     chapterContent: string,
     previousSummary?: string,
   ): Promise<{
@@ -544,6 +547,7 @@ ${chapterContent.slice(-6000)}
       const response = await this.realLLM.generate({
         prompt,
         temperature: 0.2,
+        metrics: { projectId, stepKey: 'state_extraction' },
         scenario: 'state_extraction',
       } as any);
       const parsed = this.parseJson<Record<string, any>>(response.content, {});

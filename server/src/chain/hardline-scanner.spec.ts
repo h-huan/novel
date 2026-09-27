@@ -1,8 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { detectForbiddenTells, isLanguageHardline } from './hardline-scanner';
+import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout } from './hardline-scanner';
 
 const ids = (text: string, platform = 'fanqie', storyType = 'short_novel') =>
   detectForbiddenTells(text, { platform, storyType }).map(f => f.ruleId);
+
+describe('硬红线50只判叙述动作残句', () => {
+  it('不把真实人物对话中的完整事实句当作碎片动作链', () => {
+    const text = '“协议你们签了，房号也分了。”他按住礼簿。\n\n“你进去了，楼就记住你了。”孙婆说。';
+    expect(ids(text)).not.toContain('50-fragment-action-chain');
+  });
+
+  it('仍阻断叙述层两处真实碎片动作链，坐标指向正文原文', () => {
+    const text = '他退了账，走了。\n\n灯闪了两下，灭了。';
+    const finding = detectForbiddenTells(text, { platform: 'fanqie', storyType: 'short_novel' })
+      .find(f => f.ruleId === '50-fragment-action-chain');
+    expect(finding).toBeDefined();
+    expect(finding?.hitCharOffsets?.every(offset => text.slice(offset).includes('了'))).toBe(true);
+  });
+});
+
+it('35b 将全章失败窗口都锚到真实段落，后半章不会在局部修订中消失', () => {
+  const text = Array.from({ length: 20 }, (_, i) =>
+    `第${i + 1}处记录，林野沿着名单核对位置，墙上的刻痕仍在原处。他重新查看楼层和住户，没有擅自改动纸面。`).join('\n\n');
+  const finding = detectForbiddenTells(text, { platform: 'fanqie', storyType: 'short_novel' })
+    .find(f => f.ruleId === '35b');
+  expect(finding?.occurrenceCount).toBeGreaterThan(1);
+  expect(Math.max(...(finding?.paragraphIndices || []))).toBeGreaterThan(14);
+});
 
 describe('hardline-scanner 规则15c 叙述者跳出（收紧后：创作宾语/创作反思才算）', () => {
   it('不误伤故事内笔迹辨认/写字动作（用户病例：我写的，横画都往上抬）', () => {
@@ -122,6 +146,20 @@ describe('hardline-scanner 规则42 对话圆滑（真对话段判定收紧后�
     expect(ids(text)).toContain('42');
   });
 
+  it('有两次追问和明确权责对抗时不误判为客服式对答', () => {
+    const text = [
+      '“十天前说的是下个月。”',
+      '“方案改了。”',
+      '“提前十天？”',
+      '“你管放线。”郑虎看着他，“我管时间表。”',
+      '“东面那条要重新定点，底下埋了临时管线，绕不过去。”',
+      '“我给你报。你把线放出来。”',
+      '“报给谁？”',
+      '“报给我。上头来人验收，验完封路，装药车得进。”',
+    ].join('\n\n');
+    expect(ids(text)).not.toContain('42');
+  });
+
   it('不误伤中间夹叙述/动作段的对话（物理相邻才算连续——用户病例 42@第54-68段）', () => {
     // 对话之间穿插了叙述/动作段（磨半天、撞了一下），旧口径把隔段对话误判为“连续圆滑对答”
     const text = [
@@ -193,16 +231,283 @@ describe('hardline-scanner 规则55 AI 高频模糊词密度', () => {
   });
 });
 
-describe('isLanguageHardline 阻断集合（AI 痕迹指纹进硬伤、段落节奏不进）', () => {
+describe('isLanguageHardline 阻断集合（AI 痕迹指纹 + 文笔/排版全部进硬伤，无降级旁路）', () => {
   it('AI 痕迹类规则号判为语言硬伤（阻断保存）', () => {
     for (const id of ['15b', '15c', '34', 'formula-sentence', 'dash-density', 'simile-density', '36', '37', '39', '42', '44', '46', '47', '48', '49', '55']) {
       expect(isLanguageHardline(id), id).toBe(true);
     }
   });
 
-  it('段落节奏/排版类规则号不判为语言硬伤（仍走 advisory）', () => {
-    for (const id of ['26-short-para', '26-uniform', '32', '33', '35', '40', '40b-opening-conflict', '41', '43', '45']) {
+  it('文笔/排版类规则号同样判为语言硬伤（阻断保存，不再有 advisory 降级）', () => {
+    for (const id of ['26-short-para', '26-uniform', '26b-staccato', '32', '33', '35', '35b']) {
+      expect(isLanguageHardline(id), id).toBe(true);
+    }
+  });
+
+  it('内容/节奏度量类不进语言硬线清单（由平台度量与提示词硬性要求承担）', () => {
+    for (const id of ['40', '40b-opening-conflict', '41', '43', '45', '28a', '38', 'time-density']) {
       expect(isLanguageHardline(id), id).toBe(false);
     }
+  });
+});
+
+describe('normalizeProseLayout 确定性排版规整（不增删正文）', () => {
+  const fanqie = { platform: 'fanqie', storyType: 'short_story' };
+
+  it('规则33：连续空行 ≥2 折叠为 1 个空行', () => {
+    const a = '他把那叠纸摊在桌上，一页一页往后推，推到最后一页停住了，纸角有点卷。';
+    const b = '她没有再说话，只是把手里的笔放下，笔尖磕在桌面上响了一声。';
+    expect(normalizeProseLayout(`${a}\n\n\n\n${b}`)).toBe(`${a}\n\n${b}`);
+  });
+
+  it('规则26b：连续叙述碎片段合并（消除逐句换行）', () => {
+    expect(normalizeProseLayout('翻开第一页。\n\n作者：阿遥。\n\n第二页。', fanqie))
+      .toBe('翻开第一页。作者：阿遥。第二页。');
+  });
+
+  it('对话段一律不动（引号段不参与合并）', () => {
+    const text = '“今天谁来接你？”\n\n“我姨妈来接。”';
+    expect(normalizeProseLayout(text, fanqie)).toBe(text);
+  });
+
+  it('孤立的单个碎片不合并（前后被长段包夹时保留强调节奏）', () => {
+    const text = '他把那叠纸摊在桌上，一页一页往后推，推到最后一页停住了，纸角有点卷。\n\n第二页。\n\n她没有再说话，只是把手里的笔放下，笔尖磕在桌面上响了一声。';
+    expect(normalizeProseLayout(text, fanqie)).toBe(text);
+  });
+
+  it('合规性：只删除空白，正文非空白字符严格守恒', () => {
+    const text = '甲。\n\n\n乙。\n\n“丙？”\n\n丁。';
+    const out = normalizeProseLayout(text, fanqie);
+    expect(out.replace(/\s/g, '')).toBe(text.replace(/\s/g, ''));
+    expect(out.length).toBeLessThanOrEqual(text.length);
+  });
+
+  it('平台分化：13 字叙述段在短段平台合并、在非短段平台保留', () => {
+    const a = '他抬起头看着窗外那一片浓黑。';
+    const b = '风从窗缝里挤进来。';
+    const text = `${a}\n\n${b}`;
+    expect(normalizeProseLayout(text, { platform: 'qidian', storyType: 'long_novel' })).toBe(text);
+    expect(normalizeProseLayout(text, fanqie)).toBe(`${a}${b}`);
+  });
+
+  it('段内多句号拍点（冰锥。后颈。没有搏斗。）不算一句一段，不被合并', () => {
+    const text = '冰锥。后颈。没有搏斗。\n\n她把记录本合上了。';
+    expect(normalizeProseLayout(text, fanqie)).toBe(text);
+  });
+});
+
+
+describe('hardline-scanner 命中段落锚点（硬红线段落级精修的唯一位置来源）', () => {
+  const anchorProfile = { platform: 'fanqie', storyType: 'short_story' };
+  it('规则 15c：position「第 X 段」直接映射成段号与逐字原文', () => {
+    const hit = '我写的这个结局不对劲。';
+    const text = `第一段只是铺垫，没有任何问题。\n\n${hit}\n\n第三段收尾，同样正常。`;
+    const finding = detectForbiddenTells(text, anchorProfile).find(f => f.ruleId === '15c');
+    expect(finding).toBeTruthy();
+    expect(finding!.paragraphIndices).toEqual([1]);
+    expect(finding!.paragraphs).toEqual([hit]);
+    expect(text.includes(finding!.paragraphs![0])).toBe(true);
+  });
+
+  it('规则 26-uniform：段级命中把涉及的三段整段锚出来（不是折叠摘要）', () => {
+    const seg = '楼道的灯忽明忽暗地闪了闪';
+    const p1 = `${seg}。`;
+    const text = `${p1}\n\n${p1}\n\n${p1}\n\n最后一段是足够长的正常叙述，用来打断等长节奏，避免扫描器把全章都算进同一组。`;
+    const finding = detectForbiddenTells(text, anchorProfile).find(f => f.ruleId === '26-uniform');
+    expect(finding).toBeTruthy();
+    expect(finding!.paragraphIndices).toEqual([0, 1, 2]);
+    expect(finding!.paragraphs).toEqual([p1, p1, p1]);
+  });
+
+  it('规则 35：position「offset N-M」映射成窗口真正覆盖到的段落', () => {
+    const sentence = '他把手里的单据又看了一遍，数字没有变，墨迹也没有变，';
+    const flat = `${sentence.repeat(8)}他把单据叠好放回口袋。`;
+    const text = `${flat}\n\n第二段有问号？也有感叹号！`;
+    const finding = detectForbiddenTells(text, anchorProfile).find(f => f.ruleId === '35');
+    expect(finding).toBeTruthy();
+    expect(finding!.position.startsWith('offset 0-')).toBe(true);
+    expect(finding!.paragraphIndices).toEqual([0]);
+    expect(finding!.paragraphs).toEqual([flat]);
+  });
+
+  it('纯计数类命中（规则 43 全章无不完美细节）不编造锚点', () => {
+    const text = '他把手机放回口袋，屏幕亮着，时间还在走。';
+    const finding = detectForbiddenTells(text, anchorProfile).find(f => f.ruleId === '43');
+    expect(finding).toBeTruthy();
+    expect(finding!.paragraphs).toBeUndefined();
+    expect(finding!.paragraphIndices).toBeUndefined();
+  });
+
+  it('不变量：凡带锚点的命中，锚点必须是正文逐字原文且段号与原文一一对应', () => {
+    const seg = '楼道的灯忽明忽暗地闪了闪';
+    const long = '他把手里的单据又看了一遍，数字没有变，墨迹也没有变，他把手里的单据又看了一遍，数字没有变，墨迹也没有变，他把手里的单据又看了一遍，数字没有变，墨迹也没有变，他把手里的单据又看了一遍，数字没有变，墨迹也没有变。';
+    const text = [
+      '他站在门口，手停在半空，没有敲门。',
+      `${seg}。`,
+      `${seg}。`,
+      `${seg}。`,
+      long,
+      '我写的这个结局不对劲。',
+    ].join('\n\n');
+    const findings = detectForbiddenTells(text, anchorProfile);
+    expect(findings.length).toBeGreaterThan(0);
+    const list = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    let anchored = 0;
+    for (const f of findings) {
+      if (!f.paragraphs) continue;
+      expect(f.paragraphIndices).toBeDefined();
+      expect(f.paragraphIndices!.length).toBe(f.paragraphs.length);
+      for (let i = 0; i < f.paragraphs.length; i++) {
+        expect(text.includes(f.paragraphs[i])).toBe(true);
+        expect(list[f.paragraphIndices![i]]).toBe(f.paragraphs[i]);
+        anchored++;
+      }
+    }
+    expect(anchored).toBeGreaterThan(0);
+  });
+});
+
+describe('hardline-scanner 规则32 人名/称谓独占一行（肯定式白名单判据 · 生产误报回归）', () => {
+  // 夹具 = 番茄短篇《末班地铁的第十一站》(项目 bcfd17de) 第一稿被判出的 32 条命中原文中抽样。
+  // 全部是普通叙述句：旧的反向判据（短段 + 段首 2-4 汉字 + 动作/代词黑名单）把它们全判成
+  // 「姓名/称谓段独立成段」，32 条互斥（都要求「与上下文合并」）导致精修无法收敛、正文 422 不保存。
+  const productionFalsePositives = [
+    '报站的女声从显示屏后面出来时，我的手搭在制动手柄上。',
+    '报站那一声落下去，三个人先后抬头。',
+    '又按一次。还是它。',
+    '不是电流串音。',
+    '几秒后。',
+    '东堤到站，0:52。',
+    '车厢空着。回库是1:30。',
+    '手指在制动手柄上停了两秒。',
+    '显示屏上「下一站，槐荫路」还亮着。',
+    '老周坐在桌子后面，面前摊着本行车日志。他抬了下下巴。',
+    '老周把手里那本合上，推过来。',
+  ];
+  const names = ['陈默', '母亲', '林姐', '老周', '赵明', '老爷'];
+  const rule32 = (text: string, characterNames?: string[]) =>
+    detectForbiddenTells(text, { platform: 'fanqie', storyType: 'short_novel', characterNames })
+      .filter(f => f.ruleId === '32');
+
+  it('生产误报样本 0 命中（含段首恰是本书人名的正常叙述句）', () => {
+    for (const p of productionFalsePositives) {
+      const text = `他把车速慢慢降了下来，手一直搭在制动手柄上。\n\n${p}\n\n窗外的灯一盏一盏往后退去。`;
+      expect(rule32(text, names), p).toEqual([]);
+    }
+  });
+
+  it('真·人名/称谓独占一行仍命中（判据只认本书白名单，其余一律不报）', () => {
+    for (const p of ['陈默。', '赵明！']) {
+      const text = `他把外套挂在门口，回身看了一眼墙上的钟。\n\n${p}\n\n他说这句话的时候没有抬头。`;
+      const found = rule32(text, names);
+      expect(found.length, p).toBe(1);
+      expect(found[0].snippet).toBe(p);
+      expect(found[0].paragraphs).toEqual([p]);
+      expect(found[0].paragraphIndices).toEqual([1]);
+    }
+  });
+
+  it('真实故障样本：姓名起句的动作与判断不是姓名独占段', () => {
+    for (const p of ['林野抬脚，跨过门槛。', '林野往前走。', '赵明会死。', '老爷进来了。']) {
+      const text = `门后传来一声轻响。\n\n${p}\n\n他停住脚，听见纸页在屋里翻动。`;
+      expect(rule32(text, [...names, '林野']), p).toEqual([]);
+    }
+  });
+
+  it('白名单外的人名不猜词（「李四。」在本书不是角色时不算命中）', () => {
+    const text = '他把外套挂在门口，回身看了一眼墙上的钟。\n\n李四。\n\n他说这句话的时候没有抬头。';
+    expect(rule32(text, names)).toEqual([]);
+  });
+
+  it('无白名单时规则 32 不猜词（不制造无法收敛的误报风暴）', () => {
+    const text = '他把外套挂在门口。\n\n赵明会死。\n\n他说这句话的时候没有抬头。';
+    expect(rule32(text)).toEqual([]);
+    expect(rule32(text, [])).toEqual([]);
+  });
+
+  it('上一段是问句/引语时属应答式独立成段，不判姓名孤立', () => {
+    const text = '“谁去？”\n\n赵明。\n\n他没有再说话。';
+    expect(rule32(text, names)).toEqual([]);
+  });
+
+  it('说话人提示语不算姓名孤立', () => {
+    const text = '他把外套挂在门口。\n\n赵明说。\n\n他说这句话的时候没有抬头。';
+    expect(rule32(text, names)).toEqual([]);
+  });
+
+  it('阻断集合不变量：32 仍在 LANGUAGE_HARDLINE_RULE_IDS（本轮只是收紧判据，不是退出硬线）', () => {
+    expect(isLanguageHardline('32')).toBe(true);
+  });
+});
+it('破折号过密提供全部真实坐标，且标点平板修法不再要求继续加破折号', () => {
+  const dashParagraphs = Array.from({ length: 11 }, (_, i) => `第${i + 1}道门——门轴上留下不同深浅的旧漆和铁锈。`);
+  const flat = '他沿着楼道往前走，摸到墙上的旧刻痕，又把卷尺收回口袋。'.repeat(22);
+  const content = [...dashParagraphs, flat].join('\n\n');
+  const findings = detectForbiddenTells(content, { platform: 'fanqie', storyType: 'short_story' });
+  const density = findings.find(f => f.ruleId === 'dash-density');
+  expect(density?.hitCharOffsets).toHaveLength(11);
+  expect(density?.paragraphIndices).toHaveLength(11);
+  expect(density?.occurrenceCount).toBe(11);
+  expect(findings.find(f => f.ruleId === '35')?.message).toContain('不得靠新增破折号');
+  expect(findings.find(f => f.ruleId === '35b')?.message).toContain('不得靠新增破折号');
+  expect(findings.find(f => f.ruleId === '35')?.occurrenceCount).toBeGreaterThan(1);
+  expect(findings.find(f => f.ruleId === '35b')?.occurrenceCount).toBeGreaterThan(1);
+});
+
+// ===== 规则35b 坐标锚定回归（生产病例：正文 422 存不下来 / 同一条 Gate 反复命中） =====
+describe('hardline-scanner 规则35b 坐标锚定（回归：派生串偏移会改错段落、正文存不下来）', () => {
+  // 旧实现用 narrationOnly = content.replace(...) 这个【派生串】当坐标：snippet/position 都是派生串偏移，
+  // 回映射后落在别的段落上——正文里根本没有那段（出现 “” 这种剥引号残迹），
+  // 段落级精修锚不到证据 → 中止 → 保留上一版正文 → 正文 422 存不下来。
+  // 现在派生串只用于「判定」，证据与坐标一律回映射到正文真实下标（stripQuotedWithMap + hitCharOffsets）。
+  const dialogue = '“末班车刚走。”调度说。';
+  const narration = Array.from({ length: 7 }, (_, i) =>
+    `第${i + 1}天，他沿着站台往前走，数着地上的编号，脚步不快不慢，像在等一件迟早会发生的事，风从隧道里出来，吹得衣角贴在腿上，他没有停，只是把手插进外套口袋里攥紧了。`
+  ).join('\n\n');
+  const content = `${dialogue}\n\n${narration}`;
+  const flat35b = () =>
+    detectForbiddenTells(content, { platform: 'fanqie', storyType: 'short_novel' }).filter(f => f.ruleId === '35b');
+
+  it('前置条件：引号外叙述足够长且标点平板（否则本回归无效）', () => {
+    expect(narration.length).toBeGreaterThan(480);
+    expect(/[!?！？…—;:：]/.test(narration)).toBe(false);
+    expect(content).toContain('“');
+  });
+
+  it('证据 snippet 在正文里逐字存在，且不含剥引号残迹', () => {
+    const [f] = flat35b();
+    expect(f).toBeTruthy();
+    // snippet 由 slice(s, 80) 生成：超 80 字时以 … 结尾；锚定侧同样剥 …（hardline-scanner.ts spansFromSnippet:1407）。
+    // 夹具若不剥 … 就会自己误报失败。→ 先剥 … 再逐字比对正文。
+    const bare = f.snippet!.replace(/…+$/, '');
+    expect(content).toContain(bare);
+    // 「剥引号残迹」= 相邻引号对（生产病例原文：“”他的声音压低了，“”）。
+    // 正常对话段带引号是合法叙事，不能断言「不含引号」；要断言的是「不含被剥空后留下的引号对」。
+    expect(/[“”"]{2}/.test(f.snippet!)).toBe(false);
+  });
+
+  it('position 是正文真实 offset：按该区间切正文即以 snippet 开头', () => {
+    const [f] = flat35b();
+    const m = /^offset (\d+)-(\d+)$/.exec(f.position || '');
+    expect(m).toBeTruthy();
+    const start = Number(m![1]);
+    const end = Number(m![2]);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeLessThanOrEqual(content.length);
+    const bare = f.snippet!.replace(/…+$/, '');
+    expect(content.slice(start, end).startsWith(bare)).toBe(true);
+  });
+
+  it('hitCharOffsets 给出多段真实段落起点，paragraphs 与正文逐字一致', () => {
+    const [f] = flat35b();
+    const offsets = f.hitCharOffsets || [];
+    expect(offsets.length).toBeGreaterThan(1);
+    expect(f.paragraphs?.length).toBe(offsets.length);
+    expect(f.paragraphIndices?.length).toBe(offsets.length);
+    offsets.forEach((off, k) => {
+      const p = f.paragraphs![k];
+      expect(content.indexOf(p)).toBe(off);
+      expect(content.slice(off).startsWith(p)).toBe(true);
+    });
   });
 });

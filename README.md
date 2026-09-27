@@ -6,7 +6,7 @@
 
 写作与质量规则只在执行标准一处维护与列举，本文件不再重复罗列条目。
 
-**机器权威**：代码侧可执行标准在 `server/src/modules/module-standards/module-standards.seed.ts`（当前 `SEED_BASELINE_VERSION=15`），启动时由 ensureSeeded 确定性覆盖，全项目继承，桌面端 `/module-standards`「执行标准」页面展示的就是它。确定性扫描与验收分流见 `server/src/chain/hardline-scanner.ts`，首稿规则见 `server/src/chain/chain.controller.ts`，修复循环见 `server/src/chain/adaptive-repair.ts`，模型容错见 `server/src/chain/real-llm.service.ts`。
+**机器权威**：代码侧可执行标准在 `server/src/modules/module-standards/module-standards.seed.ts`（当前 `SEED_BASELINE_VERSION=18`），启动时由 ensureSeeded 确定性覆盖，全项目继承，桌面端 `/module-standards`「执行标准」页面展示的就是它。确定性扫描与验收分流见 `server/src/chain/hardline-scanner.ts`，首稿规则见 `server/src/chain/chain.controller.ts`，修复循环见 `server/src/chain/adaptive-repair.ts`，模型容错见 `server/src/chain/real-llm.service.ts`。
 
 **全量说明**：可执行质量控制的全量说明在根目录 `QUALITY_EXECUTION.md`（英文，与代码和 seed 版本对应，是执行标准的完整英文镜像，另含项目不变量）；平台风格设计见 `server/docs/platform-style-system.md`。规则只沉淀在项目文件内，不维护外部文档副本。
 

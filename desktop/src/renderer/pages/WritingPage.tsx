@@ -1148,7 +1148,7 @@ const WritingPage: React.FC = () => {
                       </div>
 
                       <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'rgba(0,0,0,0.16)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>《魂穿北洋，领众破局》类长篇痛点</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>长篇创作常见痛点</div>
                         {longPainPoints.map(point => (
                           <div key={point} style={{ display: 'flex', gap: '7px', color: 'var(--color-text-dim)', fontSize: '14px', lineHeight: 1.55, marginBottom: '6px' }}>
                             <span style={{ color: 'var(--color-accent)' }}>•</span>

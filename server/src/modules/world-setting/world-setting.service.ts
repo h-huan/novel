@@ -9,8 +9,9 @@ import type { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } f
 import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
 import { maskForeshadowAnswers } from '../../chain/foreshadow-mask';
+import { STORY_FACT_PRIORITY } from '../module-standards/module-standards.seed';
 
-// 对齐《两百万字小说创作全流程指南》世界观 7 类 + 作品地基字段；custom_settings 为按小说自定义设定（JSON 键值对）
+// 世界观档案字段（世界运行规则 + 作品地基字段）；custom_settings 为按小说自定义设定（JSON 键值对）
 export const WORLD_PROFILE_FIELDS = ['synopsis','basic_info','era','locations','atmosphere_tone','rules','social_structure','tech_supernatural','system_mechanics','economy_system','culture_customs','naming_rules','factions','scale_plan','ending','hierarchy_rules','supplementary','custom_settings'] as const;
 
 export interface WorldSettingResponse {
@@ -123,6 +124,11 @@ export class WorldSettingService {
 
   getWritingSummary(projectId: string, id: string, maskForeshadow = false) {
     const profileData = this.getProfile(projectId, id);
+    if (!this.databaseService.getDb().prepare(
+      'SELECT 1 FROM world_system_profiles WHERE project_id=? AND world_setting_id=?'
+    ).get(projectId, id)) {
+      throw new Error(`世界观 ${id} 缺少关联档案，不能构造正文约束`);
+    }
     return { summary: this.buildWritingSummary(profileData.profile, maskForeshadow), profile: profileData.profile };
   }
 
@@ -144,7 +150,8 @@ export class WorldSettingService {
       ['势力分布（主要势力/组织）','factions'],
       ['全文规模/数据规划（人口/势力/资源等量化）','scale_plan'],
       ['结局设定','ending'],
-      ['核心层级规则（最高优先级·世界观>大纲>正文）','hierarchy_rules'],
+      // 这里曾把可由模型生成的 profile.hierarchy_rules 当第二份优先级定义注入正文，
+      // 后果是它与执行标准和本章章纲冲突时模型只能猜选。层级现只读 seed 常量。
       ['补充说明','supplementary'],
     ];
     const custom = (profile['custom_settings'] || '').trim();
@@ -158,7 +165,7 @@ export class WorldSettingService {
         ? [`自定义设定（收尾反转信息已脱敏，正文不得提前点名归属/结果）：${this.sanitizeCustomSettings(custom, profile['ending'])}`]
         : [])
       : (custom ? [`自定义设定：${custom}`] : []);
-    return ['【世界观写作摘要】', ...fields.map(([label, key]) => `${label}：${value(key)}`), ...customLines].join('\n');
+    return ['【世界观写作摘要】', `事实权威顺序：${STORY_FACT_PRIORITY}`, ...fields.map(([label, key]) => `${label}：${value(key)}`), ...customLines].join('\n');
   }
 
   /**
@@ -321,7 +328,19 @@ export class WorldSettingService {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
     const before = this.toResponse(existing);
-    this.repo.delete(id);
+    const db = this.databaseService.getDb();
+    // 这里曾只删除 world_settings，留下第二份无主 world_system_profiles；
+    // 后续按 project_id LIMIT 1 读到旧规则，正文时间机制在“三小时前/一小时前”间漂移。
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('DELETE FROM world_system_profiles WHERE project_id=? AND world_setting_id=?')
+        .run(existing.project_id, id);
+      this.repo.delete(id);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
     this.analyzeStateImpact(existing.project_id, id, '世界观删除影响分析', {
       operation: 'remove', before, priority: 'world_setting', needsReview: true,
     });
@@ -406,12 +425,14 @@ export class WorldSettingService {
       history: history,
       factions: factions,
       endingDirection: ending,
-      // from world_system_profiles（per 世界观模板.txt）
+      // from world_system_profiles
       ...(() => {
         try {
           const db = (this as any).databaseService?.getDb?.() || (this as any).db?.getDb?.();
           if (!db) return {};
-          const wf = db.prepare(`SELECT atmosphere_tone, rules, supplementary FROM world_system_profiles WHERE project_id=? LIMIT 1`).get(projectId) as any;
+          const wf = db.prepare(`SELECT p.atmosphere_tone, p.rules, p.supplementary
+            FROM world_system_profiles p JOIN world_settings w ON w.id=p.world_setting_id AND w.project_id=p.project_id
+            WHERE p.project_id=? LIMIT 1`).get(projectId) as any;
           return {
             atmosphereTone: wf?.atmosphere_tone || '',
             rules: wf?.rules || '',

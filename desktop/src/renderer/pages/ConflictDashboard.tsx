@@ -46,6 +46,7 @@ interface ConflictItem {
   checkType?: string;
   source?: string;
   sourceLabel?: string;
+  blocking?: boolean;
   actions?: ConflictAction[];
 }
 
@@ -284,6 +285,7 @@ const ConflictDashboard: React.FC = () => {
                 {c.sourceLabel && c.sourceLabel !== c.type && (
                   <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: 'rgba(255,255,255,0.06)', color: 'var(--color-text-soft)', fontWeight: 600 }}>{c.sourceLabel}</span>
                 )}
+                {c.blocking && <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '10px', backgroundColor: 'rgba(233,69,96,0.22)', color: 'var(--color-danger)', fontWeight: 700 }}>阻断保存</span>}
                 <span style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{c.description}</span>
                 <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', backgroundColor: `${STATUS_COLORS[c.status]}25`, color: STATUS_COLORS[c.status], fontWeight: 700 }}>{STATUS_LABELS[c.status]}</span>
               </div>
@@ -296,6 +298,7 @@ const ConflictDashboard: React.FC = () => {
             <h3 style={{ margin: '0 0 12px 0', fontSize: '15px', fontWeight: 700, color: 'var(--color-text-primary)' }}>冲突详情</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px' }}>
               <div><span style={{ color: 'var(--color-text-soft)' }}>优先级: </span><span style={{ color: LEVEL_COLORS[selected.level], fontWeight: 700 }}>{selected.level} · {LEVEL_LABEL[selected.level]} · {selected.priority}</span></div>
+              {selected.blocking && <div style={{ color: 'var(--color-danger)', fontWeight: 700 }}>正文硬红线或事实矛盾未通过，阻断保存</div>}
               <div><span style={{ color: 'var(--color-text-soft)' }}>类型: </span><span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{selected.type}</span></div>
               <div><span style={{ color: 'var(--color-text-soft)' }}>描述: </span><p style={{ margin: '4px 0 0 0', color: 'var(--color-text-primary)', lineHeight: 1.6, fontWeight: 500 }}>{selected.description}</p></div>
               <div><span style={{ color: 'var(--color-text-soft)' }}>位置: </span><span style={{ color: 'var(--color-accent)', fontWeight: 700 }}>{selected.location}</span>{selected.chapterStatus === 'locked' && <span style={{ color: 'var(--color-danger)', marginLeft: 6, fontWeight: 700 }}>（已锁定）</span>}</div>

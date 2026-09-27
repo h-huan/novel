@@ -3,9 +3,10 @@
  */
 import { Controller, Get, Post, Body, Query, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { RefinementTemplatesService } from './refinement-templates.service';
+import { RefinementTemplatesService, templateStandardContext } from './refinement-templates.service';
 import { DeAiEngineService } from './de-ai-engine.service';
 import { DescribePolishService } from './describe-polish.service';
+import type { PolishLlmGenerate } from './describe-polish.service';
 import { QualityInspectionService } from './quality-inspection.service';
 import { SpellCheckService } from './spell-check.service';
 import { SensitiveWordService } from './sensitive-word.service';
@@ -14,6 +15,8 @@ import { ExportService } from './export.service';
 import { ScriptExportService } from './script-export.service';
 import { SocialExportService } from './social-export.service';
 import { RealLLMService } from '../../chain/real-llm.service';
+import { DatabaseService } from '../../database/database.service';
+import { projectStandardBlock, resolveProjectStandardDirective } from '../project/creative-constitution';
 import {
   GetTemplatesQueryDto,
   ApplyTemplateDto,
@@ -46,12 +49,19 @@ export class RefinementController {
     private readonly scriptExport: ScriptExportService,
     private readonly socialExport: SocialExportService,
     private readonly realLLM: RealLLMService,
+    private readonly db: DatabaseService,
   ) {}
 
   // ─── 精修模板 ───
 
   @Get('templates')
   getTemplates(@Query() query: GetTemplatesQueryDto) {
+    // 带 projectId = 按该项目的执行标准标注适用性；不带 = 只给清单（界面不得据此直接执行）。
+    // 适用性必须由服务端判定：模板能否执行取决于项目卡片上的平台/分类/基调/文风/流派/视角。
+    if (query.projectId) {
+      const standard = resolveProjectStandardDirective(this.db.getDb(), query.projectId);
+      return this.templatesService.annotateForStandard(templateStandardContext(standard), query.category);
+    }
     return this.templatesService.findAll(query.category);
   }
 
@@ -67,21 +77,46 @@ export class RefinementController {
     return template;
   }
 
+  /**
+   * 应用精修模板：标准驱动。
+   *
+   * 旧实现是纯正则替换（还会把「地方」拆成「方」），且与项目执行标准无关。
+   * 现在：先解析执行标准（缺 projectId → 400 / 项目不存在 → 404 / 六维缺 → 422），
+   * 再做模板适用性判定（与标准冲突 → 422），最后分块走 DescribePolishService.polishBlock。
+   */
   @Post('templates/apply')
-  applyTemplate(@Body() dto: ApplyTemplateDto) {
-    try {
-      const result = this.templatesService.applyTemplate(dto.templateId, dto.content, dto.options);
-      const template = this.templatesService.findById(dto.templateId);
-      return {
+  async applyTemplate(@Body() dto: ApplyTemplateDto) {
+    const standard = resolveProjectStandardDirective(this.db.getDb(), dto.projectId ?? '');
+    const options = (dto.options ?? {}) as { chunkChars?: number; concurrency?: number };
+    return this.templatesService.applyWithStandard(
+      {
         templateId: dto.templateId,
-        templateName: template?.name,
-        original: dto.content,
-        result,
-        appliedRules: template?.rules.map((r) => r.description || r.type) || [],
-      };
-    } catch (e: any) {
-      return { error: e.message };
-    }
+        content: dto.content,
+        standard: templateStandardContext(standard),
+        chunkChars: options.chunkChars,
+        concurrency: options.concurrency,
+      },
+      this.polishLlm(dto.projectId),
+    );
+  }
+
+  /** 二次加工入口共用的模型调用装配（场景/记账口径一致）。 */
+  private polishLlm(projectId: string): PolishLlmGenerate {
+    return async (prompt: string, temperature: number, maxTokens?: number) => {
+      const resp = await this.realLLM.generate({
+        prompt,
+        metrics: { projectId, stepKey: 'refinement' },
+        scenario: 'refinement',
+        // 本工厂的三个入口（模板分块改写 / 局部降 AI 改写 / 逐句精修）输入输出都是片段而不是整章：
+        // 必须声明 segment，否则 22–47 字片段会被套整章口径（3000–5000 字、对话占比 30%–55%、
+        // 开篇 500 字字位、章尾留钩）并据此把整条调用阻断（实证：三条 refinement 记录全部 failed）。
+        // 整章口径仍在 stage='chapter' 的整章 Gate 上逐条执行，此处不降低任何严重度。
+        evaluationUnit: 'segment',
+        temperature,
+        maxTokens: maxTokens ?? 1200,
+      });
+      return resp?.content || '';
+    };
   }
 
   // ─── 去AI味 ───
@@ -102,32 +137,61 @@ export class RefinementController {
    * 不改动全文结构，只做局部精修
    */
   @Post('de-ai/llm-rewrite')
-  async llmRewriteDeAi(@Body() dto: { content: string; maxRewrites?: number }) {
+  async llmRewriteDeAi(@Body() dto: { content: string; maxRewrites?: number; projectId?: string }) {
+    // 执行标准先解析、后执行：缺 projectId → 400，项目不存在 → 404，六维未齐备 → 422。
+    // 这个端点会直接改写正文，必须与主生成链共用同一份「平台/分类/基调/文风/流派/视角」标准，
+    // 不得因为它只是一个工具按钮，就退化成通用的降AI词表（那是「配置是配置、怎么做是另一回事」的老毛病）。
+    const standard = resolveProjectStandardDirective(this.db.getDb(), dto.projectId ?? '');
     if (!dto.content || dto.content.length < 100) {
       return { result: dto.content || '', changes: [] };
     }
-    const llmGenerate = async (prompt: string): Promise<string> => {
-      const resp = await this.realLLM.generate({
-        prompt,
-        scenario: 'refinement',
-        temperature: 0.6,
-        maxTokens: 2000,
-      });
-      return resp?.content || '';
-    };
-    return this.deAiEngine.llmLocalRewrite(dto.content, llmGenerate, dto.maxRewrites || 3);
+    // 标准块拼装同样只有一份实现：与逐句精修、模板批量改写共用 projectStandardBlock。
+    const standardBlock = projectStandardBlock(standard);
+    const rewriteLlm = this.polishLlm(dto.projectId ?? '');
+    const llmGenerate = async (prompt: string): Promise<string> => rewriteLlm(prompt, 0.6, 2000);
+    return this.deAiEngine.llmLocalRewrite(dto.content, llmGenerate, dto.maxRewrites || 3, standardBlock);
   }
 
   // ─── Describe逐句精修 ───
 
   @Get('describe/styles')
-  getDescribeStyles(): any {
-    return this.describePolish.getStyles();
+  getDescribeStyles(@Query('projectId') projectId?: string): any {
+    // 方向清单来自唯一来源，但必须连同「这个项目在哪个平台、什么文风/视角下执行」一起返回：
+    // 旧实现返回的是一份与项目无关的通用菜单，作者无从判断结果是否对得上项目卡片。
+    const standard = resolveProjectStandardDirective(this.db.getDb(), projectId ?? '');
+    return {
+      projectId,
+      platform: standard.platformLabel,
+      category: standard.constitution.category,
+      categoryPlacement: standard.categoryPlacement,
+      writingStyle: standard.constitution.writingStyle,
+      storyTone: standard.constitution.storyTone,
+      webNovelGenre: standard.constitution.webNovelGenre,
+      pov: standard.constitution.pov,
+      styleTags: standard.styleTags,
+      isLong: standard.isLong,
+      styles: this.describePolish.getStyles(),
+    };
   }
 
   @Post('describe/polish')
-  describePolishSentence(@Body() dto: DescribePolishDto) {
-    return this.describePolish.polish(dto.sentence, dto.styles, dto.context);
+  async describePolishSentence(@Body() dto: DescribePolishDto) {
+    // 逐句精修会直接改句子，必须先解析执行标准；缺 projectId → 400，六维未齐备 → 422。
+    const standard = resolveProjectStandardDirective(this.db.getDb(), dto.projectId ?? '');
+    return this.describePolish.polish(
+      {
+        sentence: dto.sentence,
+        standardBlock: projectStandardBlock(standard),
+        platformLabel: standard.platformLabel,
+        writingStyle: String(standard.constitution.writingStyle ?? ''),
+        pov: String(standard.constitution.pov ?? ''),
+        styleTags: standard.styleTags,
+        context: dto.context,
+        axes: dto.styles,
+        variants: dto.variants,
+      },
+      this.polishLlm(dto.projectId),
+    );
   }
 
   // ─── AI质检 ───

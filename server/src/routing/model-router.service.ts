@@ -13,8 +13,8 @@ import { Injectable, Logger, Inject, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { cwd } from 'process';
-import { modelSceneTab } from './scenario-taxonomy';
+import { resolveDataDir } from '../config/data-dir';
+import { modelSceneTab, resolveScenarioRoute } from './scenario-taxonomy';
 
 // ==================== 类型定义 ====================
 
@@ -32,29 +32,14 @@ export interface ModelInfo {
   versions?: ModelVersion[];
 }
 
-export interface RoleModelEntry {
-  model: string;
-  priority: number;
-  label: string;
-}
-
-export interface RoleConfig {
-  models: RoleModelEntry[];
-}
 
 export interface ScenarioRoute {
   model: string;
   temperature: number;
   label: string;
-  routing_strategy?: string;
+  maxTokens?: number;
 }
 
-export interface ChapterFunctionRoute {
-  model: string;
-  tier: string;
-  temperature: number;
-  label: string;
-}
 
 export interface UserKeyEntry {
   projectId: string;
@@ -73,16 +58,24 @@ export interface RoutedModel {
   role: string;
 }
 
+/**
+ * 路由配置的读取形状。
+ *
+ * 只保留真正有消费者的字段：models（模型清单）、scenarios（模型 tab 级温度与输出上限）、
+ * defaults（daily tab 的温度兜底 + 未登记场景的 maxTokens 兜底）。
+ *
+ * 防复发：这里曾有过 roles / model_versions / chapter_function_routing / defaults.timeout 四组字段，
+ * 后果是同一件事有三份说法且互相矛盾 —— 作者改 chapter_function_routing 的 tier 与温度以为能影响路由，
+ * 实际 getModelForScenario 只认「场景 tab 配置 → 继承日常模型 → 明确报错」这一条链，四组字段全无消费者，
+ * 而 roles 还带出一份「按优先级排序的候选模型列表」等于一条隐式降级路径（本平台明令禁止降级）。
+ * 因此：场景模型只能来自「设置 → 模型配置」，任何新的兜底/顺序列表都不允许在这里复活。
+ */
 export interface RouteConfig {
   models: Record<string, ModelInfo>;
-  model_versions?: Record<string, string>;
-  roles: Record<string, RoleConfig>;
   scenarios: Record<string, ScenarioRoute>;
-  chapter_function_routing: Record<string, ChapterFunctionRoute>;
   defaults: {
     temperature: number;
     maxTokens: number;
-    timeout: number;
   };
 }
 
@@ -131,7 +124,7 @@ export class ModelRouterService implements OnModuleInit {
   private readonly customProviders = new Map<string, { name: string; baseUrl: string; apiKey: string }>();
 
   constructor(private readonly configService: ConfigService) {
-    const dataDir = process.env.DATA_DIR || path.join(cwd(), 'data');
+    const dataDir = resolveDataDir();
     this.modePath = path.join(dataDir, 'writing-mode.json');
     this.userKeysPath = path.join(dataDir, 'user-keys.json');
     this.customProvidersPath = path.join(dataDir, 'custom-providers.json');
@@ -352,9 +345,8 @@ export class ModelRouterService implements OnModuleInit {
     if (routeScenario === 'daily' && !['daily', 'default'].includes(scenario)) {
       this.logger.debug(`未单独配置的场景 ${scenario} 使用日常场景模型`);
     }
-    const scenarioRoute = routeScenario === 'daily'
-      ? this.config.scenarios.writing
-      : this.config.scenarios[routeScenario];
+    // 与 maxTokens 解析共用 resolveScenarioRoute：同一场景只能有一个答案。
+    const scenarioRoute = resolveScenarioRoute(this.config, scenario);
     if (!scenarioRoute) {
       throw new Error(`模型场景 ${routeScenario} 缺少温度配置`);
     }
@@ -451,18 +443,6 @@ export class ModelRouterService implements OnModuleInit {
     }));
   }
 
-  /**
-   * 获取指定角色的候选模型列表（按优先级排序）
-   * @param role 角色名称
-   */
-  getRoleModels(role: string): RoleModelEntry[] {
-    const roleConfig = this.config.roles[role];
-    if (!roleConfig) {
-      this.logger.warn(`未知角色: ${role}`);
-      return [];
-    }
-    return [...roleConfig.models].sort((a, b) => a.priority - b.priority);
-  }
 
   /**
    * 获取可用模型列表

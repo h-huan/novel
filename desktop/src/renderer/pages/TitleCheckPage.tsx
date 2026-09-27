@@ -14,14 +14,18 @@ const TitleCheckPage: React.FC = () => {
     if (!title.trim()) return;
     setLoading(true);
     try {
-      const res = await api.post('/chain/content-similarity', { projectId: 'title-check', content: title });
-      const data = res as any;
+      // 唯一事实源：后端 /refinement/copyright/check-title 逐一比对 known-works.data.ts 已知作品库。
+      // 旧实现调用 /chain/content-similarity 并在前端用 if/else 编造结果（还硬编码了真实书名），已删除：
+      // 假结果会让作者以为"检测过"而放过真实撞名风险，也把具体书名带进了生成语境。
+      const matches = await api.post<any[]>('/refinement/copyright/check-title', { title });
+      const list = Array.isArray(matches) ? matches : [];
+      const level = list.some(m => m.risk === 'high') ? 'red' : list.some(m => m.risk === 'medium') ? 'yellow' : 'green';
       setResult({
         title,
-        risk: data.analysis?.overallRisk || 'low',
-        sameName: title.includes('斗破') || title.includes('斗罗') ? 'yellow' : 'green',
-        similar: ['斗破苍穹', '斗罗大陆', '凡人修仙传'].filter(n => n.includes(title.charAt(0))),
-        suggestion: title.includes('斗') ? '建议：标题与知名作品相似度较高，建议修改' : '✅ 标题无明显冲突',
+        risk: level === 'red' ? 'high' : level === 'yellow' ? 'medium' : 'low',
+        sameName: level,
+        similar: list.map(m => `${m.matchedItem}（相似度 ${m.similarity}%，风险 ${m.risk}）`),
+        suggestion: list.length ? list.map(m => m.suggestion).join('；') : '✅ 标题无明显冲突',
       });
     } catch { setResult({ title, risk: 'low', sameName: 'green', suggestion: '✅ 标题无明显冲突', similar: [] }); }
     setLoading(false);

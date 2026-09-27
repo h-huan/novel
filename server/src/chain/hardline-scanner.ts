@@ -1,18 +1,68 @@
-import { resolveNovelStrategy } from './platform-benchmarks';
+import { HIGH_DIALOGUE_PLATFORMS, resolveNovelStrategy, targetForLength } from './platform-benchmarks';
+import { STYLE_PUNCTUATION_RELAX_KEYWORDS } from '../../shared/src';
+
+/**
+ * 「白描/朴素」类文风的标点宽松判定（阈值分化，不是豁免、不是降级）。
+ * 关键词表来自执行标准唯一事实源（shared STYLE_PUNCTUATION_RELAX_KEYWORDS），
+ * 本文件不再内联正则字面量 —— 阈值分化本来就是执行标准的分支，必须与标准同源，否则
+ * 新增一个天然克制的文风时，只改了标准、漏了这里，规则就会按通用窗口误报。
+ */
+const PUNCTUATION_RELAX_STYLE_PATTERN = new RegExp(STYLE_PUNCTUATION_RELAX_KEYWORDS.join('|'));
 
 /**
  * 硬红线确定性扫描（纯文本、零 IO、零框架依赖）：跨所有平台与长短篇共用同一套判定（单一事实源）。
  * 生成链（ChainController）与写作质量质检（WritingQualityService）都调用本函数，禁止再各写一份。
  * 排版/节奏类规则按 profile.platform/storyType 分化；叙述者跳出、人身/事实矛盾、AI 腔等真硬伤跨平台严格。
  */
-export interface HardlineProfile { platform?: string; storyType?: string; }
-export interface HardlineFinding { ruleId: string; message: string; snippet: string; position: string; }
+export interface HardlineProfile {
+  platform?: string;
+  storyType?: string;
+  /**
+   * 创建前确认的执行标准（项目卡片）：分类 / 基调 / 文风 / 流派 / 视角。
+   * resolveNovelStrategy 用这些标签微调节奏与回报间距（悬疑收紧回报间距、言情允许柔性回报、
+   * 爽文提高密度、白描放宽间距）；缺了它们，这些微调在生产里全部退化成通用值，
+   * 用户选了分类/基调却不生效——这是「正文不符合创建前的平台和标签」的根因之一。
+   */
+  storyCategory?: string;
+  storyTone?: string[];
+  writingStyle?: string[];
+  webNovelGenre?: string[];
+  /**
+   * 本书人物姓名/称谓白名单（来自 characters 表；唯一取法 = modules/character/character-names）。
+   * 规则 32「人名/称谓独占一行」的判据只能建立在这份白名单上，且整段只能是姓名与句末标点：
+   * 缺了白名单就只能靠「短段 + 段首 2-4 汉字」
+   * 去猜，而猜词表永远不完备（实测一本番茄短篇第一稿被判 32 条，命中原文全是普通叙述句），
+   * 误报互相矛盾导致精修无法收敛、正文 422 不保存。缺省时规则 32 不猜词（宁可少报）。
+   */
+  characterNames?: string[];
+}
+export interface HardlineFinding {
+  ruleId: string; message: string; snippet: string; position: string;
+  /** 同一条规则内部的确定性命中数；只用于比较局部修复进展，保存仍要求硬红线为零。 */
+  occurrenceCount?: number;
+  /**
+   * 可还原的段落切片：命中的原始段落（未做 ` | ` 折叠），以及它们在正文段落列表中的 0 基下标。
+   * 局部精修必须有精确位置才能就地改（整章重写会让位置漂移，是规则 42 反复误报的根因）。
+   */
+  paragraphs?: string[];
+  paragraphIndices?: number[];
+  /**
+   * 命中处的正文真实字符下标（唯一来源：规则自己匹配到的位置）。
+   *
+   * 防复发：此前锚定只有「position 精确位置」与「snippet 反查」两条路，而很多规则的 snippet
+   * 是计数摘要（「语气词 12 处 / 1245 汉字」「仿佛×5」）或短词拼接（"接着, 然后, 之后"），
+   * 在正文里逐字不存在 → 锚定落空或落到错误段落 → 段落级精修改错地方 / 直接中止保留上一版
+   * （用户看到「同一章反复命中、正文 422 存不下来」）。规则匹配时已知精确位置的一律回填本字段，
+   * 锚定阶段以它为最高优先级；判不了位置就留空（宁可无锚，不用猜的位置改正文）。
+   */
+  hitCharOffsets?: number[];
+}
 
 /**
- * 跨平台「语言硬伤」规则集合——区别于随平台分化的排版/节奏类（短段、对话占比、开篇冲突等）。
- * 这些是任何平台、长短篇都不允许的语言问题。质检扣分（writing-quality 的 HARDLINE_PENALTY）
- * 与生成端自动精修（refineToPlatformBenchmark）共用这同一份口径，保证「检测到什么就修什么」，
- * 不会出现质检按此扣分、生成阶段却不回炉的检测/修复口径错位。
+ * 跨平台「语言硬伤」规则集合：全系统唯一的阻断清单（单一事实源）。生成端验收 Gate + 段落级精修
+ * 与质检端扣分只认这一份，禁止任何模块另写规则号清单或另一套严重度。清单内命中 = 阻断保存 + 精确
+ * 改写并触发回炉，不存在「只提示不阻断」的降级路径。平台/风格分化的是阈值（番茄/抖音的短段是正当
+ * 排版、白描风格的标点窗口更长），不是「查不查」：没有任何规则会因为平台或风格而完全不检查。
  */
 export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
   '15b', '15c', '15d', '20a', '34', 'list-enumeration',
@@ -20,9 +70,15 @@ export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
   '53-same-structure-parallel', '54-measure-word-mismatch', '56-punct-stacking', '57-ellipsis-density',
   // AI 痕迹指纹：公式句、破折号/比喻过密、热血空洞反思、觉醒段、超短句堆叠、
   // 客服式对话、机械转场、刻意感官、拟人比喻、套路化表达、密集生理反应、AI 高频模糊词。
-  // 这类命中在生成验收与质检中都按"语言硬伤"处理（阻断保存 + 精修精确改写），
-  // 不再是只进建议、可被保存的 AI 腔。段落节奏类（短段堆叠、等长段、标点单一）仍走 advisory。
+  // 这类命中在生成验收与质检中都按"语言硬伤"处理（阻断保存 + 精修精确改写）。
   'formula-sentence', 'dash-density', 'simile-density',
+  // 文笔/排版硬伤：此前列在「只进 advisories 的降级区」，现全部收进本清单、同样阻断保存 + 精确改写。
+  // 26-short-para 短句独立成段 / 26-uniform 连续三段等长 / 26b-staccato 连续一句一段 /
+  // 32 人名或称谓独占一行 / 33 段后连续空行 / 35 标点单一窗口 / 35b 叙述标点平板窗口。
+  // 平台与风格分化的是阈值（短段平台 threshold=0、白描类风格窗口加长），不是「查不查」：
+  // 清单内任何一条都不会因为平台或风格而完全不检查，也不存在「只提示不阻断」的旁路。
+  '26-short-para', '26-uniform', '26b-staccato',
+  '32', '33', '35', '35b',
   '36', '37', '39', '42', '44', '46', '47', '48', '49', '55',
 ];
 
@@ -33,25 +89,30 @@ export function isLanguageHardline(ruleId: string): boolean {
 
 export function detectForbiddenTells(
     content: string,
-    profile?: { platform?: string; storyType?: string },
-  ): Array<{ ruleId: string; message: string; snippet: string; position: string }> {
+    profile?: HardlineProfile,
+  ): HardlineFinding[] {
     if (!content) return [];
-    const findings: Array<{ ruleId: string; message: string; snippet: string; position: string }> = [];
+    const findings: HardlineFinding[] = [];
 
     // ===== 平台化排版/节奏策略（关键：各平台是各平台风格，扫描器不得一刀切） =====
     // 番茄/抖音/七猫/小红书/规则怪谈等"短段落、快节奏"平台，短段独立成段、人名/称谓短句起段
     // 本就是正当排版（平台生成规则明确要求"段落短、每段不超过3行"）。若仍用"反短段"规则判违规、
     // 回炉要求拼成长段，就会与平台风格自相矛盾，导致第一稿大量误报、反复回炉永远修不干净。
-    // 因此：排版/节奏类规则（26-short-para / 26-uniform / 32 / 39 / dialogue-ratio）按平台分化；
-    //       作者跳出、人身状态矛盾、事实矛盾、AI 腔等"真硬伤"规则仍跨平台严格，不在此放宽。
+    // 因此：排版/节奏类规则（26-short-para / 26-uniform / 32 / 39 / dialogue-ratio）按平台分化阈值——
+    //       短段平台的短段是正当排版、等长段容差更宽，但规则本身同样进阻断清单，不再是「只提示不阻断」；
+    //       作者跳出、人身状态矛盾、事实矛盾、AI 腔等「真硬伤」规则则跨平台用同一套严格阈值。
     const hardlineStrategy = resolveNovelStrategy({
       platform: profile?.platform,
       storyType: profile?.storyType,
+      storyCategory: profile?.storyCategory,
+      storyTone: profile?.storyTone,
+      writingStyle: profile?.writingStyle,
+      webNovelGenre: profile?.webNovelGenre,
     });
-    const shortPacingPlatforms = new Set(['fanqie', 'douyin', 'qimao', 'xiaohongshu', 'rules_horror']);
-    const allowShortParagraph =
-      hardlineStrategy.pacing === 'very_high' ||
-      shortPacingPlatforms.has(hardlineStrategy.id as string);
+    // 短段平台集合 = 平台表里 pacing==='very_high' 的平台（逐值核对过：番茄/七猫/抖音/小红书/规则怪谈）。
+    // 此前这里另抄了一份同名单，与 pacing 判定是「或」关系，等于同一事实写两遍；
+    // 平台表调整节奏档后，两份会各自漂移，所以只保留 pacing 这一个判据。
+    const allowShortParagraph = hardlineStrategy.pacing === 'very_high';
     // 非短段平台只拦截更碎的片段（18→12），降低对正常短句的误报
     const shortParaMaxLen = allowShortParagraph ? 0 : 12;
     // 连续等长段容忍度：短段平台天然段落都不长、容易等长，放宽到 8%（几乎完全一致才判）
@@ -59,19 +120,100 @@ export function detectForbiddenTells(
     // 第一人称纪实/悬疑内心流（知乎盐选、规则怪谈）对话天然偏少，对话占比红线由 8% 降到 5%
     const lowDialoguePlatform = hardlineStrategy.id === 'zhihu' || hardlineStrategy.id === 'rules_horror';
     // 对话占比红线下限分三档：高对话强推进平台(番茄/七猫/抖音/小红书)15%；第一人称内心流(知乎盐选/规则怪谈)5%；其余 8%
-    // 注：此集合须与 platform-benchmarks 平台表的免费短章高对话平台保持同步（rules_horror 虽为 very_high 但走内心流低档）
-    const highDialoguePlatforms = new Set(['fanqie', 'qimao', 'douyin', 'xiaohongshu']);
-    const isHighDialogue = highDialoguePlatforms.has(hardlineStrategy.id as string);
+    // 集合来自平台表唯一事实源 HIGH_DIALOGUE_PLATFORMS，本文件不再自建副本（rules_horror 虽为 very_high 但走内心流低档）
+    const isHighDialogue = HIGH_DIALOGUE_PLATFORMS.has(hardlineStrategy.id as string);
     const dialogueMinRatio = isHighDialogue ? 0.15 : lowDialoguePlatform ? 0.05 : 0.08;
-    // 高对话平台的"期望值"（写进提示，红线 15% 是回炉线，期望冲到 30%）
-    const dialogueExpectPct = isHighDialogue ? 30 : Math.round(dialogueMinRatio * 100);
+    // 高对话平台的"期望值"（写进提示：期望值 = 平台表本篇幅目标区间下限）
+    // 期望值与开篇钩子窗口取自平台表本篇幅目标（唯一源 platform-benchmarks，禁止写死）：
+    // 期望值 = 该平台该篇幅对话占比目标区间下限（番茄短篇 35%、起点 25%…）。
+    // 此前这里写死 30%，与平台表的 35%–65% 是两套数字，同一章会同时被"期望≥30%"与"目标 35%"评判。
+    // 红线 15%/5%/8% 仍是回炉线（阻断线），与目标区间不是同一个量。
+    const metricTarget = targetForLength(
+      hardlineStrategy,
+      String(profile?.storyType || '') === 'long_novel' ? 'long_novel' : 'short_story',
+    );
+    const dialogueExpectPct = Math.round(metricTarget.dialogueRatio[0] * 100);
+    // 开篇钩子窗口（唯一源：平台表 openingHookChars，随平台与长短篇变化）。
+    // 此前 40 用写死的 400、40b 用写死的 300，与平台表（番茄短篇 300、知乎 200、起点 600、抖音 200）是两套数字。
+    const openingHookChars = metricTarget.openingHookChars;
     // 极高节奏平台(番茄/抖音/规则怪谈)：核心冲突/危机必须在前 300 字"实质"出现（不只看标点钩子）
     const requireEarlyConflict = hardlineStrategy.pacing === 'very_high';
+
+    // 文笔层硬线的风格分化（分化的是阈值，不是查不查）：白描/朴素/现实/日常是作者在项目卡片里选定的
+    // 执行标准，platform-benchmarks 的 resolveNovelStrategy 已把这一组定义为节奏放宽维度（标点天然克制）。
+    // 因此标点类硬线的检测窗口按该风格加长，规则本身照常生效、照常阻断保存。
+    const styleStandard = [...(profile?.writingStyle || []), ...(profile?.storyTone || [])].join(String.fromCharCode(12289));
+    const bareStyleStandard = PUNCTUATION_RELAX_STYLE_PATTERN.test(styleStandard);
+    // 对话段判定：全文件唯一一份，26-short-para / 26-uniform / 26b-staccato 共用同一口径。
+    const isDialogueParaText = (s: string) => /^[“"「]/.test(s.trim()) || /[”"」]\s*$/.test(s.trim());
 
     // 段落切分：连续空行视为分段；前后空白 trim
     const paragraphs = content.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
     const slice = (s: string, n = 80) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
+    // 段落起止字符区间（paragraphs 是 trim 后的切片，按顺序在 content 中定位）。
+    // 唯一实现：规则命中处要落段、集中锚定要落段，两边必须用同一份区间，否则又会出现「两套坐标」。
+    const paraSpans: Array<{ start: number; end: number }> = [];
+    {
+      let cursor = 0;
+      for (const p of paragraphs) {
+        const at = content.indexOf(p, cursor);
+        const start = at >= 0 ? at : cursor;
+        paraSpans.push({ start, end: start + p.length });
+        cursor = start + p.length;
+      }
+    }
+
+    // ===== 命中处真实下标 / 派生串映射（唯一实现，勿在规则里各写一份） =====
+    // 规则的摘要 snippet 常是「计数文字」或「多项拼接」，在正文里逐字不存在，拿它当坐标必然锚空。
+    // charOffsetsOf：把规则匹配到的字面串还原成正文真实下标（找不到就跳过，绝不猜位置）。
+    const charOffsetsOf = (needles: ReadonlyArray<string | undefined | null>): number[] => {
+      const out: number[] = [];
+      for (const rawNeedle of needles) {
+        const t = String(rawNeedle ?? '').replace(/[…]+$/, '').trim();
+        if (t.length < 2) continue;
+        const at = content.indexOf(t);
+        if (at >= 0) out.push(at);
+      }
+      return out;
+    };
+    /**
+     * 剥离对话引号，同时产出「派生串下标 → 正文真实下标」映射。
+     * mode '35b'：引号本身保留（引号算标点多样性）、引号内文字剔除、内文 1-60 字；
+     * mode '55' ：整段引号连引号一起剔除（只统计叙述层）、内文 1-80 字。两种口径与原实现逐字一致。
+     *
+     * 防复发：此前 35b 直接用 replace() 后的派生串当坐标——派生串比正文短，
+     * `offset 700-1180` 在正文里落在完全另一批段落上，精修照着错段落改，命中数不降 → 中止 →
+     * 保留上一版正文（正文 422 存不下来）。凡「先派生再判定」的规则，坐标必须回映射。
+     */
+    const stripQuotedWithMap = (mode: '35b' | '55') => {
+      const maxInner = mode === '35b' ? 60 : 80;
+      const isOpen = (c: string) => (mode === '35b' ? c === '“' || c === '"' : c === '“' || c === '"' || c === '「');
+      const isClose = (c: string, open: string) => (mode === '35b' ? c === (open === '“' ? '”' : '"') : c === '”' || c === '"' || c === '」');
+      const text: string[] = [];
+      const map: number[] = [];
+      let k = 0;
+      while (k < content.length) {
+        const ch = content[k];
+        if (isOpen(ch)) {
+          let end = -1;
+          const limit = Math.min(content.length - 1, k + maxInner);
+          for (let j = k + 1; j <= limit; j++) {
+            if (content[j] === '\n') break;
+            if (isClose(content[j], ch)) { end = j; break; }
+          }
+          if (end > k + 1) {
+            if (mode === '35b') { text.push(ch, content[end]); map.push(k, end); }
+            k = end + 1;
+            continue;
+          }
+        }
+        text.push(ch);
+        map.push(k);
+        k += 1;
+      }
+      return { text: text.join(''), map };
+    };
     // ===== 15c 叙述者跳出成为作者评论者（硬红线） =====
     // 判定收紧（本轮修复根因）：旧正则把"我写"裸匹配当元叙述，导致故事内人物的
     // 写字/记录/笔迹辨认动作（"我写的，横画都往上抬""那一笔我写不出来"）被误判为
@@ -156,6 +298,7 @@ export function detectForbiddenTells(
         message: `AI 公式句型过多（命中 ${formulaHits} 次"不是X而是Y/不仅X而且Y/与其X不如Y"，应直接陈述正面意思）`,
         snippet: formulaExamples.join(' / '),
         position: '全文',
+        hitCharOffsets: charOffsetsOf(formulaExamples),
       });
     }
 
@@ -165,22 +308,29 @@ export function detectForbiddenTells(
     const dashHanLen = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length || 1;
     const dashPerKilo = dashCount / (dashHanLen / 1000);
     // 与生成端硬红线第15条同口径：每千字≤2处；设6处起判量，避免极短章误判
-    if (dashCount >= 6 && dashPerKilo > 2) {
+    const dashDensityExceeded = dashCount >= 6 && dashPerKilo > 2;
+    if (dashDensityExceeded) {
       findings.push({
         ruleId: 'dash-density',
         message: `破折号过密（${dashCount} 处、约 ${dashPerKilo.toFixed(1)} 处/千字，人类约 1-2 处/千字）。绝大多数停顿改用逗号、句号、冒号，单段最多1处，删掉多余破折号让句子自然承接`,
         snippet: slice(content.slice(0, content.length), 60),
         position: '全文',
+        occurrenceCount: dashCount,
+        // 这里曾只给第一个破折号坐标，后果是全章 11 处只允许精修 1 处，密度必然不降到阈值以下。
+        // 全部真实命中位置交给同一段落锚定器；局部精修会按补丁预算分批选取。
+        hitCharOffsets: [...content.matchAll(/——/g)].map(match => match.index ?? -1).filter(index => index >= 0),
       });
     }
-    const simileDensity = (content.match(/(像|仿佛|如同|宛如|犹如|好像|好似)[^，。；：！？\n]{2,12}/g) || []).length;
+    const simileMatches = content.match(/(像|仿佛|如同|宛如|犹如|好像|好似)[^，。；：！？\n]{2,12}/g) || [];
+    const simileDensity = simileMatches.length;
     if (simileDensity > 15) {
-      const simExamples = (content.match(/(像|仿佛|如同|宛如|犹如|好像|好似)[^，。；：！？\n]{2,12}/g) || []).slice(0, 3).map(s => s.trim()).join(' / ');
+      const simExamples = simileMatches.slice(0, 3).map(s => s.trim()).join(' / ');
       findings.push({
         ruleId: 'simile-density',
         message: `比喻过密（${simileDensity} 处"像/仿佛/如同…"，一段最多 1 个且须服务情绪或画面）。删掉为修辞而修辞的比喻，优先具体动作`,
         snippet: simExamples,
         position: '全文',
+        hitCharOffsets: charOffsetsOf(simileMatches.slice(0, 3)),
       });
     }
     const timeDensity = (content.match(/\d+月\d+日|\d+:\d+|\d+点|凌晨|傍晚|午夜|深夜|上午|下午|早晨|中午|还剩\d+分钟/g) || []).length;
@@ -190,6 +340,7 @@ export function detectForbiddenTells(
         message: `时间标签过密（${timeDensity} 处"X点/X月X日/凌晨/傍晚…"）。不必每幕都报时间，让读者从光线/动作/对话自然感知时间流逝；同一地址/专名重复 >5 次也须删改`,
         snippet: slice(content, 60),
         position: '全文',
+        hitCharOffsets: charOffsetsOf([content.match(/\d+月\d+日|\d+:\d+|\d+点|凌晨|傍晚|午夜|深夜|上午|下午|早晨|中午|还剩\d+分钟/)?.[0]]),
       });
     }
     // 顿号排比列表：连续 ≥5 项"XX、"（"取餐、核对编号、骑车、等灯、敲门、递出去"）是 AI 动作清单指纹。
@@ -217,11 +368,12 @@ export function detectForbiddenTells(
           message: `顿号动作清单 ${actionListHits.length} 处（连续 ≥5 项动作"XX、"罗列：${actionListHits[0].slice(0, 24)}）。只保留 2 个核心动作并写出具体结果，其余删掉，避免"罗列动作清单"；相同动词前缀的同构排比（带了A、带了B…）见规则53；人名/物品/地名等名词并列（点名、菜单、花名册）是合法叙事，不是动作清单，不得改动`,
           snippet: actionListHits.slice(0, 2).map(s => s.trim().slice(0, 30)).join(' / '),
           position: '全文',
+          hitCharOffsets: charOffsetsOf(actionListHits.slice(0, 2)),
         });
       }
     }
     // 对话占比过低：爆款网文对话占比高（用对话推进剧情/交代设定/制造冲突）。
-    // 全章几乎无对话=大段独白+环境描写，是 AI 文的典型形态。阈值 8%。
+    // 全章几乎无对话=大段独白+环境描写，是 AI 文的典型形态。阻断线下限分三档：高对话平台 15%/第一人称内心流 5%/其余 8%（见上方 dialogueMinRatio）。
     const dialogueContent = (content.match(/[“"「][^”"」]{1,80}[”"」]/g) || []).join('').replace(/\s/g, '');
     const plainTotal = content.replace(/\s/g, '');
     const dialogueRatio = plainTotal.length > 0 ? dialogueContent.length / plainTotal.length : 0;
@@ -284,7 +436,9 @@ export function detectForbiddenTells(
     // ===== 26 短句独立成段后跟空行 =====
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
-      // 短段快节奏平台整类放行（短句独立成段是其正当排版）；其余平台只拦截 <12 字的极短碎片
+      // 短段快节奏平台整类放行（短句独立成段是其正当排版）；其余平台只拦截 <12 字的极短碎片。
+      // 本规则已在阻断清单内：命中进 contradictions 并触发段落级精修。平台分化的只是阈值（短段平台阈值=0），
+      // 短段平台上「连续一句一段」由 26b-staccato 收口，不存在「平台豁免后完全看不见」。
       if (!allowShortParagraph && p.length < shortParaMaxLen && /[。.!！？?]$/.test(p) && i < paragraphs.length - 1) {
         findings.push({
           ruleId: '26-short-para',
@@ -298,6 +452,9 @@ export function detectForbiddenTells(
     // ===== 26 连续 3 段同等字符长度 =====
     const lens = paragraphs.map(p => p.length);
     for (let i = 0; i < paragraphs.length - 2; i++) {
+      // 对话一来一回天然长度接近，是合法排版（尤其番茄对话节拍），不参与等长段判定；
+      // 否则连续 3 段长度相近的对话会被判「等长段」，属于对平台正当排版的误伤。
+      if (isDialogueParaText(paragraphs[i]) || isDialogueParaText(paragraphs[i + 1]) || isDialogueParaText(paragraphs[i + 2])) continue;
       const a = lens[i], b = lens[i + 1], c = lens[i + 2];
       if (a < 8 || b < 8 || c < 8) continue; // 跳过极短段
       const avg = (a + b + c) / 3;
@@ -337,37 +494,38 @@ export function detectForbiddenTells(
       });
     }
 
-    // ===== 32 姓名/角色独占一行（用户截图反复出现的"姓名莫名其妙独占一行"） =====
-    // 模式：段落以 2-4 字中文姓名/称谓开头 + 段落较短（≤ 30 字）+ 段落有完整标点收尾——
-    // 视觉上"姓名被孤立"成段，与上下文分离。区分真正的姓名段（"赵明会死。""老爷进来了。"）
-    // 与合理短句（"我靠在墙边。"），用动作/介词/代词白名单排除。
-    const nameParagraphStarters = /^(走|跑|站|坐|看|听|说|想|拿|拉|开|关|写|读|做|回|转|到|去|来|靠|摸|端|捧|托|搬|扔|推|敲|挤|涌|冒|冲|扑|拦|挡|握|抓|按|捏|撕|扯|拽|擦|伸|缩|跨|迈|踩|踏|踢|撞|砸|抖|振|摇|晃|摆|翻|滚|爬|滑|溜|飘|落|沉|浮|倒|塌|断|裂|碎|烧|烤|煮|炒|煎|蒸|炖|熬|沏|泡|灌|注|流|淌|滴|洒|溅|漏|溢)/;
-    const nonNameHeads = ['这个', '那个', '什么', '怎么', '为什么', '哪个', '这些', '那些', '如此', '这样', '那样', '一样', '一直', '一下', '一些', '一定', '一次', '一边', '一旦', '万一', '曾经', '已经', '正在', '慢慢', '突然', '然后', '于是', '接着', '此后', '当晚', '今天', '明天', '昨天', '刚才', '此刻', '眼前', '眼里', '心里', '手上', '背上', '肩上', '脸上', '头上', '脚下', '旁边', '对面', '远处', '近处', '身后', '身前'];
-    // 代词 + 动词开头（第一人称动作段常见模式），排除这种"我靠在/我走到..."
-    const pronounVerbStarters = new Set(['我靠', '我走', '我看', '我听', '我拿', '我拉', '我坐', '我站', '我回', '我转', '我到', '我去', '我来', '我摸', '我说', '我想', '我低', '我抬', '我盯', '我伸', '我握', '我抓', '我按', '我推', '我敲', '我擦', '我翻', '我爬', '我倒', '我沉', '我开', '我关', '我写', '我读', '我做', '我端', '我搬', '我扔', '我挤', '我握', '他在', '她在', '它在']);
-    for (let i = 0; i < paragraphs.length; i++) {
-      if (allowShortParagraph) continue; // 短段快节奏平台：人名/称谓短段独立成段是正当排版，整类放行
-      const p = paragraphs[i];
-      if (p.length > 30) continue;
-      if (p.length < 4) continue;
-      const headMatch = p.match(/^[\u4e00-\u9fff]{2,4}/);
-      if (!headMatch) continue;
-      const head = headMatch[0];
-      // 排除明显是动作/介词/代词开头
-      if (nameParagraphStarters.test(head)) continue;
-      if (nonNameHeads.includes(head)) continue;
-      if (pronounVerbStarters.has(head.slice(0, 2))) continue;
-      // 段以中文/英文句末标点收尾说明段已结束（不是被截断的中间句）
-      if (!/[。！？…\.!?]/.test(p)) continue;
-      // 排除：上一段以冒号/引号结尾（"我说：赵明。" 是引语后接补充，并非姓名独立成段）
-      if (i > 0 && (paragraphs[i - 1].endsWith('：') || paragraphs[i - 1].endsWith(':'))) continue;
-      if (i > 0 && /["\u201C\u201D]$/.test(paragraphs[i - 1])) continue;
-      findings.push({
-        ruleId: '32',
-        message: `姓名/称谓段"${head}..."独立成段（应与上下文合并）`,
-        snippet: p,
-        position: `第 ${i + 1} 段`,
-      });
+    // ===== 32 人名/称谓独占一行（用户截图反复出现的「姓名莫名其妙独占一行」） =====
+    // ⚠️ 防复发（勿再退回反向判据）：本规则此前用「短段 + 段首 2-4 汉字 + 动作/介词/代词黑名单」的
+    // 反向排除法。黑名单永远不可能完备 —— 实测一本番茄短篇第一稿被判出 32 条，命中原文【全部】是
+    // 普通叙述句（"报站的女声从显示屏后面出来时，我的手搭在制动手柄上。""又按一次。还是它。"
+    // "不是电流串音。""几秒后。""东堤到站，0:52。"…），一条真姓名段都没有。更致命的是这 32 条
+    // 【互相矛盾】（每一条都要求「与上下文合并」，而它们分散在全章各处），段落级精修不可能同时满足
+    // → repairHardlineFindingsLocally 判为无进展 → 正文 422 不保存（作者侧表现为"改了还是不过"）。
+    // 因此唯一肯定式判据是【整段只有】本书 characters 表里的人物名/称谓和句末标点。
+    // 这里曾有过第二份「段首是姓名 + 段长≤12」判据，后果是「林野抬脚，跨过门槛。」
+    // 「林野往前走。」被误报，精修耗尽后正文 422 不保存；本轮删除这个长度猜测。
+    // 白名单来源唯一：character-names.loadCharacterNames（生成链与质检链同一份，见该文件防复发注释）。
+    // 没有白名单时本规则不猜词（宁可少报，也不制造无法收敛的误报风暴）；活体路径必传本书白名单。
+    const characterNames = (profile?.characterNames || [])
+      .map(n => String(n || '').trim())
+      .filter(n => n.length >= 2)
+      .sort((a, b) => b.length - a.length);
+    if (characterNames.length > 0) {
+      for (let i = 0; i < paragraphs.length; i++) {
+        const p = paragraphs[i];
+        const head = characterNames.find(n => p.startsWith(n) && /^[。！？.!?]*$/.test(p.slice(n.length)));
+        if (!head) continue;
+        // 上一段是问句/引语时，本段是应答式独立成段（「谁去？」「赵明。」），不算姓名孤立。
+        if (i > 0 && (/[？?]\s*$/.test(paragraphs[i - 1]) || /[\u201C\u201D"]/.test(paragraphs[i - 1]))) continue;
+        // 上一段以冒号结尾（「他把东西分给三个人：」）说明本段是列表项/引语补充，不是姓名孤立。
+        if (i > 0 && (paragraphs[i - 1].endsWith('：') || paragraphs[i - 1].endsWith(':'))) continue;
+        findings.push({
+          ruleId: '32',
+          message: `人名/称谓段"${head}"独占一行（应与上下文合并）`,
+          snippet: p,
+          position: `第 ${i + 1} 段`,
+        });
+      }
     }
 
     // ===== 33 段后空行 ≥ 2（连续 \n\n+） =====
@@ -432,43 +590,69 @@ export function detectForbiddenTells(
     // 标点多元化规则 27 的确定性兜底：滑动窗口 200 字，扫到一段完全没有问号/感叹号/分号/
     // 省略号/破折号/引号对，就视为"标点单一"。
     // 注意：对话引号按对算（"…"算 1 组），连续 200 字里至少出现 1 种"非常规标点"才算合规。
-    const punctDiversityWindow = 200;
+    const punctDiversityWindow = bareStyleStandard ? 320 : 200; // 白描/朴素类风格按执行标准加长窗口，规则照常阻断
+    let firstPunctFinding: HardlineFinding | undefined;
+    let punctFailureWindows = 0;
+    const punctHitParagraphs = new Set<number>();
     for (let i = 0; i < content.length - punctDiversityWindow; i += 80) {
       const window = content.slice(i, i + punctDiversityWindow);
       // 兼容中英文引号：\u201C \u201D \u2018 \u2019 是智能引号
       const hasDiversity = /[!?！？…—\u2014\u2013;:：;\u3001]|"[^"\n]{1,40}"|"[^"\n]{1,40}"|\u201C[^\u201D\n]{1,40}\u201D/.test(window);
       if (!hasDiversity) {
-        findings.push({
+        punctFailureWindows++;
+        for (const span of paraSpans) {
+          if (span.start < i + punctDiversityWindow && span.end > i) punctHitParagraphs.add(span.start);
+        }
+        firstPunctFinding ??= {
           ruleId: '35',
-          message: `连续 ${punctDiversityWindow} 字无问号/感叹号/分号/省略号/破折号/对话引号（标点单一硬约束）`,
+          message: `连续 ${punctDiversityWindow} 字无问号/感叹号/分号/省略号/破折号/对话引号（标点单一硬约束）。标点必须符合句意${dashDensityExceeded ? '；本章破折号已过密，不得靠新增破折号修复此项' : ''}`,
           snippet: slice(window, 80),
           position: `offset ${i}-${i + punctDiversityWindow}`,
-        });
-        break;
+        };
       }
+    }
+    if (firstPunctFinding) {
+      firstPunctFinding.occurrenceCount = punctFailureWindows;
+      firstPunctFinding.hitCharOffsets = [...punctHitParagraphs].sort((a, b) => a - b);
+      findings.push(firstPunctFinding);
     }
 
     // ===== 35b 叙述标点平板（引号外叙述连续 300 字无问号/感叹/破折号/省略号/分号） =====
     // 规则 35 的盲区：对话引号算"多样性"，导致"满篇对话 + 平板叙述"漏检。本规则只看
     // 引号外的叙述文本：连续 300 字叙述只用逗号句号、无任何情绪/停顿标点，读起来平板机械
-    // （AI 收敛标点的指纹）。属 advisory（不阻断保存），提示精修时在情绪点用标点制造节奏；
-    // 压抑白描风格允许整体低频，因此不做硬红线。
-    const narrationOnly = content
-      .replace(/[\u201C][^\u201D\n]{1,60}[\u201D]/g, '“”')   // 中文引号内容替换为空引号
-      .replace(/["][^"\n]{1,60}["]/g, '""');                     // 英文引号内容
-    const narrationWindow = 300;
+    // （AI 收敛标点的指纹）。本规则已在阻断清单内：命中进 contradictions 触发段落级精修；
+    // 白描/朴素/现实/日常类风格按项目卡片执行标准加长窗口（300→480），是阈值分化，不是豁免、不是降级。
+    // 坐标修复：派生串只用于「判定」（与旧实现逐字等价），证据与坐标一律回映射到正文真实下标。
+    const { text: narrationOnly, map: narrationMap } = stripQuotedWithMap('35b');
+    const narrationWindow = bareStyleStandard ? 480 : 300;
+    let firstNarrationFinding: HardlineFinding | undefined;
+    let narrationFailureWindows = 0;
+    const narrationHitParagraphs = new Set<number>();
     for (let i = 0; i < narrationOnly.length - narrationWindow; i += 100) {
       const w = narrationOnly.slice(i, i + narrationWindow);
       const hasNarrationDiversity = /[!?！？…—\u2014;:：;]/.test(w);
       if (!hasNarrationDiversity) {
-        findings.push({
+        narrationFailureWindows++;
+        const realStart = narrationMap[i] ?? 0;
+        const realEnd = (narrationMap[Math.min(i + narrationWindow - 1, narrationMap.length - 1)] ?? realStart) + 1;
+        for (const span of paraSpans) {
+          if (span.start < realEnd && span.end > realStart) narrationHitParagraphs.add(span.start);
+        }
+        firstNarrationFinding ??= {
           ruleId: '35b',
-          message: `叙述段连续 ${narrationWindow} 字只用逗号句号、无问号/感叹号/破折号/省略号/分号（标点平板，节奏机械）。在情绪转折处用感叹、停顿（省略号/破折号）或问句制造节奏，不要全章只用逗号句号`,
-          snippet: slice(w, 80),
-          position: `offset ${i}-${i + narrationWindow}`,
-        });
-        break;
+          message: `叙述段连续 ${narrationWindow} 字只用逗号句号、无问号/感叹号/破折号/省略号/分号（标点平板，节奏机械）。仅在语义需要时用真实问句、停顿或分号调整节奏${dashDensityExceeded ? '；本章破折号已过密，不得靠新增破折号修复此项' : ''}`,
+          snippet: slice(content.slice(realStart, realEnd), 80),
+          position: `offset ${realStart}-${realEnd}`,
+          // 命中窗覆盖的【全部】段落都给出真实下标：精修一轮就能把整段平板区改完，
+          // 否则每次只改起始段、下一轮又命中相邻窗（用户看到的「反复回炉」正是这个）。
+          hitCharOffsets: [],
+        };
       }
+    }
+    if (firstNarrationFinding) {
+      firstNarrationFinding.occurrenceCount = narrationFailureWindows;
+      firstNarrationFinding.hitCharOffsets = [...narrationHitParagraphs].sort((a, b) => a - b);
+      findings.push(firstNarrationFinding);
     }
 
     // ===== 56 标点连用滥用（！！！/？？/！？/？！，叠用标点非规范用法） =====
@@ -481,6 +665,7 @@ export function detectForbiddenTells(
         message: `标点叠用 ${stackedPunct.length} 处（"！！""？？""！？"等，感叹号/问号叠用非规范用法，是 AI 情绪渲染指纹）。全部改单标点，用句子本身传达情绪`,
         snippet: slice(stackedPunct[0] ?? '', 20),
         position: '全文',
+        hitCharOffsets: charOffsetsOf([stackedPunct[0]]),
       });
     }
 
@@ -495,6 +680,7 @@ export function detectForbiddenTells(
         message: `省略号过密（${ellipsisCount} 处、约 ${ellipsisPerKilo.toFixed(1)} 处/千字，人类约 0-2 处/千字）。绝大多数停顿改用逗号/句号或直接写动作，只保留真正欲言又止/中断的 1-2 处`,
         snippet: slice((content.match(/[^。！？\n]*……[^。！？\n]*/g) || [''])[0], 40),
         position: '全文',
+        hitCharOffsets: charOffsetsOf([(content.match(/[^。！？\n]*……[^。！？\n]*/g) || [''])[0]]),
       });
     }
 
@@ -529,6 +715,7 @@ export function detectForbiddenTells(
         message: `热血空洞句过多（命中 ${hollowHitCount36} 次"我必须/我不能/我终于/这一刻/唯一能/最好"等 AI 反思签名）`,
         snippet: examples.join(' / '),
         position: '全文',
+        hitCharOffsets: charOffsetsOf(examples),
       });
     }
 
@@ -648,7 +835,7 @@ export function detectForbiddenTells(
     {
       const cjkLen = (s: string) => (s.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
       const endMarkCnt = (s: string) => (s.match(/[。！？!?]/g) || []).length;
-      const isDialoguePara = (s: string) => /^[“"「]/.test(s.trim()) || /[”"」]\s*$/.test(s.trim());
+      const isDialoguePara = isDialogueParaText; // 与 26-short-para / 26-uniform 共用同一份对话段口径
       // 一句一段：非对话段、恰好 1 个句末标点、汉字 ≤20
       const isOneLine = (s: string) => !isDialoguePara(s) && endMarkCnt(s) === 1 && cjkLen(s) > 0 && cjkLen(s) <= 20;
       const STACCATO_NEED = 3; // 连续 ≥3 段一句一段才判（孤立强调短段不判）
@@ -680,9 +867,9 @@ export function detectForbiddenTells(
 
     // ===== 40 章首无强钩子（用户反馈："没有代入感、剧情文字很平淡、完全没吸引力"） =====
     // 联网实证：番茄 5月公告"空洞水文"、澎湃"AI 不会主动推进剧情"、toutiao"读者三章就跑"。
-    // 章首 200 字必须有"反常细节/冲突直给/未完成动作/悬念悬置"——AI 典型平淡开头是
+    // 章首（开篇钩子窗口内）必须有"反常细节/冲突直给/未完成动作/悬念悬置"——AI 典型平淡开头是
     // "环境描写+主角感知+心声"循环，看似有字但没钩子。
-    const chapterStart = content.slice(0, 400); // 前 400 字
+    const chapterStart = content.slice(0, openingHookChars); // 开篇钩子窗口（唯一源：平台表 openingHookChars）
     const chapterStartTrim = chapterStart.trim();
     if (chapterStartTrim.length >= 80) {
       // 强钩子标志：① 对话引号 ≥ 1 对；② 问号 ≥ 1；③ 感叹号 ≥ 1；④ 破折号 ≥ 1；
@@ -697,30 +884,32 @@ export function detectForbiddenTells(
       if (hookCount === 0) {
         findings.push({
           ruleId: '40',
-          message: `章首 200+ 字无强钩子（无对话/问号/感叹号/破折号/突发动作/悬念词——平淡开头是 AI 写作最显眼的破绽，读者三章就跑）`,
+          message: `章首 ${openingHookChars} 字内无强钩子（无对话/问号/感叹号/破折号/突发动作/悬念词——平淡开头是 AI 写作最显眼的破绽，读者三章就跑）`,
           snippet: slice(chapterStartTrim, 100),
           position: '章首',
         });
       }
     }
 
-    // ===== 40b 极高节奏平台：核心冲突/危机必须在前300字"实质"出现（补规则40只看标点钩子的不足） =====
+    // ===== 40b 极高节奏平台：核心冲突/危机必须在开篇钩子窗口内"实质"出现（补规则40只看标点钩子的不足） =====
     if (requireEarlyConflict) {
-      const earlyWindow = content.slice(0, 300);
-      // 强冲突/危机/反常事件词，或前300字内已有一段冲突对话，即视为冲突已前置
+      const earlyWindow = content.slice(0, openingHookChars);
+      // 强冲突/危机/反常事件词，或开篇钩子窗口内已有一段冲突对话，即视为冲突已前置
       const strongEvent = /(死|尸|血|枪|刀|毒|绑|逃|追|杀|凶|爆炸|着火|车祸|报警|警笛|手铐|威胁|争吵|吵架|打斗|晕倒|坠|劫持|绑架|尸体|死者|遇害|被杀|出事|不对劲|有问题|反常|异常|不该出现|怎么会|凭什么|是谁|谁在)/;
       const earlyDialogue = /[“"「][^”"」]{2,60}[”"」]/.test(earlyWindow);
       if (!strongEvent.test(earlyWindow) && !earlyDialogue) {
         findings.push({
           ruleId: '40b-opening-conflict',
-          message: '番茄/极高节奏平台要求开篇前300字直接出现核心矛盾、危机或反常事件本身（或一段冲突对话）；当前前300字是身份/履历/户型/环境/日常动作铺垫，核心冲突出现过晚（读者前300字决定去留）。把最抓人的冲突或异常提到第一段，背景一律用后文动作和对话带出',
+          message: `本平台（极高节奏）要求开篇前 ${openingHookChars} 字内直接出现核心矛盾、危机或反常事件本身（或一段冲突对话）；当前开篇钩子窗口内是身份/履历/户型/环境/日常动作铺垫，核心冲突出现过晚（读者在前 ${openingHookChars} 字决定去留）。把最抓人的冲突或异常提到第一段，背景一律用后文动作和对话带出`,
           snippet: slice(earlyWindow.replace(/\s/g, ''), 100),
-          position: '开篇前300字',
+          position: `开篇前${openingHookChars}字`,
         });
       }
     }
 
-    // ===== 41 300字/3段无情绪点（联网实证：番茄300字一爽点/500字一钩子，开头300字流失率30%） =====
+    // ===== 41 情绪死区：连续 3 段平淡，或约 300 字符无情绪标志 =====
+    // 300 字符是保守阻断线（真人网文也常超过），平台推进密度目标见平台表 payoffGapChars，
+    // 两者不是一个量：这里只拦"连续 3 段零情绪"的 AI 环境+心声循环，不按固定字数硬塞反转。
     // 两层检测：
     //   a) 字符级：滑动窗口 300 字符无 ?！…—;:：等及两位数数字；
     //   b) 段落级：连续 3 段无问号/感叹号/破折号/省略号/分号/数字——比字符级更准确
@@ -787,8 +976,15 @@ export function detectForbiddenTells(
     for (let i = 0; i < paragraphs.length; i++) {
       if (isDialoguePara42(paragraphs[i])) dialogueParaIndices.push(i);
     }
+    // 这里曾只认「嗯/沉默/破折号」等表面标志，后果是「提前十天？」
+    // 「报给谁？」配合「你管放线，我管时间表」的真实权责对抗被判客服式对答。
+    // 两次追问须与同一段内的权责对立同时存在，普通登记问答仍由 42 阻断。
+    const hasAdversarialExchange42 = (parts: string[]): boolean =>
+      parts.filter(p => /[？?]/.test(p)).length >= 2
+      && parts.some(p => /你(?:管|负责|决定)[\s\S]{0,80}我(?:管|负责|决定)/.test(p));
     // 全局：真对话段 ≥3 且全章无人味标志 → 客服式对话整体违规。
-    // 追问推进豁免：全章对话中【去重问句 ≥3】说明存在信息推进的追问/对峙场景，不判"客服式"。
+    // 豁免口径（与实现一致）：全章任意一个非疑问答句命中【闪避/模糊回答】或【X就是X 同义反复】，
+    // 即认为存在对抗张力，不判"客服式"；注意这不是"去重问句 ≥3"。
     let globalEvasion = false;
     const globalEvasionRe = /(那边|这边|就那样|那样|不知道|不清楚|说不清|说不上|忘了|记不清|没记住|再说吧|再说|随便|都行|看情况|外头|里头|别问了|别问|不想说|不记得|没听清|在镇上|在乡下|在城里|在厂里|在外面|来不了|没空|忙着呢|走不开|说不准|没准|说不定|说不好)/;
   const tautologyRe = /^([^，。！？、；：\s]{1,8})(?:就是|还是|不还是|不就是)\1/;
@@ -798,13 +994,16 @@ export function detectForbiddenTells(
           globalEvasion = true;
         }
       }
-    const globalProbing = globalEvasion;
-    if (dialogueParaIndices.length >= 3 && humanMarkers42 === 0 && !globalProbing) {
+    const globalExempt = globalEvasion || hasAdversarialExchange42(dialogueParaIndices.map(i => paragraphs[i]));
+    if (dialogueParaIndices.length >= 3 && humanMarkers42 === 0 && !globalExempt) {
       findings.push({
         ruleId: '42',
+        occurrenceCount: dialogueParaIndices.length,
         message: `全章 ${dialogueParaIndices.length} 段真实对话，但无人味标志（无打断/沉默/答非所问/吞吞吐吐/语气词/重复）——纯"xx说/xx回答"客服式对话`,
         snippet: '全章',
         position: '全文',
+        paragraphs: dialogueParaIndices.map(i => paragraphs[i]),
+        paragraphIndices: [...dialogueParaIndices],
       });
     } else if (dialogueParaIndices.length >= 4) {
       // 段落级检测：连续 ≥4 段真实对话无人味标志。
@@ -869,12 +1068,17 @@ export function detectForbiddenTells(
         // 豁免条件：连续区内至少一个答句为模糊/闪避（"那边""不知道"——有对抗张力，是追问/对峙
         // 场景的物理指纹，不是客服式配合回答）。登记式一问一答（"你叫什么名字？""周雨。"）无
         // 闪避，仍判圆滑交替对答。
-        if (!hasEvasionAnswer) {
+        if (!hasEvasionAnswer && !hasAdversarialExchange42(paragraphs.slice(maxStart, maxStart + maxConsecutive))) {
           findings.push({
             ruleId: '42',
+            occurrenceCount: maxConsecutive - 3,
             message: `连续 ${maxConsecutive} 段对话无人味标志（无打断/沉默/语气词/重复——圆滑交替对答）`,
             snippet: paragraphs.slice(maxStart, maxStart + maxConsecutive).map(p => slice(p, 24)).join(' | '),
             position: `第 ${maxStart + 1}-${maxStart + maxConsecutive} 段`,
+            // 精确位置随结论一起返回：局部精修必须就地改这几段，不能靠整章重写（位置会漂移，
+            // 是规则 42 反复误报的根因）。paragraphs 为未折叠的原始段落原文。
+            paragraphs: paragraphs.slice(maxStart, maxStart + maxConsecutive),
+            paragraphIndices: Array.from({ length: maxConsecutive }, (_, i) => maxStart + i),
           });
         }
       }
@@ -886,6 +1090,8 @@ export function detectForbiddenTells(
     const imperfectCount = (content.match(imperfectDetailWords) || []).length;
     // 阈值按章节长度分：>2000 字 → ≥3 处，500-2000 字 → ≥2 处，<500 字 → ≥1 处
     const imperfectThreshold = content.length > 2000 ? 3 : content.length > 500 ? 2 : 1;
+    // 本规则判「缺失」（全章没有不完美细节），正文里没有可锚定的命中处 → 不带 hitCharOffsets；
+    // 它不在 LANGUAGE_HARDLINE_RULE_IDS 内，只进 advisories，不会阻断保存。
     if (imperfectCount < imperfectThreshold) {
       findings.push({
         ruleId: '43',
@@ -905,11 +1111,13 @@ export function detectForbiddenTells(
         message: `转场机械词 ≥ 3 次（"${samples}"——应改用环境切入/时间锚点/感官切入/身体状态替代）`,
         snippet: samples,
         position: '全文',
+        hitCharOffsets: charOffsetsOf(mechMatches.slice(0, 3)),
       });
     }
 
     // ===== 45 无具体数字（AI极少主动用数字） =====
-    // 阈值按章节长度分：>2000 字 → 需 ≥1 处，800-2000 字 → 需 ≥1 处但 threshold 放宽，<800 字 → 跳过
+    // 阈值：全文至少 1 处具体数字锚点（规则 45 恒为 1 处）；numMinLength 分档只决定"正文多短才不判"，
+    // 不影响所需数量。此前写成 >2000?1:1 的恒等三元，看起来像有分档其实没有，已改为常量。
     // 排除序数词（第X/其一/其二）和纯"一/二/三"单字
     const specificNumbers45 = /\d{2,}|[零一二三四五六七八九十百千万亿两]+(件|个|次|句|根|天|年|岁|块|毛|分|度|米|斤|步|遍|页|行|层|级|次|轮|趟|拳|脚|口|声|刻|秒)?/g;
     const specificCandidates = content.match(specificNumbers45) || [];
@@ -922,8 +1130,9 @@ export function detectForbiddenTells(
       if (/^[一两]$/.test(n) && n.length === 1) return false;
       return true;
     }).length;
-    const numThreshold = content.length > 2000 ? 1 : 1;
+    const numThreshold = 1;
     const numMinLength = content.length > 2000 ? 800 : content.length > 500 ? 500 : 150;
+    // 同 43：判的是「缺失」（全章无具体数字），无命中处可锚 → 不带 hitCharOffsets，只进 advisories。
     if (specificCount === 0 && content.length > numMinLength) {
       findings.push({
         ruleId: '45',
@@ -954,6 +1163,7 @@ export function detectForbiddenTells(
         message: `刻意感官描写 ${sensoryMatches.length} 处（AI最爱套路："凉意贴着皮肤往上爬""炸开一朵光""过电似的""心跳漏了一拍"等）——冷就说冷，疼就说疼，用直白动作代替`,
         snippet: sensoryMatches.slice(0, 3).join('；'),
         position: '全文',
+        hitCharOffsets: charOffsetsOf(sensoryMatches.slice(0, 3)),
       });
     }
 
@@ -976,6 +1186,7 @@ export function detectForbiddenTells(
         message: `拟人化比喻 ${personificationMatches.length} 处（"回音吞掉了尾音""风声绕了道""黑暗吞噬了一切"等非人事物做人才有的动作）——直接描写事实，不用拟人`,
         snippet: personificationMatches.slice(0, 3).join('；'),
         position: '全文',
+        hitCharOffsets: charOffsetsOf(personificationMatches.slice(0, 3)),
       });
     }
 
@@ -999,6 +1210,7 @@ export function detectForbiddenTells(
         message: `套路化表达 ${clicheMatches.length} 处（"记忆清晰得像刚发生""不像梦""那一刻我突然明白""时间仿佛静止""眼中闪过一丝复杂"等AI常用句式）——用具体场景和动作代替`,
         snippet: clicheMatches.slice(0, 3).join('；'),
         position: '全文',
+        hitCharOffsets: charOffsetsOf(clicheMatches.slice(0, 3)),
       });
     }
 
@@ -1026,6 +1238,7 @@ export function detectForbiddenTells(
           message: `同类${rp.name}在短距离内密集重复（1200字内出现≥3次：${samples}）——同一身体反应反复出现是AI高频特征，删掉多余处，用对话/环境/动作替代`,
           snippet: samples,
           position: '全文',
+          hitCharOffsets: hits.slice(0, 4),
         });
       }
     }
@@ -1036,17 +1249,31 @@ export function detectForbiddenTells(
     {
       // 允许“了”与逗号之间夹 0-3 字补语/宾语（真实病例“退了账，走了”=退了+账；“闪了两下，灭了”=闪了+两下）
       const fragChain = /[一-龥]{1,5}了[一-龥]{0,3}[，,][一-龥]{1,5}了(?=[。！])/g;
+      // 这里曾对全文裸跑正则，后果是把“协议你们签了，房号也分了”之类
+      // 人物对话误报为叙述者的碎片动作链，导致正文反复 422。复用 35b 的
+      // 引号剥离及原文坐标映射；跨引号拼接出的假命中必须拒绝。
+      const isNarrationMatch = (start: number, length: number) =>
+        Array.from({ length }, (_, i) => narrationMap[start + i]).every((real, i) =>
+          real !== undefined && (i === 0 || real === narrationMap[start + i - 1] + 1));
       const chainHits: string[] = [];
+      const chainOffsets: number[] = [];
       let cm: RegExpExecArray | null;
-      while ((cm = fragChain.exec(content)) !== null) chainHits.push(cm[0]);
-      const triple = /[一-龥]{1,5}了[一-龥]{0,3}[，,][一-龥]{1,5}了[一-龥]{0,3}[，,][一-龥]{1,5}了[一-龥]{0,3}[。！]/;
-      const tripleHit = triple.test(content);
+      while ((cm = fragChain.exec(narrationOnly)) !== null) {
+        if (!isNarrationMatch(cm.index, cm[0].length)) continue;
+        chainHits.push(cm[0]);
+        chainOffsets.push(narrationMap[cm.index]);
+      }
+      const triple = /[一-龥]{1,5}了[一-龥]{0,3}[，,][一-龥]{1,5}了[一-龥]{0,3}[，,][一-龥]{1,5}了[一-龥]{0,3}[。！]/g;
+      const tripleHits = [...narrationOnly.matchAll(triple)].filter(m => isNarrationMatch(m.index, m[0].length));
+      const tripleHit = tripleHits.length > 0;
       if (chainHits.length >= 2 || tripleHit) {
         findings.push({
           ruleId: '50-fragment-action-chain',
+          occurrenceCount: chainHits.length + (tripleHit ? 1 : 0),
           message: `“X了，Y了”式两字残句动作链 ${chainHits.length + (tripleHit ? 1 : 0)} 处（如“${(chainHits[0] || 'X了，Y了。').slice(0, 16)}”——把连贯动作切成两字碎片，读着机械发碎）。应合并为完整句子、补足主语或成分（如“他结了账转身离开”），严禁用句号把连续动作切成残句`,
           snippet: chainHits.slice(0, 3).join(' / '),
           position: '全文',
+          hitCharOffsets: chainOffsets.length > 0 ? chainOffsets.slice(0, 3) : tripleHits.map(m => narrationMap[m.index]).slice(0, 3),
         });
       }
     }
@@ -1054,7 +1281,9 @@ export function detectForbiddenTells(
     // ===== 51 句末语气词密度过高（靠嗯/啊/呀/吧/呢凑口语，显机械） =====
     {
       const hanLen51 = (content.match(/[一-龥]/g) || []).length || 1;
-      const toneWords51 = (content.match(/[嗯啊呀吧呢呗喽嘛哦哈啦哟噻](?=[。！？，,\s”"]|$)/g) || []).length;
+      const toneWordMatches51 = [...content.matchAll(/[嗯啊呀吧呢呗喽嘛哦哈啦哟噻](?=[。！？，,\s”"]|$)/g)];
+      const toneWords51 = toneWordMatches51.length;
+      const toneWordOffsets51 = toneWordMatches51.map(m => m.index ?? 0);
       const perHundred = toneWords51 / (hanLen51 / 100);
       if (toneWords51 >= 8 && perHundred > 1.2) {
         findings.push({
@@ -1062,6 +1291,7 @@ export function detectForbiddenTells(
           message: `句末语气词过密（${toneWords51} 处、约 ${perHundred.toFixed(1)} 处/百字）。语气词只在贴合人物声线时偶用，删掉为凑口语而堆的嗯/啊/呀/吧/呢，用动作和具体台词代替`,
           snippet: `语气词 ${toneWords51} 处 / ${hanLen51} 汉字`,
           position: '全文',
+          hitCharOffsets: toneWordOffsets51.slice(0, 3),
         });
       }
     }
@@ -1071,6 +1301,7 @@ export function detectForbiddenTells(
     {
       const envWords52 = ['黑车', '车灯', '路灯', '夜色', '晚风', '冷风', '烟雾', '霓虹', '月光', '雾气'];
       const envRepeatExamples: string[] = [];
+      const envRepeatOffsets: number[] = [];
       for (const w of envWords52) {
         let near = 0;
         for (let i = 0; i <= Math.max(0, paragraphs.length - 4); i++) {
@@ -1079,7 +1310,10 @@ export function detectForbiddenTells(
           if (c >= 4) { near = c; break; }
         }
         const total = (content.match(new RegExp(w, 'g')) || []).length;
-        if (near >= 4 && total >= 6) envRepeatExamples.push(`“${w}”全文${total}次且相邻4段≥${near}次`);
+        if (near >= 4 && total >= 6) {
+          envRepeatExamples.push(`“${w}”全文${total}次且相邻4段≥${near}次`);
+          envRepeatOffsets.push(content.indexOf(w));
+        }
         if (envRepeatExamples.length >= 3) break;
       }
       if (envRepeatExamples.length > 0) {
@@ -1088,6 +1322,7 @@ export function detectForbiddenTells(
           message: `同一环境意象近距离重复铺陈（${envRepeatExamples.join('；')}）。过渡环境描写只承担转场与情绪锚点，同一意象相邻段落最多 1-2 次，重复渲染处删掉或换成推进剧情的动作/对话`,
           snippet: envRepeatExamples.join('；'),
           position: '全文',
+          hitCharOffsets: envRepeatOffsets.filter(i => i >= 0),
         });
       }
     }
@@ -1099,20 +1334,23 @@ export function detectForbiddenTells(
       // 引擎会自动滑到真正的并列起点（“带了人、带了花、带了钻戒”），避免被前句残字破坏同构判断。
       const structRe = /([一-龥]{1,2})[一-龥]{0,5}[、，,]\1[一-龥]{0,5}[、，,]\1([一-龥]{0,5}(?:[、，,]\1[一-龥]{0,5})*)/g;
       const structHits: string[] = [];
+      const structOffsets: number[] = [];
       let sm: RegExpExecArray | null;
       while ((sm = structRe.exec(content)) !== null) {
         const prefix = sm[1];
         const extra = (sm[2].match(new RegExp(prefix, 'g')) || []).length; // 第 3 段之后的前缀复现次数
         const total = 3 + extra;
         // 2 字动词前缀（带了/想到）≥3 连即判；1 字前缀（你/我）放宽到 ≥4 连，容忍对话里短情绪排比
-        if (prefix.length === 2 || total >= 4) structHits.push(sm[0]);
+        if (prefix.length === 2 || total >= 4) { structHits.push(sm[0]); structOffsets.push(sm.index); }
       }
       if (structHits.length > 0) {
         findings.push({
           ruleId: '53-same-structure-parallel',
+          occurrenceCount: structHits.length,
           message: `同构排比 ${structHits.length} 处（如“${structHits[0].slice(0, 24)}”——相同动词/前缀连续铺排是AI腔）。只保留最有力的一项，其余改成有动作结果、有差异的具体句子，禁止“V了A、V了B、V了C…”式罗列`,
           snippet: structHits.slice(0, 3).join(' / '),
           position: '全文',
+          hitCharOffsets: structOffsets.slice(0, 3),
         });
       }
     }
@@ -1123,13 +1361,15 @@ export function detectForbiddenTells(
       const measureRe = /(?:[一二三四五六七八九十百千万两半几那这每整]|\d+)束[一-龥]{0,4}?(蛋糕|面包|米饭|饭|菜|汤|桌子|椅子|杯子|盒子|文件|协议|合同|手机|电脑|书本|笔|衣服|裙|鞋|包包|汽车|车子|房子|门|窗|戒指|钻戒|项链|手表|沙发|床)/g;
       const measureHits: string[] = [];
       let mm54: RegExpExecArray | null;
-      while ((mm54 = measureRe.exec(content)) !== null) measureHits.push(mm54[0]);
+      const measureOffsets: number[] = [];
+      while ((mm54 = measureRe.exec(content)) !== null) { measureHits.push(mm54[0]); measureOffsets.push(mm54.index); }
       if (measureHits.length > 0) {
         findings.push({
           ruleId: '54-measure-word-mismatch',
           message: `量词与名词搭配错误 ${measureHits.length} 处（如“${measureHits[0].slice(0, 14)}”——“束”只用于花、光、发丝、柴草等成束细长物，蛋糕/文件/戒指等块状、个状物要用“个/只/份”）。逐处核对量词与名词是否匹配，禁止把甲物的量词套到乙物`,
           snippet: measureHits.slice(0, 3).join(' / '),
           position: '全文',
+          hitCharOffsets: measureOffsets.slice(0, 3),
         });
       }
     }
@@ -1143,17 +1383,22 @@ export function detectForbiddenTells(
         '仿佛', '似乎', '不禁', '不由得', '不由', '缓缓', '微微', '静静', '默默', '悄然', '无声',
         '一丝', '一缕', '一抹', '某种', '些许', '莫名', '隐约', '隐隐', '略带',
       ];
-      const narrativeOnly = content.replace(/[“"「][^”"」]{1,80}[”"」]/g, '');
+      const { text: narrativeOnly, map: narrationMap55 } = stripQuotedWithMap('55');
       const hanLen55 = (narrativeOnly.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length || 1;
       let totalHits55 = 0;
       let maxWord55 = 0;
       let maxWordName55 = '';
       const hitExamples55: string[] = [];
+      const hitOffsets55: number[] = [];
       for (const w of aiVagueWords55) {
         const cnt = (narrativeOnly.match(new RegExp(w, 'g')) || []).length;
         totalHits55 += cnt;
         if (cnt > maxWord55) { maxWord55 = cnt; maxWordName55 = w; }
-        if (cnt > 0 && hitExamples55.length < 3) hitExamples55.push(`${w}×${cnt}`);
+        if (cnt > 0 && hitExamples55.length < 3) {
+          hitExamples55.push(`${w}×${cnt}`);
+          const at55 = narrativeOnly.indexOf(w);
+          if (at55 >= 0) hitOffsets55.push(narrationMap55[at55] ?? 0);
+        }
       }
       const perKilo55 = totalHits55 / (hanLen55 / 1000);
       if ((perKilo55 >= 5 && totalHits55 >= 8) || maxWord55 >= 4) {
@@ -1162,9 +1407,141 @@ export function detectForbiddenTells(
           message: `AI 高频模糊词过密（叙述层 ${totalHits55} 处、约 ${perKilo55.toFixed(1)} 处/千字${maxWordName55 ? `，最多是“${maxWordName55}”${maxWord55} 次` : ''}）。仿佛/似乎/不禁/缓缓/微微/一丝/一缕/某种/莫名/隐约这类模糊渲染是 AI 腔指纹：能用具体动作、数字、物件与对话说清的，一律删掉模糊词直说；同一情绪点最多保留 1 处`,
           snippet: hitExamples55.join(' / '),
           position: '全文',
+          hitCharOffsets: hitOffsets55,
         });
       }
     }
 
+    // ===== 命中段落集中锚定（唯一实现，勿在规则里各写一份） =====
+    // 为什么在这里做：Gate 的「硬红线段落级精修」（chain.controller.repairHardlineFindingsLocally）
+    // 只允许改【命中段落】——它要求每条 finding 带上命中段落的逐字原文（paragraphs）与段号
+    // （paragraphIndices）。此前只有规则 42 自己填了这两个字段，其余规则命中时精修锚不出证据，
+    // 只能中止并保留上一版正文，用户看到的就是「同一条规则反复命中、正文永远存不下来」。
+    // 这里在扫描结束后集中补锚，规则判定/阈值一字不改：
+    //   ⓪ 规则自报命中下标（hitCharOffsets）→ 直接映射到所属段落（最高优先级、唯一可信坐标）；
+    //   ① 位置精确：position 为「第 X 段」「第 X-Y 段」→ 直接用段号；
+    //   ② 位置为「offset N-M」→ 用字符区间与段落区间求交，映射成涉及到的段落；
+    //   ③ 位置模糊（全文/章首/开篇前300字/对话段）→ 用 snippet 里逐字可核验的片段反查所属段落。
+    // 三条都以「该片段在 content 中逐字存在」为前置：锚不上的宁可留空（调用方据此保留上一版正文），
+    // 绝不用猜出来的位置去改正文——那是无证据改写。规则本身报什么、判什么，这里一概不动。
+    {
+      // 段落区间 paraSpans 已在扫描开始时统一计算（唯一实现），此处直接复用，勿再算一份。
+      const spansFromCharRange = (start: number, end: number): number[] => {
+        const hit: number[] = [];
+        for (let i = 0; i < paraSpans.length; i++) {
+          if (paraSpans[i].start < end && paraSpans[i].end > start) hit.push(i);
+        }
+        return hit;
+      };
+      // snippet 里的逐字片段：规则摘要可能被 slice 截断（带 …）、用 | / || / ／ 折叠、
+      // 或夹带 ⟨⟨多空行⟩⟩ 这类标记——全部剥掉后再要求「逐字命中 content」才算证据。
+      const MIN_ANCHOR_CHARS = 8;
+      const spansFromSnippet = (snippet: string): number[] => {
+        const hit = new Set<number>();
+        for (const rawPart of String(snippet || '').split(/[|/；;]+|\s{2,}/)) {
+          const part = rawPart.replace(/⟨⟨[^⟩]*⟩⟩/g, '').replace(/[…]+$/, '').trim();
+          if (part.length < MIN_ANCHOR_CHARS) continue;
+          if (!content.includes(part)) continue;
+          for (let i = 0; i < paragraphs.length; i++) {
+            if (paragraphs[i].includes(part)) hit.add(i);
+          }
+        }
+        return [...hit].sort((a, b) => a - b);
+      };
+      const indicesFromPosition = (position: string): number[] => {
+        const trimmed = String(position || '').trim();
+        const byParagraph = /^第\s*(\d+)(?:\s*-\s*(\d+))?\s*段$/.exec(trimmed);
+        if (byParagraph) {
+          const from = Number(byParagraph[1]) - 1;
+          const to = byParagraph[2] ? Number(byParagraph[2]) - 1 : from;
+          const hit: number[] = [];
+          for (let i = Math.max(0, from); i <= Math.min(paragraphs.length - 1, to); i++) hit.push(i);
+          return hit;
+        }
+        const byCharOffset = /^offset\s*(\d+)\s*-\s*(\d+)$/.exec(trimmed);
+        if (byCharOffset) return spansFromCharRange(Number(byCharOffset[1]), Number(byCharOffset[2]));
+        return [];
+      };
+      // 命中处真实下标（规则自报，最高优先级）：规则匹配时已知精确位置的一律走这条。
+      // position/snippet 反查对「计数摘要型 snippet」必然锚空（见 HardlineFinding.hitCharOffsets 注释）。
+      const spansFromHitOffsets = (offsets: ReadonlyArray<number>): number[] => {
+        const hit = new Set<number>();
+        for (const idx of offsets) {
+          if (!Number.isFinite(idx) || idx < 0) continue;
+          for (let i = 0; i < paraSpans.length; i++) {
+            if (idx >= paraSpans[i].start && idx < paraSpans[i].end) { hit.add(i); break; }
+          }
+        }
+        return [...hit].sort((a, b) => a - b);
+      };
+      for (const finding of findings) {
+        if (finding.paragraphs?.length) continue;
+        const byOffsets = spansFromHitOffsets(finding.hitCharOffsets || []);
+        const byPosition = indicesFromPosition(finding.position);
+        const resolved = byOffsets.length > 0 ? byOffsets
+          : byPosition.length > 0 ? byPosition
+            : spansFromSnippet(finding.snippet);
+        if (resolved.length === 0) continue;
+        finding.paragraphs = resolved.map(i => paragraphs[i]);
+        finding.paragraphIndices = resolved;
+      }
+    }
+
     return findings;
+}
+
+/**
+ * normalizeProseLayout — 确定性「仅排版层」规整：只重排换行，不增删、不改写任何正文字符。
+ *
+ * 存在理由：规则 33（段后连续空行）、26-short-para / 26b-staccato（短句逐句换行）已在阻断清单内，
+ * 但它们是纯排版问题——先由确定性层在落库前直接收口，模型就不必为「多打了一个空行」白烧一轮精修
+ * （这属于「减少重复流程」）。落库后仍残留的少量碎片，才由阻断清单触发段落级精修精确改写。
+ * 排版问题在落库前直接收口：
+ *   ① 连续空行 ≥2 → 折叠为 1 个空行（规则 33 口径）；
+ *   ② 相邻的「叙述碎片段」合并为一段：非对话（不含引号）、以句号收尾、且符合平台口径的极短
+ *      叙述段，连续出现时并入同一段（累计不超过 MERGE_MAX 汉字）。对话段、长叙述段一律不动，
+ *      单个孤立碎片也不动（保留正常强调节奏）——只消除「连续多段一句一行」的机械换行。
+ * 合并只删除段间空行，正文汉字与标点数量严格守恒，字数统计（只数汉字/英文）不受影响。
+ */
+export const PROSE_LAYOUT_MERGE_MAX_CJK = 60;
+
+export function normalizeProseLayout(
+  content: string,
+  profile?: HardlineProfile,
+): string {
+  if (!content) return content;
+  const strategy = resolveNovelStrategy({
+    platform: profile?.platform, storyType: profile?.storyType,
+    storyCategory: profile?.storyCategory, storyTone: profile?.storyTone,
+    writingStyle: profile?.writingStyle, webNovelGenre: profile?.webNovelGenre,
+  });
+  // 与上方同一判据：短段平台就是 pacing==='very_high' 的平台，不再内联第二份同名单。
+  const shortPacing = strategy.pacing === 'very_high';
+  // 短段平台按 26b 口径（一句一段、≤20 汉字）收口；其余平台按 26 口径（<12 字的极短碎片）收口
+  const fragmentMaxCjk = shortPacing ? 20 : 12;
+  const cjkLen = (s: string) => (s.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  const hasQuote = (s: string) => /[“”"「」]/.test(s);
+  const endMarkCount = (s: string) => (s.match(/[。！？!?]/g) || []).length;
+  const isFragment = (s: string) => {
+    if (hasQuote(s) || !/[。]$/.test(s)) return false;
+    const len = cjkLen(s);
+    if (len === 0 || len > fragmentMaxCjk) return false;
+    return shortPacing ? endMarkCount(s) === 1 : true;
+  };
+  // ① 规则 33：连续空行 ≥2 折叠为单个空行
+  const text = content.replace(/\r\n/g, '\n').replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n');
+  // ② 规则 26 / 26b：相邻叙述碎片段合并
+  const paragraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  const out: string[] = [];
+  let buffer = '';
+  const flush = () => { if (buffer) { out.push(buffer); buffer = ''; } };
+  for (const para of paragraphs) {
+    if (!isFragment(para)) { flush(); out.push(para); continue; }
+    const merged = buffer ? buffer + para : para;
+    if (cjkLen(merged) <= PROSE_LAYOUT_MERGE_MAX_CJK) { buffer = merged; continue; }
+    flush();
+    buffer = para;
+  }
+  flush();
+  return out.join('\n\n');
 }

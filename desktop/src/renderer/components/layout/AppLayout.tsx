@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -6,7 +6,7 @@ import StatusBar from './StatusBar';
 import { useAppStore } from '../../stores/appStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { setBaseUrl } from '../../lib/api';
-import { api } from '../../lib/api';
+import { getGenerationRecovery, startFailedProjectRecovery } from '../../lib/generationRecovery';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -27,15 +27,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     return match ? match[1] : null;
   }, [location.pathname]);
 
-  // 如果 URL 包含项目 ID 但 currentProject 为空，自动加载项目信息（确保侧边栏显示）
+  // 路由切到另一项目时也重新读取，不能沿用缓存的上一本书。
   useEffect(() => {
-    if (urlProjectId && !currentProject) {
+    if (urlProjectId && currentProject?.id !== urlProjectId) {
       void fetchProject(urlProjectId);
     }
-  }, [urlProjectId, currentProject, fetchProject]);
+  }, [urlProjectId, currentProject?.id, fetchProject]);
 
-  // 判断是否有打开的项目（侧边栏应该始终显示）
-  const hasProject = Boolean(currentProject);
+  // 这里曾凭缓存的 currentProject 在全局发现/项目列表显示项目侧栏，离开项目后留下空白导航。
+  // 项目导航只由当前 URL 决定；全局页即使缓存了上一本书，也不能显示书内侧栏。
+  const hasProject = Boolean(urlProjectId && currentProject?.id === urlProjectId);
 
   useEffect(() => {
     startHealthPolling();
@@ -62,9 +63,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       return;
     }
     let cancelled = false;
-    api.get(`/chain/generation-recovery/${currentProject.id}`)
-      .then((response: any) => {
-        if (!cancelled) setRecovery((response?.data ?? response)?.audit ?? null);
+    getGenerationRecovery(currentProject.id)
+      .then((audit) => {
+        if (!cancelled) setRecovery(audit);
       })
       .catch((error: Error) => {
         if (!cancelled) setRecoveryMessage(`无法读取恢复诊断：${error.message}`);
@@ -73,20 +74,27 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   }, [currentProject?.id, currentProject?.status]);
 
   const resumeFailedGeneration = async () => {
-    if (!currentProject || !recovery?.canResume || recoveryBusy) return;
+    if (!currentProject || recoveryBusy) return;
+    if (recovery?.running) {
+      navigate(`/generation-progress/${currentProject.id}`, { state: { title: currentProject.title } });
+      return;
+    }
+    if (!recovery?.canResume) return;
     setRecoveryBusy(true);
-    setRecoveryMessage('正在从失败前快照恢复，并按原确认题材和配置重新生成……');
+    setRecoveryMessage('正在启动重新生成并打开进度页……');
     try {
-      const response: any = await api.post(`/chain/generation-recovery/${currentProject.id}/resume`, {}, 1_800_000);
-      const result = response?.data ?? response;
-      setRecovery(result.audit ?? null);
-      setRecoveryMessage(result.status === 'active' ? '创作资料已完整恢复并激活。' : '恢复未通过完整性门禁；旧资料已还原，可查看诊断后再次处理。');
+      await startFailedProjectRecovery(currentProject.id);
+      navigate(`/generation-progress/${currentProject.id}`, { state: { title: currentProject.title } });
     } catch (error: any) {
-      setRecoveryMessage(`恢复失败，旧资料已保留：${error?.message || '未知错误'}`);
       try {
-        const response: any = await api.get(`/chain/generation-recovery/${currentProject.id}`);
-        setRecovery((response?.data ?? response)?.audit ?? null);
+        const audit = await getGenerationRecovery(currentProject.id);
+        setRecovery(audit);
+        if (audit?.running) {
+          navigate(`/generation-progress/${currentProject.id}`, { state: { title: currentProject.title } });
+          return;
+        }
       } catch {}
+      setRecoveryMessage(`启动失败：${error?.message || '未知错误'}`);
     } finally {
       setRecoveryBusy(false);
     }
@@ -128,7 +136,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
         {/* Main content area */}
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-bg-primary">
-          {currentProject?.status === 'generation_failed' && (
+          {urlProjectId === currentProject?.id && currentProject?.status === 'generation_failed' && (
             <div style={{
               margin: '12px 16px 0', padding: '12px 14px', borderRadius: 8,
               backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.34)',
@@ -136,8 +144,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
             }}>
               <div style={{ minWidth: 260, flex: '1 1 520px' }}>
-                <div style={{ fontWeight: 700 }}>项目创建失败，当前资料只读，不能进入正文或继续修改。</div>
-                <div style={{ marginTop: 4 }}>恢复方式：手动触发。系统会先建立快照；恢复失败会还原旧资料，不会清空后丢失。</div>
+                <div style={{ fontWeight: 700 }}>{recovery?.running ? '正在重新生成创作资料，当前资料只读。' : '项目创建失败，当前资料只读，不能进入正文或继续修改。'}</div>
+                <div style={{ marginTop: 4 }}>{recovery?.running ? '可以打开进度页查看当前阶段。' : '恢复方式：手动触发。系统会先建立快照；恢复失败会还原旧资料，不会清空后丢失。'}</div>
                 {recovery?.recommendedAction && <div style={{ marginTop: 4, color: '#fde68a' }}>下一步：{recovery.recommendedAction}</div>}
                 {!!recovery?.missingModules?.length && <div style={{ marginTop: 4, color: '#fca5a5' }}>未完成：{recovery.missingModules.join('、')}</div>}
                 {!!recovery?.consistencyIssues?.length && <div style={{ marginTop: 4, color: '#fca5a5' }}>一致性问题：{recovery.consistencyIssues.join('；')}</div>}
@@ -145,10 +153,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 {recoveryMessage && <div style={{ marginTop: 5, color: '#bfdbfe' }}>{recoveryMessage}</div>}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button type="button" onClick={resumeFailedGeneration} disabled={!recovery?.canResume || recoveryBusy} style={{
+                <button type="button" onClick={resumeFailedGeneration} disabled={(!recovery?.canResume && !recovery?.running) || recoveryBusy} style={{
                   padding: '7px 11px', borderRadius: 6, border: '1px solid rgba(251,211,141,0.45)',
-                  backgroundColor: recovery?.canResume && !recoveryBusy ? 'var(--color-warning)' : 'var(--color-bg-elevated)', color: 'var(--color-white)', cursor: recovery?.canResume && !recoveryBusy ? 'pointer' : 'not-allowed',
-                }}>{recoveryBusy ? '正在恢复…' : '继续准备创作资料'}</button>
+                  backgroundColor: (recovery?.canResume || recovery?.running) && !recoveryBusy ? 'var(--color-warning)' : 'var(--color-bg-elevated)', color: 'var(--color-white)', cursor: (recovery?.canResume || recovery?.running) && !recoveryBusy ? 'pointer' : 'not-allowed',
+                }}>{recoveryBusy ? '正在启动…' : recovery?.running ? '查看生成进度' : '继续准备创作资料'}</button>
                 <button type="button" onClick={() => navigate(`/project/${currentProject.id}/dashboard`)} style={{
                   padding: '7px 11px', borderRadius: 6, border: '1px solid rgba(251,211,141,0.45)',
                   backgroundColor: 'rgba(0,0,0,0.18)', color: 'var(--color-white)', cursor: 'pointer',

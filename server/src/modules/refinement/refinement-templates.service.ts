@@ -1,348 +1,254 @@
 /**
- * 精修模板系统
- * 提供12+种精修模板，每条模板包含替换/添加/删除/重写规则
+ * 精修模板系统（执行标准驱动）
+ *
+ * 旧实现是「21 套正则规则」：用 remove 规则删掉「地」「着」这类虚词（正则含空白匹配），
+ * 「地方」拆成「方」、「着急」拆成「急」；而 add / rewrite 规则在旧实现里直接 return content，
+ * 是空转。更要命的是它与项目卡片上确认的 平台/分类/基调/文风/流派/视角 毫无关系——
+ * 「古风版」可以把「都市·现实 + 白描/朴素」的正文改成另一种文风，这正是
+ * 「配置是配置、怎么做是另一回事」的老毛病。
+ *
+ * 现在模板只回答两件事：
+ *   1) 方向 axis —— 取值来自 STYLE_INTENSITY_AXES（唯一来源）；
+ *   2) 任务 task —— 标准之内的具体改写任务。
+ *
+ * 真正的改写由 DescribePolishService.polishBlock 执行：prompt 装配、执行标准注入、
+ * 空输出与模型异常一律抛出，全仓共用同一份实现。凡是与执行标准冲突的模板
+ * （如古风版之于都市白描）在 applyWithStandard 中直接 422 拒绝，绝不照做。
  */
-import { Injectable } from '@nestjs/common';
-import type { Template, TemplateRule } from './dto/refinement.dto';
+import { HttpException, Injectable, UnprocessableEntityException } from '@nestjs/common';
+import type { Template, TemplateFit, TemplateStandardContext } from './dto/refinement.dto';
+import { projectStandardBlock, styleIntensityAxis } from '../project/creative-constitution';
+import type { ProjectStandardDirective } from '../project/creative-constitution';
+import { DescribePolishService } from './describe-polish.service';
+import type { PolishLlmGenerate } from './describe-polish.service';
+
+/** 由 ProjectStandardDirective 派生模板执行上下文（适用性判断 + prompt 注入） */
+export function templateStandardContext(standard: ProjectStandardDirective): TemplateStandardContext {
+  const c = standard.constitution;
+  const styleList = Array.isArray(c.writingStyle)
+    ? c.writingStyle.map((v) => String(v)).filter(Boolean)
+    : c.writingStyle ? [String(c.writingStyle)] : [];
+  const toneList = c.storyTone.map((v) => String(v)).filter(Boolean);
+  const genreList = c.webNovelGenre.map((v) => String(v)).filter(Boolean);
+  const text = [
+    standard.platformLabel,
+    c.category,
+    ...styleList,
+    ...toneList,
+    ...genreList,
+    c.pov,
+    standard.styleTags.join(' '),
+    standard.isLong ? '长篇' : '短篇',
+  ].filter(Boolean).join(' ');
+  return {
+    projectId: standard.projectId,
+    standardBlock: projectStandardBlock(standard),
+    platformLabel: standard.platformLabel,
+    category: String(c.category ?? ''),
+    writingStyle: styleList.join('、'),
+    storyTone: toneList.join('、'),
+    webNovelGenre: genreList.join('、'),
+    pov: String(c.pov ?? ''),
+    styleTags: standard.styleTags,
+    standardText: text,
+  };
+}
+
+export interface TemplateListItem extends Template {
+  axisLabel: string;
+  /** 在【该项目执行标准】下是否可用 */
+  applicable: boolean;
+  /** 不可用时的具体理由（含命中的标准文本） */
+  rejectReason: string;
+}
+
+export interface TemplateApplyInput {
+  templateId: string;
+  content: string;
+  standard: TemplateStandardContext;
+  /** 单次模型调用的正文上限（字符），默认 900 */
+  chunkChars?: number;
+  /** 并发模型调用数，默认 3 */
+  concurrency?: number;
+}
+
+export interface TemplateApplyResult {
+  templateId: string;
+  templateName: string;
+  templateTask: string;
+  axis: string;
+  axisLabel: string;
+  projectId: string;
+  platform: string;
+  standardBasis: {
+    category: string;
+    writingStyle: string;
+    storyTone: string;
+    webNovelGenre: string;
+    pov: string;
+    styleTags: string[];
+  };
+  original: string;
+  result: string;
+  chunks: number;
+  changedChunks: number;
+  unchangedChunks: number;
+  appliedRules: string[];
+}
+
+interface Chunk {
+  index: number;
+  text: string;
+  paragraphs: number;
+}
+
+const DEFAULT_CHUNK_CHARS = 900;
+const DEFAULT_CONCURRENCY = 3;
 
 @Injectable()
 export class RefinementTemplatesService {
+  constructor(private readonly describePolish: DescribePolishService) {}
+
   private readonly templates: Template[] = [
     {
-      id: 'concise',
-      name: '简洁版',
-      description: '删除冗余修饰词，精简句子结构，让表达更直接有力',
-      category: 'style',
-      tags: ['简洁', '精炼', '去除冗余'],
-      rules: [
-        { type: 'remove', pattern: '\\s*非常\\s*', description: '删除"非常"类冗余修饰' },
-        { type: 'remove', pattern: '\\s*真的\\s*', description: '删除"真的"类冗余修饰' },
-        { type: 'remove', pattern: '\\s*确实\\s*', description: '删除"确实"类冗余修饰' },
-        { type: 'remove', pattern: '\\s*实际上\\s*', description: '删除"实际上"冗余表达' },
-        { type: 'replace', pattern: '\\s*正在\\s*', replacement: '在', description: '"正在"简化为"在"' },
-        { type: 'replace', pattern: '能够', replacement: '能', description: '精简为单字' },
-        { type: 'replace', pattern: '可以', replacement: '可', description: '精简为单字' },
-        { type: 'replace', pattern: '已经', replacement: '已', description: '精简为单字' },
-        { type: 'remove', pattern: '\\s*地\\s*', description: '删除冗余的"地"字' },
-        { type: 'remove', pattern: '\\s*着\\s*', description: '删除冗余的"着"字' },
-        { type: 'rewrite', pattern: '她[的]*(脸上|面色|面容)\\s*', description: '将面部描写简化为直接动作' },
-        { type: 'rewrite', pattern: '他[的]*(心里|心中|心底)\\s*', description: '将心理描写简化为直接陈述' },
-      ],
-      sample: { before: '他的心里感到非常难过和悲伤', after: '他很难过' },
+      id: 'concise', name: '简洁版', category: 'style', tags: ['简洁', '精炼', '去除冗余'],
+      description: '在不改变信息量的前提下删去冗余修饰，让表达更直接有力',
+      axis: 'direct',
+      task: '删去冗余修饰词与口水话，让句子更直接有力；不得把「地方」「着急」这类词拆开，不得删掉任何信息',
     },
     {
-      id: 'vivid',
-      name: '生动版',
-      description: '增加细节描写和感官体验，让文字更具画面感',
-      category: 'style',
-      tags: ['生动', '细节', '感官'],
-      rules: [
-        { type: 'add', pattern: '(天空|风|雨|阳光|月)', description: '在环境描写前增加感官修饰' },
-        { type: 'add', pattern: '(听见|听到)', description: '在听觉后增加声音细节' },
-        { type: 'add', pattern: '(看见|看到|望见)', description: '在视觉后增加视觉细节' },
-        { type: 'add', pattern: '(闻到|嗅到)', description: '在嗅觉后增加气味描述' },
-        { type: 'add', pattern: '(感到|觉得|感觉)', description: '在触觉后增加质感描述' },
-        { type: 'replace', pattern: '说', replacement: '低语/轻声道/朗声道', description: '多样化"说"的表达' },
-        { type: 'replace', pattern: '走', replacement: '踱步/疾行/踱步', description: '多样化"走"的表达' },
-        { type: 'replace', pattern: '看', replacement: '凝视/扫视/瞥', description: '多样化"看"的表达' },
-        { type: 'rewrite', pattern: '笑[了]', description: '扩展笑的描写' },
-        { type: 'rewrite', pattern: '哭[了]', description: '扩展哭的描写' },
-      ],
-      sample: { before: '天黑了，他走在路上', after: '夜色如墨般倾泻而下，他缓步行走在青石板路上，脚下传来细碎的声响' },
+      id: 'vivid', name: '生动版', category: 'style', tags: ['生动', '细节', '感官'],
+      description: '补足细节与感官体验，让文字更具画面感',
+      axis: 'sensory',
+      task: '补足与当下动作/情绪直接相关的细节，让画面更具体；不得新增情节或堆砌无关环境描写',
     },
     {
-      id: 'dialogue',
-      name: '对话强化版',
+      id: 'dialogue', name: '对话强化版', category: 'dialogue', tags: ['对话', '表现力', '标签'],
       description: '增强对话表现力，丰富对话标签和语气',
-      category: 'dialogue',
-      tags: ['对话', '表现力', '标签'],
-      rules: [
-        { type: 'replace', pattern: '他说', replacement: '他压低声音道', description: '丰富对话标签' },
-        { type: 'replace', pattern: '她说', replacement: '她轻声说道', description: '丰富对话标签' },
-        { type: 'replace', pattern: '他问', replacement: '他试探着问', description: '丰富对话标签' },
-        { type: 'replace', pattern: '她答', replacement: '她毫不犹豫地回答', description: '丰富对话标签' },
-        { type: 'replace', pattern: '他喊', replacement: '他高声喊道', description: '丰富对话标签' },
-        { type: 'add', pattern: '"', description: '在对话前增加动作描写' },
-        { type: 'add', pattern: '?"', description: '在问句后增加表情描写' },
-        { type: 'add', pattern: '!"', description: '在感叹句后增加情绪描写' },
-      ],
-      sample: { before: '他说："你好。"', after: '他微微颔首，压低声音道："你好。"' },
+      axis: 'standard',
+      task: '丰富对话前后的人物动作与语气提示，让对话贴合角色身份与当下处境；不得新增对白、不得改变台词含义',
     },
     {
-      id: 'suspense',
-      name: '悬念版',
-      description: '调整表达方式，增加悬念感和神秘氛围',
-      category: 'plot',
-      tags: ['悬念', '神秘', '紧张'],
-      rules: [
-        { type: 'rewrite', pattern: '原来', description: '避免过早揭示真相' },
-        { type: 'rewrite', pattern: '是因为', description: '模糊因果关系' },
-        { type: 'add', pattern: '[。！]', description: '在句尾添加暗示性省略或停顿' },
-        { type: 'replace', pattern: '我知道', replacement: '我隐约感觉到', description: '降低确定性表达' },
-        { type: 'replace', pattern: '肯定是', replacement: '恐怕是', description: '降低肯定语气' },
-        { type: 'replace', pattern: '就是', replacement: '或许是', description: '增加不确定性' },
-        { type: 'add', pattern: '门|窗|角落|暗处', description: '在场景词前增加神秘修饰' },
-        { type: 'remove', pattern: '总之|说到底', description: '删除结论性表达' },
-      ],
-      sample: { before: '原来是有人在跟踪他', after: '暗处似乎有一道目光，如影随形' },
+      id: 'suspense', name: '悬念版', category: 'plot', tags: ['悬念', '神秘', '氛围'],
+      description: '调整信息释放节奏，增加悬念感和神秘氛围',
+      axis: 'suspense',
+      task: '延后关键信息的释放，强化读者追问的欲望；不得新增事实，不得改变已有信息的真假',
     },
     {
-      id: 'emotional',
-      name: '情绪版',
+      id: 'emotional', name: '情绪版', category: 'emotion', tags: ['情绪', '渲染', '冲击力'],
       description: '强化情绪渲染，增强情感冲击力',
-      category: 'emotion',
-      tags: ['情绪', '渲染', '感染力'],
-      rules: [
-        { type: 'rewrite', pattern: '伤[心心]', description: '扩展悲伤描写' },
-        { type: 'rewrite', pattern: '高兴|开心|快乐', description: '扩展喜悦描写' },
-        { type: 'rewrite', pattern: '生气|愤怒', description: '扩展愤怒描写' },
-        { type: 'rewrite', pattern: '害怕|恐惧|紧张', description: '扩展恐惧描写' },
-        { type: 'add', pattern: '(心跳|呼吸)', description: '增加生理反应描写' },
-        { type: 'add', pattern: '(手|脚|身体)', description: '增加肢体语言描写' },
-        { type: 'replace', pattern: '难过', replacement: '心如刀绞', description: '升级情感表达' },
-        { type: 'replace', pattern: '开心', replacement: '欣喜若狂', description: '升级情感表达' },
-      ],
-      sample: { before: '他很伤心，哭了起来', after: '他的心像被撕裂一般，泪水无声地滑落，整个人瘫坐在地上' },
+      axis: 'emotional',
+      task: '强化情绪落点与层次；不得改变基调，不得煽情化，不得替角色下结论',
     },
     {
-      id: 'scene',
-      name: '场景版',
+      id: 'scene', name: '场景版', category: 'scene', tags: ['场景', '沉浸', '环境'],
       description: '增强场景沉浸感，丰富环境描写',
-      category: 'scene',
-      tags: ['场景', '环境', '沉浸'],
-      rules: [
-        { type: 'add', pattern: '(房间|屋子|大厅)', description: '增加室内环境细节' },
-        { type: 'add', pattern: '(街道|路|巷)', description: '增加室外环境细节' },
-        { type: 'add', pattern: '(早上|清晨|黄昏|夜晚)', description: '增加时间氛围描写' },
-        { type: 'add', pattern: '(春|夏|秋|冬)', description: '增加季节氛围描写' },
-        { type: 'add', pattern: '(雨|风|雪|雾)', description: '增加天气氛围描写' },
-        { type: 'add', pattern: '(声音|气味|温度)', description: '增加多感官环境描写' },
-        { type: 'rewrite', pattern: '(来到|走进|进入)', description: '扩展进场描写' },
-      ],
-      sample: { before: '他走进咖啡馆', after: '推开沉重的木门，咖啡的醇香扑面而来，昏黄的灯光下，留声机正放着慵懒的爵士乐' },
+      axis: 'sensory',
+      task: '增强场景的空间感与在场感；不得堆砌与当下情节无关的景物',
     },
     {
-      id: 'pacing',
-      name: '节奏版',
+      id: 'pacing', name: '节奏版', category: 'style', tags: ['节奏', '韵律', '断句'],
       description: '调整句子长短和段落节奏，增强阅读韵律',
-      category: 'style',
-      tags: ['节奏', '长短句', '韵律'],
-      rules: [
-        { type: 'rewrite', pattern: '[，。]{10,}', description: '拆分过长句子' },
-        { type: 'rewrite', pattern: '{2,5}', description: '合并过短句子' },
-        { type: 'add', pattern: '。', description: '在连续长句中插入短句制造停顿' },
-        { type: 'rewrite', pattern: '，然后|，接着|，随后', description: '删除多余连接词' },
-        { type: 'rewrite', pattern: '突然|忽然|猛然', description: '优化突然性表达的位置' },
-        { type: 'remove', pattern: '首先|其次|最后|第一|第二', description: '删除序号化表达' },
-      ],
-      sample: { before: '他走了很久，然后停了下来，接着看了看四周，随后又继续走', after: '他走了很久。忽然停住，扫视四周。片刻后，又继续前行。' },
+      axis: 'standard',
+      task: '调整句长与段落切分，使张弛有节奏；不得改变叙事顺序，不得删减信息',
     },
     {
-      id: 'style-unify',
-      name: '文风统一版',
+      id: 'style-unify', name: '文风统一版', category: 'style', tags: ['文风', '统一', '语体'],
       description: '保持全文风格和语体一致，检测并修正风格不匹配',
-      category: 'style',
-      tags: ['文风', '统一', '一致性'],
-      rules: [
-        { type: 'rewrite', pattern: '（[^）]*）', description: '统一括号使用风格' },
-        { type: 'rewrite', pattern: '－|—|――', description: '统一破折号格式' },
-        { type: 'rewrite', pattern: '……|。。|。。。', description: '统一省略号格式' },
-        { type: 'rewrite', pattern: '\\d+%', description: '统一数字百分比表达' },
-        { type: 'replace', pattern: '您', replacement: '你', description: '统一人称（默认第二人称）' },
-        { type: 'remove', pattern: '呵呵|哈哈|嘿嘿', description: '删除口语化笑声音效' },
-        { type: 'replace', pattern: '牛逼|尼玛|我靠', description: '过滤不当口语表达' },
-      ],
-      sample: { before: '他心里想着这件事（其实也不是什么大事）……然后呵呵一笑', after: '他心里想着这件事——其实也不是什么大事——然后轻笑一声' },
+      axis: 'standard',
+      task: '校正与已确认文风不一致的语体（夹生的书面腔、网络腔、翻译腔），使全章语体统一到执行标准',
     },
     {
-      id: 'classical',
-      name: '古风版',
-      description: '将现代白话转化为古风雅韵，融入文言表达',
-      category: 'style',
-      tags: ['古风', '文言', '雅致'],
-      rules: [
-        { type: 'replace', pattern: '我', replacement: '吾', description: '古风人称' },
-        { type: 'replace', pattern: '你', replacement: '汝/君/卿', description: '古风人称' },
-        { type: 'replace', pattern: '他', replacement: '彼/其', description: '古风人称' },
-        { type: 'replace', pattern: '她', replacement: '伊', description: '古风人称' },
-        { type: 'replace', pattern: '的', replacement: '之', description: '古风助词' },
-        { type: 'replace', pattern: '说', replacement: '曰/言/道', description: '古风动词' },
-        { type: 'replace', pattern: '看', replacement: '观/览/望', description: '古风动词' },
-        { type: 'replace', pattern: '走', replacement: '行/步/趋', description: '古风动词' },
-        { type: 'replace', pattern: '因为', replacement: '盖因/缘', description: '古风连词' },
-        { type: 'replace', pattern: '所以', replacement: '故/是以', description: '古风连词' },
-        { type: 'replace', pattern: '但是', replacement: '然/然则', description: '古风连词' },
-        { type: 'remove', pattern: '了|着|过', description: '删除现代体助词' },
-      ],
-      sample: { before: '他因为这件事感到很高兴', after: '彼缘此事，心甚悦之' },
+      id: 'classical', name: '古风版', category: 'style', tags: ['古风', '文言', '雅韵'],
+      description: '按古代/文言方向行文（仅适用于古代题材的标准）',
+      axis: 'standard',
+      task: '按已确认的古代/文言方向调整用词与句式；现代白话的叙述腔必须去掉',
+      fit: {
+        requireAny: ['古风', '古代', '文言', '仙侠', '武侠', '历史', '宫廷', '江湖', '修真', '玄幻', '东方'],
+        forbidAny: ['白描', '朴素', '现实', '都市', '职场', '现代', '科幻', '校园'],
+        reason: '「古风版」会改变已确认的「文风/流派」，与当前执行标准冲突',
+      },
     },
     {
-      id: 'commercial',
-      name: '网文爽感版',
+      id: 'commercial', name: '网文爽感版', category: 'plot', tags: ['爽感', '节奏', '期待感'],
       description: '强化爽感节奏，增加情绪冲击点和期待感',
-      category: 'plot',
-      tags: ['爽文', '节奏', '期待感'],
-      rules: [
-        { type: 'rewrite', pattern: '他[终于]+', description: '强化"终于"的达成感' },
-        { type: 'rewrite', pattern: '没想到|岂料', description: '强化反转表达' },
-        { type: 'add', pattern: '！', description: '在关键处增加感叹句' },
-        { type: 'replace', pattern: '有一点', replacement: '竟然', description: '提升意外感强度' },
-        { type: 'replace', pattern: '可能', replacement: '必定', description: '增强主角的确定性' },
-        { type: 'add', pattern: '(目光|气势|威压)', description: '在关键场景增加气势描写' },
-        { type: 'remove', pattern: '或许|大概|似乎', description: '删除犹豫不确定的表述' },
-      ],
-      sample: { before: '他似乎变强了一点', after: '他的气势竟然暴涨！在场众人无不变色！' },
+      axis: 'emotional',
+      task: '强化爽点密度与期待感，让读者有追读动力；不得改变基调，不得凭空新增打脸/反转桥段',
     },
     {
-      id: 'literary',
-      name: '文学修辞版',
-      description: '运用比喻、拟人、排比等修辞手法提升文学性',
-      category: 'style',
-      tags: ['文学', '修辞', '比喻'],
-      rules: [
-        { type: 'add', pattern: '像[是]', description: '增加明确比喻' },
-        { type: 'add', pattern: '仿佛|似乎|好似', description: '增加暗喻表达' },
-        { type: 'add', pattern: '[，。]', description: '在并列结构中使用排比' },
-        { type: 'rewrite', pattern: '(风|雨|夜|月|星)', description: '对自然意象进行拟人化' },
-        { type: 'add', pattern: '(记忆|时光|岁月)', description: '增加抽象概念的具象描写' },
-      ],
-      sample: { before: '夜晚很安静，月亮挂在天上', after: '夜沉静如深海，月是一枚冷银的印章，悬在天鹅绒般的天幕上' },
+      id: 'literary', name: '文学修辞版', category: 'style', tags: ['修辞', '比喻', '文学性'],
+      description: '在标准允许的范围内运用修辞手法提升文学性',
+      axis: 'metaphorical',
+      task: '在已确认文风允许的范围内使用比喻/拟人/排比等修辞；不得堆砌辞藻，不得把文风改成另一种文体',
     },
     {
-      id: 'horror',
-      name: '悬疑恐怖版',
-      description: '营造恐怖氛围，增强心理压迫感和悬念',
-      category: 'emotion',
-      tags: ['恐怖', '悬疑', '心理'],
-      rules: [
-        { type: 'add', pattern: '(黑暗|阴影|暗处)', description: '增强黑暗意象' },
-        { type: 'add', pattern: '(呼吸|心跳|脚步声)', description: '强化细微声响' },
-        { type: 'add', pattern: '[。！]', description: '使用省略制造空白' },
-        { type: 'rewrite', pattern: '背后|身后|后面', description: '强化身后的压迫感' },
-        { type: 'replace', pattern: '什么', replacement: '什么东西', description: '模糊化的恐怖感' },
-        { type: 'add', pattern: '(冰凉|阴冷|寒意)', description: '强化温度相关的恐惧感' },
-      ],
-      sample: { before: '他觉得背后有人，回头却什么也没看到', after: '背后传来一阵若有若无的凉意。他猛地回头——空无一人。' },
+      id: 'horror', name: '悬疑恐怖版', category: 'emotion', tags: ['恐怖', '压迫感', '悬念'],
+      description: '营造压迫氛围，增强心理悬念',
+      axis: 'suspense',
+      task: '营造压迫与不安的气氛，强化心理悬念；不得改变题材定位，不得加入与执行标准冲突的元素',
+      fit: {
+        forbidAny: ['儿童', '童话', '亲子', '低幼', '甜宠'],
+        reason: '「悬疑恐怖版」与当前执行标准的题材定位冲突（低幼/甜宠向内容不宜施加恐怖氛围）',
+      },
     },
     {
-      id: 'logical',
-      name: '逻辑一致性版',
-      description: '检测和修正逻辑矛盾，确保前后文自洽',
-      category: 'plot',
-      tags: ['逻辑', '一致性', '自洽'],
-      rules: [
-        { type: 'rewrite', pattern: '左.*右|右.*左', description: '检查左右手/方向一致性' },
-        { type: 'rewrite', pattern: '(先|前)后矛盾', description: '检查时间顺序冲突' },
-        { type: 'remove', pattern: '突然.+又', description: '消除突然性重复表达' },
-      ],
-      sample: { before: '他右手受伤...他伸出右手', after: '他右手受伤...他伸出左手' },
+      id: 'logical', name: '逻辑一致性版', category: 'plot', tags: ['逻辑', '自洽', '因果'],
+      description: '修正前后矛盾，确保因果自洽',
+      axis: 'standard',
+      task: '修正前后矛盾与因果跳跃；不得为了自洽而新增设定或改变既有事实',
     },
     {
-      id: 'action',
-      name: '动作强化版',
+      id: 'action', name: '动作强化版', category: 'scene', tags: ['动作', '张力', '画面感'],
       description: '增强动作描写的张力和画面感',
-      category: 'scene',
-      tags: ['动作', '张力', '画面'],
-      rules: [
-        { type: 'add', pattern: '(拳|掌|腿|刀|剑)', description: '在打斗前增加蓄力描写' },
-        { type: 'add', pattern: '(风|声|影)', description: '在动作后增加效果描写' },
-        { type: 'replace', pattern: '躲', replacement: '闪/侧身', description: '升级闪避描写' },
-        { type: 'replace', pattern: '挡', replacement: '格/架', description: '升级格挡描写' },
-      ],
-      sample: { before: '他躲开了攻击', after: '他侧身一闪，风声擦耳而过' },
+      axis: 'sensory',
+      task: '增强动作的张力、速度感与因果清晰度；不得新增招式/能力，不得改变胜负结果',
     },
     {
-      id: 'dialogue-natural',
-      name: '对话自然版',
+      id: 'dialogue-natural', name: '对话自然版', category: 'dialogue', tags: ['对话', '自然', '身份'],
       description: '让对话更自然流畅，符合角色身份',
-      category: 'dialogue',
-      tags: ['对话', '自然', '身份'],
-      rules: [
-        { type: 'add', pattern: '"', description: '对话前增加角色动作或表情' },
-        { type: 'replace', pattern: '你说', replacement: '你意思是', description: '更口语化' },
-        { type: 'remove', pattern: '根据|鉴于|综上所述', description: '删除正式文书用语' },
-      ],
-      sample: { before: '"根据目前的情况，我建议我们离开"', after: '他皱着眉头看了看四周："此地不宜久留。"' },
+      axis: 'standard',
+      task: '让对话更自然、更贴合角色身份与当下处境；不得改变台词含义与信息',
     },
     {
-      id: 'exposition',
-      name: '背景说明优化版',
+      id: 'exposition', name: '背景说明优化版', category: 'plot', tags: ['背景', '融入', '叙事'],
       description: '将直白的背景说明转化为自然的叙事融入',
-      category: 'plot',
-      tags: ['背景', '说明', '融入'],
-      rules: [
-        { type: 'rewrite', pattern: '他是.*的人|他有着|他拥有', description: '将说明转化为情节体现' },
-        { type: 'rewrite', pattern: '要知道|值得一提的是', description: '移除说教式表达' },
-        { type: 'add', pattern: '(记得|想起|回忆起)', description: '用回忆方式交代背景' },
-      ],
-      sample: { before: '要知道，他是个武功高强的人', after: '三招之内，他已制服了对手——这份身手，是他十年苦练的结果' },
+      axis: 'standard',
+      task: '把直白的背景说明融进当下的动作、对话或场景中；不得删掉读者必须知道的信息',
     },
     {
-      id: 'transitions',
-      name: '过渡衔接版',
+      id: 'transitions', name: '过渡衔接版', category: 'style', tags: ['过渡', '衔接', '场景切换'],
       description: '优化段落和场景之间的过渡衔接',
-      category: 'style',
-      tags: ['过渡', '衔接', '流畅'],
-      rules: [
-        { type: 'add', pattern: '[。！？]', description: '在场景切换处增加过渡句' },
-        { type: 'rewrite', pattern: '与此同时|另一方面', description: '优化平行叙事衔接标记' },
-        { type: 'add', pattern: '(第二天|次日|翌日)', description: '在时间跳跃前增加时间标记' },
-      ],
-      sample: { before: '他回到了营地。赵明远正在开会。', after: '他回到营地时，夜色已深。而在将军府内，赵明远的会议才刚刚开始。' },
+      axis: 'standard',
+      task: '优化段落与场景之间的过渡，消除生硬跳转；不得改变事件顺序',
     },
     {
-      id: 'sensory',
-      name: '五感增强版',
-      description: '增加视觉/听觉/触觉/味觉/嗅觉多感官描写',
-      category: 'scene',
-      tags: ['五感', '感官', '沉浸'],
-      rules: [
-        { type: 'add', pattern: '(看|见|望)', description: '增加视觉细节' },
-        { type: 'add', pattern: '(听|闻|声)', description: '增加听觉细节' },
-        { type: 'add', pattern: '(摸|触|碰)', description: '增加触觉细节' },
-        { type: 'add', pattern: '(香|臭|味)', description: '增加嗅觉细节' },
-        { type: 'add', pattern: '(甜|苦|辣|咸)', description: '增加味觉细节' },
-      ],
-      sample: { before: '早晨的市场很热闹', after: '清晨的市场，叫卖声此起彼伏，油条的香气混着露水的清新扑面而来' },
+      id: 'sensory', name: '五感增强版', category: 'scene', tags: ['五感', '感官', '沉浸'],
+      description: '补足视觉/听觉/触觉/味觉/嗅觉中与情境相关的部分',
+      axis: 'sensory',
+      task: '补足五感中与当下情境真正相关的部分；不得堆砌五感，不得写与情节无关的感官铺陈',
     },
     {
-      id: 'rhythm',
-      name: '韵律节奏版',
-      description: '通过押韵和句式反复增强文字的韵律感',
-      category: 'style',
-      tags: ['韵律', '押韵', '反复'],
-      rules: [
-        { type: 'rewrite', pattern: '{6,10}', description: '将关键段落的句子调整到相近字数' },
-        { type: 'add', pattern: '[，。]', description: '在并列概念处使用反复句式' },
-        { type: 'rewrite', pattern: '不.+不', description: '使用双重否定增强语势' },
-      ],
-      sample: { before: '他每天都在想这件事，让他很烦躁', after: '他日也想，夜也想，梦中也想——这件事像一根刺，扎在心口，拔不掉，忘不了' },
+      id: 'rhythm', name: '韵律节奏版', category: 'style', tags: ['韵律', '句式', '反复'],
+      description: '通过句式反复与长短交替形成语言节奏（仅适用于韵律/古风向标准）',
+      axis: 'poetic',
+      task: '通过句式长短与有意的重复形成语言节奏；保持叙述推进，不得写成诗化文体',
+      fit: {
+        requireAny: ['古风', '古代', '诗词', '仙侠', '武侠', '东方', '玄幻', '韵律', '文艺'],
+        forbidAny: ['白描', '朴素'],
+        reason: '「韵律节奏版」的押韵/反复句式会改变已确认的「白描/朴素」文风',
+      },
     },
     {
-      id: 'flashback',
-      name: '回忆插叙版',
+      id: 'flashback', name: '回忆插叙版', category: 'plot', tags: ['回忆', '插叙', '结构'],
       description: '将平铺直叙中的关键信息转为回忆/插叙手法',
-      category: 'plot',
-      tags: ['回忆', '插叙', '结构'],
-      rules: [
-        { type: 'add', pattern: '(记忆|回忆|想起)', description: '在关键信息前插入回忆触发' },
-        { type: 'add', pattern: '(那时|当年|曾经)', description: '增加时间跳跃标记' },
-        { type: 'rewrite', pattern: '以前曾经', description: '优化回忆引入方式' },
-      ],
-      sample: { before: '他曾在军队服役十年，练就了一身本领', after: '眼前的场景让他想起了一段往事——十年前，军营里的那些日夜...' },
+      axis: 'standard',
+      task: '把关键信息改由回忆/插叙带出；不得改变事实发生的时间与因果',
     },
     {
-      id: 'summarize',
-      name: '精炼概括版',
-      description: '将冗长段落精炼压缩，保留核心信息',
-      category: 'style',
-      tags: ['精炼', '压缩', '效率'],
-      rules: [
-        { type: 'remove', pattern: '也就是说|换句话说|简单来说', description: '删除解释性重复' },
-        { type: 'rewrite', pattern: '{60,}', description: '将超长段落拆分为2~3个短段落' },
-        { type: 'remove', pattern: '的[的]*的', description: '删除冗余的"的"字' },
-      ],
-      sample: { before: '简单来说，他说的意思也就是说他不同意这个提议', after: '他不同意。' },
+      id: 'summarize', name: '精炼概括版', category: 'style', tags: ['精炼', '压缩', '效率'],
+      description: '压缩冗长段落，保留核心信息',
+      axis: 'direct',
+      task: '压缩冗长段落、保留核心信息；不得删除关键情节、人物动机与必要铺垫',
     },
   ];
 
@@ -363,84 +269,210 @@ export class RefinementTemplatesService {
   }
 
   /**
-   * 应用精修模板到指定内容
+   * 按项目执行标准标注每个模板是否可用。
+   * 界面必须依据 applicable 决定能不能执行——不能把与标准冲突的模板照做一遍。
    */
-  applyTemplate(templateId: string, content: string, options?: Record<string, unknown>): string {
-    const template = this.findById(templateId);
-    if (!template) {
-      throw new Error(`Template "${templateId}" not found`);
-    }
-
-    let result = content;
-    const appliedRules: string[] = [];
-
-    for (const rule of template.rules) {
-      const applied = this.applyRule(result, rule, options);
-      if (applied !== result) {
-        appliedRules.push(rule.description || rule.type);
-        result = applied;
-      }
-    }
-
-    return result;
+  annotateForStandard(standard: TemplateStandardContext, category?: string): TemplateListItem[] {
+    return this.findAll(category).map((template) => {
+      const verdict = this.evaluateFit(template, standard);
+      const axis = styleIntensityAxis(template.axis);
+      return {
+        ...template,
+        axisLabel: axis ? axis.label : template.axis,
+        applicable: verdict.applicable,
+        rejectReason: verdict.reason,
+      };
+    });
   }
 
   /**
-   * 获取模板的应用规则说明
+   * 标准驱动的模板批量改写：分块 → 逐块调用 DescribePolishService.polishBlock → 校验段落结构 → 合并。
+   * 任一块失败（模型异常/空输出/段落数变化）一律整体抛出并列出失败块，
+   * 绝不返回「部分改了一半」的正文冒充成功——那正是上下文不一致的来源。
    */
-  getAppliedRules(templateId: string): TemplateRule[] {
-    const template = this.findById(templateId);
+  async applyWithStandard(
+    input: TemplateApplyInput,
+    llmGenerate: PolishLlmGenerate,
+  ): Promise<TemplateApplyResult> {
+    const template = this.findById(input.templateId);
     if (!template) {
-      throw new Error(`Template "${templateId}" not found`);
+      throw new UnprocessableEntityException(
+        `精修模板未执行：模板不存在「${input.templateId}」。可用模板：${this.templates.map((t) => t.id).join('、')}`,
+      );
     }
-    return template.rules;
-  }
-
-  /**
-   * 组合多个模板
-   */
-  applyTemplates(templateIds: string[], content: string): string {
-    let result = content;
-    for (const id of templateIds) {
-      result = this.applyTemplate(id, result);
+    const verdict = this.evaluateFit(template, input.standard);
+    if (!verdict.applicable) {
+      throw new UnprocessableEntityException(
+        `精修模板未执行：${verdict.reason}。当前执行标准：${input.standard.standardText}`,
+      );
     }
-    return result;
-  }
+    if (!String(input.standard.standardBlock ?? '').trim()) {
+      throw new UnprocessableEntityException(
+        '精修模板未执行：缺少执行标准块（平台/分类/基调/文风/流派/视角）',
+      );
+    }
+    const content = String(input.content ?? '');
+    if (!content.trim()) {
+      throw new UnprocessableEntityException('精修模板未执行：待改写正文为空');
+    }
 
-  private applyRule(content: string, rule: TemplateRule, _options?: Record<string, unknown>): string {
-    if (!rule.pattern) return content;
+    const axis = styleIntensityAxis(template.axis);
+    if (!axis) {
+      throw new UnprocessableEntityException(
+        `精修模板未执行：模板「${template.name}」绑定了未知方向「${template.axis}」`,
+      );
+    }
 
-    switch (rule.type) {
-      case 'replace': {
-        const regex = this.buildRegex(rule.pattern);
-        if (regex) {
-          return content.replace(regex, rule.replacement || '');
+    const chunks = this.planChunks(content, input.chunkChars ?? DEFAULT_CHUNK_CHARS);
+    const taskTitle = `精修模板批量改写 · ${template.name}`;
+    const rewritten: string[] = new Array(chunks.length);
+    const failures: string[] = [];
+    let upstreamFailure = false;
+
+    await this.mapWithConcurrency(chunks, input.concurrency ?? DEFAULT_CONCURRENCY, async (chunk) => {
+      try {
+        const out = await this.describePolish.polishBlock(
+          {
+            text: chunk.text,
+            standardBlock: input.standard.standardBlock,
+            taskTitle,
+            taskInstruction: template.task,
+            axis: template.axis,
+            pov: input.standard.pov,
+          },
+          llmGenerate,
+        );
+        const expected = this.countParagraphs(chunk.text);
+        const actual = this.countParagraphs(out);
+        if (actual !== expected) {
+          failures.push(`第 ${chunk.index + 1} 块：段落数由 ${expected} 变为 ${actual}（改写破坏了段落结构）`);
+          return;
         }
-        return content;
+        rewritten[chunk.index] = out;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const status = (error as any)?.getStatus?.() ?? (error as any)?.status;
+        if (status === 502 || status === 504) upstreamFailure = true;
+        failures.push(`第 ${chunk.index + 1} 块：${message}`);
       }
-      case 'remove': {
-        const regex = this.buildRegex(rule.pattern);
-        if (regex) {
-          return content.replace(regex, '');
-        }
-        return content;
-      }
-      case 'add':
-        // 添加规则在mock中返回标注
-        return content;
-      case 'rewrite':
-        // 重写规则返回标注
-        return content;
-      default:
-        return content;
+    });
+
+    if (failures.length > 0) {
+      throw new HttpException(
+        {
+          code: 'TEMPLATE_APPLY_INCOMPLETE',
+          message: `精修模板未完成：${failures.length}/${chunks.length} 块失败，已整体中止（不写回半成品）：${failures.slice(0, 3).join('；')}`,
+          templateId: template.id,
+          failures,
+          standardBasis: input.standard.standardText,
+        },
+        upstreamFailure ? 502 : 422,
+      );
     }
+
+    const separator = this.detectSeparator(content);
+    const result = rewritten.join(separator);
+    const changedChunks = chunks.filter((c, i) => rewritten[i] !== c.text).length;
+
+    return {
+      templateId: template.id,
+      templateName: template.name,
+      templateTask: template.task,
+      axis: template.axis,
+      axisLabel: axis.label,
+      projectId: input.standard.projectId,
+      platform: input.standard.platformLabel,
+      standardBasis: {
+        category: input.standard.category,
+        writingStyle: input.standard.writingStyle,
+        storyTone: input.standard.storyTone,
+        webNovelGenre: input.standard.webNovelGenre,
+        pov: input.standard.pov,
+        styleTags: input.standard.styleTags,
+      },
+      original: content,
+      result,
+      chunks: chunks.length,
+      changedChunks,
+      unchangedChunks: chunks.length - changedChunks,
+      appliedRules: [`方向：${axis.label}（${axis.guide}）`, `任务：${template.task}`],
+    };
   }
 
-  private buildRegex(pattern: string): RegExp | null {
-    try {
-      return new RegExp(pattern, 'g');
-    } catch {
-      return null;
+  /** 适用性判定：与执行标准冲突的模板不得执行 */
+  evaluateFit(template: Template, standard: TemplateStandardContext): { applicable: boolean; reason: string } {
+    const fit: TemplateFit | undefined = template.fit;
+    if (!fit) return { applicable: true, reason: '' };
+    const text = String(standard.standardText ?? '');
+    const hit = (fit.forbidAny ?? []).find((word) => word && text.includes(word));
+    if (hit) {
+      return { applicable: false, reason: `${fit.reason}（执行标准中出现「${hit}」）` };
     }
+    const required = fit.requireAny ?? [];
+    if (required.length > 0 && !required.some((word) => word && text.includes(word))) {
+      return { applicable: false, reason: `${fit.reason}（执行标准中未出现 ${required.join('/')}）` };
+    }
+    return { applicable: true, reason: '' };
+  }
+
+  /** 段落分隔方式：优先空行分段，否则按单行分段——决定合并时用什么还原 */
+  private detectSeparator(content: string): string {
+    return /\n\s*\n/.test(content) ? '\n\n' : '\n';
+  }
+
+  private splitParagraphs(content: string, separator: string): string[] {
+    return content
+      .split(separator === '\n\n' ? /\n\s*\n/ : /\n/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+  }
+
+  private planChunks(content: string, chunkChars: number): Chunk[] {
+    const limit = Math.max(200, Math.floor(chunkChars));
+    const separator = this.detectSeparator(content);
+    const paragraphs = this.splitParagraphs(content, separator);
+    const chunks: Chunk[] = [];
+    let current: string[] = [];
+    let currentChars = 0;
+
+    const flush = () => {
+      if (current.length === 0) return;
+      chunks.push({
+        index: chunks.length,
+        text: current.join(separator),
+        paragraphs: current.length,
+      });
+      current = [];
+      currentChars = 0;
+    };
+
+    for (const paragraph of paragraphs) {
+      if (currentChars > 0 && currentChars + paragraph.length > limit) flush();
+      current.push(paragraph);
+      currentChars += paragraph.length;
+    }
+    flush();
+    return chunks;
+  }
+
+  private countParagraphs(text: string): number {
+    return text.split(/\n/).map((line) => line.trim()).filter(Boolean).length;
+  }
+
+  private async mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    fn: (item: T) => Promise<R>,
+  ): Promise<void> {
+    const size = Math.max(1, Math.min(Math.floor(limit), items.length));
+    let cursor = 0;
+    const workers = Array.from({ length: size }, async () => {
+      for (;;) {
+        const index = cursor++;
+        if (index >= items.length) return;
+        await fn(items[index]);
+      }
+    });
+    await Promise.all(workers);
   }
 }

@@ -17,7 +17,7 @@ describe('StateExtractionService structured extraction', () => {
       ],
     }));
 
-    const result = await service.extractForeshadowingWithLLM('正文', [
+    const result = await service.extractForeshadowingWithLLM('proj-test', '正文', [
       { id: 'fs-1', description: '暗线', type: 'hint' },
     ]);
 
@@ -38,7 +38,7 @@ describe('StateExtractionService structured extraction', () => {
       turningPoints: ['主角拿到关键账册'],
     }));
 
-    const result = await service.extractPlotWithLLM('正文', '前情');
+    const result = await service.extractPlotWithLLM('proj-test', '正文', '前情');
 
     expect(result).toMatchObject({
       activeConflicts: ['军费短缺'],

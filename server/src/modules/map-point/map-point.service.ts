@@ -10,7 +10,7 @@ import type { MapLevel, MapPointType, MapPointTreeNode } from '@novel/shared';
 import { DatabaseService } from '../../database/database.service';
 import { StateItemService } from '../../state/state-item.service';
 
-// 对齐外部文档《世界观模板》的「地点 / 氛围 / 势力」段落（聚焦 10 项）
+// 地点档案字段（聚焦 10 项：基础定位 / 描述与氛围 / 归属与资源 / 秘密与关联）
 const LOCATION_PROFILE_FIELDS = ['location_type','basic_description','atmosphere','geography_position','key_landmarks','controlling_force','resources_scarcity','secrets_foreshadow','connected_characters','connected_chapters'] as const;
 
 export interface MapPointResponse {

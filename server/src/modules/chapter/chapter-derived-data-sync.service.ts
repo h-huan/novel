@@ -440,6 +440,8 @@ export class ChapterDerivedDataSyncService {
         scenario: 'summary',
         temperature: 0.2,
         prompt: `请为以下小说章节生成结构化但简洁的章节摘要。必须覆盖：核心事件、主要人物行动、明确状态变化、关系变化、重要地点、新增信息、伏笔动作、本章结尾状态。只输出摘要正文，不要虚构正文中不存在的信息，不要扩展为文学评论。\n\n章节正文：\n${input.afterContent}`,
+        // 埋点必须显式带 projectId：summary 不在创建请求上下文内，靠 AsyncLocalStorage 兜底会丢失。
+        metrics: { projectId: input.projectId, stepKey: 'summary' },
       });
       const summary = response.content.trim();
       if (!summary) throw new Error('Summary model returned empty content');
@@ -545,7 +547,7 @@ export class ChapterDerivedDataSyncService {
       ? '本卷主线进展、关键人物变化、关系变化、时间地点变化、伏笔埋设与回收、未解决冲突、卷末状态'
       : '当前主线、分卷进展、核心人物状态、主要关系、世界观关键事实、活跃伏笔、时间线状态、未解决冲突';
     try {
-      const summary = await this.reduceAggregateInputs(llm, inputs, scope, requirement);
+      const summary = await this.reduceAggregateInputs(llm, inputs, scope, requirement, projectId);
       const now = new Date().toISOString(); const db = this.database.getDb();
       db.prepare(`INSERT INTO aggregate_summary_states (id,project_id,scope,volume_index,scope_key,summary,source_fingerprint,source_count,source,status,stale,generated_at,last_error,updated_at)
         VALUES (?,?,?,?,?,?,?,?, 'ai','current',0,?,NULL,?)
@@ -572,7 +574,7 @@ export class ChapterDerivedDataSyncService {
     if (current.length) batches.push(current); return batches;
   }
 
-  private async reduceAggregateInputs(llm: RealLLMService, inputs: string[], scope: 'volume' | 'novel', requirement: string): Promise<string> {
+  private async reduceAggregateInputs(llm: RealLLMService, inputs: string[], scope: 'volume' | 'novel', requirement: string, projectId: string): Promise<string> {
     let level = inputs; let firstPass = true;
     while (firstPass || level.length > 1) {
       firstPass = false;
@@ -580,7 +582,10 @@ export class ChapterDerivedDataSyncService {
       for (const batch of this.summaryBatches(level)) {
         const prompt = `基于以下${scope === 'volume' ? '章节' : '卷'}摘要生成聚合摘要。必须覆盖：${requirement}。只输出摘要，不得编造。\n\n${batch.join('\n\n')}`;
         if (prompt.length > 48000) throw new Error('Aggregate prompt exceeded 48000 characters');
-        const response = await llm.generate({ scenario: 'summary', temperature: 0.2, prompt });
+        const response = await llm.generate({
+          scenario: 'summary', temperature: 0.2, prompt,
+          metrics: { projectId, stepKey: 'summary' },
+        });
         if (!response.content.trim()) throw new Error('Aggregate summary model returned empty content');
         next.push(response.content.trim());
       }

@@ -5,6 +5,9 @@
  * 所有 Chain 相关模块共享的类型
  */
 
+// 仅类型引用：Gate 报告是节点级结果的一部分，必须原样带出节点边界（见 NodeResult.gateReport）。
+import type { GateFailureReport } from '../modules/writing-quality/gate-failure';
+
 // ==================== 基础类型 ====================
 
 /** 节点执行类型 */
@@ -36,6 +39,19 @@ export interface ModelSpec {
 export interface LLMRequest {
   /** Internal only: partial body fragments are evaluated after assembly. */
   deferQualityGate?: boolean;
+  /**
+   * 判定单元（与 deferQualityGate 同性质：由调用方按内容单位显式声明）。
+   *
+   * 'chapter'（缺省）：整章单元。不声明就是整章口径，任何整章级指标都不放宽。
+   * 'segment'：片段单元（红线段落级精修、质检局部精修、二次加工分块改写的一段）。
+   *
+   * 为什么必须显式声明：片段拿不到整章的篇幅、开篇字位、章尾留钩、爽点分布与章节结构。
+   * 拿片段去套「番茄章节 3000–5000 字 / 对话占比 30%–55%」只会产出作者无法执行的假问题
+   * （实证：22 字 / 43 字 / 47 字片段被判「章节 3000-5000 字不足」并据此阻断局部精修，
+   * 二次加工入口整体不可用）。这不是降级：同一内容在整章单元上仍逐条产出，severity 一字不动，
+   * 改变的只是判定单元；空宪法（未执行标准）在任何单元都照样阻断。
+   */
+  evaluationUnit?: 'chapter' | 'segment';
   prompt: string;
   systemPrompt?: string;
   model?: string;
@@ -136,6 +152,8 @@ export interface ExecutionContext {
   startTime: Date;
   timestamps: Record<string, Date>;       // 各节点的执行时间戳
   metadata: Record<string, unknown>;      // 扩展元数据
+  /** 所属小说项目：项目内场景埋点/宪法注入的归属；平台级链路（灵感发现/定时任务）为 undefined */
+  projectId?: string;
 }
 
 // ==================== Chain ====================
@@ -169,6 +187,14 @@ export interface NodeResult {
   status: 'success' | 'failed' | 'skipped' | 'partial';
   output: unknown;
   error?: string;
+  /**
+   * 节点被质量 Gate 拒绝时的完整报告（结构化，原样透传，不在中间层压成字符串）。
+   *
+   * 为什么必须挂在节点结果上：Error 实例跨节点边界会退化成 error 字符串，
+   * 报告一旦丢失，上游只能看到「缺少世界观」「volumes 为空」这类下游症状，
+   * 真实成因被吞掉之后，报错就变成了永远指错方向的噪音。
+   */
+  gateReport?: GateFailureReport;
   latency: number;             // 毫秒
   retryCount: number;
   timestamp: Date;
@@ -194,126 +220,4 @@ export interface ChainError {
   message: string;
   type: 'timeout' | 'llm_error' | 'template_error' | 'internal';
   recoverable: boolean;
-}
-
-// ==================== 短篇三步骤输出类型 ====================
-
-/** 题材项（阶段一输出） */
-export interface StoryIdea {
-  title: string;
-  hook: string;               // 一句话钩子
-  protagonist: string;        // 第一人称主角身份
-  setting: string;            // 故事发生地
-  anomaly: string;            // 核心异常事件
-  conflict: string;           // 核心冲突
-  emotion: string;            // 情绪卖点
-  reversal: string;           // 主要反转
-  platform: string;           // 适合平台
-  potential: string;          // 爆点判断
-}
-
-/** 题材报告（阶段一最终输出） */
-export interface ThemeReport {
-  platform: string;
-  styleProfile: StyleProfile;
-  ideas: StoryIdea[];
-}
-
-/** 平台风格分析 */
-export interface StyleProfile {
-  platform: string;
-  userProfile: string;
-  successFactors: string[];
-  taboos: string[];
-  wordRange: string;
-}
-
-/** 核心设定（阶段二） */
-export interface CoreSetting {
-  title: string;
-  highConcept: string;        // 一句话高概念
-  protagonist: string;        // 主角"我"的身份
-  initialDilemma: string;     // 主角最初困境
-  wantMost: string;           // 最想要什么
-  fearMost: string;           // 最害怕什么
-  antagonist: string;         // 反派或阻碍力量
-  setting: string;            // 故事发生地
-  coreAnomaly: string;        // 核心异常事件
-  emotionalEnding: string;    // 最终情绪落点
-}
-
-/** 人物关系（阶段二） */
-export interface CharacterRelation {
-  name: string;               // 人物名
-  surfaceIdentity: string;    // 表面身份
-  realPurpose: string;        // 真实目的
-  relationToMe: string;       // 与"我"的关系
-  wants: string;              // 想要什么
-  hides: string;              // 隐瞒了什么
-  reversalInvolvement: string;// 在第几次反转中起作用
-  finalFate: string;          // 最终结局
-}
-
-/** 9段章节结构（阶段二） */
-export interface ChapterStructure {
-  openingHook: string;        // 开篇钩子
-  chapter1Anomaly: string;    // 异常降临
-  chapter2Probe: string;      // 试探与误判
-  chapter3Crisis: string;     // 危机升级
-  chapter4Reversal: string;   // 第一次大反转
-  chapter5Truth: string;      // 真相逼近
-  chapter6Climax: string;     // 高潮对峙
-  chapter7FinalReversal: string;// 终局反转
-  chapter8Epilogue: string;   // 尾声余味
-}
-
-/** 递进反转（阶段二） */
-export interface ReversalEntry {
-  position: string;           // 反转位置
-  surfaceTruth: string;       // 表面真相
-  actualTruth: string;        // 实际真相
-  foreshadow: string;         // 前文伏笔
-  revealMethod: string;       // 揭露方式
-  impactOnProtagonist: string;// 对主角的打击
-  impactOnReader: string;     // 对读者的冲击
-  changesPriorReading: string;// 是否会改变前文理解
-}
-
-/** 伏笔回收（阶段二） */
-export interface ForeshadowEntry {
-  content: string;            // 伏笔内容
-  position: string;           // 出现位置
-  initialInterpretation: string;  // 当时读者会如何理解
-  recoveryMethod: string;     // 后文如何回收
-  impactAfterRecovery: string;// 回收后的冲击效果
-}
-
-/** 完整大纲（阶段二最终输出） */
-export interface FullOutline {
-  coreSetting: CoreSetting;
-  characters: CharacterRelation[];
-  chapterStructure: ChapterStructure;
-  reversals: ReversalEntry[];
-  foreshadows: ForeshadowEntry[];
-}
-
-/** 正文章节质检报告 */
-export interface ChapterQAReport {
-  passed: boolean;
-  overallScore: number;
-  outlineMatch: number;      // 大纲吻合度 0-10
-  characterConsistency: number;
-  aiTraceIndex: number;      // AI 痕迹指数 0-100
-  emotionalImpact: number;   // 热血感评分
-  chapterEndAppeal: number;  // 章节结尾吸引力
-  copyrightRisk: boolean;
-  issues: QAItem[];
-}
-
-/** 质检项 */
-export interface QAItem {
-  type: 'error' | 'warning' | 'info';
-  dimension: string;
-  description: string;
-  suggestion?: string;
 }

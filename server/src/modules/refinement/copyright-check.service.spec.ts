@@ -4,12 +4,20 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { CopyrightCheckService } from './copyright-check.service';
+import { platformDisplayName } from '../../../shared/src';
 
 describe('CopyrightCheckService', () => {
   let service: CopyrightCheckService;
 
   beforeEach(() => {
     service = new CopyrightCheckService();
+  });
+
+  it('参考作品平台来自实际作品，注册平台名称与项目卡片同源', () => {
+    const platforms = service.getPlatforms();
+    expect(platforms.every(({ count }) => count > 0)).toBe(true);
+    expect(platforms.find(({ id }) => id === 'qidian')?.name).toBe(platformDisplayName('qidian'));
+    expect(platforms.find(({ id }) => id === 'feilu')?.name).toBe('飞卢小说');
   });
 
   describe('checkTitle', () => {

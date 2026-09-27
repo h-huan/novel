@@ -29,11 +29,16 @@ export interface Project {
     revision: number;
     projectType: string;
     targetPlatform: string;
+    /** 自定义平台说明：targetPlatform === 'custom' 时它就是平台维度的执行值 */
+    customPlatformNote?: string;
     targetWords: number;
     category: string;
     storyTone: string[];
     writingStyle: unknown;
     webNovelGenre: string[];
+    submissionTags: string[];
+    plotTags: string[];
+    genreFitNote: string;
     pov: string;
     targetAudience: unknown;
     chapterWordRange: { min: number; max: number };

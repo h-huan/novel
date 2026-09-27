@@ -11,17 +11,38 @@ import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from
 import { useNavigate } from 'react-router-dom';
 import { api, getBaseUrl } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
+import type { Project } from '@novel/shared';
 import { useDiscoveryStore } from '../stores/discoveryStore';
 import { openProject } from '../lib/openProject';
-import { io, Socket } from 'socket.io-client';
+import { updateCreationStepStatus } from '../lib/creation-progress';
 import IdeaCard from '../components/discovery/IdeaCard';
+import MultiSelectDropdown from '../components/common/MultiSelectDropdown';
+import CategoryReferencePicker from '../components/common/CategoryReferencePicker';
 import {
   CHAPTER_WORD_RANGE,
   STORY_TARGET_WORD_RANGES,
   canFitTargetWordsToChapters,
   storyTargetWordsRequirement,
+  categoryOptionsForPlatform,
+  categoryReferenceOptionsForProject,
+  platformCategoryDimensionBinding,
+  platformCategoryWritingProfile,
+  platformCategoryTreeVerification,
+  platformCreationFieldNames,
+  platformSubmissionDimensions,
+  resolveSubmissionCategory,
+  platformDisplayName,
+  categoryWordScaleStanding,
+  categoryWordScaleBlocked,
+  categoryWordScaleMessage,
   type SupportedStoryType,
 } from '@novel/shared';
+import {
+  PLATFORM_OPTIONS, CUSTOM_PLATFORM_VALUE, platformStandardProblem,
+  categoryOptionId, parseCategory, categoryDisplayValue, type CategoryOption,
+  audienceChannelOptions, missingExecutionStandards, unionOptions,
+  type ExecutionStandardsValue,
+} from '../lib/executionStandards';
 
 // ============================================================
 // 常量
@@ -31,6 +52,9 @@ const STORY_TYPES = [
   { value: 'short_story', label: '短篇', desc: '聚焦主线，完整闭环', icon: '📄' },
   { value: 'long_novel', label: '长篇', desc: '多线发展，持续创作', icon: '📚' },
 ] as const;
+
+// 同一页面卸载后旧 HTTP 请求仍可能返回；序号跨组件实例保留，只有最新请求能更新发现结果。
+let latestDiscoveryRequestId = 0;
 
 const chapterRangeFor = (_storyType: SupportedStoryType) => CHAPTER_WORD_RANGE;
 
@@ -53,15 +77,77 @@ const parseIdeaTargetWords = (value: unknown): number | null => {
   return Number.isInteger(parsed) ? parsed : null;
 };
 
-const PLATFORMS = [
-  { value: 'zhihu', label: '知乎盐选', color: 'var(--color-info-light)' },
-  { value: 'fanqie', label: '番茄小说', color: 'var(--color-accent)' },
-  { value: 'qidian', label: '起点中文网', color: 'var(--color-warning)' },
-  { value: 'douyin', label: '抖音故事', color: 'var(--color-purple)' },
-  { value: 'jinjiang', label: '晋江文学城', color: 'var(--color-pink)' },
-  { value: 'rules_horror', label: '规则怪谈', color: 'var(--color-success)' },
-  { value: 'generic', label: '通用', color: 'var(--color-text-muted)' },
-] as const;
+const discoveryStandards = (state: ReturnType<typeof useDiscoveryStore.getState>): ExecutionStandardsValue => ({
+  targetPlatform: state.targetPlatform,
+  customPlatformNote: state.customPlatformNote,
+  targetWords: state.targetWords,
+  projectType: state.storyType,
+  category: [state.selectedCategory, state.selectedSubCategory].filter(Boolean).join('/'),
+  // 这里曾把新书的基调/文风/视角强制置空，后果是界面设定无法进入发现与创作。
+  storyTone: state.selectedTones,
+  writingStyle: state.selectedWritingStyles,
+  webNovelGenre: state.selectedGenres,
+  submissionTags: state.selectedSubmissionTags,
+  plotTags: state.selectedPlotTags,
+  genreFitNote: state.genreFitNote,
+  pov: state.narrativePov,
+  targetAudience: state.targetAudience,
+  categoryWordScaleDeviation: state.categoryWordScaleDeviation,
+});
+
+/** 发现阶段留空的创作维度由题材卡明确给出；创建只取这张卡的定稿值，不回填另一个隐藏默认。 */
+export const standardsForIdea = (state: ReturnType<typeof useDiscoveryStore.getState>, idea: any): ExecutionStandardsValue => ({
+  ...discoveryStandards(state),
+  targetPlatform: state.targetPlatform,
+  category: [state.selectedCategory, state.selectedSubCategory].filter(Boolean).join('/') || String(idea?.storyCategory || ''),
+  storyTone: state.selectedTones.length ? state.selectedTones : (Array.isArray(idea?.storyTone) ? idea.storyTone : []),
+  writingStyle: state.selectedWritingStyles.length ? state.selectedWritingStyles : (Array.isArray(idea?.writingStyle) ? idea.writingStyle : []),
+  webNovelGenre: state.selectedGenres.length ? state.selectedGenres : (Array.isArray(idea?.webNovelGenre) ? idea.webNovelGenre : []),
+  submissionTags: state.selectedSubmissionTags.length ? state.selectedSubmissionTags : (Array.isArray(idea?.submissionTags) ? idea.submissionTags : []),
+  plotTags: state.selectedPlotTags.length ? state.selectedPlotTags : (Array.isArray(idea?.plotTags) ? idea.plotTags : []),
+  pov: state.narrativePov || String(idea?.pov || ''),
+});
+
+export const discoverySignature = (state: ReturnType<typeof useDiscoveryStore.getState>): string => JSON.stringify({
+  ...discoveryStandards(state),
+  storyType: state.storyType,
+});
+
+/** 只接收与发起时配置及当前配置同时一致的整批结果。 */
+export const discoveryResponseMatchesSelection = (
+  requestedSignature: string,
+  state: ReturnType<typeof useDiscoveryStore.getState>,
+  ideas: Array<{ storyType?: string; targetPlatform?: string }>,
+): boolean => requestedSignature === discoverySignature(state)
+  && ideas.length > 0
+  && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
+
+const discoveryGenreProblem = (state: ReturnType<typeof useDiscoveryStore.getState>): string => {
+  const category = resolveSubmissionCategory(
+    state.targetPlatform,
+    [state.selectedCategory, state.selectedSubCategory].filter(Boolean).join('/'),
+    state.storyType, state.targetAudience,
+  );
+  if (category.status !== 'resolved') return '';
+  const gap = platformCategoryDimensionBinding(
+    state.targetPlatform, category.value, 'genre', state.selectedSubmissionTags.join('、'), state.storyType,
+  ).gap;
+  return gap && state.genreFitNote.trim().length < 10 ? `${gap}；请填写至少 10 字的契合依据` : '';
+};
+
+// 平台清单只从 executionStandards 取（唯一来源）；本文件只保留每个平台的强调色。
+// 颜色是展示细节；平台 id、显示名与「是否已执行标准」的判据都不允许在这里复制第二份。
+const PLATFORM_COLORS: Record<string, string> = {
+  zhihu: 'var(--color-info-light)',
+  fanqie: 'var(--color-accent)',
+  qidian: 'var(--color-warning)',
+  douyin: 'var(--color-purple)',
+  jinjiang: 'var(--color-pink)',
+  qimao: 'var(--color-warning)',
+  xiaohongshu: 'var(--color-pink)',
+  rules_horror: 'var(--color-success)',
+  custom: 'var(--color-text-muted)',
+};
 
 const ANGLE_COLORS: Record<string, string> = {
   '历史缝隙': 'var(--color-info-light)',
@@ -83,14 +169,27 @@ const STEP_LABELS = ['配置', '发现', '创建'];
 
 const CREATION_STEPS = [
   { label: '创建项目...', key: 'project' },
+  { label: '生成主线与结局骨架...', key: 'skeleton' },
   { label: '生成世界观...', key: 'world' },
   { label: '生成大纲...', key: 'outline' },
-  { label: '生成角色...', key: 'characters' },
+  { label: '生成角色资料...', key: 'characters' },
   { label: '生成组织与地点...', key: 'orgs' },
   { label: '生成伏笔...', key: 'foreshadowing' },
   { label: '生成时间线...', key: 'timeline' },
   { label: '完成！', key: 'done' },
 ];
+
+/** 只凭持久化的确认题材定位已创建项目，避免重载后同一张卡重复创建。 */
+export function findProjectForIdea(projects: Project[], idea: any): Project | undefined {
+  return projects.find((project) => {
+    if (project.creationSource !== 'idea_discovery' || !project.confirmedIdea) return false;
+    try {
+      const confirmed = JSON.parse(project.confirmedIdea);
+      return confirmed.title === idea.title && confirmed.hook === idea.hook
+        && confirmed.storyType === idea.storyType && confirmed.targetPlatform === idea.targetPlatform;
+    } catch { return false; }
+  });
+}
 
 // ============================================================
 // 动态样式函数（不能在 s 对象中定义函数）
@@ -139,19 +238,6 @@ const getPlatformBtnStyle = (selected: boolean, color: string): React.CSSPropert
   border: `1px solid ${selected ? color : 'rgba(255,255,255,0.08)'}`,
   backgroundColor: selected ? `${color}22` : 'rgba(255,255,255,0.04)',
   color: selected ? color : 'var(--color-text-dim)',
-  transition: 'all 0.15s',
-});
-
-const getToneBtnStyle = (selected: boolean): React.CSSProperties => ({
-  padding: '6px 14px',
-  borderRadius: '20px',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  fontSize: 'var(--font-size-xs)',
-  fontWeight: 600,
-  border: `1px solid ${selected ? 'var(--color-accent)' : 'rgba(255,255,255,0.08)'}`,
-  backgroundColor: selected ? 'rgba(233,69,96,0.15)' : 'rgba(255,255,255,0.04)',
-  color: selected ? 'var(--color-accent)' : 'var(--color-text-dim)',
   transition: 'all 0.15s',
 });
 
@@ -283,13 +369,6 @@ const s: Record<string, React.CSSProperties> = {
     flexWrap: 'wrap',
     gap: '8px',
     marginBottom: '28px',
-  },
-
-  toneGrid: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '8px',
-    marginBottom: '32px',
   },
 
   startBtn: {
@@ -481,23 +560,42 @@ const s: Record<string, React.CSSProperties> = {
 
 const DiscoveryWizardPage: React.FC = () => {
   const navigate = useNavigate();
-  const { selectProject } = useProjectStore();
+  const { selectProject, fetchProjects, projects } = useProjectStore();
   const store = useDiscoveryStore();
 
   // 从 store 读取状态（持久化，切换页面不丢失）
   const {
-    step, storyType, platform, selectedTones, targetWords, selectedCategory, selectedSubCategory,
-    isGenerating, genProgress, ideas, generationDone, prevTitles, excludeDetails,
+    step, storyType, targetPlatform, selectedGenres, selectedSubmissionTags, selectedPlotTags, selectedTones, selectedWritingStyles, narrativePov,
+    targetWords, selectedCategory, selectedSubCategory, genreFitNote,
+    customPlatformNote,
+    targetAudience, categoryWordScaleDeviation,
+    isGenerating, genProgress, ideas, generatedSignature, generationDone, prevTitles, excludeDetails,
     isCreating, creationProgress, creationErrors, creationWarnings, createdProjectId, createdProjectTitle, creationStepStatus,
     hasActiveCreation, activeCreationProjectId,
   } = store;
 
   // 本地状态（不需要持久化的 UI 数据）
-  const [categories, setCategories] = useState<Array<{ name: string; children: string[] }>>([]);
-  const [toneTags, setToneTags] = useState<string[]>([]);
-  const [writingStyles, setWritingStyles] = useState<string[]>([]);
-  const [webNovelGenres, setWebNovelGenres] = useState<string[]>([]);
+  // 这里曾有过第二份全局题材字典回退，后果是未核实平台显示另一平台不承认的投稿分类。
+  // 分类候选与长短篇范围统一来自 shared；未核实项允许填写后台原名。
   const [configError, setConfigError] = useState('');
+  const [creativeGenres, setCreativeGenres] = useState<string[]>([]);
+  const [toneOptions, setToneOptions] = useState<string[]>([]);
+  const [styleOptions, setStyleOptions] = useState<string[]>([]);
+  const [plotOptions, setPlotOptions] = useState<string[]>([]);
+  const [povOptions, setPovOptions] = useState<string[]>([]);
+  useEffect(() => {
+    api.get('/dict/web_novel_genre').then((response) => setCreativeGenres(((response as any)?.items || []).map((item: any) => item.label))).catch(() => {});
+    // 这里曾让基调、文风、情节和视角只读前端种子，后果是字典管理的增删改不会改变灵感发现选项。
+    api.get('/dict/tone_tag').then((r) => setToneOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
+    api.get('/dict/writing_style').then((r) => setStyleOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
+    api.get('/dict/plot_tag').then((r) => setPlotOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
+    api.get('/dict/narrative_pov').then((r) => setPovOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
+  }, []);
+  const categoryVerification = platformCategoryTreeVerification(targetPlatform, storyType);
+  const hasVerifiedCategoryOptions = categoryVerification?.verified === 'confirmed';
+  // 目标读者 = 所选平台投稿分类树里真实存在的频道（番茄=男频/女频，起点等还有纯爱/百合/无CP…）；
+  // 平台未建模分类树时为空：该平台没有频道概念，只显示「不限定」，不拿别家频道凑数。
+  const audienceOptions = hasVerifiedCategoryOptions ? audienceChannelOptions(targetPlatform) : [];
   const ideaRequestInFlightRef = useRef(false);
 
   // 挂载/重新进入时按 store 现状恢复，而不是无条件清空。
@@ -518,28 +616,110 @@ const DiscoveryWizardPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 从字典API加载数据
   useEffect(() => {
-    api.get('/dict/categories/all').then(r => {
-      const cats = (r as any)?.categories || [];
-      setCategories(cats.map((c: any) => ({
-        name: c.category.label,
-        children: c.subcategories.map((s: any) => s.label),
-      })));
-    }).catch(() => {});
-    api.get('/dict/tone_tag').then(r => {
-      const tags = (r as any)?.items || [];
-      setToneTags(tags.map((t: any) => t.label));
-    }).catch(() => {});
-    api.get('/dict/writing_style').then(r => {
-      const styles = (r as any)?.items || [];
-      setWritingStyles(styles.map((s: any) => s.label));
-    }).catch(() => {});
-    api.get('/dict/web_novel_genre').then(r => {
-      const genres = (r as any)?.items || [];
-      setWebNovelGenres(genres.map((g: any) => g.label));
-    }).catch(() => {});
-  }, []);
+    if (generationDone && ideas.length > 0) void fetchProjects();
+  }, [generationDone, ideas.length, fetchProjects]);
+
+  useEffect(() => {
+    if (generationDone && generatedSignature && generatedSignature !== discoverySignature(useDiscoveryStore.getState())) {
+      // 这里曾有过第二份“已发现题材仍有效”的隐含口径：配置改了却继续展示旧卡，短篇页面会出现长篇。
+      store.resetDiscovery();
+      store.setStep(0);
+      setConfigError('创作设定已改变，请按当前选择重新发现题材。');
+    }
+  }, [generationDone, generatedSignature, storyType, targetPlatform, targetWords,
+    selectedCategory, selectedSubCategory, selectedTones, selectedWritingStyles,
+    selectedGenres, selectedSubmissionTags, selectedPlotTags, narrativePov,
+    targetAudience, customPlatformNote, genreFitNote, categoryWordScaleDeviation, store]);
+
+  // 平台是分类的上位执行标准：分类必须落在所选平台的投稿分类里，不是全局题材字典里的名字。
+  // 有平台投稿分类树时用平台树；平台未建模分类树时才回退全局字典（回退是显式的，
+  // 不把全局分类冒充成平台分类——那种冒充正是「按平台分类执行」落空的原因）。
+  const platformGroups = categoryOptionsForPlatform(targetPlatform);
+  // 选项身份带频道（`频道·分类名`）：番茄有 3 个投稿分类名在男女频各有一项，
+  // 只按名字做身份的话下拉 key 会重复、频道映射会被后写覆盖，用户点的是哪一个就丢了。
+  const categories: CategoryOption[] = hasVerifiedCategoryOptions
+    ? platformGroups.map((group) => ({ id: group.id, channel: group.channel, globalCategory: group.globalCategory, name: group.name, children: group.children, flat: group.flat }))
+    : [];
+  // 历史存储里可能只有分类名（没有频道前缀）：按目标读者把能唯一确定的归到选项身份上用于回显，
+  // 跨频道同名又没有频道依据时留空——不猜，归位提示会要求重选。
+  const parsedCategory = parseCategory(selectedCategory, categories, targetAudience);
+  // 分类还可能是历史「全局大类/子类」写法（如 都市·现实/都市）：在平台侧对应多个投稿分类，
+  // 解析不出选项身份，但后端执行标准仍会把它归位到某一个平台投稿分类。
+  // 这里与执行标准页共用 categoryDisplayValue（同一份判据）：已归位就回显归位结果，
+  // 不让「系统按 男频·都市日常 执行」和「下拉是空的」同时出现。
+  const categoryPreview = resolveSubmissionCategory(
+    targetPlatform,
+    [selectedCategory, selectedSubCategory].filter(Boolean).join('/'),
+    storyType, targetAudience,
+  );
+  const displayCategory = categoryDisplayValue(
+    parsedCategory,
+    categoryPreview.status === 'resolved' ? categoryPreview.value : null,
+  );
+  const selectedCategoryRef = hasVerifiedCategoryOptions ? displayCategory.major : selectedCategory;
+  const selectedSubRef = hasVerifiedCategoryOptions ? selectedSubCategory || displayCategory.minor : '';
+  // 扁平平台（番茄等）平台侧投稿分类只有一层：选了大类就已经是投稿分类，
+  // 不能再让用户选一次子类，也不能把落库值拼成「X/X」。
+  const selectedCategoryIsFlat = categories.find((c) => categoryOptionId(c) === selectedCategoryRef)?.flat === true;
+  const platformCategoryValue = selectedCategoryIsFlat
+    ? selectedCategoryRef
+    : [selectedCategoryRef, selectedSubRef].filter(Boolean).join('/');
+  // channelHint 传目标读者：同一个分类名横跨男女频时靠它选中正确的频道，与后端执行标准同一判据。
+  const categoryPlacement = resolveSubmissionCategory(targetPlatform, platformCategoryValue, storyType, targetAudience);
+  const categoryWritingProfile = categoryPlacement.status === 'resolved'
+    ? platformCategoryWritingProfile(targetPlatform, categoryPlacement.value.channel, categoryPlacement.value.platformGroup, storyType)
+    : null;
+  const fieldNames = platformCreationFieldNames(targetPlatform, storyType, Boolean(categoryWritingProfile));
+  // 这里曾把全局 web_novel_genre 字典直接当作平台分类标签展示，用户选到的词与平台头部标签对不上。
+  // 有实测分类时只展示这份分类证据中的官方标签；无实测时明确使用作者设定字典。
+  const submissionOptions = categoryWritingProfile ? categoryWritingProfile.topTags.map((tag) => tag.name) : [];
+
+  // 「分类」维体量判据的创建前预览 —— 与后端创建入口（chain.controller 第三道阻断）、生成入口、
+  // 质量 Gate 共用 shared 的同一份 categoryWordScaleStanding，前端只把同一份结论译成界面文案。
+  //
+  // 为什么创建前就要给出来：判据未满足时后端会直接拒建项目（项目未创建，请调整目标总字数），
+  // 作者看不到原因就会在「我已经填了字数」和「项目未创建」之间来回打转 —— 那是最贵的排查方式。
+  //
+  // 为什么只在本步填了字数时才评价：这里留空的语义是「交给所选题材动态规划」（规划值在选完题材后
+  // 才产生，后端按那个值判），不是「标准未执行」。拿空值在这里报未设定，等于把一步正常用法报成错误。
+  const previewTargetWords = (() => {
+    const text = String(targetWords ?? '').trim();
+    if (!text) return null;
+    const value = Number(text);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  })();
+  const scaleStanding = categoryWordScaleStanding({
+    targetPlatform,
+    category: platformCategoryValue,
+    targetAudience,
+    // 成稿单元：向导里选的长短篇就是本书的成稿单元，用来确认平台那份实测口径适不适用。
+    projectType: storyType,
+    targetWords: previewTargetWords ?? undefined,
+    categoryWordScaleDeviation,
+  });
+  const scaleBlocked = previewTargetWords !== null && categoryWordScaleBlocked(scaleStanding);
+  // 执行判据仍用 shared 的 standing；发现页只给作者一个可操作的短提示，不展示采样路径与内部审计文本。
+  const scaleNote = scaleStanding.unitMismatch
+    ? '该分类暂无适用于本书类型的字数参考，不会套用其他类型的数据。'
+    : previewTargetWords === null ? ''
+      : scaleStanding.status === 'within' ? '目标字数在该分类参考范围内。'
+        : scaleStanding.status === 'deviation_declared' ? '已记录偏离该分类参考范围的取舍依据。'
+          : scaleBlocked ? '目标字数不在该分类参考范围内，请调整字数或填写取舍依据。' : '';
+  // 取舍依据只在「确实填了字数、且落在区间外」时可用：区间内没有取舍可写，
+  // 未填字数时写它也无从对照（后端按题材规划值判）。
+  const scaleDeviationVisible = scaleBlocked;
+  const deviationChars = categoryWordScaleDeviation.trim().length;
+
+  // 换平台后，旧平台的大类/子类在新平台可能根本不存在，必须当场清空重选，
+  // 不能留着一个对不上位的分类（那等于这项执行标准没有落地）。
+  const prevPlatformRef = useRef(targetPlatform);
+  useEffect(() => {
+    if (prevPlatformRef.current === targetPlatform) return;
+    prevPlatformRef.current = targetPlatform;
+    const state = useDiscoveryStore.getState();
+    if (state.selectedCategory || state.selectedSubCategory) state.setSelectedCategory('');
+  }, [targetPlatform]);
 
   // 自定义题材
   const [showCustom, setShowCustom] = useState(false);
@@ -555,34 +735,20 @@ const DiscoveryWizardPage: React.FC = () => {
     msg: any,
     cleanup: () => void,
   ): boolean => {
-    const stepMap: Record<string, keyof typeof creationStepStatus> = {
-      project: 'project',
-      outline: 'outline',
-      characters: 'characters',
-      world: 'world',
-      orgs: 'orgs',
-      foreshadowing: 'foreshadowing',
-      timeline: 'timeline',
-      done: 'done',
-    };
-
     switch (msg.type) {
       case 'progress': {
         store.setCreationProgress(msg.percent || 0);
-        const mapped = stepMap[msg.step];
-        if (mapped) {
-          const nextStatus = msg.status === 'done' || msg.status === 'failed' ? msg.status : 'running';
-          store.setCreationStepStatus((prev) => ({ ...prev, [mapped]: nextStatus }));
-        }
+        store.setCreationStepStatus((prev) => updateCreationStepStatus(prev, msg));
         if (msg.status === 'failed') {
           store.setCreationWarnings([...(useDiscoveryStore.getState().creationWarnings || []), msg.message || `${msg.step} 未成功写入`]);
         }
         return false;
       }
       case 'done': {
+        void fetchProjects();
         store.setCreationProgress(100);
         store.setCreationStepStatus({
-          project: 'done', outline: 'done', characters: 'done',
+          project: 'done', skeleton: 'done', outline: 'done', characters: 'done',
           world: 'done', orgs: 'done', foreshadowing: 'done', timeline: 'done', done: 'done',
         });
         if (msg.warnings && Array.isArray(msg.warnings) && msg.warnings.length > 0) {
@@ -600,16 +766,11 @@ const DiscoveryWizardPage: React.FC = () => {
         return true;
       }
       case 'error': {
+        void fetchProjects();
         const message = msg.message || '后台生成失败';
         store.setCreationErrors([message]);
         if (msg.warnings && Array.isArray(msg.warnings)) store.setCreationWarnings(msg.warnings);
-        store.setCreationStepStatus((prev) => {
-          const n = { ...prev, done: 'failed' as const };
-          for (const k of Object.keys(n) as Array<keyof typeof n>) {
-            if (n[k] === 'running') n[k] = 'failed';
-          }
-          return n;
-        });
+        store.setCreationStepStatus((prev) => updateCreationStepStatus(prev, msg));
         store.setCreating(false);
         store.setHasActiveCreation(false);
         store.setActiveCreationProjectId(null);
@@ -619,11 +780,7 @@ const DiscoveryWizardPage: React.FC = () => {
       default:
         return false;
     }
-  }, [store, selectProject, navigate, creationStepStatus]);
-
-  const toggleTone = (tag: string) => {
-    store.toggleTone(tag);
-  };
+  }, [store, selectProject, navigate, fetchProjects]);
 
   // 配置 → 发现（支持重新生成时传排除列表）
   const handleStartDiscovery = useCallback(async (excludeTitles?: string[], excludeDetailsArg?: Array<{ title: string; hook?: string; description?: string }>) => {
@@ -633,6 +790,7 @@ const DiscoveryWizardPage: React.FC = () => {
     }
     ideaRequestInFlightRef.current = true;
     const configuredState = useDiscoveryStore.getState();
+    const requestedSignature = discoverySignature(configuredState);
     const configuredTarget = configuredState.targetWords.trim();
     if (configuredTarget) {
       const value = Number(configuredTarget);
@@ -643,11 +801,42 @@ const DiscoveryWizardPage: React.FC = () => {
         return;
       }
     }
+    // 平台是执行前提：没选、选了通用、选了自定义却没写说明，都等于这一维没有标准。
+    // 判据与执行标准页、后端 missingConstitutionStandards 同源（platformStandardProblem），不在这里另写一套 if。
+    const platformProblem = platformStandardProblem(configuredState);
+    if (platformProblem !== null) {
+      setConfigError(platformProblem === 'custom_note_missing'
+        ? '你选了自定义平台，但没有写这个平台的执行标准：系统没有它的节奏/回报/读者基准，标准只能来自你的说明，留空等于这项标准不存在。'
+        : platformProblem === 'unsupported'
+          ? '规则怪谈是题材标签，不是发布平台；请选择真实目标平台。'
+          : '请选择目标平台：平台决定章节字数、节奏与回报基准，会写入创作宪法并驱动框架与正文；跳过它等于没有这项执行标准。');
+      store.setStep(0);
+      ideaRequestInFlightRef.current = false;
+      return;
+    }
+    // 这里曾强制短故事先选分类，后果是“其余维度留空自动组合”的约定失效。
+    // 平台必选；分类留空时由服务端从所选平台的同一分类事实源选取并记录在题材卡。
+    const startPlacement = resolveSubmissionCategory(configuredState.targetPlatform, [configuredState.selectedCategory, configuredState.selectedSubCategory].filter(Boolean).join('/'), configuredState.storyType, configuredState.targetAudience);
+    if (configuredState.selectedCategory && startPlacement.status === 'unmapped') {
+      setConfigError('分类「' + configuredState.selectedCategory + (configuredState.selectedSubCategory ? '/' + configuredState.selectedSubCategory : '') + '」不在' + platformDisplayName(configuredState.targetPlatform) + '的投稿分类里：' + startPlacement.reason + '。该平台可用大类：' + startPlacement.availableGroups.join('、') + '。分类是执行前提，系统不会替你自动改写——请改选该平台的投稿分类。');
+      store.setStep(0);
+      ideaRequestInFlightRef.current = false;
+      return;
+    }
+    const genreProblem = discoveryGenreProblem(configuredState);
+    if (genreProblem) {
+      setConfigError(genreProblem);
+      store.setStep(0);
+      ideaRequestInFlightRef.current = false;
+      return;
+    }
     setConfigError('');
+    const requestId = ++latestDiscoveryRequestId;
     let generationSucceeded = false;
     store.setStep(1);
     store.setGenerating(true);
     store.setIdeas([]);
+    store.setGeneratedSignature(null);
     store.setGenerationDone(false);
     store.setGenProgress('AI正在批量生成、校验并去重故事题材...');
 
@@ -662,6 +851,7 @@ const DiscoveryWizardPage: React.FC = () => {
     let msgIdx = 0;
     const startTime = Date.now();
     const msgInterval = setInterval(() => {
+      if (requestId !== latestDiscoveryRequestId) { clearInterval(msgInterval); return; }
       if (msgIdx < msgs.length) {
         store.setGenProgress(msgs[msgIdx]);
         msgIdx++;
@@ -674,29 +864,42 @@ const DiscoveryWizardPage: React.FC = () => {
     }, 5000);
 
     try {
-      const currentState = useDiscoveryStore.getState();
-      const allToneTags = [
-        ...currentState.selectedTones,
-        ...(currentState.selectedSubCategory ? [currentState.selectedSubCategory] : []),
-      ];
-
+      // 分类不再混进「标签」：它有自己的通道（storyCategory），且传的是平台投稿分类写法
+      // 「平台大类/平台子类」，后端按同一份平台分类树解析，不让模型从标签里猜题材方向。
+      const categoryValue = [configuredState.selectedCategory, configuredState.selectedSubCategory].filter(Boolean).join('/');
       const res = await api.post<any>('/chain/idea-discover', {
-        storyType: currentState.storyType,
-        platform: currentState.platform,
-        toneTags: allToneTags.length > 0 ? allToneTags : undefined,
+        storyType: configuredState.storyType,
+        platform: configuredState.targetPlatform,
+        customPlatformNote: configuredState.customPlatformNote,
+        storyTone: configuredState.selectedTones,
+        writingStyle: configuredState.selectedWritingStyles,
+        webNovelGenre: discoveryStandards(configuredState).webNovelGenre,
+        submissionTags: configuredState.selectedSubmissionTags,
+        plotTags: configuredState.selectedPlotTags,
+        genreFitNote: configuredState.genreFitNote,
+        pov: configuredState.narrativePov,
         count: 5,
         excludeTitles,
         excludeDetails: excludeDetailsArg,
-        targetWords: currentState.targetWords || undefined,
-        storyCategory: currentState.selectedSubCategory || currentState.selectedCategory || undefined,
+        targetWords: configuredState.targetWords || undefined,
+        storyCategory: categoryValue || undefined,
+        targetAudience: configuredState.targetAudience || undefined,
       });
 
       clearInterval(msgInterval);
 
+      if (requestId !== latestDiscoveryRequestId) return;
+
       if ((res as any)?.success && (res as any)?.ideas?.length > 0) {
         const newIdeas = (res as any).ideas;
+        if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), newIdeas)) {
+          store.setGenProgress('创作设定已改变，或返回题材与所选长短篇/平台不一致；旧结果已丢弃，请重新发现。');
+          store.setStep(0);
+          return;
+        }
         generationSucceeded = true;
         store.setIdeas(newIdeas);
+        store.setGeneratedSignature(requestedSignature);
         // 记录本次题材标题和完整信息，下次排除用
         const newTitles = newIdeas.map((i: any) => i.title).filter(Boolean);
         store.addPrevTitles(newTitles);
@@ -714,11 +917,13 @@ const DiscoveryWizardPage: React.FC = () => {
       }
     } catch (err: any) {
       clearInterval(msgInterval);
-      store.setGenProgress(`❌ ${err.message || '生成失败，请重试'}`);
+      if (requestId === latestDiscoveryRequestId) store.setGenProgress(`❌ ${err.message || '生成失败，请重试'}`);
     } finally {
       ideaRequestInFlightRef.current = false;
-      store.setGenerating(false);
-      store.setGenerationDone(generationSucceeded);
+      if (requestId === latestDiscoveryRequestId) {
+        store.setGenerating(false);
+        store.setGenerationDone(generationSucceeded);
+      }
     }
   }, [store]);
 
@@ -758,7 +963,7 @@ const DiscoveryWizardPage: React.FC = () => {
       store.setCreationErrors([]);
       store.setCreationWarnings([]);
       store.setCreationStepStatus({
-        project: 'pending', outline: 'pending', characters: 'pending',
+        project: 'pending', skeleton: 'pending', outline: 'pending', characters: 'pending',
         world: 'pending', orgs: 'pending', foreshadowing: 'pending', timeline: 'pending', done: 'pending',
       });
       store.setCreatedProjectId(null);
@@ -824,6 +1029,18 @@ const DiscoveryWizardPage: React.FC = () => {
   // 选中题材 → 一键创建项目（异步 + SSE 实时进度，状态存入 store 防丢失）
   const handleSelectIdea = useCallback(async (idea: any) => {
     const preflightState = useDiscoveryStore.getState();
+    if (idea.storyType && idea.storyType !== preflightState.storyType) {
+      setConfigError('题材卡的长短篇类型与当前配置不一致，请重新发现题材；项目未创建。');
+      store.setStep(0);
+      return;
+    }
+    const selectedStandards = standardsForIdea(preflightState, idea);
+    if (preflightState.ideas.includes(idea)
+      && preflightState.generatedSignature !== discoverySignature(preflightState)) {
+      setConfigError('创作设定已更改，请按当前设定重新发现灵感后再创建作品。');
+      store.setStep(0);
+      return;
+    }
     const explicitTarget = preflightState.targetWords.trim()
       ? Number(preflightState.targetWords)
       : null;
@@ -832,6 +1049,57 @@ const DiscoveryWizardPage: React.FC = () => {
     const plannedTarget = ideaTarget ?? explicitTarget;
     if (plannedTarget === null || !isFeasibleTargetWords(plannedTarget, preflightState.storyType)) {
       setConfigError(`这个题材没有可执行的动态篇幅规划。${getTargetWordsRequirement(preflightState.storyType)}请返回配置填写可执行的目标字数，再重新选择题材。`);
+      store.setStep(0);
+      return;
+    }
+    // 与 handleStartDiscovery 同一条执行标准判据：分类/视角为空就是标准未执行。
+    // 这里必须在提交前复检——选完题材直接创建项目时若跳过，「分类/视角」两个维度
+    // 会以空值写进创作宪法，框架与正文随后都失去这条约束（后端 422 才暴露已经太晚）。
+    if (!selectedStandards.category) {
+      setConfigError('请选择故事分类：分类会写入创作宪法并驱动框架与正文；跳过它等于没有这项执行标准（不是不适用）。');
+      store.setStep(0);
+      return;
+    }
+    // 与 handleStartDiscovery 同一判据：分类必须归位到所选平台的投稿分类（平台未建模分类树时不阻断）。
+    const createPlacement = resolveSubmissionCategory(selectedStandards.targetPlatform, selectedStandards.category, preflightState.storyType, preflightState.targetAudience);
+    if (createPlacement.status === 'unmapped') {
+      setConfigError('分类「' + preflightState.selectedCategory + (preflightState.selectedSubCategory ? '/' + preflightState.selectedSubCategory : '') + '」不在' + platformDisplayName(preflightState.targetPlatform) + '的投稿分类里：' + createPlacement.reason + '。该平台可用大类：' + createPlacement.availableGroups.join('、') + '。分类是执行前提，系统不会替你自动改写——请改选该平台的投稿分类。');
+      store.setStep(0);
+      return;
+    }
+    // 第三道创建前阻断：「分类」维的体量判据。与后端创建入口（chain.controller 第三道阻断）、
+    // 生成入口、质量 Gate 共用同一份 categoryWordScaleStanding —— 前端提前摆出同一句话，
+    // 作者就不必等 SSE 回「项目未创建」才知道原因。
+    // 不降级：不擅自改写所选题材给的目标字数，也不降低判据本身。
+    const createScaleStanding = categoryWordScaleStanding({
+      targetPlatform: selectedStandards.targetPlatform,
+      category: selectedStandards.category,
+      targetAudience: preflightState.targetAudience,
+      projectType: preflightState.storyType,
+      targetWords: plannedTarget,
+      categoryWordScaleDeviation: preflightState.categoryWordScaleDeviation,
+    });
+    if (categoryWordScaleBlocked(createScaleStanding)) {
+      setConfigError(categoryWordScaleMessage(createScaleStanding, platformDisplayName(selectedStandards.targetPlatform))
+        + '；请在配置步调整目标总字数，或补齐「分类体量取舍依据」后再选题材。');
+      store.setStep(0);
+      return;
+    }
+    // 平台同上：必须在提交创建前复检；空值一旦写进创作宪法，框架与正文随后都失去这条约束。
+    const platformProblem = platformStandardProblem(selectedStandards);
+    if (platformProblem !== null) {
+      setConfigError(platformProblem === 'custom_note_missing'
+        ? '你选了自定义平台，但没有写这个平台的执行标准：系统没有它的节奏/回报/读者基准，标准只能来自你的说明，留空等于这项标准不存在。'
+        : platformProblem === 'unsupported'
+          ? '规则怪谈是题材标签，不是发布平台；请选择真实目标平台。'
+          : '请选择目标平台：它决定章节字数、节奏与回报基准，会写入创作宪法并驱动框架与正文；跳过它等于没有这项执行标准。');
+      store.setStep(0);
+      return;
+    }
+    const missing = missingExecutionStandards(selectedStandards);
+    const genreProblem = discoveryGenreProblem(preflightState);
+    if (missing.length || genreProblem) {
+      setConfigError(missing.length ? `请先选定${missing.join('、')}，项目必须沿用发现灵感时的设定。` : genreProblem);
       store.setStep(0);
       return;
     }
@@ -844,47 +1112,42 @@ const DiscoveryWizardPage: React.FC = () => {
     store.setCreatedProjectTitle(idea.title || null);
     store.setCreationProgress(0);
     store.setCreationStepStatus({
-      project: 'running', outline: 'pending', characters: 'pending',
+      project: 'running', skeleton: 'pending', outline: 'pending', characters: 'pending',
       world: 'pending', orgs: 'pending', foreshadowing: 'pending', timeline: 'pending', done: 'pending',
     });
 
     // 清理上一次的连接
     sseRef.current?.close();
 
-    let receivedDone = false;
-    let wsSocket: Socket | null = null;
-
     const cleanup = () => {
       sseRef.current?.close();
       sseRef.current = null;
-      if (wsSocket) { wsSocket.disconnect(); wsSocket = null; }
     };
-    sseRef.current = { close: () => { if (wsSocket) { wsSocket.disconnect(); wsSocket = null; } } } as any;
 
     try {
       const currentState = useDiscoveryStore.getState();
-      // 将用户选择的标签按维度分类
-      const userStoryTones = currentState.selectedTones.filter((t: string) => toneTags.includes(t));
-      const userWritingStyles = currentState.selectedTones.filter((t: string) => writingStyles.includes(t));
-      const userGenres = currentState.selectedTones.filter((t: string) => webNovelGenres.includes(t));
-      // AI推荐的标签（优先用AI推荐，用户选择作为补充）
-      const aiStoryTone = idea.storyTone ? (Array.isArray(idea.storyTone) ? idea.storyTone : [idea.storyTone]) : [];
-      const aiWritingStyle = idea.writingStyle ? (Array.isArray(idea.writingStyle) ? idea.writingStyle : [idea.writingStyle]) : [];
-      const aiGenre = idea.webNovelGenre ? (Array.isArray(idea.webNovelGenre) ? idea.webNovelGenre : [idea.webNovelGenre]) : [];
-      const finalStoryTones = [...new Set([...aiStoryTone, ...userStoryTones])];
-      const finalWritingStyles = [...new Set([...aiWritingStyle, ...userWritingStyles])];
-      const finalGenres = [...new Set([...aiGenre, ...userGenres])];
+      // 这里曾让 AI 推荐值优先合并用户所选值，结果项目卡片的基调/文风/流派比发现灵感时多出另一套。
+      // 六维以用户本次配置为准；模型只负责在这些设定内构思，不得替作者增改设定。
       // 第一步：调用异步 API 创建项目
       const res = await api.post<any>('/chain/create-project-async', {
         title: idea.title,
         storyType: currentState.storyType,
-        targetPlatform: currentState.platform,
+        targetPlatform: standardsForIdea(currentState, idea).targetPlatform,
+        customPlatformNote: currentState.customPlatformNote,
         targetWords: parseIdeaTargetWords(idea?.recommendedTargetWords ?? idea?.estimatedWords) ?? (currentState.targetWords.trim() ? Number(currentState.targetWords) : undefined),
         selectedIdea: idea,
-        category: [currentState.selectedCategory, currentState.selectedSubCategory].filter(Boolean).join('/'),
-        storyTone: finalStoryTones,
-        writingStyle: finalWritingStyles,
-        webNovelGenre: finalGenres,
+        category: standardsForIdea(currentState, idea).category,
+        targetAudience: currentState.targetAudience || undefined,
+        // 分类体量取舍依据：执行标准「分类」维自己给出的合规路径，必须随创建一起落库，
+        // 只留在前端等于没有这条路径（后端判据读的是创作宪法上的那一份）。
+        categoryWordScaleDeviation: currentState.categoryWordScaleDeviation.trim() || undefined,
+        storyTone: standardsForIdea(currentState, idea).storyTone,
+        writingStyle: standardsForIdea(currentState, idea).writingStyle,
+        webNovelGenre: standardsForIdea(currentState, idea).webNovelGenre,
+        submissionTags: standardsForIdea(currentState, idea).submissionTags,
+        plotTags: standardsForIdea(currentState, idea).plotTags,
+        genreFitNote: currentState.genreFitNote,
+        pov: standardsForIdea(currentState, idea).pov,
         settings: {
           structurePlanning: 'dynamic_by_story_rhythm',
         },
@@ -906,47 +1169,14 @@ const DiscoveryWizardPage: React.FC = () => {
 
       const projectId: string = data.projectId;
       store.setCreatedProjectId(projectId);
+      void fetchProjects();
       store.setHasActiveCreation(true);
       store.setActiveCreationProjectId(projectId);
-      store.setCreationStepStatus((prev) => ({ ...prev, project: 'done', world: 'running' }));
+      store.setCreationStepStatus((prev) => ({ ...prev, project: 'done', [currentState.storyType === 'long_novel' ? 'skeleton' : 'world']: 'running' }));
 
-      // 第二步：通过 WebSocket 接收实时进度，无硬编码超时
-      // 连接存活 = 进度存活；断开 = 后端出了问题
-      const socketOrigin = getBaseUrl().replace('/api/v1', '');
-      wsSocket = io(`${socketOrigin}/writing`, {
-        transports: ['websocket', 'polling'],
-        reconnection: false,
-        query: { projectId },
-      });
-
-      wsSocket.on('connect', () => {
-        console.log(`[WS] 已连接 project=${projectId}`);
-        wsSocket!.emit('join_project', projectId);
-      });
-
-      wsSocket.on('project_creation_progress', (msg: any) => {
-        receivedDone = applyCreationMessage(projectId, msg, cleanup) || receivedDone;
-      });
-
-      wsSocket.on('disconnect', (reason: string) => {
-        if (!receivedDone) {
-          console.log(`[WS] 连接断开 (reason=${reason})`);
-          store.setCreationErrors([`WebSocket 连接断开（${reason}），请检查后端是否正常运行`]);
-          store.setCreating(false);
-          store.setHasActiveCreation(false);
-          store.setActiveCreationProjectId(null);
-        }
-        cleanup();
-      });
-
-      wsSocket.on('connect_error', (err: Error) => {
-        console.error(`[WS] 连接失败: ${err.message}`);
-        store.setCreationErrors([`WebSocket 连接失败，请检查后端是否正常运行`]);
-        store.setCreating(false);
-        store.setHasActiveCreation(false);
-        store.setActiveCreationProjectId(null);
-        cleanup();
-      });
+      // 创建状态由页面恢复 effect 通过 SSE 单路接收并按服务器事件顺序回放。
+      // 这里曾同时订阅 WebSocket 与 SSE，后果是旧事件重放覆盖新阶段，
+      // 且 WebSocket 的单独断连会把仍在服务端运行的创建流程误判为失败。
     } catch (err: any) {
       store.setCreationErrors([err.message || '创建失败']);
       store.setCreationStepStatus((prev) => {
@@ -961,7 +1191,7 @@ const DiscoveryWizardPage: React.FC = () => {
       store.setActiveCreationProjectId(null);
       cleanup();
     }
-  }, [store, selectProject, navigate, applyCreationMessage]);
+  }, [store, fetchProjects]);
 
   // 重新开始
   const handleReset = () => {
@@ -1020,19 +1250,39 @@ const DiscoveryWizardPage: React.FC = () => {
       {/* 目标平台 */}
       <div style={s.sectionTitle}>目标平台</div>
       <div style={s.platformGrid}>
-        {PLATFORMS.map((p) => (
+        {PLATFORM_OPTIONS.map((p) => (
           <button
             key={p.value}
-            style={getPlatformBtnStyle(platform === p.value, p.color)}
-            onClick={() => store.setPlatform(p.value)}
+            style={getPlatformBtnStyle(targetPlatform === p.value, PLATFORM_COLORS[p.value] || 'var(--color-text-muted)')}
+            onClick={() => { store.setTargetPlatform(p.value); setConfigError(''); }}
           >
             {p.label}
           </button>
         ))}
       </div>
 
+      {targetPlatform === CUSTOM_PLATFORM_VALUE && (
+        <div style={{ marginTop: '10px', marginBottom: '4px' }}>
+          <textarea
+            value={customPlatformNote}
+            onChange={(e) => { store.setCustomPlatformNote(e.target.value); setConfigError(''); }}
+            placeholder="写清这个平台的执行标准：章节字数、节奏、回报方式与读者预期，例如「每章 2000-3000 字，前三章必须给足钩子，按单章订阅回报写」"
+            rows={3}
+            style={{
+              width: '100%', padding: '10px 12px', boxSizing: 'border-box',
+              backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)',
+              fontFamily: 'inherit', outline: 'none', resize: 'vertical',
+            }}
+          />
+          <div style={{ marginTop: '7px', color: customPlatformNote.trim() ? '#8d96ad' : 'var(--color-danger)', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>
+            自定义平台没有内置基准，这段说明就是「平台」这一维的执行标准；留空会被判为未执行标准，创建与生成都会被阻断。
+          </div>
+        </div>
+      )}
+
       {/* 目标总字数：填写时严格执行，留空时采用所选题材的动态规划值 */}
-      <div style={s.sectionTitle}>目标总字数（可选）</div>
+      <div style={s.sectionTitle}>目标总字数</div>
       <div style={{ marginBottom: '28px' }}>
         <input
           value={targetWords}
@@ -1053,95 +1303,146 @@ const DiscoveryWizardPage: React.FC = () => {
             ? '短篇目标总字数为 8,000–35,000 字；章节字数按所选平台规则动态规划。'
             : '长篇目标总字数不少于 100,000 字；章节字数按所选平台规则动态规划。'}
         </div>
+        {scaleNote && (
+          <div style={{ marginTop: '7px', color: scaleBlocked ? 'var(--color-danger)' : '#8d96ad', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>
+            {scaleNote}
+          </div>
+        )}
+        {scaleDeviationVisible && (
+          <div style={{ marginTop: '12px' }}>
+            <div style={{ color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', marginBottom: '6px' }}>
+              分类体量取舍依据（{deviationChars}/10 字，不足 10 字不算说明）
+            </div>
+            <textarea
+              value={categoryWordScaleDeviation}
+              onChange={(e) => { store.setCategoryWordScaleDeviation(e.target.value); setConfigError(''); }}
+              placeholder="写清为什么刻意偏离该分类的体量区间：这个体量服务什么读者预期、靠什么换回曝光或留存"
+              rows={3}
+              style={{
+                width: '100%', padding: '10px 12px', boxSizing: 'border-box',
+                backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)',
+                fontFamily: 'inherit', outline: 'none', resize: 'vertical',
+              }}
+            />
+          </div>
+        )}
         {configError && (
           <div style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>{configError}</div>
         )}
       </div>
 
-      {/* 故事分类（级联选择） */}
-      <div style={s.sectionTitle}>故事分类</div>
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '28px' }}>
+      {/* 故事分类（级联选择）：分类来自所选平台的投稿分类树，不是全局题材字典 */}
+      <div style={s.sectionTitle}>{fieldNames.category}</div>
+      <div style={{ marginBottom: '28px' }}>
+        {!hasVerifiedCategoryOptions ? (
+          <CategoryReferencePicker
+            value={selectedCategory}
+            options={categoryReferenceOptionsForProject(targetPlatform, storyType)}
+            onChange={store.setSelectedCategory}
+          />
+        ) : <>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <select
+            value={selectedCategoryRef}
+            onChange={(e) => { store.setSelectedCategory(e.target.value); }}
+            style={{
+              flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)',
+              border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
+              color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
+            }}
+          >
+            <option value="" style={{ backgroundColor: 'var(--color-bg-primary)' }}>{categoryVerification?.verified === 'confirmed' ? '选择该平台分类...' : '选择题材分类...'}</option>
+            {categories.map((cat) => {
+              const optionId = categoryOptionId(cat);
+              return (
+                <option key={optionId} value={optionId} style={{ backgroundColor: 'var(--color-bg-primary)' }}>
+                  {optionId}
+                </option>
+              );
+            })}
+          </select>
+          {!selectedCategoryIsFlat && (
+            <select
+              value={selectedSubRef}
+              onChange={(e) => store.setSelectedSubCategory(e.target.value)}
+              style={{
+                flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)',
+                border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
+                color: selectedSubCategory ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
+              }}
+              disabled={!selectedCategoryRef}
+            >
+              <option value="" style={{ backgroundColor: 'var(--color-bg-primary)' }}>选择子类...</option>
+              {categories.find((c) => categoryOptionId(c) === selectedCategoryRef)?.children.map((sub) => (
+                <option key={sub} value={sub} style={{ backgroundColor: 'var(--color-bg-primary)' }}>{sub}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        {platformCategoryValue && categoryPlacement.status === 'unmapped' && (
+          <div style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: 'var(--font-size-xs)', lineHeight: 1.5 }}>
+            「{platformCategoryValue}」没有归位到{platformDisplayName(targetPlatform)}的投稿分类：{categoryPlacement.reason}。该平台可用大类：{categoryPlacement.availableGroups.join('、')}。分类是执行前提，系统不会自动改写——请改选该平台投稿分类里的大类/子类。
+          </div>
+        )}
+        </>}
+      </div>
+
+      {/* 目标读者（可选，写入创作宪法 targetAudience） */}
+      {hasVerifiedCategoryOptions && <>
+      <div style={s.sectionTitle}>目标读者（可选）</div>
+      <div style={{ marginBottom: '28px' }}>
         <select
-          value={selectedCategory}
-          onChange={(e) => { store.setSelectedCategory(e.target.value); }}
+          value={targetAudience}
+          onChange={(e) => store.setTargetAudience(e.target.value)}
           style={{
-            flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)',
-            border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
-            color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
-          }}
-        >
-          <option value="" style={{ backgroundColor: 'var(--color-bg-primary)' }}>选择大类...</option>
-          {categories.map((cat) => (
-            <option key={cat.name} value={cat.name} style={{ backgroundColor: 'var(--color-bg-primary)' }}>{cat.name}</option>
-          ))}
-        </select>
-        <select
-          value={selectedSubCategory}
-          onChange={(e) => store.setSelectedSubCategory(e.target.value)}
-          style={{
-            flex: 1, padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)',
-            border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
-            color: selectedSubCategory ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+            width: '100%', padding: '10px 12px', boxSizing: 'border-box',
+            backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '8px', color: targetAudience ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
             fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none',
           }}
-          disabled={!selectedCategory}
         >
-          <option value="" style={{ backgroundColor: 'var(--color-bg-primary)' }}>选择子类...</option>
-          {categories.find((c) => c.name === selectedCategory)?.children.map((sub) => (
-            <option key={sub} value={sub} style={{ backgroundColor: 'var(--color-bg-primary)' }}>{sub}</option>
+          <option value="" style={{ backgroundColor: 'var(--color-bg-primary)' }}>不限定</option>
+          {unionOptions(audienceOptions, targetAudience ? [targetAudience] : []).map((audience) => (
+            <option key={audience} value={audience} style={{ backgroundColor: 'var(--color-bg-primary)' }}>{audience}</option>
           ))}
         </select>
       </div>
+      </>}
 
-      {/* 情绪标签 */}
-      <div style={s.sectionTitle}>故事基调（可多选）</div>
-      <div style={s.toneGrid}>
-        {toneTags.map((tag) => (
-          <button
-            key={tag}
-            style={getToneBtnStyle(selectedTones.includes(tag))}
-            onClick={() => toggleTone(tag)}
-          >
-            {tag}
-          </button>
-        ))}
-      </div>
-
-      {/* 写作风格 */}
-      {writingStyles.length > 0 && (
-        <>
-          <div style={s.sectionTitle}>写作风格（选中后创建项目时应用）</div>
-          <div style={s.toneGrid}>
-            {writingStyles.map((style) => (
-              <button
-                key={style}
-                style={getToneBtnStyle(selectedTones.includes(style))}
-                onClick={() => toggleTone(style)}
-              >
-                {style}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* 网文流派 */}
-      {webNovelGenres.length > 0 && (
-        <>
-          <div style={s.sectionTitle}>网文流派（可多选，题材设定方向）</div>
-          <div style={s.toneGrid}>
-            {webNovelGenres.map((genre) => (
-              <button
-                key={genre}
-                style={getToneBtnStyle(selectedTones.includes(genre))}
-                onClick={() => toggleTone(genre)}
-              >
-                {genre}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      {/* 这里曾把创作设定全删成仅投稿分类/作品标签，导致新书六维空值。候选与书内表单同源。 */}
+      <div style={s.sectionTitle}>情绪氛围（可多选）</div>
+      <MultiSelectDropdown label="情绪氛围" options={unionOptions(toneOptions, selectedTones).map((item) => ({ value: item, label: item }))}
+        value={selectedTones} onToggle={store.toggleTone} placeholder="选择情绪氛围" />
+      <div style={s.sectionTitle}>文风（可多选）</div>
+      <MultiSelectDropdown label="文风" options={unionOptions(styleOptions, selectedWritingStyles).map((item) => ({ value: item, label: item }))}
+        value={selectedWritingStyles} onToggle={store.toggleWritingStyle} placeholder="选择文风" />
+      <div style={s.sectionTitle}>创作流派（可多选）</div>
+      <MultiSelectDropdown label="创作流派"
+        options={unionOptions(creativeGenres, selectedGenres).map((genre) => ({ value: genre, label: genre }))}
+        value={selectedGenres} onToggle={store.toggleGenre}
+        placeholder="选择创作流派" />
+      <div style={s.sectionTitle}>{fieldNames.genre || '投稿标签（如平台后台有此项）'}（可多选）</div>
+      <MultiSelectDropdown label={fieldNames.genre || '投稿标签'}
+        options={unionOptions(submissionOptions, selectedSubmissionTags).map((item) => ({ value: item, label: item }))}
+        value={selectedSubmissionTags} onToggle={store.toggleSubmissionTag} onAdd={store.toggleSubmissionTag}
+        addPlaceholder="填写投稿后台实际标签" placeholder="选择投稿标签" />
+      {categoryPlacement.status === 'resolved'
+        && platformCategoryDimensionBinding(targetPlatform, categoryPlacement.value, 'genre', selectedSubmissionTags.join('、'), storyType).gap
+        && <textarea value={genreFitNote} onChange={(event) => store.setGenreFitNote(event.target.value)}
+          placeholder="标签与分类契合依据：这些标签如何兑现该分类的读者预期" rows={2}
+          style={{ width: '100%', padding: '10px 12px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)', resize: 'vertical' }} />}
+      <div style={s.sectionTitle}>情节取向（可多选）</div>
+      <MultiSelectDropdown label="情节取向"
+        options={unionOptions(plotOptions, selectedPlotTags).map((item) => ({ value: item, label: item }))}
+        value={selectedPlotTags} onToggle={store.togglePlotTag} placeholder="选择情节取向" />
+      <div style={s.sectionTitle}>叙事视角</div>
+      <select value={narrativePov} onChange={(event) => store.setNarrativePov(event.target.value)}
+        style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)' }}>
+        <option value="">选择叙事视角...</option>
+        {unionOptions(povOptions, narrativePov ? [narrativePov] : []).map((item) => <option key={item} value={item}>{item}</option>)}
+      </select>
 
       {/* 开始按钮 */}
       <button
@@ -1172,7 +1473,7 @@ const DiscoveryWizardPage: React.FC = () => {
             <input
               value={customTitle}
               onChange={(e) => setCustomTitle(e.target.value)}
-              placeholder="例如：魂穿北洋，领众破局"
+              placeholder="例如：系统觉醒，从失业到逆袭"
               style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
@@ -1206,7 +1507,7 @@ const DiscoveryWizardPage: React.FC = () => {
             <input
               value={customProtagonist}
               onChange={(e) => setCustomProtagonist(e.target.value)}
-              placeholder="例如：现代历史系研究生，魂穿北洋"
+              placeholder="例如：现代历史系研究生，睁眼回到动荡年代"
               style={{ width: '100%', padding: '8px 10px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
@@ -1355,9 +1656,12 @@ const DiscoveryWizardPage: React.FC = () => {
         </div>
 
         <div style={s.ideasGrid}>
-          {ideas.map((idea, idx) => (
-            <IdeaCard key={`idea-${idx}`} idea={idea} onClick={handleSelectIdea} />
-          ))}
+          {ideas.map((idea, idx) => {
+            const existingProject = findProjectForIdea(projects, idea);
+            return <IdeaCard key={`idea-${idx}`} idea={idea} onClick={handleSelectIdea}
+              existingProject={existingProject ? { id: existingProject.id, status: existingProject.status } : undefined}
+              onOpenProject={(id) => openProject(id, existingProject?.title || idea.title, navigate)} />;
+          })}
         </div>
       </div>
     );
@@ -1380,7 +1684,9 @@ const DiscoveryWizardPage: React.FC = () => {
           </div>
         </div>
 
-        {CREATION_STEPS.map((cs) => {
+        {(storyType === 'long_novel'
+          ? [CREATION_STEPS[0], CREATION_STEPS[1], CREATION_STEPS[2], CREATION_STEPS[4], CREATION_STEPS[3], ...CREATION_STEPS.slice(5)]
+          : [CREATION_STEPS[0], ...CREATION_STEPS.slice(2)]).map((cs) => {
           const status = creationStepStatus[cs.key as keyof typeof creationStepStatus] || 'pending';
           const isRunning = status === 'running';
           const isStepDone = status === 'done';
@@ -1412,7 +1718,7 @@ const DiscoveryWizardPage: React.FC = () => {
                     {cs.label}
                   </span>
                   <span style={{ fontSize: 'var(--font-size-xs)', color: isFailed ? 'var(--color-danger)' : isStepDone ? 'var(--color-success)' : isRunning ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
-                    {isFailed ? '未写入' : isStepDone ? '完成' : isRunning ? '进行中...' : '等待中'}
+                    {isFailed ? '失败' : isStepDone ? '完成' : isRunning ? '进行中...' : '等待中'}
                   </span>
                 </div>
                 <div style={{ height: '3px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>

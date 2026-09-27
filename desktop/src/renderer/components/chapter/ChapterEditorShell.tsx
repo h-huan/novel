@@ -417,12 +417,20 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
   // 去AI味：直接对当前章节内容进行降AI处理，不需要手动复制
   const handleDeAi = useCallback(async () => {
     if (!chapter || busyAction) return;
+    // 降AI改写必须与主生成链共用同一份执行标准（平台/分类/基调/文风/流派/视角）：
+    // 缺 projectId 时服务端直接 400，这里前置暴露，不静默退化成通用词表。
+    if (!projectId) {
+      setQcBanner({ tone: 'error', message: '去AI味失败：缺少 projectId，无法按本项目执行标准改写', at: Date.now() });
+      return;
+    }
     setBusyAction('de-ai');
     setQcBanner(null);
     try {
       const content = contentRef.current;
       const { api } = await import('../../lib/api');
-      const res = await api.post('/refinement/de-ai/polish', { content, intensity: 50 });
+      // 走 LLM 局部改写并带执行标准：/de-ai/polish 是纯正则替换、不接受标准，
+      // 用它改出来的正文可能与项目卡片上的平台/基调/文风不一致。
+      const res = await api.post('/refinement/de-ai/llm-rewrite', { content, projectId, maxRewrites: 3 });
       const data = (res as any)?.data ?? res;
       const polished = data?.content || data?.result || data?.polishedContent;
       if (polished && typeof polished === 'string') {
@@ -432,6 +440,11 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
         lastSyncedFromStoreRef.current = polished;
         const changes = data?.changes || [];
         const changeCount = Array.isArray(changes) ? changes.length : 0;
+        if (polished === content) {
+          // 未检测到 AI 痕迹时后端原样返回：不得报「已完成」，那是把空转当成果。
+          setQcBanner({ tone: 'warning', message: '去AI味：未检测到需要改写的 AI 痕迹，正文未改动。', at: Date.now() });
+          return;
+        }
         setQcBanner({
           tone: 'success',
           message: `去AI味完成，已自动应用到正文${changeCount > 0 ? `（共${changeCount}处修改）` : ''}。记得点保存。`,
@@ -448,7 +461,7 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
     } finally {
       setBusyAction(null);
     }
-  }, [chapter, busyAction]);
+  }, [chapter, busyAction, projectId]);
 
   // 距上次保存的时间文本
   const getLastSavedText = (): string => {

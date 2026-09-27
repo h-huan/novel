@@ -12,6 +12,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { StateEngineService } from './state-engine.service';
 import type { CharacterStateSnapshot, StateChange } from './state-engine.service';
+import { resolveDataDir } from '../config/data-dir';
 
 /** 数据库行类型 */
 interface SnapshotRow {
@@ -82,7 +83,7 @@ export class StatePersistenceService implements OnModuleInit, OnModuleDestroy {
       const path = await import('path');
       const { mkdirSync } = await import('fs');
 
-      const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+      const dataDir = resolveDataDir();
       try { mkdirSync(dataDir, { recursive: true }); } catch { /* ignore */ }
 
       this.db = new DatabaseSync(path.join(dataDir, 'state.db'));

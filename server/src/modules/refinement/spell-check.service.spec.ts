@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SpellCheckService } from './spell-check.service';
+import { resolveDataDir } from '../../config/data-dir';
 
 describe('SpellCheckService', () => {
   let service: SpellCheckService;
@@ -12,7 +13,10 @@ describe('SpellCheckService', () => {
     // 先清空持久化文件，再创建服务
     const fs = require('fs');
     const p = require('path');
-    const dictPath = p.join(process.cwd(), 'data', 'custom-spell-dictionary.json');
+    // ⚠️ 防复发：这里曾写死 process.cwd()/data（仓库内的废弃数据目录），
+    // 于是每次跑测试都往仓库里写词典文件。统一走 resolveDataDir()
+    // （vitest 下由 vitest.setup.ts 指向 os.tmpdir() 的临时目录）。
+    const dictPath = p.join(resolveDataDir(), 'custom-spell-dictionary.json');
     if (fs.existsSync(dictPath)) fs.unlinkSync(dictPath);
     service = new SpellCheckService();
   });

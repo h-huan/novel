@@ -54,9 +54,14 @@ const ToolsPage: React.FC = () => {
 
       {/* 执行按钮 */}
       <button onClick={() => {
-        const endpoints: Record<string, string> = { era: '/chain/era-check', wordplan: '/chain/word-plan', stylevec: '/chain/style-vectorize', similarity: '/chain/content-similarity', schedule: '/chain/schedule-check' };
+        // 【防复发】每个按钮都必须打到真实端点。
+        // 历史上 stylevec / similarity 打的是恒返回编造结果的桩：/chain/style-vectorize 不读入参样本、
+        // /chain/content-similarity 因数据文件不存在而永远返回「低风险」。二者已删除，改指真实实现：
+        //   stylevec   → /material/style-analyze（MaterialService.analyzeStyle 真实统计）
+        //   similarity → /refinement/copyright/check（CopyrightCheckService.checkFull + 真实作品库）
+        const endpoints: Record<string, string> = { era: '/chain/era-check', wordplan: '/chain/word-plan', stylevec: '/material/style-analyze', similarity: '/refinement/copyright/check', schedule: '/chain/schedule-check' };
         if (['era', 'stylevec', 'similarity'].includes(tab) && !content.trim()) { setResult({ error: '请提供真实文本；系统不会使用示例内容代替。' }); return; }
-        const bodies: Record<string, any> = { era: { content }, wordplan: {}, stylevec: { samples: [content] }, similarity: { content }, schedule: {} };
+        const bodies: Record<string, any> = { era: { content }, wordplan: {}, stylevec: { content }, similarity: { content }, schedule: {} };
         callApi(endpoints[tab], bodies[tab]);
       }} disabled={loading}
         style={{ padding: '10px 24px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1, marginBottom: '16px' }}>
@@ -70,12 +75,15 @@ const ToolsPage: React.FC = () => {
             <p style={{ color: 'var(--color-danger)', fontSize: '14px' }}>❌ {result.error}</p>
           ) : tab === 'era' && result.checks ? (
             <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: result.passed ? 'var(--color-success)' : 'var(--color-danger)', marginBottom: '12px' }}>
-                {result.passed ? '✅ 时代一致通过' : '❌ 存在不一致'}
+              <div style={{ fontSize: '14px', fontWeight: 700, color: result.passed ? 'var(--color-success)' : 'var(--color-danger)', marginBottom: '6px' }}>
+                {result.passed ? '✅ 时代一致通过（仅就已核验项）' : '❌ 存在不一致'}
               </div>
+              {result.note && (
+                <div style={{ fontSize: '14px', color: 'var(--color-warning)', marginBottom: '10px' }}>{result.note}</div>
+              )}
               {result.checks.map((c: any, i: number) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span style={{ color: c.passed ? 'var(--color-success)' : 'var(--color-danger)', fontSize: '14px' }}>{c.passed ? '✓' : '✗'}</span>
+                  <span style={{ color: c.verified === false ? 'var(--color-text-muted)' : c.passed ? 'var(--color-success)' : 'var(--color-danger)', fontSize: '14px' }}>{c.verified === false ? '—' : c.passed ? '✓' : '✗'}</span>
                   <span style={{ color: 'var(--color-text-soft)', fontSize: '14px', flex: 1 }}>{c.name}</span>
                   <span style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>{c.detail}</span>
                 </div>
@@ -108,26 +116,37 @@ const ToolsPage: React.FC = () => {
                 ))}
               </div>
             </div>
-          ) : tab === 'stylevec' && result.features ? (
+          ) : tab === 'stylevec' && result.analysis ? (
             <div>
               <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '10px' }}>
-                🎨 风格: {result.styleName} · 维度: {result.vector.dimensions}
+                🎨 风格: {result.analysis.style} · 强度: {result.analysis.intensity} · 向量维度: {(result.analysis.vector || []).length}
               </div>
-              {result.features.map((f: any, i: number) => (
-                <div key={i} style={{ padding: '8px 10px', marginBottom: '6px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--color-text-soft)', fontSize: '14px' }}>{f.name}</span>
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>权重 {f.weight}</span>
-                  </div>
-                  <div style={{ color: 'var(--color-text-dim)', fontSize: '14px', marginTop: '2px' }}>{f.value}</div>
-                </div>
-              ))}
+              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '10px' }}>
+                情感基调: {result.analysis.emotionalTone || '未判断'}
+              </div>
+              <div style={{ padding: '8px 10px', marginBottom: '6px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>
+                <div style={{ color: 'var(--color-text-soft)', fontSize: '14px' }}>关键词</div>
+                <div style={{ color: 'var(--color-text-dim)', fontSize: '14px', marginTop: '2px' }}>{(result.analysis.keywords || []).join('、') || '无'}</div>
+              </div>
+              <div style={{ padding: '8px 10px', marginBottom: '6px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>
+                <div style={{ color: 'var(--color-text-soft)', fontSize: '14px' }}>句式特点</div>
+                <div style={{ color: 'var(--color-text-dim)', fontSize: '14px', marginTop: '2px' }}>{(result.analysis.sentencePatterns || []).join('；') || '无'}</div>
+              </div>
+              <div style={{ fontSize: '14px', color: 'var(--color-text-dim)', marginTop: '8px' }}>{result.message}</div>
             </div>
           ) : tab === 'similarity' ? (
             <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: result.analysis?.overallRisk === 'low' ? 'var(--color-success)' : 'var(--color-warning)', marginBottom: '8px' }}>
-                {result.analysis?.overallRisk === 'low' ? '✅ 低风险' : '⚠️ 需关注'} · {(result.analysis as any)?.summary || '分析完成'}
+              <div style={{ fontSize: '14px', fontWeight: 700, color: result.risk === 'low' ? 'var(--color-success)' : result.risk === 'medium' ? 'var(--color-warning)' : 'var(--color-danger)', marginBottom: '8px' }}>
+                {result.risk === 'low' ? '✅ 低风险' : result.risk === 'medium' ? '⚠️ 中风险' : '🔴 高风险'} · 命中 {(result.matches || []).length} 项
               </div>
+              {(result.matches || []).slice(0, 10).map((m: any, i: number) => (
+                <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '14px', color: 'var(--color-text-soft)' }}>
+                  [{m.type}] {m.matchedItem} · 相似度 {m.similarity} · 来源 {m.source}
+                </div>
+              ))}
+              {(result.suggestions || []).map((sg: any, i: number) => (
+                <div key={i} style={{ fontSize: '14px', color: 'var(--color-warning)', marginTop: '6px' }}>· {sg}</div>
+              ))}
             </div>
           ) : tab === 'schedule' ? (
             <div>

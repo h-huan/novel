@@ -1,5 +1,5 @@
 import { jsonrepair } from 'jsonrepair';
-import { validateContentContract, type ContentContractKind } from '@novel/shared';
+import { validateContentContract, type ContentContractKind } from '../../shared/src';
 
 export class StructuredOutputValidationError extends Error {
   constructor(public readonly issues: string[], public readonly raw: string) {

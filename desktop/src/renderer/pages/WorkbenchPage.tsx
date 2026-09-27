@@ -17,6 +17,7 @@ import { api } from '../lib/api';
 import { openProject } from '../lib/openProject';
 import SearchableSelect, { SearchOption } from '../components/common/SearchableSelect';
 import { RadarChart, Donut, GaugeRing, TrendChart, HBars } from '../components/common/charts';
+import { EXECUTION_STANDARD_DIMENSION_LABELS, EXECUTION_STANDARD_DIMENSIONS } from '@novel/shared';
 
 const formatWords = (n: any) => {
   const v = Number(n) || 0;
@@ -27,7 +28,7 @@ const formatWords = (n: any) => {
 const pct = (v: number | null | undefined) => (v == null || Number.isNaN(v) ? null : Math.round(v * 100));
 const num = (v: any) => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
 const DIM_SHORT: Record<string, string> = { hook: '开篇钩子', pacing: '节奏', dialogue: '对话', ai: 'AI痕迹', logic: '逻辑', detail: '细节', punctuation: '标点', other: '其它' };
-const TAG_SHORT: Record<string, string> = { platform: '平台', tone: '基调', style: '风格', genre: '流派' };
+const TAG_SHORT: Record<string, string> = { ...EXECUTION_STANDARD_DIMENSION_LABELS };
 const PALETTE = ['#60a5fa', '#a855f7', '#2ecc71', '#f39c12', '#e94560', '#3b76c3', '#e67e22'];
 const sevColor = (sev: string) => (sev === 'high' || sev === 'critical') ? 'var(--color-danger)' : sev === 'medium' ? 'var(--color-warning)' : 'var(--color-text-muted)';
 const benchStatusColor = (st: string) => (st === 'ok' ? 'var(--color-success)' : st === 'warn' ? 'var(--color-warning)' : 'var(--color-danger)');
@@ -110,7 +111,8 @@ const WorkbenchPage: React.FC = () => {
   const drilldown: any[] = data?.issueDrilldown || [];
   const issueTypes: any[] = data?.currentIssues || [];
   const consistency = data?.consistency || { total: 0, types: [], severity: [] };
-  const tagFit = data?.tagFit || { available: false, items: [], best: null, worst: null, chapterWorst: [], chapterBest: null };
+  // 兜底对象必须与后端 tagFit 返回结构同形：少字段会让「未评维度」在下游静默消失。
+  const tagFit = data?.tagFit || { available: false, items: [], best: null, worst: null, missingDims: [], dimensionCount: EXECUTION_STANDARD_DIMENSIONS.length, chapterWorst: [], chapterBest: null };
   const wc = data?.wordCompliance || { writtenChapters: 0, ok: 0, short: 0, long: 0, rate: null, avgWords: 0, avgDeficit: 0 };
   const revision = data?.revision || { revisedChapters: 0, totalRevisions: 0, avgPerChapter: 0, heavyChapters: [], distribution: [] };
   const process = data?.process || { calls: 0, firstPassRate: null, avgAttempts: null, failCount: 0, truncatedCount: 0, emptyCount: 0, avgOutputWords: null, avgTargetWords: null, errorKinds: [], steps: [] };
@@ -257,12 +259,15 @@ const WorkbenchPage: React.FC = () => {
             {/* 标签契合雷达 + 最需加强章节 */}
             <div style={card}>
               <h3 style={{ ...h3, marginBottom: 6 }}><span style={colorBar('#a855f7')} />与所选标签的契合度</h3>
-              {!tagFit.available ? <Empty text="AI 生成正文自动质检后，这里展示平台、基调、风格、流派四个契合分（满分100），越饱满越贴合" /> : (
+              {!tagFit.available ? <Empty text="生成正文并完成质检后，这里显示本书已选设定的契合度。" /> : (
                 <>
                   <RadarChart axes={tagRadar} max={100} color="#a855f7" size={280} levels={5} />
                   <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.7, marginTop: 4 }}>
                     {tagFit.best && <div>· 最贴合：<b style={{ color: 'var(--color-success)' }}>{tagFit.best.name}（{tagFit.best.score}）</b></div>}
                     {tagFit.worst && tagFit.worst.dim !== tagFit.best?.dim && <div>· 最需加强：<b style={{ color: 'var(--color-warning)' }}>{tagFit.worst.name}（{tagFit.worst.score}）</b></div>}
+                    {Array.isArray(tagFit.missingDims) && tagFit.missingDims.length > 0 && (
+                      <div>· 未评维度（模型没给分，既未计入分母、也未当通过）：<b style={{ color: 'var(--color-danger)' }}>{tagFit.missingDims.map((m: any) => m.name).join('、')}</b></div>
+                    )}
                   </div>
                   {Array.isArray(tagFit.chapterWorst) && tagFit.chapterWorst.length > 0 && (
                     <div style={{ marginTop: 8, borderTop: '1px solid var(--color-border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>

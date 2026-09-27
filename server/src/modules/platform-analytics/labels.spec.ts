@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { LANGUAGE_HARDLINE_RULE_IDS } from '../../chain/hardline-scanner';
 import {
   scenarioGroupOf, SCENARIO_GROUP_LABEL, platformLabel, storyTypeLabel,
   qualityIssueLabel, checkTypeLabel, severityLabel, scenarioLabel, SCENARIO_GROUP_ORDER,
+  HARDLINE_RULE_LABELS, hardlineRuleLabel,
 } from './labels';
 
 describe('scenarioGroupOf 模型场景四大类归并', () => {
@@ -54,5 +57,25 @@ describe('中文字典', () => {
     expect(platformLabel(undefined)).toBe('未标注');
     expect(qualityIssueLabel('never_seen_key')).toBe('never_seen_key');
     expect(scenarioLabel(null)).toBe('未知步骤');
+  });
+});
+describe('硬红线规则号 → 大白话 覆盖率（防止界面只显示裸规则号）', () => {
+  it('阻断清单内每条规则都有中文标签', () => {
+    const missing = LANGUAGE_HARDLINE_RULE_IDS.filter(id => !HARDLINE_RULE_LABELS[id]);
+    expect(missing).toEqual([]);
+  });
+  it('扫描器实际会产出的每个 ruleId 都有中文标签（含非阻断项）', () => {
+    const src = readFileSync(new URL('../../chain/hardline-scanner.ts', import.meta.url), 'utf8');
+    const emitted = [...src.matchAll(/ruleId:\s*'([^']+)'/g)].map(m => m[1]);
+    const uniq = [...new Set(emitted)].sort();
+    expect(uniq.length).toBeGreaterThan(20);
+    const missing = uniq.filter(id => !HARDLINE_RULE_LABELS[id]);
+    expect(missing).toEqual([]);
+  });
+  it('46/47/48/49 不再回退为「硬红线 46」裸号', () => {
+    ['46', '47', '48', '49'].forEach(id => {
+      expect(HARDLINE_RULE_LABELS[id]).toBeTruthy();
+      expect(hardlineRuleLabel(id)).not.toContain(id);
+    });
   });
 });

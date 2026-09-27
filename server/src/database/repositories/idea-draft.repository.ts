@@ -11,6 +11,7 @@ export interface IdeaDraftRow {
   title: string;
   project_type: string;
   target_platform: string;
+  custom_platform_note: string;
   target_words: number;
   description: string;
   status: string;

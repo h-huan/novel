@@ -13,6 +13,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import LauncherLayout from './components/layout/LauncherLayout';
 import WorkbenchPage from './pages/WorkbenchPage';
 import ProjectListPage from './pages/ProjectListPage';
+import RecoveryProgressPage from './pages/RecoveryProgressPage';
 import DiscoveryWizardPage from './pages/DiscoveryWizardPage';
 import PlatformStandardsPage from './pages/PlatformStandardsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -23,6 +24,7 @@ const LauncherRouter: React.FC = () => {
       <Routes>
         <Route path="/" element={<WorkbenchPage />} />
         <Route path="/projects" element={<ProjectListPage />} />
+        <Route path="/generation-progress/:projectId" element={<RecoveryProgressPage />} />
         <Route path="/discover" element={<DiscoveryWizardPage />} />
         <Route path="/module-standards" element={<PlatformStandardsPage />} />
         <Route path="/settings" element={<SettingsPage />} />

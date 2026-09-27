@@ -34,9 +34,12 @@ interface ConflictMark {
   suggestion: string;
 }
 
+// 这些标签描述的是「执行标准·文风维内的定向强化方向」，不是可自由替换的风格维度：
+// 平台/分类/基调/文风/流派/视角由项目卡片决定，服务端已按该标准注入 prompt，
+// 本面板只选择在文风内往哪一侧用力。
 const STYLE_LABELS: Record<string, string> = {
-  poetic: '诗意', direct: '直白', suspense: '悬念',
-  emotional: '情绪', sensory: '感官增强', metaphorical: '隐喻',
+  poetic: '文风·诗意', direct: '文风·直白', suspense: '文风·悬念',
+  emotional: '文风·情绪', sensory: '文风·感官', metaphorical: '文风·隐喻',
 };
 
 const CONFLICT_COLORS: Record<string, string> = {

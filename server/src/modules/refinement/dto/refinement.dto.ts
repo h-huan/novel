@@ -9,11 +9,27 @@ export class GetTemplatesQueryDto {
   @IsOptional()
   @IsString()
   category?: string;
+
+  /**
+   * 带上 projectId = 按该项目的执行标准标注「哪些模板可用、哪些与标准冲突」。
+   * 不带只返回模板清单，界面不得据此直接执行（适用性未知）。
+   */
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }
 
 export class ApplyTemplateDto {
   @IsString()
   templateId: string;
+
+  /**
+   * 项目 ID — 模板批量改写必须在【项目执行标准】之下执行：
+   * 平台/分类/基调/文风/流派/视角由服务端 resolveProjectStandardDirective 解析，
+   * 缺 projectId 一律 400，不允许退化成与项目无关的通用改写。
+   */
+  @IsString()
+  projectId: string;
 
   @IsString()
   content: string;
@@ -52,10 +68,29 @@ export class DescribePolishDto {
   @IsString()
   sentence: string;
 
+  /**
+   * 项目 ID — 逐句精修必须在【项目执行标准】之下执行：
+   * 平台/分类/基调/文风/流派/视角由服务端 resolveProjectStandardDirective 解析，
+   * 缺 projectId 一律 400，不允许退化成与项目无关的通用风格词表。
+   */
+  @IsString()
+  projectId: string;
+
+  /**
+   * 「文风」维内部的定向强化方向，取值见 STYLE_INTENSITY_AXES（唯一来源）。
+   * 缺省 = standard（严格按执行标准，不额外定向强化）。
+   */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  styles?: ('poetic' | 'direct' | 'metaphorical' | 'sensory' | 'emotional')[];
+  styles?: string[];
+
+  /** 每个方向返回几个变体（1-3），默认 3 */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(3)
+  variants?: number;
 
   @IsOptional()
   @IsObject()
@@ -199,8 +234,10 @@ export class SocialAdaptDto {
 export interface PolishResult {
   original: string;
   rewritten: string;
+  /** 本次定向强化的方向（STYLE_INTENSITY_AXES 的 id / label） */
+  axis: string;
+  axisLabel: string;
   changes: string[];
-  rating: number;
 }
 
 export interface InspectionResult {
@@ -330,11 +367,20 @@ export interface StoryboardFrame {
   imagePrompt: string;
 }
 
-export interface TemplateRule {
-  type: 'replace' | 'add' | 'remove' | 'rewrite';
-  pattern?: string;
-  replacement?: string;
-  description?: string;
+/**
+ * 模板与项目执行标准（平台/分类/基调/文风/流派/视角）的适用性门槛。
+ *
+ * 为什么模板需要这个：模板曾是「21 套正则规则」，其中「古风版/韵律节奏版」这类模板
+ * 会把现代白描正文改成另一种文风——即绕过项目卡片上已确认的执行标准。
+ * 凡是与执行标准冲突的模板，服务端直接拒绝执行（422），而不是照做后让正文不像这本书。
+ */
+export interface TemplateFit {
+  /** 执行标准文本中必须命中其中至少一个关键词；缺省 = 不限制 */
+  requireAny?: string[];
+  /** 执行标准文本中命中任一关键词即拒绝执行 */
+  forbidAny?: string[];
+  /** 拒绝执行时给出的理由（服务端会补上命中的标准文本） */
+  reason: string;
 }
 
 export interface Template {
@@ -343,9 +389,26 @@ export interface Template {
   description: string;
   category: string;
   tags: string[];
-  rules: TemplateRule[];
-  sample?: {
-    before: string;
-    after: string;
-  };
+  /** 定向强化方向：取值见 STYLE_INTENSITY_AXES（唯一来源） */
+  axis: string;
+  /** 模板自身任务指令——必须在项目执行标准之内执行，不得改变六维设定 */
+  task: string;
+  /** 与执行标准冲突时的拒绝门槛；缺省 = 任何标准下都可用（仍受执行标准约束） */
+  fit?: TemplateFit;
+}
+
+/** 模板执行时注入的标准上下文（由 resolveProjectStandardDirective 派生，唯一来源 projectStandardBlock） */
+export interface TemplateStandardContext {
+  projectId: string;
+  /** 可直接放在 prompt 顶部的执行标准块 */
+  standardBlock: string;
+  platformLabel: string;
+  category: string;
+  writingStyle: string;
+  storyTone: string;
+  webNovelGenre: string;
+  pov: string;
+  styleTags: string[];
+  /** 仅用于适用性判断的合并文本 */
+  standardText: string;
 }

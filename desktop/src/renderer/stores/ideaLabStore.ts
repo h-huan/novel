@@ -65,6 +65,7 @@ export interface IdeaDraft {
   title: string;
   projectType: string;
   targetPlatform: string;
+  customPlatformNote: string;
   targetWords: number;
   description: string;
   status: 'draft' | 'questioning' | 'answered' | 'refining' | 'refined' | 'confirmed' | 'converted';
@@ -83,9 +84,26 @@ export interface CreateDraftData {
   rawIdea: string;
   projectType: string;
   targetPlatform: string;
+  customPlatformNote?: string;
   targetWords?: number;
   title?: string;
   description?: string;
+}
+
+/** 想法转项目时随创建请求提交的执行标准（平台/分类/基调/文风/流派/视角/目标读者）。 */
+export interface ConvertToProjectData {
+  title?: string;
+  confirmedIdea?: string;
+  targetPlatform?: string;
+  /** 目标总字数（正文总字数）：「分类」维的平台侧判据输入，必须原样透传，缺省则沿用草稿上的值。 */
+  targetWords?: number;
+  customPlatformNote?: string;
+  category?: string;
+  storyTone?: string[];
+  writingStyle?: string[];
+  webNovelGenre?: string[];
+  pov?: string;
+  targetAudience?: string;
 }
 
 // ========== Store 定义 ==========
@@ -100,7 +118,7 @@ interface IdeaLabState {
   saveAnswers: (id: string, answers: AnswerItem[]) => Promise<void>;
   refineIdea: (id: string) => Promise<void>;
   confirmIdea: (id: string, confirmedIdea?: string) => Promise<void>;
-  convertToProject: (id: string, data?: { title?: string; confirmedIdea?: string }) => Promise<any>;
+  convertToProject: (id: string, data?: ConvertToProjectData) => Promise<any>;
   reset: () => void;
 }
 
@@ -119,6 +137,7 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
         rawIdea: data.rawIdea,
         projectType: data.projectType,
         targetPlatform: data.targetPlatform,
+        customPlatformNote: data.customPlatformNote,
         targetWords: data.targetWords,
         title: data.title || '',
         description: data.description || '',
@@ -257,12 +276,22 @@ export const useIdeaLabStore = create<IdeaLabState>((set, get) => ({
   /**
    * 转换为项目
    */
-  convertToProject: async (id: string, data?: { title?: string; confirmedIdea?: string }) => {
+  convertToProject: async (id: string, data?: ConvertToProjectData) => {
     set({ loading: true, error: null });
     try {
       const res = await api.post<any>(`/idea-lab/drafts/${id}/convert-to-project`, {
         title: data?.title || '',
         confirmedIdea: data?.confirmedIdea || '',
+        // 执行标准必须原样透传：缺项由后端用同一份判据阻断，这里不做默认值、不做静默省略。
+        targetPlatform: data?.targetPlatform,
+        targetWords: data?.targetWords,
+        customPlatformNote: data?.customPlatformNote,
+        category: data?.category,
+        storyTone: data?.storyTone,
+        writingStyle: data?.writingStyle,
+        webNovelGenre: data?.webNovelGenre,
+        pov: data?.pov,
+        targetAudience: data?.targetAudience,
       });
       const result = (res as any).data ?? res;
       set((state) => ({

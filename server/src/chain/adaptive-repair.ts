@@ -10,8 +10,26 @@ export interface ContinuationDecision {
   requiredGain: number;
 }
 
+/** 确定性扫描结论里的 `| 位置: … | 原文: …` 每次都随重写变化，比较前必须剥离。 */
+const VOLATILE_FINDING_SUFFIX = /\s*\|\s*(?:位置|原文)\s*[:：][\s\S]*$/;
+/** `【硬红线·确定性扫描·42】…` / `【质量建议·确定性扫描·26】…` → 规则号才是稳定身份。 */
+const DETERMINISTIC_FINDING = /^【[^】]*?确定性扫描·([^】·]+)】/;
+
+/**
+ * 把一条结论归约成"重写后依然不变"的身份。确定性扫描结论自带段落位置与违规原文，
+ * 而这两者每次重写都会变；不剥离它们，同一条硬伤换个段落就会被判成"全新问题"，
+ * 修复循环因此永远拿不到 repeated_issues 信号、停不下来。
+ */
+export function issueSignature(issue: string): string {
+  const text = String(issue ?? '').trim();
+  if (!text) return '';
+  const scanned = text.match(DETERMINISTIC_FINDING);
+  if (scanned) return `确定性扫描#${scanned[1]}`;
+  return text.replace(VOLATILE_FINDING_SUFFIX, '').trim();
+}
+
 function normalizedIssueSet(issues: readonly string[]): string[] {
-  return [...new Set(issues.map(issue => String(issue).trim()).filter(Boolean))].sort();
+  return [...new Set(issues.map(issueSignature).filter(Boolean))].sort();
 }
 
 /**
@@ -69,6 +87,24 @@ export function decideProgressiveRepair(
     return { repair: false, reason: 'no_measurable_progress' };
   }
   return { repair: true, reason: 'issues_reduced' };
+}
+
+/** A whole-chapter semantic rewrite must improve facts without creating new defects. */
+export function assessSemanticRepairProgress(
+  beforeIssues: readonly string[],
+  afterIssues: readonly string[],
+): { improved: boolean; before: number; after: number; introducedFamilies: string[] } {
+  const before = normalizedIssueSet(beforeIssues);
+  const after = normalizedIssueSet(afterIssues);
+  const knownFamilies = new Set(before.map(repairIssueFamily));
+  const introducedFamilies = [...new Set(after.map(repairIssueFamily)
+    .filter(family => !knownFamilies.has(family)))];
+  return {
+    improved: after.length < before.length && introducedFamilies.length === 0,
+    before: before.length,
+    after: after.length,
+    introducedFamilies,
+  };
 }
 
 /**

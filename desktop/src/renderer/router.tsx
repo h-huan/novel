@@ -5,6 +5,7 @@ import AppLayout from './components/layout/AppLayout';
 // Pages
 import WorkbenchPage from './pages/WorkbenchPage';
 import ProjectListPage from './pages/ProjectListPage';
+import RecoveryProgressPage from './pages/RecoveryProgressPage';
 import WritingPage from './pages/WritingPage';
 import CharacterPage from './pages/CharacterPage';
 import WorldPage from './pages/WorldPage';
@@ -32,6 +33,7 @@ import OrganizationMapPage from './pages/OrganizationMapPage';
 import IdeaLabPage from './pages/IdeaLabPage';
 import WritingQualityPage from './pages/WritingQualityPage';
 import PlatformStandardsPage from './pages/PlatformStandardsPage';
+import ProjectStandardsPage from './pages/ProjectStandardsPage';
 
 const AppRouter: React.FC = () => {
   return (
@@ -39,8 +41,10 @@ const AppRouter: React.FC = () => {
       <Routes>
         <Route path="/" element={<WorkbenchPage />} />
         <Route path="/projects" element={<ProjectListPage />} />
+        <Route path="/generation-progress/:projectId" element={<RecoveryProgressPage />} />
         <Route path="/project/:id" element={<ProjectDetailRedirect />} />
         <Route path="/project/:id/dashboard" element={<ProjectDashboard />} />
+        <Route path="/project/:id/standards" element={<ProjectStandardsPage />} />
         <Route path="/project/:id/writing" element={<WritingPage />} />
         <Route path="/project/:id/characters" element={<CharacterPage />} />
         <Route path="/project/:id/world" element={<WorldPage />} />

@@ -18,13 +18,17 @@
  * 章节字数为系统口径 CHAPTER_WORD_RANGE（短篇与长篇统一，书级 settings.chapterWordRange 优先）。
  */
 
-import { CHAPTER_WORD_RANGE } from '../../shared/src';
+import { CHAPTER_WORD_RANGE, STYLE_PUNCTUATION_RELAX_KEYWORDS, TargetPlatform, platformDisplayName } from '../../shared/src';
 
 // ───────────────────────── 类型：平台枚举与节奏画像 ─────────────────────────
 
-export type PlatformId =
-  | 'zhihu' | 'fanqie' | 'qidian' | 'douyin' | 'qimao'
-  | 'xiaohongshu' | 'jinjiang' | 'rules_horror' | 'generic';
+/**
+ * 平台 id 直接来自 shared TargetPlatform —— 不再在本文件另写一份 union。
+ * 在别处另写一份的结果就是「platform-style.ts 有 7 个、这里有 10 个、看板有 12 个」，
+ * 同一个平台在不同页面显示不同名字、可选与不可选也对不上。平台类型只有一份：
+ * shared/src/enums/platform.ts（PLATFORM_REGISTRY）。
+ */
+export type PlatformId = TargetPlatform;
 
 export type ReaderPayoffKind =
   | 'victory' | 'reversal' | 'reveal' | 'emotional_release' | 'relationship_shift'
@@ -90,6 +94,12 @@ export interface PlatformProfile {
   short: TextMetricTarget;
   long: TextMetricTarget;
   original: string;
+  /**
+   * 该平台的执行标准必须由用户在项目执行标准里提供（自定义平台）。
+   * 为真时，系统不得用中立基准冒充当这个平台的标准：平台维度的执行值必须引用用户填写的
+   * 「自定义平台说明」；说明为空 = 未执行标准，必须显式暴露并阻断，不得静默落回通用网文。
+   */
+  requiresUserDirective?: boolean;
 }
 
 export type ResolvedNovelStrategy = PlatformProfile & {
@@ -121,7 +131,7 @@ const S = (
 
 export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
   fanqie: {
-    id: 'fanqie', label: '番茄小说',
+    id: TargetPlatform.FANQIE, label: platformDisplayName('fanqie'),
     pacing: 'very_high', hookStrength: 'very_high',
     payoffRange: { min: 2, max: 3 }, burstGap: { min: 2, max: 4 }, allowSoftPayoff: false,
     preferredPayoffs: ['victory', 'reversal', 'reveal', 'competence_display', 'expectation_hook'],
@@ -138,7 +148,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     short: S([0.35, 0.65], 45, 90, 0.15, 300, [400, 600], true, true, CHAPTER_WORDS),
     long: S([0.30, 0.55], 55, 110, 0.20, 500, [600, 900], true, true, CHAPTER_WORDS),
     styleMust: [
-      '开篇前300字直接出现本章核心矛盾、危机或反常事件本身（或一段冲突对话），职业身份、履历、家庭环境、日常动作一律后移，由后文动作和对话带出',
+      '开篇前{openingHookChars}字直接出现本章核心矛盾、危机或反常事件本身（或一段冲突对话），职业身份、履历、家庭环境、日常动作一律后移，由后文动作和对话带出',
       '爽点必须写到明面：打脸/反转/身份反差/结果兑现用旁观者反应、对手变脸、结果落定直接呈现；本条优先级高于通用“白描/克制/去戏剧化”基准，禁止用留白把爽点写没',
       '前三章主角不许纯受气，每章至少一次主角的主动、反击、掌控或亮牌',
       '专业设定与术语用下沉读者秒懂的口语带出，不堆未解释名词',
@@ -146,7 +156,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     original: '只借鉴平台节奏与结构，禁止照搬任何在榜作品的人物、设定、桥段与原文；金手指/反差身份必须是原创组合。',
   },
   qimao: {
-    id: 'qimao', label: '七猫小说',
+    id: TargetPlatform.QIMAO, label: platformDisplayName('qimao'),
     pacing: 'very_high', hookStrength: 'very_high',
     payoffRange: { min: 2, max: 3 }, burstGap: { min: 2, max: 4 }, allowSoftPayoff: false,
     preferredPayoffs: ['victory', 'relationship_shift', 'reversal', 'reveal', 'expectation_hook'],
@@ -163,13 +173,13 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     short: S([0.35, 0.60], 45, 90, 0.15, 300, [450, 700], true, true, CHAPTER_WORDS),
     long: S([0.30, 0.55], 55, 110, 0.20, 500, [650, 950], true, true, CHAPTER_WORDS),
     styleMust: [
-      '开篇前300字直接进冲突/反常/危机，背景后移并用动作对话带出',
+      '开篇前{openingHookChars}字直接进冲突/反常/危机，背景后移并用动作对话带出',
       '主角不憋屈，每章至少一次主动掌控或反击；冲突升级靠新信息/新局面，不靠重复打脸',
     ],
     original: '冲突模型可参考类型规律，但人物关系链与事件必须原创，禁止洗稿/换皮在榜文。',
   },
   qidian: {
-    id: 'qidian', label: '起点中文网',
+    id: TargetPlatform.QIDIAN, label: platformDisplayName('qidian'),
     pacing: 'high', hookStrength: 'high',
     payoffRange: { min: 1, max: 3 }, burstGap: { min: 2, max: 5 }, allowSoftPayoff: true,
     preferredPayoffs: ['world_discovery', 'competence_display', 'reveal', 'victory', 'foreshadow_payoff'],
@@ -191,7 +201,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     original: '世界观体系、金手指规则与力量阶梯必须原创自洽，严禁套用知名作品的专有设定与名场面。',
   },
   zhihu: {
-    id: 'zhihu', label: '知乎盐选',
+    id: TargetPlatform.ZHIHU, label: platformDisplayName('zhihu'),
     pacing: 'high', hookStrength: 'very_high',
     payoffRange: { min: 1, max: 3 }, burstGap: { min: 2, max: 4 }, allowSoftPayoff: true,
     preferredPayoffs: ['reveal', 'reversal', 'relationship_shift', 'emotional_release', 'expectation_hook'],
@@ -213,7 +223,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     original: '现实题材也要人物与案件原创，禁止编造“真实经历”影射真人、禁止套用盐选爆款模板换皮。',
   },
   douyin: {
-    id: 'douyin', label: '抖音故事',
+    id: TargetPlatform.DOUYIN, label: platformDisplayName('douyin'),
     pacing: 'very_high', hookStrength: 'very_high',
     payoffRange: { min: 2, max: 4 }, burstGap: { min: 1, max: 3 }, allowSoftPayoff: false,
     preferredPayoffs: ['reversal', 'victory', 'reveal', 'crisis_escalation', 'expectation_hook'],
@@ -230,12 +240,12 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     short: S([0.40, 0.70], 35, 70, 0.10, 200, [300, 500], true, true, CHAPTER_WORDS),
     long: S([0.35, 0.65], 40, 80, 0.12, 300, [450, 700], true, true, CHAPTER_WORDS),
     styleMust: [
-      '前200字尽快建立冲突或反常，情绪外放、适合口播；用新信息、关系变化、压力升级或结果兑现维持高密度，不能按固定字数硬塞反转',
+      '前{openingHookChars}字尽快建立冲突或反常，情绪外放、适合口播；用新信息、关系变化、压力升级或结果兑现维持高密度，不能按固定字数硬塞反转',
     ],
     original: '短剧化节奏可学，故事核与反转链必须原创，禁止搬运短剧/网文剧情。',
   },
   xiaohongshu: {
-    id: 'xiaohongshu', label: '小红书故事',
+    id: TargetPlatform.XIAOHONGSHU, label: platformDisplayName('xiaohongshu'),
     pacing: 'very_high', hookStrength: 'very_high',
     payoffRange: { min: 1, max: 3 }, burstGap: { min: 1, max: 3 }, allowSoftPayoff: true,
     preferredPayoffs: ['emotional_release', 'relationship_shift', 'reversal', 'reveal', 'expectation_hook'],
@@ -257,7 +267,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     original: '情绪母题可共鸣，经历与细节必须原创，禁止伪造素人经历、禁止照搬热帖。',
   },
   jinjiang: {
-    id: 'jinjiang', label: '晋江文学城',
+    id: TargetPlatform.JINJIANG, label: platformDisplayName('jinjiang'),
     pacing: 'high', hookStrength: 'high',
     payoffRange: { min: 1, max: 3 }, burstGap: { min: 2, max: 5 }, allowSoftPayoff: true,
     preferredPayoffs: ['relationship_shift', 'emotional_release', 'reveal', 'foreshadow_payoff', 'expectation_hook'],
@@ -279,7 +289,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     original: '人设与感情线模式可类型化，具体人物、关系与桥段必须原创，严禁融梗/撞梗知名作品。',
   },
   rules_horror: {
-    id: 'rules_horror', label: '规则怪谈',
+    id: TargetPlatform.RULES_HORROR, label: platformDisplayName('rules_horror'),
     pacing: 'very_high', hookStrength: 'very_high',
     payoffRange: { min: 1, max: 3 }, burstGap: { min: 2, max: 4 }, allowSoftPayoff: false,
     preferredPayoffs: ['reveal', 'reversal', 'crisis_escalation', 'foreshadow_payoff', 'expectation_hook'],
@@ -301,7 +311,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     original: '规则条目与怪谈体系必须原创自洽，禁止套用知名规则怪谈（如动物园/公寓系列）的规则与设定。',
   },
   generic: {
-    id: 'generic', label: '通用网文',
+    id: TargetPlatform.GENERIC, label: platformDisplayName('generic'),
     pacing: 'high', hookStrength: 'high',
     payoffRange: { min: 1, max: 3 }, burstGap: { min: 2, max: 5 }, allowSoftPayoff: true,
     preferredPayoffs: ['reveal', 'victory', 'relationship_shift', 'crisis_escalation', 'expectation_hook'],
@@ -317,6 +327,30 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     short: S([0.25, 0.55], 60, 120, 0.28, 400, [600, 1000], true, false, CHAPTER_WORDS),
     long: S([0.25, 0.55], 68, 140, 0.32, 600, [800, 1300], true, false, CHAPTER_WORDS),
     original: '结构可类型化，人物、设定、情节与文字必须原创。',
+  },
+  // 自定义平台：用户在项目执行标准里自己声明的平台（shared 的 TargetPlatform.CUSTOM）。
+  // 系统不掌握它的节奏/回报/读者基准，所以这里【不编造】平台文案：styleMust 留空、
+  // guide 明确写"以用户自定义说明为准"，并由 requiresUserDirective 标记必须由用户提供标准。
+  // 下面的量化区间只是中性兜底，且执行标准里会显式声明"自定义平台无既定基准"，
+  // 不允许把它当成该平台的真实基准静默使用。
+  custom: {
+    id: TargetPlatform.CUSTOM, label: platformDisplayName('custom'),
+    requiresUserDirective: true,
+    pacing: 'high', hookStrength: 'high',
+    payoffRange: { min: 1, max: 3 }, burstGap: { min: 2, max: 5 }, allowSoftPayoff: true,
+    preferredPayoffs: ['reveal', 'victory', 'relationship_shift', 'crisis_escalation', 'expectation_hook'],
+    titleStrategies: ['身份反差', '目标冲突', '秘密悬念', '世界观奇点', '迫近代价', '结果前置', '关系爆点'],
+    guide: '本平台由用户自定义：节奏、回报形式、段落与对话区间一律以项目执行标准里用户填写的「自定义平台说明」为准；系统不掌握该平台的既定基准，禁止套用其他平台的既有节奏结论。',
+    audience: {
+      core: '由用户在「自定义平台说明」中指定，系统不预设；未指定时该维度属未执行标准，必须阻断',
+      age: '由用户说明指定', gender: '由用户说明指定',
+      scene: '由用户说明指定',
+      patience: '由用户说明指定',
+    },
+    distribution: { first3FinishRate: null, note: '自定义平台没有既定分发逻辑，须由用户在「自定义平台说明」中给出' },
+    short: S([0.25, 0.55], 60, 120, 0.28, 400, [600, 1000], true, false, CHAPTER_WORDS),
+    long: S([0.25, 0.55], 68, 140, 0.32, 600, [800, 1300], true, false, CHAPTER_WORDS),
+    original: '自定义平台同样只借鉴节奏与结构，人物、设定、情节与文字必须原创。',
   },
 };
 
@@ -335,6 +369,9 @@ export function normalizePlatformId(value?: string | null): PlatformId {
   if (raw.includes('小红书')) return 'xiaohongshu';
   if (raw.includes('晋江')) return 'jinjiang';
   if (raw.includes('规则') || raw.includes('怪谈')) return 'rules_horror';
+  // 自定义平台必须解析为 'custom'，绝不能落进下面的 generic 兜底：
+  // 那会让用户选了「自定义」却按通用网文基准生成，且没有任何提示（静默降级）。
+  if (raw.includes('自定义')) return 'custom';
   return 'generic';
 }
 
@@ -343,6 +380,30 @@ export function getPlatform(platform?: string | null): PlatformProfile {
 }
 /** 旧名兼容：部分调用处使用 getPlatformBenchmark */
 export const getPlatformBenchmark = getPlatform;
+
+/**
+ * 高对话强推进平台的唯一事实源（免费短章档）：对话占比红线下限 15%、期望值 30%。
+ *
+ * 为什么必须收在这里：hardline-scanner 此前在文件内硬编码过三份同名平台集合
+ * （短段平台两份、高对话平台一份），并留下注释「此集合须与 platform-benchmarks 平台表保持同步」。
+ * 「须人工保持同步」就是漏改的来源——新增或调整一个平台时只改了平台表，硬红线仍按旧集合判定，
+ * 同一个「对话占比」问题就会在新的平台组合上反复出现。集合定义与平台表同处一文件，改表即改集合。
+ *
+ * rules_horror 虽为 pacing=very_high，但按第一人称内心流走 5% 低档，不属于高对话强推进平台，
+ * 因此不能用 pacing 推导，必须显式列出。
+ */
+const HIGH_DIALOGUE_PLATFORM_IDS = ['fanqie', 'qimao', 'douyin', 'xiaohongshu'] as const satisfies readonly PlatformId[];
+export const HIGH_DIALOGUE_PLATFORMS: ReadonlySet<string> = new Set<string>(HIGH_DIALOGUE_PLATFORM_IDS);
+
+/**
+ * 「白描/朴素」类文风的节奏放宽判定 —— 关键词表来自执行标准唯一事实源
+ * （shared STYLE_PUNCTUATION_RELAX_KEYWORDS），本文件不再内联第二份字面量。
+ *
+ * 历史教训：这个词表曾在 hardline-scanner 与本文件各存一份（`(白描|朴素|现实|日常|群像叙事)`），
+ * 改一处必漏另一处 → 同一文风在硬红线里放宽了、在节奏画像里没放宽（或反过来），
+ * 用户选了「白描/朴素」却拿到两套互相矛盾的口径。放宽的是阈值，不是「查不查」。
+ */
+const STYLE_PUNCTUATION_RELAX_STYLE_PATTERN = new RegExp(STYLE_PUNCTUATION_RELAX_KEYWORDS.join('|'));
 
 /** 按平台 + 题材标签微调节奏/回报，返回带 tags 的解析结果（硬红线扫描与节奏规划共用） */
 export function resolveNovelStrategy(input: StoryStrategyInput): ResolvedNovelStrategy {
@@ -362,6 +423,11 @@ export function resolveNovelStrategy(input: StoryStrategyInput): ResolvedNovelSt
   let allowSoftPayoff = base.allowSoftPayoff;
   const preferred = [...base.preferredPayoffs];
 
+  // 节奏信号词袋（确定性微调）：故意【宽于】基调/文风字典 —— 除字典标签外还收金手指与流派常用词
+  // （无敌流/系统流/战神/升级、推理/怪谈/侦探、先婚后爱等），因为这些词同样真实改变读者预期。
+  // 因此这不是基调字典的第二份副本，也不得被"合并"成 STORY_TONE_SEED_LABELS：
+  // 那会删掉字典里没有但确实有信号作用的词，等于降低节奏判定的分辨力。
+  // 唯一例外是「文风宽松关键词」—— 那张表必须与 hardline-scanner 完全同源，故已改为从 shared 派生。
   if (/(爽文|无敌流|系统流|逆袭|热血|战神|升级)/.test(text)) {
     minPayoff += 1; maxPayoff += 1; maxGap -= 1; allowSoftPayoff = false;
   }
@@ -373,7 +439,7 @@ export function resolveNovelStrategy(input: StoryStrategyInput): ResolvedNovelSt
     preferred.unshift('relationship_shift', 'emotional_release');
     allowSoftPayoff = true;
   }
-  if (/(白描|朴素|现实|日常|群像叙事)/.test(text)) {
+  if (STYLE_PUNCTUATION_RELAX_STYLE_PATTERN.test(text)) {
     maxGap += 1; minPayoff = Math.max(1, minPayoff - 1); allowSoftPayoff = true;
   }
 
@@ -530,8 +596,14 @@ export function buildBenchmarkDirective(platform?: string | null, length?: strin
       `短篇 ${b.short.payoffGapChars[0]}–${b.short.payoffGapChars[1]} 字、长篇 ${b.long.payoffGapChars[0]}–${b.long.payoffGapChars[1]} 字仅作为常见推进密度参考，按场景职责动态调整；非终章章尾提供继续阅读理由，终章负责收束；` +
       `章节字数：短篇 ${b.short.chapterWords[0]}–${b.short.chapterWords[1]}、长篇 ${b.long.chapterWords[0]}–${b.long.chapterWords[1]}。`;
   }
+  // styleMust 的开篇钩子窗口写成占位符 {openingHookChars}，运行期由平台表本篇幅值插值（唯一源，
+  // 禁止在散文里复述数字）：此前番茄/七猫写死 300、抖音写死 200，而平台表长篇分别是 500/500/300，
+  // 同一章会同时收到"开篇前300字"与"开篇约 500 字内"两套数字。
+  const hookWindowText = length === 'long_novel' || length === 'short_story'
+    ? String(targetForLength(b, length).openingHookChars)
+    : `短篇 ${b.short.openingHookChars} / 长篇 ${b.long.openingHookChars}`;
   const styleMustLine = b.styleMust && b.styleMust.length
-    ? `本平台风格红线（优先级高于通用“白描/克制/去戏剧化”基准）：${b.styleMust.map((x, i) => `${i + 1}) ${x}`).join('；')}`
+    ? `本平台风格红线（优先级高于通用“白描/克制/去戏剧化”基准）：${b.styleMust.map((x, i) => `${i + 1}) ${x.replace(/\{openingHookChars\}/g, hookWindowText)}`).join('；')}`
     : '';
   return [headLine, body, `分发逻辑：${b.distribution.note}。`, `平台节奏：${b.guide}`, styleMustLine, `原创红线：${b.original}`, '行文底线：短段是为手机阅读服务，但严禁“X了，Y了”式两字残句链（如“退了账，走了”“两下，灭了”），连贯动作要连成完整句子、补足成分；句末语气词克制；同一环境意象（车/灯/夜色/烟/雨等）不做近距离重复铺陈，过渡描写只承担转场；严禁相同动词/前缀的同构排比（“带了A、带了B、带了C、带了D”“想到了A，想到了B，想到了C”——只保留最有力的一项，其余写成有差异、有结果的具体句）；量词必须与名词正确搭配（“束”只用于花/光/发丝等成束细长物，蛋糕用“个”、文件用“份”、戒指用“枚”，不许把甲物量词套给乙物）。'].filter(Boolean).join('\n');
 }
@@ -599,7 +671,7 @@ export function buildBenchmarkRefinePrompt(input: {
     a.chapterTitle ? `本章：${a.chapterTitle}` : '',
     a.person ? `叙事人称/视角：${a.person}（不得切换）` : '',
     nameList.length ? `人物白名单（正文只能出现这些人物姓名，严禁新增主角、严禁改名换人）：${nameList.join('、')}` : '',
-    a.tagText ? `平台/基调/风格/流派标签：${a.tagText}` : '',
+    a.tagText ? `平台/分类/基调/文风/流派/视角标签（创建时确认的执行标准，精修不得改写）：${a.tagText}` : '',
   ].filter(Boolean).join('\n');
   const contractBlock = input.outlineContract
     ? `【本章大纲契约（必须兑现、不可偏离）】\n${input.outlineContract.slice(0, 1800)}`

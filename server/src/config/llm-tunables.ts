@@ -19,13 +19,6 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-function envFloat(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw == null || raw === '') return fallback;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
 /** 把 env 值转换成传给 realLLM.generate 的 timeout（0 → undefined，回退到服务兜底值）。 */
 function toTimeout(ms: number): number | undefined {
   return ms > 0 ? ms : undefined;
@@ -50,20 +43,28 @@ export const LLM_TUNABLES = {
   QUALITY_REVIEW_MAXTOKENS: envInt('LLM_QUALITY_REVIEW_MAXTOKENS', 32768),
   QUALITY_REPAIR_MAXTOKENS: envInt('LLM_QUALITY_REPAIR_MAXTOKENS', 32768),
 
-  // ============ outline 写入 maxTokens 边界 ============
-  // deepseek-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算返回空内容。
-  // 实测复杂任务 reasoning 可达 7500+，故上限给足预算（这修复了"空返回"根因）。
-  OUTLINE_WRITE_MIN: envInt('LLM_OW_MAXTOKENS_MIN', 24576),
-  OUTLINE_WRITE_MAX: envInt('LLM_OW_MAXTOKENS_MAX', 32768),
-  OUTLINE_WRITE_PER_CHAPTER: envInt('LLM_OW_MAXTOKENS_PER_CHAPTER', 1200),
+  // ============ outline 写入 maxTokens ============
+  // ⚠️ 防复发（勿再引入）：这里曾有一组 OUTLINE_WRITE_MIN / OUTLINE_WRITE_MAX /
+  // OUTLINE_WRITE_PER_CHAPTER 的 env 开关，全库【零消费者】——真正生效的是
+  // routing/route-config.json 的 scenarios.outline.maxTokens（经
+  // RealLLMService.getConfiguredMaxTokens -> resolveScenarioRoute 解析）。
+  // 后果：运维改 LLM_OW_MAXTOKENS_MIN 以为能调大纲预算，实际一个字节都不生效，
+  // 而大纲仍在被截断、白烧扩容轮。已删除；大纲预算的唯一调法 = 改 route-config.json。
 
-  // ============ 正文生成 maxTokens 公式参数 ============
-  // deepseek-flash 推理模型：max_tokens 必须容纳"思考(reasoning)+输出"，否则思考吃光预算
-  // 返回空内容或把正文截断在 3200 字以下。实测复杂任务 reasoning 可达 7500+，故 EXTRA 预留
-  // 足够推理预算（与 OUTLINE_WRITE 同策略）；封顶 32768 已覆盖"推理+单章正文（CHAPTER_WORD_RANGE 区间）"。
-  BODY_MAXTOKENS_CAP: envInt('LLM_BODY_MAXTOKENS_CAP', 32768),
-  BODY_MAXTOKENS_PER_TARGET: envFloat('LLM_BODY_MAXTOKENS_PER_TARGET', 1.6),
-  BODY_MAXTOKENS_EXTRA: envInt('LLM_BODY_MAXTOKENS_EXTRA', 10000),
+  // ============ 正文生成 maxTokens ============
+  // deepseek-flash 是推理模型：max_tokens 必须同时容纳「思考(reasoning) + 正文输出」，否则思考
+  // 吃光预算就会返回空内容、或在 3200 字以下截断。实测 reasoning 可达 7500+ token，且章节越长
+  // 越大，所以不做「按目标字数线性外推」——那样算出来的值永远低于真实需要。
+  //
+  // ⚠️ 防复发（勿再引入）：这里曾有一组组合式预算参数 BODY_MAXTOKENS_CAP / BODY_MAXTOKENS_MIN /
+  // BODY_MAXTOKENS_PER_TARGET / BODY_MAXTOKENS_EXTRA，取值 min(CAP, max(MIN, target*1.6+EXTRA))。
+  // 本平台单章目标区间 CHAPTER_WORD_RANGE 按该式算出来只有 14800-18000，恒被 MIN=24576 抬起，
+  // 只有 target>9100 才用得上 CAP —— 四个参数里有两个永远不会生效，注释却写着「首版直接给足」，
+  // 与真实行为相反。后果：运维改 LLM_BODY_MAXTOKENS_CAP / _PER_TARGET / _EXTRA 以为能调正文预算，
+  // 实际一个字节都不生效，真正决定预算的只有 _MIN；而「截断→同模型扩容」那一轮白烧始终存在
+  // （实测 125s/轮）。现收敛为单值，与 route-config.json 的 outline.maxTokens 同策略：
+  // 首版即给到硬顶，从源头消除这一轮。预算的唯一调法 = LLM_BODY_MAXTOKENS 环境变量。
+  BODY_MAXTOKENS: envInt('LLM_BODY_MAXTOKENS', 32768),
 
   // ============ 进度心跳 / 重试节奏 ============
   PROGRESS_HEARTBEAT_MS: envInt('LLM_PROGRESS_HEARTBEAT_MS', 15000), // 长篇综合生成心跳

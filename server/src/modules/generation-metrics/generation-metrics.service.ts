@@ -2,7 +2,10 @@ import { defaultRepairStrategy, repairStrategies } from '../writing-quality/repa
 import { aggregateArtifactScores, aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
 import { qualityGate, qualityIssue } from '../writing-quality/quality-issue';
 import { readConstitution } from '../project/creative-constitution';
+import { loadCharacterNames } from '../character/character-names';
 import { qualityStage } from '../../routing/scenario-taxonomy';
+import { expectsProjectId } from '../../common/creation-context';
+import { CHAPTER_RESPONSIBILITY_CRITERION_ID_PATTERN } from '../../../shared/src';
 /**
  * GenerationMetricsService — 全链路生成步骤遥测与"首版一次到位"自优化
  *
@@ -21,7 +24,7 @@ import { standardDirectiveCache } from '../module-standards/standard-directive.c
 import { DatabaseService } from '../../database/database.service';
 import * as crypto from 'crypto';
 import { compileContext } from './context-compiler';
-import { repairStrategyUtility } from './repair-learning';
+import { isRepairStrategyEligible, repairStrategyUtility } from './repair-learning';
 
 export const CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES = [
   'constraint_matrix',
@@ -32,22 +35,39 @@ export type ChapterResponsibilityRepairStrategy = typeof CHAPTER_RESPONSIBILITY_
 
 export function chapterResponsibilityIssueSignature(issues: string[]): string {
   const categories = new Set<string>();
+  // 判据编号优先：审查条目按 shared 的 CR-1…CR-7 判据产出，用判据编号分类才与平台/题材无关。
+  // 旧关键词表里夹带着某一部旧书的题材词（门禁/影子/替身/亲属关系/失踪登记），
+  // 换一本书就把冲突归错类，策略学习信号随即失效——这正是「换题材后又开始反复修复」的一部分原因。
+  const criterionBuckets: Record<string, string> = {
+    '1': 'capability_scope',
+    '2': 'trigger_timing',
+    '3': 'chapter_boundary',
+    '4': 'repetition',
+    '5': 'motivation_transition',
+    '6': 'authority_procedure',
+    '7': 'authorization_timing',
+  };
+  const criterionPattern = new RegExp(CHAPTER_RESPONSIBILITY_CRITERION_ID_PATTERN.source, "g");
   for (const raw of issues) {
-    const issue = String(raw || '');
-    if (/触发条件|何时触发|超过|尚未|提前|时点|第\s*\d+\s*日/.test(issue)) categories.add('trigger_timing');
-    if (/吃下|前提|未安排|不能执行|须经|条件未满足/.test(issue)) categories.add('missing_prerequisite');
-    if (/份|人数|人证|分配|名额|不在.{0,8}人/.test(issue)) categories.add('allocation');
-    if (/重复|重演|再次执行/.test(issue)) categories.add('repetition');
-    if (/跨章|后续章|下一章|提前完成/.test(issue)) categories.add('chapter_boundary');
-    if (/预知|信息来源|后来才|尚未知/.test(issue)) categories.add('information_timing');
-    if (/继承|所有权|权限移交|生效文书|亲属关系|失踪登记|法律程序/.test(issue)) categories.add('authority_procedure');
-    if (/立场|倒向|相助|关键材料|转变触发|动机/.test(issue)) categories.add('motivation_transition');
-    if (/旧授权|高权限|远程授权|自动响应|持续机制/.test(issue)) categories.add('authorization_timing');
-    if (/超自然|现实物证|门禁|档案|监控|手机|设备|改写|作用范围/.test(issue)) categories.add('reality_boundary');
-    if (/影子|替身|痕迹|模仿|诱导|交涉|能力|未赋予|未授权/.test(issue)) categories.add('capability_scope');
+    const issue = String(raw || "");
+    for (const match of issue.matchAll(criterionPattern)) {
+      const bucket = criterionBuckets[match[1]];
+      if (bucket) categories.add(bucket);
+    }
+    if (/触发条件|何时触发|超过|尚未|提前|时点|第\s*\d+\s*日/.test(issue)) categories.add("trigger_timing");
+    if (/前提|未安排|不能执行|须经|条件未满足/.test(issue)) categories.add("missing_prerequisite");
+    if (/份|人数|人证|分配|名额|不在.{0,8}人/.test(issue)) categories.add("allocation");
+    if (/重复|重演|再次执行/.test(issue)) categories.add("repetition");
+    if (/跨章|后续章|下一章|提前完成|提前兑现/.test(issue)) categories.add("chapter_boundary");
+    if (/预知|信息来源|后来才|尚未知/.test(issue)) categories.add("information_timing");
+    if (/权限移交|生效文书|生效条件|权利生效|法定继承|程序未走完/.test(issue)) categories.add("authority_procedure");
+    if (/立场|倒向|相助|关键材料|转变触发|动机/.test(issue)) categories.add("motivation_transition");
+    if (/旧授权|高权限|远程授权|自动响应|持续机制/.test(issue)) categories.add("authorization_timing");
+    if (/超自然|改写|现实记录|现实设备|作用范围/.test(issue)) categories.add("reality_boundary");
+    if (/痕迹|模仿|诱导|交涉|未赋予|未授权|能力范围/.test(issue)) categories.add("capability_scope");
   }
-  if (categories.size === 0) categories.add('semantic_consistency');
-  return `chapter_responsibility.${[...categories].sort().join('+')}`;
+  if (categories.size === 0) categories.add("semantic_consistency");
+  return `chapter_responsibility.${[...categories].sort().join("+")}`;
 }
 
 /** 一次 LLM 调用的遥测输入 */
@@ -127,6 +147,9 @@ const STEP_LABELS: Record<string, string> = {
   enhance_opening: '开篇强化',
   enhance_reversal: '反转强化',
   quality_refine: '质检精修',
+  'long-novel-init-foundation': '长篇·世界观地基',
+  'long-novel-flexible-outline': '长篇·弹性大纲',
+  'inspiration-seed-enrich': '灵感种子补全',
 };
 
 const BOTTLENECK_MIN_CALLS = 2;
@@ -160,6 +183,12 @@ export class GenerationMetricsService implements OnModuleInit {
 
   beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true) {
     const db = this.databaseService.getDb();
+    // 项目内场景缺 projectId 一律阻断：以前这里静默取 constitution=null、runId 不注入 systemPrompt、
+    // 记录退化成平台级，等于「没有执行标准的链路」照常跑完却看着正常（review/summary 判定失标的真因）。
+    // 不降级为 warn、不填默认值：宁可让这一次调用明确失败，也不产生归属不明的生成记录。
+    if (!projectId && expectsProjectId(scenario, stepKey)) {
+      throw new Error(`项目内场景 ${scenario || stepKey || 'daily'} 缺少 projectId：无法归属项目、无法注入创作宪法与执行标准，已阻断（不降级为平台级记录）`);
+    }
     const row = projectId ? db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any : null;
     if (projectId && !row) throw new Error('生成项目不存在');
     const constitution = row ? readConstitution(row) : null;
@@ -172,12 +201,15 @@ export class GenerationMetricsService implements OnModuleInit {
       constitution ? JSON.stringify(constitution) : null, digest(systemPrompt || ''), digest(prompt), new Date().toISOString());
     const compiled = row ? compileContext(db, { projectId: projectId!, stage, chapterIndex }) : null;
     const context = compiled?.snapshot || '';
-    const standards = standardDirectiveCache.snapshot(scenario, injectStandard);
+    const standards = standardDirectiveCache.snapshot(scenario, injectStandard, stepKey);
     db.prepare('UPDATE generation_runs SET standards_snapshot=? WHERE id=?').run(JSON.stringify(standards), id);
     db.prepare('UPDATE generation_runs SET context_snapshot=?,context_version=?,prompt_version=?,chapter_index=? WHERE id=?')
       .run(context, compiled?.version || digest(''), digest((systemPrompt || '') + JSON.stringify(constitution) + standards.digest), chapterIndex ?? null, id);
     const previousChapters = row ? db.prepare("SELECT id,content FROM chapters WHERE project_id=? AND content IS NOT NULL AND (? IS NULL OR chapter_index < ?) ORDER BY chapter_index DESC LIMIT 12").all(projectId!, chapterIndex ?? null, chapterIndex ?? null) as Array<{ id: string; content: string }> : [];
-    const characterNames = row ? (db.prepare('SELECT name FROM characters WHERE project_id=?').all(projectId!) as Array<{ name: string }>).map(c => c.name) : [];
+    // 【防复发】此处曾是第二份内联的取人物名 SQL（裸 SELECT name，不排序、不去重），
+    // 与 chain.controller.getProjectCharacterNames 的排序去重口径不一致：同一个项目在两处拿到
+    // 顺序/内容都不同的人名表，身份守护与硬红线规则 32 的判定因此漂移。现统一取唯一实现。
+    const characterNames = row ? loadCharacterNames(db, projectId!) : [];
     const lessons = row ? (db.prepare("SELECT lesson FROM generation_lessons WHERE project_id=? AND category='verified_quality_repair' ORDER BY occurrence DESC,updated_at DESC LIMIT 8").all(projectId!) as Array<{ lesson: string }>).map(r => r.lesson) : [];
     return { id, constitution, stage, context, projectId, previousChapters, characterNames, lessons };
   }
@@ -282,7 +314,11 @@ export class GenerationMetricsService implements OnModuleInit {
     const c = readConstitution(db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any);
     const rows = db.prepare("SELECT strategy_id,SUM(attempts) attempts,SUM(accepted) accepted,SUM(rollbacks) rollbacks,SUM(introduced_issue_count) damage,SUM(tokens_sum) tokens,SUM(latency_ms_sum) latencyMs FROM repair_strategy_stats WHERE rule_id=? AND platform=? AND genre=? AND story_type=? AND model=? AND prompt_version=? GROUP BY strategy_id HAVING SUM(attempts)>=5")
       .all(rules[0],c.targetPlatform,c.webNovelGenre.join('|') || c.category || 'generic',c.projectType,run.model,run.prompt_version) as any[];
-    const eligible = rows.filter(r => r.strategy_id in repairStrategies);
+    // 只保留"已被这条轴验证过"的策略：样本足够、接受率达标、且无等量级回滚/损伤。
+    // 实测 unique_local_replacement / platform_metric_patch 在多个规则轴上 0% 接受率，
+    // 却因为候选池里只剩它们而持续被选中，累计白烧数千秒与数百万 token。
+    // 全部候选都不合格时返回确定性默认策略，而不是继续挑一个已知无效的策略。
+    const eligible = rows.filter(r => r.strategy_id in repairStrategies && isRepairStrategyEligible(r));
     eligible.sort((a,b) => repairStrategyUtility(b) - repairStrategyUtility(a) || a.strategy_id.localeCompare(b.strategy_id));
     return eligible[0]?.strategy_id || fallback;
   }
@@ -554,7 +590,7 @@ export class GenerationMetricsService implements OnModuleInit {
       params.push(...Array(6).fill('%' + query.q.trim() + '%'));
     }
     const cte = `WITH ranked AS (SELECT q.*, p.title project_title,p.type project_type,p.target_platform platform,
-      p.settings project_settings,p.writing_style,p.target_words,p.platform_style,
+      p.settings project_settings,p.writing_style,p.target_words,
       c.title chapter_title,COALESCE(c.chapter_index,g.chapter_index) chapter_index,
       COALESCE(g.stage,'chapter') stage,g.constitution_json,
       ROW_NUMBER() OVER(PARTITION BY q.project_id,COALESCE(g.stage,'chapter'),COALESCE(q.chapter_id,CAST(g.chapter_index AS TEXT),'')
@@ -570,7 +606,7 @@ export class GenerationMetricsService implements OnModuleInit {
     return { total, page, limit, items: rows.map(r => {
       const score = parse(r.payload).stageScore ?? null;
       const current = !r.constitution_json || r.constitution_json === JSON.stringify(readConstitution({
-        type: r.project_type, target_platform: r.platform, platform_style: r.platform_style,
+        type: r.project_type, target_platform: r.platform,
         settings: r.project_settings, writing_style: r.writing_style, target_words: r.target_words,
       }));
       return { id: r.id, projectId: r.project_id, projectTitle: r.project_title, chapterId: r.chapter_id,

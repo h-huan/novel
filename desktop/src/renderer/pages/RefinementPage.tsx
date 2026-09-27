@@ -9,27 +9,28 @@ import { api } from '../lib/api';
 
 interface ToolTab {
   id: string; label: string; icon: string;
-  endpoints: { label: string; method: 'get' | 'post'; path: string; body?: any }[];
+  // projectScoped：该端点必须携带 projectId 才能按项目执行标准执行（服务端会据此解析平台/分类/基调/文风/流派/视角）
+  endpoints: { label: string; method: 'get' | 'post'; path: string; body?: any; projectScoped?: boolean }[];
   desc: string;
 }
 
 const TOOLS: ToolTab[] = [
   { id: 'templates', label: '精修模板', icon: '✨',
     endpoints: [
-      { label: '获取模板列表', method: 'get', path: '/refinement/templates' },
+      { label: '获取模板列表(按执行标准标注)', method: 'get', path: '/refinement/templates', projectScoped: true },
       { label: '获取分类', method: 'get', path: '/refinement/templates/categories' },
-      { label: '应用模板', method: 'post', path: '/refinement/templates/apply', body: { templateId: '', chapterId: '', content: '' } },
-    ], desc: '22套精修模板：节奏优化、爽点提升、悬念营造、对话优化等' },
+      { label: '应用模板', method: 'post', path: '/refinement/templates/apply', body: { templateId: '', chapterId: '', content: '', projectId: '' } },
+    ], desc: '21套精修模板：清单按本项目执行标准（平台/分类/基调/文风/流派/视角）标注可用性，冲突模板不可执行' },
   { id: 'deai', label: '去AI味', icon: '🧹',
     endpoints: [
       { label: 'AI痕迹检测', method: 'post', path: '/refinement/de-ai/detect', body: { content: '' } },
       { label: '正则降AI处理', method: 'post', path: '/refinement/de-ai/polish', body: { content: '', intensity: 50 } },
-      { label: 'LLM局部改写(推荐)', method: 'post', path: '/refinement/de-ai/llm-rewrite', body: { content: '', maxRewrites: 3 } },
+      { label: 'LLM局部改写(推荐)', method: 'post', path: '/refinement/de-ai/llm-rewrite', body: { content: '', maxRewrites: 3, projectId: '' }, projectScoped: true },
     ], desc: 'AI痕迹检测+正则降AI+LLM局部改写(只改问题段落，不破坏全文逻辑)' },
   { id: 'describe', label: '逐句精修', icon: '🎨',
     endpoints: [
-      { label: '可用风格', method: 'get', path: '/refinement/describe/styles' },
-      { label: '精修句子', method: 'post', path: '/refinement/describe/polish', body: { text: '', style: 'poetic' } },
+      { label: '可用风格(按执行标准)', method: 'get', path: '/refinement/describe/styles', projectScoped: true },
+      { label: '精修句子', method: 'post', path: '/refinement/describe/polish', body: { sentence: '', projectId: '', styles: ['standard'], variants: 3 } },
     ], desc: '选中句子→选择风格→AI生成3个变体' },
   { id: 'spell', label: '错别字', icon: '🔤',
     endpoints: [
@@ -78,6 +79,9 @@ const RefinementPage: React.FC = () => {
   const [batchStatus, setBatchStatus] = useState('');
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [chaptersLoading, setChaptersLoading] = useState(true);
+  const [standardTemplates, setStandardTemplates] = useState<any[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState('');
 
   useEffect(() => {
     if (!projectId) return;
@@ -101,6 +105,34 @@ const RefinementPage: React.FC = () => {
     loadChapters();
   }, [projectId]);
 
+  // 批量模板下拉必须来自服务端按【本项目执行标准】判定后的清单：
+  // 与标准冲突的模板（如都市白描下的「古风版」）后端标 applicable=false，
+  // 界面不得再写死一份通用选项，否则作者选定的平台/基调/文风又被绕过去了。
+  useEffect(() => {
+    if (!projectId) return;
+    let alive = true;
+    const loadTemplates = async () => {
+      setTemplatesLoading(true);
+      setTemplatesError('');
+      try {
+        const res = await api.get<any[]>(`/refinement/templates?projectId=${encodeURIComponent(projectId)}`);
+        const list = Array.isArray(res.data) ? res.data : [];
+        if (!alive) return;
+        setStandardTemplates(list);
+        const usable = list.filter((t: any) => t.applicable);
+        if (usable.length > 0) {
+          setBatchTemplate((prev: string) => (usable.some((t: any) => t.id === prev) ? prev : usable[0].id));
+        }
+      } catch (err: any) {
+        if (alive) setTemplatesError(err?.message || '模板清单加载失败');
+      } finally {
+        if (alive) setTemplatesLoading(false);
+      }
+    };
+    loadTemplates();
+    return () => { alive = false; };
+  }, [projectId]);
+
   const tool = TOOLS.find(t => t.id === activeTool)!;
   const ep = tool?.endpoints[activeEndpoint];
 
@@ -112,17 +144,27 @@ const RefinementPage: React.FC = () => {
       if (ep.body) {
         body = { ...ep.body };
         if (body.content !== undefined) body.content = content;
+        // 逐句精修的后端字段是 sentence（旧前端传 text/style，后端收不到，等于空转）
+        if (body.sentence !== undefined) body.sentence = content;
         if (body.intensity !== undefined) body.intensity = intensity;
+        // 项目内场景（精修）必须带 projectId：后端 beginRun 对缺 projectId 的项目内场景直接阻断，
+        // 不再静默退化成平台级记录。这里从路由参数取，作为唯一来源。
+        if (body.projectId !== undefined) body.projectId = projectId || '';
       }
+      // projectScoped 的 GET 也必须带 projectId：执行标准由服务端按项目解析，
+      // 不带就等于在无标准下取回一份与本书无关的通用清单。
+      const path = ep.method === 'get' && ep.projectScoped
+        ? `${ep.path}${ep.path.includes('?') ? '&' : '?'}projectId=${encodeURIComponent(projectId || '')}`
+        : ep.path;
       const res = ep.method === 'get'
-        ? await api.get(ep.path)
-        : await api.post(ep.path, body);
+        ? await api.get(path)
+        : await api.post(path, body);
       setResult(res.data);
     } catch (err: any) {
       setResult({ error: err.message || '请求失败' });
     }
     setLoading(false);
-  }, [ep, content, intensity]);
+  }, [ep, content, intensity, projectId]);
 
   return (
     <div style={{ padding: '24px', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -162,8 +204,12 @@ const RefinementPage: React.FC = () => {
             <span style={{ fontSize: '14px', color: 'var(--color-text-dim)' }}>模板:</span>
             <select value={batchTemplate} onChange={e => setBatchTemplate(e.target.value)}
               style={{ padding: '5px 10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '5px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', outline: 'none' }}>
-              <option value="concise">简洁版</option><option value="vivid">生动版</option><option value="dialogue">对话强化版</option>
-              <option value="suspense">悬念版</option><option value="emotional">情绪版</option><option value="commercial">网文爽感版</option>
+              {standardTemplates.filter(t => t.applicable).map(t => (
+                <option key={t.id} value={t.id}>{t.name}（强化方向：{t.axisLabel}）</option>
+              ))}
+              {standardTemplates.filter(t => !t.applicable).map(t => (
+                <option key={t.id} value={t.id} disabled>{t.name}（与执行标准冲突，不可选）</option>
+              ))}
             </select>
             <button onClick={async () => {
               if (selectedChapters.length === 0) { setBatchStatus('⚠️ 请选择至少1个章节'); return; }
@@ -171,13 +217,32 @@ const RefinementPage: React.FC = () => {
               setLoading(true);
               let done = 0; let skipped = 0;
               try {
+                // 真批量精修：读章节正文 → 应用模板改写 → 写回章节。
+                // 失败/无改动一律计数并回报，绝不用空转冒充「已完成 N 章」。
+                const failures: string[] = [];
                 for (const chId of selectedChapters) {
                   const chData = chapters.find(c => c.index === chId);
                   if (chData?.status === 'locked') { skipped++; continue; }
-                  await api.get('/refinement/templates');
-                  done++;
+                  const chLabel = chData?.title || String(chId);
+                  try {
+                    const detail = await api.get<any>(`/projects/${projectId}/chapters/${chData?.id}`);
+                    const original = String(detail?.data?.content ?? '');
+                    if (!original.trim()) { failures.push(`${chLabel}: 章节无正文`); continue; }
+                    const applied = await api.post<any>('/refinement/templates/apply', { templateId: batchTemplate, content: original, projectId });
+                    const refined = String(applied?.data?.result ?? '');
+                    if (!refined.trim()) { failures.push(`${chLabel}: 模板未返回结果`); continue; }
+                    if (refined === original) { failures.push(`${chLabel}: 模板未产生改动`); continue; }
+                    await api.put(`/projects/${projectId}/chapters/${chData?.id}`, { content: refined });
+                    done++;
+                  } catch (err: any) {
+                    failures.push(`${chLabel}: ${err?.message || '精修失败'}`);
+                  }
                 }
-                setBatchStatus(`✅ 完成: ${done}章精修, 跳过 ${skipped}章已锁定`);
+                if (failures.length > 0) {
+                  setBatchStatus(`⚠️ 完成 ${done}章，跳过 ${skipped}章已锁定，${failures.length}章未完成：${failures.slice(0, 3).join('；')}${failures.length > 3 ? ' 等' : ''}`);
+                } else {
+                  setBatchStatus(`✅ 完成: ${done}章精修, 跳过 ${skipped}章已锁定`);
+                }
               } catch { setBatchStatus('❌ 批量精修失败'); }
               setLoading(false);
               setTimeout(() => setBatchStatus(''), 3000);
@@ -186,6 +251,14 @@ const RefinementPage: React.FC = () => {
               {loading ? '处理中...' : `🚀 应用精修 (${selectedChapters.length}章)`}
             </button>
           </div>
+          {templatesLoading && <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>⏳ 正在按本项目执行标准加载模板清单...</div>}
+          {templatesError && <div style={{ fontSize: '14px', color: 'var(--color-danger)' }}>❌ 模板清单加载失败：{templatesError}（未按标准判定前不得批量执行）</div>}
+          {!templatesLoading && !templatesError && standardTemplates.some(t => !t.applicable) && (
+            <div style={{ fontSize: '13px', color: 'var(--color-text-dim)', lineHeight: 1.6 }}>
+              🚫 已按执行标准过滤 {standardTemplates.filter(t => !t.applicable).length} 个冲突模板：
+              {standardTemplates.filter(t => !t.applicable).map(t => `${t.name}（${t.rejectReason}）`).join('；')}
+            </div>
+          )}
           {batchStatus && <div style={{ fontSize: '14px', color: batchStatus.startsWith('✅') ? 'var(--color-success)' : batchStatus.startsWith('⚠️') ? 'var(--color-warning)' : 'var(--color-danger)' }}>{batchStatus}</div>}
         </>
         )}

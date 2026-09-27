@@ -98,4 +98,24 @@ describe('WorldSettingService', () => {
       expect(result.constraints.length).toBe(0);
     });
   });
+
+  it('removes the linked profile in the same transaction as its world setting', () => {
+    const operations: string[] = [];
+    const db = {
+      exec: vi.fn((sql: string) => operations.push(sql)),
+      prepare: vi.fn((sql: string) => ({ run: vi.fn(() => operations.push(sql)) })),
+    };
+    (repo.findById as any).mockReturnValue(mockRow);
+    (repo.delete as any).mockImplementation(() => operations.push('world_settings DELETE'));
+    service = new WorldSettingService(repo, { getDb: () => db } as any);
+    (service as any).analyzeStateImpact = vi.fn();
+
+    expect(service.remove('ws-1')).toEqual({ success: true });
+    expect(operations).toEqual([
+      'BEGIN IMMEDIATE',
+      'DELETE FROM world_system_profiles WHERE project_id=? AND world_setting_id=?',
+      'world_settings DELETE',
+      'COMMIT',
+    ]);
+  });
 });

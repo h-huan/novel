@@ -12,6 +12,7 @@ export interface ProjectRow {
   status: string;
   target_words: number;
   current_words: number;
+  /** 历史列：target_platform 的写入投影，读取时仅可作最后一位别名补空（见 creative-constitution.ts）。 */
   platform_style: string;
   description: string | null;
   writing_style: string | null;

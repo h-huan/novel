@@ -1,5 +1,11 @@
 export type SupportedStoryType = 'short_story' | 'long_novel';
 
+/**
+ * SupportedStoryType 的值清单 —— DTO 校验唯一来源。
+ * 不含 script：script 没有「作品总字数」口径，不属于本文件管辖。
+ */
+export const SUPPORTED_STORY_TYPE_IDS: readonly SupportedStoryType[] = ['short_story', 'long_novel'];
+
 /** Canonical chapter prose range shared by server and desktop. */
 export const CHAPTER_WORD_RANGE = { min: 3_000, max: 5_000 } as const;
 

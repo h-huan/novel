@@ -1,12 +1,20 @@
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_REGISTRY, platformDisplayName } from '../../shared/src';
 import {
-  getPlatform, targetForLength, measureAgainstTarget, benchmarkRefineIssues,
+  PLATFORMS, getPlatform, targetForLength, measureAgainstTarget, benchmarkRefineIssues,
   buildBenchmarkDirective, buildBenchmarkRefinePrompt, refineKeepsStory,
 } from './platform-benchmarks';
 
 describe('platform-benchmarks 平台画像', () => {
+  it('平台画像覆盖注册表且显示名同源', () => {
+    expect(Object.keys(PLATFORMS).sort()).toEqual(PLATFORM_REGISTRY.map(({ id }) => id).sort());
+    for (const { id } of PLATFORM_REGISTRY) {
+      expect(PLATFORMS[id].id).toBe(id);
+      expect(PLATFORMS[id].label).toBe(platformDisplayName(id));
+    }
+  });
   it('每个平台都有完整画像字段（无 undefined 占位）', () => {
-    for (const id of ['fanqie', 'qimao', 'qidian', 'zhihu', 'jinjiang', 'douyin', 'xiaohongshu', 'rules_horror']) {
+    for (const { id } of PLATFORM_REGISTRY.filter(item => item.selectable)) {
       const p = getPlatform(id);
       expect(p.id).toBe(id);
       expect(p.label.length).toBeGreaterThan(0);
@@ -66,6 +74,18 @@ describe('platform-benchmarks 平台画像', () => {
     expect(directive).toContain(fanqie.label);
     expect(directive).toContain('残句链');
   });
+  it('styleMust 的开篇钩子窗口必须由平台表插值，禁止在散文里复述数字（历史事故：番茄/七猫写死 300、抖音写死 200，与平台表长篇 500/500/300 漂移）', () => {
+    for (const id of ['fanqie', 'qimao', 'qidian', 'zhihu', 'jinjiang', 'douyin', 'xiaohongshu', 'rules_horror', 'custom']) {
+      for (const length of ['short_story', 'long_novel'] as const) {
+        const directive = buildBenchmarkDirective(id, length);
+        expect(directive).not.toContain('{openingHookChars}');
+        const styleMustLine = directive.split('\n').find(l => l.startsWith('本平台风格红线'));
+        if (styleMustLine) expect(styleMustLine).not.toContain('{');
+        const expected = String(targetForLength(getPlatform(id), length).openingHookChars);
+        expect(directive).toContain(expected);
+      }
+    }
+  });
 
   it('精修 prompt 必须携带上一版原文、本章契约与人物白名单（历史事故：真空精修把都市文覆盖成另一部小说）', () => {
     const fanqie = getPlatform('fanqie');
@@ -96,6 +116,8 @@ describe('platform-benchmarks 平台画像', () => {
     expect(prompt).toContain('林薇');
     expect(prompt).toContain('陆沉');
     expect(prompt).toContain('番茄小说；爽文、女强');
+    // 精修锚点必须与执行标准同维：六维少一维，模型就看不到该维约束
+    expect(prompt).toContain('平台/分类/基调/文风/流派/视角标签');
     expect(prompt).toContain('避免连续三排比');
   });
 

@@ -79,14 +79,16 @@ export class ChainTemplateService {
       updatedAt: now,
     });
 
-    // 长篇初始地基 chain (v1.0: 创建时仅生成世界观+卷骨架)
+    // 长篇地基必须按依赖顺序执行：先主线与结局骨架，验收通过后才生成世界规则。
+    // 这里曾用一个节点同时产出骨架和世界观，后果是世界规则无法引用已确认的主线。
     this.templates.set('long-novel-init-foundation', {
       id: 'long-novel-init-foundation',
       name: '长篇初始地基',
-      version: '1.0.0',
-      description: '创建长篇项目时生成世界观（含故事核心设定14字段+详细世界观7维）+卷骨架（供后续增删改查）',
+      version: '2.0.0',
+      description: '主线与结局骨架验收通过后，以该骨架为输入生成世界规则',
       nodes: [
-        { id: 'node_1_foundation', name: '世界观生成', type: 'prompt', chainId: 'long-novel-init-foundation', promptTemplateId: 'long-novel-init-foundation', modelConfig: { temperature: 0.7 }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' }, outputMapping: { coreSetting: 'node_1.coreSetting', worldview: 'node_1.worldview', skeletonVolumes: 'node_1.skeletonVolumes' }, timeout: 120, retryCount: 0 },
+        { id: 'node_1_skeleton', name: '主线与结局骨架', type: 'prompt', chainId: 'outline', promptTemplateId: 'long-novel-main-skeleton', modelConfig: { temperature: 0.7 }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' }, outputMapping: {}, timeout: 120, retryCount: 0 },
+        { id: 'node_2_worldview', name: '世界规则', type: 'prompt', chainId: 'world_building', promptTemplateId: 'long-novel-init-worldview', modelConfig: { temperature: 0.6 }, inputMapping: { story_setting: 'user_input.story_setting', skeleton: 'chain_output.node_1_skeleton', genre: 'user_input.genre' }, outputMapping: {}, timeout: 120, retryCount: 0 },
       ],
       variables: [
         { name: 'story_setting', source: 'user_input', path: 'user_input.story_setting', required: true },
@@ -94,7 +96,35 @@ export class ChainTemplateService {
         { name: 'genre', source: 'user_input', path: 'user_input.genre', required: false },
       ],
       executionMode: 'sequential',
-      config: { timeout: 150, maxRetries: 0, enableLogging: true, strictMode: false },
+      config: { timeout: 300, maxRetries: 0, enableLogging: true, strictMode: true },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // 长篇灵活大纲 chain (v1.0: 剧情分析 → 分卷大纲 → 章纲)
+    // 平台/分类/基调/文风/流派/视角属于创建前确定的执行标准：由调用方（/chain/generate-outline）
+    // 从创作宪法解析为 platform_directive 注入，链内每一节点都必须携带，不得由模型自行决定。
+    this.templates.set('long-novel-flexible-outline', {
+      id: 'long-novel-flexible-outline',
+      name: '长篇灵活大纲',
+      version: '1.0.0',
+      description: '剧情分析→分卷大纲→章纲三阶段生成灵活大纲；卷数与章数按故事阶段动态拆分，不预设区间',
+      nodes: [
+        { id: 'node_1_analysis', name: '剧情分析', type: 'prompt', chainId: 'long-novel-flexible-outline', promptTemplateId: 'long-novel-story-analysis', modelConfig: { temperature: 0.5 }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre', chapterLimit: 'user_input.chapterLimit', platform_directive: 'user_input.platform_directive' }, outputMapping: {}, timeout: 240, retryCount: 0 },
+        { id: 'node_2_volumes', name: '分卷大纲', type: 'prompt', chainId: 'long-novel-flexible-outline', promptTemplateId: 'long-novel-volume-outline', modelConfig: { temperature: 0.6 }, inputMapping: { story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive', chapterLimit: 'user_input.chapterLimit' }, outputMapping: {}, timeout: 420, retryCount: 0 },
+        { id: 'node_3_chapters', name: '章纲生成', type: 'prompt', chainId: 'long-novel-flexible-outline', promptTemplateId: 'long-novel-chapter-outline', modelConfig: { temperature: 0.6 }, inputMapping: { story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive', chapterLimit: 'user_input.chapterLimit', wordRangeText: 'user_input.wordRangeText' }, outputMapping: {}, timeout: 600, retryCount: 0 },
+      ],
+      variables: [
+        { name: 'story_setting', source: 'user_input', path: 'user_input.story_setting', required: true },
+        { name: 'targetWords', source: 'user_input', path: 'user_input.targetWords', required: true },
+        { name: 'genre', source: 'user_input', path: 'user_input.genre', required: false },
+        { name: 'chapterLimit', source: 'user_input', path: 'user_input.chapterLimit', required: false },
+        { name: 'platform_directive', source: 'user_input', path: 'user_input.platform_directive', required: true },
+        { name: 'wordRangeText', source: 'user_input', path: 'user_input.wordRangeText', required: true },
+        { name: 'planning', source: 'user_input', path: 'user_input.planning', required: false },
+      ],
+      executionMode: 'sequential',
+      config: { timeout: 1500, maxRetries: 0, enableLogging: true, strictMode: false },
       createdAt: now,
       updatedAt: now,
     });
@@ -274,7 +304,11 @@ export class ChainTemplateService {
    * 正式执行 Chain（用于生产流程，非测试）
    * 返回 ChainExecutionResult，包含 outputs / nodeResults / status 等
    */
-  async executeChain(id: string, userInput: Record<string, unknown>): Promise<any> {
+  async executeChain(
+    id: string,
+    userInput: Record<string, unknown>,
+    onProgress?: (nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => void,
+  ): Promise<any> {
     const template = this.getDetail(id);
 
     const chain: PromptChain = {
@@ -288,7 +322,7 @@ export class ChainTemplateService {
       config: template.config,
     };
 
-    const result = await this.chainEngine.execute(chain, userInput);
+    const result = await this.chainEngine.execute(chain, userInput, onProgress);
     return result; // 直接返回 ChainExecutionResult
   }
 

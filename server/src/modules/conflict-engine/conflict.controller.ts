@@ -15,7 +15,14 @@ const CHECK_TYPE_LABEL: Record<string, string> = {
   timeline: '时间线冲突',
   plot_logic: '情节逻辑',
   outline_alignment: '大纲矛盾',
+  'hardline.outline_alignment': '正文硬红线',
 };
+
+// 这里曾有四份只包含 outline_alignment 的冲突筛选 SQL，后果是数据库已有 6 条
+// hardline.outline_alignment blocking 记录，但矛盾面板和统计都查不出来。
+// 冲突类别条件只在这里定义一次，查询、统计、清理和自动处理共用。
+const conflictIssuePredicate = (column: 'issue_type' | 'i.issue_type' = 'issue_type') =>
+  `(${column} LIKE 'consistency.%' OR ${column} IN ('originality','outline_alignment','hardline.outline_alignment'))`;
 
 // 同一 check_type（outline_alignment）由不同来源产出，严重度与处置方式完全不同：
 // 缺事件/事实冲突要改正文，文风建议不用改，资料源冲突要改的是资料源而不是正文。
@@ -24,7 +31,7 @@ const SOURCE_LABEL: Record<string, string> = {
   deterministic: '叙事逻辑',
   alignment_verifier: '大纲一致性',
   alignment_verifier_hardline: '语言与内容规范',
-  alignment_verifier_advisory: '文风建议（非阻断）',
+  alignment_verifier_advisory: '局部措辞建议（非阻断）',
   alignment_verifier_source_conflict: '资料源冲突',
 };
 
@@ -90,7 +97,7 @@ export class ConflictController {
     const db = this.databaseService.getDb();
     const res = db.prepare(`UPDATE writing_quality_issues SET status='resolved',resolved_at=datetime('now'),
       resolved_by='auto',updated_at=datetime('now') WHERE project_id=? AND status='open' AND severity='low'
-      AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')`)
+       AND ${conflictIssuePredicate()}`)
       .run(projectId || '');
     return { autoResolved: res.changes };
   }
@@ -120,10 +127,10 @@ export class ConflictController {
     const removed = idx != null
       ? db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND chapter_id IN
           (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?) AND status IN ('open','superseded')
-          AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')`)
+           AND ${conflictIssuePredicate()}`)
         .run(projectId, projectId, idx).changes
       : db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND status IN ('open','superseded')
-          AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')`)
+           AND ${conflictIssuePredicate()}`)
         .run(projectId).changes;
     return { removed: Number(removed || 0) };
   }
@@ -134,7 +141,7 @@ export class ConflictController {
   @Get('stats')
   getStats(@Query('projectId') projectId?: string) {
     const db = this.databaseService.getDb();
-    const category = "(issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment')";
+    const category = conflictIssuePredicate();
     const total = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND status IN ('open','resolved')`).get(projectId || '') as any).c;
     const resolved = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND status='resolved'`).get(projectId || '') as any).c;
     const p0 = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND severity='blocking' AND status='open'`).get(projectId || '') as any).c;
@@ -152,7 +159,9 @@ export class ConflictController {
   private queryRows(projectId?: string, chapterIndex?: number, filter?: { priority?: string; type?: string; status?: string }) {
     if (!projectId) return [];
     const db = this.databaseService.getDb();
-    const clauses = ['i.project_id = ?', "(i.issue_type LIKE 'consistency.%' OR i.issue_type='originality' OR i.issue_type='outline_alignment')"];
+    // 这里曾漏掉状态条件，superseded 的旧验收问题仍被映射成 unresolved：
+    // 面板 48 条、统计仅 15 条，用户无法辨认本轮真正的 6 条阻断硬线。
+    const clauses = ['i.project_id = ?', conflictIssuePredicate('i.issue_type'), "i.status IN ('open','resolved')"];
     const params: any[] = [projectId];
     if (chapterIndex !== undefined && !Number.isNaN(chapterIndex)) {
       clauses.push('c.chapter_index = ?');
@@ -219,6 +228,7 @@ export class ConflictController {
       checkType,
       source,
       sourceLabel: SOURCE_LABEL[source] || '确定性一致性检测',
+      blocking: row.severity === 'blocking',
       // 可执行动作（按文档 R1/R4 流程 + 来源/类型决定默认推荐动作）
       actions: this.buildActions({ checkType, source, level, chapterId, severity, status }),
     };

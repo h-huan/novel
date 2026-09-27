@@ -16,6 +16,7 @@ import { useChapterStore } from '../../stores/chapterStore';
 import AuthorNotePanel from './AuthorNotePanel';
 import WorkflowBlockedNotice from '../workflow/WorkflowBlockedNotice';
 import { useWorkflowGuardStore } from '../../stores/workflowGuardStore';
+import { SELECTABLE_PLATFORMS, TargetPlatform } from '@novel/shared';
 
 // ==================== Types ====================
 
@@ -27,7 +28,12 @@ export type ChapterScenario = 'daily' | 'climax';
 
 type TabType = 'writing' | 'plugins' | 'qa' | 'notes';
 
-type PlatformType = 'zhihu' | 'fanqie' | 'qidian' | 'douyin' | 'rules_horror';
+/**
+ * 平台改写的目标平台类型。来自唯一平台注册表（@novel/shared PLATFORM_REGISTRY），
+ * 不在本组件里手写第三份平台列表 —— 手写那份曾把「番茄小说」写成「番茄短篇」、
+ * 「起点中文网」写成「起点脑洞」，作者在编辑器里看到的平台名与项目卡片对不上。
+ */
+type PlatformType = TargetPlatform;
 
 type ChapterTarget = {
   id: string;
@@ -88,19 +94,21 @@ const MODE_DESCRIPTIONS: Record<WritingMode, string> = {
   full_auto: 'AI自动生成全文',
 };
 
-const PLATFORM_LABELS: Record<PlatformType, string> = {
-  zhihu: '知乎盐选',
-  fanqie: '番茄短篇',
-  qidian: '起点脑洞',
-  douyin: '抖音故事',
-  rules_horror: '规则怪谈',
-};
+/**
+ * 可改写的目标平台：id 与显示名都取自唯一注册表。
+ * 排除 custom（自定义平台没有系统基准，改写无据可依）与 generic（通用 = 没选平台）。
+ */
+const ADAPT_TARGETS: Array<{ value: PlatformType; label: string }> = SELECTABLE_PLATFORMS
+  .filter((p) => p.id !== TargetPlatform.CUSTOM)
+  .map((p) => ({ value: p.id, label: p.label }));
 
+// 与逐段精修同一口径：这四个按钮是「文风维内的定向强化」，不是独立风格维度，
+// 不得覆盖项目卡片上已确认的平台/分类/基调/文风/流派/视角（服务端按该标准执行）。
 const ENHANCE_STYLE_LABELS: Record<string, string> = {
-  suspense: '悬念强化',
-  poetic: '诗意增强',
-  direct: '直白有力',
-  emotional: '情绪渲染',
+  suspense: '文风·悬念向',
+  poetic: '文风·诗意向',
+  direct: '文风·直白向',
+  emotional: '文风·情绪向',
 };
 
 // ==================== Component ====================
@@ -493,20 +501,6 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
       count: 5,
     });
   }, [projectId, chapterContent, callPlugin, onError]);
-  // ========= 终稿质检 =========
-  const handleFinalQA = useCallback(() => {
-    if (!chapterContent) {
-      onError?.('请先选择章节');
-      return;
-    }
-    callPlugin('final-qa', '/chain/templates/execute/attach-final-qa', {
-      projectId,
-      chapterId: chapterId || '',
-      content: chapterContent,
-    });
-  }, [projectId, chapterId, chapterContent, callPlugin, onError]);
-
-
   // ========== 质检功能 ==========
 
   const handleQualityCheck = useCallback(async () => {
@@ -558,6 +552,15 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
       setQaLoading(false);
     }
   }, [projectId, chapterId, chapterContent, onError]);
+
+  // ========= 终稿质检 =========
+  // 不再走 /chain/templates/execute/attach-final-qa（该模板 id 在后端模板表里不存在，调用必 404）。
+  // 终稿质检与「质检」Tab 是同一种质检：统一交给 writing-quality 体系，结果落库为质量报告，
+  // 避免同一种审查存在第二套口径与第二份展示。
+  const handleFinalQA = useCallback(() => {
+    setActiveTab('qa');
+    void handleQualityCheck();
+  }, [handleQualityCheck]);
 
   // ========== 渲染 ==========
 
@@ -793,8 +796,8 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
         <div style={styles.tabContent}>
           {/* 开头强化 */}
           <div style={styles.pluginCard}>
-            <div style={styles.pluginTitle}>🎯 开头强化</div>
-            <p style={styles.pluginDesc}>增强选中章节的开头吸引力</p>
+            <div style={styles.pluginTitle}>🎯 开头强化（执行标准·文风维内定向）</div>
+            <p style={styles.pluginDesc}>在项目卡片的执行标准（平台/分类/基调/文风/流派/视角）之内强化本章开头吸引力；不会改变已确认的文风与基调</p>
             <div style={styles.pluginActions}>
               {(Object.entries(ENHANCE_STYLE_LABELS) as [string, string][]).map(([key, label]) => (
                 <button
@@ -827,11 +830,11 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
             <div style={styles.pluginTitle}>📱 平台改写</div>
             <p style={styles.pluginDesc}>转换风格以适配不同发布平台</p>
             <div style={styles.pluginActions}>
-              {(Object.entries(PLATFORM_LABELS) as [PlatformType, string][]).map(([key, label]) => (
+              {ADAPT_TARGETS.map(({ value, label }) => (
                 <button
-                  key={key}
+                  key={value}
                   style={styles.pluginBtn}
-                  onClick={() => handleAdaptPlatform(key)}
+                  onClick={() => handleAdaptPlatform(value)}
                   disabled={pluginLoading === 'adapt-platform'}
                 >
                   {pluginLoading === 'adapt-platform' ? '转换中...' : label}
@@ -860,9 +863,9 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
             <button
               style={styles.pluginBtn}
               onClick={handleFinalQA}
-              disabled={pluginLoading === 'final-qa'}
+              disabled={qaLoading}
             >
-              {pluginLoading === 'final-qa' ? '检测中...' : '🔍 终稿质检'}
+              {qaLoading ? '检测中...' : '🔍 终稿质检'}
             </button>
           </div>
 

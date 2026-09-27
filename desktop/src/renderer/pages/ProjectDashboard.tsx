@@ -7,6 +7,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
 import { parseJsonToReadable } from '../lib/textList';
+import { platformDisplayName } from '@novel/shared';
 
 interface DashboardStats {
   totalChapters: number; completedChapters: number; writingChapters: number; writtenChapters?: number;
@@ -120,6 +121,17 @@ const ProjectDashboard: React.FC = () => {
   const progress = stats.targetWords > 0 ? Math.round((stats.totalWords / stats.targetWords) * 100) : 0;
   const chapterProgress = stats.totalChapters > 0 ? Math.round((stats.completedChapters / stats.totalChapters) * 100) : 0;
   const projectStatus = String((currentProject as any)?.status || recovery?.status || '');
+  const constitution = (currentProject as any)?.creativeConstitution;
+  const settingBadges: Array<[string, string]> = constitution ? [
+    ['平台', constitution.targetPlatform ? platformDisplayName(String(constitution.targetPlatform)) : ''],
+    ['分类', String(constitution.category || '')],
+    ['情绪氛围', Array.isArray(constitution.storyTone) ? constitution.storyTone.join('·') : ''],
+    ['文风', Array.isArray(constitution.writingStyle) ? constitution.writingStyle.join('·') : ''],
+    ['流派', Array.isArray(constitution.webNovelGenre) ? constitution.webNovelGenre.join('·') : ''],
+    ['作品标签', Array.isArray(constitution.submissionTags) ? constitution.submissionTags.join('·') : ''],
+    ['情节', Array.isArray(constitution.plotTags) ? constitution.plotTags.join('·') : ''],
+    ['视角', String(constitution.pov || '')],
+  ] : [];
   const needsRecovery = ['generation_failed', 'creating'].includes(projectStatus);
   const hasConfirmedIdea = Boolean(
     (currentProject as any)?.confirmedIdea
@@ -171,6 +183,11 @@ const ProjectDashboard: React.FC = () => {
   return (
     <div style={{ padding: '28px 32px', maxWidth: '800px', margin: '0 auto', overflow: 'auto', height: '100%', background: 'var(--color-bg-primary)' }}>
       <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '24px' }}>🏠 首页</h1>
+      {settingBadges.length > 0 && <div aria-label="本书创作设定标签" style={{ display: 'flex', flexWrap: 'wrap', gap: 7, margin: '-8px 0 20px' }}>
+        {settingBadges.map(([label, content]) => <span key={label} style={{ padding: '5px 9px', borderRadius: 6, background: 'var(--color-bg-elevated)', color: 'var(--color-text-secondary)', fontSize: 12 }}>
+          {label}：{content || '未设置'}
+        </span>)}
+      </div>}
       {(needsRecovery || recoveryMessage) && (
         <div style={{ padding: '16px', marginBottom: '20px', borderRadius: '10px', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}>
           <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-warning)', marginBottom: '7px' }}>

@@ -6,6 +6,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { DatabaseSync } from 'node:sqlite';
 import * as path from 'path';
 import * as fs from 'fs';
+import { resolveDataDir } from '../config/data-dir';
 import { v4 as uuidv4 } from 'uuid';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const archiver = require('archiver');
@@ -23,7 +24,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private _dbPath: string;
 
   constructor() {
-    const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+    // 数据目录唯一来源：src/config/data-dir（勿再手写 process.cwd() 回落）
+    const dataDir = resolveDataDir();
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
@@ -32,6 +34,11 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     this.db = new DatabaseSync(this._dbPath);
+
+    // busy_timeout 必须最先设置：SQLite 默认 busy_timeout=0，任何并发写（上一次没退干净的实例
+    // 还在做 WAL checkpoint、或第二个实例同时启动执行迁移）都会立刻抛 SQLITE_BUSY
+    // "database is locked"，使整个服务启动失败。给 10s 退避窗口，锁在超时内自然释放即可继续。
+    this.db.exec('PRAGMA busy_timeout = 10000');
 
     // WAL 模式 — 优化并发写入
     this.db.exec('PRAGMA journal_mode = WAL');

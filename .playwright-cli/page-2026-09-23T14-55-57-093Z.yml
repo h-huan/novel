@@ -1,0 +1,19 @@
+- generic [ref=f5e3]:
+  - banner [ref=f5e4]:
+    - generic [ref=f5e6]:
+      - generic [ref=f5e7]: ✦ 写作工作台
+      - button "工作台" [ref=f5e8] [cursor=pointer]
+      - button "我的项目" [ref=f5e9] [cursor=pointer]
+      - button "灵感发现" [ref=f5e10] [cursor=pointer]
+      - button "系统创作规则" [ref=f5e11] [cursor=pointer]
+    - generic [ref=f5e12]:
+      - button "设置" [ref=f5e13] [cursor=pointer]
+      - generic [ref=f5e17]:
+        - button "最小化" [ref=f5e18] [cursor=pointer]
+        - button "最大化" [ref=f5e21] [cursor=pointer]
+        - button "关闭" [ref=f5e24] [cursor=pointer]
+  - main [ref=f5e28]:
+    - generic [ref=f5e29]: 正在加载项目执行标准…
+  - contentinfo [ref=f5e30]:
+    - generic [ref=f5e31]: 0 / 0 字
+    - generic [ref=f5e33]: 服务器在线

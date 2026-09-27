@@ -9,6 +9,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
+import { estimateTokens as estimateTokensByWeights, RAG_CHUNK_TOKEN_WEIGHTS } from '../common/token-budget';
 import type { DocType, ChunkStrategy } from './types';
 
 export interface Chunk {
@@ -294,20 +295,12 @@ export class ChunkerService {
   }
 
   /**
-   * 估算文本的 token 数 (粗略估计: 中文字符=2 tokens, 英文单词=1.3 tokens)
+   * 估算文本的 token 数。
+   * 口径统一在 common/token-budget 单点定义（RAG 分块口径），本方法不再自己维护一份启发式：
+   * 同一段文本在分块链路与规划链路必须得到可对齐的计量，否则预算会在两处各算一遍、各错一次。
    */
   estimateTokens(text: string): number {
-    let tokens = 0;
-    for (const char of text) {
-      if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(char)) {
-        tokens += 2;
-      } else if (/\s/.test(char)) {
-        tokens += 0;
-      } else {
-        tokens += 1;
-      }
-    }
-    return Math.ceil(tokens * 0.7); // 中文 token 修正系数
+    return estimateTokensByWeights(text, RAG_CHUNK_TOKEN_WEIGHTS);
   }
 
   /**

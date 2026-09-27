@@ -529,8 +529,8 @@ export class OutlineService {
   recommendPlan(projectId: string, dto: RecommendOutlinePlanDto): Record<string, unknown> {
     const d = this.db.getDb();
     const project = d.prepare(
-      'SELECT title, type, target_words, platform_style, description, settings FROM projects WHERE id = ?',
-    ).get(projectId) as { title: string; type: string; target_words: number; platform_style: string; description: string; settings: string } | undefined;
+      'SELECT title, type, target_words, description, settings FROM projects WHERE id = ?',
+    ).get(projectId) as { title: string; type: string; target_words: number; description: string; settings: string } | undefined;
     if (!project) throw new NotFoundException(`Project ${projectId} not found`);
     const settings = safeJson({ settings: project.settings } as any, 'settings', {});
     const planning = (dto.planning || {}) as any;

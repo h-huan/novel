@@ -1,0 +1,168 @@
+- generic [ref=f5e3]:
+  - banner [ref=f5e4]:
+    - generic [ref=f5e5]:
+      - button "末班地铁的第十一站" [ref=f5e36] [cursor=pointer]
+      - button "📖 使用手册" [ref=f5e43] [cursor=pointer]
+    - generic [ref=f5e12]:
+      - button "设置" [ref=f5e13] [cursor=pointer]
+      - generic [ref=f5e17]:
+        - button "最小化" [ref=f5e18] [cursor=pointer]
+        - button "最大化" [ref=f5e21] [cursor=pointer]
+        - button "关闭" [ref=f5e24] [cursor=pointer]
+  - generic [ref=f5e27]:
+    - complementary [ref=f5e44]:
+      - generic [ref=f5e45]: AI 写作
+      - navigation [ref=f5e47]:
+        - button "首页" [ref=f5e48] [cursor=pointer]
+        - button "本书创作设定" [ref=f5e53] [cursor=pointer]
+        - button "写作" [ref=f5e59] [cursor=pointer]
+        - button "大纲" [ref=f5e64] [cursor=pointer]
+        - button "角色" [ref=f5e69] [cursor=pointer]
+        - button "世界观" [ref=f5e75] [cursor=pointer]
+        - button "地点与势力" [ref=f5e81] [cursor=pointer]
+        - button "伏笔" [ref=f5e90] [cursor=pointer]
+        - button "时间线" [ref=f5e96] [cursor=pointer]
+        - button "素材" [ref=f5e103] [cursor=pointer]
+        - button "前后矛盾" [ref=f5e111] [cursor=pointer]
+        - button "质量诊断" [ref=f5e117] [cursor=pointer]
+        - button "知识点" [ref=f5e126] [cursor=pointer]
+        - button "导入导出" [ref=f5e131] [cursor=pointer]
+        - button "修改记录" [ref=f5e136] [cursor=pointer]
+      - button "收起侧边栏" [ref=f5e143] [cursor=pointer]
+    - main [ref=f5e28]:
+      - generic [ref=f5e29]:
+        - generic [ref=f5e146]:
+          - generic [ref=f5e147]: 本书创作设定
+          - generic [ref=f5e148]: 末班地铁的第十一站 · 创作宪法 revision 1
+        - generic [ref=f5e149]:
+          - generic [ref=f5e150]: 平台与创作方向
+          - generic [ref=f5e151]: 系统创作规则会读取本书的六项设定，贯穿大纲、正文与质量检查。修改后，已有内容不会自动改写。
+          - generic [ref=f5e152]: 目标平台
+          - combobox [ref=f5e153]:
+            - option "选择平台..."
+            - option "知乎盐选"
+            - option "番茄小说" [selected]
+            - option "起点中文网"
+            - option "抖音故事"
+            - option "晋江文学城"
+            - option "七猫小说"
+            - option "小红书故事"
+            - option "规则怪谈"
+            - option "自定义平台"
+          - generic [ref=f5e154]: 故事分类
+          - combobox [ref=f5e156]:
+            - option "选择大类..."
+            - option "男频·西方奇幻"
+            - option "男频·东方仙侠"
+            - option "男频·科幻末世"
+            - option "男频·都市日常" [selected]
+            - option "男频·都市修真"
+            - option "男频·都市高武"
+            - option "男频·历史古代"
+            - option "男频·战神赘婿"
+            - option "男频·都市种田"
+            - option "男频·传统玄幻"
+            - option "男频·历史脑洞"
+            - option "男频·悬疑脑洞"
+            - option "男频·都市脑洞"
+            - option "男频·玄幻脑洞"
+            - option "男频·悬疑灵异"
+            - option "男频·抗战谍战"
+            - option "男频·游戏体育"
+            - option "男频·动漫衍生"
+            - option "男频·男频衍生"
+            - option "女频·古风世情"
+            - option "女频·科幻末世"
+            - option "女频·游戏体育"
+            - option "女频·女频衍生"
+            - option "女频·玄幻言情"
+            - option "女频·种田"
+            - option "女频·年代"
+            - option "女频·现言脑洞"
+            - option "女频·宫斗宅斗"
+            - option "女频·悬疑脑洞"
+            - option "女频·古言脑洞"
+            - option "女频·快穿"
+            - option "女频·青春甜宠"
+            - option "女频·星光璀璨"
+            - option "女频·女频悬疑"
+            - option "女频·职场婚恋"
+            - option "女频·豪门总裁"
+            - option "女频·民国言情"
+          - generic [ref=f5e157]: 落库值仍是「都市·现实/都市日常」，下拉显示的是系统实际执行的分类「男频·都市日常」；重选分类即改写为该平台的投稿分类写法。
+          - generic [ref=f5e158]: 「番茄小说」的投稿分类是扁平的：选这一项即为投稿分类本身，落库就是这个分类名，正文按它的读者预期执行（与创建向导同一份来源）。
+          - generic [ref=f5e159]: "平台落位：番茄小说 · 男频 · 都市日常（该平台的投稿分类本身）该分类的实际体量分布未核验（系统尚未采集该平台该分类的头部数据）：不得编造数字，也不得套用其他分类的区间。该分类的写作口径未核验（系统尚未采集该平台该分类的官方分类定义与头部标签）：不得编造平台口径，也不得套用其他分类的口径。该平台分类名与归类为平台官方页面实测（verified=confirmed；番茄小说官网榜单页 fanqienovel.com/rank 内嵌的官方投稿分类：2026-09-22 实测抓取，路由形如 /rank/{gender}_{mold}_{catId}，分类名与官方编号一一对应；男频 19 类、女频 18 类，均为扁平结构（平台侧该层就是叶子，下面没有第二层子分类）。）"
+          - generic [ref=f5e160]: 目标总字数（正文总字数，不是单章）
+          - spinbutton "按该平台分类的实测体量区间填写，例如 1373345" [ref=f5e161]: "12000"
+          - generic [ref=f5e162]: 本项目是短篇，而「男频·都市日常」的实测体量来自连载长篇榜单（番茄小说官网榜单页 fanqienovel.com/rank：各分类榜单当页前 10 部的正文字数（榜单为连载长篇，短篇/短故事不在本表口径内），采集于 2026-09-22），短篇的分类体量基准尚未采集 —— 分类体量判据在本项目上没有适用口径，不得拿连载长篇的区间当短篇的标准，也不得据此判定本项目未达标准。
+          - generic [ref=f5e163]: 故事基调（可多选）
+          - generic [ref=f5e164]: 判据来源：作者设定（平台未公开该维口径）；操作定义（必须逐条落到语句层）——治愈：情绪落点回到安稳与被接纳，冲突温和、可修复；不得把创伤与惨剧当成主要卖点
+          - generic [ref=f5e165]:
+            - button "故事基调" [expanded] [active] [ref=f5e166] [cursor=pointer]:
+              - generic [ref=f5e167]: 治愈（1 项）
+              - generic [aria-hidden] [ref=f5e168]: ▴
+            - listbox "故事基调" [ref=f5e191]:
+              - option "热血" [ref=f5e192] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e193]: □
+              - option "爽文" [ref=f5e195] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e196]: □
+              - option "搞笑" [ref=f5e198] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e199]: □
+              - option "悬疑" [ref=f5e201] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e202]: □
+              - option "甜宠" [ref=f5e204] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e205]: □
+              - option "虐恋" [ref=f5e207] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e208]: □
+              - option "权谋" [ref=f5e210] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e211]: □
+              - option "爆笑" [ref=f5e213] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e214]: □
+              - option "烧脑" [ref=f5e216] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e217]: □
+              - option "无敌" [ref=f5e219] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e220]: □
+              - option "逆袭" [ref=f5e222] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e223]: □
+              - option "刀人" [ref=f5e225] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e226]: □
+              - option "治愈" [selected] [ref=f5e228] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e229]: ☑
+              - option "女强" [ref=f5e231] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e232]: □
+              - option "轻松" [ref=f5e234] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e235]: □
+              - option "压抑" [ref=f5e237] [cursor=pointer]:
+                - generic [aria-hidden] [ref=f5e238]: □
+          - generic [ref=f5e169]: 文风（可多选）
+          - generic [ref=f5e170]: 判据来源：作者设定（平台未公开该维口径）
+          - button "文风" [ref=f5e172] [cursor=pointer]:
+            - generic [ref=f5e173]: 白描（1 项）
+            - generic [aria-hidden] [ref=f5e174]: ▾
+          - generic [ref=f5e175]: 网文流派（可多选）
+          - generic [ref=f5e176]: 判据来源：作者设定（平台未公开该维口径）
+          - button "网文流派" [ref=f5e178] [cursor=pointer]:
+            - generic [ref=f5e179]: 都市（1 项）
+            - generic [aria-hidden] [ref=f5e180]: ▾
+          - generic [ref=f5e181]: 叙事视角
+          - combobox [ref=f5e182]:
+            - option "选择叙事视角..."
+            - option "第三人称限知"
+            - option "第三人称全知"
+            - option "第一人称" [selected]
+            - option "多视角轮换"
+          - generic [ref=f5e183]: 判据来源：作者设定（平台未公开该维口径）
+          - generic [ref=f5e184]: 视角决定正文的人称与信息范围，并作为独立质量维度参与校验；不选会让该维度变成「未执行标准」——不是不适用，而是这项标准没有被执行。
+          - generic [ref=f5e185]: 目标读者（可选）
+          - combobox [ref=f5e186]:
+            - option "不限定"
+            - option "男频" [selected]
+            - option "女频"
+          - generic [ref=f5e187]: 候选就是所选平台投稿页上的频道。它只在「同一分类名同时存在于多个频道」时用于归位消歧（如番茄的 科幻末世 / 悬疑脑洞 / 游戏体育 男女频各有一项），不参与「怎么写」的执行标准。
+        - generic [ref=f5e188]:
+          - button "保存本书设定" [ref=f5e189] [cursor=pointer]
+          - link "返回项目首页" [ref=f5e190] [cursor=pointer]:
+            - /url: "#/project/bcfd17de-bd0e-412f-a2ec-29278a153dc4/dashboard"
+  - contentinfo [ref=f5e30]:
+    - generic [ref=f5e31]: 0 / 0 字
+    - generic [ref=f5e33]: 服务器在线
