@@ -1,3 +1,4 @@
+import { describe, expect, it, vi } from 'vitest';
 import { GeneratedCanonGuardService } from './generated-canon-guard.service';
 
 describe('GeneratedCanonGuardService', () => {
@@ -12,10 +13,10 @@ describe('GeneratedCanonGuardService', () => {
   };
 
   const createSubject = (row: any = passedRun, current = true) => {
-    const get = jest.fn().mockReturnValue(row);
-    const prepare = jest.fn().mockReturnValue({ get });
-    const databaseService = { getDb: jest.fn().mockReturnValue({ prepare }) } as any;
-    const generationMetrics = { runIsCurrent: jest.fn().mockReturnValue(current) } as any;
+    const get = vi.fn().mockReturnValue(row);
+    const prepare = vi.fn().mockReturnValue({ get });
+    const databaseService = { getDb: vi.fn().mockReturnValue({ prepare }) } as any;
+    const generationMetrics = { runIsCurrent: vi.fn().mockReturnValue(current) } as any;
     return {
       service: new GeneratedCanonGuardService(databaseService, generationMetrics),
       generationMetrics,
