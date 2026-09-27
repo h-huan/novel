@@ -4,7 +4,7 @@
  * 公共章节 CRUD 永远表示作者手工编辑。AI 生成结果不得通过客户端声明来源后直接落 Canon；
  * AI 内容必须由生成主链在 Gate 通过后走服务端受控提交。
  */
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsIn } from 'class-validator';
 import type { ChapterStatus, HookType, TransitionMode } from '@novel/shared';
 
 export class CreateChapterDto {
@@ -43,6 +43,20 @@ export class UpdateChapterDto {
   @IsOptional()
   @IsString()
   transitionMode?: TransitionMode;
+
+  /**
+   * 旧客户端字段只允许 manual；ai_generated 明确在 HTTP 边界拒绝。
+   * 保留该单值字段仅用于滚动升级期间给出 400，而不是让旧 AI 路径静默按作者保存。
+   * 新代码不得发送 source；完成客户端迁移后删除此字段。
+   */
+  @IsOptional()
+  @IsIn(['manual'])
+  source?: string;
+}
+
+export class AcceptGeneratedChapterDto {
+  @IsString()
+  content: string;
 }
 
 export class ChapterQueryDto {
