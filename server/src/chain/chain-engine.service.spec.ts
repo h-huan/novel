@@ -128,6 +128,17 @@ describe('ChainEngineService', () => {
       expect(result.nodeResults).toBeDefined();
       expect(result.totalLatency).toBeGreaterThanOrEqual(0);
     });
+
+    it('preserves the generation run id on the prompt node result', async () => {
+      generate.mockResolvedValueOnce({ ...mockLLMOutput, runId: 'run-world-1' });
+
+      const result = await service.execute(testChain, { test: 'hello', projectId: 'project-1' });
+
+      expect(result.status).toBe('completed');
+      expect(result.nodeResults).toHaveLength(1);
+      expect(result.nodeResults[0].runId).toBe('run-world-1');
+      expect(result.nodeResults[0].output).toEqual({ result: 'test output' });
+    });
   });
 
   describe('executeNode', () => {
