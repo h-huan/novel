@@ -7,10 +7,8 @@ test.describe('Chapter lock continuity gate', () => {
   let projectId: string;
 
   test.beforeEach(async ({ request }) => {
-    const res = await request.post(`${BASE}/projects`, {
-      data: { title: uniqueTitle('lock-test'), type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
-    });
-    projectId = (await res.json()).id;
+    const project = await createProject(request, uniqueTitle('lock-test'));
+    projectId = project.id;
   });
 
   test.afterEach(async ({ request }) => {
