@@ -52,9 +52,10 @@ export class WorkflowGuardService {
     const currentStage = this.inferCurrentStage(project, assets);
     const projectType = project.type;
 
-    // Older projects may have kept the initial inspiration stage after assets
-    // were created. Persist the asset-derived stage so reopening the project
-    // does not keep returning it to discovery.
+    // Persist the stage derived from the current canonical assets. Creation-stage
+    // markers are not authorities: reopening a project, changing models, or
+    // resuming after a failed run must never move the workflow behind assets
+    // that already exist in Canon.
     if (project.current_workflow_stage !== currentStage) {
       this.projectRepo.update(projectId, {
         current_workflow_stage: currentStage,
@@ -530,21 +531,17 @@ export class WorkflowGuardService {
   }
 
   /**
-   * 推断当前阶段
+   * 推断当前阶段。
+   *
+   * 创建阶段的事实源是当前 Canon 资产，而不是历史 current_workflow_stage：
+   * 旧阶段只能作为 UI 游标，不能压过已经存在的世界观/角色/总纲/分卷/章纲。
+   * state_archive / weekly_review 属于作者主动进入的后期工作区，保留其显式状态。
    */
   private inferCurrentStage(project: any, assets: ProjectAssets): string {
     const projectType = project.type;
-    const currentStage = project.current_workflow_stage;
-
+    const currentStage = String(project.current_workflow_stage || '');
     const inferredStage = this.inferStageFromAssets(projectType, assets);
 
-    // Reaching the complete writing prerequisite is itself the transition to
-    // the writing stage.  Previously a persisted "outline" / "chapter" stage
-    // won over the real assets indefinitely, so the writing page displayed
-    // "ready for body" while its generate action was still rejected.
-    // Do not use the mere existence of an outline here: a short story must
-    // still contain its complete closure card, and a long novel must still
-    // have actual chapter plans.
     const shortStoryReadyForWriting = projectType === 'short_story'
       && assets.hasOutline
       && assets.hasShortCoreConflict
@@ -553,39 +550,27 @@ export class WorkflowGuardService {
       && assets.hasShortEndingClosure
       && assets.hasShortSceneSequence;
     const longNovelReadyForWriting = projectType === 'long_novel' && assets.hasChapterPlan;
-    if (shortStoryReadyForWriting || longNovelReadyForWriting) {
-      return 'writing';
-    }
+    if (shortStoryReadyForWriting || longNovelReadyForWriting) return 'writing';
 
-    // The initial inspiration marker is valid only while no project asset has
-    // been created. It is a stale persisted value once a project has content.
-    if (currentStage === 'idea_or_inspiration' && inferredStage !== currentStage) {
-      return inferredStage;
-    }
-
-    // 如果已有明确的 current_workflow_stage，直接使用
-    if (currentStage && currentStage !== 'idea' && currentStage !== '') {
-      if (projectType === 'short_story' && ['topic', 'outline', 'writing'].includes(currentStage)) {
-        return currentStage;
-      }
-      if (projectType === 'long_novel') {
-        const validStages = [
-          'idea_or_inspiration', 'world_setting', 'character', 'outline',
-          'volume', 'chapter', 'writing', 'state_archive', 'weekly_review',
-        ];
-        if (validStages.includes(currentStage)) {
-          return currentStage;
-        }
-      }
-    }
-
-    // 无明确阶段时，根据资产推断
     if (projectType === 'short_story') {
-      if (assets.hasOutline) return 'outline';
-      return 'topic';
+      const order = ['topic', 'outline', 'writing'];
+      const currentIndex = order.indexOf(currentStage);
+      const inferredIndex = order.indexOf(inferredStage);
+      if (currentIndex < 0) return inferredStage;
+      // Canon 可以把阶段向前推进；旧持久化游标不能把新资产拉回旧阶段。
+      return inferredIndex > currentIndex ? inferredStage : currentStage;
     }
 
-    return inferredStage;
+    if (['state_archive', 'weekly_review'].includes(currentStage)) return currentStage;
+
+    const creationOrder = [
+      'idea_or_inspiration', 'world_setting', 'character', 'outline',
+      'volume', 'chapter', 'writing',
+    ];
+    const currentIndex = creationOrder.indexOf(currentStage);
+    const inferredIndex = creationOrder.indexOf(inferredStage);
+    if (currentIndex < 0) return inferredStage;
+    return inferredIndex > currentIndex ? inferredStage : currentStage;
   }
 
   private inferStageFromAssets(projectType: string, assets: ProjectAssets): string {
