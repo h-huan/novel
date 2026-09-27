@@ -210,8 +210,9 @@ export function dependencyContext(
   // Recent body is canon-adjacent evidence and must enter before broad world data.
   // Keep all three immediate predecessors whenever they exist. The excerpt keeps
   // a small opening anchor plus a larger ending tail so names/events introduced
-  // at the chapter start are not erased just because the ending is long.
-  const recentExcerptChars = Math.max(320, Math.min(1200, Math.floor(max / 10)));
+  // at the chapter start are not erased just because the ending is long. Tight
+  // budgets reserve enough room for confirmed state and hard world rules too.
+  const recentExcerptChars = Math.max(280, Math.min(1200, Math.floor(max / 12)));
   let recent: any[] = [];
   if (tableExists(db, 'chapters') && chapterIndex !== null) {
     recent = db.prepare(`SELECT id,outline_id,volume_index,chapter_index,title,content,status
@@ -281,15 +282,16 @@ export function dependencyContext(
   add('chapterContract', chapterContract ? [chapterContract] : []);
   add('outline', outline ? [outline] : []);
   add('recentChapters', recent);
+  // Confirmed state is hard canon and must survive before descriptive profiles.
+  add('recentState', states);
   add('characterContracts', characters.map(compileCharacterContract));
   add('characters', characters.map(c => ({ id: c.id, name: c.name, speech_style: c.speech_style, forbidden_words: c.forbidden_words })));
   add('foreshadowing', hints.filter(h => explicitHints.has(h.id)));
   add('timeline', timeline);
   add('causality', links.filter(l => eventIds.has(l.source_event_id) && eventIds.has(l.target_event_id)));
   add('worldRules', [...rules, ...coreWorldSettings]);
-  // Active continuity evidence and confirmed state outrank broad background.
+  // Active continuity evidence still outranks broad location/organization context.
   add('foreshadowing', hints.filter(h => !explicitHints.has(h.id)));
-  add('recentState', states);
   add('locations', locations);
   add('organizations', organizations);
   add('outline', nearby);
