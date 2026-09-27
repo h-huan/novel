@@ -24,8 +24,8 @@ import { CHAPTER_WORD_RANGE } from '../../shared/src';
 /**
  * 单测替身：以下用例只验证 prompt 拼装与守卫流程本身，不验证执行标准解析。生产代码现在要求
  * 「项目执行标准必须真实存在」——项目行缺失会按设计抛 404/500，而不再静默退化成通用口径。
- * 因此替身必须提供一个真实存在的项目行（番茄短篇）、完整执行标准与 logger，否则被测路径会先撞上
- * 执行前提闸门，永远到不了用例真正要断言的逻辑。
+ * 因此替身必须提供一个真实存在的项目行（番茄短篇）、完整执行标准、已落库世界规则与 logger，
+ * 否则被测路径会先撞上执行前提/资料完整性闸门，永远到不了用例真正要断言的逻辑。
  * 六维取值与验收 fixture 共用 test-standards 的 STANDARD_PRECONDITIONS，不另抄一份。
  */
 const STANDARD_PROJECT_ROW = {
@@ -45,7 +45,17 @@ const STANDARD_PROJECT_ROW = {
 function standardsDbStub(row: Record<string, any> = STANDARD_PROJECT_ROW) {
   return {
     prepare: vi.fn().mockImplementation((sql: string) => ({
-      get: vi.fn().mockReturnValue(String(sql).includes('FROM projects') ? row : undefined),
+      get: vi.fn().mockImplementation(() => {
+        const statement = String(sql);
+        if (statement.includes('FROM projects')) return row;
+        if (statement.includes('FROM world_settings')) {
+          return {
+            story_premise: '测试世界观：角色每次进门都会触发既定时间回拨规则。',
+            rules: JSON.stringify(['每次进门回拨一小时']),
+          };
+        }
+        return undefined;
+      }),
       all: vi.fn().mockReturnValue([]),
       run: vi.fn().mockReturnValue({}),
     })),
@@ -1166,4 +1176,3 @@ describe('cross-chapter finding partition', () => {
     expect(partition.sourceConflicts).toEqual([]);
   });
 });
-
