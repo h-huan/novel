@@ -216,8 +216,11 @@ export function dependencyContext(
     }
   }
   ids(detail.world_rule_ids).forEach(id => ruleIds.add(id));
+  // Full-book rules are hard canon. Do not silently discard rule 65+ at query
+  // time; feed every candidate into the shared context budget so any omission is
+  // explicit in meta.truncation instead of depending on row/id order.
   const fullBookRules = tableExists(db, 'world_rules')
-    ? db.prepare("SELECT * FROM world_rules WHERE project_id=? AND scope='full_book' ORDER BY id LIMIT 64").all(projectId) as any[]
+    ? db.prepare("SELECT * FROM world_rules WHERE project_id=? AND scope='full_book' ORDER BY id").all(projectId) as any[]
     : [];
   const ruleCandidates = mergeById(
     rowsByIds(db, 'world_rules', projectId, [...ruleIds]),
