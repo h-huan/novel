@@ -25,6 +25,22 @@ async function chapterList(request: APIRequestContext, projectId: string): Promi
   return Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [];
 }
 
+async function configureRealModelRoute(request: APIRequestContext): Promise<string> {
+  const model = String(process.env.REAL_LLM_MODEL || 'deepseek-flash').trim();
+  if (!process.env.DEEPSEEK_API_KEY && !process.env.LLM_API_KEY) {
+    throw new Error('RUN_REAL_LLM_E2E=1 requires DEEPSEEK_API_KEY or LLM_API_KEY');
+  }
+  const scenes = Object.fromEntries(
+    ['daily', 'idea_generate', 'outline', 'writing', 'polish']
+      .map(scene => [`${scene}:normal`, model]),
+  );
+  const configured = await request.post(`${BASE}/routing/scenario-models`, { data: { scenes } });
+  expect(configured.status(), await configured.text()).toBe(201);
+  const mode = await request.post(`${BASE}/routing/mode`, { data: { mode: 'normal' } });
+  expect(mode.status(), await mode.text()).toBe(201);
+  return model;
+}
+
 test.describe('Writing Flow E2E', () => {
   let projectId: string;
 
@@ -97,6 +113,9 @@ test.describe('Real novel golden path', () => {
   test('discovers an idea, inherits its standards, initializes the novel and persists chapter one', async ({ request }) => {
     let projectId = '';
     try {
+      const routedModel = await configureRealModelRoute(request);
+      expect(routedModel).toBeTruthy();
+
       const standards = {
         storyType: 'short_story',
         platform: 'custom',
