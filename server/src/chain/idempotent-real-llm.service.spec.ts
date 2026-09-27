@@ -54,7 +54,7 @@ describe('IdempotentRealLLMService', () => {
       } as any;
       const database = { getDb: () => db } as any;
       const metrics = {} as any;
-      const service = new IdempotentRealLLMService(router, metrics, database, router);
+      const service = new IdempotentRealLLMService(router, metrics, database);
       const request: any = {
         prompt: '生成世界观JSON',
         systemPrompt: '只输出JSON',
@@ -66,6 +66,7 @@ describe('IdempotentRealLLMService', () => {
       };
       const stage = qualityStage(request.scenario, request.metrics.stepKey);
       const context = compileContext(db, { projectId: 'p', stage, chapterIndex: null });
+      const contextVersion = String(context.version || digest(''));
       const standards = standardDirectiveCache.snapshot(request.scenario, true, request.metrics.stepKey);
       const requestFingerprint = digest(JSON.stringify({
         prompt: request.prompt,
@@ -82,7 +83,7 @@ describe('IdempotentRealLLMService', () => {
       const systemPrompt = `${request.systemPrompt}\n【内部运行恢复指纹】${requestFingerprint}；仅用于幂等恢复，禁止在输出中复述。`;
       const promptVersion = digest(systemPrompt + JSON.stringify(constitution) + standards.digest);
       db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        'run-1','p',stage,'world_building','success',1,context.version,promptVersion,null,
+        'run-1','p',stage,'world_building','success',1,contextVersion,promptVersion,null,
         '{"world":"cached"}','test-model','2026-09-27T00:00:00.000Z',
       );
 
