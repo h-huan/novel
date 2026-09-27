@@ -122,19 +122,71 @@ export class GenerationRecoveryService {
     const consistencyIssues: string[] = [];
     const invalidChapterTargets = Number(chapterPlan?.invalid || 0);
     const plannedChapterWords = Number(chapterPlan?.planned || 0);
+    const isLongNovel = String(project.type) === 'long_novel';
+    const targetWords = Number(project.target_words);
+
+    // 长篇采用渐进式细纲：创建时只详细展开前 LONG_DETAIL_OUTLINE_WINDOW 章，
+    // 全书规模的唯一权威在卷大纲 volumes.estimatedChapters。不能再拿当前已细化
+    // 章节的 target_words 合计去等于全书 target_words，否则正常长篇必定无法激活。
+    let plannedBookChapters = counts.outlineChapters;
+    if (isLongNovel) {
+      let volumePlanValid = true;
+      let volumeRows: Array<{ volumes?: string | null }> = [];
+      try {
+        volumeRows = db.prepare("SELECT volumes FROM outlines WHERE project_id=? AND level='volume' ORDER BY \"order\",id")
+          .all(projectId) as Array<{ volumes?: string | null }>;
+      } catch {
+        volumePlanValid = false;
+      }
+      plannedBookChapters = 0;
+      if (!volumeRows.length) volumePlanValid = false;
+      for (const row of volumeRows) {
+        let estimated = 0;
+        try {
+          const meta = JSON.parse(String(row.volumes || '{}')) as { estimatedChapters?: unknown };
+          estimated = Number(meta.estimatedChapters);
+        } catch {
+          estimated = 0;
+        }
+        if (!Number.isInteger(estimated) || estimated <= 0) {
+          volumePlanValid = false;
+          continue;
+        }
+        plannedBookChapters += estimated;
+      }
+      if (!volumePlanValid || plannedBookChapters <= 0) {
+        consistencyIssues.push('长篇卷规划缺少有效预计章数，无法校验渐进式章纲范围');
+      } else {
+        if (plannedBookChapters < counts.outlineChapters) {
+          consistencyIssues.push(`长篇卷规划预计${plannedBookChapters}章，小于已生成的${counts.outlineChapters}章详细章纲`);
+        }
+        const minCapacity = plannedBookChapters * CHAPTER_WORD_RANGE.min;
+        const maxCapacity = plannedBookChapters * CHAPTER_WORD_RANGE.max;
+        if (targetWords < minCapacity || targetWords > maxCapacity) {
+          consistencyIssues.push(
+            `长篇卷规划${plannedBookChapters}章，按每章${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字无法承载项目目标${targetWords}字`,
+          );
+        }
+      }
+    }
+
     if (invalidChapterTargets) consistencyIssues.push(`${invalidChapterTargets}章目标字数不在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}`);
-    if (counts.outlineChapters && plannedChapterWords !== Number(project.target_words)) {
+    if (!isLongNovel && counts.outlineChapters && plannedChapterWords !== targetWords) {
       consistencyIssues.push(`章节目标合计${plannedChapterWords}字，与项目目标${project.target_words}字不一致`);
     }
     if (mappingProblems || counts.outlineChapters !== counts.chapters) {
       consistencyIssues.push('章节大纲与正文空壳不是一一对应');
     }
-    const invalidForeshadowRefs = counts.outlineChapters
+
+    // 短篇创建时全章纲已存在；长篇只展开前 N 章，因此未来跨卷伏笔必须按
+    // 卷规划的全书预计章数校验，而不是按当前详细章纲数量校验。
+    const foreshadowChapterCeiling = isLongNovel ? plannedBookChapters : counts.outlineChapters;
+    const invalidForeshadowRefs = foreshadowChapterCeiling > 0
       ? scalar(`SELECT COUNT(*) count FROM foreshadowings WHERE project_id=? AND
         (buried_chapter_index < 1 OR buried_chapter_index > ? OR
         (planned_recovery_chapter_index IS NOT NULL AND
         (planned_recovery_chapter_index < buried_chapter_index OR planned_recovery_chapter_index > ?)))`,
-        projectId, counts.outlineChapters, counts.outlineChapters)
+        projectId, foreshadowChapterCeiling, foreshadowChapterCeiling)
       : 0;
     if (invalidForeshadowRefs) consistencyIssues.push(`${invalidForeshadowRefs}条伏笔章节引用无效`);
 
@@ -148,7 +200,7 @@ export class GenerationRecoveryService {
     return {
       projectId,
       status: String(project.status),
-      targetWords: Number(project.target_words),
+      targetWords,
       counts,
       invalidChapterTargets,
       plannedChapterWords,
