@@ -84,6 +84,29 @@ test.describe('Writing Flow E2E', () => {
   });
 
   test('blocks body generation for a long novel without the required outline', async ({ request }) => {
+    // 这个用例只验证“大纲缺失”这一层。先补齐更上游的世界观和主角，
+    // 否则 WorkflowGuard 正确地会先阻断 world_setting/main_character，测试就测不到大纲门。
+    const world = await request.put(`${BASE}/projects/${projectId}/world-settings/simple`, {
+      data: {
+        storyPremise: '档案员追查午夜新增的失踪登记。',
+        era: '现代城市',
+        locations: ['档案馆'],
+        socialRules: '档案修改必须可追溯。',
+        specialSettings: '',
+      },
+    });
+    expect(world.status(), await world.text()).toBe(200);
+
+    const character = await request.post(`${BASE}/projects/${projectId}/characters`, {
+      data: {
+        name: '林川',
+        identity: '档案员',
+        role: 'protagonist',
+        isPovCharacter: true,
+      },
+    });
+    expect(character.status(), await character.text()).toBe(201);
+
     const res = await request.post(`${BASE}/chain/generate`, {
       data: { projectId, mode: 'semi_auto', prompt: 'Generate a chapter opening.' },
     });
