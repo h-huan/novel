@@ -1,135 +1,387 @@
-# Executable quality controls
+# 执行标准
 
-Machine baseline v62: source hierarchy is checked at every generative layer by a story independent semantic contract. Compare the complete parent facts and selected execution dimensions with the proposed child, including triggers, effect scope, chronology, count baselines, evidence survival, identities and ending. Return quoted conflicts as blocking findings. Repair only the child with the configured model, then recheck once; unresolved conflicts stop that layer before persistence. No story specific noun or verb pattern is an authority for arbitrary projects.
+本文件是 `h-huan/novel` **唯一规范文档**。
 
-Machine baseline v61: activation and body-generation source preflight reject a missing or empty saved world core rule set, even if an upstream model or database migration bypassed world candidate validation. A world row with `rules=[]` does not count as an executable world.
+它同时约束两件事：
 
-Machine baseline v60: world generation must return a substantive premise, era, atmosphere, 2-3 causal core rules, locations and ending direction before any world row is saved. A JSON object containing only an error, the protagonist's name or empty rules is invalid and must never become the authority from which the outline later concludes that the confirmed idea is unauthorized.
+1. 系统如何开发、修改、验收；
+2. 小说如何生成、检查、修复、交付。
 
-Machine baseline v59: each detailed chapter outline must pass the same source-aware fact ledger against the confirmed idea, saved world and prior chapter before the next chapter is generated. A failed candidate receives one targeted same-model repair and full recheck; remaining contradictions block the architecture at that chapter. The final whole-outline ledger still checks the complete sequence.
+`README.md` 只负责说明项目是什么、怎么启动、主要入口在哪里；API 文档只描述接口；进度文件只描述当前状态。它们都不得再维护第二套标准。
 
-Machine baseline v58: a fact-ledger reviewer may return each contradiction as a detailed object containing location and quoted evidence. Normalize that object without dropping fields and keep it blocking. A shape-only retry must not spend another model call when the returned evidence is complete.
+代码中的常量、扫描器、Creative Constitution、ChapterPlan、平台基准和模块 seed 是本文件的**可执行实现**，不是另一份规范。出现冲突时必须在同一次修改中让实现与本文件重新一致，不允许长期并存两套口径。
 
-Machine baseline v57: every detailed chapter-outline prompt uses the confirmed idea first, then saved world facts that do not contradict it, then the chapter's events, and finally prose. The prior short-story prompt contained a second world-first hierarchy; it caused the model to carry a drifted world rule into both chapters despite the confirmed card.
+---
 
-Machine baseline v56: narration must follow the project's selected POV. Omniscient third person may enter multiple characters' minds when transitions remain clear; limited POV may not. The body prompt and Gate must use the same selected POV and must not impose a universal limited-POV ban.
+## 1. 系统工作原则
 
-Machine baseline v55: recovery snapshots and cleanup include dependent world, character-profile and relationship records. An author-requested rebuild of a project with zero saved body text can replace conflicting lower-level outlines only after a complete rollback snapshot; author body text remains protected. Preserve provenance rather than changing version history to bypass protection.
+### 1.1 不做孤立补丁
 
-Machine baseline v54: the confirmed idea constrains lower world and outline records. A lower record that changes the idea's trigger, time scope or erased evidence is regenerated or repaired before activation. Recover an old active project from its confirmed idea with a rollback snapshot; do not ask the author to choose again when the card already chose.
+发现一个问题后，必须检查所有同类入口和同类数据流，不能只修当前报错位置。
 
-Machine baseline v53: an outline's own chapter number in `location_summary` must match its stored order before activation or prose. A mismatched explicit label is corrected in place without rewriting the chapter's events or locations.
+例如：
 
-Machine baseline v52: finish world-profile enrichment before project activation and include the resulting profile in cross-module fact review. A missing or contradictory profile blocks activation; it cannot be published later as an unreviewed second rule set. Time transitions must not recommend words banned by hardline rule 44.
+- 一个章节写入路径有问题，要检查生成、续写、精修、导入、恢复、人工编辑等所有写入路径；
+- 一个上下文来源会漂移，要检查生成与评审是否都读取同一权威；
+- 一个 Gate 会误判，要检查生成 Gate、质量看板、复检和修复是否共享同一判据；
+- 一个页面保存成功但后续写作链没有读取最新值，功能仍视为未完成。
 
-The first body prompt uses one fact order: locked facts and explicit must-obey/forbidden rules, then this chapter detailed outline for its concrete events, then unlocked world-profile expansions as support. Conflicting sources block before prose. Remove unrelated examples and duplicate prose rules from the prompt while retaining project dimensions, platform targets, story length distinctions and all blocking gates. An unlisted bystander may not be named, speak, or drive the plot.
+### 1.2 不以“代码存在”作为完成
 
-Evaluate fact-repair patches one at a time with the full deterministic hardline scanner. Reject only a patch that adds or worsens a hardline, then run the complete semantic review on all accepted patches. Saving remains blocked until every defect is cleared.
+表、Service、Controller、页面、字段、类型、build/typecheck 通过都只能证明实现存在。
 
-When the body has more than four fact defects, repair them in bounded groups of at most four rather than skipping local repair for a whole-chapter rewrite. Every group requires a full semantic and hardline recheck; unselected defects still block saving.
+真正完成至少要形成：
 
-The chapter outline must balance event counts, per-event costs and the final list state before any prose call. The first draft may use only the crossings and erasures assigned to that chapter. A draft that conflicts with the outline is a blocking body defect to repair; only a disagreement between two source records is a blocking source conflict. Neither category may be softened or saved.
+```text
+真实持久化
+→ 权威数据更新
+→ 派生状态/摘要/索引同步
+→ 后续上下文读取最新值
+→ 一致性与质量检查
+→ UI/报告可观察
+→ 错误、回滚和恢复路径正确
+```
 
-Machine baseline v51: before the first body-generation model call, check calculable countdowns shared by the current world profile and chapter outline. Elapsed time subtracted from a started countdown must equal the remaining time from now. A mismatch blocks generation with both source values identified; correct the source before requesting prose. If the same-model empty-output recovery call loses its network connection, the one network retry retains that call's model, output budget, temperature and thinking mode. A second connection failure remains a visible network failure with no saved body; chapter writing directs the author to retry that chapter. Outline fact defects first receive exact, bounded local patches with a full semantic and hardline recheck; a whole-chapter rewrite is a fallback only when the local correction cannot be anchored or verified. Rule 50 identifies narration action fragments, excluding quoted dialogue while mapping hits back to the original prose. Chapter quality status cannot be passing when a required execution dimension is unscored or below its project policy floor. Platform metric failure is unevaluated, never an empty passing result. Issue recheck requires an actual revision and complete review; model failure or no revision cannot be inferred to pass from an issue count. All hardline and outline gates remain blocking.
+### 1.3 优先合并、替换、删除，不无限叠加
 
-Applying a manual local revision changes the chapter body and immediately sets its quality status to pending recheck. The related issue remains unresolved until an actual review passes; applying text alone does not certify the chapter.
+修改顺序必须是：
 
-An issue returned in the chapter alignment review's `contradictions` field remains blocking, including local repetition or wording defects. No wording-pattern classifier may turn that contradiction into nonblocking advice. A conflict between source documents also blocks and requires correction of the source.
+```text
+检查现有能力
+→ 找唯一责任方
+→ 合并重复实现
+→ 删除/停用旧流程
+→ 必要时才新增
+```
 
-Fact-repair patches are applied in exact, nonoverlapping batches within the local change budget. An invalid anchor or an oversized batch does not discard other valid patches; each accepted batch still needs a complete semantic and hardline recheck, and saving remains blocked until every gate passes. A chapter outline cannot pair a calendar deadline such as "three days later at 10 a.m." with an exact remaining-hour count unless a current-time anchor proves the arithmetic before the first body model call.
+禁止为了修一个问题新增平行的 StoryContract、ChapterContract、QualityGate、Context 系统或新的“标准文档”，而旧实现继续运行。
 
-Based on main `2ee2231e45fb356b6e4cb67eb6c7fa9f029fcded`. The machine-readable authority for every rule below is `server/src/modules/module-standards/module-standards.seed.ts` (`SEED_BASELINE_VERSION = 60`), which startup enforcement applies deterministically to every project and the desktop `/module-standards` page renders; this file is the consolidated English execution standard - the complete mirror of that seed plus the project invariants enforced in code and covered by the automated checks. Update order: seed (machine) → this file → the desktop `/module-standards` page; `README.md` links here instead of restating rules. The single-chapter word range is single-sourced at `CHAPTER_WORD_RANGE` (`server/shared/src/types/story-length.ts`); prompts, guards, error messages and desktop copy interpolate that constant instead of restating numeric bounds. Platform pacing thresholds (`dialogueRatio`, `openingHookChars`, `payoffGapChars`) are single-sourced at `server/src/chain/platform-benchmarks.ts` and interpolated at runtime into every generation prompt, alignment repair prompt and hardline playbook; restating them as prose is forbidden, and each platform metric is stated once, only in the seed plus that table.
+开发期 migration、规则文档、临时分支、交接文件和历史流水账不得无限累积。历史由 Git、数据库审计和 CI 保存；当前仓库只保留当前有效结构。
 
-## Project invariants
+### 1.4 当前分支直接修改并提交
 
-One `Creative Constitution` per project is the single executable source for story type, platform, target words, category, tone, writing style, web-novel genre, POV, readers and chapter word range; database columns such as `target_platform`, `platform_style` and `writing_style` are only synced projections of it, and `settings` must never hold duplicate creative fields. Story length has one definition only: short stories total 8,000-35,000 characters, long novels total at least 100,000 with no fixed ceiling, and chapter length is read only from the platform baseline and the project constitution. The platform, category, tone, writing style, web-novel genre and POV recorded in that constitution are execution preconditions, not optional fields: an empty value means the standard was **not executed**, so it must be surfaced and its dimension blocked rather than silently becoming `not_applicable`, and an empty value must never be filled with a default or with the model's suggestion. Reading the constitution recovers the persisted aliases (`category`/`storyCategory`/`genre`, `pov`/`pointOfView`, `targetAudience`/`targetReaders`); a dimension that is still empty after alias recovery is reported as a missing standard and must be completed by the user before the project continues.
+默认在当前 checkout 分支修改；没有明确需要时不创建临时开发分支。完成一组可独立验收的修改后必须 commit，不能只停留在聊天结论或未提交工作区。
 
-During discovery the target platform is required. Category, tone, style, creative genre, platform work tags, plot direction, and POV may be omitted in the request, but each idea card must show the final explicit values before project creation. An omitted category is selected only from the chosen platform and story-length candidates in `server/shared/src/platform-categories.ts`; reference or modeled candidates retain their unverified provenance. A custom platform without category candidates requires a user-supplied category. Omitted creative dimensions are combined from the dictionary and validated; project creation remains blocked until the constitution is complete. Here a second hidden platform default once selected Fanqie for a blank platform, causing the discovered idea to use a platform the author never chose; that default is removed.
+### 1.5 不自动覆盖作者权威事实
 
-Model routing exposes exactly five user-configured scenarios - inspiration (`idea_generate`), outline/architecture (`outline`), body (`writing`), polish/QA (`polish`) and daily (`daily`) - each saved per mode. A scenario with its own model uses it; otherwise the current mode's daily model is used; when neither is configured the task stops with an explicit message and never falls back. Model, provider and reasoning effort never downgrade automatically. Every real model call writes one `generation_runs` record carrying its model, context version and standard snapshot; re-checking the same content updates the current quality report instead of creating a new report per answer. All automatic diagnostics are written to `writing_quality_reports` and `writing_quality_issues`; missing material or missing literal evidence returns unevaluated / insufficient-evidence rather than random scores, sample foreshadowings, placeholder issues or default high scores. Blocking issues stop delivery; fixable issues run Issue → Repair → Recheck → Compare → Accept/Rollback, and only accepted real repairs are learned from.
+作者确认的正文、题材、角色、世界观、章纲、状态、伏笔等正式事实不能被模型静默覆盖。
 
-RAG is an optional in-project semantic retrieval capability. It prefers the local model shipped with the application; when that model is unavailable, semantic indexing is skipped, the user is never asked for an embedding key, and creation, writing and saving are never blocked.
+人工修改影响正式事实时，必须经过差异提取、影响分析、候选状态、确认/驳回、正式写回和后续一致性复检。RAG 是可重建索引，不是事实源。
 
-## Execution standard dimensions and platform categories
+---
 
-The project form must keep all six creative execution dimensions visible and required. Creative genre and platform work tags are separate persisted values; platform submission category and work-tag names use the platform's publishing vocabulary. The Fanqie public ranking/tag sample is a candidate list, not proof of the complete author-backend list or a tag-count quota. If an author-entered work tag is absent from the sample, require a substantive category-fit explanation before discovery, project creation, or generation; include that explanation in the same genre quality gate. Author-selected plot tags are stored in the constitution and checked as part of the genre requirement. The workflow page may collapse rule text for reading, but must render the active seed text unchanged when expanded.
+## 2. 唯一故事权威与创作约束
 
-The execution standard has exactly six dimensions and they are single-sourced at `server/shared/src/execution-standard-dimensions.ts` (`platform`/`category`/`tone`/`style`/`genre`/`pov` ↔ `targetPlatform`/`category`/`storyTone`/`writingStyle`/`webNovelGenre`/`pov`). Generation (`creative-constitution`, `chain`), scoring (`stage-score`), reports and cockpit (`writing-quality`, `platform-analytics`), module-standard copy and the desktop forms all derive from that one list; no module may restate a dimension array, a platform list or a label list of its own. A chapter body request may use the `daily` model route, but its `body_*` step must resolve the `writing` module standards for both prompt injection and the persisted standards snapshot. Model routing and execution-standard routing serve different purposes; a body request with zero writing standards is an execution failure, not an acceptable default.
+### 2.1 Creative Constitution
 
-The six dimensions are not duplicates of one another. `category` answers "which submission slot on the target platform does this book go into" and is single-sourced at `server/shared/src/platform-categories.ts` (the per-platform submission trees). `tone`/`style`/`genre`/`pov` are cross-platform creative execution labels: they say how the book is written, not where it is filed. The platform trees and the internal genre taxonomy (`story_dict.story_category`, nine top-level categories) relate by mapping - every platform group declares which global category it corresponds to (`globalCategory`) - and that mapping exists so "the user filled a global category, how does it land on the target platform" is answerable; it is not a second copy of the same list. Both the platform trees and the dimension labels are dictionary-maintained: `story_dict` is seeded from the shared constants and the runtime reads the dictionary, so an author-added label is honoured without editing code.
+每个项目只有一份可执行创作宪法。它承载并约束：
 
-Chapter generation defaults to the configured `writing` model scene, including full-auto and streamed chapter creation. An explicitly requested scene is honoured. The `daily` scene remains a valid explicit or inherited model route, but the writing configuration must not be bypassed by a chapter entry point that silently defaults to `daily`.
+- 长篇/短篇；
+- 目标平台；
+- 目标总字数；
+- 投稿分类；
+- 基调；
+- 文风；
+- 创作流派/作品标签/情节取向；
+- POV；
+- 目标读者；
+- 已确认题材 `confirmedStory`；
+- 其它必须遵守/禁止事项。
 
-`platform_style` is a legacy column, not a second fact source. It is written only as a projection so it never diverges from `target_platform`, and it may be read only as the last historical alias that fills an empty platform - never ahead of `target_platform`, never in a SQL `SELECT` list of its own, and never as an "or" predicate for a hard line, a score or the cockpit. The single read criterion everywhere is `readConstitution().targetPlatform`. It is not dropped physically because historical exports and stored rows still reference it; dropping it would resurface the old `fantasy` default as a diverging value.
+数据库旧列只能作为兼容投影，不能成为第二事实源。
 
-The style-relax keyword list (`STYLE_PUNCTUATION_RELAX_KEYWORDS`: 白描/朴素/现实/日常/群像叙事) is single-sourced too, because it is consumed by both the hard-line scanner (longer threshold window) and the pacing profile (`platform-benchmarks.resolveNovelStrategy`). Relaxing the threshold is not exempting the rule and not a downgrade: the rule still runs and still blocks. The pacing-signal keyword bags in `resolveNovelStrategy` are deliberately *wider* than the tone/style dictionaries (they also carry non-dictionary signals such as 无敌流/系统流/战神/升级) and must therefore not be "merged" into the dictionary labels.
+### 2.2 六个执行维度
 
-## Character contracts
+创作执行前提固定为：
 
-The context compiler compiles existing character/profile fields into schema version 1 contracts. `profile_json.voiceContract` supports sentenceLength, speechRegister, directness, questionFrequency, explanationTolerance, preferredVocabulary, forbiddenVocabulary, catchphrases, speechRhythm, toneToDifferentPeople, authorityBehavior, dangerBehavior, betrayalBehavior, intimacyBehavior, conflictBehavior, weakPersonBehavior, moralBoundary and behaviorForbidden. Existing extended profile fields remain supported. Missing values stay unknown. The version is a SHA-256 of canonical contract content.
+```text
+平台 / 分类 / 基调 / 文风 / 流派 / 视角
+```
 
-Explicit named speech/actions are extracted conservatively; ambiguous and pronoun-only attributions are excluded. Forbidden vocabulary has an executable check. Semantic violations must identify the character, contract version, contract field and literal attributed evidence. Numerical preferences and behavioral prose are also supplied to the semantic judge, not inferred from keywords.
+维度键与显示名由 shared 代码唯一维护。任一必填维度缺失都表示“标准未执行”，必须阻断；不得用隐藏默认值、平台推荐或模型猜测补齐。
 
-## Repairs and scores
+### 2.3 灵感继承
 
-The chapter quality panel uses the same blocking status as generation: each deterministic prose hardline becomes a blocking issue; each selected execution dimension requires a score and an exact quote from the chapter, and a score below that project's policy floor blocks independently of the six-dimension average. Platform metric computation errors leave the check unevaluated and must never become an empty passing issue list.
+灵感卡一旦确认，创建项目必须继承其最终平台、分类、基调、文风、流派、作品/情节标签、POV、核心钩子与故事事实。后续世界观、角色、组织、伏笔、大纲和正文只能在这份权威之下扩展，不能重新解释成另一部小说。
 
-Five registry executors use different instructions and scope limits: voice (four patches/15%, attributed actor only), scene (six/40%, within scene boundaries), platform (six/20%, deterministic platform issue reduction required), local replacement (eight/30%, issue evidence only) and hardline local replacement (eight/60%, only the segments a deterministic hard-redline rule already flagged, with every non-flagged paragraph left byte-identical). The per-strategy percentage is a hard change budget, not a quality gate: exceeding it is rejected so no single repair can rewrite the whole chapter, while improvement must still be proven by the recheck. All retain uniqueness, overlap, structured-output validation, full recheck, comparison and rollback. Hardline local repair sends only a bounded batch of exactly anchored hit paragraphs to the model, never the full chapter as patch input; each accepted batch is checked against the full chapter, and truncated or non-improving output still blocks saving. When outline events or story facts also fail, repair those first and re-evaluate before applying local hardline patches; saving still requires both gates to pass. If punctuation monotony and dash density coincide, do not add dashes just to satisfy punctuation variety: every punctuation change must follow sentence meaning. Confirmed cast, countdown, and required-event order conflicts block from the first review instead of entering wording advisories. Meaningful adversarial questions and opposed responsibilities in dialogue are not customer-service exchanges merely because they lack filler words; smooth exchanges with no progression remain blocking under rule 42. A local patch may not trade an old hardline for a new one, and unproven improvement is rolled back. Scene/voice meaning preservation is enforced by recheck, not claimed as a deterministic property of text edits.
+---
 
-Strategy history is matched to rule ID, platform, genre, story type, model and prompt version. At least five matching attempts are required for a candidate; otherwise use the deterministic default. Accepted rates are penalized by introduced issues.
+## 3. 小说架构与正文主链
 
-Scores use positive dimension weights. Context, logic, timeline, character voice and world rules default to a 70 floor; an evidenced floor violation blocks even if the weighted score is high. The expressive dimensions selected in the Creative Constitution - `platform`, `category`, `tone`, `style`, `genre` and `pov` - are execution constraints, not advice: each is judged by the same floor rule with no severity cap, a below-floor verdict blocks, and a reviewer `blocking` severity is preserved verbatim for every rule id. No dimension, rule or layer may be downgraded to `high` or moved into advisories by code or by prompt. An empty constitution field is a missing standard, never `not_applicable`: it must not be dropped from the reviewed or required dimension set, must not shrink the coverage denominator, and must not be auto-filled with a default. Missing applicable dimensions keep the score unknown. `qualityPolicy` on project create/update can override weights/floors; defaults vary for short/long stories and Fanqie. Aggregated reports retain blocked status. The unified score is `round(LLM review x 0.7 + AI physical-fingerprint x 0.3)` minus hardline, tag and platform penalties; the current delivery target is 85+. Deterministic platform penalties are derived per platform at runtime from the single platform benchmark table (`server/src/chain/platform-benchmarks.ts`); no threshold may be restated as prose. They are: dialogue ratio below the platform `dialogueRatio` target band, no conflict/anomaly inside the platform `openingHookChars` window (opening hook), a flat ending hook, and a run of `payoffGapChars[1]` characters without a progression/payoff/emotion signal. The hardline dialogue floor (15% high-dialogue platforms, 5% first-person interior monologue, 8% otherwise) is a separate blocking line, not the target band. Authoritative values live only in the module-standards seed and this platform table.
+唯一主链：
 
-Repair progress is measured by issue resolution, not raw count alone. When the previous issue set is fully removed and the current set contains only new issues (at most three), the loop treats this as real progress and runs one more targeted repair (e.g. transition rule 44 fixed, dialogue rule 42 newly exposed). A signature identical to any earlier set (issues oscillating such as 44→42→44) still stops as `repeated_issues` to prevent thrashing. Empty model responses recover in three tiers: network retry; same-model token ceiling expansion (doubling each attempt up to the 32768 cap) when the response is empty with `finish_reason=length`, without model switch or downgrade; and one final retry with thinking disabled only when the response is still empty after the length/attempt budget, while the normal path keeps full reasoning. Both quality gates log projectId, chapterIndex, rule ID, location and quoted text before throwing, persisted to `generation_runs.error`; diagnosis uses logs and the database rather than UI screenshots.
+```text
+灵感发现
+→ Creative Constitution
+→ 主线/结局骨架
+→ 世界观与角色
+→ 分卷/章节规划
+→ ChapterPlan（本章执行合同）
+→ 有界上下文
+→ 正文首稿
+→ 确定性 Gate
+→ 语义 Gate
+→ 局部修复
+→ 复检
+→ Accepted Canon
+```
 
-## Context and AI Trace
+### 3.1 ChapterPlan 就是章节合同
 
-Dependency selection precedes recency: explicit outline characters/foreshadowings, outstanding foreshadowings, character-linked/world-wide rules and chapter rule tasks, timeline participants and causal ancestors, location/organization data and confirmed states. Recent chapters fill remaining space. Contracts are never partially clipped; oversized contracts can be omitted with a truncation notice. Other long fields can be clipped. The valid JSON snapshot includes truncation diagnostics and has a hard 4K–48K character budget (default 16K/24K), plus a stable content hash.
+不得另建第二套 ChapterContract 存储。现有章纲必须能表达：
 
-Scene beat sequences, dialogue function distributions and show/explain proxies are computed across scenes and prior chapters. `unknown` dialogue functions and absent evidence remain explicit. These are heuristic risks, not AI probabilities or semantic verdicts. The semantic judge sees the comparison evidence; accepted semantic issues drive registry selection. Reports and the cockpit expose contracts, attribution coverage, context version, policy, model distributions and risks.
+- 本章入口状态；
+- 唯一推进目标；
+- 必经事件/节拍；
+- 禁写事实；
+- 角色已知/未知边界；
+- 状态变化；
+- 伏笔任务；
+- 章末出口状态；
+- 下一章接力点。
 
-## Chapter boundary enforcement
+正文必须逐项验收，不能只做“看起来差不多”的语义比较。
 
-Body generation and the alignment gate both receive a compact boundary list of the subsequent chapters (title, core beats, foreshadowing recoveries, reversals, hooks; at most 3 chapters, truncated per chapter) read from `outlines`. Two cross-chapter findings are blocking: (a) early consumption - the body realizes core events, foreshadowing recoveries or reversals that a later chapter's outline schedules; (b) assertion conflicts - the body hard-codes a strong claim such as `only X would know Y` that contradicts a later chapter's established facts. The generation prompt forbids both before writing; the alignment verifier checks them and reports them into `contradictions` (blocking), never into `advisories`. Chapters without a following outline or the final chapter skip the boundary injection. The module-standards seed codifies the same rule for the review module so every project inherits it at startup. A chapter outline must also be internally self-consistent before it can constrain anything: when `location_summary` declares a spatial range (for example "the whole chapter never leaves the school gate"), `hot_scenes`, `setback_scenes`, `ending_setup` and the chapter-end landing point must stay inside that range, and a scene that only the next chapter opens (the far side of the door, the first face-to-face meeting) must not be reached or cashed in early. The seed rule makes this a deterministic outline-stage check: an outline defect is rewritten at outline level (retract the out-of-range landing point, or move the scene into its own chapter) instead of being left for the body gate to catch.
+### 3.2 长篇滚动规划
 
-## Chapter responsibility and story-card authorization
+长篇先冻结全书核心承诺与终局方向，再维护卷级目标，只细化近期章节窗口。已接受正文更新连续性状态后再展开下一窗口。禁止一次生成数百章固定模板，也禁止用固定“每三章一个爆点”之类机械公式代替真实节奏规划。
 
-Chapter responsibility precedes wording: the chapter-responsibility criteria (`CR-1`…`CR-7`), the authorization-boundary rule, the judgment rules, the scope discipline, the audit output contract and the repair boundaries are single-sourced at `server/shared/src/chapter-responsibility-review.ts`. The module-standards seed, the generation prompt, the audit prompt and the repair prompt all compile that one file, and no caller may restate the criteria in its own words - a second paraphrase is how an audit once rejected products the generator had no way to satisfy. Multi-criteria text is rendered one criterion per line; concatenating criteria without a separator is forbidden.
+---
 
-The generator carries the same authorization boundary as the auditor. Story-card generation, story-card fact review and story-card fact repair all receive the same compiled authorization directive, so the criteria that will reject a card are present while the card is written: an anomaly effect may perform only the smallest action the confirmed rule grants it and may never add a capability the rule did not grant (`CR-1`). An effect that only rewrites perception, memory or identity traces may never be expanded into rewriting devices, records, archives, surveillance or physical evidence (`CR-1`).
+## 4. 上下文与连续性
 
-A world-rule set must be self-consistent before any story card can be built on it: rules may not negate one another (the same subject, under the same condition, may not be simultaneously able and unable to obtain the same effect), and any effect that acts on another person must state the authorization path by which it reaches them - who performs it, on whom it takes effect, and on what basis. A rule that cannot state that path must not be written. This is enforced at worldbuilding time and again at story-card time, so the card is never asked to satisfy two mutually exclusive rules.
+正文与评审必须使用同一权威来源和相同优先级，不能写作时一套、审核时另一套。
 
-## AI-tell enforcement
+上下文优先级：
 
-AI-generated tell-tale language is treated as a hard line, not as style advice. The deterministic scanner (`detectForbiddenTells`) classifies a defined subset of rules as language hardlines (`LANGUAGE_HARDLINE_RULE_IDS`): narrator-jump/over-explaining (15b/15c/15d), state contradiction (20a), action-list and fragmented `V了，V了` chains (34/50), same-structure parallelism (53), enumeration of action items (list-enumeration), formula sentences (`不是X而是Y`/`不仅X而且Y`/`与其X不如Y` ≥3), dash/simile density, hollow motivational reflections (36), awakening paragraphs (37), short-line stacks (39), customer-service dialogue (42), mechanical transitions (44), staged sensory/personified/cliché descriptions (46/47/48), dense repeated physical reactions (49), modal-particle and environment-imagery density (51/52), measure-word mismatch (54), stacked punctuation (56), ellipsis density (57), and narrative-layer AI vague-word density (55: 仿佛/似乎/不禁/缓缓/微微/一丝/一缕/某种/悄然/无声/莫名/隐约; ≥5 per thousand chars and ≥8 total, or a single word ≥4). In the alignment gate these hits go into `contradictions` (blocking) with the `【硬红线·确定性扫描·】` prefix and feed the precise-rewrite repair instruction; paragraph-rhythm findings (short-para stacks `26-short-para`, uniform-length runs `26-uniform`, staccato one-sentence paragraphs `26b-staccato`, name-only paragraphs `32` (positive criterion only: the entire paragraph must consist only of a name or appellation from this book's `characters` table plus optional sentence-ending punctuation; name-led action or judgment sentences are ordinary narration; pronoun-led, speaker-tag, action-led and reply-to-dialogue paragraphs never count, and without the whitelist the rule never guesses - the old blacklist-based criterion produced 32 false positives on one first draft, and the later short-paragraph/name-head criterion still mislabeled ordinary action sentences such as 林野抬脚，跨过门槛。, all of them ordinary narrative sentences, mutually contradictory and therefore impossible to converge, so the chapter could not be saved), consecutive blank lines `33`, punctuation monotony `35`/`35b`) are BLOCKING and are written into `contradictions` exactly like the language hardlines, while the content/pacing metrics (redundant filter words `28a`, pronoun overload `38`, opening hook `40`/`40b`, emotional dead zone `41`, imperfection detail `43`, concrete-number anchor `45`, `dialogue-ratio`, time-density - explicit time words such as 凌晨/傍晚/午夜/深夜/上午/下午/早晨/中午/X点/X月X日/还剩X分钟 exceeding 15 per chapter, or the same place/proper name appearing more than 5 times) stay in `advisories`. The LLM verifier additionally checks four AI-tell patterns with literal evidence - uplifting/closing-thought endings, template-sentence stacking, hollow reflection paragraphs, parallelism runs - and writes them into `contradictions`.
+1. Creative Constitution 与锁定事实；
+2. 当前 ChapterPlan；
+3. 上一章出口状态与最近正文关键片段；
+4. 当前涉及角色状态、知识边界和关系；
+5. 当前涉及伏笔、时间线、因果链；
+6. 当前涉及世界规则、地点、组织；
+7. 当前卷/阶段规划；
+8. 其它按需检索信息。
 
-Rule 42 counts only physically adjacent real-dialogue paragraphs (a paragraph opening with a quote, or quotes immediately preceded by a speech verb such as 说/问/答/道); an intervening narration/action paragraph resets the counter, and ≥4 consecutive dialogue paragraphs without a human trace block it. A human trace exists when the text outside quotes carries ≥6 Chinese characters of action/scene/interiority, or includes silence, interruption, a modal particle, repetition, or a non-answer. Exemptions: an evasive answer (那边/不知道/没记住/有时候 and similar), and tautological repetition matching `X就是X`/`X还是X` (a child's deflection). The interrogation exemption is narrow - only escalating questions whose answers carry resistance (evasion/silence/non-answer/repeating the adult's words) qualify; consecutive questions alone do not exempt. Interrogation/registration scenes must (1) insert action/environment/interiority every 2-3 exchanges, (2) include at least one silence or half-answer, and (3) avoid one-to-two-character dry answers, using child-like repetition, vagueness, topic changes, counter-questions, modal particles or evasion. Rule 44 bans mechanical transition words (接着/然后/之后/随即/不久后/过了一会儿/很快/马上/立刻/接下来 and the like) at ≥3 occurrences, replaced by environment, time-anchor, sensory or body-state transitions. Rule 53 bans ≥3 consecutive clauses sharing a 1-2 character prefix; table/form structures must use one aggregate sentence (e.g. "表头三栏：日期、学生姓名、家长签字") rather than per-column "一栏是…" parallels, while noun enumerations (roll calls, menus) remain allowed.
+上下文必须有界，项目越长不能退化为整表扫描。最近剧情不能被宽泛世界背景挤出预算。
 
-## Writing-quality clause
+任何可计算的时间、数量、次数、倒计时、人物位置、物品状态必须在正文调用前先验证；资料源彼此冲突时先修资料源，禁止让正文自行二选一。
 
-Four writing-quality aspects - punctuation, naturalness, immersion and line breaks - are executable clauses in the seed body module (`文笔四要素可执行判据`), never style advice: a hit blocks saving exactly like every other hardline. Their rule ids and thresholds stay single-sourced in `hardline-scanner.ts` (`LANGUAGE_HARDLINE_RULE_IDS`) and the platform benchmark table, so the standard text never restates a numeric threshold. Punctuation covers stacked punctuation (`56-punct-stacking`), dense ellipses (`57-ellipsis-density`), dense dashes (`dash-density`) and monotone punctuation windows (`35`/`35b`): punctuation must agree with the sentence semantics - a question carries a question mark, quotes close, punctuation never manufactures a fake pause - inside the window set by the writing style. Naturalness covers AI-tell language running at scale (`formula-sentence`, `simile-density`, `48` cliched phrasing, `55` AI vague words, `34` and `53-same-structure-parallel` parallelism, `44` mechanical transitions, `list-enumeration`): the same sentence shape may not be stacked, and progression comes from concrete action and information. Immersion is show-dont-tell: emotion is carried by objects, action, pauses and body state, consecutive interior-monologue paragraphs with no event progress count as hollow reflection, an uplifting value statement at a paragraph end counts as a template ending, and staged sensory or personified description counts under `46`/`47`. Line breaks cover short-sentence paragraphs, uniform-length runs, staccato one-sentence paragraphs, name-only paragraphs and consecutive blank lines, all judged with the scanner thresholds: a fast-paced platform widens the threshold and a plain/realist writing style widens the punctuation window, but no platform and no writing style is ever exempt from any of the four aspects. If a chapter has both deterministic hardlines and outline conflicts, repair the outline event and fact conflicts first, then re-evaluate and repair remaining precisely anchored hardlines locally. Recheck every issue after each patch; the outline conflict remains blocking until independently resolved. A mixed failure must not send precise hardline evidence through an unrestricted whole-chapter rewrite.
+---
 
-## Platform adaptation and chapter consistency
+## 5. 质量 Gate 与修复纪律
 
-Before project activation, cross-module review checks a single fact ledger: the starting count, every trigger's count change, earlier events already reflected in that starting count, and the time rule. Contradictory facts already present in the confirmed idea cannot be treated as simultaneously true. Repair patches replace a uniquely matching source span inside the stored field; a shortened review excerpt must never overwrite the complete outline, world rule, character, or foreshadowing field. Every repair is reviewed again, and unresolved contradictions remain blocking. A review that still finds the same number of issues may continue its remaining bounded repair attempt when the underlying data changed.
+### 5.1 Blocking 永远优先于总分
 
-After detailed chapter outlines are saved, review the same fact ledger in chapter order and carry it across review batches. The short-form sequential chain runs this review before characters and foreshadowings; the long-form comprehensive chain runs it before activation. A contradictory initial count, historical change, per-trigger change, or time rule blocks creation. The final activation gate cannot substitute for the earlier short-form review.
+存在任一有证据的 Blocking 问题，就不能因为综合分高而交付。缺少材料、上下文或证据时标记 `unevaluated / insufficient_evidence`，不得伪造通过。
 
-A project-level cross-module gate failure is stored as a failed `generation_runs` record with its error in addition to the visible blocking issues. Successful model calls do not imply successful project activation.
+### 5.2 修复必须单调改善
 
-The first-pass prompt, the alignment repair prompt and the hardline playbook enforce pacing before writing, and every numeric threshold in them is interpolated at runtime from the platform benchmark table selected by the project platform/classification and short/long length: an opening hook (an anomaly/doubt/conflict/suspense within `openingHookChars`, at most 1-2 environment sentences), an ending hook (the final line must be an open question/reversal/crisis, with the closing beat performed only once), dialogue occupying the platform `dialogueRatio` band, spread across at least three scenes (a quoted label - a form of address written inside quotes in the narration - is not dialogue), and progression density (a payoff/emotion beat within the platform `payoffGapChars` band). Chapter consistency is gated against the outline: numbers must follow the values locked by the world rules/outline, so conflicting figures are blocked (four locked sheets written as "第七张", a locked span of two years written as "四百天"); scene and action scope follow the outline's location (e.g. "全章不出校门") and may not cross the scene boundary; only outline-listed events may be deepened, with no lateral invention of new clues/secrets; names, forms of address and relationships stay consistent and no character outside the locked cast may be invented; a repeated image/phrase/action appears at most twice per chapter and closing micro-action chains merge into 1-2 sentences. The module-standards seed codifies the dialogue/transition/parallelism/platform/consistency rules above for the body and review modules so every project inherits them at startup. The seed body module also fixes the time-node discipline (`time-node-discipline`): at most three minute-precise timestamps per chapter and never two within 500 characters; system displays, evidence screenshots and monitor records may stay minute-precise, while dialogue, self-justification, interior monologue and institutional procedures must not report minute-precise times, and everything else uses vague time expressions.
+自动修复只允许局部、证据锚定的修改。
 
-## Migrations and verification
+接受一轮修复必须同时满足：
 
-`001_initial` is the complete schema for a fresh database. Existing databases run one fixed, idempotent `schema-reconciler` on startup; it adds only missing structures and records the current schema version in a singleton metadata row. Future schema work updates this same reconciler instead of adding `002`, `003`, and further numbered files. Historical numbered records are collapsed to the single `001` baseline without deleting business data. Both the baseline and reconciler run transactionally and fail fast.
+- Blocking 问题总量下降；
+- 当前问题集合是上一轮的严格子集；
+- 不新增新的 Blocking 问题或问题族；
+- 不新增/加重确定性硬红线；
+- Creative Constitution、ChapterPlan 和故事身份没有被破坏。
 
-Automated checks cover contract attribution, critical floors, distant dependency retrieval beyond 1,000 chapters/100 characters, pathological budget limits, conditioned strategy fallback, real SQLite fresh/existing/legacy schema parity, benchmark runner and optional repairs, API validation/empty states and cockpit operation. Run the existing server typecheck/build/unit/acceptance/E2E and desktop typecheck/unit/build/quality E2E commands; CI executes the same matrix.
+不满足就回滚并停止自动修复。**自动生成流程禁止用整章重写作为兜底赌博。**
 
-Idea discovery may leave creative fields unselected. The discovery generator must choose explicit values from the managed creative dictionary for every unselected tone, writing style, genre, plot direction and narrative viewpoint; selected values remain exact constraints. Each accepted idea card carries its complete settings, and project creation copies that card into the creative constitution. Project creation, outlining, prose and quality gates still require the complete constitution. Platform submission categories and work tags continue to come from the single platform taxonomy source; dictionary entries never masquerade as an official posting taxonomy.
+内容、上下文、宪法 revision、章节合同和规则版本均未变化时，不得重复付费进行同一语义评审。
 
-An idea card must use one time and count rule across its hook, description and mechanism. A conflict between an explicit per-entry rewind and a different fixed return time is rejected during discovery and again before project creation. Historical count changes must be reflected in the present starting count.
+---
 
-The tone field is shown to authors as emotional atmosphere. Its current selectable values must describe the intended reading mood; action directions such as reversal of fortune and political contest belong to plot direction. Legacy tone values stored on existing projects retain their execution guides so an existing novel does not silently lose its contract when the selectable dictionary is corrected.
+## 6. 小说质量校验矩阵
 
-Whole-chapter fact repair must reduce confirmed semantic issues without introducing a new fact family or increasing any deterministic hardline occurrence; regressions restore the preceding candidate and remain blocked. Conflicting world-profile synopsis, world rules, or chapter outline is a blocking source defect to correct at the source before further prose rewriting. Only profiles linked to a present world setting may enter writing or review context.
+小说质量不由一个总分决定，而由“硬阻断 + 多维质量”共同决定。
+
+### 6.1 架构与章节职责（硬阻断）
+
+检查：
+
+- 全书承诺、核心冲突、终局方向是否一致；
+- 卷目标是否服务主线；
+- ChapterPlan 是否完整；
+- 本章是否覆盖全部必经事件；
+- 是否提前消费后续章节核心事件、伏笔回收或反转；
+- 章末状态是否能自然接到下一章。
+
+未通过时先修章纲/架构，不在错误结构上润色正文。
+
+### 6.2 上下文与事实一致性（硬阻断）
+
+检查：
+
+- 人物身份、动机、知识边界、关系和当前位置；
+- 世界规则边界、代价和触发条件；
+- 时间线、倒计时、事件先后；
+- 数量基线、次数变化、物品状态；
+- 已埋/推进/回收伏笔；
+- 最近章节已经发生的事实；
+- POV 与信息权限。
+
+所有结论必须能指出冲突的两个来源和正文证据。
+
+### 6.3 段落与文笔
+
+确定性扫描优先检查可机械判断的问题：
+
+- 过度一句一段、连续等长段、空行；
+- 标点叠用、破折号/省略号/单一标点过密；
+- 同构排比、动作清单、机械转场；
+- 重复意象、重复短语、密集身体反应；
+- 客服式问答、对白节奏单一；
+- 开篇长期纯环境铺垫、章尾平淡收束；
+- 平台对话占比、开篇钩子窗口和推进间隔等可计算指标。
+
+语义评审只补机器难以确定的部分，例如段尾突然上价值、空洞反思、人物声音失真、场景缺乏可感细节等。相同问题不得被确定性扫描和模型重复计数。
+
+### 6.4 AI 痕迹
+
+禁止把第三方“AI 检测概率”当作真相。AI 痕迹必须拆成可定位、可修复的症状：
+
+- 公式句和总结句；
+- 模糊副词/形容词高密度；
+- 比喻、破折号、感官套路密度异常；
+- 句长/段长过度均匀；
+- 连续短句像诗；
+- 角色对白同声同气；
+- 过度解释因果、替读者总结；
+- 情绪只“告诉”不“展示”；
+- 机械转场和模板化章尾。
+
+每一个 AI 痕迹问题都必须带正文原句/位置和对应修法，不能只给“AI 感很重”这种空结论。
+
+### 6.5 平台适配与“爆款潜力”
+
+系统**不能保证爆款**。所谓“爆款能力”只能定义为可检查的市场适配能力，包括：
+
+- 题材与投稿分类匹配；
+- 核心卖点与高概念钩子；
+- 开篇建立阅读承诺的速度；
+- 冲突/信息增量/关系变化密度；
+- 回报与压力升级间隔；
+- 章节结尾继续阅读理由；
+- 节奏曲线和张弛；
+- 反转是否有前置证据；
+- 读者期待兑现；
+- 重复桥段与疲劳；
+- 目标平台的对话、段落、篇幅和结构特征；
+- 与本地高质量样本及有来源的公开平台样本的差异。
+
+行业/平台基线与本地高质量样本必须标明来源。没有销量、完读率等商业数据时，不得把“本地高分作品”称作真实商业爆款。
+
+### 6.6 原创性
+
+类型母题可以复用，但具体世界观、机制、角色关系、关键桥段和表达必须原创。撞名、核心机制组合高度相似、明显复刻知名作品时必须报告风险。不得保存或注入大段现实作品原文作为模仿材料。
+
+---
+
+## 7. 质量结果与分数
+
+推荐输出结构：
+
+```text
+Hard Gates
+- architecture
+- continuity/facts
+- timeline/counts
+- execution dimensions
+- deterministic prose rules
+
+Quality Scores
+- paragraph/prose naturalness
+- character voice
+- emotional delivery
+- pacing/engagement
+- platform fit
+- originality
+```
+
+分数只能辅助排序和定位，不得覆盖 Hard Gate。所有语义分数必须附正文证据；没有证据就不评分。
+
+同一章节修订后，旧报告必须失效或 superseded；看板只统计当前正文对应的最新报告。
+
+---
+
+## 8. 本地验收与可观察性
+
+GitHub CI 只能证明仓库级代码质量；本地真实模型、真实数据库和真实项目必须通过本地验收报告证明。
+
+统一命令由仓库根目录 `verify-local.mjs` 提供。每次执行自动覆盖生成：
+
+```text
+verification/latest.json   # 机器可读
+verification/latest.md     # 人类可读
+```
+
+这两个文件是运行产物，不提交 Git。默认**只保存最新一次**，不按时间无限叠加。历史证据由 Git、CI、`generation_runs`、质量报告表和应用日志保存；若某次故障需要专项留档，应单独导出，不改变 latest 规则。
+
+机器报告至少记录：
+
+- 当前 commit/branch；
+- typecheck/unit/acceptance/build/E2E 结果（执行了才记录）；
+- 服务健康；
+- 代码标准版本与本地 active 标准是否一致；
+- 指定项目的 Creative Constitution revision 与 confirmedStory；
+- 第一章/最新章正文长度、字数、状态；
+- 最新 generation run、Gate 状态、模型和错误；
+- 质量 cockpit / 平台分析的可用结果。
+
+“真实成功”必须能证明正文确实落库，不能用页面可打开、模型返回过文本或测试夹具人工塞正文代替。
+
+---
+
+## 9. 测试分层
+
+### 9.1 仓库自动测试
+
+必须覆盖：
+
+```text
+Typecheck
+→ Unit
+→ Acceptance
+→ Build
+→ API E2E
+→ Desktop E2E
+```
+
+### 9.2 Golden Path
+
+真实流程验收必须覆盖：
+
+```text
+灵感发现
+→ 最终标签/六维标准
+→ 创建项目
+→ Creative Constitution
+→ 世界观/角色/架构
+→ ChapterPlan
+→ 生成第一章
+→ Gate 通过
+→ chapters.content 实际非空
+→ 质量报告与上下文可追溯
+```
+
+没有真实 API Key 时，真实模型步骤必须明确 `skipped`，不能显示成“成功”。
+
+---
+
+## 10. 文档与标准维护纪律
+
+仓库只保留一个规范文档：本文件。
+
+- `README.md`：项目介绍、启动、入口、验证命令；
+- `QUALITY_EXECUTION.md`：唯一执行标准；
+- `server/docs/API.md`：接口说明；
+- `server/docs/user-guide.md`：用户操作说明；
+- `PROGRESS.md`：若保留，只写当前状态，不作为规范来源，也不应无限追加历史。
+
+禁止再新增 `*_STANDARD*.md`、`*_RULES*.md`、`QUALITY_V2.md`、`SYSTEM_WORK_STANDARD.md` 等平行规范文件。
+
+平台风格、质量 Gate、AI 痕迹、修复纪律、开发验收原则的新规则都先合并到本文件；低层数值阈值保留在代码唯一常量表中，本文件只描述其语义和唯一来源，不复制容易漂移的数字。
+
+每次规范变化应与对应代码和测试在同一个 commit 中完成。Git commit 本身就是规范版本，不再手写独立文档版本号。

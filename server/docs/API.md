@@ -9,48 +9,22 @@
 ```http
 POST /api/v1/chain/idea-discover
 Content-Type: application/json
-
-{
-  "storyType": "short_story",
-  "platform": "fanqie",
-  "targetWords": "20000",
-  "storyCategory": "都市/现实",
-  "toneTags": ["热血", "白描"],
-  "count": 5
-}
 ```
 
-服务只调用 `idea_generate` 当前模式所配置的具体模型。一次请求先批量生成，缺项时最多使用同一模型补齐一次；不会切换模型、提供商或模式，也不会创建占位题材。相同配置仍在执行时复用同一任务。
+服务只调用 `idea_generate` 当前模式所配置的具体模型。一次请求先批量生成，缺项时最多使用同一模型补齐一次；不会切换模型、提供商或模式，也不会创建占位题材。
 
-篇幅口径只在执行标准一处定义（机器权威为 module-standards seed，见桌面端 `/module-standards`），短篇与长篇的目标总字数区间以那里为准，本文档不另写一套。返回题材必须同时给出 `storyType`、`targetPlatform`、`estimatedWords`、`plannedChapters` 与 `scopeBreakdown`，否则不能通过质量 Gate。
+篇幅、平台、分类、基调、文风、流派和视角等创作要求以根目录 `QUALITY_EXECUTION.md` 为唯一规范说明；代码侧低层阈值从 shared/platform benchmark 等唯一常量来源读取，API 文档不复制第二套规则。
 
 ### 创建项目
 
 ```http
 POST /api/v1/projects
 Content-Type: application/json
-
-{
-  "title": "作品名",
-  "type": "long_novel",
-  "targetPlatform": "fanqie",
-  "targetWords": 800000,
-  "category": "都市",
-  "storyTone": ["热血"],
-  "writingStyle": ["白描", "快节奏"],
-  "webNovelGenre": ["重生"],
-  "pov": "第三人称限知",
-  "targetAudience": "18-35岁网文读者",
-  "chapterWordRange": { "min": 3200, "max": 4000 },
-  "creationSource": "idea",
-  "ideaSeed": "用户原始想法",
-  "confirmedIdea": "已确认题材"
-}
 ```
 
-创作字段只允许从顶层写入。请求中的 `settings` 只能保存操作设置；包含 `targetPlatform`、`platform`、`recommendedPlatform`、`category`、`storyTone`、`writingStyle`、`webNovelGenre`、`pov`、`targetAudience` 或 `chapterWordRange` 会返回 400。
+项目创建必须形成完整 Creative Constitution。创作字段只允许从顶层写入；请求中的 `settings` 只保存操作设置，不允许塞入第二份创作事实。
 
-`platformStyle` 和 `projectMode` 已从写接口删除。数据库中的旧列仅作为创作宪法的同步投影。
+`platformStyle` 等旧字段仅保留为兼容投影，运行时不作为第二事实源。
 
 ### 项目接口
 
@@ -63,7 +37,19 @@ PUT    /api/v1/projects/:id
 DELETE /api/v1/projects/:id
 ```
 
-项目响应包含 `creativeConstitution`，它是所有创作模块唯一可执行的创作约束。
+项目响应包含 `creativeConstitution`，它是所有创作模块的项目级可执行创作约束。
+
+## 章节接口
+
+```text
+GET    /api/v1/projects/:projectId/chapters
+GET    /api/v1/projects/:projectId/chapters/:id
+POST   /api/v1/projects/:projectId/chapters
+PUT    /api/v1/projects/:projectId/chapters/:id
+DELETE /api/v1/projects/:projectId/chapters/:id
+```
+
+正文真实生成走 Chain 写作入口；是否成功必须以 `chapters.content` 实际落库及对应 Gate/质量报告为准。
 
 ## 模型配置
 
@@ -79,22 +65,7 @@ GET    /api/v1/routing/all-available-models
 POST   /api/v1/routing/test
 ```
 
-场景配置使用唯一格式：
-
-```json
-{
-  "mode": "normal",
-  "scenes": {
-    "idea_generate:normal": "deepseek-v4-flash",
-    "outline:normal": "deepseek-v4-flash",
-    "writing:normal": "deepseek-v4-flash",
-    "polish:normal": "deepseek-v4-flash",
-    "daily:normal": "deepseek-v4-flash"
-  }
-}
-```
-
-允许场景为 `idea_generate`、`outline`、`writing`、`polish`、`daily`；允许模式为 `economy`、`normal`、`premium`。旧的扁平或嵌套格式只在启动时迁移一次，运行时不再读取。
+允许场景为 `idea_generate`、`outline`、`writing`、`polish`、`daily`；允许模式为 `economy`、`normal`、`premium`。旧配置格式只用于兼容迁移，运行时不应维护第二套路由标准。
 
 ## 质量闭环
 
@@ -106,29 +77,26 @@ GET /api/v1/generation-metrics/content-reports?projectId=<id>&stage=chapter&seve
 GET /api/v1/platform-analytics/overview?projectId=<id>&days=30
 ```
 
-`cockpit` 返回：
+质量判断必须有证据。Blocking 问题停止交付；证据不足时返回未评估/证据不足，不允许空问题集合冒充通过。具体标准只见 `QUALITY_EXECUTION.md`。
 
-- 项目、世界观、角色、大纲和章节多维分数
-- 当前统一 `QualityIssue`
-- Gate 状态
-- 修复前后比较
-- 生成运行与趋势
-
-一个实际模型调用对应一条 `generation_runs`。同一项目、阶段、来源和内容范围只有一份当前质量报告；复检会使旧问题变为 `superseded`，不会为每次回答创建独立报告。
-
-质量问题严重度为 `blocking`、`high`、`medium`、`low`、`info`。问题证据包含原文、起止位置和是否验证。缺证据时评估状态为 `insufficient_evidence`。
-
-## 当前执行标准
+## 当前执行规则只读视图
 
 ```text
-GET  /api/v1/module-standards
-GET  /api/v1/module-standards/status
-GET  /api/v1/module-standards/:key
-POST /api/v1/module-standards/:key/summarize
+GET /api/v1/module-standards
+GET /api/v1/module-standards/status
+GET /api/v1/module-standards/:key
 ```
 
-生成时只注入当前生效标准。标准注入不代表内容通过验收，最终结果仍需经过对应质量 Gate。
+该接口只展示当前代码侧可执行镜像。运行时不再提供“让模型重新归纳并改写 hard rules”的写接口。规范变更必须通过代码 + `QUALITY_EXECUTION.md` + 测试在同一提交中完成。
+
+## 健康检查
+
+```text
+GET /api/v1/health
+GET /api/v1/health/full
+GET /api/v1/health/rag
+```
 
 ## RAG
 
-RAG 是内部可选能力，没有用户侧 Embedding 配置接口。缺少本地语义模型时相关同步返回 `skipped`，不会改用远程服务或阻断创建、保存与正文生成。
+RAG 是内部可选检索能力，不是正式事实源。缺少本地语义模型时相关同步可返回 `skipped`，不应改用未经配置的远程服务，也不应阻断正常项目数据保存。

@@ -81,6 +81,9 @@ playwright-report/
 test-results/
 .playwright-cli/
 
+# Local verification reports (latest-only runtime artifacts)
+verification/
+
 # Temporary files
 tmp/
 temp/
