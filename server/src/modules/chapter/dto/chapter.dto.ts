@@ -1,7 +1,10 @@
 /**
  * 章节 DTO
+ *
+ * 公共章节 CRUD 永远表示作者手工编辑。AI 生成结果不得通过客户端声明来源后直接落 Canon；
+ * AI 内容必须由生成主链在 Gate 通过后走服务端受控提交。
  */
-import { IsString, IsOptional, IsNumber, IsArray, Min, Max, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsNumber } from 'class-validator';
 import type { ChapterStatus, HookType, TransitionMode } from '@novel/shared';
 
 export class CreateChapterDto {
@@ -18,6 +21,7 @@ export class CreateChapterDto {
   @IsString()
   outlineId?: string;
 
+  /** 仅作者手工创建时可带正文；AI 主链不得使用该入口提交生成内容。 */
   @IsOptional()
   @IsString()
   content?: string;
@@ -39,11 +43,6 @@ export class UpdateChapterDto {
   @IsOptional()
   @IsString()
   transitionMode?: TransitionMode;
-
-  /** 本次保存来源：ai_generated=AI 生成正文 canonical 保存（触发自动质检）；manual=作者手动编辑（默认，不触发） */
-  @IsOptional()
-  @IsIn(['manual', 'ai_generated'])
-  source?: 'manual' | 'ai_generated';
 }
 
 export class ChapterQueryDto {
