@@ -1,25 +1,18 @@
 /**
  * IdeaLabService - 想法孵化核心服务
  *
- * 职责：
- * 1. 想法草稿 CRUD
- * 2. AI 追问生成（失败时显式报错）
- * 3. AI 想法完善 + 成熟度评分（失败时显式报错）
- * 4. 想法确认
- * 5. 转换为项目（复用 ProjectService）
+ * 想法成熟度只回答“故事想法是否足够清楚”；平台、六维执行标准、分类归位与体量
+ * 只由 ProjectService.create 统一判定，避免旧 IdeaLab 与主创建向导维护两套 Gate。
  */
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
-import { IdeaDraftRepository, IdeaDraftRow } from '../../database/repositories/idea-draft.repository';
-import { ProjectService } from '../project/project.service';
+import { IdeaDraftRepository, type IdeaDraftRow } from '../../database/repositories/idea-draft.repository';
 import { RealLLMService } from '../../chain/real-llm.service';
-import type { LLMRequest } from '../../chain/chain.types';
-import { CreateIdeaDraftDto } from './dto/create-idea-draft.dto';
-import { SaveAnswersDto } from './dto/save-answers.dto';
+import { ProjectService } from '../project/project.service';
 import { ConfirmIdeaDto } from './dto/confirm-idea.dto';
 import { ConvertToProjectDto } from './dto/convert-to-project.dto';
-
-// ========== 类型定义 ==========
+import { CreateIdeaDraftDto } from './dto/create-idea-draft.dto';
+import { SaveAnswersDto } from './dto/save-answers.dto';
 
 export interface QuestionItem {
   id: string;
@@ -90,22 +83,14 @@ export class IdeaLabService {
     private readonly llm: RealLLMService,
   ) {}
 
-  // ==================== 公共 CRUD ====================
-
-  /**
-   * 创建想法草稿
-   */
   createDraft(dto: CreateIdeaDraftDto): IdeaDraftResponse {
     const now = new Date().toISOString();
     const id = uuid();
-
     this.repo.insert({
       id,
       raw_idea: dto.rawIdea,
       title: dto.title || '',
       project_type: dto.projectType || 'long_novel',
-      // 空平台如实存成空串（= 未设置），不写 'generic' 冒充「已选平台」；
-      // 真正的阻断在转项目时由 ProjectService.create 的三道判统一执行。
       target_platform: dto.targetPlatform || '',
       custom_platform_note: dto.customPlatformNote || '',
       target_words: dto.targetWords,
@@ -121,91 +106,52 @@ export class IdeaLabService {
       created_at: now,
       updated_at: now,
     });
-
     return this.toResponse(this.repo.findById(id)!);
   }
 
-  /**
-   * 获取草稿详情
-   */
   getDraft(id: string): IdeaDraftResponse {
     const row = this.repo.findById(id);
     if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
     return this.toResponse(row);
   }
 
-  /**
-   * 获取所有草稿
-   */
   getAllDrafts(): IdeaDraftResponse[] {
-    return this.repo.findAll().map((r) => this.toResponse(r));
+    return this.repo.findAll().map(row => this.toResponse(row));
   }
 
-  // ==================== AI 追问生成 ====================
-
   async generateQuestionsAsync(id: string): Promise<{ questions: QuestionItem[]; status: string }> {
-    const row = this.repo.findById(id);
-    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
-
-    let questions: QuestionItem[] = [];
+    const row = this.requireDraft(id);
     try {
-      const prompt = this.buildQuestionsPrompt(row);
       const response = await this.llm.generate({
-        prompt,
-        systemPrompt: '你是一个专业的创作编辑，帮助作者完善小说想法。请生成有针对性的追问问题。返回格式为 JSON 数组，每个元素包含 id、question、reason 字段。',
+        prompt: this.buildQuestionsPrompt(row),
+        systemPrompt: '你是专业创作编辑。只根据作者当前想法提出能消除关键创作歧义的追问；返回 JSON 数组，每项包含 id、question、reason。',
         temperature: 0.8,
         scenario: 'idea_questions',
       });
-
-      questions = this.parseQuestionsResponse(response.content);
-      if (!questions || questions.length === 0) {
-        throw new Error('LLM 返回的问题为空');
-      }
+      const questions = this.parseQuestionsResponse(response.content);
+      if (!questions.length) throw new Error('LLM 返回的问题为空');
+      this.repo.update(id, {
+        questions_json: JSON.stringify(questions),
+        status: 'questioning',
+        updated_at: new Date().toISOString(),
+      });
+      return { questions, status: 'questioning' };
     } catch (err) {
-      this.logger.warn(`[IdeaLab] LLM 追问生成失败，已停止且未生成模板内容: ${err}`);
-      throw new BadRequestException(`AI追问生成失败，未使用模板降级：${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`[IdeaLab] LLM 追问生成失败，未使用模板降级: ${err}`);
+      throw new BadRequestException(`AI追问生成失败，未使用模板降级：${this.errorMessage(err)}`);
     }
-
-    this.repo.update(id, {
-      questions_json: JSON.stringify(questions),
-      status: 'questioning',
-      updated_at: new Date().toISOString(),
-    });
-
-    return {
-      questions,
-      status: 'questioning',
-    };
   }
 
-  // ==================== 保存回答 ====================
-
-  /**
-   * 保存用户回答
-   */
   saveAnswers(id: string, dto: SaveAnswersDto): { answers: AnswerItemData[]; status: string } {
-    const row = this.repo.findById(id);
-    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
-
-    const answers: AnswerItemData[] = dto.answers.map((a) => ({
-      questionId: a.questionId,
-      answer: a.answer,
-    }));
-
+    this.requireDraft(id);
+    const answers = dto.answers.map(item => ({ questionId: item.questionId, answer: item.answer }));
     this.repo.update(id, {
       answers_json: JSON.stringify(answers),
       status: 'answered',
       updated_at: new Date().toISOString(),
     });
-
-    const updated = this.repo.findById(id)!;
-    return {
-      answers: JSON.parse(updated.answers_json),
-      status: updated.status,
-    };
+    return { answers, status: 'answered' };
   }
-
-  // ==================== 完善想法 + 成熟度评分 ====================
 
   async refineIdeaAsync(id: string): Promise<{
     refinedIdea: RefinedIdea;
@@ -213,128 +159,65 @@ export class IdeaLabService {
     maturityReport: MaturityReport;
     status: string;
   }> {
-    const row = this.repo.findById(id);
-    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
-
-    const answers: AnswerItemData[] = JSON.parse(row.answers_json || '[]');
-    const questions: QuestionItem[] = JSON.parse(row.questions_json || '[]');
-
-    let refinedIdea: RefinedIdea;
+    const row = this.requireDraft(id);
+    const answers = this.parseJsonArray<AnswerItemData>(row.answers_json);
+    const questions = this.parseJsonArray<QuestionItem>(row.questions_json);
     try {
-      const prompt = this.buildRefinePrompt(row, questions, answers);
       const response = await this.llm.generate({
-        prompt,
-        systemPrompt: '你是一个专业的创作编辑，帮助作者把模糊想法完善为可创作的小说设定。输出 JSON 格式的完善结果。',
+        prompt: this.buildRefinePrompt(row, questions, answers),
+        systemPrompt: '你是专业创作编辑。把已有灵感与作者回答收敛成可执行的小说核心，不替作者补造未提供的硬事实；输出 JSON。',
         temperature: 0.7,
         scenario: 'idea_refine',
       });
-
-      const parsed = this.parseRefinedIdeaResponse(response.content);
-      if (!parsed || !parsed.oneLineHook) {
-        throw new Error('LLM 返回的完善想法不完整');
-      }
-      refinedIdea = parsed;
+      const refinedIdea = this.parseRefinedIdeaResponse(response.content);
+      if (!refinedIdea?.oneLineHook) throw new Error('LLM 返回的完善想法不完整');
+      const maturityReport = this.computeMaturityReport(refinedIdea, row.project_type);
+      const maturityScore = this.computeMaturityScore(maturityReport);
+      this.repo.update(id, {
+        refined_idea_json: JSON.stringify(refinedIdea),
+        maturity_score: maturityScore,
+        maturity_report_json: JSON.stringify(maturityReport),
+        status: 'refined',
+        updated_at: new Date().toISOString(),
+      });
+      return { refinedIdea, maturityScore, maturityReport, status: 'refined' };
     } catch (err) {
-      this.logger.warn(`[IdeaLab] LLM 完善想法失败，已停止且未生成模板内容: ${err}`);
-      throw new BadRequestException(`AI完善想法失败，未使用模板降级：${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`[IdeaLab] LLM 完善想法失败，未使用模板降级: ${err}`);
+      throw new BadRequestException(`AI完善想法失败，未使用模板降级：${this.errorMessage(err)}`);
     }
-
-    const maturityReport = this.computeMaturityReport(refinedIdea, row);
-    const maturityScore = this.computeMaturityScore(maturityReport);
-
-    this.repo.update(id, {
-      refined_idea_json: JSON.stringify(refinedIdea),
-      maturity_score: maturityScore,
-      maturity_report_json: JSON.stringify(maturityReport),
-      status: 'refined',
-      updated_at: new Date().toISOString(),
-    });
-
-    return {
-      refinedIdea,
-      maturityScore,
-      maturityReport,
-      status: 'refined',
-    };
   }
 
-  // ==================== 确认想法 ====================
-
-  /**
-   * 确认想法
-   */
   confirmIdea(id: string, dto: ConfirmIdeaDto): { confirmedIdea: string; status: string } {
-    const row = this.repo.findById(id);
-    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
-
-    const refinedIdea: RefinedIdea = JSON.parse(row.refined_idea_json || '{}');
-    const confirmedIdea = dto.confirmedIdea ||
-      refinedIdea.oneLineHook ||
-      row.raw_idea;
-
-    // 检查成熟度
-    if (row.maturity_score < 70) {
-      // 允许确认，但标记为低分确认
-      this.logger.log(`[IdeaLab] 低分确认: ${id}, score=${row.maturity_score}`);
-    }
-
+    const row = this.requireDraft(id);
+    const refinedIdea = this.parseRefinedIdeaSafe(row.refined_idea_json);
+    const confirmedIdea = dto.confirmedIdea || refinedIdea?.oneLineHook || row.raw_idea;
+    if (row.maturity_score < 70) this.logger.log(`[IdeaLab] 低分确认: ${id}, score=${row.maturity_score}`);
     this.repo.update(id, {
       confirmed_idea: confirmedIdea,
       status: 'confirmed',
       updated_at: new Date().toISOString(),
     });
-
-    return {
-      confirmedIdea,
-      status: 'confirmed',
-    };
+    return { confirmedIdea, status: 'confirmed' };
   }
 
-  // ==================== 转换为项目 ====================
-
-  /**
-   * 转换为项目
-   */
   convertToProject(id: string, dto: ConvertToProjectDto): { projectId: string; project: any } {
-    const row = this.repo.findById(id);
-    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
-
+    const row = this.requireDraft(id);
     if (row.status === 'converted') {
       throw new BadRequestException(`该想法草稿已转换为项目: ${row.converted_project_id}`);
     }
 
-    const maturityReport = this.parseMaturityReportSafe(row.maturity_report_json);
-    if (!maturityReport?.canConvertToProject) {
-      const unresolved = [
-        ...(maturityReport?.missingItems ?? []),
-        ...(maturityReport?.risks ?? []),
-      ];
-      const detail = unresolved.length > 0 ? `：${unresolved.join('；')}` : '';
-      throw new BadRequestException(`想法尚未通过成熟度检查，不能创建作品${detail}`);
-    }
-
-    const refinedIdea: RefinedIdea = JSON.parse(row.refined_idea_json || '{}');
-    const confirmedIdea = dto.confirmedIdea || row.confirmed_idea ||
-      refinedIdea.oneLineHook || row.raw_idea;
-    const title = dto.title || row.title ||
-      (refinedIdea.titleSuggestions && refinedIdea.titleSuggestions[0]) ||
-      '未命名作品';
-    // 执行标准（平台/分类/基调/文风/流派/视角）是框架层与正文层共同的验收前提，必须由创建入口原样接收。
-    // 此前这里硬编码 category: refinedIdea.storyType（那是短篇/长篇的类型值，不是分类）、storyTone: []、
-    // webNovelGenre: []、pov: ''，等于无论用户在向导里选了什么，落库的创作宪法都是空值，直到生成时才以
-    // 422 暴露。RefinedIdea 接口本身也确实没有这些字段（见上方定义），所以标准只能来自 DTO。
+    // 成熟度报告是编辑提示，不再充当第二套项目创建 Gate。转项目时用户可能刚补齐平台、分类、
+    // 六维与目标体量；真正的硬阻断必须只由 ProjectService.create 的统一创作宪法判据执行。
+    const refinedIdea = this.parseRefinedIdeaSafe(row.refined_idea_json);
+    const confirmedIdea = dto.confirmedIdea || row.confirmed_idea || refinedIdea?.oneLineHook || row.raw_idea;
+    const title = dto.title || row.title || refinedIdea?.titleSuggestions?.[0] || '未命名作品';
     const creationInput: Record<string, any> = {
       title,
       type: row.project_type as any,
       creationSource: 'idea',
       targetPlatform: dto.targetPlatform || row.target_platform,
-      // 自定义平台说明 = 「平台」这一维的执行值本身（custom 时必填，为空即未执行标准，创建入口已阻断）。
-      // 草稿阶段已经填过说明就直接沿用，用户不必在转项目时重填一遍。
       customPlatformNote: dto.customPlatformNote ?? row.custom_platform_note,
-      // 目标总字数同属「分类」维的执行值输入：转项目时填过就以本次为准，否则沿用草稿值（不填默认值）。
       targetWords: dto.targetWords ?? row.target_words,
-      // 取舍依据同属「分类」维的执行值输入。它只写在项目卡片上：草稿表没有这一列，
-      // 也没有更新草稿执行标准的入口，所以这里不设「沿用草稿值」的兜底，直接用本次传值。
       categoryWordScaleDeviation: dto.categoryWordScaleDeviation,
       category: dto.category,
       storyTone: dto.storyTone,
@@ -344,20 +227,15 @@ export class IdeaLabService {
       plotTags: dto.plotTags,
       genreFitNote: dto.genreFitNote,
       pov: dto.pov,
-      targetAudience: dto.targetAudience ?? refinedIdea.targetAudience ?? undefined,
+      targetAudience: dto.targetAudience ?? refinedIdea?.targetAudience ?? undefined,
       currentWorkflowStage: row.project_type === 'short_story' ? 'topic' : 'idea_or_inspiration',
       ideaStatus: 'converted',
       ideaSeed: row.raw_idea,
-      confirmedIdea: confirmedIdea,
-      description: row.description || refinedIdea.oneLineHook || '',
+      confirmedIdea,
+      description: row.description || refinedIdea?.oneLineHook || '',
       settings: {},
     };
 
-    // 「六维齐备 → 分类归位 → 分类体量」三道判在全平台只有 ProjectService.create 一处。
-    // 这里曾并行维护第二份「六维判」，判据与文案各写一份 —— 两份一旦漂移，同一套执行标准
-    // 从不同入口进来就会得到不同结论，表现就是用户反复看到「同一个 Gate 又没过」。
-    // 判据只留一份：交给 create 抛；本入口只补 create 拿不到的「草稿号」审计日志。
-    // 不降级：异常类型、文案、阻断时机与 create 完全一致（BadRequestException，且都在写库之前）。
     let project: ReturnType<ProjectService['create']>;
     try {
       project = this.projectService.create(creationInput as any);
@@ -368,246 +246,118 @@ export class IdeaLabService {
       throw err;
     }
 
-    // 更新草稿状态
     this.repo.update(id, {
       status: 'converted',
       converted_project_id: project.id,
       confirmed_idea: confirmedIdea,
       updated_at: new Date().toISOString(),
     });
-
-    return {
-      projectId: project.id,
-      project,
-    };
+    return { projectId: project.id, project };
   }
 
-  // ==================== Prompt 构建 ====================
+  private requireDraft(id: string): IdeaDraftRow {
+    const row = this.repo.findById(id);
+    if (!row) throw new NotFoundException(`想法草稿不存在: ${id}`);
+    return row;
+  }
 
   private buildQuestionsPrompt(row: IdeaDraftRow): string {
-    const isShort = row.project_type === 'short_story';
-    const platform = row.target_platform;
-
-    let prompt = `# 小说想法追问生成\n\n`;
-    prompt += `作者原始想法：${row.raw_idea}\n\n`;
-    prompt += `作品类型：${isShort ? '短篇' : '长篇'}\n`;
-    prompt += `目标平台：${platform}\n\n`;
-
-    if (isShort) {
-      prompt += `请针对短篇故事生成 5-7 个追问问题，帮助作者完善故事设定。\n\n`;
-      prompt += `关注维度：\n`;
-      prompt += `1. 第一人称主角身份——主角是"我"时，"我"是谁？\n`;
-      prompt += `2. 故事发生地点——具体在什么环境？\n`;
-      prompt += `3. 核心异常事件——是什么打破了日常？\n`;
-      prompt += `4. 核心冲突——主角最强烈的内心或外在冲突？\n`;
-      prompt += `5. 情绪卖点——读者看完最强烈的情绪是什么？\n`;
-      prompt += `6. 主要反转——有没有预想的反转或意外？\n`;
-      prompt += `7. 结尾冲击——想让读者在结尾感受到什么？\n`;
-    } else {
-      prompt += `请针对长篇小说生成 6-8 个追问问题，帮助作者完善故事设定。\n\n`;
-      prompt += `关注维度：\n`;
-      prompt += `1. 主角身份和长期目标——主角是谁？他想达到什么？\n`;
-      prompt += `2. 时代/地域/世界背景——故事发生在什么世界？\n`;
-      prompt += `3. 核心金手指或核心机制——主角的独特优势是什么？\n`;
-      prompt += `4. 长线冲突——贯穿全书的主要矛盾是什么？\n`;
-      prompt += `5. 反派/对手/阻力——谁在阻碍主角？\n`;
-      prompt += `6. 势力组织——有哪些阵营或组织？\n`;
-      prompt += `7. 地图/成长空间——故事的世界有多大？\n`;
-      prompt += `8. 前 30 章抓人点——开篇如何快速吸引读者？\n`;
-    }
-
-    prompt += `\n请以 JSON 数组格式返回，每个元素包含 id、question、reason 字段。`;
-
-    return prompt;
+    const short = row.project_type === 'short_story';
+    const dimensions = short
+      ? ['第一人称/主角身份', '具体发生环境', '打破日常的异常事件', '核心冲突', '核心情绪卖点', '主要反转', '结尾冲击']
+      : ['主角身份与长期目标', '时代/地域/世界背景', '核心机制', '长线冲突', '主要阻力', '势力组织', '成长空间', '开篇抓人点'];
+    return [
+      '# 小说想法追问',
+      `原始想法：${row.raw_idea}`,
+      `作品类型：${short ? '短篇' : '长篇'}`,
+      `当前目标平台：${row.target_platform || '尚未确定'}`,
+      `围绕以下维度提出 ${short ? '5-7' : '6-8'} 个真正需要作者决定的问题：${dimensions.join('；')}`,
+      '不要替作者预设答案，不要把平台推荐当成作者已经确认的事实。',
+      '返回 JSON 数组，每项包含 id、question、reason。',
+    ].join('\n\n');
   }
 
   private buildRefinePrompt(row: IdeaDraftRow, questions: QuestionItem[], answers: AnswerItemData[]): string {
-    const isShort = row.project_type === 'short_story';
-    const platform = row.target_platform;
-
-    let prompt = `# 小说想法完善\n\n`;
-    prompt += `## 原始想法\n${row.raw_idea}\n\n`;
-    prompt += `作品类型：${isShort ? '短篇' : '长篇'}\n`;
-    prompt += `目标平台：${platform}\n\n`;
-
-    if (questions.length > 0 && answers.length > 0) {
-      prompt += `## 追问与回答\n`;
-      for (const q of questions) {
-        const answer = answers.find((a) => a.questionId === q.id);
-        if (answer) {
-          prompt += `问：${q.question}\n答：${answer.answer}\n\n`;
-        }
-      }
-    }
-
-    if (isShort) {
-      prompt += `请生成以下 JSON 格式的完善结果：\n\n`;
-      prompt += `{\n`;
-      prompt += `  "titleSuggestions": ["标题建议1", "标题建议2", "标题建议3"],\n`;
-      prompt += `  "oneLineHook": "一句话钩子",\n`;
-      prompt += `  "protagonist": "第一人称主角身份",\n`;
-      prompt += `  "coreConflict": "核心冲突描述",\n`;
-      prompt += `  "worldSeed": "发生地点/环境",\n`;
-      prompt += `  "characterSeed": "关键角色设定",\n`;
-      prompt += `  "organizationSeed": "",\n`;
-      prompt += `  "sellingPoints": ["卖点1", "卖点2"],\n`;
-      prompt += `  "platformFit": "适合的平台及原因",\n`;
-      prompt += `  "storyType": "故事类型（悬疑/情感/反转/现实等）",\n`;
-      prompt += `  "targetAudience": "目标读者群体",\n`;
-      prompt += `  "shortStoryFit": "短篇适配建议",\n`;
-      prompt += `  "longNovelFit": "长篇扩展可能性",\n`;
-      prompt += `  "recommendedType": "short_story",\n`;
-      prompt += `  "nextStep": "下一步建议"\n`;
-      prompt += `}\n`;
-    } else {
-      prompt += `请生成以下 JSON 格式的完善结果：\n\n`;
-      prompt += `{\n`;
-      prompt += `  "titleSuggestions": ["标题建议1", "标题建议2", "标题建议3"],\n`;
-      prompt += `  "oneLineHook": "一句话钩子",\n`;
-      prompt += `  "protagonist": "主角设定（身份、目标、特质）",\n`;
-      prompt += `  "coreConflict": "核心冲突描述",\n`;
-      prompt += `  "worldSeed": "世界观种子",\n`;
-      prompt += `  "characterSeed": "角色种子",\n`;
-      prompt += `  "organizationSeed": "势力/组织种子",\n`;
-      prompt += `  "sellingPoints": ["卖点1", "卖点2", "卖点3"],\n`;
-      prompt += `  "platformFit": "适合的平台及原因",\n`;
-      prompt += `  "storyType": "故事类型",\n`;
-      prompt += `  "targetAudience": "目标读者群体",\n`;
-      prompt += `  "shortStoryFit": "短篇适配判断",\n`;
-      prompt += `  "longNovelFit": "长篇适配判断",\n`;
-      prompt += `  "recommendedType": "long_novel",\n`;
-      prompt += `  "nextStep": "下一步建议"\n`;
-      prompt += `}\n`;
-    }
-
-    return prompt;
+    const short = row.project_type === 'short_story';
+    const qa = questions.map(question => {
+      const answer = answers.find(item => item.questionId === question.id);
+      return answer ? `问：${question.question}\n答：${answer.answer}` : '';
+    }).filter(Boolean).join('\n\n');
+    return [
+      '# 小说想法完善',
+      `原始想法：${row.raw_idea}`,
+      `作品类型：${short ? '短篇' : '长篇'}`,
+      `当前目标平台：${row.target_platform || '尚未确定'}`,
+      qa ? `追问与回答：\n${qa}` : '',
+      '把作者已确认的信息收敛成一个故事核心；没有答案的内容保持开放，不擅自写成硬事实。',
+      '返回 JSON 对象，字段必须包含：titleSuggestions、oneLineHook、protagonist、coreConflict、worldSeed、characterSeed、organizationSeed、sellingPoints、platformFit、storyType、targetAudience、shortStoryFit、longNovelFit、recommendedType、nextStep。',
+      `recommendedType 必须为 ${short ? 'short_story' : 'long_novel'}。`,
+    ].filter(Boolean).join('\n\n');
   }
 
-  private parseQuestionsResponse(content: string): QuestionItem[] {
-    try {
-      // 尝试直接解析 JSON
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        return parsed.filter((item) => item.id && item.question);
-      }
-      // 尝试从嵌套对象中提取
-      if (parsed.questions && Array.isArray(parsed.questions)) {
-        return parsed.questions.filter((item: any) => item.id && item.question);
-      }
-      return [];
-    } catch {
-      // 尝试从 markdown 代码块中提取 JSON
-      const jsonMatch = content.match(/```(?:json)?\n([\s\S]*?)\n```/);
-      if (jsonMatch) {
-        return this.parseQuestionsResponse(jsonMatch[1]);
-      }
-      return [];
-    }
-  }
-
-  private parseRefinedIdeaResponse(content: string): RefinedIdea | null {
-    try {
-      const parsed = JSON.parse(content);
-      return parsed as RefinedIdea;
-    } catch {
-      const jsonMatch = content.match(/```(?:json)?\n([\s\S]*?)\n```/);
-      if (jsonMatch) {
-        return this.parseRefinedIdeaResponse(jsonMatch[1]);
-      }
-      return null;
-    }
-  }
-
-  // ==================== 成熟度评分 ====================
-
-  /**
-   * 计算成熟度报告
-   */
-  private computeMaturityReport(idea: RefinedIdea, row: IdeaDraftRow): MaturityReport {
+  private computeMaturityReport(idea: RefinedIdea, projectType: string): MaturityReport {
     const strengths: string[] = [];
     const missingItems: string[] = [];
     const risks: string[] = [];
+    const check = (ok: boolean, yes: string, no: string) => ok ? strengths.push(yes) : missingItems.push(no);
 
-    if (idea.oneLineHook && idea.oneLineHook.length > 10) {
-      strengths.push('有清晰的一句话钩子');
-    } else {
-      missingItems.push('需要明确一句话钩子');
-    }
+    check(!!idea.oneLineHook && idea.oneLineHook.trim().length > 10, '有清晰的一句话钩子', '需要明确一句话钩子');
+    check(!!idea.protagonist && idea.protagonist.trim().length > 4, '主角设定基本明确', '需要明确主角设定');
+    check(!!idea.coreConflict && idea.coreConflict.trim().length > 4, '核心冲突已定义', '需要明确核心冲突');
+    check(Array.isArray(idea.sellingPoints) && idea.sellingPoints.length > 0, `有 ${idea.sellingPoints?.length || 0} 个卖点`, '需要提炼故事卖点');
+    check(!!idea.platformFit && idea.platformFit.trim().length > 4, '有平台适配判断', '需要补充平台适配判断');
 
-    if (idea.protagonist && idea.protagonist.length > 4) {
-      strengths.push('主角设定基本明确');
+    if (projectType === 'short_story') {
+      if (!idea.shortStoryFit || idea.shortStoryFit.trim().length < 4) risks.push('短篇适配评估不完整');
     } else {
-      missingItems.push('需要明确主角设定');
-    }
-
-    if (idea.coreConflict && idea.coreConflict.length > 4) {
-      strengths.push('核心冲突已定义');
-    } else {
-      missingItems.push('需要明确核心冲突');
-    }
-
-    if (idea.sellingPoints && idea.sellingPoints.length > 0) {
-      strengths.push(`有 ${idea.sellingPoints.length} 个卖点`);
-    } else {
-      missingItems.push('需要提炼故事卖点');
-    }
-
-    if (idea.platformFit && idea.platformFit.length > 4) {
-      strengths.push('有平台适配判断');
-    } else {
-      missingItems.push('需要确认目标平台适配性');
-    }
-
-    if (row.target_platform && row.target_platform !== 'generic') {
-      strengths.push(`目标平台明确：${row.target_platform}`);
-    } else {
-      missingItems.push('建议选择具体目标平台');
-    }
-
-    if (row.target_words > 0) {
-      strengths.push(`目标字数设定：${row.target_words}`);
-    } else {
-      missingItems.push('建议设定目标字数');
-    }
-
-    if (row.project_type === 'short_story') {
-      if (!idea.shortStoryFit || idea.shortStoryFit.length < 4) {
-        risks.push('短篇适配评估不完整');
-      }
-    } else {
-      if (!idea.longNovelFit || idea.longNovelFit.length < 4) {
-        risks.push('长篇扩展性评估不完整');
-      }
-      if (!idea.worldSeed || idea.worldSeed.length < 4) {
-        risks.push('世界观种子需要进一步丰富以保证长篇可持续性');
-      }
+      if (!idea.longNovelFit || idea.longNovelFit.trim().length < 4) risks.push('长篇扩展性评估不完整');
+      if (!idea.worldSeed || idea.worldSeed.trim().length < 4) risks.push('世界观种子需要进一步明确以支撑长篇');
     }
 
     const satisfiedItems = strengths.length;
     const evaluatedItems = satisfiedItems + missingItems.length + risks.length;
-    const canConvertToProject = evaluatedItems > 0
-      && missingItems.length === 0
-      && risks.length === 0;
-
     return {
       strengths,
       missingItems,
       risks,
-      canConvertToProject,
+      canConvertToProject: evaluatedItems > 0 && missingItems.length === 0 && risks.length === 0,
       evaluatedItems,
       satisfiedItems,
     };
   }
 
-  /**
-   * 计算成熟度总分
-   */
   private computeMaturityScore(report: MaturityReport): number {
-    if (report.evaluatedItems <= 0) return 0;
-    return Math.round((report.satisfiedItems / report.evaluatedItems) * 100);
+    return report.evaluatedItems > 0 ? Math.round((report.satisfiedItems / report.evaluatedItems) * 100) : 0;
   }
 
-  // ==================== 响应转换 ====================
+  private parseQuestionsResponse(content: string): QuestionItem[] {
+    const parsed = this.parseJsonContent(content);
+    const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.questions) ? parsed.questions : [];
+    return rows.filter((item: any) => item?.id && item?.question)
+      .map((item: any) => ({ id: String(item.id), question: String(item.question), reason: String(item.reason || '') }));
+  }
+
+  private parseRefinedIdeaResponse(content: string): RefinedIdea | null {
+    const parsed = this.parseJsonContent(content);
+    return parsed && typeof parsed === 'object' ? parsed as RefinedIdea : null;
+  }
+
+  private parseJsonContent(content: string): any {
+    const text = String(content || '').trim();
+    try { return JSON.parse(text); } catch { /* try fenced JSON below */ }
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (!match) return null;
+    try { return JSON.parse(match[1]); } catch { return null; }
+  }
+
+  private parseJsonArray<T>(json: string): T[] {
+    try {
+      const parsed = JSON.parse(json || '[]');
+      return Array.isArray(parsed) ? parsed as T[] : [];
+    } catch {
+      return [];
+    }
+  }
 
   private toResponse(row: IdeaDraftRow): IdeaDraftResponse {
     return {
@@ -620,8 +370,8 @@ export class IdeaLabService {
       targetWords: row.target_words,
       description: row.description || '',
       status: row.status,
-      questions: JSON.parse(row.questions_json || '[]'),
-      answers: JSON.parse(row.answers_json || '[]'),
+      questions: this.parseJsonArray<QuestionItem>(row.questions_json),
+      answers: this.parseJsonArray<AnswerItemData>(row.answers_json),
       refinedIdea: this.parseRefinedIdeaSafe(row.refined_idea_json),
       maturityScore: row.maturity_score,
       maturityReport: this.parseMaturityReportSafe(row.maturity_report_json),
@@ -634,11 +384,8 @@ export class IdeaLabService {
 
   private parseRefinedIdeaSafe(json: string): RefinedIdea | null {
     try {
-      const parsed = JSON.parse(json);
-      if (parsed && parsed.oneLineHook) {
-        return parsed as RefinedIdea;
-      }
-      return null;
+      const parsed = JSON.parse(json || '{}');
+      return parsed?.oneLineHook ? parsed as RefinedIdea : null;
     } catch {
       return null;
     }
@@ -646,13 +393,9 @@ export class IdeaLabService {
 
   private parseMaturityReportSafe(json: string): MaturityReport | null {
     try {
-      const parsed = JSON.parse(json);
-      if (!parsed || !Array.isArray(parsed.strengths) || !Array.isArray(parsed.missingItems) || !Array.isArray(parsed.risks)) {
-        return null;
-      }
-      const satisfiedItems = Number.isFinite(parsed.satisfiedItems)
-        ? Math.max(0, Number(parsed.satisfiedItems))
-        : parsed.strengths.length;
+      const parsed = JSON.parse(json || '{}');
+      if (!Array.isArray(parsed?.strengths) || !Array.isArray(parsed?.missingItems) || !Array.isArray(parsed?.risks)) return null;
+      const satisfiedItems = Number.isFinite(parsed.satisfiedItems) ? Math.max(0, Number(parsed.satisfiedItems)) : parsed.strengths.length;
       const evaluatedItems = Number.isFinite(parsed.evaluatedItems)
         ? Math.max(satisfiedItems, Number(parsed.evaluatedItems))
         : satisfiedItems + parsed.missingItems.length + parsed.risks.length;
@@ -660,14 +403,16 @@ export class IdeaLabService {
         strengths: parsed.strengths,
         missingItems: parsed.missingItems,
         risks: parsed.risks,
-        canConvertToProject: parsed.canConvertToProject === true
-          && parsed.missingItems.length === 0
-          && parsed.risks.length === 0,
+        canConvertToProject: parsed.canConvertToProject === true && parsed.missingItems.length === 0 && parsed.risks.length === 0,
         evaluatedItems,
         satisfiedItems,
       };
     } catch {
       return null;
     }
+  }
+
+  private errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
   }
 }
