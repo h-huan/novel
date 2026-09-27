@@ -245,7 +245,7 @@ fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
 
 const testLines = tests.length
   ? tests.map((t) => `- ${t.label}: **${t.status.toUpperCase()}** (${t.durationMs}ms)`).join('\n')
-  : '- 未执行仓库测试（使用 `--full` 执行；追加 `--e2e` 执行 E2E）';
+  : '- 未执行仓库测试（使用 --full 执行；追加 --e2e 执行 E2E）';
 const standardLine = standardsResponse.ok
   ? `${runtime.standards.consistent ? 'PASS' : 'FAIL'} · code seed=${codeSeedVersion ?? 'unknown'} · active=${standards.length}`
   : `UNAVAILABLE · ${standardsResponse.error ?? `HTTP ${standardsResponse.status}`}`;
@@ -256,7 +256,7 @@ const gateLine = runtime.latestRun
   ? `${runtime.latestRun.gate_status ?? runtime.latestRun.gateStatus ?? 'unknown'} · run=${runtime.latestRun.id ?? 'unknown'} · model=${runtime.latestRun.model ?? 'unknown'}`
   : projectId ? '未找到 generation run' : '未指定项目';
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 第一章：${firstLine}\n- 最新 Gate：${gateLine}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 \\`verification/latest.json\\` 与 \\`verification/latest.md\\`，不叠加历史。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 如果需要检查真实小说，请使用 \\`--project <项目ID>\\` 并先在应用中完成一次真实生成/复检。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 第一章：${firstLine}\n- 最新 Gate：${gateLine}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 如果需要检查真实小说，请使用 --project <项目ID> 并先在应用中完成一次真实生成/复检。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
