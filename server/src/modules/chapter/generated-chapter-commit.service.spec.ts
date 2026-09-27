@@ -4,7 +4,7 @@ import { GeneratedChapterCommitService } from './generated-chapter-commit.servic
 
 type FixtureOptions = {
   runId?: string | null;
-  current?: boolean;
+  guardError?: Error | null;
   chapterStatus?: string;
 };
 
@@ -25,32 +25,45 @@ function fixture(options: FixtureOptions = {}) {
     throw new Error(`unexpected sql: ${sql}`);
   });
   const database = { getDb: () => ({ prepare }) } as any;
-  const metrics = { runIsCurrent: vi.fn(() => options.current ?? true) } as any;
+  const generatedCanonGuard = {
+    assertCanCommit: vi.fn(() => {
+      if (options.guardError) throw options.guardError;
+      return {
+        runId: runId || '', projectId: 'project-1', stage: 'chapter', scenario: 'writing', outputText: '正文',
+      };
+    }),
+  } as any;
   const chapters = { update: vi.fn(async (_id: string, dto: any) => ({ id: 'chapter-1', content: dto.content })) } as any;
   return {
-    service: new GeneratedChapterCommitService(database, metrics, chapters),
-    metrics,
+    service: new GeneratedChapterCommitService(database, generatedCanonGuard, chapters),
+    generatedCanonGuard,
     chapters,
   };
 }
 
 describe('GeneratedChapterCommitService', () => {
-  it('rejects AI text that has no matching passed generation run', async () => {
-    const { service, chapters } = fixture({ runId: null });
+  it('rejects AI text that has no matching generation run', async () => {
+    const { service, generatedCanonGuard, chapters } = fixture({ runId: null });
     await expect(service.commit('project-1', 'chapter-1', '正文')).rejects.toBeInstanceOf(BadRequestException);
+    expect(generatedCanonGuard.assertCanCommit).not.toHaveBeenCalled();
     expect(chapters.update).not.toHaveBeenCalled();
   });
 
-  it('rejects a passed run whose constitution/context is no longer current', async () => {
-    const { service, chapters } = fixture({ current: false });
+  it('propagates a stale-run conflict from the single canonical guard', async () => {
+    const { service, chapters } = fixture({ guardError: new ConflictException('stale') });
     await expect(service.commit('project-1', 'chapter-1', '正文')).rejects.toBeInstanceOf(ConflictException);
     expect(chapters.update).not.toHaveBeenCalled();
   });
 
-  it('persists only after a matching passed current run is verified', async () => {
-    const { service, metrics, chapters } = fixture();
+  it('persists only after the shared canonical guard verifies the matching run', async () => {
+    const { service, generatedCanonGuard, chapters } = fixture();
     await expect(service.commit('project-1', 'chapter-1', '正文')).resolves.toMatchObject({ content: '正文' });
-    expect(metrics.runIsCurrent).toHaveBeenCalledWith('run-passed', 'project-1');
+    expect(generatedCanonGuard.assertCanCommit).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      runId: 'run-passed',
+      outputText: '正文',
+      expectedStages: ['chapter'],
+    });
     expect(chapters.update).toHaveBeenCalledWith('chapter-1', { content: '正文' });
   });
 });
