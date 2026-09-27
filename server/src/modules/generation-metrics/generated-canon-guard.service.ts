@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { GenerationMetricsService } from './generation-metrics.service';
 
@@ -77,7 +77,7 @@ export class GeneratedCanonGuardService {
       throw new BadRequestException('AI Canon 提交内容与通过 Gate 的最终输出不一致');
     }
     if (!this.generationMetrics.runIsCurrent(runId, projectId)) {
-      throw new BadRequestException('AI Canon 提交凭证已过期：项目创作宪法或依赖上下文已变化');
+      throw new ConflictException('AI Canon 提交凭证已过期：项目创作宪法或依赖上下文已变化');
     }
 
     return { runId, projectId, stage, scenario, outputText };
