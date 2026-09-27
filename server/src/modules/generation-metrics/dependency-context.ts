@@ -30,6 +30,27 @@ function rowsByIds(db: DatabaseSync, name: string, projectId: string, wantedIds:
     .all(projectId, ...unique) as any[];
 }
 
+/**
+ * Query a dependency by the foreign key that actually selected it. This avoids
+ * the long-novel failure mode where we first take the project's earliest N rows
+ * and only then discover that the current chapter's row was outside that window.
+ * Table/column names are internal constants at call sites; values stay bound.
+ */
+function rowsByForeignIds(
+  db: DatabaseSync,
+  name: string,
+  projectId: string,
+  column: string,
+  wantedIds: readonly string[],
+  limit = 128,
+): any[] {
+  if (!tableExists(db, name) || wantedIds.length === 0) return [];
+  const unique = [...new Set(wantedIds.filter(Boolean))];
+  const placeholders = unique.map(() => '?').join(',');
+  return db.prepare(`SELECT * FROM ${name} WHERE project_id=? AND ${column} IN (${placeholders}) ORDER BY id LIMIT ?`)
+    .all(projectId, ...unique, limit) as any[];
+}
+
 function mergeById(...groups: any[][]): any[] {
   const out = new Map<string, any>();
   for (const group of groups) for (const row of group) if (row?.id) out.set(String(row.id), row);
@@ -130,17 +151,40 @@ export function dependencyContext(
     .filter(e => explicitEventIds.has(e.id) || e.chapter_index === chapterIndex || ids(e.participants_character_ids).some(id => involved.has(id)))
     .map(e => e.id));
 
-  const links = boundedRows(db, 'timeline_causality_links', projectId, 128);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const l of links) {
-      if (eventIds.has(l.target_event_id) && !eventIds.has(l.source_event_id)) {
-        eventIds.add(l.source_event_id);
-        changed = true;
+  // Walk only causality links whose target is already relevant. The previous
+  // implementation read the project's first 128 links and filtered afterwards,
+  // which silently lost the current chapter's ancestry in long projects.
+  const links: any[] = [];
+  const seenLinkIds = new Set<string>();
+  const expandedTargets = new Set<string>();
+  let frontier = [...eventIds];
+  while (frontier.length > 0 && links.length < 256) {
+    const targets = frontier.filter(id => !expandedTargets.has(id));
+    if (!targets.length) break;
+    targets.forEach(id => expandedTargets.add(id));
+    const upstream = rowsByForeignIds(
+      db,
+      'timeline_causality_links',
+      projectId,
+      'target_event_id',
+      targets,
+      Math.max(1, 256 - links.length),
+    );
+    const next: string[] = [];
+    for (const link of upstream) {
+      const key = String(link.id || `${link.source_event_id}->${link.target_event_id}`);
+      if (!seenLinkIds.has(key)) {
+        seenLinkIds.add(key);
+        links.push(link);
+      }
+      if (link.source_event_id && !eventIds.has(link.source_event_id)) {
+        eventIds.add(link.source_event_id);
+        next.push(link.source_event_id);
       }
     }
+    frontier = next;
   }
+
   const missingLinkedEvents = [...eventIds].filter(id => !eventCandidates.some(e => e.id === id));
   const events = mergeById(eventCandidates, rowsByIds(db, 'timeline_three_line_events', projectId, missingLinkedEvents));
   const timeline = events
@@ -148,8 +192,12 @@ export function dependencyContext(
     .sort((a, b) => Number(b.chapter_index === chapterIndex) - Number(a.chapter_index === chapterIndex) || String(a.id).localeCompare(String(b.id)));
 
   const ruleIds = new Set<string>();
-  for (const task of boundedRows(db, 'world_rule_chapter_tasks', projectId, 64)) {
-    if (task.chapter_id === current?.id && task.rule_id) ruleIds.add(task.rule_id);
+  // A chapter-bound rule is an explicit dependency; query it by chapter_id
+  // instead of taking the project's first 64 tasks and filtering in memory.
+  if (current?.id) {
+    for (const task of rowsByForeignIds(db, 'world_rule_chapter_tasks', projectId, 'chapter_id', [current.id], 128)) {
+      if (task.rule_id) ruleIds.add(task.rule_id);
+    }
   }
   ids(detail.world_rule_ids).forEach(id => ruleIds.add(id));
   const ruleCandidates = mergeById(
