@@ -102,6 +102,11 @@ export interface LLMResponse {
     totalTokens: number;
   };
   latency: number;           // 毫秒
+  /**
+   * 对应 generation_runs.id。固定生产链把它作为 AI 产物来源凭证一路带到 Canon 提交边界；
+   * 没有 runId 的结构化结果只能作为临时候选，不能证明自己通过了项目 Gate。
+   */
+  runId?: string;
 }
 
 // ==================== Chain Node ====================
@@ -143,36 +148,35 @@ export interface VariableDef {
   description?: string;
 }
 
-/** 执行上下文 */
+// ==================== Execution Context ====================
+
 export interface ExecutionContext {
   chainId: string;
-  variables: Record<string, unknown>;    // 当前所有变量
-  nodeOutputs: Record<string, unknown>;  // 各节点的输出缓存
-  retryCounters: Record<string, number>; // 各节点的重试计数
+  variables: Record<string, unknown>;
+  nodeOutputs: Record<string, unknown>;
+  retryCounters: Record<string, number>;
   startTime: Date;
-  timestamps: Record<string, Date>;       // 各节点的执行时间戳
-  metadata: Record<string, unknown>;      // 扩展元数据
+  timestamps: Record<string, Date>;
+  metadata: Record<string, unknown>;
   /** 所属小说项目：项目内场景埋点/宪法注入的归属；平台级链路（灵感发现/定时任务）为 undefined */
   projectId?: string;
 }
 
 // ==================== Chain ====================
 
-/** Prompt Chain 定义 */
 export interface PromptChain {
-  id: string;                  // 如 "inspiration-seed-enrich" / "body-by-outline"
-  name: string;                // 人类可读名称
-  version: string;             // 语义版本 (major.minor.patch)
+  id: string;
+  name: string;
+  version: string;
   description: string;
-  nodes: ChainNode[];          // 有序节点列表
-  variables: VariableDef[];    // 全局变量定义
+  nodes: ChainNode[];
+  variables: VariableDef[];
   executionMode: ExecutionMode;
   config: ChainConfig;
 }
 
-/** Chain 全局配置 */
 export interface ChainConfig {
-  timeout: number;             // 全局超时秒数
+  timeout: number;
   maxRetries: number;
   enableLogging: boolean;
   strictMode: boolean;
@@ -180,44 +184,78 @@ export interface ChainConfig {
 
 // ==================== 执行结果 ====================
 
-/** 节点执行结果 */
 export interface NodeResult {
   nodeId: string;
   nodeName: string;
   status: 'success' | 'failed' | 'skipped' | 'partial';
   output: unknown;
   error?: string;
+  /** Prompt 节点对应的 generation_runs.id；非 LLM 节点为空。 */
+  runId?: string;
   /**
    * 节点被质量 Gate 拒绝时的完整报告（结构化，原样透传，不在中间层压成字符串）。
-   *
-   * 为什么必须挂在节点结果上：Error 实例跨节点边界会退化成 error 字符串，
-   * 报告一旦丢失，上游只能看到「缺少世界观」「volumes 为空」这类下游症状，
-   * 真实成因被吞掉之后，报错就变成了永远指错方向的噪音。
    */
   gateReport?: GateFailureReport;
-  latency: number;             // 毫秒
+  latency: number;
   retryCount: number;
   timestamp: Date;
 }
 
-/** Chain 执行结果 */
 export interface ChainResult {
   chainId: string;
   chainName: string;
   status: ChainState;
-  outputs: Record<string, unknown>;    // 最终输出（各节点输出汇总）
-  nodeResults: NodeResult[];           // 各节点执行详情
+  outputs: Record<string, unknown>;
+  nodeResults: NodeResult[];
   errors: ChainError[];
-  totalLatency: number;                // 总耗时 ms
+  totalLatency: number;
   startTime: Date;
   endTime?: Date;
-  partialOutput?: unknown;             // 失败时的部分输出
+  partialOutput?: unknown;
 }
 
-/** Chain 执行错误 */
 export interface ChainError {
   nodeId: string;
   message: string;
-  type: 'timeout' | 'llm_error' | 'template_error' | 'internal';
+  type: 'llm_error' | 'validation_error' | 'timeout' | 'internal';
   recoverable: boolean;
+  details?: Record<string, unknown>;
+}
+
+export interface ChainExecutionLog {
+  id: string;
+  chainId: string;
+  projectId?: string;
+  status: ChainState;
+  startTime: Date;
+  endTime?: Date;
+  totalLatency: number;
+  nodeResults: NodeResult[];
+  errors: ChainError[];
+  inputSnapshot: Record<string, unknown>;
+  outputSnapshot: Record<string, unknown>;
+}
+
+export interface ChainProgressEvent {
+  type: 'chain_start' | 'node_start' | 'node_complete' | 'node_error' | 'chain_complete' | 'chain_error';
+  chainId: string;
+  nodeId?: string;
+  nodeName?: string;
+  progress: number;
+  message: string;
+  timestamp: Date;
+  data?: unknown;
+}
+
+export interface ChainExecutionOptions {
+  onProgress?: (event: ChainProgressEvent) => void;
+  signal?: AbortSignal;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ChainExecutionResult {
+  success: boolean;
+  result?: ChainResult;
+  error?: string;
+  duration: number;
 }
