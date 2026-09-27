@@ -36,16 +36,24 @@ export class ChapterController {
     return this.service.findOne(id);
   }
 
-  /** 作者手工编辑。AI 结果必须走 accept-generated。 */
+  /**
+   * 公共 PUT 默认只代表作者手工编辑。滚动升级期间旧前端仍会发送 source=ai_generated；
+   * 该信号只能把请求转入严格验签服务，绝不能直接进入 ChapterService.update。
+   */
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateChapterDto) {
-    return this.service.update(id, dto);
+  update(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateChapterDto,
+  ) {
+    if (dto.source === 'ai_generated') {
+      return this.generatedCommit.commit(projectId, id, dto.content || '');
+    }
+    const { source: _source, ...authorEdit } = dto;
+    return this.service.update(id, authorEdit);
   }
 
-  /**
-   * AI 正文唯一 Canon 提交入口：服务端反查同项目、同章节、同全文的最终 Gate PASS 记录，
-   * 并确认生成时的宪法/上下文仍为当前版本后才允许写库。
-   */
+  /** AI 正文唯一 Canon 提交入口。 */
   @Post(':id/accept-generated')
   acceptGenerated(
     @Param('projectId') projectId: string,
