@@ -23,21 +23,31 @@ describe('decideProgressiveRepair', () => {
     expect(decideProgressiveRepair([], [])).toEqual({ repair: false, reason: 'complete' });
   });
 
-  it('does not fall back to an automatic whole-chapter rewrite after local repair', () => {
+  it('allows exactly the first evidence-anchored local fact repair', () => {
     expect(decideProgressiveRepair([], ['漏结尾钩子'])).toEqual({
-      repair: false,
-      reason: 'whole_rewrite_disabled',
+      repair: true,
+      reason: 'first_local_repair',
     });
   });
 
-  it('still identifies an exact repeated issue set for diagnostics', () => {
-    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['漏场景', '漏钩子']).reason).toBe('repeated_issues');
+  it('identifies an exact repeated issue set and stops', () => {
+    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['漏场景', '漏钩子'])).toEqual({
+      repair: false,
+      reason: 'repeated_issues',
+    });
   });
 
-  it('blocks even when unresolved issues became fewer: another full rewrite is not earned', () => {
+  it('earns another local patch only when unresolved issues are a strict subset', () => {
     expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['漏钩子'])).toEqual({
+      repair: true,
+      reason: 'measurable_progress',
+    });
+  });
+
+  it('stops when a different problem replaces the old one', () => {
+    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['人物越界'])).toEqual({
       repair: false,
-      reason: 'whole_rewrite_disabled',
+      reason: 'no_measurable_progress',
     });
   });
 
