@@ -1,6 +1,6 @@
 export interface RepairDecision {
   repair: boolean;
-  reason: 'complete' | 'whole_rewrite_disabled' | 'repeated_issues' | 'no_measurable_progress';
+  reason: 'complete' | 'first_local_repair' | 'measurable_progress' | 'repeated_issues' | 'no_measurable_progress';
 }
 
 export interface ContinuationDecision {
@@ -41,12 +41,13 @@ export function repairIssueFamily(issue: string): string {
 }
 
 /**
- * The controller calls this only before its historical whole-chapter rewrite
- * fallback. Evidence-anchored local repairs have already run before this point.
- * Rewriting the full chapter changed unaffected facts, multiplied hardline
- * findings and repeatedly paid for another full review. Therefore the automatic
- * fallback is deliberately closed: unresolved blockers stay blocked and are
- * surfaced with their evidence instead of gambling on a new chapter draft.
+ * Authorize evidence-anchored LOCAL fact repair only.
+ *
+ * The caller records each pre-repair issue set. A first local patch is allowed;
+ * another local patch is earned only when the remaining set is a strict subset
+ * of the latest set. Repeated/equal/newly-divergent issues stop immediately.
+ * Whole-chapter rewriting is separately blocked at the LLM boundary, so this
+ * decision can never be interpreted as permission to regenerate the chapter.
  */
 export function decideProgressiveRepair(
   history: readonly (readonly string[])[],
@@ -54,14 +55,19 @@ export function decideProgressiveRepair(
 ): RepairDecision {
   const current = normalizedIssueSet(currentIssues);
   if (current.length === 0) return { repair: false, reason: 'complete' };
-  if (history.length > 0) {
-    const signature = current.join('\n');
-    const previousSets = history.map(normalizedIssueSet);
-    if (previousSets.some(items => items.join('\n') === signature)) {
-      return { repair: false, reason: 'repeated_issues' };
-    }
+  if (history.length === 0) return { repair: true, reason: 'first_local_repair' };
+
+  const signature = current.join('\n');
+  const previousSets = history.map(normalizedIssueSet);
+  if (previousSets.some(items => items.join('\n') === signature)) {
+    return { repair: false, reason: 'repeated_issues' };
   }
-  return { repair: false, reason: 'whole_rewrite_disabled' };
+
+  const latest = previousSets[previousSets.length - 1] || [];
+  const latestSet = new Set(latest);
+  const strictSubset = current.length < latest.length && current.every(issue => latestSet.has(issue));
+  if (strictSubset) return { repair: true, reason: 'measurable_progress' };
+  return { repair: false, reason: 'no_measurable_progress' };
 }
 
 /**
