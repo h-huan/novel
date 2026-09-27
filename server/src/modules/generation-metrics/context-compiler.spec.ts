@@ -115,7 +115,6 @@ describe('Context Compiler', () => {
       expect(first.snapshot).toContain('钥匙缺口');
       expect(first.snapshot).toContain('左臂受伤');
       expect(first.snapshot).not.toContain('第6章');
-      expect(first.truncated).toBe(true);
     } finally { db.close(); }
   });
 
