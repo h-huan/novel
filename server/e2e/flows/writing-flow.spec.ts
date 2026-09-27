@@ -38,6 +38,17 @@ test.describe('Writing Flow E2E', () => {
   });
 
   test('returns an authoritative writing package without an LLM', async ({ request }) => {
+    const world = await request.put(`${BASE}/projects/${projectId}/world-settings/simple`, {
+      data: {
+        storyPremise: '档案员追查午夜新增的失踪登记。',
+        era: '现代城市',
+        locations: ['档案馆'],
+        socialRules: '官方档案必须保留可追溯修改记录。',
+        specialSettings: '午夜后新增的异常登记只改变档案显示，不直接改写现实经历。',
+      },
+    });
+    expect(world.status(), await world.text()).toBe(200);
+
     const chapter = await createChapter(request, projectId, {
       title: '第一章', content: '主角在雨夜收到一封没有署名的信。', chapterIndex: 1,
     });
@@ -46,12 +57,13 @@ test.describe('Writing Flow E2E', () => {
     const res = await request.post(`${BASE}/chain/writing-context/raw`, {
       data: { projectId, chapterNumber: 1, volumeNumber: 1 },
     });
-    expect(res.status()).toBe(201);
+    expect(res.status(), await res.text()).toBe(201);
     const body = await res.json();
     expect(body).toMatchObject({ success: true, projectId, chapterNumber: 1 });
     expect(body.state).toHaveProperty('stateGuard');
     expect(body).toHaveProperty('chapterPlan');
     expect(body.canonicalContext).toHaveProperty('characters');
+    expect(body.canonicalContext.world).toContain('档案员追查午夜新增的失踪登记');
     expect(body.usage.instruction).toContain('Confirmed facts');
   });
 
