@@ -4,13 +4,18 @@
 import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ChapterService } from './chapter.service';
-import { CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
+import { GeneratedChapterCommitService } from './generated-chapter-commit.service';
+import { AcceptGeneratedChapterDto, CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
 
 @ApiTags('chapter')
 @Controller('projects/:projectId/chapters')
 export class ChapterController {
-  constructor(private readonly service: ChapterService) {}
+  constructor(
+    private readonly service: ChapterService,
+    private readonly generatedCommit: GeneratedChapterCommitService,
+  ) {}
 
+  /** 作者手工创建章节。AI 主链不得使用此入口提交生成正文。 */
   @Post()
   create(@Param('projectId') projectId: string, @Body() dto: CreateChapterDto) {
     return this.service.create(projectId, dto);
@@ -31,9 +36,23 @@ export class ChapterController {
     return this.service.findOne(id);
   }
 
+  /** 作者手工编辑。AI 结果必须走 accept-generated。 */
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: UpdateChapterDto) {
     return this.service.update(id, dto);
+  }
+
+  /**
+   * AI 正文唯一 Canon 提交入口：服务端反查同项目、同章节、同全文的最终 Gate PASS 记录，
+   * 并确认生成时的宪法/上下文仍为当前版本后才允许写库。
+   */
+  @Post(':id/accept-generated')
+  acceptGenerated(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() dto: AcceptGeneratedChapterDto,
+  ) {
+    return this.generatedCommit.commit(projectId, id, dto.content);
   }
 
   @Delete(':id')
