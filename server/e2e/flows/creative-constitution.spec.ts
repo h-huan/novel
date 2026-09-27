@@ -22,8 +22,8 @@ test('constitution survives create/update/read and rejects conflicts over HTTP',
     expect(changed.status(), await changed.text()).toBe(200);
     const saved = await (await request.get(`${url}/${p.id}`)).json();
     expect(saved.creativeConstitution.revision).toBe(2);
-    expect(saved.storyTone).toEqual(saved.creativeConstitution.storyTone);
-    expect(saved.targetPlatform).toBe(saved.creativeConstitution.targetPlatform);
+    expect(saved.creativeConstitution.storyTone).toEqual(['冷峻', '克制']);
+    expect(saved.creativeConstitution.targetPlatform).toBe('custom');
 
     const conflict = await request.put(`${url}/${p.id}`, {
       data: { targetPlatform: 'custom', settings: { targetPlatform: 'fanqie' } },
