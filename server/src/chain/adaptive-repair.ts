@@ -31,7 +31,7 @@ export function repairIssueFamily(issue: string): string {
   const text = String(issue || '').trim().toLowerCase();
   if (/必需事件|未兑现|covered=false|漏.{0,8}(事件|场景|钩子)/.test(text)) return 'outline_missing';
   if (/时间|倒计时|时序|timeline|先后顺序/.test(text)) return 'timeline';
-  if (/跨章|场景边界|提前.{0,8}(下章|后章)|章节边界/.test(text)) return 'chapter_boundary';
+  if (/跨章|场景边界|提前.{0,8}(下一章|下章|后章)|章节边界/.test(text)) return 'chapter_boundary';
   if (/世界观|世界规则|规则违反|能力边界/.test(text)) return 'world_rule';
   if (/人物|角色|动机|智力底线|character/.test(text)) return 'character';
   if (/物品状态|状态链|拿出|收起|没盖帽|收纳/.test(text)) return 'object_state';
