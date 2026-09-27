@@ -46,17 +46,19 @@ function fixture() {
   return { db };
 }
 
+function serviceFor(db: any) {
+  const router = {
+    getModelForScenario: () => ({ modelName: 'test-model', modelVersion: 'v1' }),
+    getConfig: () => ({ scenarios: { outline: { maxTokens: 4096 } }, defaults: { maxTokens: 4096 } }),
+  } as any;
+  return new IdempotentRealLLMService(router, {} as any, { getDb: () => db } as any);
+}
+
 describe('IdempotentRealLLMService', () => {
   it('returns an exact successful creation-stage run without another model call', async () => {
     const { db } = fixture();
     try {
-      const router = {
-        getModelForScenario: () => ({ modelName: 'test-model', modelVersion: 'v1' }),
-        getConfig: () => ({ scenarios: { outline: { maxTokens: 4096 } }, defaults: { maxTokens: 4096 } }),
-      } as any;
-      const database = { getDb: () => db } as any;
-      const metrics = {} as any;
-      const service = new IdempotentRealLLMService(router, metrics, database);
+      const service = serviceFor(db);
       const request: any = {
         prompt: '生成世界观JSON',
         systemPrompt: '只输出JSON',
@@ -95,6 +97,18 @@ describe('IdempotentRealLLMService', () => {
       expect(response.content).toBe('{"world":"cached"}');
       expect(response.finishReason).toBe('cached_successful_stage');
       expect(response.latency).toBe(0);
+    } finally { db.close(); }
+  });
+
+  it('physically blocks the historical automatic whole-chapter alignment rewrite', async () => {
+    const { db } = fixture();
+    try {
+      const service = serviceFor(db);
+      await expect(service.generate({
+        prompt: '根据评审结论重写整章',
+        scenario: 'writing_climax',
+        metrics: { projectId: 'p', chapterIndex: 1, stepKey: 'body_alignment_repair' },
+      })).rejects.toThrow(/自动整章.*禁用/);
     } finally { db.close(); }
   });
 });
