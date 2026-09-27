@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 const SCHEMA_DESCRIPTION =
-  'Versioned contracts, dependency context, narrative trace and executable benchmark';
+  'Versioned contracts, bounded dependency context, narrative trace and terminal generation invariants';
 
 type ColumnRow = { name: string };
 
@@ -56,6 +56,26 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
     if (!hasColumn(db, 'idea_drafts', 'custom_platform_note')) {
       db.exec("ALTER TABLE idea_drafts ADD COLUMN custom_platform_note TEXT DEFAULT ''");
       actions.push('idea_drafts.custom_platform_note');
+    }
+
+    // generation_runs 的终态必须与 gate_status 一致。过去 finishRun 只写 status，
+    // 生成在进入质量评估前失败时会永久留下 failed + not_evaluated，界面和恢复逻辑
+    // 无法分辨“没评审”与“已经失败”。把这个约束下沉到数据库边界，避免每个调用点
+    // 各补一次状态修正；同时回填历史脏数据。无需新增编号 migration。
+    if (hasTable(db, 'generation_runs') && hasColumn(db, 'generation_runs', 'gate_status')) {
+      const repaired = db.prepare(`UPDATE generation_runs SET gate_status='blocked'
+        WHERE status IN ('failed','cancelled') AND COALESCE(gate_status,'not_evaluated')='not_evaluated'`).run();
+      if (Number(repaired.changes || 0) > 0) actions.push(`generation_runs.terminal_gate_backfill.${repaired.changes}`);
+      db.exec(`
+        DROP TRIGGER IF EXISTS trg_generation_runs_terminal_gate;
+        CREATE TRIGGER trg_generation_runs_terminal_gate
+        AFTER UPDATE OF status ON generation_runs
+        WHEN NEW.status IN ('failed','cancelled')
+          AND COALESCE(NEW.gate_status,'not_evaluated')='not_evaluated'
+        BEGIN
+          UPDATE generation_runs SET gate_status='blocked' WHERE id=NEW.id;
+        END;
+      `);
     }
 
     const schemaTableIsCurrent =
