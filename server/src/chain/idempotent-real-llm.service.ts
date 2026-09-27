@@ -12,12 +12,15 @@ import { qualityStage } from '../routing/scenario-taxonomy';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 
 const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
 
 /**
- * The public provider token is still RealLLMService. This subclass adds exactly
- * one concern at the boundary: successful creation/planning calls with identical
- * immutable inputs may be reused after restart/recovery. It does not introduce
- * another model router, quality gate or generation implementation.
+ * The public provider token is still RealLLMService. This subclass keeps two
+ * runtime invariants at the single LLM boundary without adding a second router
+ * or quality system:
+ * 1) exact successful creation/planning calls may be reused after recovery;
+ * 2) the historical automatic whole-chapter alignment rewrite is physically
+ *    blocked, so only evidence-anchored local repair can run automatically.
  */
 @Injectable()
 export class IdempotentRealLLMService extends RealLLMService {
@@ -30,6 +33,11 @@ export class IdempotentRealLLMService extends RealLLMService {
   }
 
   override async generate(request: LLMRequest): Promise<LLMResponse> {
+    const stepKey = String(request.metrics?.stepKey || '').trim();
+    if (stepKey === AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP) {
+      throw new Error('自动整章大纲对齐重写已禁用：保留当前稿，只允许有逐字证据的局部事实/硬红线修复');
+    }
+
     const projectId = request.metrics?.projectId ?? currentCreationProjectId() ?? undefined;
     if (!projectId || !this.isReusableCreationCall(request, projectId)) return super.generate(request);
 
@@ -41,7 +49,6 @@ export class IdempotentRealLLMService extends RealLLMService {
     const constitutionRevision = Number.isFinite(Number(constitution.revision))
       ? Number(constitution.revision)
       : null;
-    const stepKey = String(request.metrics?.stepKey || '');
     const scenario = String(request.scenario || 'daily');
     const stage = qualityStage(scenario, stepKey);
     const compiled = compileContext(db, { projectId, stage, chapterIndex: null });
