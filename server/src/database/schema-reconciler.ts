@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const SCHEMA_DESCRIPTION =
-  'Versioned contracts, bounded dependency context, narrative trace and terminal generation invariants';
+  'Versioned creative authority, bounded dependency context, narrative trace and terminal generation invariants';
 
 type ColumnRow = { name: string };
 
@@ -18,6 +18,13 @@ function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
   return (db.prepare(`PRAGMA table_info(${table})`).all() as ColumnRow[]).some(
     (item) => item.name === column,
   );
+}
+
+function confirmedStoryExpression(prefix: 'NEW' | 'OLD' = 'NEW'): string {
+  return `json(CASE
+    WHEN json_valid(${prefix}.confirmed_idea) THEN ${prefix}.confirmed_idea
+    ELSE json_object('summary', ${prefix}.confirmed_idea)
+  END)`;
 }
 
 /**
@@ -74,6 +81,74 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
           AND COALESCE(NEW.gate_status,'not_evaluated')='not_evaluated'
         BEGIN
           UPDATE generation_runs SET gate_status='blocked' WHERE id=NEW.id;
+        END;
+      `);
+    }
+
+    // confirmed_idea / idea_seed 继续作为兼容与审计快照存在，但运行时故事权威必须只有一份：
+    // settings.creativeConstitution。把已确认题材嵌入创作宪法后，RealLLM 的统一宪法注入、
+    // 世界观/大纲/正文/精修读取到的是同一个故事事实源，不再需要两套事实对象互相对齐。
+    // 新项目通过触发器在 INSERT 时立即合并；confirmed_idea 若被明确更新，也同步到同一位置。
+    // 这里不新增 story_contract 表，也不新增编号 migration。
+    if (hasTable(db, 'projects')
+      && hasColumn(db, 'projects', 'confirmed_idea')
+      && hasColumn(db, 'projects', 'settings')) {
+      const projects = db.prepare(`SELECT id,confirmed_idea,settings FROM projects
+        WHERE LENGTH(TRIM(COALESCE(confirmed_idea,'')))>0`).all() as Array<{
+          id: string; confirmed_idea: string; settings: string;
+        }>;
+      const updateSettings = db.prepare('UPDATE projects SET settings=? WHERE id=?');
+      let storyBackfill = 0;
+      for (const project of projects) {
+        let settings: Record<string, any>;
+        try {
+          settings = JSON.parse(project.settings || '{}');
+        } catch {
+          continue;
+        }
+        const constitution = settings.creativeConstitution;
+        if (!constitution || typeof constitution !== 'object' || Array.isArray(constitution)) continue;
+        let confirmedStory: unknown;
+        try { confirmedStory = JSON.parse(project.confirmed_idea); }
+        catch { confirmedStory = { summary: project.confirmed_idea }; }
+        if (JSON.stringify((constitution as any).confirmedStory) === JSON.stringify(confirmedStory)) continue;
+        settings.creativeConstitution = { ...constitution, confirmedStory };
+        updateSettings.run(JSON.stringify(settings), project.id);
+        storyBackfill += 1;
+      }
+      if (storyBackfill > 0) actions.push(`projects.confirmed_story_backfill.${storyBackfill}`);
+
+      db.exec(`
+        DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert;
+        CREATE TRIGGER trg_projects_confirmed_story_insert
+        AFTER INSERT ON projects
+        WHEN LENGTH(TRIM(COALESCE(NEW.confirmed_idea,'')))>0
+          AND json_valid(COALESCE(NEW.settings,'{}'))
+          AND json_type(NEW.settings,'$.creativeConstitution')='object'
+        BEGIN
+          UPDATE projects
+          SET settings=json_set(
+            NEW.settings,
+            '$.creativeConstitution.confirmedStory',
+            ${confirmedStoryExpression('NEW')}
+          )
+          WHERE id=NEW.id;
+        END;
+
+        DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;
+        CREATE TRIGGER trg_projects_confirmed_story_update
+        AFTER UPDATE OF confirmed_idea ON projects
+        WHEN LENGTH(TRIM(COALESCE(NEW.confirmed_idea,'')))>0
+          AND json_valid(COALESCE(NEW.settings,'{}'))
+          AND json_type(NEW.settings,'$.creativeConstitution')='object'
+        BEGIN
+          UPDATE projects
+          SET settings=json_set(
+            NEW.settings,
+            '$.creativeConstitution.confirmedStory',
+            ${confirmedStoryExpression('NEW')}
+          )
+          WHERE id=NEW.id;
         END;
       `);
     }
