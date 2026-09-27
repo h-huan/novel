@@ -117,7 +117,7 @@ export function dependencyContext(
   const hints = hintCandidates
     .filter(f => explicitHints.has(f.id) || (['buried', 'active', 'reminder'].includes(f.status) && Number(f.buried_chapter_index || 0) <= (chapterIndex ?? Infinity)))
     .sort((a, b) => Number(explicitHints.has(b.id)) - Number(explicitHints.has(a.id))
-      || Number(ids(b.related_character_ids).some(id => involved.has(id))) - Number(ids(a.related_character_ids).some(id => involved.has(id))
+      || Number(ids(b.related_character_ids).some(id => involved.has(id))) - Number(ids(a.related_character_ids).some(id => involved.has(id)))
       || Number(b.importance || 0) - Number(a.importance || 0)
       || String(a.id).localeCompare(String(b.id)));
 
