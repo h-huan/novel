@@ -1,94 +1,48 @@
 /**
- * ChainTemplateService - Prompt Chain 模板管理服务
+ * 固定生产编排。
  *
- * 管理 Chain 模板的 CRUD、验证、执行测试
- * 当前使用内存存储，后续可迁移到数据库
+ * Prompt Chain 可视化编辑器和运行时 CRUD 已删除。生产环境只保留两条当前长篇流程所需的
+ * 固定编排，不能在运行时新增、复制、改写或执行任意 Chain，避免出现第二套小说生产线。
  */
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ChainEngineService } from './chain-engine.service';
-import {
-  PromptChain,
-  ChainNode,
-  NodeType,
-  ExecutionMode,
-  ChainConfig,
-  VariableDef,
-  VariableSource,
-} from './chain.types';
+import type { ChainTemplate, ChainTemplateSummary } from './chain-template.types';
+import type { PromptChain } from './chain.types';
 
-export interface ChainTemplate {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  nodes: ChainNode[];
-  variables: VariableDef[];
-  executionMode: ExecutionMode;
-  config: ChainConfig;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ChainTemplateSummary {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  nodes: number;
-  executionMode: ExecutionMode;
-  createdAt: string;
-  updatedAt: string;
-}
+const FIXED_CHAIN_IDS = new Set([
+  'long-novel-init-foundation',
+  'long-novel-flexible-outline',
+]);
 
 @Injectable()
 export class ChainTemplateService {
-  private readonly logger = new Logger(ChainTemplateService.name);
-  private templates: Map<string, ChainTemplate> = new Map();
+  private readonly templates = new Map<string, ChainTemplate>();
 
   constructor(private readonly chainEngine: ChainEngineService) {
-    this.seedDefaultTemplates();
+    this.registerFixedProductionChains();
   }
 
-  /** 种子数据：预置默认 Chain 模板（天龙8步 Chain 已于 2026-07-24 取消，改由 /chain/generate 单次 LLM 严格按大纲生成） */
-  private seedDefaultTemplates(): void {
-    const now = new Date().toISOString();
+  private registerFixedProductionChains(): void {
+    const now = 'code-defined';
 
-    // 灵感种子智能补全 chain
-    this.templates.set('inspiration-seed-enrich', {
-      id: 'inspiration-seed-enrich',
-      name: '灵感种子智能补全',
-      version: '1.2.0',
-      description: '灵感转项目时自动丰富骨架种子实体（角色→世界观→组织→地点）',
-      nodes: [
-        { id: 'node_1_character', name: '角色深度补全', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-character-enrich', modelConfig: { temperature: 0.6 }, inputMapping: { hook: 'user_input.hook', description: 'user_input.description', characters: 'user_input.characters' }, outputMapping: {}, timeout: 30, retryCount: 0, skipOnEmptyInput: true, description: '基于角色名+hook生成性格五维/背景/对话风格' },
-        { id: 'node_2_worldview', name: '世界观补全', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-worldview-enrich', modelConfig: { temperature: 0.5 }, inputMapping: { hook: 'user_input.hook', description: 'user_input.description', setting: 'user_input.setting' }, outputMapping: {}, timeout: 30, retryCount: 0, description: '基于setting+hook生成地理/历史/规则/势力格局' },
-        { id: 'node_3_organization', name: '组织生成', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-organization-gen', modelConfig: { temperature: 0.6 }, inputMapping: { worldview: 'chain_output.node_2_worldview' }, outputMapping: {}, timeout: 20, retryCount: 0, description: '基于世界观生成必要的主要势力' },
-        { id: 'node_4_location', name: '地点生成', type: 'prompt', chainId: 'inspiration-seed-enrich', promptTemplateId: 'seed-location-gen', modelConfig: { temperature: 0.6 }, inputMapping: { worldview: 'chain_output.node_2_worldview', isLong: 'user_input.isLong' }, outputMapping: {}, timeout: 30, retryCount: 0, description: '按作品形态生成必要地点' },
-      ],
-      variables: [
-        { name: 'hook', source: 'user_input', path: 'user_input.hook', required: false },
-        { name: 'description', source: 'user_input', path: 'user_input.description', required: false },
-        { name: 'setting', source: 'user_input', path: 'user_input.setting', required: false },
-        { name: 'characters', source: 'user_input', path: 'user_input.characters', required: false },
-        { name: 'isLong', source: 'user_input', path: 'user_input.isLong', required: false },
-      ],
-      executionMode: 'sequential',
-      config: { timeout: 120, maxRetries: 0, enableLogging: true, strictMode: false },
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    // 长篇地基必须按依赖顺序执行：先主线与结局骨架，验收通过后才生成世界规则。
-    // 这里曾用一个节点同时产出骨架和世界观，后果是世界规则无法引用已确认的主线。
     this.templates.set('long-novel-init-foundation', {
       id: 'long-novel-init-foundation',
       name: '长篇初始地基',
       version: '2.0.0',
       description: '主线与结局骨架验收通过后，以该骨架为输入生成世界规则',
       nodes: [
-        { id: 'node_1_skeleton', name: '主线与结局骨架', type: 'prompt', chainId: 'outline', promptTemplateId: 'long-novel-main-skeleton', modelConfig: { temperature: 0.7 }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' }, outputMapping: {}, timeout: 120, retryCount: 0 },
-        { id: 'node_2_worldview', name: '世界规则', type: 'prompt', chainId: 'world_building', promptTemplateId: 'long-novel-init-worldview', modelConfig: { temperature: 0.6 }, inputMapping: { story_setting: 'user_input.story_setting', skeleton: 'chain_output.node_1_skeleton', genre: 'user_input.genre' }, outputMapping: {}, timeout: 120, retryCount: 0 },
+        {
+          id: 'node_1_skeleton', name: '主线与结局骨架', type: 'prompt', chainId: 'outline',
+          promptTemplateId: 'long-novel-main-skeleton', modelConfig: { temperature: 0.7 },
+          inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' },
+          outputMapping: {}, timeout: 120, retryCount: 0,
+        },
+        {
+          id: 'node_2_worldview', name: '世界规则', type: 'prompt', chainId: 'world_building',
+          promptTemplateId: 'long-novel-init-worldview', modelConfig: { temperature: 0.6 },
+          inputMapping: { story_setting: 'user_input.story_setting', skeleton: 'chain_output.node_1_skeleton', genre: 'user_input.genre' },
+          outputMapping: {}, timeout: 120, retryCount: 0,
+        },
       ],
       variables: [
         { name: 'story_setting', source: 'user_input', path: 'user_input.story_setting', required: true },
@@ -101,18 +55,39 @@ export class ChainTemplateService {
       updatedAt: now,
     });
 
-    // 长篇灵活大纲 chain (v1.0: 剧情分析 → 分卷大纲 → 章纲)
-    // 平台/分类/基调/文风/流派/视角属于创建前确定的执行标准：由调用方（/chain/generate-outline）
-    // 从创作宪法解析为 platform_directive 注入，链内每一节点都必须携带，不得由模型自行决定。
     this.templates.set('long-novel-flexible-outline', {
       id: 'long-novel-flexible-outline',
       name: '长篇灵活大纲',
       version: '1.0.0',
-      description: '剧情分析→分卷大纲→章纲三阶段生成灵活大纲；卷数与章数按故事阶段动态拆分，不预设区间',
+      description: '剧情分析→分卷大纲→章纲三阶段固定生成流程',
       nodes: [
-        { id: 'node_1_analysis', name: '剧情分析', type: 'prompt', chainId: 'long-novel-flexible-outline', promptTemplateId: 'long-novel-story-analysis', modelConfig: { temperature: 0.5 }, inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre', chapterLimit: 'user_input.chapterLimit', platform_directive: 'user_input.platform_directive' }, outputMapping: {}, timeout: 240, retryCount: 0 },
-        { id: 'node_2_volumes', name: '分卷大纲', type: 'prompt', chainId: 'long-novel-flexible-outline', promptTemplateId: 'long-novel-volume-outline', modelConfig: { temperature: 0.6 }, inputMapping: { story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive', chapterLimit: 'user_input.chapterLimit' }, outputMapping: {}, timeout: 420, retryCount: 0 },
-        { id: 'node_3_chapters', name: '章纲生成', type: 'prompt', chainId: 'long-novel-flexible-outline', promptTemplateId: 'long-novel-chapter-outline', modelConfig: { temperature: 0.6 }, inputMapping: { story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive', chapterLimit: 'user_input.chapterLimit', wordRangeText: 'user_input.wordRangeText' }, outputMapping: {}, timeout: 600, retryCount: 0 },
+        {
+          id: 'node_1_analysis', name: '剧情分析', type: 'prompt', chainId: 'long-novel-flexible-outline',
+          promptTemplateId: 'long-novel-story-analysis', modelConfig: { temperature: 0.5 },
+          inputMapping: {
+            story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre',
+            chapterLimit: 'user_input.chapterLimit', platform_directive: 'user_input.platform_directive',
+          },
+          outputMapping: {}, timeout: 240, retryCount: 0,
+        },
+        {
+          id: 'node_2_volumes', name: '分卷大纲', type: 'prompt', chainId: 'long-novel-flexible-outline',
+          promptTemplateId: 'long-novel-volume-outline', modelConfig: { temperature: 0.6 },
+          inputMapping: {
+            story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive',
+            chapterLimit: 'user_input.chapterLimit',
+          },
+          outputMapping: {}, timeout: 420, retryCount: 0,
+        },
+        {
+          id: 'node_3_chapters', name: '章纲生成', type: 'prompt', chainId: 'long-novel-flexible-outline',
+          promptTemplateId: 'long-novel-chapter-outline', modelConfig: { temperature: 0.6 },
+          inputMapping: {
+            story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive',
+            chapterLimit: 'user_input.chapterLimit', wordRangeText: 'user_input.wordRangeText',
+          },
+          outputMapping: {}, timeout: 600, retryCount: 0,
+        },
       ],
       variables: [
         { name: 'story_setting', source: 'user_input', path: 'user_input.story_setting', required: true },
@@ -129,188 +104,33 @@ export class ChainTemplateService {
       updatedAt: now,
     });
   }
+
   getSummaries(): ChainTemplateSummary[] {
-    return Array.from(this.templates.values()).map(t => ({
-      id: t.id,
-      name: t.name,
-      version: t.version,
-      description: t.description,
-      nodes: t.nodes.length,
-      executionMode: t.executionMode,
-      createdAt: t.createdAt,
-      updatedAt: t.updatedAt,
-    }));
-  }
-
-  /** 获取完整模板详情 */
-  getDetail(id: string): ChainTemplate {
-    const tmpl = this.templates.get(id);
-    if (!tmpl) throw new NotFoundException(`Chain 模板不存在: ${id}`);
-    return tmpl;
-  }
-
-  /** 保存模板（创建或更新） */
-  save(data: {
-    id?: string;
-    name: string;
-    description: string;
-    nodes: any[];
-    variables?: any[];
-    executionMode?: ExecutionMode;
-    config?: Partial<ChainConfig>;
-  }): ChainTemplate {
-    const now = new Date().toISOString();
-    const existing = data.id ? this.templates.get(data.id) : undefined;
-
-    const template: ChainTemplate = {
-      id: data.id || uuidv4(),
-      name: data.name,
-      version: existing ? this.bumpVersion(existing.version) : '1.0.0',
-      description: data.description,
-      nodes: data.nodes.map((n, i) => ({
-        ...n,
-        id: n.id || `node_${i + 1}_${n.name?.toLowerCase().replace(/\s+/g, '_') || 'unnamed'}`,
-        chainId: data.id || uuidv4(),
-      })),
-      variables: (data.variables || []).map((v: any) => ({
-        name: v.name,
-        source: v.source as VariableSource,
-        path: v.path,
-        required: v.required,
-        defaultValue: v.defaultValue,
-        description: v.description,
-      })),
-      executionMode: data.executionMode || 'sequential',
-      config: {
-        timeout: data.config?.timeout ?? 300,
-        // Kept for schema compatibility. Generic replay is disabled by the
-        // engine because it has no new evidence or corrective prompt.
-        maxRetries: 0,
-        enableLogging: data.config?.enableLogging ?? true,
-        strictMode: data.config?.strictMode ?? false,
-      },
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-    };
-
-    this.templates.set(template.id, template);
-    this.logger.log(`保存 Chain 模板: ${template.id} (${template.name})`);
-    return template;
-  }
-
-  /** 删除模板 */
-  delete(id: string): void {
-    if (!this.templates.has(id)) {
-      throw new NotFoundException(`Chain 模板不存在: ${id}`);
-    }
-    this.templates.delete(id);
-    this.logger.log(`删除 Chain 模板: ${id}`);
-  }
-
-  /** 复制模板 */
-  duplicate(id: string): ChainTemplate {
-    const original = this.getDetail(id);
-    const now = new Date().toISOString();
-    const dupe: ChainTemplate = {
-      ...original,
-      id: uuidv4(),
-      name: `${original.name} (副本)`,
-      version: '1.0.0',
-      description: `${original.description} (由 ${original.id} 复制)`,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.templates.set(dupe.id, dupe);
-    this.logger.log(`复制 Chain 模板: ${id} → ${dupe.id}`);
-    return dupe;
-  }
-
-  /** 验证 Chain 结构 */
-  validate(chainData: { nodes: any[]; executionMode?: string }): {
-    valid: boolean;
-    errors: string[];
-    warnings: string[];
-  } {
-    const errors: string[] = [];
-    const warnings: string[] = [];
-
-    if (!chainData.nodes || chainData.nodes.length === 0) {
-      errors.push('Chain 必须包含至少一个节点');
-      return { valid: false, errors, warnings };
-    }
-
-    // 检查节点 ID 唯一性
-    const ids = chainData.nodes.map(n => n.id);
-    const dupIds = ids.filter((id, i) => ids.indexOf(id) !== i);
-    if (dupIds.length > 0) {
-      errors.push(`节点 ID 重复: ${[...new Set(dupIds)].join(', ')}`);
-    }
-
-    // 检查节点有效性
-    const validTypes: NodeType[] = ['prompt', 'condition', 'parallel', 'loop', 'transform'];
-    for (const node of chainData.nodes) {
-      if (!node.name) errors.push(`节点 ${node.id || '(未命名)'} 缺少名称`);
-      if (!validTypes.includes(node.type)) {
-        errors.push(`节点 ${node.name || node.id} 类型无效: ${node.type}，有效类型: ${validTypes.join(', ')}`);
-      }
-      if (node.type === 'prompt' && !node.promptTemplateId) {
-        warnings.push(`Prompt 节点 ${node.name || node.id} 未指定模板`);
-      }
-      if (!node.id) errors.push('所有节点必须包含 id 字段');
-    }
-
-    // 检查是否有孤立节点（没有连接）
-    if (chainData.nodes.length > 1) {
-      const hasAnyEdges = chainData.nodes.some(n => (n.nextOnSuccess?.length || 0) > 0 || n.branches?.length > 0);
-      if (!hasAnyEdges) {
-        warnings.push('多个节点但未定义节点间连接关系（nextOnSuccess）');
-      }
-    }
-
-    return { valid: errors.length === 0, errors, warnings };
-  }
-
-  /** 执行 Chain 测试 */
-  async executeTest(id: string, testData?: Record<string, unknown>): Promise<{
-    success: boolean;
-    result?: any;
-    error?: string;
-  }> {
-    const template = this.getDetail(id);
-
-    // 将模板转换为 PromptChain 格式
-    const chain: PromptChain = {
+    return [...this.templates.values()].map(template => ({
       id: template.id,
       name: template.name,
       version: template.version,
       description: template.description,
-      nodes: template.nodes,
-      variables: template.variables,
+      nodes: template.nodes.length,
       executionMode: template.executionMode,
-      config: template.config,
-    };
-
-    const userInput = testData || { material: '测试数据', platform: 'zhihu', keywords: '测试' };
-
-    try {
-      const result = await this.chainEngine.execute(chain, userInput);
-      return { success: result.status === 'completed' || result.status === 'partial', result };
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : '执行失败' };
-    }
+      createdAt: template.createdAt,
+      updatedAt: template.updatedAt,
+    }));
   }
 
-  /**
-   * 正式执行 Chain（用于生产流程，非测试）
-   * 返回 ChainExecutionResult，包含 outputs / nodeResults / status 等
-   */
+  getDetail(id: string): ChainTemplate {
+    this.assertFixed(id);
+    const template = this.templates.get(id);
+    if (!template) throw new NotFoundException(`固定生产流程不存在: ${id}`);
+    return template;
+  }
+
   async executeChain(
     id: string,
     userInput: Record<string, unknown>,
     onProgress?: (nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => void,
   ): Promise<any> {
     const template = this.getDetail(id);
-
     const chain: PromptChain = {
       id: template.id,
       name: template.name,
@@ -321,14 +141,23 @@ export class ChainTemplateService {
       executionMode: template.executionMode,
       config: template.config,
     };
-
-    const result = await this.chainEngine.execute(chain, userInput, onProgress);
-    return result; // 直接返回 ChainExecutionResult
+    return this.chainEngine.execute(chain, userInput, onProgress);
   }
 
-  private bumpVersion(current: string): string {
-    const parts = current.split('.').map(Number);
-    if (parts.length !== 3) return '1.0.1';
-    return `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
+  /** 以下方法只为旧 Controller 编译期过渡；运行时能力已经删除。 */
+  save(): never { throw this.removed(); }
+  delete(): never { throw this.removed(); }
+  duplicate(): never { throw this.removed(); }
+  validate(): never { throw this.removed(); }
+  executeTest(): never { throw this.removed(); }
+
+  private assertFixed(id: string): void {
+    if (!FIXED_CHAIN_IDS.has(id)) {
+      throw new BadRequestException(`运行时 Prompt Chain 已删除，不允许执行任意流程: ${id}`);
+    }
+  }
+
+  private removed(): BadRequestException {
+    return new BadRequestException('运行时 Prompt Chain 编辑/保存/复制/测试能力已删除；小说流程只允许代码定义的固定生产链');
   }
 }
