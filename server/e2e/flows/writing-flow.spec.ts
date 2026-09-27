@@ -112,7 +112,7 @@ test.describe('Writing Flow E2E', () => {
     });
     expect(res.status()).toBe(400);
     const body = await res.json();
-    expect(JSON.stringify(body)).toMatch(/outline|大纲/i);
+    expect(JSON.stringify(body)).toMatch(/outline|大纲|总纲/i);
   });
 
   test('skips a locked chapter without calling an LLM', async ({ request }) => {
