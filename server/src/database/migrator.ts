@@ -132,11 +132,14 @@ export class Migrator {
       }
     }
 
+    // 先把历史别名收敛成当前 creativeConstitution，再执行当前结构不变量。
+    // 顺序不能反过来：reconcileSchema 会把 confirmed_idea 合入 creativeConstitution；
+    // 若随后再跑旧数据 normalization，就会重建宪法对象并把刚合入的故事权威覆盖掉。
+    normalizeStoredConstitutions(this.db);
     const reconciliation = reconcileSchema(this.db);
     if (reconciliation.actions.length > 0) {
       console.log(`[Schema] 已校准当前结构：${reconciliation.actions.join(', ')}`);
     }
-    normalizeStoredConstitutions(this.db);
   }
 
   /**
