@@ -26,10 +26,10 @@ function fixture(options: FixtureOptions = {}) {
   });
   const database = { getDb: () => ({ prepare }) } as any;
   const generatedCanonGuard = {
-    assertCanCommit: vi.fn(() => {
+    assertCanCommit: vi.fn((input: any) => {
       if (options.guardError) throw options.guardError;
       return {
-        runId: runId || '', projectId: 'project-1', stage: 'chapter', scenario: 'writing', outputText: '正文',
+        runId: runId || '', projectId: 'project-1', stage: 'chapter', scenario: 'writing', outputText: input.outputText,
       };
     }),
   } as any;
@@ -38,6 +38,7 @@ function fixture(options: FixtureOptions = {}) {
     service: new GeneratedChapterCommitService(database, generatedCanonGuard, chapters),
     generatedCanonGuard,
     chapters,
+    get,
   };
 }
 
@@ -65,5 +66,21 @@ describe('GeneratedChapterCommitService', () => {
       expectedStages: ['chapter'],
     });
     expect(chapters.update).toHaveBeenCalledWith('chapter-1', { content: '正文' });
+  });
+
+  it('preserves leading and trailing whitespace from the exact gated output', async () => {
+    const { service, generatedCanonGuard, chapters, get } = fixture();
+    const exactOutput = '\n正文第一段\n\n正文第二段\n';
+
+    await expect(service.commit('project-1', 'chapter-1', exactOutput)).resolves.toMatchObject({ content: exactOutput });
+
+    expect(get).toHaveBeenCalledWith('project-1', 1, exactOutput);
+    expect(generatedCanonGuard.assertCanCommit).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      runId: 'run-passed',
+      outputText: exactOutput,
+      expectedStages: ['chapter'],
+    });
+    expect(chapters.update).toHaveBeenCalledWith('chapter-1', { content: exactOutput });
   });
 });
