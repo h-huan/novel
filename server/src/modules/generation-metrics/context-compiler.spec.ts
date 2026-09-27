@@ -28,7 +28,7 @@ function fixture() {
 }
 
 describe('Context Compiler', () => {
-  it('recalls distant dependencies and characters beyond the old 40-person limit', () => {
+  it('recalls explicit distant dependencies without unbounded project scans', () => {
     const db = fixture();
     try {
       for (let n=0;n<100;n++) db.prepare("INSERT INTO characters(id,project_id,name,role,profile_json) VALUES (?,'p',?,'support','{}')").run(`extra${n}`,`角色${n}`);
@@ -41,10 +41,25 @@ describe('Context Compiler', () => {
       const result = compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:1005,maxChars:8000});
       const data = JSON.parse(result.snapshot);
       expect(data.characterContracts.some((c:any)=>c.characterId==='extra99')).toBe(true);
-      expect(result.snapshot).toContain('千章前的铜钥匙'); expect(result.snapshot).toContain('铜钥匙只能在月食开启');
+      expect(result.snapshot).toContain('千章前的铜钥匙');
+      expect(result.snapshot).toContain('铜钥匙只能在月食开启');
+      expect(data.recentChapters).toHaveLength(3);
+      expect(data.recentChapters.map((chapter:any) => chapter.chapter_index)).toEqual([997, 998, 999]);
       expect(result.size).toBeLessThanOrEqual(8000);
       db.exec("UPDATE world_rules SET content='铜钥匙不能使用' WHERE id='old-law'");
       expect(compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:1005,maxChars:8000}).version).not.toBe(result.version);
+    } finally { db.close(); }
+  });
+
+  it('keeps the immediate canon before broad background when the budget is tight', () => {
+    const db = fixture();
+    try {
+      db.prepare('UPDATE world_settings SET rules=? WHERE id=?').run('背景规则'.repeat(3000), 'w');
+      const result=compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:5,maxChars:4000});
+      const data=JSON.parse(result.snapshot);
+      expect(data.recentChapters.map((chapter:any)=>chapter.chapter_index)).toEqual([2,3,4]);
+      expect(data.recentChapters[2].content_tail).toContain('往事');
+      expect(result.size).toBeLessThanOrEqual(4000);
     } finally { db.close(); }
   });
 
@@ -57,6 +72,7 @@ describe('Context Compiler', () => {
       expect(JSON.parse(result.snapshot).meta.truncation.length).toBeGreaterThan(0);
     } finally { db.close(); }
   });
+
   it('selects chapter-relevant canonical facts and produces a stable bounded version', () => {
     const db = fixture();
     try {
