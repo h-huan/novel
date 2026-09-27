@@ -43,6 +43,7 @@ export class IdempotentRealLLMService extends RealLLMService {
     const scenario = String(request.scenario || 'daily');
     const stage = qualityStage(scenario, stepKey);
     const compiled = compileContext(db, { projectId: projectId!, stage, chapterIndex: null });
+    const contextVersion = String(compiled.version || digest(''));
     const standards = standardDirectiveCache.snapshot(scenario, request.injectStandard !== false, stepKey);
     let routedModel = '';
     try {
@@ -77,7 +78,7 @@ export class IdempotentRealLLMService extends RealLLMService {
         AND COALESCE(chapter_index,-1)=-1
         AND LENGTH(TRIM(COALESCE(output_text,'')))>0
       ORDER BY finished_at DESC,id DESC LIMIT 1`).get(
-        projectId, stage, scenario, constitution.revision, compiled.version, promptVersion,
+        projectId, stage, scenario, constitution.revision, contextVersion, promptVersion,
       ) as { output_text: string; model?: string | null; finished_at?: string | null } | undefined;
 
     if (cached?.output_text) {
