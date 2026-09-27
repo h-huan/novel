@@ -26,10 +26,11 @@ export interface CharacterActionPlan {
 /**
  * ChapterPlan is also the chapter execution contract.
  *
- * Older projects only contain the original planning fields below. The contract
- * fields are optional for backward compatibility, but once present they are
- * authoritative constraints for drafting/review rather than another parallel
- * “chapter contract” object. This keeps one chapter-level source of truth.
+ * Older projects only contain the original planning fields below. Contract
+ * fields stay optional at the transport boundary for backward compatibility,
+ * but normalizeChapterPlan() always materializes them before drafting/review.
+ * This keeps one chapter-level source of truth instead of creating a second
+ * ChapterContract table/object that can drift from the detailed outline.
  */
 export interface ChapterPlan {
   core: string;
@@ -64,6 +65,97 @@ export interface ChapterPlan {
   exitState?: string[];
   /** Concrete hand-off/hook required for the next chapter. */
   nextHook?: string;
+}
+
+/** A normalized ChapterPlan always exposes the execution contract fields. */
+export type ExecutableChapterPlan = ChapterPlan & Required<Pick<ChapterPlan,
+  'entryState' | 'objective' | 'mandatoryBeats' | 'forbiddenFacts' |
+  'characterKnowledge' | 'stateTransitions' | 'foreshadowTasks' |
+  'exitState' | 'nextHook'
+>>;
+
+const cleanText = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+const cleanList = (value: unknown): string[] => Array.isArray(value)
+  ? value.map(cleanText).filter(Boolean)
+  : [];
+const unique = (values: readonly string[]): string[] => [...new Set(values.map(cleanText).filter(Boolean))];
+
+/**
+ * Upgrade an existing detailed outline into the executable contract in place.
+ *
+ * The fallback rules are deliberately deterministic and only derive constraints
+ * already present in the outline. They never invent story facts. New outline
+ * generators may provide richer fields explicitly; legacy outlines therefore
+ * become writable immediately without a parallel migration/table.
+ */
+export function normalizeChapterPlan(plan: ChapterPlan): ExecutableChapterPlan {
+  const scenes = Array.isArray(plan.scenes) ? plan.scenes : [];
+  const sceneBeats = scenes.flatMap(scene => unique([
+    scene.goal || '',
+    scene.summary || '',
+    scene.outcome || '',
+  ]));
+  const lastOutcome = [...scenes].reverse().map(scene => cleanText(scene.outcome)).find(Boolean) || '';
+  const actionKnowledge = (Array.isArray(plan.characterActions) ? plan.characterActions : [])
+    .map(action => {
+      const character = cleanText(action?.character);
+      const motivation = cleanText(action?.motivation);
+      if (!character || !motivation) return '';
+      return `${character}：行动动机仅限“${motivation}”，不得无依据预知后续事实`;
+    })
+    .filter(Boolean);
+
+  const objective = cleanText(plan.objective) || cleanText(plan.core) || cleanText(plan.conflict);
+  const mandatoryBeats = cleanList(plan.mandatoryBeats).length
+    ? cleanList(plan.mandatoryBeats)
+    : unique([...sceneBeats, ...(Array.isArray(plan.highlights) ? plan.highlights : [])]);
+  const stateTransitions = cleanList(plan.stateTransitions).length
+    ? cleanList(plan.stateTransitions)
+    : unique(Array.isArray(plan.characterStateChanges) ? plan.characterStateChanges : []);
+  const foreshadowTasks = cleanList(plan.foreshadowTasks).length
+    ? cleanList(plan.foreshadowTasks)
+    : unique([
+      ...(Array.isArray(plan.foreshadowing) ? plan.foreshadowing.map(item => `埋设/提醒：${item}`) : []),
+      ...(Array.isArray(plan.foreshadowingRecoveries) ? plan.foreshadowingRecoveries.map(item => `回收：${item}`) : []),
+    ]);
+  const exitState = cleanList(plan.exitState).length
+    ? cleanList(plan.exitState)
+    : unique([lastOutcome, ...stateTransitions]);
+
+  return {
+    ...plan,
+    entryState: cleanList(plan.entryState),
+    objective,
+    mandatoryBeats,
+    forbiddenFacts: cleanList(plan.forbiddenFacts),
+    characterKnowledge: cleanList(plan.characterKnowledge).length
+      ? cleanList(plan.characterKnowledge)
+      : unique(actionKnowledge),
+    stateTransitions,
+    foreshadowTasks,
+    exitState,
+    nextHook: cleanText(plan.nextHook) || cleanText(plan.hook),
+  };
+}
+
+/** Stable subset injected into drafting/review context. */
+export function chapterExecutionContract(plan: ChapterPlan): Pick<ExecutableChapterPlan,
+  'entryState' | 'objective' | 'mandatoryBeats' | 'forbiddenFacts' |
+  'characterKnowledge' | 'stateTransitions' | 'foreshadowTasks' |
+  'exitState' | 'nextHook'
+> {
+  const normalized = normalizeChapterPlan(plan);
+  return {
+    entryState: normalized.entryState,
+    objective: normalized.objective,
+    mandatoryBeats: normalized.mandatoryBeats,
+    forbiddenFacts: normalized.forbiddenFacts,
+    characterKnowledge: normalized.characterKnowledge,
+    stateTransitions: normalized.stateTransitions,
+    foreshadowTasks: normalized.foreshadowTasks,
+    exitState: normalized.exitState,
+    nextHook: normalized.nextHook,
+  };
 }
 
 export interface KeyValueSetting {
@@ -182,7 +274,9 @@ export function validateChapterPlan(value: unknown): ContractValidationResult<Ch
   if (value.targetWords !== undefined && (typeof value.targetWords !== 'number' || !Number.isFinite(value.targetWords))) {
     issues.push('targetWords: expected finite number');
   }
-  return issues.length ? { ok: false, issues } : { ok: true, value: value as unknown as ChapterPlan, issues };
+  return issues.length
+    ? { ok: false, issues }
+    : { ok: true, value: normalizeChapterPlan(value as unknown as ChapterPlan), issues };
 }
 
 export function validateWorldProfile(value: unknown): ContractValidationResult<WorldProfileContract> {

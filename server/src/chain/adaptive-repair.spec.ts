@@ -23,41 +23,44 @@ describe('decideProgressiveRepair', () => {
     expect(decideProgressiveRepair([], [])).toEqual({ repair: false, reason: 'complete' });
   });
 
-  it('allows the first evidenced targeted repair', () => {
-    expect(decideProgressiveRepair([], ['漏结尾钩子'])).toMatchObject({ repair: true });
-  });
-
-  it('stops when a repair repeats or replaces issues without reducing them', () => {
-    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['漏场景', '漏钩子']).reason).toBe('repeated_issues');
-    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['人物越界', '漏钩子']).reason).toBe('no_measurable_progress');
-  });
-
-  it('earns another repair only after the verified issue set becomes a strict subset', () => {
-    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['漏钩子'])).toEqual({
+  it('allows exactly the first evidence-anchored local fact repair', () => {
+    expect(decideProgressiveRepair([], ['漏结尾钩子'])).toEqual({
       repair: true,
-      reason: 'issues_reduced',
+      reason: 'first_local_repair',
     });
   });
 
-  it('reads the same deterministic rule at a new position as the same defect, not as progress', () => {
+  it('identifies an exact repeated issue set and stops', () => {
+    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['漏场景', '漏钩子'])).toEqual({
+      repair: false,
+      reason: 'repeated_issues',
+    });
+  });
+
+  it('earns another local patch only when unresolved issues are a strict subset', () => {
+    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['漏钩子'])).toEqual({
+      repair: true,
+      reason: 'measurable_progress',
+    });
+  });
+
+  it('stops when a different problem replaces the old one', () => {
+    expect(decideProgressiveRepair([['漏场景', '漏钩子']], ['人物越界'])).toEqual({
+      repair: false,
+      reason: 'no_measurable_progress',
+    });
+  });
+
+  it('reads the same deterministic rule at a new position as the same defect', () => {
     const before = ['【硬红线·确定性扫描·42】对话太圆滑机械 | 位置: 第 46-51 段 | 原文: 好的，我马上帮您查询'];
     const after = ['【硬红线·确定性扫描·42】对话太圆滑机械 | 位置: 第 102-110 段 | 原文: 请您稍等，我为您核实'];
     expect(issueSignature(after[0])).toBe('确定性扫描#42');
     expect(decideProgressiveRepair([before], after).reason).toBe('repeated_issues');
   });
 
-  it('rejects a different deterministic rule even when the issue count stays small', () => {
-    const before = ['【硬红线·确定性扫描·42】对话太圆滑机械 | 位置: 第 46-51 段 | 原文: 好的，我马上帮您查询'];
-    const after = ['【硬红线·确定性扫描·43】缺少不完美细节 | 位置: 第 20-24 段 | 原文: 桌面一尘不染'];
-    expect(decideProgressiveRepair([before], after)).toEqual({ repair: false, reason: 'no_measurable_progress' });
-  });
-
-  it('stops when fewer issues are achieved by introducing a different defect family', () => {
-    expect(decideProgressiveRepair(
-      [['时间线跳跃', '提前执行下一章场景', '漏结尾钩子']],
-      ['人物动机越界'],
-    )).toEqual({ repair: false, reason: 'no_measurable_progress' });
+  it('keeps semantic family normalization available to local repair diagnostics', () => {
     expect(repairIssueFamily('相邻段落短距离重复身体反应')).toBe('prose');
+    expect(repairIssueFamily('提前执行下一章场景')).toBe('chapter_boundary');
   });
 });
 

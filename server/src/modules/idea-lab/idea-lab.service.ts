@@ -307,11 +307,16 @@ export class IdeaLabService {
     check(Array.isArray(idea.sellingPoints) && idea.sellingPoints.length > 0, `有 ${idea.sellingPoints?.length || 0} 个卖点`, '需要提炼故事卖点');
     check(!!idea.platformFit && idea.platformFit.trim().length > 4, '有平台适配判断', '需要补充平台适配判断');
 
+    // 作品类型特有维度必须无论“满足/缺失”都进入同一分母；过去只在缺失时记 risk，
+    // 导致信息越完整 evaluatedItems 反而越少，成熟度分数口径随输入完整度漂移。
     if (projectType === 'short_story') {
-      if (!idea.shortStoryFit || idea.shortStoryFit.trim().length < 4) risks.push('短篇适配评估不完整');
+      check(!!idea.shortStoryFit && idea.shortStoryFit.trim().length >= 4,
+        '短篇闭环与篇幅适配明确', '短篇适配评估不完整');
     } else {
-      if (!idea.longNovelFit || idea.longNovelFit.trim().length < 4) risks.push('长篇扩展性评估不完整');
-      if (!idea.worldSeed || idea.worldSeed.trim().length < 4) risks.push('世界观种子需要进一步明确以支撑长篇');
+      check(!!idea.longNovelFit && idea.longNovelFit.trim().length >= 4,
+        '长篇扩展性明确', '长篇扩展性评估不完整');
+      check(!!idea.worldSeed && idea.worldSeed.trim().length >= 4,
+        '世界观种子足以支撑长篇', '世界观种子需要进一步明确以支撑长篇');
     }
 
     const satisfiedItems = strengths.length;

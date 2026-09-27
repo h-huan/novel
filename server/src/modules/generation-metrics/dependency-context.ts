@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { QualityStage } from '../writing-quality/quality-issue';
 import { canonical, compileCharacterContract, object } from '../writing-quality/character-contract';
+import { chapterContractFromOutline } from './chapter-contract-context';
 
 function ids(v: any): string[] {
   try {
@@ -35,6 +36,31 @@ function mergeById(...groups: any[][]): any[] {
   return [...out.values()];
 }
 
+function compactText(value: unknown, maxChars = 420): string | string[] | null {
+  if (value == null || value === '') return null;
+  if (Array.isArray(value)) return value.map(item => String(item).trim()).filter(Boolean).slice(0, 16);
+  const raw = String(value).trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(item => String(item).trim()).filter(Boolean).slice(0, 16);
+    if (parsed && typeof parsed === 'object') {
+      const text = canonical(parsed);
+      return text.length > maxChars ? `${text.slice(0, maxChars)}…[规则摘要]` : text;
+    }
+  } catch { /* plain text */ }
+  return raw.length > maxChars ? `${raw.slice(0, maxChars)}…[规则摘要]` : raw;
+}
+
+function recentChapterExcerpt(content: unknown, budget: number): string {
+  const text = String(content || '').trim();
+  if (text.length <= budget) return text;
+  const marker = '…[中段省略]…';
+  const headChars = Math.min(96, Math.max(32, Math.floor(budget * 0.2)));
+  const tailChars = Math.max(64, budget - headChars - marker.length);
+  return `${text.slice(0, headChars)}${marker}${text.slice(-tailChars)}`;
+}
+
 export function dependencyContext(
   db: DatabaseSync,
   input: { projectId: string; stage: QualityStage; chapterIndex?: number | null; maxChars?: number },
@@ -59,7 +85,8 @@ export function dependencyContext(
   }
 
   const detail = { ...object(outline?.detail_json), ...object(outline?.plan_json) };
-  const currentText = `${String(current?.content || '')}\n${String(outline?.content || '')}\n${canonical(detail)}`;
+  const chapterContract = chapterContractFromOutline(outline, detail);
+  const currentText = `${String(current?.content || '')}\n${String(outline?.content || '')}\n${canonical(detail)}\n${canonical(chapterContract || {})}`;
 
   // The chapter plan is the primary dependency selector. Explicit IDs are never
   // lost because of table size; name-based discovery is a bounded fallback only.
@@ -136,6 +163,21 @@ export function dependencyContext(
       || ids(r.related_timeline_event_ids).some(id => eventIds.has(id)))
     .sort((a, b) => Number(ruleIds.has(b.id)) - Number(ruleIds.has(a.id)) || String(a.id).localeCompare(String(b.id)));
 
+  // Existing world_settings remains the persisted world-profile authority. Pull
+  // only compact rule-bearing fields forward; broad synopsis/atmosphere stays
+  // low priority. This preserves hard world constraints without letting a huge
+  // profile crowd out immediate chapter canon.
+  const coreWorldSettings = boundedRows(db, 'world_settings', projectId, 4).map(row => ({
+    id: row.id,
+    name: row.name || undefined,
+    era: compactText(row.era, 120),
+    rules: compactText(row.rules, 520),
+    constraints: compactText(row.constraints, 360),
+    social_rules: compactText(row.social_rules, 300),
+    special_settings: compactText(row.special_settings, 300),
+    rule_system: compactText(row.rule_system_json, 420),
+  }));
+
   const relevantText = currentText + canonical(outline ?? {}) + timeline.map(e => e.location || '').join(' ');
   const explicitLocationIds = ids(detail.location_ids);
   const locationCandidates = mergeById(
@@ -166,7 +208,11 @@ export function dependencyContext(
   }
 
   // Recent body is canon-adjacent evidence and must enter before broad world data.
-  // Store only the ending tail so the budget is spent on continuity, not replaying old prose.
+  // Keep all three immediate predecessors whenever they exist. The excerpt keeps
+  // a small opening anchor plus a larger ending tail so names/events introduced
+  // at the chapter start are not erased just because the ending is long. Tight
+  // budgets reserve enough room for confirmed state and hard world rules too.
+  const recentExcerptChars = Math.max(280, Math.min(1200, Math.floor(max / 12)));
   let recent: any[] = [];
   if (tableExists(db, 'chapters') && chapterIndex !== null) {
     recent = db.prepare(`SELECT id,outline_id,volume_index,chapter_index,title,content,status
@@ -179,7 +225,7 @@ export function dependencyContext(
       chapter_index: c.chapter_index,
       title: c.title,
       status: c.status,
-      content_tail: String(c.content || '').slice(-1200),
+      content_tail: recentChapterExcerpt(c.content, recentExcerptChars),
     }));
   }
 
@@ -191,7 +237,8 @@ export function dependencyContext(
   }
 
   const sections: Record<string, any> = {
-    meta: { schemaVersion: 2, stage, chapterIndex, selection: 'current_plan_then_recent_canon_then_dependencies', truncation: [] },
+    meta: { schemaVersion: 3, stage, chapterIndex, selection: 'chapter_contract_then_recent_canon_then_dependencies', truncation: [] },
+    chapterContract: [],
     outline: [],
     recentChapters: [],
     characterContracts: [],
@@ -230,25 +277,29 @@ export function dependencyContext(
     }
   };
 
+  // One persisted outline, one executable contract. Drafting and review compile
+  // the same object; no parallel ChapterContract record is introduced.
+  add('chapterContract', chapterContract ? [chapterContract] : []);
   add('outline', outline ? [outline] : []);
   add('recentChapters', recent);
+  // Confirmed state is hard canon and must survive before descriptive profiles.
+  add('recentState', states);
   add('characterContracts', characters.map(compileCharacterContract));
   add('characters', characters.map(c => ({ id: c.id, name: c.name, speech_style: c.speech_style, forbidden_words: c.forbidden_words })));
   add('foreshadowing', hints.filter(h => explicitHints.has(h.id)));
   add('timeline', timeline);
   add('causality', links.filter(l => eventIds.has(l.source_event_id) && eventIds.has(l.target_event_id)));
-  add('worldRules', rules);
-  add('worldRules', boundedRows(db, 'world_settings', projectId, 4));
+  add('worldRules', [...rules, ...coreWorldSettings]);
+  // Active continuity evidence still outranks broad location/organization context.
   add('foreshadowing', hints.filter(h => !explicitHints.has(h.id)));
   add('locations', locations);
   add('organizations', organizations);
-  add('recentState', states);
   add('outline', nearby);
 
   sections.meta.truncation = omitted ? [`${omitted} items/fields omitted or clipped; budget=${max}`, ...truncation] : [];
   const snapshot = canonical(sections);
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: 3 as const,
     version: createHash('sha256').update(snapshot).digest('hex'),
     snapshot,
     size: snapshot.length,

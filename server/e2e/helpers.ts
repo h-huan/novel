@@ -7,10 +7,48 @@ export function uniqueTitle(prefix = 'test'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** Create a project and return its id */
+/**
+ * Single E2E source of truth for a project that satisfies the current creation
+ * preconditions. Tests may override the field they are exercising, but must not
+ * maintain private copies of the six-dimensional execution standard.
+ */
+export function validProjectPayload(overrides: Record<string, any> = {}) {
+  const confirmedIdea = '一名档案员发现每天午夜都会多出一份不存在的失踪登记，他必须在记录吞掉真实身份前查清来源。';
+  const base = {
+    title: uniqueTitle(),
+    type: 'long_novel',
+    creationSource: 'idea',
+    targetPlatform: 'custom',
+    customPlatformNote: '每章3000至5000字，开篇尽快进入异常事件，章章推进核心冲突并留下明确追读钩子。',
+    targetWords: 120000,
+    category: '悬疑',
+    storyTone: ['紧张', '克制'],
+    writingStyle: ['简洁', '画面感'],
+    webNovelGenre: ['悬疑推理'],
+    submissionTags: ['悬疑', '调查'],
+    plotTags: ['谜团', '追查'],
+    genreFitNote: '以连续调查和事实反转兑现悬疑读者预期。',
+    targetAudience: '成年悬疑读者',
+    pov: '第三人称限知',
+    ideaSeed: confirmedIdea,
+    confirmedIdea,
+    settings: { structurePlanning: 'dynamic_by_story_rhythm' },
+  };
+  return {
+    ...base,
+    ...overrides,
+    settings: { ...base.settings, ...(overrides.settings || {}) },
+  };
+}
+
+/**
+ * Create a project through the normal project boundary. The fixture deliberately
+ * supplies all six execution-standard dimensions; tests must not rely on hidden
+ * defaults that production creation correctly rejects.
+ */
 export async function createProject(request: APIRequestContext, title?: string) {
   const res = await request.post(`${BASE}/projects`, {
-    data: { title: title || uniqueTitle(), type: 'long_novel', targetWords: 200000, category: '测试', targetAudience: '测试读者', pov: '第三人称限知', settings: { perChapterTarget: 5000, volumeCount: 4 } },
+    data: validProjectPayload({ title: title || uniqueTitle() }),
   });
   const body = await res.json();
   expect(res.status(), JSON.stringify(body)).toBe(201);

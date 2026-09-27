@@ -32,13 +32,39 @@ export interface ProjectResponse {
   updatedAt: string;
 }
 
+/**
+ * confirmed_idea remains a compatibility/audit column, but runtime generation
+ * reads the story from creativeConstitution.confirmedStory. Normalize strings
+ * to a structured object so old IdeaLab rows and new discovery cards share one
+ * authority shape without inventing any additional facts.
+ */
+function normalizeConfirmedStory(value: unknown): unknown | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') return value;
+  const text = value.trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch { /* plain idea text */ }
+  return { summary: text };
+}
+
+function confirmedStoryForResponse(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string') return value || undefined;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const summary = (value as Record<string, unknown>).summary;
+    if (typeof summary === 'string' && summary.trim()) return summary;
+  }
+  try { return JSON.stringify(value); } catch { return undefined; }
+}
+
 @Injectable()
 export class ProjectService {
   constructor(private readonly repo: ProjectRepository, @Optional() private readonly database?: DatabaseService) {}
 
-  /**
-   * 创建项目
-   */
+  /** 创建项目 */
   create(dto: CreateProjectDto): ProjectResponse {
     const now = new Date().toISOString();
     const id = uuid();
@@ -54,23 +80,18 @@ export class ProjectService {
       ...this.parseJsonObject(dto.settings),
     }));
 
-    // 推导默认创作阶段
     const projectType = dto.type || 'long_novel';
     const creationSource = dto.creationSource || 'blank';
     const currentWorkflowStage = dto.currentWorkflowStage ||
       this.defaultWorkflowStage(projectType, creationSource);
 
     const constitution = updateConstitution({ type: projectType, settings: '{}' }, dto);
+    const confirmedStory = normalizeConfirmedStory(dto.confirmedIdea ?? dto.ideaSeed);
+    if (confirmedStory !== null) {
+      (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory = confirmedStory;
+    }
     constitution.revision = 1;
 
-    // 创建前置阻断三连（六维齐备 → 分类归位 → 分类体量）：与 chain 的 create-project-async、
-    // 生成入口（assertExecutionStandardsComplete）共用同一份判据与同一句文案。
-    //
-    // 为什么必须提到写库之前：此前 POST /projects 只判分类归位，六维与体量两道判据在创建入口
-    // 完全缺失。于是「没选基调/文风/流派/视角」或「目标总字数越界又没写取舍依据」的项目能直接落库，
-    // 只能等生成阶段才被拦下 —— 那时题材的 scopeBreakdown、大纲的章节数都已按旧值算过，改一处要连带重算。
-    // 判据本身成本为 0，就该在最早的地方暴露。
-    // 不降级：不填默认值、不用平台推荐替代、不静默落成 not_applicable。
     const missingStandards = missingConstitutionStandards(constitution);
     if (missingStandards.length > 0) {
       throw new BadRequestException(
@@ -81,8 +102,6 @@ export class ProjectService {
       );
     }
 
-    // 第二道：分类必须是这本书要投放的那个平台上的投稿分类。
-    // 分类不是孤立的题材标签，而是「这本书投到该平台的哪个分类」；归不了位 = 执行标准落不了地。
     const placementProblem = categoryPlacementProblem(constitution);
     if (placementProblem) {
       throw new BadRequestException(
@@ -93,8 +112,6 @@ export class ProjectService {
     const fitProblem = genreFitProblem(constitution);
     if (fitProblem) throw new BadRequestException(fitProblem + '；作品未创建。');
 
-    // 第三道：目标总字数要落在这个平台分类的头部实测体量里，或由作者在项目卡片写明取舍。
-    // 与生成入口、质量 Gate 共用同一份 categoryWordScaleStanding 判据与同一句文案。
     const scaleStanding = categoryWordScaleStanding(constitution);
     if (categoryWordScaleBlocked(scaleStanding)) {
       throw new BadRequestException(
@@ -114,19 +131,16 @@ export class ProjectService {
       current_workflow_stage: currentWorkflowStage,
       idea_status: dto.ideaStatus || 'none',
       idea_seed: dto.ideaSeed || null,
+      // Compatibility projection only. Generation/review use constitution.confirmedStory.
       confirmed_idea: dto.confirmedIdea || null,
       created_at: now,
       updated_at: now,
     };
 
     this.repo.insert(row as any);
-
     return this.toResponse(this.repo.findById(id)!);
   }
 
-  /**
-   * 获取项目列表
-   */
   findAll(query: ProjectQueryDto): { data: ProjectResponse[]; total: number } {
     if (query.search) {
       const data = this.repo.search(query.search, query.limit, query.offset);
@@ -146,18 +160,12 @@ export class ProjectService {
     return { data: data.map((r) => this.toResponse(r)), total };
   }
 
-  /**
-   * 获取项目详情
-   */
   findOne(id: string): ProjectResponse {
     const row = this.repo.findById(id);
     if (!row) throw new NotFoundException(`Project ${id} not found`);
     return this.toResponse(row);
   }
 
-  /**
-   * 更新项目
-   */
   update(id: string, dto: UpdateProjectDto): ProjectResponse {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Project ${id} not found`);
@@ -168,18 +176,22 @@ export class ProjectService {
     if (dto.title !== undefined) updateData.title = dto.title;
     if (dto.status !== undefined) updateData.status = dto.status;
     if (dto.description !== undefined) updateData.description = dto.description;
-
-    // 第一阶段新增字段
     if (dto.creationSource !== undefined) updateData.creation_source = dto.creationSource;
     if (dto.currentWorkflowStage !== undefined) updateData.current_workflow_stage = dto.currentWorkflowStage;
     if (dto.ideaStatus !== undefined) updateData.idea_status = dto.ideaStatus;
     if (dto.ideaSeed !== undefined) updateData.idea_seed = dto.ideaSeed || null;
-    if (dto.confirmedIdea !== undefined) updateData.confirmed_idea = dto.confirmedIdea || null;
 
+    const currentConstitution = readConstitution(existing);
     const constitution = updateConstitution(existing, dto);
-    // 只有本次更新确实在改「平台 / 分类 / 体量」时才校验：只改标题不该拿历史分类卡人，
-    // 那种情况由生成入口 assertExecutionStandardsComplete 的同一份判据负责阻断。
-    // 与创建入口共用同一份判据与同一句文案，此处后缀换成「执行标准未保存」。
+    if (dto.confirmedIdea !== undefined) {
+      const story = normalizeConfirmedStory(dto.confirmedIdea);
+      const currentStory = (currentConstitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;
+      if (JSON.stringify(story) !== JSON.stringify(currentStory)) constitution.revision += 1;
+      if (story === null) delete (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;
+      else (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory = story;
+      updateData.confirmed_idea = dto.confirmedIdea || null;
+    }
+
     if (dto.targetPlatform !== undefined || dto.category !== undefined || dto.webNovelGenre !== undefined || dto.submissionTags !== undefined || dto.genreFitNote !== undefined
       || dto.targetWords !== undefined || dto.categoryWordScaleDeviation !== undefined) {
       const fitProblem = genreFitProblem(constitution);
@@ -191,8 +203,6 @@ export class ProjectService {
           + '；执行标准未保存，请把分类改选为该平台的投稿分类。',
         );
       }
-      // 改平台 / 分类 = 换了适用口径；改目标总字数 / 取舍依据 = 换了被对照的值。
-      // 三者任一变动都必须重跑体量判据，否则「把越界字数改回区间内」这类修正拿不到判据背书。
       const scaleStanding = categoryWordScaleStanding(constitution);
       if (categoryWordScaleBlocked(scaleStanding)) {
         throw new BadRequestException(
@@ -209,9 +219,6 @@ export class ProjectService {
     return this.toResponse(this.repo.findById(id)!);
   }
 
-  /**
-   * 删除项目
-   */
   remove(id: string): { success: boolean } {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Project ${id} not found`);
@@ -241,18 +248,12 @@ export class ProjectService {
     return { success: true };
   }
 
-  /**
-   * 获取项目统计
-   */
   getStats(id: string): any {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Project ${id} not found`);
     return this.repo.getProjectStats(id);
   }
 
-  /**
-   * 获取全局统计
-   */
   getGlobalStats(): any {
     return {
       totalProjects: this.repo.count(),
@@ -261,9 +262,6 @@ export class ProjectService {
     };
   }
 
-  /**
-   * 转换数据库行为API响应
-   */
   private toResponse(row: ProjectRow): ProjectResponse {
     const creationSource = row.creation_source || 'blank';
     const constitution = readConstitution(row);
@@ -271,6 +269,7 @@ export class ProjectService {
     const currentWorkflowStage = row.current_workflow_stage ||
       this.defaultWorkflowStage(row.type, creationSource);
     const ideaStatus = row.idea_status || 'none';
+    const canonicalStory = (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;
 
     return {
       id: row.id,
@@ -287,15 +286,12 @@ export class ProjectService {
       currentWorkflowStage,
       ideaStatus,
       ideaSeed: row.idea_seed || undefined,
-      confirmedIdea: row.confirmed_idea || undefined,
+      confirmedIdea: confirmedStoryForResponse(canonicalStory) ?? (row.confirmed_idea || undefined),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
-  /**
-   * 根据作品类型和创建来源推导默认创作阶段
-   */
   private defaultWorkflowStage(type: string, _creationSource: string): string {
     if (type === 'short_story') return 'topic';
     return 'idea_or_inspiration';
@@ -316,7 +312,6 @@ export class ProjectService {
     for (const legacyKey of ['perChapterTarget', 'wordsPerChapter', 'chapterWords', 'volumeCount', 'chaptersPerVolume', 'totalChapters', 'chapterCount']) {
       delete normalized[legacyKey];
     }
-
     normalized.structurePlanning = 'dynamic_by_story_rhythm';
     return normalized;
   }
@@ -326,5 +321,4 @@ export class ProjectService {
     if (typeof value === 'string') return this.safeParseSettings(value);
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
-
 }

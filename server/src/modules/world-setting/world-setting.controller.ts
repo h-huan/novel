@@ -30,7 +30,21 @@ export class WorldSettingController {
 
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateWorldSettingDto) {
-    const result = await this.service.create(projectId, dto);
+    const result = this.service.create(projectId, dto);
+    // getWritingSummary/indexing reads world_system_profiles as the canonical
+    // writing source. Establish it in the same request before any reader runs;
+    // otherwise a newly created world_setting is immediately unreadable.
+    this.service.updateProfile(projectId, result.id, {
+      synopsis: dto.workIntro || '',
+      basic_info: [dto.name, dto.era].filter(Boolean).join('；'),
+      era: dto.era || '',
+      rules: (dto.constraints || []).map(item => item.rule).filter(Boolean).join('\n'),
+      system_mechanics: dto.systemSettings || '',
+      culture_customs: dto.culturalSettings || '',
+      naming_rules: dto.namingRules || '',
+      scale_plan: dto.dataPlanning || '',
+      supplementary: dto.censorshipRules || '',
+    });
     const sync = await this.indexWorldSetting(projectId, result);
     return { ...result, sync };
   }
@@ -38,7 +52,6 @@ export class WorldSettingController {
   @Get()
   findAll(@Param('projectId') projectId: string, @Query('mode') mode?: string) {
     console.log('[WorldSettingController] findAll called, mode:', mode);
-    // 支持 mode=simple 查询参数，返回短篇世界观设定
     if (mode === 'simple') {
       console.log('[WorldSettingController] Returning simple settings');
       return this.service.getSimpleSettings(projectId);
@@ -112,7 +125,6 @@ export class WorldSettingController {
   /**
    * 保存短篇世界观设定
    * PUT /projects/:projectId/world-settings/simple
-   * 为了兼容前端调用路径，使用单独的路由
    */
   @Put('simple')
   @ApiOperation({ summary: '保存短篇世界观设定（兼容路由）' })
@@ -126,7 +138,23 @@ export class WorldSettingController {
       specialSettings?: string;
     }
   ) {
-    return this.service.upsertSimpleSettings(projectId, body);
+    const result = this.service.upsertSimpleSettings(projectId, body);
+    const setting = this.service.findByProjectId(projectId)[0];
+    if (setting) {
+      // The simple editor and the full editor write the same canonical profile;
+      // this is a deterministic projection of fields the author just supplied,
+      // not a second inferred source of story facts.
+      this.service.updateProfile(projectId, setting.id, {
+        synopsis: body.storyPremise || '',
+        basic_info: body.storyPremise || '',
+        era: body.era || '',
+        locations: JSON.stringify(body.locations || []),
+        social_structure: body.socialRules || '',
+        system_mechanics: body.specialSettings || '',
+        supplementary: body.specialSettings || '',
+      });
+    }
+    return result;
   }
 
   /** Keep the full persisted profile available to retrieval, not just basic fields. */

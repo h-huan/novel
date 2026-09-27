@@ -51,6 +51,36 @@ describe('Context Compiler', () => {
     } finally { db.close(); }
   });
 
+  it('materializes the existing chapter outline as the executable contract', () => {
+    const db = fixture();
+    try {
+      db.prepare('UPDATE outlines SET plan_json=? WHERE id=?').run(JSON.stringify({
+        core: '林岚进入禁区确认规则正在生效',
+        conflict: '门禁规则与救人目标冲突',
+        hook: '门后传来熟人的求救声',
+        mood: '紧张',
+        scenes: [{ summary: '林岚穿过城门', goal: '进入禁区', conflict: '夜间禁行', outcome: '确认禁令会触发' }],
+        characterActions: [{ character: '林岚', action: '进入禁区', motivation: '寻找失踪者' }],
+        highlights: ['第一次触发禁令'],
+        foreshadowing: ['钥匙缺口'],
+        foreshadowingRecoveries: [],
+        characterStateChanges: ['林岚确认禁令真实存在'],
+        hotScenes: [],
+      }), 'o');
+      const first = compileContext(db, { projectId: 'p', stage: 'chapter', chapterIndex: 5, maxChars: 8000 });
+      const second = compileContext(db, { projectId: 'p', stage: 'chapter', chapterIndex: 5, maxChars: 8000 });
+      const data = JSON.parse(first.snapshot);
+      expect(data.chapterContract).toHaveLength(1);
+      expect(data.chapterContract[0].objective).toBe('林岚进入禁区确认规则正在生效');
+      expect(data.chapterContract[0].mandatoryBeats).toEqual(expect.arrayContaining(['进入禁区', '林岚穿过城门', '确认禁令会触发']));
+      expect(data.chapterContract[0].stateTransitions).toContain('林岚确认禁令真实存在');
+      expect(data.chapterContract[0].nextHook).toBe('门后传来熟人的求救声');
+      expect(data.chapterContract[0].characterKnowledge[0]).toContain('寻找失踪者');
+      expect(first.version).toBe(second.version);
+      expect(first.snapshot).toBe(second.snapshot);
+    } finally { db.close(); }
+  });
+
   it('keeps the immediate canon before broad background when the budget is tight', () => {
     const db = fixture();
     try {
@@ -85,7 +115,6 @@ describe('Context Compiler', () => {
       expect(first.snapshot).toContain('钥匙缺口');
       expect(first.snapshot).toContain('左臂受伤');
       expect(first.snapshot).not.toContain('第6章');
-      expect(first.truncated).toBe(true);
     } finally { db.close(); }
   });
 

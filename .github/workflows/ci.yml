@@ -31,6 +31,24 @@ jobs:
         run: npm run test:acceptance
       - name: API E2E
         run: npm run test:e2e
+      - name: Detect real LLM credential
+        id: real_llm
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "DEEPSEEK_API_KEY secret not configured; real-model golden path will be skipped."
+          fi
+      - name: Real LLM golden path
+        if: steps.real_llm.outputs.enabled == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          REAL_LLM_MODEL: ${{ vars.REAL_LLM_MODEL }}
+        run: RUN_REAL_LLM_E2E=1 npm run test:e2e -- --grep "Real novel golden path"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
