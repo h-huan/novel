@@ -22,27 +22,29 @@ const digest = (value: string) => crypto.createHash('sha256').update(value).dige
 @Injectable()
 export class IdempotentRealLLMService extends RealLLMService {
   constructor(
-    modelRouter: ModelRouterService,
+    private readonly runtimeRouter: ModelRouterService,
     metrics: GenerationMetricsService,
     private readonly database: DatabaseService,
-    private readonly runtimeRouter: ModelRouterService,
   ) {
-    super(modelRouter, metrics);
+    super(runtimeRouter, metrics);
   }
 
   override async generate(request: LLMRequest): Promise<LLMResponse> {
     const projectId = request.metrics?.projectId ?? currentCreationProjectId() ?? undefined;
-    if (!this.isReusableCreationCall(request, projectId)) return super.generate(request);
+    if (!projectId || !this.isReusableCreationCall(request, projectId)) return super.generate(request);
 
     const db = this.database.getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId!) as any;
+    const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     if (!project) return super.generate(request);
 
     const constitution = readConstitution(project);
+    const constitutionRevision = Number.isFinite(Number(constitution.revision))
+      ? Number(constitution.revision)
+      : null;
     const stepKey = String(request.metrics?.stepKey || '');
     const scenario = String(request.scenario || 'daily');
     const stage = qualityStage(scenario, stepKey);
-    const compiled = compileContext(db, { projectId: projectId!, stage, chapterIndex: null });
+    const compiled = compileContext(db, { projectId, stage, chapterIndex: null });
     const contextVersion = String(compiled.version || digest(''));
     const standards = standardDirectiveCache.snapshot(scenario, request.injectStandard !== false, stepKey);
     let routedModel = '';
@@ -74,11 +76,11 @@ export class IdempotentRealLLMService extends RealLLMService {
 
     const cached = db.prepare(`SELECT output_text,model,finished_at FROM generation_runs
       WHERE project_id=? AND stage=? AND scenario=? AND status='success'
-        AND constitution_revision=? AND context_version=? AND prompt_version=?
+        AND constitution_revision IS ? AND context_version=? AND prompt_version=?
         AND COALESCE(chapter_index,-1)=-1
         AND LENGTH(TRIM(COALESCE(output_text,'')))>0
       ORDER BY finished_at DESC,id DESC LIMIT 1`).get(
-        projectId, stage, scenario, constitution.revision, contextVersion, promptVersion,
+        projectId, stage, scenario, constitutionRevision, contextVersion, promptVersion,
       ) as { output_text: string; model?: string | null; finished_at?: string | null } | undefined;
 
     if (cached?.output_text) {
