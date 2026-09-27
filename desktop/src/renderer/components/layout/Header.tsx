@@ -12,7 +12,7 @@ const GLOBAL_NAV: Array<{ to: string; label: string }> = [
   { to: '/projects', label: '我的项目' },
   { to: '/discover', label: '灵感发现' },
   { to: '/dictionary', label: '创作字典' },
-  { to: '/module-standards', label: '系统工作流规则' },
+  { to: '/module-standards', label: '执行标准' },
 ];
 
 /**
