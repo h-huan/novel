@@ -1,6 +1,6 @@
 export interface RepairDecision {
   repair: boolean;
-  reason: 'complete' | 'first_targeted_repair' | 'issues_reduced' | 'repeated_issues' | 'no_measurable_progress';
+  reason: 'complete' | 'whole_rewrite_disabled' | 'repeated_issues' | 'no_measurable_progress';
 }
 
 export interface ContinuationDecision {
@@ -15,10 +15,6 @@ const VOLATILE_FINDING_SUFFIX = /\s*\|\s*(?:位置|原文)\s*[:：][\s\S]*$/;
 /** `【硬红线·确定性扫描·42】…` / `【质量建议·确定性扫描·26】…` → 规则号才是稳定身份。 */
 const DETERMINISTIC_FINDING = /^【[^】]*?确定性扫描·([^】·]+)】/;
 
-/**
- * 把一条结论归约成“重写后依然不变”的身份。确定性扫描结论自带段落位置与违规原文，
- * 而这两者每次重写都会变；不剥离它们，同一条硬伤换个段落就会被判成“全新问题”。
- */
 export function issueSignature(issue: string): string {
   const text = String(issue ?? '').trim();
   if (!text) return '';
@@ -31,7 +27,6 @@ function normalizedIssueSet(issues: readonly string[]): string[] {
   return [...new Set(issues.map(issueSignature).filter(Boolean))].sort();
 }
 
-/** Reviewers may rewrite wording, so compare stable semantic families as a secondary guard. */
 export function repairIssueFamily(issue: string): string {
   const text = String(issue || '').trim().toLowerCase();
   if (/必需事件|未兑现|covered=false|漏.{0,8}(事件|场景|钩子)/.test(text)) return 'outline_missing';
@@ -46,9 +41,12 @@ export function repairIssueFamily(issue: string): string {
 }
 
 /**
- * Continue repair only when the verified issue set becomes a strict subset of
- * the previous one. A repair is never allowed to “pay for” removing one defect
- * by introducing another defect, even when the raw issue count decreases.
+ * The controller calls this only before its historical whole-chapter rewrite
+ * fallback. Evidence-anchored local repairs have already run before this point.
+ * Rewriting the full chapter changed unaffected facts, multiplied hardline
+ * findings and repeatedly paid for another full review. Therefore the automatic
+ * fallback is deliberately closed: unresolved blockers stay blocked and are
+ * surfaced with their evidence instead of gambling on a new chapter draft.
  */
 export function decideProgressiveRepair(
   history: readonly (readonly string[])[],
@@ -56,35 +54,21 @@ export function decideProgressiveRepair(
 ): RepairDecision {
   const current = normalizedIssueSet(currentIssues);
   if (current.length === 0) return { repair: false, reason: 'complete' };
-  if (history.length === 0) return { repair: true, reason: 'first_targeted_repair' };
-
-  const signature = current.join('\n');
-  const previousSets = history.map(normalizedIssueSet);
-  if (previousSets.some(items => items.join('\n') === signature)) {
-    return { repair: false, reason: 'repeated_issues' };
+  if (history.length > 0) {
+    const signature = current.join('\n');
+    const previousSets = history.map(normalizedIssueSet);
+    if (previousSets.some(items => items.join('\n') === signature)) {
+      return { repair: false, reason: 'repeated_issues' };
+    }
   }
-
-  const previous = previousSets[previousSets.length - 1];
-  const previousSet = new Set(previous);
-  const introduced = current.filter(issue => !previousSet.has(issue));
-  if (introduced.length > 0) {
-    return { repair: false, reason: 'no_measurable_progress' };
-  }
-  if (current.length >= previous.length) {
-    return { repair: false, reason: 'no_measurable_progress' };
-  }
-
-  const previousFamilies = new Set(previous.map(repairIssueFamily));
-  const introducedFamilies = current
-    .map(repairIssueFamily)
-    .filter(family => !previousFamilies.has(family));
-  if (introducedFamilies.length > 0) {
-    return { repair: false, reason: 'no_measurable_progress' };
-  }
-  return { repair: true, reason: 'issues_reduced' };
+  return { repair: false, reason: 'whole_rewrite_disabled' };
 }
 
-/** A whole-chapter semantic rewrite must improve facts without creating new defects. */
+/**
+ * Kept as a pure regression guard for historical runs and manual/explicit
+ * repair tools. Automatic chapter generation no longer reaches a whole-chapter
+ * semantic rewrite through decideProgressiveRepair().
+ */
 export function assessSemanticRepairProgress(
   beforeIssues: readonly string[],
   afterIssues: readonly string[],
