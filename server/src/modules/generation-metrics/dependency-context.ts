@@ -168,7 +168,10 @@ export function dependencyContext(
   }
 
   // Recent body is canon-adjacent evidence and must enter before broad world data.
-  // Store only the ending tail so the budget is spent on continuity, not replaying old prose.
+  // Keep all three immediate predecessors whenever they exist; under a tight
+  // budget shorten every tail proportionally instead of dropping an entire
+  // chapter, because losing chapter N-1 is more damaging than seeing less prose.
+  const recentTailChars = Math.max(320, Math.min(1200, Math.floor(max / 10)));
   let recent: any[] = [];
   if (tableExists(db, 'chapters') && chapterIndex !== null) {
     recent = db.prepare(`SELECT id,outline_id,volume_index,chapter_index,title,content,status
@@ -181,7 +184,7 @@ export function dependencyContext(
       chapter_index: c.chapter_index,
       title: c.title,
       status: c.status,
-      content_tail: String(c.content || '').slice(-1200),
+      content_tail: String(c.content || '').slice(-recentTailChars),
     }));
   }
 
@@ -244,11 +247,12 @@ export function dependencyContext(
   add('timeline', timeline);
   add('causality', links.filter(l => eventIds.has(l.source_event_id) && eventIds.has(l.target_event_id)));
   add('worldRules', rules);
-  add('worldRules', boundedRows(db, 'world_settings', projectId, 4));
+  // Active continuity evidence and confirmed state outrank broad background.
   add('foreshadowing', hints.filter(h => !explicitHints.has(h.id)));
+  add('recentState', states);
   add('locations', locations);
   add('organizations', organizations);
-  add('recentState', states);
+  add('worldRules', boundedRows(db, 'world_settings', projectId, 4));
   add('outline', nearby);
 
   sections.meta.truncation = omitted ? [`${omitted} items/fields omitted or clipped; budget=${max}`, ...truncation] : [];
