@@ -131,9 +131,18 @@ export function dependencyContext(
 
   const explicitHints = new Set(ids(outline?.foreshadowing_ids));
   ids(detail.foreshadowing_ids).forEach(id => explicitHints.add(id));
+  let activeHints: any[] = [];
+  if (tableExists(db, 'foreshadowings') && chapterIndex !== null) {
+    activeHints = db.prepare(`SELECT * FROM foreshadowings
+      WHERE project_id=? AND status IN ('buried','active','reminder')
+        AND COALESCE(buried_chapter_index,0)<=?
+      ORDER BY importance DESC,buried_chapter_index DESC,id LIMIT 64`).all(projectId, chapterIndex) as any[];
+  } else {
+    activeHints = boundedRows(db, 'foreshadowings', projectId, 64);
+  }
   const hintCandidates = mergeById(
     rowsByIds(db, 'foreshadowings', projectId, [...explicitHints]),
-    boundedRows(db, 'foreshadowings', projectId, 64),
+    activeHints,
   );
   const hints = hintCandidates
     .filter(f => explicitHints.has(f.id) || (['buried', 'active', 'reminder'].includes(f.status) && Number(f.buried_chapter_index || 0) <= (chapterIndex ?? Infinity)))
@@ -143,8 +152,15 @@ export function dependencyContext(
       || String(a.id).localeCompare(String(b.id)));
 
   const explicitEventIds = new Set(ids(detail.timeline_event_ids));
+  const currentChapterEvents = tableExists(db, 'timeline_three_line_events') && chapterIndex !== null
+    ? db.prepare('SELECT * FROM timeline_three_line_events WHERE project_id=? AND chapter_index=? ORDER BY id LIMIT 96')
+      .all(projectId, chapterIndex) as any[]
+    : [];
   const eventCandidates = mergeById(
     rowsByIds(db, 'timeline_three_line_events', projectId, [...explicitEventIds]),
+    currentChapterEvents,
+    // Keep a bounded participant-related fallback for older schemas/plans that
+    // did not persist explicit timeline ids yet.
     boundedRows(db, 'timeline_three_line_events', projectId, 96),
   );
   const eventIds = new Set(eventCandidates
@@ -200,8 +216,14 @@ export function dependencyContext(
     }
   }
   ids(detail.world_rule_ids).forEach(id => ruleIds.add(id));
+  const fullBookRules = tableExists(db, 'world_rules')
+    ? db.prepare("SELECT * FROM world_rules WHERE project_id=? AND scope='full_book' ORDER BY id LIMIT 64").all(projectId) as any[]
+    : [];
   const ruleCandidates = mergeById(
     rowsByIds(db, 'world_rules', projectId, [...ruleIds]),
+    fullBookRules,
+    // Bounded relation fallback for legacy rows whose explicit IDs were never
+    // copied into the chapter plan.
     boundedRows(db, 'world_rules', projectId, 64),
   );
   const rules = ruleCandidates
@@ -246,11 +268,25 @@ export function dependencyContext(
 
   let states: any[] = [];
   if (tableExists(db, 'state_items')) {
+    let recentStates: any[];
     try {
-      states = db.prepare("SELECT * FROM state_items WHERE project_id=? AND status='confirmed' ORDER BY updated_at DESC,id LIMIT 64").all(projectId) as any[];
+      recentStates = db.prepare("SELECT * FROM state_items WHERE project_id=? AND status='confirmed' ORDER BY updated_at DESC,id LIMIT 64").all(projectId) as any[];
     } catch {
-      states = boundedRows(db, 'state_items', projectId, 64).filter(s => s.status === 'confirmed');
+      recentStates = boundedRows(db, 'state_items', projectId, 64).filter(s => s.status === 'confirmed');
     }
+    const involvedIds = [...involved];
+    let involvedStates: any[] = [];
+    if (involvedIds.length > 0) {
+      const placeholders = involvedIds.map(() => '?').join(',');
+      try {
+        involvedStates = db.prepare(`SELECT * FROM state_items
+          WHERE project_id=? AND status='confirmed' AND target_id IN (${placeholders})
+          ORDER BY updated_at DESC,id LIMIT 64`).all(projectId, ...involvedIds) as any[];
+      } catch {
+        involvedStates = [];
+      }
+    }
+    states = mergeById(involvedStates, recentStates);
     states.sort((a, b) => Number(involved.has(b.target_id)) - Number(involved.has(a.target_id))
       || String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || String(a.id).localeCompare(String(b.id)));
   }
