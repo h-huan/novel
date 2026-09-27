@@ -19,8 +19,12 @@ export class GeneratedChapterCommitService {
   ) {}
 
   async commit(projectId: string, chapterId: string, content: string): Promise<ChapterResponse> {
-    const canonicalContent = String(content || '').trim();
-    if (!canonicalContent) throw new BadRequestException('AI 正文为空，禁止写入 Canon');
+    // Provenance is byte-for-byte: never normalize the submitted body before
+    // matching the final PASS run. trim() is used only to reject blank content.
+    // Otherwise a harmless leading/trailing newline can turn a valid gated body
+    // into an unmatchable payload, producing "Gate passed but save failed".
+    const canonicalContent = String(content ?? '');
+    if (!canonicalContent.trim()) throw new BadRequestException('AI 正文为空，禁止写入 Canon');
 
     const db = this.database.getDb();
     const chapter = db.prepare(`
