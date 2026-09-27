@@ -1,7 +1,8 @@
 import { createRequire } from 'node:module';
 import * as crypto from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { IdempotentRealLLMService } from './idempotent-real-llm.service';
+import { RealLLMService } from './real-llm.service';
 import { compileContext } from '../modules/generation-metrics/context-compiler';
 import { qualityStage } from '../routing/scenario-taxonomy';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
@@ -55,7 +56,7 @@ function serviceFor(db: any) {
 }
 
 describe('IdempotentRealLLMService', () => {
-  it('returns an exact successful creation-stage run without another model call', async () => {
+  it('returns the original run id together with an exact cached creation-stage output', async () => {
     const { db } = fixture();
     try {
       const service = serviceFor(db);
@@ -97,7 +98,59 @@ describe('IdempotentRealLLMService', () => {
       expect(response.content).toBe('{"world":"cached"}');
       expect(response.finishReason).toBe('cached_successful_stage');
       expect(response.latency).toBe(0);
+      expect(response.runId).toBe('run-1');
     } finally { db.close(); }
+  });
+
+  it('binds a fresh project-scoped response to the exact completed generation run', async () => {
+    const { db } = fixture();
+    const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockResolvedValue({
+      content: '{"chapter":"fresh"}',
+      model: 'test-model',
+      latency: 12,
+    });
+    try {
+      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        'run-fresh','p','chapter','writing','success',1,'ctx','prompt',1,
+        '{"chapter":"fresh"}','test-model','2026-09-27T00:00:01.000Z',
+      );
+      const service = serviceFor(db);
+
+      const response = await service.generate({
+        prompt: '生成正文',
+        scenario: 'writing',
+        metrics: { projectId: 'p', chapterIndex: 1, stepKey: 'body_first' },
+      });
+
+      expect(superGenerate).toHaveBeenCalledTimes(1);
+      expect(response.content).toBe('{"chapter":"fresh"}');
+      expect(response.runId).toBe('run-fresh');
+    } finally {
+      superGenerate.mockRestore();
+      db.close();
+    }
+  });
+
+  it('does not invent provenance when no completed run matches the fresh output', async () => {
+    const { db } = fixture();
+    const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockResolvedValue({
+      content: '{"chapter":"untracked"}',
+      model: 'test-model',
+      latency: 12,
+    });
+    try {
+      const service = serviceFor(db);
+      const response = await service.generate({
+        prompt: '生成正文',
+        scenario: 'writing',
+        metrics: { projectId: 'p', chapterIndex: 1, stepKey: 'body_first' },
+      });
+
+      expect(response.runId).toBeUndefined();
+    } finally {
+      superGenerate.mockRestore();
+      db.close();
+    }
   });
 
   it('physically blocks the historical automatic whole-chapter alignment rewrite', async () => {
