@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 const SCHEMA_DESCRIPTION =
-  'Versioned creative authority, bounded dependency context, narrative trace and terminal generation invariants';
+  'Single execution standard, versioned creative authority, bounded dependency context and terminal generation invariants';
 
 type ColumnRow = { name: string };
 
@@ -36,6 +36,20 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
   const actions: string[] = [];
   db.exec('BEGIN');
   try {
+    // 旧 IdeaLab 与“运行时自归纳硬标准”已退出产品主链。它们的数据库结构也必须清理，
+    // 否则存量数据库仍会保留第二套流程/标准状态，后续代码容易误接回旧事实源。
+    for (const table of [
+      'standard_summarization_runs',
+      'module_standard_versions',
+      'module_standards',
+      'idea_drafts',
+    ]) {
+      if (hasTable(db, table)) {
+        db.exec(`DROP TABLE ${table}`);
+        actions.push(`drop_legacy_table.${table}`);
+      }
+    }
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS quality_benchmark_runs (
         id TEXT PRIMARY KEY,
@@ -56,13 +70,6 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
     if (!hasColumn(db, 'quality_benchmark_samples', 'chapter_index')) {
       db.exec('ALTER TABLE quality_benchmark_samples ADD COLUMN chapter_index INTEGER');
       actions.push('quality_benchmark_samples.chapter_index');
-    }
-
-    // 自定义平台的执行标准说明必须跟着草稿走，否则「从想法开始」的链路会在
-    // 创建草稿时丢掉用户填的平台标准，转项目时只能报「平台未执行」。
-    if (!hasColumn(db, 'idea_drafts', 'custom_platform_note')) {
-      db.exec("ALTER TABLE idea_drafts ADD COLUMN custom_platform_note TEXT DEFAULT ''");
-      actions.push('idea_drafts.custom_platform_note');
     }
 
     // generation_runs 的终态必须与 gate_status 一致。过去 finishRun 只写 status，

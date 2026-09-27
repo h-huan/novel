@@ -1,10 +1,9 @@
 /**
- * 标准指令内存缓存（无 Nest 依赖的进程内单例）
+ * 标准指令内存缓存（无 Nest 依赖的进程内单例）。
  *
- * 为什么不用 DI：RealLLMService 需要在每次调用时读取"当前生效标准"并注入提示，
- * 而 ModuleStandardsService 归纳时又要调用 RealLLMService，直接互相注入会形成循环依赖。
- * 因此由 ModuleStandardsService 在启动 seed / 每次归纳后把最新标准写入这个纯缓存，
- * RealLLMService 只单向读取它——依赖方向为 ModuleStandardsService → RealLLMService（单向），无环。
+ * 唯一规范文档是仓库根 QUALITY_EXECUTION.md。ModuleStandardsService 启动时只把代码 seed
+ * 镜像装入缓存，RealLLMService 只读；运行时不存在数据库/LLM 自归纳标准，因此同一 commit
+ * 在不同机器上使用同一套 hard rules。
  */
 
 import { createHash } from 'node:crypto';
@@ -28,7 +27,7 @@ class StandardDirectiveCacheClass {
   private rebuiltAt = 0;
   private standards: CacheStandard[] = [];
 
-  /** 由 ModuleStandardsService 用当前 active 标准全量重建。 */
+  /** 由 ModuleStandardsService 用当前代码 seed 全量重建。 */
   rebuild(standards: CacheStandard[]): void {
     this.standards = structuredClone(standards);
     this.rebuiltAt = Date.now();
