@@ -32,7 +32,6 @@ import { StoryDictModule } from './modules/story-dict/story-dict.module';
 import { OrganizationModule } from './modules/organization/organization.module';
 import { MapPointModule } from './modules/map-point/map-point.module';
 import { TimelineModule } from './modules/timeline/timeline.module';
-import { IdeaLabModule } from './modules/idea-lab/idea-lab.module';
 import { WorkflowGuardModule } from './modules/workflow-guard/workflow-guard.module';
 import { WritingQualityModule } from './modules/writing-quality/writing-quality.module';
 import { ContinuityModule } from './modules/continuity/continuity.module';
@@ -68,7 +67,6 @@ import { OriginalityModule } from './modules/originality/originality.module';
     OrganizationModule,
     MapPointModule,
     TimelineModule,
-    IdeaLabModule,
     WorkflowGuardModule,
     WritingQualityModule,
     ContinuityModule,

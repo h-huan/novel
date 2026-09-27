@@ -30,7 +30,6 @@ import ImmersiveView from './pages/ImmersiveView';
 import WeeklySummaryPage from './pages/WeeklySummaryPage';
 import TimelinePage from './pages/TimelinePage';
 import OrganizationMapPage from './pages/OrganizationMapPage';
-import IdeaLabPage from './pages/IdeaLabPage';
 import WritingQualityPage from './pages/WritingQualityPage';
 import PlatformStandardsPage from './pages/PlatformStandardsPage';
 import ProjectStandardsPage from './pages/ProjectStandardsPage';
@@ -68,6 +67,7 @@ const AppRouter: React.FC = () => {
         <Route path="/project/:id/tools" element={<ToolsPage />} />
         <Route path="/discover" element={<DiscoveryWizardPage />} />
         <Route path="/inspiration" element={<Navigate to="/discover" replace />} />
+        <Route path="/idea-lab/:draftId" element={<Navigate to="/discover" replace />} />
         <Route path="/prompt-chains" element={<PromptChainPage />} />
         <Route path="/style-writing" element={<StyleWritingPage />} />
         <Route path="/news" element={<NewsPage />} />
@@ -75,7 +75,6 @@ const AppRouter: React.FC = () => {
         <Route path="/title-check" element={<TitleCheckPage />} />
         <Route path="/settings" element={<Navigate to="/" replace />} />
         <Route path="/dictionary" element={<DictionaryPage />} />
-        <Route path="/idea-lab/:draftId" element={<IdeaLabPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>
