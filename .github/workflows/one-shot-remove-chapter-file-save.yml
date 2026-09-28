@@ -1,0 +1,117 @@
+name: One-shot remove obsolete chapter file save
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-remove-chapter-file-save.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            desktop/package-lock.json
+
+      - name: Install server tooling
+        working-directory: server
+        run: npm ci
+
+      - name: Remove obsolete chapter-save endpoint with TypeScript AST
+        working-directory: server
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const ts = require('typescript');
+          const path = 'src/chain/chain.controller.ts';
+          let text = fs.readFileSync(path, 'utf8');
+          const sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+          let target = null;
+          function walk(node) {
+            if (ts.isMethodDeclaration(node)) {
+              const decorators = ts.canHaveDecorators(node) ? (ts.getDecorators(node) || []) : [];
+              for (const d of decorators) {
+                const expr = d.expression;
+                if (ts.isCallExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'Post') {
+                  const arg = expr.arguments[0];
+                  if (arg && ts.isStringLiteral(arg) && arg.text === 'chapter-save') target = node;
+                }
+              }
+            }
+            ts.forEachChild(node, walk);
+          }
+          walk(sf);
+          if (!target) throw new Error('POST /chain/chapter-save method not found');
+          let start = target.getFullStart();
+          const end = target.getEnd();
+          // getFullStart includes the JSDoc/trivia immediately owned by this method.
+          text = text.slice(0, start) + text.slice(end).replace(/^\s*\n/, '\n');
+          text = text.replace("import { FileStorageService } from '../modules/file-storage/file-storage.service';\n", '');
+          text = text.replace("import { resolveDataDir } from '../config/data-dir';\n", '');
+          text = text.replace("    private readonly fileStorage: FileStorageService,\n", '');
+          if (text.includes("@Post('chapter-save')") || text.includes('saveChapterFile(')) {
+            throw new Error('legacy chapter-save endpoint still remains');
+          }
+          fs.writeFileSync(path, text, 'utf8');
+          NODE
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'src/chain/chain.module.ts';
+          let text = fs.readFileSync(path, 'utf8');
+          text = text.replace("import { FileStorageModule } from '../modules/file-storage/file-storage.module';\n", '');
+          text = text.replace('    FileStorageModule,\n', '');
+          fs.writeFileSync(path, text, 'utf8');
+          NODE
+
+      - name: Reject obsolete chapter-save references
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          hits = []
+          for root in [Path('server/src'), Path('desktop/src')]:
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in {'.ts', '.tsx'}:
+                      continue
+                  text = p.read_text(encoding='utf-8', errors='ignore')
+                  for marker in ["@Post('chapter-save')", '/chain/chapter-save', 'saveChapterFile(']:
+                      if marker in text:
+                          hits.append(f'{p}: {marker}')
+          if hits:
+              raise SystemExit('obsolete chapter file save references remain:\n' + '\n'.join(hits))
+          PY
+
+      - name: Verify server
+        working-directory: server
+        run: |
+          npm run typecheck
+          npm test
+          npm run test:acceptance
+
+      - name: Verify desktop
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run typecheck
+          npm test -- --run
+          npm run build
+
+      - name: Commit cleanup and remove this workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-remove-chapter-file-save.yml
+          git add server/src
+          git commit -m "refactor: remove obsolete chapter file save bypass"
+          git push origin HEAD:main
