@@ -12,14 +12,3 @@ export interface ChainTemplate {
   createdAt: string;
   updatedAt: string;
 }
-
-export interface ChainTemplateSummary {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  nodes: number;
-  executionMode: ExecutionMode;
-  createdAt: string;
-  updatedAt: string;
-}
