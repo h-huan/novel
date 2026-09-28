@@ -7,6 +7,7 @@ on:
       - .github/workflows/one-shot-remove-direct-project-create.yml
       - .github/scripts/one-shot-remove-direct-project-create.py
       - .github/scripts/one-shot-migrate-project-create-tests.py
+      - server/e2e/playwright.config.ts
 
 permissions:
   contents: write
