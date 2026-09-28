@@ -89,7 +89,7 @@ export class GenerationMetricsController {
    */
   private generationDiagnostics(projectId: string) {
     const db = this.databaseService.getDb();
-    const metrics = db.prepare(`SELECT run_id,chapter_index,step_key,scenario,status,duration_ms,total_tokens,
+    const metrics = db.prepare(`SELECT run_id,chapter_index,step_key,scenario,status,attempt,duration_ms,total_tokens,
         COALESCE(internal_retries,0) internal_retries,created_at
       FROM generation_step_metrics WHERE project_id=? ORDER BY created_at DESC LIMIT 300`).all(projectId) as any[];
     const runs = db.prepare(`SELECT id,stage,scenario,status,chapter_index,prompt_version,context_version,
@@ -116,6 +116,14 @@ export class GenerationMetricsController {
     const totalTokens = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.total_tokens) || 0), 0);
     const internalRetryCount = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.internal_retries) || 0), 0);
     const callsWithInternalRetry = metrics.filter(row => Number(row.internal_retries) > 0).length;
+    const effectiveRetryCount = metrics.reduce(
+      (sum, row) => sum + Math.max(0, Number(row.attempt) || 0) + Math.max(0, Number(row.internal_retries) || 0),
+      0,
+    );
+    const effectiveFirstPassCalls = metrics.filter(row =>
+      row.status === 'success' && (Number(row.attempt) || 0) === 0 && (Number(row.internal_retries) || 0) === 0,
+    ).length;
+    const effectiveFirstPassRate = metrics.length ? Number((effectiveFirstPassCalls / metrics.length).toFixed(3)) : 1;
     const slowestSteps = metrics
       .slice()
       .sort((a, b) => (Number(b.duration_ms) || 0) - (Number(a.duration_ms) || 0))
@@ -173,6 +181,9 @@ export class GenerationMetricsController {
       totalTokens,
       internalRetryCount,
       callsWithInternalRetry,
+      effectiveRetryCount,
+      effectiveFirstPassCalls,
+      effectiveFirstPassRate,
       exactDuplicateRunGroups: exactDuplicateRuns.length,
       exactDuplicateRuns,
       slowestSteps,
