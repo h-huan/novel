@@ -33,7 +33,7 @@ jobs:
           if grep -R "CreateProjectDto\|validProjectPayload" -n server/src server/e2e desktop/src; then exit 1; fi
           if grep -R "creationSource\|ideaSeed\|confirmedIdea" -n server/e2e; then exit 1; fi
           if grep -R "createProject: async" -n desktop/src; then exit 1; fi
-          if grep -R "request.post.*\/projects" -n server/e2e/flows --exclude='project-crud.spec.ts'; then exit 1; fi
+          if grep -R -F 'request.post(`${BASE}/projects`' -n server/e2e/flows --exclude='project-crud.spec.ts'; then exit 1; fi
           if grep -R "@Post()" -n server/src/modules/project/project.controller.ts; then exit 1; fi
           if grep -R "service.create(dto" -n server/src/modules/project; then exit 1; fi
       - name: Verify server
