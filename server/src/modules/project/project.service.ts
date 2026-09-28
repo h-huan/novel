@@ -1,10 +1,8 @@
-import { readConstitution, updateConstitution, constitutionColumns, constitutionSettings, categoryPlacementProblem, categoryPlacementMessage, missingConstitutionStandards, genreFitProblem, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, type CreativeConstitution } from './creative-constitution';
+import { readConstitution, updateConstitution, constitutionColumns, constitutionSettings, categoryPlacementProblem, categoryPlacementMessage, genreFitProblem, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, type CreativeConstitution } from './creative-constitution';
 import { platformDisplayName } from '../../../shared/src';
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { v4 as uuid } from 'uuid';
 import { ProjectRepository } from '../../database/repositories/project.repository';
 import type { ProjectRow } from '../../database/repositories/project.repository';
-import type { CreateProjectDto } from './dto/create-project.dto';
 import type { UpdateProjectDto } from './dto/update-project.dto';
 import type { ProjectQueryDto } from './dto/query-project.dto';
 import { DatabaseService } from '../../database/database.service';
@@ -28,75 +26,6 @@ export interface ProjectResponse {
 @Injectable()
 export class ProjectService {
   constructor(private readonly repo: ProjectRepository, @Optional() private readonly database?: DatabaseService) {}
-
-  /**
-   * Direct project CRUD is no longer an idea-incubation path. It can create a
-   * standards-complete project shell only; confirmed story authority belongs
-   * to the /discover creation chain and Creative Constitution.
-   */
-  create(dto: CreateProjectDto): ProjectResponse {
-    const now = new Date().toISOString();
-    const id = uuid();
-
-    const settings = JSON.stringify(this.normalizePlanningSettings({
-      autoSave: true,
-      autoSaveInterval: 30,
-      writingMode: dto.writingMode || 'full_auto',
-      immersiveModeEnabled: false,
-      recapEnabled: true,
-      typoCheckEnabled: true,
-      sensitiveWordCheckEnabled: false,
-      ...this.parseJsonObject(dto.settings),
-    }));
-
-    const projectType = dto.type || 'long_novel';
-    const currentWorkflowStage = dto.currentWorkflowStage || this.defaultWorkflowStage(projectType);
-    const constitution = updateConstitution({ type: projectType, settings: '{}' }, dto);
-    constitution.revision = 1;
-
-    const missingStandards = missingConstitutionStandards(constitution);
-    if (missingStandards.length > 0) {
-      throw new BadRequestException(
-        missingStandards
-          .map(item => `创作宪法未设置${item.label}：属未执行标准，必须补齐后才能继续（不得用默认值或平台推荐替代）`)
-          .join('；')
-        + '；项目未创建，请先选定这些执行标准。',
-      );
-    }
-
-    const placementProblem = categoryPlacementProblem(constitution);
-    if (placementProblem) {
-      throw new BadRequestException(
-        categoryPlacementMessage(constitution, placementProblem, platformDisplayName(constitution.targetPlatform))
-        + '；作品未创建，请先改选该平台的投稿分类。',
-      );
-    }
-    const fitProblem = genreFitProblem(constitution);
-    if (fitProblem) throw new BadRequestException(fitProblem + '；作品未创建。');
-
-    const scaleStanding = categoryWordScaleStanding(constitution);
-    if (categoryWordScaleBlocked(scaleStanding)) {
-      throw new BadRequestException(
-        categoryWordScaleMessage(scaleStanding, platformDisplayName(constitution.targetPlatform))
-        + '；项目未创建，请调整目标总字数，或补齐「分类体量取舍依据」。',
-      );
-    }
-
-    const row = {
-      id,
-      ...constitutionColumns(JSON.parse(settings), constitution),
-      title: dto.title,
-      status: dto.status || 'active',
-      current_words: 0,
-      description: dto.description || null,
-      current_workflow_stage: currentWorkflowStage,
-      created_at: now,
-      updated_at: now,
-    };
-
-    this.repo.insert(row as any);
-    return this.toResponse(this.repo.findById(id)!);
-  }
 
   findAll(query: ProjectQueryDto): { data: ProjectResponse[]; total: number } {
     if (query.search) {

@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { plainToInstance } from 'class-transformer';
-import { CreateProjectDto } from './dto/create-project.dto';
 import { readConstitution, updateConstitution, constitutionColumns, buildExecutionStandard, genreFitProblem, isPlatformStandardPresent, missingConstitutionStandards } from './creative-constitution';
 import { getPlatform } from '../../chain/platform-benchmarks';
 
@@ -23,8 +21,7 @@ describe('creative constitution boundary', () => {
     expect(buildExecutionStandard(loaded).directive).toContain(fitted.genreFitNote);
   });
   it('builds the constitution only from canonical project fields', () => {
-    const dto = plainToInstance(CreateProjectDto, { title: 'test', type: 'short_story', targetPlatform: 'zhihu' });
-    const c = updateConstitution({ settings: '{}' }, dto);
+    const c = updateConstitution({ settings: '{}' }, { title: 'test', type: 'short_story', targetPlatform: 'zhihu' });
     expect(c).toMatchObject({ projectType: 'short_story', targetPlatform: 'zhihu' });
     expect(c.chapterWordRange).toEqual({ min: 3000, max: 5000 });
   });

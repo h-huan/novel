@@ -34,57 +34,6 @@ export function clearProjectFlowState(projectId: string): void {
   ['lastRoute', 'activeStep', 'activeTab'].forEach((key) => localStorage.removeItem(key));
 }
 
-/**
- * 创建 / 更新项目共用的执行标准字段清单。
- *
- * 为什么写成 Record<keyof ExecutionStandardsPayload, true> 而不是手写数组：
- * 手写清单漏一项只是运行期少发一个字段，编译不报错 —— 创建入口就曾因此把
- * categoryWordScaleDeviation 整个漏掉：作者在卡片上填了「分类体量取舍依据」，界面显示已填，
- * 请求里却没有这个字段，生成侧仍按 out_of_range 阻断，反复打回。
- * 用 Record 后，执行标准加字段而这里没跟上会直接编译失败。
- */
-const EXECUTION_STANDARDS_FIELDS: Record<keyof ExecutionStandardsPayload, true> = {
-  targetPlatform: true,
-  customPlatformNote: true,
-  targetWords: true,
-  category: true,
-  storyTone: true,
-  writingStyle: true,
-  webNovelGenre: true,
-  submissionTags: true,
-  plotTags: true,
-  genreFitNote: true,
-  pov: true,
-  targetAudience: true,
-  categoryWordScaleDeviation: true,
-};
-
-/**
- * 只挑执行标准字段提交，undefined 不发。
- *
- * 空字符串 / 空数组照发：两侧判据（后端 isPlatformStandardPresent、前端 missingExecutionStandards）
- * 都把空值判为「该维未执行」，所以既不必在前端偷偷换成默认值，也不能靠「不提交」
- * 把库里的旧值留在原处冒充已执行。
- */
-function pickExecutionStandards(data: Partial<ExecutionStandardsPayload>): Record<string, unknown> {
-  const picked: Record<string, unknown> = {};
-  (Object.keys(EXECUTION_STANDARDS_FIELDS) as Array<keyof ExecutionStandardsPayload>).forEach((field) => {
-    const value = data[field];
-    if (value !== undefined) picked[field] = value;
-  });
-  return picked;
-}
-
-/** 创建项目载荷：项目自身字段 + 执行标准（直接复用 ExecutionStandardsPayload，不另建一份字段表）。 */
-interface ProjectCreateData extends Partial<ExecutionStandardsPayload> {
-  title: string;
-  type?: Project['type'];
-  currentWorkflowStage?: WorkflowStage;
-  description?: string;
-  settings?: Record<string, unknown>;
-  chapterWordRange?: { min: number; max: number };
-}
-
 /** 更新项目卡片执行标准（平台/分类/基调/文风/流派/视角/目标读者）+ 标题/类型/简介。 */
 interface ProjectUpdateData extends Partial<ExecutionStandardsPayload> {
   title?: string;
@@ -102,7 +51,6 @@ interface ProjectState {
 
   fetchProjects: () => Promise<void>;
   fetchProject: (id: string) => Promise<Project | null>;
-  createProject: (data: ProjectCreateData) => Promise<Project>;
   updateProject: (id: string, data: ProjectUpdateData) => Promise<Project>;
   deleteProject: (id: string) => Promise<void>;
   deleteProjects: (ids: string[]) => Promise<{ deleted: string[]; failed: Array<{ id: string; message: string }> }>;
@@ -182,36 +130,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return p;
     } catch {
       return null;
-    }
-  },
-
-  createProject: async (data: ProjectCreateData) => {
-    set({ loading: true, error: null });
-    try {
-      const body: Record<string, unknown> = {
-        title: data.title,
-        type: data.type || 'long_novel',
-      };
-      // 执行标准十项走同一份清单提交（六维 + 平台说明 + 目标总字数 + 分类体量取舍依据）：
-      // 旧写法逐字段 if，新增字段漏一行就静默少发，界面显示「已填」而生成侧仍按缺失阻断。
-      Object.assign(body, pickExecutionStandards(data));
-      if (data.currentWorkflowStage) body.currentWorkflowStage = data.currentWorkflowStage;
-      if (data.description) body.description = data.description;
-      if (data.settings) body.settings = data.settings;
-      if (data.chapterWordRange !== undefined) body.chapterWordRange = data.chapterWordRange;
-
-      const res = await api.post<any>('/projects', body);
-      const raw = (res as any).data ?? res;
-      const p = mapServerProject(raw);
-      set((state) => ({
-        projects: [p, ...state.projects],
-        currentProject: p,
-        loading: false,
-      }));
-      return p;
-    } catch (err: any) {
-      set({ loading: false, error: err.message || '创建项目失败' });
-      throw err;
     }
   },
 

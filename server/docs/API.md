@@ -15,16 +15,16 @@ Content-Type: application/json
 
 篇幅、平台、分类、基调、文风、流派和视角等创作要求以根目录 `QUALITY_EXECUTION.md` 为唯一规范说明；代码侧低层阈值从 shared/platform benchmark 等唯一常量来源读取，API 文档不复制第二套规则。
 
-### 创建项目
+### 创建小说
 
 ```http
-POST /api/v1/projects
+POST /api/v1/chain/create-project-async
 Content-Type: application/json
 ```
 
-项目创建必须形成完整 Creative Constitution。创作字段只允许从顶层写入；请求中的 `settings` 只保存操作设置，不允许塞入第二份创作事实。
+该接口只接受 `/chain/idea-discover` 已确认故事卡及完整执行标准，先建立 `creating` 项目壳，再按唯一生成主链构建世界观、角色和大纲；通过激活前完整性/一致性检查后才进入 `active`。
 
-`platformStyle` 等旧字段仅保留为兼容投影，运行时不作为第二事实源。
+不存在通用 `POST /projects` 创建入口；`/projects` 只负责读取、更新既有项目和删除项目，避免再次形成第二条创建链。
 
 ### 项目接口
 
@@ -32,7 +32,6 @@ Content-Type: application/json
 GET    /api/v1/projects
 GET    /api/v1/projects/:id
 GET    /api/v1/projects/:id/stats
-POST   /api/v1/projects
 PUT    /api/v1/projects/:id
 DELETE /api/v1/projects/:id
 ```

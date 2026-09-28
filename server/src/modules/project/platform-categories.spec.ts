@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { plainToInstance } from 'class-transformer';
-import { CreateProjectDto } from './dto/create-project.dto';
 import {
   updateConstitution,
   categoryPlacementProblem,
@@ -26,8 +24,7 @@ import {
 } from '../../../shared/src';
 
 function constitutionOf(partial: Record<string, unknown>) {
-  const dto = plainToInstance(CreateProjectDto, { title: 't', type: 'long_novel', ...partial });
-  return updateConstitution({ settings: '{}' }, dto);
+  return updateConstitution({ settings: '{}' }, { title: 't', type: 'long_novel', ...partial });
 }
 
 describe('platform category trees are single-sourced and honest about verification', () => {

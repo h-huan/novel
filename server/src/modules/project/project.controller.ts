@@ -4,7 +4,6 @@
 import {
   Controller,
   Get,
-  Post,
   Put,
   Delete,
   Body,
@@ -13,7 +12,6 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ProjectService } from './project.service';
-import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectQueryDto } from './dto/query-project.dto';
 
@@ -21,11 +19,6 @@ import { ProjectQueryDto } from './dto/query-project.dto';
 @Controller('projects')
 export class ProjectController {
   constructor(private readonly service: ProjectService) {}
-
-  @Post()
-  create(@Body() dto: CreateProjectDto) {
-    return this.service.create(dto);
-  }
 
   @Get()
   findAll(@Query() query: ProjectQueryDto) {

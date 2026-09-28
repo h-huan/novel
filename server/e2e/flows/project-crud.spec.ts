@@ -13,16 +13,9 @@ test.describe('Project CRUD E2E', () => {
     }
   });
 
-  test('should create a new project via API', async ({ request }) => {
-    projectTitle = uniqueTitle('crud-project');
-    const created = await createProject(request, projectTitle);
-    projectId = created.id;
-    const body = created.response;
-
-    expect(body).toHaveProperty('id');
-    expect(body.title).toBe(projectTitle);
-    expect(body.type).toBe('long_novel');
-    expect(body.status).toBe('active');
+  test('direct POST /projects is not a project creation entry', async ({ request }) => {
+    const response = await request.post(`${BASE}/projects`, { data: { title: uniqueTitle('forbidden-create') } });
+    expect(response.status()).toBe(404);
   });
 
   test('should list projects and verify the new one is present', async ({ request }) => {

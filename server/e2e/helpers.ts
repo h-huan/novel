@@ -1,4 +1,10 @@
 import { APIRequestContext, expect } from '@playwright/test';
+import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import * as fs from 'node:fs';
+import { STANDARD_PRECONDITIONS } from '../src/acceptance/test-standards';
+import { constitutionSettings, updateConstitution } from '../src/modules/project/creative-constitution';
 
 const BASE = `http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1`;
 
@@ -12,48 +18,68 @@ export function uniqueTitle(prefix = 'test'): string {
  * preconditions. Tests may override the field they are exercising, but must not
  * maintain private copies of the six-dimensional execution standard.
  */
-export function validProjectPayload(overrides: Record<string, any> = {}) {
-  const confirmedIdea = '一名档案员发现每天午夜都会多出一份不存在的失踪登记，他必须在记录吞掉真实身份前查清来源。';
-  const base = {
-    title: uniqueTitle(),
-    type: 'long_novel',
-    creationSource: 'idea',
-    targetPlatform: 'custom',
-    customPlatformNote: '每章3000至5000字，开篇尽快进入异常事件，章章推进核心冲突并留下明确追读钩子。',
-    targetWords: 120000,
-    category: '悬疑',
-    storyTone: ['紧张', '克制'],
-    writingStyle: ['简洁', '画面感'],
-    webNovelGenre: ['悬疑推理'],
-    submissionTags: ['悬疑', '调查'],
-    plotTags: ['谜团', '追查'],
-    genreFitNote: '以连续调查和事实反转兑现悬疑读者预期。',
-    targetAudience: '成年悬疑读者',
-    pov: '第三人称限知',
-    ideaSeed: confirmedIdea,
-    confirmedIdea,
-    settings: { structurePlanning: 'dynamic_by_story_rhythm' },
-  };
-  return {
-    ...base,
-    ...overrides,
-    settings: { ...base.settings, ...(overrides.settings || {}) },
-  };
-}
-
 /**
- * Create a project through the normal project boundary. The fixture deliberately
- * supplies all six execution-standard dimensions; tests must not rely on hidden
- * defaults that production creation correctly rejects.
+ * Seed a project directly into the isolated E2E SQLite database.
+ * Production has no generic project-create API: /discover -> create-project-async
+ * is the only user creation path. This helper exists only inside DATA_DIR=.runtime-data-*.
  */
 export async function createProject(request: APIRequestContext, title?: string) {
-  const res = await request.post(`${BASE}/projects`, {
-    data: validProjectPayload({ title: title || uniqueTitle() }),
-  });
+  const dataDir = process.env.DATA_DIR;
+  if (!dataDir || !dataDir.includes('.runtime-data-')) {
+    throw new Error(`E2E project fixture refused non-isolated DATA_DIR: ${dataDir || '(unset)'}`);
+  }
+  fs.mkdirSync(dataDir, { recursive: true });
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const projectTitle = title || uniqueTitle();
+  const constitution = updateConstitution(
+    { type: 'long_novel', settings: '{}' },
+    {
+      ...STANDARD_PRECONDITIONS,
+      type: 'long_novel',
+      targetAudience: '成年网文读者',
+      plotTags: ['成长', '选择'],
+    },
+  );
+  constitution.revision = 1;
+  constitution.confirmedStory = {
+    title: projectTitle,
+    storyType: 'long_novel',
+    targetPlatform: constitution.targetPlatform,
+    hook: '测试项目仅用于隔离 E2E 生命周期验证',
+    description: '隔离测试数据库中的确定性项目夹具，不代表真实文学质量样本。',
+    protagonist: '测试主角',
+    coreConflict: '测试冲突',
+    uniquePoint: '测试唯一点',
+    styleTags: ['都市', '系统'],
+  };
+  const settings = constitutionSettings({
+    autoSave: true,
+    autoSaveInterval: 30,
+    writingMode: 'full_auto',
+    structurePlanning: 'dynamic_by_story_rhythm',
+  }, constitution);
+
+  const db = new DatabaseSync(path.join(dataDir, 'novel.db'));
+  try {
+    db.exec('PRAGMA busy_timeout = 10000');
+    db.prepare(`INSERT INTO projects
+      (id,title,type,status,target_words,current_words,settings,writing_style,platform_style,target_platform,current_workflow_stage,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, projectTitle, constitution.projectType, 'active', constitution.targetWords, 0,
+      JSON.stringify(settings), JSON.stringify(constitution.writingStyle), constitution.targetPlatform,
+      constitution.targetPlatform, 'world_setting', now, now,
+    );
+  } finally {
+    db.close();
+  }
+
+  const res = await request.get(`${BASE}/projects/${id}`);
   const body = await res.json();
-  expect(res.status(), JSON.stringify(body)).toBe(201);
-  expect(body.id).toBeTruthy();
-  return { id: body.id, title: body.title, response: body };
+  expect(res.status(), JSON.stringify(body)).toBe(200);
+  expect(body.id).toBe(id);
+  expect(body.creativeConstitution?.confirmedStory?.title).toBe(projectTitle);
+  return { id, title: projectTitle, response: body };
 }
 
 /** Delete a project by id */

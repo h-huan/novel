@@ -54,16 +54,20 @@ test.describe('Writing Flow E2E', () => {
   });
 
   test('returns an authoritative writing package without an LLM', async ({ request }) => {
-    const world = await request.put(`${BASE}/projects/${projectId}/world-settings/simple`, {
+    const world = await request.post(`${BASE}/projects/${projectId}/world-settings`, {
       data: {
-        storyPremise: '档案员追查午夜新增的失踪登记。',
+        name: '档案馆异常规则',
         era: '现代城市',
-        locations: ['档案馆'],
-        socialRules: '官方档案必须保留可追溯修改记录。',
-        specialSettings: '午夜后新增的异常登记只改变档案显示，不直接改写现实经历。',
+        workIntro: '档案员追查午夜新增的失踪登记。',
+        constraints: [{
+          category: '档案规则',
+          rule: '官方档案必须保留可追溯修改记录。',
+          description: '午夜后新增的异常登记只改变档案显示，不直接改写现实经历。',
+          severity: 'hard',
+        }],
       },
     });
-    expect(world.status(), await world.text()).toBe(200);
+    expect(world.status(), await world.text()).toBe(201);
 
     const chapter = await createChapter(request, projectId, {
       title: '第一章', content: '主角在雨夜收到一封没有署名的信。', chapterIndex: 1,
@@ -86,16 +90,20 @@ test.describe('Writing Flow E2E', () => {
   test('blocks body generation for a long novel without the required outline', async ({ request }) => {
     // 这个用例只验证“大纲缺失”这一层。先补齐更上游的世界观和主角，
     // 否则 WorkflowGuard 正确地会先阻断 world_setting/main_character，测试就测不到大纲门。
-    const world = await request.put(`${BASE}/projects/${projectId}/world-settings/simple`, {
+    const world = await request.post(`${BASE}/projects/${projectId}/world-settings`, {
       data: {
-        storyPremise: '档案员追查午夜新增的失踪登记。',
+        name: '档案馆基础规则',
         era: '现代城市',
-        locations: ['档案馆'],
-        socialRules: '档案修改必须可追溯。',
-        specialSettings: '',
+        workIntro: '档案员追查午夜新增的失踪登记。',
+        constraints: [{
+          category: '档案规则',
+          rule: '档案修改必须可追溯。',
+          description: '用于验证大纲缺失门禁的确定性世界观夹具。',
+          severity: 'hard',
+        }],
       },
     });
-    expect(world.status(), await world.text()).toBe(200);
+    expect(world.status(), await world.text()).toBe(201);
 
     const character = await request.post(`${BASE}/projects/${projectId}/characters`, {
       data: {
