@@ -2,7 +2,12 @@ import { defineConfig } from '@playwright/test';
 import path from 'node:path';
 
 const port = process.env.E2E_PORT || '3100';
-const runtimeDataDir = path.resolve(__dirname, `.runtime-data-${port}-${process.pid}`);
+// Playwright evaluates this config in the launcher and worker processes. A PID
+// based path therefore makes the server and workers silently open different
+// databases. GITHUB_RUN_ID is stable for one CI run; locally the port is already
+// exclusive because reuseExistingServer=false.
+const runScope = process.env.GITHUB_RUN_ID || 'local';
+const runtimeDataDir = path.resolve(__dirname, `.runtime-data-${port}-${runScope}`);
 
 // E2E fixtures write directly only to the same isolated SQLite directory used
 // by the spawned server. Keep the guard in helpers.ts strict: production/local
