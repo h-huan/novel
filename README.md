@@ -91,7 +91,7 @@ npm run test:e2e
 node verify-local.mjs
 ```
 
-该命令主要检查当前 Server、执行标准、可发现项目、项目结构、第一章、generation run 和 Gate，不额外执行整套仓库测试。如果当前还没有同时存在可验收的短篇和长篇，报告会正常生成，但最终结果会标记为 FAIL，并提示 `dual_project_pair_incomplete` 等具体原因；这属于诊断结果，不代表脚本本身出错。
+该命令不会要求短篇和长篇同时存在，也不会只查 `active` 项目。它会自动检查最近的项目（包括 `creating` / `generation_failed`），并在报告中显示项目状态、结构审计、最近 generation run 及其 `error`。如果项目壳都没有成功落库，则报告会标记 `no_projects_found`；此时应直接保留创建页错误信息和 Server 日志，因为失败发生在项目可持久化之前。
 
 ### 最终完整验收（默认推荐）
 
@@ -136,7 +136,7 @@ verification/latest.md
 
 即使最终 verdict 为 FAIL，这两个文件仍会生成。终端命令返回非 0 只表示验收发现问题，不表示报告生成失败。优先查看 `verification/latest.md` 的“运行问题”；需要完整机器数据时查看 `verification/latest.json`。
 
-双项目模式会把短篇和长篇同时写进同一份报告，不会因为第二次验收覆盖第一次的项目结果。报告会分别检查：项目已激活、项目类型正确、`confirmedStory` 已持久化、恢复审计中无缺失模块或一致性问题、章纲与正文映射有效、第一章正文非空、对应 chapter generation run 成功且 Gate 已通过。它们已加入 `.gitignore`，默认只保留最新一次。把这两个文件提供给审查者即可判断本地真实模型、数据库、正文落库、项目结构完整性和 Gate 状态，无需依赖截图。
+快速诊断模式用于定位正在创建或创建失败的项目；最终 `--full` 模式则会把短篇和长篇同时写进同一份报告，并严格检查：项目已激活、项目类型正确、`confirmedStory` 已持久化、恢复审计中无缺失模块或一致性问题、章纲与正文映射有效、第一章正文非空、对应 chapter generation run 成功且 Gate 已通过。报告文件已加入 `.gitignore`，默认只保留最新一次。
 
 ## 数据与迁移
 
