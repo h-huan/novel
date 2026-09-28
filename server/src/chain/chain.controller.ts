@@ -10465,9 +10465,10 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       chapterIndex?: number;
       deferQualityGate?: boolean;
     },
-  ): Promise<{ data: T | null; rawContent: string; warnings: string[]; usage?: { promptTokens: number; completionTokens: number; totalTokens: number } }> {
+  ): Promise<{ data: T | null; rawContent: string; warnings: string[]; usage?: { promptTokens: number; completionTokens: number; totalTokens: number }; runId?: string }> {
     const warnings: string[] = [];
     let rawContent = '';
+    let runId: string | undefined;
     let parsedAnyResponse = false;
     let lastValidationIssues: string[] = [];
     const accumulatedValidationIssues: string[] = [];
@@ -10534,13 +10535,14 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           },
         });
         rawContent = resp.content;
+        runId = resp.runId;
         lastFailedCandidate = rawContent.slice(0, 60_000);
         usage = resp.usage;
         lastQualityGateError = null;
 
         const parsed = this.safeExtractJson<T>(rawContent, null as unknown as T);
         if (accepts(parsed)) {
-          return { data: parsed, rawContent, warnings, usage };
+          return { data: parsed, rawContent, warnings, usage, runId };
         }
         if (!parsed) lastFailureKind = 'parse';
 
@@ -10624,13 +10626,13 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       warnings.push(`${stepName}: 通过逐行解析恢复 ${lineParsed.length} 条数据`);
       // 如果期望的是数组，直接返回；如果期望的是对象，逐行尝试，优先返回第一个通过校验的对象
       if (lineParsed.length === 1) {
-        if (accepts(lineParsed[0])) return { data: lineParsed[0] as unknown as T, rawContent, warnings, usage };
+        if (accepts(lineParsed[0])) return { data: lineParsed[0] as unknown as T, rawContent, warnings, usage, runId };
       } else {
-        if (accepts(lineParsed)) return { data: lineParsed as unknown as T, rawContent, warnings, usage };
+        if (accepts(lineParsed)) return { data: lineParsed as unknown as T, rawContent, warnings, usage, runId };
         for (const obj of lineParsed) {
           if (accepts(obj)) {
             warnings.push(`${stepName}: 多行 JSON 中仅第 1 个通过校验的对象被采用`);
-            return { data: obj as unknown as T, rawContent, warnings, usage };
+            return { data: obj as unknown as T, rawContent, warnings, usage, runId };
           }
         }
       }
@@ -10645,7 +10647,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       if (accepts(parsed)) {
         this.logger.warn(`${stepName}: 通过修复尾部逗号解析成功`);
         warnings.push(`${stepName}: 通过修复尾部逗号解析成功`);
-        return { data: parsed as T, rawContent, warnings, usage };
+        return { data: parsed as T, rawContent, warnings, usage, runId };
       }
     } catch {}
 
@@ -10661,7 +10663,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           if (accepts(parsed)) {
             this.logger.warn(`${stepName}: 通过提取JSON块解析成功，长度: ${m[0].length}`);
             warnings.push(`${stepName}: 通过提取JSON块解析成功`);
-            return { data: parsed as T, rawContent, warnings, usage };
+            return { data: parsed as T, rawContent, warnings, usage, runId };
           }
         } catch {}
         try {
@@ -10670,7 +10672,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           if (accepts(parsed)) {
             this.logger.warn(`${stepName}: 通过提取JSON块+修复逗号解析成功，长度: ${m[0].length}`);
             warnings.push(`${stepName}: 通过提取JSON块+修复逗号解析成功`);
-            return { data: parsed as T, rawContent, warnings, usage };
+            return { data: parsed as T, rawContent, warnings, usage, runId };
           }
         } catch {}
       }
@@ -10684,7 +10686,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       this.logger.warn(`${stepName}: 所有解析尝试均失败，原始内容前300字: ${rawContent.slice(0, 300)}`);
       warnings.push(`${stepName}生成结果无法解析`);
     }
-    return { data: null, rawContent, warnings, usage };
+    return { data: null, rawContent, warnings, usage, runId };
   }
 
   private generateId(): string {
