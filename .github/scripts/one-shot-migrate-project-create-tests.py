@@ -145,3 +145,16 @@ if status_count != 2:
     raise SystemExit(f'writing flow world create status: expected 2 occurrences, found {status_count}')
 text = text.replace(status_assertion, "    expect(world.status(), await world.text()).toBe(201);\n")
 write(path, text)
+
+# The renderer store no longer has a second createProject action. Remove tests
+# that protected that backdoor; keep updateProject coverage for explicit standard edits.
+path = 'desktop/src/renderer/stores/projectStore.test.ts'
+text = read(path)
+text = text.replace("    vi.mocked(api.post).mockResolvedValue(serverRow as any);\n", '')
+start = text.find("  it('createProject 把十项执行标准全部发出去（含分类体量取舍依据）'")
+end = text.find("  it('updateProject 显式提交空标准", start)
+if start < 0 or end < 0:
+    raise SystemExit(f'projectStore create tests markers missing: start={start} end={end}')
+text = text[:start] + text[end:]
+text = text.replace("describe('projectStore 提交执行标准', () => {", "describe('projectStore 更新执行标准', () => {")
+write(path, text)
