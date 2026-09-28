@@ -1,0 +1,109 @@
+name: One-shot remove legacy template API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-remove-legacy-template-api.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Remove legacy template API mechanically
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          controller = Path('server/src/chain/chain.controller.ts')
+          text = controller.read_text(encoding='utf-8')
+          start_marker = "  /**\n   * GET /chain/templates\n"
+          end_marker = "  /**\n   * POST /chain/generate-outline\n"
+          if text.count(start_marker) != 1 or text.count(end_marker) != 1:
+              raise SystemExit(f'unexpected template API markers: start={text.count(start_marker)} end={text.count(end_marker)}')
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          removed = text[start:end]
+          required_routes = [
+              "@Get('templates')",
+              "@Get('templates/:id')",
+              "@Post('templates/save')",
+              "@Post('templates/:id/duplicate')",
+              "@Delete('templates/:id')",
+              "@Post('templates/validate')",
+              "@Post('templates/execute/:id')",
+          ]
+          missing = [route for route in required_routes if route not in removed]
+          if missing:
+              raise SystemExit(f'template API region incomplete; missing {missing}')
+          text = text[:start] + text[end:]
+
+          text, count = re.subn(
+              r"\n  private isStructureTemplate\(id: string\): boolean \{\n    return /outline\|plan\|foundation\|worldview/i\.test\(id\);\n  \}\n",
+              "\n",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'isStructureTemplate removal count={count}')
+          if 'isStructureTemplate(' in text:
+              raise SystemExit('isStructureTemplate reference remains after template API removal')
+          if '@Delete(' not in text:
+              text = text.replace('  Delete,\n', '', 1)
+          for route in required_routes:
+              if route in text:
+                  raise SystemExit(f'legacy route remains: {route}')
+          controller.write_text(text, encoding='utf-8')
+
+          service = Path('server/src/chain/chain-template.service.ts')
+          source = service.read_text(encoding='utf-8')
+          source = source.replace(
+              "import type { ChainTemplate, ChainTemplateSummary } from './chain-template.types';",
+              "import type { ChainTemplate } from './chain-template.types';",
+              1,
+          )
+          summaries_start = source.index('  getSummaries(): ChainTemplateSummary[] {')
+          detail_start = source.index('  getDetail(id: string): ChainTemplate {', summaries_start)
+          source = source[:summaries_start] + source[detail_start:]
+
+          stub_marker = '  /** 旧 HTTP 路由还在巨型 Controller 中，能力本体已删除；签名保留到 Controller 拆分时一起删掉。 */\n'
+          stub_start = source.index(stub_marker)
+          assert_fixed_start = source.index('  private assertFixed(id: string): void {', stub_start)
+          source = source[:stub_start] + source[assert_fixed_start:]
+
+          removed_method = "\n  private removed(): BadRequestException {\n    return new BadRequestException('运行时 Prompt Chain 编辑/保存/复制/测试能力已删除；小说流程只允许代码定义的固定生产链');\n  }"
+          if removed_method not in source:
+              raise SystemExit('removed() compatibility method not found')
+          source = source.replace(removed_method, '', 1)
+          forbidden = ['getSummaries(', 'save(_data', 'duplicate(_id', 'validate(_chainData', 'executeTest(', 'private removed(']
+          leftovers = [name for name in forbidden if name in source]
+          if leftovers:
+              raise SystemExit(f'legacy ChainTemplateService methods remain: {leftovers}')
+          service.write_text(source, encoding='utf-8')
+          PY
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Server typecheck
+        working-directory: server
+        run: npm run typecheck
+      - name: Commit cleanup and remove this workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-remove-legacy-template-api.yml
+          git add server/src/chain/chain.controller.ts server/src/chain/chain-template.service.ts
+          git commit -m "refactor: remove legacy prompt chain HTTP API"
+          git push origin HEAD:main
