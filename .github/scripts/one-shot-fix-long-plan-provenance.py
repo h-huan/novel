@@ -8,15 +8,56 @@ def once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def once_after(text: str, marker: str, old: str, new: str, label: str, required_before: tuple[str, ...] = ()) -> str:
+    marker_at = text.find(marker)
+    if marker_at < 0:
+        raise SystemExit(f'{label}: marker not found: {marker!r}')
+    target_at = text.find(old, marker_at)
+    if target_at < 0:
+        raise SystemExit(f'{label}: target not found after marker')
+    prefix = text[marker_at:target_at]
+    missing = [name for name in required_before if name not in prefix]
+    if missing:
+        raise SystemExit(f'{label}: required symbols missing before target: {missing}')
+    return text[:target_at] + new + text[target_at + len(old):]
+
+
 path = Path('server/src/chain/chain.controller.ts')
 text = path.read_text(encoding='utf-8')
 
 # The planner already generates foundation world + core characters, but the old
-# return contract dropped them. Return the accepted assets plus exact node/run
-# provenance instead of making the persistence layer guess a "latest" run.
+# return contract dropped them. Restrict this replacement to the private long
+# planner method: generateOutline() has an intentionally similar return shape.
 old_return = "    return { success: true, volumes, meta: { analysis, volumeStructure }, outputs };\n"
-new_return = """    const foundationRuns = new Map((Array.isArray((foundationResult as any)?.nodeResults) ? (foundationResult as any).nodeResults : [])\n      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));\n    const outlineRuns = new Map((Array.isArray((result as any)?.nodeResults) ? (result as any).nodeResults : [])\n      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));\n    return {\n      success: true,\n      coreSetting: foundation.coreSetting,\n      worldSetting: foundation.worldview || {},\n      characters,\n      volumes,\n      meta: { analysis, volumeStructure },\n      outputs,\n      provenance: {\n        skeletonRunId: foundationRuns.get('node_1_skeleton') || undefined,\n        worldRunId: foundationRuns.get('node_2_worldview') || undefined,\n        characterRunId: characterResult.runId,\n        volumeRunId: outlineRuns.get('node_2_volumes') || undefined,\n        chapterRunId: outlineRuns.get('node_3_chapters') || undefined,\n      },\n    };\n"""
-text = once(text, old_return, new_return, 'long planner return contract')
+new_return = """    const foundationRuns = new Map((Array.isArray((foundationResult as any)?.nodeResults) ? (foundationResult as any).nodeResults : [])
+      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));
+    const outlineRuns = new Map((Array.isArray((result as any)?.nodeResults) ? (result as any).nodeResults : [])
+      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));
+    return {
+      success: true,
+      coreSetting: foundation.coreSetting,
+      worldSetting: foundation.worldview || {},
+      characters,
+      volumes,
+      meta: { analysis, volumeStructure },
+      outputs,
+      provenance: {
+        skeletonRunId: foundationRuns.get('node_1_skeleton') || undefined,
+        worldRunId: foundationRuns.get('node_2_worldview') || undefined,
+        characterRunId: characterResult.runId,
+        volumeRunId: outlineRuns.get('node_2_volumes') || undefined,
+        chapterRunId: outlineRuns.get('node_3_chapters') || undefined,
+      },
+    };
+"""
+text = once_after(
+    text,
+    '  private async generateConfiguredLongNovelPlan(input: {',
+    old_return,
+    new_return,
+    'long planner return contract',
+    required_before=('foundationResult', 'foundation', 'characters', 'characterResult', 'const result'),
+)
 
 # Pull the provenance map next to the only persistence consumer.
 text = once(
