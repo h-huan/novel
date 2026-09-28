@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOutlineFactReviewPrompt, describeOutlineFactReview, missingPriorLedgerEntries, normalizeOutlineFactReview } from './outline-fact-ledger';
+import { buildOutlineFactReviewPrompt, describeOutlineFactReview, missingPriorLedgerEntries, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
 
 describe('outline fact ledger review contract', () => {
   it('carries previous facts and full chapter evidence into the next review', () => {
@@ -12,6 +12,19 @@ describe('outline fact ledger review contract', () => {
     for (const evidence of ['每次倒退一小时', '前批剩十三户', '第二次推门后只剩十二户', '第十三行后空位', '历史变化', '两处原文及算式']) {
       expect(prompt).toContain(evidence);
     }
+  });
+
+  it('converts zero-based internal order into one-based chapterNumber before semantic review', () => {
+    const normalized = normalizeOutlineChaptersForFactReview([{ order: 3, title: '广播响到一半', content: '本章（第4章）广播响到一半' }]);
+    expect(normalized).toEqual([{ chapterNumber: 4, title: '广播响到一半', content: '本章（第4章）广播响到一半' }]);
+
+    const prompt = buildOutlineFactReviewPrompt({
+      canonicalBrief: '{}', world: {}, previousLedger: [],
+      chapters: [{ order: 3, title: '广播响到一半', foreshadowingRecover: [{ reference: '第3章傍晚新增的债主未署名纸条' }], content: '本章（第4章）广播响到一半' }],
+    });
+    expect(prompt).toContain('"chapterNumber":4');
+    expect(prompt).not.toContain('"order":3');
+    expect(prompt).toContain('chapterNumber 是对外唯一章号');
   });
 
   it('rejects incomplete or self-contradictory review responses', () => {
