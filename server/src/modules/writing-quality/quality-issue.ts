@@ -37,6 +37,29 @@ export function isMissingStandardIssue(issue: Pick<QualityIssue, 'source' | 'rul
 }
 
 /**
+ * A semantic blocking verdict becomes a proven blocker only when its evidence is
+ * verifiable against the artifact. Missing execution standards are different:
+ * they are structural project facts, so they do not require a quote from prose.
+ */
+export function isConfirmedBlockingIssue(issue: QualityIssue): boolean {
+  return issue.status === 'open'
+    && issue.severity === 'blocking'
+    && (isMissingStandardIssue(issue) || issue.evaluation === 'evidenced');
+}
+
+/**
+ * Keeps reviewer uncertainty visible without turning it into either a false PASS
+ * or an unrepairable BLOCK. The reviewer must provide evidence before this claim
+ * can participate in the blocking set.
+ */
+export function isUnevidencedBlockingIssue(issue: QualityIssue): boolean {
+  return issue.status === 'open'
+    && issue.severity === 'blocking'
+    && !isMissingStandardIssue(issue)
+    && issue.evaluation !== 'evidenced';
+}
+
+/**
  * 文本侧同一判据。审查器与 Gate 把结论作为字符串传下去（missing / contradictions 数组），
  * 这条文本便是一串「创作宪法里这一维为空」的说明，而不是结构化 issue，所以必须有一条字符串判据。
  *
@@ -92,10 +115,15 @@ export function qualityIssue(input: {
 }
 
 export function qualityGate(issues: QualityIssue[], evaluated: boolean) {
-  const blocking = issues.filter(i => i.status === 'open' && i.severity === 'blocking');
-  return { passed: evaluated && blocking.length === 0,
-    status: blocking.length ? 'blocked' : !evaluated ? 'not_evaluated' : 'passed',
-    blockingIssueIds: blocking.map(i => i.id) };
+  const blocking = issues.filter(isConfirmedBlockingIssue);
+  const unevidencedBlocking = issues.filter(isUnevidencedBlockingIssue);
+  const reviewComplete = evaluated && unevidencedBlocking.length === 0;
+  return {
+    passed: reviewComplete && blocking.length === 0,
+    status: blocking.length ? 'blocked' : !reviewComplete ? 'not_evaluated' : 'passed',
+    blockingIssueIds: blocking.map(i => i.id),
+    unevidencedBlockingIssueIds: unevidencedBlocking.map(i => i.id),
+  };
 }
 
 export interface QualityIssueWrite {
@@ -140,8 +168,9 @@ export function replaceQualityIssues(db: DatabaseSync, input: {
     source: input.source,
     severity: raw.severity,
   }));
-  const blocking = normalized.some(issue => issue.status === 'open' && issue.severity === 'blocking');
-  const evaluated = normalized.every(issue => issue.evaluation === 'evidenced') || normalized.length === 0;
+  const evidenceComplete = normalized.every(issue => issue.evaluation === 'evidenced') || normalized.length === 0;
+  const gate = qualityGate(normalized, evidenceComplete);
+  const blocking = gate.status === 'blocked';
   const summary = normalized.length === 0 ? '未发现问题' : `${normalized.length} 条问题`;
 
   db.prepare(`INSERT INTO writing_quality_reports
@@ -153,8 +182,8 @@ export function replaceQualityIssues(db: DatabaseSync, input: {
     reportId, input.projectId, input.chapterId ?? null, `quality:${input.source}`, input.scopeKey,
     input.stage, input.title || `${input.stage}质量检查`, summary,
     blocking ? 'low' : normalized.length ? 'medium' : 'high', input.overallScore ?? null,
-    evaluated ? (blocking ? 'blocked' : 'open') : 'not_evaluated',
-    JSON.stringify({ evaluation: evaluated ? 'evaluated' : 'insufficient_evidence', source: input.source }), now, now,
+    gate.status === 'passed' ? 'open' : gate.status,
+    JSON.stringify({ evaluation: gate.status === 'not_evaluated' ? 'insufficient_evidence' : 'evaluated', source: input.source }), now, now,
   );
   db.prepare("UPDATE writing_quality_issues SET status='superseded',updated_at=? WHERE report_id=? AND status='open'")
     .run(now, reportId);
