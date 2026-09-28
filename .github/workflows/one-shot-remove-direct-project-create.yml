@@ -24,17 +24,18 @@ jobs:
             server/package-lock.json
             desktop/package-lock.json
       - name: Remove second project creation path
-        run: python .github/scripts/one-shot-remove-direct-project-create.py
+        run: |
+          python .github/scripts/one-shot-remove-direct-project-create.py
+          python .github/scripts/one-shot-migrate-project-create-tests.py
       - name: Reject direct-create leftovers
         run: |
           test ! -e server/src/modules/project/dto/create-project.dto.ts
-          ! grep -R "CreateProjectDto" -n server/src desktop/src server/e2e
-          ! grep -R "createProject: async" -n desktop/src
-          ! grep -R "validProjectPayload" -n server/e2e
-          ! grep -R "creationSource\|ideaSeed\|confirmedIdea" -n server/e2e
-          ! grep -R "request.post.*\/projects" -n server/e2e/flows --exclude='project-crud.spec.ts'
-          ! grep -R "@Post()" -n server/src/modules/project/project.controller.ts
-          ! grep -R "service.create(dto" -n server/src/modules/project
+          if grep -R "CreateProjectDto\|validProjectPayload" -n server/src server/e2e desktop/src; then exit 1; fi
+          if grep -R "creationSource\|ideaSeed\|confirmedIdea" -n server/e2e; then exit 1; fi
+          if grep -R "createProject: async" -n desktop/src; then exit 1; fi
+          if grep -R "request.post.*\/projects" -n server/e2e/flows --exclude='project-crud.spec.ts'; then exit 1; fi
+          if grep -R "@Post()" -n server/src/modules/project/project.controller.ts; then exit 1; fi
+          if grep -R "service.create(dto" -n server/src/modules/project; then exit 1; fi
       - name: Verify server
         working-directory: server
         run: |
@@ -57,6 +58,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/one-shot-remove-direct-project-create.yml
           git rm .github/scripts/one-shot-remove-direct-project-create.py
+          git rm .github/scripts/one-shot-migrate-project-create-tests.py
           git add server/src server/e2e server/docs desktop/src
           git commit -m "refactor: remove direct project creation backdoor"
           git push origin HEAD:main
