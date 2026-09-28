@@ -1,11 +1,8 @@
 import { it, expect, vi } from 'vitest';
-import { STANDARD_PRECONDITIONS } from './test-standards';
 import { createRequire } from 'node:module';
 import { Migrator } from '../database/migrator';
 import baseline from '../database/migrations/001_initial';
 import { CURRENT_SCHEMA_VERSION, reconcileSchema } from '../database/schema-reconciler';
-import { ProjectService } from '../modules/project/project.service';
-import { ProjectRepository } from '../database/repositories/project.repository';
 import {
   CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES,
   GenerationMetricsService,
@@ -15,6 +12,7 @@ import { RealLLMService } from '../chain/real-llm.service';
 import { BenchmarkController } from '../chain/benchmark.controller';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
 import { qualityIssue } from '../modules/writing-quality/quality-issue';
+import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 
 function schemaShape(db: any) {
@@ -43,7 +41,7 @@ it('fresh and baseline/legacy upgrades have schema parity and preserve business 
         ALTER TABLE quality_benchmark_samples DROP COLUMN chapter_index;
       `);
       db.exec("CREATE TABLE _migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,executed_at TEXT NOT NULL DEFAULT(datetime('now'))); INSERT INTO _migrations(id,name) VALUES(1,'initial');");
-      new ProjectService(new ProjectRepository({getDb:()=>db} as any)).create({...STANDARD_PRECONDITIONS,title:'不可丢失的小说'});
+      seedAcceptanceProject(db,{title:'不可丢失的小说'});
       db.prepare(`INSERT INTO quality_benchmark_samples
         (id,project_id,story_type,platform,content,source_ref,annotation_status,human_labels_json,created_at,updated_at)
         VALUES('kept-sample',NULL,'long_novel','fanqie','保留正文','real-source','labeled','["kept"]','now','now')`).run();
@@ -77,7 +75,7 @@ it('conditions strategy history on all six axes and falls back with insufficient
   const db=new DatabaseSync(':memory:');
   try {
     await new Migrator(db).runMigrations(); const database={getDb:()=>db} as any;
-    const p=new ProjectService(new ProjectRepository(database)).create({...STANDARD_PRECONDITIONS,title:'策略验收'});
+    const p=seedAcceptanceProject(db,{title:'策略验收'});
     const metrics=new GenerationMetricsService(database); const run=metrics.beginRun(p.id,'writing','x');
     db.prepare("UPDATE generation_runs SET model='test-model' WHERE id=?").run(run.id);
     const issue=qualityIssue({projectId:p.id,runId:run.id,stage:'chapter',ruleId:'platform.dialogue_ratio',severity:'high',message:'测试',quote:'原文',content:'原文',source:'test'});
@@ -85,9 +83,6 @@ it('conditions strategy history on all six axes and falls back with insufficient
     const relatedStructure=qualityIssue({projectId:p.id,runId:run.id,stage:'outline',ruleId:'structure.scene_event_mismatch',severity:'medium',message:'事件缺少场景',quote:'原文',content:'原文',source:'test'});
     expect(metrics.selectRepairStrategy(p.id,[blockingLogic,relatedStructure],run.id)).toBe('scene_structure_patch');
     const row=db.prepare('SELECT prompt_version FROM generation_runs WHERE id=?').get(run.id);
-    // 「流派」轴的取值来自项目卡片的执行标准，读法与 selectRepairStrategy 一致（webNovelGenre.join('|')）。
-    // 不在用例里手写第二份字面量：下面「六轴逐一失配」的断言必须建立在项目事实上，
-    // 否则执行标准的流派值一改，用例就会因为一份抄来的常量而假失败。
     const genreAxis=JSON.parse((db.prepare('SELECT settings FROM projects WHERE id=?').get(p.id) as any).settings).creativeConstitution.webNovelGenre.join('|');
     const insert=db.prepare(`INSERT INTO repair_strategy_stats(id,rule_id,platform,genre,story_type,model,prompt_version,strategy_id,attempts,accepted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'test')`);
     insert.run('other',issue.ruleId,'qidian',genreAxis,'long_novel','test-model',row.prompt_version,'unique_local_replacement',100,100);
@@ -109,8 +104,7 @@ it('promotes the strategy that previously resolved the same chapter-responsibili
   const db=new DatabaseSync(':memory:');
   try {
     await new Migrator(db).runMigrations(); const database={getDb:()=>db} as any;
-    const projects=new ProjectService(new ProjectRepository(database));
-    const first=projects.create({...STANDARD_PRECONDITIONS,title:'第一次修复',type:'short_story'});
+    const first=seedAcceptanceProject(db,{title:'第一次修复',type:'short_story'});
     const metrics=new GenerationMetricsService(database);
     const issues=[
       '第三日尚未超过三日，触发条件提前',
@@ -138,7 +132,7 @@ it('promotes the strategy that previously resolved the same chapter-responsibili
     metrics.recordChapterResponsibilityRepairAttempt(first.id,issues,'dependency_cascade',false);
     metrics.recordChapterResponsibilityRepairAttempt(first.id,issues,'full_replan',true);
 
-    const second=projects.create({...STANDARD_PRECONDITIONS,title:'第二次修复',type:'short_story'});
+    const second=seedAcceptanceProject(db,{title:'第二次修复',type:'short_story'});
     expect(metrics.selectChapterResponsibilityRepairStrategies(second.id,issues)[0]).toBe('full_replan');
   } finally { db.close(); }
 });
@@ -150,7 +144,7 @@ it('runner calls the production pipeline, isolates labels, and keeps empty state
     const metrics=new GenerationMetricsService(database); const llm=new RealLLMService({} as any,metrics);
     const controller=new BenchmarkController(database,metrics,llm);
     expect((await controller.run({})).status).toBe('waiting_for_real_samples');
-    const p=new ProjectService(new ProjectRepository(database)).create({...STANDARD_PRECONDITIONS,title:'隔离测试样本',type:'long_novel',chapterWordRange:{min:3000,max:5000}});
+    const p=seedAcceptanceProject(db,{title:'隔离测试样本',type:'long_novel',chapterWordRange:{min:3000,max:5000}});
     const content='林岚推开铁门，冷风吹过衣领。她决定在天黑前离开，门外却传来脚步声。';
     const sample=metrics.addBenchmarkSample({projectId:p.id,storyType:'long_novel',platform:'fanqie',content,sourceRef:'test-fixture:isolated-in-memory-only'});
     metrics.annotateBenchmarkSample(sample.id,['human_secret_label']);
