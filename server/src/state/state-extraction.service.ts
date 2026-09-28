@@ -13,6 +13,7 @@ import { StateEngineService, CharacterStateSnapshot, StateChange } from './state
 import { CharacterStateRepository } from '../database/repositories/character-state.repository';
 import type { CharacterStateRow } from '../database/repositories/character-state.repository';
 import { RealLLMService } from '../chain/real-llm.service';
+import { GeneratedCanonGuardService } from '../modules/generation-metrics/generated-canon-guard.service';
 
 @Injectable()
 export class StateExtractionService {
@@ -22,6 +23,7 @@ export class StateExtractionService {
     private readonly databaseService: DatabaseService,
     private readonly stateEngine: StateEngineService,
     private readonly characterStateRepo: CharacterStateRepository,
+    private readonly generatedCanonGuard: GeneratedCanonGuardService,
     @Optional() private readonly realLLM?: RealLLMService,
   ) {}
 
@@ -270,15 +272,27 @@ export class StateExtractionService {
     const extractedStates: Array<{ type: string; id: string; changes: number; legacyReviewTarget?: { entityType: string; targetId: string } }> = [];
     const db = this.databaseService.getDb();
 
-    // 获取要处理的章节
-    let chapters: Array<{ id: string; content: string }>;
+    type ExtractionChapter = { id: string; content: string; status: string; chapter_index: number };
+    let chapters: ExtractionChapter[];
     if (options.chapterIds && options.chapterIds.length > 0) {
-      const placeholders = options.chapterIds.map(() => '?').join(',');
-      const stmt = db.prepare(`SELECT id, content FROM chapters WHERE id IN (${placeholders})`);
-      chapters = stmt.all(...options.chapterIds) as Array<{ id: string; content: string }>;
+      const requestedIds = Array.from(new Set(options.chapterIds.filter(Boolean)));
+      const placeholders = requestedIds.map(() => '?').join(',');
+      const stmt = db.prepare(`SELECT id, content, status, chapter_index FROM chapters WHERE project_id = ? AND id IN (${placeholders})`);
+      chapters = stmt.all(projectId, ...requestedIds) as ExtractionChapter[];
+      if (chapters.length !== requestedIds.length) {
+        throw new Error('状态提取包含不存在或不属于当前项目的章节');
+      }
+      for (const chapter of chapters) {
+        if (!this.isTrustedExtractionSource(projectId, chapter)) {
+          throw new Error(`章节 ${chapter.id} 尚未成为已验收 Canon，禁止提取派生状态`);
+        }
+      }
     } else {
-      const stmt = db.prepare('SELECT id, content FROM chapters WHERE project_id = ? ORDER BY chapter_index');
-      chapters = stmt.all(projectId) as Array<{ id: string; content: string }>;
+      const stmt = db.prepare('SELECT id, content, status, chapter_index FROM chapters WHERE project_id = ? ORDER BY chapter_index');
+      const allChapters = stmt.all(projectId) as ExtractionChapter[];
+      chapters = allChapters.filter(chapter => this.isTrustedExtractionSource(projectId, chapter));
+      const skipped = allChapters.length - chapters.length;
+      if (skipped > 0) this.logger.log(`状态提取跳过 ${skipped} 个未验收章节 project=${projectId}`);
     }
 
     // 获取人物档案
@@ -363,6 +377,37 @@ export class StateExtractionService {
     }
 
     return { extractedStates };
+  }
+
+  /**
+   * 派生状态只能来自已经进入 Canon 的章节。
+   * locked 章节由作者显式确认；未锁定的 AI 正文必须能逐字匹配一条仍 current 的 chapter Gate PASS run。
+   * force 只控制是否重新提取，绝不能绕过来源验收。
+   */
+  private isTrustedExtractionSource(
+    projectId: string,
+    chapter: { id: string; content: string; status: string; chapter_index: number },
+  ): boolean {
+    if (chapter.status === 'locked') return true;
+    const content = String(chapter.content ?? '');
+    if (!content.trim()) return false;
+    const run = this.databaseService.getDb().prepare(`
+      SELECT id FROM generation_runs
+      WHERE project_id=? AND chapter_index=? AND stage='chapter' AND output_text=?
+      ORDER BY started_at DESC LIMIT 1
+    `).get(projectId, chapter.chapter_index, content) as { id: string } | undefined;
+    if (!run) return false;
+    try {
+      this.generatedCanonGuard.assertCanCommit({
+        projectId,
+        runId: run.id,
+        outputText: content,
+        expectedStages: ['chapter'],
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private buildCharacterTraits(character: {
