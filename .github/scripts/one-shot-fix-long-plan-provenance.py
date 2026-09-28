@@ -8,56 +8,60 @@ def once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-def once_after(text: str, marker: str, old: str, new: str, label: str, required_before: tuple[str, ...] = ()) -> str:
-    marker_at = text.find(marker)
-    if marker_at < 0:
-        raise SystemExit(f'{label}: marker not found: {marker!r}')
-    target_at = text.find(old, marker_at)
-    if target_at < 0:
-        raise SystemExit(f'{label}: target not found after marker')
-    prefix = text[marker_at:target_at]
-    missing = [name for name in required_before if name not in prefix]
-    if missing:
-        raise SystemExit(f'{label}: required symbols missing before target: {missing}')
-    return text[:target_at] + new + text[target_at + len(old):]
-
-
 path = Path('server/src/chain/chain.controller.ts')
 text = path.read_text(encoding='utf-8')
 
-# The planner already generates foundation world + core characters, but the old
-# return contract dropped them. Restrict this replacement to the private long
-# planner method: generateOutline() has an intentionally similar return shape.
-old_return = "    return { success: true, volumes, meta: { analysis, volumeStructure }, outputs };\n"
-new_return = """    const foundationRuns = new Map((Array.isArray((foundationResult as any)?.nodeResults) ? (foundationResult as any).nodeResults : [])
-      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));
-    const outlineRuns = new Map((Array.isArray((result as any)?.nodeResults) ? (result as any).nodeResults : [])
-      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));
-    return {
-      success: true,
+# Collect every detailed-outline run that actually contributed canonical chapter
+# plans. One long novel can require many outline calls, so a single fake
+# chapterRunId is not enough provenance.
+text = once(
+    text,
+    "    let absoluteChapter = 1;\n    let plannedChapterWords = 0;\n    const totalPlannedChapters = normalizedSkeletons.reduce((sum: number, volume: any) => sum + volume.estimatedChapters, 0);\n",
+    "    let absoluteChapter = 1;\n    let plannedChapterWords = 0;\n    const outlineRunIds = new Set<string>();\n    const totalPlannedChapters = normalizedSkeletons.reduce((sum: number, volume: any) => sum + volume.estimatedChapters, 0);\n",
+    'long planner outline provenance set',
+)
+
+text = once(
+    text,
+    "        const batchChapters = Array.isArray(batchResult.data)\n",
+    "        if (batchResult?.runId) outlineRunIds.add(String(batchResult.runId));\n        const batchChapters = Array.isArray(batchResult.data)\n",
+    'long planner collect outline run ids',
+)
+
+# Return the already accepted assets unchanged and add provenance only. The old
+# one-shot accidentally targeted generateOutline() because it shared a similar
+# return shape; this exact block exists only in generateConfiguredLongNovelPlan.
+old_return = """    return {
       coreSetting: foundation.coreSetting,
-      worldSetting: foundation.worldview || {},
+      worldview,
       characters,
       volumes,
-      meta: { analysis, volumeStructure },
-      outputs,
+      foreshadowings,
+      timeline,
+      organizations: Array.isArray(worldview?.factions) ? worldview.factions : [],
+      mapPoints: Array.isArray(worldview?.geography) ? worldview.geography : [],
+    };
+"""
+new_return = """    const foundationRuns = new Map((Array.isArray((foundationResult as any)?.nodeResults) ? (foundationResult as any).nodeResults : [])
+      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));
+    return {
+      coreSetting: foundation.coreSetting,
+      worldview,
+      characters,
+      volumes,
+      foreshadowings,
+      timeline,
+      organizations: Array.isArray(worldview?.factions) ? worldview.factions : [],
+      mapPoints: Array.isArray(worldview?.geography) ? worldview.geography : [],
       provenance: {
         skeletonRunId: foundationRuns.get('node_1_skeleton') || undefined,
         worldRunId: foundationRuns.get('node_2_worldview') || undefined,
         characterRunId: characterResult.runId,
-        volumeRunId: outlineRuns.get('node_2_volumes') || undefined,
-        chapterRunId: outlineRuns.get('node_3_chapters') || undefined,
+        outlineRunIds: [...outlineRunIds],
       },
     };
 """
-text = once_after(
-    text,
-    '  private async generateConfiguredLongNovelPlan(input: {',
-    old_return,
-    new_return,
-    'long planner return contract',
-    required_before=('foundationResult', 'foundation', 'characters', 'characterResult', 'const result'),
-)
+text = once(text, old_return, new_return, 'long planner return contract')
 
 # Pull the provenance map next to the only persistence consumer.
 text = once(
@@ -85,12 +89,13 @@ text = once(
     'long planner character provenance guard',
 )
 
-# Volume metadata and detailed chapter outlines are produced by two distinct
-# fixed nodes. Require both before persisting any outline Canon.
+# Volume metadata comes from the accepted skeleton. Detailed chapters come from
+# one or more outline runs; every contributing run must still be current before
+# any outline Canon is written.
 text = once(
     text,
     "            // 存储大纲 + 卷\n            if (data.volumes?.length > 0) {\n              for (const vol of data.volumes) {\n",
-    "            // 存储大纲 + 卷\n            if (data.volumes?.length > 0) {\n              this.generatedCanonGuard.assertStructuredCanCommit({\n                projectId,\n                runId: provenance.volumeRunId,\n                expectedStages: ['outline'],\n                expectedScenarios: ['long-novel-flexible-outline'],\n              });\n              this.generatedCanonGuard.assertStructuredCanCommit({\n                projectId,\n                runId: provenance.chapterRunId,\n                expectedStages: ['outline'],\n                expectedScenarios: ['long-novel-flexible-outline'],\n              });\n              for (const vol of data.volumes) {\n",
+    "            // 存储大纲 + 卷\n            if (data.volumes?.length > 0) {\n              this.generatedCanonGuard.assertStructuredCanCommit({\n                projectId,\n                runId: provenance.skeletonRunId,\n                expectedStages: ['outline'],\n                expectedScenarios: ['outline'],\n              });\n              const outlineRunIds = Array.isArray(provenance.outlineRunIds) ? provenance.outlineRunIds : [];\n              if (data.volumes.some((volume: any) => Array.isArray(volume?.chapters) && volume.chapters.length > 0) && outlineRunIds.length === 0) {\n                throw new HttpException('长篇详细章纲缺少 generation run 凭证，已停止写入 Canon', 409);\n              }\n              for (const runId of outlineRunIds) {\n                this.generatedCanonGuard.assertStructuredCanCommit({\n                  projectId,\n                  runId,\n                  expectedStages: ['outline'],\n                  expectedScenarios: ['outline'],\n                });\n              }\n              for (const vol of data.volumes) {\n",
     'long planner outline provenance guards',
 )
 
