@@ -8148,6 +8148,14 @@ ${enrichToneDirective}
               { temperature: 0.6, timeout: LLM_TUNABLES.timeoutComplex(), projectId, scenario: 'outline', maxTokens: Math.min(32768, 3000 + batch.length * 3000) },
             );
             const chapList = Array.isArray(chapResult.data?.chapters) ? chapResult.data.chapters : [];
+            if (chapList.length > 0) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,
+                runId: chapResult.runId,
+                expectedStages: ['outline'],
+                expectedScenarios: ['outline'],
+              });
+            }
             const byId = new Map(chapters.map(c => [c.id, c]));
             for (const c of chapList) {
               const cid = String((c as any)?.id || '');
