@@ -40,14 +40,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          def replace_once(path, old, new, label):
-              p = Path(path)
-              text = p.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected 1 occurrence, found {count}')
-              p.write_text(text.replace(old, new, 1), encoding='utf-8')
-
           helper = '''\nfunction projectSettings(type: 'long_novel' | 'short_story', targetWords: number) {\n  return JSON.stringify({ creativeConstitution: {\n    schemaVersion: 1, revision: 1, projectType: type, targetPlatform: 'fanqie', targetWords,\n    platformRules: {}, category: '都市', storyTone: ['现实'], writingStyle: [], webNovelGenre: ['现实向'],\n    submissionTags: [], plotTags: [], pov: 'third_person', targetAudience: null,\n    chapterWordRange: { min: 1000, max: 6000 }, confirmedStory: { title: '已确认题材' },\n  } });\n}\n'''
 
           path = 'server/src/chain/generation-recovery.service.spec.ts'
@@ -83,6 +75,32 @@ jobs:
             1,
           )
           p.write_text(text, encoding='utf-8')
+          PY
+      - name: Migrate desktop tests to the current Project model
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('desktop/src/renderer/pages/DiscoveryWizardPage.test.tsx')
+          text = path.read_text(encoding='utf-8')
+          old = """    const project = { id: 'existing', creationSource: 'idea_discovery', status: 'generation_failed',\n      confirmedIdea: JSON.stringify(idea) } as Project;"""
+          new = """    const project: Project = {\n      id: 'existing', title: idea.title, type: 'long_novel', status: 'generation_failed',\n      description: '', wordCount: 0, chapterCount: 0, targetPlatform: 'fanqie', targetWords: 500_000,\n      creativeConstitution: {\n        schemaVersion: 1, revision: 1, projectType: 'long_novel', targetPlatform: 'fanqie', targetWords: 500_000,\n        category: '男频·悬疑脑洞', storyTone: ['悬疑'], writingStyle: [], webNovelGenre: ['现实向'],\n        submissionTags: [], plotTags: [], genreFitNote: '', pov: 'third_person', targetAudience: null,\n        chapterWordRange: { min: 1000, max: 6000 }, platformRules: {}, confirmedStory: idea,\n      },\n      currentWorkflowStage: 'world_setting', createdAt: new Date(), updatedAt: new Date(),\n    };"""
+          if text.count(old) != 1:
+              raise SystemExit('DiscoveryWizardPage test fixture changed')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          path = Path('desktop/src/renderer/pages/ProjectListPage.test.tsx')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+            "function renderCard(status: string, onRetry = vi.fn(), onSelect = vi.fn(), recoveryRunning = false) {",
+            "function renderCard(status: Project['status'], onRetry = vi.fn(), onSelect = vi.fn(), recoveryRunning = false) {",
+            1,
+          )
+          old = """  const project = {\n    id: 'failed-1', title: '拆到最后一户', status, type: 'short_story',\n    creationSource: 'idea_discovery', targetPlatform: 'fanqie',\n    currentWorkflowStage: 'outline', wordCount: 0, updatedAt: new Date(),\n  } as Project;"""
+          new = """  const project: Project = {\n    id: 'failed-1', title: '拆到最后一户', status, type: 'short_story', description: '',\n    targetPlatform: 'fanqie', targetWords: 12_000, currentWorkflowStage: 'outline',\n    wordCount: 0, chapterCount: 0, createdAt: new Date(), updatedAt: new Date(),\n  };"""
+          if text.count(old) != 1:
+              raise SystemExit('ProjectListPage test fixture changed')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
       - name: Install and verify server
         working-directory: server
