@@ -9,9 +9,8 @@ import {
   Delete,
   Body,
   Param,
-  Query,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags } from '@nestjs/swagger';
 import { WorldSettingService } from './world-setting.service';
 import { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } from './dto/world-setting.dto';
 import { VectorIndexService } from '../../rag/vector-index.service';
@@ -50,12 +49,7 @@ export class WorldSettingController {
   }
 
   @Get()
-  findAll(@Param('projectId') projectId: string, @Query('mode') mode?: string) {
-    console.log('[WorldSettingController] findAll called, mode:', mode);
-    if (mode === 'simple') {
-      console.log('[WorldSettingController] Returning simple settings');
-      return this.service.getSimpleSettings(projectId);
-    }
+  findAll(@Param('projectId') projectId: string) {
     return this.service.findByProjectId(projectId);
   }
 
@@ -120,41 +114,6 @@ export class WorldSettingController {
     }
     const result = await this.service.update(id, changes as any);
     return { ...result, applied: true };
-  }
-
-  /**
-   * 保存短篇世界观设定
-   * PUT /projects/:projectId/world-settings/simple
-   */
-  @Put('simple')
-  @ApiOperation({ summary: '保存短篇世界观设定（兼容路由）' })
-  upsertSimpleSettings(
-    @Param('projectId') projectId: string,
-    @Body() body: {
-      storyPremise?: string;
-      era?: string;
-      locations?: string[];
-      socialRules?: string;
-      specialSettings?: string;
-    }
-  ) {
-    const result = this.service.upsertSimpleSettings(projectId, body);
-    const setting = this.service.findByProjectId(projectId)[0];
-    if (setting) {
-      // The simple editor and the full editor write the same canonical profile;
-      // this is a deterministic projection of fields the author just supplied,
-      // not a second inferred source of story facts.
-      this.service.updateProfile(projectId, setting.id, {
-        synopsis: body.storyPremise || '',
-        basic_info: body.storyPremise || '',
-        era: body.era || '',
-        locations: JSON.stringify(body.locations || []),
-        social_structure: body.socialRules || '',
-        system_mechanics: body.specialSettings || '',
-        supplementary: body.specialSettings || '',
-      });
-    }
-    return result;
   }
 
   /** Keep the full persisted profile available to retrieval, not just basic fields. */
