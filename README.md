@@ -79,31 +79,33 @@ npm run test:e2e
 
 ## 本地真实运行验收
 
+先在应用里分别完成一个真实短篇和一个真实长篇，并确保项目已经激活且至少完成第一章真实生成。然后在仓库根目录直接执行：
+
+```powershell
+node verify-local.mjs --full
+```
+
+不需要手工查项目 ID。默认情况下，脚本会从已激活项目中自动选择最近更新的一个短篇和一个长篇，并把两本书同时写入同一份验收报告。
+
+需要精确指定某两本书时仍可覆盖自动选择：
+
+```powershell
+node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID> --full
+```
+
 单本兼容模式仍可使用：
 
 ```powershell
 node verify-local.mjs --project <项目ID>
 ```
 
-完成一个真实短篇和一个真实长篇后，推荐一次同时验收：
-
-```powershell
-node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID>
-```
-
-如果同时执行完整仓库测试：
-
-```powershell
-node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID> --full
-```
-
 如果还要运行 E2E：
 
 ```powershell
-node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID> --full --e2e
+node verify-local.mjs --full --e2e
 ```
 
-脚本始终覆盖生成且只需要提供这两个文件：
+下面两个文件不是仓库预置文件，而是运行 `verify-local.mjs` 后才会在本地生成；每次运行都会覆盖为最新结果：
 
 ```text
 verification/latest.json
