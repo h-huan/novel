@@ -41,11 +41,31 @@ describe('GeneratedCanonGuardService', () => {
     expect(generationMetrics.runIsCurrent).toHaveBeenCalledWith('run-1', 'project-1');
   });
 
+  it('accepts a structured artifact by run proof and returns the passed raw source', () => {
+    const { service, generationMetrics } = createSubject();
+    expect(service.assertStructuredCanCommit({
+      projectId: 'project-1',
+      runId: 'run-1',
+      expectedStages: ['world'],
+      expectedScenarios: ['world_building'],
+    })).toEqual({
+      runId: 'run-1',
+      projectId: 'project-1',
+      stage: 'world',
+      scenario: 'world_building',
+      outputText: '{"world":"ok"}',
+    });
+    expect(generationMetrics.runIsCurrent).toHaveBeenCalledWith('run-1', 'project-1');
+  });
+
   it('rejects a missing generation-run credential', () => {
     const { service } = createSubject();
     expect(() => service.assertCanCommit({
       projectId: 'project-1',
       outputText: '{"world":"ok"}',
+    })).toThrow('缺少 generation run 凭证');
+    expect(() => service.assertStructuredCanCommit({
+      projectId: 'project-1',
     })).toThrow('缺少 generation run 凭证');
   });
 
@@ -55,6 +75,10 @@ describe('GeneratedCanonGuardService', () => {
       projectId: 'project-1',
       runId: 'run-1',
       outputText: '{"world":"ok"}',
+    })).toThrow('必须来自已通过质量 Gate 的运行');
+    expect(() => service.assertStructuredCanCommit({
+      projectId: 'project-1',
+      runId: 'run-1',
     })).toThrow('必须来自已通过质量 Gate 的运行');
   });
 
@@ -74,6 +98,10 @@ describe('GeneratedCanonGuardService', () => {
       runId: 'run-1',
       outputText: '{"world":"ok"}',
     })).toThrow('凭证已过期');
+    expect(() => service.assertStructuredCanCommit({
+      projectId: 'project-1',
+      runId: 'run-1',
+    })).toThrow('凭证已过期');
   });
 
   it('rejects a run from the wrong structural stage', () => {
@@ -82,6 +110,11 @@ describe('GeneratedCanonGuardService', () => {
       projectId: 'project-1',
       runId: 'run-1',
       outputText: '{"world":"ok"}',
+      expectedStages: ['world'],
+    })).toThrow('阶段不匹配');
+    expect(() => service.assertStructuredCanCommit({
+      projectId: 'project-1',
+      runId: 'run-1',
       expectedStages: ['world'],
     })).toThrow('阶段不匹配');
   });
