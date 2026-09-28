@@ -132,12 +132,13 @@ function runSummary(run) {
 
 async function inspectProject(target) {
   const projectId = target.id;
-  const [projectRes, chaptersRes, runsRes, cockpitRes, analyticsRes] = await Promise.all([
+  const [projectRes, chaptersRes, runsRes, cockpitRes, analyticsRes, integrityRes] = await Promise.all([
     request(`/projects/${encodeURIComponent(projectId)}`),
     request(`/projects/${encodeURIComponent(projectId)}/chapters`),
     request(`/generation-metrics/runs?projectId=${encodeURIComponent(projectId)}&limit=200`),
     request(`/generation-metrics/cockpit?projectId=${encodeURIComponent(projectId)}`),
     request(`/platform-analytics/overview?projectId=${encodeURIComponent(projectId)}&days=30`),
+    request(`/chain/generation-recovery/${encodeURIComponent(projectId)}`),
   ]);
 
   const project = unwrap(projectRes.data);
@@ -176,6 +177,7 @@ async function inspectProject(target) {
     },
     firstChapterRun: runSummary(firstChapterRun),
     latestRun: runSummary(runRows[0]),
+    integrityAudit: integrityRes.ok ? unwrap(integrityRes.data) : { error: integrityRes.error ?? `HTTP ${integrityRes.status}` },
     cockpit: cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` },
     platformAnalytics: analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` },
   };
@@ -239,6 +241,7 @@ if (!dualMode && inspectedProjects.project) {
     chapters: inspectedProjects.project.chapters,
     firstChapterRun: inspectedProjects.project.firstChapterRun,
     latestRun: inspectedProjects.project.latestRun,
+    integrityAudit: inspectedProjects.project.integrityAudit,
     cockpit: inspectedProjects.project.cockpit,
     platformAnalytics: inspectedProjects.project.platformAnalytics,
   });
@@ -263,10 +266,25 @@ for (const target of projectTargets) {
     runtimeProblems.push(`${prefix}_project_unavailable`);
     continue;
   }
+  if (String(result.project.status || '') !== 'active') {
+    runtimeProblems.push(`${prefix}_project_status_${result.project.status || 'unknown'}`);
+  }
   if (target.expectedType && result.project.type !== target.expectedType) {
     runtimeProblems.push(`${prefix}_project_type_${result.project.type || 'unknown'}`);
   }
   if (!result.project.confirmedStoryPresent) runtimeProblems.push(`${prefix}_confirmed_story_missing`);
+
+  const integrity = result.integrityAudit;
+  if (!integrity || integrity.error) {
+    runtimeProblems.push(`${prefix}_integrity_audit_unavailable`);
+  } else {
+    const missingModules = Array.isArray(integrity.missingModules) ? integrity.missingModules : [];
+    const consistencyIssues = Array.isArray(integrity.consistencyIssues) ? integrity.consistencyIssues : [];
+    if (missingModules.length) runtimeProblems.push(`${prefix}_missing_modules_${missingModules.length}`);
+    if (consistencyIssues.length) runtimeProblems.push(`${prefix}_consistency_issues_${consistencyIssues.length}`);
+    if (integrity.outlineBodyMappingValid !== true) runtimeProblems.push(`${prefix}_outline_body_mapping_invalid`);
+  }
+
   const firstChapter = result.chapters?.first ?? null;
   if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
   const firstRun = result.firstChapterRun;
@@ -327,14 +345,20 @@ function projectMarkdown(target) {
   const typeLine = target.expectedType
     ? `${result.project.typeMatches ? 'PASS' : 'FAIL'} · expected=${target.expectedType} · actual=${result.project.type ?? 'unknown'}`
     : `${result.project.type ?? 'unknown'}`;
-  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+  const integrity = result.integrityAudit;
+  const integrityLine = integrity?.error
+    ? `FAIL · ${integrity.error}`
+    : integrity
+      ? `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || integrity.outlineBodyMappingValid !== true) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'FAIL'}`
+      : 'FAIL · 未取得完整性审计';
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${result.project.status === 'active' ? 'PASS' : 'FAIL'} · ${result.project.status ?? 'unknown'}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
 const projectSections = projectTargets.length
   ? projectTargets.map(projectMarkdown).join('\n\n')
   : '未指定项目；本次仅执行仓库/服务健康检查。';
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 验收模式：${report.options.mode}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 同时验收真实短篇和长篇时使用 --short-project <短篇ID> --long-project <长篇ID>；两个项目会进入同一份 latest 报告，不会互相覆盖。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 项目验收要求第一章正文非空、存在对应 chapter generation run、run=success、Gate=passed/accepted，并且 Creative Constitution 已保存 confirmedStory。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 验收模式：${report.options.mode}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 同时验收真实短篇和长篇时使用 --short-project <短篇ID> --long-project <长篇ID>；两个项目会进入同一份 latest 报告，不会互相覆盖。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 项目验收要求项目已激活、Creative Constitution 已保存 confirmedStory、结构完整性审计无缺失模块/一致性问题且大纲正文映射有效、第一章正文非空、存在对应 chapter generation run、run=success、Gate=passed/accepted。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
