@@ -25,7 +25,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           controller = Path('server/src/chain/chain.controller.ts')
           text = controller.read_text(encoding='utf-8')
@@ -50,14 +49,29 @@ jobs:
               raise SystemExit(f'template API region incomplete; missing {missing}')
           text = text[:start] + text[end:]
 
-          text, count = re.subn(
-              r"\n  private isStructureTemplate\(id: string\): boolean \{\n    return /outline\|plan\|foundation\|worldview/i\.test\(id\);\n  \}\n",
-              "\n",
-              text,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit(f'isStructureTemplate removal count={count}')
+          method_marker = '  private isStructureTemplate('
+          method_start = text.find(method_marker)
+          if method_start < 0:
+              raise SystemExit('isStructureTemplate method not found')
+          brace_start = text.find('{', method_start)
+          if brace_start < 0:
+              raise SystemExit('isStructureTemplate opening brace not found')
+          depth = 0
+          method_end = -1
+          for index in range(brace_start, len(text)):
+              ch = text[index]
+              if ch == '{':
+                  depth += 1
+              elif ch == '}':
+                  depth -= 1
+                  if depth == 0:
+                      method_end = index + 1
+                      break
+          if method_end < 0:
+              raise SystemExit('isStructureTemplate closing brace not found')
+          while method_end < len(text) and text[method_end] in '\r\n':
+              method_end += 1
+          text = text[:method_start] + text[method_end:]
           if 'isStructureTemplate(' in text:
               raise SystemExit('isStructureTemplate reference remains after template API removal')
           if '@Delete(' not in text:
