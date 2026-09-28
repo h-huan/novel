@@ -59,6 +59,7 @@ describe('active runtime contains no retired creation or Canon-write flows', () 
       'source: "ai_generated"',
       'standard_summarization_runs',
       'module_standard_versions',
+      'module_standards',
       'idea_drafts',
     ];
 
