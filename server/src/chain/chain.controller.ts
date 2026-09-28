@@ -8017,6 +8017,7 @@ ${worldFieldList}
             },
           );
           let wp = worldProfileResult.data?.profile || worldProfileResult.data;
+          let worldProfileSourceRunId = worldProfileResult.runId;
           let profileReview = await this.reviewChildSource(projectId, '已确认题材与世界观骨架',
             { confirmedStory: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
           if (!profileReview.consistent) {
@@ -8026,11 +8027,18 @@ ${worldFieldList}
                 validate: value => describeProfileCandidate(value).length === 0,
                 describeValidation: describeProfileCandidate });
             wp = repair.data?.profile || repair.data;
+            worldProfileSourceRunId = repair.runId;
             profileReview = await this.reviewChildSource(projectId, '已确认题材与世界观骨架',
               { confirmedStory: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
           }
           if (!profileReview.consistent) throw new Error(`世界观深度档案与上层冲突：${profileReview.contradictions.join('；')}`);
           if (wp && typeof wp === 'object') {
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId,
+              runId: worldProfileSourceRunId,
+              expectedStages: ['world'],
+              expectedScenarios: ['world_building'],
+            });
             const input: Record<string, unknown> = {};
             for (const f of WORLD_PROFILE_FIELDS) {
               const v = (wp as any)?.[f];
