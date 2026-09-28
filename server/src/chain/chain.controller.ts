@@ -100,7 +100,6 @@ import { isStructuredOutputTruncated, STRUCTURED_JSON_OUTPUT_CEILING } from './s
 import { RealLLMService } from './real-llm.service';
 import { StatePersistenceService } from '../state/state-persistence.service';
 import { NewsRssService } from './news-rss.service';
-import { FileStorageService } from '../modules/file-storage/file-storage.service';
 import { ChainTemplateService } from './chain-template.service';
 import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
@@ -115,7 +114,6 @@ import { EmbeddingService } from '../rag/embedding.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
 import { WritingGateway } from '../modules/websocket/websocket.gateway';
 import { LLM_TUNABLES } from '../config/llm-tunables';
-import { resolveDataDir } from '../config/data-dir';
 import {
   CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES,
   GenerationMetricsService,
@@ -698,7 +696,6 @@ export class ChainController {
     private readonly realLLM: RealLLMService,
     private readonly statePersistence: StatePersistenceService,
     private readonly newsRss: NewsRssService,
-    private readonly fileStorage: FileStorageService,
     private readonly chainTemplate: ChainTemplateService,
     private readonly db: DatabaseService,
     private readonly vectorIndex: VectorIndexService,
@@ -3934,59 +3931,6 @@ ${(dto.newForeshadowing || []).map(f => `- ${f.content}`).join('\n') || '无'}
       return { success: false, error: err instanceof Error ? err.message : '归档失败' };
     }
   }
-
-  /**
-   * POST /chain/chapter-save
-   * 章节.md文件存储 - 保存为独立vol-ch文件
-   */
-  @Post('chapter-save')
-  async saveChapterFile(@Body() dto: {
-    projectId: string; chapterId: string; volumeIndex: number; chapterIndex: number;
-    title: string; content: string; wordCount: number; status?: string;
-    chapterFunction?: string; goalArc?: string;
-  }) {
-    const fs = require('fs');
-    const path = require('path');
-    const crypto = require('crypto');
-
-    const dir = path.join(resolveDataDir(), 'projects', dto.projectId, 'chapters');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-    const filename = `vol-${String(dto.volumeIndex).padStart(3, '0')}-ch-${String(dto.chapterIndex).padStart(3, '0')}.md`;
-    const checksum = crypto.createHash('md5').update(dto.content).digest('hex');
-    const now = new Date().toISOString();
-
-    const frontMatter = `---
-id: "${dto.chapterId}"
-volume: ${dto.volumeIndex}
-chapter: ${dto.chapterIndex}
-title: "${dto.title}"
-status: "${dto.status || 'draft'}"
-wordCount: ${dto.wordCount}
-chapterFunction: "${dto.chapterFunction || 'paving'}"
-goalArc: "${dto.goalArc || 'accumulate_burst'}"
-createdAt: "${now}"
-checksum: "${checksum}"
-${dto.status === 'locked' ? `lockedAt: "${now}"` : ''}
----
-
-`;
-
-    const fullPath = path.join(dir, filename);
-    fs.writeFileSync(fullPath, frontMatter + dto.content, 'utf-8');
-
-    this.logger.log(`已写入章节文件: ${fullPath} (${dto.wordCount}字)`);
-
-    return {
-      success: true,
-      filename,
-      path: fullPath,
-      fileSize: (frontMatter + dto.content).length,
-      checksum,
-      message: `已保存为 ${filename}（含YAML front matter + MD5校验和）`,
-    };
-  }
-
   /**
    * POST /chain/news-rss
    * 新闻热点RSS聚合

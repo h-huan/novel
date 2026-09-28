@@ -24,7 +24,6 @@ import { GenerationRecoveryService } from './generation-recovery.service';
 import { ChainController } from './chain.controller';
 import { StateModule } from '../state/state.module';
 import { StateManagementModule } from '../state/state-management.module';
-import { FileStorageModule } from '../modules/file-storage/file-storage.module';
 
 import { RagModule } from '../rag/rag.module';
 import { RoutingModule } from '../routing/routing.module';
@@ -42,7 +41,6 @@ import { OriginalityModule } from '../modules/originality/originality.module';
     DatabaseModule,
     StateModule,
     StateManagementModule,
-    FileStorageModule,
     RagModule,
     RoutingModule,
     CharacterModule,

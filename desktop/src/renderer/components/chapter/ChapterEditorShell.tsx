@@ -263,17 +263,6 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
       if (onSave) {
         await onSave(chapter.id, content);
       }
-      // 自动保存为.md文件
-      try {
-        const { api } = await import('../../lib/api');
-        await api.post('/chain/chapter-save', {
-          projectId, chapterId: chapter.id,
-          volumeIndex: chapter.volumeIndex, chapterIndex: chapter.chapterIndex,
-          title: chapter.title, content,
-          wordCount: countNarrativeWords(content),
-          status: chapter.status,
-        });
-      } catch {}
       setIsDirty(false);
       setLastSaved(new Date());
     } catch (err) {
