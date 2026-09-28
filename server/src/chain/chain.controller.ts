@@ -6507,6 +6507,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         const currentWorldForOutlineReview = db.prepare(`SELECT era,rules,story_premise,geography FROM world_settings
           WHERE project_id=? ORDER BY created_at ASC LIMIT 1`).get(projectId);
         let plannedChapterWords = 0;
+        const shortOutlineSourceRunIds = new Set<string>();
         const preparedChapters: Array<{
           oid: string;
           order: number;
@@ -6665,6 +6666,7 @@ ${(() => {
             },
           );
           warnings.push(...chapterResult.warnings);
+          if (chapterResult.runId) shortOutlineSourceRunIds.add(String(chapterResult.runId));
           let chData = unwrapChapter(chapterResult.data, order + 1);
           let repairRaw = chapterResult.rawContent;
 
@@ -6681,6 +6683,7 @@ ${(() => {
               },
             );
             warnings.push(...repairResult.warnings);
+            if (repairResult.runId) shortOutlineSourceRunIds.add(String(repairResult.runId));
             repairRaw = repairResult.rawContent || repairRaw;
             chData = unwrapChapter(repairResult.data, order + 1);
             chapterIssues = assessChapter(chData);
@@ -6700,6 +6703,7 @@ ${(() => {
                 },
               );
               warnings.push(...salvageResult.warnings);
+              if (salvageResult.runId) shortOutlineSourceRunIds.add(String(salvageResult.runId));
               chData = unwrapChapter(salvageResult.data, order + 1);
               chapterIssues = assessChapter(chData);
             } catch (err: any) {
@@ -6876,6 +6880,18 @@ ${(() => {
           if (isShort && i === totalChapters - 2 && fn === 'rising_action') fn = 'conflict';
           if (fn !== c.chapterFunction) preparedChapters[i] = { ...c, chapterFunction: fn };
         });
+
+        if (preparedChapters.length > 0 && shortOutlineSourceRunIds.size === 0) {
+          throw new HttpException('短篇详细章纲缺少 generation run 凭证，已停止写入 Canon', 409);
+        }
+        for (const runId of shortOutlineSourceRunIds) {
+          this.generatedCanonGuard.assertStructuredCanCommit({
+            projectId,
+            runId,
+            expectedStages: ['outline'],
+            expectedScenarios: ['outline'],
+          });
+        }
 
         db.exec('BEGIN IMMEDIATE');
         try {
