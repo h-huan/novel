@@ -88,6 +88,7 @@ text = once(
     "import { DatabaseSync } from 'node:sqlite';\n"
     "import { randomUUID } from 'node:crypto';\n"
     "import path from 'node:path';\n"
+    "import * as fs from 'node:fs';\n"
     "import { STANDARD_PRECONDITIONS } from '../src/acceptance/test-standards';\n"
     "import { constitutionSettings, updateConstitution } from '../src/modules/project/creative-constitution';\n",
     'e2e helper imports',
@@ -106,6 +107,7 @@ export async function createProject(request: APIRequestContext, title?: string) 
   if (!dataDir || !dataDir.includes('.runtime-data-')) {
     throw new Error(`E2E project fixture refused non-isolated DATA_DIR: ${dataDir || '(unset)'}`);
   }
+  fs.mkdirSync(dataDir, { recursive: true });
   const id = randomUUID();
   const now = new Date().toISOString();
   const projectTitle = title || uniqueTitle();
