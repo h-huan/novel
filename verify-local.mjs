@@ -13,8 +13,8 @@ const valueOf = (name) => {
 };
 
 const legacyProjectId = valueOf('--project') || process.env.VERIFY_PROJECT_ID || null;
-const shortProjectId = valueOf('--short-project') || process.env.VERIFY_SHORT_PROJECT_ID || null;
-const longProjectId = valueOf('--long-project') || process.env.VERIFY_LONG_PROJECT_ID || null;
+const requestedShortProjectId = valueOf('--short-project') || process.env.VERIFY_SHORT_PROJECT_ID || null;
+const requestedLongProjectId = valueOf('--long-project') || process.env.VERIFY_LONG_PROJECT_ID || null;
 const baseUrl = (valueOf('--base') || process.env.VERIFY_BASE_URL || 'http://127.0.0.1:3100/api/v1').replace(/\/$/, '');
 const runFull = has('--full');
 const runE2E = has('--e2e');
@@ -23,15 +23,9 @@ const outDir = path.join(root, 'verification');
 fs.mkdirSync(outDir, { recursive: true });
 
 const now = new Date().toISOString();
-const dualMode = Boolean(shortProjectId || longProjectId);
-const projectTargets = dualMode
-  ? [
-      shortProjectId ? { key: 'short', label: '短篇', id: shortProjectId, expectedType: 'short_story' } : null,
-      longProjectId ? { key: 'long', label: '长篇', id: longProjectId, expectedType: 'long_novel' } : null,
-    ].filter(Boolean)
-  : legacyProjectId
-    ? [{ key: 'project', label: '项目', id: legacyProjectId, expectedType: null }]
-    : [];
+const singleMode = Boolean(legacyProjectId) && !requestedShortProjectId && !requestedLongProjectId;
+let shortProjectId = requestedShortProjectId;
+let longProjectId = requestedLongProjectId;
 
 function runProcess(label, cwd, command, commandArgs) {
   const started = Date.now();
@@ -107,6 +101,70 @@ function pick(obj, keys) {
   return out;
 }
 
+function projectType(project) {
+  const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
+  return String(project?.type ?? constitution?.projectType ?? '').trim() || null;
+}
+
+function projectTime(project) {
+  const raw = project?.updatedAt ?? project?.updated_at ?? project?.createdAt ?? project?.created_at ?? '';
+  const parsed = Date.parse(String(raw));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function projectSelectionSummary(project) {
+  if (!project) return null;
+  return {
+    id: project.id ?? null,
+    title: project.title ?? null,
+    type: projectType(project),
+    status: project.status ?? null,
+    updatedAt: project.updatedAt ?? project.updated_at ?? null,
+  };
+}
+
+const projectDiscovery = {
+  attempted: false,
+  ok: true,
+  source: singleMode
+    ? 'single_project'
+    : requestedShortProjectId && requestedLongProjectId
+      ? 'explicit_pair'
+      : requestedShortProjectId || requestedLongProjectId
+        ? 'mixed_explicit_and_auto'
+        : 'auto_latest_active_pair',
+  error: null,
+  candidates: 0,
+  short: null,
+  long: null,
+};
+
+if (!singleMode && (!shortProjectId || !longProjectId)) {
+  projectDiscovery.attempted = true;
+  const projectsRes = await request('/projects?status=active&limit=100&offset=0');
+  if (!projectsRes.ok) {
+    projectDiscovery.ok = false;
+    projectDiscovery.error = projectsRes.error ?? `HTTP ${projectsRes.status}`;
+  } else {
+    const activeProjects = asArray(projectsRes.data)
+      .filter((project) => String(project?.status ?? '').toLowerCase() === 'active')
+      .sort((a, b) => projectTime(b) - projectTime(a));
+    projectDiscovery.candidates = activeProjects.length;
+    if (!shortProjectId) shortProjectId = activeProjects.find((project) => projectType(project) === 'short_story')?.id ?? null;
+    if (!longProjectId) longProjectId = activeProjects.find((project) => projectType(project) === 'long_novel')?.id ?? null;
+    projectDiscovery.short = projectSelectionSummary(activeProjects.find((project) => project.id === shortProjectId));
+    projectDiscovery.long = projectSelectionSummary(activeProjects.find((project) => project.id === longProjectId));
+  }
+}
+
+const dualMode = !singleMode;
+const projectTargets = singleMode
+  ? [{ key: 'project', label: '项目', id: legacyProjectId, expectedType: null }]
+  : [
+      shortProjectId ? { key: 'short', label: '短篇', id: shortProjectId, expectedType: 'short_story' } : null,
+      longProjectId ? { key: 'long', label: '长篇', id: longProjectId, expectedType: 'long_novel' } : null,
+    ].filter(Boolean);
+
 function chapterSummary(chapter) {
   if (!chapter) return null;
   const content = String(chapter.content ?? chapter.body ?? '');
@@ -149,7 +207,7 @@ async function inspectProject(target) {
   });
   const runRows = asArray(runsRes.data);
   const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
-  const projectType = String(project?.type ?? constitution?.projectType ?? '').trim() || null;
+  const resolvedProjectType = projectType(project);
   const firstChapterIndex = Number(chapterRows[0]?.chapter_index ?? chapterRows[0]?.chapterIndex ?? chapterRows[0]?.index ?? chapterRows[0]?.order ?? NaN);
   const firstChapterRun = Number.isFinite(firstChapterIndex)
     ? runRows.find((run) => String(run.stage ?? '').toLowerCase() === 'chapter'
@@ -164,8 +222,8 @@ async function inspectProject(target) {
       id: project?.id ?? projectId,
       title: project?.title ?? null,
       status: project?.status ?? null,
-      type: projectType,
-      typeMatches: target.expectedType ? projectType === target.expectedType : true,
+      type: resolvedProjectType,
+      typeMatches: target.expectedType ? resolvedProjectType === target.expectedType : true,
       targetPlatform: project?.targetPlatform ?? constitution?.targetPlatform ?? null,
       constitutionRevision: constitution?.revision ?? null,
       confirmedStoryPresent: Boolean(constitution?.confirmedStory),
@@ -231,6 +289,7 @@ const runtime = {
     consistent: standardsResponse.ok && standardMismatch.length === 0,
     mismatches: standardMismatch,
   },
+  projectDiscovery,
   projects: inspectedProjects,
 };
 
@@ -257,6 +316,7 @@ const failedTests = tests.filter((x) => x.status !== 'passed');
 const runtimeProblems = [];
 if (!health.ok) runtimeProblems.push('server_unavailable');
 if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
 if (dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
 
 for (const target of projectTargets) {
@@ -299,15 +359,25 @@ for (const target of projectTargets) {
   }
 }
 
+const selectionMode = singleMode
+  ? 'single_project'
+  : requestedShortProjectId && requestedLongProjectId
+    ? 'explicit_short_and_long'
+    : requestedShortProjectId || requestedLongProjectId
+      ? 'mixed_explicit_and_auto'
+      : 'auto_latest_short_and_long';
+
 const report = {
   generatedAt: now,
   command: process.argv.join(' '),
   git: gitInfo,
   options: {
     projectId: legacyProjectId,
+    requestedShortProjectId,
+    requestedLongProjectId,
     shortProjectId,
     longProjectId,
-    mode: dualMode ? 'short_and_long' : legacyProjectId ? 'single_project' : 'repository_only',
+    mode: selectionMode,
     baseUrl,
     fullTests: runFull,
     e2e: runE2E,
@@ -333,7 +403,7 @@ const standardLine = standardsResponse.ok
 
 function projectMarkdown(target) {
   const result = inspectedProjects[target.key];
-  if (!result) return `### ${target.label}\n\n- 未指定项目 ID`;
+  if (!result) return `### ${target.label}\n\n- 未找到项目`;
   if (result.project?.error) return `### ${target.label}\n\n- 项目：FAIL · ${result.project.error}`;
   const firstChapter = result.chapters?.first ?? null;
   const firstLine = firstChapter
@@ -356,14 +426,19 @@ function projectMarkdown(target) {
 
 const projectSections = projectTargets.length
   ? projectTargets.map(projectMarkdown).join('\n\n')
-  : '未指定项目；本次仅执行仓库/服务健康检查。';
+  : '未找到可验收项目。请先完成至少一个真实短篇和一个真实长篇并确保项目已激活。';
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 验收模式：${report.options.mode}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 同时验收真实短篇和长篇时使用 --short-project <短篇ID> --long-project <长篇ID>；两个项目会进入同一份 latest 报告，不会互相覆盖。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 项目验收要求项目已激活、Creative Constitution 已保存 confirmedStory、结构完整性审计无缺失模块/一致性问题且大纲正文映射有效、第一章正文非空、存在对应 chapter generation run、run=success、Gate=passed/accepted。\n`;
+const selectionLine = singleMode
+  ? `single · ${legacyProjectId}`
+  : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
+
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 默认不需要手工查项目 ID：未传 --project/--short-project/--long-project 时，脚本会从已激活项目中自动选择最近更新的一个短篇和一个长篇。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 项目验收要求项目已激活、Creative Constitution 已保存 confirmedStory、结构完整性审计无缺失模块/一致性问题且大纲正文映射有效、第一章正文非空、存在对应 chapter generation run、run=success、Gate=passed/accepted。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
 
 console.log(`[verify] ${report.verdict.status.toUpperCase()}`);
+if (dualMode) console.log(`[verify] projects short=${shortProjectId ?? 'NOT_FOUND'} long=${longProjectId ?? 'NOT_FOUND'} (${selectionMode})`);
 console.log(`[verify] ${path.relative(root, jsonPath)}`);
 console.log(`[verify] ${path.relative(root, mdPath)}`);
 if (report.verdict.status !== 'passed') process.exitCode = 1;
