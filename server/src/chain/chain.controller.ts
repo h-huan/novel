@@ -119,6 +119,7 @@ import {
   GenerationMetricsService,
   type ChapterResponsibilityRepairStrategy,
 } from '../modules/generation-metrics/generation-metrics.service';
+import { GeneratedCanonGuardService } from '../modules/generation-metrics/generated-canon-guard.service';
 import { isMissingStandardFinding, qualityIssue, replaceQualityIssues, type QualityIssue } from '../modules/writing-quality/quality-issue';
 import { executeRepair, repairPrompt as localPatchContract } from '../modules/writing-quality/repair-strategy-registry';
 import { applyLocalPatches, selectAnchoredLocalPatchBatch } from '../modules/writing-quality/local-repair';
@@ -709,6 +710,7 @@ export class ChainController {
     private readonly consistencyCheckService: ConsistencyCheckService,
     private readonly writingGateway: WritingGateway,
     private readonly generationMetrics: GenerationMetricsService,
+    private readonly generatedCanonGuard: GeneratedCanonGuardService,
     private readonly originalityGuard: OriginalityGuardService,
   ) {}
 
@@ -6066,6 +6068,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
           warnings.push(...worldResult.warnings);
           if (!worldResult) throw new Error('世界观生成未返回有效结构，停止创建以避免后续上下文失真。');
           let worldCandidate = worldResult.data;
+          let worldCandidateRunId = worldResult.runId;
           let sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
             { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
           if (!sourceReview.consistent) {
@@ -6075,6 +6078,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
                 validate: value => describeWorldSourceCandidate(value, protagonistName).length === 0,
                 describeValidation: value => describeWorldSourceCandidate(value, protagonistName) });
             worldCandidate = repair.data;
+            worldCandidateRunId = repair.runId;
             sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
               { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
           }
@@ -6082,6 +6086,12 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
             throw new Error(`世界观与确认题材仍冲突，未保存或生成大纲：${sourceReview.contradictions.join('；')}`);
           }
           if (worldCandidate && typeof worldCandidate === 'object') {
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId,
+              runId: worldCandidateRunId,
+              expectedStages: ['world'],
+              expectedScenarios: ['world_building'],
+            });
             const wd = worldCandidate;
             // 注意：outlineContextPrefix 不再使用瞬时原始 LLM 输出，改为写入后从 DB 回读（见下方），确保大纲上下文=已落库模块
             db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
@@ -7138,6 +7148,12 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
 
           if (worldResult.data && typeof worldResult.data === 'object') {
             try {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,
+                runId: worldResult.runId,
+                expectedStages: ['world'],
+                expectedScenarios: ['world_building'],
+              });
               const wd = worldResult.data;
               const wid = uuid();
               db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
