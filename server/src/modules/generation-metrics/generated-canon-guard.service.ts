@@ -19,17 +19,29 @@ export interface GeneratedCanonGuardInput {
   expectedScenarios?: string[];
 }
 
+export interface StructuredCanonGuardInput {
+  projectId: string;
+  runId?: string | null;
+  expectedStages?: string[];
+  expectedScenarios?: string[];
+}
+
 /**
  * Verifies an existing generation run before AI-produced data may enter Canon.
  *
  * This service deliberately does not score, repair, regenerate, or create a
  * second quality system. The production Gate already decided whether a run
- * passed. This boundary only proves that the exact output being committed:
+ * passed. This boundary only proves that the source run:
  *  - belongs to this project;
  *  - finished successfully;
  *  - has an explicit Gate PASS (never success/not_evaluated as a substitute);
  *  - still matches the project's current constitution/context;
- *  - is byte-for-byte the final output persisted on that run.
+ *  - produced a non-empty final output.
+ *
+ * Plain-text Canon (chapter body) additionally requires byte-for-byte equality
+ * through assertCanCommit(). Structured Canon is parsed/normalized before it is
+ * stored, so assertStructuredCanCommit() returns the passed raw source instead
+ * of pretending the normalized object can equal the raw JSON bytes.
  */
 @Injectable()
 export class GeneratedCanonGuardService {
@@ -38,13 +50,31 @@ export class GeneratedCanonGuardService {
     private readonly generationMetrics: GenerationMetricsService,
   ) {}
 
+  /** Exact-text boundary used by chapter body commits. */
   assertCanCommit(input: GeneratedCanonGuardInput): GeneratedCanonProof {
+    const outputText = String(input.outputText ?? '');
+    if (!outputText.trim()) throw new BadRequestException('AI Canon 提交内容为空');
+    const proof = this.assertRunCanCommit(input);
+    if (proof.outputText !== outputText) {
+      throw new BadRequestException('AI Canon 提交内容与通过 Gate 的最终输出不一致');
+    }
+    return proof;
+  }
+
+  /**
+   * Structured internal boundary used by world/character/outline commits.
+   * The caller must use the parsed value produced from this same run; this
+   * method returns the authoritative passed raw source for audit/provenance.
+   */
+  assertStructuredCanCommit(input: StructuredCanonGuardInput): GeneratedCanonProof {
+    return this.assertRunCanCommit(input);
+  }
+
+  private assertRunCanCommit(input: StructuredCanonGuardInput): GeneratedCanonProof {
     const projectId = String(input.projectId || '').trim();
     const runId = String(input.runId || '').trim();
-    const outputText = String(input.outputText ?? '');
     if (!projectId) throw new BadRequestException('AI Canon 提交缺少 projectId');
     if (!runId) throw new BadRequestException('AI Canon 提交缺少 generation run 凭证');
-    if (!outputText.trim()) throw new BadRequestException('AI Canon 提交内容为空');
 
     const row = this.databaseService.getDb().prepare(`SELECT id,project_id,stage,scenario,status,gate_status,output_text
       FROM generation_runs WHERE id=? AND project_id=? LIMIT 1`).get(runId, projectId) as {
@@ -73,8 +103,10 @@ export class GeneratedCanonGuardService {
     if (input.expectedScenarios?.length && !input.expectedScenarios.includes(scenario)) {
       throw new BadRequestException(`AI Canon 提交场景不匹配：scenario=${scenario || 'unknown'}`);
     }
-    if (String(row.output_text ?? '') !== outputText) {
-      throw new BadRequestException('AI Canon 提交内容与通过 Gate 的最终输出不一致');
+
+    const outputText = String(row.output_text ?? '');
+    if (!outputText.trim()) {
+      throw new BadRequestException('AI Canon 提交凭证没有可提交的最终输出');
     }
     if (!this.generationMetrics.runIsCurrent(runId, projectId)) {
       throw new ConflictException('AI Canon 提交凭证已过期：项目创作宪法或依赖上下文已变化');
