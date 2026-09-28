@@ -6,10 +6,11 @@ import { WorldSettingController } from './world-setting.controller';
 import { WorldSettingService } from './world-setting.service';
 import { WorldSettingRepository } from '../../database/repositories/world-setting.repository';
 import { StateModule } from '../../state/state.module';
+import { StateManagementModule } from '../../state/state-management.module';
 import { RagModule } from '../../rag/rag.module';
 
 @Module({
-  imports: [StateModule, RagModule],
+  imports: [StateModule, StateManagementModule, RagModule],
   controllers: [WorldSettingController],
   providers: [WorldSettingService, WorldSettingRepository],
   exports: [WorldSettingService],
