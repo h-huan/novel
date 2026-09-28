@@ -336,7 +336,7 @@ export class PlatformAnalyticsService {
     return QUALITY_DIM_ORDER.filter(d => map.has(d)).map(d => {
       const e = map.get(d)!;
       return {
-        dim: d.dim,
+        dim: d,
         name: QUALITY_DIM_LABEL[d],
         count: e.count,
         chapterCount: e.chapters.size,
