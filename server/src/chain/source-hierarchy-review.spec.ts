@@ -26,6 +26,8 @@ describe('generic source hierarchy review', () => {
     for (const text of [
       '每次交易扣一枚徽章', '只有提现才扣徽章', '第一人称', '逐字短引文', '时间方向',
       STORY_FACT_PRIORITY, '正文已锁定', '编辑保护', '人工裁决', '影响范围最小',
+      '已经发生的 Accepted/锁定正文事实', '尚未执行的未来卷纲/章纲/ChapterPlan',
+      '未来计划属于可调整依赖项', '而不是倒改历史',
     ]) expect(prompt).toContain(text);
     expect(prompt).not.toContain('进门/回拨');
   });
