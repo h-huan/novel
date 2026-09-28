@@ -79,40 +79,64 @@ npm run test:e2e
 
 ## 本地真实运行验收
 
-先在应用里分别完成一个真实短篇和一个真实长篇，并确保项目已经激活且至少完成第一章真实生成。然后在仓库根目录直接执行：
+### 什么时候运行
+
+`verify-local.mjs` 既可以用于**运行中故障诊断**，也可以用于**最终完整验收**，不要求整本小说全部生成完成。
+
+为了取得运行时项目、章节、生成记录和 Gate 数据，建议执行时保持 Server 正常运行（默认 `http://127.0.0.1:3100/api/v1`）。如果 Server 不可用，脚本仍会生成报告，但会标记 `server_unavailable`，运行时诊断信息会不完整。
+
+如果小说生成过程中已经报错，可以立即执行快速诊断，不需要等长短篇全部跑完：
+
+```powershell
+node verify-local.mjs
+```
+
+该命令主要检查当前 Server、执行标准、可发现项目、项目结构、第一章、generation run 和 Gate，不额外执行整套仓库测试。如果当前还没有同时存在可验收的短篇和长篇，报告会正常生成，但最终结果会标记为 FAIL，并提示 `dual_project_pair_incomplete` 等具体原因；这属于诊断结果，不代表脚本本身出错。
+
+### 最终完整验收（默认推荐）
+
+当应用里已经分别有一个真实短篇和一个真实长篇，并且两个项目均已激活、至少完成第一章真实生成后，在仓库根目录执行：
 
 ```powershell
 node verify-local.mjs --full
 ```
 
+这里不要求整本短篇或整部长篇写完；**第一章真实生成完成即可进入验收**。`--full` 会在运行时检查之外，再执行 Server/Desktop 的 typecheck、unit、acceptance 和 build，因此适合作为最终交付前的完整验收。
+
 不需要手工查项目 ID。默认情况下，脚本会从已激活项目中自动选择最近更新的一个短篇和一个长篇，并把两本书同时写入同一份验收报告。
 
-需要精确指定某两本书时仍可覆盖自动选择：
+### 高级/精确指定
+
+需要精确指定某两本书时可覆盖自动选择：
 
 ```powershell
 node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID> --full
 ```
 
-单本兼容模式仍可使用：
+单本兼容模式：
 
 ```powershell
 node verify-local.mjs --project <项目ID>
 ```
 
-如果还要运行 E2E：
+如果最终验收还要运行 E2E：
 
 ```powershell
 node verify-local.mjs --full --e2e
 ```
 
-下面两个文件不是仓库预置文件，而是运行 `verify-local.mjs` 后才会在本地生成；每次运行都会覆盖为最新结果：
+### 报错时怎么看
+
+下面两个文件不是仓库预置文件，而是每次运行 `verify-local.mjs` 后在本地生成，并覆盖为最新结果：
 
 ```text
 verification/latest.json
 verification/latest.md
 ```
 
-双项目模式会把短篇和长篇同时写进同一份报告，不会因为第二次验收覆盖第一次的项目结果。报告会分别检查：项目已激活、项目类型正确、`confirmedStory` 已持久化、恢复审计中无缺失模块或一致性问题、章纲与正文映射有效、第一章正文非空、对应 chapter generation run 成功且 Gate 已通过。即使最终 verdict 为 FAIL，这两个文件仍会正常生成，便于直接定位失败环节；它们已加入 `.gitignore`，默认只保留最新一次。把这两个文件提供给审查者即可判断本地真实模型、数据库、正文落库、项目结构完整性和 Gate 状态，无需依赖截图。
+即使最终 verdict 为 FAIL，这两个文件仍会生成。终端命令返回非 0 只表示验收发现问题，不表示报告生成失败。优先查看 `verification/latest.md` 的“运行问题”；需要完整机器数据时查看 `verification/latest.json`。
+
+双项目模式会把短篇和长篇同时写进同一份报告，不会因为第二次验收覆盖第一次的项目结果。报告会分别检查：项目已激活、项目类型正确、`confirmedStory` 已持久化、恢复审计中无缺失模块或一致性问题、章纲与正文映射有效、第一章正文非空、对应 chapter generation run 成功且 Gate 已通过。它们已加入 `.gitignore`，默认只保留最新一次。把这两个文件提供给审查者即可判断本地真实模型、数据库、正文落库、项目结构完整性和 Gate 状态，无需依赖截图。
 
 ## 数据与迁移
 
