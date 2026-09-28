@@ -10260,6 +10260,12 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       if (batchChapters.length !== batchNos.length) {
         throw new HttpException(`滚动补纲应返回${batchNos.length}章，实际返回${batchChapters.length}章，已停止以避免章序错乱`, 502);
       }
+      this.generatedCanonGuard.assertStructuredCanCommit({
+        projectId,
+        runId: result.runId,
+        expectedStages: ['outline'],
+        expectedScenarios: ['outline'],
+      });
 
       for (let idx = 0; idx < batchChapters.length; idx++) {
         const ch = batchChapters[idx];
