@@ -17,6 +17,16 @@ describe('ModuleStandardsService read-only execution standard', () => {
     expect(snapshot.modules.every((item) => item.baseline === SEED_BASELINE_VERSION)).toBe(true);
   });
 
+  it('injects story-specific title requirements into idea generation', () => {
+    const service = new ModuleStandardsService();
+    service.onModuleInit();
+
+    const directive = standardDirectiveCache.get('idea_generate');
+    expect(directive).toContain('书名必须从本故事的具体人物关系、处境、规则、代价、异常事实或信息差中提取至少一个可识别钩子');
+    expect(directive).toContain('同批候选的书名必须体现不同故事身份');
+    expect(directive).toContain('不得在标题直接泄露终局反转');
+  });
+
   it('exposes only the deterministic code seed and no self-induction state', () => {
     const service = new ModuleStandardsService();
     service.onModuleInit();
