@@ -1,0 +1,58 @@
+name: One-shot run cleanup on current main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-run-cleanup-current-main.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            desktop/package-lock.json
+      - name: Execute canonical cleanup script from the existing one-shot workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src = Path('.github/workflows/one-shot-remove-legacy-idea-state.yml').read_text(encoding='utf-8')
+          start = src.index("          python - <<'PY'\n") + len("          python - <<'PY'\n")
+          end = src.index("\n          PY\n", start)
+          lines = src[start:end].splitlines()
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          ns = {'__name__': '__main__'}
+          exec(compile(code, '<legacy-cleanup>', 'exec'), ns, ns)
+          PY
+      - name: Install and verify server
+        working-directory: server
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Install and verify desktop
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run typecheck
+          npm test -- --run
+      - name: Commit cleanup and remove one-shot workflows
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-remove-legacy-idea-state.yml
+          git rm .github/workflows/one-shot-run-cleanup-current-main.yml
+          git add server/src server/shared/src desktop/src
+          git commit -m "refactor: remove legacy idea state model"
+          git push origin HEAD:main
