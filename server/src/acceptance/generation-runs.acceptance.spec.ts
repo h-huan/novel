@@ -1,19 +1,17 @@
 import { it, expect, vi } from 'vitest';
-import { STANDARD_PRECONDITIONS } from './test-standards';
 import { createRequire } from 'node:module';
 import { Migrator } from '../database/migrator';
-import { ProjectService } from '../modules/project/project.service';
-import { ProjectRepository } from '../database/repositories/project.repository';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
 import { RealLLMService } from '../chain/real-llm.service';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
+import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 it('records success, provider failure, stream cancellation and constitution snapshots', async () => {
   const db = new DatabaseSync(':memory:');
   try {
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
-    const project = new ProjectService(new ProjectRepository(database)).create({ ...STANDARD_PRECONDITIONS, title: 'run' });
+    const project = seedAcceptanceProject(db, { title: 'run' });
     const metrics = new GenerationMetricsService(database);
     const service = new RealLLMService({} as any, metrics);
     const request = { prompt: '写角色', scenario: 'character_design', metrics: { projectId: project.id, stepKey: 'custom_step' } };
@@ -25,7 +23,6 @@ it('records success, provider failure, stream cancellation and constitution snap
     await service.generate(request);
     (service as any).generateInternal = vi.fn(async () => { throw new Error('provider failed'); });
     await expect(service.generate(request)).rejects.toThrow('provider failed');
-    // 取消态走 metrics 的公开入口（原流式链路已删除）：beginRun 建 running 行，finishRun 落 cancelled。
     const cancelled = metrics.beginRun(project.id, 'idea_generate', '写角色', undefined, 'custom_step');
     metrics.finishRun(cancelled.id, 'cancelled', Date.now(), undefined, '用户中止生成');
     const runs = metrics.getRuns(project.id) as any[];
@@ -60,7 +57,7 @@ it('inherits the constitution and stores evidence-based scores through five writ
  try {
   await new Migrator(db).runMigrations();
   const database={getDb:()=>db} as any;
-  const project=new ProjectService(new ProjectRepository(database)).create({...STANDARD_PRECONDITIONS,title:'全流程验收'});
+  const project=seedAcceptanceProject(db,{title:'全流程验收'});
   const metrics=new GenerationMetricsService(database);
   const service=new RealLLMService({} as any,metrics);
   const chapterContent = Array.from({ length: 70 }, (_, index) => index % 2
