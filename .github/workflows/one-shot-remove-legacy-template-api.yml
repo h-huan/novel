@@ -26,6 +26,30 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
+          def remove_method(source: str, marker: str):
+              start = source.find(marker)
+              if start < 0:
+                  return source, False
+              brace_start = source.find('{', start)
+              if brace_start < 0:
+                  raise SystemExit(f'opening brace not found for {marker}')
+              depth = 0
+              end = -1
+              for index in range(brace_start, len(source)):
+                  ch = source[index]
+                  if ch == '{':
+                      depth += 1
+                  elif ch == '}':
+                      depth -= 1
+                      if depth == 0:
+                          end = index + 1
+                          break
+              if end < 0:
+                  raise SystemExit(f'closing brace not found for {marker}')
+              while end < len(source) and source[end] in '\r\n':
+                  end += 1
+              return source[:start] + source[end:], True
+
           controller = Path('server/src/chain/chain.controller.ts')
           text = controller.read_text(encoding='utf-8')
           start_marker = "  /**\n   * GET /chain/templates\n"
@@ -49,29 +73,10 @@ jobs:
               raise SystemExit(f'template API region incomplete; missing {missing}')
           text = text[:start] + text[end:]
 
-          method_marker = '  private isStructureTemplate('
-          method_start = text.find(method_marker)
-          if method_start < 0:
-              raise SystemExit('isStructureTemplate method not found')
-          brace_start = text.find('{', method_start)
-          if brace_start < 0:
-              raise SystemExit('isStructureTemplate opening brace not found')
-          depth = 0
-          method_end = -1
-          for index in range(brace_start, len(text)):
-              ch = text[index]
-              if ch == '{':
-                  depth += 1
-              elif ch == '}':
-                  depth -= 1
-                  if depth == 0:
-                      method_end = index + 1
-                      break
-          if method_end < 0:
-              raise SystemExit('isStructureTemplate closing brace not found')
-          while method_end < len(text) and text[method_end] in '\r\n':
-              method_end += 1
-          text = text[:method_start] + text[method_end:]
+          # isStructureTemplate currently lives inside the removed block on main.
+          # Keep this optional so formatting/placement changes cannot turn an
+          # already-deleted helper into a false cleanup failure.
+          text, _ = remove_method(text, '  private isStructureTemplate(')
           if 'isStructureTemplate(' in text:
               raise SystemExit('isStructureTemplate reference remains after template API removal')
           if '@Delete(' not in text:
@@ -88,19 +93,22 @@ jobs:
               "import type { ChainTemplate } from './chain-template.types';",
               1,
           )
-          summaries_start = source.index('  getSummaries(): ChainTemplateSummary[] {')
-          detail_start = source.index('  getDetail(id: string): ChainTemplate {', summaries_start)
-          source = source[:summaries_start] + source[detail_start:]
+          summaries_start = source.find('  getSummaries(): ChainTemplateSummary[] {')
+          if summaries_start >= 0:
+              detail_start = source.find('  getDetail(id: string): ChainTemplate {', summaries_start)
+              if detail_start < 0:
+                  raise SystemExit('getDetail boundary not found after getSummaries')
+              source = source[:summaries_start] + source[detail_start:]
 
           stub_marker = '  /** 旧 HTTP 路由还在巨型 Controller 中，能力本体已删除；签名保留到 Controller 拆分时一起删掉。 */\n'
-          stub_start = source.index(stub_marker)
-          assert_fixed_start = source.index('  private assertFixed(id: string): void {', stub_start)
-          source = source[:stub_start] + source[assert_fixed_start:]
+          stub_start = source.find(stub_marker)
+          if stub_start >= 0:
+              assert_fixed_start = source.find('  private assertFixed(id: string): void {', stub_start)
+              if assert_fixed_start < 0:
+                  raise SystemExit('assertFixed boundary not found after compatibility stubs')
+              source = source[:stub_start] + source[assert_fixed_start:]
 
-          removed_method = "\n  private removed(): BadRequestException {\n    return new BadRequestException('运行时 Prompt Chain 编辑/保存/复制/测试能力已删除；小说流程只允许代码定义的固定生产链');\n  }"
-          if removed_method not in source:
-              raise SystemExit('removed() compatibility method not found')
-          source = source.replace(removed_method, '', 1)
+          source, _ = remove_method(source, '  private removed(')
           forbidden = ['getSummaries(', 'save(_data', 'duplicate(_id', 'validate(_chainData', 'executeTest(', 'private removed(']
           leftovers = [name for name in forbidden if name in source]
           if leftovers:
