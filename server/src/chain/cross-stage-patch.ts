@@ -1,11 +1,16 @@
-/** Preserve the complete stored field while repairing one uniquely located fact. */
-export function applyCrossStagePatch(original: string, match: string, replacement: string): string | null {
-  if (!match.trim() || !replacement.trim() || match.length > 300 || replacement.length > 600) return null;
-  const offset = original.indexOf(match);
-  if (offset < 0 || original.indexOf(match, offset + match.length) >= 0) return null;
-  const result = original.slice(0, offset) + replacement + original.slice(offset + match.length);
-  if (/^\s*[\[{]/.test(original)) {
-    try { JSON.parse(original); JSON.parse(result); } catch { return null; }
-  }
-  return result;
+/**
+ * Cross-stage automatic mutation is intentionally disabled at the persistence boundary.
+ *
+ * The creation pipeline currently reviews a proposed patch only after the caller has
+ * written it to live Canon. If that second review fails, the project is blocked but
+ * the mutated world/character/outline facts remain persisted. Until the caller is
+ * refactored to review an in-memory candidate and commit only after PASS, returning
+ * any replacement here would permit unreviewed AI output to enter Canon.
+ *
+ * Keep the function as the single compatibility boundary for the existing caller,
+ * but never authorize a live mutation. The surrounding creation Gate will observe
+ * that Canon did not change and stop activation instead of polluting accepted facts.
+ */
+export function applyCrossStagePatch(_original: string, _match: string, _replacement: string): null {
+  return null;
 }
