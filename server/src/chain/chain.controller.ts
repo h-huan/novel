@@ -8076,6 +8076,14 @@ ${enrichToneDirective}
             { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), projectId, scenario: 'organization_map' },
           );
           const orgList = Array.isArray(orgResult.data?.orgs) ? orgResult.data.orgs : [];
+          if (orgList.length > 0) {
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId,
+              runId: orgResult.runId,
+              expectedStages: ['outline'],
+              expectedScenarios: ['organization_map'],
+            });
+          }
           const byName = new Map(orgs.map(o => [String(o.name).trim(), o]));
           for (const o of orgList) {
             const name = String((o as any)?.name || '').trim();
@@ -8115,6 +8123,14 @@ ${enrichToneDirective}
             { temperature: 0.7, timeout: LLM_TUNABLES.timeoutMedium(), projectId, scenario: 'organization_map' },
           );
           const mapList = Array.isArray(mapResult.data?.maps) ? mapResult.data.maps : [];
+          if (mapList.length > 0) {
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId,
+              runId: mapResult.runId,
+              expectedStages: ['outline'],
+              expectedScenarios: ['organization_map'],
+            });
+          }
           const byName = new Map(maps.map(m => [String(m.name).trim(), m]));
           for (const m of mapList) {
             const name = String((m as any)?.name || '').trim();
@@ -8205,6 +8221,14 @@ ${enrichToneDirective}
             { temperature: 0.6, timeout: LLM_TUNABLES.timeoutMedium(), projectId, scenario: 'foreshadowing' },
           );
           const fsList = Array.isArray(fsResult.data?.foreshadowings) ? fsResult.data.foreshadowings : [];
+          if (fsList.length > 0) {
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId,
+              runId: fsResult.runId,
+              expectedStages: ['outline'],
+              expectedScenarios: ['foreshadowing'],
+            });
+          }
           const byId = new Map(fss.map(f => [f.id, f]));
           for (const f of fsList) {
             const fid = String((f as any)?.id || '');
