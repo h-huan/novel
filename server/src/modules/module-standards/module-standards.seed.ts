@@ -6,11 +6,14 @@
  * 平台基准与 Creative Constitution 仍由对应代码实现。禁止在运行时由 LLM/数据库改写本映射。
  */
 
-export const SEED_BASELINE_VERSION = 64;
+export const SEED_BASELINE_VERSION = 65;
 
-/** 事实冲突必须先修资料源；该优先级不授权模型在冲突资料之间自行选择。 */
+/**
+ * 事实权威与编辑保护是两条轴：上层 Canon 约束下层；锁定正文禁止自动改，但不会因此反向覆盖世界观/宪法。
+ * 资料源冲突时模型无权自行选边；除人工保护冲突外，优先修改最低权威、未锁定且影响范围最小的依赖项。
+ */
 export const STORY_FACT_PRIORITY =
-  'Creative Constitution 中已确认题材与锁定事实 > 本章 ChapterPlan/详细章纲的具体任务 > 已确认世界/角色/时间线/伏笔状态 > 已保存正文；资料源互相冲突时先修资料源并阻断生成';
+  'Creative Constitution 中已确认题材与锁定事实 > 已确认世界观硬规则/边界 > 已确认全书/卷架构、角色/关系/时间线/伏笔状态 > 本章 ChapterPlan/详细章纲 > 未锁定正文草稿；锁定正文只提高编辑保护、不反转事实权威；上层 Canon 与锁定正文冲突时禁止自动改任一侧，必须人工裁决；其余冲突优先修最低权威且影响范围最小的未锁定依赖项';
 
 export interface SeedModuleStandard {
   module_key: string;
@@ -41,7 +44,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     business_tables: ['generation_runs', 'writing_quality_reports', 'writing_quality_issues', 'generation_repairs', 'generation_lessons'],
     purpose: '让每次生成都服从唯一故事权威、同一上下文证据和可回滚的质量 Gate。',
     steps: [
-      { name: '继承权威', goal: '读取 Creative Constitution、当前 ChapterPlan 与冻结上下文' },
+      { name: '继承权威', goal: '读取 Creative Constitution、世界观、当前 ChapterPlan 与冻结上下文，并按事实层级解析冲突' },
       { name: '确定性先检', goal: '先检查结构、时间、数量、章节边界、硬红线，再把剩余语义问题交给模型' },
       { name: '证据评审', goal: '问题必须定位到事实源与正文证据，未知项不得伪造分数' },
       { name: '单调修复', goal: '只做可定位局部修复；复检后问题集合必须严格改善，否则回滚并停止' },
@@ -50,16 +53,19 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       'Blocking 问题不能被综合分抵消；上下文或 Creative Constitution 变化会使旧评审失效',
       '生成与评审使用同一章节事实选择规则和可追溯上下文，不得各读一套事实',
       '自动修复不得整章重写，不得换模型或降低严重度来换取通过',
+      '锁定正文属于编辑保护：禁止自动改；若与更高层 Canon 冲突，不得判锁定正文自动胜出，必须交由作者裁决',
       '只有已接受的真实修复才能沉淀经验；失败稿不得写入 Canon',
     ],
     rules: [
       '修复前后比较必须严格单调：Blocking 总量下降、最高严重度不增加、不得引入新的 Blocking 问题；否则回滚',
-      '相同 content/context/constitution/rules 指纹不得重复付费评审；输入发生变化才重新评估',
+      '相同 content/context/constitution/rules/chapter 指纹不得重复付费评审；输入发生变化才重新评估',
       '配置缺失、证据不足、资料源冲突都应显式阻断，禁止隐藏默认值和默认高分',
+      '普通冲突优先修改最低权威、未锁定且影响范围最小的依赖项；禁止为了省事反向修改上层 Canon',
+      '任何冲突处理或人工 Canon 修改保存后必须重新执行一致性校验；仍存在的问题不得仅凭“已解决”状态隐藏',
       'Gate 失败必须留下 project/chapter/run/rule/evidence，便于机器验收和人工追踪',
     ],
     quality_bar: '事实、结构、证据与修复结果可追溯；Hard Gate 全通过后才允许交付。',
-    inputs: ['Creative Constitution', 'ChapterPlan', '冻结上下文', '当前生成结果'],
+    inputs: ['Creative Constitution', '世界观 Canon', 'ChapterPlan', '冻结上下文', '当前生成结果'],
     outputs: ['QualityIssue', 'Gate 状态', '局部修复结果', '可追溯证据'],
   },
   {
@@ -106,6 +112,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     ],
     requirements: [
       '架构必须继承 Creative Constitution 的平台、分类、基调、文风、流派、POV 与标签',
+      '已确认世界观硬规则与边界高于后续卷纲、章纲和 ChapterPlan；下层只能补充，不能反向修改世界规则',
       '章节目标字数、节奏和回报类型服从目标平台与长短篇基准，但不得机械固定爆点间隔',
       'ChapterPlan 是正文执行合同，不另建第二份章节权威',
     ],
@@ -115,7 +122,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       '空间、时间、知识边界和章节职责冲突必须在章纲阶段修正，不把矛盾推给正文 Gate',
     ],
     quality_bar: '任一章节都能回答“从什么状态进入、必须发生什么、不能发生什么、结束后改变了什么”。',
-    inputs: ['Creative Constitution', '已确认故事事实', '平台基准'],
+    inputs: ['Creative Constitution', '世界观 Canon', '已确认故事事实', '平台基准'],
     outputs: ['全书/卷骨架', 'ChapterPlan', '章节目标与接力关系'],
   },
   {
@@ -130,7 +137,12 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       { name: '规则结构化', goal: '明确条件、作用对象、授权路径、限制、代价与例外' },
       { name: '故事对齐', goal: '逐条检查与 Creative Constitution、骨架和人物能力是否冲突' },
     ],
-    requirements: ['规则一旦确认不得为剧情方便临时改写', '长篇分层揭示，短篇只保留核心冲突所需设定'],
+    requirements: [
+      '规则一旦确认不得为剧情方便临时改写',
+      '项目创建完成后，世界观只能由作者明确手动修改；自动生成、修复、冲突处理不得静默改世界观',
+      '世界观任何手动修改保存后必须重新校验受影响的章纲、角色/时间线与正文一致性',
+      '长篇分层揭示，短篇只保留核心冲突所需设定',
+    ],
     rules: ['同一主体同一条件下不得同时得到互斥结果', '作用于他人的规则必须说明谁执行、对谁生效、凭什么生效'],
     quality_bar: '每条核心规则都能说明边界、代价、例外和首次使用位置。',
     inputs: ['Creative Constitution', '全书骨架'],
@@ -215,7 +227,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     category: 'creation',
     scenarios: ['writing'],
     business_tables: ['chapters', 'outlines'],
-    purpose: '严格按 Creative Constitution、ChapterPlan 和冻结上下文生成本章正文。',
+    purpose: '严格按 Creative Constitution、世界观、ChapterPlan 和冻结上下文生成本章正文。',
     steps: [
       { name: '读取合同', goal: '确认本章入口、目标、必经节拍、禁写事实、知识边界与出口状态' },
       { name: '正文生成', goal: '用场景行动和人物选择完成任务，不靠总结说明替代剧情' },
@@ -224,7 +236,8 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     ],
     requirements: [
       '正文必须继承故事卡最终平台/分类/基调/文风/流派/POV/标签，不得在写作阶段重新猜定位',
-      '最近正文、当前人物状态、相关伏笔/规则/时间线优先于宽泛背景资料',
+      '最近正文、当前人物状态、相关伏笔/规则/时间线优先于宽泛背景资料，但不得覆盖更高层 Creative Constitution 与世界观硬规则',
+      '已锁定正文禁止自动修改；锁定正文与更高层 Canon 冲突时必须人工裁决，不允许自动选择任一侧',
       '篇幅按 ChapterPlan 目标收敛；禁止用重复解释、同义改写或机械段落凑字数',
     ],
     rules: [
@@ -233,7 +246,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       '章节必须产生可识别变化：目标、信息、关系、资源、风险、状态或伏笔至少一项实际推进',
     ],
     quality_bar: '正文与架构一致、事实连续、人物声音可辨、段落自然，并在平台节奏下完成本章职责。',
-    inputs: ['Creative Constitution', 'ChapterPlan', '冻结上下文'],
+    inputs: ['Creative Constitution', '世界观 Canon', 'ChapterPlan', '冻结上下文'],
     outputs: ['通过 Gate 的章节正文'],
   },
   {
@@ -248,8 +261,8 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       { name: '局部替换', goal: '修改最小必要范围，不整章重写' },
       { name: '复检', goal: '重新跑确定性与语义 Gate，并比较新旧问题集合' },
     ],
-    requirements: ['修复不得引入新 Blocking', '修复不得改变 Creative Constitution、ChapterPlan 或已确认事实'],
-    rules: ['不能唯一定位原文就不自动改', '无单调改善立即回滚并停止自动修复'],
+    requirements: ['修复不得引入新 Blocking', '修复不得改变 Creative Constitution、世界观、ChapterPlan 或已确认事实', '锁定正文不得自动精修或自动解锁'],
+    rules: ['不能唯一定位原文就不自动改', '无单调改善立即回滚并停止自动修复', '同等可修复方案优先选择改动范围与下游影响更小的一项'],
     quality_bar: '修复后阻断问题严格减少且没有新硬伤，故事身份保持。',
     inputs: ['原正文', 'QualityIssue', '冻结上下文'],
     outputs: ['局部补丁', '复检结果'],
@@ -267,10 +280,10 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       { name: '状态抽取', goal: '只从已接受正文抽取人物/关系/伏笔/时间线变化候选' },
       { name: '阻断判定', goal: 'Hard Gate 失败即不可交付，不被均分掩盖' },
     ],
-    requirements: ['不得根据不存在的上下文推断事实', '摘要不能成为比正文更高权威的事实源'],
+    requirements: ['不得根据不存在的上下文推断事实', '摘要不能成为比正文更高权威的事实源', '冲突人工处理保存后必须重新检测，不得仅更新 issue.status'],
     rules: ['架构一致、人物知识、世界规则、时间数量、伏笔和 POV 属于 Hard Gate', '语言/节奏/平台/AI 痕迹等软维度必须给证据而不是给无来源概率'],
     quality_bar: '每个结论都能回到原文和事实源；Hard Gate 与软评分分离。',
-    inputs: ['正文', 'Creative Constitution', 'ChapterPlan', '冻结上下文'],
+    inputs: ['正文', 'Creative Constitution', '世界观 Canon', 'ChapterPlan', '冻结上下文'],
     outputs: ['质量报告', '状态候选', '章节摘要'],
   },
   {
