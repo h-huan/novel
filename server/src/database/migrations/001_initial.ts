@@ -819,7 +819,7 @@ CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL DEFAULT 'long_novel',
       title TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'idea',
+      status TEXT NOT NULL DEFAULT 'active',
       target_words INTEGER NOT NULL DEFAULT 0,
       current_words INTEGER NOT NULL DEFAULT 0,
       -- 历史列：platform 维的旧列名，已由 target_platform 取代，只作为写入投影存在（口径见 creative-constitution.ts）。
@@ -831,7 +831,7 @@ CREATE TABLE IF NOT EXISTS projects (
       settings TEXT NOT NULL,       -- JSON: ProjectSettings
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
-    , creation_source TEXT DEFAULT 'blank', target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT, idea_status TEXT DEFAULT 'none', idea_seed TEXT, confirmed_idea TEXT);
+    , target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT);
 
 -- [table] prompt_templates
 CREATE TABLE IF NOT EXISTS prompt_templates (

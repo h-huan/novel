@@ -4,12 +4,21 @@ import { GenerationRecoveryService } from './generation-recovery.service';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
+function projectSettings(type: 'long_novel' | 'short_story', targetWords: number) {
+  return JSON.stringify({ creativeConstitution: {
+    schemaVersion: 1, revision: 1, projectType: type, targetPlatform: 'fanqie', targetWords,
+    platformRules: {}, category: '都市', storyTone: ['现实'], writingStyle: [], webNovelGenre: ['现实向'],
+    submissionTags: [], plotTags: [], pov: 'third_person', targetAudience: null,
+    chapterWordRange: { min: 1000, max: 6000 }, confirmedStory: { title: '已确认题材' },
+  } });
+}
+
 function fixture(type: 'long_novel' | 'short_story', targetWords: number) {
   const db = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE projects (
       id TEXT PRIMARY KEY,type TEXT,status TEXT,target_words INTEGER,
-      confirmed_idea TEXT,idea_seed TEXT,updated_at TEXT
+      settings TEXT,updated_at TEXT
     );
     CREATE TABLE outlines (
       id TEXT PRIMARY KEY,project_id TEXT,level TEXT,target_words INTEGER,
@@ -31,8 +40,8 @@ function fixture(type: 'long_novel' | 'short_story', targetWords: number) {
     CREATE TABLE timeline_events (id TEXT PRIMARY KEY,timeline_id TEXT);
     CREATE TABLE version_history (id TEXT PRIMARY KEY,entity_id TEXT,created_by TEXT);
   `);
-  db.prepare('INSERT INTO projects VALUES (?,?,?,?,?,?,?)').run(
-    'p', type, 'creating', targetWords, JSON.stringify({ title: '已确认题材' }), null, new Date().toISOString(),
+  db.prepare('INSERT INTO projects VALUES (?,?,?,?,?,?)').run(
+    'p', type, 'creating', targetWords, projectSettings(type, targetWords), new Date().toISOString(),
   );
   db.prepare("INSERT INTO characters VALUES ('char','p')").run();
   db.prepare("INSERT INTO world_settings VALUES ('world','p')").run();

@@ -5,6 +5,15 @@ import { VectorIndexService } from '../rag/vector-index.service';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
+function projectSettings(type: 'long_novel' | 'short_story', targetWords: number) {
+  return JSON.stringify({ creativeConstitution: {
+    schemaVersion: 1, revision: 1, projectType: type, targetPlatform: 'fanqie', targetWords,
+    platformRules: {}, category: '都市', storyTone: ['现实'], writingStyle: [], webNovelGenre: ['现实向'],
+    submissionTags: [], plotTags: [], pov: 'third_person', targetAudience: null,
+    chapterWordRange: { min: 1000, max: 6000 }, confirmedStory: { title: '已确认题材' },
+  } });
+}
+
 describe('GenerationRecoveryService', () => {
   let db: InstanceType<typeof DatabaseSync>;
   let vectors: Record<string, Array<{ id: string; metadata: Record<string, unknown> }>>;
@@ -14,7 +23,7 @@ describe('GenerationRecoveryService', () => {
   beforeEach(() => {
     db = new DatabaseSync(':memory:');
     db.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY,type TEXT,status TEXT,target_words INTEGER,confirmed_idea TEXT,idea_seed TEXT,updated_at TEXT);
+      CREATE TABLE projects (id TEXT PRIMARY KEY,type TEXT,status TEXT,target_words INTEGER,settings TEXT,updated_at TEXT);
       CREATE TABLE outlines (id TEXT PRIMARY KEY,project_id TEXT,level TEXT,target_words INTEGER,status TEXT,"order" INTEGER);
       CREATE TABLE chapters (id TEXT PRIMARY KEY,project_id TEXT,outline_id TEXT,content TEXT,locked_at TEXT,status TEXT);
       CREATE TABLE characters (id TEXT PRIMARY KEY,project_id TEXT);
@@ -48,8 +57,8 @@ describe('GenerationRecoveryService', () => {
       }),
     };
     service = new GenerationRecoveryService({ getDb: () => db } as any, vectorIndex);
-    db.prepare(`INSERT INTO projects VALUES (?,?,?,?,?,?,?)`).run(
-      'p1', 'short_story', 'generation_failed', 3200, JSON.stringify({ title: 'idea' }), null, new Date().toISOString(),
+    db.prepare(`INSERT INTO projects VALUES (?,?,?,?,?,?)`).run(
+      'p1', 'short_story', 'generation_failed', 3200, projectSettings('short_story', 3200), new Date().toISOString(),
     );
   });
 

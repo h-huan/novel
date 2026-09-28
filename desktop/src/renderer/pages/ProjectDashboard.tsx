@@ -133,11 +133,7 @@ const ProjectDashboard: React.FC = () => {
     ['视角', String(constitution.pov || '')],
   ] : [];
   const needsRecovery = ['generation_failed', 'creating'].includes(projectStatus);
-  const hasConfirmedIdea = Boolean(
-    (currentProject as any)?.confirmedIdea
-    || (currentProject as any)?.ideaSeed
-    || (currentProject as any)?.ideaStatus === 'confirmed',
-  );
+  const hasConfirmedStory = Boolean(constitution?.confirmedStory && Object.keys(constitution.confirmedStory).length);
   const outlineReady = Boolean(recovery?.counts?.outlineChapters)
     && !recovery?.consistencyIssues?.some(issue => issue.includes('章节'));
 
@@ -175,7 +171,7 @@ const ProjectDashboard: React.FC = () => {
     { id: 'export', label: '导出', icon: '📦', done: false, path: `/project/${projectId}/import-export` },
   ];
   const stages = stageDefinitions.map(stage => {
-    if (stage.id === 'inspiration') return { ...stage, done: hasConfirmedIdea };
+    if (stage.id === 'inspiration') return { ...stage, done: hasConfirmedStory };
     if (stage.id === 'outline') return { ...stage, done: outlineReady };
     return stage;
   });

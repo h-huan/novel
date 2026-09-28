@@ -12,16 +12,16 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function renderCard(status: string, onRetry = vi.fn(), onSelect = vi.fn(), recoveryRunning = false) {
+function renderCard(status: Project['status'], onRetry = vi.fn(), onSelect = vi.fn(), recoveryRunning = false) {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const root = createRoot(host);
   roots.push(root);
-  const project = {
-    id: 'failed-1', title: '拆到最后一户', status, type: 'short_story',
-    creationSource: 'idea_discovery', targetPlatform: 'fanqie',
-    currentWorkflowStage: 'outline', wordCount: 0, updatedAt: new Date(),
-  } as Project;
+  const project: Project = {
+    id: 'failed-1', title: '拆到最后一户', status, type: 'short_story', description: '',
+    targetPlatform: 'fanqie', targetWords: 12_000, currentWorkflowStage: 'outline',
+    wordCount: 0, chapterCount: 0, createdAt: new Date(), updatedAt: new Date(),
+  };
   act(() => root.render(<ProjectCard
     project={project} onSelect={onSelect} onDelete={vi.fn()} onRetry={onRetry}
     retryBusy={false} retryDisabled={false} recoveryRunning={recoveryRunning} selected={false} onSelectionChange={vi.fn()}

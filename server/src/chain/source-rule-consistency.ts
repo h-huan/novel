@@ -4,7 +4,7 @@
  * semantic cross-module review, never silently declared consistent here.
  */
 export interface SourceRuleDocuments {
-  confirmedIdea?: string;
+  confirmedStory?: string;
   worldPremise?: string;
   worldRules?: string;
   worldProfileRules?: string;
@@ -57,7 +57,7 @@ function hasInteriorOnlyRewind(text: string): boolean {
 }
 
 export function detectSourceRuleConflicts(input: SourceRuleDocuments): string[] {
-  const idea = readableIdea(String(input.confirmedIdea || ''));
+  const idea = readableIdea(String(input.confirmedStory || ''));
   const core = `${input.worldPremise || ''}。${input.worldRules || ''}`;
   const profile = String(input.worldProfileRules || '');
   const sources = [

@@ -11,7 +11,7 @@ interface WorkflowBlockedNoticeProps {
 const ASSET_LABELS: Record<string, string> = {
   projectId: '项目 ID',
   current_stage: '当前阶段',
-  confirmed_idea: '确认题材/想法',
+  confirmed_story: '确认题材/想法',
   outline: '大纲',
   world_setting: '世界观',
   main_character: '主角',

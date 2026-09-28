@@ -20,8 +20,7 @@ export interface ProjectAssets {
   foreshadowingCount: number;
   pendingStateCount: number;
   confirmedStateCount: number;
-  hasIdea: boolean;
-  hasConfirmedIdea: boolean;
+  hasConfirmedStory: boolean;
   hasWorldSetting: boolean;
   hasMainCharacter: boolean;
   hasAntagonist: boolean;
@@ -77,7 +76,6 @@ export interface WarningItem {
 export interface WorkflowGuardResponse {
   projectId: string;
   projectType: string;
-  creationSource: string;
   currentStage: string;
   currentStageLabel: string;
   recommendedNextStage: string;
@@ -124,7 +122,6 @@ export const SHORT_STORY_STAGES = ['topic', 'outline', 'writing'] as const;
 export type ShortStoryStage = (typeof SHORT_STORY_STAGES)[number];
 
 export const LONG_NOVEL_STAGES = [
-  'idea_or_inspiration',
   'world_setting',
   'character',
   'outline',
@@ -143,7 +140,6 @@ export const SHORT_STAGE_LABELS: Record<string, string> = {
 };
 
 export const LONG_STAGE_LABELS: Record<string, string> = {
-  idea_or_inspiration: '想法',
   world_setting: '世界观',
   character: '人物',
   outline: '总纲',

@@ -22,45 +22,25 @@ const TYPE_COLORS: Record<ProjectType, string> = {
 
 const WORKFLOW_STAGE_LABELS: Record<string, string> = {
   topic: '题材',
-  idea_or_inspiration: '创作准备',
   world_setting: '世界观',
   character: '角色',
   outline: '大纲',
   volume: '分卷',
   chapter: '章节',
-  writing: '写作',
 };
 
 const STATUS_COLORS: Record<string, string> = {
   generation_failed: 'rgba(248, 113, 113, 0.16)',
-  idea: 'rgba(243, 156, 18, 0.2)',
-  world_building: 'rgba(243, 156, 18, 0.2)',
-  outlining: 'rgba(243, 156, 18, 0.2)',
-  writing: 'rgba(233, 69, 96, 0.2)',
-  editing: 'rgba(233, 69, 96, 0.2)',
-  published: 'rgba(46, 204, 113, 0.2)',
 };
 
 const STATUS_TEXT_COLORS: Record<string, string> = {
   generation_failed: '#fca5a5',
-  idea: 'var(--color-warning)',
-  world_building: 'var(--color-warning)',
-  outlining: 'var(--color-warning)',
-  writing: 'var(--color-accent)',
-  editing: 'var(--color-accent)',
-  published: 'var(--color-success)',
 };
 
 const USER_STATUS_LABELS: Record<string, string> = {
   creating: '资料生成中',
   generation_failed: '生成失败 · 不可写作',
   active: '可继续创作',
-  idea: '构思中',
-  world_building: '构思中',
-  outlining: '构思中',
-  writing: '创作中',
-  editing: '创作中',
-  published: '已完成',
 };
 
 function formatRelativeTime(date: Date): string {

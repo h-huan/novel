@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
+import { readConstitution } from '../modules/project/creative-constitution';
 
 export interface GenerationRecoveryAudit {
   projectId: string;
@@ -56,7 +57,7 @@ export class GenerationRecoveryService {
   async audit(projectId: string): Promise<GenerationRecoveryAudit> {
     const db = this.database.getDb();
     const project = db.prepare(
-      'SELECT id,type,status,target_words,confirmed_idea,idea_seed FROM projects WHERE id=?',
+      'SELECT * FROM projects WHERE id=?',
     ).get(projectId) as any;
     if (!project) throw new NotFoundException('项目不存在');
 
@@ -190,7 +191,8 @@ export class GenerationRecoveryService {
       : 0;
     if (invalidForeshadowRefs) consistencyIssues.push(`${invalidForeshadowRefs}条伏笔章节引用无效`);
 
-    const hasConfirmedSource = Boolean(String(project.confirmed_idea || project.idea_seed || '').trim());
+    const confirmedStory = readConstitution(project).confirmedStory;
+    const hasConfirmedSource = Boolean(confirmedStory && typeof confirmedStory === 'object' && Object.keys(confirmedStory).length > 0);
     if (!hasConfirmedSource) consistencyIssues.push('缺少确认灵感/项目种子，无法按原配置恢复');
     const protectedHumanWork = protectionReasons.length > 0;
     const running = this.isRunning(projectId);

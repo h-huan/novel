@@ -14,15 +14,6 @@ export const ProjectType = {
 } as const;
 export type ProjectType = (typeof ProjectType)[keyof typeof ProjectType];
 
-/** 创建来源 */
-export const CreationSource = {
-  INSPIRATION: 'inspiration',
-  IDEA_DISCOVERY: 'idea_discovery',
-  IDEA: 'idea',
-  IMPORT: 'import',
-  BLANK: 'blank',
-} as const;
-export type CreationSource = (typeof CreationSource)[keyof typeof CreationSource];
 
 /**
  * 上述枚举的值清单 —— DTO @IsIn 的唯一来源，禁止在 DTO 里再手写副本。
@@ -32,7 +23,6 @@ export type CreationSource = (typeof CreationSource)[keyof typeof CreationSource
  * （creating / generation_failed 由系统写入），所以状态那一份仍按子集显式书写，不从整表派生。
  */
 export const PROJECT_TYPE_IDS: readonly ProjectType[] = Object.values(ProjectType);
-export const CREATION_SOURCE_IDS: readonly CreationSource[] = Object.values(CreationSource);
 
 /**
  * 目标平台（platform 维取值的唯一枚举）。
@@ -58,7 +48,6 @@ export type TargetPlatform = (typeof TargetPlatform)[keyof typeof TargetPlatform
 /** 创作流程阶段 */
 export const WorkflowStage = {
   TOPIC: 'topic',
-  IDEA_OR_INSPIRATION: 'idea_or_inspiration',
   WORLD_SETTING: 'world_setting',
   CHARACTER: 'character',
   OUTLINE: 'outline',
@@ -68,12 +57,3 @@ export const WorkflowStage = {
 } as const;
 export type WorkflowStage = (typeof WorkflowStage)[keyof typeof WorkflowStage];
 
-/** 想法孵化状态 */
-export const IdeaStatus = {
-  NONE: 'none',
-  DRAFT: 'draft',
-  REFINING: 'refining',
-  CONFIRMED: 'confirmed',
-  CONVERTED: 'converted',
-} as const;
-export type IdeaStatus = (typeof IdeaStatus)[keyof typeof IdeaStatus];

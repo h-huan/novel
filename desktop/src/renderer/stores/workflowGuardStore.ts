@@ -44,7 +44,6 @@ export interface WarningItem {
 export interface WorkflowGuardData {
   projectId: string;
   projectType: string;
-  creationSource: string;
   currentStage: string;
   currentStageLabel: string;
   recommendedNextStage: string;

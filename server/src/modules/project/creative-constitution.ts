@@ -23,6 +23,8 @@ export interface CreativeConstitution {
   genreFitNote: string;
   pov: string;
   targetAudience: unknown;
+  /** 灵感发现确认后的唯一故事事实。 */
+  confirmedStory?: Record<string, unknown>;
   /**
    * 自定义平台（TargetPlatform.CUSTOM）的说明，由用户在执行标准里填写。
    * 它本身就是「平台」这一维的执行值：为空 = 用户选了自定义平台却没给标准，
@@ -760,7 +762,7 @@ export interface ProjectStandardDirective {
   isLong: boolean;
   /** 平台显示名；自定义平台取用户填写的说明，不得用通用平台 label 冒充 */
   platformLabel: string;
-  /** 创建前确认的题材标签（confirmed_idea.styleTags），不在宪法 schema 里，单独带回 */
+  /** 创建前确认的题材标签（confirmed_story.styleTags），不在宪法 schema 里，单独带回 */
   styleTags: string[];
   /** 平台投稿分类落位的一句话口径；平台未建模分类树时为 '' */
   categoryPlacement: string;
@@ -794,12 +796,12 @@ export function resolveProjectStandardDirective(db: DatabaseSync, projectId: str
       `执行标准未齐备：${missing.map(item => item.label).join('、')}缺失（项目 ${id}）。框架层与正文层都必须按这六维执行，不能用默认值或平台推荐静默补齐。`,
     );
   }
-  // 创建前确认的「题材标签」（confirmed_idea.styleTags）不在创作宪法 schema 里，
+  // 创建前确认的「题材标签」（confirmed_story.styleTags）不在创作宪法 schema 里，
   // 此前完全丢失：模型只拿到基调/文风/流派，却看不到用户选定并被确认过的具体题材标签，
   // 于是文章容易偏离创建时选定的平台/标签定位。这里补注入。
-  const confirmedIdea = plainJsonObject(row.confirmed_idea);
-  const styleTags = Array.isArray(confirmedIdea.styleTags)
-    ? confirmedIdea.styleTags.map((t: any) => String(t).trim()).filter(Boolean)
+  const confirmedStory = plainJsonObject(row.confirmed_story);
+  const styleTags = Array.isArray(confirmedStory.styleTags)
+    ? confirmedStory.styleTags.map((t: any) => String(t).trim()).filter(Boolean)
     : [];
   const isLong = constitution.projectType === 'long_novel';
   const isCustomPlatform = String(constitution.targetPlatform ?? '').trim() === 'custom';

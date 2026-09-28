@@ -20,12 +20,6 @@ function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
   );
 }
 
-function confirmedStoryExpression(prefix: 'NEW' | 'OLD' = 'NEW'): string {
-  return `json(CASE
-    WHEN json_valid(${prefix}.confirmed_idea) THEN ${prefix}.confirmed_idea
-    ELSE json_object('summary', ${prefix}.confirmed_idea)
-  END)`;
-}
 
 /**
  * Keeps an existing database aligned with the current complete 001 schema.
@@ -92,72 +86,28 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       `);
     }
 
-    // confirmed_idea / idea_seed 继续作为兼容与审计快照存在，但运行时故事权威必须只有一份：
-    // settings.creativeConstitution。把已确认题材嵌入创作宪法后，RealLLM 的统一宪法注入、
-    // 世界观/大纲/正文/精修读取到的是同一个故事事实源，不再需要两套事实对象互相对齐。
-    // 新项目通过触发器在 INSERT 时立即合并；confirmed_idea 若被明确更新，也同步到同一位置。
-    // 这里不新增 story_contract 表，也不新增编号 migration。
-    if (hasTable(db, 'projects')
-      && hasColumn(db, 'projects', 'confirmed_idea')
-      && hasColumn(db, 'projects', 'settings')) {
-      const projects = db.prepare(`SELECT id,confirmed_idea,settings FROM projects
-        WHERE LENGTH(TRIM(COALESCE(confirmed_idea,'')))>0`).all() as Array<{
-          id: string; confirmed_idea: string; settings: string;
-        }>;
-      const updateSettings = db.prepare('UPDATE projects SET settings=? WHERE id=?');
-      let storyBackfill = 0;
-      for (const project of projects) {
-        let settings: Record<string, any>;
-        try {
-          settings = JSON.parse(project.settings || '{}');
-        } catch {
-          continue;
+    // 存量库一次性搬迁旧 IdeaLab 快照后物理删列；运行时代码不再读取这些列。
+    if (hasTable(db, 'projects')) {
+      const hasConfirmed = hasColumn(db, 'projects', 'confirmed_idea');
+      const hasSeed = hasColumn(db, 'projects', 'idea_seed');
+      if ((hasConfirmed || hasSeed) && hasColumn(db, 'projects', 'settings')) {
+        const c = hasConfirmed ? 'confirmed_idea' : 'NULL AS confirmed_idea';
+        const s = hasSeed ? 'idea_seed' : 'NULL AS idea_seed';
+        const projects = db.prepare(`SELECT id,settings,${c},${s} FROM projects`).all() as any[];
+        const update = db.prepare('UPDATE projects SET settings=? WHERE id=?');
+        for (const project of projects) {
+          const raw = String(project.confirmed_idea || project.idea_seed || '').trim();
+          if (!raw) continue;
+          let settings: any; try { settings = JSON.parse(project.settings || '{}'); } catch { continue; }
+          const cc = settings.creativeConstitution; if (!cc || typeof cc !== 'object' || cc.confirmedStory !== undefined) continue;
+          let confirmedStory: any; try { confirmedStory = JSON.parse(raw); } catch { confirmedStory = { summary: raw }; }
+          settings.creativeConstitution = { ...cc, confirmedStory }; update.run(JSON.stringify(settings), project.id);
         }
-        const constitution = settings.creativeConstitution;
-        if (!constitution || typeof constitution !== 'object' || Array.isArray(constitution)) continue;
-        let confirmedStory: unknown;
-        try { confirmedStory = JSON.parse(project.confirmed_idea); }
-        catch { confirmedStory = { summary: project.confirmed_idea }; }
-        if (JSON.stringify((constitution as any).confirmedStory) === JSON.stringify(confirmedStory)) continue;
-        settings.creativeConstitution = { ...constitution, confirmedStory };
-        updateSettings.run(JSON.stringify(settings), project.id);
-        storyBackfill += 1;
       }
-      if (storyBackfill > 0) actions.push(`projects.confirmed_story_backfill.${storyBackfill}`);
-
-      db.exec(`
-        DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert;
-        CREATE TRIGGER trg_projects_confirmed_story_insert
-        AFTER INSERT ON projects
-        WHEN LENGTH(TRIM(COALESCE(NEW.confirmed_idea,'')))>0
-          AND json_valid(COALESCE(NEW.settings,'{}'))
-          AND json_type(NEW.settings,'$.creativeConstitution')='object'
-        BEGIN
-          UPDATE projects
-          SET settings=json_set(
-            NEW.settings,
-            '$.creativeConstitution.confirmedStory',
-            ${confirmedStoryExpression('NEW')}
-          )
-          WHERE id=NEW.id;
-        END;
-
-        DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;
-        CREATE TRIGGER trg_projects_confirmed_story_update
-        AFTER UPDATE OF confirmed_idea ON projects
-        WHEN LENGTH(TRIM(COALESCE(NEW.confirmed_idea,'')))>0
-          AND json_valid(COALESCE(NEW.settings,'{}'))
-          AND json_type(NEW.settings,'$.creativeConstitution')='object'
-        BEGIN
-          UPDATE projects
-          SET settings=json_set(
-            NEW.settings,
-            '$.creativeConstitution.confirmedStory',
-            ${confirmedStoryExpression('NEW')}
-          )
-          WHERE id=NEW.id;
-        END;
-      `);
+      db.exec('DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert; DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;');
+      for (const column of ['confirmed_idea','idea_seed','idea_status','creation_source']) {
+        if (hasColumn(db, 'projects', column)) { db.exec(`ALTER TABLE projects DROP COLUMN ${column}`); actions.push(`drop_legacy_column.projects.${column}`); }
+      }
     }
 
     const schemaTableIsCurrent =

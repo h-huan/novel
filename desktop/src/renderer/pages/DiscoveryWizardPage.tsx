@@ -182,12 +182,10 @@ const CREATION_STEPS = [
 /** 只凭持久化的确认题材定位已创建项目，避免重载后同一张卡重复创建。 */
 export function findProjectForIdea(projects: Project[], idea: any): Project | undefined {
   return projects.find((project) => {
-    if (project.creationSource !== 'idea_discovery' || !project.confirmedIdea) return false;
-    try {
-      const confirmed = JSON.parse(project.confirmedIdea);
-      return confirmed.title === idea.title && confirmed.hook === idea.hook
-        && confirmed.storyType === idea.storyType && confirmed.targetPlatform === idea.targetPlatform;
-    } catch { return false; }
+    const confirmed = project.creativeConstitution?.confirmedStory;
+    if (!confirmed || typeof confirmed !== 'object') return false;
+    return confirmed.title === idea.title && confirmed.hook === idea.hook
+      && confirmed.storyType === idea.storyType && confirmed.targetPlatform === idea.targetPlatform;
   });
 }
 

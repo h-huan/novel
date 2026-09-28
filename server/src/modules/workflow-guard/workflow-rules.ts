@@ -52,7 +52,7 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
   const warnings: { key: string; message: string }[] = [];
 
   // ===== 已完成资产 =====
-  if (assets.hasIdea || assets.hasConfirmedIdea) {
+  if (assets.hasConfirmedStory) {
     completedAssets.push({ key: 'idea', label: '创作想法' });
   }
   if (assets.project.description) {
@@ -75,8 +75,8 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
       { key: 'generate_outline', label: '生成大纲', targetRoute: `/project/${project.id}/outline` },
     );
 
-    // 如果有题材或确认想法，可以进入大纲
-    if (assets.hasConfirmedIdea || assets.hasOutline) {
+    // 如果有题材或确认题材，可以进入大纲
+    if (assets.hasConfirmedStory || assets.hasOutline) {
       allowedActions.push({ key: 'enter_outline', label: '进入大纲', targetRoute: `/project/${project.id}/outline` });
     }
 
@@ -87,8 +87,8 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
     );
 
     // 缺失资产
-    if (!assets.hasConfirmedIdea && !assets.hasOutline) {
-      missingAssets.push({ key: 'confirmed_idea', label: '确认想法', severity: 'required', reason: '正文生成前需要先明确题材和钩子' });
+    if (!assets.hasConfirmedStory && !assets.hasOutline) {
+      missingAssets.push({ key: 'confirmed_story', label: '确认题材', severity: 'required', reason: '正文生成前需要先明确题材和钩子' });
     }
     if (!assets.hasOutline) {
       missingAssets.push({ key: 'outline', label: '大纲', severity: 'required', reason: '短篇正文生成前需要先有大纲' });
@@ -96,7 +96,7 @@ export function buildShortStoryGuard(assets: ProjectAssets, currentStage: string
 
     // 建议
     const nextStage = 'outline';
-    const nextAction = '先完善短篇题材，确认想法后再生成大纲';
+    const nextAction = '先完善短篇题材，确认题材后再生成大纲';
 
   }
 
@@ -189,7 +189,7 @@ function buildShortStoryResult(
   if (currentStage === 'topic') {
     recommendedNextStage = 'outline';
     recommendedNextAction = missingAssets.length > 0
-      ? '建议先完成题材设定，确认想法后再进入大纲阶段'
+      ? '建议先完成题材设定，确认题材后再进入大纲阶段'
       : '题材已明确，可以进入大纲阶段';
     canProceed = missingAssets.length <= 1;
   } else if (currentStage === 'outline') {
@@ -247,7 +247,7 @@ export interface LongNovelStageResult {
 
 function longStageMap(currentStage: string): StageMapItem[] {
   const stageKeys = [
-    'idea_or_inspiration', 'world_setting', 'character', 'outline',
+    'world_setting', 'character', 'outline',
     'volume', 'chapter', 'writing', 'state_archive', 'weekly_review',
   ];
   return stageKeys.map((key) => {
@@ -272,7 +272,7 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
   const warnings: { key: string; message: string }[] = [];
 
   // ===== 已完成资产 =====
-  if (assets.hasIdea || assets.hasConfirmedIdea) {
+  if (assets.hasConfirmedStory) {
     completedAssets.push({ key: 'idea', label: '创作想法' });
   }
   if (assets.hasWorldSetting) {
@@ -301,34 +301,6 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
   allowedActions.push(
     { key: 'edit_project', label: '编辑基础设定', targetRoute: '' },
   );
-
-  if (currentStage === 'idea_or_inspiration') {
-    // ===== 想法阶段 =====
-    allowedActions.push(
-      { key: 'edit_idea', label: '完善想法' },
-      { key: 'enter_world', label: '进入世界观', targetRoute: `/project/${project.id}/world` },
-      { key: 'enter_character', label: '进入角色设定', targetRoute: `/project/${project.id}/characters` },
-    );
-
-    blockedActions.push(
-      { key: 'generate_body', label: '生成正文', reason: '当前还处于想法阶段，需要先建立世界观和角色' },
-      { key: 'continue_body', label: '续写正文', reason: '当前还处于想法阶段，不能续写正文' },
-      { key: 'generate_outline', label: '生成总纲', reason: '请先完成世界观和主角设定后再生成总纲' },
-      { key: 'generate_volume', label: '生成分卷', reason: '请先完成总纲后再生成分卷' },
-      { key: 'generate_chapter_plan', label: '生成章节规划', reason: '请先完成世界观、角色和总纲' },
-      { key: 'export_project', label: '导出终稿', reason: '当前还没有正文，不能导出终稿' },
-    );
-
-    if (!assets.hasWorldSetting) {
-      missingAssets.push({ key: 'world_setting', label: '世界观', severity: 'required', reason: '长篇需要先建立世界观基础' });
-    }
-    if (!assets.hasMainCharacter) {
-      missingAssets.push({ key: 'main_character', label: '主角', severity: 'required', reason: '长篇需要明确主角设定' });
-    }
-    if (!assets.hasOutline) {
-      missingAssets.push({ key: 'outline', label: '总纲', severity: 'recommended', reason: '建议在进入分卷前先有总纲' });
-    }
-  }
 
   if (currentStage === 'world_setting') {
     // ===== 世界观阶段 =====
@@ -506,11 +478,7 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
   let recommendedNextAction = '';
   let canProceed = true;
 
-  if (currentStage === 'idea_or_inspiration') {
-    recommendedNextStage = 'world_setting';
-    recommendedNextAction = '建议先建立世界观和角色设定';
-    canProceed = assets.hasWorldSetting || assets.hasMainCharacter;
-  } else if (currentStage === 'world_setting') {
+  if (currentStage === 'world_setting') {
     recommendedNextStage = 'character';
     recommendedNextAction = assets.hasWorldSetting ? '世界观已建立，建议进入角色设定' : '请先建立世界观';
     canProceed = assets.hasWorldSetting;
@@ -563,7 +531,6 @@ export function buildLongNovelGuard(assets: ProjectAssets, currentStage: string)
 
 function computeLongProgress(currentStage: string): number {
   const map: Record<string, number> = {
-    idea_or_inspiration: 10,
     world_setting: 20,
     character: 30,
     outline: 40,

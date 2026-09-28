@@ -8,10 +8,8 @@ import {
   Project,
   ProjectType,
   ProjectStatus,
-  CreationSource,
   TargetPlatform,
   WorkflowStage,
-  IdeaStatus,
 } from '@novel/shared';
 import type { ExecutionStandardsPayload } from '../lib/executionStandards';
 
@@ -81,11 +79,7 @@ function pickExecutionStandards(data: Partial<ExecutionStandardsPayload>): Recor
 interface ProjectCreateData extends Partial<ExecutionStandardsPayload> {
   title: string;
   type?: Project['type'];
-  creationSource?: CreationSource;
   currentWorkflowStage?: WorkflowStage;
-  ideaStatus?: IdeaStatus;
-  ideaSeed?: string;
-  confirmedIdea?: string;
   description?: string;
   settings?: Record<string, unknown>;
   chapterWordRange?: { min: number; max: number };
@@ -129,8 +123,7 @@ export function mapServerProject(raw: any): Project {
   }
 
   // 推导默认阶段
-  const creationSource = (raw.creationSource || 'blank') as CreationSource;
-  const defaultStage = constitution.projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';
+  const defaultStage = constitution.projectType === 'short_story' ? 'topic' : 'world_setting';
 
   return {
     id: raw.id || '',
@@ -141,15 +134,11 @@ export function mapServerProject(raw: any): Project {
     wordCount: raw.currentWords ?? raw.wordCount ?? 0,
     chapterCount: raw.chapterCount ?? 0,
     platforms: Array.isArray(raw.platforms) ? raw.platforms : [],
-    creationSource,
     targetPlatform: constitution.targetPlatform as TargetPlatform,
     targetWords: constitution.targetWords,
     settings: typeof raw.settings === 'string' ? (() => { try { return JSON.parse(raw.settings); } catch { return {}; } })() : (raw.settings || {}),
     creativeConstitution: constitution,
     currentWorkflowStage: (raw.currentWorkflowStage || defaultStage) as WorkflowStage,
-    ideaStatus: (raw.ideaStatus || 'none') as IdeaStatus,
-    ideaSeed: raw.ideaSeed || undefined,
-    confirmedIdea: raw.confirmedIdea || undefined,
     createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
     updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : new Date(),
   };
@@ -206,11 +195,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 执行标准十项走同一份清单提交（六维 + 平台说明 + 目标总字数 + 分类体量取舍依据）：
       // 旧写法逐字段 if，新增字段漏一行就静默少发，界面显示「已填」而生成侧仍按缺失阻断。
       Object.assign(body, pickExecutionStandards(data));
-      if (data.creationSource) body.creationSource = data.creationSource;
       if (data.currentWorkflowStage) body.currentWorkflowStage = data.currentWorkflowStage;
-      if (data.ideaStatus) body.ideaStatus = data.ideaStatus;
-      if (data.ideaSeed) body.ideaSeed = data.ideaSeed;
-      if (data.confirmedIdea) body.confirmedIdea = data.confirmedIdea;
       if (data.description) body.description = data.description;
       if (data.settings) body.settings = data.settings;
       if (data.chapterWordRange !== undefined) body.chapterWordRange = data.chapterWordRange;

@@ -1,4 +1,4 @@
-import { readConstitution, updateConstitution, constitutionSettings, buildExecutionStandard, missingConstitutionStandards, genreFitProblem, categoryPlacementProblem, categoryPlacementMessage, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, audienceChannelHint, platformStandardProblem, buildPlatformStyleDirective, resolveProjectStandardDirective, styleIntensityGuides } from '../modules/project/creative-constitution';
+import { readConstitution, updateConstitution, constitutionSettings, buildExecutionStandard, missingConstitutionStandards, genreFitProblem, categoryPlacementProblem, categoryPlacementMessage, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, audienceChannelHint, platformStandardProblem, buildPlatformStyleDirective, resolveProjectStandardDirective, styleIntensityGuides, type CreativeConstitution } from '../modules/project/creative-constitution';
 import {
   CHAPTER_WORD_RANGE,
   buildChapterResponsibilityAuditPrompt,
@@ -4916,14 +4916,15 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         .slice(-30);
       // 历史作品自动参与题材去重，不能依赖前端恰好把排除项传回来。
       const historicalExcludes = (this.db.getDb().prepare(
-        `SELECT title, confirmed_idea, idea_seed FROM projects
+        `SELECT title, settings FROM projects
          WHERE title IS NOT NULL AND TRIM(title) <> '' ORDER BY updated_at DESC LIMIT 40`,
-      ).all() as Array<{ title: string; confirmed_idea?: string | null; idea_seed?: string | null }>).map(row => {
+      ).all() as Array<{ title: string; settings: string }>).map(row => {
         let detail: any = {};
-        for (const raw of [row.confirmed_idea, row.idea_seed]) {
-          if (!raw) continue;
-          try { detail = JSON.parse(raw); break; } catch { /* keep title-only history */ }
-        }
+        try {
+          const settings = JSON.parse(row.settings || '{}');
+          const story = settings?.creativeConstitution?.confirmedStory;
+          if (story && typeof story === 'object' && !Array.isArray(story)) detail = story;
+        } catch {}
         return { ...detail, title: String(detail?.title || row.title).trim() };
       });
       const initialExcludes = [...historicalExcludes, ...requestedExcludes]
@@ -5331,6 +5332,9 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       chapterWordRange: creationChapterRange,
       settings: currentProjectSettings,
     });
+    constitution.confirmedStory = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)
+      ? structuredClone(dto.selectedIdea)
+      : { summary: String(dto.selectedIdea || '') };
     constitution.revision = 1;
     // 创建入口前置阻断：平台/分类/基调/文风/流派/视角是【执行前提】，空值 = 标准未执行。
     // 此前这些空值要等生成阶段（assertExecutionStandardsComplete）才被拦下：用户已经选完题材、
@@ -5382,12 +5386,11 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
     dto.settings = normalizedProjectSettings;
 
     const projectId = uuid();
-    db.prepare(`INSERT INTO projects (id, title, type, status, target_words, current_words, settings, writing_style, platform_style, creation_source, target_platform, idea_status, idea_seed, confirmed_idea, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    db.prepare(`INSERT INTO projects (id, title, type, status, target_words, current_words, settings, writing_style, platform_style, target_platform, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       projectId, dto.title, dto.storyType || 'short_story', 'creating', configuredTargetWords, 0,
       JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'full_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false, ...normalizedProjectSettings }),
-      JSON.stringify(constitution.writingStyle), constitution.targetPlatform,
-      'idea_discovery', constitution.targetPlatform, 'confirmed', JSON.stringify(dto.selectedIdea || {}), JSON.stringify(dto.selectedIdea || {}),
+      JSON.stringify(constitution.writingStyle), constitution.targetPlatform, constitution.targetPlatform,
       now, now
     );
     this.projectCreationEventHistory.set(projectId, []);
@@ -5984,7 +5987,7 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
               return;
             }
             // 长篇综合链在此之前已写入规划资料；这里曾没有跨章数量台账门禁，后果是矛盾章纲可能直接激活。
-            await this.assertOutlineFactLedger(projectId, JSON.stringify({ title: dto.title, type: dto.storyType, targetWords: dto.targetWords, platform: constitution.targetPlatform, projectCard: constitution, confirmedIdea: dto.selectedIdea }), buildExecutionStandard(constitution, {
+            await this.assertOutlineFactLedger(projectId, JSON.stringify({ title: dto.title, type: dto.storyType, targetWords: dto.targetWords, platform: constitution.targetPlatform, projectCard: constitution, confirmedStory: dto.selectedIdea }), buildExecutionStandard(constitution, {
               styleTags: Array.isArray(dto.selectedIdea?.styleTags) ? dto.selectedIdea.styleTags : [],
             }).directive);
             this.logger.log(`create-project-async: 长篇完成 project=${projectId}`);
@@ -6048,7 +6051,7 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         targetWords: dto.targetWords,
         platform: constitution.targetPlatform,
         projectCard: constitution,
-        confirmedIdea: dto.selectedIdea,
+        confirmedStory: dto.selectedIdea,
       });
       // ====== 步骤1：生成大纲 ======
       // 新流程先生成世界观，再用世界观作为大纲、角色与后续资料的上下文。 
@@ -6120,7 +6123,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
           if (!worldResult) throw new Error('世界观生成未返回有效结构，停止创建以避免后续上下文失真。');
           let worldCandidate = worldResult.data;
           let sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
-            { confirmedIdea: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
+            { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
           if (!sourceReview.consistent) {
             const repair = await this.llmCallWithRetry<any>('世界观上层事实修复',
               `只修复下层世界观，不改写已确认题材和创作设定。\n【上层】${canonicalCreativeBrief}\n【当前世界观】${JSON.stringify(worldCandidate)}\n【逐字证据与冲突】${JSON.stringify(sourceReview.contradictions)}\n【原始完整字段合同】${worldPrompt}\n只输出修复后的完整世界观 JSON 对象，字段和非空要求与原始合同相同。`,
@@ -6129,7 +6132,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
                 describeValidation: value => describeWorldSourceCandidate(value, protagonistName) });
             worldCandidate = repair.data;
             sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
-              { confirmedIdea: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
+              { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
           }
           if (!sourceReview.consistent) {
             throw new Error(`世界观与确认题材仍冲突，未保存或生成大纲：${sourceReview.contradictions.join('；')}`);
@@ -6260,16 +6263,16 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
               && scenes.length > 0
               && scenes.every(scene => hasUsefulValue(scene?.goal) && hasUsefulValue(scene?.conflict) && hasUsefulValue(scene?.outcome));
           };
-          const confirmedIdea = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)
+          const confirmedStory = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)
             ? dto.selectedIdea as Record<string, any>
             : null;
-          const confirmedScope = Array.isArray(confirmedIdea?.scopeBreakdown) ? confirmedIdea.scopeBreakdown : [];
-          const canonicalCardFromIdea = confirmedIdea ? {
-            coreConflict: confirmedIdea.coreConflict,
-            protagonistDesire: confirmedIdea.protagonist,
-            turningPoint: confirmedIdea.mainReversal || confirmedIdea.turningPoint,
-            reveal: confirmedIdea.mainReversal || confirmedIdea.reveal,
-            ending: confirmedIdea.description,
+          const confirmedScope = Array.isArray(confirmedStory?.scopeBreakdown) ? confirmedStory.scopeBreakdown : [];
+          const canonicalCardFromIdea = confirmedStory ? {
+            coreConflict: confirmedStory.coreConflict,
+            protagonistDesire: confirmedStory.protagonist,
+            turningPoint: confirmedStory.mainReversal || confirmedStory.turningPoint,
+            reveal: confirmedStory.mainReversal || confirmedStory.reveal,
+            ending: confirmedStory.description,
             scenes: confirmedScope.map((stage: any) => ({
               goal: serializeGeneratedSqlText(stage?.arc),
               conflict: serializeGeneratedSqlText(stage?.reason),
@@ -6986,7 +6989,7 @@ ${(() => {
           ].map((item: any) => String(typeof item === 'string' ? item : item?.name || '').split(/[，,]/)[0].trim()).filter(Boolean);
           const characterFactLedger = [...new Set(confirmedCharacterNames)].map(name => ({
             name,
-            confirmedIdeaEvidence: Object.fromEntries(Object.entries(dto.selectedIdea || {}).filter(([, value]) =>
+            confirmedStoryEvidence: Object.fromEntries(Object.entries(dto.selectedIdea || {}).filter(([, value]) =>
               serializeGeneratedSqlText(value).includes(name))),
             chapterEvidence: generatedChapterContext.filter(chapter => JSON.stringify(chapter).includes(name)).map(chapter => ({
               order: chapter.order,
@@ -7982,16 +7985,16 @@ ${worldFieldList}
           );
           let wp = worldProfileResult.data?.profile || worldProfileResult.data;
           let profileReview = await this.reviewChildSource(projectId, '已确认题材与世界观骨架',
-            { confirmedIdea: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
+            { confirmedStory: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
           if (!profileReview.consistent) {
             const repair = await this.llmCallWithRetry<any>('世界观深度档案事实修复',
-              `只修复下层深度档案，不改写已确认题材或世界观骨架。\n【上层】${JSON.stringify({ confirmedIdea: dto.selectedIdea, world: worldRow })}\n【当前档案】${JSON.stringify(wp)}\n【逐字冲突】${JSON.stringify(profileReview.contradictions)}\n输出完整JSON {"profile":{...}}；必需字段 ${worldFieldList}，每个字段为字符串。`,
+              `只修复下层深度档案，不改写已确认题材或世界观骨架。\n【上层】${JSON.stringify({ confirmedStory: dto.selectedIdea, world: worldRow })}\n【当前档案】${JSON.stringify(wp)}\n【逐字冲突】${JSON.stringify(profileReview.contradictions)}\n输出完整JSON {"profile":{...}}；必需字段 ${worldFieldList}，每个字段为字符串。`,
               { projectId, scenario: 'world_building', temperature: 0.25, timeout: LLM_TUNABLES.timeoutComplex(),
                 validate: value => describeProfileCandidate(value).length === 0,
                 describeValidation: describeProfileCandidate });
             wp = repair.data?.profile || repair.data;
             profileReview = await this.reviewChildSource(projectId, '已确认题材与世界观骨架',
-              { confirmedIdea: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
+              { confirmedStory: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
           }
           if (!profileReview.consistent) throw new Error(`世界观深度档案与上层冲突：${profileReview.contradictions.join('；')}`);
           if (wp && typeof wp === 'object') {
@@ -8257,13 +8260,13 @@ ${enrichToneDirective}
     const db = this.db.getDb();
     let recoverySnapshot: Awaited<ReturnType<GenerationRecoveryService['captureSnapshot']>> | null = null;
     try {
-      const project = db.prepare(`SELECT title,type,target_words,target_platform,
-        settings,confirmed_idea,idea_seed,status FROM projects WHERE id=?`).get(projectId) as any;
+      const project = db.prepare(`SELECT title,type,target_words,target_platform,settings,status FROM projects WHERE id=?`).get(projectId) as any;
       if (!project) throw new HttpException('项目不存在', 404);
 
       const settings = this.safeExtractJson<Record<string, unknown>>(String(project.settings || '{}'), {});
-      const ideaSource = String(project.confirmed_idea || project.idea_seed || '').trim();
-      const selectedIdea = this.safeExtractJson<any>(ideaSource, { content: ideaSource, idea: ideaSource });
+      const constitution = settings.creativeConstitution as CreativeConstitution | undefined;
+      const selectedIdea = constitution?.confirmedStory || {};
+      if (!selectedIdea || Object.keys(selectedIdea).length === 0) throw new HttpException('项目缺少 Creative Constitution.confirmedStory，不能恢复 AI 生成', 409);
       recoverySnapshot = await this.generationRecovery.captureSnapshot(projectId);
       if (explicitSourceRebuild) await this.generationRecovery.clearForExplicitSourceRebuild(projectId);
       else await this.generationRecovery.clearFailedGeneratedAssets(projectId);
@@ -9784,7 +9787,7 @@ ${summarizeOutlineConsistency(pending)}`,
     onProgress?: (step: 'skeleton' | 'world' | 'characters' | 'outline' | 'foreshadowing', message: string) => void;
   }): Promise<any> {
     // 【执行标准注入 · 长篇创建全流程】地基→角色→章纲→伏笔 与正文层共用唯一解析器。
-    // 项目行在 createProjectAsync 落库时已写入 settings.creativeConstitution 与 confirmed_idea，
+    // 项目行在 createProjectAsync 落库时已写入 settings.creativeConstitution.confirmedStory，
     // 所以这里按 projectId 解析即可拿到完整的 平台基准+分类+基调+文风+流派+视角+题材标签+目标读者。
     // 不保留任何"解析为空时另拼一份"的回落分支：第二份口径必然更弱（缺分类/视角/目标读者），
     // 一旦生效就等于用降级标准生成长篇地基，与用户创建时确认的执行标准不一致。

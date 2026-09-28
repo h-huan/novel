@@ -40,8 +40,17 @@ describe('从题材卡创建项目的执行设定', () => {
 describe('题材卡与已创建项目', () => {
   it('刷新后只将完整确认题材匹配到原项目，避免重复创建', () => {
     const idea = { title: '代驾听你说完', hook: '车内证词', storyType: 'long_novel', targetPlatform: 'fanqie' };
-    const project = { id: 'existing', creationSource: 'idea_discovery', status: 'generation_failed',
-      confirmedIdea: JSON.stringify(idea) } as Project;
+    const project: Project = {
+      id: 'existing', title: idea.title, type: 'long_novel', status: 'generation_failed',
+      description: '', wordCount: 0, chapterCount: 0, targetPlatform: 'fanqie', targetWords: 500_000,
+      creativeConstitution: {
+        schemaVersion: 1, revision: 1, projectType: 'long_novel', targetPlatform: 'fanqie', targetWords: 500_000,
+        category: '男频·悬疑脑洞', storyTone: ['悬疑'], writingStyle: [], webNovelGenre: ['现实向'],
+        submissionTags: [], plotTags: [], genreFitNote: '', pov: 'third_person', targetAudience: null,
+        chapterWordRange: { min: 1000, max: 6000 }, platformRules: {}, confirmedStory: idea,
+      },
+      currentWorkflowStage: 'world_setting', createdAt: new Date(), updatedAt: new Date(),
+    };
     expect(findProjectForIdea([project], idea)?.id).toBe('existing');
     expect(findProjectForIdea([project], { ...idea, storyType: 'short_story' })).toBeUndefined();
     expect(findProjectForIdea([project], { ...idea, hook: '另一题材' })).toBeUndefined();

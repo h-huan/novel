@@ -13,7 +13,7 @@ describe('source rule preflight', () => {
   });
   it('blocks conflicting door cost trigger and time scope before prose', () => {
     const problems = detectSourceRuleConflicts({
-      confirmedIdea: JSON.stringify({ hook: '每进一次现实倒退一小时，每进一次现实抹去一户人。' }),
+      confirmedStory: JSON.stringify({ hook: '每进一次现实倒退一小时，每进一次现实抹去一户人。' }),
       worldPremise: '每次进门使楼内时间回拨一小时；每进一次现实抹去一户记录。',
       worldRules: '林野每完整进出门一次，现实抹除对应一户。',
       worldProfileRules: '若林野推门，楼内时间回拨一小时；外界时钟不退。若完整进出门，名单扣名。',
@@ -25,19 +25,19 @@ describe('source rule preflight', () => {
 
   it('accepts one consistent rule across source records', () => {
     expect(detectSourceRuleConflicts({
-      confirmedIdea: JSON.stringify({ hook: '进门后仅楼内回拨一小时；完整进出门一次才抹去一户。' }),
+      confirmedStory: JSON.stringify({ hook: '进门后仅楼内回拨一小时；完整进出门一次才抹去一户。' }),
       worldRules: '楼内时间回拨一小时，外界时钟不退。每完整进出门一次，现实抹除一户。',
       worldProfileRules: '进入铁门仅楼内时间回拨一小时，外界时钟不退；完整进出门才扣名。',
     })).toEqual([]);
   });
 
   it('does not invent constraints for unrelated mechanics', () => {
-    expect(detectSourceRuleConflicts({ confirmedIdea: '一名医生在海岛医院追查失踪病人。', worldRules: '每次风暴之后，档案室才开放。' })).toEqual([]);
+    expect(detectSourceRuleConflicts({ confirmedStory: '一名医生在海岛医院追查失踪病人。', worldRules: '每次风暴之后，档案室才开放。' })).toEqual([]);
   });
 
   it('catches a lower chapter outline that changes the confirmed entry cost', () => {
     expect(detectSourceRuleConflicts({
-      confirmedIdea: JSON.stringify({ description: '每进一次现实抹去一户人家的记录。' }),
+      confirmedStory: JSON.stringify({ description: '每进一次现实抹去一户人家的记录。' }),
       worldRules: '每次进门，名单少一户。',
       chapterOutlines: [{ chapterIndex: 1, text: '他每完整进出门一次，现实抹除一户的姓名。' }],
     })[0]).toContain('第1章章纲');
@@ -45,7 +45,7 @@ describe('source rule preflight', () => {
 
   it('blocks the observed world rule that keeps reality still while the confirmed card rewinds reality', () => {
     const problems = detectSourceRuleConflicts({
-      confirmedIdea: JSON.stringify({ hook: '每进一次现实倒退一小时，楼里多一个不想搬的人。' }),
+      confirmedStory: JSON.stringify({ hook: '每进一次现实倒退一小时，楼里多一个不想搬的人。' }),
       worldRules: JSON.stringify(['楼内时间比现实早一小时；现实时间不倒流，只有楼内景象停留在拆迁前。']),
     });
     expect(problems).toHaveLength(1);

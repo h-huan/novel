@@ -1,10 +1,8 @@
 import {
   ProjectStatus,
   ProjectType,
-  CreationSource,
   TargetPlatform,
   WorkflowStage,
-  IdeaStatus,
 } from '../enums/project';
 
 export interface Project {
@@ -17,8 +15,6 @@ export interface Project {
   chapterCount: number;
   coverImage?: string;
   platforms?: string[];
-  /** 创建来源 */
-  creationSource: CreationSource;
   /** 目标平台 */
   targetPlatform: TargetPlatform;
   /** 目标字数 */
@@ -41,6 +37,7 @@ export interface Project {
     genreFitNote: string;
     pov: string;
     targetAudience: unknown;
+    confirmedStory?: Record<string, unknown>;
     chapterWordRange: { min: number; max: number };
     platformRules: unknown;
   };
@@ -48,12 +45,6 @@ export interface Project {
   settings?: Record<string, unknown>;
   /** 当前创作阶段 */
   currentWorkflowStage: WorkflowStage;
-  /** 想法孵化状态 */
-  ideaStatus: IdeaStatus;
-  /** 用户原始想法 */
-  ideaSeed?: string;
-  /** 确认后的成熟想法 */
-  confirmedIdea?: string;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -19,26 +19,10 @@ export interface ProjectResponse {
   currentWords: number;
   description?: string;
   settings: any;
-  /** Historical provenance only. New UI no longer branches on it. */
-  creationSource: string;
   targetPlatform: string;
   currentWorkflowStage: string;
-  /** Transitional read-only projections; project CRUD can no longer mutate these fields. */
-  ideaStatus: string;
-  ideaSeed?: string;
-  confirmedIdea?: string;
   createdAt: string;
   updatedAt: string;
-}
-
-function confirmedStoryForResponse(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === 'string') return value || undefined;
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const summary = (value as Record<string, unknown>).summary;
-    if (typeof summary === 'string' && summary.trim()) return summary;
-  }
-  try { return JSON.stringify(value); } catch { return undefined; }
 }
 
 @Injectable()
@@ -229,8 +213,6 @@ export class ProjectService {
     const constitution = readConstitution(row);
     const targetPlatform = constitution.targetPlatform;
     const currentWorkflowStage = row.current_workflow_stage || this.defaultWorkflowStage(row.type);
-    const canonicalStory = (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;
-
     return {
       id: row.id,
       creativeConstitution: constitution,
@@ -241,12 +223,8 @@ export class ProjectService {
       currentWords: row.current_words,
       description: row.description || undefined,
       settings: constitutionSettings(this.normalizePlanningSettings(this.safeParseSettings(row.settings)), constitution),
-      creationSource: row.creation_source || 'legacy',
       targetPlatform,
       currentWorkflowStage,
-      ideaStatus: 'none',
-      ideaSeed: undefined,
-      confirmedIdea: confirmedStoryForResponse(canonicalStory),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

@@ -16,6 +16,7 @@ import { OutlineService } from '../outline/outline.service';
 import { ChapterService } from '../chapter/chapter.service';
 import { ForeshadowingService } from '../foreshadowing/foreshadowing.service';
 import { ProjectService } from '../project/project.service';
+import { readConstitution } from '../project/creative-constitution';
 import { buildShortStoryGuard, buildLongNovelGuard } from './workflow-rules';
 import type {
   ProjectAssets,
@@ -105,7 +106,6 @@ export class WorkflowGuardService {
     return {
       projectId,
       projectType,
-      creationSource: project.creation_source || 'blank',
       currentStage,
       currentStageLabel: stageResult.currentStageLabel,
       recommendedNextStage: stageResult.recommendedNextStage,
@@ -343,7 +343,7 @@ export class WorkflowGuardService {
     const project = this.projectRepo.findById(projectId);
     if (!project) throw new NotFoundException(`项目不存在: ${projectId}`);
 
-    const previousStage = project.current_workflow_stage || 'idea_or_inspiration';
+    const previousStage = project.current_workflow_stage || (project.type === 'short_story' ? 'topic' : 'world_setting');
     const projectType = project.type;
 
     if (!force && ['creating', 'generation_failed'].includes(String(project.status || ''))) {
@@ -357,7 +357,7 @@ export class WorkflowGuardService {
       }
     } else {
       const validStages = [
-        'idea_or_inspiration', 'world_setting', 'character', 'outline',
+        'world_setting', 'character', 'outline',
         'volume', 'chapter', 'writing', 'state_archive', 'weekly_review',
       ];
       if (!validStages.includes(targetStage)) {
@@ -370,7 +370,7 @@ export class WorkflowGuardService {
       const stageOrder = projectType === 'short_story'
         ? ['topic', 'outline', 'writing']
         : [
-            'idea_or_inspiration', 'world_setting', 'character', 'outline',
+            'world_setting', 'character', 'outline',
             'volume', 'chapter', 'writing', 'state_archive', 'weekly_review',
           ];
 
@@ -503,8 +503,7 @@ export class WorkflowGuardService {
       foreshadowingCount,
       pendingStateCount: 0,
       confirmedStateCount: 0,
-      hasIdea: !!(project.idea_seed),
-      hasConfirmedIdea: !!(project.confirmed_idea),
+      hasConfirmedStory: Boolean(readConstitution(project).confirmedStory && Object.keys(readConstitution(project).confirmedStory || {}).length),
       hasWorldSetting: worldSettingCount > 0,
       hasMainCharacter: characterCount > 0,
       hasAntagonist: antagonistCount > 0,
@@ -564,7 +563,7 @@ export class WorkflowGuardService {
     if (['state_archive', 'weekly_review'].includes(currentStage)) return currentStage;
 
     const creationOrder = [
-      'idea_or_inspiration', 'world_setting', 'character', 'outline',
+      'world_setting', 'character', 'outline',
       'volume', 'chapter', 'writing',
     ];
     const currentIndex = creationOrder.indexOf(currentStage);
@@ -586,7 +585,7 @@ export class WorkflowGuardService {
     if (assets.hasBookOutline) return 'outline';
     if (assets.hasMainCharacter) return 'character';
     if (assets.hasWorldSetting) return 'world_setting';
-    return 'idea_or_inspiration';
+    return 'world_setting';
   }
 
   private getStageLabel(type: string, stage: string): string {
