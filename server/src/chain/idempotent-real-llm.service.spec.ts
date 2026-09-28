@@ -55,6 +55,38 @@ function serviceFor(db: any) {
   return new IdempotentRealLLMService(router, {} as any, { getDb: () => db } as any);
 }
 
+function seedCachedRun(db: any, request: any, runId: string, output: string) {
+  const scenario = request.scenario;
+  const stepKey = request.metrics.stepKey;
+  const chapterIndex = request.metrics.chapterIndex != null ? Number(request.metrics.chapterIndex) : null;
+  const stage = qualityStage(scenario, stepKey);
+  const context = compileContext(db, { projectId: 'p', stage, chapterIndex });
+  const contextVersion = String(context.version || digest(''));
+  const standards = standardDirectiveCache.snapshot(scenario, request.injectStandard !== false, stepKey);
+  const requestFingerprint = digest(JSON.stringify({
+    prompt: request.prompt,
+    systemPrompt: request.systemPrompt || '',
+    scenario,
+    stepKey,
+    chapterIndex,
+    model: 'test-model@v1',
+    temperature: request.temperature ?? null,
+    maxTokens: request.maxTokens ?? null,
+    responseFormat: request.responseFormat || 'text',
+    evaluationUnit: request.evaluationUnit || 'chapter',
+    injectStandard: request.injectStandard !== false,
+  }));
+  const fingerprintDirective = `【内部运行恢复指纹】${requestFingerprint}；仅用于幂等恢复，禁止在输出中复述。`;
+  const systemPrompt = [request.systemPrompt, fingerprintDirective].filter(Boolean).join('\n');
+  const project = db.prepare('SELECT * FROM projects WHERE id=?').get('p') as any;
+  const runtimeConstitution = readConstitution(project);
+  const promptVersion = digest(systemPrompt + JSON.stringify(runtimeConstitution) + standards.digest);
+  db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    runId, 'p', stage, scenario, 'success', runtimeConstitution.revision ?? null, contextVersion, promptVersion,
+    chapterIndex, output, 'test-model', '2026-09-27T00:00:00.000Z',
+  );
+}
+
 describe('IdempotentRealLLMService', () => {
   it('returns the original run id together with an exact cached creation-stage output', async () => {
     const { db } = fixture();
@@ -69,30 +101,7 @@ describe('IdempotentRealLLMService', () => {
         deferQualityGate: true,
         metrics: { projectId: 'p', stepKey: 'world_foundation' },
       };
-      const stage = qualityStage(request.scenario, request.metrics.stepKey);
-      const context = compileContext(db, { projectId: 'p', stage, chapterIndex: null });
-      const contextVersion = String(context.version || digest(''));
-      const standards = standardDirectiveCache.snapshot(request.scenario, true, request.metrics.stepKey);
-      const requestFingerprint = digest(JSON.stringify({
-        prompt: request.prompt,
-        systemPrompt: request.systemPrompt,
-        scenario: request.scenario,
-        stepKey: request.metrics.stepKey,
-        model: 'test-model@v1',
-        temperature: request.temperature,
-        maxTokens: null,
-        responseFormat: request.responseFormat,
-        evaluationUnit: 'chapter',
-        injectStandard: true,
-      }));
-      const systemPrompt = `${request.systemPrompt}\n【内部运行恢复指纹】${requestFingerprint}；仅用于幂等恢复，禁止在输出中复述。`;
-      const project = db.prepare('SELECT * FROM projects WHERE id=?').get('p') as any;
-      const runtimeConstitution = readConstitution(project);
-      const promptVersion = digest(systemPrompt + JSON.stringify(runtimeConstitution) + standards.digest);
-      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        'run-1','p',stage,'world_building','success',runtimeConstitution.revision ?? null,contextVersion,promptVersion,null,
-        '{"world":"cached"}','test-model','2026-09-27T00:00:00.000Z',
-      );
+      seedCachedRun(db, request, 'run-1', '{"world":"cached"}');
 
       const response = await service.generate(request);
       expect(response.content).toBe('{"world":"cached"}');
@@ -100,6 +109,39 @@ describe('IdempotentRealLLMService', () => {
       expect(response.latency).toBe(0);
       expect(response.runId).toBe('run-1');
     } finally { db.close(); }
+  });
+
+  it('reuses an identical chapter-scoped planning review but not a changed review', async () => {
+    const { db } = fixture();
+    const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockResolvedValue({
+      content: '{"consistent":false}', model: 'test-model', latency: 30,
+    });
+    try {
+      const service = serviceFor(db);
+      const request: any = {
+        prompt: '核对第4章章纲是否违背上层事实',
+        systemPrompt: '只输出JSON',
+        scenario: 'review',
+        temperature: 0.1,
+        responseFormat: 'json_object',
+        deferQualityGate: true,
+        metrics: { projectId: 'p', chapterIndex: 4, stepKey: 'outline_source_review' },
+      };
+      seedCachedRun(db, request, 'review-4', '{"consistent":true}');
+
+      const cached = await service.generate(request);
+      expect(cached.content).toBe('{"consistent":true}');
+      expect(cached.runId).toBe('review-4');
+      expect(cached.latency).toBe(0);
+      expect(superGenerate).not.toHaveBeenCalled();
+
+      const changed = await service.generate({ ...request, prompt: `${request.prompt}\n新增事实已变化` });
+      expect(changed.content).toBe('{"consistent":false}');
+      expect(superGenerate).toHaveBeenCalledTimes(1);
+    } finally {
+      superGenerate.mockRestore();
+      db.close();
+    }
   });
 
   it('binds a fresh project-scoped response to the exact completed generation run', async () => {
