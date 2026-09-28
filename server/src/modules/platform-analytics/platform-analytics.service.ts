@@ -456,8 +456,8 @@ export class PlatformAnalyticsService {
       }
       if (!n) continue;
       chapters.push({
-        projectId: r.pid, projectTitle: r.ptitle, chapterId: r.cid, chapterIndex: r.cidx, chapterTitle: r.ctitle,
-        scores, avg: Math.round(sum / n),
+        projectId: r.pid, projectTitle: r.ptitle, chapterId: r.cid, chapterIndex: r.cidx,
+        chapterTitle: r.ctitle, scores, avg: Math.round(sum / n),
       });
     }
     chapters.sort((a, b) => a.avg - b.avg);
@@ -899,7 +899,7 @@ export class PlatformAnalyticsService {
     return Object.values(buckets).sort((a, b) => a.date.localeCompare(b.date));
   }
 
-  /** 启动/运行状态（迁移版本、执行标准、自归纳、运行时长）。 */
+  /** 启动/运行状态（迁移版本、只读执行标准版本、运行时长）。 */
   bootstrap() {
     const migrations = {
       appliedCount: 0,
@@ -934,18 +934,11 @@ export class PlatformAnalyticsService {
     const standards = {
       total: 0,
       maxVersion: 0,
-      lastSummarizedAt: null as string | null,
-      runningCount: 0,
-      lastRun: null as any,
     };
     try {
-      const active = this.safeAll(`SELECT version, last_summarized_at FROM module_standards WHERE status='active'`);
+      const active = this.safeAll(`SELECT version FROM module_standards WHERE status='active'`);
       standards.total = active.length;
       standards.maxVersion = active.reduce((m, r) => Math.max(m, Number(r.version) || 0), 0);
-      const times = active.map(r => r.last_summarized_at).filter(Boolean).sort() as string[];
-      standards.lastSummarizedAt = times.length ? times[times.length - 1] : null;
-      standards.runningCount = Number(this.safeOne(`SELECT COUNT(*) AS c FROM standard_summarization_runs WHERE status='running'`)?.c || 0);
-      standards.lastRun = this.safeOne(`SELECT * FROM standard_summarization_runs ORDER BY started_at DESC LIMIT 1`);
     } catch {
       /* 标准表查询失败不拖垮整体 */
     }
