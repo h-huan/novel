@@ -84,3 +84,59 @@ text = once(
     'creative constitution E2E conflicting sources',
 )
 write(path, text)
+
+# Writing-flow E2E must use the current WorldSetting create contract. The deleted
+# /world-settings/simple alias must never be reintroduced just to satisfy tests.
+path = 'server/e2e/flows/writing-flow.spec.ts'
+text = read(path)
+old_world_one = """    const world = await request.put(`${BASE}/projects/${projectId}/world-settings/simple`, {
+      data: {
+        storyPremise: '档案员追查午夜新增的失踪登记。',
+        era: '现代城市',
+        locations: ['档案馆'],
+        socialRules: '官方档案必须保留可追溯修改记录。',
+        specialSettings: '午夜后新增的异常登记只改变档案显示，不直接改写现实经历。',
+      },
+    });
+"""
+new_world_one = """    const world = await request.post(`${BASE}/projects/${projectId}/world-settings`, {
+      data: {
+        name: '档案馆异常规则',
+        era: '现代城市',
+        workIntro: '档案员追查午夜新增的失踪登记。',
+        constraints: [{
+          category: '档案规则',
+          rule: '官方档案必须保留可追溯修改记录。',
+          description: '午夜后新增的异常登记只改变档案显示，不直接改写现实经历。',
+          severity: 'hard',
+        }],
+      },
+    });
+"""
+text = once(text, old_world_one, new_world_one, 'writing flow world fixture one')
+old_world_two = """    const world = await request.put(`${BASE}/projects/${projectId}/world-settings/simple`, {
+      data: {
+        storyPremise: '档案员追查午夜新增的失踪登记。',
+        era: '现代城市',
+        locations: ['档案馆'],
+        socialRules: '档案修改必须可追溯。',
+        specialSettings: '',
+      },
+    });
+"""
+new_world_two = """    const world = await request.post(`${BASE}/projects/${projectId}/world-settings`, {
+      data: {
+        name: '档案馆基础规则',
+        era: '现代城市',
+        workIntro: '档案员追查午夜新增的失踪登记。',
+        constraints: [{
+          category: '档案规则',
+          rule: '档案修改必须可追溯。',
+          description: '用于验证大纲缺失门禁的确定性世界观夹具。',
+          severity: 'hard',
+        }],
+      },
+    });
+"""
+text = once(text, old_world_two, new_world_two, 'writing flow world fixture two')
+write(path, text)
