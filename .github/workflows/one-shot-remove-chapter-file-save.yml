@@ -28,9 +28,9 @@ jobs:
         working-directory: server
         run: npm ci
 
-      - name: Remove obsolete chapter-save endpoint with TypeScript AST
-        working-directory: server
+      - name: Remove obsolete chapter-save endpoint and caller
         run: |
+          cd server
           node <<'NODE'
           const fs = require('fs');
           const ts = require('typescript');
@@ -53,10 +53,7 @@ jobs:
           }
           walk(sf);
           if (!target) throw new Error('POST /chain/chapter-save method not found');
-          let start = target.getFullStart();
-          const end = target.getEnd();
-          // getFullStart includes the JSDoc/trivia immediately owned by this method.
-          text = text.slice(0, start) + text.slice(end).replace(/^\s*\n/, '\n');
+          text = text.slice(0, target.getFullStart()) + text.slice(target.getEnd()).replace(/^\s*\n/, '\n');
           text = text.replace("import { FileStorageService } from '../modules/file-storage/file-storage.service';\n", '');
           text = text.replace("import { resolveDataDir } from '../config/data-dir';\n", '');
           text = text.replace("    private readonly fileStorage: FileStorageService,\n", '');
@@ -74,6 +71,18 @@ jobs:
           text = text.replace('    FileStorageModule,\n', '');
           fs.writeFileSync(path, text, 'utf8');
           NODE
+          cd ..
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('desktop/src/renderer/components/chapter/ChapterEditorShell.tsx')
+          text = p.read_text(encoding='utf-8')
+          old = """      // 自动保存为.md文件\n      try {\n        const { api } = await import('../../lib/api');\n        await api.post('/chain/chapter-save', {\n          projectId, chapterId: chapter.id,\n          volumeIndex: chapter.volumeIndex, chapterIndex: chapter.chapterIndex,\n          title: chapter.title, content,\n          wordCount: countNarrativeWords(content),\n          status: chapter.status,\n        });\n      } catch {}\n"""
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'ChapterEditorShell legacy file-save block: expected 1 occurrence, found {count}')
+          p.write_text(text.replace(old, '', 1), encoding='utf-8')
+          PY
 
       - name: Reject obsolete chapter-save references
         run: |
@@ -112,6 +121,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/one-shot-remove-chapter-file-save.yml
-          git add server/src
+          git add server/src desktop/src
           git commit -m "refactor: remove obsolete chapter file save bypass"
           git push origin HEAD:main
