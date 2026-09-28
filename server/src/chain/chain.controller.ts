@@ -7311,6 +7311,12 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
             });
           let orgCount = 0, mpCount = 0;
           if (orgResult.data) {
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId,
+              runId: orgResult.runId,
+              expectedStages: ['outline'],
+              expectedScenarios: ['organization_map'],
+            });
             const orgNameToId = new Map<string, string>();
             for (const org of (orgResult.data.organizations || [])) {
               if (org?.name && !orgNameToId.has(org.name)) orgNameToId.set(org.name, uuid());
