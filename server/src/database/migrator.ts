@@ -132,9 +132,8 @@ export class Migrator {
       }
     }
 
-    // 先把历史别名收敛成当前 creativeConstitution，再执行当前结构不变量。
-    // 顺序不能反过来：reconcileSchema 会把 confirmed_idea 合入 creativeConstitution；
-    // 若随后再跑旧数据 normalization，就会重建宪法对象并把刚合入的故事权威覆盖掉。
+    // 先把历史平台/风格别名收敛进 creativeConstitution；reconcileSchema 随后
+    // 一次性搬迁旧 IdeaLab 快照并物理删列。新库从基线起只保留 Creative Constitution 故事权威。
     normalizeStoredConstitutions(this.db);
     const reconciliation = reconcileSchema(this.db);
     if (reconciliation.actions.length > 0) {
