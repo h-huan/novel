@@ -4,7 +4,7 @@ import { ProjectService } from '../modules/project/project.service';
 import { ProjectRepository } from '../database/repositories/project.repository';
 import { Migrator } from '../database/migrator';
 import { StateItemService } from '../state/state-item.service';
-import { STANDARD_PRECONDITIONS } from './test-standards';
+import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 
 describe('constitution SQLite acceptance', () => {
@@ -14,7 +14,7 @@ describe('constitution SQLite acceptance', () => {
       await new Migrator(db).runMigrations();
       const database = { getDb: () => db } as any;
       const service = new ProjectService(new ProjectRepository(database));
-      const p = service.create({ ...STANDARD_PRECONDITIONS, title: '验收' });
+      const p = seedAcceptanceProject(db, { title: '验收' });
       const updated = service.update(p.id, { targetPlatform: 'zhihu', storyTone: ['克制'] });
       const row = db.prepare('SELECT * FROM projects WHERE id=?').get(p.id);
       expect(row.target_platform).toBe('zhihu');
@@ -35,8 +35,7 @@ describe('constitution SQLite acceptance', () => {
     try {
       await new Migrator(db).runMigrations();
       const database = { getDb: () => db } as any;
-      const service = new ProjectService(new ProjectRepository(database));
-      const project = service.create({ ...STANDARD_PRECONDITIONS, title: '存量项目' });
+      const project = seedAcceptanceProject(db, { title: '存量项目' });
       db.prepare('UPDATE projects SET target_platform=?,platform_style=?,settings=? WHERE id=?').run(
         '', 'fanqie', JSON.stringify({ targetPlatform: 'zhihu', storyTone: ['克制'], style: ['白描'], operationalFlag: true }), project.id,
       );
