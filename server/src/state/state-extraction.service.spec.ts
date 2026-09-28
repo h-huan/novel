@@ -6,6 +6,7 @@ describe('StateExtractionService structured extraction', () => {
     {} as any,
     {} as any,
     {} as any,
+    { assertCanCommit: vi.fn() } as any,
     { generate: vi.fn().mockResolvedValue({ content, model: 'deepseek', latency: 1 }) } as any,
   ) as any;
 
