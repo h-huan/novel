@@ -23,191 +23,10 @@ jobs:
           cache-dependency-path: |
             server/package-lock.json
             desktop/package-lock.json
-
       - name: Remove second project creation path
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          def read(path): return Path(path).read_text(encoding='utf-8')
-          def write(path, text): Path(path).write_text(text, encoding='utf-8')
-          def once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected 1 occurrence, found {count}')
-              return text.replace(old, new, 1)
-
-          # 1) Production ProjectController is read/update/delete only. Novel creation belongs to /discover -> create-project-async.
-          path = 'server/src/modules/project/project.controller.ts'
-          text = read(path)
-          text = text.replace('  Post,\n', '')
-          text = text.replace("import { CreateProjectDto } from './dto/create-project.dto';\n", '')
-          create_block = """  @Post()\n  create(@Body() dto: CreateProjectDto) {\n    return this.service.create(dto);\n  }\n\n"""
-          text = once(text, create_block, '', 'ProjectController direct create')
-          write(path, text)
-
-          # 2) Remove the unused direct-create business path instead of leaving dormant code that can be revived later.
-          path = 'server/src/modules/project/project.service.ts'
-          text = read(path)
-          text = text.replace(', missingConstitutionStandards', '')
-          text = text.replace("import { v4 as uuid } from 'uuid';\n", '')
-          text = text.replace("import type { CreateProjectDto } from './dto/create-project.dto';\n", '')
-          start = text.find('  /**\n   * Direct project CRUD is no longer an idea-incubation path.')
-          end = text.find('  findAll(query: ProjectQueryDto)', start)
-          if start < 0 or end < 0:
-              raise SystemExit(f'ProjectService create block markers missing: start={start} end={end}')
-          text = text[:start] + text[end:]
-          write(path, text)
-
-          dto = Path('server/src/modules/project/dto/create-project.dto.ts')
-          if not dto.exists():
-              raise SystemExit('create-project.dto.ts already missing unexpectedly')
-          dto.unlink()
-
-          # 3) Renderer store may list/update/delete projects but cannot create a second project shell.
-          path = 'desktop/src/renderer/stores/projectStore.ts'
-          text = read(path)
-          start = text.find('/**\n * 创建 / 更新项目共用的执行标准字段清单。')
-          end = text.find('/** 更新项目卡片执行标准', start)
-          if start < 0 or end < 0:
-              raise SystemExit(f'projectStore create helpers markers missing: start={start} end={end}')
-          text = text[:start] + text[end:]
-          text = re.sub(r'^\s*createProject: \(data: ProjectCreateData\) => Promise<Project>;\n', '', text, count=1, flags=re.M)
-          start = text.find('  createProject: async (data: ProjectCreateData) => {')
-          end = text.find('  updateProject: async (id: string, data: ProjectUpdateData) => {', start)
-          if start < 0 or end < 0:
-              raise SystemExit(f'projectStore create implementation markers missing: start={start} end={end}')
-          text = text[:start] + text[end:]
-          write(path, text)
-
-          # 4) Unit tests must stop protecting the deleted second creation path.
-          path = 'server/src/modules/project/project.service.spec.ts'
-          text = read(path)
-          text = text.replace("import { STANDARD_PRECONDITIONS } from '../../acceptance/test-standards';\n", '')
-          start = text.find("  describe('create', () => {")
-          end = text.find("  describe('findOne', () => {", start)
-          if start < 0 or end < 0:
-              raise SystemExit(f'project service create tests markers missing: start={start} end={end}')
-          text = text[:start] + text[end:]
-          write(path, text)
-
-          # 5) E2E project fixtures write only to the isolated test SQLite DB. No production API backdoor.
-          path = 'server/e2e/helpers.ts'
-          text = read(path)
-          text = once(
-              text,
-              "import { APIRequestContext, expect } from '@playwright/test';\n",
-              "import { APIRequestContext, expect } from '@playwright/test';\nimport { DatabaseSync } from 'node:sqlite';\nimport { randomUUID } from 'node:crypto';\nimport path from 'node:path';\nimport { STANDARD_PRECONDITIONS } from '../src/acceptance/test-standards';\nimport { constitutionSettings, updateConstitution } from '../src/modules/project/creative-constitution';\n",
-              'e2e helper imports',
-          )
-          start = text.find('export function validProjectPayload(')
-          end = text.find('/** Delete a project by id */', start)
-          if start < 0 or end < 0:
-              raise SystemExit(f'e2e fixture block markers missing: start={start} end={end}')
-          fixture = r'''/**
- * Seed a project directly into the isolated E2E SQLite database.
- * Production has no generic project-create API: /discover -> create-project-async
- * is the only user creation path. This helper exists only inside DATA_DIR=.runtime-data-*.
- */
-export async function createProject(request: APIRequestContext, title?: string) {
-  const dataDir = process.env.DATA_DIR;
-  if (!dataDir || !dataDir.includes('.runtime-data-')) {
-    throw new Error(`E2E project fixture refused non-isolated DATA_DIR: ${dataDir || '(unset)'}`);
-  }
-  const id = randomUUID();
-  const now = new Date().toISOString();
-  const projectTitle = title || uniqueTitle();
-  const constitution = updateConstitution(
-    { type: 'long_novel', settings: '{}' },
-    {
-      ...STANDARD_PRECONDITIONS,
-      type: 'long_novel',
-      targetAudience: '成年网文读者',
-      plotTags: ['成长', '选择'],
-    },
-  );
-  constitution.revision = 1;
-  constitution.confirmedStory = {
-    title: projectTitle,
-    storyType: 'long_novel',
-    targetPlatform: constitution.targetPlatform,
-    hook: '测试项目仅用于隔离 E2E 生命周期验证',
-    description: '隔离测试数据库中的确定性项目夹具，不代表真实文学质量样本。',
-    protagonist: '测试主角',
-    coreConflict: '测试冲突',
-    uniquePoint: '测试唯一点',
-    styleTags: ['都市', '系统'],
-  };
-  const settings = constitutionSettings({
-    autoSave: true,
-    autoSaveInterval: 30,
-    writingMode: 'full_auto',
-    structurePlanning: 'dynamic_by_story_rhythm',
-  }, constitution);
-
-  const db = new DatabaseSync(path.join(dataDir, 'novel.db'));
-  try {
-    db.exec('PRAGMA busy_timeout = 10000');
-    db.prepare(`INSERT INTO projects
-      (id,title,type,status,target_words,current_words,settings,writing_style,platform_style,target_platform,current_workflow_stage,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      id, projectTitle, constitution.projectType, 'active', constitution.targetWords, 0,
-      JSON.stringify(settings), JSON.stringify(constitution.writingStyle), constitution.targetPlatform,
-      constitution.targetPlatform, 'world_setting', now, now,
-    );
-  } finally {
-    db.close();
-  }
-
-  const res = await request.get(`${BASE}/projects/${id}`);
-  const body = await res.json();
-  expect(res.status(), JSON.stringify(body)).toBe(200);
-  expect(body.id).toBe(id);
-  expect(body.creativeConstitution?.confirmedStory?.title).toBe(projectTitle);
-  return { id, title: projectTitle, response: body };
-}
-
-'''
-          text = text[:start] + fixture + text[end:]
-          write(path, text)
-
-          # 6) E2E explicitly proves direct production creation is gone; other CRUD cases use the isolated DB fixture.
-          path = 'server/e2e/flows/project-crud.spec.ts'
-          text = read(path)
-          old = r'''  test('should create a new project via API', async ({ request }) => {
-    projectTitle = uniqueTitle('crud-project');
-    const created = await createProject(request, projectTitle);
-    projectId = created.id;
-    const body = created.response;
-
-    expect(body).toHaveProperty('id');
-    expect(body.title).toBe(projectTitle);
-    expect(body.type).toBe('long_novel');
-    expect(body.status).toBe('active');
-  });
-'''
-          new = r'''  test('direct POST /projects is not a project creation entry', async ({ request }) => {
-    const response = await request.post(`${BASE}/projects`, { data: { title: uniqueTitle('forbidden-create') } });
-    expect(response.status()).toBe(404);
-  });
-'''
-          text = once(text, old, new, 'project CRUD direct-create E2E')
-          write(path, text)
-
-          # 7) API docs follow the same single creation entry.
-          path = 'server/docs/API.md'
-          text = read(path)
-          start = text.find('### 创建项目\n')
-          end = text.find('### 项目接口\n', start)
-          if start < 0 or end < 0:
-              raise SystemExit(f'API create-project section markers missing: start={start} end={end}')
-          replacement = '''### 创建小说\n\n```http\nPOST /api/v1/chain/create-project-async\nContent-Type: application/json\n```\n\n该接口只接受 `/chain/idea-discover` 已确认故事卡及完整执行标准，先建立 `creating` 项目壳，再按唯一生成主链构建世界观、角色和大纲；通过激活前完整性/一致性检查后才进入 `active`。\n\n不存在通用 `POST /projects` 创建入口；`/projects` 只负责读取、更新既有项目和删除项目，避免再次形成第二条创建链。\n\n'''
-          text = text[:start] + replacement + text[end:]
-          text = text.replace('POST   /api/v1/projects\n', '')
-          write(path, text)
-          PY
-
+        env:
+          PATCH_B64: ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCByZQoKZGVmIHJlYWQocGF0aCk6IHJldHVybiBQYXRoKHBhdGgpLnJlYWRfdGV4dChlbmNvZGluZz0ndXRmLTgnKQpkZWYgd3JpdGUocGF0aCwgdGV4dCk6IFBhdGgocGF0aCkud3JpdGVfdGV4dCh0ZXh0LCBlbmNvZGluZz0ndXRmLTgnKQpkZWYgb25jZSh0ZXh0LCBvbGQsIG5ldywgbGFiZWwpOgogICAgY291bnQgPSB0ZXh0LmNvdW50KG9sZCkKICAgIGlmIGNvdW50ICE9IDE6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdChmJ3tsYWJlbH06IGV4cGVjdGVkIDEgb2NjdXJyZW5jZSwgZm91bmQge2NvdW50fScpCiAgICByZXR1cm4gdGV4dC5yZXBsYWNlKG9sZCwgbmV3LCAxKQoKcGF0aCA9ICdzZXJ2ZXIvc3JjL21vZHVsZXMvcHJvamVjdC9wcm9qZWN0LmNvbnRyb2xsZXIudHMnCnRleHQgPSByZWFkKHBhdGgpCnRleHQgPSB0ZXh0LnJlcGxhY2UoJyAgUG9zdCxcbicsICcnKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCJpbXBvcnQgeyBDcmVhdGVQcm9qZWN0RHRvIH0gZnJvbSAnLi9kdG8vY3JlYXRlLXByb2plY3QuZHRvJztcbiIsICcnKQpjcmVhdGVfYmxvY2sgPSAiIiIgIEBQb3N0KCkKICBjcmVhdGUoQEJvZHkoKSBkdG86IENyZWF0ZVByb2plY3REdG8pIHsKICAgIHJldHVybiB0aGlzLnNlcnZpY2UuY3JlYXRlKGR0byk7CiAgfQoKIiIiCnRleHQgPSBvbmNlKHRleHQsIGNyZWF0ZV9ibG9jaywgJycsICdQcm9qZWN0Q29udHJvbGxlciBkaXJlY3QgY3JlYXRlJykKd3JpdGUocGF0aCwgdGV4dCkKCnBhdGggPSAnc2VydmVyL3NyYy9tb2R1bGVzL3Byb2plY3QvcHJvamVjdC5zZXJ2aWNlLnRzJwp0ZXh0ID0gcmVhZChwYXRoKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCcsIG1pc3NpbmdDb25zdGl0dXRpb25TdGFuZGFyZHMnLCAnJykKdGV4dCA9IHRleHQucmVwbGFjZSgiaW1wb3J0IHsgdjQgYXMgdXVpZCB9IGZyb20gJ3V1aWQnO1xuIiwgJycpCnRleHQgPSB0ZXh0LnJlcGxhY2UoImltcG9ydCB0eXBlIHsgQ3JlYXRlUHJvamVjdER0byB9IGZyb20gJy4vZHRvL2NyZWF0ZS1wcm9qZWN0LmR0byc7XG4iLCAnJykKc3RhcnQgPSB0ZXh0LmZpbmQoJyAgLyoqXG4gICAqIERpcmVjdCBwcm9qZWN0IENSVUQgaXMgbm8gbG9uZ2VyIGFuIGlkZWEtaW5jdWJhdGlvbiBwYXRoLicpCmVuZCA9IHRleHQuZmluZCgnICBmaW5kQWxsKHF1ZXJ5OiBQcm9qZWN0UXVlcnlEdG8pJywgc3RhcnQpCmlmIHN0YXJ0IDwgMCBvciBlbmQgPCAwOgogICAgcmFpc2UgU3lzdGVtRXhpdChmJ1Byb2plY3RTZXJ2aWNlIGNyZWF0ZSBibG9jayBtYXJrZXJzIG1pc3Npbmc6IHN0YXJ0PXtzdGFydH0gZW5kPXtlbmR9JykKdGV4dCA9IHRleHRbOnN0YXJ0XSArIHRleHRbZW5kOl0Kd3JpdGUocGF0aCwgdGV4dCkKCmR0byA9IFBhdGgoJ3NlcnZlci9zcmMvbW9kdWxlcy9wcm9qZWN0L2R0by9jcmVhdGUtcHJvamVjdC5kdG8udHMnKQppZiBub3QgZHRvLmV4aXN0cygpOgogICAgcmFpc2UgU3lzdGVtRXhpdCgnY3JlYXRlLXByb2plY3QuZHRvLnRzIGFscmVhZHkgbWlzc2luZyB1bmV4cGVjdGVkbHknKQpkdG8udW5saW5rKCkKCnBhdGggPSAnZGVza3RvcC9zcmMvcmVuZGVyZXIvc3RvcmVzL3Byb2plY3RTdG9yZS50cycKdGV4dCA9IHJlYWQocGF0aCkKc3RhcnQgPSB0ZXh0LmZpbmQoJy8qKlxuICog5Yib5bu6IC8g5pu05paw6aG555uu5YWx55So55qE5omn6KGM5qCH5YeG5a2X5q615riF5Y2V44CCJykKZW5kID0gdGV4dC5maW5kKCcvKiog5pu05paw6aG555uu5Y2h54mH5omn6KGM5qCH5YeGJywgc3RhcnQpCmlmIHN0YXJ0IDwgMCBvciBlbmQgPCAwOgogICAgcmFpc2UgU3lzdGVtRXhpdChmJ3Byb2plY3RTdG9yZSBjcmVhdGUgaGVscGVycyBtYXJrZXJzIG1pc3Npbmc6IHN0YXJ0PXtzdGFydH0gZW5kPXtlbmR9JykKdGV4dCA9IHRleHRbOnN0YXJ0XSArIHRleHRbZW5kOl0KdGV4dCwgbiA9IHJlLnN1Ym4ocideXHMqY3JlYXRlUHJvamVjdDogXChkYXRhOiBQcm9qZWN0Q3JlYXRlRGF0YVwpID0+IFByb21pc2U8UHJvamVjdD47XG4nLCAnJywgdGV4dCwgY291bnQ9MSwgZmxhZ3M9cmUuTSkKaWYgbiAhPSAxOgogICAgcmFpc2UgU3lzdGVtRXhpdChmJ3Byb2plY3RTdG9yZSBzdGF0ZSBjcmVhdGUgc2lnbmF0dXJlIGV4cGVjdGVkIDEsIGdvdCB7bn0nKQpzdGFydCA9IHRleHQuZmluZCgnICBjcmVhdGVQcm9qZWN0OiBhc3luYyAoZGF0YTogUHJvamVjdENyZWF0ZURhdGEpID0+IHsnKQplbmQgPSB0ZXh0LmZpbmQoJyAgdXBkYXRlUHJvamVjdDogYXN5bmMgKGlkOiBzdHJpbmcsIGRhdGE6IFByb2plY3RVcGRhdGVEYXRhKSA9PiB7Jywgc3RhcnQpCmlmIHN0YXJ0IDwgMCBvciBlbmQgPCAwOgogICAgcmFpc2UgU3lzdGVtRXhpdChmJ3Byb2plY3RTdG9yZSBjcmVhdGUgaW1wbGVtZW50YXRpb24gbWFya2VycyBtaXNzaW5nOiBzdGFydD17c3RhcnR9IGVuZD17ZW5kfScpCnRleHQgPSB0ZXh0WzpzdGFydF0gKyB0ZXh0W2VuZDpdCndyaXRlKHBhdGgsIHRleHQpCgpwYXRoID0gJ3NlcnZlci9zcmMvbW9kdWxlcy9wcm9qZWN0L3Byb2plY3Quc2VydmljZS5zcGVjLnRzJwp0ZXh0ID0gcmVhZChwYXRoKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCJpbXBvcnQgeyBTVEFOREFSRF9QUkVDT05ESVRJT05TIH0gZnJvbSAnLi4vLi4vYWNjZXB0YW5jZS90ZXN0LXN0YW5kYXJkcyc7XG4iLCAnJykKc3RhcnQgPSB0ZXh0LmZpbmQoIiAgZGVzY3JpYmUoJ2NyZWF0ZScsICgpID0+IHsiKQplbmQgPSB0ZXh0LmZpbmQoIiAgZGVzY3JpYmUoJ2ZpbmRPbmUnLCAoKSA9PiB7Iiwgc3RhcnQpCmlmIHN0YXJ0IDwgMCBvciBlbmQgPCAwOgogICAgcmFpc2UgU3lzdGVtRXhpdChmJ3Byb2plY3Qgc2VydmljZSBjcmVhdGUgdGVzdHMgbWFya2VycyBtaXNzaW5nOiBzdGFydD17c3RhcnR9IGVuZD17ZW5kfScpCnRleHQgPSB0ZXh0WzpzdGFydF0gKyB0ZXh0W2VuZDpdCndyaXRlKHBhdGgsIHRleHQpCgpwYXRoID0gJ3NlcnZlci9lMmUvaGVscGVycy50cycKdGV4dCA9IHJlYWQocGF0aCkKdGV4dCA9IG9uY2UodGV4dCwgImltcG9ydCB7IEFQSVJlcXVlc3RDb250ZXh0LCBleHBlY3QgfSBmcm9tICdAcGxheXdyaWdodC90ZXN0JztcbiIsCiJpbXBvcnQgeyBBUElSZXF1ZXN0Q29udGV4dCwgZXhwZWN0IH0gZnJvbSAnQHBsYXl3cmlnaHQvdGVzdCc7XG5pbXBvcnQgeyBEYXRhYmFzZVN5bmMgfSBmcm9tICdub2RlOnNxbGl0ZSc7XG5pbXBvcnQgeyByYW5kb21VVUlEIH0gZnJvbSAnbm9kZTpjcnlwdG8nO1xuaW1wb3J0IHBhdGggZnJvbSAnbm9kZTpwYXRoJztcbmltcG9ydCB7IFNUQU5EQVJEX1BSRUNPTkRJVElPTlMgfSBmcm9tICcuLi9zcmMvYWNjZXB0YW5jZS90ZXN0LXN0YW5kYXJkcyc7XG5pbXBvcnQgeyBjb25zdGl0dXRpb25TZXR0aW5ncywgdXBkYXRlQ29uc3RpdHV0aW9uIH0gZnJvbSAnLi4vc3JjL21vZHVsZXMvcHJvamVjdC9jcmVhdGl2ZS1jb25zdGl0dXRpb24nO1xuIiwKJ2UyZSBoZWxwZXIgaW1wb3J0cycpCnN0YXJ0ID0gdGV4dC5maW5kKCdleHBvcnQgZnVuY3Rpb24gdmFsaWRQcm9qZWN0UGF5bG9hZCgnKQplbmQgPSB0ZXh0LmZpbmQoJy8qKiBEZWxldGUgYSBwcm9qZWN0IGJ5IGlkICovJywgc3RhcnQpCmlmIHN0YXJ0IDwgMCBvciBlbmQgPCAwOgogICAgcmFpc2UgU3lzdGVtRXhpdChmJ2UyZSBmaXh0dXJlIGJsb2NrIG1hcmtlcnMgbWlzc2luZzogc3RhcnQ9e3N0YXJ0fSBlbmQ9e2VuZH0nKQpmaXh0dXJlID0gJycnLyoqCiAqIFNlZWQgYSBwcm9qZWN0IGRpcmVjdGx5IGludG8gdGhlIGlzb2xhdGVkIEUyRSBTUUxpdGUgZGF0YWJhc2UuCiAqIFByb2R1Y3Rpb24gaGFzIG5vIGdlbmVyaWMgcHJvamVjdC1jcmVhdGUgQVBJOiAvZGlzY292ZXIgLT4gY3JlYXRlLXByb2plY3QtYXN5bmMKICogaXMgdGhlIG9ubHkgdXNlciBjcmVhdGlvbiBwYXRoLiBUaGlzIGhlbHBlciBleGlzdHMgb25seSBpbnNpZGUgREFUQV9ESVI9LnJ1bnRpbWUtZGF0YS0qLgogKi8KZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGNyZWF0ZVByb2plY3QocmVxdWVzdDogQVBJUmVxdWVzdENvbnRleHQsIHRpdGxlPzogc3RyaW5nKSB7CiAgY29uc3QgZGF0YURpciA9IHByb2Nlc3MuZW52LkRBVEFfRElSOwogIGlmICghZGF0YURpciB8fCAhZGF0YURpci5pbmNsdWRlcygnLnJ1bnRpbWUtZGF0YS0nKSkgewogICAgdGhyb3cgbmV3IEVycm9yKGBFMkUgcHJvamVjdCBmaXh0dXJlIHJlZnVzZWQgbm9uLWlzb2xhdGVkIERBVEFfRElSOiAke2RhdGFEaXIgfHwgJyh1bnNldCknfWApOwogIH0KICBjb25zdCBpZCA9IHJhbmRvbVVVSUQoKTsKICBjb25zdCBub3cgPSBuZXcgRGF0ZSgpLnRvSVNPU3RyaW5nKCk7CiAgY29uc3QgcHJvamVjdFRpdGxlID0gdGl0bGUgfHwgdW5pcXVlVGl0bGUoKTsKICBjb25zdCBjb25zdGl0dXRpb24gPSB1cGRhdGVDb25zdGl0dXRpb24oCiAgICB7IHR5cGU6ICdsb25nX25vdmVsJywgc2V0dGluZ3M6ICd7fScgfSwKICAgIHsKICAgICAgLi4uU1RBTkRBUkRfUFJFQ09ORElUSU9OUywKICAgICAgdHlwZTogJ2xvbmdfbm92ZWwnLAogICAgICB0YXJnZXRBdWRpZW5jZTogJ+aIkOW5tOe9keaWh+ivu+iAhScsCiAgICAgIHBsb3RUYWdzOiBbJ+aIkOmVvycsICfpgInmi6knXSwKICAgIH0sCiAgKTsKICBjb25zdGl0dXRpb24ucmV2aXNpb24gPSAxOwogIGNvbnN0aXR1dGlvbi5jb25maXJtZWRTdG9yeSA9IHsKICAgIHRpdGxlOiBwcm9qZWN0VGl0bGUsCiAgICBzdG9yeVR5cGU6ICdsb25nX25vdmVsJywKICAgIHRhcmdldFBsYXRmb3JtOiBjb25zdGl0dXRpb24udGFyZ2V0UGxhdGZvcm0sCiAgICBob29rOiAn5rWL6K+V6aG555uu5LuF55So5LqO6ZqU56a7IEUyRSDnlJ/lkb3lkajmnJ/pqozor4EnLAogICAgZGVzY3JpcHRpb246ICfpmpTnprvmtYvor5XmlbDmja7lupPkuK3nmoTnoa7lrprmgKfpobnnm67lpLnlhbfvvIzkuI3ku6PooajnnJ/lrp7mloflrabotKjph4/moLfmnKzjgIInLAogICAgcHJvdGFnb25pc3Q6ICfmtYvor5XkuLvop5InLAogICAgY29yZUNvbmZsaWN0OiAn5rWL6K+V5Yay56qBJywKICAgIHVuaXF1ZVBvaW50OiAn5rWL6K+V5ZSv5LiA54K5JywKICAgIHN0eWxlVGFnczogWyfpg73luIInLCAn57O757ufJ10sCiAgfTsKICBjb25zdCBzZXR0aW5ncyA9IGNvbnN0aXR1dGlvblNldHRpbmdzKHsKICAgIGF1dG9TYXZlOiB0cnVlLAogICAgYXV0b1NhdmVJbnRlcnZhbDogMzAsCiAgICB3cml0aW5nTW9kZTogJ2Z1bGxfYXV0bycsCiAgICBzdHJ1Y3R1cmVQbGFubmluZzogJ2R5bmFtaWNfYnlfc3Rvcnlfcmh5dGhtJywKICB9LCBjb25zdGl0dXRpb24pOwoKICBjb25zdCBkYiA9IG5ldyBEYXRhYmFzZVN5bmMocGF0aC5qb2luKGRhdGFEaXIsICdub3ZlbC5kYicpKTsKICB0cnkgewogICAgZGIuZXhlYygnUFJBR01BIGJ1c3lfdGltZW91dCA9IDEwMDAwJyk7CiAgICBkYi5wcmVwYXJlKGBJTlNFUlQgSU5UTyBwcm9qZWN0cwogICAgICAoaWQsdGl0bGUsdHlwZSxzdGF0dXMsdGFyZ2V0X3dvcmRzLGN1cnJlbnRfd29yZHMsc2V0dGluZ3Msd3JpdGluZ19zdHlsZSxwbGF0Zm9ybV9zdHlsZSx0YXJnZXRfcGxhdGZvcm0sY3VycmVudF93b3JrZmxvd19zdGFnZSxjcmVhdGVkX2F0LHVwZGF0ZWRfYXQpCiAgICAgIFZBTFVFUyAoPyw/LD8sPyw/LD8sPyw/LD8sPyw/LD8sPylgKS5ydW4oCiAgICAgIGlkLCBwcm9qZWN0VGl0bGUsIGNvbnN0aXR1dGlvbi5wcm9qZWN0VHlwZSwgJ2FjdGl2ZScsIGNvbnN0aXR1dGlvbi50YXJnZXRXb3JkcywgMCwKICAgICAgSlNPTi5zdHJpbmdpZnkoc2V0dGluZ3MpLCBKU09OLnN0cmluZ2lmeShjb25zdGl0dXRpb24ud3JpdGluZ1N0eWxlKSwgY29uc3RpdHV0aW9uLnRhcmdldFBsYXRmb3JtLAogICAgICBjb25zdGl0dXRpb24udGFyZ2V0UGxhdGZvcm0sICd3b3JsZF9zZXR0aW5nJywgbm93LCBub3csCiAgICApOwogIH0gZmluYWxseSB7CiAgICBkYi5jbG9zZSgpOwogIH0KCiAgY29uc3QgcmVzID0gYXdhaXQgcmVxdWVzdC5nZXQoYCR7QkFTRX0vcHJvamVjdHMvJHtpZH1gKTsKICBjb25zdCBib2R5ID0gYXdhaXQgcmVzLmpzb24oKTsKICBleHBlY3QocmVzLnN0YXR1cygpLCBKU09OLnN0cmluZ2lmeShib2R5KSkudG9CZSgyMDApOwogIGV4cGVjdChib2R5LmlkKS50b0JlKGlkKTsKICBleHBlY3QoYm9keS5jcmVhdGl2ZUNvbnN0aXR1dGlvbj8uY29uZmlybWVkU3Rvcnk/LnRpdGxlKS50b0JlKHByb2plY3RUaXRsZSk7CiAgcmV0dXJuIHsgaWQsIHRpdGxlOiBwcm9qZWN0VGl0bGUsIHJlc3BvbnNlOiBib2R5IH07Cn0KCicnJwp0ZXh0ID0gdGV4dFs6c3RhcnRdICsgZml4dHVyZSArIHRleHRbZW5kOl0Kd3JpdGUocGF0aCwgdGV4dCkKCnBhdGggPSAnc2VydmVyL2UyZS9mbG93cy9wcm9qZWN0LWNydWQuc3BlYy50cycKdGV4dCA9IHJlYWQocGF0aCkKb2xkID0gJycnICB0ZXN0KCdzaG91bGQgY3JlYXRlIGEgbmV3IHByb2plY3QgdmlhIEFQSScsIGFzeW5jICh7IHJlcXVlc3QgfSkgPT4gewogICAgcHJvamVjdFRpdGxlID0gdW5pcXVlVGl0bGUoJ2NydWQtcHJvamVjdCcpOwogICAgY29uc3QgY3JlYXRlZCA9IGF3YWl0IGNyZWF0ZVByb2plY3QocmVxdWVzdCwgcHJvamVjdFRpdGxlKTsKICAgIHByb2plY3RJZCA9IGNyZWF0ZWQuaWQ7CiAgICBjb25zdCBib2R5ID0gY3JlYXRlZC5yZXNwb25zZTsKCiAgICBleHBlY3QoYm9keSkudG9IYXZlUHJvcGVydHkoJ2lkJyk7CiAgICBleHBlY3QoYm9keS50aXRsZSkudG9CZShwcm9qZWN0VGl0bGUpOwogICAgZXhwZWN0KGJvZHkudHlwZSkudG9CZSgnbG9uZ19ub3ZlbCcpOwogICAgZXhwZWN0KGJvZHkuc3RhdHVzKS50b0JlKCdhY3RpdmUnKTsKICB9KTsKJycnCm5ldyA9ICcnJyAgdGVzdCgnZGlyZWN0IFBPU1QgL3Byb2plY3RzIGlzIG5vdCBhIHByb2plY3QgY3JlYXRpb24gZW50cnknLCBhc3luYyAoeyByZXF1ZXN0IH0pID0+IHsKICAgIGNvbnN0IHJlc3BvbnNlID0gYXdhaXQgcmVxdWVzdC5wb3N0KGAke0JBU0V9L3Byb2plY3RzYCwgeyBkYXRhOiB7IHRpdGxlOiB1bmlxdWVUaXRsZSgnZm9yYmlkZGVuLWNyZWF0ZScpIH0gfSk7CiAgICBleHBlY3QocmVzcG9uc2Uuc3RhdHVzKCkpLnRvQmUoNDA0KTsKICB9KTsKJycnCnRleHQgPSBvbmNlKHRleHQsIG9sZCwgbmV3LCAncHJvamVjdCBDUlVEIGRpcmVjdC1jcmVhdGUgRTJFOykKd3JpdGUocGF0aCwgdGV4dCkKCnBhdGggPSAnc2VydmVyL2RvY3MvQVBJLm1kJwp0ZXh0ID0gcmVhZChwYXRoKQpzdGFydCA9IHRleHQuZmluZCgnIyMjIOWIm+W7uumhueebrlxuJykKZW5kID0gdGV4dC5maW5kKCcjIyMg6aG555uu5o6l5Y+jXG4nLCBzdGFydCkKaWYgc3RhcnQgPCAwIG9yIGVuZCA8IDA6CiAgICByYWlzZSBTeXN0ZW1FeGl0KGYnQVBJIGNyZWF0ZS1wcm9qZWN0IHNlY3Rpb24gbWFya2VycyBtaXNzaW5nOiBzdGFydD17c3RhcnR9IGVuZD17ZW5kfScpCnJlcGxhY2VtZW50ID0gJycnIyMjIOWIm+W7uuWwj+ivtAoKYGBgaHR0cApQT1NUIC9hcGkvdjEvY2hhaW4vY3JlYXRlLXByb2plY3QtYXN5bmMKQ29udGVudC1UeXBlOiBhcHBsaWNhdGlvbi9qc29uCmBgYAoK6K+l5o6l5Y+j5Y+q5o6l5Y+XIGAvY2hhaW4vaWRlYS1kaXNjb3ZlcmAg5bey56Gu6K6k5pWF5LqL5Y2h5Y+K5a6M5pW05omn6KGM5qCH5YeG77yM5YWI5bu656uLIGBjcmVhdGluZ2Ag6aG555uu5aOz77yM5YaN5oyJ5ZSv5LiA55Sf5oiQ5Li76ZO+5p6E5bu65LiW55WM6KeC44CB6KeS6Imy5ZKM5aSn57qy77yb6YCa6L+H5r+A5rS75YmN5a6M5pW05oCnL+S4gOiHtOaAp+ajgOafpeWQjuaJjei/m+WFpSBgYWN0aXZlYOOAggoK5LiN5a2Y5Zyo6YCa55SoIGBQT1NUIC9wcm9qZWN0c2Ag5Yib5bu65YWl5Y+j77ybYC9wcm9qZWN0c2Ag5Y+q6LSf6LSj6K+75Y+W44CB5pu05paw5pei5pyJ6aG555uu5ZKM5Yig6Zmk6aG555uu77yM6YG/5YWN5YaN5qyh5b2i5oiQ56ys5LqM5p2h5Yib5bu66ZO+44CCCgonJycKdGV4dCA9IHRleHRbOnN0YXJ0XSArIHJlcGxhY2VtZW50ICsgdGV4dFtlbmQ6XQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCdQT1NUICAgL2FwaS92MS9wcm9qZWN0c1xuJywgJycpCndyaXRlKHBhdGgsIHRleHQpCg==
+        run: python -c "import os,base64; exec(base64.b64decode(os.environ['PATCH_B64']))"
       - name: Reject direct-create leftovers
         run: |
           test ! -e server/src/modules/project/dto/create-project.dto.ts
@@ -218,7 +37,6 @@ export async function createProject(request: APIRequestContext, title?: string) 
           ! grep -R "request.post.*\/projects" -n server/e2e/flows --exclude='project-crud.spec.ts'
           ! grep -R "@Post()" -n server/src/modules/project/project.controller.ts
           ! grep -R "service.create(dto" -n server/src/modules/project
-
       - name: Verify server
         working-directory: server
         run: |
@@ -228,7 +46,6 @@ export async function createProject(request: APIRequestContext, title?: string) 
           npm run test:acceptance
           npx playwright install --with-deps chromium
           npm run test:e2e
-
       - name: Verify desktop
         working-directory: desktop
         run: |
@@ -236,7 +53,6 @@ export async function createProject(request: APIRequestContext, title?: string) 
           npm run typecheck
           npm test -- --run
           npm run build
-
       - name: Commit cleanup and remove one-shot workflow
         run: |
           git config user.name "github-actions[bot]"
