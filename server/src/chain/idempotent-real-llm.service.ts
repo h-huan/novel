@@ -17,10 +17,14 @@ const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
 /**
  * The public provider token is still RealLLMService. This subclass keeps runtime
  * invariants at the single LLM boundary without adding a second router or quality system:
- * 1) exact successful creation/planning calls may be reused after recovery;
+ * 1) exact successful creation/planning/review calls may be reused after recovery or duplicate orchestration;
  * 2) the historical automatic whole-chapter alignment rewrite is physically blocked;
  * 3) project-scoped outputs carry their generation_runs.id so downstream Canon commits
  *    can prove which exact gated generation produced the artifact.
+ *
+ * Reuse is deliberately exact: prompt, system prompt, scenario, stepKey, model,
+ * temperature, output budget, constitution revision, compiled context, standards and
+ * chapter index must all match. Any real source/context change forces a new model call.
  */
 @Injectable()
 export class IdempotentRealLLMService extends RealLLMService {
@@ -58,8 +62,11 @@ export class IdempotentRealLLMService extends RealLLMService {
     const constitutionRevision = Number.isFinite(Number(constitution.revision))
       ? Number(constitution.revision)
       : null;
+    const chapterIndex = request.metrics?.chapterIndex != null && Number.isFinite(Number(request.metrics.chapterIndex))
+      ? Number(request.metrics.chapterIndex)
+      : null;
     const stage = qualityStage(scenario, stepKey);
-    const compiled = compileContext(db, { projectId, stage, chapterIndex: null });
+    const compiled = compileContext(db, { projectId, stage, chapterIndex });
     const contextVersion = String(compiled.version || digest(''));
     const standards = standardDirectiveCache.snapshot(scenario, request.injectStandard !== false, stepKey);
     let routedModel = '';
@@ -75,6 +82,7 @@ export class IdempotentRealLLMService extends RealLLMService {
       systemPrompt: request.systemPrompt || '',
       scenario,
       stepKey,
+      chapterIndex,
       model: request.model || routedModel,
       temperature: request.temperature ?? null,
       maxTokens: request.maxTokens ?? null,
@@ -89,10 +97,10 @@ export class IdempotentRealLLMService extends RealLLMService {
     const cached = db.prepare(`SELECT id,output_text,model,finished_at FROM generation_runs
       WHERE project_id=? AND stage=? AND scenario=? AND status='success'
         AND constitution_revision IS ? AND context_version=? AND prompt_version=?
-        AND COALESCE(chapter_index,-1)=-1
+        AND COALESCE(chapter_index,-1)=COALESCE(?,-1)
         AND LENGTH(TRIM(COALESCE(output_text,'')))>0
       ORDER BY finished_at DESC,id DESC LIMIT 1`).get(
-        projectId, stage, scenario, constitutionRevision, contextVersion, promptVersion,
+        projectId, stage, scenario, constitutionRevision, contextVersion, promptVersion, chapterIndex,
       ) as { id: string; output_text: string; model?: string | null; finished_at?: string | null } | undefined;
 
     if (cached?.output_text) {
@@ -125,11 +133,13 @@ export class IdempotentRealLLMService extends RealLLMService {
 
   private isReusableCreationCall(request: LLMRequest, projectId?: string): boolean {
     if (!projectId || request.deferQualityGate !== true) return false;
-    if (request.metrics?.chapterIndex != null) return false;
     const stepKey = String(request.metrics?.stepKey || '').trim();
     if (!stepKey) return false;
     const identity = `${String(request.scenario || '')} ${stepKey}`.toLowerCase();
-    if (/idea|inspiration|writ|body|chapter|review|repair|refin|polish|enhance|adapt/.test(identity)) return false;
-    return /world|outline|character|organization|foreshadow|timeline|entity|foundation|skeleton|planning|plan/.test(identity);
+    // Never cache user-facing prose or repair/polish operations. Those are mutable creative
+    // outputs. Planning facts and evidence reviews are safe to reuse only when the complete
+    // fingerprint above is byte-for-byte equivalent.
+    if (/idea|inspiration|writ|body|repair|refin|polish|enhance|adapt/.test(identity)) return false;
+    return /world|outline|chapter.?plan|character|organization|foreshadow|timeline|entity|foundation|skeleton|planning|plan|review|consistency|alignment|audit/.test(identity);
   }
 }
