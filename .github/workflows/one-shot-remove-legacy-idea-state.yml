@@ -1,0 +1,213 @@
+name: One-shot remove legacy idea state
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-remove-legacy-idea-state.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            desktop/package-lock.json
+      - name: Remove legacy idea state end-to-end
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path): return Path(path).read_text(encoding='utf-8')
+          def write(path, text): Path(path).write_text(text, encoding='utf-8')
+          def once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, found {count}')
+              return text.replace(old, new, 1)
+
+          # 1) Shared project enum: old IdeaLab lifecycle is no longer a product concept.
+          path = 'server/shared/src/enums/project.ts'
+          text = read(path)
+          text = re.sub(r"\n/\*\* 创建来源 \*/\nexport const CreationSource = \{[\s\S]*?export type CreationSource = \(typeof CreationSource\)\[keyof typeof CreationSource\];\n", "\n", text, count=1)
+          text = text.replace("export const CREATION_SOURCE_IDS: readonly CreationSource[] = Object.values(CreationSource);\n", "")
+          text = text.replace("  IDEA_OR_INSPIRATION: 'idea_or_inspiration',\n", "")
+          text = re.sub(r"\n/\*\* 想法孵化状态 \*/\nexport const IdeaStatus = \{[\s\S]*?export type IdeaStatus = \(typeof IdeaStatus\)\[keyof typeof IdeaStatus\];\n", "\n", text, count=1)
+          text = text.replace(" * 上述枚举的值清单 —— DTO @IsIn 的唯一来源，禁止在 DTO 里再手写副本。\n", " * 项目类型值清单 —— DTO @IsIn 的唯一来源，禁止在 DTO 里再手写副本。\n")
+          write(path, text)
+
+          # 2) Shared Project type: confirmed story belongs only to Creative Constitution.
+          path = 'server/shared/src/types/project.ts'
+          text = read(path)
+          text = text.replace("  CreationSource,\n", "").replace("  IdeaStatus,\n", "")
+          text = re.sub(r"\n  /\*\* 创建来源 \*/\n  creationSource: CreationSource;", "", text, count=1)
+          text = once(text, "    targetAudience: unknown;\n", "    targetAudience: unknown;\n    /** 灵感发现确认后的唯一故事事实；框架与正文必须继承。 */\n    confirmedStory?: Record<string, unknown>;\n", 'shared confirmedStory')
+          text = re.sub(r"\n  /\*\* 想法孵化状态 \*/\n  ideaStatus: IdeaStatus;\n  /\*\* 用户原始想法 \*/\n  ideaSeed\?: string;\n  /\*\* 确认后的成熟想法 \*/\n  confirmedIdea\?: string;", "", text, count=1)
+          write(path, text)
+
+          # 3) CreativeConstitution officially owns confirmedStory.
+          path = 'server/src/modules/project/creative-constitution.ts'
+          text = read(path)
+          text = once(text, "  targetAudience: unknown;\n", "  targetAudience: unknown;\n  /** 灵感发现确认后的唯一故事事实；不得再从项目兼容列读取第二份。 */\n  confirmedStory?: Record<string, unknown>;\n", 'constitution confirmedStory')
+          write(path, text)
+
+          # 4) Project repository/response no longer exposes transitional IdeaLab fields.
+          path = 'server/src/database/repositories/project.repository.ts'
+          text = read(path)
+          for line in [
+              "  creation_source: string;\n",
+              "  idea_status: string;\n",
+              "  idea_seed: string | null;\n",
+              "  confirmed_idea: string | null;\n",
+          ]:
+              text = text.replace(line, "")
+          write(path, text)
+
+          path = 'server/src/modules/project/project.service.ts'
+          text = read(path)
+          text = re.sub(r"\n  /\*\* Historical provenance only\. New UI no longer branches on it\. \*/\n  creationSource: string;", "", text, count=1)
+          text = re.sub(r"\n  /\*\* Transitional read-only projections; project CRUD can no longer mutate these fields\. \*/\n  ideaStatus: string;\n  ideaSeed\?: string;\n  confirmedIdea\?: string;", "", text, count=1)
+          text = re.sub(r"\nfunction confirmedStoryForResponse\([\s\S]*?\n}\n\n@Injectable\(\)", "\n@Injectable()", text, count=1)
+          text = text.replace("    const canonicalStory = (constitution as CreativeConstitution & { confirmedStory?: unknown }).confirmedStory;\n\n", "")
+          text = text.replace("      creationSource: row.creation_source || 'legacy',\n", "")
+          text = text.replace("      ideaStatus: 'none',\n      ideaSeed: undefined,\n      confirmedIdea: confirmedStoryForResponse(canonicalStory),\n", "")
+          write(path, text)
+
+          # 5) Desktop project store no longer accepts/maps old IdeaLab state.
+          path = 'desktop/src/renderer/stores/projectStore.ts'
+          text = read(path)
+          text = text.replace("  CreationSource,\n", "").replace("  IdeaStatus,\n", "")
+          for line in [
+              "  creationSource?: CreationSource;\n",
+              "  ideaStatus?: IdeaStatus;\n",
+              "  ideaSeed?: string;\n",
+              "  confirmedIdea?: string;\n",
+          ]:
+              text = text.replace(line, "")
+          text = text.replace("  const creationSource = (raw.creationSource || 'blank') as CreationSource;\n", "")
+          text = text.replace("  const defaultStage = constitution.projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';\n", "  const defaultStage = constitution.projectType === 'short_story' ? 'topic' : 'world_setting';\n")
+          text = text.replace("    creationSource,\n", "")
+          text = text.replace("    ideaStatus: (raw.ideaStatus || 'none') as IdeaStatus,\n    ideaSeed: raw.ideaSeed || undefined,\n    confirmedIdea: raw.confirmedIdea || undefined,\n", "")
+          for line in [
+              "      if (data.creationSource) body.creationSource = data.creationSource;\n",
+              "      if (data.ideaStatus) body.ideaStatus = data.ideaStatus;\n",
+              "      if (data.ideaSeed) body.ideaSeed = data.ideaSeed;\n",
+              "      if (data.confirmedIdea) body.confirmedIdea = data.confirmedIdea;\n",
+          ]:
+              text = text.replace(line, "")
+          write(path, text)
+
+          # 6) New database baseline no longer creates old IdeaLab columns or status default.
+          path = 'server/src/database/migrations/001_initial.ts'
+          text = read(path)
+          text = text.replace("      status TEXT NOT NULL DEFAULT 'idea',", "      status TEXT NOT NULL DEFAULT 'active',")
+          old = "    , creation_source TEXT DEFAULT 'blank', target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT, idea_status TEXT DEFAULT 'none', idea_seed TEXT, confirmed_idea TEXT);"
+          new = "    , target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT);"
+          text = once(text, old, new, '001 projects legacy columns')
+          write(path, text)
+
+          # 7) Existing DB: one-time backfill into Creative Constitution, then physically drop old columns.
+          path = 'server/src/database/schema-reconciler.ts'
+          text = read(path)
+          text = re.sub(r"\nfunction confirmedStoryExpression\([\s\S]*?\n}\n", "\n", text, count=1)
+          start_marker = "    // confirmed_idea / idea_seed 继续作为兼容与审计快照存在"
+          end_marker = "\n    const schemaTableIsCurrent ="
+          if text.count(start_marker) != 1 or text.count(end_marker) != 1:
+              raise SystemExit('schema reconciler legacy story block markers changed')
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = '''    // 存量库一次性把旧 IdeaLab 快照搬入唯一故事权威，然后物理删列。\n    // 新库的 001 基线从一开始就没有这些列。\n    if (hasTable(db, 'projects')) {\n      const hasConfirmed = hasColumn(db, 'projects', 'confirmed_idea');\n      const hasSeed = hasColumn(db, 'projects', 'idea_seed');\n      if ((hasConfirmed || hasSeed) && hasColumn(db, 'projects', 'settings')) {\n        const confirmedSelect = hasConfirmed ? 'confirmed_idea' : 'NULL AS confirmed_idea';\n        const seedSelect = hasSeed ? 'idea_seed' : 'NULL AS idea_seed';\n        const projects = db.prepare(`SELECT id,settings,${confirmedSelect},${seedSelect} FROM projects`).all() as Array<{\n          id: string; settings: string; confirmed_idea?: string | null; idea_seed?: string | null;\n        }>;\n        const updateSettings = db.prepare('UPDATE projects SET settings=? WHERE id=?');\n        let storyBackfill = 0;\n        for (const project of projects) {\n          const raw = String(project.confirmed_idea || project.idea_seed || '').trim();\n          if (!raw) continue;\n          let settings: Record<string, any>;\n          try { settings = JSON.parse(project.settings || '{}'); } catch { continue; }\n          const constitution = settings.creativeConstitution;\n          if (!constitution || typeof constitution !== 'object' || Array.isArray(constitution)) continue;\n          if ((constitution as any).confirmedStory !== undefined) continue;\n          let confirmedStory: unknown;\n          try { confirmedStory = JSON.parse(raw); } catch { confirmedStory = { summary: raw }; }\n          settings.creativeConstitution = { ...constitution, confirmedStory };\n          updateSettings.run(JSON.stringify(settings), project.id);\n          storyBackfill += 1;\n        }\n        if (storyBackfill > 0) actions.push(`projects.confirmed_story_backfill.${storyBackfill}`);\n      }\n\n      db.exec('DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert; DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;');\n      for (const column of ['confirmed_idea','idea_seed','idea_status','creation_source']) {\n        if (!hasColumn(db, 'projects', column)) continue;\n        db.exec(`ALTER TABLE projects DROP COLUMN ${column}`);\n        actions.push(`drop_legacy_column.projects.${column}`);\n      }\n    }\n'''
+          text = text[:start] + replacement + text[end:]
+          write(path, text)
+
+          # 8) Migrator comment: no second story source remains.
+          path = 'server/src/database/migrator.ts'
+          text = read(path)
+          old = "    // 先把历史别名收敛成当前 creativeConstitution，再执行当前结构不变量。\n    // 顺序不能反过来：reconcileSchema 会把 confirmed_idea 合入 creativeConstitution；\n    // 若随后再跑旧数据 normalization，就会重建宪法对象并把刚合入的故事权威覆盖掉。\n"
+          new = "    // 先把历史平台/风格别名收敛进当前 creativeConstitution；reconcileSchema 随后\n    // 一次性搬迁旧 IdeaLab 快照并物理删列。新库从 001 基线起就只有唯一故事权威。\n"
+          text = once(text, old, new, 'migrator legacy comment')
+          write(path, text)
+
+          # 9) Giant controller: mechanically move every active use to Creative Constitution.confirmedStory.
+          path = 'server/src/chain/chain.controller.ts'
+          text = read(path)
+          old_hist = '''      const historicalExcludes = (this.db.getDb().prepare(\n        `SELECT title, confirmed_idea, idea_seed FROM projects\n         WHERE title IS NOT NULL AND TRIM(title) <> '' ORDER BY updated_at DESC LIMIT 40`,\n      ).all() as Array<{ title: string; confirmed_idea?: string | null; idea_seed?: string | null }>).map(row => {\n        let detail: any = {};\n        for (const raw of [row.confirmed_idea, row.idea_seed]) {\n          if (!raw) continue;\n          try { detail = JSON.parse(raw); break; } catch { /* keep title-only history */ }\n        }\n        return { ...detail, title: String(detail?.title || row.title).trim() };\n      });'''
+          new_hist = '''      const historicalExcludes = (this.db.getDb().prepare(\n        `SELECT title, settings FROM projects\n         WHERE title IS NOT NULL AND TRIM(title) <> '' ORDER BY updated_at DESC LIMIT 40`,\n      ).all() as Array<{ title: string; settings: string }>).map(row => {\n        let detail: any = {};\n        try {\n          const settings = JSON.parse(row.settings || '{}');\n          const story = settings?.creativeConstitution?.confirmedStory;\n          if (story && typeof story === 'object' && !Array.isArray(story)) detail = story;\n          else if (typeof story === 'string' && story.trim()) detail = { summary: story };\n        } catch { /* keep title-only history */ }\n        return { ...detail, title: String(detail?.title || row.title).trim() };\n      });'''
+          text = once(text, old_hist, new_hist, 'historical idea dedupe')
+
+          text = once(text, "    constitution.revision = 1;\n", "    constitution.confirmedStory = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)\n      ? structuredClone(dto.selectedIdea)\n      : { summary: String(dto.selectedIdea || '') };\n    constitution.revision = 1;\n", 'create confirmedStory')
+
+          old_insert = '''    db.prepare(`INSERT INTO projects (id, title, type, status, target_words, current_words, settings, writing_style, platform_style, creation_source, target_platform, idea_status, idea_seed, confirmed_idea, created_at, updated_at)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(\n      projectId, dto.title, dto.storyType || 'short_story', 'creating', configuredTargetWords, 0,\n      JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'full_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false, ...normalizedProjectSettings }),\n      JSON.stringify(constitution.writingStyle), constitution.targetPlatform,\n      'idea_discovery', constitution.targetPlatform, 'confirmed', JSON.stringify(dto.selectedIdea || {}), JSON.stringify(dto.selectedIdea || {}),'''
+          new_insert = '''    db.prepare(`INSERT INTO projects (id, title, type, status, target_words, current_words, settings, writing_style, platform_style, target_platform, created_at, updated_at)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(\n      projectId, dto.title, dto.storyType || 'short_story', 'creating', configuredTargetWords, 0,\n      JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'full_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false, ...normalizedProjectSettings }),\n      JSON.stringify(constitution.writingStyle), constitution.targetPlatform, constitution.targetPlatform,'''
+          text = once(text, old_insert, new_insert, 'project insert old idea columns')
+
+          old_recovery = '''      const project = db.prepare(`SELECT title,type,target_words,target_platform,\n        settings,confirmed_idea,idea_seed,status FROM projects WHERE id=?`).get(projectId) as any;\n      if (!project) throw new HttpException('项目不存在', 404);\n\n      const settings = this.safeExtractJson<Record<string, unknown>>(String(project.settings || '{}'), {});\n      const ideaSource = String(project.confirmed_idea || project.idea_seed || '').trim();\n      const selectedIdea = this.safeExtractJson<any>(ideaSource, { content: ideaSource, idea: ideaSource });'''
+          new_recovery = '''      const project = db.prepare(`SELECT title,type,target_words,target_platform,settings,status FROM projects WHERE id=?`).get(projectId) as any;\n      if (!project) throw new HttpException('项目不存在', 404);\n\n      const settings = this.safeExtractJson<Record<string, unknown>>(String(project.settings || '{}'), {});\n      const constitution = settings.creativeConstitution as CreativeConstitution | undefined;\n      const selectedIdea = constitution?.confirmedStory || {};\n      if (!selectedIdea || typeof selectedIdea !== 'object' || Array.isArray(selectedIdea) || Object.keys(selectedIdea).length === 0) {\n        throw new HttpException('项目缺少 Creative Constitution.confirmedStory，不能恢复 AI 生成', 409);\n      }'''
+          text = once(text, old_recovery, new_recovery, 'generation recovery story source')
+          text = text.replace("    // 项目行在 createProjectAsync 落库时已写入 settings.creativeConstitution 与 confirmed_idea，\n", "    // 项目行在 createProjectAsync 落库时已写入 settings.creativeConstitution.confirmedStory，\n")
+          write(path, text)
+
+          # The controller now names CreativeConstitution in the recovery boundary.
+          if "type CreativeConstitution" not in text.split('\n', 2)[0:2]:
+              pass
+          # add type to the existing creative-constitution import if absent
+          text = read(path)
+          first_line_end = text.find('\n')
+          first_line = text[:first_line_end]
+          if 'type CreativeConstitution' not in first_line:
+              first_line = first_line.replace(' } from', ', type CreativeConstitution } from')
+              text = first_line + text[first_line_end:]
+              write(path, text)
+
+          # 10) Hard invariant: active source code must not contain the retired model.
+          forbidden = [
+            'CreationSource', 'IdeaStatus', 'creationSource', 'ideaStatus', 'ideaSeed', 'confirmedIdea',
+            'creation_source', 'idea_status', 'idea_seed', 'confirmed_idea', 'idea_or_inspiration',
+          ]
+          roots = [Path('server/src'), Path('server/shared/src'), Path('desktop/src')]
+          leftovers = []
+          for root in roots:
+              for file in root.rglob('*'):
+                  if not file.is_file() or file.suffix not in {'.ts','.tsx','.js','.mjs'}: continue
+                  data = file.read_text(encoding='utf-8', errors='ignore')
+                  for token in forbidden:
+                      if token in data:
+                          leftovers.append(f'{file}:{token}')
+          if leftovers:
+              raise SystemExit('legacy idea-state identifiers remain:\n' + '\n'.join(leftovers[:100]))
+          PY
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Server typecheck and unit tests
+        working-directory: server
+        run: |
+          npm run typecheck
+          npm test
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Desktop typecheck and unit tests
+        working-directory: desktop
+        run: |
+          npm run typecheck
+          npm test -- --run
+      - name: Commit cleanup and remove this workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-remove-legacy-idea-state.yml
+          git add server/src server/shared/src desktop/src
+          git commit -m "refactor: remove legacy idea state model"
+          git push origin HEAD:main
