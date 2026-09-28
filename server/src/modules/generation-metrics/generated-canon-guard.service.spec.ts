@@ -23,7 +23,7 @@ describe('GeneratedCanonGuardService', () => {
     };
   };
 
-  it('accepts only the exact output from a passed current project run', () => {
+  it('accepts chapter-like exact text only from a passed current project run', () => {
     const { service, generationMetrics } = createSubject();
     expect(service.assertCanCommit({
       projectId: 'project-1',
@@ -41,8 +41,8 @@ describe('GeneratedCanonGuardService', () => {
     expect(generationMetrics.runIsCurrent).toHaveBeenCalledWith('run-1', 'project-1');
   });
 
-  it('accepts a structured artifact by run proof and returns the passed raw source', () => {
-    const { service, generationMetrics } = createSubject();
+  it('accepts structured provenance from a successful current deferred-Gate run', () => {
+    const { service, generationMetrics } = createSubject({ ...passedRun, gate_status: 'not_evaluated' });
     expect(service.assertStructuredCanCommit({
       projectId: 'project-1',
       runId: 'run-1',
@@ -58,7 +58,7 @@ describe('GeneratedCanonGuardService', () => {
     expect(generationMetrics.runIsCurrent).toHaveBeenCalledWith('run-1', 'project-1');
   });
 
-  it('rejects a missing generation-run credential', () => {
+  it('rejects a missing generation-run credential on both boundaries', () => {
     const { service } = createSubject();
     expect(() => service.assertCanCommit({
       projectId: 'project-1',
@@ -69,20 +69,24 @@ describe('GeneratedCanonGuardService', () => {
     })).toThrow('缺少 generation run 凭证');
   });
 
-  it('never treats success without an explicit Gate PASS as canonical-ready', () => {
+  it('never treats success without an explicit Gate PASS as chapter-ready', () => {
     const { service } = createSubject({ ...passedRun, gate_status: 'not_evaluated' });
     expect(() => service.assertCanCommit({
       projectId: 'project-1',
       runId: 'run-1',
       outputText: '{"world":"ok"}',
     })).toThrow('必须来自已通过质量 Gate 的运行');
+  });
+
+  it('rejects structured provenance when the generation itself failed', () => {
+    const { service } = createSubject({ ...passedRun, status: 'failed', gate_status: 'not_evaluated' });
     expect(() => service.assertStructuredCanCommit({
       projectId: 'project-1',
       runId: 'run-1',
-    })).toThrow('必须来自已通过质量 Gate 的运行');
+    })).toThrow('未成功完成');
   });
 
-  it('rejects content that differs from the output that passed Gate', () => {
+  it('rejects exact text that differs from the output that passed Gate', () => {
     const { service } = createSubject();
     expect(() => service.assertCanCommit({
       projectId: 'project-1',
@@ -91,7 +95,7 @@ describe('GeneratedCanonGuardService', () => {
     })).toThrow('与通过 Gate 的最终输出不一致');
   });
 
-  it('rejects a stale run even when its historical Gate passed', () => {
+  it('rejects a stale run on both boundaries', () => {
     const { service } = createSubject(passedRun, false);
     expect(() => service.assertCanCommit({
       projectId: 'project-1',
@@ -106,12 +110,6 @@ describe('GeneratedCanonGuardService', () => {
 
   it('rejects a run from the wrong structural stage', () => {
     const { service } = createSubject({ ...passedRun, stage: 'chapter' });
-    expect(() => service.assertCanCommit({
-      projectId: 'project-1',
-      runId: 'run-1',
-      outputText: '{"world":"ok"}',
-      expectedStages: ['world'],
-    })).toThrow('阶段不匹配');
     expect(() => service.assertStructuredCanCommit({
       projectId: 'project-1',
       runId: 'run-1',
