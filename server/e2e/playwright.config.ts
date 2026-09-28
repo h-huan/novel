@@ -2,6 +2,12 @@ import { defineConfig } from '@playwright/test';
 import path from 'node:path';
 
 const port = process.env.E2E_PORT || '3100';
+const runtimeDataDir = path.resolve(__dirname, `.runtime-data-${port}-${process.pid}`);
+
+// E2E fixtures write directly only to the same isolated SQLite directory used
+// by the spawned server. Keep the guard in helpers.ts strict: production/local
+// data directories must never be accepted as test fixtures.
+process.env.DATA_DIR = runtimeDataDir;
 
 export default defineConfig({
   testDir: '.',
@@ -13,11 +19,16 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}/api/v1/health`,
     reuseExistingServer: false,
     timeout: 60000,
-    env: { NODE_ENV: 'test', PORT: port, SERVER_PORT: port, HOST: '127.0.0.1',
-      DATA_DIR: path.resolve(__dirname, `.runtime-data-${port}-${process.pid}`) },
+    env: {
+      NODE_ENV: 'test',
+      PORT: port,
+      SERVER_PORT: port,
+      HOST: '127.0.0.1',
+      DATA_DIR: runtimeDataDir,
+    },
   },
   use: {
-    baseURL: `http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1`,
+    baseURL: `http://127.0.0.1:${port}/api/v1`,
   },
   projects: [
     {
