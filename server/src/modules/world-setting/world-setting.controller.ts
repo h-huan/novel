@@ -16,6 +16,7 @@ import { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } from '
 import { VectorIndexService } from '../../rag/vector-index.service';
 import { EmbeddingService } from '../../rag/embedding.service';
 import { CanonicalSyncStateService } from '../../rag/canonical-sync-state.service';
+import { ConsistencyCheckService } from '../../state/consistency-check.service';
 
 @ApiTags('world-setting')
 @Controller('projects/:projectId/world-settings')
@@ -25,14 +26,13 @@ export class WorldSettingController {
     private readonly vectorIndex: VectorIndexService,
     private readonly embedding: EmbeddingService,
     private readonly syncStates: CanonicalSyncStateService,
+    private readonly consistencyCheck: ConsistencyCheckService,
   ) {}
 
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateWorldSettingDto) {
     const result = this.service.create(projectId, dto);
-    // getWritingSummary/indexing reads world_system_profiles as the canonical
-    // writing source. Establish it in the same request before any reader runs;
-    // otherwise a newly created world_setting is immediately unreadable.
+    // 创建阶段由生成链负责上层→下层审查；这里只建立唯一世界观档案。
     this.service.updateProfile(projectId, result.id, {
       synopsis: dto.workIntro || '',
       basic_info: [dto.name, dto.era].filter(Boolean).join('；'),
@@ -56,11 +56,16 @@ export class WorldSettingController {
   @Get(':id/profile')
   getProfile(@Param('projectId') projectId: string, @Param('id') id: string) { return this.service.getProfile(projectId, id); }
 
+  /**
+   * 项目创建后的世界观修改属于作者手动 Canon 修改。保存后必须立即复检，
+   * 不能让世界规则改变后继续携带旧人物/时间线/正文事实运行。
+   */
   @Put(':id/profile')
   async updateProfile(@Param('projectId') projectId: string, @Param('id') id: string, @Body() body: Record<string, unknown>) {
     const result = this.service.updateProfile(projectId, id, body);
     const sync = await this.indexWorldSetting(projectId, result.worldSetting);
-    return { ...result, sync };
+    const consistency = await this.revalidateManualWorldChange(projectId);
+    return { ...result, sync, consistency };
   }
 
   @Get(':id/writing-summary')
@@ -78,24 +83,30 @@ export class WorldSettingController {
   async update(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: UpdateWorldSettingDto) {
     const result = await this.service.update(id, dto);
     const sync = await this.indexWorldSetting(projectId, result);
-    return { ...result, sync };
+    const consistency = await this.revalidateManualWorldChange(projectId);
+    return { ...result, sync, consistency };
   }
 
   @Delete(':id')
   async remove(@Param('projectId') projectId: string, @Param('id') id: string) {
     const result = this.service.remove(id);
     const sync = await this.syncStates.run(projectId, 'world_setting', id, () => this.vectorIndex.deleteChunksStrict(VectorIndexService.COLLECTIONS.GLOBAL_KNOWLEDGE, [`world-setting:${id}`]));
-    return { ...result, sync };
+    const consistency = await this.revalidateManualWorldChange(projectId);
+    return { ...result, sync, consistency };
   }
 
   @Post(':id/constraints')
-  addConstraint(@Param('id') id: string, @Body() dto: AddConstraintDto) {
-    return this.service.addConstraint(id, dto);
+  async addConstraint(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: AddConstraintDto) {
+    const result = this.service.addConstraint(id, dto);
+    const consistency = await this.revalidateManualWorldChange(projectId);
+    return { ...result, consistency };
   }
 
   @Delete(':id/constraints/:constraintId')
-  removeConstraint(@Param('id') id: string, @Param('constraintId') constraintId: string) {
-    return this.service.removeConstraint(id, constraintId);
+  async removeConstraint(@Param('projectId') projectId: string, @Param('id') id: string, @Param('constraintId') constraintId: string) {
+    const result = this.service.removeConstraint(id, constraintId);
+    const consistency = await this.revalidateManualWorldChange(projectId);
+    return { ...result, consistency };
   }
 
   @Post(':id/change-plan')
@@ -103,6 +114,7 @@ export class WorldSettingController {
     return this.service.generateChangePlan(projectId, id, dto.changes || {});
   }
 
+  /** 只有用户明确 confirmed=true 才允许应用世界观修改计划。 */
   @Post(':id/apply-change-plan')
   async applyChangePlan(@Param('projectId') projectId: string, @Param('id') id: string, @Body() dto: { changes?: Record<string, string>; confirmed?: boolean }) {
     if (!dto.confirmed) {
@@ -113,7 +125,25 @@ export class WorldSettingController {
       return { applied: false, message: '无修改内容' };
     }
     const result = await this.service.update(id, changes as any);
-    return { ...result, applied: true };
+    const sync = await this.indexWorldSetting(projectId, result);
+    const consistency = await this.revalidateManualWorldChange(projectId);
+    return { ...result, applied: true, sync, consistency };
+  }
+
+  private async revalidateManualWorldChange(projectId: string) {
+    // 世界观变化只重跑受其影响的结构维度，避免顺带触发无关的写作质量评审。
+    const checks = await this.consistencyCheck.checkConsistency(projectId, {
+      checkTypes: ['world_setting', 'timeline', 'plot_logic'],
+    });
+    const blocking = checks.filter(item => item.status === 'error' || item.severity === 'high');
+    const warnings = checks.filter(item => item.status === 'warning');
+    return {
+      checked: checks.length,
+      consistent: blocking.length === 0 && warnings.length === 0,
+      blocking: blocking.length,
+      warnings: warnings.length,
+      message: checks.length === 0 ? '世界观保存后复检通过' : '世界观已保存，但下游存在需要处理的一致性问题',
+    };
   }
 
   /** Keep the full persisted profile available to retrieval, not just basic fields. */
