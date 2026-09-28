@@ -132,7 +132,9 @@ const projectDiscovery = {
       ? 'explicit_pair'
       : requestedShortProjectId || requestedLongProjectId
         ? 'mixed_explicit_and_auto'
-        : 'auto_latest_active_pair',
+        : runFull
+          ? 'auto_latest_active_pair'
+          : 'diagnostic_latest_projects',
   error: null,
   candidates: 0,
   short: null,
@@ -141,19 +143,22 @@ const projectDiscovery = {
 
 if (!singleMode && (!shortProjectId || !longProjectId)) {
   projectDiscovery.attempted = true;
-  const projectsRes = await request('/projects?status=active&limit=100&offset=0');
+  const discoveryEndpoint = runFull
+    ? '/projects?status=active&limit=100&offset=0'
+    : '/projects?limit=100&offset=0';
+  const projectsRes = await request(discoveryEndpoint);
   if (!projectsRes.ok) {
     projectDiscovery.ok = false;
     projectDiscovery.error = projectsRes.error ?? `HTTP ${projectsRes.status}`;
   } else {
-    const activeProjects = asArray(projectsRes.data)
-      .filter((project) => String(project?.status ?? '').toLowerCase() === 'active')
+    const projects = asArray(projectsRes.data)
+      .filter((project) => runFull ? String(project?.status ?? '').toLowerCase() === 'active' : true)
       .sort((a, b) => projectTime(b) - projectTime(a));
-    projectDiscovery.candidates = activeProjects.length;
-    if (!shortProjectId) shortProjectId = activeProjects.find((project) => projectType(project) === 'short_story')?.id ?? null;
-    if (!longProjectId) longProjectId = activeProjects.find((project) => projectType(project) === 'long_novel')?.id ?? null;
-    projectDiscovery.short = projectSelectionSummary(activeProjects.find((project) => project.id === shortProjectId));
-    projectDiscovery.long = projectSelectionSummary(activeProjects.find((project) => project.id === longProjectId));
+    projectDiscovery.candidates = projects.length;
+    if (!shortProjectId) shortProjectId = projects.find((project) => projectType(project) === 'short_story')?.id ?? null;
+    if (!longProjectId) longProjectId = projects.find((project) => projectType(project) === 'long_novel')?.id ?? null;
+    projectDiscovery.short = projectSelectionSummary(projects.find((project) => project.id === shortProjectId));
+    projectDiscovery.long = projectSelectionSummary(projects.find((project) => project.id === longProjectId));
   }
 }
 
@@ -270,7 +275,7 @@ const standardMismatch = standards.filter((s) => {
   const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
   const source = String(s.source ?? '');
   return (Number.isFinite(seed) && codeSeedVersion !== null && seed !== codeSeedVersion)
-    || !['seed', 'seed_upgrade', 'seed_locked'].includes(source);
+    || source !== 'code_seed';
 }).map((s) => ({
   moduleKey: s.moduleKey ?? s.module_key ?? null,
   version: s.version ?? null,
@@ -293,7 +298,6 @@ const runtime = {
   projects: inspectedProjects,
 };
 
-// Keep the legacy single-project shape for tools that already consume latest.json.
 if (!dualMode && inspectedProjects.project) {
   Object.assign(runtime, {
     project: inspectedProjects.project.project,
@@ -317,7 +321,8 @@ const runtimeProblems = [];
 if (!health.ok) runtimeProblems.push('server_unavailable');
 if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
 if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
-if (dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
+if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
+if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
 
 for (const target of projectTargets) {
   const result = inspectedProjects[target.key];
@@ -326,9 +331,9 @@ for (const target of projectTargets) {
     runtimeProblems.push(`${prefix}_project_unavailable`);
     continue;
   }
-  if (String(result.project.status || '') !== 'active') {
-    runtimeProblems.push(`${prefix}_project_status_${result.project.status || 'unknown'}`);
-  }
+
+  const projectStatus = String(result.project.status || '').toLowerCase();
+  if (projectStatus !== 'active') runtimeProblems.push(`${prefix}_project_status_${projectStatus || 'unknown'}`);
   if (target.expectedType && result.project.type !== target.expectedType) {
     runtimeProblems.push(`${prefix}_project_type_${result.project.type || 'unknown'}`);
   }
@@ -342,20 +347,23 @@ for (const target of projectTargets) {
     const consistencyIssues = Array.isArray(integrity.consistencyIssues) ? integrity.consistencyIssues : [];
     if (missingModules.length) runtimeProblems.push(`${prefix}_missing_modules_${missingModules.length}`);
     if (consistencyIssues.length) runtimeProblems.push(`${prefix}_consistency_issues_${consistencyIssues.length}`);
-    if (integrity.outlineBodyMappingValid !== true) runtimeProblems.push(`${prefix}_outline_body_mapping_invalid`);
+    if (runFull && integrity.outlineBodyMappingValid !== true) runtimeProblems.push(`${prefix}_outline_body_mapping_invalid`);
   }
 
   const firstChapter = result.chapters?.first ?? null;
-  if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
-  const firstRun = result.firstChapterRun;
-  if (!firstRun) {
-    runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
-  } else {
-    const runStatus = String(firstRun.status ?? '').toLowerCase();
-    if (runStatus !== 'success') runtimeProblems.push(`${prefix}_first_chapter_run_${runStatus || 'unknown'}`);
-    const gate = String(firstRun.gate_status ?? firstRun.gateStatus ?? '').toLowerCase();
-    if (!gate) runtimeProblems.push(`${prefix}_first_chapter_gate_missing`);
-    else if (!['passed', 'pass', 'accepted'].includes(gate)) runtimeProblems.push(`${prefix}_first_chapter_gate_${gate}`);
+  const shouldRequireFirstChapter = runFull || projectStatus === 'active';
+  if (shouldRequireFirstChapter) {
+    if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
+    const firstRun = result.firstChapterRun;
+    if (!firstRun) {
+      runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
+    } else {
+      const runStatus = String(firstRun.status ?? '').toLowerCase();
+      if (runStatus !== 'success') runtimeProblems.push(`${prefix}_first_chapter_run_${runStatus || 'unknown'}`);
+      const gate = String(firstRun.gate_status ?? firstRun.gateStatus ?? '').toLowerCase();
+      if (!gate) runtimeProblems.push(`${prefix}_first_chapter_gate_missing`);
+      else if (!['passed', 'pass', 'accepted'].includes(gate)) runtimeProblems.push(`${prefix}_first_chapter_gate_${gate}`);
+    }
   }
 }
 
@@ -365,7 +373,9 @@ const selectionMode = singleMode
     ? 'explicit_short_and_long'
     : requestedShortProjectId || requestedLongProjectId
       ? 'mixed_explicit_and_auto'
-      : 'auto_latest_short_and_long';
+      : runFull
+        ? 'auto_latest_active_short_and_long'
+        : 'diagnostic_latest_short_and_long';
 
 const report = {
   generatedAt: now,
@@ -401,6 +411,17 @@ const standardLine = standardsResponse.ok
   ? `${runtime.standards.consistent ? 'PASS' : 'FAIL'} · code seed=${codeSeedVersion ?? 'unknown'} · active=${standards.length}`
   : `UNAVAILABLE · ${standardsResponse.error ?? `HTTP ${standardsResponse.status}`}`;
 
+function latestRunLine(result) {
+  const run = result?.latestRun;
+  if (!run) return '未找到 generation run';
+  const bits = [
+    `status=${run.status ?? 'unknown'}`,
+    `stage=${run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown'}`,
+  ];
+  if (run.error) bits.push(`error=${String(run.error).replace(/\s+/g, ' ').trim()}`);
+  return bits.join(' · ');
+}
+
 function projectMarkdown(target) {
   const result = inspectedProjects[target.key];
   if (!result) return `### ${target.label}\n\n- 未找到项目`;
@@ -408,10 +429,10 @@ function projectMarkdown(target) {
   const firstChapter = result.chapters?.first ?? null;
   const firstLine = firstChapter
     ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
-    : 'FAIL · 未找到第一章';
+    : '未生成第一章';
   const gateLine = result.firstChapterRun
     ? `${result.firstChapterRun.gate_status ?? result.firstChapterRun.gateStatus ?? 'missing'} · run=${result.firstChapterRun.id ?? 'unknown'} · status=${result.firstChapterRun.status ?? 'unknown'} · model=${result.firstChapterRun.model ?? 'unknown'}`
-    : 'FAIL · 未找到第一章 chapter generation run';
+    : '未找到第一章 chapter generation run';
   const typeLine = target.expectedType
     ? `${result.project.typeMatches ? 'PASS' : 'FAIL'} · expected=${target.expectedType} · actual=${result.project.type ?? 'unknown'}`
     : `${result.project.type ?? 'unknown'}`;
@@ -419,20 +440,22 @@ function projectMarkdown(target) {
   const integrityLine = integrity?.error
     ? `FAIL · ${integrity.error}`
     : integrity
-      ? `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || integrity.outlineBodyMappingValid !== true) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'FAIL'}`
+      ? `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || (runFull && integrity.outlineBodyMappingValid !== true)) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'NOT_READY'}`
       : 'FAIL · 未取得完整性审计';
-  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${result.project.status === 'active' ? 'PASS' : 'FAIL'} · ${result.project.status ?? 'unknown'}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${result.project.status === 'active' ? 'PASS' : 'FAIL'} · ${result.project.status ?? 'unknown'}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
 const projectSections = projectTargets.length
   ? projectTargets.map(projectMarkdown).join('\n\n')
-  : '未找到可验收项目。请先完成至少一个真实短篇和一个真实长篇并确保项目已激活。';
+  : runFull
+    ? '未找到可做最终验收的项目。请先让至少一个真实短篇和一个真实长篇进入 active，并完成第一章真实生成。'
+    : '未找到任何项目。若刚才创建流程已经报错但这里仍为空，说明项目壳没有成功落库，请直接提供创建页错误信息和 Server 日志。';
 
 const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 默认不需要手工查项目 ID：未传 --project/--short-project/--long-project 时，脚本会从已激活项目中自动选择最近更新的一个短篇和一个长篇。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 项目验收要求项目已激活、Creative Constitution 已保存 confirmedStory、结构完整性审计无缺失模块/一致性问题且大纲正文映射有效、第一章正文非空、存在对应 chapter generation run、run=success、Gate=passed/accepted。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；会显示项目状态和最近 generation run/error。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
