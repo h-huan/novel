@@ -27,21 +27,22 @@ export interface StructuredCanonGuardInput {
 }
 
 /**
- * Verifies an existing generation run before AI-produced data may enter Canon.
+ * Single provenance boundary for AI-produced Canon.
  *
- * This service deliberately does not score, repair, regenerate, or create a
- * second quality system. The production Gate already decided whether a run
- * passed. This boundary only proves that the source run:
- *  - belongs to this project;
- *  - finished successfully;
- *  - has an explicit Gate PASS (never success/not_evaluated as a substitute);
- *  - still matches the project's current constitution/context;
- *  - produced a non-empty final output.
+ * It deliberately does not score, repair, regenerate, or create a second quality
+ * system. There are two existing production paths and they have different proof:
  *
- * Plain-text Canon (chapter body) additionally requires byte-for-byte equality
- * through assertCanCommit(). Structured Canon is parsed/normalized before it is
- * stored, so assertStructuredCanCommit() returns the passed raw source instead
- * of pretending the normalized object can equal the raw JSON bytes.
+ * - Chapter body: validateGeneratedContent() owns the final quality Gate. Canon
+ *   therefore requires an explicit gate_status=passed plus byte-for-byte output.
+ * - Structured world/character/outline assets: chain.controller owns the
+ *   stage-specific structural/source checks and calls llmCallWithRetry with
+ *   deferQualityGate=true. Their run must therefore prove provenance/currentness,
+ *   not pretend that an unexecuted generic Gate passed. The caller may invoke the
+ *   structured method only after those existing stage-specific checks succeeded.
+ *
+ * Both paths still require the source run to belong to the project, finish
+ * successfully, remain current for the same Creative Constitution/context, and
+ * contain a non-empty model output.
  */
 @Injectable()
 export class GeneratedCanonGuardService {
@@ -50,11 +51,11 @@ export class GeneratedCanonGuardService {
     private readonly generationMetrics: GenerationMetricsService,
   ) {}
 
-  /** Exact-text boundary used by chapter body commits. */
+  /** Exact-text boundary used by chapter body commits after the final quality Gate. */
   assertCanCommit(input: GeneratedCanonGuardInput): GeneratedCanonProof {
     const outputText = String(input.outputText ?? '');
     if (!outputText.trim()) throw new BadRequestException('AI Canon 提交内容为空');
-    const proof = this.assertRunCanCommit(input);
+    const proof = this.assertRunProvenance(input, true);
     if (proof.outputText !== outputText) {
       throw new BadRequestException('AI Canon 提交内容与通过 Gate 的最终输出不一致');
     }
@@ -62,15 +63,15 @@ export class GeneratedCanonGuardService {
   }
 
   /**
-   * Structured internal boundary used by world/character/outline commits.
-   * The caller must use the parsed value produced from this same run; this
-   * method returns the authoritative passed raw source for audit/provenance.
+   * Structured boundary used only after the current world/character/outline
+   * pipeline has completed its own structural and source-hierarchy checks.
+   * No fake gate_status is written for these deferred-Gate runs.
    */
   assertStructuredCanCommit(input: StructuredCanonGuardInput): GeneratedCanonProof {
-    return this.assertRunCanCommit(input);
+    return this.assertRunProvenance(input, false);
   }
 
-  private assertRunCanCommit(input: StructuredCanonGuardInput): GeneratedCanonProof {
+  private assertRunProvenance(input: StructuredCanonGuardInput, requireGatePass: boolean): GeneratedCanonProof {
     const projectId = String(input.projectId || '').trim();
     const runId = String(input.runId || '').trim();
     if (!projectId) throw new BadRequestException('AI Canon 提交缺少 projectId');
@@ -91,7 +92,7 @@ export class GeneratedCanonGuardService {
     if (row.status !== 'success') {
       throw new BadRequestException(`AI Canon 提交凭证未成功完成：status=${row.status || 'unknown'}`);
     }
-    if (row.gate_status !== 'passed') {
+    if (requireGatePass && row.gate_status !== 'passed') {
       throw new BadRequestException(`AI Canon 提交必须来自已通过质量 Gate 的运行：gate=${row.gate_status || 'not_evaluated'}`);
     }
 
