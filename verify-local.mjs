@@ -114,7 +114,7 @@ function runSummary(run) {
   if (!run) return null;
   return pick(run, [
     'id', 'stage', 'scenario', 'step_key', 'stepKey', 'status', 'gate_status', 'gateStatus',
-    'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
+    'chapter_index', 'chapterIndex', 'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
     'context_version', 'contextVersion', 'standard_version', 'standardVersion',
   ]);
 }
@@ -166,6 +166,7 @@ const runtime = {
   },
   project: null,
   chapters: null,
+  firstChapterRun: null,
   latestRun: null,
   cockpit: null,
   platformAnalytics: null,
@@ -175,7 +176,7 @@ if (projectId) {
   const [projectRes, chaptersRes, runsRes, cockpitRes, analyticsRes] = await Promise.all([
     request(`/projects/${encodeURIComponent(projectId)}`),
     request(`/projects/${encodeURIComponent(projectId)}/chapters`),
-    request(`/generation-metrics/runs?projectId=${encodeURIComponent(projectId)}&limit=20`),
+    request(`/generation-metrics/runs?projectId=${encodeURIComponent(projectId)}&limit=200`),
     request(`/generation-metrics/cockpit?projectId=${encodeURIComponent(projectId)}`),
     request(`/platform-analytics/overview?projectId=${encodeURIComponent(projectId)}&days=30`),
   ]);
@@ -203,6 +204,12 @@ if (projectId) {
     first: chapterSummary(chapterRows[0]),
     latest: chapterSummary(chapterRows[chapterRows.length - 1]),
   };
+  const firstChapterIndex = Number(chapterRows[0]?.chapter_index ?? chapterRows[0]?.chapterIndex ?? chapterRows[0]?.index ?? chapterRows[0]?.order ?? NaN);
+  const firstChapterRun = Number.isFinite(firstChapterIndex)
+    ? runRows.find((run) => String(run.stage ?? '').toLowerCase() === 'chapter'
+      && Number(run.chapter_index ?? run.chapterIndex ?? NaN) === firstChapterIndex)
+    : null;
+  runtime.firstChapterRun = runSummary(firstChapterRun);
   runtime.latestRun = runSummary(runRows[0]);
   runtime.cockpit = cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` };
   runtime.platformAnalytics = analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` };
@@ -222,8 +229,16 @@ if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push(
 if (projectId) {
   if (!runtime.project || runtime.project.error) runtimeProblems.push('project_unavailable');
   if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push('first_chapter_empty');
-  const gate = String(runtime.latestRun?.gate_status ?? runtime.latestRun?.gateStatus ?? '').toLowerCase();
-  if (gate && !['passed', 'pass', 'accepted'].includes(gate)) runtimeProblems.push(`latest_gate_${gate}`);
+  const firstRun = runtime.firstChapterRun;
+  if (!firstRun) {
+    runtimeProblems.push('first_chapter_run_missing');
+  } else {
+    const runStatus = String(firstRun.status ?? '').toLowerCase();
+    if (runStatus !== 'success') runtimeProblems.push(`first_chapter_run_${runStatus || 'unknown'}`);
+    const gate = String(firstRun.gate_status ?? firstRun.gateStatus ?? '').toLowerCase();
+    if (!gate) runtimeProblems.push('first_chapter_gate_missing');
+    else if (!['passed', 'pass', 'accepted'].includes(gate)) runtimeProblems.push(`first_chapter_gate_${gate}`);
+  }
 }
 
 const report = {
@@ -252,11 +267,11 @@ const standardLine = standardsResponse.ok
 const firstLine = firstChapter
   ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
   : projectId ? 'FAIL · 未找到第一章' : '未指定项目';
-const gateLine = runtime.latestRun
-  ? `${runtime.latestRun.gate_status ?? runtime.latestRun.gateStatus ?? 'unknown'} · run=${runtime.latestRun.id ?? 'unknown'} · model=${runtime.latestRun.model ?? 'unknown'}`
-  : projectId ? '未找到 generation run' : '未指定项目';
+const firstChapterGateLine = runtime.firstChapterRun
+  ? `${runtime.firstChapterRun.gate_status ?? runtime.firstChapterRun.gateStatus ?? 'missing'} · run=${runtime.firstChapterRun.id ?? 'unknown'} · status=${runtime.firstChapterRun.status ?? 'unknown'} · model=${runtime.firstChapterRun.model ?? 'unknown'}`
+  : projectId ? 'FAIL · 未找到第一章 chapter generation run' : '未指定项目';
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 第一章：${firstLine}\n- 最新 Gate：${gateLine}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 如果需要检查真实小说，请使用 --project <项目ID> 并先在应用中完成一次真实生成/复检。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 第一章：${firstLine}\n- 第一章 Gate：${firstChapterGateLine}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 如果需要检查真实小说，请使用 --project <项目ID> 并先在应用中完成一次真实生成/复检。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
