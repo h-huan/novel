@@ -6,7 +6,7 @@
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ChainEngineService } from './chain-engine.service';
-import type { ChainTemplate, ChainTemplateSummary } from './chain-template.types';
+import type { ChainTemplate } from './chain-template.types';
 import type { PromptChain } from './chain.types';
 
 const FIXED_CHAIN_IDS = new Set([
@@ -105,19 +105,6 @@ export class ChainTemplateService {
     });
   }
 
-  getSummaries(): ChainTemplateSummary[] {
-    return [...this.templates.values()].map(template => ({
-      id: template.id,
-      name: template.name,
-      version: template.version,
-      description: template.description,
-      nodes: template.nodes.length,
-      executionMode: template.executionMode,
-      createdAt: template.createdAt,
-      updatedAt: template.updatedAt,
-    }));
-  }
-
   getDetail(id: string): ChainTemplate {
     this.assertFixed(id);
     const template = this.templates.get(id);
@@ -144,45 +131,10 @@ export class ChainTemplateService {
     return this.chainEngine.execute(chain, userInput, onProgress);
   }
 
-  /** 旧 HTTP 路由还在巨型 Controller 中，能力本体已删除；签名保留到 Controller 拆分时一起删掉。 */
-  save(_data: {
-    id?: string;
-    name: string;
-    description: string;
-    nodes: any[];
-    variables?: any[];
-    executionMode?: ChainTemplate['executionMode'];
-    config?: Partial<ChainTemplate['config']>;
-  }): ChainTemplate {
-    throw this.removed();
-  }
-
-  delete(_id: string): void { throw this.removed(); }
-  duplicate(_id: string): ChainTemplate { throw this.removed(); }
-
-  validate(_chainData: { nodes: any[]; executionMode?: string }): {
-    valid: boolean;
-    errors: string[];
-    warnings: string[];
-  } {
-    throw this.removed();
-  }
-
-  async executeTest(_id: string, _testData?: Record<string, unknown>): Promise<{
-    success: boolean;
-    result?: any;
-    error?: string;
-  }> {
-    throw this.removed();
-  }
-
   private assertFixed(id: string): void {
     if (!FIXED_CHAIN_IDS.has(id)) {
       throw new BadRequestException(`运行时 Prompt Chain 已删除，不允许执行任意流程: ${id}`);
     }
   }
 
-  private removed(): BadRequestException {
-    return new BadRequestException('运行时 Prompt Chain 编辑/保存/复制/测试能力已删除；小说流程只允许代码定义的固定生产链');
-  }
 }
