@@ -8,11 +8,15 @@
 import { Body, Controller, Get, Param, Post, Put, Query, BadRequestException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { GenerationMetricsService } from './generation-metrics.service';
+import { DatabaseService } from '../../database/database.service';
 
 @ApiTags('generation-metrics')
 @Controller('generation-metrics')
 export class GenerationMetricsController {
-  constructor(private readonly metrics: GenerationMetricsService) {}
+  constructor(
+    private readonly metrics: GenerationMetricsService,
+    private readonly databaseService: DatabaseService,
+  ) {}
 
   @Get('content-reports')
   contentReports(@Query() query: Record<string, string | undefined>) {
@@ -22,7 +26,7 @@ export class GenerationMetricsController {
   @Get('cockpit')
   cockpit(@Query('projectId') projectId: string) {
     if (!projectId) throw new BadRequestException('缺少项目ID');
-    return this.metrics.getCockpit(projectId);
+    return { ...this.metrics.getCockpit(projectId), diagnostics: this.generationDiagnostics(projectId) };
   }
 
   @Get('runs')
@@ -75,5 +79,76 @@ export class GenerationMetricsController {
   calibration(@Query('projectId') projectId?: string) {
     const calib = this.metrics.getLengthCalibration(projectId || undefined);
     return { calibration: calib };
+  }
+
+  /**
+   * 只读诊断视图：不新增日志、不改变 Gate，只把现有 generation_runs /
+   * generation_step_metrics 中已经记录的数据汇总成验收可直接读取的信号。
+   * 用于发现“最终 success 但内部先白烧一轮”、完全相同输入重复付费、以及最慢步骤。
+   */
+  private generationDiagnostics(projectId: string) {
+    const db = this.databaseService.getDb();
+    const metrics = db.prepare(`SELECT run_id,chapter_index,step_key,scenario,status,duration_ms,total_tokens,
+        COALESCE(internal_retries,0) internal_retries,created_at
+      FROM generation_step_metrics WHERE project_id=? ORDER BY created_at DESC LIMIT 300`).all(projectId) as any[];
+    const runs = db.prepare(`SELECT id,stage,scenario,status,chapter_index,prompt_version,context_version,
+        constitution_revision,duration_ms,started_at
+      FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 300`).all(projectId) as any[];
+
+    const totalDurationMs = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.duration_ms) || 0), 0);
+    const totalTokens = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.total_tokens) || 0), 0);
+    const internalRetryCount = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.internal_retries) || 0), 0);
+    const callsWithInternalRetry = metrics.filter(row => Number(row.internal_retries) > 0).length;
+    const slowestSteps = metrics
+      .slice()
+      .sort((a, b) => (Number(b.duration_ms) || 0) - (Number(a.duration_ms) || 0))
+      .slice(0, 10)
+      .map(row => ({
+        runId: row.run_id ?? null,
+        chapterIndex: row.chapter_index ?? null,
+        stepKey: row.step_key ?? null,
+        scenario: row.scenario ?? null,
+        status: row.status ?? null,
+        durationMs: Number(row.duration_ms) || 0,
+        totalTokens: Number(row.total_tokens) || 0,
+        internalRetries: Number(row.internal_retries) || 0,
+      }));
+
+    const groups = new Map<string, any[]>();
+    for (const run of runs.filter(row => row.status === 'success')) {
+      const key = JSON.stringify([
+        run.stage ?? null,
+        run.scenario ?? null,
+        run.chapter_index ?? null,
+        run.prompt_version ?? null,
+        run.context_version ?? null,
+        run.constitution_revision ?? null,
+      ]);
+      groups.set(key, [...(groups.get(key) || []), run]);
+    }
+    const exactDuplicateRuns = [...groups.values()]
+      .filter(group => group.length > 1)
+      .map(group => ({
+        count: group.length,
+        stage: group[0].stage ?? null,
+        scenario: group[0].scenario ?? null,
+        chapterIndex: group[0].chapter_index ?? null,
+        promptVersion: group[0].prompt_version ?? null,
+        contextVersion: group[0].context_version ?? null,
+        constitutionRevision: group[0].constitution_revision ?? null,
+        runIds: group.map(row => row.id),
+        totalDurationMs: group.reduce((sum, row) => sum + Math.max(0, Number(row.duration_ms) || 0), 0),
+      }));
+
+    return {
+      sample: { stepMetrics: metrics.length, generationRuns: runs.length },
+      totalDurationMs,
+      totalTokens,
+      internalRetryCount,
+      callsWithInternalRetry,
+      exactDuplicateRunGroups: exactDuplicateRuns.length,
+      exactDuplicateRuns,
+      slowestSteps,
+    };
   }
 }
