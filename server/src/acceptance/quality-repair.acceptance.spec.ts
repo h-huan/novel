@@ -1,5 +1,4 @@
 import { it, expect, vi } from 'vitest';
-import { STANDARD_PRECONDITIONS } from './test-standards';
 import { createRequire } from 'node:module';
 import { Migrator } from '../database/migrator';
 import { ProjectService } from '../modules/project/project.service';
@@ -7,6 +6,7 @@ import { ProjectRepository } from '../database/repositories/project.repository';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
 import { RealLLMService } from '../chain/real-llm.service';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
+import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 const original = '小镇中央的钟楼挂着红色旗帜。居民每天清晨开门，傍晚收摊。守夜人按照既定规矩检查城门，不得擅自离开岗位。';
 
@@ -15,7 +15,7 @@ for (const regression of [false, true]) it(`repairs, rechecks, compares and ${re
   try {
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
-    const project = new ProjectService(new ProjectRepository(database)).create({ ...STANDARD_PRECONDITIONS, title: '验收' });
+    const project = seedAcceptanceProject(db, { title: '验收' });
     const metrics = new GenerationMetricsService(database);
     const llm = new RealLLMService({} as any, metrics);
     (llm as any).generateInternal = vi.fn(async (r: any) => {
@@ -55,7 +55,7 @@ it('blocks stale constitution output even when the evaluator gives high scores',
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
     const projects = new ProjectService(new ProjectRepository(database));
-    const project = projects.create({ ...STANDARD_PRECONDITIONS, title: 'stale' });
+    const project = seedAcceptanceProject(db, { title: 'stale' });
     const metrics = new GenerationMetricsService(database);
     const llm = new RealLLMService({} as any, metrics);
     (llm as any).generateInternal = vi.fn(async (r: any) => {
@@ -73,7 +73,7 @@ it('keeps physical generation runs but updates one artifact report across retrie
   try {
     await new Migrator(db).runMigrations();
     const database = { getDb: () => db } as any;
-    const project = new ProjectService(new ProjectRepository(database)).create({ ...STANDARD_PRECONDITIONS, title: '报告边界' });
+    const project = seedAcceptanceProject(db, { title: '报告边界' });
     const metrics = new GenerationMetricsService(database);
     const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, {
       score: ['category', 'tone', 'style', 'genre', 'pov', 'prose'].includes(key) ? null : 90,
