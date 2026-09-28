@@ -1,6 +1,8 @@
 /**
- * quality-inspection.service.spec.ts
- * QualityInspectionService 单元测试 — AI质检系统
+ * QualityInspectionService unit tests.
+ *
+ * Important boundary: deterministic AI fingerprints are heuristic risk signals only.
+ * They must never be promoted into fabricated semantic quality scores.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QualityInspectionService } from './quality-inspection.service';
@@ -12,115 +14,103 @@ describe('QualityInspectionService', () => {
     service = new QualityInspectionService();
   });
 
-  describe('checkLogic', () => {
-    it('should detect timeline contradictions', () => {
-      const issues = service.checkLogic('三天后，他回到了家。第二天，他又出发了。');
-      const timelineIssues = issues.filter(i => i.type === 'timeline');
-      expect(timelineIssues.length).toBeGreaterThanOrEqual(0);
-    });
-
-    it('should detect causality issues', () => {
-      const issues = service.checkLogic('因为天下雨了，所以地面是干的。');
-      // 因果关系检测：下雨→地面干的 确实矛盾，但检测可能基于模式匹配
-      expect(Array.isArray(issues)).toBe(true);
-    });
-
-    it('should return empty array for simple text', () => {
-      const issues = service.checkLogic('他推开门走了出去。');
-      expect(Array.isArray(issues)).toBe(true);
-    });
-  });
-
-  describe('checkCharacterDrift', () => {
-    it('should detect character drift with provided traits', () => {
-      const issues = service.checkCharacterDrift(
+  describe('semantic evidence boundary', () => {
+    it('does not invent timeline, causality, character or foreshadowing conclusions without semantic evidence', () => {
+      expect(service.checkLogic('三天后，他回到了家。第二天，他又出发了。')).toEqual([]);
+      expect(service.checkCharacterDrift(
         '他二话不说就冲上去打人了。',
-        { characters: [{ name: '陆川', traits: ['冷静', '理性', '善于思考'] }] },
-      );
-      const driftIssues = issues.filter(i => i.consistencyScore < 7);
-      // A "冷静理性" character fighting may be flagged
-      expect(Array.isArray(issues)).toBe(true);
+        { characters: [{ name: '陆川', traits: ['冷静', '理性'] }] },
+      )).toEqual([]);
+      expect(service.checkForeshadowing(
+        '剧情继续发展。',
+        { foreshadowingClues: ['房间里有一把刀'] },
+      )).toEqual([]);
     });
 
-    it('should return default results when no characters provided', () => {
-      const issues = service.checkCharacterDrift('测试内容');
-      expect(issues).toEqual([]);
-    });
-
-    it('each issue should have expected fields', () => {
-      const issues = service.checkCharacterDrift('测试内容', { characters: [{ name: '陆川', traits: ['勇敢'] }] });
-      for (const issue of issues) {
-        expect(issue).toHaveProperty('characterName');
-        expect(issue).toHaveProperty('consistencyScore');
-      }
-    });
-  });
-
-  describe('checkForeshadowing', () => {
-    it('should detect missing foreshadowing resolution', () => {
-      const misses = service.checkForeshadowing('剧情继续发展。', { foreshadowingClues: ['房间里有一把刀'] });
-      expect(Array.isArray(misses)).toBe(true);
-    });
-
-    it('should return default results when no clues provided', () => {
-      const misses = service.checkForeshadowing('测试内容');
-      expect(misses).toEqual([]);
-    });
-  });
-
-  describe('scoreDimensions', () => {
-    it('should return dimension scores as object', () => {
-      const dimensions = service.scoreDimensions('测试小说内容');
-      expect(typeof dimensions).toBe('object');
-      expect(Object.keys(dimensions).length).toBeGreaterThan(0);
-    });
-
-    it('each dimension should have a numeric score', () => {
-      const dimensions = service.scoreDimensions('测试内容');
-      const values = Object.values(dimensions);
-      expect(values.length).toBeGreaterThan(0);
-      for (const [key, score] of Object.entries(dimensions)) {
-        if (score === null) continue;
-        expect(typeof score).toBe('number');
-        if (key === 'aiTraceIndex') {
-          // AI痕迹指数0~100, 其余维度0~10
-          expect(score).toBeGreaterThanOrEqual(0);
-          expect(score).toBeLessThanOrEqual(100);
-        } else {
-          expect(score).toBeGreaterThanOrEqual(0);
-          expect(score).toBeLessThanOrEqual(10);
-        }
-      }
-    });
-  });
-
-  describe('inspect', () => {
-    it('should return complete inspection result', () => {
-      const result = service.inspect('这是一段测试用的章节内容。');
-      expect(result).toHaveProperty('overallScore');
-      expect(result).toHaveProperty('dimensions');
-      expect(result).toHaveProperty('suggestions');
-      expect(result).toHaveProperty('logicIssues');
-      expect(result).toHaveProperty('characterDrift');
-      expect(result).toHaveProperty('foreshadowingMisses');
-      // 验证新维度名
-      expect(result.dimensions).toHaveProperty('openingHook');
-      expect(result.dimensions).toHaveProperty('passion');
-      expect(result.dimensions).toHaveProperty('aiTraceIndex');
-    });
-
-    it('overallScore should be between 0 and 100', () => {
-      const result = service.inspect('测试内容');
+    it('keeps semantic dimensions and overall score unevaluated', () => {
+      const result = service.inspect('这是一段不足以支撑语义质量结论的章节内容。');
       expect(result.overallScore).toBeNull();
       expect(result.evaluation.status).toBe('not_evaluated');
+      expect(result.dimensions.openingHook).toBeNull();
+      expect(result.dimensions.characterMotivation).toBeNull();
+      expect(result.dimensions.aiTraceIndex).toBeNull();
+    });
+  });
+
+  describe('deterministic AI fingerprint regression', () => {
+    const lowTemplateSample = `
+凌晨四点十七分，值班室电话响了两声就断。周诚把登记簿合上，先看门，再看墙上的监控钟。走廊尽头那盏灯没亮，昨晚换过的灯泡还在纸箱里。
+
+“谁打的？”小杜从折叠床上坐起来。
+
+“分机七码。”周诚翻到昨天的维修单，“这层只有六个分机。”
+
+小杜披上外套，鞋带系到一半又停住。门外传来拖车轮子的摩擦声，慢，断一下，再慢。两人没有出声。周诚抽出抽屉里的备用钥匙，把七码写在便签背面，又把便签压进登记簿。
+
+门缝下先出现一条窄影，随后是一张折过三次的报修单。纸上没有姓名，只写着机房温度过高，落款处盖了旧章。那个章上个月已经作废。
+
+“我去机房，你守电话。”周诚说。
+
+小杜抓住他的袖口：“旧章在档案柜，昨晚是你锁的。”
+
+周诚低头看了一眼那张报修单，没有回答。他把备用钥匙放回抽屉，改拿档案柜钥匙。走廊里的拖车声停在门外，电话第三次响起，这次没有断。
+`.trim();
+
+    const highTemplateSample = `
+夜色仿佛凝固了，黑暗仿佛张开大嘴吞噬一切。林川的心跳漏了一拍，喉咙发紧，手心冒汗，一股寒意顺着脊背往上爬。这一刻，他突然意识到，眼前的一切不像梦。
+
+与此同时，他感到一种难以言喻的情绪涌上心头。空气似乎凝固，时间仿佛停止，世界好像静止。那一瞬间，他的眼里闪过一丝复杂的情绪，内心深处不禁油然而生一种强烈的感觉。
+
+然而，事情并没有结束。因此，他觉得自己必须继续前进。不仅为了自己，而且为了所有人。与此同时，远处的声音仿佛被黑暗吞没，冷风贴着皮肤向上爬，白光在眼前炸开。
+
+这一刻，他终于明白了生命的意义，也意识到真正重要的东西。总而言之，这不仅是一场选择，而且是一场成长。综上所述，所有经历都让他明白：只有勇敢面对，才能走向真正的未来。
+`.trim();
+
+    it('separates template-heavy prose from a concrete scene by a meaningful margin', () => {
+      const low = service.detectAiFingerprints(lowTemplateSample);
+      const high = service.detectAiFingerprints(highTemplateSample);
+
+      expect(low.overallScore).not.toBeNull();
+      expect(high.overallScore).not.toBeNull();
+      expect(high.overallScore!).toBeGreaterThan(low.overallScore! + 15);
+      expect(high.aiWordDensity.count).toBeGreaterThanOrEqual(10);
+      expect(high.clicheExpression.count).toBeGreaterThanOrEqual(4);
+      expect(high.aiWordDensity.count).toBeGreaterThan(low.aiWordDensity.count);
+      expect(high.clicheExpression.count).toBeGreaterThan(low.clicheExpression.count);
     });
 
-    it('should accept context with characters and foreshadowing clues', () => {
-      const result = service.inspect('测试内容', {
-        characters: [{ name: '陆川', traits: ['勇敢'] }],
-        foreshadowingClues: ['刀'],
-      });
+    it('exposes the fingerprint only as heuristic evidence, never as semantic overallScore', () => {
+      const result = service.inspect(highTemplateSample);
       expect(result.overallScore).toBeNull();
+      expect(result.evaluation.status).toBe('partial');
+      expect(result.dimensions.aiTraceIndex).toBeGreaterThan(0);
+      expect(result.dimensionEvidence.aiTraceIndex.status).toBe('heuristic');
+      expect(result.dimensions.openingHook).toBeNull();
+      expect(result.dimensionEvidence.openingHook.status).toBe('not_evaluated');
+    });
+
+    it('does not score tiny snippets as AI evidence', () => {
+      const result = service.detectAiFingerprints('仿佛什么都没有发生。');
+      expect(result.overallScore).toBeNull();
+      const inspected = service.inspect('仿佛什么都没有发生。');
+      expect(inspected.dimensions.aiTraceIndex).toBeNull();
+      expect(inspected.evaluation.status).toBe('not_evaluated');
+    });
+  });
+
+  describe('dimension contract', () => {
+    it('returns all declared dimensions and numeric AI risk only when enough text exists', () => {
+      const shortDimensions = service.scoreDimensions('测试内容');
+      expect(shortDimensions).toHaveProperty('openingHook');
+      expect(shortDimensions).toHaveProperty('passion');
+      expect(shortDimensions).toHaveProperty('aiTraceIndex');
+      expect(shortDimensions.aiTraceIndex).toBeNull();
+
+      const longText = '门外有人敲了三下。'.repeat(40);
+      const longDimensions = service.scoreDimensions(longText);
+      expect(typeof longDimensions.aiTraceIndex).toBe('number');
+      expect(longDimensions.aiTraceIndex!).toBeGreaterThanOrEqual(0);
+      expect(longDimensions.aiTraceIndex!).toBeLessThanOrEqual(100);
     });
   });
 });
