@@ -5654,10 +5654,23 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
 
           if (data && Object.keys(data).length > 0) {
             const worldSetting = data.worldSetting || data.worldview || data.world || {};
+            const provenance = data.provenance || {};
             let outlineWriteCount = 0, volumeWriteCount = 0, charCount = 0, fsCount = 0, wsCount = 0, orgCount = 0, mpCount = 0, timelineCount = 0;
 
             // 存储世界观
             if (data.coreSetting || Object.keys(worldSetting).length > 0) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,
+                runId: provenance.skeletonRunId,
+                expectedStages: ['outline'],
+                expectedScenarios: ['outline'],
+              });
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,
+                runId: provenance.worldRunId,
+                expectedStages: ['world'],
+                expectedScenarios: ['world_building'],
+              });
               const core = JSON.stringify({
                 ...(dto.settings || {}),
                 coreSetting: data.coreSetting || worldSetting,
@@ -5728,6 +5741,14 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
             }
 
             // 存储角色
+            if ((data.characters || []).length > 0) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,
+                runId: provenance.characterRunId,
+                expectedStages: ['character'],
+                expectedScenarios: ['character_design'],
+              });
+            }
             for (const ch of (data.characters || [])) {
               if (!ch.name) continue;
               try {
@@ -5775,6 +5796,24 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
 
             // 存储大纲 + 卷
             if (data.volumes?.length > 0) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,
+                runId: provenance.skeletonRunId,
+                expectedStages: ['outline'],
+                expectedScenarios: ['outline'],
+              });
+              const outlineRunIds = Array.isArray(provenance.outlineRunIds) ? provenance.outlineRunIds : [];
+              if (data.volumes.some((volume: any) => Array.isArray(volume?.chapters) && volume.chapters.length > 0) && outlineRunIds.length === 0) {
+                throw new HttpException('长篇详细章纲缺少 generation run 凭证，已停止写入 Canon', 409);
+              }
+              for (const runId of outlineRunIds) {
+                this.generatedCanonGuard.assertStructuredCanCommit({
+                  projectId,
+                  runId,
+                  expectedStages: ['outline'],
+                  expectedScenarios: ['outline'],
+                });
+              }
               for (const vol of data.volumes) {
                 const vid = uuid();
                 try {
@@ -9867,6 +9906,7 @@ ${summarizeOutlineConsistency(pending)}`,
     const timeline: any[] = [];
     let absoluteChapter = 1;
     let plannedChapterWords = 0;
+    const outlineRunIds = new Set<string>();
     const totalPlannedChapters = normalizedSkeletons.reduce((sum: number, volume: any) => sum + volume.estimatedChapters, 0);
     if (totalPlannedChapters * input.chapterWordMin > input.targetWords || totalPlannedChapters * input.chapterWordMax < input.targetWords) {
       throw new Error(`长篇地基规划${totalPlannedChapters}章，按每章${input.chapterWordMin}-${input.chapterWordMax}字无法承载目标总字数${input.targetWords}；请模型根据故事节奏重新规划章数。`);
@@ -9928,6 +9968,7 @@ ${summarizeOutlineConsistency(pending)}`,
             chaptersPerBatch = Math.min(chaptersPerBatch, batchCount);
           }
         }
+        if (batchResult?.runId) outlineRunIds.add(String(batchResult.runId));
         const batchChapters = Array.isArray(batchResult.data)
           ? batchResult.data
           : (Array.isArray(batchResult.data?.chapters) ? batchResult.data.chapters : []);
@@ -10059,6 +10100,8 @@ ${summarizeOutlineConsistency(pending)}`,
     }
     this.logger.log(`长篇架构终检通过：规划 ${plannedVolumeCount} 卷全部落地、前 ${detailedCount}/${totalPlannedChapters} 章细纲、${characters.length} 名主要/常驻角色全量、${foreshadowings.length} 条跨卷伏笔、${timeline.length} 条时间线事件。`);
 
+    const foundationRuns = new Map((Array.isArray((foundationResult as any)?.nodeResults) ? (foundationResult as any).nodeResults : [])
+      .map((node: any) => [String(node?.nodeId || ''), String(node?.runId || '')]));
     return {
       coreSetting: foundation.coreSetting,
       worldview,
@@ -10068,6 +10111,12 @@ ${summarizeOutlineConsistency(pending)}`,
       timeline,
       organizations: Array.isArray(worldview?.factions) ? worldview.factions : [],
       mapPoints: Array.isArray(worldview?.geography) ? worldview.geography : [],
+      provenance: {
+        skeletonRunId: foundationRuns.get('node_1_skeleton') || undefined,
+        worldRunId: foundationRuns.get('node_2_worldview') || undefined,
+        characterRunId: characterResult.runId,
+        outlineRunIds: [...outlineRunIds],
+      },
     };
   }
 
