@@ -1,0 +1,35 @@
+name: One-shot outline profile Canon provenance guard
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/scripts/one-shot-guard-outline-profile-canon.py'
+      - '.github/workflows/one-shot-guard-outline-profile-canon.yml'
+permissions:
+  contents: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply exact migration
+        run: python .github/scripts/one-shot-guard-outline-profile-canon.py
+      - name: Verify server typecheck
+        working-directory: server
+        run: |
+          npm ci
+          npm run typecheck
+      - name: Remove one-shot artifacts
+        run: rm .github/scripts/one-shot-guard-outline-profile-canon.py .github/workflows/one-shot-guard-outline-profile-canon.yml
+      - name: Commit migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/src/chain/chain.controller.ts .github/scripts/one-shot-guard-outline-profile-canon.py .github/workflows/one-shot-guard-outline-profile-canon.yml
+          git commit -m 'refactor: guard outline profile Canon with source run'
+          git push origin HEAD:main
