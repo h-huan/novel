@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSourceHierarchyReviewPrompt, normalizeSourceHierarchyReview } from './source-hierarchy-review';
+import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
 
 describe('generic source hierarchy review', () => {
   it('keeps a structured conflict blocking with all quoted evidence', () => {
@@ -17,12 +18,15 @@ describe('generic source hierarchy review', () => {
     expect(normalizeSourceHierarchyReview({ consistent: true, contradictions: [] })).toEqual({ consistent: true, contradictions: [] });
   });
 
-  it('builds the same contract for an unrelated contemporary story', () => {
+  it('uses the single canon hierarchy and separates locked-body protection from fact authority', () => {
     const prompt = buildSourceHierarchyReviewPrompt({
       parentName: '确认题材', parent: { hook: '每次交易扣一枚徽章' }, childName: '世界规则',
       child: { rules: ['只有提现才扣徽章'] }, executionStandard: '目标平台：短篇平台；视角：第一人称',
     });
-    for (const text of ['每次交易扣一枚徽章', '只有提现才扣徽章', '第一人称', '逐字短引文', '时间方向']) expect(prompt).toContain(text);
+    for (const text of [
+      '每次交易扣一枚徽章', '只有提现才扣徽章', '第一人称', '逐字短引文', '时间方向',
+      STORY_FACT_PRIORITY, '正文已锁定', '编辑保护', '人工裁决', '影响范围最小',
+    ]) expect(prompt).toContain(text);
     expect(prompt).not.toContain('进门/回拨');
   });
 });
