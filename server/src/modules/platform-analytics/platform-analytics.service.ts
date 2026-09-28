@@ -16,6 +16,7 @@ import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DatabaseService } from '../../database/database.service';
+import { SEED_BASELINE_VERSION, SEED_MODULE_STANDARDS } from '../module-standards/module-standards.seed';
 import { CHAPTER_WORD_RANGE, EXECUTION_STANDARD_DIMENSIONS, EXECUTION_STANDARD_DIMENSION_LABELS } from '../../../shared/src';
 import {
   platformLabel, storyTypeLabel,
@@ -335,7 +336,7 @@ export class PlatformAnalyticsService {
     return QUALITY_DIM_ORDER.filter(d => map.has(d)).map(d => {
       const e = map.get(d)!;
       return {
-        dim: d,
+        dim: d.dim,
         name: QUALITY_DIM_LABEL[d],
         count: e.count,
         chapterCount: e.chapters.size,
@@ -932,16 +933,9 @@ export class PlatformAnalyticsService {
     }
 
     const standards = {
-      total: 0,
-      maxVersion: 0,
+      total: SEED_MODULE_STANDARDS.length,
+      maxVersion: SEED_BASELINE_VERSION,
     };
-    try {
-      const active = this.safeAll(`SELECT version FROM module_standards WHERE status='active'`);
-      standards.total = active.length;
-      standards.maxVersion = active.reduce((m, r) => Math.max(m, Number(r.version) || 0), 0);
-    } catch {
-      /* 标准表查询失败不拖垮整体 */
-    }
 
     return {
       serverStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
