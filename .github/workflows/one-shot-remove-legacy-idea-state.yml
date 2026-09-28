@@ -37,33 +37,27 @@ jobs:
                   raise SystemExit(f'{label}: expected 1 occurrence, found {count}')
               return text.replace(old, new, 1)
 
-          # ---- Shared product model -------------------------------------------------
           path = 'server/shared/src/enums/project.ts'
           text = read(path)
           text = re.sub(r"\n/\*\* 创建来源 \*/\nexport const CreationSource = \{[\s\S]*?export type CreationSource = \(typeof CreationSource\)\[keyof typeof CreationSource\];\n", "\n", text, count=1)
           text = text.replace("export const CREATION_SOURCE_IDS: readonly CreationSource[] = Object.values(CreationSource);\n", "")
           text = text.replace("  IDEA_OR_INSPIRATION: 'idea_or_inspiration',\n", "")
           text = re.sub(r"\n/\*\* 想法孵化状态 \*/\nexport const IdeaStatus = \{[\s\S]*?export type IdeaStatus = \(typeof IdeaStatus\)\[keyof typeof IdeaStatus\];\n", "\n", text, count=1)
-          text = text.replace(" * 上述枚举的值清单 —— DTO @IsIn 的唯一来源，禁止在 DTO 里再手写副本。\n", " * 项目类型值清单 —— DTO @IsIn 的唯一来源，禁止在 DTO 里再手写副本。\n")
           write(path, text)
 
           path = 'server/shared/src/types/project.ts'
-          text = read(path)
-          text = text.replace("  CreationSource,\n", "").replace("  IdeaStatus,\n", "")
+          text = read(path).replace("  CreationSource,\n", "").replace("  IdeaStatus,\n", "")
           text = re.sub(r"\n  /\*\* 创建来源 \*/\n  creationSource: CreationSource;", "", text, count=1)
-          text = once(text, "    targetAudience: unknown;\n", "    targetAudience: unknown;\n    /** 灵感发现确认后的唯一故事事实；框架与正文必须继承。 */\n    confirmedStory?: Record<string, unknown>;\n", 'shared confirmedStory')
+          text = once(text, "    targetAudience: unknown;\n", "    targetAudience: unknown;\n    confirmedStory?: Record<string, unknown>;\n", 'shared confirmedStory')
           text = re.sub(r"\n  /\*\* 想法孵化状态 \*/\n  ideaStatus: IdeaStatus;\n  /\*\* 用户原始想法 \*/\n  ideaSeed\?: string;\n  /\*\* 确认后的成熟想法 \*/\n  confirmedIdea\?: string;", "", text, count=1)
           write(path, text)
 
-          # ---- Creative Constitution is the only story authority -------------------
           path = 'server/src/modules/project/creative-constitution.ts'
           text = read(path)
-          text = once(text, "  targetAudience: unknown;\n", "  targetAudience: unknown;\n  /** 灵感发现确认后的唯一故事事实；不得再从项目兼容列读取第二份。 */\n  confirmedStory?: Record<string, unknown>;\n", 'constitution confirmedStory')
-          # Internal legacy aliases are not valid story authority anymore.
+          text = once(text, "  targetAudience: unknown;\n", "  targetAudience: unknown;\n  /** 灵感发现确认后的唯一故事事实。 */\n  confirmedStory?: Record<string, unknown>;\n", 'constitution confirmedStory')
           text = text.replace('confirmedIdea', 'confirmedStory').replace('confirmed_idea', 'confirmed_story')
           write(path, text)
 
-          # ---- Project repository/service ------------------------------------------
           path = 'server/src/database/repositories/project.repository.ts'
           text = read(path)
           for line in ["  creation_source: string;\n", "  idea_status: string;\n", "  idea_seed: string | null;\n", "  confirmed_idea: string | null;\n"]:
@@ -80,7 +74,6 @@ jobs:
           text = text.replace("      ideaStatus: 'none',\n      ideaSeed: undefined,\n      confirmedIdea: confirmedStoryForResponse(canonicalStory),\n", "")
           write(path, text)
 
-          # ---- Workflow Guard: Canon assets + confirmedStory, no IdeaLab phase -----
           path = 'server/src/modules/workflow-guard/types.ts'
           text = read(path)
           text = text.replace("  hasIdea: boolean;\n  hasConfirmedIdea: boolean;\n", "  hasConfirmedStory: boolean;\n")
@@ -93,12 +86,11 @@ jobs:
           text = read(path)
           text = text.replace('assets.hasIdea || assets.hasConfirmedIdea', 'assets.hasConfirmedStory')
           text = text.replace('assets.hasConfirmedIdea', 'assets.hasConfirmedStory')
-          text = text.replace("'confirmed_idea'", "'confirmed_story'")
-          text = text.replace('确认想法', '确认题材')
-          # Long-novel guard starts at world setting; idea discovery lives outside a project.
+          text = text.replace("'confirmed_idea'", "'confirmed_story'").replace('确认想法', '确认题材')
           text = text.replace("    'idea_or_inspiration', 'world_setting', 'character', 'outline',\n", "    'world_setting', 'character', 'outline',\n")
           text = re.sub(r"\n  if \(currentStage === 'idea_or_inspiration'\) \{[\s\S]*?\n  \}\n\n  if \(currentStage === 'world_setting'\)", "\n  if (currentStage === 'world_setting')", text, count=1)
-          text = text.replace("    recommendedNextStage = 'world_setting';\n", "") if False else text
+          text = re.sub(r"\n  if \(currentStage === 'idea_or_inspiration'\) \{[\s\S]*?\n  \} else if \(currentStage === 'world_setting'\)", "\n  if (currentStage === 'world_setting')", text, count=1)
+          text = re.sub(r"^\s*idea_or_inspiration:\s*10,\n", "", text, count=1, flags=re.M)
           write(path, text)
 
           path = 'server/src/modules/workflow-guard/workflow-guard.service.ts'
@@ -109,46 +101,35 @@ jobs:
           text = text.replace("    const previousStage = project.current_workflow_stage || 'idea_or_inspiration';\n", "    const previousStage = project.current_workflow_stage || (project.type === 'short_story' ? 'topic' : 'world_setting');\n")
           text = text.replace("        'idea_or_inspiration', 'world_setting', 'character', 'outline',\n", "        'world_setting', 'character', 'outline',\n")
           text = text.replace("            'idea_or_inspiration', 'world_setting', 'character', 'outline',\n", "            'world_setting', 'character', 'outline',\n")
-          old_assets = "      hasIdea: !!(project.idea_seed),\n      hasConfirmedIdea: !!(project.confirmed_idea),\n"
-          new_assets = "      hasConfirmedStory: Boolean(readConstitution(project).confirmedStory && Object.keys(readConstitution(project).confirmedStory || {}).length),\n"
-          text = once(text, old_assets, new_assets, 'workflow story asset')
+          text = once(text, "      hasIdea: !!(project.idea_seed),\n      hasConfirmedIdea: !!(project.confirmed_idea),\n", "      hasConfirmedStory: Boolean(readConstitution(project).confirmedStory && Object.keys(readConstitution(project).confirmedStory || {}).length),\n", 'workflow story asset')
           text = text.replace("      'idea_or_inspiration', 'world_setting', 'character', 'outline',\n", "      'world_setting', 'character', 'outline',\n")
           text = text.replace("    return 'idea_or_inspiration';\n", "    return 'world_setting';\n")
           write(path, text)
 
-          # ---- Recovery reads only Creative Constitution ----------------------------
           path = 'server/src/chain/generation-recovery.service.ts'
           text = read(path)
           if "creative-constitution" not in text:
               text = text.replace("import { CHAPTER_WORD_RANGE } from '../../shared/src';\n", "import { CHAPTER_WORD_RANGE } from '../../shared/src';\nimport { readConstitution } from '../modules/project/creative-constitution';\n")
           text = text.replace("      'SELECT id,type,status,target_words,confirmed_idea,idea_seed FROM projects WHERE id=?',\n", "      'SELECT * FROM projects WHERE id=?',\n")
-          old = "    const hasConfirmedSource = Boolean(String(project.confirmed_idea || project.idea_seed || '').trim());\n"
-          new = "    const confirmedStory = readConstitution(project).confirmedStory;\n    const hasConfirmedSource = Boolean(confirmedStory && typeof confirmedStory === 'object' && Object.keys(confirmedStory).length > 0);\n"
-          text = once(text, old, new, 'recovery confirmedStory')
+          text = once(text, "    const hasConfirmedSource = Boolean(String(project.confirmed_idea || project.idea_seed || '').trim());\n", "    const confirmedStory = readConstitution(project).confirmedStory;\n    const hasConfirmedSource = Boolean(confirmedStory && typeof confirmedStory === 'object' && Object.keys(confirmedStory).length > 0);\n", 'recovery confirmedStory')
           write(path, text)
 
-          # ---- Source consistency names the canonical source correctly --------------
           for path in ['server/src/chain/source-rule-consistency.ts', 'server/src/chain/source-rule-consistency.spec.ts']:
               text = read(path).replace('confirmedIdea', 'confirmedStory')
               write(path, text)
 
-          # ---- Desktop stores/pages -------------------------------------------------
           path = 'desktop/src/renderer/stores/projectStore.ts'
-          text = read(path)
-          text = text.replace("  CreationSource,\n", "").replace("  IdeaStatus,\n", "")
-          for line in ["  creationSource?: CreationSource;\n", "  ideaStatus?: IdeaStatus;\n", "  ideaSeed?: string;\n", "  confirmedIdea?: string;\n"]:
-              text = text.replace(line, "")
+          text = read(path).replace("  CreationSource,\n", "").replace("  IdeaStatus,\n", "")
+          for line in ["  creationSource?: CreationSource;\n", "  ideaStatus?: IdeaStatus;\n", "  ideaSeed?: string;\n", "  confirmedIdea?: string;\n"]: text = text.replace(line, "")
           text = text.replace("  const creationSource = (raw.creationSource || 'blank') as CreationSource;\n", "")
           text = text.replace("  const defaultStage = constitution.projectType === 'short_story' ? 'topic' : 'idea_or_inspiration';\n", "  const defaultStage = constitution.projectType === 'short_story' ? 'topic' : 'world_setting';\n")
           text = text.replace("    creationSource,\n", "")
           text = text.replace("    ideaStatus: (raw.ideaStatus || 'none') as IdeaStatus,\n    ideaSeed: raw.ideaSeed || undefined,\n    confirmedIdea: raw.confirmedIdea || undefined,\n", "")
-          for line in ["      if (data.creationSource) body.creationSource = data.creationSource;\n", "      if (data.ideaStatus) body.ideaStatus = data.ideaStatus;\n", "      if (data.ideaSeed) body.ideaSeed = data.ideaSeed;\n", "      if (data.confirmedIdea) body.confirmedIdea = data.confirmedIdea;\n"]:
-              text = text.replace(line, "")
+          for line in ["      if (data.creationSource) body.creationSource = data.creationSource;\n", "      if (data.ideaStatus) body.ideaStatus = data.ideaStatus;\n", "      if (data.ideaSeed) body.ideaSeed = data.ideaSeed;\n", "      if (data.confirmedIdea) body.confirmedIdea = data.confirmedIdea;\n"]: text = text.replace(line, "")
           write(path, text)
 
           path = 'desktop/src/renderer/stores/workflowGuardStore.ts'
-          text = read(path).replace("  creationSource: string;\n", "")
-          write(path, text)
+          write(path, read(path).replace("  creationSource: string;\n", ""))
 
           path = 'desktop/src/renderer/pages/DiscoveryWizardPage.tsx'
           text = read(path)
@@ -159,113 +140,66 @@ jobs:
 
           path = 'desktop/src/renderer/pages/ProjectDashboard.tsx'
           text = read(path)
-          old = """  const hasConfirmedIdea = Boolean(\n    (currentProject as any)?.confirmedIdea\n    || (currentProject as any)?.ideaSeed\n    || (currentProject as any)?.ideaStatus === 'confirmed',\n  );"""
-          text = once(text, old, "  const hasConfirmedStory = Boolean(constitution?.confirmedStory && Object.keys(constitution.confirmedStory).length);", 'dashboard confirmed story')
+          text = once(text, "  const hasConfirmedIdea = Boolean(\n    (currentProject as any)?.confirmedIdea\n    || (currentProject as any)?.ideaSeed\n    || (currentProject as any)?.ideaStatus === 'confirmed',\n  );", "  const hasConfirmedStory = Boolean(constitution?.confirmedStory && Object.keys(constitution.confirmedStory).length);", 'dashboard confirmed story')
           text = text.replace("done: hasConfirmedIdea", "done: hasConfirmedStory")
           write(path, text)
 
           path = 'desktop/src/renderer/pages/ProjectListPage.tsx'
-          text = read(path)
-          text = text.replace("  idea_or_inspiration: '创作准备',\n", "")
+          text = read(path).replace("  idea_or_inspiration: '创作准备',\n", "")
           for key in ['idea', 'world_building', 'outlining', 'writing', 'editing', 'published']:
               text = re.sub(rf"^  {key}: .*\n", "", text, flags=re.M)
           write(path, text)
 
           path = 'desktop/src/renderer/components/workflow/WorkflowBlockedNotice.tsx'
-          text = read(path).replace('confirmed_idea', 'confirmed_story')
-          write(path, text)
+          write(path, read(path).replace('confirmed_idea', 'confirmed_story'))
 
-          # ---- Giant controller: all runtime story reads/writes go through Constitution
           path = 'server/src/chain/chain.controller.ts'
           text = read(path)
           old_hist = '''      const historicalExcludes = (this.db.getDb().prepare(\n        `SELECT title, confirmed_idea, idea_seed FROM projects\n         WHERE title IS NOT NULL AND TRIM(title) <> '' ORDER BY updated_at DESC LIMIT 40`,\n      ).all() as Array<{ title: string; confirmed_idea?: string | null; idea_seed?: string | null }>).map(row => {\n        let detail: any = {};\n        for (const raw of [row.confirmed_idea, row.idea_seed]) {\n          if (!raw) continue;\n          try { detail = JSON.parse(raw); break; } catch { /* keep title-only history */ }\n        }\n        return { ...detail, title: String(detail?.title || row.title).trim() };\n      });'''
-          new_hist = '''      const historicalExcludes = (this.db.getDb().prepare(\n        `SELECT title, settings FROM projects\n         WHERE title IS NOT NULL AND TRIM(title) <> '' ORDER BY updated_at DESC LIMIT 40`,\n      ).all() as Array<{ title: string; settings: string }>).map(row => {\n        let detail: any = {};\n        try {\n          const settings = JSON.parse(row.settings || '{}');\n          const story = settings?.creativeConstitution?.confirmedStory;\n          if (story && typeof story === 'object' && !Array.isArray(story)) detail = story;\n        } catch { /* keep title-only history */ }\n        return { ...detail, title: String(detail?.title || row.title).trim() };\n      });'''
+          new_hist = '''      const historicalExcludes = (this.db.getDb().prepare(\n        `SELECT title, settings FROM projects\n         WHERE title IS NOT NULL AND TRIM(title) <> '' ORDER BY updated_at DESC LIMIT 40`,\n      ).all() as Array<{ title: string; settings: string }>).map(row => {\n        let detail: any = {};\n        try {\n          const settings = JSON.parse(row.settings || '{}');\n          const story = settings?.creativeConstitution?.confirmedStory;\n          if (story && typeof story === 'object' && !Array.isArray(story)) detail = story;\n        } catch {}\n        return { ...detail, title: String(detail?.title || row.title).trim() };\n      });'''
           text = once(text, old_hist, new_hist, 'historical story dedupe')
           text = once(text, "    constitution.revision = 1;\n", "    constitution.confirmedStory = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)\n      ? structuredClone(dto.selectedIdea)\n      : { summary: String(dto.selectedIdea || '') };\n    constitution.revision = 1;\n", 'create confirmedStory')
           old_insert = '''    db.prepare(`INSERT INTO projects (id, title, type, status, target_words, current_words, settings, writing_style, platform_style, creation_source, target_platform, idea_status, idea_seed, confirmed_idea, created_at, updated_at)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(\n      projectId, dto.title, dto.storyType || 'short_story', 'creating', configuredTargetWords, 0,\n      JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'full_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false, ...normalizedProjectSettings }),\n      JSON.stringify(constitution.writingStyle), constitution.targetPlatform,\n      'idea_discovery', constitution.targetPlatform, 'confirmed', JSON.stringify(dto.selectedIdea || {}), JSON.stringify(dto.selectedIdea || {}),'''
           new_insert = '''    db.prepare(`INSERT INTO projects (id, title, type, status, target_words, current_words, settings, writing_style, platform_style, target_platform, created_at, updated_at)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(\n      projectId, dto.title, dto.storyType || 'short_story', 'creating', configuredTargetWords, 0,\n      JSON.stringify({ autoSave: true, autoSaveInterval: 30, writingMode: 'full_auto', immersiveModeEnabled: false, recapEnabled: true, typoCheckEnabled: true, sensitiveWordCheckEnabled: false, ...normalizedProjectSettings }),\n      JSON.stringify(constitution.writingStyle), constitution.targetPlatform, constitution.targetPlatform,'''
           text = once(text, old_insert, new_insert, 'project insert legacy columns')
           old_recovery = '''      const project = db.prepare(`SELECT title,type,target_words,target_platform,\n        settings,confirmed_idea,idea_seed,status FROM projects WHERE id=?`).get(projectId) as any;\n      if (!project) throw new HttpException('项目不存在', 404);\n\n      const settings = this.safeExtractJson<Record<string, unknown>>(String(project.settings || '{}'), {});\n      const ideaSource = String(project.confirmed_idea || project.idea_seed || '').trim();\n      const selectedIdea = this.safeExtractJson<any>(ideaSource, { content: ideaSource, idea: ideaSource });'''
-          new_recovery = '''      const project = db.prepare(`SELECT title,type,target_words,target_platform,settings,status FROM projects WHERE id=?`).get(projectId) as any;\n      if (!project) throw new HttpException('项目不存在', 404);\n\n      const settings = this.safeExtractJson<Record<string, unknown>>(String(project.settings || '{}'), {});\n      const constitution = settings.creativeConstitution as CreativeConstitution | undefined;\n      const selectedIdea = constitution?.confirmedStory || {};\n      if (!selectedIdea || Object.keys(selectedIdea).length === 0) {\n        throw new HttpException('项目缺少 Creative Constitution.confirmedStory，不能恢复 AI 生成', 409);\n      }'''
+          new_recovery = '''      const project = db.prepare(`SELECT title,type,target_words,target_platform,settings,status FROM projects WHERE id=?`).get(projectId) as any;\n      if (!project) throw new HttpException('项目不存在', 404);\n\n      const settings = this.safeExtractJson<Record<string, unknown>>(String(project.settings || '{}'), {});\n      const constitution = settings.creativeConstitution as CreativeConstitution | undefined;\n      const selectedIdea = constitution?.confirmedStory || {};\n      if (!selectedIdea || Object.keys(selectedIdea).length === 0) throw new HttpException('项目缺少 Creative Constitution.confirmedStory，不能恢复 AI 生成', 409);'''
           text = once(text, old_recovery, new_recovery, 'controller recovery story source')
-          text = text.replace('confirmedIdea:', 'confirmedStory:')
-          text = text.replace('settings.creativeConstitution 与 confirmed_idea', 'settings.creativeConstitution.confirmedStory')
-          first_line_end = text.find('\n')
-          first_line = text[:first_line_end]
+          text = text.replace('confirmedIdea', 'confirmedStory').replace('settings.creativeConstitution 与 confirmed_idea', 'settings.creativeConstitution.confirmedStory')
+          first_line_end = text.find('\n'); first_line = text[:first_line_end]
           if 'type CreativeConstitution' not in first_line:
               first_line = first_line.replace(' } from', ', type CreativeConstitution } from')
               text = first_line + text[first_line_end:]
           write(path, text)
 
-          # ---- New DB baseline + one-time old DB migration --------------------------
           path = 'server/src/database/migrations/001_initial.ts'
-          text = read(path)
-          text = text.replace("      status TEXT NOT NULL DEFAULT 'idea',", "      status TEXT NOT NULL DEFAULT 'active',")
-          old = "    , creation_source TEXT DEFAULT 'blank', target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT, idea_status TEXT DEFAULT 'none', idea_seed TEXT, confirmed_idea TEXT);"
-          text = once(text, old, "    , target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT);", '001 projects legacy columns')
+          text = read(path).replace("      status TEXT NOT NULL DEFAULT 'idea',", "      status TEXT NOT NULL DEFAULT 'active',")
+          text = once(text, "    , creation_source TEXT DEFAULT 'blank', target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT, idea_status TEXT DEFAULT 'none', idea_seed TEXT, confirmed_idea TEXT);", "    , target_platform TEXT DEFAULT 'generic', current_workflow_stage TEXT);", '001 projects legacy columns')
           write(path, text)
 
           path = 'server/src/database/schema-reconciler.ts'
           text = read(path)
           text = re.sub(r"\nfunction confirmedStoryExpression\([\s\S]*?\n}\n", "\n", text, count=1)
-          start_marker = "    // confirmed_idea / idea_seed 继续作为兼容与审计快照存在"
-          end_marker = "\n    const schemaTableIsCurrent ="
-          if text.count(start_marker) != 1 or text.count(end_marker) != 1:
-              raise SystemExit('schema reconciler legacy story block markers changed')
+          start_marker = "    // confirmed_idea / idea_seed 继续作为兼容与审计快照存在"; end_marker = "\n    const schemaTableIsCurrent ="
+          if text.count(start_marker) != 1 or text.count(end_marker) != 1: raise SystemExit('schema reconciler block changed')
           start = text.index(start_marker); end = text.index(end_marker, start)
-          replacement = '''    // 存量库一次性搬迁旧 IdeaLab 快照后物理删列；运行时代码不再读取这些列。\n    if (hasTable(db, 'projects')) {\n      const hasConfirmed = hasColumn(db, 'projects', 'confirmed_idea');\n      const hasSeed = hasColumn(db, 'projects', 'idea_seed');\n      if ((hasConfirmed || hasSeed) && hasColumn(db, 'projects', 'settings')) {\n        const c = hasConfirmed ? 'confirmed_idea' : 'NULL AS confirmed_idea';\n        const s = hasSeed ? 'idea_seed' : 'NULL AS idea_seed';\n        const projects = db.prepare(`SELECT id,settings,${c},${s} FROM projects`).all() as any[];\n        const update = db.prepare('UPDATE projects SET settings=? WHERE id=?');\n        for (const project of projects) {\n          const raw = String(project.confirmed_idea || project.idea_seed || '').trim();\n          if (!raw) continue;\n          let settings: any; try { settings = JSON.parse(project.settings || '{}'); } catch { continue; }\n          const cc = settings.creativeConstitution;\n          if (!cc || typeof cc !== 'object' || cc.confirmedStory !== undefined) continue;\n          let confirmedStory: any; try { confirmedStory = JSON.parse(raw); } catch { confirmedStory = { summary: raw }; }\n          settings.creativeConstitution = { ...cc, confirmedStory };\n          update.run(JSON.stringify(settings), project.id);\n        }\n      }\n      db.exec('DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert; DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;');\n      for (const column of ['confirmed_idea','idea_seed','idea_status','creation_source']) {\n        if (hasColumn(db, 'projects', column)) {\n          db.exec(`ALTER TABLE projects DROP COLUMN ${column}`);\n          actions.push(`drop_legacy_column.projects.${column}`);\n        }\n      }\n    }\n'''
+          replacement = '''    // 存量库一次性搬迁旧 IdeaLab 快照后物理删列；运行时代码不再读取这些列。\n    if (hasTable(db, 'projects')) {\n      const hasConfirmed = hasColumn(db, 'projects', 'confirmed_idea');\n      const hasSeed = hasColumn(db, 'projects', 'idea_seed');\n      if ((hasConfirmed || hasSeed) && hasColumn(db, 'projects', 'settings')) {\n        const c = hasConfirmed ? 'confirmed_idea' : 'NULL AS confirmed_idea';\n        const s = hasSeed ? 'idea_seed' : 'NULL AS idea_seed';\n        const projects = db.prepare(`SELECT id,settings,${c},${s} FROM projects`).all() as any[];\n        const update = db.prepare('UPDATE projects SET settings=? WHERE id=?');\n        for (const project of projects) {\n          const raw = String(project.confirmed_idea || project.idea_seed || '').trim();\n          if (!raw) continue;\n          let settings: any; try { settings = JSON.parse(project.settings || '{}'); } catch { continue; }\n          const cc = settings.creativeConstitution; if (!cc || typeof cc !== 'object' || cc.confirmedStory !== undefined) continue;\n          let confirmedStory: any; try { confirmedStory = JSON.parse(raw); } catch { confirmedStory = { summary: raw }; }\n          settings.creativeConstitution = { ...cc, confirmedStory }; update.run(JSON.stringify(settings), project.id);\n        }\n      }\n      db.exec('DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert; DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;');\n      for (const column of ['confirmed_idea','idea_seed','idea_status','creation_source']) {\n        if (hasColumn(db, 'projects', column)) { db.exec(`ALTER TABLE projects DROP COLUMN ${column}`); actions.push(`drop_legacy_column.projects.${column}`); }\n      }\n    }\n'''
           text = text[:start] + replacement + text[end:]
           write(path, text)
 
-          path = 'server/src/database/migrator.ts'
-          text = read(path)
-          text = text.replace("    // 先把历史别名收敛成当前 creativeConstitution，再执行当前结构不变量。\n    // 顺序不能反过来：reconcileSchema 会把 confirmed_idea 合入 creativeConstitution；\n    // 若随后再跑旧数据 normalization，就会重建宪法对象并把刚合入的故事权威覆盖掉。\n", "    // 先把历史平台/风格别名收敛进 creativeConstitution；reconcileSchema 随后一次性\n    // 搬迁旧 IdeaLab 快照并物理删列。新库从 001 起只有 Creative Constitution 故事权威。\n")
-          write(path, text)
-
-          # ---- Tests/fixtures follow renamed canonical concept ----------------------
-          for path in [
-            'server/src/chain/generation-recovery-progressive-plan.spec.ts',
-            'server/src/chain/generation-recovery.service.spec.ts',
-            'desktop/src/renderer/pages/DiscoveryWizardPage.test.tsx',
-            'desktop/src/renderer/pages/ProjectListPage.test.tsx',
-          ]:
-              if not Path(path).exists(): continue
-              text = read(path)
-              text = text.replace('confirmedIdea', 'confirmedStory').replace('ideaSeed', 'confirmedStory')
-              text = text.replace('creationSource', 'legacyCreationSourceRemoved')
-              # Old DB compatibility fixtures may keep snake_case columns; product API fields may not.
-              write(path, text)
-
-          # Runtime invariant: old product model may appear only inside one-time DB migration code/tests.
+          # Old DB fixture identifiers may remain only in migrations/reconciler/specs.
           forbidden = ['CreationSource','IdeaStatus','creationSource','ideaStatus','ideaSeed','confirmedIdea','idea_or_inspiration']
-          runtime_roots = [Path('server/src'), Path('server/shared/src'), Path('desktop/src')]
-          allowed_runtime = {
-            Path('server/src/database/schema-reconciler.ts'),
-            Path('server/src/database/migrations/001_initial.ts'),
-          }
-          leftovers = []
-          for root in runtime_roots:
-              for file in root.rglob('*'):
-                  if not file.is_file() or file.suffix not in {'.ts','.tsx','.js','.mjs'}: continue
-                  if file in allowed_runtime or '.spec.' in file.name or '.test.' in file.name: continue
-                  data = file.read_text(encoding='utf-8', errors='ignore')
-                  for token in forbidden:
-                      if token in data: leftovers.append(f'{file}:{token}')
-          if leftovers:
-              raise SystemExit('legacy runtime idea-state identifiers remain:\n' + '\n'.join(leftovers[:100]))
-
-          # Snake-case legacy DB columns are allowed only in migration/reconciler compatibility code/tests.
           snake = ['creation_source','idea_status','idea_seed','confirmed_idea']
-          leftovers = []
-          for root in runtime_roots:
+          allowed = {Path('server/src/database/schema-reconciler.ts'), Path('server/src/database/migrations/001_initial.ts')}
+          leftovers=[]
+          for root in [Path('server/src'),Path('server/shared/src'),Path('desktop/src')]:
               for file in root.rglob('*'):
                   if not file.is_file() or file.suffix not in {'.ts','.tsx','.js','.mjs'}: continue
-                  if file in allowed_runtime or '.spec.' in file.name or '.test.' in file.name: continue
-                  data = file.read_text(encoding='utf-8', errors='ignore')
-                  for token in snake:
+                  if file in allowed or '.spec.' in file.name or '.test.' in file.name: continue
+                  data=file.read_text(encoding='utf-8',errors='ignore')
+                  for token in forbidden+snake:
                       if token in data: leftovers.append(f'{file}:{token}')
-          if leftovers:
-              raise SystemExit('legacy runtime DB columns remain:\n' + '\n'.join(leftovers[:100]))
+          if leftovers: raise SystemExit('legacy runtime idea-state identifiers remain:\n'+'\n'.join(leftovers[:100]))
           PY
       - name: Install server dependencies
         working-directory: server
