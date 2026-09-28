@@ -35,6 +35,55 @@ jobs:
           ns = {'__name__': '__main__'}
           exec(compile(code, '<legacy-cleanup>', 'exec'), ns, ns)
           PY
+      - name: Migrate recovery tests to the current Constitution authority
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          helper = '''\nfunction projectSettings(type: 'long_novel' | 'short_story', targetWords: number) {\n  return JSON.stringify({ creativeConstitution: {\n    schemaVersion: 1, revision: 1, projectType: type, targetPlatform: 'fanqie', targetWords,\n    platformRules: {}, category: '都市', storyTone: ['现实'], writingStyle: [], webNovelGenre: ['现实向'],\n    submissionTags: [], plotTags: [], pov: 'third_person', targetAudience: null,\n    chapterWordRange: { min: 1000, max: 6000 }, confirmedStory: { title: '已确认题材' },\n  } });\n}\n'''
+
+          path = 'server/src/chain/generation-recovery.service.spec.ts'
+          p = Path(path); text = p.read_text(encoding='utf-8')
+          marker = "const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');\n"
+          if helper.strip() not in text:
+              text = text.replace(marker, marker + helper, 1)
+          text = text.replace(
+            "      CREATE TABLE projects (id TEXT PRIMARY KEY,type TEXT,status TEXT,target_words INTEGER,confirmed_idea TEXT,idea_seed TEXT,updated_at TEXT);",
+            "      CREATE TABLE projects (id TEXT PRIMARY KEY,type TEXT,status TEXT,target_words INTEGER,settings TEXT,updated_at TEXT);",
+            1,
+          )
+          text = text.replace(
+            "    db.prepare(`INSERT INTO projects VALUES (?,?,?,?,?,?,?)`).run(\n      'p1', 'short_story', 'generation_failed', 3200, JSON.stringify({ title: 'idea' }), null, new Date().toISOString(),\n    );",
+            "    db.prepare(`INSERT INTO projects VALUES (?,?,?,?,?,?)`).run(\n      'p1', 'short_story', 'generation_failed', 3200, projectSettings('short_story', 3200), new Date().toISOString(),\n    );",
+            1,
+          )
+          p.write_text(text, encoding='utf-8')
+
+          path = 'server/src/chain/generation-recovery-progressive-plan.spec.ts'
+          p = Path(path); text = p.read_text(encoding='utf-8')
+          marker = "const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');\n"
+          if helper.strip() not in text:
+              text = text.replace(marker, marker + helper, 1)
+          text = text.replace(
+            "      id TEXT PRIMARY KEY,type TEXT,status TEXT,target_words INTEGER,\n      confirmed_idea TEXT,idea_seed TEXT,updated_at TEXT",
+            "      id TEXT PRIMARY KEY,type TEXT,status TEXT,target_words INTEGER,\n      settings TEXT,updated_at TEXT",
+            1,
+          )
+          text = text.replace(
+            "  db.prepare('INSERT INTO projects VALUES (?,?,?,?,?,?,?)').run(\n    'p', type, 'creating', targetWords, JSON.stringify({ title: '已确认题材' }), null, new Date().toISOString(),\n  );",
+            "  db.prepare('INSERT INTO projects VALUES (?,?,?,?,?,?)').run(\n    'p', type, 'creating', targetWords, projectSettings(type, targetWords), new Date().toISOString(),\n  );",
+            1,
+          )
+          p.write_text(text, encoding='utf-8')
+          PY
       - name: Install and verify server
         working-directory: server
         run: |
