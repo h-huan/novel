@@ -83,8 +83,9 @@ export class GenerationMetricsController {
 
   /**
    * 只读诊断视图：不新增日志、不改变 Gate，只把现有 generation_runs /
-   * generation_step_metrics 中已经记录的数据汇总成验收可直接读取的信号。
-   * 用于发现“最终 success 但内部先白烧一轮”、完全相同输入重复付费、以及最慢步骤。
+   * generation_step_metrics 与业务表中已经存在的数据汇总成验收信号。
+   * 用于发现“最终 success 但内部先白烧一轮”、完全相同输入重复付费、最慢步骤，
+   * 以及“模型调用成功但生成结果没有落到业务 Canon”的编排/持久化故障。
    */
   private generationDiagnostics(projectId: string) {
     const db = this.databaseService.getDb();
@@ -94,6 +95,22 @@ export class GenerationMetricsController {
     const runs = db.prepare(`SELECT id,stage,scenario,status,chapter_index,prompt_version,context_version,
         constitution_revision,duration_ms,started_at
       FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 300`).all(projectId) as any[];
+    const project = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as any;
+    const count = (table: string, extra = ''): number => {
+      try {
+        const row = db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE project_id=?${extra}`).get(projectId) as any;
+        return Number(row?.c) || 0;
+      } catch {
+        return 0;
+      }
+    };
+    const persisted = {
+      worldSettings: count('world_settings'),
+      characters: count('characters'),
+      chapterOutlines: count('outlines', " AND level='chapter'"),
+      chapters: count('chapters'),
+      timelineEvents: count('timeline_events'),
+    };
 
     const totalDurationMs = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.duration_ms) || 0), 0);
     const totalTokens = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.total_tokens) || 0), 0);
@@ -140,8 +157,18 @@ export class GenerationMetricsController {
         totalDurationMs: group.reduce((sum, row) => sum + Math.max(0, Number(row.duration_ms) || 0), 0),
       }));
 
+    const successfulStages = new Set(runs.filter(row => row.status === 'success').map(row => String(row.stage || '')));
+    const persistenceMismatch: string[] = [];
+    if (successfulStages.has('world') && persisted.worldSettings === 0) persistenceMismatch.push('world_success_without_world_setting');
+    if (successfulStages.has('character') && persisted.characters === 0) persistenceMismatch.push('character_success_without_character');
+    if (successfulStages.has('outline') && persisted.chapterOutlines === 0) persistenceMismatch.push('outline_success_without_chapter_outline');
+    if (successfulStages.has('chapter') && persisted.chapters === 0) persistenceMismatch.push('chapter_success_without_chapter');
+
     return {
+      projectStatus: project?.status ?? null,
       sample: { stepMetrics: metrics.length, generationRuns: runs.length },
+      persisted,
+      persistenceMismatch,
       totalDurationMs,
       totalTokens,
       internalRetryCount,
