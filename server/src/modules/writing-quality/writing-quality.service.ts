@@ -142,27 +142,8 @@ export class WritingQualityService implements OnModuleInit {
     @Optional() private readonly qualityInspection?: QualityInspectionService,
   ) {}
 
-  /**
-   * 反向依赖用「注册回调」而非构造注入（ChapterModule 被本模块依赖，不能再反向 import）。
-   * AI 生成正文走 canonical 保存（source='ai_generated'）后，ChapterService 会回调这里自动跑一次
-   * 七维质检 + 标签契合并落库；手动逐字编辑不触发，避免无谓 LLM 调用。全程 try/catch，绝不阻断保存。
-   */
+  /** 服务启动时只清理上一次进程遗留的质检 running 租约。 */
   onModuleInit(): void {
-    this.chapterService?.registerAutoQualityRunner?.(async (input) => {
-      try {
-        await this.analyzeChapterQuality(input.projectId, {
-          chapterId: input.chapterId,
-          content: input.content,
-          scope: 'chapter',
-        } as AnalyzeChapterDto, { leaseAlreadyHeld: true });
-        this.logger.log(`AI 生成正文已自动完成质检（章节 ${input.chapterId}）：七维问题与标签契合已落库并同步看板`);
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`AI 生成正文自动质检失败（不影响正文保存）：${reason}`);
-        // 失败必须落到章节上：前端编辑器与看板据此提示“自动质检未完成，可重跑”，不再静默。
-        this.markChapterAutoQuality(input.chapterId, 'failed', `自动质检未完成：${reason}（可点“重新质检”）`);
-      }
-    });
     // 进程重启/崩溃会把章节永久留在 running：没有进程再去回写终态，前端「正在自动质检」
     // 与「提交质检被禁用」就都卡死。启动时把上一进程残留的 running 重置成可重跑的 failed。
     try {

@@ -36,21 +36,10 @@ export class ChapterController {
     return this.service.findOne(id);
   }
 
-  /**
-   * 公共 PUT 默认只代表作者手工编辑。滚动升级期间旧前端仍会发送 source=ai_generated；
-   * 该信号只能把请求转入严格验签服务，绝不能直接进入 ChapterService.update。
-   */
+  /** 公共 PUT 永远只代表作者手工编辑；AI 正文只能走 accept-generated。 */
   @Put(':id')
-  update(
-    @Param('projectId') projectId: string,
-    @Param('id') id: string,
-    @Body() dto: UpdateChapterDto,
-  ) {
-    if (dto.source === 'ai_generated') {
-      return this.generatedCommit.commit(projectId, id, dto.content || '');
-    }
-    const { source: _source, ...authorEdit } = dto;
-    return this.service.update(id, authorEdit);
+  update(@Param('id') id: string, @Body() dto: UpdateChapterDto) {
+    return this.service.update(id, dto);
   }
 
   /** AI 正文唯一 Canon 提交入口。 */

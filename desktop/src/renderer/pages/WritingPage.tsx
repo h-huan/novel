@@ -407,11 +407,10 @@ const WritingPage: React.FC = () => {
     let saveError = '';
     for (let attempt = 0; attempt < 3 && !saved; attempt++) {
       try {
-        const response = await api.put(
-          `/projects/${projectId}/chapters/${targetChapterId}`,
-          { content, source: 'ai_generated' as const },
-          // 章节保存是单条 SQL 写入，20s 超时足够；过久不回必是网络/锁表，
-          // 让作者看到"超时"远比让"保存中"停留数分钟直观。
+        const response = await api.post(
+          `/projects/${projectId}/chapters/${targetChapterId}/accept-generated`,
+          { content },
+          // Canon 提交只做生成凭证验签 + 单章事务写入；过久不回视为网络/锁表。
           20000,
         );
         saveResult = (response as any).data ?? response;

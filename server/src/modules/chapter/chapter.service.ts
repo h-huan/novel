@@ -36,8 +36,6 @@ export interface ChapterResponse {
   derivedSync?: any;
   /** 本章在保存时清理掉的过期 conflict 数量（基于旧版本正文的未解决 warning/error 冲突） */
   staleConflictsCleaned?: number;
-  /** AI 生成正文保存后是否已排队自动质检 */
-  autoQualityScheduled?: boolean;
   /** 本章最近一次自动质检状态：running/ok/failed（让作者看得见质检是否真正跑成） */
   autoQualityStatus?: 'running' | 'ok' | 'needs_rewrite' | 'failed';
   autoQualityMessage?: string;
@@ -54,17 +52,6 @@ export class ChapterService {
     @Optional() private readonly databaseService?: DatabaseService,
     @Optional() private readonly originalityGuard?: OriginalityGuardService,
   ) {}
-
-  /**
-   * AI 生成正文 canonical 保存后的自动质检回调，由 WritingQualityService.onModuleInit 注册。
-   * 反向依赖用「注册式」而非构造注入，避免 ChapterModule <-> WritingQualityModule 循环依赖。
-   */
-  private autoQualityRunner?: (input: { projectId: string; chapterId: string; content: string }) => Promise<void> | void;
-  registerAutoQualityRunner(
-    fn: (input: { projectId: string; chapterId: string; content: string }) => Promise<void> | void,
-  ): void {
-    this.autoQualityRunner = fn;
-  }
 
   create(projectId: string, dto: CreateChapterDto): ChapterResponse {
     const now = new Date().toISOString();
@@ -143,16 +130,6 @@ export class ChapterService {
       response.derivedSync = sync.derivedSync;
       if (cleaned > 0) {
         response.staleConflictsCleaned = cleaned;
-      }
-      // AI 生成正文 canonical 保存：异步自动跑一次七维质检 + 标签契合（质量分/问题落库并同步看板）。
-      // fire-and-forget，不阻塞保存返回；runner 内部已全容错。手动逐字编辑（source!=='ai_generated'）不触发。
-      if (dto.source === 'ai_generated' && this.autoQualityRunner && this.countWords(dto.content || '') > 0) {
-        const saved = { projectId: existing.project_id, chapterId: existing.id, content: dto.content || '' };
-        this.repo.markAutoQuality(existing.id, 'running', '正在自动质检…');
-        queueMicrotask(() => { try { void this.autoQualityRunner?.(saved); } catch { /* 不影响保存 */ } });
-        response.autoQualityScheduled = true;
-        response.autoQualityStatus = 'running';
-        response.autoQualityMessage = '正在自动质检…';
       }
     } else {
       // 内容未变化：派生数据本已与已保存内容一致，无需重新同步。
