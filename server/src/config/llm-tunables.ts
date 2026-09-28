@@ -32,8 +32,12 @@ export const LLM_TUNABLES = {
   TIMEOUT_COMPLEX: envInt('LLM_TIMEOUT_COMPLEX_MS', 600_000), // 跨模块修订/全扫描：10 分钟
 
   // ============ 跨模块一致性检查 maxTokens 边界 ============
-  CONSISTENCY_CHECK_MIN: envInt('LLM_CC_MAXTOKENS_MIN', 16384),
-  CONSISTENCY_CHECK_MAX: envInt('LLM_CC_MAXTOKENS_MAX', 24576),
+  // deepseek-flash 等推理模型把 reasoning 计入 max_tokens。真实短篇创建已出现 review
+  // 16384→32768 的长度截断补发：第一次调用完整耗时但结果不可用，随后同 prompt 再付费一次。
+  // 与 outline/body/quality review 一致，首版直接给结构化硬顶。maxTokens 是上限而非必须消费量；
+  // 不会强迫模型生成 32768 token，只消除“先用已知不足的上限试一次”的重复流程。
+  CONSISTENCY_CHECK_MIN: envInt('LLM_CC_MAXTOKENS_MIN', 32768),
+  CONSISTENCY_CHECK_MAX: envInt('LLM_CC_MAXTOKENS_MAX', 32768),
   CONSISTENCY_CHECK_BASE: envInt('LLM_CC_MAXTOKENS_BASE', 4096),
   CONSISTENCY_CHECK_PER_CONFLICT: envInt('LLM_CC_MAXTOKENS_PER_CONFLICT', 1024),
 
