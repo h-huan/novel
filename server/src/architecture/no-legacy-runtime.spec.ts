@@ -13,6 +13,13 @@ const SKIP_SEGMENTS = [
   `${path.sep}node_modules${path.sep}`,
 ];
 
+// schema-reconciler is the one allowed cleanup boundary for retired database
+// tables. Mentioning a retired table there means "drop it from old databases",
+// not "keep the retired runtime alive". No other active source gets this waiver.
+const LEGACY_CLEANUP_FILES = new Set([
+  path.join('server', 'src', 'database', 'schema-reconciler.ts'),
+]);
+
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx']);
 
 function sourceFiles(root: string): string[] {
@@ -58,9 +65,11 @@ describe('active runtime contains no retired creation or Canon-write flows', () 
     const violations: string[] = [];
     for (const root of activeRoots) {
       for (const file of sourceFiles(root)) {
+        const relative = path.relative(repoRoot, file);
+        if (LEGACY_CLEANUP_FILES.has(relative)) continue;
         const text = stripComments(fs.readFileSync(file, 'utf8'));
         for (const token of forbidden) {
-          if (text.includes(token)) violations.push(`${path.relative(repoRoot, file)} -> ${token}`);
+          if (text.includes(token)) violations.push(`${relative} -> ${token}`);
         }
       }
     }
