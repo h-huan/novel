@@ -12,7 +12,9 @@ const valueOf = (name) => {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
 };
 
-const projectId = valueOf('--project') || process.env.VERIFY_PROJECT_ID || null;
+const legacyProjectId = valueOf('--project') || process.env.VERIFY_PROJECT_ID || null;
+const shortProjectId = valueOf('--short-project') || process.env.VERIFY_SHORT_PROJECT_ID || null;
+const longProjectId = valueOf('--long-project') || process.env.VERIFY_LONG_PROJECT_ID || null;
 const baseUrl = (valueOf('--base') || process.env.VERIFY_BASE_URL || 'http://127.0.0.1:3100/api/v1').replace(/\/$/, '');
 const runFull = has('--full');
 const runE2E = has('--e2e');
@@ -21,6 +23,15 @@ const outDir = path.join(root, 'verification');
 fs.mkdirSync(outDir, { recursive: true });
 
 const now = new Date().toISOString();
+const dualMode = Boolean(shortProjectId || longProjectId);
+const projectTargets = dualMode
+  ? [
+      shortProjectId ? { key: 'short', label: '短篇', id: shortProjectId, expectedType: 'short_story' } : null,
+      longProjectId ? { key: 'long', label: '长篇', id: longProjectId, expectedType: 'long_novel' } : null,
+    ].filter(Boolean)
+  : legacyProjectId
+    ? [{ key: 'project', label: '项目', id: legacyProjectId, expectedType: null }]
+    : [];
 
 function runProcess(label, cwd, command, commandArgs) {
   const started = Date.now();
@@ -43,8 +54,8 @@ function runProcess(label, cwd, command, commandArgs) {
   };
 }
 
-function git(args) {
-  const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+function git(gitArgs) {
+  const r = spawnSync('git', gitArgs, { cwd: root, encoding: 'utf8' });
   return r.status === 0 ? String(r.stdout || '').trim() : null;
 }
 
@@ -119,6 +130,57 @@ function runSummary(run) {
   ]);
 }
 
+async function inspectProject(target) {
+  const projectId = target.id;
+  const [projectRes, chaptersRes, runsRes, cockpitRes, analyticsRes] = await Promise.all([
+    request(`/projects/${encodeURIComponent(projectId)}`),
+    request(`/projects/${encodeURIComponent(projectId)}/chapters`),
+    request(`/generation-metrics/runs?projectId=${encodeURIComponent(projectId)}&limit=200`),
+    request(`/generation-metrics/cockpit?projectId=${encodeURIComponent(projectId)}`),
+    request(`/platform-analytics/overview?projectId=${encodeURIComponent(projectId)}&days=30`),
+  ]);
+
+  const project = unwrap(projectRes.data);
+  const chapterRows = asArray(chaptersRes.data).slice().sort((a, b) => {
+    const ai = Number(a.chapter_index ?? a.chapterIndex ?? a.index ?? a.order ?? 0);
+    const bi = Number(b.chapter_index ?? b.chapterIndex ?? b.index ?? b.order ?? 0);
+    return ai - bi;
+  });
+  const runRows = asArray(runsRes.data);
+  const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
+  const projectType = String(project?.type ?? constitution?.projectType ?? '').trim() || null;
+  const firstChapterIndex = Number(chapterRows[0]?.chapter_index ?? chapterRows[0]?.chapterIndex ?? chapterRows[0]?.index ?? chapterRows[0]?.order ?? NaN);
+  const firstChapterRun = Number.isFinite(firstChapterIndex)
+    ? runRows.find((run) => String(run.stage ?? '').toLowerCase() === 'chapter'
+      && Number(run.chapter_index ?? run.chapterIndex ?? NaN) === firstChapterIndex)
+    : null;
+
+  return {
+    key: target.key,
+    label: target.label,
+    expectedType: target.expectedType,
+    project: projectRes.ok ? {
+      id: project?.id ?? projectId,
+      title: project?.title ?? null,
+      status: project?.status ?? null,
+      type: projectType,
+      typeMatches: target.expectedType ? projectType === target.expectedType : true,
+      targetPlatform: project?.targetPlatform ?? constitution?.targetPlatform ?? null,
+      constitutionRevision: constitution?.revision ?? null,
+      confirmedStoryPresent: Boolean(constitution?.confirmedStory),
+    } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
+    chapters: {
+      count: chapterRows.length,
+      first: chapterSummary(chapterRows[0]),
+      latest: chapterSummary(chapterRows[chapterRows.length - 1]),
+    },
+    firstChapterRun: runSummary(firstChapterRun),
+    latestRun: runSummary(runRows[0]),
+    cockpit: cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` },
+    platformAnalytics: analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` },
+  };
+}
+
 const tests = [];
 if (runFull) {
   const server = path.join(root, 'server');
@@ -156,6 +218,9 @@ const standardMismatch = standards.filter((s) => {
   source: s.source ?? null,
 }));
 
+const inspectedProjects = {};
+for (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);
+
 const runtime = {
   health,
   standards: {
@@ -164,55 +229,19 @@ const runtime = {
     consistent: standardsResponse.ok && standardMismatch.length === 0,
     mismatches: standardMismatch,
   },
-  project: null,
-  chapters: null,
-  firstChapterRun: null,
-  latestRun: null,
-  cockpit: null,
-  platformAnalytics: null,
+  projects: inspectedProjects,
 };
 
-if (projectId) {
-  const [projectRes, chaptersRes, runsRes, cockpitRes, analyticsRes] = await Promise.all([
-    request(`/projects/${encodeURIComponent(projectId)}`),
-    request(`/projects/${encodeURIComponent(projectId)}/chapters`),
-    request(`/generation-metrics/runs?projectId=${encodeURIComponent(projectId)}&limit=200`),
-    request(`/generation-metrics/cockpit?projectId=${encodeURIComponent(projectId)}`),
-    request(`/platform-analytics/overview?projectId=${encodeURIComponent(projectId)}&days=30`),
-  ]);
-
-  const project = unwrap(projectRes.data);
-  const chapterRows = asArray(chaptersRes.data).slice().sort((a, b) => {
-    const ai = Number(a.chapter_index ?? a.chapterIndex ?? a.index ?? a.order ?? 0);
-    const bi = Number(b.chapter_index ?? b.chapterIndex ?? b.index ?? b.order ?? 0);
-    return ai - bi;
+// Keep the legacy single-project shape for tools that already consume latest.json.
+if (!dualMode && inspectedProjects.project) {
+  Object.assign(runtime, {
+    project: inspectedProjects.project.project,
+    chapters: inspectedProjects.project.chapters,
+    firstChapterRun: inspectedProjects.project.firstChapterRun,
+    latestRun: inspectedProjects.project.latestRun,
+    cockpit: inspectedProjects.project.cockpit,
+    platformAnalytics: inspectedProjects.project.platformAnalytics,
   });
-  const runRows = asArray(runsRes.data);
-  const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
-
-  runtime.project = projectRes.ok ? {
-    id: project?.id ?? projectId,
-    title: project?.title ?? null,
-    status: project?.status ?? null,
-    type: project?.type ?? null,
-    targetPlatform: project?.targetPlatform ?? constitution?.targetPlatform ?? null,
-    constitutionRevision: constitution?.revision ?? null,
-    confirmedStoryPresent: Boolean(constitution?.confirmedStory),
-  } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` };
-  runtime.chapters = {
-    count: chapterRows.length,
-    first: chapterSummary(chapterRows[0]),
-    latest: chapterSummary(chapterRows[chapterRows.length - 1]),
-  };
-  const firstChapterIndex = Number(chapterRows[0]?.chapter_index ?? chapterRows[0]?.chapterIndex ?? chapterRows[0]?.index ?? chapterRows[0]?.order ?? NaN);
-  const firstChapterRun = Number.isFinite(firstChapterIndex)
-    ? runRows.find((run) => String(run.stage ?? '').toLowerCase() === 'chapter'
-      && Number(run.chapter_index ?? run.chapterIndex ?? NaN) === firstChapterIndex)
-    : null;
-  runtime.firstChapterRun = runSummary(firstChapterRun);
-  runtime.latestRun = runSummary(runRows[0]);
-  runtime.cockpit = cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` };
-  runtime.platformAnalytics = analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` };
 }
 
 const gitInfo = {
@@ -222,22 +251,33 @@ const gitInfo = {
 };
 
 const failedTests = tests.filter((x) => x.status !== 'passed');
-const firstChapter = runtime.chapters?.first ?? null;
 const runtimeProblems = [];
 if (!health.ok) runtimeProblems.push('server_unavailable');
 if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
-if (projectId) {
-  if (!runtime.project || runtime.project.error) runtimeProblems.push('project_unavailable');
-  if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push('first_chapter_empty');
-  const firstRun = runtime.firstChapterRun;
+if (dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
+
+for (const target of projectTargets) {
+  const result = inspectedProjects[target.key];
+  const prefix = target.key;
+  if (!result?.project || result.project.error) {
+    runtimeProblems.push(`${prefix}_project_unavailable`);
+    continue;
+  }
+  if (target.expectedType && result.project.type !== target.expectedType) {
+    runtimeProblems.push(`${prefix}_project_type_${result.project.type || 'unknown'}`);
+  }
+  if (!result.project.confirmedStoryPresent) runtimeProblems.push(`${prefix}_confirmed_story_missing`);
+  const firstChapter = result.chapters?.first ?? null;
+  if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
+  const firstRun = result.firstChapterRun;
   if (!firstRun) {
-    runtimeProblems.push('first_chapter_run_missing');
+    runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
   } else {
     const runStatus = String(firstRun.status ?? '').toLowerCase();
-    if (runStatus !== 'success') runtimeProblems.push(`first_chapter_run_${runStatus || 'unknown'}`);
+    if (runStatus !== 'success') runtimeProblems.push(`${prefix}_first_chapter_run_${runStatus || 'unknown'}`);
     const gate = String(firstRun.gate_status ?? firstRun.gateStatus ?? '').toLowerCase();
-    if (!gate) runtimeProblems.push('first_chapter_gate_missing');
-    else if (!['passed', 'pass', 'accepted'].includes(gate)) runtimeProblems.push(`first_chapter_gate_${gate}`);
+    if (!gate) runtimeProblems.push(`${prefix}_first_chapter_gate_missing`);
+    else if (!['passed', 'pass', 'accepted'].includes(gate)) runtimeProblems.push(`${prefix}_first_chapter_gate_${gate}`);
   }
 }
 
@@ -245,7 +285,15 @@ const report = {
   generatedAt: now,
   command: process.argv.join(' '),
   git: gitInfo,
-  options: { projectId, baseUrl, fullTests: runFull, e2e: runE2E },
+  options: {
+    projectId: legacyProjectId,
+    shortProjectId,
+    longProjectId,
+    mode: dualMode ? 'short_and_long' : legacyProjectId ? 'single_project' : 'repository_only',
+    baseUrl,
+    fullTests: runFull,
+    e2e: runE2E,
+  },
   tests,
   runtime,
   verdict: {
@@ -264,14 +312,29 @@ const testLines = tests.length
 const standardLine = standardsResponse.ok
   ? `${runtime.standards.consistent ? 'PASS' : 'FAIL'} · code seed=${codeSeedVersion ?? 'unknown'} · active=${standards.length}`
   : `UNAVAILABLE · ${standardsResponse.error ?? `HTTP ${standardsResponse.status}`}`;
-const firstLine = firstChapter
-  ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
-  : projectId ? 'FAIL · 未找到第一章' : '未指定项目';
-const firstChapterGateLine = runtime.firstChapterRun
-  ? `${runtime.firstChapterRun.gate_status ?? runtime.firstChapterRun.gateStatus ?? 'missing'} · run=${runtime.firstChapterRun.id ?? 'unknown'} · status=${runtime.firstChapterRun.status ?? 'unknown'} · model=${runtime.firstChapterRun.model ?? 'unknown'}`
-  : projectId ? 'FAIL · 未找到第一章 chapter generation run' : '未指定项目';
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 第一章：${firstLine}\n- 第一章 Gate：${firstChapterGateLine}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 如果需要检查真实小说，请使用 --project <项目ID> 并先在应用中完成一次真实生成/复检。\n`;
+function projectMarkdown(target) {
+  const result = inspectedProjects[target.key];
+  if (!result) return `### ${target.label}\n\n- 未指定项目 ID`;
+  if (result.project?.error) return `### ${target.label}\n\n- 项目：FAIL · ${result.project.error}`;
+  const firstChapter = result.chapters?.first ?? null;
+  const firstLine = firstChapter
+    ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
+    : 'FAIL · 未找到第一章';
+  const gateLine = result.firstChapterRun
+    ? `${result.firstChapterRun.gate_status ?? result.firstChapterRun.gateStatus ?? 'missing'} · run=${result.firstChapterRun.id ?? 'unknown'} · status=${result.firstChapterRun.status ?? 'unknown'} · model=${result.firstChapterRun.model ?? 'unknown'}`
+    : 'FAIL · 未找到第一章 chapter generation run';
+  const typeLine = target.expectedType
+    ? `${result.project.typeMatches ? 'PASS' : 'FAIL'} · expected=${target.expectedType} · actual=${result.project.type ?? 'unknown'}`
+    : `${result.project.type ?? 'unknown'}`;
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+}
+
+const projectSections = projectTargets.length
+  ? projectTargets.map(projectMarkdown).join('\n\n')
+  : '未指定项目；本次仅执行仓库/服务健康检查。';
+
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 验收模式：${report.options.mode}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告每次运行覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 同时验收真实短篇和长篇时使用 --short-project <短篇ID> --long-project <长篇ID>；两个项目会进入同一份 latest 报告，不会互相覆盖。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n- 项目验收要求第一章正文非空、存在对应 chapter generation run、run=success、Gate=passed/accepted，并且 Creative Constitution 已保存 confirmedStory。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');

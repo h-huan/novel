@@ -79,32 +79,38 @@ npm run test:e2e
 
 ## 本地真实运行验收
 
-仓库根目录执行：
+单本兼容模式仍可使用：
 
 ```powershell
 node verify-local.mjs --project <项目ID>
 ```
 
+完成一个真实短篇和一个真实长篇后，推荐一次同时验收：
+
+```powershell
+node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID>
+```
+
 如果同时执行完整仓库测试：
 
 ```powershell
-node verify-local.mjs --project <项目ID> --full
+node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID> --full
 ```
 
 如果还要运行 E2E：
 
 ```powershell
-node verify-local.mjs --project <项目ID> --full --e2e
+node verify-local.mjs --short-project <短篇项目ID> --long-project <长篇项目ID> --full --e2e
 ```
 
-脚本会自动覆盖生成：
+脚本始终覆盖生成且只需要提供这两个文件：
 
 ```text
 verification/latest.json
 verification/latest.md
 ```
 
-这两个文件是本地验收产物，已加入 `.gitignore`，默认只保留最新一次。把它们提供给审查者即可判断本地真实模型、数据库、正文落库和 Gate 状态，无需依赖截图。
+双项目模式会把短篇和长篇同时写进同一份报告，不会因为第二次验收覆盖第一次的项目结果。报告检查项目类型、`confirmedStory`、第一章正文、对应 chapter generation run 与 Gate 状态；这两个文件已加入 `.gitignore`，默认只保留最新一次。把它们提供给审查者即可判断本地真实模型、数据库、正文落库和 Gate 状态，无需依赖截图。
 
 ## 数据与迁移
 
