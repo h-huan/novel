@@ -7458,6 +7458,12 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
             );
             taskWarnings.push(...fsResult.warnings);
             if (fsResult.data) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,
+                runId: fsResult.runId,
+                expectedStages: ['outline'],
+                expectedScenarios: ['foreshadowing'],
+              });
               const allFs: any[] = [
                 ...(fsResult.data.globalForeshadowings || []).map((f: any) => ({ ...f, scope: 'global', importance: f.importance || 3 })),
                 ...(fsResult.data.longForeshadowings || []).map((f: any) => ({ ...f, scope: 'volume', importance: f.importance || 2 })),
