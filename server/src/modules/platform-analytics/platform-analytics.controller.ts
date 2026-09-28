@@ -4,7 +4,7 @@
  *   GET /platform-analytics/benchmark?projectId=&storyType=&platform=
  *        行业基线 + 本地高质量样本动态基准；没有销量证据时不冒充商业爆款
  *   GET /platform-analytics/health?days=30    轻量健康度（工作台概览）
- *   GET /platform-analytics/bootstrap         启动/运行状态（迁移版本、执行标准、自归纳、运行时长）
+ *   GET /platform-analytics/bootstrap         启动/运行状态（迁移版本、只读执行标准版本、运行时长）
  */
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
