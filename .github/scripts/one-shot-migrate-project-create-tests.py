@@ -139,4 +139,9 @@ new_world_two = """    const world = await request.post(`${BASE}/projects/${proj
     });
 """
 text = once(text, old_world_two, new_world_two, 'writing flow world fixture two')
+status_assertion = "    expect(world.status(), await world.text()).toBe(200);\n"
+status_count = text.count(status_assertion)
+if status_count != 2:
+    raise SystemExit(f'writing flow world create status: expected 2 occurrences, found {status_count}')
+text = text.replace(status_assertion, "    expect(world.status(), await world.text()).toBe(201);\n")
 write(path, text)
