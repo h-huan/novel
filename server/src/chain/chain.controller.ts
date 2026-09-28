@@ -6983,6 +6983,12 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
 
           let charCount = 0;
           if (generatedCharacters.length > 0) {
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId,
+              runId: charResult.runId,
+              expectedStages: ['character'],
+              expectedScenarios: ['character_design'],
+            });
             for (const ch of generatedCharacters) {
               if (!ch.name) continue;
               try {
