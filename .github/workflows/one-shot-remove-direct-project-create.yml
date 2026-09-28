@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/one-shot-remove-direct-project-create.yml
+      - .github/scripts/one-shot-remove-direct-project-create.py
+      - .github/scripts/one-shot-migrate-project-create-tests.py
 
 permissions:
   contents: write
