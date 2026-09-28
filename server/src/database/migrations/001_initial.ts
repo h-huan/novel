@@ -591,28 +591,6 @@ CREATE TABLE IF NOT EXISTS generation_step_metrics (
       run_id TEXT REFERENCES generation_runs(id) ON DELETE SET NULL
     );
 
--- [table] idea_drafts
-CREATE TABLE IF NOT EXISTS idea_drafts (
-      id TEXT PRIMARY KEY,
-      raw_idea TEXT NOT NULL,
-      title TEXT DEFAULT '',
-      project_type TEXT NOT NULL DEFAULT 'long_novel',
-      target_platform TEXT DEFAULT 'generic',
-      custom_platform_note TEXT DEFAULT '',
-      target_words INTEGER DEFAULT 0,
-      description TEXT DEFAULT '',
-      status TEXT DEFAULT 'draft',
-      questions_json TEXT DEFAULT '[]',
-      answers_json TEXT DEFAULT '[]',
-      refined_idea_json TEXT DEFAULT '{}',
-      maturity_score INTEGER DEFAULT 0,
-      maturity_report_json TEXT DEFAULT '{}',
-      confirmed_idea TEXT DEFAULT '',
-      converted_project_id TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
 -- [table] import_export_logs
 CREATE TABLE IF NOT EXISTS import_export_logs (
       id TEXT PRIMARY KEY,
@@ -685,44 +663,6 @@ CREATE TABLE IF NOT EXISTS model_configs (
       actual_cost REAL DEFAULT 0,
       api_key_id TEXT,
       is_default INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
--- [table] module_standard_versions
-CREATE TABLE IF NOT EXISTS module_standard_versions (
-      id TEXT PRIMARY KEY,
-      module_key TEXT NOT NULL,
-      module_name TEXT NOT NULL DEFAULT '',
-      version INTEGER NOT NULL DEFAULT 1,
-      snapshot_json TEXT NOT NULL,
-      change_note TEXT NOT NULL DEFAULT '',
-      trigger TEXT NOT NULL DEFAULT 'seed',
-      metrics_snapshot_json TEXT,
-      created_at TEXT NOT NULL
-    );
-
--- [table] module_standards
-CREATE TABLE IF NOT EXISTS module_standards (
-      module_key TEXT PRIMARY KEY,
-      module_name TEXT NOT NULL,
-      category TEXT NOT NULL DEFAULT 'creation',
-      scenarios TEXT NOT NULL DEFAULT '[]',
-      business_tables TEXT NOT NULL DEFAULT '[]',
-      purpose TEXT NOT NULL DEFAULT '',
-      steps_json TEXT NOT NULL DEFAULT '[]',
-      requirements_json TEXT NOT NULL DEFAULT '[]',
-      rules_json TEXT NOT NULL DEFAULT '[]',
-      quality_bar TEXT NOT NULL DEFAULT '',
-      inputs_json TEXT NOT NULL DEFAULT '[]',
-      outputs_json TEXT NOT NULL DEFAULT '[]',
-      version INTEGER NOT NULL DEFAULT 1,
-      change_note TEXT NOT NULL DEFAULT '',
-      source TEXT NOT NULL DEFAULT 'seed',
-      status TEXT NOT NULL DEFAULT 'active',
-      last_summarized_at TEXT,
-      metrics_snapshot_json TEXT,
-      seed_baseline_version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -846,20 +786,6 @@ CREATE TABLE IF NOT EXISTS prompt_templates (
       is_builtin INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
-    );
-
--- [table] standard_summarization_runs
-CREATE TABLE IF NOT EXISTS standard_summarization_runs (
-      id TEXT PRIMARY KEY,
-      module_key TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'running',
-      trigger TEXT NOT NULL DEFAULT 'scheduled',
-      from_version INTEGER,
-      to_version INTEGER,
-      change_note TEXT,
-      error TEXT,
-      started_at TEXT NOT NULL,
-      finished_at TEXT
     );
 
 -- [table] state_confirmations
@@ -1456,12 +1382,6 @@ CREATE INDEX IF NOT EXISTS idx_gsm_project_time
 CREATE INDEX IF NOT EXISTS idx_gsm_step_time
       ON generation_step_metrics(step_key, created_at);
 
--- [index] idx_idea_drafts_converted
-CREATE INDEX IF NOT EXISTS idx_idea_drafts_converted ON idea_drafts(converted_project_id);
-
--- [index] idx_idea_drafts_status
-CREATE INDEX IF NOT EXISTS idx_idea_drafts_status ON idea_drafts(status);
-
 -- [index] idx_location_knowledge_profiles_project
 CREATE INDEX IF NOT EXISTS idx_location_knowledge_profiles_project ON location_knowledge_profiles(project_id);
 
@@ -1476,10 +1396,6 @@ CREATE INDEX IF NOT EXISTS idx_map_parent ON map_points(parent_id);
 
 -- [index] idx_map_project
 CREATE INDEX IF NOT EXISTS idx_map_project ON map_points(project_id);
-
--- [index] idx_msv_module_time
-CREATE INDEX IF NOT EXISTS idx_msv_module_time
-      ON module_standard_versions(module_key, created_at);
 
 -- [index] idx_org_parent
 CREATE INDEX IF NOT EXISTS idx_org_parent ON organizations(parent_id);
@@ -1517,12 +1433,6 @@ CREATE INDEX IF NOT EXISTS idx_sc_project_status ON state_confirmations(project_
 
 -- [index] idx_sc_target
 CREATE INDEX IF NOT EXISTS idx_sc_target ON state_confirmations(project_id, target_type, target_id);
-
--- [index] idx_ssr_module_time
-CREATE INDEX IF NOT EXISTS idx_ssr_module_time ON standard_summarization_runs(module_key, started_at);
-
--- [index] idx_ssr_status
-CREATE INDEX IF NOT EXISTS idx_ssr_status ON standard_summarization_runs(status);
 
 -- [index] idx_state_impact_items_report
 CREATE INDEX IF NOT EXISTS idx_state_impact_items_report
@@ -1815,20 +1725,16 @@ export function down(db: DatabaseSync): void {
   DROP TABLE IF EXISTS "quality_benchmark_samples";
   DROP TABLE IF EXISTS "generation_step_metrics";
   DROP TABLE IF EXISTS "generation_runs";
-  DROP TABLE IF EXISTS "idea_drafts";
   DROP TABLE IF EXISTS "import_export_logs";
   DROP TABLE IF EXISTS "location_knowledge_profiles";
   DROP TABLE IF EXISTS "location_knowledge_relations";
   DROP TABLE IF EXISTS "map_points";
   DROP TABLE IF EXISTS "model_configs";
-  DROP TABLE IF EXISTS "module_standard_versions";
-  DROP TABLE IF EXISTS "module_standards";
   DROP TABLE IF EXISTS "organizations";
   DROP TABLE IF EXISTS "outlines";
   DROP TABLE IF EXISTS "plot_progress";
   DROP TABLE IF EXISTS "projects";
   DROP TABLE IF EXISTS "prompt_templates";
-  DROP TABLE IF EXISTS "standard_summarization_runs";
   DROP TABLE IF EXISTS "state_confirmations";
   DROP TABLE IF EXISTS "state_impact_items";
   DROP TABLE IF EXISTS "state_impact_reports";
