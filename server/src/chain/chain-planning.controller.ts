@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Sse } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Param, Post, Sse } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
 import { DatabaseService } from '../database/database.service';
@@ -14,6 +14,8 @@ import { readConstitution } from '../modules/project/creative-constitution';
 @ApiTags('chain')
 @Controller('chain')
 export class ChainPlanningController {
+  private readonly logger = new Logger(ChainPlanningController.name);
+
   constructor(
     private readonly chain: ChainController,
     private readonly database?: DatabaseService,
@@ -26,6 +28,39 @@ export class ChainPlanningController {
     // 唯一 Gate 已在 ChainController.runIdeaDiscovery 内执行，并能把失败原因反馈给同一轮补生。
     // HTTP adapter 只验证“通过凭证”，绝不再执行第二套评分/淘汰逻辑。
     const result: any = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
+    if (this.database) {
+      try {
+        await this.database.dualWrite('latest_idea_discovery_audit', {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          request: {
+            storyType: dto.storyType ?? null,
+            platform: dto.platform ?? null,
+            storyCategory: dto.storyCategory ?? null,
+            targetAudience: dto.targetAudience ?? null,
+            requestedCount: desiredCount,
+          },
+          success: result?.success === true,
+          totalIdeas: Number(result?.totalIdeas ?? (Array.isArray(result?.ideas) ? result.ideas.length : 0)) || 0,
+          qualityWarning: result?.qualityWarning ?? null,
+          error: result?.error ?? null,
+          appealGate: result?.appealGate ?? null,
+          acceptedIdeas: Array.isArray(result?.ideas)
+            ? result.ideas.slice(0, desiredCount).map((idea: any) => ({
+                title: idea?.title ?? null,
+                hook: idea?.hook ?? null,
+                coreConflict: idea?.coreConflict ?? idea?.conflict ?? null,
+                uniquePoint: idea?.uniquePoint ?? idea?.uniqueSelling ?? idea?.storyCore ?? null,
+                mainReversal: idea?.mainReversal ?? null,
+                noveltyProof: idea?.noveltyProof ?? null,
+                ideaAppealGate: idea?.ideaAppealGate ?? null,
+              }))
+            : [],
+        });
+      } catch (error) {
+        this.logger.warn(`灵感发现诊断落库失败（不影响题材返回）：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     if (!result?.success || !Array.isArray(result?.ideas)) return result;
 
     const accepted = result.ideas
@@ -48,6 +83,26 @@ export class ChainPlanningController {
         ? `只返回 ${accepted.length}/${desiredCount} 个通过展示 Gate 的题材；弱候选已淘汰，不用占位内容补数。`
         : result.qualityWarning,
     };
+  }
+
+  @Get('idea-discovery-diagnostics/latest')
+  getLatestIdeaDiscoveryDiagnostics() {
+    if (!this.database) return { available: false, reason: 'database_unavailable' };
+    try {
+      const db = this.database.getDb();
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='dual_write_store'").get() as any;
+      if (!table) return { available: false, reason: 'no_discovery_audit_yet' };
+      const row = db.prepare(`SELECT data_value, updated_at FROM dual_write_store WHERE data_key=? ORDER BY updated_at DESC LIMIT 1`)
+        .get('latest_idea_discovery_audit') as any;
+      if (!row?.data_value) return { available: false, reason: 'no_discovery_audit_yet' };
+      try {
+        return { available: true, updatedAt: row.updated_at ?? null, audit: JSON.parse(String(row.data_value)) };
+      } catch {
+        return { available: false, reason: 'invalid_discovery_audit_json', updatedAt: row.updated_at ?? null };
+      }
+    } catch (error) {
+      return { available: false, reason: 'discovery_audit_read_failed', error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   @Post('create-project-async')

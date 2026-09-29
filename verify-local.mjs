@@ -282,6 +282,7 @@ if (runFull) {
 }
 
 const health = await request('/health');
+const ideaDiscoveryResponse = await request('/chain/idea-discovery-diagnostics/latest');
 const standardsResponse = await request('/module-standards');
 const standards = asArray(standardsResponse.data);
 const codeSeedVersion = seedVersion();
@@ -302,6 +303,9 @@ for (const target of projectTargets) inspectedProjects[target.key] = await inspe
 
 const runtime = {
   health,
+  ideaDiscovery: ideaDiscoveryResponse.ok
+    ? unwrap(ideaDiscoveryResponse.data)
+    : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` },
   standards: {
     codeSeedVersion,
     activeCount: standards.length,
@@ -337,6 +341,9 @@ if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push(
 if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
 if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
 if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
+if (!runFull && runtime.ideaDiscovery?.available === true && runtime.ideaDiscovery?.audit?.success === false) {
+  runtimeProblems.push('latest_idea_discovery_failed');
+}
 
 for (const target of projectTargets) {
   const result = inspectedProjects[target.key];

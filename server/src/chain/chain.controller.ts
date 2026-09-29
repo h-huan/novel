@@ -5076,6 +5076,24 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           const passed = uniqueIssues.length === 0;
           candidateAssessments.push({
             title: String(candidate?.title || ''),
+            // 未通过候选不会进入前端，但必须保留足够文本证据供 latest.json 复盘 Gate 是否误杀。
+            candidate: {
+              title: String(candidate?.title || ''),
+              hook: String(candidate?.hook || ''),
+              description: String(candidate?.description || ''),
+              protagonist: String(candidate?.protagonist || ''),
+              coreConflict: String(candidate?.coreConflict || candidate?.conflict || ''),
+              uniquePoint: String(candidate?.uniquePoint || candidate?.uniqueSelling || candidate?.storyCore || ''),
+              mainReversal: String(candidate?.mainReversal || ''),
+              noveltyProof: candidate?.noveltyProof ?? null,
+              storyCategory: candidate?.storyCategory ?? dto.storyCategory,
+              storyTone: candidate?.storyTone ?? dto.storyTone,
+              writingStyle: candidate?.writingStyle ?? dto.writingStyle,
+              webNovelGenre: candidate?.webNovelGenre ?? dto.webNovelGenre,
+              pov: candidate?.pov ?? dto.pov,
+              submissionTags: candidate?.submissionTags ?? dto.submissionTags,
+              plotTags: candidate?.plotTags ?? dto.plotTags,
+            },
             passed,
             issues: uniqueIssues,
             warnings: appealAssessment.warnings,
