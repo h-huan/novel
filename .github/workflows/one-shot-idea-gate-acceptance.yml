@@ -1,0 +1,38 @@
+name: One-shot idea gate acceptance fixture
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, 'run idea gate acceptance fixture fix')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch fixture
+        run: python .github/scripts/patch-idea-gate-acceptance.py
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Verify acceptance
+        working-directory: server
+        run: |
+          npm run typecheck
+          npm run test:acceptance
+      - name: Remove one-shot artifacts
+        run: git rm .github/workflows/one-shot-idea-gate-acceptance.yml .github/scripts/patch-idea-gate-acceptance.py
+      - name: Commit fixture fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 1
+          git commit -m "test: align acceptance fixture with single idea gate"
+          git push
