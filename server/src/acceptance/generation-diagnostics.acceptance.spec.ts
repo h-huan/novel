@@ -8,6 +8,7 @@ import { SEED_BASELINE_VERSION } from '../modules/module-standards/module-standa
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import { RealLLMService } from '../chain/real-llm.service';
 import { ChainController } from '../chain/chain.controller';
+import { IdeaAppealGateService } from '../chain/idea-appeal-gate.service';
 import { updateConstitution } from '../modules/project/creative-constitution';
 import { HttpException } from '@nestjs/common';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
@@ -54,7 +55,7 @@ it('reports one model configuration failure and shows it on the workbench before
     const llm = new RealLLMService(router as any, metrics);
     const generate = vi.spyOn(llm, 'generate');
     const controller = Object.create(ChainController.prototype);
-    Object.assign(controller, { realLLM: llm, logger: { log: vi.fn(), error: vi.fn() } });
+    Object.assign(controller, { realLLM: llm, ideaAppealGate: new IdeaAppealGateService(), logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
     const result = await controller.ideaDiscover({ storyType: 'short_story', platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards });
     expect(result).toMatchObject({ success: false, ideas: [], error: '灵感场景未配置模型，请前往设置' });
     expect(generate).not.toHaveBeenCalled();
@@ -109,7 +110,7 @@ it('generates a complete idea batch with one configured-model call and reuses an
   };
   const controller = Object.create(ChainController.prototype);
   const db = { prepare: vi.fn(() => ({ all: vi.fn(() => []) })) };
-  Object.assign(controller, { realLLM, db: { getDb: () => db }, logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+  Object.assign(controller, { realLLM, db: { getDb: () => db }, ideaAppealGate: new IdeaAppealGateService(), logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
   const request = { storyType: 'short_story' as const, platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards };
 
   const [first, duplicate] = await Promise.all([controller.ideaDiscover(request), controller.ideaDiscover(request)]) as any[];
@@ -161,7 +162,7 @@ it('blocks idea discovery without a platform/category execution standard instead
   const database = { getDb: () => ({ prepare: () => ({ all: () => [] }) }) } as any;
   const realLLM = { assertScenarioModelConfigured: vi.fn(), generate: vi.fn(async () => ({ content: '{}' })) };
   const controller = Object.create(ChainController.prototype);
-  Object.assign(controller, { realLLM, db: database, logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+  Object.assign(controller, { realLLM, db: database, ideaAppealGate: new IdeaAppealGateService(), logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
 
   const blocked = async (payload: Record<string, unknown>, expected: string) => {
     const error = await controller.ideaDiscover(payload as any).catch((e: unknown) => e);
@@ -193,7 +194,7 @@ it('injects the user-declared custom platform standard into the idea prompt as t
   };
   const db = { prepare: vi.fn(() => ({ all: vi.fn(() => []) })) };
   const controller = Object.create(ChainController.prototype);
-  Object.assign(controller, { realLLM, db: { getDb: () => db }, logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+  Object.assign(controller, { realLLM, db: { getDb: () => db }, ideaAppealGate: new IdeaAppealGateService(), logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
 
   const result: any = await controller.ideaDiscover({
     storyType: 'short_story', platform: 'custom', storyCategory: '现实悬疑',
