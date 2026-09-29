@@ -173,6 +173,63 @@ describe('IdempotentRealLLMService', () => {
     }
   });
 
+  it('keeps structured Canon provenance when provider text normalization defeats exact output matching', async () => {
+    const { db } = fixture();
+    const stage = qualityStage('world_building', 'world_foundation');
+    const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockImplementation(async () => {
+      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        'world-physical-run','p',stage,'world_building','success',1,'ctx','prompt',null,
+        '{"world":"persisted-normalized"}','test-model',new Date(Date.now() + 1000).toISOString(),
+      );
+      return { content: '{ "world" : "caller-normalized" }', model: 'test-model', latency: 12 } as any;
+    });
+    try {
+      const service = serviceFor(db);
+      const response = await service.generate({
+        prompt: '生成世界观JSON',
+        scenario: 'world_building',
+        deferQualityGate: true,
+        metrics: { projectId: 'p', stepKey: 'world_foundation' },
+      });
+
+      expect(superGenerate).toHaveBeenCalledTimes(1);
+      expect(response.runId).toBe('world-physical-run');
+    } finally {
+      superGenerate.mockRestore();
+      db.close();
+    }
+  });
+
+  it('fails closed when more than one same-stage run finishes inside the provenance window', async () => {
+    const { db } = fixture();
+    const stage = qualityStage('world_building', 'world_foundation');
+    const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockImplementation(async () => {
+      const finishedAt = new Date(Date.now() + 1000).toISOString();
+      for (const id of ['world-run-a', 'world-run-b']) {
+        db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          id,'p',stage,'world_building','success',1,'ctx','prompt',null,
+          `{"world":"${id}"}`,'test-model',finishedAt,
+        );
+      }
+      return { content: '{"world":"unmatched-caller-output"}', model: 'test-model', latency: 12 } as any;
+    });
+    try {
+      const service = serviceFor(db);
+      const response = await service.generate({
+        prompt: '生成世界观JSON',
+        scenario: 'world_building',
+        deferQualityGate: true,
+        metrics: { projectId: 'p', stepKey: 'world_foundation' },
+      });
+
+      expect(superGenerate).toHaveBeenCalledTimes(1);
+      expect(response.runId).toBeUndefined();
+    } finally {
+      superGenerate.mockRestore();
+      db.close();
+    }
+  });
+
   it('does not invent provenance when no completed run matches the fresh output', async () => {
     const { db } = fixture();
     const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockResolvedValue({
