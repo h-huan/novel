@@ -28,6 +28,7 @@ describe('idea discovery hook contract', () => {
     const directive = ideaRecoveryDirective('short_story', [
       '核心钩子缺少明确代价、时限或失去风险',
       '核心钩子没有迫使主角采取具体行动',
+      '核心钩子没有迫使主角采取具体行动',
       '开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现',
     ], 3);
     expect(directive).toContain('直接重写 hook 本字段');
@@ -35,5 +36,6 @@ describe('idea discovery hook contract', () => {
     expect(directive).toContain('description 前 260 字');
     expect(directive).toContain(`短篇 hook 仍必须满足“四类信号至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类”`);
     expect(directive).toContain('不复写已通过项');
+    expect(directive.match(/核心钩子没有迫使主角采取具体行动/g)).toHaveLength(1);
   });
 });
