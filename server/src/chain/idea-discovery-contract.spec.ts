@@ -26,6 +26,7 @@ describe('idea discovery hook contract', () => {
     expect(directive).toContain('直接重写 hook 本字段');
     expect(directive).toContain('uniquePoint/coreConflict');
     expect(directive).toContain('description 前 260 字');
+    expect(directive).toContain(`短篇 hook 仍必须满足“四类信号至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类”`);
     expect(directive).toContain('不复写已通过项');
   });
 });
