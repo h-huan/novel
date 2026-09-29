@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChainPlanningController } from './chain-planning.controller';
+import { updateConstitution } from '../modules/project/creative-constitution';
 
 const dto = {
   storyType: 'short_story' as const,
@@ -79,5 +80,43 @@ describe('ChainPlanningController idea appeal adapter', () => {
     expect(result.success).toBe(false);
     expect(result.ideas).toEqual([]);
     expect(result.error).toContain('点击/留存前置 Gate');
+  });
+
+  it('returns confirmed story and its reader-experience profile through the recovery payload consumed by latest.json', async () => {
+    const profile = assessment(true).readerExperienceProfile;
+    const constitution: any = updateConstitution({}, {
+      type: 'short_story',
+      targetPlatform: 'fanqie',
+      category: '男频·悬疑脑洞',
+      pov: '第一人称',
+    });
+    constitution.confirmedStory = {
+      title: '遗嘱写着我家的门牌号',
+      hook: '父亲葬礼后，我在遗嘱里看见自家门牌号。',
+      coreConflict: '守住母亲和房子并查清债务真相',
+      mainReversal: '父亲其实替同事承担了被公司转嫁的责任',
+      readerExperienceProfile: profile,
+    };
+    const projectRow = { settings: JSON.stringify({ creativeConstitution: constitution }) };
+    const getGenerationRecovery = vi.fn().mockResolvedValue({ projectId: 'p1', status: 'creating' });
+    const database = {
+      getDb: () => ({ prepare: () => ({ get: () => projectRow }) }),
+    };
+    const controller = new ChainPlanningController(
+      { getGenerationRecovery } as any,
+      { select: vi.fn() } as any,
+      database as any,
+    );
+
+    const result: any = await controller.getGenerationRecovery('p1');
+    expect(result.diagnosticSchemaVersion).toBe(2);
+    expect(result.readerExperienceProfilePresent).toBe(true);
+    expect(result.storySelection).toEqual(expect.objectContaining({
+      title: '遗嘱写着我家的门牌号',
+      readerExperienceProfile: expect.objectContaining({
+        densityMode: '短篇集中兑现',
+        pace: '偏快但保留呼吸段',
+      }),
+    }));
   });
 });
