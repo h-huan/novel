@@ -55,7 +55,13 @@ function serviceFor(db: any) {
   return new IdempotentRealLLMService(router, {} as any, { getDb: () => db } as any);
 }
 
-function seedCachedRun(db: any, request: any, runId: string, output: string) {
+function seedCachedRun(
+  db: any,
+  request: any,
+  runId: string,
+  output: string,
+  finishedAt = '2026-09-27T00:00:00.000Z',
+) {
   const scenario = request.scenario;
   const stepKey = request.metrics.stepKey;
   const chapterIndex = request.metrics.chapterIndex != null ? Number(request.metrics.chapterIndex) : null;
@@ -83,7 +89,7 @@ function seedCachedRun(db: any, request: any, runId: string, output: string) {
   const promptVersion = digest(systemPrompt + JSON.stringify(runtimeConstitution) + standards.digest);
   db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     runId, 'p', stage, scenario, 'success', runtimeConstitution.revision ?? null, contextVersion, promptVersion,
-    chapterIndex, output, 'test-model', '2026-09-27T00:00:00.000Z',
+    chapterIndex, output, 'test-model', finishedAt,
   );
 }
 
@@ -173,24 +179,27 @@ describe('IdempotentRealLLMService', () => {
     }
   });
 
-  it('keeps structured Canon provenance when provider text normalization defeats exact output matching', async () => {
+  it('binds structured Canon provenance by the full request/context fingerprint even when output formatting differs', async () => {
     const { db } = fixture();
-    const stage = qualityStage('world_building', 'world_foundation');
+    const request: any = {
+      prompt: '生成世界观JSON',
+      scenario: 'world_building',
+      deferQualityGate: true,
+      metrics: { projectId: 'p', stepKey: 'world_foundation' },
+    };
     const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockImplementation(async () => {
-      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        'world-physical-run','p',stage,'world_building','success',1,'ctx','prompt',null,
-        '{"world":"persisted-normalized"}','test-model',new Date(Date.now() + 1000).toISOString(),
+      seedCachedRun(
+        db,
+        request,
+        'world-physical-run',
+        '{"world":"persisted-normalized"}',
+        new Date(Date.now() + 1000).toISOString(),
       );
       return { content: '{ "world" : "caller-normalized" }', model: 'test-model', latency: 12 } as any;
     });
     try {
       const service = serviceFor(db);
-      const response = await service.generate({
-        prompt: '生成世界观JSON',
-        scenario: 'world_building',
-        deferQualityGate: true,
-        metrics: { projectId: 'p', stepKey: 'world_foundation' },
-      });
+      const response = await service.generate(request);
 
       expect(superGenerate).toHaveBeenCalledTimes(1);
       expect(response.runId).toBe('world-physical-run');
@@ -200,27 +209,23 @@ describe('IdempotentRealLLMService', () => {
     }
   });
 
-  it('fails closed when more than one same-stage run finishes inside the provenance window', async () => {
+  it('fails closed when more than one identical-fingerprint run finishes inside the physical call', async () => {
     const { db } = fixture();
-    const stage = qualityStage('world_building', 'world_foundation');
+    const request: any = {
+      prompt: '生成世界观JSON',
+      scenario: 'world_building',
+      deferQualityGate: true,
+      metrics: { projectId: 'p', stepKey: 'world_foundation' },
+    };
     const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockImplementation(async () => {
       const finishedAt = new Date(Date.now() + 1000).toISOString();
-      for (const id of ['world-run-a', 'world-run-b']) {
-        db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-          id,'p',stage,'world_building','success',1,'ctx','prompt',null,
-          `{"world":"${id}"}`,'test-model',finishedAt,
-        );
-      }
+      seedCachedRun(db, request, 'world-run-a', '{"world":"a"}', finishedAt);
+      seedCachedRun(db, request, 'world-run-b', '{"world":"b"}', finishedAt);
       return { content: '{"world":"unmatched-caller-output"}', model: 'test-model', latency: 12 } as any;
     });
     try {
       const service = serviceFor(db);
-      const response = await service.generate({
-        prompt: '生成世界观JSON',
-        scenario: 'world_building',
-        deferQualityGate: true,
-        metrics: { projectId: 'p', stepKey: 'world_foundation' },
-      });
+      const response = await service.generate(request);
 
       expect(superGenerate).toHaveBeenCalledTimes(1);
       expect(response.runId).toBeUndefined();
