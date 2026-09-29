@@ -27,20 +27,26 @@ export class ChainPlanningController {
     const result: any = await this.chain.ideaDiscover({ ...dto, count: sampleCount });
     if (!result?.success || !Array.isArray(result?.ideas)) return result;
 
-    const { accepted, assessed } = this.ideaAppealGate.select(
-      result.ideas,
-      desiredCount,
-      dto.storyType === 'long_novel' ? 'long_novel' : 'short_story',
-      String(dto.platform || ''),
-    );
+    const storyType = dto.storyType === 'long_novel' ? 'long_novel' : 'short_story';
+    const { accepted, assessed } = this.ideaAppealGate.select(result.ideas, storyType, desiredCount);
     const rejected = assessed.filter(item => !item.assessment.passed);
+    const passedAssessments = assessed.filter(item => item.assessment.passed).slice(0, desiredCount);
     const rejectionReasons = [...new Set(rejected.flatMap(item => item.assessment.issues))];
     const appealGate = {
+      schemaVersion: 2,
+      mode: 'adaptive_reader_experience',
       generated: result.ideas.length,
       passed: accepted.length,
       rejected: rejected.length,
       reasons: rejectionReasons.slice(0, 8),
-      note: '这是文本吸引力硬 Gate，不是预测点击率/完读率；没有真实平台曝光与阅读数据时不输出虚假百分比。',
+      acceptedEvidence: passedAssessments.map((item) => ({
+        title: String(item.idea?.title || ''),
+        densityMode: item.assessment.readerExperienceProfile.densityMode,
+        pace: item.assessment.readerExperienceProfile.pace,
+        evidence: item.assessment.readerExperienceProfile.evidence,
+        warnings: item.assessment.warnings,
+      })),
+      note: '这是文本吸引力与读者体验前置 Gate，不是预测点击率/完读率；没有真实平台曝光与阅读数据时不输出虚假百分比。热血、反转、刀点、爽感和情绪起伏按长短篇自适应分布，不按固定间隔叠加。',
     };
 
     if (!accepted.length) {
