@@ -19,6 +19,17 @@ const assessment = (passed: boolean, issues: string[] = []) => ({
   passed,
   issues,
   warnings: passed ? ['刀点需要先建立人物关系再兑现'] : [],
+  signals: {
+    titleAnchored: passed,
+    hookHasAnomaly: passed,
+    hookHasPressure: passed,
+    hookHasAgency: passed,
+    hookHasRelationship: passed,
+    descriptionProgressions: passed ? 3 : 0,
+    openingDeliversPromise: passed,
+    reversalConsequential: passed,
+    payoffPromise: passed,
+  },
   readerExperienceProfile: {
     version: 1,
     storyType: 'short_story',
@@ -39,7 +50,7 @@ const assessment = (passed: boolean, issues: string[] = []) => ({
 });
 
 describe('ChainPlanningController idea appeal adapter', () => {
-  it('oversamples once, filters locally and exposes adaptive experience evidence', async () => {
+  it('oversamples once, filters locally and attaches a structured discovery audit to every selectable idea', async () => {
     const ideaDiscover = vi.fn().mockResolvedValue({ success: true, ideas: Array.from({ length: 8 }, (_, i) => ({ title: `候选${i}` })) });
     const select = vi.fn().mockReturnValue({
       accepted: Array.from({ length: 5 }, (_, i) => ({ title: `通过${i}`, readerExperienceProfile: assessment(true).readerExperienceProfile })),
@@ -60,10 +71,12 @@ describe('ChainPlanningController idea appeal adapter', () => {
       passed: 5,
       rejected: 3,
     }));
+    expect(result.appealGate.candidateAssessments).toHaveLength(8);
     expect(result.appealGate.acceptedEvidence[0]).toEqual(expect.objectContaining({
       densityMode: '短篇集中兑现',
       pace: '偏快但保留呼吸段',
     }));
+    expect(result.ideas[0].ideaDiscoveryAudit).toEqual(result.appealGate);
     expect(JSON.stringify(result.appealGate)).not.toMatch(/\d+%/);
   });
 
@@ -82,8 +95,16 @@ describe('ChainPlanningController idea appeal adapter', () => {
     expect(result.error).toContain('点击/留存前置 Gate');
   });
 
-  it('returns confirmed story and its reader-experience profile through the recovery payload consumed by latest.json', async () => {
+  it('returns confirmed story, experience profile and the discovery batch audit through the recovery payload consumed by latest.json', async () => {
     const profile = assessment(true).readerExperienceProfile;
+    const discoveryAudit = {
+      schemaVersion: 2,
+      mode: 'adaptive_reader_experience',
+      generated: 8,
+      passed: 5,
+      rejected: 3,
+      candidateAssessments: [{ title: '候选0', passed: true }],
+    };
     const constitution: any = updateConstitution({}, {
       type: 'short_story',
       targetPlatform: 'fanqie',
@@ -96,6 +117,7 @@ describe('ChainPlanningController idea appeal adapter', () => {
       coreConflict: '守住母亲和房子并查清债务真相',
       mainReversal: '父亲其实替同事承担了被公司转嫁的责任',
       readerExperienceProfile: profile,
+      ideaDiscoveryAudit: discoveryAudit,
     };
     const projectRow = { settings: JSON.stringify({ creativeConstitution: constitution }) };
     const getGenerationRecovery = vi.fn().mockResolvedValue({ projectId: 'p1', status: 'creating' });
@@ -111,12 +133,14 @@ describe('ChainPlanningController idea appeal adapter', () => {
     const result: any = await controller.getGenerationRecovery('p1');
     expect(result.diagnosticSchemaVersion).toBe(2);
     expect(result.readerExperienceProfilePresent).toBe(true);
+    expect(result.ideaDiscoveryAuditPresent).toBe(true);
     expect(result.storySelection).toEqual(expect.objectContaining({
       title: '遗嘱写着我家的门牌号',
       readerExperienceProfile: expect.objectContaining({
         densityMode: '短篇集中兑现',
         pace: '偏快但保留呼吸段',
       }),
+      ideaDiscoveryAudit: expect.objectContaining({ generated: 8, passed: 5, rejected: 3 }),
     }));
   });
 });
