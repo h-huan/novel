@@ -21,11 +21,27 @@ jobs:
       - name: Install server dependencies
         working-directory: server
         run: npm ci
-      - name: Verify acceptance
+      - name: Typecheck
         working-directory: server
+        run: npm run typecheck
+      - name: Verify acceptance and capture output
+        id: acceptance
+        continue-on-error: true
+        working-directory: server
+        shell: bash
         run: |
-          npm run typecheck
-          npm run test:acceptance
+          set -o pipefail
+          npm run test:acceptance 2>&1 | tee acceptance.log
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Upload acceptance output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: idea-gate-acceptance-output
+          path: server/acceptance.log
+      - name: Fail on acceptance error
+        if: steps.acceptance.outputs.status != '0'
+        run: exit 1
       - name: Remove one-shot artifacts
         run: git rm .github/workflows/one-shot-idea-gate-acceptance.yml .github/scripts/patch-idea-gate-acceptance.py
       - name: Commit fixture fix
