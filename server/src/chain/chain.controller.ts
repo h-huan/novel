@@ -4883,7 +4883,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         .replace(/[《》「」]/g, '').replace(/[，、,\s]/g, '').trim().toLowerCase();
       const exampleWords = configuredTargetWords ?? (dto.storyType === 'short_story' ? 20_000 : 300_000);
       const exampleChapters = dto.storyType === 'short_story' ? 4 : 90;
-      const outputSchema = `{"ideas":[{"title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"35-80字，异常+困境+代价/时限","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"主角身份、欲望和弱点","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务"}],"scopeReason":"篇幅核算理由","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转"}}]}`;
+      const outputSchema = `{"ideas":[{"title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"35-80字，异常+困境+代价/时限","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"主角身份、欲望和弱点","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务"}],"scopeReason":"篇幅核算理由","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转","irreplaceableWhy":"去掉这个职业/关系/机制任一项后故事为何不成立","secondOrderConsequence":"规则启动后的二阶后果：谁额外受益/受损、关系或目标如何被迫改变","readerQuestion":"读者看完首屏后必须追问的一个具体问题"}}]}`;
 
       const outputExample = JSON.parse(outputSchema);
       const exampleIdea = outputExample.ideas[0];
@@ -4953,7 +4953,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
  3. 已选值必须原样继承；留空维度按创作字典为每个题材显式组合，不得空着创建：${autoSelectionRules}；${submissionRule}。每项 JSON 必须额外包含 storyCategory="${dto.storyCategory}"、submissionTags 数组及 plotTags 数组；示例 JSON 中的空数组只是字段形状，不代表可留空。题材、钩子、事件链必须体现这些选择。同批题材在职业/生存环境、关系结构、压力来源、核心机制、时间结构、真相载体和结局代价中至少四个维度不同，不能只是替换姓名和地点。
 4. 每项从改变主角命运的具体事件起步，写清目标、阻力、失败代价、行动时限、连续升级、不可逆选择和有效反转。短篇单线闭环；长篇保留可持续成长、关系和伏笔空间。
 5. 标题、职业场景、时代、冲突和反转均要互不重复；不得套用知名作品或真实人物事件，不得产出违规内容。
-6. 新颖性不是堆设定。每项先选一个读者熟悉的类型外壳，再组合一个少见但可验证的职业/关系/机制，并明确相对历史作品避开了什么；写入 noveltyProof。若仍是历史题材的同一机制、同一追查路径或同一反转，必须在输出前淘汰重想。
+6. 新颖性不是堆设定，也不是自己写一句“独特”。每项先选读者熟悉的类型外壳，再把【具体生活载体/职业】、【不可互换的人物关系】、【异常机制】组成一个彼此依赖的冲突；noveltyProof 必须写清 irreplaceableWhy、secondOrderConsequence、readerQuestion。凡可概括为“某种行为→直接受到超常惩罚/奖励”“发现秘密→一路追查”“获得能力→一路升级”，且去掉具体职业/关系后故事仍成立的，视为可替换模板，必须淘汰重想。核心机制启动后至少产生一个二阶后果：改变谁受益/谁受损、迫使关系重组、改变主角目标或制造真正两难；不能只有直接报应。若仍是历史题材的同一机制、同一追查路径或同一反转，也必须淘汰重想。
 7. 输出前自行检查结构、篇幅和差异；不要为自检另写文字。
 8. 同一题材的 hook、description、规则、时间跨度与反转必须共用一套事实：若写每次进入倒退N小时，就不得又写时间固定回到另一数值的N小时前；若历史中已经触发过名单增减，当前起始名单必须反映该变化。逐次变化要能从初始值算到结尾值。
 ${excludeText}${recoveryText}
@@ -4992,8 +4992,11 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         const novelty = candidate?.noveltyProof;
         if (!novelty || String(novelty?.familiarShell || '').trim().length < 4
           || String(novelty?.uncommonCombination || '').trim().length < 8
-          || String(novelty?.avoidedPatterns || '').trim().length < 6) {
-          issues.push('缺少可核验的题材差异说明');
+          || String(novelty?.avoidedPatterns || '').trim().length < 6
+          || String(novelty?.irreplaceableWhy || '').trim().length < 10
+          || String(novelty?.secondOrderConsequence || '').trim().length < 10
+          || String(novelty?.readerQuestion || '').trim().length < 8) {
+          issues.push('缺少可核验的题材差异说明、不可替换性、二阶后果或首屏追问');
         }
         for (const field of ['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags'] as const) {
           const expected = dto[field];

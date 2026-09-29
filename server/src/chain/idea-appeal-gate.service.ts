@@ -14,6 +14,12 @@ export interface IdeaAppealSignals {
   openingDeliversPromise: boolean;
   reversalConsequential: boolean;
   payoffPromise: boolean;
+  concretePremiseAnchor: boolean;
+  counterExpectation: boolean;
+  forcedTradeoff: boolean;
+  secondOrderConsequence: boolean;
+  simpleMoralMechanismRisk: boolean;
+  distinctivenessScore: number;
 }
 
 export interface ReaderExperienceEvidence {
@@ -84,6 +90,13 @@ const CATHARSIS = /(反击|揭露|清算|赢|证明|救回|保住|翻盘|夺回|
 const SUSPENSE = /(秘密|真相|背后|究竟|到底|谁|为何|为什么|消失|失踪|名单|证据|身份|规则|异常|每次|每天|每周|倒计时|直到|最终|最后|结局|未知|谜|线索)/;
 const HOPE = /(希望|盼|梦想|守住|保住|救|回家|团聚|自由|尊严|机会|前途|改变|赢|实现)/;
 const PRESSURE_EMOTION = /(怕|恐惧|危险|威胁|逼迫|压力|绝望|焦虑|来不及|倒计时|失去|死亡)/;
+// 题材差异度不是靠“新颖/反转”自评，而看具体生活载体、反预期、两难与二阶后果是否真正进入故事。
+const CONCRETE_PREMISE = /(合同|遗嘱|工号|病历|账单|订单|直播|账号|工资|房贷|租约|房本|钥匙|名单|录音|监控|聊天记录|考核|名额|证件|快递|药方|手术|保险|借条|票据|档案|门牌|排班|学籍|成绩|二维码|银行卡|手机|群聊|户口|赔偿|保单|奖金|绩效|社保|病例|收据|发票|录取|论文|举报信|工资单)/;
+const COUNTER_EXPECTATION = /(却|反而|看似|实际上|实际是|并非|不是.{0,12}而是|越.{1,10}越|原来|真正|偏偏|本以为|没想到)/;
+const FORCED_TRADEOFF = /(在.{2,24}与.{2,24}之间|二选一|只能.{2,24}(?:或|还是)|保住.{0,14}(?:却要|必须|就得).{0,14}(?:失去|放弃)|公开.{0,14}(?:会|就会)|救.{0,10}(?:却要|代价)|代价是|换来|牺牲.{0,12}(?:才能|换取))/;
+const SECOND_ORDER = /(转嫁|反噬|牵连|连带|迫使.{0,18}(?:从|改)|敌友.{0,8}改写|关系.{0,10}改写|目标.{0,10}改变|身份.{0,10}改变|规则.{0,10}改变|谁受益|谁承担|收益.{0,10}归|责任.{0,10}转|失去.{0,10}资格)/;
+const MORAL_TRIGGER = /(说谎|撒谎|欺骗|贪心|作弊|偷懒|造假|网暴|炫富|贪婪|自私|恶意)/;
+const DIRECT_PUNISHMENT = /(消失|死亡|失去|惩罚|报应|倒霉|变穷|被抹除|失忆|受伤|破产|扣除)/;
 
 const normalized = (value: unknown): string => String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -157,6 +170,24 @@ export class IdeaAppealGateService {
     const stackingRisk = all.length > 0 && intensityHits >= (storyType === 'short_story' ? 9 : 12)
       && intensityHits / Math.max(1, all.length / 100) >= 4;
 
+    const distinctiveText = `${title}；${hook}；${uniquePoint}；${coreConflict}；${mainReversal}；${description}`;
+    const concretePremiseAnchor = CONCRETE_PREMISE.test(`${title}；${hook}；${uniquePoint}`) || /\d+[天小时分钟年月次条份人章]/.test(distinctiveText);
+    const counterExpectation = COUNTER_EXPECTATION.test(`${uniquePoint}；${mainReversal}；${description}`);
+    const forcedTradeoff = FORCED_TRADEOFF.test(`${coreConflict}；${mainReversal}；${description}`);
+    const secondOrderConsequence = SECOND_ORDER.test(`${mainReversal}；${description}`) || (reversalConsequential && forcedTradeoff);
+    const simpleMoralMechanismRisk = MORAL_TRIGGER.test(`${title}；${hook}；${uniquePoint}`)
+      && DIRECT_PUNISHMENT.test(`${title}；${hook}；${uniquePoint}`)
+      && !forcedTradeoff && !secondOrderConsequence;
+    const distinctivenessScore = Math.max(0, Math.min(10,
+      (concretePremiseAnchor ? 2 : 0)
+      + (counterExpectation ? 2 : 0)
+      + (forcedTradeoff ? 2 : 0)
+      + (secondOrderConsequence ? 2 : 0)
+      + (hookHasRelationship ? 1 : 0)
+      + (openingDeliversPromise ? 1 : 0)
+      - (simpleMoralMechanismRisk ? 4 : 0)
+      - (stackingRisk ? 1 : 0)));
+
     const readerExperienceProfile = this.buildReaderExperienceProfile(storyType, {
       lifeAnchor,
       aspiration,
@@ -187,6 +218,9 @@ export class IdeaAppealGateService {
     if (!aspiration) issues.push('主角缺少清晰的生活期盼/欲望：读者不知道他真正想得到、守住、夺回或改变什么');
     if (!socialFriction) issues.push('现实批判没有落到具体规则、权力、资源、身份或关系摩擦，容易变成空泛说教');
     if (!sustainedSuspense) issues.push('缺少可贯穿阶段的核心追问，故事没有稳定的“还想知道什么”');
+    if (simpleMoralMechanismRisk) issues.push('题材仍是“某种行为→直接受到超常惩罚/报应”的单层寓言机制，缺少会改写利益、关系或选择的第二层后果');
+    const minDistinctiveness = storyType === 'short_story' ? 6 : 5;
+    if (distinctivenessScore < minDistinctiveness) issues.push(`题材差异度不足（${distinctivenessScore}/10）：具体生活载体、反预期、两难选择和二阶后果至少要形成稳定组合，而不是字段齐全即可通过`);
 
     // 热血、刀点、喜怒哀乐、爽感是体验曲线，不是题材卡逐项打卡。缺失时给下游规划提示，不用在发现阶段强塞。
     if (!struggleAgency) warnings.push('抗争/争取空间偏弱：后续章纲应让主角通过选择和行动获得热血感，而不是被动承受');
@@ -209,6 +243,12 @@ export class IdeaAppealGateService {
         openingDeliversPromise,
         reversalConsequential,
         payoffPromise,
+        concretePremiseAnchor,
+        counterExpectation,
+        forcedTradeoff,
+        secondOrderConsequence,
+        simpleMoralMechanismRisk,
+        distinctivenessScore,
       },
       readerExperienceProfile,
     };
@@ -216,8 +256,14 @@ export class IdeaAppealGateService {
 
   select(ideas: any[], storyType: StoryType, desiredCount: number) {
     const assessed = ideas.map((idea) => ({ idea, assessment: this.assess(idea, storyType) }));
+    // 通过 Gate 后不能再按模型原始顺序截前 N 个。先选差异度更强、推进更完整的题材，
+    // 避免“第一个字段齐全但很普通”的候选占掉展示位。这里仍不是点击率预测，只是文本前置排序。
     const accepted = assessed
       .filter((item) => item.assessment.passed)
+      .sort((left, right) =>
+        right.assessment.signals.distinctivenessScore - left.assessment.signals.distinctivenessScore
+        || right.assessment.signals.descriptionProgressions - left.assessment.signals.descriptionProgressions
+        || Number(right.assessment.signals.hookHasRelationship) - Number(left.assessment.signals.hookHasRelationship))
       .slice(0, desiredCount)
       .map((item) => ({
         ...item.idea,

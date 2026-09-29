@@ -88,6 +88,43 @@ describe('IdeaAppealGateService', () => {
     expect(assessment.issues.some((item) => item.includes('人生利益'))).toBe(true);
   });
 
+  it('rejects a keyword-complete but single-layer moral punishment premise as too generic', () => {
+    const assessment = gate.assess({
+      title: '说谎带货会消失',
+      hook: '主播每次说谎带货都会从直播间消失十分钟；为了保住工作和工资，他必须在老板威胁下查清规则，否则会彻底消失，他决定反击并找出真相。',
+      description: '最初他为了保住工作继续直播，随后发现平台规则会惩罚说谎者；第二次消失后他调查账号记录和合同，最后举报老板并揭开真相，保住工资并让公司承担代价。',
+      protagonist: '想保住工资和工作的普通主播',
+      uniquePoint: '说谎带货的人会直接消失，平台记录会留下异常。',
+      coreConflict: '主角必须一边保住工作一边调查平台规则并反击老板。',
+      mainReversal: '原来老板知道规则，因此主角决定举报公司并改变目标。',
+    }, 'short_story');
+
+    expect(assessment.passed).toBe(false);
+    expect(assessment.signals.simpleMoralMechanismRisk).toBe(true);
+    expect(assessment.signals.distinctivenessScore).toBeLessThan(6);
+    expect(assessment.issues.some((item) => item.includes('单层寓言机制'))).toBe(true);
+  });
+
+  it('ranks higher distinctiveness ahead of lower distinctiveness after both candidates have passed', () => {
+    const baseline = gate.assess(strongShort, 'short_story');
+    expect(baseline.passed).toBe(true);
+    const low = { ...baseline, signals: { ...baseline.signals, distinctivenessScore: 6 } };
+    const high = { ...baseline, signals: { ...baseline.signals, distinctivenessScore: 9 } };
+    const originalAssess = gate.assess.bind(gate);
+    gate.assess = ((idea: any, storyType: 'short_story' | 'long_novel') => {
+      if (idea?.title === '较弱合格题材') return low;
+      if (idea?.title === '更强合格题材') return high;
+      return originalAssess(idea, storyType);
+    }) as typeof gate.assess;
+    try {
+      const selection = gate.select([{ title: '较弱合格题材' }, { title: '更强合格题材' }], 'short_story', 2);
+      expect(selection.accepted).toHaveLength(2);
+      expect(selection.accepted.map((item) => item.title)).toEqual(['更强合格题材', '较弱合格题材']);
+    } finally {
+      gate.assess = originalAssess;
+    }
+  });
+
   it('enriches only accepted ideas with the profile that will travel with selectedIdea', () => {
     const selection = gate.select([
       strongShort,

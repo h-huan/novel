@@ -212,6 +212,9 @@ async function inspectProject(target) {
   });
   const runRows = asArray(runsRes.data);
   const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
+  const confirmedStory = constitution?.confirmedStory && typeof constitution.confirmedStory === 'object' && !Array.isArray(constitution.confirmedStory)
+    ? constitution.confirmedStory
+    : null;
   const resolvedProjectType = projectType(project);
   const firstChapterIndex = Number(chapterRows[0]?.chapter_index ?? chapterRows[0]?.chapterIndex ?? chapterRows[0]?.index ?? chapterRows[0]?.order ?? NaN);
   const firstChapterRun = Number.isFinite(firstChapterIndex)
@@ -231,7 +234,18 @@ async function inspectProject(target) {
       typeMatches: target.expectedType ? resolvedProjectType === target.expectedType : true,
       targetPlatform: project?.targetPlatform ?? constitution?.targetPlatform ?? null,
       constitutionRevision: constitution?.revision ?? null,
-      confirmedStoryPresent: Boolean(constitution?.confirmedStory),
+      confirmedStoryPresent: Boolean(confirmedStory),
+      storySelection: confirmedStory ? {
+        title: confirmedStory.title ?? null,
+        hook: confirmedStory.hook ?? null,
+        protagonist: confirmedStory.protagonist ?? null,
+        coreConflict: confirmedStory.coreConflict ?? confirmedStory.conflict ?? null,
+        uniquePoint: confirmedStory.uniquePoint ?? confirmedStory.uniqueSelling ?? confirmedStory.storyCore ?? null,
+        mainReversal: confirmedStory.mainReversal ?? null,
+        noveltyProof: confirmedStory.noveltyProof ?? null,
+        readerExperienceProfile: confirmedStory.readerExperienceProfile ?? null,
+        ideaDiscoveryAudit: confirmedStory.ideaDiscoveryAudit ?? null,
+      } : null,
     } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
     chapters: {
       count: chapterRows.length,
