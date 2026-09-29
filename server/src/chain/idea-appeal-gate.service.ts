@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { SHORT_IDEA_HOOK_MIN_SIGNALS } from './idea-discovery-contract';
 
 type StoryType = 'short_story' | 'long_novel';
 
@@ -146,8 +147,17 @@ export class IdeaAppealGateService {
       .filter((item) => item.length >= 2)
       .slice(0, 12);
     const openingText = `${hook}；${description.slice(0, Math.min(description.length, 260))}`;
-    const openingDeliversPromise = promiseTokens.length > 0
-      && promiseTokens.some((token) => openingText.includes(token.slice(0, Math.min(token.length, 4))));
+    const openingNormalized = openingText.replace(/[\s\p{P}\p{S}]/gu, '');
+    const genericPromiseAnchors = new Set(['主角必须', '主角发现', '必须在三', '最后必须', '最终必须', '发现真相', '揭开真相', '为了保住', '一个普通']);
+    const promiseAnchors = promiseTokens.flatMap((token) => {
+      const clean = token.replace(/[\s\p{P}\p{S}]/gu, '');
+      if (clean.length < 4) return clean.length >= 2 ? [clean] : [];
+      const anchors: string[] = [];
+      for (let index = 0; index <= clean.length - 4; index += 1) anchors.push(clean.slice(index, index + 4));
+      return anchors;
+    }).filter((anchor) => !genericPromiseAnchors.has(anchor));
+    const openingDeliversPromise = promiseAnchors.length > 0
+      && promiseAnchors.some((anchor) => openingNormalized.includes(anchor));
     const reversalConsequential = mainReversal.length >= 12 && CONSEQUENCE.test(mainReversal);
     const payoffPromise = PAYOFF.test(description) || PAYOFF.test(mainReversal);
 
@@ -207,7 +217,7 @@ export class IdeaAppealGateService {
     if (!hookHasPressure) issues.push('核心钩子缺少明确代价、时限或失去风险');
     if (!hookHasAgency) issues.push('核心钩子没有迫使主角采取具体行动');
     const hookSignalCount = [hookHasAnomaly, hookHasPressure, hookHasAgency, hookHasRelationship].filter(Boolean).length;
-    if (storyType === 'short_story' && hookSignalCount < 3) issues.push('短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成三个有效信号');
+    if (storyType === 'short_story' && hookSignalCount < SHORT_IDEA_HOOK_MIN_SIGNALS) issues.push(`短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 个有效信号`);
     if (descriptionProgressions < (storyType === 'short_story' ? 2 : 3)) issues.push('故事推进只有一个点子，缺少可持续升级链');
     if (!openingDeliversPromise) issues.push('开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现');
     if (!reversalConsequential) issues.push('核心反转只是在补充信息，没有改变目标、关系、胜负条件或代价');

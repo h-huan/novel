@@ -129,6 +129,18 @@ describe('IdeaAppealGateService', () => {
     }
   });
 
+  it('recognizes a concrete promise anchor inside the selling point instead of only its first four characters', () => {
+    const assessment = gate.assess({
+      ...strongShort,
+      uniquePoint: '真正不可替换的机制来自每次回家触发的母亲遗忘，以及遗嘱和债务之间的连锁关系。',
+      coreConflict: '两难来自房屋合同和债务证据：主角既要在三天内查清责任，也要保护母亲不被逼走。',
+      mainReversal: '责任被公司转嫁给父亲，迫使主角改变目标并公开证据，即使会损害父亲一直维护的体面。',
+    }, 'short_story');
+
+    expect(assessment.signals.openingDeliversPromise).toBe(true);
+    expect(assessment.passed).toBe(true);
+  });
+
   it('enriches only accepted ideas with the profile that will travel with selectedIdea', () => {
     const selection = gate.select([
       strongShort,
