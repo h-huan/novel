@@ -44,6 +44,8 @@ describe('IdeaAppealGateService', () => {
     const assessment = gate.assess(strongShort, 'short_story');
 
     expect(assessment.passed).toBe(true);
+    expect(assessment.signals.distinctivenessScore).toBeGreaterThanOrEqual(6);
+    expect(assessment.signals.simpleMoralMechanismRisk).toBe(false);
     expect(assessment.signals.descriptionProgressions).toBeGreaterThanOrEqual(2);
     expect(assessment.signals.openingDeliversPromise).toBe(true);
     expect(assessment.signals.reversalConsequential).toBe(true);
