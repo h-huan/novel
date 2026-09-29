@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# One-shot: add regression coverage for diagnostics persisted before project creation.
 path = Path('server/src/chain/chain-planning.controller.idea-appeal.spec.ts')
 text = path.read_text(encoding='utf-8')
 marker = "\n});\n"
