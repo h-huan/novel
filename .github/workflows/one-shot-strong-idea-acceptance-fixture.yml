@@ -36,3 +36,5 @@ jobs:
           git diff --cached --quiet && exit 1
           git commit -m "test: make idea batching fixture satisfy current gate"
           git push
+
+# one-shot trigger: 2026-09-29
