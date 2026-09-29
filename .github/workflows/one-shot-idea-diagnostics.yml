@@ -1,0 +1,50 @@
+name: One-shot pre-project idea diagnostics
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, 'run pre-project idea diagnostics migration')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply diagnostics migration
+        run: |
+          python .github/scripts/patch-idea-diagnostics.py
+          python .github/scripts/patch-idea-diagnostics-tests.py
+
+      - name: Verify local acceptance script syntax
+        run: node --check verify-local.mjs
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Verify server
+        working-directory: server
+        run: |
+          npm run typecheck
+          npm test -- --run
+          npm run build
+
+      - name: Remove one-shot artifacts
+        run: git rm .github/workflows/one-shot-idea-diagnostics.yml .github/scripts/patch-idea-diagnostics.py .github/scripts/patch-idea-diagnostics-tests.py
+
+      - name: Commit diagnostics
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 1
+          git commit -m "feat: persist pre-project idea discovery diagnostics"
+          git push
