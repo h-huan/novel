@@ -1,0 +1,38 @@
+name: One-shot strong idea acceptance fixture
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, 'run strong idea acceptance fixture')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch acceptance fixture
+        run: python .github/scripts/patch-strong-idea-acceptance-fixture.py
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Verify fixture against current Gate
+        working-directory: server
+        run: |
+          npm run typecheck
+          npm run test:acceptance
+      - name: Remove one-shot artifacts
+        run: git rm .github/workflows/one-shot-strong-idea-acceptance-fixture.yml .github/scripts/patch-strong-idea-acceptance-fixture.py
+      - name: Commit fixture
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 1
+          git commit -m "test: make idea batching fixture satisfy current gate"
+          git push
