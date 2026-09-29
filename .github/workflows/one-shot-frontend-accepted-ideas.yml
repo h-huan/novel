@@ -1,0 +1,47 @@
+name: One-shot accepted-only idea display guard
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/scripts/one-shot-frontend-accepted-ideas.py'
+      - '.github/workflows/one-shot-frontend-accepted-ideas.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply exact accepted-only display guard
+        run: python .github/scripts/one-shot-frontend-accepted-ideas.py
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Verify server
+        working-directory: server
+        run: |
+          npm run typecheck
+          npm test -- --run
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Verify desktop
+        working-directory: desktop
+        run: |
+          npm run typecheck
+          npm test -- --run
+          npm run build
+      - name: Remove one-shot artifacts
+        run: rm .github/scripts/one-shot-frontend-accepted-ideas.py .github/workflows/one-shot-frontend-accepted-ideas.yml
+      - name: Commit guard
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/src/chain/idea-appeal-gate.service.ts server/src/chain/idea-appeal-gate.service.spec.ts desktop/src/renderer/stores/discoveryStore.ts desktop/src/renderer/stores/discoveryStore.accepted-ideas.test.ts .github/scripts/one-shot-frontend-accepted-ideas.py .github/workflows/one-shot-frontend-accepted-ideas.yml
+          git commit -m 'fix: show only accepted story ideas in frontend'
+          git push origin HEAD:main
