@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# This file is a one-shot migration fixture writer; it is deleted after the migration succeeds.
 Path('server/src/chain/chain-planning.controller.idea-appeal.spec.ts').write_text(r'''import { describe, expect, it, vi } from 'vitest';
 import { ChainPlanningController } from './chain-planning.controller';
 import { updateConstitution } from '../modules/project/creative-constitution';
@@ -39,7 +40,8 @@ const audit = {
   schemaVersion: 3,
   mode: 'single_recoverable_reader_experience_gate',
   generated: 7,
-  passed: 5,
+  qualified: 5,
+  returned: 5,
   rejected: 2,
   reasons: ['弱题材'],
   candidateAssessments: [],
@@ -83,7 +85,7 @@ describe('ChainPlanningController single idea gate adapter', () => {
         { title: '明确未通过题材', ideaAppealGate: { passed: false, distinctivenessScore: 9 } },
       ],
       totalIdeas: 3,
-      appealGate: { ...audit, passed: 1 },
+      appealGate: { ...audit, qualified: 1, returned: 1 },
     });
     const controller = new ChainPlanningController({ ideaDiscover } as any);
 
@@ -100,7 +102,7 @@ describe('ChainPlanningController single idea gate adapter', () => {
       ideas: [],
       totalIdeas: 0,
       error: '本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。',
-      appealGate: { ...audit, passed: 0, rejected: 7 },
+      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 7 },
     });
     const controller = new ChainPlanningController({ ideaDiscover } as any);
 
@@ -109,7 +111,7 @@ describe('ChainPlanningController single idea gate adapter', () => {
     expect(result.success).toBe(false);
     expect(result.ideas).toEqual([]);
     expect(result.error).not.toContain('点击/留存前置 Gate');
-    expect(result.appealGate).toEqual(expect.objectContaining({ passed: 0 }));
+    expect(result.appealGate).toEqual(expect.objectContaining({ returned: 0 }));
   });
 
   it('returns confirmed story, experience profile and discovery audit through the recovery payload consumed by latest.json', async () => {
@@ -147,7 +149,7 @@ describe('ChainPlanningController single idea gate adapter', () => {
         densityMode: '短篇集中兑现',
         pace: '偏快但保留呼吸段',
       }),
-      ideaDiscoveryAudit: expect.objectContaining({ generated: 7, passed: 5, rejected: 2 }),
+      ideaDiscoveryAudit: expect.objectContaining({ generated: 7, qualified: 5, returned: 5, rejected: 2 }),
     }));
   });
 });
