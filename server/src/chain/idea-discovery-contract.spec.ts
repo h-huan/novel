@@ -22,6 +22,7 @@ describe('idea discovery hook contract', () => {
     expect(contract).toContain('现实压力或代价');
     expect(contract).toContain('下一步具体行动');
     expect(contract).toContain('可持续追问');
+    expect(contract).not.toContain(`至少命中 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类`);
   });
 
   it('turns gate failures into field-specific recovery instructions instead of repeating the same generic prompt', () => {
