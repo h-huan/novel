@@ -40,6 +40,17 @@ describe('idea discovery hook contract', () => {
     expect(directive.match(/核心钩子没有迫使主角采取具体行动/g)).toHaveLength(1);
   });
 
+  it('keeps long-story recovery actionable without importing the short-story signal quota', () => {
+    const directive = ideaRecoveryDirective('long_novel', [
+      '核心钩子缺少明确代价、时限或失去风险',
+      '核心钩子没有迫使主角采取具体行动',
+    ], 2);
+
+    expect(directive).toContain('本轮只补足缺少的 2 项');
+    expect(directive).toContain('直接重写 hook 本字段');
+    expect(directive).not.toContain('四类信号至少');
+  });
+
   it('covers the exact all-rejected short-story failure set with one recoverable contract', () => {
     const reasons = [
       '核心钩子缺少一眼可识别的异常/信息差',
