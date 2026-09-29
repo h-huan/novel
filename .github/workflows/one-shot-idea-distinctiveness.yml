@@ -42,4 +42,4 @@ jobs:
           git add server/src/chain/idea-appeal-gate.service.ts server/src/chain/idea-appeal-gate.service.spec.ts server/src/chain/chain.controller.ts verify-local.mjs .github/scripts/one-shot-idea-distinctiveness.py .github/workflows/one-shot-idea-distinctiveness.yml
           git commit -m 'fix: reject generic story premises before project creation'
           git push origin HEAD:main
-# rerun after strengthening the admissible ranking fixture
+# rerun after isolating ranking behavior from content admissibility
