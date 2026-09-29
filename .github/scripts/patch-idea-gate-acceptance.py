@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# One-shot: acceptance constructs ChainController without Nest, so inject the same Gate provider explicitly.
 path = Path('server/src/acceptance/generation-diagnostics.acceptance.spec.ts')
 text = path.read_text(encoding='utf-8')
 
