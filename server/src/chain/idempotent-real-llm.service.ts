@@ -47,15 +47,17 @@ export class IdempotentRealLLMService extends RealLLMService {
 
     // 非可复用调用仍走同一个真实 LLM/Gate，只在返回后补回这次物理生成的 runId。
     if (!projectId || !this.isReusableCreationCall(request, projectId)) {
+      const callStartedAt = new Date().toISOString();
       const response = await super.generate(request);
-      return projectId ? this.attachLatestRunId(projectId, scenario, response) : response;
+      return projectId ? this.attachLatestRunId(projectId, scenario, stepKey, response, callStartedAt) : response;
     }
 
     const db = this.database.getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     if (!project) {
+      const callStartedAt = new Date().toISOString();
       const response = await super.generate(request);
-      return this.attachLatestRunId(projectId, scenario, response);
+      return this.attachLatestRunId(projectId, scenario, stepKey, response, callStartedAt);
     }
 
     const constitution = readConstitution(project);
@@ -113,22 +115,48 @@ export class IdempotentRealLLMService extends RealLLMService {
       };
     }
 
+    const callStartedAt = new Date().toISOString();
     const response = await super.generate({ ...request, systemPrompt });
-    return this.attachLatestRunId(projectId, scenario, response);
+    return this.attachLatestRunId(projectId, scenario, stepKey, response, callStartedAt);
   }
 
   /**
-   * RealLLMService finishes generation_runs before returning. Match the exact final
-   * output text and scenario, newest first. Exact text avoids accidentally attaching
-   * a review/repair run that produced a different candidate. If no row exists, leave
-   * runId empty: downstream AI-to-Canon code must fail closed rather than invent provenance.
+   * RealLLMService finishes generation_runs before returning. Exact final output
+   * remains the strongest provenance proof and is always attempted first.
+   *
+   * Some OpenAI-compatible providers normalize structured text between the value
+   * returned to the caller and the value persisted by the telemetry boundary. A
+   * byte mismatch must not make a successful world/outline result lose its runId
+   * and then fail at the Canon guard. For that integration edge we allow one
+   * deterministic fallback: exactly one successful run may have finished after
+   * this specific super.generate() call started, and it must match project,
+   * stage and scenario. If there are zero or multiple candidates we still fail
+   * closed and leave runId empty rather than inventing provenance.
    */
-  private attachLatestRunId(projectId: string, scenario: string, response: LLMResponse): LLMResponse {
+  private attachLatestRunId(
+    projectId: string,
+    scenario: string,
+    stepKey: string,
+    response: LLMResponse,
+    callStartedAt?: string,
+  ): LLMResponse {
     if (response.runId || !String(response.content || '').trim()) return response;
-    const row = this.database.getDb().prepare(`SELECT id FROM generation_runs
+    const db = this.database.getDb();
+    const exact = db.prepare(`SELECT id FROM generation_runs
       WHERE project_id=? AND scenario=? AND status='success' AND output_text=?
       ORDER BY finished_at DESC,id DESC LIMIT 1`).get(projectId, scenario, response.content) as { id: string } | undefined;
-    return row?.id ? { ...response, runId: row.id } : response;
+    if (exact?.id) return { ...response, runId: exact.id };
+    if (!callStartedAt) return response;
+
+    const stage = qualityStage(scenario, stepKey);
+    const candidates = db.prepare(`SELECT id FROM generation_runs
+      WHERE project_id=? AND stage=? AND scenario=? AND status='success'
+        AND finished_at IS NOT NULL AND finished_at>=?
+        AND LENGTH(TRIM(COALESCE(output_text,'')))>0
+      ORDER BY finished_at DESC,id DESC LIMIT 2`).all(
+        projectId, stage, scenario, callStartedAt,
+      ) as Array<{ id: string }>;
+    return candidates.length === 1 ? { ...response, runId: candidates[0].id } : response;
   }
 
   private isReusableCreationCall(request: LLMRequest, projectId?: string): boolean {
