@@ -1,0 +1,27 @@
+name: Fix idea ranking test
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/scripts/fix-idea-ranking-test.py'
+      - '.github/workflows/fix-idea-ranking-test.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Isolate ranking behavior test
+        run: python .github/scripts/fix-idea-ranking-test.py
+      - name: Remove helper artifacts
+        run: rm .github/scripts/fix-idea-ranking-test.py .github/workflows/fix-idea-ranking-test.yml
+      - name: Commit ranking test fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/scripts/one-shot-idea-distinctiveness.py .github/scripts/fix-idea-ranking-test.py .github/workflows/fix-idea-ranking-test.yml
+          git commit -m 'test: isolate idea distinctiveness ranking behavior'
+          git push origin HEAD:main
