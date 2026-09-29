@@ -25,6 +25,7 @@ import { ChainController } from './chain.controller';
 import { ChainPlanningController } from './chain-planning.controller';
 import { ChainWritingController } from './chain-writing.controller';
 import { ChainUtilityController } from './chain-utility.controller';
+import { IdeaAppealGateService } from './idea-appeal-gate.service';
 import { StateModule } from '../state/state.module';
 import { StateManagementModule } from '../state/state-management.module';
 
@@ -72,6 +73,7 @@ import { OriginalityModule } from '../modules/originality/originality.module';
     { provide: RealLLMService, useClass: IdempotentRealLLMService },
     NewsRssService,
     GenerationRecoveryService,
+    IdeaAppealGateService,
   ],
   exports: [
     ChainEngineService,
