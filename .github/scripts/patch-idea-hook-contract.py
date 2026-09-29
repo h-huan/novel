@@ -8,6 +8,16 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_between(text: str, start: str, end: str, replacement: str, label: str) -> str:
+    if text.count(start) != 1 or text.count(end) != 1:
+        raise SystemExit(f'{label}: expected unique anchors, got start={text.count(start)} end={text.count(end)}')
+    start_index = text.index(start)
+    end_index = text.index(end, start_index)
+    if end_index <= start_index:
+        raise SystemExit(f'{label}: invalid anchor order')
+    return text[:start_index] + replacement + text[end_index:]
+
+
 controller = Path('server/src/chain/chain.controller.ts')
 text = controller.read_text(encoding='utf-8-sig')
 text = replace_once(
@@ -28,31 +38,20 @@ text = replace_once(
     '\"hook\":\"${hookRequirement}\"',
     'hook schema contract',
 )
-old_recovery = (
-    "        const recoveryText = recoveryReasons.length\n"
-    "          ? `\\\n"
-    "上一批未通过项：${recoveryReasons.slice(0, 10).join('；')}。只补足缺少的${count}项，不复写已通过项。`\n"
-    "          : '';"
-)
-text = replace_once(
+text = replace_between(
     text,
-    old_recovery,
-    "        const recoveryText = ideaRecoveryDirective(dto.storyType, recoveryReasons, count);",
+    '        const recoveryText = recoveryReasons.length',
+    '        // 灵感阶段就把该平台分类的头部实测体量锚点交给模型。',
+    "        const recoveryText = ideaRecoveryDirective(dto.storyType, recoveryReasons, count);\n",
     'recovery directive',
 )
-old_empty = (
-    "      if (!accepted.length) {\n"
-    "        throw new Error(`灵感结果未通过质量 Gate，未创建题材：${Array.from(new Set(rejectedReasons)).slice(0, 6).join('；') || '证据不足'}`);\n"
-    "      }"
+text = replace_between(
+    text,
+    '      if (!accepted.length) {',
+    '      this.logger.log(`idea-discover: 完成 ${accepted.length}/${requestedCount} 个合格题材，逻辑调用不超过2次`);',
+    "      if (!accepted.length) {\n        const rejectionSummary = Array.from(new Set(rejectedReasons)).slice(0, 10).join('；') || '证据不足';\n        this.logger.warn(`idea-discover: 两轮候选均未通过展示 Gate，内部淘汰原因：${rejectionSummary}`);\n        throw new Error('本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。');\n      }\n",
+    'empty accepted response',
 )
-new_empty = (
-    "      if (!accepted.length) {\n"
-    "        const rejectionSummary = Array.from(new Set(rejectedReasons)).slice(0, 10).join('；') || '证据不足';\n"
-    "        this.logger.warn(`idea-discover: 两轮候选均未通过展示 Gate，内部淘汰原因：${rejectionSummary}`);\n"
-    "        throw new Error('本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。');\n"
-    "      }"
-)
-text = replace_once(text, old_empty, new_empty, 'empty accepted response')
 controller.write_text(text, encoding='utf-8')
 
 
@@ -63,17 +62,6 @@ text = replace_once(
     "import { Injectable } from '@nestjs/common';\n",
     "import { Injectable } from '@nestjs/common';\nimport { SHORT_IDEA_HOOK_MIN_SIGNALS } from './idea-discovery-contract';\n",
     'gate import',
-)
-old_opening = (
-    "    const promiseText = `${uniquePoint}；${coreConflict}；${mainReversal}`;\n"
-    "    const promiseTokens = promiseText\n"
-    "      .split(/[，。！？；：、\\s]/)\n"
-    "      .map((item) => item.trim())\n"
-    "      .filter((item) => item.length >= 2)\n"
-    "      .slice(0, 12);\n"
-    "    const openingText = `${hook}；${description.slice(0, Math.min(description.length, 260))}`;\n"
-    "    const openingDeliversPromise = promiseTokens.length > 0\n"
-    "      && promiseTokens.some((token) => openingText.includes(token.slice(0, Math.min(token.length, 4))));"
 )
 new_opening = (
     "    const promiseText = `${uniquePoint}；${coreConflict}；${mainReversal}`;\n"
@@ -93,9 +81,15 @@ new_opening = (
     "      return anchors;\n"
     "    }).filter((anchor) => !genericPromiseAnchors.has(anchor));\n"
     "    const openingDeliversPromise = promiseAnchors.length > 0\n"
-    "      && promiseAnchors.some((anchor) => openingNormalized.includes(anchor));"
+    "      && promiseAnchors.some((anchor) => openingNormalized.includes(anchor));\n"
 )
-text = replace_once(text, old_opening, new_opening, 'opening promise evidence')
+text = replace_between(
+    text,
+    '    const promiseText = `${uniquePoint}；${coreConflict}；${mainReversal}`;',
+    '    const reversalConsequential = mainReversal.length >= 12 && CONSEQUENCE.test(mainReversal);',
+    new_opening,
+    'opening promise evidence',
+)
 old_signal = "    if (storyType === 'short_story' && hookSignalCount < 3) issues.push('短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成三个有效信号');"
 new_signal = "    if (storyType === 'short_story' && hookSignalCount < SHORT_IDEA_HOOK_MIN_SIGNALS) issues.push(`短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 个有效信号`);"
 text = replace_once(text, old_signal, new_signal, 'shared hook signal threshold')
