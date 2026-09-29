@@ -93,9 +93,9 @@ export class GenerationMetricsController {
         COALESCE(internal_retries,0) internal_retries,created_at
       FROM generation_step_metrics WHERE project_id=? ORDER BY created_at DESC LIMIT 300`).all(projectId) as any[];
     const runs = db.prepare(`SELECT id,stage,scenario,status,chapter_index,prompt_version,context_version,
-        constitution_revision,duration_ms,started_at
+        constitution_revision,duration_ms,started_at,finished_at
       FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 300`).all(projectId) as any[];
-    const project = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as any;
+    const project = db.prepare('SELECT status,updated_at FROM projects WHERE id=?').get(projectId) as any;
     const count = (table: string, extra = ''): number => {
       try {
         const row = db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE project_id=?${extra}`).get(projectId) as any;
@@ -166,17 +166,41 @@ export class GenerationMetricsController {
       }));
 
     const successfulStages = new Set(runs.filter(row => row.status === 'success').map(row => String(row.stage || '')));
-    const persistenceMismatch: string[] = [];
-    if (successfulStages.has('world') && persisted.worldSettings === 0) persistenceMismatch.push('world_success_without_world_setting');
-    if (successfulStages.has('character') && persisted.characters === 0) persistenceMismatch.push('character_success_without_character');
-    if (successfulStages.has('outline') && persisted.chapterOutlines === 0) persistenceMismatch.push('outline_success_without_chapter_outline');
-    if (successfulStages.has('chapter') && persisted.chapters === 0) persistenceMismatch.push('chapter_success_without_chapter');
+    const observedPersistenceMismatch: string[] = [];
+    if (successfulStages.has('world') && persisted.worldSettings === 0) observedPersistenceMismatch.push('world_success_without_world_setting');
+    if (successfulStages.has('character') && persisted.characters === 0) observedPersistenceMismatch.push('character_success_without_character');
+    if (successfulStages.has('outline') && persisted.chapterOutlines === 0) observedPersistenceMismatch.push('outline_success_without_chapter_outline');
+    if (successfulStages.has('chapter') && persisted.chapters === 0) observedPersistenceMismatch.push('chapter_success_without_chapter');
+
+    const activeGenerationRuns = runs.filter(row => String(row.status || '').toLowerCase() === 'running').length;
+    const activityTimes = [
+      project?.updated_at,
+      ...metrics.map(row => row.created_at),
+      ...runs.flatMap(row => [row.started_at, row.finished_at]),
+    ]
+      .map(value => Date.parse(String(value || '')))
+      .filter(value => Number.isFinite(value));
+    const lastActivityMs = activityTimes.length ? Math.max(...activityTimes) : null;
+    const idleMs = lastActivityMs === null ? null : Math.max(0, Date.now() - lastActivityMs);
+    const creationStallThresholdMs = 3 * 60 * 1000;
+    const isCreating = String(project?.status || '').toLowerCase() === 'creating';
+    const creationStalled = isCreating && activeGenerationRuns === 0 && idleMs !== null && idleMs >= creationStallThresholdMs;
+    // 创建中短暂出现“模型已成功、业务表尚未落库”是允许的中间态；只有失败/完成后仍不一致，
+    // 或 creating 已经无运行调用并持续空闲超过阈值，才升级为真正持久化故障。
+    const persistenceMismatch = isCreating && !creationStalled ? [] : observedPersistenceMismatch;
+    const pendingPersistenceMismatch = isCreating && !creationStalled ? observedPersistenceMismatch : [];
 
     return {
       projectStatus: project?.status ?? null,
       sample: { stepMetrics: metrics.length, generationRuns: runs.length },
       persisted,
       persistenceMismatch,
+      pendingPersistenceMismatch,
+      activeGenerationRuns,
+      lastActivityAt: lastActivityMs === null ? null : new Date(lastActivityMs).toISOString(),
+      idleMs,
+      creationStallThresholdMs,
+      creationStalled,
       totalDurationMs,
       totalTokens,
       internalRetryCount,
