@@ -46,6 +46,8 @@ describe('IdeaAppealGateService', () => {
     expect(assessment.passed).toBe(true);
     expect(assessment.signals.distinctivenessScore).toBeGreaterThanOrEqual(6);
     expect(assessment.signals.simpleMoralMechanismRisk).toBe(false);
+    expect(assessment.signals.forcedTradeoff).toBe(true);
+    expect(assessment.signals.secondOrderConsequence).toBe(true);
     expect(assessment.signals.descriptionProgressions).toBeGreaterThanOrEqual(2);
     expect(assessment.signals.openingDeliversPromise).toBe(true);
     expect(assessment.signals.reversalConsequential).toBe(true);
