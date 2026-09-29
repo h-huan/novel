@@ -39,4 +39,21 @@ describe('idea discovery hook contract', () => {
     expect(directive).toContain('不复写已通过项');
     expect(directive.match(/核心钩子没有迫使主角采取具体行动/g)).toHaveLength(1);
   });
+
+  it('covers the exact all-rejected short-story failure set with one recoverable contract', () => {
+    const reasons = [
+      '核心钩子缺少一眼可识别的异常/信息差',
+      '核心钩子缺少明确代价、时限或失去风险',
+      '核心钩子没有迫使主角采取具体行动',
+      '短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成 3 个有效信号',
+      '开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现',
+    ];
+    const directive = ideaRecoveryDirective('short_story', reasons, 5);
+
+    for (const reason of reasons) expect(directive).toContain(reason);
+    expect(directive).toContain('hook 缺异常/压力/行动/关系，就直接重写 hook 本字段');
+    expect(directive).toContain('hook 或 description 前 260 字必须明确复用 uniquePoint/coreConflict');
+    expect(directive).toContain(`四类信号至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类`);
+    expect(directive).toContain('本轮只补足缺少的 5 项');
+  });
 });
