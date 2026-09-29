@@ -1,0 +1,47 @@
+name: One-shot single idea gate migration
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, 'run single idea gate migration')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply single gate migration
+        run: |
+          python .github/scripts/patch-single-idea-gate.py
+          python .github/scripts/patch-single-idea-gate-tests.py
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Verify server
+        working-directory: server
+        run: |
+          npm run typecheck
+          npm test -- --run
+          npm run build
+
+      - name: Remove one-shot artifacts
+        run: git rm .github/workflows/one-shot-single-idea-gate.yml .github/scripts/patch-single-idea-gate.py .github/scripts/patch-single-idea-gate-tests.py
+
+      - name: Commit migration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 1
+          git commit -m "refactor: make idea discovery gate single and recoverable"
+          git push
