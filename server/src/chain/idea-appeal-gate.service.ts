@@ -63,14 +63,16 @@ export interface IdeaAppealAssessment {
 }
 
 const GENERIC_TITLE = /^(?:命运之|重生之|.*的人生$|.*之路$|.*传奇$|爱与救赎$)/;
-const ANOMALY = /(突然|异常|消失|失踪|不存在|多出|少了|多一|少一|倒计时|重复|重置|回拨|名单|遗嘱|秘密|真相|陌生|不认识|死亡|葬礼|尸体|证据|监控|规则|每次|每天|每周|竟然|原来|却|不.{0,8}只.{0,8}|会.{0,24}(?:忘|消|少|多|变|出现|收到|梦见|显示|拼|撞|预告|映|跳)|(?:明天|次日|七天后|十年后).{0,24}(?:会|就|少|多|失|死))/;
-const PRESSURE = /(必须|否则|只剩|之前|截止|期限|倒计时|代价|失去|死亡|辞退|开除|破产|债|欠|追责|坐牢|举报|威胁|危险|救|保住|夺回|不能|来不及|一旦|限.{0,8}(?:天|小时|还|签|卖)|扣|洗不掉|少一笔|后退|忘掉|被.{0,8}(?:接走|抱走|收走))/;
-const AGENCY = /(查|调查|追|找|救|保|阻止|揭|证明|反击|举报|逃|夺回|争|守|破解|选择|决定|行动|潜入|对抗|偿还|起诉)/;
-const FIRST_PERSON_ACTION = /(?:我|主角).{0,16}(?:当场|偷偷|直接|立刻|马上|决定|选择|开始|点|按|推|贴|拆|打开|发布|写|喂|喝|盖|拿|翻|送|关|倒|签|拒|追|去|改|试|撕|扔|带|抱|接|坐|开|把)/;
-const RELATIONSHIP = /(父|母|爸|妈|儿|女|妻|夫|丈夫|老婆|恋人|前任|兄|弟|姐|妹|同事|老板|朋友|邻居|家人|亲人|师|同学|搭档|夫妻|家庭)/;
+const ANOMALY = /(突然|异常|消失|失踪|不存在|多出|少了|多一|少一|倒计时|重复|重置|回拨|重生|回到.{0,8}(?:年前|过去)|名单|遗嘱|秘密|真相|陌生|不认识|死亡|葬礼|尸体|证据|监控|规则|每次|每天|每周|竟然|原来|却|不.{0,8}只.{0,8}|每.{0,12}(?:就|会).{0,18}(?:忘|失|消|变|转|痛|伤|恢复|好转)|会.{0,24}(?:忘|消|少|多|变|出现|收到|梦见|显示|拼|撞|预告|映|跳)|(?:交换|转移).{0,16}(?:记忆|痛|伤|听力|触觉)|(?:明天|次日|七天后|十年后).{0,24}(?:会|就|少|多|失|死))/;
+const PRESSURE = /(必须|否则|只剩|之前|截止|期限|倒计时|代价|失去|死亡|辞退|开除|破产|债|欠|追责|坐牢|举报|威胁|危险|救|保住|夺回|不能|来不及|一旦|手术|学费|违约金|赔偿|退学|退役|停播|停职|资格|档案|失聪|失明|忘记|遗忘|限.{0,8}(?:天|小时|还|签|卖)|[一二三四五六七八九十百零两\d]+(?:天|小时|分钟)(?:内|后|前)|扣|洗不掉|少一笔|后退|忘掉|被.{0,8}(?:接走|抱走|收走))/;
+const AGENCY = /(查|调查|追|找|救|保|阻止|揭|证明|反击|举报|逃|夺回|争|守|破解|选择|决定|行动|潜入|对抗|偿还|起诉|报名|报上|公开)/;
+const FIRST_PERSON_ACTION = /(?:我|主角).{0,16}(?:当场|偷偷|直接|立刻|马上|决定|选择|开始|点|按|推|贴|拆|打开|发布|写|喂|喝|盖|拿|翻|送|关|倒|签|拒|追|去|改|试|撕|删|扔|带|抱|接|坐|开|把|照做)/;
+const CONCRETE_ACTION = /(?:我|她|他|主角|[\u4e00-\u9fff]{2,4}).{0,18}(?:撕|报名|报上|签下|删除|删|发布|发出|交出|焊|修好|寄出|取件|下单|停手|训练|拖延|隐瞒|拒绝|公开|报警|反锁|照做)/;
+const HOOK_CHOICE = /(?:必须|只能|决定|选择).{0,24}(?:查清|弄明白|阻止|救|保住|留下|离开|继续|停止|停手|公开|删除|删|发布|发出|交出|报名)|(?:不删|删了|不发|发了|不交|交出).{0,24}(?:赔|失去|退|毁|保|换|否则)/;
+const RELATIONSHIP = /(父|母|爸|妈|儿|女|妻|夫|丈夫|老婆|恋人|前任|暗恋|青梅|兄|弟|姐|妹|同事|老板|朋友|邻居|家人|亲人|师|学长|学弟|同学|同班|队友|队长|教练|室友|搭档|对手|夫妻|家庭|家属|顾客)/;
 const PROGRESSION = /(起初|最初|第一|随后|接着|之后|第二|第三|却|反而|直到|进一步|升级|失控|恶化|暴露|发现|揭开|逼迫|迫使|最终|最后|真相|代价|反转|转而|同时)/g;
-const CONSEQUENCE = /(因此|导致|迫使|不得不|转而|从此|目标|敌人|盟友|关系|身份|代价|失去|死亡|生死|真相|胜负|规则|条件|救|保|夺回|反击|举报|起诉|辞退|破产|翻盘|改变|改为|改成|转向|从.{1,20}(?:变成|转为)|不是.{0,30}(?:而是|是))/;
-const PAYOFF = /(最终|最后|结局|收束|付出代价|承担|偿还|揭开真相|真相大白|救回|保住|夺回|赢|失败|和解|分开|离开|选择|兑现|翻盘|当众|公开|拆掉|倒掉)/;
+const CONSEQUENCE = /(因此|导致|迫使|不得不|转而|从此|目标|敌人|盟友|关系|身份|代价|失去|死亡|生死|真相|胜负|规则|条件|救|保|夺回|反击|举报|起诉|辞退|破产|翻盘|改变|改为|改成|转向|退役|退学|停职|辞职|解散|取消资格|共犯|决裂|顶罪|从.{1,20}(?:变成|转为)|不是.{0,30}(?:而是|是))/;
+const PAYOFF = /(最终|最后|结局|收束|付出代价|承担|偿还|揭开真相|真相大白|救回|保住|夺回|赢|失败|和解|分开|离开|选择|选了|兑现|翻盘|当众|公开|拆掉|倒掉|退学|退役|辞职|停职|解散|取消资格|失聪|恢复|康复|顶罪)/;
 
 const LIFE_ANCHOR = /(生活|日子|家|家庭|父|母|爸|妈|儿|女|妻|夫|恋人|亲人|朋友|同事|工作|上班|职业|工资|钱|存款|房|租|贷款|债|学费|学校|考试|医院|病|健康|养老|婚|孩子|邻居|尊严|体面|名声|机会|前途|责任|归属|自由|安全|生存|吃饭|失业|辞退|开除)/;
 const ASPIRATION = /(想要|想把|想让|想给|希望|盼|梦想|目标|为了|守住|保住|保护|救|夺回|拿回|找回|改变|证明|赢|活下去|自由|尊严|回家|团聚|查清|揭开|摆脱|偿还|考上|留下|成为|阻止)/;
@@ -87,7 +89,7 @@ const FORCED_TRADEOFF = /(在.{2,24}与.{2,24}之间|二选一|只能.{2,24}(?:�
 const SECOND_ORDER = /(转嫁|反噬|牵连|连带|迫使.{0,18}(?:从|改)|敌友.{0,8}改写|关系.{0,10}改写|目标.{0,10}改变|身份.{0,10}改变|规则.{0,10}改变|谁受益|谁承担|收益.{0,10}归|责任.{0,10}转|失去.{0,10}资格)/;
 // noveltyProof.secondOrderConsequence 是模型被要求显式填写的语义字段，可用更宽的影响词识别；
 // 普通 description/mainReversal 仍使用上面的严格模式，避免“平台/市场”等背景词把单层寓言误判成二阶后果。
-const SECOND_ORDER_EVIDENCE = /(受益|受损|关系|目标|身份|规则|客流|收入|饭碗|抚养权|供货|价格|市场|调查对象|迁怒|重排|改写|被迫|反噬|牵连|连带|停工|中断|站队|资格|责任)/;
+const SECOND_ORDER_EVIDENCE = /(受益|受损|关系|目标|身份|规则|客流|收入|饭碗|抚养权|供货|价格|市场|调查对象|迁怒|重排|改写|被迫|反噬|牵连|连带|停工|中断|站队|资格|责任|队友|机会|退学|退役|辞退|停职|解散)/;
 const MORAL_TRIGGER = /(说谎|撒谎|欺骗|贪心|作弊|偷懒|造假|网暴|炫富|贪婪|自私|恶意)/;
 const DIRECT_PUNISHMENT = /(消失|死亡|失去|惩罚|报应|倒霉|变穷|被抹除|失忆|受伤|破产|扣除)/;
 
@@ -160,7 +162,7 @@ export class IdeaAppealGateService {
     const titleAnchored = titleHasStoryAnchor(title, `${hook}；${description}；${uniquePoint}；${coreConflict}；${mainReversal}；${noveltyEvidence}`);
     const hookHasAnomaly = ANOMALY.test(hook);
     const hookHasPressure = PRESSURE.test(hook);
-    const hookHasAgency = AGENCY.test(hook) || FIRST_PERSON_ACTION.test(hook);
+    const hookHasAgency = AGENCY.test(hook) || FIRST_PERSON_ACTION.test(hook) || CONCRETE_ACTION.test(hook) || HOOK_CHOICE.test(hook);
     const hookHasRelationship = RELATIONSHIP.test(hook);
     const descriptionProgressions = (description.match(PROGRESSION) || []).length;
 
@@ -182,23 +184,13 @@ export class IdeaAppealGateService {
     }).filter((anchor) => !genericPromiseAnchors.has(anchor));
     const openingDeliversPromise = promiseAnchors.length > 0
       && promiseAnchors.some((anchor) => openingNormalized.includes(anchor));
-    const reversalConsequential = mainReversal.length >= 12 && CONSEQUENCE.test(mainReversal);
-    const payoffPromise = PAYOFF.test(description) || PAYOFF.test(mainReversal);
 
     const lifeAnchor = LIFE_ANCHOR.test(all);
     const aspiration = ASPIRATION.test(all) || /(?:想|要|希望|盼).{1,20}/.test(protagonist);
     const socialFriction = SOCIAL_FRICTION.test(all);
-    const struggleAgency = STRUGGLE.test(all) || hookHasAgency;
     const painPotential = PAIN.test(all);
-    const catharsisPotential = CATHARSIS.test(all) || payoffPromise;
     const sustainedSuspense = SUSPENSE.test(`${hook}；${description}；${mainReversal}`)
       || (novelty.readerQuestion.length >= 8 && /[？?]$/.test(novelty.readerQuestion));
-    const emotionalContrastGroups = [
-      PRESSURE_EMOTION.test(all),
-      HOPE.test(all),
-      PAIN.test(all),
-      CATHARSIS.test(all),
-    ].filter(Boolean).length;
 
     const intensityHits = markerCount(all, /(反转|死亡|牺牲|背叛|真相|翻盘|绝望|反击|倒计时|失去)/);
     const stackingRisk = all.length > 0 && intensityHits >= (storyType === 'short_story' ? 9 : 12)
@@ -212,9 +204,24 @@ export class IdeaAppealGateService {
     const counterExpectation = COUNTER_EXPECTATION.test(`${uniquePoint}；${mainReversal}；${description}；${novelty.uncommonCombination}`);
     const forcedTradeoff = FORCED_TRADEOFF.test(`${coreConflict}；${mainReversal}；${description}；${novelty.secondOrderConsequence}`);
     const explicitSecondOrder = novelty.secondOrderConsequence.length >= 16 && SECOND_ORDER_EVIDENCE.test(novelty.secondOrderConsequence);
+    const baseReversalConsequence = mainReversal.length >= 12 && CONSEQUENCE.test(mainReversal);
+    const reversalConsequential = baseReversalConsequence
+      || (mainReversal.length >= 12 && explicitSecondOrder && COUNTER_EXPECTATION.test(mainReversal));
     const secondOrderConsequence = explicitSecondOrder
       || SECOND_ORDER.test(`${mainReversal}；${description}`)
       || (reversalConsequential && forcedTradeoff);
+    const payoffPromise = PAYOFF.test(description)
+      || PAYOFF.test(mainReversal)
+      || (reversalConsequential && (forcedTradeoff || secondOrderConsequence));
+    const struggleAgency = STRUGGLE.test(all) || hookHasAgency;
+    const catharsisPotential = CATHARSIS.test(all) || payoffPromise;
+    const emotionalContrastGroups = [
+      PRESSURE_EMOTION.test(all),
+      HOPE.test(all),
+      PAIN.test(all),
+      CATHARSIS.test(all),
+    ].filter(Boolean).length;
+
     const simpleMoralMechanismRisk = MORAL_TRIGGER.test(`${title}；${hook}；${uniquePoint}`)
       && DIRECT_PUNISHMENT.test(`${title}；${hook}；${uniquePoint}`)
       && !forcedTradeoff && !secondOrderConsequence;
@@ -243,18 +250,24 @@ export class IdeaAppealGateService {
     const issues: string[] = [];
     const warnings: string[] = [];
     if (!titleAnchored) issues.push('标题没有稳定锚定本故事的具体人物/规则/关系/异常，或仍是可替换套名');
-    if (!hookHasAnomaly) issues.push('核心钩子缺少一眼可识别的异常/信息差');
-    if (!hookHasPressure) issues.push('核心钩子缺少明确代价、时限或失去风险');
-    if (!hookHasAgency) issues.push('核心钩子没有迫使主角采取具体行动');
     const hookSignalCount = [hookHasAnomaly, hookHasPressure, hookHasAgency, hookHasRelationship].filter(Boolean).length;
-    if (storyType === 'short_story' && hookSignalCount < SHORT_IDEA_HOOK_MIN_SIGNALS) issues.push(`短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 个有效信号`);
+    if (storyType === 'short_story') {
+      if (!hookHasAgency) issues.push('核心钩子没有迫使主角采取具体行动或明确选择');
+      if (hookSignalCount < SHORT_IDEA_HOOK_MIN_SIGNALS) issues.push(`短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 个有效信号`);
+      if (!hookHasAnomaly) warnings.push('核心钩子未直接展示异常/信息差；若故事主要靠现实两难成立，可由压力、行动和关系共同承担首屏吸引力');
+      if (!hookHasPressure) warnings.push('核心钩子未直接展示代价或时限；若故事已有强行动、关系与信息差，可在后续卡片字段承接明确后果');
+    } else {
+      if (!hookHasPressure) issues.push('核心钩子缺少明确代价、时限或失去风险');
+      if (!hookHasAgency) issues.push('核心钩子没有迫使主角采取具体行动');
+      if (!hookHasAnomaly) warnings.push('核心钩子未直接展示异常/信息差；长篇允许由现实压力与持续追问承担开篇吸引力');
+    }
     if (descriptionProgressions < (storyType === 'short_story' ? 2 : 3)) issues.push('故事推进只有一个点子，缺少可持续升级链');
     if (!openingDeliversPromise) issues.push('开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现');
     if (!reversalConsequential) issues.push('核心反转只是在补充信息，没有改变目标、关系、胜负条件或代价');
     if (storyType === 'short_story' && !payoffPromise) issues.push('短篇只有吊胃口，没有明确的中后段/终局兑现承诺');
     if (!lifeAnchor) issues.push('缺少可代入的人生利益或关系锚点：题材机制尚未落到家庭、工作、钱、尊严、健康、归属、责任或生存等具体代价');
     if (!aspiration) issues.push('主角缺少清晰的生活期盼/欲望：读者不知道他真正想得到、守住、夺回或改变什么');
-    if (!socialFriction) issues.push('现实批判没有落到具体规则、权力、资源、身份或关系摩擦，容易变成空泛说教');
+    if (!socialFriction) warnings.push('当前题材没有明显社会规则/资源/身份摩擦；这不是所有故事的必选项，若题材主轴不是现实批判，不作为淘汰理由');
     if (!sustainedSuspense) issues.push('缺少可贯穿阶段的核心追问，故事没有稳定的“还想知道什么”');
     if (simpleMoralMechanismRisk) issues.push('题材仍是“某种行为→直接受到超常惩罚/报应”的单层寓言机制，缺少会改写利益、关系或选择的第二层后果');
     const minDistinctiveness = storyType === 'short_story' ? 6 : 5;
