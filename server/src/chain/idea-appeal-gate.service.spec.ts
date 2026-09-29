@@ -109,6 +109,82 @@ describe('IdeaAppealGateService', () => {
     expect(assessment.issues.some((item) => item.includes('单层寓言机制'))).toBe(true);
   });
 
+  it('accepts a distinctive story whose ending promise is expressed through the forced choice and its second-order consequence', () => {
+    const assessment = gate.assess({
+      title: '寄件人三年前就死了',
+      hook: '靠校园跑腿榜第一免学费的沈遥，接到一件寄给自己的快递，寄件人写着她妈的名字——她妈三年前就没了；取件期限七天，取件码却握在跟她争榜首的江屿手里。',
+      description: '沈遥靠校园跑腿榜第一免掉一整年学费。第七天驿站通知她有件超期快递，寄件人栏写着她妈的名字。她一边抢单一边顺着这批货往下查，随后发现旧事故与江屿家有关。榜首结算前一夜，她只能选一个：把江屿挤出榜外，还是先把快递的事告诉他。她选了榜，等他退学之后才知道，赔偿协议的受益人栏里写着她弟弟的名字。',
+      protagonist: '20岁大学生，想保住榜首免学费、不让弟弟辍学。',
+      coreConflict: '沈遥要拿到能救自己家的榜首奖金，而唯一能解开快递的人，正是被她挤出榜外的江屿。',
+      uniquePoint: '榜单分数和快递取件期限形成两条同时逼近的倒计时。',
+      mainReversal: '快递不是她妈寄的，而是旧事故的赔偿文书；她保住榜首后，江屿因此退学，原本的竞争关系变成她必须承担的债。',
+      noveltyProof: {
+        familiarShell: '校园竞争加身世真相',
+        uncommonCombination: '跑腿平台分榜排名、快递超期销毁、一场旧事故的赔偿文书',
+        avoidedPatterns: '主角不是追查真相，而是在压住真相抢奖金',
+        irreplaceableWhy: '去掉跑腿榜单，二选一压力不存在；去掉快递期限，真相会自然翻开',
+        secondOrderConsequence: '她保住榜首，江屿因学分和收入问题退学，而赔偿协议的受益人是她弟弟',
+        readerQuestion: '取件码为什么会在江屿的手机上？',
+      },
+    }, 'short_story');
+
+    expect(assessment.passed).toBe(true);
+    expect(assessment.signals.distinctivenessScore).toBeGreaterThanOrEqual(8);
+    expect(assessment.signals.payoffPromise).toBe(true);
+    expect(assessment.signals.reversalConsequential).toBe(true);
+    expect(assessment.signals.secondOrderConsequence).toBe(true);
+  });
+
+  it('recognizes real pressure and protagonist action without requiring fixed gate keywords', () => {
+    const assessment = gate.assess({
+      title: '备注栏里的交换',
+      hook: '我是外卖骑手，母亲等钱手术。常点粥的男生在备注写“不要香菜”，我照做后，母亲疼痛减轻，他却忘记我是谁。高考前三十天，我发现所有备注都是他写给我的情书。',
+      description: '第一次照做后母亲疼痛减轻，接着男生开始忘记她的名字和共同回忆。她继续配送，直到发现每条备注都在交换病痛与记忆。最后她决定送最后一单，却发现订单已经取消，必须在母亲的康复与让男生恢复记忆之间选择。',
+      protagonist: '19岁外卖骑手，想治好母亲并重回校园。',
+      coreConflict: '她按备注配送可减轻母亲病痛，却会让男生失去关于她的记忆；她必须在救母与留住他之间选择。',
+      uniquePoint: '外卖备注不是口味要求，而是病痛与记忆的交换协议。',
+      mainReversal: '男生并非普通顾客，他主动用自己的记忆承担她母亲的病痛；这让两人的关系从顾客与骑手改成互相承担代价的人。',
+      noveltyProof: {
+        familiarShell: '外卖骑手与校园暗恋',
+        uncommonCombination: '外卖备注栏、病痛转移、记忆递减绑定在同一配送动作里',
+        avoidedPatterns: '避开车祸失忆和系统任务',
+        irreplaceableWhy: '去掉配送和备注栏，交换机制没有日常载体；去掉遗忘代价，选择不成立',
+        secondOrderConsequence: '母亲康复后，男生的升学计划被遗忘打乱，双方家庭关系也因此改变',
+        readerQuestion: '最后一单取消，是他忘了她，还是故意终止交换？',
+      },
+    }, 'short_story');
+
+    expect(assessment.passed).toBe(true);
+    expect(assessment.signals.hookHasPressure).toBe(true);
+    expect(assessment.signals.hookHasAgency).toBe(true);
+    expect(assessment.signals.hookHasRelationship).toBe(true);
+  });
+
+  it('does not make social critique a mandatory ingredient for every otherwise strong story', () => {
+    const assessment = gate.assess({
+      title: '最后一封信会忘掉我',
+      hook: '我每寄出一封信，就会忘掉一件最重要的事；只剩三封时，我决定停笔，却收到朋友写来的回信：你忘掉的，我都替你记着。',
+      description: '第一封信让我忘了回家的路，第二封让我忘了朋友的生日。接着我开始把每段记忆写进本子，试着阻止遗忘。直到第三封回信出现，我发现朋友正在替我承担每次遗忘留下的后果。最后我必须选择停止通信保住记忆，还是寄出最后一封信救回他。',
+      protagonist: '想保住重要记忆和朋友关系的普通学生。',
+      coreConflict: '每次寄信都能解决眼前的问题，却会失去一段重要记忆；主角必须决定是否继续。',
+      uniquePoint: '通信动作与记忆递减绑定，信件既是解决问题的工具也是失去关系的代价。',
+      mainReversal: '主角发现朋友一直在替自己记录并承担遗忘的后果，关系从被保护者变成必须反过来保护对方的人。',
+      noveltyProof: {
+        familiarShell: '青春友情加轻幻想',
+        uncommonCombination: '纸质通信、记忆递减、朋友代为保存记忆',
+        avoidedPatterns: '不靠系统任务或身份揭露',
+        irreplaceableWhy: '去掉信件，记忆递减没有可重复动作；去掉朋友关系，最后选择没有情感重量',
+        secondOrderConsequence: '主角停止寄信后，朋友失去继续替她保存记忆的机会，两人的关系被迫重新建立',
+        readerQuestion: '朋友为什么记得所有主角已经忘掉的事情？',
+      },
+    }, 'short_story');
+
+    expect(assessment.readerExperienceProfile.evidence.socialFriction).toBe(false);
+    expect(assessment.warnings.some((item) => item.includes('不是所有故事的必选项'))).toBe(true);
+    expect(assessment.issues.some((item) => item.includes('现实批判'))).toBe(false);
+    expect(assessment.passed).toBe(true);
+  });
+
   it('ranks higher distinctiveness ahead of lower distinctiveness after both candidates have passed', () => {
     const baseline = gate.assess(strongShort, 'short_story');
     expect(baseline.passed).toBe(true);
