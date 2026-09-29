@@ -1,0 +1,27 @@
+name: Fix idea migration fixture
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/scripts/fix-idea-migration-fixture.py'
+      - '.github/workflows/fix-idea-migration-fixture.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fix exact test fixture
+        run: python .github/scripts/fix-idea-migration-fixture.py
+      - name: Remove helper artifacts
+        run: rm .github/scripts/fix-idea-migration-fixture.py .github/workflows/fix-idea-migration-fixture.yml
+      - name: Commit fixture fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/scripts/one-shot-idea-distinctiveness.py .github/scripts/fix-idea-migration-fixture.py .github/workflows/fix-idea-migration-fixture.yml
+          git commit -m 'test: make idea ranking fixture genuinely admissible'
+          git push origin HEAD:main
