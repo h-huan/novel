@@ -333,7 +333,15 @@ for (const target of projectTargets) {
   }
 
   const projectStatus = String(result.project.status || '').toLowerCase();
-  if (projectStatus !== 'active') runtimeProblems.push(`${prefix}_project_status_${projectStatus || 'unknown'}`);
+  const diagnostics = result.cockpit?.diagnostics ?? null;
+  const creatingInProgress = !runFull && projectStatus === 'creating' && diagnostics?.creationStalled !== true;
+  if (runFull) {
+    if (projectStatus !== 'active') runtimeProblems.push(`${prefix}_project_status_${projectStatus || 'unknown'}`);
+  } else if (projectStatus === 'creating') {
+    if (diagnostics?.creationStalled === true) runtimeProblems.push(`${prefix}_creation_stalled`);
+  } else if (projectStatus !== 'active') {
+    runtimeProblems.push(`${prefix}_project_status_${projectStatus || 'unknown'}`);
+  }
   if (target.expectedType && result.project.type !== target.expectedType) {
     runtimeProblems.push(`${prefix}_project_type_${result.project.type || 'unknown'}`);
   }
@@ -345,7 +353,7 @@ for (const target of projectTargets) {
   } else {
     const missingModules = Array.isArray(integrity.missingModules) ? integrity.missingModules : [];
     const consistencyIssues = Array.isArray(integrity.consistencyIssues) ? integrity.consistencyIssues : [];
-    if (missingModules.length) runtimeProblems.push(`${prefix}_missing_modules_${missingModules.length}`);
+    if (missingModules.length && !creatingInProgress) runtimeProblems.push(`${prefix}_missing_modules_${missingModules.length}`);
     if (consistencyIssues.length) runtimeProblems.push(`${prefix}_consistency_issues_${consistencyIssues.length}`);
     if (runFull && integrity.outlineBodyMappingValid !== true) runtimeProblems.push(`${prefix}_outline_body_mapping_invalid`);
   }
@@ -436,13 +444,30 @@ function projectMarkdown(target) {
   const typeLine = target.expectedType
     ? `${result.project.typeMatches ? 'PASS' : 'FAIL'} · expected=${target.expectedType} · actual=${result.project.type ?? 'unknown'}`
     : `${result.project.type ?? 'unknown'}`;
+  const diagnostics = result.cockpit?.diagnostics ?? null;
+  const isCreating = String(result.project.status || '').toLowerCase() === 'creating';
+  const inProgress = !runFull && isCreating && diagnostics?.creationStalled !== true;
+  const statusLine = result.project.status === 'active'
+    ? 'PASS · active'
+    : inProgress
+      ? `IN_PROGRESS · creating · idle=${diagnostics?.idleMs ?? 'unknown'}ms`
+      : `FAIL · ${result.project.status ?? 'unknown'}${diagnostics?.creationStalled ? ' · creation_stalled' : ''}`;
   const integrity = result.integrityAudit;
   const integrityLine = integrity?.error
     ? `FAIL · ${integrity.error}`
     : integrity
-      ? `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || (runFull && integrity.outlineBodyMappingValid !== true)) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'NOT_READY'}`
+      ? inProgress
+        ? `IN_PROGRESS · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length}`
+        : `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || (runFull && integrity.outlineBodyMappingValid !== true)) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'NOT_READY'}`
       : 'FAIL · 未取得完整性审计';
-  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${result.project.status === 'active' ? 'PASS' : 'FAIL'} · ${result.project.status ?? 'unknown'}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+  const persistenceLine = diagnostics
+    ? diagnostics.creationStalled
+      ? `FAIL · stalled · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
+      : (diagnostics.pendingPersistenceMismatch || []).length
+        ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
+        : `PASS · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
+    : 'UNAVAILABLE';
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
 const projectSections = projectTargets.length
@@ -455,7 +480,7 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；会显示项目状态和最近 generation run/error。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
