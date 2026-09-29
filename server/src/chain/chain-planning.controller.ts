@@ -42,6 +42,16 @@ export class ChainPlanningController {
       passed: accepted.length,
       rejected: rejected.length,
       reasons: rejectionReasons.slice(0, 8),
+      candidateAssessments: assessed.map((item) => ({
+        title: String(item.idea?.title || ''),
+        passed: item.assessment.passed,
+        issues: item.assessment.issues,
+        warnings: item.assessment.warnings,
+        signals: item.assessment.signals,
+        densityMode: item.assessment.readerExperienceProfile.densityMode,
+        pace: item.assessment.readerExperienceProfile.pace,
+        evidence: item.assessment.readerExperienceProfile.evidence,
+      })),
       acceptedEvidence: passedAssessments.map((item) => ({
         title: String(item.idea?.title || ''),
         densityMode: item.assessment.readerExperienceProfile.densityMode,
@@ -66,10 +76,13 @@ export class ChainPlanningController {
     const qualityWarning = accepted.length < desiredCount
       ? `只返回 ${accepted.length}/${desiredCount} 个通过点击/留存前置 Gate 的题材；弱候选已淘汰，不用占位内容补数。`
       : result.qualityWarning;
+    // 把本轮审计随每个可选题材带走。用户最终选择其中一张创建项目时，selectedIdea 会原样写入
+    // Creative Constitution.confirmedStory，因此 latest.json 能复盘这次发现批次，不再依赖截图。
+    const acceptedWithAudit = accepted.map((idea) => ({ ...idea, ideaDiscoveryAudit: appealGate }));
     return {
       ...result,
-      ideas: accepted,
-      totalIdeas: accepted.length,
+      ideas: acceptedWithAudit,
+      totalIdeas: acceptedWithAudit.length,
       qualityWarning,
       appealGate,
     };
@@ -102,6 +115,7 @@ export class ChainPlanningController {
           uniquePoint: confirmedStory.uniquePoint ?? confirmedStory.uniqueSelling ?? confirmedStory.storyCore ?? null,
           estimatedWords: confirmedStory.recommendedTargetWords ?? confirmedStory.estimatedWords ?? null,
           readerExperienceProfile: confirmedStory.readerExperienceProfile ?? null,
+          ideaDiscoveryAudit: confirmedStory.ideaDiscoveryAudit ?? null,
         }
       : null;
 
@@ -109,8 +123,9 @@ export class ChainPlanningController {
       ...recovery,
       diagnosticSchemaVersion: 2,
       storySelection,
-      // latest.json 已完整保存本接口返回；这里明确告诉验收器/人工阅读者去哪找体验策略。
+      // latest.json 已完整保存本接口返回；这里明确告诉验收器/人工阅读者去哪找体验策略与本轮发现审计。
       readerExperienceProfilePresent: Boolean(storySelection?.readerExperienceProfile),
+      ideaDiscoveryAuditPresent: Boolean(storySelection?.ideaDiscoveryAudit),
     };
   }
 
