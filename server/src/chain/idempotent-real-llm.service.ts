@@ -45,19 +45,17 @@ export class IdempotentRealLLMService extends RealLLMService {
     const projectId = request.metrics?.projectId ?? currentCreationProjectId() ?? undefined;
     const scenario = String(request.scenario || 'daily');
 
-    // 非可复用调用仍走同一个真实 LLM/Gate，只在返回后补回这次物理生成的 runId。
+    // 非可复用调用仍走同一个真实 LLM/Gate，只在返回后按最终输出做原有的精确 runId 绑定。
     if (!projectId || !this.isReusableCreationCall(request, projectId)) {
-      const callStartedAt = new Date().toISOString();
       const response = await super.generate(request);
-      return projectId ? this.attachLatestRunId(projectId, scenario, stepKey, response, callStartedAt) : response;
+      return projectId ? this.attachLatestRunId(projectId, scenario, response) : response;
     }
 
     const db = this.database.getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     if (!project) {
-      const callStartedAt = new Date().toISOString();
       const response = await super.generate(request);
-      return this.attachLatestRunId(projectId, scenario, stepKey, response, callStartedAt);
+      return this.attachLatestRunId(projectId, scenario, response);
     }
 
     const constitution = readConstitution(project);
@@ -96,15 +94,16 @@ export class IdempotentRealLLMService extends RealLLMService {
     const systemPrompt = [request.systemPrompt, fingerprintDirective].filter(Boolean).join('\n');
     const promptVersion = digest(systemPrompt + JSON.stringify(constitution) + standards.digest);
 
-    const cached = db.prepare(`SELECT id,output_text,model,finished_at FROM generation_runs
+    const matchingRuns = () => db.prepare(`SELECT id,output_text,model,finished_at FROM generation_runs
       WHERE project_id=? AND stage=? AND scenario=? AND status='success'
         AND constitution_revision IS ? AND context_version=? AND prompt_version=?
         AND COALESCE(chapter_index,-1)=COALESCE(?,-1)
         AND LENGTH(TRIM(COALESCE(output_text,'')))>0
-      ORDER BY finished_at DESC,id DESC LIMIT 1`).get(
+      ORDER BY finished_at DESC,id DESC LIMIT 2`).all(
         projectId, stage, scenario, constitutionRevision, contextVersion, promptVersion, chapterIndex,
-      ) as { id: string; output_text: string; model?: string | null; finished_at?: string | null } | undefined;
+      ) as Array<{ id: string; output_text: string; model?: string | null; finished_at?: string | null }>;
 
+    const cached = matchingRuns()[0];
     if (cached?.output_text) {
       return {
         content: cached.output_text,
@@ -117,46 +116,26 @@ export class IdempotentRealLLMService extends RealLLMService {
 
     const callStartedAt = new Date().toISOString();
     const response = await super.generate({ ...request, systemPrompt });
-    return this.attachLatestRunId(projectId, scenario, stepKey, response, callStartedAt);
+    if (response.runId) return response;
+
+    // The structured creation path already has a complete deterministic fingerprint.
+    // Bind provenance by that fingerprint, not by provider text formatting. Only the
+    // single run completed during this physical call is eligible. Concurrent duplicate
+    // matches remain ambiguous and therefore fail closed.
+    const completed = matchingRuns().filter(row => String(row.finished_at || '') >= callStartedAt);
+    return completed.length === 1 ? { ...response, runId: completed[0].id } : response;
   }
 
   /**
-   * RealLLMService finishes generation_runs before returning. Exact final output
-   * remains the strongest provenance proof and is always attempted first.
-   *
-   * Some OpenAI-compatible providers normalize structured text between the value
-   * returned to the caller and the value persisted by the telemetry boundary. A
-   * byte mismatch must not make a successful world/outline result lose its runId
-   * and then fail at the Canon guard. For that integration edge we allow one
-   * deterministic fallback: exactly one successful run may have finished after
-   * this specific super.generate() call started, and it must match project,
-   * stage and scenario. If there are zero or multiple candidates we still fail
-   * closed and leave runId empty rather than inventing provenance.
+   * Non-reusable/user-facing calls keep the historical byte-for-byte output proof.
+   * Structured creation calls use the stronger full request/context fingerprint above.
    */
-  private attachLatestRunId(
-    projectId: string,
-    scenario: string,
-    stepKey: string,
-    response: LLMResponse,
-    callStartedAt?: string,
-  ): LLMResponse {
+  private attachLatestRunId(projectId: string, scenario: string, response: LLMResponse): LLMResponse {
     if (response.runId || !String(response.content || '').trim()) return response;
-    const db = this.database.getDb();
-    const exact = db.prepare(`SELECT id FROM generation_runs
+    const row = this.database.getDb().prepare(`SELECT id FROM generation_runs
       WHERE project_id=? AND scenario=? AND status='success' AND output_text=?
       ORDER BY finished_at DESC,id DESC LIMIT 1`).get(projectId, scenario, response.content) as { id: string } | undefined;
-    if (exact?.id) return { ...response, runId: exact.id };
-    if (!callStartedAt) return response;
-
-    const stage = qualityStage(scenario, stepKey);
-    const candidates = db.prepare(`SELECT id FROM generation_runs
-      WHERE project_id=? AND stage=? AND scenario=? AND status='success'
-        AND finished_at IS NOT NULL AND finished_at>=?
-        AND LENGTH(TRIM(COALESCE(output_text,'')))>0
-      ORDER BY finished_at DESC,id DESC LIMIT 2`).all(
-        projectId, stage, scenario, callStartedAt,
-      ) as Array<{ id: string }>;
-    return candidates.length === 1 ? { ...response, runId: candidates[0].id } : response;
+    return row?.id ? { ...response, runId: row.id } : response;
   }
 
   private isReusableCreationCall(request: LLMRequest, projectId?: string): boolean {
