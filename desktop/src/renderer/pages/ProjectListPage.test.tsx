@@ -60,11 +60,17 @@ describe('项目列表恢复卡片', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('卡在 creating 且 worker 已停、canResume=true 时直接暴露恢复生成入口', () => {
-    const { host } = renderCard('creating', vi.fn(), vi.fn(), audit({ status: 'creating', running: false, canResume: true }));
+  it('卡在 creating 且 worker 已停、canResume=true 时直接暴露恢复生成入口且按钮不误触发打开项目', () => {
+    const onRetry = vi.fn();
+    const onSelect = vi.fn();
+    const { host } = renderCard('creating', onRetry, onSelect, audit({ status: 'creating', running: false, canResume: true }));
     expect(host.textContent).toContain('生成中断 · 可恢复');
-    expect(host.querySelector('button[aria-label="恢复生成 拆到最后一户"]')).not.toBeNull();
+    const retry = host.querySelector('button[aria-label="恢复生成 拆到最后一户"]') as HTMLButtonElement;
+    expect(retry).not.toBeNull();
     expect(host.firstElementChild?.getAttribute('style')).toContain('dashed');
+    act(() => retry.click());
+    expect(onRetry).toHaveBeenCalledWith('failed-1');
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('正常项目不显示恢复按钮', () => {
