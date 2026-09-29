@@ -131,6 +131,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideLengthContinuation, decideProgressiveRepair } from './adaptive-repair';
 import { ideaHookRequirement, ideaRecoveryDirective } from './idea-discovery-contract';
+import { IdeaAppealGateService } from './idea-appeal-gate.service';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
 const projectMetricsContext = new AsyncLocalStorage<string | null>();
@@ -713,6 +714,8 @@ export class ChainController {
     private readonly generationMetrics: GenerationMetricsService,
     private readonly generatedCanonGuard: GeneratedCanonGuardService,
     private readonly originalityGuard: OriginalityGuardService,
+    // 唯一题材吸引力 Gate 在 runIdeaDiscovery 内执行；默认值仅兼容直接 new ChainController 的单测。
+    private readonly ideaAppealGate: IdeaAppealGateService = new IdeaAppealGateService(),
   ) {}
 
   private beginChapterGeneration(projectId: string, chapterId: string) {
@@ -5045,13 +5048,13 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
 
       const accepted: any[] = [];
       const rejectedReasons: string[] = [];
+      const candidateAssessments: any[] = [];
       const seen = new Set(initialExcludes.map(item => normalizeTitle(item.title)));
       const autoSelectionRequested = !dto.storyTone.length || !dto.writingStyle.length || !dto.webNovelGenre.length
         || !dto.plotTags.length || !dto.pov || (submissionRequired && !dto.submissionTags.length);
       const seenCombinations = new Set<string>();
       const accept = (candidates: any[]) => {
         for (const candidate of candidates) {
-          if (accepted.length >= requestedCount) break;
           const titleKey = normalizeTitle(candidate?.title);
           const issues = assessIdeaQuality(candidate);
           if (!titleKey || seen.has(titleKey)) issues.push('标题与已有或同批题材重复');
@@ -5064,8 +5067,25 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           const combination = JSON.stringify(['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags', 'pov', 'submissionTags']
             .map(field => candidate?.[field]));
           if (autoSelectionRequested && seenCombinations.has(combination)) issues.push('自动组合与本批已通过题材重复');
-          if (issues.length) {
-            rejectedReasons.push(...issues);
+
+          // 唯一吸引力/留存 Gate 必须在这里执行：这里只有这一层同时掌握第一批失败原因和第二次补生。
+          // 旧链路在 HTTP adapter 再筛一次，外层失败无法反馈给补生 Prompt，形成“内层通过、外层全灭”。
+          const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType);
+          issues.push(...appealAssessment.issues);
+          const uniqueIssues = Array.from(new Set(issues));
+          const passed = uniqueIssues.length === 0;
+          candidateAssessments.push({
+            title: String(candidate?.title || ''),
+            passed,
+            issues: uniqueIssues,
+            warnings: appealAssessment.warnings,
+            signals: appealAssessment.signals,
+            densityMode: appealAssessment.readerExperienceProfile.densityMode,
+            pace: appealAssessment.readerExperienceProfile.pace,
+            evidence: appealAssessment.readerExperienceProfile.evidence,
+          });
+          if (!passed) {
+            rejectedReasons.push(...uniqueIssues);
             continue;
           }
           seen.add(titleKey);
@@ -5084,11 +5104,19 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
             plotTags: dto.plotTags.length ? dto.plotTags : candidate.plotTags,
             estimatedWords: parsePositiveTargetWords(candidate.recommendedTargetWords ?? candidate.estimatedWords),
             plannedChapters: Number(candidate.plannedChapters),
+            readerExperienceProfile: appealAssessment.readerExperienceProfile,
+            ideaAppealGate: {
+              passed: true,
+              distinctivenessScore: appealAssessment.signals.distinctivenessScore,
+              descriptionProgressions: appealAssessment.signals.descriptionProgressions,
+              hookHasRelationship: appealAssessment.signals.hookHasRelationship,
+            },
           });
         }
       };
 
-      const firstBatch = await generateBatch(requestedCount, initialExcludes);
+      const firstBatchCount = Math.min(10, requestedCount + Math.min(3, requestedCount));
+      const firstBatch = await generateBatch(firstBatchCount, initialExcludes);
       if (!firstBatch.length) throw new Error('模型已返回内容，但缺少有效的 ideas 数组。未创建题材，请重试。');
       accept(firstBatch);
 
@@ -5101,18 +5129,53 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         accept(recoveryBatch);
       }
 
-      if (!accepted.length) {
-        const rejectionSummary = Array.from(new Set(rejectedReasons)).slice(0, 10).join('；') || '证据不足';
+      const selectedAccepted = accepted
+        .sort((left, right) =>
+          Number(right?.ideaAppealGate?.distinctivenessScore || 0) - Number(left?.ideaAppealGate?.distinctivenessScore || 0)
+          || Number(right?.ideaAppealGate?.descriptionProgressions || 0) - Number(left?.ideaAppealGate?.descriptionProgressions || 0)
+          || Number(Boolean(right?.ideaAppealGate?.hookHasRelationship)) - Number(Boolean(left?.ideaAppealGate?.hookHasRelationship)))
+        .slice(0, requestedCount);
+      const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
+      const qualifiedCount = candidateAssessments.filter(item => item.passed === true).length;
+      const appealGate = {
+        schemaVersion: 3,
+        mode: 'single_recoverable_reader_experience_gate',
+        generated: candidateAssessments.length,
+        qualified: qualifiedCount,
+        returned: selectedAccepted.length,
+        rejected: candidateAssessments.filter(item => item.passed !== true).length,
+        reasons: uniqueRejectedReasons.slice(0, 8),
+        candidateAssessments,
+        acceptedEvidence: selectedAccepted.map(idea => ({
+          title: String(idea?.title || ''),
+          densityMode: idea?.readerExperienceProfile?.densityMode,
+          pace: idea?.readerExperienceProfile?.pace,
+          evidence: idea?.readerExperienceProfile?.evidence,
+          distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
+        })),
+        note: '这是文本吸引力与读者体验前置 Gate，不是预测点击率/完读率；未通过候选只保留审计，不进入前端展示。',
+      };
+
+      if (!selectedAccepted.length) {
+        const rejectionSummary = uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
         this.logger.warn(`idea-discover: 两轮候选均未通过展示 Gate，内部淘汰原因：${rejectionSummary}`);
-        throw new Error('本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。');
+        return {
+          success: false,
+          ideas: [],
+          totalIdeas: 0,
+          error: '本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。',
+          appealGate,
+        };
       }
-      this.logger.log(`idea-discover: 完成 ${accepted.length}/${requestedCount} 个合格题材，逻辑调用不超过2次`);
+      const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
+      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材，逻辑调用不超过2次`);
       return {
         success: true,
-        ideas: accepted,
-        totalIdeas: accepted.length,
-        qualityWarning: accepted.length < requestedCount
-          ? `本次有 ${accepted.length} 个题材通过质量 Gate；其余结果证据不足或未达标，未创建占位内容。`
+        ideas: acceptedWithAudit,
+        totalIdeas: acceptedWithAudit.length,
+        appealGate,
+        qualityWarning: acceptedWithAudit.length < requestedCount
+          ? `本次有 ${acceptedWithAudit.length} 个题材通过展示 Gate；其余结果已淘汰，不用占位内容补数。`
           : undefined,
       };
     } catch (err) {

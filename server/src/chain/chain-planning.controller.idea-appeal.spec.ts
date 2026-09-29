@@ -15,96 +15,103 @@ const dto = {
   pov: '第一人称',
 };
 
-const assessment = (passed: boolean, issues: string[] = []) => ({
-  passed,
-  issues,
-  warnings: passed ? ['刀点需要先建立人物关系再兑现'] : [],
-  signals: {
-    titleAnchored: passed,
-    hookHasAnomaly: passed,
-    hookHasPressure: passed,
-    hookHasAgency: passed,
-    hookHasRelationship: passed,
-    descriptionProgressions: passed ? 3 : 0,
-    openingDeliversPromise: passed,
-    reversalConsequential: passed,
-    payoffPromise: passed,
+const profile = {
+  version: 1,
+  storyType: 'short_story',
+  densityMode: '短篇集中兑现',
+  pace: '偏快但保留呼吸段',
+  evidence: {
+    lifeAnchor: true,
+    aspiration: true,
+    socialFriction: true,
+    struggleAgency: true,
+    painPotential: true,
+    catharsisPotential: true,
+    sustainedSuspense: true,
+    emotionalContrastGroups: 3,
+    stackingRisk: false,
   },
-  readerExperienceProfile: {
-    version: 1,
-    storyType: 'short_story',
-    densityMode: '短篇集中兑现',
-    pace: '偏快但保留呼吸段',
-    evidence: {
-      lifeAnchor: true,
-      aspiration: true,
-      socialFriction: true,
-      struggleAgency: true,
-      painPotential: true,
-      catharsisPotential: true,
-      sustainedSuspense: true,
-      emotionalContrastGroups: 3,
-      stackingRisk: false,
-    },
-  },
+};
+
+const audit = {
+  schemaVersion: 3,
+  mode: 'single_recoverable_reader_experience_gate',
+  generated: 7,
+  qualified: 5,
+  returned: 5,
+  rejected: 2,
+  reasons: ['弱题材'],
+  candidateAssessments: [],
+  acceptedEvidence: [],
+};
+
+const acceptedIdea = (index: number) => ({
+  title: `通过${index}`,
+  storyType: 'short_story',
+  targetPlatform: 'fanqie',
+  ideaAppealGate: { passed: true, distinctivenessScore: 8 - index },
+  readerExperienceProfile: profile,
+  ideaDiscoveryAudit: audit,
 });
 
-describe('ChainPlanningController idea appeal adapter', () => {
-  it('oversamples once, filters locally and attaches a structured discovery audit to every selectable idea', async () => {
-    const ideaDiscover = vi.fn().mockResolvedValue({ success: true, ideas: Array.from({ length: 8 }, (_, i) => ({ title: `候选${i}` })) });
-    const select = vi.fn().mockReturnValue({
-      accepted: Array.from({ length: 5 }, (_, i) => ({ title: `通过${i}`, readerExperienceProfile: assessment(true).readerExperienceProfile })),
-      assessed: Array.from({ length: 8 }, (_, i) => ({ idea: { title: `候选${i}` }, assessment: assessment(i < 5, i < 5 ? [] : ['弱题材']) })),
+describe('ChainPlanningController single idea gate adapter', () => {
+  it('does not oversample or rescreen ideas that already passed the recoverable discovery gate', async () => {
+    const ideaDiscover = vi.fn().mockResolvedValue({
+      success: true,
+      ideas: Array.from({ length: 5 }, (_, index) => acceptedIdea(index)),
+      totalIdeas: 5,
+      appealGate: audit,
     });
-    const controller = new ChainPlanningController({ ideaDiscover } as any, { select } as any);
+    const controller = new ChainPlanningController({ ideaDiscover } as any);
 
     const result: any = await controller.ideaDiscover(dto as any);
+
     expect(ideaDiscover).toHaveBeenCalledTimes(1);
-    expect(ideaDiscover).toHaveBeenCalledWith(expect.objectContaining({ count: 8 }));
-    expect(select).toHaveBeenCalledTimes(1);
-    expect(select).toHaveBeenCalledWith(expect.any(Array), 'short_story', 5);
+    expect(ideaDiscover).toHaveBeenCalledWith(expect.objectContaining({ count: 5 }));
     expect(result.ideas).toHaveLength(5);
-    expect(result.appealGate).toEqual(expect.objectContaining({
-      schemaVersion: 2,
-      mode: 'adaptive_reader_experience',
-      generated: 8,
-      passed: 5,
-      rejected: 3,
-    }));
-    expect(result.appealGate.candidateAssessments).toHaveLength(8);
-    expect(result.appealGate.acceptedEvidence[0]).toEqual(expect.objectContaining({
-      densityMode: '短篇集中兑现',
-      pace: '偏快但保留呼吸段',
-    }));
-    expect(result.ideas[0].ideaDiscoveryAudit).toEqual(result.appealGate);
-    expect(JSON.stringify(result.appealGate)).not.toMatch(/\d+%/);
+    expect(result.appealGate).toEqual(audit);
+    expect(result.ideas[0].ideaDiscoveryAudit).toEqual(audit);
   });
 
-  it('returns no weak placeholders when every generated premise fails the appeal gate', async () => {
-    const ideaDiscover = vi.fn().mockResolvedValue({ success: true, ideas: [{ title: '弱题材' }] });
-    const select = vi.fn().mockReturnValue({
-      accepted: [],
-      assessed: [{ idea: { title: '弱题材' }, assessment: assessment(false, ['钩子缺少具体代价、时限或失去风险']) }],
+  it('defensively hides entries without a passed gate receipt but never calculates a second score', async () => {
+    const ideaDiscover = vi.fn().mockResolvedValue({
+      success: true,
+      ideas: [
+        acceptedIdea(0),
+        { title: '旧格式未验收题材' },
+        { title: '明确未通过题材', ideaAppealGate: { passed: false, distinctivenessScore: 9 } },
+      ],
+      totalIdeas: 3,
+      appealGate: { ...audit, qualified: 1, returned: 1 },
     });
-    const controller = new ChainPlanningController({ ideaDiscover } as any, { select } as any);
+    const controller = new ChainPlanningController({ ideaDiscover } as any);
 
-    const result: any = await controller.ideaDiscover({ ...dto, count: 1 } as any);
-    expect(ideaDiscover).toHaveBeenCalledTimes(1);
+    const result: any = await controller.ideaDiscover({ ...dto, count: 3 } as any);
+
+    expect(result.success).toBe(true);
+    expect(result.ideas.map((idea: any) => idea.title)).toEqual(['通过0']);
+    expect(result.qualityWarning).toContain('只返回 1/3');
+  });
+
+  it('passes through the inner generic failure instead of exposing internal rejection rules', async () => {
+    const ideaDiscover = vi.fn().mockResolvedValue({
+      success: false,
+      ideas: [],
+      totalIdeas: 0,
+      error: '本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。',
+      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 7 },
+    });
+    const controller = new ChainPlanningController({ ideaDiscover } as any);
+
+    const result: any = await controller.ideaDiscover({ ...dto, count: 5 } as any);
+
     expect(result.success).toBe(false);
     expect(result.ideas).toEqual([]);
-    expect(result.error).toContain('点击/留存前置 Gate');
+    expect(result.error).not.toContain('点击/留存前置 Gate');
+    expect(result.appealGate).toEqual(expect.objectContaining({ returned: 0 }));
   });
 
-  it('returns confirmed story, experience profile and the discovery batch audit through the recovery payload consumed by latest.json', async () => {
-    const profile = assessment(true).readerExperienceProfile;
-    const discoveryAudit = {
-      schemaVersion: 2,
-      mode: 'adaptive_reader_experience',
-      generated: 8,
-      passed: 5,
-      rejected: 3,
-      candidateAssessments: [{ title: '候选0', passed: true }],
-    };
+  it('returns confirmed story, experience profile and discovery audit through the recovery payload consumed by latest.json', async () => {
     const constitution: any = updateConstitution({}, {
       type: 'short_story',
       targetPlatform: 'fanqie',
@@ -117,7 +124,7 @@ describe('ChainPlanningController idea appeal adapter', () => {
       coreConflict: '守住母亲和房子并查清债务真相',
       mainReversal: '父亲其实替同事承担了被公司转嫁的责任',
       readerExperienceProfile: profile,
-      ideaDiscoveryAudit: discoveryAudit,
+      ideaDiscoveryAudit: audit,
     };
     const projectRow = { settings: JSON.stringify({ creativeConstitution: constitution }) };
     const getGenerationRecovery = vi.fn().mockResolvedValue({ projectId: 'p1', status: 'creating' });
@@ -126,7 +133,6 @@ describe('ChainPlanningController idea appeal adapter', () => {
     };
     const controller = new ChainPlanningController(
       { getGenerationRecovery } as any,
-      { select: vi.fn() } as any,
       database as any,
     );
 
@@ -140,7 +146,7 @@ describe('ChainPlanningController idea appeal adapter', () => {
         densityMode: '短篇集中兑现',
         pace: '偏快但保留呼吸段',
       }),
-      ideaDiscoveryAudit: expect.objectContaining({ generated: 8, passed: 5, rejected: 3 }),
+      ideaDiscoveryAudit: expect.objectContaining({ generated: 7, qualified: 5, returned: 5, rejected: 2 }),
     }));
   });
 });
