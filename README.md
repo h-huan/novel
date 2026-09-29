@@ -91,7 +91,7 @@ npm run test:e2e
 node verify-local.mjs
 ```
 
-该命令不会要求短篇和长篇同时存在，也不会只查 `active` 项目。它会自动检查最近的项目（包括 `creating` / `generation_failed`），并在报告中显示项目状态、结构审计、最近 generation run 及其 `error`。如果项目壳都没有成功落库，则报告会标记 `no_projects_found`；此时应直接保留创建页错误信息和 Server 日志，因为失败发生在项目可持久化之前。
+该命令不会要求短篇和长篇同时存在，也不会只查 `active` 项目。它会自动检查最近的项目（包括 `creating` / `generation_failed`），并在报告中显示项目状态、结构审计、最近 generation run 及其 `error`。灵感发现无论成功还是全部候选被淘汰，最近一批结果都会写入 `runtime.ideaDiscovery`，其中包含唯一前置 Gate 的候选证据、通过/淘汰数量与原因，因此即使尚未创建任何项目也能复盘题材阶段。若项目壳未落库，报告仍会标记 `no_projects_found`；此时应先查看 `runtime.ideaDiscovery`。只有灵感诊断本身也不可用时，才需要结合创建页错误信息和 Server 日志定位项目持久化之前的故障。
 
 ### 最终完整验收（默认推荐）
 
@@ -136,7 +136,7 @@ verification/latest.md
 
 即使最终 verdict 为 FAIL，这两个文件仍会生成。终端命令返回非 0 只表示验收发现问题，不表示报告生成失败。优先查看 `verification/latest.md` 的“运行问题”；需要完整机器数据时查看 `verification/latest.json`。
 
-快速诊断模式用于定位正在创建或创建失败的项目；最终 `--full` 模式则会把短篇和长篇同时写进同一份报告，并严格检查：项目已激活、项目类型正确、`confirmedStory` 已持久化、恢复审计中无缺失模块或一致性问题、章纲与正文映射有效、第一章正文非空、对应 chapter generation run 成功且 Gate 已通过。报告文件已加入 `.gitignore`，默认只保留最新一次。
+快速诊断模式用于定位灵感发现、正在创建或创建失败的项目；最终 `--full` 模式则会把短篇和长篇同时写进同一份报告，并严格检查：项目已激活、项目类型正确、`confirmedStory` 已持久化、恢复审计中无缺失模块或一致性问题、章纲与正文映射有效、第一章正文非空、对应 chapter generation run 成功且 Gate 已通过。报告文件已加入 `.gitignore`，默认只保留最新一次。
 
 ## 数据与迁移
 
