@@ -9,12 +9,13 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def replace_between(text: str, start: str, end: str, replacement: str, label: str) -> str:
-    if text.count(start) != 1 or text.count(end) != 1:
-        raise SystemExit(f'{label}: expected unique anchors, got start={text.count(start)} end={text.count(end)}')
+    start_count = text.count(start)
+    if start_count != 1:
+        raise SystemExit(f'{label}: expected exactly 1 start anchor, got {start_count}')
     start_index = text.index(start)
-    end_index = text.index(end, start_index)
-    if end_index <= start_index:
-        raise SystemExit(f'{label}: invalid anchor order')
+    end_index = text.find(end, start_index + len(start))
+    if end_index < 0:
+        raise SystemExit(f'{label}: end anchor not found after start')
     return text[:start_index] + replacement + text[end_index:]
 
 
@@ -39,36 +40,22 @@ text = replace_once(
     "      const accepted: any[] = [];\n      const rejectedReasons: string[] = [];\n      const candidateAssessments: any[] = [];",
     'assessment audit array',
 )
-old_decision = """          const combination = JSON.stringify(['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags', 'pov', 'submissionTags']
-            .map(field => candidate?.[field]));
-          if (autoSelectionRequested && seenCombinations.has(combination)) issues.push('自动组合与本批已通过题材重复');
+text = replace_once(
+    text,
+    "      const accept = (candidates: any[]) => {\n        for (const candidate of candidates) {\n          if (accepted.length >= requestedCount) break;",
+    "      const accept = (candidates: any[]) => {\n        for (const candidate of candidates) {",
+    'assess all oversampled candidates',
+)
+old_gate_point = """          if (autoSelectionRequested && seenCombinations.has(combination)) issues.push('自动组合与本批已通过题材重复');
           if (issues.length) {
             rejectedReasons.push(...issues);
             continue;
           }
-          seen.add(titleKey);
-          seenCombinations.add(combination);
-          accepted.push({
-            ...candidate,
-            storyType: dto.storyType,
-            targetPlatform: dto.platform,
-            // 这里曾只返回四个创作维度，分类、投稿标签和情节取向在题材卡消失，创建时无法核对继承关系。
-            storyCategory: dto.storyCategory,
-            storyTone: dto.storyTone.length ? dto.storyTone : candidate.storyTone,
-            writingStyle: dto.writingStyle.length ? dto.writingStyle : candidate.writingStyle,
-            webNovelGenre: dto.webNovelGenre.length ? dto.webNovelGenre : candidate.webNovelGenre,
-            pov: dto.pov || candidate.pov,
-            submissionTags: dto.submissionTags.length ? dto.submissionTags : (submissionRequired ? candidate.submissionTags : []),
-            plotTags: dto.plotTags.length ? dto.plotTags : candidate.plotTags,
-            estimatedWords: parsePositiveTargetWords(candidate.recommendedTargetWords ?? candidate.estimatedWords),
-            plannedChapters: Number(candidate.plannedChapters),
-          });"""
-new_decision = """          const combination = JSON.stringify(['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags', 'pov', 'submissionTags']
-            .map(field => candidate?.[field]));
-          if (autoSelectionRequested && seenCombinations.has(combination)) issues.push('自动组合与本批已通过题材重复');
+"""
+new_gate_point = """          if (autoSelectionRequested && seenCombinations.has(combination)) issues.push('自动组合与本批已通过题材重复');
 
-          // 吸引力/留存 Gate 必须在这里执行：只有这一层同时掌握第一批失败原因和第二次补生。
-          // 此前 HTTP adapter 又筛一次，外层失败无法反馈给补生 Prompt，形成重复 Gate 和“生成完再全灭”。
+          // 唯一吸引力/留存 Gate 必须在这里执行：这里只有这一层同时掌握第一批失败原因和第二次补生。
+          // 旧链路在 HTTP adapter 再筛一次，外层失败无法反馈给补生 Prompt，形成“内层通过、外层全灭”。
           const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType);
           issues.push(...appealAssessment.issues);
           const uniqueIssues = Array.from(new Set(issues));
@@ -87,43 +74,40 @@ new_decision = """          const combination = JSON.stringify(['storyTone', 'wr
             rejectedReasons.push(...uniqueIssues);
             continue;
           }
-          seen.add(titleKey);
-          seenCombinations.add(combination);
-          accepted.push({
-            ...candidate,
-            storyType: dto.storyType,
-            targetPlatform: dto.platform,
-            // 这里曾只返回四个创作维度，分类、投稿标签和情节取向在题材卡消失，创建时无法核对继承关系。
-            storyCategory: dto.storyCategory,
-            storyTone: dto.storyTone.length ? dto.storyTone : candidate.storyTone,
-            writingStyle: dto.writingStyle.length ? dto.writingStyle : candidate.writingStyle,
-            webNovelGenre: dto.webNovelGenre.length ? dto.webNovelGenre : candidate.webNovelGenre,
-            pov: dto.pov || candidate.pov,
-            submissionTags: dto.submissionTags.length ? dto.submissionTags : (submissionRequired ? candidate.submissionTags : []),
-            plotTags: dto.plotTags.length ? dto.plotTags : candidate.plotTags,
-            estimatedWords: parsePositiveTargetWords(candidate.recommendedTargetWords ?? candidate.estimatedWords),
-            plannedChapters: Number(candidate.plannedChapters),
-            readerExperienceProfile: appealAssessment.readerExperienceProfile,
-            ideaAppealGate: {
-              passed: true,
-              distinctivenessScore: appealAssessment.signals.distinctivenessScore,
-            },
-          });"""
-text = replace_once(text, old_decision, new_decision, 'single gate decision')
+"""
+text = replace_once(text, old_gate_point, new_gate_point, 'single recoverable appeal gate')
+text = replace_once(
+    text,
+    "            plannedChapters: Number(candidate.plannedChapters),\n          });",
+    "            plannedChapters: Number(candidate.plannedChapters),\n            readerExperienceProfile: appealAssessment.readerExperienceProfile,\n            ideaAppealGate: {\n              passed: true,\n              distinctivenessScore: appealAssessment.signals.distinctivenessScore,\n              descriptionProgressions: appealAssessment.signals.descriptionProgressions,\n              hookHasRelationship: appealAssessment.signals.hookHasRelationship,\n            },\n          });",
+    'attach single gate receipt',
+)
+text = replace_once(
+    text,
+    "      const firstBatch = await generateBatch(requestedCount, initialExcludes);",
+    "      const firstBatchCount = Math.min(10, requestedCount + Math.min(3, requestedCount));\n      const firstBatch = await generateBatch(firstBatchCount, initialExcludes);",
+    'move oversampling into recoverable gate',
+)
 old_tail_start = "      if (!accepted.length) {\n        const rejectionSummary"
 tail_end = "    } catch (err) {"
-new_tail = """      accepted.sort((left, right) =>
-        Number(right?.ideaAppealGate?.distinctivenessScore || 0) - Number(left?.ideaAppealGate?.distinctivenessScore || 0));
+new_tail = """      const selectedAccepted = accepted
+        .sort((left, right) =>
+          Number(right?.ideaAppealGate?.distinctivenessScore || 0) - Number(left?.ideaAppealGate?.distinctivenessScore || 0)
+          || Number(right?.ideaAppealGate?.descriptionProgressions || 0) - Number(left?.ideaAppealGate?.descriptionProgressions || 0)
+          || Number(Boolean(right?.ideaAppealGate?.hookHasRelationship)) - Number(Boolean(left?.ideaAppealGate?.hookHasRelationship)))
+        .slice(0, requestedCount);
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
+      const qualifiedCount = candidateAssessments.filter(item => item.passed === true).length;
       const appealGate = {
         schemaVersion: 3,
         mode: 'single_recoverable_reader_experience_gate',
         generated: candidateAssessments.length,
-        passed: accepted.length,
+        qualified: qualifiedCount,
+        returned: selectedAccepted.length,
         rejected: candidateAssessments.filter(item => item.passed !== true).length,
         reasons: uniqueRejectedReasons.slice(0, 8),
         candidateAssessments,
-        acceptedEvidence: accepted.map(idea => ({
+        acceptedEvidence: selectedAccepted.map(idea => ({
           title: String(idea?.title || ''),
           densityMode: idea?.readerExperienceProfile?.densityMode,
           pace: idea?.readerExperienceProfile?.pace,
@@ -133,7 +117,7 @@ new_tail = """      accepted.sort((left, right) =>
         note: '这是文本吸引力与读者体验前置 Gate，不是预测点击率/完读率；未通过候选只保留审计，不进入前端展示。',
       };
 
-      if (!accepted.length) {
+      if (!selectedAccepted.length) {
         const rejectionSummary = uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
         this.logger.warn(`idea-discover: 两轮候选均未通过展示 Gate，内部淘汰原因：${rejectionSummary}`);
         return {
@@ -144,7 +128,7 @@ new_tail = """      accepted.sort((left, right) =>
           appealGate,
         };
       }
-      const acceptedWithAudit = accepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
+      const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
       this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材，逻辑调用不超过2次`);
       return {
         success: true,
