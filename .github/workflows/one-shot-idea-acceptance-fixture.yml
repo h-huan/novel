@@ -1,0 +1,36 @@
+name: One-shot idea acceptance fixture update
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/scripts/one-shot-idea-acceptance-fixture.py'
+      - '.github/workflows/one-shot-idea-acceptance-fixture.yml'
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Update exact acceptance fixture
+        run: python .github/scripts/one-shot-idea-acceptance-fixture.py
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Run generation diagnostics acceptance
+        working-directory: server
+        run: npx vitest run --config vitest.acceptance.config.mts src/acceptance/generation-diagnostics.acceptance.spec.ts
+      - name: Remove one-shot artifacts
+        run: rm .github/scripts/one-shot-idea-acceptance-fixture.py .github/workflows/one-shot-idea-acceptance-fixture.yml
+      - name: Commit fixture update
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/src/acceptance/generation-diagnostics.acceptance.spec.ts .github/scripts/one-shot-idea-acceptance-fixture.py .github/workflows/one-shot-idea-acceptance-fixture.yml
+          git commit -m 'test: align idea diagnostics fixture with novelty contract'
+          git push origin HEAD:main
