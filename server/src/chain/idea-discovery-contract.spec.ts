@@ -12,6 +12,7 @@ describe('idea discovery hook contract', () => {
     expect(contract).toContain('异常/信息差');
     expect(contract).toContain('代价或时限');
     expect(contract).toContain('具体行动');
+    expect(contract).toContain('关系锚点');
     expect(contract).toContain(`至少命中 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类`);
     expect(contract).toContain('不能把行动或代价只藏在 description');
   });
