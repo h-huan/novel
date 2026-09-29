@@ -2,6 +2,8 @@ import { Body, Controller, Get, Param, Post, Sse } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
+import { DatabaseService } from '../database/database.service';
+import { readConstitution } from '../modules/project/creative-constitution';
 
 /**
  * Planning/project lifecycle HTTP adapter.
@@ -16,6 +18,7 @@ export class ChainPlanningController {
   constructor(
     private readonly chain: ChainController,
     private readonly ideaAppealGate: IdeaAppealGateService,
+    private readonly database?: DatabaseService,
   ) {}
 
   @Post('idea-discover')
@@ -83,8 +86,32 @@ export class ChainPlanningController {
   }
 
   @Get('generation-recovery/:projectId')
-  getGenerationRecovery(@Param('projectId') projectId: string) {
-    return this.chain.getGenerationRecovery(projectId);
+  async getGenerationRecovery(@Param('projectId') projectId: string) {
+    const recovery: any = await this.chain.getGenerationRecovery(projectId);
+    if (!this.database) return recovery;
+
+    const project = this.database.getDb().prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
+    if (!project) return recovery;
+    const confirmedStory: any = readConstitution(project).confirmedStory;
+    const storySelection = confirmedStory && typeof confirmedStory === 'object' && !Array.isArray(confirmedStory)
+      ? {
+          title: confirmedStory.title ?? null,
+          hook: confirmedStory.hook ?? null,
+          coreConflict: confirmedStory.coreConflict ?? confirmedStory.conflict ?? null,
+          mainReversal: confirmedStory.mainReversal ?? null,
+          uniquePoint: confirmedStory.uniquePoint ?? confirmedStory.uniqueSelling ?? confirmedStory.storyCore ?? null,
+          estimatedWords: confirmedStory.recommendedTargetWords ?? confirmedStory.estimatedWords ?? null,
+          readerExperienceProfile: confirmedStory.readerExperienceProfile ?? null,
+        }
+      : null;
+
+    return {
+      ...recovery,
+      diagnosticSchemaVersion: 2,
+      storySelection,
+      // latest.json 已完整保存本接口返回；这里明确告诉验收器/人工阅读者去哪找体验策略。
+      readerExperienceProfilePresent: Boolean(storySelection?.readerExperienceProfile),
+    };
   }
 
   @Post('generation-recovery/:projectId/resume-start')
