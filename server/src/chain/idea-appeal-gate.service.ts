@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { SHORT_IDEA_HOOK_MIN_SIGNALS } from './idea-discovery-contract';
 
 type StoryType = 'short_story' | 'long_novel';
-
 type DensityMode = '短篇集中兑现' | '长篇分阶段波动';
 
 export interface IdeaAppealSignals {
@@ -24,23 +23,14 @@ export interface IdeaAppealSignals {
 }
 
 export interface ReaderExperienceEvidence {
-  /** 是否落到读者能理解的人生利益：家庭、工作、钱、尊严、健康、归属、责任、生存等。 */
   lifeAnchor: boolean;
-  /** 主角是否有明确想得到、守住、夺回或改变的东西。 */
   aspiration: boolean;
-  /** 批判是否落到具体规则、权力、资源、身份或关系摩擦，而不是口号。 */
   socialFriction: boolean;
-  /** 是否存在主动抗争/争取/保护/揭露等行动可能。 */
   struggleAgency: boolean;
-  /** 是否存在可在建立情感投入后兑现的失去、背叛、牺牲、遗憾等情感代价。 */
   painPotential: boolean;
-  /** 是否存在反击、翻盘、守住、夺回、真相揭开等释放压力的回报。 */
   catharsisPotential: boolean;
-  /** 是否存在能跨阶段持续追问的未知、真相、身份、规则或结果。 */
   sustainedSuspense: boolean;
-  /** 不是要求喜怒哀乐逐项出现，只统计目前能识别的不同情绪功能组。 */
   emotionalContrastGroups: number;
-  /** 仅作警告：高强度元素过密可能产生“每段都爆”的疲劳，不作为鼓励叠加的目标。 */
   stackingRisk: boolean;
 }
 
@@ -73,50 +63,81 @@ export interface IdeaAppealAssessment {
 }
 
 const GENERIC_TITLE = /^(?:命运之|重生之|.*的人生$|.*之路$|.*传奇$|爱与救赎$)/;
-const ANOMALY = /(突然|异常|消失|失踪|不存在|多出|少了|倒计时|重复|重置|回拨|名单|遗嘱|秘密|真相|陌生|不认识|死亡|葬礼|尸体|证据|监控|规则|每次|每天|每周|第\d|竟然|原来|却)/;
-const PRESSURE = /(必须|否则|只剩|之前|截止|期限|倒计时|代价|失去|死亡|辞退|开除|破产|债|欠|追责|坐牢|举报|威胁|危险|救|保住|夺回|不能|来不及|一旦)/;
+const ANOMALY = /(突然|异常|消失|失踪|不存在|多出|少了|多一|少一|倒计时|重复|重置|回拨|名单|遗嘱|秘密|真相|陌生|不认识|死亡|葬礼|尸体|证据|监控|规则|每次|每天|每周|竟然|原来|却|不.{0,8}只.{0,8}|会.{0,24}(?:忘|消|少|多|变|出现|收到|梦见|显示|拼|撞|预告|映|跳)|(?:明天|次日|七天后|十年后).{0,24}(?:会|就|少|多|失|死))/;
+const PRESSURE = /(必须|否则|只剩|之前|截止|期限|倒计时|代价|失去|死亡|辞退|开除|破产|债|欠|追责|坐牢|举报|威胁|危险|救|保住|夺回|不能|来不及|一旦|限.{0,8}(?:天|小时|还|签|卖)|扣|洗不掉|少一笔|后退|忘掉|被.{0,8}(?:接走|抱走|收走))/;
 const AGENCY = /(查|调查|追|找|救|保|阻止|揭|证明|反击|举报|逃|夺回|争|守|破解|选择|决定|行动|潜入|对抗|偿还|起诉)/;
+const FIRST_PERSON_ACTION = /(?:我|主角).{0,16}(?:当场|偷偷|直接|立刻|马上|决定|选择|开始|点|按|推|贴|拆|打开|发布|写|喂|喝|盖|拿|翻|送|关|倒|签|拒|追|去|改|试|撕|扔|带|抱|接|坐|开|把)/;
 const RELATIONSHIP = /(父|母|爸|妈|儿|女|妻|夫|丈夫|老婆|恋人|前任|兄|弟|姐|妹|同事|老板|朋友|邻居|家人|亲人|师|同学|搭档|夫妻|家庭)/;
 const PROGRESSION = /(起初|最初|第一|随后|接着|之后|第二|第三|却|反而|直到|进一步|升级|失控|恶化|暴露|发现|揭开|逼迫|迫使|最终|最后|真相|代价|反转|转而|同时)/g;
-const CONSEQUENCE = /(因此|导致|迫使|不得不|转而|从此|目标|敌人|盟友|关系|身份|代价|失去|死亡|生死|真相|胜负|规则|条件|救|保|夺回|反击|举报|起诉|辞退|破产|翻盘|改变)/;
-const PAYOFF = /(最终|最后|结局|收束|付出代价|承担|偿还|揭开真相|真相大白|救回|保住|夺回|赢|失败|和解|分开|离开|选择|兑现|翻盘)/;
+const CONSEQUENCE = /(因此|导致|迫使|不得不|转而|从此|目标|敌人|盟友|关系|身份|代价|失去|死亡|生死|真相|胜负|规则|条件|救|保|夺回|反击|举报|起诉|辞退|破产|翻盘|改变|改为|改成|转向|从.{1,20}(?:变成|转为)|不是.{0,30}(?:而是|是))/;
+const PAYOFF = /(最终|最后|结局|收束|付出代价|承担|偿还|揭开真相|真相大白|救回|保住|夺回|赢|失败|和解|分开|离开|选择|兑现|翻盘|当众|公开|拆掉|倒掉)/;
 
-// “贴近生活”不等于只能写现实题材。幻想/悬疑同样需要把超常机制压到人能理解的生活利益与情感关系上。
 const LIFE_ANCHOR = /(生活|日子|家|家庭|父|母|爸|妈|儿|女|妻|夫|恋人|亲人|朋友|同事|工作|上班|职业|工资|钱|存款|房|租|贷款|债|学费|学校|考试|医院|病|健康|养老|婚|孩子|邻居|尊严|体面|名声|机会|前途|责任|归属|自由|安全|生存|吃饭|失业|辞退|开除)/;
-const ASPIRATION = /(想要|希望|盼|梦想|目标|为了|守住|保住|保护|救|夺回|拿回|找回|改变|证明|赢|活下去|自由|尊严|回家|团聚|查清|揭开|摆脱|偿还|考上|留下|成为|阻止)/;
-const SOCIAL_FRICTION = /(规则|制度|权力|资源|利益|阶层|贫富|公司|老板|职场|学校|医院|家庭|婚姻|房|债|资格|名额|户口|身份|合同|考核|晋升|举报|责任|公平|不公|偏见|歧视|剥削|压榨|垄断|关系户|人情|舆论|平台|算法|资本|组织|管理|规定|处罚|赔偿|诉讼|起诉)/;
-const STRUGGLE = /(反击|反抗|对抗|争取|竞争|守住|保护|救|证明|揭露|揭开|举报|阻止|夺回|拿回|赢|破解|逃离|摆脱|追查|调查|起诉|偿还)/;
-const PAIN = /(失去|背叛|牺牲|告别|葬礼|死亡|离开|放弃|误解|决裂|遗憾|来不及|代价|消失|失踪|破裂|错过|失业|破产|病|失败)/;
-const CATHARSIS = /(反击|揭露|清算|赢|证明|救回|保住|翻盘|夺回|拿回|举报|起诉|偿还|自由|保护|实现|团聚|真相大白|揭开真相|摆脱|逆转)/;
+const ASPIRATION = /(想要|想把|想让|想给|希望|盼|梦想|目标|为了|守住|保住|保护|救|夺回|拿回|找回|改变|证明|赢|活下去|自由|尊严|回家|团聚|查清|揭开|摆脱|偿还|考上|留下|成为|阻止)/;
+const SOCIAL_FRICTION = /(规则|制度|权力|资源|利益|阶层|贫富|公司|老板|职场|学校|校长|医院|院长|家庭|婚姻|房|债|资格|名额|户口|身份|合同|考核|晋升|举报|责任|公平|不公|偏见|歧视|剥削|压榨|垄断|关系户|人情|舆论|平台|算法|资本|组织|管理|规定|处罚|赔偿|诉讼|起诉|总部|经理|供货|加盟|维权|抚养权|高利贷|医托|养老院|驾校|市场|数据|黑产)/;
+const STRUGGLE = /(反击|反抗|对抗|争取|竞争|守住|保护|救|证明|揭露|揭开|举报|阻止|夺回|拿回|赢|破解|逃离|摆脱|追查|调查|起诉|偿还|拆掉|公开|直播)/;
+const PAIN = /(失去|背叛|牺牲|告别|葬礼|死亡|离开|放弃|误解|决裂|遗憾|来不及|代价|消失|失踪|破裂|错过|失业|破产|病|失败|忘|失忆)/;
+const CATHARSIS = /(反击|揭露|清算|赢|证明|救回|保住|翻盘|夺回|拿回|举报|起诉|偿还|自由|保护|实现|团聚|真相大白|揭开真相|摆脱|逆转|公开|拆掉|倒掉|当众)/;
 const SUSPENSE = /(秘密|真相|背后|究竟|到底|谁|为何|为什么|消失|失踪|名单|证据|身份|规则|异常|每次|每天|每周|倒计时|直到|最终|最后|结局|未知|谜|线索)/;
 const HOPE = /(希望|盼|梦想|守住|保住|救|回家|团聚|自由|尊严|机会|前途|改变|赢|实现)/;
-const PRESSURE_EMOTION = /(怕|恐惧|危险|威胁|逼迫|压力|绝望|焦虑|来不及|倒计时|失去|死亡)/;
-// 题材差异度不是靠“新颖/反转”自评，而看具体生活载体、反预期、两难与二阶后果是否真正进入故事。
-const CONCRETE_PREMISE = /(合同|遗嘱|工号|病历|账单|订单|直播|账号|工资|房贷|租约|房本|钥匙|名单|录音|监控|聊天记录|考核|名额|证件|快递|药方|手术|保险|借条|票据|档案|门牌|排班|学籍|成绩|二维码|银行卡|手机|群聊|户口|赔偿|保单|奖金|绩效|社保|病例|收据|发票|录取|论文|举报信|工资单)/;
-const COUNTER_EXPECTATION = /(却|反而|看似|实际上|实际是|并非|不是.{0,12}而是|越.{1,10}越|原来|真正|偏偏|本以为|没想到)/;
-const FORCED_TRADEOFF = /(在.{2,24}与.{2,24}之间|二选一|只能.{2,24}(?:或|还是)|保住.{0,14}(?:却要|必须|就得).{0,14}(?:失去|放弃)|公开.{0,14}(?:会|就会)|救.{0,10}(?:却要|代价)|代价是|换来|牺牲.{0,12}(?:才能|换取))/;
-const SECOND_ORDER = /(转嫁|反噬|牵连|连带|迫使.{0,18}(?:从|改)|敌友.{0,8}改写|关系.{0,10}改写|目标.{0,10}改变|身份.{0,10}改变|规则.{0,10}改变|谁受益|谁承担|收益.{0,10}归|责任.{0,10}转|失去.{0,10}资格)/;
+const PRESSURE_EMOTION = /(怕|恐惧|危险|威胁|逼迫|压力|绝望|焦虑|来不及|倒计时|失去|死亡|忘)/;
+const CONCRETE_PREMISE = /(合同|遗嘱|工号|病历|账单|订单|直播|账号|工资|房贷|租约|房本|钥匙|名单|录音|监控|聊天记录|考核|名额|证件|快递|药方|手术|保险|借条|票据|档案|门牌|排班|学籍|成绩|二维码|银行卡|手机|群聊|户口|赔偿|保单|奖金|绩效|社保|病例|收据|发票|录取|论文|举报信|工资单|摊位|货架|电子屏|APP|公交线|烧烤|喜被|公平秤|奶茶|驾校|养老院|驿站|粥摊)/i;
+const COUNTER_EXPECTATION = /(却|反而|看似|实际上|实际是|并非|不是.{0,30}(?:而是|是)|越.{1,10}越|原来|真正|偏偏|本以为|没想到)/;
+const FORCED_TRADEOFF = /(在.{2,24}与.{2,24}之间|二选一|只能.{2,24}(?:或|还是)|保住.{0,14}(?:却要|必须|就得).{0,14}(?:失去|放弃)|公开.{0,14}(?:会|就会)|救.{0,10}(?:却要|代价)|代价是|换来|牺牲.{0,12}(?:才能|换取)|要.{0,18}(?:又|却|同时).{0,18}(?:失去|放弃|承担|保住)|越.{0,12}越.{0,12}(?:失去|危险|难))/;
+const SECOND_ORDER = /(转嫁|反噬|牵连|连带|迫使.{0,18}(?:从|改)|敌友.{0,8}改写|关系.{0,10}改写|目标.{0,10}改变|身份.{0,10}改变|规则.{0,10}改变|谁受益|谁承担|收益.{0,10}归|责任.{0,10}转|失去.{0,10}资格|客流|收入|饭碗|抚养权|供货|平台|价格|市场|调查对象|迁怒|重排|被迫|逼)/;
 const MORAL_TRIGGER = /(说谎|撒谎|欺骗|贪心|作弊|偷懒|造假|网暴|炫富|贪婪|自私|恶意)/;
 const DIRECT_PUNISHMENT = /(消失|死亡|失去|惩罚|报应|倒霉|变穷|被抹除|失忆|受伤|破产|扣除)/;
 
 const normalized = (value: unknown): string => String(value ?? '').replace(/\s+/g, ' ').trim();
 
-const textOf = (idea: any): string => [
-  idea?.title,
-  idea?.hook,
-  idea?.description,
-  idea?.protagonist,
-  idea?.coreConflict,
-  idea?.conflict,
-  idea?.uniquePoint,
-  idea?.uniqueSelling,
-  idea?.mainReversal,
-  idea?.storyCore,
-].map(normalized).filter(Boolean).join('；');
+function noveltyOf(idea: any) {
+  const novelty = idea?.noveltyProof && typeof idea.noveltyProof === 'object' ? idea.noveltyProof : {};
+  return {
+    familiarShell: normalized(novelty?.familiarShell),
+    uncommonCombination: normalized(novelty?.uncommonCombination),
+    avoidedPatterns: normalized(novelty?.avoidedPatterns),
+    irreplaceableWhy: normalized(novelty?.irreplaceableWhy),
+    secondOrderConsequence: normalized(novelty?.secondOrderConsequence),
+    readerQuestion: normalized(novelty?.readerQuestion),
+  };
+}
+
+const textOf = (idea: any): string => {
+  const novelty = noveltyOf(idea);
+  return [
+    idea?.title,
+    idea?.hook,
+    idea?.description,
+    idea?.protagonist,
+    idea?.coreConflict,
+    idea?.conflict,
+    idea?.uniquePoint,
+    idea?.uniqueSelling,
+    idea?.mainReversal,
+    idea?.storyCore,
+    novelty.familiarShell,
+    novelty.uncommonCombination,
+    novelty.irreplaceableWhy,
+    novelty.secondOrderConsequence,
+    novelty.readerQuestion,
+  ].map(normalized).filter(Boolean).join('；');
+};
 
 function markerCount(text: string, regex: RegExp): number {
   const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
   return [...text.matchAll(new RegExp(regex.source, flags))].length;
+}
+
+function titleHasStoryAnchor(title: string, evidence: string): boolean {
+  if (title.length < 4 || GENERIC_TITLE.test(title)) return false;
+  const cleanTitle = title.replace(/[《》“”'"，。！？：；、\s]/g, '');
+  const cleanEvidence = evidence.replace(/[\s\p{P}\p{S}]/gu, '');
+  if (cleanTitle.length < 2) return false;
+  for (let i = 0; i <= cleanTitle.length - 2; i += 1) {
+    const gram = cleanTitle.slice(i, i + 2);
+    if (cleanEvidence.includes(gram)) return true;
+  }
+  return false;
 }
 
 @Injectable()
@@ -125,18 +146,18 @@ export class IdeaAppealGateService {
     const title = normalized(idea?.title);
     const hook = normalized(idea?.hook);
     const description = normalized(idea?.description);
+    const protagonist = normalized(idea?.protagonist);
     const uniquePoint = normalized(idea?.uniquePoint || idea?.uniqueSelling || idea?.storyCore);
     const coreConflict = normalized(idea?.coreConflict || idea?.conflict);
     const mainReversal = normalized(idea?.mainReversal);
+    const novelty = noveltyOf(idea);
+    const noveltyEvidence = [novelty.uncommonCombination, novelty.irreplaceableWhy, novelty.secondOrderConsequence, novelty.readerQuestion].filter(Boolean).join('；');
     const all = textOf(idea);
 
-    const titleAnchors = [hook, description, uniquePoint, coreConflict, mainReversal]
-      .join('')
-      .includes(title.replace(/[《》“”'"，。！？：；、\s]/g, '').slice(0, 2));
-    const titleAnchored = title.length >= 4 && !GENERIC_TITLE.test(title) && titleAnchors;
+    const titleAnchored = titleHasStoryAnchor(title, `${hook}；${description}；${uniquePoint}；${coreConflict}；${mainReversal}；${noveltyEvidence}`);
     const hookHasAnomaly = ANOMALY.test(hook);
     const hookHasPressure = PRESSURE.test(hook);
-    const hookHasAgency = AGENCY.test(hook);
+    const hookHasAgency = AGENCY.test(hook) || FIRST_PERSON_ACTION.test(hook);
     const hookHasRelationship = RELATIONSHIP.test(hook);
     const descriptionProgressions = (description.match(PROGRESSION) || []).length;
 
@@ -162,12 +183,13 @@ export class IdeaAppealGateService {
     const payoffPromise = PAYOFF.test(description) || PAYOFF.test(mainReversal);
 
     const lifeAnchor = LIFE_ANCHOR.test(all);
-    const aspiration = ASPIRATION.test(all);
+    const aspiration = ASPIRATION.test(all) || /(?:想|要|希望|盼).{1,20}/.test(protagonist);
     const socialFriction = SOCIAL_FRICTION.test(all);
-    const struggleAgency = STRUGGLE.test(all);
+    const struggleAgency = STRUGGLE.test(all) || hookHasAgency;
     const painPotential = PAIN.test(all);
     const catharsisPotential = CATHARSIS.test(all) || payoffPromise;
-    const sustainedSuspense = SUSPENSE.test(`${hook}；${description}；${mainReversal}`);
+    const sustainedSuspense = SUSPENSE.test(`${hook}；${description}；${mainReversal}`)
+      || (novelty.readerQuestion.length >= 8 && /[？?]$/.test(novelty.readerQuestion));
     const emotionalContrastGroups = [
       PRESSURE_EMOTION.test(all),
       HOPE.test(all),
@@ -175,16 +197,21 @@ export class IdeaAppealGateService {
       CATHARSIS.test(all),
     ].filter(Boolean).length;
 
-    // 这是风险提示，不是“越多越好”的打分。短文本塞入过多高强度词，通常意味着元素堆砌而非自然节奏。
     const intensityHits = markerCount(all, /(反转|死亡|牺牲|背叛|真相|翻盘|绝望|反击|倒计时|失去)/);
     const stackingRisk = all.length > 0 && intensityHits >= (storyType === 'short_story' ? 9 : 12)
       && intensityHits / Math.max(1, all.length / 100) >= 4;
 
-    const distinctiveText = `${title}；${hook}；${uniquePoint}；${coreConflict}；${mainReversal}；${description}`;
-    const concretePremiseAnchor = CONCRETE_PREMISE.test(`${title}；${hook}；${uniquePoint}`) || /\d+[天小时分钟年月次条份人章]/.test(distinctiveText);
-    const counterExpectation = COUNTER_EXPECTATION.test(`${uniquePoint}；${mainReversal}；${description}`);
-    const forcedTradeoff = FORCED_TRADEOFF.test(`${coreConflict}；${mainReversal}；${description}`);
-    const secondOrderConsequence = SECOND_ORDER.test(`${mainReversal}；${description}`) || (reversalConsequential && forcedTradeoff);
+    const distinctiveText = `${title}；${hook}；${uniquePoint}；${coreConflict}；${mainReversal}；${description}；${noveltyEvidence}`;
+    const structuredPremiseEvidence = novelty.uncommonCombination.length >= 12 && novelty.irreplaceableWhy.length >= 16;
+    const concretePremiseAnchor = CONCRETE_PREMISE.test(`${title}；${hook}；${uniquePoint}；${novelty.uncommonCombination}`)
+      || /\d+[天小时分钟年月次条份人章]/.test(distinctiveText)
+      || structuredPremiseEvidence;
+    const counterExpectation = COUNTER_EXPECTATION.test(`${uniquePoint}；${mainReversal}；${description}；${novelty.uncommonCombination}`);
+    const forcedTradeoff = FORCED_TRADEOFF.test(`${coreConflict}；${mainReversal}；${description}；${novelty.secondOrderConsequence}`);
+    const explicitSecondOrder = novelty.secondOrderConsequence.length >= 16 && SECOND_ORDER.test(novelty.secondOrderConsequence);
+    const secondOrderConsequence = explicitSecondOrder
+      || SECOND_ORDER.test(`${mainReversal}；${description}`)
+      || (reversalConsequential && forcedTradeoff);
     const simpleMoralMechanismRisk = MORAL_TRIGGER.test(`${title}；${hook}；${uniquePoint}`)
       && DIRECT_PUNISHMENT.test(`${title}；${hook}；${uniquePoint}`)
       && !forcedTradeoff && !secondOrderConsequence;
@@ -222,8 +249,6 @@ export class IdeaAppealGateService {
     if (!openingDeliversPromise) issues.push('开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现');
     if (!reversalConsequential) issues.push('核心反转只是在补充信息，没有改变目标、关系、胜负条件或代价');
     if (storyType === 'short_story' && !payoffPromise) issues.push('短篇只有吊胃口，没有明确的中后段/终局兑现承诺');
-
-    // 用户要求的“贴近生活/现实批判”落成底层人类利益和具体摩擦，而不是强迫每本都写工资房价。
     if (!lifeAnchor) issues.push('缺少可代入的人生利益或关系锚点：题材机制尚未落到家庭、工作、钱、尊严、健康、归属、责任或生存等具体代价');
     if (!aspiration) issues.push('主角缺少清晰的生活期盼/欲望：读者不知道他真正想得到、守住、夺回或改变什么');
     if (!socialFriction) issues.push('现实批判没有落到具体规则、权力、资源、身份或关系摩擦，容易变成空泛说教');
@@ -232,7 +257,6 @@ export class IdeaAppealGateService {
     const minDistinctiveness = storyType === 'short_story' ? 6 : 5;
     if (distinctivenessScore < minDistinctiveness) issues.push(`题材差异度不足（${distinctivenessScore}/10）：具体生活载体、反预期、两难选择和二阶后果至少要形成稳定组合，而不是字段齐全即可通过`);
 
-    // 热血、刀点、喜怒哀乐、爽感是体验曲线，不是题材卡逐项打卡。缺失时给下游规划提示，不用在发现阶段强塞。
     if (!struggleAgency) warnings.push('抗争/争取空间偏弱：后续章纲应让主角通过选择和行动获得热血感，而不是被动承受');
     if (!painPotential) warnings.push('题材卡尚未显出自然的情感代价；后续只能在建立关系/愿望投入后安排“刀点”，禁止为了虐而虐');
     if (!catharsisPotential) warnings.push('当前回报/释放压力的路径偏弱；后续需设计与前置压力对应的阶段兑现，禁止凭空开挂');
@@ -266,8 +290,6 @@ export class IdeaAppealGateService {
 
   select(ideas: any[], storyType: StoryType, desiredCount: number) {
     const assessed = ideas.map((idea) => ({ idea, assessment: this.assess(idea, storyType) }));
-    // 通过 Gate 后不能再按模型原始顺序截前 N 个。先选差异度更强、推进更完整的题材，
-    // 避免“第一个字段齐全但很普通”的候选占掉展示位。这里仍不是点击率预测，只是文本前置排序。
     const accepted = assessed
       .filter((item) => item.assessment.passed)
       .sort((left, right) =>
@@ -277,12 +299,10 @@ export class IdeaAppealGateService {
       .slice(0, desiredCount)
       .map((item) => ({
         ...item.idea,
-        // 前端只能展示通过 Gate 的候选；显式标记用于前端二次防守，禁止未来接口扩展时误把 raw/rejected 候选渲染出来。
         ideaAppealGate: {
           passed: true as const,
           distinctivenessScore: item.assessment.signals.distinctivenessScore,
         },
-        // 随 selectedIdea 原样进入 Creative Constitution.confirmedStory；后续世界观/章纲/正文共享同一份体验策略。
         readerExperienceProfile: item.assessment.readerExperienceProfile,
       }));
     return { assessed, accepted };
