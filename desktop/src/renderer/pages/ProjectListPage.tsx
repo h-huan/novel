@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../stores/projectStore';
 import { openProject } from '../lib/openProject';
-import { getGenerationRecovery, startFailedProjectRecovery } from '../lib/generationRecovery';
+import { getGenerationRecovery, generationRecoveryUiState, startFailedProjectRecovery, type GenerationRecoveryAudit } from '../lib/generationRecovery';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import type { Project, ProjectType } from '@novel/shared';
@@ -67,7 +67,7 @@ interface ProjectCardProps {
   onRetry: (id: string) => void;
   retryBusy: boolean;
   retryDisabled: boolean;
-  recoveryRunning?: boolean;
+  recoveryAudit?: GenerationRecoveryAudit | null;
   retryMessage?: string;
   selected: boolean;
   onSelectionChange: (id: string, selected: boolean) => void;
@@ -80,31 +80,34 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   onRetry,
   retryBusy,
   retryDisabled,
-  recoveryRunning = false,
+  recoveryAudit = null,
   retryMessage,
   selected,
   onSelectionChange,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const failed = project.status === 'generation_failed';
-  const statusLabel = recoveryRunning ? '正在重新生成 · 查看进度' : USER_STATUS_LABELS[project.status] || project.status;
-  const statusBgColor = STATUS_COLORS[project.status] || 'rgba(108,108,128,0.2)';
-  const statusTextColor = STATUS_TEXT_COLORS[project.status] || 'var(--color-text-muted)';
+  const recoveryState = generationRecoveryUiState(project.status, recoveryAudit);
+  const interruptedCreating = project.status === 'creating' && recoveryState.recoverable;
+  const recoveryAttention = failed || interruptedCreating;
+  const statusLabel = recoveryState.statusLabel || USER_STATUS_LABELS[project.status] || project.status;
+  const statusBgColor = recoveryAttention ? 'rgba(248, 113, 113, 0.16)' : (STATUS_COLORS[project.status] || 'rgba(108,108,128,0.2)');
+  const statusTextColor = recoveryAttention ? '#fca5a5' : (STATUS_TEXT_COLORS[project.status] || 'var(--color-text-muted)');
   const platformText = platformLabelOf(project.targetPlatform) || project.targetPlatform;
   const stageLabel = WORKFLOW_STAGE_LABELS[project.currentWorkflowStage] || '';
 
   return (
     <div
-      style={{ ...cardStyles.card, ...(failed ? cardStyles.failedCard : {}) }}
+      style={{ ...cardStyles.card, ...(recoveryAttention ? cardStyles.failedCard : {}) }}
       onClick={() => onSelect(project.id)}
       onMouseEnter={(event) => {
         setIsHovered(true);
-        event.currentTarget.style.borderColor = failed ? 'rgba(248,113,113,0.55)' : 'var(--color-accent)';
-        event.currentTarget.style.transform = failed ? 'none' : 'translateY(-2px)';
+        event.currentTarget.style.borderColor = recoveryAttention ? 'rgba(248,113,113,0.55)' : 'var(--color-accent)';
+        event.currentTarget.style.transform = recoveryAttention ? 'none' : 'translateY(-2px)';
       }}
       onMouseLeave={(event) => {
         setIsHovered(false);
-        event.currentTarget.style.borderColor = failed ? 'rgba(148,163,184,0.28)' : 'var(--color-border)';
+        event.currentTarget.style.borderColor = recoveryAttention ? 'rgba(148,163,184,0.28)' : 'var(--color-border)';
         event.currentTarget.style.transform = 'translateY(0)';
       }}
     >
@@ -118,13 +121,13 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
             style={cardStyles.checkbox}
           />
         </label>
-        <h3 style={{ ...cardStyles.title, ...(failed ? cardStyles.failedTitle : {}) }}>{project.title}</h3>
+        <h3 style={{ ...cardStyles.title, ...(recoveryAttention ? cardStyles.failedTitle : {}) }}>{project.title}</h3>
         <div style={cardStyles.headerRight}>
           <span style={{ ...cardStyles.typeBadge, backgroundColor: TYPE_COLORS[project.type] || 'var(--color-text-muted)' }}>
             {TYPE_LABELS[project.type] || project.type}
           </span>
           <button
-            style={{ ...cardStyles.deleteBtn, opacity: isHovered || failed ? 1 : 0, pointerEvents: isHovered || failed ? 'auto' : 'none' }}
+            style={{ ...cardStyles.deleteBtn, opacity: isHovered || recoveryAttention ? 1 : 0, pointerEvents: isHovered || recoveryAttention ? 'auto' : 'none' }}
             onClick={(event) => {
               event.stopPropagation();
               onDelete(project.id);
@@ -153,18 +156,26 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         <span style={cardStyles.time}>{formatRelativeTime(project.updatedAt)}</span>
       </div>
 
-      {failed && (
+      {recoveryState.tracked && (recoveryState.running || recoveryState.recoverable || recoveryState.blocked) && (
         <div style={cardStyles.failedActions} onClick={(event) => event.stopPropagation()}>
-          <span style={cardStyles.failedHint}>{recoveryRunning ? '创作资料正在生成，可随时查看实时进度。' : '创建未完成；可查看诊断或重新生成。'}</span>
-          <button
-            type="button"
-            style={{ ...cardStyles.retryBtn, opacity: retryDisabled ? 0.55 : 1 }}
-            disabled={retryDisabled && !recoveryRunning}
-            onClick={() => onRetry(project.id)}
-            aria-label={`${recoveryRunning ? '查看进度' : '重新生成'} ${project.title}`}
-          >
-            {recoveryRunning ? '查看进度' : retryBusy ? '正在启动…' : '重新生成'}
-          </button>
+          <span style={cardStyles.failedHint}>
+            {recoveryState.running
+              ? '创作资料正在生成，可随时查看实时进度。'
+              : recoveryState.recoverable
+                ? '创建流程已中断；后端诊断允许从已确认题材继续恢复。'
+                : (recoveryAudit?.recommendedAction || '当前状态不允许自动恢复，请进入项目查看诊断。')}
+          </span>
+          {recoveryState.actionLabel && (
+            <button
+              type="button"
+              style={{ ...cardStyles.retryBtn, opacity: retryDisabled && !recoveryState.running ? 0.55 : 1 }}
+              disabled={retryDisabled && !recoveryState.running}
+              onClick={() => onRetry(project.id)}
+              aria-label={`${recoveryState.actionLabel} ${project.title}`}
+            >
+              {recoveryState.running ? '查看进度' : retryBusy ? '正在启动…' : recoveryState.actionLabel}
+            </button>
+          )}
           {retryMessage && <span role="alert" style={cardStyles.retryMessage}>{retryMessage}</span>}
         </div>
       )}
@@ -231,7 +242,7 @@ const ProjectListPage: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [retryingProjectId, setRetryingProjectId] = useState<string | null>(null);
   const [retryMessages, setRetryMessages] = useState<Record<string, string>>({});
-  const [runningRecoveries, setRunningRecoveries] = useState<Record<string, boolean>>({});
+  const [recoveryAudits, setRecoveryAudits] = useState<Record<string, GenerationRecoveryAudit | null>>({});
 
   useEffect(() => { void fetchProjects(); }, [fetchProjects]);
 
@@ -240,13 +251,20 @@ const ProjectListPage: React.FC = () => {
   }, [navigate, searchParams]);
 
   useEffect(() => {
-    const failedIds = projects.filter((project) => project.status === 'generation_failed').map((project) => project.id);
+    // `creating` is not proof that a worker is still alive. A crashed background
+    // creation can remain in that status while the recovery audit already says
+    // running=false/canResume=true. Query both incomplete statuses so the existing
+    // recovery endpoint is visible from the project list instead of being hidden
+    // behind a misleading "资料生成中" badge.
+    const recoveryIds = projects
+      .filter((project) => project.status === 'generation_failed' || project.status === 'creating')
+      .map((project) => project.id);
     let cancelled = false;
-    void Promise.all(failedIds.map(async (id) => {
-      try { return [id, Boolean((await getGenerationRecovery(id))?.running)] as const; }
-      catch { return [id, false] as const; }
+    void Promise.all(recoveryIds.map(async (id) => {
+      try { return [id, await getGenerationRecovery(id)] as const; }
+      catch { return [id, null] as const; }
     })).then((entries) => {
-      if (!cancelled) setRunningRecoveries(Object.fromEntries(entries));
+      if (!cancelled) setRecoveryAudits(Object.fromEntries(entries));
     });
     return () => { cancelled = true; };
   }, [projects]);
@@ -256,8 +274,9 @@ const ProjectListPage: React.FC = () => {
   const allFilteredSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedProjectIds.has(id));
 
   const handleSelectProject = async (id: string) => {
-    if (runningRecoveries[id]) {
-      const project = projects.find((item) => item.id === id);
+    const project = projects.find((item) => item.id === id);
+    const recoveryState = generationRecoveryUiState(project?.status, recoveryAudits[id]);
+    if (recoveryState.running) {
       navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
       return;
     }
@@ -280,8 +299,16 @@ const ProjectListPage: React.FC = () => {
 
   const handleRetryProject = async (id: string) => {
     const project = projects.find((item) => item.id === id);
-    if (runningRecoveries[id]) {
+    const recoveryState = generationRecoveryUiState(project?.status, recoveryAudits[id]);
+    if (recoveryState.running) {
       navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
+      return;
+    }
+    if (!recoveryState.recoverable) {
+      setRetryMessages((current) => ({
+        ...current,
+        [id]: recoveryAudits[id]?.recommendedAction || '当前诊断不允许自动恢复，请进入项目查看原因。',
+      }));
       return;
     }
     if (retryingProjectId) return;
@@ -289,12 +316,15 @@ const ProjectListPage: React.FC = () => {
     setRetryMessages((current) => ({ ...current, [id]: '' }));
     try {
       await startFailedProjectRecovery(id);
-      setRunningRecoveries((current) => ({ ...current, [id]: true }));
+      setRecoveryAudits((current) => ({
+        ...current,
+        [id]: current[id] ? { ...current[id]!, running: true, canResume: false } : current[id],
+      }));
       navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
     } catch (error: any) {
       const audit = await getGenerationRecovery(id).catch(() => null);
+      setRecoveryAudits((current) => ({ ...current, [id]: audit }));
       if (audit?.running) {
-        setRunningRecoveries((current) => ({ ...current, [id]: true }));
         navigate(`/generation-progress/${id}`, { state: { title: project?.title || '项目' } });
       } else {
         setRetryMessages((current) => ({ ...current, [id]: `启动失败：${error?.message || '请查看项目诊断'}` }));
@@ -394,7 +424,7 @@ const ProjectListPage: React.FC = () => {
               onRetry={handleRetryProject}
               retryBusy={retryingProjectId === project.id}
               retryDisabled={retryingProjectId !== null}
-              recoveryRunning={Boolean(runningRecoveries[project.id])}
+              recoveryAudit={recoveryAudits[project.id]}
               retryMessage={retryMessages[project.id]}
               selected={selectedProjectIds.has(project.id)}
               onSelectionChange={setProjectSelected}
