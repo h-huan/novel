@@ -84,7 +84,10 @@ const PRESSURE_EMOTION = /(怕|恐惧|危险|威胁|逼迫|压力|绝望|焦虑|
 const CONCRETE_PREMISE = /(合同|遗嘱|工号|病历|账单|订单|直播|账号|工资|房贷|租约|房本|钥匙|名单|录音|监控|聊天记录|考核|名额|证件|快递|药方|手术|保险|借条|票据|档案|门牌|排班|学籍|成绩|二维码|银行卡|手机|群聊|户口|赔偿|保单|奖金|绩效|社保|病例|收据|发票|录取|论文|举报信|工资单|摊位|货架|电子屏|APP|公交线|烧烤|喜被|公平秤|奶茶|驾校|养老院|驿站|粥摊)/i;
 const COUNTER_EXPECTATION = /(却|反而|看似|实际上|实际是|并非|不是.{0,30}(?:而是|是)|越.{1,10}越|原来|真正|偏偏|本以为|没想到)/;
 const FORCED_TRADEOFF = /(在.{2,24}与.{2,24}之间|二选一|只能.{2,24}(?:或|还是)|保住.{0,14}(?:却要|必须|就得).{0,14}(?:失去|放弃)|公开.{0,14}(?:会|就会)|救.{0,10}(?:却要|代价)|代价是|换来|牺牲.{0,12}(?:才能|换取)|要.{0,18}(?:又|却|同时).{0,18}(?:失去|放弃|承担|保住)|越.{0,12}越.{0,12}(?:失去|危险|难))/;
-const SECOND_ORDER = /(转嫁|反噬|牵连|连带|迫使.{0,18}(?:从|改)|敌友.{0,8}改写|关系.{0,10}改写|目标.{0,10}改变|身份.{0,10}改变|规则.{0,10}改变|谁受益|谁承担|收益.{0,10}归|责任.{0,10}转|失去.{0,10}资格|客流|收入|饭碗|抚养权|供货|平台|价格|市场|调查对象|迁怒|重排|被迫|逼)/;
+const SECOND_ORDER = /(转嫁|反噬|牵连|连带|迫使.{0,18}(?:从|改)|敌友.{0,8}改写|关系.{0,10}改写|目标.{0,10}改变|身份.{0,10}改变|规则.{0,10}改变|谁受益|谁承担|收益.{0,10}归|责任.{0,10}转|失去.{0,10}资格)/;
+// noveltyProof.secondOrderConsequence 是模型被要求显式填写的语义字段，可用更宽的影响词识别；
+// 普通 description/mainReversal 仍使用上面的严格模式，避免“平台/市场”等背景词把单层寓言误判成二阶后果。
+const SECOND_ORDER_EVIDENCE = /(受益|受损|关系|目标|身份|规则|客流|收入|饭碗|抚养权|供货|价格|市场|调查对象|迁怒|重排|改写|被迫|反噬|牵连|连带|停工|中断|站队|资格|责任)/;
 const MORAL_TRIGGER = /(说谎|撒谎|欺骗|贪心|作弊|偷懒|造假|网暴|炫富|贪婪|自私|恶意)/;
 const DIRECT_PUNISHMENT = /(消失|死亡|失去|惩罚|报应|倒霉|变穷|被抹除|失忆|受伤|破产|扣除)/;
 
@@ -208,7 +211,7 @@ export class IdeaAppealGateService {
       || structuredPremiseEvidence;
     const counterExpectation = COUNTER_EXPECTATION.test(`${uniquePoint}；${mainReversal}；${description}；${novelty.uncommonCombination}`);
     const forcedTradeoff = FORCED_TRADEOFF.test(`${coreConflict}；${mainReversal}；${description}；${novelty.secondOrderConsequence}`);
-    const explicitSecondOrder = novelty.secondOrderConsequence.length >= 16 && SECOND_ORDER.test(novelty.secondOrderConsequence);
+    const explicitSecondOrder = novelty.secondOrderConsequence.length >= 16 && SECOND_ORDER_EVIDENCE.test(novelty.secondOrderConsequence);
     const secondOrderConsequence = explicitSecondOrder
       || SECOND_ORDER.test(`${mainReversal}；${description}`)
       || (reversalConsequential && forcedTradeoff);
