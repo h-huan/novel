@@ -56,25 +56,27 @@ const acceptedIdea = (index: number) => ({
 
 describe('ChainPlanningController single idea gate adapter', () => {
   it('does not oversample or rescreen ideas that already passed the recoverable discovery gate', async () => {
-    const ideaDiscover = vi.fn().mockResolvedValue({
+    const upstream = {
       success: true,
       ideas: Array.from({ length: 5 }, (_, index) => acceptedIdea(index)),
       totalIdeas: 5,
       appealGate: audit,
-    });
+    };
+    const ideaDiscover = vi.fn().mockResolvedValue(upstream);
     const controller = new ChainPlanningController({ ideaDiscover } as any);
 
     const result: any = await controller.ideaDiscover(dto as any);
 
     expect(ideaDiscover).toHaveBeenCalledTimes(1);
     expect(ideaDiscover).toHaveBeenCalledWith(expect.objectContaining({ count: 5 }));
+    expect(result).toBe(upstream);
     expect(result.ideas).toHaveLength(5);
     expect(result.appealGate).toEqual(audit);
     expect(result.ideas[0].ideaDiscoveryAudit).toEqual(audit);
   });
 
-  it('defensively hides entries without a passed gate receipt but never calculates a second score', async () => {
-    const ideaDiscover = vi.fn().mockResolvedValue({
+  it('returns the orchestrator payload unchanged instead of becoming a second gate', async () => {
+    const upstream = {
       success: true,
       ideas: [
         acceptedIdea(0),
@@ -83,28 +85,31 @@ describe('ChainPlanningController single idea gate adapter', () => {
       ],
       totalIdeas: 3,
       appealGate: { ...audit, qualified: 1, returned: 1 },
-    });
+    };
+    const ideaDiscover = vi.fn().mockResolvedValue(upstream);
     const controller = new ChainPlanningController({ ideaDiscover } as any);
 
     const result: any = await controller.ideaDiscover({ ...dto, count: 3 } as any);
 
-    expect(result.success).toBe(true);
-    expect(result.ideas.map((idea: any) => idea.title)).toEqual(['通过0']);
-    expect(result.qualityWarning).toContain('只返回 1/3');
+    expect(ideaDiscover).toHaveBeenCalledTimes(1);
+    expect(result).toBe(upstream);
+    expect(result.ideas.map((idea: any) => idea.title)).toEqual(['通过0', '旧格式未验收题材', '明确未通过题材']);
   });
 
   it('passes through the inner generic failure instead of exposing internal rejection rules', async () => {
-    const ideaDiscover = vi.fn().mockResolvedValue({
+    const upstream = {
       success: false,
       ideas: [],
       totalIdeas: 0,
       error: '本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。',
       appealGate: { ...audit, qualified: 0, returned: 0, rejected: 7 },
-    });
+    };
+    const ideaDiscover = vi.fn().mockResolvedValue(upstream);
     const controller = new ChainPlanningController({ ideaDiscover } as any);
 
     const result: any = await controller.ideaDiscover({ ...dto, count: 5 } as any);
 
+    expect(result).toBe(upstream);
     expect(result.success).toBe(false);
     expect(result.ideas).toEqual([]);
     expect(result.error).not.toContain('点击/留存前置 Gate');

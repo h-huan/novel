@@ -26,7 +26,7 @@ export class ChainPlanningController {
     const requested = Number(dto.count);
     const desiredCount = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 10) : 5;
     // 唯一 Gate 已在 ChainController.runIdeaDiscovery 内执行，并能把失败原因反馈给同一轮补生。
-    // HTTP adapter 只验证“通过凭证”，绝不再执行第二套评分/淘汰逻辑。
+    // HTTP adapter 只规范传输参数、记录诊断并原样返回 orchestrator 结果；不再做第二次筛选或改写。
     const result: any = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
     if (this.database) {
       try {
@@ -61,28 +61,7 @@ export class ChainPlanningController {
         this.logger.warn(`灵感发现诊断落库失败（不影响题材返回）：${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    if (!result?.success || !Array.isArray(result?.ideas)) return result;
-
-    const accepted = result.ideas
-      .filter((idea: any) => idea?.ideaAppealGate?.passed === true)
-      .slice(0, desiredCount);
-    if (!accepted.length) {
-      return {
-        ...result,
-        success: false,
-        ideas: [],
-        totalIdeas: 0,
-        error: '本轮没有通过展示标准的题材；未通过内容不会展示，请重新发现。',
-      };
-    }
-    return {
-      ...result,
-      ideas: accepted,
-      totalIdeas: accepted.length,
-      qualityWarning: accepted.length < desiredCount
-        ? `只返回 ${accepted.length}/${desiredCount} 个通过展示 Gate 的题材；弱候选已淘汰，不用占位内容补数。`
-        : result.qualityWarning,
-    };
+    return result;
   }
 
   @Get('idea-discovery-diagnostics/latest')
