@@ -267,6 +267,11 @@ export class IdeaAppealGateService {
       .slice(0, desiredCount)
       .map((item) => ({
         ...item.idea,
+        // 前端只能展示通过 Gate 的候选；显式标记用于前端二次防守，禁止未来接口扩展时误把 raw/rejected 候选渲染出来。
+        ideaAppealGate: {
+          passed: true as const,
+          distinctivenessScore: item.assessment.signals.distinctivenessScore,
+        },
         // 随 selectedIdea 原样进入 Creative Constitution.confirmedStory；后续世界观/章纲/正文共享同一份体验策略。
         readerExperienceProfile: item.assessment.readerExperienceProfile,
       }));

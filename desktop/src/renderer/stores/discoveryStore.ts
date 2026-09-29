@@ -6,8 +6,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-interface DiscoveryIdea {
+export interface DiscoveryIdea {
   title: string;
+  /** 后端 IdeaAppealGate 的通过凭证；前端展示层只接受 passed=true。 */
+  ideaAppealGate?: {
+    passed: boolean;
+    distinctivenessScore?: number;
+  };
   hook?: string;
   description?: string;
   protagonist?: string;
@@ -143,6 +148,10 @@ interface DiscoveryState {
   resetDiscovery: () => void;
 }
 
+export const acceptedDiscoveryIdeas = (ideas: DiscoveryIdea[]): DiscoveryIdea[] => (
+  Array.isArray(ideas) ? ideas.filter((idea) => idea?.ideaAppealGate?.passed === true) : []
+);
+
 const INITIAL_STEP_STATUS: CreationStepStatus = {
   project: 'pending', outline: 'pending', characters: 'pending',
   skeleton: 'pending', world: 'pending', orgs: 'pending', foreshadowing: 'pending', timeline: 'pending', done: 'pending',
@@ -242,7 +251,8 @@ export const useDiscoveryStore = create<DiscoveryState>()(
 
       setGenerating: (isGenerating) => set({ isGenerating }),
       setGenProgress: (genProgress) => set({ genProgress }),
-      setIdeas: (ideas) => set({ ideas }),
+      // UI 的唯一题材列表只保存后端明确标记为通过 Gate 的候选；raw/rejected/旧格式候选一律不进入展示状态。
+      setIdeas: (ideas) => set({ ideas: acceptedDiscoveryIdeas(ideas) }),
       setGeneratedSignature: (generatedSignature) => set({ generatedSignature }),
       setGenerationDone: (generationDone) => set({ generationDone }),
       addPrevTitles: (titles) => set((s) => ({ prevTitles: [...s.prevTitles, ...titles] })),

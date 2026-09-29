@@ -139,6 +139,10 @@ describe('IdeaAppealGateService', () => {
 
     expect(selection.accepted).toHaveLength(1);
     expect(selection.accepted[0]).not.toBe(strongShort);
+    expect(selection.accepted[0].ideaAppealGate).toEqual(expect.objectContaining({
+      passed: true,
+      distinctivenessScore: expect.any(Number),
+    }));
     expect(selection.accepted[0].readerExperienceProfile).toEqual(
       expect.objectContaining({ version: 1, storyType: 'short_story', densityMode: '短篇集中兑现' }),
     );
