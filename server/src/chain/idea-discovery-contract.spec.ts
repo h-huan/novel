@@ -17,6 +17,13 @@ describe('idea discovery hook contract', () => {
     expect(contract).toContain('不能把行动或代价只藏在 description');
   });
 
+  it('keeps long-story hooks actionable without forcing short-story density', () => {
+    const contract = ideaHookRequirement('long_novel');
+    expect(contract).toContain('现实压力或代价');
+    expect(contract).toContain('下一步具体行动');
+    expect(contract).toContain('可持续追问');
+  });
+
   it('turns gate failures into field-specific recovery instructions instead of repeating the same generic prompt', () => {
     const directive = ideaRecoveryDirective('short_story', [
       '核心钩子缺少明确代价、时限或失去风险',
