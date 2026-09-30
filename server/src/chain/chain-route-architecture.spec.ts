@@ -50,8 +50,10 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('structuredCards.push(await generateStructuredCard(selectedPremise, index))');
     expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas)');
     expect(source).toContain("structuringProtocol: 'one_selected_premise_per_call_server_owned_identity'");
+    expect(source).toContain('JSON 结构（ideas 必须恰好 1 项）');
     expect(source).not.toContain('generateBatch(requestedCount');
     expect(source).not.toContain('const generateBatch = async');
+    expect(source).not.toContain('请一次生成 ${count} 个互不重复、可直接创建作品');
     expect(source).not.toContain('完整题材卡结构化应与创建前筛选出的');
     expect(source).not.toContain('\\"sourcePremiseId\\":\\"P1\\"');
   });
