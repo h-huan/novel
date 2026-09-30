@@ -33,19 +33,41 @@ const profile = {
   },
 };
 
+const preselectedPremises = Array.from({ length: 5 }, (_, index) => ({
+  premiseId: `P${index + 1}`,
+  workingTitle: `胚子${index + 1}`,
+  protagonistSituation: '普通人的具体生活处境与明确愿望',
+  openingEvent: '迫使主角行动的具体起始事件',
+  coreConflict: '主角目标与现实阻力持续对撞',
+  activeChoice: '主角必须亲自做出关键选择',
+  escalation: '选择带来连续升级与不可逆后果',
+  reversalEffect: '反转改变目标关系或代价',
+  payoff: '中后段兑现主要阅读承诺',
+  irreplaceableCarrier: '职业关系与冲突彼此绑定不可替换',
+  secondOrderConsequence: '额外受益受损者迫使关系与目标改变',
+  readerQuestion: '主角最终如何承担这个选择的后果',
+  differentiation: '与历史题材的核心机制和关系结构不同',
+}));
+
 const audit = {
-  schemaVersion: 3,
-  mode: 'single_recoverable_reader_experience_gate',
-  generated: 7,
+  schemaVersion: 4,
+  mode: 'premise_preselection_then_final_reader_experience_gate',
+  premisePoolSize: 15,
+  premiseSelected: 5,
+  generated: 5,
   qualified: 5,
   returned: 5,
-  rejected: 2,
-  reasons: ['弱题材'],
+  rejected: 0,
+  reasons: [],
+  preselectedPremises,
   candidateAssessments: [],
   acceptedEvidence: [],
 };
 
+const finalGateFailure = '创建前筛选已完成，但完整题材卡最终验收没有任何一项通过；系统已停止展示，不会通过增加补生次数或另换题材掩盖。请重新发现。';
+
 const acceptedIdea = (index: number) => ({
+  sourcePremiseId: `P${index + 1}`,
   title: `通过${index}`,
   storyType: 'short_story',
   targetPlatform: 'fanqie',
@@ -54,8 +76,8 @@ const acceptedIdea = (index: number) => ({
   ideaDiscoveryAudit: audit,
 });
 
-describe('ChainPlanningController single idea gate adapter', () => {
-  it('does not oversample or rescreen ideas that already passed the recoverable discovery gate', async () => {
+describe('ChainPlanningController idea-discovery transport adapter', () => {
+  it('does not oversample or rescreen ideas already selected before card creation and accepted by the final gate', async () => {
     const upstream = {
       success: true,
       ideas: Array.from({ length: 5 }, (_, index) => acceptedIdea(index)),
@@ -96,13 +118,13 @@ describe('ChainPlanningController single idea gate adapter', () => {
     expect(result.ideas.map((idea: any) => idea.title)).toEqual(['通过0', '旧格式未验收题材', '明确未通过题材']);
   });
 
-  it('passes through the inner generic failure instead of exposing internal rejection rules', async () => {
+  it('passes through a final-gate pipeline failure without triggering another selection layer', async () => {
     const upstream = {
       success: false,
       ideas: [],
       totalIdeas: 0,
-      error: '本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。',
-      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 7 },
+      error: finalGateFailure,
+      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 5 },
     };
     const ideaDiscover = vi.fn().mockResolvedValue(upstream);
     const controller = new ChainPlanningController({ ideaDiscover } as any);
@@ -112,8 +134,12 @@ describe('ChainPlanningController single idea gate adapter', () => {
     expect(result).toBe(upstream);
     expect(result.success).toBe(false);
     expect(result.ideas).toEqual([]);
-    expect(result.error).not.toContain('点击/留存前置 Gate');
-    expect(result.appealGate).toEqual(expect.objectContaining({ returned: 0 }));
+    expect(result.error).toContain('不会通过增加补生次数或另换题材掩盖');
+    expect(result.appealGate).toEqual(expect.objectContaining({
+      mode: 'premise_preselection_then_final_reader_experience_gate',
+      premiseSelected: 5,
+      returned: 0,
+    }));
   });
 
   it('returns confirmed story, experience profile and discovery audit through the recovery payload consumed by latest.json', async () => {
@@ -151,17 +177,24 @@ describe('ChainPlanningController single idea gate adapter', () => {
         densityMode: '短篇集中兑现',
         pace: '偏快但保留呼吸段',
       }),
-      ideaDiscoveryAudit: expect.objectContaining({ generated: 7, qualified: 5, returned: 5, rejected: 2 }),
+      ideaDiscoveryAudit: expect.objectContaining({
+        mode: 'premise_preselection_then_final_reader_experience_gate',
+        premisePoolSize: 15,
+        premiseSelected: 5,
+        generated: 5,
+        qualified: 5,
+        returned: 5,
+      }),
     }));
   });
 
-  it('persists the latest idea batch before any project exists so local verification can diagnose discovery failure', async () => {
+  it('persists the latest idea batch before any project exists so local verification can diagnose final-gate failure', async () => {
     const ideaDiscover = vi.fn().mockResolvedValue({
       success: false,
       ideas: [],
       totalIdeas: 0,
-      error: '本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。',
-      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 7 },
+      error: finalGateFailure,
+      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 5 },
     });
     const dualWrite = vi.fn().mockResolvedValue(undefined);
     const controller = new ChainPlanningController(
@@ -180,7 +213,12 @@ describe('ChainPlanningController single idea gate adapter', () => {
         success: false,
         totalIdeas: 0,
         request: expect.objectContaining({ storyType: 'short_story', platform: 'fanqie', requestedCount: 5 }),
-        appealGate: expect.objectContaining({ mode: 'single_recoverable_reader_experience_gate', returned: 0 }),
+        appealGate: expect.objectContaining({
+          mode: 'premise_preselection_then_final_reader_experience_gate',
+          premisePoolSize: 15,
+          premiseSelected: 5,
+          returned: 0,
+        }),
       }),
     );
   });
@@ -188,10 +226,10 @@ describe('ChainPlanningController single idea gate adapter', () => {
   it('exposes the persisted pre-project idea audit for verify-local without requiring a project id', () => {
     const persisted = {
       schemaVersion: 1,
-      generatedAt: '2026-09-29T09:00:00.000Z',
+      generatedAt: '2026-09-30T01:00:00.000Z',
       success: false,
       totalIdeas: 0,
-      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 7 },
+      appealGate: { ...audit, qualified: 0, returned: 0, rejected: 5 },
     };
     const database = {
       getDb: () => ({
@@ -200,7 +238,7 @@ describe('ChainPlanningController single idea gate adapter', () => {
             if (sql.includes('sqlite_master')) return { name: 'dual_write_store' };
             if (sql.includes('dual_write_store')) {
               expect(args[0]).toBe('latest_idea_discovery_audit');
-              return { data_value: JSON.stringify(persisted), updated_at: '2026-09-29T09:00:01.000Z' };
+              return { data_value: JSON.stringify(persisted), updated_at: '2026-09-30T01:00:01.000Z' };
             }
             return undefined;
           },
@@ -212,9 +250,12 @@ describe('ChainPlanningController single idea gate adapter', () => {
     const result: any = controller.getLatestIdeaDiscoveryDiagnostics();
 
     expect(result.available).toBe(true);
-    expect(result.updatedAt).toBe('2026-09-29T09:00:01.000Z');
+    expect(result.updatedAt).toBe('2026-09-30T01:00:01.000Z');
     expect(result.audit).toEqual(expect.objectContaining({ success: false, totalIdeas: 0 }));
-    expect(result.audit.appealGate).toEqual(expect.objectContaining({ returned: 0, rejected: 7 }));
+    expect(result.audit.appealGate).toEqual(expect.objectContaining({
+      mode: 'premise_preselection_then_final_reader_experience_gate',
+      returned: 0,
+      rejected: 5,
+    }));
   });
-
 });
