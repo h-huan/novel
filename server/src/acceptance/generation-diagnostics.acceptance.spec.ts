@@ -19,6 +19,28 @@ const discoveryStandards = {
   storyTone: ['悬疑'], writingStyle: ['白描/朴素'], webNovelGenre: ['悬疑'], plotTags: ['探案'], pov: '第三人称限知',
 };
 
+const makePremiseSelectionFixture = (count = 5) => ({
+  pool: Array.from({ length: count }, (_, index) => ({
+    premiseId: `P${index + 1}`,
+    workingTitle: `候选题材${index + 1}`,
+    storyCore: `普通人在限时压力中发现异常证据并主动追查，最终必须承担选择造成的关系后果${index + 1}`,
+  })),
+  selectedPremises: Array.from({ length: count }, (_, index) => ({
+    premiseId: `P${index + 1}`,
+    protagonistSituation: '普通人正面临具体生活压力，并有必须守住的人或事',
+    openingEvent: '一份与日常工作直接相关的异常证据迫使主角立即行动',
+    coreConflict: '主角的现实目标与主动阻挠者在有限时间内持续对撞',
+    activeChoice: '主角必须亲自决定是否公开会改变关系与利益分配的证据',
+    escalation: '每次核验都会让时间压力、职业风险与关系代价继续升级',
+    reversalEffect: '关键反转会改变责任归属、主角目标以及最终选择的代价',
+    payoff: '终局兑现证据真相、人物选择与关系变化三项阅读承诺',
+    irreplaceableCarrier: '职业现场的方法直接决定证据能否成立，换掉载体故事便无法推进',
+    secondOrderConsequence: '证据公开后会重新分配责任与利益，并迫使关键关系重新站队',
+    readerQuestion: '主角能否在截止时间前证明异常，同时承担公开证据造成的后果',
+    differentiation: `第${index + 1}个候选使用独立职业载体、证据链与关系代价，不复用其他题材机制`,
+  })),
+});
+
 it('learns partial chapter-responsibility progress for future strategy ordering', async () => {
   const db = new DatabaseSync(':memory:');
   try {
@@ -69,7 +91,7 @@ it('reports one model configuration failure and shows it on the workbench before
   } finally { db.close(); }
 });
 
-it('generates a complete idea batch with one configured-model call and reuses an identical in-flight request', async () => {
+it('generates a complete idea batch through preselection plus structuring and reuses an identical in-flight request', async () => {
   const premises = [
     {
       title: '逆风浮标的维修合同', setting: '海岛气象站', hero: '失语气象员',
@@ -113,6 +135,7 @@ it('generates a complete idea batch with one configured-model call and reuses an
     },
   ];
   const makeIdea = (index: number) => ({
+    sourcePremiseId: `P${index}`,
     title: premises[index - 1].title,
     alternateTitles: [`${premises[index - 1].title}·备选甲`, `${premises[index - 1].title}·备选乙`],
     storyType: 'short_story',
@@ -136,10 +159,15 @@ it('generates a complete idea batch with one configured-model call and reuses an
       readerQuestion: `主角能否在截止日前证明${premises[index - 1].setting}里的异常，同时承担公开证据带来的关系代价`,
     },
   });
+  let generationCall = 0;
   const realLLM = {
     assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
     generate: vi.fn(async () => {
+      generationCall += 1;
       await new Promise(resolve => setTimeout(resolve, 10));
+      if (generationCall === 1) {
+        return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+      }
       return { content: JSON.stringify({ ideas: [1, 2, 3, 4, 5].map(makeIdea) }) };
     }),
   };
@@ -150,9 +178,18 @@ it('generates a complete idea batch with one configured-model call and reuses an
 
   const [first, duplicate] = await Promise.all([controller.ideaDiscover(request), controller.ideaDiscover(request)]) as any[];
   expect(first).toMatchObject({ success: true, totalIdeas: 5 });
+  expect(first.appealGate).toMatchObject({
+    premisePoolSize: 5,
+    premisePoolTarget: 15,
+    premisePoolTargetMet: false,
+    premiseSelected: 5,
+  });
   expect(duplicate).toEqual(first);
-  expect(realLLM.generate).toHaveBeenCalledTimes(1);
-  expect(realLLM.generate).toHaveBeenCalledWith(expect.objectContaining({
+  expect(realLLM.generate).toHaveBeenCalledTimes(2);
+  expect(realLLM.generate).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    scenario: 'idea_generate', responseFormat: 'json_object', maxEmptyRetries: 1,
+  }));
+  expect(realLLM.generate).toHaveBeenNthCalledWith(2, expect.objectContaining({
     scenario: 'idea_generate', responseFormat: 'json_object', maxEmptyRetries: 1,
   }));
 });
@@ -220,10 +257,15 @@ it('blocks idea discovery without a platform/category execution standard instead
 
 it('injects the user-declared custom platform standard into the idea prompt as the platform authority', async () => {
   const prompts: string[] = [];
+  let generationCall = 0;
   const realLLM = {
     assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
     generate: vi.fn(async (input: any) => {
+      generationCall += 1;
       prompts.push(String(input.prompt));
+      if (generationCall === 1) {
+        return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+      }
       return { content: JSON.stringify({ ideas: [] }) };
     }),
   };
@@ -236,10 +278,10 @@ it('injects the user-declared custom platform standard into the idea prompt as t
     customPlatformNote: '每章末尾必须留一个可验证的实物线索；回报以关系变化为主，不用打脸爽点。',
     ...discoveryStandards,
   });
-  // 说明已进入 prompt（上面断言），后续质量 Gate 才有资格判定这批题材不合格
+  // 自定义平台标准应贯穿创建前筛选与完整卡结构化；这里故意让第二阶段返回空卡，验证失败点已经越过筛选阶段。
   expect(result.success).toBe(false);
-  expect(String(result.error)).toContain('缺少有效的 ideas 数组');
-  expect(realLLM.generate).toHaveBeenCalledTimes(1);
+  expect(String(result.error)).toContain('完整题材卡结构化应与创建前筛选出的 5 个题材一一对应');
+  expect(realLLM.generate).toHaveBeenCalledTimes(2);
   const prompt = prompts.join('\n');
   expect(prompt).toContain('每章末尾必须留一个可验证的实物线索');
   expect(prompt).toContain('用户填写的「自定义平台说明」是该平台节奏、回报类型、段落与对话区间的唯一事实源');
