@@ -6,6 +6,100 @@ export type IdeaStoryType = 'short_story' | 'long_novel';
  */
 export const SHORT_IDEA_HOOK_MIN_SIGNALS = 3;
 
+const SELECTED_PREMISE_FIELDS = [
+  'premiseId',
+  'protagonistSituation',
+  'openingEvent',
+  'coreConflict',
+  'activeChoice',
+  'escalation',
+  'reversalEffect',
+  'payoff',
+  'irreplaceableCarrier',
+  'secondOrderConsequence',
+  'readerQuestion',
+  'differentiation',
+] as const;
+
+export interface PremiseSelectionResult {
+  pool: Array<Record<string, unknown>>;
+  selected: Array<Record<string, unknown>>;
+  poolTargetMet: boolean;
+}
+
+/**
+ * 题材池的“广搜数量”只用于提高搜索覆盖，不是质量 Gate。
+ * 未被选中的轻量胚子只需最小骨架；只有最终选中的 requestedCount 项需要完整筛选证据。
+ */
+export function normalizePremiseSelectionPayload(
+  payload: unknown,
+  requestedCount: number,
+  poolTarget: number,
+): PremiseSelectionResult {
+  if (!Number.isInteger(requestedCount) || requestedCount <= 0) {
+    throw new Error('创建前题材筛选的目标数量无效。');
+  }
+  const source = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const rawPool = Array.isArray(source.pool) ? source.pool : [];
+  const rawSelected = Array.isArray(source.selectedPremises) ? source.selectedPremises : [];
+
+  // 未选中的池只保留最小骨架；单个额外候选写坏不能拖死已经选中的成熟题材。
+  const pool: Array<Record<string, unknown>> = [];
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const raw of rawPool) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const premiseId = String(item.premiseId || '').trim();
+    const workingTitle = String(item.workingTitle || '').trim();
+    const storyCore = String(item.storyCore || '').trim();
+    if (!premiseId || workingTitle.length < 2 || storyCore.length < 8 || byId.has(premiseId)) continue;
+    const normalized = { ...item, premiseId, workingTitle, storyCore };
+    pool.push(normalized);
+    byId.set(premiseId, normalized);
+  }
+
+  if (pool.length < requestedCount) {
+    throw new Error(`创建前题材筛选只有 ${pool.length} 个有效轻量题材胚子，少于本次需要的 ${requestedCount} 个；系统不会用弱题材补数。`);
+  }
+  if (rawSelected.length !== requestedCount) {
+    throw new Error(`创建前题材筛选必须明确选出 ${requestedCount} 个成熟题材；当前选择数量为 ${rawSelected.length}。`);
+  }
+
+  const selectedIds = new Set<string>();
+  const selected = rawSelected.map((raw, index) => {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(`创建前题材筛选的第 ${index + 1} 个已选题材缺少结构化证据。`);
+    }
+    const item = raw as Record<string, unknown>;
+    const premiseId = String(item.premiseId || '').trim();
+    if (!premiseId || selectedIds.has(premiseId)) {
+      throw new Error('创建前题材筛选返回了空或重复的已选 premiseId。');
+    }
+    const poolItem = byId.get(premiseId);
+    if (!poolItem) {
+      throw new Error(`创建前题材筛选引用了轻量候选池中不存在的 premiseId：${premiseId || '空'}。`);
+    }
+    const missing = SELECTED_PREMISE_FIELDS.filter(field => String(item[field] || '').trim().length < 4);
+    if (missing.length) {
+      throw new Error(`已选题材 ${premiseId} 缺少创建完整题材卡所需的筛选证据：${missing.join('、')}。`);
+    }
+    selectedIds.add(premiseId);
+    return {
+      ...poolItem,
+      ...item,
+      premiseId,
+      workingTitle: String(item.workingTitle || poolItem.workingTitle || '').trim(),
+      storyCore: String(item.storyCore || poolItem.storyCore || '').trim(),
+    };
+  });
+
+  return {
+    pool,
+    selected,
+    poolTargetMet: pool.length >= Math.max(requestedCount, Number.isFinite(poolTarget) ? Math.floor(poolTarget) : requestedCount),
+  };
+}
+
 /**
  * 完整题材卡创建之前的唯一选题契约。
  * 这一阶段只产生轻量题材池并明确选择，不生成展示卡，不让最终 Gate 承担主要选题。
@@ -20,12 +114,12 @@ export function ideaPremiseSelectionDirective(
     : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
   return `【题材卡创建前筛选】
 这一步发生在完整题材卡创建之前。先广泛搜寻，再比较，再选择；禁止先创建完整题材卡再交给最终 Gate 大量淘汰。
-1. 先提出至少 ${poolSize} 个真正不同的轻量题材胚子；这里只构思故事骨架，不写完整题材卡。
-2. 对胚子逐一比较人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异。
+1. 以 ${poolSize} 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。${poolSize} 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ${requestedCount} 个成熟题材，可以少于 ${poolSize}，禁止为了凑数填弱项。
+2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${requestedCount} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。
 3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
 4. 从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。
 5. ${storyTypeRule}
-6. 输出轻量候选池和 selectedPremiseIds 即可；不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
+6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 只包含已经选中的 ${requestedCount} 项及其筛选证据。不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
 }
 
 /**
