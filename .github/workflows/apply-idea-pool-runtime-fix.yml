@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - '.github/workflows/apply-idea-pool-runtime-fix.yml'
+      - '.github/scripts/apply-idea-pool-runtime-fix.py'
   workflow_dispatch:
 
 permissions:
