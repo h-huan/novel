@@ -48,6 +48,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('finalGateRepairAttempted');
     expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
     expect(source).toContain('selectedAccepted.length !== requestedCount');
+    expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
+    expect(source).toContain('repairGenerated: finalGateRepairGenerated');
     expect(source).toContain('系统不会把部分结果伪装成完整成功');
     expect(source).not.toContain('未通过项已留审计，系统没有自动补生或换题');
     expect(source).not.toContain('qualityWarning: acceptedWithAudit.length < requestedCount');
@@ -58,6 +60,8 @@ describe('chain HTTP architecture', () => {
 
     expect(source).toContain('factRepairFields');
     expect(source).toContain('禁止重新生成完整章纲');
+    expect(source).toContain('const preservedTargetWords = chData.targetWords');
+    expect(source).toContain('const preservedWordCountReason = chData.wordCountReason');
     expect(source).toContain("shortOutlineSourceRunIds.add(String(repair.runId))");
     expect(source).not.toContain('只输出与当前章纲同字段的完整 JSON 对象；修复后所有事件');
   });
