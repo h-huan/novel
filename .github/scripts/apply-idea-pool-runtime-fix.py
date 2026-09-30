@@ -81,6 +81,11 @@ replace_once(
     'premise audit fields',
 )
 
+legacy_local_name_count = text.count('selectedPremiseIds')
+if legacy_local_name_count != 3:
+    raise SystemExit(f'selected premise set rename: expected exactly 3 post-migration local references, found {legacy_local_name_count}')
+text = text.replace('selectedPremiseIds', 'selectedPremiseIdSet')
+
 obsolete_markers = (
     '创建前题材筛选未形成至少',
     'selectedPremiseIds',
@@ -96,6 +101,7 @@ for required in (
     'normalizePremiseSelectionPayload',
     'premisePoolTargetMet',
     'selectedPremises',
+    'selectedPremiseIdSet',
 ):
     if required not in text:
         raise SystemExit(f'required runtime marker missing: {required}')
