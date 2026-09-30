@@ -68,6 +68,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('ideaGateLocalRepairDirective');
     expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
     expect(source).toContain('selectedAccepted.length === 0');
+    expect(source).toContain('selectedAccepted.length < requestedCount');
     expect(source).toContain('const qualityWarning = partial');
     expect(source).toContain('未通过题材已淘汰，系统未换题或补数');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
