@@ -1,21 +1,60 @@
 import { describe, expect, it } from 'vitest';
 import {
   SHORT_IDEA_HOOK_MIN_SIGNALS,
+  ideaCardStructuringDirective,
   ideaHookRequirement,
-  ideaRecoveryDirective,
+  ideaPremiseSelectionDirective,
 } from './idea-discovery-contract';
 
-describe('idea discovery hook contract', () => {
-  it('keeps the short-story prompt aligned with the gate signal minimum without turning signals into a creation checklist', () => {
+describe('idea discovery preselection contract', () => {
+  it('screens a broad lightweight premise pool before any complete idea cards are created', () => {
+    const contract = ideaPremiseSelectionDirective('short_story', 5);
+
+    expect(contract).toContain('题材卡创建前筛选');
+    expect(contract).toContain('至少 15 个真正不同的轻量题材胚子');
+    expect(contract).toContain('这里只构思故事骨架，不写完整题材卡');
+    expect(contract).toContain('人物处境、核心冲突、主角主动选择');
+    expect(contract).toContain('生活/职业载体不可替换性');
+    expect(contract).toContain('二阶后果');
+    expect(contract).toContain('单层“行为→超常奖惩→调查”的寓言机制');
+    expect(contract).toContain('恰好 5 个成熟题材');
+    expect(contract).toContain('不按关键词数量打分');
+    expect(contract).toContain('不把最终 Gate 当主要选题器');
+    expect(contract).toContain('selectedPremiseIds');
+    expect(contract).not.toContain('完整 hook/description/scopeBreakdown');
+  });
+
+  it('keeps long premise selection sustainable without importing short-story closure rules', () => {
+    const contract = ideaPremiseSelectionDirective('long_novel', 4);
+
+    expect(contract).toContain('至少 12 个真正不同的轻量题材胚子');
+    expect(contract).toContain('可持续升级的核心矛盾');
+    expect(contract).toContain('人物成长/关系变化');
+    expect(contract).toContain('阶段性兑现空间');
+    expect(contract).not.toContain('有限篇幅内形成单线闭环');
+  });
+
+  it('structures only the premises already selected before card creation', () => {
+    const directive = ideaCardStructuringDirective([
+      { premiseId: 'P2', workingTitle: '候选二', coreConflict: '冲突二' },
+      { premiseId: 'P7', workingTitle: '候选七', coreConflict: '冲突七' },
+    ]);
+
+    expect(directive).toContain('完整题材卡结构化');
+    expect(directive).toContain('不再重新选题');
+    expect(directive).toContain('sourcePremiseId：["P2","P7"]');
+    expect(directive).toContain('禁止替换、合并、拆分、另造题材');
+    expect(directive).toContain('最终 Gate 只做独立验收');
+    expect(directive).toContain('不是自动补生另一批题材');
+  });
+
+  it('treats hook generation as expression of a preselected story rather than another search stage', () => {
     const contract = ideaHookRequirement('short_story');
+
     expect(SHORT_IDEA_HOOK_MIN_SIGNALS).toBe(3);
-    expect(contract).toContain('先构思一个值得读的完整故事题材');
-    expect(contract).toContain('先在内部广泛寻找至少本批输出数量 3 倍');
-    expect(contract).toContain('构思阶段先淘汰弱题材');
-    expect(contract).toContain('只输出内部筛选后真正成熟的候选');
-    expect(contract).toContain('合格候选不够时继续重想');
-    expect(contract).toContain('Gate 字段只是最终独立验收证据，不是创作清单');
-    expect(contract).toContain('现实利益冲突、关系反常、制度困境、隐藏事实或超常现象');
+    expect(contract).toContain('题材已经通过完整题材卡创建前的轻量候选池筛选');
+    expect(contract).toContain('这里只把该题材最有吸引力的起始事件准确压缩成 hook');
+    expect(contract).toContain('不再重新选题、换题');
     expect(contract).toContain('异常/信息差');
     expect(contract).toContain('代价或时限');
     expect(contract).toContain('具体行动/选择');
@@ -23,74 +62,17 @@ describe('idea discovery hook contract', () => {
     expect(contract).toContain(`至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类有效信号`);
     expect(contract).toContain('必须包含主角具体行动或明确选择');
     expect(contract).toContain('不要求固定组合');
-    expect(contract).toContain('不能把关键行动/选择只藏在 description');
+    expect(contract).not.toContain('内部广泛寻找');
+    expect(contract).not.toContain('补足缺少');
   });
 
-  it('keeps long-story hooks actionable and story-first without forcing short-story density', () => {
+  it('keeps long-story hooks actionable without forcing short-story signal density', () => {
     const contract = ideaHookRequirement('long_novel');
-    expect(contract).toContain('先构思一个值得读的完整故事题材');
-    expect(contract).toContain('先在内部广泛寻找至少本批输出数量 3 倍');
+
+    expect(contract).toContain('题材已经通过完整题材卡创建前的轻量候选池筛选');
     expect(contract).toContain('现实压力或代价');
     expect(contract).toContain('下一步具体行动');
     expect(contract).toContain('可持续追问');
     expect(contract).not.toContain(`至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类有效信号`);
-  });
-
-  it('turns gate failures into story-level recovery guidance instead of a keyword patch list', () => {
-    const directive = ideaRecoveryDirective('short_story', [
-      '核心钩子缺少明确代价、时限或失去风险',
-      '核心钩子没有迫使主角采取具体行动',
-      '核心钩子没有迫使主角采取具体行动',
-      '开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现',
-    ], 3);
-    expect(directive).toContain('本轮目标是补足缺少的 3 个合格题材');
-    expect(directive).toContain('先在内部重新寻找至少 9 个不同题材胚子');
-    expect(directive).toContain('先淘汰弱题材');
-    expect(directive).toContain('禁止把外部 Gate 当成主要选题器');
-    expect(directive).toContain('失败原因只用于指出“故事哪里不成立”');
-    expect(directive).toContain('不是让你逐项补关键词');
-    expect(directive).toContain('人物处境→核心冲突→主动选择→后果升级→有效反转/兑现');
-    expect(directive).toContain('若问题只是 hook');
-    expect(directive).toContain('才重写 hook 本字段');
-    expect(directive).toContain('反转、二阶后果、不可替换性或生活期盼本身不成立，必须重想故事因果');
-    expect(directive).toContain('uniquePoint/coreConflict');
-    expect(directive).toContain('description 前 260 字');
-    expect(directive).toContain(`四类信号中的至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类`);
-    expect(directive).toContain('这是表达验收');
-    expect(directive).toContain('不是四项创作配方');
-    expect(directive).toContain('不复写已通过项');
-    expect(directive.match(/核心钩子没有迫使主角采取具体行动/g)).toHaveLength(1);
-  });
-
-  it('keeps long-story recovery actionable without importing the short-story signal quota', () => {
-    const directive = ideaRecoveryDirective('long_novel', [
-      '核心钩子缺少明确代价、时限或失去风险',
-      '核心钩子没有迫使主角采取具体行动',
-    ], 2);
-
-    expect(directive).toContain('本轮目标是补足缺少的 2 个合格题材');
-    expect(directive).toContain('先在内部重新寻找至少 6 个不同题材胚子');
-    expect(directive).toContain('若问题只是 hook');
-    expect(directive).toContain('重想故事因果');
-    expect(directive).not.toContain('四类信号中的至少');
-  });
-
-  it('covers the exact all-rejected short-story failure set with one recoverable story-first contract', () => {
-    const reasons = [
-      '核心钩子缺少一眼可识别的异常/信息差',
-      '核心钩子缺少明确代价、时限或失去风险',
-      '核心钩子没有迫使主角采取具体行动',
-      '短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成 3 个有效信号',
-      '开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现',
-    ];
-    const directive = ideaRecoveryDirective('short_story', reasons, 5);
-
-    for (const reason of reasons) expect(directive).toContain(reason);
-    expect(directive).toContain('故事哪里不成立');
-    expect(directive).toContain('禁止为了过 Gate 把普通故事强行改成超常机制');
-    expect(directive).toContain('hook 或 description 前 260 字');
-    expect(directive).toContain(`四类信号中的至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类`);
-    expect(directive).toContain('本轮目标是补足缺少的 5 个合格题材');
-    expect(directive).toContain('先在内部重新寻找至少 15 个不同题材胚子');
   });
 });
