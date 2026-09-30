@@ -19,6 +19,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Repair staging anchor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/apply_single_idea_card_structuring.py')
+          s = p.read_text(encoding='utf-8')
+          if 'import re\n' not in s:
+              s = s.replace('from pathlib import Path\n', 'from pathlib import Path\nimport re\n', 1)
+          start = s.index('old_schema_prefix = ')
+          end = s.index('\nold_auto =', start)
+          replacement = r'''controller, schema_replacements = re.subn(
+              r'\\?"sourcePremiseId\\?"\s*:\s*\\?"P1\\?"\s*,',
+              '',
+              controller,
+              count=1,
+          )
+          if schema_replacements != 1:
+              raise SystemExit('output schema sourcePremiseId anchor missing')
+          '''
+          s = s[:start] + replacement + s[end:]
+          p.write_text(s, encoding='utf-8')
+          PY
       - name: Apply source patch
         run: |
           python .github/scripts/apply_single_idea_card_structuring.py
