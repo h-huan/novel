@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Repair staging anchor
+      - name: Repair staging anchors
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -39,6 +39,11 @@ jobs:
               raise SystemExit('output schema sourcePremiseId anchor missing')
           '''
           s = s[:start] + replacement + s[end:]
+          old_assertions = "    expect(directive).not.toContain('sourcePremiseId');\n    expect(directive).not.toContain('premiseId');"
+          new_assertion = "    expect(directive).toContain('不要输出 premiseId、sourcePremiseId');"
+          if old_assertions not in s:
+              raise SystemExit('single-card identity assertion anchor missing')
+          s = s.replace(old_assertions, new_assertion, 1)
           p.write_text(s, encoding='utf-8')
           PY
       - name: Apply source patch
