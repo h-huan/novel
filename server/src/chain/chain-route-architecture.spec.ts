@@ -55,6 +55,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('selectedAccepted.length !== requestedCount');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
     expect(source).toContain('repairGenerated: finalGateRepairGenerated');
+    expect(source).toContain('repairError: finalGateRepairError');
     expect(source).toContain('系统不会把部分结果伪装成完整成功');
     expect(source).not.toContain('未通过项已留审计，系统没有自动补生或换题');
     expect(source).not.toContain('qualityWarning: acceptedWithAudit.length < requestedCount');
