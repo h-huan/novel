@@ -18,6 +18,7 @@ import {
   alignmentFindingSeverity,
 } from './chain.controller';
 import { GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';
+import { IdeaAppealGateService } from './idea-appeal-gate.service';
 import { STANDARD_PRECONDITIONS } from '../acceptance/test-standards';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 
@@ -1174,5 +1175,110 @@ describe('cross-chapter finding partition', () => {
     expect(partition.blocking).toHaveLength(1);
     expect(partition.advisories).toEqual([]);
     expect(partition.sourceConflicts).toEqual([]);
+  });
+});
+
+
+describe('idea discovery live orchestrator behavior', () => {
+  it('returns the final-gate-passed subset instead of zeroing a batch when one selected premise still fails', async () => {
+    const selected = (id: string, title: string) => ({
+      premiseId: id,
+      workingTitle: title,
+      storyCore: `${title}的具体人物处境、起始事件与冲突骨架。`,
+      protagonistSituation: '主角要守住家人、住处和现实收入，无法无代价退出当前冲突。',
+      openingEvent: '一份现实记录出现无法解释的矛盾，迫使主角当天处理。',
+      coreConflict: '主角要保住现实利益并查清责任，对方则主动逼她放弃证据。',
+      activeChoice: '主角决定留下证据并主动查清来源，而不是接受对方给出的退路。',
+      escalation: '选择之后工作、家庭和钱的压力连续升级，并牵连新的利益相关者。',
+      reversalEffect: '关键事实改变了主角原先的目标、盟友关系和要承担的代价。',
+      payoff: '终局由主角自己的选择兑现开篇承诺，并让真正责任方承担后果。',
+      irreplaceableCarrier: '具体职业流程、家庭利益和证据载体彼此绑定，换掉任一项故事就不成立。',
+      secondOrderConsequence: '主角公开证据后第三方利益受损，原本支持她的人被迫重新站队。',
+      readerQuestion: '主角能否在现实利益被拿走之前证明记录是谁改的？',
+      differentiation: '冲突由具体生活载体和利益关系共同推动，不是换名后的秘密追查模板。',
+    });
+    const premiseOne = selected('P1', '遗嘱里的门牌号');
+    const premiseTwo = selected('P2', '门后的普通秘密');
+    const pool = [
+      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore },
+      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore },
+    ];
+    const common = {
+      storyType: 'short_story', targetPlatform: 'fanqie', storyCategory: '悬疑',
+      storyTone: ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'], pov: '第一人称',
+      submissionTags: ['悬疑'], plotTags: ['调查'], estimatedWords: 20000, plannedChapters: 5,
+      scopeBreakdown: [{ arc: '全篇主线', chapters: 5, reason: '五章完成调查、选择和兑现' }],
+      scopeReason: '两万字按五章展开，每章约四千字。', setting: '现代城市', characters: ['主角', '母亲'], styleTags: ['现实悬疑'],
+    };
+    const strongCard = {
+      ...common,
+      title: '遗嘱写着我家门牌',
+      hook: '父亲葬礼后，我在遗嘱里看见自家门牌号；每次回家母亲都会忘记我一小时。我只剩三天查清原因，否则她会彻底失去这段记忆，我决定追查父亲留下的债务和那份遗嘱。',
+      description: '最初我只想守住母亲和这个家，查清父亲为什么欠下巨债。第一天，我发现债主拿着房屋合同逼母亲搬走；随后我起诉并追查签字人，找到父亲当年替同事担责的证据。第二次回家，母亲忘了我，却记得合同背后的老板。最后我必须在公开证据和保住母亲名声之间选择，并用父亲留下的录音揭开真相，让真正的责任人承担代价。',
+      protagonist: '一个想守住母亲、住房和家庭尊严的普通上班族。',
+      coreConflict: '主角必须在三天内查清房屋合同与债务真相，同时保护母亲不被债主和公司逼走。',
+      uniquePoint: '每次回家母亲都会短暂忘记主角，这个异常逼迫主角重新理解父亲留下的债务与责任。',
+      mainReversal: '主角发现父亲并非单纯欠债，而是替同事承担了被公司转嫁的责任；目标从替父还债转为公开证据并起诉真正责任人。',
+      noveltyProof: {
+        familiarShell: '家庭债务加现实悬疑',
+        uncommonCombination: '遗嘱门牌、母亲短时遗忘、房屋合同与职场转嫁责任共同组成证据链',
+        avoidedPatterns: '不靠系统任务或单层超常报应推进',
+        irreplaceableWhy: '去掉遗嘱和住房合同，家庭债务无法落到具体证据；去掉母亲关系，选择没有现实重量',
+        secondOrderConsequence: '公开证据会洗清债务却损害父亲维护的名声，也让母亲必须重新选择如何理解父亲',
+        readerQuestion: '遗嘱为什么写着自家门牌，母亲的遗忘又和父亲替人担责有什么关系？',
+      },
+    };
+    const weakCard = {
+      ...common,
+      title: '门后的普通秘密',
+      hook: '她在下班路上遇到一件说不清的事情，于是继续往前走，准备等有机会时再看看究竟发生了什么。',
+      description: '最初她照常生活，随后遇见一些变化，接着又得到几条信息。事情逐渐变得复杂，她尝试处理，却始终没有明确目标。后来她发现先前理解并不完整，于是继续观察。最终事情出现新的解释，但她仍然只是顺着情况往前走，没有形成必须承担的选择和兑现。',
+      protagonist: '一个想把生活过好的普通上班族，但当前没有清晰的迫近目标。',
+      coreConflict: '她面对越来越复杂的情况，却没有形成双方主动争夺同一利益的具体冲突。',
+      uniquePoint: '一个暂时说不清楚的生活秘密，会在后面逐渐出现新的解释。',
+      mainReversal: '后来她知道事情和最初理解不同，但这个信息没有改变她的目标或关系。',
+      noveltyProof: {
+        familiarShell: '都市生活悬疑', uncommonCombination: '普通通勤、模糊秘密和零散信息组成观察过程',
+        avoidedPatterns: '避免直接套用知名作品', irreplaceableWhy: '当前载体仍可替换，正是最终 Gate 应识别的问题',
+        secondOrderConsequence: '事情变化后周围人的态度有所变化，但没有形成明确利益重组',
+        readerQuestion: '那件事情后来到底会怎样发展下去呢？',
+      },
+    };
+
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: [premiseOne, premiseTwo] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [weakCard] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ patches: [{}] }) });
+    const controller = Object.create(ChainController.prototype) as any;
+    controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    controller.ideaAppealGate = new IdeaAppealGateService();
+    controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    controller.db = {
+      getDb: () => ({
+        prepare: () => ({ all: () => [] }),
+      }),
+    };
+
+    const result = await controller.runIdeaDiscovery({
+      storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
+      storyTone: ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
+      submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
+      targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
+    }, 2);
+
+    expect(generate).toHaveBeenCalledTimes(4);
+    expect(result.success).toBe(true);
+    expect(result.ideas).toHaveLength(1);
+    expect(result.ideas[0].sourcePremiseId).toBe('P1');
+    expect(result.totalIdeas).toBe(1);
+    expect(result.qualityWarning).toContain('最终 Gate 通过 1 个');
+    expect(result.appealGate).toEqual(expect.objectContaining({
+      premiseSelected: 2,
+      generated: 2,
+      qualified: 1,
+      returned: 1,
+      rejected: 1,
+    }));
   });
 });

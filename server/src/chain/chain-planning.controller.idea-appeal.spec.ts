@@ -50,8 +50,10 @@ const preselectedPremises = Array.from({ length: 5 }, (_, index) => ({
 }));
 
 const audit = {
-  schemaVersion: 4,
-  mode: 'premise_preselection_then_final_reader_experience_gate',
+  schemaVersion: 7,
+  mode: 'premise_preselection_then_final_gate_bounded_repair',
+  structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
+  repairProtocol: 'ordered_local_patch_server_owned_identity',
   premisePoolSize: 15,
   premiseSelected: 5,
   generated: 5,
@@ -136,7 +138,7 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
     expect(result.ideas).toEqual([]);
     expect(result.error).toContain('不会通过增加补生次数或另换题材掩盖');
     expect(result.appealGate).toEqual(expect.objectContaining({
-      mode: 'premise_preselection_then_final_reader_experience_gate',
+      mode: 'premise_preselection_then_final_gate_bounded_repair',
       premiseSelected: 5,
       returned: 0,
     }));
@@ -178,7 +180,7 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
         pace: '偏快但保留呼吸段',
       }),
       ideaDiscoveryAudit: expect.objectContaining({
-        mode: 'premise_preselection_then_final_reader_experience_gate',
+        mode: 'premise_preselection_then_final_gate_bounded_repair',
         premisePoolSize: 15,
         premiseSelected: 5,
         generated: 5,
@@ -214,7 +216,7 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
         totalIdeas: 0,
         request: expect.objectContaining({ storyType: 'short_story', platform: 'fanqie', requestedCount: 5 }),
         appealGate: expect.objectContaining({
-          mode: 'premise_preselection_then_final_reader_experience_gate',
+          mode: 'premise_preselection_then_final_gate_bounded_repair',
           premisePoolSize: 15,
           premiseSelected: 5,
           returned: 0,
@@ -253,7 +255,7 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
     expect(result.updatedAt).toBe('2026-09-30T01:00:01.000Z');
     expect(result.audit).toEqual(expect.objectContaining({ success: false, totalIdeas: 0 }));
     expect(result.audit.appealGate).toEqual(expect.objectContaining({
-      mode: 'premise_preselection_then_final_reader_experience_gate',
+      mode: 'premise_preselection_then_final_gate_bounded_repair',
       returned: 0,
       rejected: 5,
     }));

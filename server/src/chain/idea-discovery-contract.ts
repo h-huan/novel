@@ -6,6 +6,16 @@ export type IdeaStoryType = 'short_story' | 'long_novel';
  */
 export const SHORT_IDEA_HOOK_MIN_SIGNALS = 3;
 
+// 创建前筛选已经形成了结构化语义证据。它只在当前进程内随服务器绑定的题材卡流转，
+// 不进入 JSON / API / Canon，避免最终 Gate 丢掉上游证据后又靠关键词重新猜同一件事。
+const selectedPremiseEvidenceByCard = new WeakMap<object, Record<string, unknown>>();
+
+export function selectedPremiseEvidenceForIdeaCard(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  const evidence = selectedPremiseEvidenceByCard.get(value as object);
+  return evidence ? { ...evidence } : null;
+}
+
 const SELECTED_PREMISE_FIELDS = [
   'protagonistSituation',
   'openingEvent',
@@ -163,7 +173,9 @@ export function bindStructuredIdeaCardToPremise(
     Object.entries(rawCard as Record<string, unknown>)
       .filter(([key]) => key !== 'sourcePremiseId' && key !== 'premiseId'),
   );
-  return { ...safeCard, sourcePremiseId: premiseId };
+  const boundCard = { ...safeCard, sourcePremiseId: premiseId };
+  selectedPremiseEvidenceByCard.set(boundCard, { ...selectedPremise });
+  return boundCard;
 }
 
 const IDEA_GATE_REPAIR_TEXT_FIELDS = [
@@ -233,6 +245,7 @@ export function applyOrderedIdeaRepairPatches(
   }
 
   return cards.map((card, index) => {
+    const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(card);
     const patch = ideaRepairRecord(rawPatches[index]);
     if (!patch) {
       throw new Error(`最终 Gate 定向局部修复第 ${index + 1} 项不是对象；系统不会猜测它对应哪个题材。`);
@@ -258,6 +271,9 @@ export function applyOrderedIdeaRepairPatches(
 
     // 显式恢复服务器持有的身份，哪怕模型在未知字段里试图改写也不会生效。
     next.sourcePremiseId = card.sourcePremiseId;
+    if (selectedPremiseEvidence) {
+      selectedPremiseEvidenceByCard.set(next, selectedPremiseEvidence);
+    }
     return next;
   });
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
+import { bindStructuredIdeaCardToPremise } from './idea-discovery-contract';
 
 const gate = new IdeaAppealGateService();
 
@@ -110,3 +111,53 @@ describe('latest diagnostic idea-gate regressions', () => {
   }
 });
 
+
+
+describe('selected-premise semantic evidence survives wording variation', () => {
+  it('does not require a new regex keyword every time the same selected story is phrased differently', () => {
+    const rawCard = {
+      title: '反诈室友让我继续打钱',
+      hook: '对面发来的话术和反诈客服室友工作群里的样本一模一样。下月房租全靠这笔押金，她仍把钱打过去，把手机交给室友全程录屏，自己继续聊。',
+      description: '她只想拿回押金续住房子。第一轮交钱后，对方立刻换了收款人；随后室友发现话术来自正在追踪的团伙。她继续装作上钩，把聊天和转账路径留作证据。最后她必须在马上止损和继续拖住对方之间选择，因为室友所在团队只差最后一条资金链就能锁定收款人。',
+      protagonist: '租约快到期、想拿回押金继续住下去的普通上班族。',
+      coreConflict: '她要保住下月住处和押金，同时配合室友拖住骗子，任何一步提前收手都会断掉资金证据。',
+      uniquePoint: '诈骗话术和反诈客服室友工作群里的样本完全重合，而主角必须假装继续上钩。',
+      mainReversal: '她以为室友只是在帮她止损，后来才知道室友追的正是同一团伙；两人的目标从救一笔押金改成保住房子同时锁住资金链。',
+      noveltyProof: {
+        familiarShell: '合租生活加反诈悬疑',
+        uncommonCombination: '租房押金、反诈客服室友和实时诈骗话术样本绑定在同一场转账里',
+        avoidedPatterns: '不靠超能力或身份曝光解决诈骗',
+        irreplaceableWhy: '去掉合租与押金压力，主角没有继续冒险的现实代价；去掉反诈室友，实时话术比对和录屏证据链不成立',
+        secondOrderConsequence: '她继续聊天会让骗子把目标扩展到同住地址，室友也必须在保护她与追完整资金链之间重新选择',
+        readerQuestion: '这笔押金到底能不能拿回来，室友为什么要求她明知有风险还继续聊下去？',
+      },
+    };
+    const unbound = gate.assess(rawCard, 'short_story');
+    expect(unbound.signals.hookHasAnomaly).toBe(false);
+    expect(unbound.signals.hookHasPressure).toBe(false);
+    expect(unbound.signals.hookHasAgency).toBe(false);
+
+    const bound = bindStructuredIdeaCardToPremise({
+      premiseId: 'P-natural-wording',
+      workingTitle: rawCard.title,
+      storyCore: '租客发现押金骗局话术与反诈室友追踪样本重合，决定继续装作上钩留下证据。',
+      protagonistSituation: '租约快到期，她需要拿回押金才能保住下月住处。',
+      openingEvent: '诈骗方发来的整套话术与反诈客服室友工作群里的追踪样本重合。',
+      coreConflict: '她要保住押金和住处，同时拖住骗子让室友补齐资金链，两项目标互相制造风险。',
+      activeChoice: '她明知对面是骗子仍决定按原节奏继续聊，把手机交给室友录屏并保留转账路径。',
+      escalation: '继续配合让诈骗方扩大目标范围，也让室友必须在立即止损和追完整资金链之间取舍。',
+      reversalEffect: '室友并非临时帮忙，而是在追同一团伙，私人押金纠纷变成共同承担风险的取证行动。',
+      payoff: '终局必须同时兑现押金去向、资金链证据和两人对风险边界的选择。',
+      irreplaceableCarrier: '合租关系带来即时反诈协作，押金又提供不能简单退出的现实利益。',
+      secondOrderConsequence: '骗子把目标扩展到同住地址后，室友的职业追查会反过来威胁两人的现实住处安全。',
+      readerQuestion: '明知被骗为什么还继续聊，这次继续会让她拿回押金还是失去住处？',
+      differentiation: '冲突来自租房现金流和反诈室友的实时协作，而不是发现秘密后一路调查。',
+    }, [rawCard]);
+    const assessment = gate.assess(bound, 'short_story');
+    expect(assessment.signals.hookHasAnomaly).toBe(true);
+    expect(assessment.signals.hookHasPressure).toBe(true);
+    expect(assessment.signals.hookHasAgency).toBe(true);
+    expect(assessment.issues).not.toContain('核心钩子没有迫使主角采取具体行动或明确选择');
+    expect(assessment.issues.some((item) => item.includes('短篇首屏钩子信息过弱'))).toBe(false);
+  });
+});

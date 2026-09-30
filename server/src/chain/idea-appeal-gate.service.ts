@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SHORT_IDEA_HOOK_MIN_SIGNALS } from './idea-discovery-contract';
+import { SHORT_IDEA_HOOK_MIN_SIGNALS, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 
 type StoryType = 'short_story' | 'long_novel';
 type DensityMode = '短篇集中兑现' | '长篇分阶段波动';
@@ -158,11 +158,23 @@ export class IdeaAppealGateService {
     const novelty = noveltyOf(idea);
     const noveltyEvidence = [novelty.uncommonCombination, novelty.irreplaceableWhy, novelty.secondOrderConsequence, novelty.readerQuestion].filter(Boolean).join('；');
     const all = textOf(idea);
+    const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(idea);
+    const evidenceText = (field: string) => String(selectedPremiseEvidence?.[field] || '').trim();
+    // 只有服务器从“创建前筛选”绑定过的卡才能使用这些语义证据。普通外部对象、历史卡和
+    // 直接调用 Gate 的数据仍必须靠卡片自身文本成立，不能伪造 selectedPremise 字段绕过验收。
+    const boundPremiseEvidence = hook.length >= 24 && selectedPremiseEvidence !== null;
+    const selectedOpeningEvidence = boundPremiseEvidence
+      && evidenceText('openingEvent').length >= 8
+      && evidenceText('readerQuestion').length >= 8;
+    const selectedPressureEvidence = boundPremiseEvidence
+      && evidenceText('coreConflict').length >= 8
+      && (evidenceText('escalation').length >= 8 || evidenceText('protagonistSituation').length >= 8);
+    const selectedAgencyEvidence = boundPremiseEvidence && evidenceText('activeChoice').length >= 8;
 
     const titleAnchored = titleHasStoryAnchor(title, `${hook}；${description}；${uniquePoint}；${coreConflict}；${mainReversal}；${noveltyEvidence}`);
-    const hookHasAnomaly = ANOMALY.test(hook);
-    const hookHasPressure = PRESSURE.test(hook);
-    const hookHasAgency = AGENCY.test(hook) || FIRST_PERSON_ACTION.test(hook) || CONCRETE_ACTION.test(hook) || HOOK_CHOICE.test(hook);
+    const hookHasAnomaly = ANOMALY.test(hook) || selectedOpeningEvidence;
+    const hookHasPressure = PRESSURE.test(hook) || selectedPressureEvidence;
+    const hookHasAgency = AGENCY.test(hook) || FIRST_PERSON_ACTION.test(hook) || CONCRETE_ACTION.test(hook) || HOOK_CHOICE.test(hook) || selectedAgencyEvidence;
     const hookHasRelationship = RELATIONSHIP.test(hook);
     const descriptionProgressions = (description.match(PROGRESSION) || []).length;
 

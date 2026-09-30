@@ -8,6 +8,7 @@ import {
   ideaHookRequirement,
   ideaPremiseSelectionDirective,
   normalizePremiseSelectionPayload,
+  selectedPremiseEvidenceForIdeaCard,
 } from './idea-discovery-contract';
 
 const selectedPremise = (premiseId: string) => ({
@@ -259,5 +260,38 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('下一步具体行动');
     expect(contract).toContain('可持续追问');
     expect(contract).not.toContain(`至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类有效信号`);
+  });
+});
+
+
+describe('server-owned selected-premise evidence', () => {
+  it('keeps preselection evidence off the API card while making it available to the final Gate', () => {
+    const premise = selectedPremise('P-evidence');
+    const card = bindStructuredIdeaCardToPremise(premise, [{
+      title: '证据绑定题材',
+      hook: '这是一段足够长的自然语言钩子，用来确认服务器内部证据不会暴露到返回 JSON。',
+    }]);
+
+    expect(selectedPremiseEvidenceForIdeaCard(card)).toEqual(expect.objectContaining({
+      premiseId: 'P-evidence',
+      activeChoice: premise.activeChoice,
+      openingEvent: premise.openingEvent,
+    }));
+    expect(JSON.stringify(card)).not.toContain('activeChoice');
+    expect(JSON.stringify(card)).not.toContain('protagonistSituation');
+  });
+
+  it('preserves the same server-owned evidence across a bounded local repair clone', () => {
+    const premise = selectedPremise('P-repair-evidence');
+    const card = bindStructuredIdeaCardToPremise(premise, [{
+      title: '修复后仍绑定',
+      hook: '原钩子已经足够长，但自然表达可能没有命中固定动词词表。',
+    }]);
+    const repaired = applyOrderedIdeaRepairPatches([card], [{ hook: '修复后钩子仍然只改变允许修改的文本字段，题材身份和前置证据都应保留。' }])[0];
+
+    expect(selectedPremiseEvidenceForIdeaCard(repaired)).toEqual(expect.objectContaining({
+      premiseId: 'P-repair-evidence',
+      activeChoice: premise.activeChoice,
+    }));
   });
 });
