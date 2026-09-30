@@ -7,7 +7,6 @@ export type IdeaStoryType = 'short_story' | 'long_novel';
 export const SHORT_IDEA_HOOK_MIN_SIGNALS = 3;
 
 const SELECTED_PREMISE_FIELDS = [
-  'premiseId',
   'protagonistSituation',
   'openingEvent',
   'coreConflict',
