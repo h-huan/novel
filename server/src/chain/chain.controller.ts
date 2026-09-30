@@ -130,7 +130,7 @@ import {
   validateForeshadowingBoundary,
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideLengthContinuation, decideProgressiveRepair } from './adaptive-repair';
-import { ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective } from './idea-discovery-contract';
+import { ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
@@ -4933,8 +4933,12 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           pool: [{
             premiseId: 'P1',
             workingTitle: '4-16字暂名',
+            storyCore: '一句到两句核心故事骨架：人物处境 + 起始事件 + 核心冲突方向',
+          }],
+          selectedPremises: [{
+            premiseId: 'P1',
             protagonistSituation: '主角当前生活处境、想守住/得到/改变什么',
-            openingEvent: '真正改变主角命运的赛始事件',
+            openingEvent: '真正改变主角命运的起始事件',
             coreConflict: '目标与主动对手/现实阻力如何对撞',
             activeChoice: '主角必须亲自做出的关键选择/行动',
             escalation: '选择之后如何连续升级并产生不可逆后果',
@@ -4945,7 +4949,6 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             readerQuestion: '读者看完起始事件后必须追问的具体问题',
             differentiation: '相对历史题材和常见套路真正不同在哪里',
           }],
-          selectedPremiseIds: ['P1'],
         };
         return `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
 ${ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize)}
@@ -4956,11 +4959,11 @@ ${categoryBenchmark ? `【分类体量参考】${categoryBenchmark}` : ''}
 ${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredTargetWords}；筛选时必须判断题材是否撑得住这一体量。` : '用户未指定总字数；筛选时按平台分类体量和故事自身可持续性判断。'}
 ${excludeText}
 只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
-pool 必须至少 ${premisePoolSize} 项，premiseId 必须唯一；selectedPremiseIds 必须恰好 ${requestedCount} 项、互不重复，并且每个 ID 都必须来自 pool。
+pool 以 ${premisePoolSize} 项为广搜目标，不是整批成功的硬门槛；每个有效 pool 项只需 premiseId、workingTitle、storyCore。若已经充分比较并能选出 ${requestedCount} 个成熟题材，可以少于目标，禁止为了凑数填弱项。selectedPremises 必须恰好 ${requestedCount} 项、premiseId 互不重复且来自 pool，并补齐创建完整题材卡前所需的筛选证据。
 JSON 结构：${JSON.stringify(premiseSchema)}`;
       };
 
-      const discoverPremisePoolBeforeCards = async (): Promise<{ pool: any[]; selected: any[] }> => {
+      const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload>> => {
         const response = await this.realLLM.generate({
           prompt: buildPremiseSelectionPrompt(),
           scenario: 'idea_generate',
@@ -4978,36 +4981,17 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
         } catch {
           throw new Error('创建前题材筛选未返回合法 JSON；系统没有创建任何完整题材卡。');
         }
-        const pool = Array.isArray(parsed?.pool) ? parsed.pool : [];
-        const selectedIds = Array.isArray(parsed?.selectedPremiseIds)
-          ? parsed.selectedPremiseIds.map((item: unknown) => String(item || '').trim()).filter(Boolean)
-          : [];
-        const requiredFields = [
-          'premiseId', 'workingTitle', 'protagonistSituation', 'openingEvent', 'coreConflict',
-          'activeChoice', 'escalation', 'reversalEffect', 'payoff', 'irreplaceableCarrier',
-          'secondOrderConsequence', 'readerQuestion', 'differentiation',
-        ];
-        const malformed = pool.find((item: any) =>
-          !item || requiredFields.some(field => String(item?.[field] || '').trim().length < 4));
-        if (pool.length < premisePoolSize || malformed) {
-          throw new Error(`创建前题材筛选未形成至少 ${premisePoolSize} 个结构完整的轻量题材胚子；系统没有创建完整题材卡，也不会用弱题材补数。`);
+        const normalizedSelection = normalizePremiseSelectionPayload(
+          parsed,
+          requestedCount,
+          premisePoolSize,
+        );
+        if (!normalizedSelection.poolTargetMet) {
+          this.logger.warn(
+            `idea-discover: 创建前广搜有效轻量胚子 ${normalizedSelection.pool.length}/${premisePoolSize}，但已明确选出 ${normalizedSelection.selected.length}/${requestedCount} 个成熟题材；继续结构化，不用弱题材凑池。`,
+          );
         }
-        const byId = new Map<string, any>();
-        for (const item of pool) {
-          const id = String(item?.premiseId || '').trim();
-          if (!id || byId.has(id)) {
-            throw new Error('创建前题材筛选返回了重复或空的 premiseId；系统没有创建完整题材卡。');
-          }
-          byId.set(id, item);
-        }
-        if (selectedIds.length !== requestedCount || new Set(selectedIds).size !== requestedCount) {
-          throw new Error(`创建前题材筛选必须从轻量候选池中明确选出 ${requestedCount} 个成熟题材；当前选择数量不符，系统不会进入完整题材卡创建。`);
-        }
-        const selected = selectedIds.map((id: string) => byId.get(id));
-        if (selected.some((item: any) => !item)) {
-          throw new Error('创建前题材筛选引用了候选池中不存在的 premiseId；系统不会进入完整题材卡创建。');
-        }
-        return { pool, selected };
+        return normalizedSelection;
       };
 
       const buildPrompt = (
@@ -5228,15 +5212,15 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
 
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
       const selectedPremises = premiseDiscovery.selected;
-      const selectedPremiseIds = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
+      const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
       const structuredCards = await generateBatch(requestedCount, initialExcludes, selectedPremises);
       if (structuredCards.length !== requestedCount) {
         throw new Error(`完整题材卡结构化应与创建前筛选出的 ${requestedCount} 个题材一一对应；当前只返回 ${structuredCards.length} 张，系统不会另找题材补数。`);
       }
       const structuredPremiseIds = structuredCards.map((item: any) => String(item?.sourcePremiseId || '').trim());
       const structuredUniqueIds = new Set(structuredPremiseIds);
-      const missingPremiseIds = [...selectedPremiseIds].filter(id => !structuredUniqueIds.has(id));
-      const unknownPremiseIds = [...structuredUniqueIds].filter(id => !selectedPremiseIds.has(id));
+      const missingPremiseIds = [...selectedPremiseIdSet].filter(id => !structuredUniqueIds.has(id));
+      const unknownPremiseIds = [...structuredUniqueIds].filter(id => !selectedPremiseIdSet.has(id));
       if (structuredUniqueIds.size !== requestedCount || missingPremiseIds.length || unknownPremiseIds.length) {
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
       }
@@ -5254,6 +5238,8 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         schemaVersion: 4,
         mode: 'premise_preselection_then_final_reader_experience_gate',
         premisePoolSize: premiseDiscovery.pool.length,
+        premisePoolTarget: premisePoolSize,
+        premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
         generated: candidateAssessments.length,
         qualified: qualifiedCount,
