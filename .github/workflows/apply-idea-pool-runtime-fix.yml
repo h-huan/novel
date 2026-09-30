@@ -1,4 +1,5 @@
 name: Apply idea pool runtime fix
+# one-time runner; deletes itself after the verified source commit
 
 on:
   push:
