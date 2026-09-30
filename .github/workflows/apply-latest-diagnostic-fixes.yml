@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/apply-latest-diagnostic-fixes.yml'
       - '.github/scripts/apply_latest_diagnostic_fixes.py'
+      - '.github/scripts/patch_latest_progression.py'
 
 permissions:
   contents: write
@@ -20,7 +21,9 @@ jobs:
         with:
           node-version: 22
       - name: Apply source patches
-        run: python .github/scripts/apply_latest_diagnostic_fixes.py
+        run: |
+          python .github/scripts/apply_latest_diagnostic_fixes.py
+          python .github/scripts/patch_latest_progression.py
       - name: Install server dependencies
         run: npm ci --prefix server
       - name: Typecheck
@@ -32,6 +35,7 @@ jobs:
         run: |
           rm .github/workflows/apply-latest-diagnostic-fixes.yml
           rm .github/scripts/apply_latest_diagnostic_fixes.py
+          rm .github/scripts/patch_latest_progression.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
