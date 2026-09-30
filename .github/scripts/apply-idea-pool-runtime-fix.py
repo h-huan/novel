@@ -81,11 +81,15 @@ replace_once(
     'premise audit fields',
 )
 
-for obsolete in (
+obsolete_markers = (
     '创建前题材筛选未形成至少',
     'selectedPremiseIds',
-):
-    if obsolete in text:
+)
+for obsolete in obsolete_markers:
+    matches = [(index, line) for index, line in enumerate(text.splitlines(), 1) if obsolete in line]
+    if matches:
+        for index, line in matches:
+            print(f'RESIDUAL {obsolete} @ line {index}: {line.strip()}')
         raise SystemExit(f'obsolete runtime marker remains: {obsolete}')
 
 for required in (
