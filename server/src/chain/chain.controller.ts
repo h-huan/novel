@@ -5130,7 +5130,7 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       const autoSelectionRequested = !dto.storyTone.length || !dto.writingStyle.length || !dto.webNovelGenre.length
         || !dto.plotTags.length || !dto.pov || (submissionRequired && !dto.submissionTags.length);
       const seenCombinations = new Set<string>();
-      const accept = (candidates: any[]) => {
+      const accept = (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
         for (const candidate of candidates) {
           const titleKey = normalizeTitle(candidate?.title);
           const issues = assessIdeaQuality(candidate);
@@ -5153,6 +5153,8 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           const passed = uniqueIssues.length === 0;
           candidateAssessments.push({
             title: String(candidate?.title || ''),
+            sourcePremiseId: String(candidate?.sourcePremiseId || '').trim(),
+            attempt,
             // 未通过候选不会进入前端，但必须保留足够文本证据供 latest.json 复盘 Gate 是否误杀。
             candidate: {
               title: String(candidate?.title || ''),
@@ -5224,7 +5226,58 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       if (structuredUniqueIds.size !== requestedCount || missingPremiseIds.length || unknownPremiseIds.length) {
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
       }
-      accept(structuredCards);
+      accept(structuredCards, 'initial');
+
+      // Final Gate is not allowed to silently shrink a requested batch. The selected premises are already the
+      // story identities; a failing full card gets one bounded repair of that same premise, never a substitute.
+      let finalGateRepairAttempted = false;
+      let finalGateRepairGenerated = 0;
+      const acceptedPremiseIds = () => new Set(accepted.map((idea: any) => String(idea?.sourcePremiseId || '').trim()).filter(Boolean));
+      const missingAfterGate = () => selectedPremises
+        .map((item: any) => String(item?.premiseId || '').trim())
+        .filter((id: string) => id && !acceptedPremiseIds().has(id));
+      const initialMissingPremiseIds = missingAfterGate();
+      if (initialMissingPremiseIds.length > 0) {
+        finalGateRepairAttempted = true;
+        const initialIssueByPremiseId = new Map(candidateAssessments
+          .filter((item: any) => item?.attempt === 'initial' && item?.passed !== true && item?.sourcePremiseId)
+          .map((item: any) => [String(item.sourcePremiseId), item.issues]));
+        const failedCards = structuredCards.filter((item: any) => initialMissingPremiseIds.includes(String(item?.sourcePremiseId || '').trim()));
+        const failedPremises = selectedPremises.filter((item: any) => initialMissingPremiseIds.includes(String(item?.premiseId || '').trim()));
+        const repairTargets = failedCards.map((card: any) => ({
+          premise: failedPremises.find((item: any) => String(item?.premiseId || '').trim() === String(card?.sourcePremiseId || '').trim()),
+          card,
+          gateIssues: initialIssueByPremiseId.get(String(card?.sourcePremiseId || '').trim()) || [],
+        }));
+        const repairResponse = await this.realLLM.generate({
+          prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
+对下面 ${repairTargets.length} 张完整题材卡执行一次“最终 Gate 定向局部修复”。这不是重新选题，也不是换 premise。
+
+硬约束：
+1. 每张必须原样保留 sourcePremiseId，并与对应 premise 一一对应；不得新增、删除、交换或改写题材身份。
+2. 平台、长短篇、分类，以及用户已明确选择的基调/文风/流派/视角/标签不得改变。
+3. 只修 gateIssues 点名的表达与结构证据：让 hook 清楚显出异常/信息差、现实压力、主角行动和关键关系；让 description/冲突/反转/noveltyProof 把已经存在的因果与二阶后果说清。禁止为了过 Gate 新增另一套案件、能力、身份、亲属关系或结局。
+4. 篇幅字段只在 gateIssues 明确指出篇幅/章数无效时修正，且仍必须满足本次项目字数与章节范围；否则保持原值。
+5. 只输出 JSON 对象 {"ideas":[...]}，ideas 必须恰好 ${repairTargets.length} 项。不得输出分析、Markdown 或额外文字。
+
+待修复卡：${JSON.stringify(repairTargets)}`,
+          scenario: 'idea_generate',
+          timeout: LLM_TUNABLES.timeoutSimple(),
+          maxEmptyRetries: 1,
+          responseFormat: 'json_object',
+        });
+        const repairedCards = extractIdeaList(repairResponse.content || '') || [];
+        finalGateRepairGenerated = repairedCards.length;
+        const expectedRepairIds = [...initialMissingPremiseIds].sort();
+        const actualRepairIds = repairedCards.map((item: any) => String(item?.sourcePremiseId || '').trim()).filter(Boolean).sort();
+        const uniqueRepairIds = new Set(actualRepairIds);
+        if (repairedCards.length !== expectedRepairIds.length
+          || uniqueRepairIds.size !== expectedRepairIds.length
+          || actualRepairIds.join('\u0000') !== expectedRepairIds.join('\u0000')) {
+          throw new Error(`最终 Gate 定向修复必须逐一返回原未通过题材；期望=${expectedRepairIds.join('、')}，实际=${actualRepairIds.join('、') || '无'}。系统不会用别的题材补位。`);
+        }
+        accept(repairedCards, 'repair');
+      }
 
       const selectedAccepted = accepted
         .sort((left, right) =>
@@ -5232,20 +5285,30 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           || Number(right?.ideaAppealGate?.descriptionProgressions || 0) - Number(left?.ideaAppealGate?.descriptionProgressions || 0)
           || Number(Boolean(right?.ideaAppealGate?.hookHasRelationship)) - Number(Boolean(left?.ideaAppealGate?.hookHasRelationship)))
         .slice(0, requestedCount);
+      const finalAcceptedPremiseIds = new Set(selectedAccepted.map((idea: any) => String(idea?.sourcePremiseId || '').trim()).filter(Boolean));
+      const finalMissingPremiseIds = selectedPremises
+        .map((item: any) => String(item?.premiseId || '').trim())
+        .filter((id: string) => id && !finalAcceptedPremiseIds.has(id));
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
-      const qualifiedCount = candidateAssessments.filter(item => item.passed === true).length;
+      const finalRejectedReasons = Array.from(new Set(candidateAssessments
+        .filter((item: any) => finalMissingPremiseIds.includes(String(item?.sourcePremiseId || '')) && item?.passed !== true)
+        .flatMap((item: any) => Array.isArray(item?.issues) ? item.issues : [])));
+      const qualifiedCount = selectedAccepted.length;
       const appealGate = {
-        schemaVersion: 4,
-        mode: 'premise_preselection_then_final_reader_experience_gate',
+        schemaVersion: 5,
+        mode: 'premise_preselection_then_final_gate_bounded_repair',
         premisePoolSize: premiseDiscovery.pool.length,
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
-        generated: candidateAssessments.length,
+        generated: structuredCards.length,
+        evaluatedAttempts: candidateAssessments.length,
         qualified: qualifiedCount,
         returned: selectedAccepted.length,
-        rejected: candidateAssessments.filter(item => item.passed !== true).length,
-        reasons: uniqueRejectedReasons.slice(0, 8),
+        rejected: finalMissingPremiseIds.length,
+        repairAttempted: finalGateRepairAttempted,
+        repairGenerated: finalGateRepairGenerated,
+        reasons: finalRejectedReasons.slice(0, 8),
         preselectedPremises: selectedPremises,
         candidateAssessments,
         acceptedEvidence: selectedAccepted.map(idea => ({
@@ -5255,30 +5318,27 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先完成轻量题材池的创建前筛选，再把已选胚子结构化为完整题材卡；最终 Gate 只做独立验收，不负责换题或补生。',
+        note: '先完成轻量题材池筛选，再结构化完整卡；最终 Gate 未通过时只允许对原 premise 做一次定向局部修复。修复后仍不足请求数量则整次失败，绝不返回部分成功。',
       };
 
-      if (!selectedAccepted.length) {
-        const rejectionSummary = uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
-        this.logger.warn(`idea-discover: 创建前已筛选 ${selectedPremises.length} 个题材，但完整卡最终 Gate 全部拒绝：${rejectionSummary}`);
+      if (selectedAccepted.length !== requestedCount || finalMissingPremiseIds.length > 0) {
+        const rejectionSummary = finalRejectedReasons.slice(0, 10).join('；') || uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
+        this.logger.warn(`idea-discover: 最终 Gate 与一次定向局部修复后仍只有 ${selectedAccepted.length}/${requestedCount} 个通过：${rejectionSummary}`);
         return {
           success: false,
           ideas: [],
           totalIdeas: 0,
-          error: '创建前筛选已完成，但完整题材卡最终验收没有任何一项通过；系统已停止展示，不会通过增加补生次数或另换题材掩盖。请重新发现。',
+          error: `请求 ${requestedCount} 个可选题材，但最终 Gate 与一次定向局部修复后只有 ${selectedAccepted.length} 个通过；系统不会把部分结果伪装成完整成功。请重新发现。`,
           appealGate,
         };
       }
       const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
-      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材；创建前筛选与完整卡结构化已分阶段完成，最终 Gate 未参与补生`);
+      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材；最终 Gate 通过后才作为完整候选集返回`);
       return {
         success: true,
         ideas: acceptedWithAudit,
         totalIdeas: acceptedWithAudit.length,
         appealGate,
-        qualityWarning: acceptedWithAudit.length < requestedCount
-          ? `创建前已筛选 ${selectedPremises.length} 个成熟题材；完整卡最终 Gate 有 ${acceptedWithAudit.length}/${requestedCount} 个通过。未通过项已留审计，系统没有自动补生或换题。`
-          : undefined,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : '题材发现失败';
@@ -6913,14 +6973,58 @@ ${(() => {
           let factCheck = await reviewChapterFacts(chData);
           if (!factCheck.review || !factCheck.review.consistent || factCheck.review.contradictions.length || factCheck.missing.length) {
             const defects = [...(factCheck.review?.contradictions || []), ...factCheck.missing.map(item => `丢失前章台账：${item}`)];
-            const repair = await this.llmCallWithRetry<any>(`第${order + 1}章事实修复`,
-              `只修复当前章纲的事实矛盾，已确认题材与前章事实优先，世界观只能作不冲突的补充。不得删掉本章职责或新增人物。\n【确认题材】${canonicalCreativeBrief}\n【已保存世界规则】${JSON.stringify(currentWorldForOutlineReview)}\n【前章事实台账】${JSON.stringify(priorOutlineFactLedger)}\n【当前章纲】${JSON.stringify(chData)}\n【必须逐项修复】${JSON.stringify(defects)}\n只输出与当前章纲同字段的完整 JSON 对象；修复后所有事件、场景结果和伏笔证据必须使用同一触发条件、时间方向与数量基线。`,
-              { projectId, chapterIndex: order + 1, scenario: 'outline', temperature: 0.25,
+            const factRepairFields = [
+              'title', 'content', 'coreContent', 'summary', 'plot', 'scenes', 'mainScenes',
+              'characterActions', '人物行动', 'conflicts', 'conflict', 'conflictDesign',
+              'highlights', 'highlight', 'rousing', 'hotScenes', 'foreshadowing', 'foreshadowingSet',
+              '伏笔设置', 'foreshadowingRecover', 'foreshadowingPayoff', '伏笔回收', 'characterStates',
+              'hook', 'nextChapterHook', 'nextHook', 'emotionalTone', 'mood', 'turningPoint', 'reversalPoint',
+            ] as const;
+            const factRepairFieldSet = new Set<string>(factRepairFields);
+            const repair = await this.llmCallWithRetry<any>(`第${order + 1}章事实局部修复`,
+              `只修复当前章纲被事实审查逐项点名的矛盾。已确认题材与前章事实优先，世界观只能作不冲突的补充。不得删除本章职责、不得新增人物、不得换故事。
+【确认题材】${canonicalCreativeBrief}
+【已保存世界规则】${JSON.stringify(currentWorldForOutlineReview)}
+【前章事实台账】${JSON.stringify(priorOutlineFactLedger)}
+【当前章纲】${JSON.stringify(chData)}
+【必须逐项修复】${JSON.stringify(defects)}
+
+【局部修复硬约束】禁止重新生成完整章纲。只输出 JSON 对象 {"patch":{...}}，patch 只包含确实需要修改的事实字段；禁止输出 targetWords、wordCountReason、chapterFunction、goalArc 等结构/篇幅字段。未点名字段必须保持当前值。`,
+              {
+                projectId, chapterIndex: order + 1, scenario: 'outline', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(),
-                validate: value => assessChapter(unwrapChapter(value, order + 1, true)).length === 0,
-                describeValidation: value => assessChapter(unwrapChapter(value, order + 1, true)) });
-            chData = unwrapChapter(repair.data, order + 1);
-            if (!chData) throw new Error(`第${order + 1}章事实修复未返回有效章纲`);
+                validate: value => {
+                  const patch = (value as any)?.patch;
+                  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
+                  const keys = Object.keys(patch);
+                  return keys.length > 0 && keys.every(key => factRepairFieldSet.has(key));
+                },
+                describeValidation: value => {
+                  const patch = (value as any)?.patch;
+                  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return ['必须返回 {"patch":{...}}，不得重写整章'];
+                  const badKeys = Object.keys(patch).filter(key => !factRepairFieldSet.has(key));
+                  return badKeys.length ? [`局部事实修复包含禁止字段：${badKeys.join('、')}`] : [];
+                },
+              });
+            if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
+            const rawPatch = repair.data?.patch;
+            if (!rawPatch || typeof rawPatch !== 'object' || Array.isArray(rawPatch)) {
+              throw new Error(`第${order + 1}章事实局部修复未返回 patch 对象`);
+            }
+            const factPatch = Object.fromEntries(Object.entries(rawPatch)
+              .filter(([key]) => factRepairFieldSet.has(key)));
+            const preservedTargetWords = chData.targetWords;
+            const preservedWordCountReason = chData.wordCountReason;
+            chData = {
+              ...chData,
+              ...factPatch,
+              targetWords: preservedTargetWords,
+              wordCountReason: preservedWordCountReason,
+            };
+            const repairedStructureIssues = assessChapter(chData);
+            if (repairedStructureIssues.length > 0) {
+              throw new Error(`第${order + 1}章事实局部修复破坏了既有结构：${repairedStructureIssues.join('；')}。已停止，不再用整章重写兜底。`);
+            }
             factCheck = await reviewChapterFacts(chData);
           }
           if (!factCheck.review || !factCheck.review.consistent || factCheck.review.contradictions.length || factCheck.missing.length) {

@@ -63,3 +63,50 @@ describe('idea appeal gate story-evidence regressions', () => {
     expect(assessment.issues).not.toContain('核心钩子没有迫使主角采取具体行动');
   });
 });
+
+const latestDiagnosticGateCases = [
+  {
+    title: '一碗旧味掀翻尚食局',
+    hook: '摆摊头一天，微服太子在她最便宜的汤饼里吃出宫中旧味，追问味道来处；她当众承认，请太子接连来摊上尝菜，用膳单把二十年前的漏账一道道摆上桌。',
+    description: '她不肯替人顶下御膳贪墨的账，被赶出宫，在长安街口支起汤饼摊，只想站稳脚跟、把脏水洗净。摆摊首日太子吃出宫中旧味，她用一道道菜把当年膳单上的漏账摆上桌。尚食局先断原料，再买通街吏封摊，最后抬出她父亲的旧罪逼她认账；查到最后，她发现父亲确实动过手，是为了替一位宫人换下要命的毒膳。最终她必须在平反和保护那位宫人之间作出选择。',
+    protagonist: '阿禾，御膳房掌勺出身的女厨，想靠自己的手艺在长安站住，把泼在身上的脏水洗净。',
+    coreConflict: '她要翻出二十年御膳贪墨真相，尚食局掌事握着父亲旧罪，也能把以食谋逆扣在她和太子头上。',
+    uniquePoint: '味道就是证据：每道菜都是二十年前膳单的一页，太子每吃一口就替她验证一次旧账。',
+    mainReversal: '她原以为父亲是冤枉的，最后发现父亲确实动过手，是为了替宫人换掉毒膳；平反因此变成承认罪与义同体。',
+    noveltyProof: { familiarShell: '古言甜宠与市井美食翻旧案', uncommonCombination: '被顶罪出宫的掌勺女厨与微服太子靠味道和膳单翻二十年前的御膳贪墨案', avoidedPatterns: '不靠系统、重生或发现秘密一路追查', irreplaceableWhy: '去掉做菜尝味，宫中旧味、膳单漏账和毒膳这条证据链立即断掉', secondOrderConsequence: '太子频繁出宫被御史追责，父亲旧案翻转又会暴露当年被救宫人的身份，她必须在平反和保人之间选择', readerQuestion: '这口宫中旧味是谁教她的，她和二十年前的御膳贪墨案到底是什么关系？' },
+  },
+  {
+    title: '抄书娘子当众念假契',
+    hook: '替雇主抄地契时，她对照出三个字被人改过，正是这张假契吞了邻居一家的田；雇主当晚就要把她卖出去，她当着一屋子人把地契一字一句念出来，从此每抄一份都留底本。',
+    description: '她从小被当牛马使唤，不识字，只能替人抄书讨口饭，最想守住的是不再被人拿一张纸就夺走家的活路。她认出假契后当众念出改字，并开始给每份抄件留底。雇主毁她住处、买通证人，乡绅用官面施压；她靠底本串起被吞田的人家。最后她认出旧案里伪造地契的人正是把自己卖掉的生父，复仇对象从雇主扩大成整条假契吞田链。',
+    protagonist: '阿绫，被卖作抄书娘子的穷女，想靠自己认得的字把家的活路守住。', coreConflict: '她要护住认字秘密和底本，雇主与乡绅则用她不识字、说不清的身份反咬她诬告。', uniquePoint: '她的武器不是身份而是认字，每一个被改过的字都能变成当庭证据。', mainReversal: '旧案里伪造地契的抄书人正是把她卖掉的生父，她认字的本事与自己的来处原来是一根线。',
+    noveltyProof: { familiarShell: '古言小人物翻案与对簿公堂', uncommonCombination: '不识字却被卖去抄书的穷娘子，用逐字对照和每份留底建立证据库', avoidedPatterns: '不靠身份曝光或打斗，也不是发现秘密一路追查', irreplaceableWhy: '换成绣厨医，识文断字这个主动权和底本证据链都不存在', secondOrderConsequence: '被假契坑过的人纷纷来求她辨认，乡绅集中堵她，生父身份暴露又把养大她的人家卷入旧案', readerQuestion: '一个不识字的人怎么会认出地契改字，她又是被谁卖去抄书的？' },
+  },
+  {
+    title: '甜汤铺开在仇家对面',
+    hook: '她把甜汤铺开在仇家大宅正门对面，开张头一天，仇家老太太隔窗点了她一碗甜汤，点名要她亲自送进宅。她明知有去无回仍端碗进门，决定用这碗汤把仇家的私话一句句听出来。',
+    description: '她家甜汤铺被仇家做局夺走，父母一个病死一个失踪，她带着一口锅和配方把铺子开到仇家正门对面。她一碗汤送一句话，仇家几房为争家产越咬越凶；对方先查菜谱，再查她身世，最后翻出父母旧事逼她闭嘴。她后来发现父亲不是被仇家直接害死，而是替仇家背下一桩放贷逼死人的账，真正的对手另有其人。',
+    protagonist: '柳甜，甜汤铺孤女，想把铺子站住并查清父母是怎么没的。', coreConflict: '她要靠送汤进出仇家查父母之死，仇家则用商会、供货和官面处罚逼她关店。', uniquePoint: '铺子的位置就是机制：正对仇家大门，一碗汤进宅，一句话出铺。', mainReversal: '父亲并非被仇家直接害死，而是替仇家背下一桩放贷逼死人的账，复仇对象转向幕后同伙。',
+    noveltyProof: { familiarShell: '古言市井夺产复仇与情报周旋', uncommonCombination: '甜汤铺正对仇家大门，用送汤入宅形成贴身情报通道', avoidedPatterns: '不写被夺家产后嫁入豪门，也不靠一路追查', irreplaceableWhy: '换成普通账房或绣坊，正面对峙和送汤入宅的信息通道都会消失', secondOrderConsequence: '她递的话帮助仇家某房争到家产后反被收作眼线，仇家散伙又让欠债仆役和邻里都来找她，她被迫从个人翻案变成替一群人讨债', readerQuestion: '仇家老太太为什么非要她亲自送甜汤进去，她父母到底被谁弄没的？' },
+  },
+  {
+    title: '卖糖人的我被指成拐子',
+    hook: '摊前丢了个官家小孩，丫鬟当街指认她是拐子，官差踹翻糖摊把她押走。她当众拆开糖人模具，按孩子画下的糖人样子连夜追凶，却发现被拐的孩子都长着同一张模子脸。',
+    description: '她在街口卖糖人，无亲无势，只想凭手艺挣口安稳饭。孩子在摊前丢失后，她为了自证清白拆开糖人模具，照孩子留下的样子逐个找人。每找到一个被换过身份的孩子，宗族就有人堵口，官府里保她和压她的人同时亮牌。最后她发现自己也是当年被换出去的孩子，最初指认她的人正知道她的身世。',
+    protagonist: '阿棠，街头卖糖人的孤女，想凭手艺挣安稳饭并洗掉拐子的嫌疑。', coreConflict: '她要自证清白并找回孩子，换嗣团伙与宗族官面则不断改口供、堵口并逼她认祖归宗。', uniquePoint: '糖人模具是一眼可见的身份对照工具，孩子只画得出糖人样子，她追的不是凶而是谁是谁。', mainReversal: '她发现自己也是被换出去的孩子，追拐子变成追自己的来处，目标转为掀开整套换嗣规则。',
+    noveltyProof: { familiarShell: '古言悬疑与街头小人物自证清白', uncommonCombination: '街头糖人手艺、同一张模子脸的换嗣机制和主角自身被换的身世反噬', avoidedPatterns: '把拐卖写成宗族换嗣而非个人作案，不靠通用秘密追查', irreplaceableWhy: '换成绣抄书医术就没有人人可画的一眼识别载体，街头手艺身份也失去意义', secondOrderConsequence: '换嗣案一掀开，被换孩子、买孩子宗族和经办者都被牵动，亲生一家找上门逼她认祖归宗，与她替别人争的选择自由直接冲突', readerQuestion: '孩子怎么在她摊前丢的，为什么被换走的孩子都长着同一张模子脸？' },
+  },
+];
+
+describe('latest diagnostic idea-gate regressions', () => {
+  for (const idea of latestDiagnosticGateCases) {
+    it(`does not false-reject ${idea.title}`, () => {
+      const assessment = gate.assess(idea, 'short_story');
+      expect(assessment.issues).toEqual([]);
+      expect(assessment.passed).toBe(true);
+      expect(assessment.signals.hookHasAgency).toBe(true);
+      expect([assessment.signals.hookHasAnomaly, assessment.signals.hookHasPressure, assessment.signals.hookHasRelationship].filter(Boolean).length).toBeGreaterThanOrEqual(2);
+    });
+  }
+});
+
