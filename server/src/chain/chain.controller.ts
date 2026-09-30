@@ -130,7 +130,7 @@ import {
   validateForeshadowingBoundary,
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideLengthContinuation, decideProgressiveRepair } from './adaptive-repair';
-import { ideaHookRequirement, ideaRecoveryDirective } from './idea-discovery-contract';
+import { ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective } from './idea-discovery-contract';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
@@ -4888,7 +4888,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const exampleWords = configuredTargetWords ?? (dto.storyType === 'short_story' ? 20_000 : 300_000);
       const exampleChapters = dto.storyType === 'short_story' ? 4 : 90;
       const hookRequirement = ideaHookRequirement(dto.storyType);
-      const outputSchema = `{"ideas":[{"title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"${hookRequirement}","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"主角身份、欲望和弱点","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务"}],"scopeReason":"篇幅核算理由","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转","irreplaceableWhy":"去掉这个职业/关系/机制任一项后故事为何不成立","secondOrderConsequence":"规则启动后的二阶后果：谁额外受益/受损、关系或目标如何被迫改变","readerQuestion":"读者看完首屏后必须追问的一个具体问题"}}]}`;
+      const outputSchema = `{"ideas":[{"sourcePremiseId":"P1","title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"${hookRequirement}","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"主角身份、欲望和弱点","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务"}],"scopeReason":"篇幅核算理由","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转","irreplaceableWhy":"去掉这个职业/关系/机制任一项后故事为何不成立","secondOrderConsequence":"规则启动后的二阶后果：谁额外受益/受损、关系或目标如何被迫改变","readerQuestion":"读者看完首屏后必须追问的一个具体问题"}}]}`;
 
       const outputExample = JSON.parse(outputSchema);
       const exampleIdea = outputExample.ideas[0];
@@ -4917,15 +4917,108 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         : submissionRequired
           ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
+      const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
+      const buildPremiseSelectionPrompt = () => {
+        const excludeText = initialExcludes.length
+          ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
+          : '';
+        const categoryResolution = resolveSubmissionCategory(dto.platform, String(dto.storyCategory || ''), dto.storyType, audienceChannelHint(dto.targetAudience));
+        const categoryWritingBrief = categoryResolution.status === 'resolved'
+          ? platformCategoryWritingBrief(dto.platform, categoryResolution.value, dto.storyType)
+          : '';
+        const categoryBenchmark = categoryResolution.status === 'resolved'
+          ? platformCategoryBenchmarkNote(dto.platform, categoryResolution.value, dto.storyType)
+          : '';
+        const premiseSchema = {
+          pool: [{
+            premiseId: 'P1',
+            workingTitle: '4-16字暂名',
+            protagonistSituation: '主角当前生活处境、想守住/得到/改变什么',
+            openingEvent: '真正改变主角命运的赛始事件',
+            coreConflict: '目标与主动对手/现实阻力如何对撞',
+            activeChoice: '主角必须亲自做出的关键选择/行动',
+            escalation: '选择之后如何连续升级并产生不可逆后果',
+            reversalEffect: '反转如何改变目标、关系、胜负条件或代价',
+            payoff: '中后段/终局准备兑现的核心阅读承诺',
+            irreplaceableCarrier: '为什么这个职业/生活载体/关系不可替换',
+            secondOrderConsequence: '机制启动后谁额外受益/受损，关系或目标如何被迫改变',
+            readerQuestion: '读者看完起始事件后必须追问的具体问题',
+            differentiation: '相对历史题材和常见套路真正不同在哪里',
+          }],
+          selectedPremiseIds: ['P1'],
+        };
+        return `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
+${ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize)}
+【本次执行设定】
+目标平台=${dto.platform}；分类=${dto.storyCategory}；创作流派=${dto.webNovelGenre.join('、')}；平台作品标签=${dto.submissionTags.join('、')}；基调=${dto.storyTone.join('、')}；文风=${dto.writingStyle.join('、')}；视角=${dto.pov}${dto.plotTags.length ? '；情节取向=' + dto.plotTags.join('、') : ''}${dto.genreFitNote ? '；标签与分类契合依据=' + dto.genreFitNote : ''}。
+${categoryWritingBrief ? `【分类证据】${categoryWritingBrief}` : '此分类尚无已核验的官方标签，不编造平台标签。'}
+${categoryBenchmark ? `【分类体量参考】${categoryBenchmark}` : ''}
+${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredTargetWords}；筛选时必须判断题材是否撑得住这一体量。` : '用户未指定总字数；筛选时按平台分类体量和故事自身可持续性判断。'}
+${excludeText}
+只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
+pool 必须至少 ${premisePoolSize} 项，premiseId 必须唯一；selectedPremiseIds 必须恰好 ${requestedCount} 项、互不重复，并且每个 ID 都必须来自 pool。
+JSON 结构：${JSON.stringify(premiseSchema)}`;
+      };
+
+      const discoverPremisePoolBeforeCards = async (): Promise<{ pool: any[]; selected: any[] }> => {
+        const response = await this.realLLM.generate({
+          prompt: buildPremiseSelectionPrompt(),
+          scenario: 'idea_generate',
+          timeout: LLM_TUNABLES.timeoutSimple(),
+          maxEmptyRetries: 1,
+          responseFormat: 'json_object',
+        });
+        const normalized = String(response.content || '')
+          .trim()
+          .replace(/^```(?:json)?\s*/i, '')
+          .replace(/\s*```$/i, '');
+        let parsed: any;
+        try {
+          parsed = JSON.parse(jsonrepair(normalized || '{}'));
+        } catch {
+          throw new Error('创建前题材筛选未返回合法 JSON；系统没有创建任何完整题材卡。');
+        }
+        const pool = Array.isArray(parsed?.pool) ? parsed.pool : [];
+        const selectedIds = Array.isArray(parsed?.selectedPremiseIds)
+          ? parsed.selectedPremiseIds.map((item: unknown) => String(item || '').trim()).filter(Boolean)
+          : [];
+        const requiredFields = [
+          'premiseId', 'workingTitle', 'protagonistSituation', 'openingEvent', 'coreConflict',
+          'activeChoice', 'escalation', 'reversalEffect', 'payoff', 'irreplaceableCarrier',
+          'secondOrderConsequence', 'readerQuestion', 'differentiation',
+        ];
+        const malformed = pool.find((item: any) =>
+          !item || requiredFields.some(field => String(item?.[field] || '').trim().length < 4));
+        if (pool.length < premisePoolSize || malformed) {
+          throw new Error(`创建前题材筛选未形成至少 ${premisePoolSize} 个结构完整的轻量题材胚子；系统没有创建完整题材卡，也不会用弱题材补数。`);
+        }
+        const byId = new Map<string, any>();
+        for (const item of pool) {
+          const id = String(item?.premiseId || '').trim();
+          if (!id || byId.has(id)) {
+            throw new Error('创建前题材筛选返回了重复或空的 premiseId；系统没有创建完整题材卡。');
+          }
+          byId.set(id, item);
+        }
+        if (selectedIds.length !== requestedCount || new Set(selectedIds).size !== requestedCount) {
+          throw new Error(`创建前题材筛选必须从轻量候选池中明确选出 ${requestedCount} 个成熟题材；当前选择数量不符，系统不会进入完整题材卡创建。`);
+        }
+        const selected = selectedIds.map((id: string) => byId.get(id));
+        if (selected.some((item: any) => !item)) {
+          throw new Error('创建前题材筛选引用了候选池中不存在的 premiseId；系统不会进入完整题材卡创建。');
+        }
+        return { pool, selected };
+      };
+
       const buildPrompt = (
         count: number,
         excludes: Array<{ title: string; hook?: string; description?: string }>,
-        recoveryReasons: string[] = [],
+        selectedPremises: any[] = [],
       ) => {
         const excludeText = excludes.length
-          ? `\n历史作品与本批已通过题材（标题、职业场景、异常机制、核心冲突、代价和反转均不得换名复用）：\n${excludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 160)}` : ''}`).join('\n')}`
+          ? `\n历史作品与本次明确排除题材（标题、职业场景、异常机制、核心冲突、代价和反转均不得换名复用）：\n${excludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 160)}` : ''}`).join('\n')}`
           : '';
-        const recoveryText = ideaRecoveryDirective(dto.storyType, recoveryReasons, count);
+        const structureText = ideaCardStructuringDirective(selectedPremises);
         // 灵感阶段就把该平台分类的头部实测体量锚点交给模型。
         // 不带锚点，模型只能凭故事类型自由选体量：长篇默认挑 10-30 万，落到具体平台分类下就落在
         // 头部实测区间外，创建入口/生成入口/质量 Gate 三处都会按「未执行标准」拦下，作者只能回头
@@ -4959,7 +5052,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
 6. 新颖性不是堆设定，也不是自己写一句“独特”。每项先选读者熟悉的类型外壳，再把【具体生活载体/职业】、【不可互换的人物关系】、【异常机制】组成一个彼此依赖的冲突；noveltyProof 必须写清 irreplaceableWhy、secondOrderConsequence、readerQuestion。凡可概括为“某种行为→直接受到超常惩罚/奖励”“发现秘密→一路追查”“获得能力→一路升级”，且去掉具体职业/关系后故事仍成立的，视为可替换模板，必须淘汰重想。核心机制启动后至少产生一个二阶后果：改变谁受益/谁受损、迫使关系重组、改变主角目标或制造真正两难；不能只有直接报应。若仍是历史题材的同一机制、同一追查路径或同一反转，也必须淘汰重想。
 7. 输出前自行检查结构、篇幅和差异；不要为自检另写文字。
 8. 同一题材的 hook、description、规则、时间跨度与反转必须共用一套事实：若写每次进入倒退N小时，就不得又写时间固定回到另一数值的N小时前；若历史中已经触发过名单增减，当前起始名单必须反映该变化。逐次变化要能从初始值算到结尾值。
-${excludeText}${recoveryText}
+${excludeText}${structureText}
 
 JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       };
@@ -4967,10 +5060,10 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       const generateBatch = async (
         count: number,
         excludes: Array<{ title: string; hook?: string; description?: string }>,
-        recoveryReasons: string[] = [],
+        selectedPremises: any[] = [],
       ): Promise<any[]> => {
         const response = await this.realLLM.generate({
-          prompt: buildPrompt(count, excludes, recoveryReasons),
+          prompt: buildPrompt(count, excludes, selectedPremises),
           scenario: 'idea_generate',
           timeout: LLM_TUNABLES.timeoutSimple(),
           maxEmptyRetries: 1,
@@ -5068,8 +5161,8 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
             .map(field => candidate?.[field]));
           if (autoSelectionRequested && seenCombinations.has(combination)) issues.push('自动组合与本批已通过题材重复');
 
-          // 唯一吸引力/留存 Gate 必须在这里执行：这里只有这一层同时掌握第一批失败原因和第二次补生。
-          // 旧链路在 HTTP adapter 再筛一次，外层失败无法反馈给补生 Prompt，形成“内层通过、外层全灭”。
+          // 最终吸引力/留存 Gate 只做独立验收：完整题材卡已经来自前置轻量候选池的明确筛选。
+          // 这里不得再承担主要选题、换题或质量补生；失败只进入审计并阻断该卡展示。
           const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType);
           issues.push(...appealAssessment.issues);
           const uniqueIssues = Array.from(new Set(issues));
@@ -5133,19 +5226,21 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         }
       };
 
-      const firstBatchCount = Math.min(10, requestedCount + Math.min(3, requestedCount));
-      const firstBatch = await generateBatch(firstBatchCount, initialExcludes);
-      if (!firstBatch.length) throw new Error('模型已返回内容，但缺少有效的 ideas 数组。未创建题材，请重试。');
-      accept(firstBatch);
-
-      // 最多补跑一次，只补缺项。一次用户操作最多两次逻辑调用，且始终使用同一场景配置模型。
-      if (accepted.length < requestedCount) {
-        const missing = requestedCount - accepted.length;
-        const acceptedExcludes = accepted.map(item => ({ title: item.title, hook: item.hook, description: item.description }));
-        this.logger.warn(`idea-discover: 首批有 ${accepted.length}/${requestedCount} 项通过，使用同一模型一次补齐 ${missing} 项`);
-        const recoveryBatch = await generateBatch(missing, [...initialExcludes, ...acceptedExcludes], Array.from(new Set(rejectedReasons)));
-        accept(recoveryBatch);
+      const premiseDiscovery = await discoverPremisePoolBeforeCards();
+      const selectedPremises = premiseDiscovery.selected;
+      const selectedPremiseIds = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
+      const structuredCards = await generateBatch(requestedCount, initialExcludes, selectedPremises);
+      if (structuredCards.length !== requestedCount) {
+        throw new Error(`完整题材卡结构化应与创建前筛选出的 ${requestedCount} 个题材一一对应；当前只返回 ${structuredCards.length} 张，系统不会另找题材补数。`);
       }
+      const structuredPremiseIds = structuredCards.map((item: any) => String(item?.sourcePremiseId || '').trim());
+      const structuredUniqueIds = new Set(structuredPremiseIds);
+      const missingPremiseIds = [...selectedPremiseIds].filter(id => !structuredUniqueIds.has(id));
+      const unknownPremiseIds = [...structuredUniqueIds].filter(id => !selectedPremiseIds.has(id));
+      if (structuredUniqueIds.size !== requestedCount || missingPremiseIds.length || unknownPremiseIds.length) {
+        throw new Error(`完整题材卡没有逐一保持创建前筛选结果；缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
+      }
+      accept(structuredCards);
 
       const selectedAccepted = accepted
         .sort((left, right) =>
@@ -5156,13 +5251,16 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
       const qualifiedCount = candidateAssessments.filter(item => item.passed === true).length;
       const appealGate = {
-        schemaVersion: 3,
-        mode: 'single_recoverable_reader_experience_gate',
+        schemaVersion: 4,
+        mode: 'premise_preselection_then_final_reader_experience_gate',
+        premisePoolSize: premiseDiscovery.pool.length,
+        premiseSelected: selectedPremises.length,
         generated: candidateAssessments.length,
         qualified: qualifiedCount,
         returned: selectedAccepted.length,
         rejected: candidateAssessments.filter(item => item.passed !== true).length,
         reasons: uniqueRejectedReasons.slice(0, 8),
+        preselectedPremises: selectedPremises,
         candidateAssessments,
         acceptedEvidence: selectedAccepted.map(idea => ({
           title: String(idea?.title || ''),
@@ -5171,29 +5269,29 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '这是文本吸引力与读者体验前置 Gate，不是预测点击率/完读率；未通过候选只保留审计，不进入前端展示。',
+        note: '先完成轻量题材池的创建前筛选，再把已选胚子结构化为完整题材卡；最终 Gate 只做独立验收，不负责换题或补生。',
       };
 
       if (!selectedAccepted.length) {
         const rejectionSummary = uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
-        this.logger.warn(`idea-discover: 两轮候选均未通过展示 Gate，内部淘汰原因：${rejectionSummary}`);
+        this.logger.warn(`idea-discover: 创建前已筛选 ${selectedPremises.length} 个题材，但完整卡最终 Gate 全部拒绝：${rejectionSummary}`);
         return {
           success: false,
           ideas: [],
           totalIdeas: 0,
-          error: '本轮候选均未达到展示标准，系统已按失败原因自动补生一次；未通过内容不会展示，请重新发现。',
+          error: '创建前筛选已完成，但完整题材卡最终验收没有任何一项通过；系统已停止展示，不会通过增加补生次数或另换题材掩盖。请重新发现。',
           appealGate,
         };
       }
       const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
-      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材，逻辑调用不超过2次`);
+      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材；创建前筛选与完整卡结构化已分阶段完成，最终 Gate 未参与补生`);
       return {
         success: true,
         ideas: acceptedWithAudit,
         totalIdeas: acceptedWithAudit.length,
         appealGate,
         qualityWarning: acceptedWithAudit.length < requestedCount
-          ? `本次有 ${acceptedWithAudit.length} 个题材通过展示 Gate；其余结果已淘汰，不用占位内容补数。`
+          ? `创建前已筛选 ${selectedPremises.length} 个成熟题材；完整卡最终 Gate 有 ${acceptedWithAudit.length}/${requestedCount} 个通过。未通过项已留审计，系统没有自动补生或换题。`
           : undefined,
       };
     } catch (err) {
