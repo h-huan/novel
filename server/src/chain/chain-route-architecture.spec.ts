@@ -59,23 +59,22 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('\\"sourcePremiseId\\":\\"P1\\"');
   });
 
-  it('never reports a partial idea batch as successful after the final gate', () => {
+  it('returns final-gate-passed selected premises without replacing or zeroing a partial batch', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('finalGateRepairAttempted');
     expect(source).toContain("repairProtocol: 'ordered_local_patch_server_owned_identity'");
     expect(source).toContain('applyOrderedIdeaRepairPatches');
     expect(source).toContain('ideaGateLocalRepairDirective');
-    expect(source).not.toContain('最终 Gate 定向修复必须逐一返回原未通过题材');
-    expect(source).not.toContain('每张必须原样保留 sourcePremiseId');
     expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
-    expect(source).toContain('selectedAccepted.length !== requestedCount');
+    expect(source).toContain('selectedAccepted.length === 0');
+    expect(source).toContain('const qualityWarning = partial');
+    expect(source).toContain('未通过题材已淘汰，系统未换题或补数');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
     expect(source).toContain('repairGenerated: finalGateRepairGenerated');
     expect(source).toContain('repairError: finalGateRepairError');
-    expect(source).toContain('系统不会把部分结果伪装成完整成功');
-    expect(source).not.toContain('未通过项已留审计，系统没有自动补生或换题');
-    expect(source).not.toContain('qualityWarning: acceptedWithAudit.length < requestedCount');
+    expect(source).not.toContain('selectedAccepted.length !== requestedCount');
+    expect(source).not.toContain('系统不会把部分结果伪装成完整成功');
   });
 
   it('repairs outline fact conflicts as a local patch instead of regenerating the whole chapter plan', () => {

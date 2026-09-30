@@ -185,6 +185,41 @@ describe('IdeaAppealGateService', () => {
     expect(assessment.passed).toBe(true);
   });
 
+
+  it('recognizes pressure and action in real short-card hooks instead of forcing a repair for ordinary Chinese phrasing', () => {
+    const antiFraud = gate.assess({
+      ...strongShort,
+      hook: '被裁员后她靠夜间客服兼职和合租省钱，正准备把最后一笔“解冻保证金”转给网恋的海外工程师；转账确认前一秒，新室友江砚亮出反诈客服工牌，拦下她的手：那个说要娶她的人，正拿她的照片骗下一个人。她没哭，删掉对话框，答应假装继续转账当诱饵，唯一条件是别把她写成反诈案例。',
+    }, 'short_story');
+    expect(antiFraud.signals.hookHasPressure).toBe(true);
+    expect(antiFraud.signals.hookHasAgency).toBe(true);
+    expect(antiFraud.signals.hookHasRelationship).toBe(true);
+
+    const sleepTester = gate.assess({
+      ...strongShort,
+      hook: '试睡师江晚为母亲的疗养费接下高薪私单，刚铺好床，失眠三年的总裁就睡着。他递来三十天同住合约，她签字时加一条：谁动手脚，就报警，不许用钱封口。',
+    }, 'short_story');
+    expect(sleepTester.signals.hookHasPressure).toBe(true);
+    expect(sleepTester.signals.hookHasAgency).toBe(true);
+    expect(sleepTester.signals.hookHasRelationship).toBe(true);
+
+    const cake = gate.assess({
+      ...strongShort,
+      hook: '母亲的手术费压在月底租约上，她半夜回店堵住偷吃报废蛋糕的男人，发现对方是刚收购商场、要她搬走的控糖总裁。她当场提出试吃抵租：他尝新品，她换租约延期。',
+    }, 'short_story');
+    expect(cake.signals.hookHasPressure).toBe(true);
+    expect(cake.signals.hookHasAgency).toBe(true);
+    expect(cake.signals.hookHasRelationship).toBe(true);
+
+    const moderator = gate.assess({
+      ...strongShort,
+      hook: '她给千万粉情感主播当反黑客服，误登他账号，发现置顶私密小号只关注她一人。当夜他被曝“骗粉”，两小时内她得选：删记录保饭碗，还是替他挖出造谣源头。',
+    }, 'short_story');
+    expect(moderator.signals.hookHasAnomaly).toBe(true);
+    expect(moderator.signals.hookHasPressure).toBe(true);
+    expect(moderator.signals.hookHasAgency).toBe(true);
+  });
+
   it('ranks higher distinctiveness ahead of lower distinctiveness after both candidates have passed', () => {
     const baseline = gate.assess(strongShort, 'short_story');
     expect(baseline.passed).toBe(true);

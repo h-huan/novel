@@ -5236,8 +5236,8 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       }
       accept(structuredCards, 'initial');
 
-      // Final Gate is not allowed to silently shrink a requested batch. The selected premises are already the
-      // story identities; a failing full card gets one bounded repair of that same premise, never a substitute.
+      // Final Gate 只决定哪些已选 premise 可以展示，不再承担补题职责。某张卡失败时允许对同一 premise
+      // 做一次有界局部修复；仍失败就只淘汰这一张，已通过题材照常返回，绝不能把 4/5 伪装成 0/5。
       let finalGateRepairAttempted = false;
       let finalGateRepairGenerated = 0;
       let finalGateRepairError: string | null = null;
@@ -5322,28 +5322,33 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先完成轻量题材池筛选；每个已选 premise 独立结构化恰好一张完整卡，题材身份由服务器绑定，避免批量大 JSON 少卡/错 ID。最终 Gate 未通过时只允许对原 premise 做一次有序局部字段修复；修复后仍不足请求数量则整次失败。',
+        note: '先完成轻量题材池筛选；每个已选 premise 独立结构化恰好一张完整卡，题材身份由服务器绑定，避免批量大 JSON 少卡/错 ID。最终 Gate 未通过时只允许对原 premise 做一次有序局部字段修复；仍未通过只淘汰该题材，已通过题材照常返回，不换题、不补数。',
       };
 
-      if (selectedAccepted.length !== requestedCount || finalMissingPremiseIds.length > 0) {
+      if (selectedAccepted.length === 0) {
         const rejectionSummary = finalRejectedReasons.slice(0, 10).join('；') || uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
-        this.logger.warn(`idea-discover: 最终 Gate 与一次定向局部修复后仍只有 ${selectedAccepted.length}/${requestedCount} 个通过：${rejectionSummary}`);
+        this.logger.warn(`idea-discover: 最终 Gate 与一次定向局部修复后 0/${requestedCount} 通过：${rejectionSummary}`);
         return {
           success: false,
           ideas: [],
           totalIdeas: 0,
           error: finalGateRepairError
-            ? `请求 ${requestedCount} 个可选题材，但最终 Gate 的同题材局部修复协议未完成：${finalGateRepairError} 系统不会把部分结果伪装成完整成功。`
-            : `请求 ${requestedCount} 个可选题材，但最终 Gate 与一次定向局部修复后只有 ${selectedAccepted.length} 个通过；系统不会把部分结果伪装成完整成功。请重新发现。`,
+            ? `本次创建前筛选的 ${requestedCount} 个题材均未形成可展示结果，且同题材局部修复协议未完成：${finalGateRepairError}`
+            : `本次创建前筛选的 ${requestedCount} 个题材在最终 Gate 与一次定向局部修复后均未通过；系统未换题或补数，请重新发现。`,
           appealGate,
         };
       }
       const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
-      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材；最终 Gate 通过后才作为完整候选集返回`);
+      const partial = selectedAccepted.length < requestedCount || finalMissingPremiseIds.length > 0;
+      const qualityWarning = partial
+        ? `创建前已筛选 ${requestedCount} 个题材，最终 Gate 通过 ${selectedAccepted.length} 个；未通过题材已淘汰，系统未换题或补数。`
+        : undefined;
+      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材；只返回最终 Gate 通过项，不换题补数`);
       return {
         success: true,
         ideas: acceptedWithAudit,
         totalIdeas: acceptedWithAudit.length,
+        qualityWarning,
         appealGate,
       };
     } catch (err) {
