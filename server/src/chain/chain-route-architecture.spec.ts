@@ -59,6 +59,20 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('\\"sourcePremiseId\\":\\"P1\\"');
   });
 
+  it('carries server-owned preselection evidence through structuring and bounded repair into the final gate', () => {
+    const contract = read('idea-discovery-contract.ts');
+    const gate = read('idea-appeal-gate.service.ts');
+
+    expect(contract).toContain('selectedPremiseEvidenceByCard = new WeakMap');
+    expect(contract).toContain('selectedPremiseEvidenceByCard.set(boundCard, { ...selectedPremise })');
+    expect(contract).toContain('const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(card)');
+    expect(contract).toContain('selectedPremiseEvidenceByCard.set(next, selectedPremiseEvidence)');
+    expect(gate).toContain('selectedPremiseEvidenceForIdeaCard(idea)');
+    expect(gate).toContain('const selectedAgencyEvidence');
+    expect(gate).toContain('const selectedPressureEvidence');
+    expect(gate).toContain('const selectedOpeningEvidence');
+  });
+
   it('returns final-gate-passed selected premises without replacing or zeroing a partial batch', () => {
     const source = read('chain.controller.ts');
 
