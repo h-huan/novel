@@ -49,6 +49,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('for (let index = 0; index < selectedPremises.length; index += 1)');
     expect(source).toContain('structuredCards.push(await generateStructuredCard(selectedPremise, index))');
     expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas)');
+    expect(source).toContain('第 ${position + 1}/${requestedCount} 个已选题材结构化失败');
     expect(source).toContain("structuringProtocol: 'one_selected_premise_per_call_server_owned_identity'");
     expect(source).toContain('JSON 结构（ideas 必须恰好 1 项）');
     expect(source).not.toContain('generateBatch(requestedCount');
