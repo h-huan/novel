@@ -20,7 +20,8 @@ jobs:
         with:
           node-version: 22
       - name: Fix patch type syntax
-        run: sed -i 's/targets: readonly Array</targets: ReadonlyArray</' .github/scripts/apply_latest10_idea_repair.py
+        run: |
+          sed -i 's/targets: readonly Array</targets: ReadonlyArray</' .github/scripts/apply_latest10_idea_repair.py
       - name: Apply source patch
         run: python .github/scripts/apply_latest10_idea_repair.py
       - name: Install server dependencies
