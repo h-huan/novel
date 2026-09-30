@@ -130,7 +130,7 @@ import {
   validateForeshadowingBoundary,
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideLengthContinuation, decideProgressiveRepair } from './adaptive-repair';
-import { ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
+import { applyOrderedIdeaRepairPatches, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
@@ -5232,6 +5232,7 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       // story identities; a failing full card gets one bounded repair of that same premise, never a substitute.
       let finalGateRepairAttempted = false;
       let finalGateRepairGenerated = 0;
+      let finalGateRepairError: string | null = null;
       const acceptedPremiseIds = () => new Set(accepted.map((idea: any) => String(idea?.sourcePremiseId || '').trim()).filter(Boolean));
       const missingAfterGate = () => selectedPremises
         .map((item: any) => String(item?.premiseId || '').trim())
@@ -5250,33 +5251,25 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           gateIssues: initialIssueByPremiseId.get(String(card?.sourcePremiseId || '').trim()) || [],
         }));
         const repairResponse = await this.realLLM.generate({
-          prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
-对下面 ${repairTargets.length} 张完整题材卡执行一次“最终 Gate 定向局部修复”。这不是重新选题，也不是换 premise。
-
-硬约束：
-1. 每张必须原样保留 sourcePremiseId，并与对应 premise 一一对应；不得新增、删除、交换或改写题材身份。
-2. 平台、长短篇、分类，以及用户已明确选择的基调/文风/流派/视角/标签不得改变。
-3. 只修 gateIssues 点名的表达与结构证据：让 hook 清楚显出异常/信息差、现实压力、主角行动和关键关系；让 description/冲突/反转/noveltyProof 把已经存在的因果与二阶后果说清。禁止为了过 Gate 新增另一套案件、能力、身份、亲属关系或结局。
-4. 篇幅字段只在 gateIssues 明确指出篇幅/章数无效时修正，且仍必须满足本次项目字数与章节范围；否则保持原值。
-5. 只输出 JSON 对象 {"ideas":[...]}，ideas 必须恰好 ${repairTargets.length} 项。不得输出分析、Markdown 或额外文字。
-
-待修复卡：${JSON.stringify(repairTargets)}`,
+          prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective(repairTargets)}`,
           scenario: 'idea_generate',
           timeout: LLM_TUNABLES.timeoutSimple(),
           maxEmptyRetries: 1,
           responseFormat: 'json_object',
         });
-        const repairedCards = extractIdeaList(repairResponse.content || '') || [];
-        finalGateRepairGenerated = repairedCards.length;
-        const expectedRepairIds = [...initialMissingPremiseIds].sort();
-        const actualRepairIds = repairedCards.map((item: any) => String(item?.sourcePremiseId || '').trim()).filter(Boolean).sort();
-        const uniqueRepairIds = new Set(actualRepairIds);
-        if (repairedCards.length !== expectedRepairIds.length
-          || uniqueRepairIds.size !== expectedRepairIds.length
-          || actualRepairIds.join('\u0000') !== expectedRepairIds.join('\u0000')) {
-          throw new Error(`最终 Gate 定向修复必须逐一返回原未通过题材；期望=${expectedRepairIds.join('、')}，实际=${actualRepairIds.join('、') || '无'}。系统不会用别的题材补位。`);
+        const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
+        const repairPatches = Array.isArray(repairPayload?.patches) ? repairPayload.patches : [];
+        finalGateRepairGenerated = repairPatches.length;
+        try {
+          const repairedCards = applyOrderedIdeaRepairPatches(
+            repairTargets.map((target: any) => target.card as Record<string, unknown>),
+            repairPatches,
+          );
+          accept(repairedCards, 'repair');
+        } catch (repairError) {
+          finalGateRepairError = repairError instanceof Error ? repairError.message : String(repairError);
+          this.logger.warn(`idea-discover: 最终 Gate 同题材局部修复协议未完成：${finalGateRepairError}`);
         }
-        accept(repairedCards, 'repair');
       }
 
       const selectedAccepted = accepted
@@ -5295,8 +5288,9 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         .flatMap((item: any) => Array.isArray(item?.issues) ? item.issues : [])));
       const qualifiedCount = selectedAccepted.length;
       const appealGate = {
-        schemaVersion: 5,
+        schemaVersion: 6,
         mode: 'premise_preselection_then_final_gate_bounded_repair',
+        repairProtocol: 'ordered_local_patch_server_owned_identity',
         premisePoolSize: premiseDiscovery.pool.length,
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
@@ -5308,6 +5302,7 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         rejected: finalMissingPremiseIds.length,
         repairAttempted: finalGateRepairAttempted,
         repairGenerated: finalGateRepairGenerated,
+        repairError: finalGateRepairError,
         reasons: finalRejectedReasons.slice(0, 8),
         preselectedPremises: selectedPremises,
         candidateAssessments,
@@ -5318,7 +5313,7 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先完成轻量题材池筛选，再结构化完整卡；最终 Gate 未通过时只允许对原 premise 做一次定向局部修复。修复后仍不足请求数量则整次失败，绝不返回部分成功。',
+        note: '先完成轻量题材池筛选，再结构化完整卡；最终 Gate 未通过时只允许对原 premise 做一次有序局部字段修复，题材身份由服务器持有。修复后仍不足请求数量则整次失败，绝不返回部分成功。',
       };
 
       if (selectedAccepted.length !== requestedCount || finalMissingPremiseIds.length > 0) {
@@ -5328,7 +5323,9 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           success: false,
           ideas: [],
           totalIdeas: 0,
-          error: `请求 ${requestedCount} 个可选题材，但最终 Gate 与一次定向局部修复后只有 ${selectedAccepted.length} 个通过；系统不会把部分结果伪装成完整成功。请重新发现。`,
+          error: finalGateRepairError
+            ? `请求 ${requestedCount} 个可选题材，但最终 Gate 的同题材局部修复协议未完成：${finalGateRepairError} 系统不会把部分结果伪装成完整成功。`
+            : `请求 ${requestedCount} 个可选题材，但最终 Gate 与一次定向局部修复后只有 ${selectedAccepted.length} 个通过；系统不会把部分结果伪装成完整成功。请重新发现。`,
           appealGate,
         };
       }

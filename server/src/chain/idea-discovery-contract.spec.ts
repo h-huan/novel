@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   SHORT_IDEA_HOOK_MIN_SIGNALS,
+  applyOrderedIdeaRepairPatches,
   ideaCardStructuringDirective,
+  ideaGateLocalRepairDirective,
   ideaHookRequirement,
   ideaPremiseSelectionDirective,
   normalizePremiseSelectionPayload,
@@ -124,6 +126,82 @@ describe('idea discovery preselection contract', () => {
     expect(directive).toContain('禁止替换、合并、拆分、另造题材');
     expect(directive).toContain('最终 Gate 只做独立验收');
     expect(directive).toContain('不是自动补生另一批题材');
+  });
+
+
+  it('keeps final-gate premise identity on the server instead of asking the model to echo opaque ids', () => {
+    const directive = ideaGateLocalRepairDirective([
+      {
+        premise: { premiseId: 'P11', workingTitle: '旧味甜汤', storyCore: '主角从一碗甜汤查出旧案' },
+        card: { sourcePremiseId: 'P11', title: '旧味甜汤', hook: '原钩子' },
+        gateIssues: ['核心钩子信息过弱'],
+      },
+      {
+        premise: { premiseId: 'P14', workingTitle: '假契', storyCore: '主角公开念出假契' },
+        card: { sourcePremiseId: 'P14', title: '假契', hook: '原钩子二' },
+        gateIssues: ['推进链证据不足'],
+      },
+    ]);
+
+    expect(directive).toContain('patches 数组必须恰好 2 项');
+    expect(directive).toContain('严格按输入 position 的顺序逐项对应');
+    expect(directive).not.toContain('P11');
+    expect(directive).not.toContain('P14');
+    expect(directive).not.toContain('sourcePremiseId');
+    expect(directive).not.toContain('premiseId');
+  });
+
+  it('merges ordered local patches without allowing the model to replace identity or project settings', () => {
+    const cards = [{
+      sourcePremiseId: 'P11',
+      title: '旧标题',
+      targetPlatform: 'fanqie',
+      storyCategory: '悬疑',
+      estimatedWords: 20000,
+      hook: '旧钩子',
+      description: '旧概要',
+      noveltyProof: {
+        familiarShell: '旧外壳',
+        readerQuestion: '旧追问',
+        secondOrderConsequence: '旧二阶后果',
+      },
+    }];
+    const repaired = applyOrderedIdeaRepairPatches(cards, [{
+      sourcePremiseId: 'PX',
+      title: '模型试图换标题',
+      targetPlatform: 'other',
+      estimatedWords: 1,
+      hook: '把原故事已有的压力与主动行动写清楚',
+      noveltyProof: {
+        readerQuestion: '新的具体追问是什么？',
+        unknownField: '不得进入',
+      },
+      unknownTopLevel: '不得进入',
+    }]);
+
+    expect(repaired).toHaveLength(1);
+    expect(repaired[0].sourcePremiseId).toBe('P11');
+    expect(repaired[0].title).toBe('旧标题');
+    expect(repaired[0].targetPlatform).toBe('fanqie');
+    expect(repaired[0].estimatedWords).toBe(20000);
+    expect(repaired[0].hook).toBe('把原故事已有的压力与主动行动写清楚');
+    expect((repaired[0].noveltyProof as any).familiarShell).toBe('旧外壳');
+    expect((repaired[0].noveltyProof as any).readerQuestion).toBe('新的具体追问是什么？');
+    expect((repaired[0].noveltyProof as any).unknownField).toBeUndefined();
+    expect(repaired[0].unknownTopLevel).toBeUndefined();
+  });
+
+  it('requires one ordered patch per failed card but never requires a premise id in the patch itself', () => {
+    const cards = [
+      { sourcePremiseId: 'P11', hook: '旧钩子一' },
+      { sourcePremiseId: 'P14', hook: '旧钩子二' },
+    ];
+    expect(() => applyOrderedIdeaRepairPatches(cards, [{ hook: '只返回一项' }]))
+      .toThrow('期望 2 个');
+    expect(applyOrderedIdeaRepairPatches(cards, [
+      { hook: '修复后的钩子一' },
+      { hook: '修复后的钩子二' },
+    ]).map(item => item.sourcePremiseId)).toEqual(['P11', 'P14']);
   });
 
   it('treats hook generation as expression of a preselected story rather than another search stage', () => {

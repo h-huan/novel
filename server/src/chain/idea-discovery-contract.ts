@@ -138,6 +138,102 @@ export function ideaCardStructuringDirective(
 ${JSON.stringify(selectedPremises)}`;
 }
 
+const IDEA_GATE_REPAIR_TEXT_FIELDS = [
+  'hook',
+  'description',
+  'coreConflict',
+  'uniquePoint',
+  'mainReversal',
+] as const;
+
+const IDEA_GATE_REPAIR_NOVELTY_FIELDS = [
+  'familiarShell',
+  'uncommonCombination',
+  'avoidedPatterns',
+  'irreplaceableWhy',
+  'secondOrderConsequence',
+  'readerQuestion',
+] as const;
+
+function ideaRepairRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function withoutIdeaInternalIdentity(value: unknown, internalField: string): Record<string, unknown> {
+  const record = ideaRepairRecord(value) || {};
+  return Object.fromEntries(Object.entries(record).filter(([key]) => key !== internalField));
+}
+
+/**
+ * 最终 Gate 的一次同题材局部修复协议。
+ * premise/card 的内部身份由服务器按数组位置持有，不交给模型回传，避免真实模型遗漏 opaque id
+ * 就把整批题材判成失败。模型只负责修 Gate 点名的可读字段。
+ */
+export function ideaGateLocalRepairDirective(
+  targets: ReadonlyArray<{ premise?: unknown; card?: unknown; gateIssues?: unknown }>,
+): string {
+  const safeTargets = targets.map((target, index) => ({
+    position: index + 1,
+    premise: withoutIdeaInternalIdentity(target?.premise, 'premiseId'),
+    card: withoutIdeaInternalIdentity(target?.card, 'sourcePremiseId'),
+    gateIssues: Array.isArray(target?.gateIssues) ? target.gateIssues.map(String) : [],
+  }));
+  return `【最终 Gate·同题材有序局部修复】
+下面 ${safeTargets.length} 项已经完成创建前筛选和完整题材卡结构化。服务器已经锁定每一项的题材身份，你不负责回传、生成或修改内部标识，也不得换题。
+1. patches 数组必须恰好 ${safeTargets.length} 项，并严格按输入 position 的顺序逐项对应；每项只写需要修改的字段。
+2. 顶层只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出标题、平台、分类、篇幅、章数、标签或任何内部标识。
+3. 只修 gateIssues 点名的表达证据，让原故事已有的异常/信息差、现实压力、主角行动、关系、因果升级、反转和二阶后果更清楚；禁止新增另一套案件、能力、身份、亲属关系或结局。
+4. 某字段无需改就省略；禁止用空字符串删除原证据。服务器只会合并白名单内的非空文本，其余输出会被忽略。
+5. 只输出一个 JSON 对象：{"patches":[{...}]}，不输出分析、Markdown 或额外文字。
+【按顺序待修复内容】
+${JSON.stringify(safeTargets)}`;
+}
+
+/**
+ * 把模型返回的有序局部补丁合回服务器持有的原卡。
+ * 只允许白名单文本字段单调覆盖；题材身份、标题、平台、分类、篇幅和用户配置始终取原卡。
+ */
+export function applyOrderedIdeaRepairPatches(
+  cards: readonly Record<string, unknown>[],
+  rawPatches: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(rawPatches) || rawPatches.length !== cards.length) {
+    const actual = Array.isArray(rawPatches) ? rawPatches.length : 0;
+    throw new Error(`最终 Gate 定向局部修复返回 ${actual} 个有序补丁，期望 ${cards.length} 个；题材身份仍由系统保留，不会用别的题材补位。`);
+  }
+
+  return cards.map((card, index) => {
+    const patch = ideaRepairRecord(rawPatches[index]);
+    if (!patch) {
+      throw new Error(`最终 Gate 定向局部修复第 ${index + 1} 项不是对象；系统不会猜测它对应哪个题材。`);
+    }
+    const next: Record<string, unknown> = { ...card };
+    for (const field of IDEA_GATE_REPAIR_TEXT_FIELDS) {
+      const value = typeof patch[field] === 'string' ? String(patch[field]).trim() : '';
+      if (value) next[field] = value;
+    }
+
+    const noveltyPatch = ideaRepairRecord(patch.noveltyProof);
+    if (noveltyPatch) {
+      const existingNovelty = ideaRepairRecord(card.noveltyProof) || {};
+      const acceptedNovelty: Record<string, unknown> = {};
+      for (const field of IDEA_GATE_REPAIR_NOVELTY_FIELDS) {
+        const value = typeof noveltyPatch[field] === 'string' ? String(noveltyPatch[field]).trim() : '';
+        if (value) acceptedNovelty[field] = value;
+      }
+      if (Object.keys(acceptedNovelty).length > 0) {
+        next.noveltyProof = { ...existingNovelty, ...acceptedNovelty };
+      }
+    }
+
+    // 显式恢复服务器持有的身份，哪怕模型在未知字段里试图改写也不会生效。
+    next.sourcePremiseId = card.sourcePremiseId;
+    return next;
+  });
+}
+
 export function ideaHookRequirement(storyType: IdeaStoryType): string {
   const storyFirst = '题材已经通过完整题材卡创建前的轻量候选池筛选；这里只把该题材最有吸引力的起始事件准确压缩成 hook，不再重新选题、换题或为了命中 Gate 关键词改造故事。异常/信息差不等于超能力，可以来自现实利益冲突、关系反常、制度困境、隐藏事实或超常现象';
   if (storyType === 'short_story') {

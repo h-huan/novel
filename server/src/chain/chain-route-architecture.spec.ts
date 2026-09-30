@@ -46,6 +46,11 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('finalGateRepairAttempted');
+    expect(source).toContain("repairProtocol: 'ordered_local_patch_server_owned_identity'");
+    expect(source).toContain('applyOrderedIdeaRepairPatches');
+    expect(source).toContain('ideaGateLocalRepairDirective');
+    expect(source).not.toContain('最终 Gate 定向修复必须逐一返回原未通过题材');
+    expect(source).not.toContain('每张必须原样保留 sourcePremiseId');
     expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
     expect(source).toContain('selectedAccepted.length !== requestedCount');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
