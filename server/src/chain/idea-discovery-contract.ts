@@ -8,6 +8,45 @@ export const SHORT_IDEA_HOOK_MIN_SIGNALS = 3;
 
 const INTERNAL_SEARCH_DIRECTIVE = '在输出任何 JSON 候选前，先在内部广泛寻找至少本批输出数量 3 倍的不同题材胚子，并在构思阶段先淘汰弱题材：只有设定噱头却没有人物目标/主动选择、冲突不能连续升级、反转只是补充信息而不改变目标/关系/代价、职业或生活载体可随意替换、只有悬念没有中后段兑现、熟悉套路仅换名换皮的题材都不得进入最终 JSON。只输出内部筛选后真正成熟的候选，不输出被淘汰题材、评分表或思考过程；合格候选不够时继续重想，禁止拿弱题材凑数';
 
+/**
+ * 完整题材卡创建之前的唯一选题契约。
+ * 这一阶段只产生轻量题材池并明确选择，不生成展示卡，不让最终 Gate 承担主要选题。
+ */
+export function ideaPremiseSelectionDirective(
+  storyType: IdeaStoryType,
+  requestedCount: number,
+  poolSize = Math.max(requestedCount * 3, requestedCount + 5),
+): string {
+  const storyTypeRule = storyType === 'short_story'
+    ? '短篇必须能在有限篇幅内形成单线闭环和明确兑现；反转少而重，不能靠不断加设定续命。'
+    : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
+  return `【题材卡创建前筛选】
+这一步发生在完整题材卡创建之前。先广泛搜寻，再比较，再选择；禁止先创建完整题材卡再交给最终 Gate 大量淘汰。
+1. 先提出至少 ${poolSize} 个真正不同的轻量题材胚子；这里只构思故事骨架，不写完整题材卡。
+2. 对胚子逐一比较人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异。
+3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
+4. 从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。
+5. ${storyTypeRule}
+6. 输出轻量候选池和 selectedPremiseIds 即可；不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
+}
+
+/**
+ * 创建前筛选完成后，只把被选中的胚子结构化为完整题材卡；不允许在这里重新选题。
+ */
+export function ideaCardStructuringDirective(
+  selectedPremises: readonly Record<string, unknown>[],
+): string {
+  const ids = selectedPremises.map(item => String(item?.premiseId || '').trim()).filter(Boolean);
+  return `【完整题材卡结构化】
+以下 ${selectedPremises.length} 个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把它们逐一结构化成完整题材卡，不再重新选题。
+- 每张完整卡必须一一对应 sourcePremiseId：${JSON.stringify(ids)}。
+- 禁止替换、合并、拆分、另造题材，禁止因为某字段难写就把故事换成更容易过 Gate 的套路。
+- hook、description、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
+- 最终 Gate 只做独立验收；若结构化后仍不成立，系统应暴露管线失败，而不是自动补生另一批题材。
+【已选题材胚子】
+${JSON.stringify(selectedPremises)}`;
+}
+
 export function ideaHookRequirement(storyType: IdeaStoryType): string {
   const storyFirst = `先构思一个值得读的完整故事题材，再把最有吸引力的起始事件压缩成 hook；${INTERNAL_SEARCH_DIRECTIVE}。Gate 字段只是最终独立验收证据，不是创作清单，禁止为了命中关键词拼装题材或硬造超常规则。所谓异常/信息差也不等于超能力，可以来自现实利益冲突、关系反常、制度困境、隐藏事实或超常现象`;
   if (storyType === 'short_story') {
