@@ -54,6 +54,12 @@ replace_once(
     'premise output rule',
 )
 
+replace_once(
+    "      const discoverPremisePoolBeforeCards = async (): Promise<{ pool: any[]; selected: any[] }> => {",
+    "      const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload>> => {",
+    'premise selection return type',
+)
+
 validation_pattern = re.compile(
     r"        const pool = Array\.isArray\(parsed\?\.pool\) \? parsed\.pool : \[\];\n"
     r"        const selectedIds = Array\.isArray\(parsed\?\.selectedPremiseIds\).*?"
