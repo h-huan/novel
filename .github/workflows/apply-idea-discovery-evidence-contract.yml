@@ -1,0 +1,295 @@
+name: Apply idea discovery evidence contract fix
+on:
+  push:
+    branches: [main]
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'chore: apply idea discovery evidence contract fix'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Apply semantic evidence contract patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8-sig')
+              actual = text.count(old)
+              if actual < count:
+                  raise SystemExit(f'{path}: expected at least {count} occurrence(s), found {actual}: {old[:120]!r}')
+              text = text.replace(old, new, count)
+              p.write_text(text, encoding='utf-8')
+
+          contract = 'server/src/chain/idea-discovery-contract.ts'
+          replace(contract,
+          "export const SHORT_IDEA_HOOK_MIN_SIGNALS = 3;\n\nconst SELECTED_PREMISE_FIELDS = [",
+          "export const SHORT_IDEA_HOOK_MIN_SIGNALS = 3;\n\n// 创建前筛选已经形成了结构化语义证据。它只在当前进程内随服务器绑定的题材卡流转，\n// 不进入 JSON / API / Canon，避免最终 Gate 丢掉上游证据后又靠关键词重新猜同一件事。\nconst selectedPremiseEvidenceByCard = new WeakMap<object, Record<string, unknown>>();\n\nexport function selectedPremiseEvidenceForIdeaCard(value: unknown): Record<string, unknown> | null {\n  if (!value || typeof value !== 'object') return null;\n  const evidence = selectedPremiseEvidenceByCard.get(value as object);\n  return evidence ? { ...evidence } : null;\n}\n\nconst SELECTED_PREMISE_FIELDS = [")
+
+          replace(contract,
+          "  return { ...safeCard, sourcePremiseId: premiseId };",
+          "  const boundCard = { ...safeCard, sourcePremiseId: premiseId };\n  selectedPremiseEvidenceByCard.set(boundCard, { ...selectedPremise });\n  return boundCard;")
+
+          replace(contract,
+          "  return cards.map((card, index) => {\n    const patch = ideaRepairRecord(rawPatches[index]);",
+          "  return cards.map((card, index) => {\n    const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(card);\n    const patch = ideaRepairRecord(rawPatches[index]);")
+
+          replace(contract,
+          "    // 显式恢复服务器持有的身份，哪怕模型在未知字段里试图改写也不会生效。\n    next.sourcePremiseId = card.sourcePremiseId;\n    return next;",
+          "    // 显式恢复服务器持有的身份，哪怕模型在未知字段里试图改写也不会生效。\n    next.sourcePremiseId = card.sourcePremiseId;\n    if (selectedPremiseEvidence) {\n      selectedPremiseEvidenceByCard.set(next, selectedPremiseEvidence);\n    }\n    return next;")
+
+          gate = 'server/src/chain/idea-appeal-gate.service.ts'
+          replace(gate,
+          "import { SHORT_IDEA_HOOK_MIN_SIGNALS } from './idea-discovery-contract';",
+          "import { SHORT_IDEA_HOOK_MIN_SIGNALS, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';")
+
+          replace(gate,
+          "    const all = textOf(idea);\n\n    const titleAnchored = titleHasStoryAnchor(title, `${hook}；${description}；${uniquePoint}；${coreConflict}；${mainReversal}；${noveltyEvidence}`);\n    const hookHasAnomaly = ANOMALY.test(hook);\n    const hookHasPressure = PRESSURE.test(hook);\n    const hookHasAgency = AGENCY.test(hook) || FIRST_PERSON_ACTION.test(hook) || CONCRETE_ACTION.test(hook) || HOOK_CHOICE.test(hook);",
+          "    const all = textOf(idea);\n    const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(idea);\n    const evidenceText = (field: string) => String(selectedPremiseEvidence?.[field] || '').trim();\n    // 只有服务器从“创建前筛选”绑定过的卡才能使用这些语义证据。普通外部对象、历史卡和\n    // 直接调用 Gate 的数据仍必须靠卡片自身文本成立，不能伪造 selectedPremise 字段绕过验收。\n    const boundPremiseEvidence = hook.length >= 24 && selectedPremiseEvidence !== null;\n    const selectedOpeningEvidence = boundPremiseEvidence\n      && evidenceText('openingEvent').length >= 8\n      && evidenceText('readerQuestion').length >= 8;\n    const selectedPressureEvidence = boundPremiseEvidence\n      && evidenceText('coreConflict').length >= 8\n      && (evidenceText('escalation').length >= 8 || evidenceText('protagonistSituation').length >= 8);\n    const selectedAgencyEvidence = boundPremiseEvidence && evidenceText('activeChoice').length >= 8;\n\n    const titleAnchored = titleHasStoryAnchor(title, `${hook}；${description}；${uniquePoint}；${coreConflict}；${mainReversal}；${noveltyEvidence}`);\n    const hookHasAnomaly = ANOMALY.test(hook) || selectedOpeningEvidence;\n    const hookHasPressure = PRESSURE.test(hook) || selectedPressureEvidence;\n    const hookHasAgency = AGENCY.test(hook) || FIRST_PERSON_ACTION.test(hook) || CONCRETE_ACTION.test(hook) || HOOK_CHOICE.test(hook) || selectedAgencyEvidence;")
+
+          contract_spec = 'server/src/chain/idea-discovery-contract.spec.ts'
+          replace(contract_spec,
+          "  normalizePremiseSelectionPayload,\n} from './idea-discovery-contract';",
+          "  normalizePremiseSelectionPayload,\n  selectedPremiseEvidenceForIdeaCard,\n} from './idea-discovery-contract';")
+          with Path(contract_spec).open('a', encoding='utf-8') as f:
+              f.write(r'''
+
+describe('server-owned selected-premise evidence', () => {
+  it('keeps preselection evidence off the API card while making it available to the final Gate', () => {
+    const premise = selectedPremise('P-evidence');
+    const card = bindStructuredIdeaCardToPremise(premise, [{
+      title: '证据绑定题材',
+      hook: '这是一段足够长的自然语言钩子，用来确认服务器内部证据不会暴露到返回 JSON。',
+    }]);
+
+    expect(selectedPremiseEvidenceForIdeaCard(card)).toEqual(expect.objectContaining({
+      premiseId: 'P-evidence',
+      activeChoice: premise.activeChoice,
+      openingEvent: premise.openingEvent,
+    }));
+    expect(JSON.stringify(card)).not.toContain('activeChoice');
+    expect(JSON.stringify(card)).not.toContain('protagonistSituation');
+  });
+
+  it('preserves the same server-owned evidence across a bounded local repair clone', () => {
+    const premise = selectedPremise('P-repair-evidence');
+    const card = bindStructuredIdeaCardToPremise(premise, [{
+      title: '修复后仍绑定',
+      hook: '原钩子已经足够长，但自然表达可能没有命中固定动词词表。',
+    }]);
+    const repaired = applyOrderedIdeaRepairPatches([card], [{ hook: '修复后钩子仍然只改变允许修改的文本字段，题材身份和前置证据都应保留。' }])[0];
+
+    expect(selectedPremiseEvidenceForIdeaCard(repaired)).toEqual(expect.objectContaining({
+      premiseId: 'P-repair-evidence',
+      activeChoice: premise.activeChoice,
+    }));
+  });
+});
+''')
+
+          gate_spec = 'server/src/chain/idea-appeal-gate.story-regression.spec.ts'
+          replace(gate_spec,
+          "import { IdeaAppealGateService } from './idea-appeal-gate.service';",
+          "import { IdeaAppealGateService } from './idea-appeal-gate.service';\nimport { bindStructuredIdeaCardToPremise } from './idea-discovery-contract';")
+          with Path(gate_spec).open('a', encoding='utf-8') as f:
+              f.write(r'''
+
+describe('selected-premise semantic evidence survives wording variation', () => {
+  it('does not require a new regex keyword every time the same selected story is phrased differently', () => {
+    const rawCard = {
+      title: '反诈室友让我继续打钱',
+      hook: '对面发来的话术和反诈客服室友工作群里的样本一模一样。下月房租全靠这笔押金，她仍把钱打过去，把手机交给室友全程录屏，自己继续聊。',
+      description: '她只想拿回押金续住房子。第一轮交钱后，对方立刻换了收款人；随后室友发现话术来自正在追踪的团伙。她继续装作上钩，把聊天和转账路径留作证据。最后她必须在马上止损和继续拖住对方之间选择，因为室友所在团队只差最后一条资金链就能锁定收款人。',
+      protagonist: '租约快到期、想拿回押金继续住下去的普通上班族。',
+      coreConflict: '她要保住下月住处和押金，同时配合室友拖住骗子，任何一步提前收手都会断掉资金证据。',
+      uniquePoint: '诈骗话术和反诈客服室友工作群里的样本完全重合，而主角必须假装继续上钩。',
+      mainReversal: '她以为室友只是在帮她止损，后来才知道室友追的正是同一团伙；两人的目标从救一笔押金改成保住房子同时锁住资金链。',
+      noveltyProof: {
+        familiarShell: '合租生活加反诈悬疑',
+        uncommonCombination: '租房押金、反诈客服室友和实时诈骗话术样本绑定在同一场转账里',
+        avoidedPatterns: '不靠超能力或身份曝光解决诈骗',
+        irreplaceableWhy: '去掉合租与押金压力，主角没有继续冒险的现实代价；去掉反诈室友，实时话术比对和录屏证据链不成立',
+        secondOrderConsequence: '她继续聊天会让骗子把目标扩展到同住地址，室友也必须在保护她与追完整资金链之间重新选择',
+        readerQuestion: '这笔押金到底能不能拿回来，室友为什么要求她明知有风险还继续聊下去？',
+      },
+    };
+    const unbound = gate.assess(rawCard, 'short_story');
+    expect(unbound.signals.hookHasAnomaly).toBe(false);
+    expect(unbound.signals.hookHasPressure).toBe(false);
+    expect(unbound.signals.hookHasAgency).toBe(false);
+
+    const bound = bindStructuredIdeaCardToPremise({
+      premiseId: 'P-natural-wording',
+      workingTitle: rawCard.title,
+      storyCore: '租客发现押金骗局话术与反诈室友追踪样本重合，决定继续装作上钩留下证据。',
+      protagonistSituation: '租约快到期，她需要拿回押金才能保住下月住处。',
+      openingEvent: '诈骗方发来的整套话术与反诈客服室友工作群里的追踪样本重合。',
+      coreConflict: '她要保住押金和住处，同时拖住骗子让室友补齐资金链，两项目标互相制造风险。',
+      activeChoice: '她明知对面是骗子仍决定按原节奏继续聊，把手机交给室友录屏并保留转账路径。',
+      escalation: '继续配合让诈骗方扩大目标范围，也让室友必须在立即止损和追完整资金链之间取舍。',
+      reversalEffect: '室友并非临时帮忙，而是在追同一团伙，私人押金纠纷变成共同承担风险的取证行动。',
+      payoff: '终局必须同时兑现押金去向、资金链证据和两人对风险边界的选择。',
+      irreplaceableCarrier: '合租关系带来即时反诈协作，押金又提供不能简单退出的现实利益。',
+      secondOrderConsequence: '骗子把目标扩展到同住地址后，室友的职业追查会反过来威胁两人的现实住处安全。',
+      readerQuestion: '明知被骗为什么还继续聊，这次继续会让她拿回押金还是失去住处？',
+      differentiation: '冲突来自租房现金流和反诈室友的实时协作，而不是发现秘密后一路调查。',
+    }, [rawCard]);
+    const assessment = gate.assess(bound, 'short_story');
+    expect(assessment.signals.hookHasAnomaly).toBe(true);
+    expect(assessment.signals.hookHasPressure).toBe(true);
+    expect(assessment.signals.hookHasAgency).toBe(true);
+    expect(assessment.issues).not.toContain('核心钩子没有迫使主角采取具体行动或明确选择');
+    expect(assessment.issues.some((item) => item.includes('短篇首屏钩子信息过弱'))).toBe(false);
+  });
+});
+''')
+
+          planning_spec = 'server/src/chain/chain-planning.controller.idea-appeal.spec.ts'
+          p = Path(planning_spec)
+          text = p.read_text(encoding='utf-8-sig')
+          text = text.replace("schemaVersion: 4,\n  mode: 'premise_preselection_then_final_reader_experience_gate',",
+                              "schemaVersion: 7,\n  mode: 'premise_preselection_then_final_gate_bounded_repair',\n  structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',\n  repairProtocol: 'ordered_local_patch_server_owned_identity',")
+          text = text.replace("mode: 'premise_preselection_then_final_reader_experience_gate'", "mode: 'premise_preselection_then_final_gate_bounded_repair'")
+          if "schemaVersion: 4" in text or "premise_preselection_then_final_reader_experience_gate" in text:
+              raise SystemExit('stale idea discovery audit fixture remains')
+          p.write_text(text, encoding='utf-8')
+
+          helpers = 'server/src/chain/chain.controller.helpers.spec.ts'
+          replace(helpers,
+          "import { GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';",
+          "import { GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';\nimport { IdeaAppealGateService } from './idea-appeal-gate.service';")
+          with Path(helpers).open('a', encoding='utf-8') as f:
+              f.write(r'''
+
+describe('idea discovery live orchestrator behavior', () => {
+  it('returns the final-gate-passed subset instead of zeroing a batch when one selected premise still fails', async () => {
+    const selected = (id: string, title: string) => ({
+      premiseId: id,
+      workingTitle: title,
+      storyCore: `${title}的具体人物处境、起始事件与冲突骨架。`,
+      protagonistSituation: '主角要守住家人、住处和现实收入，无法无代价退出当前冲突。',
+      openingEvent: '一份现实记录出现无法解释的矛盾，迫使主角当天处理。',
+      coreConflict: '主角要保住现实利益并查清责任，对方则主动逼她放弃证据。',
+      activeChoice: '主角决定留下证据并主动查清来源，而不是接受对方给出的退路。',
+      escalation: '选择之后工作、家庭和钱的压力连续升级，并牵连新的利益相关者。',
+      reversalEffect: '关键事实改变了主角原先的目标、盟友关系和要承担的代价。',
+      payoff: '终局由主角自己的选择兑现开篇承诺，并让真正责任方承担后果。',
+      irreplaceableCarrier: '具体职业流程、家庭利益和证据载体彼此绑定，换掉任一项故事就不成立。',
+      secondOrderConsequence: '主角公开证据后第三方利益受损，原本支持她的人被迫重新站队。',
+      readerQuestion: '主角能否在现实利益被拿走之前证明记录是谁改的？',
+      differentiation: '冲突由具体生活载体和利益关系共同推动，不是换名后的秘密追查模板。',
+    });
+    const premiseOne = selected('P1', '遗嘱里的门牌号');
+    const premiseTwo = selected('P2', '门后的普通秘密');
+    const pool = [
+      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore },
+      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore },
+    ];
+    const common = {
+      storyType: 'short_story', targetPlatform: 'fanqie', storyCategory: '悬疑',
+      storyTone: ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'], pov: '第一人称',
+      submissionTags: ['悬疑'], plotTags: ['调查'], estimatedWords: 20000, plannedChapters: 5,
+      scopeBreakdown: [{ arc: '全篇主线', chapters: 5, reason: '五章完成调查、选择和兑现' }],
+      scopeReason: '两万字按五章展开，每章约四千字。', setting: '现代城市', characters: ['主角', '母亲'], styleTags: ['现实悬疑'],
+    };
+    const strongCard = {
+      ...common,
+      title: '遗嘱写着我家门牌',
+      hook: '父亲葬礼后，我在遗嘱里看见自家门牌号；每次回家母亲都会忘记我一小时。我只剩三天查清原因，否则她会彻底失去这段记忆，我决定追查父亲留下的债务和那份遗嘱。',
+      description: '最初我只想守住母亲和这个家，查清父亲为什么欠下巨债。第一天，我发现债主拿着房屋合同逼母亲搬走；随后我起诉并追查签字人，找到父亲当年替同事担责的证据。第二次回家，母亲忘了我，却记得合同背后的老板。最后我必须在公开证据和保住母亲名声之间选择，并用父亲留下的录音揭开真相，让真正的责任人承担代价。',
+      protagonist: '一个想守住母亲、住房和家庭尊严的普通上班族。',
+      coreConflict: '主角必须在三天内查清房屋合同与债务真相，同时保护母亲不被债主和公司逼走。',
+      uniquePoint: '每次回家母亲都会短暂忘记主角，这个异常逼迫主角重新理解父亲留下的债务与责任。',
+      mainReversal: '主角发现父亲并非单纯欠债，而是替同事承担了被公司转嫁的责任；目标从替父还债转为公开证据并起诉真正责任人。',
+      noveltyProof: {
+        familiarShell: '家庭债务加现实悬疑',
+        uncommonCombination: '遗嘱门牌、母亲短时遗忘、房屋合同与职场转嫁责任共同组成证据链',
+        avoidedPatterns: '不靠系统任务或单层超常报应推进',
+        irreplaceableWhy: '去掉遗嘱和住房合同，家庭债务无法落到具体证据；去掉母亲关系，选择没有现实重量',
+        secondOrderConsequence: '公开证据会洗清债务却损害父亲维护的名声，也让母亲必须重新选择如何理解父亲',
+        readerQuestion: '遗嘱为什么写着自家门牌，母亲的遗忘又和父亲替人担责有什么关系？',
+      },
+    };
+    const weakCard = {
+      ...common,
+      title: '门后的普通秘密',
+      hook: '她在下班路上遇到一件说不清的事情，于是继续往前走，准备等有机会时再看看究竟发生了什么。',
+      description: '最初她照常生活，随后遇见一些变化，接着又得到几条信息。事情逐渐变得复杂，她尝试处理，却始终没有明确目标。后来她发现先前理解并不完整，于是继续观察。最终事情出现新的解释，但她仍然只是顺着情况往前走，没有形成必须承担的选择和兑现。',
+      protagonist: '一个想把生活过好的普通上班族，但当前没有清晰的迫近目标。',
+      coreConflict: '她面对越来越复杂的情况，却没有形成双方主动争夺同一利益的具体冲突。',
+      uniquePoint: '一个暂时说不清楚的生活秘密，会在后面逐渐出现新的解释。',
+      mainReversal: '后来她知道事情和最初理解不同，但这个信息没有改变她的目标或关系。',
+      noveltyProof: {
+        familiarShell: '都市生活悬疑', uncommonCombination: '普通通勤、模糊秘密和零散信息组成观察过程',
+        avoidedPatterns: '避免直接套用知名作品', irreplaceableWhy: '当前载体仍可替换，正是最终 Gate 应识别的问题',
+        secondOrderConsequence: '事情变化后周围人的态度有所变化，但没有形成明确利益重组',
+        readerQuestion: '那件事情后来到底会怎样发展下去呢？',
+      },
+    };
+
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: [premiseOne, premiseTwo] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [weakCard] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ patches: [{}] }) });
+    const controller = Object.create(ChainController.prototype) as any;
+    controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    controller.ideaAppealGate = new IdeaAppealGateService();
+    controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    controller.db = {
+      getDb: () => ({
+        prepare: () => ({ all: () => [] }),
+      }),
+    };
+
+    const result = await controller.runIdeaDiscovery({
+      storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
+      storyTone: ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
+      submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
+      targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
+    }, 2);
+
+    expect(generate).toHaveBeenCalledTimes(4);
+    expect(result.success).toBe(true);
+    expect(result.ideas).toHaveLength(1);
+    expect(result.ideas[0].sourcePremiseId).toBe('P1');
+    expect(result.totalIdeas).toBe(1);
+    expect(result.qualityWarning).toContain('最终 Gate 通过 1 个');
+    expect(result.appealGate).toEqual(expect.objectContaining({
+      premiseSelected: 2,
+      generated: 2,
+      qualified: 1,
+      returned: 1,
+      rejected: 1,
+    }));
+  });
+});
+''')
+          PY
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+      - name: Typecheck
+        working-directory: server
+        run: npm run typecheck
+      - name: Focused regressions
+        working-directory: server
+        run: npx vitest run src/chain/idea-discovery-contract.spec.ts src/chain/idea-appeal-gate.service.spec.ts src/chain/idea-appeal-gate.story-regression.spec.ts src/chain/chain-planning.controller.idea-appeal.spec.ts src/chain/chain-route-architecture.spec.ts src/chain/chain.controller.helpers.spec.ts
+      - name: Commit fix and remove temporary runner
+        run: |
+          rm .github/workflows/apply-idea-discovery-evidence-contract.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: preserve preselection evidence through idea gate'
+          git push origin main
