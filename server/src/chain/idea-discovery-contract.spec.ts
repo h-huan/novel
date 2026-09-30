@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SHORT_IDEA_HOOK_MIN_SIGNALS,
   applyOrderedIdeaRepairPatches,
+  bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
   ideaGateLocalRepairDirective,
   ideaHookRequirement,
@@ -114,20 +115,48 @@ describe('idea discovery preselection contract', () => {
     expect(contract).not.toContain('有限篇幅内形成单线闭环');
   });
 
-  it('structures only the premises already selected before card creation', () => {
-    const directive = ideaCardStructuringDirective([
-      { premiseId: 'P2', workingTitle: '候选二', coreConflict: '冲突二' },
-      { premiseId: 'P7', workingTitle: '候选七', coreConflict: '冲突七' },
-    ]);
+  it('structures one preselected premise at a time without exposing its opaque id to the model', () => {
+    const directive = ideaCardStructuringDirective({
+      premiseId: 'P2',
+      workingTitle: '候选二',
+      storyCore: '主角在不可替换的职业责任中被迫做出选择',
+      coreConflict: '冲突二',
+    });
 
-    expect(directive).toContain('完整题材卡结构化');
+    expect(directive).toContain('恰好 1 张完整题材卡');
     expect(directive).toContain('不再重新选题');
-    expect(directive).toContain('sourcePremiseId：["P2","P7"]');
-    expect(directive).toContain('禁止替换、合并、拆分、另造题材');
-    expect(directive).toContain('最终 Gate 只做独立验收');
-    expect(directive).toContain('不是自动补生另一批题材');
+    expect(directive).toContain('服务器已经锁定题材身份');
+    expect(directive).toContain('候选二');
+    expect(directive).not.toContain('P2');
+    expect(directive).toContain('不要输出 premiseId、sourcePremiseId');
+    expect(directive).toContain('不是自动补生或改写其它题材');
   });
 
+  it('binds each one-card response back to the server-owned selected premise identity', () => {
+    const selected = Array.from({ length: 5 }, (_, index) => ({
+      premiseId: `P${index + 1}`,
+      workingTitle: `候选${index + 1}`,
+    }));
+    const cards = selected.map((premise, index) => bindStructuredIdeaCardToPremise(premise, [{
+      sourcePremiseId: 'MODEL_SHOULD_NOT_OWN_THIS',
+      premiseId: 'MODEL_INTERNAL_ID',
+      title: `完整卡${index + 1}`,
+      hook: `这是第${index + 1}张完整题材卡的具体钩子`,
+    }]));
+
+    expect(cards).toHaveLength(5);
+    expect(cards.map(card => card.sourcePremiseId)).toEqual(['P1', 'P2', 'P3', 'P4', 'P5']);
+    expect(cards.map(card => card.title)).toEqual(['完整卡1', '完整卡2', '完整卡3', '完整卡4', '完整卡5']);
+    expect(cards.every(card => card.premiseId === undefined)).toBe(true);
+  });
+
+  it('rejects zero or multiple full cards for one selected premise instead of hiding the mismatch in a batch', () => {
+    const premise = { premiseId: 'P3', workingTitle: '候选三' };
+    expect(() => bindStructuredIdeaCardToPremise(premise, []))
+      .toThrow('返回 0 张，期望恰好 1 张');
+    expect(() => bindStructuredIdeaCardToPremise(premise, [{ title: 'A' }, { title: 'B' }]))
+      .toThrow('返回 2 张，期望恰好 1 张');
+  });
 
   it('keeps final-gate premise identity on the server instead of asking the model to echo opaque ids', () => {
     const directive = ideaGateLocalRepairDirective([

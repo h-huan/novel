@@ -42,6 +42,20 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('pool.length < premisePoolSize || malformed');
   });
 
+  it('materializes each selected premise as exactly one independent full card instead of one five-card JSON batch', () => {
+    const source = read('chain.controller.ts');
+
+    expect(source).toContain('const generateStructuredCard = async');
+    expect(source).toContain('for (let index = 0; index < selectedPremises.length; index += 1)');
+    expect(source).toContain('structuredCards.push(await generateStructuredCard(selectedPremise, index))');
+    expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas)');
+    expect(source).toContain("structuringProtocol: 'one_selected_premise_per_call_server_owned_identity'");
+    expect(source).not.toContain('generateBatch(requestedCount');
+    expect(source).not.toContain('const generateBatch = async');
+    expect(source).not.toContain('完整题材卡结构化应与创建前筛选出的');
+    expect(source).not.toContain('\\"sourcePremiseId\\":\\"P1\\"');
+  });
+
   it('never reports a partial idea batch as successful after the final gate', () => {
     const source = read('chain.controller.ts');
 

@@ -130,7 +130,7 @@ import {
   validateForeshadowingBoundary,
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideLengthContinuation, decideProgressiveRepair } from './adaptive-repair';
-import { applyOrderedIdeaRepairPatches, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
+import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
@@ -4888,7 +4888,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const exampleWords = configuredTargetWords ?? (dto.storyType === 'short_story' ? 20_000 : 300_000);
       const exampleChapters = dto.storyType === 'short_story' ? 4 : 90;
       const hookRequirement = ideaHookRequirement(dto.storyType);
-      const outputSchema = `{"ideas":[{"sourcePremiseId":"P1","title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"${hookRequirement}","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"主角身份、欲望和弱点","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务"}],"scopeReason":"篇幅核算理由","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转","irreplaceableWhy":"去掉这个职业/关系/机制任一项后故事为何不成立","secondOrderConsequence":"规则启动后的二阶后果：谁额外受益/受损、关系或目标如何被迫改变","readerQuestion":"读者看完首屏后必须追问的一个具体问题"}}]}`;
+      const outputSchema = `{"ideas":[{"title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"${hookRequirement}","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"主角身份、欲望和弱点","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务"}],"scopeReason":"篇幅核算理由","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转","irreplaceableWhy":"去掉这个职业/关系/机制任一项后故事为何不成立","secondOrderConsequence":"规则启动后的二阶后果：谁额外受益/受损、关系或目标如何被迫改变","readerQuestion":"读者看完首屏后必须追问的一个具体问题"}}]}`;
 
       const outputExample = JSON.parse(outputSchema);
       const exampleIdea = outputExample.ideas[0];
@@ -4910,7 +4910,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const chosen = selected as string[];
         return chosen.length
           ? `${field} 必须原样为 ${JSON.stringify(chosen)}`
-          : `${field} 未预选；每个题材从字典 ${JSON.stringify(options)} 中选择${field === 'pov' ? '恰好1项字符串' : '1-2项数组'}，同批题材尽量采用不同组合`;
+          : `${field} 未预选；每个题材从字典 ${JSON.stringify(options)} 中选择${field === 'pov' ? '恰好1项字符串' : '1-2项数组'}，为当前已选题材选择最契合的组合，不得为了追求差异改写题材`;
       }).join('；');
       const submissionRule = dto.submissionTags.length
         ? `submissionTags 必须原样为 ${JSON.stringify(dto.submissionTags)}`
@@ -4995,14 +4995,13 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
       };
 
       const buildPrompt = (
-        count: number,
         excludes: Array<{ title: string; hook?: string; description?: string }>,
-        selectedPremises: any[] = [],
+        selectedPremise: Record<string, unknown>,
       ) => {
         const excludeText = excludes.length
           ? `\n历史作品与本次明确排除题材（标题、职业场景、异常机制、核心冲突、代价和反转均不得换名复用）：\n${excludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 160)}` : ''}`).join('\n')}`
           : '';
-        const structureText = ideaCardStructuringDirective(selectedPremises);
+        const structureText = ideaCardStructuringDirective(selectedPremise);
         // 灵感阶段就把该平台分类的头部实测体量锚点交给模型。
         // 不带锚点，模型只能凭故事类型自由选体量：长篇默认挑 10-30 万，落到具体平台分类下就落在
         // 头部实测区间外，创建入口/生成入口/质量 Gate 三处都会按「未执行标准」拦下，作者只能回头
@@ -5024,13 +5023,13 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
           ? storyTargetWordsRequirement(dto.storyType, chapterRange)
           : `每项 estimatedWords 必须严格等于 ${configuredTargetWords}。`;
         return `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
-请一次生成 ${count} 个互不重复、可直接创建作品的${dto.storyType === 'short_story' ? '短篇' : '长篇'}题材。只输出一个合法 JSON 对象，不输出分析过程、Markdown 或额外文字。
+请把下方【完整题材卡结构化】中的唯一一个已选${dto.storyType === 'short_story' ? '短篇' : '长篇'}题材胚子结构化为恰好 1 张完整题材卡。只输出一个合法 JSON 对象，不输出分析过程、Markdown 或额外文字。
 
  本次执行设定：目标平台=${dto.platform}；分类=${dto.storyCategory}；创作流派=${dto.webNovelGenre.join('、')}；平台作品标签=${dto.submissionTags.join('、')}；基调=${dto.storyTone.join('、')}；文风=${dto.writingStyle.join('、')}；视角=${dto.pov}${dto.plotTags.length ? '；情节取向=' + dto.plotTags.join('、') : ''}${dto.genreFitNote ? '；标签与分类契合依据=' + dto.genreFitNote : ''}。${categoryWritingBrief ? '\n分类证据：' + categoryWritingBrief : '\n此分类尚无已核验的官方标签，不编造平台标签。'}${categoryAnchorText}
 硬性要求：
 1. targetPlatform 必须原样等于“${dto.platform}”，storyType 必须等于“${dto.storyType}”；不得推荐或改写平台。
 2. ${targetRule} plannedChapters 必须满足 estimatedWords ÷ 章节数落在每章 ${chapterRange.min}-${chapterRange.max} 字；scopeBreakdown 的章节合计必须等于 plannedChapters。
- 3. 已选值必须原样继承；留空维度按创作字典为每个题材显式组合，不得空着创建：${autoSelectionRules}；${submissionRule}。每项 JSON 必须额外包含 storyCategory="${dto.storyCategory}"、submissionTags 数组及 plotTags 数组；示例 JSON 中的空数组只是字段形状，不代表可留空。题材、钩子、事件链必须体现这些选择。同批题材在职业/生存环境、关系结构、压力来源、核心机制、时间结构、真相载体和结局代价中至少四个维度不同，不能只是替换姓名和地点。
+ 3. 已选值必须原样继承；留空维度按创作字典为每个题材显式组合，不得空着创建：${autoSelectionRules}；${submissionRule}。每项 JSON 必须额外包含 storyCategory="${dto.storyCategory}"、submissionTags 数组及 plotTags 数组；示例 JSON 中的空数组只是字段形状，不代表可留空。题材、钩子、事件链必须体现这些选择。与其它已选题材的差异已经在创建前筛选阶段确定，本阶段只忠实结构化当前胚子，不得为了制造差异换题。
 4. 每项从改变主角命运的具体事件起步，写清目标、阻力、失败代价、行动时限、连续升级、不可逆选择和有效反转。短篇单线闭环；长篇保留可持续成长、关系和伏笔空间。
 5. 标题、职业场景、时代、冲突和反转均要互不重复；不得套用知名作品或真实人物事件，不得产出违规内容。
 6. 新颖性不是堆设定，也不是自己写一句“独特”。每项先选读者熟悉的类型外壳，再把【具体生活载体/职业】、【不可互换的人物关系】、【异常机制】组成一个彼此依赖的冲突；noveltyProof 必须写清 irreplaceableWhy、secondOrderConsequence、readerQuestion。凡可概括为“某种行为→直接受到超常惩罚/奖励”“发现秘密→一路追查”“获得能力→一路升级”，且去掉具体职业/关系后故事仍成立的，视为可替换模板，必须淘汰重想。核心机制启动后至少产生一个二阶后果：改变谁受益/谁受损、迫使关系重组、改变主角目标或制造真正两难；不能只有直接报应。若仍是历史题材的同一机制、同一追查路径或同一反转，也必须淘汰重想。
@@ -5038,22 +5037,28 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
 8. 同一题材的 hook、description、规则、时间跨度与反转必须共用一套事实：若写每次进入倒退N小时，就不得又写时间固定回到另一数值的N小时前；若历史中已经触发过名单增减，当前起始名单必须反映该变化。逐次变化要能从初始值算到结尾值。
 ${excludeText}${structureText}
 
-JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
+JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       };
 
-      const generateBatch = async (
-        count: number,
-        excludes: Array<{ title: string; hook?: string; description?: string }>,
-        selectedPremises: any[] = [],
-      ): Promise<any[]> => {
+      const generateStructuredCard = async (
+        selectedPremise: Record<string, unknown>,
+        position: number,
+      ): Promise<Record<string, unknown>> => {
         const response = await this.realLLM.generate({
-          prompt: buildPrompt(count, excludes, selectedPremises),
+          prompt: buildPrompt(initialExcludes, selectedPremise),
           scenario: 'idea_generate',
           timeout: LLM_TUNABLES.timeoutSimple(),
+          // 这里只允许底层对“空响应”做一次技术重取；不会换 premise，也不会重新选题。
           maxEmptyRetries: 1,
           responseFormat: 'json_object',
         });
-        return extractIdeaList(response.content || '') || [];
+        const rawIdeas = extractIdeaList(response.content || '') || [];
+        try {
+          return bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          throw new Error(`第 ${position + 1}/${requestedCount} 个已选题材结构化失败：${detail}`);
+        }
       };
 
       const assessIdeaQuality = (candidate: any): string[] => {
@@ -5215,16 +5220,19 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
       const selectedPremises = premiseDiscovery.selected;
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
-      const structuredCards = await generateBatch(requestedCount, initialExcludes, selectedPremises);
-      if (structuredCards.length !== requestedCount) {
-        throw new Error(`完整题材卡结构化应与创建前筛选出的 ${requestedCount} 个题材一一对应；当前只返回 ${structuredCards.length} 张，系统不会另找题材补数。`);
+      const structuredCards: Array<Record<string, unknown>> = [];
+      // 已选题材逐一结构化：用户要 5 个题材时是 5 个 premise 各创建 1 张卡，
+      // 不是把 5 张完整卡塞进一个大 JSON，也不是对同一张卡反复改写 5 次。
+      for (let index = 0; index < selectedPremises.length; index += 1) {
+        const selectedPremise = selectedPremises[index] as Record<string, unknown>;
+        structuredCards.push(await generateStructuredCard(selectedPremise, index));
       }
       const structuredPremiseIds = structuredCards.map((item: any) => String(item?.sourcePremiseId || '').trim());
       const structuredUniqueIds = new Set(structuredPremiseIds);
       const missingPremiseIds = [...selectedPremiseIdSet].filter(id => !structuredUniqueIds.has(id));
       const unknownPremiseIds = [...structuredUniqueIds].filter(id => !selectedPremiseIdSet.has(id));
-      if (structuredUniqueIds.size !== requestedCount || missingPremiseIds.length || unknownPremiseIds.length) {
-        throw new Error(`完整题材卡没有逐一保持创建前筛选结果；缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
+      if (structuredCards.length !== requestedCount || structuredUniqueIds.size !== requestedCount || missingPremiseIds.length || unknownPremiseIds.length) {
+        throw new Error(`完整题材卡没有逐一保持创建前筛选结果；生成=${structuredCards.length}/${requestedCount}，缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
       }
       accept(structuredCards, 'initial');
 
@@ -5288,8 +5296,9 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
         .flatMap((item: any) => Array.isArray(item?.issues) ? item.issues : [])));
       const qualifiedCount = selectedAccepted.length;
       const appealGate = {
-        schemaVersion: 6,
+        schemaVersion: 7,
         mode: 'premise_preselection_then_final_gate_bounded_repair',
+        structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
         repairProtocol: 'ordered_local_patch_server_owned_identity',
         premisePoolSize: premiseDiscovery.pool.length,
         premisePoolTarget: premisePoolSize,
@@ -5313,7 +5322,7 @@ JSON 结构（ideas 必须恰好 ${count} 项）：${outputSchemaWithAuto}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先完成轻量题材池筛选，再结构化完整卡；最终 Gate 未通过时只允许对原 premise 做一次有序局部字段修复，题材身份由服务器持有。修复后仍不足请求数量则整次失败，绝不返回部分成功。',
+        note: '先完成轻量题材池筛选；每个已选 premise 独立结构化恰好一张完整卡，题材身份由服务器绑定，避免批量大 JSON 少卡/错 ID。最终 Gate 未通过时只允许对原 premise 做一次有序局部字段修复；修复后仍不足请求数量则整次失败。',
       };
 
       if (selectedAccepted.length !== requestedCount || finalMissingPremiseIds.length > 0) {

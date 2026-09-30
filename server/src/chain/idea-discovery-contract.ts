@@ -125,17 +125,45 @@ export function ideaPremiseSelectionDirective(
  * 创建前筛选完成后，只把被选中的胚子结构化为完整题材卡；不允许在这里重新选题。
  */
 export function ideaCardStructuringDirective(
-  selectedPremises: readonly Record<string, unknown>[],
+  selectedPremise: Record<string, unknown>,
 ): string {
-  const ids = selectedPremises.map(item => String(item?.premiseId || '').trim()).filter(Boolean);
+  const safePremise = Object.fromEntries(
+    Object.entries(selectedPremise || {}).filter(([key]) => key !== 'premiseId'),
+  );
   return `【完整题材卡结构化】
-以下 ${selectedPremises.length} 个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把它们逐一结构化成完整题材卡，不再重新选题。
-- 每张完整卡必须一一对应 sourcePremiseId：${JSON.stringify(ids)}。
+这个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把这一项结构化成恰好 1 张完整题材卡，不再重新选题。
+- 服务器已经锁定题材身份；不要输出 premiseId、sourcePremiseId 或任何内部标识，系统会在返回后绑定原题材身份。
 - 禁止替换、合并、拆分、另造题材，禁止因为某字段难写就把故事换成更容易过 Gate 的套路。
 - hook、description、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
-- 最终 Gate 只做独立验收；若结构化后仍不成立，系统应暴露管线失败，而不是自动补生另一批题材。
-【已选题材胚子】
-${JSON.stringify(selectedPremises)}`;
+- 最终 Gate 只做独立验收；若这一张结构化后仍不成立，系统应暴露这一题材的管线失败，而不是自动补生或改写其它题材。
+【已选题材胚子（内部标识已由服务器移除）】
+${JSON.stringify(safePremise)}`;
+}
+
+/**
+ * 每个已选 premise 独立结构化一张完整题材卡。
+ * 模型只负责卡片内容；opaque premise 身份始终由服务器绑定，避免批量大 JSON 少卡或错 ID。
+ */
+export function bindStructuredIdeaCardToPremise(
+  selectedPremise: Record<string, unknown>,
+  rawIdeas: unknown,
+): Record<string, unknown> {
+  const premiseId = String(selectedPremise?.premiseId || '').trim();
+  const label = String(selectedPremise?.workingTitle || premiseId || '未知题材').trim();
+  if (!premiseId) throw new Error('完整题材卡结构化缺少服务器持有的 premiseId。');
+  const ideas = Array.isArray(rawIdeas) ? rawIdeas : [];
+  if (ideas.length !== 1) {
+    throw new Error(`题材“${label}”的完整题材卡结构化返回 ${ideas.length} 张，期望恰好 1 张；系统不会换题、补题或重复改写其它题材。`);
+  }
+  const rawCard = ideas[0];
+  if (!rawCard || typeof rawCard !== 'object' || Array.isArray(rawCard)) {
+    throw new Error(`题材“${label}”的完整题材卡不是合法对象；系统不会猜测或换题。`);
+  }
+  const safeCard = Object.fromEntries(
+    Object.entries(rawCard as Record<string, unknown>)
+      .filter(([key]) => key !== 'sourcePremiseId' && key !== 'premiseId'),
+  );
+  return { ...safeCard, sourcePremiseId: premiseId };
 }
 
 const IDEA_GATE_REPAIR_TEXT_FIELDS = [
