@@ -168,7 +168,11 @@ it('generates a complete idea batch through preselection plus structuring and re
       if (generationCall === 1) {
         return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
       }
-      return { content: JSON.stringify({ ideas: [1, 2, 3, 4, 5].map(makeIdea) }) };
+      const cardIndex = generationCall - 1;
+      if (cardIndex >= 1 && cardIndex <= 5) {
+        return { content: JSON.stringify({ ideas: [makeIdea(cardIndex)] }) };
+      }
+      throw new Error(`unexpected idea generation call: ${generationCall}`);
     }),
   };
   const controller = Object.create(ChainController.prototype);
@@ -185,13 +189,18 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 5,
   });
   expect(duplicate).toEqual(first);
-  expect(realLLM.generate).toHaveBeenCalledTimes(2);
-  expect(realLLM.generate).toHaveBeenNthCalledWith(1, expect.objectContaining({
-    scenario: 'idea_generate', responseFormat: 'json_object', maxEmptyRetries: 1,
-  }));
-  expect(realLLM.generate).toHaveBeenNthCalledWith(2, expect.objectContaining({
-    scenario: 'idea_generate', responseFormat: 'json_object', maxEmptyRetries: 1,
-  }));
+  // 同一请求只执行一条共享主链：1 次创建前筛选 + 5 个不同 premise 各 1 次完整卡结构化。
+  expect(realLLM.generate).toHaveBeenCalledTimes(6);
+  for (let call = 1; call <= 6; call += 1) {
+    expect(realLLM.generate).toHaveBeenNthCalledWith(call, expect.objectContaining({
+      scenario: 'idea_generate', responseFormat: 'json_object', maxEmptyRetries: 1,
+    }));
+  }
+  expect(first.appealGate).toMatchObject({
+    structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
+    generated: 5,
+    returned: 5,
+  });
 });
 
 it('uses read-only code standards and records their exact code version on generation runs', async () => {
@@ -278,9 +287,10 @@ it('injects the user-declared custom platform standard into the idea prompt as t
     customPlatformNote: '每章末尾必须留一个可验证的实物线索；回报以关系变化为主，不用打脸爽点。',
     ...discoveryStandards,
   });
-  // 自定义平台标准应贯穿创建前筛选与完整卡结构化；这里故意让第二阶段返回空卡，验证失败点已经越过筛选阶段。
+  // 自定义平台标准应贯穿创建前筛选与单题材完整卡结构化；这里故意让第一个已选题材返回空卡，验证失败点已经越过筛选阶段。
   expect(result.success).toBe(false);
-  expect(String(result.error)).toContain('完整题材卡结构化应与创建前筛选出的 5 个题材一一对应');
+  expect(String(result.error)).toContain('第 1/5 个已选题材结构化失败');
+  expect(String(result.error)).toContain('返回 0 张，期望恰好 1 张');
   expect(realLLM.generate).toHaveBeenCalledTimes(2);
   const prompt = prompts.join('\n');
   expect(prompt).toContain('每章末尾必须留一个可验证的实物线索');
