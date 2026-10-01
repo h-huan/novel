@@ -18,7 +18,10 @@ fs.rmSync(stageRoot, { recursive: true, force: true });
 fs.mkdirSync(stageModules, { recursive: true });
 fs.cpSync(path.join(serverRoot, 'dist'), stageRoot, { recursive: true });
 fs.copyFileSync(path.join(serverRoot, 'package.json'), path.join(stageRoot, 'package.json'));
-fs.copyFileSync(process.execPath, path.join(stageRoot, 'node.exe'));
+const bundledNodeName = process.platform === 'win32' ? 'node.exe' : 'node';
+const bundledNodePath = path.join(stageRoot, bundledNodeName);
+fs.copyFileSync(process.execPath, bundledNodePath);
+if (process.platform !== 'win32') fs.chmodSync(bundledNodePath, 0o755);
 
 const modelSource = path.join(serverRoot, 'data', 'models', 'bge-small-zh-v1.5-onnx');
 const modelTarget = path.join(stageRoot, 'data', 'models', 'bge-small-zh-v1.5-onnx');
