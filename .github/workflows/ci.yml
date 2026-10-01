@@ -71,6 +71,8 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Verify server launcher syntax
+        run: node --check scripts/dev.js && node --check scripts/prepare-server-runtime.js
       - name: Typecheck
         run: npm run typecheck
       - name: Unit tests
