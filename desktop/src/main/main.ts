@@ -17,6 +17,7 @@ import {
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 // 当前桌面运行环境的 Chromium GPU 子进程可能因图形运行库不可用而
 // 连续崩溃并直接终止整个应用。小说编辑器不依赖 GPU 渲染，启动前关闭
@@ -56,6 +57,8 @@ let isQuitting = false;
 const SERVER_PORT = 3100;
 let lastServerStatus: { running: boolean; port: number; error?: string } = { running: false, port: SERVER_PORT };
 let serverCheckPromise: Promise<boolean> | null = null;
+let managedServerProcess: ChildProcess | null = null;
+let managedServerOutput: string[] = [];
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 function getWindowStatePath(): string {
@@ -346,6 +349,29 @@ function setupAutoUpdater(): void {
 
 // ---------- NestJS 服务连接（服务端固定 3100） ----------
 
+const SERVER_START_TIMEOUT_MS = 30_000;
+const SERVER_HEALTH_INTERVAL_MS = 250;
+const SERVER_OUTPUT_TAIL = 40;
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function rememberServerOutput(chunk: unknown): void {
+  const lines = String(chunk ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) return;
+  managedServerOutput.push(...lines);
+  if (managedServerOutput.length > SERVER_OUTPUT_TAIL) {
+    managedServerOutput = managedServerOutput.slice(-SERVER_OUTPUT_TAIL);
+  }
+}
+
+function broadcastServerStatus(status: { running: boolean; port: number; error?: string }): void {
+  lastServerStatus = status;
+  mainWindow?.webContents.send('server-status', status);
+  launcherWindow?.webContents.send('server-status', status);
+}
+
 async function tryConnectPort(port: number): Promise<boolean> {
   try {
     const healthUrl = `http://127.0.0.1:${port}/api/v1/health`;
@@ -353,35 +379,125 @@ async function tryConnectPort(port: number): Promise<boolean> {
     if (!res.ok) return false;
     const body = await res.json() as { status?: string };
     return body.status === 'ok';
-  } catch { /* 服务未起或被占 */ }
+  } catch { /* 服务未起或端口不可达 */ }
   return false;
 }
 
 async function connectToServer(port: number = SERVER_PORT): Promise<boolean> {
-  if (await tryConnectPort(port)) {
-    lastServerStatus = { running: true, port };
-    console.log(`[server] backend ready at http://127.0.0.1:${port}`);
-    mainWindow?.webContents.send('server-status', { running: true, port });
-    launcherWindow?.webContents.send('server-status', { running: true, port });
-    return true;
-  }
-  return false;
+  if (!(await tryConnectPort(port))) return false;
+  const status = { running: true, port };
+  broadcastServerStatus(status);
+  console.log(`[server] backend ready at http://127.0.0.1:${port}`);
+  return true;
 }
 
 function reportServerUnavailable(port: number, detail?: string): void {
-  const msg = detail || `服务端未运行，请在 server 目录单独启动服务端（固定端口 ${port}）。`;
-  lastServerStatus = { running: false, port, error: msg };
-  console.warn(`[server] backend unavailable on port ${port}`);
-  mainWindow?.webContents.send('server-status', { running: false, port, error: msg });
-  launcherWindow?.webContents.send('server-status', { running: false, port, error: msg });
+  const msg = detail || `服务端启动失败或端口 ${port} 不可用。`;
+  broadcastServerStatus({ running: false, port, error: msg });
+  console.warn(`[server] backend unavailable on port ${port}: ${msg}`);
+}
+
+function stopManagedServer(): void {
+  const child = managedServerProcess;
+  managedServerProcess = null;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    if (child.connected) {
+      child.send?.({ type: 'shutdown' }, () => {
+        try { child.disconnect?.(); } catch { /* already disconnected */ }
+      });
+    } else {
+      child.kill('SIGTERM');
+    }
+  } catch {
+    try { child.kill('SIGTERM'); } catch { /* already stopped */ }
+  }
+}
+
+function managedServerSpec(port: number): { executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } | null {
+  if (!app.isPackaged) return null;
+  const serverRoot = path.join(process.resourcesPath, 'server');
+  const nodeExecutable = path.join(serverRoot, process.platform === 'win32' ? 'node.exe' : 'node');
+  const entry = path.join(serverRoot, 'src', 'main.js');
+  if (!fs.existsSync(nodeExecutable)) throw new Error(`内置服务端 Node 运行时不存在：${nodeExecutable}`);
+  if (!fs.existsSync(entry)) throw new Error(`内置服务端入口不存在：${entry}`);
+  const dataDir = path.join(app.getPath('userData'), 'server-data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  return {
+    executable: nodeExecutable,
+    args: [entry],
+    cwd: serverRoot,
+    env: {
+      ...process.env,
+      PORT: String(port),
+      SERVER_PORT: String(port),
+      DATA_DIR: dataDir,
+      NOVEL_MANAGED_SERVER: '1',
+      NODE_ENV: 'production',
+    },
+  };
+}
+
+async function startManagedServer(port: number): Promise<boolean> {
+  const spec = managedServerSpec(port);
+  if (!spec) {
+    reportServerUnavailable(port, '开发模式后端未启动；请从 desktop 目录运行 npm run dev，由启动器自动拉起服务端。');
+    return false;
+  }
+
+  managedServerOutput = [];
+  const child = spawn(spec.executable, spec.args, {
+    cwd: spec.cwd,
+    env: spec.env,
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    windowsHide: true,
+    shell: false,
+  });
+  managedServerProcess = child;
+  child.stdout?.on('data', chunk => {
+    rememberServerOutput(chunk);
+    process.stdout.write(`[server] ${String(chunk)}`);
+  });
+  child.stderr?.on('data', chunk => {
+    rememberServerOutput(chunk);
+    process.stderr.write(`[server] ${String(chunk)}`);
+  });
+  child.once('error', error => rememberServerOutput(`spawn error: ${error.message}`));
+  child.once('exit', (code, signal) => {
+    if (managedServerProcess === child) managedServerProcess = null;
+    if (!isQuitting && code !== 0) {
+      reportServerUnavailable(port, `受管服务端异常退出（code=${code ?? 'null'}, signal=${signal ?? 'none'}）`);
+    }
+  });
+
+  const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await connectToServer(port)) return true;
+    if (child.exitCode !== null || child.signalCode !== null) break;
+    await delay(SERVER_HEALTH_INTERVAL_MS);
+  }
+
+  const tail = managedServerOutput.slice(-8).join(' | ');
+  stopManagedServer();
+  reportServerUnavailable(port, `内置服务端未在 ${SERVER_START_TIMEOUT_MS / 1000} 秒内就绪${tail ? `：${tail}` : ''}`);
+  return false;
 }
 
 function ensureServerRunning(port = SERVER_PORT): Promise<boolean> {
   if (!serverCheckPromise) {
-    serverCheckPromise = connectToServer(port).then(running => {
-      if (!running) reportServerUnavailable(port);
-      return running;
-    }).finally(() => { serverCheckPromise = null; });
+    serverCheckPromise = (async () => {
+      // 已有健康服务可能是开发者单独启动的后端；直接复用且不接管生命周期。
+      if (await connectToServer(port)) return true;
+      if (managedServerProcess && managedServerProcess.exitCode === null) {
+        const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+          if (await connectToServer(port)) return true;
+          if (!managedServerProcess || managedServerProcess.exitCode !== null) break;
+          await delay(SERVER_HEALTH_INTERVAL_MS);
+        }
+      }
+      return startManagedServer(port);
+    })().finally(() => { serverCheckPromise = null; });
   }
   return serverCheckPromise;
 }
@@ -680,10 +796,14 @@ function registerIpcHandlers(): void {
     },
   );
 
-  ipcMain.handle('stop-server', async (): Promise<IpcResult> => ({
-    success: false,
-    error: '服务端独立运行，管理端不负责关闭服务端。',
-  }));
+  ipcMain.handle('stop-server', async (): Promise<IpcResult> => {
+    if (!managedServerProcess) {
+      return { success: false, error: '当前服务端不是由桌面应用启动，不能由桌面应用关闭。' };
+    }
+    stopManagedServer();
+    broadcastServerStatus({ running: false, port: SERVER_PORT });
+    return { success: true, data: { port: SERVER_PORT, status: 'stopped' } };
+  });
 
   // ===== 项目事件发送 (渲染进程通过 IPC 触发) =====
   // 这些通道由渲染进程调用，向其他渲染进程广播事件
@@ -734,13 +854,15 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', restoreApplicationWindow);
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     registerIpcHandlers();
-    createWindow();
     createTray();
     registerShortcuts();
     setupAutoUpdater();
-    void ensureServerRunning();
+
+    // 窗口创建前先完成服务端启动/复用判定，避免渲染层一启动就请求一个尚不存在的 3100。
+    await ensureServerRunning();
+    createWindow();
 
     app.on('activate', restoreApplicationWindow);
   });
@@ -753,9 +875,10 @@ app.on('window-all-closed', () => {
   }
 });
 
-// 退出前只清理管理端自身资源；独立服务端不受影响。
+// 退出时只关闭由桌面应用自己启动的受管服务端；外部复用的 3100 不受影响。
 app.on('before-quit', () => {
   isQuitting = true;
+  stopManagedServer();
 
   // 保存窗口状态
   saveWindowBounds();
