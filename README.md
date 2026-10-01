@@ -83,7 +83,7 @@ npm run test:e2e
 
 `verify-local.mjs` 既可以用于**运行中故障诊断**，也可以用于**最终完整验收**，不要求整本小说全部生成完成。
 
-为了取得运行时项目、章节、生成记录和 Gate 数据，建议执行时保持 Server 正常运行（默认 `http://127.0.0.1:3100/api/v1`）。如果 Server 不可用，脚本仍会生成报告，但会标记 `server_unavailable`，运行时诊断信息会不完整。
+为了取得运行时项目、章节、生成记录和 Gate 数据，建议执行时保持 Server 正常运行（默认 `http://127.0.0.1:3100/api/v1`）。如果 Server 不可用，脚本仍会生成报告，但只把 `server_unavailable` 作为运行根因，并将题材诊断、执行标准、项目发现和项目检查标记为未执行；不会再把 `project_auto_discovery_failed`、`no_projects_found` 等下游结果误报成独立业务故障。
 
 如果小说生成过程中已经报错，可以立即执行快速诊断，不需要等长短篇全部跑完：
 
@@ -148,7 +148,8 @@ verification/latest.md
 ## 目录
 
 ```text
-desktop/              Electron 主进程、React 界面、前端测试
+desktop/              Electron 主进程、前端测试
+desktop/              Electron 主进程、前端测试
 server/               NestJS API、生成链、质量闭环、SQLite、测试
 QUALITY_EXECUTION.md  唯一执行标准
 verify-local.mjs      本地验收报告生成器
