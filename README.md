@@ -149,7 +149,6 @@ verification/latest.md
 
 ```text
 desktop/              Electron 主进程、前端测试
-desktop/              Electron 主进程、前端测试
 server/               NestJS API、生成链、质量闭环、SQLite、测试
 QUALITY_EXECUTION.md  唯一执行标准
 verify-local.mjs      本地验收报告生成器
