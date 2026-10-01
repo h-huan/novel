@@ -123,6 +123,11 @@ function projectSelectionSummary(project) {
   };
 }
 
+// Runtime diagnostics depend on the same backend. Establish that prerequisite once,
+// then skip dependent probes when it is unavailable instead of reporting cascaded
+// project/standard failures that are only consequences of the same root cause.
+const health = await request('/health');
+
 const projectDiscovery = {
   attempted: false,
   ok: true,
@@ -136,12 +141,17 @@ const projectDiscovery = {
           ? 'auto_latest_active_pair'
           : 'diagnostic_latest_projects',
   error: null,
+  skippedReason: null,
   candidates: 0,
   short: null,
   long: null,
 };
 
-if (!singleMode && (!shortProjectId || !longProjectId)) {
+if (!health.ok) {
+  projectDiscovery.ok = false;
+  projectDiscovery.skippedReason = 'server_unavailable';
+  projectDiscovery.error = 'skipped: server unavailable';
+} else if (!singleMode && (!shortProjectId || !longProjectId)) {
   projectDiscovery.attempted = true;
   const discoveryEndpoint = runFull
     ? '/projects?status=active&limit=100&offset=0'
@@ -281,9 +291,18 @@ if (runFull) {
   }
 }
 
-const health = await request('/health');
-const ideaDiscoveryResponse = await request('/chain/idea-discovery-diagnostics/latest');
-const standardsResponse = await request('/module-standards');
+const skippedRuntimeRequest = (label) => ({
+  ok: false,
+  status: null,
+  error: `skipped: server unavailable (${label})`,
+  data: null,
+});
+const ideaDiscoveryResponse = health.ok
+  ? await request('/chain/idea-discovery-diagnostics/latest')
+  : skippedRuntimeRequest('idea-discovery');
+const standardsResponse = health.ok
+  ? await request('/module-standards')
+  : skippedRuntimeRequest('module-standards');
 const standards = asArray(standardsResponse.data);
 const codeSeedVersion = seedVersion();
 const standardMismatch = standards.filter((s) => {
@@ -299,10 +318,20 @@ const standardMismatch = standards.filter((s) => {
 }));
 
 const inspectedProjects = {};
-for (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);
+if (health.ok) {
+  for (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);
+}
 
 const runtime = {
   health,
+  preflight: health.ok
+    ? { ok: true, rootCause: null, downstreamSkipped: [] }
+    : {
+        ok: false,
+        rootCause: 'server_unavailable',
+        downstreamSkipped: ['ideaDiscovery', 'standards', 'projectDiscovery', 'projects'],
+        detail: health.error ?? `HTTP ${health.status}`,
+      },
   ideaDiscovery: ideaDiscoveryResponse.ok
     ? unwrap(ideaDiscoveryResponse.data)
     : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` },
@@ -336,16 +365,20 @@ const gitInfo = {
 
 const failedTests = tests.filter((x) => x.status !== 'passed');
 const runtimeProblems = [];
-if (!health.ok) runtimeProblems.push('server_unavailable');
-if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
-if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
-if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
-if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
-if (!runFull && runtime.ideaDiscovery?.available === true && runtime.ideaDiscovery?.audit?.success === false) {
-  runtimeProblems.push('latest_idea_discovery_failed');
+if (!health.ok) {
+  // Root-cause-first: downstream runtime checks were not executed.
+  runtimeProblems.push('server_unavailable');
+} else {
+  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+  if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
+  if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
+  if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
+  if (!runFull && runtime.ideaDiscovery?.available === true && runtime.ideaDiscovery?.audit?.success === false) {
+    runtimeProblems.push('latest_idea_discovery_failed');
+  }
 }
 
-for (const target of projectTargets) {
+if (health.ok) for (const target of projectTargets) {
   const result = inspectedProjects[target.key];
   const prefix = target.key;
   if (!result?.project || result.project.error) {
@@ -425,6 +458,7 @@ const report = {
   runtime,
   verdict: {
     status: failedTests.length === 0 && runtimeProblems.length === 0 ? 'passed' : 'failed',
+    rootCause: !health.ok ? 'server_unavailable' : (runtimeProblems[0] ?? null),
     failedTests: failedTests.map((x) => x.label),
     runtimeProblems,
   },
@@ -491,7 +525,9 @@ function projectMarkdown(target) {
   return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
-const projectSections = projectTargets.length
+const projectSections = !health.ok
+  ? 'Server 不可用，项目、题材、Gate 与执行标准运行时检查均未执行；本报告只确认到服务连接这一层。'
+  : projectTargets.length
   ? projectTargets.map(projectMarkdown).join('\n\n')
   : runFull
     ? '未找到可做最终验收的项目。请先让至少一个真实短篇和一个真实长篇进入 active，并完成第一章真实生成。'
@@ -507,6 +543,7 @@ const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
 
 console.log(`[verify] ${report.verdict.status.toUpperCase()}`);
+if (!health.ok) console.log('[verify] root cause: server_unavailable; downstream runtime diagnostics skipped');
 if (dualMode) console.log(`[verify] projects short=${shortProjectId ?? 'NOT_FOUND'} long=${longProjectId ?? 'NOT_FOUND'} (${selectionMode})`);
 console.log(`[verify] ${path.relative(root, jsonPath)}`);
 console.log(`[verify] ${path.relative(root, mdPath)}`);
