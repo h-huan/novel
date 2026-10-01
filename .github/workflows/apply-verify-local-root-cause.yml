@@ -1,0 +1,131 @@
+name: Apply verify-local root-cause fix
+on:
+  push:
+    branches: [main]
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'chore: apply verify-local root-cause fix'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch verify-local root-cause handling
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('verify-local.mjs')
+          text = p.read_text(encoding='utf-8-sig')
+
+          def replace(old, new, count=1):
+              global text
+              actual = text.count(old)
+              if actual < count:
+                  raise SystemExit(f'expected at least {count} occurrence(s), found {actual}: {old[:140]!r}')
+              text = text.replace(old, new, count)
+
+          replace(
+          "function projectSelectionSummary(project) {\n  if (!project) return null;\n  return {\n    id: project.id ?? null,\n    title: project.title ?? null,\n    type: projectType(project),\n    status: project.status ?? null,\n    updatedAt: project.updatedAt ?? project.updated_at ?? null,\n  };\n}\n\nconst projectDiscovery = {",
+          "function projectSelectionSummary(project) {\n  if (!project) return null;\n  return {\n    id: project.id ?? null,\n    title: project.title ?? null,\n    type: projectType(project),\n    status: project.status ?? null,\n    updatedAt: project.updatedAt ?? project.updated_at ?? null,\n  };\n}\n\n// Runtime diagnostics depend on the same backend. Establish that prerequisite once,\n// then skip dependent probes when it is unavailable instead of reporting cascaded\n// project/standard failures that are only consequences of the same root cause.\nconst health = await request('/health');\n\nconst projectDiscovery = {")
+
+          replace(
+          "  error: null,\n  candidates: 0,",
+          "  error: null,\n  skippedReason: null,\n  candidates: 0,")
+
+          replace(
+          "if (!singleMode && (!shortProjectId || !longProjectId)) {\n  projectDiscovery.attempted = true;",
+          "if (!health.ok) {\n  projectDiscovery.ok = false;\n  projectDiscovery.skippedReason = 'server_unavailable';\n  projectDiscovery.error = 'skipped: server unavailable';\n} else if (!singleMode && (!shortProjectId || !longProjectId)) {\n  projectDiscovery.attempted = true;")
+
+          replace(
+          "const health = await request('/health');\nconst ideaDiscoveryResponse = await request('/chain/idea-discovery-diagnostics/latest');\nconst standardsResponse = await request('/module-standards');",
+          "const skippedRuntimeRequest = (label) => ({\n  ok: false,\n  status: null,\n  error: `skipped: server unavailable (${label})`,\n  data: null,\n});\nconst ideaDiscoveryResponse = health.ok\n  ? await request('/chain/idea-discovery-diagnostics/latest')\n  : skippedRuntimeRequest('idea-discovery');\nconst standardsResponse = health.ok\n  ? await request('/module-standards')\n  : skippedRuntimeRequest('module-standards');")
+
+          replace(
+          "const inspectedProjects = {};\nfor (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);",
+          "const inspectedProjects = {};\nif (health.ok) {\n  for (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);\n}")
+
+          replace(
+          "const runtime = {\n  health,\n  ideaDiscovery:",
+          "const runtime = {\n  health,\n  preflight: health.ok\n    ? { ok: true, rootCause: null, downstreamSkipped: [] }\n    : {\n        ok: false,\n        rootCause: 'server_unavailable',\n        downstreamSkipped: ['ideaDiscovery', 'standards', 'projectDiscovery', 'projects'],\n        detail: health.error ?? `HTTP ${health.status}`,\n      },\n  ideaDiscovery:")
+
+          old = """const failedTests = tests.filter((x) => x.status !== 'passed');
+const runtimeProblems = [];
+if (!health.ok) runtimeProblems.push('server_unavailable');
+if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
+if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
+if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
+if (!runFull && runtime.ideaDiscovery?.available === true && runtime.ideaDiscovery?.audit?.success === false) {
+  runtimeProblems.push('latest_idea_discovery_failed');
+}
+
+for (const target of projectTargets) {
+"""
+          new = """const failedTests = tests.filter((x) => x.status !== 'passed');
+const runtimeProblems = [];
+if (!health.ok) {
+  // Root-cause-first: when the runtime prerequisite is unavailable, downstream
+  // project/standard/Gate diagnostics were not executed and must not be reported
+  // as independent failures.
+  runtimeProblems.push('server_unavailable');
+} else {
+  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+  if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
+  if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
+  if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
+  if (!runFull && runtime.ideaDiscovery?.available === true && runtime.ideaDiscovery?.audit?.success === false) {
+    runtimeProblems.push('latest_idea_discovery_failed');
+  }
+}
+
+if (health.ok) for (const target of projectTargets) {
+"""
+          replace(old, new)
+
+          replace(
+          "  verdict: {\n    status: failedTests.length === 0 && runtimeProblems.length === 0 ? 'passed' : 'failed',\n    failedTests: failedTests.map((x) => x.label),\n    runtimeProblems,\n  },",
+          "  verdict: {\n    status: failedTests.length === 0 && runtimeProblems.length === 0 ? 'passed' : 'failed',\n    rootCause: !health.ok ? 'server_unavailable' : (runtimeProblems[0] ?? null),\n    failedTests: failedTests.map((x) => x.label),\n    runtimeProblems,\n  },")
+
+          replace(
+          "const projectSections = projectTargets.length\n  ? projectTargets.map(projectMarkdown).join('\\n\\n')\n  : runFull",
+          "const projectSections = !health.ok\n  ? 'Server 不可用，项目、题材、Gate 与执行标准运行时检查均未执行；本报告只确认到服务连接这一层。'\n  : projectTargets.length\n  ? projectTargets.map(projectMarkdown).join('\\n\\n')\n  : runFull")
+
+          replace(
+          "console.log(`[verify] ${report.verdict.status.toUpperCase()}`);\nif (dualMode)",
+          "console.log(`[verify] ${report.verdict.status.toUpperCase()}`);\nif (!health.ok) console.log('[verify] root cause: server_unavailable; downstream runtime diagnostics skipped');\nif (dualMode)")
+
+          p.write_text(text, encoding='utf-8')
+          PY
+      - name: Syntax check
+        run: node --check verify-local.mjs
+      - name: Root-cause smoke test
+        run: |
+          set +e
+          node verify-local.mjs --base http://127.0.0.1:59999/api/v1
+          code=$?
+          set -e
+          test "$code" -ne 0
+          node - <<'NODE'
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('verification/latest.json', 'utf8'));
+          if (report.verdict?.rootCause !== 'server_unavailable') throw new Error('missing server_unavailable root cause');
+          if (JSON.stringify(report.verdict?.runtimeProblems) !== JSON.stringify(['server_unavailable'])) {
+            throw new Error(`cascaded runtime problems were not suppressed: ${JSON.stringify(report.verdict?.runtimeProblems)}`);
+          }
+          if (report.runtime?.projectDiscovery?.skippedReason !== 'server_unavailable') throw new Error('project discovery was not marked skipped');
+          if (!Array.isArray(report.runtime?.preflight?.downstreamSkipped) || !report.runtime.preflight.downstreamSkipped.includes('ideaDiscovery')) {
+            throw new Error('downstream skip metadata missing');
+          }
+          NODE
+      - name: Commit fix and remove temporary workflow
+        run: |
+          rm .github/workflows/apply-verify-local-root-cause.yml
+          rm -rf verification
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add verify-local.mjs .github/workflows/apply-verify-local-root-cause.yml
+          git commit -m "fix: report verify-local runtime root cause"
+          git push origin HEAD:main
