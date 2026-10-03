@@ -67,10 +67,13 @@ jobs:
           text = p.read_text(encoding='utf-8-sig')
           start = "    // 创建阶段由生成链负责上层→下层审查；这里只建立唯一世界观档案。\n    this.service.updateProfile(projectId, result.id, {"
           end = "    const sync = await this.indexWorldSetting(projectId, result);"
-          if text.count(start) != 1 or text.count(end) != 1:
-              raise RuntimeError('controller atomic create markers are not unique')
+          if text.count(start) != 1:
+              raise RuntimeError(f'controller atomic create start marker expected 1 match, got {text.count(start)}')
           a = text.index(start)
-          b = text.index(end, a)
+          try:
+              b = text.index(end, a)
+          except ValueError as error:
+              raise RuntimeError('controller atomic create end marker not found after create block') from error
           text = text[:a] + "    // service.create 已在同一事务写入初始 profile；返回后世界观立即冻结。\n" + text[b:]
           p.write_text(text, encoding='utf-8')
           print('patched controller to avoid post-freeze updateProfile')
