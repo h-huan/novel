@@ -47,10 +47,18 @@ export interface CreationStepStatus {
   done: 'pending' | 'running' | 'done' | 'failed';
 }
 
+const clampIdeaCount = (value: unknown): number => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return 5;
+  return Math.max(1, Math.min(10, parsed));
+};
+
 interface DiscoveryState {
   // Step 1: 配置
   step: number;
   storyType: 'short_story' | 'long_novel';
+  /** 本轮必须返回的合格灵感故事卡数量；后端支持 1-10，默认 5。 */
+  ideaCount: number;
   /** 目标平台 = 执行标准里的「平台」这一维。字段名与 ExecutionStandardsValue.targetPlatform 一致，
    *  这样前端唯一的平台判据 platformStandardProblem(state) 可以直接吃整个 store，不必再加一层适配。 */
   targetPlatform: string;
@@ -107,6 +115,7 @@ interface DiscoveryState {
   // Actions
   setStep: (step: number) => void;
   setStoryType: (type: 'short_story' | 'long_novel') => void;
+  setIdeaCount: (count: number) => void;
   setTargetPlatform: (targetPlatform: string) => void;
   setCustomPlatformNote: (note: string) => void;
   setSelectedTones: (tones: string[]) => void;
@@ -160,6 +169,7 @@ const INITIAL_STEP_STATUS: CreationStepStatus = {
 const INITIAL_STATE = {
   step: 0,
   storyType: 'short_story' as const,
+  ideaCount: 5,
   // 不预设平台：平台是执行前提，不能由系统替用户先选好一个（那等于用一个默认值冒充标准）。
   targetPlatform: '',
   customPlatformNote: '',
@@ -206,6 +216,14 @@ export const useDiscoveryStore = create<DiscoveryState>()(
       setStoryType: (storyType) => set((state) => state.storyType === storyType ? state : {
         storyType, selectedCategory: '', selectedSubCategory: '', selectedSubmissionTags: [], genreFitNote: '', targetAudience: '',
         ideas: [], generatedSignature: null, generationDone: false, prevTitles: [], excludeDetails: [],
+      }),
+      setIdeaCount: (count) => set((state) => {
+        const ideaCount = clampIdeaCount(count);
+        if (state.ideaCount === ideaCount) return state;
+        return {
+          ideaCount,
+          ideas: [], generatedSignature: null, generationDone: false, prevTitles: [], excludeDetails: [],
+        };
       }),
       // 这里曾把作者基调/文风也当作平台投稿标签一并清空，切平台就丢掉创作意图。
       // 只清空平台分类和与分类绑定的流派/作品标签；情节与创作手法保留供作者复核。
@@ -281,15 +299,9 @@ export const useDiscoveryStore = create<DiscoveryState>()(
     }),
     {
       name: 'discovery-store',
-      // 只持久化用户配置和发现结果（跨会话有意义的）
-      // ❌ 不持久化以下瞬时状态：
-      //   - step（向导位置，刷新后应重新判断）
-      //   - isGenerating / genProgress（生成中状态）
-      //   - 创建流程全部状态（isCreating、progress、stepStatus、errors、warnings、projectId）
-      //   - SSE 连接追踪（页面刷新后连接已断）
       partialize: (state) => ({
-        // === 用户配置（可跨会话保留）===
         storyType: state.storyType,
+        ideaCount: state.ideaCount,
         targetPlatform: state.targetPlatform,
         selectedTones: state.selectedTones,
         selectedWritingStyles: state.selectedWritingStyles,
@@ -304,15 +316,15 @@ export const useDiscoveryStore = create<DiscoveryState>()(
         targetAudience: state.targetAudience,
         customPlatformNote: state.customPlatformNote,
         categoryWordScaleDeviation: state.categoryWordScaleDeviation,
-        // === 发现结果（可跨会话保留，用户可回顾）===
       }),
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         const old = persisted as Partial<DiscoveryState>;
+        const ideaCount = clampIdeaCount(old.ideaCount ?? 5);
         // v2 的 selectedGenres 曾同时承载番茄作品标签和创作流派，不能迁入新流派字段。
-        // 仅在番茄长篇可识别为旧投稿标签时迁入新字段；其余值要求作者重选，防风格串位。
         if (version === 2) return {
           storyType: old.storyType === 'long_novel' ? 'long_novel' as const : 'short_story' as const,
+          ideaCount,
           targetPlatform: old.targetPlatform || '',
           selectedTones: old.selectedTones || [],
           selectedWritingStyles: old.selectedWritingStyles || [],
@@ -328,9 +340,28 @@ export const useDiscoveryStore = create<DiscoveryState>()(
           customPlatformNote: old.customPlatformNote || '',
           categoryWordScaleDeviation: old.categoryWordScaleDeviation || '',
         };
-        // 旧版 selectedTones 同时包含基调/文风/流派，无法无损判别；要求作者重新明确三维。
+        // v3 已经把创作维度拆开，只补 ideaCount；更旧版本仍要求作者重新明确三维。
+        if (version === 3) return {
+          storyType: old.storyType === 'long_novel' ? 'long_novel' as const : 'short_story' as const,
+          ideaCount,
+          targetPlatform: old.targetPlatform || '',
+          selectedTones: old.selectedTones || [],
+          selectedWritingStyles: old.selectedWritingStyles || [],
+          selectedGenres: old.selectedGenres || [],
+          selectedSubmissionTags: old.selectedSubmissionTags || [],
+          selectedPlotTags: old.selectedPlotTags || [],
+          genreFitNote: old.genreFitNote || '',
+          targetWords: old.targetWords || '',
+          selectedCategory: old.selectedCategory || '',
+          selectedSubCategory: old.selectedSubCategory || '',
+          narrativePov: old.narrativePov || '',
+          targetAudience: old.targetAudience || '',
+          customPlatformNote: old.customPlatformNote || '',
+          categoryWordScaleDeviation: old.categoryWordScaleDeviation || '',
+        };
         return {
           storyType: old.storyType === 'long_novel' ? 'long_novel' as const : 'short_story' as const,
+          ideaCount,
           targetPlatform: old.targetPlatform || '',
           selectedTones: [], selectedWritingStyles: [], selectedGenres: [],
           selectedSubmissionTags: [],
@@ -345,11 +376,9 @@ export const useDiscoveryStore = create<DiscoveryState>()(
           categoryWordScaleDeviation: old.categoryWordScaleDeviation || '',
         };
       },
-      // 清理旧版 localStorage 中残留的瞬时状态（partialize 不再写这些字段，
-      // 但旧存储中仍有，zustand hydration 时会读回来造成 UI 污染）
       onRehydrateStorage: () => (state) => {
         if (!state) return;
-        // 检测是否有脏数据（任何创建流程的非默认值）
+        state.ideaCount = clampIdeaCount(state.ideaCount);
         const hasDirtyCreation = (
           state.isCreating ||
           state.creationProgress > 0 ||
@@ -362,7 +391,6 @@ export const useDiscoveryStore = create<DiscoveryState>()(
         const hasOldDiscoveryResults = state.ideas.length > 0 || state.generationDone || state.prevTitles.length > 0 || state.excludeDetails.length > 0;
         if (hasDirtyCreation || hasOldDiscoveryResults) {
           console.log('[discovery-store] 检测到旧版残留数据，清理中...');
-          // 只重置瞬时状态，保留用户配置和发现结果
           state.isGenerating = false;
           state.genProgress = '';
           state.isCreating = false;
