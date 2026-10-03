@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readConstitution } from '../project/creative-constitution';
 import { GeneratedCanonGuardService } from './generated-canon-guard.service';
 
 describe('GeneratedCanonGuardService', () => {
@@ -7,30 +6,6 @@ describe('GeneratedCanonGuardService', () => {
     id: 'project-1',
     type: 'long_novel',
     status: 'active',
-    target_words: 120000,
-    target_platform: 'fanqie',
-    writing_style: JSON.stringify(['白描']),
-    settings: JSON.stringify({
-      creativeConstitution: {
-        schemaVersion: 1,
-        revision: 1,
-        projectType: 'long_novel',
-        targetPlatform: 'fanqie',
-        targetWords: 120000,
-        platformRules: {},
-        category: '悬疑',
-        storyTone: ['紧张'],
-        writingStyle: ['白描'],
-        webNovelGenre: ['悬疑'],
-        submissionTags: ['悬疑'],
-        plotTags: ['调查'],
-        genreFitNote: '与悬疑分类和调查主线一致',
-        pov: '第三人称',
-        targetAudience: '',
-        confirmedStory: { title: '旧站', hook: '消失的站台' },
-        chapterWordRange: { min: 3000, max: 5000 },
-      },
-    }),
   };
 
   const passedRun = {
@@ -41,7 +16,6 @@ describe('GeneratedCanonGuardService', () => {
     status: 'success',
     gate_status: 'passed',
     output_text: '{"world":"ok"}',
-    constitution_json: JSON.stringify(readConstitution(projectRow as any)),
   };
 
   const createSubject = (row: any = passedRun, current = true, project: any = projectRow) => {
@@ -85,36 +59,14 @@ describe('GeneratedCanonGuardService', () => {
     expect(generationMetrics.runIsCurrent).toHaveBeenCalledWith('run-1', 'project-1');
   });
 
-  it('keeps same-constitution structured runs valid while their own creation batch changes dependency context', () => {
-    const creatingProject = { ...projectRow, status: 'creating' };
-    const sameConstitutionRun = {
-      ...passedRun,
-      gate_status: 'not_evaluated',
-      constitution_json: JSON.stringify(readConstitution(creatingProject as any)),
-    };
-    const { service } = createSubject(sameConstitutionRun, false, creatingProject);
-    expect(service.assertStructuredCanCommit({
+  it('rejects stale structured runs even while a project is creating', () => {
+    const { service } = createSubject({ ...passedRun, gate_status: 'not_evaluated' }, false, { ...projectRow, status: 'creating' });
+    expect(() => service.assertStructuredCanCommit({
       projectId: 'project-1',
       runId: 'run-1',
       expectedStages: ['world'],
       expectedScenarios: ['world_building'],
-    })).toEqual(expect.objectContaining({ runId: 'run-1' }));
-  });
-
-  it('still rejects a creating-batch run when the Creative Constitution changed', () => {
-    const creatingProject = {
-      ...projectRow,
-      status: 'creating',
-      settings: JSON.stringify({
-        creativeConstitution: {
-          ...(JSON.parse(projectRow.settings) as any).creativeConstitution,
-          revision: 2,
-          pov: '第一人称',
-        },
-      }),
-    };
-    const { service } = createSubject({ ...passedRun, gate_status: 'not_evaluated' }, false, creatingProject);
-    expect(() => service.assertStructuredCanCommit({ projectId: 'project-1', runId: 'run-1' })).toThrow('凭证已过期');
+    })).toThrow('凭证已过期');
   });
 
   it('rejects a missing generation-run credential on both boundaries', () => {
