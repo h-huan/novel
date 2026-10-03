@@ -17,7 +17,8 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
 def regex_once(path: str, pattern: str, replacement: str, label: str) -> None:
     file = ROOT / path
     text = file.read_text(encoding='utf-8-sig')
-    new_text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    # lambda makes replacement literal, so source-code trailing backslashes are not parsed as re-template escapes.
+    new_text, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)
     if count != 1:
         raise RuntimeError(f'{label}: expected exactly 1 regex match, got {count} in {path}')
     file.write_text(new_text, encoding='utf-8')
