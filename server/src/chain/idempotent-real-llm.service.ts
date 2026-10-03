@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { RealLLMService } from './real-llm.service';
 import type { LLMRequest, LLMResponse } from './chain.types';
@@ -10,6 +10,7 @@ import { readConstitution } from '../modules/project/creative-constitution';
 import { compileContext } from '../modules/generation-metrics/context-compiler';
 import { qualityStage } from '../routing/scenario-taxonomy';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
+import { LLM_TUNABLES } from '../config/llm-tunables';
 
 const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
@@ -20,7 +21,10 @@ const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
  * 1) exact successful creation/planning/review calls may be reused after recovery or duplicate orchestration;
  * 2) the historical automatic whole-chapter alignment rewrite is physically blocked;
  * 3) project-scoped outputs carry their generation_runs.id so downstream Canon commits
- *    can prove which exact gated generation produced the artifact.
+ *    can prove which exact gated generation produced the artifact;
+ * 4) an exhausted transient transport failure gets one configurable outer recovery round
+ *    with the exact same configured model/request, so a short socket reset does not abort
+ *    the whole creation pipeline after RealLLM's single immediate network retry.
  *
  * Reuse is deliberately exact: prompt, system prompt, scenario, stepKey, model,
  * temperature, output budget, constitution revision, compiled context, standards and
@@ -28,6 +32,8 @@ const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
  */
 @Injectable()
 export class IdempotentRealLLMService extends RealLLMService {
+  private readonly recoveryLogger = new Logger(IdempotentRealLLMService.name);
+
   constructor(
     private readonly runtimeRouter: ModelRouterService,
     metrics: GenerationMetricsService,
@@ -47,14 +53,14 @@ export class IdempotentRealLLMService extends RealLLMService {
 
     // 非可复用调用仍走同一个真实 LLM/Gate，只在返回后按最终输出做原有的精确 runId 绑定。
     if (!projectId || !this.isReusableCreationCall(request, projectId)) {
-      const response = await super.generate(request);
+      const response = await this.generateWithNetworkRecovery(request);
       return projectId ? this.attachLatestRunId(projectId, scenario, response) : response;
     }
 
     const db = this.database.getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     if (!project) {
-      const response = await super.generate(request);
+      const response = await this.generateWithNetworkRecovery(request);
       return this.attachLatestRunId(projectId, scenario, response);
     }
 
@@ -115,7 +121,7 @@ export class IdempotentRealLLMService extends RealLLMService {
     }
 
     const callStartedAt = new Date().toISOString();
-    const response = await super.generate({ ...request, systemPrompt });
+    const response = await this.generateWithNetworkRecovery({ ...request, systemPrompt });
     if (response.runId) return response;
 
     // The structured creation path already has a complete deterministic fingerprint.
@@ -124,6 +130,42 @@ export class IdempotentRealLLMService extends RealLLMService {
     // matches remain ambiguous and therefore fail closed.
     const completed = matchingRuns().filter(row => String(row.finished_at || '') >= callStartedAt);
     return completed.length === 1 ? { ...response, runId: completed[0].id } : response;
+  }
+
+  /**
+   * RealLLM already performs the immediate same-model transport retry. If that short
+   * retry window is exhausted, recover once more at the provider boundary after a
+   * configurable delay. This intentionally does not switch model/provider, loosen the
+   * prompt, or swallow non-network failures. Each re-entry creates a fresh generation_run,
+   * leaving the failed attempt auditable instead of pretending it succeeded.
+   */
+  private async generateWithNetworkRecovery(request: LLMRequest): Promise<LLMResponse> {
+    const retries = Math.max(0, Math.floor(LLM_TUNABLES.NETWORK_RECOVERY_RETRIES));
+    for (let recoveryAttempt = 0; ; recoveryAttempt += 1) {
+      try {
+        return await super.generate(request);
+      } catch (error) {
+        if (!this.isTransientNetworkFailure(error) || recoveryAttempt >= retries) {
+          throw error;
+        }
+        const delayMs = Math.max(
+          0,
+          Math.floor(LLM_TUNABLES.NETWORK_RECOVERY_DELAY_MS * Math.pow(2, recoveryAttempt)),
+        );
+        this.recoveryLogger.warn(
+          `[provider-network-recovery] 同配置模型恢复 ${recoveryAttempt + 1}/${retries}: `
+          + `scenario=${request.scenario || 'daily'}, step=${request.metrics?.stepKey || 'unknown'}, delayMs=${delayMs}`,
+        );
+        if (delayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+  }
+
+  private isTransientNetworkFailure(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /网络连接失败\(|UND_ERR_SOCKET|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ConnectTimeout|EAI_AGAIN|ENETUNREACH|fetch failed|other side closed|socket hang up|Connection error|terminated/i.test(message);
   }
 
   /**
