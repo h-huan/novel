@@ -1,0 +1,49 @@
+name: Apply canon consistency fix
+on:
+  push:
+    branches: [fix/canon-creation-consistency-20261003]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/canon-creation-consistency-20261003
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply guarded replacements
+        run: python .github/scripts/apply-canon-consistency-fix.py
+      - name: Server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Server typecheck
+        working-directory: server
+        run: npm run typecheck
+      - name: Canon and creation-batch tests
+        working-directory: server
+        run: npx vitest run src/modules/canon/canon-policy.spec.ts src/modules/generation-metrics/generated-canon-guard.service.spec.ts
+      - name: Desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Desktop typecheck
+        working-directory: desktop
+        run: npm run typecheck
+      - name: Remove one-shot patch machinery
+        run: rm -f .github/scripts/apply-canon-consistency-fix.py .github/workflows/apply-canon-consistency-fix.yml
+      - name: Commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: unify canon and creation consistency"
+          git push origin HEAD:fix/canon-creation-consistency-20261003
