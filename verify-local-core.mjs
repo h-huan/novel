@@ -1,0 +1,550 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+
+const root = path.dirname(fileURLToPath(import.meta.url));
+const args = process.argv.slice(2);
+const has = (name) => args.includes(name);
+const valueOf = (name) => {
+  const i = args.indexOf(name);
+  return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
+};
+
+const legacyProjectId = valueOf('--project') || process.env.VERIFY_PROJECT_ID || null;
+const requestedShortProjectId = valueOf('--short-project') || process.env.VERIFY_SHORT_PROJECT_ID || null;
+const requestedLongProjectId = valueOf('--long-project') || process.env.VERIFY_LONG_PROJECT_ID || null;
+const baseUrl = (valueOf('--base') || process.env.VERIFY_BASE_URL || 'http://127.0.0.1:3100/api/v1').replace(/\/$/, '');
+const runFull = has('--full');
+const runE2E = has('--e2e');
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const outDir = path.join(root, 'verification');
+fs.mkdirSync(outDir, { recursive: true });
+
+const now = new Date().toISOString();
+const singleMode = Boolean(legacyProjectId) && !requestedShortProjectId && !requestedLongProjectId;
+let shortProjectId = requestedShortProjectId;
+let longProjectId = requestedLongProjectId;
+
+function runProcess(label, cwd, command, commandArgs) {
+  const started = Date.now();
+  const result = spawnSync(command, commandArgs, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 20 * 1024 * 1024,
+    env: process.env,
+  });
+  const stdout = String(result.stdout || '');
+  const stderr = String(result.stderr || '');
+  const tail = (text) => text.split(/\r?\n/).filter(Boolean).slice(-30).join('\n');
+  return {
+    label,
+    status: result.status === 0 ? 'passed' : 'failed',
+    exitCode: result.status,
+    durationMs: Date.now() - started,
+    stdoutTail: tail(stdout),
+    stderrTail: tail(stderr),
+  };
+}
+
+function git(gitArgs) {
+  const r = spawnSync('git', gitArgs, { cwd: root, encoding: 'utf8' });
+  return r.status === 0 ? String(r.stdout || '').trim() : null;
+}
+
+function seedVersion() {
+  try {
+    const raw = fs.readFileSync(path.join(root, 'server/src/modules/module-standards/module-standards.seed.ts'), 'utf8');
+    const m = raw.match(/SEED_BASELINE_VERSION\s*=\s*(\d+)/);
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function request(endpoint) {
+  try {
+    const response = await fetch(`${baseUrl}${endpoint}`, { signal: AbortSignal.timeout(5000) });
+    let data = null;
+    const text = await response.text();
+    if (text) {
+      try { data = JSON.parse(text); } catch { data = text; }
+    }
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: null, error: error instanceof Error ? error.message : String(error), data: null };
+  }
+}
+
+function unwrap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  if ('data' in value && value.data !== undefined) return value.data;
+  return value;
+}
+
+function asArray(value) {
+  const v = unwrap(value);
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === 'object') {
+    for (const key of ['items', 'rows', 'runs', 'chapters', 'standards', 'data']) {
+      if (Array.isArray(v[key])) return v[key];
+    }
+  }
+  return [];
+}
+
+function pick(obj, keys) {
+  if (!obj || typeof obj !== 'object') return null;
+  const out = {};
+  for (const key of keys) if (obj[key] !== undefined) out[key] = obj[key];
+  return out;
+}
+
+function projectType(project) {
+  const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
+  return String(project?.type ?? constitution?.projectType ?? '').trim() || null;
+}
+
+function projectTime(project) {
+  const raw = project?.updatedAt ?? project?.updated_at ?? project?.createdAt ?? project?.created_at ?? '';
+  const parsed = Date.parse(String(raw));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function projectSelectionSummary(project) {
+  if (!project) return null;
+  return {
+    id: project.id ?? null,
+    title: project.title ?? null,
+    type: projectType(project),
+    status: project.status ?? null,
+    updatedAt: project.updatedAt ?? project.updated_at ?? null,
+  };
+}
+
+// Runtime diagnostics depend on the same backend. Establish that prerequisite once,
+// then skip dependent probes when it is unavailable instead of reporting cascaded
+// project/standard failures that are only consequences of the same root cause.
+const health = await request('/health');
+
+const projectDiscovery = {
+  attempted: false,
+  ok: true,
+  source: singleMode
+    ? 'single_project'
+    : requestedShortProjectId && requestedLongProjectId
+      ? 'explicit_pair'
+      : requestedShortProjectId || requestedLongProjectId
+        ? 'mixed_explicit_and_auto'
+        : runFull
+          ? 'auto_latest_active_pair'
+          : 'diagnostic_latest_projects',
+  error: null,
+  skippedReason: null,
+  candidates: 0,
+  short: null,
+  long: null,
+};
+
+if (!health.ok) {
+  projectDiscovery.ok = false;
+  projectDiscovery.skippedReason = 'server_unavailable';
+  projectDiscovery.error = 'skipped: server unavailable';
+} else if (!singleMode && (!shortProjectId || !longProjectId)) {
+  projectDiscovery.attempted = true;
+  const discoveryEndpoint = runFull
+    ? '/projects?status=active&limit=100&offset=0'
+    : '/projects?limit=100&offset=0';
+  const projectsRes = await request(discoveryEndpoint);
+  if (!projectsRes.ok) {
+    projectDiscovery.ok = false;
+    projectDiscovery.error = projectsRes.error ?? `HTTP ${projectsRes.status}`;
+  } else {
+    const projects = asArray(projectsRes.data)
+      .filter((project) => runFull ? String(project?.status ?? '').toLowerCase() === 'active' : true)
+      .sort((a, b) => projectTime(b) - projectTime(a));
+    projectDiscovery.candidates = projects.length;
+    if (!shortProjectId) shortProjectId = projects.find((project) => projectType(project) === 'short_story')?.id ?? null;
+    if (!longProjectId) longProjectId = projects.find((project) => projectType(project) === 'long_novel')?.id ?? null;
+    projectDiscovery.short = projectSelectionSummary(projects.find((project) => project.id === shortProjectId));
+    projectDiscovery.long = projectSelectionSummary(projects.find((project) => project.id === longProjectId));
+  }
+}
+
+const dualMode = !singleMode;
+const projectTargets = singleMode
+  ? [{ key: 'project', label: '项目', id: legacyProjectId, expectedType: null }]
+  : [
+      shortProjectId ? { key: 'short', label: '短篇', id: shortProjectId, expectedType: 'short_story' } : null,
+      longProjectId ? { key: 'long', label: '长篇', id: longProjectId, expectedType: 'long_novel' } : null,
+    ].filter(Boolean);
+
+function chapterSummary(chapter) {
+  if (!chapter) return null;
+  const content = String(chapter.content ?? chapter.body ?? '');
+  return {
+    id: chapter.id ?? null,
+    index: chapter.chapter_index ?? chapter.chapterIndex ?? chapter.index ?? chapter.order ?? null,
+    title: chapter.title ?? null,
+    status: chapter.status ?? null,
+    contentLength: content.length,
+    wordCount: Number(chapter.word_count ?? chapter.wordCount ?? 0) || 0,
+    locked: chapter.locked ?? chapter.is_locked ?? null,
+  };
+}
+
+function runSummary(run) {
+  if (!run) return null;
+  return pick(run, [
+    'id', 'stage', 'scenario', 'step_key', 'stepKey', 'status', 'gate_status', 'gateStatus',
+    'chapter_index', 'chapterIndex', 'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
+    'context_version', 'contextVersion', 'standard_version', 'standardVersion',
+  ]);
+}
+
+async function inspectProject(target) {
+  const projectId = target.id;
+  const [projectRes, chaptersRes, runsRes, cockpitRes, analyticsRes, integrityRes] = await Promise.all([
+    request(`/projects/${encodeURIComponent(projectId)}`),
+    request(`/projects/${encodeURIComponent(projectId)}/chapters`),
+    request(`/generation-metrics/runs?projectId=${encodeURIComponent(projectId)}&limit=200`),
+    request(`/generation-metrics/cockpit?projectId=${encodeURIComponent(projectId)}`),
+    request(`/platform-analytics/overview?projectId=${encodeURIComponent(projectId)}&days=30`),
+    request(`/chain/generation-recovery/${encodeURIComponent(projectId)}`),
+  ]);
+
+  const project = unwrap(projectRes.data);
+  const chapterRows = asArray(chaptersRes.data).slice().sort((a, b) => {
+    const ai = Number(a.chapter_index ?? a.chapterIndex ?? a.index ?? a.order ?? 0);
+    const bi = Number(b.chapter_index ?? b.chapterIndex ?? b.index ?? b.order ?? 0);
+    return ai - bi;
+  });
+  const runRows = asArray(runsRes.data);
+  const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
+  const confirmedStory = constitution?.confirmedStory && typeof constitution.confirmedStory === 'object' && !Array.isArray(constitution.confirmedStory)
+    ? constitution.confirmedStory
+    : null;
+  const resolvedProjectType = projectType(project);
+  const firstChapterIndex = Number(chapterRows[0]?.chapter_index ?? chapterRows[0]?.chapterIndex ?? chapterRows[0]?.index ?? chapterRows[0]?.order ?? NaN);
+  const firstChapterRun = Number.isFinite(firstChapterIndex)
+    ? runRows.find((run) => String(run.stage ?? '').toLowerCase() === 'chapter'
+      && Number(run.chapter_index ?? run.chapterIndex ?? NaN) === firstChapterIndex)
+    : null;
+
+  return {
+    key: target.key,
+    label: target.label,
+    expectedType: target.expectedType,
+    project: projectRes.ok ? {
+      id: project?.id ?? projectId,
+      title: project?.title ?? null,
+      status: project?.status ?? null,
+      type: resolvedProjectType,
+      typeMatches: target.expectedType ? resolvedProjectType === target.expectedType : true,
+      targetPlatform: project?.targetPlatform ?? constitution?.targetPlatform ?? null,
+      constitutionRevision: constitution?.revision ?? null,
+      confirmedStoryPresent: Boolean(confirmedStory),
+      storySelection: confirmedStory ? {
+        title: confirmedStory.title ?? null,
+        hook: confirmedStory.hook ?? null,
+        protagonist: confirmedStory.protagonist ?? null,
+        coreConflict: confirmedStory.coreConflict ?? confirmedStory.conflict ?? null,
+        uniquePoint: confirmedStory.uniquePoint ?? confirmedStory.uniqueSelling ?? confirmedStory.storyCore ?? null,
+        mainReversal: confirmedStory.mainReversal ?? null,
+        noveltyProof: confirmedStory.noveltyProof ?? null,
+        readerExperienceProfile: confirmedStory.readerExperienceProfile ?? null,
+        ideaDiscoveryAudit: confirmedStory.ideaDiscoveryAudit ?? null,
+      } : null,
+    } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
+    chapters: {
+      count: chapterRows.length,
+      first: chapterSummary(chapterRows[0]),
+      latest: chapterSummary(chapterRows[chapterRows.length - 1]),
+    },
+    firstChapterRun: runSummary(firstChapterRun),
+    latestRun: runSummary(runRows[0]),
+    integrityAudit: integrityRes.ok ? unwrap(integrityRes.data) : { error: integrityRes.error ?? `HTTP ${integrityRes.status}` },
+    cockpit: cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` },
+    platformAnalytics: analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` },
+  };
+}
+
+const tests = [];
+if (runFull) {
+  const server = path.join(root, 'server');
+  const desktop = path.join(root, 'desktop');
+  for (const [label, cwd, script] of [
+    ['server:typecheck', server, 'typecheck'],
+    ['server:unit', server, 'test'],
+    ['server:acceptance', server, 'test:acceptance'],
+    ['server:build', server, 'build'],
+    ['desktop:typecheck', desktop, 'typecheck'],
+    ['desktop:unit', desktop, 'test'],
+    ['desktop:build', desktop, 'build'],
+  ]) {
+    tests.push(runProcess(label, cwd, npmCmd, ['run', script]));
+  }
+  if (runE2E) {
+    tests.push(runProcess('server:e2e', server, npmCmd, ['run', 'test:e2e']));
+    tests.push(runProcess('desktop:e2e', desktop, npmCmd, ['run', 'test:e2e']));
+  }
+}
+
+const skippedRuntimeRequest = (label) => ({
+  ok: false,
+  status: null,
+  error: `skipped: server unavailable (${label})`,
+  data: null,
+});
+const ideaDiscoveryResponse = health.ok
+  ? await request('/chain/idea-discovery-diagnostics/latest')
+  : skippedRuntimeRequest('idea-discovery');
+const standardsResponse = health.ok
+  ? await request('/module-standards')
+  : skippedRuntimeRequest('module-standards');
+const standards = asArray(standardsResponse.data);
+const codeSeedVersion = seedVersion();
+const standardMismatch = standards.filter((s) => {
+  const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
+  const source = String(s.source ?? '');
+  return (Number.isFinite(seed) && codeSeedVersion !== null && seed !== codeSeedVersion)
+    || source !== 'code_seed';
+}).map((s) => ({
+  moduleKey: s.moduleKey ?? s.module_key ?? null,
+  version: s.version ?? null,
+  seedBaselineVersion: s.seedBaselineVersion ?? s.seed_baseline_version ?? null,
+  source: s.source ?? null,
+}));
+
+const inspectedProjects = {};
+if (health.ok) {
+  for (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);
+}
+
+const runtime = {
+  health,
+  preflight: health.ok
+    ? { ok: true, rootCause: null, downstreamSkipped: [] }
+    : {
+        ok: false,
+        rootCause: 'server_unavailable',
+        downstreamSkipped: ['ideaDiscovery', 'standards', 'projectDiscovery', 'projects'],
+        detail: health.error ?? `HTTP ${health.status}`,
+      },
+  ideaDiscovery: ideaDiscoveryResponse.ok
+    ? unwrap(ideaDiscoveryResponse.data)
+    : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` },
+  standards: {
+    codeSeedVersion,
+    activeCount: standards.length,
+    consistent: standardsResponse.ok && standardMismatch.length === 0,
+    mismatches: standardMismatch,
+  },
+  projectDiscovery,
+  projects: inspectedProjects,
+};
+
+if (!dualMode && inspectedProjects.project) {
+  Object.assign(runtime, {
+    project: inspectedProjects.project.project,
+    chapters: inspectedProjects.project.chapters,
+    firstChapterRun: inspectedProjects.project.firstChapterRun,
+    latestRun: inspectedProjects.project.latestRun,
+    integrityAudit: inspectedProjects.project.integrityAudit,
+    cockpit: inspectedProjects.project.cockpit,
+    platformAnalytics: inspectedProjects.project.platformAnalytics,
+  });
+}
+
+const gitInfo = {
+  commit: git(['rev-parse', 'HEAD']),
+  branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
+  dirty: Boolean(git(['status', '--porcelain'])),
+};
+
+const failedTests = tests.filter((x) => x.status !== 'passed');
+const runtimeProblems = [];
+if (!health.ok) {
+  // Root-cause-first: downstream runtime checks were not executed.
+  runtimeProblems.push('server_unavailable');
+} else {
+  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+  if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
+  if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
+  if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
+  if (!runFull && runtime.ideaDiscovery?.available === true && runtime.ideaDiscovery?.audit?.success === false) {
+    runtimeProblems.push('latest_idea_discovery_failed');
+  }
+}
+
+if (health.ok) for (const target of projectTargets) {
+  const result = inspectedProjects[target.key];
+  const prefix = target.key;
+  if (!result?.project || result.project.error) {
+    runtimeProblems.push(`${prefix}_project_unavailable`);
+    continue;
+  }
+
+  const projectStatus = String(result.project.status || '').toLowerCase();
+  const diagnostics = result.cockpit?.diagnostics ?? null;
+  const creatingInProgress = !runFull && projectStatus === 'creating' && diagnostics?.creationStalled !== true;
+  if (runFull) {
+    if (projectStatus !== 'active') runtimeProblems.push(`${prefix}_project_status_${projectStatus || 'unknown'}`);
+  } else if (projectStatus === 'creating') {
+    if (diagnostics?.creationStalled === true) runtimeProblems.push(`${prefix}_creation_stalled`);
+  } else if (projectStatus !== 'active') {
+    runtimeProblems.push(`${prefix}_project_status_${projectStatus || 'unknown'}`);
+  }
+  if (target.expectedType && result.project.type !== target.expectedType) {
+    runtimeProblems.push(`${prefix}_project_type_${result.project.type || 'unknown'}`);
+  }
+  if (!result.project.confirmedStoryPresent) runtimeProblems.push(`${prefix}_confirmed_story_missing`);
+
+  const integrity = result.integrityAudit;
+  if (!integrity || integrity.error) {
+    runtimeProblems.push(`${prefix}_integrity_audit_unavailable`);
+  } else {
+    const missingModules = Array.isArray(integrity.missingModules) ? integrity.missingModules : [];
+    const consistencyIssues = Array.isArray(integrity.consistencyIssues) ? integrity.consistencyIssues : [];
+    if (missingModules.length && !creatingInProgress) runtimeProblems.push(`${prefix}_missing_modules_${missingModules.length}`);
+    if (consistencyIssues.length) runtimeProblems.push(`${prefix}_consistency_issues_${consistencyIssues.length}`);
+    if (runFull && integrity.outlineBodyMappingValid !== true) runtimeProblems.push(`${prefix}_outline_body_mapping_invalid`);
+  }
+
+  const firstChapter = result.chapters?.first ?? null;
+  const shouldRequireFirstChapter = runFull || projectStatus === 'active';
+  if (shouldRequireFirstChapter) {
+    if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
+    const firstRun = result.firstChapterRun;
+    if (!firstRun) {
+      runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
+    } else {
+      const runStatus = String(firstRun.status ?? '').toLowerCase();
+      if (runStatus !== 'success') runtimeProblems.push(`${prefix}_first_chapter_run_${runStatus || 'unknown'}`);
+      const gate = String(firstRun.gate_status ?? firstRun.gateStatus ?? '').toLowerCase();
+      if (!gate) runtimeProblems.push(`${prefix}_first_chapter_gate_missing`);
+      else if (!['passed', 'pass', 'accepted'].includes(gate)) runtimeProblems.push(`${prefix}_first_chapter_gate_${gate}`);
+    }
+  }
+}
+
+const selectionMode = singleMode
+  ? 'single_project'
+  : requestedShortProjectId && requestedLongProjectId
+    ? 'explicit_short_and_long'
+    : requestedShortProjectId || requestedLongProjectId
+      ? 'mixed_explicit_and_auto'
+      : runFull
+        ? 'auto_latest_active_short_and_long'
+        : 'diagnostic_latest_short_and_long';
+
+const report = {
+  generatedAt: now,
+  command: process.argv.join(' '),
+  git: gitInfo,
+  options: {
+    projectId: legacyProjectId,
+    requestedShortProjectId,
+    requestedLongProjectId,
+    shortProjectId,
+    longProjectId,
+    mode: selectionMode,
+    baseUrl,
+    fullTests: runFull,
+    e2e: runE2E,
+  },
+  tests,
+  runtime,
+  verdict: {
+    status: failedTests.length === 0 && runtimeProblems.length === 0 ? 'passed' : 'failed',
+    rootCause: !health.ok ? 'server_unavailable' : (runtimeProblems[0] ?? null),
+    failedTests: failedTests.map((x) => x.label),
+    runtimeProblems,
+  },
+};
+
+const jsonPath = path.join(outDir, 'latest.json');
+fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
+
+const testLines = tests.length
+  ? tests.map((t) => `- ${t.label}: **${t.status.toUpperCase()}** (${t.durationMs}ms)`).join('\n')
+  : '- 未执行仓库测试（使用 --full 执行；追加 --e2e 执行 E2E）';
+const standardLine = standardsResponse.ok
+  ? `${runtime.standards.consistent ? 'PASS' : 'FAIL'} · code seed=${codeSeedVersion ?? 'unknown'} · active=${standards.length}`
+  : `UNAVAILABLE · ${standardsResponse.error ?? `HTTP ${standardsResponse.status}`}`;
+
+function latestRunLine(result) {
+  const run = result?.latestRun;
+  if (!run) return '未找到 generation run';
+  const bits = [
+    `status=${run.status ?? 'unknown'}`,
+    `stage=${run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown'}`,
+  ];
+  if (run.error) bits.push(`error=${String(run.error).replace(/\s+/g, ' ').trim()}`);
+  return bits.join(' · ');
+}
+
+function projectMarkdown(target) {
+  const result = inspectedProjects[target.key];
+  if (!result) return `### ${target.label}\n\n- 未找到项目`;
+  if (result.project?.error) return `### ${target.label}\n\n- 项目：FAIL · ${result.project.error}`;
+  const firstChapter = result.chapters?.first ?? null;
+  const firstLine = firstChapter
+    ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
+    : '未生成第一章';
+  const gateLine = result.firstChapterRun
+    ? `${result.firstChapterRun.gate_status ?? result.firstChapterRun.gateStatus ?? 'missing'} · run=${result.firstChapterRun.id ?? 'unknown'} · status=${result.firstChapterRun.status ?? 'unknown'} · model=${result.firstChapterRun.model ?? 'unknown'}`
+    : '未找到第一章 chapter generation run';
+  const typeLine = target.expectedType
+    ? `${result.project.typeMatches ? 'PASS' : 'FAIL'} · expected=${target.expectedType} · actual=${result.project.type ?? 'unknown'}`
+    : `${result.project.type ?? 'unknown'}`;
+  const diagnostics = result.cockpit?.diagnostics ?? null;
+  const isCreating = String(result.project.status || '').toLowerCase() === 'creating';
+  const inProgress = !runFull && isCreating && diagnostics?.creationStalled !== true;
+  const statusLine = result.project.status === 'active'
+    ? 'PASS · active'
+    : inProgress
+      ? `IN_PROGRESS · creating · idle=${diagnostics?.idleMs ?? 'unknown'}ms`
+      : `FAIL · ${result.project.status ?? 'unknown'}${diagnostics?.creationStalled ? ' · creation_stalled' : ''}`;
+  const integrity = result.integrityAudit;
+  const integrityLine = integrity?.error
+    ? `FAIL · ${integrity.error}`
+    : integrity
+      ? inProgress
+        ? `IN_PROGRESS · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length}`
+        : `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || (runFull && integrity.outlineBodyMappingValid !== true)) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'NOT_READY'}`
+      : 'FAIL · 未取得完整性审计';
+  const persistenceLine = diagnostics
+    ? diagnostics.creationStalled
+      ? `FAIL · stalled · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
+      : (diagnostics.pendingPersistenceMismatch || []).length
+        ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
+        : `PASS · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
+    : 'UNAVAILABLE';
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+}
+
+const projectSections = !health.ok
+  ? 'Server 不可用，项目、题材、Gate 与执行标准运行时检查均未执行；本报告只确认到服务连接这一层。'
+  : projectTargets.length
+  ? projectTargets.map(projectMarkdown).join('\n\n')
+  : runFull
+    ? '未找到可做最终验收的项目。请先让至少一个真实短篇和一个真实长篇进入 active，并完成第一章真实生成。'
+    : '未找到任何项目。若刚才创建流程已经报错但这里仍为空，说明项目壳没有成功落库，请直接提供创建页错误信息和 Server 日志。';
+
+const selectionLine = singleMode
+  ? `single · ${legacyProjectId}`
+  : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
+
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+
+const mdPath = path.join(outDir, 'latest.md');
+fs.writeFileSync(mdPath, markdown, 'utf8');
+
+console.log(`[verify] ${report.verdict.status.toUpperCase()}`);
+if (!health.ok) console.log('[verify] root cause: server_unavailable; downstream runtime diagnostics skipped');
+if (dualMode) console.log(`[verify] projects short=${shortProjectId ?? 'NOT_FOUND'} long=${longProjectId ?? 'NOT_FOUND'} (${selectionMode})`);
+console.log(`[verify] ${path.relative(root, jsonPath)}`);
+console.log(`[verify] ${path.relative(root, mdPath)}`);
+if (report.verdict.status !== 'passed') process.exitCode = 1;
