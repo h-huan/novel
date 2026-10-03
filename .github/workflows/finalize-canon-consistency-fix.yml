@@ -20,6 +20,17 @@ jobs:
           node-version: 22
       - name: Apply guarded final replacements
         run: |
+          # Canon wording + strict Guard were committed directly before this run.
+          # Remove those two already-applied sections from the one-shot patch copy
+          # so the remaining guarded replacements stay exact and fail closed.
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/finalize-canon-consistency-fix.py')
+          text = p.read_text(encoding='utf-8-sig')
+          section1 = text.index('# -----------------------------------------------------------------------------\n# 1) Canon policy wording')
+          section3 = text.index('# -----------------------------------------------------------------------------\n# 3) Long creation batch')
+          p.write_text(text[:section1] + text[section3:], encoding='utf-8')
+          PY
           python .github/scripts/finalize-canon-consistency-fix.py
           python .github/scripts/finalize-safe-cross-stage-repair.py
           python .github/scripts/finalize-world-invariant-boundary.py
@@ -34,7 +45,7 @@ jobs:
         run: npm run build
       - name: Canon and creation regression tests
         working-directory: server
-        run: npx vitest run src/modules/canon/canon-policy.spec.ts src/modules/generation-metrics/generated-canon-guard.service.spec.ts src/modules/world-setting/world-setting.service.spec.ts src/chain/cross-stage-patch.spec.ts src/chain/generation-recovery.service.spec.ts src/chain/source-hierarchy-review.spec.ts
+        run: npx vitest run src/modules/canon/canon-policy.spec.ts src/modules/generation-metrics/generated-canon-guard.service.spec.ts src/modules/world-setting/world-setting.service.spec.ts src/chain/cross-stage-patch.spec.ts src/chain/generation-recovery.service.spec.ts src/chain/source-hierarchy-review.spec.ts src/chain/creation-consistency-architecture.spec.ts
       - name: Server unit suite
         working-directory: server
         run: npm test
