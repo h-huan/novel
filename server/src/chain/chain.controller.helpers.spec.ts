@@ -1180,7 +1180,8 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it('returns the final-gate-passed subset instead of zeroing a batch when one selected premise still fails', async () => {
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape'])(
+    'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
       workingTitle: title,
@@ -1247,9 +1248,14 @@ describe('idea discovery live orchestrator behavior', () => {
 
     const generate = vi.fn()
       .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: [premiseOne, premiseTwo] }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [weakCard] }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ patches: [{}] }) });
+      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) });
+    if (failure === 'card_network') generate.mockRejectedValueOnce(new Error('card connection reset'));
+    else if (failure === 'card_shape') generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [] }) });
+    else {
+      generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [weakCard] }) });
+      if (failure === 'repair_network') generate.mockRejectedValueOnce(new Error('repair connection reset'));
+      else generate.mockResolvedValueOnce({ content: JSON.stringify({ patches: [{}] }) });
+    }
     const controller = Object.create(ChainController.prototype) as any;
     controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
     controller.ideaAppealGate = new IdeaAppealGateService();
@@ -1267,16 +1273,23 @@ describe('idea discovery live orchestrator behavior', () => {
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
     }, 2);
 
-    expect(generate).toHaveBeenCalledTimes(4);
+    const cardFailed = failure === 'card_network' || failure === 'card_shape';
+    expect(generate).toHaveBeenCalledTimes(cardFailed ? 3 : 4);
     expect(result.success).toBe(true);
     expect(result.ideas).toHaveLength(1);
     expect(result.ideas[0].sourcePremiseId).toBe('P1');
     expect(result.totalIdeas).toBe(1);
     expect(result.qualityWarning).toContain('最终 Gate 通过 1 个');
+    if (cardFailed) {
+      expect(result.appealGate.structuringErrors).toEqual([expect.objectContaining({ sourcePremiseId: 'P2' })]);
+    }
+    if (failure === 'repair_network') expect(result.appealGate.repairError).toContain('repair connection reset');
     expect(result.appealGate).toEqual(expect.objectContaining({
       premiseSelected: 2,
-      generated: 2,
+      generated: cardFailed ? 1 : 2,
       qualified: 1,
+      requested: 2,
+      shortfall: 1,
       returned: 1,
       rejected: 1,
     }));

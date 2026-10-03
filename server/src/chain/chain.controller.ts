@@ -5226,17 +5226,28 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       const selectedPremises = premiseDiscovery.selected;
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
       const structuredCards: Array<Record<string, unknown>> = [];
+      const structuringErrors: Array<{ sourcePremiseId: string; error: string }> = [];
       // 已选题材逐一结构化：用户要 5 个题材时是 5 个 premise 各创建 1 张卡，
       // 不是把 5 张完整卡塞进一个大 JSON，也不是对同一张卡反复改写 5 次。
       for (let index = 0; index < selectedPremises.length; index += 1) {
         const selectedPremise = selectedPremises[index] as Record<string, unknown>;
-        structuredCards.push(await generateStructuredCard(selectedPremise, index));
+        try {
+          structuredCards.push(await generateStructuredCard(selectedPremise, index));
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          const sourcePremiseId = String(selectedPremise.premiseId || '').trim();
+          structuringErrors.push({ sourcePremiseId, error: detail });
+          candidateAssessments.push({ sourcePremiseId, attempt: 'initial', passed: false, issues: [detail] });
+          rejectedReasons.push(detail);
+          this.logger.warn(`idea-discover: ${sourcePremiseId} 结构化失败，继续其它已选题材：${detail}`);
+        }
       }
       const structuredPremiseIds = structuredCards.map((item: any) => String(item?.sourcePremiseId || '').trim());
       const structuredUniqueIds = new Set(structuredPremiseIds);
       const missingPremiseIds = [...selectedPremiseIdSet].filter(id => !structuredUniqueIds.has(id));
       const unknownPremiseIds = [...structuredUniqueIds].filter(id => !selectedPremiseIdSet.has(id));
-      if (structuredCards.length !== requestedCount || structuredUniqueIds.size !== requestedCount || missingPremiseIds.length || unknownPremiseIds.length) {
+      if (structuredUniqueIds.size !== structuredCards.length || unknownPremiseIds.length
+        || missingPremiseIds.some(id => !structuringErrors.some(item => item.sourcePremiseId === id))) {
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；生成=${structuredCards.length}/${requestedCount}，缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
       }
       accept(structuredCards, 'initial');
@@ -5250,7 +5261,8 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       const missingAfterGate = () => selectedPremises
         .map((item: any) => String(item?.premiseId || '').trim())
         .filter((id: string) => id && !acceptedPremiseIds().has(id));
-      const initialMissingPremiseIds = missingAfterGate();
+      // A failed technical call has no card to patch; never ask the model to invent one.
+      const initialMissingPremiseIds = missingAfterGate().filter(id => structuredUniqueIds.has(id));
       if (initialMissingPremiseIds.length > 0) {
         finalGateRepairAttempted = true;
         const initialIssueByPremiseId = new Map(candidateAssessments
@@ -5263,17 +5275,17 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
           card,
           gateIssues: initialIssueByPremiseId.get(String(card?.sourcePremiseId || '').trim()) || [],
         }));
-        const repairResponse = await this.realLLM.generate({
-          prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective(repairTargets)}`,
-          scenario: 'idea_generate',
-          timeout: LLM_TUNABLES.timeoutSimple(),
-          maxEmptyRetries: 1,
-          responseFormat: 'json_object',
-        });
-        const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
-        const repairPatches = Array.isArray(repairPayload?.patches) ? repairPayload.patches : [];
-        finalGateRepairGenerated = repairPatches.length;
         try {
+          const repairResponse = await this.realLLM.generate({
+            prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective(repairTargets)}`,
+            scenario: 'idea_generate',
+            timeout: LLM_TUNABLES.timeoutSimple(),
+            maxEmptyRetries: 1,
+            responseFormat: 'json_object',
+          });
+          const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
+          const repairPatches = Array.isArray(repairPayload?.patches) ? repairPayload.patches : [];
+          finalGateRepairGenerated = repairPatches.length;
           const repairedCards = applyOrderedIdeaRepairPatches(
             repairTargets.map((target: any) => target.card as Record<string, unknown>),
             repairPatches,
@@ -5311,7 +5323,10 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
         premiseSelected: selectedPremises.length,
         generated: structuredCards.length,
         evaluatedAttempts: candidateAssessments.length,
+        structuringErrors,
         qualified: qualifiedCount,
+        requested: requestedCount,
+        shortfall: requestedCount - selectedAccepted.length,
         returned: selectedAccepted.length,
         rejected: finalMissingPremiseIds.length,
         repairAttempted: finalGateRepairAttempted,
@@ -5721,6 +5736,12 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       'SELECT type,target_words,target_platform,writing_style,settings FROM projects WHERE id=?',
     ).get(projectId) as Record<string, unknown>);
 
+    // Both initial creation and recovery use the persisted authority, never the UI payload
+    // or its batch audit (which includes other selected/rejected story candidates).
+    if (!constitution.confirmedStory || Object.keys(constitution.confirmedStory).length === 0) {
+      throw new Error('项目缺少已持久化的 confirmedStory，不能创建框架');
+    }
+    dto = { ...dto, selectedIdea: structuredClone(constitution.confirmedStory) };
     const isShort = dto.storyType !== 'long_novel';
     // 长短篇都从同一张 confirmedStory 做确定性投影；不让两条流程各自摘要一次题材。
     const storyFoundation = buildStoryFoundation(dto.selectedIdea);

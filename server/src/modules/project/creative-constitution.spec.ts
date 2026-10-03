@@ -103,3 +103,19 @@ describe('creative constitution boundary', () => {
     expect(platform?.requirement).toContain('唯一事实源');
   });
 });
+
+describe('persisted discovery audit isolation', () => {
+  it.each(['short_story', 'long_novel'])('reads the same selected story authority for %s creation and prose', type => {
+    const c = updateConstitution({}, { type, targetPlatform: 'fanqie', category: '悬疑', pov: '第一人称' });
+    const story = { title: '当前作品', hook: '唯一故事钩子', readerExperienceProfile: { pace: '紧凑' },
+      ideaDiscoveryAudit: { candidateAssessments: [{ candidate: { title: '另一作品' } }] } };
+    c.confirmedStory = story;
+    const settings = JSON.stringify({ creativeConstitution: c });
+    const read = readConstitution({ settings });
+    expect(read.confirmedStory).toEqual({
+      title: '当前作品', hook: '唯一故事钩子', readerExperienceProfile: { pace: '紧凑' },
+    });
+    expect(JSON.stringify(read)).not.toContain('另一作品');
+    expect(JSON.parse(settings).creativeConstitution.confirmedStory).toEqual(story);
+  });
+});

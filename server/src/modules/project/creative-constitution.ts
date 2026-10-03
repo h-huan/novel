@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import type { DatabaseSync } from 'node:sqlite';
+import { confirmedStoryFacts } from '../canon/canon-policy';
 import { buildBenchmarkDirective, getPlatform, normalizePlatformId, targetForLength } from '../../chain/platform-benchmarks';
 import { scorePolicy } from '../writing-quality/score-policy';
 import { CHAPTER_WORD_RANGE, describeCategoryPlacement, dimensionGuidesText, EXECUTION_STANDARD_DIMENSIONS, platformCreationFieldNames, platformSubmissionDimensions, platformCategoryBenchmarkNote, platformCategoryDimensionBinding, platformCategoryTreeVerification, platformCategoryWritingBrief, platformCategoryWritingNote, platformHasOwnCategoryTree, platformStandardProblem, resolveSubmissionCategory, CATEGORY_WORD_SCALE_DEVIATION_MIN_CHARS, audienceChannelHint, categoryWordScaleBlocked, categoryWordScaleLine, categoryWordScaleMessage, categoryWordScaleStanding, type CategoryWordScaleInput, type CategoryWordScaleStanding, type CategoryWordScaleStatus, type ExecutionStandardDimensionKey } from '../../../shared/src';
@@ -406,6 +407,8 @@ export function readConstitution(row: Record<string, any>): CreativeConstitution
     // 仍然存在的别名，而不是原样返回空值：空的分类/视角会让对应质量维度静默变成 not_applicable，
     // 读起来像“检查过没问题”，实际是“从未检查”。
     const clone = structuredClone(saved);
+    // Applies to existing projects too; persisted discovery diagnostics are not Canon facts.
+    if (clone.confirmedStory) clone.confirmedStory = confirmedStoryFacts(clone.confirmedStory);
     // 最后一项 row.platform_style 与 row.story_category / row.story_tone 同类：历史别名兜底，
     // 只在宪法与 target_platform 都为空时回收旧行里用户当年选的平台。它排在最末，
     // 永远不会覆盖有值的 target_platform 或宪法 —— 别名只补空，不做第二判据。

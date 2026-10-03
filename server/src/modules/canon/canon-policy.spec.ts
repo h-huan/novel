@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCanonPolicyDirective, buildStoryFoundation, chooseMinimumImpactRepair } from './canon-policy';
+import { buildCanonPolicyDirective, buildStoryFoundation, confirmedStoryFacts, chooseMinimumImpactRepair } from './canon-policy';
 
 describe('canon policy', () => {
   it('never chooses world canon as an automatic repair target', () => {
@@ -75,5 +75,30 @@ describe('canon policy', () => {
     expect(directive).toContain('修改单元最少');
     expect(directive).toContain('下游依赖最少');
     expect(directive).toContain('RAG');
+  });
+});
+
+describe('discovery facts boundary', () => {
+  it.each(['short_story', 'long_novel'])('keeps only the selected %s story in generation context', storyType => {
+    const selected = {
+      title: '选中的故事', storyType, hook: '守住唯一证人', characters: ['林川'],
+      customFact: { constraint: '证人不可死亡' },
+      readerExperienceProfile: { pace: '紧凑' },
+    };
+    const audited = { ...selected,
+      ideaAppealGate: { passed: true },
+      ideaDiscoveryAudit: {
+        preselectedPremises: [{ workingTitle: '另一部小说', payoff: '证人死亡' }],
+        candidateAssessments: [{ candidate: { description: '外星人摧毁城市' } }],
+      },
+    };
+    const snapshot = JSON.stringify(audited);
+    expect(confirmedStoryFacts(audited)).toEqual(selected);
+    expect(buildStoryFoundation(audited)).toEqual(buildStoryFoundation(selected));
+    expect(JSON.stringify(confirmedStoryFacts(audited))).not.toContain('另一部小说');
+    expect(JSON.stringify(audited)).toBe(snapshot);
+    const facts = confirmedStoryFacts(audited);
+    (facts.characters as string[]).push('新角色');
+    expect(audited.characters).toEqual(['林川']);
   });
 });
