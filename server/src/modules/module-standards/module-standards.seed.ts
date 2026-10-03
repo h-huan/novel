@@ -8,7 +8,7 @@ import { buildCanonPolicyDirective } from '../canon/canon-policy';
  * 平台基准与 Creative Constitution 仍由对应代码实现。禁止在运行时由 LLM/数据库改写本映射。
  */
 
-export const SEED_BASELINE_VERSION = 65;
+export const SEED_BASELINE_VERSION = 66;
 
 /** 唯一 Canon 规则文本由机器策略生成；旧调用点继续用这个名字，但不能再定义第二套顺序。 */
 export const STORY_FACT_PRIORITY = buildCanonPolicyDirective();
@@ -58,7 +58,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
       '修复前后比较必须严格单调：Blocking 总量下降、最高严重度不增加、不得引入新的 Blocking 问题；否则回滚',
       '相同 content/context/constitution/rules/chapter 指纹不得重复付费评审；输入发生变化才重新评估',
       '配置缺失、证据不足、资料源冲突都应显式阻断，禁止隐藏默认值和默认高分',
-      '普通冲突优先修改最低权威、未锁定且影响范围最小的依赖项；禁止为了省事反向修改上层 Canon',
+      '世界观一旦建立永不作为自动或人工修复目标；其它冲突按影响范围、修改单元、下游依赖数量与时间态计算总成本，优先修改最小代价且未锁定的局部依赖，禁止雪崩式重写',
       '任何冲突处理或人工 Canon 修改保存后必须重新执行一致性校验；仍存在的问题不得仅凭“已解决”状态隐藏',
       'Gate 失败必须留下 project/chapter/run/rule/evidence，便于机器验收和人工追踪',
     ],
@@ -137,8 +137,8 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     ],
     requirements: [
       '规则一旦确认不得为剧情方便临时改写',
-      '项目创建完成后，世界观只能由作者明确手动修改；自动生成、修复、冲突处理不得静默改世界观',
-      '世界观任何手动修改保存后必须重新校验受影响的章纲、角色/时间线与正文一致性',
+      '项目创建阶段首次世界观通过上层事实审查并写入后立即冻结；同一项目内自动生成、修复、冲突处理和人工编辑都不得再修改世界观',
+      '后续资料与冻结世界观冲突时，必须在章纲、未来计划、状态、伏笔、时间线或未接受正文中选择总影响成本最低的局部修复点；若无安全修复点则人工裁决而不是改世界观',
       '长篇分层揭示，短篇只保留核心冲突所需设定',
     ],
     rules: ['同一主体同一条件下不得同时得到互斥结果', '作用于他人的规则必须说明谁执行、对谁生效、凭什么生效'],

@@ -52,19 +52,20 @@ export class WorldSettingService {
   ) {}
 
   /**
-   * 世界观只允许在项目创建阶段首次建立/补齐。项目一旦离开 creating，世界观即冻结。
-   * 这是硬边界，不提供“影响分析后仍可自动修改”的旁路：冲突必须去改更小影响面的资料。
+   * 世界观冻结点是【第一条正式世界观记录写入】而不是 project.status。
+   * 没有世界观的项目允许首次建立；一旦存在，任何状态下都不得 create/update/remove/改约束/改 profile。
    */
-  private assertWorldMutable(projectId: string, operation: string): void {
+  private assertWorldMutable(projectId: string, operation: string, initialCreate = false): void {
     const project = this.databaseService.getDb().prepare('SELECT id,status FROM projects WHERE id=? LIMIT 1').get(projectId) as any;
     if (!project) throw new NotFoundException('Project not found');
-    if (String(project.status || '') !== 'creating') {
+    const existing = this.repo.findByProjectId(projectId) || [];
+    if (!initialCreate || existing.length > 0) {
       throw new ConflictException(`世界观已冻结，不能执行“${operation}”。世界观是小说地基；请在章纲、未来计划、状态、伏笔或未接受正文中选择最小代价修复点，禁止通过修改世界观来消除冲突。`);
     }
   }
 
   create(projectId: string, dto: CreateWorldSettingDto): WorldSettingResponse {
-    this.assertWorldMutable(projectId, '创建/替换世界观');
+    this.assertWorldMutable(projectId, '创建世界观', true);
     const now = new Date().toISOString();
     const id = uuid();
 
@@ -77,7 +78,10 @@ export class WorldSettingService {
       appliesTo: [],
     }));
 
-    this.repo.insert({
+    const db = this.databaseService.getDb();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      this.repo.insert({
       id,
       project_id: projectId,
       name: dto.name,
@@ -99,7 +103,28 @@ export class WorldSettingService {
       censorship_rules: dto.censorshipRules || null,
       created_at: now,
       updated_at: now,
-    });
+      });
+
+      const initialProfile: Record<string, string> = {
+        synopsis: dto.workIntro || '',
+        basic_info: [dto.name, dto.era].filter(Boolean).join('；'),
+        era: dto.era || '',
+        rules: (dto.constraints || []).map(item => item.rule).filter(Boolean).join('\n'),
+        system_mechanics: dto.systemSettings || '',
+        culture_customs: dto.culturalSettings || '',
+        naming_rules: dto.namingRules || '',
+        scale_plan: dto.dataPlanning || '',
+        hierarchy_rules: buildCanonPolicyDirective(),
+        supplementary: dto.censorshipRules || '',
+      };
+      const profileValues = WORLD_PROFILE_FIELDS.map(field => String(initialProfile[field] || ''));
+      db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id, ${WORLD_PROFILE_FIELDS.join(', ')}, created_at, updated_at) VALUES (?, ?, ?, ${WORLD_PROFILE_FIELDS.map(() => '?').join(', ')}, ?, ?)` )
+        .run(uuid(), projectId, id, ...profileValues, now, now);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
 
     return this.toResponse(this.repo.findById(id)!);
   }

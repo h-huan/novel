@@ -233,6 +233,10 @@ export class GenerationRecoveryService {
     if (audit.protectedHumanWork) {
       throw new ConflictException(`检测到受保护资料：${audit.protectionReasons.join('；')}。已停止自动覆盖。`);
     }
+    const frozenWorld = this.database.getDb().prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId);
+    if (frozenWorld) {
+      throw new ConflictException('世界观已冻结，自动恢复禁止删除或重建世界观。请保留现有世界观，从角色、章纲、状态、伏笔、时间线等下游资料继续恢复。');
+    }
 
     await this.clearGeneratedAssets(projectId);
   }
@@ -243,6 +247,10 @@ export class GenerationRecoveryService {
     if (!project) throw new NotFoundException('项目不存在');
     if (!['active', 'generation_failed'].includes(String(project.status))) {
       throw new ConflictException('项目仍在创建或运行，不能同时按原题材重建。');
+    }
+    const frozenWorld = db.prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId);
+    if (frozenWorld) {
+      throw new ConflictException('世界观已冻结，禁止按原题材重建世界观。请保留世界观，只在章纲、角色、状态、伏笔、时间线或未接受正文中做最小影响修复。');
     }
     const protectedBodies = Number((db.prepare(`SELECT COUNT(*) AS n FROM chapters WHERE project_id=?
       AND (length(trim(COALESCE(content,'')))>0 OR locked_at IS NOT NULL OR status IN ('reviewing','locked','completed'))`)
