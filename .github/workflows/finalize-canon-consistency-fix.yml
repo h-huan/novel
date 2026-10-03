@@ -1,0 +1,71 @@
+name: Finalize canon consistency fix
+on:
+  push:
+    branches: [fix/canon-creation-consistency-20261003]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/canon-creation-consistency-20261003
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply guarded final replacements
+        run: python .github/scripts/finalize-canon-consistency-fix.py
+      - name: Server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Server typecheck
+        working-directory: server
+        run: npm run typecheck
+      - name: Server build
+        working-directory: server
+        run: npm run build
+      - name: Canon and creation regression tests
+        working-directory: server
+        run: npx vitest run src/modules/canon/canon-policy.spec.ts src/modules/generation-metrics/generated-canon-guard.service.spec.ts src/modules/world-setting/world-setting.service.spec.ts src/chain/cross-stage-patch.spec.ts
+      - name: Server unit suite
+        working-directory: server
+        run: npm test
+      - name: Server acceptance suite
+        working-directory: server
+        run: npm run test:acceptance
+      - name: Server e2e suite
+        working-directory: server
+        run: npm run test:e2e
+      - name: Desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Desktop typecheck
+        working-directory: desktop
+        run: npm run typecheck
+      - name: Desktop unit suite
+        working-directory: desktop
+        run: npm test
+      - name: Desktop build
+        working-directory: desktop
+        run: npm run build
+      - name: Desktop runtime packaging check
+        working-directory: desktop
+        run: npm run check:runtime-packaging
+      - name: Remove one-shot patch machinery
+        run: rm -f .github/scripts/finalize-canon-consistency-fix.py .github/workflows/finalize-canon-consistency-fix.yml
+      - name: Commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: freeze world canon and minimize repair blast radius"
+          git push origin HEAD:fix/canon-creation-consistency-20261003
