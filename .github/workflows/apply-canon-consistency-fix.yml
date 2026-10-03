@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
       - name: Apply guarded replacements
-        run: python .github/scripts/apply-canon-consistency-fix.py
+        run: python .github/scripts/run-canon-consistency-fix.py
       - name: Server dependencies
         working-directory: server
         run: npm ci
@@ -35,7 +35,7 @@ jobs:
         working-directory: desktop
         run: npm run typecheck
       - name: Remove one-shot patch machinery
-        run: rm -f .github/scripts/apply-canon-consistency-fix.py .github/workflows/apply-canon-consistency-fix.yml
+        run: rm -f .github/scripts/apply-canon-consistency-fix.py .github/scripts/run-canon-consistency-fix.py .github/workflows/apply-canon-consistency-fix.yml
       - name: Commit verified changes
         run: |
           git config user.name "github-actions[bot]"
