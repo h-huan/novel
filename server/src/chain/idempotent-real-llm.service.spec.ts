@@ -8,6 +8,7 @@ import { qualityStage } from '../routing/scenario-taxonomy';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import { readConstitution } from '../modules/project/creative-constitution';
 import { getPlatform, targetForLength } from './platform-benchmarks';
+import { LLM_TUNABLES } from '../config/llm-tunables';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 
@@ -253,6 +254,62 @@ describe('IdempotentRealLLMService', () => {
       expect(response.runId).toBeUndefined();
     } finally {
       superGenerate.mockRestore();
+      db.close();
+    }
+  });
+
+  it('re-enters the same configured provider call after an exhausted transient socket failure', async () => {
+    const { db } = fixture();
+    const oldRetries = LLM_TUNABLES.NETWORK_RECOVERY_RETRIES;
+    const oldDelay = LLM_TUNABLES.NETWORK_RECOVERY_DELAY_MS;
+    (LLM_TUNABLES as any).NETWORK_RECOVERY_RETRIES = 1;
+    (LLM_TUNABLES as any).NETWORK_RECOVERY_DELAY_MS = 0;
+    const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate')
+      .mockRejectedValueOnce(new Error('DeepSeek 网络连接失败(UND_ERR_SOCKET): other side closed'))
+      .mockResolvedValue({ content: '{"consistent":true}', model: 'test-model', latency: 20 });
+    try {
+      const service = serviceFor(db);
+      const response = await service.generate({
+        prompt: '复核大纲来源事实',
+        scenario: 'review',
+        responseFormat: 'json_object',
+        deferQualityGate: true,
+        metrics: { projectId: 'p', stepKey: 'outline_source_review' },
+      });
+
+      expect(superGenerate).toHaveBeenCalledTimes(2);
+      expect(response.content).toBe('{"consistent":true}');
+    } finally {
+      superGenerate.mockRestore();
+      (LLM_TUNABLES as any).NETWORK_RECOVERY_RETRIES = oldRetries;
+      (LLM_TUNABLES as any).NETWORK_RECOVERY_DELAY_MS = oldDelay;
+      db.close();
+    }
+  });
+
+  it('does not retry non-network model failures at the provider boundary', async () => {
+    const { db } = fixture();
+    const oldRetries = LLM_TUNABLES.NETWORK_RECOVERY_RETRIES;
+    const oldDelay = LLM_TUNABLES.NETWORK_RECOVERY_DELAY_MS;
+    (LLM_TUNABLES as any).NETWORK_RECOVERY_RETRIES = 1;
+    (LLM_TUNABLES as any).NETWORK_RECOVERY_DELAY_MS = 0;
+    const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate')
+      .mockRejectedValue(new Error('DeepSeek API error: 400 invalid_request_error'));
+    try {
+      const service = serviceFor(db);
+      await expect(service.generate({
+        prompt: '复核大纲来源事实',
+        scenario: 'review',
+        responseFormat: 'json_object',
+        deferQualityGate: true,
+        metrics: { projectId: 'p', stepKey: 'outline_source_review' },
+      })).rejects.toThrow(/400 invalid_request_error/);
+
+      expect(superGenerate).toHaveBeenCalledTimes(1);
+    } finally {
+      superGenerate.mockRestore();
+      (LLM_TUNABLES as any).NETWORK_RECOVERY_RETRIES = oldRetries;
+      (LLM_TUNABLES as any).NETWORK_RECOVERY_DELAY_MS = oldDelay;
       db.close();
     }
   });
