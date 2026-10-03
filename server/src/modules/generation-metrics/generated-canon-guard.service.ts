@@ -29,12 +29,16 @@ export interface StructuredCanonGuardInput {
 /**
  * Single provenance boundary for AI-produced Canon.
  *
- * Currentness is always checked against the real project context.  Creation
+ * Currentness is always checked against the real project context. Creation
  * batches must therefore validate every generated run before the first Canon
  * write, then persist that already-validated batch without re-validating against
- * the context it is changing itself.  The guard deliberately has no
+ * the context it is changing itself. The guard deliberately has no
  * "project.status=creating" stale-run bypass: such a bypass would also admit a
  * genuinely stale run produced by another creation attempt.
+ *
+ * Project/context existence and freshness belong to GenerationMetricsService;
+ * this boundary only validates the generation-run proof itself. Keeping that
+ * responsibility in one place avoids a second schema/currentness implementation.
  */
 @Injectable()
 export class GeneratedCanonGuardService {
@@ -70,7 +74,7 @@ export class GeneratedCanonGuardService {
     if (!runId) throw new BadRequestException('AI Canon 提交缺少 generation run 凭证');
 
     const db = this.databaseService.getDb();
-    // 这里只读取提交边界真正需要的稳定列。constitution/context 当前性由
+    // 这里只读取提交边界真正需要的稳定列。constitution/context 当前性与项目存在性由
     // GenerationMetricsService.runIsCurrent 统一判断，避免 Guard 自己复制 schema/算法。
     const row = db.prepare(`SELECT id,project_id,stage,scenario,status,gate_status,output_text
       FROM generation_runs WHERE id=? AND project_id=? LIMIT 1`).get(runId, projectId) as {
@@ -104,9 +108,6 @@ export class GeneratedCanonGuardService {
     if (!outputText.trim()) {
       throw new BadRequestException('AI Canon 提交凭证没有可提交的最终输出');
     }
-
-    const project = db.prepare('SELECT id FROM projects WHERE id=? LIMIT 1').get(projectId) as any;
-    if (!project) throw new BadRequestException('AI Canon 提交对应项目不存在');
 
     if (!this.generationMetrics.runIsCurrent(runId, projectId)) {
       throw new ConflictException('AI Canon 提交凭证已过期：项目创作宪法或依赖上下文已变化');
