@@ -153,8 +153,15 @@ const firstText = (...values: unknown[]): string | undefined => {
  * 这里只做字段投影/别名归一化，不调用模型、不补事实、不改变题材；后续世界观、角色、章纲
  * 可以展开，但必须能追溯回同一个 foundation，避免长短篇各自拿一份不同故事摘要开工。
  */
+/** Discovery diagnostics can contain other candidates and must never become story facts.
+ * Keep the stored audit intact; project only the selected card at context boundaries. */
+export function confirmedStoryFacts(confirmedStory: unknown): Record<string, unknown> {
+  const { ideaDiscoveryAudit, ideaAppealGate, ...facts } = asRecord(confirmedStory);
+  return structuredClone(facts);
+}
+
 export function buildStoryFoundation(confirmedStory: unknown): StoryFoundation {
-  const story = asRecord(confirmedStory);
+  const story = confirmedStoryFacts(confirmedStory);
   const foundation: StoryFoundation = {
     schemaVersion: 1,
     source: 'confirmed_story',

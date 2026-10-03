@@ -2,7 +2,7 @@ import { Body, Controller, Get, Logger, Param, Post, Sse } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
 import { DatabaseService } from '../database/database.service';
-import { readConstitution } from '../modules/project/creative-constitution';
+import { readConstitution, settingsObject } from '../modules/project/creative-constitution';
 
 /**
  * Planning/project lifecycle HTTP adapter.
@@ -102,6 +102,10 @@ export class ChainPlanningController {
     const project = this.database.getDb().prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     if (!project) return recovery;
     const confirmedStory: any = readConstitution(project).confirmedStory;
+    // Full batch diagnostics remain available here, outside generation/review contexts.
+    const storedSettings = settingsObject(project.settings);
+    const storedAudit = storedSettings.ideaDiscoveryAudit
+      ?? storedSettings.creativeConstitution?.confirmedStory?.ideaDiscoveryAudit;
     const storySelection = confirmedStory && typeof confirmedStory === 'object' && !Array.isArray(confirmedStory)
       ? {
           title: confirmedStory.title ?? null,
@@ -111,7 +115,7 @@ export class ChainPlanningController {
           uniquePoint: confirmedStory.uniquePoint ?? confirmedStory.uniqueSelling ?? confirmedStory.storyCore ?? null,
           estimatedWords: confirmedStory.recommendedTargetWords ?? confirmedStory.estimatedWords ?? null,
           readerExperienceProfile: confirmedStory.readerExperienceProfile ?? null,
-          ideaDiscoveryAudit: confirmedStory.ideaDiscoveryAudit ?? null,
+          ideaDiscoveryAudit: storedAudit ?? null,
         }
       : null;
 

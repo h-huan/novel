@@ -287,11 +287,13 @@ it('injects the user-declared custom platform standard into the idea prompt as t
     customPlatformNote: '每章末尾必须留一个可验证的实物线索；回报以关系变化为主，不用打脸爽点。',
     ...discoveryStandards,
   });
-  // 自定义平台标准应贯穿创建前筛选与单题材完整卡结构化；这里故意让第一个已选题材返回空卡，验证失败点已经越过筛选阶段。
+  // 每个已选题材都继承自定义平台；全部空卡时给出各题材结构错误，不调用无对象的修复。
   expect(result.success).toBe(false);
   expect(String(result.error)).toContain('第 1/5 个已选题材结构化失败');
   expect(String(result.error)).toContain('返回 0 张，期望恰好 1 张');
-  expect(realLLM.generate).toHaveBeenCalledTimes(2);
+  expect(realLLM.generate).toHaveBeenCalledTimes(6);
+  expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: false });
+  expect(result.appealGate.structuringErrors).toHaveLength(5);
   const prompt = prompts.join('\n');
   expect(prompt).toContain('每章末尾必须留一个可验证的实物线索');
   expect(prompt).toContain('用户填写的「自定义平台说明」是该平台节奏、回报类型、段落与对话区间的唯一事实源');

@@ -57,7 +57,7 @@ interface DiscoveryState {
   // Step 1: 配置
   step: number;
   storyType: 'short_story' | 'long_novel';
-  /** 本轮必须返回的合格灵感故事卡数量；后端支持 1-10，默认 5。 */
+  /** 本轮目标合格灵感故事卡数量；后端支持 1-10，默认 5，缺额显式展示。 */
   ideaCount: number;
   /** 目标平台 = 执行标准里的「平台」这一维。字段名与 ExecutionStandardsValue.targetPlatform 一致，
    *  这样前端唯一的平台判据 platformStandardProblem(state) 可以直接吃整个 store，不必再加一层适配。 */

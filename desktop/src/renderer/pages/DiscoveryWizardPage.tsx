@@ -114,13 +114,13 @@ export const discoverySignature = (state: ReturnType<typeof useDiscoveryStore.ge
   ideaCount: state.ideaCount,
 });
 
-/** 只接收与发起时配置及当前配置同时一致的整批结果。 */
+/** 同配置的合格卡可部分返回；数量缺额单独展示，不丢弃已通过的题材。 */
 export const discoveryResponseMatchesSelection = (
   requestedSignature: string,
   state: ReturnType<typeof useDiscoveryStore.getState>,
   ideas: Array<{ storyType?: string; targetPlatform?: string }>,
 ): boolean => requestedSignature === discoverySignature(state)
-  && ideas.length === state.ideaCount
+  && ideas.length > 0 && ideas.length <= state.ideaCount
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
 const discoveryGenreProblem = (state: ReturnType<typeof useDiscoveryStore.getState>): string => {
@@ -891,10 +891,6 @@ const DiscoveryWizardPage: React.FC = () => {
 
       if ((res as any)?.success && (res as any)?.ideas?.length > 0) {
         const newIdeas = (res as any).ideas;
-        if (newIdeas.length !== configuredState.ideaCount) {
-          store.setGenProgress(`❌ 本轮要求 ${configuredState.ideaCount} 张合格故事卡，但后端只返回 ${newIdeas.length} 张；本轮不计为成功，请重新发现。`);
-          return;
-        }
         if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), newIdeas)) {
           store.setGenProgress('创作设定已改变，或返回题材与所选长短篇/平台不一致；旧结果已丢弃，请重新发现。');
           store.setStep(0);
@@ -911,7 +907,10 @@ const DiscoveryWizardPage: React.FC = () => {
           .filter((i: any) => i.title)
           .map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
         store.addExcludeDetails(newDetails);
-        const qualityWarn = (res as any).qualityWarning ? `\n⚠️ ${(res as any).qualityWarning}` : '';
+        const partialWarning = newIdeas.length < configuredState.ideaCount
+          ? `本轮缺少 ${configuredState.ideaCount - newIdeas.length} 张；已通过的故事卡可直接创建项目。` : '';
+        const warning = [(res as any).qualityWarning, partialWarning].filter(Boolean).join(' ');
+        const qualityWarn = warning ? `\n⚠️ ${warning}` : '';
         store.setGenProgress(`✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
         store.setGenProgress(`❌ ${(res as any).error}`);
@@ -1457,7 +1456,7 @@ const DiscoveryWizardPage: React.FC = () => {
           {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count} 张</option>)}
         </select>
         <div style={{ marginTop: '6px', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
-          本轮必须返回 {ideaCount} 张通过质量门的完整故事卡；不足不会伪装成成功。
+          本轮目标 {ideaCount} 张合格故事卡；不足时显示缺额，已通过的故事卡仍可创建项目。
         </div>
       </div>
 

@@ -71,11 +71,13 @@ describe('发现结果必须对应发起时的选择', () => {
       [{ storyType: 'short_story', targetPlatform: 'fanqie' }])).toBe(true);
   });
 
-  it('返回数量必须与本轮 ideaCount 完全一致', () => {
+  it('保留同配置的部分合格卡，但拒收空批次与超额响应', () => {
     const state = { ...useDiscoveryStore.getState(), storyType: 'short_story' as const, targetPlatform: 'fanqie', ideaCount: 3 };
     const signature = discoverySignature(state);
     const one = { storyType: 'short_story', targetPlatform: 'fanqie' };
-    expect(discoveryResponseMatchesSelection(signature, state, [one])).toBe(false);
+    expect(discoveryResponseMatchesSelection(signature, state, [one])).toBe(true);
+    expect(discoveryResponseMatchesSelection(signature, state, [])).toBe(false);
+    expect(discoveryResponseMatchesSelection(signature, state, [one, one, one, one])).toBe(false);
     expect(discoveryResponseMatchesSelection(signature, state, [one, one, one])).toBe(true);
   });
 
