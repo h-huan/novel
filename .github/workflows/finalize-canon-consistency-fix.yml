@@ -113,7 +113,11 @@ jobs:
         run: npm run build
       - name: Desktop runtime packaging check
         working-directory: desktop
-        run: npm run check:runtime-packaging
+        run: |
+          npm run prepare:server-runtime
+          test -f packaging-resources/server-runtime/src/main.js
+          test -f packaging-resources/server-runtime/package.json
+          test -x packaging-resources/server-runtime/node
       - name: Remove one-shot patch machinery
         run: rm -f .github/scripts/finalize-canon-consistency-fix.py .github/scripts/finalize-safe-cross-stage-repair.py .github/scripts/finalize-world-invariant-boundary.py .github/workflows/finalize-canon-consistency-fix.yml
       - name: Commit verified changes
