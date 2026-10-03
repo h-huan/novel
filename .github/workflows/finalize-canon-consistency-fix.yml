@@ -22,6 +22,7 @@ jobs:
         run: |
           python .github/scripts/finalize-canon-consistency-fix.py
           python .github/scripts/finalize-safe-cross-stage-repair.py
+          python .github/scripts/finalize-world-invariant-boundary.py
       - name: Server dependencies
         working-directory: server
         run: npm ci
@@ -59,7 +60,7 @@ jobs:
         working-directory: desktop
         run: npm run check:runtime-packaging
       - name: Remove one-shot patch machinery
-        run: rm -f .github/scripts/finalize-canon-consistency-fix.py .github/scripts/finalize-safe-cross-stage-repair.py .github/workflows/finalize-canon-consistency-fix.yml
+        run: rm -f .github/scripts/finalize-canon-consistency-fix.py .github/scripts/finalize-safe-cross-stage-repair.py .github/scripts/finalize-world-invariant-boundary.py .github/workflows/finalize-canon-consistency-fix.yml
       - name: Commit verified changes
         run: |
           git config user.name "github-actions[bot]"
