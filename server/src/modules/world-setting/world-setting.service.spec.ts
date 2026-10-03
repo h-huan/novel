@@ -26,6 +26,15 @@ describe('WorldSettingService', () => {
     updated_at: '2025-01-01',
   };
 
+  const projectDb = (status = 'creating') => ({
+    prepare: vi.fn((_sql: string) => ({
+      get: vi.fn(() => ({ id: 'project-1', status })),
+      all: vi.fn(() => []),
+      run: vi.fn(),
+    })),
+    exec: vi.fn(),
+  });
+
   beforeEach(() => {
     repo = {
       findById: vi.fn(),
@@ -38,11 +47,12 @@ describe('WorldSettingService', () => {
       updateConstraint: vi.fn(),
     } as unknown as WorldSettingRepository;
 
-    service = new WorldSettingService(repo);
+    const db = projectDb('creating');
+    service = new WorldSettingService(repo, { getDb: () => db } as any);
   });
 
   describe('create', () => {
-    it('should create world setting with constraints', () => {
+    it('should create world setting with constraints while project is creating', () => {
       (repo.findById as any).mockReturnValue(mockRow);
 
       const result = service.create('project-1', {
@@ -65,7 +75,7 @@ describe('WorldSettingService', () => {
   });
 
   describe('constraint management', () => {
-    it('should add constraint', () => {
+    it('should add constraint while project is creating', () => {
       (repo.findById as any).mockReturnValue(mockRow);
       (repo.addConstraint as any).mockReturnValue({
         ...mockRow,
@@ -86,7 +96,7 @@ describe('WorldSettingService', () => {
       expect(result.version).toBe(2);
     });
 
-    it('should remove constraint', () => {
+    it('should remove constraint while project is creating', () => {
       (repo.findById as any).mockReturnValue(mockRow);
       (repo.removeConstraint as any).mockReturnValue({
         ...mockRow,
@@ -99,11 +109,16 @@ describe('WorldSettingService', () => {
     });
   });
 
-  it('removes the linked profile in the same transaction as its world setting', () => {
+  it('removes the linked profile in the same transaction as its world setting during creation', () => {
     const operations: string[] = [];
     const db = {
       exec: vi.fn((sql: string) => operations.push(sql)),
-      prepare: vi.fn((sql: string) => ({ run: vi.fn(() => operations.push(sql)) })),
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes('SELECT id,status FROM projects')) {
+          return { get: vi.fn(() => ({ id: 'project-1', status: 'creating' })) };
+        }
+        return { run: vi.fn(() => operations.push(sql)) };
+      }),
     };
     (repo.findById as any).mockReturnValue(mockRow);
     (repo.delete as any).mockImplementation(() => operations.push('world_settings DELETE'));
@@ -117,5 +132,25 @@ describe('WorldSettingService', () => {
       'world_settings DELETE',
       'COMMIT',
     ]);
+  });
+
+  it('rejects every world mutation entry once the project is active', () => {
+    const activeDb = projectDb('active');
+    service = new WorldSettingService(repo, { getDb: () => activeDb } as any);
+    (repo.findById as any).mockReturnValue(mockRow);
+
+    const blocked = (call: () => unknown) => expect(call).toThrow('世界观已冻结');
+    blocked(() => service.create('project-1', { name: '另一个世界' } as any));
+    blocked(() => service.update('ws-1', { name: '改名' } as any));
+    blocked(() => service.updateProfile('project-1', 'ws-1', { rules: '改规则' }));
+    blocked(() => service.remove('ws-1'));
+    blocked(() => service.addConstraint('ws-1', { category: 'power', rule: '改约束' } as any));
+    blocked(() => service.removeConstraint('ws-1', 'c-1'));
+
+    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.delete).not.toHaveBeenCalled();
+    expect(repo.addConstraint).not.toHaveBeenCalled();
+    expect(repo.removeConstraint).not.toHaveBeenCalled();
   });
 });
