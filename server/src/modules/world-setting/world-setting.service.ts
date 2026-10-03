@@ -1,7 +1,7 @@
 /**
  * 世界观 Setting Service
  */
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { WorldSettingRepository } from '../../database/repositories/world-setting.repository';
 import type { WorldSettingRow } from '../../database/repositories/world-setting.repository';
@@ -9,7 +9,7 @@ import type { CreateWorldSettingDto, UpdateWorldSettingDto, AddConstraintDto } f
 import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
 import { maskForeshadowAnswers } from '../../chain/foreshadow-mask';
-import { STORY_FACT_PRIORITY } from '../module-standards/module-standards.seed';
+import { buildCanonPolicyDirective } from '../canon/canon-policy';
 
 // 世界观档案字段（世界运行规则 + 作品地基字段）；custom_settings 为按小说自定义设定（JSON 键值对）
 export const WORLD_PROFILE_FIELDS = ['synopsis','basic_info','era','locations','atmosphere_tone','rules','social_structure','tech_supernatural','system_mechanics','economy_system','culture_customs','naming_rules','factions','scale_plan','ending','hierarchy_rules','supplementary','custom_settings'] as const;
@@ -31,13 +31,11 @@ export interface WorldSettingResponse {
   workIntro?: string;
   systemSettings?: string;
   dataPlanning?: string;
-  // 新增字段 (migration 042)
   culturalSettings?: string;
   spoilerSettings?: string;
   censorshipRules?: string;
   createdAt: string;
   updatedAt: string;
-  // 短篇世界观字段
   storyPremise?: string;
   locations?: string[];
   socialRules?: string;
@@ -53,7 +51,20 @@ export class WorldSettingService {
     @Optional() private readonly stateItemService?: StateItemService,
   ) {}
 
+  /**
+   * 世界观只允许在项目创建阶段首次建立/补齐。项目一旦离开 creating，世界观即冻结。
+   * 这是硬边界，不提供“影响分析后仍可自动修改”的旁路：冲突必须去改更小影响面的资料。
+   */
+  private assertWorldMutable(projectId: string, operation: string): void {
+    const project = this.databaseService.getDb().prepare('SELECT id,status FROM projects WHERE id=? LIMIT 1').get(projectId) as any;
+    if (!project) throw new NotFoundException('Project not found');
+    if (String(project.status || '') !== 'creating') {
+      throw new ConflictException(`世界观已冻结，不能执行“${operation}”。世界观是小说地基；请在章纲、未来计划、状态、伏笔或未接受正文中选择最小代价修复点，禁止通过修改世界观来消除冲突。`);
+    }
+  }
+
   create(projectId: string, dto: CreateWorldSettingDto): WorldSettingResponse {
+    this.assertWorldMutable(projectId, '创建/替换世界观');
     const now = new Date().toISOString();
     const id = uuid();
 
@@ -113,12 +124,13 @@ export class WorldSettingService {
   updateProfile(projectId: string, id: string, input: Record<string, unknown>) {
     const worldSetting = this.findOne(id);
     if (worldSetting.projectId !== projectId) throw new NotFoundException('World setting not found');
+    this.assertWorldMutable(projectId, '修改世界观档案');
     const db = this.databaseService.getDb(); const now = new Date().toISOString();
     const before = db.prepare('SELECT * FROM world_system_profiles WHERE world_setting_id = ?').get(id) as any;
     const values = WORLD_PROFILE_FIELDS.map(field => String(input[field] ?? before?.[field] ?? ''));
     db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id, ${WORLD_PROFILE_FIELDS.join(', ')}, created_at, updated_at) VALUES (?, ?, ?, ${WORLD_PROFILE_FIELDS.map(() => '?').join(', ')}, ?, ?) ON CONFLICT(world_setting_id) DO UPDATE SET ${WORLD_PROFILE_FIELDS.map(field => `${field}=excluded.${field}`).join(', ')}, updated_at=excluded.updated_at`).run(before?.id || uuid(), projectId, id, ...values, before?.created_at || now, now);
     const changedFields = WORLD_PROFILE_FIELDS.filter(field => String(before?.[field] || '') !== String(input[field] ?? before?.[field] ?? ''));
-    if (changedFields.length) this.analyzeStateImpact(projectId, id, '世界观 profile 修改影响分析', { changedFields, changedGroups: this.worldGroups(changedFields), riskReason: '世界规则已变化，后续正文上下文需要复核。', affectedModules: ['chapter','outline','character','foreshadowing','timeline','map','writing_context','writing_quality'], suggestedReviewAction: '复核关联章节、地图和伏笔。' });
+    if (changedFields.length) this.analyzeStateImpact(projectId, id, '创建阶段世界观 profile 补齐影响分析', { changedFields, changedGroups: this.worldGroups(changedFields), riskReason: '创建阶段世界规则仍在首次建立，后续资料必须以最终冻结版本为准。', affectedModules: ['chapter','outline','character','foreshadowing','timeline','map','writing_context','writing_quality'], suggestedReviewAction: '世界观冻结前完成一致性复核。' });
     return this.getProfile(projectId, id);
   }
 
@@ -150,47 +162,30 @@ export class WorldSettingService {
       ['势力分布（主要势力/组织）','factions'],
       ['全文规模/数据规划（人口/势力/资源等量化）','scale_plan'],
       ['结局设定','ending'],
-      // 这里曾把可由模型生成的 profile.hierarchy_rules 当第二份优先级定义注入正文，
-      // 后果是它与执行标准和本章章纲冲突时模型只能猜选。层级现只读 seed 常量。
       ['补充说明','supplementary'],
     ];
     const custom = (profile['custom_settings'] || '').trim();
-    // 收尾反转脱敏（仅生成侧 maskForeshadow=true 时）：custom_settings 中凡命中
-    // “收尾/变脸/反转/才揭示/归属”的锁定句，抹去具体归属/答案（如“笔迹一属沈月兰，
-    // 笔迹二属贺德山——这是老贺变脸的依据”），只保留“该信息锁定在收尾揭示”的提示，
-    // 防止模型把世界观锁定事实当可写信息直接写进正文。评审侧 maskForeshadow=false
-    // 拿完整档案，才能判定正文是否提前消费收尾反转——两端信息不对称是结构性保障。
     const customLines = maskForeshadow
       ? (custom
         ? [`自定义设定（收尾反转信息已脱敏，正文不得提前点名归属/结果）：${this.sanitizeCustomSettings(custom, profile['ending'])}`]
         : [])
       : (custom ? [`自定义设定：${custom}`] : []);
-    return ['【世界观写作摘要】', `事实权威顺序：${STORY_FACT_PRIORITY}`, ...fields.map(([label, key]) => `${label}：${value(key)}`), ...customLines].join('\n');
+    return ['【世界观写作摘要】', buildCanonPolicyDirective(), ...fields.map(([label, key]) => `${label}：${value(key)}`), ...customLines].join('\n');
   }
 
-  /**
-   * 收尾反转脱敏：把 custom_settings 中命中“收尾/变脸/反转/才揭示/归属锁定”的条目改写为
-   * 不含答案的提示（如“接送签到表家长栏两种笔迹的具体归属锁定在收尾对峙时揭示”），
-   * 其余普通设定原样保留。规则层价值：正文生成侧必须拿不到收尾反转答案，
-   * 评审侧仍用完整档案判错，两端信息不对称是防提前消费的结构性保障。
-   */
   private sanitizeCustomSettings(custom: string, ending?: string): string {
     if (!custom) return '';
-    // 脱敏触发关键词：收尾反转词 + ending「必须回收的伏笔」清单关键词（通用提取，不硬编码单本小说）
     const foreshadowKeywords = new Set<string>();
     if (ending) {
       const m = ending.match(/必须回收的伏笔[：:]([^\n]+)/);
       if (m) {
         for (const item of m[1].split(/[①②③④⑤⑥⑦⑧⑨⑩]/).filter(Boolean)) {
           const clean = item.replace(/[，。；、\s"“”'（）()]/g, '').trim();
-          // 取每个伏笔条目的核心名词短语（前 12 字）作为触发词
           if (clean.length >= 2) foreshadowKeywords.add(clean.slice(0, 12));
         }
       }
     }
     const triggerPattern = /(收尾|变脸|反转|才揭示|才回收|揭破|在收尾)/;
-    // 触发判定：反转词命中，或任一伏笔关键词的任一 ≥3 字连续片段命中（覆盖“担保栏写沈青禾”这类
-    // 关键词顺序不完全一致的情形，通用不硬编码）。
     const foreshadowTriggers = [...foreshadowKeywords].flatMap(k => {
       const trigs: string[] = [];
       for (let i = 0; i + 3 <= k.length; i++) trigs.push(k.slice(i, i + 3));
@@ -204,8 +199,6 @@ export class WorldSettingService {
       const hitForeshadow = foreshadowTriggers.some(f => f.length >= 3 && t.includes(f));
       if (triggerPattern.test(t) || hitForeshadow) {
         const masked = maskForeshadowAnswers(t)
-
-          // 兜底：担保/教师证明/档案等伏笔载体出现名字时也抹除（排除括号防贪吃）
           .replace(/(担保|证明|档案|台账|名单|签名)[^，。；\n（(]{0,20}?[“「]?[沈贺郭周宁简石殷覃祝陶龙韦莫][^”」，。；\n（)]{0,8}/g, '$1（署名锁定在收尾揭示）');
         out.push(`【收尾锁定，正文只留线索】${masked.slice(0, 160)}`);
       } else {
@@ -231,6 +224,7 @@ export class WorldSettingService {
   update(id: string, dto: UpdateWorldSettingDto): WorldSettingResponse {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
+    this.assertWorldMutable(existing.project_id, '修改世界观资料');
 
     const now = new Date().toISOString();
     const updateData: Record<string, unknown> = { updated_at: now, version: existing.version + 1 };
@@ -247,7 +241,7 @@ export class WorldSettingService {
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
-    this.analyzeStateImpact(existing.project_id, id, '世界观资料修改影响分析', {
+    this.analyzeStateImpact(existing.project_id, id, '创建阶段世界观资料补齐影响分析', {
       before: this.toResponse(existing),
       after: dto,
       priority: 'world_setting',
@@ -256,8 +250,7 @@ export class WorldSettingService {
   }
 
   /**
-   * 生成世界观修改方案（真实）：基于数据库当前设定计算差异，并扫描章节正文与伏笔，
-   * 找出对旧值的具体引用，给出真实的影响分析。不依赖任何内存桩或假数据。
+   * 保留差异扫描给作者诊断，但项目离开 creating 后只允许“看影响”，不再提供可执行修改路径。
    */
   generateChangePlan(projectId: string, settingId: string, proposedChanges: Record<string, unknown>): {
     changes: Array<{ field: string; oldValue: string; newValue: string }>;
@@ -272,58 +265,50 @@ export class WorldSettingService {
     const changes: Array<{ field: string; oldValue: string; newValue: string }> = [];
     for (const [field, newValue] of Object.entries(proposedChanges || {})) {
       const oldValue = String((current as any)[field] ?? '');
-      if (oldValue !== String(newValue)) {
-        changes.push({ field, oldValue, newValue: String(newValue) });
-      }
+      if (oldValue !== String(newValue)) changes.push({ field, oldValue, newValue: String(newValue) });
     }
 
-    // 真实影响分析：扫描章节正文与伏笔描述，查找对旧值的具体引用
     const db = this.databaseService.getDb();
     const affectedContent: string[] = [];
     for (const change of changes) {
       const oldVal = change.oldValue.trim();
       if (!oldVal) continue;
       const chapters = db.prepare('SELECT chapter_index, title, content FROM chapters WHERE project_id = ? AND content LIKE ?').all(projectId, `%${oldVal}%`) as any[];
-      for (const ch of chapters) {
-        affectedContent.push(`第${ch.chapter_index}章${ch.title ? `《${ch.title}》` : ''}：正文引用了“${oldVal}”`);
-      }
+      for (const ch of chapters) affectedContent.push(`第${ch.chapter_index}章${ch.title ? `《${ch.title}》` : ''}：正文引用了“${oldVal}”`);
       const fores = db.prepare('SELECT chapter_index, description FROM foreshadowings WHERE project_id = ? AND description LIKE ?').all(projectId, `%${oldVal}%`) as any[];
-      for (const f of fores) {
-        affectedContent.push(`第${f.chapter_index ?? '?'}章伏笔：引用了“${oldVal}”`);
-      }
+      for (const f of fores) affectedContent.push(`第${f.chapter_index ?? '?'}章伏笔：引用了“${oldVal}”`);
     }
     const uniqueAffected = [...new Set(affectedContent)];
 
-    let severity: 'low' | 'medium' | 'high' = 'low';
-    let requiresConfirmation = false;
-    if (changes.length > 3) { severity = 'high'; requiresConfirmation = true; }
-    else if (changes.length > 1) severity = 'medium';
-    if (uniqueAffected.length > 3) severity = 'high';
-    if (uniqueAffected.length > 0 && severity === 'low') severity = 'medium';
-    if (uniqueAffected.length > 0) requiresConfirmation = true;
+    const status = String((db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as any)?.status || '');
+    let severity: 'low' | 'medium' | 'high' = uniqueAffected.length > 3 || changes.length > 3 ? 'high' : changes.length > 1 || uniqueAffected.length ? 'medium' : 'low';
+    const frozen = status !== 'creating';
+    if (frozen && changes.length) severity = 'high';
 
     const suggestions: string[] = [];
-    if (changes.length > 0) suggestions.push(`“${current.name}”的修改可能影响依赖该设定的章节与伏笔，建议重新审查相关正文`);
-    if (uniqueAffected.length > 0) suggestions.push(`检测到 ${uniqueAffected.length} 处内容可能需同步修改：${uniqueAffected.slice(0, 3).join('；')}${uniqueAffected.length > 3 ? '…' : ''}`);
-    if (severity === 'high') suggestions.push('此修改影响范围较大，建议分步实施并逐一确认');
-    if (requiresConfirmation) suggestions.push('需要作者确认后才能执行此修改');
-    if (suggestions.length === 0) suggestions.push('此修改未检测到冲突影响，可以安全执行');
+    if (frozen && changes.length) {
+      suggestions.push('世界观已经冻结，此方案仅用于识别冲突来源，不允许执行世界观修改。');
+      suggestions.push('请改动影响范围最小的未来章纲、伏笔、时间线、状态或未接受正文，把剧情圆回现有世界观。');
+    } else if (changes.length > 0) {
+      suggestions.push('项目仍在创建阶段，应在激活前完成世界观定稿；激活后该世界观将永久冻结。');
+    }
+    if (uniqueAffected.length > 0) suggestions.push(`检测到 ${uniqueAffected.length} 处依赖：${uniqueAffected.slice(0, 3).join('；')}${uniqueAffected.length > 3 ? '…' : ''}`);
+    if (suggestions.length === 0) suggestions.push('没有实际差异。');
 
     return {
       changes,
       impactAnalysis: [{ affectedContent: uniqueAffected.length ? uniqueAffected : ['暂无已检测到的受影响内容'], severity }],
       suggestions,
-      requiresConfirmation,
+      requiresConfirmation: frozen || uniqueAffected.length > 0,
     };
   }
 
   remove(id: string): { success: boolean } {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
+    this.assertWorldMutable(existing.project_id, '删除世界观');
     const before = this.toResponse(existing);
     const db = this.databaseService.getDb();
-    // 这里曾只删除 world_settings，留下第二份无主 world_system_profiles；
-    // 后续按 project_id LIMIT 1 读到旧规则，正文时间机制在“三小时前/一小时前”间漂移。
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare('DELETE FROM world_system_profiles WHERE project_id=? AND world_setting_id=?')
@@ -334,7 +319,7 @@ export class WorldSettingService {
       db.exec('ROLLBACK');
       throw error;
     }
-    this.analyzeStateImpact(existing.project_id, id, '世界观删除影响分析', {
+    this.analyzeStateImpact(existing.project_id, id, '创建阶段世界观删除影响分析', {
       operation: 'remove', before, priority: 'world_setting', needsReview: true,
     });
     return { success: true };
@@ -343,11 +328,12 @@ export class WorldSettingService {
   addConstraint(id: string, dto: AddConstraintDto): WorldSettingResponse {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
+    this.assertWorldMutable(existing.project_id, '添加世界观约束');
     const constraint = { id: uuid(), ...dto, appliesTo: [] };
     const row = this.repo.addConstraint(id, constraint);
     if (!row) throw new NotFoundException(`WorldSetting ${id} not found`);
     const response = this.toResponse(row);
-    this.analyzeStateImpact(existing.project_id, id, '世界观约束添加影响分析', {
+    this.analyzeStateImpact(existing.project_id, id, '创建阶段世界观约束添加影响分析', {
       before: this.toResponse(existing),
       after: { constraints: row.constraints },
       constraintChange: `add_constraint: ${dto.category || 'unknown'}: ${(dto as any).rule || ''}`,
@@ -359,10 +345,11 @@ export class WorldSettingService {
   removeConstraint(id: string, constraintId: string): WorldSettingResponse {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`WorldSetting ${id} not found`);
+    this.assertWorldMutable(existing.project_id, '删除世界观约束');
     const row = this.repo.removeConstraint(id, constraintId);
     if (!row) throw new NotFoundException(`WorldSetting ${id} not found`);
     const response = this.toResponse(row);
-    this.analyzeStateImpact(existing.project_id, id, '世界观约束删除影响分析', {
+    this.analyzeStateImpact(existing.project_id, id, '创建阶段世界观约束删除影响分析', {
       before: this.toResponse(existing),
       after: { constraints: row.constraints },
       constraintChange: `remove_constraint: ${constraintId}`,
@@ -389,13 +376,11 @@ export class WorldSettingService {
       workIntro: row.work_intro || undefined,
       systemSettings: row.system_settings || undefined,
       dataPlanning: row.data_planning || undefined,
-      // 新增字段 (migration 042)
       culturalSettings: row.cultural_settings || undefined,
       spoilerSettings: row.spoiler_settings || undefined,
       censorshipRules: row.censorship_rules || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      // 短篇世界观字段
       storyPremise: row.story_premise || '',
       locations: row.locations ? JSON.parse(row.locations) : [],
       socialRules: row.social_rules || '',
