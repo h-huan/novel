@@ -65,6 +65,7 @@ import { detectSourceCountdownConflict } from './source-countdown-consistency';
 import { describeWorldSourceCandidate } from './source-rule-consistency';
 import { buildSourceHierarchyReviewPrompt, normalizeSourceHierarchyReview, SourceHierarchyReview } from './source-hierarchy-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
+import { buildStoryFoundation } from '../modules/canon/canon-policy';
 import {
   classifyGateFailure,
   OUTLINE_PRECONDITION_MARKER,
@@ -1128,8 +1129,12 @@ export class ChainController {
     // 执行标准是验收前提：评审器拿不到平台/分类/基调/文风/流派/视角，就只能判「有没有按大纲写」，
     // 判不了「这一章是否符合创建时确认的平台分类与文风」——那正是「配置是配置、执行是另一回事」的缺口。
     const reviewStandard = input.projectId ? this.buildExecutionStandardTags(input.projectId) : '';
-    const reviewPrompt = `你是小说章节验收器。只判断，不改写正文。\n\n${reviewStandard ? `【创建项目时确认的执行标准（验收前提，正文必须执行）】\n${reviewStandard}\n\n` : ''}【章节】第${input.chapterIndex}章 ${input.chapterTitle}\n【不可偏离的详细大纲（当前章事实合同）】\n${input.outlineContract.slice(0, 12000)}\n\n【支持性故事上下文（前文事实/角色/世界观/时间线/伏笔）】\n${input.storyContext.slice(0, 14000)}\n\n${input.subsequentChapterBoundary ? `【后续章节边界（本章不得提前消费）】\n${input.subsequentChapterBoundary.slice(0, 1800)}\n\n` : ''}\n【待验收正文】\n${input.content}\n\n事实权威顺序：\n1. 已保存正文、明确锁定状态、mustObeyRules/forbiddenWriting 是最高权威。\n2. 当前章的具体到达时间、人物行动、场景与伏笔，以【详细大纲】为本章权威。\n3. 自动扩展的世界档案/简介只作支持材料；若它与详细大纲对同一事实说法冲突，写入 sourceConflicts，不得要求正文同时满足两套说法，也不得把遵循详细大纲判成正文错误。\n\n必须严格按顺序执行：\n第一步：从【详细大纲】提取“本章必需事件点清单”——每个事件点是大纲明确要求正文实际发生的一个具体事件/场景/人物行动/钩子，按大纲出现顺序排列，至少包含结尾钩子，合并同一场景的重复描述，最多12项。\n第二步：逐项判定正文是否真实发生该事件，给出 covered 与正文逐字证据。\n第三步：仅检查有逐字证据的故事事实冲突、人物越界、时间线冲突和结尾钩子；若提供了【后续章节边界】，必须额外检查两类跨章问题并写入 contradictions：(a) 跨章提前消费——正文把后续章节大纲明确计划的核心事件、伏笔回收或反转提前兑现/提前揭开；(b) 跨章断言冲突——正文写死“只有…才知道…”“世上只有…”“唯一…就是…”等强断言，而该断言与后续章节既定事实冲突（如后续大纲显示该信息另有来源）。两类问题均视为阻断性矛盾。\n第四步：只有重复措辞、相似身体动作、轻微收纳跳步、段落节奏与地点用词偏差写入 advisories。人物白名单外新角色、时间/倒计时/名单数量冲突、大纲必需事件顺序错位即使措辞为「建议统一」也必须写入 contradictions 并阻断，不得放入 advisories。
-第五步：AI 痕迹检查——只补判确定性扫描覆盖不到的两项，命中且有逐字证据才写入 contradictions（视为阻断性矛盾）：(a) 升华式段尾：段落末尾突然“上价值”/总结点题（如“那一刻她终于明白”“一切都会过去的”）；(c) 空洞反思段：连续多段内心独白只有情绪、没有事件推进。正常的一两处修辞不判。以下各项已由确定性硬红线扫描唯一覆盖（formula-sentence 公式句／dash-density 破折号过密／simile-density 比喻过密／48 套路化表达／55 AI 高频模糊词过密／34 排比与动词堆砌／53-same-structure-parallel 同构排比，见 LANGUAGE_HARDLINE_RULE_IDS），仍按阻断性矛盾处理，但判据只有一份：此处不得再判定、不得再产出同类条目，以免同一处 AI 痕迹被重复计数。\n第六步：执行标准检查——平台/分类/基调/文风/流派/视角六维都是创建时确认的执行前提，任一处偏差都写入 contradictions（阻断性矛盾），由修复闭环改写后重新验收，不得因为「只是文风/只是措辞」降级成 advisories。逐维判据：(a)「视角」——正文叙事视角必须与执行标准一致（标准为「多视角轮换」时按段落级标记判定）；(b)「分类」——本章的事件类型、场景与冲突必须落在执行标准「分类」所指的平台投稿分类范围内；(c)「基调」——全篇情绪走向与标准一致，情绪转折有铺垫与代价，未中途改调性；(d)「文风」——句式、比喻密度、描写分寸与信息给法与标准一致；(e)「流派」——该流派读者的核心预期在本章被兑现。判定必须有逐字证据，且偏差须成规模（同一维≥2 处或贯穿全章）才判，单处用词偏好不判。平台层量化基准（段落厚度、对话占比、章尾钩等）由确定性硬红线扫描器负责，此处不重复判定。\n\n严格规则：\n- 正文必须执行本章大纲，不得用同主题的另一件事替代。\n- 任一必需事件 covered=false 或存在有证据的故事事实冲突才不通过。\n- sourceConflicts 是资料源之间的矛盾：先修资料源，阻断正文保存，禁止正文同时满足两套矛盾说法。\n- 不以关键词出现作为通过依据；证据必须逐字来自正文，找不到就写“无明确证据”，不得猜。\n- 输出必须紧凑：event不超过60字，evidence不超过80字，contradictions最多6项，advisories最多6项，总JSON不超过6000个汉字。\n\n只输出JSON对象：{"pass":true|false,"requiredEvents":[{"event":"必需事件点","covered":true|false,"evidence":"正文逐字证据或无明确证据"}],"missingRequiredItems":["所有covered=false的事件点"],"contradictions":["仅有证据的故事事实/人物/时间线/跨章冲突"],"advisories":["非阻断的局部措辞/重复问题（执行标准六维偏差不得放这里）"],"sourceConflicts":["资料源之间互相冲突的说法"],"outlineAligned":true|false,"continuityPassed":true|false,"characterPassed":true|false,"worldPassed":true|false,"timelinePassed":true|false,"prosePassed":true|false,"evidence":["最多4条总体逐字证据"]}\n\npass 必须为 true 当且仅当：全部 requiredEvents.covered===true 且 contradictions 为空。advisories 不改变 pass；sourceConflicts 必须清零才可通过。`;
+    const reviewPrompt = `你是小说章节验收器。只判断，不改写正文。\n\n${reviewStandard ? `【创建项目时确认的执行标准（验收前提，正文必须执行）】\n${reviewStandard}\n\n` : ''}【章节】第${input.chapterIndex}章 ${input.chapterTitle}\n【不可偏离的详细大纲（当前章事实合同）】\n${input.outlineContract.slice(0, 12000)}\n\n【支持性故事上下文（前文事实/角色/世界观/时间线/伏笔）】\n${input.storyContext.slice(0, 14000)}\n\n${input.subsequentChapterBoundary ? `【后续章节边界（本章不得提前消费）】\n${input.subsequentChapterBoundary.slice(0, 1800)}\n\n` : ''}\n【待验收正文】\n${input.content}\n\n${STORY_FACT_PRIORITY}
+
+正文验收补充：世界观不可作为自动修复目标；已接受历史与未来计划冲突且未触碰世界观/确认故事核心时，保留历史并修未来计划；其它资料源冲突按修改范围最小、下游依赖最少的原则选择局部修复点。
+
+必须严格按顺序执行：\n第一步：从【详细大纲】提取“本章必需事件点清单”——每个事件点是大纲明确要求正文实际发生的一个具体事件/场景/人物行动/钩子，按大纲出现顺序排列，至少包含结尾钩子，合并同一场景的重复描述，最多12项。\n第二步：逐项判定正文是否真实发生该事件，给出 covered 与正文逐字证据。\n第三步：仅检查有逐字证据的故事事实冲突、人物越界、时间线冲突和结尾钩子；若提供了【后续章节边界】，必须额外检查两类跨章问题并写入 contradictions：(a) 跨章提前消费——正文把后续章节大纲明确计划的核心事件、伏笔回收或反转提前兑现/提前揭开；(b) 跨章断言冲突——正文写死“只有…才知道…”“世上只有…”“唯一…就是…”等强断言，而该断言与后续章节既定事实冲突（如后续大纲显示该信息另有来源）。两类问题均视为阻断性矛盾。\n第四步：只有重复措辞、相似身体动作、轻微收纳跳步、段落节奏与地点用词偏差写入 advisories。人物白名单外新角色、时间/倒计时/名单数量冲突、大纲必需事件顺序错位即使措辞为「建议统一」也必须写入 contradictions 并阻断，不得放入 advisories。
+第五步：AI 痕迹检查——只补判确定性扫描覆盖不到的两项，命中且有逐字证据才写入 contradictions（视为阻断性矛盾）：(a) 升华式段尾：段落末尾突然“上价值”/总结点题（如“那一刻她终于明白”“一切都会过去的”）；(c) 空洞反思段：连续多段内心独白只有情绪、没有事件推进。正常的一两处修辞不判。以下各项已由确定性硬红线扫描唯一覆盖（formula-sentence 公式句／dash-density 破折号过密／simile-density 比喻过密／48 套路化表达／55 AI 高频模糊词过密／34 排比与动词堆砌／53-same-structure-parallel 同构排比，见 LANGUAGE_HARDLINE_RULE_IDS），仍按阻断性矛盾处理，但判据只有一份：此处不得再判定、不得再产出同类条目，以免同一处 AI 痕迹被重复计数。\n第六步：执行标准检查——平台/分类/基调/文风/流派/视角六维都是创建时确认的执行前提，任一处偏差都写入 contradictions（阻断性矛盾），由修复闭环改写后重新验收，不得因为「只是文风/只是措辞」降级成 advisories。逐维判据：(a)「视角」——正文叙事视角必须与执行标准一致（标准为「多视角轮换」时按段落级标记判定）；(b)「分类」——本章的事件类型、场景与冲突必须落在执行标准「分类」所指的平台投稿分类范围内；(c)「基调」——全篇情绪走向与标准一致，情绪转折有铺垫与代价，未中途改调性；(d)「文风」——句式、比喻密度、描写分寸与信息给法与标准一致；(e)「流派」——该流派读者的核心预期在本章被兑现。判定必须有逐字证据，且偏差须成规模（同一维≥2 处或贯穿全章）才判，单处用词偏好不判。平台层量化基准（段落厚度、对话占比、章尾钩等）由确定性硬红线扫描器负责，此处不重复判定。\n\n严格规则：\n- 正文必须执行本章大纲，不得用同主题的另一件事替代。\n- 任一必需事件 covered=false 或存在有证据的故事事实冲突才不通过。\n- sourceConflicts 是资料源之间的矛盾：世界观永不改；优先修最小影响面的未来计划、派生资料或未接受草稿；没有安全局部修复点时阻断并人工裁决，禁止正文同时满足两套矛盾说法。\n- 不以关键词出现作为通过依据；证据必须逐字来自正文，找不到就写“无明确证据”，不得猜。\n- 输出必须紧凑：event不超过60字，evidence不超过80字，contradictions最多6项，advisories最多6项，总JSON不超过6000个汉字。\n\n只输出JSON对象：{"pass":true|false,"requiredEvents":[{"event":"必需事件点","covered":true|false,"evidence":"正文逐字证据或无明确证据"}],"missingRequiredItems":["所有covered=false的事件点"],"contradictions":["仅有证据的故事事实/人物/时间线/跨章冲突"],"advisories":["非阻断的局部措辞/重复问题（执行标准六维偏差不得放这里）"],"sourceConflicts":["资料源之间互相冲突的说法"],"outlineAligned":true|false,"continuityPassed":true|false,"characterPassed":true|false,"worldPassed":true|false,"timelinePassed":true|false,"prosePassed":true|false,"evidence":["最多4条总体逐字证据"]}\n\npass 必须为 true 当且仅当：全部 requiredEvents.covered===true 且 contradictions 为空。advisories 不改变 pass；sourceConflicts 必须清零才可通过。`;
     const qualityOutputContract = '';
     let response: { content: string };
     try {
@@ -5717,7 +5722,9 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
     ).get(projectId) as Record<string, unknown>);
 
     const isShort = dto.storyType !== 'long_novel';
-    const ideaStr = JSON.stringify(dto.selectedIdea);
+    // 长短篇都从同一张 confirmedStory 做确定性投影；不让两条流程各自摘要一次题材。
+    const storyFoundation = buildStoryFoundation(dto.selectedIdea);
+    const ideaStr = JSON.stringify({ confirmedStory: dto.selectedIdea, storyFoundation });
     const targetWanZi = dto.targetWords / 10000;
 
     const getCreationCounts = () => ({
@@ -6278,6 +6285,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
         platform: constitution.targetPlatform,
         projectCard: constitution,
         confirmedStory: dto.selectedIdea,
+        storyFoundation,
       });
       // ====== 步骤1：生成大纲 ======
       // 新流程先生成世界观，再用世界观作为大纲、角色与后续资料的上下文。 

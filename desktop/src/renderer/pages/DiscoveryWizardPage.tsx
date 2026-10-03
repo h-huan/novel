@@ -111,6 +111,7 @@ export const standardsForIdea = (state: ReturnType<typeof useDiscoveryStore.getS
 export const discoverySignature = (state: ReturnType<typeof useDiscoveryStore.getState>): string => JSON.stringify({
   ...discoveryStandards(state),
   storyType: state.storyType,
+  ideaCount: state.ideaCount,
 });
 
 /** 只接收与发起时配置及当前配置同时一致的整批结果。 */
@@ -119,7 +120,7 @@ export const discoveryResponseMatchesSelection = (
   state: ReturnType<typeof useDiscoveryStore.getState>,
   ideas: Array<{ storyType?: string; targetPlatform?: string }>,
 ): boolean => requestedSignature === discoverySignature(state)
-  && ideas.length > 0
+  && ideas.length === state.ideaCount
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
 const discoveryGenreProblem = (state: ReturnType<typeof useDiscoveryStore.getState>): string => {
@@ -563,7 +564,7 @@ const DiscoveryWizardPage: React.FC = () => {
 
   // 从 store 读取状态（持久化，切换页面不丢失）
   const {
-    step, storyType, targetPlatform, selectedGenres, selectedSubmissionTags, selectedPlotTags, selectedTones, selectedWritingStyles, narrativePov,
+    step, storyType, ideaCount, targetPlatform, selectedGenres, selectedSubmissionTags, selectedPlotTags, selectedTones, selectedWritingStyles, narrativePov,
     targetWords, selectedCategory, selectedSubCategory, genreFitNote,
     customPlatformNote,
     targetAudience, categoryWordScaleDeviation,
@@ -625,7 +626,7 @@ const DiscoveryWizardPage: React.FC = () => {
       store.setStep(0);
       setConfigError('创作设定已改变，请按当前选择重新发现题材。');
     }
-  }, [generationDone, generatedSignature, storyType, targetPlatform, targetWords,
+  }, [generationDone, generatedSignature, storyType, ideaCount, targetPlatform, targetWords,
     selectedCategory, selectedSubCategory, selectedTones, selectedWritingStyles,
     selectedGenres, selectedSubmissionTags, selectedPlotTags, narrativePov,
     targetAudience, customPlatformNote, genreFitNote, categoryWordScaleDeviation, store]);
@@ -857,7 +858,7 @@ const DiscoveryWizardPage: React.FC = () => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         const minutes = Math.floor(elapsed / 60);
         const secs = elapsed % 60;
-        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，当前模型正在生成并校验 5 个题材，请勿重复点击...`);
+        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，当前模型正在生成并校验 ${configuredState.ideaCount} 个题材，请勿重复点击...`);
       }
     }, 5000);
 
@@ -876,7 +877,7 @@ const DiscoveryWizardPage: React.FC = () => {
         plotTags: configuredState.selectedPlotTags,
         genreFitNote: configuredState.genreFitNote,
         pov: configuredState.narrativePov,
-        count: 5,
+        count: configuredState.ideaCount,
         excludeTitles,
         excludeDetails: excludeDetailsArg,
         targetWords: configuredState.targetWords || undefined,
@@ -890,6 +891,10 @@ const DiscoveryWizardPage: React.FC = () => {
 
       if ((res as any)?.success && (res as any)?.ideas?.length > 0) {
         const newIdeas = (res as any).ideas;
+        if (newIdeas.length !== configuredState.ideaCount) {
+          store.setGenProgress(`❌ 本轮要求 ${configuredState.ideaCount} 张合格故事卡，但后端只返回 ${newIdeas.length} 张；本轮不计为成功，请重新发现。`);
+          return;
+        }
         if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), newIdeas)) {
           store.setGenProgress('创作设定已改变，或返回题材与所选长短篇/平台不一致；旧结果已丢弃，请重新发现。');
           store.setStep(0);
@@ -907,7 +912,7 @@ const DiscoveryWizardPage: React.FC = () => {
           .map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
         store.addExcludeDetails(newDetails);
         const qualityWarn = (res as any).qualityWarning ? `\n⚠️ ${(res as any).qualityWarning}` : '';
-        store.setGenProgress(`✨ 发现 ${newIdeas.length} 个故事题材（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
+        store.setGenProgress(`✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
         store.setGenProgress(`❌ ${(res as any).error}`);
       } else {
@@ -1442,6 +1447,20 @@ const DiscoveryWizardPage: React.FC = () => {
         {unionOptions(povOptions, narrativePov ? [narrativePov] : []).map((item) => <option key={item} value={item}>{item}</option>)}
       </select>
 
+      <div style={s.sectionTitle}>灵感故事卡数量</div>
+      <div style={{ marginBottom: '28px' }}>
+        <select
+          value={ideaCount}
+          onChange={(event) => store.setIdeaCount(Number(event.target.value))}
+          style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)' }}
+        >
+          {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count} 张</option>)}
+        </select>
+        <div style={{ marginTop: '6px', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
+          本轮必须返回 {ideaCount} 张通过质量门的完整故事卡；不足不会伪装成成功。
+        </div>
+      </div>
+
       {/* 开始按钮 */}
       <button
         style={s.startBtn}
@@ -1619,7 +1638,7 @@ const DiscoveryWizardPage: React.FC = () => {
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            AI从不同角度生成了以下 {ideas.length} 个题材，点击卡片可查看详情
+            本轮目标 {ideaCount} 张，已通过 {ideas.length} / {ideaCount} 张；点击卡片可查看详情
             {prevTitles.length > ideas.length && (
               <span style={{ color: 'var(--color-warning)', marginLeft: '8px' }}>
                 （已累计排除 {prevTitles.length - ideas.length} 个旧题材）
@@ -1656,7 +1675,7 @@ const DiscoveryWizardPage: React.FC = () => {
         <div style={s.ideasGrid}>
           {ideas.map((idea, idx) => {
             const existingProject = findProjectForIdea(projects, idea);
-            return <IdeaCard key={`idea-${idx}`} idea={idea} onClick={handleSelectIdea}
+            return <IdeaCard key={`idea-${idx}`} idea={idea} index={idx + 1} total={ideaCount} onClick={handleSelectIdea}
               existingProject={existingProject ? { id: existingProject.id, status: existingProject.status } : undefined}
               onOpenProject={(id) => openProject(id, existingProject?.title || idea.title, navigate)} />;
           })}

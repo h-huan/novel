@@ -1,3 +1,5 @@
+import { buildCanonPolicyDirective } from '../canon/canon-policy';
+
 /**
  * 执行标准的机器映射。
  *
@@ -8,12 +10,8 @@
 
 export const SEED_BASELINE_VERSION = 65;
 
-/**
- * 事实权威与编辑保护是两条轴：上层 Canon 约束下层；锁定正文禁止自动改，但不会因此反向覆盖世界观/宪法。
- * 资料源冲突时模型无权自行选边；除人工保护冲突外，优先修改最低权威、未锁定且影响范围最小的依赖项。
- */
-export const STORY_FACT_PRIORITY =
-  'Creative Constitution 中已确认题材与锁定事实 > 已确认世界观硬规则/边界 > 已确认全书/卷架构、角色/关系/时间线/伏笔状态 > 本章 ChapterPlan/详细章纲 > 未锁定正文草稿；锁定正文只提高编辑保护、不反转事实权威；上层 Canon 与锁定正文冲突时禁止自动改任一侧，必须人工裁决；其余冲突优先修最低权威且影响范围最小的未锁定依赖项';
+/** 唯一 Canon 规则文本由机器策略生成；旧调用点继续用这个名字，但不能再定义第二套顺序。 */
+export const STORY_FACT_PRIORITY = buildCanonPolicyDirective();
 
 export interface SeedModuleStandard {
   module_key: string;
