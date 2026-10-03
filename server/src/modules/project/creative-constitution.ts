@@ -508,6 +508,11 @@ export function updateConstitution(row: Record<string, any>, dto: Record<string,
 export function constitutionSettings(settings: Record<string, any>, c: CreativeConstitution): Record<string, any> {
   const result = { ...settings };
   for (const key of ['targetPlatform', 'platform', 'recommendedPlatform', 'storyCategory', 'category', 'genre', 'storyTone', 'writingStyle', 'style', 'webNovelGenre', 'submissionTags', 'plotTags', 'genreFitNote', 'pov', 'pointOfView', 'targetAudience', 'targetReaders', 'customPlatformNote', 'categoryWordScaleDeviation', 'chapterWordRange']) delete result[key];
+  // Preserve diagnostics when a settings edit writes the context-only constitution back.
+  const audit = c.confirmedStory?.ideaDiscoveryAudit
+    ?? settings.creativeConstitution?.confirmedStory?.ideaDiscoveryAudit
+    ?? settings.ideaDiscoveryAudit;
+  if (audit !== undefined) result.ideaDiscoveryAudit = structuredClone(audit);
   return { ...result, creativeConstitution: c };
 }
 
@@ -553,6 +558,9 @@ export function normalizeStoredConstitutions(db: DatabaseSync): void {
     const savedRevision = Number(saved?.revision);
     const baseRevision = Number.isInteger(savedRevision) && savedRevision > 0 ? savedRevision : 1;
     const constitution: CreativeConstitution = {
+      // Normalization must preserve confirmedStory and every other non-alias field.
+      // Reconstructing only the dimension fields used to erase the selected story on restart.
+      ...saved,
       schemaVersion: 1,
       revision: baseRevision,
       projectType,

@@ -103,7 +103,9 @@ export class ChainPlanningController {
     if (!project) return recovery;
     const confirmedStory: any = readConstitution(project).confirmedStory;
     // Full batch diagnostics remain available here, outside generation/review contexts.
-    const storedAudit = settingsObject(project.settings).creativeConstitution?.confirmedStory?.ideaDiscoveryAudit;
+    const storedSettings = settingsObject(project.settings);
+    const storedAudit = storedSettings.ideaDiscoveryAudit
+      ?? storedSettings.creativeConstitution?.confirmedStory?.ideaDiscoveryAudit;
     const storySelection = confirmedStory && typeof confirmedStory === 'object' && !Array.isArray(confirmedStory)
       ? {
           title: confirmedStory.title ?? null,

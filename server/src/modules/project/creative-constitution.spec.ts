@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readConstitution, updateConstitution, constitutionColumns, buildExecutionStandard, genreFitProblem, isPlatformStandardPresent, missingConstitutionStandards } from './creative-constitution';
+import { readConstitution, updateConstitution, constitutionColumns, constitutionSettings, normalizeStoredConstitutions, buildExecutionStandard, genreFitProblem, isPlatformStandardPresent, missingConstitutionStandards } from './creative-constitution';
 import { getPlatform } from '../../chain/platform-benchmarks';
 
 describe('creative constitution boundary', () => {
@@ -117,5 +117,41 @@ describe('persisted discovery audit isolation', () => {
     });
     expect(JSON.stringify(read)).not.toContain('另一作品');
     expect(JSON.parse(settings).creativeConstitution.confirmedStory).toEqual(story);
+  });
+});
+
+describe('constitution persistence across restart and edits', () => {
+  it.each(['short_story', 'long_novel'])('preserves %s confirmedStory when normalizing stored rows', type => {
+    const audit = { preselectedPremises: [{ title: '其它候选' }] };
+    const c = updateConstitution({}, { type, targetPlatform: 'fanqie', category: '悬疑', pov: '第一人称' });
+    c.confirmedStory = { title: '当前故事', hook: '核心钩子', ideaDiscoveryAudit: audit };
+    c.qualityPolicy = { acceptanceThreshold: 90 } as any;
+    let row: any = { id: 'p1', type, settings: JSON.stringify({ creativeConstitution: c }) };
+    const db: any = { prepare: (sql: string) => sql.startsWith('SELECT')
+      ? { all: () => [row] }
+      : { run: (_type: string, _platform: string, _legacyPlatform: string, _words: number, _style: string, settings: string) => {
+        row = { ...row, settings };
+      } } };
+    normalizeStoredConstitutions(db);
+    const persisted = JSON.parse(row.settings).creativeConstitution;
+    expect(persisted.confirmedStory).toEqual(c.confirmedStory);
+    expect(persisted.qualityPolicy).toEqual(c.qualityPolicy);
+    expect(readConstitution(row).confirmedStory).toEqual({ title: '当前故事', hook: '核心钩子' });
+    const firstSettings = row.settings;
+    normalizeStoredConstitutions(db);
+    expect(row.settings).toBe(firstSettings);
+  });
+
+  it('retains the full audit outside Canon when settings are edited', () => {
+    const c = updateConstitution({}, { type: 'short_story', targetPlatform: 'fanqie', category: '悬疑', pov: '第一人称' });
+    const audit = { candidateAssessments: [{ candidate: { title: '另一个故事' } }] };
+    c.confirmedStory = { title: '当前故事', ideaDiscoveryAudit: audit };
+    const stored = { creativeConstitution: c };
+    const context = readConstitution({ settings: stored });
+    const edited = constitutionSettings(stored, { ...context, revision: context.revision + 1 });
+    expect(edited.ideaDiscoveryAudit).toEqual(audit);
+    expect(edited.creativeConstitution.confirmedStory).toEqual({ title: '当前故事' });
+    expect(readConstitution({ settings: edited }).confirmedStory).toEqual({ title: '当前故事' });
+    expect(constitutionSettings(edited, readConstitution({ settings: edited })).ideaDiscoveryAudit).toEqual(audit);
   });
 });
