@@ -5354,7 +5354,9 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
           totalIdeas: 0,
           error: finalGateRepairError
             ? `本次创建前筛选的 ${requestedCount} 个题材均未形成可展示结果，且同题材局部修复协议未完成：${finalGateRepairError}`
-            : `本次创建前筛选的 ${requestedCount} 个题材在最终 Gate 与一次定向局部修复后均未通过；系统未换题或补数，请重新发现。`,
+            : structuredCards.length === 0
+              ? `本次创建前筛选的 ${requestedCount} 个题材全部结构化失败：${rejectionSummary}。系统未换题或补数，请重新发现。`
+              : `本次创建前筛选的 ${requestedCount} 个题材在最终 Gate 与一次定向局部修复后均未通过：${rejectionSummary}；系统未换题或补数，请重新发现。`,
           appealGate,
         };
       }
