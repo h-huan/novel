@@ -71,7 +71,9 @@ describe('canon policy', () => {
   it('exports one prompt directive that explicitly freezes world canon and minimizes blast radius', () => {
     const directive = buildCanonPolicyDirective();
     expect(directive).toContain('不得修改世界观');
-    expect(directive).toContain('修改范围最小');
+    expect(directive).toContain('影响范围最小');
+    expect(directive).toContain('修改单元最少');
+    expect(directive).toContain('下游依赖最少');
     expect(directive).toContain('RAG');
   });
 });
