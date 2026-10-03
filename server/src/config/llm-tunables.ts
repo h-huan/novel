@@ -19,7 +19,7 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-/** 把 env 值转换成传给 realLLM.generate 的 timeout（0 → undefined，回退到服务兜底值）。 */
+/** 把 env 值转换成传给 realLLM.generate 的 timeout（0 → undefined，回退服务兜底值）。 */
 function toTimeout(ms: number): number | undefined {
   return ms > 0 ? ms : undefined;
 }
@@ -77,6 +77,11 @@ export const LLM_TUNABLES = {
   HEARTBEAT_SHORT_MS: envInt('LLM_HEARTBEAT_SHORT_MS', 20000), // 短篇生成心跳
   STEP_PACE_MS: envInt('LLM_STEP_PACE_MS', 1000), // 步骤间停顿，避免瞬时打满限流
   RETRY_BASE_DELAY_MS: envInt('LLM_RETRY_BASE_DELAY_MS', 1000),
+  // RealLLM 内部已经对一次物理调用做 1 次同模型网络补发。这里控制统一 provider
+  // 边界的额外恢复轮：默认再恢复 1 轮，使一次短暂 UND_ERR_SOCKET 不会直接终止建书；
+  // 仍然只使用用户配置的同一模型，不切换 provider/模型，不改变 prompt/质量标准。
+  NETWORK_RECOVERY_RETRIES: envInt('LLM_NETWORK_RECOVERY_RETRIES', 1),
+  NETWORK_RECOVERY_DELAY_MS: envInt('LLM_NETWORK_RECOVERY_DELAY_MS', 3000),
 
   /** 转成 realLLM.generate 接受的 timeout（0 → undefined，回退服务兜底）。 */
   timeoutSimple: () => toTimeout(LLM_TUNABLES.TIMEOUT_SIMPLE),
