@@ -18,17 +18,18 @@ describe('generic source hierarchy review', () => {
     expect(normalizeSourceHierarchyReview({ consistent: true, contradictions: [] })).toEqual({ consistent: true, contradictions: [] });
   });
 
-  it('uses the single canon hierarchy and separates locked-body protection from fact authority', () => {
+  it('uses the single canon policy and separates locked-body protection from fact authority', () => {
     const prompt = buildSourceHierarchyReviewPrompt({
       parentName: '确认题材', parent: { hook: '每次交易扣一枚徽章' }, childName: '世界规则',
       child: { rules: ['只有提现才扣徽章'] }, executionStandard: '目标平台：短篇平台；视角：第一人称',
     });
     for (const text of [
       '每次交易扣一枚徽章', '只有提现才扣徽章', '第一人称', '逐字短引文', '时间方向',
-      STORY_FACT_PRIORITY, '正文已锁定', '编辑保护', '人工裁决', '影响范围最小',
-      '已经发生的 Accepted/锁定正文事实', '尚未执行的未来卷纲/章纲/ChapterPlan',
-      '未来计划属于可调整依赖项', '而不是倒改历史',
+      STORY_FACT_PRIORITY, '正文已锁定', '编辑保护', '人工裁决',
+      '已经发生并接受的正文', '尚未执行的未来计划', '保留已经发生历史',
+      '影响范围最小', '下游依赖最少', '不得反向修改世界观',
     ]) expect(prompt).toContain(text);
+    expect(prompt).not.toContain('已保存正文、明确锁定状态、mustObeyRules/forbiddenWriting 是最高权威');
     expect(prompt).not.toContain('进门/回拨');
   });
 });
