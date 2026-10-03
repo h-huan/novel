@@ -51,9 +51,11 @@ interface IdeaCardProps {
   onClick: (idea: any) => void;
   existingProject?: { id: string; status: string };
   onOpenProject?: (id: string) => void;
+  index?: number;
+  total?: number;
 }
 
-const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick, existingProject, onOpenProject }) => {
+const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick, existingProject, onOpenProject, index, total }) => {
   const isRawFallback = !!idea.raw && !idea.description && !idea.protagonist && !idea.setting && !idea.hook && !idea.angle;
   const hasBody = idea.description || idea.coreConflict || idea.tone || idea.uniquePoint || idea.mainReversal || idea.estimatedWords || idea.scopeReason || idea.protagonist || idea.setting || idea.raw;
 
@@ -63,6 +65,7 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick, existingProject, onO
       <div style={s.header}>
         <div style={s.titleRow}>
           <span style={s.title}>{idea.title}</span>
+          {index && total ? <span style={s.qualityFlag}>{index}/{total}</span> : null}
           {idea.storyType && <span style={s.qualityFlag}>{idea.storyType === 'short_story' ? '短篇' : '长篇'}</span>}
           {existingProject && <span style={s.qualityFlag}>{existingProject.status === 'generation_failed' ? '已创建 · 生成失败' : existingProject.status === 'creating' ? '已创建 · 生成中' : '已创建'}</span>}
           {idea.angle && <span style={getAngleBadgeStyle(idea.angle)}>{idea.angle}</span>}

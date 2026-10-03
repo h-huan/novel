@@ -233,8 +233,12 @@ export class GenerationRecoveryService {
     if (audit.protectedHumanWork) {
       throw new ConflictException(`检测到受保护资料：${audit.protectionReasons.join('；')}。已停止自动覆盖。`);
     }
-
-    await this.clearGeneratedAssets(projectId);
+    const preserveWorld = Boolean(
+      this.database.getDb().prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId),
+    );
+    // 普通恢复永远保留已经建立的世界观，只清理可再生的下游资料。
+    // “按题材重建”仍走 clearForExplicitSourceRebuild，并在存在世界观时明确拒绝。
+    await this.clearGeneratedAssets(projectId, { preserveWorld });
   }
 
   async clearForExplicitSourceRebuild(projectId: string): Promise<void> {
@@ -243,6 +247,10 @@ export class GenerationRecoveryService {
     if (!project) throw new NotFoundException('项目不存在');
     if (!['active', 'generation_failed'].includes(String(project.status))) {
       throw new ConflictException('项目仍在创建或运行，不能同时按原题材重建。');
+    }
+    const frozenWorld = db.prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId);
+    if (frozenWorld) {
+      throw new ConflictException('世界观已冻结，禁止按原题材重建世界观。请保留世界观，只在章纲、角色、状态、伏笔、时间线或未接受正文中做最小影响修复。');
     }
     const protectedBodies = Number((db.prepare(`SELECT COUNT(*) AS n FROM chapters WHERE project_id=?
       AND (length(trim(COALESCE(content,'')))>0 OR locked_at IS NOT NULL OR status IN ('reviewing','locked','completed'))`)
@@ -262,12 +270,15 @@ export class GenerationRecoveryService {
     await this.clearGeneratedAssets(projectId);
   }
 
-  private async clearGeneratedAssets(projectId: string): Promise<void> {
+  private async clearGeneratedAssets(
+    projectId: string,
+    options: { preserveWorld?: boolean } = {},
+  ): Promise<void> {
     await this.deleteProjectVectors(projectId);
     const db = this.database.getDb();
     db.exec('BEGIN IMMEDIATE');
     try {
-      this.deleteProjectRows(projectId);
+      this.deleteProjectRows(projectId, options);
       db.prepare("UPDATE projects SET status='creating',updated_at=? WHERE id=?")
         .run(new Date().toISOString(), projectId);
       db.exec('COMMIT');
@@ -352,9 +363,10 @@ export class GenerationRecoveryService {
     }
   }
 
-  private deleteProjectRows(projectId: string): void {
+  private deleteProjectRows(projectId: string, options: { preserveWorld?: boolean } = {}): void {
     const db = this.database.getDb();
     for (const table of RECOVERY_PROFILE_TABLES) {
+      if (options.preserveWorld && table === 'world_system_profiles') continue;
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
         db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(projectId);
       }
@@ -367,7 +379,9 @@ export class GenerationRecoveryService {
     db.prepare('DELETE FROM map_points WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM organizations WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM characters WHERE project_id=?').run(projectId);
-    db.prepare('DELETE FROM world_settings WHERE project_id=?').run(projectId);
+    if (!options.preserveWorld) {
+      db.prepare('DELETE FROM world_settings WHERE project_id=?').run(projectId);
+    }
   }
 
   private insertRows(table: string, rows: Record<string, unknown>[]): void {

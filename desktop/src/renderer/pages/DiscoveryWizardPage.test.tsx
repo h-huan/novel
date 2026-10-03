@@ -59,7 +59,9 @@ describe('题材卡与已创建项目', () => {
 
 describe('发现结果必须对应发起时的选择', () => {
   it('切为短篇后拒收仍在途的长篇响应，且拒收错类型题材', () => {
-    const longState = { ...useDiscoveryStore.getState(), storyType: 'long_novel' as const, targetPlatform: 'fanqie' };
+    // 本用例只验证“请求签名/长短篇类型”维度，因此显式把本轮数量设为 1；
+    // 数量完整性由下一用例单独验证，避免用默认 5 张契约干扰这里的单一断言。
+    const longState = { ...useDiscoveryStore.getState(), storyType: 'long_novel' as const, targetPlatform: 'fanqie', ideaCount: 1 };
     const shortState = { ...longState, storyType: 'short_story' as const };
     const requested = discoverySignature(longState);
     const longIdeas = [{ storyType: 'long_novel', targetPlatform: 'fanqie' }];
@@ -67,6 +69,14 @@ describe('发现结果必须对应发起时的选择', () => {
     expect(discoveryResponseMatchesSelection(discoverySignature(shortState), shortState, longIdeas)).toBe(false);
     expect(discoveryResponseMatchesSelection(discoverySignature(shortState), shortState,
       [{ storyType: 'short_story', targetPlatform: 'fanqie' }])).toBe(true);
+  });
+
+  it('返回数量必须与本轮 ideaCount 完全一致', () => {
+    const state = { ...useDiscoveryStore.getState(), storyType: 'short_story' as const, targetPlatform: 'fanqie', ideaCount: 3 };
+    const signature = discoverySignature(state);
+    const one = { storyType: 'short_story', targetPlatform: 'fanqie' };
+    expect(discoveryResponseMatchesSelection(signature, state, [one])).toBe(false);
+    expect(discoveryResponseMatchesSelection(signature, state, [one, one, one])).toBe(true);
   });
 
   it('已选文风变化时拒收旧响应', () => {

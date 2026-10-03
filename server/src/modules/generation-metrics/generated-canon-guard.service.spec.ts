@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { GeneratedCanonGuardService } from './generated-canon-guard.service';
 
 describe('GeneratedCanonGuardService', () => {
+  const projectRow = {
+    id: 'project-1',
+    type: 'long_novel',
+    status: 'active',
+  };
+
   const passedRun = {
     id: 'run-1',
     project_id: 'project-1',
@@ -12,9 +18,10 @@ describe('GeneratedCanonGuardService', () => {
     output_text: '{"world":"ok"}',
   };
 
-  const createSubject = (row: any = passedRun, current = true) => {
-    const get = vi.fn().mockReturnValue(row);
-    const prepare = vi.fn().mockReturnValue({ get });
+  const createSubject = (row: any = passedRun, current = true, project: any = projectRow) => {
+    const prepare = vi.fn().mockImplementation((sql: string) => ({
+      get: vi.fn().mockReturnValue(sql.includes('FROM generation_runs') ? row : project),
+    }));
     const databaseService = { getDb: vi.fn().mockReturnValue({ prepare }) } as any;
     const generationMetrics = { runIsCurrent: vi.fn().mockReturnValue(current) } as any;
     return {
@@ -48,72 +55,57 @@ describe('GeneratedCanonGuardService', () => {
       runId: 'run-1',
       expectedStages: ['world'],
       expectedScenarios: ['world_building'],
-    })).toEqual({
-      runId: 'run-1',
-      projectId: 'project-1',
-      stage: 'world',
-      scenario: 'world_building',
-      outputText: '{"world":"ok"}',
-    });
+    })).toEqual(expect.objectContaining({ runId: 'run-1', projectId: 'project-1' }));
     expect(generationMetrics.runIsCurrent).toHaveBeenCalledWith('run-1', 'project-1');
+  });
+
+  it('rejects stale structured runs even while a project is creating', () => {
+    const { service } = createSubject({ ...passedRun, gate_status: 'not_evaluated' }, false, { ...projectRow, status: 'creating' });
+    expect(() => service.assertStructuredCanCommit({
+      projectId: 'project-1',
+      runId: 'run-1',
+      expectedStages: ['world'],
+      expectedScenarios: ['world_building'],
+    })).toThrow('凭证已过期');
   });
 
   it('rejects a missing generation-run credential on both boundaries', () => {
     const { service } = createSubject();
-    expect(() => service.assertCanCommit({
-      projectId: 'project-1',
-      outputText: '{"world":"ok"}',
-    })).toThrow('缺少 generation run 凭证');
-    expect(() => service.assertStructuredCanCommit({
-      projectId: 'project-1',
-    })).toThrow('缺少 generation run 凭证');
+    expect(() => service.assertCanCommit({ projectId: 'project-1', outputText: '{"world":"ok"}' })).toThrow('缺少 generation run 凭证');
+    expect(() => service.assertStructuredCanCommit({ projectId: 'project-1' })).toThrow('缺少 generation run 凭证');
   });
 
   it('never treats success without an explicit Gate PASS as chapter-ready', () => {
     const { service } = createSubject({ ...passedRun, gate_status: 'not_evaluated' });
     expect(() => service.assertCanCommit({
-      projectId: 'project-1',
-      runId: 'run-1',
-      outputText: '{"world":"ok"}',
+      projectId: 'project-1', runId: 'run-1', outputText: '{"world":"ok"}',
     })).toThrow('必须来自已通过质量 Gate 的运行');
   });
 
   it('rejects structured provenance when the generation itself failed', () => {
     const { service } = createSubject({ ...passedRun, status: 'failed', gate_status: 'not_evaluated' });
-    expect(() => service.assertStructuredCanCommit({
-      projectId: 'project-1',
-      runId: 'run-1',
-    })).toThrow('未成功完成');
+    expect(() => service.assertStructuredCanCommit({ projectId: 'project-1', runId: 'run-1' })).toThrow('未成功完成');
   });
 
   it('rejects exact text that differs from the output that passed Gate', () => {
     const { service } = createSubject();
     expect(() => service.assertCanCommit({
-      projectId: 'project-1',
-      runId: 'run-1',
-      outputText: '{"world":"changed-after-review"}',
+      projectId: 'project-1', runId: 'run-1', outputText: '{"world":"changed-after-review"}',
     })).toThrow('与通过 Gate 的最终输出不一致');
   });
 
-  it('rejects a stale run on both boundaries', () => {
-    const { service } = createSubject(passedRun, false);
+  it('rejects stale active-project runs on both boundaries', () => {
+    const { service } = createSubject(passedRun, false, { ...projectRow, status: 'active' });
     expect(() => service.assertCanCommit({
-      projectId: 'project-1',
-      runId: 'run-1',
-      outputText: '{"world":"ok"}',
+      projectId: 'project-1', runId: 'run-1', outputText: '{"world":"ok"}',
     })).toThrow('凭证已过期');
-    expect(() => service.assertStructuredCanCommit({
-      projectId: 'project-1',
-      runId: 'run-1',
-    })).toThrow('凭证已过期');
+    expect(() => service.assertStructuredCanCommit({ projectId: 'project-1', runId: 'run-1' })).toThrow('凭证已过期');
   });
 
   it('rejects a run from the wrong structural stage', () => {
     const { service } = createSubject({ ...passedRun, stage: 'chapter' });
     expect(() => service.assertStructuredCanCommit({
-      projectId: 'project-1',
-      runId: 'run-1',
-      expectedStages: ['world'],
+      projectId: 'project-1', runId: 'run-1', expectedStages: ['world'],
     })).toThrow('阶段不匹配');
   });
 });

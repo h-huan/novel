@@ -65,6 +65,7 @@ import { detectSourceCountdownConflict } from './source-countdown-consistency';
 import { describeWorldSourceCandidate } from './source-rule-consistency';
 import { buildSourceHierarchyReviewPrompt, normalizeSourceHierarchyReview, SourceHierarchyReview } from './source-hierarchy-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
+import { buildStoryFoundation } from '../modules/canon/canon-policy';
 import {
   classifyGateFailure,
   OUTLINE_PRECONDITION_MARKER,
@@ -85,7 +86,7 @@ import {
   type OutlineConsistencyRow,
 } from './outline-consistency';
 import { maskForeshadowAnswers } from './foreshadow-mask';
-import { applyCrossStagePatch } from './cross-stage-patch';
+import { CROSS_STAGE_PATCH_TABLE_MAP, applyCrossStagePatch, isImmutableWorldPatchTarget, selectMinimumImpactCrossStagePatches } from './cross-stage-patch';
 import { buildOutlineFactReviewPrompt, describeOutlineFactReview, missingPriorLedgerEntries, normalizeOutlineFactReview } from './outline-fact-ledger';
 import { ideaTimeConflict } from './idea-fact-consistency';
 import {
@@ -1128,8 +1129,12 @@ export class ChainController {
     // 执行标准是验收前提：评审器拿不到平台/分类/基调/文风/流派/视角，就只能判「有没有按大纲写」，
     // 判不了「这一章是否符合创建时确认的平台分类与文风」——那正是「配置是配置、执行是另一回事」的缺口。
     const reviewStandard = input.projectId ? this.buildExecutionStandardTags(input.projectId) : '';
-    const reviewPrompt = `你是小说章节验收器。只判断，不改写正文。\n\n${reviewStandard ? `【创建项目时确认的执行标准（验收前提，正文必须执行）】\n${reviewStandard}\n\n` : ''}【章节】第${input.chapterIndex}章 ${input.chapterTitle}\n【不可偏离的详细大纲（当前章事实合同）】\n${input.outlineContract.slice(0, 12000)}\n\n【支持性故事上下文（前文事实/角色/世界观/时间线/伏笔）】\n${input.storyContext.slice(0, 14000)}\n\n${input.subsequentChapterBoundary ? `【后续章节边界（本章不得提前消费）】\n${input.subsequentChapterBoundary.slice(0, 1800)}\n\n` : ''}\n【待验收正文】\n${input.content}\n\n事实权威顺序：\n1. 已保存正文、明确锁定状态、mustObeyRules/forbiddenWriting 是最高权威。\n2. 当前章的具体到达时间、人物行动、场景与伏笔，以【详细大纲】为本章权威。\n3. 自动扩展的世界档案/简介只作支持材料；若它与详细大纲对同一事实说法冲突，写入 sourceConflicts，不得要求正文同时满足两套说法，也不得把遵循详细大纲判成正文错误。\n\n必须严格按顺序执行：\n第一步：从【详细大纲】提取“本章必需事件点清单”——每个事件点是大纲明确要求正文实际发生的一个具体事件/场景/人物行动/钩子，按大纲出现顺序排列，至少包含结尾钩子，合并同一场景的重复描述，最多12项。\n第二步：逐项判定正文是否真实发生该事件，给出 covered 与正文逐字证据。\n第三步：仅检查有逐字证据的故事事实冲突、人物越界、时间线冲突和结尾钩子；若提供了【后续章节边界】，必须额外检查两类跨章问题并写入 contradictions：(a) 跨章提前消费——正文把后续章节大纲明确计划的核心事件、伏笔回收或反转提前兑现/提前揭开；(b) 跨章断言冲突——正文写死“只有…才知道…”“世上只有…”“唯一…就是…”等强断言，而该断言与后续章节既定事实冲突（如后续大纲显示该信息另有来源）。两类问题均视为阻断性矛盾。\n第四步：只有重复措辞、相似身体动作、轻微收纳跳步、段落节奏与地点用词偏差写入 advisories。人物白名单外新角色、时间/倒计时/名单数量冲突、大纲必需事件顺序错位即使措辞为「建议统一」也必须写入 contradictions 并阻断，不得放入 advisories。
-第五步：AI 痕迹检查——只补判确定性扫描覆盖不到的两项，命中且有逐字证据才写入 contradictions（视为阻断性矛盾）：(a) 升华式段尾：段落末尾突然“上价值”/总结点题（如“那一刻她终于明白”“一切都会过去的”）；(c) 空洞反思段：连续多段内心独白只有情绪、没有事件推进。正常的一两处修辞不判。以下各项已由确定性硬红线扫描唯一覆盖（formula-sentence 公式句／dash-density 破折号过密／simile-density 比喻过密／48 套路化表达／55 AI 高频模糊词过密／34 排比与动词堆砌／53-same-structure-parallel 同构排比，见 LANGUAGE_HARDLINE_RULE_IDS），仍按阻断性矛盾处理，但判据只有一份：此处不得再判定、不得再产出同类条目，以免同一处 AI 痕迹被重复计数。\n第六步：执行标准检查——平台/分类/基调/文风/流派/视角六维都是创建时确认的执行前提，任一处偏差都写入 contradictions（阻断性矛盾），由修复闭环改写后重新验收，不得因为「只是文风/只是措辞」降级成 advisories。逐维判据：(a)「视角」——正文叙事视角必须与执行标准一致（标准为「多视角轮换」时按段落级标记判定）；(b)「分类」——本章的事件类型、场景与冲突必须落在执行标准「分类」所指的平台投稿分类范围内；(c)「基调」——全篇情绪走向与标准一致，情绪转折有铺垫与代价，未中途改调性；(d)「文风」——句式、比喻密度、描写分寸与信息给法与标准一致；(e)「流派」——该流派读者的核心预期在本章被兑现。判定必须有逐字证据，且偏差须成规模（同一维≥2 处或贯穿全章）才判，单处用词偏好不判。平台层量化基准（段落厚度、对话占比、章尾钩等）由确定性硬红线扫描器负责，此处不重复判定。\n\n严格规则：\n- 正文必须执行本章大纲，不得用同主题的另一件事替代。\n- 任一必需事件 covered=false 或存在有证据的故事事实冲突才不通过。\n- sourceConflicts 是资料源之间的矛盾：先修资料源，阻断正文保存，禁止正文同时满足两套矛盾说法。\n- 不以关键词出现作为通过依据；证据必须逐字来自正文，找不到就写“无明确证据”，不得猜。\n- 输出必须紧凑：event不超过60字，evidence不超过80字，contradictions最多6项，advisories最多6项，总JSON不超过6000个汉字。\n\n只输出JSON对象：{"pass":true|false,"requiredEvents":[{"event":"必需事件点","covered":true|false,"evidence":"正文逐字证据或无明确证据"}],"missingRequiredItems":["所有covered=false的事件点"],"contradictions":["仅有证据的故事事实/人物/时间线/跨章冲突"],"advisories":["非阻断的局部措辞/重复问题（执行标准六维偏差不得放这里）"],"sourceConflicts":["资料源之间互相冲突的说法"],"outlineAligned":true|false,"continuityPassed":true|false,"characterPassed":true|false,"worldPassed":true|false,"timelinePassed":true|false,"prosePassed":true|false,"evidence":["最多4条总体逐字证据"]}\n\npass 必须为 true 当且仅当：全部 requiredEvents.covered===true 且 contradictions 为空。advisories 不改变 pass；sourceConflicts 必须清零才可通过。`;
+    const reviewPrompt = `你是小说章节验收器。只判断，不改写正文。\n\n${reviewStandard ? `【创建项目时确认的执行标准（验收前提，正文必须执行）】\n${reviewStandard}\n\n` : ''}【章节】第${input.chapterIndex}章 ${input.chapterTitle}\n【不可偏离的详细大纲（当前章事实合同）】\n${input.outlineContract.slice(0, 12000)}\n\n【支持性故事上下文（前文事实/角色/世界观/时间线/伏笔）】\n${input.storyContext.slice(0, 14000)}\n\n${input.subsequentChapterBoundary ? `【后续章节边界（本章不得提前消费）】\n${input.subsequentChapterBoundary.slice(0, 1800)}\n\n` : ''}\n【待验收正文】\n${input.content}\n\n${STORY_FACT_PRIORITY}
+
+正文验收补充：世界观不可作为自动修复目标；已接受历史与未来计划冲突且未触碰世界观/确认故事核心时，保留历史并修未来计划；其它资料源冲突按修改范围最小、下游依赖最少的原则选择局部修复点。
+
+必须严格按顺序执行：\n第一步：从【详细大纲】提取“本章必需事件点清单”——每个事件点是大纲明确要求正文实际发生的一个具体事件/场景/人物行动/钩子，按大纲出现顺序排列，至少包含结尾钩子，合并同一场景的重复描述，最多12项。\n第二步：逐项判定正文是否真实发生该事件，给出 covered 与正文逐字证据。\n第三步：仅检查有逐字证据的故事事实冲突、人物越界、时间线冲突和结尾钩子；若提供了【后续章节边界】，必须额外检查两类跨章问题并写入 contradictions：(a) 跨章提前消费——正文把后续章节大纲明确计划的核心事件、伏笔回收或反转提前兑现/提前揭开；(b) 跨章断言冲突——正文写死“只有…才知道…”“世上只有…”“唯一…就是…”等强断言，而该断言与后续章节既定事实冲突（如后续大纲显示该信息另有来源）。两类问题均视为阻断性矛盾。\n第四步：只有重复措辞、相似身体动作、轻微收纳跳步、段落节奏与地点用词偏差写入 advisories。人物白名单外新角色、时间/倒计时/名单数量冲突、大纲必需事件顺序错位即使措辞为「建议统一」也必须写入 contradictions 并阻断，不得放入 advisories。
+第五步：AI 痕迹检查——只补判确定性扫描覆盖不到的两项，命中且有逐字证据才写入 contradictions（视为阻断性矛盾）：(a) 升华式段尾：段落末尾突然“上价值”/总结点题（如“那一刻她终于明白”“一切都会过去的”）；(c) 空洞反思段：连续多段内心独白只有情绪、没有事件推进。正常的一两处修辞不判。以下各项已由确定性硬红线扫描唯一覆盖（formula-sentence 公式句／dash-density 破折号过密／simile-density 比喻过密／48 套路化表达／55 AI 高频模糊词过密／34 排比与动词堆砌／53-same-structure-parallel 同构排比，见 LANGUAGE_HARDLINE_RULE_IDS），仍按阻断性矛盾处理，但判据只有一份：此处不得再判定、不得再产出同类条目，以免同一处 AI 痕迹被重复计数。\n第六步：执行标准检查——平台/分类/基调/文风/流派/视角六维都是创建时确认的执行前提，任一处偏差都写入 contradictions（阻断性矛盾），由修复闭环改写后重新验收，不得因为「只是文风/只是措辞」降级成 advisories。逐维判据：(a)「视角」——正文叙事视角必须与执行标准一致（标准为「多视角轮换」时按段落级标记判定）；(b)「分类」——本章的事件类型、场景与冲突必须落在执行标准「分类」所指的平台投稿分类范围内；(c)「基调」——全篇情绪走向与标准一致，情绪转折有铺垫与代价，未中途改调性；(d)「文风」——句式、比喻密度、描写分寸与信息给法与标准一致；(e)「流派」——该流派读者的核心预期在本章被兑现。判定必须有逐字证据，且偏差须成规模（同一维≥2 处或贯穿全章）才判，单处用词偏好不判。平台层量化基准（段落厚度、对话占比、章尾钩等）由确定性硬红线扫描器负责，此处不重复判定。\n\n严格规则：\n- 正文必须执行本章大纲，不得用同主题的另一件事替代。\n- 任一必需事件 covered=false 或存在有证据的故事事实冲突才不通过。\n- sourceConflicts 是资料源之间的矛盾：世界观永不改；优先修最小影响面的未来计划、派生资料或未接受草稿；没有安全局部修复点时阻断并人工裁决，禁止正文同时满足两套矛盾说法。\n- 不以关键词出现作为通过依据；证据必须逐字来自正文，找不到就写“无明确证据”，不得猜。\n- 输出必须紧凑：event不超过60字，evidence不超过80字，contradictions最多6项，advisories最多6项，总JSON不超过6000个汉字。\n\n只输出JSON对象：{"pass":true|false,"requiredEvents":[{"event":"必需事件点","covered":true|false,"evidence":"正文逐字证据或无明确证据"}],"missingRequiredItems":["所有covered=false的事件点"],"contradictions":["仅有证据的故事事实/人物/时间线/跨章冲突"],"advisories":["非阻断的局部措辞/重复问题（执行标准六维偏差不得放这里）"],"sourceConflicts":["资料源之间互相冲突的说法"],"outlineAligned":true|false,"continuityPassed":true|false,"characterPassed":true|false,"worldPassed":true|false,"timelinePassed":true|false,"prosePassed":true|false,"evidence":["最多4条总体逐字证据"]}\n\npass 必须为 true 当且仅当：全部 requiredEvents.covered===true 且 contradictions 为空。advisories 不改变 pass；sourceConflicts 必须清零才可通过。`;
     const qualityOutputContract = '';
     let response: { content: string };
     try {
@@ -5717,7 +5722,9 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
     ).get(projectId) as Record<string, unknown>);
 
     const isShort = dto.storyType !== 'long_novel';
-    const ideaStr = JSON.stringify(dto.selectedIdea);
+    // 长短篇都从同一张 confirmedStory 做确定性投影；不让两条流程各自摘要一次题材。
+    const storyFoundation = buildStoryFoundation(dto.selectedIdea);
+    const ideaStr = JSON.stringify({ confirmedStory: dto.selectedIdea, storyFoundation });
     const targetWanZi = dto.targetWords / 10000;
 
     const getCreationCounts = () => ({
@@ -5867,8 +5874,33 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       // ====== 长篇：调用综合链 ======
       if (!isShort) {
         // 这里曾让一个模型请求同时生成主线骨架与世界规则，后果是世界规则无法依赖已验收主线。
-        emit('skeleton', 10, '生成主线与结局骨架，验收通过后再生成世界规则...');
-        this.logger.log(`create-project-async: 长篇模式 project=${projectId}`);
+        const existingFrozenWorld = db.prepare('SELECT * FROM world_settings WHERE project_id=? LIMIT 1').get(projectId) as any;
+        const existingFrozenProfile = existingFrozenWorld
+          ? db.prepare('SELECT * FROM world_system_profiles WHERE project_id=? AND world_setting_id=? LIMIT 1')
+              .get(projectId, existingFrozenWorld.id) as any
+          : null;
+        const frozenWorldConstraints = existingFrozenWorld
+          ? this.safeExtractJson<Record<string, any>>(String(existingFrozenWorld.constraints || '{}'), {})
+          : {};
+        const frozenLongWorldview = existingFrozenWorld ? {
+          era: String(existingFrozenWorld.era || existingFrozenProfile?.era || ''),
+          geography: this.safeExtractJson<any[]>(String(existingFrozenWorld.geography || '[]'), []),
+          factions: this.safeExtractJson<any[]>(String(existingFrozenWorld.factions || '[]'), []),
+          rules: String(existingFrozenProfile?.rules || this.safeExtractJson<any[]>(String(existingFrozenWorld.rules || '[]'), []).join('\n')),
+          atmosphere: String(existingFrozenWorld.atmosphere || existingFrozenProfile?.atmosphere_tone || ''),
+          socialStructure: String(existingFrozenProfile?.social_structure || frozenWorldConstraints.socialStructure || ''),
+          powerSystem: String(existingFrozenProfile?.tech_supernatural || frozenWorldConstraints.powerSystem || ''),
+          economy: String(existingFrozenProfile?.economy_system || frozenWorldConstraints.economy || ''),
+          culture: String(existingFrozenProfile?.culture_customs || frozenWorldConstraints.culture || ''),
+          history: String(existingFrozenProfile?.era || frozenWorldConstraints.history || existingFrozenWorld.era || ''),
+          endingDirection: String(existingFrozenProfile?.ending || ''),
+          storyPremise: String(existingFrozenWorld.story_premise || existingFrozenProfile?.synopsis || dto.title),
+          __frozenWorldId: String(existingFrozenWorld.id),
+        } : undefined;
+        emit('skeleton', 10, frozenLongWorldview
+          ? '世界观已冻结：复用现有世界观，只重建主线骨架与下游资料...'
+          : '生成主线与结局骨架，验收通过后再生成世界规则...');
+        this.logger.log(`create-project-async: 长篇模式 project=${projectId}${frozenLongWorldview ? '（复用冻结世界观）' : ''}`);
         let heartbeatPercent = 12;
         const heartbeat = setInterval(() => {
           heartbeatPercent = Math.min(heartbeatPercent + 3, 38);
@@ -5886,6 +5918,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
             genre: constitution.category,
             chapterWordMin: CHAPTER_WORD_RANGE.min,
             chapterWordMax: CHAPTER_WORD_RANGE.max,
+            frozenWorldview: frozenLongWorldview,
             onProgress: (step, message) => {
               if (step !== activeGenerationStep) emit(activeGenerationStep, heartbeatPercent, '本阶段已通过生成验收，进入下一阶段', 'done');
               emit(step, heartbeatPercent, message);
@@ -5896,22 +5929,37 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
           if (data && Object.keys(data).length > 0) {
             const worldSetting = data.worldSetting || data.worldview || data.world || {};
             const provenance = data.provenance || {};
-            let outlineWriteCount = 0, volumeWriteCount = 0, charCount = 0, fsCount = 0, wsCount = 0, orgCount = 0, mpCount = 0, timelineCount = 0;
+            const reusingFrozenWorld = Boolean(existingFrozenWorld);
+            const creationBatchOutlineRunIds = Array.isArray(provenance.outlineRunIds) ? provenance.outlineRunIds : [];
+            const creationBatchHasChapters = (data.volumes || []).some((volume: any) => Array.isArray(volume?.chapters) && volume.chapters.length > 0);
+            // 同一长篇创建批次必须在第一条 Canon 写入之前一次性验明全部来源。
+            // 之后 world/character/outline 的正常落库会改变依赖上下文，因此绝不能边写边拿新上下文
+            // 重新判同批旧 run 过期；真正的外部上下文漂移会在本次 preflight 前被 runIsCurrent 拦截。
+            this.generatedCanonGuard.assertStructuredCanCommit({
+              projectId, runId: provenance.skeletonRunId, expectedStages: ['outline'], expectedScenarios: ['outline'],
+            });
+            if (!reusingFrozenWorld && (data.coreSetting || Object.keys(worldSetting).length > 0)) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId, runId: provenance.worldRunId, expectedStages: ['world'], expectedScenarios: ['world_building'],
+              });
+            }
+            if ((data.characters || []).length > 0) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId, runId: provenance.characterRunId, expectedStages: ['character'], expectedScenarios: ['character_design'],
+              });
+            }
+            if (creationBatchHasChapters && creationBatchOutlineRunIds.length === 0) {
+              throw new HttpException('长篇详细章纲缺少 generation run 凭证，已停止写入 Canon', 409);
+            }
+            for (const runId of creationBatchOutlineRunIds) {
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId, runId, expectedStages: ['outline'], expectedScenarios: ['outline'],
+              });
+            }
+            let outlineWriteCount = 0, volumeWriteCount = 0, charCount = 0, fsCount = 0, wsCount = reusingFrozenWorld ? 1 : 0, orgCount = 0, mpCount = 0, timelineCount = 0;
 
             // 存储世界观
             if (data.coreSetting || Object.keys(worldSetting).length > 0) {
-              this.generatedCanonGuard.assertStructuredCanCommit({
-                projectId,
-                runId: provenance.skeletonRunId,
-                expectedStages: ['outline'],
-                expectedScenarios: ['outline'],
-              });
-              this.generatedCanonGuard.assertStructuredCanCommit({
-                projectId,
-                runId: provenance.worldRunId,
-                expectedStages: ['world'],
-                expectedScenarios: ['world_building'],
-              });
               const core = JSON.stringify({
                 ...(dto.settings || {}),
                 coreSetting: data.coreSetting || worldSetting,
@@ -5928,7 +5976,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
             }
 
             // 存储世界观
-            if (Object.keys(worldSetting).length > 0) {
+            if (!reusingFrozenWorld && Object.keys(worldSetting).length > 0) {
               const wid = uuid();
               try {
                 db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, created_at, updated_at)
@@ -5981,15 +6029,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
               }
             }
 
-            // 存储角色
-            if ((data.characters || []).length > 0) {
-              this.generatedCanonGuard.assertStructuredCanCommit({
-                projectId,
-                runId: provenance.characterRunId,
-                expectedStages: ['character'],
-                expectedScenarios: ['character_design'],
-              });
-            }
+            // 存储角色（generation run 已在本批第一条 Canon 写入前统一验明）
             for (const ch of (data.characters || [])) {
               if (!ch.name) continue;
               try {
@@ -6037,24 +6077,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
 
             // 存储大纲 + 卷
             if (data.volumes?.length > 0) {
-              this.generatedCanonGuard.assertStructuredCanCommit({
-                projectId,
-                runId: provenance.skeletonRunId,
-                expectedStages: ['outline'],
-                expectedScenarios: ['outline'],
-              });
-              const outlineRunIds = Array.isArray(provenance.outlineRunIds) ? provenance.outlineRunIds : [];
-              if (data.volumes.some((volume: any) => Array.isArray(volume?.chapters) && volume.chapters.length > 0) && outlineRunIds.length === 0) {
-                throw new HttpException('长篇详细章纲缺少 generation run 凭证，已停止写入 Canon', 409);
-              }
-              for (const runId of outlineRunIds) {
-                this.generatedCanonGuard.assertStructuredCanCommit({
-                  projectId,
-                  runId,
-                  expectedStages: ['outline'],
-                  expectedScenarios: ['outline'],
-                });
-              }
+              // skeleton / outline run 已在本批第一条 Canon 写入前统一验明。
               for (const vol of data.volumes) {
                 const vid = uuid();
                 try {
@@ -6278,6 +6301,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
         platform: constitution.targetPlatform,
         projectCard: constitution,
         confirmedStory: dto.selectedIdea,
+        storyFoundation,
       });
       // ====== 步骤1：生成大纲 ======
       // 新流程先生成世界观，再用世界观作为大纲、角色与后续资料的上下文。 
@@ -7903,7 +7927,8 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
         repairAttempt++;
         const repairResult = await this.llmCallWithRetry<any>(
           `跨模块故事一致性修订（第${repairAttempt}次）`,
-          `根据审查发现，对本次尚未激活的AI生成资料做最小修订。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向；只能修正互斥的专名、时间、数量、年龄、伤病历史和因果事实。先逐项核对数量基线、历史已发生事件、每次触发后的增减和时间规则；已确认题材是上层事实，下层与它互斥时必须改下层；已确认题材自身互斥时不得凭空声称两种说法都成立。每个patch只替换字段内一段逐字存在的短原文，match必须在当前资料对应字段中逐字出现且只出现一次；replacement是替换该短原文的新片段，不是完整字段，不得带省略号。多处需改就给多个patch，尤其章纲与伏笔计数要同步。\n【唯一故事基准】${canonicalCreativeBrief}\n【当前资料（id是唯一可用entityId；末尾…表示仅供审查的截断显示，绝不可写回）】${generatedBundleText}\n【必须修复的矛盾】${JSON.stringify(contradictions)}\n只输出JSON:{"patches":[{"entityType":"world|worldProfile|character|organization|mapPoint|chapter|foreshadowing","entityId":"当前资料中的id","field":"允许字段","match":"该字段中逐字存在且只出现一次的短原文","replacement":"替换后的短片段","reason":"对应矛盾"}]}`,
+          `${STORY_FACT_PRIORITY}\
+根据审查发现，对本次尚未激活的AI生成资料做最小修订。世界观/world/worldProfile 只作为不可变参照，绝对不得作为 patch 目标；优先选择影响范围最小、修改单元最少、下游依赖最少、尚未执行的资料把冲突圆回。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向；只能修正互斥的专名、时间、数量、年龄、伤病历史和因果事实。先逐项核对数量基线、历史已发生事件、每次触发后的增减和时间规则；已确认题材是上层事实，下层与它互斥时必须改最小影响面的下层；已确认题材自身互斥时不得凭空声称两种说法都成立。每个patch只替换字段内一段逐字存在的短原文，match必须在当前资料对应字段中逐字出现且只出现一次；replacement是替换该短原文的新片段，不是完整字段，不得带省略号。多处需改就给多个patch，尤其章纲与伏笔计数要同步。\n【唯一故事基准】${canonicalCreativeBrief}\n【当前资料（id是唯一可用entityId；末尾…表示仅供审查的截断显示，绝不可写回）】${generatedBundleText}\n【必须修复的矛盾】${JSON.stringify(contradictions)}\n只输出JSON:{"patches":[{"entityType":"character|organization|mapPoint|chapter|foreshadowing","entityId":"当前资料中的id","field":"允许字段","match":"该字段中逐字存在且只出现一次的短原文","replacement":"替换后的短片段","reason":"对应矛盾"}]}`,
           {
             temperature: 0.1,
             timeout: LLM_TUNABLES.timeoutComplex(),
@@ -7934,15 +7959,8 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
         // 不可变/安全敏感列：一致性修订接口永远不允许修改（主键、租户隔离、时间戳由系统维护）。
         const PROTECTED_PATCH_COLUMNS = new Set(['id', 'project_id', 'created_at', 'updated_at']);
         // 实体类型 -> 真实表名（表名来自固定映射，非用户输入，可安全用于 PRAGMA 插值）
-        const PATCH_TABLE_MAP: Record<string, string> = {
-          world: 'world_settings',
-          worldProfile: 'world_system_profiles',
-          character: 'characters',
-          organization: 'organizations',
-          mapPoint: 'map_points',
-          chapter: 'outlines',
-          foreshadowing: 'foreshadowings',
-        };
+        // 可修实体唯一来源在 cross-stage-patch；world/worldProfile 刻意不在表中，世界观永不作为修复目标。
+        const PATCH_TABLE_MAP = CROSS_STAGE_PATCH_TABLE_MAP;
         // 允许修订的列直接从数据库真实表结构推导，而非手写白名单。
         // 根治“白名单写漏字段（如 buried_chapter_index）”导致合法修订被整批丢弃的反复 bug：
         // 凡是表内真实存在且非受保护列的字段，一致性修订都可修正，问题从源头解决。
@@ -7964,20 +7982,38 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
         let appliedPatchCount = 0;
         let skippedPatchCount = 0;
         const previousBundleText = generatedBundleText;
-        db.exec('BEGIN IMMEDIATE');
-        try {
-          for (const patch of patches) {
-            const entityType = String(patch?.entityType || '');
-            const target = getPatchTarget(entityType);
-            const entityId = String(patch?.entityId || '');
-            const field = String(patch?.field || '');
-            const replacement = patch?.replacement;
-            const match = patch?.match;
-            // 透明跳过原因：仅受保护列/未知实体/非本次生成范围/空值才跳过；
-            // 表内真实存在的事实字段一律应用，从根源解决“合法修订被丢弃”。
-            const visibleRow = Object.values(generatedBundle).flatMap((rows: any[]) => rows)
-              .find((row: any) => String(row.id) === entityId) as Record<string, unknown> | undefined;
-            const skipReason = !target
+
+        // 先让机器成本选择器从同一矛盾的候选位置里挑最小影响点；世界观在 selector 和目标映射两层都不可选。
+        const repairCandidates = patches.map((patch: any) => {
+          const match = String(patch?.match || '');
+          const occurrences = match ? generatedBundleText.split(match).length - 1 : 0;
+          return { ...patch, dependentCount: Math.max(0, occurrences - 1) };
+        });
+        const selectedPatches = selectMinimumImpactCrossStagePatches(repairCandidates);
+        if (selectedPatches.length === 0) {
+          throw new Error('跨模块一致性没有可安全自动修改的最小代价候选；世界观/锁定事实保持不变，项目未激活。');
+        }
+
+        // 所有修改先落在内存候选上。候选未通过二次审查前，数据库 Canon 一个字都不改。
+        const candidateBundle = structuredClone(generatedBundle) as Record<string, any[]>;
+        const candidateRows = Object.values(candidateBundle).flatMap((rows: any[]) => rows);
+        const pendingUpdates = new Map<string, {
+          table: string; field: string; entityId: string; entityType: string;
+          originalValue: string; nextValue: string;
+        }>();
+
+        for (const patch of selectedPatches) {
+          const entityType = String(patch?.entityType || '');
+          const target = getPatchTarget(entityType);
+          const entityId = String(patch?.entityId || '');
+          const field = String(patch?.field || '');
+          const replacement = patch?.replacement;
+          const match = patch?.match;
+          const visibleRow = candidateRows.find((row: any) => String(row.id) === entityId) as Record<string, unknown> | undefined;
+          const immutableWorldTarget = isImmutableWorldPatchTarget(entityType);
+          const skipReason = immutableWorldTarget
+            ? `世界观 Canon 已冻结，跨阶段修复禁止修改 ${entityType}`
+            : !target
               ? `未知实体类型 ${entityType}`
               : !target.fields.has(field)
                 ? `字段 ${field} 受保护或不存在于表 ${target.table}`
@@ -7985,60 +8021,63 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                   ? `实体 ${entityId} 不在本次生成范围内`
                   : !visibleRow || typeof visibleRow[field] !== 'string' || !String(visibleRow[field]).includes(String(match))
                     ? '原文锚点不在本次审查资料中'
-                : typeof match !== 'string' || !match.trim() || typeof replacement !== 'string' || !replacement.trim()
-                    ? '原文锚点或修订值为空'
-                    : null;
-            if (skipReason) {
-              // 静默跳过：字段不存在/受保护/值为空 是AI建议的正常过滤，不打扰用户
-              if (!target || !target.fields.has(field) || !hasUsefulValue(replacement)) {
-                skippedPatchCount++;
-                continue;
-              }
-              warnings.push(`一致性修订跳过：${entityType}#${entityId}.${field}（${skipReason}，已忽略）`);
-              skippedPatchCount++;
-              continue;
-            }
-            // 字段名来自数据库 PRAGMA 真实列名，但可能含保留字（如 outlines.order），必须加引号 + 标识符合法性校验
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
-              skippedPatchCount++;
-              continue;
-            }
+                    : typeof match !== 'string' || !match.trim() || typeof replacement !== 'string' || !replacement.trim()
+                      ? '原文锚点或修订值为空'
+                      : null;
+          if (skipReason) {
+            warnings.push(`一致性候选跳过：${entityType}#${entityId}.${field}（${skipReason}）`);
+            skippedPatchCount++;
+            continue;
+          }
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
+            skippedPatchCount++;
+            continue;
+          }
+
+          const key = `${target!.table}:${entityId}:${field}`;
+          let pending = pendingUpdates.get(key);
+          if (!pending) {
             const currentRow = db.prepare(`SELECT "${field}" AS value FROM ${target!.table} WHERE id=? AND project_id=?`)
               .get(entityId, projectId) as { value: unknown } | undefined;
             if (!currentRow || typeof currentRow.value !== 'string') {
-              warnings.push(`一致性修订目标字段不是文本，已跳过：${entityType}#${entityId}.${field}`);
+              warnings.push(`一致性候选目标字段不是文本，已跳过：${entityType}#${entityId}.${field}`);
               skippedPatchCount++;
               continue;
             }
-            const storedValue = applyCrossStagePatch(currentRow.value, match, replacement);
-            if (storedValue === null) {
-              warnings.push(`一致性修订原文锚点缺失、不唯一或破坏JSON结构，已跳过：${entityType}#${entityId}.${field}`);
-              skippedPatchCount++;
-              continue;
-            }
-            const updateResult = db.prepare(`UPDATE ${target!.table} SET "${field}"=?, updated_at=? WHERE id=? AND project_id=?`)
-              .run(storedValue, now(), entityId, projectId);
-            if (Number(updateResult.changes || 0) !== 1) {
-              warnings.push(`一致性修订目标不存在，已跳过：${entityId}`);
-              skippedPatchCount++;
-              continue;
-            }
-            appliedPatchCount++;
+            pending = {
+              table: target!.table,
+              field,
+              entityId,
+              entityType,
+              originalValue: currentRow.value,
+              nextValue: currentRow.value,
+            };
+            pendingUpdates.set(key, pending);
           }
-          db.exec('COMMIT');
-        } catch (error) {
-          try { db.exec('ROLLBACK'); } catch {}
-          throw error;
+
+          const nextStoredValue = applyCrossStagePatch(pending.nextValue, match, replacement);
+          const nextVisibleValue = applyCrossStagePatch(String(visibleRow![field]), match, replacement);
+          if (nextStoredValue === null || nextVisibleValue === null) {
+            warnings.push(`一致性候选原文锚点缺失、不唯一或破坏JSON结构，已跳过：${entityType}#${entityId}.${field}`);
+            skippedPatchCount++;
+            continue;
+          }
+          pending.nextValue = nextStoredValue;
+          visibleRow![field] = nextVisibleValue;
+          appliedPatchCount++;
         }
-        warnings.push(`跨模块一致性自动修订 ${appliedPatchCount} 处（跳过 ${skippedPatchCount} 处无效字段），并已执行二次审查`);
-        generatedBundle = readGeneratedBundle();
-        generatedBundleText = JSON.stringify(generatedBundle);
-        if (generatedBundleText === previousBundleText) {
-          throw new Error(`跨模块一致性修订没有改变任何审查字段（应用${appliedPatchCount}处，跳过${skippedPatchCount}处），项目未激活：${warnings.slice(-8).join('；')}`);
+
+        if (appliedPatchCount === 0 || pendingUpdates.size === 0) {
+          throw new Error(`跨模块一致性没有形成可复查的候选修改（跳过${skippedPatchCount}处），项目未激活。`);
         }
+        const candidateBundleText = JSON.stringify(candidateBundle);
+        if (candidateBundleText === previousBundleText) {
+          throw new Error(`跨模块一致性候选没有改变任何审查字段（候选${appliedPatchCount}处，跳过${skippedPatchCount}处），项目未激活。`);
+        }
+
         const secondAlignmentResult = await this.llmCallWithRetry<any>(
-          `跨模块故事一致性第${repairAttempt}次复查`,
-          `核对修订后的资料是否严格属于同一个故事并且事实互不矛盾。先检查确认题材与世界主记录、深度档案、章纲的触发条件、时间范围、代价及证据存续是否一致；再检查专名、年龄、时间跨度、伤病历史、章节因果、结局和伏笔证据。只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["无关虚构"]}\n【唯一故事基准】${canonicalCreativeBrief}\n【修订后资料】${generatedBundleText}`,
+          `跨模块故事一致性第${repairAttempt}次候选复查`,
+          `${STORY_FACT_PRIORITY}\n核对候选修订后的资料是否严格属于同一个故事并且事实互不矛盾。世界观只是不可变参照，绝对不能通过修改世界观来让候选通过。检查确认题材与冻结世界观、角色、章纲、组织、地点、伏笔之间的专名、年龄、时间跨度、伤病历史、章节因果、结局和证据是否一致。只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["无关虚构"]}\n【唯一故事基准】${canonicalCreativeBrief}\n【候选修订资料】${candidateBundleText}`,
           {
             temperature: 0.1,
             timeout: LLM_TUNABLES.timeoutComplex(),
@@ -8048,6 +8087,40 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
             describeValidation: describeAlignmentValidation,
           },
         );
+        const candidateAlignment = secondAlignmentResult.data;
+        if (!candidateAlignment) {
+          throw new Error(`跨模块一致性候选复查未返回完整结构，数据库未修改：${secondAlignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
+        }
+        const candidateContradictions = [
+          ...(Array.isArray(candidateAlignment?.contradictions) ? candidateAlignment.contradictions : []),
+          ...(Array.isArray(candidateAlignment?.unrelatedInventions) ? candidateAlignment.unrelatedInventions : []),
+        ].map((item: any) => String(item || '').trim()).filter(Boolean);
+
+        if (candidateAlignment.consistent === true && candidateContradictions.length === 0) {
+          // 候选已审查通过后才允许写 live Canon；WHERE 旧值是乐观锁，防止复查期间其它流程改了同一字段。
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            for (const update of pendingUpdates.values()) {
+              const updateResult = db.prepare(
+                `UPDATE ${update.table} SET "${update.field}"=?, updated_at=? WHERE id=? AND project_id=? AND "${update.field}"=?`,
+              ).run(update.nextValue, now(), update.entityId, projectId, update.originalValue);
+              if (Number(updateResult.changes || 0) !== 1) {
+                throw new Error(`一致性候选提交冲突：${update.entityType}#${update.entityId}.${update.field} 在复查期间已变化`);
+              }
+            }
+            db.exec('COMMIT');
+          } catch (error) {
+            try { db.exec('ROLLBACK'); } catch {}
+            throw error;
+          }
+          generatedBundle = readGeneratedBundle();
+          generatedBundleText = JSON.stringify(generatedBundle);
+          warnings.push(`跨模块一致性候选复查通过后提交 ${appliedPatchCount} 处最小影响修订（跳过 ${skippedPatchCount} 处），世界观未修改`);
+        } else {
+          // 失败候选只存在于内存，下一轮仍基于原 Canon 重新选最小代价点。
+          warnings.push(`第${repairAttempt}次最小影响候选仍有${candidateContradictions.length}处冲突，已丢弃候选，数据库 Canon 未修改`);
+        }
+
         alignment = secondAlignmentResult.data;
         if (!alignment) {
           throw new Error(`跨模块一致性二次审查未返回完整结构，项目未激活：${secondAlignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
@@ -8074,7 +8147,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
             quote: '',
             content: generatedBundleText,
             evidenceVerified: false,
-            suggestion: '修正世界观、角色、大纲、组织、地点或伏笔中的互斥事实后重新检查。',
+            suggestion: '保持冻结世界观不变，在章纲、未来计划、角色状态、组织、地点或伏笔中选择最小影响修复点后重新检查。',
             details: { repairAttempt, evidence: '模型未返回可逐字定位的原文，因此按证据不足阻断。' },
           })),
         });
@@ -8203,7 +8276,7 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
     const now = () => new Date().toISOString();
     const warnings: string[] = [];
 
-    // 上下文可重算：世界观深度补全完成后，重新计算以包含补全后的世界观档案，供后续组织/地点/大纲/伏笔使用
+    // 世界观在进入角色/章纲前已经定稿；后续深度资料只能读取它，禁止再生成或修改世界事实。
     const buildCtxSummary = () => {
       const worldRow = db.prepare(`SELECT era,story_premise,atmosphere FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
       const profile = db.prepare(`SELECT p.synopsis, p.atmosphere_tone, p.rules, p.social_structure, p.locations
@@ -8222,123 +8295,19 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
     // 深度补全同样贯穿执行标准六维（平台/分类/基调/文风/流派/视角）+ 长短篇，与正文共用同一事实源（项目已落库，直接读取）
     const enrichToneDirective = this.resolvePlatformToneDirective(projectId);
 
-    this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '补全角色/世界观/组织/地点/大纲/伏笔的深度资料...', status: 'running' });
+    this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '读取冻结世界观，补全组织/地点/大纲/伏笔的派生资料...', status: 'running' });
 
     // ====== 角色深度资料 -> character_extended_profiles ======
     // 角色 13 字段档案已在主流程任务A生成（含 aliasTitle/faction/catchphrase/fears 等补齐字段），
     // 不再逐角色重复调用一次完整生成，避免重复执行步骤。
     this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 90, message: '角色深度资料已由主流程生成，跳过重复补全', status: 'done' });
 
-    // ====== 五个深度子步骤按层级顺序执行（各步骤已补全则跳过，避免重复执行步骤）======
-    // 顺序：世界观 → 组织 → 地点 → 大纲 → 伏笔；世界观深度先生成并回写上下文，后续步骤基于它生成。
+    // ====== 四个派生深度子步骤按层级顺序执行（各步骤已补全则跳过）======
+    // 世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔。
     const enrichTasks: Array<() => Promise<void>> = [];
 
-    // 世界观 depth
-    enrichTasks.push(async () => {
-      try {
-        const existingProfile = db.prepare(`SELECT p.naming_rules, p.scale_plan, p.ending FROM world_system_profiles p
-          JOIN world_settings w ON w.id=p.world_setting_id AND w.project_id=p.project_id
-          WHERE p.project_id=? LIMIT 1`).get(projectId) as any;
-        if (existingProfile && (existingProfile.naming_rules || '').trim() && (existingProfile.scale_plan || '').trim() && (existingProfile.ending || '').trim()) {
-          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '世界观深度资料已存在，跳过', status: 'done' });
-          return;
-        }
-        const worldRow = db.prepare(`SELECT id,era,geography,factions,rules,atmosphere,story_premise,constraints FROM world_settings WHERE project_id=? LIMIT 1`).get(projectId) as any;
-        if (worldRow) {
-          const worldFieldList = WORLD_PROFILE_FIELDS.join(', ');
-          const describeProfileCandidate = (value: unknown): string[] => {
-            const profile = (value as any)?.profile || value;
-            if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return ['世界观深度档案未返回对象'];
-            return ['era', 'rules', 'ending', 'hierarchy_rules', 'naming_rules', 'scale_plan']
-              .filter(field => typeof (profile as any)[field] !== 'string' || !(profile as any)[field].trim())
-              .map(field => `世界观深度档案缺少${field}`);
-          };
-          const worldProfileResult = await this.llmCallWithRetry<any>(
-            '世界观深度资料补全',
-            `你是该小说的世界设定架构师。基于已确认的世界观骨架，补全一份完整的"地基型世界观档案"，使得后续所有大纲与正文都以此为唯一权威来源。不允许把"地基型"简化为8类古早模板。
-${enrichToneDirective}
-
-【已确认世界观骨架（括号内仅为说明，实际请以骨架为准）】
-${JSON.stringify({ era: worldRow.era, storyPremise: worldRow.story_premise, atmosphere: worldRow.atmosphere, constraints: worldRow.constraints, factions: worldRow.factions, rules: worldRow.rules })}
-
-【输出字段（共15个，全部必须有实质内容）】
-${worldFieldList}
-
-各字段含义与内容要求（按编号对应，每项都须可被后续AI写作直接用作约束）：
-
-1) synopsis——作品简介：一句话故事前提，点名核心冲突与独特卖点。50-100字。
-2) basic_info——基本信息：时代、世界观类型（现实/奇幻/科幻等）、核心冲突概括、目标读者。100-200字。
-3) era——时代与时间线：故事发生的具体年代、关键历史节点、与剧情关联的前史事件。不得泛写"现代"或"古代"。
-4) locations——地点体系：按剧情重要性分级列出关键地点；标注各地点之间的空间关系与移动逻辑；说明各地点承载的剧情功能（如：冲突高发区/情报交换点/安全屋）。
-5) atmosphere_tone——氛围基调：全书整体情绪定位与语言风格方向。不得写"紧张"两个字就结束——须说明紧张感从何而来、以何种叙事方式传递。
-6) rules——只把已确认世界观骨架的核心规则改写为清晰的if-then句，条数与触发条件、作用范围、代价、证据存续逐项保持一致；不得为了凑3-5条新增时间窗口缩短、记忆丢失、户籍变化、显影限制等骨架没有的机制。
-7) social_structure——社会结构：政治势力格局、经济资源流动方向、阶层划分与流动（或封闭）机制、权力交接规则。
-8) tech_supernatural——科技/超自然体系：若故事涉及非常规力量，写出体系名称、能力来源（先天/后天/装备/契约等）、能力分级或约束条件、使用代价与副作用。若为纯现实题材，须写出"本作为现实题材，不以超自然力量为叙事手段，故事张力由真实社会机制、人物博弈与心理冲突驱动"，并点明剧情实际涉及的专业领域规则（如刑侦程序、医疗规范、行业潜规则等）。
-9) system_mechanics——系统运行机制：世界观中制度化、规则化的运行逻辑，如组织运作方式、经济循环、信息/舆论传播方式、特殊制度（参考核心设定.txt示例中的召唤玩家系统、贡献点兑换、复活机制、自研系统、科技树等具象运行规则）。即使是现实题材，也必须写出剧情涉及的特定社会运行机制（行业准入、执法权限、信息壁垒等），不可空着。
-10) culture_customs——文化风俗与禁忌：语言特征、地域风俗、族群/阶层之间的关系基调、不可触碰的社会禁忌及触犯后果。
-11) naming_rules——命名规则：角色命名规律（姓氏来源/命名风格/是否有代际特征）、地名命名逻辑、关键术语/专有名词的书写统一性要求。此字段用于让AI在生成正文时不出现"同一个地名在不同章写成了两种叫法"。
-12) scale_plan——全文数据规划：宏观规模框架——人口数量级（不需要精确数字，给"千/万/十万/百万级"的数量级即可）、势力间人数对比、资源总量级、故事时间跨度、空间尺度（单城市/多城市/多国/多大陆）。目的是防止后续章节出现前后数据矛盾（比如第3章说"小镇只有三百人"、第10章突然出现"镇上万人集会"）。
-13) ending——结局方向：不剧透具体情节，但必须锁定：核心冲突的解决方式方向（智力博弈/武力决战/自我牺牲/和解/制度变革等）、主角最终状态的基调（圆满/开放性/悲剧/蜕变/回归日常）、必须被回收的关键伏笔类型。此字段是"终点锚"，正文生成不可偏离。
-14) hierarchy_rules——核心层级规则：逐字使用「${STORY_FACT_PRIORITY}」。不得另写第二套层级；不能把世界档案中新添的未锁定说明抬到确认题材或本章章纲之上。
-15) supplementary——补充说明：仅放上述14项确实无法覆盖的极特殊约束。可空。注意：以下内容必须归类到对应字段，不要放入本字段：
-- 创作禁忌、禁用的陈词滥调、不能出现的行为模式 → 放入 rules（核心规则体系）
-- 场景细节要求、道具写实要求、地点功能描述 → 放入 locations（地点体系）
-- 每章节奏要求、悬念设置、写作规范 → 放入 hierarchy_rules（核心层级规则）
-- 社会禁忌、文化风俗、语言特征 → 放入 culture_customs（文化风俗与禁忌）
-- 行业规则、专业领域规范、执法程序 → 放入 tech_supernatural（科技/超自然体系）或 system_mechanics（系统运行机制）
-只有当内容确实不属于上述任何一类时，才放入本字段。
-
-【质量底线】
-不写"丰富多样""精彩纷呈""错综复杂"等空话套话。每一条信息必须能用于约束后续写作——当AI生成正文时，应能根据此字段做出"这个设定违背了第X条规则/这个地名与命名规则矛盾/这个情节走向与结局锚冲突"的具体判断。
-若世界观骨架信息不足，只补地点氛围与非因果细节；规则、代价、时间线、官方记录、人物结局等必须沿用已确认题材与骨架，信息不足时明确留待章纲，不得自行发明第二套事实。
-
-只输出JSON:{"profile":{ ...上述15个字段 }}。
-每个字段的值必须是字符串（可包含换行），不要输出嵌套JSON对象，不要输出数组。`,
-            {
-              temperature: 0.7, timeout: LLM_TUNABLES.timeoutComplex(), projectId, scenario: 'world_building',
-              maxTokens: Math.min(32768, 24576),
-              validate: value => describeProfileCandidate(value).length === 0,
-              describeValidation: describeProfileCandidate,
-            },
-          );
-          let wp = worldProfileResult.data?.profile || worldProfileResult.data;
-          let worldProfileSourceRunId = worldProfileResult.runId;
-          let profileReview = await this.reviewChildSource(projectId, '已确认题材与世界观骨架',
-            { confirmedStory: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
-          if (!profileReview.consistent) {
-            const repair = await this.llmCallWithRetry<any>('世界观深度档案事实修复',
-              `只修复下层深度档案，不改写已确认题材或世界观骨架。\n【上层】${JSON.stringify({ confirmedStory: dto.selectedIdea, world: worldRow })}\n【当前档案】${JSON.stringify(wp)}\n【逐字冲突】${JSON.stringify(profileReview.contradictions)}\n输出完整JSON {"profile":{...}}；必需字段 ${worldFieldList}，每个字段为字符串。`,
-              { projectId, scenario: 'world_building', temperature: 0.25, timeout: LLM_TUNABLES.timeoutComplex(),
-                validate: value => describeProfileCandidate(value).length === 0,
-                describeValidation: describeProfileCandidate });
-            wp = repair.data?.profile || repair.data;
-            worldProfileSourceRunId = repair.runId;
-            profileReview = await this.reviewChildSource(projectId, '已确认题材与世界观骨架',
-              { confirmedStory: dto.selectedIdea, world: worldRow }, '世界观深度档案', wp, enrichToneDirective);
-          }
-          if (!profileReview.consistent) throw new Error(`世界观深度档案与上层冲突：${profileReview.contradictions.join('；')}`);
-          if (wp && typeof wp === 'object') {
-            this.generatedCanonGuard.assertStructuredCanCommit({
-              projectId,
-              runId: worldProfileSourceRunId,
-              expectedStages: ['world'],
-              expectedScenarios: ['world_building'],
-            });
-            const input: Record<string, unknown> = {};
-            for (const f of WORLD_PROFILE_FIELDS) {
-              const v = (wp as any)?.[f];
-              if (typeof v === 'string' && v.trim()) input[f] = v.trim();
-              else if (Array.isArray(v)) input[f] = JSON.stringify(v);
-            }
-            if (Object.keys(input).length) {
-              try { await this.worldSettingService.updateProfile(projectId, worldRow.id, input); }
-              catch (e: any) { warnings.push(`世界观深度资料写入失败:${e.message}`); }
-            }
-          }
-          this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 92, message: '世界观深度资料已补全', status: 'running' });
-        }
-      } catch (e: any) { warnings.push(`世界观深度资料生成失败:${e.message}`); this.logger.warn(`enrich: world failed project=${projectId}: ${e.message}`); }
-    });
+    // 世界观 depth 不再在此补全：一旦世界观主记录通过上层事实审查并写入，
+    // 它就是不可变故事地基。缺少非核心展示字段宁可保持为空，也不能在角色/章纲之后再让 LLM 新增世界事实。
 
     // 组织/势力 depth
     enrichTasks.push(async () => {
@@ -8537,22 +8506,10 @@ ${enrichToneDirective}
 
     // 每项写入都会改变质量门禁的上下文版本；按顺序生成、审查、写入，
     // 避免并发任务把彼此的正常写入误判成生成期间上下文漂移。
-    if (enrichTasks.length > 0) {
-      await enrichTasks[0]();
-      ctxSummary = buildCtxSummary();
-      for (const enrichTask of enrichTasks.slice(1)) await enrichTask();
-    }
+    for (const enrichTask of enrichTasks) await enrichTask();
 
-    const worldProfile = db.prepare(`SELECT p.era,p.rules,p.ending,p.hierarchy_rules FROM world_system_profiles p
-      JOIN world_settings w ON w.id=p.world_setting_id AND w.project_id=p.project_id
-      WHERE p.project_id=? LIMIT 1`).get(projectId) as Record<string, unknown> | undefined;
-    const missingWorldFields = ['era', 'rules', 'ending', 'hierarchy_rules', 'naming_rules', 'scale_plan']
-      .filter(field => !String(worldProfile?.[field] || '').trim());
-    if (missingWorldFields.length) {
-      // 这里曾把世界档案补全失败仅记 warning 后仍激活，后果是正文拿到「待补全」
-      // 或半套规则，事实冲突直到第一章 Gate 才暴露。
-      throw new Error(`世界观深度档案不完整（${missingWorldFields.join('、')}），项目不得激活`);
-    }
+    // 世界观完整性的硬门禁由首次世界生成/上层事实审查与 assertProjectSourceCompleteness 承担。
+    // 禁止在这里为了填满展示型 profile 字段而再次改写世界观。
 
     return warnings;
   }
@@ -10064,6 +10021,7 @@ ${summarizeOutlineConsistency(pending)}`,
     genre: string;
     chapterWordMin: number;
     chapterWordMax: number;
+    frozenWorldview?: Record<string, unknown>;
     onProgress?: (step: 'skeleton' | 'world' | 'characters' | 'outline' | 'foreshadowing', message: string) => void;
   }): Promise<any> {
     // 【执行标准注入 · 长篇创建全流程】地基→角色→章纲→伏笔 与正文层共用唯一解析器。
@@ -10073,31 +10031,37 @@ ${summarizeOutlineConsistency(pending)}`,
     // 一旦生效就等于用降级标准生成长篇地基，与用户创建时确认的执行标准不一致。
     // resolvePlatformToneDirective 只有两种结果——返回完整标准，或抛错阻断（缺 projectId→400，项目不存在→404）。
     const platformDirective = this.resolvePlatformToneDirective(input.projectId);
-    const foundationResult = await this.chainTemplate.executeChain('long-novel-init-foundation', {
+    const foundationInput = {
       projectId: input.projectId,
       story_setting: (platformDirective ? platformDirective + '\n\n' : '') + input.storySetting,
       targetWords: input.targetWanZi,
       genre: input.genre,
-    }, (_nodeIndex, nodeId, status, result) => {
+    };
+    const foundationProgress = (_nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => {
       if (nodeId === 'node_1_skeleton' && status === 'completed') {
         const skeleton = result?.output;
         if (!skeleton?.coreSetting || !Array.isArray(skeleton.skeletonVolumes) || skeleton.skeletonVolumes.length === 0
           || skeleton.skeletonVolumes.some((volume: any) => !Number.isInteger(Number(volume?.estimatedChapters))
             || Number(volume.estimatedChapters) <= 0 || !String(volume?.chapterCountReason || '').trim())) {
-          throw new Error('长篇主线骨架缺少完整核心设定或有效分卷章数；世界规则未开始生成。');
+          throw new Error('长篇主线骨架缺少完整核心设定或有效分卷章数；后续资料未开始生成。');
         }
         const plannedChapters = skeleton.skeletonVolumes.reduce((total: number, volume: any) => total + Number(volume.estimatedChapters), 0);
         if (plannedChapters * input.chapterWordMin > input.targetWords
           || plannedChapters * input.chapterWordMax < input.targetWords) {
-          throw new Error(`长篇主线骨架规划${plannedChapters}章，无法按每章${input.chapterWordMin}-${input.chapterWordMax}字承载目标${input.targetWords}字；世界规则未开始生成。`);
+          throw new Error(`长篇主线骨架规划${plannedChapters}章，无法按每章${input.chapterWordMin}-${input.chapterWordMax}字承载目标${input.targetWords}字；后续资料未开始生成。`);
         }
-        input.onProgress?.('world', '主线与结局骨架已通过验收，开始生成世界规则');
+        input.onProgress?.('world', input.frozenWorldview
+          ? '主线与结局骨架已通过验收，继续沿用冻结世界观'
+          : '主线与结局骨架已通过验收，开始生成世界规则');
       }
-    });
+    };
+    const foundationResult = input.frozenWorldview
+      ? await this.chainTemplate.executeLongNovelFoundationSkeleton(foundationInput, foundationProgress)
+      : await this.chainTemplate.executeChain('long-novel-init-foundation', foundationInput, foundationProgress);
     const outputs: any = foundationResult?.outputs || {};
     const skeleton = outputs.node_1_skeleton;
     const worldOutput = outputs.node_2_worldview;
-    const generatedWorldview = worldOutput?.worldview;
+    const generatedWorldview = input.frozenWorldview || worldOutput?.worldview;
     if (!skeleton?.coreSetting || !Array.isArray(skeleton.skeletonVolumes) || !generatedWorldview
       || !Array.isArray(generatedWorldview.geography) || !Array.isArray(generatedWorldview.factions)) {
       // 真实成因优先于下游症状：地基节点被质量 Gate 拒绝时，「缺少世界观」只是症状。
@@ -10117,7 +10081,9 @@ ${summarizeOutlineConsistency(pending)}`,
           ? `string(len=${value.length},head=${JSON.stringify(value.slice(0, 160))})`
           : `object(keys=${Object.keys(value as Record<string, unknown>).join(',')})`));
       throw new Error(
-        '长篇地基顺序生成未完成（需先主线骨架、再世界规则）。'
+        (input.frozenWorldview
+          ? '长篇恢复地基未完成（冻结世界观保持不变，只重建主线骨架与下游资料）。'
+          : '长篇地基顺序生成未完成（需先主线骨架、再世界规则）。')
         + `诊断：${diagnose.length > 0 ? diagnose.join(' | ') : '模型未返回任何可解析内容'}；`
         + `链错误：${JSON.stringify(foundationResult?.errors || [])}。`,
       );

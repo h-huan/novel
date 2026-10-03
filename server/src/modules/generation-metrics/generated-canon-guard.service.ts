@@ -29,20 +29,16 @@ export interface StructuredCanonGuardInput {
 /**
  * Single provenance boundary for AI-produced Canon.
  *
- * It deliberately does not score, repair, regenerate, or create a second quality
- * system. There are two existing production paths and they have different proof:
+ * Currentness is always checked against the real project context. Creation
+ * batches must therefore validate every generated run before the first Canon
+ * write, then persist that already-validated batch without re-validating against
+ * the context it is changing itself. The guard deliberately has no
+ * "project.status=creating" stale-run bypass: such a bypass would also admit a
+ * genuinely stale run produced by another creation attempt.
  *
- * - Chapter body: validateGeneratedContent() owns the final quality Gate. Canon
- *   therefore requires an explicit gate_status=passed plus byte-for-byte output.
- * - Structured world/character/outline assets: chain.controller owns the
- *   stage-specific structural/source checks and calls llmCallWithRetry with
- *   deferQualityGate=true. Their run must therefore prove provenance/currentness,
- *   not pretend that an unexecuted generic Gate passed. The caller may invoke the
- *   structured method only after those existing stage-specific checks succeeded.
- *
- * Both paths still require the source run to belong to the project, finish
- * successfully, remain current for the same Creative Constitution/context, and
- * contain a non-empty model output.
+ * Project/context existence and freshness belong to GenerationMetricsService;
+ * this boundary only validates the generation-run proof itself. Keeping that
+ * responsibility in one place avoids a second schema/currentness implementation.
  */
 @Injectable()
 export class GeneratedCanonGuardService {
@@ -63,9 +59,9 @@ export class GeneratedCanonGuardService {
   }
 
   /**
-   * Structured boundary used only after the current world/character/outline
-   * pipeline has completed its own structural and source-hierarchy checks.
-   * No fake gate_status is written for these deferred-Gate runs.
+   * Structured boundary used after the current structural/source-hierarchy Gate.
+   * For a multi-artifact creation batch, callers must invoke this for all batch
+   * runIds before writing the first artifact.
    */
   assertStructuredCanCommit(input: StructuredCanonGuardInput): GeneratedCanonProof {
     return this.assertRunProvenance(input, false);
@@ -77,7 +73,10 @@ export class GeneratedCanonGuardService {
     if (!projectId) throw new BadRequestException('AI Canon 提交缺少 projectId');
     if (!runId) throw new BadRequestException('AI Canon 提交缺少 generation run 凭证');
 
-    const row = this.databaseService.getDb().prepare(`SELECT id,project_id,stage,scenario,status,gate_status,output_text
+    const db = this.databaseService.getDb();
+    // 这里只读取提交边界真正需要的稳定列。constitution/context 当前性与项目存在性由
+    // GenerationMetricsService.runIsCurrent 统一判断，避免 Guard 自己复制 schema/算法。
+    const row = db.prepare(`SELECT id,project_id,stage,scenario,status,gate_status,output_text
       FROM generation_runs WHERE id=? AND project_id=? LIMIT 1`).get(runId, projectId) as {
         id: string;
         project_id: string;
@@ -109,6 +108,7 @@ export class GeneratedCanonGuardService {
     if (!outputText.trim()) {
       throw new BadRequestException('AI Canon 提交凭证没有可提交的最终输出');
     }
+
     if (!this.generationMetrics.runIsCurrent(runId, projectId)) {
       throw new ConflictException('AI Canon 提交凭证已过期：项目创作宪法或依赖上下文已变化');
     }

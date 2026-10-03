@@ -32,18 +32,7 @@ export class WorldSettingController {
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateWorldSettingDto) {
     const result = this.service.create(projectId, dto);
-    // 创建阶段由生成链负责上层→下层审查；这里只建立唯一世界观档案。
-    this.service.updateProfile(projectId, result.id, {
-      synopsis: dto.workIntro || '',
-      basic_info: [dto.name, dto.era].filter(Boolean).join('；'),
-      era: dto.era || '',
-      rules: (dto.constraints || []).map(item => item.rule).filter(Boolean).join('\n'),
-      system_mechanics: dto.systemSettings || '',
-      culture_customs: dto.culturalSettings || '',
-      naming_rules: dto.namingRules || '',
-      scale_plan: dto.dataPlanning || '',
-      supplementary: dto.censorshipRules || '',
-    });
+    // service.create 已在同一事务写入初始 profile；返回后世界观立即冻结。
     const sync = await this.indexWorldSetting(projectId, result);
     return { ...result, sync };
   }

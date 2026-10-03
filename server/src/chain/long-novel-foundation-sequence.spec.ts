@@ -24,6 +24,17 @@ describe('long novel foundation dependency', () => {
     expect(result.outputs.node_1_skeleton.coreSetting.title).toBe('旧站之谜');
   });
 
+  it('can rerun only the existing skeleton node when recovery must reuse a frozen world', async () => {
+    const generate = vi.fn().mockResolvedValueOnce({ content: JSON.stringify(skeleton) });
+    const chain = new ChainTemplateService(new ChainEngineService(new PromptRegistryService(), { generate } as any));
+    const result = await chain.executeLongNovelFoundationSkeleton(input);
+    expect(result.status).toBe('completed');
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate.mock.calls[0][0].scenario).toBe('outline');
+    expect(result.outputs.node_1_skeleton.coreSetting.title).toBe('旧站之谜');
+    expect(result.outputs.node_2_worldview).toBeUndefined();
+  });
+
   it('never starts world generation when skeleton generation fails', async () => {
     const generate = vi.fn().mockRejectedValue(new Error('UND_ERR_SOCKET'));
     const chain = new ChainTemplateService(new ChainEngineService(new PromptRegistryService(), { generate } as any));

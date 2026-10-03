@@ -131,6 +131,29 @@ export class ChainTemplateService {
     return this.chainEngine.execute(chain, userInput, onProgress);
   }
 
+  /**
+   * Recovery helper for a project whose world Canon already exists. It reuses
+   * node_1_skeleton from the one fixed foundation chain and deliberately does
+   * not execute node_2_worldview. No second prompt/template source is created.
+   */
+  async executeLongNovelFoundationSkeleton(
+    userInput: Record<string, unknown>,
+    onProgress?: (nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => void,
+  ): Promise<any> {
+    const template = this.getDetail('long-novel-init-foundation');
+    const chain: PromptChain = {
+      id: template.id,
+      name: template.name,
+      version: template.version,
+      description: template.description,
+      nodes: [template.nodes[0]],
+      variables: template.variables,
+      executionMode: 'sequential',
+      config: template.config,
+    };
+    return this.chainEngine.execute(chain, userInput, onProgress);
+  }
+
   private assertFixed(id: string): void {
     if (!FIXED_CHAIN_IDS.has(id)) {
       throw new BadRequestException(`运行时 Prompt Chain 已删除，不允许执行任意流程: ${id}`);
