@@ -108,7 +108,7 @@ function candidateCost(candidate: CanonRepairCandidate): { cost: number; eligibl
   cost += dependentCount * 40;
   cost += Math.max(0, changeUnits - 1) * 25;
 
-  return { cost, eligible: Number.isFinite(cost), reason: '可修改，按基础代价 + 时间态 + 下游依赖 + 影响范围计算' };
+  return { cost, eligible: Number.isFinite(cost), reason: '可修改，按基础代价 + 时间态 + 下游依赖 + 影响范围 + 修改单元计算' };
 }
 
 /**
@@ -191,7 +191,7 @@ export function buildCanonPolicyDirective(): string {
   return `【唯一 Canon 与最小代价修复原则】\n`
     + `1. 世界观（world_setting / world_rule）一旦建立就是作品地基，任何自动生成、审查、修复、RAG 回填都不得修改世界观；发现冲突时必须改其它资料。\n`
     + `2. 已经发生且已接受的正文事实尽量保持不动；未来卷纲/章纲/伏笔/时间线属于可调整计划，只要不触碰世界观与已确认故事核心，应优先让未来计划衔接已经发生的历史。\n`
-    + `3. 其它冲突不按“为了通过 Gate 就重写整层”的方式处理。必须优先选择影响范围最小、下游依赖最少、可局部圆回的资料；通常优先级为派生摘要/RAG → 未接受草稿 → 当前或未来 ChapterPlan → 局部伏笔/时间线/角色状态 → 卷/全书骨架。\n`
+    + `3. 其它冲突不按“为了通过 Gate 就重写整层”的方式处理。必须优先选择影响范围最小、修改单元最少、下游依赖最少、可局部圆回的资料；通常优先级为派生摘要/RAG → 未接受草稿 → 当前或未来 ChapterPlan → 局部伏笔/时间线/角色状态 → 卷/全书骨架。\n`
     + `4. Creative Constitution / confirmedStory 代表作者已经确认的创作方向，自动流程不得为了迁就下层内容反向改写；若它与不可自动修改的世界观或锁定事实发生真正互斥，必须阻断并要求人工裁决。\n`
     + `5. RAG 与摘要只是检索/派生材料，没有独立事实权威；它们与真实 Canon 冲突时直接重建或丢弃，不得反向覆盖 Canon。\n`
     + `6. 修复必须局部、单调：只改被选中的最小修复点，复检后冲突必须减少且不得新增更大影响的冲突；否则回滚并停止。`;
