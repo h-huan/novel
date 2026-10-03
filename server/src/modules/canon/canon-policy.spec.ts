@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCanonPolicyDirective, chooseMinimumImpactRepair } from './canon-policy';
+import { buildCanonPolicyDirective, buildStoryFoundation, chooseMinimumImpactRepair } from './canon-policy';
 
 describe('canon policy', () => {
   it('never chooses world canon as an automatic repair target', () => {
@@ -36,6 +36,36 @@ describe('canon policy', () => {
     ]);
     expect(decision.target).toBeNull();
     expect(decision.requiresHumanDecision).toBe(true);
+  });
+
+  it('projects one deterministic foundation for both long and short creation without inventing facts', () => {
+    const story = {
+      title: '旧站回声',
+      storyType: 'short_story',
+      targetPlatform: 'zhihu',
+      description: '记者调查已经撤销的地铁站。',
+      protagonist: '记者林川',
+      coreConflict: '追查真相与保住证人安全冲突',
+      activeChoice: '继续调查',
+      mainReversal: '站点从档案中被抹除',
+      payoff: '找到证人并留下可核验记录',
+      setting: '现代城市',
+      characters: ['林川', '陈姨'],
+      estimatedWords: 12000,
+    };
+    const first = buildStoryFoundation(story);
+    const second = buildStoryFoundation(structuredClone(story));
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({
+      source: 'confirmed_story',
+      title: '旧站回声',
+      premise: '记者调查已经撤销的地铁站。',
+      protagonist: '记者林川',
+      coreConflict: '追查真相与保住证人安全冲突',
+      endingDirection: '找到证人并留下可核验记录',
+      targetWords: 12000,
+    });
+    expect(Object.values(first)).not.toContain('系统自动补全');
   });
 
   it('exports one prompt directive that explicitly freezes world canon and minimizes blast radius', () => {
