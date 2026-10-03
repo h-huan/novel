@@ -127,17 +127,25 @@ describe('GenerationRecoveryService', () => {
     expect(vectors[VectorIndexService.COLLECTIONS.CHARACTERS]).toHaveLength(0);
   });
 
-  it('blocks whole-project failed-generation cleanup once the world has been established', async () => {
+  it('preserves frozen world while clearing only downstream generated assets for ordinary recovery', async () => {
     db.prepare(`INSERT INTO outlines VALUES ('o1','p1','chapter',3200,'draft',1)`).run();
     db.prepare(`INSERT INTO chapters VALUES ('c1','p1','o1','',NULL,'draft')`).run();
     db.prepare(`INSERT INTO characters VALUES ('char1','p1')`).run();
+    db.prepare(`INSERT INTO character_extended_profiles VALUES ('cp1','p1','char1','旧人物档案')`).run();
     db.prepare(`INSERT INTO world_settings VALUES ('w1','p1')`).run();
     db.prepare(`INSERT INTO world_system_profiles VALUES ('wp1','p1','w1','旧世界规则')`).run();
 
-    await expect(service.clearFailedGeneratedAssets('p1')).rejects.toThrow('世界观已冻结');
+    const audit = await service.audit('p1');
+    expect(audit.canResume).toBe(true);
+    await service.clearFailedGeneratedAssets('p1');
+
     expect((db.prepare('SELECT id FROM world_settings WHERE project_id=?').get('p1') as any).id).toBe('w1');
     expect((db.prepare('SELECT rules FROM world_system_profiles WHERE project_id=?').get('p1') as any).rules).toBe('旧世界规则');
-    expect((db.prepare('SELECT id FROM outlines WHERE project_id=?').get('p1') as any).id).toBe('o1');
+    expect((db.prepare('SELECT COUNT(*) count FROM outlines WHERE project_id=?').get('p1') as any).count).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) count FROM chapters WHERE project_id=?').get('p1') as any).count).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) count FROM characters WHERE project_id=?').get('p1') as any).count).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) count FROM character_extended_profiles WHERE project_id=?').get('p1') as any).count).toBe(0);
+    expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p1') as any).status).toBe('creating');
   });
 
   it('restores non-world generated assets and vectors when a pre-world recovery attempt fails', async () => {

@@ -5874,8 +5874,33 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       // ====== 长篇：调用综合链 ======
       if (!isShort) {
         // 这里曾让一个模型请求同时生成主线骨架与世界规则，后果是世界规则无法依赖已验收主线。
-        emit('skeleton', 10, '生成主线与结局骨架，验收通过后再生成世界规则...');
-        this.logger.log(`create-project-async: 长篇模式 project=${projectId}`);
+        const existingFrozenWorld = db.prepare('SELECT * FROM world_settings WHERE project_id=? LIMIT 1').get(projectId) as any;
+        const existingFrozenProfile = existingFrozenWorld
+          ? db.prepare('SELECT * FROM world_system_profiles WHERE project_id=? AND world_setting_id=? LIMIT 1')
+              .get(projectId, existingFrozenWorld.id) as any
+          : null;
+        const frozenWorldConstraints = existingFrozenWorld
+          ? this.safeExtractJson<Record<string, any>>(String(existingFrozenWorld.constraints || '{}'), {})
+          : {};
+        const frozenLongWorldview = existingFrozenWorld ? {
+          era: String(existingFrozenWorld.era || existingFrozenProfile?.era || ''),
+          geography: this.safeExtractJson<any[]>(String(existingFrozenWorld.geography || '[]'), []),
+          factions: this.safeExtractJson<any[]>(String(existingFrozenWorld.factions || '[]'), []),
+          rules: String(existingFrozenProfile?.rules || this.safeExtractJson<any[]>(String(existingFrozenWorld.rules || '[]'), []).join('\n')),
+          atmosphere: String(existingFrozenWorld.atmosphere || existingFrozenProfile?.atmosphere_tone || ''),
+          socialStructure: String(existingFrozenProfile?.social_structure || frozenWorldConstraints.socialStructure || ''),
+          powerSystem: String(existingFrozenProfile?.tech_supernatural || frozenWorldConstraints.powerSystem || ''),
+          economy: String(existingFrozenProfile?.economy_system || frozenWorldConstraints.economy || ''),
+          culture: String(existingFrozenProfile?.culture_customs || frozenWorldConstraints.culture || ''),
+          history: String(existingFrozenProfile?.era || frozenWorldConstraints.history || existingFrozenWorld.era || ''),
+          endingDirection: String(existingFrozenProfile?.ending || ''),
+          storyPremise: String(existingFrozenWorld.story_premise || existingFrozenProfile?.synopsis || dto.title),
+          __frozenWorldId: String(existingFrozenWorld.id),
+        } : undefined;
+        emit('skeleton', 10, frozenLongWorldview
+          ? '世界观已冻结：复用现有世界观，只重建主线骨架与下游资料...'
+          : '生成主线与结局骨架，验收通过后再生成世界规则...');
+        this.logger.log(`create-project-async: 长篇模式 project=${projectId}${frozenLongWorldview ? '（复用冻结世界观）' : ''}`);
         let heartbeatPercent = 12;
         const heartbeat = setInterval(() => {
           heartbeatPercent = Math.min(heartbeatPercent + 3, 38);
@@ -5893,6 +5918,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
             genre: constitution.category,
             chapterWordMin: CHAPTER_WORD_RANGE.min,
             chapterWordMax: CHAPTER_WORD_RANGE.max,
+            frozenWorldview: frozenLongWorldview,
             onProgress: (step, message) => {
               if (step !== activeGenerationStep) emit(activeGenerationStep, heartbeatPercent, '本阶段已通过生成验收，进入下一阶段', 'done');
               emit(step, heartbeatPercent, message);
@@ -5903,6 +5929,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
           if (data && Object.keys(data).length > 0) {
             const worldSetting = data.worldSetting || data.worldview || data.world || {};
             const provenance = data.provenance || {};
+            const reusingFrozenWorld = Boolean(existingFrozenWorld);
             const creationBatchOutlineRunIds = Array.isArray(provenance.outlineRunIds) ? provenance.outlineRunIds : [];
             const creationBatchHasChapters = (data.volumes || []).some((volume: any) => Array.isArray(volume?.chapters) && volume.chapters.length > 0);
             // 同一长篇创建批次必须在第一条 Canon 写入之前一次性验明全部来源。
@@ -5911,7 +5938,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
             this.generatedCanonGuard.assertStructuredCanCommit({
               projectId, runId: provenance.skeletonRunId, expectedStages: ['outline'], expectedScenarios: ['outline'],
             });
-            if (data.coreSetting || Object.keys(worldSetting).length > 0) {
+            if (!reusingFrozenWorld && (data.coreSetting || Object.keys(worldSetting).length > 0)) {
               this.generatedCanonGuard.assertStructuredCanCommit({
                 projectId, runId: provenance.worldRunId, expectedStages: ['world'], expectedScenarios: ['world_building'],
               });
@@ -5929,7 +5956,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
                 projectId, runId, expectedStages: ['outline'], expectedScenarios: ['outline'],
               });
             }
-            let outlineWriteCount = 0, volumeWriteCount = 0, charCount = 0, fsCount = 0, wsCount = 0, orgCount = 0, mpCount = 0, timelineCount = 0;
+            let outlineWriteCount = 0, volumeWriteCount = 0, charCount = 0, fsCount = 0, wsCount = reusingFrozenWorld ? 1 : 0, orgCount = 0, mpCount = 0, timelineCount = 0;
 
             // 存储世界观
             if (data.coreSetting || Object.keys(worldSetting).length > 0) {
@@ -5949,7 +5976,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
             }
 
             // 存储世界观
-            if (Object.keys(worldSetting).length > 0) {
+            if (!reusingFrozenWorld && Object.keys(worldSetting).length > 0) {
               const wid = uuid();
               try {
                 db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, created_at, updated_at)
@@ -9994,6 +10021,7 @@ ${summarizeOutlineConsistency(pending)}`,
     genre: string;
     chapterWordMin: number;
     chapterWordMax: number;
+    frozenWorldview?: Record<string, unknown>;
     onProgress?: (step: 'skeleton' | 'world' | 'characters' | 'outline' | 'foreshadowing', message: string) => void;
   }): Promise<any> {
     // 【执行标准注入 · 长篇创建全流程】地基→角色→章纲→伏笔 与正文层共用唯一解析器。
@@ -10003,31 +10031,37 @@ ${summarizeOutlineConsistency(pending)}`,
     // 一旦生效就等于用降级标准生成长篇地基，与用户创建时确认的执行标准不一致。
     // resolvePlatformToneDirective 只有两种结果——返回完整标准，或抛错阻断（缺 projectId→400，项目不存在→404）。
     const platformDirective = this.resolvePlatformToneDirective(input.projectId);
-    const foundationResult = await this.chainTemplate.executeChain('long-novel-init-foundation', {
+    const foundationInput = {
       projectId: input.projectId,
       story_setting: (platformDirective ? platformDirective + '\n\n' : '') + input.storySetting,
       targetWords: input.targetWanZi,
       genre: input.genre,
-    }, (_nodeIndex, nodeId, status, result) => {
+    };
+    const foundationProgress = (_nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => {
       if (nodeId === 'node_1_skeleton' && status === 'completed') {
         const skeleton = result?.output;
         if (!skeleton?.coreSetting || !Array.isArray(skeleton.skeletonVolumes) || skeleton.skeletonVolumes.length === 0
           || skeleton.skeletonVolumes.some((volume: any) => !Number.isInteger(Number(volume?.estimatedChapters))
             || Number(volume.estimatedChapters) <= 0 || !String(volume?.chapterCountReason || '').trim())) {
-          throw new Error('长篇主线骨架缺少完整核心设定或有效分卷章数；世界规则未开始生成。');
+          throw new Error('长篇主线骨架缺少完整核心设定或有效分卷章数；后续资料未开始生成。');
         }
         const plannedChapters = skeleton.skeletonVolumes.reduce((total: number, volume: any) => total + Number(volume.estimatedChapters), 0);
         if (plannedChapters * input.chapterWordMin > input.targetWords
           || plannedChapters * input.chapterWordMax < input.targetWords) {
-          throw new Error(`长篇主线骨架规划${plannedChapters}章，无法按每章${input.chapterWordMin}-${input.chapterWordMax}字承载目标${input.targetWords}字；世界规则未开始生成。`);
+          throw new Error(`长篇主线骨架规划${plannedChapters}章，无法按每章${input.chapterWordMin}-${input.chapterWordMax}字承载目标${input.targetWords}字；后续资料未开始生成。`);
         }
-        input.onProgress?.('world', '主线与结局骨架已通过验收，开始生成世界规则');
+        input.onProgress?.('world', input.frozenWorldview
+          ? '主线与结局骨架已通过验收，继续沿用冻结世界观'
+          : '主线与结局骨架已通过验收，开始生成世界规则');
       }
-    });
+    };
+    const foundationResult = input.frozenWorldview
+      ? await this.chainTemplate.executeLongNovelFoundationSkeleton(foundationInput, foundationProgress)
+      : await this.chainTemplate.executeChain('long-novel-init-foundation', foundationInput, foundationProgress);
     const outputs: any = foundationResult?.outputs || {};
     const skeleton = outputs.node_1_skeleton;
     const worldOutput = outputs.node_2_worldview;
-    const generatedWorldview = worldOutput?.worldview;
+    const generatedWorldview = input.frozenWorldview || worldOutput?.worldview;
     if (!skeleton?.coreSetting || !Array.isArray(skeleton.skeletonVolumes) || !generatedWorldview
       || !Array.isArray(generatedWorldview.geography) || !Array.isArray(generatedWorldview.factions)) {
       // 真实成因优先于下游症状：地基节点被质量 Gate 拒绝时，「缺少世界观」只是症状。
@@ -10047,7 +10081,9 @@ ${summarizeOutlineConsistency(pending)}`,
           ? `string(len=${value.length},head=${JSON.stringify(value.slice(0, 160))})`
           : `object(keys=${Object.keys(value as Record<string, unknown>).join(',')})`));
       throw new Error(
-        '长篇地基顺序生成未完成（需先主线骨架、再世界规则）。'
+        (input.frozenWorldview
+          ? '长篇恢复地基未完成（冻结世界观保持不变，只重建主线骨架与下游资料）。'
+          : '长篇地基顺序生成未完成（需先主线骨架、再世界规则）。')
         + `诊断：${diagnose.length > 0 ? diagnose.join(' | ') : '模型未返回任何可解析内容'}；`
         + `链错误：${JSON.stringify(foundationResult?.errors || [])}。`,
       );

@@ -62,6 +62,13 @@ describe('creation consistency architecture invariants', () => {
     expect(transactionAt).toBeGreaterThan(reviewAt);
   });
 
+  it('reuses frozen world during long recovery instead of generating or inserting a second world', () => {
+    expect(controllerSource).toContain('frozenWorldview: frozenLongWorldview');
+    expect(controllerSource).toContain('executeLongNovelFoundationSkeleton');
+    expect(controllerSource).toContain('if (!reusingFrozenWorld && Object.keys(worldSetting).length > 0)');
+    expect(controllerSource).toContain('wsCount = reusingFrozenWorld ? 1 : 0');
+  });
+
   it('does not run a late world-depth mutation after downstream canon exists', () => {
     expect(controllerSource).not.toContain('// 世界观 depth\n    enrichTasks.push');
     expect(controllerSource).toContain('世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔');
