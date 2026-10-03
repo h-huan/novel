@@ -63,6 +63,25 @@ export interface CanonRepairDecision {
   scored: Array<{ candidate: CanonRepairCandidate; cost: number; eligible: boolean; reason: string }>;
 }
 
+export interface StoryFoundation {
+  schemaVersion: 1;
+  source: 'confirmed_story';
+  title?: string;
+  storyType?: string;
+  targetPlatform?: string;
+  premise?: string;
+  protagonist?: string;
+  coreConflict?: string;
+  activeChoice?: string;
+  escalation?: string;
+  mainReversal?: string;
+  endingDirection?: string;
+  uniquePoint?: string;
+  setting?: string;
+  characters?: unknown[];
+  targetWords?: number | string;
+}
+
 export function isImmutableCanonSource(sourceType: CanonSourceType): boolean {
   return sourceType === 'world_setting' || sourceType === 'world_rule';
 }
@@ -116,6 +135,53 @@ export function chooseMinimumImpactRepair(candidates: readonly CanonRepairCandid
     reason: `选择 ${eligible[0].candidate.sourceType} 作为最小代价修复点，避免扩大影响面。`,
     scored,
   };
+}
+
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+);
+
+const firstText = (...values: unknown[]): string | undefined => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+};
+
+/**
+ * 长篇和短篇创建都从同一张已确认故事卡得到这一份确定性地基。
+ * 这里只做字段投影/别名归一化，不调用模型、不补事实、不改变题材；后续世界观、角色、章纲
+ * 可以展开，但必须能追溯回同一个 foundation，避免长短篇各自拿一份不同故事摘要开工。
+ */
+export function buildStoryFoundation(confirmedStory: unknown): StoryFoundation {
+  const story = asRecord(confirmedStory);
+  const foundation: StoryFoundation = {
+    schemaVersion: 1,
+    source: 'confirmed_story',
+  };
+
+  const assign = <K extends keyof StoryFoundation>(key: K, value: StoryFoundation[K] | undefined) => {
+    if (value !== undefined && value !== '' && (!Array.isArray(value) || value.length > 0)) foundation[key] = value;
+  };
+
+  assign('title', firstText(story.title, story.workingTitle));
+  assign('storyType', firstText(story.storyType, story.type));
+  assign('targetPlatform', firstText(story.targetPlatform, story.platform));
+  assign('premise', firstText(story.storyCore, story.description, story.hook));
+  assign('protagonist', firstText(story.protagonist, story.protagonistSituation));
+  assign('coreConflict', firstText(story.coreConflict, story.conflict));
+  assign('activeChoice', firstText(story.activeChoice));
+  assign('escalation', firstText(story.escalation, story.secondOrderConsequence));
+  assign('mainReversal', firstText(story.mainReversal, story.reversalEffect));
+  assign('endingDirection', firstText(story.endingDirection, story.payoff));
+  assign('uniquePoint', firstText(story.uniquePoint, story.uniqueSelling, story.differentiation));
+  assign('setting', firstText(story.setting));
+  if (Array.isArray(story.characters) && story.characters.length) assign('characters', structuredClone(story.characters));
+  const targetWords = story.recommendedTargetWords ?? story.estimatedWords;
+  if ((typeof targetWords === 'number' && Number.isFinite(targetWords)) || (typeof targetWords === 'string' && targetWords.trim())) {
+    assign('targetWords', typeof targetWords === 'string' ? targetWords.trim() : targetWords as number);
+  }
+  return foundation;
 }
 
 /**
