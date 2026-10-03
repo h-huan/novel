@@ -7,15 +7,18 @@ import { spawnSync } from 'node:child_process';
 function run(report) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'novel-verify-guard-'));
   const file = path.join(dir, 'latest.json');
+  const markdown = path.join(dir, 'latest.md');
   fs.writeFileSync(file, JSON.stringify(report), 'utf8');
+  fs.writeFileSync(markdown, '# 本地验收报告\n\n- 最终结果：**PASSED**\n\n## 说明\n\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n', 'utf8');
   const result = spawnSync(process.execPath, [path.resolve('verify-local-guard.mjs'), file], { encoding: 'utf8' });
   const next = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const nextMarkdown = fs.readFileSync(markdown, 'utf8');
   fs.rmSync(dir, { recursive: true, force: true });
-  return { result, next };
+  return { result, next, nextMarkdown };
 }
 
 {
-  const { result, next } = run({
+  const { result, next, nextMarkdown } = run({
     options: { mode: 'diagnostic_latest_short_and_long', shortProjectId: 'short-1', longProjectId: null },
     runtime: { projects: { short: { project: { status: 'creating' }, cockpit: { diagnostics: { creationStalled: false } } } } },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
@@ -23,10 +26,13 @@ function run(report) {
   assert.equal(result.status, 1);
   assert.equal(next.verdict.status, 'failed');
   assert.deepEqual(next.verdict.runtimeProblems, ['long_project_missing']);
+  assert.match(nextMarkdown, /最终结果：\*\*FAILED\*\*/u);
+  assert.match(nextMarkdown, /long_project_missing/u);
+  assert.doesNotMatch(nextMarkdown, /不要求短篇和长篇同时存在/u);
 }
 
 {
-  const { result, next } = run({
+  const { result, next, nextMarkdown } = run({
     options: { mode: 'diagnostic_latest_short_and_long', shortProjectId: 'short-1', longProjectId: 'long-1' },
     runtime: { projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } }, long: { project: { status: 'active' }, cockpit: { diagnostics: {} } } } },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
@@ -34,6 +40,7 @@ function run(report) {
   assert.equal(result.status, 0);
   assert.equal(next.verdict.status, 'passed');
   assert.deepEqual(next.verdict.runtimeProblems, []);
+  assert.match(nextMarkdown, /Verification Guard\n\n- PASS/u);
 }
 
 console.log('verify-local-guard tests passed');
