@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
-import { readConstitution } from '../project/creative-constitution';
 import { GenerationMetricsService } from './generation-metrics.service';
 
 export interface GeneratedCanonProof {
@@ -30,16 +29,12 @@ export interface StructuredCanonGuardInput {
 /**
  * Single provenance boundary for AI-produced Canon.
  *
- * Chapter body requires a fully current context and an explicit Gate PASS.
- * Structured assets created in one project-creation batch are different: the
- * batch generates skeleton/world/characters/outlines first and then persists
- * them. Persisting the first artifact necessarily changes the dependency
- * context, so comparing every later run against the already-mutated context
- * makes the batch invalidate itself. During project.status=creating we therefore
- * freeze currentness at the Creative Constitution revision: same project + same
- * constitution + successful provenance remains valid while this batch writes its
- * own Canon rows. Once the project becomes active, full context currentness is
- * required again.
+ * Currentness is always checked against the real project context.  Creation
+ * batches must therefore validate every generated run before the first Canon
+ * write, then persist that already-validated batch without re-validating against
+ * the context it is changing itself.  The guard deliberately has no
+ * "project.status=creating" stale-run bypass: such a bypass would also admit a
+ * genuinely stale run produced by another creation attempt.
  */
 @Injectable()
 export class GeneratedCanonGuardService {
@@ -60,8 +55,9 @@ export class GeneratedCanonGuardService {
   }
 
   /**
-   * Structured boundary used only after the current world/character/outline
-   * pipeline has completed its own structural and source-hierarchy checks.
+   * Structured boundary used after the current structural/source-hierarchy Gate.
+   * For a multi-artifact creation batch, callers must invoke this for all batch
+   * runIds before writing the first artifact.
    */
   assertStructuredCanCommit(input: StructuredCanonGuardInput): GeneratedCanonProof {
     return this.assertRunProvenance(input, false);
@@ -74,7 +70,9 @@ export class GeneratedCanonGuardService {
     if (!runId) throw new BadRequestException('AI Canon 提交缺少 generation run 凭证');
 
     const db = this.databaseService.getDb();
-    const row = db.prepare(`SELECT id,project_id,stage,scenario,status,gate_status,output_text,constitution_json
+    // 这里只读取提交边界真正需要的稳定列。constitution/context 当前性由
+    // GenerationMetricsService.runIsCurrent 统一判断，避免 Guard 自己复制 schema/算法。
+    const row = db.prepare(`SELECT id,project_id,stage,scenario,status,gate_status,output_text
       FROM generation_runs WHERE id=? AND project_id=? LIMIT 1`).get(runId, projectId) as {
         id: string;
         project_id: string;
@@ -83,7 +81,6 @@ export class GeneratedCanonGuardService {
         status: string | null;
         gate_status: string | null;
         output_text: string | null;
-        constitution_json: string | null;
       } | undefined;
 
     if (!row) throw new BadRequestException('AI Canon 提交凭证不存在或不属于当前项目');
@@ -108,21 +105,11 @@ export class GeneratedCanonGuardService {
       throw new BadRequestException('AI Canon 提交凭证没有可提交的最终输出');
     }
 
-    const project = db.prepare('SELECT * FROM projects WHERE id=? LIMIT 1').get(projectId) as any;
+    const project = db.prepare('SELECT id FROM projects WHERE id=? LIMIT 1').get(projectId) as any;
     if (!project) throw new BadRequestException('AI Canon 提交对应项目不存在');
 
-    const fullContextCurrent = this.generationMetrics.runIsCurrent(runId, projectId);
-    if (!fullContextCurrent) {
-      // 创建批次在落库 world -> character -> outline 时会自然改变 context_snapshot。
-      // 只对 structured + creating 开这个窄口：constitution 必须逐字仍是同一版；
-      // 用户若修改创作宪法，旧 run 仍会立刻失效。
-      const sameCreationConstitution = !requireGatePass
-        && String(project.status || '') === 'creating'
-        && !!row.constitution_json
-        && row.constitution_json === JSON.stringify(readConstitution(project));
-      if (!sameCreationConstitution) {
-        throw new ConflictException('AI Canon 提交凭证已过期：项目创作宪法或依赖上下文已变化');
-      }
+    if (!this.generationMetrics.runIsCurrent(runId, projectId)) {
+      throw new ConflictException('AI Canon 提交凭证已过期：项目创作宪法或依赖上下文已变化');
     }
 
     return { runId, projectId, stage, scenario, outputText };
