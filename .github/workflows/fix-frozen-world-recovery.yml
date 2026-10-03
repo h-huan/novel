@@ -1,0 +1,53 @@
+name: Fix frozen world recovery
+on:
+  push:
+    branches: [fix/canon-creation-consistency-20261003]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/canon-creation-consistency-20261003
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply guarded recovery patch
+        run: python .github/scripts/fix-frozen-world-recovery.py
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Typecheck
+        working-directory: server
+        run: npm run typecheck
+      - name: Build
+        working-directory: server
+        run: npm run build
+      - name: Focused recovery regression
+        working-directory: server
+        run: npx vitest run src/chain/generation-recovery.service.spec.ts src/chain/long-novel-foundation-sequence.spec.ts src/chain/creation-consistency-architecture.spec.ts src/modules/world-setting/world-setting.service.spec.ts src/modules/generation-metrics/generated-canon-guard.service.spec.ts
+      - name: Full unit suite
+        working-directory: server
+        run: npm test
+      - name: Acceptance suite
+        working-directory: server
+        run: npm run test:acceptance
+      - name: E2E suite
+        working-directory: server
+        run: npm run test:e2e
+      - name: Remove one-shot patch machinery
+        run: rm -f .github/scripts/fix-frozen-world-recovery.py .github/workflows/fix-frozen-world-recovery.yml
+      - name: Commit verified recovery fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: resume downstream generation with frozen world canon"
+          git push origin HEAD:fix/canon-creation-consistency-20261003
