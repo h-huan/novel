@@ -34,6 +34,47 @@ jobs:
           python .github/scripts/finalize-canon-consistency-fix.py
           python .github/scripts/finalize-safe-cross-stage-repair.py
           python .github/scripts/finalize-world-invariant-boundary.py
+          # First-world creation is one atomic operation: the main row and its
+          # initial profile are written in the same transaction, then frozen.
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str, label: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8-sig')
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected 1 match, got {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+              print(f'patched {label}: {path}')
+
+          service = 'server/src/modules/world-setting/world-setting.service.ts'
+          replace_once(
+              service,
+              "    this.repo.insert({",
+              "    const db = this.databaseService.getDb();\n    db.exec('BEGIN IMMEDIATE');\n    try {\n      this.repo.insert({",
+              'begin atomic first-world create',
+          )
+          replace_once(
+              service,
+              "    });\n\n    return this.toResponse(this.repo.findById(id)!);",
+              "      });\n\n      const initialProfile: Record<string, string> = {\n        synopsis: dto.workIntro || '',\n        basic_info: [dto.name, dto.era].filter(Boolean).join('；'),\n        era: dto.era || '',\n        rules: (dto.constraints || []).map(item => item.rule).filter(Boolean).join('\\n'),\n        system_mechanics: dto.systemSettings || '',\n        culture_customs: dto.culturalSettings || '',\n        naming_rules: dto.namingRules || '',\n        scale_plan: dto.dataPlanning || '',\n        hierarchy_rules: buildCanonPolicyDirective(),\n        supplementary: dto.censorshipRules || '',\n      };\n      const profileValues = WORLD_PROFILE_FIELDS.map(field => String(initialProfile[field] || ''));\n      db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id, ${WORLD_PROFILE_FIELDS.join(', ')}, created_at, updated_at) VALUES (?, ?, ?, ${WORLD_PROFILE_FIELDS.map(() => '?').join(', ')}, ?, ?)` )\n        .run(uuid(), projectId, id, ...profileValues, now, now);\n      db.exec('COMMIT');\n    } catch (error) {\n      db.exec('ROLLBACK');\n      throw error;\n    }\n\n    return this.toResponse(this.repo.findById(id)!);",
+              'write initial world profile before freeze',
+          )
+
+          controller = 'server/src/modules/world-setting/world-setting.controller.ts'
+          p = Path(controller)
+          text = p.read_text(encoding='utf-8-sig')
+          start = "    // 创建阶段由生成链负责上层→下层审查；这里只建立唯一世界观档案。\n    this.service.updateProfile(projectId, result.id, {"
+          end = "    const sync = await this.indexWorldSetting(projectId, result);"
+          if text.count(start) != 1 or text.count(end) != 1:
+              raise RuntimeError('controller atomic create markers are not unique')
+          a = text.index(start)
+          b = text.index(end, a)
+          text = text[:a] + "    // service.create 已在同一事务写入初始 profile；返回后世界观立即冻结。\n" + text[b:]
+          p.write_text(text, encoding='utf-8')
+          print('patched controller to avoid post-freeze updateProfile')
+          PY
       - name: Server dependencies
         working-directory: server
         run: npm ci
