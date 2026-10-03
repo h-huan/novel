@@ -61,3 +61,35 @@ describe('constitution SQLite acceptance', () => {
     } finally { db.close(); }
   });
 });
+
+describe('confirmed story restart persistence', () => {
+  it.each(['short_story', 'long_novel'])('keeps %s story through real SQLite migrations, editing and writing-context reload', async type => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      await new Migrator(db).runMigrations();
+      const project = seedAcceptanceProject(db, { title: '重启后的当前故事', type });
+      const row = db.prepare('SELECT settings FROM projects WHERE id=?').get(project.id) as any;
+      const settings = JSON.parse(row.settings);
+      const audit = { preselectedPremises: [{ workingTitle: '另一部作品', payoff: '其它结局' }] };
+      settings.creativeConstitution.confirmedStory.ideaDiscoveryAudit = audit;
+      const originalStory = settings.creativeConstitution.confirmedStory;
+      db.prepare('UPDATE projects SET settings=? WHERE id=?').run(JSON.stringify(settings), project.id);
+
+      await new Migrator(db).runMigrations();
+      const firstRestart = db.prepare('SELECT settings FROM projects WHERE id=?').get(project.id) as any;
+      expect(JSON.parse(firstRestart.settings).creativeConstitution.confirmedStory).toEqual(originalStory);
+      await new Migrator(db).runMigrations();
+      expect((db.prepare('SELECT settings FROM projects WHERE id=?').get(project.id) as any).settings).toBe(firstRestart.settings);
+
+      const database = { getDb: () => db } as any;
+      const service = new ProjectService(new ProjectRepository(database));
+      service.update(project.id, { storyTone: ['克制'] });
+      const edited = db.prepare('SELECT settings FROM projects WHERE id=?').get(project.id) as any;
+      expect(JSON.parse(edited.settings).ideaDiscoveryAudit).toEqual(audit);
+      const context = new StateItemService(database).buildWritingStateContext(project.id);
+      expect(context.projectCard.creativeConstitution.confirmedStory.title).toBe(project.title);
+      expect(context.projectCard.creativeConstitution.confirmedStory.hook).toBe(originalStory.hook);
+      expect(JSON.stringify(context.projectCard.creativeConstitution)).not.toContain('另一部作品');
+    } finally { db.close(); }
+  });
+});
