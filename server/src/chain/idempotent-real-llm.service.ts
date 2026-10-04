@@ -14,6 +14,9 @@ import { LLM_TUNABLES } from '../config/llm-tunables';
 
 const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
+const SINGLE_IDEA_CARD_MARKER = 'JSON 结构（ideas 必须恰好 1 项）';
+const SINGLE_IDEA_CARD_RECOVERY_DIRECTIVE =
+  '【结构恢复】上一响应没有满足本次唯一输出契约。不要换题、不要重选 premise、不要修改题材身份；仅把同一个已选题材按原请求完整输出为 {"ideas":[{...}]}，且 ideas 必须恰好 1 项。不要返回空数组、单独的 idea 字段、裸卡片或额外解释。';
 
 /**
  * The public provider token is still RealLLMService. This subclass keeps runtime
@@ -24,7 +27,10 @@ const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
  *    can prove which exact gated generation produced the artifact;
  * 4) an exhausted transient transport failure gets one configurable outer recovery round
  *    with the exact same configured model/request, so a short socket reset does not abort
- *    the whole creation pipeline after RealLLM's single immediate network retry.
+ *    the whole creation pipeline after RealLLM's single immediate network retry;
+ * 5) the one-premise/one-card idea structuring contract gets one technical shape recovery
+ *    on the same premise instead of silently turning a malformed provider JSON shape into
+ *    a missing user-requested idea card.
  *
  * Reuse is deliberately exact: prompt, system prompt, scenario, stepKey, model,
  * temperature, output budget, constitution revision, compiled context, standards and
@@ -138,8 +144,33 @@ export class IdempotentRealLLMService extends RealLLMService {
    * configurable delay. This intentionally does not switch model/provider, loosen the
    * prompt, or swallow non-network failures. Each re-entry creates a fresh generation_run,
    * leaving the failed attempt auditable instead of pretending it succeeded.
+   *
+   * For the explicit one-premise/one-card idea request, a successful transport can still
+   * return the wrong JSON envelope. That is a technical protocol failure, not evidence
+   * that the selected premise is bad. We first normalize harmless equivalent envelopes;
+   * if there is still no single card, we re-issue the exact same premise once with only
+   * an output-shape reminder. A second invalid response is returned unchanged so the
+   * existing controller fails closed instead of inventing a card or weakening quality.
    */
   private async generateWithNetworkRecovery(request: LLMRequest): Promise<LLMResponse> {
+    const first = await this.generatePhysicalWithNetworkRecovery(request);
+    if (!this.isSingleIdeaCardStructuringRequest(request)) return first;
+
+    const normalizedFirst = this.normalizeSingleIdeaCardEnvelope(first);
+    if (normalizedFirst) return normalizedFirst;
+
+    this.recoveryLogger.warn(
+      `[idea-shape-recovery] 同一已选 premise 的完整题材卡输出形状无效，执行一次同题材结构恢复: scenario=${request.scenario || 'daily'}`,
+    );
+    const recoveryRequest: LLMRequest = {
+      ...request,
+      systemPrompt: [request.systemPrompt, SINGLE_IDEA_CARD_RECOVERY_DIRECTIVE].filter(Boolean).join('\n'),
+    };
+    const recovered = await this.generatePhysicalWithNetworkRecovery(recoveryRequest);
+    return this.normalizeSingleIdeaCardEnvelope(recovered) ?? recovered;
+  }
+
+  private async generatePhysicalWithNetworkRecovery(request: LLMRequest): Promise<LLMResponse> {
     const retries = Math.max(0, Math.floor(LLM_TUNABLES.NETWORK_RECOVERY_RETRIES));
     for (let recoveryAttempt = 0; ; recoveryAttempt += 1) {
       try {
@@ -161,6 +192,64 @@ export class IdempotentRealLLMService extends RealLLMService {
         }
       }
     }
+  }
+
+  private isSingleIdeaCardStructuringRequest(request: LLMRequest): boolean {
+    return String(request.scenario || '') === 'idea_generate'
+      && request.responseFormat === 'json_object'
+      && String(request.prompt || '').includes(SINGLE_IDEA_CARD_MARKER);
+  }
+
+  private normalizeSingleIdeaCardEnvelope(response: LLMResponse): LLMResponse | null {
+    const source = String(response.content || '').trim();
+    if (!source) return null;
+    const cleaned = source
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    let parsed: any;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      && Array.isArray(parsed.ideas) && parsed.ideas.length === 1
+      && this.looksLikeIdeaCard(parsed.ideas[0])) {
+      return response;
+    }
+
+    let card: any = null;
+    if (Array.isArray(parsed) && parsed.length === 1 && this.looksLikeIdeaCard(parsed[0])) {
+      card = parsed[0];
+    } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      && this.looksLikeIdeaCard(parsed.idea)) {
+      card = parsed.idea;
+    } else if (this.looksLikeIdeaCard(parsed)) {
+      card = parsed;
+    }
+    if (!card) return null;
+
+    // The text has changed client-side, so any provider/run provenance tied to the raw
+    // bytes must not be carried forward as if it were an exact output match.
+    const { runId: _runId, ...rest } = response;
+    return {
+      ...rest,
+      content: JSON.stringify({ ideas: [card] }),
+      finishReason: response.finishReason
+        ? `${response.finishReason}|normalized_single_idea_card`
+        : 'normalized_single_idea_card',
+    };
+  }
+
+  private looksLikeIdeaCard(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const card = value as Record<string, unknown>;
+    const title = String(card.title || '').trim();
+    const narrativeSignals = [card.hook, card.description, card.coreConflict, card.mainReversal]
+      .filter(item => String(item || '').trim().length > 0).length;
+    return title.length > 0 && narrativeSignals >= 2;
   }
 
   private isTransientNetworkFailure(error: unknown): boolean {
