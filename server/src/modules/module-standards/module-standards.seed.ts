@@ -8,7 +8,7 @@ import { buildCanonPolicyDirective } from '../canon/canon-policy';
  * 平台基准与 Creative Constitution 仍由对应代码实现。禁止在运行时由 LLM/数据库改写本映射。
  */
 
-export const SEED_BASELINE_VERSION = 66;
+export const SEED_BASELINE_VERSION = 67;
 
 /** 唯一 Canon 规则文本由机器策略生成；旧调用点继续用这个名字，但不能再定义第二套顺序。 */
 export const STORY_FACT_PRIORITY = buildCanonPolicyDirective();
@@ -111,6 +111,7 @@ export const SEED_MODULE_STANDARDS: SeedModuleStandard[] = [
     requirements: [
       '架构必须继承 Creative Constitution 的平台、分类、基调、文风、流派、POV 与标签',
       '已确认世界观硬规则与边界高于后续卷纲、章纲和 ChapterPlan；下层只能补充，不能反向修改世界规则',
+      '世界规则中写明的并列前置条件、精确人数/数量、证据组合与触发时点在故事卡、章纲和 ChapterPlan 下传时必须无损保留，不得用摘要、省略或模糊复数改变生效条件',
       '章节目标字数、节奏和回报类型服从目标平台与长短篇基准，但不得机械固定爆点间隔',
       'ChapterPlan 是正文执行合同，不另建第二份章节权威',
     ],
