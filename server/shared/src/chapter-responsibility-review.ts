@@ -38,7 +38,7 @@ export const CHAPTER_RESPONSIBILITY_CRITERIA: readonly ChapterResponsibilityCrit
   {
     id: 'CR-2',
     label: '触发条件与时点',
-    check: '规则规定的触发条件（前置动作、次数、代价、时点）必须在该章真实成立；条件未满足就出现效果，或某信息早于其在故事时间线上发生之前就被知晓，都算冲突。',
+    check: '规则规定的触发条件（前置动作、次数、人数、数量、证据组合、代价、时点）必须在该章真实成立；并列条件与精确数量是不可拆分的执行合同：上层写明 A+B+C、两名/三份/第N次等要件时，下层不得缩写成 A、模糊成“有人/若干/多次”，也不得把未明写当作已满足。条件未满足就出现效果，或某信息早于其在故事时间线上发生之前就被知晓，都算冲突。',
   },
   {
     id: 'CR-3',
@@ -58,7 +58,7 @@ export const CHAPTER_RESPONSIBILITY_CRITERIA: readonly ChapterResponsibilityCrit
   {
     id: 'CR-6',
     label: '证据、程序与权利生效',
-    check: '涉及法律、行政、所有权、继承或系统权限移交的效果，必须写明来源、生效条件与生效时点；仅凭身份关系材料不得视为已经生效的权利。',
+    check: '涉及法律、行政、所有权、继承、档案校验或系统权限移交的效果，必须写明来源、生效条件、人数/数量、证据组合与生效时点；上层明确的程序要件不得在故事卡、章纲或正文压缩时省略，仅凭身份关系材料不得视为已经生效的权利。',
   },
   {
     id: 'CR-7',
@@ -83,7 +83,7 @@ export const CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE =
 export const CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT =
   '只输出JSON对象：全部可在已确认规则内执行时返回 {"consistent":true,"contradictions":[]}；确有冲突时返回 {"consistent":false,"contradictions":[{"chapter":1,"criterion":"CR-1","task":"存在冲突的任务原文","conflict":"违反了哪条判据与哪条已确认规则，以及为何无法执行","ruleEvidence":"被违反的判据编号与【已确认世界规则/执行标准】原文逐字引用","retain":"必须保留的故事目标","fix":"不新增任何能力、且可直接执行的替代任务"}]}。criterion 必须是上列判据编号之一，ruleEvidence 必须是逐字引用；给不出逐字证据的疑虑不得写成冲突。';
 
-/** 修复器的修订边界：与判据同源，避免修复提示里再抄一份走样。 */
+/** 修复器的修订边界：与判据同源，避免修复提示里再抄一份走样表述。 */
 export const CHAPTER_RESPONSIBILITY_REPAIR_BOUNDARIES =
   '修订边界：每章只承担一个独有推进任务；后续章的反转不得提前；能力和世界规则必须满足明确触发条件；设定规定为反复发生的机制必须保留其重复性，只调整推进、代价或信息增量，不得为了消除重复而删掉设定机制本身；物品、份数、人员与信息来源必须写清。';
 
@@ -128,7 +128,7 @@ export const isEvidencedChapterResponsibilityConflict = (value: unknown): value 
  */
 export function chapterResponsibilityPlanningDirective(): string {
   return [
-    "【生成前能力边界编译 · 判据与审查/修复同源】逐项核对每个异常事件的作用主体、作用对象、载体、触发条件和能力范围，只有已确认世界规则逐字授权的效果才能进入章节任务。",
+    "【生成前规则执行编译 · 判据与审查/修复同源】逐项核对所有受世界规则约束的事件、程序与效果：作用主体、作用对象、载体、全部前置条件、人数/数量、证据组合、触发时点和能力范围都必须与已确认世界规则一致；不得因章纲压缩而省略会改变是否生效的必要条件。",
     CHAPTER_RESPONSIBILITY_JUDGMENT_RULES,
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
   ].join("\n");
@@ -206,7 +206,9 @@ export function chapterResponsibilityCriteriaText(ids: readonly string[]): strin
  */
 export function storyCardAuthorizationDirective(): string {
   return [
-    "【生成前能力边界编译 · 短篇故事卡 · 与事实审查/修复同源】先逐项确定每个异常事件的作用主体、作用对象、载体、触发条件与可见范围，只有【已确认世界规则】逐字授权的效果才能进入故事卡。规则未授予的能力一律不得写入，例如让站点强行牵引或驱使乘客下车、让异常直接操纵列车/车门/警报/调度，或凭空抹除、伪造现实记录与物证；被遗忘者只在他人记忆与记录中变淡，真实存在的照片与物证仍然存在。",
+    "【生成前规则执行编译 · 短篇故事卡 · 与事实审查/修复同源】故事卡不是世界规则的摘要，而是后续章纲的可执行合同。逐场景核对所有会产生状态变化、程序效果、证据效力、权限变化或异常效果的机制，明确主体、对象、载体、全部前置条件、人数/数量、证据组合、触发时点、代价与结果；只有【已确认世界规则】授权且条件完整满足的结果才能进入 outcome。",
+    "【无损继承】上层规则中的 AND 条件、枚举项和精确数量不得被语义压缩：A+B+C 不能改成 A；“两名/三份/第N次”不能写成“有人/若干/多次”；“须/必须/仅当/若…则…”中的必要条件不得省略。若场景暂时只具备部分条件，只能写申请、调查、补证、等待或其它尚未生效的动作，不能提前写最终程序/权限/规则效果已经成立。",
+    "【审查与修复闭环】审查只按同一判据指出真实冲突或缺失的必要条件；每条问题必须给出 criterion、scene、cardEvidence、ruleEvidence、conflict、fix。用于修复时，fix 是强制合同，必须逐条落实，不得用同义缩写再次丢掉人数、证据项、时点或必要动作；不得为了修一处改掉已确认人物、真相、核心反转、结局或其它已通过场景的职责。",
     chapterResponsibilityCriteriaText(['CR-1', 'CR-2', 'CR-4', 'CR-6']),
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
   ].join("\n");

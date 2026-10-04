@@ -71,6 +71,9 @@ const finalGateFailure = '创建前筛选已完成，但完整题材卡最终验
 const acceptedIdea = (index: number) => ({
   sourcePremiseId: `P${index + 1}`,
   title: `通过${index}`,
+  hook: `钩子${index}`,
+  description: `描述${index}`,
+  coreConflict: `冲突${index}`,
   storyType: 'short_story',
   targetPlatform: 'fanqie',
   ideaAppealGate: { passed: true, distinctivenessScore: 8 - index },
@@ -79,7 +82,7 @@ const acceptedIdea = (index: number) => ({
 });
 
 describe('ChainPlanningController idea-discovery transport adapter', () => {
-  it('does not oversample or rescreen ideas already selected before card creation and accepted by the final gate', async () => {
+  it('does not oversample or rescreen a complete batch already accepted by the final gate', async () => {
     const upstream = {
       success: true,
       ideas: Array.from({ length: 5 }, (_, index) => acceptedIdea(index)),
@@ -99,7 +102,88 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
     expect(result.ideas[0].ideaDiscoveryAudit).toEqual(audit);
   });
 
-  it('returns the orchestrator payload unchanged instead of becoming a second gate', async () => {
+  it('fills only the missing idea-card slots through another full gated discovery batch', async () => {
+    const first = {
+      success: true,
+      ideas: Array.from({ length: 4 }, (_, index) => acceptedIdea(index)),
+      totalIdeas: 4,
+      qualityWarning: '创建前已筛选 5 个题材，最终 Gate 通过 4 个',
+      appealGate: { ...audit, generated: 4, qualified: 4, returned: 4, shortfall: 1, rejected: 1 },
+    };
+    const replacement = {
+      success: true,
+      ideas: [{ ...acceptedIdea(9), sourcePremiseId: 'P1', title: '补位但完整过Gate' }],
+      totalIdeas: 1,
+      appealGate: { ...audit, premiseSelected: 1, generated: 1, qualified: 1, returned: 1 },
+    };
+    const ideaDiscover = vi.fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(replacement);
+    const controller = new ChainPlanningController({ ideaDiscover } as any);
+
+    const result: any = await controller.ideaDiscover({ ...dto, count: 5 } as any);
+
+    expect(ideaDiscover).toHaveBeenCalledTimes(2);
+    expect(ideaDiscover.mock.calls[1][0]).toEqual(expect.objectContaining({
+      count: 1,
+      excludeDetails: expect.arrayContaining([
+        expect.objectContaining({ title: '通过0' }),
+        expect.objectContaining({ title: '通过3' }),
+      ]),
+    }));
+    expect(result.success).toBe(true);
+    expect(result.totalIdeas).toBe(5);
+    expect(result.ideas).toHaveLength(5);
+    expect(result.qualityWarning).toBeUndefined();
+    expect(result.appealGate).toEqual(expect.objectContaining({
+      schemaVersion: 8,
+      requested: 5,
+      returned: 5,
+      shortfall: 0,
+      topupProtocol: 'bounded_full_gate_gap_fill',
+      topupAttempted: true,
+    }));
+    expect(result.ideas.every((idea: any) => idea.ideaDiscoveryAudit?.returned === 5)).toBe(true);
+  });
+
+  it('fails the batch instead of returning success=true when bounded full-gate top-up still misses the requested count', async () => {
+    const first = {
+      success: true,
+      ideas: Array.from({ length: 4 }, (_, index) => acceptedIdea(index)),
+      totalIdeas: 4,
+      appealGate: { ...audit, generated: 4, qualified: 4, returned: 4, shortfall: 1, rejected: 1 },
+    };
+    const failedTopup = {
+      success: false,
+      ideas: [],
+      totalIdeas: 0,
+      error: '候选结构化失败',
+      appealGate: { ...audit, premiseSelected: 1, generated: 0, qualified: 0, returned: 0, rejected: 1 },
+    };
+    const ideaDiscover = vi.fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(failedTopup)
+      .mockResolvedValueOnce(failedTopup);
+    const controller = new ChainPlanningController({ ideaDiscover } as any);
+
+    const result: any = await controller.ideaDiscover({ ...dto, count: 5 } as any);
+
+    expect(ideaDiscover).toHaveBeenCalledTimes(3);
+    expect(result.success).toBe(false);
+    expect(result.totalIdeas).toBe(4);
+    expect(result.ideas).toHaveLength(4);
+    expect(result.error).toContain('请求 5，最终通过 4');
+    expect(result.qualityWarning).toContain('本批按数量合同判失败');
+    expect(result.appealGate).toEqual(expect.objectContaining({
+      requested: 5,
+      returned: 4,
+      shortfall: 1,
+      topupAttempted: true,
+    }));
+    expect(result.appealGate.topupAttempts).toHaveLength(2);
+  });
+
+  it('returns the orchestrator payload unchanged instead of becoming a second quality gate when cardinality is already complete', async () => {
     const upstream = {
       success: true,
       ideas: [
@@ -120,7 +204,7 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
     expect(result.ideas.map((idea: any) => idea.title)).toEqual(['通过0', '旧格式未验收题材', '明确未通过题材']);
   });
 
-  it('passes through a final-gate pipeline failure without triggering another selection layer', async () => {
+  it('passes through a zero-result final-gate pipeline failure without triggering another selection layer', async () => {
     const upstream = {
       success: false,
       ideas: [],
