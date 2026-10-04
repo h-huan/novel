@@ -17,6 +17,10 @@ const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
 const SINGLE_IDEA_CARD_MARKER = 'JSON 结构（ideas 必须恰好 1 项）';
 const SINGLE_IDEA_CARD_RECOVERY_DIRECTIVE =
   '【结构恢复】上一响应没有满足本次唯一输出契约。不要换题、不要重选 premise、不要修改题材身份；仅把同一个已选题材按原请求完整输出为 {"ideas":[{...}]}，且 ideas 必须恰好 1 项。不要返回空数组、单独的 idea 字段、裸卡片或额外解释。';
+const STORY_CARD_REVIEW_MARKER = '【候选故事卡】';
+const STORY_CARD_REPAIR_MARKER = '重新生成故事卡，完全丢弃候选卡中的错误机制，只能使用已确认题材与世界规则。';
+const STORY_CARD_REPAIR_FLOOR =
+  '【同一候选局部修复·覆盖前文“重新生成”措辞】这里的“重新生成故事卡”只表示返回完整 JSON，不表示从零重写故事卡。必须以【当前候选故事卡】为唯一修复底稿，只修改【禁止出现的错误】逐条点名的 scene/字段及其直接依赖；未被点名且不依赖冲突机制的 coreConflict、protagonistDesire、turningPoint、reveal、ending 和其它 scenes 原样保留。每条 fix 都是强制合同：人数、数量、并列证据、前置动作、时点和触发条件必须完整落到对应 goal/conflict/outcome，不得再用“有人/若干/相关证据/按馆规”等模糊概括替代精确要件。不得新增另一套人物关系、真相、反转、结局或世界规则。';
 
 /**
  * The public provider token is still RealLLMService. This subclass keeps runtime
@@ -30,7 +34,10 @@ const SINGLE_IDEA_CARD_RECOVERY_DIRECTIVE =
  *    the whole creation pipeline after RealLLM's single immediate network retry;
  * 5) the one-premise/one-card idea structuring contract gets one technical shape recovery
  *    on the same premise instead of silently turning a malformed provider JSON shape into
- *    a missing user-requested idea card.
+ *    a missing user-requested idea card;
+ * 6) a short-story-card audit keeps the exact audited candidate for the immediately
+ *    following repair, preventing the repair call from rebuilding the whole card from
+ *    premise+rules and creating a different conflict elsewhere.
  *
  * Reuse is deliberately exact: prompt, system prompt, scenario, stepKey, model,
  * temperature, output budget, constitution revision, compiled context, standards and
@@ -39,6 +46,8 @@ const SINGLE_IDEA_CARD_RECOVERY_DIRECTIVE =
 @Injectable()
 export class IdempotentRealLLMService extends RealLLMService {
   private readonly recoveryLogger = new Logger(IdempotentRealLLMService.name);
+  private readonly reviewedShortStoryCardByProject = new Map<string, string>();
+  private static readonly MAX_REVIEWED_STORY_CARD_CACHE = 128;
 
   constructor(
     private readonly runtimeRouter: ModelRouterService,
@@ -55,18 +64,21 @@ export class IdempotentRealLLMService extends RealLLMService {
     }
 
     const projectId = request.metrics?.projectId ?? currentCreationProjectId() ?? undefined;
-    const scenario = String(request.scenario || 'daily');
+    this.captureReviewedShortStoryCard(request, projectId);
+    const effectiveRequest = this.withReviewedShortStoryCardForRepair(request, projectId);
+    const effectiveStepKey = String(effectiveRequest.metrics?.stepKey || '').trim();
+    const scenario = String(effectiveRequest.scenario || 'daily');
 
     // 非可复用调用仍走同一个真实 LLM/Gate，只在返回后按最终输出做原有的精确 runId 绑定。
-    if (!projectId || !this.isReusableCreationCall(request, projectId)) {
-      const response = await this.generateWithNetworkRecovery(request);
+    if (!projectId || !this.isReusableCreationCall(effectiveRequest, projectId)) {
+      const response = await this.generateWithNetworkRecovery(effectiveRequest);
       return projectId ? this.attachLatestRunId(projectId, scenario, response) : response;
     }
 
     const db = this.database.getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     if (!project) {
-      const response = await this.generateWithNetworkRecovery(request);
+      const response = await this.generateWithNetworkRecovery(effectiveRequest);
       return this.attachLatestRunId(projectId, scenario, response);
     }
 
@@ -74,13 +86,13 @@ export class IdempotentRealLLMService extends RealLLMService {
     const constitutionRevision = Number.isFinite(Number(constitution.revision))
       ? Number(constitution.revision)
       : null;
-    const chapterIndex = request.metrics?.chapterIndex != null && Number.isFinite(Number(request.metrics.chapterIndex))
-      ? Number(request.metrics.chapterIndex)
+    const chapterIndex = effectiveRequest.metrics?.chapterIndex != null && Number.isFinite(Number(effectiveRequest.metrics.chapterIndex))
+      ? Number(effectiveRequest.metrics.chapterIndex)
       : null;
-    const stage = qualityStage(scenario, stepKey);
+    const stage = qualityStage(scenario, effectiveStepKey);
     const compiled = compileContext(db, { projectId, stage, chapterIndex });
     const contextVersion = String(compiled.version || digest(''));
-    const standards = standardDirectiveCache.snapshot(scenario, request.injectStandard !== false, stepKey);
+    const standards = standardDirectiveCache.snapshot(scenario, effectiveRequest.injectStandard !== false, effectiveStepKey);
     let routedModel = '';
     try {
       const routed = this.runtimeRouter.getModelForScenario(scenario);
@@ -90,20 +102,20 @@ export class IdempotentRealLLMService extends RealLLMService {
     }
 
     const requestFingerprint = digest(JSON.stringify({
-      prompt: request.prompt,
-      systemPrompt: request.systemPrompt || '',
+      prompt: effectiveRequest.prompt,
+      systemPrompt: effectiveRequest.systemPrompt || '',
       scenario,
-      stepKey,
+      stepKey: effectiveStepKey,
       chapterIndex,
-      model: request.model || routedModel,
-      temperature: request.temperature ?? null,
-      maxTokens: request.maxTokens ?? null,
-      responseFormat: request.responseFormat || 'text',
-      evaluationUnit: request.evaluationUnit || 'chapter',
-      injectStandard: request.injectStandard !== false,
+      model: effectiveRequest.model || routedModel,
+      temperature: effectiveRequest.temperature ?? null,
+      maxTokens: effectiveRequest.maxTokens ?? null,
+      responseFormat: effectiveRequest.responseFormat || 'text',
+      evaluationUnit: effectiveRequest.evaluationUnit || 'chapter',
+      injectStandard: effectiveRequest.injectStandard !== false,
     }));
     const fingerprintDirective = `【内部运行恢复指纹】${requestFingerprint}；仅用于幂等恢复，禁止在输出中复述。`;
-    const systemPrompt = [request.systemPrompt, fingerprintDirective].filter(Boolean).join('\n');
+    const systemPrompt = [effectiveRequest.systemPrompt, fingerprintDirective].filter(Boolean).join('\n');
     const promptVersion = digest(systemPrompt + JSON.stringify(constitution) + standards.digest);
 
     const matchingRuns = () => db.prepare(`SELECT id,output_text,model,finished_at FROM generation_runs
@@ -119,7 +131,7 @@ export class IdempotentRealLLMService extends RealLLMService {
     if (cached?.output_text) {
       return {
         content: cached.output_text,
-        model: String(cached.model || request.model || routedModel || 'cached'),
+        model: String(cached.model || effectiveRequest.model || routedModel || 'cached'),
         finishReason: 'cached_successful_stage',
         latency: 0,
         runId: cached.id,
@@ -127,7 +139,7 @@ export class IdempotentRealLLMService extends RealLLMService {
     }
 
     const callStartedAt = new Date().toISOString();
-    const response = await this.generateWithNetworkRecovery({ ...request, systemPrompt });
+    const response = await this.generateWithNetworkRecovery({ ...effectiveRequest, systemPrompt });
     if (response.runId) return response;
 
     // The structured creation path already has a complete deterministic fingerprint.
@@ -194,6 +206,49 @@ export class IdempotentRealLLMService extends RealLLMService {
     }
   }
 
+  private captureReviewedShortStoryCard(request: LLMRequest, projectId?: string): void {
+    if (!projectId) return;
+    const prompt = String(request.prompt || '');
+    const markerIndex = prompt.indexOf(STORY_CARD_REVIEW_MARKER);
+    if (markerIndex < 0 || !prompt.includes('只核对故事卡是否忠实于已确认题材')) return;
+    const start = markerIndex + STORY_CARD_REVIEW_MARKER.length;
+    const tail = prompt.slice(start);
+    const endMarkers = ['检查人物姓名', '并按下述能力边界编译', '题材未明确的关系不得被故事卡擅自确定'];
+    let end = tail.length;
+    for (const marker of endMarkers) {
+      const index = tail.indexOf(marker);
+      if (index >= 0) end = Math.min(end, index);
+    }
+    const raw = tail.slice(0, end).trim();
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!this.looksLikeShortStoryCard(parsed)) return;
+      const normalized = JSON.stringify(parsed);
+      this.reviewedShortStoryCardByProject.delete(projectId);
+      this.reviewedShortStoryCardByProject.set(projectId, normalized);
+      while (this.reviewedShortStoryCardByProject.size > IdempotentRealLLMService.MAX_REVIEWED_STORY_CARD_CACHE) {
+        const oldest = this.reviewedShortStoryCardByProject.keys().next().value as string | undefined;
+        if (!oldest) break;
+        this.reviewedShortStoryCardByProject.delete(oldest);
+      }
+    } catch {
+      // Audit still runs normally; an unparsable embedded candidate cannot be used as a repair base.
+    }
+  }
+
+  private withReviewedShortStoryCardForRepair(request: LLMRequest, projectId?: string): LLMRequest {
+    if (!projectId) return request;
+    const prompt = String(request.prompt || '');
+    if (!prompt.includes(STORY_CARD_REPAIR_MARKER)) return request;
+    const candidate = this.reviewedShortStoryCardByProject.get(projectId);
+    if (!candidate) return request;
+    return {
+      ...request,
+      prompt: `${prompt}\n【当前候选故事卡（唯一修复底稿）】${candidate}\n${STORY_CARD_REPAIR_FLOOR}`,
+    };
+  }
+
   private isSingleIdeaCardStructuringRequest(request: LLMRequest): boolean {
     return String(request.scenario || '') === 'idea_generate'
       && request.responseFormat === 'json_object'
@@ -250,6 +305,15 @@ export class IdempotentRealLLMService extends RealLLMService {
     const narrativeSignals = [card.hook, card.description, card.coreConflict, card.mainReversal]
       .filter(item => String(item || '').trim().length > 0).length;
     return title.length > 0 && narrativeSignals >= 2;
+  }
+
+  private looksLikeShortStoryCard(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const card = value as Record<string, unknown>;
+    return ['coreConflict', 'protagonistDesire', 'turningPoint', 'reveal', 'ending']
+      .every(field => String(card[field] || '').trim().length > 0)
+      && Array.isArray(card.scenes)
+      && card.scenes.length > 0;
   }
 
   private isTransientNetworkFailure(error: unknown): boolean {
