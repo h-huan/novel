@@ -68,6 +68,13 @@ export function standardScene(scenario?: string | null, stepKey?: string | null)
   return STANDARD_ALIASES[key] || key;
 }
 
+/** Evaluation reports retain their story context but are never themselves chapter prose. */
+export function isEvaluationOutput(scenario?: string | null, stepKey?: string | null): boolean {
+  const scene = standardScene(scenario, stepKey);
+  return ['review', 'summary', 'state_extraction'].includes(scene)
+    || /(?:^|_)(?:review|audit|judge)(?:_|$)/.test(String(stepKey || ''));
+}
+
 /**
  * 场景 → 生效的场景配置（模型、温度、输出上限共用的唯一解析规则）。
  */

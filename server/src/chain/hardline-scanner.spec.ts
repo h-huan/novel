@@ -4,6 +4,53 @@ import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout } from '
 const ids = (text: string, platform = 'fanqie', storyType = 'short_novel') =>
   detectForbiddenTells(text, { platform, storyType }).map(f => f.ruleId);
 
+describe('转场必须有位置与重复证据',()=>{
+  it.each(['星舰记录','宫门账册','公司流水'])('动作速度和句内时间关系不算机械转场：%s',subject=>{
+    const text=[`${subject}核对之后，她把原件交还给值守的人。`,'她滑得很快，但仍认出了被删掉的一行。','她分拣得很快，把不同日期的回执放进两个信封。','“对方当时接得很快，你再看看记录。”'].join('\n\n');
+    expect(ids(text)).not.toContain('44');
+  });
+  it('正常的连续时间推进不因三个转场词自动阻断',()=>{
+    const text=['然后，她从箱底取出第一张收条，检查签字。','之后，门外的人递来钥匙，告诉她仓库已经停电。','接着，他们沿楼梯下去，在车边等到送货员。'].join('\n\n');
+    expect(ids(text)).not.toContain('44');
+  });
+  it('真正重复的转场段保留阻断与精确锚点',()=>{
+    const p='然后，他核对库存，把缺少的条目重新写进那张表格。';
+    const finding=detectForbiddenTells(Array(4).fill(p).join('\n\n')).find(f=>f.ruleId==='44');
+    expect(finding?.paragraphIndices).toEqual([0,1,2,3]);
+    expect(finding?.occurrenceCount).toBe(2);
+    expect(finding?.paragraphs).toEqual(Array(4).fill(p));
+    expect(isLanguageHardline('44')).toBe(true);
+  });
+});
+
+describe('语言重复证据与标点种类分离', () => {
+  it.each(['仓库', '星舰', '宫门'])('不因克制叙述只使用逗号句号阻断：%s', place => {
+    const sentences = [
+      `她把${place}的钥匙交给守在门外的人，先问清来意，再决定要不要把这封信拆开。`,
+      '雨水从鞋底渗进来，她走到桌边才发觉袜子湿透，借了块干布垫在脚下。',
+      '桌上的收条写着昨日的日期，签名却是今天刚到的人留下的，她把两个时间分别记在纸边。',
+      '那人没有催她，只把袖口卷起来，露出一道尚未愈合的伤口，让她看清受伤的位置。',
+      '门外响起车轮声，她循声望过去，见来送货的少年正把箱子往台阶上挪，便放下信帮他扶了一把。',
+      '箱底比她预想的沉，木板边缘磨得光滑，侧面贴着一张被雨水泡开的旧标签，字迹还认得出来。',
+      '少年说货物在途中换过一次车，搬箱的人曾把收条拿走核对，回来时折痕已经不在原处。',
+      '她将这句话写在收条背面，重新查了一遍箱数，才让少年把余下的货搬到檐下避雨。',
+      '守门的人始终站在台阶外，等她抬头看他，他才从衣袋里取出另一把钥匙，放在那封信旁边。',
+      '两把钥匙的齿口并不一样，旧的能开外门，新的对应里面那间小屋，她只试了外门，便把新的收好。',
+    ];
+    const text = sentences.join('\n\n');
+    expect(text.length).toBeGreaterThan(320);
+    expect(/[！？；…—]/.test(text)).toBe(false);
+    expect(ids(text)).not.toContain('35');expect(ids(text)).not.toContain('35b');
+  });
+  it('重复叙述仍阻断，增加分号和省略号不能消除证据', () => {
+    const flat='他沿着楼道核对墙上的刻痕，又把量过的尺寸记在纸上。'.repeat(30);
+    const decorated=flat.replace(/，/g,'；').replace(/。/g,'……。');
+    for(const text of [flat,decorated]) {
+      expect(ids(text)).toContain('35');expect(ids(text)).toContain('35b');
+    }
+  });
+});
+
 describe('硬红线50只判叙述动作残句', () => {
   it('不把真实人物对话中的完整事实句当作碎片动作链', () => {
     const text = '“协议你们签了，房号也分了。”他按住礼簿。\n\n“你进去了，楼就记住你了。”孙婆说。';
@@ -134,7 +181,7 @@ describe('hardline-scanner 规则42 对话圆滑（真对话段判定收紧后�
     expect(ids(text)).not.toContain('42');
   });
 
-  it('命中真客服式一问一答（连续 4+ 段真实对话无人味标志）', () => {
+  it('自然登记问答不能仅因缺少表面人味词而被确定性阻断', () => {
     const text = [
       '"你叫什么名字？"',
       '"周雨。"',
@@ -143,7 +190,19 @@ describe('hardline-scanner 规则42 对话圆滑（真对话段判定收紧后�
       '"家里谁接你？"',
       '"我姨妈。"',
     ].join('\n\n');
-    expect(ids(text)).toContain('42');
+    expect(ids(text)).not.toContain('42');
+  });
+
+  it.each(['星舰', '宫门', '公司'])('拒绝与追问不依赖特定表面词豁免：%s',place=>{
+    const text=[`“${place}的记录能让我看吗。”`,'“权限不在你这里。”','“那你能提供什么。”','“只提供已经确认的部分。”','“代价呢。”','“先交还密钥。”','“交还之后呢。”','“仍要等待确认。”'].join('\n\n');
+    expect(ids(text)).not.toContain('42');
+  });
+
+  it('机械重复问答仍阻断，塞入动作或语气词不能绕过',()=>{
+    for(const marker of ['', '他看了一眼，沉默了一下。']) {
+      const text=Array.from({length:3},()=>`“请问是否需要帮助。”${marker}\n\n“您好，这边已经收到请求。”`).join('\n\n');
+      expect(ids(text)).toContain('42');
+    }
   });
 
   it('有两次追问和明确权责对抗时不误判为客服式对答', () => {
@@ -317,6 +376,11 @@ describe('hardline-scanner 命中段落锚点（硬红线段落级精修的唯�
     expect(finding).toBeTruthy();
     expect(finding!.paragraphIndices).toEqual([0, 1, 2]);
     expect(finding!.paragraphs).toEqual([p1, p1, p1]);
+  });
+
+  it('等长但有不同事实和行动的自然段不被判为机械重复',()=>{
+    const text=['她把钥匙放在桌上，转身去打开窗户。','雨水沿着屋檐落下，远处传来汽车声。','信封里面只有白纸，背面写着收件人。'].join('\n\n');
+    expect(ids(text)).not.toContain('26-uniform');
   });
 
   it('规则 35：position「offset N-M」映射成窗口真正覆盖到的段落', () => {

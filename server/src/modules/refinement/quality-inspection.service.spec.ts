@@ -38,6 +38,15 @@ describe('QualityInspectionService', () => {
   });
 
   describe('deterministic AI fingerprint regression', () => {
+    it('does not penalize natural equal-length paragraphs or punctuation variety alone',()=>{
+      const text=['她把钥匙放在桌上，转身去打开窗户。','雨水沿着屋檐落下，远处传来汽车声。','信封里面只有白纸，背面写着收件人。','船舱里的灯依旧亮着，主角核对每个位置。','他取出纸上的号码，仔细比对新的登记本。','远处的院子开始下雨，门口的信件还没收好。','她把桌上的纸放回去，仍旧站在门边等待。','货架后面留有一个出口，地上的水迹通向窗边。','他在纸上记下这件事，然后关好了门窗。','桌边留下的外套还没有干透，她便挂在栏杆上。'].join('\n\n');
+      const result=service.detectAiFingerprints(text);
+      expect(result.paragraphUniformity.uniformGroups).toBe(0);
+      expect(result.paragraphUniformity.score).toBe(0);
+      expect(result.punctuationDiversity.score).toBe(0);
+      const repeated=service.detectAiFingerprints('他沿着楼道核对墙上的刻痕，又把量过的尺寸记在纸上。\n\n'.repeat(10));
+      expect(repeated.paragraphUniformity.uniformGroups).toBeGreaterThan(0);
+    });
     const lowTemplateSample = `
 凌晨四点十七分，值班室电话响了两声就断。周诚把登记簿合上，先看门，再看墙上的监控钟。走廊尽头那盏灯没亮，昨晚换过的灯泡还在纸箱里。
 

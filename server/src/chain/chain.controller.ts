@@ -1,3 +1,5 @@
+import { presentationReviewIssues, presentationGateIssues, type IdeaPresentationVerdict } from './idea-presentation-review';
+import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
 import { readConstitution, updateConstitution, constitutionSettings, buildExecutionStandard, missingConstitutionStandards, genreFitProblem, categoryPlacementProblem, categoryPlacementMessage, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, audienceChannelHint, platformStandardProblem, buildPlatformStyleDirective, resolveProjectStandardDirective, styleIntensityGuides, type CreativeConstitution } from '../modules/project/creative-constitution';
 import {
   CHAPTER_WORD_RANGE,
@@ -86,8 +88,11 @@ import {
   type OutlineConsistencyRow,
 } from './outline-consistency';
 import { maskForeshadowAnswers } from './foreshadow-mask';
-import { CROSS_STAGE_PATCH_TABLE_MAP, applyCrossStagePatch, isImmutableWorldPatchTarget, selectMinimumImpactCrossStagePatches } from './cross-stage-patch';
-import { buildOutlineFactReviewPrompt, describeOutlineFactReview, missingPriorLedgerEntries, normalizeOutlineFactReview } from './outline-fact-ledger';
+import { canonicalBriefForAudit, storyHierarchyForAudit, applyCrossStageFieldPatch, describeCrossStagePatchValidation, CROSS_STAGE_PATCH_TABLE_MAP, isImmutableWorldPatchTarget, selectMinimumImpactCrossStagePatches } from './cross-stage-patch';
+import { findChapterOutline, readOrderedChapterOutlines } from './chapter-outline-coordinate';
+import { applyChapterLengthInsertions } from './chapter-length-expansion';
+import { chapterNumberFromOrder } from '../../shared/src';
+import { chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineChaptersForFactReview, normalizeOutlineFactReview, type OutlineFactLedgerEntry, type OutlineFactReview } from './outline-fact-ledger';
 import { ideaTimeConflict } from './idea-fact-consistency';
 import {
   CHAPTER_FORESHADOWING_FIELD,
@@ -192,7 +197,7 @@ const normalizeOutlineChapterFunction = (
   const mapped = map[raw];
   if (mapped && mapped !== 'paving') return mapped;
 
-  const chapterNo = order <= 0 ? order + 1 : order;
+  const chapterNo = chapterNumberFromOrder(order);
   if (isShort) {
     const shortRhythm: OutlineChapterFunction[] = [
       'opening',
@@ -314,8 +319,8 @@ export function partitionAlignmentFindings(
     // 这里曾直接信任评审器的 advisories 字段，后果是「白名单外李成」「后天/三天后」
     // 和大纲事件顺序错位首次验收被放行，下一轮才升级为阻断并触发整章重写。
     // 内容事实先于措辞建议分类；两组词必须同时出现，避免把纯重复用语当事实矛盾。
-    const materialFact = /(后天|三天后|明天|昨天|时间|倒计时|时序|先后|顺序|次序|名单|户数|数量|格数|姓名|白名单|人物|角色|台账|大纲|设定|刻痕)/.test(finding)
-      && /(不一致|矛盾|冲突|错位|不在|晚于|未兑现|缺失|缺过渡|口径|出入|偏离|越界)/.test(finding);
+    const materialFact = /(后天|三天后|明天|昨天|时间|倒计时|时序|先后|顺序|次序|名单|户数|数量|格数|姓名|白名单|人物|角色|台账|大纲|设定|刻痕|空间|位置|地点)/.test(finding)
+      && /(不一致|矛盾|冲突|错位|不在|晚于|未兑现|缺失|偏离|越界|不能同时|不可能同时|互斥)/.test(finding);
     if (materialFact) {
       result.blocking.push(finding);
       continue;
@@ -428,19 +433,6 @@ export const resolveCreationChapterPlan = (
       ? confirmed
       : Math.min(maxChapters, Math.max(minChapters, averageRecommendation)),
   };
-};
-
-export const buildChapterContinuityLedgerEntry = (chapter: Record<string, any>, chapterNo: number): string => {
-  const compact = (value: unknown, max = 900): string => serializeGeneratedSqlText(value).replace(/\s+/g, ' ').trim().slice(0, max);
-  return JSON.stringify({
-    chapter: chapterNo,
-    eventChain: compact(chapter.content || chapter.coreContent || chapter.summary || chapter.plot, 1200),
-    actions: chapter.characterActions || [],
-    characterStates: chapter.characterStates || chapter.stateChanges || [],
-    foreshadowing: chapter.foreshadowing || [],
-    foreshadowingRecovered: chapter.foreshadowingRecover || [],
-    hook: compact(chapter.hook || chapter.nextChapterHook || chapter.outcome || chapter.result, 500),
-  });
 };
 
 export const collectOutlineForeshadowings = (rows: Array<{ order: number; scenes?: unknown }>): any[] => {
@@ -594,7 +586,7 @@ export const extractIdeaList = (content: string): any[] | null => {
 };
 
 const inferOutlineGoalArc = (order = 0, isShort = true): string => {
-  const chapterNo = order <= 0 ? order + 1 : order;
+  const chapterNo = chapterNumberFromOrder(order);
   const shortArc = [
     'mist_truth',
     'probe_showdown',
@@ -780,9 +772,7 @@ export class ChainController {
   }
 
   private generatedNarrativeWordCount(content: string): number {
-    const chinese = (content.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-    const english = content.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ').split(/\s+/).filter(token => /[a-zA-Z]/.test(token)).length;
-    return chinese + english;
+    return GenerationMetricsService.countWords(content);
   }
 
   private assertGeneratedChapterLength(content: string, targetWords: number, wordRange?: { min: number; max: number }): number {
@@ -797,23 +787,7 @@ export class ChainController {
     return actual;
   }
 
-  /**
-   * 生成正文并把字数强制收敛到 CHAPTER_WORD_RANGE 字区间。
-   *
-   * 两个历史坑导致“字数不足下限”假性失败：
-   * 1) 之前复用场景默认 maxTokens(4096)，而 CHAPTER_WORD_RANGE 中文字约需 4000-5200 token，
-   *    模型被 API 在 ~4096 token 处硬截断，正好落在 3000 字上下，难以稳定跨过下限；
-   * 2) “不足下限”的旧重试是让模型“整章重写得更长”，但模型常给出相似篇幅而原地踏步，
-   *    几次重试后仍 < 3000，最终抛 422 丢整章。
-   *
-   * 现在的做法：
-   * - 显式传入充足 maxTokens，确保模型有空间写到目标区间、不被 token 上限掐断；
-   * - “不足下限”改为“续写追加”：把上一版完整正文作基底，要求模型只输出新增续写片段并
-   *   追加到尾部，字数因此单调递增、必定逼近并跨过 3000（不再依赖模型一次写够）；
-   * - “超出上限”直接走确定性句末截断兜底（trimToSentenceBoundary，不伪造内容），
-   *   截断后必落在 CHAPTER_WORD_RANGE，省去无谓的压缩重试。
-   * 全部调用均为真实 LLM，绝不伪造内容；只有重试耗尽仍 < 3000 才抛 422。
-   */
+  /** Generate within the configured range; fill shortfalls inside existing scenes without moving the chapter exit. */
   private async generateBodyWithLengthGuard(params: {
     basePrompt: string;
     targetWords: number;
@@ -826,7 +800,7 @@ export class ChainController {
   }): Promise<string> {
     const { basePrompt, targetWords, scenario, temperature = 0.7 } = params;
     const range = params.wordRange || { ...CHAPTER_WORD_RANGE };
-    // 首版一次到位自校准：用历史"目标→首版实际"产出比，前置铺够篇幅，把"少字→补字 3-4 轮"压到 1-2 轮。
+    // 历史产出比只用于观测及章内缺口估计，不改变章纲目标。
     const metricsProjectId = params.metricsContext?.projectId;
     const lengthCalib = metricsProjectId ? this.generationMetrics.getLengthCalibration(metricsProjectId) : null;
     const yieldRatio = lengthCalib && lengthCalib.ratio < 1 ? Math.max(0.6, lengthCalib.ratio) : 1;
@@ -860,15 +834,13 @@ export class ChainController {
         const direction = lastActual < range.min ? '不足下限' : '超出上限';
         params.onProgress?.({
           label: '字数微调',
-          message: `字数微调：上一版 ${lastActual} 字${direction}，按实际缺口一次续写追加（不添无关支线、不重写已有正文）…`,
+          message: `字数微调：上一版 ${lastActual} 字${direction}，按实际缺口在章内补足既定场景，保留原收尾…`,
           progress: stepProgress,
         });
       }
-      // 首轮正常大纲生成；重试一律走“续写追加”（见 buildExpansionContinuationPrompt）。
-      // 首版按历史产出比前置铺够篇幅（自校准），从源头减少"少字→补字"轮次。
-      const firstPrompt = !isRetry && lengthCalib && lengthCalib.ratio < 0.95
-        ? basePrompt + this.buildLengthCalibrationDirective(targetWords, range, lengthCalib.ratio)
-        : basePrompt;
+      // 首轮正常大纲生成；重试只走章内锚定插入（见 buildChapterLengthInsertionPrompt）。
+      // 每次首稿都显式提供篇幅验收参数；不以历史样本数量决定是否注入。
+      const firstPrompt = basePrompt + this.buildFirstPassLengthParameters(targetWords, range, lengthCalib);
       const genPhase = params.metricsContext?.phase;
       const isRepairPhase = genPhase === 'repair';
       const isBenchmarkPhase = genPhase === 'benchmark_refine';
@@ -876,7 +848,7 @@ export class ChainController {
         : isBenchmarkPhase ? 'body_benchmark_refine'
         : (isRetry ? 'body_length_retry' : 'body_first');
       const prompt = isRetry
-        ? this.buildExpansionContinuationPrompt(basePrompt, lastContent, lastActual, targetWords, attempt, range, yieldRatio)
+        ? this.buildChapterLengthInsertionPrompt(basePrompt, lastContent, lastActual, targetWords, attempt, range, yieldRatio)
         : firstPrompt;
       // 续写保持同一创作温度；变化来自明确的剩余字数和上下文，不能靠升温碰运气。
       const useTemp = temperature;
@@ -884,6 +856,7 @@ export class ChainController {
       try {
         response = await this.realLLM.generate({
           prompt, scenario, temperature: useTemp, maxTokens, deferQualityGate: true,
+          responseFormat: isRetry ? 'json_object' : undefined,
           metrics: {
             projectId: metricsProjectId,
             chapterIndex: params.metricsContext?.chapterIndex,
@@ -897,24 +870,19 @@ export class ChainController {
         const message = error instanceof Error ? error.message : String(error);
         throw new HttpException(`章节生成调用失败，正文未保存：${message}`, 502);
       }
-      const raw = this.generatedNarrativeText(response);
+      let raw: string;
+      try {
+        raw = isRetry ? applyChapterLengthInsertions(lastContent, JSON.parse(response.content)) : this.generatedNarrativeText(response);
+      } catch (error) {
+        throw new HttpException(`篇幅章内补足失败，未追加或改写原收尾：${error instanceof Error ? error.message : String(error)}`, 422);
+      }
       if (!raw) {
         throw new HttpException('正文生成未返回可验收内容，正文未保存', 502);
       }
-      // 重试时模型可能返回“完整新版正文”（以已写正文开头），也可能只返回“续写片段”。
-      // 以是否复用已有正文开头来判定：复用则视为整章重写直接采用；否则作为续写片段追加到尾部。
-      // 重试返回可能是「整章重写」或「纯续写片段」。不能只靠前 80 字全等判定——模型整章重写时常对
-      // 开头做局部改写（用词高度重合但不完全一致），全等会把整章重写误判成续写，进而把两遍完整稿拼成
-      // 双开头（同一晚事件发生两遍、时间线矛盾，曾把章节质量直接打到 34）。改用归一化 bigram 相似度
-      // + 分散锚点稳健识别「同一开头的完整重写」：判定为完整重写就直接采用 raw，绝不与旧稿拼接。
-      // 落库前做确定性「仅排版层」规整：折叠连续空行（规则 33）、合并连续叙述碎片段
-      // （规则 26 / 26b-staccato）。这两类已在阻断清单内：确定性层先收口，残留碎片会进 contradictions 触发段落级精修，
-      // 必须在确定性层收口。规则只重排换行、不增删字符，因此不影响字数统计与续写拼接语义。
+      // 排版规整只改变换行；章内插入已经保留原稿和收尾。
       const layoutProfile = this.resolveHardlineProfile(metricsProjectId);
       const content = normalizeProseLayout(
-        isRetry
-          ? (this.retryResponseIsFullRewrite(raw, lastContent) ? raw : lastContent + raw)
-          : raw,
+        raw,
         layoutProfile,
       );
       const actual = this.generatedNarrativeWordCount(content);
@@ -928,21 +896,10 @@ export class ChainController {
         });
         return content;
       }
-      // 关键修复②：超出上限走确定性句末截断兜底（仅裁剪模型多余铺陈，不伪造任何内容）。
-      // 正文必有句末标点，截断后必落在合法区间，直接采用，避免无谓的压缩重试。
       if (lastActual > range.max) {
-        const trimmed = this.trimToSentenceBoundary(content, range.max, range.min);
-        const trimmedCount = this.generatedNarrativeWordCount(trimmed);
-        if (trimmedCount >= range.min) {
-          params.onProgress?.({
-            label: '字数验收通过',
-            message: `正文经句末收敛至 ${trimmedCount} 字（落在 ${range.min}-${range.max} 区间内），进入大纲一致性质检…`,
-            progress: 90,
-          });
-          return trimmed;
-        }
+        throw new HttpException(`正文${lastActual}字超出本章上限${range.max}；停止保存，禁止截掉收尾和必需事件凑篇幅`,422);
       }
-      // 不足下限时不按固定次数继续。首稿后可做一次按实际缺口的续写；
+      // 不足下限时不按固定次数继续。首稿后可做一次按实际缺口的章内插入；
       // 后续只有在字数确实向下限显著推进时才获得下一次调用资格。
       const continuation = decideLengthContinuation(previousActual, lastActual, range.min);
       if (!continuation.continue) {
@@ -956,79 +913,8 @@ export class ChainController {
     }
   }
 
-  /**
-   * 字数重试时，判断模型本次返回的是「整章重写的完整稿」还是「只新增的续写片段」。
-   * 旧实现只比较前 80 字是否完全相同，模型只要对开头做局部改写就会被误判成续写，
-   * 导致「旧完整稿 + 新完整稿」双稿叠印（同一事件发生两遍、时间线矛盾，曾把章节打到 34 分）。
-   * 改为确定性文本相似度判定，不调用模型：
-   *   1) 前 80 字精确相同 → 必然是完整重写（保留原快速路径）；
-   *   2) 归一化去标点空白后，两段开篇（前 300 字）bigram Dice ≥ 0.5 → 同一开头的重写；
-   *   3) 旧稿在 开头/1/3/2/3 三处的短锚点在新稿命中 ≥2 → 新稿复述了旧稿主体，判为重写。
-   * 真正的续写片段从旧稿结尾往后写，与旧稿「开头」几乎不重合，三条都不会误命中。
-   */
-  private retryResponseIsFullRewrite(raw: string, prev: string): boolean {
-    if (!prev) return false;
-    if (raw.startsWith(prev.slice(0, 80))) return true;
-    const norm = (s: string) => String(s).replace(/[\s\p{P}]/gu, '');
-    const a = norm(prev);
-    const b = norm(raw);
-    if (a.length < 40 || b.length < 40) return false;
-    if (this.bigramDice(a.slice(0, 300), b.slice(0, 300)) >= 0.5) return true;
-    const anchors = [0, 0.33, 0.66]
-      .map((t) => a.slice(Math.floor(a.length * t), Math.floor(a.length * t) + 24))
-      .filter((x) => x.length >= 16);
-    if (anchors.filter((anc) => b.includes(anc)).length >= 2) return true;
-    // 兜底：新稿正文里直接出现旧稿「开头」一段、且新稿体量达旧稿一半以上 → 它是从头重写的完整稿
-    // （真续写从旧稿结尾往后写，绝不可能包含旧稿开头），必须采用新稿、禁止拼接成双开头。
-    const headAnchor = a.slice(0, 40);
-    if (headAnchor.length >= 24 && b.includes(headAnchor) && b.length >= a.length * 0.5) return true;
-    return false;
-  }
-
-  /** 字符二元组 Dice 系数（0~1），衡量两段文本词面重合度，纯确定性、零模型调用。 */
-  private bigramDice(a: string, b: string): number {
-    const gramSet = (s: string) => {
-      const set = new Set<string>();
-      for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
-      return set;
-    };
-    const A = gramSet(a);
-    const B = gramSet(b);
-    if (A.size === 0 || B.size === 0) return 0;
-    let inter = 0;
-    for (const g of A) if (B.has(g)) inter++;
-    return (2 * inter) / (A.size + B.size);
-  }
-
-  /**
-   * 把超出上限的正文在“句末标点”处确定性截断到 maxCount（与 generatedNarrativeWordCount
-   * 同一计量）以内，避免要求模型反复自我压缩仍失败导致整章丢失。只裁剪模型自身多余
-   * 铺陈，不新增、不改写任何内容（无假数据）。从尾部向前找第一个既 ≤ maxCount 又 ≥
-   * minCount 的句末边界，尽量贴近上限、少切真实内容。
-   */
-  private trimToSentenceBoundary(content: string, maxCount: number, minCount: number = CHAPTER_WORD_RANGE.min): string {
-    if (this.generatedNarrativeWordCount(content) <= maxCount) return content;
-    const endings = /[。！？!?…~）”」』]/;
-    let fallback = '';
-    for (let i = content.length - 1; i >= 0; i--) {
-      if (!endings.test(content[i])) continue;
-      const slice = content.slice(0, i + 1);
-      const count = this.generatedNarrativeWordCount(slice);
-      if (count <= maxCount) {
-        if (count >= minCount) return slice; // 命中理想区间，直接采用
-        fallback = slice; // 暂存“不超过上限”的最长切片，若找不到理想区间再用
-      }
-    }
-    return fallback || content.slice(0, maxCount);
-  }
-
-  /**
-   * 构建“续写追加”扩充 prompt：把上一版完整正文作基底，要求模型严格从其结尾继续，
-   * 只输出【新增续写片段】（不重复、不重写已有正文），从而让总字数单调递增地逼近下限。
-   * 这是修复“字数不足下限”的关键——比“整章重写得更长”可靠得多，因为后者模型常给出
-   * 相似篇幅而原地踏步。所有追加内容必须贴合本章任务，不得引入无关支线（避免破坏大纲一致性）。
-   */
-  private buildExpansionContinuationPrompt(
+  /** Build a bounded insertion request; the executor preserves original prose and its exit. */
+  private buildChapterLengthInsertionPrompt(
     basePrompt: string,
     prevContent: string,
     prevActual: number,
@@ -1041,35 +927,28 @@ export class ChainController {
     const deficit = Math.max(range.min - prevActual, targetWords - prevActual);
     // 模型单次续写实际产出约为"要求量"的 yieldRatio，按 1/yieldRatio 放大一次性要足，避免挤牙膏式 3-4 轮。
     const safeYield = Math.max(0.6, yieldRatio);
-    const askWords = Math.max(deficit, Math.ceil(deficit / safeYield));
+    const askWords = Math.min(range.max - prevActual, Math.max(deficit, Math.ceil(deficit / safeYield)));
     const yieldHint = yieldRatio < 0.95
       ? `（据历史统计，你单次续写实际产出约为要求量的 ${(yieldRatio * 100).toFixed(0)}%，本次请直接写够 ≥ ${askWords} 字新增内容，一次性补足、不要分多次挤牙膏）`
       : '';
     const directive =
       `你正在扩写同一章小说。已写正文经系统逐字统计为 ${prevActual} 字，但本章正文必须达到 ≥ ${range.min} 且 ≤ ${range.max} 中文字（目标约 ${targetWords} 字），目前还差约 ${deficit} 字。\n` +
-      `请严格以【已写正文】的结尾为起点继续往后写，只输出【新增的续写内容】，规则（不可违反）：\n` +
-      `1) 绝不重复、绝不重写【已写正文】，不要加“（续写）”之类标记；直接在结尾后接续；\n` +
-      `2) 只补充符合本章任务的情节细节（对话、动作、感官刻画、心理活动、场景氛围），不得引入与本章大纲无关的支线或新核心事件；\n` +
-      `3) 续写后整体（已写 + 本次）应达到 ≥ ${range.min} 且 ≤ ${range.max} 中文字，并在合适处自然收尾；\n` +
-      `4) 保持人物、视角、语气、时代背景与【已写正文】完全一致；\n` +
-      `5) 你的回复只算新增续写部分的字数，必须 ≥ ${askWords} 且使整体不超 ${range.max}。${yieldHint}`;
-    return `${basePrompt}\n\n## 字数扩充（自动重试·第${attempt}次·续写追加）\n${directive}\n\n## 已写正文（请从其结尾继续，不要重复它）\n${prevContent}`;
+      `按生效执行标准在本章既定场景内部补足篇幅。新增正文约${askWords}字，整体不得超${range.max}字。${yieldHint}\n` +
+      `只输出JSON:{"insertions":[{"before":"已写正文中唯一出现的完整段落原文","text":"插在该段之前的新增场景细节"}]}。before必须从段落开头取原文，不能使用省略号或虚构锚点；不要输出完整新版正文。`;
+    return `${basePrompt}\n\n## 字数扩充（自动重试·第${attempt}次·章内插入）\n${directive}\n\n## 已写正文（原文与收尾由系统保留）\n${prevContent}`;
   }
 
-  /**
-   * 首版篇幅自校准指令：历史首版平均只写到目标的 ratio（<1），则在首版 prompt 前置要求按
-   * target/ratio 铺排，把"结尾仓促、偏短"消灭在第一版，而非靠后续多轮补字。封顶不超章节上限。
-   */
-  private buildLengthCalibrationDirective(
+  /** Always expose the actual counting contract, including on a new project's first call. */
+  private buildFirstPassLengthParameters(
     targetWords: number,
     range: { min: number; max: number },
-    ratio: number,
+    calibration: { samples: number; ratio: number } | null,
   ): string {
-    const safeRatio = Math.max(0.62, ratio);
-    const padded = Math.min(range.max, Math.round(targetWords / safeRatio));
-    return `\n\n## 篇幅一次到位要求（依据本模型历史首版产出自动校准）\n` +
-      `统计显示：你在本项目的正文首版平均只写到目标篇幅的约 ${(ratio * 100).toFixed(0)}%，常因结尾仓促而偏短、触发多轮补写。\n` +
-      `本次请直接按约 ${padded} 字铺排（最终仍须落在 ${range.min}-${range.max} 字区间）：开场即进入冲突，按场景节拍均匀分配篇幅，每个关键场景写足对话+动作+感官+心理，不要把多个场景压成概述，确保第一版就写到目标区间、无需后续补字。`;
+    return '\n\n【本次首稿篇幅验收参数】\n' + JSON.stringify({
+      targetWords, minWords: range.min, maxWords: range.max,
+      countingBasis: '汉字数＋英文词数；标点、空白、纯数字不计入',
+      historicalFirstPass: calibration ? { samples: calibration.samples, actualToTargetRatio: calibration.ratio } : null,
+    });
   }
 
   /**
@@ -1133,13 +1012,11 @@ export class ChainController {
 
 正文验收补充：世界观不可作为自动修复目标；已接受历史与未来计划冲突且未触碰世界观/确认故事核心时，保留历史并修未来计划；其它资料源冲突按修改范围最小、下游依赖最少的原则选择局部修复点。
 
-必须严格按顺序执行：\n第一步：从【详细大纲】提取“本章必需事件点清单”——每个事件点是大纲明确要求正文实际发生的一个具体事件/场景/人物行动/钩子，按大纲出现顺序排列，至少包含结尾钩子，合并同一场景的重复描述，最多12项。\n第二步：逐项判定正文是否真实发生该事件，给出 covered 与正文逐字证据。\n第三步：仅检查有逐字证据的故事事实冲突、人物越界、时间线冲突和结尾钩子；若提供了【后续章节边界】，必须额外检查两类跨章问题并写入 contradictions：(a) 跨章提前消费——正文把后续章节大纲明确计划的核心事件、伏笔回收或反转提前兑现/提前揭开；(b) 跨章断言冲突——正文写死“只有…才知道…”“世上只有…”“唯一…就是…”等强断言，而该断言与后续章节既定事实冲突（如后续大纲显示该信息另有来源）。两类问题均视为阻断性矛盾。\n第四步：只有重复措辞、相似身体动作、轻微收纳跳步、段落节奏与地点用词偏差写入 advisories。人物白名单外新角色、时间/倒计时/名单数量冲突、大纲必需事件顺序错位即使措辞为「建议统一」也必须写入 contradictions 并阻断，不得放入 advisories。
-第五步：AI 痕迹检查——只补判确定性扫描覆盖不到的两项，命中且有逐字证据才写入 contradictions（视为阻断性矛盾）：(a) 升华式段尾：段落末尾突然“上价值”/总结点题（如“那一刻她终于明白”“一切都会过去的”）；(c) 空洞反思段：连续多段内心独白只有情绪、没有事件推进。正常的一两处修辞不判。以下各项已由确定性硬红线扫描唯一覆盖（formula-sentence 公式句／dash-density 破折号过密／simile-density 比喻过密／48 套路化表达／55 AI 高频模糊词过密／34 排比与动词堆砌／53-same-structure-parallel 同构排比，见 LANGUAGE_HARDLINE_RULE_IDS），仍按阻断性矛盾处理，但判据只有一份：此处不得再判定、不得再产出同类条目，以免同一处 AI 痕迹被重复计数。\n第六步：执行标准检查——平台/分类/基调/文风/流派/视角六维都是创建时确认的执行前提，任一处偏差都写入 contradictions（阻断性矛盾），由修复闭环改写后重新验收，不得因为「只是文风/只是措辞」降级成 advisories。逐维判据：(a)「视角」——正文叙事视角必须与执行标准一致（标准为「多视角轮换」时按段落级标记判定）；(b)「分类」——本章的事件类型、场景与冲突必须落在执行标准「分类」所指的平台投稿分类范围内；(c)「基调」——全篇情绪走向与标准一致，情绪转折有铺垫与代价，未中途改调性；(d)「文风」——句式、比喻密度、描写分寸与信息给法与标准一致；(e)「流派」——该流派读者的核心预期在本章被兑现。判定必须有逐字证据，且偏差须成规模（同一维≥2 处或贯穿全章）才判，单处用词偏好不判。平台层量化基准（段落厚度、对话占比、章尾钩等）由确定性硬红线扫描器负责，此处不重复判定。\n\n严格规则：\n- 正文必须执行本章大纲，不得用同主题的另一件事替代。\n- 任一必需事件 covered=false 或存在有证据的故事事实冲突才不通过。\n- sourceConflicts 是资料源之间的矛盾：世界观永不改；优先修最小影响面的未来计划、派生资料或未接受草稿；没有安全局部修复点时阻断并人工裁决，禁止正文同时满足两套矛盾说法。\n- 不以关键词出现作为通过依据；证据必须逐字来自正文，找不到就写“无明确证据”，不得猜。\n- 输出必须紧凑：event不超过60字，evidence不超过80字，contradictions最多6项，advisories最多6项，总JSON不超过6000个汉字。\n\n只输出JSON对象：{"pass":true|false,"requiredEvents":[{"event":"必需事件点","covered":true|false,"evidence":"正文逐字证据或无明确证据"}],"missingRequiredItems":["所有covered=false的事件点"],"contradictions":["仅有证据的故事事实/人物/时间线/跨章冲突"],"advisories":["非阻断的局部措辞/重复问题（执行标准六维偏差不得放这里）"],"sourceConflicts":["资料源之间互相冲突的说法"],"outlineAligned":true|false,"continuityPassed":true|false,"characterPassed":true|false,"worldPassed":true|false,"timelinePassed":true|false,"prosePassed":true|false,"evidence":["最多4条总体逐字证据"]}\n\npass 必须为 true 当且仅当：全部 requiredEvents.covered===true 且 contradictions 为空。advisories 不改变 pass；sourceConflicts 必须清零才可通过。`;
-    const qualityOutputContract = '';
+按已注入的质量评审执行标准完成章节事件、事实、执行维度与语言验收。\n\n只输出JSON对象：{"pass":true|false,"requiredEvents":[{"event":"必需事件点","covered":true|false,"evidence":"正文逐字证据或无明确证据"}],"missingRequiredItems":["所有covered=false的事件点"],"contradictions":["有逐字证据的故事事实/人物/时间线/跨章冲突或语言阻断问题"],"advisories":["非阻断的局部措辞/重复问题（执行标准六维偏差不得放这里）"],"sourceConflicts":["资料源之间互相冲突的说法"],"outlineAligned":true|false,"continuityPassed":true|false,"characterPassed":true|false,"worldPassed":true|false,"timelinePassed":true|false,"prosePassed":true|false,"evidence":["最多4条总体逐字证据"]}\n\npass 必须为 true 当且仅当：全部 requiredEvents.covered===true、prosePassed===true 且 contradictions 为空。advisories 不改变 pass；sourceConflicts 必须清零才可通过。`;
     let response: { content: string };
     try {
       response = await this.realLLM.generate({
-        prompt: `${reviewPrompt}${qualityOutputContract}`,
+        prompt: reviewPrompt,
         scenario: 'review',
         temperature: 0.1,
         // 真实日志显示 8192→16384 仍可能连续截断。第一次直接使用评审完整预算，
@@ -1176,6 +1053,12 @@ export class ChainController {
       sourceConflicts?: unknown;
       evidence?: unknown;
     }>(response.content, null as any);
+    if (typeof verdict?.prosePassed !== 'boolean') {
+      return fail(['正文语言验收缺少prosePassed明确结论，评审未完成，不得以大纲通过代替语言通过']);
+    }
+    if (verdict.prosePassed === false && (!Array.isArray(verdict.contradictions) || verdict.contradictions.length === 0)) {
+      return fail(['正文语言验收未通过但缺少阻断问题证据，评审不完整，不得盲目润色正文']);
+    }
     const requiredEvents = Array.isArray(verdict?.requiredEvents) ? verdict.requiredEvents : [];
     const uncoveredEvents = requiredEvents
       .filter((e: any) => e && e.covered !== true)
@@ -1211,7 +1094,7 @@ export class ChainController {
     // 客服式对话、机械转场、刻意感官/拟人/套路化表达、密集生理反应、AI 高频模糊词等）
     // 与事实类一样按阻断性矛盾处理（带【硬红线·确定性扫描·】前缀，触发精修精确改写）；
     // 文笔/排版类（短段堆叠 26-short-para、等长段 26-uniform、逐句换行 26b-staccato、姓名独占一行 32、
-    // 多空行 33、标点单一 35、叙述标点平板 35b）已全部收进同一份阻断清单 LANGUAGE_HARDLINE_RULE_IDS，
+    // 多空行 33、重复叙述窗口 35/35b）已全部收进同一份阻断清单 LANGUAGE_HARDLINE_RULE_IDS，
     // 与语言硬伤一样进 contradictions、阻断保存，不存在「只提示不阻断」。仍进 advisories 的只剩内容/节奏
     // 度量类（40 开篇钩子 / 40b 番茄前300字冲突 / 41 情绪死区 / 43 不完美细节 / 45 数字锚点 / 28a
     // 冗余过滤词 / 38 代词过载 / 对话占比 dialogue-ratio / time-density 时间词过密），由平台度量与提示词硬性要求承担。
@@ -1252,6 +1135,7 @@ export class ChainController {
     const evaluationStatus = verdictEvaluated ? 'evaluated' : 'not_evaluated';
     const pass = evaluationStatus === 'evaluated'
       && verdict?.outlineAligned === true
+      && verdict?.prosePassed === true
       && missing.length === 0 && contradictions.length === 0 && sourceConflicts.length === 0;
     return {
       evaluationStatus,
@@ -1266,7 +1150,7 @@ export class ChainController {
       characterPassed: pass || verdict?.characterPassed === true,
       worldPassed: pass || verdict?.worldPassed === true,
       timelinePassed: pass || verdict?.timelinePassed === true,
-      prosePassed: verdict?.prosePassed === true && languageFindings.length === 0,
+      prosePassed: verdict?.prosePassed === true && !languageFindings.some(f => isLanguageHardline(f.ruleId)),
       hardlineFindings: [...languageFindings.filter(f => isLanguageHardline(f.ruleId)), ...factFindings],
     };
   }
@@ -1386,49 +1270,6 @@ export class ChainController {
       return null;
     }
   }
-
-  /**
-   * 构建“大纲对齐自修复”prompt：把验收器判定的缺失/冲突要点逐条列出，并要求整章重写时
-   * 强制以【本章结尾钩子】收尾、不得提前终止于大纲中间事件。仍是真实 LLM 重写，无假数据。
-   * 仅作原 basePrompt 的追加指令段，大纲与上下文保持不变（见上文）。
-   */
-  private buildAlignmentRepairPrompt(
-    basePrompt: string,
-    missing: string[],
-    contradictions: string[],
-    chapterIndex: number,
-    targetWords: number,
-    previousContent: string,
-    attemptLabel: string,
-  ): string {
-    const missingList = missing.map((m, i) => `  ${i + 1}) ${m}`).join('\n');
-    // 截断上一版正文喂给模型（避免 prompt 过长），让它"看到"已写好的部分以便保留，
-    // 而不是整章推倒重来导致文本同质化/风格断裂。
-    const prev = (previousContent || '').slice(0, 6000);
-
-    // 本函数仅修大纲事件与事实冲突。确定性硬红线按扫描器证据交给局部补丁，复检后再判。
-    const contradictionList = contradictions.map((c, i) => `  ${i + 1}) ${c}`).join('\n');
-    const contradictionBlock = contradictionList
-      ? `\n\n## LLM 验收矛盾（需要重写思路，不只是删字）\n${contradictionList}\n\n每条矛盾都必须在【上一版正文】中定位到具体句子并直接改写该句：数字/事实类矛盾（数量自相矛盾、时间线冲突、事实冲突）必须把冲突句改写成与开篇及世界观档案一致的数字/事实，矛盾双方只保留正确的一方；跨章提前消费类矛盾必须删除或降级为模糊线索；改完对照矛盾列表逐条确认已消除，不得原样保留任何一条。\n`
-      : '';
-
-    const directive =
-      `\n\n## 大纲对齐迭代精修（${attemptLabel} · 基于上一版进化，不是推倒重来）\n` +
-      `上一版第${chapterIndex}章正文未通过大纲一致性验收，缺失/冲突如下，本次必须全部兑现：\n${missingList}\n${contradictionBlock}\n` +
-      `【上一版正文（保留已正确发生的场景，只补回缺失事件并修正事实冲突）】\n${prev}\n\n` +
-      `迭代精修规则（不可违反）：\n` +
-      `1) 这是一次【针对性精修】而非随意改写：上一版中已正确发生的场景与正文必须尽量保留其位置与内容，只补回缺失的必需事件点并修正事实冲突；\n` +
-      `2) 缺失要点 ${missingList} 必须全部兑现，不得省略、不得替换、不得调换其在大纲中的顺序；\n` +
-      `3) 正文的【最后一个场景】必须是【本章结尾钩子】所描述的内容，必须将正文落在该钩子场景上收尾；严禁提前终止于大纲中间事件（如用餐、通勤、过渡等场景）；\n` +
-      `4) 仍须满足 ${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max} 字（目标约 ${targetWords} 字）、散文质感、视角一致、不违反世界观/角色/时间线等全部原有要求；\n` +
-      `5) 本轮不以标点或文风润色代替缺失事件；重写后仍要经过全文硬红线扫描，任何残留都会阻断保存；\n` +
-      `6) 直接输出完整可发布的正文（含保留的原有场景 + 补回的新场景），不要任何解释、前缀、JSON 或方法论标签。`;
-    return `${basePrompt}${directive}`;
-  }
-
-  // 这里曾有第二份硬红线修法说明书，后果是与扫描器命中结论冲突、混合失败时
-  // 把语言问题塞进大纲重写，标点建议甚至与破折号密度相互打架。现只以扫描器 finding
-  // 为语言判据；大纲修复只处理事件与事实，局部精修只处理命中段落。
 
   /**
    * 执行前提读取失败必须显式失败，绝不静默降级。
@@ -1700,70 +1541,20 @@ ${localPatchContract('hardline_local_replacement')}
       this.logger.warn(`章节 ${chapterIndex} ${sourceCountdownConflict}`);
       throw new HttpException(sourceCountdownConflict, 422);
     }
-    // 首稿 prompt 的平台数字口径唯一源：与确定性扫描器、buildOutlineAdherenceContract、
+    // 首稿 prompt 的平台数字口径唯一源：与确定性扫描器、
     // buildHardlineRulePlaybook 共用 resolvePlatformStrategy(projectId) 的平台基准表。
     // 此前这里写死「前 300 字」「35%–65%」「4000 字约 1400–2600 字」「最长连续叙述约 800 字」，
     // 与平台表（openingHookChars 200–800、dialogueRatio 20%–65%、payoffGapChars 300–1500）
     // 在同一份 prompt 内形成两套数字，模型只能随机二选一，作者看到的却是「我选了知乎却按番茄写」。
-    const __fp = this.resolvePlatformStrategy(projectId);
-    const __fpPlatform = String(__fp.strategy.id || '');
-    const openingHookChars = __fp.target.openingHookChars;
-    const dialogueRangeText = `${Math.round(__fp.target.dialogueRatio[0] * 100)}%–${Math.round(__fp.target.dialogueRatio[1] * 100)}%`;
-    const dialogueFloorText = `${Math.round(__fp.target.dialogueRatio[0] * 100)}%`;
-    const dialogueWordsText = `${Math.round(targetWords * __fp.target.dialogueRatio[0])}–${Math.round(targetWords * __fp.target.dialogueRatio[1])}`;
-    const payoffGapText = `${__fp.target.payoffGapChars[0]}–${__fp.target.payoffGapChars[1]}`;
-    const payoffGapMaxChars = __fp.target.payoffGapChars[1];
-    const fanqieHotReference = __fpPlatform === 'fanqie';
-    // 跨章节学习：把之前章节归纳出的避坑经验注入本章首版与精修 prompt，使本章主动规避历史错误。
+    const { target: platformTarget } = this.resolvePlatformStrategy(projectId);
     const historicalLessons = this.getActiveLessons(projectId);
-    // 这里曾只有泛化“数字自洽”提示，后果是模型为写出章尾画面自行
-    // 增加第三次完整进出，使一次扣一户的规则在首稿即失真。
-    const chapterCountGuard = `\n\n## 本章可计数事件合同（只在内部核算）\n按详细大纲逐次列出本章明确发生的进出、扣名及章末名单状态：触发一次只能产生一次代价。不得为写成章尾画面补造大纲未列的触发；原本空着的末格不得计作本章新扣一户。门内回拨与门外经过时间分别核算，不能以“门外时间没变”代替“门内回拨一小时”。每个人名、户数、日期只用大纲和已确认状态的同一口径。`;
-    const enrichedBase = (historicalLessons
-      ? `${basePrompt}\n\n${historicalLessons}`
-      : basePrompt) + chapterCountGuard;
-    const firstPassPrompt = `${enrichedBase}\n\n## 首稿前一次性核对（只在内部执行，不输出计划）\n动笔前先逐项核对本章大纲的全部事件、结尾钩子、已确稿状态、人物声音与行为边界、平台节奏和目标字数；先解决彼此冲突，再一次写成完整正文。不得留到第二轮再补人物、场景、对话或平台要求。\n\n### 开篇钩子（平台硬性要求，必须在开篇钩子窗口内出现）\n前 ${openingHookChars} 字内必须让读者看到一个反常/疑点/冲突/悬念，禁止先铺环境再进事件：开篇直接落到异常事实上（如一个对不上的数字、一句不对劲的称呼、一件不该出现在这里的东西），或用一个带冲突的对话/动作开场；环境细节最多 1-2 句带过，不得连续 3 句以上纯白描铺垫。写完自查：前 ${openingHookChars} 字是否有一个明确的“哪里不对”。\n\n### 对话节拍（42 硬红线，全章必须满足）\n一问一答连续超过 3 段而没有任何人味介入（动作/沉默/打断/语气词/答非所问/停顿/重复），即为客服式圆滑对答；全章任何位置都不得出现连续 4 段无人味对话。本章所有问答都须符合已确认角色的身份与动机，间隔两三轮给出有因果作用的沉默、动作或环境介入，禁止用无关语气词硬凑。\n\n追问豁免（严格限定）：只有答句带对抗张力（孩子闪避/沉默/答非所问/重复家长的话）的追问才豁免——如“就来接你的是谁？”“我姨妈。”“她在哪儿住？”“在那边。”“哪边。”。连续问句本身不构成豁免，纯登记式一问一答仍然违规。\n\n盘问/登记/信息收集场景：每 2-3 轮问答之间出现符合本书人物和场景的动作、环境或心理介入；至少一处真实的沉默、没答或答一半停住；答句不能全是一两个字干条，需有回避、反问或具体行动，不得为了过线塞无关语气词。\n叙述中带引号的称呼/引用词（写着“叔叔”、改成“姑姑”）不是对话，不受此限。\n\n### 对话写作（不引用与本书无关的作品示例）
-让回应与角色目标相符，必要时以动作或沉默改变下一句的意思；不得用无信息的短答、机械插动作或大量破折号凑出节奏。规则 42 与确定性硬红线扫描仍逐段验收。
-
-### 对话占比（宪法硬性要求，全章必须满足，量化执行）
-全章人物对话（引号内的台词）必须落在本平台本篇幅的对话占比目标区间 ${dialogueRangeText}（唯一来源 platform-benchmarks 平台表，随平台与长短篇变化；按本章目标 ${targetWords} 字即约 ${dialogueWordsText} 字，场景分散到至少 3 处）；低于区间下限 ${dialogueFloorText} 视为不合格，低于系统阻断线（高对话平台 15%/第一人称内心流 5%/其余 8%）直接回炉。注意区分：带引号的称呼/引用词（“叔叔”“姑姑”“某某家长”等）不是对话，不计入占比，也不能拿来凑数。规划对话时让台词承担推进：问询核实（关键事实/时间/人物关系）、孩子口中漏出的细节（谁接、家里几口人、大人交代过什么话）、与同事/邻里的信息交换，每处对话至少推进一个信息点或暴露一处人物，禁止纯寒暄对白。
-对话场景必须分散在全章（至少 3 处，覆盖开篇/中段/后段），禁止把所有对话堆在同一个场景；
-叙述长段后必须及时用对话打破，最长连续叙述不得超过本平台推进密度上限 ${payoffGapMaxChars} 字（该平台回报间距目标 ${payoffGapText} 字）。
-
-### 动作与节奏（规则 34/39 口径）
-连续动作不能是无目的的流水账（“站起来，走到桌前，拉开抽屉，拿出纸”——规则 34 拦截）：每个动作要么带目的、要么带感受，合并进完整长句（“我把手里的表合上，拉过一张凳子，在他对面坐下。坐下以后，我比他还矮一点”）。动作夹心只用在情绪转折处，不要每句台词都配动作（动作过多像提线木偶）。${fanqieHotReference ? '番茄短句节奏是平台特色，短句用于冲击力，但' : '短句可以做冲击力，但'}段内不要连续堆叠超短句（规则 39 只拦“诗歌断行”式堆叠，名单/清单式罗列除外）。
-
-### 转场禁令（规则 44，全章硬红线）
-全章禁止使用机械转场词：接着/然后/之后/随即/过了一会儿/不久后/很快/马上/立刻/接下来/此后/当晚等，
-出现 3 次即整章不合格。转场必须用具体切入：环境切入（窗外蝉声突然停了）/时间锚点（第二天早上，台历翻到八月）/感官切入（一股粉笔灰味先到）/身体状态（我站起来，膝盖响了一声）。写段落衔接时自查：是否用了以上禁词，
-用了就改成具体切入。
-
-### 句式排比禁令（AI 指纹重灾区）
-禁止连续 3 个及以上同句式列举（如“甲那栏写着…”“乙那栏写着…”“丙那栏写着…”或“第一种…第二种…”式逐一排比）：
-同结构句式全章最多出现 2 次，第 3 次起必须改写为聚合句（“十来个人、两年、四张表，翻来覆去只有两种笔迹”）
-或换句式/换视角切入；列举时只挑 1-2 个具体例子展开细节，其余用总数概括。同一段落内禁止 2 个以上“X 栏写着 Y，笔迹 Z”式短句连排。表格/表单/列表的结构说明（如登记表的栏目）必须用聚合句一次带过（“表头三栏：日期、姓名、签字”），禁止逐栏“一栏是…，一栏是…，一栏是…”排比铺陈。
-
-### 数字与数量自洽（世界观硬约束）
-
-涉及数量（张数/期数/次数/人数/金额/天数/页码等任何可数项）时，必须与世界观档案锁定的口径完全一致（具体数值以档案为准，档案写多少就写多少）。落笔前先列出本章要用到的每一个数量，逐一与世界观档案核对：档案已锁定的照抄，档案未锁定的宁可不写具体数字、也绝不自创。同一数量概念在全章任何位置出现都必须同值，禁止出现“两年四张”与“一年四张”并存的矛盾表述；涉及换算的表述（如“两年”与“约七百三十天”）只能全章统一取一种写法，禁止两种写法并存或换算错误。全文写完自查一遍：所有数字是否自洽、且与档案一致。
-
-### 本章场景与动作边界（大纲硬约束，逐条遵守）
-本章场景与动作范围以详细大纲的 location_summary 与情节事件为准，正文只允许出现大纲明确列出的场景与动作，禁止出现大纲未列的地点/场景（例如任何一个大纲没有写明的场景切换或地点）与未列的动作（例如任何一个大纲没有写明的行为）——这些属于后续章节，本章提前出现即越界；涉及后续章节信息时只能留线索，不得直接兑现。章末收束按大纲执行且只收一次，不得重复收束、不得重复同一动作（如同一动作反反复复做）。全文写完自查一遍：场景是否全部落在大纲范围内、收束是否唯一。
-
-### 重复意象与前后一致自查（成稿前必须执行）
-①同一意象/动作/短语全章最多出现 2 次（如反复出现的道具、动作、天数或点题短语），
-重复 3 次及以上必须删改或替换为具体描写，禁止靠反复点题制造强调。
-②人物姓名、称呼、家庭关系前后必须完全一致：写“名字没变/称呼换了一个”之类的判定句前，
-先核对前文实际写过的称谓是否真的没变；同一处称谓的变化必须交代清楚（写清从什么变成什么），
-不得出现前文写的是某个姓名、后文却断言“名字没变”式的自相矛盾。
-③人名不得自创超出世界观档案/大纲名单的人物（需要新人物时必须先确认大纲是否锁定过该名字）。
-④章节功能边界：本章功能 = 大纲列明的情节事件（逐条照大纲执行）。
-禁止新增大纲未列的新线索/新发现/新秘密（任何大纲没有写明的“额外发现”）——深化大纲已有事件可以，
-横向加戏不行。
-⑤节奏精炼：收尾与过渡段合并动作链，同一连续动作（锁门→摸黑找钥匙→进屋→躺下）合并成 1-2 句表述，
-禁止每个小动作单独成段造成拖沓；全章最后一个收束场景尽量简短有力。
-⑥结尾钩子：最后一句话必须是未解问题/反转/危机临门一脚（先留一个让读者追问的缺口，再给出这句话），
-不得以平淡动作收尾（如拉灯、躺下、合上本子）；倒数第二段已完成的收束动作在最后一段不要再复述。`;
+    const enrichedBase = historicalLessons ? basePrompt + '\n\n' + historicalLessons : basePrompt;
+    // Writing rules are injected from the execution standard; this boundary carries data only.
+    const firstPassPrompt = enrichedBase + '\n\n【本次平台节奏参数】\n' + JSON.stringify({
+      openingHookChars: platformTarget.openingHookChars,
+      dialogueRatio: platformTarget.dialogueRatio,
+      payoffGapChars: platformTarget.payoffGapChars,
+    });
     // 章际边界：若存在后续章节，把后续章节核心节拍注入首稿与精修 prompt，
     // 防止本章提前兑现后续章节事件/伏笔回收/反转，或写死与后续章节既定事实冲突的强断言。
     // 收尾锁定伏笔禁令（世界观档案：两种笔迹归属等收尾反转）与后续章节边界一起注入，
@@ -1857,12 +1648,21 @@ ${localPatchContract('hardline_local_replacement')}
           attempt: hardlineLocalAttempts, onProgress,
         });
         if (!localRepair) break;
-        content = localRepair.content;
-        this.assertGeneratedChapterIdentity(content, chapterIndex);
-        qualityReport = await this.checkChapterAlignment({
-          chapterIndex, chapterTitle, outlineContract, storyContext: reviewStoryContext, content, projectId,
+        const beforeReport = qualityReport;
+        const candidateReport = await this.checkChapterAlignment({
+          chapterIndex, chapterTitle, outlineContract, storyContext: reviewStoryContext, content: localRepair.content, projectId,
           subsequentChapterBoundary: boundaryInput,
         });
+        const candidateSemanticIssues = [...candidateReport.missing, ...candidateReport.contradictions.filter(item => !isHardlineFinding(item))];
+        if (candidateReport.evaluationStatus !== 'evaluated' || candidateReport.sourceConflicts.length > 0
+          || candidateSemanticIssues.length > 0
+          || !assessHardlineRepairProgress(beforeReport.hardlineFindings, candidateReport.hardlineFindings).accepted) {
+          this.logger.warn(`硬红线局部修订第${hardlineLocalAttempts}轮未通过完整验收，候选未接纳、保留原稿及原结论：语义问题${candidateSemanticIssues.length}处`);
+          break;
+        }
+        content = localRepair.content;
+        this.assertGeneratedChapterIdentity(content, chapterIndex);
+        qualityReport = candidateReport;
         if (qualityReport.pass) {
           onProgress?.({
             label: '大纲对照精修通过',
@@ -1918,57 +1718,8 @@ ${localPatchContract('hardline_local_replacement')}
         }
         this.logger.warn(`大纲局部修订第${attempt}轮复检未改善，保留原稿：事实 ${semanticProgress.before}→${semanticProgress.after}，硬红线 ${hardlineProgress.beforeOccurrences}→${hardlineProgress.afterOccurrences}；${hardlineProgress.reason}`);
       }
-      const repairPrompt = this.buildAlignmentRepairPrompt(
-        boundedFirstPassPrompt, missing, qualityReport.contradictions.filter(item => !isHardlineFinding(item)),
-        chapterIndex, targetWords, content, `第 ${attempt} 次自适应修复`,
-      );
-      const beforeRepair = content;
-      const beforeReport = qualityReport;
-      try {
-        const repaired = await this.generateBodyWithLengthGuard({
-          basePrompt: repairPrompt, targetWords, scenario, temperature, onProgress, wordRange,
-          metricsContext: { projectId, chapterIndex, phase: 'repair' },
-        });
-        const repairGuard = refineKeepsStory(beforeRepair, repaired, this.getProjectCharacterNames(projectId));
-        if (!repairGuard.ok) {
-          this.logger.warn(`大纲对照精修第${attempt}轮未通过故事身份守护（${repairGuard.reason}），丢弃本次结果、保留上一版正文`);
-          break;
-        }
-        content = repaired;
-      } catch (error) {
-        // 精修生成失败（如字数守卫耗尽）：保留上一版正文与其验收结论，跳出循环后按原结论抛出。
-        this.logger.warn(`大纲自修复第${attempt}次生成失败，沿用上一版验收结论：${error instanceof Error ? error.message : String(error)}`);
-        break;
-      }
-      this.assertGeneratedChapterIdentity(content, chapterIndex);
-      // 修复循环内评审同样使用完整世界观档案（评审专用，生成侧保持脱敏）。
-      qualityReport = await this.checkChapterAlignment({
-        chapterIndex, chapterTitle, outlineContract, storyContext: reviewStoryContext, content, projectId,
-        subsequentChapterBoundary: boundaryInput,
-      });
-      // 这里曾只检查“故事身份”，即使整章修订把 5 条硬红线写成 8 条、
-      // 又引入 7×3=20 等事实矛盾，仍把新稿留作最终失败稿。以复检证据回滚退化稿。
-      const semanticProgress = assessSemanticRepairProgress(
-        [...beforeReport.missing, ...beforeReport.contradictions.filter(item => !isHardlineFinding(item))],
-        [...qualityReport.missing, ...qualityReport.contradictions.filter(item => !isHardlineFinding(item))],
-      );
-      const hardlineProgress = assessHardlineRepairProgress(
-        beforeReport.hardlineFindings, qualityReport.hardlineFindings, false,
-      );
-      if (qualityReport.evaluationStatus !== 'evaluated' || !semanticProgress.improved
-        || !hardlineProgress.accepted || qualityReport.sourceConflicts.length > 0) {
-        this.logger.warn(`大纲精修第${attempt}轮复检退化，回滚整章：事实 ${semanticProgress.before}→${semanticProgress.after}，硬红线 ${hardlineProgress.beforeOccurrences}→${hardlineProgress.afterOccurrences}；${hardlineProgress.reason}`);
-        content = beforeRepair;
-        qualityReport = beforeReport;
-        break;
-      }
-      if (qualityReport.pass) {
-        onProgress?.({
-          label: '大纲对照精修通过',
-          message: `大纲对照通过（第 ${attempt} 次精修后）：精修后正文已忠实覆盖所有必需事件点。`,
-          progress: 92,
-        });
-      }
+      this.logger.warn(`大纲局部修复第${attempt}轮未能证明改善，停止自动修复并保留原稿与验收证据`);
+      break;
     }
     // 不再把结论丢掉：自修复后仍存在的缺失/矛盾按 source 持久化进矛盾 tab（连正文原文一起落库，
     // 作者随时能取回这一版草稿），随后由 Gate 分类器抛出，由作者决定重生成还是手改
@@ -2024,7 +1775,6 @@ ${localPatchContract('hardline_local_replacement')}
     // 跨章节学习闭环：把本章最终仍未满足的缺失/冲突归纳成通用避坑经验入库，
     // 供本项目后续章节生成时自动规避（第一章漏的教训，第二章首版就用上，避免反复犯同样错）。
     if (llmUnmet.length > 0 || hardlineViolations.length > 0) {
-      void this.summarizeChapterLessons(projectId, chapterIndex, qualityReport.missing, qualityReport.contradictions);
     }
     // 平台指标已在首稿前通过唯一 benchmark 指令注入。这里不再先做一次整章“平台精修”后
     // 又进入统一质量 Gate；统一 Gate 会用同一份确定性平台测量，只对有证据的高严重度问题
@@ -2169,7 +1919,7 @@ ${localPatchContract('hardline_local_replacement')}
    *   32   姓名/角色独占一行（"赵明。""李四。"紧接空行——用户截图里反复出现的"姓名莫名其妙独占一行"）
    *   33   段后空行 ≥ 2（连续 \n\n+ 是诗歌式排版的物理指纹，Markdown 渲染后是大段空白）
    *   34   排比/动词并列（连续 4 个 2-字动作词"站起来/走到/拉开/拿出"——AI 写作最显眼的破绽之一）
-   *   35   标点单一（连续 200 字以上无引号/问号/破折号/感叹号/分号/省略号——"逗号句号一家独大"硬约束）
+   *   35/35b   重复叙述窗口（须有语句重复证据，缺少某类标点不是阻断理由）
    *   36   热血空洞句（"这一刻""我终于""我必须""我不能""唯一能""最好的""只有……才能"——AI 反思段的特征签名）
    *   37   抽象情绪独白段（连续 3 段以"我感到/我意识到/我明白/我突然觉悟"开头——AI 端正觉醒段）
    *
@@ -2326,151 +2076,9 @@ ${localPatchContract('hardline_local_replacement')}
       const lines = rows
         .map((r, i) => `  ${i + 1}) [${r.category}] ${r.lesson}（已在前面 ${r.occurrence} 章出现）`)
         .join('\n');
-      return (
-        `## 本项目历史避坑经验（跨章节学习 · 已从之前章节的生成中归纳，本章务必主动规避）\n` +
-        `${lines}\n\n` +
-        `应用规则：上述每条都是本项目前几章实际犯过的错误，本章动笔前逐条对照，确保不再重犯；` +
-        `但不得因此自我设限、不得编造与大纲无关的内容来"预防"，仍以忠实执行本章大纲为最高目标。`
-      );
+      return `## 本项目历史诊断与作者知识点（数据）\n${lines}`;
     } catch (error) {
       this.throwStepReadFailure('getActiveLessons', projectId, error);
-    }
-  }
-
-  /**
-   * 单项目避坑经验总量上限。超过则淘汰「最少出现 + 最久未出现」的旧经验，避免无限叠加。
-   */
-  private static readonly MAX_LESSONS_PER_PROJECT = 24;
-
-  /**
-   * 跨章节学习 · 把一章最终未通过的缺失/冲突，经真实 LLM 归纳成通用避坑经验并入库。
-   * 三道闸防止无限叠加：
-   *   1) 归纳：要求 LLM 把同类问题合并成 1-3 条通用教训；
-   *   2) 合并：先读取本项目已有经验，让 LLM 把新问题映射到已有经验（existingId）做增量，
-   *      或对已有经验用更精炼的措辞覆盖旧版本（旧版本移除），仅在确属全新类别时新建；
-   *   3) 淘汰：入库后若超过 MAX_LESSONS_PER_PROJECT，按「出现次数最少 → 最久未出现」删除最旧多余的。
-   * 失败不影响正文保存（fire-and-forget，catch 内仅告警）。归纳用真实 LLM，绝不伪造。
-   */
-  private async summarizeChapterLessons(
-    projectId: string,
-    chapterIndex: number,
-    missing: string[],
-    contradictions: string[],
-  ): Promise<void> {
-    const issues = [
-      ...missing.map(m => `缺失/未覆盖: ${m}`),
-      ...contradictions.map(c => `冲突: ${c}`),
-    ].filter(Boolean);
-    if (!issues.length) return;
-    try {
-      const db = this.db.getDb();
-      const now = new Date().toISOString();
-      // 先读已有经验，供 LLM 判断「合并到旧条目」还是「新建」
-      const existing = db.prepare(
-        `SELECT id, category, lesson, occurrence FROM generation_lessons WHERE project_id = ? ORDER BY occurrence DESC, updated_at DESC`,
-      ).all(projectId) as Array<{ id: string; category: string; lesson: string; occurrence: number }>;
-      const existingText = existing.length
-        ? existing
-            .map((e, i) => `  [${i + 1}] id=${e.id} (${e.category}, 已出现${e.occurrence}次) ${e.lesson}`)
-            .join('\n')
-        : '（暂无，本章为首次归纳）';
-
-      const prompt =
-        `你是小说生成质量复盘器。下面是一章正文未通过大纲一致性验收时暴露的具体问题，` +
-        `请归纳成可复用的「避坑经验」，用于注入到本项目后续章节的生成提示中，使后续章节主动规避同类问题。\n\n` +
-        `【本章具体问题】\n${issues.join('\n')}\n\n` +
-        `【本项目已有避坑经验（能对应到下面某条的，必须合并到它的 existingId，不要新建重复条目）】\n${existingText}\n\n` +
-        `【归纳与合并要求】\n` +
-        `- 把同类问题合并，输出 1-3 条；每条要么是「合并到已有经验」，要么是「全新经验」；\n` +
-        `- 若问题与某条已有经验属同一类（如都关于"漏结尾钩子"或都关于"视角漂移"），必须 action=merge 并填该条 existingId，` +
-        `可顺便在 lesson 字段给出更精炼的措辞以覆盖旧版本（旧表述即被移除）；\n` +
-        `- 仅当确属全新、无法并入任何已有经验时才 action=new；\n` +
-        `- 每条教训必须是「具体、可执行」的中文短句（例如"务必让正文最后一个场景落在结尾钩子场景上收尾，不得提前终止于用餐/通勤等中间事件"），不要复述具体章节内容；\n` +
-        `- 类别从以下选一：missing_scene（漏场景/漏事件）、early_termination（提前终止/未到结尾钩子）、character_conflict（角色身份/关系冲突）、viewpoint_drift（视角/人称漂移）、hook_missing（漏结尾钩子）、other。\n\n` +
-        `只输出JSON：{"items":[{"action":"merge","existingId":"<id>","lesson":"<可选：更精炼措辞，覆盖旧版本>"},{"action":"new","category":"...","lesson":"..."}]}`;
-
-      const resp = await this.realLLM.generate({
-        prompt,
-        metrics: { projectId, stepKey: 'outline' },
-        scenario: 'outline',
-        temperature: 0.2,
-        maxTokens: 4096,
-        responseFormat: 'json_object',
-        maxEmptyRetries: 1,
-      });
-      const parsed = this.safeExtractJson<{
-        items?: Array<{ action?: string; existingId?: string; category?: string; lesson?: string }>;
-      }>(resp.content, null as any);
-      const items = Array.isArray(parsed?.items) ? parsed!.items : [];
-      if (!items.length) return;
-
-      const mergeStmt = db.prepare(
-        `UPDATE generation_lessons
-         SET occurrence = occurrence + 1,
-             last_chapter_index = ?,
-             updated_at = ?,
-             lesson = COALESCE(?, lesson)
-         WHERE id = ? AND project_id = ?`,
-      );
-      const newStmt = db.prepare(
-        `INSERT INTO generation_lessons (id, project_id, category, lesson, occurrence, last_chapter_index, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-         ON CONFLICT(project_id, lesson) DO UPDATE SET
-           occurrence = occurrence + 1,
-           last_chapter_index = excluded.last_chapter_index,
-           updated_at = excluded.updated_at`,
-      );
-      const bumpByText = db.prepare(
-        `UPDATE generation_lessons SET occurrence = occurrence + 1, last_chapter_index = ?, updated_at = ?
-         WHERE project_id = ? AND lesson = ?`,
-      );
-
-      let merged = 0;
-      let created = 0;
-      for (const it of items) {
-        const action = String(it?.action || '').trim();
-        if (action === 'merge') {
-          const existingId = String(it?.existingId || '').trim();
-          if (!existingId) continue;
-          const refined = it?.lesson ? String(it.lesson).trim() : '';
-          mergeStmt.run(chapterIndex, now, refined || null, existingId, projectId);
-          merged++;
-        } else if (action === 'new') {
-          const category = String(it?.category || 'other').slice(0, 32);
-          const lesson = String(it?.lesson || '').trim();
-          if (!lesson) continue;
-          const res = newStmt.run(
-            this.generateAlignmentCheckId(), projectId, category, lesson, chapterIndex, now, now,
-          );
-          if (Number(res.changes) === 0) {
-            // 与既有条目措辞恰好一致（UNIQUE 冲突），按文本补增量，确保计数不丢
-            bumpByText.run(chapterIndex, now, projectId, lesson);
-          }
-          created++;
-        }
-      }
-
-      // 第三道闸：超量淘汰最旧最少见的经验，防止无限叠加
-      const countRow = db.prepare(`SELECT COUNT(*) AS c FROM generation_lessons WHERE project_id = ?`)
-        .get(projectId) as { c: number };
-      let pruned = 0;
-      if (countRow.c > ChainController.MAX_LESSONS_PER_PROJECT) {
-        const excess = countRow.c - ChainController.MAX_LESSONS_PER_PROJECT;
-        pruned = db.prepare(
-          `DELETE FROM generation_lessons WHERE project_id = ? AND id IN (
-             SELECT id FROM generation_lessons WHERE project_id = ?
-             ORDER BY occurrence ASC, updated_at ASC LIMIT ?
-           )`,
-        ).run(projectId, projectId, excess).changes as number;
-      }
-
-      this.logger.log(
-        `[跨章节学习] 归纳完成（project=${projectId}, ch${chapterIndex}）：合并=${merged}, 新建=${created}, 淘汰旧经验=${pruned}, 现存=${countRow.c - pruned}`,
-      );
-    } catch (err) {
-      this.logger.warn(
-        `章节教训归纳失败（不影响正文保存）：${err instanceof Error ? err.message : String(err)}`,
-      );
     }
   }
 
@@ -2665,8 +2273,8 @@ ${localPatchContract('hardline_local_replacement')}
         const povInstruction = (() => {
           const pov = String((chapterContext as any).pov || '').trim();
           return pov
-            ? `严格使用已有项目配置的叙事视角：${pov}。本视角的硬红线已写入下方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。`
-            : '保持大纲与前文已经建立的叙事视角，不得无依据切换；本视角的硬红线已写入下方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。';
+            ? `严格使用已有项目配置的叙事视角：${pov}。视角纪律按已注入正文执行标准执行。`
+            : '保持大纲与前文已经建立的叙事视角，不得无依据切换；视角纪律按已注入正文执行标准执行。';
         })();
         const stateGuardText = String((chapterContext as any).stateGuard || '已确稿事实必须遵守；待确稿候选只能参考，不要写死；冲突/过期需避免或复核。');
         const confirmedStateText = String(
@@ -2680,7 +2288,6 @@ ${localPatchContract('hardline_local_replacement')}
         // 大纲严格性约束（红线 + 绿区）：大纲是不可偏离的合同，但在红线内
         // 鼓励微发挥与多样性。配合末位 assertGeneratedChapterAlignment 形成
         // "事前约束 + 事后拒绝"双保险。短篇受篇幅限制，微发挥以精准为主。
-        const outlineAdherenceContract = this.buildOutlineAdherenceContract(this.isProjectLongNovel(dto.projectId), dto.projectId);
 
         // 平台风格指令必须放在 prompt 最前面（章节标题之后、大纲之前），确保模型第一眼看到并遵循。
         // 放在大纲/大段已确稿上下文之后会被 deepseek 等模型忽略，导致"选了番茄却写成盐选"。
@@ -2698,16 +2305,11 @@ ${confirmedStateText}
 ## 状态使用规则
 ${stateGuardText}
 
-${outlineAdherenceContract}
 
-${this.buildNarrativeQualityContract(dto.projectId)}
 
-## 写作要求
-1. 正文长度必须严格控制在 ${wordRange.min}-${wordRange.max} 个汉字之间，绝对不得超过 ${wordRange.max} 字、也不得少于 ${wordRange.min} 字。写到约 ${chapterTargetWords} 字时必须自然收尾，不要摊开写或注水。
-2. 严格遵循本章大纲中已列出的核心事件、冲突、人物行动、结尾钩子；按大纲事件顺序依次推进，大纲列出的所有场景与人物行动都必须实际发生，不许擅自改写或跳过。正文的最后一个场景必须是【本章结尾钩子】所描述的场景并落在该钩子场景上收尾，严禁提前终止于大纲中间事件（如用餐、通勤、过渡等场景）。
-3. 不得在正文里写"天龙8步""目标/诱因/行动/阻碍/误判/反转/代价/钩子"等小标题或方法论标签；只输出可发布的纯正文。
-4. 对话、动作、场景描写要服务于大纲事件，不得为凑字数添加与本章无关的支线。
-5. ${povInstruction}
+## 本次任务
+按已注入正文执行标准完成上述本章合同。
+叙事视角参数：${povInstruction}
 
 ## 直接输出
 请直接输出完整章节正文，不要任何解释、前缀、JSON、Markdown 标题。`;
@@ -2801,9 +2403,6 @@ ${this.buildNarrativeQualityContract(dto.projectId)}
       // 与 /chain/generate、body-by-outline 两端点共用同源约束（修复：
       // 之前 /chain/continue 不注入降 AI 文风 + 散文质感约束，续写后接的正文照样机械/AI 味）。
       // 续写是增量，但必须继续遵守本章已建立的视角、人物、节奏、段落硬约束。
-      const chapterOutlineAdherence = this.buildOutlineAdherenceContract(this.isProjectLongNovel(dto.projectId), dto.projectId);
-      const narrativeQualityContract = this.buildNarrativeQualityContract(dto.projectId);
-      prompt = `${prompt}\n\n${chapterOutlineAdherence}\n\n${narrativeQualityContract}`;
 
       const response = await this.realLLM.generate({ prompt, scenario: dto.scenario || 'writing', temperature: 0.7 });
       const continuation = String(response.content || '').trim();
@@ -4419,14 +4018,12 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
 
         // 加载大纲（全部章节大纲，用于构建完整上下文）
         generationKey = this.beginChapterGeneration(dto.projectId, dto.chapterId);
-        const allOutlines = this.db.prepare(
-          'SELECT * FROM outlines WHERE project_id = ? AND level = \'chapter\' ORDER BY "order"'
-        ).all(dto.projectId) as any[];
+        const allOutlines = readOrderedChapterOutlines(this.db.getDb(), dto.projectId);
 
         // 构建 FullOutline 结构
         const outlineVolumes = allOutlines.map((o: any, i: number) => ({
           title: o.title || `第${i + 1}章`,
-          order: o.order || i + 1,
+          order: chapterNumberFromOrder(i),
           function: o.chapter_function || 'breathing',
           content: o.content || '',
           targetWords: Number(o.target_words || 0),
@@ -4519,12 +4116,11 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
         // 进度通过 SSE 心跳事件推送给前端，不再有"目标→诱因→...→钩子"逐节点推进。
         const chapterOutlineText = currentOutline ? this.buildChapterOutlineContext(currentOutline) : (dto.prompt || '');
         // 大纲严格性约束（红线 + 绿区）：与 /chain/generate 同源，统一维护
-        const chapterOutlineAdherence = this.buildOutlineAdherenceContract(this.isProjectLongNovel(dto.projectId), dto.projectId);
         const povInstruction = (() => {
           const pov = String((currentOutline as any)?.pov || '').trim();
           return pov
-            ? `严格使用已有项目配置的叙事视角：${pov}。本视角的硬红线已写入上方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。`
-            : '保持大纲与前文已经建立的叙事视角，不得无依据切换；本视角的硬红线已写入上方【大纲严格性约束】的 POV 红线段，第一人称/第三人称均须严守"禁止叙述者跳出成为作者评论者"。';
+            ? `严格使用已有项目配置的叙事视角：${pov}。视角纪律按已注入正文执行标准执行。`
+            : '保持大纲与前文已经建立的叙事视角，不得无依据切换；视角纪律按已注入正文执行标准执行。';
         })();
         const streamPrompt = `你正在创作第${chapterRow.chapter_index}章 ${currentOutline?.title || `第${chapterRow.chapter_index}章`}。
 
@@ -4535,21 +4131,11 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         ## 已确稿故事上下文
         ${confirmedStateContext}
 
-        ${chapterOutlineAdherence}
 
-        ${this.buildNarrativeQualityContract(dto.projectId)}
 
-        ## 写作要求（本章具体约束；平台文风见上方【目标平台与风格定位】，降 AI 味见上方【大纲严格性约束】）
-
-        ### 字数与大纲
-        1. 总长 ${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max} 汉字，到约 ${currentTargetWords} 字必须自然收尾，不许注水、不许为凑数把对话稀释成自言自语。
-        2. 严格遵循本章大纲中已列出的核心事件、冲突、人物行动、结尾钩子；按大纲事件顺序依次推进，大纲列出的所有场景与人物行动都必须实际发生在正文中，不许为"文笔"擅自改写或跳过。正文的【最后一个场景】必须是【本章结尾钩子】所描述的场景，必须将正文落在该钩子场景上收尾；严禁提前终止于大纲中间事件（如用餐、通勤、过渡等场景），即使字数已接近上限也要先写完钩子再收尾。
-        3. ${povInstruction}
-        4. 不得在正文里写"天龙8步""目标/诱因/行动/阻碍/误判/反转/代价/钩子"等方法论标签；只输出可发布的纯正文。
-
-        ### 文风（统一约束）
-        5. 文风与"降 AI 味"要求（禁止排比句、禁止相邻句/段以同一人名或代词起头、禁止对仗四字短语堆砌与升华式说教、禁用 AI 高频副词、禁止模板化开头结尾、禁止对话标签密集、禁止比拟人比喻滥用等）以及上下文一致性要求（角色状态延续、事实/记忆一致、时空逻辑自洽、场景过渡自然、结尾承接下章钩子）已写入上方【大纲严格性约束】的「降 AI 文风 · 必守」「上下文一致性 · 必守」「散文质感」三节，本章同样逐条严格遵守。
-        6. 对话、动作、场景描写都要服务于本章大纲事件，不为"显得深刻"添加说教性内心独白或与本章无关的支线。
+        ## 本次任务
+        按已注入正文执行标准完成上述本章合同。
+        叙事视角参数：${povInstruction}
 
         ## 直接输出
         请直接输出完整章节正文，不要任何解释、前缀、JSON、Markdown 标题。`;
@@ -4642,7 +4228,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
 
     const result = await this.llmCallWithRetry<any>(
       '章节大纲扩写',
-      `${this.resolvePlatformToneDirective(dto.projectId)}在不改变既定故事、人物关系、章节功能、目标字数和后续章节任务的前提下，扩写当前章节的详细大纲。只能补足本章已经承担的事件链、场景、行动、冲突、亮点、伏笔证据和结尾钩子；不得编造另一套故事、提前揭示后续真相或改写已确认资料。\n项目类型：${project.type}\n章节标题：${outline.title}\n章节功能：${outline.chapter_function}\n目标字数：${outline.target_words}\n现有大纲：${outline.content}\n现有结构资料：${outline.scenes || '{}'}\n只输出JSON对象：{"content":"至少80字事件链","scenes":["场景"],"characterActions":"行动","conflicts":[{"name":"冲突","trigger":"触发"}],"highlights":[{"point":"爽点"}],"foreshadowing":[{"content":"线索"}],"foreshadowingRecover":[{"reference":"回收"}],"characterStates":[{"character":"人","stateBefore":"前","stateAfter":"后"}],"hook":"下章钩子","emotionalTone":"情绪"}`,
+      `${this.resolvePlatformToneDirective(dto.projectId)}在不改变既定故事、人物关系、章节功能、目标字数和后续章节任务的前提下，扩写当前章节的详细大纲。只能补足本章已经承担的事件链、场景、行动、冲突、亮点、伏笔证据和结尾钩子；不得编造另一套故事、提前揭示后续真相或改写已确认资料。\n项目类型：${project.type}\n章节标题：${outline.title}\n章节功能：${outline.chapter_function}\n目标字数：${outline.target_words}\n现有大纲：${outline.content}\n现有结构资料：${outline.scenes || '{}'}\n只输出JSON对象：{"content":"至少80字事件链","scenes":["场景"],"characterActions":"行动","conflicts":[{"name":"冲突","trigger":"触发"}],"highlights":[{"point":"爽点"}],"foreshadowing":[{"content":"线索"}],"foreshadowingRecover":[{"reference":"回收"}],"characterStates":[{"character":"人","stateBefore":"前","stateAfter":"后"}],"hook":"本章合同收尾或终章余韵","emotionalTone":"情绪"}`,
       {
         temperature: 0.45,
         timeout: LLM_TUNABLES.timeoutContent(),
@@ -5140,10 +4726,14 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       const autoSelectionRequested = !dto.storyTone.length || !dto.writingStyle.length || !dto.webNovelGenre.length
         || !dto.plotTags.length || !dto.pov || (submissionRequired && !dto.submissionTags.length);
       const seenCombinations = new Set<string>();
-      const accept = (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
+      const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
+        const presentationReviews = await this.reviewIdeaPresentation(candidates, accepted);
+        const presentationByTitle = new Map(presentationReviews.map(review => [review.title, review]));
         for (const candidate of candidates) {
           const titleKey = normalizeTitle(candidate?.title);
           const issues = assessIdeaQuality(candidate);
+          const presentationReview = presentationByTitle.get(candidate.title);
+          issues.push(...presentationGateIssues(presentationReview));
           if (!titleKey || seen.has(titleKey)) issues.push('标题与已有或同批题材重复');
           const closest = [...initialExcludes, ...accepted]
             .map(reference => ({ reference, similarity: ideaSemanticSimilarity(candidate, reference) }))
@@ -5185,6 +4775,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
             },
             passed,
             issues: uniqueIssues,
+            presentationReview: presentationReview ?? null,
             warnings: appealAssessment.warnings,
             signals: appealAssessment.signals,
             densityMode: appealAssessment.readerExperienceProfile.densityMode,
@@ -5250,7 +4841,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
         || missingPremiseIds.some(id => !structuringErrors.some(item => item.sourcePremiseId === id))) {
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；生成=${structuredCards.length}/${requestedCount}，缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
       }
-      accept(structuredCards, 'initial');
+      await accept(structuredCards, 'initial');
 
       // Final Gate 只决定哪些已选 premise 可以展示，不再承担补题职责。某张卡失败时允许对同一 premise
       // 做一次有界局部修复；仍失败就只淘汰这一张，已通过题材照常返回，绝不能把 4/5 伪装成 0/5。
@@ -5289,8 +4880,9 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
           const repairedCards = applyOrderedIdeaRepairPatches(
             repairTargets.map((target: any) => target.card as Record<string, unknown>),
             repairPatches,
+            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
           );
-          accept(repairedCards, 'repair');
+          await accept(repairedCards, 'repair');
         } catch (repairError) {
           finalGateRepairError = repairError instanceof Error ? repairError.message : String(repairError);
           this.logger.warn(`idea-discover: 最终 Gate 同题材局部修复协议未完成：${finalGateRepairError}`);
@@ -5399,39 +4991,58 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
     return review;
   }
 
+  private outlineFactGateError(projectId: string, message: string, evidence: unknown,
+    kind: 'review_contract_invalid' | 'review_unavailable' | 'fact_conflict', chapterIndex?: number): Error {
+    this.logger.error(message);
+    try {
+      const started = Date.now();
+      const run = this.generationMetrics.beginRun(projectId, 'review', message, undefined, 'outline_fact_ledger', chapterIndex, false);
+      this.generationMetrics.finishRun(run.id, 'failed', started, JSON.stringify({ kind, evidence }), message);
+    } catch (recordError) {
+      this.logger.warn('章纲事实 Gate 失败记录写入失败（保持阻断）：' + (recordError instanceof Error ? recordError.message : String(recordError)));
+    }
+    return new Error(message);
+  }
+
+  /** Creation relay and activation batches share ledger validation and failure reporting. */
+  private async reviewOutlineFacts(projectId: string, label: string, canonicalBrief: string,
+    world: unknown, previousLedger: OutlineFactLedgerEntry[], chapters: unknown[],
+    executionStandard: string, chapterIndex?: number, sourceChapters: unknown[] = []): Promise<OutlineFactReview> {
+    let result: Awaited<ReturnType<ChainController['llmCallWithRetry']>>;
+    try {
+      result = await this.llmCallWithRetry<any>(label,
+        executionStandard + '\n' + buildOutlineFactReviewPrompt({ canonicalBrief, world, previousLedger, chapters, sourceChapters }),
+        { projectId, chapterIndex, scenario: 'review', temperature: 0.1,
+          timeout: LLM_TUNABLES.timeoutComplex(), maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
+          validate: value => describeOutlineFactReview(normalizeOutlineFactReview(value, previousLedger)).length === 0,
+          describeValidation: value => describeOutlineFactReview(normalizeOutlineFactReview(value, previousLedger)) });
+    } catch (error) {
+      throw this.outlineFactGateError(projectId, label + '未完成，未修改章纲：' +
+        (error instanceof Error ? error.message : String(error)), { chapters, previousLedger, sourceChapters }, 'review_unavailable', chapterIndex);
+    }
+    const review = normalizeOutlineFactReview(result.data, previousLedger);
+    const issues = describeOutlineFactReview(review);
+    if (!review || issues.length) {
+      throw this.outlineFactGateError(projectId, label + '审查输出不合规，未修改章纲：' +
+        [...issues, ...result.warnings].join('；'), { chapters, previousLedger, sourceChapters, rawReview: result.data }, 'review_contract_invalid', chapterIndex);
+    }
+    return review;
+  }
+
   private async assertOutlineFactLedger(projectId: string, canonicalBrief: string, executionStandard: string): Promise<void> {
     const db = this.db.getDb();
-    const outlineWorld = db.prepare(`SELECT era,rules,story_premise,geography FROM world_settings WHERE project_id=? ORDER BY created_at ASC LIMIT 1`).get(projectId);
-    const outlineFacts = db.prepare(`SELECT "order",title,content,scenes FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`).all(projectId) as any[];
+    const outlineWorld = db.prepare('SELECT era,rules,story_premise,geography FROM world_settings WHERE project_id=? ORDER BY created_at ASC LIMIT 1').get(projectId);
+    const outlineFacts = db.prepare('SELECT "order",title,content,scenes FROM outlines WHERE project_id=? AND level=\'chapter\' ORDER BY "order"').all(projectId) as any[];
     if (outlineFacts.length === 0) throw new Error('章纲事实台账审查无章纲，项目不得激活');
-    let previousLedger: string[] = [];
+    let previousLedger: OutlineFactLedgerEntry[] = [];
     for (let batchStart = 0; batchStart < outlineFacts.length; batchStart += 4) {
       const chapterBatch = outlineFacts.slice(batchStart, batchStart + 4);
-      const factReviewResult = await this.llmCallWithRetry<any>(
-        `第${batchStart + 1}-${batchStart + chapterBatch.length}章事实台账审查`,
-        `${executionStandard}\n${buildOutlineFactReviewPrompt({ canonicalBrief, world: outlineWorld, previousLedger, chapters: chapterBatch })}`,
-        {
-          temperature: 0.1,
-          timeout: LLM_TUNABLES.timeoutComplex(),
-          projectId,
-          scenario: 'review',
-          maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
-          validate: value => describeOutlineFactReview(normalizeOutlineFactReview(value)).length === 0,
-          describeValidation: value => describeOutlineFactReview(normalizeOutlineFactReview(value)),
-        },
-      );
-      const factReview = normalizeOutlineFactReview(factReviewResult.data);
-      const missingLedger = factReview ? missingPriorLedgerEntries(previousLedger, factReview.ledger) : [];
-      if (!factReview || factReview.consistent !== true || factReview.contradictions.length > 0 || missingLedger.length > 0) {
-        const details = factReview?.contradictions?.join('；') || (missingLedger.length ? `事实台账丢失上批对象：${missingLedger.join('；')}` : '') || factReviewResult.warnings.join('；') || '未获得完整且明确通过的审查结果';
-        const gateError = `第${batchStart + 1}-${batchStart + chapterBatch.length}章事实台账未通过，项目未激活：${details}`;
-        try {
-          const gateRun = this.generationMetrics.beginRun(projectId, 'review', gateError, undefined, 'outline_fact_ledger', null, false);
-          this.generationMetrics.finishRun(gateRun.id, 'failed', Date.now(), JSON.stringify(chapterBatch), gateError);
-        } catch (recordError) {
-          this.logger.warn(`章纲事实台账 Gate 失败运行落库失败（不改变阻断结论）：${recordError instanceof Error ? recordError.message : String(recordError)}`);
-        }
-        throw new Error(gateError);
+      const label = '第' + (batchStart + 1) + '-' + (batchStart + chapterBatch.length) + '章事实台账审查';
+      const factReview = await this.reviewOutlineFacts(projectId, label, canonicalBrief, outlineWorld,
+        previousLedger, chapterBatch, executionStandard, undefined, outlineFacts.slice(0, batchStart));
+      if (!factReview.consistent || factReview.contradictions.length) {
+        throw this.outlineFactGateError(projectId, label + '存在已举证的事实矛盾，项目未激活：' +
+          factReview.contradictions.join('；'), { chapters: chapterBatch, sourceChapters: outlineFacts.slice(0, batchStart), previousLedger, review: factReview }, 'fact_conflict');
       }
       previousLedger = factReview.ledger;
     }
@@ -5764,8 +5375,9 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
     });
 
     let activeGenerationStep = 'world';
+    let activeGenerationMessage = '正在生成创作资料...';
     const emit = (step: string, percent: number, message: string, status: 'running' | 'done' | 'failed' = 'running') => {
-      if (status === 'running' && step !== 'project' && step !== 'done') activeGenerationStep = step;
+      if (status === 'running' && step !== 'project' && step !== 'done') { activeGenerationStep = step; activeGenerationMessage = message; }
       this.emitProjectProgress(projectId, { type: 'progress', step, percent, message, status, counts: getCreationCounts() });
     };
 
@@ -5927,7 +5539,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
         let heartbeatPercent = 12;
         const heartbeat = setInterval(() => {
           heartbeatPercent = Math.min(heartbeatPercent + 3, 38);
-          emit(activeGenerationStep, heartbeatPercent, '当前创作阶段仍在生成和验收中...');
+          emit(activeGenerationStep, heartbeatPercent, activeGenerationMessage);
         }, LLM_TUNABLES.PROGRESS_HEARTBEAT_MS);
         try {
           const data = await this.generateConfiguredLongNovelPlan({
@@ -6270,9 +5882,13 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
             emit('foreshadowing', 95, `伏笔已写入 ${fsCount} 条`, fsCount > 0 ? 'done' : 'failed');
             emit('timeline', 98, `时间线事件已写入 ${timelineCount} 条`, timelineCount > 0 ? 'done' : 'failed');
             await syncProjectRag();
+            emit('profiles', 95, '完善组织、地点、章纲和伏笔资料...');
             warnings.push(...await this.enrichNewProjectProfiles(projectId, dto));
+            emit('profiles', 95, '创作资料完善完成', 'done');
+            emit('review', 96, '检查激活前资料完整性与质量门禁...');
             this.assertProjectSourceCompleteness(projectId);
             await this.generationRecovery.assertActivationReady(projectId);
+            emit('review', 98, '激活前质量门禁已通过', 'done');
             emit('done', 100, `长篇生成完成（${volumeWriteCount}卷${outlineWriteCount}章）`, 'done');
             db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ?`).run(now(), projectId);
             this.emitProjectProgress(projectId, {
@@ -6301,7 +5917,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
       shortHeartbeatTimer = setInterval(() => {
         shortHeartbeatPercent = Math.min(shortHeartbeatPercent + 2, 85);
         // 这里曾一直发 world 心跳，后果是大纲开始后世界观又显示“进行中”。
-        emit(activeGenerationStep, shortHeartbeatPercent, '当前创作阶段仍在生成和验收中...');
+        emit(activeGenerationStep, shortHeartbeatPercent, activeGenerationMessage);
       }, LLM_TUNABLES.HEARTBEAT_SHORT_MS);
 
       // 开篇钩子字数取自平台表（唯一源），不写死 300：知乎短篇 200、番茄短篇 300、起点短篇 600。
@@ -6309,14 +5925,7 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
         projectId,
         this.isProjectLongNovel(projectId),
       ).target.openingHookChars;
-      const shortStoryPrompt = `【短篇要求】
-- 章节数量必须由用户目标字数和故事闭环实际决定，包含开篇钩子、递进冲突、高潮与尾声余味
-- 角色数量由冲突与场景需要决定，主角必须主动行动
-- 反转次数和位置由冲突结构决定，不能只靠结尾突转，禁做梦/精神病/系统解释等廉价反转
-- 每章：冲突 + 信息增量 + 结尾钩子
-- 每章采用八拍结构（目标→诱因→行动→阻碍→误判→反转→代价→钩子）构建冲突递进
-- 开篇前${shortOpenHookChars}字必须出现强异常，让读者产生"必须继续看"的疑问
-- 伏笔数量必须由实际章节事件链决定，含出现位置/回收位置/回收冲击，不得使用固定数量`;
+      const chapterCreationParameters = `【本次章纲参数】${JSON.stringify({ projectType:constitution.projectType, openingHookChars:shortOpenHookChars })}`;
       const canonicalCreativeBrief = JSON.stringify({
         title: dto.title,
         type: dto.storyType,
@@ -6790,8 +6399,8 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         }
 
         volId = uuid();
-        let previousSummary = '';
-        let priorOutlineFactLedger: string[] = [];
+        const acceptedOutlineSources: Record<string, unknown>[] = [];
+        let priorOutlineFactLedger: OutlineFactLedgerEntry[] = [];
         const currentWorldForOutlineReview = db.prepare(`SELECT era,rules,story_premise,geography FROM world_settings
           WHERE project_id=? ORDER BY created_at ASC LIMIT 1`).get(projectId);
         let plannedChapterWords = 0;
@@ -6865,16 +6474,16 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           }
 
           emit('outline', 30 + Math.round(((chapterIndex + 1) / chapterTitles.length) * 15), `逐章生成并校验大纲 ${chapterIndex + 1}/${chapterTitles.length}`);
-          const chapterPrompt = `${shortStoryPrompt}
+          const chapterPrompt = `${chapterCreationParameters}
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
-${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n${previousSummary}\n` : ''}【本章节】
+${chapterIndex > 0 ? `【全部已确认前文-必须连续且不得重复】\n${JSON.stringify(acceptedOutlineSources)}\n` : ''}【本章节】
 第${order + 1}章"${expectedChapter.title}"（功能:${expectedChapter.func}）
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
 【已经完成、禁止重演的章节任务】${JSON.stringify(completedTaskBoundary)}
 【下一章保留任务、本章禁止提前执行】${JSON.stringify(nextTaskBoundary)}
           【全书章节分工与动态节拍】${JSON.stringify(chapterResponsibilityPlan)}
 当前章叙事节拍：${JSON.stringify(currentBeat?.beatLabel || '')}。节拍来自章节职责，不按固定章数强制爽点；本章只需完成与职责相符的推进价值。
-本章只能完成自己的推进任务；不得提前执行后续章节的推进任务或结局（章职能边界，判据 CR-3）。结尾钩子只能制造下一步动机或障碍，不能把下一章的行动先做一遍。
+本章只能完成自己的推进任务；不得提前执行后续章节的推进任务或结局（章职能边界，判据 CR-3）。收尾按已注入章纲标准与当前章节职责执行。
 设定:${ideaSpan}
 【核心层级纪律（最高优先级）】${STORY_FACT_PRIORITY}。本章大纲必须继承已确认题材与已锁定事实；已保存世界观仅能补充不冲突的细节，不得把世界观后来增写的触发条件、时间范围或证据存续盖过题材卡。这里曾有第二份「世界观 > 大纲 > 正文」层级，后果是确认题材被世界观新规则覆盖，再被大纲和正文重复执行。
             【硬性连续性】人物姓名、亲属关系、责任归属、既定事件真相和结局必须逐字遵守确认题材；不得无因新增伤病、物证、神秘气味、秘密关系或新事件。已经在前文完成的推进任务不得换一种说法再次发生（判据 CR-4）。人物改变立场、回头相助或突然交出关键材料，必须写明前文已有动机及本章可见触发。新增细节必须在本章产生作用，或明确写入foreshadowing并在后续既定事件中有回收位置。
@@ -7009,28 +6618,14 @@ ${(() => {
           // 这里曾只检查单章 JSON 结构，等两章都生成后才查时间与名单算式；
           // 第一章的「回拨一小时」对「手机快一小时」因此带进第二章，最后整套资料回滚。
           // 在每章接力点按同一事实台账核查，修的是当前章，不改已确认题材或前章。
-          const reviewChapterFacts = async (candidate: Record<string, any>) => {
-            const result = await this.llmCallWithRetry<any>(`第${order + 1}章生成前事实台账`,
-              `${executionStandardForReview}\n${buildOutlineFactReviewPrompt({
-                canonicalBrief: canonicalCreativeBrief,
-                world: currentWorldForOutlineReview,
-                previousLedger: priorOutlineFactLedger,
-                chapters: [{ order, title: candidate.title, content: candidate.content,
-                  scenes: candidate.scenes, characterActions: candidate.characterActions,
-                  foreshadowing: candidate.foreshadowing, foreshadowingRecover: candidate.foreshadowingRecover,
-                  characterStates: candidate.characterStates, hook: candidate.hook }],
-              })}`,
-              { projectId, chapterIndex: order + 1, scenario: 'review', temperature: 0.1,
-                timeout: LLM_TUNABLES.timeoutComplex(), maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
-                validate: value => describeOutlineFactReview(normalizeOutlineFactReview(value)).length === 0,
-                describeValidation: value => describeOutlineFactReview(normalizeOutlineFactReview(value)) });
-            const review = normalizeOutlineFactReview(result.data);
-            const missing = review ? missingPriorLedgerEntries(priorOutlineFactLedger, review.ledger) : [];
-            return { review, missing };
-          };
+          const reviewChapterFacts = (candidate: Record<string, any>) => this.reviewOutlineFacts(
+            projectId, '第' + (order + 1) + '章生成前事实台账', canonicalCreativeBrief,
+            currentWorldForOutlineReview, priorOutlineFactLedger,
+            [chapterFactsForReview(order, candidate)],
+            executionStandardForReview, order + 1, acceptedOutlineSources);
           let factCheck = await reviewChapterFacts(chData);
-          if (!factCheck.review || !factCheck.review.consistent || factCheck.review.contradictions.length || factCheck.missing.length) {
-            const defects = [...(factCheck.review?.contradictions || []), ...factCheck.missing.map(item => `丢失前章台账：${item}`)];
+          if (!factCheck.consistent || factCheck.contradictions.length) {
+            const defects = factCheck.contradictions;
             const factRepairFields = [
               'title', 'content', 'coreContent', 'summary', 'plot', 'scenes', 'mainScenes',
               'characterActions', '人物行动', 'conflicts', 'conflict', 'conflictDesign',
@@ -7043,6 +6638,7 @@ ${(() => {
               `只修复当前章纲被事实审查逐项点名的矛盾。已确认题材与前章事实优先，世界观只能作不冲突的补充。不得删除本章职责、不得新增人物、不得换故事。
 【确认题材】${canonicalCreativeBrief}
 【已保存世界规则】${JSON.stringify(currentWorldForOutlineReview)}
+【已确认前章原始资料】${JSON.stringify(acceptedOutlineSources)}
 【前章事实台账】${JSON.stringify(priorOutlineFactLedger)}
 【当前章纲】${JSON.stringify(chData)}
 【必须逐项修复】${JSON.stringify(defects)}
@@ -7085,10 +6681,11 @@ ${(() => {
             }
             factCheck = await reviewChapterFacts(chData);
           }
-          if (!factCheck.review || !factCheck.review.consistent || factCheck.review.contradictions.length || factCheck.missing.length) {
-            throw new Error(`第${order + 1}章章纲事实仍互斥，停止生成后续章节：${[...(factCheck.review?.contradictions || []), ...factCheck.missing].join('；') || '复核未明确通过'}`);
+          if (!factCheck.consistent || factCheck.contradictions.length) {
+            throw this.outlineFactGateError(projectId, '第' + (order + 1) + '章章纲仍存在已举证的事实矛盾，停止生成后续章节：' +
+              factCheck.contradictions.join('；'), { chapter: chData, sourceChapters: acceptedOutlineSources, previousLedger: priorOutlineFactLedger, review: factCheck }, 'fact_conflict', order + 1);
           }
-          priorOutlineFactLedger = factCheck.review.ledger;
+          priorOutlineFactLedger = factCheck.ledger;
 
           let content = String(chData.content || chData.coreContent || chData.summary || chData.plot || chData['核心内容']).trim();
           // 统一把结构化字段以"标签：内容"格式合并到 content，确保前端能解析到所有字段
@@ -7167,7 +6764,7 @@ ${(() => {
             scenes: JSON.stringify(chapterScenes),
           });
           plannedChapterWords += chapterTargetWords;
-          previousSummary += `${previousSummary ? '\n' : ''}${buildChapterContinuityLedgerEntry(chData, order + 1)}`;
+          acceptedOutlineSources.push(normalizeOutlineChaptersForFactReview([chapterFactsForReview(order, chData)])[0] as Record<string, unknown>);
         }
 
         // 字数合计校正：LLM 各章 targetWords 之和不一定恰好等于项目目标，逐个"硬碰硬"失败。
@@ -7349,11 +6946,11 @@ ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || 
 ${dto.selectedIdea?.protagonist ? `【必须包含的主角（不可省略或改名）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}
 
 需要包含 5 个核心人物：1. 主角；2. 女主角/重要配角；3. 主要反派；4. 主要配角；5. 导师/智者或主要同盟。每个角色的字段必须严格按以下结构：
-【读者代入钩子（必填）】每个角色必须写明至少 2 类读者代入钩子并写入 readerEmpathyPoint：悲惨经历 / 反转设定 / 热血高光 / 牺牲瞬间（主角至少覆盖热血与牺牲之一）。例如"被最信任的人背叛后仍选择相信（悲惨+反转）"。
+【读者代入信息】readerEmpathyPoint按已注入角色设计执行标准填写。
 【成长标签（必填）】每个角色给出 2-3 个"从→到"成长标签（如"隐忍→爆发""冷漠→守护""轻信→审慎"），写入 growthTags 数组。
 【角色标签（必填）】每个角色给出 2-4 个角色定位标签（如"隐忍型主角""职场精英""双面间谍""黑化反派""温柔导师"），写入 tags 数组，用于快速识别角色定位。
 
-JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反派|导师同盟|其他","basicInfo":"基本信息：姓名、年龄、外貌、身份","personality":"[3个核心性格特质 + 1个矛盾点]，每个特质用一句话具体场景说明，而非抽象词；矛盾点必须用'但/却/然而'等转折词写明角色的不自洽之处","backstory":"背景故事：影响性格的关键经历，必须是改变角色当前行为模式的具体事件而非履历","abilities":"能力设定：详细的能力体系，包括等级划分、获得方式、约束条件、使用代价","goalMotivation":"目标动机：短期目标 + 长期理想，明确写出为什么想要、打算怎么做","growthArc":"成长弧光：从弱到强的具体过程，包括触发事件、阶段划分、最终状态","relationships":[{"targetName":"对方角色名","type":"盟友/对手/恋人/亲人/导师/下属","description":"关系性质与关键事件","future":"未来演变方向"}],"readerEmpathyPoint":"读者代入钩子：至少2类（悲惨/反转/热血/牺牲）","growthTags":["成长标签：2-3个从→到"],"tags":["角色标签：2-4个定位标签，如隐忍型主角/职场精英/双面间谍"],"aliasTitle":"别名/称号/头衔（可空）","faction":"所属阵营/势力与忠诚度（可空）","catchphrase":"口头禅/说话风格/用词习惯（可空）","fears":"弱点/恐惧：可被对手利用的具体软肋，不写'怕黑'而写'童年被关地下室导致幽闭恐惧，狭窄空间会呼吸困难、判断力下降'（可空）"}]`;
+JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反派|导师同盟|其他","basicInfo":"基本信息：姓名、年龄、外貌、身份","personality":"[3个核心性格特质 + 1个矛盾点]，每个特质用一句话具体场景说明，而非抽象词；矛盾点必须用'但/却/然而'等转折词写明角色的不自洽之处","backstory":"背景故事：影响性格的关键经历，必须是改变角色当前行为模式的具体事件而非履历","abilities":"能力与资源：符合本作品世界设定的实际能力、来源、边界与代价","goalMotivation":"目标动机：短期目标 + 长期理想，明确写出为什么想要、打算怎么做","growthArc":"成长弧光：由事件和选择推动的实际变化，包括触发、阶段与最终状态","relationships":[{"targetName":"对方角色名","type":"盟友/对手/恋人/亲人/导师/下属","description":"关系性质与关键事件","future":"未来演变方向"}],"readerEmpathyPoint":"按已注入角色标准描述具体处境与代入点","growthTags":["成长标签：2-3个从→到"],"tags":["角色标签：2-4个定位标签，如隐忍型主角/职场精英/双面间谍"],"aliasTitle":"别名/称号/头衔（可空）","faction":"所属阵营/势力与忠诚度（可空）","catchphrase":"口头禅/说话风格/用词习惯（可空）","fears":"弱点/恐惧：可被对手利用的具体软肋，不写'怕黑'而写'童年被关地下室导致幽闭恐惧，狭窄空间会呼吸困难、判断力下降'（可空）"}]`;
           const charResult = await this.llmCallWithRetry<any[]>('角色生成', charPrompt, {
             temperature: 0.8,
             timeout: LLM_TUNABLES.timeoutComplex(),
@@ -7868,332 +7465,17 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
       // 这里曾在短篇激活之后才异步生成世界观深度档案，后果是创建期审查通过的
       // 资料随后被第二份规则/时间线改写，第一章正文才发现源头冲突并反复 422。
       // 深度档案必须先落库，再与主表、章纲一起接受同一轮跨模块审查。
+      emit('profiles', 95, '完善组织、地点、章纲和伏笔资料...');
       warnings.push(...await this.enrichNewProjectProfiles(projectId, dto));
+      emit('profiles', 95, '创作资料完善完成', 'done');
+      emit('review', 96, '核对故事事实、章节因果和伏笔回收...');
 
       // 写入时间线和索引前，先证明各模块仍属于同一个已确认故事。
       // 这不是“字段非空”检查，而是阻止时代、类型、主角、案件和结局被独立生成任务改写。
-      const canonicalNames = [
-        dto.selectedIdea?.protagonist,
-        ...(Array.isArray(dto.selectedIdea?.characters) ? dto.selectedIdea.characters : []),
-      ].map((value: any) => {
-        const raw = typeof value === 'string'
-          ? value
-          : String(value?.name || value?.characterName || value?.identity || '');
-        return raw.split(/[：:，,（(]/)[0].trim();
-      }).filter((value: string) => value.length >= 2);
-      const truncateBundle = (s: any, max: number) => { const t = String(s || ''); return t.length > max ? t.slice(0, max) + '…' : t; };
-      const readGeneratedBundle = () => ({
-        world: (db.prepare(`SELECT id,era,geography,factions,rules,atmosphere,story_premise FROM world_settings WHERE project_id=?`).all(projectId) as any[])
-          .map((w: any) => ({ ...w, geography: truncateBundle(w.geography, 500), factions: truncateBundle(w.factions, 500), rules: truncateBundle(w.rules, 500), story_premise: truncateBundle(w.story_premise, 500) })),
-        worldProfiles: (db.prepare(`SELECT p.id,p.era,p.rules,p.tech_supernatural,p.system_mechanics,p.culture_customs,p.ending,p.hierarchy_rules FROM world_system_profiles p JOIN world_settings w ON w.id=p.world_setting_id AND w.project_id=p.project_id WHERE p.project_id=?`).all(projectId) as any[])
-          .map((p: any) => Object.fromEntries(Object.entries(p).map(([key, value]) => [key, truncateBundle(value, 1800)]))),
-        characters: (db.prepare(`SELECT id,name,identity,background,personality,abilities,relationships,arc FROM characters WHERE project_id=?`).all(projectId) as any[])
-          .map((c: any) => ({ id: c.id, name: c.name, identity: truncateBundle(c.identity, 300), background: truncateBundle(c.background, 300), personality: truncateBundle(c.personality, 300), abilities: truncateBundle(c.abilities, 200), relationships: truncateBundle(c.relationships, 200), arc: truncateBundle(c.arc, 200) })),
-        organizations: (db.prepare(`SELECT id,name,type,description,parent_id,level FROM organizations WHERE project_id=?`).all(projectId) as any[])
-          .map((o: any) => ({ id: o.id, name: o.name, type: o.type, description: truncateBundle(o.description, 300), parent_id: o.parent_id, level: o.level })),
-        mapPoints: (db.prepare(`SELECT id,name,type,description,parent_id,level FROM map_points WHERE project_id=?`).all(projectId) as any[])
-          .map((m: any) => ({ id: m.id, name: m.name, type: m.type, description: truncateBundle(m.description, 300), parent_id: m.parent_id, level: m.level })),
-        // 这里曾把章纲截断到500字后交给修订器作“完整字段”覆盖，后果是正文规划被省略号截断。
-        // 审查输入仍可裁剪，写回必须使用数据库原文中的精确锚点局部替换。
-        chapters: (db.prepare(`SELECT id,"order",title,content,scenes FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`).all(projectId) as any[])
-          .map((c: any) => ({ id: c.id, order: c.order, title: c.title, content: truncateBundle(c.content, 2400), scenes: truncateBundle(c.scenes, 600) })),
-        foreshadowings: (db.prepare(`SELECT id,content,buried_chapter_index,planned_recovery_chapter_index,evidence_text,recovery_condition,payoff_description FROM foreshadowings WHERE project_id=?`).all(projectId) as any[])
-          .map((f: any) => ({ id: f.id, content: truncateBundle(f.content, 250), buried_chapter_index: f.buried_chapter_index, planned_recovery_chapter_index: f.planned_recovery_chapter_index, evidence_text: truncateBundle(f.evidence_text, 200), recovery_condition: truncateBundle(f.recovery_condition, 200), payoff_description: truncateBundle(f.payoff_description, 200) })),
-      });
-      let generatedBundle = readGeneratedBundle();
-      let generatedBundleText = JSON.stringify(generatedBundle);
-      if (canonicalNames.length > 0 && !canonicalNames.some((name: string) => generatedBundleText.includes(name))) {
-        throw new Error(`创作资料已偏离确认题材：主角/核心人物“${canonicalNames.join('、')}”未出现在生成结果中，未创建时间线或索引。`);
-      }
-      // 项目激活前必须完成真实一致性审查。缺少审查结果不能伪造“通过”。
-      const describeAlignmentValidation = (value: any): string[] => {
-        const issues: string[] = [];
-        if (!value || typeof value.consistent !== 'boolean') issues.push('consistent必须为布尔值');
-        if (!Array.isArray(value?.contradictions)) issues.push('contradictions必须为数组');
-        if (!Array.isArray(value?.unrelatedInventions)) issues.push('unrelatedInventions必须为数组');
-        return issues;
-      };
-      const alignmentResult = await this.llmCallWithRetry<any>(
-        '跨模块故事一致性审查',
-        `核对生成资料是否严格属于同一个已确认故事。只判断事实一致性，不评价文风，不允许因为字段丰富就判定通过。${executionStandardForReview}
-【唯一故事基准】${canonicalCreativeBrief}
-【生成资料】${generatedBundleText}
-重点检查：${STORY_FACT_PRIORITY}。逐项核对已确认题材的触发条件、回拨范围、抹除对象和证据存续有没有被世界观主记录、深度档案或章纲擅自改变；深度档案不能新添骨架没有的代价或规则。继续检查时代、角色身份、地点、数量基线、时间线、各章因果、伏笔证据。任何下层改写上层事实或资料源互斥，必须 consistent=false 并指出字段与原文。
-只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["与故事无关的虚构"]}`,
-        {
-          temperature: 0.1,
-          timeout: LLM_TUNABLES.timeoutComplex(),
-          projectId,
-          scenario: 'review',
-          maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
-          validate: (value: any) => describeAlignmentValidation(value).length === 0,
-          describeValidation: describeAlignmentValidation,
-        },
-      );
-      let alignment = alignmentResult.data;
-      if (!alignment) {
-        throw new Error(`跨模块故事一致性审查未返回完整结构，未执行修订或激活：${alignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
-      }
-      let contradictions = [
-        ...(Array.isArray(alignment?.contradictions) ? alignment.contradictions : []),
-        ...(Array.isArray(alignment?.unrelatedInventions) ? alignment.unrelatedInventions : []),
-      ].map((item: any) => String(item || '').trim()).filter(Boolean);
-      // 一致性修订迭代：最多 2 次"修订→复查"；不能只按问题数量判断是否无进展，
-      // 因为修好一个问题后可能暴露另一个，数量不变仍应继续修订。
-      let repairAttempt = 0;
-      const MAX_CONSISTENCY_REPAIRS = 2;
-      while (!alignment || alignment.consistent !== true || contradictions.length > 0) {
-        if (contradictions.length === 0) {
-          throw new Error('跨模块故事一致性审查未确认通过，但没有提供可修订的具体矛盾；项目未激活，请重新生成。');
-        }
-        if (repairAttempt >= MAX_CONSISTENCY_REPAIRS) break;
-        repairAttempt++;
-        const repairResult = await this.llmCallWithRetry<any>(
-          `跨模块故事一致性修订（第${repairAttempt}次）`,
-          `${STORY_FACT_PRIORITY}\
-根据审查发现，对本次尚未激活的AI生成资料做最小修订。世界观/world/worldProfile 只作为不可变参照，绝对不得作为 patch 目标；优先选择影响范围最小、修改单元最少、下游依赖最少、尚未执行的资料把冲突圆回。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向；只能修正互斥的专名、时间、数量、年龄、伤病历史和因果事实。先逐项核对数量基线、历史已发生事件、每次触发后的增减和时间规则；已确认题材是上层事实，下层与它互斥时必须改最小影响面的下层；已确认题材自身互斥时不得凭空声称两种说法都成立。每个patch只替换字段内一段逐字存在的短原文，match必须在当前资料对应字段中逐字出现且只出现一次；replacement是替换该短原文的新片段，不是完整字段，不得带省略号。多处需改就给多个patch，尤其章纲与伏笔计数要同步。\n【唯一故事基准】${canonicalCreativeBrief}\n【当前资料（id是唯一可用entityId；末尾…表示仅供审查的截断显示，绝不可写回）】${generatedBundleText}\n【必须修复的矛盾】${JSON.stringify(contradictions)}\n只输出JSON:{"patches":[{"entityType":"character|organization|mapPoint|chapter|foreshadowing","entityId":"当前资料中的id","field":"允许字段","match":"该字段中逐字存在且只出现一次的短原文","replacement":"替换后的短片段","reason":"对应矛盾"}]}`,
-          {
-            temperature: 0.1,
-            timeout: LLM_TUNABLES.timeoutComplex(),
-            projectId,
-            scenario: 'review',
-            // 修订可能需要给出完整的章节或资料字段，不能把固定 4096 当作
-            // 所有项目的上限；仍按矛盾数量设置有界输出，避免无控制膨胀。
-            maxTokens: Math.max(
-              LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
-              Math.min(
-                LLM_TUNABLES.CONSISTENCY_CHECK_MAX,
-                LLM_TUNABLES.CONSISTENCY_CHECK_BASE + contradictions.length * LLM_TUNABLES.CONSISTENCY_CHECK_PER_CONFLICT,
-              ),
-            ),
-            validate: (value: any) => Array.isArray(value?.patches) && value.patches.length > 0 && value.patches.length <= 24
-              && value.patches.every((patch: any) => typeof patch?.match === 'string' && patch.match.trim().length > 0
-                && typeof patch?.replacement === 'string' && patch.replacement.trim().length > 0),
-            describeValidation: (value: any) => !Array.isArray(value?.patches)
-              ? ['必须返回patches数组']
-              : (value.patches.length === 0 ? ['检测到矛盾时patches不能为空'] : []),
-          },
-        );
-        const patches = repairResult.data?.patches;
-        if (!Array.isArray(patches) || patches.length === 0) {
-          throw new Error(`跨模块一致性修订未返回有效patches，未写入任何半成品：${repairResult.warnings.join('；') || '模型超时或输出格式无法解析。建议减少项目模块数据量后重试。'}`);
-        }
+      await this.reviewCreationConsistency(projectId, dto, canonicalCreativeBrief, executionStandardForReview, warnings, emit);
 
-        // 不可变/安全敏感列：一致性修订接口永远不允许修改（主键、租户隔离、时间戳由系统维护）。
-        const PROTECTED_PATCH_COLUMNS = new Set(['id', 'project_id', 'created_at', 'updated_at']);
-        // 实体类型 -> 真实表名（表名来自固定映射，非用户输入，可安全用于 PRAGMA 插值）
-        // 可修实体唯一来源在 cross-stage-patch；world/worldProfile 刻意不在表中，世界观永不作为修复目标。
-        const PATCH_TABLE_MAP = CROSS_STAGE_PATCH_TABLE_MAP;
-        // 允许修订的列直接从数据库真实表结构推导，而非手写白名单。
-        // 根治“白名单写漏字段（如 buried_chapter_index）”导致合法修订被整批丢弃的反复 bug：
-        // 凡是表内真实存在且非受保护列的字段，一致性修订都可修正，问题从源头解决。
-        const patchTargetCache = new Map<string, { table: string; fields: Set<string> } | null>();
-        const getPatchTarget = (entityType: string): { table: string; fields: Set<string> } | null => {
-          if (!patchTargetCache.has(entityType)) {
-            const table = PATCH_TABLE_MAP[String(entityType || '')];
-            if (!table) { patchTargetCache.set(entityType, null); return null; }
-            const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-            const fields = new Set<string>();
-            for (const c of cols) {
-              if (!PROTECTED_PATCH_COLUMNS.has(c.name)) fields.add(c.name);
-            }
-            patchTargetCache.set(entityType, { table, fields });
-          }
-          return patchTargetCache.get(entityType) ?? null;
-        };
-        const validIds = new Set(Object.values(generatedBundle).flatMap((rows: any[]) => rows.map(row => String(row.id))));
-        let appliedPatchCount = 0;
-        let skippedPatchCount = 0;
-        const previousBundleText = generatedBundleText;
-
-        // 先让机器成本选择器从同一矛盾的候选位置里挑最小影响点；世界观在 selector 和目标映射两层都不可选。
-        const repairCandidates = patches.map((patch: any) => {
-          const match = String(patch?.match || '');
-          const occurrences = match ? generatedBundleText.split(match).length - 1 : 0;
-          return { ...patch, dependentCount: Math.max(0, occurrences - 1) };
-        });
-        const selectedPatches = selectMinimumImpactCrossStagePatches(repairCandidates);
-        if (selectedPatches.length === 0) {
-          throw new Error('跨模块一致性没有可安全自动修改的最小代价候选；世界观/锁定事实保持不变，项目未激活。');
-        }
-
-        // 所有修改先落在内存候选上。候选未通过二次审查前，数据库 Canon 一个字都不改。
-        const candidateBundle = structuredClone(generatedBundle) as Record<string, any[]>;
-        const candidateRows = Object.values(candidateBundle).flatMap((rows: any[]) => rows);
-        const pendingUpdates = new Map<string, {
-          table: string; field: string; entityId: string; entityType: string;
-          originalValue: string; nextValue: string;
-        }>();
-
-        for (const patch of selectedPatches) {
-          const entityType = String(patch?.entityType || '');
-          const target = getPatchTarget(entityType);
-          const entityId = String(patch?.entityId || '');
-          const field = String(patch?.field || '');
-          const replacement = patch?.replacement;
-          const match = patch?.match;
-          const visibleRow = candidateRows.find((row: any) => String(row.id) === entityId) as Record<string, unknown> | undefined;
-          const immutableWorldTarget = isImmutableWorldPatchTarget(entityType);
-          const skipReason = immutableWorldTarget
-            ? `世界观 Canon 已冻结，跨阶段修复禁止修改 ${entityType}`
-            : !target
-              ? `未知实体类型 ${entityType}`
-              : !target.fields.has(field)
-                ? `字段 ${field} 受保护或不存在于表 ${target.table}`
-                : !validIds.has(entityId)
-                  ? `实体 ${entityId} 不在本次生成范围内`
-                  : !visibleRow || typeof visibleRow[field] !== 'string' || !String(visibleRow[field]).includes(String(match))
-                    ? '原文锚点不在本次审查资料中'
-                    : typeof match !== 'string' || !match.trim() || typeof replacement !== 'string' || !replacement.trim()
-                      ? '原文锚点或修订值为空'
-                      : null;
-          if (skipReason) {
-            warnings.push(`一致性候选跳过：${entityType}#${entityId}.${field}（${skipReason}）`);
-            skippedPatchCount++;
-            continue;
-          }
-          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
-            skippedPatchCount++;
-            continue;
-          }
-
-          const key = `${target!.table}:${entityId}:${field}`;
-          let pending = pendingUpdates.get(key);
-          if (!pending) {
-            const currentRow = db.prepare(`SELECT "${field}" AS value FROM ${target!.table} WHERE id=? AND project_id=?`)
-              .get(entityId, projectId) as { value: unknown } | undefined;
-            if (!currentRow || typeof currentRow.value !== 'string') {
-              warnings.push(`一致性候选目标字段不是文本，已跳过：${entityType}#${entityId}.${field}`);
-              skippedPatchCount++;
-              continue;
-            }
-            pending = {
-              table: target!.table,
-              field,
-              entityId,
-              entityType,
-              originalValue: currentRow.value,
-              nextValue: currentRow.value,
-            };
-            pendingUpdates.set(key, pending);
-          }
-
-          const nextStoredValue = applyCrossStagePatch(pending.nextValue, match, replacement);
-          const nextVisibleValue = applyCrossStagePatch(String(visibleRow![field]), match, replacement);
-          if (nextStoredValue === null || nextVisibleValue === null) {
-            warnings.push(`一致性候选原文锚点缺失、不唯一或破坏JSON结构，已跳过：${entityType}#${entityId}.${field}`);
-            skippedPatchCount++;
-            continue;
-          }
-          pending.nextValue = nextStoredValue;
-          visibleRow![field] = nextVisibleValue;
-          appliedPatchCount++;
-        }
-
-        if (appliedPatchCount === 0 || pendingUpdates.size === 0) {
-          throw new Error(`跨模块一致性没有形成可复查的候选修改（跳过${skippedPatchCount}处），项目未激活。`);
-        }
-        const candidateBundleText = JSON.stringify(candidateBundle);
-        if (candidateBundleText === previousBundleText) {
-          throw new Error(`跨模块一致性候选没有改变任何审查字段（候选${appliedPatchCount}处，跳过${skippedPatchCount}处），项目未激活。`);
-        }
-
-        const secondAlignmentResult = await this.llmCallWithRetry<any>(
-          `跨模块故事一致性第${repairAttempt}次候选复查`,
-          `${STORY_FACT_PRIORITY}\n核对候选修订后的资料是否严格属于同一个故事并且事实互不矛盾。世界观只是不可变参照，绝对不能通过修改世界观来让候选通过。检查确认题材与冻结世界观、角色、章纲、组织、地点、伏笔之间的专名、年龄、时间跨度、伤病历史、章节因果、结局和证据是否一致。只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["无关虚构"]}\n【唯一故事基准】${canonicalCreativeBrief}\n【候选修订资料】${candidateBundleText}`,
-          {
-            temperature: 0.1,
-            timeout: LLM_TUNABLES.timeoutComplex(),
-            projectId,
-            scenario: 'review',
-            validate: (value: any) => describeAlignmentValidation(value).length === 0,
-            describeValidation: describeAlignmentValidation,
-          },
-        );
-        const candidateAlignment = secondAlignmentResult.data;
-        if (!candidateAlignment) {
-          throw new Error(`跨模块一致性候选复查未返回完整结构，数据库未修改：${secondAlignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
-        }
-        const candidateContradictions = [
-          ...(Array.isArray(candidateAlignment?.contradictions) ? candidateAlignment.contradictions : []),
-          ...(Array.isArray(candidateAlignment?.unrelatedInventions) ? candidateAlignment.unrelatedInventions : []),
-        ].map((item: any) => String(item || '').trim()).filter(Boolean);
-
-        if (candidateAlignment.consistent === true && candidateContradictions.length === 0) {
-          // 候选已审查通过后才允许写 live Canon；WHERE 旧值是乐观锁，防止复查期间其它流程改了同一字段。
-          db.exec('BEGIN IMMEDIATE');
-          try {
-            for (const update of pendingUpdates.values()) {
-              const updateResult = db.prepare(
-                `UPDATE ${update.table} SET "${update.field}"=?, updated_at=? WHERE id=? AND project_id=? AND "${update.field}"=?`,
-              ).run(update.nextValue, now(), update.entityId, projectId, update.originalValue);
-              if (Number(updateResult.changes || 0) !== 1) {
-                throw new Error(`一致性候选提交冲突：${update.entityType}#${update.entityId}.${update.field} 在复查期间已变化`);
-              }
-            }
-            db.exec('COMMIT');
-          } catch (error) {
-            try { db.exec('ROLLBACK'); } catch {}
-            throw error;
-          }
-          generatedBundle = readGeneratedBundle();
-          generatedBundleText = JSON.stringify(generatedBundle);
-          warnings.push(`跨模块一致性候选复查通过后提交 ${appliedPatchCount} 处最小影响修订（跳过 ${skippedPatchCount} 处），世界观未修改`);
-        } else {
-          // 失败候选只存在于内存，下一轮仍基于原 Canon 重新选最小代价点。
-          warnings.push(`第${repairAttempt}次最小影响候选仍有${candidateContradictions.length}处冲突，已丢弃候选，数据库 Canon 未修改`);
-        }
-
-        alignment = secondAlignmentResult.data;
-        if (!alignment) {
-          throw new Error(`跨模块一致性二次审查未返回完整结构，项目未激活：${secondAlignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
-        }
-        contradictions = [
-          ...(Array.isArray(alignment?.contradictions) ? alignment.contradictions : []),
-          ...(Array.isArray(alignment?.unrelatedInventions) ? alignment.unrelatedInventions : []),
-        ].map((item: any) => String(item || '').trim()).filter(Boolean);
-      }
-      if (!alignment) {
-        throw new Error(`跨模块故事一致性审查未返回完整结构，项目未激活：consistent/contradictions/unrelatedInventions缺失`);
-      }
-      if (alignment.consistent !== true || contradictions.length > 0) {
-        replaceQualityIssues(db, {
-          projectId,
-          stage: 'project',
-          source: 'cross_stage_gate',
-          scopeKey: 'creation',
-          title: '跨阶段一致性 Gate',
-          issues: contradictions.map((message, index) => ({
-            ruleId: `cross_stage_consistency.${index + 1}`,
-            severity: 'blocking',
-            message,
-            quote: '',
-            content: generatedBundleText,
-            evidenceVerified: false,
-            suggestion: '保持冻结世界观不变，在章纲、未来计划、角色状态、组织、地点或伏笔中选择最小影响修复点后重新检查。',
-            details: { repairAttempt, evidence: '模型未返回可逐字定位的原文，因此按证据不足阻断。' },
-          })),
-        });
-        const gateError = `跨模块一致性经${repairAttempt}次自动修订后仍存${contradictions.length}处问题，已阻断项目激活：${contradictions.join('；')}`;
-        try {
-          // 这里曾只有成功的模型 review 运行，最终项目 Gate 失败却没有 failed run，
-          // 后果是诊断看板显示项目生成失败但失败运行数为零。
-          const gateRun = this.generationMetrics.beginRun(projectId, 'review', gateError,
-            undefined, 'cross_stage_gate', null, false);
-          this.generationMetrics.finishRun(gateRun.id, 'failed', Date.now(), generatedBundleText, gateError);
-        } catch (recordError) {
-          this.logger.warn(`跨模块 Gate 失败运行落库失败（不改变阻断结论）：${recordError instanceof Error ? recordError.message : String(recordError)}`);
-        }
-        throw new Error(gateError);
-      }
-      replaceQualityIssues(db, {
-        projectId,
-        stage: 'project',
-        source: 'cross_stage_gate',
-        scopeKey: 'creation',
-        title: '跨阶段一致性 Gate',
-        issues: [],
-      });
+      emit('review', 97, '跨模块事实一致性审查已通过', 'done');
+      emit('timeline', 98, '建立故事时间线...');
 
       // ====== 步骤6：创建默认时间线 ======
       if (!hasTimeline || !hasTimelineEvents) {
@@ -8284,12 +7566,344 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
     }
   }
 
-  /**
-   * 项目创建完成后补全各模块深度资料（之前创建流程只写了主表，profile / depth 表从未被填充）：
-   * 角色 character_extended_profiles、世界观 world_system_profiles、
-   * 组织 depth、地点 depth、大纲 depth、伏笔 depth。
-   * 这是「补全」步骤：任一模块失败只记录 warning，绝不回滚或中断项目激活。
-   */
+  /** 同一故事的最终审查与事务提交边界，供创建流程和故障回归共用。 */
+  private async reviewCreationConsistency(
+    projectId: string,
+    dto: { selectedIdea: any },
+    canonicalCreativeBrief: string,
+    executionStandardForReview: string,
+    warnings: string[],
+    emit: (step: string, percent: number, message: string, status?: 'running' | 'done' | 'failed') => void,
+  ): Promise<void> {
+    const db = this.db.getDb();
+    const now = () => new Date().toISOString();
+    canonicalCreativeBrief = canonicalBriefForAudit(canonicalCreativeBrief);
+    const canonicalNames = [
+      dto.selectedIdea?.protagonist,
+      ...(Array.isArray(dto.selectedIdea?.characters) ? dto.selectedIdea.characters : []),
+    ].map((value: any) => {
+      const raw = typeof value === 'string'
+        ? value
+        : String(value?.name || value?.characterName || value?.identity || '');
+      return raw.split(/[：:，,（(]/)[0].trim();
+    }).filter((value: string) => value.length >= 2);
+    const truncateBundle = (s: any, max: number) => { const t = String(s || ''); return t.length > max ? t.slice(0, max) + '…' : t; };
+    const readGeneratedBundle = () => ({
+      world: (db.prepare(`SELECT id,era,geography,factions,rules,atmosphere,story_premise FROM world_settings WHERE project_id=?`).all(projectId) as any[])
+        .map((w: any) => ({ ...w, geography: truncateBundle(w.geography, 500), factions: truncateBundle(w.factions, 500), rules: truncateBundle(w.rules, 500), story_premise: truncateBundle(w.story_premise, 500) })),
+      worldProfiles: (db.prepare(`SELECT p.id,p.era,p.rules,p.tech_supernatural,p.system_mechanics,p.culture_customs,p.ending,p.hierarchy_rules FROM world_system_profiles p JOIN world_settings w ON w.id=p.world_setting_id AND w.project_id=p.project_id WHERE p.project_id=?`).all(projectId) as any[])
+        .map((p: any) => Object.fromEntries(Object.entries(p).map(([key, value]) => [key, truncateBundle(key === 'hierarchy_rules' ? storyHierarchyForAudit(value, buildCanonPolicyDirective()) : value, 1800)]))),
+      characters: (db.prepare(`SELECT id,name,identity,background,personality,abilities,relationships,arc FROM characters WHERE project_id=?`).all(projectId) as any[])
+        .map((c: any) => ({ id: c.id, name: c.name, identity: truncateBundle(c.identity, 300), background: truncateBundle(c.background, 300), personality: truncateBundle(c.personality, 300), abilities: truncateBundle(c.abilities, 200), relationships: truncateBundle(c.relationships, 200), arc: truncateBundle(c.arc, 200) })),
+      organizations: (db.prepare(`SELECT id,name,type,description,parent_id,level FROM organizations WHERE project_id=?`).all(projectId) as any[])
+        .map((o: any) => ({ id: o.id, name: o.name, type: o.type, description: truncateBundle(o.description, 300), parent_id: o.parent_id, level: o.level })),
+      mapPoints: (db.prepare(`SELECT id,name,type,description,parent_id,level FROM map_points WHERE project_id=?`).all(projectId) as any[])
+        .map((m: any) => ({ id: m.id, name: m.name, type: m.type, description: truncateBundle(m.description, 300), parent_id: m.parent_id, level: m.level })),
+      // 这里曾把章纲截断到500字后交给修订器作“完整字段”覆盖，后果是正文规划被省略号截断。
+      // 审查输入仍可裁剪，写回必须使用数据库原文中的精确锚点局部替换。
+      chapters: readOrderedChapterOutlines(db, projectId)
+        .map((c: any, index: number) => ({ id: c.id, chapterIndex: chapterNumberFromOrder(index), title: c.title, content: truncateBundle(c.content, 2400), scenes: truncateBundle(c.scenes, 600) })),
+      foreshadowings: (db.prepare(`SELECT id,content,buried_chapter_index,planned_recovery_chapter_index,evidence_text,recovery_condition,payoff_description FROM foreshadowings WHERE project_id=?`).all(projectId) as any[])
+        .map((f: any) => ({ id: f.id, content: truncateBundle(f.content, 250), buried_chapter_index: f.buried_chapter_index, planned_recovery_chapter_index: f.planned_recovery_chapter_index, evidence_text: truncateBundle(f.evidence_text, 200), recovery_condition: truncateBundle(f.recovery_condition, 200), payoff_description: truncateBundle(f.payoff_description, 200) })),
+    });
+    let generatedBundle = readGeneratedBundle();
+    let generatedBundleText = JSON.stringify(generatedBundle);
+    if (canonicalNames.length > 0 && !canonicalNames.some((name: string) => generatedBundleText.includes(name))) {
+      throw new Error(`创作资料已偏离确认题材：主角/核心人物“${canonicalNames.join('、')}”未出现在生成结果中，未创建时间线或索引。`);
+    }
+    // 项目激活前必须完成真实一致性审查。缺少审查结果不能伪造“通过”。
+    const describeAlignmentValidation = (value: any): string[] => {
+      const issues: string[] = [];
+      if (!value || typeof value.consistent !== 'boolean') issues.push('consistent必须为布尔值');
+      if (!Array.isArray(value?.contradictions)) issues.push('contradictions必须为数组');
+      if (!Array.isArray(value?.unrelatedInventions)) issues.push('unrelatedInventions必须为数组');
+      return issues;
+    };
+    const alignmentResult = await this.llmCallWithRetry<any>(
+      '跨模块故事一致性审查',
+      `核对生成资料是否严格属于同一个已确认故事。只判断事实一致性，不评价文风，不允许因为字段丰富就判定通过。${executionStandardForReview}
+【唯一故事基准】${canonicalCreativeBrief}
+【生成资料】${generatedBundleText}
+重点检查：${STORY_FACT_PRIORITY}。逐项核对已确认题材的触发条件、回拨范围、抹除对象和证据存续有没有被世界观主记录、深度档案或章纲擅自改变；深度档案不能新添骨架没有的代价或规则。继续检查时代、角色身份、地点、数量基线、时间线、各章因果、伏笔证据。任何下层改写上层事实或资料源互斥，必须 consistent=false 并指出字段与原文。
+只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["与故事无关的虚构"]}`,
+      {
+        temperature: 0.1,
+        timeout: LLM_TUNABLES.timeoutComplex(),
+        projectId,
+        scenario: 'review',
+        maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
+        validate: (value: any) => describeAlignmentValidation(value).length === 0,
+        describeValidation: describeAlignmentValidation,
+      },
+    );
+    let alignment = alignmentResult.data;
+    if (!alignment) {
+      throw new Error(`跨模块故事一致性审查未返回完整结构，未执行修订或激活：${alignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
+    }
+    let contradictions = [
+      ...(Array.isArray(alignment?.contradictions) ? alignment.contradictions : []),
+      ...(Array.isArray(alignment?.unrelatedInventions) ? alignment.unrelatedInventions : []),
+    ].map((item: any) => String(item || '').trim()).filter(Boolean);
+    // 一致性修订迭代：最多 2 次"修订→复查"；不能只按问题数量判断是否无进展，
+    // 因为修好一个问题后可能暴露另一个，数量不变仍应继续修订。
+    let repairAttempt = 0;
+    const MAX_CONSISTENCY_REPAIRS = 2;
+    while (!alignment || alignment.consistent !== true || contradictions.length > 0) {
+      if (contradictions.length === 0) {
+        throw new Error('跨模块故事一致性审查未确认通过，但没有提供可修订的具体矛盾；项目未激活，请重新生成。');
+      }
+      if (repairAttempt >= MAX_CONSISTENCY_REPAIRS) break;
+      repairAttempt++;
+      emit('review', 96, `正在进行第${repairAttempt}轮最小影响修订与复查...`);
+      const repairResult = await this.llmCallWithRetry<any>(
+        `跨模块故事一致性修订（第${repairAttempt}次）`,
+        `${STORY_FACT_PRIORITY}\
+根据审查发现，对本次尚未激活的AI生成资料做最小修订。世界观/world/worldProfile 只作为不可变参照，绝对不得作为 patch 目标；优先选择影响范围最小、修改单元最少、下游依赖最少、尚未执行的资料把冲突圆回。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向；只能修正互斥的专名、时间、数量、年龄、伤病历史和因果事实。先逐项核对数量基线、历史已发生事件、每次触发后的增减和时间规则；已确认题材是上层事实，下层与它互斥时必须改最小影响面的下层；已确认题材自身互斥时不得凭空声称两种说法都成立。每个patch只替换字段内一段逐字存在的短原文，match必须在当前资料对应字段中逐字出现且只出现一次；replacement是替换该短原文的新片段，不是完整字段，不得带省略号。多处需改就给多个patch，尤其章纲与伏笔计数要同步。\n【唯一故事基准】${canonicalCreativeBrief}\n【当前资料（id是唯一可用entityId；末尾…表示仅供审查的截断显示，绝不可写回）】${generatedBundleText}\n【字段约束】entityType对应characters/organizations/mapPoints/chapters/foreshadowings；field只能填写对应对象的真实键名，例如chapter.content，不得使用内容内的中文小标题。伏笔章节序号可以修订，match和replacement为完整旧整数与新整数的字符串，新序号必须在已有章节范围内。\n【必须修复的矛盾】${JSON.stringify(contradictions)}\n只输出JSON:{"patches":[{"entityType":"character|organization|mapPoint|chapter|foreshadowing","entityId":"当前资料中的id","field":"允许字段","match":"该字段中逐字存在且只出现一次的短原文","replacement":"替换后的短片段","reason":"对应矛盾"}]}`,
+        {
+          temperature: 0.1,
+          timeout: LLM_TUNABLES.timeoutComplex(),
+          projectId,
+          scenario: 'review',
+          // 修订可能需要给出完整的章节或资料字段，不能把固定 4096 当作
+          // 所有项目的上限；仍按矛盾数量设置有界输出，避免无控制膨胀。
+          maxTokens: Math.max(
+            LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
+            Math.min(
+              LLM_TUNABLES.CONSISTENCY_CHECK_MAX,
+              LLM_TUNABLES.CONSISTENCY_CHECK_BASE + contradictions.length * LLM_TUNABLES.CONSISTENCY_CHECK_PER_CONFLICT,
+            ),
+          ),
+          validate: (value: any) => describeCrossStagePatchValidation(value, generatedBundle).length === 0,
+          describeValidation: (value: any) => describeCrossStagePatchValidation(value, generatedBundle),
+          retryInstruction: '重新按【必须修复的矛盾】逐项生成完整patches对象，保留所有仍需解决的真实故事问题，不能只返回导致校验失败的补丁。chapterIndex是只读的从1开始章节号，伏笔采用同一坐标；禁止改为0。entityType必须使用单数chapter、foreshadowing，不得改为表名。只修正patches，不要返回或同步整份章纲对象。',
+        },
+      );
+      const patches = repairResult.data?.patches;
+      if (!Array.isArray(patches) || patches.length === 0) {
+        throw new Error(`跨模块一致性修订未返回有效patches，未写入任何半成品：${repairResult.warnings.join('；') || '模型超时或输出格式无法解析。建议减少项目模块数据量后重试。'}`);
+      }
+
+      // 不可变/安全敏感列：一致性修订接口永远不允许修改（主键、租户隔离、时间戳由系统维护）。
+      const PROTECTED_PATCH_COLUMNS = new Set(['id', 'project_id', 'created_at', 'updated_at']);
+      // 实体类型 -> 真实表名（表名来自固定映射，非用户输入，可安全用于 PRAGMA 插值）
+      // 可修实体唯一来源在 cross-stage-patch；world/worldProfile 刻意不在表中，世界观永不作为修复目标。
+      const PATCH_TABLE_MAP = CROSS_STAGE_PATCH_TABLE_MAP;
+      // 允许修订的列直接从数据库真实表结构推导，而非手写白名单。
+      // 根治“白名单写漏字段（如 buried_chapter_index）”导致合法修订被整批丢弃的反复 bug：
+      // 凡是表内真实存在且非受保护列的字段，一致性修订都可修正，问题从源头解决。
+      const patchTargetCache = new Map<string, { table: string; fields: Set<string> } | null>();
+      const getPatchTarget = (entityType: string): { table: string; fields: Set<string> } | null => {
+        if (!patchTargetCache.has(entityType)) {
+          const table = PATCH_TABLE_MAP[String(entityType || '')];
+          if (!table) { patchTargetCache.set(entityType, null); return null; }
+          const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+          const fields = new Set<string>();
+          for (const c of cols) {
+            if (!PROTECTED_PATCH_COLUMNS.has(c.name)) fields.add(c.name);
+          }
+          patchTargetCache.set(entityType, { table, fields });
+        }
+        return patchTargetCache.get(entityType) ?? null;
+      };
+      const validIds = new Set(Object.values(generatedBundle).flatMap((rows: any[]) => rows.map(row => String(row.id))));
+      let appliedPatchCount = 0;
+      let skippedPatchCount = 0;
+      const previousBundleText = generatedBundleText;
+
+      // 先让机器成本选择器从同一矛盾的候选位置里挑最小影响点；世界观在 selector 和目标映射两层都不可选。
+      const repairCandidates = patches.map((patch: any) => {
+        const match = String(patch?.match || '');
+        const occurrences = match ? generatedBundleText.split(match).length - 1 : 0;
+        return { ...patch, dependentCount: Math.max(0, occurrences - 1) };
+      });
+      const selectedPatches = selectMinimumImpactCrossStagePatches(repairCandidates);
+      if (selectedPatches.length === 0) {
+        throw new Error('跨模块一致性没有可安全自动修改的最小代价候选；世界观/锁定事实保持不变，项目未激活。');
+      }
+
+      // 所有修改先落在内存候选上。候选未通过二次审查前，数据库 Canon 一个字都不改。
+      const candidateBundle = structuredClone(generatedBundle) as Record<string, any[]>;
+      const candidateRows = Object.values(candidateBundle).flatMap((rows: any[]) => rows);
+      const pendingUpdates = new Map<string, {
+        table: string; field: string; entityId: string; entityType: string;
+        originalValue: string | number; nextValue: string | number;
+      }>();
+
+      for (const patch of selectedPatches) {
+        const entityType = String(patch?.entityType || '');
+        const target = getPatchTarget(entityType);
+        const entityId = String(patch?.entityId || '');
+        const field = String(patch?.field || '');
+        const replacement = patch?.replacement;
+        const match = patch?.match;
+        const visibleRow = candidateRows.find((row: any) => String(row.id) === entityId) as Record<string, unknown> | undefined;
+        const immutableWorldTarget = isImmutableWorldPatchTarget(entityType);
+        const skipReason = immutableWorldTarget
+          ? `世界观 Canon 已冻结，跨阶段修复禁止修改 ${entityType}`
+          : !target
+            ? `未知实体类型 ${entityType}`
+            : !target.fields.has(field)
+              ? `字段 ${field} 受保护或不存在于表 ${target.table}`
+              : !validIds.has(entityId)
+                ? `实体 ${entityId} 不在本次生成范围内`
+                : !visibleRow || (typeof visibleRow[field] !== 'string' && typeof visibleRow[field] !== 'number') || !String(visibleRow[field]).includes(String(match))
+                  ? '原文锚点不在本次审查资料中'
+                  : typeof match !== 'string' || !match.trim() || typeof replacement !== 'string' || !replacement.trim()
+                    ? '原文锚点或修订值为空'
+                    : null;
+        if (skipReason) {
+          warnings.push(`一致性候选跳过：${entityType}#${entityId}.${field}（${skipReason}）`);
+          skippedPatchCount++;
+          continue;
+        }
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
+          skippedPatchCount++;
+          continue;
+        }
+
+        const key = `${target!.table}:${entityId}:${field}`;
+        let pending = pendingUpdates.get(key);
+        if (!pending) {
+          const currentRow = db.prepare(`SELECT "${field}" AS value FROM ${target!.table} WHERE id=? AND project_id=?`)
+            .get(entityId, projectId) as { value: unknown } | undefined;
+          if (!currentRow || (typeof currentRow.value !== 'string' && typeof currentRow.value !== 'number')) {
+            warnings.push(`一致性候选目标字段不是文本，已跳过：${entityType}#${entityId}.${field}`);
+            skippedPatchCount++;
+            continue;
+          }
+          pending = {
+            table: target!.table,
+            field,
+            entityId,
+            entityType,
+            originalValue: currentRow.value,
+            nextValue: currentRow.value,
+          };
+          pendingUpdates.set(key, pending);
+        }
+
+        const nextStoredValue = applyCrossStageFieldPatch(pending.nextValue, match, replacement);
+        const nextVisibleValue = applyCrossStageFieldPatch(visibleRow![field] as string | number, match, replacement);
+        if (nextStoredValue === null || nextVisibleValue === null) {
+          warnings.push(`一致性候选原文锚点缺失、不唯一或破坏JSON结构，已跳过：${entityType}#${entityId}.${field}`);
+          skippedPatchCount++;
+          continue;
+        }
+        pending.nextValue = nextStoredValue;
+        visibleRow![field] = nextVisibleValue;
+        appliedPatchCount++;
+      }
+
+      if (appliedPatchCount === 0 || pendingUpdates.size === 0) {
+        throw new Error(`跨模块一致性没有形成可复查的候选修改（跳过${skippedPatchCount}处），项目未激活。`);
+      }
+      const candidateBundleText = JSON.stringify(candidateBundle);
+      if (candidateBundleText === previousBundleText) {
+        throw new Error(`跨模块一致性候选没有改变任何审查字段（候选${appliedPatchCount}处，跳过${skippedPatchCount}处），项目未激活。`);
+      }
+
+      const secondAlignmentResult = await this.llmCallWithRetry<any>(
+        `跨模块故事一致性第${repairAttempt}次候选复查`,
+        `${STORY_FACT_PRIORITY}\n核对候选修订后的资料是否严格属于同一个故事并且事实互不矛盾。世界观只是不可变参照，绝对不能通过修改世界观来让候选通过。检查确认题材与冻结世界观、角色、章纲、组织、地点、伏笔之间的专名、年龄、时间跨度、伤病历史、章节因果、结局和证据是否一致。只输出JSON:{"consistent":true,"canonicalFactsPreserved":["已保留事实"],"contradictions":["具体矛盾"],"unrelatedInventions":["无关虚构"]}\n【唯一故事基准】${canonicalCreativeBrief}\n【候选修订资料】${candidateBundleText}`,
+        {
+          temperature: 0.1,
+          timeout: LLM_TUNABLES.timeoutComplex(),
+          projectId,
+          scenario: 'review',
+          validate: (value: any) => describeAlignmentValidation(value).length === 0,
+          describeValidation: describeAlignmentValidation,
+        },
+      );
+      const candidateAlignment = secondAlignmentResult.data;
+      if (!candidateAlignment) {
+        throw new Error(`跨模块一致性候选复查未返回完整结构，数据库未修改：${secondAlignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
+      }
+      const candidateContradictions = [
+        ...(Array.isArray(candidateAlignment?.contradictions) ? candidateAlignment.contradictions : []),
+        ...(Array.isArray(candidateAlignment?.unrelatedInventions) ? candidateAlignment.unrelatedInventions : []),
+      ].map((item: any) => String(item || '').trim()).filter(Boolean);
+
+      if (candidateAlignment.consistent === true && candidateContradictions.length === 0) {
+        // 候选已审查通过后才允许写 live Canon；WHERE 旧值是乐观锁，防止复查期间其它流程改了同一字段。
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          for (const update of pendingUpdates.values()) {
+            const updateResult = db.prepare(
+              `UPDATE ${update.table} SET "${update.field}"=?, updated_at=? WHERE id=? AND project_id=? AND "${update.field}"=?`,
+            ).run(update.nextValue, now(), update.entityId, projectId, update.originalValue);
+            if (Number(updateResult.changes || 0) !== 1) {
+              throw new Error(`一致性候选提交冲突：${update.entityType}#${update.entityId}.${update.field} 在复查期间已变化`);
+            }
+          }
+          db.exec('COMMIT');
+        } catch (error) {
+          try { db.exec('ROLLBACK'); } catch {}
+          throw error;
+        }
+        generatedBundle = readGeneratedBundle();
+        generatedBundleText = JSON.stringify(generatedBundle);
+        warnings.push(`跨模块一致性候选复查通过后提交 ${appliedPatchCount} 处最小影响修订（跳过 ${skippedPatchCount} 处），世界观未修改`);
+      } else {
+        // 失败候选只存在于内存，下一轮仍基于原 Canon 重新选最小代价点。
+        warnings.push(`第${repairAttempt}次最小影响候选仍有${candidateContradictions.length}处冲突，已丢弃候选，数据库 Canon 未修改`);
+        // 候选已丢弃，审查结论也必须保留原 Canon 的结论，不能借用未提交版本。
+        continue;
+      }
+
+      alignment = secondAlignmentResult.data;
+      if (!alignment) {
+        throw new Error(`跨模块一致性二次审查未返回完整结构，项目未激活：${secondAlignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
+      }
+      contradictions = [
+        ...(Array.isArray(alignment?.contradictions) ? alignment.contradictions : []),
+        ...(Array.isArray(alignment?.unrelatedInventions) ? alignment.unrelatedInventions : []),
+      ].map((item: any) => String(item || '').trim()).filter(Boolean);
+    }
+    if (!alignment) {
+      throw new Error(`跨模块故事一致性审查未返回完整结构，项目未激活：consistent/contradictions/unrelatedInventions缺失`);
+    }
+    if (alignment.consistent !== true || contradictions.length > 0) {
+      replaceQualityIssues(db, {
+        projectId,
+        stage: 'project',
+        source: 'cross_stage_gate',
+        scopeKey: 'creation',
+        title: '跨阶段一致性 Gate',
+        issues: contradictions.map((message, index) => ({
+          ruleId: `cross_stage_consistency.${index + 1}`,
+          severity: 'blocking',
+          message,
+          quote: '',
+          content: generatedBundleText,
+          evidenceVerified: false,
+          suggestion: '保持冻结世界观不变，在章纲、未来计划、角色状态、组织、地点或伏笔中选择最小影响修复点后重新检查。',
+          details: { repairAttempt, evidence: '模型未返回可逐字定位的原文，因此按证据不足阻断。' },
+        })),
+      });
+      const gateError = `跨模块一致性经${repairAttempt}次自动修订后仍存${contradictions.length}处问题，已阻断项目激活：${contradictions.join('；')}`;
+      try {
+        // 这里曾只有成功的模型 review 运行，最终项目 Gate 失败却没有 failed run，
+        // 后果是诊断看板显示项目生成失败但失败运行数为零。
+        const gateRun = this.generationMetrics.beginRun(projectId, 'review', gateError,
+          undefined, 'cross_stage_gate', null, false);
+        this.generationMetrics.finishRun(gateRun.id, 'failed', Date.now(), generatedBundleText, gateError);
+      } catch (recordError) {
+        this.logger.warn(`跨模块 Gate 失败运行落库失败（不改变阻断结论）：${recordError instanceof Error ? recordError.message : String(recordError)}`);
+      }
+      throw new Error(gateError);
+    }
+    replaceQualityIssues(db, {
+      projectId,
+      stage: 'project',
+      source: 'cross_stage_gate',
+      scopeKey: 'creation',
+      title: '跨阶段一致性 Gate',
+      issues: [],
+    });
+
+  }
+
+  /** 冻结世界观后仅补全派生资料；所有补全必须接受后续跨模块审查。 */
   private async enrichNewProjectProfiles(
     projectId: string,
     dto: { title: string; storyType: string; selectedIdea: any; settings?: Record<string, unknown> },
@@ -8700,11 +8314,7 @@ ${enrichToneDirective}
         ? db.prepare('SELECT outline_id, chapter_index FROM chapters WHERE id = ? AND project_id = ?').get(chapterId, projectId) as any
         : null;
       const effectiveChapterNumber = Number(selectedChapter?.chapter_index || chapterNumber || 1);
-      const chOutline = selectedChapter?.outline_id
-        ? db.prepare(`SELECT title, content, chapter_function, scenes FROM outlines WHERE id = ? AND project_id = ? AND level = 'chapter' LIMIT 1`).get(selectedChapter.outline_id, projectId) as any
-        : db.prepare(
-          `SELECT title, content, chapter_function, scenes FROM outlines WHERE project_id = ? AND level = 'chapter' AND "order" IN (?, ?) ORDER BY CASE WHEN "order" = ? THEN 0 ELSE 1 END LIMIT 1`
-        ).get(projectId, effectiveChapterNumber, effectiveChapterNumber - 1, effectiveChapterNumber) as any;
+      const chOutline = findChapterOutline(db, projectId, effectiveChapterNumber, chapterId);
       if (chOutline) {
         result.context.chapterOutline = chOutline.content || '';
         result.context.chapterFunction = chOutline.chapter_function || 'exposition';
@@ -8793,19 +8403,11 @@ ${enrichToneDirective}
     if (!projectId || !Number.isInteger(chapterIndex) || chapterIndex < 1) return '';
     try {
       const db = this.db.getDb();
-      // 与 buildChapterPlanContext 相同的当前章定位逻辑（order 与章号同量级）：
-      // 优先取 order=chapterIndex 的行，其次 chapterIndex-1；再取 order 更大的后续章。
-      const current = db.prepare(
-        `SELECT "order" FROM outlines
-         WHERE project_id=? AND level='chapter' AND "order" IN (?, ?)
-         ORDER BY CASE WHEN "order" = ? THEN 0 ELSE 1 END LIMIT 1`
-      ).get(projectId, chapterIndex, chapterIndex - 1, chapterIndex) as { order: number } | undefined;
-      const baseOrder = Number(current?.order ?? chapterIndex - 1);
-      const rows = db.prepare(
-        `SELECT title, content, scenes, location_summary FROM outlines
-         WHERE project_id=? AND level='chapter' AND "order" > ?
-         ORDER BY "order" ASC LIMIT 3`
-      ).all(projectId, baseOrder) as Array<{ title: string; content: string | null; scenes: string | null; location_summary: string | null }>;
+      const current = findChapterOutline(db, projectId, chapterIndex);
+      const sequence = readOrderedChapterOutlines(db, projectId);
+      const currentPosition = sequence.findIndex(row => row.id === current?.id);
+      if (currentPosition < 0) return '';
+      const rows = sequence.slice(currentPosition + 1, currentPosition + 4);
       if (!rows.length) return '';
       const parts: string[] = ['【后续章节边界 · 本章不得提前消费（仅用于约束与验收，不得写进正文）】'];
       for (const row of rows) {
@@ -8833,12 +8435,6 @@ ${enrichToneDirective}
   }
 
   /**
-   * buildOutlineAdherenceContract — 大纲严格性约束（红线 + 绿区）
-   * 核心原则：大纲是不可偏离的合同；但在不违反红线的前提下，鼓励"微发挥"
-   * 与多样性，尤其长篇应避免把大纲复述成干瘪散文。
-   * @param isLong 长篇对多样性要求更高（人物弧光、多线质感、场景呼吸感）
-   */
-  /**
    * resolvePlatformStrategy — prompt 层平台口径的唯一解析入口。
    *
    * 与确定性扫描器 detectForbiddenTells 走完全相同的 resolveNovelStrategy 调用：平台 + 长短篇 +
@@ -8864,325 +8460,6 @@ ${enrichToneDirective}
     });
     const long = typeof isLong === 'boolean' ? isLong : String(profile.storyType || '') === 'long_novel';
     return { strategy, target: targetForLength(strategy, long ? 'long_novel' : 'short_story') };
-  }
-
-  private buildOutlineAdherenceContract(isLong: boolean, projectId?: string): string {
-    const difference = isLong
-      ? '【差别化说明 · 长篇】对多样性要求更高：同一世界观下应呈现人物成长弧光、多线并进的质感、不同场景的呼吸感与各异的叙事节奏；但仍须始终锚定本章大纲，不得借"多样性"之名漂移出大纲或篡改确稿设定。'
-      : '【差别化说明 · 短篇】受篇幅限制，微发挥以"精准"为主，围绕单一事件把人物与转折写透，不铺张支线。';
-
-    // 排版红线按平台分化（与确定性扫描器 detectForbiddenTells 保持同一套判定，
-    // 避免"平台规则要求段落短、硬红线又禁止短句独立成段"的自相矛盾）：短段快节奏平台允许承载
-    // 信息/对话/情绪的短段独立成段，只防连续等长与机械拆句；其余平台维持拼接要求。
-    // 平台 + 长短篇 + 六维执行标准统一走 resolvePlatformStrategy（与确定性扫描器同一解析入口）。
-    const { strategy: __hlStrategy, target: __target } = this.resolvePlatformStrategy(projectId, isLong);
-    // 短段平台集合 = 平台表 pacing==='very_high'（与 hardline-scanner 同一判据）。
-    // 此前这里另抄了一份同名单与 pacing 判定做「或」：同一事实写两遍，平台表调整节奏档后两份会各自漂移。
-    const __shortPacing = __hlStrategy.pacing === 'very_high';
-    const paragraphRule10 = __shortPacing
-      ? '10. 本平台段落要短（一般每段不超过3行），但必须长短错落：单个有冲击力的短句可独立成段做强调，连续短段不超过2个，第3个相邻短句要并入同一段或展开成中长段；严禁每一句话都另起一段（机械碎断），也禁止连续3段几乎等长'
-      : '10. 段落长短交错，禁止连续3段同等长度，禁止短句独立成段后跟空行';
-    const paragraphRule11 = __shortPacing
-      ? '11. 允许人名/称谓配合对话或动作短段起行，但每个短段必须承载实际信息；段间只留1个空行，禁止连续空行≥2'
-      : '11. 禁止姓名/称谓独立成段，禁止段后空行≥2';
-
-    // 平台排版/节奏/读者回报规则不写死数值：唯一源为 platform-benchmarks，
-    // 由 prompt 顶部的 resolvePlatformToneDirective → buildBenchmarkDirective 注入，与确定性扫描器、
-    // 质检共用同一份阈值；下方【网文节奏】的开篇字数/推进密度/对话占比一律从 __target 运行时插值，
-    // 禁止再写死常数（历史上「全章对话占比≥30%」与系统口径 35%–65% 就是这么在同一个 prompt 里打架的）。
-    const __payoffGapText = `${__target.payoffGapChars[0]}–${__target.payoffGapChars[1]}`;
-    const __dialogueRangeText = `${Math.round(__target.dialogueRatio[0] * 100)}%–${Math.round(__target.dialogueRatio[1] * 100)}%`;
-
-    return `## 大纲严格性约束
-【写作前自检 · 必须先想清楚再动笔】
-在开始写正文前，请在脑中明确以下3点（不需要输出，只作为写作锚点）：
-1. 本章必须承接的前文事实是什么？（上一章结尾的状态/未解决的悬念）
-2. 本章唯一核心冲突是什么？（所有情节都应围绕这个冲突展开）
-3. 本章结尾要留下什么钩子？（最后一句话必须让读者想看下一章）
-
-【绿区·鼓励微发挥】
-在不违反红线的前提下，可自由调度对话语气、感官细节、环境烘托、叙事节奏，使各章风貌各异。未列入角色卡或本章章纲的背景路人不得有姓名、台词或推进核心剧情。
-
-【正面示范 · 什么是"人味"】
-- 好的情绪："他攥紧口袋里的旧照片，指尖泛白，半天没说出话。"（用动作体现，零形容词）
-- 坏的情绪："他感到非常难过，内心充满了无尽的悲伤与痛苦。"（AI高频词+形容词堆砌+直接说情绪）
-- 好的对话：人物有目的地回避问题，动作或沉默改变下一句的意思；连续多轮短答仍须有可见的介入和信息推进。
-- 坏的对话："你好，我今天来是想和你讨论一下关于我们之间关系的问题。"（太完整太书面）
-- 好的比喻：与人物背景相关的自定义比喻（农民用庄稼、医生用手术刀）
-- 坏的比喻："像一把刀""像一盆冷水""如同行尸走肉"（机械老梗）
-- 好的描写："他蹲在墙根，把烟屁股在地上捻灭，又点了一根。"（白描，动作说话）
-- 坏的描写："他孤独地蹲在冰冷的墙根，忧郁地把燃尽的烟屁股在粗糙的地上用力捻灭，又颤抖着颤抖地点燃了一根新的香烟。"（每个名词前都加形容词，AI味重灾区）
-
-【写作原则 · 白描优先】
-- 能用动词说清的，绝不用形容词。"他跑"比"他飞快地奔跑"好
-- 能用名词说清的，绝不用修饰语。"桌子"比"老旧的木制桌子"好（除非桌子的旧是剧情关键）
-- 情绪不直接说，用动作、生理反应、对话留白体现
-- 朴素写法的可执行口径是：句子短、形容词少、情感藏在事里。只写机制，不点名具体作品或作者（点名会诱导复刻特定文本 = 书籍污染）
-
-【网文节奏】
-- 开篇前${__target.openingHookChars}字必须有冲突/悬念/反常，禁止先铺环境
-- 每${__payoffGapText}字一个情绪点（反转/冲突升级/新信息/关系位移）；这是本平台本篇幅的常见推进密度，可依场景职责与张力曲线偏离，禁止按固定字数硬塞反转
-- 对话占比${__dialogueRangeText}（本平台本篇幅区间），对话要有打断/沉默/答非所问/潜台词
-- 动作用短句，心理用长句，句式要有呼吸感
-- 每章至少1处具体数字锚点（"二十三块""还剩十四分钟"）
-- 每章至少3处不完美细节（指甲缝黑泥/扣子没扣/路灯闪烁）
-
-${difference}
-
-═══════════════════════════════════════
-【硬红线 · 违反即作废 · 最后3条最重要】
-═══════════════════════════════════════
-1. 严格按大纲事件顺序推进，所有场景必须实际发生，不得跳过或提前终止于中间事件
-2. 已确稿事实（角色身份/关系/位置/物品/伤势）不可偏离，变化必须有交代
-3. 严格按本项目已确认的 POV 执行：全知视角可在清楚转场后呈现多个角色内心；限定视角不得无依据进入其他角色脑内；叙述者不得跳出成为作者评论者
-4. 正文最后一个场景必须落在本章结尾钩子上
-5. 禁止排比句和并列结构滥用（"他想到了A，想到了B，想到了C"）
-6. 禁止AI高频词（仿佛/似乎/感到/觉得/不由得/情不自禁/内心充满了/缓缓/微微/一丝/一缕/某种/悄然/无声/莫名/隐约/略显）——能用具体动作、数字、物件与对话说清的，一律删掉模糊词直说
-7. 禁止机械比喻/文学老梗（"像一把刀""像一盆冷水""如同行尸走肉"）
-8. 禁止解释过度（用行动体现情绪和动机，不直接说"他很难过因为..."）
-9. 禁止形容词堆砌：一个名词前最多1个形容词，禁止"冰冷的/孤独的/无尽的/深邃的/璀璨的"等无信息量修饰词连用；能用动词/名词说清的就不加形容词
-${paragraphRule10}
-${paragraphRule11}
-12. 禁止刻意感官描写：不用"凉意贴着皮肤往上爬""炸开一朵光""过电似的传到手腕""心跳漏了一拍""喉咙发紧""手心冒汗"等套路化生理反应；冷就说冷，疼就说疼，用直白动作代替
-13. 禁止拟人化比喻：不用"回音吞掉了尾音""风声绕了道""黑暗吞噬了一切""时间飞逝"等非人事物做人才有的动作；直接描写事实
-14. 禁止套路化表达：不用"记忆清晰得像刚发生的事""不像梦""那一刻我突然明白""时间仿佛静止""眼中闪过一丝复杂"等AI常用句式；用具体场景和动作代替
-15. 破折号（——）必须节制：全章每1000字不超过2处、总数控制在个位数，单段最多1处；绝大多数停顿用逗号、句号、冒号表达，禁止几乎每段都靠破折号承接（这是AI腔的机械停顿指纹）
-16. 禁止升华式段尾与模板句：段落末尾不得突然“上价值”、总结点题（“那一刻她终于明白”“一切都会过去的”）；不得多处堆砌“不是X而是Y/不仅X而且Y/与其X不如Y”公式句与“眼中闪过一丝复杂”式套路化描写；情绪靠动作、停顿与对话呈现，不靠结尾金句
-
-⚠️ 以上16条硬红线中，第9条（禁止形容词堆砌）、第12条（禁止刻意感官描写）、第8条（禁止解释过度）是最容易违反的，请特别注意。朴素文字最有力量。`;
-  }
-
-  /**
-   * buildNarrativeQualityContract — 叙事质量通用约束（短篇优先，逻辑/分寸/去AI味）
-   *
-   * 与 buildOutlineAdherenceContract 互补：后者管"语言风格和AI痕迹（用词层面）"，
-   * 本方法管"叙事结构质量（基础逻辑、描写分寸、降低AI痕迹）"。
-   *
-   * 设计原则（短篇优先）：
-   * - 核心三条：上下文一致、节奏快、基础逻辑通顺。不追求面面俱到。
-   * - 描写有分寸：该写的（关键动作、反应、感官细节）必须写，不该写的（小物件来源、
-   *   配角背景、交通过程）一个字不多。留白不是偷懒，是信任读者。
-   * - 降低AI痕迹是硬要求：AI写的东西太完美、太平均、太想把什么都说到，打破这个就有人味。
-   * - "动笔前三问"锚定基础逻辑，从源头避免时间线/因果链/常识错误。
-   * - 不写死具体数值，适用于所有题材和平台。
-   * - 规则已同步收敛进功能模块标准库 body/review 模块（module-standards.seed.ts），此处为其确定性合同
-   */
-  private buildNarrativeQualityContract(projectId?: string): string {
-    // 推进密度取自平台表（与 prompt 顶部基准指令同一份，运行时插值），不写死「每500-800字」：
-    // 番茄短篇 400–600、起点长篇 900–1500，写死一个数就会逼长篇平台按短篇密度硬塞反转。
-    const __nqTarget = this.resolvePlatformStrategy(
-      projectId,
-      projectId ? this.isProjectLongNovel(projectId) : undefined,
-    ).target;
-    const __nqPayoffGap = `${__nqTarget.payoffGapChars[0]}–${__nqTarget.payoffGapChars[1]}`;
-    const base = `## 叙事质量纪律（动笔前必须明确，写作中必须遵守，与大纲严格性约束同级）
-
-### ═══ 设定层级铁律（最高优先级，所有生成入口必须遵守）═══
-
-**事实优先级：${STORY_FACT_PRIORITY}。**
-
-前面阶段已生成并保存的所有设定，后面阶段必须100%严格遵守，禁止与已有设定矛盾，禁止自行修改已有设定，禁止凭空新增与已有设定冲突的内容。具体：
-- **世界观**：时代、年份、地点、氛围基调、核心规则、社会结构、结局方向——正文所有时间、地点、规则必须与之一致。
-- **大纲**：章节任务、事件链、核心冲突、反转位置、结局——正文每一段都必须能对应到本章大纲的具体场景或行动，不得跳过或合并大纲事件。
-- **角色卡**：姓名、身份、年龄、外貌、性格、说话风格、关系、目标——正文出场角色必须严格使用角色卡中的设定，禁止改名、禁止改身份、禁止改年龄外貌。未列入角色卡或章纲的路人不得有姓名、台词或推进核心剧情。
-- **伏笔**：已埋设的伏笔必须在指定位置回收，回收方式必须与埋设时的线索一致。
-- **组织/地图**：组织名称、势力关系、地点名称、空间关系——正文必须严格使用，禁止自行编造新组织或新地点。
-
-**冲突裁决原则**：正文偏离已确认设定时修改正文；两份已保存资料互相冲突时阻断生成并修正架构资料，不能要求正文同时满足互斥命令。
-
----
-
-### ═══ 动笔前四问（开始写正文前，必须在脑中明确，不需要输出）═══
-
-**第一问·时间线锚点**
-本章每个关键事件发生在什么时间？角色在那个时间点能在那个位置吗？相关机构或他人的响应流程（审批、出行、等待回执、排班等）给了足够时间吗？——时间线对不上就现在调整，不要带着矛盾动笔。
-
-**第二问·人物动机锚点**
-每个出场角色在本章想要什么？他的行为符合身份和利益吗？有没有角色只是为了"推进剧情"而做不符合人设的事？可疑角色的暴露点控制在1-2个关键反常细节，不要把"我是坏人"写在脸上。
-
-**第三问·冲突因果锚点**
-本章核心冲突的"因"是什么？"果"是什么？推进链完整吗？有没有靠"刚好遇到"来解决核心冲突？——巧合只能引发事件，不能解决冲突。主角的关键突破必须来自行动或推理。
-
-**第四问·物品状态锚点**
-本章有哪些关键物品（保单/信封/手机/钥匙/证物等）？它们的状态变化链是什么？（出现→被拿走→被销毁→被转移→丢失）——动笔前必须列清楚，写完后必须检查：物品被拿走/销毁/丢失后，后面绝对不能再出现；角色拿到某物品后，后续使用时要能追溯来源。
-
----
-
-### ═══ 描写分寸（什么该写，什么不该写，判断标准）═══
-
-### ✅ 必须写的（不写读者出戏）
-- **角色的关键动作和反应**：发现关键线索时手停在哪、被质问时眼神往哪飘、做决定时身体什么姿态。这些是读者代入的锚点。
-- **核心场景的感官细节**：不是"房间很旧"，是"潮气混着木头腐朽的味道扑上来""灰尘厚得像绒，手指按下去留印痕"。用一两个感官词代替一大段背景介绍。
-- **情绪的身体化表达**：不是"他很震惊"，是"那一点在眼里慢慢糊了""指节抵着桌沿压得发白"。把情绪藏进微动作里，不要直接说破。
-- **关键对话的潜台词**：角色说的和想的可以不一致，该停的时候停，沉默也是对话。
-
-### ❌ 不该写的（写了拖节奏显刻意）
-- **小物件的来源**：出现一把剪刀、一辆车、一部手机，不需要解释哪来的。出现即合理。
-- **配角的背景和动机**：警察为什么当警察、上司为什么针对主角，不需要交代。他做了什么、说了什么就够了。
-- **交通方式和路上发生的事**：从A到B，除非路上有关键情节，否则一句话带过甚至直接跳。
-- **环境里每个东西的功能**：大部分背景就是背景，不需要每个细节都埋伏笔。
-- **角色反应的完整心理过程**：不需要"震惊→否认→愤怒→冷静"拆解成几个阶段，一个身体反应+一个动作就够了。
-- **专业操作的细节步骤**：签名比对不需要写"横笔的位置，竖笔的角度，落笔的顿挫，收笔的回锋"这些专业术语；查系统不需要写每一步点击了哪个按钮；做化验不需要写试剂配比。读者只需要知道结果和角色的反应，过程点到为止（"他比对了三遍，每一处转折都对得上"就够了）。除非专业操作本身是关键情节（如主角通过某个专业细节发现破绽），否则不要展开写步骤。
-
-### ⚖️ 判断标准（写之前问自己一句）
-> 这个细节/解释/描写，删了之后读者会困惑吗？
-> - 会困惑 → 必须写
-> - 不会困惑，但能增强代入感/情绪 → 选写（用最省的方式写）
-> - 不会困惑，也不增强什么 → 不写
-
----
-
-### ═══ 基础纪律（上下文一致、节奏快、基础逻辑通顺）═══
-
-### 一、逻辑自洽（基础要求，违反则读者出戏）
-- **时间线必须对得上**：角色位置、物品存在时长、机构运作时间必须自洽。"略写过程"可以，但"结果说不通"不行。
-- **专有名词必须锁定（零容忍）**：设定中出现的专有名词（公司名、城市名、部门名、人名、地名、组织名、项目名等）必须严格使用，**不得自行编造、替换或改名**。如果上下文里列出了"专有名词·必须严格使用"清单，必须100%遵循。例如设定中公司叫"星辰保险"，正文里不能写成"天恒保险"；角色是"经侦支队"，不能写成"刑侦支队"。如果正文中需要出现设定中没有的新名称，必须是合理的新增，且生成后应回写到设定中。
-- **时间节点不能太刻意**：不密集砸精确到分钟的时间点，人物对话/辩解/内心独白不报精确时间，机构流程也不逐分钟交代；用具体情境锚点（快到中午的时候/那天下午/忙到天黑），不用硬红线44禁止的机械转场。完整口径（精确时间点密度上限、场景区分与系统显示/证据截图/监控记录豁免）统一以【执行标准 · 正文生成】的「时间节点纪律 time-node-discipline」为准（已随系统指令注入本次生成）。
-- **物品状态必须追踪**：关键物品（保单/信封/手机/钥匙/证物等）被拿走/销毁/丢失后，后面绝对不能再出现。角色使用某物品时，要能追溯他是什么时候拿到的。写完后必须检查关键物品的状态链是否一致。
-- **信息必须有来源**：角色说"我已经看过/知道/查到了"某信息时，必须交代他是怎么知道的（谁告诉他的、他在哪看到的、他什么时候查的）。不能凭空"已经知道"。
-- **专业场景结果必须符合常识**：警务/医疗/法律/职场的核心结果不能违反基本常识（如保险诈骗归经侦不管刑侦）。可以不写审批流程，但不能让警察瞬移、不能让嫌疑人问完话就直接走。
-- **因果链必须完整**：每个关键情节有因有果。主角的突破来自行动/推理，不是"刚好遇到"。
-- **感官描写必须准确**：触觉不能"记住"（应该是"触感记住了"），视觉不能"听到"，嗅觉不能"看到"。感官动词和感官对象必须匹配。
-- **判断标准**：读者的疑问应该是"这背后藏着什么？"（好悬念），而不是"这现实吗？"（逻辑漏洞）。
-
-### 二、人物够用即可（短篇不追求每个角色都立体）
-- **主角必须立住**：有明确的目标、行为逻辑、情绪反应。读者能代入他。
-- **配角够用即可**：不需要每个配角都有背景故事和人物弧光。他做了什么、说了什么、对主角产生什么影响，就够了。
-- **可疑角色暗示≤2个**：用1个关键反常细节暗示，不要反复提醒读者"他有问题"。
-- **主角面对重大冲击要有身体反应**：不能"微温一下"就立刻切到理性分析。给一个具体的身体动作（发呆/盯着某物/手停住），不需要拆解情绪阶段。
-
-### 三、对话自然（不念经、不台词化、不审讯笔录化）
-- **专业术语必须转化为口语**：法条/规则/术语不能整段念出。加反问、停顿、口语缓冲词。
-- **对话可以有潜台词**：角色说的和想的可以不一致。允许沉默、答非所问、用动作代替回答。但不是每段对话都必须有潜台词，自然就好。
-- **禁止审讯笔录式一问一答**：不能连续多组"你是XX？""是。""你做了XX？""对。"这种超短问答。真实询问会有缓冲（"嗯""你说慢点""这个我再确认一下"）、重复、打断、答非所问。至少每3组问答插入一个非问答元素（动作/环境/角色反应/缓冲词）。
-- **允许"废话"存在**：真实对话里有寒暄、重复、答非所问。可以加一两句"无关但真实"的话（如警察进门说"你们这楼不好找"），不要每句都在推进剧情。
-- **角色反应不能太"正确"**：主角面对突发状况时，允许犹豫、走神、说半句停住、做一个无关的小动作。不要每一步都理性果断得像在执行任务清单。
-
-### 四、节奏紧凑（短篇核心要求）
-- **不铺垫、不灌水**：每段都在推进剧情或建立人物，没有"日常灌水"段落。
-- **每${__nqPayoffGap}字有一次有效推进**：新线索、关系变化、认知反转、代价暴露——让读者停不下来。这是本平台本篇幅的常见推进密度，可依场景职责与张力曲线偏离，禁止按固定字数硬塞反转。
-- **探索过程可以有小挫折**：但不需要每个挫折都展开写。一个"不对"的瞬间（空找/卡壳/误导）就够了，点到为止。
-- **紧迫感必须有依据**：倒计时/期限来自角色处境（制度流程/敌人行动/自然时间），不是作者凭空宣布。
-
-### 五、信息不倾倒
-- **背景信息分散释放**：不能一次性通过内心独白倒出全部背景。分散到多个场景，通过物品/对话/动作自然带出。当前场景只需要当前需要的信息。
-- **控制信息差**：读者知道的、主角知道的、反派知道的要有差异。每次揭示新信息时可以同时产生新疑问，但不是必须每次都抛两个问题。
-
----
-
-### 六、禁止元叙述（硬红线，违反则打回重写）
-正文必须保持故事内视角，绝对禁止叙述者跳出故事成为作者评论者。以下模式一经出现即视为违反硬红线：
-- **禁止"创作反思/创作宾语式元叙述"**：如"我本来想写""我准备写""我写的这个结局""我写的故事"——你是故事中的角色，不是写这个故事的作者。注意区分：故事内人物的写字、记录、笔迹辨认动作（"我写的，横画都往上抬""那一笔我写不出来""我在登记表上写了两行字"）是正常叙事，不是作者跳出，不得删改。
-- **禁止"我把这个故事/结局/剧情/人物/角色/场景/设定"**：如"我把这个人物写死了""我把结局改了"——你在经历故事，不是在编排故事。
-- **禁止"作者/编者/笔者 + 写/觉得/也/认为/决定/在这里/写到这里"**：如"作者也很无奈""笔者认为""写到这里"——绝对不允许出现作者自称。
-- **禁止"作为作者/写手/创作者/笔者"**：任何以作者身份自居的表述都禁止。
-- **禁止评论剧情本身**：如"没有反转""没有救场""没有伏笔""怎么写都比...强""这就是我一辈子写过的最..."——你是故事中的人，不知道"反转""伏笔"这些创作术语。
-- **判断标准**：如果一句话跳出了当前场景、站在故事外评论故事本身，或者使用了"写/作者/伏笔/反转/结局"这类创作术语来描述当前经历，就是元叙述，必须删除或改写为角色视角的真实感受。
-
----
-
-### ═══ 吸引力与代入感（让读者停不下来，但不要让读者感觉到你在用力）═══
-
-语句通顺≠好看。但"好看"不是靠堆砌技巧堆出来的——恰恰相反，读者一旦感觉到"作者在用力制造悬念/在堆砌感官/在设计节奏"，就会出戏、会反感。
-
-**核心原则：所有技巧都是为了让故事自然流淌，不是为了展示技巧。** 好的网文，读者看完只记得故事和人物，不记得"这里用了一个钩子""那里有三种感官描写"。如果读者能指出"这里作者在刻意制造悬念"，那就是失败。
-
-### 一、开篇：从事情正在发生的地方开始
-
-- **不要从"起床/吃饭/走路/喝水"这种无冲突的日常动作开始**。读者打开一本书，想看到的是"正在发生什么事"，不是"主角今天过得怎么样"。
-- **但也不要为了钩子而钩子**。不要开篇就扔一个跟后文脱节的"惊天秘密"，不要用"他不知道的是……"这种上帝视角剧透。钩子应该是故事自然的起点——主角正在做一件事，这件事里有不对劲的地方，读者自然想知道"怎么回事"。
-- **日常场景可以开篇，但日常里要有异常**。比如主角在喝饮料，听见走廊一声闷响——这是自然的，因为喝饮料是日常，闷响是异常。但如果写了三段"饮料什么味道、主角心情怎么样、天气好不好"才出现闷响，那就拖了。
-- **判断标准（自然版）**：读完开头，读者心里自然冒出一个疑问——"然后呢？""怎么回事？"——而不是觉得"作者在吊我胃口"。
-
-### 二、代入感：让读者自然进入主角的身体，不是堆砌感官
-
-- **不要罗列感官**。不要写"我看到……我听到……我闻到……我摸到……"——这是在做感官清单，不是在讲故事。感官应该是主角在那个情境下自然会注意到的东西。
-  - 主角看到血迹时，自然会注意到颜色（暗红，不是鲜红）、形状（拖痕，不是滴落）、气味（铁锈味）——但不需要把五种感官都凑齐。
-  - 主角紧张时，自然会感觉到心跳、手心出汗、呼吸变浅——但不需要每处紧张都写全套身体反应，选一个最贴切的就够了。
-- **第一人称要有心理活动，但不要大段独白**。心理活动应该是穿插在动作之间的短句、判断、瞬间的闪回——像真人在做事时脑子里自然冒出来的念头，不是站在那里思考人生。
-  - ✅ 自然："那颜色不对。不是饮料。我脑子里嗡的一声，第一反应是喊人，但喉咙像被什么堵住了。"
-  - ❌ 刻意："我感到一阵强烈的恐惧和震惊，我的心跳加速到每分钟120次，我的手心渗出了冷汗，我的大脑在飞速运转分析这到底是什么情况……"（像在写体检报告）
-- **情绪不要说破，用动作带出来**。不要写"我很紧张""我很害怕""我很愤怒"——写主角在那种情绪下自然会做的动作。但也不要每处情绪都硬塞一个动作，有时候一句"我没说话"比十个动作更有力。
-- **判断标准（自然版）**：读者读完一段，感觉"我要是在那儿，我也会这样"——而不是觉得"作者在教我怎么感受"。
-
-### 三、对话：像真人在说话，不是演员在念台词
-
-- **对话的第一要求是"像真人说的"，不是"信息量大"**。真人说话会停顿、会改口、会说半句、会答非所问、会说废话。如果每句对话都在精准推进剧情，那就是台词，不是对话。
-- **关键对话要有张力，但张力来自角色的处境，不是来自作者的设计**。
-  - 受伤的人说话自然会断断续续、有气无力——不需要作者特意"加张力"。
-  - 被质问的人自然会回避、转移话题、答非所问——不需要作者特意"加潜台词"。
-  - 愤怒的人自然会简短、带刺、重复——不需要作者特意"加冲突"。
-- **对话之间要有动作/表情，但不要每两句就插一个**。连续几句纯对话是可以的——真人吵架时就是你一句我一句，不会每说一句就喝一口水。动作/表情应该出现在情绪转折处、停顿处、需要强调的地方。
-- **判断标准（自然版）**：把对话读出来，觉得"这话真人会说"——而不是觉得"这话写得真好"。
-
-### 四、情绪：自然流淌，不是设计曲线
-
-- **一章内情绪自然会有起伏，因为剧情在推进**。不需要作者特意设计"平静→紧张→恐惧→愤怒→决心"的曲线——剧情到了，情绪自然就到了。
-- **但不要全程平淡**。如果一章读完，主角的情绪没有任何变化，那说明这一章没有发生任何真正影响主角的事——这才是问题，不是"情绪曲线不对"。
-- **情绪转变要有触发点，但触发点要自然**。主角不会"突然就生气了"——他是看到了什么、听到了什么、想到了什么，才生气的。把那个触发点写出来，情绪转变就自然了。
-- **张弛有度是自然的，不是机械的**。连续紧张之后，人自然会喘口气、会愣一下、会回想刚才发生了什么——这就是"弛"。不需要作者特意安排"连续2段紧张后必须有1段舒缓"。
-- **判断标准（自然版）**：读者跟着主角的情绪走，到紧张处心跳加速，到舒缓处松一口气——而不是觉得"作者在调节我的情绪"。
-
-### 五、悬念：读者自然想知道，不是作者故意吊胃口
-
-- **每章结尾自然会有"未完成的事"**。主角的目标还没达成、危险还没解除、真相还没揭开——这些就是天然的钩子。不需要作者特意在结尾加一句"他不知道的是……"。
-- **但不要为了留钩子而强行打断**。如果一个场景自然结束了，就结束它，不要为了"留悬念"而在最后一句硬加一个新危机。好的钩子是"这件事还没完"，不是"突然又出事了"。
-- **中间自然会有小悬念**。主角在推进自己的目标，自然会遇到新阻碍、发现新信息、产生新疑问——这些就是小悬念。不需要作者每500字就硬塞一个反转。
-- **信息不要一次倒完，但也不要故意藏着**。主角知道什么，读者就知道什么（第一人称）；主角不知道的，读者也不知道。不需要作者特意"留10-20%不解释"——该解释的时候自然会解释，不该解释的时候主角自己也不知道。
-- **判断标准（自然版）**：读者合上书，心里想"接下来会怎么样"——而不是觉得"作者又在吊我胃口"。
-
-### 六、节奏：故事自然有快慢，不是机械切换
-
-- **紧张的场景自然会用短句**。人在紧张时，思维是跳跃的、碎片化的——写出来自然就是短句。不需要作者特意"把句子控制在10字以内"。
-- **舒缓的场景自然会用长句**。人在放松、思考、回忆时，思维是连贯的、延展的——写出来自然就是长句。不需要作者特意"用长句调节节奏"。
-- **关键的东西自然会被强调**。最重要的动作、最关键的发现、最震撼的反转，读者会自然注意到——因为它重要。不需要作者特意"单独成段"来强调。但如果它确实重要，单独成段也是自然的。
-- **不要为了节奏而节奏**。如果一个场景需要慢，就慢；需要快，就快。不要因为"连续3段同节奏"就硬插一段不同节奏的——那会打断故事的自然流淌。
-- **判断标准（自然版）**：读者读紧张场景时呼吸急促，读舒缓场景时放松下来——而不是觉得"作者在切换节奏"。
-
-### ⚖️ 总判断标准：刻意还是自然？
-
-写完一段，问自己：
-> 读者读完这段，是记住了"故事里发生了什么"，还是记住了"作者用了什么技巧"？
-
-- 记住故事 → 自然，好。
-- 记住技巧 → 刻意，改。
-
-**最自然的写作，是读者感觉不到作者的存在。** 读者不是在"读一本写得很好的书"，而是在"经历一个故事"。所有的钩子、感官、对话、情绪、悬念、节奏，都应该是故事本身的一部分，而不是作者贴上去的装饰。
-
----
-
-### ═══ 去 AI 味（写作手法提示）═══
-
-AI 写的东西本质是"太完美、太平均、太想把什么都说到"。打破这个，人味就出来了。
-本节只列写作手法：全部去 AI 味规则、阈值与规则号（hardline-scanner）统一以【执行标准 · 正文生成】为准（已随系统指令注入本次生成），硬伤自检口径见下方【核心三条】，此处不另立第二套口径。
-
-**1. 保持10%的"不完美"**：适当留口语化表达、半截话、重复、改口（"我不是说……算了"），不必句句完整。
-**2. 句子开头别总用主语**：动作开头（"手按在桌沿上"）、环境开头（"空调风口嗡嗡响"）、时间开头（"九点十四分"）、短句直掷（"不对。"）混着用。
-**3. 用具体代替抽象**：不是"他很紧张"，是"手心出汗，在裤腿上蹭了一下"。
-**4. 情绪不要说破**：让角色做一个反常的小动作，读者自己体会（"他把保单折了折，塞进内侧口袋"）。
-**5. 避免 AI 高频词与套路句式**：少用"首先、其次、值得注意的是、综上所述"，少用"像……一样"式标准比喻、三连排比与工整对仗。
-**6. 禁止生成过程标记残留**：不属于正文的短句（"这不该存在""【待补充】""[情绪点]"）不得独立成行；"这不该存在"是 AI 高频残留短语，换成更具体的人类想法（"这不可能""爷爷怎么会有银行卡"）。
-**7. 禁止套路化结尾与旁白**：不用全知视角旁白剧透（"她不知道的是……""殊不知……"），不用廉价反转（"原来一切都是梦""他早就死了"），不用抽象点题（"一切才刚刚开始""命运的齿轮开始转动"）；留钩子就落到具体动作、对话或物件细节上。
-**8. 不要短距离重复**：动作、身体部位、同一动词、同一环境细节都不要在短距离内反复出现；需要时换部位、换表达，或用对话/环境/心理替代。
-
-### ═══ 硬伤自检（零容忍，写完必查；阈值口径见执行标准）═══
-
-**0. 专有名词一致**：设定里的公司/城市/部门/人名/地名/组织/项目名，正文不得改名或替换；正文新出现的名字必须回写设定。检查方法：把正文专有名词列出，与设定逐一比对。
-**1. 物品状态链**：关键物品（保单/信封/手机/钥匙/证物等）被拿走、销毁、丢失后不得再出现；角色使用某物品必须能追溯到来源。检查方法：列出本章关键物品，逐个追踪状态变化链。
-**2. 时间节点不刻意**：不要密集报精确到分钟的时间，人物被质问时不说"我十五点前录完的"这类精确报时，机构流程也不逐分钟交代。检查方法：通读找出全部精确时间点，只保留必要的。
-**3. 对话不机械**：避免连续超短一问一答（"你是XX？""是。"），对话要有缓冲、停顿、重复、答非所问。检查方法：看询问段落，问答之间是否有动作/沉默/语气词介入。
-**4. 动作不模式化**：避免"手+桌面"（按桌沿、拍桌面、指节压得发白）、"手+脸"（扶额、揉眉心、摸下巴）、"眼神"（眯眼、瞳孔收缩、目光锐利）等成串重复，也避免词语直接重复。检查方法：扫一遍动作描写，看有没有重复的身体部位+物品组合。
-**5. 信息有来源、感官要对、环境不重复**：角色说"我看过/我知道"必须交代怎么知道的；感官动词与对象要匹配；同一环境细节不要短距离重复。检查方法：扫"已经/知道/看过"，扫感官动词，扫环境描写。
-**6. 标点规范**：禁止一逗到底（一句超过4个逗号仍未断句要拆开）；对话标点跟随说话人位置（说话人在中间用逗号、在结尾用句号、在开头用冒号）；破折号只用于转折或补充，省略号不超过6点；全部中文标点。检查方法：写完后通读，该换气处用句号，引号成对检查。
-
----
-
-⚠️ **核心三条：上下文一致、节奏快、基础逻辑通顺。** 这三条做到了就是合格的短篇。描写分寸是加分项，但**专有名词不一致、物品状态矛盾、时间节点太刻意、对话审讯笔录化、动作模式化、内部标记残留、一逗到底**以及确定性扫描命中的 AI 痕迹语言硬伤（口径见项目执行标准）都是阻断性硬伤，必须零容忍、写完必查。`;
-
-    // 执行标准六维（平台/分类/基调/文风/流派/视角）与长短篇基准统一由 prompt 顶部的 resolvePlatformToneDirective 注入
-    // （执行标准源 creative-constitution.buildExecutionStandard，平台/长短篇基准源 platform-benchmarks），
-    // 此处不再重复拼接、也不保留第二份手写平台文案。
-    return base;
   }
 
   // platformStandardProblem 的唯一实现已上收到 modules/project/creative-constitution.ts（全链路同一口径）：
@@ -9234,14 +8511,7 @@ AI 写的东西本质是"太完美、太平均、太想把什么都说到"。打
     try {
       // 1. 提取当前章节大纲
       if (chapterNumber || chapterId) {
-        const selectedChapter = chapterId
-          ? db.prepare('SELECT outline_id FROM chapters WHERE id = ? AND project_id = ?').get(chapterId, projectId) as any
-          : null;
-        const chOutline = selectedChapter?.outline_id
-          ? db.prepare(`SELECT title, content, chapter_function, scenes FROM outlines WHERE id = ? AND project_id = ? AND level = 'chapter' LIMIT 1`).get(selectedChapter.outline_id, projectId) as any
-          : db.prepare(
-            `SELECT title, content, chapter_function, scenes FROM outlines WHERE project_id = ? AND "order" IN (?, ?) AND level = 'chapter' ORDER BY CASE WHEN "order" = ? THEN 0 ELSE 1 END LIMIT 1`
-          ).get(projectId, chapterNumber || 1, (chapterNumber || 1) - 1, chapterNumber || 1) as any;
+        const chOutline = findChapterOutline(db, projectId, chapterNumber || 1, chapterId);
         if (chOutline) {
           parts.push(`【当前章节大纲】\n标题: ${chOutline.title || ''}\n功能: ${chOutline.chapter_function || ''}`);
           if (chOutline.content) parts.push(`核心内容: ${chOutline.content}`);
@@ -10737,6 +10007,26 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
    * LLM 调用 + JSON 解析的 retry 包装
    * @returns { data, rawContent, warnings }
    */
+  private async reviewIdeaPresentation(cards: any[], references: any[] = []): Promise<IdeaPresentationVerdict[]> {
+    if (!cards.length) return [];
+    const display = (items: any[]) => items.map((card, index) => ({ position: index + 1, title: card.title, targetPlatform: card.targetPlatform, storyCategory: card.storyCategory,
+      hook: card.hook, coreConflict: card.coreConflict, mainReversal: card.mainReversal, description: card.description }));
+    const result = await this.llmCallWithRetry<{ reviews: IdeaPresentationVerdict[] }>(
+      '题材标题与首屏独立审查',
+      '以目标平台普通读者的点击选择独立审查实际标题与首屏。不得把字段齐全、两字重合、职业专名、证据链完整或模型自称独特当作吸引力。'
+      + '标题应让读者直接感到具体利益冲突、反常关系、危险欲望或迫切未解问题；短意象、道具名和文雅暂名若脱离概要就没有点击动机，应titleCompelling=false。'
+      + 'hook应展示命运立即改变的事件、可代入的风险/欲望及主动选择；只写职业查账、比对证据、逐级举报流程不能通过。'
+      + '比较同批及参考卡的关系、选择、冲突推进和反转；不要求跨越用户指定分类，但同一职业查案/权力阴谋路径换道具应distinctFromBatch=false。'
+      + 'readerQuestion必须是由实际标题与开篇引发的具体读者追问，不要泛泛问真相是什么；不合格时issues写具体理由和可沿原故事修正的表达。'
+      + '每个position原样返回实际title，三个判据为布尔值。只输出JSON:{"reviews":[{"position":1,"title":"实际标题","titleCompelling":true,"openingCompelling":true,"distinctFromBatch":true,"readerQuestion":"具体追问","issues":[]}]}。'
+      + '\n【实际题材卡】' + JSON.stringify(display(cards)) + '\n【已通过参考卡】' + JSON.stringify(display(references)),
+      { scenario: 'idea_generate', stepKey: 'idea_presentation_review', temperature: 0.1, timeout: LLM_TUNABLES.timeoutComplex(), maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
+        validate: value => presentationReviewIssues(value, cards).length === 0,
+        describeValidation: value => presentationReviewIssues(value, cards) },
+    );
+    return result.data?.reviews || [];
+  }
+
   private async llmCallWithRetry<T>(
     stepName: string,
     prompt: string,
@@ -10752,6 +10042,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       projectId?: string;
       chapterIndex?: number;
       deferQualityGate?: boolean;
+      retryInstruction?: string;
     },
   ): Promise<{ data: T | null; rawContent: string; warnings: string[]; usage?: { promptTokens: number; completionTokens: number; totalTokens: number }; runId?: string }> {
     const warnings: string[] = [];
@@ -10799,7 +10090,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
             ? `${prompt}\n\n【此前结果未通过，以下问题必须一次性全部解决】${accumulatedValidationIssues.length > 0
               ? `${lastFailureKind === 'quality_gate' ? 'JSON结构可以读取，但内容违反质量要求' : 'JSON语法有效，但结构不完整'}：${accumulatedValidationIssues.join('；')}`
               : '返回内容不是完整、合法的JSON对象'}。${lastFailedCandidate
-                ? `\n【上次候选JSON】\n${lastFailedCandidate}\n【修订要求】保留已合规字段，只修改上述问题涉及的字段；同步更新所有引用同一事件的content、scenes、characterActions、conflicts、highlights、foreshadowing、characterStates与hook，避免修一处后产生字段互相矛盾。`
+                ? `\n【上次候选JSON】\n${lastFailedCandidate}\n【修订要求】${options.retryInstruction || '保留已合规字段，只修改上述问题涉及的字段；同步更新所有引用同一事件的content、scenes、characterActions、conflicts、highlights、foreshadowing、characterStates与hook，避免修一处后产生字段互相矛盾。'}`
                 : ''}请逐项修正，只输出一个完整JSON对象，不要解释或Markdown。`
             : promptWithQuality,
           scenario: options.scenario || 'outline',
@@ -10967,7 +10258,8 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     } catch {}
 
     if (parsedAnyResponse) {
-      const detail = lastValidationIssues.join('；') || '字段结构不符合要求';
+      // 解析抢救可能只看到内层数组/补丁，不能覆盖真正阻断本次任务的首次校验原因。
+      const detail = accumulatedValidationIssues.join('；') || lastValidationIssues.join('；') || '字段结构不符合要求';
       this.logger.warn(`${stepName}: JSON语法有效但结构校验失败: ${detail}`);
       warnings.push(`${stepName}生成结果结构不完整：${detail}`);
     } else {

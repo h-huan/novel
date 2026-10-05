@@ -43,6 +43,8 @@ export interface CreationStepStatus {
   world: 'pending' | 'running' | 'done' | 'failed';
   orgs: 'pending' | 'running' | 'done' | 'failed';
   foreshadowing: 'pending' | 'running' | 'done' | 'failed';
+  profiles?: 'pending' | 'running' | 'done' | 'failed';
+  review?: 'pending' | 'running' | 'done' | 'failed';
   timeline: 'pending' | 'running' | 'done' | 'failed';
   done: 'pending' | 'running' | 'done' | 'failed';
 }
@@ -163,7 +165,7 @@ export const acceptedDiscoveryIdeas = (ideas: DiscoveryIdea[]): DiscoveryIdea[] 
 
 const INITIAL_STEP_STATUS: CreationStepStatus = {
   project: 'pending', outline: 'pending', characters: 'pending',
-  skeleton: 'pending', world: 'pending', orgs: 'pending', foreshadowing: 'pending', timeline: 'pending', done: 'pending',
+  skeleton: 'pending', world: 'pending', orgs: 'pending', foreshadowing: 'pending', profiles: 'pending', review: 'pending', timeline: 'pending', done: 'pending',
 };
 
 const INITIAL_STATE = {

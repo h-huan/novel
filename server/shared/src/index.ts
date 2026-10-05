@@ -4,3 +4,4 @@ export * from './platform-categories';
 export * from './execution-standard-dimensions';
 export * from './category-word-scale';
 export * from './chapter-responsibility-review';
+export * from './chapter-coordinates';

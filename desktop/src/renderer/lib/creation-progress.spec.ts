@@ -27,3 +27,12 @@ describe('creation progress replay', () => {
     expect(failed.outline).toBe('pending');
   });
 });
+
+describe('late creation stages',()=>{
+ it('shows profile enrichment then review, and attributes the final error to review',()=>{
+  const profiles=updateCreationStepStatus(initial,{type:'progress',step:'profiles',status:'done'});
+  const review=updateCreationStepStatus(profiles,{type:'progress',step:'review',status:'running'});
+  const failed=updateCreationStepStatus(review,{type:'error',step:'review'});
+  expect(failed.profiles).toBe('done'); expect(failed.review).toBe('failed');expect(failed.timeline).toBe('pending');
+ });
+});

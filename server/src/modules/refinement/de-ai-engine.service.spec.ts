@@ -2,7 +2,7 @@
  * de-ai-engine.service.spec.ts
  * DeAiEngineService 单元测试
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DeAiEngineService } from './de-ai-engine.service';
 
 describe('DeAiEngineService', () => {
@@ -76,5 +76,23 @@ describe('DeAiEngineService', () => {
       const result = service.polish('', 10);
       expect(result.result).toBe('');
     });
+  });
+
+  it('局部降AI调用只针对证据，不再强制五感和人味动作',async()=>{
+    const content='毋庸置疑，她已经交出了钥匙。'+ '门锁上的划痕仍在。'.repeat(30);
+    const generate=vi.fn(async(prompt:string)=>prompt.split('原文片段（含上下文）：\n')[1].split('\n\n执行')[0].replace('毋庸置疑，',''));
+    await service.llmLocalRewrite(content,generate,1,'【已确认执行标准】现代现实，克制叙述。');
+    const prompt=generate.mock.calls[0][0];
+    expect(prompt).toContain('现代现实，克制叙述');
+    expect(prompt).toContain('执行已注入的局部精修标准');
+    expect(prompt).not.toContain('增加具体的动作细节和五感描写');
+    expect(prompt).not.toContain('对话要有人味');
+  });
+
+  it('词表提示不是硬伤证据，模型判断无需修改时允许保留原片段',async()=>{
+    const content='首先，我得核对记录。'+ '门锁上的划痕仍在。'.repeat(30);
+    const generate=vi.fn(async(prompt:string)=>prompt.split('原文片段（含上下文）：\n')[1].split('\n\n执行')[0]);
+    const result=await service.llmLocalRewrite(content,generate,1,'【已确认执行标准】');
+    expect(result).toEqual({result:content,changes:[]});
   });
 });

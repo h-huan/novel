@@ -850,7 +850,7 @@ export class GenerationMetricsService implements OnModuleInit {
   /**
    * 字数产出比自校准：历史"正文首版实际字数 / 目标字数"的中位数。
    * 样本不足 minSamples 时返回 null（冷启动不盲目调整）。
-   * ratio<1 表示模型系统性写不够，首版应按 target/ratio 铺够；ratio>=1 表示首版基本到位。
+   * ratio<1 表示历史首版偏短；仅作观测及章内缺口估计，不能据此改变章纲目标。
    */
   getLengthCalibration(projectId?: string, minSamples = 3): { samples: number; ratio: number; medianTarget: number } | null {
     try {

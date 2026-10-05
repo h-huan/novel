@@ -17,7 +17,7 @@ import { ModelRouterService } from '../routing/model-router.service';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import { LLM_TUNABLES } from '../config/llm-tunables';
-import { resolveScenarioRoute } from '../routing/scenario-taxonomy';
+import { isEvaluationOutput, resolveScenarioRoute } from '../routing/scenario-taxonomy';
 import { estimateTokens, PLANNING_TOKEN_WEIGHTS } from '../common/token-budget';
 import { STRUCTURED_JSON_OUTPUT_CEILING, structuredTruncationError } from './structured-truncation';
 import * as net from 'net';
@@ -260,7 +260,8 @@ export class RealLLMService implements ILLMService {
       const response = await this.generateInternal(enriched);
       if (run && response.model) this.metrics.setRunModel?.(run.id, response.model);
       generatedOutput = response.content;
-      if (!request.deferQualityGate && run?.constitution && ['world', 'character', 'outline', 'chapter', 'refinement'].includes(run.stage)) {
+      if (!isEvaluationOutput(request.scenario, request.metrics?.stepKey)
+        && !request.deferQualityGate && run?.constitution && ['world', 'character', 'outline', 'chapter', 'refinement'].includes(run.stage)) {
         response.content = await this.evaluateGeneratedRun(run, request, response.content);
         generatedOutput = response.content;
       }

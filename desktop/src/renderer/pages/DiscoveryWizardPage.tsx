@@ -176,6 +176,8 @@ const CREATION_STEPS = [
   { label: '生成角色资料...', key: 'characters' },
   { label: '生成组织与地点...', key: 'orgs' },
   { label: '生成伏笔...', key: 'foreshadowing' },
+  { label: '完善创作资料...', key: 'profiles' },
+  { label: '审查并修订故事一致性...', key: 'review' },
   { label: '生成时间线...', key: 'timeline' },
   { label: '完成！', key: 'done' },
 ];
@@ -729,6 +731,7 @@ const DiscoveryWizardPage: React.FC = () => {
   const [customConflict, setCustomConflict] = useState('');
   const [customUnique, setCustomUnique] = useState('');
 
+  const [creationMessage, setCreationMessage] = useState('');
   const applyCreationMessage = useCallback((
     projectId: string,
     msg: any,
@@ -736,6 +739,7 @@ const DiscoveryWizardPage: React.FC = () => {
   ): boolean => {
     switch (msg.type) {
       case 'progress': {
+        setCreationMessage(String(msg.message || ''));
         store.setCreationProgress(msg.percent || 0);
         store.setCreationStepStatus((prev) => updateCreationStepStatus(prev, msg));
         if (msg.status === 'failed') {
@@ -748,7 +752,7 @@ const DiscoveryWizardPage: React.FC = () => {
         store.setCreationProgress(100);
         store.setCreationStepStatus({
           project: 'done', skeleton: 'done', outline: 'done', characters: 'done',
-          world: 'done', orgs: 'done', foreshadowing: 'done', timeline: 'done', done: 'done',
+          world: 'done', orgs: 'done', foreshadowing: 'done', profiles: 'done', review: 'done', timeline: 'done', done: 'done',
         });
         if (msg.warnings && Array.isArray(msg.warnings) && msg.warnings.length > 0) {
           store.setCreationWarnings(msg.warnings);
@@ -966,7 +970,7 @@ const DiscoveryWizardPage: React.FC = () => {
       store.setCreationWarnings([]);
       store.setCreationStepStatus({
         project: 'pending', skeleton: 'pending', outline: 'pending', characters: 'pending',
-        world: 'pending', orgs: 'pending', foreshadowing: 'pending', timeline: 'pending', done: 'pending',
+        world: 'pending', orgs: 'pending', foreshadowing: 'pending', profiles: 'pending', review: 'pending', timeline: 'pending', done: 'pending',
       });
       store.setCreatedProjectId(null);
       store.setCreatedProjectTitle(null);
@@ -1115,7 +1119,7 @@ const DiscoveryWizardPage: React.FC = () => {
     store.setCreationProgress(0);
     store.setCreationStepStatus({
       project: 'running', skeleton: 'pending', outline: 'pending', characters: 'pending',
-      world: 'pending', orgs: 'pending', foreshadowing: 'pending', timeline: 'pending', done: 'pending',
+      world: 'pending', orgs: 'pending', foreshadowing: 'pending', profiles: 'pending', review: 'pending', timeline: 'pending', done: 'pending',
     });
 
     // 清理上一次的连接
@@ -1637,6 +1641,7 @@ const DiscoveryWizardPage: React.FC = () => {
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+            当前分类：{selectedSubCategory || selectedCategory || '未选择'} · <button style={{ color: 'var(--color-accent)', background: 'none', border: 0, cursor: 'pointer' }} onClick={() => store.setStep(0)}>修改分类与配置</button><br />
             本轮目标 {ideaCount} 张，已通过 {ideas.length} / {ideaCount} 张；点击卡片可查看详情
             {prevTitles.length > ideas.length && (
               <span style={{ color: 'var(--color-warning)', marginLeft: '8px' }}>
@@ -1753,7 +1758,7 @@ const DiscoveryWizardPage: React.FC = () => {
 
         {isWaiting && (
           <div style={{ textAlign: 'center', padding: '12px 0 0' }}>
-            <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>AI 正在调用大模型，通常需要 2-5 分钟...</span>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>{creationMessage || '正在生成并校验创作资料...'} 创建包含逐章验收和跨模块复查，耗时取决于模型与章节数。</span>
           </div>
         )}
       </div>
@@ -1860,7 +1865,7 @@ const DiscoveryWizardPage: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <h1 style={s.headerTitle}>💡 灵感发现</h1>
-            <p style={s.headerSub}>从多个角度挖掘故事题材，三分钟搭建完整创作框架</p>
+            <p style={s.headerSub}>从多个角度挖掘故事题材，生成并校验完整创作框架</p>
           </div>
           {step > 0 && (
             <button

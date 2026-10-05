@@ -202,53 +202,43 @@ export class WritingQualityService implements OnModuleInit {
         const c = db.prepare('SELECT chapter_index FROM chapters WHERE id=?').get(chapterId) as { chapter_index?: number } | undefined;
         chapterIndex = Number(c?.chapter_index ?? 0) || 0;
       }
-      // 问题类型 → 面向「下一章首版如何主动规避」的可执行教训（跨平台/长短篇通用，不含本书具体情节）
-      const HOOK_OPEN = '开篇第一屏直接落在冲突/反常/强悬念上，删掉环境与履历铺垫，前几百字内让主角面对具体威胁或抉择';
-      const PACING = '按目标平台节奏密度安排有效推进或反转，删掉不推进剧情的重复铺陈，每个场景结束时局面必须发生变化';
-      const PAYOFF = '情绪与爽点必须明面兑现：用具体结果、对手反应、旁观者态度落地，不靠旁白宣称，关键情绪点给足场面';
-      const AI_TELL = '禁用AI模板句与程式化渲染（“像……一样/眼底闪过一丝/空气凝固/喉咙发紧”等），用不可替换的具体细节替代套路比喻';
-      const SPECIFIC = '抽象判断必须落到可感知的具体动作、物件、数字或对话，不写“复杂/精彩/气氛紧张”这类空泛概括';
-      const SHOW = '减少直接说明与作者旁白，把背景、设定、因果拆进人物动作和对话里带出，禁止大段内心解释';
-      const DIALOGUE = '对话要像真人：加入打断、沉默、省略、答非所问和身体动作，不同人物腔调必须有区分，禁止一来一回工整对答';
-      const LOGIC = '严格按时间与因果顺序写，每个行动有前因后果，不得出现与已确认时间线或大纲矛盾的事件顺序';
+      // 只记录诊断类型，避免把固定修法写成另一套硬规则。
       const LESSON_BY_TYPE: Record<string, { category: string; lesson: string }> = {
-        reader_hook: { category: 'hook', lesson: HOOK_OPEN },
-        retention_point: { category: 'hook', lesson: HOOK_OPEN },
-        low_retention: { category: 'hook', lesson: HOOK_OPEN },
-        needs_hook: { category: 'hook', lesson: HOOK_OPEN },
-        chapter_hook: { category: 'hook', lesson: '每章结尾落在未解问题、反转、新威胁或关键动作/对话上，禁止平淡收尾或“他不知道的是”式作者旁白假钩' },
-        pacing_risk: { category: 'pacing', lesson: PACING },
-        needs_payoff: { category: 'pacing', lesson: PACING },
-        emotional_payoff: { category: 'payoff', lesson: PAYOFF },
-        meme_point: { category: 'payoff', lesson: PAYOFF },
-        ai_pattern_risk: { category: 'ai_tell', lesson: AI_TELL },
-        template_repetition: { category: 'ai_tell', lesson: AI_TELL },
-        repeated_emotion_action: { category: 'ai_tell', lesson: '同一类情绪、生理反应或环境意象不在相邻段落重复，换用不同外化动作或直接删掉重复渲染' },
-        too_abstract: { category: 'specificity', lesson: SPECIFIC },
-        low_specificity: { category: 'specificity', lesson: SPECIFIC },
-        needs_detail: { category: 'specificity', lesson: SPECIFIC },
-        too_expository: { category: 'show_not_tell', lesson: SHOW },
-        over_explained: { category: 'show_not_tell', lesson: SHOW },
-        flat_dialogue: { category: 'dialogue', lesson: DIALOGUE },
-        same_voice_characters: { category: 'dialogue', lesson: DIALOGUE },
-        needs_character_voice: { category: 'dialogue', lesson: DIALOGUE },
-        lack_of_subtext: { category: 'dialogue', lesson: DIALOGUE },
-        needs_asymmetry: { category: 'dialogue', lesson: DIALOGUE },
-        timeline_conflict: { category: 'logic', lesson: LOGIC },
-        causality_gap: { category: 'logic', lesson: LOGIC },
-        time_order_error: { category: 'logic', lesson: LOGIC },
-        event_sequence_risk: { category: 'logic', lesson: LOGIC },
-        label_fit: { category: 'label_fit', lesson: '叙事节奏、对话方式、情绪密度与人称必须主动贴合本书选定的执行标准（平台/分类/基调/文风/流派/视角）六维，最弱维度尤其对齐' },
-        // 平台指标问题（deterministicPlatformReview 落库的 platform.*）同样沉淀成跨章教训，
-        // 否则下一章首版 prompt 读不到「本章哪里不符合目标平台」，同类问题会一直复发。
-        platform_chapter_length: { category: 'platform', lesson: '按目标平台单章字数区间写足有效情节：过短先补推进与冲突，过长先砍不推进剧情的铺陈，不靠灌水凑数' },
-        platform_paragraph_length: { category: 'platform', lesson: '按目标平台阅读节奏切段：单段不超上限，长段拆开并穿插短句或对话，避免整屏密排大段' },
-        platform_dialogue_ratio: { category: 'platform', lesson: '对话占比必须落在目标平台区间：把说明性叙述改成一来一回的对话，加入打断、沉默与动作，不要大段转述' },
-        platform_opening_hook: { category: 'platform', lesson: HOOK_OPEN + '，开篇钩子必须落在平台要求的字位之前' },
-        platform_ending_hook: { category: 'platform', lesson: '章尾必须落在未解问题、反转、新威胁或关键动作/对话上，并按目标平台的留钩要求处理，禁止平淡收尾' },
-        platform_payoff_gap: { category: 'platform', lesson: PACING + '，并按目标平台的爽点/情绪间隔上限补足推进与兑现' },
-        platform_category_word_scale: { category: 'platform', lesson: '目标总字数必须与该平台投稿分类的实测体量分布对照后取舍：要么调整总字数与分卷节奏对齐区间，要么写明刻意偏离的依据，不得默认通过' },
-        punctuation: { category: 'punctuation', lesson: '统一中文全角标点，省略号用“……”，连贯动作写完整句、不切成两字残句，克制句末语气词' },
+        reader_hook: { category: 'hook', lesson: '历史诊断类别：reader_hook；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        retention_point: { category: 'hook', lesson: '历史诊断类别：retention_point；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        low_retention: { category: 'hook', lesson: '历史诊断类别：low_retention；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        needs_hook: { category: 'hook', lesson: '历史诊断类别：needs_hook；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        chapter_hook: { category: 'hook', lesson: '历史诊断类别：chapter_hook；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        pacing_risk: { category: 'pacing', lesson: '历史诊断类别：pacing_risk；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        needs_payoff: { category: 'pacing', lesson: '历史诊断类别：needs_payoff；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        emotional_payoff: { category: 'payoff', lesson: '历史诊断类别：emotional_payoff；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        meme_point: { category: 'payoff', lesson: '历史诊断类别：meme_point；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        ai_pattern_risk: { category: 'ai_tell', lesson: '历史诊断类别：ai_pattern_risk；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        template_repetition: { category: 'ai_tell', lesson: '历史诊断类别：template_repetition；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        repeated_emotion_action: { category: 'ai_tell', lesson: '历史诊断类别：repeated_emotion_action；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        too_abstract: { category: 'specificity', lesson: '历史诊断类别：too_abstract；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        low_specificity: { category: 'specificity', lesson: '历史诊断类别：low_specificity；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        needs_detail: { category: 'specificity', lesson: '历史诊断类别：needs_detail；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        too_expository: { category: 'show_not_tell', lesson: '历史诊断类别：too_expository；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        over_explained: { category: 'show_not_tell', lesson: '历史诊断类别：over_explained；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        flat_dialogue: { category: 'dialogue', lesson: '历史诊断类别：flat_dialogue；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        same_voice_characters: { category: 'dialogue', lesson: '历史诊断类别：same_voice_characters；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        needs_character_voice: { category: 'dialogue', lesson: '历史诊断类别：needs_character_voice；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        lack_of_subtext: { category: 'dialogue', lesson: '历史诊断类别：lack_of_subtext；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        needs_asymmetry: { category: 'dialogue', lesson: '历史诊断类别：needs_asymmetry；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        timeline_conflict: { category: 'logic', lesson: '历史诊断类别：timeline_conflict；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        causality_gap: { category: 'logic', lesson: '历史诊断类别：causality_gap；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        time_order_error: { category: 'logic', lesson: '历史诊断类别：time_order_error；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        event_sequence_risk: { category: 'logic', lesson: '历史诊断类别：event_sequence_risk；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        label_fit: { category: 'label_fit', lesson: '历史诊断类别：label_fit；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        platform_chapter_length: { category: 'platform', lesson: '历史诊断类别：platform_chapter_length；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        platform_paragraph_length: { category: 'platform', lesson: '历史诊断类别：platform_paragraph_length；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        platform_dialogue_ratio: { category: 'platform', lesson: '历史诊断类别：platform_dialogue_ratio；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        platform_opening_hook: { category: 'platform', lesson: '历史诊断类别：platform_opening_hook；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        platform_ending_hook: { category: 'platform', lesson: '历史诊断类别：platform_ending_hook；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        platform_payoff_gap: { category: 'platform', lesson: '历史诊断类别：platform_payoff_gap；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        platform_category_word_scale: { category: 'platform', lesson: '历史诊断类别：platform_category_word_scale；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
+        punctuation: { category: 'punctuation', lesson: '历史诊断类别：punctuation；按本次已注入执行标准和章节证据复核，不直接据历史标签改写。' },
       };
       const items: Array<{ category: string; lesson: string }> = [];
       const seen = new Set<string>();
@@ -263,7 +253,7 @@ export class WritingQualityService implements OnModuleInit {
         add('label_fit', LESSON_BY_TYPE.label_fit.lesson);
       }
       if (hardlineRuleIds.length) {
-        add('language_hardline', '上一版命中确定性语言硬伤：成稿前自检——连贯动作写完整句、删掉相同动词/前缀的同构排比、量词与名词正确搭配、不用“X了，Y了”两字残句链、统一中文标点');
+        add('language_hardline', `历史诊断命中规则：${hardlineRuleIds.join('、')}；须按当前共用扫描器复核，不以旧命中替代本章证据。`);
       }
       if (!items.length) return;
       const now = new Date().toISOString();

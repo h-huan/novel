@@ -3,7 +3,7 @@ import type { CreationStepStatus } from '../stores/discoveryStore';
 const stepKeys: Record<string, keyof CreationStepStatus> = {
   project: 'project', skeleton: 'skeleton', world: 'world', outline: 'outline',
   characters: 'characters', orgs: 'orgs', foreshadowing: 'foreshadowing',
-  timeline: 'timeline', done: 'done',
+  profiles: 'profiles', review: 'review', timeline: 'timeline', done: 'done',
 };
 
 export function updateCreationStepStatus(

@@ -353,8 +353,7 @@ export class DeAiEngineService {
 
     let result = content;
     const changes: Array<{ before: string; after: string; reason: string }> = [];
-    // 改写失败、返回空片段或原样返回，都要留下记录：这些位置是 detect 认定的 AI 痕迹，
-    // 没有改掉就等于「降AI」这条执行标准没有完成，不能悄悄返回一个看起来成功的结果。
+    // 空输出或无效片段必须报错；词表风险本身不是硬伤证据，符合标准的原片段可保留。
     const failures: Array<{ position: number; description: string; upstream: boolean; reason: string }> = [];
 
     for (const target of targets) {
@@ -371,18 +370,15 @@ AI痕迹说明：${target.description}
 原文片段（含上下文）：
 ${context}
 
-改写要求：
-1. 去掉AI常用的过渡词、形容词堆砌、排比句
-2. 增加具体的动作细节和五感描写
-3. 对话要有人味，允许打断、沉默、答非所问
-4. 不要改变情节和人物关系
-5. 只输出改写后的完整片段，不要解释
+执行已注入的局部精修标准，只处理上述证据对应的问题；输出改写后的完整片段，不要解释。
 
 改写后的片段：`;
 
       try {
         const rewritten = await llmGenerate(rewritePrompt);
         const cleanRewritten = rewritten.trim().replace(/^["'"'"']|["'"'"']$/g, '');
+        // 词表命中只是候选风险，不能要求已符合执行标准的片段为制造改动而重写。
+        if (cleanRewritten === context) continue;
         if (cleanRewritten && cleanRewritten.length > 20 && cleanRewritten !== context) {
           result = result.substring(0, start) + cleanRewritten + result.substring(end);
           changes.push({
@@ -391,8 +387,7 @@ ${context}
             reason: target.description,
           });
         } else {
-          // 模型没改（空返回 / 过短 / 原样返回）同样是「降AI」未完成，
-          // 一并计入失败，绝不当作「这处不需要改」悄悄放过。
+          // 无效输出不视为无需修改，也不接受它覆盖原文。
           failures.push({
             position: target.position,
             description: target.description,

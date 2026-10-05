@@ -123,6 +123,7 @@ export function ideaPremiseSelectionDirective(
     : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
   return `【题材卡创建前筛选】
 这一步发生在完整题材卡创建之前。先广泛搜寻，再比较，再选择；禁止先创建完整题材卡再交给最终 Gate 大量淘汰。
+选题必须先证明读者为什么愿意点开：暂名也应有具体利益冲突、反常关系或迫切悬念，不能全是意象与道具名。先比较不同关系与欲望、主动对手、选择和推进路径，不要把所有题材收敛为“职业发现账册/印记→追查权贵→公开证据”。遵守用户分类，在分类内部广搜不同冲突；现实两难、关系背叛、绝境求生、欲望争夺、反常身份均可按故事取舍，不是逐项配额。
 1. 以 ${poolSize} 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。${poolSize} 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ${requestedCount} 个成熟题材，可以少于 ${poolSize}，禁止为了凑数填弱项。
 2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${requestedCount} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。
 3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
@@ -144,6 +145,7 @@ export function ideaCardStructuringDirective(
 这个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把这一项结构化成恰好 1 张完整题材卡，不再重新选题。
 - 服务器已经锁定题材身份；不要输出 premiseId、sourcePremiseId 或任何内部标识，系统会在返回后绑定原题材身份。
 - 禁止替换、合并、拆分、另造题材，禁止因为某字段难写就把故事换成更容易过 Gate 的套路。
+- 标题必须先兑现点击承诺：脱离概要也能看懂具体冲突、反常关系或未解问题；从原故事已有事件和关系中提炼，不沿用文雅暂名，不靠夸张空话和虚假设定。hook先写命运改变的现场与人物选择，不用职业查证流程开篇。
 - hook、description、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
 - 最终 Gate 只做独立验收；若这一张结构化后仍不成立，系统应暴露这一题材的管线失败，而不是自动补生或改写其它题材。
 【已选题材胚子（内部标识已由服务器移除）】
@@ -223,7 +225,7 @@ export function ideaGateLocalRepairDirective(
   return `【最终 Gate·同题材有序局部修复】
 下面 ${safeTargets.length} 项已经完成创建前筛选和完整题材卡结构化。服务器已经锁定每一项的题材身份，你不负责回传、生成或修改内部标识，也不得换题。
 1. patches 数组必须恰好 ${safeTargets.length} 项，并严格按输入 position 的顺序逐项对应；每项只写需要修改的字段。
-2. 顶层只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出标题、平台、分类、篇幅、章数、标签或任何内部标识。
+2. 若gateIssues明确点名标题，可额外返回title，只改原故事的表达且不得换题；其它情况下标题保持原样。顶层只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数、标签或任何内部标识。
 3. 只修 gateIssues 点名的表达证据，让原故事已有的异常/信息差、现实压力、主角行动、关系、因果升级、反转和二阶后果更清楚；禁止新增另一套案件、能力、身份、亲属关系或结局。
 4. 某字段无需改就省略；禁止用空字符串删除原证据。服务器只会合并白名单内的非空文本，其余输出会被忽略。
 5. 只输出一个 JSON 对象：{"patches":[{...}]}，不输出分析、Markdown 或额外文字。
@@ -233,11 +235,12 @@ ${JSON.stringify(safeTargets)}`;
 
 /**
  * 把模型返回的有序局部补丁合回服务器持有的原卡。
- * 只允许白名单文本字段单调覆盖；题材身份、标题、平台、分类、篇幅和用户配置始终取原卡。
+ * 只允许白名单文本字段覆盖；标题仅在 Gate 点名的位置可修，身份与用户配置始终取原卡。
  */
 export function applyOrderedIdeaRepairPatches(
   cards: readonly Record<string, unknown>[],
   rawPatches: unknown,
+  titleRepairPositions: readonly number[] = [],
 ): Array<Record<string, unknown>> {
   if (!Array.isArray(rawPatches) || rawPatches.length !== cards.length) {
     const actual = Array.isArray(rawPatches) ? rawPatches.length : 0;
@@ -251,6 +254,7 @@ export function applyOrderedIdeaRepairPatches(
       throw new Error(`最终 Gate 定向局部修复第 ${index + 1} 项不是对象；系统不会猜测它对应哪个题材。`);
     }
     const next: Record<string, unknown> = { ...card };
+    if (titleRepairPositions.includes(index) && typeof patch.title === 'string' && patch.title.trim()) next.title = patch.title.trim();
     for (const field of IDEA_GATE_REPAIR_TEXT_FIELDS) {
       const value = typeof patch[field] === 'string' ? String(patch[field]).trim() : '';
       if (value) next[field] = value;

@@ -172,6 +172,13 @@ it('generates a complete idea batch through preselection plus structuring and re
       if (cardIndex >= 1 && cardIndex <= 5) {
         return { content: JSON.stringify({ ideas: [makeIdea(cardIndex)] }) };
       }
+      if (generationCall === 7) {
+        return { content: JSON.stringify({ reviews: Array.from({ length: 5 }, (_, index) => ({
+          position: index + 1, title: makeIdea(index + 1).title,
+          titleCompelling: true, openingCompelling: true, distinctFromBatch: true,
+          readerQuestion: '主角能否在截止日前验证现场证据并保住家人的现实利益？', issues: [],
+        })) }) };
+      }
       throw new Error(`unexpected idea generation call: ${generationCall}`);
     }),
   };
@@ -189,13 +196,14 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 5,
   });
   expect(duplicate).toEqual(first);
-  // 同一请求只执行一条共享主链：1 次创建前筛选 + 5 个不同 premise 各 1 次完整卡结构化。
-  expect(realLLM.generate).toHaveBeenCalledTimes(6);
+  // 同一请求只执行一条共享主链：1 次筛选 + 5 次结构化 + 1 次独立标题/首屏审查。
+  expect(realLLM.generate).toHaveBeenCalledTimes(7);
   for (let call = 1; call <= 6; call += 1) {
     expect(realLLM.generate).toHaveBeenNthCalledWith(call, expect.objectContaining({
       scenario: 'idea_generate', responseFormat: 'json_object', maxEmptyRetries: 1,
     }));
   }
+  expect(realLLM.generate).toHaveBeenNthCalledWith(7, expect.objectContaining({ scenario: 'idea_generate', metrics: expect.objectContaining({ stepKey: 'idea_presentation_review' }) }));
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,

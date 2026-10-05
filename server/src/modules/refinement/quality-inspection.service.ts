@@ -4,6 +4,7 @@
  * 维度口径以项目执行标准为唯一事实源（module-standards seed / QUALITY_EXECUTION.md）
  */
 import { Injectable } from '@nestjs/common';
+import { detectForbiddenTells } from '../../chain/hardline-scanner';
 import type {
   InspectionResult,
   LogicIssue,
@@ -170,24 +171,15 @@ export class QualityInspectionService {
     const emptyAdjPerThousand = (emptyAdjCount / content.length) * 1000;
     const adjectiveDensityScore = Math.min(10, Math.floor(avgDePerSentence * 2) + overLimitSentences + Math.floor(emptyAdjPerThousand * 2));
 
-    // 3. 段落均匀度检测：连续3段同等长度（±15%）
+    // 3. Uniformity counts use the shared evidence rule; length alone is observational.
     const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 10);
-    let uniformGroups = 0;
+    const sharedFindings = detectForbiddenTells(content);
+    const uniformGroups = sharedFindings.filter(f => f.ruleId === '26-uniform').length;
     const lengths = paragraphs.map(p => p.trim().length);
-    for (let i = 0; i < lengths.length - 2; i++) {
-      const avg = (lengths[i] + lengths[i + 1] + lengths[i + 2]) / 3;
-      if (avg === 0) continue;
-      const variance = Math.max(
-        Math.abs(lengths[i] - avg) / avg,
-        Math.abs(lengths[i + 1] - avg) / avg,
-        Math.abs(lengths[i + 2] - avg) / avg,
-      );
-      if (variance < 0.15) uniformGroups++;
-    }
     const avgVariance = lengths.length > 2
       ? lengths.slice(0, -1).reduce((sum, _, i) => sum + Math.abs(lengths[i] - lengths[i + 1]) / Math.max(lengths[i], lengths[i + 1]), 0) / (lengths.length - 1)
       : 0;
-    const paragraphUniformityScore = Math.min(10, uniformGroups * 3 + Math.floor((1 - avgVariance) * 3));
+    const paragraphUniformityScore = Math.min(10, uniformGroups * 3);
 
     // 4. AI高频词密度
     const aiWords = ['仿佛', '似乎', '好像', '犹如', '宛如', '不禁', '不由得', '情不自禁', '内心深处', '油然而生', '涌上心头', '感到', '觉得', '意识到', '这一刻', '终于明白', '总而言之', '综上所述', '不仅', '而且', '与此同时', '然而', '因此', '过电似的', '过电一样', '触电似的', '不像梦', '不是梦', '心跳漏了一拍', '喉咙发紧', '手心冒汗'];
@@ -223,8 +215,9 @@ export class QualityInspectionService {
     const allPunctuation = content.match(/[，。！？；：、""''《》（）—…·]/g) || [];
     const uniquePunct = new Set(allPunctuation).size;
     const punctRatio = allPunctuation.length > 0 ? uniquePunct / allPunctuation.length : 0;
-    // 标点种类<4种扣分
-    const punctuationDiversityScore = uniquePunct < 4 ? Math.min(10, (4 - uniquePunct) * 3) : 0;
+    // Variety is descriptive; penalty requires shared punctuation misuse evidence.
+    const punctuationDiversityScore = Math.min(10, sharedFindings.filter(f =>
+      ['56-punct-stacking', '57-ellipsis-density'].includes(f.ruleId)).length * 3);
 
     // 8. 套路化表达/刻意感官描写/拟人化比喻检测（新增）
     const clichePatterns = [

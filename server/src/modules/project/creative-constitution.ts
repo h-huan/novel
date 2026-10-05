@@ -828,13 +828,10 @@ export function resolveProjectStandardDirective(db: DatabaseSync, projectId: str
   // 执行标准唯一来源：正文层、框架层与二次加工层共用 buildExecutionStandard，不再各自另拼一份。
   const bodyStandard = buildExecutionStandard(constitution, { styleTags });
   const toneDirective = `${bodyStandard.directive}以下内容的节奏、人物动机、冲突设计、语言风格都必须体现这一定位。`;
-  const lengthNote = isLong
-    ? '【本作为长篇】平台风格需体现世界观纵深、分卷节奏、长线伏笔与人物弧光；爽点可持续累积，不必每章密集打脸。'
-    : '【本作为短篇】平台风格需体现在有限篇幅内的高密度冲突、即时反转与情绪闭环；每1000字必须有钩子或爽点，结尾必须兑现开篇问题。';
   const directive = '【目标平台与风格定位 · 最高优先级，必须贯穿本次全部生成内容】\n'
     + (platformDirective ? platformDirective + '\n' : '')
     + (toneDirective ? toneDirective + '\n' : '')
-    + lengthNote + '\n【项目创作宪法】\n' + JSON.stringify(constitution) + '\n\n';
+    + '\n【项目创作宪法】\n' + JSON.stringify(constitution) + '\n\n';
 
   // 分类落位与平台口径一并带回：作者必须能看见「这次改写是在哪个平台分类下执行的」，
   // 否则按钮给出的结果与项目卡片上的标准对不上，用户无从判断。

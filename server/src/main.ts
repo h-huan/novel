@@ -1,3 +1,4 @@
+import { findStaleBuildArtifact } from './build-freshness';
 /**
  * NestJS 服务入口
  * 使用 Fastify 适配器，支持 WebSocket
@@ -58,50 +59,17 @@ if (fs.existsSync(envPath)) {
  * 「明明改了却没生效 / 怎么会有旧程序 / 同一个问题反复出现」就是这么来的。
  * 这类静默陈旧无法从日志分辨，只能在启动时硬拦住。
  *
- * 判据：src 下最新的 .ts 修改时间 > dist 下最旧的 .js 修改时间 ⇒ 产物陈旧。
- * 用「最旧产物」而不是入口文件，是因为 tsc 逐个写出文件，只看入口会漏掉后写的模块。
+ * 判据：每个运行时源码与对应产物比对，缺失或落后即阻断。
+ * 增量编译允许未改动模块保留原时间；测试与声明文件不属于运行时产物。
  * 只在自己确实跑在 dist 下时检查（源码直跑、测试环境不做此断言）。
  */
 function assertBuildIsFresh(): void {
-  const distSegment = `${path.sep}dist${path.sep}`;
-  if (!__filename.includes(distSegment)) return;
-  const distRoot = path.join(serverRoot, 'dist');
-  const srcRoot = path.join(serverRoot, 'src');
-  if (!fs.existsSync(distRoot) || !fs.existsSync(srcRoot)) return;
-
-  const walk = (root: string, ext: string): Array<{ file: string; mtimeMs: number }> => {
-    const found: Array<{ file: string; mtimeMs: number }> = [];
-    const stack = [root];
-    while (stack.length > 0) {
-      const current = stack.pop() as string;
-      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-        const full = path.join(current, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name === 'node_modules') continue;
-          stack.push(full);
-        } else if (entry.name.endsWith(ext)) {
-          found.push({ file: full, mtimeMs: fs.statSync(full).mtimeMs });
-        }
-      }
-    }
-    return found;
-  };
-
-  const sources = walk(srcRoot, '.ts');
-  const artifacts = walk(distRoot, '.js');
-  if (sources.length === 0 || artifacts.length === 0) return;
-
-  const newestSource = sources.reduce((a, b) => (a.mtimeMs >= b.mtimeMs ? a : b));
-  const oldestArtifact = artifacts.reduce((a, b) => (a.mtimeMs <= b.mtimeMs ? a : b));
-  if (newestSource.mtimeMs <= oldestArtifact.mtimeMs) return;
-
-  const rel = (p: string) => p.replace(serverRoot + path.sep, '').replace(/\\/g, '/');
-  throw new Error(
-    '后端拒绝启动：dist 产物早于源码，正在运行的是上一版代码（静默陈旧）。'
-    + ` 更新的源码：${rel(newestSource.file)}（${new Date(newestSource.mtimeMs).toISOString()}）`
-    + ` 最旧的产物：${rel(oldestArtifact.file)}（${new Date(oldestArtifact.mtimeMs).toISOString()}）。`
-    + ' 修复：在仓库根执行 pwsh -File .\\restart.ps1，或先在 server 下执行 npm run build 再启动。',
-  );
+  if (!__filename.includes(path.sep + 'dist' + path.sep)) return;
+  const stale = findStaleBuildArtifact(serverRoot);
+  if (!stale) return;
+  const rel = (file: string) => path.relative(serverRoot, file).replace(/\\/g, '/');
+  throw new Error('后端拒绝启动：编译产物缺失或早于对应源码。源码：' + rel(stale.source)
+    + '；对应产物：' + rel(stale.artifact) + '；请在 server 下执行 npm run build 再启动。');
 }
 
 function getLogLevels(): Array<'log' | 'error' | 'warn' | 'debug' | 'verbose'> {

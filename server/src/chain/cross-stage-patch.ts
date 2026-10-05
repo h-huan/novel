@@ -15,6 +15,7 @@ export const CROSS_STAGE_PATCH_TABLE_MAP: Readonly<Record<string, string>> = Obj
 
 export const CROSS_STAGE_MUTABLE_ENTITY_TYPES = Object.freeze(Object.keys(CROSS_STAGE_PATCH_TABLE_MAP));
 
+
 export function isImmutableWorldPatchTarget(entityType: unknown): boolean {
   return entityType === 'world' || entityType === 'worldProfile';
 }
@@ -125,4 +126,55 @@ export function applyCrossStagePatch(original: string, match: string, replacemen
     }
   }
   return candidate;
+}
+
+/** Remove only the exact server-owned directive; preserve fictional hierarchy facts. */
+export function storyHierarchyForAudit(value: unknown, policy: string): string {
+  return String(value ?? '').split(policy).join('').trim();
+}
+
+/** Remove a byte-identical duplicate, never summarize or discard unique confirmed facts. */
+export function canonicalBriefForAudit(brief: string): string {
+  const value = JSON.parse(brief);
+  if (value?.confirmedStory && value?.projectCard?.confirmedStory
+    && JSON.stringify(value.confirmedStory) === JSON.stringify(value.projectCard.confirmedStory)) {
+    delete value.projectCard.confirmedStory;
+  }
+  return JSON.stringify(value);
+}
+
+export function applyCrossStageFieldPatch(original: string | number, match: string, replacement: string): string | number | null {
+  if (typeof original === 'string') return applyCrossStagePatch(original, match, replacement);
+  if (!Number.isSafeInteger(original) || match !== String(original) || !/^(0|[1-9]\d*)$/.test(replacement)) return null;
+  const next = Number(replacement);
+  return Number.isSafeInteger(next) && next !== original ? next : null;
+}
+
+const PATCH_BUNDLE_KEYS: Record<string, string> = {
+  character: 'characters', organization: 'organizations', mapPoint: 'mapPoints', chapter: 'chapters', foreshadowing: 'foreshadowings',
+};
+
+export function describeCrossStagePatchValidation(value: any, bundle: Record<string, any[]>): string[] {
+  if (!Array.isArray(value?.patches) || !value.patches.length || value.patches.length > 24) return ['patches必须包含1-24个补丁'];
+  const issues: string[] = [];
+  for (const patch of value.patches) {
+    const rows = bundle[PATCH_BUNDLE_KEYS[patch?.entityType]];
+    const row = rows?.find(item => item.id === patch?.entityId);
+    const original = row?.[patch?.field];
+    if (!row || !Object.hasOwn(row, patch?.field) || ['id', 'chapterIndex'].includes(patch.field)) {
+      issues.push('补丁目标必须是当前资料中的可修实体id和真实字段名，禁止世界观目标或中文内容标签');
+      continue;
+    }
+    if (typeof patch.match !== 'string' || typeof patch.replacement !== 'string' || !patch.replacement.trim()
+      || (typeof original !== 'string' && typeof original !== 'number')
+      || applyCrossStageFieldPatch(original, patch.match, patch.replacement) === null) {
+      issues.push('补丁必须精确匹配唯一原文且保持JSON；数值字段使用完整旧值与新整数的字符串');
+    }
+    if (typeof original === 'number' && (patch.entityType !== 'foreshadowing'
+      || !['buried_chapter_index', 'planned_recovery_chapter_index'].includes(patch.field)
+      || Number(patch.replacement) < 1 || Number(patch.replacement) > bundle.chapters.length)) {
+      issues.push(`仅允许修订伏笔章节序号，使用从1开始的故事章节号（第一章=1），范围1-${bundle.chapters.length}；不得按数据库order减1或改为0`);
+    }
+  }
+  return [...new Set(issues)];
 }

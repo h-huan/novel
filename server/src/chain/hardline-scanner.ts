@@ -74,7 +74,7 @@ export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
   'formula-sentence', 'dash-density', 'simile-density',
   // 文笔/排版硬伤：此前列在「只进 advisories 的降级区」，现全部收进本清单、同样阻断保存 + 精确改写。
   // 26-short-para 短句独立成段 / 26-uniform 连续三段等长 / 26b-staccato 连续一句一段 /
-  // 32 人名或称谓独占一行 / 33 段后连续空行 / 35 标点单一窗口 / 35b 叙述标点平板窗口。
+  // 32 人名或称谓独占一行 / 33 段后连续空行 / 35/35b 有证据的重复叙述窗口。
   // 平台与风格分化的是阈值（短段平台 threshold=0、白描类风格窗口加长），不是「查不查」：
   // 清单内任何一条都不会因为平台或风格而完全不检查，也不存在「只提示不阻断」的旁路。
   '26-short-para', '26-uniform', '26b-staccato',
@@ -85,6 +85,41 @@ export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
 /** 判断某条扫描命中是否属于跨平台语言硬伤（兼容规则号带后缀的情况） */
 export function isLanguageHardline(ruleId: string): boolean {
   return LANGUAGE_HARDLINE_RULE_IDS.some(id => ruleId === id || ruleId.startsWith(id));
+}
+
+/** Repeated prose is evidence; absence of decorative punctuation is not. */
+export function hasMechanicalSentenceRepeat(text: string): boolean {
+  // Check both complete sentences and long clauses. Changing commas to semicolons
+  // must not hide repeated clauses inside a single run-on sentence.
+  for (const separator of [/[。！？!?\n]+/, /[，,；;。！？!?\n]+/]) {
+    const counts = new Map<string, number>();
+    for (const sentence of text.split(separator)) {
+      // Repeated spoken words may be intentional; this detector owns narrative prose only.
+      if (/[“”「」"]/.test(sentence)) continue;
+      // Punctuation-only edits must not turn an unchanged repeated sentence into a pass.
+      const normalized = sentence.replace(/\d+/g, '#').replace(/[^\u3400-\u4dbf\u4e00-\u9fffa-zA-Z#]/g, '');
+      if ((normalized.match(/[\u3400-\u4dbf\u4e00-\u9fff]/g) || []).length < 12) continue;
+      const count = (counts.get(normalized) || 0) + 1;
+      if (count >= 3) return true;
+      counts.set(normalized, count);
+    }
+  }
+  return false;
+}
+
+/** Spoken content drives the finding, never a dictionary of "human" mannerisms. */
+export function hasRepeatedDialogueExchange(paragraphs: readonly string[]): boolean {
+  const turns = paragraphs.map(p => [...p.matchAll(/[“"「]([^”"」]+)[”"」]/g)]
+    .map(m => m[1]).join('').replace(/\d+/g, '#').replace(/[\s\p{P}\p{S}]/gu, ''));
+  const pairCounts = new Map<string, number>();
+  for (let i = 0; i + 1 < turns.length; i++) {
+    if (!turns[i] || !turns[i + 1]) continue;
+    const key = JSON.stringify([turns[i], turns[i + 1]]);
+    const count = (pairCounts.get(key) || 0) + 1;
+    if (count >= 3) return true;
+    pairCounts.set(key, count);
+  }
+  return false;
 }
 
 export function detectForbiddenTells(
@@ -461,11 +496,12 @@ export function detectForbiddenTells(
       if (
         Math.abs(a - avg) / avg < uniformTolerance &&
         Math.abs(b - avg) / avg < uniformTolerance &&
-        Math.abs(c - avg) / avg < uniformTolerance
+        Math.abs(c - avg) / avg < uniformTolerance &&
+        hasMechanicalSentenceRepeat(paragraphs.slice(i, i + 3).join('\n'))
       ) {
         findings.push({
           ruleId: '26-uniform',
-          message: `连续 3 段同等长度（均约 ${Math.round(avg)} 字），缺乏节奏变化`,
+          message: `连续 3 段长度接近（均约 ${Math.round(avg)} 字）且存在重复叙述语句，须消除机械展开；不能仅靠改变段长过关`,
           snippet: `${slice(paragraphs[i], 20)} || ${slice(paragraphs[i + 1], 20)} || ${slice(paragraphs[i + 2], 20)}`,
           position: `第 ${i + 1}-${i + 3} 段`,
         });
@@ -586,26 +622,21 @@ export function detectForbiddenTells(
       }
     }
 
-    // ===== 35 标点单一（连续 200 字无引号/问号/破折号/感叹号/分号/省略号） =====
-    // 标点多元化规则 27 的确定性兜底：滑动窗口 200 字，扫到一段完全没有问号/感叹号/分号/
-    // 省略号/破折号/引号对，就视为"标点单一"。
-    // 注意：对话引号按对算（"…"算 1 组），连续 200 字里至少出现 1 种"非常规标点"才算合规。
-    const punctDiversityWindow = bareStyleStandard ? 320 : 200; // 白描/朴素类风格按执行标准加长窗口，规则照常阻断
+    // ===== 35 窗口内重复叙述：只凭标点种类少不能证明机械语言 =====
+    const punctDiversityWindow = bareStyleStandard ? 320 : 200; // 白描/朴素类风格按执行标准加长窗口，重复证据仍阻断
     let firstPunctFinding: HardlineFinding | undefined;
     let punctFailureWindows = 0;
     const punctHitParagraphs = new Set<number>();
     for (let i = 0; i < content.length - punctDiversityWindow; i += 80) {
       const window = content.slice(i, i + punctDiversityWindow);
-      // 兼容中英文引号：\u201C \u201D \u2018 \u2019 是智能引号
-      const hasDiversity = /[!?！？…—\u2014\u2013;:：;\u3001]|"[^"\n]{1,40}"|"[^"\n]{1,40}"|\u201C[^\u201D\n]{1,40}\u201D/.test(window);
-      if (!hasDiversity) {
+      if (hasMechanicalSentenceRepeat(window)) {
         punctFailureWindows++;
         for (const span of paraSpans) {
           if (span.start < i + punctDiversityWindow && span.end > i) punctHitParagraphs.add(span.start);
         }
         firstPunctFinding ??= {
           ruleId: '35',
-          message: `连续 ${punctDiversityWindow} 字无问号/感叹号/分号/省略号/破折号/对话引号（标点单一硬约束）。标点必须符合句意${dashDensityExceeded ? '；本章破折号已过密，不得靠新增破折号修复此项' : ''}`,
+          message: `连续 ${punctDiversityWindow} 字存在至少三次重复的叙述句（忽略标点与阿拉伯数字）。须消除重复展开，不能只加标点凑多样性${dashDensityExceeded ? '；本章破折号已过密，不得靠新增破折号修复此项' : ''}`,
           snippet: slice(window, 80),
           position: `offset ${i}-${i + punctDiversityWindow}`,
         };
@@ -617,12 +648,7 @@ export function detectForbiddenTells(
       findings.push(firstPunctFinding);
     }
 
-    // ===== 35b 叙述标点平板（引号外叙述连续 300 字无问号/感叹/破折号/省略号/分号） =====
-    // 规则 35 的盲区：对话引号算"多样性"，导致"满篇对话 + 平板叙述"漏检。本规则只看
-    // 引号外的叙述文本：连续 300 字叙述只用逗号句号、无任何情绪/停顿标点，读起来平板机械
-    // （AI 收敛标点的指纹）。本规则已在阻断清单内：命中进 contradictions 触发段落级精修；
-    // 白描/朴素/现实/日常类风格按项目卡片执行标准加长窗口（300→480），是阈值分化，不是豁免、不是降级。
-    // 坐标修复：派生串只用于「判定」（与旧实现逐字等价），证据与坐标一律回映射到正文真实下标。
+    // ===== 35b 剥离对话后核对重复叙述，并回映射到正文真实坐标 =====
     const { text: narrationOnly, map: narrationMap } = stripQuotedWithMap('35b');
     const narrationWindow = bareStyleStandard ? 480 : 300;
     let firstNarrationFinding: HardlineFinding | undefined;
@@ -630,8 +656,7 @@ export function detectForbiddenTells(
     const narrationHitParagraphs = new Set<number>();
     for (let i = 0; i < narrationOnly.length - narrationWindow; i += 100) {
       const w = narrationOnly.slice(i, i + narrationWindow);
-      const hasNarrationDiversity = /[!?！？…—\u2014;:：;]/.test(w);
-      if (!hasNarrationDiversity) {
+      if (hasMechanicalSentenceRepeat(w)) {
         narrationFailureWindows++;
         const realStart = narrationMap[i] ?? 0;
         const realEnd = (narrationMap[Math.min(i + narrationWindow - 1, narrationMap.length - 1)] ?? realStart) + 1;
@@ -640,7 +665,7 @@ export function detectForbiddenTells(
         }
         firstNarrationFinding ??= {
           ruleId: '35b',
-          message: `叙述段连续 ${narrationWindow} 字只用逗号句号、无问号/感叹号/破折号/省略号/分号（标点平板，节奏机械）。仅在语义需要时用真实问句、停顿或分号调整节奏${dashDensityExceeded ? '；本章破折号已过密，不得靠新增破折号修复此项' : ''}`,
+          message: `叙述段连续 ${narrationWindow} 字存在至少三次重复的叙述句（忽略标点与阿拉伯数字）。须消除重复展开，标点随句意变化，不得靠分号、省略号或问句替换消除命中${dashDensityExceeded ? '；本章破折号已过密，不得靠新增破折号修复此项' : ''}`,
           snippet: slice(content.slice(realStart, realEnd), 80),
           position: `offset ${realStart}-${realEnd}`,
           // 命中窗覆盖的【全部】段落都给出真实下标：精修一轮就能把整段平板区改完，
@@ -945,143 +970,23 @@ export function detectForbiddenTells(
       }
     }
 
-    // ===== 42 对话全圆滑对答（禁止客服式对话） =====
-    // 三段检测：
-    //   a) 全章级别：≥4 个对话引号对且无人味标志 → 整体违规；
-    //   b) 段落级别：连续 ≥4 段含 quotes 的段落无人味标志 → 局部违规（比全局检测更精确）；
-    //   c) 段内级别：单段 3 句对话全是"xx说/xx问/xx答" → 段内违规（经典客服式对答）。
-    // 人味标志：打断（破折号）/ 沉默（没说话/没出声/不回答/没理）/ 答非所问 / 吞吞吐吐 /
-    //           语气词（嗯/啧/哼/嘶/操/呸/啊？/呀！/我去）/ 重复（不行不行/不是不是）
-    const hasInterruption42 = /[—\u2014]/.test(content);
-    const hasSilence42 = /(没说话|没出声|没回答|沉默|没理|没接|没回|不回答|不说|没吭|没响|没应)/.test(content);
-    const hasEvasion42 = /(你看|那个|这怎么|什么呀|不会吧|瞎说|哪有|骗人|不信|谁信|别闹|去你的|少来|呸|没这|没那)/.test(content);
-    const hasHesitation42 = /(我…|也…|不…|可能|大概|也许|好像|算是|差不多|也…也|我我|他他)/.test(content);
-    const hasToneWords42 = /([嗯啧哼嘶呸啊哎嘿哈哦呜]{1,2}[！。，、… ])/.test(content);
-    const hasRepetition42 = /((.{1,3})\2\2)/.test(content);
-    // 动作介入（对话伴随身体动作，是人类书写的强信号；AI 圆滑客服对话不会出现）
-    const hasAction42 = /(磨了半天|磨了磨|抬起脸|抬起头|低下头|顿了一下|顿了顿|愣住|愣了愣|愣了半天|没动|张了张嘴|张张嘴|欲言又止|别过脸|侧过身|背过身|转过身|站住|停住|停下|清了清嗓子|咳了一声|看了一眼|看了看|瞄了一眼|盯着|摸了摸|攥紧|握了握|扯了扯|拉了拉|拽了拽|按了按|揉了揉|推了推|撞了一下|推了一下|拍了拍|咬了咬|咽了口|咽了咽|吸了口气|深吸一口气|叹了口气)/.test(content);
-    const humanMarkers42 = [hasInterruption42, hasSilence42, hasEvasion42, hasHesitation42, hasToneWords42, hasRepetition42, hasAction42].filter(Boolean).length;
-    // 真对话段判定（本轮修复根因）：旧实现只要段落里出现任意引号就计入"对话段落"，把叙述段中的
-    // 引用称呼/记录词（"2016年秋季那一张，'贺小满'后面写着'叔叔'"）误判成对话，导致"连续 N 段
-    // 对话无人味"大面积误报。真对话段只有两种：① 段首即引语（"…"开头）；② 段内成对引号且
-    // 引号前紧邻说话动词（他说："…"）。"写着/改成/叫做"等记录性动词不是说话，一律不计入。
-    const isDialoguePara42 = (p: string): boolean => {
-      if (/^[\u201C"「]/.test(p)) return true;
-      // 转述/称谓引用（"一个说'我姨妈'，另一个说'我姑姑'"）：说话者非具体人物，
-      // 属叙述性转述而非现场对答，不算对话段。
-      if (/(?:一个|另一个|有人说?|有人|别人|谁都没|没人|大家)[^。！？\n]{0,10}?(?:说|答|应|回|叫|喊|问)[：:，,]?\s*[\u201C"「][^\u201C"「\n]{1,6}[\u201D"」]/.test(p)) return false;
-      return /(说|问|答|道|喊|叫|吼|嚷|应|回|念|读|讲|骂|哭|笑|叹|叹口气)[：:，,]?\s*[\u201C"「][^\u201C"「\n]{1,80}[\u201D"」]/.test(p);
-    };
-    const dialogueParaIndices: number[] = [];
-    for (let i = 0; i < paragraphs.length; i++) {
-      if (isDialoguePara42(paragraphs[i])) dialogueParaIndices.push(i);
-    }
-    // 这里曾只认「嗯/沉默/破折号」等表面标志，后果是「提前十天？」
-    // 「报给谁？」配合「你管放线，我管时间表」的真实权责对抗被判客服式对答。
-    // 两次追问须与同一段内的权责对立同时存在，普通登记问答仍由 42 阻断。
-    const hasAdversarialExchange42 = (parts: string[]): boolean =>
-      parts.filter(p => /[？?]/.test(p)).length >= 2
-      && parts.some(p => /你(?:管|负责|决定)[\s\S]{0,80}我(?:管|负责|决定)/.test(p));
-    // 全局：真对话段 ≥3 且全章无人味标志 → 客服式对话整体违规。
-    // 豁免口径（与实现一致）：全章任意一个非疑问答句命中【闪避/模糊回答】或【X就是X 同义反复】，
-    // 即认为存在对抗张力，不判"客服式"；注意这不是"去重问句 ≥3"。
-    let globalEvasion = false;
-    const globalEvasionRe = /(那边|这边|就那样|那样|不知道|不清楚|说不清|说不上|忘了|记不清|没记住|再说吧|再说|随便|都行|看情况|外头|里头|别问了|别问|不想说|不记得|没听清|在镇上|在乡下|在城里|在厂里|在外面|来不了|没空|忙着呢|走不开|说不准|没准|说不定|说不好)/;
-  const tautologyRe = /^([^，。！？、；：\s]{1,8})(?:就是|还是|不还是|不就是)\1/;
-      for (const di of dialogueParaIndices) {
-        const inner = (paragraphs[di].match(/[\u201C"「][^\u201C"「\n]{1,60}[\u201D"」]/) || [''])[0];
-        if (!(/[？?]$/.test(inner) || /(谁|什么|哪儿|哪里|哪|怎么|为什么|多少|几|吗|呢|啥)/.test(inner)) && (globalEvasionRe.test(inner) || tautologyRe.test(inner))) {
-          globalEvasion = true;
-        }
+    // ===== 42 连续重复对答：无某种语气词或动作不能证明客服式对话 =====
+    // 扫描器只阻断可确定的重复轮次；对话是否空洞、是否有冲突/信息推进由完整语言评审确认。
+    let dialogueRunStart = 0;
+    for (let end = 0; end <= paragraphs.length; end++) {
+      if (end < paragraphs.length && isDialogueParaText(paragraphs[end])) continue;
+      const run = paragraphs.slice(dialogueRunStart, end);
+      if (hasRepeatedDialogueExchange(run)) {
+        findings.push({
+          ruleId: '42', occurrenceCount: 1,
+          message: '连续对话存在至少三次重复对答轮次（忽略标点与阿拉伯数字），须消除机械重复；不能靠添加沉默、动作或语气词过关',
+          snippet: run.map(p => slice(p, 24)).join(' | '),
+          position: '第 ' + (dialogueRunStart + 1) + '-' + end + ' 段',
+          paragraphs: run,
+          paragraphIndices: Array.from({length: run.length}, (_, i) => dialogueRunStart + i),
+        });
       }
-    const globalExempt = globalEvasion || hasAdversarialExchange42(dialogueParaIndices.map(i => paragraphs[i]));
-    if (dialogueParaIndices.length >= 3 && humanMarkers42 === 0 && !globalExempt) {
-      findings.push({
-        ruleId: '42',
-        occurrenceCount: dialogueParaIndices.length,
-        message: `全章 ${dialogueParaIndices.length} 段真实对话，但无人味标志（无打断/沉默/答非所问/吞吞吐吐/语气词/重复）——纯"xx说/xx回答"客服式对话`,
-        snippet: '全章',
-        position: '全文',
-        paragraphs: dialogueParaIndices.map(i => paragraphs[i]),
-        paragraphIndices: [...dialogueParaIndices],
-      });
-    } else if (dialogueParaIndices.length >= 4) {
-      // 段落级检测：连续 ≥4 段真实对话无人味标志。
-      // 关键口径（本轮修复）：只统计【物理相邻】的对话段——中间只要插入叙述/动作段，
-      // 对话就被打断（叙述本身即场景感/人味），连续计数立即重置，而不是按对话段列表
-      // 相邻跳过叙述段继续累加（旧口径把隔段对话误判为"连续圆滑对答"，是 42 反复
-      // 误报的根因）。
-      let consecutiveNoHuman = 0;
-      let maxConsecutive = 0;
-      let maxStart = 0;
-      let currentStart = 0;
-      for (let j = 0; j < dialogueParaIndices.length; j++) {
-        // 物理相邻检查：当前对话段与上一对话段之间若隔着非对话段，视为被打断
-        if (j > 0 && dialogueParaIndices[j] !== dialogueParaIndices[j - 1] + 1) {
-          if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
-            maxConsecutive = consecutiveNoHuman;
-            maxStart = currentStart;
-          }
-          consecutiveNoHuman = 0;
-        }
-        const p = paragraphs[dialogueParaIndices[j]];
-        // 混合段人味（修复误报根因）：对话段内【引号外叙述文字 ≥6 个汉字】（去掉标点后）即视为
-        // 动作/场景/心理叙述介入，天然具有叙事人味——"小满的目光往窗外偏了一下。然后她把书包带子
-        // 往肩上一提，说：'老师，阿岩来了。'"属动作介入的叙事段，不是"纯客服式对答"；
-        // 纯"他说：'…'""她问：'…'"（引号外仅说话标签，<6 字）仍按原逻辑判无人味。
-        const quoteOutside = p.replace(/[\u201C\u201D"「」][^\u201C\u201D"「」]*[\u201C\u201D"「」]/g, '');
-        const narrationLen = quoteOutside.replace(/[，。！？、；：…\s]/g, '').length;
-        const hasMixedNarration = narrationLen >= 6;
-        const localHuman = hasMixedNarration || /([—\u2014]|没说话|没出声|没回答|沉默|没理|没接|没回|不回答|不说|你看|那个|这怎么|什么呀|不会吧|瞎说|哪有|骗人|不信|[嗯啧哼嘶呸啊哎嘿哈哈哦呜]{1,2}[！。，、… ]|…|我我|他他|也…也|磨了半天|磨了磨|抬起脸|抬起头|低下头|顿了一下|顿了顿|愣住|愣了愣|愣了半天|没动|张了张嘴|张张嘴|欲言又止|别过脸|侧过身|背过身|转过身|站住|停住|停下|清了清嗓子|咳了一声|看了一眼|看了看|瞄了一眼|盯着|摸了摸|攥紧|握了握|扯了扯|拉了拉|拽了拽|按了按|揉了揉|推了推|撞了一下|推了一下|拍了拍|咬了咬|咽了口|咽了咽|吸了口气|深吸一口气|叹了口气)/.test(p);
-        if (!localHuman) {
-          if (consecutiveNoHuman === 0) currentStart = dialogueParaIndices[j];
-          consecutiveNoHuman++;
-        } else {
-          if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
-            maxConsecutive = consecutiveNoHuman;
-            maxStart = currentStart;
-          }
-          consecutiveNoHuman = 0;
-        }
-      }
-      if (consecutiveNoHuman >= 4 && consecutiveNoHuman > maxConsecutive) {
-        maxConsecutive = consecutiveNoHuman;
-        maxStart = currentStart;
-      }
-      if (maxConsecutive >= 4) {
-        // 追问推进豁免（修复误杀根因）：规则 42 本意是拦截"无信息推进的客服式寒暄对答"；
-        // 而"信息推进的追问/对峙"——老师连续换问句逼问、对方敷衍回避（如"就来接你的是谁。/
-        // 我姨妈。/她在哪儿住。/在那边。/哪边。"）——每轮问句都在推进新信息，是有戏剧张力的
-        // 正文，LLM 评审确认合格。判定口径：连续区内【去重问句 ≥3 个】即视为追问推进区，豁免 42；
-        // 问句少（<3）的机械套问（"你妈在哪儿？""广东。""你爸呢？""也在外头。"）不豁免。
-        let hasEvasionAnswer = false;
-        {
-          const evasionAnswerRe = /(那边|这边|就那样|那样|不知道|不清楚|说不清|说不上|忘了|记不清|没记住|再说吧|再说|随便|都行|看情况|外头|里头|别问了|别问|不想说|不记得|没听清|在镇上|在乡下|在城里|在厂里|在外面|来不了|没空|忙着呢|走不开|说不准|没准|说不定|说不好)/;
-          const tautologyRe = /^([^，。！？、；：\s]{1,8})(?:就是|还是|不还是|不就是)\1/;
-          for (let k = maxStart; k < maxStart + maxConsecutive; k++) {
-            const inner = (paragraphs[k].match(/[\u201C"「][^\u201C"「\n]{1,60}[\u201D"」]/) || [''])[0];
-            if (!(/[？?]$/.test(inner) || /(谁|什么|哪儿|哪里|哪|怎么|为什么|多少|几|吗|呢|啥)/.test(inner)) && (evasionAnswerRe.test(inner) || tautologyRe.test(inner))) {
-              hasEvasionAnswer = true;
-            }
-          }
-        }
-        // 豁免条件：连续区内至少一个答句为模糊/闪避（"那边""不知道"——有对抗张力，是追问/对峙
-        // 场景的物理指纹，不是客服式配合回答）。登记式一问一答（"你叫什么名字？""周雨。"）无
-        // 闪避，仍判圆滑交替对答。
-        if (!hasEvasionAnswer && !hasAdversarialExchange42(paragraphs.slice(maxStart, maxStart + maxConsecutive))) {
-          findings.push({
-            ruleId: '42',
-            occurrenceCount: maxConsecutive - 3,
-            message: `连续 ${maxConsecutive} 段对话无人味标志（无打断/沉默/语气词/重复——圆滑交替对答）`,
-            snippet: paragraphs.slice(maxStart, maxStart + maxConsecutive).map(p => slice(p, 24)).join(' | '),
-            position: `第 ${maxStart + 1}-${maxStart + maxConsecutive} 段`,
-            // 精确位置随结论一起返回：局部精修必须就地改这几段，不能靠整章重写（位置会漂移，
-            // 是规则 42 反复误报的根因）。paragraphs 为未折叠的原始段落原文。
-            paragraphs: paragraphs.slice(maxStart, maxStart + maxConsecutive),
-            paragraphIndices: Array.from({ length: maxConsecutive }, (_, i) => maxStart + i),
-          });
-        }
-      }
+      dialogueRunStart = end + 1;
     }
 
     // ===== 43 无不完美细节（AI的"过度干净"物理指纹） =====
@@ -1101,17 +1006,26 @@ export function detectForbiddenTells(
       });
     }
 
-    // ===== 44 转场机械词过多 =====
-    const mechTransitions44 = /(接着|然后|之后|随即|不久后|不一会儿|片刻后|过了一会儿|很快|马上|立刻|不一会儿的功夫|接下来|话说|于是乎|说到这|话又说回来|再然后|之后不久|片刻之间)/g;
-    const mechMatches = content.match(mechTransitions44) || [];
-    if (mechMatches.length >= 3) {
-      const samples = mechMatches.slice(0, 3).join(', ');
+    // ===== 44 重复模板化转场 =====
+    // 全文词频不能区分动作速度、时间关系和转场，更不能据此要求补造时间或感官事实。
+    const transitionStart44 = /^(再然后|再之后|之后不久|过了一会儿|不一会儿的功夫|话又说回来|不久后|不一会儿|片刻后|接下来|于是乎|说到这|片刻之间|接着|然后|之后|随即|很快|马上|立刻|话说)/;
+    const repeatedTransitionWindows: number[] = [];
+    for (let index = 0; index + 2 < paragraphs.length; index++) {
+      const window = paragraphs.slice(index, index + 3);
+      if (window.some(p => isDialogueParaText(p) || !transitionStart44.test(p))) continue;
+      if (hasMechanicalSentenceRepeat(window.join('\n'))) repeatedTransitionWindows.push(index);
+    }
+    if (repeatedTransitionWindows.length) {
+      const indices = [...new Set(repeatedTransitionWindows.flatMap(start => [start, start + 1, start + 2]))];
+      const evidence = indices.map(index => paragraphs[index]);
       findings.push({
         ruleId: '44',
-        message: `转场机械词 ≥ 3 次（"${samples}"——应改用环境切入/时间锚点/感官切入/身体状态替代）`,
-        snippet: samples,
-        position: '全文',
-        hitCharOffsets: charOffsetsOf(mechMatches.slice(0, 3)),
+        message: '相邻叙述段以转场词起头且存在重复叙述证据；只修正重复展开，保留原时间、动作速度和情节事实，不以新增时间或感官细节换词',
+        snippet: evidence.slice(0, 3).join(' | '),
+        position: `第 ${indices[0] + 1}-${indices[indices.length - 1] + 1} 段`,
+        occurrenceCount: repeatedTransitionWindows.length,
+        paragraphs: evidence,
+        paragraphIndices: indices,
       });
     }
 
