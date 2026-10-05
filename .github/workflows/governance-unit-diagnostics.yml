@@ -1,5 +1,5 @@
 name: Governance unit diagnostics
-# trigger: retry-1
+# trigger: retry-2
 
 on:
   push:
