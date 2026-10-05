@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-7
+# trigger: retry-8
 
 on:
   push:
@@ -72,6 +72,49 @@ jobs:
       - name: Server build
         working-directory: server
         run: npm run build
+
+      - name: Governance test - module standards service
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/modules/module-standards/module-standards.service.spec.ts
+
+      - name: Governance test - public rule source
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/modules/module-standards/public-rule-source.spec.ts
+
+      - name: Governance test - source fact consistency
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/chain/source-fact-consistency.spec.ts
+
+      - name: Governance test - source countdown consistency
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/chain/source-countdown-consistency.spec.ts
+
+      - name: Governance test - source rule consistency
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/chain/source-rule-consistency.spec.ts
+
+      - name: Governance test - real LLM standards injection
+        working-directory: server
+        env:
+          DEEPSEEK_API_KEY: ''
+          OPENAI_API_KEY: ''
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/chain/real-llm.standards.spec.ts
+
+      - name: Governance test - generation metrics ruleset
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/modules/generation-metrics/generation-metrics.ruleset.spec.ts
+
+      - name: Governance test - idea discovery contract
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/chain/idea-discovery-contract.spec.ts
+
+      - name: Governance test - idea appeal gate
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/chain/idea-appeal-gate.service.spec.ts
+
+      - name: Governance test - hardline scanner
+        working-directory: server
+        run: node --no-warnings node_modules/vitest/vitest.mjs run src/chain/hardline-scanner.spec.ts
 
       - name: Server unit tests
         working-directory: server
