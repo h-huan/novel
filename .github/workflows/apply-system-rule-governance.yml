@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-11
+# trigger: retry-12
 
 on:
   push:
@@ -36,6 +36,7 @@ jobs:
           python tools/system-rule-governance/bootstrap/enrich_normative_contracts.py
           python tools/system-rule-governance/bootstrap/align_gen_qlt_registry.py
           python tools/system-rule-governance/bootstrap/patch_core.py
+          python tools/system-rule-governance/bootstrap/fix_idea_semantic_gate.py
           python tools/system-rule-governance/bootstrap/patch_hardline.py
           python tools/system-rule-governance/bootstrap/patch_platform.py
           python tools/system-rule-governance/bootstrap/patch_chain_runner.py
