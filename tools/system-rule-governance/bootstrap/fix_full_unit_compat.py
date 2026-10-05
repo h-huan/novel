@@ -69,15 +69,25 @@ new = """  it('keeps raw countdown arithmetic as advisory when stable fact ident
     });
     controller.persistAlignmentContradictions = vi.fn();
     controller.assertNoBlockingGeneratedContentIssues = vi.fn();
+    // generateBodyWithAlignmentGuard performs one final locked-context Canon validation after
+    // the alignment Gate passes. The test stubs that already-existing transport dependency and
+    // returns the exact same prose; it does not bypass or redefine the Gate under test.
+    controller.realLLM = {
+      validateGeneratedContent: vi.fn().mockImplementation(async (_projectId: string, _chapterIndex: number, content: string) => content),
+    };
 
     await expect(controller.generateBodyWithAlignmentGuard({
       projectId: 'p1', basePrompt: '写正文', targetWords: 4000,
       scenario: 'writing_climax', chapterIndex: 1, chapterTitle: '第一章',
       outlineContract: '三天后零点截止。', storyContext: '已确认上下文',
       wordRange: { min: 3000, max: 5000 },
-    })).resolves.toEqual(expect.any(String));
+    })).resolves.toMatchObject({
+      content: expect.any(String),
+      qualityReport: expect.objectContaining({ pass: true, timelinePassed: true, prosePassed: true }),
+    });
 
     expect(controller.generateBodyWithLengthGuard).toHaveBeenCalledTimes(1);
+    expect(controller.realLLM.validateGeneratedContent).toHaveBeenCalledTimes(1);
     expect(controller.logger.warn).toHaveBeenCalledWith(expect.stringContaining('可计算时间风险'));
   });
 """
