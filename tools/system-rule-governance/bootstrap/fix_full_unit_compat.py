@@ -54,6 +54,9 @@ new = """  it('keeps raw countdown arithmetic as advisory when stable fact ident
     controller.worldSettingService.getWritingSummary = () => ({
       summary: '两天前，72小时倒计时启动。',
     });
+    // This test owns the raw-text advisory branch, not world-context assembly. Keep the
+    // integration input explicit so missing unrelated service methods cannot mask the rule behavior.
+    controller.buildWorldWritingContext = vi.fn().mockReturnValue('两天前，72小时倒计时启动。');
     controller.getActiveLessons = vi.fn().mockReturnValue('');
     controller.generateBodyWithLengthGuard = vi.fn().mockResolvedValue('正文'.repeat(1800));
     controller.assertGeneratedChapterIdentity = vi.fn();
@@ -80,18 +83,19 @@ new = """  it('keeps raw countdown arithmetic as advisory when stable fact ident
 """
 text = replace_once(text, old, new, 'countdown advisory integration test')
 
-# 3) Keep the sequential-patch regression, but use a rule that remains deterministic: actual
-# repeated prose. The old action-chain example is now a semantic/style risk, not a P1 hardline.
+# 3) Keep the sequential-patch regression, but use a rule that remains deterministic. Stacked
+# !/? punctuation is rule 56 and is directly reproducible; the old action-chain example is now
+# semantic/style risk, not a P1 hardline.
 old = """        { original: '屋里只有一本账册。', replacement: '拉开抽屉，抽出账册，翻到末页，推到桌上。' },
 """
-new = """        { original: '屋里只有一本账册。', replacement: '屋里只有一本账册。屋里只有一本账册。屋里只有一本账册。屋里只有一本账册。' },
+new = """        { original: '屋里只有一本账册。', replacement: '屋里只有一本账册！！' },
 """
-text = replace_once(text, old, new, 'repair regression actual hardline patch')
+text = replace_once(text, old, new, 'repair regression deterministic hardline patch')
 text = replace_once(
     text,
     """    expect(after).not.toContain('拉开抽屉，抽出账册');
 """,
-    """    expect(after).not.toContain('屋里只有一本账册。屋里只有一本账册。');
+    """    expect(after).not.toContain('屋里只有一本账册！！');
 """,
     'repair regression rejection assertion',
 )
