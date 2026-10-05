@@ -1,0 +1,106 @@
+name: Apply system rule governance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-system-rule-governance.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Apply transparent governance patch
+        run: |
+          set -euxo pipefail
+          python tools/system-rule-governance/bootstrap/prebuilt_part_0.py
+          python tools/system-rule-governance/bootstrap/prebuilt_part_1.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_0.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_1.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_2.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_3.py
+          python tools/system-rule-governance/bootstrap/patch_core.py
+          python tools/system-rule-governance/bootstrap/patch_hardline.py
+          python tools/system-rule-governance/bootstrap/patch_platform.py
+          python tools/system-rule-governance/bootstrap/patch_chain.py
+          git diff --check
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          doc=Path('QUALITY_EXECUTION.md').read_text()
+          reg=Path('server/shared/src/system-workflow-rules.registry.ts').read_text()
+          doc_ids=re.findall(r'\[([A-Z]+-\d{3})\s*·\s*P[0-3]\]',doc)
+          reg_ids=re.findall(r"id: '([A-Z]+-\d{3})'",reg)
+          assert len(doc_ids)==58 and len(set(doc_ids))==58, (len(doc_ids),len(set(doc_ids)))
+          assert len(reg_ids)==58 and len(set(reg_ids))==58, (len(reg_ids),len(set(reg_ids)))
+          assert set(doc_ids)==set(reg_ids), sorted(set(doc_ids)^set(reg_ids))
+          print('Rule ID exact-set OK:',len(doc_ids))
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Server verification
+        working-directory: server
+        env:
+          DEEPSEEK_API_KEY: ''
+          OPENAI_API_KEY: ''
+        run: |
+          set -euxo pipefail
+          npm ci
+          node --check ../verify-local.mjs
+          npm run typecheck
+          npm run build
+          npm test
+          npm run test:acceptance
+          npm run test:e2e
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Desktop verification
+        working-directory: desktop
+        env:
+          DEEPSEEK_API_KEY: ''
+          OPENAI_API_KEY: ''
+        run: |
+          set -euxo pipefail
+          npm ci
+          node --check scripts/dev.js
+          node --check scripts/prepare-server-runtime.js
+          npm run typecheck
+          npm test
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:e2e:quality
+
+      - name: Commit verified governance refactor
+        run: |
+          set -euxo pipefail
+          rm -rf tools/system-rule-governance
+          rm -f .github/workflows/apply-system-rule-governance.yml
+          git diff --check
+          git config user.name 'openai-codex'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git status --short
+          git commit -m 'refactor: unify system workflow rule governance'
+          git push origin HEAD:main
