@@ -1,5 +1,5 @@
 name: Governance unit diagnostics
-# trigger: retry-3-final-stack
+# trigger: retry-4-full
 
 on:
   push:
@@ -47,10 +47,41 @@ jobs:
       - name: Install server dependencies
         working-directory: server
         run: npm ci
-      - name: Run final failing unit with full stack
+      - name: Run full unit suite with concise failure summary
         working-directory: server
         env:
           DEEPSEEK_API_KEY: ''
           OPENAI_API_KEY: ''
         run: |
-          node --no-warnings node_modules/vitest/vitest.mjs run src/chain/chain.controller.helpers.spec.ts -t "keeps raw countdown arithmetic as advisory when stable fact identity is unavailable" --reporter=verbose
+          set +e
+          node --no-warnings node_modules/vitest/vitest.mjs run --exclude '**/*.acceptance.spec.ts' --reporter=json --outputFile=/tmp/unit-results.json
+          code=$?
+          set -e
+          node - <<'NODE'
+          const fs = require('fs');
+          const p = '/tmp/unit-results.json';
+          if (!fs.existsSync(p)) {
+            console.log('UNIT_DIAGNOSTIC: result file missing');
+            process.exit(0);
+          }
+          const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const failed = [];
+          const suiteErrors = [];
+          for (const file of data.testResults || []) {
+            let assertionFailure = false;
+            for (const a of file.assertionResults || []) {
+              if (a.status !== 'failed') continue;
+              assertionFailure = true;
+              const message = String((a.failureMessages || [])[0] || '').split('\n').slice(0, 8).join(' | ');
+              failed.push({ file: file.name, test: [...(a.ancestorTitles || []), a.title].join(' > '), message });
+            }
+            if (file.status === 'failed' && !assertionFailure) {
+              const message = String(file.message || '').split('\n').slice(0, 10).join(' | ');
+              suiteErrors.push({ file: file.name, message });
+            }
+          }
+          console.log(`UNIT_DIAGNOSTIC: failedSuites=${data.numFailedTestSuites || 0} failedTests=${data.numFailedTests || failed.length}`);
+          for (const f of failed) console.log(`UNIT_FAIL | ${f.file} | ${f.test} | ${f.message}`);
+          for (const f of suiteErrors) console.log(`UNIT_SUITE_FAIL | ${f.file} | ${f.message}`);
+          NODE
+          exit $code
