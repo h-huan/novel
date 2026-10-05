@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: contents-api
+# trigger: retry-2
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
           python tools/system-rule-governance/bootstrap/patch_core.py
           python tools/system-rule-governance/bootstrap/patch_hardline.py
           python tools/system-rule-governance/bootstrap/patch_platform.py
-          python tools/system-rule-governance/bootstrap/patch_chain.py
+          python tools/system-rule-governance/bootstrap/patch_chain_runner.py
           git diff --check
           python - <<'PY'
           import re
