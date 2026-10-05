@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-14
+# trigger: retry-15-final
 
 on:
   push:
@@ -42,6 +42,7 @@ jobs:
           python tools/system-rule-governance/bootstrap/retire_hardline_quota_tests.py
           python tools/system-rule-governance/bootstrap/patch_platform.py
           python tools/system-rule-governance/bootstrap/patch_chain_runner.py
+          python tools/system-rule-governance/bootstrap/fix_full_unit_compat.py
           git diff --check
           python - <<'PY'
           import re
@@ -203,6 +204,7 @@ jobs:
           set -euxo pipefail
           rm -rf tools/system-rule-governance
           rm -f .github/workflows/apply-system-rule-governance.yml
+          rm -f .github/workflows/governance-unit-diagnostics.yml
           git diff --check
           git config user.name 'openai-codex'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
