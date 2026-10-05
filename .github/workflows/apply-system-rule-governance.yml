@@ -1,4 +1,5 @@
 name: Apply system rule governance
+# trigger: contents-api
 
 on:
   push:
