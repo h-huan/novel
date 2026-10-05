@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-6
+# trigger: retry-7
 
 on:
   push:
@@ -57,20 +57,42 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
 
-      - name: Server verification
+      - name: Server install
+        working-directory: server
+        run: npm ci
+
+      - name: Server script syntax
+        working-directory: server
+        run: node --check ../verify-local.mjs
+
+      - name: Server typecheck
+        working-directory: server
+        run: npm run typecheck
+
+      - name: Server build
+        working-directory: server
+        run: npm run build
+
+      - name: Server unit tests
         working-directory: server
         env:
           DEEPSEEK_API_KEY: ''
           OPENAI_API_KEY: ''
-        run: |
-          set -euxo pipefail
-          npm ci
-          node --check ../verify-local.mjs
-          npm run typecheck
-          npm run build
-          npm test
-          npm run test:acceptance
-          npm run test:e2e
+        run: npm test
+
+      - name: Server acceptance tests
+        working-directory: server
+        env:
+          DEEPSEEK_API_KEY: ''
+          OPENAI_API_KEY: ''
+        run: npm run test:acceptance
+
+      - name: Server API E2E
+        working-directory: server
+        env:
+          DEEPSEEK_API_KEY: ''
+          OPENAI_API_KEY: ''
+        run: npm run test:e2e
 
       - uses: actions/setup-node@v4
         with:
@@ -78,21 +100,36 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
-      - name: Desktop verification
+      - name: Desktop install
+        working-directory: desktop
+        run: npm ci
+
+      - name: Desktop script syntax
+        working-directory: desktop
+        run: node --check scripts/dev.js && node --check scripts/prepare-server-runtime.js
+
+      - name: Desktop typecheck
+        working-directory: desktop
+        run: npm run typecheck
+
+      - name: Desktop unit tests
+        working-directory: desktop
+        run: npm test
+
+      - name: Desktop build
+        working-directory: desktop
+        run: npm run build
+
+      - name: Desktop install Chromium
+        working-directory: desktop
+        run: npx playwright install --with-deps chromium
+
+      - name: Desktop Quality cockpit E2E
         working-directory: desktop
         env:
           DEEPSEEK_API_KEY: ''
           OPENAI_API_KEY: ''
-        run: |
-          set -euxo pipefail
-          npm ci
-          node --check scripts/dev.js
-          node --check scripts/prepare-server-runtime.js
-          npm run typecheck
-          npm test
-          npm run build
-          npx playwright install --with-deps chromium
-          npm run test:e2e:quality
+        run: npm run test:e2e:quality
 
       - name: Commit verified governance refactor
         run: |
