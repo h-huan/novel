@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-10
+# trigger: retry-11
 
 on:
   push:
@@ -33,6 +33,7 @@ jobs:
           python tools/system-rule-governance/bootstrap/prebuilt_small_2.py
           python tools/system-rule-governance/bootstrap/prebuilt_small_3.py
           python tools/system-rule-governance/bootstrap/complete_missing_rules.py
+          python tools/system-rule-governance/bootstrap/enrich_normative_contracts.py
           python tools/system-rule-governance/bootstrap/align_gen_qlt_registry.py
           python tools/system-rule-governance/bootstrap/patch_core.py
           python tools/system-rule-governance/bootstrap/patch_hardline.py
@@ -65,7 +66,10 @@ jobs:
             assert hit and anchor in hit.group(1), (rule_id, hit.group(1) if hit else None)
             doc_hit=re.search(rf'^###\s+.*{re.escape(anchor)}.*\[{rule_id}\s*·\s*P[0-3]\]',doc,re.M)
             assert doc_hit, (rule_id, anchor, 'document semantic mismatch')
-          print('Rule ID exact-set and semantic anchors OK:',len(doc_ids))
+          assert 'prosePassed' in doc and 'prosePassed' in reg
+          assert '具体必需事件' in doc and '具体必需事件' in reg
+          assert '终章按合同结局或余韵收束' in doc and '终章按合同结局或余韵收束' in reg
+          print('Rule ID exact-set and normative contract alignment OK:',len(doc_ids))
           PY
 
       - uses: actions/setup-node@v4
