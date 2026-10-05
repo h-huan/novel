@@ -1,4 +1,5 @@
 name: Governance unit diagnostics
+# trigger: retry-1
 
 on:
   push:
@@ -37,6 +38,7 @@ jobs:
           python tools/system-rule-governance/bootstrap/retire_hardline_quota_tests.py
           python tools/system-rule-governance/bootstrap/patch_platform.py
           python tools/system-rule-governance/bootstrap/patch_chain_runner.py
+          python tools/system-rule-governance/bootstrap/fix_full_unit_compat.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -64,14 +66,22 @@ jobs:
           }
           const data = JSON.parse(fs.readFileSync(p, 'utf8'));
           const failed = [];
+          const suiteErrors = [];
           for (const file of data.testResults || []) {
+            let assertionFailure = false;
             for (const a of file.assertionResults || []) {
               if (a.status !== 'failed') continue;
+              assertionFailure = true;
               const message = String((a.failureMessages || [])[0] || '').split('\n').slice(0, 8).join(' | ');
               failed.push({ file: file.name, test: [...(a.ancestorTitles || []), a.title].join(' > '), message });
+            }
+            if (file.status === 'failed' && !assertionFailure) {
+              const message = String(file.message || '').split('\n').slice(0, 10).join(' | ');
+              suiteErrors.push({ file: file.name, message });
             }
           }
           console.log(`UNIT_DIAGNOSTIC: failedSuites=${data.numFailedTestSuites || 0} failedTests=${data.numFailedTests || failed.length}`);
           for (const f of failed) console.log(`UNIT_FAIL | ${f.file} | ${f.test} | ${f.message}`);
+          for (const f of suiteErrors) console.log(`UNIT_SUITE_FAIL | ${f.file} | ${f.message}`);
           NODE
           exit $code
