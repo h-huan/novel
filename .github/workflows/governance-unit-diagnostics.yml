@@ -1,0 +1,77 @@
+name: Governance unit diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/governance-unit-diagnostics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-unit-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply governance patch
+        run: |
+          set -euo pipefail
+          python tools/system-rule-governance/bootstrap/prebuilt_part_0.py
+          python tools/system-rule-governance/bootstrap/prebuilt_part_1.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_0.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_1.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_2.py
+          python tools/system-rule-governance/bootstrap/prebuilt_small_3.py
+          python tools/system-rule-governance/bootstrap/complete_missing_rules.py
+          python tools/system-rule-governance/bootstrap/enrich_normative_contracts.py
+          python tools/system-rule-governance/bootstrap/align_gen_qlt_registry.py
+          python tools/system-rule-governance/bootstrap/patch_core.py
+          python tools/system-rule-governance/bootstrap/fix_idea_semantic_gate.py
+          python tools/system-rule-governance/bootstrap/patch_hardline.py
+          python tools/system-rule-governance/bootstrap/fix_hardline_spec_syntax.py
+          python tools/system-rule-governance/bootstrap/retire_hardline_quota_tests.py
+          python tools/system-rule-governance/bootstrap/patch_platform.py
+          python tools/system-rule-governance/bootstrap/patch_chain_runner.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+      - name: Run full unit suite with concise failure summary
+        working-directory: server
+        env:
+          DEEPSEEK_API_KEY: ''
+          OPENAI_API_KEY: ''
+        run: |
+          set +e
+          node --no-warnings node_modules/vitest/vitest.mjs run --exclude '**/*.acceptance.spec.ts' --reporter=json --outputFile=/tmp/unit-results.json
+          code=$?
+          set -e
+          node - <<'NODE'
+          const fs = require('fs');
+          const p = '/tmp/unit-results.json';
+          if (!fs.existsSync(p)) {
+            console.log('UNIT_DIAGNOSTIC: result file missing');
+            process.exit(0);
+          }
+          const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const failed = [];
+          for (const file of data.testResults || []) {
+            for (const a of file.assertionResults || []) {
+              if (a.status !== 'failed') continue;
+              const message = String((a.failureMessages || [])[0] || '').split('\n').slice(0, 8).join(' | ');
+              failed.push({ file: file.name, test: [...(a.ancestorTitles || []), a.title].join(' > '), message });
+            }
+          }
+          console.log(`UNIT_DIAGNOSTIC: failedSuites=${data.numFailedTestSuites || 0} failedTests=${data.numFailedTests || failed.length}`);
+          for (const f of failed) console.log(`UNIT_FAIL | ${f.file} | ${f.test} | ${f.message}`);
+          NODE
+          exit $code
