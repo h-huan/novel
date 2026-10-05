@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-13
+# trigger: retry-14
 
 on:
   push:
@@ -39,6 +39,7 @@ jobs:
           python tools/system-rule-governance/bootstrap/fix_idea_semantic_gate.py
           python tools/system-rule-governance/bootstrap/patch_hardline.py
           python tools/system-rule-governance/bootstrap/fix_hardline_spec_syntax.py
+          python tools/system-rule-governance/bootstrap/retire_hardline_quota_tests.py
           python tools/system-rule-governance/bootstrap/patch_platform.py
           python tools/system-rule-governance/bootstrap/patch_chain_runner.py
           git diff --check
