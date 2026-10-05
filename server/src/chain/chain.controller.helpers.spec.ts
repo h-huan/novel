@@ -410,21 +410,46 @@ describe('chapter alignment evaluation availability', () => {
     expect(controller.buildAlignmentRepairPrompt).not.toHaveBeenCalled();
   });
 
-  it('blocks a contradictory source countdown before the first body model call', async () => {
+  it('keeps raw countdown arithmetic as advisory when stable fact identity is unavailable', async () => {
     const controller = applyStandardsStub(Object.create(ChainController.prototype) as any);
     controller.worldSettingService.getWritingSummary = () => ({
-      summary: '两天前——开发方下达定向爆破令，72小时倒计时启动。',
+      summary: '两天前，72小时倒计时启动。',
     });
-    controller.generateBodyWithLengthGuard = vi.fn();
+    // This test owns the raw-text advisory branch, not world-context assembly. Keep the
+    // integration input explicit so missing unrelated service methods cannot mask the rule behavior.
+    controller.buildWorldWritingContext = vi.fn().mockReturnValue('两天前，72小时倒计时启动。');
+    controller.getActiveLessons = vi.fn().mockReturnValue('');
+    controller.generateBodyWithLengthGuard = vi.fn().mockResolvedValue('正文'.repeat(1800));
+    controller.assertGeneratedChapterIdentity = vi.fn();
+    controller.checkChapterAlignment = vi.fn().mockResolvedValue({
+      evaluationStatus: 'evaluated', pass: true,
+      requiredEvents: [{ event: '必需事件', covered: true, evidence: '正文证据' }],
+      missingRequiredItems: [], missing: [], contradictions: [], advisories: [], sourceConflicts: [], evidence: [], hardlineFindings: [],
+      outlineAligned: true, continuityPassed: true, characterPassed: true,
+      worldPassed: true, timelinePassed: true, prosePassed: true,
+    });
+    controller.persistAlignmentContradictions = vi.fn();
+    controller.assertNoBlockingGeneratedContentIssues = vi.fn();
+    // generateBodyWithAlignmentGuard performs one final locked-context Canon validation after
+    // the alignment Gate passes. The test stubs that already-existing transport dependency and
+    // returns the exact same prose; it does not bypass or redefine the Gate under test.
+    controller.realLLM = {
+      validateGeneratedContent: vi.fn().mockImplementation(async (_projectId: string, _chapterIndex: number, content: string) => content),
+    };
 
     await expect(controller.generateBodyWithAlignmentGuard({
       projectId: 'p1', basePrompt: '写正文', targetWords: 4000,
       scenario: 'writing_climax', chapterIndex: 1, chapterTitle: '第一章',
-      outlineContract: '三天后上午十点起爆。', storyContext: '已确认上下文',
+      outlineContract: '三天后零点截止。', storyContext: '已确认上下文',
       wordRange: { min: 3000, max: 5000 },
-    })).rejects.toMatchObject({ status: 422 });
+    })).resolves.toMatchObject({
+      content: expect.any(String),
+      qualityReport: expect.objectContaining({ pass: true, timelinePassed: true, prosePassed: true }),
+    });
 
-    expect(controller.generateBodyWithLengthGuard).not.toHaveBeenCalled();
+    expect(controller.generateBodyWithLengthGuard).toHaveBeenCalledTimes(1);
+    expect(controller.realLLM.validateGeneratedContent).toHaveBeenCalledTimes(1);
+    expect(controller.logger.warn).toHaveBeenCalledWith(expect.stringContaining('可计算时间风险'));
   });
 });
 
@@ -1176,7 +1201,7 @@ describe('cross-chapter boundary enforcement', () => {
     controller.realLLM = { generate: vi.fn().mockResolvedValue({ content: JSON.stringify({
       patches: [
         { original: '二楼那户仍写着名字。', replacement: '二楼那户已变成空白。' },
-        { original: '屋里只有一本账册。', replacement: '拉开抽屉，抽出账册，翻到末页，推到桌上。' },
+        { original: '屋里只有一本账册。', replacement: '屋里只有一本账册！！' },
       ],
     }) }) };
     const after = await controller.repairOutlineFactsLocally({
@@ -1185,7 +1210,7 @@ describe('cross-chapter boundary enforcement', () => {
     });
     expect(after).toContain('二楼那户已变成空白。');
     expect(after).toContain('屋里只有一本账册。');
-    expect(after).not.toContain('拉开抽屉，抽出账册');
+    expect(after).not.toContain('屋里只有一本账册！！');
   });
 
   it('surfaces a network failure in local outline repair instead of silently rewriting the chapter', async () => {

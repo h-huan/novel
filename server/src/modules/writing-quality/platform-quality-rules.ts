@@ -51,7 +51,7 @@ export function deterministicPlatformReview(input: {
   const dialogue = byKey.get('dialogueRatio');
   if (dialogue && dialogue.status !== 'ok') issues.push(issue('platform.dialogue_ratio', `${dialogue.label} ${dialogue.value}，目标 ${dialogue.target}`, quoteAt(), dialogue.status === 'bad' ? 'high' : 'medium'));
   const opening = byKey.get('openingHook');
-  if (opening?.status === 'bad') issues.push(issue('platform.opening_hook_position', opening.advice, quoteAt(0, target.openingHookChars), 'high'));
+  if (opening?.status === 'bad') issues.push(issue('platform.opening_hook_position', `${opening.advice}；这是表面信号风险，必须由语义评审确认真实阅读承诺是否缺失`, quoteAt(0, target.openingHookChars), 'medium'));
   const ending = byKey.get('endingHook');
   if (ending && ending.status !== 'ok') issues.push(issue('platform.ending_hook', ending.advice, quoteAt(Math.max(0, input.content.length - 100)), 'high'));
 
@@ -126,11 +126,11 @@ const PLATFORM_ISSUE_TITLES: Record<string, string> = {
 
 const PLATFORM_ISSUE_SUGGESTIONS: Record<string, string> = {
   platform_chapter_length: '按目标平台单章字数区间增删：补足有效情节或压缩冗余铺陈，不改变本章大纲契约。',
-  platform_paragraph_length: '拆长短段：单段不超过平台上限，长段之间插入短句或对话，避免大段密排。',
-  platform_dialogue_ratio: '提高对话密度：把说明性叙述改成人物之间的一来一回，加入打断、沉默与动作，使对话占比进入平台区间。',
-  platform_opening_hook: '重写开篇：前几百字直接落在冲突/反常/强悬念上，删掉环境与履历铺垫。',
-  platform_ending_hook: '重写章尾：落在未解问题、反转、新威胁或关键动作/对话上，不要平淡收尾。',
-  platform_payoff_gap: '在长间隔中补有效推进或情绪兑现（反转、进展、对手反应、关键抉择），缩短无推进段落。',
+  platform_paragraph_length: '仅调整现有句子的分段、合并和冗余表达；不得为了段落指标新增对话、动作、感官或故事事实。',
+  platform_dialogue_ratio: '先核对本章场景与人物知识是否本来就支持对话；只允许把已确认且已存在的信息改为合适人物的表达。若事实条件不支持，保留为待语义/架构处理，不得为追比例凭空添加对话、打断、沉默或动作。',
+  platform_opening_hook: '只允许前移、压缩或重排正文/ChapterPlan中已经存在的冲突、异常或未解问题；不得新增事件、威胁、人物或规则来制造钩子。',
+  platform_ending_hook: '只收紧本章已经存在的未解问题、状态变化或既定收尾；若ChapterPlan没有继续阅读理由，报告架构问题，不得凭空增加反转、新威胁、动作或对话。',
+  platform_payoff_gap: '优先压缩无推进重复，或把本章已经发生的进展/选择/关系变化表达得更清楚；不得新增反转、对手反应、关键选择或事件来凑密度。',
   platform_category_word_scale: '回到项目卡片对齐该平台分类的体量分布：要么按该分类头部实测区间调整目标总字数与分卷节奏，要么写明本作为何刻意偏离该区间（不得默认通过）。',
 };
 
@@ -156,7 +156,7 @@ export function platformReviewToRows(review: { issues: QualityIssue[] }): Platfo
       title: PLATFORM_ISSUE_TITLES[issueType] || issue.message,
       summary: issue.message,
       evidence: issue.evidence.quote || issue.message,
-      suggestion: PLATFORM_ISSUE_SUGGESTIONS[issueType] || '按目标平台指标调整本章写法，只改叙述方式与节奏，不改剧情事实。',
+      suggestion: PLATFORM_ISSUE_SUGGESTIONS[issueType] || '仅在现有事实与ChapterPlan范围内调整表达；不能证明安全局部修复时保留原稿并报告问题，不新增剧情事实。',
       tags: [issueType],
     });
   }

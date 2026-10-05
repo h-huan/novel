@@ -1,54 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { describeWorldSourceCandidate, detectSourceRuleConflicts } from './source-rule-consistency';
+import { describeWorldSourceCandidate } from './source-rule-consistency';
 
-describe('source rule preflight', () => {
-  it('rejects a world-shaped error object with empty core rules before saving', () => {
-    expect(describeWorldSourceCandidate({ error: '林野的门后机制未经授权', rules: [] }, '林野'))
-      .toContain('世界观rules必须包含2-3条非空因果规则');
+describe('generic world source validation', () => {
+  it('rejects malformed/empty world records without encoding a particular story mechanic', () => {
+    expect(describeWorldSourceCandidate({ error: '生成失败', rules: [] }, '甲'))
+      .toContain('世界观rules必须包含至少一条非空因果规则；具体数量由本作品结构需要决定，不设公共固定配额');
   });
 
-  it('accepts a substantive world candidate with the selected protagonist', () => {
-    expect(describeWorldSourceCandidate({ era: '当代', storyPremise: '林野在拆迁旧楼找哥哥', atmosphere: '压抑',
-      endingDirection: '兄弟线收束', rules: ['每进门一次现实回拨一小时', '每进门一次抹去一户'], locations: ['旧楼'] }, '林野')).toEqual([]);
-  });
-  it('blocks conflicting door cost trigger and time scope before prose', () => {
-    const problems = detectSourceRuleConflicts({
-      confirmedStory: JSON.stringify({ hook: '每进一次现实倒退一小时，每进一次现实抹去一户人。' }),
-      worldPremise: '每次进门使楼内时间回拨一小时；每进一次现实抹去一户记录。',
-      worldRules: '林野每完整进出门一次，现实抹除对应一户。',
-      worldProfileRules: '若林野推门，楼内时间回拨一小时；外界时钟不退。若完整进出门，名单扣名。',
-    });
-    expect(problems).toHaveLength(2);
-    expect(problems[0]).toContain('扣名触发');
-    expect(problems[1]).toContain('回拨作用范围');
+  it('does not impose a universal 2-3 world-rule quota', () => {
+    expect(describeWorldSourceCandidate({
+      era: '任意时代', storyPremise: '甲面对一个需要遵守的核心规则', atmosphere: '自定', endingDirection: '完成本故事收束',
+      rules: ['唯一必要的核心因果规则'], locations: ['地点A'],
+    }, '甲')).toEqual([]);
   });
 
-  it('accepts one consistent rule across source records', () => {
-    expect(detectSourceRuleConflicts({
-      confirmedStory: JSON.stringify({ hook: '进门后仅楼内回拨一小时；完整进出门一次才抹去一户。' }),
-      worldRules: '楼内时间回拨一小时，外界时钟不退。每完整进出门一次，现实抹除一户。',
-      worldProfileRules: '进入铁门仅楼内时间回拨一小时，外界时钟不退；完整进出门才扣名。',
-    })).toEqual([]);
+  it('accepts a substantive world candidate for arbitrary genres', () => {
+    expect(describeWorldSourceCandidate({
+      era: '当代',
+      storyPremise: '甲在新的现实压力下寻找解决办法',
+      atmosphere: '克制',
+      endingDirection: '完成核心选择并承担后果',
+      rules: ['公开规则一', '公开规则二'],
+      locations: ['地点A'],
+    }, '甲')).toEqual([]);
   });
 
-  it('does not invent constraints for unrelated mechanics', () => {
-    expect(detectSourceRuleConflicts({ confirmedStory: '一名医生在海岛医院追查失踪病人。', worldRules: '每次风暴之后，档案室才开放。' })).toEqual([]);
-  });
-
-  it('catches a lower chapter outline that changes the confirmed entry cost', () => {
-    expect(detectSourceRuleConflicts({
-      confirmedStory: JSON.stringify({ description: '每进一次现实抹去一户人家的记录。' }),
-      worldRules: '每次进门，名单少一户。',
-      chapterOutlines: [{ chapterIndex: 1, text: '他每完整进出门一次，现实抹除一户的姓名。' }],
-    })[0]).toContain('第1章章纲');
-  });
-
-  it('blocks the observed world rule that keeps reality still while the confirmed card rewinds reality', () => {
-    const problems = detectSourceRuleConflicts({
-      confirmedStory: JSON.stringify({ hook: '每进一次现实倒退一小时，楼里多一个不想搬的人。' }),
-      worldRules: JSON.stringify(['楼内时间比现实早一小时；现实时间不倒流，只有楼内景象停留在拆迁前。']),
-    });
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain('回拨作用范围互斥');
+  it('keeps protagonist anchoring as structure validation', () => {
+    expect(describeWorldSourceCandidate({
+      era: '当代', storyPremise: '乙的故事', atmosphere: '平静', endingDirection: '收束',
+      rules: ['规则一', '规则二'], locations: ['地点A'],
+    }, '甲')).toContain('世界观storyPremise未保留主角“甲”');
   });
 });

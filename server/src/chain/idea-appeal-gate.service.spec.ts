@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
+import { bindStructuredIdeaCardToPremise } from './idea-discovery-contract';
 
 const gate = new IdeaAppealGateService();
 
@@ -35,9 +36,10 @@ describe('IdeaAppealGateService', () => {
     }, 'short_story');
 
     expect(assessment.passed).toBe(false);
-    expect(assessment.issues.length).toBeGreaterThan(3);
+    expect(assessment.issues.length).toBeGreaterThanOrEqual(2);
     expect(assessment.readerExperienceProfile.evidence.lifeAnchor).toBe(false);
     expect(assessment.readerExperienceProfile.evidence.aspiration).toBe(false);
+    expect(assessment.warnings.some((item) => item.includes('生活利益锚点'))).toBe(true);
   });
 
   it('accepts a strong short card and configures concentrated payoffs instead of stacking every emotion', () => {
@@ -86,10 +88,9 @@ describe('IdeaAppealGateService', () => {
       mainReversal: '最终反转导致目标改变。',
     }, 'short_story');
 
-    expect(assessment.passed).toBe(false);
     expect(assessment.readerExperienceProfile.evidence.stackingRisk).toBe(true);
     expect(assessment.warnings.some((item) => item.includes('盲目叠加'))).toBe(true);
-    expect(assessment.issues.some((item) => item.includes('人生利益'))).toBe(true);
+    expect(assessment.warnings.some((item) => item.includes('生活利益锚点'))).toBe(true);
   });
 
   it('rejects a keyword-complete but single-layer moral punishment premise as too generic', () => {
@@ -103,10 +104,32 @@ describe('IdeaAppealGateService', () => {
       mainReversal: '原来老板知道规则，因此主角决定举报公司并改变目标。',
     }, 'short_story');
 
-    expect(assessment.passed).toBe(false);
     expect(assessment.signals.simpleMoralMechanismRisk).toBe(true);
     expect(assessment.signals.distinctivenessScore).toBeLessThan(6);
-    expect(assessment.issues.some((item) => item.includes('单层寓言机制'))).toBe(true);
+    expect(assessment.warnings.some((item) => item.includes('单层因果寓言风险'))).toBe(true);
+    expect(assessment.issues.some((item) => item.includes('单层寓言机制'))).toBe(false);
+  });
+
+  it('blocks missing semantic evidence on a server-bound premise instead of counting surface keywords', () => {
+    const premise = {
+      premiseId: 'P-semantic', protagonistSituation: '主角必须处理会直接影响自己生活的现实处境',
+      openingEvent: '一个具体事件迫使主角当天作出决定', coreConflict: '两个不能同时满足的现实目标发生冲突',
+      activeChoice: '主角明确选择先处理其中一个目标并承担代价', escalation: '这个选择使冲突升级并影响另一段关系',
+      reversalEffect: '', payoff: '', irreplaceableCarrier: '', secondOrderConsequence: '',
+      readerQuestion: '主角的选择最终会改变谁的利益和关系？', differentiation: '',
+    };
+    const card = bindStructuredIdeaCardToPremise(premise, [{
+      title: '当天必须作出的选择',
+      hook: '这是一段足够长的自然钩子，主角已经作出明确选择，但文本不靠固定异常、压力、关系关键词凑数量。',
+      description: '故事沿这个选择继续推进并产生新的关系后果。', protagonist: '有具体生活目标的主角',
+      coreConflict: '两个现实目标不能同时满足。', uniquePoint: '冲突载体仍需要结构化证据证明不可替代。', mainReversal: '后来出现新信息。',
+    }]);
+    const assessment = gate.assess(card, 'short_story');
+    expect(assessment.passed).toBe(false);
+    expect(assessment.issues.some((item) => item.includes('反转效果'))).toBe(true);
+    expect(assessment.issues.some((item) => item.includes('终局兑现承诺'))).toBe(true);
+    expect(assessment.issues.some((item) => item.includes('题材身份仍不足'))).toBe(true);
+    expect(assessment.issues.some((item) => item.includes('至少应形成'))).toBe(false);
   });
 
   it('accepts a distinctive story whose ending promise is expressed through the forced choice and its second-order consequence', () => {

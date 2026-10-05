@@ -1,9 +1,4 @@
-/**
- * 模块执行规则只读视图。
- *
- * 规范只维护在仓库根 QUALITY_EXECUTION.md；这里展示代码侧可执行镜像。
- * 运行时不允许通过模型或接口改写 hard rules，避免不同机器因历史样本不同而执行不同标准。
- */
+/** Read-only API for the System Workflow Rule Registry. */
 import { Controller, Get, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ModuleStandardsService } from './module-standards.service';
@@ -13,15 +8,27 @@ import { ModuleStandardsService } from './module-standards.service';
 export class ModuleStandardsController {
   constructor(private readonly service: ModuleStandardsService) {}
 
+  /** Compatibility grouped view. */
   @Get()
-  list() {
-    return { standards: this.service.list() };
+  list() { return { standards: this.service.list() }; }
+
+  @Get('rules')
+  rules() { return { rules: this.service.listRules() }; }
+
+  @Get('rules/:id')
+  rule(@Param('id') id: string) {
+    const value = this.service.getRule(id);
+    return value ? { rule: value } : { error: 'not found', rule: null };
+  }
+
+  @Get('rules/:id/impact')
+  impact(@Param('id') id: string) {
+    const value = this.service.impact(id);
+    return value ? { impact: value } : { error: 'not found', impact: null };
   }
 
   @Get('status')
-  status() {
-    return this.service.status();
-  }
+  status() { return this.service.status(); }
 
   @Get(':key')
   one(@Param('key') key: string) {

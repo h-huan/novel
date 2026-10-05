@@ -35,8 +35,10 @@ describe('chain HTTP architecture', () => {
 
     expect(source).toContain('normalizePremiseSelectionPayload');
     expect(source).toContain('premisePoolTargetMet');
-    expect(source).toContain('pool 以 ${premisePoolSize} 项为广搜目标，不是整批成功的硬门槛');
-    expect(source).toContain('selectedPremises 必须恰好 ${requestedCount} 项');
+    expect(source).toContain('ideaPremiseSelectionDirective');
+    expect(source).toContain('ideaCardStructuringDirective');
+    expect(source).not.toContain('pool 以 ${premisePoolSize} 项为广搜目标，不是整批成功的硬门槛');
+    expect(source).not.toContain('selectedPremises 必须恰好 ${requestedCount} 项');
     expect(source).not.toContain('创建前题材筛选未形成至少');
     expect(source).not.toContain('selectedPremiseIds');
     expect(source).not.toContain('pool.length < premisePoolSize || malformed');

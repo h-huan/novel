@@ -211,7 +211,7 @@ it('generates a complete idea batch through preselection plus structuring and re
   });
 });
 
-it('uses read-only code standards and records their exact code version on generation runs', async () => {
+it('uses read-only Registry rules and records their exact ruleset version on generation runs', async () => {
   const db = new DatabaseSync(':memory:');
   try {
     await new Migrator(db).runMigrations();
@@ -225,22 +225,27 @@ it('uses read-only code standards and records their exact code version on genera
       AND name IN ('module_standards','module_standard_versions','standard_summarization_runs') ORDER BY name`).all();
     expect(legacyTables).toEqual([]);
     expect(standards.status()).toMatchObject({
-      standardSource: 'code_seed',
+      standardSource: 'system_workflow_rule_registry',
       seedBaselineVersion: SEED_BASELINE_VERSION,
       dirtyCount: 0,
       running: [],
     });
-    expect(standardDirectiveCache.get('idea_generate')).toContain('灵感发现·执行标准');
+    const ideaDirective = standardDirectiveCache.get('idea_generate');
+    expect(ideaDirective).toContain('【系统规则 GEN-002');
+    expect(ideaDirective).toContain('【系统规则 QLT-006');
     expect(standardDirectiveCache.get('writing')).toContain('Creative Constitution');
 
     const run = metrics.beginRun(undefined, 'idea_generate', '测试');
     const snapshot = JSON.parse(db.prepare('SELECT standards_snapshot FROM generation_runs WHERE id=?').get(run.id).standards_snapshot);
+    expect(snapshot.rulesetVersion).toBe(SEED_BASELINE_VERSION);
     expect(snapshot.modules).toContainEqual({
-      key: 'inspiration', version: SEED_BASELINE_VERSION, baseline: SEED_BASELINE_VERSION,
+      key: 'GEN-002', version: SEED_BASELINE_VERSION, baseline: SEED_BASELINE_VERSION,
     });
     expect(snapshot.modules).toContainEqual({
-      key: 'quality_loop', version: SEED_BASELINE_VERSION, baseline: SEED_BASELINE_VERSION,
+      key: 'QLT-006', version: SEED_BASELINE_VERSION, baseline: SEED_BASELINE_VERSION,
     });
+    expect(snapshot.modules).not.toContainEqual(expect.objectContaining({ key: 'inspiration' }));
+    expect(snapshot.modules).not.toContainEqual(expect.objectContaining({ key: 'quality_loop' }));
 
     const noStandards = metrics.beginRun(undefined, 'daily', '测试', undefined, undefined, undefined, false);
     expect(JSON.parse(db.prepare('SELECT standards_snapshot FROM generation_runs WHERE id=?').get(noStandards.id).standards_snapshot).enabled).toBe(false);

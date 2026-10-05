@@ -154,6 +154,21 @@ const STEP_LABELS: Record<string, string> = {
 
 const BOTTLENECK_MIN_CALLS = 2;
 
+export function generationRulesetSnapshotIsCurrent(
+  rawSnapshot: unknown,
+  currentRulesetVersion: number,
+  currentRegistryDigest: string,
+): boolean {
+  if (typeof rawSnapshot !== 'string' || !rawSnapshot.trim()) return false;
+  try {
+    const snapshot = JSON.parse(rawSnapshot) as { rulesetVersion?: number; registryDigest?: string };
+    return snapshot.rulesetVersion === currentRulesetVersion
+      && snapshot.registryDigest === currentRegistryDigest;
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class GenerationMetricsService implements OnModuleInit {
   private readonly logger = new Logger(GenerationMetricsService.name);
@@ -211,7 +226,12 @@ export class GenerationMetricsService implements OnModuleInit {
     // 顺序/内容都不同的人名表，身份守护与硬红线规则 32 的判定因此漂移。现统一取唯一实现。
     const characterNames = row ? loadCharacterNames(db, projectId!) : [];
     const lessons = row ? (db.prepare("SELECT lesson FROM generation_lessons WHERE project_id=? AND category='verified_quality_repair' ORDER BY occurrence DESC,updated_at DESC LIMIT 8").all(projectId!) as Array<{ lesson: string }>).map(r => r.lesson) : [];
-    return { id, constitution, stage, context, projectId, previousChapters, characterNames, lessons };
+    return {
+      id, constitution, stage, context, projectId, previousChapters, characterNames, lessons,
+      rulesetVersion: standards.rulesetVersion,
+      rulesetDigest: standards.registryDigest,
+      ruleIds: standards.ruleIds,
+    };
   }
 
   private qualityContext(projectId: string, stage: string = 'project', chapterIndex?: number | null): string {
@@ -222,10 +242,16 @@ export class GenerationMetricsService implements OnModuleInit {
 
   runIsCurrent(runId: string, projectId: string): boolean {
     const db = this.databaseService.getDb();
-    const run = db.prepare('SELECT constitution_json,context_snapshot,stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
+    const run = db.prepare('SELECT constitution_json,context_snapshot,standards_snapshot,stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
     const row = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
-    return !!run && !!row && run.constitution_json === JSON.stringify(readConstitution(row))
-      && run.context_snapshot === this.qualityContext(projectId, run.stage, run.chapter_index);
+    return !!run && !!row
+      && run.constitution_json === JSON.stringify(readConstitution(row))
+      && run.context_snapshot === this.qualityContext(projectId, run.stage, run.chapter_index)
+      && generationRulesetSnapshotIsCurrent(
+        run.standards_snapshot,
+        standardDirectiveCache.getRulesetVersion(),
+        standardDirectiveCache.getRulesetDigest(),
+      );
   }
 
   finishRun(id: string, status: 'success' | 'failed' | 'cancelled', started: number, output?: string, error?: string, model?: string) {

@@ -1,4 +1,4 @@
-import { HIGH_DIALOGUE_PLATFORMS, resolveNovelStrategy, targetForLength } from './platform-benchmarks';
+import { resolveNovelStrategy } from './platform-benchmarks';
 import { STYLE_PUNCTUATION_RELAX_KEYWORDS } from '../../shared/src';
 
 /**
@@ -65,21 +65,11 @@ export interface HardlineFinding {
  * 排版、白描风格的标点窗口更长），不是「查不查」：没有任何规则会因为平台或风格而完全不检查。
  */
 export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
-  '15b', '15c', '15d', '20a', '34', 'list-enumeration',
-  '50-fragment-action-chain', '51-modal-particle-density', '52-env-imagery-repeat',
-  '53-same-structure-parallel', '54-measure-word-mismatch', '56-punct-stacking', '57-ellipsis-density',
-  // AI 痕迹指纹：公式句、破折号/比喻过密、热血空洞反思、觉醒段、超短句堆叠、
-  // 客服式对话、机械转场、刻意感官、拟人比喻、套路化表达、密集生理反应、AI 高频模糊词。
-  // 这类命中在生成验收与质检中都按"语言硬伤"处理（阻断保存 + 精修精确改写）。
-  'formula-sentence', 'dash-density', 'simile-density',
-  // 文笔/排版硬伤：此前列在「只进 advisories 的降级区」，现全部收进本清单、同样阻断保存 + 精确改写。
-  // 26-short-para 短句独立成段 / 26-uniform 连续三段等长 / 26b-staccato 连续一句一段 /
-  // 32 人名或称谓独占一行 / 33 段后连续空行 / 35/35b 有证据的重复叙述窗口。
-  // 平台与风格分化的是阈值（短段平台 threshold=0、白描类风格窗口加长），不是「查不查」：
-  // 清单内任何一条都不会因为平台或风格而完全不检查，也不存在「只提示不阻断」的旁路。
-  '26-short-para', '26-uniform', '26b-staccato',
-  '32', '33', '35', '35b',
-  '36', '37', '39', '42', '44', '46', '47', '48', '49', '55',
+  // 只保留可确定验证的硬伤：明确元叙述、物理排版错误、实质重复、残句链、同构重复、量词错误和叠用标点。
+  // 段长/句长/标点密度/词频/比喻/生理反应等启发式只能作为语义复核证据，不能直接阻断。
+  '15c', '15d', '33', '35', '35b', '42', '44',
+  '53-same-structure-parallel',
+  '54-measure-word-mismatch', '56-punct-stacking',
 ];
 
 /** 判断某条扫描命中是否属于跨平台语言硬伤（兼容规则号带后缀的情况） */
@@ -152,28 +142,6 @@ export function detectForbiddenTells(
     const shortParaMaxLen = allowShortParagraph ? 0 : 12;
     // 连续等长段容忍度：短段平台天然段落都不长、容易等长，放宽到 8%（几乎完全一致才判）
     const uniformTolerance = allowShortParagraph ? 0.08 : 0.15;
-    // 第一人称纪实/悬疑内心流（知乎盐选、规则怪谈）对话天然偏少，对话占比红线由 8% 降到 5%
-    const lowDialoguePlatform = hardlineStrategy.id === 'zhihu' || hardlineStrategy.id === 'rules_horror';
-    // 对话占比红线下限分三档：高对话强推进平台(番茄/七猫/抖音/小红书)15%；第一人称内心流(知乎盐选/规则怪谈)5%；其余 8%
-    // 集合来自平台表唯一事实源 HIGH_DIALOGUE_PLATFORMS，本文件不再自建副本（rules_horror 虽为 very_high 但走内心流低档）
-    const isHighDialogue = HIGH_DIALOGUE_PLATFORMS.has(hardlineStrategy.id as string);
-    const dialogueMinRatio = isHighDialogue ? 0.15 : lowDialoguePlatform ? 0.05 : 0.08;
-    // 高对话平台的"期望值"（写进提示：期望值 = 平台表本篇幅目标区间下限）
-    // 期望值与开篇钩子窗口取自平台表本篇幅目标（唯一源 platform-benchmarks，禁止写死）：
-    // 期望值 = 该平台该篇幅对话占比目标区间下限（番茄短篇 35%、起点 25%…）。
-    // 此前这里写死 30%，与平台表的 35%–65% 是两套数字，同一章会同时被"期望≥30%"与"目标 35%"评判。
-    // 红线 15%/5%/8% 仍是回炉线（阻断线），与目标区间不是同一个量。
-    const metricTarget = targetForLength(
-      hardlineStrategy,
-      String(profile?.storyType || '') === 'long_novel' ? 'long_novel' : 'short_story',
-    );
-    const dialogueExpectPct = Math.round(metricTarget.dialogueRatio[0] * 100);
-    // 开篇钩子窗口（唯一源：平台表 openingHookChars，随平台与长短篇变化）。
-    // 此前 40 用写死的 400、40b 用写死的 300，与平台表（番茄短篇 300、知乎 200、起点 600、抖音 200）是两套数字。
-    const openingHookChars = metricTarget.openingHookChars;
-    // 极高节奏平台(番茄/抖音/规则怪谈)：核心冲突/危机必须在前 300 字"实质"出现（不只看标点钩子）
-    const requireEarlyConflict = hardlineStrategy.pacing === 'very_high';
-
     // 文笔层硬线的风格分化（分化的是阈值，不是查不查）：白描/朴素/现实/日常是作者在项目卡片里选定的
     // 执行标准，platform-benchmarks 的 resolveNovelStrategy 已把这一组定义为节奏放宽维度（标点天然克制）。
     // 因此标点类硬线的检测窗口按该风格加长，规则本身照常生效、照常阻断保存。
@@ -362,7 +330,7 @@ export function detectForbiddenTells(
       const simExamples = simileMatches.slice(0, 3).map(s => s.trim()).join(' / ');
       findings.push({
         ruleId: 'simile-density',
-        message: `比喻过密（${simileDensity} 处"像/仿佛/如同…"，一段最多 1 个且须服务情绪或画面）。删掉为修辞而修辞的比喻，优先具体动作`,
+        message: `比喻过密（${simileDensity} 处"像/仿佛/如同…"，一段最多 1 个且须服务情绪或画面）。删除冗余比喻或直述原文已有事实；不得为了替换比喻新增具体动作`,
         snippet: simExamples,
         position: '全文',
         hitCharOffsets: charOffsetsOf(simileMatches.slice(0, 3)),
@@ -407,20 +375,6 @@ export function detectForbiddenTells(
         });
       }
     }
-    // 对话占比过低：爆款网文对话占比高（用对话推进剧情/交代设定/制造冲突）。
-    // 全章几乎无对话=大段独白+环境描写，是 AI 文的典型形态。阻断线下限分三档：高对话平台 15%/第一人称内心流 5%/其余 8%（见上方 dialogueMinRatio）。
-    const dialogueContent = (content.match(/[“"「][^”"」]{1,80}[”"」]/g) || []).join('').replace(/\s/g, '');
-    const plainTotal = content.replace(/\s/g, '');
-    const dialogueRatio = plainTotal.length > 0 ? dialogueContent.length / plainTotal.length : 0;
-    if (dialogueRatio < dialogueMinRatio) {
-      findings.push({
-        ruleId: 'dialogue-ratio',
-        message: `对话占比仅 ${(dialogueRatio * 100).toFixed(1)}%（低于本平台 ${(dialogueMinRatio * 100).toFixed(0)}% 红线下限，期望≥${dialogueExpectPct}%；要用对话推进剧情、交代设定、制造冲突）。当前大段内心独白+环境描写，应把推理、交代、交锋改成一来一回的人物对话（电话、他人搭话、自言自语、多人场面），连续叙述不超过2段就用对话打断`,
-        snippet: slice(content, 60),
-        position: '全文',
-      });
-    }
-
     // ===== 15d 第一人称对话框里偷切作者口吻 =====
     // 抓所有对话引号内容（含 ""/""/「」），检查是否混入作者口吻
     const dialoguePattern = /"[^"\n]{1,200}"|"[^"\n]{1,200}"|「[^」\n]{1,200}」/g;
@@ -613,7 +567,7 @@ export function detectForbiddenTells(
           const combined = content.slice(grp[0].start, grp[3].end);
           findings.push({
             ruleId: '34',
-            message: '连续 4 个动作动词领起的短句排比（"' + slice(combined, 60) + '"——像动作清单/分镜脚本，是AI排比物理指纹）。把其中至少两个动作合并进带目的或感受的完整句，只保留真正推进剧情的关键动作',
+            message: '连续 4 个动作动词领起的短句排比（"' + slice(combined, 60) + '"——像动作清单/分镜脚本，是AI排比物理指纹）。把其中至少两个既有动作按原有因果合并成完整句，只保留真正推进剧情的关键动作；不得补造目的、感受或新事件',
             snippet: slice(combined, 80),
             position: `offset ${grp[0].start}-${grp[3].end}`,
           });
@@ -702,7 +656,7 @@ export function detectForbiddenTells(
     if (ellipsisPerKilo > 5) {
       findings.push({
         ruleId: '57-ellipsis-density',
-        message: `省略号过密（${ellipsisCount} 处、约 ${ellipsisPerKilo.toFixed(1)} 处/千字，人类约 0-2 处/千字）。绝大多数停顿改用逗号/句号或直接写动作，只保留真正欲言又止/中断的 1-2 处`,
+        message: `省略号过密（${ellipsisCount} 处、约 ${ellipsisPerKilo.toFixed(1)} 处/千字，人类约 0-2 处/千字）。仅调整现有标点和句法，保留真正语义中断处；不得为了替代省略号新增动作或事实`,
         snippet: slice((content.match(/[^。！？\n]*……[^。！？\n]*/g) || [''])[0], 40),
         position: '全文',
         hitCharOffsets: charOffsetsOf([(content.match(/[^。！？\n]*……[^。！？\n]*/g) || [''])[0]]),
@@ -890,86 +844,6 @@ export function detectForbiddenTells(
       flushStaccato(paragraphs.length);
     }
 
-    // ===== 40 章首无强钩子（用户反馈："没有代入感、剧情文字很平淡、完全没吸引力"） =====
-    // 联网实证：番茄 5月公告"空洞水文"、澎湃"AI 不会主动推进剧情"、toutiao"读者三章就跑"。
-    // 章首（开篇钩子窗口内）必须有"反常细节/冲突直给/未完成动作/悬念悬置"——AI 典型平淡开头是
-    // "环境描写+主角感知+心声"循环，看似有字但没钩子。
-    const chapterStart = content.slice(0, openingHookChars); // 开篇钩子窗口（唯一源：平台表 openingHookChars）
-    const chapterStartTrim = chapterStart.trim();
-    if (chapterStartTrim.length >= 80) {
-      // 强钩子标志：① 对话引号 ≥ 1 对；② 问号 ≥ 1；③ 感叹号 ≥ 1；④ 破折号 ≥ 1；
-      // ⑤ 动作词"突然/猛地/瞬间/冲/扑/摔/砸/吼/喊"≥ 1；⑥ "为什么/谁/怎么回事"等悬念词 ≥ 1
-      const hasDialogue = /"[^"\n]{1,40}"|"[^"\n]{1,40}"|\u201C[^\u201D\n]{1,40}\u201D/.test(chapterStartTrim);
-      const hasQuestion = /[？?]/.test(chapterStartTrim);
-      const hasExclamation = /[！!]/.test(chapterStartTrim);
-      const hasDash = /[—\u2014]/.test(chapterStartTrim);
-      const hasActionBurst = /(突然|猛地|瞬间|冲过去|扑过去|摔|砸|吼|喊|拽|抢)/.test(chapterStartTrim);
-      const hasSuspenseWord = /(为什么|谁|怎么回事|为何|凭什么是|怎么会|到底)/.test(chapterStartTrim);
-      const hookCount = [hasDialogue, hasQuestion, hasExclamation, hasDash, hasActionBurst, hasSuspenseWord].filter(Boolean).length;
-      if (hookCount === 0) {
-        findings.push({
-          ruleId: '40',
-          message: `章首 ${openingHookChars} 字内无强钩子（无对话/问号/感叹号/破折号/突发动作/悬念词——平淡开头是 AI 写作最显眼的破绽，读者三章就跑）`,
-          snippet: slice(chapterStartTrim, 100),
-          position: '章首',
-        });
-      }
-    }
-
-    // ===== 40b 极高节奏平台：核心冲突/危机必须在开篇钩子窗口内"实质"出现（补规则40只看标点钩子的不足） =====
-    if (requireEarlyConflict) {
-      const earlyWindow = content.slice(0, openingHookChars);
-      // 强冲突/危机/反常事件词，或开篇钩子窗口内已有一段冲突对话，即视为冲突已前置
-      const strongEvent = /(死|尸|血|枪|刀|毒|绑|逃|追|杀|凶|爆炸|着火|车祸|报警|警笛|手铐|威胁|争吵|吵架|打斗|晕倒|坠|劫持|绑架|尸体|死者|遇害|被杀|出事|不对劲|有问题|反常|异常|不该出现|怎么会|凭什么|是谁|谁在)/;
-      const earlyDialogue = /[“"「][^”"」]{2,60}[”"」]/.test(earlyWindow);
-      if (!strongEvent.test(earlyWindow) && !earlyDialogue) {
-        findings.push({
-          ruleId: '40b-opening-conflict',
-          message: `本平台（极高节奏）要求开篇前 ${openingHookChars} 字内直接出现核心矛盾、危机或反常事件本身（或一段冲突对话）；当前开篇钩子窗口内是身份/履历/户型/环境/日常动作铺垫，核心冲突出现过晚（读者在前 ${openingHookChars} 字决定去留）。把最抓人的冲突或异常提到第一段，背景一律用后文动作和对话带出`,
-          snippet: slice(earlyWindow.replace(/\s/g, ''), 100),
-          position: `开篇前${openingHookChars}字`,
-        });
-      }
-    }
-
-    // ===== 41 情绪死区：连续 3 段平淡，或约 300 字符无情绪标志 =====
-    // 300 字符是保守阻断线（真人网文也常超过），平台推进密度目标见平台表 payoffGapChars，
-    // 两者不是一个量：这里只拦"连续 3 段零情绪"的 AI 环境+心声循环，不按固定字数硬塞反转。
-    // 两层检测：
-    //   a) 字符级：滑动窗口 300 字符无 ?！…—;:：等及两位数数字；
-    //   b) 段落级：连续 3 段无问号/感叹号/破折号/省略号/分号/数字——比字符级更准确
-    //      （3 段环境+心声无情绪=AI"环境+心声循环零推进"的典型模式）
-    const emotionRichChars = /[？！\uFF01\uFF1F…—\u2014\u2013;:：；;\u3001]|\d{2,}/;
-    const emotionDeadZone = 300;
-    let emotionDeadHit = false;
-    for (let i = 0; i < content.length - emotionDeadZone; i += 100) {
-      if (!emotionRichChars.test(content.slice(i, i + emotionDeadZone))) {
-        emotionDeadHit = true;
-        findings.push({
-          ruleId: '41',
-          message: `连续 ${emotionDeadZone} 字符无情绪波动（无?/!/—/…/数字——纯描述无情绪段，番茄300字一爽点公式不可违反）`,
-          snippet: slice(content.slice(i, i + emotionDeadZone), 80),
-          position: `offset ${i}-${i + emotionDeadZone}`,
-        });
-        break;
-      }
-    }
-    // 段落级检测：连续 3 段无情绪标志
-    if (!emotionDeadHit && paragraphs.length >= 3) {
-      for (let i = 0; i < paragraphs.length - 2; i++) {
-        const trio = paragraphs[i] + paragraphs[i + 1] + paragraphs[i + 2];
-        if (!emotionRichChars.test(trio)) {
-          findings.push({
-            ruleId: '41',
-            message: `连续 3 段无情绪波动（无?/!/—/…/数字——"环境描写+主角心声循环零推进"的 AI 典型模式）`,
-            snippet: slice(paragraphs[i], 30) + ' | ' + slice(paragraphs[i + 1], 30) + ' | ' + slice(paragraphs[i + 2], 30),
-            position: `第 ${i + 1}-${i + 3} 段`,
-          });
-          break;
-        }
-      }
-    }
-
     // ===== 42 连续重复对答：无某种语气词或动作不能证明客服式对话 =====
     // 扫描器只阻断可确定的重复轮次；对话是否空洞、是否有冲突/信息推进由完整语言评审确认。
     let dialogueRunStart = 0;
@@ -987,23 +861,6 @@ export function detectForbiddenTells(
         });
       }
       dialogueRunStart = end + 1;
-    }
-
-    // ===== 43 无不完美细节（AI的"过度干净"物理指纹） =====
-    // 词表已从 38 扩到 60+ 项，覆盖身体缺陷/环境反常/物件异常/时间错感/意外干扰
-    const imperfectDetailWords = /(黑泥|线头|扣子|鞋带|口红|汗渍|指甲缝|腋下|松了|没系|缺了一角|裂口|雪花屏|闪烁|滴水|关不上|后盖不见了|划了一道|照片里没人|录音里有杂音|歪了|斜了|破洞|褪色|掉了漆|磨破了|起了毛|卷了边|糊了|没信号|空号|占线|没电|只剩2%|误触|按错了|多按了|发错了|打错了|走错了|坐过了|指甲油斑|鞋垫磨薄|茶垢|毛衣起球|拉链卡住|鞋底脱胶|扣子掉了|领口泛黄|袖口磨白|裤腿卷边|墙皮|剥落|发霉|漏气|蜘蛛网|打卷|糊边|裂纹|锈迹|卡壳|卡住|推开时嘎吱|扭不紧|旋钮打滑|糊味|焦味|酸味|霉味|有只蚊子|有只蟑螂|飞蛾扑灯|空调漏水|漏水了|下雨没关窗|被风吹倒|被风吹落|渗水|渗着|洇出|洇着|黄渍|水渍|污渍|灰渍|油渍|泥印|积灰|灰尘|橘子皮|果皮|纸屑|烟头|闪了两|闪了闪|嗡了一声|暗下去|薄得透光|露着灰|脱线|起球|泛黄|发黑|斑驳|划痕|掉漆|锈住|打不开|拧不开|皱巴巴|边角磨损)/g;
-    const imperfectCount = (content.match(imperfectDetailWords) || []).length;
-    // 阈值按章节长度分：>2000 字 → ≥3 处，500-2000 字 → ≥2 处，<500 字 → ≥1 处
-    const imperfectThreshold = content.length > 2000 ? 3 : content.length > 500 ? 2 : 1;
-    // 本规则判「缺失」（全章没有不完美细节），正文里没有可锚定的命中处 → 不带 hitCharOffsets；
-    // 它不在 LANGUAGE_HARDLINE_RULE_IDS 内，只进 advisories，不会阻断保存。
-    if (imperfectCount < imperfectThreshold) {
-      findings.push({
-        ruleId: '43',
-        message: `全章 ${imperfectCount} 处不完美/反常识细节（需 ≥${imperfectThreshold} 处——AI "过度干净"物理指纹：人物小缺陷/环境反常/物件异常/意外干扰）`,
-        snippet: `检测到的不完美细节: ${imperfectCount} / 至少 ${imperfectThreshold}`,
-        position: '全文',
-      });
     }
 
     // ===== 44 重复模板化转场 =====
@@ -1029,33 +886,6 @@ export function detectForbiddenTells(
       });
     }
 
-    // ===== 45 无具体数字（AI极少主动用数字） =====
-    // 阈值：全文至少 1 处具体数字锚点（规则 45 恒为 1 处）；numMinLength 分档只决定"正文多短才不判"，
-    // 不影响所需数量。此前写成 >2000?1:1 的恒等三元，看起来像有分档其实没有，已改为常量。
-    // 排除序数词（第X/其一/其二）和纯"一/二/三"单字
-    const specificNumbers45 = /\d{2,}|[零一二三四五六七八九十百千万亿两]+(件|个|次|句|根|天|年|岁|块|毛|分|度|米|斤|步|遍|页|行|层|级|次|轮|趟|拳|脚|口|声|刻|秒)?/g;
-    const specificCandidates = content.match(specificNumbers45) || [];
-    const specificCount = specificCandidates.filter(n => {
-      // 排除序数词（"第X"）、纯单字序数、以及"一些/几个/很多/好久"
-      if (n.length < 2) return false;
-      if (/^第/.test(n)) return false;
-      if (/^(一些|几个|很多|好久|一些)$/.test(n)) return false;
-      if (/^[一二三四五六七八九十]{1}$/.test(n)) return false;
-      if (/^[一两]$/.test(n) && n.length === 1) return false;
-      return true;
-    }).length;
-    const numThreshold = 1;
-    const numMinLength = content.length > 2000 ? 800 : content.length > 500 ? 500 : 150;
-    // 同 43：判的是「缺失」（全章无具体数字），无命中处可锚 → 不带 hitCharOffsets，只进 advisories。
-    if (specificCount === 0 && content.length > numMinLength) {
-      findings.push({
-        ruleId: '45',
-        message: `全章无具体数字锚点（正文 ${content.length} 字 ≥ ${numMinLength} 字阈值）——"第三十七根雨丝""坐了三天三夜""第十一个电话"：具体数字是真实感物理指纹，AI极少主动调用`,
-        snippet: `检测到的具体数字: ${specificCount} / 至少 ${numThreshold}`,
-        position: '全文',
-      });
-    }
-
     // ===== 46 刻意感官描写（AI最爱，新增） =====
     // "凉意贴着皮肤往上爬""炸开一朵光""过电似的传到手腕""心跳漏了一拍""喉咙发紧""手心冒汗"
     const sensoryPatterns46 = [
@@ -1074,7 +904,7 @@ export function detectForbiddenTells(
     if (sensoryMatches.length > 0) {
       findings.push({
         ruleId: '46',
-        message: `刻意感官描写 ${sensoryMatches.length} 处（AI最爱套路："凉意贴着皮肤往上爬""炸开一朵光""过电似的""心跳漏了一拍"等）——冷就说冷，疼就说疼，用直白动作代替`,
+        message: `刻意感官描写 ${sensoryMatches.length} 处（AI最爱套路："凉意贴着皮肤往上爬""炸开一朵光""过电似的""心跳漏了一拍"等）——只能精简或直述原文已经存在的感受/事实，不得新增身体动作、感官或时间事实`,
         snippet: sensoryMatches.slice(0, 3).join('；'),
         position: '全文',
         hitCharOffsets: charOffsetsOf(sensoryMatches.slice(0, 3)),
@@ -1097,7 +927,7 @@ export function detectForbiddenTells(
     if (personificationMatches.length > 0) {
       findings.push({
         ruleId: '47',
-        message: `拟人化比喻 ${personificationMatches.length} 处（"回音吞掉了尾音""风声绕了道""黑暗吞噬了一切"等非人事物做人才有的动作）——直接描写事实，不用拟人`,
+        message: `拟人化比喻 ${personificationMatches.length} 处（"回音吞掉了尾音""风声绕了道""黑暗吞噬了一切"等非人事物做人才有的动作）——若语义复核确认模板化，只能改写为原文已经存在的事实，不得新增情节事实`,
         snippet: personificationMatches.slice(0, 3).join('；'),
         position: '全文',
         hitCharOffsets: charOffsetsOf(personificationMatches.slice(0, 3)),
@@ -1121,7 +951,7 @@ export function detectForbiddenTells(
     if (clicheMatches.length > 0) {
       findings.push({
         ruleId: '48',
-        message: `套路化表达 ${clicheMatches.length} 处（"记忆清晰得像刚发生""不像梦""那一刻我突然明白""时间仿佛静止""眼中闪过一丝复杂"等AI常用句式）——用具体场景和动作代替`,
+        message: `套路化表达 ${clicheMatches.length} 处（"记忆清晰得像刚发生""不像梦""那一刻我突然明白""时间仿佛静止""眼中闪过一丝复杂"等AI常用句式）——若语义复核确认模板化，只能基于既有场景和动作改写，不得新造动作或场景`,
         snippet: clicheMatches.slice(0, 3).join('；'),
         position: '全文',
         hitCharOffsets: charOffsetsOf(clicheMatches.slice(0, 3)),
@@ -1149,7 +979,7 @@ export function detectForbiddenTells(
         const samples = mAll.slice(0, 4).map(m => m[0].trim()).join(' / ');
         findings.push({
           ruleId: '49',
-          message: `同类${rp.name}在短距离内密集重复（1200字内出现≥3次：${samples}）——同一身体反应反复出现是AI高频特征，删掉多余处，用对话/环境/动作替代`,
+          message: `同类${rp.name}在短距离内密集重复（1200字内出现≥3次：${samples}）——同一身体反应反复出现是AI高频特征，删掉或合并冗余处；不得为了替换而新增对话、环境、动作或感官事实`,
           snippet: samples,
           position: '全文',
           hitCharOffsets: hits.slice(0, 4),
@@ -1233,7 +1063,7 @@ export function detectForbiddenTells(
       if (envRepeatExamples.length > 0) {
         findings.push({
           ruleId: '52-env-imagery-repeat',
-          message: `同一环境意象近距离重复铺陈（${envRepeatExamples.join('；')}）。过渡环境描写只承担转场与情绪锚点，同一意象相邻段落最多 1-2 次，重复渲染处删掉或换成推进剧情的动作/对话`,
+          message: `同一环境意象近距离重复铺陈（${envRepeatExamples.join('；')}）。过渡环境描写只承担转场与情绪锚点，同一意象相邻段落最多 1-2 次，重复渲染处删除或合并，只保留既有转场/情绪锚点；不得新增动作或对话事实`,
           snippet: envRepeatExamples.join('；'),
           position: '全文',
           hitCharOffsets: envRepeatOffsets.filter(i => i >= 0),
@@ -1318,7 +1148,7 @@ export function detectForbiddenTells(
       if ((perKilo55 >= 5 && totalHits55 >= 8) || maxWord55 >= 4) {
         findings.push({
           ruleId: '55',
-          message: `AI 高频模糊词过密（叙述层 ${totalHits55} 处、约 ${perKilo55.toFixed(1)} 处/千字${maxWordName55 ? `，最多是“${maxWordName55}”${maxWord55} 次` : ''}）。仿佛/似乎/不禁/缓缓/微微/一丝/一缕/某种/莫名/隐约这类模糊渲染是 AI 腔指纹：能用具体动作、数字、物件与对话说清的，一律删掉模糊词直说；同一情绪点最多保留 1 处`,
+          message: `AI 高频模糊词过密（叙述层 ${totalHits55} 处、约 ${perKilo55.toFixed(1)} 处/千字${maxWordName55 ? `，最多是“${maxWordName55}”${maxWord55} 次` : ''}）。仿佛/似乎/不禁/缓缓/微微/一丝/一缕/某种/莫名/隐约这类模糊渲染是 AI 腔指纹：在原句事实不变前提下删除多余模糊词，或改成上下文已经存在的具体事实；不得新增动作、数字、物件或对话制造“具体感”`,
           snippet: hitExamples55.join(' / '),
           position: '全文',
           hitCharOffsets: hitOffsets55,

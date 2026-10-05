@@ -1,83 +1,90 @@
 /**
- * 标准指令内存缓存（无 Nest 依赖的进程内单例）。
- *
- * 唯一规范文档是仓库根 QUALITY_EXECUTION.md。ModuleStandardsService 启动时只把代码 seed
- * 镜像装入缓存，RealLLMService 只读；运行时不存在数据库/LLM 自归纳标准，因此同一 commit
- * 在不同机器上使用同一套 hard rules。
+ * Runtime prompt projection of the public System Workflow Rule Registry.
+ * The cache never owns public rule text or thresholds; it only selects active rules
+ * for a scene and renders their registry directives.
  */
-
 import { createHash } from 'node:crypto';
 import { standardScene } from '../../routing/scenario-taxonomy';
-
-interface CacheStandard {
-  version?: number;
-  seed_baseline_version?: number;
-  module_key: string;
-  module_name: string;
-  scenarios: string[];
-  purpose: string;
-  steps_json: string;
-  requirements_json: string;
-  rules_json: string;
-  quality_bar: string;
-  category: string;
-}
+import {
+  SYSTEM_WORKFLOW_RULESET_VERSION,
+  activeSystemWorkflowRules,
+} from './system-workflow-rules.registry';
+import type { SystemWorkflowRule } from './system-workflow-rule.types';
 
 class StandardDirectiveCacheClass {
   private rebuiltAt = 0;
-  private standards: CacheStandard[] = [];
+  private rules: SystemWorkflowRule[] = [];
 
-  /** 由 ModuleStandardsService 用当前代码 seed 全量重建。 */
-  rebuild(standards: CacheStandard[]): void {
-    this.standards = structuredClone(standards);
+  rebuild(rules: readonly SystemWorkflowRule[] = activeSystemWorkflowRules()): void {
+    this.rules = structuredClone([...rules]);
     this.rebuiltAt = Date.now();
   }
 
-  private format(s: CacheStandard): string {
-    const parse = (raw: string): string[] => {
-      try {
-        const v = JSON.parse(raw);
-        return Array.isArray(v) ? v.map((x: any) => (typeof x === 'string' ? x : x?.name ? `${x.name}：${x.goal || ''}` : '')).filter(Boolean) : [];
-      } catch {
-        return [];
-      }
-    };
-    const steps = parse(s.steps_json);
-    const reqs = parse(s.requirements_json);
-    const rules = parse(s.rules_json);
-    const lines: string[] = [`【${s.module_name}·执行标准】${s.purpose}`];
-    if (steps.length) lines.push(`标准步骤：${steps.map((x, i) => `${i + 1}.${x}`).join(' ')}`);
-    if (reqs.length) lines.push(`硬性要求：${reqs.map(x => `·${x}`).join(' ')}`);
-    if (rules.length) lines.push(`规则纪律：${rules.map(x => `·${x}`).join(' ')}`);
-    if (s.quality_bar) lines.push(`质量门槛：${s.quality_bar}`);
+  private format(rule: SystemWorkflowRule, scene: string): string {
+    const lines = [`【系统规则 ${rule.id} · ${rule.level} · ${rule.name}】${rule.summary}`];
+    for (const detail of rule.details ?? []) lines.push(`- ${detail}`);
+    const directives = rule.directives;
+    if (directives) {
+      if (['review'].includes(scene) && directives.review) lines.push(`评审：${directives.review}`);
+      else if (['polish'].includes(scene) && directives.repair) lines.push(`修复：${directives.repair}`);
+      else if (directives.generation) lines.push(`生成：${directives.generation}`);
+      if (directives.save && ['writing', 'polish', 'review'].includes(scene)) lines.push(`保存：${directives.save}`);
+    }
+    if (rule.evidencePolicy && ['review', 'polish'].includes(scene)) lines.push(`证据：${rule.evidencePolicy}`);
     return lines.join('\n');
   }
 
-  /** 取某场景需注入的全部标准（场景专属 + 横切）。 */
-  get(scenario?: string | null, stepKey?: string | null): string {
-    const key = standardScene(scenario, stepKey);
-    return this.standards
-      .filter(s => s.scenarios.includes(key))
-      .map(s => this.format(s))
-      .join('\n\n');
+  private rulesFor(scenario?: string | null, stepKey?: string | null): SystemWorkflowRule[] {
+    const scene = standardScene(scenario, stepKey);
+    return this.rules.filter((rule) =>
+      rule.status === 'active'
+      && rule.consumers.includes('prompt')
+      && (rule.scenarios.includes('*') || rule.scenarios.includes(scene)),
+    );
   }
 
-  getRebuiltAt(): number {
-    return this.rebuiltAt;
+  get(scenario?: string | null, stepKey?: string | null): string {
+    const scene = standardScene(scenario, stepKey);
+    return this.rulesFor(scenario, stepKey).map((rule) => this.format(rule, scene)).join('\n\n');
+  }
+
+  getRebuiltAt(): number { return this.rebuiltAt; }
+  getRulesetVersion(): number { return SYSTEM_WORKFLOW_RULESET_VERSION; }
+  getRulesetDigest(): string {
+    const canonical = this.rules
+      .filter((rule) => rule.status === 'active')
+      .map((rule) => ({
+        id: rule.id, level: rule.level, blocking: rule.blocking, scenarios: [...rule.scenarios],
+        summary: rule.summary, details: [...(rule.details ?? [])], evidencePolicy: rule.evidencePolicy ?? null,
+        parameterRefs: [...(rule.parameterRefs ?? [])], dependencies: [...(rule.dependencies ?? [])],
+        directives: rule.directives ?? null,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
   }
 
   snapshot(scenario: string, enabled = true, stepKey?: string | null) {
+    const selected = enabled ? this.rulesFor(scenario, stepKey) : [];
     const directive = enabled ? this.get(scenario, stepKey) : '';
     return {
-      enabled, available: !!directive,
-      digest: createHash('sha256').update(directive).digest('hex'),
-      modules: enabled ? this.standards.filter(s => s.scenarios.includes(standardScene(scenario, stepKey)))
-        .map(s => ({ key: s.module_key, version: s.version ?? null, baseline: s.seed_baseline_version ?? null })) : [],
+      enabled,
+      available: !!directive,
+      rulesetVersion: SYSTEM_WORKFLOW_RULESET_VERSION,
+      registryDigest: this.getRulesetDigest(),
+      digest: createHash('sha256')
+        .update(`${SYSTEM_WORKFLOW_RULESET_VERSION}\n${directive}`)
+        .digest('hex'),
+      ruleIds: selected.map((rule) => rule.id),
+      modules: selected.map((rule) => ({
+        key: rule.id,
+        version: SYSTEM_WORKFLOW_RULESET_VERSION,
+        baseline: SYSTEM_WORKFLOW_RULESET_VERSION,
+      })),
     };
   }
 
   clear(): void {
-    this.standards = [];
+    this.rules = [];
     this.rebuiltAt = 0;
   }
 }

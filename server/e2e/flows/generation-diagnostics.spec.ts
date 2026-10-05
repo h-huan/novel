@@ -13,5 +13,7 @@ test('unconfigured idea discovery preserves its cause and adds one visible faile
   expect(after.generationRuns.total).toBe(before.generationRuns.total + 1);
   expect(after.generationRuns.recent[0].error).toBe(result.error);
   expect(after.kpis.llmCalls).toBe(before.kpis.llmCalls);
-  expect(after.generationRuns.recent[0].standards.modules.some((s: any) => s.key === 'quality_loop' && s.baseline === SEED_BASELINE_VERSION)).toBe(true);
+  expect(after.generationRuns.recent[0].standards.rulesetVersion).toBe(SEED_BASELINE_VERSION);
+  expect(after.generationRuns.recent[0].standards.modules.some((s: any) => s.key === 'QLT-006' && s.baseline === SEED_BASELINE_VERSION)).toBe(true);
+  expect(after.generationRuns.recent[0].standards.modules.some((s: any) => s.key === 'quality_loop')).toBe(false);
 });

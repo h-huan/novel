@@ -1,11 +1,5 @@
 export type IdeaStoryType = 'short_story' | 'long_novel';
 
-/**
- * 灵感发现的 hook 生成契约必须与 IdeaAppealGateService 使用同一口径。
- * 这里是生成侧唯一文案来源，避免 Prompt 要求和 Gate 判据再次漂移。
- */
-export const SHORT_IDEA_HOOK_MIN_SIGNALS = 3;
-
 // 创建前筛选已经形成了结构化语义证据。它只在当前进程内随服务器绑定的题材卡流转，
 // 不进入 JSON / API / Canon，避免最终 Gate 丢掉上游证据后又靠关键词重新猜同一件事。
 const selectedPremiseEvidenceByCard = new WeakMap<object, Record<string, unknown>>();
@@ -285,7 +279,7 @@ export function applyOrderedIdeaRepairPatches(
 export function ideaHookRequirement(storyType: IdeaStoryType): string {
   const storyFirst = '题材已经通过完整题材卡创建前的轻量候选池筛选；这里只把该题材最有吸引力的起始事件准确压缩成 hook，不再重新选题、换题或为了命中 Gate 关键词改造故事。异常/信息差不等于超能力，可以来自现实利益冲突、关系反常、制度困境、隐藏事实或超常现象';
   if (storyType === 'short_story') {
-    return `35-80字；${storyFirst}；hook 应自然形成异常/信息差、明确代价或时限、主角具体行动/选择、关系锚点中的至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类有效信号，其中必须包含主角具体行动或明确选择；其余两类按故事本身决定，不要求固定组合，也不能把关键行动/选择只藏在 description 里`;
+    return `35-80字；${storyFirst}；必须让读者看见主角正在做什么或明确选择什么，并自然给出至少一个来自本故事自身的继续阅读理由，例如现实代价、关系冲突、资源争夺、信息差、迫近后果或未解问题。不得按关键词数量或固定信号个数凑 Gate，也不能把关键行动/选择只藏在 description 里`;
   }
   return `35-80字；${storyFirst}；直接写出现实压力或代价、主角下一步具体行动，并留下可持续追问；不能只有设定说明`;
 }

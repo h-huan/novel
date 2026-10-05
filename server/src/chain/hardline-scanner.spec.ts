@@ -290,23 +290,15 @@ describe('hardline-scanner 规则55 AI 高频模糊词密度', () => {
   });
 });
 
-describe('isLanguageHardline 阻断集合（AI 痕迹指纹 + 文笔/排版全部进硬伤，无降级旁路）', () => {
-  it('AI 痕迹类规则号判为语言硬伤（阻断保存）', () => {
-    for (const id of ['15b', '15c', '34', 'formula-sentence', 'dash-density', 'simile-density', '36', '37', '39', '42', '44', '46', '47', '48', '49', '55']) {
-      expect(isLanguageHardline(id), id).toBe(true);
-    }
+describe('isLanguageHardline 阻断集合（只保留可确定证据）', () => {
+  it('客观可复算/可定位的重复、格式和明确语言错误继续阻断保存', () => {
+    for (const id of ['15c', '15d', '33', '35', '35b', '42', '44', '53-same-structure-parallel', '54-measure-word-mismatch', '56-punct-stacking']) expect(isLanguageHardline(id), id).toBe(true);
   });
-
-  it('文笔/排版类规则号同样判为语言硬伤（阻断保存，不再有 advisory 降级）', () => {
-    for (const id of ['26-short-para', '26-uniform', '26b-staccato', '32', '33', '35', '35b']) {
-      expect(isLanguageHardline(id), id).toBe(true);
-    }
+  it('词频、段长、修辞、生理反应等启发式只作语义复核信号', () => {
+    for (const id of ['15b', '20a', '34', 'list-enumeration', 'formula-sentence', 'dash-density', 'simile-density', '26-short-para', '26b-staccato', '32', '36', '37', '39', '46', '47', '48', '49', '50-fragment-action-chain', '51-modal-particle-density', '52-env-imagery-repeat', '55', '57-ellipsis-density']) expect(isLanguageHardline(id), id).toBe(false);
   });
-
-  it('内容/节奏度量类不进语言硬线清单（由平台度量与提示词硬性要求承担）', () => {
-    for (const id of ['40', '40b-opening-conflict', '41', '43', '45', '28a', '38', 'time-density']) {
-      expect(isLanguageHardline(id), id).toBe(false);
-    }
+  it('已退役的表面配额规则不再进入阻断集合', () => {
+    for (const id of ['40', '40b-opening-conflict', '41', '43', '45', 'dialogue-ratio', '28a', '38', 'time-density']) expect(isLanguageHardline(id), id).toBe(false);
   });
 });
 
@@ -394,12 +386,10 @@ describe('hardline-scanner 命中段落锚点（硬红线段落级精修的唯�
     expect(finding!.paragraphs).toEqual([flat]);
   });
 
-  it('纯计数类命中（规则 43 全章无不完美细节）不编造锚点', () => {
+  it('已退役的固定内容配额规则 43 不再制造全章 finding 或伪造锚点', () => {
     const text = '他把手机放回口袋，屏幕亮着，时间还在走。';
     const finding = detectForbiddenTells(text, anchorProfile).find(f => f.ruleId === '43');
-    expect(finding).toBeTruthy();
-    expect(finding!.paragraphs).toBeUndefined();
-    expect(finding!.paragraphIndices).toBeUndefined();
+    expect(finding).toBeUndefined();
   });
 
   it('不变量：凡带锚点的命中，锚点必须是正文逐字原文且段号与原文一一对应', () => {
@@ -499,8 +489,8 @@ describe('hardline-scanner 规则32 人名/称谓独占一行（肯定式白名�
     expect(rule32(text, names)).toEqual([]);
   });
 
-  it('阻断集合不变量：32 仍在 LANGUAGE_HARDLINE_RULE_IDS（本轮只是收紧判据，不是退出硬线）', () => {
-    expect(isLanguageHardline('32')).toBe(true);
+  it('32 仍可检测姓名孤立，但只作语义/排版复核信号，不直接阻断', () => {
+    expect(isLanguageHardline('32')).toBe(false);
   });
 });
 it('破折号过密提供全部真实坐标，且标点平板修法不再要求继续加破折号', () => {
@@ -573,5 +563,20 @@ describe('hardline-scanner 规则35b 坐标锚定（回归：派生串偏移会�
       expect(content.indexOf(p)).toBe(off);
       expect(content.slice(off).startsWith(p)).toBe(true);
     });
+  });
+});
+
+describe('system workflow rule governance regressions', () => {
+  it('does not hard-block surface quotas or word/punctuation frequency proxies', () => {
+    const prose = Array.from({ length: 12 }, (_, i) => `第${i + 1}段平静记录已经发生的工作与关系变化，不需要问号、感叹号、数字锚点或强制不完美细节来证明自然。`).join('\n\n');
+    const findings = detectForbiddenTells(prose, { platform: 'zhihu', storyType: 'short_story' });
+    const hard = findings.filter((item) => isLanguageHardline(item.ruleId)).map((item) => item.ruleId);
+    for (const id of ['41','43','45','dialogue-ratio','dash-density','simile-density','55','57-ellipsis-density','26-short-para','26b-staccato']) expect(hard).not.toContain(id);
+  });
+  it('keeps actual repeated prose/dialogue evidence in the deterministic blocking family', () => {
+    for (const id of ['35','35b','42','44','53-same-structure-parallel','54-measure-word-mismatch','56-punct-stacking']) expect(isLanguageHardline(id)).toBe(true);
+  });
+  it('treats stylistic templates and density signals as semantic-review evidence, not direct blockers', () => {
+    for (const id of ['15b','20a','34','list-enumeration','formula-sentence','dash-density','simile-density','36','37','39','46','47','48','49','50-fragment-action-chain','51-modal-particle-density','52-env-imagery-repeat','55','57-ellipsis-density']) expect(isLanguageHardline(id)).toBe(false);
   });
 });

@@ -18,11 +18,12 @@ describe('RealLLMService structured output guard', () => {
     const response = await service.generate({ prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object' });
 
     expect(callModel).toHaveBeenCalledWith(
-      'deepseek-flash', '输出JSON对象', expect.stringContaining('执行前置规则'),
+      'deepseek-flash', '输出JSON对象', expect.any(String),
       0.4, 4096, 600_000, 'json_object', undefined,
     );
     expect(response.content).toBe('{"ok":true}');
     expect(response.finishReason).toBe('stop');
+    expect(String(callModel.mock.calls[0][2] || '')).not.toContain('执行前置规则');
   });
 
   it('rejects an empty structured response instead of passing it to the parser', async () => {
@@ -89,7 +90,7 @@ describe('RealLLMService structured output guard', () => {
     });
 
     expect(callModel).toHaveBeenCalledWith(
-      'deepseek-flash', '输出JSON对象', expect.stringContaining('执行前置规则'),
+      'deepseek-flash', '输出JSON对象', expect.any(String),
       0.4, 7200, 600_000, 'json_object', undefined,
     );
   });
@@ -144,7 +145,7 @@ describe('RealLLMService structured output guard', () => {
     await service.generate({ prompt: '生成正文', scenario: 'daily' });
 
     expect(callModel).toHaveBeenCalledWith(
-      'deepseek-flash', '生成正文', expect.stringContaining('执行前置规则'),
+      'deepseek-flash', '生成正文', expect.any(String),
       0.4, 4096, 600_000, undefined, undefined,
     );
   });

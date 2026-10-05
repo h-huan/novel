@@ -22,7 +22,6 @@ import { estimateTokens, PLANNING_TOKEN_WEIGHTS } from '../common/token-budget';
 import { STRUCTURED_JSON_OUTPUT_CEILING, structuredTruncationError } from './structured-truncation';
 import * as net from 'net';
 
-const EXECUTION_PREFLIGHT_DIRECTIVE = `【执行前置规则】输出前先在内部一次性核对任务目标、全部硬约束、已确认上下文、输出结构和禁止事项，再组织完整结果。不要输出思考过程。已有候选内容时先判断能否基于证据局部修订；不得用重复生成、升温碰运气或无新信息的再次评审代替规划。`;
 
 /**
  * 支持在流式响应中回报真实 usage 的上游。未列出的 provider 不发送 stream_options，
@@ -560,12 +559,12 @@ export class RealLLMService implements ILLMService {
       metricEmitted = true;
       this.recordStepMetric(request, modelName, status, Date.now() - startTime, internalRetries, extra);
     };
-    // 统一注入"当前生效功能模块标准 + 原创横切标准"（由 ModuleStandardsService 归纳维护，与具体模型版本解耦）；
-    // 标准自身归纳等元任务以 injectStandard=false 关闭，避免递归污染。
+    // 公共小说规则只从 System Workflow Rule Registry 的运行时投影注入。
+    // injectStandard=false 用于元任务：必须真正关闭公共规则，不能留下调用器内联的第二套前置规则。
     const standardDirective = request.injectStandard === false
       ? ''
       : standardDirectiveCache.get(request.scenario || 'daily', request.metrics?.stepKey);
-    const effectiveSystemPrompt = [EXECUTION_PREFLIGHT_DIRECTIVE, request.systemPrompt, standardDirective]
+    const effectiveSystemPrompt = [request.systemPrompt, standardDirective]
       .filter(s => typeof s === 'string' && s.trim()).join('\n\n');
     try {
       // physicalCalls 只用于日志与"第几次调用"表述，不参与任何预算判断

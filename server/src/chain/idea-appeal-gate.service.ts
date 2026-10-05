@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SHORT_IDEA_HOOK_MIN_SIGNALS, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import { selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 
 type StoryType = 'short_story' | 'long_novel';
 type DensityMode = '短篇集中兑现' | '长篇分阶段波动';
@@ -261,11 +261,10 @@ export class IdeaAppealGateService {
 
     const issues: string[] = [];
     const warnings: string[] = [];
-    if (!titleAnchored) issues.push('标题没有稳定锚定本故事的具体人物/规则/关系/异常，或仍是可替换套名');
-    const hookSignalCount = [hookHasAnomaly, hookHasPressure, hookHasAgency, hookHasRelationship].filter(Boolean).length;
+    if (!title || GENERIC_TITLE.test(title)) issues.push('标题为空或仍是可替换到任意故事的套名');
+    else if (!titleAnchored) warnings.push('标题与题材卡的具体锚点关联偏弱；交由标题语义审查确认，不凭字面重合直接淘汰');
     if (storyType === 'short_story') {
       if (!hookHasAgency) issues.push('核心钩子没有迫使主角采取具体行动或明确选择');
-      if (hookSignalCount < SHORT_IDEA_HOOK_MIN_SIGNALS) issues.push(`短篇首屏钩子信息过弱：异常/压力/行动/关系至少应形成 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 个有效信号`);
       if (!hookHasAnomaly) warnings.push('核心钩子未直接展示异常/信息差；若故事主要靠现实两难成立，可由压力、行动和关系共同承担首屏吸引力');
       if (!hookHasPressure) warnings.push('核心钩子未直接展示代价或时限；若故事已有强行动、关系与信息差，可在后续卡片字段承接明确后果');
     } else {
@@ -273,17 +272,28 @@ export class IdeaAppealGateService {
       if (!hookHasAgency) issues.push('核心钩子没有迫使主角采取具体行动');
       if (!hookHasAnomaly) warnings.push('核心钩子未直接展示异常/信息差；长篇允许由现实压力与持续追问承担开篇吸引力');
     }
-    if (descriptionProgressions < (storyType === 'short_story' ? 2 : 3)) issues.push('故事推进只有一个点子，缺少可持续升级链');
-    if (!openingDeliversPromise) issues.push('开篇钩子与核心卖点/冲突脱节，阅读承诺不能尽早兑现');
-    if (!reversalConsequential) issues.push('核心反转只是在补充信息，没有改变目标、关系、胜负条件或代价');
-    if (storyType === 'short_story' && !payoffPromise) issues.push('短篇只有吊胃口，没有明确的中后段/终局兑现承诺');
-    if (!lifeAnchor) issues.push('缺少可代入的人生利益或关系锚点：题材机制尚未落到家庭、工作、钱、尊严、健康、归属、责任或生存等具体代价');
-    if (!aspiration) issues.push('主角缺少清晰的生活期盼/欲望：读者不知道他真正想得到、守住、夺回或改变什么');
+    if (descriptionProgressions < (storyType === 'short_story' ? 2 : 3)) warnings.push('词面推进标志偏少；仅作为风险信号，需结合结构化 escalation/反转/兑现证据判断真实升级链');
+    if (!openingDeliversPromise && !selectedOpeningEvidence) warnings.push('开篇与核心卖点的词面重合偏弱；交由结构化题材证据/语义审查确认，不按 n-gram 重合硬阻断');
+    if (boundPremiseEvidence && evidenceText('reversalEffect').length < 8) issues.push('结构化题材证据缺少会改变目标、关系、胜负条件或代价的反转效果');
+    else if (!reversalConsequential) warnings.push('词面未识别到反转后果；不能只凭关键词缺失判失败');
+    if (storyType === 'short_story' && boundPremiseEvidence && evidenceText('payoff').length < 8) issues.push('结构化题材证据缺少短篇中后段/终局兑现承诺');
+    else if (storyType === 'short_story' && !payoffPromise) warnings.push('词面未识别到兑现承诺；交由结构化 payoff/语义审查确认');
+    if (!lifeAnchor) warnings.push('词面未识别到生活利益锚点；不能因词表未命中直接淘汰现实、幻想或特殊题材');
+    if (!aspiration && boundPremiseEvidence && evidenceText('activeChoice').length < 8) issues.push('结构化题材证据没有主角明确行动/选择，无法形成可执行目标');
+    else if (!aspiration) warnings.push('词面未识别到欲望表达；不能只凭“想要/希望”等词缺失判失败');
     if (!socialFriction) warnings.push('当前题材没有明显社会规则/资源/身份摩擦；这不是所有故事的必选项，若题材主轴不是现实批判，不作为淘汰理由');
-    if (!sustainedSuspense) issues.push('缺少可贯穿阶段的核心追问，故事没有稳定的“还想知道什么”');
-    if (simpleMoralMechanismRisk) issues.push('题材仍是“某种行为→直接受到超常惩罚/报应”的单层寓言机制，缺少会改写利益、关系或选择的第二层后果');
+    if (!sustainedSuspense && boundPremiseEvidence && evidenceText('readerQuestion').length < 8) issues.push('结构化题材证据缺少可贯穿阶段的核心追问');
+    else if (!sustainedSuspense) warnings.push('词面未识别到悬念表达；不能只凭疑问词/悬念词缺失判失败');
+    if (simpleMoralMechanismRisk && boundPremiseEvidence && evidenceText('secondOrderConsequence').length < 8) issues.push('结构化题材证据仍缺少第二层后果，当前机制容易退化为单层因果寓言');
+    else if (simpleMoralMechanismRisk) warnings.push('词面呈现单层因果寓言风险；需结合 secondOrderConsequence 语义证据确认');
     const minDistinctiveness = storyType === 'short_story' ? 6 : 5;
-    if (distinctivenessScore < minDistinctiveness) issues.push(`题材差异度不足（${distinctivenessScore}/10）：具体生活载体、反预期、两难选择和二阶后果至少要形成稳定组合，而不是字段齐全即可通过`);
+    if (boundPremiseEvidence) {
+      const structuredDistinctive = [
+        evidenceText('irreplaceableCarrier'), evidenceText('differentiation'), evidenceText('secondOrderConsequence'),
+      ].filter((value) => value.length >= 8).length;
+      if (structuredDistinctive === 0) issues.push('结构化题材证据缺少不可替代载体、差异化或二阶后果，题材身份仍不足');
+    }
+    if (distinctivenessScore < minDistinctiveness) warnings.push(`词面差异度代理分偏低（${distinctivenessScore}/10）；仅用于排序/复核，不作为固定 N-of-M Hard Gate`);
 
     if (!struggleAgency) warnings.push('抗争/争取空间偏弱：后续章纲应让主角通过选择和行动获得热血感，而不是被动承受');
     if (!painPotential) warnings.push('题材卡尚未显出自然的情感代价；后续只能在建立关系/愿望投入后安排“刀点”，禁止为了虐而虐');

@@ -535,7 +535,7 @@ export function measureAgainstTarget(content: string, t: TextMetricTarget): { me
     value: pct(m.dialogueRatio), target: `${pct(t.dialogueRatio[0])}–${pct(t.dialogueRatio[1])}`,
     status: dOk ? 'ok' : (m.dialogueRatio < t.dialogueRatio[0] ? 'bad' : 'warn'),
     advice: dOk ? '' : m.dialogueRatio < t.dialogueRatio[0]
-      ? '对话偏少，关键信息/冲突尽量放进人物对话，减少大段独白与环境描写'
+      ? '对话占比低于平台经验区间；先做语义复核，只有现有场景和人物知识本来支持时才能重组为对话，不得凭空添加对白'
       : '对话偏多，注意用动作与信息推进替代无意义斗嘴',
   });
 
@@ -544,7 +544,7 @@ export function measureAgainstTarget(content: string, t: TextMetricTarget): { me
     key: 'avgParaChars', label: '平均段落字数',
     value: `${m.avgParaChars} 字`, target: `≤ ${t.avgParaCharsMax} 字`,
     status: pOk ? 'ok' : 'bad',
-    advice: pOk ? '' : '段落偏厚，拆成更短意群、一句动作/一句对话独立，适配手机划屏',
+    advice: pOk ? '' : '段落偏厚；只调整现有句子的分段与冗余，不新增动作、对白或事实来满足排版指标',
   });
 
   const lrOk = m.longParaRatio <= t.longParaRatioMax;
@@ -559,14 +559,14 @@ export function measureAgainstTarget(content: string, t: TextMetricTarget): { me
     key: 'openingHook', label: `开篇 ${t.openingHookChars} 字内钩子`,
     value: m.openingHasHook ? '有' : '未检测到', target: '必须有冲突/异常/对话/强标点',
     status: m.openingHasHook ? 'ok' : 'bad',
-    advice: m.openingHasHook ? '' : `前 ${t.openingHookChars} 字未见冲突信号，把危机/反常/悬念提到第一屏`,
+    advice: m.openingHasHook ? '' : `前 ${t.openingHookChars} 字未命中表面钩子信号；这里只标记风险，需语义审查确认，修订只能前移或压缩已有事件`,
   });
 
   rows.push({
     key: 'endingHook', label: '章尾留钩',
     value: m.endingHasHook ? '有' : '未检测到', target: t.endingHook ? '必须留悬念' : '不强制',
     status: m.endingHasHook ? 'ok' : 'warn',
-    advice: m.endingHasHook ? '' : '结尾偏平，用未解问题、反转或危机临门一脚留住读者',
+    advice: m.endingHasHook ? '' : '章尾未命中表面留钩信号；先核对ChapterPlan与既有状态变化，不得新造反转、危机或问题',
   });
 
   return { metrics: m, rows };

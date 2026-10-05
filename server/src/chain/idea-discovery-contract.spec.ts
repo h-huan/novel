@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  SHORT_IDEA_HOOK_MIN_SIGNALS,
   applyOrderedIdeaRepairPatches,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
@@ -236,18 +235,16 @@ describe('idea discovery preselection contract', () => {
 
   it('treats hook generation as expression of a preselected story rather than another search stage', () => {
     const contract = ideaHookRequirement('short_story');
-
-    expect(SHORT_IDEA_HOOK_MIN_SIGNALS).toBe(3);
     expect(contract).toContain('题材已经通过完整题材卡创建前的轻量候选池筛选');
     expect(contract).toContain('这里只把该题材最有吸引力的起始事件准确压缩成 hook');
     expect(contract).toContain('不再重新选题、换题');
-    expect(contract).toContain('异常/信息差');
-    expect(contract).toContain('代价或时限');
-    expect(contract).toContain('具体行动/选择');
-    expect(contract).toContain('关系锚点');
-    expect(contract).toContain(`至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类有效信号`);
-    expect(contract).toContain('必须包含主角具体行动或明确选择');
-    expect(contract).toContain('不要求固定组合');
+    expect(contract).toContain('主角正在做什么或明确选择什么');
+    expect(contract).toContain('继续阅读理由');
+    expect(contract).toContain('现实代价');
+    expect(contract).toContain('关系冲突');
+    expect(contract).toContain('信息差');
+    expect(contract).toContain('未解问题');
+    expect(contract).toContain('不得按关键词数量或固定信号个数凑 Gate');
     expect(contract).not.toContain('内部广泛寻找');
     expect(contract).not.toContain('补足缺少');
   });
@@ -259,7 +256,7 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('现实压力或代价');
     expect(contract).toContain('下一步具体行动');
     expect(contract).toContain('可持续追问');
-    expect(contract).not.toContain(`至少 ${SHORT_IDEA_HOOK_MIN_SIGNALS} 类有效信号`);
+    expect(contract).not.toContain('固定信号个数');
   });
 });
 

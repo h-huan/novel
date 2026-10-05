@@ -63,7 +63,7 @@ import {
 } from './platform-benchmarks';
 import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout, type HardlineFinding, type HardlineProfile } from './hardline-scanner';
 import { assessHardlineRepairProgress } from './hardline-repair-progress';
-import { detectSourceCountdownConflict } from './source-countdown-consistency';
+import { detectSourceCountdownRisk } from './source-countdown-consistency';
 import { describeWorldSourceCandidate } from './source-rule-consistency';
 import { buildSourceHierarchyReviewPrompt, normalizeSourceHierarchyReview, SourceHierarchyReview } from './source-hierarchy-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
@@ -93,7 +93,6 @@ import { findChapterOutline, readOrderedChapterOutlines } from './chapter-outlin
 import { applyChapterLengthInsertions } from './chapter-length-expansion';
 import { chapterNumberFromOrder } from '../../shared/src';
 import { chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineChaptersForFactReview, normalizeOutlineFactReview, type OutlineFactLedgerEntry, type OutlineFactReview } from './outline-fact-ledger';
-import { ideaTimeConflict } from './idea-fact-consistency';
 import {
   CHAPTER_FORESHADOWING_FIELD,
   CHAPTER_FORESHADOWING_CONTRACT,
@@ -195,35 +194,10 @@ const normalizeOutlineChapterFunction = (
     closing: 'closing',
   };
   const mapped = map[raw];
-  if (mapped && mapped !== 'paving') return mapped;
-
-  const chapterNo = chapterNumberFromOrder(order);
-  if (isShort) {
-    const shortRhythm: OutlineChapterFunction[] = [
-      'opening',
-      'exposition',
-      'rising_action',
-      'conflict',
-      'climax',
-      'transition',
-      'climax',
-      'cliffhanger',
-      'resolution',
-    ];
-    return shortRhythm[Math.max(0, Math.min(chapterNo - 1, shortRhythm.length - 1))];
-  }
-
-  const longCycle: OutlineChapterFunction[] = [
-    'opening',
-    'charging',
-    'conflict',
-    'explosion',
-    'breathing',
-    'paving',
-    'cliffhanger',
-    'transition',
-  ];
-  return longCycle[(Math.max(chapterNo, 1) - 1) % longCycle.length];
+  if (mapped) return mapped;
+  // Compatibility value only: missing/unknown chapter responsibility must not be invented from chapter order.
+  // The executable responsibility remains the ChapterPlan/content + semantic architecture audit.
+  return 'paving';
 };
 
 export const parsePositiveTargetWords = (value: unknown): number | null => {
@@ -585,30 +559,10 @@ export const extractIdeaList = (content: string): any[] | null => {
   return null;
 };
 
-const inferOutlineGoalArc = (order = 0, isShort = true): string => {
-  const chapterNo = chapterNumberFromOrder(order);
-  const shortArc = [
-    'mist_truth',
-    'probe_showdown',
-    'accumulate_burst',
-    'crisis_resolve',
-    'suppress_counter',
-    'foreshadow_recover',
-    'pave_climax',
-    'probe_showdown',
-    'foreshadow_recover',
-  ];
-  const longArc = [
-    'mist_truth',
-    'accumulate_burst',
-    'crisis_resolve',
-    'pave_climax',
-    'foreshadow_recover',
-    'suppress_counter',
-    'probe_showdown',
-  ];
-  const source = isShort ? shortArc : longArc;
-  return source[(Math.max(chapterNo, 1) - 1) % source.length];
+const inferOutlineGoalArc = (_order = 0, _isShort = true): string => {
+  // Do not synthesize a story arc from chapter position. Empty means "not explicitly supplied";
+  // the actual chapter responsibility remains in ChapterPlan/content and is audited semantically.
+  return '';
 };
 
 // ==================== DTO ====================
@@ -1536,11 +1490,11 @@ ${localPatchContract('hardline_local_replacement')}
     const wordRange = params.wordRange || this.getChapterWordRange(projectId, targetWords);
     this.assertProjectSourceCompleteness(projectId);
     const reviewWorldContext = this.buildWorldWritingContext(projectId, false);
-    const sourceCountdownConflict = detectSourceCountdownConflict(reviewWorldContext, outlineContract);
-    if (sourceCountdownConflict) {
-      this.logger.warn(`章节 ${chapterIndex} ${sourceCountdownConflict}`);
-      throw new HttpException(sourceCountdownConflict, 422);
-    }
+    // Raw prose cannot prove two numeric phrases share one stable fact identity. Surface the
+    // arithmetic risk for semantic review/logging, but deterministic CTX-005 blocking is reserved
+    // for structured claims with an explicit identity/unit/source.
+    const sourceCountdownRisk = detectSourceCountdownRisk(reviewWorldContext, outlineContract);
+    if (sourceCountdownRisk) this.logger.warn(`章节 ${chapterIndex} ${sourceCountdownRisk}`);
     // 首稿 prompt 的平台数字口径唯一源：与确定性扫描器、
     // buildHardlineRulePlaybook 共用 resolvePlatformStrategy(projectId) 的平台基准表。
     // 此前这里写死「前 300 字」「35%–65%」「4000 字约 1400–2600 字」「最长连续叙述约 800 字」，
@@ -4550,7 +4504,6 @@ ${categoryBenchmark ? `【分类体量参考】${categoryBenchmark}` : ''}
 ${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredTargetWords}；筛选时必须判断题材是否撑得住这一体量。` : '用户未指定总字数；筛选时按平台分类体量和故事自身可持续性判断。'}
 ${excludeText}
 只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
-pool 以 ${premisePoolSize} 项为广搜目标，不是整批成功的硬门槛；每个有效 pool 项只需 premiseId、workingTitle、storyCore。若已经充分比较并能选出 ${requestedCount} 个成熟题材，可以少于目标，禁止为了凑数填弱项。selectedPremises 必须恰好 ${requestedCount} 项、premiseId 互不重复且来自 pool，并补齐创建完整题材卡前所需的筛选证据。
 JSON 结构：${JSON.stringify(premiseSchema)}`;
       };
 
@@ -4621,11 +4574,6 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
 1. targetPlatform 必须原样等于“${dto.platform}”，storyType 必须等于“${dto.storyType}”；不得推荐或改写平台。
 2. ${targetRule} plannedChapters 必须满足 estimatedWords ÷ 章节数落在每章 ${chapterRange.min}-${chapterRange.max} 字；scopeBreakdown 的章节合计必须等于 plannedChapters。
  3. 已选值必须原样继承；留空维度按创作字典为每个题材显式组合，不得空着创建：${autoSelectionRules}；${submissionRule}。每项 JSON 必须额外包含 storyCategory="${dto.storyCategory}"、submissionTags 数组及 plotTags 数组；示例 JSON 中的空数组只是字段形状，不代表可留空。题材、钩子、事件链必须体现这些选择。与其它已选题材的差异已经在创建前筛选阶段确定，本阶段只忠实结构化当前胚子，不得为了制造差异换题。
-4. 每项从改变主角命运的具体事件起步，写清目标、阻力、失败代价、行动时限、连续升级、不可逆选择和有效反转。短篇单线闭环；长篇保留可持续成长、关系和伏笔空间。
-5. 标题、职业场景、时代、冲突和反转均要互不重复；不得套用知名作品或真实人物事件，不得产出违规内容。
-6. 新颖性不是堆设定，也不是自己写一句“独特”。每项先选读者熟悉的类型外壳，再把【具体生活载体/职业】、【不可互换的人物关系】、【异常机制】组成一个彼此依赖的冲突；noveltyProof 必须写清 irreplaceableWhy、secondOrderConsequence、readerQuestion。凡可概括为“某种行为→直接受到超常惩罚/奖励”“发现秘密→一路追查”“获得能力→一路升级”，且去掉具体职业/关系后故事仍成立的，视为可替换模板，必须淘汰重想。核心机制启动后至少产生一个二阶后果：改变谁受益/谁受损、迫使关系重组、改变主角目标或制造真正两难；不能只有直接报应。若仍是历史题材的同一机制、同一追查路径或同一反转，也必须淘汰重想。
-7. 输出前自行检查结构、篇幅和差异；不要为自检另写文字。
-8. 同一题材的 hook、description、规则、时间跨度与反转必须共用一套事实：若写每次进入倒退N小时，就不得又写时间固定回到另一数值的N小时前；若历史中已经触发过名单增减，当前起始名单必须反映该变化。逐次变化要能从初始值算到结尾值。
 ${excludeText}${structureText}
 
 JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
@@ -4661,7 +4609,6 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
         if (String(candidate?.targetPlatform || '') !== dto.platform) issues.push('目标平台未原样继承');
         if (String(candidate?.hook || '').trim().length < 25) issues.push('钩子缺少异常、困境与代价');
         if (String(candidate?.description || '').trim().length < 120) issues.push('概要未形成具体事件升级链');
-        if (ideaTimeConflict(candidate)) issues.push('钩子与概要的逐次倒退时间不一致');
         if (String(candidate?.coreConflict || '').trim().length < 15) issues.push('核心冲突不具体');
         if (String(candidate?.mainReversal || '').trim().length < 10) issues.push('核心反转不成立');
         if (String(candidate?.uniquePoint || '').trim().length < 8) issues.push('独特卖点不清楚');
@@ -5097,11 +5044,6 @@ JSON 结构（ideas 必须恰好 1 项）：${outputSchemaWithAuto}`;
     if (dto.selectedIdea?.storyType && dto.selectedIdea.storyType !== dto.storyType) {
       return { success: false, error: '所选题材的长短篇类型与当前配置不一致；项目未创建，请按当前类型重新发现题材。' };
     }
-    // 这里曾只在项目激活前审查时间规则，后果是自相矛盾的题材卡耗完整轮生成后才失败。
-    if (ideaTimeConflict(dto.selectedIdea || {})) {
-      return { success: false, error: '所选题材的钩子与概要对门后时间给出不同数值；项目未创建，请先统一题材卡中的时间规则。' };
-    }
-
     const db = this.db.getDb();
     const now = new Date().toISOString();
     const { v4: uuid } = require('uuid');
@@ -5978,7 +5920,7 @@ ${protagonistName ? `【必须保留的主角（不得改名、不得换成别�
 - era——时代/时间线：具体年代、关键历史节点、与剧情的因果。
 - storyPremise——故事前提：一句话，**必须出现主角「${protagonistName || '主角'}」的姓名与身份，不得改名**。
 - atmosphere——氛围基调：全书情绪定位，说明紧张/悬疑等从何而来、如何传递。
-- rules——核心规则数组：2-3 条，每条写成"谁在什么条件下做什么会发生什么"的 if-then 形式，并写清作用对象、载体与可见范围（谁看得见、谁受影响）；每条规则只授予它字面写出的能力，规则之间不得互相否定——不得出现一条写某站只对某人可见、另一条又要求别人在此下车这类互斥设定；任何作用于他人的效果都必须写明该效果抵达他人的授权路径。
+- rules——核心规则数组：只列本故事真正需要的核心因果规则，不设固定条数；每条写成"谁在什么条件下做什么会发生什么"的 if-then 形式，并写清作用对象、载体与可见范围（谁看得见、谁受影响）；每条规则只授予它字面写出的能力，规则之间不得互相否定——不得出现一条写某站只对某人可见、另一条又要求别人在此下车这类互斥设定；任何作用于他人的效果都必须写明该效果抵达他人的授权路径。
 - geography——地理：大陆/区域分布 + 关键地点（标剧情功能）。
 - locations——核心地点名数组（3-5 个，简短）。
 - socialRules——行业规则/法律边界/社会行为规范数组（简短；**不得写社会结构或地点**）。
@@ -6493,34 +6435,23 @@ ${(() => {
   const ideaNames = [dto.selectedIdea?.protagonist, ...(Array.isArray(dto.selectedIdea?.characters) ? dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')) : [])].filter(Boolean);
   return ideaNames.length > 0 ? `【允许出现的人物（禁止新增任何不在列的人物或神秘角色）】${ideaNames.join('、')}\n` : '';
 })()}【允许出现的地点】仅限已确认世界观中明确存在的地点；禁止新增拍卖行、码头仓库、工厂等未确认地点。
-【整体质量要求（最高优先级，不可妥协）】
-- 主线清晰，副线丰富：本章必须推进唯一指定任务（主线），同时激活/推进至少一条配角线或情感线（副线）
-- 节奏张弛有度：紧张场景后必须给呼吸段落（如环境描写、配角对话、主角独白），不能连续高强度
-- 推进价值明确：本章至少完成一种真实变化——新信息、有效选择、代价、关系变化、压力升级、伏笔回收、情绪落点或阶段兑现；不得为了凑爽点重复冲突或让人物降智
-- 高光按需出现：只有章节职责和前文铺垫支持时才设置打脸、逆袭、反转、热血、情感暴击或信息爆点；数量可以为0，不能按固定章数强制制造
-- 节奏服从故事：铺设、发现、施压、恢复、兑现和余波可按当前张力自由组合；连续高强度后允许缓冲，但缓冲章仍需产生状态或关系变化
-- 人物成长合理：人物状态变化必须有触发事件作为原因，不能凭空变强/变聪明/变勇敢
-- 伏笔设置和回收明确：非终章只有确有后续作用时才新增伏笔，并给出晚于本章且不超过全书末章的 plannedRecoveryChapter；终章不得新增依赖续章回收的伏笔，回收项必须引用前文埋设
-- 反转因果必须闭合：凡关键人物持有明显存在破绽的报告、物证或文件，必须在content或scenes中交代其未提前发现破绽的具体原因，不能只依靠人物突然降智
-【大纲↔正文铁律】大纲是正文的唯一合同。正文生成的每一段都必须能对应到本章大纲中列出的具体场景或人物行动。大纲中"核心内容"的5步事件链必须在正文中完整展开，不得跳过或合并。
-【严格审查合同】任何与已确认世界规则、人物身份、事件先后、已揭示信息、物证来源或章节任务边界的明确冲突，都必须作为 blocking 问题；不得用高分抵消。质量审查已覆盖这些连续性规则，通过后不再重复调用第二个语义审查器。
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
 按以下文档结构生成。必要字段必须存在；允许按章节职责为空的数组会单独说明：
-1. 核心内容 (content) — 100字左右的事件链要点，从开场到转折结果的5步推进，不要展开成正文。
-2. 主要场景 (scenes) — 2-3个关键场景数组，每场写 location(地点) + goal(本场目标) + conflict(本场阻碍) + outcome(本场结果)。
+1. 核心内容 (content) — 按顺序概括本章职责真正需要的事件链，从入口状态写到本章结果；步骤数量由事件本身决定，不固定为5步，不展开成正文。
+2. 主要场景 (scenes) — 本章实际需要的关键场景数组，每场写 location(地点) + goal(本场目标) + conflict(本场阻碍) + outcome(本场结果)；不按固定场景数量凑数。
 3. 人物行动 (characterActions) — 主要人物的具体行动 + 行动结果数组，不得为空。
-4. 冲突设计 (conflicts) — 本章冲突设计数组：列出2-3个本章冲突（如人物内心冲突/人际冲突/环境冲突/系统冲突），每个含 冲突名 + 冲突双方 + 触发条件 + 升级路径 + 本章解决程度。
+4. 冲突设计 (conflicts) — 只列本章实际存在的冲突，每个含 冲突名 + 冲突双方 + 触发条件 + 升级路径 + 本章解决程度；本章职责不需要独立冲突项时写[]，不得为满足数量制造冲突。
 5. 高光设置 (highlights) — 仅列出本章真实存在且有铺垫的高光/记忆点，每个含 type + point + trigger；没有则写[]，不得为凑数量制造反转。
 6. 伏笔设置 (foreshadowing) — 非终章确需新增时使用{"content","type","evidenceText","riskLevel","plannedRecoveryChapter"}，回收章必须在本章之后且不超过全书末章；没有则写[]；终章必须写[]。
 7. 伏笔回收 (foreshadowingRecover) — 回收前文伏笔数组，格式{"reference","method"}；无回收则写[]。
-8. 人物状态 (characterStates) — 至少1个核心人物本章状态变化，格式{"character","stateBefore","stateAfter","trigger"}。
+8. 人物状态 (characterStates) — 只有本章确实改变人物状态时列出；没有真实变化写[]，不得为满足字段制造变化，格式{"character","stateBefore","stateAfter","trigger"}。
 9. 章尾牵引 (hook) — 非终章只引出下一步动机或障碍；终章可留空或写不依赖续章的余韵，禁止承诺不存在的下一章。
 10. 情绪基调 (emotionalTone) — 简短描述本章情绪走向。
 
 只输出一个合法JSON对象，不要数组、解释或Markdown。`;
-          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章场景、冲突强度与剩余总字数确定","content":"100字左右的事件链要点：开场→推进→受阻或选择→变化→结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[],"foreshadowing":[],"foreshadowingRecover":[],"characterStates":[{"character":"人物名","stateBefore":"本章前状态","stateAfter":"本章后状态","trigger":"触发事件"}],"hook":"${isFinalChapter ? '可留空或填写终章余韵' : '只引出下一步动机或障碍'}","emotionalTone":"情绪基调"}`;
+          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章场景、冲突强度与剩余总字数确定","content":"按本章职责顺序概括必要事件链与结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[],"foreshadowing":[],"foreshadowingRecover":[],"characterStates":[{"character":"人物名","stateBefore":"本章前状态","stateAfter":"本章后状态","trigger":"触发事件"}],"hook":"${isFinalChapter ? '可留空或填写终章余韵' : '只引出下一步动机或障碍'}","emotionalTone":"情绪基调"}`;
 
           const countCJK = (s: string): number => (String(s || '').match(/[㐀-䶿一-鿿]/g) || []).length;
           // help: coerce string to single-element array
@@ -6537,11 +6468,12 @@ ${(() => {
             if (coreLen < 30 || coreLen > 280) issues.push(`核心内容过短或过长（当前约${coreLen}字）`);
             if (scenes.length === 0) issues.push('scenes必须是非空数组');
             if (!hasUsefulValue(candidate.characterActions || candidate['人物行动'])) issues.push('缺少characterActions');
-            // 冲突：至少 1 个（presence 校验，避免单冲突章节触发修复循环；prompt 仍要求 2-3 个）
+            // conflicts 保留为结构字段；是否必须存在冲突由当前 ChapterPlan/语义架构审查决定，
+            // 不在结构解析器里按固定数量强迫故事制造冲突。
             const conflicts = Array.isArray(candidate.conflicts)
               ? candidate.conflicts
               : (String(candidate.conflict || '').trim() ? [candidate.conflict] : []);
-            if (conflicts.length < 1) issues.push('缺少conflict/conflicts');
+            void conflicts;
             const foreshadowing = Array.isArray(candidate.foreshadowing) ? candidate.foreshadowing : [];
             issues.push(...validateForeshadowingBoundary(foreshadowing, order + 1, chapterTitles.length));
             issues.push(...validateChapterEndingBoundary(
@@ -6797,16 +6729,10 @@ ${(() => {
           }
         }
 
-        // 防御：无论模型/上游给出什么功能值，短篇落库前统一按节奏兜底，避免全 paving 或非法值入库
-        const totalChapters = preparedChapters.length;
+        // Normalize only an explicitly supplied chapter function. Do not force terminal/penultimate
+        // responsibilities from position; closure/climax obligations come from the story's ChapterPlan and audit.
         preparedChapters.forEach((c, i) => {
-          let fn = normalizeOutlineChapterFunction(c.chapterFunction, c.order, isShort);
-          // ★ 最后一章强制为 climax 或 resolution（短篇最后一章必须有高潮和结局）
-          if (i === totalChapters - 1 && fn !== 'climax' && fn !== 'resolution' && fn !== 'closing') {
-            fn = /(结局|收束|落幕|尾声|解决|和解|回归)/.test(c.title + (c.content || '')) ? 'resolution' : 'climax';
-          }
-          // 倒数第二章如果是短篇，优先为 conflict/climax（高潮前的最大冲突）
-          if (isShort && i === totalChapters - 2 && fn === 'rising_action') fn = 'conflict';
+          const fn = normalizeOutlineChapterFunction(c.chapterFunction, c.order, isShort);
           if (fn !== c.chapterFunction) preparedChapters[i] = { ...c, chapterFunction: fn };
         });
 
@@ -7220,13 +7146,9 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
 【必须原名收录的规范地点清单】${JSON.stringify(canonicalLocationNames)}
 【地点完整性硬约束】地图点必须包含世界观中列出的所有关键地点（locations字段），不得遗漏。世界观中明确存在的地点必须出现在 mapPoints 中，可以根据剧情需要补充子场景，但不能缺少世界观已锁定的地点。
 没有独立组织时 organizations 返回空数组；没有需要独立管理的地点时 mapPoints 返回空数组。禁止为了数量填充。
-【地点层级限制】地点最多2级，禁止过度细化：
-- 第一级：区域/建筑/场所（如"主角所在公司"、"出租屋"、"中心医院"，一律用通用功能名，禁止带入任何具体作品的专有名）
-- 第二级：该场所内的具体功能场景（如"大会议室"、"卧室"、"急诊室"）
-- 禁止第三级及以下（如"大会议室→靠窗座位"、"卧室→床头柜"）
-- 每个一级地点下的二级地点不超过3个，只保留对剧情有实际作用的场景
-- level字段：一级用"location"，二级用"scene"，parentName填写上级地点名
-- 同一物理地点只建一个点：禁止用人物修饰或括号注释重复建点（如"恒业公司办公室"与"主角创立的恒业公司办公室"、"街角咖啡馆"与"街角咖啡馆（初次碰面处）"视为同一个点，示例均为中性占位、不得照抄）；大堂/门口/办公室/卡座/卧室等内部子场景必须作为二级 scene 且 parentName 精确等于所属一级地点名，不得平铺成又一个一级点
+【地点层级】只保留对既定剧情有实际作用的层级；level 使用输出 schema 中最贴近的值，parentName 指向直接上级。
+- 不为“世界丰富”创建无剧情作用的子地点，不设固定层级数或每层子节点配额。
+- 同一物理地点只建一个点；内部功能场景挂在直接父地点下，不得用人物修饰、括号注释或别名平铺成重复地点。
 输出JSON:{"organizations":[{"name":"原文名称","type":"类型","level":"root|branch|cell","parentName":"","description":"它在既定剧情中的作用"}],"mapPoints":[{"name":"原文名称","type":"类型","level":"world|region|country|city|location|scene","parentName":"","description":"该地点发生的既定事件"}]}`,
             {
               temperature: 0.35,
