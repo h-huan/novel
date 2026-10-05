@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -16,3 +17,16 @@ if needle not in source:
 source = source.replace(needle, injection + needle, 1)
 path.write_text(source, encoding='utf-8')
 subprocess.run([sys.executable, str(path)], check=True)
+
+# Safety invariant: the story-specific free-text time checker is retired completely.
+# Do not allow a half-applied state where its import/file is removed but an executable call survives.
+controller = Path('server/src/chain/chain.controller.ts')
+text = controller.read_text(encoding='utf-8')
+text, removed = re.subn(
+    r"\n(?P<indent>\s*)if \(ideaTimeConflict\(dto\.selectedIdea \|\| \{\}\)\) \{\n(?P=indent)  return \{ success: false, error: '[^\n']*' \};\n(?P=indent)\}\n",
+    "\n",
+    text,
+)
+if 'ideaTimeConflict' in text:
+    raise SystemExit(f'patch_chain_runner: ideaTimeConflict survived retirement (fallback removals={removed})')
+controller.write_text(text, encoding='utf-8')
