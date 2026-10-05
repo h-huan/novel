@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-3
+# trigger: retry-4
 
 on:
   push:
@@ -32,6 +32,7 @@ jobs:
           python tools/system-rule-governance/bootstrap/prebuilt_small_1.py
           python tools/system-rule-governance/bootstrap/prebuilt_small_2.py
           python tools/system-rule-governance/bootstrap/prebuilt_small_3.py
+          python tools/system-rule-governance/bootstrap/complete_missing_rules.py
           python tools/system-rule-governance/bootstrap/patch_core.py
           python tools/system-rule-governance/bootstrap/patch_hardline.py
           python tools/system-rule-governance/bootstrap/patch_platform.py
