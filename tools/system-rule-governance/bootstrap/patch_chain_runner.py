@@ -19,14 +19,24 @@ path.write_text(source, encoding='utf-8')
 subprocess.run([sys.executable, str(path)], check=True)
 
 # Safety invariant: the story-specific free-text time checker is retired completely.
-# Do not allow a half-applied state where its import/file is removed but an executable call survives.
+# The old implementation was duplicated in both idea-card validation and create-project preflight;
+# remove any surviving executable copies after the main patch, then fail closed if the symbol remains.
 controller = Path('server/src/chain/chain.controller.ts')
 text = controller.read_text(encoding='utf-8')
-text, removed = re.subn(
-    r"\n(?P<indent>\s*)if \(ideaTimeConflict\(dto\.selectedIdea \|\| \{\}\)\) \{\n(?P=indent)  return \{ success: false, error: '[^\n']*' \};\n(?P=indent)\}\n",
+text, card_removed = re.subn(
+    r"^[ \t]*if \(ideaTimeConflict\(candidate\)\) issues\.push\([^\n]*\);\n",
+    "",
+    text,
+    flags=re.M,
+)
+text, preflight_removed = re.subn(
+    r"\n[ \t]*if \(ideaTimeConflict\(dto\.selectedIdea \|\| \{\}\)\) \{\n[ \t]*return \{ success: false, error: '[^\n']*' \};\n[ \t]*\}\n",
     "\n",
     text,
 )
 if 'ideaTimeConflict' in text:
-    raise SystemExit(f'patch_chain_runner: ideaTimeConflict survived retirement (fallback removals={removed})')
+    raise SystemExit(
+        'patch_chain_runner: ideaTimeConflict survived retirement '
+        f'(card removals={card_removed}, preflight removals={preflight_removed})'
+    )
 controller.write_text(text, encoding='utf-8')
