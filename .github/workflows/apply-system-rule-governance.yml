@@ -1,5 +1,5 @@
 name: Apply system rule governance
-# trigger: retry-16-acceptance
+# trigger: retry-17-acceptance-projection
 
 on:
   push:
