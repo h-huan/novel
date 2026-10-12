@@ -114,6 +114,13 @@ export const PLATFORM_ISSUE_TAGS: Record<string, string> = {
   'platform.category_word_scale_unset': 'platform_category_word_scale',
 };
 
+/** Numeric compliance belongs to the shared measurement, never model estimation. */
+export function isObjectivePlatformRule(ruleId: unknown): boolean {
+  return ['platform.chapter_length', 'platform.avgParaChars', 'platform.longParaRatio',
+    'platform.dialogue_ratio', 'platform.category_word_scale', 'platform.category_word_scale_unset']
+    .some(id => ruleId === id || ruleId === PLATFORM_ISSUE_TAGS[id]);
+}
+
 const PLATFORM_ISSUE_TITLES: Record<string, string> = {
   platform_chapter_length: '单章字数不符合目标平台篇幅',
   platform_paragraph_length: '段落长度不符合目标平台阅读节奏',
@@ -142,6 +149,29 @@ export interface PlatformQualityRow {
   evidence: string;
   suggestion: string;
   tags: string[];
+}
+
+const PLATFORM_SIGNAL_RULE_IDS = new Set(['platform.opening_hook_position', 'platform.ending_hook', 'platform.payoff_emotion_gap_risk']);
+
+/** Shared by generation and manual review: semantic proxies never become metric violations. */
+export function partitionPlatformIssues(issues: QualityIssue[]) {
+  return {
+    confirmed: issues.filter(issue=>!PLATFORM_SIGNAL_RULE_IDS.has(issue.ruleId)),
+    probes: issues.filter(issue=>PLATFORM_SIGNAL_RULE_IDS.has(issue.ruleId)),
+  };
+}
+
+// 关键词只能找候选位置，不能证明悬念、推进或章尾承诺不存在。
+// 客观度量仍计分并阻断；语义项由有正文证据的语义评审产出问题。
+export function partitionPlatformRows(rows: PlatformQualityRow[], semanticIssues: Array<{ issueType: string }>) {
+  const semanticTypes = new Set(semanticIssues.map(issue => issue.issueType));
+  const proxyTypes = new Set([...PLATFORM_SIGNAL_RULE_IDS].map(id=>PLATFORM_ISSUE_TAGS[id]));
+  return {
+    confirmed: rows.filter(row => !proxyTypes.has(row.issueType)),
+    probes: rows.filter(row => proxyTypes.has(row.issueType)).map(row => ({ ...row,
+      evaluation: semanticTypes.has(row.issueType) ? 'semantic_confirmed' : 'needs_semantic_review',
+    })),
+  };
 }
 
 /** 把 deterministicPlatformReview 的发现映射成 writing_quality_issues 可直接入库的问题行。 */

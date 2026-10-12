@@ -1,9 +1,10 @@
 import type { CreativeConstitution } from '../project/creative-constitution';
 import type { ScoreDimension, DimensionScore } from './stage-score';
+import { DEFAULT_LANGUAGE_SCORE_FLOOR } from '../../../shared/src/system-workflow-rules.registry';
 
 export interface ScorePolicy { version: 1; floors: Partial<Record<ScoreDimension, number>>; weights: Partial<Record<ScoreDimension, number>> }
 export function scorePolicy(c: Pick<CreativeConstitution, 'targetPlatform' | 'projectType'>, override?: Partial<ScorePolicy>): ScorePolicy {
-  const floors = { character_voice: 70, world_rules: 70, context: 70, logic: 70, ...override?.floors };
+  const floors = { character_voice: 70, world_rules: 70, context: 70, logic: 70, prose: DEFAULT_LANGUAGE_SCORE_FLOOR, ...override?.floors };
   const weights = { context: 2, logic: 2, character_voice: 1.5, world_rules: 1.5,
     ...(c.projectType === 'short_story' ? { structure: 2, payoff: 2 } : { timeline: 1.5, retention: 1.5 }),
     ...(c.targetPlatform === 'fanqie' ? { pacing: 2, retention: 2 } : {}), ...override?.weights };

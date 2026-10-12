@@ -1,3 +1,4 @@
+import { CHARACTER_VOICE_COMPARISON_ISSUE_TYPES } from '../../../shared/src/system-workflow-rules.registry';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -19,6 +20,104 @@ export interface QualityIssue {
   source: string;
   contractVersion?: string;
   contractField?: string;
+  /** A verified missing prerequisite must be resolved before a framework is expanded into prose. */
+  requiredPlanningCondition?: boolean;
+}
+
+/** QLT-003: recover only layout differences; never stitch or rewrite a quotation. */
+export function resolveQualityEvidence(content: string, candidate: unknown): {
+  quote: string; start: number | null; end: number | null; verified: boolean; unique: boolean;
+} {
+  const quote = typeof candidate === 'string' ? candidate.trim() : '';
+  const absent = { quote, start: null, end: null, verified: false, unique: false };
+  if (!quote) return absent;
+  const exact = content.indexOf(quote);
+  if (exact >= 0) {
+    const unique = content.indexOf(quote, exact + 1) < 0;
+    return { quote: content.slice(exact, exact + quote.length), start: unique ? exact : null,
+      end: unique ? exact + quote.length : null, verified: true, unique };
+  }
+  // String offsets are UTF-16 units, including surrogate pairs. Array.from indexes
+  // code points and therefore cannot be used as offsets into the original string.
+  const indexes: number[] = [];
+  let compact = '';
+  for (let index = 0; index < content.length; index++) {
+    if (/\s/u.test(content[index])) continue;
+    indexes.push(index);
+    compact += content[index];
+  }
+  const compactQuote = quote.replace(/\s/gu, '');
+  if (!compactQuote) return absent;
+  const found = compact.indexOf(compactQuote);
+  if (found < 0) return absent;
+  const start = indexes[found];
+  const end = indexes[found + compactQuote.length - 1] + 1;
+  const unique = compact.indexOf(compactQuote, found + 1) < 0;
+  return { quote: content.slice(start, end), start: unique ? start : null,
+    end: unique ? end : null, verified: true, unique };
+}
+
+/** Required semantic bases are owned by QLT-003; sources are supplied by callers. */
+export function verifySemanticEvidence(finding: {
+  ruleId?: string; issueType?: string; evidence?: unknown; shownEvidence?: unknown;
+  evidenceKind?: string; basisEvidence?: unknown; basisSource?: string; basisReason?: string;
+}, content: string, sources: Record<string, string> = {}) {
+  const primary = resolveQualityEvidence(content, finding.evidence);
+  const reasons: string[] = [];
+  if (!primary.verified) reasons.push('问题引文不能连续定位到原文');
+  const ruleId = finding.ruleId || finding.issueType || '';
+  const explanation = /(?:over_explain|overexplanation|too_expository|causal_author_explanation)/.test(ruleId)
+    || finding.evidenceKind === 'redundant_interpretation';
+  const premature = finding.evidenceKind === 'premature_reveal';
+  const causalGap = /(?:causality_gap|causal_gap)/.test(ruleId) || finding.evidenceKind === 'causal_gap';
+  let shown = resolveQualityEvidence(content, finding.shownEvidence);
+  let basis = resolveQualityEvidence(sources[finding.basisSource || ''] || '', finding.basisEvidence);
+  if (explanation && !premature) {
+    if (!shown.verified) reasons.push('过度解释缺少已呈现信息的原文证据');
+    if (!finding.basisReason?.trim()) reasons.push('未说明解释是否新增信息、改变判断或推动选择');
+  }
+  if (CHARACTER_VOICE_COMPARISON_ISSUE_TYPES.some(type => ruleId === type || ruleId.endsWith('.' + type))) {
+    if (!shown.verified) reasons.push('人物声音同质缺少另一人物的连续对白证据');
+    if (primary.quote === shown.quote) reasons.push('人物声音同质不能仅凭同一句简短应答判断');
+    if (!finding.basisReason?.trim()) reasons.push('缺少人物、表达或应对方式及场景依据的说明');
+  }
+  if (premature || causalGap) {
+    if (premature && finding.basisSource !== 'chapter_plan') reasons.push('提前揭示须引用章纲揭示安排');
+    if (!basis.verified) reasons.push('缺少可核对的章纲或必要前提依据');
+    if (!finding.basisReason?.trim()) reasons.push('缺少揭示越界或必要因果前提的说明');
+  }
+  return { primary, shown, basis, verified: reasons.length === 0, reasons };
+}
+
+export function semanticEvidenceSources(content: string, context: string, executionStandard: string) {
+  let snapshot: any = {};
+  try { snapshot = JSON.parse(context); } catch { /* Non-JSON context has no verified ChapterPlan field. */ }
+  return {
+    body: content, project_context: context, execution_standard: executionStandard,
+    chapter_plan: JSON.stringify([snapshot.outline, snapshot.chapterContract, snapshot.planningSources].filter(Boolean)),
+  };
+}
+
+/** Correct a citation address only when its unchanged quote has one real source.
+ * Reveal ordering must still cite chapter_plan; no evidence or verdict is invented. */
+export function resolveExactCausalBasisSource(finding: any, sources: Record<string, string>) {
+  if (finding?.evidenceKind !== 'causal_gap' || typeof finding.basisEvidence !== 'string' || !finding.basisEvidence.trim()
+    || resolveQualityEvidence(sources[finding.basisSource] || '', finding.basisEvidence).verified) return finding;
+  const matches = Object.entries(sources).filter(([, text]) => resolveQualityEvidence(text, finding.basisEvidence).verified);
+  return matches.length === 1 ? { ...finding, basisSource: matches[0][0] } : finding;
+}
+
+export function materializeDimensionBasis(criterionSource: string, basis: any, dimensionId: string) {
+  if (!basis || basis.criterionId !== dimensionId) return basis;
+  return {...basis,criterion:criterionSource,selectionMethod:'provided_criterion_id'};
+}
+
+export function verifyDimensionBasis(criterionSource: string, basis: unknown, definitionStatus?: string): boolean {
+  if (definitionStatus === 'unknown_definition') return false;
+  if (!basis || typeof basis !== 'object') return false;
+  const value = basis as { status?: string; criterion?: unknown; reason?: string };
+  return value.status === 'evaluated' && !!value.reason?.trim()
+    && resolveQualityEvidence(criterionSource, value.criterion).verified;
 }
 
 /**
@@ -43,7 +142,7 @@ export function isMissingStandardIssue(issue: Pick<QualityIssue, 'source' | 'rul
  */
 export function isConfirmedBlockingIssue(issue: QualityIssue): boolean {
   return issue.status === 'open'
-    && issue.severity === 'blocking'
+    && (issue.severity === 'blocking' || issue.requiredPlanningCondition === true)
     && (isMissingStandardIssue(issue) || issue.evaluation === 'evidenced');
 }
 
@@ -101,15 +200,17 @@ export function qualityIssue(input: {
   const severity: QualitySeverity = ({ critical: 'blocking', contradiction: 'blocking', warning: 'medium',
     info: 'info' } as Record<string, QualitySeverity>)[rawSeverity]
     || (['blocking', 'high', 'medium', 'low', 'info'].includes(rawSeverity) ? rawSeverity as QualitySeverity : 'medium');
-  const quote = typeof input.quote === 'string' ? input.quote.trim() : '';
-  const start = quote && input.content ? input.content.indexOf(quote) : -1;
-  const verified = input.evidenceVerified === true || start >= 0;
+  const located = resolveQualityEvidence(input.content ?? '', input.quote);
+  const quote = located.quote;
+  // Trusted structural findings without prose have their own authority. A flag
+  // must never override a failed quote when the actual artifact is available.
+  const verified = located.verified || (input.content === undefined && input.evidenceVerified === true);
   return {
     id: input.id || createHash('sha256').update(JSON.stringify([input.projectId, input.entityId, input.runId, input.ruleId, quote, input.message])).digest('hex'),
     projectId: input.projectId, entityId: input.entityId ?? null, runId: input.runId ?? null,
     constitutionRevision: input.constitutionRevision ?? null, stage: input.stage, ruleId: input.ruleId,
     severity, status: ['resolved', 'superseded', 'dismissed'].includes(input.status || '') ? input.status as QualityIssue['status'] : 'open',
-    message: input.message, evidence: { quote, start: start >= 0 ? start : null, end: start >= 0 ? start + quote.length : null, verified },
+    message: input.message, evidence: { quote, start: located.start, end: located.end, verified },
     evaluation: verified ? 'evidenced' : 'insufficient_evidence', source: input.source,
   };
 }
@@ -117,7 +218,8 @@ export function qualityIssue(input: {
 export function qualityGate(issues: QualityIssue[], evaluated: boolean) {
   const blocking = issues.filter(isConfirmedBlockingIssue);
   const unevidencedBlocking = issues.filter(isUnevidencedBlockingIssue);
-  const reviewComplete = evaluated && unevidencedBlocking.length === 0;
+  const reviewComplete = evaluated && issues.every(issue => issue.status !== 'open'
+    || isMissingStandardIssue(issue) || issue.evaluation === 'evidenced');
   return {
     passed: reviewComplete && blocking.length === 0,
     status: blocking.length ? 'blocked' : !reviewComplete ? 'not_evaluated' : 'passed',
@@ -208,4 +310,12 @@ export function replaceQualityIssues(db: DatabaseSync, input: {
       JSON.stringify({ qualityIssue: issue, details: raw.details ?? null }), now, now);
   });
   return { reportId, issues: normalized };
+}
+
+/** Statistical platform deviations remain visible risks, not an automatic prose mandate. */
+export function isAutomaticQualityRepairIssue(issue:QualityIssue) {
+ if(issue.requiredPlanningCondition)return false;
+ if(issue.status!=='open'||!['blocking','high'].includes(issue.severity)||issue.evaluation!=='evidenced')return false;
+ if(issue.severity!=='blocking'&&issue.ruleId.startsWith('platform.')&&issue.source.startsWith('platform_deterministic'))return false;
+ return true;
 }

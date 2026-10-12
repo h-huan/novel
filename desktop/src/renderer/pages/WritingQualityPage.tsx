@@ -443,11 +443,12 @@ const WritingQualityPage: React.FC = () => {
       {attention && (
         <div style={styles.panel}>
           <div style={{ ...styles.row, justifyContent: 'space-between' }}>
-            <div style={{ fontWeight: 700 }}>前三屏生死线</div>
-            <span style={{ ...styles.badge, background: attention.level === 'high' ? '#7f1d1d' : attention.level === 'medium' ? '#713f12' : '#14532d', color: 'var(--color-white)' }}>
-              滑走风险 {attention.slipAwayRiskScore}
+            <div style={{ fontWeight: 700 }}>开篇文本信号检查</div>
+            <span style={{ ...styles.badge, background: '#334155', color: 'var(--color-white)' }}>
+              读完率未测
             </span>
           </div>
+          <div style={{ ...styles.muted, marginTop: 8 }}>以下为关键词与标点的表面信号，需结合语义核对；不能据此预测读完率或证明超越爆款。</div>
           <div style={{ ...styles.row, marginTop: 10 }}>
             {(attention.checkpoints || []).map(item => (
               <span key={item.name} style={{ ...styles.badge, background: item.pass ? '#064e3b' : '#7f1d1d', color: 'var(--color-white)' }}>

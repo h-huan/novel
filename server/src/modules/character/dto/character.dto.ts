@@ -6,6 +6,7 @@ import { Type } from 'class-transformer';
 import type { RelationshipType } from '@novel/shared';
 
 export class PersonalityDto {
+  @IsOptional() @IsString() summary?: string;
   @IsNumber() extraversion?: number = 50;
   @IsNumber() agreeableness?: number = 50;
   @IsNumber() conscientiousness?: number = 50;
@@ -104,6 +105,16 @@ export class CreateCharacterDto {
   /** 统一详细档案 JSON，合并原 character_extended_profiles 的全部字段 */
   @IsOptional()
   profile?: Record<string, unknown>;
+
+  @IsOptional()
+  abilities?: Record<string, unknown>;
+
+  @IsOptional()
+  arc?: string | Record<string, unknown>;
+
+  @IsOptional()
+  @IsArray()
+  relationships?: AddRelationshipDto[];
 }
 
 export class AddRelationshipDto {

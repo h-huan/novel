@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { QualityStage } from '../writing-quality/quality-issue';
 import { canonical, compileCharacterContract, object } from '../writing-quality/character-contract';
+import { hasCurrentProfile } from '../character/character-profile';
 import { chapterContractFromOutline } from './chapter-contract-context';
 
 function ids(v: any): string[] {
@@ -125,7 +126,9 @@ export function dependencyContext(
   const hasProfiles = tableExists(db, 'character_extended_profiles');
   const characters = selected.map(c => ({
     ...c,
-    ...(hasProfiles ? db.prepare('SELECT * FROM character_extended_profiles WHERE character_id=? LIMIT 1').get(c.id) as any : {}),
+    // Current canonical profiles must never be overwritten by stale legacy traits.
+    ...(!hasCurrentProfile(object(c.profile_json)) && hasProfiles
+      ? db.prepare('SELECT * FROM character_extended_profiles WHERE character_id=? LIMIT 1').get(c.id) as any : {}),
     id: c.id,
   }));
 
@@ -301,10 +304,14 @@ export function dependencyContext(
   // budgets reserve enough room for confirmed state and hard world rules too.
   const recentExcerptChars = Math.max(280, Math.min(1200, Math.floor(max / 12)));
   let recent: any[] = [];
+  let previousChapter: any = null;
   if (tableExists(db, 'chapters') && chapterIndex !== null) {
     recent = db.prepare(`SELECT id,outline_id,volume_index,chapter_index,title,content,status
       FROM chapters WHERE project_id=? AND chapter_index<? AND LENGTH(TRIM(COALESCE(content,'')))>0
       ORDER BY chapter_index DESC,id LIMIT 3`).all(projectId, chapterIndex) as any[];
+    const preceding = recent.find(c => c.chapter_index === chapterIndex - 1);
+    if (preceding) previousChapter = { id: preceding.id, chapter_index: preceding.chapter_index,
+      title: preceding.title, content: String(preceding.content), complete: true };
     recent = recent.reverse().map(c => ({
       id: c.id,
       outline_id: c.outline_id,
@@ -328,6 +335,7 @@ export function dependencyContext(
     chapterContract: [],
     outline: [],
     recentChapters: [],
+    previousChapter: [],
     characterContracts: [],
     characters: [],
     foreshadowing: [],
@@ -355,7 +363,7 @@ export function dependencyContext(
   };
   const add = (key: string, items: any[]) => {
     for (const item of items) {
-      sections[key].push(key === 'characterContracts' ? item : prune(item));
+      sections[key].push(['characterContracts', 'previousChapter'].includes(key) ? item : prune(item));
       if (canonical(sections).length > max - 300) {
         sections[key].pop();
         omitted += 1;
@@ -371,8 +379,9 @@ export function dependencyContext(
   add('recentChapters', recent);
   // Confirmed state is hard canon and must survive before descriptive profiles.
   add('recentState', states);
-  add('characterContracts', characters.map(compileCharacterContract));
-  add('characters', characters.map(c => ({ id: c.id, name: c.name, speech_style: c.speech_style, forbidden_words: c.forbidden_words })));
+  const characterContracts = characters.map(compileCharacterContract);
+  add('characterContracts', characterContracts);
+  add('characters', characterContracts.map(c => ({ id: c.characterId, name: c.name, speech_style: c.speechRegister, forbidden_words: c.forbiddenVocabulary })));
   add('foreshadowing', hints.filter(h => explicitHints.has(h.id)));
   add('timeline', timeline);
   add('causality', links.filter(l => eventIds.has(l.source_event_id) && eventIds.has(l.target_event_id)));
@@ -382,6 +391,10 @@ export function dependencyContext(
   add('locations', locations);
   add('organizations', organizations);
   add('outline', nearby);
+  // Preserve existing dependency coverage under tight diagnostic budgets. Full
+  // prior prose is atomic: include all of it or explicitly record its omission.
+  // The production writing/review boundary loads it separately from background.
+  add('previousChapter', previousChapter ? [previousChapter] : []);
 
   sections.meta.truncation = omitted ? [`${omitted} items/fields omitted or clipped; budget=${max}`, ...truncation] : [];
   const snapshot = canonical(sections);

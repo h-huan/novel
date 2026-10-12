@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, getBaseUrl } from '../lib/api';
 import { useProjectStore } from '../stores/projectStore';
 import type { Project } from '@novel/shared';
-import { useDiscoveryStore } from '../stores/discoveryStore';
+import { useDiscoveryStore, acceptedDiscoveryIdeas } from '../stores/discoveryStore';
 import { openProject } from '../lib/openProject';
 import { updateCreationStepStatus } from '../lib/creation-progress';
 import IdeaCard from '../components/discovery/IdeaCard';
@@ -114,13 +114,13 @@ export const discoverySignature = (state: ReturnType<typeof useDiscoveryStore.ge
   ideaCount: state.ideaCount,
 });
 
-/** 同配置的合格卡可部分返回；数量缺额单独展示，不丢弃已通过的题材。 */
+/** Completed discovery requires the exact requested number of qualified cards. */
 export const discoveryResponseMatchesSelection = (
   requestedSignature: string,
   state: ReturnType<typeof useDiscoveryStore.getState>,
   ideas: Array<{ storyType?: string; targetPlatform?: string }>,
 ): boolean => requestedSignature === discoverySignature(state)
-  && ideas.length > 0 && ideas.length <= state.ideaCount
+  && ideas.length === state.ideaCount
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
 const discoveryGenreProblem = (state: ReturnType<typeof useDiscoveryStore.getState>): string => {
@@ -895,6 +895,14 @@ const DiscoveryWizardPage: React.FC = () => {
 
       if ((res as any)?.success && (res as any)?.ideas?.length > 0) {
         const newIdeas = (res as any).ideas;
+        if (newIdeas.length !== configuredState.ideaCount) {
+          store.setGenProgress(`❌ 题材数量不足或超额：请求 ${configuredState.ideaCount}，返回 ${newIdeas.length}；本轮未完成，请重新发现。`);
+          return;
+        }
+        if (acceptedDiscoveryIdeas(newIdeas).length !== configuredState.ideaCount) {
+          store.setGenProgress('❌ 有题材未通过当前规则或含禁止命名，本轮不交付缺量批次，请重新发现。');
+          return;
+        }
         if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), newIdeas)) {
           store.setGenProgress('创作设定已改变，或返回题材与所选长短篇/平台不一致；旧结果已丢弃，请重新发现。');
           store.setStep(0);
@@ -911,9 +919,7 @@ const DiscoveryWizardPage: React.FC = () => {
           .filter((i: any) => i.title)
           .map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
         store.addExcludeDetails(newDetails);
-        const partialWarning = newIdeas.length < configuredState.ideaCount
-          ? `本轮缺少 ${configuredState.ideaCount - newIdeas.length} 张；已通过的故事卡可直接创建项目。` : '';
-        const warning = [(res as any).qualityWarning, partialWarning].filter(Boolean).join(' ');
+        const warning = (res as any).qualityWarning || '';
         const qualityWarn = warning ? `\n⚠️ ${warning}` : '';
         store.setGenProgress(`✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {

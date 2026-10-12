@@ -4,6 +4,7 @@ import { Migrator } from '../database/migrator';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
 import { RealLLMService } from '../chain/real-llm.service';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
+import { dimensionBasisFromPrompt } from '../test/quality-review.fixture';
 import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 it('records success, provider failure, stream cancellation and constitution snapshots', async () => {
@@ -18,7 +19,7 @@ it('records success, provider failure, stream cancellation and constitution snap
     (service as any).generateInternal = vi.fn(async (r: any) => {
       if (r.scenario !== 'review') expect(r.systemPrompt).toContain('fanqie');
       return { content: r.scenario === 'review' ? JSON.stringify({ dimensions: Object.fromEntries(
-        SCORE_DIMENSIONS.map(k => [k, { score: 90, reason: '满足已确认约束', evidence: ['角色'] }])) }) : '角色', model: 'fixture', latency: 1 };
+        SCORE_DIMENSIONS.map(k => [k, { score: 90, reason: '满足已确认约束', evidence: ['角色'], basis: dimensionBasisFromPrompt(r.prompt,k) }])) }) : '角色', model: 'fixture', latency: 1 };
     });
     await service.generate(request);
     (service as any).generateInternal = vi.fn(async () => { throw new Error('provider failed'); });
@@ -64,7 +65,7 @@ it('inherits the constitution and stores evidence-based scores through five writ
     ? `“钟楼突然响了！我们必须立刻穿过广场找到钥匙，否则城门关闭后所有人都会被困在这里！”`
     : `钟楼突然响了！林岚冲过广场，推开挡路的木箱，拿到钥匙后继续奔向正在关闭的城门。`).join('\n') + '\n门后站着的人究竟是谁？';
   (service as any).generateInternal=vi.fn(async(r:any)=>{
-   if(r.scenario==='review') return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'验收固定证据',evidence:['钟楼']}]))})};
+   if(r.scenario==='review') return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'验收固定证据',evidence:['钟楼'],basis:dimensionBasisFromPrompt(r.prompt,k)}]))})};
    expect(r.systemPrompt).toContain('fanqie');
    return {content:['writing','refinement'].includes(r.scenario) ? chapterContent : '钟楼',model:'fixture'};
   });

@@ -147,6 +147,8 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
 
     if (nextId !== prevChapterIdRef.current) {
       // 章节切换（含首次进入）：直接覆盖
+      const persistedAt = chapter?.updatedAt ? new Date(chapter.updatedAt) : null;
+      setLastSaved(nextContent.trim() && persistedAt && Number.isFinite(persistedAt.getTime()) ? persistedAt : null);
       prevChapterIdRef.current = nextId;
       lastSyncedFromStoreRef.current = nextContent;
       contentRef.current = nextContent;

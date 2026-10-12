@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
+  confirmedIdeaStoryCard,
   applyOrderedIdeaRepairPatches,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
@@ -220,6 +222,22 @@ describe('idea discovery preselection contract', () => {
     expect(repaired[0].unknownTopLevel).toBeUndefined();
   });
 
+  it('repairs the reviewed story field without changing stage allocation or guessing a match', () => {
+    const card = { sourcePremiseId: 'P4', setting: '记忆受损会持续累积。', ending: '她付出记忆代价，带母亲回家。',
+      scopeBreakdown: [{ arc: '第一次用票', chapters: 2, reason: '她确认代价是有人忘记她一天。', outcome: '弟弟退烧。' }] };
+    const patch = { storyPatches: [{ field: 'scopeBreakdown', stage: 1, subfield: 'reason',
+      match: '确认代价', replacement: '起初误以为代价' }] };
+    const result = applyOrderedIdeaRepairPatches([card], [patch], [], [], [0])[0];
+    expect(result.scopeBreakdown).toEqual([{ ...card.scopeBreakdown[0], reason: '她起初误以为代价是有人忘记她一天。' }]);
+    expect(card.scopeBreakdown[0].reason).toBe('她确认代价是有人忘记她一天。');
+    expect(result.sourcePremiseId).toBe('P4'); expect(result.ending).toBe(card.ending);
+    expect(() => applyOrderedIdeaRepairPatches([card], [patch])).toThrow('未获得内容审查授权');
+    expect(() => applyOrderedIdeaRepairPatches([card], [{ storyPatches: [{ ...patch.storyPatches[0], subfield: 'chapters' }] }], [], [], [0])).toThrow('reason/outcome');
+    expect(() => applyOrderedIdeaRepairPatches([card], [{ storyPatches: [{ field: 'ending', match: '不存在的原文', replacement: '改后' }] }], [], [], [0])).toThrow('未唯一定位');
+    const repeated = { ...card, ending: '代价与代价' };
+    expect(() => applyOrderedIdeaRepairPatches([repeated], [{ storyPatches: [{ field: 'ending', match: '代价', replacement: '记忆' }] }], [], [], [0])).toThrow('未唯一定位');
+  });
+
   it('requires one ordered patch per failed card but never requires a premise id in the patch itself', () => {
     const cards = [
       { sourcePremiseId: 'P11', hook: '旧钩子一' },
@@ -290,5 +308,58 @@ describe('server-owned selected-premise evidence', () => {
       premiseId: 'P-repair-evidence',
       activeChoice: premise.activeChoice,
     }));
+  });
+});
+describe('premise execution prerequisites', () => {
+  it.each([
+    { pool: [], selectedPremises: [], blocked: true, missingRequiredDimensions: ['基调', '文风', '流派', '视角'], message: '按 GEN-001 缺失必填维度，必须阻断' },
+    { pool: [], selectedPremises: [], status: 'blocked', code: 'GEN-001', missingDimensions: ['基调'], message: '需补齐后才能进行题材筛选' },
+    { pool: [], selectedPremises: [], blocked: true, reason: '不得用隐藏默认值补齐' },
+  ])('preserves the model prerequisite refusal rather than reporting weak premises', payload => {
+    expect(() => normalizePremiseSelectionPayload(payload, 5, 15)).toThrow('执行前提阻断');
+    expect(() => normalizePremiseSelectionPayload(payload, 5, 15)).toThrow(payload.message || payload.reason!);
+    expect(() => normalizePremiseSelectionPayload(payload, 5, 15)).not.toThrow('有效轻量题材胚子');
+  });
+
+  it('distinguishes unconfirmed discovery choices from incomplete project execution in the injected rule', () => {
+    standardDirectiveCache.rebuild();
+    const rule = standardDirectiveCache.rulesFor('idea_generate').find(item => item.id === 'GEN-001')!;
+    expect(rule).toBeDefined();
+    expect(rule.summary).toContain('不因此拒绝题材预选');
+    expect(rule.summary).toContain('完整故事卡必须展示最终六维供用户确认');
+    expect(rule.summary).toContain('创建项目及后续生成必须六维完整');
+  });
+});
+
+describe('category diversity before story-card creation', () => {
+  const payload = (categories: string[]) => {
+    const pool = categories.map((storyCategory, i) => ({ premiseId: `P${i + 1}`, workingTitle: `题材${i + 1}`, storyCore: '人物有独立目标和对手，选择带来真实后果。', storyCategory }));
+    return { pool, selectedPremises: pool.map(item => ({ ...selectedPremise(item.premiseId), storyCategory: item.storyCategory })) };
+  };
+  it('retains each selected premise category across a mixed-category batch', () => {
+    const value = normalizePremiseSelectionPayload(payload(['悬疑惊悚', '现实生活', '古代言情']), 3, 9, ['悬疑惊悚', '现实生活', '古代言情']);
+    expect(value.selected.map(x => x.storyCategory)).toEqual(['悬疑惊悚', '现实生活', '古代言情']);
+  });
+  it('rejects a batch collapsed into one category when several were explicitly offered', () => {
+    expect(() => normalizePremiseSelectionPayload(payload(['悬疑惊悚', '悬疑惊悚']), 2, 6, ['悬疑惊悚', '现实生活'])).toThrow('全部落在同一分类');
+  });
+  it('rejects a fabricated category and relabeling a selected premise', () => {
+    expect(() => normalizePremiseSelectionPayload(payload(['不存在的分类', '现实生活']), 2, 6, ['悬疑惊悚', '现实生活'])).toThrow('不在本次平台分类候选');
+    const changed = payload(['悬疑惊悚', '现实生活']); changed.selectedPremises[0].storyCategory = '现实生活';
+    expect(() => normalizePremiseSelectionPayload(changed, 2, 6, ['悬疑惊悚', '现实生活'])).toThrow('禁止改分类标签');
+  });
+  it('allows within-category exploration when the author fixed the category', () => {
+    expect(normalizePremiseSelectionPayload(payload(['悬疑惊悚', '悬疑惊悚']), 2, 6, ['悬疑惊悚']).selected).toHaveLength(2);
+  });
+});
+
+describe('confirmed idea story-card projection', () => {
+  it('does not manufacture ending or scene outcomes from synopsis and stage labels', () => {
+    const card = confirmedIdeaStoryCard({ description: '她必须在更多人出事前查清真相', coreConflict: '查清旧案', scopeBreakdown: [{ arc: '调查', reason: '找到线索' }] });
+    expect(card.ending).toBeUndefined(); expect(card.scenes[0].outcome).toBeUndefined();
+  });
+  it('inherits only explicitly confirmed closure and state changes', () => {
+    const card = confirmedIdeaStoryCard({ ending: '她提交证据，承认沉默的责任，与母亲断联', scopeBreakdown: [{ arc: '公开作证', reason: '同学施压要求撤回', outcome: '材料交付，主角承担公开作证的代价' }] });
+    expect(card.ending).toContain('承认沉默的责任'); expect(card.scenes[0].outcome).toBe('材料交付，主角承担公开作证的代价');
   });
 });

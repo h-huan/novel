@@ -13,7 +13,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PromptRegistryService } from './prompt-registry.service';
 import { RealLLMService } from './real-llm.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
-import { gateFailureLabel, isGateRejection, type GateFailureReport } from '../modules/writing-quality/gate-failure';
+import { gateFailureLabel, isGateRejection, GateRejectionError, classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
+import { describeChapterResponsibilityPlan } from '../../shared/src/chapter-responsibility-review';
+import { jsonrepair } from 'jsonrepair';
 import { standardScene } from '../routing/scenario-taxonomy';
 import {
   PromptChain,
@@ -121,7 +123,10 @@ export class ChainEngineService {
             recoverable: false,
           });
 
-          if (chain.config.strictMode) {
+          // Quality-rejected dependencies are unusable even in a chain that
+          // permits ordinary optional-node failures. Preserve the upstream
+          // report and stop before downstream generation invents a substitute.
+          if (chain.config.strictMode || nodeResult.gateReport) {
             overallState = 'failed';
             break;
           }
@@ -344,6 +349,10 @@ export class ChainEngineService {
     // 调用 LLM
     const response = await this.llm.generate({
       prompt,
+      planningResponsibilityPreflight: chain.id === 'long-novel-flexible-outline' && node.id === 'node_1_analysis',
+      planningSources: chain.id === 'long-novel-flexible-outline' && node.id !== 'node_1_analysis'
+        ? JSON.parse(JSON.stringify({ analysis: context.nodeOutputs.node_1_analysis,
+          ...(node.id === 'node_3_chapters' ? { volumes: context.nodeOutputs.node_2_volumes } : {}) })) : undefined,
       temperature: this.calculateTemperature(node.modelConfig.temperature),
       timeout: node.timeout * 1000,
       scenario: node.chainId || chain.id,
@@ -369,13 +378,25 @@ export class ChainEngineService {
     // 尝试解析 JSON。解析失败必须留下可诊断证据（长度/首尾片段/finishReason），
     // 否则调用方只会看到"缺少某字段"，真实故障（截断/非法 JSON/字段名不符）被掩盖。
     const parsedOutput = this.tryParseJSON(response.content);
-    if (typeof parsedOutput !== 'object' || parsedOutput === null) {
+    if (typeof parsedOutput !== 'object' || parsedOutput === null
+      || (['long-novel-flexible-outline', 'long-novel-init-foundation'].includes(chain.id) && Array.isArray(parsedOutput))) {
       const raw = typeof response.content === 'string' ? response.content : String(response.content);
       this.logger.error(
         `[${chain.id}/${node.id}] LLM 输出不是合法 JSON：contentLength=${raw.length}, `
         + `finishReason=${response.finishReason ?? 'unknown'}, `
         + `head=${JSON.stringify(raw.slice(0, 300))}, tail=${JSON.stringify(raw.slice(-300))}`,
       );
+      if (['long-novel-flexible-outline', 'long-novel-init-foundation'].includes(chain.id)) {
+        throw new GateRejectionError(classifyGateFailure({ evaluationStatus: 'not_evaluated', topic: 'quality_gate', gateStatus: 'not_evaluated',
+          buckets: { review_incomplete: [`上游节点${node.id}未返回合法JSON对象，禁止将原文当作已完成结构继续下游`] } }), raw);
+      }
+    }
+    if (node.chainId === 'long-novel-flexible-outline' && node.id === 'node_1_analysis') {
+      const issues = describeChapterResponsibilityPlan(parsedOutput, context.variables['user_input'] && (context.variables['user_input'] as any).chapterLimit);
+      if (issues.length) throw new GateRejectionError(classifyGateFailure({
+        evaluationStatus: 'evaluated', topic: 'quality_gate', gateStatus: 'blocked',
+        buckets: { outline_alignment: issues.map(issue => 'ARCH-005上游章节职责：' + issue) },
+      }), response.content);
     }
     return { output: parsedOutput, ...(response.runId ? { runId: response.runId } : {}) };
   }
@@ -707,7 +728,21 @@ ${fullText}`;
       try {
         return JSON.parse(jsonMatch[0]);
       } catch {
-        // JSON 解析失败，返回原文
+        // Only recover missing escapes on existing quotes. No fields, values,
+        // delimiters or truncated strings may be supplied by a repair library.
+        try {
+          const original = jsonMatch[0];
+          const repaired = jsonrepair(original);
+          let index = 0;
+          for (let cursor = 0; cursor < repaired.length; cursor++) {
+            if (repaired[cursor] === original[index]) index++;
+            else if (!(repaired[cursor] === '\\' && original[index] === '"' && repaired[cursor + 1] === '"')) throw new Error('非引号转义修复');
+          }
+          if (index !== original.length) throw new Error('修复改变原文');
+          const value = JSON.parse(repaired);
+          this.logger.warn('结构化输出仅补齐字符串中既有引号的转义，未改动原文字符、字段或数值');
+          return value;
+        } catch { /* Keep malformed output for diagnostics and stop fixed production chains. */ }
       }
     }
     return text;

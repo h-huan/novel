@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { standardScene } from '../../routing/scenario-taxonomy';
 import {
   SYSTEM_WORKFLOW_RULESET_VERSION,
+  SYSTEM_WORKFLOW_PROMPT_RULE_SCOPE_BY_STEP,
   activeSystemWorkflowRules,
 } from './system-workflow-rules.registry';
 import type { SystemWorkflowRule } from './system-workflow-rule.types';
@@ -36,7 +37,11 @@ class StandardDirectiveCacheClass {
 
   private rulesFor(scenario?: string | null, stepKey?: string | null): SystemWorkflowRule[] {
     const scene = standardScene(scenario, stepKey);
+    const roots=stepKey?SYSTEM_WORKFLOW_PROMPT_RULE_SCOPE_BY_STEP[stepKey]:undefined;
+    const scopedIds=new Set(roots);
+    if(roots){const add=(id:string)=>{for(const dep of this.rules.find(rule=>rule.id===id)?.dependencies||[]){if(!scopedIds.has(dep)){scopedIds.add(dep);add(dep);}}};for(const root of roots)add(root);}
     return this.rules.filter((rule) =>
+      (!roots||scopedIds.has(rule.id)) &&
       rule.status === 'active'
       && rule.consumers.includes('prompt')
       && (rule.scenarios.includes('*') || rule.scenarios.includes(scene)),

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { DatabaseService } from '../../database/database.service';
 import { GeneratedCanonGuardService } from '../generation-metrics/generated-canon-guard.service';
 import { ChapterService, type ChapterResponse } from './chapter.service';
@@ -28,7 +29,7 @@ export class GeneratedChapterCommitService {
 
     const db = this.database.getDb();
     const chapter = db.prepare(`
-      SELECT id, project_id, chapter_index, status
+      SELECT id, project_id, chapter_index, status, outline_id
       FROM chapters
       WHERE id=? AND project_id=?
     `).get(chapterId, projectId) as {
@@ -36,6 +37,7 @@ export class GeneratedChapterCommitService {
       project_id: string;
       chapter_index: number;
       status: string;
+      outline_id?: string;
     } | undefined;
 
     if (!chapter) throw new NotFoundException(`Chapter ${chapterId} not found in project ${projectId}`);
@@ -69,6 +71,11 @@ export class GeneratedChapterCommitService {
 
     // ChapterService 是唯一章节持久化实现：版本快照、原创检测、派生同步均从这里执行。
     // 不把 runId/content 来源重新暴露给通用 PUT，避免形成第二条 AI 写路径。
+    const outline = chapter.outline_id ? db.prepare('SELECT * FROM outlines WHERE id=? AND project_id=?')
+      .get(chapter.outline_id, projectId) : null;
+    if (outline) return this.chapters.update(chapterId, { content: canonicalContent }, {
+      runId: run.id, outlineFingerprint: createHash('sha256').update(JSON.stringify(outline)).digest('hex'),
+    });
     return this.chapters.update(chapterId, { content: canonicalContent });
   }
 }

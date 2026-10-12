@@ -1,3 +1,7 @@
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
+import { getPlatform, targetForLength, measureAgainstTarget } from './platform-benchmarks';
+import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
+import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ChainController,
@@ -13,6 +17,7 @@ import {
   ideaSemanticSimilarity,
   parseChapterResponsibilityIssue,
   applyAuditedResponsibilityFixes,
+  resolveExplicitCharacterDemographics,
   partitionAlignmentFindings,
   alignmentFindingSeverity,
 } from './chain.controller';
@@ -37,7 +42,7 @@ const STANDARD_PROJECT_ROW = {
     creativeConstitution: {
       schemaVersion: 1, revision: 1, projectType: 'short_story',
       ...STANDARD_PRECONDITIONS,
-      targetWords: 20000, platformRules: {}, chapterWordRange: { ...CHAPTER_WORD_RANGE },
+      targetWords: 20000, platformRules: targetForLength(getPlatform(STANDARD_PRECONDITIONS.targetPlatform), 'short_story'), chapterWordRange: { ...CHAPTER_WORD_RANGE },
     },
   }),
 };
@@ -74,6 +79,23 @@ function applyStandardsStub(controller: any) {
 }
 
 describe('idea discovery execution settings', () => {
+  it('uses the confirmed story when a framework request omits a new setting, while preserving an explicit request', async () => {
+    const controller = applyStandardsStub(Object.create(ChainController.prototype)) as any;
+    const settings = JSON.parse(STANDARD_PROJECT_ROW.settings);
+    settings.creativeConstitution.confirmedStory = { title: '已确认题材', coreConflict: '保住订单并救人' };
+    controller.db = { getDb: () => standardsDbStub({ ...STANDARD_PROJECT_ROW, settings: JSON.stringify(settings) }) };
+    controller.workflowGuard = { assertCanGenerateOutline: vi.fn() };
+    controller.chainTemplate = { executeChain: vi.fn().mockResolvedValue({ outputs: { node_3_chapters: { volumes: [{ volumeNumber: 1, chapters: [{}] }] } } }) };
+    controller.assertOutlineCandidateFacts = vi.fn().mockResolvedValue(undefined);
+    await controller.generateOutline({ projectId: 'fixture' });
+    expect(controller.chainTemplate.executeChain.mock.calls[0][1].story_setting).toContain('保住订单并救人');
+    await controller.generateOutline({ projectId: 'fixture', storySetting: '作者补充的候选设定' });
+    expect(controller.chainTemplate.executeChain.mock.calls[1][1].story_setting).toBe('作者补充的候选设定');
+    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledTimes(2);
+    expect(controller.assertOutlineCandidateFacts.mock.calls[0][4][0].chapterNumber).toBe(1);
+    controller.assertOutlineCandidateFacts.mockRejectedValueOnce(new Error('已举证的上游框架矛盾'));
+    await expect(controller.generateOutline({ projectId: 'fixture' })).rejects.toThrow('已举证的上游框架矛盾');
+  });
   it('rejects a long idea submitted as a short project before writing a project row', async () => {
     const controller = Object.create(ChainController.prototype) as any;
     const getDb = vi.fn();
@@ -194,6 +216,26 @@ describe('idea novelty and audited repair compilers', () => {
 });
 
 describe('structured generation quality retry', () => {
+  it('keeps the latest root field failure without parsing nested fragments or claiming recovery', async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ content: JSON.stringify({ title: '第1章', content: '', scenes: [{ location: '食堂' }] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ title: '第1章', content: '接收食堂', scenes: [{ location: '食堂' }] }) });
+    const controller = Object.create(ChainController.prototype) as any;
+    controller.realLLM = { generate };
+    controller.logger = { warn: vi.fn(), error: vi.fn() };
+    const describeValidation = (value: any) => !value?.content ? ['缺少content事件链'] : ['scenes[0]缺少outcome'];
+    const result = await controller.llmCallWithRetry('第1章详细大纲', '只输出JSON', {
+      scenario: 'outline', validate: () => false, describeValidation,
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.data).toBeNull();
+    expect(result.validationIssues).toEqual(['scenes[0]缺少outcome']);
+    expect(result.warnings.join('；')).not.toMatch(/逐行解析恢复|无法解析|缺少title/);
+    expect(result.warnings.join('；')).toContain('缺少content事件链');
+    expect(generate.mock.calls[1][0].prompt).toContain('缺少content事件链');
+    expect(generate.mock.calls[1][0].prompt).toContain('JSON语法有效');
+  });
+
   it('skips the prose quality Gate for schema-validated JSON by default', async () => {
     const generate = vi.fn().mockResolvedValue({ content: '{"title":"第一章"}' });
     const controller = Object.create(ChainController.prototype) as any;
@@ -475,6 +517,35 @@ describe('alignment finding partition', () => {
     expect(partition.advisories).toHaveLength(1);
   });
 
+  it('keeps explicitly denied advisory conflicts while preserving affirmative and declared conflicts', () => {
+    const allowed='角色全名属可接受的合理细节，未与角色卡冲突。';
+    const aligned='世界观与大纲没有矛盾，均支持当前行为。';
+    const trueConflict='姓名没有冲突；但倒计时三天与两天不一致。';
+    const result=partitionAlignmentFindings([],outline,[allowed,aligned,trueConflict]);
+    expect(result.advisories).toEqual([allowed,aligned]);
+    expect(result.sourceConflicts).toEqual([]);
+    expect(result.blocking).toEqual([trueConflict]);
+    expect(partitionAlignmentFindings([allowed],outline).blocking).toEqual([allowed]);
+  });
+  it('keeps an explicit no-boundary-violation advisory without hiding another real conflict', () => {
+    const allowed='“锅炉房”在正文出现但未列入本章场景范围，属报馆内部空间，不构成越界。';
+    expect(partitionAlignmentFindings([], '报馆排字房', [allowed])).toMatchObject({ blocking: [], advisories: [allowed] });
+    const mixed=allowed+'但日期与大纲冲突，正文为明天，大纲为三天后。';
+    expect(partitionAlignmentFindings([], '报馆排字房', [mixed]).blocking).toEqual([mixed]);
+    expect(partitionAlignmentFindings([allowed], '报馆排字房').blocking).toEqual([allowed]);
+  });
+
+  it('keeps a denied factual exclusion advisory while preserving actual and declared conflicts', () => {
+    const allowed='“昨天说好今天一早送药钱来”与后文“九点前后，约好一早的药钱还没送来”属于同一次约期的先后叙述，语义上是在强调失约，不构成事实互斥；若后续要写死约点，可在下章用一句“约的是七点”钉死。';
+    expect(partitionAlignmentFindings([], outline, [allowed])).toMatchObject({ blocking: [], advisories: [allowed] });
+    for (const denied of ['并不构成事实冲突', '不存在事实互斥', '没有事实矛盾']) {
+      expect(partitionAlignmentFindings([], outline, [denied]).blocking).toEqual([]);
+    }
+    const mixed=allowed+'但正文的三天与章纲的两天倒计时不一致。';
+    expect(partitionAlignmentFindings([], outline, [mixed]).blocking).toEqual([mixed]);
+    expect(partitionAlignmentFindings([allowed], outline).blocking).toEqual([allowed]);
+  });
+
   it('keeps a reviewer contradiction blocking even when it describes repeated wording', () => {
     const partition = partitionAlignmentFindings([
       '第2、3段短距离重复同一句身体反应描写，措辞重复且句式重复',
@@ -682,8 +753,9 @@ describe('chapter responsibility semantic repair', () => {
     const repairPrompt = controller.llmCallWithRetry.mock.calls[0][1];
     expect(repairPrompt).toContain('CR-6');
     expect(repairPrompt).toContain('CR-7');
-    expect(repairPrompt).toContain('修订边界：每章只承担一个独有推进任务');
-    expect(repairPrompt).toContain('判定纪律：只按上列判据');
+    expect(repairPrompt).toContain('每章只承担独有推进任务');
+    expect(repairPrompt).toContain('授权与章节边界按CR-1～CR-7及已确认世界规则判定');
+    expect(repairPrompt).toContain('必要行动结果按QLT-003同源因果账目判定');
     for (const bookSpecific of ['看房', '签约', '失踪登记', '亲属关系证明', '替身', '影子', '门禁', '法律物证']) {
       expect(repairPrompt).not.toContain(bookSpecific);
     }
@@ -862,8 +934,37 @@ describe('generated SQLite text boundary', () => {
     expect(serializeGeneratedSqlText('', '未设定')).toBe('未设定');
   });
 });
+describe('immediate chapter evidence at production boundaries', () => {
+  it('keeps unknown demographics instead of borrowing another person’s pronouns or age', () => {
+    expect(resolveExplicitCharacterDemographics({basicInfo:'年龄：unavailable；身份：旅馆住户',backstory:'她的父亲七十岁，先生来找他。'})).toEqual({age:null,gender:null});
+    expect(resolveExplicitCharacterDemographics({basicInfo:'年龄：24；性别：女；身份：工程师',backstory:'父亲七十岁。'})).toEqual({age:24,gender:'女'});
+    expect(resolveExplicitCharacterDemographics({age:1200,gender:'男',basicInfo:'性别：女'})).toEqual({age:1200,gender:'男'});
+    expect(resolveExplicitCharacterDemographics({age:'unknown',gender:'unavailable',basicInfo:'中年人'})).toEqual({age:null,gender:null});
+  });
+  it('loads the full middle facts once without overwriting bounded background or Canon', () => {
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    const content='开头'.repeat(1500)+'她没有取得通行许可。'+'结尾'.repeat(1500);
+    const get=vi.fn().mockReturnValue({id:'prior',chapter_index:1,title:'前章',content});
+    controller.db={getDb:()=>({prepare:vi.fn().mockReturnValue({get})})};
+    const context=controller.previousChapterReviewContext('p',2,'背景'.repeat(10000));
+    const parsed=JSON.parse(context);
+    expect(parsed.previousChapter[0]).toMatchObject({content,complete:true});
+    expect(parsed.storyContext).toHaveLength(14000);
+    expect(controller.previousChapterReviewContext('p',2,context)).toBe(context);
+    expect(get).toHaveBeenCalledWith('p',1);
+    get.mockReturnValue(undefined);
+    const missing=JSON.parse(controller.previousChapterReviewContext('p',2,'背景'));
+    expect(missing.previousChapter).toEqual([]);
+    expect(missing.recentChapters).toEqual([{chapter_index:1}]);
+  });
+});
+
 describe('cross-chapter boundary enforcement', () => {
   const passVerdict = {
+    // These fixtures isolate other gates; source semantics are covered in their own tests.
+    sourceQualityAudit: {version:1,checks:Object.fromEntries(SOURCE_QUALITY_AXES.map(axis=>[axis,{status:'not_applicable',evidence:'',reason:'该隔离测试只验证其他验收分支而不评源头语义'}]))},
+    readerGoals: Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:'unknown',quote:'',reason:'隔离测试没有真实读者证据，不能推定高倾向'}])),
+    causalAudit: { status: 'not_applicable', reason: '该测试短句没有决定性行动与处境变化', transitions: [] },
     pass: true,
     evaluationStatus: 'evaluated',
     requiredEvents: [{ event: '必需事件', covered: true, evidence: '证据' }],
@@ -880,6 +981,105 @@ describe('cross-chapter boundary enforcement', () => {
     evidence: ['证据'],
   };
 
+  it('preserves verified temporal conflicts when another countdown remains unresolved',async()=>{
+ const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);const body='倒计时23:59:58。\n倒计时23:58:00。\n送达下午两点十一分。\n现场时间十八点三十四。\n倒计时23:12:47。';const temporalAudit={status:'evaluated',checks:[{ref:'T1',status:'supported',reason:'首次读数是此计时器的基准',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'baseline',reason:'首次读数按同一计时器建立基准'}]},{ref:'T2',status:'unknown',reason:'该中间读数暂无可绑定钟点',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'unknown',reason:'该中间读数暂无可绑定钟点'}]},...['T3','T4'].map(ref=>({ref,status:'supported',reason:'目录明确提供同日现场钟点',calculations:[]})),{ref:'T5',status:'supported',reason:'后次读数晚于同日现场钟点',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'elapsed',earlierRef:'T1',earlierReadingIndex:0,startClockId:'T3:C1',endClockId:'T4:C1',startRelation:'at_reading',endRelation:'before_reading',elapsedConstraint:'ge',reason:'同一计时器基准与订单送达同刻，后次读数晚于现场钟点'}]}]};
+ controller.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify({...passVerdict,missingRequiredItems:["已确认的身份事件仍未完成"]})}).mockResolvedValue({content:JSON.stringify({temporalAudit})})};const result=await controller.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'图',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文',content:body});expect(result.evaluationStatus).toBe('not_evaluated');expect(result.pass).toBe(false);expect(result.contradictions.join('')).toContain('2831秒');expect(result.missing.join('')).toContain('尚未验证');expect(result.missing).toContain('已确认的身份事件仍未完成');
+ });
+  it('uses an independent small continuity report and blocks a false aggregate PASS', async () => {
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any),base=standardsDbStub();
+    const prior='他们初次在一楼大堂见面。',body='昨夜他在302室第一次见到那个人。';
+    controller.db={getDb:()=>({prepare:(sql:string)=>sql.includes('FROM chapters')?{get:()=>({id:'prior',chapter_index:1,title:'前章',content:prior})}:base.prepare(sql)})};
+    const verdict={...passVerdict,sourceQualityAudit:{version:1,checks:{...passVerdict.sourceQualityAudit.checks,continuity:{status:'supported',evidence:body,basisSource:'context',basisEvidence:prior,reason:'初次相见的动作相同却忽略了具体地点'}}}};
+    controller.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify(verdict)}).mockResolvedValueOnce({content:JSON.stringify({claimChecks:[{ref:'C1',status:'conflict',basisEvidence:prior,reason:'首次相见的房间与已确认前章大堂地点冲突'}]})})};
+    const result=await controller.checkChapterAlignment({projectId:'p',chapterIndex:2,chapterTitle:'次章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'背景',content:body});
+    expect(result.pass).toBe(false);expect(result.continuityPassed).toBe(false);
+    expect(result.contradictions.join('')).toContain('前序声称·C1');
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(2);
+    expect(controller.realLLM.generate.mock.calls[1][0].metrics.stepKey).toBe('alignment_continuity_review');
+    expect(controller.realLLM.generate.mock.calls[0][0].prompt).toContain(prior);
+    expect(controller.realLLM.generate.mock.calls[1][0].prompt).toContain('此专项只返回一个合法JSON对象');
+  });
+
+  it('never turns unresolved countdown continuity into an overall pass after one boundary correction',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);const body='倒计时23:59:58。\n倒计时23:12:47。';
+    const temporalAudit={status:'evaluated',checks:[{ref:'T1',status:'supported',reason:'首次读数确认为同一倒计时的开始',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'baseline',reason:'首次读数作为同一计时器基准'}]},{ref:'T2',status:'unknown',reason:'缺少起止钟表，不能声称完整时间核对通过',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'unknown',reason:'没有实际经过时长，不能推定该读数成立'}]}]};
+    controller.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify(passVerdict)}).mockResolvedValue({content:JSON.stringify({temporalAudit})})};
+    const result=await controller.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'图',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文',content:body});expect(result.pass).toBe(false);expect(result.evaluationStatus).toBe('not_evaluated');expect(result.missing.join('')).toContain('尚未验证');expect(controller.realLLM.generate).toHaveBeenCalledTimes(3);
+  });
+
+  it('preserves readable categorized reviewer advice without promoting it to a defect',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,advisories:[{kind:'language_heuristic',summary:'三张截图内容各异，列举承担证据核对用途，不是重复动作。'}]})})};
+    const result=await controller.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'图',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文',content:'他截了三张不同的截图。'});
+    expect(result.pass).toBe(true);expect(result.advisories).toContain('三张截图内容各异，列举承担证据核对用途，不是重复动作。');expect(result.advisories).not.toContain('[object Object]');
+  });
+
+  it('treats a normal repeated-prefix list as a semantic risk and retains confirmed language failures',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);controller.logger={warn:vi.fn()};
+    const input={projectId:'p',chapterIndex:1,chapterTitle:'图',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认故事上下文',content:'他截了三张图，一张评价总页，一张倒计时，一张账号信息。'};
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify(passVerdict)})};
+    const clean=await controller.checkChapterAlignment(input);expect(clean.pass).toBe(true);expect(clean.hardlineFindings.some((f:any)=>f.ruleId==='53-same-structure-parallel')).toBe(false);
+    expect(controller.realLLM.generate.mock.calls[0][0].prompt).toContain('形态风险定位（不是已确认缺陷）');
+    controller.realLLM.generate.mockResolvedValue({content:JSON.stringify({...passVerdict,prosePassed:false,contradictions:[{kind:'language',summary:'连续重复同一场景动作，没有推进，原文已逐段核对。'}]})});
+    expect((await controller.checkChapterAlignment(input)).pass).toBe(false);
+  });
+
+  it('corrects only reader citations once and keeps real language failures',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    controller.logger={warn:vi.fn()};
+    const content='陆沉把截图发进去，只问一句：谁见过这种。';
+    const verdict={...passVerdict,prosePassed:false,contradictions:[{kind:'language',summary:'同一段动作被连续重复，缺少推进。'}],readerGoals:{...passVerdict.readerGoals,sharing:{status:'weak',quote:'他把截图发进骑手群，只问一句：谁见过这种。',reason:'这个差异尚不能支持强传播倾向，需要保留原判断'}}};
+    controller.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify(verdict)}).mockResolvedValueOnce({content:JSON.stringify({repairs:[{key:'sharing',anchorId:'body:p1',status:'supported'}]})})};
+    const result=await controller.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'门',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认故事上下文。',content});
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(2);
+    expect(result.evaluationStatus).toBe('evaluated');expect(result.pass).toBe(false);
+    expect(result.readerGoals.sharing.status).toBe('weak');
+    expect(result.contradictions.join('；')).toContain('连续重复');
+  });
+
+  it('fails closed on omitted source coverage and blocks grounded gaps even with pass=true',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,sourceQualityAudit:undefined})})};
+    const input={projectId:'p',chapterIndex:1,chapterTitle:'门',outlineContract:'有效详细大纲'.repeat(30),storyContext:'只有城主能允许放行。',content:'学徒命令守卫，守卫开门。'};
+    const omitted=await controller.checkChapterAlignment(input);
+    expect(omitted.pass).toBe(false);expect(omitted.evaluationStatus).toBe('not_evaluated');
+    const audit={...passVerdict.sourceQualityAudit,checks:{...passVerdict.sourceQualityAudit.checks,agency:{status:'gap',evidence:input.content,basisSource:'context',basisEvidence:input.storyContext,reason:'学徒没有命令权限，放行缺少有效授权或守卫选择依据'}}};
+    controller.realLLM.generate.mockResolvedValue({content:JSON.stringify({...passVerdict,sourceQualityAudit:audit,overallScore:99})});
+    const gap=await controller.checkChapterAlignment(input);
+    expect(gap.evaluationStatus).toBe('evaluated');expect(gap.pass).toBe(false);expect(gap.contradictions.join('')).toContain('源头核对·agency');
+    expect(gap.readerGoals.sharing.status).toBe('unknown');
+  });
+
+  it('blocks a cited causal gap even when the reviewer calls it a wording advisory', async () => {
+    const controller = applyStandardsStub(Object.create(ChainController.prototype) as any);
+    controller.realLLM = { generate: vi.fn().mockResolvedValue({ content: JSON.stringify({
+      ...passVerdict,
+      advisories: ['发行版次表述含糊'],
+      causalAudit: { status: 'evaluated', reason: '救人结果依赖未呈现的传播条件', transitions: [{
+        actionEvidence: '她改掉了指控。', resultEvidence: '他暂缓执行。', basisSource: 'body', bridgeEvidence: '',
+        status: 'gap', reason: '正文只有副刊发行，没有指控质疑版出街的条件。',
+      }] },
+    }) }) };
+    const result = await controller.checkChapterAlignment({ projectId:'p1', chapterIndex:1, chapterTitle:'首章',
+      outlineContract:'有效详细大纲'.repeat(30), storyContext:'质疑版计划发行', content:'她改掉了指控。副刊已经出街。他暂缓执行。' });
+    expect(result.evaluationStatus).toBe('evaluated');
+    expect(result.pass).toBe(false);
+    expect(result.contradictions.join('')).toContain('没有指控质疑版出街');
+  });
+
+  it('does not accept a planned causal bridge as an enacted condition', async () => {
+    const controller = applyStandardsStub(Object.create(ChainController.prototype) as any);
+    controller.realLLM = { generate: vi.fn().mockResolvedValue({ content: JSON.stringify({
+      ...passVerdict, causalAudit: { status:'evaluated', reason:'本章有暂缓执行这一重要结果', transitions:[{
+        actionEvidence:'她改掉了指控。', resultEvidence:'他暂缓执行。', basisSource:'chapter_plan',
+        bridgeEvidence:'质疑版计划发行', status:'supported', reason:'引用计划但正文没有呈现发行条件。',
+      }] },
+    }) }) };
+    const result = await controller.checkChapterAlignment({ projectId:'p1', chapterIndex:1, chapterTitle:'首章',
+      outlineContract:'有效详细大纲'.repeat(30), storyContext:'质疑版计划发行', content:'她改掉了指控。他暂缓执行。' });
+    expect(result.pass).toBe(false);
+    expect(result.evaluationStatus).toBe('not_evaluated');
+  });
+
   it.each([undefined,false])('不以大纲通过覆盖缺失或失败的语言验收：%s',async prosePassed=>{
     const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
     controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,prosePassed})})};
@@ -888,6 +1088,40 @@ describe('cross-chapter boundary enforcement', () => {
     expect(report.missing.join('')).toContain('语言验收');
   });
 
+  it('corrects malformed full reports once with the same draft and never accepts an internal fragment',async()=>{
+    const c=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    c.realLLM={generate:vi.fn().mockResolvedValueOnce({content:'{"pass":false,"checks":{"voice":{"status":"supported"},{"status":"supported"}}}'})
+      .mockResolvedValue({content:JSON.stringify(passVerdict)})};
+    const input={projectId:'p',chapterIndex:1,chapterTitle:'门',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已经确认的前章上下文',content:'她留下了清样。'};
+    const report=await c.checkChapterAlignment(input);
+    expect(report.evaluationStatus).toBe('evaluated');
+    expect(c.realLLM.generate).toHaveBeenCalledTimes(2);
+    const correction=c.realLLM.generate.mock.calls[1][0];expect(correction.metrics.stepKey).toBe('alignment_review_contract');
+    expect(correction.prompt).toContain(input.content);expect(correction.prompt).toContain(input.outlineContract);expect(correction.prompt).toContain('完整JSON语法无效');
+  });
+  it('stops after one unsuccessful protocol correction and keeps the draft unmodified',async()=>{
+    const c=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    c.realLLM={generate:vi.fn().mockResolvedValue({content:'{"status":"supported"}'})};
+    const input={projectId:'p',chapterIndex:1,chapterTitle:'门',outlineContract:'有效详细大纲'.repeat(30),storyContext:'确认上下文',content:'她留下了清样。'};
+    const result=await c.checkChapterAlignment(input);expect(result.evaluationStatus).toBe('not_evaluated');expect(result.pass).toBe(false);
+    expect(c.realLLM.generate).toHaveBeenCalledTimes(2);expect(input.content).toBe('她留下了清样。');
+  });
+  it('requests only missing report paths and preserves the original failed prose decision',async()=>{
+    const c=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    const original:any={...passVerdict,pass:false,prosePassed:false};delete original.readerGoals;
+    c.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify(original)}).mockImplementation(async(request:any)=>{
+      expect(request.prompt).toContain('不要重发完整报告');expect(request.prompt).toContain('["readerGoals"]');
+      return {content:JSON.stringify({corrections:[{path:'readerGoals',value:passVerdict.readerGoals}]})};
+    })};
+    const report=await c.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'门',outlineContract:'有效详细大纲'.repeat(30),storyContext:'确认上下文',content:'她留下了清样。'});
+    expect(report.pass).toBe(false);expect(report.prosePassed).toBe(false);expect(c.realLLM.generate).toHaveBeenCalledTimes(2);
+  });
+  it('stops ambiguous duplicate report fields instead of regenerating away blocking findings',async()=>{
+    const c=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    c.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,sourceQualityAudit:{...passVerdict.sourceQualityAudit,readerGoals:{click:{status:'supported'}}}})})};
+    const report=await c.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'门',outlineContract:'有效详细大纲'.repeat(30),storyContext:'确认上下文',content:'她留下了清样。'});
+    expect(report.pass).toBe(false);expect(report.evaluationStatus).toBe('not_evaluated');expect(c.realLLM.generate).toHaveBeenCalledTimes(1);
+  });
   it('审查入口使用注入的语言标准，不限制为旧的两项AI检查',async()=>{
     const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
     controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify(passVerdict)})};
@@ -895,14 +1129,80 @@ describe('cross-chapter boundary enforcement', () => {
     const prompt=controller.realLLM.generate.mock.calls[0][0].prompt;
     expect(prompt).toContain('按已注入的质量评审执行标准完成章节事件、事实、执行维度与语言验收');
     expect(prompt).not.toContain('只补判确定性扫描覆盖不到的两项');
+    expect(prompt).toContain('仍检查前文接力、非数值事件先后与世界规则');
+  });
+
+  it('blocks a temporal conflict even when the model aggregate passes, and rejects omitted checks',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    const content='船在九点离港。\n十点靠岸。\n他声称航行了四个小时。';
+    const temporalAudit={status:'evaluated',checks:[
+      {ref:'T1',status:'supported',reason:'离港时点明确，须与同次靠岸记录核对。'},
+      {ref:'T2',status:'supported',reason:'靠岸时点明确，同一天航行间隔一小时。'},
+      {ref:'T3',status:'conflict',calculations:[{quantityIndex:0,sameEndpoints:false,reason:'该测试只验证时间结论入闸，计算另有独立测试。'}],comparisonEvidence:'船在九点离港。\n十点靠岸。',reason:'同一次航行九点至十点仅一小时，与四小时精确声明矛盾。'}
+    ]};
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,temporalAudit})})};
+    const input={projectId:'p',chapterIndex:1,chapterTitle:'渡海',outlineContract:'有效详细大纲'.repeat(30),storyContext:'',content};
+    const report=await controller.checkChapterAlignment(input);
+    expect(report.pass).toBe(false);expect(report.timelinePassed).toBe(false);
+    expect(report.contradictions.join('')).toContain('一小时');
+    temporalAudit.checks.pop();
+    controller.realLLM.generate.mockResolvedValue({content:JSON.stringify({...passVerdict,temporalAudit})});
+    const incomplete=await controller.checkChapterAlignment(input);
+    expect(incomplete.evaluationStatus).toBe('not_evaluated');expect(incomplete.missing.join('')).toContain('漏项');
+  });
+
+  it('uses one temporal decision source while preserving typed non-time issues',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    const content='航行不到三个小时。';
+    const temporalAudit={status:'evaluated',checks:[{ref:'T1',status:'unknown',reason:'缺少具体靠岸时点，不能把更紧上界判为互斥。',calculations:[{quantityIndex:0,sameEndpoints:false,reason:'缺少当前叙述时刻，保留未知不猜结束时钟。'}]}]};
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,temporalAudit,contradictions:[{kind:'story',summary:'人物名单与确认资料不符。'}]})})};
+    const input={projectId:'p',chapterIndex:1,chapterTitle:'渡海',outlineContract:'有效详细大纲'.repeat(30),storyContext:'',content};
+    const report=await controller.checkChapterAlignment(input);
+    expect(report.contradictions).toEqual(['人物名单与确认资料不符。']);expect(report.pass).toBe(false);
+  });
+
+  it('rejects unclassified model findings instead of letting a time claim bypass validation',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,contradictions:['两个上界不一致']})})};
+    const report=await controller.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'首章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'',content:'她关上了门。'});
+    expect(report.evaluationStatus).toBe('not_evaluated');expect(report.missing.join('')).toContain('类型');
+  });
+
+  it('does not turn a vague clock wording advisory into a second numeric gate',()=>{
+    const advisory='傍晚与八点的时间段措辞不一致，属非阻断的局部措辞建议。';
+    const result=partitionAlignmentFindings([], '本章合同', [advisory],true);
+    expect(result.blocking).toEqual([]);expect(result.advisories).toContain(advisory);
+    expect(partitionAlignmentFindings([], '本章合同', ['名单姓名不在人物白名单'],true).blocking).toHaveLength(1);
+  });
+
+  it('measures the current candidate and injects the same temporal policy into actual alignment review',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify(passVerdict)})};
+    const content='“别烧。”她拒签。\n\n“把遗体留下。”主任收起单子。';
+    await controller.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'首章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文',content});
+    const prompt=controller.realLLM.generate.mock.calls[0][0].prompt;
+    standardDirectiveCache.rebuild();
+    const effective = prompt + standardDirectiveCache.get('review');
+    expect(effective.split(TEMPORAL_FACT_CONTINUITY_POLICY)).toHaveLength(2);
+    const target=targetForLength(getPlatform(STANDARD_PRECONDITIONS.targetPlatform),'short_story');
+    expect(prompt).toContain(JSON.stringify(measureAgainstTarget(content,target)));
+    expect(effective.split(PLATFORM_MEASUREMENT_REVIEW_POLICY)).toHaveLength(2);
   });
 
   it('语言评审有阻断证据时，即使模型总pass为true仍不能通过',async()=>{
     const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
-    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,prosePassed:false,contradictions:['正文“她抬起他拿着”缺少谓语衔接，无法判明动作主体。']})})};
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,prosePassed:false,contradictions:[{kind:'language',summary:'正文“她抬起他拿着”缺少谓语衔接，无法判明动作主体。'}]})})};
     const report=await controller.checkChapterAlignment({projectId:'any-project',chapterIndex:1,chapterTitle:'首章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文',content:'她抬起他拿着。'});
     expect(report.evaluationStatus).toBe('evaluated');expect(report.pass).toBe(false);expect(report.prosePassed).toBe(false);
     expect(report.contradictions.join('')).toContain('动作主体');
+  });
+  it('keeps author requirements reported as missing eligible for repair while blocking PASS',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify({...passVerdict,prosePassed:false,missingRequiredItems:['作者要求消除“周。慕。”碎句，正文仍未执行。']})})};
+    const report=await controller.checkChapterAlignment({projectId:'any-project',chapterIndex:1,chapterTitle:'首章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'作者明确要求合并碎句',content:'周。慕。'});
+    expect(report.evaluationStatus).toBe('evaluated');
+    expect(report.pass).toBe(false);
+    expect(report.missing.join('')).toContain('未执行');
   });
 
   it('keeps a factual reviewer advisory blocking in the actual alignment gate', async () => {
@@ -1091,11 +1391,14 @@ describe('cross-chapter boundary enforcement', () => {
       projectId: 'p1', basePrompt: '写正文', targetWords: 4000,
       scenario: 'writing_climax', chapterIndex: 1, chapterTitle: '第一章',
       outlineContract: '有效详细大纲'.repeat(30), storyContext: '已确认上下文',
+      subsequentChapterBoundary: '第二章才揭示投料者',
       wordRange: { min: 3000, max: 5000 },
     })).rejects.toThrow();
 
     expect(controller.generateBodyWithLengthGuard).toHaveBeenCalledTimes(1);
     expect(controller.repairOutlineFactsLocally).toHaveBeenCalledWith(expect.objectContaining({issues:['第二次进门后，二楼那户必须变空']}));
+    expect(controller.repairOutlineFactsLocally).toHaveBeenCalledWith(expect.objectContaining({storyContext: expect.stringContaining('已确认上下文')}));
+    expect(controller.repairOutlineFactsLocally).toHaveBeenCalledWith(expect.objectContaining({storyContext: expect.stringContaining('第二章才揭示投料者')}));
     expect(controller.persistAlignmentContradictions).toHaveBeenCalledWith(expect.objectContaining({content:body}));
     expect(controller.repairHardlineFindingsLocally).not.toHaveBeenCalled();
   });
@@ -1168,9 +1471,12 @@ describe('cross-chapter boundary enforcement', () => {
     const after = await controller.repairOutlineFactsLocally({
       projectId: 'p1', chapterIndex: 1, content: before,
       outlineContract: '二楼那户变空', issues: ['二楼那户必须变空'], attempt: 1,
+      storyContext: '作者本次要求：不把未知原因解释为自动获救。人物只知道名单变空。后续章节才揭原因。',
     });
     expect(after).toBe(`${'林野沿墙核对名单。'.repeat(150)}二楼那户已变成空白。`);
     expect(controller.realLLM.generate.mock.calls[0][0].scenario).toBe('refinement');
+    expect(controller.realLLM.generate.mock.calls[0][0].structuredRepairIssueCount).toBe(1);
+    expect(controller.realLLM.generate.mock.calls[0][0].prompt).toContain('作者本次要求：不把未知原因解释为自动获救。人物只知道名单变空。后续章节才揭原因。');
   });
 
   it('batches more than four outline defects instead of skipping local repair', async () => {
@@ -1188,6 +1494,7 @@ describe('cross-chapter boundary enforcement', () => {
     });
     expect(after).toContain('二楼那户已变成空白。');
     const prompt = controller.realLLM.generate.mock.calls[0][0].prompt;
+    expect(controller.realLLM.generate.mock.calls[0][0].structuredRepairIssueCount).toBe(4);
     expect(prompt).toContain('问题四');
     expect(prompt).not.toContain('问题五');
   });
@@ -1248,7 +1555,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1314,8 +1621,11 @@ describe('idea discovery live orchestrator behavior', () => {
       },
     };
 
+    const mixed = failure === 'category_inheritance';
+    const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
+    if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
     const generate = vi.fn()
-      .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: [premiseOne, premiseTwo] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: selectedForBatch }) })
       .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) });
     if (failure === 'card_network') generate.mockRejectedValueOnce(new Error('card connection reset'));
     else if (failure === 'card_shape') generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [] }) });
@@ -1326,11 +1636,30 @@ describe('idea discovery live orchestrator behavior', () => {
     }
     const controller = Object.create(ChainController.prototype) as any;
     controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    controller.reviewPremiseSelection = vi.fn().mockResolvedValue({ passed: true, issues: [] });
     controller.reviewIdeaPresentation = vi.fn(async (cards: any[]) => cards.map((card, index) => ({
       position: index + 1, title: card.title, titleCompelling: true,
       openingCompelling: true, distinctFromBatch: true,
+      storyCoherent: true, payoffCredible: true, platformFit: true,
+      storyEvidence: card.hook, payoffEvidence: card.description, platformEvidence: card.hook,
+      qualityReason: '以实际题材的主动选择、因果和结局证据完成评审。',
       readerQuestion: '这些记录背后的责任人为何主动逼她放弃证据？', issues: [],
     })));
+    if (failure === 'review_protocol') controller.reviewIdeaPresentation.mockRejectedValue(new Error('题材独立审查未完成：platformEvidence引用了执行标准'));
+    if (failure === 'parallel_order') {
+      let releaseFirst!: () => void;
+      const secondStarted = new Promise<void>(resolve => { releaseFirst = resolve; });
+      let cardCalls = 0;
+      controller.realLLM.generate = async (request: any) => {
+        const result = generate(request);
+        if (request.metrics?.stepKey === 'idea_card_structure') {
+          cardCalls += 1;
+          if (cardCalls === 1) await secondStarted;
+          if (cardCalls === 2) releaseFirst();
+        }
+        return result;
+      };
+    }
     controller.ideaAppealGate = new IdeaAppealGateService();
     controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     controller.db = {
@@ -1344,15 +1673,34 @@ describe('idea discovery live orchestrator behavior', () => {
       storyTone: ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
       submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
+      ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
     }, 2);
+    expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+    expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[1]);
+
+    if (failure === 'review_protocol') {
+      expect(generate).toHaveBeenCalledTimes(3);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('审查未完成');
+      return;
+    }
 
     const cardFailed = failure === 'card_network' || failure === 'card_shape';
     expect(generate).toHaveBeenCalledTimes(cardFailed ? 3 : 4);
-    expect(result.success).toBe(true);
-    expect(result.ideas).toHaveLength(1);
-    expect(result.ideas[0].sourcePremiseId).toBe('P1');
-    expect(result.totalIdeas).toBe(1);
-    expect(result.qualityWarning).toContain('最终 Gate 通过 1 个');
+    expect(result.success).toBe(false);
+    expect(result.status).toBe('incomplete');
+    expect(result.ideas).toHaveLength(0);
+    expect(result.qualifiedIdeas).toHaveLength(1);
+    expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
+    if (mixed) {
+      expect(result.qualifiedIdeas[0].storyCategory).toBe('悬疑惊悚');
+      expect(generate.mock.calls[1][0].prompt).toContain('分类=悬疑惊悚');
+      expect(generate.mock.calls[2][0].prompt).toContain('分类=现实生活');
+      expect(result.appealGate.selectedCategories).toEqual(['悬疑惊悚', '现实生活']);
+    }
+    expect(result.totalIdeas).toBe(0);
+    expect(result.error).toContain('请求 2，最终通过 1');
     if (cardFailed) {
       expect(result.appealGate.structuringErrors).toEqual([expect.objectContaining({ sourcePremiseId: 'P2' })]);
     }
@@ -1363,8 +1711,92 @@ describe('idea discovery live orchestrator behavior', () => {
       qualified: 1,
       requested: 2,
       shortfall: 1,
-      returned: 1,
+      returned: 0,
       rejected: 1,
     }));
   });
+});
+
+describe('discovery before dimension confirmation', () => {
+  it('provides dictionary choices to premise selection and preserves a prerequisite refusal without retrying or weakening gates', async () => {
+    const controller = Object.create(ChainController.prototype) as any;
+    const refusal = { pool: [], selectedPremises: [], blocked: true,
+      missingRequiredDimensions: ['流派', '基调', '文风', '视角'],
+      message: '按 GEN-001 当前必填执行维度缺失，必须阻断' };
+    controller.realLLM = { assertScenarioModelConfigured: vi.fn(),
+      generate: vi.fn().mockResolvedValue({ content: JSON.stringify(refusal) }) };
+    controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({ all: (type: string) =>
+      sql.includes('story_dict') ? [{ label: `真实候选-${type}` }] : [] }) }) };
+    const result = await controller.runIdeaDiscovery({ storyType: 'short_story', platform: 'fanqie',
+      customPlatformNote: '', storyCategory: '年代', storyTone: [], writingStyle: [], webNovelGenre: [],
+      submissionTags: [], plotTags: [], genreFitNote: '', pov: '' }, 5);
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(1);
+    const prompt = controller.realLLM.generate.mock.calls[0][0].prompt;
+    expect(prompt).toContain('当前阶段=灵感发现的题材预选');
+    for (const type of ['tone_tag', 'writing_style', 'web_novel_genre', 'narrative_pov']) {
+      expect(prompt).toContain(`真实候选-${type}`);
+    }
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(refusal.message);
+    expect(result.error).toContain('流派、基调、文风、视角');
+    expect(result.error).not.toContain('有效轻量题材胚子');
+  });
+});
+
+it('routes to upstream diagnosis after a repeated family instead of spending a second repair and review cycle', async()=>{
+  const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
+  const body='她核对名单，留下待确认的一行。'.repeat(180);
+  controller.getActiveLessons=vi.fn(()=> '');
+  controller.generateBodyWithLengthGuard=vi.fn(async()=>body);
+  controller.assertGeneratedChapterIdentity=vi.fn();
+  controller.repairOutlineFactsLocally=vi.fn(async()=>body+'她核对完第一页。');
+  controller.persistAlignmentContradictions=vi.fn();
+  controller.recordGateRejection=vi.fn();
+  controller.diagnoseUpstreamRepair=vi.fn(async()=>({status:'evaluated',trigger:'同类缺陷',findings:[{
+    stage:'generation_execution',reason:'正文对白仍未落实当前章既有交流场景，须检查生成输入。',nextAction:'核对首稿怎样消费平台要求，并检查其它章同类交流处理。'}]}));
+  const base={evaluationStatus:'evaluated',pass:false,advisories:[],sourceConflicts:[],evidence:[],hardlineFindings:[],contradictions:[]};
+  controller.checkChapterAlignment=vi.fn()
+    .mockResolvedValueOnce({...base,missing:['开篇未兑现','对白占比不足']})
+    .mockResolvedValueOnce({...base,missing:['对白占比不足']});
+  await expect(controller.generateBodyWithAlignmentGuard({projectId:'p1',basePrompt:'写本章',targetWords:4000,
+    scenario:'writing',chapterIndex:1,chapterTitle:'第一章',outlineContract:'本章应有对话和核心事件。'.repeat(30),storyContext:'当前确认的上下文',wordRange:{min:3000,max:5000}})).rejects.toThrow();
+  expect(controller.repairOutlineFactsLocally).toHaveBeenCalledTimes(1);
+  expect(controller.checkChapterAlignment).toHaveBeenCalledTimes(2);
+  expect(controller.diagnoseUpstreamRepair).toHaveBeenCalledTimes(1);
+  expect(controller.persistAlignmentContradictions.mock.calls.some((c:any)=>c[0].source==='alignment_verifier_advisory'&&c[0].contradictions.some((x:string)=>x.includes('上游诊断')))).toBe(true);
+});
+
+it('uses the full same-scope routing inventory and preserves hardline evidence after semantic improvement',async()=>{
+ const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);const body='她核对名单，留下待确认的一行。'.repeat(180);const hard='【硬红线·确定性扫描·54-measure-word-mismatch】量词错配 | 原文: 那束奶油蛋糕';
+ controller.getActiveLessons=vi.fn(()=> '');controller.generateBodyWithLengthGuard=vi.fn(async()=>body);controller.assertGeneratedChapterIdentity=vi.fn();controller.repairOutlineFactsLocally=vi.fn(async()=>body+'她核对完第一页。');controller.persistAlignmentContradictions=vi.fn();controller.recordGateRejection=vi.fn();controller.diagnoseUpstreamRepair=vi.fn(async()=>({status:'evaluated',findings:[]}));
+ const base={evaluationStatus:'evaluated',pass:false,advisories:[],sourceConflicts:[],evidence:[],hardlineFindings:[{ruleId:'54-measure-word-mismatch',occurrenceCount:1,snippet:'那束奶油蛋糕',position:'第1段',message:'量词错配'}],contradictions:[hard]};
+ controller.checkChapterAlignment=vi.fn().mockResolvedValueOnce({...base,missing:['开篇事件未兑现']}).mockResolvedValueOnce({...base,missing:[]});
+ await expect(controller.generateBodyWithAlignmentGuard({projectId:'p1',basePrompt:'写本章',targetWords:4000,scenario:'writing',chapterIndex:1,chapterTitle:'第一章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文'})).rejects.toThrow();
+ expect(controller.diagnoseUpstreamRepair).toHaveBeenCalledTimes(1);const diagnosis=controller.diagnoseUpstreamRepair.mock.calls[0][0];expect(diagnosis.trigger).not.toBe('问题集合增长');expect(diagnosis.issues).toContain(hard);
+});
+
+it('does not promote narrative conflict and dialogue ratio advice from the actual failed review',()=>{
+ const advice='对话占比18.8%，低于平台经验区间35%–65%。本章为开篇单视角动作段，独处送单、算账与门禁冲突占据主段，人物可交流处已有对白；属经验区间偏差，建议不改动既有对白结构硬凑比例。';
+ expect(partitionAlignmentFindings([], '本章合同', [advice],true)).toMatchObject({blocking:[],advisories:[advice]});
+ const actual=advice+'但人物姓名与确认名单冲突。';
+ expect(partitionAlignmentFindings([], '本章合同', [actual],true).blocking).toEqual([actual]);
+ expect(partitionAlignmentFindings([advice], '本章合同',[],true).blocking).toEqual([advice]);
+});
+
+
+it('reports failed candidate review instead of the previous repaired body defect',async()=>{
+ const controller=applyStandardsStub(Object.create(ChainController.prototype) as any),body='她核对名单，留下待确认的一行。'.repeat(180);
+ controller.getActiveLessons=vi.fn(()=> '');controller.generateBodyWithLengthGuard=vi.fn(async()=>body);controller.assertGeneratedChapterIdentity=vi.fn();controller.repairOutlineFactsLocally=vi.fn(async()=>body+'她核对完第一页。');controller.persistAlignmentContradictions=vi.fn();controller.recordGateRejection=vi.fn();
+ const base={pass:false,advisories:[],sourceConflicts:[],evidence:[],hardlineFindings:[],contradictions:[]};
+ controller.checkChapterAlignment=vi.fn().mockResolvedValueOnce({...base,evaluationStatus:'evaluated',missing:['原先缺失的关键行动']}).mockResolvedValueOnce({...base,evaluationStatus:'not_evaluated',missing:['专项时间审查未完成：结构化输出截断']});
+ await expect(controller.generateBodyWithAlignmentGuard({projectId:'p1',basePrompt:'写本章',targetWords:4000,scenario:'writing',chapterIndex:1,chapterTitle:'第一章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文'})).rejects.toThrow();
+ const record=controller.recordGateRejection.mock.calls[0][0];expect(JSON.stringify(record.report)).toContain('专项时间审查未完成');expect(JSON.stringify(record.report)).not.toContain('原先缺失的关键行动');expect(record.content).toBe(body);expect(controller.repairOutlineFactsLocally).toHaveBeenCalledTimes(1);
+});
+
+it('does not promote an advisory that explicitly denies missing facts, while retaining affirmative defects',()=>{
+ const denied='大纲要求从门卫确认住户身份，正文姓名确认来自订单与电话，未构成缺失或冲突。';
+ expect(partitionAlignmentFindings([], '故事章纲', [denied],true)).toMatchObject({blocking:[],advisories:[denied]});
+ const mixed='大纲要求的关键行动缺失。其余表达未构成缺失或冲突。';expect(partitionAlignmentFindings([], '故事章纲',[mixed],true).blocking).toEqual([mixed]);
+ expect(partitionAlignmentFindings([denied], '故事章纲',[],true).blocking).toEqual([denied]);
 });

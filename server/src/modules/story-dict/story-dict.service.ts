@@ -5,7 +5,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { DatabaseService } from '../../database/database.service';
-import { GLOBAL_STORY_CATEGORIES, NARRATIVE_POV_SEED_LABELS, PLOT_TAG_SEED_LABELS, STORY_TONE_SEED_LABELS, WRITING_STYLE_SEED_LABELS } from '../../../shared/src';
+import { GLOBAL_STORY_CATEGORIES, NARRATIVE_POV_SEED_LABELS, PLOT_TAG_SEED_LABELS, STORY_TONE_SEED_LABELS, WRITING_STYLE_SEED_LABELS, WEB_NOVEL_GENRE_SEED_LABELS } from '../../../shared/src';
 
 export interface DictItem {
   id: string;
@@ -25,7 +25,7 @@ export interface DictItem {
  * 所以正确性不依赖这里的数字被手动 bump（这正是历史上「改了 seed 却不生效」的根因）。
  * 但每次改动 seed 内容时仍应递增，便于在 _migrations 里核对某次同步到底跑没跑。
  */
-export const STORY_DICT_SEED_VERSION = 23;
+export const STORY_DICT_SEED_VERSION = 24;
 
 /**
  * 执行标准种子（唯一事实源）。
@@ -92,23 +92,7 @@ export const STORY_DICT_SEEDS: Array<{ type: string; parent: string | null; labe
       // 操作定义（STYLE_GUIDES）与硬线扫描器的阈值分化都按同一份 key 取值，改名只改共享常量。
       ...WRITING_STYLE_SEED_LABELS.map((label, i) => ({ type: 'writing_style', parent: null, label, order: i + 1 })),
       // 网文流派（题材/设定流派，不是文风）
-      { type: 'web_novel_genre', parent: null, label: '系统流', order: 1 },
-      { type: 'web_novel_genre', parent: null, label: '重生', order: 2 },
-      { type: 'web_novel_genre', parent: null, label: '穿越', order: 3 },
-      { type: 'web_novel_genre', parent: null, label: '种田', order: 4 },
-      { type: 'web_novel_genre', parent: null, label: '无限流', order: 5 },
-      { type: 'web_novel_genre', parent: null, label: '无敌流', order: 6 },
-      { type: 'web_novel_genre', parent: null, label: '凡人流', order: 7 },
-      { type: 'web_novel_genre', parent: null, label: '扮猪吃虎', order: 8 },
-      { type: 'web_novel_genre', parent: null, label: '诸天流', order: 9 },
-      { type: 'web_novel_genre', parent: null, label: '退婚流', order: 10 },
-      { type: 'web_novel_genre', parent: null, label: '废材流', order: 11 },
-      { type: 'web_novel_genre', parent: null, label: '快穿', order: 12 },
-      { type: 'web_novel_genre', parent: null, label: '马甲流', order: 13 },
-      { type: 'web_novel_genre', parent: null, label: '科技流', order: 14 },
-      { type: 'web_novel_genre', parent: null, label: '幕后流', order: 15 },
-      { type: 'web_novel_genre', parent: null, label: '直播流', order: 16 },
-      { type: 'web_novel_genre', parent: null, label: 'DND', order: 17 },
+      ...WEB_NOVEL_GENRE_SEED_LABELS.map((label, i) => ({ type: 'web_novel_genre', parent: null, label, order: i + 1 })),
       // 叙事视角（结构性叙述约束：决定人称与信息范围，直接约束正文能写什么，不是文风标签）
       // 取值集合只有一份事实源（@novel/shared 的 NARRATIVE_POV_SEED_LABELS），这里派生而不是再写一遍：
       // 前端视角下拉的兜底用的就是同一份，改名只改共享常量，字典与控件不会再各走各的。

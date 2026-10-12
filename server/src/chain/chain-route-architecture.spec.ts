@@ -48,8 +48,6 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('const generateStructuredCard = async');
-    expect(source).toContain('for (let index = 0; index < selectedPremises.length; index += 1)');
-    expect(source).toContain('structuredCards.push(await generateStructuredCard(selectedPremise, index))');
     expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas)');
     expect(source).toContain('第 ${position + 1}/${requestedCount} 个已选题材结构化失败');
     expect(source).toContain("structuringProtocol: 'one_selected_premise_per_call_server_owned_identity'");
@@ -75,7 +73,7 @@ describe('chain HTTP architecture', () => {
     expect(gate).toContain('const selectedOpeningEvidence');
   });
 
-  it('returns final-gate-passed selected premises without replacing or zeroing a partial batch', () => {
+  it('preserves final-gate-passed selected premises as diagnostics when the batch is incomplete', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('finalGateRepairAttempted');
@@ -85,8 +83,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
-    expect(source).toContain('const qualityWarning = partial');
-    expect(source).toContain('未通过题材已淘汰，系统未换题或补数');
+    expect(source).toContain("status: 'incomplete'");
+    expect(source).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
     expect(source).toContain('repairGenerated: finalGateRepairGenerated');
     expect(source).toContain('repairError: finalGateRepairError');

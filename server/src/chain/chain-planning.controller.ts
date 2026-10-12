@@ -1,36 +1,9 @@
-import { Body, Controller, Get, Logger, Param, Post, Sse } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, Logger, Param, Post, Sse } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
 import { DatabaseService } from '../database/database.service';
 import { readConstitution, settingsObject } from '../modules/project/creative-constitution';
-
-const IDEA_DISCOVERY_TOPUP_ATTEMPTS = 2;
-
-const normalizeIdeaText = (value: unknown) => String(value || '')
-  .replace(/[《》「」【】\s，。！？、,.;:：；!?]/g, '')
-  .trim()
-  .toLowerCase();
-
-const ideaIdentity = (idea: any) => [
-  normalizeIdeaText(idea?.title),
-  normalizeIdeaText(idea?.hook),
-  normalizeIdeaText(idea?.coreConflict ?? idea?.conflict),
-].filter(Boolean).join('|');
-
-const appendUniqueIdeas = (target: any[], candidates: unknown, limit: number) => {
-  if (!Array.isArray(candidates) || target.length >= limit) return;
-  const identities = new Set(target.map(ideaIdentity).filter(Boolean));
-  const titles = new Set(target.map((item: any) => normalizeIdeaText(item?.title)).filter(Boolean));
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== 'object' || target.length >= limit) continue;
-    const identity = ideaIdentity(candidate);
-    const title = normalizeIdeaText((candidate as any)?.title);
-    if ((identity && identities.has(identity)) || (title && titles.has(title))) continue;
-    target.push(candidate);
-    if (identity) identities.add(identity);
-    if (title) titles.add(title);
-  }
-};
+import { isGateRejection } from '../modules/writing-quality/gate-failure';
 
 /**
  * Planning/project lifecycle HTTP adapter.
@@ -54,79 +27,8 @@ export class ChainPlanningController {
     const requested = Number(dto.count);
     const desiredCount = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 10) : 5;
 
-    // 每次 orchestrator 调用都执行完整的“题材预选 → 单卡结构化 → 最终 Gate”。
-    // 若某个已选题材因结构化/最终 Gate 失败造成数量缺口，只对缺口发起新的完整 Gate 批次，
-    // 并把已经通过的题材作为排除项。禁止用未过 Gate 的弱项补数，也禁止 success=true 却少返回。
-    const primary: any = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
-    let result: any = primary;
-
-    if (primary?.success === true && Array.isArray(primary?.ideas) && primary.ideas.length < desiredCount) {
-      const accepted: any[] = [];
-      appendUniqueIdeas(accepted, primary.ideas, desiredCount);
-      const topupAudits: any[] = [];
-      const originalExcludes = Array.isArray((dto as any).excludeDetails)
-        ? (dto as any).excludeDetails.filter((item: any) => String(item?.title || '').trim())
-        : Array.isArray((dto as any).excludeTitles)
-          ? (dto as any).excludeTitles.map((title: unknown) => ({ title: String(title || '') })).filter((item: any) => item.title.trim())
-          : [];
-
-      for (let attempt = 1; attempt <= IDEA_DISCOVERY_TOPUP_ATTEMPTS && accepted.length < desiredCount; attempt += 1) {
-        const missing = desiredCount - accepted.length;
-        const acceptedExcludes = accepted.map((idea: any) => ({
-          title: String(idea?.title || '').trim(),
-          hook: String(idea?.hook || '').trim(),
-          description: String(idea?.description || '').trim(),
-        })).filter((item: any) => item.title);
-        const topup: any = await this.chain.ideaDiscover({
-          ...dto,
-          count: missing,
-          excludeDetails: [...originalExcludes, ...acceptedExcludes].slice(-30),
-        } as any);
-        topupAudits.push({
-          attempt,
-          requested: missing,
-          success: topup?.success === true,
-          returned: Array.isArray(topup?.ideas) ? topup.ideas.length : 0,
-          error: topup?.error ?? null,
-          appealGate: topup?.appealGate ?? null,
-        });
-        if (topup?.success === true) appendUniqueIdeas(accepted, topup.ideas, desiredCount);
-      }
-
-      const shortfall = Math.max(0, desiredCount - accepted.length);
-      const mergedAppealGate = {
-        ...(primary?.appealGate || {}),
-        schemaVersion: Math.max(8, Number(primary?.appealGate?.schemaVersion || 0) || 0),
-        requested: desiredCount,
-        qualified: accepted.length,
-        returned: accepted.length,
-        shortfall,
-        topupProtocol: 'bounded_full_gate_gap_fill',
-        topupAttempted: topupAudits.length > 0,
-        topupAttempts: topupAudits,
-      };
-      const acceptedWithAudit = accepted.map((idea: any) => ({ ...idea, ideaDiscoveryAudit: mergedAppealGate }));
-
-      result = shortfall === 0
-        ? {
-            ...primary,
-            success: true,
-            ideas: acceptedWithAudit,
-            totalIdeas: acceptedWithAudit.length,
-            qualityWarning: undefined,
-            error: null,
-            appealGate: mergedAppealGate,
-          }
-        : {
-            ...primary,
-            success: false,
-            ideas: acceptedWithAudit,
-            totalIdeas: acceptedWithAudit.length,
-            qualityWarning: `请求 ${desiredCount} 个合格题材，完整 Gate 与 ${topupAudits.length} 次缺口补齐后仍只有 ${acceptedWithAudit.length} 个；本批按数量合同判失败。`,
-            error: `灵感故事卡数量不足：请求 ${desiredCount}，最终通过 ${acceptedWithAudit.length}；禁止以 success=true 返回缺量结果。`,
-            appealGate: mergedAppealGate,
-          };
-    }
+    // GEN-002：筛选与有界修复由 orchestrator 负责；适配层保留合格卡与缺额诊断。
+    const result: any = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
 
     if (this.database) {
       try {
@@ -245,8 +147,15 @@ export class ChainPlanningController {
   }
 
   @Post('generate-outline')
-  generateOutline(@Body() dto: Parameters<ChainController['generateOutline']>[0]) {
-    return this.chain.generateOutline(dto);
+  async generateOutline(@Body() dto: Parameters<ChainController['generateOutline']>[0]) {
+    try {
+      return await this.chain.generateOutline(dto);
+    } catch (error) {
+      if (isGateRejection(error)) {
+        throw new HttpException({ message: error.report.message, error: 'QualityGateRejected', gateReport: error.report }, error.report.status);
+      }
+      throw error;
+    }
   }
 
   @Post('expand-outline-chapter')

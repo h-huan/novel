@@ -435,3 +435,13 @@ describe('StateItemService confirmation semantics', () => {
     expect(canonical.payload.intent).toBe('canonical_change');
   });
 });
+
+it('keeps discovery diagnostics in storage while projecting one constitution and author settings into writing',()=>{
+ const f=fixture();const row=f.db.prepare("SELECT settings FROM projects WHERE id='p'").get() as any;
+ const settings={...JSON.parse(row.settings||'{}'),ideaDiscoveryAudit:{raw:'diagnostic-only-rejected-candidate'},structurePlanning:{chapters:5},taboos:['保留作者禁忌'],customAuthorRequirement:'保留其它作者要求'};
+ const before=JSON.stringify(settings);f.db.prepare("UPDATE projects SET settings=? WHERE id='p'").run(before);
+ const context=f.service.buildWritingStateContext('p',1);
+ expect(context.contextText).not.toContain('diagnostic-only-rejected-candidate');expect(context.projectCard.planning).not.toHaveProperty('ideaDiscoveryAudit');expect(context.projectCard.planning).not.toHaveProperty('creativeConstitution');
+ expect(context.projectCard.creativeConstitution).toBeDefined();expect(context.projectCard.planning).toMatchObject({structurePlanning:{chapters:5},customAuthorRequirement:'保留其它作者要求'});expect(context.projectCard.taboos).toEqual(['保留作者禁忌']);
+ expect((f.db.prepare("SELECT settings FROM projects WHERE id='p'").get() as any).settings).toBe(before);
+});

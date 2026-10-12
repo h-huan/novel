@@ -2,6 +2,17 @@ interface ChapterDb {
   prepare(sql: string): { get(...args: any[]): any; all(...args: any[]): any[] };
 }
 
+/** One source projection for creation review and the outline consumed by prose generation. */
+const STORY_RECORD_METADATA = new Set(['id','project_id','level','parent_id','order','status','created_at',
+  'updated_at','actual_words','volume_index','chapter_index','source_chapter_id','source_run_id',
+  'locked','locked_at','author_confirmed','author_confirmed_at']);
+export function storySourceFields(row: any): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row || {}).filter(([field]) => !STORY_RECORD_METADATA.has(field)));
+}
+export function chapterOutlineStorySource(row: any): Record<string, unknown> {
+  return storySourceFields(row);
+}
+
 /** Expand sibling positions into a global story sequence, including multiple volumes. */
 export function readOrderedChapterOutlines(db: ChapterDb, projectId: string): any[] {
   return db.prepare(`SELECT o.* FROM outlines o LEFT JOIN outlines p ON p.id=o.parent_id AND p.project_id=o.project_id

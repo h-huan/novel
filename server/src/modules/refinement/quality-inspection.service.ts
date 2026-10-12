@@ -1,3 +1,4 @@
+import { quotedText } from '../../chain/quoted-text';
 /**
  * AI质检系统
  * 逻辑检测、人设漂移检测、伏笔遗漏检测、写作专属十一维度评分
@@ -202,8 +203,8 @@ export class QualityInspectionService {
     const sentenceLengthUniformityScore = Math.max(0, Math.min(10, Math.floor((1 - cv) * 10)));
 
     // 6. 对话占比：引号内内容占比
-    const dialogueMatches = content.match(/"[^"]*"|「[^」]*」|“[^”]*”/g) || [];
-    const dialogueLength = dialogueMatches.reduce((sum, m) => sum + m.length, 0);
+    const dialogueMatches = quotedText(content);
+    const dialogueLength = dialogueMatches.reduce((sum, m) => sum + m.quote.length, 0);
     const dialogueRatio = content.length > 0 ? dialogueLength / content.length : 0;
     // 对话占比<15%或>60%都扣分，20-50%最佳
     let dialogueRatioScore = 0;

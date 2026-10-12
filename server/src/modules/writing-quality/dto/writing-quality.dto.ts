@@ -114,6 +114,14 @@ export class LLMQualityOutput {
   };
   /** 每个已评分执行维度在本章正文中的逐字证据；缺失时该维仍属未评估。 */
   tagFitEvidence?: Partial<Record<'platform' | 'category' | 'tone' | 'style' | 'genre' | 'pov', string>>;
+  /** Reviewer must identify its supplied criterion, or explicitly leave the dimension unassessed. */
+  tagFitBasis?: Partial<Record<'platform' | 'category' | 'tone' | 'style' | 'genre' | 'pov', {
+    status: 'evaluated' | 'unknown_definition'; criterion: string; reason: string;
+  }>>;
+  evidenceValidation?: {
+    status: 'evaluated' | 'not_evaluated';
+    unverifiedIssues: Array<{ index: number; issueType: string; reasons: string[] }>;
+  };
 }
 
 export interface LLMQualityIssue {
@@ -123,13 +131,19 @@ export interface LLMQualityIssue {
   summary: string;
   evidence: string;
   suggestion: string;
-  paragraphIndex: number;
-  sentenceIndex: number;
-  startOffset: number;
-  endOffset: number;
+  paragraphIndex: number | null;
+  sentenceIndex: number | null;
+  startOffset: number | null;
+  endOffset: number | null;
   originalText: string;
   suggestedText: string;
   tags: string[];
+  evidenceKind?: 'redundant_interpretation' | 'premature_reveal' | 'causal_gap' | 'other';
+  shownEvidence?: string;
+  basisEvidence?: string;
+  basisSource?: 'chapter_plan' | 'execution_standard' | 'project_context' | 'body';
+  basisReason?: string;
+  evidenceVerified?: boolean;
 }
 
 export interface LLMRefineOutput {
@@ -150,4 +164,6 @@ export interface RecheckResult {
   remainingIssues: number;
   newIssues: number;
   summary: string;
+  evidence?: string;
+  basisReason?: string;
 }

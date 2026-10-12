@@ -164,18 +164,22 @@ it('generates a complete idea batch through preselection plus structuring and re
     assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
     generate: vi.fn(async () => {
       generationCall += 1;
+      const currentCall = generationCall;
       await new Promise(resolve => setTimeout(resolve, 10));
-      if (generationCall === 1) {
+      if (currentCall === 1) {
         return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
       }
-      const cardIndex = generationCall - 1;
+      const cardIndex = currentCall - 1;
       if (cardIndex >= 1 && cardIndex <= 5) {
         return { content: JSON.stringify({ ideas: [makeIdea(cardIndex)] }) };
       }
-      if (generationCall === 7) {
+      if (currentCall === 7) {
         return { content: JSON.stringify({ reviews: Array.from({ length: 5 }, (_, index) => ({
           position: index + 1, title: makeIdea(index + 1).title,
           titleCompelling: true, openingCompelling: true, distinctFromBatch: true,
+          storyCoherent: true, payoffCredible: true, platformFit: true,
+          storyEvidence: makeIdea(index + 1).hook, payoffEvidence: makeIdea(index + 1).description,
+          platformEvidence: makeIdea(index + 1).hook, qualityReason: '根据实际题材的设定、选择、兑现与平台判据完成评审。',
           readerQuestion: '主角能否在截止日前验证现场证据并保住家人的现实利益？', issues: [],
         })) }) };
       }

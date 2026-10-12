@@ -18,7 +18,8 @@ import { StateItemService } from '../../state/state-item.service';
 import { DatabaseService } from '../../database/database.service';
 
 // 角色档案字段：14 项里的其余 13 项（姓名在 characters 主表），分组与中文标签见 buildCharacterSections
-export const PROFILE_FIELDS = ['alias_title','identity_occupation','faction_stance','role_type','appearance','personality_traits','abilities_skills','backstory','relationships','catchphrase_speech_style','goals_motivation','weaknesses_fears','supplementary'] as const;
+import { PROFILE_FIELDS, hasCurrentProfile } from './character-profile';
+export { PROFILE_FIELDS } from './character-profile';
 
 export const PROFILE_FIELD_LABELS: Record<string, string> = {
   alias_title: '别名/称号', identity_occupation: '身份/职业', faction_stance: '阵营/立场', role_type: '角色类型',
@@ -91,9 +92,9 @@ export class CharacterService {
       appearance: dto.appearance || null,
       background: dto.background || null,
       personality: JSON.stringify(personality),
-      abilities: '{}',
-      relationships: '[]',
-      arc: '[]',
+      abilities: JSON.stringify(dto.abilities || {}),
+      relationships: JSON.stringify(dto.relationships || []),
+      arc: dto.arc === undefined ? '[]' : (typeof dto.arc === 'string' ? dto.arc : JSON.stringify(dto.arc)),
       dialogue_style: dto.dialogueStyle || null,
       dialogue_patterns: JSON.stringify(dto.dialoguePatterns || []),
       is_pov_character: dto.isPovCharacter ? 1 : 0,
@@ -154,6 +155,7 @@ export class CharacterService {
     if (dto.profile !== undefined) updateData.profile_json = typeof dto.profile === 'string' ? dto.profile : JSON.stringify(dto.profile);
     if (dto.abilities !== undefined) updateData.abilities = typeof dto.abilities === 'string' ? dto.abilities : JSON.stringify(dto.abilities);
     if (dto.arc !== undefined) updateData.arc = typeof dto.arc === 'string' ? dto.arc : JSON.stringify(dto.arc);
+    if (dto.relationships !== undefined) updateData.relationships = JSON.stringify(dto.relationships);
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
@@ -265,76 +267,24 @@ export class CharacterService {
     const profile = db.prepare('SELECT * FROM character_extended_profiles WHERE project_id = ? AND character_id = ?').get(projectId, id) as any;
     const stateContext = this.stateItemService?.buildWritingStateContext(projectId);
 
-    // 合并 extended profile 到 characters.profile_json，保持单表查询可用
-    const profileData = this.profileRow(profile);
-    // 附上 PROFILE_FIELDS 之外的读者向字段（前端"读者共鸣点/成长标签"展示用）
-    profileData.reader_empathy_point = (profile as any)?.reader_empathy_point || '';
-    profileData.reader_expectation = (profile as any)?.reader_expectation || '';
-    const unifiedProfile = {
-      motivation: {
-        shortTermGoal: profileData.short_term_goal,
-        longTermGoal: profileData.long_term_goal,
-        coreDesire: profileData.core_desire,
-        coreFear: profileData.core_fear,
-        currentProblem: profileData.current_problem,
-        failureCost: profileData.failure_cost,
-      },
-      backgroundDetail: {
-        keyBackstory: profileData.key_backstory,
-        trauma: profileData.trauma,
-        obsession: profileData.obsession,
-        hiddenIdentity: profileData.hidden_identity,
-        secret: profileData.secret,
-        mainTruthRelation: profileData.main_truth_relation,
-      },
-      abilitiesDetail: {
-        source: profileData.ability_source,
-        level: profileData.ability_level,
-        specialSkills: profileData.special_skills,
-        limit: profileData.ability_limit,
-        cost: profileData.ability_cost,
-        cannotUseReason: profileData.cannot_use_reason,
-      },
-      weaknessesDetail: {
-        body: profileData.body_weakness,
-        personality: profileData.personality_weakness,
-        emotion: profileData.emotion_weakness,
-        moralBoundary: profileData.moral_boundary,
-      },
-      personalityDetail: {
-        surface: profileData.surface_personality,
-        deep: profileData.deep_personality,
-        contradiction: profileData.contradiction_point,
-        values: profileData.value_system,
-      },
-      dialogueDetail: {
-        speechStyle: profileData.speech_style,
-        catchphrase: profileData.catchphrase,
-        commonWords: profileData.common_words,
-        forbiddenWords: profileData.forbidden_words,
-        dangerReaction: profileData.danger_reaction,
-        betrayalReaction: profileData.betrayal_reaction,
-      },
-      arcDetail: {
-        initial: profileData.initial_arc_state,
-        current: profileData.current_arc_state,
-        volume: profileData.volume_arc,
-        ending: profileData.ending_arc,
-      },
-      plotFunction: {
-        plot: profileData.plot_function,
-      },
-      writingRules: {
-        forbidden: profileData.forbidden_writing,
-        breakPoints: profileData.easy_to_break_points,
-      },
+    // profile_json 是当前资料；旧表只为尚未迁移的角色提供只读回退。
+    const canonical = hasCurrentProfile(character.profile)
+      ? character.profile : { ...this.profileRow(profile),
+        reader_empathy_point: profile?.reader_empathy_point || '',
+        reader_expectation: profile?.reader_expectation || '',
+      };
+    const unifiedProfile = canonical;
+    const profileData = { ...canonical } as Record<string, any>;
+    profileData.reader_empathy_point = canonical.reader_empathy_point || '';
+    profileData.reader_expectation = canonical.reader_expectation || '';
+    const currentFields = {
+      identity_occupation: character.identity, personality_traits: character.personality?.summary,
+      abilities_skills: character.abilities?.description, backstory: character.background,
+      goals_motivation: character.goals, weaknesses_fears: character.weaknesses,
     };
-
-    // 同步回 characters 表
-    try {
-      db.prepare(`UPDATE characters SET profile_json = ? WHERE id = ?`)
-        .run(JSON.stringify(unifiedProfile), id);
-    } catch {}
+    for (const [field, value] of Object.entries(currentFields)) {
+      if (!(field in canonical) && value) profileData[field] = value;
+    }
 
     return {
       character: { ...character, profile: unifiedProfile },
@@ -351,22 +301,30 @@ export class CharacterService {
     const db = this.databaseService.getDb();
     const now = new Date().toISOString();
     const before = db.prepare('SELECT * FROM character_extended_profiles WHERE character_id = ?').get(id) as any;
-    const values = PROFILE_FIELDS.map(field => String(input[field] ?? before?.[field] ?? ''));
+    const current = this.getProfile(projectId, id).profile;
+    const values = PROFILE_FIELDS.map(field => String(input[field] ?? current[field] ?? ''));
     db.prepare(`INSERT INTO character_extended_profiles (id, project_id, character_id, ${PROFILE_FIELDS.join(', ')}, created_at, updated_at)
       VALUES (?, ?, ?, ${PROFILE_FIELDS.map(() => '?').join(', ')}, ?, ?)
       ON CONFLICT(character_id) DO UPDATE SET ${PROFILE_FIELDS.map(field => `${field}=excluded.${field}`).join(', ')}, updated_at=excluded.updated_at`)
       .run(before?.id || uuid(), projectId, id, ...values, before?.created_at || now, now);
-    const changed = PROFILE_FIELDS.filter(field => String(before?.[field] ?? '') !== String(input[field] ?? before?.[field] ?? ''));
-    if (changed.length) this.recordAutoProfileChanges(projectId, id, before ?? {}, input);
+    const nextProfile = { ...current, ...character.profile };
+    for (const field of PROFILE_FIELDS) {
+      if (field in input) nextProfile[field] = String(input[field] ?? '');
+      else if (!(field in nextProfile)) nextProfile[field] = current[field] ?? '';
+    }
+    db.prepare('UPDATE characters SET profile_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(nextProfile), now, id);
+    const changed = PROFILE_FIELDS.filter(field => String(current[field] ?? '') !== String(input[field] ?? current[field] ?? ''));
+    if (changed.length) this.recordAutoProfileChanges(projectId, id, current, { ...current, ...input });
     if (changed.length) {
       const groups = {
         motivation: ['short_term_goal', 'long_term_goal', 'core_desire'], ability: ['ability_limit', 'ability_cost', 'cannot_use_reason'],
-        dialogue: ['speech_style', 'catchphrase', 'forbidden_words'], arc: ['current_arc_state', 'volume_arc', 'ending_arc'],
+        dialogue: ['catchphrase_speech_style', 'speech_style', 'catchphrase', 'forbidden_words'], arc: ['current_arc_state', 'volume_arc', 'ending_arc'],
         constraints: ['forbidden_writing', 'must_obey_rules', 'easy_to_break_points'],
       };
       const changedGroups = Object.entries(groups).filter(([, fields]) => fields.some(field => changed.includes(field as any))).map(([group]) => group);
       const affectedModules = [...new Set(changedGroups.flatMap(group => group === 'motivation' ? ['chapter', 'outline', 'conflict'] : group === 'ability' ? ['chapter', 'conflict', 'writing_quality'] : group === 'dialogue' ? ['chapter', 'dialogue_quality'] : group === 'arc' ? ['chapter', 'character_state', 'outline'] : ['chapter', 'writing_context', 'writing_quality']))];
-      this.analyzeStateImpact(projectId, id, '角色创作资料修改影响分析', { changedFields: changed, changedGroups, riskReason: '核心角色设定已变化，后续正文与质量检查上下文需要复核。', affectedModules, suggestedReviewAction: '在状态中心查看影响报告，并复核关联章节和对话。', before: this.profileRow(before), after: input, affects: affectedModules });
+      this.analyzeStateImpact(projectId, id, '角色创作资料修改影响分析', { changedFields: changed, changedGroups, riskReason: '核心角色设定已变化，后续正文与质量检查上下文需要复核。', affectedModules, suggestedReviewAction: '在状态中心查看影响报告，并复核关联章节和对话。', before: current, after: { ...current, ...input }, affects: affectedModules });
     }
     return this.getProfile(projectId, id);
   }

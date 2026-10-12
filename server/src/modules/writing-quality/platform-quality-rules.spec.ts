@@ -1,6 +1,21 @@
 import { expect, it } from 'vitest';
 import { readConstitution } from '../project/creative-constitution';
-import { deterministicPlatformReview, platformReviewToRows } from './platform-quality-rules';
+import { deterministicPlatformReview, platformReviewToRows, partitionPlatformRows, partitionPlatformIssues } from './platform-quality-rules';
+
+it('关键词未命中只保留待核对信号，客观比例仍是确认问题，语义确认的问题不被取消', () => {
+  const review = deterministicPlatformReview({ projectId: 'p', runId: 'r', stage: 'chapter',
+    content: '她从版框里取出弟弟惯用的铅条。'.repeat(100),
+    constitution: readConstitution({ type: 'long_novel', target_platform: 'fanqie' }) });
+  const result = partitionPlatformRows(platformReviewToRows(review), [{ issueType: 'platform_opening_hook' }]);
+  expect(result.confirmed.map(row => row.issueType)).toContain('platform_dialogue_ratio');
+  expect(result.confirmed.map(row => row.issueType)).not.toContain('platform_ending_hook');
+  expect(result.probes.find(row => row.issueType === 'platform_ending_hook')?.evaluation).toBe('needs_semantic_review');
+  expect(result.probes.find(row => row.issueType === 'platform_opening_hook')?.evaluation).toBe('semantic_confirmed');
+  const generation = partitionPlatformIssues(review.issues);
+  expect(generation.confirmed.some(issue=>issue.ruleId==='platform.dialogue_ratio')).toBe(true);
+  expect(generation.confirmed.some(issue=>issue.ruleId==='platform.ending_hook')).toBe(false);
+  expect(generation.probes.some(issue=>issue.ruleId==='platform.ending_hook')).toBe(true);
+});
 
 it('records evidenced deterministic platform risks without claiming semantic payoff failure', () => {
   const content = `清晨，他慢慢收拾行李。${'平静的景色铺展开来。'.repeat(90)}\n事情结束了。`;

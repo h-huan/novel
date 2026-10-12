@@ -359,7 +359,9 @@ export class StateItemService {
       webNovelGenre: constitution.webNovelGenre, creativeConstitution: constitution,
       taboos: projectSettings.taboos || projectSettings.forbiddenContent || [],
       publishingRhythm: projectSettings.publishingRhythm || projectSettings.publishRhythm || null,
-      planning: projectSettings,
+      // Persisted diagnostics remain available to the product; they are not story facts.
+      // The constitution already has one explicit field above, so omit its duplicate here.
+      planning: Object.fromEntries(Object.entries(projectSettings).filter(([key])=>!['ideaDiscoveryAudit','creativeConstitution'].includes(key))),
     };
     const rows = db.prepare(`
       SELECT * FROM state_items

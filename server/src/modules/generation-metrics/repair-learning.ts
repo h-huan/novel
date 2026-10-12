@@ -1,3 +1,4 @@
+import { repairStrategies } from '../writing-quality/repair-strategy-registry';
 export interface RepairStrategyStats {
   attempts: number;
   accepted: number;
@@ -46,4 +47,11 @@ export function isRepairStrategyEligible(raw: RepairStrategyStats): boolean {
   if (accepted / attempts < REPAIR_STRATEGY_MIN_ACCEPTANCE) return false;
   const harm = Math.max(0, Number(raw.rollbacks) || 0) + Math.max(0, Number(raw.damage) || 0);
   return harm < attempts;
+}
+
+/** 只由已接受、已评估的修复调用；不复制小说事实或阈值为规则。 */
+export function verifiedRepairLesson(ruleId: string, strategyId: string): string | null {
+  if (!Object.hasOwn(repairStrategies, strategyId)) return null;
+  const strategy = repairStrategies[strategyId as keyof typeof repairStrategies];
+  return '已验证策略参考：问题 '+ruleId+'；策略 '+strategyId+'；方法：'+strategy.prompt+' 仅供当前规则允许的同类问题参考，仍按当前创作宪法、事实条件与本轮预算执行，并完整复检候选；历史成功不代替本次验收。';
 }

@@ -1,12 +1,50 @@
 import { it, expect } from 'vitest';
 import { parseStageScore, SCORE_DIMENSIONS, aggregateProjectScore, stageJudgePrompt, applicableScoreDimensions } from './stage-score';
+import { deterministicPlatformReview } from './platform-quality-rules';
 import { readConstitution } from '../project/creative-constitution';
+import { dimensionBasis } from '../../test/quality-review.fixture';
 // 执行前提（用户选定）：平台/分类/基调/文风/流派/视角全部设置，测试本身不得落在"未执行标准"上。
 const COMPLETE_STANDARDS = {
   target_platform: 'fanqie',
-  settings: { category: '悬疑', storyTone: ['冷峻'], writingStyle: ['简练'], webNovelGenre: ['都市'], pov: '第三人称限知' },
+  settings: { category: '悬疑', storyTone: ['冷峻'], writingStyle: ['简练'], webNovelGenre: ['都市'], genreFitNote: '现实城市职业与人际冲突推动人物选择', pov: '第三人称限知' },
 };
 const input = { projectId: 'p', runId: 'r', stage: 'world' as const, content: '真实引用', constitution: readConstitution(COMPLETE_STANDARDS) };
+it('requires evidenced framework prerequisites regardless of advisory severity, preserving ordinary advice and uncertainty', () => {
+  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, { score: 90, reason: '满足本阶段要求', evidence: [input.content], basis: dimensionBasis(input.constitution, key) }]));
+  const issue = { ruleId: 'logic.causal_gap', severity: 'low', message: '缺少取得授权的动作', evidence: input.content, evidenceKind: 'causal_gap', basisSource: 'chapter_plan', basisEvidence: '进入需要有效当单授权。', basisReason: '上游明确要求授权，本轮结果未交代取得。' };
+  const planning = { ...input, stage: 'outline' as const, reviewContext: JSON.stringify({ planningSources: { rule: issue.basisEvidence } }) };
+  const ordinary = parseStageScore({ dimensions, issues: [issue] }, planning);
+  expect(ordinary.gateStatus).toBe('passed');
+  const required = parseStageScore({ dimensions, issues: [issue] }, { ...planning, enforcePlanningConditions: true });
+  expect(required.gateStatus).toBe('blocked');
+  expect(required.issues[0].severity).toBe('low');
+  expect(required.overallScore).toBe(ordinary.overallScore);
+  expect(parseStageScore({ dimensions, issues: [{ ...issue, evidenceKind: 'other' }] }, { ...planning, enforcePlanningConditions: true }).gateStatus).toBe('passed');
+  const unknown = parseStageScore({ dimensions, issues: [{ ...issue, basisEvidence: '不存在的规则' }] }, { ...planning, enforcePlanningConditions: true });
+  expect(unknown.gateStatus).toBe('not_evaluated');
+  expect(unknown.issues[0].requiredPlanningCondition).toBeUndefined();
+});
+it('objective platform problems come from measurements while semantic pacing remains independent', () => {
+  const chapterInput = { ...input, stage: 'chapter' as const };
+  const score = parseStageScore({ issues: [
+    { ruleId: 'platform.dialogue_ratio', severity: 'blocking', message: '模型猜测比例不足', evidence: input.content },
+    { ruleId: 'pacing.procedural_density', severity: 'low', message: '独立语义节奏问题', evidence: input.content },
+  ] }, chapterInput);
+  expect(score.issues.some(issue => issue.ruleId === 'platform.dialogue_ratio')).toBe(false);
+  expect(score.issues.some(issue => issue.ruleId === 'pacing.procedural_density')).toBe(true);
+  const actual = deterministicPlatformReview(chapterInput);
+  expect(actual.issues.some(issue => issue.ruleId === 'platform.dialogue_ratio' && issue.source === 'platform_deterministic_v1')).toBe(true);
+  expect(stageJudgePrompt(chapterInput.content, '', chapterInput.constitution, 'chapter')).toContain('整章客观测量');
+});
+it('binds a selected criterion ID to the supplied full rule, never another dimension or unknown definition',()=>{
+  const dimension={score:88,reason:'根据当前冷峻判据审查正文表现',evidence:['真实引用'],basis:{status:'evaluated',criterionId:'tone',reason:'按冷峻基调控制情绪与表达'}};
+  const score=parseStageScore({dimensions:{tone:dimension}},input);
+  expect(score.dimensions.tone.status).toBe('evaluated');
+  expect((score.dimensions.tone.basis as any).criterion).toContain('冷峻');
+  expect(parseStageScore({dimensions:{tone:{...dimension,basis:{...dimension.basis,criterionId:'style'}}}},input).dimensions.tone.status).toBe('not_evaluated');
+  const unknown=readConstitution({...COMPLETE_STANDARDS,settings:{...COMPLETE_STANDARDS.settings,webNovelGenre:['未定义流派'],genreFitNote:''}});
+  expect(parseStageScore({dimensions:{genre:{...dimension,basis:{...dimension.basis,criterionId:'genre'}}}},{...input,constitution:unknown}).dimensions.genre.status).toBe('not_evaluated');
+});
 it('does not count missing or fabricated evidence as high scores', () => {
   const score = parseStageScore({ dimensions: { context: { score: 99, reason: '好', evidence: ['不存在'] } } }, input);
   expect(score.overallScore).toBeNull();
@@ -26,13 +64,13 @@ it('anchors evidence when the quoted JSON differs only in whitespace', () => {
 });
 
 it('keeps the project unassessed until all prerequisite stages are assessed', () => {
-  const world = parseStageScore({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 90, reason: '满足', evidence: ['真实引用'] }])) }, input);
+  const world = parseStageScore({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 90, reason: '满足', evidence: ['真实引用'], basis: dimensionBasis(input.constitution, k) }])) }, input);
   expect(aggregateProjectScore({ world }).overallScore).toBeNull();
   expect(aggregateProjectScore({ world }).coverage).toBe(0.25);
   expect(aggregateProjectScore({ world, character: world, outline: world, chapter: world }).overallScore).toBe(90);
 });
 it('preserves all dimensions and marks a low consistency dimension blocking', () => {
-  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: k === 'context' ? 20 : 99, reason: '与前文冲突', evidence: ['真实引用'] }]));
+  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: k === 'context' ? 20 : 99, reason: '与前文冲突', evidence: ['真实引用'], basis: dimensionBasis(input.constitution, k) }]));
   const result = parseStageScore({ dimensions }, input);
   expect(result.coverage).toBe(1);
   expect(result.issues.some(i => i.severity === 'blocking')).toBe(true);
@@ -45,7 +83,7 @@ it('preserves all dimensions and marks a low consistency dimension blocking', ()
 // 口径变更（用户指令）：平台/分类/基调/文风/流派/视角是执行约束，不再被降级为 high。
 // 评审模型给出的严重度必须原样保留 —— 这条断言是"禁止降级"的回归锁。
 it('preserves a blocking expressive verdict exactly as the reviewer reported it', () => {
-  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 99, reason: '满足', evidence: ['真实引用'] }]));
+  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 99, reason: '满足', evidence: ['真实引用'], basis: dimensionBasis(input.constitution, k) }]));
   const result = parseStageScore({ dimensions, issues: [
     { ruleId: 'constitution.style', severity: 'blocking', message: '文风偏平，缺少具体动作', evidence: '真实引用' },
     { ruleId: 'constitution.tone', severity: 'BLOCKING', message: '基调偏冷', evidence: '真实引用' },
@@ -67,7 +105,7 @@ it('blocks a below-floor expressive dimension the user selected', () => {
     web_novel_genre: ['都市'], writing_style: ['简练'],
   });
   const chapterInput = { ...input, stage: 'chapter' as const, constitution };
-  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: k === 'tone' ? 30 : 99, reason: '基调与所选不符', evidence: ['真实引用'] }]));
+  const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: k === 'tone' ? 30 : 99, reason: '基调与所选不符', evidence: ['真实引用'], basis: dimensionBasis(constitution, k) }]));
   const result = parseStageScore({ dimensions }, chapterInput);
   expect(result.dimensions.tone.status).toBe('evaluated');
   expect(result.issues.find(i => i.ruleId === 'constitution.tone')?.severity).toBe('blocking');
@@ -158,4 +196,20 @@ describe('判定单元（整章 / 片段）—— 单元不成立，不是降严
     const chapter = listOf('chapter');
     for (const key of ['tone', 'length', 'retention', 'structure', 'payoff']) expect(chapter).toContain(key);
   });
+});
+
+it('blocks evidenced low prose independently of a high overall score and keeps project overrides explicit',()=>{
+ const c=readConstitution(COMPLETE_STANDARDS);
+ const content='门上的字没有变。她退出又重开，门上的字没有变。';
+ const dimensions=Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:k==='prose'?68:95,reason:k==='prose'?'同一状态在没有新信息时反复说明，拖慢当前动作':'按本阶段执行标准落实',evidence:[content],basis:dimensionBasis(c,k)}]));
+ const score=parseStageScore({dimensions},{...input,stage:'chapter',content,constitution:c});
+ expect(score.overallScore).toBeGreaterThan(80);
+ expect(score.gateStatus).toBe('blocked');
+ expect(score.issues).toContainEqual(expect.objectContaining({ruleId:'constitution.prose',severity:'blocking',evaluation:'evidenced'}));
+ expect(stageJudgePrompt(content,'',c,'chapter')).toContain('"prose":70');
+ const good=parseStageScore({dimensions:{...dimensions,prose:{...dimensions.prose,score:82}}},{...input,stage:'chapter',content,constitution:c});
+ expect(good.gateStatus).toBe('passed');
+ const configured=parseStageScore({dimensions},{...input,stage:'chapter',content,constitution:{...c,qualityPolicy:{version:1,floors:{prose:65},weights:{}}}});
+ expect(configured.policy?.floors.prose).toBe(65);
+ expect(configured.gateStatus).toBe('passed');
 });

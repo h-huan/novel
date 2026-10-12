@@ -1,12 +1,38 @@
 import { it, expect } from 'vitest';
 import { applyLocalPatches, compareRepair, selectAnchoredLocalPatchBatch } from './local-repair';
+
+it('deletes a whole prose paragraph without creating blank paragraphs or changing unrelated spacing', () => {
+  const first='原段保留。'.repeat(30), last='下一段保留。'.repeat(30);
+  const untouched='\n\n\n\n  另一处原有空行与缩进。';
+  const body=first+'\n\n删去的重复段落。\n\n'+last+untouched;
+  const patch={original:'删去的重复段落。',replacement:''};
+  const selected=selectAnchoredLocalPatchBatch(body,[patch],0.2);
+  expect(applyLocalPatches(body,selected.patches,false,0.2)).toBe(first+'\n\n'+last+untouched);
+});
+
+it('keeps inline deletion exact and handles paragraph deletion at Windows document edges', () => {
+  const kept='保留的正文。'.repeat(40);
+  expect(applyLocalPatches('删去首段。\r\n\r\n'+kept,[{original:'删去首段。',replacement:''}])).toBe(kept);
+  expect(applyLocalPatches(kept+'\r\n\r\n删去末段。',[{original:'删去末段。',replacement:''}])).toBe(kept);
+  const inline=kept+'\n\n句内删除旧词，空行保持。';
+  expect(applyLocalPatches(inline,[{original:'旧词',replacement:''}])).toBe(kept+'\n\n句内删除，空行保持。');
+});
+
+it('counts a removed paragraph separator in the same local-change budget', () => {
+  const body='保留。'.repeat(30)+'\n\n删段\n\n'+'后文。'.repeat(30);
+  const patch={original:'删段',replacement:''};
+  const limit=3/body.length;
+  expect(selectAnchoredLocalPatchBatch(body,[patch],limit).rejected[0].reason).toBe('超出本批改动预算');
+  expect(()=>applyLocalPatches(body,[patch],false,limit)).toThrow('局部修复范围超过');
+});
 import { parseStageScore, SCORE_DIMENSIONS } from './stage-score';
 import { readConstitution } from '../project/creative-constitution';
+import { dimensionBasis } from '../../test/quality-review.fixture';
 
 // 用户选定的执行前提必须齐全，否则"未执行标准"的 blocking 会掩盖本文件真正要测的复检逻辑。
 const COMPLETE_STANDARDS = {
   target_platform: 'fanqie',
-  settings: { category: '悬疑', storyTone: ['冷峻'], writingStyle: ['简练'], webNovelGenre: ['都市'], pov: '第三人称限知' },
+  settings: { category: '悬疑', storyTone: ['冷峻'], writingStyle: ['简练'], webNovelGenre: ['都市'], genreFitNote: '现实城市职业与人际冲突推动人物选择', pov: '第三人称限知' },
 };
 it('applies only unique local patches and rejects ambiguous or extensive rewrites', () => {
   expect(applyLocalPatches('0123456789', [{ original: '34', replacement: 'AB' }])).toBe('012AB56789');
@@ -27,7 +53,7 @@ it('keeps exact fact patches when one original quote is missing and another exce
 });
 it('rejects an improved total when a single dimension regresses', () => {
   const input = { projectId: 'p', runId: 'r', stage: 'world' as const, content: '证据', constitution: readConstitution(COMPLETE_STANDARDS) };
-  const make = (context: number, logic: number) => parseStageScore({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: k === 'context' ? context : logic, reason: '评估', evidence: ['证据'] }])) }, input);
+  const make = (context: number, logic: number) => parseStageScore({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: k === 'context' ? context : logic, reason: '评估', evidence: ['证据'], basis: dimensionBasis(input.constitution,k) }])) }, input);
   expect(compareRepair(make(90, 60), make(80, 99)).accepted).toBe(false);
   expect(compareRepair(make(40, 80), make(90, 80)).accepted).toBe(true);
 });
@@ -39,6 +65,7 @@ it('accepts removal of an evidenced blocker despite small judge score noise', ()
     score: key === 'context' ? context : 88,
     reason: '有逐字证据',
     evidence: [content],
+    basis: dimensionBasis(constitution, key),
   }]));
   const before = parseStageScore({
     dimensions: dimensions(90),
@@ -59,6 +86,7 @@ it('still rejects a repair when a dimension crosses its quality floor', () => {
       score: key === 'context' ? context : 88,
       reason: '有逐字证据',
       evidence: [content],
+      basis: dimensionBasis(constitution, key),
     }])),
   }, { projectId: 'p', runId: String(context), stage: 'outline', content, constitution });
 
@@ -79,6 +107,7 @@ it('accepts a fully verified repair of an evidenced blocker even when the first 
       score: 90,
       reason: '已按创作宪法修复',
       evidence: [afterContent],
+      basis: dimensionBasis(constitution, key),
     }])),
     issues: [],
   }, { projectId: 'p', runId: 'after', stage: 'outline', content: afterContent, constitution });

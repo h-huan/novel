@@ -85,9 +85,7 @@ async function request<T>(
   await initializeApiBaseUrl();
   const url = `${BASE_URL}${path}`;
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
+  const headers: Record<string, string> = {};
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -106,6 +104,9 @@ async function request<T>(
     // 这三类动词若调用方未传 body，这里补一个合法空对象，确保请求本身有效；
     // 不影响任何业务逻辑或模型/场景配置（后端对应端点本就允许空 body）。
     options.body = '{}';
+  }
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
   }
 
   let response: Response;

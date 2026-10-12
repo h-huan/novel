@@ -116,9 +116,13 @@ export class PlatformAnalyticsService {
 
   /** 每个章节「最新一份质检报告」的 id（旧报告问题随重写失效，不计入当前待改） */
   private latestReportIds(scope: Scope): string[] {
-    const sc = this.scopeClause(scope);
+    const sc = this.scopeClause(scope, 'r.project_id');
     const rows = this.safeAll(
-      `SELECT id, chapter_id,source_type,scope,created_at FROM writing_quality_reports WHERE chapter_id IS NOT NULL${sc.clause} ORDER BY created_at ASC`,
+      `SELECT r.id, r.chapter_id, r.source_type, r.scope, r.created_at
+       FROM writing_quality_reports r
+       JOIN projects p ON p.id=r.project_id
+       JOIN chapters c ON c.id=r.chapter_id AND c.project_id=r.project_id
+       WHERE r.chapter_id IS NOT NULL${sc.clause} ORDER BY r.created_at ASC`,
       sc.params,
     );
     const latest = new Map<string, string>();
@@ -361,9 +365,13 @@ export class PlatformAnalyticsService {
     const sc = this.scopeClause(scope, 'i.project_id');
     const rows = this.safeAll(
       `SELECT i.issue_type check_type,i.severity,c.chapter_index,i.created_at detected_at
-       FROM writing_quality_issues i LEFT JOIN chapters c ON c.id=i.chapter_id
+       FROM writing_quality_issues i
+       JOIN projects p ON p.id=i.project_id
+       JOIN writing_quality_reports r ON r.id=i.report_id AND r.project_id=i.project_id
+       LEFT JOIN chapters c ON c.id=i.chapter_id AND c.project_id=i.project_id
        WHERE i.status='open' AND (i.issue_type LIKE 'consistency.%' OR i.issue_type='originality'
-         OR i.issue_type='outline_alignment' OR i.issue_type LIKE 'hardline.%')${sc.clause}
+         OR i.issue_type='outline_alignment' OR i.issue_type LIKE 'hardline.%')
+         AND (i.chapter_id IS NULL OR c.id IS NOT NULL)${sc.clause}
        ORDER BY i.created_at ASC`, sc.params,
     );
     const latest = new Map<string, any>();

@@ -1,29 +1,70 @@
+import { fictionNarrativeText } from '../../shared/src/fiction-naming';
+import { resolveQualityEvidence } from '../modules/writing-quality/quality-issue';
+import { readerGoalReviewIssues, readerGoalGateIssues, type ReaderGoalReview } from './reader-goal-review';
+
 export interface IdeaPresentationVerdict {
   position: number;
   title: string;
   titleCompelling: boolean;
   openingCompelling: boolean;
   distinctFromBatch: boolean;
+  storyCoherent: boolean;
+  payoffCredible: boolean;
+  platformFit: boolean;
+  storyEvidence: string;
+  payoffEvidence: string;
+  platformEvidence: string;
+  qualityReason: string;
   readerQuestion: string;
   issues: string[];
+  warnings?: string[];
+  readerGoals?: ReaderGoalReview;
+}
+
+/** Reference verdicts are never accepted again; unknown/duplicate target rows still fail. */
+export function targetIdeaReviews(value: any, cards: readonly any[], references: readonly any[]): any {
+  if (!Array.isArray(value?.reviews)) return value;
+  const targets = new Set(cards.map(card => card.title));
+  const referenceTitles = new Set(references.map(card => card.title).filter(title => !targets.has(title)));
+  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)) };
 }
 
 /** Bind an independent semantic judgement to exactly the cards actually reviewed. */
-export function presentationReviewIssues(value: any, cards: readonly any[]): string[] {
+export function presentationReviewIssues(value: any, cards: readonly any[], requireReaderGoals = false): string[] {
   if (!Array.isArray(value?.reviews) || value.reviews.length !== cards.length) return ['标题与首屏审查必须逐卡返回完整结论'];
   const seen = new Set<number>();
+  const issues: string[] = [];
   for (const row of value.reviews) {
+    if (requireReaderGoals || row?.readerGoals !== undefined) issues.push(...readerGoalReviewIssues(row?.readerGoals, fictionNarrativeText(cards[row?.position - 1] || {})).map(issue => '第' + (row?.position ?? '?') + '张题材审查：readerGoals.' + issue));
     if (!Number.isInteger(row?.position) || row.position < 1 || row.position > cards.length || seen.has(row.position)
       || row.title !== cards[row.position - 1].title
-      || ['titleCompelling', 'openingCompelling', 'distinctFromBatch'].some(key => typeof row[key] !== 'boolean')
+      || ['titleCompelling', 'openingCompelling', 'distinctFromBatch', 'storyCoherent', 'payoffCredible', 'platformFit'].some(key => typeof row[key] !== 'boolean')
+      || ['storyEvidence', 'payoffEvidence', 'platformEvidence'].some(key => !resolveQualityEvidence(fictionNarrativeText(cards[row.position - 1]), row[key]).verified)
+      || typeof row.qualityReason !== 'string' || row.qualityReason.trim().length < 8
       || typeof row.readerQuestion !== 'string' || row.readerQuestion.trim().length < 8
       || !Array.isArray(row.issues) || row.issues.some((issue: any) => typeof issue !== 'string' || !issue.trim())
-      || ((!row.titleCompelling || !row.openingCompelling || !row.distinctFromBatch) && row.issues.length === 0)) {
-      return ['审查必须匹配实际标题和唯一position，明确读者追问及未通过理由'];
+      || ((!row.titleCompelling || !row.openingCompelling || !row.distinctFromBatch || !row.storyCoherent || !row.payoffCredible || !row.platformFit) && row.issues.length === 0)) {
+      const card = cards[row?.position - 1];
+      const prefix = `第${row?.position ?? '?'}张题材审查`;
+      if (!card || seen.has(row.position) || row.title !== card.title) issues.push(`${prefix}：position须唯一且title须与对应题材原样一致`);
+      for (const key of ['titleCompelling', 'openingCompelling', 'distinctFromBatch', 'storyCoherent', 'payoffCredible', 'platformFit']) {
+        if (typeof row?.[key] !== 'boolean') issues.push(`${prefix}：${key}必须为布尔值`);
+      }
+      for (const key of ['storyEvidence', 'payoffEvidence', 'platformEvidence']) {
+        if (!card || !resolveQualityEvidence(fictionNarrativeText(card), row?.[key]).verified) issues.push(`${prefix}：${key}不能连续定位到题材卡原文；必须逐字引用对应卡的hook、setting、description、ending或scopeBreakdown，不得引用executionStandard、分类规则或参考卡，不得改写或拼接`);
+      }
+      if (typeof row?.qualityReason !== 'string' || row.qualityReason.trim().length < 8) issues.push(`${prefix}：qualityReason至少8字`);
+      if (typeof row?.readerQuestion !== 'string' || row.readerQuestion.trim().length < 8) issues.push(`${prefix}：readerQuestion至少8字`);
+      if (!Array.isArray(row?.issues) || row.issues.some((issue: any) => typeof issue !== 'string' || !issue.trim())) issues.push(`${prefix}：issues必须是非空理由字符串数组，合格时可为空数组`);
+      else if (['titleCompelling', 'openingCompelling', 'distinctFromBatch', 'storyCoherent', 'payoffCredible', 'platformFit'].some(key => row[key] === false) && !row.issues.length) issues.push(`${prefix}：存在false判据，issues须说明具体问题`);
     }
-    seen.add(row.position);
+    if (Array.isArray(row?.issues) && row.issues.length && ['titleCompelling', 'openingCompelling', 'distinctFromBatch', 'storyCoherent', 'payoffCredible', 'platformFit'].every(key => row[key] === true)) {
+      issues.push(`第${row.position}张题材审查：六项全部true却返回阻断issues，结论互斥；真实缺陷须把对应判据设false并给证据，可选表达建议须放warnings，不得仅按“建议”字样自动降级真实矛盾`);
+    }
+    if (row?.warnings !== undefined && (!Array.isArray(row.warnings) || row.warnings.some((item: any) => typeof item !== 'string' || !item.trim()))) issues.push(`第${row.position}张题材审查：warnings须为建议字符串数组`);
+    seen.add(row?.position);
   }
-  return [];
+  return issues;
 }
 
 export function presentationGateIssues(review: IdeaPresentationVerdict | undefined): string[] {
@@ -32,6 +73,10 @@ export function presentationGateIssues(review: IdeaPresentationVerdict | undefin
     ...(!review.titleCompelling ? ['标题缺少具体利益冲突、反常关系或未解问题，只有意象或道具名，未形成点击承诺'] : []),
     ...(!review.openingCompelling ? ['首屏缺少立即可理解的危险、欲望或关系反差，只在介绍设定或职业查证流程'] : []),
     ...(!review.distinctFromBatch ? ['与同批题材的主动选择、冲突推进或反转路径雷同，不能只换职业和道具'] : []),
+    ...(!review.storyCoherent ? ['题材因果或人物选择不成立，不能只凭噱头和字段齐全宣称精彩'] : []),
+    ...(!review.payoffCredible ? ['标题与起始承诺未形成可信兑现，结局不能靠新增能力或省略程序条件收束'] : []),
+    ...(!review.platformFit ? ['故事机制、分类或流派没有落实本次平台执行标准'] : []),
     ...review.issues,
+    ...(review.readerGoals ? readerGoalGateIssues(review.readerGoals) : []),
   ];
 }

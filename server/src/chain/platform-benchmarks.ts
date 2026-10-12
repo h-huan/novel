@@ -1,3 +1,4 @@
+import { quotedText } from './quoted-text';
 /**
  * platform-benchmarks.ts — 全平台唯一事实源（Single Source of Truth）
  *
@@ -149,7 +150,7 @@ export const PLATFORMS: Record<PlatformId, PlatformProfile> = {
     long: S([0.30, 0.55], 55, 110, 0.20, 500, [600, 900], true, true, CHAPTER_WORDS),
     styleMust: [
       '开篇前{openingHookChars}字直接出现本章核心矛盾、危机或反常事件本身（或一段冲突对话），职业身份、履历、家庭环境、日常动作一律后移，由后文动作和对话带出',
-      '爽点必须写到明面：打脸/反转/身份反差/结果兑现用旁观者反应、对手变脸、结果落定直接呈现；本条优先级高于通用“白描/克制/去戏剧化”基准，禁止用留白把爽点写没',
+      '阶段结果应让读者看得懂：按已选分类、文风和场景职责呈现行动改变了什么、仍有什么风险，不强制旁观者反应、对手变脸或打脸；必要结果不藏掉，未到期谜底保留',
       '前三章主角不许纯受气，每章至少一次主角的主动、反击、掌控或亮牌',
       '专业设定与术语用下沉读者秒懂的口语带出，不堆未解释名词',
     ],
@@ -472,7 +473,6 @@ export interface NarrativeMetrics {
   endingHasHook: boolean;
 }
 
-const CN_QUOTES = /[“「『]([\s\S]*?)[”」』]/g;
 const HOOK_WORDS = /(突然|忽然|死|杀|血|逃|跑|证据|录音|秘密|真相|不对|不对劲|诡异|异常|规则|倒计时|威胁|离婚|背叛|陷害|重生|穿越|系统|？|！|\?|!)/;
 const END_HOOK = /(？|\?|……|\.\.\.|吗|呢|谁|到底|究竟|竟然|原来|没想到|下一秒|就在此时|话音未落)/;
 
@@ -496,7 +496,7 @@ export function measureNarrative(content: string): NarrativeMetrics {
   const paraLens = paras.map(p => narrativeWords(p));
   const paragraphCount = paras.length;
   const avgParaChars = paragraphCount ? Math.round(paraLens.reduce((a, b) => a + b, 0) / paragraphCount) : 0;
-  const quoted = (text.match(CN_QUOTES) || []).map(q => narrativeWords(q)).reduce((a, b) => a + b, 0);
+  const quoted = quotedText(text).map(q => narrativeWords(q.text)).reduce((a, b) => a + b, 0);
   const dialogueRatio = words ? Number((quoted / words).toFixed(3)) : 0;
   return {
     words, paragraphCount, avgParaChars,
@@ -526,7 +526,7 @@ export function measureAgainstTarget(content: string, t: TextMetricTarget): { me
   const last = paras[paras.length - 1] || '';
   m.endingHasHook = t.endingHook ? END_HOOK.test(last) : true;
 
-  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const pct = (v: number) => `${(v * 100).toFixed(1).replace(/\.0$/, '')}%`;
   const rows: BenchmarkMetricRow[] = [];
 
   const dOk = m.dialogueRatio >= t.dialogueRatio[0] && m.dialogueRatio <= t.dialogueRatio[1];
@@ -585,7 +585,7 @@ export function buildBenchmarkDirective(platform?: string | null, length?: strin
   if (length === 'long_novel' || length === 'short_story') {
     const t = targetForLength(b, length);
     const lenLabel = length === 'long_novel' ? '长篇' : '短篇';
-    body = `（${lenLabel}）对话占比约 ${pct(t.dialogueRatio[0])}–${pct(t.dialogueRatio[1])}；平均段落不超过 ${t.avgParaCharsMax} 字，${t.shortParagraph ? '一句/短句意群成段' : '允许成段但不写大墙'}；` +
+    body = `（${lenLabel}）对话占比约 ${pct(t.dialogueRatio[0])}–${pct(t.dialogueRatio[1])}；平均段落不超过 ${t.avgParaCharsMax} 字，${t.shortParagraph ? '按完整意群组织短段，可含几句，长短自然变化，不强制一句一段' : '允许成段但不写大墙'}；` +
       `开篇约 ${t.openingHookChars} 字内建立阅读承诺；${t.payoffGapChars[0]}–${t.payoffGapChars[1]} 字是平台常见推进密度参考，可由场景职责和张力曲线偏离，禁止按固定字数硬塞反转${t.endingHook ? '；非终章章尾提供继续阅读理由，终章完成收束或余韵' : ''}；本章 ${t.chapterWords[0]}–${t.chapterWords[1]} 字。`;
   } else {
     const dLo = Math.min(b.short.dialogueRatio[0], b.long.dialogueRatio[0]);
@@ -603,9 +603,9 @@ export function buildBenchmarkDirective(platform?: string | null, length?: strin
     ? String(targetForLength(b, length).openingHookChars)
     : `短篇 ${b.short.openingHookChars} / 长篇 ${b.long.openingHookChars}`;
   const styleMustLine = b.styleMust && b.styleMust.length
-    ? `本平台风格红线（优先级高于通用“白描/克制/去戏剧化”基准）：${b.styleMust.map((x, i) => `${i + 1}) ${x.replace(/\{openingHookChars\}/g, hookWindowText)}`).join('；')}`
+    ? `本平台阅读要求（与已选分类、文风及作者要求共同执行，不取消谜底留白）：${b.styleMust.map((x, i) => `${i + 1}) ${x.replace(/\{openingHookChars\}/g, hookWindowText)}`).join('；')}`
     : '';
-  return [headLine, body, `分发逻辑：${b.distribution.note}。`, `平台节奏：${b.guide}`, styleMustLine, `原创红线：${b.original}`, '行文底线：短段是为手机阅读服务，但严禁“X了，Y了”式两字残句链（如“退了账，走了”“两下，灭了”），连贯动作要连成完整句子、补足成分；句末语气词克制；同一环境意象（车/灯/夜色/烟/雨等）不做近距离重复铺陈，过渡描写只承担转场；严禁相同动词/前缀的同构排比（“带了A、带了B、带了C、带了D”“想到了A，想到了B，想到了C”——只保留最有力的一项，其余写成有差异、有结果的具体句）；量词必须与名词正确搭配（“束”只用于花/光/发丝等成束细长物，蛋糕用“个”、文件用“份”、戒指用“枚”，不许把甲物量词套给乙物）。'].filter(Boolean).join('\n');
+  return [headLine, body, `分发逻辑：${b.distribution.note}。`, `平台节奏：${b.guide}`, styleMustLine, `原创红线：${b.original}`, '行文底线：短段是为手机阅读服务，但严禁“X了，Y了”式两字残句链（如“退了账，走了”“两下，灭了”），连贯动作要连成完整句子、补足成分；正常语气词和“了”按语义保留，只收敛无新信息的重复，不按词频删词；同一环境意象（车/灯/夜色/烟/雨等）不做近距离重复铺陈，过渡描写只承担转场；严禁相同动词/前缀的同构排比（“带了A、带了B、带了C、带了D”“想到了A，想到了B，想到了C”——只保留最有力的一项，其余写成有差异、有结果的具体句）；量词必须与名词正确搭配（“束”只用于花/光/发丝等成束细长物，蛋糕用“个”、文件用“份”、戒指用“枚”，不许把甲物量词套给乙物）。'].filter(Boolean).join('\n');
 }
 
 // ───────────────────────── 生成链：对照优秀线的自动收敛（不止过红线） ─────────────────────────

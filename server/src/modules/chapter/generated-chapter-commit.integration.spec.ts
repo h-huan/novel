@@ -17,7 +17,7 @@ describe('GeneratedChapterCommitService database boundary', () => {
     db = new DatabaseSync(':memory:');
     db.exec(`
       CREATE TABLE chapters (
-        id TEXT PRIMARY KEY, project_id TEXT, chapter_index INTEGER, status TEXT
+        id TEXT PRIMARY KEY, project_id TEXT, chapter_index INTEGER, status TEXT, outline_id TEXT
       );
       CREATE TABLE generation_runs (
         id TEXT PRIMARY KEY, project_id TEXT, chapter_index INTEGER, stage TEXT,
@@ -25,7 +25,7 @@ describe('GeneratedChapterCommitService database boundary', () => {
       );
     `);
     const exactOutput = '\n第一章正文\n';
-    db.prepare('INSERT INTO chapters VALUES (?,?,?,?)').run('chapter-1', 'project-1', 1, 'draft');
+    db.prepare('INSERT INTO chapters VALUES (?,?,?,?,?)').run('chapter-1', 'project-1', 1, 'draft', null);
     db.prepare('INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?)').run(
       'run-first-draft', 'project-1', 1, 'chapter', 'writing',
       'success', 'not_evaluated', exactOutput, '2026-09-27T10:00:00.000Z',

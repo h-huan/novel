@@ -65,10 +65,9 @@ export interface HardlineFinding {
  * 排版、白描风格的标点窗口更长），不是「查不查」：没有任何规则会因为平台或风格而完全不检查。
  */
 export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
-  // 只保留可确定验证的硬伤：明确元叙述、物理排版错误、实质重复、残句链、同构重复、量词错误和叠用标点。
+  // 只保留可确定验证的硬伤：明确元叙述、物理排版错误、实质重复、残句链、量词错误和叠用标点。
   // 段长/句长/标点密度/词频/比喻/生理反应等启发式只能作为语义复核证据，不能直接阻断。
   '15c', '15d', '33', '35', '35b', '42', '44',
-  '53-same-structure-parallel',
   '54-measure-word-mismatch', '56-punct-stacking',
 ];
 
@@ -368,7 +367,7 @@ export function detectForbiddenTells(
       if (actionListHits.length > 0) {
         findings.push({
           ruleId: 'list-enumeration',
-          message: `顿号动作清单 ${actionListHits.length} 处（连续 ≥5 项动作"XX、"罗列：${actionListHits[0].slice(0, 24)}）。只保留 2 个核心动作并写出具体结果，其余删掉，避免"罗列动作清单"；相同动词前缀的同构排比（带了A、带了B…）见规则53；人名/物品/地名等名词并列（点名、菜单、花名册）是合法叙事，不是动作清单，不得改动`,
+          message: `顿号动作清单 ${actionListHits.length} 处（连续 ≥5 项动作"XX、"罗列：${actionListHits[0].slice(0, 24)}）。这是形态风险，核对是否是有作用的流程概述或真实连续动作；仅在无信息变化的机械复述或句意受阻时修订，不按项数删动作；相同动词前缀的同构排比（带了A、带了B…）见规则53；人名/物品/地名等名词并列（点名、菜单、花名册）是合法叙事，不是动作清单，不得改动`,
           snippet: actionListHits.slice(0, 2).map(s => s.trim().slice(0, 30)).join(' / '),
           position: '全文',
           hitCharOffsets: charOffsetsOf(actionListHits.slice(0, 2)),
@@ -567,7 +566,7 @@ export function detectForbiddenTells(
           const combined = content.slice(grp[0].start, grp[3].end);
           findings.push({
             ruleId: '34',
-            message: '连续 4 个动作动词领起的短句排比（"' + slice(combined, 60) + '"——像动作清单/分镜脚本，是AI排比物理指纹）。把其中至少两个既有动作按原有因果合并成完整句，只保留真正推进剧情的关键动作；不得补造目的、感受或新事件',
+            message: '连续 4 个动作动词领起的短句排比（"' + slice(combined, 60) + '"——形态风险，须核对真实动作顺序与叙事作用）。正常连续动作可保留；仅在机械复述或影响句意时按既有因果调整，不要求合并固定数量，不补造目的、感受或新事件',
             snippet: slice(combined, 80),
             position: `offset ${grp[0].start}-${grp[3].end}`,
           });
@@ -1072,7 +1071,7 @@ export function detectForbiddenTells(
     }
 
     // ===== 53 同字/同构短并列（用户点名：“带了人、带了花、带了钻戒、带了协议”） =====
-    // 正常名词并列（苹果、香蕉、橘子）不是问题；相同动词/前缀反复铺排的同构排比才是 AI 腔。
+    // 正常名词并列（苹果、香蕉、橘子）不是问题；同构形态只定位语义复核风险，普通名词清单和有意强调不直接判AI腔。
     {
       // 反向引用 \1 强制“同一 1-2 字前缀”复现：带噪声的起点（“结果你带了人”）因无法满足前缀重复，
       // 引擎会自动滑到真正的并列起点（“带了人、带了花、带了钻戒”），避免被前句残字破坏同构判断。
@@ -1091,7 +1090,7 @@ export function detectForbiddenTells(
         findings.push({
           ruleId: '53-same-structure-parallel',
           occurrenceCount: structHits.length,
-          message: `同构排比 ${structHits.length} 处（如“${structHits[0].slice(0, 24)}”——相同动词/前缀连续铺排是AI腔）。只保留最有力的一项，其余改成有动作结果、有差异的具体句子，禁止“V了A、V了B、V了C…”式罗列`,
+          message: `同构排比 ${structHits.length} 处（如“${structHits[0].slice(0, 24)}”）。这是形态风险，须核对是否为正常列举、有意强调或符合人物处境的对白；仅在实际机械复述、阻断理解或无作用重复被原文证实后报告语言缺陷，不按数量直接改写`,
           snippet: structHits.slice(0, 3).join(' / '),
           position: '全文',
           hitCharOffsets: structOffsets.slice(0, 3),

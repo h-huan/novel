@@ -74,6 +74,7 @@ interface ChapterNode {
   goalArc: GoalArcType;
   targetWords: number;
   wordCountReason?: string;
+  timeline?: string;
   content: string;
   conflict: string;
   mood: string;
@@ -494,6 +495,7 @@ const OutlinePage: React.FC = () => {
       goalArc: normalizeGoalArc(ch.goalArc || ch.goal_arc || sceneData.goalArc),
       targetWords: Number(ch.targetWords || ch.target_words || sceneData.targetWords || 0),
       content: ch.content || '',
+      timeline: ch.timeline || sceneData.timeline || '',
       conflict: sceneData.conflict || ch.conflict || '',
       mood: sceneData.emotionalTone || sceneData.mood || ch.mood || '',
       hook: sceneData.hook || ch.hook || '',
@@ -687,9 +689,10 @@ const OutlinePage: React.FC = () => {
         await api.post(`/projects/${projectId}/outlines`, {
           level: 'chapter',
           parentId: volumeId,
-          order: chapterIndex + 1,
+          order: totalChapters,
           title: chapter.title,
           content: chapter.content || '',
+          timeline: chapter.timeline || '',
           chapterFunction: normalizeFunction(chapter.chapterFunction) === 'paving'
             ? inferRhythmByOrder(chapterIndex + 1)
             : normalizeFunction(chapter.chapterFunction),
@@ -756,6 +759,7 @@ const OutlinePage: React.FC = () => {
       goalArc: normalizeGoalArc(chapter.goalArc),
       targetWords: Number(chapter.targetWords || 0),
       wordCountReason: chapter.wordCountReason || chapter.targetWordsReason || '',
+      timeline: typeof chapter.timeline === 'string' ? chapter.timeline : '',
       content,
       conflict: chapter.conflict || '',
       mood: chapter.mood || chapter.tone || chapter.emotion || '',

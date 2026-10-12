@@ -1,3 +1,4 @@
+import { quotedText } from '../../chain/quoted-text';
 import { QualityInspectionService } from '../refinement/quality-inspection.service';
 import { qualityIssue, type QualityIssue, type QualityStage } from './quality-issue';
 
@@ -62,8 +63,8 @@ export function styleFingerprint(input: {
   for (const line of input.content.split(/\n+/)) {
     const speakers = input.characterNames.filter(name => line.startsWith(name));
     if (speakers.length !== 1) continue;
-    for (const match of line.matchAll(/[“「]([^”」]{12,})[”」]/g)) {
-      const quote = match[1];
+    for (const match of quotedText(line).filter(q => q.text.length >= 12)) {
+      const quote = match.text;
       if (!voices.has(quote)) voices.set(quote, new Set());
       voices.get(quote)!.add(speakers[0]);
     }
@@ -77,7 +78,7 @@ export function styleFingerprint(input: {
   for (const line of input.content.split(/\n+/)) {
     const speaker = input.characterNames.find(name => line.startsWith(name));
     if (!speaker) continue;
-    const quotes = [...line.matchAll(/[“「]([^”」]{8,})[”」]/g)].map(match => match[1]);
+    const quotes = quotedText(line).filter(q => q.text.length >= 8).map(q => q.text);
     if (quotes.length) attributed.set(speaker, [...(attributed.get(speaker) || []), ...quotes]);
   }
   const heuristicPatterns: Array<[string, RegExp, string]> = [
@@ -94,7 +95,7 @@ export function styleFingerprint(input: {
   const functions = paragraphs.map(paragraph => ({
     paragraph,
     signature: [
-      /[“「]/.test(paragraph) ? 'dialogue' : 'narration',
+      quotedText(paragraph).length ? 'dialogue' : 'narration',
       /(突然|忽然|下一秒|就在这时)/.test(paragraph) ? 'turn' : 'steady',
       /(因为|所以|意味着|说明)/.test(paragraph) ? 'explain' : 'show',
     ].join(':'),

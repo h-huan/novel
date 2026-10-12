@@ -7,6 +7,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as Handlebars from 'handlebars';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
+import { chapterResponsibilityPlanningDirective } from '../../shared/src/chapter-responsibility-review';
 
 interface TemplateEntry {
   id: string;
@@ -62,10 +63,14 @@ export class PromptRegistryService {
 3. **每卷主题**：为每卷确定一个核心主题
 4. **卷数理由**：说明为什么选择这个卷数（基于剧情需要）
 5. **执行标准对齐**：卷数、每卷主题与阶段划分必须体现上述平台定位、故事基调、文风、网文流派、题材标签与叙事视角；不得给出与执行标准矛盾的结构
+6. **先编译章节职责，再展开内容**：${chapterResponsibilityPlanningDirective(false)}
+按已注入QLT-003的行动—条件—结果判据，先核对每项exitState如何由本章责任实际实现；将必要动作与前置条件安排在responsibility/prerequisites中，而不是只写获救、落网、封停等结果。进入权限核对不能替代对结果成立条件的核对。
+未确认精确起点钟表时，timeline优先使用已有的相对先后、时段和期限约束，不自行补出各章的精确小时数。确有来源或明确候选排期的数值，后续content与scenes中的同一动作必须沿用该时点，不能另写相互冲突的早晚或跨日；不得为数字标签另加正文解释。
+以chapterResponsibilities列出本批次各章的职责、进入条件、结束状态和相对时间。只编译后续细纲要展开的近期连续窗口；章节上限非空时遵守该上限，长篇不一次穷举全书远期章节。先把核心事件的起点、已有期限、完成位置与完成后的后果分开；所有处在同一时限内的章节必须能沿一条累计时间线执行，不能每章重新开始计时。尚未获得的线索、权限、道具和人物配合必须在此前安排获得途径，或明确保留为本章需要解决的任务，不能在后章直接当作已有。prerequisites与exitState只编译本次候选，不覆盖已确认资料；期限依据缺失则写未知，不编造精确数值。每章的阶段回报须体现行动前后的局面改变，不只反复增加罚款或跑手续。
 
 ## 输出格式
 输出合法JSON，不要markdown包裹：
-{"analysis":{"storyComplexity":"简单/中等/复杂","recommendedVolumes":null,"reason":"根据叙事阶段得到卷数的理由"},"volumes":[{"volumeNumber":1,"theme":"卷主题","focus":"本卷重点","estimatedChapters":null,"chapterCountReason":"根据事件链密度与节奏得到章数的理由"}]}
+{"analysis":{"storyComplexity":"简单/中等/复杂","recommendedVolumes":null,"reason":"根据叙事阶段得到卷数的理由"},"volumes":[{"volumeNumber":1,"theme":"卷主题","focus":"本卷重点","estimatedChapters":null,"chapterCountReason":"根据事件链密度与节奏得到章数的理由"}],"chapterResponsibilities":[{"chapter":1,"title":"候选章节","function":"章节职责","responsibility":"本章唯一推进任务","prerequisites":["来自已确认资料或前章出口的必要条件"],"timeline":"相对计时起点的位置；在同一累计期限内或在核心事件完成后","exitState":"本章结束时实际取得的事实、筹码与局面改变"}]}
 输出时必须把 null 替换为按当前故事分析得到的正整数；数量必须有理由，禁止平均分配。`,
       variables: ['user_input.story_setting', 'user_input.targetWords', 'user_input.genre', 'user_input.chapterLimit', 'user_input.platform_directive'],
       isActive: true,
@@ -94,6 +99,8 @@ export class PromptRegistryService {
 3. **卷内结构**：每卷应有起承转合（开头铺垫→发展→高潮→结尾钩子）
 4. **卷间衔接**：每卷结尾应自然过渡到下一卷
 5. **伏笔规划**：在大纲中标注关键伏笔的埋设位置和回收位置
+6. **继承已编译职责**：前序chapterResponsibilities中的期限、进入条件和出口状态是本次规划的共同基线；本节点展开冲突与兑现，不重新安排相互矛盾的日期，不跳过必要条件的取得，不提前消费后章出口。若前序与已确认资料不兼容，明确指出双方依据，不用新增能力或延长期限掩盖。
+7. **关键动作因果自检**：新增决定性动作前核对参与者位置、进入与离开条件、关键证据来源和动作先后；同一人在同一时点不能既被引出又被锁在原处。卷纲保留阶段目标、冲突和结果关系，尚未落实的战术条件交给后续细纲解决；不得靠手滑、巧合泄密或一句“完成反制”跳过取得关键证据与权限的必要路径。
 
 ## 输出格式
 输出合法JSON，不要markdown包裹：
@@ -120,6 +127,10 @@ export class PromptRegistryService {
 {{user_input.story_setting}}
 
 ## 卷结构与剧情分析
+【前序章节职责与累计状态】
+{{json chain_output.node_1_analysis}}
+
+【卷级展开】
 {{json chain_output.node_2_volumes}}
 
 ## 本批次规模
@@ -137,11 +148,14 @@ export class PromptRegistryService {
 8. **chapterFunction 只能取以下之一**：opening、exposition、rising_action、conflict、climax、explosion、resolution、closing、cliffhanger、transition、breathing、charging
 9. **goalArc 只能取以下之一**：crisis_resolve、accumulate_burst、foreshadow_recover、pave_climax、suppress_counter、mist_truth、probe_showdown
 10. **场景可拍**：scenes 是本章场景列表（字符串数组，每项一个可感知的地点+事件）
+11. **时间职责编译**：按已注入的 CTX-005、CTX-008，把故事中明确的总时间窗口、事件期限与前章状态落实到各章 timeline。先确定核心事件从哪一处开始计时、必须在哪一处前完成，再分配各章的相对位置；章纲中的“次日”“又过数天”等跨度必须能纳入同一条累计时间线。已到期核心事件之后的后果可以跨日，但须明确事件已完成，不能把收束阶段的跨度放进尚未结束的倒计时。仅编译已有依据，来源没有精确钟点或历时就保持相对关系，不补造秒数；content、scenes、characterActions 必须遵循同一 timeline。
+12. **按前序职责接力**：逐章继承chapterResponsibilities的prerequisites、timeline和exitState，细化动作与场景，不独立重设起点、期限、能力或已取得证据。第N章用到的前章成果必须能定位到第N-1章或更早的出口；普通既有职业能力仍以已确认人物与世界资料为依据，不要求无关日常动作逐项登记。终局动作先后、参与者位置、关键工具与离场路径须可由这些条件成立，不能以一句“完成反制”跳过必要因果。
+13. **关键场景状态核对**：按已注入ARCH-005/QLT-003，生成场景前沿进入—行动—结果—离开核对参与者位置、可用权限、关键物件的来源与保管状态，核对对手按既有能力反应时结果是否仍成立；不能把结果断言当成立条件。只把真正改变结果的交接或撤离动作写进场景，不另加解释段；物理物件与可共享的信息不能混作同一独占对象，已明确原件/唯一副本的条件须继承。相邻章交接发生在前章最后一个实际动作之后，同一时段可以包含先后事件，不为消除时段重叠编造精确钟点。
 
 ## 输出格式
 输出合法JSON，不要markdown包裹：
-{"volumes":[{"volumeNumber":1,"chapters":[{"volumeNumber":1,"chapterNumber":1,"title":"章节标题","chapterFunction":"exposition","goalArc":"accumulate_burst","targetWords":3000,"wordCountReason":"为什么需要这些字","content":"本章详细大纲（核心事件、冲突、人物行动、场景、结尾钩子）","conflict":"核心冲突","mood":"基调/情绪","hook":"结尾钩子","foreshadowing":"本章埋设伏笔（无则空字符串）","foreshadowingRecovery":"本章回收伏笔（无则空字符串）","highlight":"爽点/高能记忆点","characterActions":"人物本章关键行动","scenes":["场景1"],"reversals":["递进反转"],"foreshadows":[{"item":"伏笔","type":"埋设"}]}]}]}`,
-      variables: ['chain_output.node_2_volumes', 'user_input.story_setting', 'user_input.platform_directive', 'user_input.chapterLimit', 'user_input.wordRangeText'],
+{"volumes":[{"volumeNumber":1,"chapters":[{"volumeNumber":1,"chapterNumber":1,"title":"章节标题","chapterFunction":"exposition","goalArc":"accumulate_burst","targetWords":3000,"wordCountReason":"为什么需要这些字","timeline":"本章相对前章的位置、累计时间与已有期限；无数字依据时只写相对关系","content":"本章详细大纲（核心事件、冲突、人物行动、场景、结尾钩子）","conflict":"核心冲突","mood":"基调/情绪","hook":"结尾钩子","foreshadowing":"本章埋设伏笔（无则空字符串）","foreshadowingRecovery":"本章回收伏笔（无则空字符串）","highlight":"爽点/高能记忆点","characterActions":"人物本章关键行动","scenes":["场景1"],"reversals":["递进反转"],"foreshadows":[{"item":"伏笔","type":"埋设"}]}]}]}`,
+      variables: ['chain_output.node_1_analysis', 'chain_output.node_2_volumes', 'user_input.story_setting', 'user_input.platform_directive', 'user_input.chapterLimit', 'user_input.wordRangeText'],
       isActive: true,
     });
 

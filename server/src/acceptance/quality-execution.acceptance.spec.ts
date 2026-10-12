@@ -9,11 +9,41 @@ import {
   chapterResponsibilityIssueSignature,
 } from '../modules/generation-metrics/generation-metrics.service';
 import { RealLLMService } from '../chain/real-llm.service';
+import { ChainController } from '../chain/chain.controller';
 import { BenchmarkController } from '../chain/benchmark.controller';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
+import { dimensionBasisFromPrompt } from '../test/quality-review.fixture';
 import { qualityIssue } from '../modules/writing-quality/quality-issue';
 import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
+
+it('persists the logical insertion rejection with the candidate and leaves saved content intact', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    await new Migrator(db).runMigrations();
+    const project = seedAcceptanceProject(db, { title: '补写失败诊断' });
+    db.prepare("INSERT INTO chapters(id,project_id,chapter_index,title,content,created_at,updated_at) VALUES('saved',?,2,'原章节','不得覆盖的已保存正文','now','now')").run(project.id);
+    const metrics = new GenerationMetricsService({ getDb: () => db } as any);
+    const controller = Object.create(ChainController.prototype) as any;
+    const first = '她收起信。门外又有人敲门。\n\n谁在那里？';
+    controller.resolveHardlineProfile = () => undefined;
+    controller.logger = { error: vi.fn(), warn: vi.fn() };
+    controller.generationMetrics = metrics;
+    controller.realLLM = { generate: vi.fn().mockResolvedValueOnce({ content: first })
+      .mockResolvedValueOnce({ content: JSON.stringify({ insertions: [{ anchorId: 'invalid', text: '新场景' }] }) }) };
+    const before = db.prepare('SELECT * FROM chapters WHERE project_id=?').all(project.id);
+    await expect(controller.generateBodyWithLengthGuard({ basePrompt: '本章出口', targetWords: 40,
+      scenario: 'writing', wordRange: { min: 30, max: 100 },
+      metricsContext: { projectId: project.id, chapterIndex: 2 } })).rejects.toThrow('编号无效');
+    const metric = db.prepare("SELECT * FROM generation_step_metrics WHERE project_id=? AND step_key='body_length_contract'").get(project.id);
+    expect(metric).toMatchObject({ status: 'failed', phase: 'validation', chapter_index: 2 });
+    const run = db.prepare('SELECT * FROM generation_runs WHERE id=?').get(metric.run_id);
+    expect(run).toMatchObject({ status: 'failed', project_id: project.id, output_text: first });
+    expect(run.error).toContain('编号无效');
+    expect(controller.logger.warn).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT * FROM chapters WHERE project_id=?').all(project.id)).toEqual(before);
+  } finally { db.close(); }
+});
 
 function schemaShape(db: any) {
   return db.prepare("SELECT type,name,tbl_name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")
@@ -150,7 +180,7 @@ it('runner calls the production pipeline, isolates labels, and keeps empty state
     metrics.annotateBenchmarkSample(sample.id,['human_secret_label']);
     const spy=vi.fn(async(r:any)=>{
       expect(r.prompt).not.toContain('human_secret_label');
-      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'测试评审',evidence:[content]}]))})};
+      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'测试评审',evidence:[content],basis:dimensionBasisFromPrompt(r.prompt,k)}]))})};
     });
     (llm as any).generateInternal=spy;
     const result:any=await controller.run({projectId:p.id,sampleIds:[sample.id]});
@@ -160,7 +190,7 @@ it('runner calls the production pipeline, isolates labels, and keeps empty state
     (llm as any).generateInternal=vi.fn(async(r:any)=>{
       if(r.scenario==='refinement') return {content:JSON.stringify({patches:[{original:'铁门',replacement:'木门'}]})};
       const current=r.prompt.split('当前生成结果：')[1];
-      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:k==='logic'&&!current.includes('木门')?40:90,reason:'按事实修正门材质',evidence:[current]}]))})};
+      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:k==='logic'&&!current.includes('木门')?40:90,reason:'按事实修正门材质',evidence:[current],basis:dimensionBasisFromPrompt(r.prompt,k)}]))})};
     });
     const repaired:any=await controller.run({projectId:p.id,sampleIds:[sample.id],repair:true});
     expect(repaired.status).toBe('completed');

@@ -1,5 +1,7 @@
-import { qualityIssue, type QualityStage } from './quality-issue';
-import { readConstitution } from '../project/creative-constitution';
+import { qualityIssue, resolveQualityEvidence, verifySemanticEvidence, semanticEvidenceSources, verifyDimensionBasis, type QualityStage } from './quality-issue';
+import { causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
+import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from './semantic-evidence-repair';
+import { readConstitution, buildExecutionStandard } from '../project/creative-constitution';
 import { scorePolicy } from './score-policy';
 /**
  * WritingQualityService - Phase 6.2 稳定修复版
@@ -19,7 +21,7 @@ import { ChapterService } from '../chapter/chapter.service';
 import { QualityInspectionService } from '../refinement/quality-inspection.service';
 import { compileContext } from '../generation-metrics/context-compiler';
 import { reviewCharacterContracts } from './character-contract';
-import { deterministicPlatformReview, platformReviewToRows, type PlatformQualityRow } from './platform-quality-rules';
+import { deterministicPlatformReview, isObjectivePlatformRule, platformReviewToRows, partitionPlatformRows, type PlatformQualityRow } from './platform-quality-rules';
 // 平台显示名只有 platform-analytics/labels 一份（含看板短名别名）：这里曾内联 PLATFORM_CN 第二份，
 // 结果是同一次质检里生成侧用「番茄小说」、质检提示用「番茄」，用户无法确认两处说的是不是同一件事。
 import { PLATFORM_LABELS } from '../platform-analytics/labels';
@@ -401,15 +403,31 @@ export class WritingQualityService implements OnModuleInit {
       throw new BadRequestException('LLM service is not available. Please configure an API key.');
     }
 
+    // QLT-004: statistical fingerprints locate risks for review, not proven defects.
+    let aiFingerprints: any = null;
+    let fingerprintScore = 0;
+    if (this.qualityInspection) {
+      try {
+        aiFingerprints = this.qualityInspection.detectAiFingerprints(content);
+        if (typeof aiFingerprints?.overallScore !== 'number') aiFingerprints = null;
+        else fingerprintScore = Math.max(0, 100 - aiFingerprints.overallScore);
+      } catch (err) {
+        this.logger.warn(`AI fingerprint detection failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // LLM 调用（失败时直接抛错，不写空报告）
     let llmResult: LLMQualityOutput;
     let parseWarning: string | null = null;
     let rawContentPreview: string | null = null;
     try {
-      const response = await this.callQualityLLM(content, chapterTitle, context, dto, projectId);
+      const response = await this.callQualityLLM(content, chapterTitle, context, dto, projectId, aiFingerprints);
       llmResult = response.result;
       parseWarning = response.parseWarning;
       rawContentPreview = response.rawPreview;
+      if (llmResult.evidenceValidation?.status === 'not_evaluated') {
+        throw new BadRequestException(`语义评审未完成：${llmResult.evidenceValidation.unverifiedIssues.length} 项问题缺少可验证依据；保留旧报告，不进入自动精修`);
+      }
     } catch (err) {
       this.logger.error(`LLM quality analysis failed: ${err instanceof Error ? err.message : String(err)}`);
       throw new BadRequestException(`Quality analysis failed: ${err instanceof Error ? err.message : 'LLM call error'}`);
@@ -430,28 +448,14 @@ export class WritingQualityService implements OnModuleInit {
       mode: this.inferAttentionMode(context?.project),
     });
 
-    // 物理指纹检测（确定性，毫秒级）
-    let aiFingerprints: any = null;
-    let fingerprintScore = 0;
-    if (this.qualityInspection) {
-      try {
-        aiFingerprints = this.qualityInspection.detectAiFingerprints(content);
-        if (typeof aiFingerprints?.overallScore !== 'number') aiFingerprints = null;
-        else fingerprintScore = Math.max(0, 100 - aiFingerprints.overallScore);
-      } catch (err) {
-        this.logger.warn(`AI fingerprint detection failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    // 统一综合评分：物理指纹30% + LLM语义评审70%（设定一致性由chain层负责）
+    // QLT-004: unconfirmed statistical risk cannot lower a verified semantic score.
+    // Actual language hardlines, platform compliance and label penalties remain below.
     const llmScore = llmResult.overallScore;
-    const blendedScore = aiFingerprints
-      ? Math.round(fingerprintScore * 0.3 + llmScore * 0.7)
-      : llmScore;
+    const blendedScore = llmScore;
 
     // 确定性硬红线扣分（与生成链共用同一扫描器 hardline-scanner，单一事实源）：
     // 「哪些算硬线」的唯一判据 = hardline-scanner 的 LANGUAGE_HARDLINE_RULE_IDS（语言硬伤 + 文笔/排版硬伤）；
-    // 「扣多少分」才由下面的权重表决定。LLM 语义评分对同构排比/量词错配/残句链等语言硬伤容易手软给虚高分，
+    // 「扣多少分」才由下面的权重表决定。量词错配/残句链等可确认语言硬伤由共享硬线清单兜底；同构形态交语义评审，
     // 这里用零 LLM 的确定性扫描逐项扣分，让这类问题无法靠 LLM 印象混到 90+。
     const hardlineProfile = {
       platform: context?.project?.tagProfile?.platform || undefined,
@@ -488,7 +492,8 @@ export class WritingQualityService implements OnModuleInit {
     // 平台标准（目标平台的目标度量）在质检侧的落地点：复用生成侧 Gate 的确定性评审，
     // 把「本章不符合目标平台」变成可逐条精修的质检问题并计入统一综合分。
     // 此前该评审只在生成侧 Gate 调用，质检报告里看不到任何 platform.* 问题，平台标准等于没生效。
-    const platformRows = platformReview.rows;
+    const platformFindings = partitionPlatformRows(platformReview.rows, llmResult.issues || []);
+    const platformRows = platformFindings.confirmed;
     const PLATFORM_SEVERITY_PENALTY: Record<string, number> = { blocking: 6, high: 4, medium: 2, low: 0, info: 0 };
     const platformPenalty = Math.min(12, platformRows.reduce((sum, row) => sum + (PLATFORM_SEVERITY_PENALTY[row.severity] || 0), 0));
 
@@ -541,8 +546,12 @@ export class WritingQualityService implements OnModuleInit {
     const unifiedScore = Math.max(0, blendedScore - hardlinePenalty - tagPenalty - platformPenalty);
 
     const reportPayload: Record<string, any> = { attention };
+    reportPayload.platformSignalProbes = platformFindings.probes;
     reportPayload.characterContractReview = (llmResult as any).characterContractReview;
     reportPayload.narrativeTrace = (llmResult as any).narrativeTrace;
+    reportPayload.causalAudit = (llmResult as any).causalAudit;
+    reportPayload.evidenceValidation = llmResult.evidenceValidation;
+    reportPayload.tagFitBasis = llmResult.tagFitBasis;
     if ((llmResult as any).tagFit) reportPayload.tagFit = (llmResult as any).tagFit;
     if (rawTagEvidence) reportPayload.tagFitEvidence = rawTagEvidence;
     // 覆盖范围每次都入库；否则“本项目不设该投稿字段”会在看板被误报成“漏评”。
@@ -557,6 +566,7 @@ export class WritingQualityService implements OnModuleInit {
     if (aiFingerprints) {
       reportPayload.aiFingerprints = aiFingerprints;
       reportPayload.fingerprintScore = fingerprintScore;
+      reportPayload.fingerprintEvaluation = { role: 'semantic_review_probe', scorePenalty: 0 };
       reportPayload.unifiedScore = unifiedScore;
     }
     if (hardlineHits.length > 0) {
@@ -601,7 +611,7 @@ export class WritingQualityService implements OnModuleInit {
     const summary = parseWarning
       ? `质量诊断解析失败：${parseWarning}。请重试。`
       : aiFingerprints
-        ? `${llmResult.summary}（物理指纹分：${fingerprintScore}，融合分：${blendedScore}${hardlineNote}${tagNote}${platformNote}，统一综合分：${unifiedScore}）`
+        ? `${llmResult.summary}（统计指纹参考分：${fingerprintScore}，仅作风险线索；语义分：${blendedScore}${hardlineNote}${tagNote}${platformNote}，统一综合分：${unifiedScore}）`
         : `${llmResult.summary}${hardlineNote}${tagNote}${platformNote}（统一综合分：${unifiedScore}）`;
     // 等级以统一综合分确定性推导为准（90+ 为 high），不再直接采用 LLM 自报等级，避免分与级不一致。
     const overallLevel = levelByQualityScore(unifiedScore);
@@ -648,13 +658,17 @@ export class WritingQualityService implements OnModuleInit {
     // 这里曾只有第二份“硬红线扣分”口径：质检报告扣了分却没有阻断问题，
     // 高基础分仍可能把命中硬红线的章节标成 ok。与生成 Gate 共用扫描结果并逐条阻断。
     const hardlineIssues = this.buildHardlineIssues(content, hardlineHits);
-    const allInputIssues = [...(llmResult.issues || []), ...punctIssues, ...hardlineIssues, ...labelFitIssue, ...platformRows];
+    const platformTypes = new Set(platformRows.map(row => row.issueType));
+    const allInputIssues = [...(llmResult.issues || []).filter(issue => !platformTypes.has(issue.issueType)), ...punctIssues, ...hardlineIssues, ...labelFitIssue, ...platformRows];
     for (const issue of allInputIssues) {
       const issueType = validTags.has(issue.issueType) ? issue.issueType : 'needs_hook';
       const tags = (issue.tags || []).filter((t: string) => validTags.has(t));
       if (!tags.includes(issueType)) tags.unshift(issueType);
 
       const issueId = uuid();
+      const issuePayload = JSON.stringify({ evidenceVerified: issue.evidenceVerified ?? true,
+        evidenceKind: issue.evidenceKind, shownEvidence: issue.shownEvidence, basisEvidence: issue.basisEvidence,
+        basisSource: issue.basisSource, basisReason: issue.basisReason });
       db.prepare(`
         INSERT INTO writing_quality_issues (
           id, report_id, project_id, chapter_id, issue_type, severity, title, summary,
@@ -668,7 +682,7 @@ export class WritingQualityService implements OnModuleInit {
         issue.paragraphIndex ?? null, issue.sentenceIndex ?? null,
         issue.startOffset ?? null, issue.endOffset ?? null,
         issue.originalText || '', issue.suggestedText || '',
-        JSON.stringify(tags), 'open', '{}',
+        JSON.stringify(tags), 'open', issuePayload,
         JSON.stringify(this.buildIssueNavigation({
           projectId,
           chapterId,
@@ -695,7 +709,7 @@ export class WritingQualityService implements OnModuleInit {
         end_offset: issue.endOffset ?? null as any,
         original_text: issue.originalText || '',
         suggested_text: issue.suggestedText || '',
-        tags: JSON.stringify(tags), status: 'open', payload: '{}',
+        tags: JSON.stringify(tags), status: 'open', payload: issuePayload,
         navigation_json: JSON.stringify(this.buildIssueNavigation({
           projectId,
           chapterId,
@@ -1001,6 +1015,14 @@ export class WritingQualityService implements OnModuleInit {
     ).get(issue.chapter_id) as { id: string; title: string; content: string; status: string } | undefined;
     if (!chapterRow) throw new NotFoundException(`Chapter ${issue.chapter_id} not found`);
 
+    const evidence = resolveQualityEvidence(chapterRow.content, issue.evidence);
+    if (!evidence.verified || !evidence.unique) {
+      throw new BadRequestException('问题原文证据缺失或定位不唯一，请重新质检后再精修');
+    }
+    if (safeJsonParse(issue.payload || '{}', {}).evidenceVerified !== true) {
+      throw new BadRequestException('该问题尚未通过当前证据校验，请重新质检后再精修');
+    }
+
     const isLocked = chapterRow.status === 'locked';
     const mode = dto.mode || 'suggest_only';
     const contextText = this.getChapterContext(chapterRow.content, issue);
@@ -1010,6 +1032,7 @@ export class WritingQualityService implements OnModuleInit {
     }
 
     const refineResult = await this.callRefineLLM(issue, chapterRow.content, contextText, dto.instruction);
+    const canApply = mode !== 'suggest_only' && !isLocked && refineResult.remainingRisk !== 'high';
 
     const now = new Date().toISOString();
     const revisionId = uuid();
@@ -1023,7 +1046,7 @@ export class WritingQualityService implements OnModuleInit {
       'local_refine', refineResult.beforeText, refineResult.afterText,
       JSON.stringify(refineResult.diff), 0,
       JSON.stringify({ reason: refineResult.reason, remainingRisk: refineResult.remainingRisk, locked: isLocked }),
-      mode !== 'suggest_only' && !isLocked ? 1 : 0,
+      canApply ? 1 : 0,
       'system', now, now,
     );
     const history = safeJsonParse(issue.status_history_json || '[]', []);
@@ -1041,10 +1064,10 @@ export class WritingQualityService implements OnModuleInit {
         beforeText: refineResult.beforeText, afterText: refineResult.afterText,
         reason: refineResult.reason, diff: refineResult.diff,
         remainingRisk: refineResult.remainingRisk,
-        canApply: mode !== 'suggest_only' && !isLocked,
+        canApply,
         locked: isLocked, applied: false,
       },
-      canApply: mode !== 'suggest_only' && !isLocked,
+      canApply,
       locked: isLocked,
     };
   }
@@ -1061,6 +1084,9 @@ export class WritingQualityService implements OnModuleInit {
     if (revision.applied === 1) {
       throw new BadRequestException('Revision already applied');
     }
+    if (revision.can_apply === 0 || safeJsonParse(revision.payload || '{}', {}).remainingRisk === 'high') {
+      throw new BadRequestException('该修订仅供参考或存在高风险，不能直接应用');
+    }
 
     const chapterRow = db.prepare(
       'SELECT id, content, word_count, status FROM chapters WHERE id = ?',
@@ -1075,9 +1101,9 @@ export class WritingQualityService implements OnModuleInit {
     const afterText = revision.after_text;
     const currentContent = chapterRow.content;
 
-    if (!currentContent.includes(beforeText)) {
+    if (!beforeText || !resolveQualityEvidence(currentContent, beforeText).unique || !currentContent.includes(beforeText)) {
       throw new BadRequestException(
-        'Cannot apply revision: original text not found in chapter. The chapter may have been modified since the revision was created.',
+        'Cannot apply revision: original text missing or ambiguous. Please recheck the current chapter.',
       );
     }
 
@@ -1135,12 +1161,15 @@ export class WritingQualityService implements OnModuleInit {
 
     if (!issue) throw new BadRequestException('复检缺少关联质量问题，不能判定通过');
     if (!this.realLLM) throw new BadRequestException('复检模型不可用，问题保持未通过，请稍后重试');
-    if (!revision.applied || !revision.after_text) throw new BadRequestException('修订稿尚未应用，不能复检通过');
+    if (!revision.applied || typeof revision.after_text !== 'string') throw new BadRequestException('修订稿尚未应用，不能复检通过');
     const chapterRow = db.prepare(
       'SELECT content FROM chapters WHERE id = ?',
     ).get(revision.chapter_id) as { content: string } | undefined;
     if (!chapterRow?.content || !chapterRow.content.includes(revision.after_text)) {
       throw new BadRequestException('修订稿未写入章节正文，不能复检通过');
+    }
+    if (revision.after_text === '' && chapterRow.content.includes(revision.before_text)) {
+      throw new BadRequestException('待删除原文仍在章节中，不能复检通过');
     }
     // 这里曾有第二份“复检通过”口径：模型异常时按剩余问题数推断 pass，
     // 甚至 JSON 解析失败也默认通过，导致未验证的硬红线被标成 recheck_passed。
@@ -1258,9 +1287,16 @@ export class WritingQualityService implements OnModuleInit {
     context: Record<string, any>,
     dto: AnalyzeChapterDto,
     projectId: string,
+    fingerprintProbes?: unknown,
   ): Promise<{ result: LLMQualityOutput; parseWarning: string | null; rawPreview: string | null }> {
     const tagsList = WRITING_QUALITY_TAGS.join(', ');
-    const tp = (context as any)?.project?.tagProfile || {};
+    const savedConstitution = (context as any)?.project?.creativeConstitution;
+    const tp = savedConstitution ? {
+      platform: savedConstitution.targetPlatform, projectType: savedConstitution.projectType,
+      category: savedConstitution.category, targetAudience: savedConstitution.targetAudience,
+      tone: savedConstitution.storyTone, style: savedConstitution.writingStyle,
+      genre: savedConstitution.webNovelGenre, pov: savedConstitution.pov,
+    } : (context as any)?.project?.tagProfile || {};
     const tagDimensions = executionDimensionsForProject({
       targetPlatform: tp.platform || '', projectType: tp.projectType || '',
       category: tp.category || '', targetAudience: tp.targetAudience || '',
@@ -1269,6 +1305,13 @@ export class WritingQualityService implements OnModuleInit {
     });
     const tagFitExample = Object.fromEntries(tagDimensions.map(dim => [dim.dimension, 0]));
     const tagEvidenceExample = Object.fromEntries(tagDimensions.map(dim => [dim.dimension, '正文逐字片段']));
+    const constitution = (context as any)?.project?.creativeConstitution || readConstitution({
+      type: tp.projectType, target_platform: tp.platform,
+      settings: { category: tp.category, storyTone: tp.tone, writingStyle: tp.style, webNovelGenre: tp.genre, pov: tp.pov },
+    });
+    const standard = buildExecutionStandard(constitution);
+    const tagCriteria = Object.fromEntries(tagDimensions.map(dim => [dim.dimension,
+      standard.dimensions.find(item => item.dimension === dim.dimension)?.requirement || '']));
     // 标签契合的基准必须与生成侧执行标准同源：平台给这个投稿分类写的官方定义 + 该分类头部官方标签。
     // 否则会出现两套判据——生成按番茄投稿分类写，质检却按系统内部题材分类打分。
     const categoryResolution = resolveSubmissionCategory(tp.platform, tp.category, tp.projectType, tp.targetAudience);
@@ -1309,6 +1352,7 @@ export class WritingQualityService implements OnModuleInit {
 - 潜台词缺乏（lack_of_subtext / repeated_emotion_action）
 
 【Character Voice Contract】
+按已注入GEN-006人物声音规则执行。
 - 对正文中可明确归属的角色，逐人核对上下文内 speech_style、catchphrase、common_words、forbidden_words、tone_to_different_people、emotion_outburst_style、danger_reaction、betrayal_reaction、weak_person_reaction、strong_person_reaction、must_obey_rules、forbidden_writing。
 - 台词与行为偏移必须引用该角色的连续原文；无法确认说话人时不得归因，不得伪造角色违规。
 
@@ -1327,6 +1371,8 @@ ${timelineCheck}
 
 【标签契合度评分 tagFit】只对本项目真实填写的执行设定逐维打分（0-100，越高越贴合）：${tagDimensions.map(dim => `${dim.dimension}=${dim.label}`).join('、')}。这些维度必须全部给出分数，并在 tagFitEvidence 中为每维给出一段本章正文逐字原文（不可改写、不可引用大纲）；缺分或证据不能逐字定位均属未评估，不能标为合格。未选择的非投稿写作维度不得臆造评分。分类口径未核验时不得编造，也不得套用其他分类的口径；按本项目已选分类和标签本身判断。结果写入输出 JSON 的 tagFit 与 tagFitEvidence 字段，不要写进 issues。
 
+上述逐维评分仅适用于已有可核对操作定义的维度。缺少定义时必须在 tagFitBasis 标记 unknown_definition，并省略该维 tagFit 分数；不能把“按某标签执行”这一句当作标签定义，也不能凭模型记忆发明主角身份、操盘方式等要求。criterion 必须连续引用对应执行判据，不得把多处判据拼接。过度解释须同时给出已呈现信息原文及其后的重复解释，不能仅因人物思考、犹豫或推断就判错。
+
 你必须只输出严格JSON，不输出任何其他内容。`;
 
     const chapter = this.dbService.getDb().prepare('SELECT chapter_index FROM chapters WHERE id=? AND project_id=?')
@@ -1334,23 +1380,40 @@ ${timelineCheck}
     const contextSerialized = compileContext(this.dbService.getDb(), {
       projectId, stage: 'chapter', chapterIndex: chapter?.chapter_index ?? null,
     }).snapshot;
+    const evidenceSources = semanticEvidenceSources(content, contextSerialized, standard.directive);
     const contractReview = reviewCharacterContracts({ projectId, runId: dto.chapterId, content }, JSON.parse(contextSerialized).characterContracts || []);
     const trace = narrativeTrace(content, this.dbService.getDb().prepare('SELECT id,content FROM chapters WHERE project_id=? AND chapter_index<? AND content IS NOT NULL ORDER BY chapter_index DESC LIMIT 3').all(projectId,chapter?.chapter_index ?? 0) as Array<{id:string;content:string}>);
     const prompt = `请对以下网文章节进行专业质量诊断。
 
 章节标题：${chapterTitle}
 作品标签：${tagProfileText}
+各维执行判据（与生成同源）：${JSON.stringify(tagCriteria)}
+各维操作定义核验状态（由系统核验，不凭模型记忆改判）：${JSON.stringify(Object.fromEntries(standard.dimensions.map(d => [d.dimension, d.definitionStatus || 'provided'])))}
+平台判据已经包含平台事实源或作者自定义说明，须按本次实际提供的内容核对；不要把尚未采集的分类级实测阈值误判为整个平台标准缺失。
 
+本次作者重点（只提高关注，不缩小完整审查范围、不另造评分定义）：${JSON.stringify(dto.focusTags || [])}
+统计风险线索（仅定位候选；普通列举、常用词、句长或标点计数不能直接作为缺陷或扣分依据）：${JSON.stringify(fingerprintProbes || null)}。若确有机械重复，必须引用当前正文并说明信息功能如何重复；同一问题不重复扣分。
+当前正文客观测量：${JSON.stringify(deterministicPlatformReview({ projectId, runId: '', stage: 'chapter', content, constitution }).measurements)}。字数、对白比例、平均段长、长段比例及分类篇幅只由同源测量器产生问题，不能估算百分比或在语义issues重复报告客观指标，也不能因猜测指标未达标而扣分。机械对白、口吻、节奏和信息密度仍需独立语义审查。
 项目上下文（大纲/角色/世界观等）：${contextSerialized}
+章纲依据原文（basisSource=chapter_plan，basisEvidence须连续引用以下内容）：${evidenceSources.chapter_plan}
+没有可定位的章纲揭示安排时，不报premature_reveal；正文中的疑问、猜测或说明不能替代章纲安排。
 逐角色归属证据：${JSON.stringify(contractReview.evidence)}
 跨章/跨场景叙事风险（只作线索，必须原文证据确认）：${JSON.stringify(trace)}
 角色问题必须附 characterId、contractVersion、contractField；没有明确归属证据不得归因。
 
+阅读目标同源审查：按已注入QLT-003四项阅读目标执行。
+逐项核对当前章节对点击、完整阅读、传播和代入的贡献，薄弱处须以当前正文证据进入相应reader_hook、low_retention、meme_point或low_specificity等现有语义问题，不强行四项都找错，不用全书计划代替当前体验；缺少全篇材料时不能断言全篇完读倾向已成立。
+
+必要因果优先审查：按已注入QLT-003必要因果判据执行。
+${context?.project?.type === 'short_story' ? '按已注入QLT-003短篇阅读承诺执行。' : ''}
+先输出causalAudit，再给总评；核对本章真正改变人命、权利、关系或机构决定的关键行动与结果，不要用日常小动作代替核心结果审查。最多6项，连续逐字引用行动、结果和支持条件；bridgeEvidence可以来自正文或已提供的项目上下文，但必须说明当前人物如何能使用该条件。没有成立条件时status=gap，允许bridgeEvidence为空，不编造证据。只有本章没有声称任何行动结果时才可not_applicable并解释。不得把“结果发生了”本身当作行动导致结果的证据。
+
 章节正文：
-${content.slice(0, 15000)}
+${content}
 
 请输出严格JSON：
 {
+  "causalAudit": {"status":"evaluated|not_applicable","reason":"核对范围与理由","transitions":[{"actionEvidence":"行动连续原文","resultEvidence":"结果连续原文","basisSource":"body|project_context|chapter_plan","bridgeEvidence":"支持当前结果的必要条件连续原文，gap时可为空","status":"supported|gap","reason":"支持条件如何导致结果或缺少什么条件"}]},
   "summary": "本章质量总评，控制在120字内",
   "overallLevel": "low|medium|high|critical",
   "overallScore": 0-100,
@@ -1361,6 +1424,11 @@ ${content.slice(0, 15000)}
       "title": "问题标题",
       "summary": "问题说明",
       "evidence": "正文中的证据片段",
+      "evidenceKind": "redundant_interpretation|premature_reveal|causal_gap|other",
+      "shownEvidence": "重复解释对应已呈现信息；same_voice_characters对应另一人物的连续逐字对白；其他问题可为空",
+      "basisSource": "chapter_plan|execution_standard|project_context|body",
+      "basisEvidence": "提前揭示对应章纲安排，或因果缺口对应必要前提的连续逐字原文",
+      "basisReason": "说明人物、表达/应对方式和场景依据，或解释是否新增信息/改变判断/推动选择，或必要因果前提及其影响",
       "suggestion": "具体修复建议",
       "paragraphIndex": 0,
       "sentenceIndex": 0,
@@ -1372,7 +1440,8 @@ ${content.slice(0, 15000)}
     }
   ],
   "tagFit": ${JSON.stringify({ ...tagFitExample, note: '一句话说明最贴合或最偏离哪个标签' })},
-  "tagFitEvidence": ${JSON.stringify(tagEvidenceExample)}
+  "tagFitEvidence": ${JSON.stringify(tagEvidenceExample)},
+  "tagFitBasis": ${JSON.stringify(Object.fromEntries(tagDimensions.map(dim => [dim.dimension, { status: 'evaluated|unknown_definition', criterion: '上述对应维度执行判据中的连续逐字片段，不得仅复制标签名', reason: '正文如何落实该判据；缺少标签操作定义时说明未能核验' }])))}
 }`;
 
     const response = await this.realLLM!.generate({
@@ -1399,28 +1468,101 @@ ${content.slice(0, 15000)}
     parsed.overallLevel = levelByQualityScore(parsed.overallScore);
     parsed.summary = String(parsed.summary || '').slice(0, 200);
     (parsed as any).tagFit = this.normalizeTagFit((parsed as any).tagFit);
-    parsed.issues = (parsed.issues || []).filter((issue: any) => {
+    let causal = validateCausalAudit((parsed as any).causalAudit, content, evidenceSources);
+    if (!causal.verified) {
+      const repaired = await this.realLLM!.generate({
+        scenario: 'review', responseFormat: 'json_object', temperature: 0.1,
+        maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS, maxEmptyRetries: 0,
+        ...causalAuditRepairPrompt((parsed as any).causalAudit, causal.errors, content, evidenceSources, false),
+        metrics: { projectId, stepKey: 'quality_causal_contract' },
+      } as any);
+      const fixed = this.parseJson<any>(repaired.content || '');
+      (parsed as any).causalAudit = materializeCausalAuditAnchors(fixed?.causalAudit, content, evidenceSources);
+      causal = validateCausalAudit((parsed as any).causalAudit, content, evidenceSources);
+    }
+    if (!causal.verified) throw new BadRequestException(`必要因果评审未完成：${causal.errors.join('；')}；保留旧报告`);
+    parsed.issues = [...(parsed.issues || []).filter(issue => !isObjectivePlatformRule(issue.issueType) && !causal.issues.some(gap =>
+      gap.issueType === issue.issueType && gap.evidence === issue.evidence)), ...causal.issues];
+    const unverifiedCharacterIssues: NonNullable<LLMQualityOutput['evidenceValidation']>['unverifiedIssues'] = [];
+    parsed.issues = (parsed.issues || []).filter((issue: any, index: number) => {
       if (!String(issue.issueType).includes('character_voice')) return true;
       // 契约锚定：模型给出角色/契约标识时，必须能对上契约字段与引用证据（防臆造）。
       if (issue.characterId && issue.contractVersion) {
         const contract = contractReview.contracts.find(c => c.characterId === issue.characterId && c.version === issue.contractVersion);
-        return !!contract && !!(contract as any)[issue.contractField]
+        const valid = !!contract && !!(contract as any)[issue.contractField]
           && contractReview.evidence.some(e => e.characterId === issue.characterId && typeof issue.evidence === 'string' && e.quote.includes(issue.evidence));
+        if (!valid) unverifiedCharacterIssues.push({ index, issueType: issue.issueType, reasons: ['角色归属、契约字段或证据未验证'] });
+        return valid;
       }
       // 未锚定契约时此前一律丢弃，导致「角色口吻」整类问题在契约字段为空时全部消失（质检看着没作用）。
       // 改为要求证据能在正文中原样命中：既保留可直接核验的问题，又挡住臆造引用。
       const quote = typeof issue.evidence === 'string' ? issue.evidence.trim() : '';
       const original = typeof issue.originalText === 'string' ? issue.originalText.trim() : '';
       const needle = quote.length >= 6 ? quote : original;
-      return needle.length >= 6 && content.includes(needle);
+      const valid = needle.length >= 6 && content.includes(needle);
+      if (!valid) unverifiedCharacterIssues.push({ index, issueType: issue.issueType, reasons: ['角色原文证据未验证'] });
+      return valid;
     });
+    parsed.evidenceValidation = { status: unverifiedCharacterIssues.length ? 'not_evaluated' : 'evaluated', unverifiedIssues: unverifiedCharacterIssues };
     parsed.issues.push(...contractReview.issues.map(issue => ({ issueType: issue.ruleId, severity: 'high', title: issue.message,
       summary: issue.message, evidence: issue.evidence.quote, originalText: issue.evidence.quote,
       characterId: issue.entityId, contractVersion: issue.contractVersion, contractField: issue.contractField, suggestion: '按角色契约修复并复检' } as any)));
     (parsed as any).characterContractReview = contractReview;
     (parsed as any).narrativeTrace = trace;
+    this.normalizeReviewEvidence(parsed, content, evidenceSources, tagCriteria,
+      Object.fromEntries(standard.dimensions.map(dim => [dim.dimension, dim.definitionStatus || 'provided'])));
+
+    const invalidIndexes = [...new Set((parsed.evidenceValidation?.unverifiedIssues || [])
+      .filter(issue => issue.index >= 0).map(issue => issue.index))];
+    if (invalidIndexes.length && !unverifiedCharacterIssues.length) {
+      const repaired = await this.realLLM!.generate({
+        scenario: 'review', responseFormat: 'json_object', temperature: 0.1,
+        maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS, maxEmptyRetries: 0,
+        ...semanticEvidenceRepairPrompt(parsed.issues, invalidIndexes, content, evidenceSources),
+        metrics: { projectId, stepKey: 'quality_issue_evidence_contract' },
+      } as any);
+      parsed.issues = applySemanticEvidenceRepairs(parsed.issues, invalidIndexes,
+        this.parseJson<any>(repaired.content || ''), content, evidenceSources);
+      parsed.evidenceValidation = { status: 'evaluated', unverifiedIssues: [] };
+      this.normalizeReviewEvidence(parsed, content, evidenceSources, tagCriteria,
+        Object.fromEntries(standard.dimensions.map(dim => [dim.dimension, dim.definitionStatus || 'provided'])));
+    }
 
     return { result: parsed, parseWarning: null, rawPreview: null };
+  }
+
+  /** QLT-003: one shared locator for both model prose issues and dimension evidence. */
+  private normalizeReviewEvidence(result: LLMQualityOutput, content: string, sources: Record<string, string>, criteria: Record<string, string>, definitionStatuses: Record<string, string> = {}) {
+    const unverifiedIssues: NonNullable<LLMQualityOutput['evidenceValidation']>['unverifiedIssues'] = [...(result.evidenceValidation?.unverifiedIssues || [])];
+    result.issues = (result.issues || []).map((issue, index) => {
+      const checked = verifySemanticEvidence(issue, content, sources);
+      if (!checked.verified) unverifiedIssues.push({ index, issueType: issue.issueType, reasons: checked.reasons });
+      const original = resolveQualityEvidence(content, issue.originalText);
+      return { ...issue, evidence: checked.primary.quote,
+        shownEvidence: checked.shown.verified ? checked.shown.quote : issue.shownEvidence,
+        basisEvidence: checked.basis.verified ? checked.basis.quote : issue.basisEvidence,
+        evidenceVerified: checked.verified,
+        startOffset: checked.primary.start, endOffset: checked.primary.end,
+        paragraphIndex: checked.primary.start === null ? null : content.slice(0, checked.primary.start).split(/\n\s*\n/).length - 1,
+        sentenceIndex: null,
+        originalText: original.verified ? original.quote : '',
+      };
+    });
+    for (const dim of EXECUTION_STANDARD_DIMENSIONS) {
+      if (!(dim.dimension in criteria)) continue;
+      const quote = resolveQualityEvidence(content, result.tagFitEvidence?.[dim.dimension]);
+      const basis = result.tagFitBasis?.[dim.dimension];
+      const valid = verifyDimensionBasis(criteria[dim.dimension], basis, definitionStatuses[dim.dimension]) && quote.verified;
+      if (!valid) unverifiedIssues.push({ index: -1, issueType: `execution_dimension.${dim.dimension}`,
+        reasons: ['该维正文证据、执行判据或操作定义未验证，不能形成完整合格评审'] });
+      if (definitionStatuses[dim.dimension] === 'unknown_definition') {
+        result.tagFitBasis ||= {};
+        result.tagFitBasis[dim.dimension] = { status: 'unknown_definition', criterion: '', reason: '执行标准未提供该标签的操作定义，不能凭模型记忆评分' };
+      }
+      if (!valid && result.tagFit) delete result.tagFit[dim.dimension];
+      if (result.tagFitEvidence) result.tagFitEvidence[dim.dimension] = quote.verified ? quote.quote : '';
+    }
+    result.evidenceValidation = { status: unverifiedIssues.length ? 'not_evaluated' : 'evaluated', unverifiedIssues };
   }
 
   // 规范化标签契合分（六维，0-100 整数；未返回的维度保持缺失，不折算 0、不缩小分母）
@@ -1568,17 +1710,15 @@ ${contextText.slice(0, 3000)}
 
     const result = this.parseJson<LLMRefineOutput>(response.content);
     if (!result) {
-      return {
-        beforeText: issue.original_text || issue.evidence || '',
-        afterText: issue.suggested_text || issue.evidence || '',
-        reason: 'LLM 精修解析失败',
-        diff: [],
-        remainingRisk: 'high',
-      };
+      throw new BadRequestException('精修未完成：模型结果无效，不采用旧建议作为新修订');
     }
-
-    result.beforeText = result.beforeText || issue.original_text || issue.evidence || '';
-    result.afterText = result.afterText || result.beforeText;
+    const before = resolveQualityEvidence(fullContent, result.beforeText);
+    const anchor = resolveQualityEvidence(fullContent, issue.evidence);
+    if (!before.unique || !anchor.unique || before.start! < anchor.start! || before.end! > anchor.end!) {
+      throw new BadRequestException('精修原文缺失、定位不唯一或不属于问题证据范围');
+    }
+    if (typeof result.afterText !== 'string') throw new BadRequestException('精修缺少有效替换文本');
+    result.beforeText = before.quote;
     result.reason = String(result.reason || '').slice(0, 200);
     result.remainingRisk = ['none', 'low', 'medium', 'high'].includes(result.remainingRisk)
       ? result.remainingRisk : 'medium';
@@ -1589,7 +1729,7 @@ ${contextText.slice(0, 3000)}
   private async callRecheckLLM(
     issue: IssueRow, revisedText: string, fullContent: string,
   ): Promise<RecheckResult> {
-    const fixText = revisedText.slice(0, 2000);
+    const fixText = revisedText;
     const prompt = `请复查以下精修结果。
 
 原始问题：${issue.title}
@@ -1597,15 +1737,16 @@ ${contextText.slice(0, 3000)}
 修改后文本：
 ${fixText}
 
-章节当前内容（片段）：
-${fullContent.slice(0, 3000)}
+章节当前完整内容：
+${fullContent}
 
 请判断问题是否已修复、是否引入新问题、修改是否符合写作质量要求。
 输出严格JSON：
-{ "pass": true/false, "level": "pass|warning|fail", "remainingIssues": 0, "newIssues": 0, "summary": "复查总结，80字内" }`;
+{ "pass": true/false, "level": "pass|warning|fail", "remainingIssues": 0, "newIssues": 0, "summary": "复查总结，80字内", "evidence": "当前完整正文中的连续逐字引用", "basisReason": "修复是否保留新增信息、必要因果和留白，是否引入新事实" }`;
 
     const response = await this.realLLM!.generate({
       prompt, temperature: 0.2, scenario: 'review', responseFormat: 'json_object',
+      metrics: { projectId: issue.project_id, stepKey: 'quality_recheck' },
     } as any);
 
     const raw = this.parseJson<Record<string, any>>(response.content || '');
@@ -1616,6 +1757,10 @@ ${fullContent.slice(0, 3000)}
       || typeof raw.summary !== 'string' || !raw.summary.trim()) {
       throw new BadRequestException('复检未评估：模型结果缺失或格式无效，问题保持未通过');
     }
+    const evidence = resolveQualityEvidence(fullContent, raw.evidence);
+    if (!evidence.verified || typeof raw.basisReason !== 'string' || !raw.basisReason.trim()) {
+      throw new BadRequestException('复检未评估：缺少当前完整正文证据或修复边界说明，问题保持未通过');
+    }
     const pass = raw.pass === true && raw.level === 'pass'
       && raw.remainingIssues === 0 && raw.newIssues === 0;
     return {
@@ -1624,6 +1769,8 @@ ${fullContent.slice(0, 3000)}
       remainingIssues: raw.remainingIssues,
       newIssues: raw.newIssues,
       summary: raw.summary.trim().slice(0, 120),
+      evidence: evidence.quote,
+      basisReason: raw.basisReason.trim(),
     };
   }
 
@@ -1644,8 +1791,8 @@ ${fullContent.slice(0, 3000)}
           ? 'medium'
           : 'low';
     const summary = input.attention.reasons?.length
-      ? `滑走风险 ${input.attention.slipAwayRiskScore}：${input.attention.reasons.slice(0, 2).join('；')}`
-      : `滑走风险 ${input.attention.slipAwayRiskScore}，前三屏注意力基础通过。`;
+      ? `表面信号检查（非读完率）：${input.attention.reasons.slice(0, 2).join('；')}`
+      : '表面信号检查通过；未有真实读者数据，读完率未测。';
     const payload = { attention: input.attention, mode: dto.mode || 'auto' };
 
     if (dto.reportId) {
@@ -1656,12 +1803,9 @@ ${fullContent.slice(0, 3000)}
         const oldPayload = safeJsonParse(existing.payload || '{}', {});
         db.prepare(`
           UPDATE writing_quality_reports
-          SET summary = ?, overall_level = ?, overall_score = ?, payload = ?, attention_json = ?, updated_at = ?
+          SET payload = ?, attention_json = ?, updated_at = ?
           WHERE id = ?
         `).run(
-          summary,
-          level,
-          Math.max(0, 100 - Number(input.attention.slipAwayRiskScore || 0)),
           JSON.stringify({ ...oldPayload, ...payload }),
           JSON.stringify(input.attention),
           now,
@@ -1695,7 +1839,7 @@ ${fullContent.slice(0, 3000)}
       `Attention Check: ${input.title}`,
       summary,
       level,
-      Math.max(0, 100 - Number(input.attention.slipAwayRiskScore || 0)),
+      null,
       'rule',
       JSON.stringify(payload),
       JSON.stringify(input.attention),
@@ -1742,7 +1886,7 @@ ${fullContent.slice(0, 3000)}
     ].map(item => ({
       ...item,
       pass: item.score >= 45,
-      issue: item.score >= 45 ? '' : `${item.name}缺少明确疑点、冲突、情绪或信息变化。`,
+      issue: item.score >= 45 ? '' : `${item.name}未命中足够表面信号，需语义核对，不能据此判定缺少冲突或悬念。`,
     }));
 
     const windows: Array<{ start: number; end: number; score: number; risk: string }> = [];
@@ -1767,11 +1911,14 @@ ${fullContent.slice(0, 3000)}
     const slipAwayRiskScore = Math.max(0, Math.min(100, 30 + failures * 8 - Math.floor(scoreText(content.slice(0, 500)) / 4)));
     const reasons = [
       ...checkpoints.filter(item => !item.pass).map(item => item.issue),
-      ...windows.filter(item => item.score < 45).slice(0, 5).map(item => `${item.start}-${item.end}字缺少新的疑点、冲突、信息变化或情绪推进。`),
+      ...windows.filter(item => item.score < 45).slice(0, 5).map(item => `${item.start}-${item.end}字表面信号较少，需核对实际信息与状态变化。`),
     ];
 
     return {
       mode: input.mode,
+      evidenceBasis: 'surface_signals',
+      completionRate: null,
+      limitation: '仅按关键词与标点定位候选风险；未有真实读者数据，不能预测读完率或证明超越爆款。',
       slipAwayRiskScore,
       level: slipAwayRiskScore >= 75 ? 'high' : slipAwayRiskScore >= 50 ? 'medium' : 'low',
       checkpoints,
@@ -1985,19 +2132,29 @@ ${fullContent.slice(0, 3000)}
         paragraphIndex: r.paragraph_index,
         sentenceIndex: r.sentence_index,
       });
+    const payload = safeJsonParse(r.payload);
+    const unifiedIssue = payload?.qualityIssue || qualityIssue({ id: r.id, projectId: r.project_id, entityId: r.chapter_id,
+      stage: 'chapter', ruleId: r.issue_type, severity: r.severity, status: r.status,
+      message: r.summary || r.title, quote: r.evidence,
+      evidenceVerified: payload?.evidenceVerified === true, source: 'writing_quality_issues' });
+    // Preserve the verified report's stored coordinates, never invent them from a flag.
+    if (!payload?.qualityIssue && unifiedIssue.evidence.verified && r.original_text === unifiedIssue.evidence.quote
+      && Number.isInteger(r.start_offset) && Number.isInteger(r.end_offset)
+      && r.start_offset! >= 0 && r.end_offset! - r.start_offset! === unifiedIssue.evidence.quote.length) {
+      unifiedIssue.evidence.start = r.start_offset;
+      unifiedIssue.evidence.end = r.end_offset;
+    }
     return {
       id: r.id, reportId: r.report_id, projectId: r.project_id, chapterId: r.chapter_id,
       issueType: r.issue_type, severity: r.severity,
-      qualityIssue: safeJsonParse(r.payload)?.qualityIssue || qualityIssue({ id: r.id, projectId: r.project_id, entityId: r.chapter_id,
-        stage: 'chapter', ruleId: r.issue_type, severity: r.severity, status: r.status,
-        message: r.summary || r.title, quote: r.evidence, source: 'writing_quality_issues' }),
+      qualityIssue: unifiedIssue,
       title: r.title, summary: r.summary,
       evidence: r.evidence, suggestion: r.suggestion,
       paragraphIndex: r.paragraph_index, sentenceIndex: r.sentence_index,
       startOffset: r.start_offset, endOffset: r.end_offset,
       originalText: r.original_text, suggestedText: r.suggested_text,
       tags,
-      status: r.status, payload: safeJsonParse(r.payload),
+      status: r.status, payload,
       latestRevisionId: r.latest_revision_id || null,
       navigation,
       statusHistory: safeJsonParse(r.status_history_json || '[]', []),

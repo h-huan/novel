@@ -1,3 +1,5 @@
+import { OUTLINE_STATE_CONTINUITY_POLICY } from '../../shared/src/system-workflow-rules.registry';
+
 export interface OutlineFactLedgerEntry {
   /** Identity is assigned by the server, independently of titles/chapter numbers. */
   id: string;
@@ -138,14 +140,61 @@ export function normalizeOutlineChaptersForFactReview(chapters: unknown[]): unkn
   });
 }
 
+/** Generation consumes the same evidence and history as review and repair. */
+export function buildOutlineContinuityContext(sourceChapters: unknown[], previousLedger: OutlineFactLedgerEntry[], includePolicy = true): string {
+  return `${includePolicy ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n【已确认前章原始资料】${JSON.stringify(normalizeOutlineChaptersForFactReview(sourceChapters))}\n【前批事实台账】${JSON.stringify(previousLedger)}`;
+}
+
+/** Review quotations must exist in actual supplied text, not just sound plausible. */
+export function describeOutlineFactEvidence(review: OutlineFactReview | null, sources: unknown[], chapterSources: unknown[] = []): string[] {
+  if (!review) return [];
+  const texts: string[] = [];
+  const collect = (value: unknown, target = texts): void => {
+    if (typeof value === 'string') {
+      target.push(value);
+      try { const parsed = JSON.parse(value); if (parsed && typeof parsed === 'object') collect(parsed, target); } catch {}
+    } else if (Array.isArray(value)) value.forEach(item => collect(item, target));
+    else if (value && typeof value === 'object') Object.values(value).forEach(item => collect(item, target));
+  };
+  collect(sources);
+  const numbered = normalizeOutlineChaptersForFactReview(chapterSources) as Array<Record<string, unknown>>;
+  const chapterNumber = (location: string): number | undefined => {
+    const match = location.match(/第\s*([\d一二三四五六七八九十百千零〇两]+)\s*章|chapter(?:Number)?\s*[:=#]?\s*(\d+)/i);
+    if (!match) return undefined;
+    const raw = match[1] || match[2];
+    if (/^\d+$/.test(raw)) return Number(raw);
+    const digits: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 零: 0, 〇: 0, 两: 2 };
+    const units: Record<string, number> = { 十: 10, 百: 100, 千: 1000 };
+    let total = 0, digit = 0;
+    for (const char of raw) {
+      if (char in units) { total += (digit || 1) * units[char]; digit = 0; }
+      else digit = digits[char];
+    }
+    return total + digit;
+  };
+  return review.contradictions.flatMap((item, index) => {
+    const evidence = JSON.parse(item);
+    return ['quote1', 'quote2'].flatMap((key, side) => {
+      if (!texts.some(text => text.includes(evidence[key]))) return [`第${index + 1}条矛盾的${key}不能逐字定位到本次输入原始资料；重新核对证据，不得据此改写小说事实`];
+      const number = chapterNumber(evidence['location' + (side + 1)]);
+      if (number === undefined || !numbered.length) return [];
+      const chapterTexts: string[] = [];
+      numbered.filter(c => c.chapterNumber === number).forEach(c => collect(c, chapterTexts));
+      return chapterTexts.some(text => text.includes(evidence[key])) ? []
+        : [`第${index + 1}条矛盾的${key}虽存在于其他资料，但不在声明的第${number}章；按chapterNumber重新定位，不得据此改写小说事实`];
+    });
+  });
+}
+
 export function buildOutlineFactReviewPrompt(input: {
   canonicalBrief: string;
   world: unknown;
   previousLedger: OutlineFactLedgerEntry[];
   chapters: unknown[];
   sourceChapters?: unknown[];
+  includePolicy?: boolean;
 }): string {
   const reviewChapters = normalizeOutlineChaptersForFactReview(input.chapters);
   const sourceChapters = normalizeOutlineChaptersForFactReview(input.sourceChapters || []);
-  return `按执行标准核对已保存的世界观与详细章纲，只检查事实连续性。按生效执行标准中的事实台账覆盖范围逐条建立并继承事实，核对全部当前章字段与前章事实。必须核对 content、scenes、characterActions 和其中嵌入的伏笔证据，不能只看章标题。跨章节、跨批次遇到同一对象须延续已有台账，不能重新设定基线；事实身份由服务端id确定，标题和章节状态可正常变化。前批baseline与history由服务端保留，不能重写。ledger只提交本批状态更新：更新已有事实用{id,current}，原样引用已有id；新增事实用{current}，编号由服务端分配；未变化条目可省略，服务端自动继承。即使省略条目，也必须核对其baseline、history、current与本章是否真正互斥；真实冲突必须在contradictions中提供双方原文证据。若材料没有明确数字，不得猜数；若本批没有新增或变化，ledger可为空，旧台账仍完整继承。\n判定纪律：contradictions 只允许放“同一事实在两处材料中无法同时成立”的冲突。每条冲突必须给出 location1、quote1、location2、quote2、conflict；涉及数量/时间时再给 calculation。像“配比一致”“数量仍为1”“当前已签署但未归档”“伏笔已埋设且本批未回收”这种状态摘要属于 ledger，不是矛盾；不得因为信息暂未明写就自行判冲突。给不出两处逐字证据时必须视为没有被证明的冲突，不得写入 contradictions。\n【唯一故事基准】${input.canonicalBrief}\n【已保存世界观】${JSON.stringify(input.world)}\n【已确认前章原始资料】${JSON.stringify(sourceChapters)}\n【前批事实台账】${JSON.stringify(input.previousLedger)}\n【本批完整章纲】${JSON.stringify(reviewChapters)}\n只输出合法JSON。无冲突：{\"consistent\":true,\"contradictions\":[],\"ledger\":[{\"current\":\"对象：起始事实与本批状态\"}]}。确有冲突：{\"consistent\":false,\"contradictions\":[{\"location1\":\"第一处字段路径\",\"quote1\":\"第一处逐字原文\",\"location2\":\"第二处字段路径\",\"quote2\":\"第二处逐字原文\",\"conflict\":\"两处为何无法同时成立\",\"calculation\":\"涉及数量或时间时写算式，否则留空\"}],\"ledger\":[{\"id\":\"前批已有id\",\"current\":\"有依据的本批状态\"}]}。`;
+  return `${input.includePolicy !== false ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n按执行标准核对已保存的世界观与详细章纲，只检查事实连续性。按生效执行标准中的事实台账覆盖范围逐条建立并继承事实，核对全部当前章字段与前章事实。必须核对 content、scenes、characterActions 和其中嵌入的伏笔证据，不能只看章标题。跨章节、跨批次遇到同一对象须延续已有台账，不能重新设定基线；事实身份由服务端id确定，标题和章节状态可正常变化。前批baseline与history由服务端保留，不能重写。ledger只提交本批状态更新：更新已有事实用{id,current}，原样引用已有id；新增事实用{current}，编号由服务端分配；未变化条目可省略，服务端自动继承。即使省略条目，也必须核对其baseline、history、current与本章是否真正互斥；真实冲突必须在contradictions中提供双方原文证据。若材料没有明确数字，不得猜数；若本批没有新增或变化，ledger可为空，旧台账仍完整继承。\n判定纪律：contradictions 只允许放“同一事实在两处材料中无法同时成立”的冲突。每条冲突必须给出 location1、quote1、location2、quote2、conflict；涉及数量/时间时再给 calculation。像“配比一致”“数量仍为1”“当前已签署但未归档”“伏笔已埋设且本批未回收”这种状态摘要属于 ledger，不是矛盾；不得因为信息暂未明写就自行判冲突。给不出两处逐字证据时必须视为没有被证明的冲突，不得写入 contradictions。\n【唯一故事基准】${input.canonicalBrief}\n【已保存世界观】${JSON.stringify(input.world)}\n【已确认前章原始资料】${JSON.stringify(sourceChapters)}\n【前批事实台账】${JSON.stringify(input.previousLedger)}\n【本批完整章纲】${JSON.stringify(reviewChapters)}\n只输出合法JSON。无冲突：{\"consistent\":true,\"contradictions\":[],\"ledger\":[{\"current\":\"对象：起始事实与本批状态\"}]}。确有冲突：{\"consistent\":false,\"contradictions\":[{\"location1\":\"第一处字段路径\",\"quote1\":\"第一处逐字原文\",\"location2\":\"第二处字段路径\",\"quote2\":\"第二处逐字原文\",\"conflict\":\"两处为何无法同时成立\",\"calculation\":\"涉及数量或时间时写算式，否则留空\"}],\"ledger\":[{\"id\":\"前批已有id\",\"current\":\"有依据的本批状态\"}]}。`;
 }

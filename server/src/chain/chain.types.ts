@@ -39,6 +39,10 @@ export interface ModelSpec {
 export interface LLMRequest {
   /** Internal only: partial body fragments are evaluated after assembly. */
   deferQualityGate?: boolean;
+  /** Fixed framework entry: audit and repair responsibility prerequisites before downstream expansion. */
+  planningResponsibilityPreflight?: boolean;
+  /** Accepted preceding framework outputs, shared by review and citation verification. */
+  planningSources?: Record<string, unknown>;
   /**
    * 判定单元（与 deferQualityGate 同性质：由调用方按内容单位显式声明）。
    *
@@ -68,11 +72,19 @@ export interface LLMRequest {
   role?: string;
   /** 要求兼容 OpenAI 协议的提供商返回严格 JSON 对象。 */
   responseFormat?: 'text' | 'json_object';
+  /** 最小结构化修复单元；仅一个待修问题时允许硬顶截断后同模型关闭思考恢复一次。 */
+  structuredRepairIssueCount?: number;
+  /** Internal: one connected upstream repair group, including its projections. */
+  structuredRepairUnitCount?: number;
+  /** One complete cross-stage decision; splitting would lose relationships. */
+  structuredReviewUnitCount?: number;
   /**
    * 空内容允许补发的次数。运行时统一封顶为 1：空内容没有可修订材料，
    * 可补发一次；再次为空立即停止，避免与网络层/业务层重试叠加。
    */
   maxEmptyRetries?: number;
+  /** Shared by one structured task, including protocol correction and transport recovery. */
+  physicalCallBudget?: { remaining: number; recoveryWithoutThinking?: boolean };
   /**
    * 埋点上下文（业务步骤语义，可选）。由调用方透传，用于全链路步骤遥测：
    * 哪个业务步骤、第几轮（0=首版）、目标/上一版字数，供首页透明展示与首版自优化。

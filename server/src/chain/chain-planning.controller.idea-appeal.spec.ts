@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChainPlanningController } from './chain-planning.controller';
 import { updateConstitution } from '../modules/project/creative-constitution';
+import { GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';
+
+it('returns the upstream outline review report and HTTP status instead of a generic server error', async () => {
+  const report = classifyGateFailure({ evaluationStatus: 'not_evaluated', topic: 'quality_gate', gateStatus: 'not_evaluated', missing: ['platform：评审引文无法核对'] });
+  const controller = new ChainPlanningController({ generateOutline: vi.fn().mockRejectedValue(new GateRejectionError(report)) } as any);
+  let error: any;
+  try { await controller.generateOutline({ projectId: 'p' }); } catch (value) { error = value; }
+  expect(error.getStatus()).toBe(503);
+  expect(error.getResponse()).toEqual({ message: report.message, error: 'QualityGateRejected', gateReport: report });
+});
 
 const dto = {
   storyType: 'short_story' as const,
@@ -102,85 +112,38 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
     expect(result.ideas[0].ideaDiscoveryAudit).toEqual(audit);
   });
 
-  it('fills only the missing idea-card slots through another full gated discovery batch', async () => {
-    const first = {
+  it('retains a partial final-gate batch without starting another selection or failing accepted cards', async () => {
+    const upstream = {
       success: true,
       ideas: Array.from({ length: 4 }, (_, index) => acceptedIdea(index)),
       totalIdeas: 4,
-      qualityWarning: '创建前已筛选 5 个题材，最终 Gate 通过 4 个',
-      appealGate: { ...audit, generated: 4, qualified: 4, returned: 4, shortfall: 1, rejected: 1 },
+      qualityWarning: '创建前已筛选 5 个题材，最终 Gate 通过 4 个；缺少 1 个',
+      appealGate: { ...audit, requested: 5, generated: 5, qualified: 4, returned: 4, shortfall: 1, rejected: 1 },
     };
-    const replacement = {
-      success: true,
-      ideas: [{ ...acceptedIdea(9), sourcePremiseId: 'P1', title: '补位但完整过Gate' }],
-      totalIdeas: 1,
-      appealGate: { ...audit, premiseSelected: 1, generated: 1, qualified: 1, returned: 1 },
+    const ideaDiscover = vi.fn().mockResolvedValue(upstream);
+    let persisted: any;
+    const database = {
+      dualWrite: vi.fn(async (_key: string, value: any) => { persisted = value; }),
+      getDb: () => ({ prepare: (sql: string) => ({ get: () => sql.includes('sqlite_master')
+        ? { name: 'dual_write_store' }
+        : { data_value: JSON.stringify(persisted), updated_at: '2026-10-06' } }) }),
     };
-    const ideaDiscover = vi.fn()
-      .mockResolvedValueOnce(first)
-      .mockResolvedValueOnce(replacement);
-    const controller = new ChainPlanningController({ ideaDiscover } as any);
+    const controller = new ChainPlanningController({ ideaDiscover } as any, database as any);
 
     const result: any = await controller.ideaDiscover({ ...dto, count: 5 } as any);
 
-    expect(ideaDiscover).toHaveBeenCalledTimes(2);
-    expect(ideaDiscover.mock.calls[1][0]).toEqual(expect.objectContaining({
-      count: 1,
-      excludeDetails: expect.arrayContaining([
-        expect.objectContaining({ title: '通过0' }),
-        expect.objectContaining({ title: '通过3' }),
-      ]),
-    }));
+    expect(ideaDiscover).toHaveBeenCalledTimes(1);
+    expect(result).toBe(upstream);
     expect(result.success).toBe(true);
-    expect(result.totalIdeas).toBe(5);
-    expect(result.ideas).toHaveLength(5);
-    expect(result.qualityWarning).toBeUndefined();
-    expect(result.appealGate).toEqual(expect.objectContaining({
-      schemaVersion: 8,
-      requested: 5,
-      returned: 5,
-      shortfall: 0,
-      topupProtocol: 'bounded_full_gate_gap_fill',
-      topupAttempted: true,
-    }));
-    expect(result.ideas.every((idea: any) => idea.ideaDiscoveryAudit?.returned === 5)).toBe(true);
-  });
-
-  it('fails the batch instead of returning success=true when bounded full-gate top-up still misses the requested count', async () => {
-    const first = {
-      success: true,
-      ideas: Array.from({ length: 4 }, (_, index) => acceptedIdea(index)),
-      totalIdeas: 4,
-      appealGate: { ...audit, generated: 4, qualified: 4, returned: 4, shortfall: 1, rejected: 1 },
-    };
-    const failedTopup = {
-      success: false,
-      ideas: [],
-      totalIdeas: 0,
-      error: '候选结构化失败',
-      appealGate: { ...audit, premiseSelected: 1, generated: 0, qualified: 0, returned: 0, rejected: 1 },
-    };
-    const ideaDiscover = vi.fn()
-      .mockResolvedValueOnce(first)
-      .mockResolvedValueOnce(failedTopup)
-      .mockResolvedValueOnce(failedTopup);
-    const controller = new ChainPlanningController({ ideaDiscover } as any);
-
-    const result: any = await controller.ideaDiscover({ ...dto, count: 5 } as any);
-
-    expect(ideaDiscover).toHaveBeenCalledTimes(3);
-    expect(result.success).toBe(false);
-    expect(result.totalIdeas).toBe(4);
     expect(result.ideas).toHaveLength(4);
-    expect(result.error).toContain('请求 5，最终通过 4');
-    expect(result.qualityWarning).toContain('本批按数量合同判失败');
-    expect(result.appealGate).toEqual(expect.objectContaining({
-      requested: 5,
-      returned: 4,
-      shortfall: 1,
-      topupAttempted: true,
-    }));
-    expect(result.appealGate.topupAttempts).toHaveLength(2);
+    expect(result.qualityWarning).toContain('缺少 1 个');
+    expect(result.error).toBeUndefined();
+    const diagnostics: any = controller.getLatestIdeaDiscoveryDiagnostics();
+    expect(diagnostics.audit.success).toBe(true);
+    expect(diagnostics.audit.acceptedIdeas).toHaveLength(4);
+    expect(diagnostics.audit.appealGate).toEqual(upstream.appealGate);
+    expect(diagnostics.audit.request.requestedCount).toBe(5);
+    expect(diagnostics.audit.qualityWarning).toBe(upstream.qualityWarning);
   });
 
   it('returns the orchestrator payload unchanged instead of becoming a second quality gate when cardinality is already complete', async () => {

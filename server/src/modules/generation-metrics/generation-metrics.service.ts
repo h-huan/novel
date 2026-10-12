@@ -24,7 +24,7 @@ import { standardDirectiveCache } from '../module-standards/standard-directive.c
 import { DatabaseService } from '../../database/database.service';
 import * as crypto from 'crypto';
 import { compileContext } from './context-compiler';
-import { isRepairStrategyEligible, repairStrategyUtility } from './repair-learning';
+import { isRepairStrategyEligible, repairStrategyUtility, verifiedRepairLesson } from './repair-learning';
 
 export const CHAPTER_RESPONSIBILITY_REPAIR_STRATEGIES = [
   'constraint_matrix',
@@ -124,9 +124,14 @@ export interface StepFlowStat {
 const STEP_LABELS: Record<string, string> = {
   body_first: '正文·首版生成',
   body_length_retry: '正文·字数补足',
+  body_length_contract: '正文·篇幅插入验收',
   body_alignment_repair: '正文·大纲/硬红线精修',
   consistency_repair: '设定一致性修订',
   idea_generate: '题材/灵感生成',
+  idea_premise_selection: '轻量题材池筛选',
+  idea_card_structure: '已选题材单卡生成',
+  idea_presentation_review: '完整题材内容审查',
+  idea_presentation_contract: '题材审查协议验收',
   inspiration: '题材/灵感生成',
   outline: '大纲规划',
   world_building: '世界观生成',
@@ -264,6 +269,38 @@ export class GenerationMetricsService implements OnModuleInit {
     this.databaseService.getDb().prepare('UPDATE generation_runs SET model=? WHERE id=?').run(model,id);
   }
 
+  /** A rejected final patch cannot retain its earlier PASS proof. */
+  attachExpansionSource(runId:string,sourceDraft:string,draftHash:string) {
+    const db=this.databaseService.getDb();
+    const row=db.prepare('SELECT quality_payload FROM generation_runs WHERE id=?').get(runId) as any;
+    if(!row)return;
+    let payload:any={};try{payload=JSON.parse(row.quality_payload||'{}');}catch{}
+    payload.expansionSource={version:1,sourceDraft,draftHash};
+    db.prepare('UPDATE generation_runs SET quality_payload=? WHERE id=?').run(JSON.stringify(payload),runId);
+  }
+
+  attachTimePlanProvenance(runId:string,provenance:{draftHash:string;outlineHash:string;timers:unknown}) {
+    const db=this.databaseService.getDb();
+    const row=db.prepare('SELECT quality_payload FROM generation_runs WHERE id=?').get(runId) as any;
+    if(!row)return;
+    let payload:any={};try{payload=JSON.parse(row.quality_payload||'{}');}catch{}
+    payload.timePlan={version:1,...provenance};
+    db.prepare('UPDATE generation_runs SET quality_payload=? WHERE id=?').run(JSON.stringify(payload),runId);
+  }
+
+  blockRunValidation(id: string, message: string) {
+    const db = this.databaseService.getDb();
+    const row = db.prepare('SELECT quality_payload FROM generation_runs WHERE id=?').get(id) as any;
+    let payload: any = {};
+    try { payload = JSON.parse(row?.quality_payload || '{}'); } catch {}
+    payload.postRepairValidation = { status: 'blocked', message };
+    payload.gate = { ...payload.gate, passed: false, status: 'blocked' };
+    db.prepare('UPDATE generation_runs SET gate_status=?, quality_payload=? WHERE id=?')
+      .run('blocked', JSON.stringify(payload), id);
+    db.prepare('UPDATE writing_quality_reports SET summary=?, overall_level=?, payload=?, updated_at=? WHERE source_id=? AND source_type=?')
+      .run('blocked', 'low', JSON.stringify(payload), new Date().toISOString(), id, 'artifact_quality');
+  }
+
   saveRunScore(runId: string, projectId: string, score: StageScore) {
     const db = this.databaseService.getDb();
     const run = db.prepare('SELECT stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
@@ -305,11 +342,12 @@ export class GenerationMetricsService implements OnModuleInit {
 
   learnAcceptedRepair(projectId: string, repairId: string, before: StageScore, after: StageScore) {
     const db = this.databaseService.getDb();
-    const repair = db.prepare("SELECT status FROM generation_repairs WHERE id=? AND project_id=?").get(repairId, projectId) as any;
+    const repair = db.prepare("SELECT status,strategy FROM generation_repairs WHERE id=? AND project_id=?").get(repairId, projectId) as any;
     if (repair?.status !== 'accepted' || after.status !== 'evaluated') return;
     for (const rule of [...new Set(before.issues.map(issue => issue.ruleId))]) {
       if (after.issues.some(issue => issue.ruleId === rule && issue.status === 'open')) continue;
-      const lesson = '已验证策略：遇到 ' + rule + ' 问题，只替换原文中唯一匹配的局部片段；对照创作宪法复检全部维度，无退步且问题消除才接受。';
+      const lesson = verifiedRepairLesson(rule, repair.strategy);
+      if (!lesson) continue;
       const now = new Date().toISOString();
       db.prepare(`INSERT INTO generation_lessons (id,project_id,category,lesson,occurrence,last_chapter_index,created_at,updated_at)
         VALUES (?,?,?,?,1,0,?,?) ON CONFLICT(project_id,lesson) DO UPDATE SET occurrence=occurrence+1,updated_at=excluded.updated_at`).run(

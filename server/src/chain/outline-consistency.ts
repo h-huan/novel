@@ -7,12 +7,13 @@
  * 正文无论怎么写都必然违约，Gate 必然 422——这不是评审器误判，是章节合同本身有缺陷。
  * 本模块在大纲阶段就把这类缺陷判出来，交给「就地改写大纲」修复，而不是把矛盾放进正文
  * 再靠 Gate 拦截（module-standards 的 outline 规则要求：确定性校验先判，就地改写）。
+ * 地点名出现本身不证明抵达：车辆名、文书目的地、远望和访问计划须与实际场景区分。
  *
  * 判据要求两处同时成立才命中（宁窄勿误报）：
  *  1) 命中的地点词来自「项目内其它章节的 location_summary」，不是任意名词；
  *  2) 该地点词不构成本章自身场景范围的一部分（含子串关系——「店长办公室」在本章
  *     location_summary 的「回魂剧本杀店·店长办公室」里，属本章范围内，不得误判越界）。
- * 判据用生产库 8 个项目 / 24 条章节大纲全量回归过：命中 2 处真缺陷，0 处误报。
+ * 判据还须匹配实际场景落点或抵达动作；复杂叙述继续由语义一致性审查核对。
  */
 
 /** 参与一致性判定的章节大纲行（只取判定需要的列）。 */
@@ -200,13 +201,31 @@ function findOutOfScopePlace(text: string, otherTokens: string[], ownTokens: str
       // 收缩到虚词上就不再是地点：宁可不判，也不许把「母亲的」当成越界地点。
       if (TRAILING_PARTICLE.test(candidate)) continue;
       if (ownTokens.some((own) => own.includes(candidate))) break;
-      if (text.includes(candidate)) {
+      if (hasActualSceneAtPlace(text, candidate)) {
         if (!best || candidate.length > best.length) best = candidate;
         break;
       }
     }
   }
   return best;
+}
+
+/** A name on a vehicle, document, plan or offstage view does not locate this scene. */
+function hasActualSceneAtPlace(text: string, place: string): boolean {
+  const escaped = place.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const part of text.split(/[。；;|\n]/)) {
+    const at = part.indexOf(place);
+    if (at < 0) continue;
+    const before = part.slice(Math.max(0, at - 24), at);
+    const after = part.slice(at + place.length);
+    if (/^(?:车|的车|灯|的灯|名|的名)/.test(after)) continue;
+    if (/(?:明天|明日|次日|下一章|下章|打算|计划|准备|决定|即将|将要|下一站|写着|指向|看见|望见|听说)[^。；]*$/.test(before)) continue;
+    if (/(?:未|没有|不曾|尚未|不)(?:曾|能|会|再|提前)?(?:到|进|踏|抵|去)[^，。；]*$/.test(before)) continue;
+    const location = new RegExp(`(?:在|抵达|到达|站到|站在|走进|进入|来到|踏入|押到|押至|落在|收在|收束在)[^，。；]{0,8}${escaped}`);
+    const header = new RegExp(`^\\s*${escaped}(?:[：:]|[。！？]|$|[门堂院厅场室口内外前后])`);
+    if (location.test(part) || header.test(part)) return true;
+  }
+  return false;
 }
 
 /**

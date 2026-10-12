@@ -18,6 +18,41 @@ function fixture() {
 }
 
 describe('continuity review idempotency', () => {
+  it('counts deduplicated persisted findings, not repeated candidates', () => {
+    const { db, service, input, issue } = fixture();
+    try {
+      const result = service.persistReviews(input, 'sum', 'foreshadowing', [issue, issue, issue]);
+      expect(result).toMatchObject({ issueCount: 1, blockingCount: 1 });
+      expect(result.reviewIds).toHaveLength(1);
+      expect(result.stateItemIds).toHaveLength(1);
+    } finally { db.close(); }
+  });
+  it('does not require plan metadata verbatim; only exact validated AI proof completes review', () => {
+    const { db, service, input } = fixture();
+    try {
+      db.exec(`INSERT INTO outlines(id,project_id,level,title,content) VALUES ('o','p','chapter','标题','应当通过实际选择推进，不能把这段规划复制到正文');
+        INSERT INTO generation_runs(id,project_id,chapter_index,stage,scenario,status,gate_status,output_text,prompt_version,context_version,started_at) VALUES ('run','p',1,'chapter','writing','success','passed','new','v','v','now');`);
+      const chapter = { outline_id: 'o', chapter_index: 1 };
+      expect(service.reviewOutline(input, 'sum', chapter)).toMatchObject({ status: 'pending', issueCount: 0 });
+      const outline = db.prepare('SELECT * FROM outlines WHERE id=? AND project_id=?').get('o', 'p');
+      const proof = { runId: 'run', outlineFingerprint: createHash('sha256').update(JSON.stringify(outline)).digest('hex') };
+      expect(service.reviewOutline({ ...input, validatedOutlineProof: proof }, 'sum', chapter)).toMatchObject({ status: 'completed', issueCount: 0 });
+      expect(service.reviewOutline({ ...input, afterContent: 'changed', validatedOutlineProof: proof }, 'sum', chapter).status).toBe('pending');
+      db.prepare('UPDATE outlines SET content=? WHERE id=?').run('更新计划', 'o');
+      expect(service.reviewOutline({ ...input, validatedOutlineProof: proof }, 'sum', chapter).status).toBe('pending');
+    } finally { db.close(); }
+  });
+  it('archives legacy literal probes, preserving actual blockers and confirmed items', () => {
+    const { db, service, input, issue } = fixture();
+    try {
+      db.exec(`INSERT INTO outlines(id,project_id,level,title,content) VALUES ('o','p','chapter','标题','章纲说明');`);
+      const literal = service.persistReviews(input, 'sum', 'outline', [{ ...issue, type: 'missing_requirement', block: false }]);
+      const blocker = service.persistReviews(input, 'sum', 'outline', [{ ...issue, type: 'actual_conflict' }]);
+      service.reviewOutline(input, 'sum', { outline_id: 'o', chapter_index: 1 });
+      expect(db.prepare('SELECT status FROM state_items WHERE id=?').get(literal.stateItemIds[0]).status).toBe('archived');
+      expect(db.prepare('SELECT status FROM state_items WHERE id=?').get(blocker.stateItemIds[0]).status).toBe('conflict');
+    } finally { db.close(); }
+  });
   it('creates one review and one linked state item', () => {
     const { db,service,input,issue }=fixture(); const result=service.persistReviews(input,'sum','foreshadowing',[issue]);
     expect(result.reviewIds).toHaveLength(1); expect(result.stateItemIds).toHaveLength(1);

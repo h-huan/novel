@@ -46,6 +46,8 @@ export const LLM_TUNABLES = {
   // 之前耗尽，因此评审从第一次调用就使用完整预算，不再先失败再扩容。
   QUALITY_REVIEW_MAXTOKENS: envInt('LLM_QUALITY_REVIEW_MAXTOKENS', 32768),
   QUALITY_REPAIR_MAXTOKENS: envInt('LLM_QUALITY_REPAIR_MAXTOKENS', 32768),
+  // RPR-003：证据证明改善才继续；轮数上限不授予保存通过。
+  QUALITY_LOCAL_REPAIR_MAX_ATTEMPTS: envInt('LLM_QUALITY_LOCAL_REPAIR_MAX_ATTEMPTS', 8),
 
   // ============ outline 写入 maxTokens ============
   // ⚠️ 防复发（勿再引入）：这里曾有一组 OUTLINE_WRITE_MIN / OUTLINE_WRITE_MAX /

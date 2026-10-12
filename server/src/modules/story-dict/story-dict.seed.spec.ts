@@ -5,7 +5,7 @@ import {
   storyDictKey,
   findDuplicateSeedLabels,
 } from './story-dict.service';
-import { GLOBAL_STORY_CATEGORIES, NARRATIVE_POV_SEED_LABELS, PLOT_TAG_SEED_LABELS } from '../../../shared/src';
+import { GLOBAL_STORY_CATEGORIES, NARRATIVE_POV_SEED_LABELS, PLOT_TAG_SEED_LABELS, WEB_NOVEL_GENRE_SEED_LABELS, dimensionGuide } from '../../../shared/src';
 
 /**
  * 有意保留的「基调词 = 题材子类同名」冻结清单。
@@ -24,6 +24,11 @@ const tones = STORY_DICT_SEEDS.filter(s => s.type === 'tone_tag');
 const plots = STORY_DICT_SEEDS.filter(s => s.type === 'plot_tag');
 
 describe('执行标准种子（story_dict）不变量', () => {
+  it('内置创作流派都有同源操作定义，自定义值不冒用其他流派定义', () => {
+    expect(genres.map(g => g.label)).toEqual(WEB_NOVEL_GENRE_SEED_LABELS);
+    for (const genre of genres) expect(dimensionGuide('genre', genre.label)).not.toBe('');
+    expect(dimensionGuide('genre', '作者自建流派')).toBe('');
+  });
   it('情节取向候选由共享定义进入可管理字典', () => {
     expect(plots.map(item => item.label)).toEqual([...PLOT_TAG_SEED_LABELS]);
   });

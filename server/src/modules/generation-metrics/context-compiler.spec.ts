@@ -28,6 +28,20 @@ function fixture() {
 }
 
 describe('Context Compiler', () => {
+  it('retains middle facts of the complete immediate chapter separately from summaries', () => {
+    const db=fixture();
+    try {
+      const content='开头'.repeat(900)+'她尚未获得钥匙，门从未打开。'+'结尾'.repeat(900);
+      db.prepare('UPDATE chapters SET content=? WHERE id=?').run(content,'ch4');
+      const result=compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:5,maxChars:12000});
+      expect(JSON.parse(result.snapshot).previousChapter).toEqual([expect.objectContaining({content,complete:true,chapter_index:4})]);
+      expect(result.size).toBeLessThanOrEqual(12000);
+      const tight=compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:5,maxChars:4000});
+      const data=JSON.parse(tight.snapshot);
+      if(!data.previousChapter.length) expect(data.meta.truncation).toContain('previousChapter');
+      else expect(data.previousChapter[0].content).toBe(content);
+    } finally {db.close();}
+  });
   it('recalls explicit distant dependencies without unbounded project scans', () => {
     const db = fixture();
     try {
@@ -125,6 +139,31 @@ describe('Context Compiler', () => {
       db.prepare("UPDATE character_extended_profiles SET forbidden_words='永远' WHERE character_id='c'").run();
       const after = compileContext(db, { projectId: 'p', stage: 'chapter', chapterIndex: 5 });
       expect(after.version).not.toBe(before.version);
+    } finally { db.close(); }
+  });
+});
+
+// Real SQLite exercises the same profile projection consumed by writing and QC.
+describe('canonical character voice propagation', () => {
+  it('reads saved card style in both stages without stale legacy catchphrases', () => {
+    const db=fixture();
+    try {
+      db.prepare('UPDATE characters SET profile_json=? WHERE id=?').run(JSON.stringify({catchphrase_speech_style:'平时讲具体事，受质问先确认对方目的',writingRules:{limit:'只知亲历事实'}}),'c');
+      for (const stage of ['chapter','refinement'] as const) {
+        const data=JSON.parse(compileContext(db,{projectId:'p',stage,chapterIndex:5,maxChars:12000}).snapshot);
+        const c=data.characterContracts.find((c:any)=>c.characterId==='c');
+        expect(c.speechRegister).toBe('平时讲具体事，受质问先确认对方目的');
+        expect(c.catchphrases).toEqual([]);
+        expect(c.forbiddenVocabulary).toEqual([]);
+      }
+    } finally { db.close(); }
+  });
+  it('keeps a cleared card trait empty rather than restoring the old table', () => {
+    const db=fixture();
+    try {
+      db.prepare('UPDATE characters SET profile_json=? WHERE id=?').run(JSON.stringify({catchphrase_speech_style:''}),'c');
+      const data=JSON.parse(compileContext(db,{projectId:'p',stage:'chapter',chapterIndex:5,maxChars:12000}).snapshot);
+      expect(data.characterContracts.find((c:any)=>c.characterId==='c').speechRegister).toBeNull();
     } finally { db.close(); }
   });
 });

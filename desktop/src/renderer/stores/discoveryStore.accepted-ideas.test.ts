@@ -23,4 +23,10 @@ describe('灵感发现前端只展示通过后端 Gate 的题材', () => {
     useDiscoveryStore.getState().setIdeas([accepted, rejected, rawWithoutGate]);
     expect(useDiscoveryStore.getState().ideas.map((idea) => idea.title)).toEqual(['通过题材']);
   });
+  it('rejects a stale passed card containing a prohibited pet name', () => {
+    const stale = { ...accepted, hook: '她要救回宠物豆包。' };
+    expect(acceptedDiscoveryIdeas([stale])).toEqual([]);
+    useDiscoveryStore.getState().setIdeas([stale]);
+    expect(useDiscoveryStore.getState().ideas).toEqual([]);
+  });
 });

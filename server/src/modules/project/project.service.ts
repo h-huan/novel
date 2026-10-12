@@ -105,21 +105,35 @@ export class ProjectService {
       ...(db.prepare(`SELECT id FROM timelines WHERE project_id = ?`).all(id) as Array<{ id: string }>).map(row => row.id),
       ...(db.prepare(`SELECT event.id FROM timeline_events event JOIN timelines timeline ON timeline.id = event.timeline_id WHERE timeline.project_id = ?`).all(id) as Array<{ id: string }>).map(row => row.id),
     ] : [];
-    this.repo.delete(id);
-    if (db) {
-      if (versionEntityIds.length) {
-        const placeholders = versionEntityIds.map(() => '?').join(',');
-        db.prepare(`DELETE FROM version_history WHERE entity_id IN (${placeholders})`).run(...versionEntityIds);
+    if (db) db.exec('BEGIN IMMEDIATE');
+    try {
+      if (db) {
+        // These quality tables have no project foreign key, so project deletion
+        // would otherwise leave reports and open issues visible on the workbench.
+        for (const table of ['writing_revision_records', 'writing_quality_issues', 'writing_quality_reports']) {
+          db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(id);
+        }
       }
-      for (const table of [
-        'canonical_entity_sync_states',
-        'chapter_continuity_reviews',
-        'chapter_summaries',
-        'aggregate_summary_states',
-        'chapter_derived_sync_states',
-      ]) {
-        db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(id);
+      this.repo.delete(id);
+      if (db) {
+        if (versionEntityIds.length) {
+          const placeholders = versionEntityIds.map(() => '?').join(',');
+          db.prepare(`DELETE FROM version_history WHERE entity_id IN (${placeholders})`).run(...versionEntityIds);
+        }
+        for (const table of [
+          'canonical_entity_sync_states',
+          'chapter_continuity_reviews',
+          'chapter_summaries',
+          'aggregate_summary_states',
+          'chapter_derived_sync_states',
+        ]) {
+          db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(id);
+        }
+        db.exec('COMMIT');
       }
+    } catch (error) {
+      if (db) db.exec('ROLLBACK');
+      throw error;
     }
     return { success: true };
   }

@@ -52,12 +52,15 @@ export interface ChapterDerivedDataSyncResult {
   warnings: string[];
 }
 
+export interface ValidatedChapterOutlineProof { runId: string; outlineFingerprint: string; }
+
 interface SyncInput {
   projectId: string;
   chapterId: string;
   beforeContent: string;
   afterContent: string;
   reason: 'manual_save' | 'version_restore' | 'manual_resync';
+  validatedOutlineProof?: ValidatedChapterOutlineProof;
 }
 
 @Injectable()
@@ -352,16 +355,34 @@ export class ChapterDerivedDataSyncService {
   private reviewOutline(input: SyncInput, checksum: string, chapter: any): ContinuityReviewStep {
     const outline = chapter.outline_id ? this.database.getDb().prepare('SELECT * FROM outlines WHERE id=? AND project_id=?').get(chapter.outline_id, input.projectId) as any : null;
     if (!outline) return { status: 'pending', detail: 'Chapter is not linked to an outline; author review is required', issueCount: 0, blockingCount: 0, reviewIds: [], stateItemIds: [] };
-    const issues: any[] = [];
-    const requirements = [String(outline.content || ''), ...this.jsonStrings(outline.plot_points), ...this.jsonStrings(outline.scenes)].filter((v) => v.length >= 4);
-    for (const requirement of requirements) {
-      if (!input.afterContent.includes(requirement)) issues.push({ type: 'missing_requirement', target: outline.id, requirement, old: input.beforeContent.includes(requirement) ? requirement : '', next: '', severity: 'medium', block: false });
-    }
-    return this.persistReviews(input, checksum, 'outline', issues);
+    const db = this.database.getDb();
+    // Retire only the old nonblocking literal-match probes, retaining their history.
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`UPDATE state_items SET status='archived',updated_at=? WHERE status='pending'
+        AND source_type='chapter_continuity_recheck' AND created_by='chapter-derived-sync'
+        AND id IN (SELECT state_item_id FROM chapter_continuity_reviews WHERE project_id=? AND chapter_id=?
+          AND review_type='outline' AND issue_type='missing_requirement' AND blocks_lock=0 AND status='pending')`)
+        .run(new Date().toISOString(), input.projectId, input.chapterId);
+      db.prepare(`UPDATE chapter_continuity_reviews SET status='archived',updated_at=? WHERE project_id=? AND chapter_id=?
+        AND review_type='outline' AND issue_type='missing_requirement' AND blocks_lock=0 AND status='pending'`)
+        .run(new Date().toISOString(), input.projectId, input.chapterId);
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+    // Plans are semantic contracts, not mandatory verbatim sentences in prose.
+    // Reuse the validated AI commit proof; manual edits/restores still need review.
+    const proof = input.validatedOutlineProof;
+    const fingerprint = createHash('sha256').update(JSON.stringify(outline)).digest('hex');
+    const run = proof && proof.outlineFingerprint === fingerprint
+      ? this.database.getDb().prepare(`SELECT id FROM generation_runs WHERE id=? AND project_id=?
+        AND chapter_index=? AND stage='chapter' AND status='success' AND gate_status='passed' AND output_text=?`)
+        .get(proof.runId, input.projectId, chapter.chapter_index, input.afterContent) : null;
+    if (run) return { status: 'completed', detail: 'Exact generated body passed current outline alignment before Canon commit', issueCount: 0, blockingCount: 0, reviewIds: [], stateItemIds: [] };
+    return { status: 'pending', detail: 'Semantic outline review required; plan prose and metadata are not literal body requirements', issueCount: 0, blockingCount: 0, reviewIds: [], stateItemIds: [] };
   }
 
   private persistReviews(input: SyncInput, checksum: string, reviewType: string, issues: any[]): ContinuityReviewStep {
-    const db = this.database.getDb(); const now = new Date().toISOString(); const reviewIds: string[] = []; const stateItemIds: string[] = [];
+    const db = this.database.getDb(); const now = new Date().toISOString(); const reviewIds: string[] = []; const stateItemIds: string[] = []; const blockingIds = new Set<string>();
     for (const issue of issues) {
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -369,7 +390,7 @@ export class ChapterDerivedDataSyncService {
         db.prepare(`INSERT INTO chapter_continuity_reviews (id,project_id,chapter_id,content_checksum,review_type,issue_type,target_id,requirement,old_evidence,new_evidence,change_type,severity,blocks_lock,status,state_item_id,payload,created_at,updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chapter_id,content_checksum,review_type,issue_type,target_id) DO NOTHING`)
           .run(id,input.projectId,input.chapterId,checksum,reviewType,issue.type,issue.target||'',issue.requirement||null,issue.old||null,issue.next||null,issue.type,issue.severity,issue.block?1:0,issue.block?'conflict':'pending',null,JSON.stringify(issue),now,now);
-        let row = db.prepare(`SELECT id,state_item_id FROM chapter_continuity_reviews WHERE chapter_id=? AND content_checksum=? AND review_type=? AND issue_type=? AND target_id=?`).get(input.chapterId,checksum,reviewType,issue.type,issue.target||'') as any;
+        let row = db.prepare(`SELECT id,state_item_id,blocks_lock FROM chapter_continuity_reviews WHERE chapter_id=? AND content_checksum=? AND review_type=? AND issue_type=? AND target_id=?`).get(input.chapterId,checksum,reviewType,issue.type,issue.target||'') as any;
         if (!row.state_item_id && this.stateItems) {
           const dedupeKey = [input.chapterId, checksum, reviewType, issue.type, issue.target || ''].join(':');
           const summary = `${reviewType}:${issue.type}:${dedupeKey}`;
@@ -377,11 +398,10 @@ export class ChapterDerivedDataSyncService {
           db.prepare('UPDATE chapter_continuity_reviews SET state_item_id=?,updated_at=? WHERE id=? AND state_item_id IS NULL').run(state.id,now,row.id);
           row = { ...row, state_item_id: state.id };
         }
-        db.exec('COMMIT'); reviewIds.push(row.id); if (row.state_item_id) stateItemIds.push(row.state_item_id);
+        db.exec('COMMIT'); if (!reviewIds.includes(row.id)) reviewIds.push(row.id); if (row.state_item_id && !stateItemIds.includes(row.state_item_id)) stateItemIds.push(row.state_item_id); if (row.blocks_lock) blockingIds.add(row.id);
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
-    const blocking = issues.filter((x) => x.block).length;
-    return { status: 'completed', detail: `Persisted ${issues.length} ${reviewType} review finding(s)`, issueCount: issues.length, blockingCount: blocking, reviewIds, stateItemIds };
+    return { status: 'completed', detail: `Persisted ${reviewIds.length} ${reviewType} review finding(s)`, issueCount: reviewIds.length, blockingCount: blockingIds.size, reviewIds, stateItemIds };
   }
 
   private jsonStrings(raw: string): string[] { try { const value=JSON.parse(raw||'[]'); const out:string[]=[]; const walk=(v:any)=>{ if(typeof v==='string') out.push(v.trim()); else if(Array.isArray(v)) v.forEach(walk); else if(v&&typeof v==='object') Object.values(v).forEach(walk); }; walk(value); return out; } catch { return []; } }

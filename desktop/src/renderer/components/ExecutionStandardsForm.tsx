@@ -122,6 +122,7 @@ const ExecutionStandardsForm: React.FC<ExecutionStandardsFormProps> = ({
     : null;
   const fieldNames = platformCreationFieldNames(value.targetPlatform, value.projectType, Boolean(categoryProfile));
   const submissionOptions = categoryProfile ? categoryProfile.topTags.map((tag) => tag.name) : [];
+  const undefinedCreativeGenres = value.webNovelGenre.filter(label => !dimensionGuide('genre', label));
 
   const isCustomPlatform = value.targetPlatform === CUSTOM_PLATFORM_VALUE;
   const customNoteMissing = isCustomPlatformNoteMissing(value);
@@ -243,7 +244,7 @@ const ExecutionStandardsForm: React.FC<ExecutionStandardsFormProps> = ({
       <div style={s.sectionTitle}>创作流派（可多选）</div>
       <MultiSelectDropdown label="创作流派"
         value={value.webNovelGenre} disabled={disabled}
-        options={unionOptions(creativeGenres, value.webNovelGenre).map((item) => ({ value: item, label: item }))}
+        options={unionOptions(creativeGenres, value.webNovelGenre).map((item) => ({ value: item, label: item, hint: dimensionGuide('genre', item) || '自定义流派：请说明可见的行动机制和读者预期' }))}
         onToggle={(item) => patch({ webNovelGenre: toggleTag(value.webNovelGenre, item) })}
         addPlaceholder="填写创作流派" placeholder="选择创作流派" />
       <div style={s.sectionTitle}>{fieldNames.genre || '投稿标签（如平台后台有此项）'}（可多选）</div>
@@ -260,9 +261,10 @@ const ExecutionStandardsForm: React.FC<ExecutionStandardsFormProps> = ({
       {selectedGenreGaps.map((gap) => (
         <div key={gap} style={s.hintError}>{gap}</div>
       ))}
-      {selectedGenreGaps.length > 0 && <textarea value={value.genreFitNote} disabled={disabled}
+      {undefinedCreativeGenres.length > 0 && <div style={s.hint}>自定义流派“{undefinedCreativeGenres.join('、')}”需要说明其行动机制；不会由模型自动补充定义。</div>}
+      {(selectedGenreGaps.length > 0 || undefinedCreativeGenres.length > 0) && <textarea value={value.genreFitNote} disabled={disabled}
         onChange={(event) => patch({ genreFitNote: event.target.value })}
-        placeholder="标签与分类契合依据：这些标签如何兑现该分类的读者预期"
+        placeholder="流派与分类依据：谁采取什么行动、如何推动故事并兑现读者预期"
         rows={2} style={{ ...s.select, resize: 'vertical', lineHeight: 1.6 }} />}
       <div style={s.sectionTitle}>情节取向（可多选）</div>
       <MultiSelectDropdown label="情节取向" value={value.plotTags} disabled={disabled}

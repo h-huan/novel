@@ -34,6 +34,22 @@ function fixture() {
 afterEach(() => { while (databases.length) databases.pop()!.close(); });
 
 describe('outline structure and body synchronization', () => {
+  it('保存章节合同后真实持久化新职责和收尾，正文不被章纲保存覆盖', () => {
+    const { db, service, first } = fixture();
+    if (!(db.prepare('PRAGMA table_info(outlines)').all() as any[]).some(row => row.name === 'plan_json')) db.exec('ALTER TABLE outlines ADD COLUMN plan_json TEXT');
+    const plan = { core: '公开质疑后等待真实处理决定', scenes: [{ summary: '执行人收到暂缓通知', outcome: '暂缓处置，人仍在押' }],
+      characterActions: [{ character: '主角', action: '发出质疑', result: '引起复核' }], conflict: '争取时间而非直接改判',
+      highlights: ['等待复核'], foreshadowing: [], foreshadowingRecoveries: [], characterStateChanges: ['由旁观转为承担风险'],
+      hook: '另一个名字出现', mood: '紧张', hotScenes: ['通知抵达'], targetWords: 3500, nextHook: '另一个名字出现' };
+    const before = db.prepare('SELECT content FROM chapters WHERE outline_id=?').get(first.id) as any;
+    const response = service.update(first.id, { plan });
+    const saved = db.prepare('SELECT plan_json,scenes,ending_setup FROM outlines WHERE id=?').get(first.id) as any;
+    expect(JSON.parse(saved.plan_json).core).toBe(plan.core);
+    expect(JSON.parse(saved.scenes).core).toBe(plan.core);
+    expect(saved.ending_setup).toBe(plan.hook);
+    expect(response.plan.core).toBe(plan.core);
+    expect((db.prepare('SELECT content FROM chapters WHERE outline_id=?').get(first.id) as any).content).toBe(before.content);
+  });
   it('splits a blank chapter, keeps bodies blank, and shifts legacy chapter references atomically', () => {
     const { db, service, first } = fixture();
 

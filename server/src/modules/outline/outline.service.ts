@@ -17,7 +17,7 @@ import type {
 } from './dto/outline.dto';
 import { StateItemService } from '../../state/state-item.service';
 import { ConsistencyCheckService } from '../../state/consistency-check.service';
-import { CHAPTER_WORD_RANGE } from '../../../shared/src';
+import { CHAPTER_WORD_RANGE, validateChapterPlan } from '../../../shared/src';
 
 export interface OutlineResponse {
   id: string;
@@ -202,6 +202,22 @@ export class OutlineService {
     if (dto.timeline !== undefined) updateData.timeline = dto.timeline;
     if (dto.locationSummary !== undefined) updateData.location_summary = dto.locationSummary;
     if (dto.conflictDesign !== undefined) updateData.conflict_design = dto.conflictDesign;
+
+    if (dto.plan !== undefined) {
+      if (existing.level !== 'chapter') throw new BadRequestException('章节合同只适用于章节节点');
+      const checked = validateChapterPlan(dto.plan);
+      if (!checked.ok || !checked.value) throw new BadRequestException(`章节合同无效：${checked.issues.join('；')}`);
+      const plan = checked.value;
+      updateData.plan_json = JSON.stringify(plan);
+      // Legacy consumers still read scenes and these display fields. Derive them
+      // from the accepted plan so a saved contract cannot coexist with stale beats.
+      updateData.scenes = JSON.stringify(plan);
+      updateData.ending_setup = plan.nextHook || plan.hook;
+      updateData.hot_scenes = JSON.stringify(plan.hotScenes);
+      updateData.highlight_points = JSON.stringify(plan.highlights);
+      updateData.conflict_design = plan.conflict;
+      if (plan.targetWords !== undefined) updateData.target_words = this.resolveChapterTargetWords(existing.project_id, plan.targetWords);
+    }
 
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);

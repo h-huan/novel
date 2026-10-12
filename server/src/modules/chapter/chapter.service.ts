@@ -6,7 +6,7 @@ import type { ChapterRow } from '../../database/repositories/chapter.repository'
 import { VersionHistoryRepository } from '../../database/repositories/version-history.repository';
 import { StateItemService } from '../../state/state-item.service';
 import type { CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
-import { ChapterDerivedDataSyncService } from './chapter-derived-data-sync.service';
+import { ChapterDerivedDataSyncService, type ValidatedChapterOutlineProof } from './chapter-derived-data-sync.service';
 import { DatabaseService } from '../../database/database.service';
 import { OriginalityGuardService } from '../originality/originality-guard.service';
 import { CHAPTER_WORD_RANGE } from '../../../shared/src';
@@ -94,7 +94,7 @@ export class ChapterService {
     return this.toResponse(row);
   }
 
-  async update(id: string, dto: UpdateChapterDto): Promise<ChapterResponse> {
+  async update(id: string, dto: UpdateChapterDto, validatedOutlineProof?: ValidatedChapterOutlineProof): Promise<ChapterResponse> {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Chapter ${id} not found`);
     if (existing.status === 'locked') throw new BadRequestException('Cannot modify locked chapter');
@@ -125,7 +125,7 @@ export class ChapterService {
         title: (dto.title ?? existing.title) || '',
         content: dto.content || '',
       });
-      const sync = await this.syncAfterContentChange(existing, dto.content || '', 'manual_save');
+      const sync = await this.syncAfterContentChange(existing, dto.content || '', 'manual_save', validatedOutlineProof);
       response.stateSync = sync.stateSync;
       response.derivedSync = sync.derivedSync;
       if (cleaned > 0) {
@@ -333,6 +333,7 @@ export class ChapterService {
     existing: ChapterRow,
     afterContent: string,
     reason: 'manual_save' | 'version_restore',
+    validatedOutlineProof?: ValidatedChapterOutlineProof,
   ): Promise<{ stateSync: Record<string, unknown>; derivedSync: Record<string, unknown> }> {
     const stateSync: Record<string, unknown> = {};
     let derivedSync: any = { success: false };
@@ -353,6 +354,7 @@ export class ChapterService {
         derivedSync = await this.derivedDataSync.syncAfterContentChange({
           projectId: existing.project_id, chapterId: existing.id,
           beforeContent: existing.content || '', afterContent, reason,
+          validatedOutlineProof,
         });
       } catch (error) {
         warnings.push(`Derived data sync failed: ${this.errorMessage(error)}`);

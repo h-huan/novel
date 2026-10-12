@@ -292,7 +292,7 @@ describe('hardline-scanner 规则55 AI 高频模糊词密度', () => {
 
 describe('isLanguageHardline 阻断集合（只保留可确定证据）', () => {
   it('客观可复算/可定位的重复、格式和明确语言错误继续阻断保存', () => {
-    for (const id of ['15c', '15d', '33', '35', '35b', '42', '44', '53-same-structure-parallel', '54-measure-word-mismatch', '56-punct-stacking']) expect(isLanguageHardline(id), id).toBe(true);
+    for (const id of ['15c', '15d', '33', '35', '35b', '42', '44', '54-measure-word-mismatch', '56-punct-stacking']) expect(isLanguageHardline(id), id).toBe(true);
   });
   it('词频、段长、修辞、生理反应等启发式只作语义复核信号', () => {
     for (const id of ['15b', '20a', '34', 'list-enumeration', 'formula-sentence', 'dash-density', 'simile-density', '26-short-para', '26b-staccato', '32', '36', '37', '39', '46', '47', '48', '49', '50-fragment-action-chain', '51-modal-particle-density', '52-env-imagery-repeat', '55', '57-ellipsis-density']) expect(isLanguageHardline(id), id).toBe(false);
@@ -574,9 +574,11 @@ describe('system workflow rule governance regressions', () => {
     for (const id of ['41','43','45','dialogue-ratio','dash-density','simile-density','55','57-ellipsis-density','26-short-para','26b-staccato']) expect(hard).not.toContain(id);
   });
   it('keeps actual repeated prose/dialogue evidence in the deterministic blocking family', () => {
-    for (const id of ['35','35b','42','44','53-same-structure-parallel','54-measure-word-mismatch','56-punct-stacking']) expect(isLanguageHardline(id)).toBe(true);
+    for (const id of ['35','35b','42','44','54-measure-word-mismatch','56-punct-stacking']) expect(isLanguageHardline(id)).toBe(true);
   });
   it('treats stylistic templates and density signals as semantic-review evidence, not direct blockers', () => {
     for (const id of ['15b','20a','34','list-enumeration','formula-sentence','dash-density','simile-density','36','37','39','46','47','48','49','50-fragment-action-chain','51-modal-particle-density','52-env-imagery-repeat','55','57-ellipsis-density']) expect(isLanguageHardline(id)).toBe(false);
   });
 });
+
+it('同构形态保留风险定位，普通资料清单不直接阻断',()=>{const hits=detectForbiddenTells('他截了三张图，一张评价总页，一张倒计时，一张账号信息。');expect(hits.some(f=>f.ruleId==='53-same-structure-parallel')).toBe(true);expect(isLanguageHardline('53-same-structure-parallel')).toBe(false);});

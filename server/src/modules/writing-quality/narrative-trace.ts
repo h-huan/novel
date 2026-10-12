@@ -1,3 +1,5 @@
+import { splitNarrativeSceneWindows } from './narrative-scenes';
+import { quotedText } from '../../chain/quoted-text';
 /** All classifiers are transparent proxy features, never semantic verdicts or AI probabilities. */
 const beats: Array<[string, RegExp]> = [
   ['reveal', /发现|原来|真相|看见|得知/], ['conflict', /拒绝|阻止|争执|攻击|拔刀|威胁/],
@@ -9,20 +11,20 @@ const functions: Array<[string, RegExp]> = [
   ['smalltalk', /吃了|天气|早安|晚安|你好/], ['information', /因为|所以|首先|其次|说明|告诉你/], ['subtext_candidate', /随你|算了|没什么|你说呢/],
 ];
 function analyze(content: string) {
-  const scenes = content.split(/\n\s*\n|\n(?:\*{3,}|—{3,})\n/).filter(s => s.trim());
+  const scenes = splitNarrativeSceneWindows(content);
   const fingerprints = scenes.map(scene => {
     const sequence = ['start'];
     for (const sentence of scene.split(/[。！？\n]/)) for (const [name,re] of beats) if (re.test(sentence) && sequence.at(-1) !== name) sequence.push(name);
     sequence.push(/[？?]\s*$/.test(scene) ? 'question_end' : 'end');
     return { sequence, signature: sequence.join('>'), quote: scene.slice(0,100), enoughSignals: sequence.length >= 5 };
   });
-  const dialogue = [...content.matchAll(/[“「]([^”」]+)[”」]/g)];
+  const dialogue = quotedText(content);
   const distribution: Record<string, number> = Object.fromEntries([...functions.map(([k]) => [k,0]), ['unknown',0]]);
-  for (const m of dialogue) distribution[functions.find(([,re]) => re.test(m[1]))?.[0] || 'unknown']++;
+  for (const m of dialogue) distribution[functions.find(([,re]) => re.test(m.text))?.[0] || 'unknown']++;
   const units = content.match(/[^。！？\n]+[。！？]?/g) || [];
   let show = 0; let explain = 0;
   for (const unit of units) {
-    if (/[“「]|推|握|走|敲|抬|冷|烫|气味|响|粗糙|裂纹|锈|脚步/.test(unit)) show++;
+    if (quotedText(unit).length || /推|握|走|敲|抬|冷|烫|气味|响|粗糙|裂纹|锈|脚步/.test(unit)) show++;
     if (/意味着|说明|总之|显然|毫无疑问|内心|命运|人生|之所以|感到.*因为/.test(unit)) explain++;
   }
   return { fingerprints, dialogueFunction: { total: dialogue.length, distribution, informationRatio: dialogue.length ? distribution.information / dialogue.length : null },
@@ -34,7 +36,7 @@ export function narrativeTrace(content: string, previous: Array<{ id: string; co
   for (const p of comparisons) {
     if (current.dialogueFunction.total >= 5 && p.dialogueFunction.total >= 5
       && (current.dialogueFunction.informationRatio ?? 0) > 0.7 && (p.dialogueFunction.informationRatio ?? 0) > 0.7) {
-      risks.push({ ruleId: 'ai_trace.cross_chapter_dialogue_function_risk', quote: content.match(/[“「][^”」]+[”」]/)?.[0] || '',
+      risks.push({ ruleId: 'ai_trace.cross_chapter_dialogue_function_risk', quote: quotedText(content)[0]?.quote || '',
         comparisonId: p.id, comparisonQuote: previous.find(v => v.id === p.id)!.content.match(/[“「][^”」]+[”」]/)?.[0], reason: '相邻章节对白持续集中于信息传递候选功能，需语义核验' });
     }
     if (current.showExplain.units >= 5 && p.showExplain.units >= 5 && (current.showExplain.ratio ?? 1) < 0.35 && (p.showExplain.ratio ?? 1) < 0.35) {

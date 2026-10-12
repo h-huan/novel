@@ -10,6 +10,16 @@ import {
 } from './outline-consistency';
 
 describe('explicit outline chapter labels', () => {
+  it('does not move a scene when a destination is on a vehicle or transfer paper', () => {
+    const rows: OutlineConsistencyRow[] = [
+      { id: 'chapter3', order: 2, location_summary: '谷底药庐',
+        setback_scenes: JSON.stringify(['谷底药庐：阿粟被押上宗主峰车，铜牌改名。']),
+        ending_setup: '章末落点收在谷底药庐阶前；副页下一站写着宗主峰，她并未踏足。' },
+      { id: 'chapter4', order: 3, location_summary: '宗主峰药田→宗主峰堂上' },
+    ];
+    expect(scanOutlineConsistency(rows)).toEqual([]);
+    expect(scanOutlineConsistency([{ ...rows[0], ending_setup: '她来到宗主峰药田，救出弟弟。' }, rows[1]]).length).toBeGreaterThan(0);
+  });
   it('repairs only a wrong location heading and leaves all scene text intact', () => {
     const original = '第七章空间全部在待拆片区内外收束：顶层遗物间→拆迁指挥部→小院门口。';
     expect(correctedOutlineOrdinalLabel({ id: 'o2', order: 1, location_summary: original }))
@@ -131,8 +141,10 @@ describe('outline-consistency · 真实大纲回归', () => {
     });
   });
 
-  it('Gate 判死那次是真违约：声明「不出校门」却在章末落点与钩子抵达「小满家」', () => {
-    const findings = scanOutlineConsistency(C8);
+  it('下一步访问的计划不等于本章已抵达；真实抵达仍违反排他范围', () => {
+    expect(scanOutlineConsistency(C8)).toEqual([]);
+    const arrived = C8.map((row,index) => index === 0 ? { ...row, ending_setup: '她走进小满家。', scenes: JSON.stringify({ hook: '她站在小满家。' }) } : row);
+    const findings = scanOutlineConsistency(arrived);
     expect(findings).toHaveLength(2);
     expect(findings.map((f) => f.field)).toEqual(['ending_setup', 'scenes.hook']);
     for (const finding of findings) {
@@ -155,7 +167,7 @@ describe('outline-consistency · 真实大纲回归', () => {
   });
 
   it('汇总与修复指令可用：指令只列需改字段并附本章原文范围', () => {
-    const findings = scanOutlineConsistency(C8);
+    const findings = scanOutlineConsistency(C8.map((row,index) => index === 0 ? { ...row, ending_setup: '她走进小满家。', scenes: JSON.stringify({ hook: '她站在小满家。' }) } : row));
     const summary = summarizeOutlineConsistency(findings);
     expect(summary).toContain('小满家');
     expect(summarizeOutlineConsistency([])).toBe('');

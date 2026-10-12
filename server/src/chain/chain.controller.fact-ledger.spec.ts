@@ -1,3 +1,4 @@
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import { describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
 import { normalizeOutlineFactReview } from './outline-fact-ledger';
@@ -19,6 +20,110 @@ const conflict = {
 };
 
 describe('outline fact review pipeline', () => {
+  it('passes the complete persisted world, including constraints and social rules, to framework audits', async () => {
+    const controller=controllerFixture(),world={era:'现代',rules:'许可仅对持有人生效',constraints:'许可不保证设备持续打开',social_rules:'他人必须各自取得许可',rule_system_json:'{"revoke":"过期失效"}'},outlines=[{order:1,content:'持有人刷卡进入'}];
+    const prepare=vi.fn((sql:string)=>sql.includes('world_settings')?{get:()=>world}:{all:()=>outlines});
+    controller.db={getDb:()=>({prepare})};controller.assertOutlineCandidateFacts=vi.fn().mockResolvedValue(undefined);
+    await controller.assertOutlineFactLedger('p','故事目标','执行标准');
+    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledWith('p','故事目标','执行标准',world,outlines);
+    expect(prepare.mock.calls.some(([sql])=>sql.includes('SELECT * FROM world_settings'))).toBe(true);
+  });
+  it('keeps wrong-chapter quotations in review correction and never calls candidate repair', async () => {
+    const controller = controllerFixture();
+    const candidates = [{ order: 2, content: '本章没有请求' }, { order: 3, content: '当日请求被拒', scenes: JSON.stringify({ stateAfter: '上门请求被拒' }) }];
+    const data = { consistent: false, contradictions: [{ location1: '第3章.stateAfter', quote1: '上门请求被拒',
+      location2: '第4章.content', quote2: '当日请求被拒', conflict: '误报为跨章冲突' }], ledger: [] };
+    controller.llmCallWithRetry.mockImplementation(async (_label: string, _prompt: string, options: any) => {
+      expect(options.validate(data)).toBe(false);
+      expect(options.describeValidation(data).join('；')).toContain('不在声明的第3章');
+      return { data, warnings: [] };
+    });
+    const repair = vi.fn();
+    await expect(controller.assertOutlineCandidateFacts('p', '{}', '', {}, candidates, repair)).rejects.toThrow('审查输出不合规');
+    expect(repair).not.toHaveBeenCalled();
+    expect(JSON.parse(controller.generationMetrics.finishRun.mock.calls[0][3]).kind).toBe('review_contract_invalid');
+  });
+  it('collects conflicts across all batches before one repair round, without inheriting rejected updates', async () => {
+    const controller = controllerFixture();
+    const candidates = Array.from({ length: 5 }, (_, order) => ({ order, content: '未确认状态' }));
+    const bad = { consistent: false, contradictions: ['真实冲突'], ledger: [{ id: 'fact_1', current: '被否决状态' }] };
+    controller.reviewOutlineFacts = vi.fn().mockResolvedValueOnce(bad).mockResolvedValueOnce(bad)
+      .mockResolvedValueOnce({ consistent: true, contradictions: [], ledger: [] })
+      .mockResolvedValueOnce({ consistent: true, contradictions: [], ledger: [] });
+    const repair = vi.fn(async (batch: any[]) => {
+      if (repair.mock.calls.length === 1) expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(2);
+      for (const item of batch) item.content = '已修复状态';
+    });
+    await controller.assertOutlineCandidateFacts('p', '{}', '', {}, candidates, repair);
+    expect(repair.mock.calls.map((c: any[]) => c[0].map((v: any) => v.order))).toEqual([[0, 1, 2, 3], [4]]);
+    expect(controller.reviewOutlineFacts.mock.calls[1][4]).toEqual([]);
+    expect(controller.reviewOutlineFacts.mock.calls[2][4]).toEqual([]);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(4);
+  });
+  it('restarts the complete audit from the baseline after one late candidate repair', async () => {
+    const controller = controllerFixture();
+    const candidates = Array.from({ length: 5 }, (_, order) => ({ order, content: order === 4 ? '错误状态' : '初始状态' }));
+    const review = { consistent: false, contradictions: ['真实矛盾'], ledger: [] };
+    controller.reviewOutlineFacts = vi.fn()
+      .mockResolvedValueOnce({ consistent: true, contradictions: [], ledger: [{ id: 'fact_1', current: '旧台账' }] })
+      .mockResolvedValueOnce(review)
+      .mockResolvedValueOnce({ consistent: true, contradictions: [], ledger: [] })
+      .mockResolvedValueOnce({ consistent: true, contradictions: [], ledger: [] });
+    const repair = vi.fn(async (batch: any[]) => { batch[0].content = '修复状态'; });
+    await controller.assertOutlineCandidateFacts('p', '{}', '', {}, candidates, repair);
+    expect(repair).toHaveBeenCalledTimes(1);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(4);
+    const calls = controller.reviewOutlineFacts.mock.calls;
+    expect(calls.map((c: any[]) => c[5].map((v: any) => v.order))).toEqual([[0, 1, 2, 3], [4], [0, 1, 2, 3], [4]]);
+    expect(calls[2][4]).toEqual([]);
+    expect(calls[3][5][0].content).toBe('修复状态');
+  });
+
+  it('still blocks a remaining conflict after the single repair attempt', async () => {
+    const controller = controllerFixture();
+    controller.reviewOutlineFacts = vi.fn().mockResolvedValue({ consistent: false, contradictions: ['真实矛盾'], ledger: [] });
+    const repair = vi.fn(async () => {});
+    await expect(controller.assertOutlineCandidateFacts('p', '{}', '', {}, [{ order: 0, content: '候选' }], repair))
+      .rejects.toThrow('已举证的事实矛盾');
+    expect(repair).toHaveBeenCalledTimes(1);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(2);
+  });
+
+  it('audits all merged candidate fields without opening a database write path', async () => {
+    const controller = controllerFixture();
+    const first = '第一次使用已产生损失';
+    const last = '只累计后面三次';
+    controller.llmCallWithRetry.mockImplementation(async (_label: string, prompt: string, options: any) => {
+      expect(prompt).toContain(first);
+      expect(prompt).toContain(last);
+      standardDirectiveCache.rebuild();
+      expect(prompt + standardDirectiveCache.get(options.scenario)).toContain('累计状态必须从第一次实际触发');
+      const data = { consistent: false, contradictions: [{ location1: '第一章.content', quote1: first,
+        location2: '第四章.scenes', quote2: last, conflict: '首次使用代价未计入总量' }], ledger: [] };
+      expect(options.validate(data)).toBe(true);
+      return { data, warnings: [] };
+    });
+    // No db exists on this fixture: candidate reconciliation cannot insert outlines.
+    await expect(controller.assertOutlineCandidateFacts('p', '{}', '', {}, [
+      { order: 0, content: first }, { order: 1, content: '第二次使用' },
+      { order: 2, content: '第三次使用' }, { order: 3, scenes: last },
+    ])).rejects.toThrow('已举证的事实矛盾');
+    expect(JSON.parse(controller.generationMetrics.finishRun.mock.calls[0][3]).kind).toBe('fact_conflict');
+  });
+
+  it('keeps invented conflict quotations in review correction, not in the content repair path', async () => {
+    const controller = controllerFixture();
+    const data = { consistent: false, contradictions: [conflict], ledger: [] };
+    controller.llmCallWithRetry.mockImplementation(async (_label: string, _prompt: string, options: any) => {
+      expect(options.validate(data)).toBe(false);
+      expect(options.describeValidation(data).join('；')).toContain('不能逐字定位');
+      expect(options.retryInstruction).toContain('不得改写输入章纲');
+      return { data, warnings: [] };
+    });
+    await expect(controller.reviewOutlineFacts('p', '候选审查', '{}', {}, [], [{ content: '正常事件' }], ''))
+      .rejects.toThrow('审查输出不合规');
+    expect(JSON.parse(controller.generationMetrics.finishRun.mock.calls[0][3]).kind).toBe('review_contract_invalid');
+  });
   it.each([
     ['都市', '住所七号楼906室', '住所八号楼307室'],
     ['科幻', '封存两支血清', '封存五支血清'],

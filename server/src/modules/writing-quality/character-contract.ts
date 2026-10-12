@@ -30,11 +30,16 @@ export interface CharacterVoiceContract {
 export function compileCharacterContract(row: Record<string, any>): CharacterVoiceContract {
   const p = object(row.profile_json);
   const explicit = object(p.voiceContract ?? p.character_voice_contract);
-  const merged = { ...p, ...Object.fromEntries(Object.entries(row).filter(([,v]) => v !== null && v !== '')), ...explicit };
-  const pick = (...keys: string[]) => keys.map(k => merged[k]).find(v => v !== undefined && v !== null && v !== '') ?? null;
+  const merged = { ...Object.fromEntries(Object.entries(row).filter(([,v]) => v !== null && v !== '')), ...p, ...explicit };
+  // An explicit empty value clears a trait rather than reviving another source.
+  const pick = (...keys: string[]) => {
+    const owns = (source: Record<string, any>, key: string) => Object.prototype.hasOwnProperty.call(source, key);
+    const key = keys.find(k => owns(explicit, k)) ?? keys.find(k => owns(p, k)) ?? keys.find(k => owns(merged, k));
+    return key === undefined || merged[key] === '' ? null : merged[key] ?? null;
+  };
   const data = {
     schemaVersion: 1 as const, characterId: String(row.id), name: String(row.name || ''),
-    sentenceLength: pick('sentenceLength', 'sentence_length'), speechRegister: pick('speechRegister', 'speech_register', 'speech_style'),
+    sentenceLength: pick('sentenceLength', 'sentence_length'), speechRegister: pick('speechRegister', 'speech_register', 'speech_style', 'catchphrase_speech_style', 'dialogue_style'),
     directness: pick('directness'), questionFrequency: pick('questionFrequency', 'question_frequency', 'rhetorical_question_tendency'),
     explanationTolerance: pick('explanationTolerance', 'explanation_tolerance'),
     preferredVocabulary: list(pick('preferredVocabulary', 'common_words')), forbiddenVocabulary: list(pick('forbiddenVocabulary', 'forbidden_words')),

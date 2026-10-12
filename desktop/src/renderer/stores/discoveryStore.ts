@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { prohibitedFictionNames } from '@novel/shared';
 
 export interface DiscoveryIdea {
   title: string;
@@ -160,7 +161,7 @@ interface DiscoveryState {
 }
 
 export const acceptedDiscoveryIdeas = (ideas: DiscoveryIdea[]): DiscoveryIdea[] => (
-  Array.isArray(ideas) ? ideas.filter((idea) => idea?.ideaAppealGate?.passed === true) : []
+  Array.isArray(ideas) ? ideas.filter((idea) => idea?.ideaAppealGate?.passed === true && !prohibitedFictionNames(idea).length) : []
 );
 
 const INITIAL_STEP_STATUS: CreationStepStatus = {

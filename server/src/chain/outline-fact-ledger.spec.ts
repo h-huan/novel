@@ -1,7 +1,47 @@
 import { describe, expect, it } from 'vitest';
 import { chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
+import { buildOutlineContinuityContext, describeOutlineFactEvidence } from './outline-fact-ledger';
+import { CHAPTER_RESPONSIBILITY_CRITERIA, chapterResponsibilityPlanningDirective } from '../../shared/src';
+import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY } from '../../shared/src/system-workflow-rules.registry';
 
 describe('outline fact ledger review contract', () => {
+  it.each(['第3章 characterStates.stateAfter', '第三章.scenes', 'chapterNumber=3.scenes'])('rejects a real quotation assigned to the wrong chapter: %s', location1 => {
+    const chapters = [{ order: 2, content: '人物本章未出场' }, { order: 3, content: '当日请求被拒', scenes: JSON.stringify({ characterStates: [{ stateAfter: '上门请求被拒' }] }) }];
+    const review = normalizeOutlineFactReview({ consistent: false, contradictions: [{ location1, quote1: '上门请求被拒',
+      location2: '第4章.content', quote2: '当日请求被拒', conflict: '错置时间' }], ledger: [] });
+    expect(describeOutlineFactEvidence(review, [chapters], chapters)[0]).toContain('不在声明的第3章');
+    const corrected = normalizeOutlineFactReview({ consistent: false, contradictions: [{ location1: '第4章.scenes', quote1: '上门请求被拒',
+      location2: '第4章.content', quote2: '当日请求被拒', conflict: '待核对' }], ledger: [] });
+    expect(describeOutlineFactEvidence(corrected, [chapters], chapters)).toEqual([]);
+  });
+  it('uses the same temporal source policy in generation, review and the public rule', () => {
+    expect(buildOutlineContinuityContext([], [])).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+    expect(buildOutlineFactReviewPrompt({ canonicalBrief: '{}', world: {}, previousLedger: [], chapters: [{ order: 0, content: '事件' }] })).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+    expect(getSystemWorkflowRule('CTX-008')!.details).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+    expect(chapterResponsibilityPlanningDirective()).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+  });
+  it('derives creation criteria from the actual Registry, including cumulative consequences', () => {
+    expect(CHAPTER_RESPONSIBILITY_CRITERIA).toEqual(getSystemWorkflowRule('ARCH-005')!.clauses!.map(c => ({ id: c.id, label: c.label, check: c.text })));
+    expect(chapterResponsibilityPlanningDirective()).toContain(OUTLINE_STATE_CONTINUITY_POLICY);
+  });
+  it('feeds the first trigger and inherited history into generation even when current summaries omit it', () => {
+    const ledger = [{ id: 'fact_1', baseline: '第一次触发已损失记忆', history: ['第二次触发也有损失'], current: '当前尚未核定总数' }];
+    const prompt = buildOutlineContinuityContext([{ order: 0, content: '每次截留都失去记忆' }], ledger);
+    expect(prompt).toContain('"chapterNumber":1');
+    expect(prompt).toContain('第一次触发已损失记忆');
+    expect(prompt).toContain('第二次触发也有损失');
+    expect(prompt).toContain('当前尚未核定总数');
+    expect(prompt).toContain('不得猜出精确总数');
+  });
+  it('verifies both actual quotations and rejects fabricated paraphrases before Canon repair', () => {
+    const review = normalizeOutlineFactReview({ consistent: false, contradictions: [{
+      location1: '第一章.content', quote1: '每一记都产生缺口',
+      location2: '第四章.characterStates', quote2: '只缺三段', conflict: '第一章缺口未计入',
+    }], ledger: [] });
+    const sources = [{ content: '第一场每一记都产生缺口。' }, { scenes: JSON.stringify({ characterStates: [{ stateBefore: '只缺三段' }] }) }];
+    expect(describeOutlineFactEvidence(review, sources)).toEqual([]);
+    expect(describeOutlineFactEvidence(review, sources.slice(0, 1))[0]).toContain('quote2');
+  });
   it.each([
     { mainScenes: [{ location: '星舰医务舱C区', item: '封存两支血清' }] },
     { scenes: [{ location: '南城七号楼906室', outcome: '钥匙交给邻居' }] },

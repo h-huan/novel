@@ -6,6 +6,26 @@ export interface AnchoredPatchSelection {
   rejected: Array<{ index: number; reason: string }>;
 }
 
+/** Prompt 与执行器共享预算计算口径，字符数含标点和换行。 */
+export function localPatchBudgetDirective(content: string, maxRatio: number, maxPatches: number): string {
+  return '本轮正文共'+content.length+'字符（含标点和换行），合计改动预算最多'+Math.floor(content.length*maxRatio)+'字符，最多'+maxPatches+'处。每处按原文覆盖长度与replacement长度的较大值计费，再把各处相加；整段删除还计入被删除的相邻空行。输出前自行核算，超预算片段不纳入本批，保留待修问题。';
+}
+
+/** An exact whole-paragraph deletion owns its adjacent separator, too. */
+function anchoredPatchRange(content: string, start: number, original: string, replacement: string, structured = false) {
+  let end = start + original.length;
+  if (!structured && replacement === '') {
+    const prefix = content.slice(0, start);
+    const preceding = prefix.match(/\r?\n(?:[ \t]*\r?\n)+$/);
+    if (start === 0 || preceding) {
+      const following = content.slice(end).match(/^\r?\n(?:[ \t]*\r?\n)+/);
+      if (following) end += following[0].length;
+      else if (end === content.length && preceding) start -= preceding[0].length;
+    }
+  }
+  return { start, end };
+}
+
 /** Keep exact, unique, nonoverlapping patches within one local-change budget. */
 export function selectAnchoredLocalPatchBatch(content: string, raw: unknown, maxRatio = 0.2): AnchoredPatchSelection {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) throw new Error('局部修复需要1至8处明确替换');
@@ -23,18 +43,18 @@ export function selectAnchoredLocalPatchBatch(content: string, raw: unknown, max
       rejected.push({ index, reason: '原文缺失或匹配不唯一' });
       continue;
     }
-    const end = start + patch.original.length;
-    if (ranges.some(range => start < range.end && end > range.start)) {
+    const range = anchoredPatchRange(content, start, patch.original, patch.replacement);
+    if (ranges.some(other => range.start < other.end && range.end > other.start)) {
       rejected.push({ index, reason: '与已选片段重叠' });
       continue;
     }
-    const cost = Math.max(patch.original.length, patch.replacement.length);
+    const cost = Math.max(range.end - range.start, patch.replacement.length);
     if (touched + cost > content.length * maxRatio) {
       rejected.push({ index, reason: '超出本批改动预算' });
       continue;
     }
     patches.push({ original: patch.original, replacement: patch.replacement });
-    ranges.push({ start, end });
+    ranges.push(range);
     touched += cost;
   }
   return { patches, rejected };
@@ -47,7 +67,7 @@ export function applyLocalPatches(content: string, raw: unknown, structured = fa
     if (typeof patch?.original !== 'string' || !patch.original || typeof patch.replacement !== 'string') throw new Error('局部修复格式无效');
     const start = content.indexOf(patch.original);
     if (start < 0 || content.indexOf(patch.original, start + 1) >= 0) throw new Error('修复原文缺失或匹配不唯一');
-    ranges.push({ start, end: start + patch.original.length, replacement: patch.replacement });
+    ranges.push({ ...anchoredPatchRange(content, start, patch.original, patch.replacement, structured), replacement: patch.replacement });
   }
   ranges.sort((a, b) => a.start - b.start);
   if (ranges.some((r, i) => i > 0 && r.start < ranges[i - 1].end)) throw new Error('修复片段重叠');
@@ -58,6 +78,15 @@ export function applyLocalPatches(content: string, raw: unknown, structured = fa
   if (!result.trim()) throw new Error('修复后内容为空');
   if (structured) JSON.parse(result);
   return result;
+}
+
+/** Distinguish the rejected candidate's actual review from the retained original's defects. */
+export function repairRejectionDetails(after: StageScore | null, reason: string): string {
+  const blocking=after?.issues.filter(issue=>issue.status==='open'&&issue.severity==='blocking').map(issue=>`${issue.ruleId}：${issue.message}`)||[];
+  const missing=after?Object.entries(after.dimensions).filter(([,value])=>['not_evaluated','missing_standard'].includes(value.status)).map(([key,value])=>`${key}：${value.reason}`):[];
+  return '【修复候选未采用】原稿保留，未保存候选。回滚原因：'+reason
+    +(blocking.length?'；候选复检阻断：'+blocking.join('；'):'')
+    +(missing.length?'；候选未验证维度：'+missing.join('；'):'');
 }
 
 export function compareRepair(before: StageScore, after: StageScore): { accepted: boolean; reason: string } {

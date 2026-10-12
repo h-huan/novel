@@ -74,6 +74,25 @@ describe('ChainEngineService', () => {
     expect(service).toBeDefined();
   });
 
+  it.each(['blocked', 'not_evaluated'] as const)('stops downstream calls after an upstream quality %s even in a non-strict chain', async (gateStatus) => {
+    const report = classifyGateFailure({ evaluationStatus: 'evaluated', topic: 'quality_gate', gateStatus,
+      buckets: gateStatus === 'blocked' ? { prose_hardline: ['当前卷纲违反已确认事实'] } : { review_incomplete: ['当前卷纲评审缺少可核对依据'] } });
+    generate.mockRejectedValueOnce(new GateRejectionError(report, '未通过卷纲')).mockResolvedValue(mockLLMOutput);
+    const result = await service.execute({ ...testChain, nodes: [mockNode, { ...mockNode, id: 'downstream' }] }, { test: 'hello' });
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(1);
+    expect(firstGateReportFromChain(result)).toEqual(report);
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps ordinary non-strict optional-node failure behavior', async () => {
+    generate.mockRejectedValueOnce(new Error('optional input unavailable')).mockResolvedValue(mockLLMOutput);
+    const result = await service.execute({ ...testChain, nodes: [mockNode, { ...mockNode, id: 'downstream' }] }, { test: 'hello' });
+    expect(result.status).toBe('partial');
+    expect(result.nodeResults).toHaveLength(2);
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
   describe('chapter synthesis token budget', () => {
     it('keeps a 3000-5000 character chapter within a single-chapter output budget', () => {
       expect(chapterSynthesisMaxTokens(3000)).toBe(3600);

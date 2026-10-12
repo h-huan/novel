@@ -377,7 +377,8 @@ describe('execution standard 四维不再共用一句判据，且不因平台给
     expect(genre).toContain('系统流');
     expect(genre).toContain('落差');
     expect(genre).toContain('必答项');
-    expect(genre).toContain('该流派读者的核心预期必须在本章被兑现');
+    expect(genre).toContain('核心预期按当前阶段与章纲揭示安排推进');
+    expect(genre).toContain('全书承诺在约定阶段兑现');
     // 基调维：平台定义判据 + 该维自身情绪规则都必须保留
     const tone = find('tone');
     expect(tone).toContain('按平台分类执行');
@@ -401,7 +402,7 @@ describe('execution standard 四维不再共用一句判据，且不因平台给
     expect(genre).toBeTruthy();
     if (!genre) return;
     expect(genre.requirement).toContain('未核验');
-    expect(genre.requirement).toContain('该流派读者的核心预期必须在本章被兑现');
+    expect(genre.requirement).toContain('核心预期按当前阶段与章纲揭示安排推进');
   });
 });
 

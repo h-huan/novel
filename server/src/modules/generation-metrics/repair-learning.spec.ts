@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { repairStrategyUtility } from './repair-learning';
+import { repairStrategyUtility, verifiedRepairLesson } from './repair-learning';
 
 describe('repair strategy learning utility', () => {
   it('prefers a similarly successful strategy that uses fewer tokens and less time', () => {
@@ -20,5 +20,19 @@ describe('repair strategy learning utility', () => {
     const reducedMostIssues = repairStrategyUtility({ attempts: 4, accepted: 0, improvement_sum: 3 });
     const madeNoProgress = repairStrategyUtility({ attempts: 4, accepted: 0, improvement_sum: 0, rollbacks: 4 });
     expect(reducedMostIssues).toBeGreaterThan(madeNoProgress);
+  });
+});
+
+describe('verified strategy references', () => {
+  it('records the actual strategy, with current-context verification instead of generic advice', () => {
+    const lesson=verifiedRepairLesson('platform.dialogue_ratio','platform_metric_patch');
+    expect(lesson).toContain('platform_metric_patch');
+    expect(lesson).toContain('禁止新增人物或剧情');
+    expect(lesson).toContain('历史成功不代替本次验收');
+    expect(lesson).not.toContain('35%');
+  });
+  it('does not turn unknown strategy names into verified experience', () => {
+    expect(verifiedRepairLesson('logic','unknown')).toBeNull();
+    expect(verifiedRepairLesson('logic','toString')).toBeNull();
   });
 });

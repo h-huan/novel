@@ -1,8 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { readConstitution, updateConstitution, constitutionColumns, constitutionSettings, normalizeStoredConstitutions, buildExecutionStandard, genreFitProblem, isPlatformStandardPresent, missingConstitutionStandards } from './creative-constitution';
-import { getPlatform } from '../../chain/platform-benchmarks';
+import { getPlatform, buildBenchmarkDirective } from '../../chain/platform-benchmarks';
 
 describe('creative constitution boundary', () => {
+  it('supplies the actual platform benchmark to the same criterion used by generation and review', () => {
+    const c = updateConstitution({}, { targetPlatform: 'fanqie', type: 'short_story' });
+    const platform = buildExecutionStandard(c).dimensions.find(d => d.dimension === 'platform')!;
+    expect(platform.requirement).toContain(buildBenchmarkDirective('fanqie', 'short_story'));
+    expect(platform.requirement).toContain('分类级可读性口径未核验');
+  });
+  it('内置幕后流可核对但不能只凭隐藏凶手判为符合，自定义流派保留未知状态', () => {
+    const c = readConstitution({ target_platform: 'fanqie', settings: { webNovelGenre: ['幕后流'] } });
+    const genre = buildExecutionStandard(c).dimensions.find(d => d.dimension === 'genre')!;
+    expect(genre.definitionStatus).toBe('provided');
+    expect(genre.requirement).toContain('仅有隐藏凶手或未知阴谋不等于幕后流');
+    expect(genre.requirement).toContain('不要求首章解释完整计划');
+    const unknown = buildExecutionStandard({ ...c, webNovelGenre: ['作者自建流派'], genreFitNote: '' }).dimensions.find(d => d.dimension === 'genre')!;
+    expect(unknown.definitionStatus).toBe('unknown_definition');
+    expect(buildExecutionStandard({ ...c, webNovelGenre: ['作者自建流派'], genreFitNote: '代理交易引发身份冲突' }).dimensions.find(d => d.dimension === 'genre')!.definitionStatus).toBe('provided');
+  });
   it('persists plot tags and requires a category-fit note for tags absent from the public sample', () => {
     const base = updateConstitution({}, {
       targetPlatform: 'fanqie', type: 'long_novel', category: '男频·都市日常',
@@ -101,6 +117,7 @@ describe('creative constitution boundary', () => {
     expect(platform?.value).toBe(note);
     expect(platform?.value).not.toBe(getPlatform('custom').label);
     expect(platform?.requirement).toContain('唯一事实源');
+    expect(platform?.requirement).toContain(note);
   });
 });
 

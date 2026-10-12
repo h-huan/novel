@@ -234,6 +234,7 @@ export interface ExecutionStandardDimension {
   value: string;
   /** 该维必须被执行的验收口径：写进 prompt，同时作为对应质量维度的验收依据 */
   requirement: string;
+  definitionStatus?: 'provided' | 'unknown_definition';
 }
 
 export interface ExecutionStandard {
@@ -279,8 +280,8 @@ export function buildExecutionStandard(
   };
 
   push('platform', '平台', platformLabel, isCustomPlatform
-    ? '节奏、回报类型、段落与对话区间一律以上述「自定义平台说明」为唯一事实源；系统不掌握该平台的既定基准，禁止把通用网文或其他平台的基准当成它的标准套用'
-    : '节奏、回报类型、段落与对话区间一律以 platform-benchmarks 为唯一事实源，不得套用其他平台写法；该区间是平台级口径（平台实测或建模），系统尚未采集按投稿分类细分的段落与对话阈值——分类级可读性口径未核验，不得把平台级区间说成该分类的实测口径');
+    ? '节奏、回报类型、段落与对话区间一律以上述「自定义平台说明」为唯一事实源；系统不掌握该平台的既定基准，禁止把通用网文或其他平台的基准当成它的标准套用\n自定义平台说明：' + c.customPlatformNote
+    : '节奏、回报类型、段落与对话区间一律以 platform-benchmarks 为唯一事实源，不得套用其他平台写法；该区间是平台级口径（平台实测或建模），系统尚未采集按投稿分类细分的段落与对话阈值——分类级可读性口径未核验，不得把平台级区间说成该分类的实测口径\n' + buildBenchmarkDirective(c.targetPlatform, c.projectType));
   // 「按平台分类执行」：分类不是孤立的题材标签，而是【这本书在该平台的投稿分类】。
   // 同一个「都市」在番茄是男频都市下的子分类，在晋江可能根本不存在；只写全局分类，
   // 模型就只能按系统内部 taxonomy 写，投到平台对不上位 —— 执行标准写了却不生效。
@@ -361,7 +362,17 @@ export function buildExecutionStandard(
   const plotLine = plotTags.length ? `；情节取向「${plotTags.join('、')}」必须落实到人物行动、冲突与回报，不得只写在标签里` : '';
   push('genre', '流派与作品标签', [...c.webNovelGenre, ...submissionTags, ...plotTags].join('、'),
     dimensionRequirement('genre', submissionTags.join('、'),
-      `创作流派按「${c.webNovelGenre.join('、')}」执行；平台作品标签按「${submissionTags.join('、')}」兑现到可见的人物、关系与事件中；该流派读者的核心预期必须在本章被兑现${plotLine}`));
+      `创作流派按「${c.webNovelGenre.join('、')}」执行；平台作品标签按「${submissionTags.join('、')}」兑现到可见的人物、关系与事件中；核心预期按当前阶段与章纲揭示安排推进，全书承诺在约定阶段兑现，不要求每章完成全部反转、救赎或真相揭示${plotLine}` + dimensionGuidesText('genre', c.webNovelGenre)));
+  const genreDimension = dimensions.find(d => d.dimension === 'genre');
+  if (genreDimension && c.webNovelGenre.length) {
+    const binding = resolvedCategory ? platformCategoryDimensionBinding(c.targetPlatform, resolvedCategory, 'genre', c.webNovelGenre.join('、'), c.projectType) : null;
+    const supplied = !!c.genreFitNote?.trim() || c.webNovelGenre.every(label => !!dimensionGuidesText('genre', [label]))
+      || !!(binding && !binding.gap && binding.requirement.includes('平台官方定义：'));
+    genreDimension.definitionStatus = supplied ? 'provided' : 'unknown_definition';
+    genreDimension.requirement += supplied
+      ? (c.genreFitNote?.trim() ? '；作者补充流派依据：' + c.genreFitNote.trim() : binding && !binding.gap && binding.requirement.includes('平台官方定义：') ? '；创作流派可核对平台依据：' + binding.requirement : '')
+      : '；所选创作流派操作定义未提供：该维 unknown_definition，不得凭标签名或模型记忆评分；须由系统操作口径、已有平台定义或作者流派依据明确其可见机制';
+  }
   push('pov', '视角', c.pov,
     dimensionRequirement('pov', c.pov,
       `叙事视角固定为「${c.pov}」：全篇保持一致，除选择"多视角轮换"外不得切换，每次切换都要有段落级标记`));
