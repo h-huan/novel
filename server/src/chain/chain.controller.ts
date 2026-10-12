@@ -8598,9 +8598,12 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       if (appliedPatchCount === 0 || pendingUpdates.size === 0) {
         throw new Error(`跨模块一致性没有形成可复查的候选修改（跳过${skippedPatchCount}处），项目未激活。`);
       }
-      const worldPlanChanges=selectedPatches.filter((patch:any)=>isWorldPlanPatchTarget(patch.entityType))
-        .map((patch:any,index:number)=>({ref:'WP'+(index+1),entityType:patch.entityType,field:patch.field,
-          before:String(patch.match),after:String(patch.replacement)}));
+      // Review EVERY still-pending world method change from the original Canon,
+      // including edits retained from a failed earlier candidate round.
+      const worldPlanChanges=[...pendingUpdates.values()]
+        .filter(update=>isWorldPlanPatchTarget(update.entityType)&&update.originalValue!==update.nextValue)
+        .map((update,index)=>({ref:'WP'+(index+1),entityType:update.entityType,field:update.field,
+          before:String(update.originalValue),after:String(update.nextValue)}));
       const candidateBundleText = JSON.stringify(candidateBundle);
       if (candidateBundleText === previousBundleText) {
         throw new Error(`跨模块一致性候选没有改变任何审查字段（候选${appliedPatchCount}处，跳过${skippedPatchCount}处），项目未激活。`);
@@ -8645,6 +8648,15 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
         // 候选已审查通过后才允许写 live Canon；WHERE 旧值是乐观锁，防止复查期间其它流程改了同一字段。
         db.exec('BEGIN IMMEDIATE');
         try {
+          // A project may have been activated or accepted prose saved while
+          // the model reviewed this candidate; recheck within the write lock.
+          if (worldPlanChanges.length) {
+            const state=db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as {status:string}|undefined;
+            const accepted=db.prepare("SELECT COUNT(*) AS count FROM chapters WHERE project_id=? AND LENGTH(TRIM(COALESCE(content,'')))>0")
+              .get(projectId) as {count:number};
+            if(state?.status!=='creating'||accepted.count>0)
+              throw new Error('世界计划复审期间项目已产生正式正文或退出创建阶段，禁止自动写入');
+          }
           for (const update of pendingUpdates.values()) {
             const updateResult = db.prepare(
               `UPDATE ${update.table} SET "${update.field}"=?, updated_at=? WHERE id=? AND project_id=? AND "${update.field}"=?`,
