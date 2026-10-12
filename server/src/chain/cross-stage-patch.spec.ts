@@ -7,6 +7,7 @@ import {
   selectMinimumImpactCrossStagePatches,
   crossStageRepairContext,
   describeCrossStagePatchValidation,
+  describeWorldPlanReviewValidation,
   crossStageRepairRequests,
   crossStageRepairAnchors,
   isScopedWorldPlanReplacement,
