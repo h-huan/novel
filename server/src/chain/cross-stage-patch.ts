@@ -57,6 +57,12 @@ export function describeWorldPlanReviewValidation(value: any, changes: readonly 
       try {before=JSON.parse(change.before).endingDirection;after=JSON.parse(change.after).endingDirection;}
       catch {return [change.ref+' 原始方法字段无法读取'];}
     }
+    // Each iteration may be individually local but the accumulated proposal
+    // must still modify exactly one eligible method clause in the original.
+    if (typeof before !== 'string' || typeof after !== 'string'
+      || !isScopedWorldPlanReplacement(before,after)) {
+      return [change.ref+' 累计候选改变了多个方法句段或触及保护内容'];
+    }
     const partsBefore=String(before).split(/(?<=[。！？；\n])/u);
     const partsAfter=String(after).split(/(?<=[。！？；\n])/u);
     const changedIndex=partsBefore.findIndex((part,index)=>part!==partsAfter[index]);
