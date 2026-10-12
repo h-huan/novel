@@ -8238,19 +8238,19 @@ ${STORY_ENTITY_MODELING_POLICY}
         });
       const checked=validateOutlineSourceBoundaryReview({checks:responses.flatMap(response=>response.checks)},rows,context);
       if(!checked.verified)throw new Error('章纲来源边界专项证据未通过：'+checked.errors.join('；'));
-      // This complete entity batch already disproves the candidate. Further
-      // source batches and result proofs are pending until upstream repair.
-      if(checked.findings.length)return [...findings,...checked.findings];
+      // Keep the source report even when it flags a gap. The result audit
+      // may provide a disputed prerequisite in the SAME chapter; returning
+      // before it runs makes a false-positive impossible to reconcile.
       boundaryReports.set(rows[0].chapterId,{rows,checks:responses.flatMap(response=>response.checks)});
       if(checked.verified&&!checked.findings.length)verifiedSourceReviews.set(cacheKey,checked.findings);
       }
-      // A disproved source prerequisite must reach upstream repair. Requiring
-      // downstream result proofs first made their missing evidence prevent the
-      // repair itself. Repaired candidates still execute every remaining gate.
-      const boundaryFindings=[...boundaryReports.values()].flatMap(report=>
-        validateOutlineSourceBoundaryReview({checks:report.checks},report.rows,context).findings);
-      if(boundaryFindings.length) return [...findings,...boundaryFindings];
+      const disputedChapters=new Set([...boundaryReports.entries()].filter(([,report])=>
+        validateOutlineSourceBoundaryReview({checks:report.checks},report.rows,context).findings.length
+      ).map(([id])=>id));
       for(const row of bundle.chapters){
+        // Once a source gap exists, only inspect its chapter's result proofs;
+        // do not spend calls on unaffected later chapters before source repair.
+        if(disputedChapters.size && !disputedChapters.has(row.id))continue;
         if(!outlineResultClaimCatalog([row]).length)continue;
         const proofContext=sourceBoundaryEvidenceContext(JSON.stringify({world:bundle.world,worldProfiles:bundle.worldProfiles,chapters:[row]}));
         const cacheKey='result:'+proofContext;
