@@ -103,7 +103,7 @@ import {
   type OutlineConsistencyRow,
 } from './outline-consistency';
 import { maskForeshadowAnswers } from './foreshadow-mask';
-import { canonicalBriefForAudit, storyHierarchyForAudit, applyCrossStageFieldPatch, describeCrossStagePatchValidation, CROSS_STAGE_PATCH_TABLE_MAP, isImmutableWorldPatchTarget, selectMinimumImpactCrossStagePatches, crossStageRepairRequests, crossStageRepairAnchors, materializeCrossStageRepairEdits, crossStageRepairAnchorView, crossStageRepairDependencyView } from './cross-stage-patch';
+import { canonicalBriefForAudit, storyHierarchyForAudit, applyCrossStageFieldPatch, describeCrossStagePatchValidation, describeWorldPlanReviewValidation, isWorldPlanPatchTarget, CROSS_STAGE_PATCH_TABLE_MAP, isImmutableWorldPatchTarget, selectMinimumImpactCrossStagePatches, crossStageRepairRequests, crossStageRepairAnchors, materializeCrossStageRepairEdits, crossStageRepairAnchorView, crossStageRepairDependencyView } from './cross-stage-patch';
 import { findChapterOutline, readOrderedChapterOutlines, chapterOutlineStorySource, storySourceFields } from './chapter-outline-coordinate';
 import { hasCurrentProfile } from '../modules/character/character-profile';
 import { chapterLengthReviewBatches, chapterLengthReviewEvidenceErrors, chapterLengthEvidenceAnchors, materializeChapterLengthEvidenceCorrection, chapterLengthConflictProofErrors, mergeChapterLengthEvidenceCorrection, chapterLengthReviewFindings, applyChapterLengthReviewRepairs, chapterLengthReviewInput, validateChapterLengthReview, applyChapterLengthInsertions, chapterLengthInsertionChoices, chapterLengthDigitalTimeValues, CHAPTER_LENGTH_INSERTION_LIMIT, CHAPTER_LENGTH_INSERTION_STATE_CONTRACT } from './chapter-length-expansion';
@@ -8238,19 +8238,19 @@ ${STORY_ENTITY_MODELING_POLICY}
         });
       const checked=validateOutlineSourceBoundaryReview({checks:responses.flatMap(response=>response.checks)},rows,context);
       if(!checked.verified)throw new Error('章纲来源边界专项证据未通过：'+checked.errors.join('；'));
-      // This complete entity batch already disproves the candidate. Further
-      // source batches and result proofs are pending until upstream repair.
-      if(checked.findings.length)return [...findings,...checked.findings];
+      // Keep the source report even when it flags a gap. The result audit
+      // may provide a disputed prerequisite in the SAME chapter; returning
+      // before it runs makes a false-positive impossible to reconcile.
       boundaryReports.set(rows[0].chapterId,{rows,checks:responses.flatMap(response=>response.checks)});
       if(checked.verified&&!checked.findings.length)verifiedSourceReviews.set(cacheKey,checked.findings);
       }
-      // A disproved source prerequisite must reach upstream repair. Requiring
-      // downstream result proofs first made their missing evidence prevent the
-      // repair itself. Repaired candidates still execute every remaining gate.
-      const boundaryFindings=[...boundaryReports.values()].flatMap(report=>
-        validateOutlineSourceBoundaryReview({checks:report.checks},report.rows,context).findings);
-      if(boundaryFindings.length) return [...findings,...boundaryFindings];
+      const disputedChapters=new Set([...boundaryReports.entries()].filter(([,report])=>
+        validateOutlineSourceBoundaryReview({checks:report.checks},report.rows,context).findings.length
+      ).map(([id])=>id));
       for(const row of bundle.chapters){
+        // Once a source gap exists, only inspect its chapter's result proofs;
+        // do not spend calls on unaffected later chapters before source repair.
+        if(disputedChapters.size && !disputedChapters.has(row.id))continue;
         if(!outlineResultClaimCatalog([row]).length)continue;
         const proofContext=sourceBoundaryEvidenceContext(JSON.stringify({world:bundle.world,worldProfiles:bundle.worldProfiles,chapters:[row]}));
         const cacheKey='result:'+proofContext;
@@ -8436,7 +8436,7 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
         `跨模块故事一致性修订（第${repairAttempt}次）`,
         `${STORY_FACT_PRIORITY}\
 【修订与复查共用的未来方案判据】${CROSS_STAGE_REVIEW_POLICY}\n【修订必须沿用的来源边界】${SOURCE_QUALITY_POLICY}${implementationFeedback}\n【其它资料与本轮先前提案的当前执行路径，只读且未成为Canon】${JSON.stringify(crossStageRepairDependencyView(generatedBundle,request.targetIds,proposedPatches))}\n保持同一事件的主体、物件、取得方式与结果在当前执行资料中一致；本批之外的依赖不能修改，若无法沿共同合法路径同步，应报告真实缺口，不自行选择另一互斥路径。只读候选不授予世界能力，能力仍以不可修改来源为准。\n替代方案不能用新的未经授权效果替换旧效果，不能把尚未发生的证据取得、他人配合或处置写成已发生事实或无条件保证。尚未执行的计划可安排既有角色符合动机与已有权限的合理配合，但须落实触发、实际行动与时点，不强迫对手失去已有行动能力。先消除导致失败的必要条件缺口，再选择最小影响范围；不得为了少改几个字保留违规机制。若现有方向与资料互斥且无合法路径，保留真实阻断，不编造事件圆回。\n【共用替代机制合同】${CHAPTER_RESPONSIBILITY_REPAIR_BOUNDARIES}\n
-根据审查发现，对本次尚未激活的AI生成资料做最小修订。世界观/world/worldProfile 只作为不可变参照，绝对不得作为 patch 目标；优先选择影响范围最小、修改单元最少、下游依赖最少、尚未执行的资料把冲突圆回。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向。对尚未执行的章纲，可调整行动次序和必要的取得、交付、保护或处置行动，但路径须由既有人物、物件和已确认能力实际成立；不新增器件性质或授权，不把目标、希望、申请或单句“已经拿到”当取得路径。候选计划不倒改已保存正文中的已发生事实，受影响正文另走原完整验收。先逐项核对数量基线、历史已发生事件、每次触发后的增减和时间规则；已确认题材是上层事实，下层与它互斥时必须改最小影响面的下层；已确认题材自身互斥时不得凭空声称两种说法都成立。修订仅选择服务器提供的位置编号，每个edits返回anchorId、replacement、reason，不复述旧原文，不自己拼接JSON路径或数据库字段。服务器按位置更新原字段并保持未选择内容不变。选择全部受影响同义表述，尤其章纲与伏笔计数同步；不补解释段、不新增设备能力。\n【唯一故事基准】${canonicalCreativeBrief}\n【不可修改来源】${repairContextText}\n【诊断原文与修订位置的对应】${JSON.stringify(diagnosticPositions)}\n【允许修改的位置目录；未显示字段保留且仍参与完整复检】${JSON.stringify(crossStageRepairAnchorView(visibleRepairAnchors))}\n【本批允许目标id】${JSON.stringify(request.targetIds)}\n【本批仍必须保留的确认阶段成果】${JSON.stringify(crossStagePromiseCatalog(canonicalCreativeBrief))}\n必要条件有缺口时，先补对应阶段的实际取得或处置行动，再同步依赖；不得只降低后章认知、删掉确定程度或把指定责任人改为待查方向来消除矛盾。\n【必须修复的矛盾】${JSON.stringify(request.findings)}${crossStageRepairPlanDirective(repairObligations,repairContextText)}\n只输出JSON，包含上面要求的repairPlans（本批没有阶段缺口时省略）以及位置修订:{"edits":[{"anchorId":"实际E编号","replacement":"该位置完整新文本","reason":"对应缺口"}]}}`,
+根据审查发现，对本次尚未激活的AI生成资料做最小修订。世界观机制与已发生事实不可修改；仅允许 worldPlan.constraints.endingDirection 和 worldProfilePlan.ending 中明确未执行的方法段使用服务器位置编号修订，其余世界字段和锁定内容绝对不得作为目标；优先选择影响范围最小、修改单元最少、下游依赖最少、尚未执行的资料把冲突圆回。不得新增人物、组织、地点、章节或伏笔，不得改写故事方向。对尚未执行的章纲，可调整行动次序和必要的取得、交付、保护或处置行动，但路径须由既有人物、物件和已确认能力实际成立；不新增器件性质或授权，不把目标、希望、申请或单句“已经拿到”当取得路径。候选计划不倒改已保存正文中的已发生事实，受影响正文另走原完整验收。先逐项核对数量基线、历史已发生事件、每次触发后的增减和时间规则；已确认题材是上层事实，下层与它互斥时必须改最小影响面的下层；已确认题材自身互斥时不得凭空声称两种说法都成立。修订仅选择服务器提供的位置编号，每个edits返回anchorId、replacement、reason，不复述旧原文，不自己拼接JSON路径或数据库字段。服务器按位置更新原字段并保持未选择内容不变。选择全部受影响同义表述，尤其章纲与伏笔计数同步；不补解释段、不新增设备能力。\n【唯一故事基准】${canonicalCreativeBrief}\n【不可修改来源】${repairContextText}\n【诊断原文与修订位置的对应】${JSON.stringify(diagnosticPositions)}\n【允许修改的位置目录；未显示字段保留且仍参与完整复检】${JSON.stringify(crossStageRepairAnchorView(visibleRepairAnchors))}\n【本批允许目标id】${JSON.stringify(request.targetIds)}\n【本批仍必须保留的确认阶段成果】${JSON.stringify(crossStagePromiseCatalog(canonicalCreativeBrief))}\n必要条件有缺口时，先补对应阶段的实际取得或处置行动，再同步依赖；不得只降低后章认知、删掉确定程度或把指定责任人改为待查方向来消除矛盾。\n【必须修复的矛盾】${JSON.stringify(request.findings)}${crossStageRepairPlanDirective(repairObligations,repairContextText)}\n只输出JSON，包含上面要求的repairPlans（本批没有阶段缺口时省略）以及位置修订:{"edits":[{"anchorId":"实际E编号","replacement":"该位置完整新文本","reason":"对应缺口"}]}}`,
         {
           temperature: 0.1,
           timeout: LLM_TUNABLES.timeoutComplex(),
@@ -8478,6 +8478,8 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       // 实体类型 -> 真实表名（表名来自固定映射，非用户输入，可安全用于 PRAGMA 插值）
       // 可修实体唯一来源在 cross-stage-patch；world/worldProfile 刻意不在表中，世界观永不作为修复目标。
       const PATCH_TABLE_MAP = CROSS_STAGE_PATCH_TABLE_MAP;
+      // World fields are strictly exempted from broad PRAGMA edit privileges.
+      // Only a classified future plan may use worldPlan/worldProfilePlan below.
       // 允许修订的列直接从数据库真实表结构推导，而非手写白名单。
       // 根治“白名单写漏字段（如 buried_chapter_index）”导致合法修订被整批丢弃的反复 bug：
       // 凡是表内真实存在且非受保护列的字段，一致性修订都可修正，问题从源头解决。
@@ -8489,6 +8491,8 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
           const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
           const fields = new Set<string>();
           for (const c of cols) {
+            if (entityType === 'worldPlan' && c.name !== 'constraints') continue;
+            if (entityType === 'worldProfilePlan' && c.name !== 'ending') continue;
             if (!PROTECTED_PATCH_COLUMNS.has(c.name)) fields.add(c.name);
           }
           patchTargetCache.set(entityType, { table, fields });
@@ -8500,13 +8504,20 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       let skippedPatchCount = 0;
       const previousBundleText = generatedBundleText;
 
-      // 先让机器成本选择器从同一矛盾的候选位置里挑最小影响点；世界观在 selector 和目标映射两层都不可选。
+      // Only an explicitly scoped *future-method* projection may enter repair;
+      // every other world mechanism/fact remains immutable.
       const repairCandidates = patches.map((patch: any) => {
         const match = String(patch?.match || '');
         const occurrences = match ? generatedBundleText.split(match).length - 1 : 0;
         return { ...patch, dependentCount: Math.max(0, occurrences - 1) };
       });
       const selectedPatches = selectMinimumImpactCrossStagePatches(repairCandidates);
+      if (selectedPatches.some((patch:any)=>isWorldPlanPatchTarget(patch.entityType))) {
+        const accepted = db.prepare(`SELECT COUNT(*) AS count FROM chapters WHERE project_id=? AND LENGTH(TRIM(COALESCE(content,'')))>0`).get(projectId) as {count:number};
+        const project = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as {status:string}|undefined;
+        if (accepted.count > 0 || project?.status !== 'creating')
+          throw new Error('世界计划混合字段只可在尚无已保存正文的创建阶段修订；必须人工确认已有作品的改动');
+      }
       if (selectedPatches.length === 0) {
         throw new Error('跨模块一致性没有可安全自动修改的最小代价候选；世界观/锁定事实保持不变，项目未激活。');
       }
@@ -8587,6 +8598,12 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       if (appliedPatchCount === 0 || pendingUpdates.size === 0) {
         throw new Error(`跨模块一致性没有形成可复查的候选修改（跳过${skippedPatchCount}处），项目未激活。`);
       }
+      // Review EVERY still-pending world method change from the original Canon,
+      // including edits retained from a failed earlier candidate round.
+      const worldPlanChanges=[...pendingUpdates.values()]
+        .filter(update=>isWorldPlanPatchTarget(update.entityType)&&update.originalValue!==update.nextValue)
+        .map((update,index)=>({ref:'WP'+(index+1),entityType:update.entityType,field:update.field,
+          before:String(update.originalValue),after:String(update.nextValue)}));
       const candidateBundleText = JSON.stringify(candidateBundle);
       if (candidateBundleText === previousBundleText) {
         throw new Error(`跨模块一致性候选没有改变任何审查字段（候选${appliedPatchCount}处，跳过${skippedPatchCount}处），项目未激活。`);
@@ -8596,16 +8613,17 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       }
       reviewedCandidates.add(candidateBundleText);
 
+      const planReviewDirective=worldPlanChanges.length ? `\n【受限世界计划方法修订】${JSON.stringify(worldPlanChanges)}\n世界机制、已发生事实、作者明确锁定的方法、阶段成果与代价均不可变。独立判断是否仅改未执行方法；包含其他改动、无法证明来源或证据不足时阻断。与consistent/contradictions并列返回worldPlanChecks，按每个WP编号给出{ref,status:"future_method_only|blocked|unknown",reason:"与确认事实和两版文字的具体对照",beforeEvidence:"原方法逐字片段",afterEvidence:"候选方法逐字片段",protected:{mechanism:"preserved|changed|unknown",history:"preserved|changed|unknown",lockedMethod:"preserved|changed|unknown",outcome:"preserved|changed|unknown",cost:"preserved|changed|unknown"}}。只有五项全部preserved且其它Gate通过才能保存。` : '';
       const secondAlignmentResult = await this.llmCallWithRetry<any>(
         `跨模块故事一致性第${repairAttempt}次候选复查`,
-        `${STORY_FACT_PRIORITY}\n${SOURCE_QUALITY_POLICY}\n核对候选修订后的资料是否严格属于同一个故事并且事实互不矛盾。世界观只是不可变参照，绝对不能通过修改世界观来让候选通过。检查确认题材与冻结世界观、角色、章纲、组织、地点、伏笔之间的专名、年龄、时间跨度、伤病历史、章节因果、结局和证据是否一致。${crossStageReviewDirective()}${crossStagePromiseDirective(canonicalCreativeBrief,candidateBundleText)}\n【唯一故事基准】${canonicalCreativeBrief}\n【候选修订资料】${candidateBundleText}`,
+        `${STORY_FACT_PRIORITY}\n${SOURCE_QUALITY_POLICY}\n核对候选修订后的资料是否严格属于同一个故事并且事实互不矛盾。世界观机制与已发生事实是不可变参照；只允许窄范围未执行方法同步，不能借该出口删除机制、固定成果、代价或硬锁定方案。检查确认题材与冻结世界观、角色、章纲、组织、地点、伏笔之间的专名、年龄、时间跨度、伤病历史、章节因果、结局和证据是否一致。${crossStageReviewDirective()}${crossStagePromiseDirective(canonicalCreativeBrief,candidateBundleText)}${planReviewDirective}\n【唯一故事基准】${canonicalCreativeBrief}\n【候选修订资料】${candidateBundleText}`,
         {
           temperature: 0.1,
           timeout: LLM_TUNABLES.timeoutComplex(),
           projectId,
           scenario: 'review',
-          validate: (value: any) => describeCrossStageReviewValidation(value,canonicalCreativeBrief,candidateBundleText).length === 0,
-          describeValidation: (value: any) => describeCrossStageReviewValidation(value,canonicalCreativeBrief,candidateBundleText),
+          validate: (value: any) => [...describeCrossStageReviewValidation(value,canonicalCreativeBrief,candidateBundleText),...describeWorldPlanReviewValidation(value,worldPlanChanges)].length === 0,
+          describeValidation: (value: any) => [...describeCrossStageReviewValidation(value,canonicalCreativeBrief,candidateBundleText),...describeWorldPlanReviewValidation(value,worldPlanChanges)],
           stepKey: 'creation_cross_stage_review', structuredReviewUnitCount: 1,
           retryInstruction: `只纠正审查分类与结论，不修改输入资料，不生成patches；重新核对每项原文与主线影响，保留真实冲突。${crossStageReviewDirective()}${crossStagePromiseDirective(canonicalCreativeBrief,candidateBundleText)}`,
         },
@@ -8614,7 +8632,9 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       if (!candidateAlignment) {
         throw new Error(`跨模块一致性候选复查未返回完整结构，数据库未修改：${secondAlignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
       }
-      const candidateContradictions = [...crossStageBlockingIssues(candidateAlignment),...await reviewStagePromises(candidateBundle as typeof generatedBundle)];
+      const candidateContradictions = [...crossStageBlockingIssues(candidateAlignment),
+        ...describeWorldPlanReviewValidation(candidateAlignment,worldPlanChanges),
+        ...await reviewStagePromises(candidateBundle as typeof generatedBundle)];
       // At the last allowed repair, a confirmed blocking result already makes
       // acceptance impossible. Keep that evidence and stop; do not spend more
       // calls collecting repair advice that this transaction cannot use.
@@ -8628,6 +8648,15 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
         // 候选已审查通过后才允许写 live Canon；WHERE 旧值是乐观锁，防止复查期间其它流程改了同一字段。
         db.exec('BEGIN IMMEDIATE');
         try {
+          // A project may have been activated or accepted prose saved while
+          // the model reviewed this candidate; recheck within the write lock.
+          if (worldPlanChanges.length) {
+            const state=db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as {status:string}|undefined;
+            const accepted=db.prepare("SELECT COUNT(*) AS count FROM chapters WHERE project_id=? AND LENGTH(TRIM(COALESCE(content,'')))>0")
+              .get(projectId) as {count:number};
+            if(state?.status!=='creating'||accepted.count>0)
+              throw new Error('世界计划复审期间项目已产生正式正文或退出创建阶段，禁止自动写入');
+          }
           for (const update of pendingUpdates.values()) {
             const updateResult = db.prepare(
               `UPDATE ${update.table} SET "${update.field}"=?, updated_at=? WHERE id=? AND project_id=? AND "${update.field}"=?`,
@@ -8636,6 +8665,22 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
               throw new Error(`一致性候选提交冲突：${update.entityType}#${update.entityId}.${update.field} 在复查期间已变化`);
             }
           }
+          // Read actual database values while still inside the transaction.
+          // The exact accepted projected values must be materialized or ALL edits roll back.
+          for(const update of pendingUpdates.values()) {
+            const saved=db.prepare(`SELECT "${update.field}" AS value FROM ${update.table} WHERE id=? AND project_id=?`)
+              .get(update.entityId,projectId) as {value:string|number}|undefined;
+            if(!saved || saved.value!==update.nextValue)
+              throw new Error(`跨模块已验收候选与数据库保存值不一致：${update.entityType}.${update.field}`);
+          }
+          // Compare the complete reviewed source projection, not just changed
+          // columns. Transaction rollback protects every dependent record.
+          const stableProjection=(bundle:Record<string,any[]>)=>JSON.stringify(
+            Object.fromEntries(Object.entries(bundle).map(([key,rows])=>[key,
+              rows.map(row=>Object.fromEntries(Object.entries(row).filter(([field])=>field!=='updated_at')))
+                .sort((a,b)=>String(a.id).localeCompare(String(b.id)))])));
+          if(stableProjection(readGeneratedBundle())!==stableProjection(candidateBundle))
+            throw new Error('已验收候选与实际保存全量投影不一致，依赖修订全部回滚');
           db.exec('COMMIT');
         } catch (error) {
           try { db.exec('ROLLBACK'); } catch {}
@@ -8643,7 +8688,7 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
         }
         generatedBundle = readGeneratedBundle();
         generatedBundleText = JSON.stringify(generatedBundle);
-        warnings.push(`跨模块一致性候选复查通过后提交 ${appliedPatchCount} 处最小影响修订（跳过 ${skippedPatchCount} 处），世界观未修改`);
+        warnings.push(`跨模块一致性候选复查通过并重读 ${appliedPatchCount} 处依赖修订（跳过 ${skippedPatchCount} 处），世界机制与已发生事实保持冻结`);
       } else {
         // 失败候选仅保留在内存继续修订依赖；正式 Canon 仍作为原值校验基线。
         warnings.push(`第${repairAttempt}次最小影响候选仍有${candidateContradictions.length}处冲突，候选仅保留在内存供依赖修订，数据库 Canon 未修改`);

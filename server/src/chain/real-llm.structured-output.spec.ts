@@ -482,10 +482,15 @@ describe('RealLLMService structured output guard', () => {
 
     const response = await service.generate({ prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object' });
 
-    expect(callModel).toHaveBeenCalledWith(
-      'deepseek-flash', '输出JSON对象', expect.any(String),
+    // The transport now carries explicit thinking override and abort signal.
+    expect(callModel.mock.calls[0][0]).toBe('deepseek-flash');
+    expect(callModel.mock.calls[0][1]).toBe('输出JSON对象');
+    expect(typeof callModel.mock.calls[0][2]).toBe('string');
+    expect(callModel.mock.calls[0].slice(3, 8)).toEqual([
       0.4, 4096, 600_000, 'json_object', undefined,
-    );
+    ]);
+    expect(callModel.mock.calls[0][8]).toBeUndefined();
+    expect(callModel.mock.calls[0][9]).toBeInstanceOf(AbortSignal);
     expect(response.content).toBe('{"ok":true}');
     expect(response.finishReason).toBe('stop');
     expect(String(callModel.mock.calls[0][2] || '')).not.toContain('执行前置规则');
@@ -581,10 +586,15 @@ describe('RealLLMService structured output guard', () => {
       prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxTokens: 7200,
     });
 
-    expect(callModel).toHaveBeenCalledWith(
-      'deepseek-flash', '输出JSON对象', expect.any(String),
+    // The transport now carries explicit thinking override and abort signal.
+    expect(callModel.mock.calls[0][0]).toBe('deepseek-flash');
+    expect(callModel.mock.calls[0][1]).toBe('输出JSON对象');
+    expect(typeof callModel.mock.calls[0][2]).toBe('string');
+    expect(callModel.mock.calls[0].slice(3, 8)).toEqual([
       0.4, 7200, 600_000, 'json_object', undefined,
-    );
+    ]);
+    expect(callModel.mock.calls[0][8]).toBeUndefined();
+    expect(callModel.mock.calls[0][9]).toBeInstanceOf(AbortSignal);
   });
 
   it('keeps the expanded budget and explicit temperature during a network retry', async () => {
@@ -636,10 +646,15 @@ describe('RealLLMService structured output guard', () => {
 
     await service.generate({ prompt: '生成正文', scenario: 'daily' });
 
-    expect(callModel).toHaveBeenCalledWith(
-      'deepseek-flash', '生成正文', expect.any(String),
+    // The transport now carries explicit thinking override and abort signal.
+    expect(callModel.mock.calls[0][0]).toBe('deepseek-flash');
+    expect(callModel.mock.calls[0][1]).toBe('生成正文');
+    expect(typeof callModel.mock.calls[0][2]).toBe('string');
+    expect(callModel.mock.calls[0].slice(3, 8)).toEqual([
       0.4, 4096, 600_000, undefined, undefined,
-    );
+    ]);
+    expect(callModel.mock.calls[0][8]).toBeUndefined();
+    expect(callModel.mock.calls[0][9]).toBeInstanceOf(AbortSignal);
   });
 
   it('rejects an empty plain-text (body generation) response instead of returning it empty', async () => {

@@ -145,7 +145,8 @@ it('generates a complete idea batch through preselection plus structuring and re
     setting: premises[index - 1].setting, protagonist: premises[index - 1].hero, characters: ['主角', '对手', '证人'],
     styleTags: ['现实', '悬疑'], ...discoveryStandards,
     targetPlatform: 'fanqie', tone: '冲突直接且适合移动阅读', estimatedWords: 20_000, plannedChapters: 4,
-    scopeBreakdown: [{ arc: '危机与追查', chapters: 4, reason: '完成调查、选择、反转与收束' }],
+    scopeBreakdown: [{ arc: '危机与追查', chapters: 4, reason: '完成调查、选择、反转与收束', outcome: '主角取得可验证的证据并完成主动选择，关系和责任发生明确变化' }],
+    ending: '主角公开已查证的关键材料，合法渠道确认责任并采取实际行动，相关人员承担具体后果；主角保留选择的现实代价，关系因此改变。',
     scopeReason: '四章分别承担危机、追查、选择与反转收束',
     coreConflict: premises[index - 1].conflict,
     uniquePoint: premises[index - 1].point,
@@ -159,31 +160,39 @@ it('generates a complete idea batch through preselection plus structuring and re
       readerQuestion: `主角能否在截止日前证明${premises[index - 1].setting}里的异常，同时承担公开证据带来的关系代价`,
     },
   });
-  let generationCall = 0;
+  let structuredCount = 0;
   const realLLM = {
     assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
-    generate: vi.fn(async () => {
-      generationCall += 1;
-      const currentCall = generationCall;
+    generate: vi.fn(async (input: any) => {
       await new Promise(resolve => setTimeout(resolve, 10));
-      if (currentCall === 1) {
-        return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+      const step = input.metrics?.stepKey;
+      if (step === 'idea_premise_selection') return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+      if (step === 'idea_premise_source_drift_review' || step === 'idea_premise_overlap_review')
+        return { content: JSON.stringify({ passed: true, issues: [] }) };
+      if (step === 'idea_card_structure') {
+        structuredCount++;
+        if (structuredCount > 5) throw Error('同一请求不应重复结构化');
+        return { content: JSON.stringify({ ideas: [makeIdea(structuredCount)] }) };
       }
-      const cardIndex = currentCall - 1;
-      if (cardIndex >= 1 && cardIndex <= 5) {
-        return { content: JSON.stringify({ ideas: [makeIdea(cardIndex)] }) };
-      }
-      if (currentCall === 7) {
-        return { content: JSON.stringify({ reviews: Array.from({ length: 5 }, (_, index) => ({
-          position: index + 1, title: makeIdea(index + 1).title,
-          titleCompelling: true, openingCompelling: true, distinctFromBatch: true,
-          storyCoherent: true, payoffCredible: true, platformFit: true,
-          storyEvidence: makeIdea(index + 1).hook, payoffEvidence: makeIdea(index + 1).description,
-          platformEvidence: makeIdea(index + 1).hook, qualityReason: '根据实际题材的设定、选择、兑现与平台判据完成评审。',
-          readerQuestion: '主角能否在截止日前验证现场证据并保住家人的现实利益？', issues: [],
-        })) }) };
-      }
-      throw new Error(`unexpected idea generation call: ${generationCall}`);
+      if (step === 'idea_presentation_review') return { content: JSON.stringify({
+        reviews: Array.from({ length: 5 }, (_, index) => {
+          const position = index + 1, card = makeIdea(position);
+          const goal = (field: string) => ({ status: 'supported', evidenceRef: `C${position}.${field}`,
+            reason: '由具体风险、主动选择与可验证结果形成完整阅读期待和实际关系变化。' });
+          return {
+            position, title: card.title, titleCompelling: true, openingCompelling: true,
+            distinctFromBatch: true, storyCoherent: true, payoffCredible: true, platformFit: true,
+            storyEvidenceRef: `C${position}.hook`, payoffEvidenceRef: `C${position}.ending`,
+            platformEvidenceRef: `C${position}.description`,
+            qualityReason: '以本题材实际开篇压力、行动条件及具体责任兑现核对平台与阅读目标。',
+            readerQuestion: '主角能否证实当前异常并承担公开材料后的真实关系后果？',
+            readerGoals: { click: goal('hook'), completion: goal('description'),
+              sharing: goal('ending'), immersion: goal('hook') },
+            issues: [],
+          };
+        }),
+      }) };
+      throw new Error('unexpected idea generation step: '+String(step));
     }),
   };
   const controller = Object.create(ChainController.prototype);
@@ -200,14 +209,12 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 5,
   });
   expect(duplicate).toEqual(first);
-  // 同一请求只执行一条共享主链：1 次筛选 + 5 次结构化 + 1 次独立标题/首屏审查。
-  expect(realLLM.generate).toHaveBeenCalledTimes(7);
-  for (let call = 1; call <= 6; call += 1) {
-    expect(realLLM.generate).toHaveBeenNthCalledWith(call, expect.objectContaining({
-      scenario: 'idea_generate', responseFormat: 'json_object', maxEmptyRetries: 1,
-    }));
-  }
-  expect(realLLM.generate).toHaveBeenNthCalledWith(7, expect.objectContaining({ scenario: 'idea_generate', metrics: expect.objectContaining({ stepKey: 'idea_presentation_review' }) }));
+  // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、一次标题与阅读目标独立审查。
+  expect(realLLM.generate).toHaveBeenCalledTimes(9);
+  expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
+    'idea_premise_selection','idea_premise_source_drift_review','idea_premise_overlap_review',
+    ...Array(5).fill('idea_card_structure'),'idea_presentation_review',
+  ].sort());
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,
@@ -289,9 +296,11 @@ it('injects the user-declared custom platform standard into the idea prompt as t
     generate: vi.fn(async (input: any) => {
       generationCall += 1;
       prompts.push(String(input.prompt));
-      if (generationCall === 1) {
+      if (input.metrics?.stepKey === 'idea_premise_selection') {
         return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
       }
+      if (['idea_premise_source_drift_review','idea_premise_overlap_review'].includes(input.metrics?.stepKey))
+        return { content: JSON.stringify({ passed: true, issues: [] }) };
       return { content: JSON.stringify({ ideas: [] }) };
     }),
   };
@@ -308,7 +317,7 @@ it('injects the user-declared custom platform standard into the idea prompt as t
   expect(result.success).toBe(false);
   expect(String(result.error)).toContain('第 1/5 个已选题材结构化失败');
   expect(String(result.error)).toContain('返回 0 张，期望恰好 1 张');
-  expect(realLLM.generate).toHaveBeenCalledTimes(6);
+  expect(realLLM.generate).toHaveBeenCalledTimes(8);
   expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: false });
   expect(result.appealGate.structuringErrors).toHaveLength(5);
   const prompt = prompts.join('\n');

@@ -11,6 +11,12 @@ let controller: any;
 const review = (consistent: boolean, contradictions: string[] = []) => ({ data: { consistent, contradictions, unrelatedInventions: [] }, warnings: [] });
 const patch = (replacement: string) => ({ data: { patches: [{ entityType: 'foreshadowing', entityId: 'clue', field: 'planned_recovery_chapter_index', match: '3', replacement }] }, warnings: [] });
 const chapterValue = () => (db.prepare('SELECT planned_recovery_chapter_index AS value FROM foreshadowings WHERE id=?').get('clue') as any).value;
+const feasibleUpstreamPath = () => ({ data: {
+  plans: [{ ref: 'P1', status: 'feasible', mechanismRefs: ['S1'],
+    actions: ['已授权角色在阶段期限内实际取得并核验原始材料，然后交付主角形成可用筹码。'],
+    remainingCounterexamples: [] }],
+  counterexampleChecks: [{ ref: 'F1', conditionChange: '通过实际取得、核验和交付动作排除只申请未完成的原反例。' }],
+}, warnings: [] });
 const run = () => controller.reviewCreationConsistency('p', { selectedIdea: {} }, '{}', '', [], vi.fn());
 
 beforeEach(async () => {
@@ -73,6 +79,8 @@ describe('production cross-module commit boundary with native SQLite', () => {
     db.prepare('UPDATE outlines SET content=? WHERE id=?').run(content,'chapter0');
     let repairs=0,sourceReviews=0;
     controller.llmCallWithRetry.mockImplementation(async(label:string)=>{
+      if(label==='上游替代行动路径设计')return feasibleUpstreamPath();
+      if(label==='上游替代行动路径复核')return review(true);
       if(label.includes('候选复查')||label==='跨模块故事一致性审查')return review(true);
       if(label==='阶段兑现独立验收')return {data:{checks:[{ref:'P1',status:'weakened',candidateEvidence:content,reason:'本阶段仅申请资料，没有取得承诺的反制筹码'}]},warnings:[]};
       if(label==='章纲来源边界专项复核'){
@@ -119,6 +127,8 @@ describe('production cross-module commit boundary with native SQLite', () => {
     db.prepare('UPDATE outlines SET content=? WHERE id=?').run(content,'chapter0');
     let reached=false;
     controller.llmCallWithRetry.mockImplementation(async(label:string,prompt:string)=>{
+      if(label==='上游替代行动路径设计')return feasibleUpstreamPath();
+      if(label==='上游替代行动路径复核')return review(true);
       if(label==='跨模块故事一致性审查')return review(true);
       if(label==='阶段兑现独立验收')return {data:{checks:[{ref:'P1',status:'preserved',candidateEvidence:content,reason:'本阶段所得属嫌疑方向，未声称已经排除其它路径'}]},warnings:[]};
       if(label.startsWith('跨模块故事一致性修订')){
@@ -140,9 +150,10 @@ describe('production cross-module commit boundary with native SQLite', () => {
     controller.llmCallWithRetry.mockImplementation(async(label:string,prompt:string,options:any)=>{
       if(label==='跨模块故事一致性审查')return review(true);
       if(label==='阶段兑现独立验收')return {data:{checks:[{ref:'P1',status:'weakened',candidateEvidence:content,reason:'只有申请，没有取得承诺的材料'}]},warnings:[]};
-      if(label.startsWith('跨模块故事一致性修订')) {
-        expect(prompt).toContain('先完成路径设计');repairs++;
-        const data={repairPlans:[{ref:'P1',status:'blocked',remainingCounterexamples:['现有来源与权限无法完成取得']}],edits:[]};
+      if(label==='上游替代行动路径设计') {
+        expect(prompt).toContain('先设计能够兑现固定成果的替代行动路径');
+        repairs++;
+        const data={plans:[{ref:'P1',status:'blocked',remainingCounterexamples:['现有来源与权限无法完成取得']}]};
         expect(options.validate(data)).toBe(true);
         return {data,warnings:[]};
       }
@@ -347,7 +358,7 @@ describe('production cross-module commit boundary with native SQLite', () => {
         expect(prompt).toContain('只在失败候选中出现的问题');
         expect(prompt).toContain('原Canon保留为提交校验基线');
         expect(prompt).toContain('planned_recovery_chapter_index');
-        const positions = JSON.parse(prompt.split('【完整目标位置目录】')[1].split('\n')[0]);
+        const positions = JSON.parse(prompt.split('【允许修改的位置目录；未显示字段保留且仍参与完整复检】')[1].split('\n')[0]);
         expect(positions.find((entry: any) => entry.entityId === 'clue').fields.planned_recovery_chapter_index[0][2]).toBe('4');
         expect(chapterValue()).toBe(3);
         return {data:{patches:[{entityType:'foreshadowing',entityId:'clue',field:'planned_recovery_chapter_index',match:'4',replacement:'5'}]},warnings:[]};

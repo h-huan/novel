@@ -37,7 +37,7 @@ it('injects the computed candidate into generation and all review context throug
  controller.persistAlignmentContradictions=vi.fn();controller.realLLM.validateGeneratedContent=vi.fn(async(_p:any,_i:any,body:string,context:string)=>{expect(context).toContain('23:59:50');return body;});
  controller.generationMetrics={attachTimePlanProvenance:vi.fn()};
  controller.generateBodyWithLengthGuard=vi.fn(async(input:any)=>{expect(input.basePrompt).toContain('23:59:50');input.onRetainedLengthFailure('retained-run','她离开站点。');return '她离开站点。';});
- controller.checkChapterAlignment=vi.fn(async(input:any)=>{expect(input.storyContext.startsWith('\n\n【本次候选时间计划')).toBe(true);expect(input.storyContext).toContain('23:59:50');return {pass:true,missing:[],contradictions:[],advisories:[],sourceConflicts:[]};});
+ controller.checkChapterAlignment=vi.fn(async(input:any)=>{const context=JSON.parse(input.storyContext);expect(context.timePlanDirective).toContain('【本次候选时间计划');expect(context.timePlanDirective).toContain('23:59:50');return {pass:true,missing:[],contradictions:[],advisories:[],sourceConflicts:[]};});
  await controller.generateBodyWithAlignmentGuard({projectId:'p',basePrompt:'按章纲生成',targetWords:100,scenario:'writing',chapterIndex:1,chapterTitle:'开篇',outlineContract:outline,storyContext:'上下文'.repeat(10000),wordRange:{min:90,max:110}});
  expect(controller.realLLM.generate).toHaveBeenCalledTimes(1);
  expect(controller.generationMetrics.attachTimePlanProvenance).toHaveBeenCalledWith('retained-run',expect.objectContaining({draftHash:expect.stringMatching(/^[a-f0-9]{64}$/),outlineHash:expect.stringMatching(/^[a-f0-9]{64}$/),timers:expect.any(Array)}));

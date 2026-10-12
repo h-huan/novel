@@ -12,9 +12,72 @@ export const CROSS_STAGE_PATCH_TABLE_MAP: Readonly<Record<string, string>> = Obj
   mapPoint: 'map_points',
   chapter: 'outlines',
   foreshadowing: 'foreshadowings',
+  // This does NOT authorize world/worldProfile mutation. Only the narrowly
+  // verified future-method projection in each mixed field may be changed.
+  worldPlan: 'world_settings',
+  worldProfilePlan: 'world_system_profiles',
 });
 
 export const CROSS_STAGE_MUTABLE_ENTITY_TYPES = Object.freeze(Object.keys(CROSS_STAGE_PATCH_TABLE_MAP));
+
+export const isWorldPlanPatchTarget = (entityType: unknown): boolean =>
+  entityType === 'worldPlan' || entityType === 'worldProfilePlan';
+
+/** Mechanical boundary: one method clause, preserving all other clauses byte-for-byte.
+ * Semantics (lock, mechanism, history, outcome, cost) need separate full review. */
+export function isScopedWorldPlanReplacement(original: string, next: string): boolean {
+  const clauses = (s: string) => s.split(/(?<=[。！？；\n])/u);
+  const before = clauses(original), after = clauses(next);
+  if (before.length !== after.length || original === next) return false;
+  const changed = before.map((part, index) => part !== after[index] ? index : -1).filter(i => i >= 0);
+  if (changed.length !== 1) return false;
+  const position = changed[0];
+  if (!before[position].trim() || !after[position].trim()) return false;
+  // When method and non-negotiable outcome/cost/mechanism share one sentence,
+  // refuse the automated edit. A review cannot turn a mixed sentence into a plan.
+  return !/(?:世界规则|世界机制|能力边界|已发生事实|既成事实|已确认成果|固定成果|阶段成果|固定代价|付出代价|(?:成果|代价|规则|机制|事实|承诺)[:：]|作者锁定|不可更改|不可变|冻结)/.test(before[position]);
+}
+
+export function describeWorldPlanReviewValidation(value: any, changes: readonly {
+  ref: string; before: string; after: string;
+}[]): string[] {
+  if (!changes.length) return [];
+  const checks = value?.worldPlanChecks;
+  if (!Array.isArray(checks) || checks.length !== changes.length ||
+      new Set(checks.map((row: any) => row?.ref)).size !== changes.length) {
+    return ['受限世界计划修订须逐项独立核对，不能缺失或重复'];
+  }
+  const protectedFacts = ['mechanism', 'history', 'lockedMethod', 'outcome', 'cost'];
+  return changes.flatMap(change => {
+    const row = checks.find((item: any) => item?.ref === change.ref);
+    let before=change.before,after=change.after;
+    // For the JSON-backed field use the actual edited leaf; other constraints
+    // are immutable and must not become supporting evidence for a changed plan.
+    if(change.before.trim().startsWith('{')) {
+      try {before=JSON.parse(change.before).endingDirection;after=JSON.parse(change.after).endingDirection;}
+      catch {return [change.ref+' 原始方法字段无法读取'];}
+    }
+    // Each iteration may be individually local but the accumulated proposal
+    // must still modify exactly one eligible method clause in the original.
+    if (typeof before !== 'string' || typeof after !== 'string'
+      || !isScopedWorldPlanReplacement(before,after)) {
+      return [change.ref+' 累计候选改变了多个方法句段或触及保护内容'];
+    }
+    const partsBefore=String(before).split(/(?<=[。！？；\n])/u);
+    const partsAfter=String(after).split(/(?<=[。！？；\n])/u);
+    const changedIndex=partsBefore.findIndex((part,index)=>part!==partsAfter[index]);
+    const oldClause=partsBefore[changedIndex]||'',newClause=partsAfter[changedIndex]||'';
+    if (!row || row.status !== 'future_method_only' ||
+        typeof row.reason !== 'string' || row.reason.trim().length < 12 ||
+        typeof row.beforeEvidence !== 'string' || row.beforeEvidence.length < 4 ||
+        typeof row.afterEvidence !== 'string' || row.afterEvidence.length < 4 ||
+        !oldClause.includes(row.beforeEvidence) || !newClause.includes(row.afterEvidence) ||
+        protectedFacts.some(key => row.protected?.[key] !== 'preserved')) {
+      return [change.ref + ' 未证明仅替换未执行方法且全部固定事实保留'];
+    }
+    return [];
+  });
+}
 
 interface RepairAnchor {
   id:string; entityType:string; entityId:string; field:string; value:string;
@@ -23,11 +86,13 @@ interface RepairAnchor {
 /** Position ownership stays on the server; the model never transcribes old JSON. */
 export function crossStageRepairAnchors(bundle:Record<string,any[]>,targetIds:readonly string[]):RepairAnchor[] {
   const anchors:RepairAnchor[]=[];
-  const types:Record<string,string>={characters:'character',organizations:'organization',mapPoints:'mapPoint',chapters:'chapter',foreshadowings:'foreshadowing'};
+  const types:Record<string,string>={characters:'character',organizations:'organization',mapPoints:'mapPoint',chapters:'chapter',foreshadowings:'foreshadowing',world:'worldPlan',worldProfiles:'worldProfilePlan'};
   for(const [key,type] of Object.entries(types))for(const row of bundle[key]||[]){
     if(!targetIds.includes(row.id))continue;
     for(const [field,value] of Object.entries(row)){
       if(['id','project_id','chapterIndex','level','created_at','updated_at'].includes(field))continue;
+      if(type==='worldPlan'&&field!=='constraints')continue;
+      if(type==='worldProfilePlan'&&field!=='ending')continue;
       const add=(part:Omit<RepairAnchor,'id'|'entityType'|'entityId'|'field'>)=>anchors.push({id:'E'+(anchors.length+1),entityType:type,entityId:row.id,field,...part});
       if(typeof value==='number'){if(type==='foreshadowing'&&['buried_chapter_index','planned_recovery_chapter_index'].includes(field))add({value:String(value)});continue;}
       if(typeof value!=='string')continue;
@@ -36,9 +101,23 @@ export function crossStageRepairAnchors(bundle:Record<string,any[]>,targetIds:re
         const visit=(node:any,path:Array<string|number>)=>{
           if(typeof node==='string')add({value:node,path});
           else if(node&&typeof node==='object')for(const [child,item] of Object.entries(node))visit(item,[...path,Array.isArray(node)?Number(child):child]);
-        };visit(parsed,[]);
+        };
+        if(type==='worldPlan') {
+          // Only the existing JSON leaf, never the other constraints.
+          if(typeof parsed.endingDirection==='string' && parsed.endingDirection.trim())
+            add({value:parsed.endingDirection,path:['endingDirection']});
+        } else visit(parsed,[]);
       }else{
-        let start=0;for(const part of value.split('\n')){add({value:part,start,end:start+part.length});start+=part.length+1;}
+        if(type==='worldPlan')continue; // unstructured world constraints remain frozen
+        if(type==='worldProfilePlan') {
+          let start=0;
+          for(const part of value.split(/(?<=[。！？；\n])/u)) {
+            if(part.trim()) add({value:part,start,end:start+part.length});
+            start+=part.length;
+          }
+        }else{
+          let start=0;for(const part of value.split('\n')){add({value:part,start,end:start+part.length});start+=part.length+1;}
+        }
       }
     }
   }
@@ -113,7 +192,8 @@ export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:re
   for(const position of crossStageRepairDiagnosticPositions(anchors,related,related.map(target=>target.id)))for(const id of position.anchorIds)ids.add(id);
   // All affected chapter action chains stay available for causal replacement,
   // not merely the faulty conclusion or one copied projection.
-  return anchors.filter(anchor=>ids.has(anchor.id)||(anchor.entityType==='chapter'&&anchor.field==='content'));
+  return anchors.filter(anchor=>ids.has(anchor.id)||(anchor.entityType==='chapter'&&anchor.field==='content')
+    || isWorldPlanPatchTarget(anchor.entityType));
 }
 
 /** Read-only current dependencies, including preceding proposals from this round.
@@ -162,11 +242,18 @@ export function crossStageRepairContext(bundle:Record<string,any[]>,findings:str
  * All batches are proposals; the caller must review their combined full candidate. */
 export function crossStageRepairRequests(bundle:Record<string,any[]>,findings:string[]) {
   const mutable=new Set(['characters','organizations','mapPoints','chapters','foreshadowings']);
-  const entities=Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>
+  const entities=[...Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>
     rows.map((row,index)=>({id:row.id,text:Object.values(row).filter(value=>typeof value==='string').join('\n'),reference:`${key}[${index}]`,namedReferences:[
       ...(typeof row.name==='string'&&row.name?[`${key}[${row.name}]`]:[]),
       ...(typeof row.chapterIndex==='number'?[`${key}[chapterIndex=${row.chapterIndex}]`]:[]),
-    ]})));
+    ],planField:''}))),
+    ...(bundle.world||[]).flatMap((row,index)=>{
+      let constraints:any;try{constraints=JSON.parse(row.constraints);}catch{return [];}
+      const plan=constraints?.endingDirection;
+      return typeof plan==='string'&&plan.trim()?[{id:row.id,text:plan,reference:`world[${index}].constraints.endingDirection`,namedReferences:[],planField:'endingDirection'}]:[];
+    }),
+    ...(bundle.worldProfiles||[]).flatMap((row,index)=>typeof row.ending==='string'&&row.ending.trim()
+      ?[{id:row.id,text:row.ending,reference:`worldProfiles[${index}].ending`,namedReferences:[],planField:'ending'}]:[])];
   const groups:Array<{findings:string[];targetIds:string[]}>=[];
   for(const finding of findings){
     // Reviewers may cite UUID prefixes. Resolve only unambiguous complete tokens;
@@ -176,7 +263,15 @@ export function crossStageRepairRequests(bundle:Record<string,any[]>,findings:st
       const matches=entities.filter(entity=>typeof entity.id==='string'&&entity.id.toLowerCase().startsWith(token.toLowerCase()));
       return matches.length===1?[matches[0].id]:[];
     });
-    const targetIds=entities.filter(entity=>finding.includes(entity.id)||finding.includes(entity.reference)||entity.namedReferences.some(ref=>finding.includes(ref))||prefixIds.includes(entity.id)).map(entity=>entity.id);
+    const targetIds=entities.filter(entity=>finding.includes(entity.id)||finding.includes(entity.reference)
+      ||entity.namedReferences.some(ref=>finding.includes(ref))||prefixIds.includes(entity.id)
+      ||(entity.planField==='endingDirection'&&/world(?:\.constraints)?\.endingDirection|world\[\d+\]\.constraints\.endingDirection/.test(finding))
+      ||(entity.planField==='ending'&&/worldProfiles?(?:\[\d+\])?\.ending\b/.test(finding))).map(entity=>entity.id);
+    // Two projections of the same planned ending must be revised together.
+    for(const world of bundle.world||[])for(const profile of bundle.worldProfiles||[])
+      if(profile.world_setting_id===world.id && (targetIds.includes(world.id)||targetIds.includes(profile.id))) {
+        for(const id of [world.id,profile.id])if(entities.some(entity=>entity.id===id&&entity.planField)&&!targetIds.includes(id))targetIds.push(id);
+      }
     // Opening knowledge is produced by the preceding chapter. Keeping that
     // producer read-only leaves only a downstream wording change available.
     // Include its plan, never a saved body or an immutable world mechanism.
@@ -239,7 +334,7 @@ export function crossStageRepairRequests(bundle:Record<string,any[]>,findings:st
     // Positions must always be derived from complete source fields. A finding
     // without an ID may broaden targets, but must never change their coordinates
     // by replacing the source with quoted neighborhoods.
-    if(!targetIds.length)return [{findings:[...findings],targetIds:entities.map(entity=>entity.id),context:bundle,connected:false}];
+    if(!targetIds.length)return [{findings:[...findings],targetIds:entities.filter(entity=>!entity.planField).map(entity=>entity.id),context:bundle,connected:false}];
     const related=groups.filter(group=>group.targetIds.some(id=>targetIds.includes(id)));
     const merged={findings:[finding,...related.flatMap(group=>group.findings)],targetIds:[...new Set([...targetIds,...related.flatMap(group=>group.targetIds)])]};
     for(const group of related)groups.splice(groups.indexOf(group),1);
@@ -273,6 +368,9 @@ function repairSourceType(entityType: string): CanonSourceType | null {
   switch (entityType) {
     case 'character': return 'character';
     case 'chapter': return 'chapter_plan';
+    // This is a proposed future plan, NOT the immutable world-rule source type.
+    case 'worldPlan':
+    case 'worldProfilePlan': return 'book_skeleton';
     case 'foreshadowing': return 'foreshadowing';
     // 组织和地点属于当前世界中的派生状态，不具备修改世界观本身的权限。
     case 'organization':
@@ -393,6 +491,7 @@ export function applyCrossStageFieldPatch(original: string | number, match: stri
 
 const PATCH_BUNDLE_KEYS: Record<string, string> = {
   character: 'characters', organization: 'organizations', mapPoint: 'mapPoints', chapter: 'chapters', foreshadowing: 'foreshadowings',
+  worldPlan: 'world', worldProfilePlan: 'worldProfiles',
 };
 
 export function describeCrossStagePatchValidation(value: any, bundle: Record<string, any[]>): string[] {
@@ -411,9 +510,24 @@ export function describeCrossStagePatchValidation(value: any, bundle: Record<str
       issues.push(`${target}：补丁目标必须是当前资料中的可修实体id和真实字段名，禁止世界观目标或中文内容标签`);
       continue;
     }
+    const next = typeof original==='string' || typeof original==='number'
+      ? applyCrossStageFieldPatch(original, patch.match, patch.replacement) : null;
+    if (isWorldPlanPatchTarget(patch?.entityType)) {
+      const allowed = patch.entityType==='worldPlan' && patch.field==='constraints'
+        ? (() => {try {
+            const before=JSON.parse(String(original)),after=JSON.parse(String(next));
+            return before && after && !Array.isArray(before) && !Array.isArray(after)
+              && typeof before.endingDirection==='string' && typeof after.endingDirection==='string'
+              && isScopedWorldPlanReplacement(before.endingDirection,after.endingDirection)
+              && JSON.stringify({...before,endingDirection:null})===JSON.stringify({...after,endingDirection:null});
+          }catch{return false;}})()
+        : patch.entityType==='worldProfilePlan' && patch.field==='ending'
+          && typeof original==='string' && typeof next==='string'
+          && isScopedWorldPlanReplacement(original,next);
+      if(!allowed) {issues.push(`${target}：只允许单个未执行方法段修订，世界机制、既成事实及同字段其它内容必须逐字保留`);continue;}
+    }
     if (typeof patch.match !== 'string' || typeof patch.replacement !== 'string' || !patch.replacement.trim()
-      || (typeof original !== 'string' && typeof original !== 'number')
-      || applyCrossStageFieldPatch(original, patch.match, patch.replacement) === null) {
+      || (typeof original !== 'string' && typeof original !== 'number') || next === null) {
       const matches=typeof original==='string'&&typeof patch.match==='string'&&patch.match.length
         ?original.split(patch.match).length-1:null;
       issues.push(`${target}：${matches===0?'match在该字段不存在，须逐字复制该字段实际原文，不得从另一字段或审查摘要拼句':matches!==null&&matches>1?`match在该字段出现${matches}次，须增加真实相邻原文使其唯一`:'补丁必须精确匹配唯一原文且保持JSON；数值字段使用完整旧值与新整数的字符串'}`);
