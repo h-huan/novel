@@ -9,6 +9,7 @@ import {
   describeCrossStagePatchValidation,
   crossStageRepairRequests,
   crossStageRepairAnchors,
+  isScopedWorldPlanReplacement,
   crossStageRepairDependencyView,
   crossStageRepairFocusedAnchors,
   crossStageRepairDiagnosticPositions,
@@ -168,6 +169,32 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(view.chapters[0].content).toContain('个人授权使整栋楼一直敞开。');
     const candidate=applyCrossStagePatch(original,'个人授权使整栋楼一直敞开。','本人刷卡后闸机关闭。');
     expect(candidate).toContain('保留后续计划。'.repeat(800));expect(bundle.chapters[0].content).toBe(original);
+  });
+  it('allows only a reviewed future-method clause inside mixed frozen fields', () => {
+    const bundle={world:[{id:'w',constraints:JSON.stringify({rule:'触发代价不变',endingDirection:'固定成果：获得证据。旧方法：私自调取档案。代价：失去职位。'})}],
+      worldProfiles:[{id:'wp',world_setting_id:'w',rules:'世界规则冻结',ending:'固定成果：获得证据。旧方法：私自调取档案。代价：失去职位。'}],
+      chapters:[{id:'c',chapterIndex:1,content:'主角在最后取得证据。'}]};
+    const request=crossStageRepairRequests(bundle,['world.constraints.endingDirection 与 chapters[0].content 的未执行方法冲突']);
+    expect(request[0].targetIds).toEqual(expect.arrayContaining(['w','wp','c']));
+    const anchors=crossStageRepairAnchors(request[0].context,['w','wp']);
+    expect(anchors.some(item=>item.entityType==='worldPlan'&&item.path?.join('.')==='endingDirection')).toBe(true);
+    expect(anchors.some(item=>item.entityType==='worldProfilePlan'&&item.field==='ending')).toBe(true);
+    expect(anchors.some(item=>item.field==='rules')).toBe(false);
+    const old=String(bundle.world[0].constraints),next=JSON.stringify({rule:'触发代价不变',endingDirection:'固定成果：获得证据。新方法：经授权查验档案。代价：失去职位。'});
+    expect(describeCrossStagePatchValidation({patches:[{entityType:'worldPlan',entityId:'w',field:'constraints',match:old,replacement:next}]},bundle)).toEqual([]);
+    const corrupted=JSON.stringify({rule:'触发无需代价',endingDirection:JSON.parse(next).endingDirection});
+    expect(describeCrossStagePatchValidation({patches:[{entityType:'worldPlan',entityId:'w',field:'constraints',match:old,replacement:corrupted}]},bundle).length).toBeGreaterThan(0);
+    expect(describeCrossStagePatchValidation({patches:[{entityType:'worldProfilePlan',entityId:'wp',field:'rules',match:'世界规则冻结',replacement:'取消限制'}]},bundle).length).toBeGreaterThan(0);
+    const promises={worldPlanChecks:[{ref:'WP1',status:'future_method_only',reason:'仅在尚未执行的路径中调整取得方式，固定事实仍不变化',beforeEvidence:'私自调取档案',afterEvidence:'经授权查验档案',protected:{mechanism:'preserved',history:'preserved',lockedMethod:'preserved',outcome:'preserved',cost:'preserved'}}]};
+    expect(describeWorldPlanReviewValidation(promises,[{ref:'WP1',before:old,after:next}])).toEqual([]);
+    expect(describeWorldPlanReviewValidation({...promises,worldPlanChecks:[]},[{ref:'WP1',before:old,after:next}]).length).toBeGreaterThan(0);
+    expect(describeWorldPlanReviewValidation({worldPlanChecks:[{...promises.worldPlanChecks[0],protected:{...promises.worldPlanChecks[0].protected,outcome:'unknown'}}]},[{ref:'WP1',before:old,after:next}]).length).toBeGreaterThan(0);
+  });
+  it('does not replace a mechanism, achieved outcome or cost hidden in the same clause',()=>{
+    expect(isScopedWorldPlanReplacement('固定成果：取得证据。旧方法：私取档案。', '固定成果：只有线索。旧方法：私取档案。')).toBe(false);
+    expect(isScopedWorldPlanReplacement('规则：消耗一次机会。旧方法：私取档案。', '规则：无需机会。旧方法：私取档案。')).toBe(false);
+    expect(isScopedWorldPlanReplacement('代价：失去职位。旧方法：私取档案。', '代价：没有损失。旧方法：私取档案。')).toBe(false);
+    expect(isScopedWorldPlanReplacement('旧方法：未经允许调取档案。', '新方法：机构依法核验档案。')).toBe(true);
   });
   it('never exposes world canon as an automatic repair target', () => {
     expect(CROSS_STAGE_MUTABLE_ENTITY_TYPES).not.toContain('world');

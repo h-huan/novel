@@ -18,8 +18,10 @@ export type CanonSourceType =
 export type CanonTemporalState = 'confirmed_history' | 'current_execution' | 'future_plan' | 'derived';
 
 /**
- * 世界观是作品地基。创建完成以后任何自动流程都不得修改、修复或重写世界观；
- * 冲突必须在其它资料中以最小影响面圆回。只有项目仍处于 creating 时允许首次建立世界观。
+ * 世界机制和已发生事实是作品地基，不能在自动修复中改变。
+ * 创建期未保存正文时，未单独锁定的未来方法仅能在跨阶段候选的
+ * 受限方法段中替换，须保留所有其它句段、固定成果及代价，通过原完整Gate后事务保存。
+ * 原 world_setting/world_rule 来源仍永久不可作为普通自动修复目标。
  */
 export const WORLD_CANON_IMMUTABLE = true as const;
 
@@ -196,7 +198,7 @@ export function buildStoryFoundation(confirmedStory: unknown): StoryFoundation {
  */
 export function buildCanonPolicyDirective(): string {
   return `【唯一 Canon 与最小代价修复原则】\n`
-    + `1. 世界观（world_setting / world_rule）一旦建立就是作品地基，任何自动生成、审查、修复、RAG 回填都不得修改世界观；发现冲突时必须改其它资料。\n`
+    + `1. 世界机制、既成事实、确定成果与代价是不可修改的Canon（world_setting / world_rule）。仅AUTH-004允许创建阶段、无已保存正文时，严格隔离两个混合字段里的未执行且未锁定方法片段；其它世界字段永不自动修改。没有独立证据证明例外成立就阻断。\n`
     + `2. 已经发生且已接受的正文事实尽量保持不动；未来卷纲/章纲/伏笔/时间线属于可调整计划，只要不触碰世界观与已确认故事核心，应优先让未来计划衔接已经发生的历史。\n`
     + `3. 其它冲突不按“为了通过 Gate 就重写整层”的方式处理。必须优先选择影响范围最小、修改单元最少、下游依赖最少、可局部圆回的资料；通常优先级为派生摘要/RAG → 未接受草稿 → 当前或未来 ChapterPlan → 局部伏笔/时间线/角色状态 → 卷/全书骨架。\n`
     + `4. Creative Constitution / confirmedStory 代表作者已经确认的创作方向，自动流程不得为了迁就下层内容反向改写；若它与不可自动修改的世界观或锁定事实发生真正互斥，必须阻断并要求人工裁决。\n`

@@ -8,7 +8,7 @@ import type { SystemWorkflowRule } from './system-workflow-rule.types';
 /** 连续修复的升级边界；这是流程预算，不是正文质量阈值。 */
 export const UPSTREAM_REPAIR_ROUTING_LIMITS = { sameFamilyAfterAttempts: 1, maxLocalAttemptsBeforeDiagnosis: 2, maxSourceRepairModelCalls: 3 } as const;
 export const UPSTREAM_REPAIR_ROUTING_POLICY = '同类缺陷经局部修复仍存在、问题集合增长或局部修复进入连续循环时，先回查章节合同、上下文装配、生成执行与审查协议，再决定处理阶段。不得只因有局部改善持续下游修复；上游诊断必须引用本次输入与正文证据，不能把猜测当已确认源冲突。诊断未完成时保留草稿与原质量结论；修改已确认上游事实须按原作者确认与锁定规则处理，不能自动重写正文或回写Canon。质量候选回滚时须同时显示原稿保留与候选复检的实际阻断或未知维度，不只重复修复前的旧缺陷。失败候选的事实不得进入Canon，其必要条件诊断须作为只读反馈传给下一次源头修订，依赖未通过的候选仅在内存继续修订，锚点取本轮候选位置目录，原Canon作为提交原值校验基线；整体复检通过后才原子提交。原因相同的必要依赖修改一起保留，只有显式声明的互斥备选组才做成本择一；相同或无变化候选不重复复检。每个源头修订任务共用物理模型调用预算，扩容、网络恢复和协议纠错不能重置预算；耗尽或候选复检仍失败时如实停止，不能把停止当验收成功。';
-export const SYSTEM_WORKFLOW_RULESET_VERSION = 190;
+export const SYSTEM_WORKFLOW_RULESET_VERSION = 191;
 /** Default language acceptance floor; project score policy remains explicitly configurable. */
 export const DEFAULT_LANGUAGE_SCORE_FLOOR = 70;
 
@@ -38,7 +38,7 @@ export const FICTION_NAMING_POLICY = {
   narrativeFields: ['title', 'alternateTitles', 'workingTitle', 'storyCore', 'protagonistSituation', 'openingEvent', 'activeChoice', 'escalation', 'reversalEffect', 'payoff', 'irreplaceableCarrier', 'secondOrderConsequence', 'readerQuestion', 'differentiation', 'hook', 'description', 'setting', 'protagonist', 'characters', 'coreConflict', 'conflict', 'uniquePoint', 'uniqueSelling', 'mainReversal', 'ending', 'noveltyProof', 'scopeBreakdown'],
 } as const;
 
-export const CROSS_STAGE_REVIEW_POLICY = '先区分已发生事实、已授权世界机制、作者显式锁定的硬性方法与尚未发生的解决计划。ending、endingDirection、人物arc等字段中的未来方法没有单独锁定且缺少必要能力依据时，不是必须还原的世界规则或已发生事实；可在未执行计划中选择有现有权限与条件的等效路径，保留已确认角色、关键事件、各阶段承诺的成果、结局结果与代价。已确认scopeBreakdown的outcome须逐项核对候选的实际行动与结果；合法等效手段不能把确定成果降成嫌疑、申请或希望，条件不足须修订上游取得路径，不能删除兑现或仅列为建议，不赋予新能力，不改已发生事实。原方法确有缺口仍记录并修订，不以原方案文本自证能力；合法替代方法与原意图不同本身不构成事实互斥，但所有当前执行描述与依赖必须同步，未同步仍阻断。跨模块审查只将已确认事实互斥、下层改变上层规则、改写主线或结局的无关剧情列为阻断。contradictions必须说明互斥来源、字段、原文和因果影响；unrelatedInventions必须指出新增事实的来源字段与原文、违反的已确认边界及主线影响。基准没有逐项列出某个背景细节，不等于该细节违背基准；截断显示不等于完整资料缺失。重复建模、别名、未被当前章纲使用但不改变故事的背景地点或资料冗余放warnings，不强制每个地图点都成为独立场景。新增动机或推定真相若改变已确认人物选择、因果或揭示安排仍阻断，不得借warnings放行。consistent当且仅当两个阻断数组均为空、固定阶段兑现清单也全部保留时为true；结论与数组互斥是评审协议错误，先纠正评审，不据此修订Canon。世界观只作为冻结参照，不得通过删除世界观条目来消除整理建议。';
+export const CROSS_STAGE_REVIEW_POLICY = '先区分已发生事实、已授权世界机制、作者显式锁定的硬性方法与尚未发生的解决计划。ending、endingDirection、人物arc等字段中的未来方法没有单独锁定且缺少必要能力依据时，不是必须还原的世界规则或已发生事实；可在未执行计划中选择有现有权限与条件的等效路径，保留已确认角色、关键事件、各阶段承诺的成果、结局结果与代价。已确认scopeBreakdown的outcome须逐项核对候选的实际行动与结果；合法等效手段不能把确定成果降成嫌疑、申请或希望，条件不足须修订上游取得路径，不能删除兑现或仅列为建议，不赋予新能力，不改已发生事实。原方法确有缺口仍记录并修订，不以原方案文本自证能力；合法替代方法与原意图不同本身不构成事实互斥，但所有当前执行描述与依赖必须同步，未同步仍阻断。跨模块审查只将已确认事实互斥、下层改变上层规则、改写主线或结局的无关剧情列为阻断。contradictions必须说明互斥来源、字段、原文和因果影响；unrelatedInventions必须指出新增事实的来源字段与原文、违反的已确认边界及主线影响。基准没有逐项列出某个背景细节，不等于该细节违背基准；截断显示不等于完整资料缺失。重复建模、别名、未被当前章纲使用但不改变故事的背景地点或资料冗余放warnings，不强制每个地图点都成为独立场景。新增动机或推定真相若改变已确认人物选择、因果或揭示安排仍阻断，不得借warnings放行。consistent当且仅当两个阻断数组均为空、固定阶段兑现清单也全部保留时为true；结论与数组互斥是评审协议错误，先纠正评审，不据此修订Canon。世界机制、已发生事实、已确认阶段成果与代价永久冻结。只有创建阶段尚无已保存正文时，世界混合字段中的未执行且未单独锁定的方法计划才可与章纲及后续状态组成同一候选，并只在已存在的constraints.endingDirection和worldProfiles.ending的单个方法段修订；其余句段逐字保留，所有固定边界经独立核对且完整候选通过后才能事务落库与重读，缺失来源或边界不清时阻断；不得通过删除世界观条目来消除整理建议。';
 
 export const STORY_ENTITY_MODELING_POLICY = '只按既定事件链实际需要建模，不设地点或组织数量配额。factions/organizations只收录真实的集体、机构或有组织关系的势力；当户、旧事相关人等单个人物身份只放characters，不把个人复制成独立组织。没有独立势力时factions返回空数组；locations只列故事已确认或既定事件必需的地点，不为满足数量补充背景点。已冻结的地点清单仍原名继承，整理建议不能改写世界观。';
 
@@ -118,7 +118,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
   rule({
     id: 'AUTH-004', name: '世界观冻结', category: 'authority', level: 'P0', status: 'active', blocking: true,
     scenarios: ['world_building', 'outline', ...WRITING_SCENES], consumers: ['prompt', 'repair', 'persistence'], dependencies: ['AUTH-002'],
-    summary: '当前产品规则下，首次通过并写入的世界观被冻结，不作为自动修复目标。',
+    summary: '世界机制、已发生事实、固定成果及代价冻结；仅创建阶段无已保存正文的未锁定未来方法，允许在两个指定方法字段的单句段受限替换，完整候选通过后事务提交。',
     implementationRefs: ['server/src/modules/canon', 'server/src/chain/chain.controller.ts'],
     directives: { repair: '世界观不作为自动修复目标；与其冲突且无法安全局部修复时阻断并人工裁决。' },
   }),

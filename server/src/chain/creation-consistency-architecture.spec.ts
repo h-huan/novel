@@ -51,7 +51,8 @@ describe('creation consistency architecture invariants', () => {
     expect(patchSource).not.toMatch(/\bworld\s*:\s*['"]world_settings['"]/);
     expect(patchSource).not.toMatch(/\bworldProfile\s*:\s*['"]world_system_profiles['"]/);
     expect(controllerSource).not.toContain('entityType":"world|worldProfile|');
-    expect(controllerSource).toContain('entityType":"character|organization|mapPoint|chapter|foreshadowing');
+    expect(controllerSource).toContain('crossStageRepairAnchorView(visibleRepairAnchors)');
+    expect(controllerSource).toContain('CROSS_STAGE_PATCH_TABLE_MAP');
   });
 
   it('reviews an in-memory minimum-impact candidate before any cross-stage Canon commit', () => {
