@@ -188,6 +188,11 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(describeCrossStagePatchValidation({patches:[{entityType:'worldProfilePlan',entityId:'wp',field:'rules',match:'世界规则冻结',replacement:'取消限制'}]},bundle).length).toBeGreaterThan(0);
     const promises={worldPlanChecks:[{ref:'WP1',status:'future_method_only',reason:'仅在尚未执行的路径中调整取得方式，固定事实仍不变化',beforeEvidence:'私自调取档案',afterEvidence:'经授权查验档案',protected:{mechanism:'preserved',history:'preserved',lockedMethod:'preserved',outcome:'preserved',cost:'preserved'}}]};
     expect(describeWorldPlanReviewValidation(promises,[{ref:'WP1',before:old,after:next}])).toEqual([]);
+    // Two separate repair rounds may each change one clause. The cumulative
+    // plan must still be rejected when they modify multiple clauses overall.
+    const multi=JSON.stringify({rule:'触发代价不变',
+      endingDirection:'固定成果：获得证据。新方法：经授权查验档案。追加方法：绕过核验。代价：失去职位。'});
+    expect(describeWorldPlanReviewValidation(promises,[{ref:'WP1',before:old,after:multi}]).length).toBeGreaterThan(0);
     expect(describeWorldPlanReviewValidation({...promises,worldPlanChecks:[]},[{ref:'WP1',before:old,after:next}]).length).toBeGreaterThan(0);
     expect(describeWorldPlanReviewValidation({worldPlanChecks:[{...promises.worldPlanChecks[0],protected:{...promises.worldPlanChecks[0].protected,outcome:'unknown'}}]},[{ref:'WP1',before:old,after:next}]).length).toBeGreaterThan(0);
   });
