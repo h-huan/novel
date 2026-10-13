@@ -4,7 +4,7 @@ describe('chapter review retry provenance', () => {
   it('keeps one complete predecessor and authoritative review inputs after repeated context assembly',async()=>{
     const {ChainController}=await import('./chain.controller');const c=Object.create(ChainController.prototype) as any;
     const previous={id:'prior',chapter_index:1,title:'前章',content:'前章真实正文。'.repeat(2500)};
-    c.db={getDb:()=>({prepare:()=>({get:()=>previous})})};
+    c.db={getDb:()=>({prepare:()=>({get:()=>previous,all:()=>[]})})};
     const once=c.previousChapterReviewContext('p',2,'背景材料'.repeat(5000));
     const world='完整世界规则。'.repeat(3000)+'末尾实际冻结答案';
     const envelope=JSON.stringify({storyContext:once,reviewWorldContext:world,timePlanDirective:'已核对时间计划'});
@@ -12,6 +12,7 @@ describe('chapter review retry provenance', () => {
     expect(third).toBe(twice);const parsed=JSON.parse(third);
     expect(parsed.previousChapter).toEqual([{...previous,complete:true}]);expect(parsed.storyContext).toHaveLength(14000);
     expect(parsed.storyContext).not.toContain('previousChapter');expect(parsed.reviewWorldContext).toBe(world);expect(parsed.timePlanDirective).toBe('已核对时间计划');
+    expect(parsed.historicalChapters).toEqual([]);
     c.db={getDb:()=>({prepare:()=>({get:()=>undefined})})};
     const missing=JSON.parse(c.previousChapterReviewContext('p',2,envelope));expect(missing.previousChapter).toEqual([]);expect(missing.reviewWorldContext).toBe(world);
     c.worldSettingService={findByProjectId:()=>[{id:'w'}],getWritingSummary:()=>({summary:'已脱敏创作摘要',profile:{rules:'普通钥匙可以开门。',ending:'最后把对手困住。'}})};
@@ -77,4 +78,22 @@ it('uses one persisted row for retry parameters and rejects invalid API provenan
  const {ChainController}=await import('./chain.controller');const {vi}=await import('vitest');const c=Object.create(ChainController.prototype) as any;const run={project_id:'p',chapter_index:1,stage:'chapter',scenario:'writing',output_text:'留存正文'};const get=vi.fn(()=>run);c.db={getDb:()=>({prepare:()=>({get})})};
  expect(c.chapterRetryParameters(undefined,'p',1,'章纲')).toEqual({});expect(get).not.toHaveBeenCalled();expect(c.chapterRetryParameters('r','p',1,'章纲').initialContent).toBe('留存正文');expect(get).toHaveBeenCalledTimes(1);
  try{c.chapterRetryParameters('r','other',1,'章纲');throw Error('should fail');}catch(error:any){expect(error.getStatus()).toBe(400);}
+});
+
+
+it('preserves separate complete historical evidence across repeated assembly without replacing the latest state',async()=>{
+ const {ChainController}=await import('./chain.controller');const {vi}=await import('vitest');
+ const c=Object.create(ChainController.prototype) as any;
+ const latest={id:'two',chapter_index:2,title:'第二章',content:'现在他在医院。'};
+ const earlier={id:'one',chapter_index:1,title:'第一章',content:'昨天他在门厅接电话。'};
+ const all=vi.fn(()=>[earlier]);
+ c.db={getDb:()=>({prepare:()=>({get:()=>latest,all})})};
+ const first=c.previousChapterReviewContext('p',3,'背景');
+ const second=c.previousChapterReviewContext('p',3,JSON.stringify({storyContext:first,reviewWorldContext:'冻结规则'}));
+ const parsed=JSON.parse(second);
+ expect(parsed.previousChapter).toEqual([{...latest,complete:true}]);
+ expect(parsed.historicalChapters).toEqual([{...earlier,complete:true}]);
+ expect(parsed.storyContext).toBe('背景');expect(parsed.reviewWorldContext).toBe('冻结规则');
+ expect(all).toHaveBeenCalledWith('p',2,'');
+ expect(c.previousChapterReviewContext('p',3,second)).toBe(second);
 });

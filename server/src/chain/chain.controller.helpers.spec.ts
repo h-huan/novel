@@ -945,7 +945,7 @@ describe('immediate chapter evidence at production boundaries', () => {
     const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);
     const content='开头'.repeat(1500)+'她没有取得通行许可。'+'结尾'.repeat(1500);
     const get=vi.fn().mockReturnValue({id:'prior',chapter_index:1,title:'前章',content});
-    controller.db={getDb:()=>({prepare:vi.fn().mockReturnValue({get})})};
+    controller.db={getDb:()=>({prepare:vi.fn().mockReturnValue({get,all:()=>[]})})};
     const context=controller.previousChapterReviewContext('p',2,'背景'.repeat(10000));
     const parsed=JSON.parse(context);
     expect(parsed.previousChapter[0]).toMatchObject({content,complete:true});
@@ -988,7 +988,7 @@ describe('cross-chapter boundary enforcement', () => {
   it('uses an independent small continuity report and blocks a false aggregate PASS', async () => {
     const controller=applyStandardsStub(Object.create(ChainController.prototype) as any),base=standardsDbStub();
     const prior='他们初次在一楼大堂见面。',body='昨夜他在302室第一次见到那个人。';
-    controller.db={getDb:()=>({prepare:(sql:string)=>sql.includes('FROM chapters')?{get:()=>({id:'prior',chapter_index:1,title:'前章',content:prior})}:base.prepare(sql)})};
+    controller.db={getDb:()=>({prepare:(sql:string)=>sql.includes('FROM chapters')?{get:()=>({id:'prior',chapter_index:1,title:'前章',content:prior}),all:()=>[]}:base.prepare(sql)})};
     const verdict={...passVerdict,sourceQualityAudit:{version:1,checks:{...passVerdict.sourceQualityAudit.checks,continuity:{status:'supported',evidence:body,basisSource:'context',basisEvidence:prior,reason:'初次相见的动作相同却忽略了具体地点'}}}};
     controller.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify(verdict)}).mockResolvedValueOnce({content:JSON.stringify({claimChecks:[{ref:'C1',status:'conflict',basisEvidence:prior,reason:'首次相见的房间与已确认前章大堂地点冲突'}]})})};
     const result=await controller.checkChapterAlignment({projectId:'p',chapterIndex:2,chapterTitle:'次章',outlineContract:'有效详细大纲'.repeat(30),storyContext:'背景',content:body});
