@@ -174,3 +174,24 @@ describe('spoken adjacent duration numbers',()=>{
   const result=validateTemporalReview({status:'evaluated',checks},catalog,body);expect(result.errors).toEqual([]);expect(result.issues.length>0).toBe(conflict);
  });
 });
+
+
+it('preserves approximate suffixes across duration units without claiming exact arithmetic',()=>{
+ for(const [text,minutes] of [['七个钟头上下',420],['30分钟上下',30],['十秒上下',1/6]] as const){
+  expect(temporalNumbers(text).durations[0]).toMatchObject({original:text,minutes,operator:'unknown'});
+ }
+ expect(temporalNumbers('七个钟头').durations[0]).toMatchObject({operator:'eq',minutes:420});
+});
+
+
+describe('relative-day and day-phase review coverage',()=>{
+ it('includes relative-day events without numeric clocks or period suffixes',()=>{
+  const body='前天我在门口，你怎么知道的。\n昨天的配送授权到头了。\n前天你在楼上待过。';
+  const catalog=temporalReviewCatalog(body);expect(catalog.map(row=>row.evidence)).toEqual(body.split('\n'));
+  expect(catalog.every(row=>row.clocks.length===0 && row.durations.length===0)).toBe(true);
+ });
+ it('includes explicit day-phase changes without inventing exact clock boundaries',()=>{
+  const catalog=temporalReviewCatalog('天刚亮透，他出了门。\n已经下午了。\n普通动作。');
+  expect(catalog).toHaveLength(2);expect(catalog.every(row=>row.clocks.length===0)).toBe(true);
+ });
+});

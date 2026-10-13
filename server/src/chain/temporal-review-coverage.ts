@@ -15,14 +15,14 @@ function timeNumber(text: string): number {
 export function temporalNumbers(evidence: string) {
   const number = '[零〇一二两三四五六七八九十百千\\d]+(?:\\.\\d+)?';
   const durations: Array<{ original: string; minutes: number; minuteBounds?:{min:number;max:number}; operator: 'eq'|'lt'|'le'|'gt'|'ge'|'unknown' }> = [];
-  const pattern = new RegExp(`(不到|不足|未满|不超过|至多|至少|不少于|超过|大约|大概|约|近|将近|差不多)?(${number})(?:来)?(?:个)?(多)?(小时|钟头|分钟|秒钟|秒)(不到|以内|以上|左右)?`, 'g');
+  const pattern = new RegExp(`(不到|不足|未满|不超过|至多|至少|不少于|超过|大约|大概|约|近|将近|差不多)?(${number})(?:来)?(?:个)?(多)?(小时|钟头|分钟|秒钟|秒)(不到|以内|以上|左右|上下)?`, 'g');
   for (const match of evidence.matchAll(pattern)) {
     const n = timeNumber(match[2]); if (!Number.isFinite(n) || n < 0) continue;
     const operator = ['不到','不足','未满'].includes(match[1]) || match[5] === '不到' ? 'lt'
       : ['不超过','至多'].includes(match[1]) || match[5] === '以内' ? 'le'
       : ['至少','不少于'].includes(match[1]) || match[5] === '以上' ? 'ge'
       : match[1] === '超过' || match[3] ? 'gt'
-      : ['约','大约','大概','近','将近','差不多'].includes(match[1]) || match[5] === '左右' || match[0].includes('来') ? 'unknown' : 'eq';
+      : ['约','大约','大概','近','将近','差不多'].includes(match[1]) || ['左右','上下'].includes(match[5]) || match[0].includes('来') ? 'unknown' : 'eq';
     const unit=['小时','钟头'].includes(match[4])?60:match[4]==='分钟'?1:1/60;
     // Consecutive Chinese numbers before a time unit mean a spoken range, not decimal concatenation.
     const pair=/^(?:一两|两三|二三|三四|四五|五六|六七|七八|八九)$/.test(match[2])?[...match[2]].map(timeNumber):null;
@@ -56,7 +56,7 @@ export function temporalNumbers(evidence: string) {
 /** Locates review material; it does not infer event identity or block from keywords. */
 export function temporalReviewCatalog(content: string) {
   const numericTime = /(?:[零〇一二两三四五六七八九十百千\d]+(?:\.[\d]+)?(?:来)?(?:个)?(?:多)?(?:小时|钟头|分钟|秒钟|秒|年|个月|天|日|点|时)|\d{1,2}[:：]\d{2})/;
-  return content.split(/\r?\n/).map(s => s.trim()).filter(s => s && (numericTime.test(s)||/(?:今天|今日|明天|明日|后天|昨天|昨日|前天)(?:凌晨|清晨|清早|早上|上午|中午|下午|傍晚|晚上|夜里)/.test(s)))
+  return content.split(/\r?\n/).map(s => s.trim()).filter(s => s && (numericTime.test(s)||/(?:今天|今日|明天|明日|后天|昨天|昨日|前天)|(?:天刚亮|天没亮|天亮了|过了中午|已经下午|入夜)/.test(s)))
     .map((evidence, i) => {const numbers=temporalNumbers(evidence);return { id: `T${i + 1}`, evidence, ...numbers, clocks:numbers.clocks.map((clock,j)=>({...clock,id:`T${i+1}:C${j+1}`})), digitalClocks:numbers.countdowns.map((read,j)=>({id:`T${i+1}:D${j+1}`,original:read.original,minutes:read.seconds/60,minuteOptions:[read.seconds/60],precisionSeconds:1,readingIndex:j})).filter(clock=>clock.minutes<1440) };});
 }
 

@@ -81,3 +81,15 @@ it('does not turn a spoken duration range into an invented precise plan baseline
  expect(()=>validateChapterTimePlan({timers:[{id:'期限',basisEvidence:'倒计时一两小时',initialSeconds:3600,steps:[{eventEvidence:'她离开。',elapsedSeconds:0}]}]},'倒计时一两小时。她离开。')).toThrow('初值与章纲期限不符');
  expect(chapterTimePlanRequest('倒计时还剩二十四小时。','')).not.toBeNull();
 });
+
+
+it('leaves suffix-qualified remaining time to semantic review without a paid precise plan',()=>{
+ expect(chapterTimePlanRequest('倒计时还剩十来个小时。她离开。倒计时还剩七个钟头上下。','')).toBeNull();
+ expect(chapterTimePlanRequest('倒计时还剩七个钟头。她离开。','')).not.toBeNull();
+ expect(()=>validateChapterTimePlan({timers:[{id:'期限',basisEvidence:'倒计时还剩七个钟头上下',initialSeconds:25200,steps:[{eventEvidence:'她离开。',elapsedSeconds:0}]}]},'倒计时还剩七个钟头上下。她离开。')).toThrow('初值与章纲期限不符');
+});
+
+ it('does not reuse an exact duration elsewhere as an approximate current countdown',()=>{
+    expect(chapterTimePlanRequest('赶路十分钟。倒计时还剩十分钟上下。','')).toBeNull();
+    expect(chapterTimePlanRequest('赶路十分钟。倒计时还剩十分钟以内。','')).toBeNull();
+  });

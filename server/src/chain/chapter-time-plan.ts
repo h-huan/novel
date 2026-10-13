@@ -10,7 +10,7 @@ function currentCountdownBases(text: string): number[] {
     const escaped = q.original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // Restrict the connection to an explicit display/remaining-value statement;
     // do not match a retrospective window such as “倒推出24小时里的记录”.
-    return new RegExp('(?:倒计时(?:显示|还剩|剩余|剩|还有|为|是|初值为|当前值为|仅剩|只有|：|:|\\s)*' + escaped + '|' + escaped + '\\s*(?:的)?倒计时)').test(text);
+    return new RegExp('(?:倒计时(?:显示|还剩|剩余|剩|还有|为|是|初值为|当前值为|仅剩|只有|：|:|\\s)*' + escaped + '(?!上下|左右|不到|以内|以上)|' + escaped + '\\s*(?:的)?倒计时)').test(text);
   }).map(q => q.seconds);
 }
 export function chapterTimePlanRequest(outline: string, context: string) {

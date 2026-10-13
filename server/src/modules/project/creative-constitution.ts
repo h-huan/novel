@@ -315,7 +315,14 @@ export function buildExecutionStandard(
   const categoryRequirement = (() => {
     const base = '事件类型、场景与冲突必须落在「' + c.category + '」范围内，不得混入该分类之外的题材机制';
     if (categoryResolution.status === 'no_tree') {
-      return base + '；「' + c.category + '」的投稿后台分类归属未核验（不得臆造平台分类，也不得套用其他平台的分类）；该分类实际体量分布未核验，不得编造数字，也不得套用其他分类的区间';
+      const scope = Object.fromEntries(['angle', 'description', 'setting'].flatMap(key => {
+        const value = c.confirmedStory?.[key];
+        return typeof value === 'string' && value.trim() ? [[key, value.trim()]] : [];
+      }));
+      const unknown = '「' + c.category + '」的投稿后台分类归属和官方定义未核验（不得臆造平台分类，也不得套用其他平台的分类）；该分类实际体量分布未核验，不得编造数字，也不得套用其他分类的区间';
+      return Object.keys(scope).length
+        ? unknown + '；本维可执行判据为作者已确认的题材定位：' + JSON.stringify(scope) + '。逐项核对本章事件类型、场景和冲突机制是否延续该定位，不改已确认设定、不凭分类标签补题材机制；可对这份作者定位给出证据化评分，评分不代表平台官方分类归属、定义或体量已核验。'
+        : base + '；' + unknown;
     }
     if (categoryResolution.status === 'unmapped') {
       return base + '；警告：该分类未在' + platformLabel + '的投稿分类中归位（' + categoryResolution.reason + '）';

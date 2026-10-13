@@ -27,7 +27,7 @@ export function parseWholeReviewJson(raw:string):any {
  return value;
 }
 
-/** Recover only the observed missing dimensions-closing brace before issues.
+/** Recover only the observed missing dimensions-closing brace before issues or repairs.
  * No values, findings or incomplete strings are repaired or discarded. */
 export function parseScoreReviewJson(raw: string): { value: any; normalized: boolean } {
  let value: any, normalized = false;
@@ -40,7 +40,7 @@ export function parseScoreReviewJson(raw: string): { value: any; normalized: boo
    if (char === '"') { quoted = true; continue; }
    if (char === '{' || char === '[') depth++;
    else if (char === '}' || char === ']') depth--;
-   else if (char === ',' && depth === 2 && /^,\s*"issues"\s*:/.test(raw.slice(i))) {
+   else if (char === ',' && depth === 2 && /^,\s*"(?:issues|repairs)"\s*:/.test(raw.slice(i))) {
     candidate = raw.slice(0, i) + '}' + raw.slice(i); break;
    }
   }
@@ -51,10 +51,10 @@ export function parseScoreReviewJson(raw: string): { value: any; normalized: boo
   || !value.dimensions || typeof value.dimensions !== 'object' || Array.isArray(value.dimensions)) {
   throw new Error('评审协议无效：必须返回 dimensions 评分对象及顶层问题清单');
  }
- if (Object.prototype.hasOwnProperty.call(value.dimensions, 'issues')) {
-  if (!Array.isArray(value.dimensions.issues) || value.issues !== undefined) throw new Error('评审协议无效：问题清单层级冲突');
-  value.issues = value.dimensions.issues;
-  delete value.dimensions.issues;
+ for(const key of ['issues','repairs']) if (Object.prototype.hasOwnProperty.call(value.dimensions, key)) {
+  if (!Array.isArray(value.dimensions[key]) || value[key] !== undefined) throw new Error('评审协议无效：问题或补丁清单层级冲突');
+  value[key] = value.dimensions[key];
+  delete value.dimensions[key];
   normalized = true;
  }
  return { value, normalized };

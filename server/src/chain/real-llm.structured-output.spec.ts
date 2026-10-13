@@ -738,3 +738,12 @@ describe('RealLLMService structured output guard', () => {
     expect(callModel.mock.calls.map(call => call[4])).toEqual([4096, 8192, 16384]);
   });
 });
+
+ it('preserves scores and repairs when the dimensions closing brace is missing', () => {
+  const dimensions={category:{score:88,reason:'作者确认定位',evidence:['同一原文']}};
+  const repairs=[{index:0,evidenceAnchorId:'body:p1'}];
+  const malformed=JSON.stringify({dimensions}).slice(0,-2)+',"repairs":'+JSON.stringify(repairs)+'}';
+  expect(parseScoreReviewJson(malformed)).toEqual({value:{dimensions,repairs},normalized:true});
+  expect(() => parseScoreReviewJson(malformed.slice(0,-3))).toThrow();
+  expect(() => parseScoreReviewJson(JSON.stringify({dimensions:{...dimensions,repairs},repairs:[]}))).toThrow();
+ });

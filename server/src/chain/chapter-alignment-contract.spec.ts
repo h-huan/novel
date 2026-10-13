@@ -105,3 +105,11 @@ it('recognizes an actual elevator arrival display without demanding a repeated f
  expect(validateChapterObligationReview([{...row,evidence:body.split('\n\n')}],catalog,body).errors).toEqual([]);
  for(const text of ['她按了14，准备等电梯。','如果数字跳到14，电梯停稳，她就出去。','数字跳到14，电梯将会停稳。','屏幕数字跳到14，订单停稳了。','数字跳到14分钟，电梯停稳。'])expect(validateChapterObligationReview([{...row,evidence:[text]}],catalog,text).errors.join('')).toContain('明确楼层');
 });
+
+ it('does not turn a demonstrative relationship layer into floor one', async()=>{
+    const {validateChapterObligationReview}=await import('./chapter-alignment-contract');
+    const body='她借钱给他，双方说好以后还。';
+    const row={ref:'M1',status:'covered',evidence:[body],reason:'实际借款与归还约定完成双方关系变化'};
+    expect(validateChapterObligationReview([row],[{ref:'M1',source:'同盟在钱这一层上落地。'}],body).errors).toEqual([]);
+    expect(validateChapterObligationReview([row],[{ref:'M1',source:'她借钱给他，随后到达一层。'}],body).errors).toContain('M1行动证据未覆盖章纲明确楼层；到楼下或他人到达不能代替本人到达');
+  });

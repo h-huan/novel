@@ -172,3 +172,16 @@ describe('constitution persistence across restart and edits', () => {
     expect(constitutionSettings(edited, readConstitution({ settings: edited })).ideaDiscoveryAudit).toEqual(audit);
   });
 });
+
+ it('keeps platform classification unknown while evaluating an explicitly confirmed story scope',()=>{
+    const c=readConstitution({type:'short_story',target_platform:'fanqie',settings:{category:'男频脑洞'}});
+    const absent=buildExecutionStandard(c).dimensions.find(d=>d.dimension==='category')!;
+    expect(absent.requirement).not.toContain('本维可执行判据为作者已确认');
+    c.confirmedStory={title:'测试',setting:'远洋船上，矛盾只来自船员交换身份，没有时间回溯。'};
+    const present=buildExecutionStandard(c).dimensions.find(d=>d.dimension==='category')!;
+    expect(present.requirement).toContain('远洋船上');
+    expect(present.requirement).toContain('官方定义未核验');
+    expect(present.requirement).toContain('评分不代表平台官方分类');
+    c.confirmedStory={title:'测试'};
+    expect(buildExecutionStandard(c).dimensions.find(d=>d.dimension==='category')!.requirement).not.toContain('本维可执行判据为作者已确认');
+  });

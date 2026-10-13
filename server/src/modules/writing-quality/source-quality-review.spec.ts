@@ -430,3 +430,42 @@ it('locates six-axis citations without changing judgments or accepting the wrong
   expect(applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:'body:p1'}],body,sources)).toBe(audit);
   expect(applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:''}],body,sources)).toBe(audit);
 });
+
+ it('uses complete earlier prose for explicit recollections but not current state', () => {
+    const older='“不要逞强。”她说。', latest='她已经离开城镇。';
+    const context=JSON.stringify({previousChapter:[{complete:true,content:latest}],historicalChapters:[{complete:true,content:older}]});
+    const body='“不要逞强，上回我就说过。”她说。';
+    const f=fixture(body);
+    (f.audit.checks as any).continuity={status:'supported',evidence:body,basisSource:'context',basisEvidence:older,reason:'回溯原话有已保存早期章节完整依据',claimChecks:[{ref:'C1',status:'consistent',basisEvidence:older,reason:'早期原话可核对明确的上回回忆'}]};
+    expect(validateSourceQualityReview(f.audit,f.goals,body,{context}).errors.filter(e=>e.includes('continuity')||e.includes('C1'))).toEqual([]);
+    const current='昨天她留在城镇，如今仍在城镇。',g=fixture(current);
+    (g.audit.checks as any).continuity={...f.audit.checks.continuity,evidence:current};
+    expect(validateSourceQualityReview(g.audit,g.goals,current,{context}).errors).toContain('C1前序声称缺少实际前章对照依据');
+    const incomplete=context.replace('"complete":true,"content":"“不要逞强。”她说。"','"complete":false,"content":"“不要逞强。”她说。"');
+    expect(validateSourceQualityReview(f.audit,f.goals,body,{context:incomplete}).verified).toBe(false);
+  });
+
+ it('does not interpret a material layer as a building floor',()=>{
+    const body='昨天汤里结了一层油。',prior='他把昨天的汤放在桌上。',f=fixture(body);
+    const context=JSON.stringify({previousChapter:[{complete:true,content:prior}]});
+    (f.audit.checks as any).continuity={status:'supported',evidence:body,basisSource:'context',basisEvidence:prior,reason:'已核对昨天留下的汤与当前回忆一致',claimChecks:[{ref:'C1',status:'consistent',basisEvidence:prior,reason:'原文确有昨日留下汤而没有虚构楼层'}]};
+    expect(validateSourceQualityReview(f.audit,f.goals,body,{context}).errors.filter(e=>e.includes('楼层'))).toEqual([]);
+  });
+
+ it('can cite an older recorded statement without treating that record as the latest state',()=>{
+    const prior='现在这条工单已关闭。',older='昨天发现一笔异常记录。',body='回执上面写着昨天发现一笔异常记录。',f=fixture(body);
+    const context=JSON.stringify({previousChapter:[{complete:true,content:prior}],historicalChapters:[{complete:true,content:older}]});
+    (f.audit.checks as any).continuity={status:'supported',evidence:body,basisSource:'context',basisEvidence:older,reason:'本章引用先前回执原文而非声称当前工单状态',claimChecks:[{ref:'C1',status:'consistent',basisEvidence:older,reason:'原话属于过去记录，可用早期完整正文定位'}]};
+    expect(validateSourceQualityReview(f.audit,f.goals,body,{context}).errors.filter(e=>e.includes('C1'))).toEqual([]);
+  });
+
+ it('uses earlier full prose for an explicitly dated call while keeping present state on the latest chapter',()=>{
+  const older='他昨晚在一楼门厅接了电话。',prior='他如今已在医院。';
+  const context=JSON.stringify({previousChapter:[{complete:true,content:prior}],historicalChapters:[{complete:true,content:older}]});
+  const body='昨晚他在一楼门厅接了电话。',f=fixture(body);
+  (f.audit.checks as any).continuity={status:'supported',evidence:body,basisSource:'context',basisEvidence:older,reason:'明确回指昨晚同一通话事件，来源为完整已保存历史',claimChecks:[{ref:'C1',status:'consistent',basisEvidence:older,reason:'同一旧通话的地点与行动均有完整历史依据'}]};
+  expect(validateSourceQualityReview(f.audit,f.goals,body,{context}).errors.filter(e=>e.includes('C1'))).toEqual([]);
+  const current='昨晚他在一楼门厅，如今仍在一楼门厅。',g=fixture(current);
+  (g.audit.checks as any).continuity={...f.audit.checks.continuity,evidence:current};
+  expect(validateSourceQualityReview(g.audit,g.goals,current,{context}).errors).toContain('C1前序声称缺少实际前章对照依据');
+ });

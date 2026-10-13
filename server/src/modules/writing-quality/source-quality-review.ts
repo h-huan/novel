@@ -29,7 +29,7 @@ export async function reviewFixedSourceChecklist<T extends {id:string},R extends
 
 /** Contract ownership is QLT-003. This checks coverage/evidence, not semantic truth. */
 export const SOURCE_QUALITY_AXES = ['promise', 'continuity', 'agency', 'professional', 'progression', 'voice'] as const;
-export const CONTINUITY_EVIDENCE_CONTRACT = CONTINUITY_SCOPE_POLICY + '有previousChapter时，continuity的supported也必须引用context中紧邻前章完整正文的basisEvidence；逐项对照本章对过去事件、人物所知、位置及权限等状态的声称，不用本章回忆或章纲当作前章事实。只有摘要或中段省略而没有完整前章时标unknown，不宣称核对完成。';
+export const CONTINUITY_EVIDENCE_CONTRACT = CONTINUITY_SCOPE_POLICY + '有previousChapter时，continuity的supported也必须引用context中已保存前序完整正文的basisEvidence；逐项对照本章对过去事件、人物所知、位置及权限等状态的声称，不用本章回忆或章纲当作前章事实。明确回溯的旧事件或原话可引用historicalChapters中的完整已保存正文；当前状态仍以紧邻前章为准，旧状态不得覆盖新状态。只有摘要或中段省略而没有完整前章时标unknown，不宣称核对完成。';
 export function continuityClaimCatalog(content: string) {
   return [...new Set(content.split(/\r?\n/).map(row=>row.trim()).filter(row=>/(?:昨天|昨日|昨夜|昨晚|上次|上回|前一天|前章|此前|之前|第一次)/.test(row)))]
     .map((evidence,index)=>({ref:'C'+(index+1),evidence,requiresPrior:/(?:昨天|昨日|昨夜|昨晚|上次|上回|前一天|前章)/.test(evidence)}));
@@ -39,12 +39,12 @@ export function continuityClaimReviewDirective(content: string, refs?: string[])
     +'。有前章时sourceQualityAudit.checks.continuity.claimChecks返回清单每个C编号恰一条：{ref,status:"consistent|conflict|new_information|not_prior|unknown",basisEvidence:"对应来源连续逐字原文",reason:"至少8字具体比较"}。consistent和conflict须用前章原文对照该条具体声称的主体、行为、地点、时点与肯定/否定状态，不能只引正确的一半或另一条回忆证明此条；冲突如实返回conflict，地点不同不能因同为“打量”忽略。本章首次披露的新增背景、首次取得的历史调查资料或人物请求可new_information，basisEvidence引用本条正文并说明为什么没有改写前章已确认事实；前章已明确的地点、投诉、人物所知等状态不同不得包装为新增信息。requiresPrior=true不得not_prior；其它确属本章内新发生事件可not_prior并解释实际先后。未能核对依据返回unknown，不以摘要或单条记忆概括全部连续性。正文正常省略细节无需补解释段。';
 }
 export function continuityClaimReviewPrompt(content: string, context: string, refs?: string[]) {
-  return '只审查本章前序声称与紧邻前章的实际一致性，不改正文，不补解释，不评其它维度。\n'
+  return '只审查本章前序声称与已保存前序正文的实际一致性。当前状态以紧邻前章为准；明确回溯的旧事件或原话可核对historicalChapters，不能用旧状态覆盖新状态。不改正文，不补解释，不评其它维度。\n'
     +continuityClaimReviewDirective(content,refs)+'\n【实际前章与支持上下文】\n'+context+'\n【本章正文】\n'+content
     +'\n此专项只返回一个合法JSON对象：{"claimChecks":[{"ref":"C编号","status":"consistent|conflict|new_information|not_prior|unknown","basisEvidence":"对应来源连续逐字原文","reason":"至少8字具体比较"}]}。不返回完整章节评审，不输出其它字段。';
 }
 function claimLocationTokens(text: string) {
-  return [...text.matchAll(/(?:\d{3,5})(?=门口|门前|室|号房|房间)|[一二两三四五六七八九十百\d]+(?:楼|层)/g)].map(match=>match[0]);
+  return [...text.matchAll(/(?:\d{3,5})(?=门口|门前|室|号房|房间)|[一二两三四五六七八九十百\d]+(?:楼|层(?=楼|大厅|大堂|走廊|门口|电梯|的|[，。；、！？\s]|$))/g)].map(match=>match[0]);
 }
 export function sourceBoundaryRiskKinds(content:string):string[] {
   const kinds:string[]=[];
@@ -396,16 +396,23 @@ export interface SourceQualityAudit {
   version: 1;
   checks: Record<SourceQualityAxis, SourceQualityRow>;
 }
-function priorChapterEvidence(context: string | undefined): {required:boolean;content:string} {
+function priorChapterEvidence(context: string | undefined): {required:boolean;content:string;historical:string} {
   try {
     const data = JSON.parse(context || '{}');
     const full = (Array.isArray(data.previousChapter) ? data.previousChapter : []).filter((row: any) => row.complete === true && typeof row.content === 'string');
     return { required: Number(data.meta?.chapterIndex) > 1 || full.length > 0 || !!data.recentChapters?.length || data.meta?.truncation?.includes('previousChapter'),
-      content: full.map((row: any) => row.content).join('\n') };
-  } catch { return { required: false, content: '' }; }
+      content: full.map((row: any) => row.content).join('\n'), historical: (Array.isArray(data.historicalChapters)?data.historicalChapters:[]).filter((row:any)=>row.complete===true&&typeof row.content==='string').map((row:any)=>row.content).join('\n') };
+  } catch { return { required: false, content: '', historical: '' }; }
 }
 export function continuityPriorEvidenceAnchors(context:string) {
-  return priorChapterEvidence(context).content.split(/\n\s*\n/).map((text,index)=>({id:'prior:p'+(index+1),text:text.trim()})).filter(row=>row.text);
+  let data:any;try{data=JSON.parse(context||'{}');}catch{return [];}
+  let index=0;
+  return [...(Array.isArray(data.previousChapter)?data.previousChapter:[]),...(Array.isArray(data.historicalChapters)?data.historicalChapters:[])].filter(row=>row.complete===true&&typeof row.content==='string').flatMap((row,chapter)=>row.content.split(/\n\s*\n/).filter((text:string)=>text.trim()).map((text:string)=>({id:'prior:p'+(++index),text:text.trim(),chapter,chapterIndex:row.chapter_index})));
+}
+function continuityClaimPriorSource(evidence:string,prior:{content:string;historical:string}) {
+  const historical = /上回|上次|以前|曾经|当初|先前|上面写着|原话|当时|昨天|昨日|昨夜|昨晚|前天|前日|前一天|那天|那晚/.test(evidence);
+  const currentState = /现在|此刻|当前|眼下|如今|此时/.test(evidence);
+  return historical && !currentState ? prior.content+'\n\n'+prior.historical : prior.content;
 }
 export function materializeContinuityNewInformationEvidence(checks:any,content:string) {
   if(!Array.isArray(checks))return checks;
@@ -419,7 +426,7 @@ export function materializeContinuityNewInformationEvidence(checks:any,content:s
 export function continuityCitationRepairPrompt(checks:any[],refs:string[],content:string,context:string) {
   return '仅定位已返回连续性判断的前章引文，不重新评审、不改正文、状态、理由或其它条目。不能手抄、改标点或补引号。'
     +'\n【待定位声称与原判断】'+JSON.stringify(continuityClaimCatalog(content).filter(row=>refs.includes(row.ref)).map(row=>({...row,check:checks.find(check=>check.ref===row.ref)})))
-    +'\n【前章实际段落编号】'+JSON.stringify(continuityPriorEvidenceAnchors(context))
+    +'历史章仅核对明确回溯的旧事件或原话；当前状态仍以紧邻前章为准，旧状态不能覆盖新状态。\n【已保存前序实际段落编号】'+JSON.stringify(continuityPriorEvidenceAnchors(context))
     +'\n只返回JSON:{"repairs":[{"ref":"指定C编号","basisAnchorIds":["实际prior:p编号"]}]}。每个指定编号一条，选1至4个连续段落共同覆盖原判断的事实，不能跨段拼接；确无依据返回空数组，服务器保持未完成，不补造证据。';
 }
 export function applyContinuityCitationRepairs(checks:any[],refs:string[],value:any,context:string) {
@@ -430,7 +437,7 @@ export function applyContinuityCitationRepairs(checks:any[],refs:string[],value:
     const ids=rows.find(row=>row.ref===check.ref)?.basisAnchorIds;
     if(!Array.isArray(ids)||!ids.length||ids.length>4||new Set(ids).size!==ids.length)throw Error(check.ref+'前章引文未定位');
     const indices=ids.map(id=>anchors.findIndex(anchor=>anchor.id===id));
-    if(indices.some((index,i)=>index<0||i>0&&index!==indices[i-1]+1))throw Error(check.ref+'前章依据编号无效或跨段拼接');
+    if(indices.some((index,i)=>index<0||i>0&&(index!==indices[i-1]+1||anchors[index].chapter!==anchors[indices[i-1]].chapter)))throw Error(check.ref+'前章依据编号无效或跨段拼接');
     return {...check,basisEvidence:indices.map(index=>anchors[index].text).join('\n\n')};
   });
 }
@@ -473,7 +480,7 @@ export function validateSourceQualityReview(audit: unknown, readerGoals: unknown
         if(!check||!['consistent','conflict','new_information','not_prior','unknown'].includes(check.status)||typeof check.reason!=='string'||check.reason.trim().length<8
           ||check.status==='unknown'||check.status==='not_prior'&&claim.requiresPrior
           ||check.status==='new_information'&&!resolveQualityEvidence(claim.evidence,check.basisEvidence).verified
-          ||!['not_prior','new_information'].includes(check.status)&&!resolveQualityEvidence(prior.content,check.basisEvidence).verified) {
+          ||!['not_prior','new_information'].includes(check.status)&&!resolveQualityEvidence(continuityClaimPriorSource(claim.evidence,prior),check.basisEvidence).verified) {
           errors.push(claim.ref+'前序声称缺少实际前章对照依据');continue;
         }
         if(check.status==='conflict') findings.push('【前序声称·'+claim.ref+'】'+check.reason+' | 正文: '+claim.evidence+' | 前章: '+check.basisEvidence);
@@ -493,8 +500,8 @@ export function validateSourceQualityReview(audit: unknown, readerGoals: unknown
     }
 
     if (prior?.required && row.status === 'supported'
-      && (row.basisSource !== 'context' || !resolveQualityEvidence(prior.content, row.basisEvidence).verified)) {
-      errors.push('continuity通过缺少紧邻前章完整正文的逐字依据，不能用当前章或章纲自证跨章连贯');
+      && (row.basisSource !== 'context' || !resolveQualityEvidence(prior.content+'\n\n'+prior.historical, row.basisEvidence).verified)) {
+      errors.push('continuity通过缺少已保存前序完整正文的逐字依据，不能用当前章或章纲自证跨章连贯');
       continue;
     }
     if (prior?.required && row.status === 'not_applicable') {
@@ -535,7 +542,7 @@ export function invalidSourceQualityCitations(audit: SourceQualityAudit, content
     if((row.status!=='not_applicable'||row.evidence) && !resolveQualityEvidence(content,row.evidence).verified) targets.push({key:`source:${axis}:evidence`,axis,field:'evidence',source:'body'});
     const prior=axis==='continuity'?priorChapterEvidence(sources.context):null;
     if(prior?.required && row.status==='supported' && prior.content
-      && (row.basisSource!=='context'||!resolveQualityEvidence(prior.content,row.basisEvidence).verified)) {
+      && (row.basisSource!=='context'||!resolveQualityEvidence(prior.content+'\n\n'+prior.historical,row.basisEvidence).verified)) {
       // A missing/wrong source is not a citation typo. Re-evaluate the verdict;
       // a quote-only repair must not fabricate a premise for an existing PASS.
       return targets;

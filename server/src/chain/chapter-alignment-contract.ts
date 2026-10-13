@@ -89,11 +89,11 @@ export function chapterObligationCatalog(outline:string) {
  return [...new Set(sources)].map((source,index)=>({ref:'M'+(index+1),source}));
 }
 export function chapterObligationReviewDirective(catalog:ReturnType<typeof chapterObligationCatalog>) {
- return '服务端固定的必需行动与结果清单：'+JSON.stringify(catalog)+'。这份清单不能由requiredEvents摘要替代、合并或删项。每条完整核对行动主体、地点、先后与结果：到门口、准备上楼、他人上楼不能证明指定角色已经到达目标楼层；计划和意愿不当作实际完成。正文可以自然口语化，不要求照抄章纲或解释流程。额外返回obligationChecks，每个M编号恰一条：{"ref":"固定M编号","status":"covered|missing|unknown","evidence":["正文连续逐字证据，可用多条真实原文共同证明完整行动与结果"],"reason":"至少12字说明全条已发生或缺了什么"}。missing允许无引文但必须指出具体缺失，unknown保留审查未完成；covered证据须覆盖关键地点和结果限定，不能只证明同一条中的另一半。';
+ return '服务端固定的必需行动与结果清单：'+JSON.stringify(catalog)+'。这份清单不能由requiredEvents摘要替代、合并或删项。每条仅按该条实际指定的行动主体、地点、先后与结果核对，不把其它条目的限定条件移过来。仅在该条章纲明确指定到达某楼层时，到门口、准备上楼、他人上楼不能证明指定角色已到达；未指定楼层的条目不得凭空加本人到达楼层的条件。计划和意愿不当作实际完成。正文可以自然口语化，不要求照抄章纲或解释流程。额外返回obligationChecks，每个M编号恰一条：{"ref":"固定M编号","status":"covered|missing|unknown","evidence":["正文连续逐字证据，可用多条真实原文共同证明完整行动与结果"],"reason":"至少12字说明全条已发生或缺了什么"}。missing允许无引文但必须指出具体缺失，unknown保留审查未完成；covered证据须覆盖关键地点和结果限定，不能只证明同一条中的另一半。';
 }
 function floorValues(text:string) {
  const number=(value:string)=>temporalNumbers(value+'分钟').durations[0]?.minutes;
- const values=[...text.matchAll(/(地下|负)?([零〇一二两三四五六七八九十百千\d]+)(?:楼|层)/g)].map(match=>(match[1]?'-':'')+number(match[2]));
+ const values=[...text.matchAll(/(?<!这|那|另)(地下|负)?([零〇一二两三四五六七八九十百千\d]+)(?:楼|层)/g)].map(match=>(match[1]?'-':'')+number(match[2]));
  // A stopped elevator's displayed floor is a location, even without repeating 楼/层.
  for(const paragraph of text.split(/\n\s*\n|\n/)) {
   if(!/电梯/.test(paragraph)||!/(?:停稳|停下|门开)/.test(paragraph)||/(?:如果|要是|假如|等到|准备|计划|想象|将会|会停|还没|未停|没有停|不停)/.test(paragraph))continue;

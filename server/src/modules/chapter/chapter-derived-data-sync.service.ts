@@ -346,10 +346,53 @@ export class ChapterDerivedDataSyncService {
       }
     }
     const timeMarks = input.afterContent.match(/(?:第[一二三四五六七八九十\d]+[天日年月]|\d{4}年\d{1,2}月\d{1,2}日)/g) || [];
-    if (timeMarks.length > 1 && new Set(timeMarks).size !== timeMarks.length) {
+    const validatedRun = this.validatedTimelineRun(input);
+    if (validatedRun) this.retireDuplicateTimeProbes(input, checksum, validatedRun);
+    if (!validatedRun && timeMarks.length > 1 && new Set(timeMarks).size !== timeMarks.length) {
       issues.push({ type: 'time_order_risk', requirement: '时间标记顺序应保持一致', old: '', next: timeMarks.join(' / '), severity: 'medium', block: false });
     }
     return this.persistReviews(input, checksum, 'timeline', issues);
+  }
+
+  private validatedTimelineRun(input: SyncInput): string | null {
+    const proof = input.validatedOutlineProof;
+    if (!proof) return null;
+    const run = this.database.getDb().prepare(`SELECT r.id,r.quality_payload FROM generation_runs r
+      JOIN chapters c ON c.project_id=r.project_id AND c.chapter_index=r.chapter_index
+      WHERE r.id=? AND r.project_id=? AND c.id=? AND r.stage='chapter' AND r.status='success'
+        AND r.gate_status='passed' AND r.output_text=? AND c.content=r.output_text`)
+      .get(proof.runId, input.projectId, input.chapterId, input.afterContent) as any;
+    if (!run) return null;
+    try {
+      const quality = JSON.parse(run.quality_payload || '{}');
+      const timeline = quality.stageScore?.dimensions?.timeline;
+      // A green aggregate gate cannot overrule an unresolved evidenced time finding.
+      if (quality.gate?.passed !== true || timeline?.status !== 'evaluated' || !Number.isFinite(timeline.score) || timeline.score < 60) return null;
+      if (!Array.isArray(quality.stageScore?.issues) || quality.stageScore.issues.some((issue: any) =>
+        issue.status === 'open' && /^(?:timeline[.]|constitution[.]timeline)/.test(String(issue.ruleId || '')))) return null;
+      return run.id;
+    } catch { return null; }
+  }
+
+  private retireDuplicateTimeProbes(input: SyncInput, checksum: string, runId: string): void {
+    const db = this.database.getDb();
+    const now = new Date().toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const rows = db.prepare(`SELECT id,state_item_id,payload FROM chapter_continuity_reviews
+        WHERE project_id=? AND chapter_id=? AND content_checksum=? AND review_type='timeline'
+          AND issue_type='time_order_risk' AND blocks_lock=0 AND status='pending'`)
+        .all(input.projectId, input.chapterId, checksum) as any[];
+      for (const row of rows) {
+        let payload: any = {}; try { payload = JSON.parse(row.payload || '{}'); } catch {}
+        db.prepare(`UPDATE chapter_continuity_reviews SET status='archived',payload=?,updated_at=? WHERE id=?`)
+          .run(JSON.stringify({...payload, resolution: {reason: 'exact_body_semantic_timeline_review', runId}}), now, row.id);
+        if (row.state_item_id) db.prepare(`UPDATE state_items SET status='archived',updated_at=? WHERE id=?
+          AND status='pending' AND authority='soft_candidate' AND source_type='chapter_continuity_recheck'
+          AND created_by='chapter-derived-sync'`).run(now, row.state_item_id);
+      }
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
 
   private reviewOutline(input: SyncInput, checksum: string, chapter: any): ContinuityReviewStep {

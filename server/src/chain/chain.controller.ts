@@ -1096,7 +1096,8 @@ export class ChainController {
     }
     // Full immediate Canon is separate from the bounded background. Never clip it
     // into a head/tail excerpt and then claim cross-chapter review is complete.
-    return JSON.stringify({previousChapter: [{...previous, complete: true}], storyContext: background.slice(0, 14000),...mandatory});
+    const earlier = this.db.getDb().prepare('SELECT id, chapter_index, title, content FROM chapters WHERE project_id = ? AND chapter_index < ? AND trim(content) <> ? ORDER BY chapter_index DESC LIMIT 2').all(projectId, chapterIndex - 1, '') as any[];
+    return JSON.stringify({previousChapter: [{...previous, complete: true}], historicalChapters: earlier.map(row => ({...row, complete: true})), storyContext: background.slice(0, 14000),...mandatory});
   }
 
   private async checkChapterAlignment(input: {
@@ -1289,11 +1290,22 @@ sourceConflicts只指两份已提供的资料源彼此互斥，必须指出两�
         if(refs.length) {
           const citationOnly=refs.every(ref=>['consistent','conflict'].includes(focused.claimChecks?.find((row:any)=>row.ref===ref)?.status))
             &&validation.errors.filter(error=>/^C\d+/.test(error)).every(error=>/^C\d+前序声称缺少实际前章对照依据$/.test(error));
+          let recheckRefs=refs;
           if(citationOnly) {
             const corrected=await this.realLLM.generate({prompt:continuityCitationRepairPrompt(focused.claimChecks,refs,input.content,reviewContext),scenario:'review',temperature:0.1,responseFormat:'json_object',maxTokens:LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,maxEmptyRetries:0,structuredRepairIssueCount:refs.length,
               metrics:{projectId:input.projectId,chapterIndex:input.chapterIndex,stepKey:'alignment_continuity_citation',attempt:1}});
-            focused.claimChecks=applyContinuityCitationRepairs(focused.claimChecks,refs,parseWholeReviewJson(corrected.content),reviewContext);
-          } else {
+            const citationPatch=parseWholeReviewJson(corrected.content);
+            recheckRefs=[];
+            for(const ref of refs) {
+              try {
+                focused.claimChecks=applyContinuityCitationRepairs(focused.claimChecks,[ref],{repairs:citationPatch.repairs?.filter((row:any)=>row.ref===ref)},reviewContext);
+              } catch {
+                recheckRefs.push(ref);
+              }
+            }
+          }
+          if(recheckRefs.length) {
+          const refs=recheckRefs;
           const corrected=await this.realLLM.generate({prompt:continuityClaimReviewPrompt(input.content,reviewContext,refs)
             +'\n【仅这些条目尚未核实】'+JSON.stringify(focused.claimChecks?.filter((row:any)=>refs.includes(row.ref)))
             +'\n【校验发现】'+validation.errors.join('；')+'\n只返回上述C编号的新核对结果；重新核对全部关键限定，允许纠正原consistent为conflict或unknown，不能找一句同动作的引文填平PASS。不改其它条目和已经举证的冲突。',
