@@ -1,6 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { reviewIdeaCardsInBatches } from './idea-review-batches';
+import { reviewIdeaCardsInBatches, rebaseIdeaReviewReferences } from './idea-review-batches';
 
+describe('global provenance for independent idea review evidence',()=> {
+  it('rebases local C1/C2 to full-batch C4/C5 without rewriting story quotes',()=>{
+    const verdict={position:1,title:'未改变的标题',storyEvidenceRef:'C1.hook',payoffEvidenceRef:'C1.ending',
+      platformEvidenceRef:'C1.hook',qualityReason:'根据C1.setting与C1.ending',
+      payoffBridge:{actionEvidenceRef:'C1.scopeBreakdown[3].reason',resultEvidenceRef:'C1.ending',
+        conditionEvidenceRef:'C2.coreConflict',reason:'C1.ending 需核实条件'},
+      readerGoals:{click:{evidenceRef:'C1.title',reason:'一个实际风险'},completion:{evidenceRef:'C2.description'}},
+      storyEvidence:'用户原始文案保持不变'};
+    const changed=rebaseIdeaReviewReferences(verdict,3,2);
+    expect(changed).toMatchObject({position:4,storyEvidenceRef:'C4.hook',payoffEvidenceRef:'C4.ending',
+      platformEvidenceRef:'C4.hook',qualityReason:'根据C4.setting与C4.ending',
+      payoffBridge:{actionEvidenceRef:'C4.scopeBreakdown[3].reason',resultEvidenceRef:'C4.ending',
+        conditionEvidenceRef:'C5.coreConflict',reason:'C4.ending 需核实条件'},
+      readerGoals:{click:{evidenceRef:'C4.title'},completion:{evidenceRef:'C5.description'}},
+      storyEvidence:'用户原始文案保持不变'});
+    expect(verdict.storyEvidenceRef).toBe('C1.hook');
+    expect(verdict.position).toBe(1);
+  });
+});
 describe('independent idea Gate batching', () => {
   it('keeps 5 exact reviews in original order with complete out-of-group references', async () => {
     const cards = Array.from({length: 5}, (_, i) => ({id: 'P'+(i+1)}));
