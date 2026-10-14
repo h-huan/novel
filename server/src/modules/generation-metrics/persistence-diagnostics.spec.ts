@@ -5,7 +5,7 @@ describe('create framework persistence diagnostics', () => {
     const result = classifyFrameworkPersistence({
       projectStatus:'generation_failed',creationStalled:false,
       observedMismatches:['outline_success_without_chapter_outline'],
-      runs:[{stage:'outline',status:'success'},{stage:'outline',status:'failed',gate_status:'blocked'}],
+      runs:[{stage:'outline',status:'failed',gate_status:'blocked'},{stage:'outline',status:'success'}],
     });
     expect(result.persistenceMismatch).toEqual([]);
     expect(result.uncommittedCandidates).toEqual(['outline_success_without_chapter_outline']);
@@ -26,6 +26,15 @@ describe('create framework persistence diagnostics', () => {
     });
     expect(result.persistenceMismatch).toEqual(['world_success_without_world_setting']);
     expect(result.uncommittedCandidates).toEqual(['outline_success_without_chapter_outline']);
+  });
+  it('does not suppress a later persistence failure merely because an old Gate run once blocked', () => {
+    const result = classifyFrameworkPersistence({projectStatus:'generation_failed',creationStalled:false,
+      observedMismatches:['outline_success_without_chapter_outline'],
+      runs:[{stage:'outline',status:'failed',gate_status:'not_evaluated'},
+        {stage:'outline',status:'failed',gate_status:'blocked'}],
+    });
+    expect(result.persistenceMismatch).toEqual(['outline_success_without_chapter_outline']);
+    expect(result.uncommittedCandidates).toEqual([]);
   });
   it('keeps in-flight mismatches pending until active work truly stalls', () => {
     const x = {projectStatus:'creating',observedMismatches:['outline_success_without_chapter_outline'],
