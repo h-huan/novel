@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findStaleBuildArtifact } from './build-freshness';
@@ -12,6 +12,24 @@ function fixture() {
  return {root,file};
 }
 describe('runtime artifact freshness',()=>{
+ it('catches missing emitted middleware before Nest loads AppModule',()=>{
+  const {root,file}=fixture();
+  mkdirSync(join(root,'src/common'),{recursive:true});
+  file('src/app.module.ts',100);file('dist/src/app.module.js',110);
+  file('src/common/creation-context.middleware.ts',100);
+  const failure=findStaleBuildArtifact(root);
+  expect(failure?.missing).toBe(true);
+  expect(failure?.artifact).toBe(join(root,'dist/src/common/creation-context.middleware.js'));
+ });
+ it('uses a clean compiled-server entry on regular start, retaining watch as explicit dev mode',()=>{
+  const scripts=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).scripts;
+  expect(scripts.start).toContain('npm run build');
+  expect(scripts.start).toContain('dist/src/main.js');
+  expect(scripts.start).not.toContain('nest.js start');
+  expect(scripts.postbuild).toContain('verify-runtime-build.cjs');
+  expect(scripts['start:dev']).toContain('--watch');
+ });
+
  it('accepts incremental outputs alongside unchanged older modules',()=>{
   const {root,file}=fixture();file('src/old.ts',100);file('dist/src/old.js',110);file('src/new.ts',200);file('dist/src/new.js',210);
   expect(findStaleBuildArtifact(root)).toBeNull();
