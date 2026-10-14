@@ -45,7 +45,7 @@ export function rebaseIdeaReviewReferences<T extends Record<string, any>>(
   const result = structuredClone(verdict);
   const reference = (raw: unknown) => {
     if (typeof raw !== 'string') return raw;
-    return raw.replace(/\\bC(\\d+)(?=\\.)/g, (matched, n) => {
+    return raw.replace(/\bC(\d+)(?=\.)/g, (matched, n) => {
       const position = Number(n);
       return position >= 1 && position <= localCount ? 'C' + (position + offset) : matched;
     });
