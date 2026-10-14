@@ -66,6 +66,8 @@ export function analyzeIdeaDiscovery(snapshot) {
       qualified, delivered: countOf(audit.totalIdeas) ?? 0, shortfall,
     },
     stageSignals, selectionReasons, structuringErrors, candidates,
+    timing: gate.timing && typeof gate.timing === 'object' ? gate.timing : audit.timing || null,
+    reviewAttempts: gate.reviewAttempts || null,
     repair: {
       attempted: gate.repairAttempted === true,
       generated: countOf(gate.repairGenerated),
@@ -94,6 +96,15 @@ export function renderIdeaDiscoveryDetails(analysis) {
       shown(c.delivered) + '；缺额 ' + shown(c.shortfall),
     '- 可能出问题的阶段：' + (analysis.stageSignals.join('；') || '未发现已记录的失败阶段'),
   ];
+  if (analysis.timing) {
+    const tm = analysis.timing;
+    const duration = (n) => Number.isFinite(Number(n)) ? (Number(n) / 1000).toFixed(1) + '秒' : '未知';
+    lines.push('- 总耗时：' + duration(tm.totalMs) + '；前置筛选及复核：' + duration(tm.preselectionMs)
+      + '；逐卡结构化（并发墙钟）：' + duration(tm.structuringMs)
+      + '；初次终审：' + duration(tm.initialFinalGateMs) + '；失败卡局部修复与复核：' + duration(tm.repairMs));
+    for (const call of list(tm.cardCalls)) lines.push('  - 单卡模型调用 ' + textOf(call?.premiseId, 80)
+      + '：' + duration(call?.durationMs) + ' · ' + textOf(call?.outcome, 20));
+  } else lines.push('- 耗时拆分：旧版报告没有逐阶段计时；仅凭总等待时间不能判定是哪一环卡顿或重复。');
   if (analysis.error) lines.push('- 服务端批次错误：' + analysis.error);
   if (analysis.selectionReasons.length) {
     lines.push('', '### 前置题材筛选 / 独立复核');
