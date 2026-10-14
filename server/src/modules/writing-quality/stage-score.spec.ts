@@ -146,9 +146,10 @@ it('评审侧拿到的是与生成侧同一份执行标准，含按平台分类�
   const prompt = stageJudgePrompt('正文', '上下文', constitution, 'chapter');
   expect(prompt).toContain('项目执行标准 · 最高优先级');
   expect(prompt).toContain('按平台分类执行');
-  // 流派维的真实落差必须进入评审提示词，否则评审器无从判定该维是否被兑现。
+  // 抽样标签未覆盖不代表作品不契合；评审仍必须基于实际故事内容核验。
   expect(prompt).toContain('系统流');
-  expect(prompt).toContain('落差');
+  expect(prompt).toContain('按实际故事内容核验');
+  expect(prompt).toContain('不要求另补解释');
   expect(prompt).toContain('不得默认通过');
 });
 

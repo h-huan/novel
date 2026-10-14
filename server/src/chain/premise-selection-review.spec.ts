@@ -20,6 +20,43 @@ describe('premise selection before identity lock', () => {
     for (const change of [{ referencePremiseId: 'C' }, { referencePremiseId: 'B' }, { quote: '输入里不存在的虚构原文' }, { kind: 'unknown' }])
       expect(premiseSelectionReviewIssues({ ...failure, issues: [{ ...failure.issues[0], ...change }] }, selection()).length).toBeGreaterThan(0);
   });
+  it('detects a genuinely unsupported outcome promise before any complete card exists', () => {
+    const selected = selection();
+    const gap: PremiseSelectionReview = { passed: false, issues: [{
+      kind: 'payoff_gap', premiseId: 'B', referencePremiseId: 'B',
+      quote: String(selected.selected[1].payoff), referenceQuote: String(selected.selected[1].activeChoice),
+      reason: '已给行动只能证明现场发生，不足以使没有裁决权限的当事人直接取得法定权利',
+    }] };
+    expect(premiseSelectionReviewIssues(gap, selected)).toEqual([]);
+    expect(premiseReselectionPlan(selected, gap).repairSlots).toEqual([expect.objectContaining({
+      replacesPremiseId: 'B', mode: 'correct_or_replace_from_pool',
+    })]);
+    expect(retainReviewedPremises(selected, gap).selection.selected.map(p => p.premiseId)).toEqual(['A']);
+    expect(premiseSelectionReviewIssues({...gap, issues:[{...gap.issues[0], referencePremiseId:'A'}]}, selected).length).toBeGreaterThan(0);
+    expect(premiseSelectionReviewIssues({...gap, issues:[{...gap.issues[0], quote:'伪造出来的承诺证据不属于本题材'}]}, selected).length).toBeGreaterThan(0);
+  });
+  it('accepts evidence-bound payoff prechecks in the existing source-integrity review call', async () => {
+    const selected = selection();
+    const gap: PremiseSelectionReview = {passed:false,issues:[{
+      kind:'payoff_gap',premiseId:'B',referencePremiseId:'B',
+      quote:String(selected.selected[1].payoff),referenceQuote:String(selected.selected[1].activeChoice),
+      reason:'行动之后的外部权利结果必须有掌握裁决权的一方实际决定，不能直接跳过桥接条件',
+    }]};
+    const c = Object.create(ChainController.prototype) as any;
+    c.llmCallWithRetry=vi.fn(async (_label:string, prompt:string,options:any)=>{
+      expect(prompt).toContain('payoff_gap');
+      expect(prompt).toContain('必要证据');
+      expect(options.validate(gap)).toBe(true);
+      return {data:gap};
+    });
+    await expect(c.reviewPremiseSelection(selected,'','source_drift')).resolves.toEqual(gap);
+    const overlapReview = {...gap, issues:[{...gap.issues[0]}]};
+    c.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{
+      expect(options.validate(overlapReview)).toBe(false);
+      return {data:overlapReview};
+    });
+    await expect(c.reviewPremiseSelection(selected,'','overlap')).rejects.toThrow('协议错误');
+  });
   it('preserves the original pool and unaffected selected facts despite model overwrites', () => {
     const original = selection();
     const result = normalizePremiseReselection({ selectedPremises: [{ ...premise('A'), activeChoice: '篡改原选择' },

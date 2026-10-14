@@ -188,6 +188,13 @@ it('generates a complete idea batch through preselection plus structuring and re
             readerQuestion: '主角能否证实当前异常并承担公开材料后的真实关系后果？',
             readerGoals: { click: goal('hook'), completion: goal('description'),
               sharing: goal('ending'), immersion: goal('hook') },
+            // This affirmative verdict must cite a real action, result and independent
+            // prerequisite, not infer a result from its own ending statement.
+            payoffBridge: {
+              status: 'supported', actionEvidenceRef: `C${position}.hook`,
+              resultEvidenceRef: `C${position}.ending`, conditionEvidenceRef: `C${position}.description`,
+              reason: '主角以实际核验及主动公开证据建立责任转移的前提，终局再兑现责任和关系变化。',
+            },
             issues: [],
           };
         }),
@@ -219,7 +226,48 @@ it('generates a complete idea batch through preselection plus structuring and re
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,
     returned: 5,
+    reviewAttempts: {initial:5, repairs:0},
+    timing: {preselectionMs:expect.any(Number), structuringMs:expect.any(Number),
+      initialFinalGateMs:expect.any(Number), repairMs:0, totalMs:expect.any(Number)},
   });
+  expect(first.appealGate.timing.cardCalls).toHaveLength(5);
+  expect(new Set(first.appealGate.timing.cardCalls.map((row: any) => row.premiseId)).size).toBe(5);
+  expect(first.appealGate.timing.cardCalls.every((row: any) => row.outcome === 'success' && row.durationMs >= 0)).toBe(true);
+});
+
+it('does not share an in-flight discovery across different excluded story details with the same title', async () => {
+  const controller = Object.create(ChainController.prototype) as any;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const generate = vi.fn(async () => { await gate; return {success: true, ideas: []}; });
+  controller.runIdeaDiscovery = generate;
+  controller.logger = {warn: vi.fn()};
+  const request = {
+    storyType: 'short_story' as const, platform: 'fanqie',
+    storyCategory: '悬疑灵异', count: 5,
+    ...discoveryStandards, excludeTitles: ['相同旧标题'],
+  };
+  const oldVersion = {...request, excludeDetails: [{
+    title: '相同旧标题', hook: '旧题材的继承争议',
+    description: '这次要排除被调换的收养身份',
+  }]};
+  const newVersion = {...request, excludeDetails: [{
+    title: '相同旧标题', hook: '新版题材的合同争议',
+    description: '这次要排除被篡改的采购合同',
+  }]};
+  const inFlight = [
+    controller.ideaDiscover(oldVersion),
+    controller.ideaDiscover(newVersion),
+    controller.ideaDiscover(oldVersion),
+  ];
+  try {
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls[0][0].excludeDetails).toEqual(oldVersion.excludeDetails);
+    expect(generate.mock.calls[1][0].excludeDetails).toEqual(newVersion.excludeDetails);
+  } finally {
+    release();
+  }
+  await Promise.all(inFlight);
 });
 
 it('uses read-only Registry rules and records their exact ruleset version on generation runs', async () => {

@@ -230,6 +230,23 @@ describe('idea discovery preselection contract', () => {
     expect(repaired[0].unknownTopLevel).toBeUndefined();
   });
 
+  it('keeps protagonist prose corrections local without allowing premise or platform changes', () => {
+    const card = {
+      sourcePremiseId: 'P11', title: '关系证据失效', targetPlatform: 'fanqie',
+      protagonist: '她越想核实事实，越能证明没有前提的最终结论。',
+      hook: '角色面对原有冲突行动', coreConflict: '原有目标与对手对抗',
+    };
+    const revised = applyOrderedIdeaRepairPatches([card], [{
+      protagonist: '她核实了事实本身，但仍须追查足以证明最终责任的条件。',
+      sourcePremiseId:'fake', targetPlatform:'other', title:'替换的故事',
+    }])[0];
+    expect(revised.protagonist).toContain('仍须追查');
+    expect(revised.sourcePremiseId).toBe('P11');
+    expect(revised.targetPlatform).toBe('fanqie');
+    expect(revised.title).toBe('关系证据失效');
+    expect(revised.hook).toBe(card.hook);
+    expect(card.protagonist).toContain('没有前提');
+  });
   it('repairs the reviewed story field without changing stage allocation or guessing a match', () => {
     const card = { sourcePremiseId: 'P4', setting: '记忆受损会持续累积。', ending: '她付出记忆代价，带母亲回家。',
       scopeBreakdown: [{ arc: '第一次用票', chapters: 2, reason: '她确认代价是有人忘记她一天。', outcome: '弟弟退烧。' }] };

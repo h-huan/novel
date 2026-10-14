@@ -11,7 +11,7 @@ const mode = String(report?.options?.mode || '');
 const problems = new Set(Array.isArray(report?.verdict?.runtimeProblems) ? report.verdict.runtimeProblems : []);
 const terminalPersistenceMismatches = [];
 
-if (mode.includes('short_and_long')) {
+if (report?.options?.fullTests === true && mode.includes('short_and_long')) {
   if (!report?.options?.shortProjectId) problems.add('short_project_missing');
   if (!report?.options?.longProjectId) problems.add('long_project_missing');
 }

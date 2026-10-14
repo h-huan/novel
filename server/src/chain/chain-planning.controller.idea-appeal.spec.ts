@@ -114,11 +114,13 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
 
   it('retains a partial final-gate batch without starting another selection or failing accepted cards', async () => {
     const upstream = {
-      success: true,
-      ideas: Array.from({ length: 4 }, (_, index) => acceptedIdea(index)),
-      totalIdeas: 4,
-      qualityWarning: '创建前已筛选 5 个题材，最终 Gate 通过 4 个；缺少 1 个',
-      appealGate: { ...audit, requested: 5, generated: 5, qualified: 4, returned: 4, shortfall: 1, rejected: 1 },
+      success: false,
+      status: 'incomplete',
+      ideas: [],
+      qualifiedIdeas: Array.from({ length: 4 }, (_, index) => acceptedIdea(index)),
+      totalIdeas: 0,
+      error: '请求 5 张，最终通过 4 张；本批未完成',
+      appealGate: { ...audit, requested: 5, generated: 5, qualified: 4, returned: 0, shortfall: 1, rejected: 1 },
     };
     const ideaDiscover = vi.fn().mockResolvedValue(upstream);
     let persisted: any;
@@ -134,16 +136,20 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
 
     expect(ideaDiscover).toHaveBeenCalledTimes(1);
     expect(result).toBe(upstream);
-    expect(result.success).toBe(true);
-    expect(result.ideas).toHaveLength(4);
-    expect(result.qualityWarning).toContain('缺少 1 个');
-    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(false);
+    expect(result.status).toBe('incomplete');
+    expect(result.ideas).toEqual([]);
+    expect(result.qualifiedIdeas).toHaveLength(4);
+    expect(result.error).toContain('本批未完成');
     const diagnostics: any = controller.getLatestIdeaDiscoveryDiagnostics();
-    expect(diagnostics.audit.success).toBe(true);
+    expect(diagnostics.audit.success).toBe(false);
+    expect(diagnostics.audit.totalIdeas).toBe(0);
+    expect(diagnostics.audit.qualifiedCount).toBe(4);
+    expect(diagnostics.audit.shortfallCount).toBe(1);
     expect(diagnostics.audit.acceptedIdeas).toHaveLength(4);
+    expect(diagnostics.audit.acceptedIdeas.map((idea: any) => idea.title)).toEqual(upstream.qualifiedIdeas.map(idea => idea.title));
     expect(diagnostics.audit.appealGate).toEqual(upstream.appealGate);
     expect(diagnostics.audit.request.requestedCount).toBe(5);
-    expect(diagnostics.audit.qualityWarning).toBe(upstream.qualityWarning);
   });
 
   it('returns the orchestrator payload unchanged instead of becoming a second quality gate when cardinality is already complete', async () => {
@@ -318,6 +324,16 @@ it('persists complete qualified cards separately when the full discovery batch r
  expect(result.success).toBe(false);expect(result.ideas).toEqual([]);
  const retained=writes.get('latest_idea_discovery_qualified');expect(retained.qualifiedIdeas).toEqual([cards[0]]);expect(retained.qualifiedIdeas[0].ending).toBe('明确结果');
  expect(retained.request.count).toBe(2);expect(retained.status).toBe('incomplete');
+ // Delivery is incomplete, but the saved audit must still count passing cards accurately.
+ expect(writes.get('latest_idea_discovery_audit')).toMatchObject({
+   success: false, totalIdeas: 0, qualifiedCount: 1, shortfallCount: 1,
+ });
+ // A shortfall is still a failure, yet its approved card must stay inspectable
+ // in the diagnostics used to analyze a real 1/2 (or 4/5) run.
+ const savedAudit = writes.get('latest_idea_discovery_audit');
+ expect(savedAudit.acceptedIdeas.map((idea: any) => idea.title)).toEqual(['已通过']);
+ expect(savedAudit.acceptedIdeas[0].ideaAppealGate.passed).toBe(true);
+ expect(savedAudit.acceptedIdeas).not.toContainEqual(expect.objectContaining({title:'未通过'}));
 });
 
 it('does not overwrite the previous passed card cache on an empty failed discovery',async()=>{
@@ -326,6 +342,8 @@ it('does not overwrite the previous passed card cache on an empty failed discove
  await c.ideaDiscover({...dto,count:5} as any);
  expect(db.dualWrite.mock.calls.some(call=>call[0]==='latest_idea_discovery_qualified')).toBe(false);
  expect(db.dualWrite.mock.calls.some(call=>call[0]==='latest_idea_discovery_audit')).toBe(true);
+ const audit = db.dualWrite.mock.calls.find(call=>call[0]==='latest_idea_discovery_audit')?.[1];
+ expect(audit).toMatchObject({success: false, qualifiedCount: 0, shortfallCount: 5});
 });
 
 it('archives the prior approved batch before accepting a smaller new approved batch',async()=>{

@@ -191,6 +191,7 @@ ${includePreselectionPolicy ? IDEA_PRESELECTION_REVIEW_POLICY : "按已注入GEN
 - 禁止替换、合并、拆分、另造题材，禁止因为某字段难写就把故事换成更容易过 Gate 的套路。
 - 标题必须先兑现点击承诺：脱离概要也能看懂具体冲突、反常关系或未解问题；从原故事已有事件和关系中提炼，不沿用文雅暂名，不靠夸张空话和虚假设定。hook先写命运改变的现场与人物选择，不用职业查证流程开篇。
 - hook、description、setting、ending、scopeBreakdown、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；能力触发、持续时间、代价与同一人物状态须在所有字段一致。只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
+- 所有面向读者的字段（尤其protagonist、hook、description和ending）使用自然、准确的中文叙述：不要写残缺主语、同义句堆叠、证据到结论的逻辑跳跃或硬凑的AI式抽象判断。事实与推断要分开：局部证据真实不等于整件事的责任已获证明；发现或公开事实不等于相关权利、程序或机构处置已经完成。遇到“越A越B”“因此”“坐实”等因果词，逐字核对B是否真由已建立事实推出，不能靠修辞掩盖条件缺失。若原骨架结局依赖第三方授权、法定程序或证据取得条件，必须在既定事件链中留下可信的行动和权限桥梁，否则不能把结果写成已发生。
 - 最终 Gate 只做独立验收；若这一张结构化后仍不成立，系统应暴露这一题材的管线失败，而不是自动补生或改写其它题材。
 写完后再逐项核对原池骨架和所选胚子中的触发动作、人物身份与知情、到场事件、时间阶段、升级机制和结局方向；同一事实在所有卡片字段中保持一致。人物当时的请求可以有后来才揭露的另一层动机，但请求发生这一事实必须保留。
 【已选题材胚子（内部标识已由服务器移除）】
@@ -230,6 +231,7 @@ export function bindStructuredIdeaCardToPremise(
 const IDEA_GATE_REPAIR_TEXT_FIELDS = [
   'hook',
   'description',
+  'protagonist',
   'coreConflict',
   'uniquePoint',
   'mainReversal',
@@ -273,7 +275,7 @@ export function ideaGateLocalRepairDirective(
   return `【最终 Gate·同题材有序局部修复】
 下面 ${safeTargets.length} 项已经完成创建前筛选和完整题材卡结构化。服务器已经锁定每一项的题材身份，你不负责回传、生成或修改内部标识，也不得换题。
 1. patches 数组必须恰好 ${safeTargets.length} 项，并严格按输入 position 的顺序逐项对应；每项只写需要修改的字段。
-2. 若gateIssues明确点名标题，可额外返回title，只改原故事的表达且不得换题；其它情况下标题保持原样。顶层只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数、标签或任何内部标识。
+2. 若gateIssues明确点名标题，可额外返回title，只改原故事的表达且不得换题；其它情况下标题保持原样。顶层只允许 hook、description、protagonist、coreConflict、uniquePoint、mainReversal；protagonist仅可修人物简介的指代、语义与既有弱点表达，不得改名、人物身份或动机；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数、标签或任何内部标识。
 3. 只修 gateIssues 点名的表达证据，让原故事已有的异常/信息差、现实压力、主角行动、关系、因果升级、反转和二阶后果更清楚；禁止新增另一套案件、能力、身份、亲属关系或结局。
 若storyRepairAllowed=true，必须同步修复点名问题在setting、ending与scopeBreakdown中的所有矛盾引用，不能只改description留下旧规则。这些字段不接受整对象覆盖，只能另返回storyPatches数组：{"field":"setting或ending","match":"逐字存在且唯一的短原文","replacement":"修正后片段"}，或{"field":"scopeBreakdown","stage":1,"subfield":"reason或outcome","match":"该阶段字段中逐字存在且唯一的短原文","replacement":"修正后片段"}。stage从1开始。保留原题材人物、核心困境、选择方向和结局代价，不新增能力或改变已有规则数值；存在无法沿原事实修复的真实矛盾就保持拒绝，不能靠补一条万能规则圆回。不得改arc、chapters、篇幅或平台配置。storyRepairAllowed=false时禁止此数组。
 若gateIssues点名故事命名，可另返回namingReplacements对象（原禁止名称:原创虚构名称），服务器会在全部故事文本中统一替换，包含人物/宠物名、结局与章节规划；只许更换名称，不改变行为、关系和事件。其它题材不允许此字段。

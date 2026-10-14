@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 function run(report) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'novel-verify-guard-'));
@@ -12,7 +13,7 @@ function run(report) {
   const mismatchText = Array.isArray(mismatch) && mismatch.length ? mismatch.join(',') : 'none';
   fs.writeFileSync(file, JSON.stringify(report), 'utf8');
   fs.writeFileSync(markdown, `# 本地验收报告\n\n- 最终结果：**PASSED**\n\n### 短篇\n\n- 创建/持久化诊断：PASS · mismatch=${mismatchText}\n\n## 说明\n\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n`, 'utf8');
-  const result = spawnSync(process.execPath, [path.resolve('verify-local-guard.mjs'), file], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'verify-local-guard.mjs'), file], { encoding: 'utf8' });
   const next = JSON.parse(fs.readFileSync(file, 'utf8'));
   const nextMarkdown = fs.readFileSync(markdown, 'utf8');
   fs.rmSync(dir, { recursive: true, force: true });
@@ -25,12 +26,11 @@ function run(report) {
     runtime: { projects: { short: { project: { status: 'creating' }, cockpit: { diagnostics: { creationStalled: false } } } } },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
   });
-  assert.equal(result.status, 1);
-  assert.equal(next.verdict.status, 'failed');
-  assert.deepEqual(next.verdict.runtimeProblems, ['long_project_missing']);
-  assert.match(nextMarkdown, /最终结果：\*\*FAILED\*\*/u);
-  assert.match(nextMarkdown, /long_project_missing/u);
-  assert.doesNotMatch(nextMarkdown, /不要求短篇和长篇同时存在/u);
+  // Quick diagnostic does not require a second novel to exist.
+  assert.equal(result.status, 0);
+  assert.equal(next.verdict.status, 'passed');
+  assert.deepEqual(next.verdict.runtimeProblems, []);
+  assert.doesNotMatch(nextMarkdown, /long_project_missing/u);
 }
 
 {
@@ -65,6 +65,19 @@ function run(report) {
   assert.ok(next.verdict.runtimeProblems.includes('short_project_status_generation_failed'));
   assert.match(nextMarkdown, /创建\/持久化诊断：FAIL · mismatch=outline_success_without_chapter_outline/u);
   assert.doesNotMatch(nextMarkdown, /创建\/持久化诊断：PASS · mismatch=outline_success_without_chapter_outline/u);
+}
+
+{
+  const { result, next, nextMarkdown } = run({
+    options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: null },
+    runtime: { projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } } } },
+    verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
+  });
+  // Full acceptance still requires both short and long projects.
+  assert.equal(result.status, 1);
+  assert.equal(next.verdict.status, 'failed');
+  assert.deepEqual(next.verdict.runtimeProblems, ['long_project_missing']);
+  assert.match(nextMarkdown, /long_project_missing/u);
 }
 
 console.log('verify-local-guard tests passed');

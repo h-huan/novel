@@ -558,15 +558,19 @@ export function invalidSourceQualityCitations(audit: SourceQualityAudit, content
   });
 }
 export function applySourceQualityCitationRepairs(audit:SourceQualityAudit, targets:SourceCitationTarget[], rows:unknown, content:string,sources:Record<string,string>):SourceQualityAudit {
-  if (!Array.isArray(rows)) return audit;
-  let checks = audit.checks;
-  for (const target of targets) {
-    const matches = rows.filter(row => row?.key === target.key);
-    if (matches.length !== 1) continue;
-    const quote = resolveCitationAnchor(matches[0].anchorId, target.source, content, sources);
-    if (!quote) continue;
-    if (checks === audit.checks) checks = {...audit.checks};
+  // A citation patch is atomic: one wrong/missing source must not partially
+  // rewrite a verdict whose complete evidence has not passed validation.
+  if (!Array.isArray(rows) || rows.length !== targets.length
+    || new Set(targets.map(target => target.key)).size !== targets.length
+    || new Set(rows.map(row => row?.key)).size !== targets.length) return audit;
+  const resolved = targets.map(target => {
+    const row = rows.find(item => item?.key === target.key);
+    return {target, quote: resolveCitationAnchor(row?.anchorId, target.source, content, sources)};
+  });
+  if (resolved.some(row => !row.quote)) return audit;
+  const checks = {...audit.checks};
+  for (const {target, quote} of resolved) {
     checks[target.axis] = {...checks[target.axis], [target.field]: quote};
   }
-  return checks === audit.checks ? audit : {...audit, checks};
+  return {...audit, checks};
 }

@@ -353,7 +353,7 @@ describe('按平台分类执行：基调/文风/流派/视角各自回到平台�
 });
 
 describe('execution standard 四维不再共用一句判据，且不因平台给判据而丢掉该维自身规则', () => {
-  it('四维各自的 requirement 互不相同，流派维带出真实落差且同时保留该维通用规则', () => {
+  it('四维判据保留各自规则，未命中样本不替代实际正文契合审查', () => {
     const c = constitutionOf({
       targetPlatform: 'fanqie',
       category: '都市·现实/都市',
@@ -375,8 +375,9 @@ describe('execution standard 四维不再共用一句判据，且不因平台给
 
     const genre = find('genre');
     expect(genre).toContain('系统流');
-    expect(genre).toContain('落差');
-    expect(genre).toContain('必答项');
+    expect(genre).toContain('按实际故事内容核验');
+    expect(genre).toContain('不要求另补解释');
+    expect(genre).toContain('不得默认通过');
     expect(genre).toContain('核心预期按当前阶段与章纲揭示安排推进');
     expect(genre).toContain('全书承诺在约定阶段兑现');
     // 基调维：平台定义判据 + 该维自身情绪规则都必须保留
