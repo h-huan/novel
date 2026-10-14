@@ -152,6 +152,10 @@ node verify-local.mjs --archive
 
 这样既更新 `verification/latest.json` / `latest.md`，也将**本次完整的 Guard 校验后结果**按时间另存到 `verification/runs/`，便于逐次对比真实模型的 5/5、4/5 等波动及失败证据。该目录已被 Git 忽略，可能含完整故事素材和详细错误日志，不应公开上传。未传 `--archive` 时仍只保留 latest；核心程序异常未产生新报告时也不准把旧 latest 当成新验证结果。
 
+出现「灵感通过 5/5，但创建小说时大纲 Gate 阻断」时，先区分**模型已生成但审查未批准提交的候选章纲**与**数据库确认写入后丢失的数据**。新报告会把前者写成 `BLOCKED · 候选尚未通过框架 Gate`，不会伪装成写库成功后丢失。新版本框架关键行动审查失败时会在 `runtime.projects.short.failedRuns[*].frameworkGateEvidence`（或 `project` / `long`）记录结构化的缺失条件、审核错误及因果引用；`latest.md` 亦展示对应问题摘要。**旧版本生成记录没有保存此类原始审查锚点，无法事后补齐。** 如果仍缺来源证据，应通过日志和受保护的真实复测确认是否为合法规则冲突，不自动改写已确认故事/世界设定。
+
+执行标准唯一权威为 System Workflow Rule Registry；报告要求服务端来源 `system_workflow_rule_registry` 与仓库 Registry 版本一致，不能按旧的 `code_seed` 行标识判断版本漂移。诊断报告如显示代码版本与服务端一致但 `source` 为旧值，才需核对实际部署版本。
+
 `verification/latest.json` 的 `runtime.ideaDiscovery` 保留 Server 返回的原始审计和所有候选证据；`runtime.ideaDiscoveryAnalysis` 是按阶段整理的只读摘要。如果服务不可用、尚未运行过灵感生成，报告会明确写“无审计”，**不能把缺失证据当成 Gate 已通过或未通过**。只读诊断的“阶段信号”不等于已证明具体模型失效根因；仍需配合应用异常现场和真实 Server 日志做归因。
 
 快速诊断模式**不要求短篇、长篇同时存在**；完整验收 `--full` 才要求二者满足第一章验收条件。脚本的入口、核心逻辑、Guard 与阶段诊断均在 CI 中执行语法或回归测试。
