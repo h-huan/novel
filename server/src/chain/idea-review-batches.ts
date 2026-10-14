@@ -42,7 +42,7 @@ export function rebaseIdeaReviewReferences<T extends Record<string, any>>(
   if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(localCount) || localCount < 1) {
     throw Error('invalid idea reviewer evidence offset');
   }
-  const result = structuredClone(verdict);
+  const result: Record<string, any> = structuredClone(verdict);
   const reference = (raw: unknown) => {
     if (typeof raw !== 'string') return raw;
     return raw.replace(/\bC(\d+)(?=\.)/g, (matched, n) => {
@@ -69,5 +69,5 @@ export function rebaseIdeaReviewReferences<T extends Record<string, any>>(
     if(typeof result[key]==='string')result[key]=reference(result[key]);
   }
   if(Number.isInteger(result.position))result.position+=offset;
-  return result;
+  return result as T;
 }
