@@ -226,7 +226,13 @@ it('generates a complete idea batch through preselection plus structuring and re
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,
     returned: 5,
+    reviewAttempts: {initial:5, repairs:0},
+    timing: {preselectionMs:expect.any(Number), structuringMs:expect.any(Number),
+      initialFinalGateMs:expect.any(Number), repairMs:0, totalMs:expect.any(Number)},
   });
+  expect(first.appealGate.timing.cardCalls).toHaveLength(5);
+  expect(new Set(first.appealGate.timing.cardCalls.map((row: any) => row.premiseId)).size).toBe(5);
+  expect(first.appealGate.timing.cardCalls.every((row: any) => row.outcome === 'success' && row.durationMs >= 0)).toBe(true);
 });
 
 it('does not share an in-flight discovery across different excluded story details with the same title', async () => {
