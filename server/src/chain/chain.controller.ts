@@ -1,4 +1,5 @@
 import { boundedDiscoveryMap } from './bounded-discovery-map';
+import { reviewIdeaCardsInBatches } from './idea-review-batches';
 import { generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
 import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } from './cross-stage-patch';
@@ -5606,7 +5607,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const result = await this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
       standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + '\n当前是锁定前复核，只审查，不修改或重选。'
-      + (mode === 'source_drift' ? '本次核验两类已选题材的同一身份问题，不审同批重合。第一类 source_drift：逐项核对已选展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺；补足细节不等于改写原骨架，若原池只记人物提出请求，先核实展开是否仍保留请求发生；后文揭露真实动机不代表请求未发生。地点与状态须分清先后阶段，不把后来变化倒推为前一事件未发生。第二类 payoff_gap：选中前核对同一题材 storyCore / payoff 的核心结果与 activeChoice / escalation 已提供的行动、必要证据、参与者权限或权利程序能否形成真实因果。只在已明确的结局需要某必要条件而筛选证据缺失时指出，不能因未来场景未写足、超自然原理未解释或个人不喜欢题材就拦截；尤其不能从公开证据直接推定有权机关已经作出处置，也不能从事业成果直接推定外部权利已获裁决。引用同ID已选题材的两个不同真实片段，quote 指向不成立的承诺/结果，referenceQuote 指向当事人已有行动/阶段，理由具体交代哪一项必要条件缺失。payoff_gap 不得凭空猜测新的反转或法律结论。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，必须说明选择、升级、反转与代价为何同构；引用两处相似句子之外，还须逐项比较主角选择触发的具体升级、反转改变的胜负条件与最终代价。')
+      + (mode === 'source_drift' ? '本次核验两类已选题材的同一身份问题，不审同批重合。第一类 source_drift：逐项核对已选展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺；补足细节不等于改写原骨架，若原池只记人物提出请求，先核实展开是否仍保留请求发生；后文揭露真实动机不代表请求未发生。地点与状态须分清先后阶段，不把后来变化倒推为前一事件未发生。第二类 payoff_gap：选中前核对同一题材 storyCore / payoff 的核心结果与 activeChoice / escalation 已提供的行动、必要证据、参与者权限或权利程序能否形成真实因果。逐项列出结局中即使主角成功执行当前行动也可能不成立的结果，检查已选原文有没有实际建立相应控制权、资源来源、合法手续及第三方决定；不能因为两个系统共享数据、操作者或名称就推定能力互通，更不能用结局断言自证能力。只在已明确的结局需要某必要条件而筛选证据缺失时指出，不能因未来场景未写足、超自然原理未解释或个人不喜欢题材就拦截；尤其不能从公开证据直接推定有权机关已经作出处置，也不能从事业成果直接推定外部权利已获裁决。引用同ID已选题材的两个不同真实片段，quote 指向不成立的承诺/结果，referenceQuote 指向当事人已有行动/阶段，理由具体交代哪一项必要条件缺失。payoff_gap 不得凭空猜测新的反转或法律结论。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，必须说明选择、升级、反转与代价为何同构；引用两处相似句子之外，还须逐项比较主角选择触发的具体升级、反转改变的胜负条件与最终代价。')
       + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
       + '\n【待锁定已选胚子】' + JSON.stringify(selection.selected)
       + '\n当前审查类型=' + mode + (mode === 'source_drift' ? '（允许source_drift/payoff_gap两类）' : '') + '\n只输出JSON:{"passed":true,"issues":[]}。有已举证问题则passed=false，issues项为'
@@ -11024,6 +11025,12 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
    */
   private async reviewIdeaPresentation(cards: any[], references: any[] = [], customPlatformNote = ''): Promise<IdeaPresentationVerdict[]> {
     if (!cards.length) return [];
+    // Bounded parallel reviews retain every other candidate as comparison
+    // evidence. A failed group rejects the complete final Gate review.
+    if (cards.length > 3) {
+      return reviewIdeaCardsInBatches(cards, references,
+        (group, comparisons) => this.reviewIdeaPresentation(group, comparisons, customPlatformNote), 3, 2);
+    }
     const reviewIssues = (value: unknown) => [...ideaReviewEvidenceReferenceIssues(targetIdeaReviews(value, cards, references), cards),
       ...ideaPayoffBridgeIssues(targetIdeaReviews(value, cards, references), cards),
       ...presentationReviewIssues(resolveIdeaReviewEvidence(targetIdeaReviews(value, cards, references), cards), cards, true)];
@@ -11042,7 +11049,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       + '比较同批及参考卡的关系、选择、冲突推进和反转；不要求跨越用户指定分类，但同一职业查案/权力阴谋路径换道具应distinctFromBatch=false。'
       + 'readerQuestion必须是由实际标题与开篇引发的具体读者追问，不要泛泛问真相是什么；不合格时issues写具体理由和可沿原故事修正的表达。'
       + '还须逐项核对protagonist、hook、description、ending中的自然中文与事实到结论的推理：句子里的因果、程度和反证是否真的成立。可理解的语气瑕疵写warnings；若文字将局部证据直接等同整体责任，或因果关系本身不成立，则storyCoherent=false并给出具体原文和缺失前提，不能因情节看似完整而忽略。'
-      + '还须独立核对storyCoherent（能力触发、边界与代价是否前后一致，人物主动选择和必要因果是否自洽）、payoffCredible（开篇承诺是否由既定选择和代价兑现，不能靠新能力或省略权利/程序条件收束）、platformFit（故事机制是否符合所附平台、分类与流派标准，而非只填标签）。反转不得取消已成立前提，身份、证据与亲属关系不能直接等同法律或程序效果。短篇闭环不要求情绪圆满，更不能一次揭露无条件解决所有冲突。能力的科学来源或幕后起源尚未揭示、悬疑信息暂时保留，不能单独判因果失败，不要求题材卡把全部谜底解释完；必须指出具体互斥事实或兑现结果缺少的必要前提。道具词和意象不能单独判标题失败，要看它是否已经形成可理解的利益、关系、危险或问题。'
+      + '同一人物若已在前文退出行动或失去能力，后续行动与计划不得默认仍由其完成；核对跨节点状态、权利和后续结果的一致性。还须独立核对storyCoherent（能力触发、边界与代价是否前后一致，人物主动选择和必要因果是否自洽）、payoffCredible（开篇承诺是否由既定选择和代价兑现，不能靠新能力或省略权利/程序条件收束）、platformFit（故事机制是否符合所附平台、分类与流派标准，而非只填标签）。反转不得取消已成立前提，身份、证据与亲属关系不能直接等同法律或程序效果。短篇闭环不要求情绪圆满，更不能一次揭露无条件解决所有冲突。能力的科学来源或幕后起源尚未揭示、悬疑信息暂时保留，不能单独判因果失败，不要求题材卡把全部谜底解释完；必须指出具体互斥事实或兑现结果缺少的必要前提。道具词和意象不能单独判标题失败，要看它是否已经形成可理解的利益、关系、危险或问题。'
       + '按已注入QLT-003核对必要因果、四项阅读目标及题材证据编号。'
       + (cards.every(card => card.storyType === 'short_story') ? '按已注入QLT-003短篇阅读承诺执行。' : '长篇按阶段兑现与持续追读判断，不要求题材卡或单章解决全书冲突。')
       + 'qualityReason须明确核心行动导致关键结果的桥接条件，不能只评价题材新颖、故事完整或亲情有代价。核对同批选择—代价—反击—揭晓的结构，而非只比较词汇。每卡另返回payoffBridge:{status:"supported|gap",actionEvidenceRef:"本卡实际行动编号",resultEvidenceRef:"本卡ending或scopeBreakdown的outcome编号",conditionEvidenceRef:"已建立必要条件的本卡编号，gap时可省略",reason:"核心行动为何能造成所称结果，或缺哪个必要条件"}，按已注入QLT-003题材兑现条件合同逐项判定。'
