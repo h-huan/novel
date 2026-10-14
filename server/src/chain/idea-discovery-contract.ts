@@ -231,6 +231,7 @@ export function bindStructuredIdeaCardToPremise(
 const IDEA_GATE_REPAIR_TEXT_FIELDS = [
   'hook',
   'description',
+  'protagonist',
   'coreConflict',
   'uniquePoint',
   'mainReversal',
@@ -274,7 +275,7 @@ export function ideaGateLocalRepairDirective(
   return `【最终 Gate·同题材有序局部修复】
 下面 ${safeTargets.length} 项已经完成创建前筛选和完整题材卡结构化。服务器已经锁定每一项的题材身份，你不负责回传、生成或修改内部标识，也不得换题。
 1. patches 数组必须恰好 ${safeTargets.length} 项，并严格按输入 position 的顺序逐项对应；每项只写需要修改的字段。
-2. 若gateIssues明确点名标题，可额外返回title，只改原故事的表达且不得换题；其它情况下标题保持原样。顶层只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数、标签或任何内部标识。
+2. 若gateIssues明确点名标题，可额外返回title，只改原故事的表达且不得换题；其它情况下标题保持原样。顶层只允许 hook、description、protagonist、coreConflict、uniquePoint、mainReversal；protagonist仅可修人物简介的指代、语义与既有弱点表达，不得改名、人物身份或动机；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数、标签或任何内部标识。
 3. 只修 gateIssues 点名的表达证据，让原故事已有的异常/信息差、现实压力、主角行动、关系、因果升级、反转和二阶后果更清楚；禁止新增另一套案件、能力、身份、亲属关系或结局。
 若storyRepairAllowed=true，必须同步修复点名问题在setting、ending与scopeBreakdown中的所有矛盾引用，不能只改description留下旧规则。这些字段不接受整对象覆盖，只能另返回storyPatches数组：{"field":"setting或ending","match":"逐字存在且唯一的短原文","replacement":"修正后片段"}，或{"field":"scopeBreakdown","stage":1,"subfield":"reason或outcome","match":"该阶段字段中逐字存在且唯一的短原文","replacement":"修正后片段"}。stage从1开始。保留原题材人物、核心困境、选择方向和结局代价，不新增能力或改变已有规则数值；存在无法沿原事实修复的真实矛盾就保持拒绝，不能靠补一条万能规则圆回。不得改arc、chapters、篇幅或平台配置。storyRepairAllowed=false时禁止此数组。
 若gateIssues点名故事命名，可另返回namingReplacements对象（原禁止名称:原创虚构名称），服务器会在全部故事文本中统一替换，包含人物/宠物名、结局与章节规划；只许更换名称，不改变行为、关系和事件。其它题材不允许此字段。
