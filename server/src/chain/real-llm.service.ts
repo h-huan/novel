@@ -909,15 +909,32 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     // 即使旧调用点传入更大数字，也在这里统一封顶，避免业务层、SDK 与空响应重试相乘。
     const maxEmptyRetries = request.maxEmptyRetries === 0 ? 0 : 1;
     let thinkingDisabledAttempted = request.physicalCallBudget?.recoveryWithoutThinking === true;
-    const callBudgetedModel = (...args: Parameters<RealLLMService['callModel']>) => {
+    let localPhysicalCalls = 0;
+    let lastPhysicalOutcome = '尚无模型回复';
+    const callBudgetedModel = async (...args: Parameters<RealLLMService['callModel']>): Promise<ModelCallResult> => {
       assertGenerationActive();
       if (request.physicalCallBudget) {
         if (request.physicalCallBudget.remaining <= 0) {
-          throw new Error('源头修订模型调用预算已用尽，已停止扩容或补发；本次未验收，不返回截断候选。');
+          // Keep the blocking budget contract, but report what exhausted it.
+          // This is not permission to extend the budget, bypass Gate or treat
+          // an incomplete source repair as a validated candidate.
+          throw new Error('源头修订模型调用预算已用尽，已停止扩容或补发；本次未验收，不返回截断候选。'
+            + ' 本步骤已发物理调用=' + localPhysicalCalls
+            + '；最后一次结果=' + lastPhysicalOutcome
+            + '；阶段=' + (request.metrics?.stepKey || request.scenario || 'unknown') + '。');
         }
         request.physicalCallBudget.remaining--;
       }
-      return this.callModel(...args);
+      localPhysicalCalls++;
+      try {
+        const result = await this.callModel(...args);
+        lastPhysicalOutcome = 'finish_reason=' + (result.finishReason || 'unknown')
+          + '，返回字符=' + result.content.length;
+        return result;
+      } catch (error) {
+        lastPhysicalOutcome = '模型调用异常=' + (error instanceof Error ? error.name + ': ' + error.message.slice(0, 200) : String(error).slice(0, 200));
+        throw error;
+      }
     };
     // 显式单项契约与步骤/场景共同约束；普通多项 JSON 不获得额外恢复。
     const upstreamRepairUnit = request.structuredRepairUnitCount === 1 && request.scenario === 'review'
