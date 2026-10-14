@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const reportPath = path.join(root, 'verification', 'latest.json');
+const previousReportTime = fs.existsSync(reportPath) ? fs.statSync(reportPath).mtimeMs : -1;
 
 const core = spawnSync(
   process.execPath,
@@ -14,7 +15,9 @@ const core = spawnSync(
 );
 
 let guardStatus = 0;
-if (fs.existsSync(reportPath)) {
+// A crashed core must never re-run the guard or archive a prior latest.json.
+const hasFreshReport = fs.existsSync(reportPath) && fs.statSync(reportPath).mtimeMs > previousReportTime;
+if (hasFreshReport) {
   const guard = spawnSync(
     process.execPath,
     [path.join(root, 'verify-local-guard.mjs'), reportPath],
@@ -25,7 +28,7 @@ if (fs.existsSync(reportPath)) {
 
 // Keep the default latest-only workflow; opt in to per-run evidence when
 // diagnosing intermittent real-model failures across several manual runs.
-if (process.argv.includes('--archive') && fs.existsSync(reportPath)) {
+if (process.argv.includes('--archive') && hasFreshReport) {
   try {
     const snapshot = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
     const stamp = String(snapshot.generatedAt || new Date().toISOString()).replace(/[^0-9A-Za-z_-]/g, '-');
@@ -43,4 +46,8 @@ if (process.argv.includes('--archive') && fs.existsSync(reportPath)) {
 }
 
 const coreStatus = typeof core.status === 'number' ? core.status : 1;
+if (!hasFreshReport) {
+  console.error('[verify] core did not write a fresh report; previous latest files are preserved but are stale.');
+  guardStatus = 1;
+}
 process.exitCode = coreStatus !== 0 ? coreStatus : guardStatus;
