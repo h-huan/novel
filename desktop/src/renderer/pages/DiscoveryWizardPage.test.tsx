@@ -102,5 +102,19 @@ it('allows only explicitly marked qualified partial results without weakening th
 it('shows saved partial selection reasons without another discovery request',async()=>{
  const {discoveryShortfallReasons}=await import('./DiscoveryWizardPage');
  expect(discoveryShortfallReasons([{ideaDiscoveryAudit:{selectionAudit:{reasons:[{reason:'核心动机被改写'}]}}}])).toEqual(['核心动机被改写']);
+ expect(discoveryShortfallReasons([{
+   ideaDiscoveryAudit: {
+     selectionAudit: {reasons:[{reason:'原池与所选因果不符'}]},
+     structuringErrors:[{sourcePremiseId:'P3',error:'JSON结构化失败'}],
+     reasons:['开篇行动没有后续兑现','原池与所选因果不符'],
+     repairError:'模型没有返回有效的局部补丁',
+   },
+ }])).toEqual([
+   '原池与所选因果不符',
+   'P3 结构化失败：JSON结构化失败',
+   '开篇行动没有后续兑现',
+   '局部修复未完成：模型没有返回有效的局部补丁',
+ ]);
  expect(discoveryShortfallReasons([])).toEqual([]);
+ expect(discoveryShortfallReasons([{ideaDiscoveryAudit:{}}])).toEqual([]);
 });
