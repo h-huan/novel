@@ -7375,16 +7375,17 @@ ${(() => {
           } catch (error) {
             if (!isGateRejection(error) || error.report.status !== 422
               || error.report.kinds.length !== 1 || error.report.kinds[0] !== 'outline_alignment') throw error;
+            const actionCandidate = chData as Record<string, any>; // already verified non-null above
             const repair = await this.llmCallWithRetry<any>(`第${order + 1}章关键行动因果局部修复`,
               `本章候选已通过结构和事实核对，但关键行动不能兑现承诺结果。仅修改当前尚未入库的候选章纲，补足确有来源依据的最小必要行动与实际授权，不得创造新世界规则、角色、机构权力、人物关系、剧情真相、阶段终局，也不能改变篇幅或本章职责。\n【已确认题材】${canonicalCreativeBrief}\n【已保存世界条件，仅保留与确认题材不冲突部分】${JSON.stringify(currentWorldForOutlineReview)}\n【前章已通过事实】${JSON.stringify(acceptedOutlineSources)}\n【当前候选】${JSON.stringify(chData)}\n【独立关键行动审查阻断，必须落实真实前提而非只改措辞】${error.report.detail}\n只能输出JSON对象{"patch":{"content":"修正后的事件链","scenes":[],"characterActions":[]}}。patch仅列实际需要变化的content、scenes、characterActions、conflicts、highlights、characterStates、hook字段，不得重写整章、不得提交其它字段，不能把将来打算当作本章已兑现事实。没有证据能成立则不得编造已获批准。`,
               { projectId, chapterIndex: order + 1, scenario: 'outline', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(), stepKey: 'creation_chapter_action_proof_repair',
-                validate: value => { try { applyChapterActionProofPatch(chData, value); return true; } catch { return false; } },
-                describeValidation: value => { try { applyChapterActionProofPatch(chData, value); return []; }
+                validate: value => { try { applyChapterActionProofPatch(actionCandidate, value); return true; } catch { return false; } },
+                describeValidation: value => { try { applyChapterActionProofPatch(actionCandidate, value); return []; }
                   catch (failure) { return [failure instanceof Error ? failure.message : String(failure)]; } },
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
-            const revised = applyChapterActionProofPatch(chData, repair.data);
+            const revised = applyChapterActionProofPatch(actionCandidate, repair.data);
             const structureProblems = assessChapter(revised);
             if (structureProblems.length) throw new Error(`第${order + 1}章关键行动局部修复破坏了章纲结构：${structureProblems.join('；')}；原候选没有提交。`);
             const revisedFacts = await reviewChapterFacts(revised);
