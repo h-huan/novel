@@ -56,8 +56,9 @@ function git(gitArgs) {
 
 function seedVersion() {
   try {
-    const raw = fs.readFileSync(path.join(root, 'server/src/modules/module-standards/module-standards.seed.ts'), 'utf8');
-    const m = raw.match(/SEED_BASELINE_VERSION\s*=\s*(\d+)/);
+    // Baseline is a Registry alias now, not a duplicated numeric constant in the seed.
+    const raw = fs.readFileSync(path.join(root, 'server/shared/src/system-workflow-rules.registry.ts'), 'utf8');
+    const m = raw.match(/SYSTEM_WORKFLOW_RULESET_VERSION\s*=\s*(\d+)/);
     return m ? Number(m[1]) : null;
   } catch {
     return null;
@@ -222,6 +223,14 @@ async function inspectProject(target) {
     return ai - bi;
   });
   const runRows = asArray(runsRes.data);
+  // The chapters LIST deliberately omits manuscript content; only the chapter-detail
+  // endpoint returns text. Reading list.content gives a fake empty first chapter even
+  // when its wordCount is positive and the generation run passed.
+  const firstChapterId = chapterRows[0]?.id;
+  const firstChapterDetailRes = firstChapterId
+    ? await request(`/projects/${encodeURIComponent(projectId)}/chapters/${encodeURIComponent(firstChapterId)}`)
+    : null;
+  const firstChapterDetail = firstChapterDetailRes?.ok ? unwrap(firstChapterDetailRes.data) : null;
   const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
   const confirmedStory = constitution?.confirmedStory && typeof constitution.confirmedStory === 'object' && !Array.isArray(constitution.confirmedStory)
     ? constitution.confirmedStory
@@ -260,7 +269,11 @@ async function inspectProject(target) {
     } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
     chapters: {
       count: chapterRows.length,
-      first: chapterSummary(chapterRows[0]),
+      first: chapterSummary(firstChapterDetail ?? chapterRows[0]),
+      firstContentStatus: !firstChapterId ? 'no_chapters'
+        : !firstChapterDetailRes?.ok ? 'unavailable' : 'loaded',
+      firstContentError: firstChapterId && !firstChapterDetailRes?.ok
+        ? (firstChapterDetailRes?.error || `HTTP ${firstChapterDetailRes?.status}`) : null,
       latest: chapterSummary(chapterRows[chapterRows.length - 1]),
     },
     firstChapterRun: runSummary(firstChapterRun),
@@ -424,7 +437,8 @@ if (health.ok) for (const target of projectTargets) {
   const firstChapter = result.chapters?.first ?? null;
   const shouldRequireFirstChapter = runFull || projectStatus === 'active';
   if (shouldRequireFirstChapter) {
-    if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
+    if (result.chapters?.firstContentStatus === 'unavailable') runtimeProblems.push(`${prefix}_first_chapter_detail_unavailable`);
+    else if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
     const firstRun = result.firstChapterRun;
     if (!firstRun) {
       runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
@@ -499,9 +513,11 @@ function projectMarkdown(target) {
   if (!result) return `### ${target.label}\n\n- 未找到项目`;
   if (result.project?.error) return `### ${target.label}\n\n- 项目：FAIL · ${result.project.error}`;
   const firstChapter = result.chapters?.first ?? null;
-  const firstLine = firstChapter
-    ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
-    : '未生成第一章';
+  const firstLine = result.chapters?.firstContentStatus === 'unavailable'
+    ? 'UNAVAILABLE · 章节详情获取失败：' + (result.chapters.firstContentError || 'unknown')
+    : firstChapter
+      ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
+      : '未生成第一章';
   const gateLine = result.firstChapterRun
     ? `${result.firstChapterRun.gate_status ?? result.firstChapterRun.gateStatus ?? 'missing'} · run=${result.firstChapterRun.id ?? 'unknown'} · status=${result.firstChapterRun.status ?? 'unknown'} · model=${result.firstChapterRun.model ?? 'unknown'}`
     : '未找到第一章 chapter generation run';
