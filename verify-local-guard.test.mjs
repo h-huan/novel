@@ -25,12 +25,11 @@ function run(report) {
     runtime: { projects: { short: { project: { status: 'creating' }, cockpit: { diagnostics: { creationStalled: false } } } } },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
   });
-  assert.equal(result.status, 1);
-  assert.equal(next.verdict.status, 'failed');
-  assert.deepEqual(next.verdict.runtimeProblems, ['long_project_missing']);
-  assert.match(nextMarkdown, /最终结果：\*\*FAILED\*\*/u);
-  assert.match(nextMarkdown, /long_project_missing/u);
-  assert.doesNotMatch(nextMarkdown, /不要求短篇和长篇同时存在/u);
+  // Quick diagnostic does not require a second novel to exist.
+  assert.equal(result.status, 0);
+  assert.equal(next.verdict.status, 'passed');
+  assert.deepEqual(next.verdict.runtimeProblems, []);
+  assert.doesNotMatch(nextMarkdown, /long_project_missing/u);
 }
 
 {
@@ -65,6 +64,19 @@ function run(report) {
   assert.ok(next.verdict.runtimeProblems.includes('short_project_status_generation_failed'));
   assert.match(nextMarkdown, /创建\/持久化诊断：FAIL · mismatch=outline_success_without_chapter_outline/u);
   assert.doesNotMatch(nextMarkdown, /创建\/持久化诊断：PASS · mismatch=outline_success_without_chapter_outline/u);
+}
+
+{
+  const { result, next, nextMarkdown } = run({
+    options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: null },
+    runtime: { projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } } } },
+    verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
+  });
+  // Full acceptance still requires both short and long projects.
+  assert.equal(result.status, 1);
+  assert.equal(next.verdict.status, 'failed');
+  assert.deepEqual(next.verdict.runtimeProblems, ['long_project_missing']);
+  assert.match(nextMarkdown, /long_project_missing/u);
 }
 
 console.log('verify-local-guard tests passed');
