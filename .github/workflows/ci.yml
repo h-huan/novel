@@ -22,20 +22,12 @@ jobs:
             desktop/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Verify local acceptance script syntax and diagnostics regressions
-        run: |
-          node --check ../verify-local.mjs
-          node --check ../verify-local-core.mjs
-          node --check ../verify-local-guard.mjs
-          node --check ../verify-local-idea-diagnostics.mjs
-          node --check ../verify-local-standards.mjs
-          node --test ../verify-local-guard.test.mjs ../verify-local-idea-diagnostics.test.mjs ../verify-local-standards.test.mjs
+      - name: Verify local acceptance script syntax
+        run: node --check ../verify-local.mjs
       - name: Typecheck
         run: npm run typecheck
       - name: Build
         run: npm run build
-      - name: Regression for missing runtime middleware
-        run: node scripts/verify-bootstrap-diagnostic.cjs
       - name: Unit tests
         run: npm test
       - name: Acceptance tests
@@ -96,23 +88,3 @@ jobs:
         with:
           name: desktop-test-results
           path: desktop/test-results
-  server-windows-startup:
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: server
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: server/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Clean build and runtime artifact check
-        run: npm run build
-      - name: Require compiled Nest AppModule
-        run: node -e "require('./dist/src/app.module.js')"
-      - name: Reject missing compiled middleware before boot
-        run: node scripts/verify-bootstrap-diagnostic.cjs

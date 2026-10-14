@@ -2,7 +2,7 @@ import { normalizePremiseSelectionPayload, type PremiseSelectionResult } from '.
 
 export interface PremiseSelectionReview {
   passed: boolean;
-  issues: Array<{ kind: 'overlap' | 'source_drift' | 'payoff_gap'; premiseId: string; referencePremiseId: string;
+  issues: Array<{ kind: 'overlap' | 'source_drift'; premiseId: string; referencePremiseId: string;
     quote: string; referenceQuote: string; reason: string }>;
 }
 const containsQuote = (value: Record<string, unknown> | undefined, quote: unknown) =>
@@ -18,11 +18,9 @@ export function premiseSelectionReviewIssues(value: unknown, selection: PremiseS
   for (const item of review.issues) {
     const candidate = selection.selected.find(p => p.premiseId === item?.premiseId);
     const reference = item?.kind === 'overlap' ? selection.selected.find(p => p.premiseId === item.referencePremiseId)
-      : item?.kind === 'source_drift' ? selection.pool.find(p => p.premiseId === item.referencePremiseId)
-      : item?.kind === 'payoff_gap' ? selection.selected.find(p => p.premiseId === item.referencePremiseId) : undefined;
+      : item?.kind === 'source_drift' ? selection.pool.find(p => p.premiseId === item.referencePremiseId) : undefined;
     if (!candidate || !reference || (item.kind === 'overlap' && item.premiseId === item.referencePremiseId)
-      || (['source_drift', 'payoff_gap'].includes(item.kind) && item.premiseId !== item.referencePremiseId)
-      || (item.kind === 'payoff_gap' && item.quote === item.referenceQuote)
+      || (item.kind === 'source_drift' && item.premiseId !== item.referencePremiseId)
       || !containsQuote(candidate, item.quote) || !containsQuote(reference, item.referenceQuote)
       || typeof item.reason !== 'string' || item.reason.trim().length < 8) errors.push('筛选问题须绑定实际题材身份、两段原文及具体因果理由，不能错引参考项');
   }
@@ -94,7 +92,7 @@ export function retainReviewedPremises(selection: PremiseSelectionResult, review
   protectedIds: readonly string[] = []) {
   const errors = premiseSelectionReviewIssues(review, selection);
   if (errors.length) throw new Error('不能保留未完成有效复核的题材：' + errors.join('；'));
-  const excluded = new Set(review.issues.filter(issue => issue.kind === 'source_drift' || issue.kind === 'payoff_gap').map(issue => issue.premiseId));
+  const excluded = new Set(review.issues.filter(issue => issue.kind === 'source_drift').map(issue => issue.premiseId));
   const protectedSet = new Set(protectedIds);
   for (const issue of review.issues.filter(item => item.kind === 'overlap')) {
     if (excluded.has(issue.premiseId) || excluded.has(issue.referencePremiseId)) continue;

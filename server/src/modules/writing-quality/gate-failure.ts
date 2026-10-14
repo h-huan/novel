@@ -28,8 +28,6 @@ export interface GateFailureInput {
   evaluationStatus: 'evaluated' | 'not_evaluated';
   /** 默认 outline_alignment（chain.controller 的本章大纲一致性 Gate）。 */
   topic?: GateTopic;
-  /** The same causal verdict can happen before a novel framework is committed. */
-  artifact?: 'framework';
   /** 质量 Gate 的原始状态字（如 failed）。用于保留既有的「质量 Gate <status>」前缀契约。 */
   gateStatus?: string;
   missing?: string[];
@@ -75,13 +73,6 @@ export function isHardlineFinding(text: string): boolean {
  * 否则作者会去反复重试评审，而真正该做的是补全本章详细大纲（这正是「同一个问题反反复复」的一种）。
  */
 export const OUTLINE_PRECONDITION_MARKER = '本章详细大纲不足以作为正文验收依据';
-
-const FRAMEWORK_SECTION_TITLE: Record<GateFailureKind, string> = {
-  missing_standard: '【框架执行标准】执行标准未落实，候选框架未提交',
-  prose_hardline: '【框架审查硬红线】已举证的框架问题，候选框架未提交',
-  outline_alignment: '【框架关键行动因果】依据世界规则和候选章纲核对的必要条件缺口，候选框架未提交',
-  review_incomplete: '【框架审查未完成】审查没有得到可靠结论，候选框架未提交，不能当作故事事实缺陷',
-};
 
 const KIND_ORDER: GateFailureKind[] = ['missing_standard', 'prose_hardline', 'outline_alignment', 'review_incomplete'];
 
@@ -175,16 +166,10 @@ export function classifyGateFailure(input: GateFailureInput): GateFailureReport 
     const items = buckets[kind];
     const body = items.slice(0, 4).join('；');
     const more = items.length > 4 ? `（另有 ${items.length - 4} 项同类问题，见矛盾面板）` : '';
-    return `${input.artifact === 'framework' ? FRAMEWORK_SECTION_TITLE[kind] : SECTION_TITLE[topic][kind]}：${body}${more}`;
+    return `${SECTION_TITLE[topic][kind]}：${body}${more}`;
   });
 
-  const prefix = input.artifact === 'framework'
-    ? kinds.includes('review_incomplete')
-      ? '小说框架审查未完成，候选框架未提交'
-      : kinds.includes('missing_standard')
-        ? '框架执行标准未落实，候选框架未提交'
-        : '小说框架关键行动因果未通过，候选框架未提交'
-    : buildGateFailurePrefix(topic, input.gateStatus, kinds, outlinePreconditionOnly);
+  const prefix = buildGateFailurePrefix(topic, input.gateStatus, kinds, outlinePreconditionOnly);
 
   return {
     topic,

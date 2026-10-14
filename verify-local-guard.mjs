@@ -11,7 +11,7 @@ const mode = String(report?.options?.mode || '');
 const problems = new Set(Array.isArray(report?.verdict?.runtimeProblems) ? report.verdict.runtimeProblems : []);
 const terminalPersistenceMismatches = [];
 
-if (report?.options?.fullTests === true && mode.includes('short_and_long')) {
+if (mode.includes('short_and_long')) {
   if (!report?.options?.shortProjectId) problems.add('short_project_missing');
   if (!report?.options?.longProjectId) problems.add('long_project_missing');
 }
@@ -54,6 +54,10 @@ fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
 if (fs.existsSync(markdownPath)) {
   let markdown = fs.readFileSync(markdownPath, 'utf8');
   markdown = markdown.replace(/- 最终结果：\*\*(?:PASSED|FAILED)\*\*/u, `- 最终结果：**${report.verdict.status.toUpperCase()}**`);
+  markdown = markdown.replace(
+    /- 不带 --full 是故障诊断：自动选择最近项目（包括 creating \/ generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。/u,
+    '- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed）；当模式声明 short_and_long 时必须同时找到短篇和长篇，否则验收失败；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。',
+  );
   for (const mismatch of terminalPersistenceMismatches) {
     markdown = markdown.replace(`创建/持久化诊断：PASS · mismatch=${mismatch}`, `创建/持久化诊断：FAIL · mismatch=${mismatch}`);
   }

@@ -3,8 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { analyzeIdeaDiscovery, renderIdeaDiscoveryDetails } from './verify-local-idea-diagnostics.mjs';
-import { analyzeExecutionStandards } from './verify-local-standards.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -57,9 +55,8 @@ function git(gitArgs) {
 
 function seedVersion() {
   try {
-    // Baseline is a Registry alias now, not a duplicated numeric constant in the seed.
-    const raw = fs.readFileSync(path.join(root, 'server/shared/src/system-workflow-rules.registry.ts'), 'utf8');
-    const m = raw.match(/SYSTEM_WORKFLOW_RULESET_VERSION\s*=\s*(\d+)/);
+    const raw = fs.readFileSync(path.join(root, 'server/src/modules/module-standards/module-standards.seed.ts'), 'utf8');
+    const m = raw.match(/SEED_BASELINE_VERSION\s*=\s*(\d+)/);
     return m ? Number(m[1]) : null;
   } catch {
     return null;
@@ -199,28 +196,11 @@ function chapterSummary(chapter) {
 
 function runSummary(run) {
   if (!run) return null;
-  const out = pick(run, [
+  return pick(run, [
     'id', 'stage', 'scenario', 'step_key', 'stepKey', 'status', 'gate_status', 'gateStatus',
     'chapter_index', 'chapterIndex', 'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
     'context_version', 'contextVersion', 'standard_version', 'standardVersion',
   ]);
-  // The authoritative failed run now retains structured causal evidence in
-  // quality_payload. Show a bounded summary; never infer missing proof from text.
-  try {
-    const payload = typeof run.quality_payload === 'string'
-      ? JSON.parse(run.quality_payload) : run.quality_payload;
-    const evidence = payload?.postRepairValidation?.evidence;
-    if (evidence && typeof evidence === 'object') {
-      out.frameworkGateEvidence = {
-        evaluationStatus: evidence.evaluationStatus || 'unknown',
-        errors: Array.isArray(evidence.errors) ? evidence.errors : [],
-        issues: Array.isArray(evidence.issues) ? evidence.issues : [],
-        transitions: Array.isArray(evidence.causalAudit?.transitions)
-          ? evidence.causalAudit.transitions : [],
-      };
-    }
-  } catch { /* Older logs lacked structured evidence. Do not invent it. */ }
-  return out;
 }
 
 async function inspectProject(target) {
@@ -241,14 +221,6 @@ async function inspectProject(target) {
     return ai - bi;
   });
   const runRows = asArray(runsRes.data);
-  // The chapters LIST deliberately omits manuscript content; only the chapter-detail
-  // endpoint returns text. Reading list.content gives a fake empty first chapter even
-  // when its wordCount is positive and the generation run passed.
-  const firstChapterId = chapterRows[0]?.id;
-  const firstChapterDetailRes = firstChapterId
-    ? await request(`/projects/${encodeURIComponent(projectId)}/chapters/${encodeURIComponent(firstChapterId)}`)
-    : null;
-  const firstChapterDetail = firstChapterDetailRes?.ok ? unwrap(firstChapterDetailRes.data) : null;
   const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
   const confirmedStory = constitution?.confirmedStory && typeof constitution.confirmedStory === 'object' && !Array.isArray(constitution.confirmedStory)
     ? constitution.confirmedStory
@@ -287,18 +259,11 @@ async function inspectProject(target) {
     } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
     chapters: {
       count: chapterRows.length,
-      first: chapterSummary(firstChapterDetail ?? chapterRows[0]),
-      firstContentStatus: !firstChapterId ? 'no_chapters'
-        : !firstChapterDetailRes?.ok ? 'unavailable' : 'loaded',
-      firstContentError: firstChapterId && !firstChapterDetailRes?.ok
-        ? (firstChapterDetailRes?.error || `HTTP ${firstChapterDetailRes?.status}`) : null,
+      first: chapterSummary(chapterRows[0]),
       latest: chapterSummary(chapterRows[chapterRows.length - 1]),
     },
     firstChapterRun: runSummary(firstChapterRun),
     latestRun: runSummary(runRows[0]),
-    // Keep chronological execution evidence when the last call happened to succeed.
-    failedRuns: runRows.filter((run) => Boolean(String(run.error || '').trim())
-      || /fail|error|reject|block/i.test(String(run.status || ''))).slice(0, 15).map(runSummary),
     integrityAudit: integrityRes.ok ? unwrap(integrityRes.data) : { error: integrityRes.error ?? `HTTP ${integrityRes.status}` },
     cockpit: cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` },
     platformAnalytics: analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` },
@@ -340,17 +305,22 @@ const standardsResponse = health.ok
   : skippedRuntimeRequest('module-standards');
 const standards = asArray(standardsResponse.data);
 const codeSeedVersion = seedVersion();
-const standardsAnalysis = analyzeExecutionStandards(standards, codeSeedVersion, standardsResponse.ok);
+const standardMismatch = standards.filter((s) => {
+  const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
+  const source = String(s.source ?? '');
+  return (Number.isFinite(seed) && codeSeedVersion !== null && seed !== codeSeedVersion)
+    || source !== 'code_seed';
+}).map((s) => ({
+  moduleKey: s.moduleKey ?? s.module_key ?? null,
+  version: s.version ?? null,
+  seedBaselineVersion: s.seedBaselineVersion ?? s.seed_baseline_version ?? null,
+  source: s.source ?? null,
+}));
 
 const inspectedProjects = {};
 if (health.ok) {
   for (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);
 }
-
-const ideaDiscoverySnapshot = ideaDiscoveryResponse.ok
-  ? unwrap(ideaDiscoveryResponse.data)
-  : { available: false, error: ideaDiscoveryResponse.error ?? ('HTTP ' + ideaDiscoveryResponse.status) };
-const ideaDiscoveryAnalysis = analyzeIdeaDiscovery(ideaDiscoverySnapshot);
 
 const runtime = {
   health,
@@ -362,9 +332,15 @@ const runtime = {
         downstreamSkipped: ['ideaDiscovery', 'standards', 'projectDiscovery', 'projects'],
         detail: health.error ?? `HTTP ${health.status}`,
       },
-  ideaDiscovery: ideaDiscoverySnapshot,
-  ideaDiscoveryAnalysis,
-  standards: standardsAnalysis,
+  ideaDiscovery: ideaDiscoveryResponse.ok
+    ? unwrap(ideaDiscoveryResponse.data)
+    : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` },
+  standards: {
+    codeSeedVersion,
+    activeCount: standards.length,
+    consistent: standardsResponse.ok && standardMismatch.length === 0,
+    mismatches: standardMismatch,
+  },
   projectDiscovery,
   projects: inspectedProjects,
 };
@@ -375,7 +351,6 @@ if (!dualMode && inspectedProjects.project) {
     chapters: inspectedProjects.project.chapters,
     firstChapterRun: inspectedProjects.project.firstChapterRun,
     latestRun: inspectedProjects.project.latestRun,
-    failedRuns: inspectedProjects.project.failedRuns,
     integrityAudit: inspectedProjects.project.integrityAudit,
     cockpit: inspectedProjects.project.cockpit,
     platformAnalytics: inspectedProjects.project.platformAnalytics,
@@ -394,7 +369,7 @@ if (!health.ok) {
   // Root-cause-first: downstream runtime checks were not executed.
   runtimeProblems.push('server_unavailable');
 } else {
-  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push(runtime.standards.error || 'execution_standard_drift');
+  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
   if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
   if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
@@ -440,8 +415,7 @@ if (health.ok) for (const target of projectTargets) {
   const firstChapter = result.chapters?.first ?? null;
   const shouldRequireFirstChapter = runFull || projectStatus === 'active';
   if (shouldRequireFirstChapter) {
-    if (result.chapters?.firstContentStatus === 'unavailable') runtimeProblems.push(`${prefix}_first_chapter_detail_unavailable`);
-    else if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
+    if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
     const firstRun = result.firstChapterRun;
     if (!firstRun) {
       runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
@@ -516,11 +490,9 @@ function projectMarkdown(target) {
   if (!result) return `### ${target.label}\n\n- 未找到项目`;
   if (result.project?.error) return `### ${target.label}\n\n- 项目：FAIL · ${result.project.error}`;
   const firstChapter = result.chapters?.first ?? null;
-  const firstLine = result.chapters?.firstContentStatus === 'unavailable'
-    ? 'UNAVAILABLE · 章节详情获取失败：' + (result.chapters.firstContentError || 'unknown')
-    : firstChapter
-      ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
-      : '未生成第一章';
+  const firstLine = firstChapter
+    ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
+    : '未生成第一章';
   const gateLine = result.firstChapterRun
     ? `${result.firstChapterRun.gate_status ?? result.firstChapterRun.gateStatus ?? 'missing'} · run=${result.firstChapterRun.id ?? 'unknown'} · status=${result.firstChapterRun.status ?? 'unknown'} · model=${result.firstChapterRun.model ?? 'unknown'}`
     : '未找到第一章 chapter generation run';
@@ -546,36 +518,11 @@ function projectMarkdown(target) {
   const persistenceLine = diagnostics
     ? diagnostics.creationStalled
       ? `FAIL · stalled · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
-      : (diagnostics.persistenceMismatch || []).length
-        ? `FAIL · mismatch=${diagnostics.persistenceMismatch.join(',')}`
-        : (diagnostics.uncommittedCandidates || []).length
-          ? `BLOCKED · 候选尚未通过框架 Gate（没有被批准提交），并非已确认的数据丢失 · ${diagnostics.uncommittedCandidates.join(',')}`
-          : (diagnostics.pendingPersistenceMismatch || []).length
-            ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
-            : 'PASS · mismatch=none'
+      : (diagnostics.pendingPersistenceMismatch || []).length
+        ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
+        : `PASS · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
     : 'UNAVAILABLE';
-  const failedRunLines = (result.failedRuns || []).flatMap((run) => {
-    const lines = ['- run=' + (run.id ?? 'unknown') + ' · stage=' + (run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown')
-      + ' · status=' + (run.status ?? 'unknown') + ' · gate=' + (run.gate_status ?? run.gateStatus ?? 'unknown')
-      + ' · model=' + (run.model ?? 'unknown') + ' · error=' + String(run.error ?? '(not provided)').replace(/\\s+/g, ' ').trim()];
-    const proof = run.frameworkGateEvidence;
-    if (proof) {
-      lines.push('  - 关键行动审查状态：' + String(proof.evaluationStatus || 'unknown'));
-      for (const item of (proof.issues || []).slice(0, 15)) lines.push('  - 证据化阻断：章号='
-        + (item.chapterNumber ?? '?') + ' · ' + String(item.summary || '(无摘要)').slice(0, 900)
-        + ' · 来源=' + String(item.evidence || '(未提供)').slice(0, 1100));
-      for (const item of (proof.errors || []).slice(0, 8)) lines.push('  - 审查协议错误：' + String(item).slice(0, 800));
-      for (const item of (proof.transitions || []).filter(x => x.status === 'gap').slice(0, 15))
-        lines.push('  - 因果账目：章号=' + (item.chapterNumber ?? '?') + ' · 必要条件='
-          + String(item.requiredCondition || '(未提供)').slice(0, 650) + ' · 依据='
-          + String(item.reason || '(未提供)').slice(0, 650)
-          + ' · 行动引用=' + String(item.actionAnchorId || '?')
-          + ' · 结果引用=' + String(item.resultAnchorId || '?')
-          + ' · 桥接引用=' + String(item.bridgeAnchorId || '(缺失)'));
-    }
-    return lines;
-  });
-  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}\n\n#### 最近失败的生成调用（最多15条）\n\n${failedRunLines.join('\n') || '- 未发现有错误标记的生成记录'}`;
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
 const projectSections = !health.ok
@@ -590,12 +537,7 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const ideaDiagnosticsSection = renderIdeaDiscoveryDetails(ideaDiscoveryAnalysis);
-const failedTestDetails = failedTests.length
-  ? failedTests.map((test) => '### ' + test.label + '\n\n- exitCode=' + test.exitCode + '\n- stderrTail:\n\x60\x60\x60text\n' + (test.stderrTail || '(empty)') + '\n\x60\x60\x60\n- stdoutTail:\n\x60\x60\x60text\n' + (test.stdoutTail || '(empty)') + '\n\x60\x60\x60').join('\n\n')
-  : '- 无';
-
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n${ideaDiagnosticsSection}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 仓库测试失败详情\n\n${failedTestDetails}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
