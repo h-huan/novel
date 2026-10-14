@@ -8343,20 +8343,27 @@ ${STORY_ENTITY_MODELING_POLICY}
     const reviewStagePromises=async(bundle:typeof generatedBundle):Promise<string[]> => {
       if(!crossStagePromiseCatalog(canonicalCreativeBrief).length)return [];
       const rows=bundle.chapters.filter((row:any)=>typeof row.chapterIndex==='number');
-      const findings:string[]=[];
-      for(const input of crossStagePromiseReviewInputs(canonicalCreativeBrief,rows)){
-        const key=JSON.stringify(input);
-        if(verifiedStagePromises.has(key)){findings.push(...verifiedStagePromises.get(key)!);continue;}
-        const response=await this.llmCallWithRetry<any>('阶段兑现独立验收',stagePromiseReviewPrompt(input.brief,input.candidateText),{
+      const requests = crossStagePromiseReviewInputs(canonicalCreativeBrief, rows);
+      // The individual stage promises are independent claims against frozen
+      // story evidence; only fact ledgers have a strict sequential dependency.
+      // Keep the same complete checks with a two-worker ceiling.
+      const responses = await boundedDiscoveryMap(requests, 2, async input => {
+        const key = JSON.stringify(input);
+        const cached = verifiedStagePromises.get(key);
+        if (cached) return cached;
+        const response = await this.llmCallWithRetry<any>('阶段兑现独立验收',stagePromiseReviewPrompt(input.brief,input.candidateText),{
           projectId,scenario:'review',stepKey:'creation_stage_promise_review',temperature:0.1,
           validate:value=>describeStagePromiseReviewValidation(value,input.brief,input.candidateText).length===0,
           describeValidation:value=>describeStagePromiseReviewValidation(value,input.brief,input.candidateText),
           retryInstruction:'只纠正阶段验收协议，不修订故事。'+stagePromiseReviewPrompt(input.brief,input.candidateText)});
         if(!response.data)throw Error('阶段兑现独立验收未返回完整证据，不能以整体一致性替代');
         const stageFindings=crossStagePromiseFindings({promiseChecks:response.data.checks},input.candidateText,input.brief);
-        verifiedStagePromises.set(key,stageFindings);findings.push(...stageFindings);
-      }
-      return findings;
+        verifiedStagePromises.set(key,stageFindings);
+        return stageFindings;
+      });
+      const failure = responses.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failure) throw failure.reason;
+      return responses.flatMap(result => result.status === 'fulfilled' ? result.value : []);
     };
     const reviewSourceBoundaries=async (bundle:typeof generatedBundle) => {
       const currentBoundarySources=boundarySources(bundle);
