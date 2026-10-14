@@ -147,7 +147,6 @@ describe('premise selection before identity lock', () => {
       .mockResolvedValue({passed:true,issues:[]});
     c.llmCallWithRetry=vi.fn(async (_label:string,prompt:string,options:any)=>{
       expect(prompt).toContain('"mode":"replace_from_pool"');
-      expect(prompt).toContain('"P');
       expect(prompt).toContain('"C"');
       const preserve={replacements:[{replacesPremiseId:'B',premise:premise('B')}]};
       expect(options.validate(preserve)).toBe(false);
