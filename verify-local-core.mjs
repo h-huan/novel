@@ -199,11 +199,28 @@ function chapterSummary(chapter) {
 
 function runSummary(run) {
   if (!run) return null;
-  return pick(run, [
+  const out = pick(run, [
     'id', 'stage', 'scenario', 'step_key', 'stepKey', 'status', 'gate_status', 'gateStatus',
     'chapter_index', 'chapterIndex', 'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
     'context_version', 'contextVersion', 'standard_version', 'standardVersion',
   ]);
+  // The authoritative failed run now retains structured causal evidence in
+  // quality_payload. Show a bounded summary; never infer missing proof from text.
+  try {
+    const payload = typeof run.quality_payload === 'string'
+      ? JSON.parse(run.quality_payload) : run.quality_payload;
+    const evidence = payload?.postRepairValidation?.evidence;
+    if (evidence && typeof evidence === 'object') {
+      out.frameworkGateEvidence = {
+        evaluationStatus: evidence.evaluationStatus || 'unknown',
+        errors: Array.isArray(evidence.errors) ? evidence.errors : [],
+        issues: Array.isArray(evidence.issues) ? evidence.issues : [],
+        transitions: Array.isArray(evidence.causalAudit?.transitions)
+          ? evidence.causalAudit.transitions : [],
+      };
+    }
+  } catch { /* Older logs lacked structured evidence. Do not invent it. */ }
+  return out;
 }
 
 async function inspectProject(target) {
