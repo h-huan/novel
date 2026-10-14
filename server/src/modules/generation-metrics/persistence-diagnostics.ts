@@ -9,7 +9,7 @@ export function classifyFrameworkPersistence(input: {
   const isCreating = input.projectStatus === 'creating';
   const blockedBeforeFrameworkCommit = input.projectStatus === 'generation_failed' && input.runs.some(run =>
     run.stage === 'outline' && run.status === 'failed' && run.gate_status === 'blocked');
-  const uncommittedCandidates = blockedBeforeFrameworkCommit
+  const uncommittedCandidates: string[] = blockedBeforeFrameworkCommit
     ? input.observedMismatches.filter(code => code === 'outline_success_without_chapter_outline') : [];
   const remaining = input.observedMismatches.filter(code => !uncommittedCandidates.includes(code));
   return {
