@@ -4904,6 +4904,9 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       targetWords: String(dto.targetWords || '').trim(),
       count: requestedCount,
       excludeTitles: dto.excludeTitles || [],
+      // Historical hook/description change the actual exclusion contract.
+      // Two requests with identical titles but different stories must not share a running batch.
+      excludeDetails: dto.excludeDetails || [],
     });
     if (!this.ideaDiscoveryInFlight) this.ideaDiscoveryInFlight = new Map<string, Promise<any>>();
     const active = this.ideaDiscoveryInFlight.get(requestKey);
