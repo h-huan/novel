@@ -133,6 +133,31 @@ describe('premise selection before identity lock', () => {
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
   });
+  it('replaces a repeatedly drifting single identity with an unused original-pool premise', async()=>{
+    const original=selection();
+    const drift:PremiseSelectionReview={passed:false,issues:[{
+      kind:'source_drift',premiseId:'B',referencePremiseId:'B',
+      quote:String(original.selected[1].activeChoice),
+      referenceQuote:String(original.pool[1].storyCore),
+      reason:'既定身份已被展开改写，不能修辞补救',
+    }]};
+    const c=Object.create(ChainController.prototype) as any;
+    c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce(drift)
+      .mockResolvedValueOnce({passed:true,issues:[]})
+      .mockResolvedValue({passed:true,issues:[]});
+    c.llmCallWithRetry=vi.fn(async (_label:string,prompt:string,options:any)=>{
+      expect(prompt).toContain('"mode":"replace_from_pool"');
+      expect(prompt).toContain('"C"');
+      const preserve={replacements:[{replacesPremiseId:'B',premise:premise('B')}]};
+      expect(options.validate(preserve)).toBe(false);
+      return {data:{replacements:[{replacesPremiseId:'B',premise:premise('C')}]}};
+    });
+    const result=await c.reconcilePremiseSelection(original,2,3,['悬疑'],'');
+    expect(result.selected.map((p:any)=>p.premiseId)).toEqual(['A','C']);
+    expect(result.pool).toEqual(original.pool);
+    expect(result.selectionAudit).toMatchObject({reselectionAttempted:true,finalReview:{passed:true}});
+    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+  });
   it('does not repair fiction if either independent audit fails to complete', async () => {
     const c=Object.create(ChainController.prototype) as any;
     c.reviewPremiseSelection=vi.fn().mockRejectedValueOnce(new Error('审查协议失败')).mockResolvedValueOnce(failure);

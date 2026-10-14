@@ -5469,26 +5469,51 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           storyRepairAllowed: candidateAssessments.some((item: any) => item.sourcePremiseId === card.sourcePremiseId
             && item.attempt === 'initial' && item.presentationReview
             && [item.presentationReview.storyCoherent, item.presentationReview.payoffCredible, item.presentationReview.platformFit].includes(false)),
+          // Explicit user genres remain immutable. Auto-selected labels may
+          // be repaired only when the platform-fit reviewer rejected them.
+          autoGenreRepairAllowed: !dto.webNovelGenre.length && candidateAssessments.some((item:any)=>
+            item.sourcePremiseId===card.sourcePremiseId && item.attempt==='initial'
+            && item.presentationReview?.platformFit===false),
         }));
         try {
-          const repairResponse = await this.realLLM.generate({
-            prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective(repairTargets)}`,
-            scenario: 'idea_generate',
-            timeout: LLM_TUNABLES.timeoutSimple(),
-            maxEmptyRetries: 1,
-            responseFormat: 'json_object',
+          // Independent failed premises must not be bundled into one enormous
+          // structural repair response. Each local patch keeps its original
+          // locked source identity and the original validators, while the
+          // physical requests can run concurrently (max two).
+          const repairSettled = await boundedDiscoveryMap(repairTargets, 2, async (target) => {
+            const response = await this.realLLM.generate({
+              prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective([target],autoOptions.webNovelGenre)}`,
+              scenario: 'idea_generate',
+              timeout: LLM_TUNABLES.timeoutSimple(),
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: {stepKey: 'idea_final_gate_local_repair', attempt: 0},
+            });
+            const payload=this.safeExtractJson<Record<string,unknown>>(String(response.content||''),{});
+            const patches=Array.isArray(payload?.patches)?payload.patches:[];
+            return applyOrderedIdeaRepairPatches(
+              [target.card as Record<string,unknown>], patches,
+              target.gateIssues.some((issue:string)=>issue.includes('标题'))?[0]:[],
+              target.gateIssues.some((issue:string)=>issue.includes('故事命名'))?[0]:[],
+              target.storyRepairAllowed?[0]:[],
+              target.autoGenreRepairAllowed?[0]:[],
+              autoOptions.webNovelGenre,
+            )[0];
           });
-          const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
-          const repairPatches = Array.isArray(repairPayload?.patches) ? repairPayload.patches : [];
-          finalGateRepairGenerated = repairPatches.length;
-          const repairedCards = applyOrderedIdeaRepairPatches(
-            repairTargets.map((target: any) => target.card as Record<string, unknown>),
-            repairPatches,
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('故事命名')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.storyRepairAllowed ? [index] : []),
-          );
-          await accept(repairedCards, 'repair');
+          const repairedCards: Array<Record<string,unknown>>=[];
+          const failedRepairs: string[]=[];
+          for(let index=0;index<repairSettled.length;index++){
+            const result=repairSettled[index];
+            if(result.status==='fulfilled'){
+              finalGateRepairGenerated++;
+              repairedCards.push(result.value);
+            } else {
+              const premiseId=String(repairTargets[index]?.card?.sourcePremiseId||'unknown');
+              failedRepairs.push(premiseId+': '+(result.reason instanceof Error?result.reason.message:String(result.reason)));
+            }
+          }
+          if(failedRepairs.length) finalGateRepairError=failedRepairs.join('；');
+          if(repairedCards.length) await accept(repairedCards,'repair');
         } catch (repairError) {
           finalGateRepairError = repairError instanceof Error ? repairError.message : String(repairError);
           this.logger.warn(`idea-discover: 最终 Gate 同题材局部修复协议未完成：${finalGateRepairError}`);
@@ -5650,9 +5675,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const slotReview: PremiseSelectionReview = {passed:false,issues:slot.issues};
       const protectedCurrentIds = selected.selected.filter(item=>item.premiseId!==slot.replacesPremiseId).map(item=>item.premiseId);
       const availableIds = repairPlan.availableCandidates.map(item=>item.premiseId).filter(id=>!protectedCurrentIds.includes(id));
+      // With one verified source-drift slot and unused original-pool identities,
+      // replacing the ambiguous premise is safer than spending a full review
+      // round polishing that same misread identity again (observed P10 case).
+      // Multiple affected slots keep their existing correlated reselect plan.
+      const preferReplacement = repairPlan.repairSlots.length === 1
+        && slot.issues.some(issue=>issue.kind==='source_drift')
+        && availableIds.some(id=>id!==slot.replacesPremiseId);
+      const eligibleIds = preferReplacement ? availableIds.filter(id=>id!==slot.replacesPremiseId) : availableIds;
       const normalize = (value: unknown) => {
         const row = (value as any)?.replacements?.[0]?.premise;
-        if (!availableIds.includes(row?.premiseId)) throw new Error('单项重选不能复制其它已选身份或已淘汰同构项');
+        if (!eligibleIds.includes(row?.premiseId)) throw new Error('单项重选不能复制正常项、重复错误来源或已淘汰同构项');
         return normalizeTargetedPremiseReselection(value, selected, slotReview, requestedCount, poolTarget, categories);
       };
     const result = await this.llmCallWithRetry<any>('锁定前原池重选',
@@ -5663,8 +5696,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n【本位置原池骨架（所有字段均须服从）】' + JSON.stringify(initial.pool.find(item => item.premiseId === slot.replacesPremiseId))
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。若原身份已难以沿原骨架修复，应从可用原池换选成熟题材。'
       + '\n【服务器保护的正常项ID（完整原文已在原选择中，只比较，不返回或修改）】' + JSON.stringify(repairPlan.protectedItems.map(item => item.premiseId))
-      + '\n【本次必须处理的原位置】' + JSON.stringify([{replacesPremiseId:slot.replacesPremiseId,mode:slot.mode}])
-      + '\n【可用原池候选ID（完整骨架已在原池中，仍须按完整因果链避开同构）】' + JSON.stringify(availableIds)
+      + '\n【本次必须处理的原位置】' + JSON.stringify([{replacesPremiseId:slot.replacesPremiseId,mode:preferReplacement?'replace_from_pool':slot.mode}])
+      + '\n【可用原池候选ID（完整骨架已在原池中，仍须按完整因果链避开同构）】' + JSON.stringify(eligibleIds)
       + '\n本次分类候选=' + JSON.stringify(categories)
       + `\n只输出JSON:{"replacements":[{"replacesPremiseId":"问题项原ID","premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","differentiation":"...","storyCategory":"原池分类"}}]}。replacements恰好1项，只覆盖列出的原位置；正常项由服务器按原顺序合并，不要返回它们。replace_from_pool必须更换原池身份；correct_or_replace_from_pool允许修正原身份的展开。不可再选已淘汰同构项、复制正常项或改变原池故事骨架。换选须逐一对照正常项的选择、升级、反转作用与兑现代价，不能只换职业或道具。`,
       { scenario: 'idea_generate', stepKey: 'idea_premise_pool_reselection', physicalCallBudget: reselectionBudget, timeout: LLM_TUNABLES.timeoutSimple(),
@@ -8268,6 +8301,21 @@ ${STORY_ENTITY_MODELING_POLICY}
     } catch (err: any) {
       if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
       this.logger.error(`create-project-async 执行失败 project=${projectId}, step=${activeGenerationStep}: ${err.message}`);
+      // A successful last LLM call does not mean the creation workflow passed.
+      // Persist terminal framework/activation failures as first-class runs so
+      // the cockpit and verify-local reports cannot show a failed project
+      // with zero corresponding failed generation records.
+      try {
+        const started=Date.now();
+        const run=this.generationMetrics.beginRun(projectId,'review',
+          '项目创建终止点：'+String(activeGenerationStep||'unknown'),undefined,'creation_terminal_failure',undefined,false);
+        this.generationMetrics.finishRun(run.id,'failed',started,
+          JSON.stringify({stage:activeGenerationStep||'unknown',protectedExistingData:true,
+            cancelled:currentGenerationSignal()?.aborted===true}),
+          err instanceof Error?err.message:String(err));
+      } catch (diagnosticError) {
+        this.logger.warn('项目创建失败诊断未能写入（仍保留失败状态）：'+String(diagnosticError));
+      }
       try {
         db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
       } catch {}
