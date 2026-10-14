@@ -554,11 +554,27 @@ function projectMarkdown(target) {
             ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
             : 'PASS · mismatch=none'
     : 'UNAVAILABLE';
-  const failedRunLines = (result.failedRuns || []).map((run) =>
-    '- run=' + (run.id ?? 'unknown') + ' · stage=' + (run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown')
-    + ' · status=' + (run.status ?? 'unknown') + ' · gate=' + (run.gate_status ?? run.gateStatus ?? 'unknown')
-    + ' · model=' + (run.model ?? 'unknown') + ' · error=' + String(run.error ?? '(not provided)').replace(/\s+/g, ' ').trim()
-  );
+  const failedRunLines = (result.failedRuns || []).flatMap((run) => {
+    const lines = ['- run=' + (run.id ?? 'unknown') + ' · stage=' + (run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown')
+      + ' · status=' + (run.status ?? 'unknown') + ' · gate=' + (run.gate_status ?? run.gateStatus ?? 'unknown')
+      + ' · model=' + (run.model ?? 'unknown') + ' · error=' + String(run.error ?? '(not provided)').replace(/\\s+/g, ' ').trim()];
+    const proof = run.frameworkGateEvidence;
+    if (proof) {
+      lines.push('  - 关键行动审查状态：' + String(proof.evaluationStatus || 'unknown'));
+      for (const item of (proof.issues || []).slice(0, 15)) lines.push('  - 证据化阻断：章号='
+        + (item.chapterNumber ?? '?') + ' · ' + String(item.summary || '(无摘要)').slice(0, 900)
+        + ' · 来源=' + String(item.evidence || '(未提供)').slice(0, 1100));
+      for (const item of (proof.errors || []).slice(0, 8)) lines.push('  - 审查协议错误：' + String(item).slice(0, 800));
+      for (const item of (proof.transitions || []).filter(x => x.status === 'gap').slice(0, 15))
+        lines.push('  - 因果账目：章号=' + (item.chapterNumber ?? '?') + ' · 必要条件='
+          + String(item.requiredCondition || '(未提供)').slice(0, 650) + ' · 依据='
+          + String(item.reason || '(未提供)').slice(0, 650)
+          + ' · 行动引用=' + String(item.actionAnchorId || '?')
+          + ' · 结果引用=' + String(item.resultAnchorId || '?')
+          + ' · 桥接引用=' + String(item.bridgeAnchorId || '(缺失)'));
+    }
+    return lines;
+  });
   return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}\n\n#### 最近失败的生成调用（最多15条）\n\n${failedRunLines.join('\n') || '- 未发现有错误标记的生成记录'}`;
 }
 
