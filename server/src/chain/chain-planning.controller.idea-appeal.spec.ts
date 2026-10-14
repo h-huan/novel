@@ -318,6 +318,10 @@ it('persists complete qualified cards separately when the full discovery batch r
  expect(result.success).toBe(false);expect(result.ideas).toEqual([]);
  const retained=writes.get('latest_idea_discovery_qualified');expect(retained.qualifiedIdeas).toEqual([cards[0]]);expect(retained.qualifiedIdeas[0].ending).toBe('明确结果');
  expect(retained.request.count).toBe(2);expect(retained.status).toBe('incomplete');
+ // Delivery is incomplete, but the saved audit must still count passing cards accurately.
+ expect(writes.get('latest_idea_discovery_audit')).toMatchObject({
+   success: false, totalIdeas: 0, qualifiedCount: 1, shortfallCount: 1,
+ });
 });
 
 it('does not overwrite the previous passed card cache on an empty failed discovery',async()=>{
@@ -326,6 +330,8 @@ it('does not overwrite the previous passed card cache on an empty failed discove
  await c.ideaDiscover({...dto,count:5} as any);
  expect(db.dualWrite.mock.calls.some(call=>call[0]==='latest_idea_discovery_qualified')).toBe(false);
  expect(db.dualWrite.mock.calls.some(call=>call[0]==='latest_idea_discovery_audit')).toBe(true);
+ const audit = db.dualWrite.mock.calls.find(call=>call[0]==='latest_idea_discovery_audit')?.[1];
+ expect(audit).toMatchObject({success: false, qualifiedCount: 0, shortfallCount: 5});
 });
 
 it('archives the prior approved batch before accepting a smaller new approved batch',async()=>{
