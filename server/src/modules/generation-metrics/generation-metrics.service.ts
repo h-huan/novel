@@ -288,13 +288,12 @@ export class GenerationMetricsService implements OnModuleInit {
     db.prepare('UPDATE generation_runs SET quality_payload=? WHERE id=?').run(JSON.stringify(payload),runId);
   }
 
-  blockRunValidation(id: string, message: string, evidence?: Record<string, unknown>) {
+  blockRunValidation(id: string, message: string) {
     const db = this.databaseService.getDb();
     const row = db.prepare('SELECT quality_payload FROM generation_runs WHERE id=?').get(id) as any;
     let payload: any = {};
     try { payload = JSON.parse(row?.quality_payload || '{}'); } catch {}
-    payload.postRepairValidation = { status: 'blocked', message,
-      ...(evidence ? { evidence } : {}) };
+    payload.postRepairValidation = { status: 'blocked', message };
     payload.gate = { ...payload.gate, passed: false, status: 'blocked' };
     db.prepare('UPDATE generation_runs SET gate_status=?, quality_payload=? WHERE id=?')
       .run('blocked', JSON.stringify(payload), id);

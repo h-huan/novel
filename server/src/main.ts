@@ -12,8 +12,7 @@ import {
 } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
-// Load AppModule only after artifact integrity is checked; a missing compiled
-// middleware would otherwise fail during static module imports.
+import { AppModule } from './app.module';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -94,11 +93,6 @@ function getLogLevels(): Array<'log' | 'error' | 'warn' | 'debug' | 'verbose'> {
 }
 
 export async function bootstrap(options: { port?: number; host?: string } = {}): Promise<NestFastifyApplication> {
-  // This runs before importing AppModule, which recursively loads every global
-  // middleware. Check source/build mismatches before Node reports an opaque
-  // MODULE_NOT_FOUND from a partial or stale dist directory.
-  assertBuildIsFresh();
-  const { AppModule } = require('./app.module') as typeof import('./app.module');
   const logLevels = getLogLevels();
 
   const app = await NestFactory.create<NestFastifyApplication>(

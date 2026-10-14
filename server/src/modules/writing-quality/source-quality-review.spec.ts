@@ -427,8 +427,6 @@ it('locates six-axis citations without changing judgments or accepting the wrong
   expect(repaired.checks.progression).toEqual({...audit.checks.progression,evidence:body,basisEvidence:sources.chapter_plan});
   expect(repaired.checks.voice).toBe(audit.checks.voice);
   expect(validateSourceQualityReview(repaired,f.goals,body,sources).findings).toHaveLength(1);
-  expect(applySourceQualityCitationRepairs(audit,targets,[rows[0]],body,sources)).toBe(audit);
-  expect(applySourceQualityCitationRepairs(audit,targets,[rows[0],rows[0]],body,sources)).toBe(audit);
   expect(applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:'body:p1'}],body,sources)).toBe(audit);
   expect(applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:''}],body,sources)).toBe(audit);
 });

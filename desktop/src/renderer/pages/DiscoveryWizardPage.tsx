@@ -125,39 +125,6 @@ export const discoveryResponseMatchesSelection = (
   && (allowQualifiedPartial ? ideas.length > 0 && ideas.length < state.ideaCount : ideas.length === state.ideaCount)
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
-/** The recovery archive is a past request, not permission to label old cards as the current selection.
- * Compare the original request, including unselected fields, before reusing any qualified cards. */
-export const discoveryRecoveryMatchesSelection = (
-  batch: any,
-  state: ReturnType<typeof useDiscoveryStore.getState>,
-): boolean => {
-  const request = batch?.request;
-  const cards = batch?.qualifiedIdeas;
-  if (!request || typeof request !== 'object' || !Array.isArray(cards)
-    || cards.length === 0 || cards.length > state.ideaCount) return false;
-  const selectedCategory = [state.selectedCategory, state.selectedSubCategory].filter(Boolean).join('/');
-  const strings: Array<[unknown, string]> = [
-    [request.storyType, state.storyType], [request.platform, state.targetPlatform],
-    [request.storyCategory, selectedCategory], [request.customPlatformNote, state.customPlatformNote],
-    [request.genreFitNote, state.genreFitNote], [request.pov, state.narrativePov],
-    [request.targetWords, state.targetWords], [request.targetAudience, state.targetAudience],
-  ];
-  if (request.count !== state.ideaCount
-    || strings.some(([actual, expected]) => String(actual ?? '').trim() !== String(expected ?? '').trim())) return false;
-  const arrays: Array<[unknown, string[]]> = [
-    [request.storyTone, state.selectedTones], [request.writingStyle, state.selectedWritingStyles],
-    [request.webNovelGenre, state.selectedGenres], [request.submissionTags, state.selectedSubmissionTags],
-    [request.plotTags, state.selectedPlotTags],
-  ];
-  if (arrays.some(([actual, expected]) => !Array.isArray(actual)
-    || JSON.stringify(actual) !== JSON.stringify(expected))) return false;
-  // No filtered-out, duplicate or cross-platform result may inherit the current request signature.
-  return acceptedDiscoveryIdeas(cards).length === cards.length
-    && new Set(cards.map((card: any) => String(card.sourcePremiseId || '').trim())).size === cards.length
-    && cards.every((card: any) => card.sourcePremiseId
-      && card.storyType === state.storyType && card.targetPlatform === state.targetPlatform);
-};
-
 // Absence from a public sample is not evidence of an invalid tag.
 const discoveryGenreProblem = (_state: ReturnType<typeof useDiscoveryStore.getState>): string => '';
 
@@ -973,8 +940,9 @@ const DiscoveryWizardPage: React.FC = () => {
         store.addExcludeDetails(newDetails);
         const warning = (res as any).qualityWarning || '';
         const qualityWarn = warning ? `\n⚠️ ${warning}` : '';
-        const missingReason = discoveryShortfallReasons(newIdeas).slice(0, 5).join('；');
-        const missingDetail = partial && missingReason ? `\n缺额原因：${missingReason}` : '';
+        const selectionReasons = (res as any)?.appealGate?.selectionAudit?.reasons;
+        const missingReason = Array.isArray(selectionReasons) ? selectionReasons.map((item: any) => typeof item?.reason === 'string' ? item.reason : '').filter(Boolean).join('；') : '';
+        const missingDetail = partial && missingReason ? `\n未通过原因：${missingReason}` : '';
 
         store.setGenProgress(partial ? `本批未完成：已保留 ${newIdeas.length}/${configuredState.ideaCount} 个合格故事卡，缺少 ${configuredState.ideaCount-newIdeas.length} 个。可选择已有卡，不会自动补生。${missingDetail}${qualityWarn}` : `✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
@@ -999,13 +967,20 @@ const DiscoveryWizardPage: React.FC = () => {
     try { response = await api.get<any>('/chain/idea-discovery-diagnostics/latest'); }
     catch (error:any) { store.setGenProgress(`恢复读取失败：${error.message}`); return; }
     const current = useDiscoveryStore.getState();
-    const retained = previous
-      ? ((response as any).retainedBatches || []).find((batch: any) => discoveryRecoveryMatchesSelection(batch, current))
-      : (response as any).retained;
-    if (!discoveryRecoveryMatchesSelection(retained, current)) {
-      store.setGenProgress('没有与当前完整创作设置一致的已通过故事卡；目标字数、目标读者、分类和自定义平台说明也必须与原请求一致。'); return;
+    const retained = previous ? ((response as any).retainedBatches || []).find((batch:any)=>batch.request?.platform===current.targetPlatform && batch.request?.storyType===current.storyType && batch.request?.count===current.ideaCount) : (response as any).retained;
+    const cards = acceptedDiscoveryIdeas(retained?.qualifiedIdeas || []);
+    if (!cards.length || cards.length > current.ideaCount || retained?.request?.count !== current.ideaCount || retained?.request?.platform !== current.targetPlatform || retained?.request?.storyType !== current.storyType) {
+      store.setGenProgress('没有与当前平台及长短篇匹配的已通过故事卡。'); return;
     }
-    const cards = retained.qualifiedIdeas;
+    if (current.selectedCategory && cards.some((card:any)=>!String(card.storyCategory||'').includes(current.selectedCategory))) {
+      store.setGenProgress('上次故事卡分类与当前选择不同，请先恢复原选择。'); return;
+    }
+    const requested: any = discoveryStandards(current);
+    const fields = ['storyTone','writingStyle','webNovelGenre','submissionTags','plotTags'];
+    if (fields.some(field => requested[field]?.length && cards.some((card:any)=>JSON.stringify(card[field]||[])!==JSON.stringify(requested[field])))
+      || (current.narrativePov && cards.some((card:any)=>card.pov!==current.narrativePov))) {
+      store.setGenProgress('上次故事卡与当前创作设置不同，未恢复；请先恢复原选择。'); return;
+    }
     store.setIdeas(cards); store.setGeneratedSignature(discoverySignature(current));
     store.setGenerationDone(true); store.setStep(1);
     store.setGenProgress(`已恢复 ${cards.length}/${retained.request.count} 个已通过故事卡；原批次${retained.success?'已完成':'未完成'}。恢复不调用模型，请核对卡上的创作设置后选择。`);
@@ -1764,7 +1739,7 @@ const DiscoveryWizardPage: React.FC = () => {
 
         {ideas.length < ideaCount && discoveryShortfallReasons(ideas).length > 0 && (
           <div role="status" style={{ marginBottom: 16, color: 'var(--color-warning)', lineHeight: 1.6 }}>
-            本批缺少 {ideaCount - ideas.length} 张：以下为已记录的筛选、结构化或终审缺额原因；已通过的故事卡保留。
+            本批缺少 {ideaCount - ideas.length} 张：以下题材在筛选阶段未通过，已通过的故事卡保留。
             <ul>{discoveryShortfallReasons(ideas).map((reason, index) => <li key={index}>{reason}</li>)}</ul>
           </div>
         )}
@@ -2014,18 +1989,7 @@ const DiscoveryWizardPage: React.FC = () => {
 
 export default DiscoveryWizardPage;
 
-/** Render existing server evidence only; never promote a failed batch to success. */
 export function discoveryShortfallReasons(cards: any[]): string[] {
-  const audit = cards[0]?.ideaDiscoveryAudit;
-  if (!audit || typeof audit !== 'object') return [];
-  const selection = Array.isArray(audit.selectionAudit?.reasons)
-    ? audit.selectionAudit.reasons.map((item: any) => item?.reason) : [];
-  const structuring = Array.isArray(audit.structuringErrors)
-    ? audit.structuringErrors.map((item: any) => item?.error
-      ? `${item.sourcePremiseId || '未标识题材'} 结构化失败：${item.error}` : '') : [];
-  const gate = Array.isArray(audit.reasons) ? audit.reasons : [];
-  const repair = typeof audit.repairError === 'string' ? [`局部修复未完成：${audit.repairError}`] : [];
-  return [...new Set<string>([...selection, ...structuring, ...gate, ...repair]
-    .filter((reason: unknown): reason is string => typeof reason === 'string')
-    .map((reason: string) => reason.trim()).filter(Boolean))].slice(0, 8);
+  const reasons = cards[0]?.ideaDiscoveryAudit?.selectionAudit?.reasons;
+  return Array.isArray(reasons) ? [...new Set<string>(reasons.map((item: any) => typeof item?.reason === 'string' ? item.reason.trim() : '').filter(Boolean))] : [];
 }

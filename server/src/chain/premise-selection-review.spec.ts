@@ -20,43 +20,6 @@ describe('premise selection before identity lock', () => {
     for (const change of [{ referencePremiseId: 'C' }, { referencePremiseId: 'B' }, { quote: '输入里不存在的虚构原文' }, { kind: 'unknown' }])
       expect(premiseSelectionReviewIssues({ ...failure, issues: [{ ...failure.issues[0], ...change }] }, selection()).length).toBeGreaterThan(0);
   });
-  it('detects a genuinely unsupported outcome promise before any complete card exists', () => {
-    const selected = selection();
-    const gap: PremiseSelectionReview = { passed: false, issues: [{
-      kind: 'payoff_gap', premiseId: 'B', referencePremiseId: 'B',
-      quote: String(selected.selected[1].payoff), referenceQuote: String(selected.selected[1].activeChoice),
-      reason: '已给行动只能证明现场发生，不足以使没有裁决权限的当事人直接取得法定权利',
-    }] };
-    expect(premiseSelectionReviewIssues(gap, selected)).toEqual([]);
-    expect(premiseReselectionPlan(selected, gap).repairSlots).toEqual([expect.objectContaining({
-      replacesPremiseId: 'B', mode: 'correct_or_replace_from_pool',
-    })]);
-    expect(retainReviewedPremises(selected, gap).selection.selected.map(p => p.premiseId)).toEqual(['A']);
-    expect(premiseSelectionReviewIssues({...gap, issues:[{...gap.issues[0], referencePremiseId:'A'}]}, selected).length).toBeGreaterThan(0);
-    expect(premiseSelectionReviewIssues({...gap, issues:[{...gap.issues[0], quote:'伪造出来的承诺证据不属于本题材'}]}, selected).length).toBeGreaterThan(0);
-  });
-  it('accepts evidence-bound payoff prechecks in the existing source-integrity review call', async () => {
-    const selected = selection();
-    const gap: PremiseSelectionReview = {passed:false,issues:[{
-      kind:'payoff_gap',premiseId:'B',referencePremiseId:'B',
-      quote:String(selected.selected[1].payoff),referenceQuote:String(selected.selected[1].activeChoice),
-      reason:'行动之后的外部权利结果必须有掌握裁决权的一方实际决定，不能直接跳过桥接条件',
-    }]};
-    const c = Object.create(ChainController.prototype) as any;
-    c.llmCallWithRetry=vi.fn(async (_label:string, prompt:string,options:any)=>{
-      expect(prompt).toContain('payoff_gap');
-      expect(prompt).toContain('必要证据');
-      expect(options.validate(gap)).toBe(true);
-      return {data:gap};
-    });
-    await expect(c.reviewPremiseSelection(selected,'','source_drift')).resolves.toEqual(gap);
-    const overlapReview = {...gap, issues:[{...gap.issues[0]}]};
-    c.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{
-      expect(options.validate(overlapReview)).toBe(false);
-      return {data:overlapReview};
-    });
-    await expect(c.reviewPremiseSelection(selected,'','overlap')).rejects.toThrow('协议错误');
-  });
   it('preserves the original pool and unaffected selected facts despite model overwrites', () => {
     const original = selection();
     const result = normalizePremiseReselection({ selectedPremises: [{ ...premise('A'), activeChoice: '篡改原选择' },
@@ -132,31 +95,6 @@ describe('premise selection before identity lock', () => {
     expect(result.selectionAudit.initialReview.issues).toHaveLength(2);
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
-  });
-  it('replaces a repeatedly drifting single identity with an unused original-pool premise', async()=>{
-    const original=selection();
-    const drift:PremiseSelectionReview={passed:false,issues:[{
-      kind:'source_drift',premiseId:'B',referencePremiseId:'B',
-      quote:String(original.selected[1].activeChoice),
-      referenceQuote:String(original.pool[1].storyCore),
-      reason:'既定身份已被展开改写，不能修辞补救',
-    }]};
-    const c=Object.create(ChainController.prototype) as any;
-    c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce(drift)
-      .mockResolvedValueOnce({passed:true,issues:[]})
-      .mockResolvedValue({passed:true,issues:[]});
-    c.llmCallWithRetry=vi.fn(async (_label:string,prompt:string,options:any)=>{
-      expect(prompt).toContain('"mode":"replace_from_pool"');
-      expect(prompt).toContain('"C"');
-      const preserve={replacements:[{replacesPremiseId:'B',premise:premise('B')}]};
-      expect(options.validate(preserve)).toBe(false);
-      return {data:{replacements:[{replacesPremiseId:'B',premise:premise('C')}]}};
-    });
-    const result=await c.reconcilePremiseSelection(original,2,3,['悬疑'],'');
-    expect(result.selected.map((p:any)=>p.premiseId)).toEqual(['A','C']);
-    expect(result.pool).toEqual(original.pool);
-    expect(result.selectionAudit).toMatchObject({reselectionAttempted:true,finalReview:{passed:true}});
-    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
   });
   it('does not repair fiction if either independent audit fails to complete', async () => {
     const c=Object.create(ChainController.prototype) as any;

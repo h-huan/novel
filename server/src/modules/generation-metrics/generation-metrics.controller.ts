@@ -9,7 +9,6 @@ import { Body, Controller, Get, Param, Post, Put, Query, BadRequestException } f
 import { ApiTags } from '@nestjs/swagger';
 import { GenerationMetricsService } from './generation-metrics.service';
 import { DatabaseService } from '../../database/database.service';
-import { classifyFrameworkPersistence } from './persistence-diagnostics';
 
 @ApiTags('generation-metrics')
 @Controller('generation-metrics')
@@ -93,7 +92,7 @@ export class GenerationMetricsController {
     const metrics = db.prepare(`SELECT run_id,chapter_index,step_key,scenario,status,attempt,duration_ms,total_tokens,
         COALESCE(internal_retries,0) internal_retries,created_at
       FROM generation_step_metrics WHERE project_id=? ORDER BY created_at DESC LIMIT 300`).all(projectId) as any[];
-    const runs = db.prepare(`SELECT id,stage,scenario,status,gate_status,chapter_index,prompt_version,context_version,
+    const runs = db.prepare(`SELECT id,stage,scenario,status,chapter_index,prompt_version,context_version,
         constitution_revision,duration_ms,started_at,finished_at
       FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 300`).all(projectId) as any[];
     const project = db.prepare('SELECT status,updated_at FROM projects WHERE id=?').get(projectId) as any;
@@ -186,14 +185,10 @@ export class GenerationMetricsController {
     const creationStallThresholdMs = 3 * 60 * 1000;
     const isCreating = String(project?.status || '').toLowerCase() === 'creating';
     const creationStalled = isCreating && activeGenerationRuns === 0 && idleMs !== null && idleMs >= creationStallThresholdMs;
-    // Successful model calls do NOT imply accepted outlines. If the authoritative
-    // framework action Gate blocks the candidate, the framework is intentionally
-    // left uncommitted. Report it separately from real persistence faults.
-    const {persistenceMismatch, pendingPersistenceMismatch, uncommittedCandidates, blockedBeforeFrameworkCommit} =
-      classifyFrameworkPersistence({
-        projectStatus: String(project?.status || '').toLowerCase(), creationStalled,
-        observedMismatches: observedPersistenceMismatch, runs,
-      });
+    // 创建中短暂出现“模型已成功、业务表尚未落库”是允许的中间态；只有失败/完成后仍不一致，
+    // 或 creating 已经无运行调用并持续空闲超过阈值，才升级为真正持久化故障。
+    const persistenceMismatch = isCreating && !creationStalled ? [] : observedPersistenceMismatch;
+    const pendingPersistenceMismatch = isCreating && !creationStalled ? observedPersistenceMismatch : [];
 
     return {
       projectStatus: project?.status ?? null,
@@ -201,8 +196,6 @@ export class GenerationMetricsController {
       persisted,
       persistenceMismatch,
       pendingPersistenceMismatch,
-      uncommittedCandidates,
-      blockedBeforeFrameworkCommit,
       activeGenerationRuns,
       lastActivityAt: lastActivityMs === null ? null : new Date(lastActivityMs).toISOString(),
       idleMs,

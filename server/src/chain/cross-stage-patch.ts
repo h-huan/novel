@@ -267,17 +267,6 @@ export function crossStageRepairRequests(bundle:Record<string,any[]>,findings:st
       ||entity.namedReferences.some(ref=>finding.includes(ref))||prefixIds.includes(entity.id)
       ||(entity.planField==='endingDirection'&&/world(?:\.constraints)?\.endingDirection|world\[\d+\]\.constraints\.endingDirection/.test(finding))
       ||(entity.planField==='ending'&&/worldProfiles?(?:\[\d+\])?\.ending\b/.test(finding))).map(entity=>entity.id);
-    // An independent reviewer sometimes cites exact story evidence without an
-    // entity ID. Match literal 24-character evidence windows before resorting
-    // to a massive all-entities repair prompt. No guessed/semantic routing;
-    // unresolved findings keep the conservative full-scope fallback below.
-    if(!targetIds.length){
-      const quoted=[...finding.matchAll(/(?:^|[|；\n])\s*(?:正文|行动|结果)\s*[:：]\s*([^|；\n]{24,800})/g)]
-        .map(match=>match[1].trim());
-      const spans=quoted.flatMap(quote=>Array.from({length:Math.max(0,quote.length-23)},
-        (_,index)=>quote.slice(index,index+24)).filter(span=>span.trim().length===24));
-      for(const entity of entities)if(!entity.planField&&spans.some(span=>entity.text.includes(span)))targetIds.push(entity.id);
-    }
     // Two projections of the same planned ending must be revised together.
     for(const world of bundle.world||[])for(const profile of bundle.worldProfiles||[])
       if(profile.world_setting_id===world.id && (targetIds.includes(world.id)||targetIds.includes(profile.id))) {
