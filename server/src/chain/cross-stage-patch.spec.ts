@@ -17,6 +17,24 @@ import {
   materializeCrossStageRepairEdits,
 } from './cross-stage-patch';
 
+describe('evidence-based routing for findings without a source UUID', () => {
+  it('routes only the exact cited mutable story source and not unrelated chapters', () => {
+    const line='她在合同柜中找到清晰的签署记录，再拿记录核对当年的房屋处置权限';
+    const bundle={chapters:[{id:'chapter-1',chapterIndex:1,content:line},
+      {id:'chapter-2',chapterIndex:2,content:'他在港口发现了一封无关的信，随后准备去找失踪的人。'}],
+      characters:[{id:'role-1',name:'小甲',arc:'日常工作与关系，未涉及合同柜。'}]};
+    const result=crossStageRepairRequests(bundle,['【关键结果】还缺少权利条件 | 行动: '+line+' | 来源: 原权限只允许查询']);
+    expect(result).toHaveLength(1);
+    expect(result[0].targetIds).toEqual(['chapter-1']);
+    expect(result[0].connected).toBe(true);
+  });
+  it('keeps conservative full scope if the quote cannot be grounded exactly', () => {
+    const bundle={chapters:[{id:'chapter-1',content:'短句一'},{id:'chapter-2',content:'短句二'}]};
+    const result=crossStageRepairRequests(bundle,['未提供身份引用，也没有任何能够在故事文本找到的确切行动证据']);
+    expect(new Set(result[0].targetIds)).toEqual(new Set(['chapter-1','chapter-2']));
+    expect(result[0].connected).toBe(false);
+  });
+});
 describe('cross-stage Canon mutation boundary', () => {
   it('includes the next opening knowledge that carries a failed producer claim without expanding to unrelated later chapters',()=>{
     const bundle={chapters:[{id:'producer',chapterIndex:2,content:'陈甲比较记录后锁定唯一时间窗口。'},
