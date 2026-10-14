@@ -4944,6 +4944,13 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     targetAudience?: string;
   }, requestedCount: number) {
     this.logger.log(`idea-discover: type=${dto.storyType} platform=${dto.platform} count=${requestedCount}`);
+    const discoveryStartedMs = Date.now();
+    // Wall-clock stage telemetry measures actual latency, including LLM retries and
+    // independent reviews. It never changes acceptance, counts or the story payload.
+    const stageTimings = {
+      preselectionMs: 0, structuringMs: 0, initialFinalGateMs: 0, repairMs: 0,
+      cardCalls: [] as Array<{premiseId: string; durationMs: number; outcome: 'success' | 'error'}>,
+    };
     try {
       // 只验证并使用 idea_generate 当前场景所配置的模型；不得切换模型、提供商或模式。
       this.realLLM.assertScenarioModelConfigured('idea_generate');
@@ -5201,6 +5208,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         selectedPremise: Record<string, unknown>,
         position: number,
       ): Promise<Record<string, unknown>> => {
+        const callStartedMs = Date.now();
+        let outcome: 'success' | 'error' = 'error';
+        try {
         const response = await this.realLLM.generate({
           prompt: buildPrompt(initialExcludes, selectedPremise),
           scenario: 'idea_generate',
@@ -5212,10 +5222,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         });
         const rawIdeas = extractIdeaList(response.content || '') || [];
         try {
-          return bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas);
+          const card = bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas);
+          outcome = 'success';
+          return card;
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           throw new Error(`第 ${position + 1}/${requestedCount} 个已选题材结构化失败：${detail}`);
+        }
+        } finally {
+          stageTimings.cardCalls.push({ premiseId: String(selectedPremise.premiseId || ''),
+            durationMs: Date.now() - callStartedMs, outcome });
         }
       };
 
@@ -5384,7 +5400,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         }
       };
 
+      const preselectionStartedMs = Date.now();
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
+      stageTimings.preselectionMs = Date.now() - preselectionStartedMs;
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
@@ -5392,8 +5410,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const structuringErrors: Array<{ sourcePremiseId: string; error: string }> = [];
       // 已选题材逐一结构化：用户要 5 个题材时是 5 个 premise 各创建 1 张卡，
       // 不是把 5 张完整卡塞进一个大 JSON，也不是对同一张卡反复改写 5 次。
+      const structuringStartedMs = Date.now();
       const results = await boundedDiscoveryMap(selectedPremises, IDEA_CARD_GENERATION_CONCURRENCY,
         (premise, index) => generateStructuredCard(premise as Record<string, unknown>, index));
+      stageTimings.structuringMs = Date.now() - structuringStartedMs;
       for (let index = 0; index < results.length; index++) {
         const selectedPremise = selectedPremises[index] as Record<string, unknown>;
         try {
@@ -5417,7 +5437,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         || missingPremiseIds.some(id => !structuringErrors.some(item => item.sourcePremiseId === id))) {
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；生成=${structuredCards.length}/${requestedCount}，缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。系统不会自动换题或补生。`);
       }
+      const initialFinalGateStartedMs = Date.now();
       await accept(structuredCards, 'initial');
+      stageTimings.initialFinalGateMs = Date.now() - initialFinalGateStartedMs;
 
       // Final Gate 只决定哪些已选 premise 可以展示，不再承担补题职责。某张卡失败时允许对同一 premise
       // 做一次有界局部修复；仍失败则保留已通过项为诊断候选，整批缺量不能报成功。
@@ -5431,6 +5453,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // A failed technical call has no card to patch; never ask the model to invent one.
       const initialMissingPremiseIds = missingAfterGate().filter(id => structuredUniqueIds.has(id));
       if (initialMissingPremiseIds.length > 0) {
+        const repairStartedMs = Date.now();
         finalGateRepairAttempted = true;
         const initialIssueByPremiseId = new Map(candidateAssessments
           .filter((item: any) => item?.attempt === 'initial' && item?.passed !== true && item?.sourcePremiseId)
@@ -5467,6 +5490,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         } catch (repairError) {
           finalGateRepairError = repairError instanceof Error ? repairError.message : String(repairError);
           this.logger.warn(`idea-discover: 最终 Gate 同题材局部修复协议未完成：${finalGateRepairError}`);
+        } finally {
+          stageTimings.repairMs = Date.now() - repairStartedMs;
         }
       }
 
@@ -5488,6 +5513,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const appealGate = {
         schemaVersion: 8,
         mode: 'premise_preselection_then_final_gate_bounded_repair',
+        timing: { ...stageTimings, totalMs: Date.now() - discoveryStartedMs },
+        // Record the actual number of independent reviews rather than guessing from wall time.
+        reviewAttempts: { initial: structuredCards.length, repairs: candidateAssessments.filter((item: any) => item.attempt === 'repair').length },
         structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
         repairProtocol: 'ordered_local_patch_server_owned_identity',
         premisePoolSize: premiseDiscovery.pool.length,
@@ -5556,7 +5584,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : '题材发现失败';
       this.logger.error(`idea-discover 失败: ${message}`);
-      return { success: false, ideas: [], error: message };
+      return { success: false, ideas: [], error: message,
+        timing: { ...stageTimings, totalMs: Date.now() - discoveryStartedMs } };
     }
   }
 
