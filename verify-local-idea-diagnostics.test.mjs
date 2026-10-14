@@ -29,6 +29,7 @@ test('records the exact failed stage and source evidence for an incomplete 4/5 d
     structured: 4, evaluatedAttempts: null, qualified: 4, delivered: 0, shortfall: 1,
   });
   assert.ok(analysis.stageSignals.includes('逐题材结构化异常'));
+  assert.ok(!analysis.stageSignals.includes('完整卡审查不通过'), 'no structured card means no substantive Gate verdict');
   assert.ok(analysis.stageSignals.includes('前置筛选复核不通过'));
   assert.ok(analysis.stageSignals.includes('局部修复调用或协议异常'));
   const md = renderIdeaDiscoveryDetails(analysis);
