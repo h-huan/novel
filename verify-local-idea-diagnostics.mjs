@@ -2,7 +2,9 @@
 // Never re-grade, regenerate or change any qualified story card here.
 const list = (value) => Array.isArray(value) ? value : [];
 const textOf = (value, limit = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
-const countOf = (value) => Number.isInteger(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+const countOf = (value) => value === null || value === undefined || value === ''
+  ? null
+  : Number.isInteger(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 
 export function analyzeIdeaDiscovery(snapshot) {
   if (snapshot?.available !== true || !snapshot?.audit) {
