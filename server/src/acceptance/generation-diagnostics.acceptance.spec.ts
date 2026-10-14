@@ -174,9 +174,14 @@ it('generates a complete idea batch through preselection plus structuring and re
         if (structuredCount > 5) throw Error('同一请求不应重复结构化');
         return { content: JSON.stringify({ ideas: [makeIdea(structuredCount)] }) };
       }
-      if (step === 'idea_presentation_review') return { content: JSON.stringify({
-        reviews: Array.from({ length: 5 }, (_, index) => {
-          const position = index + 1, card = makeIdea(position);
+      if (step === 'idea_presentation_review') {
+        const reviewPayload = input.prompt.split('【实际题材卡与已通过参考卡】')[1]?.split('\\n若存在standardLines')[0];
+        const reviewCards = reviewPayload ? JSON.parse(reviewPayload).cards : [];
+        return { content: JSON.stringify({
+        reviews: reviewCards.map((item: any, index: number) => {
+          const position = index + 1;
+          const premiseIndex = premises.findIndex(premise => premise.title === item.title) + 1;
+          const card = makeIdea(premiseIndex);
           const goal = (field: string) => ({ status: 'supported', evidenceRef: `C${position}.${field}`,
             reason: '由具体风险、主动选择与可验证结果形成完整阅读期待和实际关系变化。' });
           return {
@@ -199,6 +204,7 @@ it('generates a complete idea batch through preselection plus structuring and re
           };
         }),
       }) };
+      }
       throw new Error('unexpected idea generation step: '+String(step));
     }),
   };
@@ -216,12 +222,18 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 5,
   });
   expect(duplicate).toEqual(first);
-  // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、一次标题与阅读目标独立审查。
-  expect(realLLM.generate).toHaveBeenCalledTimes(9);
+  // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、
+  // 两组并行且保留全批对照的独立标题与兑现审查。
+  expect(realLLM.generate).toHaveBeenCalledTimes(10);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
     'idea_premise_selection','idea_premise_source_drift_review','idea_premise_overlap_review',
-    ...Array(5).fill('idea_card_structure'),'idea_presentation_review',
+    ...Array(5).fill('idea_card_structure'),'idea_presentation_review','idea_presentation_review',
   ].sort());
+  const auditRows = first.appealGate.candidateAssessments;
+  expect(auditRows.map((row: any) => row.presentationReview?.position)).toEqual([1,2,3,4,5]);
+  expect(auditRows.map((row: any) => row.presentationReview?.storyEvidenceRef)).toEqual([
+    'C1.hook','C2.hook','C3.hook','C4.hook','C5.hook'
+  ]);
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,
