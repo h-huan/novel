@@ -322,6 +322,12 @@ it('persists complete qualified cards separately when the full discovery batch r
  expect(writes.get('latest_idea_discovery_audit')).toMatchObject({
    success: false, totalIdeas: 0, qualifiedCount: 1, shortfallCount: 1,
  });
+ // A shortfall is still a failure, yet its approved card must stay inspectable
+ // in the diagnostics used to analyze a real 1/2 (or 4/5) run.
+ const savedAudit = writes.get('latest_idea_discovery_audit');
+ expect(savedAudit.acceptedIdeas.map((idea: any) => idea.title)).toEqual(['已通过']);
+ expect(savedAudit.acceptedIdeas[0].ideaAppealGate.passed).toBe(true);
+ expect(savedAudit.acceptedIdeas).not.toContainEqual(expect.objectContaining({title:'未通过'}));
 });
 
 it('does not overwrite the previous passed card cache on an empty failed discovery',async()=>{
