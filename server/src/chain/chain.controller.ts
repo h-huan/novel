@@ -1,4 +1,5 @@
 import { boundedDiscoveryMap } from './bounded-discovery-map';
+import { ensureCreationTimelineWithEvents } from './creation-timeline';
 import { reviewIdeaCardsInBatches, rebaseIdeaReviewReferences } from './idea-review-batches';
 import { generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
@@ -6218,36 +6219,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       return lines.join('\n');
     };
 
-    const insertTimelineWithEvents = (timelineItems: any[], fallbackChapters: any[] = []): number => {
-      const items = timelineItems.length > 0 ? timelineItems : fallbackChapters;
-      if (items.length === 0) return 0;
-      const tid = uuid();
-      const startDate = items[0]?.date || items[0]?.eventDate || null;
-      const endDate = items[items.length - 1]?.date || items[items.length - 1]?.eventDate || null;
-      db.prepare(`INSERT INTO timelines (id, project_id, name, description, start_date, end_date, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`).run(
-        tid, projectId, `${dto.title}时间线`, `《${dto.title}》的故事时间线`, startDate, endDate, now(), now()
-      );
-
-      let eventCount = 0;
-      for (const [index, item] of items.entries()) {
-        const title = serializeGeneratedSqlText(item.title || item.event || item.name, `关键节点 ${index + 1}`);
-        if (!title) continue;
-        const relatedChapterIds = item.chapterReference ? [String(item.chapterReference)] : [];
-        db.prepare(`INSERT INTO timeline_events (id, timeline_id, title, description, event_date, event_type, importance, related_character_ids, related_chapter_ids, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
-          uuid(), tid, title,
-          serializeGeneratedSqlText(item.description || item.significance || item.summary),
-          serializeGeneratedSqlText(item.date || item.eventDate, `第${index + 1}章`),
-          serializeGeneratedSqlText(item.eventType, 'plot'),
-          Number(item.importance || (index === 0 ? 3 : 2)),
-          JSON.stringify(asArray(item.relatedCharacterIds || item.characters).map(String)),
-          JSON.stringify(relatedChapterIds),
-          now(), now()
-        );
-        eventCount++;
-      }
-      return eventCount;
-    };
+    const insertTimelineWithEvents = (timelineItems: any[], fallbackChapters: any[] = []): number =>
+      ensureCreationTimelineWithEvents(db, {
+        projectId, title: dto.title, timelineItems, fallbackChapters,
+        makeId: uuid, timestamp: now, serialize: serializeGeneratedSqlText,
+      });
 
     const syncProjectRag = async (): Promise<void> => {
       if (!this.embedding.getAvailability().available) return;
@@ -8232,8 +8208,13 @@ ${STORY_ENTITY_MODELING_POLICY}
           emit('timeline', 98, `时间线事件已创建 ${eventCount} 条`, eventCount > 0 ? 'done' : 'failed');
           this.logger.log(`create-project-async: 时间线事件已创建 project=${projectId}, events=${eventCount}`);
         } catch (e: any) {
-          warnings.push(`时间线创建失败: ${e.message}`);
-          emit('timeline', 98, '时间线创建失败', 'failed');
+          const cause = e instanceof Error ? e.message : String(e);
+          warnings.push(`时间线创建失败: ${cause}`);
+          emit('timeline', 98, `时间线写入被阻断：${cause}`, 'failed');
+          // Missing timeline data is a hard activation blocker. Keep its
+          // original error rather than running later index/activation steps
+          // and replacing it with a generic "时间线缺失" diagnosis.
+          throw new Error(`创建阶段时间线写入失败：${cause}`);
         }
       } else {
         emit('timeline', 98, '时间线事件已存在', 'done');
