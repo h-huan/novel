@@ -5469,6 +5469,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           storyRepairAllowed: candidateAssessments.some((item: any) => item.sourcePremiseId === card.sourcePremiseId
             && item.attempt === 'initial' && item.presentationReview
             && [item.presentationReview.storyCoherent, item.presentationReview.payoffCredible, item.presentationReview.platformFit].includes(false)),
+          // Explicit user genres remain immutable. Auto-selected labels may
+          // be repaired only when the platform-fit reviewer rejected them.
+          autoGenreRepairAllowed: !dto.webNovelGenre.length && candidateAssessments.some((item:any)=>
+            item.sourcePremiseId===card.sourcePremiseId && item.attempt==='initial'
+            && item.presentationReview?.platformFit===false),
         }));
         try {
           // Independent failed premises must not be bundled into one enormous
@@ -5477,7 +5482,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           // physical requests can run concurrently (max two).
           const repairSettled = await boundedDiscoveryMap(repairTargets, 2, async (target) => {
             const response = await this.realLLM.generate({
-              prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective([target])}`,
+              prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective([target],autoOptions.webNovelGenre)}`,
               scenario: 'idea_generate',
               timeout: LLM_TUNABLES.timeoutSimple(),
               maxEmptyRetries: 1,
@@ -5491,6 +5496,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               target.gateIssues.some((issue:string)=>issue.includes('标题'))?[0]:[],
               target.gateIssues.some((issue:string)=>issue.includes('故事命名'))?[0]:[],
               target.storyRepairAllowed?[0]:[],
+              target.autoGenreRepairAllowed?[0]:[],
+              autoOptions.webNovelGenre,
             )[0];
           });
           const repairedCards: Array<Record<string,unknown>>=[];
