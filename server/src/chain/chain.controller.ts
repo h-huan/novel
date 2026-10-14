@@ -8294,6 +8294,21 @@ ${STORY_ENTITY_MODELING_POLICY}
     } catch (err: any) {
       if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
       this.logger.error(`create-project-async 执行失败 project=${projectId}, step=${activeGenerationStep}: ${err.message}`);
+      // A successful last LLM call does not mean the creation workflow passed.
+      // Persist terminal framework/activation failures as first-class runs so
+      // the cockpit and verify-local reports cannot show a failed project
+      // with zero corresponding failed generation records.
+      try {
+        const started=Date.now();
+        const run=this.generationMetrics.beginRun(projectId,'review',
+          '项目创建终止点：'+String(activeGenerationStep||'unknown'),undefined,'creation_terminal_failure',undefined,false);
+        this.generationMetrics.finishRun(run.id,'failed',started,
+          JSON.stringify({stage:activeGenerationStep||'unknown',protectedExistingData:true,
+            cancelled:currentGenerationSignal()?.aborted===true}),
+          err instanceof Error?err.message:String(err));
+      } catch (diagnosticError) {
+        this.logger.warn('项目创建失败诊断未能写入（仍保留失败状态）：'+String(diagnosticError));
+      }
       try {
         db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
       } catch {}
