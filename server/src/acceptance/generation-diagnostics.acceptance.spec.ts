@@ -175,7 +175,7 @@ it('generates a complete idea batch through preselection plus structuring and re
         return { content: JSON.stringify({ ideas: [makeIdea(structuredCount)] }) };
       }
       if (step === 'idea_presentation_review') {
-        const reviewPayload = input.prompt.split('【实际题材卡与已通过参考卡】')[1]?.split('\\n若存在standardLines')[0];
+        const reviewPayload = input.prompt.split('【实际题材卡与已通过参考卡】')[1]?.split('\n若存在standardLines')[0];
         const reviewCards = reviewPayload ? JSON.parse(reviewPayload).cards : [];
         return { content: JSON.stringify({
         reviews: reviewCards.map((item: any, index: number) => {
