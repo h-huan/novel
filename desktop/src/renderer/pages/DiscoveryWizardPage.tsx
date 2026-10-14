@@ -940,9 +940,8 @@ const DiscoveryWizardPage: React.FC = () => {
         store.addExcludeDetails(newDetails);
         const warning = (res as any).qualityWarning || '';
         const qualityWarn = warning ? `\n⚠️ ${warning}` : '';
-        const selectionReasons = (res as any)?.appealGate?.selectionAudit?.reasons;
-        const missingReason = Array.isArray(selectionReasons) ? selectionReasons.map((item: any) => typeof item?.reason === 'string' ? item.reason : '').filter(Boolean).join('；') : '';
-        const missingDetail = partial && missingReason ? `\n未通过原因：${missingReason}` : '';
+        const missingReason = discoveryShortfallReasons(newIdeas).slice(0, 5).join('；');
+        const missingDetail = partial && missingReason ? `\n缺额原因：${missingReason}` : '';
 
         store.setGenProgress(partial ? `本批未完成：已保留 ${newIdeas.length}/${configuredState.ideaCount} 个合格故事卡，缺少 ${configuredState.ideaCount-newIdeas.length} 个。可选择已有卡，不会自动补生。${missingDetail}${qualityWarn}` : `✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
@@ -1739,7 +1738,7 @@ const DiscoveryWizardPage: React.FC = () => {
 
         {ideas.length < ideaCount && discoveryShortfallReasons(ideas).length > 0 && (
           <div role="status" style={{ marginBottom: 16, color: 'var(--color-warning)', lineHeight: 1.6 }}>
-            本批缺少 {ideaCount - ideas.length} 张：以下题材在筛选阶段未通过，已通过的故事卡保留。
+            本批缺少 {ideaCount - ideas.length} 张：以下为已记录的筛选、结构化或终审缺额原因；已通过的故事卡保留。
             <ul>{discoveryShortfallReasons(ideas).map((reason, index) => <li key={index}>{reason}</li>)}</ul>
           </div>
         )}
@@ -1989,7 +1988,18 @@ const DiscoveryWizardPage: React.FC = () => {
 
 export default DiscoveryWizardPage;
 
+/** Render existing server evidence only; never promote a failed batch to success. */
 export function discoveryShortfallReasons(cards: any[]): string[] {
-  const reasons = cards[0]?.ideaDiscoveryAudit?.selectionAudit?.reasons;
-  return Array.isArray(reasons) ? [...new Set<string>(reasons.map((item: any) => typeof item?.reason === 'string' ? item.reason.trim() : '').filter(Boolean))] : [];
+  const audit = cards[0]?.ideaDiscoveryAudit;
+  if (!audit || typeof audit !== 'object') return [];
+  const selection = Array.isArray(audit.selectionAudit?.reasons)
+    ? audit.selectionAudit.reasons.map((item: any) => item?.reason) : [];
+  const structuring = Array.isArray(audit.structuringErrors)
+    ? audit.structuringErrors.map((item: any) => item?.error
+      ? `${item.sourcePremiseId || '未标识题材'} 结构化失败：${item.error}` : '') : [];
+  const gate = Array.isArray(audit.reasons) ? audit.reasons : [];
+  const repair = typeof audit.repairError === 'string' ? [`局部修复未完成：${audit.repairError}`] : [];
+  return [...new Set<string>([...selection, ...structuring, ...gate, ...repair]
+    .filter((reason: unknown): reason is string => typeof reason === 'string')
+    .map((reason: string) => reason.trim()).filter(Boolean))].slice(0, 8);
 }
