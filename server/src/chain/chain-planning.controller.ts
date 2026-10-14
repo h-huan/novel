@@ -74,8 +74,9 @@ export class ChainPlanningController {
           qualityWarning: result?.qualityWarning ?? null,
           error: result?.error ?? null,
           appealGate: result?.appealGate ?? null,
-          acceptedIdeas: Array.isArray(result?.ideas)
-            ? result.ideas.slice(0, desiredCount).map((idea: any) => ({
+          // Incomplete batches deliver through qualifiedIdeas, not ideas. Preserve the
+          // passing cards' evidence in the audit without promoting a shortfall to success.
+          acceptedIdeas: qualified.slice(0, desiredCount).map((idea: any) => ({
                 title: idea?.title ?? null,
                 hook: idea?.hook ?? null,
                 coreConflict: idea?.coreConflict ?? idea?.conflict ?? null,
@@ -83,8 +84,7 @@ export class ChainPlanningController {
                 mainReversal: idea?.mainReversal ?? null,
                 noveltyProof: idea?.noveltyProof ?? null,
                 ideaAppealGate: idea?.ideaAppealGate ?? null,
-              }))
-            : [],
+              })),
         });
       } catch (error) {
         this.logger.warn(`灵感发现诊断落库失败（不影响题材返回）：${error instanceof Error ? error.message : String(error)}`);
