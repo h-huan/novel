@@ -229,6 +229,41 @@ it('generates a complete idea batch through preselection plus structuring and re
   });
 });
 
+it('does not share an in-flight discovery across different excluded story details with the same title', async () => {
+  const controller = Object.create(ChainController.prototype) as any;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const generate = vi.fn(async () => { await gate; return {success: true, ideas: []}; });
+  controller.runIdeaDiscovery = generate;
+  controller.logger = {warn: vi.fn()};
+  const request = {
+    storyType: 'short_story' as const, platform: 'fanqie',
+    storyCategory: '悬疑灵异', count: 5,
+    ...discoveryStandards, excludeTitles: ['相同旧标题'],
+  };
+  const oldVersion = {...request, excludeDetails: [{
+    title: '相同旧标题', hook: '旧题材的继承争议',
+    description: '这次要排除被调换的收养身份',
+  }]};
+  const newVersion = {...request, excludeDetails: [{
+    title: '相同旧标题', hook: '新版题材的合同争议',
+    description: '这次要排除被篡改的采购合同',
+  }]};
+  const inFlight = [
+    controller.ideaDiscover(oldVersion),
+    controller.ideaDiscover(newVersion),
+    controller.ideaDiscover(oldVersion),
+  ];
+  try {
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls[0][0].excludeDetails).toEqual(oldVersion.excludeDetails);
+    expect(generate.mock.calls[1][0].excludeDetails).toEqual(newVersion.excludeDetails);
+  } finally {
+    release();
+  }
+  await Promise.all(inFlight);
+});
+
 it('uses read-only Registry rules and records their exact ruleset version on generation runs', async () => {
   const db = new DatabaseSync(':memory:');
   try {
