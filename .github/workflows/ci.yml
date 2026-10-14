@@ -28,7 +28,8 @@ jobs:
           node --check ../verify-local-core.mjs
           node --check ../verify-local-guard.mjs
           node --check ../verify-local-idea-diagnostics.mjs
-          node --test ../verify-local-guard.test.mjs ../verify-local-idea-diagnostics.test.mjs
+          node --check ../verify-local-standards.mjs
+          node --test ../verify-local-guard.test.mjs ../verify-local-idea-diagnostics.test.mjs ../verify-local-standards.test.mjs
       - name: Typecheck
         run: npm run typecheck
       - name: Build
