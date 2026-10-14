@@ -5650,9 +5650,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const slotReview: PremiseSelectionReview = {passed:false,issues:slot.issues};
       const protectedCurrentIds = selected.selected.filter(item=>item.premiseId!==slot.replacesPremiseId).map(item=>item.premiseId);
       const availableIds = repairPlan.availableCandidates.map(item=>item.premiseId).filter(id=>!protectedCurrentIds.includes(id));
+      // With one verified source-drift slot and unused original-pool identities,
+      // replacing the ambiguous premise is safer than spending a full review
+      // round polishing that same misread identity again (observed P10 case).
+      // Multiple affected slots keep their existing correlated reselect plan.
+      const preferReplacement = repairPlan.repairSlots.length === 1
+        && slot.issues.some(issue=>issue.kind==='source_drift')
+        && availableIds.some(id=>id!==slot.replacesPremiseId);
+      const eligibleIds = preferReplacement ? availableIds.filter(id=>id!==slot.replacesPremiseId) : availableIds;
       const normalize = (value: unknown) => {
         const row = (value as any)?.replacements?.[0]?.premise;
-        if (!availableIds.includes(row?.premiseId)) throw new Error('单项重选不能复制其它已选身份或已淘汰同构项');
+        if (!eligibleIds.includes(row?.premiseId)) throw new Error('单项重选不能复制正常项、重复错误来源或已淘汰同构项');
         return normalizeTargetedPremiseReselection(value, selected, slotReview, requestedCount, poolTarget, categories);
       };
     const result = await this.llmCallWithRetry<any>('锁定前原池重选',
@@ -5663,8 +5671,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n【本位置原池骨架（所有字段均须服从）】' + JSON.stringify(initial.pool.find(item => item.premiseId === slot.replacesPremiseId))
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。若原身份已难以沿原骨架修复，应从可用原池换选成熟题材。'
       + '\n【服务器保护的正常项ID（完整原文已在原选择中，只比较，不返回或修改）】' + JSON.stringify(repairPlan.protectedItems.map(item => item.premiseId))
-      + '\n【本次必须处理的原位置】' + JSON.stringify([{replacesPremiseId:slot.replacesPremiseId,mode:slot.mode}])
-      + '\n【可用原池候选ID（完整骨架已在原池中，仍须按完整因果链避开同构）】' + JSON.stringify(availableIds)
+      + '\n【本次必须处理的原位置】' + JSON.stringify([{replacesPremiseId:slot.replacesPremiseId,mode:preferReplacement?'replace_from_pool':slot.mode}])
+      + '\n【可用原池候选ID（完整骨架已在原池中，仍须按完整因果链避开同构）】' + JSON.stringify(eligibleIds)
       + '\n本次分类候选=' + JSON.stringify(categories)
       + `\n只输出JSON:{"replacements":[{"replacesPremiseId":"问题项原ID","premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","differentiation":"...","storyCategory":"原池分类"}}]}。replacements恰好1项，只覆盖列出的原位置；正常项由服务器按原顺序合并，不要返回它们。replace_from_pool必须更换原池身份；correct_or_replace_from_pool允许修正原身份的展开。不可再选已淘汰同构项、复制正常项或改变原池故事骨架。换选须逐一对照正常项的选择、升级、反转作用与兑现代价，不能只换职业或道具。`,
       { scenario: 'idea_generate', stepKey: 'idea_premise_pool_reselection', physicalCallBudget: reselectionBudget, timeout: LLM_TUNABLES.timeoutSimple(),
