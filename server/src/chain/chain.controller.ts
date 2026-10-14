@@ -1,5 +1,5 @@
 import { boundedDiscoveryMap } from './bounded-discovery-map';
-import { reviewIdeaCardsInBatches } from './idea-review-batches';
+import { reviewIdeaCardsInBatches, rebaseIdeaReviewReferences } from './idea-review-batches';
 import { generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
 import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } from './cross-stage-patch';
@@ -11060,7 +11060,10 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     // evidence. A failed group rejects the complete final Gate review.
     if (cards.length > 3) {
       return reviewIdeaCardsInBatches(cards, references,
-        (group, comparisons) => this.reviewIdeaPresentation(group, comparisons, customPlatformNote), 3, 2);
+        async (group, comparisons, start) => {
+          const verdicts = await this.reviewIdeaPresentation(group, comparisons, customPlatformNote);
+          return verdicts.map(verdict => rebaseIdeaReviewReferences(verdict, start, group.length));
+        }, 3, 2);
     }
     const reviewIssues = (value: unknown) => [...ideaReviewEvidenceReferenceIssues(targetIdeaReviews(value, cards, references), cards),
       ...ideaPayoffBridgeIssues(targetIdeaReviews(value, cards, references), cards),
