@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { analyzeIdeaDiscovery, renderIdeaDiscoveryDetails } from './verify-local-idea-diagnostics.mjs';
+import { analyzeExecutionStandards } from './verify-local-standards.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -322,17 +323,7 @@ const standardsResponse = health.ok
   : skippedRuntimeRequest('module-standards');
 const standards = asArray(standardsResponse.data);
 const codeSeedVersion = seedVersion();
-const standardMismatch = standards.filter((s) => {
-  const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
-  const source = String(s.source ?? '');
-  return (Number.isFinite(seed) && codeSeedVersion !== null && seed !== codeSeedVersion)
-    || source !== 'code_seed';
-}).map((s) => ({
-  moduleKey: s.moduleKey ?? s.module_key ?? null,
-  version: s.version ?? null,
-  seedBaselineVersion: s.seedBaselineVersion ?? s.seed_baseline_version ?? null,
-  source: s.source ?? null,
-}));
+const standardsAnalysis = analyzeExecutionStandards(standards, codeSeedVersion, standardsResponse.ok);
 
 const inspectedProjects = {};
 if (health.ok) {
@@ -356,12 +347,7 @@ const runtime = {
       },
   ideaDiscovery: ideaDiscoverySnapshot,
   ideaDiscoveryAnalysis,
-  standards: {
-    codeSeedVersion,
-    activeCount: standards.length,
-    consistent: standardsResponse.ok && standardMismatch.length === 0,
-    mismatches: standardMismatch,
-  },
+  standards: standardsAnalysis,
   projectDiscovery,
   projects: inspectedProjects,
 };
@@ -391,7 +377,7 @@ if (!health.ok) {
   // Root-cause-first: downstream runtime checks were not executed.
   runtimeProblems.push('server_unavailable');
 } else {
-  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push(runtime.standards.error || 'execution_standard_drift');
   if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
   if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
