@@ -714,7 +714,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     try {
       const checked = await this.auditPlanningActions(run, { prompt: content, planningSources, metrics: { projectId } }, content);
       if (!checked.verified || checked.issues.length) {
-        const report = classifyGateFailure({ topic: 'outline_alignment', evaluationStatus: checked.verified ? 'evaluated' : 'not_evaluated',
+        const report = classifyGateFailure({ topic: 'outline_alignment', artifact: 'framework', evaluationStatus: checked.verified ? 'evaluated' : 'not_evaluated',
           buckets: checked.verified ? { outline_alignment: checked.issues.map(issue => issue.summary) } : { review_incomplete: checked.errors } });
         throw new GeneratedQualityGateError(report, content);
       }
