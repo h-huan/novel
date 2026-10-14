@@ -105,3 +105,18 @@ test('does not mark a failed batch as successful when the overall audit is incom
   assert.deepEqual(result.stageSignals, ['批次失败，审计尚未定位到具体环节']);
   assert.match(renderIdeaDiscoveryDetails(result), /尚未取得细粒度失败证据/);
 });
+
+test('does not turn an absent premise count into a fake zero-selected failure', () => {
+  const result = analyzeIdeaDiscovery({
+    available: true,
+    audit: {
+      success: false, qualifiedCount: 0, totalIdeas: 0,
+      request: { requestedCount: 5 },
+      appealGate: { premiseSelected: null, premisePoolSize: null },
+    },
+  });
+  assert.equal(result.counts.selected, null);
+  assert.equal(result.counts.poolActual, null);
+  assert.equal(result.counts.requested, 5);
+  assert.deepEqual(result.stageSignals, ['批次失败，审计尚未定位到具体环节']);
+});
