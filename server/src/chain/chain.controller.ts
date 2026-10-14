@@ -5570,15 +5570,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   private async reviewPremiseSelection(selection: ReturnType<typeof normalizePremiseSelectionPayload>, standard: string, mode: 'overlap' | 'source_drift'): Promise<PremiseSelectionReview> {
     const validateReview = (value: unknown) => [...premiseSelectionReviewIssues(value, selection),
       ...(Array.isArray((value as PremiseSelectionReview)?.issues) ? (value as PremiseSelectionReview).issues : [])
-        .filter(item => item?.kind !== mode).map(() => '当前独立审查只能返回' + mode)];
+        .filter(item => mode === 'source_drift'
+          ? !['source_drift', 'payoff_gap'].includes(item?.kind) : item?.kind !== 'overlap')
+        .map(() => '当前独立审查不能混入其它类型的问题')];
     const result = await this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
       standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + '\n当前是锁定前复核，只审查，不修改或重选。'
-      + (mode === 'source_drift' ? '本次只核对每个已选项展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺，逐项核对，不审同批重合。补足细节不等于改写原骨架，不猜测未明写事实。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，必须说明选择、升级、反转与代价为何同构；引用两处相似句子之外，还须逐项比较主角选择触发的具体升级、反转改变的胜负条件与最终代价。')
+      + (mode === 'source_drift' ? '本次核验两类已选题材的同一身份问题，不审同批重合。第一类 source_drift：逐项核对已选展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺；补足细节不等于改写原骨架，原池只记提出请求不能把后文揭露动机当作取消请求；地点须区分先后阶段。第二类 payoff_gap：选中前核对同一题材 storyCore / payoff 的核心结果与 activeChoice / escalation 已提供的行动、必要证据、参与者权限或权利程序能否形成真实因果。只在已明确的结局需要某必要条件而筛选证据缺失时指出，不能因未来场景未写足、超自然原理未解释或个人不喜欢题材就拦截；尤其不能把公开录音直接等同有权机关执行处置，把赢下一单直接等同取得抚养权。引用同ID已选题材的两个不同真实片段，quote 指向不成立的承诺/结果，referenceQuote 指向当事人已有行动/阶段，理由具体交代哪一项必要条件缺失。payoff_gap 不得凭空猜测新的反转或法律结论。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，必须说明选择、升级、反转与代价为何同构；引用两处相似句子之外，还须逐项比较主角选择触发的具体升级、反转改变的胜负条件与最终代价。')
       + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
       + '\n【待锁定已选胚子】' + JSON.stringify(selection.selected)
-      + '\n当前审查类型=' + mode + '\n只输出JSON:{"passed":true,"issues":[]}。有已举证问题则passed=false，issues项为'
-      + '{"kind":"' + mode + '","premiseId":"需处理的已选ID","referencePremiseId":"对照ID","quote":"该已选项连续原文至少8字","referenceQuote":"对照项连续原文至少8字","reason":"具体因果理由至少8字"}。overlap对照另一已选项，source_drift对照同ID原池骨架；不要求猜测未明写细节。',
+      + '\n当前审查类型=' + mode + (mode === 'source_drift' ? '（允许source_drift/payoff_gap两类）' : '') + '\n只输出JSON:{"passed":true,"issues":[]}。有已举证问题则passed=false，issues项为'
+      + '{"kind":"' + (mode === 'source_drift' ? 'source_drift或payoff_gap' : mode) + '","premiseId":"需处理的已选ID","referencePremiseId":"对照ID","quote":"问题承诺连续原文至少8字","referenceQuote":"与其对照的行动或原骨架连续原文至少8字","reason":"缺失的必要桥接条件或具体因果理由至少8字"}。overlap对照另一已选项，source_drift对照同ID原池骨架，payoff_gap的两个引文均来自同ID已选项、必须不同；不得仅因细节未展开就推断失败。' ,
       { scenario: 'idea_generate', stepKey: 'idea_premise_' + mode + '_review', temperature: 0.1, timeout: LLM_TUNABLES.timeoutComplex(),
         validate: value => validateReview(value).length === 0,
         describeValidation: value => validateReview(value),
