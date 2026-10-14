@@ -125,6 +125,39 @@ export const discoveryResponseMatchesSelection = (
   && (allowQualifiedPartial ? ideas.length > 0 && ideas.length < state.ideaCount : ideas.length === state.ideaCount)
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
+/** The recovery archive is a past request, not permission to label old cards as the current selection.
+ * Compare the original request, including unselected fields, before reusing any qualified cards. */
+export const discoveryRecoveryMatchesSelection = (
+  batch: any,
+  state: ReturnType<typeof useDiscoveryStore.getState>,
+): boolean => {
+  const request = batch?.request;
+  const cards = batch?.qualifiedIdeas;
+  if (!request || typeof request !== 'object' || !Array.isArray(cards)
+    || cards.length === 0 || cards.length > state.ideaCount) return false;
+  const selectedCategory = [state.selectedCategory, state.selectedSubCategory].filter(Boolean).join('/');
+  const strings: Array<[unknown, string]> = [
+    [request.storyType, state.storyType], [request.platform, state.targetPlatform],
+    [request.storyCategory, selectedCategory], [request.customPlatformNote, state.customPlatformNote],
+    [request.genreFitNote, state.genreFitNote], [request.pov, state.narrativePov],
+    [request.targetWords, state.targetWords], [request.targetAudience, state.targetAudience],
+  ];
+  if (request.count !== state.ideaCount
+    || strings.some(([actual, expected]) => String(actual ?? '').trim() !== String(expected ?? '').trim())) return false;
+  const arrays: Array<[unknown, string[]]> = [
+    [request.storyTone, state.selectedTones], [request.writingStyle, state.selectedWritingStyles],
+    [request.webNovelGenre, state.selectedGenres], [request.submissionTags, state.selectedSubmissionTags],
+    [request.plotTags, state.selectedPlotTags],
+  ];
+  if (arrays.some(([actual, expected]) => !Array.isArray(actual)
+    || JSON.stringify(actual) !== JSON.stringify(expected))) return false;
+  // No filtered-out, duplicate or cross-platform result may inherit the current request signature.
+  return acceptedDiscoveryIdeas(cards).length === cards.length
+    && new Set(cards.map((card: any) => String(card.sourcePremiseId || '').trim())).size === cards.length
+    && cards.every((card: any) => card.sourcePremiseId
+      && card.storyType === state.storyType && card.targetPlatform === state.targetPlatform);
+};
+
 // Absence from a public sample is not evidence of an invalid tag.
 const discoveryGenreProblem = (_state: ReturnType<typeof useDiscoveryStore.getState>): string => '';
 
@@ -966,20 +999,13 @@ const DiscoveryWizardPage: React.FC = () => {
     try { response = await api.get<any>('/chain/idea-discovery-diagnostics/latest'); }
     catch (error:any) { store.setGenProgress(`恢复读取失败：${error.message}`); return; }
     const current = useDiscoveryStore.getState();
-    const retained = previous ? ((response as any).retainedBatches || []).find((batch:any)=>batch.request?.platform===current.targetPlatform && batch.request?.storyType===current.storyType && batch.request?.count===current.ideaCount) : (response as any).retained;
-    const cards = acceptedDiscoveryIdeas(retained?.qualifiedIdeas || []);
-    if (!cards.length || cards.length > current.ideaCount || retained?.request?.count !== current.ideaCount || retained?.request?.platform !== current.targetPlatform || retained?.request?.storyType !== current.storyType) {
-      store.setGenProgress('没有与当前平台及长短篇匹配的已通过故事卡。'); return;
+    const retained = previous
+      ? ((response as any).retainedBatches || []).find((batch: any) => discoveryRecoveryMatchesSelection(batch, current))
+      : (response as any).retained;
+    if (!discoveryRecoveryMatchesSelection(retained, current)) {
+      store.setGenProgress('没有与当前完整创作设置一致的已通过故事卡；目标字数、目标读者、分类和自定义平台说明也必须与原请求一致。'); return;
     }
-    if (current.selectedCategory && cards.some((card:any)=>!String(card.storyCategory||'').includes(current.selectedCategory))) {
-      store.setGenProgress('上次故事卡分类与当前选择不同，请先恢复原选择。'); return;
-    }
-    const requested: any = discoveryStandards(current);
-    const fields = ['storyTone','writingStyle','webNovelGenre','submissionTags','plotTags'];
-    if (fields.some(field => requested[field]?.length && cards.some((card:any)=>JSON.stringify(card[field]||[])!==JSON.stringify(requested[field])))
-      || (current.narrativePov && cards.some((card:any)=>card.pov!==current.narrativePov))) {
-      store.setGenProgress('上次故事卡与当前创作设置不同，未恢复；请先恢复原选择。'); return;
-    }
+    const cards = retained.qualifiedIdeas;
     store.setIdeas(cards); store.setGeneratedSignature(discoverySignature(current));
     store.setGenerationDone(true); store.setStep(1);
     store.setGenProgress(`已恢复 ${cards.length}/${retained.request.count} 个已通过故事卡；原批次${retained.success?'已完成':'未完成'}。恢复不调用模型，请核对卡上的创作设置后选择。`);
