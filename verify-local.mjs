@@ -23,5 +23,24 @@ if (fs.existsSync(reportPath)) {
   guardStatus = typeof guard.status === 'number' ? guard.status : 1;
 }
 
+// Keep the default latest-only workflow; opt in to per-run evidence when
+// diagnosing intermittent real-model failures across several manual runs.
+if (process.argv.includes('--archive') && fs.existsSync(reportPath)) {
+  try {
+    const snapshot = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    const stamp = String(snapshot.generatedAt || new Date().toISOString()).replace(/[^0-9A-Za-z_-]/g, '-');
+    const runDir = path.join(root, 'verification', 'runs');
+    fs.mkdirSync(runDir, { recursive: true });
+    const prefix = stamp + '-' + process.pid;
+    fs.copyFileSync(reportPath, path.join(runDir, prefix + '.json'));
+    const md = path.join(root, 'verification', 'latest.md');
+    if (fs.existsSync(md)) fs.copyFileSync(md, path.join(runDir, prefix + '.md'));
+    console.log('[verify] archived: verification/runs/' + prefix);
+  } catch (error) {
+    console.error('[verify] archive failed: ' + (error instanceof Error ? error.message : String(error)));
+    guardStatus = 1;
+  }
+}
+
 const coreStatus = typeof core.status === 'number' ? core.status : 1;
 process.exitCode = coreStatus !== 0 ? coreStatus : guardStatus;
