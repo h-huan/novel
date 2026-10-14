@@ -402,3 +402,30 @@ it('packs identical review-standard lines without losing card-specific criteria,
  expect(JSON.stringify({cards,references})).toBe(before);
  expect(packIdeaReviewStandards([{executionStandard:'短'}],[])).toEqual({cards:[{executionStandard:'短'}],references:[]});
 });
+
+describe('auto-selected genre correction never rewrites author settings', () => {
+  const card={sourcePremiseId:'P8',title:'小票账本',webNovelGenre:['系统流'],
+    setting:'小票记录的规则具有固定作用范围。',ending:'主角选择承担代价。',
+    scopeBreakdown:[{arc:'追查规则',chapters:1,reason:'确认规则',outcome:'找到来源'}]};
+  it('allows a registered auto genre while keeping story facts and identity unchanged',()=>{
+    const input=[{webNovelGenre:['规则怪谈']}];
+    const output=applyOrderedIdeaRepairPatches([card],input,[],[],[],[0],['系统流','规则怪谈'])[0];
+    expect(output.webNovelGenre).toEqual(['规则怪谈']);
+    expect(output.ending).toBe(card.ending);
+    expect(output.setting).toBe(card.setting);
+    expect(output.sourcePremiseId).toBe(card.sourcePremiseId);
+    expect(card.webNovelGenre).toEqual(['系统流']);
+  });
+  it('blocks overwriting an explicitly selected genre or inventing unregistered genres',()=>{
+    expect(()=>applyOrderedIdeaRepairPatches([card],[{webNovelGenre:['规则怪谈']}],[],[],[],[],['系统流','规则怪谈'])).toThrow('只有系统自动选择');
+    expect(()=>applyOrderedIdeaRepairPatches([card],[{webNovelGenre:['万能流']}],[],[],[],[0],['系统流','规则怪谈'])).toThrow('现有创作字典');
+    expect(()=>applyOrderedIdeaRepairPatches([card],[{webNovelGenre:['规则怪谈','规则怪谈']}],[],[],[],[0],['规则怪谈'])).toThrow('现有创作字典');
+  });
+  it('exposes only auto-label repair in the directive and not server owned identity',()=>{
+    const prompt=ideaGateLocalRepairDirective([{card,gateIssues:['流派不匹配'],autoGenreRepairAllowed:true}],['规则怪谈']);
+    expect(prompt).toContain('autoGenreRepairAllowed');
+    expect(prompt).toContain('规则怪谈');
+    expect(prompt).not.toContain('"sourcePremiseId"');
+    expect(prompt).toContain('所有标签纠正仍须重新完整 Gate 审核');
+  });
+});
