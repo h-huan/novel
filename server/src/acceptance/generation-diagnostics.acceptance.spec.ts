@@ -188,6 +188,13 @@ it('generates a complete idea batch through preselection plus structuring and re
             readerQuestion: '主角能否证实当前异常并承担公开材料后的真实关系后果？',
             readerGoals: { click: goal('hook'), completion: goal('description'),
               sharing: goal('ending'), immersion: goal('hook') },
+            // This affirmative verdict must cite a real action, result and independent
+            // prerequisite, not infer a result from its own ending statement.
+            payoffBridge: {
+              status: 'supported', actionEvidenceRef: `C${position}.hook`,
+              resultEvidenceRef: `C${position}.ending`, conditionEvidenceRef: `C${position}.description`,
+              reason: '主角以实际核验及主动公开证据建立责任转移的前提，终局再兑现责任和关系变化。',
+            },
             issues: [],
           };
         }),
