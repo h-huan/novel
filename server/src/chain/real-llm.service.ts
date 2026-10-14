@@ -711,8 +711,15 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     const content = JSON.stringify({ volumes: [{ chapters }] });
     const started = Date.now();
     const run = this.metrics.beginRun(projectId, 'outline', content, undefined, 'framework_action_proof');
+    let frameworkEvidence: Record<string, unknown> | undefined;
     try {
       const checked = await this.auditPlanningActions(run, { prompt: content, planningSources, metrics: { projectId } }, content);
+      frameworkEvidence = {
+        evaluationStatus: checked.verified ? 'evaluated' : 'not_evaluated',
+        issues: checked.issues,
+        errors: checked.errors,
+        causalAudit: checked.audit,
+      };
       if (!checked.verified || checked.issues.length) {
         const report = classifyGateFailure({ topic: 'outline_alignment', artifact: 'framework', evaluationStatus: checked.verified ? 'evaluated' : 'not_evaluated',
           buckets: checked.verified ? { outline_alignment: checked.issues.map(issue => issue.summary) } : { review_incomplete: checked.errors } });
@@ -720,7 +727,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       }
       this.metrics.finishRun(run.id, 'success', started, content);
     } catch (error) {
-      this.metrics.blockRunValidation(run.id, error instanceof Error ? error.message : String(error));
+      this.metrics.blockRunValidation(run.id, error instanceof Error ? error.message : String(error), frameworkEvidence);
       this.metrics.finishRun(run.id, 'failed', started, content, error instanceof Error ? error.message : String(error));
       throw error;
     }
