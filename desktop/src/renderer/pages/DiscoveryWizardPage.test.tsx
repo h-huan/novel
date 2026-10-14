@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { useDiscoveryStore } from '../stores/discoveryStore';
 import { missingExecutionStandards } from '../lib/executionStandards';
-import { discoveryResponseMatchesSelection, discoverySignature, findProjectForIdea, standardsForIdea } from './DiscoveryWizardPage';
+import { discoveryRecoveryMatchesSelection, discoveryResponseMatchesSelection, discoverySignature, findProjectForIdea, standardsForIdea } from './DiscoveryWizardPage';
 import type { Project } from '@novel/shared';
 
 describe('从题材卡创建项目的执行设定', () => {
@@ -117,4 +117,59 @@ it('shows saved partial selection reasons without another discovery request',asy
  ]);
  expect(discoveryShortfallReasons([])).toEqual([]);
  expect(discoveryShortfallReasons([{ideaDiscoveryAudit:{}}])).toEqual([]);
+});
+
+
+describe('历史合格灵感恢复必须严格绑定原始请求', () => {
+  const state = {
+    ...useDiscoveryStore.getState(),
+    ideaCount: 2, storyType: 'short_story' as const, targetPlatform: 'fanqie',
+    targetWords: '20000', targetAudience: '男频',
+    selectedCategory: '男频', selectedSubCategory: '都市',
+    customPlatformNote: '', genreFitNote: '贴合都市情节',
+    selectedTones: ['紧张'], selectedWritingStyles: ['白描'],
+    selectedGenres: ['悬疑'], selectedSubmissionTags: ['现实'],
+    selectedPlotTags: ['调查'], narrativePov: '第一人称',
+  };
+  const request = {
+    count: state.ideaCount, storyType: state.storyType, platform: state.targetPlatform,
+    storyCategory: '男频/都市', customPlatformNote: state.customPlatformNote,
+    genreFitNote: state.genreFitNote, targetWords: state.targetWords,
+    targetAudience: state.targetAudience, storyTone: state.selectedTones,
+    writingStyle: state.selectedWritingStyles, webNovelGenre: state.selectedGenres,
+    submissionTags: state.selectedSubmissionTags, plotTags: state.selectedPlotTags,
+    pov: state.narrativePov,
+  };
+  const cards = ['P1', 'P2'].map(sourcePremiseId => ({
+    sourcePremiseId, title: '都市合同的谜团', storyType: 'short_story',
+    targetPlatform: 'fanqie', ideaAppealGate: {passed: true},
+  }));
+  const batch = {request, qualifiedIdeas: cards};
+
+  it('allows a saved full/partial qualified set only under its exact original settings', () => {
+    expect(discoveryRecoveryMatchesSelection(batch, state)).toBe(true);
+    expect(discoveryRecoveryMatchesSelection({...batch, qualifiedIdeas:[cards[0]]}, state)).toBe(true);
+  });
+
+  it.each([
+    ['target words', {targetWords: '30000'}],
+    ['audience', {targetAudience: '女频'}],
+    ['category', {selectedSubCategory: '现实'}],
+    ['custom platform standard', {customPlatformNote: '额外规则'}],
+    ['genre explanation', {genreFitNote: '改过的契合理由'}],
+    ['plot tags', {selectedPlotTags: ['逆袭']}],
+    ['writing style', {selectedWritingStyles: ['诙谐']}],
+    ['narrative POV', {narrativePov: '第三人称'}],
+    ['card count', {ideaCount: 3}],
+  ])('rejects past batches with changed %s', (_name, change) => {
+    expect(discoveryRecoveryMatchesSelection(batch, {...state, ...change})).toBe(false);
+  });
+
+  it('refuses incomplete request snapshots, rejected, duplicated and wrong-platform cards', () => {
+    expect(discoveryRecoveryMatchesSelection({...batch, request: {...request, targetAudience: undefined}}, state)).toBe(false);
+    expect(discoveryRecoveryMatchesSelection({...batch, qualifiedIdeas: [cards[0], cards[0]]}, state)).toBe(false);
+    expect(discoveryRecoveryMatchesSelection({...batch, qualifiedIdeas: [cards[0], {...cards[1], ideaAppealGate:{passed:false}}]}, state)).toBe(false);
+    expect(discoveryRecoveryMatchesSelection({...batch, qualifiedIdeas: [cards[0], {...cards[1], targetPlatform:'other'}]}, state)).toBe(false);
+    expect(discoveryRecoveryMatchesSelection({...batch, qualifiedIdeas: []}, state)).toBe(false);
+  });
 });
