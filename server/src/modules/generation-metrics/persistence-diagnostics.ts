@@ -7,8 +7,12 @@ export function classifyFrameworkPersistence(input: {
   runs: Array<{stage?:string;status?:string;gate_status?:string}>;
 }) {
   const isCreating = input.projectStatus === 'creating';
-  const blockedBeforeFrameworkCommit = input.projectStatus === 'generation_failed' && input.runs.some(run =>
-    run.stage === 'outline' && run.status === 'failed' && run.gate_status === 'blocked');
+  // Only the latest run can explain the *current* project failure. A stale
+  // outline rejection from an earlier retry must not hide a new DB write fault.
+  const lastRun = input.runs[0];
+  const blockedBeforeFrameworkCommit = input.projectStatus === 'generation_failed'
+    && lastRun?.stage === 'outline' && lastRun.status === 'failed'
+    && lastRun.gate_status === 'blocked';
   const uncommittedCandidates: string[] = blockedBeforeFrameworkCommit
     ? input.observedMismatches.filter(code => code === 'outline_success_without_chapter_outline') : [];
   const remaining = input.observedMismatches.filter(code => !uncommittedCandidates.includes(code));
