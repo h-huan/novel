@@ -13,6 +13,25 @@ import {
 
 const HARDLINE = `${HARDLINE_FINDING_PREFIX}rule42】叙述者跳出成为作者评论者 | 位置: 第3段 | 原文: 各位看官`;
 
+describe('framework audit must remain a hard Gate while correctly naming the artifact', () => {
+  it('preserves 422 on a real framework causal gap, without claiming any chapter body exists', () => {
+    const report = classifyGateFailure({topic:'outline_alignment',artifact:'framework',evaluationStatus:'evaluated',
+      buckets:{outline_alignment:['世界设定的必要授权尚未在候选行动中得到满足']}});
+    expect(report.status).toBe(422);
+    expect(report.kinds).toEqual(['outline_alignment']);
+    expect(report.message).toContain('候选框架未提交');
+    expect(report.message).toContain('世界设定的必要授权');
+    expect(report.message).not.toContain('正文未保存');
+    expect(report.sections[0]).toContain('框架关键行动因果');
+  });
+  it('preserves 503 when a framework review has no trustworthy judgment', () => {
+    const report = classifyGateFailure({topic:'outline_alignment',artifact:'framework',evaluationStatus:'not_evaluated',
+      buckets:{review_incomplete:['模型审查未给出有效的因果引用']}});
+    expect(report.status).toBe(503);
+    expect(report.message).toContain('框架审查未完成');
+    expect(report.message).not.toContain('正文');
+  });
+});
 describe('gate failure classifier', () => {
   it('splits the three real causes apart instead of blaming the outline for everything', () => {
     const report = classifyGateFailure({

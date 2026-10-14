@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { analyzeIdeaDiscovery, renderIdeaDiscoveryDetails } from './verify-local-idea-diagnostics.mjs';
+import { analyzeExecutionStandards } from './verify-local-standards.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -198,11 +199,28 @@ function chapterSummary(chapter) {
 
 function runSummary(run) {
   if (!run) return null;
-  return pick(run, [
+  const out = pick(run, [
     'id', 'stage', 'scenario', 'step_key', 'stepKey', 'status', 'gate_status', 'gateStatus',
     'chapter_index', 'chapterIndex', 'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
     'context_version', 'contextVersion', 'standard_version', 'standardVersion',
   ]);
+  // The authoritative failed run now retains structured causal evidence in
+  // quality_payload. Show a bounded summary; never infer missing proof from text.
+  try {
+    const payload = typeof run.quality_payload === 'string'
+      ? JSON.parse(run.quality_payload) : run.quality_payload;
+    const evidence = payload?.postRepairValidation?.evidence;
+    if (evidence && typeof evidence === 'object') {
+      out.frameworkGateEvidence = {
+        evaluationStatus: evidence.evaluationStatus || 'unknown',
+        errors: Array.isArray(evidence.errors) ? evidence.errors : [],
+        issues: Array.isArray(evidence.issues) ? evidence.issues : [],
+        transitions: Array.isArray(evidence.causalAudit?.transitions)
+          ? evidence.causalAudit.transitions : [],
+      };
+    }
+  } catch { /* Older logs lacked structured evidence. Do not invent it. */ }
+  return out;
 }
 
 async function inspectProject(target) {
@@ -322,17 +340,7 @@ const standardsResponse = health.ok
   : skippedRuntimeRequest('module-standards');
 const standards = asArray(standardsResponse.data);
 const codeSeedVersion = seedVersion();
-const standardMismatch = standards.filter((s) => {
-  const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
-  const source = String(s.source ?? '');
-  return (Number.isFinite(seed) && codeSeedVersion !== null && seed !== codeSeedVersion)
-    || source !== 'code_seed';
-}).map((s) => ({
-  moduleKey: s.moduleKey ?? s.module_key ?? null,
-  version: s.version ?? null,
-  seedBaselineVersion: s.seedBaselineVersion ?? s.seed_baseline_version ?? null,
-  source: s.source ?? null,
-}));
+const standardsAnalysis = analyzeExecutionStandards(standards, codeSeedVersion, standardsResponse.ok);
 
 const inspectedProjects = {};
 if (health.ok) {
@@ -356,12 +364,7 @@ const runtime = {
       },
   ideaDiscovery: ideaDiscoverySnapshot,
   ideaDiscoveryAnalysis,
-  standards: {
-    codeSeedVersion,
-    activeCount: standards.length,
-    consistent: standardsResponse.ok && standardMismatch.length === 0,
-    mismatches: standardMismatch,
-  },
+  standards: standardsAnalysis,
   projectDiscovery,
   projects: inspectedProjects,
 };
@@ -391,7 +394,7 @@ if (!health.ok) {
   // Root-cause-first: downstream runtime checks were not executed.
   runtimeProblems.push('server_unavailable');
 } else {
-  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push(runtime.standards.error || 'execution_standard_drift');
   if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
   if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
@@ -543,15 +546,35 @@ function projectMarkdown(target) {
   const persistenceLine = diagnostics
     ? diagnostics.creationStalled
       ? `FAIL · stalled · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
-      : (diagnostics.pendingPersistenceMismatch || []).length
-        ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
-        : `PASS · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
+      : (diagnostics.persistenceMismatch || []).length
+        ? `FAIL · mismatch=${diagnostics.persistenceMismatch.join(',')}`
+        : (diagnostics.uncommittedCandidates || []).length
+          ? `BLOCKED · 候选尚未通过框架 Gate（没有被批准提交），并非已确认的数据丢失 · ${diagnostics.uncommittedCandidates.join(',')}`
+          : (diagnostics.pendingPersistenceMismatch || []).length
+            ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
+            : 'PASS · mismatch=none'
     : 'UNAVAILABLE';
-  const failedRunLines = (result.failedRuns || []).map((run) =>
-    '- run=' + (run.id ?? 'unknown') + ' · stage=' + (run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown')
-    + ' · status=' + (run.status ?? 'unknown') + ' · gate=' + (run.gate_status ?? run.gateStatus ?? 'unknown')
-    + ' · model=' + (run.model ?? 'unknown') + ' · error=' + String(run.error ?? '(not provided)').replace(/\s+/g, ' ').trim()
-  );
+  const failedRunLines = (result.failedRuns || []).flatMap((run) => {
+    const lines = ['- run=' + (run.id ?? 'unknown') + ' · stage=' + (run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown')
+      + ' · status=' + (run.status ?? 'unknown') + ' · gate=' + (run.gate_status ?? run.gateStatus ?? 'unknown')
+      + ' · model=' + (run.model ?? 'unknown') + ' · error=' + String(run.error ?? '(not provided)').replace(/\\s+/g, ' ').trim()];
+    const proof = run.frameworkGateEvidence;
+    if (proof) {
+      lines.push('  - 关键行动审查状态：' + String(proof.evaluationStatus || 'unknown'));
+      for (const item of (proof.issues || []).slice(0, 15)) lines.push('  - 证据化阻断：章号='
+        + (item.chapterNumber ?? '?') + ' · ' + String(item.summary || '(无摘要)').slice(0, 900)
+        + ' · 来源=' + String(item.evidence || '(未提供)').slice(0, 1100));
+      for (const item of (proof.errors || []).slice(0, 8)) lines.push('  - 审查协议错误：' + String(item).slice(0, 800));
+      for (const item of (proof.transitions || []).filter(x => x.status === 'gap').slice(0, 15))
+        lines.push('  - 因果账目：章号=' + (item.chapterNumber ?? '?') + ' · 必要条件='
+          + String(item.requiredCondition || '(未提供)').slice(0, 650) + ' · 依据='
+          + String(item.reason || '(未提供)').slice(0, 650)
+          + ' · 行动引用=' + String(item.actionAnchorId || '?')
+          + ' · 结果引用=' + String(item.resultAnchorId || '?')
+          + ' · 桥接引用=' + String(item.bridgeAnchorId || '(缺失)'));
+    }
+    return lines;
+  });
   return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}\n\n#### 最近失败的生成调用（最多15条）\n\n${failedRunLines.join('\n') || '- 未发现有错误标记的生成记录'}`;
 }
 
