@@ -8385,28 +8385,40 @@ ${STORY_ENTITY_MODELING_POLICY}
       // a contradictory alias elsewhere in the same chapter. Batch by chapter.
       const groups=new Map<string,typeof targets>();
       for(const target of targets){const group=groups.get(target.chapterId)||[];group.push(target);groups.set(target.chapterId,group);}
-      for(const rows of groups.values()){
+      // Source boundary checks use the same frozen context for every chapter.
+      // Two independent groups may be reviewed concurrently; a single rejected
+      // group still aborts the whole creation, and conflicting verdicts still
+      // pass through the later same-chapter evidence reconciliation.
+      const boundaryResults=await boundedDiscoveryMap([...groups.values()],2,async rows=>{
         const cacheKey='boundary:'+JSON.stringify({rows,context});
         const cached=verifiedSourceReviews.get(cacheKey);
-        if(cached){findings.push(...cached);continue;}
+        if(cached)return {rows,cacheKey,cached,checks:[] as any[],findings:cached};
         const responses=await reviewFixedSourceChecklist(rows,async batch=>{
-        const response=await this.llmCallWithRetry<any>('章纲来源边界专项复核',
-        outlineSourceBoundaryReviewPrompt(batch,context),{
-          projectId,scenario:'review',temperature:0.1,stepKey:'creation_outline_source_boundary',
-          validate:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).verified,
-          describeValidation:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).errors,
-          retryInstruction:'仅修正点名章纲的核对依据和状态，不改章纲，不补造能力，不以总审查通过替代各项结果。',
+          const response=await this.llmCallWithRetry<any>('章纲来源边界专项复核',
+            outlineSourceBoundaryReviewPrompt(batch,context),{
+              projectId,scenario:'review',temperature:0.1,stepKey:'creation_outline_source_boundary',
+              validate:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).verified,
+              describeValidation:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).errors,
+              retryInstruction:'仅修正点名章纲的核对依据和状态，不改章纲，不补造能力，不以总审查通过替代各项结果。',
+            });
+          if(!response.data)throw new Error('章纲来源边界专项未完成，停止上游修复与正文生成。');
+          return response.data;
         });
-      if(!response.data)throw new Error('章纲来源边界专项未完成，停止上游修复与正文生成。');
-      return response.data;
-        });
-      const checked=validateOutlineSourceBoundaryReview({checks:responses.flatMap(response=>response.checks)},rows,context);
-      if(!checked.verified)throw new Error('章纲来源边界专项证据未通过：'+checked.errors.join('；'));
-      // Keep the source report even when it flags a gap. The result audit
-      // may provide a disputed prerequisite in the SAME chapter; returning
-      // before it runs makes a false-positive impossible to reconcile.
-      boundaryReports.set(rows[0].chapterId,{rows,checks:responses.flatMap(response=>response.checks)});
-      if(checked.verified&&!checked.findings.length)verifiedSourceReviews.set(cacheKey,checked.findings);
+        const checks=responses.flatMap(response=>response.checks);
+        const checked=validateOutlineSourceBoundaryReview({checks},rows,context);
+        if(!checked.verified)throw new Error('章纲来源边界专项证据未通过：'+checked.errors.join('；'));
+        return {rows,cacheKey,cached:undefined,checks,findings:checked.findings};
+      });
+      const failedBoundary=boundaryResults.find((result):result is PromiseRejectedResult=>result.status==='rejected');
+      if(failedBoundary)throw failedBoundary.reason;
+      for(const result of boundaryResults){
+        if(result.status!=='fulfilled')continue;
+        const {rows,cacheKey,cached,checks,findings:sourceFindings}=result.value;
+        if(cached){findings.push(...cached);continue;}
+        // Record even conflicting source reports: same-chapter result-proof
+        // evidence may rebut them, but must never silently override them.
+        boundaryReports.set(rows[0].chapterId,{rows,checks});
+        if(!sourceFindings.length)verifiedSourceReviews.set(cacheKey,sourceFindings);
       }
       const disputedChapters=new Set([...boundaryReports.entries()].filter(([,report])=>
         validateOutlineSourceBoundaryReview({checks:report.checks},report.rows,context).findings.length
