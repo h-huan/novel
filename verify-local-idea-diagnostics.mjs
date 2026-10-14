@@ -27,6 +27,12 @@ export function analyzeIdeaDiscovery(snapshot) {
     reason: textOf(typeof reason === 'string' ? reason : reason?.reason || reason?.message || reason?.issue, 1000),
     kind: textOf(reason?.kind || reason?.type, 100),
   })).filter((item) => item.reason);
+  const reviewIssues = (review) => list(review?.issues).map((item) => ({
+    id: textOf(item?.premiseId, 80), kind: textOf(item?.kind, 60),
+    reason: textOf(item?.reason, 1000),
+  })).filter(item => item.reason);
+  const initialSelectionIssues = reviewIssues(selectionAudit.initialReview);
+  const finalSelectionIssues = reviewIssues(selectionAudit.finalReview);
   const structuringErrors = list(gate.structuringErrors).map((item) => ({
     premiseId: textOf(item?.sourcePremiseId, 100),
     error: textOf(item?.error, 1600),
@@ -66,6 +72,12 @@ export function analyzeIdeaDiscovery(snapshot) {
       qualified, delivered: countOf(audit.totalIdeas) ?? 0, shortfall,
     },
     stageSignals, selectionReasons, structuringErrors, candidates,
+    preselectionReviews: {
+      initialPassed: selectionAudit.initialReview?.passed ?? null,
+      finalPassed: selectionAudit.finalReview?.passed ?? null,
+      reselectionAttempted: selectionAudit.reselectionAttempted === true,
+      initialIssues: initialSelectionIssues, finalIssues: finalSelectionIssues,
+    },
     timing: gate.timing && typeof gate.timing === 'object' ? gate.timing : audit.timing || null,
     reviewAttempts: gate.reviewAttempts || null,
     repair: {
@@ -112,6 +124,16 @@ export function renderIdeaDiscoveryDetails(analysis) {
       lines.push('- ' + (item.id ? item.id + ' · ' : '') +
         (item.kind ? '[' + item.kind + '] ' : '') + item.reason);
     }
+  }
+  if (analysis.preselectionReviews && (analysis.preselectionReviews.initialIssues.length || analysis.preselectionReviews.finalIssues.length)) {
+    const pre = analysis.preselectionReviews;
+    lines.push('', '### 锁定前独立复核与定向重选历史');
+    lines.push('- 初审：' + (pre.initialPassed === true ? 'PASS' : pre.initialPassed === false ? 'FAILED' : 'UNKNOWN')
+      + '；是否进行了原池定向重选：' + (pre.reselectionAttempted ? '是' : '否')
+      + '；复审：' + (pre.finalPassed === true ? 'PASS' : pre.finalPassed === false ? 'FAILED' : 'UNKNOWN'));
+    for (const issue of pre.initialIssues) lines.push('- 初审发现 ' + (issue.id || '?') + ' [' + (issue.kind || '?') + ']：' + issue.reason);
+    for (const issue of pre.finalIssues) lines.push('- 复审仍未解决 ' + (issue.id || '?') + ' [' + (issue.kind || '?') + ']：' + issue.reason);
+    if (pre.initialIssues.length && pre.finalPassed === true) lines.push('- 初审问题已在后续复审通过，不能算作最终失败原因。');
   }
   if (analysis.structuringErrors.length) {
     lines.push('', '### 单卡结构化错误');
