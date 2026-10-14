@@ -121,3 +121,35 @@ test('does not turn an absent premise count into a fake zero-selected failure', 
   assert.equal(result.counts.requested, 5);
   assert.deepEqual(result.stageSignals, ['批次失败，审计尚未定位到具体环节']);
 });
+
+test('reports actual stage durations and resolved initial review issues without inventing new failures', () => {
+  const analysis = analyzeIdeaDiscovery({
+    available:true, audit:{
+      generatedAt:'2026-10-14T08:36:00Z',
+      success:false, totalIdeas:0, qualifiedCount:3, shortfallCount:2,
+      request:{requestedCount:5}, appealGate:{
+        requested:5,premiseSelected:5,generated:5,qualified:3,
+        timing:{totalMs:720000,preselectionMs:210000,structuringMs:260000,
+          initialFinalGateMs:130000,repairMs:120000,
+          cardCalls:[{premiseId:'P1',durationMs:50000,outcome:'success'}]},
+        selectionAudit:{
+          initialReview:{passed:false,issues:[{kind:'source_drift',premiseId:'P3',reason:'原始证据与选中阶段发生事实偏移'}]},
+          reselectionAttempted:true,finalReview:{passed:true,issues:[]},
+        },
+        candidateAssessments:[{sourcePremiseId:'P4',title:'发生缺额的题材',attempt:'initial',
+          candidate:{hook:'已有钩子'},passed:false,issues:['必要条件未建立']}],
+      },
+    },
+  });
+  assert.equal(analysis.counts.qualified,3);
+  assert.equal(analysis.timing.totalMs,720000);
+  assert.equal(analysis.preselectionReviews.initialPassed,false);
+  assert.equal(analysis.preselectionReviews.finalPassed,true);
+  assert.deepEqual(analysis.stageSignals,['完整卡审查不通过']);
+  const md = renderIdeaDiscoveryDetails(analysis);
+  assert.match(md,/总耗时：720.0秒/);
+  assert.match(md,/前置筛选及复核：210.0秒/);
+  assert.match(md,/单卡模型调用 P1/);
+  assert.match(md,/初审问题已在后续复审通过/);
+  assert.match(md,/P4 \/ initial/);
+});
