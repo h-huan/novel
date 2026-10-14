@@ -529,9 +529,13 @@ function projectMarkdown(target) {
   const persistenceLine = diagnostics
     ? diagnostics.creationStalled
       ? `FAIL · stalled · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
-      : (diagnostics.pendingPersistenceMismatch || []).length
-        ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
-        : `PASS · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
+      : (diagnostics.persistenceMismatch || []).length
+        ? `FAIL · mismatch=${diagnostics.persistenceMismatch.join(',')}`
+        : (diagnostics.uncommittedCandidates || []).length
+          ? `BLOCKED · 候选尚未通过框架 Gate（没有被批准提交），并非已确认的数据丢失 · ${diagnostics.uncommittedCandidates.join(',')}`
+          : (diagnostics.pendingPersistenceMismatch || []).length
+            ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
+            : 'PASS · mismatch=none'
     : 'UNAVAILABLE';
   const failedRunLines = (result.failedRuns || []).map((run) =>
     '- run=' + (run.id ?? 'unknown') + ' · stage=' + (run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown')
