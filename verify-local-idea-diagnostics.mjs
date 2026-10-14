@@ -36,6 +36,7 @@ export function analyzeIdeaDiscovery(snapshot) {
     title: textOf(item?.title, 150),
     attempt: textOf(item?.attempt, 50),
     passed: item?.passed === true,
+    hasStructuredCard: Boolean(item?.candidate && typeof item.candidate === 'object' && !Array.isArray(item.candidate)),
     issues: list(item?.issues).map((issue) => textOf(issue, 1200)).filter(Boolean),
     warnings: list(item?.warnings).map((warning) => textOf(warning, 1200)).filter(Boolean),
     evidence: item?.passed === true ? null : {
@@ -45,7 +46,7 @@ export function analyzeIdeaDiscovery(snapshot) {
       mainReversal: textOf(item?.candidate?.mainReversal, 1000),
     },
   }));
-  const failedCandidates = candidates.filter((item) => !item.passed);
+  const failedCandidates = candidates.filter((item) => !item.passed && item.hasStructuredCard);
   const stageSignals = [];
   if (requested !== null && selected !== null && selected < requested) stageSignals.push('前置筛选未选足');
   if (selectionReasons.length) stageSignals.push('前置筛选复核不通过');
@@ -107,7 +108,7 @@ export function renderIdeaDiscoveryDetails(analysis) {
       lines.push('- ' + (item.premiseId || '未知题材') + '：' + item.error);
     }
   }
-  const failed = analysis.candidates.filter((item) => !item.passed);
+  const failed = analysis.candidates.filter((item) => !item.passed && item.hasStructuredCard);
   if (failed.length) {
     lines.push('', '### 逐题材 Gate 失败（按尝试记录）');
     for (const item of failed) {
