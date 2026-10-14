@@ -34,6 +34,11 @@ export function ensureCreationTimelineWithEvents(
       ORDER BY events DESC, t.created_at ASC LIMIT 1
     `).get(options.projectId) as { id: string; events: number } | undefined;
     if (previous && Number(previous.events) > 0) {
+      // Never promote a partial legacy write to a complete timeline.
+      // Existing author events stay untouched, including their ordering.
+      if (Number(previous.events) < items.length) {
+        throw new Error(`已有时间线事件 ${previous.events}/${items.length}，必须核对缺失节点；不会覆盖已保存事件`);
+      }
       db.exec('RELEASE SAVEPOINT creation_timeline_insert');
       return Number(previous.events);
     }

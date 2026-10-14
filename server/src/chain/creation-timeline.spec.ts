@@ -61,6 +61,17 @@ describe('creation timeline finalization', () => {
     expect(ensureCreationTimelineWithEvents(db,options())).toBe(2);
   });
 
+  it('refuses to silently accept partially persisted historical events', () => {
+    const {db,options}=fixture();
+    db.prepare('INSERT INTO timelines VALUES(?,?,?,?,?,?,?,?)').run(
+      'kept','project','original','author saved',null,null,'2026-10-10','2026-10-10');
+    db.prepare('INSERT INTO timeline_events VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(
+      'event1','kept','author event','',null,'plot',3,'[]','["1"]','2026-10-10','2026-10-10');
+    expect(() => ensureCreationTimelineWithEvents(db,options())).toThrow('已有时间线事件 1/2');
+    expect((db.prepare('SELECT COUNT(*) n FROM timeline_events').get() as any).n).toBe(1);
+    expect((db.prepare('SELECT title FROM timeline_events').get() as any).title).toBe('author event');
+  });
+
   it('never fabricates events without a source chapter or explicit timeline', () => {
     const {db,options}=fixture();
     expect(ensureCreationTimelineWithEvents(db,options([]))).toBe(0);
