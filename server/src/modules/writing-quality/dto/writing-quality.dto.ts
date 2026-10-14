@@ -140,6 +140,7 @@ export interface LLMQualityIssue {
   tags: string[];
   evidenceKind?: 'redundant_interpretation' | 'premature_reveal' | 'causal_gap' | 'other';
   shownEvidence?: string;
+  shownSource?: "body" | "project_context";
   basisEvidence?: string;
   basisSource?: 'chapter_plan' | 'execution_standard' | 'project_context' | 'body';
   basisReason?: string;

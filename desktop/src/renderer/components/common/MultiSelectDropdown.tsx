@@ -5,6 +5,7 @@ export interface MultiSelectOption {
   label: string;
   hint?: string;
   warning?: string;
+  searchText?: string;
 }
 
 interface Props {
@@ -16,11 +17,15 @@ interface Props {
   addPlaceholder?: string;
   placeholder?: string;
   disabled?: boolean;
+  showLabel?: boolean;
+  description?: string;
 }
 
 /** 三项作者多选设定共用一份交互，避免灵感发现与项目卡片再次长出两套选择行为。 */
-const MultiSelectDropdown: React.FC<Props> = ({ label, options, value, onToggle, onAdd, addPlaceholder = '填写自定义标签', placeholder = '请选择…', disabled = false }) => {
+const MultiSelectDropdown: React.FC<Props> = ({ label, options, value, onToggle, onAdd, addPlaceholder = '填写自定义标签', placeholder = '请选择…', disabled = false, showLabel = false, description }) => {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const visibleOptions = options.filter(option => `${option.label} ${option.value} ${option.searchText || ''}`.toLowerCase().includes(search.trim().toLowerCase()));
   const [customValue, setCustomValue] = useState('');
   const root = useRef<HTMLDivElement>(null);
 
@@ -47,14 +52,20 @@ const MultiSelectDropdown: React.FC<Props> = ({ label, options, value, onToggle,
     setCustomValue('');
   };
   return (
-    <div ref={root} style={{ position: 'relative', width: '100%', marginBottom: 24 }}>
+    <div ref={root} style={{ position: 'relative', width: '100%', marginBottom: 20 }}>
+      {showLabel && <div style={{ marginBottom: 7 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-text-primary)', fontWeight: 600, fontSize: 14 }}>
+          <span>{label}</span><span style={{ color: 'var(--color-text-muted)', fontWeight: 400, fontSize: 12 }}>{options.length} 个选项 · 已选 {value.length} 项</span>
+        </div>
+        {description && <div style={{ color: 'var(--color-text-muted)', fontSize: 12, marginTop: 4, lineHeight: 1.6 }}>{description}</div>}
+      </div>}
       <button
         type="button"
         aria-label={label}
         aria-expanded={open}
         aria-haspopup="listbox"
         disabled={disabled || (options.length === 0 && !onAdd)}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => { setOpen(current => !current); setSearch(''); }}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
           width: '100%', minHeight: 42, padding: '9px 12px', textAlign: 'left',
@@ -73,12 +84,19 @@ const MultiSelectDropdown: React.FC<Props> = ({ label, options, value, onToggle,
           aria-multiselectable="true"
           style={{
             position: 'absolute', zIndex: 60, top: 'calc(100% + 4px)', left: 0, right: 0,
-            maxHeight: 264, overflowY: 'auto', padding: 4,
+            maxHeight: 360, overflowY: 'auto', padding: 6,
             border: '1px solid var(--color-border)', borderRadius: 9,
             background: 'var(--color-bg-elevated)', boxShadow: 'var(--shadow-lg)',
           }}
         >
-          {options.map((option) => {
+          <div style={{ position: 'sticky', top: -6, background: 'var(--color-bg-elevated, #202036)', padding: '4px 2px 8px', zIndex: 1 }}>
+            <input autoFocus aria-label={`搜索${label}`} value={search} onChange={event => setSearch(event.target.value)}
+              placeholder={`搜索${label}…`} style={{ boxSizing: 'border-box', width: '100%', padding: '9px 10px', borderRadius: 6,
+                border: '1px solid var(--color-border)', background: 'var(--color-bg-primary, #19192c)', color: 'var(--color-text-primary)', font: 'inherit', outline: 'none' }} />
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 5 }}>找到 {visibleOptions.length} 项 · 支持多选</div>
+          </div>
+          {!visibleOptions.length && <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>没有匹配项，请换个词搜索{onAdd ? '，或添加自定义标签' : ''}。</div>}
+          {visibleOptions.map((option) => {
             const checked = value.includes(option.value);
             return (
               <button
@@ -96,7 +114,10 @@ const MultiSelectDropdown: React.FC<Props> = ({ label, options, value, onToggle,
                 }}
               >
                 <span aria-hidden="true" style={{ width: 16, textAlign: 'center', color: checked ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>{checked ? '☑' : '□'}</span>
-                <span style={{ flex: 1 }}>{option.label}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block' }}>{option.label}</span>
+                  {showLabel && option.hint && <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', marginTop: 3, lineHeight: 1.5 }}>{option.hint}</span>}
+                </span>
                 {option.warning && <span aria-hidden="true">⚠</span>}
               </button>
             );

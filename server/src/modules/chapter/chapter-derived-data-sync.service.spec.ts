@@ -29,3 +29,17 @@ describe('exact-body timeline proof reuse',()=>{
  });
  it('archives only nonblocking duplicate probes at the exact body checksum',()=>{const {svc,db}=service();svc.retireDuplicateTimeProbes(input,'current-hash','r');expect(db.prepare.mock.calls[0][0]).toContain("issue_type='time_order_risk' AND blocks_lock=0 AND status='pending'");expect(db.prepare.mock.calls[0][0]).toContain('content_checksum=?');});
 });
+
+describe('summary truncation persistence boundary', () => {
+ it('rejects a truncated nonempty summary without inserting it or retrying', async () => {
+  const {svc,db}=service();const writes: string[]=[];
+  db.prepare.mockImplementation((sql:string)=>({get:()=>({id:'old',summary:'完整的旧摘要',status:'current',content_checksum:'old-hash'}),run:()=>writes.push(sql)}));
+  const generate=vi.fn(async()=>({content:'关系变化：他尚未',finishReason:'length'}));
+  svc.moduleRef={get:()=>({isAvailable:async()=>true,generate})};
+  const warnings:string[]=[];
+  const result=await svc.syncChapterSummary({...input,beforeContent:'old body',afterContent:'new body'},'new-hash',warnings);
+  expect(result.status).toBe('warning');expect(generate).toHaveBeenCalledTimes(1);
+  expect(warnings.join(' ')).toContain('truncated');
+  expect(writes.some(sql=>sql.includes('INSERT INTO chapter_summaries'))).toBe(false);
+ });
+});

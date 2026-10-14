@@ -227,3 +227,20 @@ describe('outline fact review pipeline', () => {
     expect(record.evidence.review.contradictions[0]).toContain('时间快一小时');
   });
 });
+
+
+it('uses the existing focused fact scope and source anchors while keeping an evidenced conflict',async()=>{
+ const controller=controllerFixture();
+ const prior=[{order:0,content:'第一次触发已经消耗一枚令牌。'}],chapters=[{order:1,content:'再次触发后只消耗过一枚令牌。'}];
+ controller.llmCallWithRetry.mockImplementation(async (_label:string,prompt:string,options:any)=>{
+  expect(options.stepKey).toBe('creation_outline_fact_dependencies');
+  const directory=JSON.parse(prompt.split('【原始资料编号目录（原文只出现于上述输入，按路径选取，不手抄）】')[1].split('\n只输出合法JSON')[0]);
+  const one=directory.find((r:any)=>r.path==='前章·第1章.content'),two=directory.find((r:any)=>r.path==='本批·第2章.content');
+  const data={consistent:false,contradictions:[{anchor1:one.id,anchor2:two.id,conflict:'累计扣除次数与每次触发需要消耗一枚的规则不符',calculation:'1+1=2'}],ledger:[]};
+  expect(options.validate(data)).toBe(true);
+  return {data,warnings:[]};
+ });
+ const review=await controller.reviewOutlineFacts('p','第二章','既定故事',{rules:'每次触发消耗一枚令牌。'},[],chapters,'标准',2,prior);
+ expect(review.consistent).toBe(false);expect(JSON.parse(review.contradictions[0]).quote2).toBe(chapters[0].content);
+ expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
+});

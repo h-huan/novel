@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { confirmedStoryFacts } from '../canon/canon-policy';
 import { buildBenchmarkDirective, getPlatform, normalizePlatformId, targetForLength } from '../../chain/platform-benchmarks';
 import { scorePolicy } from '../writing-quality/score-policy';
-import { CHAPTER_WORD_RANGE, describeCategoryPlacement, dimensionGuidesText, EXECUTION_STANDARD_DIMENSIONS, platformCreationFieldNames, platformSubmissionDimensions, platformCategoryBenchmarkNote, platformCategoryDimensionBinding, platformCategoryTreeVerification, platformCategoryWritingBrief, platformCategoryWritingNote, platformHasOwnCategoryTree, platformStandardProblem, resolveSubmissionCategory, CATEGORY_WORD_SCALE_DEVIATION_MIN_CHARS, audienceChannelHint, categoryWordScaleBlocked, categoryWordScaleLine, categoryWordScaleMessage, categoryWordScaleStanding, type CategoryWordScaleInput, type CategoryWordScaleStanding, type CategoryWordScaleStatus, type ExecutionStandardDimensionKey } from '../../../shared/src';
+import { CREATIVE_TAG_GUIDES, CHAPTER_WORD_RANGE, describeCategoryPlacement, dimensionGuidesText, EXECUTION_STANDARD_DIMENSIONS, platformCreationFieldNames, platformSubmissionDimensions, platformCategoryBenchmarkNote, platformCategoryDimensionBinding, platformCategoryTreeVerification, platformCategoryWritingBrief, platformCategoryWritingNote, platformHasOwnCategoryTree, platformStandardProblem, resolveSubmissionCategory, CATEGORY_WORD_SCALE_DEVIATION_MIN_CHARS, audienceChannelHint, categoryWordScaleBlocked, categoryWordScaleLine, categoryWordScaleMessage, categoryWordScaleStanding, type CategoryWordScaleInput, type CategoryWordScaleStanding, type CategoryWordScaleStatus, type ExecutionStandardDimensionKey } from '../../../shared/src';
 export { platformStandardProblem } from '../../../shared/src';
 import type { PlatformBoundDimension } from '../../../shared/src';
 
@@ -136,13 +136,9 @@ export function missingConstitutionStandards(c: CreativeConstitution): MissingSt
   }));
 }
 
-/** 头部样本不是投稿标签全集。未命中样本时要求作者说明契合点，质量门仍逐章验收。 */
-export function genreFitProblem(c: CreativeConstitution): string | null {
-  const placement = resolveSubmissionCategory(c.targetPlatform, c.category, c.projectType, audienceChannelHint(c.targetAudience));
-  if (placement.status !== 'resolved' || !(c.submissionTags ?? []).length) return null;
-  const gap = platformCategoryDimensionBinding(c.targetPlatform, placement.value, 'genre', (c.submissionTags ?? []).join('、'), c.projectType).gap;
-  return gap && String(c.genreFitNote ?? '').trim().length < 10
-    ? `${gap}；请填写至少 10 字的标签与分类契合依据` : null;
+/** A missing sample tag is not a contradiction. Content alignment remains a quality gate. */
+export function genreFitProblem(_c: CreativeConstitution): string | null {
+  return null;
 }
 
 /**
@@ -308,7 +304,7 @@ export function buildExecutionStandard(
     const binding = platformCategoryDimensionBinding(c.targetPlatform, resolvedCategory, dimension, value, c.projectType);
     // 平台给了判据不等于该维自身的执行口径可以丢：两者都必须留在标准里。
     const parts = [binding.requirement];
-    if (binding.gap) parts.push('头部样本落差（必答项，必须核验作者依据，不得默认通过）：' + binding.gap + '；作者依据：' + (c.genreFitNote || '未填写'));
+    if (binding.gap) parts.push('样本未收录不代表不符合：按作者选择与实际故事内容核验，不要求另补解释，不因缺少样本判未执行。');
     parts.push(genericRule);
     return parts.join('；');
   };
@@ -366,7 +362,7 @@ export function buildExecutionStandard(
       + dimensionGuidesText('style', styleList)));
   const plotTags = c.plotTags ?? [];
   const submissionTags = c.submissionTags ?? [];
-  const plotLine = plotTags.length ? `；情节取向「${plotTags.join('、')}」必须落实到人物行动、冲突与回报，不得只写在标签里` : '';
+  const plotLine = plotTags.length ? `；情节取向「${plotTags.join('、')}」必须落实到人物行动、冲突与回报，不得只写在标签里${plotTags.filter(tag => CREATIVE_TAG_GUIDES[tag]).map(tag => '；' + tag + '：' + CREATIVE_TAG_GUIDES[tag]).join('')}` : '';
   push('genre', '流派与作品标签', [...c.webNovelGenre, ...submissionTags, ...plotTags].join('、'),
     dimensionRequirement('genre', submissionTags.join('、'),
       `创作流派按「${c.webNovelGenre.join('、')}」执行；平台作品标签按「${submissionTags.join('、')}」兑现到可见的人物、关系与事件中；核心预期按当前阶段与章纲揭示安排推进，全书承诺在约定阶段兑现，不要求每章完成全部反转、救赎或真相揭示${plotLine}` + dimensionGuidesText('genre', c.webNovelGenre)));

@@ -87,3 +87,28 @@ describe('manual review citation repair', () => {
     } finally { db.close(); }
   });
 });
+
+describe('cross-chapter comparison citation sources', () => {
+  const content = '读取记录确认了他的猜测。';
+  const prior = '他猜替身是由旧代码训练的。';
+  const source = { project_context: JSON.stringify({ previousChapter: [{ content: prior }] }) };
+  const issue = { ruleId: 'ai_trace.cross_chapter_template_repetition', evidenceKind: 'redundant_interpretation',
+    severity: 'low', message: '比较建议', evidence: content, basisReason: '比较前章推测与本章确认是否承担新职责' };
+  it('retains an actual prior quote without changing the finding or score', () => {
+    const shown = causalEvidenceAnchors(content, source).find(row => row.source === 'project_context' && row.text === prior)!;
+    expect(shown).toBeTruthy();
+    const [fixed] = applySemanticEvidenceRepairs([issue], [0], { repairs: [{ index: 0, evidenceAnchorId: 'body:p1', shownAnchorId: shown.id }] }, content, source);
+    expect(fixed).toMatchObject({ ...issue, shownEvidence: prior, shownSource: 'project_context' });
+    expect(verifySemanticEvidence(fixed, content, source).verified).toBe(true);
+  });
+  it('rejects fabricated previous quotes and unavailable sources', () => {
+    const finding = { ...issue, shownSource: 'project_context', shownEvidence: prior };
+    expect(verifySemanticEvidence(finding, content, {}).verified).toBe(false);
+    expect(verifySemanticEvidence({ ...finding, shownEvidence: '不存在的旧事实' }, content, source).verified).toBe(false);
+  });
+  it('does not let ordinary explanation or voice comparisons use an outside quote', () => {
+    for (const ruleId of ['ai_trace.over_explain', 'same_voice_characters']) {
+      expect(verifySemanticEvidence({ ...issue, ruleId, shownEvidence: prior, shownSource: 'project_context' }, content, source).verified).toBe(false);
+    }
+  });
+});

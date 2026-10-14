@@ -1,6 +1,7 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
+import { generationTasks } from '../common/generation-cancellation';
 
 /** Focused HTTP adapter for chapter writing, context, quality checks and local repair. */
 @ApiTags('chain')
@@ -8,9 +9,14 @@ import { ChainController } from './chain.controller';
 export class ChainWritingController {
   constructor(private readonly chain: ChainController) {}
 
+  @Get('chapter-review-candidates/:projectId/:chapterId')
+  retainedChapterReviewCandidates(@Param('projectId') projectId: string, @Param('chapterId') chapterId: string) {
+    return this.chain.retainedChapterReviewCandidates(projectId, chapterId);
+  }
+
   @Post('generate')
   generate(@Body() dto: Parameters<ChainController['generate']>[0]) {
-    return this.chain.generate(dto);
+    return generationTasks.run('chapter', dto.projectId, dto.chapterId || '', () => this.chain.generate(dto));
   }
 
   @Post('stream-generate')
@@ -18,12 +24,17 @@ export class ChainWritingController {
     @Body() dto: Parameters<ChainController['streamGenerate']>[0],
     @Res() res: Parameters<ChainController['streamGenerate']>[1],
   ) {
-    return this.chain.streamGenerate(dto, res);
+    return generationTasks.run('chapter', dto.projectId, dto.chapterId || '', () => this.chain.streamGenerate(dto, res));
+  }
+
+  @Post('cancel-chapter/:projectId/:chapterId')
+  cancelChapter(@Param('projectId') projectId: string, @Param('chapterId') chapterId: string) {
+    return generationTasks.cancel('chapter', projectId, chapterId);
   }
 
   @Post('continue')
   continueWriting(@Body() dto: Parameters<ChainController['continueWriting']>[0]) {
-    return this.chain.continueWriting(dto);
+    return generationTasks.run('chapter', dto.projectId, dto.chapterId || '', () => this.chain.continueWriting(dto));
   }
 
   @Post('enhance-opening')

@@ -19,13 +19,13 @@ describe('creative constitution boundary', () => {
     expect(unknown.definitionStatus).toBe('unknown_definition');
     expect(buildExecutionStandard({ ...c, webNovelGenre: ['作者自建流派'], genreFitNote: '代理交易引发身份冲突' }).dimensions.find(d => d.dimension === 'genre')!.definitionStatus).toBe('provided');
   });
-  it('persists plot tags and requires a category-fit note for tags absent from the public sample', () => {
+  it('preserves plot tags without blocking tags absent from a non-exhaustive public sample', () => {
     const base = updateConstitution({}, {
       targetPlatform: 'fanqie', type: 'long_novel', category: '男频·都市日常',
       storyTone: ['热血'], writingStyle: ['白描/朴素'], webNovelGenre: ['都市现实'], submissionTags: ['系统流'],
       pov: '第三人称限知', plotTags: ['逆袭'],
     });
-    expect(genreFitProblem(base)).toContain('契合依据');
+    expect(genreFitProblem(base)).toBeNull();
     const fitted = updateConstitution({ settings: JSON.stringify({ creativeConstitution: base }) }, {
       genreFitNote: '系统机制通过都市职业晋升兑现人物逆袭，而非借用异界设定',
     });

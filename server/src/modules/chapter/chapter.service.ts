@@ -1,3 +1,4 @@
+import { isProseLayoutOnlyChange } from './prose-layout-change';
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { v4 as uuid } from 'uuid';
@@ -77,7 +78,7 @@ export class ChapterService {
     // 杜绝「列表项缺质检字段 → 前端同步把状态覆盖成空、评分列永远『待质检』」。
     const scoreMap = this.repo.latestQualityScoreByProject(projectId);
     return this.repo.findByProjectId(projectId).map((row) => ({
-      id: row.id, volumeIndex: row.volume_index, chapterIndex: row.chapter_index,
+      id: row.id, projectId: row.project_id, volumeIndex: row.volume_index, chapterIndex: row.chapter_index,
       title: row.title, wordCount: row.word_count,
       targetWords: this.repo.findOutlineTargetWords(row.outline_id),
       status: row.status, updatedAt: row.updated_at,
@@ -117,9 +118,10 @@ export class ChapterService {
       // 保存新正文后清理本章过期冲突（用户铁律：矛盾点非最新版本和当前正文的矛盾要删除）
       // 删的是「未解决且非 pass」的（status in warning/error）；保留已通过（pass）和已解决（resolved）的。
       // 这样避免旧版本正文产生的矛盾叠加，且不影响已通过/已解决的历史记录。
-      const cleaned = this.cleanStaleConflictsForChapter(existing.project_id, existing.chapter_index);
+      const formattingOnly = isProseLayoutOnlyChange(existing.content || '', dto.content || '');
+      const cleaned = formattingOnly ? 0 : this.cleanStaleConflictsForChapter(existing.project_id, existing.chapter_index);
       // 原创性后置检测（在清理旧冲突之后执行，避免被当作过期矛盾清掉；检测本身不阻断保存，命中落矛盾表）
-      this.originalityGuard?.checkChapter({
+      if (!formattingOnly) this.originalityGuard?.checkChapter({
         projectId: existing.project_id,
         chapterIndex: existing.chapter_index,
         title: (dto.title ?? existing.title) || '',
@@ -304,7 +306,7 @@ export class ChapterService {
     const grouped = new Map<number, ChapterListItem[]>();
     for (const row of this.repo.findByProjectId(projectId)) {
       const chapters = grouped.get(row.volume_index) || [];
-      chapters.push({ id: row.id, volumeIndex: row.volume_index, chapterIndex: row.chapter_index,
+      chapters.push({ id: row.id, projectId: row.project_id, volumeIndex: row.volume_index, chapterIndex: row.chapter_index,
         title: row.title, wordCount: row.word_count,
         targetWords: this.repo.findOutlineTargetWords(row.outline_id),
         status: row.status, updatedAt: row.updated_at });
@@ -338,7 +340,10 @@ export class ChapterService {
     const stateSync: Record<string, unknown> = {};
     let derivedSync: any = { success: false };
     const warnings: string[] = [];
-    if (this.stateItemService) {
+    if (isProseLayoutOnlyChange(existing.content || '', afterContent)) {
+      stateSync.formattingOnly = true;
+      stateSync.stateCandidates = { created: [], reason: 'Verified text/order unchanged; formatting creates no story facts' };
+    } else if (this.stateItemService) {
       try {
         stateSync.stateCandidates = this.stateItemService.createFromManualChapterEdit(
           existing.project_id, existing.id, existing.content || '', afterContent,
@@ -444,6 +449,7 @@ export class ChapterService {
 
 export interface ChapterListItem {
   id: string;
+  projectId: string;
   volumeIndex: number;
   chapterIndex: number;
   title: string;

@@ -108,3 +108,27 @@ describe('continuity review idempotency', () => {
     expect(allowed.allowed).toBe(true); expect(allowed.needsResync).toBe(false); expect(allowed.needsAuthorReview).toBe(true);
   });
 });
+
+describe('completed manual semantic review reuse', () => {
+  it('retains the review only for the same body, outline and current model provenance', () => {
+    const { db, service, input } = fixture();
+    try {
+      db.prepare("INSERT INTO outlines(id,project_id,level,title,content) VALUES ('o','p','chapter','测试','合同')").run();
+      const outline = db.prepare("SELECT * FROM outlines WHERE id='o'").get();
+      const checksum = createHash('sha256').update(input.afterContent).digest('hex');
+      const receipt = { bodyHash: checksum, outlineHash: createHash('sha256').update(JSON.stringify(outline)).digest('hex'),
+        report: { evaluationStatus: 'evaluated', pass: true, missing: [], contradictions: [], sourceConflicts: [] },
+        runs: [{ id: 'actual-review', status: 'success' }] };
+      db.prepare(`INSERT INTO chapter_continuity_reviews(id,project_id,chapter_id,content_checksum,review_type,issue_type,target_id,change_type,severity,status,payload,created_at,updated_at)
+        VALUES ('manual','p','c',?,'outline','manual_semantic_alignment_review','o','review','low','resolved',?,'now','now')`).run(checksum, JSON.stringify(receipt));
+      let current = true; service.moduleRef = { get: () => ({ runIsCurrent: (id: string) => current && id === 'actual-review' }) };
+      expect(service.reviewOutline(input, checksum, { outline_id: 'o', chapter_index: 1 })).toMatchObject({ status: 'completed', reviewIds: ['manual'] });
+      current = false;
+      expect(service.reviewOutline(input, checksum, { outline_id: 'o', chapter_index: 1 }).status).toBe('pending');
+      current = true;
+      db.prepare("UPDATE outlines SET content='修改后的合同' WHERE id='o'").run();
+      expect(service.reviewOutline(input, checksum, { outline_id: 'o', chapter_index: 1 }).status).toBe('pending');
+      expect(service.reviewOutline({ ...input, afterContent: 'changed' }, 'changed-hash', { outline_id: 'o', chapter_index: 1 }).status).toBe('pending');
+    } finally { db.close(); }
+  });
+});

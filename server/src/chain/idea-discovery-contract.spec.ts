@@ -39,6 +39,14 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('selectedPremises');
     expect(contract).toContain('单层“行为→超常奖惩→调查”的寓言机制');
     expect(contract).toContain('不把最终 Gate 当主要选题器');
+    expect(contract).toContain('原池 storyCore 与所选 openingEvent');
+    expect(contract).toContain('人物当时提出请求这一事件不能凭动机反转被取消');
+  });
+
+  it('carries the whole causal chain into one-card structuring', () => {
+    const directive = ideaCardStructuringDirective(selectedPremise('P1'));
+    expect(directive).toContain('触发动作、人物身份与知情、到场事件、时间阶段、升级机制和结局方向');
+    expect(directive).toContain('请求发生这一事实必须保留');
   });
 
   it('accepts five valid selected premises even when the lightweight pool misses the 15-item search target', () => {
@@ -362,4 +370,18 @@ describe('confirmed idea story-card projection', () => {
     const card = confirmedIdeaStoryCard({ ending: '她提交证据，承认沉默的责任，与母亲断联', scopeBreakdown: [{ arc: '公开作证', reason: '同学施压要求撤回', outcome: '材料交付，主角承担公开作证的代价' }] });
     expect(card.ending).toContain('承认沉默的责任'); expect(card.scenes[0].outcome).toBe('材料交付，主角承担公开作证的代价');
   });
+});
+
+
+it('packs identical review-standard lines without losing card-specific criteria, order or reference context',async()=>{
+ const {packIdeaReviewStandards}=await import('./idea-discovery-contract');
+ const common='已有共同规则，事实不能覆盖。'.repeat(35);
+ const cards=[{title:'A',description:'第一题材事实',executionStandard:common+'\n\n本卡仅允许科幻\n'+common},{title:'B',description:'第二题材事实',executionStandard:common+'\n本卡仅允许历史'}];
+ const references=[{title:'已通过',ending:'既定结局',executionStandard:common+'\n本卡仅允许历史'}];
+ const before=JSON.stringify({cards,references}),packed=packIdeaReviewStandards(cards,references) as any;
+ expect(JSON.stringify(packed).length).toBeLessThan(before.length);
+ const decode=(rows:any[])=>rows.map(({executionStandardRefs,...row})=>({...row,executionStandard:executionStandardRefs.map((id:string)=>packed.standardLines[id]).join('\n')}));
+ expect(decode(packed.cards)).toEqual(cards);expect(decode(packed.references)).toEqual(references);
+ expect(JSON.stringify({cards,references})).toBe(before);
+ expect(packIdeaReviewStandards([{executionStandard:'短'}],[])).toEqual({cards:[{executionStandard:'短'}],references:[]});
 });

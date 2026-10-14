@@ -1267,6 +1267,9 @@ export function normalizeProseLayout(
   const endMarkCount = (s: string) => (s.match(/[。！？!?]/g) || []).length;
   const isFragment = (s: string) => {
     if (hasQuote(s) || !/[。]$/.test(s)) return false;
+    if (/^[^。！？\n]{1,12}[:：]/.test(s)) return false; // Message/record labels retain their reading boundary.
+    // A visible scene/time boundary is not a disposable short prose fragment.
+    if (/^(?:【|#{1,6}\s|次日|翌日|第二天|当天|当晚|清晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里|凌晨|同一时间|与此同时|另一边|\d{1,2}[:：]\d{2})/.test(s)) return false;
     const len = cjkLen(s);
     if (len === 0 || len > fragmentMaxCjk) return false;
     return shortPacing ? endMarkCount(s) === 1 : true;

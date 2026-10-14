@@ -36,6 +36,11 @@ export class ImportExportController {
   /**
    * 导出
    */
+  @Get('projects/:projectId/txt')
+  exportProjectTxt(@Param('projectId') projectId: string) {
+    return this.exportEngine.exportProjectTxt(projectId);
+  }
+
   @Post('export')
   async export(@Body() dto: ExportDto) {
     // 这里需要从外部传入章节数据，简化实现中由调用方提供

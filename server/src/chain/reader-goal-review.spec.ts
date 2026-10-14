@@ -62,3 +62,15 @@ describe('bounded reader goal citation correction', () => {
     expect(invalidReaderGoalQuotes(unknown,text)).toEqual([]);
   });
 });
+
+
+it('keeps one exact body directory and includes complete extra sources only when explicitly requested',async()=>{
+ const {readerGoalQuoteRepairPrompt}=await import('./reader-goal-review');
+ const body='不可丢弃的独立正文段落。\n\n他没有同意。';
+ const prompt=readerGoalQuoteRepairPrompt(goals(),['sharing'],body).prompt;
+ expect(prompt.split('不可丢弃的独立正文段落。').length-1).toBe(1);
+ expect(prompt).toContain('body:p2');expect(prompt).toContain('他没有同意。');
+ const sourcePrompt=readerGoalQuoteRepairPrompt(goals(),[],body,{context:'前章的许可已经撤回。'}).prompt;
+ expect(sourcePrompt).toContain('context:p1');expect(sourcePrompt).toContain('前章的许可已经撤回。');
+ expect(sourcePrompt.split('不可丢弃的独立正文段落。').length-1).toBe(1);
+});

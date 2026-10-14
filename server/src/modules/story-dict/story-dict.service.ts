@@ -25,7 +25,7 @@ export interface DictItem {
  * 所以正确性不依赖这里的数字被手动 bump（这正是历史上「改了 seed 却不生效」的根因）。
  * 但每次改动 seed 内容时仍应递增，便于在 _migrations 里核对某次同步到底跑没跑。
  */
-export const STORY_DICT_SEED_VERSION = 24;
+export const STORY_DICT_SEED_VERSION = 26;
 
 /**
  * 执行标准种子（唯一事实源）。

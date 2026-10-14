@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { ideaReviewEvidenceCatalog,resolveIdeaReviewEvidence,ideaReviewEvidenceReferenceIssues } from './idea-review-evidence';
+import { ideaReviewEvidenceCatalog,resolveIdeaReviewEvidence,ideaReviewEvidenceReferenceIssues,ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { ChainController } from './chain.controller';
 import { presentationGateIssues } from './idea-presentation-review';
 import { vi } from 'vitest';
 import { readerGoalReviewIssues } from './reader-goal-review';
-const cards=[{title:'危险订单',hook:'她亲自退回赔款，决定查明停工的原因。',description:'停工让村民没了收入。她借走邻居的车去找负责人。',scopeBreakdown:[{summary:'负责人拒绝见她，她留在门口等到下班。'}],executionStandard:'非故事执行规则',lockedPremise:{storyCore:'旧胚子事实'}},
+const cards=[{title:'危险订单',hook:'她亲自退回赔款，决定查明停工的原因。',description:'停工让村民没了收入。她借走邻居的车去找负责人。',setting:'负责人下班必须经过唯一的大门。',ending:'她在大门等到了下班的负责人。',scopeBreakdown:[{summary:'负责人拒绝见她，她留在门口等到下班。'}],executionStandard:'非故事执行规则',lockedPremise:{storyCore:'旧胚子事实'}},
  {title:'第二张卡',hook:'其他卡真实原文不能作为第一张卡证据。'}];
 describe('server-owned idea evidence references',()=>{
+ it('does not accept a claimed ending as its own causal condition',()=>{
+  const valid={position:1,payoffCredible:true,payoffBridge:{status:'supported',actionEvidenceRef:'C1.description',
+   resultEvidenceRef:'C1.ending',conditionEvidenceRef:'C1.setting',reason:'负责人下班只有一条通路，等候可以遇见本人'}};
+  expect(ideaPayoffBridgeIssues({reviews:[valid]},cards)).toEqual([]);
+  for(const ref of ['C1.ending','C2.hook','C1.invented'])
+   expect(ideaPayoffBridgeIssues({reviews:[{...valid,payoffBridge:{...valid.payoffBridge,conditionEvidenceRef:ref}}]},cards).length).toBeGreaterThan(0);
+  const gap={...valid,payoffCredible:false,payoffBridge:{...valid.payoffBridge,status:'gap',conditionEvidenceRef:undefined,
+   reason:'当前故事没有交代行动能让目标结果发生的必要条件'}};
+  expect(ideaPayoffBridgeIssues({reviews:[gap]},cards)).toEqual([]);
+  expect(ideaPayoffBridgeIssues({reviews:[{...gap,payoffCredible:true}]},cards).join('；')).toContain('缺少必要条件');
+  const resolved=resolveIdeaReviewEvidence({reviews:[valid]},cards).reviews[0].payoffBridge;
+  expect(resolved.conditionEvidence).toBe(cards[0].setting);
+  expect(resolved.resultEvidence).toBe(cards[0].ending);
+ });
  it('catalogs actual recursive narrative fields without standards or reference premises',()=>{
   const entries=ideaReviewEvidenceCatalog(cards);
   expect(entries.find(e=>e.id==='C1.scopeBreakdown[0].summary')?.quote).toBe(cards[0].scopeBreakdown?.[0].summary);
@@ -40,6 +54,7 @@ describe('server-owned idea evidence references',()=>{
   const raw={position:1,title:cards[0].title,titleCompelling:true,openingCompelling:true,distinctFromBatch:true,
    storyCoherent:true,payoffCredible:true,platformFit:true,storyEvidenceRef:'C1.description',payoffEvidenceRef:'C1.description',platformEvidenceRef:'C1.hook',
    qualityReason:'按既定行动与必要因果核对，当前场景证据均来自此卡',readerQuestion:'她为何必须自己查清楚停工的原因？',issues:[],
+   payoffBridge:{status:'supported',actionEvidenceRef:'C1.description',resultEvidenceRef:'C1.ending',conditionEvidenceRef:'C1.setting',reason:'大门是负责人下班唯一通路，等候可以遇见本人'},
    readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:key==='sharing'?'weak':'supported',evidenceRef:'C1.description',reason:'人物主动追查虽可理解，尚缺可讨论的独特取舍'}]))};
   c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
    expect(prompt).toContain('服务器证据编号目录');

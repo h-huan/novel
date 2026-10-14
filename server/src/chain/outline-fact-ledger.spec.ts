@@ -206,3 +206,34 @@ describe('outline fact ledger review contract', () => {
     expect(describeOutlineFactReview(review)).not.toEqual([]);
   });
 });
+
+
+describe('lossless state prompt encoding and source-owned evidence',()=>{
+ it('retains every baseline, history position and current state exactly without changing the input',async()=>{
+  const {serializeOutlineFactLedger}=await import('./outline-fact-ledger');
+  const text='首次使用已损失一段记忆，日期未明确。'.repeat(20);
+  const ledger=[{id:'fact_1',baseline:text,history:[text,'第二次也有损失。',text],current:text}];
+  const before=JSON.stringify(ledger),encoded=serializeOutlineFactLedger(ledger),parsed=JSON.parse(encoded);
+  expect(encoded.length).toBeLessThan(before.length);
+  expect(parsed.encoding).toBe('exact_state_refs');
+  expect(parsed.entries.map((r:any)=>({id:r.id,baseline:parsed.states[r.baseline],history:r.history.map((id:string)=>parsed.states[id]),current:parsed.states[r.current]}))).toEqual(ledger);
+  expect(JSON.stringify(ledger)).toBe(before);
+  expect(serializeOutlineFactLedger([])).toBe('[]');
+ });
+ it('resolves only actual source identifiers and keeps a real contradiction and its calculation',async()=>{
+  const {outlineFactEvidenceAnchors,resolveOutlineFactEvidence,describeOutlineFactEvidence}=await import('./outline-fact-ledger');
+  const sources={canonicalBrief:'第一次用完扣一段记忆。',world:{rules:'每次触发都会损失。'},sourceChapters:[{order:0,content:'第一次之后已经少了一段记忆。'}],chapters:[{order:1,content:'第二次之后总共少一段记忆。'}]};
+  const anchors=outlineFactEvidenceAnchors(sources),one=anchors.find(a=>a.text===sources.sourceChapters[0].content)!,two=anchors.find(a=>a.text===sources.chapters[0].content)!;
+  const value={consistent:false,contradictions:[{anchor1:one.id,anchor2:two.id,conflict:'两次触发的累计损失与明示每次扣除不符',calculation:'1+1=2'}],ledger:[]};
+  const resolved=resolveOutlineFactEvidence(value,anchors) as any;
+  expect(resolved.contradictions[0]).toMatchObject({quote1:one.text,quote2:two.text,calculation:'1+1=2'});
+  const review=normalizeOutlineFactReview(resolved)!;
+  expect(review.consistent).toBe(false);expect(review.contradictions).toHaveLength(1);
+  expect(describeOutlineFactEvidence(review,[sources.canonicalBrief,sources.world,sources.sourceChapters,sources.chapters],[...sources.sourceChapters,...sources.chapters])).toEqual([]);
+  for(const defect of [{anchor2:'fact_1'},{quote2:'看似合理但未提供的摘要'},{location2:'第1章'}]){
+   const bad=resolveOutlineFactEvidence({...value,contradictions:[{...value.contradictions[0],...defect}]},anchors);
+   const normalized=normalizeOutlineFactReview(bad);
+   expect(normalized===null || describeOutlineFactEvidence(normalized,[sources.canonicalBrief,sources.world,sources.sourceChapters,sources.chapters],[...sources.sourceChapters,...sources.chapters]).length>0).toBe(true);
+  }
+ });
+});

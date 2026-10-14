@@ -17,6 +17,7 @@ import { openProject } from '../lib/openProject';
 import { updateCreationStepStatus } from '../lib/creation-progress';
 import IdeaCard from '../components/discovery/IdeaCard';
 import MultiSelectDropdown from '../components/common/MultiSelectDropdown';
+import { discoveryTagOptions, toggleDiscoveryTagSelection } from '../lib/discoveryTagOptions';
 import CategoryReferencePicker from '../components/common/CategoryReferencePicker';
 import {
   CHAPTER_WORD_RANGE,
@@ -119,22 +120,13 @@ export const discoveryResponseMatchesSelection = (
   requestedSignature: string,
   state: ReturnType<typeof useDiscoveryStore.getState>,
   ideas: Array<{ storyType?: string; targetPlatform?: string }>,
+  allowQualifiedPartial = false,
 ): boolean => requestedSignature === discoverySignature(state)
-  && ideas.length === state.ideaCount
+  && (allowQualifiedPartial ? ideas.length > 0 && ideas.length < state.ideaCount : ideas.length === state.ideaCount)
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
-const discoveryGenreProblem = (state: ReturnType<typeof useDiscoveryStore.getState>): string => {
-  const category = resolveSubmissionCategory(
-    state.targetPlatform,
-    [state.selectedCategory, state.selectedSubCategory].filter(Boolean).join('/'),
-    state.storyType, state.targetAudience,
-  );
-  if (category.status !== 'resolved') return '';
-  const gap = platformCategoryDimensionBinding(
-    state.targetPlatform, category.value, 'genre', state.selectedSubmissionTags.join('、'), state.storyType,
-  ).gap;
-  return gap && state.genreFitNote.trim().length < 10 ? `${gap}；请填写至少 10 字的契合依据` : '';
-};
+// Absence from a public sample is not evidence of an invalid tag.
+const discoveryGenreProblem = (_state: ReturnType<typeof useDiscoveryStore.getState>): string => '';
 
 // 平台清单只从 executionStandards 取（唯一来源）；本文件只保留每个平台的强调色。
 // 颜色是展示细节；平台 id、显示名与「是否已执行标准」的判据都不允许在这里复制第二份。
@@ -579,6 +571,7 @@ const DiscoveryWizardPage: React.FC = () => {
   // 这里曾有过第二份全局题材字典回退，后果是未核实平台显示另一平台不承认的投稿分类。
   // 分类候选与长短篇范围统一来自 shared；未核实项允许填写后台原名。
   const [configError, setConfigError] = useState('');
+  const [customTag, setCustomTag] = useState('');
   const [creativeGenres, setCreativeGenres] = useState<string[]>([]);
   const [toneOptions, setToneOptions] = useState<string[]>([]);
   const [styleOptions, setStyleOptions] = useState<string[]>([]);
@@ -675,6 +668,16 @@ const DiscoveryWizardPage: React.FC = () => {
   // 这里曾把全局 web_novel_genre 字典直接当作平台分类标签展示，用户选到的词与平台头部标签对不上。
   // 有实测分类时只展示这份分类证据中的官方标签；无实测时明确使用作者设定字典。
   const submissionOptions = categoryWritingProfile ? categoryWritingProfile.topTags.map((tag) => tag.name) : [];
+  const tagState = { selectedGenres, selectedPlotTags, selectedTones, selectedSubmissionTags };
+  const groupedTags = discoveryTagOptions({ selectedGenres: creativeGenres, selectedPlotTags: plotOptions,
+    selectedTones: toneOptions, selectedSubmissionTags: submissionOptions }, tagState);
+  const toggleUnifiedTag = (value: string) => {
+    const option = groupedTags.find(item => item.value === value);
+    if (!option) return;
+    // One atomic update; no transient half-selected state or change to legacy persistence keys.
+    const state = useDiscoveryStore.getState();
+    useDiscoveryStore.setState(toggleDiscoveryTagSelection(option, state));
+  };
 
   // 「分类」维体量判据的创建前预览 —— 与后端创建入口（chain.controller 第三道阻断）、生成入口、
   // 质量 Gate 共用 shared 的同一份 categoryWordScaleStanding，前端只把同一份结论译成界面文案。
@@ -732,6 +735,17 @@ const DiscoveryWizardPage: React.FC = () => {
   const [customUnique, setCustomUnique] = useState('');
 
   const [creationMessage, setCreationMessage] = useState('');
+  const [cancellingCreation, setCancellingCreation] = useState(false);
+  const cancelCreation = async () => {
+    const id = useDiscoveryStore.getState().activeCreationProjectId || useDiscoveryStore.getState().createdProjectId;
+    if (!id || cancellingCreation) return;
+    setCancellingCreation(true);
+    try {
+      const response = await api.post<{cancelled: boolean; message: string}>(`/chain/cancel-creation/${encodeURIComponent(id)}`, {}, 30_000);
+      setCreationMessage(response.data.message);
+    } catch (error) { setCreationMessage(error instanceof Error ? error.message : '取消请求未送达，请重试'); }
+    finally { setCancellingCreation(false); }
+  };
   const applyCreationMessage = useCallback((
     projectId: string,
     msg: any,
@@ -771,7 +785,11 @@ const DiscoveryWizardPage: React.FC = () => {
       case 'error': {
         void fetchProjects();
         const message = msg.message || '后台生成失败';
-        store.setCreationErrors([message]);
+        if (msg.cancelled) {
+          setCreationMessage(message);
+          store.setCreationErrors([]);
+          store.setCreationWarnings([...(useDiscoveryStore.getState().creationWarnings || []), message]);
+        } else store.setCreationErrors([message]);
         if (msg.warnings && Array.isArray(msg.warnings)) store.setCreationWarnings(msg.warnings);
         store.setCreationStepStatus((prev) => updateCreationStepStatus(prev, msg));
         store.setCreating(false);
@@ -893,17 +911,18 @@ const DiscoveryWizardPage: React.FC = () => {
 
       if (requestId !== latestDiscoveryRequestId) return;
 
-      if ((res as any)?.success && (res as any)?.ideas?.length > 0) {
-        const newIdeas = (res as any).ideas;
-        if (newIdeas.length !== configuredState.ideaCount) {
+      const partial = (res as any)?.success === false && (res as any)?.status === 'incomplete' && (res as any)?.qualifiedIdeas?.length > 0;
+      if (((res as any)?.success && (res as any)?.ideas?.length > 0) || partial) {
+        const newIdeas = partial ? (res as any).qualifiedIdeas : (res as any).ideas;
+        if ((!partial && newIdeas.length !== configuredState.ideaCount) || newIdeas.length > configuredState.ideaCount) {
           store.setGenProgress(`❌ 题材数量不足或超额：请求 ${configuredState.ideaCount}，返回 ${newIdeas.length}；本轮未完成，请重新发现。`);
           return;
         }
-        if (acceptedDiscoveryIdeas(newIdeas).length !== configuredState.ideaCount) {
+        if (acceptedDiscoveryIdeas(newIdeas).length !== newIdeas.length) {
           store.setGenProgress('❌ 有题材未通过当前规则或含禁止命名，本轮不交付缺量批次，请重新发现。');
           return;
         }
-        if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), newIdeas)) {
+        if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), newIdeas, partial)) {
           store.setGenProgress('创作设定已改变，或返回题材与所选长短篇/平台不一致；旧结果已丢弃，请重新发现。');
           store.setStep(0);
           return;
@@ -921,7 +940,11 @@ const DiscoveryWizardPage: React.FC = () => {
         store.addExcludeDetails(newDetails);
         const warning = (res as any).qualityWarning || '';
         const qualityWarn = warning ? `\n⚠️ ${warning}` : '';
-        store.setGenProgress(`✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
+        const selectionReasons = (res as any)?.appealGate?.selectionAudit?.reasons;
+        const missingReason = Array.isArray(selectionReasons) ? selectionReasons.map((item: any) => typeof item?.reason === 'string' ? item.reason : '').filter(Boolean).join('；') : '';
+        const missingDetail = partial && missingReason ? `\n未通过原因：${missingReason}` : '';
+
+        store.setGenProgress(partial ? `本批未完成：已保留 ${newIdeas.length}/${configuredState.ideaCount} 个合格故事卡，缺少 ${configuredState.ideaCount-newIdeas.length} 个。可选择已有卡，不会自动补生。${missingDetail}${qualityWarn}` : `✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
         store.setGenProgress(`❌ ${(res as any).error}`);
       } else {
@@ -937,6 +960,30 @@ const DiscoveryWizardPage: React.FC = () => {
         store.setGenerationDone(generationSucceeded);
       }
     }
+  }, [store]);
+
+  const handleRecoverQualified = useCallback(async (previous = false) => {
+    let response: any;
+    try { response = await api.get<any>('/chain/idea-discovery-diagnostics/latest'); }
+    catch (error:any) { store.setGenProgress(`恢复读取失败：${error.message}`); return; }
+    const current = useDiscoveryStore.getState();
+    const retained = previous ? ((response as any).retainedBatches || []).find((batch:any)=>batch.request?.platform===current.targetPlatform && batch.request?.storyType===current.storyType && batch.request?.count===current.ideaCount) : (response as any).retained;
+    const cards = acceptedDiscoveryIdeas(retained?.qualifiedIdeas || []);
+    if (!cards.length || cards.length > current.ideaCount || retained?.request?.count !== current.ideaCount || retained?.request?.platform !== current.targetPlatform || retained?.request?.storyType !== current.storyType) {
+      store.setGenProgress('没有与当前平台及长短篇匹配的已通过故事卡。'); return;
+    }
+    if (current.selectedCategory && cards.some((card:any)=>!String(card.storyCategory||'').includes(current.selectedCategory))) {
+      store.setGenProgress('上次故事卡分类与当前选择不同，请先恢复原选择。'); return;
+    }
+    const requested: any = discoveryStandards(current);
+    const fields = ['storyTone','writingStyle','webNovelGenre','submissionTags','plotTags'];
+    if (fields.some(field => requested[field]?.length && cards.some((card:any)=>JSON.stringify(card[field]||[])!==JSON.stringify(requested[field])))
+      || (current.narrativePov && cards.some((card:any)=>card.pov!==current.narrativePov))) {
+      store.setGenProgress('上次故事卡与当前创作设置不同，未恢复；请先恢复原选择。'); return;
+    }
+    store.setIdeas(cards); store.setGeneratedSignature(discoverySignature(current));
+    store.setGenerationDone(true); store.setStep(1);
+    store.setGenProgress(`已恢复 ${cards.length}/${retained.request.count} 个已通过故事卡；原批次${retained.success?'已完成':'未完成'}。恢复不调用模型，请核对卡上的创作设置后选择。`);
   }, [store]);
 
   // 重新发现（排除已出现的题材，传完整详情用于更精确去重）
@@ -1423,36 +1470,38 @@ const DiscoveryWizardPage: React.FC = () => {
       </div>
       </>}
 
-      {/* 这里曾把创作设定全删成仅投稿分类/作品标签，导致新书六维空值。候选与书内表单同源。 */}
-      <div style={s.sectionTitle}>情绪氛围（可多选）</div>
-      <MultiSelectDropdown label="情绪氛围" options={unionOptions(toneOptions, selectedTones).map((item) => ({ value: item, label: item }))}
-        value={selectedTones} onToggle={store.toggleTone} placeholder="选择情绪氛围" />
+      <div style={s.sectionTitle}>分类与创作标签（选了定向，未选随机）</div>
+      <p style={{ color: 'var(--color-text-muted)', fontSize: 13, lineHeight: 1.7 }}>
+        先按分组选择，打开下拉可直接搜索。已选条件固定，未选维度随机；同一标签无需重复勾选。
+      </p>
+      {(['主题与设定', '人物与关系', '情节与体验', '平台标签（待核实分组）'] as const).map(group => {
+        const items = groupedTags.filter(option => option.group === group);
+        if (!items.length) return null;
+        return <MultiSelectDropdown key={group} label={group === '平台标签（待核实分组）' ? '平台补充标签' : group} options={items} showLabel
+          description={group === '主题与设定' ? '故事背景与核心设定，例如古代、末世、系统、重生。' : group === '人物与关系' ? '人物类型与关系结构，例如总裁、群像、双强、无CP。' : group === '情节与体验' ? '主要冲突与阅读体验，例如复仇、逆袭、爽文、甜宠。' : '所选平台分类中可参考的作品标签，候选会随分类变化。'}
+          value={groupedTags.filter(option => option.group === group && option.bindings.some(binding => tagState[binding.field].includes(binding.value))).map(option => option.value)}
+          onToggle={toggleUnifiedTag} placeholder={`选择${group}，留空随机`} />;
+      })}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <input aria-label="补充创作要求" value={customTag} onChange={event => setCustomTag(event.target.value)}
+          placeholder="没有合适选项？填写自定义创作要求" style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)', borderRadius: 8, font: 'inherit' }} />
+        <button type="button" style={{ padding: '9px 16px', background: 'var(--color-accent-soft)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)', borderRadius: 8, font: 'inherit', cursor: 'pointer' }} disabled={!customTag.trim()} onClick={() => {
+          const value = customTag.trim();
+          const existing = groupedTags.find(option => option.value === value || option.bindings.some(binding => binding.value === value) || option.searchText.split(' ').includes(value));
+          if (existing) {
+            if (!existing.bindings.some(binding => tagState[binding.field].includes(binding.value))) toggleUnifiedTag(existing.value);
+          } else if (value) store.togglePlotTag(value);
+          setCustomTag('');
+        }}>添加</button>
+      </div>
+      <div style={s.sectionTitle}>原创创作设置</div>
       <div style={s.sectionTitle}>文风（可多选）</div>
-      <MultiSelectDropdown label="文风" options={unionOptions(styleOptions, selectedWritingStyles).map((item) => ({ value: item, label: item }))}
-        value={selectedWritingStyles} onToggle={store.toggleWritingStyle} placeholder="选择文风" />
-      <div style={s.sectionTitle}>创作流派（可多选）</div>
-      <MultiSelectDropdown label="创作流派"
-        options={unionOptions(creativeGenres, selectedGenres).map((genre) => ({ value: genre, label: genre }))}
-        value={selectedGenres} onToggle={store.toggleGenre}
-        placeholder="选择创作流派" />
-      <div style={s.sectionTitle}>{fieldNames.genre || '投稿标签（如平台后台有此项）'}（可多选）</div>
-      <MultiSelectDropdown label={fieldNames.genre || '投稿标签'}
-        options={unionOptions(submissionOptions, selectedSubmissionTags).map((item) => ({ value: item, label: item }))}
-        value={selectedSubmissionTags} onToggle={store.toggleSubmissionTag} onAdd={store.toggleSubmissionTag}
-        addPlaceholder="填写投稿后台实际标签" placeholder="选择投稿标签" />
-      {categoryPlacement.status === 'resolved'
-        && platformCategoryDimensionBinding(targetPlatform, categoryPlacement.value, 'genre', selectedSubmissionTags.join('、'), storyType).gap
-        && <textarea value={genreFitNote} onChange={(event) => store.setGenreFitNote(event.target.value)}
-          placeholder="标签与分类契合依据：这些标签如何兑现该分类的读者预期" rows={2}
-          style={{ width: '100%', padding: '10px 12px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)', resize: 'vertical' }} />}
-      <div style={s.sectionTitle}>情节取向（可多选）</div>
-      <MultiSelectDropdown label="情节取向"
-        options={unionOptions(plotOptions, selectedPlotTags).map((item) => ({ value: item, label: item }))}
-        value={selectedPlotTags} onToggle={store.togglePlotTag} placeholder="选择情节取向" />
+      <MultiSelectDropdown label="文风" options={unionOptions(styleOptions, selectedWritingStyles).map(item => ({ value: item, label: item }))}
+        value={selectedWritingStyles} onToggle={store.toggleWritingStyle} placeholder="选择文风，留空随机" />
       <div style={s.sectionTitle}>叙事视角</div>
       <select value={narrativePov} onChange={(event) => store.setNarrativePov(event.target.value)}
         style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)' }}>
-        <option value="">选择叙事视角...</option>
+        <option value="">不预选，随故事卡随机确定</option>
         {unionOptions(povOptions, narrativePov ? [narrativePov] : []).map((item) => <option key={item} value={item}>{item}</option>)}
       </select>
 
@@ -1479,6 +1528,9 @@ const DiscoveryWizardPage: React.FC = () => {
       >
         {isGenerating ? '⏳ 返回发现进度（生成中…）' : '🚀 AI深度发现题材'}
       </button>
+
+      {!isGenerating && <button style={{ ...s.retryBtn, marginTop: '10px', width: '100%' }} onClick={() => { void handleRecoverQualified(); }}>恢复上次已通过故事卡</button>}
+      {!isGenerating && <button style={{ ...s.retryBtn, marginTop: '10px', width: '100%' }} onClick={() => { void handleRecoverQualified(true); }}>恢复上一批已通过故事卡</button>}
 
       {/* 自定义题材入口 */}
       <div style={{ marginTop: '16px', marginBottom: '8px' }}>
@@ -1613,6 +1665,9 @@ const DiscoveryWizardPage: React.FC = () => {
           <div style={{ fontSize: '48px', marginBottom: '12px' }}>🤔</div>
           <div style={s.genText}>{genProgress || '暂无题材数据'}</div>
           <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'center' }}>
+            <button style={s.retryBtn} onClick={() => { void handleRecoverQualified(); }}>
+              恢复已通过故事卡
+            </button>
             <button style={s.retryBtn} onClick={() => handleStartDiscovery()}>
               重新发现
             </button>
@@ -1681,6 +1736,13 @@ const DiscoveryWizardPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {ideas.length < ideaCount && discoveryShortfallReasons(ideas).length > 0 && (
+          <div role="status" style={{ marginBottom: 16, color: 'var(--color-warning)', lineHeight: 1.6 }}>
+            本批缺少 {ideaCount - ideas.length} 张：以下题材在筛选阶段未通过，已通过的故事卡保留。
+            <ul>{discoveryShortfallReasons(ideas).map((reason, index) => <li key={index}>{reason}</li>)}</ul>
+          </div>
+        )}
 
         <div style={s.ideasGrid}>
           {ideas.map((idea, idx) => {
@@ -1798,6 +1860,11 @@ const DiscoveryWizardPage: React.FC = () => {
             </div>
           )}
 
+          {isCreating && (activeCreationProjectId || createdProjectId) && (
+            <button type="button" disabled={cancellingCreation} onClick={() => void cancelCreation()} style={{ marginTop: 16, padding: '10px 16px', cursor: 'pointer' }}>
+              {cancellingCreation ? '正在取消…' : '取消生成，保留已完成成果'}
+            </button>
+          )}
           {/* 操作按钮区：根据成功/失败状态显示不同按钮 */}
           {!isCreating && (
             <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1921,3 +1988,8 @@ const DiscoveryWizardPage: React.FC = () => {
 };
 
 export default DiscoveryWizardPage;
+
+export function discoveryShortfallReasons(cards: any[]): string[] {
+  const reasons = cards[0]?.ideaDiscoveryAudit?.selectionAudit?.reasons;
+  return Array.isArray(reasons) ? [...new Set<string>(reasons.map((item: any) => typeof item?.reason === 'string' ? item.reason.trim() : '').filter(Boolean))] : [];
+}

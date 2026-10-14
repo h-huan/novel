@@ -166,7 +166,7 @@ describe('idea discovery execution settings', () => {
     }), 5);
   });
 
-  it('passes the six settings unchanged and blocks tags outside the selected platform category', async () => {
+  it('passes settings unchanged and does not treat a public sample as an exhaustive tag list', async () => {
     const controller = Object.create(ChainController.prototype) as any;
     controller.logger = { warn: vi.fn() };
     controller.runIdeaDiscovery = vi.fn().mockResolvedValue({ success: true, ideas: [] });
@@ -182,8 +182,7 @@ describe('idea discovery execution settings', () => {
         pov: configured.pov,
       }), 5,
     );
-    await expect(controller.ideaDiscover({ ...configured, submissionTags: ['系统'] }))
-      .rejects.toThrow(/头部官方标签/);
+    await expect(controller.ideaDiscover({ ...configured, submissionTags: ['系统'] })).resolves.toEqual({success:true,ideas:[]});
   });
 });
 
@@ -1757,7 +1756,7 @@ it('routes to upstream diagnosis after a repeated family instead of spending a s
     stage:'generation_execution',reason:'正文对白仍未落实当前章既有交流场景，须检查生成输入。',nextAction:'核对首稿怎样消费平台要求，并检查其它章同类交流处理。'}]}));
   const base={evaluationStatus:'evaluated',pass:false,advisories:[],sourceConflicts:[],evidence:[],hardlineFindings:[],contradictions:[]};
   controller.checkChapterAlignment=vi.fn()
-    .mockResolvedValueOnce({...base,missing:['开篇未兑现','对白占比不足']})
+    .mockResolvedValueOnce({...base,missing:['对白占比不足']})
     .mockResolvedValueOnce({...base,missing:['对白占比不足']});
   await expect(controller.generateBodyWithAlignmentGuard({projectId:'p1',basePrompt:'写本章',targetWords:4000,
     scenario:'writing',chapterIndex:1,chapterTitle:'第一章',outlineContract:'本章应有对话和核心事件。'.repeat(30),storyContext:'当前确认的上下文',wordRange:{min:3000,max:5000}})).rejects.toThrow();
@@ -1799,4 +1798,23 @@ it('does not promote an advisory that explicitly denies missing facts, while ret
  expect(partitionAlignmentFindings([], '故事章纲', [denied],true)).toMatchObject({blocking:[],advisories:[denied]});
  const mixed='大纲要求的关键行动缺失。其余表达未构成缺失或冲突。';expect(partitionAlignmentFindings([], '故事章纲',[mixed],true).blocking).toEqual([mixed]);
  expect(partitionAlignmentFindings([denied], '故事章纲',[],true).blocking).toEqual([denied]);
+});
+
+
+it('sends matching complete pool sources to source review and every selected item to overlap review',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{const data={passed:true,issues:[]};expect(options.validate(data)).toBe(true);return {data,warnings:[]};});
+ const selection={pool:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'},{premiseId:'P2',storyCore:'未选原池项专用标记'}],selected:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'}]};
+ await controller.reviewPremiseSelection(selection,'既定标准','source_drift');
+ const source=controller.llmCallWithRetry.mock.calls[0][1];expect(source).toContain('保留原始骨架完整内容');expect(source).not.toContain('未选原池项专用标记');
+ await controller.reviewPremiseSelection(selection,'既定标准','overlap');
+ const overlap=controller.llmCallWithRetry.mock.calls[1][1];expect(overlap).toContain('保留原始骨架完整内容');expect(overlap).not.toContain('原轻量池');
+});
+
+it('supplies exact saved closing text while retaining the complete predecessor for handoff review',()=>{
+ const c=Object.create(ChainController.prototype) as any;const raw='前章完整正文。'.repeat(400)+'早上八点零六分，他已经收到通知。';
+ c.db={getDb:()=>({prepare:()=>({get:()=>({id:'previous',chapter_index:3,title:'前章',content:raw}),all:()=>[]})})};
+ const context=JSON.parse(c.previousChapterReviewContext('p',4,'既定背景'));
+ expect(context.previousChapter[0].content).toBe(raw);expect(context.chapterHandoff.predecessorClosingScene).toBe(raw.slice(-1800));
+ expect(context.chapterHandoff.predecessorId).toBe('previous');
 });

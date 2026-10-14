@@ -60,7 +60,7 @@ export function resolveQualityEvidence(content: string, candidate: unknown): {
 /** Required semantic bases are owned by QLT-003; sources are supplied by callers. */
 export function verifySemanticEvidence(finding: {
   ruleId?: string; issueType?: string; evidence?: unknown; shownEvidence?: unknown;
-  evidenceKind?: string; basisEvidence?: unknown; basisSource?: string; basisReason?: string;
+  evidenceKind?: string; shownSource?: string; basisEvidence?: unknown; basisSource?: string; basisReason?: string;
 }, content: string, sources: Record<string, string> = {}) {
   const primary = resolveQualityEvidence(content, finding.evidence);
   const reasons: string[] = [];
@@ -70,7 +70,11 @@ export function verifySemanticEvidence(finding: {
     || finding.evidenceKind === 'redundant_interpretation';
   const premature = finding.evidenceKind === 'premature_reveal';
   const causalGap = /(?:causality_gap|causal_gap)/.test(ruleId) || finding.evidenceKind === 'causal_gap';
-  let shown = resolveQualityEvidence(content, finding.shownEvidence);
+  const crossChapterComparison = ruleId === "ai_trace.cross_chapter_template_repetition";
+  // Previous-chapter evidence belongs to the supplied project snapshot; ordinary
+  // explanation and character-voice comparisons still require current-body text.
+  let shown = resolveQualityEvidence(crossChapterComparison && finding.shownSource === "project_context"
+    ? sources.project_context || "" : content, finding.shownEvidence);
   let basis = resolveQualityEvidence(sources[finding.basisSource || ''] || '', finding.basisEvidence);
   if (explanation && !premature) {
     if (!shown.verified) reasons.push('过度解释缺少已呈现信息的原文证据');

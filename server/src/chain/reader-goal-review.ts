@@ -1,3 +1,4 @@
+import { resolveCitationAnchor } from '../modules/writing-quality/citation-anchor';
 import { causalEvidenceAnchors } from '../modules/writing-quality/causal-review';
 import { resolveQualityEvidence } from '../modules/writing-quality/quality-issue';
 
@@ -38,23 +39,26 @@ export function invalidReaderGoalQuotes(value: unknown, text: string): ReaderGoa
   });
 }
 
-export function readerGoalQuoteRepairPrompt(goals: unknown, keys: ReaderGoalKey[], text: string) {
+export function readerGoalQuoteRepairPrompt(goals: unknown, keys: ReaderGoalKey[], text: string, sources: Record<string,string> = {}) {
   return {
     systemPrompt: '只修复阅读倾向评审的引文定位。保留原status、reason及所有真实问题，不重新评分，不改正文。原文不能支持原判断时返回空编号，保持未评估。',
     prompt: '原判断：' + JSON.stringify(goals) + '\n待修复项：' + JSON.stringify(keys)
-      + '\n当前正文原文段落：' + JSON.stringify(causalEvidenceAnchors(text, {}))
-      + '\n只输出JSON:{"repairs":[{"key":"待修复项名称","anchorId":"body:p编号"}]}。每个待修复项恰好一次；选择能直接支持原reason的原文段落编号，不改述引文，不引用章纲或规则；没有支持段落时anchorId为空。',
+      + '\n当前正文原文段落：' + JSON.stringify(causalEvidenceAnchors(text, sources))
+      + '\n只输出JSON:{"repairs":[{"key":"待修复项名称","anchorId":"body:p编号"}]}。每个待修复项恰好一次；优先选择一个能直接支持原reason的原文段落编号；确需多个段落时用逗号分隔、按原文顺序返回编号，程序会引用首末段之间的完整连续原文，不拼接省略，不改述引文，不引用章纲或规则；没有支持段落时anchorId为空。',
   };
 }
 
 export function applyReaderGoalQuoteRepairs(goals: ReaderGoalReview, keys: ReaderGoalKey[], value: any, text: string): ReaderGoalReview {
   const rows = value?.repairs;
-  if (!Array.isArray(rows) || rows.length !== keys.length
-    || new Set(rows.map(row => row?.key)).size !== keys.length
-    || rows.some(row => !keys.includes(row?.key))) return goals;
-  const anchors = new Map(causalEvidenceAnchors(text, {}).map(row => [row.id, row.text]));
-  if (rows.some(row => typeof row.anchorId !== 'string' || !anchors.has(row.anchorId))) return goals;
-  const repaired = {...goals};
-  for (const row of rows) repaired[row.key as ReaderGoalKey] = {...goals[row.key as ReaderGoalKey], quote: anchors.get(row.anchorId)!};
+  if (!Array.isArray(rows)) return goals;
+  let repaired = goals;
+  for (const key of keys) {
+    const matches = rows.filter(row => row?.key === key);
+    if (matches.length !== 1) continue;
+    const quote = resolveCitationAnchor(matches[0].anchorId, 'body', text, {});
+    if (!quote) continue;
+    if (repaired === goals) repaired = {...goals};
+    repaired[key] = {...goals[key], quote};
+  }
   return repaired;
 }

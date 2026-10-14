@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpException, Logger, Param, Post, Sse } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
+import { generationTasks } from '../common/generation-cancellation';
 import { DatabaseService } from '../database/database.service';
 import { readConstitution, settingsObject } from '../modules/project/creative-constitution';
 import { isGateRejection } from '../modules/writing-quality/gate-failure';
@@ -32,6 +33,28 @@ export class ChainPlanningController {
 
     if (this.database) {
       try {
+        const qualified = ((result?.success ? result?.ideas : result?.qualifiedIdeas) || []).filter((idea: any) => idea?.ideaAppealGate?.passed === true);
+        if (qualified.length > 0) {
+          // Archive the prior usable batch before replacing the latest recovery entry.
+          try {
+            const db = this.database.getDb();
+            const previous = db.prepare('SELECT data_value FROM dual_write_store WHERE data_key=?').get('latest_idea_discovery_qualified') as any;
+            const saved = db.prepare('SELECT data_value FROM dual_write_store WHERE data_key=?').get('idea_discovery_qualified_history') as any;
+            const prior = previous?.data_value ? JSON.parse(previous.data_value) : null;
+            const history = saved?.data_value ? JSON.parse(saved.data_value) : [];
+            if (prior?.qualifiedIdeas?.some((idea:any)=>idea?.ideaAppealGate?.passed === true)) {
+              const batches = [prior, ...(Array.isArray(history) ? history : [])];
+              const unique = batches.filter((batch:any,index:number)=>batches.findIndex((other:any)=>other.generatedAt===batch.generatedAt)===index).slice(0,5);
+              await this.database.dualWrite('idea_discovery_qualified_history', unique);
+            }
+          } catch (error) { this.logger.warn('上一批通过卡归档失败：'+(error instanceof Error ? error.message : String(error))); }
+          await this.database.dualWrite('latest_idea_discovery_qualified', {
+          request: { ...dto, count: desiredCount }, generatedAt: new Date().toISOString(),
+          success: result?.success === true, status: result?.status || (result?.success ? 'complete' : 'failed'),
+          qualifiedIdeas: qualified,
+          appealGate: result?.appealGate ?? null, error: result?.error ?? null,
+        });
+        }
         await this.database.dualWrite('latest_idea_discovery_audit', {
           schemaVersion: 1,
           generatedAt: new Date().toISOString(),
@@ -77,13 +100,29 @@ export class ChainPlanningController {
         .get('latest_idea_discovery_audit') as any;
       if (!row?.data_value) return { available: false, reason: 'no_discovery_audit_yet' };
       try {
-        return { available: true, updatedAt: row.updated_at ?? null, audit: JSON.parse(String(row.data_value)) };
+        let retained: any = null;
+        try {
+          const saved = db.prepare('SELECT data_value FROM dual_write_store WHERE data_key=?').get('latest_idea_discovery_qualified') as any;
+          retained = saved?.data_value ? JSON.parse(saved.data_value) : null;
+        } catch { /* Optional recovery cache must never hide the original audit. */ }
+        let retainedBatches: any[] = [];
+        try {
+          const history = db.prepare('SELECT data_value FROM dual_write_store WHERE data_key=?').get('idea_discovery_qualified_history') as any;
+          const parsed = history?.data_value ? JSON.parse(history.data_value) : [];
+          retainedBatches = Array.isArray(parsed) ? parsed : [];
+        } catch { /* Optional history does not replace the latest audit. */ }
+        return { available: true, updatedAt: row.updated_at ?? null, audit: JSON.parse(String(row.data_value)), retained, retainedBatches };
       } catch {
         return { available: false, reason: 'invalid_discovery_audit_json', updatedAt: row.updated_at ?? null };
       }
     } catch (error) {
       return { available: false, reason: 'discovery_audit_read_failed', error: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  @Post('cancel-creation/:projectId')
+  cancelCreation(@Param('projectId') projectId: string) {
+    return generationTasks.cancel('creation', projectId);
   }
 
   @Post('create-project-async')

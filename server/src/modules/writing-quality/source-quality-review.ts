@@ -1,3 +1,4 @@
+import { resolveCitationAnchor } from './citation-anchor';
 import { resolveQualityEvidence } from './quality-issue';
 import { readerGoalReviewIssues, type ReaderGoalReview } from '../../chain/reader-goal-review';
 import { SOURCE_QUALITY_POLICY, STORY_CAUSAL_REVIEW_POLICY, CROSS_STAGE_REVIEW_POLICY, CONTINUITY_SCOPE_POLICY } from '../../../shared/src/system-workflow-rules.registry';
@@ -31,7 +32,7 @@ export async function reviewFixedSourceChecklist<T extends {id:string},R extends
 export const SOURCE_QUALITY_AXES = ['promise', 'continuity', 'agency', 'professional', 'progression', 'voice'] as const;
 export const CONTINUITY_EVIDENCE_CONTRACT = CONTINUITY_SCOPE_POLICY + '有previousChapter时，continuity的supported也必须引用context中已保存前序完整正文的basisEvidence；逐项对照本章对过去事件、人物所知、位置及权限等状态的声称，不用本章回忆或章纲当作前章事实。明确回溯的旧事件或原话可引用historicalChapters中的完整已保存正文；当前状态仍以紧邻前章为准，旧状态不得覆盖新状态。只有摘要或中段省略而没有完整前章时标unknown，不宣称核对完成。';
 export function continuityClaimCatalog(content: string) {
-  return [...new Set(content.split(/\r?\n/).map(row=>row.trim()).filter(row=>/(?:昨天|昨日|昨夜|昨晚|上次|上回|前一天|前章|此前|之前|第一次)/.test(row)))]
+  return [...new Set(content.split(/\r?\n/).map(row=>row.trim()).filter(row=>/(?:昨天|昨日|昨夜|昨晚|上次|上回|前一天|前章|此前|之前|第一次|首次)/.test(row)))]
     .map((evidence,index)=>({ref:'C'+(index+1),evidence,requiresPrior:/(?:昨天|昨日|昨夜|昨晚|上次|上回|前一天|前章)/.test(evidence)}));
 }
 export function continuityClaimReviewDirective(content: string, refs?: string[]) {
@@ -130,7 +131,7 @@ function bindSourceEvidence(row:any,context:string) {
   if(row.basisRef===undefined)return {...row,additionalBasisEvidence:undefined};
   const refs=sourceReferenceList(row.basisRef);
   const catalog=sourceEvidenceCatalog(context),sources=refs.map((ref:any)=>catalog.find(item=>item.id===ref));
-  if(!refs.length||refs.length>8||new Set(refs).size!==refs.length||sources.some((source:any)=>!source)
+  if(!refs.length||new Set(refs).size!==refs.length||sources.some((source:any)=>!source)
     ||row.basisEvidence!==undefined&&!sources.some((source:any)=>resolveQualityEvidence(source.text,row.basisEvidence).verified))
     return {...row,basisEvidence:''};
   return {...row,basisEvidence:row.basisEvidence??sources[0]!.text,additionalBasisEvidence:sources.slice(1).map((source:any)=>source.text)};
@@ -164,12 +165,13 @@ export function validateSourceBoundaryReview(row:any,content:string,context:stri
   const errors:string[]=[],findings:string[]=[],sourceConflicts:string[]=[];
   if(!row||!['supported','gap','conflict','unknown'].includes(row.status)||typeof row.reason!=='string'||row.reason.trim().length<8
     ||!resolveQualityEvidence(content,row.evidence).verified||!resolveSourceContextEvidence(context,row.basisEvidence).verified
-    ||row.additionalBasisEvidence!==undefined&&(!Array.isArray(row.additionalBasisEvidence)||row.additionalBasisEvidence.length>7||row.additionalBasisEvidence.some((evidence:unknown)=>!resolveSourceContextEvidence(context,evidence).verified))
+    ||row.additionalBasisEvidence!==undefined&&(!Array.isArray(row.additionalBasisEvidence)||row.additionalBasisEvidence.some((evidence:unknown)=>!resolveSourceContextEvidence(context,evidence).verified))
     ||!['body','chapter_plan'].includes(row.origin))errors.push('来源边界核对缺少实际正文、来源依据或明确结论；不得拼接不同字段的引文');
   else if(hasFutureGoalEvidence(row,context))errors.push('来源角色错误：未来结局计划、人物成长弧与候选人物arc不能作为已授权能力或必须恢复原手段的依据，与其它来源混引也不能授权机制；须核对独立机制或完整叙事中的实际行动条件。');
   else if(row.status==='unknown')errors.push('来源边界尚未核实：'+row.reason);
   else if(['gap','conflict'].includes(row.status)) {
-    const finding='【来源边界】'+row.reason+' | 正文: '+row.evidence+' | 来源: '+sourceEvidenceText(row);
+    const preview=(text:string)=>text.length>240?text.slice(0,240)+'…（仅预览，完整证据见留存记录）':text;
+    const finding='【来源边界】'+row.reason+' | 正文: '+preview(row.evidence)+' | 来源: '+preview(sourceEvidenceText(row));
     if(row.origin==='chapter_plan') {
       if(!resolveQualityEvidence(outline,row.outlineEvidence).verified)errors.push('来源边界认定章纲有错但缺实际章纲证据');
       else sourceConflicts.push(finding+' | 章纲: '+row.outlineEvidence);
@@ -303,19 +305,23 @@ function bodySourceBoundaryParagraphs(content:string) {
   return content.split(/\n\s*\n/).map((text,index)=>({id:'B'+(index+1),content:text.trim()})).filter(row=>row.content);
 }
 export function bodySourceBoundaryCatalog(content:string,requiredIds:readonly string[]=[]) {
+  // Whole-body cross-paragraph targets are distinct from the first paragraph.
+  if(requiredIds.includes('B0'))return [{id:'B0',content}];
   const rows=bodySourceBoundaryParagraphs(content).filter(row=>needsSourceBoundaryReview(row.content)||requiredIds.includes(row.id));
-  return rows.length||!needsSourceBoundaryReview(content)?rows:[{id:'B1',content}];
+  return rows.length||!needsSourceBoundaryReview(content)?rows:[{id:'B0',content}];
 }
 export function remapBodySourceBoundaryTargets(previous:string,current:string,targets:readonly {id:string;content:string}[]) {
+  if(targets.some(row=>row.id==='B0'||row.content===previous))return ['B0'];
   const convert=(row:{id:string;content:string})=>({...row,id:'body-'+row.id.slice(1)});
   return remapSourceBoundaryUnits(bodySourceBoundaryParagraphs(previous).map(convert),bodySourceBoundaryParagraphs(current).map(convert),targets.map(convert)).map(id=>'B'+id.slice(5));
 }
 export function bodySourceBoundaryReviewPrompt(rows:Array<{id:string;content:string}>,context:string,outline:string,content:string) {
   return sourceBoundaryReviewPrompt(content,JSON.stringify(sourceEvidenceCatalog(context)),outline)
     +SOURCE_BOUNDARY_OBSERVATION_SCOPE_DIRECTIVE+SOURCE_BOUNDARY_AUTHORITY_SCOPE_DIRECTIVE
+    +'\n【不能用作机制basisRef的未来计划编号】'+JSON.stringify(sourceEvidenceCatalog(context).filter(source=>hasFutureGoalEvidence({basisRef:source.id},context)).map(source=>({id:source.id,path:source.path})))
     +'\n【服务端固定正文风险清单】'+JSON.stringify(rows)
     +SOURCE_INFERENCE_SCOPE_DIRECTIVE
-    +'\n只返回JSON:{"checks":[{"id":"实际id","status":"supported|gap|conflict|unknown","basisRef":"实际S编号，可多个","origin":"body|chapter_plan","outlineEvidence":"仅章纲也有同一错误时引用实际章纲连续原文，其它为空","reason":"实际条件和仍未排除的关键反例"}]}。每个id恰好一条；正文及来源引文由服务器按id和basisRef绑定，不能用一处正常描述代替全清单。';
+    +'\n只返回JSON:{"checks":[{"id":"实际id","status":"supported|gap|conflict|unknown","basisRef":"实际S编号，可多个","origin":"body|chapter_plan","outlineEvidence":"仅章纲也有同一错误时引用实际章纲连续原文，其它为空","reason":"实际条件和仍未排除的关键反例"}]}。每个id恰好一条；正文及来源引文由服务器按id和basisRef绑定，不能用一处正常描述代替全清单。basisRef只选本次目录中实际存在的编号，允许覆盖本条真实机制所需的多个来源；每个编号恰好一次，不返回拼接的basisEvidence。来源原文由服务器绑定，所有来源仍逐项核对角色，不得引用未来计划授权机制。';
 }
 export function validateBodySourceBoundaryReview(value:any,rows:Array<{id:string;content:string}>,context:string,outline:string) {
   const errors:string[]=[],findings:string[]=[],sourceConflicts:string[]=[];
@@ -410,7 +416,7 @@ export function continuityPriorEvidenceAnchors(context:string) {
   return [...(Array.isArray(data.previousChapter)?data.previousChapter:[]),...(Array.isArray(data.historicalChapters)?data.historicalChapters:[])].filter(row=>row.complete===true&&typeof row.content==='string').flatMap((row,chapter)=>row.content.split(/\n\s*\n/).filter((text:string)=>text.trim()).map((text:string)=>({id:'prior:p'+(++index),text:text.trim(),chapter,chapterIndex:row.chapter_index})));
 }
 function continuityClaimPriorSource(evidence:string,prior:{content:string;historical:string}) {
-  const historical = /上回|上次|以前|曾经|当初|先前|上面写着|原话|当时|昨天|昨日|昨夜|昨晚|前天|前日|前一天|那天|那晚/.test(evidence);
+  const historical = /上回|上次|以前|曾经|当初|先前|此前|之前|第一次|首次|上面写着|原话|当时|昨天|昨日|昨夜|昨晚|前天|前日|前一天|那天|那晚/.test(evidence);
   const currentState = /现在|此刻|当前|眼下|如今|此时/.test(evidence);
   return historical && !currentState ? prior.content+'\n\n'+prior.historical : prior.content;
 }
@@ -552,10 +558,15 @@ export function invalidSourceQualityCitations(audit: SourceQualityAudit, content
   });
 }
 export function applySourceQualityCitationRepairs(audit:SourceQualityAudit, targets:SourceCitationTarget[], rows:unknown, content:string,sources:Record<string,string>):SourceQualityAudit {
-  if(!Array.isArray(rows)||rows.length!==targets.length||new Set(rows.map(row=>row?.key)).size!==targets.length)return audit;
-  const anchors=new Map(causalEvidenceAnchors(content,sources).map(row=>[row.id,row]));
-  if(rows.some(row=>{const target=targets.find(t=>t.key===row?.key);const anchor=anchors.get(row?.anchorId);return !target||!anchor||anchor.source!==target.source;}))return audit;
-  const checks={...audit.checks};
-  for(const row of rows){const target=targets.find(t=>t.key===row.key)!;checks[target.axis]={...checks[target.axis],[target.field]:anchors.get(row.anchorId)!.text};}
-  return {...audit,checks};
+  if (!Array.isArray(rows)) return audit;
+  let checks = audit.checks;
+  for (const target of targets) {
+    const matches = rows.filter(row => row?.key === target.key);
+    if (matches.length !== 1) continue;
+    const quote = resolveCitationAnchor(matches[0].anchorId, target.source, content, sources);
+    if (!quote) continue;
+    if (checks === audit.checks) checks = {...audit.checks};
+    checks[target.axis] = {...checks[target.axis], [target.field]: quote};
+  }
+  return checks === audit.checks ? audit : {...audit, checks};
 }

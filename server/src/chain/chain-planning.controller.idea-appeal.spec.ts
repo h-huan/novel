@@ -308,3 +308,31 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
     }));
   });
 });
+
+it('persists complete qualified cards separately when the full discovery batch remains incomplete',async()=>{
+ const cards=[{title:'已通过',ending:'明确结果',ideaAppealGate:{passed:true}},{title:'未通过',ideaAppealGate:{passed:false}}];
+ const writes=new Map<string,any>();const database={dualWrite:vi.fn(async(key:string,value:any)=>writes.set(key,value))};
+ const upstream={success:false,status:'incomplete',ideas:[],qualifiedIdeas:cards,error:'缺少一张',appealGate:{qualified:1,requested:2}};
+ const controller=new ChainPlanningController({ideaDiscover:vi.fn(async()=>upstream)} as any,database as any);
+ const result=await controller.ideaDiscover({count:2,platform:'fanqie',storyType:'short_story'});
+ expect(result.success).toBe(false);expect(result.ideas).toEqual([]);
+ const retained=writes.get('latest_idea_discovery_qualified');expect(retained.qualifiedIdeas).toEqual([cards[0]]);expect(retained.qualifiedIdeas[0].ending).toBe('明确结果');
+ expect(retained.request.count).toBe(2);expect(retained.status).toBe('incomplete');
+});
+
+it('does not overwrite the previous passed card cache on an empty failed discovery',async()=>{
+ const db={dualWrite:vi.fn().mockResolvedValue(undefined)};
+ const c=new ChainPlanningController({ideaDiscover:vi.fn().mockResolvedValue({success:false,ideas:[],error:'重选截断'})} as any,db as any);
+ await c.ideaDiscover({...dto,count:5} as any);
+ expect(db.dualWrite.mock.calls.some(call=>call[0]==='latest_idea_discovery_qualified')).toBe(false);
+ expect(db.dualWrite.mock.calls.some(call=>call[0]==='latest_idea_discovery_audit')).toBe(true);
+});
+
+it('archives the prior approved batch before accepting a smaller new approved batch',async()=>{
+ const prior={generatedAt:'earlier',qualifiedIdeas:[{title:'原卡',ideaAppealGate:{passed:true}}]};
+ const db={dualWrite:vi.fn().mockResolvedValue(undefined),getDb:()=>({prepare:()=>({get:(key:string)=>key==='latest_idea_discovery_qualified'?{data_value:JSON.stringify(prior)}:undefined})})};
+ const c=new ChainPlanningController({ideaDiscover:vi.fn().mockResolvedValue({success:false,status:'incomplete',qualifiedIdeas:[{title:'新卡',ideaAppealGate:{passed:true}}]})} as any,db as any);
+ await c.ideaDiscover({...dto,count:5} as any);
+ expect(db.dualWrite.mock.calls[0]).toEqual(['idea_discovery_qualified_history',[prior]]);
+ expect(db.dualWrite.mock.calls[1][0]).toBe('latest_idea_discovery_qualified');
+});

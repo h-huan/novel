@@ -302,7 +302,7 @@ ChapterPlan 必须表达：入口状态、唯一推进目标、必经事件/节�
 
 ### 5.14 POV、文风与可发布正文边界 `[QLT-014 · P2]`
 
-叙述服从已确认 POV 与文风，不建立白描、短句、情绪直述、形容词或正常修辞的全作品禁令。正文只输出可发布故事内容，不输出方法论标题、模型过程或创作点评；故事内人物正常写字、记录、辨认笔迹不属于元叙述。
+叙述服从已确认 POV 与文风，不建立白描、短句、情绪直述、形容词或正常修辞的全作品禁令。正文只输出可发布故事内容，不输出方法论标题、模型过程或创作点评；故事内人物正常写字、记录、辨认笔迹不属于元叙述。明确切换时间阶段或地点、且有助于读者辨认时，可用简短的【时间·地点】场景标识，如【次日清晨·会议室】；只标已有依据的时间或地点，不补不存在的地址、不制造精确时刻、不强制每段或每章加标识，不把故事场景标识当作方法论标题。
 
 正文先让读者看懂谁在做什么、为什么改变处境，人物、时间、地点、物件状态和知情边界保持一致。自然表达服从已选文风、时代与人物身份：适合口语的地方可用省略、语气词、停顿、改口和简短应答，句子与段落随意思长短变化；叙述不必句句工整、对称或像汇报，但不能牺牲可理解的主谓、指代与必要因果。标点跟着语义和语气，不规定种类配额、不拆成单字句、不机械只用逗号句号，也不为制造变化堆标点。人物可以迟疑、误判或说不周全的话，须符合当时所知与处境；不为模仿人写而故意加入错字、病句或事实矛盾。已经由行动、对白或物证让读者理解的信息，不再用总结句、心理自述或旁白换词复述；理解下一步选择确实需要的心理、前提和衔接要保留，未到期谜底不解释。对白承担真实交流意图，允许回避、试探、答非所问和潜台词，读者仍能理解必要意图；不让每个人轮流完整说明背景或精确回答所有问题。降低AI痕迹针对有证据的重复解释、模板句式、整齐成串的同构动作、同质声音与无作用细节；表达清楚、句子通顺或偶尔规整本身不是缺陷，不用随机换词、添动作或故意写错取代真实叙事。
 
@@ -539,3 +539,21 @@ GEN-007沿用唯一规则，补足篇幅时禁止擅自新增原稿之外的精�
 取消版本116冻结数字读数的误拦截：时间可按行动推进，扩写候选仍进入完整来源与时间复检。明确经过秒数/分钟通过服务端durations编号绑定计时器前后读数，程序核算；真假时长、上下界与未知反例均覆盖。该数据不要求写成正文解释段。
 
 失败Gate运行载荷可保存扩写来源原稿及当前失败正文SHA256；同项目同章节的安全评审重试核对哈希后恢复对照。旧记录缺来源不猜造原稿。未改既有故事资料，未降低质量门，未增加修复次数。
+
+有证据确认已解决不同问题时，不因剩余问题共享宽泛类别而提前停止；继续受连续局部尝试上限和共享调用预算约束。没有新的实质改善、问题增多或重复修同一失败点时，转入来源诊断。来源边界错误的界面引文采用明确标记的短预览，完整正文、来源与模型原始结果仍留存，不用截短的展示文字代替验收证据。
+
+### 保留成功成果的主线验收范围
+
+创作与验收优先保证主线相关的因果、人物身份与知情边界、关键权限和期限、章节接力、核心承诺及到期必要伏笔成立。只处理有原文证据且会影响行动理解、后续发展或已声称结果的问题；无关主线的小道具、背景细节、轻微表达瑕疵和可选润色保留为advisories，不因追求完美反复改稿。建议项确认不影响行动、结果或主线时明确写明；不得把关键前提缺失、世界规则冲突或必要伏笔未兑现伪装成小细节。日期、执行者、权限及动作前后状态属于同一事件时，生成和局部修订继承实际已保存正文及已确认框架，不凭摘要另猜月份、星期、主体或扩展权限；局部修订后核对受影响的事件和章节接力，验收绑定实际最终稿，不以旧版报告代替。语句通顺、允许口语和人物误判，不为解释补解释；实际重复解释、无效复盘及不改变局势的流程堆叠按叙事作用处理。复用已通过成果和留存稿，不为可选建议重新生成整章；不增加独立全书评审轮次。
+
+
+### Execution update 195: reading units and adjacent chapter handoff
+
+Paragraphs follow narrative units rather than character-count quotas: keep related actions together; separate changes of speaker, scene, time, and source of information. Clearly distinguish messages, logs, and notifications where useful, using existing facts only. Preserve meaningful short replies and pauses. Do not mechanically split every sentence or merge explicit scene boundaries.
+
+Generation and the existing whole-chapter review prioritize the preceding closing scene and the current opening: time, place, people, completed actions, objects, knowledge, and unfinished actions. Require original text evidence for conflicts. Do not invent an unstated next day, flashback, or repeated action to excuse a contradiction. A clear flashback is allowed; ordinary memories do not require forced callbacks. This adds no separate model review round.
+
+
+### Execution update 196: reading structure and non-replayed openings
+
+Do not split each thought or sentence into a separate paragraph. Keep an observation or action chain together, using short paragraphs for meaningful dialogue, impact, or recognition. Separate message speakers and record entries, preserving their source boundaries. Paragraph length statistics are diagnostics, not quality quotas. Start a new chapter after the predecessor's completed actions; do not replay waking, reading a notice, getting up, or departing. Distinguish character assumptions and recovered memories from objective events. Do not invent another sleep, a lie, a flashback, or a date change merely to excuse a contradiction.

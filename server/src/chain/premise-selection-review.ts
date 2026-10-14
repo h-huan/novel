@@ -84,3 +84,33 @@ export function normalizeTargetedPremiseReselection(value: unknown, original: Pr
   const selectedPremises = original.selected.map(item => bySlot.get(String(item.premiseId)) || item);
   return normalizePremiseReselection({selectedPremises}, original, review, requestedCount, poolTarget, categories);
 }
+
+/** Isolate evidenced failures after completed reviews, without rewriting retained premises.
+ * Protocol errors and incomplete reviews must never be treated as a partial pass.
+ */
+export function retainReviewedPremises(selection: PremiseSelectionResult, review: PremiseSelectionReview,
+  protectedIds: readonly string[] = []) {
+  const errors = premiseSelectionReviewIssues(review, selection);
+  if (errors.length) throw new Error('不能保留未完成有效复核的题材：' + errors.join('；'));
+  const excluded = new Set(review.issues.filter(issue => issue.kind === 'source_drift').map(issue => issue.premiseId));
+  const protectedSet = new Set(protectedIds);
+  for (const issue of review.issues.filter(item => item.kind === 'overlap')) {
+    if (excluded.has(issue.premiseId) || excluded.has(issue.referencePremiseId)) continue;
+    // Prefer keeping the original unaffected choice over a newly repaired duplicate.
+    excluded.add(protectedSet.has(issue.premiseId) && !protectedSet.has(issue.referencePremiseId)
+      ? issue.referencePremiseId : issue.premiseId);
+  }
+  return {
+    selection: { ...selection, selected: selection.selected.filter(item => !excluded.has(String(item.premiseId))) },
+    excludedPremiseIds: [...excluded],
+    reasons: review.issues,
+  };
+}
+
+/** Carry only the final failed preselection evidence into the partial-batch report. */
+export function premiseSelectionFailureReasons(audit: unknown): string[] {
+  const value = audit as { reasons?: Array<{reason?:unknown}>; finalReview?: PremiseSelectionReview } | undefined;
+  const items = Array.isArray(value?.reasons) ? value.reasons
+    : value?.finalReview?.passed === false ? value.finalReview.issues : [];
+  return [...new Set(items.map(item => typeof item?.reason === 'string' ? item.reason.trim() : '').filter(Boolean))];
+}

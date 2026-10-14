@@ -221,10 +221,6 @@ export function missingExecutionStandards(value: ExecutionStandardsValue): strin
   if (!value.webNovelGenre.length) missing.push('流派');
   if (required.includes('genre') && !value.submissionTags.length) missing.push('作品标签');
   if (!value.pov.trim()) missing.push('视角');
-  const placement = resolveSubmissionCategory(value.targetPlatform, value.category, value.projectType, value.targetAudience);
-  if (placement.status === 'resolved' && value.submissionTags.length
-    && platformCategoryDimensionBinding(value.targetPlatform, placement.value, 'genre', value.submissionTags.join('、'), value.projectType).gap
-    && value.genreFitNote.trim().length < 10) missing.push('标签与分类契合依据');
   return missing;
 }
 

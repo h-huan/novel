@@ -428,14 +428,17 @@ export class ImportEngineService {
 
   private splitChapters(content: string, format: string): ChapterInfo[] {
     // 按行处理
-    const lines = content.split(/\r?\n/);
+    const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/);
+    // Our TXT uses bracketed headings: body separators and Markdown remain prose.
+    const exportedTxt = /^【第\d+章(?:\s.*)?】$/.test(lines[0]?.trim() || '');
     const chapters: { title: string; contentLines: string[] }[] = [];
     let currentTitle = '前言';
     let currentLines: string[] = [];
 
     for (const line of lines) {
       const trimmed = line.trim();
-      const title = this.detectChapterTitle(trimmed, format);
+      const exportedHeading = trimmed.match(/^【(第\d+章(?:\s.*)?)】$/);
+      const title = exportedTxt ? (exportedHeading?.[1] ?? null) : this.detectChapterTitle(trimmed, format);
 
       if (title !== null) {
         // 保存上一章
@@ -444,7 +447,7 @@ export class ImportEngineService {
         }
         currentTitle = title;
         currentLines = [];
-      } else if (this.isChapterSeparator(trimmed)) {
+      } else if (!exportedTxt && this.isChapterSeparator(trimmed)) {
         // 分隔符也作为分章标记
         if (currentLines.length > 0 || chapters.length > 0) {
           chapters.push({ title: currentTitle, contentLines: [...currentLines] });
@@ -464,7 +467,7 @@ export class ImportEngineService {
     return chapters
       .filter((c) => c.contentLines.some((l) => l.trim().length > 0))
       .map((c, i) => ({
-        index: i + 1,
+        index: Number(c.title.match(/^第(\d+)[章节回]/)?.[1]) || i + 1,
         title: c.title,
         content: c.contentLines.join('\n').trim(),
         wordCount: this.countWords(c.contentLines.join('\n')),

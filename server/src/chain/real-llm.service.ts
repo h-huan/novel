@@ -1,3 +1,4 @@
+import { assertGenerationActive, currentGenerationSignal, GenerationCancelledError } from '../common/generation-cancellation';
 import { reviewCharacterContracts } from '../modules/writing-quality/character-contract';
 import { narrativeTrace } from '../modules/writing-quality/narrative-trace';
 import { repairPrompt, executeRepair } from '../modules/writing-quality/repair-strategy-registry';
@@ -258,13 +259,14 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   }
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
+    assertGenerationActive();
     const start = Date.now();
     const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false);
     const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
       '【项目唯一创作宪法；所有生成内容必须继承】', JSON.stringify(run.constitution),
       ...(request.scenario === 'long-novel-flexible-outline' && run.context
         ? ['【框架规划与评审共用的已确认来源快照】以下世界规则、角色、伏笔与既有事实是本次规划的共同输入。条件、证据来源、埋设与回收位置须无损继承；候选不能覆盖已确认事实。', run.context] : []),
-      ...(run.lessons || [])].filter(Boolean).join('\n') , metrics: { ...request.metrics, runId: run.id } } : request;
+      ...(run.lessons || [])].filter(Boolean).join('\n') , metrics: { ...request.metrics, runId: run.id } } : run ? { ...request, metrics: { ...request.metrics, runId: run.id } } : request;
     let generatedOutput: string | undefined;
     try {
       const response = await this.generateInternal(enriched);
@@ -279,10 +281,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         response.content = await this.evaluateGeneratedRun(run, request, response.content);
         generatedOutput = response.content;
       }
+      assertGenerationActive();
       if (run) this.metrics.finishRun(run.id, 'success', start, response.content, undefined, response.model);
       return response;
     } catch (error) {
-      if (run) this.metrics.finishRun(run.id, 'failed', start, generatedOutput, error instanceof Error ? error.message : String(error));
+      const failedContent = (error as {generatedContent?:unknown})?.generatedContent;
+      if (typeof failedContent === 'string') generatedOutput = failedContent;
+      if (run) this.metrics.finishRun(run.id, currentGenerationSignal()?.aborted ? 'cancelled' : 'failed', start, generatedOutput, currentGenerationSignal()?.aborted ? '已取消生成，留存输出未验收' : error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -846,7 +851,8 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     );
 
     const callTimeout = request.timeout ?? 600_000; // 默认10分钟
-    const reasoningEffort = this.resolveReasoningEffort(request.scenario);
+    const reasoningEffort = this.resolveReasoningEffort(request.scenario, request.metrics?.stepKey ?? undefined);
+    const preserveThinking = request.metrics?.stepKey === 'idea_premise_pool_reselection';
 
     // ⚠️ 关键：用带清除机制的超时包裹主 LLM 调用，确保超时一定生效，
     // 且重试时不会留下未处理的 reject 定时器（否则会产生 unhandledRejection）。
@@ -871,7 +877,19 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         );
       });
       try {
-        return await Promise.race([call(controller.signal), timeoutP]);
+        assertGenerationActive();
+        const userSignal = currentGenerationSignal();
+        const signal = userSignal ? AbortSignal.any([controller.signal, userSignal]) : controller.signal;
+        let abortHandler: (() => void) | undefined;
+        const cancelled = new Promise<never>((_, reject) => {
+          abortHandler = () => reject(new GenerationCancelledError());
+          userSignal?.addEventListener('abort', abortHandler, { once: true });
+        });
+        try {
+          const result = await Promise.race([call(signal), timeoutP, cancelled]);
+          assertGenerationActive();
+          return result;
+        } finally { if (abortHandler) userSignal?.removeEventListener('abort', abortHandler); }
       } finally {
         if (timer) clearTimeout(timer);
       }
@@ -885,6 +903,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     const maxEmptyRetries = request.maxEmptyRetries === 0 ? 0 : 1;
     let thinkingDisabledAttempted = request.physicalCallBudget?.recoveryWithoutThinking === true;
     const callBudgetedModel = (...args: Parameters<RealLLMService['callModel']>) => {
+      assertGenerationActive();
       if (request.physicalCallBudget) {
         if (request.physicalCallBudget.remaining <= 0) {
           throw new Error('源头修订模型调用预算已用尽，已停止扩容或补发；本次未验收，不返回截断候选。');
@@ -994,7 +1013,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // 凡是首次预算就顶到硬顶的调用点（如 review 传 maxTokens=硬顶 32768），nextExpandedMaxTokens
           // 必然返回 null —— 那条扩容通道等于不存在，一次 finish_reason=length 就把整条评审作废，
           // 白烧一整个物理调用。实测证据（generation_step_metrics）：
-          //   review 行 duration_ms=115915 / output_chars=0 / fail_reason=「结构化输出被长度截断，扩容后仍不足」，
+          //   review 行 duration_ms=115915 / output_chars=0 / fail_reason=「结构化输出被长度截断，当前输出额度已达上限」，
           //   而 review 成功行 completion_tokens 仅 391~718 —— 说明这次截断不是「结构化结果装不下」，
           //   是推理(reasoning)把配额吃光了，一个字正文都没吐出来。
           // 恢复手段因此不是加配额（已在硬顶）、不是减字段、不是换模型（都是降级），而是本文件既有的
@@ -1005,7 +1024,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // 单项局部修复也由调用方明确声明问题数量，并保持完整上下文、8处/20%补丁限制。
           // 对最小单元允许同模型、同提示词、同 JSON 契约关闭思考补发一次；
           // 其他多项结构化任务出现半截 JSON 时仍交回调用方缩小批量。
-          if (!thinkingDisabledAttempted && (!result.content.trim() || singleStructuredUnit)) {
+          if (!preserveThinking && !thinkingDisabledAttempted && (!result.content.trim() || singleStructuredUnit)) {
             this.logger.warn(
               `结构化输出在硬顶被长度截断（${singleStructuredUnit ? unitLabel : '无正文输出'}），同模型关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
             );
@@ -1020,12 +1039,14 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           emit('truncated', { resp:this.toResponse(result,modelName,request,startTime), reason: singleStructuredUnit
             ? `${unitLabel}在硬顶且同模型关闭思考补发后仍被截断`
             : '结构化输出被长度截断，扩容后仍不足' });
-          throw structuredTruncationError(
+          const truncationError = structuredTruncationError(
             singleStructuredUnit
               ? `${unitLabel}在 ${currentMaxTokens} tokens 硬顶且同模型关闭思考补发后仍被截断；已停止本次修复`
-              : `结构化生成因输出长度被截断（已扩容至 ${currentMaxTokens} 仍不足，请减小单次结构化批量）`,
+              : `结构化生成因输出长度被截断（当前额度 ${currentMaxTokens} 已达上限，请减小单次结构化批量）`,
             { maxTokens: currentMaxTokens, scenario: request.scenario, model: modelName },
           );
+          Object.assign(truncationError, {generatedContent: result.content});
+          throw truncationError;
         }
 
         // 必须在 length 之后判断空内容。推理模型可能把预算耗尽后返回
@@ -1048,7 +1069,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // 空响应的最后手段：扩容已到硬顶/已用完扩容机会（length 型），或空内容重试预算
           // 已用尽（非 length 型）时，关闭思考补发一次。故障恢复而非降级——此时模型已无法产出
           // 正文，关闭思考是让它能输出的唯一手段；正常路径仍保留完整推理。
-          if (!thinkingDisabledAttempted && (result.finishReason === 'length' || emptyRetriesUsed >= maxEmptyRetries)) {
+          if (!preserveThinking && !thinkingDisabledAttempted && (result.finishReason === 'length' || emptyRetriesUsed >= maxEmptyRetries)) {
             this.logger.warn(
               `空内容且扩容后仍被思考耗尽，关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
             );
@@ -1095,6 +1116,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       emit('empty', { reason: lastEmptyError?.message || '模型多次返回空内容' });
       throw lastEmptyError ?? new Error(`模型返回空内容: model=${modelName}, scenario=${request.scenario || 'daily'}`);
     } catch (err: any) {
+      assertGenerationActive();
       const msg = err?.message || String(err);
       // 网络错误发生在拿到创作结果之前，可补发一次；重复网络错误交还调用方，
       // 不再与 SDK 和业务节点叠加成多轮隐式运行。
@@ -1125,7 +1147,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
               if (next === null || truncationExpansions >= MAX_TRUNCATION_EXPANSIONS) {
                 // 与主循环同一口径（防复发）：硬顶 + 一个字都没吐 = 推理想光了配额，
                 // 先走「关闭思考补发」这条既有故障恢复通道，再判死。
-                if (!thinkingDisabledAttempted && (!settled.content.trim() || singleStructuredUnit)) {
+                if (!preserveThinking && !thinkingDisabledAttempted && (!settled.content.trim() || singleStructuredUnit)) {
                   this.logger.warn(
                     `网络重试后最小结构化单元或空输出在硬顶截断，同模型关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
                   );
@@ -1136,10 +1158,10 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
                     return __respNetNoThink;
                   }
                 }
-                throw structuredTruncationError(
-                  `结构化生成因输出长度被截断（网络重试+扩容至 ${currentMaxTokens} 仍不足）`,
+                throw Object.assign(structuredTruncationError(
+                  `结构化生成因输出长度被截断（网络恢复后当前额度 ${currentMaxTokens} 已达上限）`,
                   { maxTokens: currentMaxTokens, scenario: request.scenario, model: modelName },
-                );
+                ), {generatedContent: settled.content});
               }
               this.logger.warn(
                 `网络重试后输出被长度截断（或思考耗尽预算），同模型扩容补发（不换模型/非降级）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens ${currentMaxTokens}→${next}`,
@@ -1248,11 +1270,14 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     return userKey?.baseUrl || this.getFirstEnv(runtimeModel.baseUrlNames) || undefined;
   }
 
-  /** 推理强度只接受用户显式配置；系统不自行降低已选模型的推理等级。 */
-  private resolveReasoningEffort(_scenario?: string): 'low' | 'medium' | 'high' | undefined {
-    if (process.env.LLM_REASONING_EFFORT) {
-      const v = process.env.LLM_REASONING_EFFORT as string;
-      return v === 'low' || v === 'medium' || v === 'high' ? v : undefined;
+  /** 仅接受显式思考强度配置；单组对照不授权默认降低质量相关计算。 */
+  private resolveReasoningEffort(scenario?: string, stepKey?: string): 'low' | 'medium' | 'high' | undefined {
+    const configured = process.env.LLM_REASONING_EFFORT;
+    if (configured) return configured === 'low' || configured === 'medium' || configured === 'high' ? configured : undefined;
+    if (scenario === 'idea_generate' && stepKey === 'idea_presentation_review') {
+      const reviewOverride = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
+      if (reviewOverride) return reviewOverride === 'low' || reviewOverride === 'medium' || reviewOverride === 'high' ? reviewOverride : undefined;
+      return undefined;
     }
     return undefined;
   }
@@ -1704,3 +1729,4 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     return false;
   }
 }
+

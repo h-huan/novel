@@ -1,3 +1,4 @@
+import { assertGenerationActive } from '../common/generation-cancellation';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { jsonrepair } from 'jsonrepair';
@@ -59,6 +60,7 @@ export class IdempotentRealLLMService extends RealLLMService {
   }
 
   override async generate(request: LLMRequest): Promise<LLMResponse> {
+    assertGenerationActive();
     const stepKey = String(request.metrics?.stepKey || '').trim();
     if (stepKey === AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP) {
       throw new Error('自动整章大纲对齐重写已禁用：保留当前稿，只允许有逐字证据的局部事实/硬红线修复');
@@ -189,6 +191,7 @@ export class IdempotentRealLLMService extends RealLLMService {
       try {
         return await super.generate(request);
       } catch (error) {
+        assertGenerationActive();
         if (!this.isTransientNetworkFailure(error) || recoveryAttempt >= retries) {
           throw error;
         }

@@ -12,7 +12,7 @@ const ImportExportPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [activeTab, setActiveTab] = useState<'import' | 'export' | 'publish'>('import');
   const [content, setContent] = useState('');
-  const [format, setFormat] = useState('markdown');
+  const [format, setFormat] = useState('txt');
   const [exportResult, setExportResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [importId, setImportId] = useState<string | null>(null);
@@ -40,26 +40,43 @@ const ImportExportPage: React.FC = () => {
     if (!content) return;
     setLoading(true);
     try {
-      const deconstructRes = await api.post('/chain/ai-deconstruct', { content });
-      const deconstructData = deconstructRes.data as any;
+
       const res = await api.post('/import-export/import/text', { projectId: id, content, fileName: 'import.txt' });
-      const resData = res.data as any;
+      const resData = (res.data ?? res) as any;
       setExportResult({
         import: resData,
-        deconstruction: deconstructData.deconstruction,
+        message: `已识别 ${resData.result?.chapters?.length || 0} 章。正文仅解析预览，未覆盖项目内容。`,
       });
-      // 【防复发】这里曾经调用 POST /chain/import-optimize 并把返回的 optimizations 一起展示。
-      // 该端点无视入参内容，固定返回 3 条编造优化项（还引用了并不存在的角色「陆川」），已删除。
-      // 导入后的真实分析由 POST /chain/ai-deconstruct 承担，不要再引入与入参无关的「优化建议」。
+      // Chapter recognition is deterministic; no model call is needed to read an exported TXT.
       if (resData?.projectId) setImportId(resData.projectId);
     } catch (err: any) { setExportResult({ error: err.message }); }
     setLoading(false);
   }, [id, content]);
 
+  const downloadFile = (fileName: string, content: string | Uint8Array, mimeType = 'text/plain;charset=utf-8') => {
+    const blob = new Blob([content as BlobPart], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const handleExport = useCallback(async () => {
     setLoading(true);
     try {
-      if (format === 'novel') {
+      if (format === 'txt') {
+        if (!id) throw new Error('缺少项目编号，请重新打开项目');
+        const res = await api.get<any>(`/import-export/projects/${id}/txt`);
+        const data = res.data ?? res;
+        if (!data.files?.length) throw new Error('暂无已保存正文可导出');
+        if (data.files.length === 1) downloadFile(data.files[0].fileName, data.files[0].content);
+        else {
+          const bytes = Uint8Array.from(atob(data.archiveBase64), (char) => char.charCodeAt(0));
+          downloadFile(data.archiveName, bytes, 'application/zip');
+        }
+        setExportResult({ ...data, message: `已导出 ${data.chapterCount} 章，${data.files.length} 份 TXT（每份最多50章）${data.skippedEmptyChapters ? `；跳过 ${data.skippedEmptyChapters} 个空章节` : ''}` });
+      } else if (format === 'novel') {
         // .novel 项目包导出 - 先获取真实数据
         setLoading(true);
         try {
@@ -110,8 +127,8 @@ const ImportExportPage: React.FC = () => {
           setExportResult({ error: e.message || '导出失败' });
         }
         setLoading(false);
-      } else if (format === 'txt' || format === 'markdown') {
-        const ext = format === 'markdown' ? 'md' : 'txt';
+      } else if (format === 'markdown') {
+        const ext = 'md';
         const blob = new Blob([content || ''], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -129,6 +146,12 @@ const ImportExportPage: React.FC = () => {
   const handlePreview = useCallback(async () => {
     setLoading(true);
     try {
+      if (format === 'txt') {
+        const res = await api.get<any>(`/import-export/projects/${id}/txt`);
+        setExportResult({ ...(res.data ?? res), message: '正文导出预览（每份最多50章）' });
+        setLoading(false);
+        return;
+      }
       const res = await api.post('/import-export/export/preview', { projectId: id, format, content });
       setExportResult(res.data);
     } catch (err: any) { setExportResult({ error: err.message }); }
@@ -254,7 +277,7 @@ const ImportExportPage: React.FC = () => {
       {/* 导入 */}
       {activeTab === 'import' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)', fontWeight: 500 }}>粘贴文本或上传文件，AI 自动拆解为章节/角色/世界观/伏笔</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-soft)', fontWeight: 500 }}>粘贴文本或上传 TXT/Markdown，识别章节标题并预览正文</p>
           <textarea value={content} onChange={e => setContent(e.target.value)}
             style={{
               width: '100%', padding: '16px', backgroundColor: 'rgba(0,0,0,0.25)', border: '2px dashed rgba(255,255,255,0.12)',
@@ -264,9 +287,9 @@ const ImportExportPage: React.FC = () => {
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={handleImportText} disabled={loading || !content}
               style={{ padding: '10px 28px', backgroundColor: 'var(--color-accent)', border: 'none', borderRadius: '8px', color: 'var(--color-white)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: loading || !content ? 0.5 : 1 }}>
-              {loading ? '⏳ AI拆解中...' : '📥 AI智能拆解导入'}
+              {loading ? '识别中...' : '📥 识别导入章节'}
             </button>
-            <input type="file" accept=".txt,.md,.docx,.epub" id="fileUpload"
+            <input type="file" accept=".txt,.md" id="fileUpload"
               style={{ display: 'none' }}
               onChange={async (e) => {
                 const file = e.target.files?.[0];
@@ -309,16 +332,22 @@ const ImportExportPage: React.FC = () => {
           </div>
           {exportResult && (
             <div style={{ padding: '12px', backgroundColor: exportResult.error ? 'rgba(231,76,60,0.1)' : 'rgba(46,204,113,0.08)', borderRadius: '8px', fontSize: '14px', color: exportResult.error ? 'var(--color-danger)' : 'var(--color-success)' }}>
-              {exportResult.error || `✅ ${exportResult.message || '导入完成！AI 已拆解为章节、角色和世界观'}`}
+              {exportResult.error || `✅ ${exportResult.message || '章节识别完成'}`}
             </div>
           )}
+          {exportResult?.import?.result?.chapters?.map((chapter: any) => (
+            <details key={`${chapter.index}-${chapter.title}`}>
+              <summary>{chapter.title} · {chapter.wordCount} 字</summary>
+              <div style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}>{chapter.content}</div>
+            </details>
+          ))}
         </div>
       )}
 
       {/* 导出 */}
       {activeTab === 'export' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-dim)' }}>选择格式和内容，支持Markdown/TXT/EPUB/PDF/DOCX/分镜/剧本</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--color-text-dim)' }}>TXT 直接读取已保存正文，每50章一份，保留章节标题；多份打包为 ZIP，可解压后逐份导入。</p>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {['markdown', 'txt', 'novel', 'epub', 'pdf', 'docx', 'script', 'storyboard'].map(f => (
               <button key={f} onClick={() => { setFormat(f); setExportResult(null); }}
@@ -330,12 +359,12 @@ const ImportExportPage: React.FC = () => {
                 }}>{f === 'novel' ? '📦 .novel' : f}</button>
             ))}
           </div>
-          <textarea value={content} onChange={e => setContent(e.target.value)}
+          {format !== 'txt' && <textarea value={content} onChange={e => setContent(e.target.value)}
             style={{
               width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
               borderRadius: '8px', color: 'var(--color-text-primary)', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical',
               outline: 'none', lineHeight: 1.6, boxSizing: 'border-box', minHeight: '150px',
-            }} placeholder="输入要导出的内容..." />
+            }} placeholder="输入要导出的内容..." />}
 
           {/* 短剧剧本预览 */}
           {format === 'script' && content && (
@@ -388,8 +417,18 @@ const ImportExportPage: React.FC = () => {
             </button>
           </div>
 
+          {exportResult?.error && <div role="alert" style={{ color: 'var(--color-danger)' }}>{exportResult.error}</div>}
+          {exportResult?.message && <p role="status">{exportResult.message}</p>}
+          {exportResult?.files?.map((file: any) => (
+            <details key={file.fileName}>
+              <summary>{file.fileName} · {file.chapterCount} 章</summary>
+              <button onClick={() => downloadFile(file.fileName, file.content)}>下载 {file.fileName}</button>
+              <div style={{ whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto' }}>{file.content}</div>
+            </details>
+          ))}
+
           {/* 导出预览 (K8) */}
-          {exportResult && (
+          {exportResult && format !== 'txt' && (
             <div style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', overflow: 'hidden' }}>
               <div style={{
                 padding: '8px 12px', backgroundColor: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.06)',

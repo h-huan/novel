@@ -131,7 +131,7 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
       const res = await api.get<any>(`/projects/${projectId}/chapters`);
       const payload = unwrapApiPayload<unknown>(res);
       const list = Array.isArray(payload) ? payload : [];
-      const chapters = Array.isArray(list) ? list.map(mapServerChapter) : [];
+      const chapters = Array.isArray(list) ? list.map((raw) => mapServerChapter({ ...raw, projectId: raw.projectId || projectId })) : [];
       set({ chapters, loading: false });
     } catch {
       set({ loading: false });
@@ -160,6 +160,7 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
   updateChapter: async (id: string, data: UpdateChapterDto) => {
     const chapter = get().chapters.find((c) => c.id === id);
     if (!chapter) throw new Error('未找到要更新的章节，请先重新选择章节');
+    if (!chapter.projectId) throw new Error('章节缺少项目编号，请刷新后重新选择章节');
     try {
       const res = await api.put<any>(`/projects/${chapter.projectId}/chapters/${id}`, data);
       const updated = mapServerChapter(unwrapApiPayload(res));

@@ -3,12 +3,12 @@ import { repairIssueFamily } from './adaptive-repair';
 import { causalEvidenceAnchors } from '../modules/writing-quality/causal-review';
 const family = (issue: string) => /对白|对话占比|dialogueRatio/i.test(issue) ? 'platform_dialogue'
   : /开篇|钩子|openingHook/i.test(issue) ? 'reading_promise' : repairIssueFamily(issue);
-export function upstreamRepairTrigger(history: readonly (readonly string[])[], current: readonly string[]): string | null {
+export function upstreamRepairTrigger(history: readonly (readonly string[])[], current: readonly string[], progressConfirmed = false): string | null {
   if (!current.length || !history.length) return null;
   const previous = history.at(-1)!;
   if (new Set(current).size > new Set(previous).size) return '问题集合增长';
   const oldFamilies = new Set(history.flatMap(issues => issues.map(family)));
-  if (history.length >= UPSTREAM_REPAIR_ROUTING_LIMITS.sameFamilyAfterAttempts && current.some(issue => oldFamilies.has(family(issue)))) return '同类缺陷修复后仍存在';
+  if (!progressConfirmed && history.length >= UPSTREAM_REPAIR_ROUTING_LIMITS.sameFamilyAfterAttempts && current.some(issue => oldFamilies.has(family(issue)))) return '同类缺陷修复后仍存在';
   if (history.length >= UPSTREAM_REPAIR_ROUTING_LIMITS.maxLocalAttemptsBeforeDiagnosis) return '连续局部修复';
   return null;
 }

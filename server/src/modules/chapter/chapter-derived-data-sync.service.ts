@@ -1,3 +1,5 @@
+import { GenerationMetricsService } from '../generation-metrics/generation-metrics.service';
+import { isProseLayoutOnlyChange } from './prose-layout-change';
 import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
@@ -348,7 +350,7 @@ export class ChapterDerivedDataSyncService {
     const timeMarks = input.afterContent.match(/(?:第[一二三四五六七八九十\d]+[天日年月]|\d{4}年\d{1,2}月\d{1,2}日)/g) || [];
     const validatedRun = this.validatedTimelineRun(input);
     if (validatedRun) this.retireDuplicateTimeProbes(input, checksum, validatedRun);
-    if (!validatedRun && timeMarks.length > 1 && new Set(timeMarks).size !== timeMarks.length) {
+    if (!isProseLayoutOnlyChange(input.beforeContent, input.afterContent) && !validatedRun && timeMarks.length > 1 && new Set(timeMarks).size !== timeMarks.length) {
       issues.push({ type: 'time_order_risk', requirement: '时间标记顺序应保持一致', old: '', next: timeMarks.join(' / '), severity: 'medium', block: false });
     }
     return this.persistReviews(input, checksum, 'timeline', issues);
@@ -421,6 +423,26 @@ export class ChapterDerivedDataSyncService {
         AND chapter_index=? AND stage='chapter' AND status='success' AND gate_status='passed' AND output_text=?`)
         .get(proof.runId, input.projectId, chapter.chapter_index, input.afterContent) : null;
     if (run) return { status: 'completed', detail: 'Exact generated body passed current outline alignment before Canon commit', issueCount: 0, blockingCount: 0, reviewIds: [], stateItemIds: [] };
+    // A real manual review is also a durable result. Reuse only the same body,
+    // exact outline and still-current provider-run provenance; never a client pass flag.
+    const manual = db.prepare(`SELECT id,payload FROM chapter_continuity_reviews
+      WHERE project_id=? AND chapter_id=? AND content_checksum=? AND review_type='outline'
+        AND issue_type='manual_semantic_alignment_review' AND status='resolved'
+      ORDER BY updated_at DESC LIMIT 1`).get(input.projectId, input.chapterId, checksum) as any;
+    if (manual) {
+      try {
+        const receipt = JSON.parse(manual.payload || '{}');
+        const report = receipt.report;
+        const metrics = this.moduleRef.get(GenerationMetricsService, { strict: false });
+        if (receipt.bodyHash === checksum && receipt.outlineHash === fingerprint
+          && report?.evaluationStatus === 'evaluated' && report.pass === true
+          && ['missing','contradictions','sourceConflicts'].every(key => Array.isArray(report[key]) && report[key].length === 0)
+          && Array.isArray(receipt.runs) && receipt.runs.length > 0
+          && receipt.runs.every((row: any) => row.status === 'success' && metrics.runIsCurrent(row.id, input.projectId))) {
+          return { status: 'completed', detail: 'Current saved body retained its real manual semantic review; no duplicate model call', issueCount: 0, blockingCount: 0, reviewIds: [manual.id], stateItemIds: [] };
+        }
+      } catch { /* Missing/stale provenance keeps the ordinary pending state. */ }
+    }
     return { status: 'pending', detail: 'Semantic outline review required; plan prose and metadata are not literal body requirements', issueCount: 0, blockingCount: 0, reviewIds: [], stateItemIds: [] };
   }
 
@@ -478,6 +500,13 @@ export class ChapterDerivedDataSyncService {
         checksum: contentChecksum,
       };
     }
+    if (current?.status === 'current' && current.summary?.trim()
+      && current.content_checksum === this.checksum(input.beforeContent)
+      && isProseLayoutOnlyChange(input.beforeContent, input.afterContent)) {
+      db.prepare('UPDATE chapter_summaries SET content_checksum=?,updated_at=? WHERE id=?')
+        .run(contentChecksum, new Date().toISOString(), current.id);
+      return { status: 'completed', detail: 'Existing summary retained for verified formatting-only change; no model call', entityId: current.id, checksum: contentChecksum };
+    }
     if (current) {
       db.prepare(`UPDATE chapter_summaries SET status = 'stale', updated_at = ? WHERE id = ?`)
         .run(new Date().toISOString(), current.id);
@@ -506,6 +535,7 @@ export class ChapterDerivedDataSyncService {
         // 埋点必须显式带 projectId：summary 不在创建请求上下文内，靠 AsyncLocalStorage 兜底会丢失。
         metrics: { projectId: input.projectId, stepKey: 'summary' },
       });
+      if (response.finishReason === 'length') throw new Error('Summary output was truncated; retained old summary as stale without retry');
       const summary = response.content.trim();
       if (!summary) throw new Error('Summary model returned empty content');
       const now = new Date().toISOString();
@@ -749,6 +779,7 @@ export class ChapterDerivedDataSyncService {
   }
 
   private async runConflictReview(input: SyncInput, warnings: string[]): Promise<DerivedSyncStep> {
+    if (isProseLayoutOnlyChange(input.beforeContent, input.afterContent)) return { status: 'skipped', detail: 'Formatting introduces no story changes; existing conflict reports retained without rescanning' };
     try {
       const db = this.database.getDb();
       const chapter = db.prepare('SELECT chapter_index FROM chapters WHERE id = ? AND project_id = ?').get(input.chapterId, input.projectId) as any;

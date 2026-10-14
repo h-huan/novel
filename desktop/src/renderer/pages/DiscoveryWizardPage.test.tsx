@@ -88,3 +88,19 @@ describe('发现结果必须对应发起时的选择', () => {
       [{ storyType: 'short_story', targetPlatform: 'fanqie' }])).toBe(false);
   });
 });
+
+it('allows only explicitly marked qualified partial results without weakening the complete-batch contract',()=>{
+ const state={...useDiscoveryStore.getState(),storyType:'short_story' as const,targetPlatform:'fanqie',ideaCount:3};
+ const signature=discoverySignature(state),one={storyType:'short_story',targetPlatform:'fanqie'};
+ expect(discoveryResponseMatchesSelection(signature,state,[one])).toBe(false);
+ expect(discoveryResponseMatchesSelection(signature,state,[one],true)).toBe(true);
+ expect(discoveryResponseMatchesSelection(signature,state,[],true)).toBe(false);
+ expect(discoveryResponseMatchesSelection(signature,state,[one,one,one,one],true)).toBe(false);
+ expect(discoveryResponseMatchesSelection(signature,state,[{...one,targetPlatform:'other'}],true)).toBe(false);
+});
+
+it('shows saved partial selection reasons without another discovery request',async()=>{
+ const {discoveryShortfallReasons}=await import('./DiscoveryWizardPage');
+ expect(discoveryShortfallReasons([{ideaDiscoveryAudit:{selectionAudit:{reasons:[{reason:'核心动机被改写'}]}}}])).toEqual(['核心动机被改写']);
+ expect(discoveryShortfallReasons([])).toEqual([]);
+});

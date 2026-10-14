@@ -26,7 +26,19 @@ export function targetIdeaReviews(value: any, cards: readonly any[], references:
   if (!Array.isArray(value?.reviews)) return value;
   const targets = new Set(cards.map(card => card.title));
   const referenceTitles = new Set(references.map(card => card.title).filter(title => !targets.has(title)));
-  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)) };
+  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)).map((row:any)=>({
+    ...row, issues: Array.isArray(row?.issues) ? row.issues.map((issue:any)=> {
+      if (typeof issue==='string') return issue;
+      const criteria=['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'];
+      const criterion = issue?.criterion ?? issue?.judgment;
+      // Only a recognized structured reason is converted. Verdicts and evidence stay unchanged.
+      if (issue && typeof issue==='object' && !Array.isArray(issue) && typeof issue.reason==='string' && issue.reason.trim()
+        && criteria.includes(criterion) && !(issue.criterion !== undefined && issue.judgment !== undefined && issue.criterion !== issue.judgment)
+        && (issue.field === undefined || (typeof issue.field==='string' && issue.field.trim())))
+        return issue.field ? `${issue.field}（${criterion}）：${issue.reason}` : `${criterion}：${issue.reason}`;
+      return issue;
+    }) : row?.issues,
+  })) };
 }
 
 /** Bind an independent semantic judgement to exactly the cards actually reviewed. */

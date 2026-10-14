@@ -97,3 +97,18 @@ it('preserves separate complete historical evidence across repeated assembly wit
  expect(all).toHaveBeenCalledWith('p',2,'');
  expect(c.previousChapterReviewContext('p',3,second)).toBe(second);
 });
+
+
+it('lists only same-chapter retained prose, marks length limits and protects saved bodies',async()=>{
+ const {ChainController}=await import('./chain.controller');
+ const c=Object.create(ChainController.prototype) as any;
+ let chapter:any={chapter_index:3,content:''};
+ const base={project_id:'p',chapter_index:3,stage:'chapter',scenario:'writing',status:'failed',gate_status:'blocked'};
+ const rows=[{...base,id:'long',output_text:'字'.repeat(5001)},{...base,id:'usable',output_text:'字'.repeat(4000)},{...base,id:'json',output_text:'{"pass":true}'},{...base,id:'foreign',project_id:'other',output_text:'字'.repeat(4000)}];
+ c.db={getDb:()=>({prepare:(sql:string)=>({get:()=>sql.includes('FROM chapters')?chapter:{settings:'{}'},all:(projectId:string,index:number)=>{expect(projectId).toBe('p');expect(index).toBe(3);return rows;}})})};
+ const listed=c.retainedChapterReviewCandidates('p','chapter');
+ expect(listed.items.map((x:any)=>[x.runId,x.words,x.canReview])).toEqual([['long',5001,false],['usable',4000,true]]);
+ expect(listed.items.every((x:any)=>!('output_text' in x))).toBe(true);
+ chapter={chapter_index:3,content:'已保存的正文'};expect(c.retainedChapterReviewCandidates('p','chapter')).toEqual({items:[]});
+ chapter=undefined;expect(()=>c.retainedChapterReviewCandidates('p','missing')).toThrow('章节不存在');
+});

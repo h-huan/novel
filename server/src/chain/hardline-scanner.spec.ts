@@ -311,9 +311,9 @@ describe('normalizeProseLayout 确定性排版规整（不增删正文）', () =
     expect(normalizeProseLayout(`${a}\n\n\n\n${b}`)).toBe(`${a}\n\n${b}`);
   });
 
-  it('规则26b：连续叙述碎片段合并（消除逐句换行）', () => {
+  it('记录标签与叙述的边界不因短段合并而消失', () => {
     expect(normalizeProseLayout('翻开第一页。\n\n作者：阿遥。\n\n第二页。', fanqie))
-      .toBe('翻开第一页。作者：阿遥。第二页。');
+      .toBe('翻开第一页。\n\n作者：阿遥。\n\n第二页。');
   });
 
   it('对话段一律不动（引号段不参与合并）', () => {
@@ -582,3 +582,8 @@ describe('system workflow rule governance regressions', () => {
 });
 
 it('同构形态保留风险定位，普通资料清单不直接阻断',()=>{const hits=detectForbiddenTells('他截了三张图，一张评价总页，一张倒计时，一张账号信息。');expect(hits.some(f=>f.ruleId==='53-same-structure-parallel')).toBe(true);expect(isLanguageHardline('53-same-structure-parallel')).toBe(false);});
+
+it('does not merge explicit time or information boundaries into neighboring short narration',()=>{
+ const text='他终于放下手机。\n\n次日清晨他回到公司。\n\n【群通知】\n\n公司要求全员参会。';
+ expect(normalizeProseLayout(text,{platform:'fanqie',storyType:'short_story'})).toBe(text);
+});

@@ -53,6 +53,38 @@ export class ExportEngineService {
     private readonly foreshadowingRepo: ForeshadowingRepository,
   ) {}
 
+  /** Export persisted prose in reading order; never generate or rewrite content. */
+  exportProjectTxt(projectId: string) {
+    if (!this.projectRepo.findById(projectId)) throw new BadRequestException('项目不存在');
+    const rows = this.chapterRepo.findByProjectId(projectId);
+    const chapters = rows.map((row, i) => ({
+      index: i + 1, title: row.title, content: row.content || '',
+    })).filter((chapter) => chapter.content.trim());
+    if (!chapters.length) throw new BadRequestException('暂无已保存正文可导出');
+    const files: Array<{ fileName: string; content: string; chapterCount: number }> = [];
+    for (let i = 0; i < chapters.length; i += 50) {
+      const batch = chapters.slice(i, i + 50);
+      files.push({
+        fileName: `正文${batch[0].index}-${batch[batch.length - 1].index}.txt`,
+        chapterCount: batch.length,
+        content: batch.map((chapter) => {
+          const title = chapter.title.replace(/^第[零一二三四五六七八九十百千万\d]+[章节回]\s*/, '').replace(/[\r\n]+/g, ' ').trim();
+          const body = chapter.content.split(/\r\n|\r|\n/).filter((line) => line.trim().length > 0).join('\n');
+          return `【第${chapter.index}章${title ? ' ' + title : ''}】\n\n${body}`;
+        }).join('\n\n\n'),
+      });
+    }
+    let archiveBase64: string | undefined;
+    if (files.length > 1) {
+      const AdmZip = require('adm-zip');
+      const zip = new AdmZip();
+      for (const file of files) zip.addFile(file.fileName, Buffer.from(file.content, 'utf8'));
+      archiveBase64 = zip.toBuffer().toString('base64');
+    }
+    return { files, chapterCount: chapters.length, skippedEmptyChapters: rows.length - chapters.length,
+      archiveBase64, archiveName: `正文${chapters[0].index}-${chapters[chapters.length - 1].index}.zip` };
+  }
+
   /**
    * 导出为指定格式
    */

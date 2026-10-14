@@ -26,6 +26,11 @@ export function resolveIdeaReviewEvidence(value: any, cards: readonly any[]): an
     for(const field of ['storyEvidence','payoffEvidence','platformEvidence']) {
       if(row[field+'Ref']!==undefined) next[field]=resolve(row,row[field+'Ref'],true);
     }
+    if (row.payoffBridge && typeof row.payoffBridge === 'object') {
+      next.payoffBridge = { ...row.payoffBridge };
+      for (const field of ['actionEvidence', 'resultEvidence', 'conditionEvidence'])
+        next.payoffBridge[field] = resolve(row, row.payoffBridge[field + 'Ref']);
+    }
     if(row.readerGoals && typeof row.readerGoals==='object') {
       next.readerGoals={...row.readerGoals};
       for(const key of ['click','completion','sharing','immersion']) {
@@ -51,6 +56,37 @@ export function ideaReviewEvidenceReferenceIssues(value: any, cards: readonly an
     };
     for(const field of ['storyEvidence','payoffEvidence','platformEvidence']) check(row[field+'Ref'],field+'Ref',true);
     for(const key of ['click','completion','sharing','immersion']) check(row.readerGoals?.[key]?.evidenceRef,'readerGoals.'+key+'.evidenceRef');
+  }
+  return issues;
+}
+
+/** A claimed resolution is not its own mechanism. Missing conditions remain a valid GAP. */
+export function ideaPayoffBridgeIssues(value: any, cards: readonly any[]): string[] {
+  if (!Array.isArray(value?.reviews)) return [];
+  const catalog = ideaReviewEvidenceCatalog(cards);
+  const issues: string[] = [];
+  for (const row of value.reviews) {
+    const bridge = row?.payoffBridge;
+    const prefix = `第${row?.position ?? '?'}张题材审查：payoffBridge`;
+    if (!bridge || !['supported', 'gap'].includes(bridge.status)
+      || typeof bridge.reason !== 'string' || bridge.reason.trim().length < 8) {
+      issues.push(prefix + '须返回行动、结果、成立条件及supported或gap结论');
+      continue;
+    }
+    const own = (ref: unknown) => catalog.find(entry => entry.position === row.position && entry.id === ref);
+    const action = own(bridge.actionEvidenceRef), result = own(bridge.resultEvidenceRef);
+    const condition = own(bridge.conditionEvidenceRef);
+    const narrative = (entry: IdeaEvidenceEntry | undefined) => entry && entry.field !== 'title';
+    if (!narrative(action)) issues.push(prefix + '.actionEvidenceRef须引用本卡实际行动');
+    if (!result || !(result.field === 'ending' || /^scopeBreakdown\[\d+\]\.outcome$/.test(result.field)))
+      issues.push(prefix + '.resultEvidenceRef须引用本卡结局或阶段兑现结果');
+    if (bridge.status === 'supported' && (!narrative(condition) || condition?.field === 'ending'
+      || condition?.id === result?.id || condition?.quote === result?.quote))
+      issues.push(prefix + '.conditionEvidenceRef须引用结果断言之外的既有成立条件，不能用结局自证');
+    if (bridge.status === 'gap' && bridge.conditionEvidenceRef !== undefined && !narrative(condition))
+      issues.push(prefix + '.conditionEvidenceRef不能引用其它卡或虚构字段');
+    if (row.payoffCredible !== (bridge.status === 'supported'))
+      issues.push(prefix + '结论须与payoffCredible一致，缺少必要条件时必须拒绝兑现');
   }
   return issues;
 }

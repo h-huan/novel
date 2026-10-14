@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { getBaseUrl, initializeApiBaseUrl } from '../lib/api';
+import { api, getBaseUrl, initializeApiBaseUrl } from '../lib/api';
 import { getGenerationRecovery } from '../lib/generationRecovery';
 import { openProject } from '../lib/openProject';
 import { useProjectStore } from '../stores/projectStore';
 
-type Phase = 'connecting' | 'running' | 'verifying' | 'done' | 'failed';
-type ProgressEvent = { type?: string; step?: string; percent?: number; message?: string; status?: string };
+type Phase = 'connecting' | 'running' | 'verifying' | 'done' | 'failed' | 'cancelled';
+type ProgressEvent = { type?: string; step?: string; percent?: number; message?: string; status?: string; cancelled?: boolean };
 
 /** 恢复进度与首次创建共用服务端 SSE；这里曾缺少恢复专用页面，按钮会等待整轮生成而不给用户任何反馈。 */
 const RecoveryProgressPage: React.FC = () => {
@@ -20,6 +20,15 @@ const RecoveryProgressPage: React.FC = () => {
   const [message, setMessage] = useState('正在连接生成进度…');
   const [events, setEvents] = useState<string[]>([]);
   const [connection, setConnection] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const cancelGeneration = async () => {
+    setCancelling(true);
+    try {
+      const response = await api.post<{message: string}>(`/chain/cancel-creation/${encodeURIComponent(projectId)}`, {}, 30_000);
+      setMessage(response.data.message);
+    } catch (error) { setMessage(error instanceof Error ? error.message : '取消请求未送达，请重试'); }
+    finally { setCancelling(false); }
+  };
 
   useEffect(() => {
     if (!projectId) return;
@@ -74,6 +83,13 @@ const RecoveryProgressPage: React.FC = () => {
             source?.close();
             if (auditTimer) clearInterval(auditTimer);
             void fetchProjects();
+          } else if (event.type === 'error' && event.cancelled) {
+            terminalSeen = true;
+            setPhase('cancelled');
+            setConnection('生成已停止，已完成成果保留');
+            source?.close();
+            if (auditTimer) clearInterval(auditTimer);
+            void fetchProjects();
           } else if (event.type === 'error') {
             terminalSeen = true;
             setPhase('verifying');
@@ -109,12 +125,12 @@ const RecoveryProgressPage: React.FC = () => {
     <main className="mx-auto w-full max-w-3xl overflow-y-auto px-6 py-8 text-text-primary" aria-live="polite">
       <button type="button" onClick={() => navigate('/projects')} className="mb-8 text-sm text-text-secondary hover:text-text-primary">← 返回我的项目</button>
       <div className="mb-2 text-xs font-semibold tracking-widest text-accent">项目创建</div>
-      <h1 className="text-2xl font-bold">{working ? '正在重新生成创作资料' : phase === 'done' ? '创作资料生成完成' : '重新生成未完成'}</h1>
+      <h1 className="text-2xl font-bold">{working ? '正在重新生成创作资料' : phase === 'done' ? '创作资料生成完成' : phase === 'cancelled' ? '已取消生成' : '重新生成未完成'}</h1>
       <p className="mt-2 text-sm text-text-secondary">{title}</p>
 
       <section className="mt-8 rounded-xl border border-border bg-bg-secondary p-6">
         <div className="flex items-center justify-between gap-4">
-          <strong className="text-base">{phase === 'verifying' ? '确认失败状态' : phase === 'failed' ? '生成失败' : phase === 'done' ? '已完成' : '生成进度'}</strong>
+          <strong className="text-base">{phase === 'verifying' ? '确认失败状态' : phase === 'cancelled' ? '已取消' : phase === 'failed' ? '生成失败' : phase === 'done' ? '已完成' : '生成进度'}</strong>
           <span className="text-xl font-semibold tabular-nums">{percent}%</span>
         </div>
         <div role="progressbar" aria-label="重新生成进度" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} className="mt-4 h-2 overflow-hidden rounded-full bg-bg-primary">
@@ -124,6 +140,7 @@ const RecoveryProgressPage: React.FC = () => {
         {working && <p className="mt-3 text-xs text-text-secondary">{connection || '当前步骤完成后，进度会继续更新。'} 可以离开此页，稍后从项目列表返回查看。</p>}
       </section>
 
+      {working && <button type="button" disabled={cancelling} onClick={() => void cancelGeneration()} className="mt-5 rounded-lg border border-border px-5 py-3 text-sm">{cancelling ? '正在取消…' : '取消生成，保留已完成成果'}</button>}
       {events.length > 0 && <section className="mt-6">
         <h2 className="mb-3 text-sm font-semibold">执行记录</h2>
         <ol className="space-y-2 border-l border-border pl-5 text-sm text-text-secondary">
@@ -131,7 +148,7 @@ const RecoveryProgressPage: React.FC = () => {
         </ol>
       </section>}
       {phase === 'done' && <button type="button" onClick={() => void openProject(projectId, title, navigate)} className="mt-8 rounded-lg bg-accent px-5 py-3 font-semibold text-white">进入项目</button>}
-      {phase === 'failed' && <button type="button" onClick={() => navigate('/projects')} className="mt-8 rounded-lg border border-border px-5 py-3 text-sm">返回项目列表查看诊断</button>}
+      {(phase === 'failed' || phase === 'cancelled') && <button type="button" onClick={() => navigate('/projects')} className="mt-8 rounded-lg border border-border px-5 py-3 text-sm">返回项目列表查看诊断</button>}
     </main>
   );
 };

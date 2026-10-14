@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
-import { normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { retainReviewedPremises, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -55,6 +55,7 @@ describe('premise selection before identity lock', () => {
       expect(prompt).toContain('不生成新pool');
       expect(options.validate({ replacements: [{ replacesPremiseId: 'B', premise: premise('NEW') }] })).toBe(false);
       expect(prompt).toContain('服务器保护的正常项');
+      expect(prompt).toContain('修订须复查全部筛选字段的同一因果事实');
       expect(prompt).toContain('replacements恰好1项');
       return { data: { replacements: [{ replacesPremiseId: 'B', premise: premise('C') }] } };
     });
@@ -63,12 +64,17 @@ describe('premise selection before identity lock', () => {
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
     expect(result.selectionAudit.reselectionAttempted).toBe(true);
   });
-  it('blocks unresolved overlap after one reselection instead of replenishing weak cards', async () => {
+  it('isolates a repaired duplicate and retains the original unaffected choice after one reselection', async () => {
     const c = Object.create(ChainController.prototype) as any;
-    c.reviewPremiseSelection = vi.fn().mockResolvedValue(failure);
+    const finalFailure = {...failure, issues:[{...failure.issues[0],premiseId:'A',referencePremiseId:'C'}]};
+    c.reviewPremiseSelection = vi.fn().mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValueOnce(failure)
+      .mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValueOnce(finalFailure);
     c.llmCallWithRetry = vi.fn().mockResolvedValue({ data: { replacements: [{ replacesPremiseId: 'B', premise: premise('C') }] } });
     c.generationMetrics = {beginRun: vi.fn(()=>({id:'gate'})),finishRun:vi.fn()};
-    await expect(c.reconcilePremiseSelection(selection(), 2, 3, ['悬疑'], '')).rejects.toThrow('仍未通过');
+    const result = await c.reconcilePremiseSelection(selection(), 2, 3, ['悬疑'], '');
+    expect(result.selected).toEqual([selection().selected[0]]);
+    expect(result.selectionAudit).toMatchObject({partial:true,excludedPremiseIds:['C'],completeCardGatePending:true});
+    expect(result.selectionAudit.finalReview.passed).toBe(false);
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
     expect(c.generationMetrics.finishRun).toHaveBeenCalledWith('gate','failed',expect.any(Number),expect.stringContaining('premise_selection_rejected'),expect.stringContaining('仍未通过'));
   });
@@ -81,12 +87,13 @@ describe('premise selection before identity lock', () => {
     const fixed={...premise('A'),activeChoice:'恢复原池行动方向而非错误展开'};
     c.llmCallWithRetry=vi.fn(async (_label:string,prompt:string)=>{
       expect(prompt).toContain('source_drift'); expect(prompt).toContain('overlap');
-      return {data:{replacements:[{replacesPremiseId:'A',premise:fixed},{replacesPremiseId:'B',premise:premise('C')}]}};
+      expect(prompt).toContain('replacements恰好1项');
+      return {data:{replacements:prompt.includes('\"replacesPremiseId\":\"A\",\"mode\"') ? [{replacesPremiseId:'A',premise:fixed}] : [{replacesPremiseId:'B',premise:premise('C')}]}};
     });
     const result=await c.reconcilePremiseSelection(original,2,3,['悬疑'],'');
     expect(result.selected[0].activeChoice).toBe(fixed.activeChoice);
     expect(result.selectionAudit.initialReview.issues).toHaveLength(2);
-    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
   });
   it('does not repair fiction if either independent audit fails to complete', async () => {
@@ -105,6 +112,14 @@ describe('premise selection before identity lock', () => {
       return {data:failure};
     });
     await expect(c.reviewPremiseSelection(selection(),'','source_drift')).rejects.toThrow('协议错误');
+  });
+  it('instructs source review to separate an actual request from a later motive reveal', async () => {
+    const c = Object.create(ChainController.prototype) as any;
+    c.llmCallWithRetry = vi.fn().mockResolvedValue({ data: { passed: true, issues: [] } });
+    await c.reviewPremiseSelection(selection(), '', 'source_drift');
+    const prompt = c.llmCallWithRetry.mock.calls[0][1] as string;
+    expect(prompt).toContain('先核实展开是否仍保留请求发生');
+    expect(prompt).toContain('不把后来变化倒推为前一事件未发生');
   });
 
 });
@@ -144,11 +159,51 @@ describe('targeted original-pool reselection', () => {
   });
 });
 
-it('stops upstream before a model call when the original pool has no available replacements', async () => {
+it('retains reviewed independent choices without a model call when replacement candidates are unavailable', async () => {
   const c=Object.create(ChainController.prototype) as any;
   c.reviewPremiseSelection=vi.fn().mockResolvedValue(failure);
   c.llmCallWithRetry=vi.fn();
   const original=selection(); original.pool=original.pool.slice(0,2);
-  await expect(c.reconcilePremiseSelection(original,2,2,['悬疑'],'')).rejects.toThrow('原池没有足够可用');
+  const result=await c.reconcilePremiseSelection(original,2,2,['悬疑'],'');
+  expect(result.selected).toEqual([original.selected[0]]);
+  expect(result.selectionAudit.partial).toBe(true);
   expect(c.llmCallWithRetry).not.toHaveBeenCalled();
+});
+
+it('does not salvage invalid review evidence or invent a passed global verdict',()=>{
+ const original=selection();
+ expect(()=>retainReviewedPremises(original,{...failure,issues:[{...failure.issues[0],quote:'不存在的原文引用至少八字'}]})).toThrow();
+ expect(()=>retainReviewedPremises(original,{...failure,passed:true})).toThrow();
+ const result=retainReviewedPremises(original,failure);expect(result.selection.selected).toEqual([original.selected[0]]);
+ expect(original.selected).toHaveLength(2);expect(result.selection.pool).toBe(original.pool);
+});
+it('excludes source-drift identities even when no overlap remains',()=>{
+ const original=selection();
+ const review:PremiseSelectionReview={passed:false,issues:original.selected.map(item=>({kind:'source_drift',premiseId:String(item.premiseId),referencePremiseId:String(item.premiseId),quote:String(item.activeChoice),referenceQuote:String(item.storyCore),reason:'该题材的行动与原骨架存在真实互斥'}))};
+ expect(retainReviewedPremises(original,review).selection.selected).toEqual([]);
+});
+
+it('reports the excluded final selection cause without replaying resolved initial defects',async()=>{
+ const {premiseSelectionFailureReasons}=await import('./premise-selection-review');
+ expect(premiseSelectionFailureReasons({initialReview:{passed:false,issues:[{reason:'已解决旧问题'}]},finalReview:{passed:false,issues:[{reason:'原题材核心动机被改写'}]},reasons:[{reason:'原题材核心动机被改写'}]})).toEqual(['原题材核心动机被改写']);
+ expect(premiseSelectionFailureReasons({finalReview:{passed:true,issues:[]}})).toEqual([]);
+ expect(premiseSelectionFailureReasons(undefined)).toEqual([]);
+});
+
+it('distinguishes an actual request from unstated motive while protecting objective source facts',async()=>{
+ const {IDEA_PRESELECTION_REVIEW_POLICY}=await import('../../shared/src/system-workflow-rules.registry');
+ expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('展开仍保留原请求实际发生时');
+ expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('改写已确认生死身份或冲突结果');
+ expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('不自动免除最终因果与世界规则审核');
+});
+
+it('stops single-slot reselection on transport/truncation failure without generating later slots',async()=>{
+ const c=Object.create(ChainController.prototype) as any;
+ c.reviewPremiseSelection=vi.fn().mockResolvedValue(failure);
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+  expect(prompt).toContain('replacements恰好1项');expect(options.physicalCallBudget.remaining).toBe(3);
+  throw new Error('结构化截断，保留原始输出');
+ });
+ await expect(c.reconcilePremiseSelection(selection(),2,3,['悬疑'],'')).rejects.toThrow('结构化截断');
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
 });

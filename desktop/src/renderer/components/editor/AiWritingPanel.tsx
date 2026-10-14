@@ -1,4 +1,4 @@
-﻿/**
+/**
  * AiWritingPanel - AI写作控制面板
  *
  * 三标签设计：
@@ -162,6 +162,18 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
   const streamMode = true;
   const [streamProgress, setStreamProgress] = useState(0);
   const [streamContent, setStreamContent] = useState('');
+  const [retainedDrafts,setRetainedDrafts]=useState<Array<{runId:string;words:number;canReview:boolean}>>([]);
+  const [retainedDraftVersion,setRetainedDraftVersion]=useState(0);
+  const [isCancelling, setIsCancelling] = useState(false);
+  useEffect(()=>{
+    let cancelled=false;setRetainedDrafts([]);
+    if(projectId&&chapterId&&!chapterContent?.trim()) {
+      void api.get<{items:Array<{runId:string;words:number;canReview:boolean}>}>(`/chain/chapter-review-candidates/${encodeURIComponent(projectId)}/${encodeURIComponent(chapterId)}`)
+        .then(response=>{if(!cancelled)setRetainedDrafts(response.data?.items||[]);}).catch(()=>{});
+    }
+    return ()=>{cancelled=true;};
+  },[projectId,chapterId,chapterContent,retainedDraftVersion]);
+
   const [generationNotice, setGenerationNotice] = useState<GenerationNotice | null>(externalGenerationNotice || null);
   const publishGenerationNotice = useCallback((notice: GenerationNotice) => {
     setGenerationNotice(notice);
@@ -209,7 +221,18 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
     setIsGenerating(isChapterGenerationActive(projectId, chapterId));
   }, [projectId, chapterId]);
 
-  const handleGenerate = useCallback(async () => {
+  const handleCancelGeneration = async () => {
+    if (!projectId || !chapterId || isCancelling) return;
+    setIsCancelling(true);
+    try {
+      const response = await api.post<{cancelled: boolean; message: string}>(`/chain/cancel-chapter/${encodeURIComponent(projectId)}/${encodeURIComponent(chapterId)}`, {}, 30_000);
+      publishGenerationNotice({ tone: 'working', text: response.data.message });
+    } catch (error) {
+      publishGenerationNotice({ tone: 'error', text: error instanceof Error ? error.message : '取消请求未送达，请重试' });
+    } finally { setIsCancelling(false); }
+  };
+
+  const handleGenerate = useCallback(async (retryRunId?: string) => {
     if (!projectId || !chapterId || isGenerating || isChapterGenerationActive(projectId, chapterId)) {
       if (isChapterGenerationActive(projectId, chapterId)) setIsGenerating(true);
       return;
@@ -240,13 +263,14 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
     setBlockedNotice(null);
     setStreamContent('');
     setStreamProgress(0);
-    publishGenerationNotice({ tone: 'working', text: '已开始生成，正在等待服务端进度…' });
+    publishGenerationNotice({ tone: 'working', text: retryRunId ? '正在审查留存正文，等待服务端进度…' : '已开始生成，正在等待服务端进度…' });
     onGenerateStart?.();
 
     if (streamMode) {
       // SSE 流式输出（单次 LLM 严格按大纲生成）— 使用 fetch 流解析（POST 模式）
       try {
         const body: Record<string, unknown> = { projectId, chapterId, chapterNumber: chapterIndex, mode: writingMode, prompt, scenario: getScenarioKey() };
+        if(retryRunId)body.retryRunId=retryRunId;
         // Keep every visible chapter-generation action on the single verified
         // path, including its terminal event and hard acceptance gates.
         body.templateId = 'body-by-outline';
@@ -295,10 +319,16 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                   : `正文质检通过（大纲、人物、世界观、时间线、叙事连贯性），正在保存并同步创作资料…${evidence ? ` 证据：${evidence}` : ''}`,
               });
               onGenerateComplete?.(content, chapterId);
+            } else if (data.type === 'cancelled') {
+              receivedTerminalEvent = true;
+              finishGeneration();
+              setRetainedDraftVersion(v => v + 1);
+              publishGenerationNotice({ tone: 'warning', text: String(data.message || '已取消生成，原正文和留存稿已保留') });
             } else if (data.type === 'error') {
               receivedTerminalEvent = true;
               finishGeneration();
               const message = String(data.error || '生成失败');
+              setRetainedDraftVersion(v=>v+1);
               publishGenerationNotice({ tone: 'error', text: `生成失败：${message}` });
               onError?.(message);
             } else if (data.progress !== undefined) {
@@ -333,6 +363,7 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
     try {
       // 调用单次生成 API（严格按已绑定详细大纲），等待完整结果
         const response = await api.post('/chain/generate', {
+        ...(retryRunId ? {retryRunId} : {}),
         projectId,
         chapterId: chapterId || undefined,
         chapterNumber: chapterIndex || undefined,
@@ -353,12 +384,13 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : '生成失败';
+      setRetainedDraftVersion(v => v + 1);
       publishGenerationNotice({ tone: 'error', text: `生成失败：${message}` });
       onError?.(message);
     } finally {
       finishGeneration();
     }
-  }, [projectId, chapterId, writingMode, prompt, isGenerating, getScenarioKey, checkAction, onGenerateStart, onGenerateComplete, onError, publishGenerationNotice]);
+  }, [projectId, chapterId, chapterIndex, writingMode, prompt, isGenerating, getScenarioKey, checkAction, onGenerateStart, onGenerateComplete, onError, publishGenerationNotice]);
 
   // 对外暴露「从外部触发 AI 生成」入口：写作页父组件可通过 ref 调一次
   // runGenerate() 来启动一次正文生成（典型用法：用户从「前后矛盾」tab 点
@@ -562,6 +594,8 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
     void handleQualityCheck();
   }, [handleQualityCheck]);
 
+  const reviewableDraft = retainedDrafts.find(draft => draft.canReview);
+
   // ========== 渲染 ==========
 
   return (
@@ -758,8 +792,20 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                 border: `1px solid ${generationNotice.tone === 'error' ? 'rgba(231, 76, 96, .45)' : generationNotice.tone === 'success' ? 'rgba(46, 204, 113, .40)' : 'rgba(243, 156, 18, .38)'}`,
               }}
             >
-              {generationNotice.text}
+              {generationNotice.text.length > 1000 ? (
+                  <>
+                    <div>{generationNotice.text.slice(0, 700)}…</div>
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: 'pointer' }}>查看完整信息与证据</summary>
+                      <div style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflowY: 'auto', marginTop: 8 }}>{generationNotice.text}</div>
+                    </details>
+                  </>
+                ) : generationNotice.text}
             </div>
+          )}
+          {retainedDrafts.some(draft=>!draft.canReview)&&(
+            <div style={{fontSize:13,marginBottom:10,color:'var(--color-text-muted)'}}>超长或不足的候选已保留，须先处理篇幅；不会截断保存。</div>
+
           )}
           <div style={styles.actions}>
             <button
@@ -768,11 +814,22 @@ const AiWritingPanel = forwardRef<AiWritingPanelHandle, AiWritingPanelProps>(fun
                 opacity: isGenerating ? 0.5 : 1,
                 cursor: isGenerating ? 'not-allowed' : 'pointer',
               }}
-              onClick={handleGenerate}
+              onClick={() => void handleGenerate(reviewableDraft?.runId)}
               disabled={isGenerating || !chapterId}
             >
-              {isGenerating ? '生成中...' : '🤖 AI生成'}
+              {isGenerating ? '执行中...' : reviewableDraft ? `继续验收留存稿（${reviewableDraft.words}字）` : '🤖 AI生成'}
             </button>
+            {isGenerating && (
+              <button style={styles.contBtn} disabled={isCancelling} onClick={() => void handleCancelGeneration()}>
+                {isCancelling ? '正在取消…' : '取消生成'}
+              </button>
+            )}
+            {reviewableDraft && (
+              <button style={styles.contBtn} disabled={isGenerating} onClick={() => void handleGenerate()}>
+                另生成一版新稿
+              </button>
+            )}
+
             {chapterId && (
               <button
                 style={{

@@ -7,9 +7,12 @@ import { ChainController } from './chain.controller';
 
 const bundle = { worldProfiles: [{id:'frozen', hierarchy_rules:'冻结规则'}], chapters: Array.from({length:5},(_,i)=>({id:'chapter'+i,content:'伏笔设置：第三章回收。'})), foreshadowings:[{id:'clue',planned_recovery_chapter_index:3}] };
 const patch = {entityType:'foreshadowing',entityId:'clue',field:'planned_recovery_chapter_index',match:'3',replacement:'5'};
-const cards = [{title:'铁印打在军刀上',hook:'我接到一批菜刀订单，却发现铁料会折断边军的刀。'}];
+const cards = [{title:'铁印打在军刀上',hook:'我接到一批菜刀订单，却发现铁料会折断边军的刀。',
+ setting:'订单准许退回不合格铁料，更换为验过的合格铁料。',ending:'他退回不合格铁料，边军换料后止住断刃。'}];
 const verdict = {position:1,title:cards[0].title,titleCompelling:false,openingCompelling:true,distinctFromBatch:true,
  storyCoherent:true,payoffCredible:true,platformFit:true,storyEvidence:cards[0].hook,payoffEvidence:cards[0].hook,platformEvidence:cards[0].hook,
+ payoffBridge:{status:'supported',actionEvidenceRef:'C1.ending',resultEvidenceRef:'C1.ending',conditionEvidenceRef:'C1.setting',
+  actionEvidence:cards[0].ending,resultEvidence:cards[0].ending,conditionEvidence:cards[0].setting,reason:'订单已允许退回不合格原料并换用验过的合格材料'},
  readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:'supported',quote:cards[0].hook,reason:'此处既定人物选择带来可理解的风险与追问'}])),
  qualityReason:'根据实际卡片的已有行动和因果判定，不补充小说事实。',readerQuestion:'谁在故意让边军的刀折断？',issues:['标题只有道具意象，未展示人的风险。']};
 
@@ -130,4 +133,45 @@ describe('creation failure regressions',()=>{
   expect(presentationReviewIssues(targetIdeaReviews(payload,cards,[]),cards).length).toBeGreaterThan(0);
   expect(presentationReviewIssues(targetIdeaReviews({reviews:[verdict,verdict]},cards,[reference]),cards).length).toBeGreaterThan(0);
  });
+});
+
+it('normalizes structured review reasons without changing false verdicts or dropping defects',()=>{
+ const card={title:'明确冲突的标题'};
+ const original={position:1,title:card.title,titleCompelling:false,issues:[{field:'title',criterion:'titleCompelling',reason:'原标题只有意象缺少人物利益冲突'}]};
+ const fixed=targetIdeaReviews({reviews:[original]},[card],[]).reviews[0];
+ expect(fixed.titleCompelling).toBe(false);expect(fixed.issues).toEqual(['title（titleCompelling）：原标题只有意象缺少人物利益冲突']);
+ expect(original.issues[0]).toHaveProperty('reason');
+ const unknown={field:'title',criterion:'unknown',reason:'不能推测未知协议的具体含义'};
+ expect(targetIdeaReviews({reviews:[{...original,issues:[unknown]}]},[card],[]).reviews[0].issues).toEqual([unknown]);
+});
+
+it('accepts a recognized issue reason without optional field, preserving the actual rejection',()=>{
+ const card={title:'分类不匹配'}; const row={position:1,title:card.title,platformFit:false,issues:[{criterion:'platformFit',reason:'核心阅读承诺没有兑现分类要求'}]};
+ const fixed=targetIdeaReviews({reviews:[row]},[card],[]).reviews[0];
+ expect(fixed.platformFit).toBe(false);expect(fixed.issues).toEqual(['platformFit：核心阅读承诺没有兑现分类要求']);
+ expect(row.issues[0]).not.toHaveProperty('field');
+});
+
+it('normalizes the observed judgment alias while keeping gaps and conflicting protocol visible',()=>{
+ const card={title:'行动尚未兑现的题材'};
+ const issue={judgment:'payoffCredible',reason:'行动只能改变前一状态，尚缺导致最终获救的必要条件',evidenceRef:'C1.ending'};
+ const row={position:1,title:card.title,payoffCredible:false,issues:[issue]};
+ const fixed=targetIdeaReviews({reviews:[row]},[card],[]).reviews[0];
+ expect(fixed.payoffCredible).toBe(false);
+ expect(fixed.issues).toEqual(['payoffCredible：'+issue.reason]);
+ expect(row.issues[0]).toBe(issue);
+ for(const bad of [{...issue,judgment:'unknown'},{...issue,criterion:'storyCoherent'}])
+  expect(targetIdeaReviews({reviews:[{...row,issues:[bad]}]},[card],[]).reviews[0].issues).toEqual([bad]);
+});
+
+it('keeps related fact fields inside the local outline repair boundary',async()=>{
+ const {OUTLINE_FACT_REPAIR_SYNC_POLICY}=await import('../../shared/src/system-workflow-rules.registry');
+ expect(OUTLINE_FACT_REPAIR_SYNC_POLICY).toContain('同一事实的必要关联字段属于本次局部修复范围');
+ expect(OUTLINE_FACT_REPAIR_SYNC_POLICY).toContain('characterActions');
+ expect(OUTLINE_FACT_REPAIR_SYNC_POLICY).toContain('未关联的字段保持原值');
+ const {readFileSync}=await import('node:fs');
+ const source=readFileSync(new URL('./chain.controller.ts',import.meta.url),'utf8');
+ const repair=source.slice(source.indexOf('【局部修复硬约束】禁止重新生成完整章纲'),source.indexOf('if (repair.runId) shortOutlineSourceRunIds'));
+ expect(repair).toContain('${OUTLINE_FACT_REPAIR_SYNC_POLICY}');
+ expect(repair).not.toContain('未点名字段必须保持当前值');
 });

@@ -469,3 +469,17 @@ it('locates six-axis citations without changing judgments or accepting the wrong
   (g.audit.checks as any).continuity={...f.audit.checks.continuity,evidence:current};
   expect(validateSourceQualityReview(g.audit,g.goals,current,{context}).errors).toContain('C1前序声称缺少实际前章对照依据');
  });
+
+
+it.each(['第一次','首次','此前','之前'])('uses full historical sources for %s while refusing stale current-state proof',cue=>{
+ const older='她说过：“留下就要付出代价。”',latest='如今她已经离开。';
+ const context=JSON.stringify({previousChapter:[{complete:true,content:latest}],historicalChapters:[{complete:true,content:older}]});
+ const body=`他记得${cue}她说过：“留下就要付出代价。”`;
+ const f=fixture(body);
+ const continuity={status:'supported',evidence:body,basisSource:'context',basisEvidence:older,reason:'明确回顾旧事件，有已保存完整历史原文',claimChecks:[{ref:'C1',status:'consistent',basisEvidence:older,reason:'回顾的原话由历史完整正文实际证明'}]};
+ (f.audit.checks as any).continuity=continuity;
+ expect(validateSourceQualityReview(f.audit,f.goals,body,{context}).errors.filter(e=>e.includes('C1'))).toEqual([]);
+ const current=body+'如今她仍在这里。',g=fixture(current);
+ (g.audit.checks as any).continuity={...continuity,evidence:current};
+ expect(validateSourceQualityReview(g.audit,g.goals,current,{context}).errors).toContain('C1前序声称缺少实际前章对照依据');
+});

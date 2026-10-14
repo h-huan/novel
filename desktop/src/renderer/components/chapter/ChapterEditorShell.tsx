@@ -279,13 +279,13 @@ const ChapterEditorShell = forwardRef<ChapterEditorShellHandle, ChapterEditorShe
   const actionError = (error: unknown) => error instanceof Error ? error.message : '请检查服务连接后重试';
 
   const ensureCurrentContentSaved = useCallback(async () => {
-    if (!chapter) return;
+    if (!chapter || !isDirty) return;
     const content = contentRef.current;
     await updateChapter(chapter.id, { content });
     if (onSave) await onSave(chapter.id, content);
     setIsDirty(false);
     setLastSaved(new Date());
-  }, [chapter, updateChapter, onSave]);
+  }, [chapter, isDirty, updateChapter, onSave]);
 
   /** 提交质检前以后端为权威复查本章质检状态：store 可能是数秒前的快照，仅凭 props 会漏判「刚被别处触发的质检」。 */
   const readFreshAutoQuality = useCallback(async (chapterId: string) => {

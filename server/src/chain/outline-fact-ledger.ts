@@ -140,9 +140,64 @@ export function normalizeOutlineChaptersForFactReview(chapters: unknown[]): unkn
   });
 }
 
+
+/** Lossless prompt-only encoding; persistence keeps the original ledger schema. */
+export function serializeOutlineFactLedger(ledger: OutlineFactLedgerEntry[]): string {
+  const plain = JSON.stringify(ledger);
+  const states: Record<string, string> = {}, ids = new Map<string, string>();
+  const ref = (text: string) => {
+    let id = ids.get(text);
+    if (!id) { id = 'S' + (ids.size + 1); ids.set(text, id); states[id] = text; }
+    return id;
+  };
+  const entries = ledger.map(row => ({id:row.id,baseline:ref(row.baseline),history:row.history.map(ref),current:ref(row.current)}));
+  const encoded = JSON.stringify({encoding:'exact_state_refs',states,entries});
+  return encoded.length < plain.length ? encoded : plain;
+}
+
+export interface OutlineFactAnchor { id:string; path:string; text:string }
+/** Raw sources only: derived ledger summaries must never become source evidence. */
+export function outlineFactEvidenceAnchors(input: {canonicalBrief:string;world:unknown;sourceChapters?:unknown[];chapters:unknown[]}): OutlineFactAnchor[] {
+  const anchors: OutlineFactAnchor[] = [];
+  const walk = (value:unknown,path:string):void => {
+    if(typeof value==='string' && value.trim()) {
+      anchors.push({id:'F'+(anchors.length+1),path,text:value});
+      try { const parsed=JSON.parse(value); if(parsed && typeof parsed==='object')walk(parsed,path+'.json'); } catch {}
+    } else if(Array.isArray(value)) value.forEach((item,index)=>walk(item,path+'['+index+']'));
+    else if(value && typeof value==='object') Object.entries(value).forEach(([key,item])=>walk(item,path+'.'+key));
+  };
+  walk(input.canonicalBrief,'确认故事');walk(input.world,'保存世界');
+  for(const [name,rows] of [['前章',input.sourceChapters||[]],['本批',input.chapters]] as const) {
+    normalizeOutlineChaptersForFactReview([...rows]).forEach((row:any,index:number)=>walk(row,name+'·'+(Number.isInteger(row?.chapterNumber)?'第'+row.chapterNumber+'章':'条目'+(index+1))));
+  }
+  return anchors;
+}
+
+export function resolveOutlineFactEvidence(value:unknown,anchors:OutlineFactAnchor[]):unknown {
+  if(!value || typeof value!=='object' || Array.isArray(value))return value;
+  const review=value as any;
+  if(!Array.isArray(review.contradictions))return value;
+  const byId=new Map(anchors.map(anchor=>[anchor.id,anchor]));
+  return {...review,contradictions:review.contradictions.map((row:any)=>{
+    if(!row || typeof row!=='object' || Array.isArray(row))return row;
+    const next={...row};
+    for(const side of [1,2]) {
+      const id=next['anchor'+side];
+      if(id===undefined)continue; // Existing stored reports remain valid only with exact quotes.
+      const anchor=byId.get(id);
+      if(!anchor) { next['quote'+side]='';continue; }
+      // A conflicting literal quote is not silently repaired into a different finding.
+      if(next['quote'+side]!==undefined && next['quote'+side]!==anchor.text) { next['quote'+side]='';continue; }
+      next['quote'+side]=anchor.text;
+      next['location'+side]=next['location'+side]||anchor.path;
+    }
+    return next;
+  })};
+}
+
 /** Generation consumes the same evidence and history as review and repair. */
 export function buildOutlineContinuityContext(sourceChapters: unknown[], previousLedger: OutlineFactLedgerEntry[], includePolicy = true): string {
-  return `${includePolicy ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n【已确认前章原始资料】${JSON.stringify(normalizeOutlineChaptersForFactReview(sourceChapters))}\n【前批事实台账】${JSON.stringify(previousLedger)}`;
+  return `${includePolicy ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n【已确认前章原始资料】${JSON.stringify(normalizeOutlineChaptersForFactReview(sourceChapters))}\n【前批事实台账】${serializeOutlineFactLedger(previousLedger)}`;
 }
 
 /** Review quotations must exist in actual supplied text, not just sound plausible. */
@@ -196,5 +251,5 @@ export function buildOutlineFactReviewPrompt(input: {
 }): string {
   const reviewChapters = normalizeOutlineChaptersForFactReview(input.chapters);
   const sourceChapters = normalizeOutlineChaptersForFactReview(input.sourceChapters || []);
-  return `${input.includePolicy !== false ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n按执行标准核对已保存的世界观与详细章纲，只检查事实连续性。按生效执行标准中的事实台账覆盖范围逐条建立并继承事实，核对全部当前章字段与前章事实。必须核对 content、scenes、characterActions 和其中嵌入的伏笔证据，不能只看章标题。跨章节、跨批次遇到同一对象须延续已有台账，不能重新设定基线；事实身份由服务端id确定，标题和章节状态可正常变化。前批baseline与history由服务端保留，不能重写。ledger只提交本批状态更新：更新已有事实用{id,current}，原样引用已有id；新增事实用{current}，编号由服务端分配；未变化条目可省略，服务端自动继承。即使省略条目，也必须核对其baseline、history、current与本章是否真正互斥；真实冲突必须在contradictions中提供双方原文证据。若材料没有明确数字，不得猜数；若本批没有新增或变化，ledger可为空，旧台账仍完整继承。\n判定纪律：contradictions 只允许放“同一事实在两处材料中无法同时成立”的冲突。每条冲突必须给出 location1、quote1、location2、quote2、conflict；涉及数量/时间时再给 calculation。像“配比一致”“数量仍为1”“当前已签署但未归档”“伏笔已埋设且本批未回收”这种状态摘要属于 ledger，不是矛盾；不得因为信息暂未明写就自行判冲突。给不出两处逐字证据时必须视为没有被证明的冲突，不得写入 contradictions。\n【唯一故事基准】${input.canonicalBrief}\n【已保存世界观】${JSON.stringify(input.world)}\n【已确认前章原始资料】${JSON.stringify(sourceChapters)}\n【前批事实台账】${JSON.stringify(input.previousLedger)}\n【本批完整章纲】${JSON.stringify(reviewChapters)}\n只输出合法JSON。无冲突：{\"consistent\":true,\"contradictions\":[],\"ledger\":[{\"current\":\"对象：起始事实与本批状态\"}]}。确有冲突：{\"consistent\":false,\"contradictions\":[{\"location1\":\"第一处字段路径\",\"quote1\":\"第一处逐字原文\",\"location2\":\"第二处字段路径\",\"quote2\":\"第二处逐字原文\",\"conflict\":\"两处为何无法同时成立\",\"calculation\":\"涉及数量或时间时写算式，否则留空\"}],\"ledger\":[{\"id\":\"前批已有id\",\"current\":\"有依据的本批状态\"}]}。`;
+  return `${input.includePolicy !== false ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n按执行标准核对已保存的世界观与详细章纲，只检查事实连续性。台账若为exact_state_refs格式，states是逐字原文，entries中baseline/history/current的S编号必须按states还原并逐条核对，不能把编号当成事实文字、丢弃历史或只看current。按生效执行标准中的事实台账覆盖范围逐条建立并继承事实，核对全部当前章字段与前章事实。必须核对 content、scenes、characterActions 和其中嵌入的伏笔证据，不能只看章标题。跨章节、跨批次遇到同一对象须延续已有台账，不能重新设定基线；事实身份由服务端id确定，标题和章节状态可正常变化。前批baseline与history由服务端保留，不能重写。ledger只提交本批状态更新：更新已有事实用{id,current}，原样引用已有id；新增事实用{current}，编号由服务端分配；未变化条目可省略，服务端自动继承。即使省略条目，也必须核对其baseline、history、current与本章是否真正互斥；真实冲突必须在contradictions中提供双方原文证据。若材料没有明确数字，不得猜数；若本批没有新增或变化，ledger可为空，旧台账仍完整继承。\n判定纪律：contradictions 只允许放“同一事实在两处材料中无法同时成立”的冲突。每条冲突优先给出原文目录的anchor1、anchor2和conflict，服务端按编号回填完整原文与实际路径；不得引用前批台账摘要编号充当原始资料。兼容旧格式时必须给出 location1、quote1、location2、quote2、conflict；涉及数量/时间时再给 calculation。像“配比一致”“数量仍为1”“当前已签署但未归档”“伏笔已埋设且本批未回收”这种状态摘要属于 ledger，不是矛盾；不得因为信息暂未明写就自行判冲突。给不出两处逐字证据时必须视为没有被证明的冲突，不得写入 contradictions。\n【唯一故事基准】${input.canonicalBrief}\n【已保存世界观】${JSON.stringify(input.world)}\n【已确认前章原始资料】${JSON.stringify(sourceChapters)}\n【前批事实台账】${serializeOutlineFactLedger(input.previousLedger)}\n【本批完整章纲】${JSON.stringify(reviewChapters)}\n【原始资料编号目录（原文只出现于上述输入，按路径选取，不手抄）】${JSON.stringify(outlineFactEvidenceAnchors(input).map(({id,path})=>({id,path})))}\n只输出合法JSON。无冲突：{\"consistent\":true,\"contradictions\":[],\"ledger\":[{\"current\":\"对象：起始事实与本批状态\"}]}。确有冲突：{\"consistent\":false,\"contradictions\":[{\"anchor1\":\"第一处实际F编号\",\"anchor2\":\"第二处实际F编号\",\"conflict\":\"两处为何无法同时成立\",\"calculation\":\"涉及数量或时间时写算式，否则留空\"}],\"ledger\":[{\"id\":\"前批已有id\",\"current\":\"有依据的本批状态\"}]}。`;
 }
