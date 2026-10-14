@@ -5471,24 +5471,42 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             && [item.presentationReview.storyCoherent, item.presentationReview.payoffCredible, item.presentationReview.platformFit].includes(false)),
         }));
         try {
-          const repairResponse = await this.realLLM.generate({
-            prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective(repairTargets)}`,
-            scenario: 'idea_generate',
-            timeout: LLM_TUNABLES.timeoutSimple(),
-            maxEmptyRetries: 1,
-            responseFormat: 'json_object',
+          // Independent failed premises must not be bundled into one enormous
+          // structural repair response. Each local patch keeps its original
+          // locked source identity and the original validators, while the
+          // physical requests can run concurrently (max two).
+          const repairSettled = await boundedDiscoveryMap(repairTargets, 2, async (target) => {
+            const response = await this.realLLM.generate({
+              prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective([target])}`,
+              scenario: 'idea_generate',
+              timeout: LLM_TUNABLES.timeoutSimple(),
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: {stepKey: 'idea_final_gate_local_repair', attempt: 0},
+            });
+            const payload=this.safeExtractJson<Record<string,unknown>>(String(response.content||''),{});
+            const patches=Array.isArray(payload?.patches)?payload.patches:[];
+            return applyOrderedIdeaRepairPatches(
+              [target.card as Record<string,unknown>], patches,
+              target.gateIssues.some((issue:string)=>issue.includes('标题'))?[0]:[],
+              target.gateIssues.some((issue:string)=>issue.includes('故事命名'))?[0]:[],
+              target.storyRepairAllowed?[0]:[],
+            )[0];
           });
-          const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
-          const repairPatches = Array.isArray(repairPayload?.patches) ? repairPayload.patches : [];
-          finalGateRepairGenerated = repairPatches.length;
-          const repairedCards = applyOrderedIdeaRepairPatches(
-            repairTargets.map((target: any) => target.card as Record<string, unknown>),
-            repairPatches,
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('故事命名')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.storyRepairAllowed ? [index] : []),
-          );
-          await accept(repairedCards, 'repair');
+          const repairedCards: Array<Record<string,unknown>>=[];
+          const failedRepairs: string[]=[];
+          for(let index=0;index<repairSettled.length;index++){
+            const result=repairSettled[index];
+            if(result.status==='fulfilled'){
+              finalGateRepairGenerated++;
+              repairedCards.push(result.value);
+            } else {
+              const premiseId=String(repairTargets[index]?.card?.sourcePremiseId||'unknown');
+              failedRepairs.push(premiseId+': '+(result.reason instanceof Error?result.reason.message:String(result.reason)));
+            }
+          }
+          if(failedRepairs.length) finalGateRepairError=failedRepairs.join('；');
+          if(repairedCards.length) await accept(repairedCards,'repair');
         } catch (repairError) {
           finalGateRepairError = repairError instanceof Error ? repairError.message : String(repairError);
           this.logger.warn(`idea-discover: 最终 Gate 同题材局部修复协议未完成：${finalGateRepairError}`);
