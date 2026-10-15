@@ -6,6 +6,7 @@ import {
   findDuplicateSeedLabels,
 } from './story-dict.service';
 import { GLOBAL_STORY_CATEGORIES, NARRATIVE_POV_SEED_LABELS, PLOT_TAG_SEED_LABELS, WEB_NOVEL_GENRE_SEED_LABELS, dimensionGuide } from '../../../shared/src';
+import { ADDITIONAL_CREATIVE_TAGS, CREATIVE_TAG_GUIDES, creativeTagGroup, WRITING_STYLE_SEED_LABELS, STORY_TONE_SEED_LABELS } from '../../../shared/src';
 
 /**
  * 有意保留的「基调词 = 题材子类同名」冻结清单。
@@ -24,6 +25,19 @@ const tones = STORY_DICT_SEEDS.filter(s => s.type === 'tone_tag');
 const plots = STORY_DICT_SEEDS.filter(s => s.type === 'plot_tag');
 
 describe('执行标准种子（story_dict）不变量', () => {
+  it('扩充词条能从字典进入发现分组，并带有执行释义', () => {
+    const plotLabels = new Set(plots.map(item => item.label));
+    for (const [label, tag] of Object.entries(ADDITIONAL_CREATIVE_TAGS)) {
+      expect(plotLabels.has(label), label).toBe(true);
+      expect(creativeTagGroup(label, '平台标签（待核实分组）')).toBe(tag.group);
+      expect(CREATIVE_TAG_GUIDES[label].length).toBeGreaterThan(10);
+    }
+    for (const label of WRITING_STYLE_SEED_LABELS) expect(dimensionGuide('style', label), label).not.toBe('');
+    for (const label of STORY_TONE_SEED_LABELS) expect(dimensionGuide('tone', label), label).not.toBe('');
+    expect(creativeTagGroup('婆媳', '情节与体验')).toBe('人物与关系');
+    expect(creativeTagGroup('亲情与利益', '情节与体验')).toBe('主题');
+    expect(creativeTagGroup('自建玩法', '情节与体验')).toBe('情节与体验');
+  });
   it('内置创作流派都有同源操作定义，自定义值不冒用其他流派定义', () => {
     expect(genres.map(g => g.label)).toEqual(WEB_NOVEL_GENRE_SEED_LABELS);
     for (const genre of genres) expect(dimensionGuide('genre', genre.label)).not.toBe('');

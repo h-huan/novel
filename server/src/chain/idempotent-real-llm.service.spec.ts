@@ -313,6 +313,15 @@ describe('IdempotentRealLLMService', () => {
       db.close();
     }
   });
+  it('does not re-enter discovery after the provider has exhausted its own network recovery',async()=>{
+    const {db}=fixture();
+    const superGenerate=vi.spyOn(RealLLMService.prototype,'generate').mockRejectedValue(new Error('DeepSeek 网络连接失败(UND_ERR_SOCKET): other side closed'));
+    try {
+      const service=serviceFor(db);
+      await expect(service.generate({prompt:'生成原池',scenario:'idea_generate',metrics:{stepKey:'idea_premise_selection'}})).rejects.toThrow('网络连接失败');
+      expect(superGenerate).toHaveBeenCalledTimes(1);
+    } finally {superGenerate.mockRestore();db.close();}
+  });
 
   it('physically blocks the historical automatic whole-chapter alignment rewrite', async () => {
     const { db } = fixture();

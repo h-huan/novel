@@ -1,4 +1,5 @@
 export * from './enums';
+export * from './creative-dictionary';
 export * from './types';
 export * from './platform-categories';
 export * from './execution-standard-dimensions';

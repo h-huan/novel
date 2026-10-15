@@ -58,6 +58,19 @@ export function causalExitResultAnchors(anchors: ReturnType<typeof causalEvidenc
   return clauses.length ? clauses : [parent];
 }
 
+/** The server owns the complete result inventory, including scene outcomes and
+ * payoff/state fields that can disagree with characterActions.result. */
+export function causalChapterResultAnchors(anchors: ReturnType<typeof causalEvidenceAnchors>, chapterIndex: number) {
+  const prefix = chapterIndex + '.';
+  const resultPath = /^(?:scenes\.\d+\.outcome|characterActions\.\d+\.result|conflicts\.\d+\.resolution|highlights\.\d+\.point|characterStates\.\d+\.stateAfter|foreshadowingRecover\.\d+\.(?:method|payoff))$/;
+  const parents = anchors.filter(anchor => anchor.source === 'body' && !anchor.id.includes(':c')
+    && anchor.path?.startsWith(prefix) && resultPath.test(anchor.path.slice(prefix.length)));
+  return parents.flatMap(parent => {
+    const clauses = anchors.filter(anchor => anchor.id.startsWith(parent.id + ':c'));
+    return clauses.length ? clauses : [parent];
+  });
+}
+
 /** IDs resolve to exact source paragraphs; no fuzzy quote correction or invented bridge. */
 export function materializeCausalAuditAnchors(value: any, content: string, sources: Record<string,string>) {
   if (!value || !Array.isArray(value.transitions)) return value;
@@ -136,5 +149,10 @@ export function applyCausalAuditRepair(original:any,errors:string[],value:any) {
  const rows=Array.isArray(value?.repairs)?value.repairs:Array.isArray(value?.causalAudit?.transitions)&&value.causalAudit.transitions.length===original.transitions.length?targets.map(index=>({index,...value.causalAudit.transitions[index]})):undefined;
  const normalized=Array.isArray(rows)?rows.map(row=>({...row,index:typeof row?.index==='string'&&/^(0|[1-9]\d*)$/.test(row.index)?Number(row.index):row?.index})):rows;
  if(!Array.isArray(normalized)||normalized.length!==targets.length||new Set(normalized.map(row=>row?.index)).size!==targets.length||normalized.some(row=>!targets.includes(row?.index)))throw new Error('因果协议纠错必须完整覆盖点名行，不能重审或增删已验证行');
- return {...original,transitions:original.transitions.map((row:any,index:number)=>normalized.find(fixed=>fixed.index===index)||row)};
+ return {...original,transitions:original.transitions.map((row:any,index:number)=>{
+   const fixed=normalized.find(item=>item.index===index);
+   if(!fixed)return row;
+   if(row.chapterNumber!==undefined&&fixed.chapterNumber!==undefined&&fixed.chapterNumber!==row.chapterNumber)throw new Error('因果协议纠错不能改变点名行章号');
+   return {...fixed,...(row.chapterNumber!==undefined?{chapterNumber:row.chapterNumber}:{})};
+ })};
 }

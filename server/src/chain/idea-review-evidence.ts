@@ -1,5 +1,18 @@
 /** Evidence is selected from server-owned narrative fields, never generated or guessed. */
 export interface IdeaEvidenceEntry { id: string; position: number; field: string; quote: string }
+
+/** The production JSON example includes every required evidence family. */
+export function ideaReviewResponseExample() {
+  return { reviews: [{ position: 1, title: '实际标题', titleCompelling: true, openingCompelling: true,
+    distinctFromBatch: true, storyCoherent: true, payoffCredible: true, platformFit: true,
+    storyEvidenceRef: 'C1.description', payoffEvidenceRef: 'C1.ending', platformEvidenceRef: 'C1.hook',
+    qualityReason: '根据实际设定、选择、因果与平台判据解释判断', readerQuestion: '由实际标题和开篇引发的具体追问',
+    payoffBridge: { status: 'supported', actionEvidenceRef: 'C1.description', resultEvidenceRef: 'C1.ending',
+      conditionEvidenceRef: 'C1.setting', reason: '必须按实际卡说明行动造成结果的必要条件；缺失则gap并拒绝兑现' },
+    readerGoals: Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,
+      { status: 'supported', evidenceRef: 'C1.description', reason: '依据本卡实际机制说明支持、薄弱或未知的具体理由' }])), issues: [],
+  }] };
+}
 const fields = ['title','hook','description','setting','protagonist','coreConflict','mainReversal','ending','scopeBreakdown'] as const;
 export function ideaReviewEvidenceCatalog(cards: readonly any[]): IdeaEvidenceEntry[] {
   const entries: IdeaEvidenceEntry[]=[];

@@ -5,6 +5,7 @@ import { generationTasks } from '../common/generation-cancellation';
 import { DatabaseService } from '../database/database.service';
 import { readConstitution, settingsObject } from '../modules/project/creative-constitution';
 import { isGateRejection } from '../modules/writing-quality/gate-failure';
+import { ideaDiscoveryAuthorSettings } from './idea-discovery-contract';
 
 /**
  * Planning/project lifecycle HTTP adapter.
@@ -59,6 +60,7 @@ export class ChainPlanningController {
           schemaVersion: 1,
           generatedAt: new Date().toISOString(),
           request: {
+            ...ideaDiscoveryAuthorSettings(dto),
             storyType: dto.storyType ?? null,
             platform: dto.platform ?? null,
             storyCategory: dto.storyCategory ?? null,

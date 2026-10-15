@@ -261,7 +261,8 @@ describe('ChainPlanningController idea-discovery transport adapter', () => {
         schemaVersion: 1,
         success: false,
         totalIdeas: 0,
-        request: expect.objectContaining({ storyType: 'short_story', platform: 'fanqie', requestedCount: 5 }),
+        request: expect.objectContaining({ storyType: 'short_story', platform: 'fanqie', requestedCount: 5,
+          webNovelGenre: dto.webNovelGenre, plotTags: dto.plotTags, writingStyle: dto.writingStyle, pov: dto.pov }),
         appealGate: expect.objectContaining({
           mode: 'premise_preselection_then_final_gate_bounded_repair',
           premisePoolSize: 15,

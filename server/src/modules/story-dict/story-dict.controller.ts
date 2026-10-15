@@ -2,7 +2,7 @@
  * StoryDictController - 创作字典管理 API
  */
 import { Controller, Get, Post, Put, Delete, Body, Param, Logger } from '@nestjs/common';
-import { StoryDictService } from './story-dict.service';
+import { StoryDictService, STORY_DICT_SEED_VERSION } from './story-dict.service';
 
 @Controller('dict')
 export class StoryDictController {
@@ -22,7 +22,7 @@ export class StoryDictController {
 
   @Get('types/all')
   getTypes() {
-    return { types: this.service.getTypes() };
+    return { types: this.service.getTypes(), seedVersion: STORY_DICT_SEED_VERSION };
   }
 
   @Post()

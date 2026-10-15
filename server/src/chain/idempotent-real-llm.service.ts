@@ -192,7 +192,9 @@ export class IdempotentRealLLMService extends RealLLMService {
         return await super.generate(request);
       } catch (error) {
         assertGenerationActive();
-        if (!this.isTransientNetworkFailure(error) || recoveryAttempt >= retries) {
+        // Discovery already receives the provider's bounded network recovery.
+        // Re-entering it here reset that allowance and duplicated physical calls.
+        if (request.scenario === 'idea_generate' || !this.isTransientNetworkFailure(error) || recoveryAttempt >= retries) {
           throw error;
         }
         const delayMs = Math.max(

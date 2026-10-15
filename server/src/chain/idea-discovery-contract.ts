@@ -1,6 +1,31 @@
-import { prohibitedFictionNames } from '../../shared/src/fiction-naming';
+import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
 import { FICTION_NAMING_POLICY, IDEA_PRESELECTION_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
 export type IdeaStoryType = 'short_story' | 'long_novel';
+
+export class PremiseNamingError extends Error {}
+
+/** Only author-selected discovery settings; never infer choices from generated candidates. */
+export function ideaDiscoveryAuthorSettings(input: {
+  storyType?: string; platform?: string; storyCategory?: string; targetAudience?: string;
+  webNovelGenre?: string[]; storyTone?: string[]; writingStyle?: string[];
+  submissionTags?: string[]; plotTags?: string[]; pov?: string; targetWords?: string; genreFitNote?: string;
+  discoveryCategoryOptions?: string[];
+}) {
+  return {
+    storyType: input.storyType ?? null, platform: input.platform ?? null,
+    storyCategory: input.discoveryCategoryOptions && input.discoveryCategoryOptions.length > 1 ? null : input.storyCategory ?? null,
+    ...(input.discoveryCategoryOptions?.length ? { categoryCandidates: input.discoveryCategoryOptions } : {}),
+    targetAudience: input.targetAudience || null, webNovelGenre: input.webNovelGenre || [],
+    storyTone: input.storyTone || [], writingStyle: input.writingStyle || [],
+    submissionTags: input.submissionTags || [], plotTags: input.plotTags || [],
+    pov: input.pov || null, targetWords: input.targetWords || null, genreFitNote: input.genreFitNote || null,
+  };
+}
+
+export function ideaDiscoveryAuthorContext(input: Parameters<typeof ideaDiscoveryAuthorSettings>[0]): string {
+  return '\n【本次作者明确选择；空项为未指定，不能由候选反推】' + JSON.stringify(ideaDiscoveryAuthorSettings(input))
+    + '\n本次明确的共同流派、关系或情节条件须保留，不因共同条件本身判来源偏移或同构；仍比较共同条件之外的主动选择、具体升级、反转改变与兑现代价，类型相同不能豁免真实因果同构。';
+}
 
 // 创建前筛选已经形成了结构化语义证据。它只在当前进程内随服务器绑定的题材卡流转，
 // 不进入 JSON / API / Canon，避免最终 Gate 丢掉上游证据后又靠关键词重新猜同一件事。
@@ -12,7 +37,7 @@ export function selectedPremiseEvidenceForIdeaCard(value: unknown): Record<strin
   return evidence ? { ...evidence } : null;
 }
 
-const SELECTED_PREMISE_FIELDS = [
+export const SELECTED_PREMISE_FIELDS = [
   'protagonistSituation',
   'openingEvent',
   'coreConflict',
@@ -109,9 +134,11 @@ export function normalizePremiseSelectionPayload(
     if (!poolItem) {
       throw new Error(`创建前题材筛选引用了轻量候选池中不存在的 premiseId：${premiseId || '空'}。`);
     }
-    const prohibited = prohibitedFictionNames({ ...poolItem, ...item });
-    if (prohibited.length) throw new Error(`已选题材 ${premiseId} 含禁止的故事命名：${prohibited.join('、')}；请使用原创虚构名称。`);
-    const missing = SELECTED_PREMISE_FIELDS.filter(field => String(item[field] || '').trim().length < 4);
+    const prohibited = prohibitedFictionNames({ ...poolItem, ...item,
+      workingTitle: poolItem.workingTitle, storyCore: poolItem.storyCore });
+    if (prohibited.length) throw new PremiseNamingError(`已选题材 ${premiseId} 含禁止的故事命名：${prohibited.join('、')}；请使用原创虚构名称。`);
+    // Difference is established by the independent overlap review, not this self-description.
+    const missing = SELECTED_PREMISE_FIELDS.filter(field => field !== 'differentiation' && String(item[field] || '').trim().length < 4);
     if (missing.length) {
       throw new Error(`已选题材 ${premiseId} 缺少创建完整题材卡所需的筛选证据：${missing.join('、')}。`);
     }
@@ -128,8 +155,8 @@ export function normalizePremiseSelectionPayload(
       ...poolItem,
       ...item,
       premiseId,
-      workingTitle: String(item.workingTitle || poolItem.workingTitle || '').trim(),
-      storyCore: String(item.storyCore || poolItem.storyCore || '').trim(),
+      workingTitle: String(poolItem.workingTitle).trim(),
+      storyCore: String(poolItem.storyCore).trim(),
       ...(categoryOptions?.length ? { storyCategory } : {}),
     };
   });
@@ -160,13 +187,16 @@ export function ideaPremiseSelectionDirective(
     : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
   return `【题材卡创建前筛选】
 这一步发生在完整题材卡创建之前。先广泛搜寻，再比较，再选择；禁止先创建完整题材卡再交给最终 Gate 大量淘汰。
+原池的storyCore也须用一到两句写清“处境与触发—主动选择—选择导致的升级—改变胜负条件—兑现及代价”的因果方向，不能只列职业和开端，再把所有展开补成同一条翻案路径。严格保留用户指定的类型、关系与情节条件；共同条件之外的选择、升级机制和兑现路径仍应分别构思，不能把职业列表当成不同故事。先在内部按实际因果路径归组，再跨不同路径比较选取成熟项，不默认取pool前几项；未选候选也须提供可辨认的路径，才能真正作为原池备用。以上只在现有storyCore中表达，不新增字段、输出长篇分析或增加模型调用。
 选题必须先证明读者为什么愿意点开：暂名也应有具体利益冲突、反常关系或迫切悬念，不能全是意象与道具名。先比较不同关系与欲望、主动对手、选择和推进路径，不要把所有题材收敛为“职业发现账册/印记→追查权贵→公开证据”。遵守用户分类，在分类内部广搜不同冲突；现实两难、关系背叛、绝境求生、欲望争夺、反常身份均可按故事取舍，不是逐项配额。
 对已选项逐对比较“人物关系—主动选择—对手制约—因果升级—反转改变—结局代价”；换时代、职业、身份包装或分类标签不算实质差异。若两项共享同一营救、潜入、被利用和反设局路径，须在锁定题材前从原轻量池选择真正不同的成熟项。筛选证据必须证明故事成立，不能靠自称独特或完整字段过关；能力触发、边界与代价应前后一致，不要求解释超自然科学来源或提前揭示全部谜底。选中前须比较openingEvent、coreConflict、escalation、reversalEffect与payoff中的同一事实；临时代价不能无条件变成永久代价，物资预支不能无条件变成复活或赎回活人，同一个人不能既已死亡又等待营救。无法沿原规则成立的胚子应在锁定前淘汰，从原池选择成熟项。反转不得取消已建立的核心前提，程序或权利的兑现必须有因果条件，不能让新能力或一次公开证据无条件解决全部冲突。
-选中前先在内部逐项对照原池 storyCore 与所选 openingEvent、coreConflict、activeChoice、escalation、reversalEffect、payoff：已明确的触发动作、人物身份、到场事件、时间阶段和结局方向须保留；未明确的真实动机可经反转揭示，但人物当时提出请求这一事件不能凭动机反转被取消。只在内部检查，不增加输出字段。
+选中前先在内部逐项对照原池 storyCore 与所选 openingEvent、coreConflict、activeChoice、escalation、reversalEffect、payoff：已明确的触发动作、人物身份、到场事件、时间阶段和结局方向须保留；未明确的真实动机可经反转揭示，但人物当时提出请求这一事件不能凭动机反转被取消。原池骨架涉及代写、转交、救助等多方动作时，要写清谁实施、为谁实施、交给谁或影响谁；没有明确的对象关系不得在展开时自行定成相反事实。只在内部检查，不增加输出字段。
+合理展开可补充原池未限定且与原约束兼容的细节；不得把原有职业或专业经历升级成更高等级、冠军资历、新权限或新能力来取得胜负，也不能让新增关键证据、对手目的或新角色取代原骨架的反转和兑现依赖。展开需要的关键身份与因果条件应在本次原池骨架中先明确，不能等到筛选字段再偷偷升级。
+先固定原池中每条规则的触发动作、作用对象及适用条件，再展开选择、升级、反转与兑现。尤其核对“有/无、已经/尚未、只作用于/不作用于”等条件；后文不能把作用对象改成其排除对象，也不能用一个此前没有的例外或新能力兑现原机制做不到的结果。若原机制无法支撑拟定结局，选择符合原规则的行动与代价，或在锁定前改选原池成熟候选，不把矛盾留给完整卡修复。selectedPremises 不返回或重写storyCore、workingTitle；这两项由服务器从原池继承。
 1. 以 ${poolSize} 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。${poolSize} 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ${requestedCount} 个成熟题材，可以少于 ${poolSize}，禁止为了凑数填弱项。
 2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${requestedCount} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。
 3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
-4. 从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。
+4. 从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。payoff须写出从主角行动到结果成立的必要桥接：涉及他人决定、机构认可或对手配合时，说明谁依据什么作出该决定，不能把交出证据、人情口碑、集体支持或主动请求直接当成对方必然认可。普通直接因果不补无关手续或法律条文；原池没有可成立的路径时，在锁定前选择其它成熟项，不把缺口留给完整卡再编新规则。
 5. ${storyTypeRule}
 6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 只包含已经选中的 ${requestedCount} 项及其筛选证据。不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
 }
@@ -193,6 +223,7 @@ ${includePreselectionPolicy ? IDEA_PRESELECTION_REVIEW_POLICY : "按已注入GEN
 - hook、description、setting、ending、scopeBreakdown、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；能力触发、持续时间、代价与同一人物状态须在所有字段一致。只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
 - 最终 Gate 只做独立验收；若这一张结构化后仍不成立，系统应暴露这一题材的管线失败，而不是自动补生或改写其它题材。
 写完后再逐项核对原池骨架和所选胚子中的触发动作、人物身份与知情、到场事件、时间阶段、升级机制和结局方向；同一事实在所有卡片字段中保持一致。人物当时的请求可以有后来才揭露的另一层动机，但请求发生这一事实必须保留。
+原池storyCore是事实来源；其它已选字段是经过来源核查的展开，不能用重复出现的展开新规则替代原池条件。若仍发现两者互斥，不得通过新增例外或能力把错误前提圆成另一故事。
 【已选题材胚子（内部标识已由服务器移除）】
 ${JSON.stringify(safePremise)}
 【同批差异参照（只作边界，不生成或借用其故事路径）】
@@ -261,7 +292,8 @@ function withoutIdeaInternalIdentity(value: unknown, internalField: string): Rec
  * 就把整批题材判成失败。模型只负责修 Gate 点名的可读字段。
  */
 export function ideaGateLocalRepairDirective(
-  targets: ReadonlyArray<{ premise?: unknown; card?: unknown; gateIssues?: unknown; storyRepairAllowed?: boolean }>,
+  targets: ReadonlyArray<{ premise?: unknown; card?: unknown; gateIssues?: unknown; storyRepairAllowed?: boolean;
+    dimensionRepairOptions?: Record<string, readonly string[]> }>,
 ): string {
   const safeTargets = targets.map((target, index) => ({
     position: index + 1,
@@ -269,12 +301,14 @@ export function ideaGateLocalRepairDirective(
     card: withoutIdeaInternalIdentity(target?.card, 'sourcePremiseId'),
     gateIssues: Array.isArray(target?.gateIssues) ? target.gateIssues.map(String) : [],
     storyRepairAllowed: target.storyRepairAllowed === true,
+    dimensionRepairOptions: target.dimensionRepairOptions || {},
   }));
   return `【最终 Gate·同题材有序局部修复】
 下面 ${safeTargets.length} 项已经完成创建前筛选和完整题材卡结构化。服务器已经锁定每一项的题材身份，你不负责回传、生成或修改内部标识，也不得换题。
 1. patches 数组必须恰好 ${safeTargets.length} 项，并严格按输入 position 的顺序逐项对应；每项只写需要修改的字段。
-2. 若gateIssues明确点名标题，可额外返回title，只改原故事的表达且不得换题；其它情况下标题保持原样。顶层只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数、标签或任何内部标识。
+2. 若gateIssues明确点名标题，可额外返回title，只改原故事的表达且不得换题；其它情况下标题保持原样。顶层只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数或任何内部标识。仅当服务器提供dimensionRepairOptions时，可另返回dimensionPatch对象，只修其中点名的标签字段，从该字段给定候选中选择1-2项；未授权字段不能修改。只存在标签问题时只返回dimensionPatch，不改故事，不返回空补丁。
 3. 只修 gateIssues 点名的表达证据，让原故事已有的异常/信息差、现实压力、主角行动、关系、因果升级、反转和二阶后果更清楚；禁止新增另一套案件、能力、身份、亲属关系或结局。
+先核对premise.storyCore中的原池事实是否允许这次修复；不能把其它展开字段里重复出现的新机制当作原池授权。改变一处规则的适用对象或状态时，须同步核对hook、description、setting、反转、结局与全部阶段的同一事实依赖；不能只改规则定义而让既有事件仍按相反条件发生。无法在原池事实与锁定选择、代价下修复时，该项返回空对象保留原卡供最终门继续拒绝，不补万能例外或新能力。
 若storyRepairAllowed=true，必须同步修复点名问题在setting、ending与scopeBreakdown中的所有矛盾引用，不能只改description留下旧规则。这些字段不接受整对象覆盖，只能另返回storyPatches数组：{"field":"setting或ending","match":"逐字存在且唯一的短原文","replacement":"修正后片段"}，或{"field":"scopeBreakdown","stage":1,"subfield":"reason或outcome","match":"该阶段字段中逐字存在且唯一的短原文","replacement":"修正后片段"}。stage从1开始。保留原题材人物、核心困境、选择方向和结局代价，不新增能力或改变已有规则数值；存在无法沿原事实修复的真实矛盾就保持拒绝，不能靠补一条万能规则圆回。不得改arc、chapters、篇幅或平台配置。storyRepairAllowed=false时禁止此数组。
 若gateIssues点名故事命名，可另返回namingReplacements对象（原禁止名称:原创虚构名称），服务器会在全部故事文本中统一替换，包含人物/宠物名、结局与章节规划；只许更换名称，不改变行为、关系和事件。其它题材不允许此字段。
 4. 某字段无需改就省略；禁止用空字符串删除原证据。服务器只会合并白名单内的非空文本，其余输出会被忽略。
@@ -293,6 +327,8 @@ export function applyOrderedIdeaRepairPatches(
   titleRepairPositions: readonly number[] = [],
   namingRepairPositions: readonly number[] = [],
   storyRepairPositions: readonly number[] = [],
+  dimensionRepairOptions: readonly Record<string, readonly string[]>[] = [],
+  dimensionOnlyPositions: readonly number[] = [],
 ): Array<Record<string, unknown>> {
   if (!Array.isArray(rawPatches) || rawPatches.length !== cards.length) {
     const actual = Array.isArray(rawPatches) ? rawPatches.length : 0;
@@ -305,20 +341,25 @@ export function applyOrderedIdeaRepairPatches(
     if (!patch) {
       throw new Error(`最终 Gate 定向局部修复第 ${index + 1} 项不是对象；系统不会猜测它对应哪个题材。`);
     }
+    if (dimensionOnlyPositions.includes(index) && Object.keys(patch).some(key=>key!=='dimensionPatch')) {
+      throw new Error('仅标签问题禁止修改故事或其它字段');
+    }
     const next: Record<string, unknown> = { ...card };
-    if (namingRepairPositions.includes(index) && patch.namingReplacements !== undefined) {
-      const replacements = ideaRepairRecord(patch.namingReplacements);
-      if (!replacements || !Object.keys(replacements).length) throw new Error('故事命名修复必须给出完整名称映射');
-      for (const [oldName, newName] of Object.entries(replacements)) {
-        if (!FICTION_NAMING_POLICY.prohibitedNames.some(name => name.toLowerCase() === oldName.toLowerCase())
-          || typeof newName !== 'string' || newName.trim().length < 2 || newName.length > 30
-          || prohibitedFictionNames({ title: newName }).length) throw new Error('故事命名修复只能将禁止名称改为原创虚构名称');
-        const pattern = new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        const replace = (value: unknown): unknown => typeof value === 'string' ? value.replace(pattern, () => newName.trim())
-          : Array.isArray(value) ? value.map(replace)
-          : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, part]) => [key, replace(part)])) : value;
-        for (const field of FICTION_NAMING_POLICY.narrativeFields) if (field in next) next[field] = replace(next[field]);
+    if (patch.dimensionPatch !== undefined) {
+      const dimensions = ideaRepairRecord(patch.dimensionPatch);
+      const allowed = dimensionRepairOptions[index] || {};
+      if (!dimensions || !Object.keys(dimensions).length) throw new Error('标签修复须提供非空dimensionPatch');
+      for (const [field, values] of Object.entries(dimensions)) {
+        if (!['storyTone','writingStyle','webNovelGenre','plotTags'].includes(field) || !allowed[field]
+          || !Array.isArray(values) || values.length < 1 || values.length > 2
+          || new Set(values).size !== values.length || values.some(value=>typeof value!=='string' || !allowed[field].includes(value))) {
+          throw new Error('标签修复只能修改服务器点名字段并使用本次字典或作者选择的候选');
+        }
+        next[field] = [...values];
       }
+    }
+    if (namingRepairPositions.includes(index) && patch.namingReplacements !== undefined) {
+      Object.assign(next, applyFictionNamingReplacements(next, patch.namingReplacements));
     }
     if (titleRepairPositions.includes(index) && typeof patch.title === 'string' && patch.title.trim()) next.title = patch.title.trim();
     for (const field of IDEA_GATE_REPAIR_TEXT_FIELDS) {

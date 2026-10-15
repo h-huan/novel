@@ -4,7 +4,7 @@ import { readConstitution } from '../modules/project/creative-constitution';
 import { parseScoreReviewJson } from './review-json';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
 import { dimensionBasis } from '../test/quality-review.fixture';
-import { causalEvidenceAnchors, causalExitResultAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchors, causalExitResultAnchors, causalChapterResultAnchors } from '../modules/writing-quality/causal-review';
 import { createServer } from 'node:http';
 
 it.each(['project_context:p1', 'project_context:p999'])('completes issue citations within the existing two reviews and preserves verdicts: %s', async (basisAnchorId) => {
@@ -45,6 +45,34 @@ const createService = () => {
   };
   return new RealLLMService(router as any);
 };
+it.each([32768,4096])('retains the original truncation and usage after the last allowed call at %s tokens',async(maxTokens)=>{
+ const service=createService(),budget:{remaining:number;recoveryWithoutThinking?:boolean}={remaining:1};
+ const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+ const usage={promptTokens:6908,completionTokens:maxTokens,totalTokens:6908+maxTokens};
+ const callModel=vi.fn().mockResolvedValue({content:'',finishReason:'length',usage});
+ (service as any).callModel=callModel;
+ await expect(service.generate({prompt:'完整来源与原字段',scenario:'idea_generate',responseFormat:'json_object',maxTokens,
+  physicalCallBudget:budget,metrics:{stepKey:'idea_premise_source_drift_review'}}))
+  .rejects.toMatchObject({structuredOutputTruncated:true,physicalCallBudgetExhausted:true,generatedContent:''});
+ expect(callModel).toHaveBeenCalledTimes(1);expect(budget.remaining).toBe(0);
+ expect(budget.recoveryWithoutThinking).toBeUndefined();
+ expect(record).toHaveBeenCalledTimes(1);expect(record.mock.calls[0][2]).toBe('truncated');
+ expect((record.mock.calls[0][5] as any).resp.usage).toEqual(usage);
+});
+it('keeps a network-recovered truncation instead of replacing it with a budget error',async()=>{
+ const service=createService(),budget:{remaining:number;recoveryWithoutThinking?:boolean}={remaining:2};
+ const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+ const usage={promptTokens:6908,completionTokens:32768,totalTokens:39676};
+ const callModel=vi.fn().mockRejectedValueOnce(new Error('UND_ERR_SOCKET'))
+  .mockResolvedValueOnce({content:'',finishReason:'length',usage});
+ (service as any).callModel=callModel;
+ await expect(service.generate({prompt:'完整来源与原字段',scenario:'idea_generate',responseFormat:'json_object',maxTokens:32768,
+  physicalCallBudget:budget,metrics:{stepKey:'idea_premise_source_drift_review'}}))
+  .rejects.toMatchObject({structuredOutputTruncated:true,physicalCallBudgetExhausted:true});
+ expect(callModel).toHaveBeenCalledTimes(2);expect(budget.recoveryWithoutThinking).toBeUndefined();
+ expect(record).toHaveBeenCalledTimes(1);expect(record.mock.calls[0][2]).toBe('truncated');
+ expect((record.mock.calls[0][5] as any).resp.usage).toEqual(usage);
+});
 it('aborts the physical call at the deadline without retrying or accepting partial output', async () => {
   vi.useFakeTimers();
   try {
@@ -301,6 +329,24 @@ describe('upstream responsibility preflight', () => {
 });
 
 describe('decisive planning action proof', () => {
+  it('在交给小说修复前补齐场景漏查项，保留首轮已举证缺口，不另开模型循环', async () => {
+    const chapter = {chapterNumber:4,chapterFunction:'climax',content:'他把编号写在本子上。',scenes:[{outcome:'老人手里有了记录。'},{outcome:'证人没有离开。'}],characterActions:[{action:'他把编号写在本子上。',result:'记录登记完成。'}]};
+    const body=JSON.stringify([chapter]);
+    const anchors=causalEvidenceAnchors(body,{}),catalog=causalChapterResultAnchors(anchors,0);
+    const missing=catalog.find(anchor=>anchor.path==='0.scenes.0.outcome')!;
+    const action=anchors.find(anchor=>anchor.path==='0.content'&&!anchor.id.includes(':c'))!;
+    const rows=catalog.filter(anchor=>anchor.id!==missing.id).map(anchor=>({chapterNumber:4,actionAnchorId:action.id,resultAnchorId:anchor.id,bridgeAnchorId:anchor.path==='0.scenes.1.outcome'?'':action.id,status:anchor.path==='0.scenes.1.outcome'?'gap':'supported',reason:anchor.path==='0.scenes.1.outcome'?'没有呈现证人仍然在场的行为依据':'实际登记行动可支持登记完成的直接结果'}));
+    const service=new RealLLMService({} as any);
+    const generate=vi.fn().mockResolvedValueOnce({content:JSON.stringify({causalAudit:{status:'evaluated',reason:'首轮只检查了部分实际结果',transitions:rows}})})
+      .mockResolvedValueOnce({content:JSON.stringify({repairs:[{index:rows.length,actionAnchorId:action.id,resultAnchorId:missing.id,bridgeAnchorId:'',status:'gap',reason:'记录在自己的本子上，未呈现交给老人的动作'}]})});
+    (service as any).generateInternal=generate;
+    const result=await (service as any).auditPlanningActions({id:'r',context:'{}'}, {}, JSON.stringify({volumes:[{chapters:[chapter]}]}));
+    expect(result.verified).toBe(true);
+    expect(result.issues).toHaveLength(2);
+    expect(result.audit.transitions.find((row:any)=>row.resultAnchorId===missing.id)).toMatchObject({chapterNumber:4,status:'gap'});
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls[1][0].prompt).toContain('不能重审');
+  });
   const bad = { chapterNumber: 4, chapterFunction: 'climax', content: '他关上门。对手无法开门。' };
   const run = { id: 'r', context: JSON.stringify({ rule: '门外插销落下后，只能从门外移开。' }) };
   const gap = { chapterNumber: 4, actionEvidence: '他关上门。', resultEvidence: '对手无法开门。', bridgeEvidence: '', status: 'gap', reason: '关门本身没有剥夺对手正常开门能力，缺少实际限制条件' };
@@ -382,12 +428,15 @@ describe('decisive planning action proof', () => {
     for (const verified of [true, false]) {
       const metrics = { beginRun: vi.fn(() => run), finishRun: vi.fn(), blockRunValidation: vi.fn() };
       const service = new RealLLMService({} as any, metrics as any);
-      const audit = vi.fn().mockResolvedValue({ verified, errors: ['引文合同未完成'], issues: verified ? [{ summary: gap.reason }] : [] });
+      const evidence = { status: verified ? 'evaluated' : 'not_evaluated', transitions: [gap] };
+      const audit = vi.fn().mockResolvedValue({ verified, errors: ['引文合同未完成'], issues: verified ? [{ summary: gap.reason }] : [], audit: evidence });
       (service as any).auditPlanningActions = audit;
       await expect(service.validatePlanningActions('p', [bad], { analysis: '已确认章节责任' }))
-        .rejects.toMatchObject({ gateRejection: true, report: { status: verified ? 422 : 503 } });
+        .rejects.toMatchObject({ gateRejection: true, planningActionAudit: evidence, report: { status: verified ? 422 : 503,
+          prefix: verified ? '章纲行动结果未通过，当前章纲未保存' : '章纲行动结果评审未完成，当前章纲未保存' } });
       expect(audit).toHaveBeenCalledTimes(1);
       expect(metrics.finishRun).toHaveBeenCalledWith('r', 'failed', expect.any(Number), expect.any(String), expect.any(String));
+      expect(metrics.blockRunValidation).toHaveBeenCalledWith('r', expect.any(String), evidence);
       await service.validatePlanningActions('p', [{ ...bad, chapterFunction: 'paving' }], {});
       expect(metrics.beginRun).toHaveBeenCalledTimes(1);
     }

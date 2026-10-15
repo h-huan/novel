@@ -1,0 +1,54 @@
+.dictionary-page {
+  height: 100%; min-height: 0; width: 100%; max-width: 1120px;
+  box-sizing: border-box; margin: 0 auto; padding: 16px 24px 10px;
+  display: flex; flex-direction: column; overflow: hidden;
+  color: var(--color-text-primary); font-size: 13px;
+}
+.dictionary-page button, .dictionary-page input {
+  min-height: 30px; box-sizing: border-box; padding: 4px 10px;
+  border: 1px solid var(--color-border); border-radius: 5px;
+  background: transparent; color: var(--color-text-soft); font: inherit;
+}
+.dictionary-page button { cursor: pointer; white-space: nowrap; }
+.dictionary-page button:hover { background: rgba(150, 180, 210, .09); }
+.dictionary-page button:disabled { opacity: .45; cursor: default; }
+.dictionary-page :is(button, input, [role="tabpanel"]):focus-visible { outline: 2px solid #65cde2; outline-offset: 2px; }
+.dictionary-page input { min-width: 0; background: rgba(0, 0, 0, .12); color: var(--color-text-primary); }
+.dictionary-page input::placeholder { color: var(--color-text-secondary); }
+.dictionary-page__toolbar { flex: 0 0 auto; padding-bottom: 10px; border-bottom: 1px solid var(--color-border); }
+.dictionary-page__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.dictionary-page h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: .02em; }
+.dictionary-page h1 span { margin-left: 6px; font-size: 11px; color: var(--color-text-secondary); font-weight: 400; }
+.dictionary-page__heading p { margin: 4px 0 0; color: var(--color-text-soft); font-size: 12px; line-height: 1.5; }
+.dictionary-page .dictionary-page__sync { color: var(--color-text-secondary); font-size: 12px; }
+.dictionary-page__tabs { display: flex; flex-wrap: wrap; gap: 5px; }
+.dictionary-page__tabs button { padding: 5px 12px; border-color: transparent; color: var(--color-text-secondary); }
+.dictionary-page__tabs button[aria-selected="true"] { background: rgba(80, 190, 210, .13); border-color: rgba(101, 205, 226, .45); color: #8de2f2; font-weight: 600; }
+.dictionary-page__context { display: flex; align-items: baseline; gap: 12px; margin: 8px 0; }
+.dictionary-page__context p { flex: 1; margin: 0; color: var(--color-text-soft); font-size: 12px; line-height: 1.5; }
+.dictionary-page__context > span { flex-shrink: 0; color: var(--color-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dictionary-page__tools { display: flex; gap: 12px; }
+.dictionary-page__tools > input { flex: 1; }
+.dictionary-page__add { display: flex; flex: 1; gap: 6px; }
+.dictionary-page__add input { flex: 1; }
+.dictionary-page .dictionary-page__primary { border-color: rgba(101, 205, 226, .35); background: rgba(80, 190, 210, .13); color: #8de2f2; }
+.dictionary-page__message { margin: 8px 0 0; color: #efc47d; font-size: 12px; }
+.dictionary-page__list { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-top: 4px; }
+.dictionary-page__entry { padding: 8px 10px; margin: 0; border-bottom: 1px solid rgba(140, 160, 190, .15); }
+.dictionary-page__entry:nth-child(even) { background: rgba(140, 160, 190, .035); }
+.dictionary-page__entry:hover { background: rgba(140, 160, 190, .07); }
+.dictionary-page__entry-heading { display: flex; align-items: center; gap: 6px; }
+.dictionary-page__entry-heading strong { flex: 1; min-width: 0; color: var(--color-text-primary); font-size: 14px; font-weight: 600; }
+.dictionary-page__entry-heading input { flex: 1; }
+.dictionary-page__entry-heading button { min-height: 25px; padding: 2px 8px; font-size: 12px; border-color: transparent; }
+.dictionary-page .dictionary-page__edit { color: #84d5e8; }
+.dictionary-page .dictionary-page__delete { color: #e9a0a7; }
+.dictionary-page .dictionary-page__delete:hover { background: rgba(220, 90, 110, .13); }
+.dictionary-page__entry > p { margin: 3px 0 0; color: var(--color-text-soft); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.dictionary-page__empty { padding: 20px 10px; color: var(--color-text-secondary); }
+@media (max-width: 620px) {
+  .dictionary-page { padding: 12px; }
+  .dictionary-page__heading { align-items: flex-start; }
+  .dictionary-page__tools { flex-direction: column; gap: 6px; }
+  .dictionary-page__tabs button { padding: 4px 8px; }
+}

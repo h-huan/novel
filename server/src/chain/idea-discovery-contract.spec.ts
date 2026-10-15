@@ -8,6 +8,8 @@ import {
   ideaGateLocalRepairDirective,
   ideaHookRequirement,
   ideaPremiseSelectionDirective,
+  ideaDiscoveryAuthorSettings,
+  ideaDiscoveryAuthorContext,
   normalizePremiseSelectionPayload,
   selectedPremiseEvidenceForIdeaCard,
 } from './idea-discovery-contract';
@@ -28,6 +30,39 @@ const selectedPremise = (premiseId: string) => ({
 });
 
 describe('idea discovery preselection contract', () => {
+  it('allows omitted self-assessed differentiation but keeps every causal field mandatory', () => {
+    const item:any=selectedPremise('P1');delete item.differentiation;
+    const pool=[{premiseId:'P1',workingTitle:'维修铺的选择',storyCore:'主角承担失去铺面的代价，完成自己作出的既定选择。'}];
+    const result=normalizePremiseSelectionPayload({pool,selectedPremises:[item]},1,1);
+    expect(result.selected[0].differentiation).toBeUndefined();
+    expect(result.selected[0].activeChoice).toBe(item.activeChoice);
+    for(const field of ['activeChoice','escalation','reversalEffect','payoff']) {
+      expect(()=>normalizePremiseSelectionPayload({pool,selectedPremises:[{...item,[field]:''}]},1,1)).toThrow(field);
+    }
+  });
+  it('repairs only authorized dictionary fields and rejects invented labels or story edits for dimension-only failures',()=>{
+    const original={sourcePremiseId:'P5',storyTone:['温情','热血'],description:'既有完整故事保持不变',ending:'原结局保持不变'};
+    const options=[{storyTone:['温馨','热血']}];
+    const patched=applyOrderedIdeaRepairPatches([original],[{dimensionPatch:{storyTone:['温馨','热血']}}],[],[],[],options,[0])[0];
+    expect(patched.storyTone).toEqual(['温馨','热血']);expect(patched.description).toBe(original.description);expect(patched.ending).toBe(original.ending);
+    for(const patch of [{dimensionPatch:{storyTone:['温情']}},{dimensionPatch:{writingStyle:['白描']}},
+      {dimensionPatch:{storyTone:['温馨']},description:'偷改故事'}]) {
+      expect(()=>applyOrderedIdeaRepairPatches([original],[patch],[],[],[],options,[0])).toThrow();
+    }
+    expect(()=>applyOrderedIdeaRepairPatches([original],[{dimensionPatch:{storyTone:['温馨']}}])).toThrow();
+    expect(original.storyTone).toEqual(['温情','热血']);
+  });
+  it('projects only author choices for the initial generation and all later reviews without inferring omitted fields', () => {
+    const input={storyType:'short_story',platform:'fanqie',storyCategory:'都市日常',webNovelGenre:['扮猪吃虎','退婚流'],
+      plotTags:['婆媳'],storyTone:[],writingStyle:['白描'],pov:'第一人称',apiKey:'must-not-project'};
+    const settings=ideaDiscoveryAuthorSettings(input);
+    expect(settings).toMatchObject({webNovelGenre:['扮猪吃虎','退婚流'],plotTags:['婆媳'],storyTone:[],writingStyle:['白描'],pov:'第一人称'});
+    expect(settings).not.toHaveProperty('apiKey');
+    expect(ideaDiscoveryAuthorContext(input)).toContain(JSON.stringify(settings));
+    expect(ideaDiscoveryAuthorContext(input)).toContain('类型相同不能豁免真实因果同构');
+    expect(ideaDiscoveryAuthorSettings({storyCategory:'自动候选',discoveryCategoryOptions:['都市日常','悬疑']}))
+      .toMatchObject({storyCategory:null,categoryCandidates:['都市日常','悬疑'],webNovelGenre:[]});
+  });
   it('treats the broad pool size as a search target instead of an all-candidate hard gate', () => {
     const contract = ideaPremiseSelectionDirective('short_story', 5);
 
@@ -41,6 +76,10 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('不把最终 Gate 当主要选题器');
     expect(contract).toContain('原池 storyCore 与所选 openingEvent');
     expect(contract).toContain('人物当时提出请求这一事件不能凭动机反转被取消');
+    expect(contract).toContain('要写清谁实施、为谁实施、交给谁或影响谁');
+    expect(contract).toContain('选择导致的升级—改变胜负条件—兑现及代价');
+    expect(contract).toContain('共同条件之外的选择、升级机制和兑现路径仍应分别构思');
+    expect(contract).toContain('不默认取pool前几项');
   });
 
   it('carries the whole causal chain into one-card structuring', () => {
@@ -95,6 +134,17 @@ describe('idea discovery preselection contract', () => {
 
     expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: selected }, 5, 15))
       .toThrow('activeChoice');
+  });
+
+  it('keeps the original pool source even when the generated expansion tries to overwrite it', () => {
+    const pool=['P1','P2'].map(premiseId=>({premiseId,workingTitle:'原池暂名'+premiseId,
+      storyCore:'同一行动只能转移既有代价，不能消除代价'+premiseId}));
+    const result=normalizePremiseSelectionPayload({pool,selectedPremises:pool.map(item=>({...selectedPremise(item.premiseId),
+      workingTitle:'覆盖原暂名',storyCore:'展开自行改成行动消除所有代价'}))},2,2);
+    expect(result.selected.map(item=>item.storyCore)).toEqual(pool.map(item=>item.storyCore));
+    expect(result.selected.map(item=>item.workingTitle)).toEqual(pool.map(item=>item.workingTitle));
+    expect(()=>normalizePremiseSelectionPayload({pool:[{...pool[0],storyCore:'主角把宠物命名为ChatGPT并试图用展开覆盖来源'},pool[1]],
+      selectedPremises:pool.map(item=>({...selectedPremise(item.premiseId),storyCore:'覆盖来源后隐藏禁止命名'}))},2,2)).toThrow('禁止的故事命名');
   });
 
   it('blocks duplicate selections and selections that do not come from the lightweight pool', () => {

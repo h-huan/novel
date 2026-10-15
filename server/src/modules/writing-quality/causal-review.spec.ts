@@ -3,6 +3,26 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
+import { causalChapterResultAnchors } from './causal-review';
+
+it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
+ const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
+ const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
+ const results=causalChapterResultAnchors(anchors,0);
+ expect(results.some(row=>row.text.includes('老人手里'))).toBe(true);
+ expect(results.filter(row=>row.path==='0.scenes.0.outcome')).toHaveLength(2);
+ expect(results.map(row=>row.path)).not.toContain('0.scenes.0.goal');
+ expect(results.map(row=>row.path)).not.toContain('0.characterStates.0.stateBefore');
+ expect(results.map(row=>row.path)).toContain('0.foreshadowingRecover.0.method');
+});
+it('补齐遗漏结果只继承服务器章号，不允许借协议修复改章号或沿用旧桥接', () => {
+ const original={transitions:[{chapterNumber:4,resultAnchorId:'body:v2'}]};
+ const errors=['第1项因果审查缺少行动及成立条件'];
+ const fixed=applyCausalAuditRepair(original,errors,{repairs:[{index:0,status:'gap',resultAnchorId:'body:v2'}]});
+ expect(fixed.transitions[0]).toMatchObject({chapterNumber:4,status:'gap'});
+ expect(fixed.transitions[0].bridgeAnchorId).toBeUndefined();
+ expect(()=>applyCausalAuditRepair(original,errors,{repairs:[{index:0,chapterNumber:3}]})).toThrow('不能改变');
+});
 
 it('retains the verified bridge only for an unchanged supported pair, never for a new gap or state', () => {
  const body = '她递交材料。\n\n调查员接过材料。';

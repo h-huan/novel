@@ -17,10 +17,11 @@ import { openProject } from '../lib/openProject';
 import { updateCreationStepStatus } from '../lib/creation-progress';
 import IdeaCard from '../components/discovery/IdeaCard';
 import MultiSelectDropdown from '../components/common/MultiSelectDropdown';
-import { discoveryTagOptions, toggleDiscoveryTagSelection } from '../lib/discoveryTagOptions';
+import { CREATIVE_DICTIONARY_TYPES, dictionaryDiscoveryTags, toggleDiscoveryTagSelection, type CreativeDictionaryItem } from '../lib/discoveryTagOptions';
 import CategoryReferencePicker from '../components/common/CategoryReferencePicker';
 import {
   CHAPTER_WORD_RANGE,
+  DISCOVERY_TAG_GROUPS,
   STORY_TARGET_WORD_RANGES,
   canFitTargetWordsToChapters,
   storyTargetWordsRequirement,
@@ -572,18 +573,29 @@ const DiscoveryWizardPage: React.FC = () => {
   // 分类候选与长短篇范围统一来自 shared；未核实项允许填写后台原名。
   const [configError, setConfigError] = useState('');
   const [customTag, setCustomTag] = useState('');
-  const [creativeGenres, setCreativeGenres] = useState<string[]>([]);
-  const [toneOptions, setToneOptions] = useState<string[]>([]);
-  const [styleOptions, setStyleOptions] = useState<string[]>([]);
-  const [plotOptions, setPlotOptions] = useState<string[]>([]);
-  const [povOptions, setPovOptions] = useState<string[]>([]);
+  const [dictionaryItems, setDictionaryItems] = useState<CreativeDictionaryItem[]>([]);
+  const styleOptions = dictionaryItems.filter(item => item.dictType === 'writing_style').map(item => item.label);
+  const povOptions = dictionaryItems.filter(item => item.dictType === 'narrative_pov').map(item => item.label);
   useEffect(() => {
-    api.get('/dict/web_novel_genre').then((response) => setCreativeGenres(((response as any)?.items || []).map((item: any) => item.label))).catch(() => {});
-    // 这里曾让基调、文风、情节和视角只读前端种子，后果是字典管理的增删改不会改变灵感发现选项。
-    api.get('/dict/tone_tag').then((r) => setToneOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
-    api.get('/dict/writing_style').then((r) => setStyleOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
-    api.get('/dict/plot_tag').then((r) => setPlotOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
-    api.get('/dict/narrative_pov').then((r) => setPovOptions(((r as any)?.items || []).map((item: any) => item.label))).catch(() => {});
+    let active = true;
+    let revision = 0;
+    const refreshDictionary = () => {
+      const current = ++revision;
+      Promise.all(CREATIVE_DICTIONARY_TYPES.map(type => api.get<any>('/dict/' + type)))
+        .then(results => { if (active && current === revision) setDictionaryItems(results.flatMap(result => (result as any).items || [])); })
+        .catch(() => {});
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshDictionary(); };
+    refreshDictionary();
+    window.addEventListener('focus', refreshDictionary);
+    window.addEventListener('story-dictionary-changed', refreshDictionary);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshDictionary);
+      window.removeEventListener('story-dictionary-changed', refreshDictionary);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
   const categoryVerification = platformCategoryTreeVerification(targetPlatform, storyType);
   const hasVerifiedCategoryOptions = categoryVerification?.verified === 'confirmed';
@@ -669,8 +681,7 @@ const DiscoveryWizardPage: React.FC = () => {
   // 有实测分类时只展示这份分类证据中的官方标签；无实测时明确使用作者设定字典。
   const submissionOptions = categoryWritingProfile ? categoryWritingProfile.topTags.map((tag) => tag.name) : [];
   const tagState = { selectedGenres, selectedPlotTags, selectedTones, selectedSubmissionTags };
-  const groupedTags = discoveryTagOptions({ selectedGenres: creativeGenres, selectedPlotTags: plotOptions,
-    selectedTones: toneOptions, selectedSubmissionTags: submissionOptions }, tagState);
+  const groupedTags = dictionaryDiscoveryTags(dictionaryItems, tagState, submissionOptions);
   const toggleUnifiedTag = (value: string) => {
     const option = groupedTags.find(item => item.value === value);
     if (!option) return;
@@ -1474,11 +1485,11 @@ const DiscoveryWizardPage: React.FC = () => {
       <p style={{ color: 'var(--color-text-muted)', fontSize: 13, lineHeight: 1.7 }}>
         先按分组选择，打开下拉可直接搜索。已选条件固定，未选维度随机；同一标签无需重复勾选。
       </p>
-      {(['主题与设定', '人物与关系', '情节与体验', '平台标签（待核实分组）'] as const).map(group => {
+      {DISCOVERY_TAG_GROUPS.map(({ key: group, label, description }) => {
         const items = groupedTags.filter(option => option.group === group);
         if (!items.length) return null;
-        return <MultiSelectDropdown key={group} label={group === '平台标签（待核实分组）' ? '平台补充标签' : group} options={items} showLabel
-          description={group === '主题与设定' ? '故事背景与核心设定，例如古代、末世、系统、重生。' : group === '人物与关系' ? '人物类型与关系结构，例如总裁、群像、双强、无CP。' : group === '情节与体验' ? '主要冲突与阅读体验，例如复仇、逆袭、爽文、甜宠。' : '所选平台分类中可参考的作品标签，候选会随分类变化。'}
+        return <MultiSelectDropdown key={group} label={label} options={items} showLabel
+          description={description}
           value={groupedTags.filter(option => option.group === group && option.bindings.some(binding => tagState[binding.field].includes(binding.value))).map(option => option.value)}
           onToggle={toggleUnifiedTag} placeholder={`选择${group}，留空随机`} />;
       })}

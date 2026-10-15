@@ -1,4 +1,4 @@
-
+import { ADDITIONAL_CREATIVE_TAGS, ADDITIONAL_GENRE_GUIDES, ADDITIONAL_STYLE_GUIDES, ADDITIONAL_TONE_GUIDES } from './creative-dictionary';
 /**
  * 可执行创作维度的唯一词表。投稿字段名由平台决定；创作六维仍是生成与质检前提。
  *
@@ -83,6 +83,7 @@ export const NARRATIVE_POV_SEED_LABELS = [
  * 这里的语义是「与种子一致」，不是另立一套标准。
  */
 export const WRITING_STYLE_SEED_LABELS = [
+  ...Object.keys(ADDITIONAL_STYLE_GUIDES),
   '白描/朴素',
   '情感',
   '宏大叙事',
@@ -95,6 +96,7 @@ export const WRITING_STYLE_SEED_LABELS = [
 
 /** 基调（tone 维）取值的唯一事实源。语义边界同 WRITING_STYLE_SEED_LABELS（字典初始值，不是硬编码白名单）。 */
 export const STORY_TONE_SEED_LABELS = [
+  ...Object.keys(ADDITIONAL_TONE_GUIDES),
   '热血',
   '搞笑',
   '悬疑',
@@ -109,6 +111,7 @@ export const STORY_TONE_SEED_LABELS = [
 
 /** 情节取向是作者创作设定，不冒称任何平台的投稿字段。两处创建表单共用候选。 */
 export const PLOT_TAG_SEED_LABELS = [
+  ...Object.keys(ADDITIONAL_CREATIVE_TAGS),
   '成长', '逆袭', '复仇', '救赎', '探案', '冒险', '权谋', '情感拉扯',
   '群像', '商战', '生存', '争霸', '悬念反转', '日常经营',
   '打脸回报', '人物牺牲', '女性成长',
@@ -119,6 +122,7 @@ export const PLOT_TAG_SEED_LABELS = [
 
 /** Supplementary creative tags have their own definitions, not genre or official platform identities. */
 export const CREATIVE_TAG_GUIDES: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(ADDITIONAL_CREATIVE_TAGS).map(([label, tag]) => [label, tag.guide])),
   "女强": "女主拥有独立目标、判断与行动能力，关键决定实际推动故事。",
   "大女主": "以女主自身成长与事业选择为主线，其他关系服务其独立经历。",
   "萌宝": "孩子作为重要角色参与关系和情节，而非只作为称呼或背景。",
@@ -193,6 +197,7 @@ export const CREATIVE_TAG_GUIDES: Record<string, string> = {
  * 点名作者会诱导模型复刻特定文本（书籍污染），与「写作规则收敛到执行标准唯一来源」是同一条红线。
  */
 export const STYLE_GUIDES: Record<string, string> = {
+  ...ADDITIONAL_STYLE_GUIDES,
   '白描/朴素': '用清楚、自然的日常语言叙事，少堆修饰；动作、对白和必要的心理交代共同表达情绪与因果，不强制把心理换成手部动作；长短句随意思自然变化，标点服从语气与语义，不把连续意思拆成单字或碎句；环境与职业细节只保留能帮助理解、改变局势或塑造人物的部分，避免同一动作和背景反复说明；常用语气词可以自然使用，不按频次删“了”，也不重复解释读者已经能理解的意思',
   '情感': '细腻的心理描写，关系拉扯有来有回；对白带潜台词，情绪共鸣必须落在具体细节上，不空喊',
   '宏大叙事': '世界观交代完整，群像与阵营并进，伏笔分层交叉；允许铺垫，但每次铺垫都必须在后续被兑现',
@@ -205,6 +210,7 @@ export const STYLE_GUIDES: Record<string, string> = {
 
 /** 基调操作定义（唯一事实源）。与 STYLE_GUIDES 同一分工：字典定「可选值」，这里定「选了之后怎么写」。 */
 export const TONE_GUIDES: Record<string, string> = {
+  ...ADDITIONAL_TONE_GUIDES,
   // 这里曾把爽文、权谋、无敌、逆袭、刀人、女强同时当作情绪基调候选，后果是与情节/流派重叠。
   // 旧项目可能仍保存这些值，保留其操作定义以维持既有作品质量门；新候选只取 STORY_TONE_SEED_LABELS。
   '热血': '靠「立目标—受挫—突破」推进，情绪高点必须由角色的主动选择与代价堆出来，不靠喊口号和形容词',
@@ -227,6 +233,7 @@ export const TONE_GUIDES: Record<string, string> = {
 
 /** 作者创作流派的系统操作口径，不冒称平台投稿分类或官方定义。 */
 export const GENRE_GUIDES: Record<string, string> = {
+  ...ADDITIONAL_GENRE_GUIDES,
   '系统流': '系统有明确的触发、任务、奖励与限制，人物选择会改变系统状态；规则与代价保持一致，不用临时新增权限跳过冲突',
   '重生': '人物回到自身经历过的时间节点，既有记忆影响当前选择；记忆有信息范围，改变过去会产生可追踪的新后果',
   '穿越': '人物进入不同时间或世界，原身份与新环境的差异推动行动；迁移条件、知识与能力边界保持一致',

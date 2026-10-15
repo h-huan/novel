@@ -5,7 +5,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { DatabaseService } from '../../database/database.service';
-import { GLOBAL_STORY_CATEGORIES, NARRATIVE_POV_SEED_LABELS, PLOT_TAG_SEED_LABELS, STORY_TONE_SEED_LABELS, WRITING_STYLE_SEED_LABELS, WEB_NOVEL_GENRE_SEED_LABELS } from '../../../shared/src';
+import { CREATIVE_DICTIONARY_VERSION, GLOBAL_STORY_CATEGORIES, NARRATIVE_POV_SEED_LABELS, PLOT_TAG_SEED_LABELS, STORY_TONE_SEED_LABELS, WRITING_STYLE_SEED_LABELS, WEB_NOVEL_GENRE_SEED_LABELS } from '../../../shared/src';
 
 export interface DictItem {
   id: string;
@@ -25,7 +25,7 @@ export interface DictItem {
  * 所以正确性不依赖这里的数字被手动 bump（这正是历史上「改了 seed 却不生效」的根因）。
  * 但每次改动 seed 内容时仍应递增，便于在 _migrations 里核对某次同步到底跑没跑。
  */
-export const STORY_DICT_SEED_VERSION = 26;
+export const STORY_DICT_SEED_VERSION = CREATIVE_DICTIONARY_VERSION;
 
 /**
  * 执行标准种子（唯一事实源）。
@@ -243,6 +243,8 @@ export class StoryDictService implements OnModuleInit {
     if (dto.label !== undefined) { updates.push('label = ?'); params.push(dto.label); }
     if (dto.parentLabel !== undefined) { updates.push('parent_label = ?'); params.push(dto.parentLabel); }
     if (dto.sortOrder !== undefined) { updates.push('sort_order = ?'); params.push(dto.sortOrder); }
+    // An explicit user edit owns the label/group; startup seed sync must preserve it.
+    updates.push('is_custom = 1');
     updates.push('updated_at = ?');
     params.push(now);
     params.push(id);

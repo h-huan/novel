@@ -11,3 +11,21 @@ export function prohibitedFictionNames(value: Record<string, any>): string[] {
   const content = fictionNarrativeText(value).toLowerCase();
   return FICTION_NAMING_POLICY.prohibitedNames.filter(name => content.includes(name.toLowerCase()));
 }
+
+/** Literal name-only edits of narrative values; identifiers and settings stay intact. */
+export function applyFictionNamingReplacements(value: Record<string, any>, replacements: unknown): Record<string, any> {
+  if (!replacements || typeof replacements !== 'object' || Array.isArray(replacements) || !Object.keys(replacements).length)
+    throw new Error('故事命名修复必须给出完整名称映射');
+  const next = { ...value };
+  for (const [oldName, newName] of Object.entries(replacements)) {
+    if (!FICTION_NAMING_POLICY.prohibitedNames.some(name => name.toLowerCase() === oldName.toLowerCase())
+      || typeof newName !== 'string' || newName.trim().length < 2 || newName.length > 30
+      || prohibitedFictionNames({ title: newName }).length) throw new Error('故事命名修复只能将禁止名称改为原创虚构名称');
+    const pattern = new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const replace = (part: unknown): unknown => typeof part === 'string' ? part.replace(pattern, () => newName.trim())
+      : Array.isArray(part) ? part.map(replace)
+      : part && typeof part === 'object' ? Object.fromEntries(Object.entries(part).map(([key, entry]) => [key, replace(entry)])) : part;
+    for (const field of FICTION_NAMING_POLICY.narrativeFields) if (field in next) next[field] = replace(next[field]);
+  }
+  return next;
+}

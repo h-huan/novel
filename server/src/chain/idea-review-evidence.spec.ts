@@ -4,9 +4,17 @@ import { ChainController } from './chain.controller';
 import { presentationGateIssues } from './idea-presentation-review';
 import { vi } from 'vitest';
 import { readerGoalReviewIssues } from './reader-goal-review';
+import { ideaReviewResponseExample } from './idea-review-evidence';
+import { presentationReviewIssues } from './idea-presentation-review';
 const cards=[{title:'危险订单',hook:'她亲自退回赔款，决定查明停工的原因。',description:'停工让村民没了收入。她借走邻居的车去找负责人。',setting:'负责人下班必须经过唯一的大门。',ending:'她在大门等到了下班的负责人。',scopeBreakdown:[{summary:'负责人拒绝见她，她留在门口等到下班。'}],executionStandard:'非故事执行规则',lockedPremise:{storyCore:'旧胚子事实'}},
  {title:'第二张卡',hook:'其他卡真实原文不能作为第一张卡证据。'}];
 describe('server-owned idea evidence references',()=>{
+ it('validates the same complete response example included in the production prompt',()=>{
+  const example=ideaReviewResponseExample();example.reviews[0].title=cards[0].title;
+  expect(ideaPayoffBridgeIssues(example,[cards[0]])).toEqual([]);
+  expect(ideaReviewEvidenceReferenceIssues(example,[cards[0]])).toEqual([]);
+  expect(presentationReviewIssues(resolveIdeaReviewEvidence(example,[cards[0]]),[cards[0]],true)).toEqual([]);
+ });
  it('does not accept a claimed ending as its own causal condition',()=>{
   const valid={position:1,payoffCredible:true,payoffBridge:{status:'supported',actionEvidenceRef:'C1.description',
    resultEvidenceRef:'C1.ending',conditionEvidenceRef:'C1.setting',reason:'负责人下班只有一条通路，等候可以遇见本人'}};
@@ -56,15 +64,22 @@ describe('server-owned idea evidence references',()=>{
    qualityReason:'按既定行动与必要因果核对，当前场景证据均来自此卡',readerQuestion:'她为何必须自己查清楚停工的原因？',issues:[],
    payoffBridge:{status:'supported',actionEvidenceRef:'C1.description',resultEvidenceRef:'C1.ending',conditionEvidenceRef:'C1.setting',reason:'大门是负责人下班唯一通路，等候可以遇见本人'},
    readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:key==='sharing'?'weak':'supported',evidenceRef:'C1.description',reason:'人物主动追查虽可理解，尚缺可讨论的独特取舍'}]))};
+  const sharedBudget={remaining:3};let calls=0;
   c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
    expect(prompt).toContain('服务器证据编号目录');
+   expect(prompt).toContain(JSON.stringify(ideaReviewResponseExample()));
+   expect(options.physicalCallBudget.remaining).toBe(3-calls++);
+   expect(options.physicalCallBudget.recoveryWithoutThinking).toBeUndefined();
+   options.physicalCallBudget.remaining--;options.physicalCallBudget.recoveryWithoutThinking=true;
    expect(options.validate({reviews:[raw]})).toBe(true);
    const bad={...raw,readerGoals:{...raw.readerGoals,completion:{...raw.readerGoals.completion,evidenceRef:'C2.hook'}}};
    expect(options.validate({reviews:[bad]})).toBe(false);
    expect(options.describeValidation({reviews:[bad]}).join('；')).toContain('第1张题材审查：readerGoals.completion.evidenceRef');
    return {data:{reviews:[raw]}};
   });
-  const [review]=await c.reviewIdeaPresentation([cards[0]]);
+  const [review]=await c.reviewIdeaPresentation([cards[0]],[],'',sharedBudget);
+  await c.reviewIdeaPresentation([cards[0]],[],'',sharedBudget);
+  expect(sharedBudget.remaining).toBe(1);expect(sharedBudget).not.toHaveProperty('recoveryWithoutThinking');
   expect(review.readerGoals.sharing.quote).toBe(cards[0].description);
   expect(review.readerGoals.sharing.status).toBe('weak');
   expect(presentationGateIssues(review).join('；')).toContain('传播倾向');

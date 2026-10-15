@@ -126,6 +126,30 @@ export function exclusiveClaimReviewMismatch(claim:string,reason:string):string|
   }
   return null;
 }
+/** Stable addresses into original source sentences; no model transcription or
+ * fuzzy quote repair. Parent source IDs and source roles stay unchanged. */
+export function sourceEvidenceSpanCatalog(context:string) {
+  return sourceEvidenceCatalog(context).map(source=>({id:source.id,path:source.path,
+    spans:[...source.text.matchAll(/[^。！？\n]+[。！？\n]?|[。！？\n]/g)]
+      .map((match,index)=>({id:source.id+'.E'+(index+1),text:match[0]})).filter(span=>span.text.trim())}));
+}
+/** Lossless transport: column names occur once; all source IDs, roles and
+ * original spans remain available to the reviewer. */
+export function packSourceEvidenceSpans(context:string) {
+  return {columns:['sourceId','sourcePath','spans'],spanColumns:['evidenceRef','originalText'],
+    rows:sourceEvidenceSpanCatalog(context).map(source=>[source.id,source.path,source.spans.map(span=>[span.id,span.text])])};
+}
+function bindSourceSpan(row:any,context:string,kind:'basis'|'mechanism') {
+  const evidenceKey=kind==='basis'?'basisEvidence':'mechanismEvidence';
+  const spanKey=evidenceKey+'Ref',sourceKey=kind==='basis'?'basisRef':'mechanismBasisRef';
+  if(row?.[spanKey]===undefined)return row;
+  const sources=sourceReferenceList(row[sourceKey]);
+  const span=sourceEvidenceSpanCatalog(context).filter(source=>sources.includes(source.id))
+    .flatMap(source=>source.spans).find(span=>span.id===row[spanKey]);
+  if(!span || row[evidenceKey]!==undefined&&!resolveQualityEvidence(span.text,row[evidenceKey]).verified)
+    return {...row,[evidenceKey]:''};
+  return {...row,[evidenceKey]:span.text};
+}
 function bindSourceEvidence(row:any,context:string) {
   if(!row)return row;
   if(row.basisRef===undefined)return {...row,additionalBasisEvidence:undefined};
@@ -249,17 +273,18 @@ function sourceInferenceScopeDirective(content:string) {
 export function outlineResultClaimPrompt(rows:Array<{id:string;scenes?:unknown;plan_json?:unknown}>,context:string,refs?:readonly string[]) {
   return '只核对下面固定清单中行动到关键结果的必要条件，不改写章纲或正文。'+SOURCE_QUALITY_POLICY+'\n'+STORY_CAUSAL_REVIEW_POLICY
     +sourceInferenceScopeDirective(outlineResultClaimCatalog(rows).filter(item=>!refs||refs.includes(item.ref)).map(item=>item.result).join('\n'))
-    +'\n结果可继承同章此前通过实际行动取得的知识、物件或状态，不要求每次继续行动都重新取得；须核对取得动作、先后与本项对象相同。掌握或把线索掐在手里等信息表达不自动等于留存原始记录。basisEvidence引用实际取得或本项成立动作。涉及额外机制时，若取得动作在候选章纲而机制条件在独立来源，分开返回mechanismBasisRef与mechanismEvidence（独立来源编号与连续原文）；两类证据一起核对，不能只凭动作授予新能力，也不能只凭世界中存在机制就证明人物已经取得结果。排他结论仍须核对排除范围与实际比对，不以掌握信息的口语豁免唯一性。'
+    +'\n结果可继承同章此前通过实际行动取得的知识、物件或状态，不要求每次继续行动都重新取得；须核对取得动作、先后与本项对象相同。掌握或把线索掐在手里等信息表达不自动等于留存原始记录。basisEvidenceRef选择实际取得或本项成立动作所在的原文编号。涉及额外机制时，若取得动作在候选章纲而机制条件在独立来源，分开返回mechanismBasisRef与mechanismEvidenceRef（独立来源编号与其下的原文片段编号）；两类证据一起核对，不能只凭动作授予新能力，也不能只凭世界中存在机制就证明人物已经取得结果。排他结论仍须核对排除范围与实际比对，不以掌握信息的口语豁免唯一性。'
     +'\n每项分别核对：正常打开门不证明这是唯一作案路径；主体有进入能力不证明有困住对手的能力；请求机构介入不证明其已经到场处置。这些是区分条件的说明，不是对输入预判。明确授权的特殊能力按其来源执行；普通直接因果无需额外手续。同一行动的多个结果已经拆成不同ref，各结果分别举证；不能引用录音制度证明限制人身移动，不能引用进入权限证明内侧无法离开，不能以结果词本身当对象机制。依据必须支持当前ref的结果，不得用另一结果的有效依据代替。不要因另一项正常就跳过本项。'
-    +'\n【固定关键结果清单】'+JSON.stringify(outlineResultClaimCatalog(rows).filter(item=>!refs||refs.includes(item.ref)))+'\n【完整当前章纲与来源编号】'+JSON.stringify(sourceEvidenceCatalog(context))
-    +'\n逐个ref恰好返回一行，只输出JSON:{"checks":[{"ref":"实际ref","status":"supported|gap|conflict|unknown","basisRef":"实际S编号","basisEvidence":"所选来源中实际行动或必要条件的连续逐字短引文","reason":"至少8字说明必要条件如何成立或缺失"}]}。行动与结果由服务器按ref绑定，不复述actionEvidence/resultEvidence。basisEvidence必须从所选来源引用具体行动或成立条件，不能引用本项结果或重复结果的句子当成立依据；候选result字段是待证结论，不是独立来源。涉及复制内容、他人权限、排他推论、限制屋内人员离开等额外机制时，basisEvidence必须引用候选chapters与candidatePrerequisites之外的独立机制资料；不能引用候选content中的同义结果，不把历史结局或执行标准本身当能力授权。普通直接因果可引用已明确的对应行动，不要求新增手续。额外性质、排他推论或限制他人行动须引用独立机制，引用计划声称效果发生不能证明这个效果具备成立条件。来源编号须对应这段实际引文，不能用无关来源代替。只证明已选实际路径，不用目标、效果词或未选择方案代替操作机制。不把完整词面引文等同因果证明。';
+    +'\n【固定关键结果清单】'+JSON.stringify(outlineResultClaimCatalog(rows).filter(item=>!refs||refs.includes(item.ref)))+'\n【完整当前章纲与来源编号】'+JSON.stringify(packSourceEvidenceSpans(context))
+    +'\n逐个ref恰好返回一行，只输出JSON:{"checks":[{"ref":"实际ref","status":"supported|gap|conflict|unknown","basisRef":"实际S编号","basisEvidenceRef":"该来源下实际S编号.E序号","reason":"至少8字说明必要条件如何成立或缺失"}]}。basisEvidenceRef只能选同一basisRef下的连续原文编号，原文由服务器回填，不抄写、不省略拼接basisEvidence。行动与结果由服务器按ref绑定，不复述actionEvidence/resultEvidence。必须选择具体行动或成立条件，不能选择本项结果或重复结果的句子当成立依据；候选result字段是待证结论，不是独立来源。涉及额外机制时可另返回mechanismBasisRef和mechanismEvidenceRef，后者须是前者下的实际原文编号，仍分别核对实际取得动作和独立机制；不能用候选content中的同义结果、历史结局或执行标准授予新能力。普通直接因果不要求新增手续。额外性质、排他推论或限制他人行动仍须独立机制，引用计划声称效果发生不能证明效果成立。只证明已选实际路径，不用目标、效果词或未选择方案代替操作机制。不把有效编号或完整词面引文等同因果证明。';
 }
 export function validateOutlineResultClaims(value:any,rows:Array<{id:string;scenes?:unknown;plan_json?:unknown}>,context:string,refs?:readonly string[]) {
   const catalog=outlineResultClaimCatalog(rows).filter(item=>!refs||refs.includes(item.ref)),checks=value?.checks,errors:string[]=[],findings:string[]=[];
   if(!Array.isArray(checks)||checks.length!==catalog.length||new Set(checks.map((row:any)=>row?.ref)).size!==catalog.length
     ||checks.some((row:any)=>!catalog.some(item=>item.ref===row?.ref)))errors.push('关键结果专项须逐项覆盖固定ref，不能遗漏或用其它项代替');
   for(const item of catalog){
-    const received=bindSourceEvidence(Array.isArray(checks)?checks.find((row:any)=>row?.ref===item.ref):undefined,context);
+    const suppliedRow=Array.isArray(checks)?checks.find((row:any)=>row?.ref===item.ref):undefined;
+    const received=bindSourceEvidence(bindSourceSpan(bindSourceSpan(suppliedRow,context,'basis'),context,'mechanism'),context);
     const row=received?{...received,actionEvidence:received.actionEvidence??item.action,resultEvidence:received.resultEvidence??item.result}:undefined;
     if(!row||!['supported','gap','conflict','unknown'].includes(row.status)||typeof row.reason!=='string'||row.reason.trim().length<8
       ||!resolveQualityEvidence(item.action,row.actionEvidence).verified||!resolveQualityEvidence(item.result,row.resultEvidence).verified
@@ -267,7 +292,8 @@ export function validateOutlineResultClaims(value:any,rows:Array<{id:string;scen
     if(row.status==='supported'){
       const mismatch=exclusiveClaimReviewMismatch(item.result,row.reason);
       if(mismatch)findings.push(item.chapterId+'【关键结果】'+mismatch+' | 结果: '+item.result+' | 评审依据: '+row.reason);
-      const supplied=checks.find((check:any)=>check?.ref===item.ref)?.basisEvidence;
+      const suppliedCheck=checks.find((check:any)=>check?.ref===item.ref);
+      const supplied=suppliedCheck?.basisEvidenceRef!==undefined ? received?.basisEvidence : suppliedCheck?.basisEvidence;
       const proof=typeof supplied==='string'?supplied.trim():'';
       const resultOnly=proof&&[item.result,item.parentResult].some(result=>resolveQualityEvidence(result,proof).verified);
       if(!proof||resultOnly)errors.push(item.ref+'成立依据须引用实际行动或独立条件，不能由待证结果自证');
@@ -281,7 +307,7 @@ export function validateOutlineResultClaims(value:any,rows:Array<{id:string;scen
           &&resolveQualityEvidence(source.text,evidence).verified);
         const suppliedRow=checks.find((check:any)=>check?.ref===item.ref);
         const mechanismRefs=sourceReferenceList(suppliedRow?.mechanismBasisRef);
-        const mechanismProof=typeof suppliedRow?.mechanismEvidence==='string'?suppliedRow.mechanismEvidence.trim():'';
+        const mechanismProof=typeof received?.mechanismEvidence==='string'?received.mechanismEvidence.trim():'';
         const independent=independentProof(refs,proof)||Boolean(mechanismProof&&mechanismRefs.length&&independentProof(mechanismRefs,mechanismProof));
         if(!independent)errors.push(item.ref+'额外能力或限制效果须引用独立机制，不能引用候选章纲的结果或其叙述副本');
       }

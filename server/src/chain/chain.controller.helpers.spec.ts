@@ -1,4 +1,5 @@
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
+import { premiseSourceComparisonCatalog } from './premise-selection-review';
 import { getPlatform, targetForLength, measureAgainstTarget } from './platform-benchmarks';
 import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
 import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
@@ -1675,6 +1676,13 @@ describe('idea discovery live orchestrator behavior', () => {
       ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
     }, 2);
     expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+    for (const call of controller.reviewPremiseSelection.mock.calls) {
+      expect(call[1]).toContain('【本次作者明确选择');
+      expect(call[1]).toContain('"webNovelGenre":["悬疑推理"]');
+      expect(call[1]).toContain('"plotTags":["调查"]');
+      expect(call[1]).toContain('"writingStyle":["简洁"]');
+      expect(call[1]).toContain('"pov":"第一人称"');
+    }
     expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[1]);
 
     if (failure === 'review_protocol') {
@@ -1686,6 +1694,9 @@ describe('idea discovery live orchestrator behavior', () => {
     }
 
     const cardFailed = failure === 'card_network' || failure === 'card_shape';
+    // The repair fixture returns an empty patch: preserve the original refusal without another review.
+    expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(1);
+    if (!cardFailed && failure !== 'repair_network') expect(result.appealGate.repairGenerated).toBe(0);
     expect(generate).toHaveBeenCalledTimes(cardFailed ? 3 : 4);
     expect(result.success).toBe(false);
     expect(result.status).toBe('incomplete');
@@ -1803,7 +1814,9 @@ it('does not promote an advisory that explicitly denies missing facts, while ret
 
 it('sends matching complete pool sources to source review and every selected item to overlap review',async()=>{
  const controller=Object.create(ChainController.prototype) as any;
- controller.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{const data={passed:true,issues:[]};expect(options.validate(data)).toBe(true);return {data,warnings:[]};});
+ controller.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{const data=options.stepKey==='idea_premise_source_drift_review'
+  ? {sourceChecks:premiseSourceComparisonCatalog(selection).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开字段保留原池的行动与结果约束'}))}
+  : {passed:true,issues:[]};expect(options.validate(data)).toBe(true);return {data,warnings:[]};});
  const selection={pool:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'},{premiseId:'P2',storyCore:'未选原池项专用标记'}],selected:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'}]};
  await controller.reviewPremiseSelection(selection,'既定标准','source_drift');
  const source=controller.llmCallWithRetry.mock.calls[0][1];expect(source).toContain('保留原始骨架完整内容');expect(source).not.toContain('未选原池项专用标记');

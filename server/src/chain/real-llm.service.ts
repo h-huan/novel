@@ -7,7 +7,7 @@ import { isAutomaticQualityRepairIssue, isMissingStandardIssue, semanticEvidence
 import { buildChapterResponsibilityAuditPrompt, buildChapterResponsibilityRepairPrompt, describeChapterResponsibilityPlan, isEvidencedChapterResponsibilityConflict } from '../../shared/src/chapter-responsibility-review';
 import { quotedText } from './quoted-text';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -60,7 +60,7 @@ type ModelCallResult = {
 class GeneratedQualityGateError extends Error {
   /** 结构化标记：chain.controller 的重试循环靠它区分「Gate 拒绝」与「传输层故障」，不靠中文前缀嗅探。 */
   readonly gateRejection = true;
-  constructor(readonly report: GateFailureReport, readonly generatedContent: string) {
+  constructor(readonly report: GateFailureReport, readonly generatedContent: string, readonly planningActionAudit?: unknown) {
     super(report.message);
     this.name = 'GeneratedQualityGateError';
   }
@@ -716,11 +716,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       if (!checked.verified || checked.issues.length) {
         const report = classifyGateFailure({ topic: 'outline_alignment', evaluationStatus: checked.verified ? 'evaluated' : 'not_evaluated',
           buckets: checked.verified ? { outline_alignment: checked.issues.map(issue => issue.summary) } : { review_incomplete: checked.errors } });
-        throw new GeneratedQualityGateError(report, content);
+        const prefix = checked.verified ? '章纲行动结果未通过，当前章纲未保存' : '章纲行动结果评审未完成，当前章纲未保存';
+        throw new GeneratedQualityGateError({ ...report, prefix, message: prefix + '：' + report.sections.join('；') }, content, checked.audit);
       }
       this.metrics.finishRun(run.id, 'success', started, content);
     } catch (error) {
-      this.metrics.blockRunValidation(run.id, error instanceof Error ? error.message : String(error));
+      this.metrics.blockRunValidation(run.id, error instanceof Error ? error.message : String(error),
+        error instanceof GeneratedQualityGateError ? error.planningActionAudit : undefined);
       this.metrics.finishRun(run.id, 'failed', started, content, error instanceof Error ? error.message : String(error));
       throw error;
     }
@@ -750,9 +752,9 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       && /^(worldRules|world)(\.|$)/.test(anchor.path || '');
     const worldMechanisms = evidenceAnchors.filter(isWorldMechanism);
     const bodyAnchors = evidenceAnchors.filter(anchor => anchor.source === 'body');
-    const chapterEvidenceCatalog = chapters.map(chapter => ({ chapterNumber: chapter.chapterNumber,
+    const chapterEvidenceCatalog = chapters.map((chapter, index) => ({ chapterNumber: chapter.chapterNumber,
       anchorIds: bodyAnchors.filter(anchor => resolveQualityEvidence(JSON.stringify(chapter), anchor.text).verified).map(anchor => anchor.id),
-      ...(resultField ? { resultAnchorIds: causalExitResultAnchors(bodyAnchors, chapter[resultField]).map(anchor => anchor.id) } : {}) }));
+      resultAnchorIds: (resultField ? causalExitResultAnchors(bodyAnchors, chapter[resultField]) : causalChapterResultAnchors(bodyAnchors, index)).map(anchor => anchor.id) }));
     let audit: any = null;
     let checked = { verified: false, errors: ['缺少关键场景行动结果审查'], issues: [] as any[] };
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -773,6 +775,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           prompt: '\n【完整章节结构，先按字段与事件顺序理解，后选择引文地址】' + body + '\n'
             + prompt.prompt + '\n每项transitions另带chapterNumber，须覆盖这些关键章：' + JSON.stringify(chapters.map(chapter => chapter.chapterNumber))
             + '。行动、结果证据必须实际属于声明的本章，不能以其它章节的结果代替。\n【章号与本章证据地址对应】' + JSON.stringify(chapterEvidenceCatalog)
+            + '\n服务器resultAnchorIds目录中的每一项均须单独核查并返回对应transitions，不能自行抽样；同一行动在场景结果、人物结果、冲突解决、状态、亮点、伏笔回收中的不同断言也分别核对。先一次收齐全部已有缺口，再交给同一次局部修复。普通动作直接结果可引用其实际行动，真实未来安排按planned核实，不为凑缺口强加额外手续。'
             + (resultField ? '\n本次核对出口状态目录：对应章resultAnchorIds逐项各有一条transitions，不抽样、不合并多个结果为一项。resultAnchorId必须来自该目录。先阅读完整responsibility中的事件先后，再核对该结果全部必要环节，而非仅证明最容易成立的一环；reason须交代行动前状态、必要条件是否实际满足。尤其不能从结果倒推尚有未完成任务，或把进入权限当成剥夺对手原有能力。prerequisites是待满足条件，字段名及同义复述不证明已满足。普通直接结果不追加程序；未来安排、线索埋设使用planned及实际理由，无需bridge，不得配成已兑现结果或报gap；心理选择按原文直接核对。' : '')
             + (resultField ? '\n每条transitions（及纠错repairs）还必须填写beforeStateAnchorId（本章行动前完整状态的body地址，允许与actionAnchorId相同以保留同句先后）、requiredCondition（该结果成立所需的最小实际条件）。bridgeAnchorId只选实际满足此条件的原文，无则gap且留空。先输出这两项，再判断status。任务先已完成，后续行动还能改变该任务是否按时完成吗？进入权限与阻止屋内者离开的能力是否同一权限？不要用已完成目标或结果断言回答必要条件已满足。planned的beforeStateAnchorId可选择叙事安排原文，requiredCondition说明未到期，不追加程序。' : '')
             + '\n规划审查区分事件发生与读者获知：后章揭晓的先前事实可证明前章机制，未来才执行的动作不能证明前章结果；不能要求在悬念章提前揭晓幕后身份。',
@@ -798,13 +801,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
             checked.verified = false;
           }
         });
-        if (resultField) {
+        if (resultField || chapterEvidenceCatalog.some(entry => entry.resultAnchorIds.length)) {
           const missing = chapterEvidenceCatalog.flatMap(entry => (entry.resultAnchorIds || []).filter(id =>
             !audit?.transitions?.some((row: any) => row.chapterNumber === entry.chapterNumber && row.resultAnchorId === id))
             .map(id => ({ chapterNumber: entry.chapterNumber, resultAnchorId: id })));
-          if (chapterEvidenceCatalog.some(entry => !entry.resultAnchorIds?.length) || missing.length) {
+          if ((resultField && chapterEvidenceCatalog.some(entry => !entry.resultAnchorIds.length)) || missing.length) {
             checked.verified = false;
-            checked.errors.push('实际出口结果逐项核对未完整覆盖：' + missing.map(row => row.resultAnchorId).join('、'));
+            checked.errors.push((resultField ? '实际出口结果' : '结构化结果') + '逐项核对未完整覆盖：' + missing.map(row => row.resultAnchorId).join('、'));
             // Address omissions within the existing correction call while preserving
             // all reviewed rows, including genuine gaps. Never rerun a valid verdict.
             if (Array.isArray(audit?.transitions)) for (const row of missing) {
@@ -902,6 +905,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     // 即使旧调用点传入更大数字，也在这里统一封顶，避免业务层、SDK 与空响应重试相乘。
     const maxEmptyRetries = request.maxEmptyRetries === 0 ? 0 : 1;
     let thinkingDisabledAttempted = request.physicalCallBudget?.recoveryWithoutThinking === true;
+    const hasRecoveryAllowance = () => !request.physicalCallBudget || request.physicalCallBudget.remaining > 0;
     const callBudgetedModel = (...args: Parameters<RealLLMService['callModel']>) => {
       assertGenerationActive();
       if (request.physicalCallBudget) {
@@ -968,6 +972,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       metricEmitted = true;
       this.recordStepMetric(request, modelName, status, Date.now() - startTime, internalRetries, extra);
     };
+    const stopTruncated = (result: ModelCallResult, detail: string): never => {
+      const physicalCallBudgetExhausted = !hasRecoveryAllowance();
+      const reason = detail + (physicalCallBudgetExhausted ? '；物理调用预算已耗尽，未执行额外补发' : '');
+      emit('truncated', { resp: this.toResponse(result, modelName, request, startTime), reason });
+      throw Object.assign(structuredTruncationError(reason, { maxTokens: currentMaxTokens, scenario: request.scenario, model: modelName }),
+        { generatedContent: result.content, physicalCallBudgetExhausted });
+    };
     // 公共小说规则只从 System Workflow Rule Registry 的运行时投影注入。
     // injectStandard=false 用于元任务：必须真正关闭公共规则，不能留下调用器内联的第二套前置规则。
     const standardDirective = request.injectStandard === false
@@ -1000,7 +1011,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // 在模型输出上限内把 maxTokens 翻倍，用【同一模型/同一 prompt/同一 json 模式】重试（不换模型、不去 json，非降级）。
           // 扩容预算独立于空内容重试预算：只要没到硬顶就继续翻倍，直到装得下或到顶。
           const expanded = nextExpandedMaxTokens(currentMaxTokens);
-          if (expanded !== null && truncationExpansions < MAX_TRUNCATION_EXPANSIONS) {
+          if (expanded !== null && truncationExpansions < MAX_TRUNCATION_EXPANSIONS && hasRecoveryAllowance()) {
             this.logger.warn(
               `结构化输出被长度截断，同模型扩容输出上限重试（不换模型/非降级）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens ${currentMaxTokens}→${expanded}`,
             );
@@ -1024,7 +1035,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // 单项局部修复也由调用方明确声明问题数量，并保持完整上下文、8处/20%补丁限制。
           // 对最小单元允许同模型、同提示词、同 JSON 契约关闭思考补发一次；
           // 其他多项结构化任务出现半截 JSON 时仍交回调用方缩小批量。
-          if (!preserveThinking && !thinkingDisabledAttempted && (!result.content.trim() || singleStructuredUnit)) {
+          if (hasRecoveryAllowance() && !preserveThinking && !thinkingDisabledAttempted && (!result.content.trim() || singleStructuredUnit)) {
             this.logger.warn(
               `结构化输出在硬顶被长度截断（${singleStructuredUnit ? unitLabel : '无正文输出'}），同模型关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
             );
@@ -1036,17 +1047,9 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
               return __respTruncNoThink;
             }
           }
-          emit('truncated', { resp:this.toResponse(result,modelName,request,startTime), reason: singleStructuredUnit
-            ? `${unitLabel}在硬顶且同模型关闭思考补发后仍被截断`
-            : '结构化输出被长度截断，扩容后仍不足' });
-          const truncationError = structuredTruncationError(
-            singleStructuredUnit
-              ? `${unitLabel}在 ${currentMaxTokens} tokens 硬顶且同模型关闭思考补发后仍被截断；已停止本次修复`
-              : `结构化生成因输出长度被截断（当前额度 ${currentMaxTokens} 已达上限，请减小单次结构化批量）`,
-            { maxTokens: currentMaxTokens, scenario: request.scenario, model: modelName },
-          );
-          Object.assign(truncationError, {generatedContent: result.content});
-          throw truncationError;
+          stopTruncated(result, singleStructuredUnit && thinkingDisabledAttempted
+            ? `${unitLabel}在 ${currentMaxTokens} tokens 硬顶且同模型关闭思考补发后仍被截断；已停止本次修复`
+            : `结构化生成因输出长度被截断（当前额度 ${currentMaxTokens}，本次未取得完整JSON）`);
         }
 
         // 必须在 length 之后判断空内容。推理模型可能把预算耗尽后返回
@@ -1069,7 +1072,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // 空响应的最后手段：扩容已到硬顶/已用完扩容机会（length 型），或空内容重试预算
           // 已用尽（非 length 型）时，关闭思考补发一次。故障恢复而非降级——此时模型已无法产出
           // 正文，关闭思考是让它能输出的唯一手段；正常路径仍保留完整推理。
-          if (!preserveThinking && !thinkingDisabledAttempted && (result.finishReason === 'length' || emptyRetriesUsed >= maxEmptyRetries)) {
+          if (hasRecoveryAllowance() && !preserveThinking && !thinkingDisabledAttempted && (result.finishReason === 'length' || emptyRetriesUsed >= maxEmptyRetries)) {
             this.logger.warn(
               `空内容且扩容后仍被思考耗尽，关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
             );
@@ -1144,10 +1147,10 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
             while (settled.finishReason === 'length'
               && (request.responseFormat === 'json_object' || !settled.content.trim())) {
               const next = nextExpandedMaxTokens(currentMaxTokens);
-              if (next === null || truncationExpansions >= MAX_TRUNCATION_EXPANSIONS) {
+              if (next === null || truncationExpansions >= MAX_TRUNCATION_EXPANSIONS || !hasRecoveryAllowance()) {
                 // 与主循环同一口径（防复发）：硬顶 + 一个字都没吐 = 推理想光了配额，
                 // 先走「关闭思考补发」这条既有故障恢复通道，再判死。
-                if (!preserveThinking && !thinkingDisabledAttempted && (!settled.content.trim() || singleStructuredUnit)) {
+                if (hasRecoveryAllowance() && !preserveThinking && !thinkingDisabledAttempted && (!settled.content.trim() || singleStructuredUnit)) {
                   this.logger.warn(
                     `网络重试后最小结构化单元或空输出在硬顶截断，同模型关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
                   );
@@ -1158,10 +1161,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
                     return __respNetNoThink;
                   }
                 }
-                throw Object.assign(structuredTruncationError(
-                  `结构化生成因输出长度被截断（网络恢复后当前额度 ${currentMaxTokens} 已达上限）`,
-                  { maxTokens: currentMaxTokens, scenario: request.scenario, model: modelName },
-                ), {generatedContent: settled.content});
+                return stopTruncated(settled, `结构化生成因输出长度被截断（网络恢复后当前额度 ${currentMaxTokens}，本次未取得完整JSON）`);
               }
               this.logger.warn(
                 `网络重试后输出被长度截断（或思考耗尽预算），同模型扩容补发（不换模型/非降级）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens ${currentMaxTokens}→${next}`,
@@ -1193,7 +1193,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
               || innerMsg.includes('fetch failed') || innerMsg.includes('UND_ERR_SOCKET') || innerMsg.includes('other side closed')
               || innerMsg.includes('Connection error');
             if (!stillNetwork) {
-              emit('failed', { reason: innerMsg });
+              if (!metricEmitted) emit('failed', { reason: innerMsg });
               throw innerErr;
             }
             internalRetries++;

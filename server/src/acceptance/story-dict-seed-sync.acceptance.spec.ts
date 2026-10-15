@@ -30,6 +30,19 @@ function makeService(db: any): StoryDictService {
   return new StoryDictService({ getDb: () => db } as any);
 }
 
+it('用户编辑内置词条的分组后，下一次启动同步仍保留其修改', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const service = makeService(db);
+    service.seedDefaults();
+    const row = service.getByType('plot_tag').find(item => item.label === '婆媳')!;
+    service.update(row.id, { parentLabel: '人物与关系' });
+    service.seedDefaults();
+    expect(service.getById(row.id)?.parentLabel).toBe('人物与关系');
+    expect(service.getById(row.id)?.isCustom).toBe(true);
+  } finally { db.close(); }
+});
+
 it('启动同步把库内旧值拉平到当前 seed：更新旧值 / 清理废弃项 / 不动用户自建项', () => {
   const db = new DatabaseSync(':memory:');
   try {
