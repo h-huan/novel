@@ -51,7 +51,8 @@ const runtimeProblems = [...problems];
 const failedTests = Array.isArray(report?.verdict?.failedTests) ? report.verdict.failedTests : [];
 report.verdict = {
   ...(report.verdict || {}),
-  status: runtimeProblems.length === 0 && failedTests.length === 0 ? 'passed' : 'failed',
+  status: runtimeProblems.length || failedTests.length ? 'failed'
+    : persistenceRows.some(row => row.status === 'creating' && !row.creationStalled) ? 'in_progress' : 'passed',
   rootCause: runtimeProblems[0] || report?.verdict?.rootCause || null,
   failedTests,
   runtimeProblems,
@@ -60,7 +61,7 @@ fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
 
 if (fs.existsSync(markdownPath)) {
   let markdown = fs.readFileSync(markdownPath, 'utf8');
-  markdown = markdown.replace(/- 最终结果：\*\*(?:PASSED|FAILED)\*\*/u, `- 最终结果：**${report.verdict.status.toUpperCase()}**`);
+  markdown = markdown.replace(/- 最终结果：\*\*(?:PASSED|FAILED|IN_PROGRESS)\*\*/u, `- 最终结果：**${report.verdict.status.toUpperCase()}**`);
   markdown = markdown.replace(
     /- 不带 --full 是故障诊断：自动选择最近项目（包括 creating \/ generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。/u,
     '- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed）；当模式声明 short_and_long 时必须同时找到短篇和长篇，否则验收失败；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。',
@@ -91,7 +92,7 @@ if (fs.existsSync(markdownPath)) {
 }
 
 if (report.verdict.status !== 'passed') {
-  console.error(`[verify-guard] FAILED: ${runtimeProblems.join(', ') || failedTests.join(', ') || 'verification failed'}`);
+  console.error(`[verify-guard] ${report.verdict.status.toUpperCase()}: ${runtimeProblems.join(', ') || failedTests.join(', ') || 'creation not yet completed'}`);
   process.exitCode = 1;
 } else {
   console.log('[verify-guard] PASSED');
