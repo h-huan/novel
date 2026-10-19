@@ -1,7 +1,7 @@
 import { resolveCitationAnchor } from './citation-anchor';
 import { resolveQualityEvidence } from './quality-issue';
 import { readerGoalReviewIssues, type ReaderGoalReview } from '../../chain/reader-goal-review';
-import { SOURCE_QUALITY_POLICY, STORY_CAUSAL_REVIEW_POLICY, CROSS_STAGE_REVIEW_POLICY, CONTINUITY_SCOPE_POLICY } from '../../../shared/src/system-workflow-rules.registry';
+import { SOURCE_QUALITY_POLICY, STORY_CAUSAL_REVIEW_POLICY, CROSS_STAGE_REVIEW_POLICY, CONTINUITY_SCOPE_POLICY, SOURCE_EVIDENCE_REFERENCE_POLICY } from '../../../shared/src/system-workflow-rules.registry';
 import { isStructuredOutputTruncated } from '../../chain/structured-truncation';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -62,7 +62,18 @@ export function needsSourceBoundaryReview(content: string) {
  * Give the reviewer and citation validator the same explicit source set. */
 export function sourceBoundaryEvidenceContext(context:string) {
   let story:any=context;try{story=JSON.parse(context);}catch{}
-  return JSON.stringify({storySources:story,executionStandard:{sourceQualityPolicy:SOURCE_QUALITY_POLICY}});
+  // Decode only structured JSON envelopes. Keep every source value and role;
+  // the evidence catalog already applies the same decoding for quote binding.
+  const decode=(value:any):any=>{
+    if(typeof value==='string'){
+      try{const parsed=JSON.parse(value);if(parsed&&typeof parsed==='object')return decode(parsed);}catch{}
+      return value;
+    }
+    if(Array.isArray(value))return value.map(decode);
+    if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,decode(item)]));
+    return value;
+  };
+  return JSON.stringify({storySources:decode(story),executionStandard:{sourceQualityPolicy:SOURCE_QUALITY_POLICY}});
 }
 /** Preserve narrative prerequisites omitted by structured actions. Only omit
  * an inline action copy when it decodes identically to the retained actions;
@@ -131,7 +142,20 @@ export function exclusiveClaimReviewMismatch(claim:string,reason:string):string|
 export function sourceEvidenceSpanCatalog(context:string) {
   return sourceEvidenceCatalog(context).map(source=>({id:source.id,path:source.path,
     spans:[...source.text.matchAll(/[^。！？\n]+[。！？\n]?|[。！？\n]/g)]
-      .map((match,index)=>({id:source.id+'.E'+(index+1),text:match[0]})).filter(span=>span.text.trim())}));
+      .map((match,index)=>({id:source.id+'.E'+(index+1),text:match[0],start:match.index!,end:match.index!+match[0].length})).filter(span=>span.text.trim())}));
+}
+/** Resolve only explicit addresses into one authorized source. Preserve the
+ * original intervening text, including whitespace, rather than joining quotes. */
+export function resolveSourceEvidenceSpan(context:string,reference:unknown,parentReferences:unknown):string|null {
+  if(typeof reference!=='string')return null;
+  const match=/^(S[1-9]\d*)\.E([1-9]\d*)(?:-(S[1-9]\d*)\.E([1-9]\d*))?$/.exec(reference);
+  if(!match||match[3]&&match[3]!==match[1]||!sourceReferenceList(parentReferences).includes(match[1]))return null;
+  const source=sourceEvidenceCatalog(context).find(source=>source.id===match[1]);
+  const spans=sourceEvidenceSpanCatalog(context).find(source=>source.id===match[1])?.spans;
+  const first=spans?.find(span=>span.id===match[1]+'.E'+match[2]);
+  const last=spans?.find(span=>span.id===match[1]+'.E'+(match[4]??match[2]));
+  if(!source||!first||!last||last.start<first.start)return null;
+  return source.text.slice(first.start,last.end);
 }
 /** Lossless transport: column names occur once; all source IDs, roles and
  * original spans remain available to the reviewer. */
@@ -143,12 +167,10 @@ function bindSourceSpan(row:any,context:string,kind:'basis'|'mechanism') {
   const evidenceKey=kind==='basis'?'basisEvidence':'mechanismEvidence';
   const spanKey=evidenceKey+'Ref',sourceKey=kind==='basis'?'basisRef':'mechanismBasisRef';
   if(row?.[spanKey]===undefined)return row;
-  const sources=sourceReferenceList(row[sourceKey]);
-  const span=sourceEvidenceSpanCatalog(context).filter(source=>sources.includes(source.id))
-    .flatMap(source=>source.spans).find(span=>span.id===row[spanKey]);
-  if(!span || row[evidenceKey]!==undefined&&!resolveQualityEvidence(span.text,row[evidenceKey]).verified)
+  const evidence=resolveSourceEvidenceSpan(context,row[spanKey],row[sourceKey]);
+  if(evidence===null || row[evidenceKey]!==undefined&&!resolveQualityEvidence(evidence,row[evidenceKey]).verified)
     return {...row,[evidenceKey]:''};
-  return {...row,[evidenceKey]:span.text};
+  return {...row,[evidenceKey]:evidence};
 }
 function bindSourceEvidence(row:any,context:string) {
   if(!row)return row;
@@ -272,6 +294,7 @@ function sourceInferenceScopeDirective(content:string) {
 }
 export function outlineResultClaimPrompt(rows:Array<{id:string;scenes?:unknown;plan_json?:unknown}>,context:string,refs?:readonly string[]) {
   return '只核对下面固定清单中行动到关键结果的必要条件，不改写章纲或正文。'+SOURCE_QUALITY_POLICY+'\n'+STORY_CAUSAL_REVIEW_POLICY
+    +'\n'+SOURCE_EVIDENCE_REFERENCE_POLICY
     +sourceInferenceScopeDirective(outlineResultClaimCatalog(rows).filter(item=>!refs||refs.includes(item.ref)).map(item=>item.result).join('\n'))
     +'\n结果可继承同章此前通过实际行动取得的知识、物件或状态，不要求每次继续行动都重新取得；须核对取得动作、先后与本项对象相同。掌握或把线索掐在手里等信息表达不自动等于留存原始记录。basisEvidenceRef选择实际取得或本项成立动作所在的原文编号。涉及额外机制时，若取得动作在候选章纲而机制条件在独立来源，分开返回mechanismBasisRef与mechanismEvidenceRef（独立来源编号与其下的原文片段编号）；两类证据一起核对，不能只凭动作授予新能力，也不能只凭世界中存在机制就证明人物已经取得结果。排他结论仍须核对排除范围与实际比对，不以掌握信息的口语豁免唯一性。'
     +'\n每项分别核对：正常打开门不证明这是唯一作案路径；主体有进入能力不证明有困住对手的能力；请求机构介入不证明其已经到场处置。这些是区分条件的说明，不是对输入预判。明确授权的特殊能力按其来源执行；普通直接因果无需额外手续。同一行动的多个结果已经拆成不同ref，各结果分别举证；不能引用录音制度证明限制人身移动，不能引用进入权限证明内侧无法离开，不能以结果词本身当对象机制。依据必须支持当前ref的结果，不得用另一结果的有效依据代替。不要因另一项正常就跳过本项。'
@@ -559,7 +582,7 @@ export function validateSourceQualityReview(audit: unknown, readerGoals: unknown
 export function sourceQualityReviewContract(): string {
   return '另返回sourceQualityAudit:{version:1,checks:{' + SOURCE_QUALITY_AXES.map(axis =>
     `${axis}:{status:"supported|gap|conflict|not_applicable|unknown",evidence:"当前正文连续逐字原文",basisSource:"body|chapter_plan|context",basisEvidence:"gap/conflict对应的必要前提连续原文",reason:"至少8字具体核对与影响"}`,
-  ).join(',') + '}}。六项必须逐项返回；not_applicable说明实际不适用原因，unknown表示必要依据尚未核实，不能伪造supported；gap/conflict只报影响当前行动理解或已声称结果的缺口，不要求补无关细节。chapter_plan只引用本次显示章纲，context只引用本次显示上下文。'
+  ).join(',') + '}}。六项必须逐项返回；not_applicable时evidence必须为空字符串，实际不适用原因只写reason，不能把“没有前文”等评审说明冒充正文引文；有前章仍必须核对，不能not_applicable。unknown表示必要依据尚未核实，不能伪造supported；gap/conflict只报影响当前行动理解或已声称结果的缺口，不要求补无关细节。chapter_plan只引用本次显示章纲，context只引用本次显示上下文。'
     + CONTINUITY_EVIDENCE_CONTRACT
     + '另返回readerGoals:{click,completion,sharing,immersion}，各项为{status:"supported|weak|unknown",quote:"本章连续逐字原文，unknown可为空",reason:"至少8字说明本阶段成立机制、薄弱处或未验证部分"}。正文阶段只评本章实际体验，不把未来计划、总分和未写结局当已兑现；weak/unknown保留真实阅读倾向，不伪造高倾向；不预测实际读者转化率。';
 }
@@ -589,6 +612,16 @@ export function applySourceQualityCitationRepairs(audit:SourceQualityAudit, targ
   for (const target of targets) {
     const matches = rows.filter(row => row?.key === target.key);
     if (matches.length !== 1) continue;
+    const row = audit.checks[target.axis];
+    // An explicit empty anchor clears only a not-applicable citation, never a
+    // required proof. Existing prior-chapter checks still forbid skipping it.
+    if (matches[0].anchorId === '' && target.field === 'evidence'
+      && target.source === 'body' && row.status === 'not_applicable'
+      && !(target.axis === 'continuity' && priorChapterEvidence(sources.context)?.required)) {
+      if (checks === audit.checks) checks = {...audit.checks};
+      checks[target.axis] = {...row, evidence: ''};
+      continue;
+    }
     const quote = resolveCitationAnchor(matches[0].anchorId, target.source, content, sources);
     if (!quote) continue;
     if (checks === audit.checks) checks = {...audit.checks};

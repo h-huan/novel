@@ -1,3 +1,4 @@
+import { ACTIVE_ISSUE_SQL, retireStaleIssues } from '../writing-quality/issue-lifecycle';
 /**
  * 冲突检测 Controller
  * API: 检测 / 报告列表 / 解决冲突 / 统计
@@ -104,24 +105,20 @@ export class ConflictController {
     const idx = chapterIndex != null && chapterIndex !== '' && !Number.isNaN(Number(chapterIndex))
       ? Number(chapterIndex)
       : null;
-    const removed = idx != null
-      ? db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND chapter_id IN
-          (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?) AND status IN ('open','superseded')
-           AND ${conflictIssuePredicate()}`)
-        .run(projectId, projectId, idx).changes
-      : db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND status IN ('open','superseded')
-           AND ${conflictIssuePredicate()}`)
-        .run(projectId).changes;
+    const chapter = idx != null ? db.prepare('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?')
+      .get(projectId, idx) as { id: string } | undefined : undefined;
+    const removed = idx != null && !chapter ? 0 : retireStaleIssues(db, projectId, chapter?.id);
     return { removed: Number(removed || 0) };
   }
 
   @Get('stats')
   getStats(@Query('projectId') projectId?: string) {
     const db = this.databaseService.getDb();
+    if (projectId) retireStaleIssues(db, projectId);
     const category = conflictIssuePredicate();
-    const total = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND status IN ('open','resolved')`).get(projectId || '') as any).c;
+    const total = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND (status IN ${ACTIVE_ISSUE_SQL} OR status='resolved')`).get(projectId || '') as any).c;
     const resolved = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND status='resolved'`).get(projectId || '') as any).c;
-    const p0 = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND severity='blocking' AND status='open'`).get(projectId || '') as any).c;
+    const p0 = (db.prepare(`SELECT COUNT(*) AS c FROM writing_quality_issues WHERE project_id=? AND ${category} AND severity='blocking' AND status IN ${ACTIVE_ISSUE_SQL}`).get(projectId || '') as any).c;
     return {
       total,
       resolved,
@@ -147,7 +144,9 @@ export class ConflictController {
   private queryRows(projectId?: string, chapterIndex?: number, filter?: { priority?: string; type?: string; status?: string }) {
     if (!projectId) return [];
     const db = this.databaseService.getDb();
-    const clauses = ['i.project_id = ?', conflictIssuePredicate('i.issue_type'), "i.status IN ('open','resolved')"];
+    retireStaleIssues(db, projectId);
+    const clauses = ['i.project_id = ?', conflictIssuePredicate('i.issue_type'),
+      filter?.status === 'resolved' ? "i.status='resolved'" : `i.status IN ${ACTIVE_ISSUE_SQL}`];
     const params: any[] = [projectId];
     if (chapterIndex !== undefined && !Number.isNaN(chapterIndex)) {
       clauses.push('c.chapter_index = ?');
@@ -155,7 +154,7 @@ export class ConflictController {
     }
     if (filter?.status) {
       if (filter.status === 'resolved') clauses.push("i.status = 'resolved'");
-      else if (filter.status === 'unresolved') clauses.push("i.status = 'open'");
+      else if (filter.status === 'unresolved') clauses.push(`i.status IN ${ACTIVE_ISSUE_SQL}`);
     }
     if (filter?.priority) {
       const severity = { critical: 'high', high: 'high', medium: 'medium', low: 'low' }[filter.priority] || filter.priority;

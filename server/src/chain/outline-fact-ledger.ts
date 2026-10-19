@@ -103,6 +103,33 @@ export function normalizeOutlineFactReview(value: unknown, previous: OutlineFact
   };
 }
 
+/** Diagnose the model's delta, not a null normalized record. An unknown ledger
+ * id must not falsely report a correct consistent flag as missing. */
+export function describeOutlineFactUpdateProtocol(value:unknown,previous:OutlineFactLedgerEntry[]):string[]{
+  if(!value||typeof value!=='object'||Array.isArray(value))return ['事实审查须返回JSON对象'];
+  const raw=value as Record<string,any>,issues:string[]=[],known=new Set(previous.map(row=>row.id)),seen=new Set<string>();
+  if(typeof raw.consistent!=='boolean')issues.push('consistent必须为布尔值');
+  if(!Array.isArray(raw.contradictions))issues.push('contradictions必须为带两处逐字证据的结构化冲突数组');
+  else raw.contradictions.forEach((row:unknown,index:number)=>{
+    if(!normalizeContradictionEvidence(row))issues.push(`contradictions[${index}]缺少两处位置、逐字引文或具体冲突关系`);
+  });
+  if(!Array.isArray(raw.ledger))issues.push('ledger必须为状态更新数组');
+  else raw.ledger.forEach((row:any,index:number)=>{
+    const at=`ledger[${index}]`;
+    if(!row||typeof row!=='object'||Array.isArray(row)){issues.push(at+'须为更新对象');return;}
+    const extras=Object.keys(row).filter(key=>key!=='id'&&key!=='current');
+    if(extras.length)issues.push(at+'不允许改写字段：'+extras.join('、')+'；只返回id和current');
+    if(!nonEmptyText(row.current))issues.push(at+'.current须为非空事实文本');
+    if(Object.hasOwn(row,'id')){
+      if(typeof row.id!=='string'||!row.id.trim())issues.push(at+'.id须引用前批已有编号；新增事实省略id');
+      else if(!known.has(row.id.trim()))issues.push(at+'.id='+row.id+'不在前批台账中；新增事实省略id，由服务器分配，不得自行编号');
+      else if(seen.has(row.id.trim()))issues.push(at+'.id重复更新同一事实：'+row.id);
+      seen.add(nonEmptyText(row.id));
+    }
+  });
+  return issues;
+}
+
 export function describeOutlineFactReview(value: unknown): string[] {
   const review = value as Partial<OutlineFactReview> | null;
   const issues: string[] = [];

@@ -104,3 +104,11 @@ it('shows saved partial selection reasons without another discovery request',asy
  expect(discoveryShortfallReasons([{ideaDiscoveryAudit:{selectionAudit:{reasons:[{reason:'核心动机被改写'}]}}}])).toEqual(['核心动机被改写']);
  expect(discoveryShortfallReasons([])).toEqual([]);
 });
+
+
+it('keeps several discovery POV choices while each created project receives one selected story POV',()=>{
+  const state={...useDiscoveryStore.getState(),narrativePov:JSON.stringify(['第一人称','第三人称限知'])};
+  expect(standardsForIdea(state,{pov:'第三人称限知'}).pov).toBe('第三人称限知');
+  expect(standardsForIdea(state,{pov:'第二人称'}).pov).toBe('');
+  expect(discoverySignature(state)).not.toBe(discoverySignature({...state,narrativePov:'第一人称'}));
+});

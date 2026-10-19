@@ -31,11 +31,13 @@ export function targetIdeaReviews(value: any, cards: readonly any[], references:
       if (typeof issue==='string') return issue;
       const criteria=['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'];
       const criterion = issue?.criterion ?? issue?.judgment;
+      const reason = issue?.reason ?? issue?.detail;
       // Only a recognized structured reason is converted. Verdicts and evidence stay unchanged.
-      if (issue && typeof issue==='object' && !Array.isArray(issue) && typeof issue.reason==='string' && issue.reason.trim()
+      if (issue && typeof issue==='object' && !Array.isArray(issue) && typeof reason==='string' && reason.trim()
+        && !(issue.reason !== undefined && issue.detail !== undefined && issue.reason !== issue.detail)
         && criteria.includes(criterion) && !(issue.criterion !== undefined && issue.judgment !== undefined && issue.criterion !== issue.judgment)
         && (issue.field === undefined || (typeof issue.field==='string' && issue.field.trim())))
-        return issue.field ? `${issue.field}（${criterion}）：${issue.reason}` : `${criterion}：${issue.reason}`;
+        return issue.field ? `${issue.field}（${criterion}）：${reason}` : `${criterion}：${reason}`;
       return issue;
     }) : row?.issues,
   })) };

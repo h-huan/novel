@@ -39,5 +39,5 @@ ${buildCanonPolicyDirective()}
 已经发生并接受的正文与尚未执行的未来计划冲突、且不触及世界观或已确认故事核心时，应保留已经发生历史，未来计划是更低雪崩成本的修复点。
 其它普通冲突必须按最小代价原则定位：优先选择修改范围最小、下游依赖最少、尚未执行且未锁定的资料；不得为了省事整层重写，更不得反向修改世界观。
 发现互斥时 consistent=false；每条 contradictions 必须给出上层与下层的逐字短引文、字段位置、冲突推导，以及“应在下层哪个最小字段/事件点修复”的建议。下层必需字段缺失由结构门单独处理。
-没有发现互斥时 consistent=true 且 contradictions=[]。只输出 JSON：{"consistent":true,"contradictions":[]}。`;
+没有发现互斥时 consistent=true 且 contradictions=[]。只输出合法JSON，并完整遵守本次核查目录的输出合同。`;
 }

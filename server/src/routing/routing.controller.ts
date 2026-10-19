@@ -1,3 +1,4 @@
+import {readGenerationBudgets,saveGenerationBudgets,GENERATION_BUDGET_RANGES} from '../config/generation-budgets';
 /**
  * RoutingController - 模型配置与连通性测试
  */
@@ -11,6 +12,11 @@ export class RoutingController {
   private readonly logger = new Logger(RoutingController.name);
   
   constructor(private readonly modelRouter: ModelRouterService) {}
+
+  @Get('generation-budgets')
+  getGenerationBudgets(){return {settings:readGenerationBudgets(),ranges:GENERATION_BUDGET_RANGES};}
+  @Post('generation-budgets')
+  setGenerationBudgets(@Body() value:unknown){try{return {success:true,settings:saveGenerationBudgets(value)};}catch(error){throw new BadRequestException(error instanceof Error?error.message:String(error));}}
 
   @Get('keys')
   @ApiOperation({ summary: '获取已保存的 API Key 列表（含环境变量）' })

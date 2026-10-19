@@ -189,7 +189,7 @@ describe('idea discovery preselection contract', () => {
     expect(directive).toContain('候选二');
     expect(directive).not.toContain('P2');
     expect(directive).toContain('不要输出 premiseId、sourcePremiseId');
-    expect(directive).toContain('不是自动补生或改写其它题材');
+    expect(directive).toContain('模型不得自行换身份、补生题材、改写其它题材或使用旧批次');
   });
 
   it('binds each one-card response back to the server-owned selected premise identity', () => {
@@ -434,4 +434,17 @@ it('packs identical review-standard lines without losing card-specific criteria,
  expect(decode(packed.cards)).toEqual(cards);expect(decode(packed.references)).toEqual(references);
  expect(JSON.stringify({cards,references})).toBe(before);
  expect(packIdeaReviewStandards([{executionStandard:'短'}],[])).toEqual({cards:[{executionStandard:'短'}],references:[]});
+});
+it('packs local repair standards losslessly with per-card facts and all pending defects preserved',()=>{
+ const common='共用标准：不改变已确认人物、关键机制和结果条件。'.repeat(35);
+ const targets=[{card:{title:'A',setting:'事实A'},executionStandard:common+'\n本卡分类A',gateIssues:['缺少取得路径']},
+  {card:{title:'B',setting:'事实B'},executionStandard:common+'\n本卡分类B',gateIssues:['遗漏交付结果']}];
+ const before=JSON.stringify(targets),text=ideaGateLocalRepairDirective(targets);
+ const json=text.split('【按顺序待修复内容】\n')[1].split('\n若存在standardLines')[0];
+ const data=JSON.parse(json);
+ expect(data.cards.map((row:any)=>row.executionStandardRefs.map((id:string)=>data.standardLines[id]).join('\n')))
+  .toEqual(targets.map(row=>row.executionStandard));
+ expect(data.cards.map((row:any)=>row.gateIssues)).toEqual(targets.map(row=>row.gateIssues));
+ expect(data.cards.map((row:any)=>row.card)).toEqual(targets.map(row=>row.card));
+ expect(JSON.stringify(targets)).toBe(before);
 });

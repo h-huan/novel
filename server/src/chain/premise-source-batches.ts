@@ -1,11 +1,12 @@
-import { IDEA_SOURCE_REVIEW_LIMITS } from '../../shared/src/system-workflow-rules.registry';
+import {type ReviewCallBudget} from './independent-review-batches';
+import {readGenerationBudgets} from '../config/generation-budgets';
 import { type PremiseSelectionResult } from './idea-discovery-contract';
 import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 
 export function premiseSourceBatches(selection: PremiseSelectionResult): PremiseSelectionResult[] {
-  if (selection.selected.length <= IDEA_SOURCE_REVIEW_LIMITS.splitAfterPremises) return [selection];
-  const middle = Math.ceil(selection.selected.length / 2);
-  return [selection.selected.slice(0, middle), selection.selected.slice(middle)].map(selected => ({
+  const size=readGenerationBudgets().sourceBatchSize;
+  const parts:Array<typeof selection.selected>=[];for(let start=0;start<selection.selected.length;start+=size)parts.push(selection.selected.slice(start,start+size));
+  return parts.map(selected => ({
     ...selection, selected, pool: selection.pool.filter(row => selected.some(item => item.premiseId === row.premiseId)),
   }));
 }
@@ -25,13 +26,41 @@ export function mergePremiseSourceBatches(selection: PremiseSelectionResult, bat
       return { ...check, ref: `S${position + 1}.${entry.field}` };
     });
   });
-  return materializePremiseSourceReview({ sourceChecks }, selection);
+  const result=materializePremiseSourceReview({ sourceChecks }, selection);
+  result.issues.push(...reviews.flatMap(review=>review.issues.filter(issue=>issue.kind==='selection_fit')));
+  result.genreChecks=batches.flatMap((batch,index)=>(reviews[index].genreChecks||[]).map(check=>{
+    const local=Number(/^S(\d+)\./.exec(check.ref)?.[1])-1;
+    const position=selection.selected.findIndex(item=>item.premiseId===batch.selected[local]?.premiseId);
+    if(position<0)throw Error('流派审核批次编号无法绑定原题材');
+    return {...check,ref:check.ref.replace(/^S\d+\./,'S'+(position+1)+'.'),...(check.evidenceRef?{evidenceRef:check.evidenceRef.replace(/^S\d+\./,'S'+(position+1)+'.')}:{})};
+  }));
+  result.categoryChecks=batches.flatMap((batch,index)=>(reviews[index].categoryChecks||[]).map(check=>{
+    const local=Number(/^S(\d+)\./.exec(check.ref)?.[1])-1;
+    const position=selection.selected.findIndex(item=>item.premiseId===batch.selected[local]?.premiseId);
+    if(position<0)throw Error('分类审核批次编号无法绑定原题材');
+    return {...check,ref:check.ref.replace(/^S\d+\./,'S'+(position+1)+'.'),...(check.evidenceRef?{evidenceRef:check.evidenceRef.replace(/^S\d+\./,'S'+(position+1)+'.')}:{})};
+  }));
+  result.payoffChecks=batches.flatMap((batch,index)=>(reviews[index].payoffChecks||[]).map(check=>{
+    const local=Number(/^S(\d+)\./.exec(check.ref)?.[1])-1;
+    const position=selection.selected.findIndex(item=>item.premiseId===batch.selected[local]?.premiseId);
+    if(position<0)throw Error('兑现审核编号无法绑定原题材');
+    const rebind=(ref:string)=>ref.replace(/^S\d+\./,'S'+(position+1)+'.');
+    return {...check,ref:rebind(check.ref),...(check.actionEvidenceRef?{actionEvidenceRef:rebind(check.actionEvidenceRef)}:{}),
+      ...(check.conditionEvidenceRef?{conditionEvidenceRef:rebind(check.conditionEvidenceRef)}:{}),
+      ...(check.links?{links:check.links.map(link=>({...link,ref:rebind(link.ref)}))}:{})};
+  }));
+  result.passed=result.issues.length===0;return result;
 }
 
 /** Share the live parent allowance; a batch never resets the two-call source cap. */
-export function premiseSourceCallBudget(parent?: {remaining:number}) {
-  let remaining: number = IDEA_SOURCE_REVIEW_LIMITS.maxPhysicalCalls;
+export function premiseSourceCallBudget(parent?: ReviewCallBudget) {
+  let remaining: number = readGenerationBudgets().sourceMaxPhysicalCalls;
   return {
+    refundReservedCalls(amount:number) {
+      remaining+=amount;
+      if(parent?.refundReservedCalls)parent.refundReservedCalls(amount);
+      else if(parent)parent.remaining+=amount;
+    },
     get remaining() { return Math.min(remaining, parent?.remaining ?? remaining); },
     set remaining(value: number) {
       const used = this.remaining - value;
@@ -39,4 +68,17 @@ export function premiseSourceCallBudget(parent?: {remaining:number}) {
       if (parent) parent.remaining -= used;
     },
   };
+}
+
+/** Leave one physical call for every batch that has not run yet.
+ * A protocol recovery may use only the surplus, never the next batch's allowance. */
+export function reserveReviewBatchBudget(parent:{remaining:number},pendingBatches:number){
+ return {
+  get remaining(){return Math.max(0,parent.remaining-pendingBatches);},
+  set remaining(value:number){
+   const available=this.remaining;
+   if(value<0||value>available)throw Error('审核批次调用预算不得透支或重置');
+   parent.remaining-=available-value;
+  },
+ };
 }

@@ -427,8 +427,8 @@ it('locates six-axis citations without changing judgments or accepting the wrong
   expect(repaired.checks.progression).toEqual({...audit.checks.progression,evidence:body,basisEvidence:sources.chapter_plan});
   expect(repaired.checks.voice).toBe(audit.checks.voice);
   expect(validateSourceQualityReview(repaired,f.goals,body,sources).findings).toHaveLength(1);
-  expect(applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:'body:p1'}],body,sources)).toBe(audit);
-  expect(applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:''}],body,sources)).toBe(audit);
+  {const partial=applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:'body:p1'}],body,sources);expect(partial.checks.progression).toEqual({...audit.checks.progression,evidence:body});expect(validateSourceQualityReview(partial,f.goals,body,sources).verified).toBe(false);}
+  {const partial=applySourceQualityCitationRepairs(audit,targets,[rows[0],{...rows[1],anchorId:''}],body,sources);expect(partial.checks.progression).toEqual({...audit.checks.progression,evidence:body});expect(validateSourceQualityReview(partial,f.goals,body,sources).verified).toBe(false);}
 });
 
  it('uses complete earlier prose for explicit recollections but not current state', () => {
@@ -482,4 +482,44 @@ it.each(['第一次','首次','此前','之前'])('uses full historical sources 
  const current=body+'如今她仍在这里。',g=fixture(current);
  (g.audit.checks as any).continuity={...continuity,evidence:current};
  expect(validateSourceQualityReview(g.audit,g.goals,current,{context}).errors).toContain('C1前序声称缺少实际前章对照依据');
+});
+
+describe('not-applicable citation transport',()=>{
+ it('clears an explicitly empty citation without changing the not-applicable judgment',async()=>{
+  const {invalidSourceQualityCitations,applySourceQualityCitationRepairs}=await import('./source-quality-review');
+  const body='她推开车门。',f=fixture(body);const audit=f.audit as any;
+  audit.checks.continuity={status:'not_applicable',evidence:'这是第一章，没有前文。',reason:'这是首章，没有前序章节可供跨章核对。'};
+  const targets=invalidSourceQualityCitations(audit,body,{}),snapshot=JSON.stringify(audit);
+  const repaired=applySourceQualityCitationRepairs(audit,targets,[{key:'source:continuity:evidence',anchorId:''}],body,{});
+  expect(repaired.checks.continuity).toEqual({...audit.checks.continuity,evidence:''});
+  expect(validateSourceQualityReview(repaired,f.goals,body,{}).verified).toBe(true);
+  expect(JSON.stringify(audit)).toBe(snapshot);
+ });
+ it('never clears required prior-chapter proof or accepts not-applicable with a previous chapter',async()=>{
+  const {invalidSourceQualityCitations,applySourceQualityCitationRepairs}=await import('./source-quality-review');
+  const body='她推开车门。',f=fixture(body),audit=f.audit as any;
+  const sources={context:JSON.stringify({previousChapter:[{complete:true,content:'她已到车边。'}]})};
+  audit.checks.continuity={status:'not_applicable',evidence:'这是第一章，没有前文。',reason:'误称没有前文不应绕过实际前章核对。'};
+  const targets=invalidSourceQualityCitations(audit,body,sources);
+  expect(applySourceQualityCitationRepairs(audit,targets,[{key:'source:continuity:evidence',anchorId:''}],body,sources)).toBe(audit);
+  audit.checks.continuity.evidence='';
+  expect(validateSourceQualityReview(audit,f.goals,body,sources).errors).toContain('continuity已有前章，不能以不适用跳过跨章核对');
+ });
+ it.each(['supported','gap','conflict','unknown'])('keeps %s evidence and judgment when no anchor supports it',async status=>{
+  const {invalidSourceQualityCitations,applySourceQualityCitationRepairs}=await import('./source-quality-review');
+  const body='她推开车门。',f=fixture(body),audit=f.audit as any;
+  audit.checks.agency={status,evidence:'不能定位的改述',reason:'此项缺少实际支持不得清空后当作通过。'};
+  const targets=invalidSourceQualityCitations(audit,body,{});
+  expect(applySourceQualityCitationRepairs(audit,targets,[{key:'source:agency:evidence',anchorId:''}],body,{})).toBe(audit);
+  expect(validateSourceQualityReview(audit,f.goals,body,{}).verified).toBe(false);
+ });
+});
+
+it('unpacks nested source envelopes without dropping values, changing roles or promoting future plans',()=>{
+ const nested={world:JSON.stringify({worldProfiles:[{profile:{rules:JSON.stringify(['当班调度通话由通话录音留存。']),system_mechanics:'既有通话录音用于核验。',ending:'未来完整录音被恢复。',count:3}}]}),previousChapter:JSON.stringify([{complete:true,content:'乘客听不见电话另一端。'}])};
+ const old=JSON.stringify({storySources:nested,executionStandard:{sourceQualityPolicy:SOURCE_QUALITY_POLICY}}),actual=sourceBoundaryEvidenceContext(JSON.stringify(nested));
+ expect(sourceEvidenceCatalog(actual)).toEqual(sourceEvidenceCatalog(old));
+ const decoded=JSON.parse(actual);expect(decoded.storySources.world.worldProfiles[0].profile.rules).toEqual(['当班调度通话由通话录音留存。']);
+ expect(decoded.storySources.world.worldProfiles[0].profile.count).toBe(3);
+ expect(sourceEvidenceCatalog(actual).find(s=>s.text==='未来完整录音被恢复。')?.path).toContain('.ending');
 });

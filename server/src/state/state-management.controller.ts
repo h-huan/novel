@@ -1,3 +1,4 @@
+import { ACTIVE_ISSUE_SQL, retireStaleIssues } from '../modules/writing-quality/issue-lifecycle';
 /**
  * 状态管理控制器 (State Management Controller)
  *
@@ -589,14 +590,15 @@ export class StateManagementController {
     this.logger.log(`Getting consistency checks for project ${projectId}`);
     const db = this.databaseService.getDb();
 
+    retireStaleIssues(db, projectId);
     let query = `SELECT i.*,c.chapter_index FROM writing_quality_issues i
       LEFT JOIN chapters c ON c.id=i.chapter_id
-      WHERE i.project_id=? AND i.issue_type LIKE 'consistency.%'`;
+      WHERE i.project_id=? AND i.issue_type LIKE 'consistency.%' AND i.status IN ${ACTIVE_ISSUE_SQL}`;
     const params: any[] = [projectId];
 
     if (status) {
-      if (status === 'error') query += " AND i.status='open' AND i.severity='blocking'";
-      else if (status === 'warning') query += " AND i.status='open' AND i.severity!='blocking'";
+      if (status === 'error') query += " AND i.severity='blocking'";
+      else if (status === 'warning') query += " AND i.severity!='blocking'";
       else query += ' AND 1=0';
     }
 

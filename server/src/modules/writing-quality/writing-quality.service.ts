@@ -1,3 +1,4 @@
+import { retireStaleIssues, reviewedContentHash } from './issue-lifecycle';
 import { qualityIssue, resolveQualityEvidence, verifySemanticEvidence, semanticEvidenceSources, verifyDimensionBasis, type QualityStage } from './quality-issue';
 import { causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from './semantic-evidence-repair';
@@ -299,9 +300,7 @@ export class WritingQualityService implements OnModuleInit {
     }
     const words = this.countCjkWords(content);
     const wordRange = CHAPTER_WORD_RANGE;
-    if (words < wordRange.min) {
-      throw new BadRequestException(`本章正文仅 ${words} 字，未达到 ${wordRange.min} 字下限，暂不能提交质检。`);
-    }
+    // 下限只用于规划，短稿仍须完整质检，不以字数不足阻止送审或要求灌水。
     if (words > wordRange.max) {
       throw new BadRequestException(`本章正文已达 ${words} 字，超过 ${wordRange.max} 字上限，需精简后再提交质检。`);
     }
@@ -545,7 +544,7 @@ export class WritingQualityService implements OnModuleInit {
     const weakestTag = tagDimArr.slice().sort((a, b) => a.score - b.score)[0] || null;
     const unifiedScore = Math.max(0, blendedScore - hardlinePenalty - tagPenalty - platformPenalty);
 
-    const reportPayload: Record<string, any> = { attention };
+    const reportPayload: Record<string, any> = { attention, reviewedContentHash: reviewedContentHash(content) };
     reportPayload.platformSignalProbes = platformFindings.probes;
     reportPayload.characterContractReview = (llmResult as any).characterContractReview;
     reportPayload.narrativeTrace = (llmResult as any).narrativeTrace;
@@ -819,6 +818,7 @@ export class WritingQualityService implements OnModuleInit {
 
   listReports(projectId: string, query: ListReportsDto) {
     const db = this.dbService.getDb();
+    retireStaleIssues(db, projectId, query.chapterId);
     const clauses = ['project_id = ?'];
     const params: any[] = [projectId];
 
@@ -829,6 +829,8 @@ export class WritingQualityService implements OnModuleInit {
     if (query.status) {
       clauses.push('status = ?');
       params.push(query.status);
+    } else {
+      clauses.push("status != 'superseded'");
     }
 
     const limit = Math.min(Math.max(Number(query.limit || 50) || 50, 1), 200);
@@ -909,6 +911,7 @@ export class WritingQualityService implements OnModuleInit {
     const report = db.prepare('SELECT * FROM writing_quality_reports WHERE id = ?').get(reportId) as ReportRow | undefined;
     if (!report) throw new NotFoundException(`Report ${reportId} not found`);
 
+    retireStaleIssues(db, report.project_id, report.chapter_id || undefined);
     const issueRows = db.prepare(
       'SELECT * FROM writing_quality_issues WHERE report_id = ? ORDER BY severity DESC, created_at ASC',
     ).all(reportId) as unknown as IssueRow[];

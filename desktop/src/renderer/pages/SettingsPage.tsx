@@ -1,3 +1,4 @@
+import GenerationBudgetSettings from '../components/GenerationBudgetSettings';
 /**
  * SettingsPage - 系统设置
  * API Key 管理 + 精确模型场景配置
@@ -398,6 +399,7 @@ const SettingsPage: React.FC = () => {
         </div>
       </div>
 
+      <div style={{display:tab==='mode'?'block':'none'}}><GenerationBudgetSettings/></div>
       {/* ========= 偏好设置 Tab ========= */}
       <div style={{ display: tab === 'prefs' ? 'block' : 'none' }}>
         <div>

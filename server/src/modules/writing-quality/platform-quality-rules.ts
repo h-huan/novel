@@ -40,9 +40,8 @@ export function deterministicPlatformReview(input: {
   });
   const issues: QualityIssue[] = [];
   const byKey = new Map(measurements.rows.map(row => [row.key, row]));
-  if (measurements.metrics.words < input.constitution.chapterWordRange.min
-    || measurements.metrics.words > input.constitution.chapterWordRange.max) {
-    issues.push(issue('platform.chapter_length', `章节 ${measurements.metrics.words} 字，不在创作宪法 ${input.constitution.chapterWordRange.min}-${input.constitution.chapterWordRange.max} 字范围`, quoteAt()));
+  if (measurements.metrics.words > input.constitution.chapterWordRange.max) {
+    issues.push(issue('platform.chapter_length', `章节 ${measurements.metrics.words} 字，超过创作宪法 ${input.constitution.chapterWordRange.max} 字上限`, quoteAt()));
   }
   for (const key of ['avgParaChars', 'longParaRatio'] as const) {
     const row = byKey.get(key);
@@ -114,9 +113,9 @@ export const PLATFORM_ISSUE_TAGS: Record<string, string> = {
   'platform.category_word_scale_unset': 'platform_category_word_scale',
 };
 
-/** Numeric compliance belongs to the shared measurement, never model estimation. */
+/** Keep measurements factual; paragraph length alone cannot prove poor readability. */
 export function isObjectivePlatformRule(ruleId: unknown): boolean {
-  return ['platform.chapter_length', 'platform.avgParaChars', 'platform.longParaRatio',
+  return ['platform.chapter_length',
     'platform.dialogue_ratio', 'platform.category_word_scale', 'platform.category_word_scale_unset']
     .some(id => ruleId === id || ruleId === PLATFORM_ISSUE_TAGS[id]);
 }
@@ -132,8 +131,8 @@ const PLATFORM_ISSUE_TITLES: Record<string, string> = {
 };
 
 const PLATFORM_ISSUE_SUGGESTIONS: Record<string, string> = {
-  platform_chapter_length: '按目标平台单章字数区间增删：补足有效情节或压缩冗余铺陈，不改变本章大纲契约。',
-  platform_paragraph_length: '仅调整现有句子的分段、合并和冗余表达；不得为了段落指标新增对话、动作、感官或故事事实。',
+  platform_chapter_length: '压缩冗余铺陈以满足篇幅上限，保留必要事件、因果与本章出口；不因短于规划下限要求补字。',
+  platform_paragraph_length: '先指出信息混杂、说话人难辨或阅读停顿不当的原文；按叙事单位调整，不为达段长指标拆句换行，不新增事实。',
   platform_dialogue_ratio: '先核对本章场景与人物知识是否本来就支持对话；只允许把已确认且已存在的信息改为合适人物的表达。若事实条件不支持，保留为待语义/架构处理，不得为追比例凭空添加对话、打断、沉默或动作。',
   platform_opening_hook: '只允许前移、压缩或重排正文/ChapterPlan中已经存在的冲突、异常或未解问题；不得新增事件、威胁、人物或规则来制造钩子。',
   platform_ending_hook: '只收紧本章已经存在的未解问题、状态变化或既定收尾；若ChapterPlan没有继续阅读理由，报告架构问题，不得凭空增加反转、新威胁、动作或对话。',
@@ -151,7 +150,7 @@ export interface PlatformQualityRow {
   tags: string[];
 }
 
-const PLATFORM_SIGNAL_RULE_IDS = new Set(['platform.opening_hook_position', 'platform.ending_hook', 'platform.payoff_emotion_gap_risk']);
+const PLATFORM_SIGNAL_RULE_IDS = new Set(['platform.avgParaChars', 'platform.longParaRatio', 'platform.opening_hook_position', 'platform.ending_hook', 'platform.payoff_emotion_gap_risk']);
 
 /** Shared by generation and manual review: semantic proxies never become metric violations. */
 export function partitionPlatformIssues(issues: QualityIssue[]) {

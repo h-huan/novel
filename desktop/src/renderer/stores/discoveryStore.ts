@@ -185,7 +185,7 @@ const INITIAL_STATE = {
   targetWords: '',
   selectedCategory: '',
   selectedSubCategory: '',
-  narrativePov: '',
+  narrativePov: '第一人称',
   targetAudience: '',
   categoryWordScaleDeviation: '',
 
@@ -320,10 +320,11 @@ export const useDiscoveryStore = create<DiscoveryState>()(
         customPlatformNote: state.customPlatformNote,
         categoryWordScaleDeviation: state.categoryWordScaleDeviation,
       }),
-      version: 4,
+      version: 5,
       migrate: (persisted, version) => {
         const old = persisted as Partial<DiscoveryState>;
         const ideaCount = clampIdeaCount(old.ideaCount ?? 5);
+
         // v2 的 selectedGenres 曾同时承载番茄作品标签和创作流派，不能迁入新流派字段。
         if (version === 2) return {
           storyType: old.storyType === 'long_novel' ? 'long_novel' as const : 'short_story' as const,
@@ -338,13 +339,13 @@ export const useDiscoveryStore = create<DiscoveryState>()(
           targetWords: old.targetWords || '',
           selectedCategory: old.selectedCategory || '',
           selectedSubCategory: old.selectedSubCategory || '',
-          narrativePov: old.narrativePov || '',
+          narrativePov: old.narrativePov || '第一人称',
           targetAudience: old.targetAudience || '',
           customPlatformNote: old.customPlatformNote || '',
           categoryWordScaleDeviation: old.categoryWordScaleDeviation || '',
         };
         // v3 已经把创作维度拆开，只补 ideaCount；更旧版本仍要求作者重新明确三维。
-        if (version === 3) return {
+        if (version === 3 || version === 4) return {
           storyType: old.storyType === 'long_novel' ? 'long_novel' as const : 'short_story' as const,
           ideaCount,
           targetPlatform: old.targetPlatform || '',
@@ -357,7 +358,7 @@ export const useDiscoveryStore = create<DiscoveryState>()(
           targetWords: old.targetWords || '',
           selectedCategory: old.selectedCategory || '',
           selectedSubCategory: old.selectedSubCategory || '',
-          narrativePov: old.narrativePov || '',
+          narrativePov: old.narrativePov || '第一人称',
           targetAudience: old.targetAudience || '',
           customPlatformNote: old.customPlatformNote || '',
           categoryWordScaleDeviation: old.categoryWordScaleDeviation || '',
@@ -373,7 +374,7 @@ export const useDiscoveryStore = create<DiscoveryState>()(
           targetWords: old.targetWords || '',
           selectedCategory: old.selectedCategory || '',
           selectedSubCategory: old.selectedSubCategory || '',
-          narrativePov: old.narrativePov || '',
+          narrativePov: old.narrativePov || '第一人称',
           targetAudience: old.targetAudience || '',
           customPlatformNote: old.customPlatformNote || '',
           categoryWordScaleDeviation: old.categoryWordScaleDeviation || '',

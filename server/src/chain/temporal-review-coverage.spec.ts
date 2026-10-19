@@ -195,3 +195,19 @@ describe('relative-day and day-phase review coverage',()=>{
   expect(catalog).toHaveLength(2);expect(catalog.every(row=>row.clocks.length===0)).toBe(true);
  });
 });
+
+describe('compound durations and wall-clock precision',()=>{
+ it('parses minutes and seconds as one duration in original order',()=>{
+  expect(temporalNumbers('先等5秒，再通话2分03秒，又等1分钟12秒。').durations.map(q=>[q.original,q.minutes,q.operator])).toEqual([['5秒',5/60,'eq'],['2分03秒',2.05,'eq'],['1分钟12秒',1.2,'eq']]);
+  expect(temporalNumbers('不到两分三秒。').durations).toMatchObject([{minutes:2.05,operator:'lt'}]);
+ });
+ const review=(duration:string,seconds=false)=>{
+  const body=seconds?`钟表显示23:47:00。\n钟表显示23:49:00。\n通话${duration}。`:`钟表显示23:47。\n钟表显示23:49。\n通话${duration}。`;
+  const catalog=temporalReviewCatalog(body);
+  const checks=catalog.map(entry=>({ref:entry.id,status:'supported',reason:'同一通话的起止钟表与实际时长，按原文精度核对。',calculations:entry.durations.map((_,quantityIndex)=>({quantityIndex,sameEndpoints:true,startClockId:seconds?'T1:D1':'T1:C1',endClockId:seconds?'T2:D1':'T2:C1'})),countdownCalculations:entry.countdowns.map((_,readingIndex)=>({readingIndex,relation:'not_countdown',reason:'原文明示这是墙上钟表，不是倒计时。'}))}));
+  return validateTemporalReview({status:'evaluated',checks},catalog,body);
+ };
+ it('keeps minute-display precision without inventing missing seconds',()=>{expect(review('2分03秒')).toMatchObject({verified:true,issues:[]});});
+ it('still blocks a duration outside minute resolution',()=>{expect(review('4分03秒').issues.join('')).toContain('不满足');});
+ it('keeps second-precision clocks strict',()=>{expect(review('2分03秒',true).issues.join('')).toContain('不满足');expect(review('2分00秒',true)).toMatchObject({verified:true,issues:[]});});
+});

@@ -4,7 +4,7 @@
 
 ## 唯一执行标准
 
-项目的开发纪律、小说生成规则、质量 Gate、修复原则、验收方式只在根目录 `QUALITY_EXECUTION.md` 维护。
+项目的小说生成规则、质量 Gate、修复原则和验收方式只在 [执行标准](server/shared/src/执行标准.ts) 维护；应用内“执行标准”和运行时读取同一来源。
 
 README 不重复标准内容，也不维护标准版本号。代码中的扫描器、Creative Constitution、ChapterPlan、平台基准和模块 seed 都是该标准的可执行实现。
 
@@ -150,6 +150,6 @@ verification/latest.md
 ```text
 desktop/              Electron 主进程、前端测试
 server/               NestJS API、生成链、质量闭环、SQLite、测试
-QUALITY_EXECUTION.md  唯一执行标准
+server/shared/src/执行标准.ts  唯一执行标准
 verify-local.mjs      本地验收报告生成器
 ```

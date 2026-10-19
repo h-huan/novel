@@ -20,6 +20,7 @@ import MultiSelectDropdown from '../components/common/MultiSelectDropdown';
 import { CREATIVE_DICTIONARY_TYPES, dictionaryDiscoveryTags, toggleDiscoveryTagSelection, type CreativeDictionaryItem } from '../lib/discoveryTagOptions';
 import CategoryReferencePicker from '../components/common/CategoryReferencePicker';
 import {
+  discoveryPovChoices, toggleDiscoveryPov, discoveryPovMatches, discoveryPovForIdea,
   CHAPTER_WORD_RANGE,
   DISCOVERY_TAG_GROUPS,
   STORY_TARGET_WORD_RANGES,
@@ -107,7 +108,7 @@ export const standardsForIdea = (state: ReturnType<typeof useDiscoveryStore.getS
   webNovelGenre: state.selectedGenres.length ? state.selectedGenres : (Array.isArray(idea?.webNovelGenre) ? idea.webNovelGenre : []),
   submissionTags: state.selectedSubmissionTags.length ? state.selectedSubmissionTags : (Array.isArray(idea?.submissionTags) ? idea.submissionTags : []),
   plotTags: state.selectedPlotTags.length ? state.selectedPlotTags : (Array.isArray(idea?.plotTags) ? idea.plotTags : []),
-  pov: state.narrativePov || String(idea?.pov || ''),
+  pov: discoveryPovForIdea(state.narrativePov, idea?.pov),
 });
 
 export const discoverySignature = (state: ReturnType<typeof useDiscoveryStore.getState>): string => JSON.stringify({
@@ -973,30 +974,6 @@ const DiscoveryWizardPage: React.FC = () => {
     }
   }, [store]);
 
-  const handleRecoverQualified = useCallback(async (previous = false) => {
-    let response: any;
-    try { response = await api.get<any>('/chain/idea-discovery-diagnostics/latest'); }
-    catch (error:any) { store.setGenProgress(`恢复读取失败：${error.message}`); return; }
-    const current = useDiscoveryStore.getState();
-    const retained = previous ? ((response as any).retainedBatches || []).find((batch:any)=>batch.request?.platform===current.targetPlatform && batch.request?.storyType===current.storyType && batch.request?.count===current.ideaCount) : (response as any).retained;
-    const cards = acceptedDiscoveryIdeas(retained?.qualifiedIdeas || []);
-    if (!cards.length || cards.length > current.ideaCount || retained?.request?.count !== current.ideaCount || retained?.request?.platform !== current.targetPlatform || retained?.request?.storyType !== current.storyType) {
-      store.setGenProgress('没有与当前平台及长短篇匹配的已通过故事卡。'); return;
-    }
-    if (current.selectedCategory && cards.some((card:any)=>!String(card.storyCategory||'').includes(current.selectedCategory))) {
-      store.setGenProgress('上次故事卡分类与当前选择不同，请先恢复原选择。'); return;
-    }
-    const requested: any = discoveryStandards(current);
-    const fields = ['storyTone','writingStyle','webNovelGenre','submissionTags','plotTags'];
-    if (fields.some(field => requested[field]?.length && cards.some((card:any)=>JSON.stringify(card[field]||[])!==JSON.stringify(requested[field])))
-      || (current.narrativePov && cards.some((card:any)=>card.pov!==current.narrativePov))) {
-      store.setGenProgress('上次故事卡与当前创作设置不同，未恢复；请先恢复原选择。'); return;
-    }
-    store.setIdeas(cards); store.setGeneratedSignature(discoverySignature(current));
-    store.setGenerationDone(true); store.setStep(1);
-    store.setGenProgress(`已恢复 ${cards.length}/${retained.request.count} 个已通过故事卡；原批次${retained.success?'已完成':'未完成'}。恢复不调用模型，请核对卡上的创作设置后选择。`);
-  }, [store]);
-
   // 重新发现（排除已出现的题材，传完整详情用于更精确去重）
   const handleRegenerate = useCallback(() => {
     const currentState = useDiscoveryStore.getState();
@@ -1509,12 +1486,15 @@ const DiscoveryWizardPage: React.FC = () => {
       <div style={s.sectionTitle}>文风（可多选）</div>
       <MultiSelectDropdown label="文风" options={unionOptions(styleOptions, selectedWritingStyles).map(item => ({ value: item, label: item }))}
         value={selectedWritingStyles} onToggle={store.toggleWritingStyle} placeholder="选择文风，留空随机" />
-      <div style={s.sectionTitle}>叙事视角</div>
-      <select value={narrativePov} onChange={(event) => store.setNarrativePov(event.target.value)}
-        style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--color-text-primary)' }}>
-        <option value="">不预选，随故事卡随机确定</option>
-        {unionOptions(povOptions, narrativePov ? [narrativePov] : []).map((item) => <option key={item} value={item}>{item}</option>)}
-      </select>
+      <div style={s.sectionTitle}>叙事视角（可多选）</div>
+      <MultiSelectDropdown label="叙事视角"
+        options={unionOptions(povOptions, discoveryPovChoices(narrativePov)).map(item => ({ value: item, label: item }))}
+        value={discoveryPovChoices(narrativePov)}
+        onToggle={(item) => store.setNarrativePov(toggleDiscoveryPov(narrativePov, item))}
+        placeholder="选择候选视角，留空随机" />
+      <div style={{ marginTop: 6, color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
+        可选多个候选视角，每张故事卡确定其中一个；创建小说后沿用该卡视角。
+      </div>
 
       <div style={s.sectionTitle}>灵感故事卡数量</div>
       <div style={{ marginBottom: '28px' }}>
@@ -1540,8 +1520,6 @@ const DiscoveryWizardPage: React.FC = () => {
         {isGenerating ? '⏳ 返回发现进度（生成中…）' : '🚀 AI深度发现题材'}
       </button>
 
-      {!isGenerating && <button style={{ ...s.retryBtn, marginTop: '10px', width: '100%' }} onClick={() => { void handleRecoverQualified(); }}>恢复上次已通过故事卡</button>}
-      {!isGenerating && <button style={{ ...s.retryBtn, marginTop: '10px', width: '100%' }} onClick={() => { void handleRecoverQualified(true); }}>恢复上一批已通过故事卡</button>}
 
       {/* 自定义题材入口 */}
       <div style={{ marginTop: '16px', marginBottom: '8px' }}>
@@ -1676,9 +1654,6 @@ const DiscoveryWizardPage: React.FC = () => {
           <div style={{ fontSize: '48px', marginBottom: '12px' }}>🤔</div>
           <div style={s.genText}>{genProgress || '暂无题材数据'}</div>
           <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'center' }}>
-            <button style={s.retryBtn} onClick={() => { void handleRecoverQualified(); }}>
-              恢复已通过故事卡
-            </button>
             <button style={s.retryBtn} onClick={() => handleStartDiscovery()}>
               重新发现
             </button>

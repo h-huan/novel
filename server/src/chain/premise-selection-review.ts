@@ -1,4 +1,6 @@
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload, type PremiseSelectionResult } from './idea-discovery-contract';
+import type { PremisePayoffCheck } from './premise-payoff-review';
+import { assertPremiseCausalPlans } from './premise-causal-plan';
 
 export interface PremiseSourceCheck {
   ref: string;
@@ -8,9 +10,12 @@ export interface PremiseSourceCheck {
 
 export interface PremiseSelectionReview {
   passed: boolean;
-  issues: Array<{ kind: 'overlap' | 'source_drift'; premiseId: string; referencePremiseId: string;
+  issues: Array<{ kind: 'overlap' | 'source_drift' | 'selection_fit'; premiseId: string; referencePremiseId: string;
     quote: string; referenceQuote: string; reason: string; field?: string }>;
   sourceChecks?: PremiseSourceCheck[];
+  payoffChecks?: PremisePayoffCheck[];
+  genreChecks?: Array<{ref:string;status:string;field?:string;quote?:string;evidenceRef?:string;reason:string}>;
+  categoryChecks?: Array<{ref:string;status:string;evidenceRef?:string;reason:string}>;
 }
 const containsQuote = (value: Record<string, unknown> | undefined, quote: unknown) =>
   typeof quote === 'string' && quote.trim().length >= 8 && !!value
@@ -55,9 +60,9 @@ export function premiseSelectionReviewIssues(value: unknown, selection: PremiseS
   for (const item of review.issues) {
     const candidate = selection.selected.find(p => p.premiseId === item?.premiseId);
     const reference = item?.kind === 'overlap' ? selection.selected.find(p => p.premiseId === item.referencePremiseId)
-      : item?.kind === 'source_drift' ? selection.pool.find(p => p.premiseId === item.referencePremiseId) : undefined;
+      : (item?.kind === 'source_drift' || item?.kind === 'selection_fit') ? selection.pool.find(p => p.premiseId === item.referencePremiseId) : undefined;
     if (!candidate || !reference || (item.kind === 'overlap' && item.premiseId === item.referencePremiseId)
-      || (item.kind === 'source_drift' && item.premiseId !== item.referencePremiseId)
+      || ((item.kind === 'source_drift' || item.kind === 'selection_fit') && item.premiseId !== item.referencePremiseId)
       || !(item.kind === 'source_drift' && item.field
         ? SELECTED_PREMISE_FIELDS.some(field => field === item.field) && typeof item.quote === 'string'
           && item.quote.trim().length >= 4 && candidate?.[item.field] === item.quote
@@ -130,9 +135,12 @@ export function normalizePremiseReselection(value: unknown, original: PremiseSel
     const seed = original.pool.find(item => item.premiseId === row?.premiseId);
     if (!seed) throw new Error('重选只能使用原轻量池的题材，不能补生或伪造身份');
     return { ...row, premiseId: seed.premiseId, workingTitle: seed.workingTitle,
-      storyCore: seed.storyCore, ...(seed.storyCategory ? { storyCategory: seed.storyCategory } : {}) };
+      storyCore: seed.storyCore, ...(seed.storyCategory ? { storyCategory: seed.storyCategory } : {}),
+      ...(seed.storyCategoryId ? { storyCategoryId: seed.storyCategoryId } : {}) };
   });
-  return normalizePremiseSelectionPayload({ pool: original.pool, selectedPremises }, requestedCount, poolTarget, categories);
+  const normalized = normalizePremiseSelectionPayload({ pool: original.pool, selectedPremises }, requestedCount, poolTarget, categories);
+  if (original.selected.some(item => item.causalPlan !== undefined)) assertPremiseCausalPlans(normalized);
+  return normalized;
 }
 
 /** Build repair slots from verified reviews; unaffected selections stay server-owned. */
@@ -181,7 +189,7 @@ export function retainReviewedPremises(selection: PremiseSelectionResult, review
   protectedIds: readonly string[] = []) {
   const errors = premiseSelectionReviewIssues(review, selection);
   if (errors.length) throw new Error('不能保留未完成有效复核的题材：' + errors.join('；'));
-  const excluded = new Set(review.issues.filter(issue => issue.kind === 'source_drift').map(issue => issue.premiseId));
+  const excluded = new Set(review.issues.filter(issue => issue.kind === 'source_drift' || issue.kind === 'selection_fit').map(issue => issue.premiseId));
   const protectedSet = new Set(protectedIds);
   for (const issue of review.issues.filter(item => item.kind === 'overlap')) {
     if (excluded.has(issue.premiseId) || excluded.has(issue.referencePremiseId)) continue;
@@ -219,4 +227,15 @@ export function premiseReserveReselectionPlan(initial: PremiseSelectionResult, c
       premiseId: item.referencePremiseId, referencePremiseId: item.premiseId,
       quote: item.referenceQuote, referenceQuote: item.quote });
   return { replacesPremiseId, availableCandidates, review: { passed: false, issues } as PremiseSelectionReview };
+}
+
+/** Reused old pairs cannot veto an unrelated replacement. Out-of-scope findings
+ * are protocol errors; they must never be silently discarded to obtain a pass. */
+export function premiseOverlapScopeIssues(value:unknown,selection:PremiseSelectionResult,focusId?:string):string[]{
+ if(!focusId)return [];
+ if(!selection.selected.some(item=>item.premiseId===focusId))return ['同构审核变化项不在当前选择中'];
+ const issues=(value as PremiseSelectionReview)?.issues;
+ if(!Array.isArray(issues))return [];
+ return issues.filter(item=>item.premiseId!==focusId&&item.referencePremiseId!==focusId)
+  .map(()=> '本次同构审核只允许返回变化项与保留项之间的问题，旧配对不得重复否决换选');
 }

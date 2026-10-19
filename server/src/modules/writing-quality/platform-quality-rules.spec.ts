@@ -1,6 +1,29 @@
 import { expect, it } from 'vitest';
 import { readConstitution } from '../project/creative-constitution';
-import { deterministicPlatformReview, platformReviewToRows, partitionPlatformRows, partitionPlatformIssues } from './platform-quality-rules';
+import { deterministicPlatformReview, platformReviewToRows, partitionPlatformRows, partitionPlatformIssues, isObjectivePlatformRule } from './platform-quality-rules';
+
+it('retains paragraph measurements as probes without forcing a split, while semantic findings remain reviewable',()=>{
+ const content='她把信封推回去，等他把话说完。'+ '桌上的名单还留着空位，她知道他在等一个答复，却没有立刻替他作决定。'.repeat(40);
+ const review=deterministicPlatformReview({projectId:'p',runId:'r',stage:'chapter',content,constitution:readConstitution({type:'long_novel',target_platform:'fanqie'})});
+ const partition=partitionPlatformIssues(review.issues);
+ expect(partition.confirmed.some(issue=>['platform.avgParaChars','platform.longParaRatio'].includes(issue.ruleId))).toBe(false);
+ expect(partition.probes.some(issue=>issue.ruleId==='platform.avgParaChars')).toBe(true);
+ for(const id of ['platform.avgParaChars','platform.longParaRatio','platform_paragraph_length'])expect(isObjectivePlatformRule(id)).toBe(false);
+ expect(isObjectivePlatformRule('platform.chapter_length')).toBe(true);
+ const rows=platformReviewToRows(review);
+ const unconfirmed=partitionPlatformRows(rows,[]);
+ expect(unconfirmed.probes.filter(row=>row.issueType==='platform_paragraph_length').every(row=>row.evaluation==='needs_semantic_review')).toBe(true);
+ const evaluated=partitionPlatformRows(rows,[{issueType:'platform_paragraph_length'}]);
+ expect(evaluated.probes.some(row=>row.issueType==='platform_paragraph_length'&&row.evaluation==='semantic_confirmed')).toBe(true);
+});
+
+it('keeps the maximum-length finding while the planning minimum no longer forces padding',()=>{
+ const constitution=readConstitution({type:'long_novel',target_platform:'fanqie'});
+ for(const words of [2399,5001]){
+  const result=deterministicPlatformReview({projectId:'p',runId:'r',stage:'chapter',content:'她'.repeat(words),constitution});
+  expect(result.issues.some(issue=>issue.ruleId==='platform.chapter_length')).toBe(words>5000);
+ }
+});
 
 it('关键词未命中只保留待核对信号，客观比例仍是确认问题，语义确认的问题不被取消', () => {
   const review = deterministicPlatformReview({ projectId: 'p', runId: 'r', stage: 'chapter',
@@ -21,7 +44,7 @@ it('records evidenced deterministic platform risks without claiming semantic pay
   const content = `清晨，他慢慢收拾行李。${'平静的景色铺展开来。'.repeat(90)}\n事情结束了。`;
   const result = deterministicPlatformReview({ projectId: 'p', runId: 'r', stage: 'chapter', content,
     constitution: readConstitution({ type: 'long_novel', target_platform: 'fanqie' }) });
-  expect(result.issues.some(issue => issue.ruleId === 'platform.chapter_length')).toBe(true);
+  expect(result.issues.some(issue => issue.ruleId === 'platform.chapter_length')).toBe(false);
   const gap = result.issues.find(issue => issue.ruleId === 'platform.payoff_emotion_gap_risk');
   expect(gap?.message).toContain('风险标记');
   expect(gap?.evidence.verified).toBe(true);
@@ -33,7 +56,7 @@ it('maps every deterministic platform finding to a persistable quality tag with 
     constitution: readConstitution({ type: 'long_novel', target_platform: 'fanqie' }) });
   const rows = platformReviewToRows(review);
   // 同一份 measureAgainstTarget 的每一类短板都必须能在质检侧落库，而不是被丢弃/改写成 needs_hook
-  expect(rows.map(r => r.issueType)).toContain('platform_chapter_length');
+  expect(rows.map(r => r.issueType)).not.toContain('platform_chapter_length');
   expect(rows.map(r => r.issueType)).toContain('platform_dialogue_ratio');
   expect(rows.map(r => r.issueType)).toContain('platform_opening_hook');
   for (const row of rows) {
@@ -58,7 +81,8 @@ it('片段单元不产出整章级平台指标，但仍产出段落级指标（�
   // 同一内容在整章单元上必须照旧逐条产出：单元判定不得变成通用放宽
   const asChapter = deterministicPlatformReview({ projectId: 'p', runId: 'r', stage: 'chapter',
     content: fragment, constitution: readConstitution({ type: 'long_novel', target_platform: 'fanqie' }) });
-  expect(asChapter.issues.map(issue => issue.ruleId)).toContain('platform.chapter_length');
+  expect(asChapter.issues.map(issue => issue.ruleId)).not.toContain('platform.chapter_length');
+  expect(asChapter.issues.map(issue => issue.ruleId)).toContain('platform.dialogue_ratio');
 });
 
 it('按平台分类执行：目标总字数落在该分类头部实测区间之外会被确定性判出并可落库', () => {

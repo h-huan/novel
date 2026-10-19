@@ -37,11 +37,16 @@ describe('public rule governance', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('QUALITY_EXECUTION.md and the machine registry expose exactly the same active Rule IDs', () => {
-    const doc = readFileSync(join(repoRoot, 'QUALITY_EXECUTION.md'), 'utf8');
-    const documentIds = [...doc.matchAll(/\[([A-Z]+-\d{3})\s*·\s*P[0-3]\]/g)].map((match) => match[1]);
-    expect(new Set(documentIds).size).toBe(documentIds.length); // one authoritative heading per rule
-    expect([...documentIds].sort()).toEqual(activeSystemWorkflowRules().map((rule) => rule.id).sort());
+  it('执行标准 is the sole definition and legacy documents/imports are references only', () => {
+    const canonical=readFileSync(join(process.cwd(),'shared/src/执行标准.ts'),'utf8');
+    expect(canonical).toContain('export const SYSTEM_WORKFLOW_RULES:');
+    const legacy=readFileSync(join(process.cwd(),'shared/src/system-workflow-rules.registry.ts'),'utf8');
+    expect(legacy).toContain("export * from './执行标准'");
+    expect(legacy).not.toContain('export const');
+    const doc=readFileSync(join(repoRoot,'QUALITY_EXECUTION.md'),'utf8');
+    expect(doc).toContain('server/shared/src/执行标准.ts');
+    expect(doc).not.toMatch(/\[[A-Z]+-\d{3}\s*·\s*P[0-3]\]/);
+    expect(activeSystemWorkflowRules().every(rule=>rule.id&&rule.summary)).toBe(true);
   });
 
   it('every active rule has implementation ownership and P0/P1 rules have non-UI execution/governance consumers', () => {

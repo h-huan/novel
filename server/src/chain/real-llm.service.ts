@@ -1,3 +1,4 @@
+import {generationOutputBounds} from '../config/generation-budgets';
 import { assertGenerationActive, currentGenerationSignal, GenerationCancelledError } from '../common/generation-cancellation';
 import { reviewCharacterContracts } from '../modules/writing-quality/character-contract';
 import { narrativeTrace } from '../modules/writing-quality/narrative-trace';
@@ -928,7 +929,8 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     let lastEmptyError: Error | null = null;
     // 结构化输出被 finish_reason=length 截断时的"同模型扩容"状态：模型与 json_object 模式都不变（非降级），
     // 只把输出上限翻倍后用同一 prompt 重试。硬顶由 structured-truncation.ts 单点定义，与调用侧预算同源。
-    let currentMaxTokens = configuredMaxTokens;
+    const outputBounds=generationOutputBounds(modelName,configuredMaxTokens);
+    let currentMaxTokens = outputBounds.initial;
     // ⚠️ 历史缺陷（防复发，勿改回）：截断扩容曾与"空内容重试"共用同一个 attempt 计数，
     // 于是扩容窗口被空内容预算吃掉 —— 配置 8192 时只能扩到 16384 就抛
     // "已扩容至 16384 仍不足"（真实故障：module-standards 归纳、评审链路连续失败）。
@@ -951,11 +953,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       );
     };
     // 扩容轮数上限由硬顶反推（从 1 翻到硬顶所需的最多轮数），避免理论上限之外的无限翻倍。
-    const MAX_TRUNCATION_EXPANSIONS = Math.max(1, Math.ceil(Math.log2(STRUCTURED_JSON_OUTPUT_CEILING)));
+    const MAX_TRUNCATION_EXPANSIONS = Math.max(1, Math.ceil(Math.log2(outputBounds.ceiling)));
     // 扩容的唯一算法：主循环与网络重试分支共用同一个口径，不允许出现第二套判断。
     // 返回下一档输出上限；已到硬顶则返回 null（调用方据此判定"扩容已无意义"）。
     const nextExpandedMaxTokens = (current: number): number | null => {
-      const next = Math.min(STRUCTURED_JSON_OUTPUT_CEILING, Math.floor(current * 2));
+      const next = Math.min(outputBounds.ceiling, Math.floor(current * 2));
       return next > current ? next : null;
     };
     // 温度优先级：调用方显式传入的 temperature > 路由配置的 temperature

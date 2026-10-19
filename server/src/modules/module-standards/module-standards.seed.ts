@@ -61,7 +61,7 @@ export function buildSeedModuleStandardsFromRegistry(): SeedModuleStandard[] {
       category: view.legacyCategory,
       scenarios,
       business_tables: [],
-      purpose: `QUALITY_EXECUTION.md 中 ${view.name} 类公共规则的只读投影；规则所有权属于 Rule ID，不属于本模块。`,
+      purpose: `执行标准中 ${view.name} 类公共规则的只读投影；规则所有权属于 Rule ID，不属于本模块。`,
       steps: [],
       requirements: rules.filter((item) => item.level === 'P0' || item.level === 'P1')
         .map((item) => `[${item.id} · ${item.level}] ${item.summary}`),

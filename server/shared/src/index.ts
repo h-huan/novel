@@ -7,3 +7,5 @@ export * from './category-word-scale';
 export * from './chapter-responsibility-review';
 export * from './chapter-coordinates';
 export * from './fiction-naming';
+
+export * from './discovery-pov';

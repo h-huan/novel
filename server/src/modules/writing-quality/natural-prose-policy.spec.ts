@@ -1,5 +1,5 @@
 import {describe,it,expect,afterEach} from 'vitest';
-import {NATURAL_PROSE_POLICY,READER_ENGAGEMENT_POLICY,activeSystemWorkflowRules} from '../../../shared/src/system-workflow-rules.registry';
+import {CHAPTER_PROSE_SCOPE_POLICY,NATURAL_PROSE_POLICY,READER_ENGAGEMENT_POLICY,activeSystemWorkflowRules} from '../../../shared/src/system-workflow-rules.registry';
 import {ModuleStandardsService} from '../module-standards/module-standards.service';
 import {standardDirectiveCache} from '../module-standards/standard-directive.cache';
 import {detectForbiddenTells} from '../../chain/hardline-scanner';
@@ -13,6 +13,7 @@ describe('natural prose and evidenced reading goals',()=>{
       const prompt=standardDirectiveCache.get(stage);
       expect(prompt.split(NATURAL_PROSE_POLICY).length-1).toBe(1);
       expect(prompt).toContain(READER_ENGAGEMENT_POLICY);
+      expect(prompt.split(CHAPTER_PROSE_SCOPE_POLICY).length-1).toBe(1);
     }
   });
   it('does not exchange human tone for broken logic or unnecessary explanations',()=>{

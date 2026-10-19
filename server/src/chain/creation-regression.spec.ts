@@ -164,6 +164,19 @@ it('normalizes the observed judgment alias while keeping gaps and conflicting pr
   expect(targetIdeaReviews({reviews:[{...row,issues:[bad]}]},[card],[]).reviews[0].issues).toEqual([bad]);
 });
 
+it('normalizes observed detail reasons without deleting defects or accepting conflicting reasons',()=>{
+ const card={title:'待修订题材'};
+ const defects=[{criterion:'titleCompelling',detail:'标题没有表达具体人物危机和利益冲突'},
+   {criterion:'storyCoherent',detail:'任务尚未完成就发放奖励，违反已建立的触发条件'}];
+ const row={position:1,title:card.title,titleCompelling:false,storyCoherent:false,issues:defects};
+ const fixed=targetIdeaReviews({reviews:[row]},[card],[]).reviews[0];
+ expect(fixed.titleCompelling).toBe(false);expect(fixed.storyCoherent).toBe(false);
+ expect(fixed.issues).toEqual(defects.map(issue=>issue.criterion+'：'+issue.detail));
+ expect(row.issues).toBe(defects);
+ for(const bad of [{...defects[0],reason:'与detail互相冲突的另一份理由'}, {...defects[0],criterion:'unknown'}, {...defects[0],detail:''}])
+  expect(targetIdeaReviews({reviews:[{...row,issues:[bad]}]},[card],[]).reviews[0].issues).toEqual([bad]);
+});
+
 it('keeps related fact fields inside the local outline repair boundary',async()=>{
  const {OUTLINE_FACT_REPAIR_SYNC_POLICY}=await import('../../shared/src/system-workflow-rules.registry');
  expect(OUTLINE_FACT_REPAIR_SYNC_POLICY).toContain('同一事实的必要关联字段属于本次局部修复范围');

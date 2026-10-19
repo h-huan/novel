@@ -544,7 +544,7 @@ export function measureAgainstTarget(content: string, t: TextMetricTarget): { me
     key: 'avgParaChars', label: '平均段落字数',
     value: `${m.avgParaChars} 字`, target: `≤ ${t.avgParaCharsMax} 字`,
     status: pOk ? 'ok' : 'bad',
-    advice: pOk ? '' : '段落偏厚；只调整现有句子的分段与冗余，不新增动作、对白或事实来满足排版指标',
+    advice: pOk ? '' : '段长超参考值，仅作阅读风险；先核对是否信息混杂或焦点跳换，不为指标强拆连贯段落',
   });
 
   const lrOk = m.longParaRatio <= t.longParaRatioMax;
@@ -552,7 +552,7 @@ export function measureAgainstTarget(content: string, t: TextMetricTarget): { me
     key: 'longParaRatio', label: '超长段落占比',
     value: pct(m.longParaRatio), target: `≤ ${pct(t.longParaRatioMax)}`,
     status: lrOk ? 'ok' : 'warn',
-    advice: lrOk ? '' : '存在过多“大墙”段落，读者易跳读，优先拆分超过阈值的段落',
+    advice: lrOk ? '' : '长段占比超参考值，仅作阅读风险；按叙事焦点与实际阅读负担判断，不只因超过阈值拆段',
   });
 
   rows.push({
@@ -585,16 +585,16 @@ export function buildBenchmarkDirective(platform?: string | null, length?: strin
   if (length === 'long_novel' || length === 'short_story') {
     const t = targetForLength(b, length);
     const lenLabel = length === 'long_novel' ? '长篇' : '短篇';
-    body = `（${lenLabel}）对话占比约 ${pct(t.dialogueRatio[0])}–${pct(t.dialogueRatio[1])}；平均段落不超过 ${t.avgParaCharsMax} 字，${t.shortParagraph ? '按完整意群组织短段，可含几句，长短自然变化，不强制一句一段' : '允许成段但不写大墙'}；` +
-      `开篇约 ${t.openingHookChars} 字内建立阅读承诺；${t.payoffGapChars[0]}–${t.payoffGapChars[1]} 字是平台常见推进密度参考，可由场景职责和张力曲线偏离，禁止按固定字数硬塞反转${t.endingHook ? '；非终章章尾提供继续阅读理由，终章完成收束或余韵' : ''}；本章 ${t.chapterWords[0]}–${t.chapterWords[1]} 字。`;
+    body = `（${lenLabel}）对话占比约 ${pct(t.dialogueRatio[0])}–${pct(t.dialogueRatio[1])}；平均段长参考≤${t.avgParaCharsMax}字（仅作风险提示，不因超参考值强拆连贯叙事），${t.shortParagraph ? '按完整意群组织短段，可含几句，长短自然变化，不强制一句一段' : '允许成段但不写大墙'}；` +
+      `开篇约 ${t.openingHookChars} 字内建立阅读承诺；${t.payoffGapChars[0]}–${t.payoffGapChars[1]} 字是平台常见推进密度参考，可由场景职责和张力曲线偏离，禁止按固定字数硬塞反转${t.endingHook ? '；非终章章尾提供继续阅读理由，终章完成收束或余韵' : ''}；本章规划参考 ${t.chapterWords[0]}–${t.chapterWords[1]} 字，下限为参考，质量优先，宁短勿水。`;
   } else {
     const dLo = Math.min(b.short.dialogueRatio[0], b.long.dialogueRatio[0]);
     const dHi = Math.max(b.short.dialogueRatio[1], b.long.dialogueRatio[1]);
     const paraMax = Math.max(b.short.avgParaCharsMax, b.long.avgParaCharsMax);
-    body = `对话占比约 ${pct(dLo)}–${pct(dHi)}；平均段落不超过 ${paraMax} 字、拒绝大段厚段落；` +
+    body = `对话占比约 ${pct(dLo)}–${pct(dHi)}；平均段长参考≤${paraMax}字，信息组织以连贯可读为准，不按数字强拆；` +
       `短篇开篇约 ${b.short.openingHookChars} 字内、长篇开篇约 ${b.long.openingHookChars} 字内建立阅读承诺；` +
       `短篇 ${b.short.payoffGapChars[0]}–${b.short.payoffGapChars[1]} 字、长篇 ${b.long.payoffGapChars[0]}–${b.long.payoffGapChars[1]} 字仅作为常见推进密度参考，按场景职责动态调整；非终章章尾提供继续阅读理由，终章负责收束；` +
-      `章节字数：短篇 ${b.short.chapterWords[0]}–${b.short.chapterWords[1]}、长篇 ${b.long.chapterWords[0]}–${b.long.chapterWords[1]}。`;
+      `章节规划参考：短篇 ${b.short.chapterWords[0]}–${b.short.chapterWords[1]}、长篇 ${b.long.chapterWords[0]}–${b.long.chapterWords[1]}，下限为参考，质量优先，宁短勿水。`;
   }
   // styleMust 的开篇钩子窗口写成占位符 {openingHookChars}，运行期由平台表本篇幅值插值（唯一源，
   // 禁止在散文里复述数字）：此前番茄/七猫写死 300、抖音写死 200，而平台表长篇分别是 500/500/300，

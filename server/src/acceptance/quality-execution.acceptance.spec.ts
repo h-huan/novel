@@ -17,7 +17,7 @@ import { qualityIssue } from '../modules/writing-quality/quality-issue';
 import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 
-it('persists the logical insertion rejection with the candidate and leaves saved content intact', async () => {
+it('persists the preparation rejection of a short draft and leaves saved content intact', async () => {
   const db = new DatabaseSync(':memory:');
   try {
     await new Migrator(db).runMigrations();
@@ -34,12 +34,14 @@ it('persists the logical insertion rejection with the candidate and leaves saved
     const before = db.prepare('SELECT * FROM chapters WHERE project_id=?').all(project.id);
     await expect(controller.generateBodyWithLengthGuard({ basePrompt: '本章出口', targetWords: 40,
       scenario: 'writing', wordRange: { min: 30, max: 100 },
-      metricsContext: { projectId: project.id, chapterIndex: 2 } })).rejects.toThrow('编号无效');
-    const metric = db.prepare("SELECT * FROM generation_step_metrics WHERE project_id=? AND step_key='body_length_contract'").get(project.id);
+      prepareInitialDraft: async () => { throw new Error('必要时间条件未通过'); },
+      metricsContext: { projectId: project.id, chapterIndex: 2 } })).rejects.toThrow('必要时间条件未通过');
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(1);
+    const metric = db.prepare("SELECT * FROM generation_step_metrics WHERE project_id=? AND step_key='body_time_plan_consumption_contract'").get(project.id);
     expect(metric).toMatchObject({ status: 'failed', phase: 'validation', chapter_index: 2 });
     const run = db.prepare('SELECT * FROM generation_runs WHERE id=?').get(metric.run_id);
     expect(run).toMatchObject({ status: 'failed', project_id: project.id, output_text: first });
-    expect(run.error).toContain('编号无效');
+    expect(run.error).toContain('必要时间条件未通过');
     expect(controller.logger.warn).not.toHaveBeenCalled();
     expect(db.prepare('SELECT * FROM chapters WHERE project_id=?').all(project.id)).toEqual(before);
   } finally { db.close(); }

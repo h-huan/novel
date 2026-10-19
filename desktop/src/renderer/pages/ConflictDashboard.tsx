@@ -2,7 +2,7 @@
  * ConflictDashboard - 冲突优先级可视化面板
  * 对接后端 /conflict-engine/* API
  *
- * 行为依据（项目执行标准：module-standards seed / QUALITY_EXECUTION.md 的冲突优先级与章节职责先于措辞）：
+ * 行为依据（项目执行标准：shared/src/执行标准.ts 的冲突优先级与章节职责先于措辞）：
  * - R1 金字塔：锁定正文(P0) > 世界观(P1) > 基础设定/大纲(P2) > 未锁定正文(P3)
  * - R2 处理：高优先级可改 → 评估+用户确认；锁定 → 以高优先级为准自动修改低优先级
  * - R4 流程：高优先级不可变 → 自动修正低优先级；高优先级可改 → AI生成方案+用户确认
@@ -90,19 +90,17 @@ const ConflictDashboard: React.FC = () => {
   }, [loadConflicts]);
 
   /**
-   * 一键清理过期矛盾（用户铁律：矛盾点非最新版本和当前正文的矛盾要删除）
-   * 调 DELETE /conflicts/stale?projectId=，删除所有 status=warning/error 且未解决的冲突。
-   * 保留：已通过（pass）+ 已解决（resolved）。
+   * 归档有版本或来源状态依据的过期问题，当前问题与历史记录均保留。
    */
   const cleanupStaleConflicts = useCallback(async () => {
     if (!projectId) return;
-    if (!window.confirm('确定清理所有过期矛盾（基于旧版本正文或已过期检测产生的未解决冲突）？\n\n将删除：status=warning/error 且未解决的冲突\n保留：已通过的检查 + 已解决的记录\n\n清理后请重新检测本章以生成最新冲突。')) return;
+    if (!window.confirm('清理已被新版正文替代的旧问题？仍适用的未解决问题会保留，历史记录可追溯。')) return;
     setCleaningStale(true);
     try {
       const res = await api.delete(`/conflicts/stale?projectId=${projectId}`);
       const data = (res as any).data ?? res;
       const removed = Number(data?.removed || 0);
-      setRecheckMessage(`已清理 ${removed} 条过期矛盾。下次「重新检测」会生成最新冲突。`);
+      setRecheckMessage(`已归档 ${removed} 条过期问题，当前未解决问题已保留。`);
       await loadConflicts();
     } catch (e: any) {
       setActionError(`清理失败：${e?.message || String(e)}`);
@@ -171,7 +169,7 @@ const ConflictDashboard: React.FC = () => {
         <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text-primary)' }}>⚡ 冲突优先级</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={cleanupStaleConflicts} disabled={loading || cleaningStale}
-            title="删除本章/全项目所有 status=warning/error 且未解决的过期冲突（基于旧版本正文或已过期检测产生的）"
+            title="归档有正文版本依据的过期问题，保留仍适用的未解决问题"
             style={{ padding: '8px 16px', backgroundColor: 'rgba(243,156,18,0.12)', border: '1px solid rgba(243,156,18,0.3)', borderRadius: '6px', color: 'var(--color-warning)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
             {cleaningStale ? '清理中…' : '🧹 清理过期矛盾'}
           </button>

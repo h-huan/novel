@@ -14,9 +14,9 @@
 export const STRUCTURED_TRUNCATION_FLAG = 'structuredOutputTruncated';
 
 /**
- * 结构化输出（json_object）允许申请的输出上限。
- * 与现有最大场景配置 writing=32768 对齐，不申请未经上游验证的更大值。
- * 调用侧的「单批预算」与这里的硬顶必须是同一个数，否则规划出来的批次仍会撞顶。
+ * 未识别模型的保守兼容上限。已识别的deepseek-flash从运行预算取得实际上限。
+ * 32768不是所有模型的能力上限；deepseek-flash官方上限393216由generation-budgets约束。
+ * 保留此导出供旧场景及未知模型兼容，正常Flash调用不使用它作为硬顶。
  */
 export const STRUCTURED_JSON_OUTPUT_CEILING = 32768;
 

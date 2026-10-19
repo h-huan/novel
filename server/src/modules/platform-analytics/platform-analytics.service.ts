@@ -1,3 +1,4 @@
+import { ACTIVE_ISSUE_SQL, retireStaleIssues } from '../writing-quality/issue-lifecycle';
 /**
  * PlatformAnalyticsService — 工作台数据驾驶舱聚合（跨业务表 + 生成遥测，确定性统计，不伪造任何数据）
  *
@@ -122,9 +123,11 @@ export class PlatformAnalyticsService {
        FROM writing_quality_reports r
        JOIN projects p ON p.id=r.project_id
        JOIN chapters c ON c.id=r.chapter_id AND c.project_id=r.project_id
-       WHERE r.chapter_id IS NOT NULL${sc.clause} ORDER BY r.created_at ASC`,
+       WHERE r.chapter_id IS NOT NULL AND r.status != 'superseded'${sc.clause} ORDER BY r.created_at ASC`,
       sc.params,
     );
+    const projects = this.safeAll(`SELECT DISTINCT r.project_id FROM writing_quality_reports r WHERE 1=1${sc.clause}`, sc.params);
+    for (const project of projects) retireStaleIssues(this.database.getDb(), project.project_id);
     const latest = new Map<string, string>();
     for (const r of rows) latest.set(`${r.chapter_id}:${r.source_type}:${r.scope}`, String(r.id));
     return [...latest.values()];
@@ -314,7 +317,7 @@ export class PlatformAnalyticsService {
     const ph = latestIds.map(() => '?').join(',');
     return this.safeAll(
       `SELECT issue_type, chapter_id, severity FROM writing_quality_issues
-       WHERE status='open' AND report_id IN (${ph})`, latestIds,
+       WHERE status IN ${ACTIVE_ISSUE_SQL} AND report_id IN (${ph})`, latestIds,
     );
   }
 
@@ -369,7 +372,7 @@ export class PlatformAnalyticsService {
        JOIN projects p ON p.id=i.project_id
        JOIN writing_quality_reports r ON r.id=i.report_id AND r.project_id=i.project_id
        LEFT JOIN chapters c ON c.id=i.chapter_id AND c.project_id=i.project_id
-       WHERE i.status='open' AND (i.issue_type LIKE 'consistency.%' OR i.issue_type='originality'
+       WHERE i.status IN ${ACTIVE_ISSUE_SQL} AND (i.issue_type LIKE 'consistency.%' OR i.issue_type='originality'
          OR i.issue_type='outline_alignment' OR i.issue_type LIKE 'hardline.%')
          AND (i.chapter_id IS NULL OR c.id IS NOT NULL)${sc.clause}
        ORDER BY i.created_at ASC`, sc.params,
@@ -488,7 +491,7 @@ export class PlatformAnalyticsService {
        FROM writing_quality_issues i
        LEFT JOIN chapters c ON c.id=i.chapter_id
        LEFT JOIN projects p ON p.id=i.project_id
-       WHERE i.status='open' AND i.report_id IN (${ph})${sc.clause}
+       WHERE i.status IN ${ACTIVE_ISSUE_SQL} AND i.report_id IN (${ph})${sc.clause}
        ORDER BY i.created_at`, [...latestIds, ...sc.params],
     );
     const sevRank: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
@@ -563,7 +566,7 @@ export class PlatformAnalyticsService {
     const sc = this.scopeClause(scope, 'i.project_id');
     const rows = this.safeAll(
       `SELECT i.issue_type check_type,i.summary message,i.payload FROM writing_quality_issues i
-       WHERE i.status='open' AND (i.issue_type LIKE 'consistency.%' OR i.issue_type='originality'
+       WHERE i.status IN ${ACTIVE_ISSUE_SQL} AND (i.issue_type LIKE 'consistency.%' OR i.issue_type='originality'
          OR i.issue_type='outline_alignment' OR i.issue_type LIKE 'hardline.%')${sc.clause}`, sc.params,
     );
     const m = new Map<string, number>();

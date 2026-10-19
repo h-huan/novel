@@ -285,7 +285,7 @@ ${characterContent.substring(0, 500)}
       });
     }
 
-    const overdue = db.prepare(`SELECT content, planned_recovery_chapter_index FROM foreshadowings
+    const overdue = db.prepare(`SELECT id, content, planned_recovery_chapter_index FROM foreshadowings
       WHERE project_id = ? AND status IN ('buried','active','reminder')
         AND planned_recovery_chapter_index IS NOT NULL AND planned_recovery_chapter_index < ?`
     ).all(row?.project_id || '', chapter.index) as any[];
@@ -298,6 +298,7 @@ ${characterContent.substring(0, 500)}
         message: `伏笔已超过计划回收章节：${item.content}`,
         details: [{
           field: 'foreshadowing',
+          sourceId: item.id,
           expected: `第${item.planned_recovery_chapter_index}章前回收或重新排期`,
           actual: `检查到第${chapter.index}章仍未回收`,
           suggestion: '回收、取消，或由作者明确调整回收窗口。',

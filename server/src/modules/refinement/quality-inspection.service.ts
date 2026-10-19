@@ -2,7 +2,7 @@ import { quotedText } from '../../chain/quoted-text';
 /**
  * AI质检系统
  * 逻辑检测、人设漂移检测、伏笔遗漏检测、写作专属十一维度评分
- * 维度口径以项目执行标准为唯一事实源（module-standards seed / QUALITY_EXECUTION.md）
+ * 维度口径以项目执行标准为唯一事实源（shared/src/执行标准.ts）
  */
 import { Injectable } from '@nestjs/common';
 import { detectForbiddenTells } from '../../chain/hardline-scanner';

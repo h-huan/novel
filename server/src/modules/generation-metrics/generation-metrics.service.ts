@@ -1,4 +1,5 @@
 import { defaultRepairStrategy, repairStrategies } from '../writing-quality/repair-strategy-registry';
+import { ACTIVE_ISSUE_SQL, retireStaleIssues } from '../writing-quality/issue-lifecycle';
 import { aggregateArtifactScores, aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
 import { qualityGate, qualityIssue } from '../writing-quality/quality-issue';
 import { readConstitution } from '../project/creative-constitution';
@@ -504,6 +505,7 @@ export class GenerationMetricsService implements OnModuleInit {
 
   getCockpit(projectId: string) {
     const db = this.databaseService.getDb();
+    retireStaleIssues(db, projectId);
     const project = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
     const currentConstitution = project ? JSON.stringify(readConstitution(project)) : null;
     const currentContexts = new Map<string, string>();
@@ -517,7 +519,7 @@ export class GenerationMetricsService implements OnModuleInit {
     const issueRows = db.prepare(`SELECT i.*,q.source_type,r.stage run_stage,r.chapter_index run_chapter,r.context_snapshot run_context
       FROM writing_quality_issues i JOIN writing_quality_reports q ON q.id=i.report_id
       LEFT JOIN generation_runs r ON q.source_type='artifact_quality' AND r.id=q.source_id
-      WHERE i.project_id=? AND i.status='open' AND (q.source_type!='artifact_quality'
+      WHERE i.project_id=? AND i.status IN ${ACTIVE_ISSUE_SQL} AND (q.source_type!='artifact_quality'
         OR r.constitution_json=?) ORDER BY i.created_at DESC LIMIT 100`)
       .all(projectId, currentConstitution) as any[];
     const issues = issueRows.filter(issue => issue.source_type !== 'artifact_quality'
@@ -546,9 +548,9 @@ export class GenerationMetricsService implements OnModuleInit {
     scores.project = aggregateProjectScore(scores);
     const repairs = db.prepare('SELECT id,stage,status,strategy,reason,before_score,after_score,before_text,after_text FROM generation_repairs WHERE project_id=? ORDER BY created_at DESC LIMIT 100').all(projectId) as any[];
     const issuePareto = db.prepare(`SELECT issue_type ruleId,COUNT(*) count FROM writing_quality_issues
-      WHERE project_id=? AND status='open' GROUP BY issue_type ORDER BY count DESC,issue_type LIMIT 20`).all(projectId);
+      WHERE project_id=? AND status IN ${ACTIVE_ISSUE_SQL} GROUP BY issue_type ORDER BY count DESC,issue_type LIMIT 20`).all(projectId);
     const issueStageDistribution = db.prepare(`SELECT q.scope stage,COUNT(*) count FROM writing_quality_issues i
-      JOIN writing_quality_reports q ON q.id=i.report_id WHERE i.project_id=? AND i.status='open' GROUP BY q.scope ORDER BY count DESC`).all(projectId);
+      JOIN writing_quality_reports q ON q.id=i.report_id WHERE i.project_id=? AND i.status IN ${ACTIVE_ISSUE_SQL} GROUP BY q.scope ORDER BY count DESC`).all(projectId);
     const strategyStats = db.prepare(`SELECT strategy_id strategyId,SUM(attempts) attempts,SUM(accepted) accepted,SUM(rollbacks) rollbacks,
       ROUND(CASE WHEN SUM(attempts)>0 THEN 1.0*SUM(accepted)/SUM(attempts) END,3) successRate,
       ROUND(CASE WHEN SUM(attempts)>0 THEN 1.0*SUM(introduced_issue_count)/SUM(attempts) END,3) destructionRate,

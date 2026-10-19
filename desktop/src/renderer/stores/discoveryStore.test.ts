@@ -49,3 +49,22 @@ describe('discovery execution settings', () => {
     });
   });
 });
+
+describe('discovery defaults and explicit selection',()=>{
+ beforeEach(()=>useDiscoveryStore.getState().reset());
+ it('defaults to first person and allows explicitly clearing it for random',()=>{
+  expect(useDiscoveryStore.getState().narrativePov).toBe('第一人称');
+  useDiscoveryStore.getState().setNarrativePov('');expect(useDiscoveryStore.getState().narrativePov).toBe('');
+ });
+ it('retains one choice, then every manually selected genre',()=>{
+  const state=useDiscoveryStore.getState();state.toggleGenre('系统流');
+  expect(useDiscoveryStore.getState().selectedGenres).toEqual(['系统流']);
+  state.toggleGenre('都市战神');state.toggleGenre('扮猪吃虎');
+  expect(useDiscoveryStore.getState().selectedGenres).toEqual(['系统流','都市战神','扮猪吃虎']);
+ });
+ it('migrates the previous empty default without replacing explicit choices',()=>{
+  const migrate=useDiscoveryStore.persist.getOptions().migrate!;
+  expect(migrate({narrativePov:'',selectedGenres:['系统流','都市战神']},4)).toMatchObject({narrativePov:'第一人称',selectedGenres:['系统流','都市战神']});
+  expect(migrate({narrativePov:'第三人称限知'},4)).toMatchObject({narrativePov:'第三人称限知'});
+ });
+});

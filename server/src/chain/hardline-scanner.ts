@@ -1,5 +1,6 @@
 import { resolveNovelStrategy } from './platform-benchmarks';
 import { STYLE_PUNCTUATION_RELAX_KEYWORDS } from '../../shared/src';
+import { literalCharacterCountMismatches } from './literal-character-count';
 
 /**
  * 「白描/朴素」类文风的标点宽松判定（阈值分化，不是豁免、不是降级）。
@@ -69,6 +70,7 @@ export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
   // 段长/句长/标点密度/词频/比喻/生理反应等启发式只能作为语义复核证据，不能直接阻断。
   '15c', '15d', '33', '35', '35b', '42', '44',
   '54-measure-word-mismatch', '56-punct-stacking',
+  'literal-character-count',
 ];
 
 /** 判断某条扫描命中是否属于跨平台语言硬伤（兼容规则号带后缀的情况） */
@@ -117,6 +119,12 @@ export function detectForbiddenTells(
   ): HardlineFinding[] {
     if (!content) return [];
     const findings: HardlineFinding[] = [];
+    for(const finding of literalCharacterCountMismatches(content))findings.push({
+      ruleId:'literal-character-count',
+      message:`完整引文实际${finding.actual}个汉字，却自报${finding.declared}个字；修正数量或省略无作用的数量说明，保留引文事实`,
+      snippet:finding.evidence,position:`offset ${finding.start}-${finding.end}`,
+      hitCharOffsets:[finding.start],occurrenceCount:1,
+    });
 
     // ===== 平台化排版/节奏策略（关键：各平台是各平台风格，扫描器不得一刀切） =====
     // 番茄/抖音/七猫/小红书/规则怪谈等"短段落、快节奏"平台，短段独立成段、人名/称谓短句起段
@@ -1234,60 +1242,14 @@ export function detectForbiddenTells(
 }
 
 /**
- * normalizeProseLayout — 确定性「仅排版层」规整：只重排换行，不增删、不改写任何正文字符。
- *
- * 存在理由：规则 33（段后连续空行）、26-short-para / 26b-staccato（短句逐句换行）已在阻断清单内，
- * 但它们是纯排版问题——先由确定性层在落库前直接收口，模型就不必为「多打了一个空行」白烧一轮精修
- * （这属于「减少重复流程」）。落库后仍残留的少量碎片，才由阻断清单触发段落级精修精确改写。
- * 排版问题在落库前直接收口：
- *   ① 连续空行 ≥2 → 折叠为 1 个空行（规则 33 口径）；
- *   ② 相邻的「叙述碎片段」合并为一段：非对话（不含引号）、以句号收尾、且符合平台口径的极短
- *      叙述段，连续出现时并入同一段（累计不超过 MERGE_MAX 汉字）。对话段、长叙述段一律不动，
- *      单个孤立碎片也不动（保留正常强调节奏）——只消除「连续多段一句一行」的机械换行。
- * 合并只删除段间空行，正文汉字与标点数量严格守恒，字数统计（只数汉字/英文）不受影响。
+ * QLT-014: whitespace cleanup cannot decide narrative focus or meaningful pauses.
+ * Preserve paragraph boundaries; merge/delete decisions remain in semantic review.
+ * The scanner still reports paragraph risks and verifies actual language defects.
  */
-export const PROSE_LAYOUT_MERGE_MAX_CJK = 60;
-
 export function normalizeProseLayout(
   content: string,
-  profile?: HardlineProfile,
+  _profile?: HardlineProfile,
 ): string {
   if (!content) return content;
-  const strategy = resolveNovelStrategy({
-    platform: profile?.platform, storyType: profile?.storyType,
-    storyCategory: profile?.storyCategory, storyTone: profile?.storyTone,
-    writingStyle: profile?.writingStyle, webNovelGenre: profile?.webNovelGenre,
-  });
-  // 与上方同一判据：短段平台就是 pacing==='very_high' 的平台，不再内联第二份同名单。
-  const shortPacing = strategy.pacing === 'very_high';
-  // 短段平台按 26b 口径（一句一段、≤20 汉字）收口；其余平台按 26 口径（<12 字的极短碎片）收口
-  const fragmentMaxCjk = shortPacing ? 20 : 12;
-  const cjkLen = (s: string) => (s.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-  const hasQuote = (s: string) => /[“”"「」]/.test(s);
-  const endMarkCount = (s: string) => (s.match(/[。！？!?]/g) || []).length;
-  const isFragment = (s: string) => {
-    if (hasQuote(s) || !/[。]$/.test(s)) return false;
-    if (/^[^。！？\n]{1,12}[:：]/.test(s)) return false; // Message/record labels retain their reading boundary.
-    // A visible scene/time boundary is not a disposable short prose fragment.
-    if (/^(?:【|#{1,6}\s|次日|翌日|第二天|当天|当晚|清晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里|凌晨|同一时间|与此同时|另一边|\d{1,2}[:：]\d{2})/.test(s)) return false;
-    const len = cjkLen(s);
-    if (len === 0 || len > fragmentMaxCjk) return false;
-    return shortPacing ? endMarkCount(s) === 1 : true;
-  };
-  // ① 规则 33：连续空行 ≥2 折叠为单个空行
-  const text = content.replace(/\r\n/g, '\n').replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n');
-  // ② 规则 26 / 26b：相邻叙述碎片段合并
-  const paragraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-  const out: string[] = [];
-  let buffer = '';
-  const flush = () => { if (buffer) { out.push(buffer); buffer = ''; } };
-  for (const para of paragraphs) {
-    if (!isFragment(para)) { flush(); out.push(para); continue; }
-    const merged = buffer ? buffer + para : para;
-    if (cjkLen(merged) <= PROSE_LAYOUT_MERGE_MAX_CJK) { buffer = merged; continue; }
-    flush();
-    buffer = para;
-  }
-  flush();
-  return out.join('\n\n');
+  return content.replace(/\r\n/g, '\n').replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n');
 }

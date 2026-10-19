@@ -6,6 +6,7 @@ import { SOURCE_QUALITY_AXES, CONTINUITY_EVIDENCE_CONTRACT } from '../modules/wr
 const flags = ['pass','outlineAligned','continuityPassed','characterPassed','worldPassed','timelinePassed','prosePassed'];
 const arrays = ['requiredEvents','missingRequiredItems','contradictions','advisories','sourceConflicts','evidence'];
 const object = (v: any) => !!v && typeof v === 'object' && !Array.isArray(v);
+const citationJsonSyntax = 'JSON引文类型必须按骨架：requiredEvents[].evidence、sourceQualityAudit.checks各轴的evidence/basisEvidence、readerGoals各轴的quote、causalAudit各引文字段均为单个字符串；需要多处支撑时选最能核验的一段连续原文，其余写入已有总体evidence数组或合同允许的逐项检查数组，不拼接为一段引文。只有骨架标为[]的字段才能列多项。合法示例：{"event":"事件","covered":true,"evidence":"一段连续原文"}；禁止写成{"evidence":"引文甲","引文乙"}，对象内每个逗号后必须是带冒号的字段名，不能出现裸字符串。';
 
 export function parseChapterAlignmentReview(raw: string): {value: any; errors: string[]; invalidPaths: string[]} {
   let value: any;
@@ -57,7 +58,7 @@ export function mergeChapterReviewContractCorrection(original: ReturnType<typeof
 }
 
 export function chapterReviewContractCorrectionDirective(original: ReturnType<typeof parseChapterAlignmentReview>) {
-  if(!original.value||!original.invalidPaths.length)return '上一轮完整JSON语法或字段归属无效。按当前正文与原合同重新返回单个完整评审JSON。不得复制损坏JSON里的无名称对象、placeholder或错层结构；不能从内部片段拼成通过报告。';
+  if(!original.value||!original.invalidPaths.length)return '上一轮完整JSON语法或字段归属无效。按当前正文与原合同重新返回单个完整评审JSON。不得复制损坏JSON里的无名称对象、placeholder或错层结构；不能从内部片段拼成通过报告。'+citationJsonSyntax;
   return '只返回JSON补丁 {"corrections":[{"path":"点名字段路径","value":"该字段实际完整审查结果，保持合同规定类型"}]}。必须且仅覆盖以下路径：'+JSON.stringify(original.invalidPaths)
     +'。不要重发完整报告，不修改其它已合法字段、质量判断或正文。只纠正结构；缺实际证据须保留unknown或阻断，不用空数组或默认通过填平真实问题。';
 }
@@ -66,7 +67,7 @@ export function chapterReviewContractCorrectionDirective(original: ReturnType<ty
 export function chapterAlignmentReviewContract(catalog:ReturnType<typeof chapterObligationCatalog>=[]): string {
   const sourceRow={status:'supported|gap|conflict|not_applicable|unknown',evidence:'当前正文连续逐字原文',basisSource:'body|chapter_plan|context',basisEvidence:'gap/conflict及跨章continuity supported对应的必要前提连续原文',reason:'至少8字解释'};
   const goal={status:'supported|weak|unknown',quote:'本章连续逐字原文；unknown可为空',reason:'至少8字说明本阶段阅读机制'};
-  return '只输出单个合法JSON对象，以下骨架字段全部必填，示例布尔值须按本次证据判断，状态从竖线选项中选择一个；不能输出未命名对象或多个JSON。六项源头审查逐项返回，gap/conflict须有前提证据，not_applicable须说明原因，unknown保留未验证；chapter_plan/context仅引用本次实际显示资料。readerGoals保留真实weak/unknown，不把未来计划当本章效果。'+CONTINUITY_EVIDENCE_CONTRACT+'结构如下：'+JSON.stringify({
+  return '只输出单个合法JSON对象，以下骨架字段全部必填，示例布尔值须按本次证据判断，状态从竖线选项中选择一个；不能输出未命名对象或多个JSON。六项源头审查逐项返回，gap/conflict须有前提证据，not_applicable须说明原因，unknown保留未验证；chapter_plan/context仅引用本次实际显示资料。readerGoals保留真实weak/unknown，不把未来计划当本章效果。'+CONTINUITY_EVIDENCE_CONTRACT+citationJsonSyntax+'结构如下：'+JSON.stringify({
     ...(catalog.length?{obligationChecks:catalog.map(row=>({ref:row.ref,status:'covered|missing|unknown',evidence:[],reason:'按完整行动与结果核对实际正文'}))}:{}),
     pass:true,requiredEvents:[{event:'必需事件点',covered:true,evidence:'正文逐字证据'}],missingRequiredItems:[],
     contradictions:[{kind:'story|language',summary:'有逐字证据的非时间冲突或语言问题；无问题返回空数组'}],advisories:[],sourceConflicts:[],
@@ -93,7 +94,19 @@ export function chapterObligationReviewDirective(catalog:ReturnType<typeof chapt
 }
 function floorValues(text:string) {
  const number=(value:string)=>temporalNumbers(value+'分钟').durations[0]?.minutes;
- const values=[...text.matchAll(/(?<!这|那|另)(地下|负)?([零〇一二两三四五六七八九十百千\d]+)(?:楼|层)/g)].map(match=>(match[1]?'-':'')+number(match[2]));
+ const values:string[]=[];
+ // 层 can describe relationships or psychology. Only physical location evidence
+ // creates a floor obligation; leave abstract/ambiguous layers to semantic review.
+ for(const match of text.matchAll(/(?<![这那另同某每零〇一二两三四五六七八九十百千\d])(地下|负)?([零〇一二两三四五六七八九十百千\d]+)(楼|层)/g)) {
+  if(match[3]==='层') {
+   const before=text.slice(0,match.index),after=text.slice(match.index!+match[0].length);
+   const namedPlace=/^(?:的)?(?:大厅|大堂|候梯厅|走廊|楼梯|电梯|楼道|门厅|办公室|办公区|病房|病区|教室|客房|房间|平台|车库|停车场|地下室)/.test(after);
+   const arrival=/(?:到达|抵达|来到|走到|上到|下到|爬到|登上|进入|走进|返回|回到|停在|站在|位于|住在|到了|到|至)(?:了|第)?$/.test(before);
+   const bareLocation=/^(?:时|后|处|内|里)?(?:[，。！？；、：,.;!?…“”「」"'{}\]\s]|$)/.test(after);
+   if(!namedPlace&&!(arrival&&bareLocation))continue;
+  }
+  values.push((match[1]?'-':'')+number(match[2]));
+ }
  // A stopped elevator's displayed floor is a location, even without repeating 楼/层.
  for(const paragraph of text.split(/\n\s*\n|\n/)) {
   if(!/电梯/.test(paragraph)||!/(?:停稳|停下|门开)/.test(paragraph)||/(?:如果|要是|假如|等到|准备|计划|想象|将会|会停|还没|未停|没有停|不停)/.test(paragraph))continue;

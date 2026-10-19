@@ -1,3 +1,4 @@
+import { ACTIVE_ISSUE_SQL, reviewedContentHash } from './issue-lifecycle';
 import { CHARACTER_VOICE_COMPARISON_ISSUE_TYPES } from '../../../shared/src/system-workflow-rules.registry';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -291,7 +292,7 @@ export function replaceQualityIssues(db: DatabaseSync, input: {
     gate.status === 'passed' ? 'open' : gate.status,
     JSON.stringify({ evaluation: gate.status === 'not_evaluated' ? 'insufficient_evidence' : 'evaluated', source: input.source }), now, now,
   );
-  db.prepare("UPDATE writing_quality_issues SET status='superseded',updated_at=? WHERE report_id=? AND status='open'")
+  db.prepare(`UPDATE writing_quality_issues SET status='superseded',updated_at=? WHERE report_id=? AND status IN ${ACTIVE_ISSUE_SQL}`)
     .run(now, reportId);
 
   const insert = db.prepare(`INSERT INTO writing_quality_issues
@@ -311,7 +312,7 @@ export function replaceQualityIssues(db: DatabaseSync, input: {
     insert.run(issueId, reportId, input.projectId, input.chapterId ?? null, issue.ruleId,
       issue.severity, issue.message, issue.message, issue.evidence.quote || null, raw.suggestion ?? null,
       issue.evidence.start, issue.evidence.end, issue.status,
-      JSON.stringify({ qualityIssue: issue, details: raw.details ?? null }), now, now);
+      JSON.stringify({ qualityIssue: issue, details: raw.details ?? null, reviewedContentHash: raw.content !== undefined ? reviewedContentHash(raw.content) : undefined }), now, now);
   });
   return { reportId, issues: normalized };
 }

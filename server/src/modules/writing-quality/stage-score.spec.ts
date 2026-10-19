@@ -1,7 +1,7 @@
 import { it, expect } from 'vitest';
 import { parseStageScore, SCORE_DIMENSIONS, aggregateProjectScore, stageJudgePrompt, applicableScoreDimensions } from './stage-score';
 import { deterministicPlatformReview } from './platform-quality-rules';
-import { readConstitution } from '../project/creative-constitution';
+import { readConstitution, buildExecutionStandard } from '../project/creative-constitution';
 import { dimensionBasis } from '../../test/quality-review.fixture';
 // 执行前提（用户选定）：平台/分类/基调/文风/流派/视角全部设置，测试本身不得落在"未执行标准"上。
 const COMPLETE_STANDARDS = {
@@ -130,7 +130,7 @@ it('treats an empty constitution as unexecuted standards instead of not_applicab
 });
 
 it('评审侧拿到的是与生成侧同一份执行标准，含按平台分类执行的逐维口径', () => {
-  // 判定侧只给宪法原文 = 「说一套判另一套」：模型看不到分类落位、头部官方标签与落差。
+  // 评审应接收生成所用的完整同源执行标准，不能只拿标签值另作推断。
   const constitution = readConstitution({
     target_platform: 'fanqie',
     settings: {
@@ -146,9 +146,10 @@ it('评审侧拿到的是与生成侧同一份执行标准，含按平台分类�
   const prompt = stageJudgePrompt('正文', '上下文', constitution, 'chapter');
   expect(prompt).toContain('项目执行标准 · 最高优先级');
   expect(prompt).toContain('按平台分类执行');
-  // 流派维的真实落差必须进入评审提示词，否则评审器无从判定该维是否被兑现。
+  // 完整判据与采样边界均须进入评审；样本未收录不能直接判不符合。
   expect(prompt).toContain('系统流');
-  expect(prompt).toContain('落差');
+  expect(prompt).toContain(buildExecutionStandard(constitution).directive);
+  expect(prompt).toContain('样本未收录不代表不符合');
   expect(prompt).toContain('不得默认通过');
 });
 
@@ -212,4 +213,23 @@ it('blocks evidenced low prose independently of a high overall score and keeps p
  const configured=parseStageScore({dimensions},{...input,stage:'chapter',content,constitution:{...c,qualityPolicy:{version:1,floors:{prose:65},weights:{}}}});
  expect(configured.policy?.floors.prose).toBe(65);
  expect(configured.gateStatus).toBe('passed');
+});
+
+
+it('materializes current-artifact evidence IDs in actual score parsing without accepting stale IDs', async () => {
+  const { scoreEvidenceAnchors } = await import('./score-evidence-anchors');
+  const id = scoreEvidenceAnchors(input.content)[0].id;
+  const dimension = { score: 88, reason: '符合当前前序事实', evidenceIds: [id] };
+  const score = parseStageScore({ dimensions: { context: dimension } }, input);
+  expect(score.dimensions.context.status).toBe('evaluated');
+  expect(score.dimensions.context.evidence).toEqual([input.content]);
+  expect(parseStageScore({ dimensions: { context: { ...dimension, evidenceIds: ['stale'], evidence: [input.content] } } }, input).dimensions.context.status).toBe('not_evaluated');
+});
+it('offers the same current-artifact ID selection in full and missing-dimension prompts', async () => {
+  const { missingDimensionJudgePrompt } = await import('./stage-score');
+  const { scoreEvidenceAnchors } = await import('./score-evidence-anchors');
+  for(const prompt of [stageJudgePrompt(input.content,'',input.constitution,'world'),missingDimensionJudgePrompt(input.content,'',input.constitution,'world',['logic'])]) {
+    expect(prompt).toContain('evidenceIds');
+    expect(prompt).toContain(scoreEvidenceAnchors(input.content)[0].id);
+  }
 });

@@ -113,3 +113,16 @@ it('recognizes an actual elevator arrival display without demanding a repeated f
     expect(validateChapterObligationReview([row],[{ref:'M1',source:'同盟在钱这一层上落地。'}],body).errors).toEqual([]);
     expect(validateChapterObligationReview([row],[{ref:'M1',source:'她借钱给他，随后到达一层。'}],body).errors).toContain('M1行动证据未覆盖章纲明确楼层；到楼下或他人到达不能代替本人到达');
   });
+
+
+it.each(['调查多了一层他躲不开的旧关系','计划蒙上一层阴影','同盟多了一层顾虑','同一层意思已说清楚','这一层关系成立'])('does not convert abstract layers into physical destinations: %s',source=>{
+ const body='乙提起甲过去的经历，她才明白双方原来相识。';
+ const row={ref:'M1',status:'covered',reason:'人物经过交流明白双方关系，行动及关系变化已经呈现。',evidence:[body]};
+ expect(validateChapterObligationReview([row],[{ref:'M1',source}],body).errors).toEqual([]);
+});
+it.each(['她到达一层。','她进入地下二层。','她在一层的办公室交接材料。','她抵达第十四层。'])('retains explicit physical floor obligations: %s',source=>{
+ const body='她在楼下等消息，没有进入大楼。';
+ const row={ref:'M1',status:'covered',reason:'人物等在楼下，缺少本人到达指定楼层的行动。',evidence:[body]};
+ expect(validateChapterObligationReview([row],[{ref:'M1',source}],body).errors.join('')).toContain('明确楼层');
+ expect(validateChapterObligationReview([{...row,evidence:[source]}],[{ref:'M1',source}],source).errors).toEqual([]);
+});

@@ -15,8 +15,24 @@ function timeNumber(text: string): number {
 export function temporalNumbers(evidence: string) {
   const number = '[零〇一二两三四五六七八九十百千\\d]+(?:\\.\\d+)?';
   const durations: Array<{ original: string; minutes: number; minuteBounds?:{min:number;max:number}; operator: 'eq'|'lt'|'le'|'gt'|'ge'|'unknown' }> = [];
+  const durationPositions=new Map<object,number>();
+  const compoundRanges:Array<[number,number]>=[];
+  const compoundPattern=new RegExp(`(不到|不足|未满|不超过|至多|至少|不少于|超过|大约|大概|约|近|将近|差不多)?(${number})(?:分钟|分)(${number})(?:秒钟|秒)(不到|以内|以上|左右|上下)?`,'g');
+  for(const match of evidence.matchAll(compoundPattern)) {
+    const minutes=timeNumber(match[2]),seconds=timeNumber(match[3]);
+    if(!Number.isFinite(minutes)||!Number.isFinite(seconds))continue;
+    const operator=['不到','不足','未满'].includes(match[1])||match[4]==='不到'?'lt'
+      :['不超过','至多'].includes(match[1])||match[4]==='以内'?'le'
+      :['至少','不少于'].includes(match[1])||match[4]==='以上'?'ge'
+      :match[1]==='超过'?'gt'
+      :match[1]||['左右','上下'].includes(match[4])?'unknown':'eq';
+    durations.push({original:match[0],minutes:minutes+seconds/60,operator});
+    durationPositions.set(durations[durations.length-1],match.index!);
+    compoundRanges.push([match.index!,match.index!+match[0].length]);
+  }
   const pattern = new RegExp(`(不到|不足|未满|不超过|至多|至少|不少于|超过|大约|大概|约|近|将近|差不多)?(${number})(?:来)?(?:个)?(多)?(小时|钟头|分钟|秒钟|秒)(不到|以内|以上|左右|上下)?`, 'g');
   for (const match of evidence.matchAll(pattern)) {
+    if(compoundRanges.some(([start,end])=>match.index!>=start&&match.index!<end))continue;
     const n = timeNumber(match[2]); if (!Number.isFinite(n) || n < 0) continue;
     const operator = ['不到','不足','未满'].includes(match[1]) || match[5] === '不到' ? 'lt'
       : ['不超过','至多'].includes(match[1]) || match[5] === '以内' ? 'le'
@@ -28,7 +44,9 @@ export function temporalNumbers(evidence: string) {
     const pair=/^(?:一两|两三|二三|三四|四五|五六|六七|七八|八九)$/.test(match[2])?[...match[2]].map(timeNumber):null;
     const minuteBounds=pair?{min:pair[0]*unit,max:pair[1]*unit}:undefined;
     durations.push({ original:match[0],minutes:minuteBounds?.min??n*unit,...(minuteBounds?{minuteBounds}:{}),operator });
+    durationPositions.set(durations[durations.length-1],match.index!);
   }
+  durations.sort((a,b)=>durationPositions.get(a)!-durationPositions.get(b)!);
   const countdowns:Array<{original:string;seconds:number}>=[];
   const digitalRanges:Array<[number,number]>=[];
   for(const match of evidence.matchAll(/(?<!\d)(?<!\d[:：])(\d{1,3})[:：]([0-5]\d)[:：]([0-5]\d)(?!\d|[:：]\d)/g)){
@@ -100,12 +118,14 @@ export function validateTemporalReview(audit: unknown, catalog: ReturnType<typeo
           errors.push(`${check.ref}不能复算同一起止点，跨日或未知边界不得猜测`); continue;
         }
         const q = entry.durations[calc.quantityIndex];
-        const satisfies = q.operator === 'unknown' ? null : intervals.some(({min,max})=>durationMatchesInterval(q,min,max)===true);
+        const precision=(clock:typeof start)=>clock&&'precisionSeconds' in clock?Number(clock.precisionSeconds):60;
+        const margin=(Math.max(precision(start),precision(end))-1)/60;
+        const satisfies = q.operator === 'unknown' ? null : intervals.some(({min,max})=>durationMatchesInterval(q,Math.max(0,min-margin),max+margin)===true);
         if (satisfies === null) continue;
         const expected = satisfies ? 'supported' : 'conflict';
         const elapsed=[...new Set(intervals.map(({min,max})=>(min===max?String(min):`${Math.max(0,min)}–${max}`)+'分钟'))].join('或');
         if (calc.status !== undefined && calc.status !== expected) errors.push(`${check.ref}算术结论错误：${elapsed} ${q.operator} ${q.minutes}分钟应为${expected}`);
-        if (!satisfies) issues.push(`【时间核对】${entry.evidence} | 同一起止点${start.original}至${end.original}为${elapsed}，不满足${q.original}`);
+        if (!satisfies) issues.push(`【时间核对】${entry.evidence} | 同一起止点${start.original}至${end.original}为${elapsed}，不满足${q.original}（已考虑钟表分辨率余量${Math.round(margin*60)}秒）`);
       }
     }
     if (check.status === 'conflict') {

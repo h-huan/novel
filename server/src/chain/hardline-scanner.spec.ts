@@ -333,12 +333,12 @@ describe('normalizeProseLayout 确定性排版规整（不增删正文）', () =
     expect(out.length).toBeLessThanOrEqual(text.length);
   });
 
-  it('平台分化：13 字叙述段在短段平台合并、在非短段平台保留', () => {
+  it('平台节奏不授权按字数自动合并已有叙述段', () => {
     const a = '他抬起头看着窗外那一片浓黑。';
     const b = '风从窗缝里挤进来。';
     const text = `${a}\n\n${b}`;
     expect(normalizeProseLayout(text, { platform: 'qidian', storyType: 'long_novel' })).toBe(text);
-    expect(normalizeProseLayout(text, fanqie)).toBe(`${a}${b}`);
+    expect(normalizeProseLayout(text, fanqie)).toBe(text);
   });
 
   it('段内多句号拍点（冰锥。后颈。没有搏斗。）不算一句一段，不被合并', () => {
@@ -586,4 +586,13 @@ it('同构形态保留风险定位，普通资料清单不直接阻断',()=>{con
 it('does not merge explicit time or information boundaries into neighboring short narration',()=>{
  const text='他终于放下手机。\n\n次日清晨他回到公司。\n\n【群通知】\n\n公司要求全员参会。';
  expect(normalizeProseLayout(text,{platform:'fanqie',storyType:'short_story'})).toBe(text);
+});
+
+
+it('preserves recognition pauses and focus changes across genres', () => {
+  for (const text of ['门开了。\n\n不是他。', '剑断了。\n\n殿外钟声响起。', '他放下杯子。\n\n他推开门。']) {
+    for (const platform of ['fanqie', 'qidian']) {
+      expect(normalizeProseLayout(text, { platform, storyType: 'short_story' })).toBe(text);
+    }
+  }
 });

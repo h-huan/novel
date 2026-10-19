@@ -1,3 +1,4 @@
+import {readGenerationBudgets} from './generation-budgets';
 /**
  * LLM 生成可调参数 —— 全部集中于此，且均可通过环境变量覆盖。
  *
@@ -29,7 +30,7 @@ export const LLM_TUNABLES = {
   TIMEOUT_SIMPLE: envInt('LLM_TIMEOUT_SIMPLE_MS', 300_000), // 标题/短文本：5 分钟
   TIMEOUT_MEDIUM: envInt('LLM_TIMEOUT_MEDIUM_MS', 420_000), // 角色/世界观/伏笔：7 分钟
   TIMEOUT_CONTENT: envInt('LLM_TIMEOUT_CONTENT_MS', 540_000), // 大纲/正文：9 分钟
-  TIMEOUT_COMPLEX: envInt('LLM_TIMEOUT_COMPLEX_MS', 600_000), // 跨模块修订/全扫描：10 分钟
+  get TIMEOUT_COMPLEX(){return readGenerationBudgets().complexTimeoutMs;}, // 跨模块修订/全扫描：10 分钟
 
   // ============ 跨模块一致性检查 maxTokens 边界 ============
   // deepseek-flash 等推理模型把 reasoning 计入 max_tokens。真实短篇创建已出现 review

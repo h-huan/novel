@@ -210,6 +210,7 @@ const WritingQualityPage: React.FC = () => {
   }), [reports]);
 
   const filteredIssues = issues.filter(issue => {
+    if (!OPEN_STATUSES.has(issue.status)) return false;
     if (filterSeverity !== 'all' && issue.severity !== filterSeverity) return false;
     if (filterType !== 'all' && issue.issueType !== filterType) return false;
     return true;

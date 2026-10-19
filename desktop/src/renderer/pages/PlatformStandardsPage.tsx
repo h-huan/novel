@@ -1,7 +1,6 @@
 /**
  * Read-only System Workflow Rule Registry view.
- * QUALITY_EXECUTION.md is the sole human normative entry; this page displays
- * the executable registry projection without re-summarising rules.
+ * 唯一执行标准定义由 shared/src/执行标准.ts 提供，本页只作只读展示。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
@@ -59,13 +58,13 @@ const PlatformStandardsPage: React.FC = () => {
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '28px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>系统工作流规则</h1>
+        <h1 style={{ margin: 0, fontSize: 22 }}>执行标准</h1>
         {version !== undefined && <span style={tag}>ruleset v{version}</span>}
         <span style={{ ...tag, color: '#16a34a' }}>只读 · 全部作品共用</span>
         <button onClick={load} style={{ marginLeft: 'auto' }}>刷新</button>
       </div>
       <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.7 }}>
-        唯一规范入口：QUALITY_EXECUTION.md。下方按 Rule ID 展示机器执行镜像；分类和场景只是过滤视图，不拥有第二套规则。
+        全部规则与生成、审核、保存使用同一份执行标准。分类和场景仅用于查阅，不另设规则。
       </p>
       {error && <div style={{ ...card, color: '#b91c1c' }}>{error}</div>}
       {grouped.map((group) => (

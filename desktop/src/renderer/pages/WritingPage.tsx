@@ -595,10 +595,8 @@ const WritingPage: React.FC = () => {
   const modeLabel = { manual: '手动', semi_auto: '半自动', full_auto: '全自动' }[writingMode];
 
   // 每章目标来自该章大纲；项目只规定 CHAPTER_WORD_RANGE 的有效范围。
-  // 这里给作者一个**正负向**提示：达成 CHAPTER_WORD_RANGE 区间是绿色"已达成"，
-  // 仅在确实没达标（< CHAPTER_WORD_RANGE.min）或硬越界（> CHAPTER_WORD_RANGE.max）时给橙色提示。原先"已超过目标"
-  // 一直显示为橙色警告，3918 字已完成时它仍亮着，让作者误以为出错。
-  type ChapterHint = { tone: 'success' | 'warning' | 'error'; message: string };
+  // 下限只作规划参考，短稿仍以完整质量审核为准。
+  type ChapterHint = { tone: 'info' | 'success' | 'warning' | 'error'; message: string };
   const [chapterHint, setChapterHint] = useState<ChapterHint | null>(null);
   const wordCount = useCallback((text: string) => countNarrativeWords(text), []);
 
@@ -622,7 +620,7 @@ const WritingPage: React.FC = () => {
       return;
     }
     if (actual < CHAPTER_WORD_RANGE.min) {
-      setChapterHint({ tone: 'warning', message: `本章正文 ${actual.toLocaleString()} 字，未达 ${CHAPTER_WORD_RANGE.min} 字下限` });
+      setChapterHint({ tone: 'info', message: `本章正文 ${actual.toLocaleString()} 字，低于规划参考；不要求凑字数，以完整质检为准` });
       return;
     }
     if (actual > CHAPTER_WORD_RANGE.max) {
@@ -804,6 +802,8 @@ const WritingPage: React.FC = () => {
           {chapterHint && (() => {
             const palette = chapterHint.tone === 'success'
               ? { color: '#1abc9c', backgroundColor: 'rgba(26,188,156,0.14)' }
+              : chapterHint.tone === 'info'
+                ? { color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg-tertiary)' }
               : chapterHint.tone === 'error'
                 ? { color: '#ff9aa9', backgroundColor: 'rgba(231,76,96,0.14)' }
                 : { color: 'var(--color-warning)', backgroundColor: 'rgba(243,156,18,0.14)' };

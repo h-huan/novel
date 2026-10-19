@@ -1,3 +1,4 @@
+import { retireStaleIssues } from '../writing-quality/issue-lifecycle';
 import { isProseLayoutOnlyChange } from './prose-layout-change';
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
@@ -10,7 +11,7 @@ import type { CreateChapterDto, UpdateChapterDto } from './dto/chapter.dto';
 import { ChapterDerivedDataSyncService, type ValidatedChapterOutlineProof } from './chapter-derived-data-sync.service';
 import { DatabaseService } from '../../database/database.service';
 import { OriginalityGuardService } from '../originality/originality-guard.service';
-import { CHAPTER_WORD_RANGE } from '../../../shared/src';
+import { CHAPTER_WORD_RANGE, isChapterBodyLengthAcceptable } from '../../../shared/src';
 
 export interface ChapterResponse {
   id: string;
@@ -115,11 +116,9 @@ export class ChapterService {
     this.repo.update(id, updateData);
     const response = this.toResponse(this.repo.findById(id)!);
     if (contentChanged) {
-      // 保存新正文后清理本章过期冲突（用户铁律：矛盾点非最新版本和当前正文的矛盾要删除）
-      // 删的是「未解决且非 pass」的（status in warning/error）；保留已通过（pass）和已解决（resolved）的。
-      // 这样避免旧版本正文产生的矛盾叠加，且不影响已通过/已解决的历史记录。
+      // Only retire findings tied to a replaced version; keep the just-accepted review.
       const formattingOnly = isProseLayoutOnlyChange(existing.content || '', dto.content || '');
-      const cleaned = formattingOnly ? 0 : this.cleanStaleConflictsForChapter(existing.project_id, existing.chapter_index);
+      const cleaned = this.cleanStaleConflictsForChapter(existing.project_id, existing.chapter_index);
       // 原创性后置检测（在清理旧冲突之后执行，避免被当作过期矛盾清掉；检测本身不阻断保存，命中落矛盾表）
       if (!formattingOnly) this.originalityGuard?.checkChapter({
         projectId: existing.project_id,
@@ -141,29 +140,13 @@ export class ChapterService {
     return response;
   }
 
-  /**
-   * 清理本章过期冲突：删除本章所有 status='warning'/'error' 且 status != 'resolved' 的 conflict。
-   * 用户铁律：矛盾点非最新版本和当前正文的矛盾要删除，否则会逐渐叠加且修改没任何意义。
-   * 保留：status='resolved'（已解决历史记录）+ status='pass'（已通过的检查）。
-   * 返回删除条数，便于前端展示「已清理 N 条过期矛盾」。
-   */
+  /** Archive obsolete findings of every type while retaining their history. */
   private cleanStaleConflictsForChapter(projectId: string, chapterIndex: number): number {
     if (!this.databaseService) return 0;
-    try {
-      const db = this.databaseService.getDb();
-      // 状态机：status='resolved'（已解决）/ 'pass'（已通过）/ 'warning'/'error'（未解决冲突）。
-      // 删 status in ('warning','error') 且 status != 'resolved'；保留 pass 与 resolved。
-      const res = db.prepare(`DELETE FROM writing_quality_issues WHERE project_id=? AND status IN ('open','superseded')
-        AND chapter_id IN (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?)
-        AND (issue_type LIKE 'consistency.%' OR issue_type='originality' OR issue_type='outline_alignment' OR issue_type LIKE 'hardline.%')`)
-        .run(projectId, projectId, chapterIndex);
-      return Number(res.changes || 0);
-    } catch (err: any) {
-      // 不阻断保存：清理失败仅记日志，不抛错
-      // eslint-disable-next-line no-console
-      console.warn(`[ChapterService] cleanStaleConflictsForChapter 失败（已忽略）: ${err?.message ?? err}`);
-      return 0;
-    }
+    const db = this.databaseService.getDb();
+    const chapter = db.prepare('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?')
+      .get(projectId, chapterIndex) as { id: string } | undefined;
+    return chapter ? retireStaleIssues(db, projectId, chapter.id) : 0;
   }
 
   remove(id: string): { success: boolean } {
@@ -415,12 +398,9 @@ export class ChapterService {
     }
     // 门禁文案区分「空正文 / 不足 / 超限」，避免把"无法送审/锁定"误读成"已被锁定"。
     if (actual === 0) {
-      throw new BadRequestException(`本章正文为空（0 字）。请先写作或生成正文，达到约 ${target} 字（${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max} 字区间）后再提交质检或锁定。`);
+      throw new BadRequestException('本章正文为空（0 字）。请先写作或生成正文后再提交质检或锁定。');
     }
-    if (actual < CHAPTER_WORD_RANGE.min) {
-      throw new BadRequestException(`本章正文仅 ${actual} 字，未达到 ${CHAPTER_WORD_RANGE.min} 字下限（本章目标 ${target} 字），暂不能提交质检或锁定。`);
-    }
-    if (actual > CHAPTER_WORD_RANGE.max) {
+    if (!isChapterBodyLengthAcceptable(actual)) {
       throw new BadRequestException(`本章正文已达 ${actual} 字，超过 ${CHAPTER_WORD_RANGE.max} 字上限（本章目标 ${target} 字），需精简后才能提交质检或锁定。`);
     }
   }

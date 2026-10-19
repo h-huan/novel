@@ -554,6 +554,12 @@ describe('alignment finding partition', () => {
     expect(partition.advisories).toEqual([]);
     expect(partition.sourceConflicts).toEqual([]);
   });
+  it('does not let a no-mainline-impact phrase hide a factual advisory conflict',()=>{
+    const defect='正文自报数量为五，实际为四，数量不一致，但不影响主线理解。';
+    const preference='两处雨声措辞可以更简洁，不影响主线理解。';
+    const result=partitionAlignmentFindings([],outline,[defect,preference]);
+    expect(result.blocking).toEqual([defect]);expect(result.advisories).toEqual([preference]);
+  });
 
   it('keeps an execution-standard deviation blocking instead of demoting it for mentioning 文风', () => {
     const partition = partitionAlignmentFindings([
@@ -981,6 +987,15 @@ describe('cross-chapter boundary enforcement', () => {
     evidence: ['证据'],
   };
 
+  it('does not accept a wrong literal count even when every model flag claims success',async()=>{
+    const c=applyStandardsStub(Object.create(ChainController.prototype) as any);
+    c.logger={warn:vi.fn(),error:vi.fn()};
+    c.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify(passVerdict)})};
+    const result=await c.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'通知',outlineContract:'本章完成通知与人物决定。'.repeat(12),storyContext:'既定事实。',content:'纸上印着“立即返航”五个字。'});
+    expect(result.evaluationStatus).toBe('evaluated');expect(result.pass).toBe(false);expect(result.prosePassed).toBe(false);
+    expect(result.contradictions.join('')).toContain('literal-character-count');
+    expect(c.realLLM.generate).toHaveBeenCalledTimes(1);
+  });
   it('preserves verified temporal conflicts when another countdown remains unresolved',async()=>{
  const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);const body='倒计时23:59:58。\n倒计时23:58:00。\n送达下午两点十一分。\n现场时间十八点三十四。\n倒计时23:12:47。';const temporalAudit={status:'evaluated',checks:[{ref:'T1',status:'supported',reason:'首次读数是此计时器的基准',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'baseline',reason:'首次读数按同一计时器建立基准'}]},{ref:'T2',status:'unknown',reason:'该中间读数暂无可绑定钟点',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'unknown',reason:'该中间读数暂无可绑定钟点'}]},...['T3','T4'].map(ref=>({ref,status:'supported',reason:'目录明确提供同日现场钟点',calculations:[]})),{ref:'T5',status:'supported',reason:'后次读数晚于同日现场钟点',calculations:[],countdownCalculations:[{readingIndex:0,timerId:'one',relation:'elapsed',earlierRef:'T1',earlierReadingIndex:0,startClockId:'T3:C1',endClockId:'T4:C1',startRelation:'at_reading',endRelation:'before_reading',elapsedConstraint:'ge',reason:'同一计时器基准与订单送达同刻，后次读数晚于现场钟点'}]}]};
  controller.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify({...passVerdict,missingRequiredItems:["已确认的身份事件仍未完成"]})}).mockResolvedValue({content:JSON.stringify({temporalAudit})})};const result=await controller.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'图',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认上下文',content:body});expect(result.evaluationStatus).toBe('not_evaluated');expect(result.pass).toBe(false);expect(result.contradictions.join('')).toContain('2831秒');expect(result.missing.join('')).toContain('尚未验证');expect(result.missing).toContain('已确认的身份事件仍未完成');
@@ -1555,12 +1570,13 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
       workingTitle: title,
       storyCore: `${title}的具体人物处境、起始事件与冲突骨架。`,
+      causalPlan: [{action:{field:'activeChoice',quote:'主角决定留下证据并主动查清来源'},conditions:[{field:'reversalEffect',quote:'关键事实改变了主角原先的目标'}],result:{field:'payoff',quote:'让真正责任方承担后果'}}],
       protagonistSituation: '主角要守住家人、住处和现实收入，无法无代价退出当前冲突。',
       openingEvent: '一份现实记录出现无法解释的矛盾，迫使主角当天处理。',
       coreConflict: '主角要保住现实利益并查清责任，对方则主动逼她放弃证据。',
@@ -1645,6 +1661,11 @@ describe('idea discovery live orchestrator behavior', () => {
       qualityReason: '以实际题材的主动选择、因果和结局证据完成评审。',
       readerQuestion: '这些记录背后的责任人为何主动逼她放弃证据？', issues: [],
     })));
+    if(failure==='preselection_shortfall')controller.reconcilePremiseSelection=vi.fn(async(initial:any)=>({...initial,selected:initial.selected.slice(0,1),selectionAudit:{partial:true,reasons:[{reason:'其余题材同构且原池有界重选后仍不合格'}]}}));
+    if(failure==='review_budget'){
+      const review=controller.reviewIdeaPresentation.getMockImplementation();
+      controller.reviewIdeaPresentation.mockImplementation((cards:any[],refs:any[],note:string,budget:any)=>{budget.remaining=0;return review(cards);});
+    }
     if (failure === 'review_protocol') controller.reviewIdeaPresentation.mockRejectedValue(new Error('题材独立审查未完成：platformEvidence引用了执行标准'));
     if (failure === 'parallel_order') {
       let releaseFirst!: () => void;
@@ -1675,8 +1696,17 @@ describe('idea discovery live orchestrator behavior', () => {
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
       ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
     }, 2);
+    expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
+    expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
+    if(failure==='preselection_shortfall'){
+      expect(generate).toHaveBeenCalledTimes(1);expect(controller.reviewIdeaPresentation).not.toHaveBeenCalled();
+      expect(result.success).toBe(false);expect(result.status).toBe('incomplete');expect(result.ideas).toEqual([]);
+      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,generated:0,qualified:0,repairAttempted:false,stopReason:'preselection_shortfall'});return;
+    }
     expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
     for (const call of controller.reviewPremiseSelection.mock.calls) {
+      expect(call[0].selected.every((premise: any) => premise.storyCategory)).toBe(true);
+      expect(call[1]).toContain('【与完整卡一致的分类标准】');
       expect(call[1]).toContain('【本次作者明确选择');
       expect(call[1]).toContain('"webNovelGenre":["悬疑推理"]');
       expect(call[1]).toContain('"plotTags":["调查"]');
@@ -1693,6 +1723,11 @@ describe('idea discovery live orchestrator behavior', () => {
       return;
     }
 
+    if(failure==='review_budget'){
+      expect(generate).toHaveBeenCalledTimes(3);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
+      expect(result.appealGate.fulfillment.stopReason).toBe('budget_or_original_pool_exhausted');return;
+    }
     const cardFailed = failure === 'card_network' || failure === 'card_shape';
     // The repair fixture returns an empty patch: preserve the original refusal without another review.
     expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(1);
@@ -1815,9 +1850,9 @@ it('does not promote an advisory that explicitly denies missing facts, while ret
 it('sends matching complete pool sources to source review and every selected item to overlap review',async()=>{
  const controller=Object.create(ChainController.prototype) as any;
  controller.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{const data=options.stepKey==='idea_premise_source_drift_review'
-  ? {sourceChecks:premiseSourceComparisonCatalog(selection).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开字段保留原池的行动与结果约束'}))}
+  ? {sourceChecks:premiseSourceComparisonCatalog(selection).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开字段保留原池的行动与结果约束'})),payoffChecks:[{ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',reason:'该普通行动能够直接造成规划中的对应结果'}]}
   : {passed:true,issues:[]};expect(options.validate(data)).toBe(true);return {data,warnings:[]};});
- const selection={pool:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'},{premiseId:'P2',storyCore:'未选原池项专用标记'}],selected:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'}]};
+ const selection={pool:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'},{premiseId:'P2',storyCore:'未选原池项专用标记'}],selected:[{premiseId:'P1',storyCore:'保留原始骨架完整内容',activeChoice:'她拨通电话并说明具体情况。',payoff:'电话接通，双方开始交谈。'}]};
  await controller.reviewPremiseSelection(selection,'既定标准','source_drift');
  const source=controller.llmCallWithRetry.mock.calls[0][1];expect(source).toContain('保留原始骨架完整内容');expect(source).not.toContain('未选原池项专用标记');
  await controller.reviewPremiseSelection(selection,'既定标准','overlap');
@@ -1830,4 +1865,33 @@ it('supplies exact saved closing text while retaining the complete predecessor f
  const context=JSON.parse(c.previousChapterReviewContext('p',4,'既定背景'));
  expect(context.previousChapter[0].content).toBe(raw);expect(context.chapterHandoff.predecessorClosingScene).toBe(raw.slice(-1800));
  expect(context.chapterHandoff.predecessorId).toBe('previous');
+});
+
+
+it('keeps selected POV candidates separate from the single POV of each story',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;controller.logger={warn:vi.fn()};
+ controller.runIdeaDiscovery=vi.fn().mockResolvedValue({success:true,ideas:[]});
+ await controller.ideaDiscover({storyType:'short_story',platform:'fanqie',storyCategory:'',pov:JSON.stringify(['第一人称','第三人称限知'])});
+ const selected=controller.runIdeaDiscovery.mock.calls[0][0];
+ expect(selected.pov).toBe('');expect(selected.discoveryPovOptions).toEqual(['第一人称','第三人称限知']);
+});
+it('does not merge in-flight requests with different selected POV candidates',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;controller.logger={warn:vi.fn()};
+ controller.runIdeaDiscovery=vi.fn().mockImplementation(async()=>({success:true,ideas:[]}));
+ await Promise.all([
+ controller.ideaDiscover({storyType:'short_story',platform:'fanqie',storyCategory:'都市日常',pov:JSON.stringify(['第一人称','第三人称限知'])}),
+ controller.ideaDiscover({storyType:'short_story',platform:'fanqie',storyCategory:'都市日常',pov:JSON.stringify(['第一人称','第三人称全知'])})]);
+ expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(2);
+});
+
+it('sends full standards only for actual reviewed cards while preserving all reference story comparison fields',async()=>{
+ const c=Object.create(ChainController.prototype) as any;let captured='';const stop=Error('local prompt capture');
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{captured=prompt;throw stop;});
+ const actual={title:'当场揭穿真假凭证',storyType:'short_story',targetPlatform:'fanqie',storyCategory:'悬疑',hook:'紧迫人物选择',coreConflict:'双方真实利益冲突',description:'主角行动引发后果',mainReversal:'新条件改变胜负',setting:'同一能力与代价边界',ending:'原条件兑现',protagonist:'既有人物',scopeBreakdown:[{arc:'完整阶段',outcome:'独立比较需保留的结果'}],storyTone:['紧张'],pov:'第一人称'};
+ const reference={...actual,title:'另一个已通过故事',description:'不可删除的参考卡因果行动全文',ending:'不可删除的参考结局全文'};
+ await expect(c.reviewIdeaPresentation([actual],[reference],'',{remaining:5})).rejects.toBe(stop);
+ const packed=JSON.parse(captured.split('【实际题材卡与已通过参考卡】')[1].split('\n若存在standardLines')[0]);
+ expect(packed.cards[0].executionStandard||packed.cards[0].executionStandardRefs).toBeTruthy();
+ expect(packed.references[0]).not.toHaveProperty('executionStandard');expect(packed.references[0]).not.toHaveProperty('executionStandardRefs');expect(packed.references[0]).not.toHaveProperty('lockedPremise');
+ for(const key of ['hook','coreConflict','description','mainReversal','setting','ending','protagonist','scopeBreakdown','storyCategory','storyTone','pov'])expect(packed.references[0][key]).toEqual((reference as any)[key]);
 });

@@ -237,3 +237,26 @@ describe('lossless state prompt encoding and source-owned evidence',()=>{
   }
  });
 });
+
+it('reports an unknown generated fact id without falsely rejecting valid verdict fields',async()=>{
+ const {describeOutlineFactUpdateProtocol}=await import('./outline-fact-ledger');
+ const previous=[{id:'fact_1',baseline:'既定账户只在最近一笔改变去向',current:'既定账户只在最近一笔改变去向',history:[]}];
+ const raw={consistent:true,contradictions:[],ledger:[{id:'fact_2',current:'新出现的调查结果'}]};
+ const errors=describeOutlineFactUpdateProtocol(raw,previous);
+ expect(errors).toHaveLength(1);expect(errors[0]).toContain('ledger[0].id=fact_2');
+ expect(errors.join()).not.toContain('consistent必须');expect(normalizeOutlineFactReview(raw,previous)).toBeNull();
+ expect(describeOutlineFactUpdateProtocol({...raw,ledger:[{current:'新出现的调查结果'}]},previous)).toEqual([]);
+ expect(normalizeOutlineFactReview({...raw,ledger:[{current:'新出现的调查结果'}]},previous)?.ledger).toHaveLength(2);
+});
+it('keeps history protection and precise duplicate or field protocol errors',async()=>{
+ const {describeOutlineFactUpdateProtocol}=await import('./outline-fact-ledger');
+ const previous=[{id:'fact_1',baseline:'旧事实',current:'旧事实',history:[]}];
+ const errors=describeOutlineFactUpdateProtocol({consistent:true,contradictions:[],ledger:[{id:'fact_1',current:'新状态',baseline:'擅自改历史'},{id:'fact_1',current:'又一状态'}]},previous);
+ expect(errors.join()).toContain('baseline');expect(errors.join()).toContain('重复更新');expect(previous[0].baseline).toBe('旧事实');
+});
+it('shares quantity period, count and recipient rules across generation, audit and the public source',async()=>{
+ const {OUTLINE_QUANTITY_SCOPE_POLICY}=await import('../../shared/src/system-workflow-rules.registry');
+ expect(buildOutlineContinuityContext([],[])).toContain(OUTLINE_QUANTITY_SCOPE_POLICY);
+ expect(buildOutlineFactReviewPrompt({canonicalBrief:'原事实',world:{},previousLedger:[],chapters:[]})).toContain(OUTLINE_QUANTITY_SCOPE_POLICY);
+ expect(getSystemWorkflowRule('CTX-005')!.details!.join('\n')).toContain(OUTLINE_QUANTITY_SCOPE_POLICY);
+});

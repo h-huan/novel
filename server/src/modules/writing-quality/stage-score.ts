@@ -1,3 +1,4 @@
+import { renderScoreEvidenceAnchors, selectedScoreEvidence } from './score-evidence-anchors';
 import { scorePolicy, weightedScore, type ScorePolicy } from './score-policy';
 import { attributeCharacterEvidence, type CharacterVoiceContract } from './character-contract';
 import { MISSING_STANDARD_SOURCE, qualityIssue, qualityGate, resolveQualityEvidence, verifySemanticEvidence, semanticEvidenceSources, verifyDimensionBasis, materializeDimensionBasis, type QualityIssue, type QualityStage } from './quality-issue';
@@ -154,10 +155,9 @@ export function parseStageScore(raw: unknown, input: {
   const criteria = buildExecutionStandard(c).dimensions;
   for (const key of SCORE_DIMENSIONS) {
     const d = value.dimensions?.[key];
-    const evidence = Array.isArray(d?.evidence)
-      ? d.evidence.map((q: unknown) => resolveQualityEvidence(input.content, q))
-        .filter((q: ReturnType<typeof resolveQualityEvidence>) => q.verified).map((q: ReturnType<typeof resolveQualityEvidence>) => q.quote)
-      : [];
+    const evidence = selectedScoreEvidence(input.content, d)
+      .map((q: unknown) => resolveQualityEvidence(input.content, q))
+      .filter(q => q.verified).map(q => q.quote);
     const missing = missingStandards.get(key);
     const criterionRequired = EXECUTION_STANDARD_DIMENSIONS.some(dimension => dimension.dimension === key);
     const criterionSource = criteria.find(dimension=>dimension.dimension===key)?.requirement || '';
@@ -240,7 +240,7 @@ export function stageJudgePrompt(content: string, context: string, constitution:
   );
   const shape = Object.fromEntries(dimensions.map(key => [key, missingKeys.has(key)
     ? { score: null, reason: `创作宪法未设置${missingKeys.get(key)!.label}`, evidence: [] }
-    : { score: null, reason: '原因', evidence: ['当前生成结果中的连续逐字原文'] }]));
+    : { score: null, reason: '原因', evidenceIds: ['选择当前生成结果中的证据编号'] }]));
   const criteria = Object.fromEntries(buildExecutionStandard(constitution).dimensions
     .filter(d => EXECUTION_STANDARD_DIMENSIONS.some(item => item.dimension === d.dimension))
     .map(d => [d.dimension, d.requirement]));
@@ -257,12 +257,13 @@ ${stage === 'outline' ? '章纲中的scenes、goal、conflict、outcome等字段
 AI Trace 语义问题使用以下 ruleId：ai_trace.emotion_overexplanation、ai_trace.causal_author_explanation、ai_trace.paragraph_function_homology、ai_trace.scene_structure_homology、ai_trace.functional_complete_dialogue、ai_trace.insufficient_subtext、ai_trace.transparent_character_cognition、ai_trace.abstract_summary、ai_trace.cross_chapter_template_repetition。启发式信号只表示风险；你必须依据原文和前序章节解释语义问题，不能把关键词命中直接判成问题。
 不能用词语计数代替语义判断；不能捏造引用或分数。无证据时 score=null。每项有分数必须提供生成结果中的逐字引用及解释。每维只给1-2段10-60字的连续原文，reason控制在120字内；issues最多8条，合并同一根因，避免重复长篇解释。
 整章客观测量：${JSON.stringify(deterministicPlatformReview({ projectId: '', runId: '', stage, content, constitution }).measurements)}。字数、对白比例、平均段长、长段比例及分类篇幅由同一测量器负责，不能自行估算、另报platform客观指标问题或因猜测指标未达标而扣分。叙事节奏、口吻、信息密度仍按原文独立审查并使用语义规则编号，不能用百分比代替语义理由。
+评分维度优先返回evidenceIds，选择下方当前生成结果已有的完整证据编号，由程序直接提取对应原文，不重新抄写或修改句子。每维选择1-2个与该维判断直接相关的编号；evidenceIds与evidence不同时提供。不得编造、跨版本复用编号；确实没有证据保持score=null。问题清单issues的双边证据要求保持不变。
 各执行维度判据（basis.criterionId 必须选择当前维度编号；程序绑定本次提供的完整判据，不能按标签名猜含义。也可逐字引用basis.criterion；操作定义未知时 basis.status=unknown_definition 且 score=null）：${JSON.stringify(criteria)}
 明显违反已确认事实、逻辑、时间线、世界规则或人物声音契约时对应分数必须低于60，并记录 blocking 问题（高分不能抵消 Blocking）。用户在创作宪法里选定的平台/分类/基调/文风/流派/视角是执行约束：正文与之不符且对应维度分数低于60时同样记为 blocking，不得记为 high、不得降级为建议；任何维度、规则或层级的严重度都不允许下调。
 只输出JSON：${JSON.stringify({ dimensions: shape, issues: [{ ruleId: '规则', severity: 'blocking|high|medium|low', message: '问题', evidence: '逐字引用', evidenceKind: 'redundant_interpretation|premature_reveal|causal_gap|other', shownEvidence: '重复解释对应的已呈现信息原文', shownSource: 'body；仅ai_trace.cross_chapter_template_repetition可用project_context前章原文', basisSource: 'chapter_plan|execution_standard|project_context|body', basisEvidence: '章纲揭示安排或必要因果前提原文', basisReason: '新增信息/改变判断/推动选择，或越界/缺口如何影响当前行动', characterId: '角色ID（角色问题必填）', contractVersion: '契约版本', contractField: '违背的契约字段' }] })}
 ${executionStandardJudgingBlock(constitution)}创作宪法：${JSON.stringify(constitution)}
 前序上下文：${context}
-当前生成结果：${content}`;
+当前生成结果（每行方括号内为证据编号，标签不属于原文）：${renderScoreEvidenceAnchors(content)}`;
 }
 
 export function missingDimensionJudgePrompt(
@@ -272,7 +273,7 @@ export function missingDimensionJudgePrompt(
   stage: QualityStage,
   dimensions: ScoreDimension[],
 ) {
-  const shape = Object.fromEntries(dimensions.map(key => [key, { score: null, reason: '原因', evidence: ['当前生成结果中的连续逐字原文'] }]));
+  const shape = Object.fromEntries(dimensions.map(key => [key, { score: null, reason: '原因', evidenceIds: ['选择当前生成结果中的证据编号'] }]));
   const criteria = Object.fromEntries(buildExecutionStandard(constitution).dimensions
     .filter(d => dimensions.includes(d.dimension as ScoreDimension) && EXECUTION_STANDARD_DIMENSIONS.some(item => item.dimension === d.dimension))
     .map(d => [d.dimension, d.requirement]));
@@ -280,13 +281,14 @@ export function missingDimensionJudgePrompt(
     basis: { status: 'evaluated|unknown_definition', criterionId: key, reason: '编号判据如何落实，未知定义说明未能核验' },
   });
   return `你是小说质量评审器。上一轮评审缺少以下维度的可验证证据：${dimensions.join('、')}。
+评分维度优先返回evidenceIds，选择下方当前生成结果已有的完整证据编号，由程序直接提取对应原文，不重新抄写或修改句子。每维选择1-2个与该维判断直接相关的编号；evidenceIds与evidence不同时提供。不得编造、跨版本复用编号；确实没有证据保持score=null。问题清单issues的双边证据要求保持不变。
 只补评这些维度，不改写作品。每个维度必须给出0-100分、原因，以及至少一段从“当前生成结果”连续逐字复制的原文；不得使用省略号拼接，不得改写引文。确实不适用时 score=null 并说明原因。
 对应执行判据：${JSON.stringify(criteria)}
 只输出JSON对象：${JSON.stringify({ dimensions: shape })}
 阶段：${stage}
 ${executionStandardJudgingBlock(constitution)}创作宪法：${JSON.stringify(constitution)}
 前序上下文：${context}
-当前生成结果：${content}`;
+当前生成结果（每行方括号内为证据编号，标签不属于原文）：${renderScoreEvidenceAnchors(content)}`;
 }
 
 /** Project coverage includes every required stage; a missing stage cannot raise the total. */

@@ -1,0 +1,53 @@
+import {it,expect,vi} from 'vitest';
+import {normalizePremiseSelectionPayload,SELECTED_PREMISE_FIELDS,ideaGateLocalRepairDirective} from './idea-discovery-contract';
+import {premiseSourceComparisonCatalog,type PremiseSelectionReview} from './premise-selection-review';
+import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
+const selection=()=>normalizePremiseSelectionPayload({
+ pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'原池既定行动、条件和代价均保持真实一致'+premiseId})),
+ selectedPremises:['A','B','C','D','E'].map(premiseId=>({premiseId,...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(key=>key!=='differentiation').map(key=>[key,'既定的具体人物行动、必要条件与结果'+premiseId]))})),
+},5,5);
+const report=(input:ReturnType<typeof selection>):PremiseSelectionReview=>({passed:true,issues:[],
+ sourceChecks:premiseSourceComparisonCatalog(input).map(row=>({ref:row.ref,status:'preserved',reason:'完整核对当前展开与原池必要事实后确认保留'})),
+ payoffChecks:input.selected.map((_item,i)=>({ref:`S${i+1}.payoff`,status:'supported',actionEvidenceRef:`S${i+1}.activeChoice`,reason:'既定行动通过已写明的必要条件造成结果'})),
+ genreChecks:input.selected.map((_item,i)=>({ref:`S${i+1}.genre1`,status:'fulfilled',evidenceRef:`S${i+1}.activeChoice`,reason:'当前主动选择已落实指定流派机制'})),
+ categoryChecks:input.selected.map((_item,i)=>({ref:`S${i+1}.category`,status:'fulfilled',evidenceRef:`S${i+1}.coreConflict`,reason:'核心冲突与所选分类阅读承诺一致'})),
+});
+it('reviews only two changed items, restores all fifty checks and rebinds evidence to original positions',async()=>{
+ const original=selection(),cache:PremiseSourceReceipts=new Map(),review=vi.fn(async input=>report(input));
+ await reviewChangedPremiseSources(original,'same standards+genres',cache,review);
+ const next=structuredClone(original);next.selected[1].activeChoice+='新行动';next.selected[4].payoff+='新结果';
+ const result=await reviewChangedPremiseSources(next,'same standards+genres',cache,review);
+ expect(review.mock.calls.map(([input])=>input.selected.map(item=>item.premiseId))).toEqual([['A','B','C','D','E'],['B','E']]);
+ expect(result.passed).toBe(true);expect(result.sourceChecks).toHaveLength(50);
+ expect(result.payoffChecks?.find(row=>row.ref==='S5.payoff')?.actionEvidenceRef).toBe('S5.activeChoice');
+ expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
+ expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
+});
+it('never reuses failed, missing or unknown receipts and preserves current failure evidence',async()=>{
+ const input=selection(),cache:PremiseSourceReceipts=new Map();
+ const review=vi.fn(async pending=>{const r=report(pending),index=pending.selected.findIndex(item=>item.premiseId==='B');
+  if(index>=0){r.passed=false;r.issues=[{kind:'source_drift',premiseId:'B',referencePremiseId:'B',quote:pending.selected[index].activeChoice,referenceQuote:pending.pool.find(seed=>seed.premiseId==='B')!.storyCore,reason:'当前展开改变了原池明确的主动选择'}];r.sourceChecks!.find(row=>row.ref===`S${index+1}.activeChoice`)!.status='drift';}return r;});
+ await reviewChangedPremiseSources(input,'standard',cache,review);
+ const result=await reviewChangedPremiseSources(input,'standard',cache,review);
+ expect(review.mock.calls[1][0].selected.map(item=>item.premiseId)).toEqual(['B']);
+ expect(result.passed).toBe(false);expect(result.issues[0].premiseId).toBe('B');
+ expect(result.sourceChecks?.find(row=>row.ref==='S2.activeChoice')?.status).toBe('drift');
+ const missing=vi.fn(async()=>({passed:true,issues:[]}));const empty:PremiseSourceReceipts=new Map();
+ await reviewChangedPremiseSources(input,'standard',empty,missing);expect(empty.size).toBe(0);
+});
+it('invalidates on source facts, category, standards, genre scope and a new run',async()=>{
+ const input=selection(),cache:PremiseSourceReceipts=new Map(),review=vi.fn(async pending=>report(pending));
+ await reviewChangedPremiseSources(input,'standards+genres',cache,review);
+ const next=structuredClone(input);next.pool[2].storyCore+='新原池事实';next.selected[3].storyCategory='新分类';
+ await reviewChangedPremiseSources(next,'standards+genres',cache,review);
+ expect(review.mock.calls[1][0].selected.map(item=>item.premiseId)).toEqual(['C','D']);
+ await reviewChangedPremiseSources(next,'changed standards or genres',cache,review);
+ expect(review.mock.calls[2][0].selected).toHaveLength(5);
+ await reviewChangedPremiseSources(input,'standards+genres',new Map(),review);
+ expect(review.mock.calls[3][0].selected).toHaveLength(5);
+});
+it('passes complete per-card standards into a local repair without allowing identity or configuration edits',()=>{
+ const prompt=ideaGateLocalRepairDirective([{card:{storyCategory:'古言甜宠'},executionStandard:'本卡甜宠要求：关系升温与具体照顾须推动选择',gateIssues:['修复缺少必要条件的因果']}]);
+ expect(prompt).toContain('本卡甜宠要求：关系升温与具体照顾须推动选择');
+ expect(prompt).toContain('不能只修点名因果');expect(prompt).toContain('不要输出平台、分类、篇幅、章数或任何内部标识');
+});

@@ -6,8 +6,13 @@ export type SupportedStoryType = 'short_story' | 'long_novel';
  */
 export const SUPPORTED_STORY_TYPE_IDS: readonly SupportedStoryType[] = ['short_story', 'long_novel'];
 
-/** Canonical chapter prose range shared by server and desktop. */
+/** Planning range: the lower bound is advisory for prose; quality takes priority. */
 export const CHAPTER_WORD_RANGE = { min: 3_000, max: 5_000 } as const;
+
+/** A short chapter still requires full event, causality and prose review. */
+export function isChapterBodyLengthAcceptable(words: number, range: { max: number } = CHAPTER_WORD_RANGE): boolean {
+  return Number.isInteger(words) && words > 0 && words <= range.max;
+}
 
 /** 全端共用的作品总字数口径。章节字数由目标平台基准决定。 */
 export const STORY_TARGET_WORD_RANGES = {

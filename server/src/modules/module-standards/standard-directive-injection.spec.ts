@@ -94,3 +94,27 @@ it('scopes insertion workers without removing the full chapter quality gates',()
  }
  expect(standardDirectiveCache.get('review','alignment_review')).toContain('QLT-014');expect(activeSystemWorkflowRules()).toHaveLength(60);
 });
+it('uses task-specific generation details while retaining full final quality rules and identical rule inventory',()=>{
+ standardDirectiveCache.rebuild();
+ const full=standardDirectiveCache.get('idea_generate');
+ const selected=standardDirectiveCache.get('idea_generate','idea_premise_selection');
+ const card=standardDirectiveCache.get('idea_generate','idea_card_structure');
+ expect(selected.length).toBeLessThan(full.length);
+ expect(card).toContain('普通直接因果');expect(selected).toContain('反转');expect(selected).toContain('必要条件');
+ expect(selected).not.toContain('坐标由程序按 UTF-16');
+ expect(standardDirectiveCache.snapshot('idea_generate',true,'idea_premise_selection').ruleIds)
+  .toEqual(standardDirectiveCache.snapshot('idea_generate').ruleIds);
+ expect(standardDirectiveCache.get('idea_generate','idea_presentation_review')).toBe(full);
+ expect(standardDirectiveCache.get('review')).toContain('坐标由程序按 UTF-16');
+ expect(standardDirectiveCache.snapshot('review').ruleIds).toEqual(expect.arrayContaining(['QLT-003','QLT-011','QLT-014']));
+ standardDirectiveCache.clear();
+});
+it('keeps chapter causal and source requirements during outline generation without injecting prose-report machinery',()=>{
+ standardDirectiveCache.rebuild();
+ const plan=standardDirectiveCache.get('outline','creation_chapter_detail');
+ expect(plan.length).toBeLessThan(standardDirectiveCache.get('outline').length);
+ expect(plan).toContain(SOURCE_QUALITY_POLICY);expect(plan).toContain('CR-1');
+ expect(plan).toContain('关键');expect(plan).not.toContain('坐标由程序按 UTF-16');
+ expect(standardDirectiveCache.get('review','alignment_review')).toContain('坐标由程序按 UTF-16');
+ standardDirectiveCache.clear();
+});

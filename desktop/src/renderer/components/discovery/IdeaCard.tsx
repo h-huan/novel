@@ -1,3 +1,4 @@
+import { creativeChoiceBadgeGroups } from '../../lib/creativeChoiceBadges';
 import React from 'react';
 
 const ANGLE_COLORS: Record<string, string> = { '历史缝隙': 'var(--color-info-light)', '新闻改编': 'var(--color-accent)', '小人物大历史': 'var(--color-success)', '穿越新解': 'var(--color-purple)', '职业传奇': 'var(--color-warning)' };
@@ -76,22 +77,8 @@ const IdeaCard: React.FC<IdeaCardProps> = ({ idea, onClick, existingProject, onO
         {idea.hook && <p style={s.hook}>「{idea.hook}」</p>}
         {/* 这里曾跨维度按同名去重，后果是“权谋”等词只显示一次，作者无法看出它同时承担哪两个设定。 */}
         {(() => {
-          // 统一处理为字符串数组：支持数组、字符串（按·或,或、分割）
-          const toTagArray = (val: unknown): string[] => {
-            if (!val) return [];
-            if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
-            return String(val).split(/[·,，、]/).map(s => s.trim()).filter(Boolean);
-          };
-          const tone = toTagArray(idea.storyTone);
-          const style = toTagArray(idea.writingStyle);
-          const genre = toTagArray(idea.webNovelGenre);
           const platform = idea.targetPlatform || '';
-          const groups: Array<[string, string[]]> = [
-            ['分类', toTagArray(idea.storyCategory ?? idea.category)],
-            ['情绪氛围', tone], ['文风', style], ['流派', genre],
-            ['作品标签', toTagArray(idea.submissionTags)],
-            ['情节', toTagArray(idea.plotTags)], ['视角', toTagArray(idea.pov)],
-          ];
+          const groups = creativeChoiceBadgeGroups(idea);
           const hasAny = platform || groups.some(([, tags]) => tags.length > 0);
           if (!hasAny) return null;
           return (

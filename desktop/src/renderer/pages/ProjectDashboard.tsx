@@ -1,3 +1,4 @@
+import { creativeChoiceBadgeGroups } from '../lib/creativeChoiceBadges';
 /**
  * ProjectDashboard - 项目进度看板
  * 对接真实后端数据，使用 store 缓存避免重复请求
@@ -124,13 +125,7 @@ const ProjectDashboard: React.FC = () => {
   const constitution = (currentProject as any)?.creativeConstitution;
   const settingBadges: Array<[string, string]> = constitution ? [
     ['平台', constitution.targetPlatform ? platformDisplayName(String(constitution.targetPlatform)) : ''],
-    ['分类', String(constitution.category || '')],
-    ['情绪氛围', Array.isArray(constitution.storyTone) ? constitution.storyTone.join('·') : ''],
-    ['文风', Array.isArray(constitution.writingStyle) ? constitution.writingStyle.join('·') : ''],
-    ['流派', Array.isArray(constitution.webNovelGenre) ? constitution.webNovelGenre.join('·') : ''],
-    ['作品标签', Array.isArray(constitution.submissionTags) ? constitution.submissionTags.join('·') : ''],
-    ['情节', Array.isArray(constitution.plotTags) ? constitution.plotTags.join('·') : ''],
-    ['视角', String(constitution.pov || '')],
+    ...creativeChoiceBadgeGroups(constitution).map(([label,values]):[string,string]=>[label,values.join('·')]),
   ] : [];
   const needsRecovery = ['generation_failed', 'creating'].includes(projectStatus);
   const hasConfirmedStory = Boolean(constitution?.confirmedStory && Object.keys(constitution.confirmedStory).length);
