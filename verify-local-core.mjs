@@ -385,6 +385,7 @@ if (!health.ok) {
 } else {
   if (!standardsResponse.ok) runtimeProblems.push('execution_standards_unavailable');
   else if (!runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+  if (!ideaDiscoveryResponse.ok) runtimeProblems.push('idea_discovery_diagnostics_unavailable');
   if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
   if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
@@ -403,6 +404,7 @@ if (health.ok) for (const target of projectTargets) {
 
   const projectStatus = String(result.project.status || '').toLowerCase();
   const diagnostics = result.cockpit?.diagnostics ?? null;
+  if (!diagnostics || result.cockpit?.error) runtimeProblems.push(`${prefix}_creation_diagnostics_unavailable`);
   const creatingInProgress = !runFull && projectStatus === 'creating' && diagnostics?.creationStalled !== true;
   if (runFull) {
     if (projectStatus !== 'active') runtimeProblems.push(`${prefix}_project_status_${projectStatus || 'unknown'}`);
