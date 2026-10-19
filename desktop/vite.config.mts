@@ -3,12 +3,26 @@ const configDirectory = fileURLToPath(new URL('.', import.meta.url));
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
 let electronChild: ChildProcess | null = null;
 const expectedElectronExits = new Set<number>();
+let activeElectronBundleHash: string | null = null;
+
+// Vite's Electron hook can fire again after file watcher reconnection or
+// unchanged rebuild. Do not kill/reopen the whole window for identical bytes.
+// Include preload: rebuilding only preload must still restart Electron.
+function electronBundleHash(): string | null {
+  const main = path.join(configDirectory, 'dist-electron', 'main.js');
+  const preload = path.join(configDirectory, 'dist-electron', 'preload.js');
+  if (!existsSync(main) || !existsSync(preload)) return null;
+  try { return createHash('sha256').update(readFileSync(main)).update(readFileSync(preload)).digest('hex'); }
+  catch { return null; }
+}
 
 function stopElectronChild(): void {
   const child = electronChild;
@@ -25,8 +39,14 @@ function stopElectronChild(): void {
 }
 
 function startElectronHidden(): void {
+  const currentBundleHash = electronBundleHash();
+  if (currentBundleHash && currentBundleHash === activeElectronBundleHash
+    && electronChild?.pid && electronChild.exitCode === null && electronChild.signalCode === null) {
+    return;
+  }
   const electronExecutable = require('electron') as string;
   stopElectronChild();
+  activeElectronBundleHash = currentBundleHash;
   const child = spawn(electronExecutable, ['.', '--no-sandbox'], {
     cwd: configDirectory,
     stdio: 'inherit',
