@@ -277,6 +277,18 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
     mainWindow = null;
   });
 
+  let mainDocumentLoads = 0;
+  mainWindow.webContents.on('did-finish-load', () => {
+    // Screen lock/sleep must not reload the renderer. Record actual document
+    // reloads only (hash navigation does not trigger this), without printing
+    // project IDs or noisy reconnect polls.
+    if (++mainDocumentLoads > 1) {
+      console.warn('[desktop] main renderer document reloaded; check Vite HMR/reconnect and Electron lifetime');
+    }
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[desktop] main renderer exited: ${details.reason}, exitCode=${details.exitCode}`);
+  });
   mainWindow.webContents.once('did-finish-load', () => {
     setTimeout(() => { void ensureServerRunning(); }, 100);
   });
