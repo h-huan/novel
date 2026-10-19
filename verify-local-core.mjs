@@ -53,13 +53,20 @@ function git(gitArgs) {
   return r.status === 0 ? String(r.stdout || '').trim() : null;
 }
 
-function seedVersion() {
+/** Validate the single authoritative rule definition and the seed's reference to it.
+ * No version number is hardcoded in this verifier. */
+function executionStandardSource() {
   try {
-    const raw = fs.readFileSync(path.join(root, 'server/src/modules/module-standards/module-standards.seed.ts'), 'utf8');
-    const m = raw.match(/SEED_BASELINE_VERSION\s*=\s*(\d+)/);
-    return m ? Number(m[1]) : null;
-  } catch {
-    return null;
+    const source = fs.readFileSync(path.join(root, 'server/shared/src/执行标准.ts'), 'utf8');
+    const seed = fs.readFileSync(path.join(root, 'server/src/modules/module-standards/module-standards.seed.ts'), 'utf8');
+    const versions = [...source.matchAll(/export\s+const\s+SYSTEM_WORKFLOW_RULESET_VERSION\s*=\s*(\d+)\s*;/g)];
+    const version = versions.length === 1 ? Number(versions[0][1]) : null;
+    const seedBindingValid = /export\s+const\s+SEED_BASELINE_VERSION\s*=\s*SYSTEM_WORKFLOW_RULESET_VERSION\s*;/.test(seed);
+    return { version, seedBindingValid, error: version === null
+      ? 'authoritative_ruleset_version_missing_or_ambiguous'
+      : !seedBindingValid ? 'seed_does_not_reference_authoritative_version' : null };
+  } catch (error) {
+    return { version: null, seedBindingValid: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -304,12 +311,15 @@ const standardsResponse = health.ok
   ? await request('/module-standards')
   : skippedRuntimeRequest('module-standards');
 const standards = asArray(standardsResponse.data);
-const codeSeedVersion = seedVersion();
+const codeRuleSource = executionStandardSource();
+const codeSeedVersion = codeRuleSource.version;
 const standardMismatch = standards.filter((s) => {
   const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
+  const version = Number(s.version ?? NaN);
   const source = String(s.source ?? '');
-  return (Number.isFinite(seed) && codeSeedVersion !== null && seed !== codeSeedVersion)
-    || source !== 'code_seed';
+  return codeSeedVersion === null || !Number.isFinite(seed) || !Number.isFinite(version)
+    || seed !== codeSeedVersion || version !== codeSeedVersion
+    || source !== 'system_workflow_rule_registry';
 }).map((s) => ({
   moduleKey: s.moduleKey ?? s.module_key ?? null,
   version: s.version ?? null,
@@ -337,8 +347,12 @@ const runtime = {
     : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` },
   standards: {
     codeSeedVersion,
+    seedBindingValid: codeRuleSource.seedBindingValid,
+    sourceError: codeRuleSource.error,
+    expectedSource: 'system_workflow_rule_registry',
     activeCount: standards.length,
-    consistent: standardsResponse.ok && standardMismatch.length === 0,
+    consistent: standardsResponse.ok && codeSeedVersion !== null && codeRuleSource.seedBindingValid
+      && standards.length > 0 && standardMismatch.length === 0,
     mismatches: standardMismatch,
   },
   projectDiscovery,
@@ -369,7 +383,8 @@ if (!health.ok) {
   // Root-cause-first: downstream runtime checks were not executed.
   runtimeProblems.push('server_unavailable');
 } else {
-  if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
+  if (!standardsResponse.ok) runtimeProblems.push('execution_standards_unavailable');
+  else if (!runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
   if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
   if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
@@ -413,7 +428,8 @@ if (health.ok) for (const target of projectTargets) {
   }
 
   const firstChapter = result.chapters?.first ?? null;
-  const shouldRequireFirstChapter = runFull || projectStatus === 'active';
+  // Quick diagnostics intentionally stop at creation data; only --full requires a written first chapter.
+  const shouldRequireFirstChapter = runFull;
   if (shouldRequireFirstChapter) {
     if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
     const firstRun = result.firstChapterRun;
@@ -453,6 +469,9 @@ const report = {
     baseUrl,
     fullTests: runFull,
     e2e: runE2E,
+    creationDataOnly: !runFull,
+    requiresWrittenFirstChapter: runFull,
+    makesModelRequests: false,
   },
   tests,
   runtime,
@@ -471,7 +490,7 @@ const testLines = tests.length
   ? tests.map((t) => `- ${t.label}: **${t.status.toUpperCase()}** (${t.durationMs}ms)`).join('\n')
   : '- 未执行仓库测试（使用 --full 执行；追加 --e2e 执行 E2E）';
 const standardLine = standardsResponse.ok
-  ? `${runtime.standards.consistent ? 'PASS' : 'FAIL'} · code seed=${codeSeedVersion ?? 'unknown'} · active=${standards.length}`
+  ? `${runtime.standards.consistent ? 'PASS' : 'FAIL'} · unique ruleset=${codeSeedVersion ?? 'unknown'} · seed binding=${codeRuleSource.seedBindingValid ? 'valid' : 'invalid'} · modules=${standards.length} · mismatches=${standardMismatch.length}${codeRuleSource.error ? ' · ' + codeRuleSource.error : ''}`
   : `UNAVAILABLE · ${standardsResponse.error ?? `HTTP ${standardsResponse.status}`}`;
 
 function latestRunLine(result) {
@@ -515,14 +534,22 @@ function projectMarkdown(target) {
         ? `IN_PROGRESS · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length}`
         : `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || (runFull && integrity.outlineBodyMappingValid !== true)) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'NOT_READY'}`
       : 'FAIL · 未取得完整性审计';
-  const persistenceLine = diagnostics
-    ? diagnostics.creationStalled
-      ? `FAIL · stalled · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
-      : (diagnostics.pendingPersistenceMismatch || []).length
-        ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
-        : `PASS · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
-    : 'UNAVAILABLE';
-  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+  const persistenceMismatches = Array.isArray(diagnostics?.persistenceMismatch) ? diagnostics.persistenceMismatch : [];
+  const pendingMismatches = Array.isArray(diagnostics?.pendingPersistenceMismatch) ? diagnostics.pendingPersistenceMismatch : [];
+  const persistenceLine = !diagnostics ? 'UNAVAILABLE'
+    : diagnostics.creationStalled ? `FAIL · stalled · mismatch=${persistenceMismatches.join(',') || 'none'}`
+    : persistenceMismatches.length ? `FAIL · mismatch=${persistenceMismatches.join(',')}`
+    : pendingMismatches.length ? `IN_PROGRESS · pending=${pendingMismatches.join(',')}`
+    : inProgress ? 'IN_PROGRESS · creating'
+    : 'PASS · no observed persistence mismatch';
+  const persisted = diagnostics?.persisted ?? {};
+  const samples = diagnostics?.sample ?? {};
+  const slowest = Array.isArray(diagnostics?.slowestSteps) ? diagnostics.slowestSteps.slice(0, 5) : [];
+  const times = slowest.map(step => `  - ${step.stepKey || step.scenario || 'unknown'} · ${step.durationMs ?? 'unknown'}ms · tokens=${step.totalTokens ?? 'unknown'} · ${step.status || 'unknown'}`).join('\n');
+  const metricsLine = diagnostics
+    ? `- 运行记录：stepMetrics=${samples.stepMetrics ?? 'unknown'} · generationRuns=${samples.generationRuns ?? 'unknown'} · 首次调用成功率=${diagnostics.effectiveFirstPassRate ?? 'unknown'}（仅步骤调用，不代表项目交付）\n- 步骤耗时累计：${diagnostics.totalDurationMs ?? 'unknown'}ms（可能并行，不能作为墙钟耗时） · totalTokens=${diagnostics.totalTokens ?? 'unknown'} · internalRetries=${diagnostics.internalRetryCount ?? 'unknown'}\n- 业务落库：${JSON.stringify(persisted)}\n- 相同运行指纹组：${diagnostics.exactDuplicateRunGroups ?? 'unknown'}（仅诊断线索，不能直接判定重复调用）\n- 最慢步骤（已有监控样本，不代表整个批次）：\n${times || '  - 无样本'}`
+    : '- 性能与落库诊断：未取得数据';
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n${metricsLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
 const projectSections = !health.ok
@@ -537,7 +564,7 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收（包含正文）' : '创建资料范围诊断（不要求生成正文）'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n- 模型请求：本脚本只执行本地 HTTP GET、规则读取及可选仓库测试；不调用模型\n- 诊断边界：发现稳定性与项目创建端到端结果只能由对应批次和真实落库证据确认；单项目 PASS 不代表整批验收通过\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
