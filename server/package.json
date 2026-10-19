@@ -7,7 +7,7 @@
     "prebuild": "npm run clean",
     "build": "tsc && node -e \"var f=require('fs');f.mkdirSync('dist/src/routing',{recursive:true});f.copyFileSync('src/routing/route-config.json','dist/src/routing/route-config.json')\"",
     "start": "node --no-warnings node_modules/@nestjs/cli/bin/nest.js start",
-    "start:dev": "node --no-warnings node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "start:dev": "npm run build && npm run start:prod",
     "start:debug": "node --no-warnings node_modules/@nestjs/cli/bin/nest.js start --debug --watch",
     "start:prod": "node --no-warnings dist/src/main.js",
     "typecheck": "tsc --noEmit",
