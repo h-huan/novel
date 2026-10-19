@@ -39,21 +39,27 @@ cd ..\desktop
 npm ci
 ```
 
-正常桌面开发：
+**本地正常启动（项目根目录）**：
 
 ```powershell
+powershell -File .\restart.ps1
+```
+
+该脚本先检查并清理本项目已有的相关进程，再构建服务端，以独立单进程启动 NestJS；3100 健康检查通过后才启动 5173 桌面前端。**运行前先确认没有正在执行的生成任务**，重启会结束所选服务的进程。
+
+**前后端分开运行时**，先在根目录启动后端，再启动桌面前端：
+
+```powershell
+powershell -File .\restart.ps1 -Only back
 cd desktop
-node scripts/dev.js
+npm run dev
 ```
 
-服务端固定使用 `3100`，桌面开发前端固定使用 `5173`。端口被占用时应明确失败，不允许静默切换到其他端口。
+`desktop/npm run dev` 现在只复用健康的 3100 服务端，不自动启动 NestJS `--watch`，也不会在桌面退出时关闭外部后端。只需重启后端时可使用 `restart.ps1 -Only back`，只需重启前端时可使用 `restart.ps1 -Only front`；不会主动结束另一端服务。
 
-只调试后端时：
+服务端固定使用 `3100`，桌面前端固定使用 `5173`；健康检查不通过会明确失败，不会静默改端口或假装前端启动成功。稳定验收不使用后端 `--watch`，避免运行时编译中的非原子覆盖。
 
-```powershell
-cd server
-npm run start:dev
-```
+**编码问题**：启动器自身的状态诊断采用 ASCII 控制台输出，Electron 界面保留详细中文错误；Windows 终端仍需将自身编码设为 UTF-8 才能可靠显示其它服务的中文日志，启动器不会私自改变共享控制台代码页。
 
 ## 仓库验证
 
@@ -148,6 +154,7 @@ verification/latest.md
 ## 目录
 
 ```text
+docs/skills/novel-source-quality/  源头质量维护技能及评测资料（仅开发维护，不是应用运行依赖）
 desktop/              Electron 主进程、前端测试
 server/               NestJS API、生成链、质量闭环、SQLite、测试
 server/shared/src/执行标准.ts  唯一执行标准
