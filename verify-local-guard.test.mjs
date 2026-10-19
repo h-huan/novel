@@ -94,8 +94,10 @@ function run(report) {
     } } },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
   });
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 1);
   assert.deepEqual(next.verdict.runtimeProblems, []);
+  assert.equal(next.verdict.status, 'in_progress');
+  assert.match(nextMarkdown, /最终结果：\*\*IN_PROGRESS\*\*/u);
   assert.match(nextMarkdown, /创建\\/持久化诊断：IN_PROGRESS · pending=outline_success_without_chapter_outline/u);
 }
 {
