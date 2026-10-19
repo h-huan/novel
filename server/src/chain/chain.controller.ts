@@ -4719,7 +4719,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     // verified platform tags; never filter an explicitly selected category.
     const usableCategoryCandidates = inputCategory ? categoryCandidates : categoryCandidates.filter(category => {
       const requiresTags = platformSubmissionDimensions(requestedPlatform, dto.storyType, category, dto.targetAudience).includes('genre');
-      if (!requiresTags || (Array.isArray(dto.submissionTags) && dto.submissionTags.length > 0)) return true;
+      if (!requiresTags || (Array.isArray(dto.submissionTags) && dto.submissionTags.some(tag => String(tag).trim()))) return true;
       const placement = resolveSubmissionCategory(requestedPlatform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
       return placement.status === 'resolved' && (platformCategoryWritingProfile(
         requestedPlatform, placement.value.channel, placement.value.platformGroup, dto.storyType)?.topTags || []).length > 0;
