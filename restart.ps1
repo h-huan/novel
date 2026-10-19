@@ -62,8 +62,7 @@ $ProjectRoot = $PSScriptRoot
 $LogDir = Join-Path $ProjectRoot 'logs'
 $StateFile = Join-Path $LogDir 'dev-pids.json'
 $BackendPort = 3100
-$FrontendPorts = @(5173, 5174)
-$LegacyPorts = @(3000)
+$FrontendPorts = @(5173)
 # 相对路径的父 CLI 命令行特征：这些进程自身不含项目根绝对路径，必须靠"后代是否指向本项目"来认定。
 $DevCommandPatterns = @(
   'node_modules/@nestjs/cli/bin/nest.js start --watch',
@@ -308,7 +307,6 @@ if (-not (Test-Path -LiteralPath $LogDir)) { New-Item -ItemType Directory -Force
 $portsToClear = @()
 if ($Only -in @('all', 'back')) { $portsToClear += $BackendPort }
 if ($Only -in @('all', 'front')) { $portsToClear += $FrontendPorts }
-if ($Only -in @('all', 'back')) { $portsToClear += $LegacyPorts }
 $portsToClear = @($portsToClear | Sort-Object -Unique)
 
 Write-Step "清理目标端口：$($portsToClear -join ', ')"
@@ -318,7 +316,14 @@ if ($stateIds.Count -gt 0) { Write-Step "上一轮记录的服务 PID：$($state
 
 $snapshot = Get-ProcessSnapshot
 $childrenMap = Get-ChildrenMap -Snapshot $snapshot
-$roots = @(@(Get-ProjectRootIds -Snapshot $snapshot -ChildrenMap $childrenMap -StateIds $stateIds -Scope $Only) + @(Get-ListenerOwners -Ports $portsToClear)) | Sort-Object -Unique
+$ownedRoots = @(Get-ProjectRootIds -Snapshot $snapshot -ChildrenMap $childrenMap -StateIds $stateIds -Scope $Only)
+$ownedTree = @(Expand-Descendants -Roots $ownedRoots -ChildrenMap $childrenMap)
+$listenerOwners = @(Get-ListenerOwners -Ports $portsToClear)
+$foreignOwners = @($listenerOwners | Where-Object { $_ -notin $ownedTree })
+if ($foreignOwners.Count -gt 0) {
+  throw "目标端口被非本项目进程占用（PID=$($foreignOwners -join ', ')）。为避免误杀，不清理这些端口；请先核实对应进程。"
+}
+$roots = @(@($ownedRoots) + $listenerOwners) | Sort-Object -Unique
 if ($roots.Count -gt 0) { Write-Step "待清理根进程 PID：$($roots -join ', ')" } else { Write-Step '待清理根进程：无' }
 
 # 第一轮：先杀父（watcher / dev CLI），断掉"边杀边重建"的源头。
