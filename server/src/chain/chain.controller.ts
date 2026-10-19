@@ -4842,6 +4842,12 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     targetAudience?: string;
   }, requestedCount: number) {
     this.logger.log(`idea-discover: type=${dto.storyType} platform=${dto.platform} count=${requestedCount}`);
+    // Measured wall-clock stage boundaries, not sum of concurrent model calls.
+    // Exposes stalled/repeated phases without altering model or quality contracts.
+    const discoveryStartMs = Date.now();
+    let premisesReadyMs: number | null = null;
+    let structuredReadyMs: number | null = null;
+    let initialReviewReadyMs: number | null = null;
     try {
       // 只验证并使用 idea_generate 当前场景所配置的模型；不得切换模型、提供商或模式。
       this.realLLM.assertScenarioModelConfigured('idea_generate');
@@ -5316,6 +5322,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
 
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
+      premisesReadyMs = Date.now();
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
       if(selectedPremises.length<requestedCount){
@@ -5366,7 +5373,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         || missingPremiseIds.some(id => !structuringErrors.some(item => item.sourcePremiseId === id))) {
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；生成=${structuredCards.length}/${requestedCount}，缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。身份对应异常时停止，不把未知身份当成已通过的原池换选。`);
       }
+      structuredReadyMs = Date.now();
       await accept(structuredCards, 'initial');
+      initialReviewReadyMs = Date.now();
 
       let finalGateRepairAttempted=false,finalGateRepairGenerated=0;
       let finalGateRepairError:string|null=null;
@@ -5479,7 +5488,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
       const finalRejectedReasons = latestIdeaFailureReasons(candidateAssessments,finalMissingPremiseIds);
       const qualifiedCount = selectedAccepted.length;
+      const discoveryEndMs = Date.now();
+      const phaseDurationsMs = {
+        preselection: premisesReadyMs === null ? null : premisesReadyMs - discoveryStartMs,
+        cardStructuring: premisesReadyMs === null || structuredReadyMs === null ? null : structuredReadyMs - premisesReadyMs,
+        initialCardReview: structuredReadyMs === null || initialReviewReadyMs === null ? null : initialReviewReadyMs - structuredReadyMs,
+        fulfillmentAndFinalReview: initialReviewReadyMs === null ? null : discoveryEndMs - initialReviewReadyMs,
+        totalWallClock: discoveryEndMs - discoveryStartMs,
+      };
+      this.logger.log(`idea-discover timing (wall clock ms): ${JSON.stringify(phaseDurationsMs)}`);
       const appealGate = {
+        phaseDurationsMs,
         schemaVersion: 8,
         mode: 'budgeted_original_pool_fulfillment',
         structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
