@@ -2,7 +2,6 @@ const { spawn, spawnSync } = require('node:child_process');
 const path = require('node:path');
 
 const desktopRoot = path.resolve(__dirname, '..');
-const serverRoot = path.resolve(desktopRoot, '..', 'server');
 const cliArgs = process.argv.slice(2);
 if (!cliArgs.includes('--host')) cliArgs.unshift('--host', '0.0.0.0');
 
