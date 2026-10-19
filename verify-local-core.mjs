@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -377,6 +378,25 @@ const gitInfo = {
   dirty: Boolean(git(['status', '--porcelain'])),
 };
 
+// Hash actual local files, including uncommitted changes, without claiming to
+// prove which JavaScript bytes the running service loaded.
+const fingerprintPaths = [
+  'server/shared/src/执行标准.ts',
+  'server/src/chain/chain.controller.ts',
+  'server/src/chain/real-llm.service.ts',
+  'server/src/chain/chapter-dependency-review.ts',
+  'server/src/chain/premise-payoff-review.ts',
+  'server/src/chain/premise-source-reuse.ts',
+  'verify-local.mjs', 'verify-local-core.mjs', 'verify-local-guard.mjs',
+];
+const sourceFingerprints = Object.fromEntries(fingerprintPaths.map(file => {
+  try {
+    return [file, createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex')];
+  } catch {
+    return [file, null];
+  }
+}));
+
 const failedTests = tests.filter((x) => x.status !== 'passed');
 const runtimeProblems = [];
 if (!health.ok) {
@@ -467,6 +487,8 @@ const report = {
   generatedAt: now,
   command: process.argv.join(' '),
   git: gitInfo,
+  sourceFingerprints,
+  runningModuleByteIdentityVerified: false,
   options: {
     projectId: legacyProjectId,
     requestedShortProjectId,
@@ -494,6 +516,9 @@ const report = {
 
 const jsonPath = path.join(outDir, 'latest.json');
 fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
+
+const fingerprintLines = Object.entries(sourceFingerprints)
+  .map(([file, hash]) => `- ${file}: ${hash || 'UNAVAILABLE'}`).join('\n');
 
 const testLines = tests.length
   ? tests.map((t) => `- ${t.label}: **${t.status.toUpperCase()}** (${t.durationMs}ms)`).join('\n')
@@ -573,7 +598,7 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收（包含正文）' : '创建资料范围诊断（不要求生成正文）'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n- 模型请求：本脚本只执行本地 HTTP GET、规则读取及可选仓库测试；不调用模型\n- 诊断边界：发现稳定性与项目创建端到端结果只能由对应批次和真实落库证据确认；单项目 PASS 不代表整批验收通过\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收（包含正文）' : '创建资料范围诊断（不要求生成正文）'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n- 模型请求：本脚本只执行本地 HTTP GET、规则读取及可选仓库测试；不调用模型\n- 诊断边界：发现稳定性与项目创建端到端结果只能由对应批次和真实落库证据确认；单项目 PASS 不代表整批验收通过\n\n## 项目验收\n\n${projectSections}\n\n## 源码版本证据\n\n${fingerprintLines}\n\n- 源码 SHA256 只描述本地文件，不能证明后端进程正在加载这些字节。\n- 模型调用成功率不是项目交付率；物理调用数和墙钟时间由独立批次账本确认。\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
