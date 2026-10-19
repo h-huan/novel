@@ -38,12 +38,19 @@ it('从原因果账目定位具体结果字段和全部结果索引，不猜测�
       resultAnchorId: anchors.find(a => a.path === '0.characterActions.0.result')!.id,
       actionEvidence: '提出调解', resultEvidence: '纠纷已解除', reason: '提出不等于对方接受' },
     { status: 'gap', resultAnchorId: 'body:unknown', resultEvidence: '未知位置', reason: '保持实际缺口' },
-    { status: 'supported', reason: '通过项不能列成缺口' },
+    { status: 'supported', actionAnchorId: anchors.find(a => a.path === '0.characterActions.0.action')!.id,
+      resultAnchorId: anchors.find(a => a.path === '0.characterStates.0.stateAfter')!.id,
+      resultEvidence: '双方已经达成协议', reason: '此前审核原样保留的结果索引' },
   ] } });
   const result = chapterActionRepairEvidence(candidate, failure);
   expect(result.gaps).toEqual([expect.objectContaining({ actionPath: 'characterActions.0.action', resultPath: 'characterActions.0.result', reason: '提出不等于对方接受' }),
     expect.objectContaining({ resultPath: null, resultEvidence: '未知位置' })]);
   expect(result.resultFields).toEqual(expect.arrayContaining(['characterActions.0.result', 'characterStates.0.stateAfter', 'foreshadowingRecover.0.method']));
+  expect(result.protectedResults).toEqual([expect.objectContaining({
+    status: 'supported', actionPath: 'characterActions.0.action',
+    resultPath: 'characterStates.0.stateAfter', resultEvidence: '双方已经达成协议',
+  })]);
+  expect(result.gaps).not.toEqual(expect.arrayContaining([expect.objectContaining({resultPath: 'characterStates.0.stateAfter'})]));
   expect(candidate.characterActions[0].result).toBe('纠纷已解除');
 });
 it('事实通过不能盖过行动缺口：完整拒绝作为同一章局部修复依据', async () => {
