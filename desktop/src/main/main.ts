@@ -385,16 +385,21 @@ async function tryConnectPort(port: number): Promise<boolean> {
 
 async function connectToServer(port: number = SERVER_PORT): Promise<boolean> {
   if (!(await tryConnectPort(port))) return false;
-  const status = { running: true, port };
-  broadcastServerStatus(status);
-  console.log(`[server] backend ready at http://127.0.0.1:${port}`);
+  if (!lastServerStatus.running || lastServerStatus.port !== port) {
+    broadcastServerStatus({ running: true, port });
+    console.log(`[server] backend ready at http://127.0.0.1:${port}`);
+  }
   return true;
 }
 
 function reportServerUnavailable(port: number, detail?: string): void {
   const msg = detail || `服务端启动失败或端口 ${port} 不可用。`;
+  // The renderer polls get-server-status. Repeated identical failures are a
+  // single state, not new crashes; keep full localized detail in UI status,
+  // emit an ASCII diagnostic once per state transition for Windows consoles.
+  if (!lastServerStatus.running && lastServerStatus.port === port && lastServerStatus.error === msg) return;
   broadcastServerStatus({ running: false, port, error: msg });
-  console.warn(`[server] backend unavailable on port ${port}: ${msg}`);
+  console.warn(`[server] backend unavailable on port ${port}; check backend logs and health endpoint http://127.0.0.1:${port}/api/v1/health; detail sent to UI`);
 }
 
 function stopManagedServer(): void {
@@ -441,7 +446,7 @@ function managedServerSpec(port: number): { executable: string; args: string[]; 
 async function startManagedServer(port: number): Promise<boolean> {
   const spec = managedServerSpec(port);
   if (!spec) {
-    reportServerUnavailable(port, '开发模式后端未启动；请从 desktop 目录运行 npm run dev，由启动器自动拉起服务端。');
+    reportServerUnavailable(port, '开发模式服务端未运行。请先在项目根目录启动独立后端（restart.ps1 -Only back），再启动桌面前端；桌面进程不会自动启动或管理开发后端。');
     return false;
   }
 
