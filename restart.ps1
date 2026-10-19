@@ -121,7 +121,7 @@ function Get-ListenerOwners([int[]]$Ports) {
 }
 
 # 只返回"根"进程（父 CLI / 父开发进程 / 上一轮记录的服务）：绝对路径匹配 + 有本项目后代的相对路径父进程。
-function Get-ProjectRootIds($Snapshot, $ChildrenMap, [int[]]$StateIds) {
+function Get-ProjectRootIds($Snapshot, $ChildrenMap, [int[]]$StateIds, [string]$Scope = 'all') {
   $absolute = New-Object System.Collections.Generic.HashSet[int]
   foreach ($p in $Snapshot) {
     $cmd = [string]$p.CommandLine
@@ -129,7 +129,10 @@ function Get-ProjectRootIds($Snapshot, $ChildrenMap, [int[]]$StateIds) {
     if ($p.Name -notin @('node.exe', 'electron.exe', 'cmd.exe')) { continue }
     # 跳过 Codex 自身运行时（cua-repl / server.mjs），它们不属于本项目
     if ($cmd -like '*\OpenAI\Codex\runtimes\*') { continue }
-    if ($cmd -like "*$ProjectRoot\server*" -or $cmd -like "*$ProjectRoot\desktop*") {
+    $isBack = $cmd -like "*$ProjectRoot\server*"
+    $isFront = $cmd -like "*$ProjectRoot\desktop*"
+    if (($Scope -in @('all', 'back') -and $isBack) -or
+        ($Scope -in @('all', 'front') -and $isFront)) {
       [void]$absolute.Add([int]$p.ProcessId)
     }
   }
@@ -141,7 +144,12 @@ function Get-ProjectRootIds($Snapshot, $ChildrenMap, [int[]]$StateIds) {
     if (-not $cmd) { continue }
     if ($p.Name -ne 'node.exe') { continue }
     $hitPattern = $false
-    foreach ($pattern in $DevCommandPatterns) { if ($cmd -like "*$pattern*") { $hitPattern = $true; break } }
+    foreach ($pattern in $DevCommandPatterns) {
+      $backPattern = $pattern -like '*nestjs*'
+      if (($Scope -eq 'back' -and -not $backPattern) -or
+          ($Scope -eq 'front' -and $backPattern)) { continue }
+      if ($cmd -like "*$pattern*") { $hitPattern = $true; break }
+    }
     if (-not $hitPattern) { continue }
     $descendants = @(Expand-Descendants -Roots @([int]$p.ProcessId) -ChildrenMap $ChildrenMap)
     $owned = $false
@@ -152,11 +160,13 @@ function Get-ProjectRootIds($Snapshot, $ChildrenMap, [int[]]$StateIds) {
   return @($roots | Sort-Object -Unique)
 }
 
-function Read-DevState {
+function Read-DevState([string]$Scope = 'all') {
   if (-not (Test-Path -LiteralPath $StateFile)) { return @() }
   try { $json = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json } catch { return @() }
   $ids = New-Object System.Collections.Generic.List[int]
   foreach ($name in @('backend', 'frontend')) {
+    if ($Scope -eq 'back' -and $name -eq 'frontend') { continue }
+    if ($Scope -eq 'front' -and $name -eq 'backend') { continue }
     $entry = $json.$name
     if ($null -eq $entry) { continue }
     $id = [int]$entry.pid
@@ -174,6 +184,28 @@ function Read-DevState {
     $ids.Add($id)
   }
   return @($ids)
+}
+
+# Keep the opposite service's validated PID in partial restarts.
+# Do not turn -Only back/-Only front into untracked process ownership.
+function Get-PreservedDevState([string]$Scope) {
+  $preserved = @{}
+  if ($Scope -eq 'all' -or -not (Test-Path -LiteralPath $StateFile)) { return $preserved }
+  $name = if ($Scope -eq 'back') { 'frontend' } else { 'backend' }
+  try {
+    $json = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+    $entry = $json.$name
+    if ($null -eq $entry -or [int]$entry.pid -le 0 -or $null -eq $entry.startedAtMs) { return $preserved }
+    $proc = Get-Process -Id ([int]$entry.pid) -ErrorAction Stop
+    $actual = [long]([datetimeoffset]$proc.StartTime).ToUnixTimeMilliseconds()
+    if ([Math]::Abs($actual - [long]$entry.startedAtMs) -gt 3000) { return $preserved }
+    $preserved[$name] = @{
+      pid = [int]$entry.pid
+      startedAtMs = $actual
+      startedAt = $proc.StartTime.ToUniversalTime().ToString('o')
+    }
+  } catch { }
+  return $preserved
 }
 
 function Write-DevState($Entries) {
@@ -276,17 +308,17 @@ if (-not (Test-Path -LiteralPath $LogDir)) { New-Item -ItemType Directory -Force
 $portsToClear = @()
 if ($Only -in @('all', 'back')) { $portsToClear += $BackendPort }
 if ($Only -in @('all', 'front')) { $portsToClear += $FrontendPorts }
-$portsToClear += $LegacyPorts
+if ($Only -in @('all', 'back')) { $portsToClear += $LegacyPorts }
 $portsToClear = @($portsToClear | Sort-Object -Unique)
 
 Write-Step "清理目标端口：$($portsToClear -join ', ')"
 
-$stateIds = @(Read-DevState)
+$stateIds = @(Read-DevState -Scope $Only)
 if ($stateIds.Count -gt 0) { Write-Step "上一轮记录的服务 PID：$($stateIds -join ', ')（连同其全部子孙一并清理）" }
 
 $snapshot = Get-ProcessSnapshot
 $childrenMap = Get-ChildrenMap -Snapshot $snapshot
-$roots = @(@(Get-ProjectRootIds -Snapshot $snapshot -ChildrenMap $childrenMap -StateIds $stateIds) + @(Get-ListenerOwners -Ports $portsToClear)) | Sort-Object -Unique
+$roots = @(@(Get-ProjectRootIds -Snapshot $snapshot -ChildrenMap $childrenMap -StateIds $stateIds -Scope $Only) + @(Get-ListenerOwners -Ports $portsToClear)) | Sort-Object -Unique
 if ($roots.Count -gt 0) { Write-Step "待清理根进程 PID：$($roots -join ', ')" } else { Write-Step '待清理根进程：无' }
 
 # 第一轮：先杀父（watcher / dev CLI），断掉"边杀边重建"的源头。
@@ -298,7 +330,7 @@ $snapshot2 = Get-ProcessSnapshot
 $childrenMap2 = Get-ChildrenMap -Snapshot $snapshot2
 $secondPass = @(
   @(Expand-Descendants -Roots $roots -ChildrenMap $childrenMap2) +
-  @(Get-ProjectRootIds -Snapshot $snapshot2 -ChildrenMap $childrenMap2 -StateIds @()) +
+  @(Get-ProjectRootIds -Snapshot $snapshot2 -ChildrenMap $childrenMap2 -StateIds @() -Scope $Only) +
   @(Get-ListenerOwners -Ports $portsToClear)
 ) | Sort-Object -Unique
 Stop-ProcessIds -Ids $secondPass -Reason '清理子进程与重建进程' | Out-Null
@@ -321,7 +353,7 @@ Write-Step '端口已全部释放'
 # 残留断言：清理后若还有本项目进程，直接打印出来，避免"以为干净了"。
 $snapshot3 = Get-ProcessSnapshot
 $childrenMap3 = Get-ChildrenMap -Snapshot $snapshot3
-$residual = @(Get-ProjectRootIds -Snapshot $snapshot3 -ChildrenMap $childrenMap3 -StateIds @())
+$residual = @(Get-ProjectRootIds -Snapshot $snapshot3 -ChildrenMap $childrenMap3 -StateIds @() -Scope $Only)
 if ($residual.Count -gt 0) {
   Write-Note "仍有残留项目进程（下次启动会继续清理）：$($residual -join ', ')"
 } else {
@@ -329,7 +361,7 @@ if ($residual.Count -gt 0) {
 }
 
 if ($KillOnly) {
-  Write-DevState @{}
+  Write-DevState (Get-PreservedDevState -Scope $Only)
   Write-Step '仅清理模式完成（未启动服务）'
   exit 0
 }
@@ -337,7 +369,7 @@ if ($KillOnly) {
 $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $nodeExe) { throw '未找到 node，可执行文件不在 PATH 中' }
 
-$state = @{}
+$state = Get-PreservedDevState -Scope $Only
 if ($Only -in @('all', 'back')) {
   Archive-Log (Join-Path $LogDir 'backend.out.log')
   Archive-Log (Join-Path $LogDir 'backend.err.log')
@@ -407,17 +439,28 @@ if ($Only -in @('all', 'back')) {
   $healthy = $false
   do {
     try {
-      $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 5 -ErrorAction Stop
-      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) { $healthy = $true; break }
+      $resp = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 5 -ErrorAction Stop
+      if ($resp.status -eq 'ok') { $healthy = $true; break }
     } catch { }
     Start-Sleep -Seconds 1
   } while ((Get-Date) -lt $deadline)
-  if ($healthy) { Write-Step '后端健康检查通过' } else { Write-Note '后端健康检查超时，请查看 logs/backend.err.log' }
+  if ($healthy) { Write-Step '后端健康检查通过' } else {
+    throw '后端未通过健康检查；停止启动前端。保留当前日志用于诊断：logs/backend.err.log、logs/backend.build.log'
+  }
 }
 
 # 启动顺序是硬约束：后端未就绪就起前端，前端会在这段时间里反复抛
 # "[server] backend unavailable on port 3100"（logs/desktop.err.log 实测 8 次）。
 # 因此 all 模式必须"先后端 → 等健康检查通过 → 再前端"，不得并行启动。
+if ($Only -eq 'front') {
+  try {
+    $health = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 5 -ErrorAction Stop
+    if ($health.status -ne 'ok') { throw 'health status is not ok' }
+  } catch {
+    throw '已有后端 3100 未就绪；-Only front 不会启动后端。请先运行 -Only back 并核对健康检查。'
+  }
+}
+
 if ($Only -in @('all', 'front')) {
   Archive-Log (Join-Path $LogDir 'desktop.log')
   Archive-Log (Join-Path $LogDir 'desktop.err.log')
@@ -450,7 +493,7 @@ if ($Only -in @('all', 'front')) {
 }
 $final = Get-ProcessSnapshot
 $finalMap = Get-ChildrenMap -Snapshot $final
-$finalRoots = @(Get-ProjectRootIds -Snapshot $final -ChildrenMap $finalMap -StateIds @())
+$finalRoots = @(Get-ProjectRootIds -Snapshot $final -ChildrenMap $finalMap -StateIds @() -Scope $Only)
 $finalAll = @(Expand-Descendants -Roots $finalRoots -ChildrenMap $finalMap)
 Write-Step "当前项目进程：父 CLI + 带绝对路径的子进程共 $($finalRoots.Count) 个（含全部子孙 $($finalAll.Count) 个）：$($finalRoots -join ', ')"
 Write-Step "端口断言才是唯一口径：后端 3100 与前端 5173 必须各只有 1 个 listener（见上）"
