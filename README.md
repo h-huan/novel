@@ -23,8 +23,7 @@ README 不重复标准内容，也不维护标准版本号。代码中的扫描�
 - `/project/:id/writing-quality`：质量报告
 - `/project/:id/refinement`：精修
 
-API 文档：`server/docs/API.md`  
-用户操作说明：`server/docs/user-guide.md`
+API 以服务端路由定义为准；运行和验收命令见本 README。
 
 ## 本地开发
 
