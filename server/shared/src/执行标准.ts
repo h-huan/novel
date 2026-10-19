@@ -64,6 +64,10 @@ export const CHARACTER_VOICE_COMPARISON_ISSUE_TYPES = ['same_voice_characters'] 
 // scheduling waves instead of three. Same inputs, gates, physical-call budget
 // and output ordering; do not parallelize dependent chapter creation.
 export const IDEA_CARD_GENERATION_CONCURRENCY = 3;
+// Independent, already locked premise-to-card structuring has no shared story
+// state. Run up to five cards concurrently; source/presentation reviews retain
+// their separate concurrency ceiling and independent quality gates.
+export const IDEA_CARD_STRUCTURING_CONCURRENCY = 5;
 
 /** Naming constraint on fictional story content, not on routing/platform metadata. */
 export const FICTION_NAMING_POLICY = {
