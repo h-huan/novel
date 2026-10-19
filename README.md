@@ -39,28 +39,33 @@ cd ..\desktop
 npm ci
 ```
 
-**本地正常启动（项目根目录）**：
+**前后端分别运行，现有 package.json 是唯一启动入口**：
+
+先在第一个终端启动服务端：
 
 ```powershell
-powershell -File .\restart.ps1
+cd server
+npm run start:dev
 ```
 
-该脚本先检查并清理本项目已有的相关进程，再构建服务端，以独立单进程启动 NestJS；3100 健康检查通过后才启动 5173 桌面前端。**运行前先确认没有正在执行的生成任务**，重启会结束所选服务的进程。
+该命令先干净构建（会清理并重新编译 server/dist），构建成功后以**独立单进程**启动 NestJS，监听 **3100**，不启用可能干扰运行时的 `--watch`。先确认当前没有进行中的生成任务，并停止旧服务进程，避免同时运行多份后端或在运行中覆盖编译产物。
 
-**前后端分开运行时**，先在根目录启动后端，再启动桌面前端：
+服务端健康检查：
 
 ```powershell
-powershell -File .\restart.ps1 -Only back
+Invoke-RestMethod http://127.0.0.1:3100/api/v1/health
+```
+
+响应中 `status` 应为 `ok`。随后在第二个终端启动前端：
+
+```powershell
 cd desktop
 npm run dev
 ```
 
-`desktop/npm run dev` 现在只复用健康的 3100 服务端，不自动启动 NestJS `--watch`，也不会在桌面退出时关闭外部后端。只需重启后端时可使用 `restart.ps1 -Only back`，只需重启前端时可使用 `restart.ps1 -Only front`；不会主动结束另一端服务。
+这个脚本直接运行 Vite（前端 **5173**，开发模式会启动 Electron 窗口），不会启动、结束或重建 3100 后端。端口冲突立即报错，不自动改端口。关闭前端不影响后端，后端异常退出也不会由桌面端偷偷重启；应查看服务端控制台中的原始异常。
 
-服务端固定使用 `3100`，桌面前端固定使用 `5173`；健康检查不通过会明确失败，不会静默改端口或假装前端启动成功。稳定验收不使用后端 `--watch`，避免运行时编译中的非原子覆盖。
-
-**编码问题**：启动器自身的状态诊断采用 ASCII 控制台输出，Electron 界面保留详细中文错误；Windows 终端仍需将自身编码设为 UTF-8 才能可靠显示其它服务的中文日志，启动器不会私自改变共享控制台代码页。
-
+如需在 Windows PowerShell 里显示中文日志，先检查终端自身的 UTF-8 编码；程序不会自动修改共享控制台代码页。
 ## 仓库验证
 
 后端：
@@ -154,7 +159,6 @@ verification/latest.md
 ## 目录
 
 ```text
-docs/skills/novel-source-quality/  源头质量维护技能及评测资料（仅开发维护，不是应用运行依赖）
 desktop/              Electron 主进程、前端测试
 server/               NestJS API、生成链、质量闭环、SQLite、测试
 server/shared/src/执行标准.ts  唯一执行标准
