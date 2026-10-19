@@ -16,11 +16,19 @@ export function chapterActionRepairEvidence(chapter: unknown, failure: ChapterAc
   const anchors = causalEvidenceAnchorOptions(JSON.stringify([chapter]), {});
   const address = (id?: string) => anchors.find(anchor => anchor.id === id && anchor.source === 'body');
   const path = (id?: string) => address(id)?.path?.replace(/^0\./, '') || null;
+  const transitions = failure?.planningActionAudit?.transitions || [];
   return {
-    gaps: (failure?.planningActionAudit?.transitions || []).filter(row => row.status === 'gap').map(row => ({
+    gaps: transitions.filter(row => row.status === 'gap').map(row => ({
       actionPath: path(row.actionAnchorId), resultPath: path(row.resultAnchorId),
       actionEvidence: row.actionEvidence, resultEvidence: row.resultEvidence, reason: row.reason,
     })),
+    // Hand the patcher the other reviewed result identities so it knows what
+    // NOT to rewrite. They are not approval receipts and are never used to
+    // bypass the complete independent post-patch review.
+    protectedResults: transitions.filter(row => row.status === 'supported' || row.status === 'planned')
+      .map(row => ({ status: row.status, actionPath: path(row.actionAnchorId),
+        resultPath: path(row.resultAnchorId), resultEvidence: row.resultEvidence }))
+      .filter(row => row.resultPath !== null),
     resultFields: [...new Set(causalChapterResultAnchors(anchors, 0).map(anchor => anchor.path?.replace(/^0\./, '')).filter(Boolean))],
   };
 }
