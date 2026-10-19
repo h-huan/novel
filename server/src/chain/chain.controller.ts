@@ -5015,7 +5015,8 @@ ${excludeText}
 JSON 结构：${JSON.stringify(premiseSchema)}`;
       };
 
-      const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown }> => {
+      const discoverPremisePoolBeforeCards = async () => {
+        const preselectionStartedMs = Date.now();
         const response = await this.realLLM.generate({
           prompt: buildPremiseSelectionPrompt(),
           scenario: 'idea_generate',
@@ -5025,6 +5026,7 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
           responseFormat: 'json_object',
           metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
         });
+        const poolGeneratedMs = Date.now() - preselectionStartedMs;
         const normalized = String(response.content || '')
           .trim()
           .replace(/^```(?:json)?\s*/i, '')
@@ -5070,7 +5072,15 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
             `idea-discover: 创建前广搜有效轻量胚子 ${normalizedSelection.pool.length}/${premisePoolSize}，但已明确选出 ${normalizedSelection.selected.length}/${requestedCount} 个成熟题材；继续结构化，不用弱题材凑池。`,
           );
         }
-        return normalizedSelection;
+        return {
+          ...normalizedSelection,
+          // Nested timings are disjoint wall-clock stages. Source review may
+          // itself contain parallel reviewer calls; never sum model durations.
+          preselectionDurationsMs: {
+            poolGeneration: poolGeneratedMs,
+            sourceReviewsAndReselection: Date.now() - preselectionStartedMs - poolGeneratedMs,
+          },
+        };
       };
 
       let sameBatchPremises: Array<Record<string, unknown>> = [];
@@ -5509,6 +5519,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         repairProtocol: 'budgeted_progress_or_original_pool_replacement',
         fulfillment:{stopReason:fulfillmentStopReason,actions:fulfillmentActions,sourceCallsRemaining:sourceCompletionBudget.remaining,reselectionCallsRemaining:reselectionCompletionBudget.remaining},
         premisePoolSize: premiseDiscovery.pool.length,
+        preselectionDurationsMs: premiseDiscovery.preselectionDurationsMs,
         categorySelectionMode: variedCategories ? 'per_premise_from_platform_candidates' : 'fixed_category',
         selectedCategories: [...new Set(selectedPremises.map(premise => selectedCategoryById.get(String(premise.premiseId))))],
         premisePoolTarget: premisePoolSize,
