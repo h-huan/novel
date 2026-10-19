@@ -82,7 +82,7 @@ function run(report) {
   assert.equal(result.status, 1);
   assert.ok(next.verdict.runtimeProblems.includes('project_project_status_generation_failed'));
   assert.ok(next.verdict.runtimeProblems.includes('project_persistence_mismatch_outline_success_without_chapter_outline'));
-  assert.match(nextMarkdown, /### 项目\\n\\n- 创建\\/持久化诊断：FAIL · mismatch=outline_success_without_chapter_outline/u);
+  assert.match(nextMarkdown, /### 项目\n\n- 创建\/持久化诊断：FAIL · mismatch=outline_success_without_chapter_outline/u);
 }
 {
   const { result, next, nextMarkdown } = run({
@@ -98,7 +98,7 @@ function run(report) {
   assert.deepEqual(next.verdict.runtimeProblems, []);
   assert.equal(next.verdict.status, 'in_progress');
   assert.match(nextMarkdown, /最终结果：\*\*IN_PROGRESS\*\*/u);
-  assert.match(nextMarkdown, /创建\\/持久化诊断：IN_PROGRESS · pending=outline_success_without_chapter_outline/u);
+  assert.match(nextMarkdown, /创建\/持久化诊断：IN_PROGRESS · pending=outline_success_without_chapter_outline/u);
 }
 {
   const { result, next } = run({
