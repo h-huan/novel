@@ -572,7 +572,7 @@ function projectMarkdown(target) {
     : integrity
       ? inProgress
         ? `IN_PROGRESS · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length}`
-        : `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || (runFull && integrity.outlineBodyMappingValid !== true)) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length} · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${integrity.outlineBodyMappingValid ? 'PASS' : 'NOT_READY'}`
+        : `${(integrity.missingModules?.length || integrity.consistencyIssues?.length || (runFull && integrity.outlineBodyMappingValid !== true)) ? 'FAIL' : 'PASS'} · missing=${(integrity.missingModules || []).length}(${(integrity.missingModules || []).join('、') || 'none'}) · consistency=${(integrity.consistencyIssues || []).length} · outline↔chapter=${(integrity.counts?.outlineChapters > 0 && integrity.outlineBodyMappingValid ? 'PASS' : 'NOT_READY')}`
       : 'FAIL · 未取得完整性审计';
   const persistenceMismatches = Array.isArray(diagnostics?.persistenceMismatch) ? diagnostics.persistenceMismatch : [];
   const pendingMismatches = Array.isArray(diagnostics?.pendingPersistenceMismatch) ? diagnostics.pendingPersistenceMismatch : [];
@@ -589,7 +589,12 @@ function projectMarkdown(target) {
   const metricsLine = diagnostics
     ? `- 运行记录：stepMetrics=${samples.stepMetrics ?? 'unknown'} · generationRuns=${samples.generationRuns ?? 'unknown'} · 首次调用成功率=${diagnostics.effectiveFirstPassRate ?? 'unknown'}（仅步骤调用，不代表项目交付）\n- 步骤耗时累计：${diagnostics.totalDurationMs ?? 'unknown'}ms（可能并行，不能作为墙钟耗时） · totalTokens=${diagnostics.totalTokens ?? 'unknown'} · internalRetries=${diagnostics.internalRetryCount ?? 'unknown'}\n- 业务落库：${JSON.stringify(persisted)}\n- 相同运行指纹组：${diagnostics.exactDuplicateRunGroups ?? 'unknown'}（仅诊断线索，不能直接判定重复调用）\n- 最慢步骤（已有监控样本，不代表整个批次）：\n${times || '  - 无样本'}`
     : '- 性能与落库诊断：未取得数据';
-  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n${metricsLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+  const blockedRuns = Array.isArray(result.cockpit?.bottlenecks)
+    ? result.cockpit.bottlenecks.filter(row => String(row?.status || '').toLowerCase() === 'failed').slice(0, 3) : [];
+  const blockingLine = blockedRuns.length
+    ? blockedRuns.map(row => `  - ${row.stage || row.scenario || 'unknown'} / ${row.step_key || row.stepKey || 'run'}：${String(row.error || '未提供阻断详情').replace(/\s+/g, ' ').slice(0, 1200)}`).join('\n')
+    : '  - 无已记录的失败步骤';
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n${metricsLine}\n- 真实失败步骤（不以其它步骤 success 覆盖）：\n${blockingLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
 const projectSections = !health.ok
@@ -604,7 +609,13 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收（包含正文）' : '创建资料范围诊断（不要求生成正文）'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n- 模型请求：本脚本只执行本地 HTTP GET、规则读取及可选仓库测试；不调用模型\n- 诊断边界：完整性判据来自业务审计 audit 内的缺失模块与冲突，不来自接口 success。发现稳定性与项目创建端到端结果只能由对应批次和真实落库证据确认；单项目 PASS 不代表整批验收通过\n\n## 项目验收\n\n${projectSections}\n\n## 源码版本证据\n\n${fingerprintLines}\n\n- 源码 SHA256 只描述本地文件，不能证明后端进程正在加载这些字节。\n- 模型调用成功率不是项目交付率；物理调用数和墙钟时间由独立批次账本确认。\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：只核查实际存在的最新项目（包括 creating / generation_failed）；未创建的长短篇类别显示 NOT_FOUND/NOT_TESTED，不虚构失败或通过；显式指定项目不可用仍失败。--full 要求真实短篇与长篇均可验收；创建中的项目显示 IN_PROGRESS，真实停滞标为 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const latestDiscoveryGate = runtime.ideaDiscovery?.audit?.appealGate ?? null;
+const discoveryTiming = latestDiscoveryGate?.phaseDurationsMs;
+const discoverySummary = latestDiscoveryGate
+  ? `- 最近题材发现：${runtime.ideaDiscovery.audit?.success ? 'SUCCESS' : 'FAILED'} · qualified=${latestDiscoveryGate.qualified ?? 'unknown'}/${latestDiscoveryGate.requested ?? 'unknown'} · pool=${latestDiscoveryGate.premisePoolSize ?? 'unknown'}/${latestDiscoveryGate.premisePoolTarget ?? 'unknown'} · presentation physical calls=${latestDiscoveryGate.presentationPhysicalCallsUsed ?? 'unknown'} · phaseWallMs=${discoveryTiming ? JSON.stringify(discoveryTiming) : 'NOT_RECORDED_IN_THIS_BATCH'}`
+  : '- 最近题材发现：无可用完整批次审计';
+
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收（包含正文）' : '创建资料范围诊断（不要求生成正文）'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n${discoverySummary}\n- 项目选择：${selectionLine}\n- 模型请求：本脚本只执行本地 HTTP GET、规则读取及可选仓库测试；不调用模型\n- 诊断边界：完整性判据来自业务审计 audit 内的缺失模块与冲突，不来自接口 success。发现稳定性与项目创建端到端结果只能由对应批次和真实落库证据确认；单项目 PASS 不代表整批验收通过\n\n## 项目验收\n\n${projectSections}\n\n## 源码版本证据\n\n${fingerprintLines}\n\n- 源码 SHA256 只描述本地文件，不能证明后端进程正在加载这些字节。\n- 模型调用成功率不是项目交付率；物理调用数和墙钟时间由独立批次账本确认。\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：只核查实际存在的最新项目（包括 creating / generation_failed）；未创建的长短篇类别显示 NOT_FOUND/NOT_TESTED，不虚构失败或通过；显式指定项目不可用仍失败。--full 要求真实短篇与长篇均可验收；创建中的项目显示 IN_PROGRESS，真实停滞标为 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
