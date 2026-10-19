@@ -447,7 +447,7 @@ function managedServerSpec(port: number): { executable: string; args: string[]; 
 async function startManagedServer(port: number): Promise<boolean> {
   const spec = managedServerSpec(port);
   if (!spec) {
-    reportServerUnavailable(port, '开发模式服务端未运行。请先在项目根目录启动独立后端（restart.ps1 -Only back），再启动桌面前端；桌面进程不会自动启动或管理开发后端。');
+    reportServerUnavailable(port, '开发模式服务端未运行。请在 server 目录运行 npm run start:dev，后端 3100 健康后，再在 desktop 目录运行 npm run dev。两端独立运行，桌面端不负责启动或停止开发后端。');
     return false;
   }
 
