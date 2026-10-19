@@ -23,16 +23,27 @@ function run(report) {
 
 {
   const { result, next, nextMarkdown } = run({
-    options: { mode: 'diagnostic_latest_short_and_long', shortProjectId: 'short-1', longProjectId: null },
+    options: { mode: 'diagnostic_latest_available_projects', fullTests: false, shortProjectId: 'short-1', longProjectId: null },
     runtime: { projects: { short: { project: { status: 'creating' }, cockpit: { diagnostics: { creationStalled: false } } } } },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
   });
   assert.equal(result.status, 1);
+  assert.equal(next.verdict.status, 'in_progress');
+  assert.deepEqual(next.verdict.runtimeProblems, []);
+  assert.match(nextMarkdown, /最终结果：\*\*IN_PROGRESS\*\*/u);
+  assert.doesNotMatch(nextMarkdown, /long_project_missing/u);
+}
+
+{
+  const { result, next, nextMarkdown } = run({
+    options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: null },
+    runtime: { projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } } } },
+    verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
+  });
+  assert.equal(result.status, 1);
   assert.equal(next.verdict.status, 'failed');
-  assert.deepEqual(next.verdict.runtimeProblems, ['long_project_missing']);
-  assert.match(nextMarkdown, /最终结果：\*\*FAILED\*\*/u);
+  assert.ok(next.verdict.runtimeProblems.includes('long_project_missing'));
   assert.match(nextMarkdown, /long_project_missing/u);
-  assert.doesNotMatch(nextMarkdown, /不要求短篇和长篇同时存在/u);
 }
 
 {
