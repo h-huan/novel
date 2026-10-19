@@ -181,7 +181,7 @@ import {
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
 import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
-import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_CARD_STRUCTURING_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
 import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQuoteRepairs, type ReaderGoalReview } from './reader-goal-review';
@@ -5004,8 +5004,8 @@ ${ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, 
 【本次执行设定】
 ${ideaDiscoveryAuthorContext(dto)}
 ${premiseCategoryIdentityDirective(discoveryCategories)}
-${variedCategories ? '在目录分类中广搜不同人物欲望、关系、冲突和兑现路径；已选题材不可全部来自同一分类，分类编号选择后锁定，不靠改标签制造差异。' : ''}
-当前阶段=灵感发现的题材预选，尚未确认故事卡或创建项目。维度选择参数：${autoSelectionRules}；${submissionRule}。本轮 pool 与 selectedPremises 仍只输出下列骨架与筛选证据 schema；具体维度组合在后续完整故事卡中显式返回给用户确认。每个原池storyCore及已选展开都须同时落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材，不能仅在标签字段补齐；缺失关键机制的骨架不得入选，无法组合时如实报告约束不足。
+${variedCategories ? '在目录分类中广搜不同人物欲望、关系、冲突和兑现路径；已选题材不可全部来自同一分类，分类编号选择后锁定，不靠改标签制造差异。候选必须按各自投稿分类的真实阅读承诺成立，言情分类不能只放一段夫妻或恋人身份而只写职业查案。' : ''}
+当前阶段=灵感发现的题材预选，尚未确认故事卡或创建项目。维度选择参数：${autoSelectionRules}；${submissionRule}。本轮 pool 与 selectedPremises 仍只输出下列骨架与筛选证据 schema；具体维度组合在后续完整故事卡中显式返回给用户确认。同一流派可共享类型期待，但候选的主动选择、对手反应、升级链、翻盘依据及结局代价不能只是换职业、地点和物件的同一结构；在选择及备用池阶段就排除实质同构题材，而非等做完整卡之后才发现。每个候选先确认关键兑现所需的资源、权限、证据与时序在既定事件内确实可取得，不能靠结局声明倒推条件。每个原池storyCore及已选展开都须同时落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材，不能仅在标签字段补齐；缺失关键机制的骨架不得入选，无法组合时如实报告约束不足。
 创作流派的组合须符合可见的行动机制，不能仅根据题材名或隐藏凶手贴标签：${dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre)}
 ${variedCategories ? '后续按每个入选题材的分类分别取得分类证据与体量锚点，不把一个分类的标签用于其它分类。' : categoryWritingBrief ? `【分类证据】${categoryWritingBrief}` : '此分类尚无已核验的官方标签，不编造平台标签。'}
 ${!variedCategories && categoryBenchmark ? `【分类体量参考】${categoryBenchmark}` : ''}
@@ -5347,7 +5347,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const reservedInitialReviewCalls=minimumCardReviewCalls(selectedPremises.length);
       presentationBudget.remaining-=reservedInitialReviewCalls;
       let results:PromiseSettledResult<Record<string,unknown>>[];
-      try {results=await independentReviewBatches(selectedPremises,presentationBudget,IDEA_CARD_GENERATION_CONCURRENCY,
+      try {results=await independentReviewBatches(selectedPremises,presentationBudget,IDEA_CARD_STRUCTURING_CONCURRENCY,
         async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{try{return {status:'fulfilled',value:await generateStructuredCard(premise,index,budget)};}catch(reason){return {status:'rejected',reason};}});}
       finally {presentationBudget.remaining+=reservedInitialReviewCalls;}
       for (let index = 0; index < results.length; index++) {
@@ -5448,7 +5448,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const availableOriginalPool=()=>premiseDiscovery.pool.filter(item=>!attemptedPremiseIds.has(String(item.premiseId)));
       let fulfillmentStopReason='requested_quantity_verified';
       try {fulfillmentStopReason=await fulfillDiscoveryGaps({
-        missing:missingAfterGate,hasCard:id=>latestCards.has(id),
+        missing:missingAfterGate,
+        // Core overlap is bound to the locked premise. A copy edit cannot change
+        // the rejected underlying chain without breaking premise identity.
+        // Reserve quality calls for candidates whose real weaknesses can be patched.
+        hasCard:id=>latestCards.has(id) && latestAssessment(id)?.presentationReview?.distinctFromBatch !== false,
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
         canReplace:()=>availableOriginalPool().length>0&&reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&presentationBudget.remaining>=1+minimumCardReviewCalls(1),
@@ -5824,7 +5828,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const result = await this.llmCallWithRetry<any>('锁定前原池备用重选',
         standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
         + '\n当前只处理列出的一个缺额位置，在共享预算内选择本批尚未尝试的原池成熟候选；不得沿失败身份再改措辞、改写其它位置、扩池或补生。'
-        + '\n【原池】' + JSON.stringify(initial.pool) + '\n【当前选择】' + JSON.stringify(current.selected)
+        + '\n【本次可选原池原文】' + JSON.stringify(initial.pool.filter(item=>availableIds.includes(String(item.premiseId)))) + '\n【当前选择】' + JSON.stringify(current.selected)
         + '\n【本次终检证据】' + JSON.stringify(review) + '\n【本问题位置】' + plan.replacesPremiseId
         + '\n【可用备用ID】' + JSON.stringify(availableIds) + '\n分类候选=' + JSON.stringify(categories)
         + '\n【本次comparisons必须恰好覆盖的referencePremiseId】' + JSON.stringify(current.selected.filter(item=>item.premiseId!==plan.replacesPremiseId).map(item=>item.premiseId))
