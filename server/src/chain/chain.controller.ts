@@ -4714,8 +4714,17 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     const categoryCandidates = categoryVerification?.verified === 'confirmed'
       ? categoryOptionsForPlatform(requestedPlatform).map(option => option.id)
       : categoryReferenceOptionsForProject(requestedPlatform, dto.storyType);
-    const requestedCategory = inputCategory || (categoryCandidates.length
-      ? categoryCandidates[Math.floor(Math.random() * categoryCandidates.length)] : '');
+    // A missing category means per-premise category selection, not a random global
+    // category. Exclude only categories that cannot supply their required
+    // verified platform tags; never filter an explicitly selected category.
+    const usableCategoryCandidates = inputCategory ? categoryCandidates : categoryCandidates.filter(category => {
+      const requiresTags = platformSubmissionDimensions(requestedPlatform, dto.storyType, category, dto.targetAudience).includes('genre');
+      if (!requiresTags || (Array.isArray(dto.submissionTags) && dto.submissionTags.length > 0)) return true;
+      const placement = resolveSubmissionCategory(requestedPlatform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
+      return placement.status === 'resolved' && (platformCategoryWritingProfile(
+        requestedPlatform, placement.value.channel, placement.value.platformGroup, dto.storyType)?.topTags || []).length > 0;
+    });
+    const requestedCategory = inputCategory || usableCategoryCandidates[0] || '';
     if (!requestedCategory) {
       throw new HttpException(
         '未选分类，且所选平台与长短篇没有可用的分类候选；请填写该平台的分类。参考分类不会冒充已核验的投稿分类。',
@@ -4740,7 +4749,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       pov: selectedPovChoices.length === 1 ? selectedPovChoices[0] : '',
       discoveryPovOptions: selectedPovChoices.length > 1 ? selectedPovChoices : undefined,
       storyCategory: requestedCategory,
-      discoveryCategoryOptions: inputCategory ? [requestedCategory] : [...new Set(categoryCandidates)],
+      discoveryCategoryOptions: inputCategory ? [requestedCategory] : [...new Set(usableCategoryCandidates)],
     };
     // 与创建项目共用维度和分类归位判据；GEN-001 区分发现时待选与创建时缺失。
     const discoveryConstitution = readConstitution({
@@ -4793,6 +4802,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       targetWords: String(dto.targetWords || '').trim(),
       count: requestedCount,
       excludeTitles: dto.excludeTitles || [],
+      // Two requests with different exclusion details must not share an in-flight task.
+      excludeDetails: dto.excludeDetails || [],
     });
     if (!this.ideaDiscoveryInFlight) this.ideaDiscoveryInFlight = new Map<string, Promise<any>>();
     const active = this.ideaDiscoveryInFlight.get(requestKey);
@@ -4873,7 +4884,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const submissionOptions = submissionPlacement.status === 'resolved'
         ? (platformCategoryWritingProfile(dto.platform, submissionPlacement.value.channel, submissionPlacement.value.platformGroup, dto.storyType)?.topTags || []).map(tag => tag.name)
         : [];
-      if (submissionRequired && !dto.submissionTags.length && !submissionOptions.length) {
+      if (!variedCategories && submissionRequired && !dto.submissionTags.length && !submissionOptions.length) {
         throw new Error('此平台分类要求作品标签，但尚无可核验候选；请填写平台后台实际标签后再发现题材。');
       }
       const configuredTargetWords = String(dto.targetWords || '').trim()
@@ -4942,9 +4953,11 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       }).join('；');
       const submissionRule = dto.submissionTags.length
         ? `submissionTags 必须原样为 ${JSON.stringify(dto.submissionTags)}`
-        : submissionRequired
-          ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
-          : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
+        : variedCategories
+          ? '未预选投稿分类，每个题材必须按自己锁定的分类独立核对标签要求；需要作品标签时只能从该分类已有的核验候选选择，不得借用别的分类标签，不得编造；不要求时返回[]'
+          : submissionRequired
+            ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
+            : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
       const buildPremiseSelectionPrompt = () => {
         const excludeText = initialExcludes.length
@@ -5061,6 +5074,9 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
       ) => {
         const cardCategory = String(selectedPremise.storyCategory || dto.storyCategory);
         const submission = submissionForCategory(cardCategory);
+        if (submission.required && !dto.submissionTags.length && !submission.options.length) {
+          throw new Error(`题材 ${String(selectedPremise.premiseId || '')} 的分类 ${cardCategory} 缺少必需的核验投稿标签，停止本卡结构化而非支付无效生成调用`);
+        }
         const cardSubmissionRule = dto.submissionTags.length ? `submissionTags 必须原样为 ${JSON.stringify(dto.submissionTags)}`
           : submission.required ? `submissionTags 从本分类候选 ${JSON.stringify(submission.options)} 选择1-2项；没有候选则报告前提缺失，不编造`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
