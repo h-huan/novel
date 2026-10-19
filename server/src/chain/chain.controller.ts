@@ -30,7 +30,7 @@ import { generationTasks, assertGenerationActive, currentGenerationSignal } from
 import {parseWholeReviewJson} from './review-json';
 import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } from './cross-stage-patch';
 import { describeCrossStagePathDesign, crossStagePathReviewInput } from './cross-stage-review';
-import { CROSS_STAGE_REVIEW_POLICY, SOURCE_QUALITY_POLICY, OUTLINE_PROJECTION_POLICY, OUTLINE_FACT_REPAIR_SYNC_POLICY, UPSTREAM_REPAIR_ROUTING_LIMITS } from '../../shared/src/system-workflow-rules.registry';
+import { CROSS_STAGE_REVIEW_POLICY, SOURCE_QUALITY_POLICY, OUTLINE_PROJECTION_POLICY, OUTLINE_FACT_REPAIR_SYNC_POLICY, STORY_PREREQUISITE_POLICY, UPSTREAM_REPAIR_ROUTING_LIMITS } from '../../shared/src/system-workflow-rules.registry';
 import { chapterTimePlanRequest, validateChapterTimePlan, chapterTimePlanDirective, chapterTimeDisplaysForEvidenceReview } from './chapter-time-plan';
 import { createHash } from 'node:crypto';
 import { chapterObligationEvidencePrompt, materializeChapterObligationEvidence, chapterMissingItemTexts, chapterObligationWritingContext, chapterObligationRepairTargets, mergeChapterObligationRepairs, chapterObligationCatalog, chapterObligationReviewDirective, validateChapterObligationReview, parseChapterAlignmentReview, mergeChapterReviewContractCorrection, chapterAlignmentReviewContract, chapterReviewContractCorrectionDirective } from './chapter-alignment-contract';
@@ -7399,7 +7399,9 @@ ${(() => {
   return ideaNames.length > 0 ? `【允许出现的人物（禁止新增任何不在列的人物或神秘角色）】${ideaNames.join('、')}\n` : '';
 })()}【允许出现的地点】仅限已确认世界观中明确存在的地点；禁止新增拍卖行、码头仓库、工厂等未确认地点。
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
-【事实与行动结果依赖】${OUTLINE_FACT_REPAIR_SYNC_POLICY}
+【事实与行动结果依赖】${STORY_PREREQUISITE_POLICY}
+${OUTLINE_FACT_REPAIR_SYNC_POLICY}
+【本章新增关键证据】若本章认定合同签名、原始笔迹、印章、监控、照片等具体资料或某一页内容，先核对前章是否真正取得该份资料及相应页码、部位和访问权；空白模板或其它页面不能代替未取得的原件页。没有证据时保留合理悬念或仅作尚未核实的怀疑，禁止在反转/高光/状态中宣布证实；不能为凑流程自动增添新取证渠道。
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
@@ -7473,6 +7475,7 @@ ${(() => {
 【前章事实台账】${JSON.stringify(priorOutlineFactLedger)}
 【当前章纲】${JSON.stringify(chData)}
 【必须逐项修复】${JSON.stringify(defects)}
+【材料与结论对应】${STORY_PREREQUISITE_POLICY}。若缺的是此前没有实际取得的材料页、原件、签名或权限，不得靠补写比对结果来伪装已取得；在本章既有行动、已确认人物与来源内修正证据链，或按已有真实证据限缩当前结论。局部补丁完成后仍独立复核，不增加模型调用轮次。
 【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(chapterActionRepairEvidence(chData, dependencyCheck.actionFailure))}
 【修订保护边界】protectedResults 仅列出首次审核已支持或尚未到期、且有实际字段地址的结果；除非真正属于被点名缺口的必要依赖，不改变这些未被指出问题的行动、结果及条件。它们不是修后通过凭证，修后仍须重新独立核验两道门；若修订使其它已支持结果失去必要依据，不得沿用旧结论。
 ${OUTLINE_QUANTITY_SCOPE_POLICY}
