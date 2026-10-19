@@ -445,6 +445,12 @@ if (health.ok) for (const target of projectTargets) {
   }
 }
 
+// Creating is a valid transient state, but it is never a completed PASS.
+const creationInProgress = projectTargets
+  .filter(target => String(inspectedProjects[target.key]?.project?.status || '').toLowerCase() === 'creating'
+    && inspectedProjects[target.key]?.cockpit?.diagnostics?.creationStalled !== true)
+  .map(target => target.key);
+
 const selectionMode = singleMode
   ? 'single_project'
   : requestedShortProjectId && requestedLongProjectId
@@ -476,8 +482,9 @@ const report = {
   tests,
   runtime,
   verdict: {
-    status: failedTests.length === 0 && runtimeProblems.length === 0 ? 'passed' : 'failed',
+    status: failedTests.length || runtimeProblems.length ? 'failed' : creationInProgress.length ? 'in_progress' : 'passed',
     rootCause: !health.ok ? 'server_unavailable' : (runtimeProblems[0] ?? null),
+    creationInProgress,
     failedTests: failedTests.map((x) => x.label),
     runtimeProblems,
   },
