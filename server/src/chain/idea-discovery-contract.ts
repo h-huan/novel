@@ -1,5 +1,5 @@
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues } from './premise-causal-plan';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
 import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
 import { bindPremiseCategory } from './premise-category-identity';
@@ -191,6 +191,53 @@ export function normalizePremiseSelectionPayload(
     selected,
     poolTargetMet: pool.length >= Math.max(requestedCount, Number.isFinite(poolTarget) ? Math.floor(poolTarget) : requestedCount),
   };
+}
+
+/** Find only malformed selected-premise plans; never invent a bridge from prose. */
+export function incompleteInitialPremisePlans(
+  payload: unknown, requestedCount: number, poolTarget: number, categoryOptions?: readonly string[],
+): Array<{ premiseId: string; issues: string[]; premise: Record<string, unknown> }> {
+  const raw = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const selected = Array.isArray(raw.selectedPremises) ? raw.selectedPremises as Record<string, unknown>[] : [];
+  const withoutPlans = selected.map(item => {
+    if (!item || typeof item !== 'object') return item;
+    const { causalPlan: _unverified, ...fields } = item;
+    return fields;
+  });
+  const base = normalizePremiseSelectionPayload({ ...raw, selectedPremises: withoutPlans }, requestedCount, poolTarget, categoryOptions);
+  return base.selected.flatMap((premise, index) => {
+    const original = selected[index];
+    const bound = bindPremiseCausalPlan({ ...premise, causalPlan: original?.causalPlan });
+    const issues = premiseCausalPlanIssues(bound);
+    return issues.length ? [{ premiseId: String(premise.premiseId), issues, premise: bound }] : [];
+  });
+}
+
+/** Replace only named invalid causal plans; all identities and story fields remain server-owned. */
+export function applyInitialPremisePlanOnlyPatch(
+  payload: unknown, patch: unknown, failedIds: readonly string[], requestedCount: number,
+  poolTarget: number, categoryOptions?: readonly string[],
+): PremiseSelectionResult {
+  const raw = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const rows = (patch as any)?.plans;
+  if (!Array.isArray(rows) || rows.length !== failedIds.length || !failedIds.length)
+    throw new Error('因果计划补正必须恰好覆盖原有问题位置');
+  const ids = new Set(failedIds);
+  const corrections = new Map<string, unknown>();
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Object.keys(row).some(key => !['premiseId', 'causalPlan'].includes(key))
+      || typeof row.premiseId !== 'string' || !ids.has(row.premiseId) || corrections.has(row.premiseId)
+      || !Array.isArray(row.causalPlan))
+      throw new Error('因果计划补正不得改写故事字段、身份或其它题材');
+    corrections.set(row.premiseId, row.causalPlan);
+  }
+  if (corrections.size !== ids.size) throw new Error('因果计划补正遗漏了原有问题位置');
+  const selected = Array.isArray(raw.selectedPremises) ? raw.selectedPremises as Record<string, unknown>[] : [];
+  const corrected = selected.map(row => row && typeof row === 'object' && corrections.has(String(row.premiseId))
+    ? { ...row, causalPlan: corrections.get(String(row.premiseId)) } : row);
+  const normalized = normalizePremiseSelectionPayload({ ...raw, selectedPremises: corrected }, requestedCount, poolTarget, categoryOptions);
+  assertPremiseCausalPlans(normalized);
+  return normalized;
 }
 
 /**
