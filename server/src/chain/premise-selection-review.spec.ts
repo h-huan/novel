@@ -463,7 +463,8 @@ it.each([3,2])('partitions only for output capacity and preserves completed work
   const slots=JSON.parse(section('【必须处理的位置及模式】','【可用原池ID】')),current=JSON.parse(section('【当前选择】','【本次独立缺陷】'));
   scopes.push(slots.length);options.physicalCallBudget.remaining--;
   if(scopes.length===1)throw Error('结构化生成因输出长度被截断');
-  const data={replacements:slots.map((slot:any)=>({replacesPremiseId:slot.replacesPremiseId,premise:premise(slot.replacesPremiseId),comparisons:current.filter((item:any)=>item.premiseId!==slot.replacesPremiseId).map((item:any)=>compare(item.premiseId))}))};
+  const data={replacements:slots.map((slot:any)=>({replacesPremiseId:slot.replacesPremiseId,premise:{...premise(slot.replacesPremiseId),activeChoice:'先核对救人权限与既定代价再主动行动'+slot.replacesPremiseId},comparisons:current.filter((item:any)=>item.premiseId!==slot.replacesPremiseId).map((item:any)=>compare(item.premiseId))}))};
+  expect(options.validate({replacements:data.replacements.map((row:any)=>({...row,premise:premise(row.replacesPremiseId)}))})).toBe(false);
   expect(options.validate(data)).toBe(true);return {data};
  });
  const result=await c.reconcilePremiseSelection(original,4,5,['悬疑'],'',[],{reviews:{remaining:8},reselection:credits});
