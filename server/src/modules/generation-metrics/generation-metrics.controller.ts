@@ -169,7 +169,13 @@ export class GenerationMetricsController {
     const observedPersistenceMismatch: string[] = [];
     if (successfulStages.has('world') && persisted.worldSettings === 0) observedPersistenceMismatch.push('world_success_without_world_setting');
     if (successfulStages.has('character') && persisted.characters === 0) observedPersistenceMismatch.push('character_success_without_character');
-    if (successfulStages.has('outline') && persisted.chapterOutlines === 0) observedPersistenceMismatch.push('outline_success_without_chapter_outline');
+    // A successful earlier model/review step is not proof of an outline commit when
+    // the latest outline attempt failed the quality gate and the project is failed.
+    const latestOutlineRun = runs.find(row => row.stage === 'outline');
+    const latestOutlineFailed = String(project?.status || '').toLowerCase() === 'generation_failed'
+      && String(latestOutlineRun?.status || '').toLowerCase() === 'failed';
+    if (successfulStages.has('outline') && persisted.chapterOutlines === 0 && !latestOutlineFailed)
+      observedPersistenceMismatch.push('outline_success_without_chapter_outline');
     if (successfulStages.has('chapter') && persisted.chapters === 0) observedPersistenceMismatch.push('chapter_success_without_chapter');
 
     const activeGenerationRuns = runs.filter(row => String(row.status || '').toLowerCase() === 'running').length;
