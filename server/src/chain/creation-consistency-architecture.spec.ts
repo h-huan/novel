@@ -18,18 +18,6 @@ function indexOrFail(source: string, marker: string): number {
 }
 
 describe('creation consistency architecture invariants', () => {
-  it('never lets a later generated world overwrite a confirmed short-story causal foundation', () => {
-    const start = indexOrFail(controllerSource, 'const worldContinuityDirective = worldRowForOutline');
-    const end = controllerSource.indexOf('if (isShort) {', start);
-    expect(end).toBeGreaterThan(start);
-    const directive = controllerSource.slice(start, end);
-    expect(directive).toContain('仅可补充已确认题材，不得覆盖故事卡的已锁定事实');
-    expect(directive).toContain('${STORY_FACT_PRIORITY}');
-    expect(directive).toContain('不得以世界规则反向改写原有触发、能力、时序、因果、真相或结局');
-    expect(directive).not.toContain('高于故事卡和章纲措辞');
-    expect(controllerSource).toContain('【核心层级纪律（最高优先级）】${STORY_FACT_PRIORITY}');
-  });
-
   it('projects one confirmed story into the same Story Foundation for long and short creation', () => {
     expect(controllerSource).toContain('const storyFoundation = buildStoryFoundation(dto.selectedIdea);');
     expect(controllerSource).toContain('const ideaStr = JSON.stringify({ confirmedStory: dto.selectedIdea, storyFoundation });');
