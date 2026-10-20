@@ -33,6 +33,7 @@ import { describeCrossStagePathDesign, crossStagePathReviewInput } from './cross
 import { CROSS_STAGE_REVIEW_POLICY, SOURCE_QUALITY_POLICY, OUTLINE_PROJECTION_POLICY, OUTLINE_FACT_REPAIR_SYNC_POLICY, STORY_PREREQUISITE_POLICY, UPSTREAM_REPAIR_ROUTING_LIMITS } from '../../shared/src/system-workflow-rules.registry';
 import { chapterTimePlanRequest, validateChapterTimePlan, chapterTimePlanDirective, chapterTimeDisplaysForEvidenceReview } from './chapter-time-plan';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { chapterObligationEvidencePrompt, materializeChapterObligationEvidence, chapterMissingItemTexts, chapterObligationWritingContext, chapterObligationRepairTargets, mergeChapterObligationRepairs, chapterObligationCatalog, chapterObligationReviewDirective, validateChapterObligationReview, parseChapterAlignmentReview, mergeChapterReviewContractCorrection, chapterAlignmentReviewContract, chapterReviewContractCorrectionDirective } from './chapter-alignment-contract';
 import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosis } from './upstream-repair-routing';
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
@@ -5712,7 +5713,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
         const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories);
         const premises=Object.fromEntries(rows.map((row:any)=>[row.replacesPremiseId,candidate.selected.find(item=>item.premiseId===row.premise.premiseId)!]));
-        if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||Object.entries(prior).some(([key,entry])=>premises[id][key]!==entry)))
+        if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||!isDeepStrictEqual(premises[id],prior)))
           throw Error('比较协议补正不得更换候选身份或改写premise，只补正comparisons');
         const issues=premiseReplacementComparisonIssues(value,candidate);
         if(issues.length){frozen??=structuredClone(premises);throw Error(issues.join('；'));}
