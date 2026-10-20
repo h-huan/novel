@@ -5347,6 +5347,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           premiseSelected:selectedPremises.length,requested:requestedCount,preselectionShortfall:requestedCount-selectedPremises.length,
           generated:0,qualified:0,returned:0,shortfall:requestedCount,repairAttempted:false,repairGenerated:0,
           presentationPhysicalCallsUsed:0,presentationPhysicalCallLimit:presentationCallLimit,
+          preselectionBudgets:{sourceReviewCallsRemaining:sourceCompletionBudget.remaining,
+            reselectionCallsRemaining:reselectionCompletionBudget.remaining},
           selectionAudit:premiseDiscovery.selectionAudit,preselectedPremises:selectedPremises,candidateAssessments:[],reasons,
           note:'保留原池筛选证据；未生成完整故事卡，未用旧卡或不合格题材补数。',
         }};
