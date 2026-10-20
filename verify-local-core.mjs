@@ -606,9 +606,11 @@ function projectMarkdown(target) {
     : '- 性能与落库诊断：未取得数据';
   const blockedRuns = Array.isArray(result.cockpit?.bottlenecks)
     ? result.cockpit.bottlenecks.filter(row => String(row?.status || '').toLowerCase() === 'failed').slice(0, 3) : [];
-  const blockingLine = blockedRuns.length
-    ? blockedRuns.map(row => `  - ${row.stage || row.scenario || 'unknown'} / ${row.step_key || row.stepKey || 'run'}：${String(row.error || '未提供阻断详情').replace(/\s+/g, ' ').slice(0, 1200)}`).join('\n')
-    : '  - 无已记录的失败步骤';
+  const failedModelSteps = blockedRuns.map(row => `  - ${row.stage || row.scenario || 'unknown'} / ${row.step_key || row.stepKey || 'run'}：${String(row.error || '未提供阻断详情').replace(/\s+/g, ' ').slice(0, 1200)}`);
+  const creationFailure = diagnostics?.latestCreationFailure;
+  const failureLines = [...failedModelSteps,
+    ...(creationFailure ? [`  - 创建执行链 / ${creationFailure.step || 'unknown'}：${String(creationFailure.reason || '错误原因未记录').replace(/\s+/g, ' ').slice(0, 1200)}`] : [])];
+  const blockingLine = failureLines.length ? failureLines.join('\n') : '  - 无已记录的失败步骤（旧版创建异常可能仅存在于服务器日志）';
   return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n${metricsLine}\n- 真实失败步骤（不以其它步骤 success 覆盖）：\n${blockingLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
