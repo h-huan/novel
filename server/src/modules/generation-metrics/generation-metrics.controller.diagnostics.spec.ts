@@ -25,12 +25,12 @@ describe('generation metrics diagnostics', () => {
       { id: 'r1', stage: 'outline', scenario: 'review', status: 'success', chapter_index: 4, prompt_version: 'p', context_version: 'c', constitution_revision: 1, duration_ms: 120000, started_at: '2026-09-28T00:00:00Z', finished_at: '2026-09-28T00:02:00Z' },
       { id: 'r2', stage: 'outline', scenario: 'review', status: 'success', chapter_index: 4, prompt_version: 'p', context_version: 'c', constitution_revision: 1, duration_ms: 60000, started_at: '2026-09-28T00:01:00Z', finished_at: '2026-09-28T00:02:00Z' },
     ];
-    const controller = controllerFor(stepRows, runRows, { status: 'generation_failed', updated_at: '2026-09-28T00:02:00Z' }, {
+    const controller = controllerFor(stepRows, runRows, { status: 'active', updated_at: '2026-09-28T00:02:00Z' }, {
       world_settings: 1, characters: 0, outlines: 0, chapters: 0, timeline_events: 0,
     });
 
     const cockpit: any = controller.cockpit('project-1');
-    expect(cockpit.diagnostics.projectStatus).toBe('generation_failed');
+    expect(cockpit.diagnostics.projectStatus).toBe('active');
     expect(cockpit.diagnostics.internalRetryCount).toBe(1);
     expect(cockpit.diagnostics.callsWithInternalRetry).toBe(1);
     expect(cockpit.diagnostics.effectiveRetryCount).toBe(1);
@@ -43,6 +43,27 @@ describe('generation metrics diagnostics', () => {
     expect(cockpit.diagnostics.exactDuplicateRuns[0].runIds).toEqual(['r1', 'r2']);
     expect(cockpit.diagnostics.persistenceMismatch).toContain('outline_success_without_chapter_outline');
     expect(cockpit.diagnostics.pendingPersistenceMismatch).toEqual([]);
+  });
+
+  it('attributes failed creation to a local pipeline error without counting it as a model call or a failed commit', () => {
+    const at = '2026-10-20T05:12:14Z';
+    const steps = [
+      { run_id: null, step_key: 'creation_pipeline_failure', scenario: 'review', phase: 'outline',
+        status: 'failed', fail_reason: '章纲职责仍有矛盾，停止创建', duration_ms: 0, total_tokens: null, attempt: 0, created_at: at },
+      { run_id: 'ok', step_key: 'outline', scenario: 'outline', status: 'success',
+        duration_ms: 40000, total_tokens: 41000, attempt: 0, internal_retries: 0, created_at: at },
+    ];
+    const runs = [{ id: 'ok', stage: 'outline', scenario: 'outline', status: 'success', started_at: at, finished_at: at }];
+    const dbCounts = { world_settings: 1, characters: 0, outlines: 0, chapters: 0, timeline_events: 0 };
+    const out: any = controllerFor(steps, runs, { status: 'generation_failed', updated_at: at }, dbCounts).cockpit('failed');
+    expect(out.diagnostics.latestCreationFailure).toEqual({ step: 'outline', reason: '章纲职责仍有矛盾，停止创建', at });
+    expect(out.diagnostics.persistenceMismatch).not.toContain('outline_success_without_chapter_outline');
+    expect(out.diagnostics.sample).toEqual({ stepMetrics: 1, generationRuns: 1 });
+    expect(out.diagnostics.effectiveFirstPassRate).toBe(1);
+    expect(out.diagnostics.totalTokens).toBe(41000);
+    const complete: any = controllerFor(steps.slice(1), runs, { status: 'active', updated_at: at }, dbCounts).cockpit('complete');
+    expect(complete.diagnostics.persistenceMismatch).toContain('outline_success_without_chapter_outline');
+    expect(complete.diagnostics.latestCreationFailure).toBeNull();
   });
 
   it('does not infer an outline persistence failure from an earlier successful review when the final outline gate failed', () => {
