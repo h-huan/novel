@@ -1,6 +1,6 @@
 import {fulfillDiscoveryGaps,discoveryFailureImproved} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, premiseCausalPlanExample } from './premise-causal-plan';
-import { orderedIdeaRepairPatches } from './idea-discovery-contract';
+import { orderedIdeaRepairPatches, incompleteInitialPremisePlans, applyInitialPremisePlanOnlyPatch } from './idea-discovery-contract';
 import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues} from './premise-selection-review';
@@ -5048,13 +5048,39 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
         } catch {
           throw new Error('创建前题材筛选未返回合法 JSON；系统没有创建任何完整题材卡。');
         }
-        const initialSelection = normalizePremiseSelectionPayload(
-          parsed,
-          requestedCount,
-          premisePoolSize,
-          discoveryCategories,
-        );
-        assertPremiseCausalPlans(initialSelection);
+        let initialSelection: ReturnType<typeof normalizePremiseSelectionPayload>;
+        try {
+          initialSelection = normalizePremiseSelectionPayload(parsed, requestedCount, premisePoolSize, discoveryCategories);
+          assertPremiseCausalPlans(initialSelection);
+        } catch (error) {
+          // A malformed selected causalPlan must not discard a valid, paid-for pool.
+          // Spend at most ONE existing reselection credit to repair only the bad plans.
+          if (!(error instanceof Error) || !error.message.includes('生成前因果计划未完成')) throw error;
+          const failures = incompleteInitialPremisePlans(parsed, requestedCount, premisePoolSize, discoveryCategories);
+          if (!failures.length || reselectionCompletionBudget.remaining < 1) throw error;
+          const failedIds = failures.map(item => item.premiseId);
+          const patchBudget = { remaining: 1 };
+          let patched: ReturnType<typeof normalizePremiseSelectionPayload> | undefined;
+          try {
+            const repair = await this.llmCallWithRetry<any>('首次原池因果计划定向补正',
+              '原池已生成，只纠正以下已选题材的causalPlan结构缺口；禁止修改或重新生成pool、题材身份、分类、人物处境、事件、主动选择、因果升级及结局文字。'
+              + '所有行动、必要条件与结果的{field,quote}必须逐字锚定当前题材已有故事字段；主线最终结果必须由result引用payoff中的实际兑现原文。'
+              + '原有计划中成立的因果环节应保留；如果当前故事事实确实无法支持结局，不得编造新证据、新权限或偷改故事来凑计划，无法补正则停止本批。'
+              + '\\n【需要补正的问题题材】' + JSON.stringify(failures)
+              + '\\n【计划形式示例】' + JSON.stringify(premiseCausalPlanExample())
+              + '\\n只输出JSON：{"plans":[{"premiseId":"对应问题ID","causalPlan":[{"action":{"field":"activeChoice","quote":"已有原文"},"conditions":[],"result":{"field":"payoff","quote":"已有兑现原文"}}]}]}。'
+              + 'plans必须恰好覆盖点名的问题ID，不返回其它题材，不输出理由、自评、pool、selectedPremises或任何故事字段。',
+              { scenario: 'idea_generate', stepKey: 'idea_premise_pool_reselection',
+                physicalCallBudget: patchBudget, timeout: discoveryBudget.complexTimeoutMs,
+                validate: value => { try { patched = applyInitialPremisePlanOnlyPatch(parsed, value, failedIds, requestedCount, premisePoolSize, discoveryCategories); return true; } catch { return false; } },
+                describeValidation: value => { try { applyInitialPremisePlanOnlyPatch(parsed, value, failedIds, requestedCount, premisePoolSize, discoveryCategories); return []; } catch (e) { return [String((e as Error).message)]; } },
+              });
+            if (!repair.data || !patched) throw new Error('首次原池因果计划定向补正未通过原质量校验：' + (repair.validationIssues || repair.warnings || []).join('；'));
+            initialSelection = patched;
+          } finally {
+            reselectionCompletionBudget.remaining -= 1 - patchBudget.remaining;
+          }
+        }
         // Fixed categories were previously attached only after independent precheck.
         if (!variedCategories) for (const premise of initialSelection.selected) {
           if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) throw new Error('已选题材未继承本次固定分类');
