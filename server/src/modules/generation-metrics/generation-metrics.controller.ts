@@ -89,9 +89,12 @@ export class GenerationMetricsController {
    */
   private generationDiagnostics(projectId: string) {
     const db = this.databaseService.getDb();
-    const metrics = db.prepare(`SELECT run_id,chapter_index,step_key,scenario,status,attempt,duration_ms,total_tokens,
-        COALESCE(internal_retries,0) internal_retries,created_at
+    const rawMetrics = db.prepare(`SELECT run_id,chapter_index,step_key,scenario,status,attempt,duration_ms,total_tokens,
+        COALESCE(internal_retries,0) internal_retries,created_at,phase,fail_reason
       FROM generation_step_metrics WHERE project_id=? ORDER BY created_at DESC LIMIT 300`).all(projectId) as any[];
+    // Terminal pipeline errors are local events, never physical model requests.
+    const metrics = rawMetrics.filter(row => row.step_key !== 'creation_pipeline_failure');
+    const creationFailures = rawMetrics.filter(row => row.step_key === 'creation_pipeline_failure');
     const runs = db.prepare(`SELECT id,stage,scenario,status,chapter_index,prompt_version,context_version,
         constitution_revision,duration_ms,started_at,finished_at
       FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 300`).all(projectId) as any[];
@@ -171,10 +174,10 @@ export class GenerationMetricsController {
     if (successfulStages.has('character') && persisted.characters === 0) observedPersistenceMismatch.push('character_success_without_character');
     // A successful earlier model/review step is not proof of an outline commit when
     // the latest outline attempt failed the quality gate and the project is failed.
-    const latestOutlineRun = runs.find(row => row.stage === 'outline');
-    const latestOutlineFailed = String(project?.status || '').toLowerCase() === 'generation_failed'
-      && String(latestOutlineRun?.status || '').toLowerCase() === 'failed';
-    if (successfulStages.has('outline') && persisted.chapterOutlines === 0 && !latestOutlineFailed)
+    // A model's successful outline text is not evidence of a completed business write.
+    // Interrupted projects retain missingModules and their specific terminal failure.
+    const projectFailed = String(project?.status || '').toLowerCase() === 'generation_failed';
+    if (successfulStages.has('outline') && persisted.chapterOutlines === 0 && !projectFailed)
       observedPersistenceMismatch.push('outline_success_without_chapter_outline');
     if (successfulStages.has('chapter') && persisted.chapters === 0) observedPersistenceMismatch.push('chapter_success_without_chapter');
 
@@ -200,6 +203,10 @@ export class GenerationMetricsController {
       projectStatus: project?.status ?? null,
       sample: { stepMetrics: metrics.length, generationRuns: runs.length },
       persisted,
+      latestCreationFailure: String(project?.status || '').toLowerCase() === 'generation_failed' && creationFailures.length
+        ? { step: creationFailures[0].phase ?? null, reason: creationFailures[0].fail_reason ?? null,
+            at: creationFailures[0].created_at ?? null }
+        : null,
       persistenceMismatch,
       pendingPersistenceMismatch,
       activeGenerationRuns,
