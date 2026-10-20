@@ -45,6 +45,18 @@ describe('generation metrics diagnostics', () => {
     expect(cockpit.diagnostics.pendingPersistenceMismatch).toEqual([]);
   });
 
+  it('does not infer an outline persistence failure from an earlier successful review when the final outline gate failed', () => {
+    const rows = [
+      { id: 'out-fail', stage: 'outline', scenario: 'outline', status: 'failed', started_at: '2026-10-20T02:22:00Z', finished_at: '2026-10-20T02:23:00Z' },
+      { id: 'old-success', stage: 'outline', scenario: 'review', status: 'success', started_at: '2026-10-20T02:20:00Z', finished_at: '2026-10-20T02:21:00Z' },
+    ];
+    const counts = { world_settings: 1, characters: 0, outlines: 0, chapters: 0, timeline_events: 0 };
+    const failed: any = controllerFor([], rows, { status: 'generation_failed', updated_at: '2026-10-20T02:23:00Z' }, counts).cockpit('failed');
+    expect(failed.diagnostics.persistenceMismatch).not.toContain('outline_success_without_chapter_outline');
+    const completed: any = controllerFor([], rows.slice(1), { status: 'active', updated_at: '2026-10-20T02:21:00Z' }, counts).cockpit('completed');
+    expect(completed.diagnostics.persistenceMismatch).toContain('outline_success_without_chapter_outline');
+  });
+
   it('keeps a fresh creating project as an in-progress persistence window instead of a false failure', () => {
     const now = new Date().toISOString();
     const controller = controllerFor(
