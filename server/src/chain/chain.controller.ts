@@ -5340,6 +5340,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const error='创建前筛选仅有 '+selectedPremises.length+'/'+requestedCount+' 个可锁定题材；本批数量不足，已停止完整卡生成、审核与修复。'+reasons.slice(0,5).join('；');
         return {success:false,status:'incomplete',ideas:[],totalIdeas:0,error,appealGate:{
           schemaVersion:8,mode:'premise_preselection_then_final_gate_bounded_repair',stoppedAt:'premise_preselection',
+          phaseDurationsMs:{preselection:Date.now()-discoveryStartMs,cardStructuring:null,initialCardReview:null,
+            fulfillmentAndFinalReview:null,totalWallClock:Date.now()-discoveryStartMs},
+          preselectionDurationsMs:premiseDiscovery.preselectionDurationsMs,
           stopReason:'preselection_shortfall',premisePoolSize:premiseDiscovery.pool.length,premisePoolTarget:premisePoolSize,
           premiseSelected:selectedPremises.length,requested:requestedCount,preselectionShortfall:requestedCount-selectedPremises.length,
           generated:0,qualified:0,returned:0,shortfall:requestedCount,repairAttempted:false,repairGenerated:0,
@@ -5716,7 +5719,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       try{
         const result=await this.llmCallWithRetry<any>(unusedIds?'锁定前原池备用汇总重选':'锁定前原池重选',
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
-          +'\n【原池】'+JSON.stringify(initial.pool)+'\n【当前选择】'+JSON.stringify(selected.selected)
+          +'\n【原池】'+JSON.stringify(initial.pool.filter(item=>availableIds.includes(item.premiseId)))+'\n【当前选择】'+JSON.stringify(selected.selected)
           +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)+'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool可纠正原身份展开。不得复制其它位置、改变分类或用正常项填空。'
