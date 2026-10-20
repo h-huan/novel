@@ -190,13 +190,14 @@ describe('idea discovery execution settings', () => {
 
 describe('idea novelty and audited repair compilers', () => {
   it('rejects an unchanged failed replacement before another independent review without blocking real edits', () => {
+    const planLink = { action: { field: 'activeChoice', quote: '记下地址' }, conditions: [], result: { field: 'payoff', quote: '找到会计' } };
     const original = [
-      { premiseId: 'P2', payoff: '找到会计', causalPlan: [{ action: { field: 'activeChoice', quote: '记下地址' }, conditions: [], result: { field: 'payoff', quote: '找到会计' } }] },
+      { premiseId: 'P2', payoff: '找到会计', causalPlan: [planLink] },
       { premiseId: 'P3', payoff: '完成现有行动' },
     ];
     expect(unchangedPremiseReselectionSlots(original, structuredClone(original), ['P2'])).toEqual(['P2']);
     expect(unchangedPremiseReselectionSlots(original, [
-      { ...original[0], causalPlan: [{ ...original[0].causalPlan[0], result: { field: 'payoff', quote: '凭已取得的地址找到会计' } }] }, original[1],
+      { ...original[0], causalPlan: [{ ...planLink, result: { field: 'payoff', quote: '凭已取得的地址找到会计' } }] }, original[1],
     ], ['P2'])).toEqual([]);
     expect(unchangedPremiseReselectionSlots(original, [{ ...original[0], premiseId: 'P8' }, original[1]], ['P2'])).toEqual([]);
     expect(unchangedPremiseReselectionSlots(original, [{ ...original[0], premiseId: 'P8' }, original[1]], ['P2','P3'])).toEqual(['P3']);
