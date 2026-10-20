@@ -20,7 +20,8 @@ function indexOrFail(source: string, marker: string): number {
 describe('creation consistency architecture invariants', () => {
   it('never lets a later generated world overwrite a confirmed short-story causal foundation', () => {
     const start = indexOrFail(controllerSource, 'const worldContinuityDirective = worldRowForOutline');
-    const end = indexOrFail(controllerSource, 'if (isShort) {');
+    const end = controllerSource.indexOf('if (isShort) {', start);
+    expect(end).toBeGreaterThan(start);
     const directive = controllerSource.slice(start, end);
     expect(directive).toContain('仅可补充已确认题材，不得覆盖故事卡的已锁定事实');
     expect(directive).toContain('${STORY_FACT_PRIORITY}');
