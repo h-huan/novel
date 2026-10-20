@@ -177,6 +177,24 @@ it('normalizes observed detail reasons without deleting defects or accepting con
   expect(targetIdeaReviews({reviews:[{...row,issues:[bad]}]},[card],[]).reviews[0].issues).toEqual([bad]);
 });
 
+it('enforces the same action-result ownership rule during outline generation and independent review',async()=>{
+ const {OUTLINE_PROJECTION_POLICY,STORY_CAUSAL_REVIEW_POLICY}=await import('../../shared/src/system-workflow-rules.registry');
+ expect(OUTLINE_PROJECTION_POLICY).toContain('result只能归于当前行动');
+ expect(OUTLINE_PROJECTION_POLICY).toContain('另一人物的独立决定');
+ expect(STORY_CAUSAL_REVIEW_POLICY).toContain('章纲自己的characterActions');
+ expect(STORY_CAUSAL_REVIEW_POLICY).toContain('仍须判gap');
+ const {readFileSync}=await import('node:fs');
+ const generator=readFileSync(new URL('./chain.controller.ts',import.meta.url),'utf8');
+ const reviewer=readFileSync(new URL('./real-llm.service.ts',import.meta.url),'utf8');
+ const producer=generator.slice(generator.indexOf('const chapterPrompt ='),generator.indexOf('const chapterResult ='));
+ expect(producer).toContain('${OUTLINE_PROJECTION_POLICY}');
+ expect(producer).toContain('${STORY_PREREQUISITE_POLICY}');
+ expect(generator).toContain('let dependencyCheck = await reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+ expect(generator).toContain('dependencyCheck = await reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+ expect(reviewer).toContain('STORY_CAUSAL_REVIEW_POLICY');
+ expect(reviewer).toContain('validateCausalAudit(audit, body, sources)');
+});
+
 it('keeps related fact fields inside the local outline repair boundary',async()=>{
  const {OUTLINE_FACT_REPAIR_SYNC_POLICY}=await import('../../shared/src/system-workflow-rules.registry');
  expect(OUTLINE_FACT_REPAIR_SYNC_POLICY).toContain('同一事实的必要关联字段属于本次局部修复范围');
