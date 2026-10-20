@@ -197,7 +197,7 @@ describe('idea novelty and audited repair compilers', () => {
     ];
     expect(unchangedPremiseReselectionSlots(original, structuredClone(original), ['P2'])).toEqual(['P2']);
     expect(unchangedPremiseReselectionSlots(original, [
-      { ...original[0], causalPlan: [{ ...planLink, result: { field: 'payoff', quote: '凭已取得的地址找到会计' } }] }, original[1],
+      { ...original[0], payoff: '凭已取得的地址找到会计', causalPlan: [{ ...planLink, result: { field: 'payoff', quote: '凭已取得的地址找到会计' } }] }, original[1],
     ], ['P2'])).toEqual([]);
     expect(unchangedPremiseReselectionSlots(original, [{ ...original[0], premiseId: 'P8' }, original[1]], ['P2'])).toEqual([]);
     expect(unchangedPremiseReselectionSlots(original, [{ ...original[0], premiseId: 'P8' }, original[1]], ['P2','P3'])).toEqual(['P3']);
