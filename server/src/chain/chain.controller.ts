@@ -192,6 +192,16 @@ import { IdeaAppealGateService } from './idea-appeal-gate.service';
 import { prohibitedFictionNames } from '../../shared/src/fiction-naming';
 import { chapterDetailStructureIssues } from './chapter-detail-contract';
 
+/** Reject a byte-equivalent failed slot before spending another independent semantic review. */
+export function unchangedPremiseReselectionSlots(
+  before: readonly Record<string, unknown>[], after: readonly Record<string, unknown>[], slotIds: readonly string[],
+): string[] {
+  return slotIds.filter(id => {
+    const index = before.findIndex(item => String(item.premiseId) === id);
+    return index < 0 || !after[index] || isDeepStrictEqual(before[index], after[index]);
+  });
+}
+
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
 const projectMetricsContext = new AsyncLocalStorage<string | null>();
 
@@ -5712,6 +5722,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
         const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories);
+        const unchanged=unchangedPremiseReselectionSlots(selected.selected,candidate.selected,slots.map(slot=>String(slot.replacesPremiseId)));
+        if(unchanged.length)throw Error('原池重选未实际改变问题位置的题材身份或故事资料，禁止原样重复审核：'+unchanged.join('、'));
         const premises=Object.fromEntries(rows.map((row:any)=>[row.replacesPremiseId,candidate.selected.find(item=>item.premiseId===row.premise.premiseId)!]));
         if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||!isDeepStrictEqual(premises[id],prior)))
           throw Error('比较协议补正不得更换候选身份或改写premise，只补正comparisons');
