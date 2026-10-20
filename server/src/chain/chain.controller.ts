@@ -8455,6 +8455,12 @@ ${STORY_ENTITY_MODELING_POLICY}
     } catch (err: any) {
       if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
       this.logger.error(`create-project-async 执行失败 project=${projectId}, step=${activeGenerationStep}: ${err.message}`);
+      // This is a failed BUSINESS creation, not another physical model request.
+      // Preserve the actual exception for read-only verification without affecting quality or budgets.
+      if (currentGenerationSignal()?.aborted !== true) this.generationMetrics.record({
+        projectId, scenario: 'review', stepKey: 'creation_pipeline_failure', phase: activeGenerationStep,
+        status: 'failed', failReason: String(err?.message || err), durationMs: 0,
+      });
       try {
         db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
       } catch {}
