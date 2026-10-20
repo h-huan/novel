@@ -228,6 +228,17 @@ async function inspectProject(target) {
     const bi = Number(b.chapter_index ?? b.chapterIndex ?? b.index ?? b.order ?? 0);
     return ai - bi;
   });
+  // The chapter LIST API deliberately omits content. The single-chapter GET
+  // is the only source that can prove nonempty persisted body text.
+  const firstChapterId = chapterRows[0]?.id;
+  const firstDetailRes = firstChapterId
+    ? await request(`/projects/${encodeURIComponent(projectId)}/chapters/${encodeURIComponent(firstChapterId)}`)
+    : null;
+  const firstChapterDetail = firstDetailRes?.ok ? unwrap(firstDetailRes.data) : null;
+  const firstChapterBodyVerified = Boolean(firstChapterDetail && typeof firstChapterDetail.content === 'string');
+  const firstChapterBodyError = firstChapterId && !firstChapterBodyVerified
+    ? (firstDetailRes?.error ?? `单章详情未返回正文（HTTP ${firstDetailRes?.status ?? 'unknown'}）`)
+    : null;
   const runRows = asArray(runsRes.data);
   const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
   const confirmedStory = constitution?.confirmedStory && typeof constitution.confirmedStory === 'object' && !Array.isArray(constitution.confirmedStory)
@@ -267,7 +278,9 @@ async function inspectProject(target) {
     } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
     chapters: {
       count: chapterRows.length,
-      first: chapterSummary(chapterRows[0]),
+      first: firstChapterBodyVerified ? chapterSummary(firstChapterDetail) : chapterSummary(chapterRows[0]),
+      firstBodyVerified: firstChapterBodyVerified,
+      firstBodyError: firstChapterBodyError,
       latest: chapterSummary(chapterRows[chapterRows.length - 1]),
     },
     firstChapterRun: runSummary(firstChapterRun),
@@ -457,7 +470,9 @@ if (health.ok) for (const target of projectTargets) {
   // Quick diagnostics intentionally stop at creation data; only --full requires a written first chapter.
   const shouldRequireFirstChapter = runFull;
   if (shouldRequireFirstChapter) {
-    if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
+    if (!firstChapter) runtimeProblems.push(`${prefix}_first_chapter_missing`);
+    else if (!result.chapters?.firstBodyVerified) runtimeProblems.push(`${prefix}_first_chapter_body_unavailable`);
+    else if (firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
     const firstRun = result.firstChapterRun;
     if (!firstRun) {
       runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
@@ -548,7 +563,7 @@ function projectMarkdown(target) {
   if (result.project?.error) return `### ${target.label}\n\n- 项目：FAIL · ${result.project.error}`;
   const firstChapter = result.chapters?.first ?? null;
   const firstLine = firstChapter
-    ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
+    ? `${!result.chapters?.firstBodyVerified ? 'UNVERIFIED · detail unavailable' : firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${result.chapters?.firstBodyVerified ? firstChapter.contentLength : 'UNKNOWN'} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
     : '未生成第一章';
   const gateLine = result.firstChapterRun
     ? `${result.firstChapterRun.gate_status ?? result.firstChapterRun.gateStatus ?? 'missing'} · run=${result.firstChapterRun.id ?? 'unknown'} · status=${result.firstChapterRun.status ?? 'unknown'} · model=${result.firstChapterRun.model ?? 'unknown'}`
