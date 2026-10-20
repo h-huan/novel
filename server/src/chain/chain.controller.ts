@@ -7121,13 +7121,13 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
         const worldRowForOutline = db.prepare(`SELECT atmosphere, story_premise, rules, special_settings, social_rules, constraints
           FROM world_settings WHERE project_id = ? LIMIT 1`).get(projectId) as any;
         const worldContinuityDirective = worldRowForOutline
-          ? `\n【已确认世界规则（高于故事卡和章纲措辞）】${JSON.stringify({
+          ? `\n【已保存世界规则：仅可补充已确认题材，不得覆盖故事卡的已锁定事实】${JSON.stringify({
             storyPremise: worldRowForOutline.story_premise,
             rules: worldRowForOutline.rules,
             specialSettings: worldRowForOutline.special_settings,
             socialRules: worldRowForOutline.social_rules,
             constraints: worldRowForOutline.constraints,
-          })}\n若题材或故事卡中的概括性措辞与这里冲突，保留人物、真相、反转和结局，但必须把事件机制改写为符合已确认世界规则的方式；不得要求后续章纲执行一个违反世界规则的“唯一任务”。\n`
+          })}\n按同一事实优先级核对：${STORY_FACT_PRIORITY}。若后生成的世界观与确认题材或锁定故事卡冲突，不得以世界规则反向改写原有触发、能力、时序、因果、真相或结局；须回到已确认来源核查并拒绝无依据的世界观增补。只有不冲突的世界细节才可用于章节职责和具体事件。\n`
           : '';
         if (isShort) {
           const unwrapStoryCard = (value: any): Record<string, any> | null => {
