@@ -6,6 +6,7 @@ import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY } f
 import { describe, expect, it, vi } from 'vitest';
 import {
   ChainController,
+  unchangedPremiseReselectionSlots,
   canFitChapterWordRange,
   canFitStoryTargetWords,
   parsePositiveTargetWords,
@@ -188,6 +189,18 @@ describe('idea discovery execution settings', () => {
 });
 
 describe('idea novelty and audited repair compilers', () => {
+  it('rejects an unchanged failed replacement before another independent review without blocking real edits', () => {
+    const original = [
+      { premiseId: 'P2', payoff: '找到会计', causalPlan: [{ action: { field: 'activeChoice', quote: '记下地址' }, conditions: [], result: { field: 'payoff', quote: '找到会计' } }] },
+      { premiseId: 'P3', payoff: '完成现有行动' },
+    ];
+    expect(unchangedPremiseReselectionSlots(original, structuredClone(original), ['P2'])).toEqual(['P2']);
+    expect(unchangedPremiseReselectionSlots(original, [
+      { ...original[0], causalPlan: [{ ...original[0].causalPlan[0], result: { field: 'payoff', quote: '凭已取得的地址找到会计' } }] }, original[1],
+    ], ['P2'])).toEqual([]);
+    expect(unchangedPremiseReselectionSlots(original, [{ ...original[0], premiseId: 'P8' }, original[1]], ['P2'])).toEqual([]);
+    expect(unchangedPremiseReselectionSlots(original, [{ ...original[0], premiseId: 'P8' }, original[1]], ['P2','P3'])).toEqual(['P3']);
+  });
   it('detects renamed versions of the same premise but keeps distinct mechanisms apart', () => {
     const elevator = { title: '午夜电梯', description: '夜班保安进入循环电梯，违反规则后身份逐字消失，必须在天亮前救妹妹。' };
     const renamed = { title: '凌晨升降机', description: '值夜保安困在反复循环的升降机，犯规就被抹去身份，要在日出前寻找妹妹。' };
