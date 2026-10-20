@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { assertPremiseCausalPlans, premiseCausalPlanIssues } from './premise-causal-plan';
-import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, incompleteInitialPremisePlans, applyInitialPremisePlanOnlyPatch, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { materializePremisePayoffReview, premisePayoffReviewIssues } from './premise-payoff-review';
 import { materializePremiseSourceReview, normalizePremiseReselection, premiseSourceComparisonCatalog } from './premise-selection-review';
 import { mergePremiseSourceBatches } from './premise-source-batches';
@@ -33,6 +33,30 @@ function report(s:ReturnType<typeof selection>) {
 }
 
 describe('plan critical prerequisites before full story cards',()=>{
+  it('repairs only an incomplete selected plan and preserves pool, selection, labels and all prose verbatim',()=>{
+    const raw={pool:['A','B'].map(premise),selectedPremises:['A','B'].map(premise)};
+    raw.selectedPremises[1].causalPlan=[raw.selectedPremises[1].causalPlan[0]];
+    const original=JSON.stringify(raw);
+    expect(()=>normalizePremiseSelectionPayload(raw,2,2)).toThrow('causalPlan须覆盖主线兑现');
+    const faults=incompleteInitialPremisePlans(raw,2,2);
+    expect(faults.map(row=>row.premiseId)).toEqual(['B']);
+    expect(faults[0].issues).toContain('causalPlan须覆盖主线兑现，不能只列开端或普通动作');
+    const candidate={plans:[{premiseId:'B',causalPlan:premise('B').causalPlan}]};
+    const patched=applyInitialPremisePlanOnlyPatch(raw,candidate,['B'],2,2);
+    expect(patched.pool).toEqual(normalizePremiseSelectionPayload({pool:raw.pool,selectedPremises:raw.selectedPremises.map(({causalPlan,...item})=>item)},2,2).pool);
+    expect(patched.selected[0].causalPlan).toEqual(raw.selectedPremises[0].causalPlan);
+    expect(patched.selected[1].causalPlan).toEqual(premise('B').causalPlan);
+    expect(patched.selected.map(({causalPlan,...item})=>item)).toEqual(
+      normalizePremiseSelectionPayload({pool:raw.pool,selectedPremises:raw.selectedPremises.map(({causalPlan,...item})=>item)},2,2).selected);
+    expect(JSON.stringify(raw)).toBe(original);
+    for(const bad of [
+      {plans:[{premiseId:'A',causalPlan:premise('A').causalPlan}]},
+      {plans:[{premiseId:'B',causalPlan:premise('B').causalPlan,activeChoice:'偷改原行动'}]},
+      {plans:[{premiseId:'B',causalPlan:[premise('B').causalPlan[0]]}]},
+      {plans:[{premiseId:'B',causalPlan:[{action:{field:'activeChoice',quote:'凭空出现的能力'},conditions:[],result:{field:'payoff',quote:premise('B').payoff}}]}]},
+      {plans:[]},
+    ]) expect(()=>applyInitialPremisePlanOnlyPatch(raw,bad,['B'],2,2)).toThrow();
+  });
   it('requires a real plan at the live boundary and never fabricates it from old prose',()=>{
     const s=selection();delete (s.selected[0] as any).causalPlan;
     expect(()=>assertPremiseCausalPlans(s)).toThrow('生成前因果计划未完成');
