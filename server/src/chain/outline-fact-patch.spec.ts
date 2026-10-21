@@ -33,6 +33,23 @@ it('does not globally replace equal dates, guess ambiguous rewrites or reject ev
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:text.replace('三天前','两天前')},[])).toEqual([]);
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:'他在评审会展示了之前取得的凭据'},[text])).toEqual([]);
 });
+it('requires action-result patches to touch the exact cited causal assertion before re-review',()=>{
+ const {outlineFactPatchSynchronizationIssues}=require('./outline-fact-patch');
+ const chapter={
+  content:'她没有站起，也没有出声。评估程序根据申请材料决定是否发放补偿。',
+  characterActions:[{action:'她没有站起，也没有出声',result:'家里补偿落空'}],
+  characterStates:[{stateAfter:'家里补偿落空'}],
+ };
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'她没有站起，也没有出声',resultEvidence:'家里补偿落空',
+  reason:'未行动不能证明补偿结果由她造成'}],resultFields:['characterActions.0.result','characterStates.0.stateAfter']};
+ const unrelated={content:chapter.content.replace('她没有站起','她仍没有站起')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[],evidence).join(' '))
+  .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ const targeted={'characterActions.0.result':'她没有参与评估决定，补偿结果由评估程序按申请材料决定'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,targeted,[],evidence)).toEqual([]);
+ expect(chapter.characterActions[0].result).toBe('家里补偿落空');
+});
 it('rejects nonempty but unchanged patches before semantic re-review, including reordered object keys',()=>{
  const before=structuredClone(original);
  for(const patch of [{content:original.content},{'characterActions.0.result':original.characterActions[0].result},
