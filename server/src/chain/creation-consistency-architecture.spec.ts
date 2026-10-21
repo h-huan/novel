@@ -18,6 +18,13 @@ function indexOrFail(source: string, marker: string): number {
 }
 
 describe('creation consistency architecture invariants', () => {
+  it('treats candidate-pool size as a search target and bounds repeated reserve replacement', () => {
+    expect(controllerSource).toContain('if (candidatePool.length < minimumPremiseSelectionCount)');
+    expect(controllerSource).not.toContain('if (candidatePool.length < requestedCount)');
+    expect(controllerSource).toContain('reserveReconciliationRounds<1');
+    expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
+  });
+
   it('keeps good preselection cards reviewable but never passes an incomplete batch', () => {
     expect(controllerSource).toContain('const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);');
     expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
