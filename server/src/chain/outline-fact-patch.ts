@@ -72,6 +72,27 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
   }
  }
  const issues:string[]=[];
+ // A semantic conflict arrives as two exact source quotations. Before paying for
+ // another semantic review, require the one-sided current-chapter assertion to
+ // be addressed by this patch. This is only a patch-target check, not a verdict
+ // that the repaired chapter is semantically consistent.
+ const containsQuote=(rows:Map<string,string>,quote:string)=>!!quote&&[...rows.values()].some(value=>value.includes(quote));
+ for(const defect of defects){
+  let row:any;
+  try{row=JSON.parse(defect);}catch{continue;}
+  if(!row||typeof row!=='object'||typeof row.quote1!=='string'||typeof row.quote2!=='string')continue;
+  const quote1= row.quote1.trim(),quote2=row.quote2.trim();
+  if(!quote1||!quote2)continue;
+  const before1=containsQuote(old,quote1),before2=containsQuote(old,quote2);
+  if(!before1&&!before2)continue;
+  const after1=containsQuote(current,quote1),after2=containsQuote(current,quote2);
+  if(before1&&before2){
+   if(after1&&after2)issues.push('事实补丁没有消除当前章内两侧冲突引文；必须修正当前章的冲突断言及其投影，不得以当前章反向改写已接受事实。');
+  }else{
+   const currentQuote=before1?quote1:quote2;
+   if(containsQuote(current,currentQuote))issues.push('事实补丁未触及当前章的冲突引文“'+currentQuote.slice(0,100)+'”；前章已接受事实是不可变来源，须修正当前章及其投影，不得反向改写前章。');
+  }
+ }
  for(const [oldClause,newClause]of changes)for(const [path,text]of current){
   if(clauses(text).includes(oldClause))issues.push(`补丁未同步已点名事件：${path}仍为“${oldClause}”，同一事件其它字段已改为“${newClause}”；核对并修正原有对应路径，不改无关事件或前章。`);
  }
