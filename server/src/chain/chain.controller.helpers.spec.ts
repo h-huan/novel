@@ -1592,8 +1592,8 @@ describe('idea discovery live orchestrator behavior', () => {
     const premiseOne = selected('P1', '遗嘱里的门牌号');
     const premiseTwo = selected('P2', '门后的普通秘密');
     const pool = [
-      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore },
-      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore },
+      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore, storyCategoryId: 'K1' },
+      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore, storyCategoryId: mixed ? 'K2' : 'K1' },
     ];
     const common = {
       storyType: 'short_story', targetPlatform: 'fanqie', storyCategory: '悬疑',
@@ -1640,16 +1640,23 @@ describe('idea discovery live orchestrator behavior', () => {
     const mixed = failure === 'category_inheritance';
     const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
     if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
-    const generate = vi.fn()
-      .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: selectedForBatch }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) });
-    if (failure === 'card_network') generate.mockRejectedValueOnce(new Error('card connection reset'));
-    else if (failure === 'card_shape') generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [] }) });
-    else {
-      generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [weakCard] }) });
-      if (failure === 'repair_network') generate.mockRejectedValueOnce(new Error('repair connection reset'));
-      else generate.mockResolvedValueOnce({ content: JSON.stringify({ patches: [{}] }) });
-    }
+    const generate = vi.fn(async (request: any) => {
+      const step = request.metrics?.stepKey;
+      if (step === 'idea_premise_pool_generation') return { content: JSON.stringify({ pool }) };
+      if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: selectedForBatch }) };
+      if (step === 'idea_card_structure') {
+        const selectedBlock = request.prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0] || '';
+        if (selectedBlock.includes(premiseOne.workingTitle)) return { content: JSON.stringify({ ideas: [strongCard] }) };
+        if (failure === 'card_network') throw new Error('card connection reset');
+        if (failure === 'card_shape') return { content: JSON.stringify({ ideas: [] }) };
+        return { content: JSON.stringify({ ideas: [weakCard] }) };
+      }
+      if (step === 'idea_card_local_repair') {
+        if (failure === 'repair_network') throw new Error('repair connection reset');
+        return { content: JSON.stringify({ patches: [{}] }) };
+      }
+      throw new Error('unexpected generation step: ' + String(step));
+    });
     const controller = Object.create(ChainController.prototype) as any;
     controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
     controller.reviewPremiseSelection = vi.fn().mockResolvedValue({ passed: true, issues: [] });
@@ -1716,10 +1723,12 @@ describe('idea discovery live orchestrator behavior', () => {
       expect(call[1]).toContain('"writingStyle":["简洁"]');
       expect(call[1]).toContain('"pov":"第一人称"');
     }
-    expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[1]);
+    const firstCardCallIndex = generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
+    expect(firstCardCallIndex).toBeGreaterThanOrEqual(0);
+    expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[firstCardCallIndex]);
 
     if (failure === 'review_protocol') {
-      expect(generate).toHaveBeenCalledTimes(3);
+      expect(generate).toHaveBeenCalledTimes(6);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);
       expect(result.error).toContain('审查未完成');
@@ -1727,7 +1736,7 @@ describe('idea discovery live orchestrator behavior', () => {
     }
 
     if(failure==='review_budget'){
-      expect(generate).toHaveBeenCalledTimes(3);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(generate).toHaveBeenCalledTimes(6);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('budget_or_original_pool_exhausted');return;
     }
@@ -1735,7 +1744,7 @@ describe('idea discovery live orchestrator behavior', () => {
     // The repair fixture returns an empty patch: preserve the original refusal without another review.
     expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(1);
     if (!cardFailed && failure !== 'repair_network') expect(result.appealGate.repairGenerated).toBe(0);
-    expect(generate).toHaveBeenCalledTimes(cardFailed ? 3 : 4);
+    expect(generate).toHaveBeenCalledTimes(cardFailed ? 6 : 7);
     expect(result.success).toBe(false);
     expect(result.status).toBe('incomplete');
     expect(result.ideas).toHaveLength(0);
@@ -1743,8 +1752,9 @@ describe('idea discovery live orchestrator behavior', () => {
     expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
     if (mixed) {
       expect(result.qualifiedIdeas[0].storyCategory).toBe('悬疑惊悚');
-      expect(generate.mock.calls[1][0].prompt).toContain('分类=悬疑惊悚');
-      expect(generate.mock.calls[2][0].prompt).toContain('分类=现实生活');
+      const cardPrompts = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure').map(([request]: any[]) => request.prompt);
+      expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseOne.workingTitle))).toContain('分类=悬疑惊悚');
+      expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseTwo.workingTitle))).toContain('分类=现实生活');
       expect(result.appealGate.selectedCategories).toEqual(['悬疑惊悚', '现实生活']);
     }
     expect(result.totalIdeas).toBe(0);
@@ -1779,7 +1789,7 @@ describe('discovery before dimension confirmation', () => {
     const result = await controller.runIdeaDiscovery({ storyType: 'short_story', platform: 'fanqie',
       customPlatformNote: '', storyCategory: '年代', storyTone: [], writingStyle: [], webNovelGenre: [],
       submissionTags: [], plotTags: [], genreFitNote: '', pov: '' }, 5);
-    expect(controller.realLLM.generate).toHaveBeenCalledTimes(1);
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(3);
     const prompt = controller.realLLM.generate.mock.calls[0][0].prompt;
     expect(prompt).toContain('当前阶段=灵感发现的题材预选');
     for (const type of ['tone_tag', 'writing_style', 'web_novel_genre', 'narrative_pov']) {
