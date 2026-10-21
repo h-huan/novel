@@ -5130,13 +5130,14 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         };
         this.logger.log('idea-discover: 候选池并发生成 wallMs=' + poolGenerationAudit.wallMs
           + '，batchDurationsMs=' + JSON.stringify(poolGenerationAudit.batches.map(batch => ({ batch: batch.batch, durationMs: batch.durationMs, rawReturned: batch.rawReturned, error: batch.error }))));
-        if (candidatePool.length < requestedCount) {
+        if (candidatePool.length < minimumPremiseSelectionCount) {
           const batchErrors = poolBatchResults.filter(item => item.error).map(item => '第' + (item.batchIndex + 1) + '批：' + item.error).join('；');
-          throw new Error('并发候选池只形成' + candidatePool.length + '/' + premisePoolSize + '个有效且去重后的轻量题材，少于本次至少需要的' + requestedCount + '个；' + (batchErrors || '候选不足，未进入选优和完整卡生成。'));
+          throw new Error('并发候选池只形成' + candidatePool.length + '/' + premisePoolSize + '个有效且去重后的轻量题材，低于最低可交付数量' + minimumPremiseSelectionCount + '个；' + (batchErrors || '候选不足，未进入选优和完整卡生成。'));
         }
         if (candidatePool.length < premisePoolSize) {
           this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
         }
+        const selectionStartedAt = Date.now();
         const selectionResponse = await this.realLLM.generate({
           prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool }),
           scenario: 'idea_generate',
@@ -5145,6 +5146,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           responseFormat: 'json_object',
           metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
         });
+        const selectionWallMs = Date.now() - selectionStartedAt;
         const parsedSelection = parseResponse(selectionResponse.content, '固定候选池选优');
         if (parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')) throw prerequisiteError(parsedSelection);
         const initialSelection = normalizePremiseSelectionPayload({
@@ -5161,12 +5163,18 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           return { category, standard: placement.status === 'resolved'
             ? platformCategoryWritingBrief(dto.platform, placement.value, dto.storyType) : '' };
         });
+        const preselectionReviewStartedAt = Date.now();
         const normalizedSelection = await this.reconcilePremiseSelection(initialSelection, requestedCount, premisePoolSize,
           variedCategories ? discoveryCategories : [dto.storyCategory], buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
             + ideaDiscoveryAuthorContext(dto)
             + '\n【本次选择约束】' + autoSelectionRules + '；' + submissionRule
             + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
             + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre), dto.webNovelGenre, {reviews:sourceCompletionBudget,reselection:reselectionCompletionBudget});
+        const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
+        this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
+          + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
+          + '，有效池=' + candidatePool.length + '/' + premisePoolSize
+          + '，选中=' + normalizedSelection.selected.length + '/' + requestedCount);
         for (const premise of normalizedSelection.selected) {
           if (!variedCategories && premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
             throw new Error('已选题材 ' + premise.premiseId + ' 未继承本次固定分类 ' + dto.storyCategory + '。');
@@ -5182,7 +5190,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           ? normalizedSelection.selectionAudit as Record<string, unknown> : {};
         return {
           ...normalizedSelection,
-          selectionAudit: { ...priorAudit, poolGeneration: poolGenerationAudit },
+          selectionAudit: { ...priorAudit, poolGeneration: poolGenerationAudit,
+            phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs: Date.now() - poolStartedAt } },
         };
       };
 
@@ -5886,7 +5895,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
       attemptedIds=new Set([...initial.selected,...selected.selected].map(item=>String(item.premiseId)));
     const reserveStartCredits=reselectionBudget.remaining;
-    while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0){
+    let reserveReconciliationRounds = 0;
+    while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0&&reserveReconciliationRounds<1){
+      reserveReconciliationRounds += 1;
+      this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '/1；之后仅保留独立复核通过项，不继续循环换题。');
       if(shared&&shared.reviews.remaining<2)break;
       const retained=retainReviewedPremises(selected,finalReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
       const unusedIds=new Set(initial.pool.filter(item=>!attemptedIds.has(String(item.premiseId))).map(item=>String(item.premiseId)));
