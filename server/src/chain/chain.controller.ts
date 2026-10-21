@@ -5431,6 +5431,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // A short preselection must not erase independently verified premises.
       // The final quantity gate still rejects a batch below requestedCount.
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
+      const minimumDeliverableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
       if (preselectionShortfall) {
         this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，最终缺额不能冒充成功。`);
       }
@@ -5476,7 +5477,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const latestCards=new Map(structuredCards.map(card=>[String(card.sourcePremiseId),card]));
       const attemptedPremiseIds=new Set(selectedPremises.map(item=>String(item.premiseId)));
       const latestAssessment=(id:string)=>[...candidateAssessments].reverse().find(item=>item.sourcePremiseId===id);
-      const missingAfterGate=()=>selectedPremises.map(item=>String(item.premiseId)).filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id));
+      const missingAfterGate=()=>new Set(accepted.map(card=>String(card.sourcePremiseId||'').trim()).filter(Boolean)).size>=minimumDeliverableCount
+        ? [] : selectedPremises.map(item=>String(item.premiseId)).filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id));
       const fulfillmentActions:any[]=[];
       const repairMissing=async(initialMissingPremiseIds:string[])=>{
         const before=new Map(initialMissingPremiseIds.map(id=>[id,latestAssessment(id)]));
@@ -5568,6 +5570,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           await accept([card],'initial');return 'replaced';
         },
       });}catch(error){finalGateRepairError=String((error as Error).message);fulfillmentStopReason='completion_unavailable';}
+      const acceptedUniqueCount = new Set(accepted.map(card=>String(card?.sourcePremiseId||'').trim()).filter(Boolean)).size;
+      if (acceptedUniqueCount >= minimumDeliverableCount && acceptedUniqueCount < requestedCount) {
+        fulfillmentStopReason = 'minimum_acceptable_partial';
+        fulfillmentActions.push({kind:'stop_at_minimum_acceptable_partial',accepted:acceptedUniqueCount,requested:requestedCount,
+          skippedFurtherRepairAndReplacement:true,remainingPresentationCalls:presentationBudget.remaining,
+          remainingSourceCalls:sourceCompletionBudget.remaining,remainingReselectionCalls:reselectionCompletionBudget.remaining});
+      }
 
       if (preselectionShortfall && fulfillmentStopReason === 'requested_quantity_verified') fulfillmentStopReason = 'preselection_shortfall';
       const selectedAccepted = accepted
@@ -5620,7 +5629,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先完成轻量题材池筛选；每个已选 premise 独立结构化恰好一张完整卡，题材身份由服务器绑定。只处理本批缺额；有实质改善时继续局部修复，停滞时从本批未尝试原池换选并完整验收；共享预算不足或原池耗尽时如实报告缺量，不降低质量。',
+        note: '先并发生成轻量候选池，再从固定池选优；入选题材逐张并发结构化并执行原有质量门。目标数量少1-2张时，若仍达到最低可交付数量就返回全部合格卡并停止为凑数继续修复/换题；低于最低数量时才在共享预算内尝试补救，不降低质量。',
       };
 
       if (selectedAccepted.length === 0) {
@@ -5641,10 +5650,21 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
       const partial = selectedAccepted.length < requestedCount || finalMissingPremiseIds.length > 0;
       if (partial) {
-        appealGate.returned = 0;
         const reason = [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 5).join('；') || finalGateRepairError || '题材结构化或独立审查未通过';
-        const error = `故事题材数量不足：请求 ${requestedCount}，最终通过 ${selectedAccepted.length}；本批未完成，禁止以 success=true 返回缺量结果。未通过原因：${reason}`;
-        this.logger.warn(`idea-discover: ${error}`);
+        if (selectedAccepted.length >= minimumDeliverableCount) {
+          appealGate.returned = selectedAccepted.length;
+          appealGate.partial = true;
+          appealGate.minimumDeliverableCount = minimumDeliverableCount;
+          appealGate.fulfillment.stopReason = 'minimum_acceptable_partial';
+          const warning = '请求' + requestedCount + '张，最终有' + selectedAccepted.length + '张通过全部质量门；按最低可交付数量' + minimumDeliverableCount + '张返回，缺额' + (requestedCount - selectedAccepted.length) + '张。未降低质量门，已停止为凑数继续修复或换题。';
+          this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
+          return { success: true, status: 'partial', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
+            qualifiedIdeas: acceptedWithAudit, warning, appealGate };
+        }
+        appealGate.returned = 0;
+        const error = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
+          + '；低于最低可交付数量 ' + minimumDeliverableCount + '。未通过原因：' + reason;
+        this.logger.warn('idea-discover: ' + error);
         return { success: false, status: 'incomplete', ideas: [], totalIdeas: 0,
           qualifiedIdeas: acceptedWithAudit, error, appealGate };
       }
@@ -5751,6 +5771,32 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const initialReview = await reviewBoth(initial);
     if (initialReview.passed) return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview } };
     const repairPlan = premiseReselectionPlan(initial, initialReview);
+    const minimumSelectableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
+    // If enough independently reviewed premises remain, stop here instead of spending
+    // more calls trying to fill every position. Full-card gates still run afterwards.
+    let partialSelection = initial;
+    let partialReview = initialReview;
+    const partialExcludedIds = new Set<string>();
+    while (!partialReview.passed) {
+      const retained = retainReviewedPremises(partialSelection, partialReview,
+        repairPlan.protectedItems.map(item => String(item.premiseId)));
+      if (retained.selection.selected.length < minimumSelectableCount
+        || retained.selection.selected.length >= partialSelection.selected.length
+        || !retained.excludedPremiseIds.length) break;
+      retained.excludedPremiseIds.forEach(id => partialExcludedIds.add(String(id)));
+      partialSelection = retained.selection;
+      partialReview = await reviewBoth(partialSelection);
+      if (partialReview.passed) {
+        this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + requestedCount
+          + ' 个已独立复核合格题材；达到最低可交付数量，停止为凑数重选。');
+        return { ...partialSelection, selectionAudit: {
+          initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
+          minimumSelectableCount, selectionStopReason: 'minimum_acceptable_partial',
+          excludedPremiseIds: [...partialExcludedIds], reasons: [...initialReview.issues],
+          completeCardGatePending: true,
+        } };
+      }
+    }
     if (repairPlan.availableCandidates.length < repairPlan.repairSlots.length) {
       const retained = retainReviewedPremises(initial, initialReview);
       if (!retained.selection.selected.length) throw new Error('原池没有足够可用的不同题材用于问题位置重选，且没有可保留的已复核题材；不扩大池、不重复下游修复。');
