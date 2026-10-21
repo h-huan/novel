@@ -108,7 +108,8 @@ describe('chain HTTP architecture', () => {
     const patch = read('outline-fact-patch.ts');
     expect(source).toContain('OUTLINE_FACT_REPAIR_FIELDS');
     expect(source).toContain('禁止重新生成完整章纲');
-    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects)');
+    expect(source).toContain('const actionRepairEvidence = chapterActionRepairEvidence(chData, dependencyCheck.actionFailure)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
     expect(source).toContain('chData = applyOutlineFactPatch(chData,rawPatch)');
     expect(source).toContain("shortOutlineSourceRunIds.add(String(repair.runId))");
     expect(patch).toContain('OUTLINE_FACT_REPAIR_FIELDS = [');
