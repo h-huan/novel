@@ -38,6 +38,8 @@ function printDetailedReport(value) {
   const runtime = value?.runtime || {};
   const discovery = runtime.ideaDiscovery || {};
   const audit = discovery.audit || {};
+  const selectionAudit = audit.selectionAudit && typeof audit.selectionAudit === 'object'
+    ? audit.selectionAudit : {};
   const trace = runtime.discoveryCallTrace || {};
   const poolEvidence = {
     available: discovery.available ?? null,
@@ -54,6 +56,22 @@ function printDetailedReport(value) {
     phaseDurationsMs: audit.phaseDurationsMs ?? null,
     preselectionDurationsMs: audit.preselectionDurationsMs ?? null,
     preselectionBudgets: audit.preselectionBudgets ?? null,
+    // Keep critical timings and stop reasons ahead of the potentially large raw audit.
+    // The report is truncated for console readability; these fields must remain visible.
+    poolGeneration: selectionAudit.poolGeneration ?? null,
+    phaseTimings: selectionAudit.phaseTimings ?? null,
+    selectionSummary: {
+      initialReviewPassed: selectionAudit.initialReview?.passed ?? null,
+      initialIssueCount: Array.isArray(selectionAudit.initialReview?.issues) ? selectionAudit.initialReview.issues.length : null,
+      finalReviewPassed: selectionAudit.finalReview?.passed ?? null,
+      finalIssueCount: Array.isArray(selectionAudit.finalReview?.issues) ? selectionAudit.finalReview.issues.length : null,
+      reselectionAttempted: selectionAudit.reselectionAttempted ?? null,
+      partial: selectionAudit.partial ?? null,
+      minimumSelectableCount: selectionAudit.minimumSelectableCount ?? null,
+      selectionStopReason: selectionAudit.selectionStopReason ?? null,
+      excludedPremiseIds: selectionAudit.excludedPremiseIds ?? null,
+      reserveReplacementCount: Array.isArray(selectionAudit.reserve?.replacements) ? selectionAudit.reserve.replacements.length : null,
+    },
     selectionAudit: audit.selectionAudit ?? null,
     structuringErrors: audit.structuringErrors ?? null,
     candidateAssessments: audit.candidateAssessments ?? null,
