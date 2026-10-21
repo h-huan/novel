@@ -20,6 +20,19 @@ describe('outline fact ledger review contract', () => {
     expect(getSystemWorkflowRule('CTX-008')!.details).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
     expect(chapterResponsibilityPlanningDirective()).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
   });
+  it('separates group replies from private messages and checks direct positive evidence before blocking creation', () => {
+    const prompt = buildOutlineFactReviewPrompt({
+      canonicalBrief: '{}',
+      world: {},
+      previousLedger: [],
+      chapters: [{ order: 2, content: '工作群报修消息底下没人回；助理私聊回复安全员。导演先签了安全条款。' }],
+    });
+    expect(prompt).toContain('必须通读同一批完整content、scenes、characterActions及相邻字段');
+    expect(prompt).toContain('若content已明确写出某人签字、交付或当事人承认其指示，不得把该动作或承认判为缺失');
+    expect(prompt).toContain('同一群消息“底下没人回”与“回复挂在该消息下”是真冲突');
+    expect(prompt).toContain('私聊回复不能当作群消息回复');
+  });
+
   it('derives creation criteria from the actual Registry, including cumulative consequences', () => {
     expect(CHAPTER_RESPONSIBILITY_CRITERIA).toEqual(getSystemWorkflowRule('ARCH-005')!.clauses!.map(c => ({ id: c.id, label: c.label, check: c.text })));
     expect(chapterResponsibilityPlanningDirective()).toContain(OUTLINE_STATE_CONTINUITY_POLICY);
