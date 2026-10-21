@@ -104,6 +104,30 @@ describe('idea discovery preselection contract', () => {
     expect(result.poolTargetMet).toBe(false);
   });
 
+  it('allows fewer independently selected mature premises without relaxing evidence requirements', () => {
+    const pool = Array.from({ length: 15 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具备独立因果路径的轻量题材骨架。',
+    }));
+    const four = pool.slice(0, 4).map(item => selectedPremise(item.premiseId));
+    const result = normalizePremiseSelectionPayload({ pool, selectedPremises: four }, 5, 15, undefined, 3);
+    expect(result.selected).toHaveLength(4);
+    expect(result.poolTargetMet).toBe(true);
+
+    const three = normalizePremiseSelectionPayload({ pool, selectedPremises: four.slice(0, 3) }, 5, 15, undefined, 3);
+    expect(three.selected).toHaveLength(3);
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: four.slice(0, 2) }, 5, 15, undefined, 3))
+      .toThrow('3-5 个成熟题材');
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: four }, 5, 15))
+      .toThrow('5-5 个成熟题材');
+
+    const missingEvidence = four.slice(0, 3).map(item => ({ ...item }));
+    missingEvidence[1] = { ...missingEvidence[1], payoff: '' };
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: missingEvidence }, 5, 15, undefined, 3))
+      .toThrow('payoff');
+  });
+
   it('ignores malformed unselected extras instead of letting one weak pool item zero the whole batch', () => {
     const validPool = Array.from({ length: 5 }, (_, index) => ({
       premiseId: `P${index + 1}`,
