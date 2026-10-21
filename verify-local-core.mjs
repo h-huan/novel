@@ -351,6 +351,20 @@ const standardsResponse = health.ok
   ? await request('/module-standards')
   : skippedRuntimeRequest('module-standards');
 const standards = asArray(standardsResponse.data);
+const globalRunsResponse = health.ok
+  ? await request('/generation-metrics/runs?limit=200')
+  : skippedRuntimeRequest('global-generation-runs');
+const recentGlobalRuns = asArray(globalRunsResponse.data);
+const discoveryRunRows = recentGlobalRuns.filter(run =>
+  String(run.stage ?? '').toLowerCase() === 'idea_generate'
+  || String(run.scenario ?? '').toLowerCase() === 'idea_generate'
+  || String(run.step_key ?? run.stepKey ?? '').startsWith('idea_'));
+const discoveryCallTrace = {
+  source: { ok: globalRunsResponse.ok, status: globalRunsResponse.status,
+    error: globalRunsResponse.error ?? null, totalGlobalRows: recentGlobalRuns.length, limit: 200 },
+  runs: discoveryRunRows.map(runDetail),
+  stepBreakdown: stepBreakdown(discoveryRunRows.map(runDetail)),
+};
 const codeSeedVersion = seedVersion();
 const standardMismatch = standards.filter((s) => {
   const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
@@ -382,6 +396,7 @@ const runtime = {
   ideaDiscovery: ideaDiscoveryResponse.ok
     ? unwrap(ideaDiscoveryResponse.data)
     : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` },
+  discoveryCallTrace,
   standards: {
     codeSeedVersion,
     activeCount: standards.length,
@@ -594,9 +609,31 @@ function detailedIdeaMarkdown() {
     reasons: audit.reasons ?? null,
   };
   const detail = JSON.stringify(evidence, null, 2);
+  const trace = runtime.discoveryCallTrace || {};
+  const calls = trace.runs || [];
+  const callLines = [
+    '### 灵感发现的实际调用时间线', '',
+    '- 样本：' + calls.length + ' 条。全局接口最近 200 条中按 idea_generate 筛选，不代表全部历史。',
+    '- 接口：' + (trace.source?.ok ? 'PASS' : 'UNAVAILABLE') + ' · ' + (trace.source?.error ?? ''),
+    '', '| Run ID | 步骤 | 状态 | 耗时 ms | Gate | 时间 | 错误 |',
+    '|---|---|---|---:|---|---|---|',
+    ...calls.map(run => '| ' + markdownCell(run.id, 48)
+      + ' | ' + markdownCell(run.step_key ?? run.stepKey ?? run.stage ?? run.scenario)
+      + ' | ' + markdownCell(run.status)
+      + ' | ' + (run.durationMs ?? 0)
+      + ' | ' + markdownCell(run.gateStatus)
+      + ' | ' + markdownCell(run.startedAt)
+      + ' | ' + markdownCell(run.error, 550) + ' |'),
+    '', '### 灵感发现耗时分组', '',
+    '| 步骤 | 调用数 | 非成功数 | 耗时 ms |',
+    '|---|---:|---:|---:|',
+    ...(trace.stepBreakdown || []).map(row => '| ' + markdownCell(row.step)
+      + ' | ' + row.calls + ' | ' + row.failures + ' | ' + row.durationMs + ' |'),
+  ];
   return '## 题材发现：数量、审核、调用预算与失败证据\n\n'
     + '未提供的证据保留为 null，不推断通过。内容过长时 Markdown 仅显示前 30000 字，完整数据保留在 JSON。\n\n'
-    + '~~~json\n' + detail.slice(0, 30000) + '\n~~~\n';
+    + '~~~json\n' + detail.slice(0, 30000) + '\n~~~\n\n'
+    + callLines.join('\n') + '\n';
 }
 function detailedProjectMarkdown(target) {
   const item = inspectedProjects[target.key];
