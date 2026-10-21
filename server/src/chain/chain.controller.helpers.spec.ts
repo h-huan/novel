@@ -1699,9 +1699,12 @@ describe('idea discovery live orchestrator behavior', () => {
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
     if(failure==='preselection_shortfall'){
-      expect(generate).toHaveBeenCalledTimes(1);expect(controller.reviewIdeaPresentation).not.toHaveBeenCalled();
+      expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(true);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalled();
       expect(result.success).toBe(false);expect(result.status).toBe('incomplete');expect(result.ideas).toEqual([]);
-      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,generated:0,qualified:0,repairAttempted:false,stopReason:'preselection_shortfall'});return;
+      expect(result.appealGate).toMatchObject({premiseSelected:1,preselectionShortfall:1,requested:2,fulfillment:{stopReason:'preselection_shortfall'}});
+      expect(Array.isArray(result.qualifiedIdeas)).toBe(true);
+      return;
     }
     expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
     for (const call of controller.reviewPremiseSelection.mock.calls) {
