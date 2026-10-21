@@ -5302,18 +5302,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
-      if(selectedPremises.length<requestedCount){
-        const reasons=premiseSelectionFailureReasons(premiseDiscovery.selectionAudit);
-        const error='创建前筛选仅有 '+selectedPremises.length+'/'+requestedCount+' 个可锁定题材；本批数量不足，已停止完整卡生成、审核与修复。'+reasons.slice(0,5).join('；');
-        return {success:false,status:'incomplete',ideas:[],totalIdeas:0,error,appealGate:{
-          schemaVersion:8,mode:'premise_preselection_then_final_gate_bounded_repair',stoppedAt:'premise_preselection',
-          stopReason:'preselection_shortfall',premisePoolSize:premiseDiscovery.pool.length,premisePoolTarget:premisePoolSize,
-          premiseSelected:selectedPremises.length,requested:requestedCount,preselectionShortfall:requestedCount-selectedPremises.length,
-          generated:0,qualified:0,returned:0,shortfall:requestedCount,repairAttempted:false,repairGenerated:0,
-          presentationPhysicalCallsUsed:0,presentationPhysicalCallLimit:presentationCallLimit,
-          selectionAudit:premiseDiscovery.selectionAudit,preselectedPremises:selectedPremises,candidateAssessments:[],reasons,
-          note:'保留原池筛选证据；未生成完整故事卡，未用旧卡或不合格题材补数。',
-        }};
+      // A short preselection must not erase independently verified premises.
+      // The final quantity gate still rejects a batch below requestedCount.
+      const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
+      if (preselectionShortfall) {
+        this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，最终缺额不能冒充成功。`);
       }
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
       const structuredCards: Array<Record<string, unknown>> = [];
@@ -5421,7 +5414,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return initialMissingPremiseIds.filter(id=>discoveryFailureImproved(before.get(id),latestAssessment(id)));
       };
       const availableOriginalPool=()=>premiseDiscovery.pool.filter(item=>!attemptedPremiseIds.has(String(item.premiseId)));
-      let fulfillmentStopReason='requested_quantity_verified';
+      let fulfillmentStopReason=preselectionShortfall ? 'preselection_shortfall' : 'requested_quantity_verified';
       try {fulfillmentStopReason=await fulfillDiscoveryGaps({
         missing:missingAfterGate,hasCard:id=>latestCards.has(id),
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
@@ -5450,6 +5443,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         },
       });}catch(error){finalGateRepairError=String((error as Error).message);fulfillmentStopReason='completion_unavailable';}
 
+      if (preselectionShortfall && fulfillmentStopReason === 'requested_quantity_verified') fulfillmentStopReason = 'preselection_shortfall';
       const selectedAccepted = accepted
         .sort((left, right) =>
           Number(right?.ideaAppealGate?.distinctivenessScore || 0) - Number(left?.ideaAppealGate?.distinctivenessScore || 0)
@@ -5475,6 +5469,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
+        preselectionShortfall,
         selectionAudit: premiseDiscovery.selectionAudit,
         generated: structuredCards.length,
         evaluatedAttempts: candidateAssessments.length,
@@ -5489,7 +5484,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         repairError: finalGateRepairError,
         presentationPhysicalCallsUsed: presentationCallLimit - presentationBudget.remaining,
         presentationPhysicalCallLimit: presentationCallLimit,
-        reasons: finalRejectedReasons.slice(0, 8),
+        reasons: [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 8),
         preselectedPremises: selectedPremises,
         candidateAssessments,
         acceptedEvidence: selectedAccepted.map(idea => ({
@@ -5701,7 +5696,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       reselectionStopReason, sourceRepairCallsRemaining: reselectionBudget.remaining,
       excludedPremiseIds: unresolvedIds, reasons: initialReview.issues.filter(issue=>unresolvedIds.includes(issue.premiseId)),
       completeCardGatePending: true } : {};
-    const postReselectionReview = await reviewBoth(selected);
+    const postReselectionReview = selected === initial ? initialReview : await reviewBoth(selected);
     let finalReview=postReselectionReview;
     const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
       attemptedIds=new Set([...initial.selected,...selected.selected].map(item=>String(item.premiseId)));
@@ -7385,6 +7380,7 @@ ${(() => {
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
 【事实与行动结果依赖】${OUTLINE_FACT_REPAIR_SYNC_POLICY}
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
+【本章事件与状态唯一来源】本章content须按时序写清实际发生的行动、必要条件、直接结果与未完成目标。scenes.outcome、characterActions.result、characterStates.stateAfter只能投影同一已发生事实，不得把计划、猜测、未明示的决定或下一章任务写成本章结果。同一物件变更保管人时须写明交付动作、时间与双方；同一时点不得同时在两个人手中或两个地点。人物进出、立场变化必须有本章可见的触发，不能靠字段间互相复述当作已实际发生。
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
 按以下文档结构生成。必要字段必须存在；允许按章节职责为空的数组会单独说明：
