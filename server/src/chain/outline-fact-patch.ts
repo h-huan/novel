@@ -77,12 +77,52 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
  // be addressed by this patch. This is only a patch-target check, not a verdict
  // that the repaired chapter is semantically consistent.
  const containsQuote=(rows:Map<string,string>,quote:string)=>!!quote&&[...rows.values()].some(value=>value.includes(quote));
+ const conflictFragments=(text:string):string[]=>{
+  const patterns=[/“([^”]{2,180})”/g,/「([^」]{2,180})」/g,/『([^』]{2,180})』/g,/‘([^’]{2,120})’/g,/"([^"]{2,180})"/g];
+  const found:string[]=[];
+  for(const pattern of patterns)for(const match of text.matchAll(pattern)){
+   const fragment=String(match[1]||'').trim();if(fragment.length>=4)found.push(fragment);
+  }
+  return [...new Set(found)];
+ };
+ const changeTouchesFragment=(before:string,after:string,fragment:string):boolean=>{
+  let prefix=0;
+  while(prefix<before.length&&prefix<after.length&&before[prefix]===after[prefix])prefix++;
+  let suffix=0;
+  while(suffix<before.length-prefix&&suffix<after.length-prefix
+    &&before[before.length-1-suffix]===after[after.length-1-suffix])suffix++;
+  const changedEnd=before.length-suffix;
+  if(changedEnd<=prefix)return false;
+  let at=before.indexOf(fragment);
+  while(at>=0){
+   if(at<changedEnd&&at+fragment.length>prefix)return true;
+   at=before.indexOf(fragment,at+1);
+  }
+  return false;
+ };
  for(const defect of defects){
   let row:any;
   try{row=JSON.parse(defect);}catch{continue;}
   if(!row||typeof row!=='object'||typeof row.quote1!=='string'||typeof row.quote2!=='string')continue;
   const quote1= row.quote1.trim(),quote2=row.quote2.trim();
   if(!quote1||!quote2)continue;
+  const conflict=String(row.conflict||'');
+  const evidenceFragments=conflictFragments(conflict).filter(fragment=>quote1.includes(fragment)||quote2.includes(fragment));
+  const primaryConflict=conflict.split(/[；;]/,1)[0];
+  const primaryFragments=conflictFragments(primaryConflict)
+   .filter(fragment=>evidenceFragments.includes(fragment)&&[...old.values()].some(value=>value.includes(fragment)));
+  const targetFragments=(primaryFragments.length?primaryFragments:evidenceFragments)
+   .filter(fragment=>[...old.values()].some(value=>value.includes(fragment)));
+  // A full-field quotation can change when an unrelated sentence changes. Require
+  // the patch's actual diff to touch a quoted assertion from the conflict itself.
+  // This is only a target check; the independent fact review still decides truth.
+  if(targetFragments.length){
+   const directlyChanged=targetFragments.some(fragment=>[...old.entries()].some(([path,before])=>{
+    const updated=current.get(path);
+    return updated!==undefined&&updated!==before&&changeTouchesFragment(before,updated,fragment);
+   }));
+   if(!directlyChanged)issues.push('事实补丁没有直接修改冲突描述中的原始断言“'+targetFragments.slice(0,3).join('／')+'”；只改同一字段的其它文字不能视为修复。');
+  }
   const before1=containsQuote(old,quote1),before2=containsQuote(old,quote2);
   if(!before1&&!before2)continue;
   const after1=containsQuote(current,quote1),after2=containsQuote(current,quote2);

@@ -5444,7 +5444,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
       // A short preselection must not erase independently verified premises.
-      // The final quantity gate still rejects a batch below requestedCount.
+      // The final quantity gate may return a partial batch only after the minimum count and all quality gates pass.
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
       const minimumDeliverableCount = minimumAcceptableIdeaCount(requestedCount);
       if (preselectionShortfall) {
