@@ -139,8 +139,8 @@ export function normalizePremiseSelectionPayload(
     byId.set(premiseId, normalized);
   }
 
-  if (pool.length < requestedCount) {
-    throw new Error(`创建前题材筛选只有 ${pool.length} 个有效轻量题材胚子，少于本次需要的 ${requestedCount} 个；系统不会用弱题材补数。`);
+  if (pool.length < minimumCount) {
+    throw new Error(`创建前题材筛选只有 ${pool.length} 个有效轻量题材胚子，低于最低可交付数量 ${minimumCount} 个；系统不会用弱题材补数。`);
   }
   if (rawSelected.length < minimumCount || rawSelected.length > requestedCount) {
     throw new Error(`创建前题材筛选须选出 ${minimumCount}-${requestedCount} 个成熟题材；当前选择数量为 ${rawSelected.length}。少于最低数量不能进入完整卡生成，超过请求数量也不能混入本批。`);
