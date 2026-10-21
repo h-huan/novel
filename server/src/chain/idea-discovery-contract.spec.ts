@@ -11,6 +11,7 @@ import {
   ideaDiscoveryAuthorSettings,
   ideaDiscoveryAuthorContext,
   normalizePremiseSelectionPayload,
+  minimumAcceptableIdeaCount,
   selectedPremiseEvidenceForIdeaCard,
 } from './idea-discovery-contract';
 
@@ -479,4 +480,12 @@ it('packs local repair standards losslessly with per-card facts and all pending 
  expect(data.cards.map((row:any)=>row.gateIssues)).toEqual(targets.map(row=>row.gateIssues));
  expect(data.cards.map((row:any)=>row.card)).toEqual(targets.map(row=>row.card));
  expect(JSON.stringify(targets)).toBe(before);
+});
+
+
+describe('minimum acceptable idea count', () => {
+  it('allows at most two missing cards without making a three-card request collapse to one', () => {
+    expect([1, 2, 3, 4, 5, 6, 7].map(minimumAcceptableIdeaCount)).toEqual([1, 2, 3, 3, 3, 4, 5]);
+    expect(() => minimumAcceptableIdeaCount(0)).toThrow('正整数');
+  });
 });

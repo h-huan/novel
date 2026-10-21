@@ -64,7 +64,7 @@ describe('chain HTTP architecture', () => {
     const gate = read('idea-appeal-gate.service.ts');
 
     expect(contract).toContain('selectedPremiseEvidenceByCard = new WeakMap');
-    expect(contract).toContain('selectedPremiseEvidenceByCard.set(boundCard, { ...selectedPremise })');
+    expect(contract).toContain('selectedPremiseEvidenceByCard.set(boundCard, structuredClone(selectedPremise))');
     expect(contract).toContain('const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(card)');
     expect(contract).toContain('selectedPremiseEvidenceByCard.set(next, selectedPremiseEvidence)');
     expect(gate).toContain('selectedPremiseEvidenceForIdeaCard(idea)');
@@ -77,10 +77,10 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('finalGateRepairAttempted');
-    expect(source).toContain("repairProtocol: 'ordered_local_patch_server_owned_identity'");
+    expect(source).toContain("repairProtocol: 'budgeted_progress_or_original_pool_replacement'");
     expect(source).toContain('applyOrderedIdeaRepairPatches');
     expect(source).toContain('ideaGateLocalRepairDirective');
-    expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
+    expect(source).toContain("mode: 'budgeted_original_pool_fulfillment'");
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
     expect(source).toContain("status: 'incomplete'");
@@ -95,11 +95,15 @@ describe('chain HTTP architecture', () => {
   it('repairs outline fact conflicts as a local patch instead of regenerating the whole chapter plan', () => {
     const source = read('chain.controller.ts');
 
-    expect(source).toContain('factRepairFields');
+    const patch = read('outline-fact-patch.ts');
+    expect(source).toContain('OUTLINE_FACT_REPAIR_FIELDS');
     expect(source).toContain('禁止重新生成完整章纲');
-    expect(source).toContain('const preservedTargetWords = chData.targetWords');
-    expect(source).toContain('const preservedWordCountReason = chData.wordCountReason');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects)');
+    expect(source).toContain('chData = applyOutlineFactPatch(chData,rawPatch)');
     expect(source).toContain("shortOutlineSourceRunIds.add(String(repair.runId))");
+    expect(patch).toContain('OUTLINE_FACT_REPAIR_FIELDS = [');
+    expect(patch).not.toContain("'targetWords'");
+    expect(patch).not.toContain("'wordCountReason'");
     expect(source).not.toContain('只输出与当前章纲同字段的完整 JSON 对象；修复后所有事件');
   });
 });

@@ -38,7 +38,7 @@ import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosi
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, premiseSelectionFailureReasons, retainReviewedPremises, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, type IdeaPresentationVerdict } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -180,7 +180,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -4946,7 +4946,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
-      const minimumPremiseSelectionCount = requestedCount <= 2 ? requestedCount : Math.max(1, requestedCount - 2);
+      const minimumPremiseSelectionCount = minimumAcceptableIdeaCount(requestedCount);
       const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>> } = {}) => {
         const excludeText = initialExcludes.length
           ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
@@ -5437,7 +5437,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // A short preselection must not erase independently verified premises.
       // The final quantity gate still rejects a batch below requestedCount.
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
-      const minimumDeliverableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
+      const minimumDeliverableCount = minimumAcceptableIdeaCount(requestedCount);
       if (preselectionShortfall) {
         this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，若最终达到最低可交付数量则返回明确标注缺额的合格部分结果，不用弱题材凑数。`);
       }
@@ -5777,7 +5777,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         categoryChecks: reviews.flatMap(review=>review.categoryChecks||[]) };
     };
     const initialReview = await reviewBoth(initial);
-    const minimumSelectableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
+    const minimumSelectableCount = minimumAcceptableIdeaCount(requestedCount);
     if (initialReview.passed) {
       const partial = initial.selected.length < requestedCount;
       return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
@@ -5796,8 +5796,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         || retained.selection.selected.length >= partialSelection.selected.length
         || !retained.excludedPremiseIds.length) break;
       retained.excludedPremiseIds.forEach(id => partialExcludedIds.add(String(id)));
+      const previouslyReviewedSelection = partialSelection;
       partialSelection = retained.selection;
-      partialReview = await reviewBoth(partialSelection);
+      partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
         this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + requestedCount
           + ' 个已独立复核合格题材；达到最低可交付数量，停止为凑数重选。');
@@ -5808,11 +5809,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           completeCardGatePending: true,
         } };
       }
-    }
-    if (initial.selected.length < requestedCount) {
-      const retained = retainReviewedPremises(partialSelection, partialReview,
-        repairPlan.protectedItems.map(item => String(item.premiseId)));
-      throw new Error('固定候选池只筛出 ' + initial.selected.length + '/' + requestedCount + ' 个成熟题材；在不降低独立审核质量的前提下，复核后仅 ' + retained.selection.selected.length + ' 个题材可保留，低于最低可交付数量 ' + minimumSelectableCount + '。已停止继续重选，避免为凑数增加耗时或引入弱题材。');
     }
     if (repairPlan.availableCandidates.length < repairPlan.repairSlots.length) {
       const retained = retainReviewedPremises(initial, initialReview);
@@ -5839,7 +5835,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const normalize=(value:unknown)=>{
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
-        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories);
+        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
         const premises=Object.fromEntries(rows.map((row:any)=>[row.replacesPremiseId,candidate.selected.find(item=>item.premiseId===row.premise.premiseId)!]));
         if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||Object.entries(prior).some(([key,entry])=>premises[id][key]!==entry)))
           throw Error('比较协议补正不得更换候选身份或改写premise，只补正comparisons');

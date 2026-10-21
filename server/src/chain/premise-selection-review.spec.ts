@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
 
@@ -38,7 +38,31 @@ describe('premise selection before identity lock', () => {
     initial.selected[0].differentiation='他明确声称自己的选择与别人不同';
     expect(premiseSourceComparisonCatalog(initial)).toHaveLength(21);
   });
-  it('does not enter another provider attempt after the last physical call returns invalid comparison JSON', async () => {
+  it('reuses and reindexes completed review evidence when failed premises are removed', () => {
+ const original=normalizePremiseSelectionPayload({pool:['A','B','C'].map(premise),selectedPremises:['A','B','C'].map(premise)},3,3);
+ const review:PremiseSelectionReview={passed:false,issues:[{kind:'source_drift',premiseId:'B',referencePremiseId:'B',
+   quote:premise('B').activeChoice,referenceQuote:premise('B').storyCore,reason:'决定性物证缺少实际取得和交付条件'}],
+   sourceChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.activeChoice',status:id==='B'?'drift':'preserved',reason:'对照原池事实与展开内容，核对当前行动是否保留'})),
+   payoffChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.payoff',status:id==='B'?'gap':'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',conditionEvidenceRef:'S'+(index+1)+'.escalation',links:[{ref:'S'+(index+1)+'.causalPlan.1',status:id==='B'?'gap':'supported',reason:'逐环核对本题材的实际必要条件是否成立'}],reason:'核对决定性结果的必要行动与条件是否实际成立'})),
+   categoryChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.category',status:'fulfilled',evidenceRef:'S'+(index+1)+'.activeChoice',reason:'当前主线选择落实对应分类机制'})),
+   genreChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.genre',status:'fulfilled',evidenceRef:'S'+(index+1)+'.activeChoice',reason:'当前人物行动落实本卡已选流派机制'}))};
+ const retained=retainReviewedPremises(original,review);
+ expect(retained.selection.selected.map(item=>item.premiseId)).toEqual(['A','C']);
+ const finalReview=retainPremiseReviewEvidence(original,review,retained.selection);
+ expect(finalReview.passed).toBe(true);
+ expect(finalReview.issues).toEqual([]);
+ expect(finalReview.sourceChecks?.map(row=>row.ref)).toEqual(['S1.activeChoice','S2.activeChoice']);
+ expect(finalReview.payoffChecks?.map(row=>row.ref)).toEqual(['S1.payoff','S2.payoff']);
+ expect(finalReview.payoffChecks?.map(row=>row.actionEvidenceRef)).toEqual(['S1.activeChoice','S2.activeChoice']);
+ expect(finalReview.payoffChecks?.map(row=>row.conditionEvidenceRef)).toEqual(['S1.escalation','S2.escalation']);
+ expect(finalReview.payoffChecks?.map(row=>row.links?.[0].ref)).toEqual(['S1.causalPlan.1','S2.causalPlan.1']);
+ expect(finalReview.categoryChecks?.map(row=>row.ref)).toEqual(['S1.category','S2.category']);
+ expect(finalReview.categoryChecks?.map(row=>row.evidenceRef)).toEqual(['S1.activeChoice','S2.activeChoice']);
+ expect(finalReview.genreChecks?.map(row=>row.ref)).toEqual(['S1.genre','S2.genre']);
+ expect(finalReview.genreChecks?.map(row=>row.evidenceRef)).toEqual(['S1.activeChoice','S2.activeChoice']);
+});
+
+it('does not enter another provider attempt after the last physical call returns invalid comparison JSON', async () => {
     const c=Object.create(ChainController.prototype) as any;
     c.logger={warn:vi.fn(),error:vi.fn()};
     c.realLLM={generate:vi.fn(async(options:any)=>{
@@ -477,6 +501,28 @@ it('does not reinterpret a network failure as output capacity or start fallback 
  c.llmCallWithRetry=vi.fn().mockRejectedValue(Error('network failed'));
  await expect(c.reconcilePremiseSelection(selection(),2,3,['悬疑'],'')).rejects.toThrow('network failed');expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
 });
+it('tries an original-pool replacement when the initial selection is short and one selected premise fails review', async () => {
+ const initial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),selectedPremises:['A','B','C'].map(premise)},5,7,undefined,3);
+ const c=Object.create(ChainController.prototype) as any;
+ const failed:PremiseSelectionReview={passed:false,issues:[{kind:'source_drift',premiseId:'B',referencePremiseId:'B',
+   quote:premise('B').activeChoice,referenceQuote:premise('B').storyCore,reason:'决定性物证缺少实际取得和交付条件'}]};
+ let sourceRound=0;
+ c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:string,mode:string)=>{
+   if(mode==='overlap')return {passed:true,issues:[]};
+   return sourceRound++===0?failed:{passed:true,issues:[]};
+ });
+ c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+   const data={replacements:[{replacesPremiseId:'B',premise:premise('D'),comparisons:[compare('A'),compare('C')]}]};
+   expect(options.validate(data)).toBe(true);
+   return {data};
+ });
+ const result=await c.reconcilePremiseSelection(initial,5,7,['悬疑'],'');
+ expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','D','C']);
+ expect(result.selectionAudit.finalReview.passed).toBe(true);
+ expect(result.selectionAudit.reselectionAttempted).toBe(true);
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+});
+
 it('aggregates all failed reserve positions and keeps the remaining failure after another slot passes',async()=>{
  const initial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),selectedPremises:['A','B','C'].map(premise)},3,7);
  const c=Object.create(ChainController.prototype) as any;

@@ -8,6 +8,12 @@ export type IdeaStoryType = 'short_story' | 'long_novel';
 
 export class PremiseNamingError extends Error {}
 
+/** Keep partial delivery useful: requests above two still return at least three qualified cards. */
+export function minimumAcceptableIdeaCount(requestedCount: number): number {
+  if (!Number.isInteger(requestedCount) || requestedCount < 1) throw new Error('题材数量必须为正整数');
+  return requestedCount <= 2 ? requestedCount : Math.max(3, requestedCount - 2);
+}
+
 /** Current rejection and attempt history are different views. Never report a
  * fixed initial defect as the reason the latest candidate is still blocked. */
 export function latestIdeaFailureReasons(assessments:readonly {sourcePremiseId?:unknown;passed?:unknown;issues?:unknown}[],missingIds:readonly string[]):string[]{

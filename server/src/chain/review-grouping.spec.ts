@@ -4,6 +4,8 @@ import { isReviewOutputCapacityError, splitReviewMaterial } from './review-group
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseSourceComparisonCatalog, materializePremiseSourceReview } from './premise-selection-review';
+import { premisePayoffCatalog } from './premise-payoff-review';
+import { premiseCausalCatalog } from './premise-causal-plan';
 
 beforeEach(() => vi.spyOn(config, 'readGenerationBudgets').mockReturnValue({ ...config.GENERATION_BUDGET_DEFAULTS, reviewGroupingMode: 0 }));
 afterEach(() => vi.restoreAllMocks());
@@ -63,8 +65,18 @@ describe('aggregate review before capacity partitioning', () => {
     c.logger = { warn: vi.fn(), error: vi.fn() };
     c.realLLM = { generate: vi.fn(async (request: any) => {
       request.physicalCallBudget.remaining--;
-      return { content: JSON.stringify({ sourceChecks: premiseSourceComparisonCatalog(selection)
-        .map(row => ({ ref: row.ref, status: 'preserved', reason: '展开保持原池的行动方向与既定后果' })) }) };
+      const payoffChecks = premisePayoffCatalog(selection).map((row, index) => ({
+        ref: row.ref, status: 'supported', actionEvidenceRef: 'S' + (index + 1) + '.activeChoice',
+        conditionEvidenceRef: 'S' + (index + 1) + '.escalation',
+        reason: '逐项核对兑现结果所需的实际行动与必要条件',
+        links: premiseCausalCatalog(selection.selected[index], 'S' + (index + 1) + '.').map(link => ({
+          ref: link.ref, status: 'supported', reason: '当前因果环节的行动、条件与结果相互成立',
+        })),
+      }));
+      return { content: JSON.stringify({
+        sourceChecks: premiseSourceComparisonCatalog(selection).map(row => ({ ref: row.ref, status: 'preserved', reason: '展开保持原池的行动方向与既定后果' })),
+        payoffChecks,
+      }) };
     }) };
     const result = await c.reviewPremiseSelection(selection, '完整既有执行标准', 'source_drift', budget);
     expect(result.sourceChecks).toHaveLength(50); expect(c.realLLM.generate).toHaveBeenCalledOnce();
