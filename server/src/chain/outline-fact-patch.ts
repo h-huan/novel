@@ -115,7 +115,7 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
   }
   return [...new Set(found)];
  };
- const changeTouchesFragment=(before:string,after:string,fragment:string):boolean=>{
+ function changeTouchesFragment(before:string,after:string,fragment:string):boolean {
   let prefix=0;
   while(prefix<before.length&&prefix<after.length&&before[prefix]===after[prefix])prefix++;
   let suffix=0;
@@ -129,7 +129,7 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
    at=before.indexOf(fragment,at+1);
   }
   return false;
- };
+ }
  for(const defect of defects){
   let row:any;
   try{row=JSON.parse(defect);}catch{continue;}
