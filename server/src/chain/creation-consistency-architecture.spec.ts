@@ -30,6 +30,13 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
   });
 
+  it('prevents cross-channel message contradictions and protects explicit action evidence during outline repair', () => {
+    expect(controllerSource).toContain('【通信渠道与同源事件约束】');
+    expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
+    expect(controllerSource).toContain('【通信渠道矛盾修复规则】');
+    expect(controllerSource).toContain('不得删除或忽略该直接证据去迁就错误审查');
+  });
+
   it('short-world directive cannot override the confirmed story or silently rewrite a conflict', () => {
     expect(controllerSource).toContain('【已确认世界规则（不得覆盖已确认题材的核心事实）】');
     expect(controllerSource).not.toContain('【已确认世界规则（高于故事卡和章纲措辞）】');
