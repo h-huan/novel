@@ -109,7 +109,7 @@ describe('idea discovery preselection contract', () => {
     expect(directive).toContain('只有 3-5 个题材真正满足');
     expect(directive).toContain('selectedPremises 返回 3-5 项');
     expect(directive).toContain('绝不为了凑数加入弱项');
-    expect(ideaPremiseSelectionDirective('short_story', 5)).toContain('selectedPremises 返回 5-5 项');
+    expect(ideaPremiseSelectionDirective('short_story', 5)).toContain('selectedPremises 返回 恰好 5 项');
   });
 
   it('allows fewer independently selected mature premises without relaxing evidence requirements', () => {
