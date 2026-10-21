@@ -5430,7 +5430,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // A short preselection must not erase independently verified premises.
       // The final quantity gate still rejects a batch below requestedCount.
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
-      const minimumDeliverableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
+      const minimumDeliverableCount = Math.max(1, requestedCount - 2);
       if (preselectionShortfall) {
         this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，若最终达到最低可交付数量则返回明确标注缺额的合格部分结果，不用弱题材凑数。`);
       }
@@ -5772,7 +5772,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const initialReview = await reviewBoth(initial);
     if (initialReview.passed) return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview } };
     const repairPlan = premiseReselectionPlan(initial, initialReview);
-    const minimumSelectableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
+    const minimumSelectableCount = Math.max(1, requestedCount - 2);
     // If enough independently reviewed premises remain, stop here instead of spending
     // more calls trying to fill every position. Full-card gates still run afterwards.
     let partialSelection = initial;
