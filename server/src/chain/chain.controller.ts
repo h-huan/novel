@@ -5053,8 +5053,10 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           const reason = String((parsed && (parsed.message || parsed.reason)) || '').trim();
           return new Error('创建前题材筛选被执行前提阻断' + (missing ? '（' + missing + '）' : '') + '：' + (reason || '模型未说明原因') + '；未进入题材质量筛选。');
         };
-        const poolBatchResults: Array<{ batchIndex: number; candidates: any[]; error?: string; blocked?: any }> =
+        const poolStartedAt = Date.now();
+        const poolBatchResults: Array<{ batchIndex: number; candidates: any[]; durationMs: number; error?: string; blocked?: any }> =
           await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
+            const batchStartedAt = Date.now();
             try {
               const response = await this.realLLM.generate({
                 prompt: buildPremiseSelectionPrompt('pool', { batchIndex, batchCount: poolBatchCount, batchSize }),
@@ -5065,11 +5067,11 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
                 metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
               });
               const parsed = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
-              if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) return { batchIndex, candidates: [], blocked: parsed };
+              if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) return { batchIndex, candidates: [], durationMs: Date.now() - batchStartedAt, blocked: parsed };
               if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
-              return { batchIndex, candidates: parsed.pool };
+              return { batchIndex, candidates: parsed.pool, durationMs: Date.now() - batchStartedAt };
             } catch (error) {
-              return { batchIndex, candidates: [], error: error instanceof Error ? error.message : String(error) };
+              return { batchIndex, candidates: [], durationMs: Date.now() - batchStartedAt, error: error instanceof Error ? error.message : String(error) };
             }
           }));
         const blockedBatch = poolBatchResults.find(item => item.blocked);
@@ -5112,6 +5114,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         }
         const poolGenerationAudit = {
           strategy: 'parallel_pool_batches_then_fixed_pool_selection',
+          wallMs: Date.now() - poolStartedAt,
           target: premisePoolSize,
           generated: candidatePool.length,
           shortfall: Math.max(0, premisePoolSize - candidatePool.length),
@@ -5121,9 +5124,12 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             batch: batch.batchIndex + 1,
             requested: poolBatchSizes[batch.batchIndex],
             rawReturned: batch.candidates.length,
+            durationMs: batch.durationMs,
             error: batch.error || null,
           })),
         };
+        this.logger.log('idea-discover: 候选池并发生成 wallMs=' + poolGenerationAudit.wallMs
+          + '，batchDurationsMs=' + JSON.stringify(poolGenerationAudit.batches.map(batch => ({ batch: batch.batch, durationMs: batch.durationMs, rawReturned: batch.rawReturned, error: batch.error }))));
         if (candidatePool.length < requestedCount) {
           const batchErrors = poolBatchResults.filter(item => item.error).map(item => '第' + (item.batchIndex + 1) + '批：' + item.error).join('；');
           throw new Error('并发候选池只形成' + candidatePool.length + '/' + premisePoolSize + '个有效且去重后的轻量题材，少于本次至少需要的' + requestedCount + '个；' + (batchErrors || '候选不足，未进入选优和完整卡生成。'));
