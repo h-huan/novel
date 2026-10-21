@@ -5096,7 +5096,6 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               storyCategory = discoveryCategories[categoryIndex];
             }
             const bound = bindPremiseCategory({
-              ...item,
               premiseId: 'P' + (candidatePool.length + 1),
               workingTitle,
               storyCore,
@@ -5433,7 +5432,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
       const minimumDeliverableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
       if (preselectionShortfall) {
-        this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，最终缺额不能冒充成功。`);
+        this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，若最终达到最低可交付数量则返回明确标注缺额的合格部分结果，不用弱题材凑数。`);
       }
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
       const structuredCards: Array<Record<string, unknown>> = [];
