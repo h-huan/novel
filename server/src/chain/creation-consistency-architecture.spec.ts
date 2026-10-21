@@ -18,6 +18,12 @@ function indexOrFail(source: string, marker: string): number {
 }
 
 describe('creation consistency architecture invariants', () => {
+  it('short-world directive cannot override the confirmed story or silently rewrite a conflict', () => {
+    expect(controllerSource).toContain('【已确认世界规则（不得覆盖已确认题材的核心事实）】');
+    expect(controllerSource).not.toContain('【已确认世界规则（高于故事卡和章纲措辞）】');
+    expect(controllerSource).toContain('若二者存在真实互斥，停止下游改写并将冲突交由既有一致性审核处理');
+  });
+
   it('projects one confirmed story into the same Story Foundation for long and short creation', () => {
     expect(controllerSource).toContain('const storyFoundation = buildStoryFoundation(dto.selectedIdea);');
     expect(controllerSource).toContain('const ideaStr = JSON.stringify({ confirmedStory: dto.selectedIdea, storyFoundation });');

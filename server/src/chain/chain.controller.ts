@@ -7027,13 +7027,13 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
         const worldRowForOutline = db.prepare(`SELECT atmosphere, story_premise, rules, special_settings, social_rules, constraints
           FROM world_settings WHERE project_id = ? LIMIT 1`).get(projectId) as any;
         const worldContinuityDirective = worldRowForOutline
-          ? `\n【已确认世界规则（高于故事卡和章纲措辞）】${JSON.stringify({
+          ? `\n【已确认世界规则（不得覆盖已确认题材的核心事实）】${JSON.stringify({
             storyPremise: worldRowForOutline.story_premise,
             rules: worldRowForOutline.rules,
             specialSettings: worldRowForOutline.special_settings,
             socialRules: worldRowForOutline.social_rules,
             constraints: worldRowForOutline.constraints,
-          })}\n若题材或故事卡中的概括性措辞与这里冲突，保留人物、真相、反转和结局，但必须把事件机制改写为符合已确认世界规则的方式；不得要求后续章纲执行一个违反世界规则的“唯一任务”。\n`
+          })}\n本世界规则在保存前已按已确认题材进行来源审查，后续只可补充不冲突的细节；不可为了迎合世界观新增条款而改变已确认题材的触发条件、事件机制、人物身份、真相、反转、结局或固定代价。若二者存在真实互斥，停止下游改写并将冲突交由既有一致性审核处理，不擅自修改任何已锁定事实。\n`
           : '';
         if (isShort) {
           const unwrapStoryCard = (value: any): Record<string, any> | null => {

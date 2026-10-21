@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import {normalizePremiseSelectionPayload,SELECTED_PREMISE_FIELDS,ideaGateLocalRepairDirective} from './idea-discovery-contract';
-import {premiseSourceComparisonCatalog,type PremiseSelectionReview} from './premise-selection-review';
+import {premiseSourceComparisonCatalog,materializePremiseSourceReview,type PremiseSelectionReview} from './premise-selection-review';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
 const selection=()=>normalizePremiseSelectionPayload({
  pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'原池既定行动、条件和代价均保持真实一致'+premiseId})),
@@ -23,17 +23,29 @@ it('reviews only two changed items, restores all fifty checks and rebinds eviden
  expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
  expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
 });
-it('never reuses failed, missing or unknown receipts and preserves current failure evidence',async()=>{
+it('reuses complete unchanged failed evidence without turning rejection into acceptance; invalid and unknown reviews are not cached',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map();
  const review=vi.fn(async pending=>{const r=report(pending),index=pending.selected.findIndex(item=>item.premiseId==='B');
-  if(index>=0){r.passed=false;r.issues=[{kind:'source_drift',premiseId:'B',referencePremiseId:'B',quote:pending.selected[index].activeChoice,referenceQuote:pending.pool.find(seed=>seed.premiseId==='B')!.storyCore,reason:'当前展开改变了原池明确的主动选择'}];r.sourceChecks!.find(row=>row.ref===`S${index+1}.activeChoice`)!.status='drift';}return r;});
+  if(index>=0){
+   r.sourceChecks!.find(row=>row.ref===`S${index+1}.activeChoice`)!.status='drift';
+   r.sourceChecks!.find(row=>row.ref===`S${index+1}.activeChoice`)!.reason='当前展开改变了原池明确的主动选择';
+   const isolated={...pending,selected:[pending.selected[index]],pool:pending.pool.filter(seed=>seed.premiseId==='B')};
+   const drift=materializePremiseSourceReview({sourceChecks:r.sourceChecks!.filter(row=>row.ref.startsWith(`S${index+1}.`)).map(row=>({...row,ref:row.ref.replace(/^S\\d+\\./,'S1.')}))},isolated);
+   r.passed=false;r.issues=drift.issues;
+  }return r;});
  await reviewChangedPremiseSources(input,'standard',cache,review);
  const result=await reviewChangedPremiseSources(input,'standard',cache,review);
- expect(review.mock.calls[1][0].selected.map(item=>item.premiseId)).toEqual(['B']);
+ expect(review).toHaveBeenCalledTimes(1);
  expect(result.passed).toBe(false);expect(result.issues[0].premiseId).toBe('B');
  expect(result.sourceChecks?.find(row=>row.ref==='S2.activeChoice')?.status).toBe('drift');
+ const changed=structuredClone(input);changed.selected[1].activeChoice+='新事实';
+ await reviewChangedPremiseSources(changed,'standard',cache,review);
+ expect(review.mock.calls[1][0].selected.map(item=>item.premiseId)).toEqual(['B']);
  const missing=vi.fn(async()=>({passed:true,issues:[]}));const empty:PremiseSourceReceipts=new Map();
  await reviewChangedPremiseSources(input,'standard',empty,missing);expect(empty.size).toBe(0);
+ const unknown=vi.fn(async pending=>{const r=report(pending);r.sourceChecks![0].status='unknown';return r;});
+ const unknownCache:PremiseSourceReceipts=new Map();
+ await reviewChangedPremiseSources(input,'standard',unknownCache,unknown);expect(unknownCache.size).toBe(0);
 });
 it('invalidates on source facts, category, standards, genre scope and a new run',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map(),review=vi.fn(async pending=>report(pending));

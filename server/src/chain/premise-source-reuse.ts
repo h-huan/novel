@@ -1,7 +1,9 @@
 import {type PremiseSelectionResult} from './idea-discovery-contract';
-import {type PremiseSelectionReview, premiseSourceReviewIssues} from './premise-selection-review';
+import {type PremiseSelectionReview, premiseSourceReviewIssues, premiseSelectionReviewIssues, materializePremiseSourceReview} from './premise-selection-review';
 import {mergePremiseSourceBatches} from './premise-source-batches';
 import {premisePayoffReviewIssues} from './premise-payoff-review';
+import {premiseGenreFitIssues} from './premise-genre-fit';
+import {premiseCategoryFitIssues} from './premise-category-fit';
 
 type Receipt={selection:PremiseSelectionResult;review:PremiseSelectionReview};
 /** Owned by one reconciliation only. Never persists or crosses discovery runs. */
@@ -26,6 +28,7 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
  observe?:(counts:{reused:number;reviewed:number})=>void):Promise<PremiseSelectionReview> {
  const key=(item:PremiseSelectionResult['selected'][number])=>JSON.stringify({scope,item,
   seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
+ const requiredGenres=(()=>{try{const parsed=JSON.parse(scope);return Array.isArray(parsed?.requiredGenres)?parsed.requiredGenres as string[]:[];}catch{return [];}})();
  const hits=selection.selected.map(item=>receipts.get(key(item)));
  const pending=selection.selected.filter((_item,index)=>!hits[index]);
  observe?.({reused:selection.selected.length-pending.length,reviewed:pending.length});
@@ -39,11 +42,27 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
   if(!premiseSourceReviewIssues({sourceChecks:fresh.review.sourceChecks},input).length){
    for(let index=0;index<input.selected.length;index++){
     const receipt=singleReceipt(input,fresh.review,index),r=receipt.review;
-    if(r.passed&&r.sourceChecks?.every(row=>row.status==='preserved')&&r.payoffChecks?.length===1
+    // Complete failed reviews are evidence, not passes: reuse the same rejection
+    // only while the premise, source, standards and required genres are identical.
+    // Never cache unknown, incomplete or contradictory review contracts.
+    let sourceIssuesMatch=false;
+    try{
+     const materialized=materializePremiseSourceReview({sourceChecks:r.sourceChecks},receipt.selection).issues;
+     const recorded=r.issues.filter(issue=>issue.kind==='source_drift');
+     const same=(a:typeof recorded[number],b:typeof recorded[number])=>
+       a.premiseId===b.premiseId&&a.referencePremiseId===b.referencePremiseId
+       &&a.field===b.field&&a.quote===b.quote&&a.referenceQuote===b.referenceQuote&&a.reason===b.reason;
+     sourceIssuesMatch=materialized.length===recorded.length&&materialized.every(issue=>recorded.some(row=>same(issue,row)));
+    }catch{}
+    if(sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
+      &&r.sourceChecks?.every(row=>row.status!=='unknown')
+      &&r.payoffChecks?.length===1
       &&!premisePayoffReviewIssues({payoffChecks:r.payoffChecks},receipt.selection).length
-      &&r.payoffChecks.every(row=>row.status==='supported')
-      &&(r.genreChecks||[]).every(row=>row.status==='fulfilled')
-      &&(r.categoryChecks||[]).every(row=>row.status==='fulfilled'))
+      &&r.payoffChecks.every(row=>row.status!=='unknown'&&(row.links||[]).every(link=>link.status!=='unknown'))
+      &&!premiseGenreFitIssues({genreChecks:r.genreChecks},receipt.selection,requiredGenres).length
+      &&!premiseCategoryFitIssues({categoryChecks:r.categoryChecks},receipt.selection).length
+      &&(r.genreChecks||[]).every(row=>row.status!=='unknown')
+      &&(r.categoryChecks||[]).every(row=>row.status!=='unknown'))
      receipts.set(key(input.selected[index]),structuredClone(receipt));
    }
   }
