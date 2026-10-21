@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { useDiscoveryStore } from '../stores/discoveryStore';
 import { missingExecutionStandards } from '../lib/executionStandards';
-import { discoveryResponseMatchesSelection, discoverySignature, findProjectForIdea, standardsForIdea } from './DiscoveryWizardPage';
+import { discoveryResponseMatchesSelection, discoverySignature, findProjectForIdea, normalizeDiscoveryResponse, standardsForIdea } from './DiscoveryWizardPage';
 import type { Project } from '@novel/shared';
 
 describe('从题材卡创建项目的执行设定', () => {
@@ -97,6 +97,23 @@ it('allows only explicitly marked qualified partial results without weakening th
  expect(discoveryResponseMatchesSelection(signature,state,[],true)).toBe(false);
  expect(discoveryResponseMatchesSelection(signature,state,[one,one,one,one],true)).toBe(false);
  expect(discoveryResponseMatchesSelection(signature,state,[{...one,targetPlatform:'other'}],true)).toBe(false);
+});
+
+it('normalizes the current server partial-success contract and the legacy incomplete contract', () => {
+  const base = { storyType: 'short_story', targetPlatform: 'fanqie', ideaAppealGate: { passed: true } };
+  const partialIdeas = [base, { ...base, title: '第二张' }, { ...base, title: '第三张' }];
+  expect(normalizeDiscoveryResponse({ success: true, status: 'partial', ideas: partialIdeas, warning: '缺额2张' }, 5))
+    .toEqual({ ideas: partialIdeas, partial: true });
+  expect(normalizeDiscoveryResponse({ success: false, status: 'incomplete', qualifiedIdeas: partialIdeas }, 5))
+    .toEqual({ ideas: partialIdeas, partial: true });
+  const fullIdeas = Array.from({ length: 5 }, (_, index) => ({ ...base, title: '完整' + index }));
+  expect(normalizeDiscoveryResponse({ success: true, ideas: fullIdeas }, 5))
+    .toEqual({ ideas: fullIdeas, partial: false });
+  expect(normalizeDiscoveryResponse({ success: true, status: 'partial', ideas: [] }, 5)).toBeNull();
+  expect(normalizeDiscoveryResponse({ success: false, status: 'incomplete', qualifiedIdeas: [] }, 5)).toBeNull();
+  // A short unmarked success is not silently reclassified as an approved partial result.
+  expect(normalizeDiscoveryResponse({ success: true, ideas: partialIdeas }, 5))
+    .toEqual({ ideas: partialIdeas, partial: false });
 });
 
 it('shows saved partial selection reasons without another discovery request',async()=>{

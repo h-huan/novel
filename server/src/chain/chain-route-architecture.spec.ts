@@ -92,6 +92,16 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('系统不会把部分结果伪装成完整成功');
   });
 
+  it('keeps the desktop discovery wizard aligned with the server partial-success response contract', () => {
+    const desktopPage = fs.readFileSync(
+      path.resolve(chainDir, '../../../desktop/src/renderer/pages/DiscoveryWizardPage.tsx'),
+      'utf8',
+    );
+    expect(desktopPage).toContain("result.status === 'partial'");
+    expect(desktopPage).toContain("result.status === 'incomplete'");
+    expect(desktopPage).toContain('normalizeDiscoveryResponse(res, configuredState.ideaCount)');
+  });
+
   it('repairs outline fact conflicts as a local patch instead of regenerating the whole chapter plan', () => {
     const source = read('chain.controller.ts');
 

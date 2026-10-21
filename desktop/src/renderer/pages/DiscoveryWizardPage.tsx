@@ -127,6 +127,23 @@ export const discoveryResponseMatchesSelection = (
   && (allowQualifiedPartial ? ideas.length > 0 && ideas.length < state.ideaCount : ideas.length === state.ideaCount)
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
+/** Normalize both the current server partial-success contract and the legacy incomplete contract. */
+export const normalizeDiscoveryResponse = (
+  response: unknown,
+  requestedCount: number,
+): { ideas: any[]; partial: boolean } | null => {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) return null;
+  const result = response as Record<string, any>;
+  const currentPartial = result.success === true && result.status === 'partial'
+    && Array.isArray(result.ideas) && result.ideas.length > 0;
+  const legacyPartial = result.success === false && result.status === 'incomplete'
+    && Array.isArray(result.qualifiedIdeas) && result.qualifiedIdeas.length > 0;
+  const complete = result.success === true && Array.isArray(result.ideas) && result.ideas.length > 0;
+  if (!complete && !legacyPartial) return null;
+  const ideas = legacyPartial ? result.qualifiedIdeas : result.ideas;
+  return { ideas, partial: ideas.length < requestedCount && (currentPartial || legacyPartial) };
+};
+
 // Absence from a public sample is not evidence of an invalid tag.
 const discoveryGenreProblem = (_state: ReturnType<typeof useDiscoveryStore.getState>): string => '';
 
@@ -923,9 +940,9 @@ const DiscoveryWizardPage: React.FC = () => {
 
       if (requestId !== latestDiscoveryRequestId) return;
 
-      const partial = (res as any)?.success === false && (res as any)?.status === 'incomplete' && (res as any)?.qualifiedIdeas?.length > 0;
-      if (((res as any)?.success && (res as any)?.ideas?.length > 0) || partial) {
-        const newIdeas = partial ? (res as any).qualifiedIdeas : (res as any).ideas;
+      const normalizedResponse = normalizeDiscoveryResponse(res, configuredState.ideaCount);
+      if (normalizedResponse) {
+        const { partial, ideas: newIdeas } = normalizedResponse;
         if ((!partial && newIdeas.length !== configuredState.ideaCount) || newIdeas.length > configuredState.ideaCount) {
           store.setGenProgress(`❌ 题材数量不足或超额：请求 ${configuredState.ideaCount}，返回 ${newIdeas.length}；本轮未完成，请重新发现。`);
           return;
@@ -950,7 +967,7 @@ const DiscoveryWizardPage: React.FC = () => {
           .filter((i: any) => i.title)
           .map((i: any) => ({ title: i.title, hook: i.hook, description: i.description }));
         store.addExcludeDetails(newDetails);
-        const warning = (res as any).qualityWarning || '';
+        const warning = (res as any).warning || (res as any).qualityWarning || '';
         const qualityWarn = warning ? `\n⚠️ ${warning}` : '';
         const selectionReasons = (res as any)?.appealGate?.selectionAudit?.reasons;
         const missingReason = Array.isArray(selectionReasons) ? selectionReasons.map((item: any) => typeof item?.reason === 'string' ? item.reason : '').filter(Boolean).join('；') : '';
