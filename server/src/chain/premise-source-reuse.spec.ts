@@ -30,7 +30,7 @@ it('reuses complete unchanged failed evidence without turning rejection into acc
    r.sourceChecks!.find(row=>row.ref===`S${index+1}.activeChoice`)!.status='drift';
    r.sourceChecks!.find(row=>row.ref===`S${index+1}.activeChoice`)!.reason='当前展开改变了原池明确的主动选择';
    const isolated={...pending,selected:[pending.selected[index]],pool:pending.pool.filter(seed=>seed.premiseId==='B')};
-   const drift=materializePremiseSourceReview({sourceChecks:r.sourceChecks!.filter(row=>row.ref.startsWith(`S${index+1}.`)).map(row=>({...row,ref:row.ref.replace(/^S\\d+\\./,'S1.')}))},isolated);
+   const drift=materializePremiseSourceReview({sourceChecks:r.sourceChecks!.filter(row=>row.ref.startsWith(`S${index+1}.`)).map(row=>({...row,ref:row.ref.replace(`S${index+1}.`,'S1.')}))},isolated);
    r.passed=false;r.issues=drift.issues;
   }return r;});
  await reviewChangedPremiseSources(input,'standard',cache,review);
