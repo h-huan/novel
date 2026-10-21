@@ -78,6 +78,13 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
  const actionGaps=(actionEvidence?.gaps||[]).filter(gap=>gap.actionPath||gap.resultPath);
  const normalizePath=(value:string)=>value.replace(/\[(0|[1-9]\d*)\]/g,'.$1').replace(/^0\./,'');
  const pathOverlaps=(left:string,right:string)=>left===right||left.startsWith(right+'.')||right.startsWith(left+'.');
+ const evidenceClause=(value:string,quote:string):string=>{
+  const at=value.indexOf(quote);if(at<0)return quote;
+  const delimiter=/[。！？；\n\r]/;
+  let start=at;while(start>0&&!delimiter.test(value[start-1]))start--;
+  let end=at+quote.length;while(end<value.length&&!delimiter.test(value[end]))end++;
+  return value.slice(start,end).trim()||quote;
+ };
  const directlyChangesEvidence=(path:string,quote:string|undefined):boolean=>{
   const target=normalizePath(path);
   for(const [oldPath,before] of old){
@@ -85,9 +92,9 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
    const after=current.get(oldPath);
    if(after===undefined||after===before)continue;
    const literal=String(quote||'').trim();
-   if(literal&&before.includes(literal))return changeTouchesFragment(before,after,literal);
+   if(literal&&before.includes(literal))return changeTouchesFragment(before,after,evidenceClause(before,literal));
    const escaped=literal?JSON.stringify(literal).slice(1,-1):'';
-   if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,escaped);
+   if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,evidenceClause(before,escaped));
    // Some projected paths are nested inside JSON serialized in a string field.
    // If the exact anchor cannot be found in that serialization, only field overlap
    // can be checked locally; the independent semantic review remains authoritative.
