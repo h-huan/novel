@@ -5612,6 +5612,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         requested: requestedCount,
         shortfall: requestedCount - selectedAccepted.length,
         returned: selectedAccepted.length,
+        partial: false,
+        minimumDeliverableCount,
         rejected: finalMissingPremiseIds.length,
         repairAttempted: finalGateRepairAttempted,
         repairGenerated: finalGateRepairGenerated,
