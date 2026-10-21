@@ -572,6 +572,101 @@ function projectMarkdown(target) {
   return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
+
+function detailedIdeaMarkdown() {
+  const data = runtime.ideaDiscovery || {};
+  const audit = data.audit || data.appealGate || data;
+  const evidence = {
+    available: data.available ?? null, success: data.success ?? audit.success ?? null,
+    requested: audit.requested ?? null, preselectionShortfall: audit.preselectionShortfall ?? null,
+    premiseSelected: audit.premiseSelected ?? null, generated: audit.generated ?? null,
+    qualified: audit.qualified ?? null, returned: audit.returned ?? null, shortfall: audit.shortfall ?? null,
+    stopReason: audit.stopReason ?? audit.fulfillment?.stopReason ?? null,
+    physicalCalls: {
+      presentationUsed: audit.presentationPhysicalCallsUsed ?? null,
+      presentationLimit: audit.presentationPhysicalCallLimit ?? null,
+      sourceRemaining: audit.fulfillment?.sourceCallsRemaining ?? null,
+      reselectionRemaining: audit.fulfillment?.reselectionCallsRemaining ?? null,
+    },
+    selectionAudit: audit.selectionAudit ?? null,
+    structuringErrors: audit.structuringErrors ?? null,
+    candidateAssessments: audit.candidateAssessments ?? null,
+    reasons: audit.reasons ?? null,
+  };
+  const detail = JSON.stringify(evidence, null, 2);
+  return '## 题材发现：数量、审核、调用预算与失败证据\n\n'
+    + '未提供的证据保留为 null，不推断通过。内容过长时 Markdown 仅显示前 30000 字，完整数据保留在 JSON。\n\n'
+    + '~~~json\n' + detail.slice(0, 30000) + '\n~~~\n';
+}
+function detailedProjectMarkdown(target) {
+  const item = inspectedProjects[target.key];
+  if (!item) return '';
+  const runs = item.runTimeline || [];
+  const stats = item.cockpit?.diagnostics || {};
+  const issues = Array.isArray(item.integrityAudit?.consistencyIssues) ? item.integrityAudit.consistencyIssues : [];
+  const failed = runs.filter(run => String(run.status).toLowerCase() === 'failed');
+  const rows = [
+    '### ' + target.label + '：逐次调用与根因证据', '',
+    '- 运行样本：' + runs.length + ' 条（最近 200 条上限，更早记录未包含）',
+    '- 物理步骤指标样本：' + (stats.sample?.stepMetrics ?? 'unknown')
+      + '；内部重试：' + (stats.internalRetryCount ?? 'unknown')
+      + '；有效重试：' + (stats.effectiveRetryCount ?? 'unknown'),
+    '- 指标累计耗时：' + (stats.totalDurationMs ?? 'unknown') + ' ms；Token：'
+      + (stats.totalTokens ?? 'unknown') + '；首轮通过率：'
+      + (stats.effectiveFirstPassRate ?? 'unknown'),
+    '- 同配置重复成功运行组：' + (stats.exactDuplicateRunGroups ?? 'unknown')
+      + '（同配置不代表重复请求，须核对实际事件和 Run ID）',
+    '- 已持久化对象：' + JSON.stringify(stats.persisted ?? {}),
+    '- 创建停滞：' + (stats.creationStalled ?? 'unknown')
+      + '；空闲毫秒：' + (stats.idleMs ?? 'unknown')
+      + '；持久化不一致：' + JSON.stringify(stats.persistenceMismatch ?? []),
+    '- 完整性冲突：' + issues.length, '',
+    ...issues.slice(0, 35).map(issue =>
+      '- 冲突：' + markdownCell(typeof issue === 'string' ? issue : JSON.stringify(issue), 1400)),
+    '',
+    '**步骤耗时分布（仅最近运行样本）**', '',
+    '| 步骤 | 次数 | 非成功数 | 累计耗时 ms |', '|---|---:|---:|---:|',
+    ...(item.stepBreakdown || []).slice(0, 35).map(step => '| ' +
+      markdownCell(step.step) + ' | ' + step.calls + ' | ' + step.failures
+      + ' | ' + step.durationMs + ' |'),
+    '',
+    '**生成调用时间线（含 Gate 和失败原因）**', '',
+    '| Run ID | 阶段 | 状态 | 耗时 ms | Gate | 开始时间 | 原始错误摘录 |',
+    '|---|---|---|---:|---|---|---|',
+    ...runs.map(run => '| ' + markdownCell(run.id, 48) + ' | '
+      + markdownCell(run.step_key ?? run.stepKey ?? run.stage ?? run.scenario) + ' | '
+      + markdownCell(run.status, 30) + ' | ' + (run.durationMs ?? 0)
+      + ' | ' + markdownCell(run.gateStatus, 35)
+      + ' | ' + markdownCell(run.startedAt, 40) + ' | '
+      + markdownCell(run.error, 450) + ' |'), '',
+    '**失败调用详细错误（最多 40 条，每条最多 4000 字）**', '',
+    ...(failed.length ? failed.slice(0, 40).map(run =>
+      '- ' + markdownCell(run.id) + ' [' + markdownCell(run.stage ?? run.scenario) + '] '
+      + markdownCell(run.error || run.failedOutputExcerpt || run.status, 4000))
+      : ['- 无失败记录']), '',
+    '**后端已识别的慢步骤与可能重复调用**', '',
+    '~~~json',
+    JSON.stringify({
+      slowestSteps: stats.slowestSteps || [], exactDuplicateRuns: stats.exactDuplicateRuns || [],
+    }, null, 2),
+    '~~~',
+  ];
+  return rows.join('\n');
+}
+function failedTestsMarkdown() {
+  const failed = tests.filter(test => test.status !== 'passed');
+  return '## 仓库测试失败日志\n\n' + (failed.length ? failed.map(test =>
+    '### ' + test.label + '\n\n'
+    + '- 退出码：' + test.exitCode + '；耗时：' + test.durationMs + ' ms\n\n'
+    + '~~~text\n' + String(test.stdoutTail || '') + '\n'
+    + String(test.stderrTail || '') + '\n~~~').join('\n\n')
+    : '无失败测试；若未指定 --full，本轮未执行仓库测试。');
+}
+const detailedSections = !health.ok
+  ? '## 详细运行诊断\n\nServer 不可用，无法取得现有的题材与项目生成日志。'
+  : detailedIdeaMarkdown() + '\n## 项目生成调用明细\n\n'
+    + projectTargets.map(detailedProjectMarkdown).filter(Boolean).join('\n\n');
+
 const projectSections = !health.ok
   ? 'Server 不可用，项目、题材、Gate 与执行标准运行时检查均未执行；本报告只确认到服务连接这一层。'
   : projectTargets.length
@@ -584,7 +679,7 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n## 仓库测试\n\n${testLines}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n${detailedSections}\n\n## 仓库测试\n\n${testLines}\n\n${failedTestsMarkdown()}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- 本报告只读取现有 generation_runs 与 cockpit 等接口，不等同于直接读取 Server 进程 stdout/stderr；若有独立服务端日志，可与 JSON 一并提供。\n- generation_runs 最多返回最近 200 条，较早历史需单独提供服务端日志或数据库备份；Markdown 中较长证据可能截断，JSON 保留接口返回的完整结构化数据。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');
