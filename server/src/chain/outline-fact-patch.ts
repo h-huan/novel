@@ -43,7 +43,7 @@ export function applyOutlineFactPatch(chapter:Record<string,any>,patch:unknown):
  * Require an identical full event clause on both sides of one changed duration;
  * unrelated uses of the same number, ambiguous rewrites and prior chapters are
  * intentionally left to the independent fact/action gates. */
-export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>,patch:unknown,defects:readonly string[]):string[]{
+export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>,patch:unknown,defects:readonly string[],actionEvidence?:{gaps?:readonly {actionPath?:string|null;resultPath?:string|null;actionEvidence?:string;resultEvidence?:string;reason?:string}[]}):string[]{
  const next=applyOutlineFactPatch(chapter,patch);
  const leaves=(value:unknown,path='',rows=new Map<string,string>()):Map<string,string>=>{
   if(typeof value==='string')rows.set(path,value);
@@ -72,6 +72,36 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
   }
  }
  const issues:string[]=[];
+ // Action/result gaps carry exact evidence paths from the independent action review.
+ // Require the patch to change one of the cited action/result assertions, not merely
+ // another sentence in the same content field. The semantic review still decides truth.
+ const actionGaps=(actionEvidence?.gaps||[]).filter(gap=>gap.actionPath||gap.resultPath);
+ const normalizePath=(value:string)=>value.replace(/\[(0|[1-9]\d*)\]/g,'.$1').replace(/^0\./,'');
+ const pathOverlaps=(left:string,right:string)=>left===right||left.startsWith(right+'.')||right.startsWith(left+'.');
+ const directlyChangesEvidence=(path:string,quote:string|undefined):boolean=>{
+  const target=normalizePath(path);
+  for(const [oldPath,before] of old){
+   if(!pathOverlaps(normalizePath(oldPath),target))continue;
+   const after=current.get(oldPath);
+   if(after===undefined||after===before)continue;
+   const literal=String(quote||'').trim();
+   if(literal&&before.includes(literal))return changeTouchesFragment(before,after,literal);
+   const escaped=literal?JSON.stringify(literal).slice(1,-1):'';
+   if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,escaped);
+   // Some projected paths are nested inside JSON serialized in a string field.
+   // If the exact anchor cannot be found in that serialization, only field overlap
+   // can be checked locally; the independent semantic review remains authoritative.
+   return true;
+  }
+  return false;
+ };
+ for(const gap of actionGaps){
+  const refs=[{path:gap.actionPath,quote:gap.actionEvidence},{path:gap.resultPath,quote:gap.resultEvidence}]
+   .filter((item):item is {path:string;quote:string|undefined}=>typeof item.path==='string'&&!!item.path.trim());
+  if(refs.length&&!refs.some(item=>directlyChangesEvidence(item.path,item.quote))){
+   issues.push('事实补丁没有直接修改行动结果审核点名的行动/结果原文；只改同字段的其它文字不能视为修复。原因：'+String(gap.reason||'行动与结果之间缺少成立条件').slice(0,180));
+  }
+ }
  // A semantic conflict arrives as two exact source quotations. Before paying for
  // another semantic review, require the one-sided current-chapter assertion to
  // be addressed by this patch. This is only a patch-target check, not a verdict
