@@ -1593,7 +1593,7 @@ describe('idea discovery live orchestrator behavior', () => {
     const premiseTwo = selected('P2', '门后的普通秘密');
     const pool = [
       { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore, storyCategoryId: 'K1' },
-      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore, storyCategoryId: mixed ? 'K2' : 'K1' },
+      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore, storyCategoryId: failure === 'category_inheritance' ? 'K2' : 'K1' },
     ];
     const common = {
       storyType: 'short_story', targetPlatform: 'fanqie', storyCategory: '悬疑',
@@ -1705,6 +1705,8 @@ describe('idea discovery live orchestrator behavior', () => {
     }, 2);
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
+    expect(generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation')).toHaveLength(3);
+    expect(generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection')).toBe(3);
     if(failure==='preselection_shortfall'){
       expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(true);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalled();
