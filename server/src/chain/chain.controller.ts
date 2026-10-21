@@ -13,7 +13,7 @@ import { independentReviewBatches } from './independent-review-batches';
 import {reserveReviewBatchBudget} from './premise-source-batches';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
 import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective } from './premise-category-fit';
-import { premiseCategoryIdentityDirective } from './premise-category-identity';
+import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence } from './chapter-dependency-review';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
@@ -4946,7 +4946,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
-      const buildPremiseSelectionPrompt = () => {
+      const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>> } = {}) => {
         const excludeText = initialExcludes.length
           ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
           : '';
@@ -4980,50 +4980,172 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             causalPlan: premiseCausalPlanExample(),
           }],
         };
+        const promptPhase = phase;
+        const batchIndex = options.batchIndex ?? 0;
+        const batchCount = options.batchCount ?? 1;
+        const batchSize = options.batchSize ?? premisePoolSize;
+        const candidatePool = options.pool ?? [];
+        const batchFocus = [
+          '本批优先探索关系压力、利益冲突与人物选择的不同组合。',
+          '本批优先探索资源限制、规则边界、身份责任与主动对手的不同组合。',
+          '本批优先探索反常关系、现实两难、欲望争夺与兑现代价的不同组合。',
+        ][batchIndex % 3];
+        const poolDirective = [
+          '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
+          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本阶段不选题、不展开完整筛选字段，不输出selectedPremises。',
+          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore用一到两句写清人物处境与触发、主动选择、因果升级、改变胜负条件的反转、兑现方向与代价。',
+          batchFocus,
+          '候选之间必须在人物欲望、关系结构、主动选择、升级机制、反转作用或兑现代价上有实质差异；不能只换职业、名字或道具，也不能复用历史排除项。',
+          '保留用户指定的类型、平台、分类、流派与其它条件。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
+        ].join('\n');
+        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false)
+          .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；逐项比较全部候选后选出最成熟的题材，不得新增候选或改写原池。')
+          .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
+          .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
+        const promptDirective = promptPhase === 'pool' ? poolDirective
+          : promptPhase === 'selection' ? selectionDirective
+          : ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false);
+        const promptSchema = promptPhase === 'pool'
+          ? { pool: [{ ...premiseSchema.pool[0], premiseId: 'B' + (batchIndex + 1) + '-P1' }] }
+          : promptPhase === 'selection' ? { selectedPremises: premiseSchema.selectedPremises } : premiseSchema;
+        const phaseContext = promptPhase === 'pool'
+          ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。只输出pool；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
+          : promptPhase === 'selection'
+            ? '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。'
+            : '当前阶段=灵感发现的题材预选，尚未确认故事卡或创建项目。维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。本轮pool与selectedPremises仍只输出骨架与筛选证据schema。';
+        const poolContext = promptPhase === 'selection'
+          ? '\n【服务器已固定的候选池；不得新增、改写或重新编号】' + JSON.stringify(candidatePool)
+          : '';
         return `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
-${ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false)}
+${promptDirective}
 【本次执行设定】
 ${ideaDiscoveryAuthorContext(dto)}
 ${premiseCategoryIdentityDirective(discoveryCategories)}
 ${variedCategories ? '在目录分类中广搜不同人物欲望、关系、冲突和兑现路径；已选题材不可全部来自同一分类，分类编号选择后锁定，不靠改标签制造差异。' : ''}
-当前阶段=灵感发现的题材预选，尚未确认故事卡或创建项目。维度选择参数：${autoSelectionRules}；${submissionRule}。本轮 pool 与 selectedPremises 仍只输出下列骨架与筛选证据 schema；具体维度组合在后续完整故事卡中显式返回给用户确认。每个原池storyCore及已选展开都须同时落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材，不能仅在标签字段补齐；缺失关键机制的骨架不得入选，无法组合时如实报告约束不足。
+${phaseContext}
 创作流派的组合须符合可见的行动机制，不能仅根据题材名或隐藏凶手贴标签：${dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre)}
 ${variedCategories ? '后续按每个入选题材的分类分别取得分类证据与体量锚点，不把一个分类的标签用于其它分类。' : categoryWritingBrief ? `【分类证据】${categoryWritingBrief}` : '此分类尚无已核验的官方标签，不编造平台标签。'}
 ${!variedCategories && categoryBenchmark ? `【分类体量参考】${categoryBenchmark}` : ''}
 ${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredTargetWords}；筛选时必须判断题材是否撑得住这一体量。` : '用户未指定总字数；筛选时按平台分类体量和故事自身可持续性判断。'}
+${poolContext}
 ${excludeText}
 只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
-JSON 结构：${JSON.stringify(premiseSchema)}`;
+JSON 结构：${JSON.stringify(promptSchema)}`;
       };
 
       const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown }> => {
-        const response = await this.realLLM.generate({
-          prompt: buildPremiseSelectionPrompt(),
+        const poolBatchCount = Math.min(IDEA_CARD_GENERATION_CONCURRENCY, premisePoolSize);
+        const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
+        const extraBatchCount = premisePoolSize % poolBatchCount;
+        const poolBatchSizes = Array.from({ length: poolBatchCount }, (_, index) => baseBatchSize + (index < extraBatchCount ? 1 : 0));
+        const parseResponse = (content: unknown, label: string): any => {
+          const normalized = String(content || '').trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '');
+          try {
+            return JSON.parse(jsonrepair(normalized || '{}'));
+          } catch {
+            throw new Error(label + '未返回合法JSON；没有创建完整题材卡。');
+          }
+        };
+        const prerequisiteError = (parsed: any) => {
+          const dimensions = parsed && (parsed.missingRequiredDimensions ?? parsed.missingDimensions);
+          const missing = Array.isArray(dimensions) ? dimensions.map(String).join('、') : '';
+          const reason = String((parsed && (parsed.message || parsed.reason)) || '').trim();
+          return new Error('创建前题材筛选被执行前提阻断' + (missing ? '（' + missing + '）' : '') + '：' + (reason || '模型未说明原因') + '；未进入题材质量筛选。');
+        };
+        const poolBatchResults: Array<{ batchIndex: number; candidates: any[]; error?: string; blocked?: any }> =
+          await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
+            try {
+              const response = await this.realLLM.generate({
+                prompt: buildPremiseSelectionPrompt('pool', { batchIndex, batchCount: poolBatchCount, batchSize }),
+                scenario: 'idea_generate',
+                timeout: discoveryBudget.complexTimeoutMs,
+                maxEmptyRetries: 1,
+                responseFormat: 'json_object',
+                metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
+              });
+              const parsed = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
+              if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) return { batchIndex, candidates: [], blocked: parsed };
+              if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
+              return { batchIndex, candidates: parsed.pool };
+            } catch (error) {
+              return { batchIndex, candidates: [], error: error instanceof Error ? error.message : String(error) };
+            }
+          }));
+        const blockedBatch = poolBatchResults.find(item => item.blocked);
+        if (blockedBatch) throw prerequisiteError(blockedBatch.blocked);
+        const candidatePool: Array<Record<string, unknown>> = [];
+        const seenTitles = new Set<string>();
+        const seenCores = new Set<string>();
+        for (const batch of poolBatchResults.slice().sort((left, right) => left.batchIndex - right.batchIndex)) {
+          for (const raw of batch.candidates) {
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+            const item = raw as Record<string, unknown>;
+            const workingTitle = String(item.workingTitle || '').trim();
+            const storyCore = String(item.storyCore || '').trim();
+            const titleKey = normalizeTitle(workingTitle);
+            const coreKey = normalizeTitle(storyCore);
+            if (workingTitle.length < 2 || storyCore.length < 8 || !titleKey || !coreKey
+              || seenTitles.has(titleKey) || seenCores.has(coreKey)) continue;
+            let storyCategoryId = 'K1';
+            let storyCategory = dto.storyCategory;
+            if (variedCategories) {
+              const match = String(item.storyCategoryId || '').trim().match(/^K(\d+)$/);
+              const categoryIndex = match ? Number(match[1]) - 1 : -1;
+              if (categoryIndex < 0 || !discoveryCategories[categoryIndex]) continue;
+              storyCategoryId = 'K' + (categoryIndex + 1);
+              storyCategory = discoveryCategories[categoryIndex];
+            }
+            const bound = bindPremiseCategory({
+              ...item,
+              premiseId: 'P' + (candidatePool.length + 1),
+              workingTitle,
+              storyCore,
+              storyCategoryId,
+              storyCategory,
+            }, discoveryCategories, false);
+            candidatePool.push(bound);
+            seenTitles.add(titleKey);
+            seenCores.add(coreKey);
+            if (candidatePool.length >= premisePoolSize) break;
+          }
+          if (candidatePool.length >= premisePoolSize) break;
+        }
+        const poolGenerationAudit = {
+          strategy: 'parallel_pool_batches_then_fixed_pool_selection',
+          target: premisePoolSize,
+          generated: candidatePool.length,
+          shortfall: Math.max(0, premisePoolSize - candidatePool.length),
+          batchCount: poolBatchCount,
+          maxConcurrency: poolBatchCount,
+          batches: poolBatchResults.map(batch => ({
+            batch: batch.batchIndex + 1,
+            requested: poolBatchSizes[batch.batchIndex],
+            rawReturned: batch.candidates.length,
+            error: batch.error || null,
+          })),
+        };
+        if (candidatePool.length < requestedCount) {
+          const batchErrors = poolBatchResults.filter(item => item.error).map(item => '第' + (item.batchIndex + 1) + '批：' + item.error).join('；');
+          throw new Error('并发候选池只形成' + candidatePool.length + '/' + premisePoolSize + '个有效且去重后的轻量题材，少于本次至少需要的' + requestedCount + '个；' + (batchErrors || '候选不足，未进入选优和完整卡生成。'));
+        }
+        if (candidatePool.length < premisePoolSize) {
+          this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
+        }
+        const selectionResponse = await this.realLLM.generate({
+          prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool }),
           scenario: 'idea_generate',
-          // Pool search plus full selected-premise causal planning is a complex task, not short-text generation.
           timeout: discoveryBudget.complexTimeoutMs,
           maxEmptyRetries: 1,
           responseFormat: 'json_object',
           metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
         });
-        const normalized = String(response.content || '')
-          .trim()
-          .replace(/^```(?:json)?\s*/i, '')
-          .replace(/\s*```$/i, '');
-        let parsed: any;
-        try {
-          parsed = JSON.parse(jsonrepair(normalized || '{}'));
-        } catch {
-          throw new Error('创建前题材筛选未返回合法 JSON；系统没有创建任何完整题材卡。');
-        }
-        const initialSelection = normalizePremiseSelectionPayload(
-          parsed,
-          requestedCount,
-          premisePoolSize,
-          discoveryCategories,
-        );
+        const parsedSelection = parseResponse(selectionResponse.content, '固定候选池选优');
+        if (parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')) throw prerequisiteError(parsedSelection);
+        const initialSelection = normalizePremiseSelectionPayload({
+          pool: candidatePool,
+          selectedPremises: parsedSelection && parsedSelection.selectedPremises,
+        }, requestedCount, premisePoolSize, discoveryCategories);
         assertPremiseCausalPlans(initialSelection);
-        // Fixed categories were previously attached only after independent precheck.
         if (!variedCategories) for (const premise of initialSelection.selected) {
           if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) throw new Error('已选题材未继承本次固定分类');
           premise.storyCategory = dto.storyCategory;
@@ -5041,17 +5163,21 @@ JSON 结构：${JSON.stringify(premiseSchema)}`;
             + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre), dto.webNovelGenre, {reviews:sourceCompletionBudget,reselection:reselectionCompletionBudget});
         for (const premise of normalizedSelection.selected) {
           if (!variedCategories && premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
-            throw new Error(`已选题材 ${premise.premiseId} 未继承本次固定分类 ${dto.storyCategory}。`);
+            throw new Error('已选题材 ' + premise.premiseId + ' 未继承本次固定分类 ' + dto.storyCategory + '。');
           }
           premise.storyCategory = variedCategories ? premise.storyCategory : dto.storyCategory;
           selectedCategoryById.set(String(premise.premiseId), String(premise.storyCategory));
         }
         if (!normalizedSelection.poolTargetMet) {
-          this.logger.warn(
-            `idea-discover: 创建前广搜有效轻量胚子 ${normalizedSelection.pool.length}/${premisePoolSize}，但已明确选出 ${normalizedSelection.selected.length}/${requestedCount} 个成熟题材；继续结构化，不用弱题材凑池。`,
-          );
+          this.logger.warn('idea-discover: 创建前广搜有效轻量胚子 ' + normalizedSelection.pool.length + '/' + premisePoolSize
+            + '，但已明确选出 ' + normalizedSelection.selected.length + '/' + requestedCount + ' 个成熟题材；继续结构化，不用弱题材凑池。');
         }
-        return normalizedSelection;
+        const priorAudit = normalizedSelection.selectionAudit && typeof normalizedSelection.selectionAudit === 'object'
+          ? normalizedSelection.selectionAudit as Record<string, unknown> : {};
+        return {
+          ...normalizedSelection,
+          selectionAudit: { ...priorAudit, poolGeneration: poolGenerationAudit },
+        };
       };
 
       let sameBatchPremises: Array<Record<string, unknown>> = [];
