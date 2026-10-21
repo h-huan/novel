@@ -104,6 +104,14 @@ describe('idea discovery preselection contract', () => {
     expect(result.poolTargetMet).toBe(false);
   });
 
+  it('asks the fixed-pool selector for as many mature premises as exist without padding weak candidates', () => {
+    const directive = ideaPremiseSelectionDirective('short_story', 5, 15, false, 3);
+    expect(directive).toContain('只有 3-5 个题材真正满足');
+    expect(directive).toContain('selectedPremises 返回 3-5 项');
+    expect(directive).toContain('绝不为了凑数加入弱项');
+    expect(ideaPremiseSelectionDirective('short_story', 5)).toContain('selectedPremises 返回 5-5 项');
+  });
+
   it('allows fewer independently selected mature premises without relaxing evidence requirements', () => {
     const pool = Array.from({ length: 15 }, (_, index) => ({
       premiseId: 'P' + (index + 1),
