@@ -99,6 +99,7 @@ export function normalizePremiseSelectionPayload(
   requestedCount: number,
   poolTarget: number,
   categoryOptions?: readonly string[],
+  minimumSelectedCount = requestedCount,
 ): PremiseSelectionResult {
   if (!Number.isInteger(requestedCount) || requestedCount <= 0) {
     throw new Error('创建前题材筛选的目标数量无效。');
@@ -112,6 +113,7 @@ export function normalizePremiseSelectionPayload(
   }
   const rawPool = Array.isArray(source.pool) ? source.pool : [];
   const rawSelected = Array.isArray(source.selectedPremises) ? source.selectedPremises : [];
+  const minimumCount = Math.min(requestedCount, Math.max(1, Number.isInteger(minimumSelectedCount) ? minimumSelectedCount : requestedCount));
 
   // 未选中的池只保留最小骨架；单个额外候选写坏不能拖死已经选中的成熟题材。
   const pool: Array<Record<string, unknown>> = [];
@@ -134,8 +136,8 @@ export function normalizePremiseSelectionPayload(
   if (pool.length < requestedCount) {
     throw new Error(`创建前题材筛选只有 ${pool.length} 个有效轻量题材胚子，少于本次需要的 ${requestedCount} 个；系统不会用弱题材补数。`);
   }
-  if (rawSelected.length !== requestedCount) {
-    throw new Error(`创建前题材筛选必须明确选出 ${requestedCount} 个成熟题材；当前选择数量为 ${rawSelected.length}。`);
+  if (rawSelected.length < minimumCount || rawSelected.length > requestedCount) {
+    throw new Error(`创建前题材筛选须选出 ${minimumCount}-${requestedCount} 个成熟题材；当前选择数量为 ${rawSelected.length}。少于最低数量不能进入完整卡生成，超过请求数量也不能混入本批。`);
   }
 
   const selectedIds = new Set<string>();
@@ -202,7 +204,9 @@ export function ideaPremiseSelectionDirective(
   requestedCount: number,
   poolSize = Math.max(requestedCount * 3, requestedCount + 5),
   includeSharedPolicy = true,
+  minimumSelectedCount = requestedCount,
 ): string {
+  const minimumCount = Math.min(requestedCount, Math.max(1, Number.isInteger(minimumSelectedCount) ? minimumSelectedCount : requestedCount));
   const storyTypeRule = storyType === 'short_story'
     ? '短篇必须能在有限篇幅内形成单线闭环和明确兑现；反转少而重，不能靠不断加设定续命。'
     : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
@@ -219,9 +223,9 @@ ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生�
 1. 以 ${poolSize} 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。${poolSize} 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ${requestedCount} 个成熟题材，可以少于 ${poolSize}，禁止为了凑数填弱项。
 2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${requestedCount} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。
 3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
-4. 从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。payoff须写出从主角行动到结果成立的必要桥接：涉及他人决定、机构认可或对手配合时，说明谁依据什么作出该决定，不能把交出证据、人情口碑、集体支持或主动请求直接当成对方必然认可。普通直接因果不补无关手续或法律条文；原池没有可成立的路径时，在锁定前选择其它成熟项，不把缺口留给完整卡再编新规则。
+4. 先尽可能从轻量胚子池中选出 ${requestedCount} 个成熟题材；若经过比较只有 ${minimumCount}-${requestedCount} 个题材真正满足全部因果、差异、平台和作者条件，则只返回实际合格项，绝不为了凑数加入弱项。选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。payoff须写出从主角行动到结果成立的必要桥接：涉及他人决定、机构认可或对手配合时，说明谁依据什么作出该决定，不能把交出证据、人情口碑、集体支持或主动请求直接当成对方必然认可。普通直接因果不补无关手续或法律条文；原池没有可成立的路径时，在锁定前选择其它成熟项，不把缺口留给完整卡再编新规则。
 5. ${storyTypeRule}
-6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 只包含已经选中的 ${requestedCount} 项及其筛选证据。不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
+6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 返回 ${minimumCount}-${requestedCount} 项，每项都必须是原池真实身份并包含完整筛选证据；不足 ${minimumCount} 项时按前提/质量失败处理，不补造或弱化条件。不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
 }
 
 /**
