@@ -105,6 +105,26 @@ describe('idea discovery preselection contract', () => {
     expect(result.poolTargetMet).toBe(false);
   });
 
+  it('continues with a qualified partial pool when the search target exceeds the minimum deliverable count', () => {
+    const pool = Array.from({ length: 3 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '成熟候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具有独立选择、升级和兑现路径的轻量题材骨架。',
+    }));
+    const result = normalizePremiseSelectionPayload({
+      pool,
+      selectedPremises: pool.map(item => selectedPremise(item.premiseId)),
+    }, 5, 15, undefined, 3);
+
+    expect(result.pool).toHaveLength(3);
+    expect(result.selected).toHaveLength(3);
+    expect(result.poolTargetMet).toBe(false);
+    expect(() => normalizePremiseSelectionPayload({
+      pool: pool.slice(0, 2),
+      selectedPremises: pool.slice(0, 2).map(item => selectedPremise(item.premiseId)),
+    }, 5, 15, undefined, 3)).toThrow('低于最低可交付数量 3 个');
+  });
+
   it('asks the fixed-pool selector for as many mature premises as exist without padding weak candidates', () => {
     const directive = ideaPremiseSelectionDirective('short_story', 5, 15, false, 3);
     expect(directive).toContain('只有 3-5 个题材真正满足');
