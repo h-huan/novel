@@ -36,7 +36,7 @@ it('does not globally replace equal dates, guess ambiguous rewrites or reject ev
 it('requires action-result patches to touch the exact cited causal assertion before re-review',()=>{
  const chapter={
   content:'她没有站起，也没有出声。评估程序根据申请材料决定是否发放补偿。',
-  characterActions:[{action:'她没有站起，也没有出声',result:'家里补偿落空'}],
+  characterActions:[{action:'她没有站起，也没有出声',result:'因为她没有站起或没有出声，家里补偿落空'}],
   characterStates:[{stateAfter:'家里补偿落空'}],
  };
  const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
@@ -45,7 +45,7 @@ it('requires action-result patches to touch the exact cited causal assertion bef
  const unrelated={content:chapter.content.replace('她没有站起','她仍没有站起')};
  expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[],evidence).join(' '))
   .toContain('没有直接修改行动结果审核点名的行动/结果原文');
- const targeted={'characterActions.0.result':'她没有参与评估决定，补偿结果由评估程序按申请材料决定'};
+ const targeted={'characterActions.0.result':'家里补偿落空仍由评估程序按申请材料决定，并非她没有站起或没有出声造成'};
  expect(outlineFactPatchSynchronizationIssues(chapter,targeted,[],evidence)).toEqual([]);
  expect(chapter.characterActions[0].result).toBe('家里补偿落空');
 });
