@@ -1705,8 +1705,8 @@ describe('idea discovery live orchestrator behavior', () => {
     }, 2);
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
-    expect(generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation')).toHaveLength(3);
-    expect(generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection')).toBe(3);
+    expect(generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation')).toHaveLength(2);
+    expect(generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection')).toBe(2);
     if(failure==='preselection_shortfall'){
       expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(true);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalled();
@@ -1730,7 +1730,7 @@ describe('idea discovery live orchestrator behavior', () => {
     expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[firstCardCallIndex]);
 
     if (failure === 'review_protocol') {
-      expect(generate).toHaveBeenCalledTimes(6);
+      expect(generate).toHaveBeenCalledTimes(5);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);
       expect(result.error).toContain('审查未完成');
@@ -1738,7 +1738,7 @@ describe('idea discovery live orchestrator behavior', () => {
     }
 
     if(failure==='review_budget'){
-      expect(generate).toHaveBeenCalledTimes(6);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(generate).toHaveBeenCalledTimes(5);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('budget_or_original_pool_exhausted');return;
     }
@@ -1746,7 +1746,7 @@ describe('idea discovery live orchestrator behavior', () => {
     // The repair fixture returns an empty patch: preserve the original refusal without another review.
     expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(1);
     if (!cardFailed && failure !== 'repair_network') expect(result.appealGate.repairGenerated).toBe(0);
-    expect(generate).toHaveBeenCalledTimes(cardFailed ? 6 : 7);
+    expect(generate).toHaveBeenCalledTimes(cardFailed ? 5 : 6);
     expect(result.success).toBe(false);
     expect(result.status).toBe('incomplete');
     expect(result.ideas).toHaveLength(0);
@@ -1791,7 +1791,7 @@ describe('discovery before dimension confirmation', () => {
     const result = await controller.runIdeaDiscovery({ storyType: 'short_story', platform: 'fanqie',
       customPlatformNote: '', storyCategory: '年代', storyTone: [], writingStyle: [], webNovelGenre: [],
       submissionTags: [], plotTags: [], genreFitNote: '', pov: '' }, 5);
-    expect(controller.realLLM.generate).toHaveBeenCalledTimes(3);
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(2);
     const prompt = controller.realLLM.generate.mock.calls[0][0].prompt;
     expect(prompt).toContain('当前阶段=灵感发现的题材预选');
     for (const type of ['tone_tag', 'writing_style', 'web_novel_genre', 'narrative_pov']) {
