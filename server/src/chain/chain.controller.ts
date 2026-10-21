@@ -7643,6 +7643,7 @@ ${(() => {
           let factCheck = dependencyCheck.facts;
           if (!factCheck.consistent || factCheck.contradictions.length || dependencyCheck.actionFailure) {
             const defects = dependencyCheck.defects;
+            const actionRepairEvidence = chapterActionRepairEvidence(chData, dependencyCheck.actionFailure);
             const repair = await this.llmCallWithRetry<any>(`第${order + 1}章事实与结果依赖局部修复`,
               `只修复当前章纲被事实与行动结果审查逐项点名的缺口。两类检查共享本章仅一次局部修复，不因新增审查再开修复循环。已确认题材与前章事实优先，世界观只能作不冲突的补充。不得删除本章职责、不得新增人物、不得换故事。
 【确认题材】${canonicalCreativeBrief}
@@ -7651,7 +7652,7 @@ ${(() => {
 【前章事实台账】${JSON.stringify(priorOutlineFactLedger)}
 【当前章纲】${JSON.stringify(chData)}
 【必须逐项修复】${JSON.stringify(defects)}
-【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(chapterActionRepairEvidence(chData, dependencyCheck.actionFailure))}
+【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(actionRepairEvidence)}
 ${OUTLINE_QUANTITY_SCOPE_POLICY}
 按RPR-001和QLT-003先确定事件先后及实际成立程度，再同步上述结果字段；这些路径用于定位原有事实，不是新增事件要求。若某结果没有成立条件且并非锁定职责，按已有行动实际能证明的程度修正该断言；职责确需此结果时，只能在已确认人物权限和事件边界内补条件，不能为保留强结论而擅自扩大权限。并列或复述不能把行动前的说法挪为触发后的反应。没有路径的缺口保留原始证据与理由，不猜字段或默认为已解决。
 
@@ -7659,16 +7660,16 @@ ${OUTLINE_QUANTITY_SCOPE_POLICY}
               {
                 projectId, chapterIndex: order + 1, scenario: 'outline', stepKey:'creation_chapter_fact_repair', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(),
-                validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects).length===0; } catch { return false; } },
-                describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects); } catch(error) { return [String((error as Error).message)]; } },
-                retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；同一事件各字段保持一致，不改前章或其它事件，不重写整章。',
+                validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence).length===0; } catch { return false; } },
+                describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence); } catch(error) { return [String((error as Error).message)]; } },
+                retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；行动结果缺口必须直接修改actionPath或resultPath所指原文，不能只改同字段无关文字；同一事件各字段保持一致，不改前章或其它事件，不重写整章。',
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
             const rawPatch = repair.data?.patch;
             if (!rawPatch || typeof rawPatch !== 'object' || Array.isArray(rawPatch)) {
               throw new Error(`第${order + 1}章事实局部修复未返回 patch 对象`);
             }
-            const remainingSyncIssues=outlineFactPatchSynchronizationIssues(chData,rawPatch,defects);
+            const remainingSyncIssues=outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence);
             if(remainingSyncIssues.length)throw new Error(`第${order+1}章事实补丁本地同步检查未通过，未发起重复语义复核：${remainingSyncIssues.join('；')}`);
             chData = applyOutlineFactPatch(chData,rawPatch);
             const repairedStructureIssues = assessChapter(chData);
