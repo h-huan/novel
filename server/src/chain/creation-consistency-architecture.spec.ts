@@ -18,6 +18,18 @@ function indexOrFail(source: string, marker: string): number {
 }
 
 describe('creation consistency architecture invariants', () => {
+  it('keeps good preselection cards reviewable but never passes an incomplete batch', () => {
+    expect(controllerSource).toContain('const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);');
+    expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
+    expect(controllerSource).toContain("if (partial) {");
+    expect(controllerSource).not.toContain("stoppedAt:'premise_preselection'");
+  });
+  it('avoids reviewing an unchanged selection twice and projects chapter events consistently', () => {
+    expect(controllerSource).toContain('selected === initial ? initialReview : await reviewBoth(selected)');
+    expect(controllerSource).toContain('【本章事件与状态唯一来源】');
+    expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
+  });
+
   it('short-world directive cannot override the confirmed story or silently rewrite a conflict', () => {
     expect(controllerSource).toContain('【已确认世界规则（不得覆盖已确认题材的核心事实）】');
     expect(controllerSource).not.toContain('【已确认世界规则（高于故事卡和章纲措辞）】');
