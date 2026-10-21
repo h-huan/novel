@@ -72,11 +72,12 @@ function printDetailedReport(value) {
       excludedPremiseIds: selectionAudit.excludedPremiseIds ?? null,
       reserveReplacementCount: Array.isArray(selectionAudit.reserve?.replacements) ? selectionAudit.reserve.replacements.length : null,
     },
-    selectionAudit: audit.selectionAudit ?? null,
     structuringErrors: audit.structuringErrors ?? null,
     candidateAssessments: audit.candidateAssessments ?? null,
     reasons: audit.reasons ?? null,
     fulfillment: audit.fulfillment ?? null,
+    // Raw audit can be large; place it last so it cannot hide the diagnostics above.
+    selectionAudit: audit.selectionAudit ?? null,
   };
 
   console.log('[verify] 本次报告身份：' + JSON.stringify({
