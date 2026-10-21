@@ -34,7 +34,6 @@ it('does not globally replace equal dates, guess ambiguous rewrites or reject ev
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:'他在评审会展示了之前取得的凭据'},[text])).toEqual([]);
 });
 it('requires action-result patches to touch the exact cited causal assertion before re-review',()=>{
- const {outlineFactPatchSynchronizationIssues}=require('./outline-fact-patch');
  const chapter={
   content:'她没有站起，也没有出声。评估程序根据申请材料决定是否发放补偿。',
   characterActions:[{action:'她没有站起，也没有出声',result:'家里补偿落空'}],
