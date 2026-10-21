@@ -47,7 +47,7 @@ it('requires action-result patches to touch the exact cited causal assertion bef
   .toContain('没有直接修改行动结果审核点名的行动/结果原文');
  const targeted={'characterActions.0.result':'家里补偿落空仍由评估程序按申请材料决定，并非她没有站起或没有出声造成'};
  expect(outlineFactPatchSynchronizationIssues(chapter,targeted,[],evidence)).toEqual([]);
- expect(chapter.characterActions[0].result).toBe('家里补偿落空');
+ expect(chapter.characterActions[0].result).toBe('因为她没有站起或没有出声，家里补偿落空');
 });
 it('rejects nonempty but unchanged patches before semantic re-review, including reordered object keys',()=>{
  const before=structuredClone(original);
