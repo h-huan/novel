@@ -45,7 +45,7 @@ it('reuses complete unchanged failed evidence without turning rejection into acc
  await reviewChangedPremiseSources(input,'standard',empty,missing);expect(empty.size).toBe(0);
  const unknown=vi.fn(async pending=>{const r=report(pending);r.sourceChecks![0].status='unknown';return r;});
  const unknownCache:PremiseSourceReceipts=new Map();
- await reviewChangedPremiseSources(input,'standard',unknownCache,unknown);expect(unknownCache.size).toBe(0);
+ await reviewChangedPremiseSources(input,'standard',unknownCache,unknown);expect(unknownCache.size).toBe(4); // Other four valid premises remain reusable; the unknown A is excluded.
 });
 it('invalidates on source facts, category, standards, genre scope and a new run',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map(),review=vi.fn(async pending=>report(pending));
