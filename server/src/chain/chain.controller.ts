@@ -4946,6 +4946,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
+      const minimumPremiseSelectionCount = requestedCount <= 2 ? requestedCount : Math.max(1, requestedCount - 2);
       const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>> } = {}) => {
         const excludeText = initialExcludes.length
           ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
@@ -4998,7 +4999,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '候选之间必须在人物欲望、关系结构、主动选择、升级机制、反转作用或兑现代价上有实质差异；不能只换职业、名字或道具，也不能复用历史排除项。',
           '保留用户指定的类型、平台、分类、流派与其它条件。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
         ].join('\n');
-        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false)
+        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false, minimumPremiseSelectionCount)
           .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；逐项比较全部候选后选出最成熟的题材，不得新增候选或改写原池。')
           .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
           .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
@@ -5143,7 +5144,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const initialSelection = normalizePremiseSelectionPayload({
           pool: candidatePool,
           selectedPremises: parsedSelection && parsedSelection.selectedPremises,
-        }, requestedCount, premisePoolSize, discoveryCategories);
+        }, requestedCount, premisePoolSize, discoveryCategories, minimumPremiseSelectionCount);
         assertPremiseCausalPlans(initialSelection);
         if (!variedCategories) for (const premise of initialSelection.selected) {
           if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) throw new Error('已选题材未继承本次固定分类');
@@ -5770,9 +5771,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         categoryChecks: reviews.flatMap(review=>review.categoryChecks||[]) };
     };
     const initialReview = await reviewBoth(initial);
-    if (initialReview.passed) return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview } };
-    const repairPlan = premiseReselectionPlan(initial, initialReview);
     const minimumSelectableCount = requestedCount <= 2 ? requestedCount : requestedCount - 2;
+    if (initialReview.passed) {
+      const partial = initial.selected.length < requestedCount;
+      return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
+        ...(partial ? { partial: true, minimumSelectableCount, selectionStopReason: 'mature_selection_shortfall', completeCardGatePending: true } : {}) } };
+    }
+    const repairPlan = premiseReselectionPlan(initial, initialReview);
     // If enough independently reviewed premises remain, stop here instead of spending
     // more calls trying to fill every position. Full-card gates still run afterwards.
     let partialSelection = initial;
@@ -5797,6 +5802,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           completeCardGatePending: true,
         } };
       }
+    }
+    if (initial.selected.length < requestedCount) {
+      const retained = retainReviewedPremises(partialSelection, partialReview,
+        repairPlan.protectedItems.map(item => String(item.premiseId)));
+      throw new Error('固定候选池只筛出 ' + initial.selected.length + '/' + requestedCount + ' 个成熟题材；在不降低独立审核质量的前提下，复核后仅 ' + retained.selection.selected.length + ' 个题材可保留，低于最低可交付数量 ' + minimumSelectableCount + '。已停止继续重选，避免为凑数增加耗时或引入弱题材。');
     }
     if (repairPlan.availableCandidates.length < repairPlan.repairSlots.length) {
       const retained = retainReviewedPremises(initial, initialReview);
