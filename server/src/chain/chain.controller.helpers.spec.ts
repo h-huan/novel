@@ -1640,9 +1640,18 @@ describe('idea discovery live orchestrator behavior', () => {
     const mixed = failure === 'category_inheritance';
     const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
     if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
+    let poolBatchCallsStarted = 0;
+    let releasePoolBatches!: () => void;
+    const bothPoolBatchesStarted = new Promise<void>(resolve => { releasePoolBatches = resolve; });
     const generate = vi.fn(async (request: any) => {
       const step = request.metrics?.stepKey;
-      if (step === 'idea_premise_pool_generation') return { content: JSON.stringify({ pool }) };
+      if (step === 'idea_premise_pool_generation') {
+        poolBatchCallsStarted += 1;
+        if (poolBatchCallsStarted >= 2) releasePoolBatches();
+        // A barrier makes the test fail if pool generation is changed back to serial awaits.
+        await bothPoolBatchesStarted;
+        return { content: JSON.stringify({ pool }) };
+      }
       if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: selectedForBatch }) };
       if (step === 'idea_card_structure') {
         const selectedBlock = request.prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0] || '';
@@ -1705,13 +1714,25 @@ describe('idea discovery live orchestrator behavior', () => {
     }, 2);
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
-    expect(generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation')).toHaveLength(2);
-    expect(generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection')).toBe(2);
+    const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
+    expect(poolCalls).toHaveLength(2);
+    expect(poolCalls.map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
+    expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
+    expect(poolCalls[0][0].prompt).toContain('只生成恰好 4 个轻量题材胚子');
+    expect(poolCalls[1][0].prompt).toContain('只生成恰好 3 个轻量题材胚子');
+    expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
+    const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
+    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(2);
+    expect(selectionCall?.[0].prompt).toContain('【服务器已固定的候选池；不得新增、改写或重新编号】');
+    expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
+    expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
+    expect(selectionCall?.[0].prompt).toContain('只输出selectedPremises');
     if(failure==='preselection_shortfall'){
       expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(true);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalled();
       expect(result.success).toBe(false);expect(result.status).toBe('incomplete');expect(result.ideas).toEqual([]);
       expect(result.appealGate).toMatchObject({premiseSelected:1,preselectionShortfall:1,requested:2,fulfillment:{stopReason:'preselection_shortfall'}});
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
       expect(Array.isArray(result.qualifiedIdeas)).toBe(true);
       return;
     }
@@ -1737,6 +1758,7 @@ describe('idea discovery live orchestrator behavior', () => {
       return;
     }
 
+    expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
     if(failure==='review_budget'){
       expect(generate).toHaveBeenCalledTimes(5);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
