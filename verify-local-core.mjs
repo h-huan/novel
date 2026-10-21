@@ -37,12 +37,14 @@ function runProcess(label, cwd, command, commandArgs) {
   });
   const stdout = String(result.stdout || '');
   const stderr = String(result.stderr || '');
-  const tail = (text) => text.split(/\r?\n/).filter(Boolean).slice(-30).join('\n');
+  const tail = (text) => text.split(/\r?\n/).filter(Boolean).slice(-120).join('\n');
   return {
     label,
     status: result.status === 0 ? 'passed' : 'failed',
     exitCode: result.status,
     durationMs: Date.now() - started,
+    startedAt: new Date(started).toISOString(),
+    finishedAt: new Date().toISOString(),
     stdoutTail: tail(stdout),
     stderrTail: tail(stderr),
   };
@@ -199,8 +201,44 @@ function runSummary(run) {
   return pick(run, [
     'id', 'stage', 'scenario', 'step_key', 'stepKey', 'status', 'gate_status', 'gateStatus',
     'chapter_index', 'chapterIndex', 'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
+    'started_at', 'startedAt', 'duration_ms', 'durationMs', 'prompt_version', 'promptVersion',
     'context_version', 'contextVersion', 'standard_version', 'standardVersion',
   ]);
+}
+
+
+/** Existing generation_runs data only; never export prompts or context snapshots. */
+function runDetail(run) {
+  const summary = runSummary(run) || {};
+  let payload = null;
+  try { payload = typeof run.quality_payload === 'string' ? JSON.parse(run.quality_payload) : run.quality_payload; } catch {}
+  return {
+    ...summary,
+    error: String(summary.error || '').slice(0, 4000) || null,
+    durationMs: Number(run.duration_ms ?? run.durationMs ?? 0) || 0,
+    startedAt: run.started_at ?? run.startedAt ?? null,
+    finishedAt: run.finished_at ?? run.finishedAt ?? null,
+    gateStatus: run.gate_status ?? run.gateStatus ?? payload?.gate?.status ?? null,
+    qualityGate: payload?.gate ? pick(payload.gate, ['status', 'passed', 'reason']) : null,
+    stageScore: payload?.stageScore ? pick(payload.stageScore, ['stage', 'status', 'overallScore']) : null,
+    failedOutputExcerpt: String(run.status).toLowerCase() === 'failed'
+      ? String(run.output_text || '').slice(0, 700) : null,
+  };
+}
+function stepBreakdown(runs) {
+  const byStep = new Map();
+  for (const row of runs) {
+    const step = String(row.step_key ?? row.stepKey ?? row.stage ?? row.scenario ?? 'unknown');
+    const group = byStep.get(step) || { step, calls: 0, failures: 0, durationMs: 0 };
+    group.calls++;
+    group.durationMs += Math.max(0, Number(row.durationMs) || 0);
+    if (String(row.status).toLowerCase() !== 'success') group.failures++;
+    byStep.set(step, group);
+  }
+  return [...byStep.values()].sort((a, b) => b.durationMs - a.durationMs);
+}
+function markdownCell(value, limit = 320) {
+  return String(value ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '／').slice(0, limit);
 }
 
 async function inspectProject(target) {
@@ -264,6 +302,15 @@ async function inspectProject(target) {
     },
     firstChapterRun: runSummary(firstChapterRun),
     latestRun: runSummary(runRows[0]),
+    runTimeline: runRows.map(runDetail),
+    stepBreakdown: stepBreakdown(runRows.map(runDetail)),
+    runtimeSources: {
+      project: { ok: projectRes.ok, status: projectRes.status, error: projectRes.error ?? null },
+      chapters: { ok: chaptersRes.ok, status: chaptersRes.status, error: chaptersRes.error ?? null },
+      runs: { ok: runsRes.ok, status: runsRes.status, error: runsRes.error ?? null, returned: runRows.length, limit: 200 },
+      cockpit: { ok: cockpitRes.ok, status: cockpitRes.status, error: cockpitRes.error ?? null },
+      integrity: { ok: integrityRes.ok, status: integrityRes.status, error: integrityRes.error ?? null },
+    },
     integrityAudit: integrityRes.ok ? unwrap(integrityRes.data) : { error: integrityRes.error ?? `HTTP ${integrityRes.status}` },
     cockpit: cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` },
     platformAnalytics: analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` },
