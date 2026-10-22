@@ -19,7 +19,7 @@ describe('WritingQualityService.buildPlatformReview（质检侧平台标准）',
       .toThrow(/项目执行标准不可用/);
   });
 
-  it('番茄长篇：篇幅/对话占比/开篇钩子等短板会被质检侧判为 platform_* 问题', () => {
+  it('番茄长篇：对话占比/开篇钩子等短板进入质检；低于规划下限不强制补字', () => {
     const context = {
       project: { creativeConstitution: readConstitution({ type: 'long_novel', target_platform: 'fanqie' }) },
     };
@@ -27,9 +27,18 @@ describe('WritingQualityService.buildPlatformReview（质检侧平台标准）',
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((row: any) => row.issueType.startsWith('platform_'))).toBe(true);
     expect(rows.map((row: any) => row.issueType)).toContain('platform_dialogue_ratio');
-    expect(rows.map((row: any) => row.issueType)).toContain('platform_chapter_length');
+    expect(rows.map((row: any) => row.issueType)).not.toContain('platform_chapter_length');
     // 度量与问题必须来自同一份 measureAgainstTarget 结果，而不是「有结论没有数字」
     expect(measurements?.metrics.dialogueRatio).toBeLessThan(0.35);
+  });
+
+  it('平台上限超标时 platform_chapter_length 会进入质检问题', () => {
+    const creativeConstitution = readConstitution({ type: 'long_novel', target_platform: 'fanqie' });
+    const context = { project: { creativeConstitution } };
+    const tooLongContent = '她'.repeat(creativeConstitution.chapterWordRange.max + 1);
+    const { rows, measurements } = service.buildPlatformReview('p2', tooLongContent, context, 'run-2');
+    expect(measurements?.metrics.words).toBeGreaterThan(creativeConstitution.chapterWordRange.max);
+    expect(rows.map((row: any) => row.issueType)).toContain('platform_chapter_length');
   });
 
   it('平台评审内部异常原样暴露，不静默降级为空问题集合', () => {

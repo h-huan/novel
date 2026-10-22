@@ -40,12 +40,8 @@ export function deterministicPlatformReview(input: {
   });
   const issues: QualityIssue[] = [];
   const byKey = new Map(measurements.rows.map(row => [row.key, row]));
-  const chapterWords = measurements.metrics.words;
-  const chapterRange = input.constitution.chapterWordRange;
-  if (chapterWords < chapterRange.min) {
-    issues.push(issue('platform.chapter_length', `章节 ${chapterWords} 字，低于创作宪法 ${chapterRange.min} 字下限；先核对是否遗漏已规划内容，不得为凑字新增剧情事实`, quoteAt()));
-  } else if (chapterWords > chapterRange.max) {
-    issues.push(issue('platform.chapter_length', `章节 ${chapterWords} 字，超过创作宪法 ${chapterRange.max} 字上限`, quoteAt()));
+  if (measurements.metrics.words > input.constitution.chapterWordRange.max) {
+    issues.push(issue('platform.chapter_length', `章节 ${measurements.metrics.words} 字，超过创作宪法 ${input.constitution.chapterWordRange.max} 字上限`, quoteAt()));
   }
   for (const key of ['avgParaChars', 'longParaRatio'] as const) {
     const row = byKey.get(key);
@@ -135,7 +131,7 @@ const PLATFORM_ISSUE_TITLES: Record<string, string> = {
 };
 
 const PLATFORM_ISSUE_SUGGESTIONS: Record<string, string> = {
-  platform_chapter_length: '低于下限时先核对是否遗漏已规划的必要事件、因果或本章出口；高于上限时压缩冗余铺陈；保留必要内容，不凭空新增剧情事实凑字。',
+  platform_chapter_length: '压缩冗余铺陈以满足篇幅上限，保留必要事件、因果与本章出口；不因短于规划下限要求补字。',
   platform_paragraph_length: '先指出信息混杂、说话人难辨或阅读停顿不当的原文；按叙事单位调整，不为达段长指标拆句换行，不新增事实。',
   platform_dialogue_ratio: '先核对本章场景与人物知识是否本来就支持对话；只允许把已确认且已存在的信息改为合适人物的表达。若事实条件不支持，保留为待语义/架构处理，不得为追比例凭空添加对话、打断、沉默或动作。',
   platform_opening_hook: '只允许前移、压缩或重排正文/ChapterPlan中已经存在的冲突、异常或未解问题；不得新增事件、威胁、人物或规则来制造钩子。',
