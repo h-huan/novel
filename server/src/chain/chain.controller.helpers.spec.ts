@@ -1640,7 +1640,15 @@ describe('idea discovery live orchestrator behavior', () => {
     const requestedCount = failure === 'pool_below_minimum' || failure === 'pool_top_up_unique' ? 5 : 2;
     const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
     const mixed = failure === 'category_inheritance';
-    const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
+    const topUpPremise = {
+      ...selected('P3', '水库账本提前清空'),
+      storyCore: '山区供水站的账本突然显示水库已被提前放空。维修员决定公开泵站记录，承包商随即关闭备用管线，迫使村民在停水前选出证人。',
+      storyCategoryId: 'K1',
+    };
+    const selectedForBatch = failure === 'pool_top_up_unique'
+      ? [premiseOne, premiseTwo, topUpPremise]
+      : mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }]
+        : [premiseOne, premiseTwo];
     if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
     let poolBatchCallsStarted = 0;
     let releasePoolBatches!: () => void;
