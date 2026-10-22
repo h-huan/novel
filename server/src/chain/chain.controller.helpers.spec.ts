@@ -1570,7 +1570,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1637,7 +1637,7 @@ describe('idea discovery live orchestrator behavior', () => {
       },
     };
 
-    const requestedCount = failure === 'pool_below_minimum' ? 5 : 2;
+    const requestedCount = failure === 'pool_below_minimum' || failure === 'pool_top_up_unique' ? 5 : 2;
     const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
     const mixed = failure === 'category_inheritance';
     const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
@@ -1652,6 +1652,13 @@ describe('idea discovery live orchestrator behavior', () => {
         if (poolBatchCallsStarted >= 2) releasePoolBatches();
         // A barrier makes the test fail if pool generation is changed back to serial awaits.
         await bothPoolBatchesStarted;
+        if (failure === 'pool_top_up_unique' && request.metrics?.attempt === 2) {
+          return { content: JSON.stringify({ pool: [{
+            workingTitle: '水库账本提前清空',
+            storyCore: '山区供水站的账本突然显示水库已被提前放空。维修员决定公开泵站记录，承包商随即关闭备用管线，迫使村民在停水前选出证人。',
+            storyCategoryId: 'K1',
+          }] }) };
+        }
         return { content: JSON.stringify({ pool }) };
       }
       if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: selectedForBatch }) };
@@ -1717,14 +1724,18 @@ describe('idea discovery live orchestrator behavior', () => {
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
     const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
-    expect(poolCalls).toHaveLength(2);
-    expect(poolCalls.map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
+    expect(poolCalls).toHaveLength(requestedCount === 5 ? 3 : 2);
+    expect(poolCalls.slice(0, 2).map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
+    if (requestedCount === 5) {
+      expect(poolCalls[2][0].metrics?.attempt).toBe(2);
+      expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
+    }
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
     expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
     expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
     expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
     const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
-    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(2);
+    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(requestedCount === 5 ? 3 : 2);
     expect(selectionCall?.[0].prompt).toContain('【服务器已固定的候选池；不得新增、改写或重新编号】');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
@@ -1752,9 +1763,20 @@ describe('idea discovery live orchestrator behavior', () => {
       const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
       expect(completeCardCalls.length).toBeGreaterThan(0);
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
-        target: 15, generated: 2, shortfall: 13, batchCount: 2, maxConcurrency: 2,
+        target: 15, generated: 2, shortfall: 13, batchCount: 3, maxConcurrency: 2,
+        supplementAttempted: true, supplementAdded: 0,
       });
       expect(result.appealGate.minimumDeliverableCount).toBe(3);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe('incomplete');
+      expect(result.ideas).toEqual([]);
+      return;
+    }
+    if (failure === 'pool_top_up_unique') {
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
+        target: 15, generated: 3, shortfall: 12, batchCount: 3, maxConcurrency: 2,
+        supplementAttempted: true, supplementAdded: 1,
+      });
       expect(result.success).toBe(false);
       expect(result.status).toBe('incomplete');
       expect(result.ideas).toEqual([]);
@@ -1935,6 +1957,21 @@ it('does not merge in-flight requests with different selected POV candidates',as
  expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(2);
 });
 
+it('coalesces identical in-flight requests when the omitted category is randomly resolved per call',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;controller.logger={warn:vi.fn()};
+ let resolveTask!:(value:{success:boolean;ideas:any[]})=>void;
+ const pending=new Promise<{success:boolean;ideas:any[]}>(resolve=>{resolveTask=resolve;});
+ controller.runIdeaDiscovery=vi.fn(()=>pending);
+ const random=vi.spyOn(Math,'random').mockReturnValueOnce(0).mockReturnValueOnce(0.999999);
+ try{
+  const request={storyType:'long_novel',platform:'fanqie',storyCategory:''};
+  const first=controller.ideaDiscover(request),second=controller.ideaDiscover(request);
+  expect(random).toHaveBeenCalledTimes(2);
+  expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+  resolveTask({success:true,ideas:[]});
+  await expect(Promise.all([first,second])).resolves.toEqual([{success:true,ideas:[]},{success:true,ideas:[]}]);
+ }finally{random.mockRestore();}
+});
 it('sends full standards only for actual reviewed cards while preserving all reference story comparison fields',async()=>{
  const c=Object.create(ChainController.prototype) as any;let captured='';const stop=Error('local prompt capture');
  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{captured=prompt;throw stop;});

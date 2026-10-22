@@ -317,12 +317,15 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 4, generated: 3, qualified: 3, returned: 3, requested: 5,
     shortfall: 2, partial: true, minimumDeliverableCount: 3,
   });
+  expect(partialResult.appealGate.selectionAudit.poolGeneration).toMatchObject({
+    supplementAttempted: true, supplementAdded: 0, batchCount: 3,
+  });
   expect(partialResult.appealGate.structuringErrors).toEqual([
     expect.objectContaining({ sourcePremiseId: 'P2', error: expect.stringContaining('测试夹具模拟第2张完整卡结构化失败') }),
   ]);
-  expect(realLLM.generate).toHaveBeenCalledTimes(32);
+  expect(realLLM.generate).toHaveBeenCalledTimes(33);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
-    ...Array(6).fill('idea_premise_pool_generation'),
+    ...Array(7).fill('idea_premise_pool_generation'),
     ...Array(3).fill('idea_premise_selection'),
     ...Array(3).fill('idea_premise_source_drift_review'),
     ...Array(3).fill('idea_premise_overlap_review'),

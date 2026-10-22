@@ -4788,7 +4788,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       genreFitNote: normalizedDto.genreFitNote,
       pov: normalizedDto.pov,
       discoveryPovOptions: normalizedDto.discoveryPovOptions,
-      storyCategory: normalizedDto.storyCategory,
+      storyCategory: inputCategory || null,
+      discoveryCategoryOptions: normalizedDto.discoveryCategoryOptions,
       targetAudience: String(dto.targetAudience || '').trim(),
       targetWords: String(dto.targetWords || '').trim(),
       count: requestedCount,
@@ -5002,6 +5003,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本阶段不选题、不展开完整筛选字段，不输出selectedPremises。',
           '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore用一到两句写清人物处境与触发、主动选择、因果升级、改变胜负条件的反转、兑现方向与代价。',
           batchFocus,
+          candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
           '候选之间必须在人物欲望、关系结构、主动选择、升级机制、反转作用或兑现代价上有实质差异；不能只换职业、名字或道具，也不能复用历史排除项。',
           '保留用户指定的类型、平台、分类、流派与其它条件。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
         ].join('\n');
@@ -5024,7 +5026,11 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             : '当前阶段=灵感发现的题材预选，尚未确认故事卡或创建项目。维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。本轮pool与selectedPremises仍只输出骨架与筛选证据schema。';
         const poolContext = promptPhase === 'selection'
           ? '\n【服务器已固定的候选池；不得新增、改写或重新编号】' + JSON.stringify(candidatePool)
-          : '';
+          : promptPhase === 'pool' && candidatePool.length
+            ? '\n【本轮已生成候选池；仅用于排重，不得重复或近似改写】' + JSON.stringify(candidatePool.map(item => ({
+              workingTitle: item.workingTitle, storyCore: item.storyCore, storyCategory: item.storyCategory,
+            })))
+            : '';
         return `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
 ${promptDirective}
 【本次执行设定】
@@ -5063,7 +5069,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         };
         const poolStartedAt = Date.now();
         const poolBatchResults: Array<{
-          batchIndex: number; candidates: any[]; durationMs: number; rawReturned: number | null;
+          batchIndex: number; requested: number; candidates: any[]; durationMs: number; rawReturned: number | null;
           parseFailed: boolean; error?: string; blocked?: any;
         }> = await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
           const batchStartedAt = Date.now();
@@ -5081,14 +5087,14 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             parsed = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
             if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) {
               rawReturned = 0;
-              return { batchIndex, candidates: [], rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed };
+              return { batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed };
             }
             if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
             rawReturned = parsed.pool.length;
-            return { batchIndex, candidates: parsed.pool, rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt };
+            return { batchIndex, requested: batchSize, candidates: parsed.pool, rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt };
           } catch (error) {
             return {
-              batchIndex, candidates: [], rawReturned, parseFailed: rawReturned === null,
+              batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: rawReturned === null,
               durationMs: Date.now() - batchStartedAt,
               error: error instanceof Error ? error.message : String(error),
             };
@@ -5107,7 +5113,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           invalidCategory: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
           categoryBindingCounts: Record<string, number>;
         }>();
-        for (const batch of poolBatchResults.slice().sort((left, right) => left.batchIndex - right.batchIndex)) {
+        const processPoolBatch = (batch: typeof poolBatchResults[number]) => {
           const stats = {
             rawReturned: batch.rawReturned,
             validBeforeDedup: 0,
@@ -5153,7 +5159,12 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             }
             stats.validBeforeDedup += 1;
             poolFilterTotals.validBeforeDedup += 1;
-            if (seenTitles.has(titleKey) || seenCores.has(coreKey)) {
+            const nearDuplicate = batch.batchIndex >= poolBatchCount && candidatePool.some(existing =>
+              ideaSemanticSimilarity(
+                { title: workingTitle, description: storyCore },
+                { title: String(existing.workingTitle || ''), description: String(existing.storyCore || '') },
+              ) >= 0.42);
+            if (seenTitles.has(titleKey) || seenCores.has(coreKey) || nearDuplicate) {
               stats.duplicateCount += 1;
               poolFilterTotals.duplicateCount += 1;
               continue;
@@ -5187,9 +5198,61 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             stats.categoryBindingCounts[categoryKey] = (stats.categoryBindingCounts[categoryKey] || 0) + 1;
             categoryBindingCounts[categoryKey] = (categoryBindingCounts[categoryKey] || 0) + 1;
           }
+        };
+        for (const batch of poolBatchResults.slice().sort((left, right) => left.batchIndex - right.batchIndex)) processPoolBatch(batch);
+
+        let poolSupplementAttempted = false;
+        let poolSupplementRequested = 0;
+        let poolSupplementAdded = 0;
+        const canSupplementPool = candidatePool.length < requestedCount
+          && poolBatchResults.some(batch => batch.rawReturned !== null && !batch.blocked && !batch.error);
+        if (canSupplementPool) {
+          poolSupplementAttempted = true;
+          poolSupplementRequested = Math.max(3, requestedCount - candidatePool.length + 2);
+          const batchIndex = poolBatchCount;
+          const batchStartedAt = Date.now();
+          let rawReturned: number | null = null;
+          let supplementResult: typeof poolBatchResults[number];
+          try {
+            const response = await this.realLLM.generate({
+              prompt: buildPremiseSelectionPrompt('pool', {
+                batchIndex, batchCount: poolBatchCount + 1, batchSize: poolSupplementRequested, pool: candidatePool,
+              }),
+              scenario: 'idea_generate',
+              timeout: discoveryBudget.complexTimeoutMs,
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
+            });
+            const parsed = parseResponse(response.content, '候选池补足批次');
+            if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) {
+              rawReturned = 0;
+              supplementResult = {
+                batchIndex, requested: poolSupplementRequested, candidates: [], rawReturned,
+                parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed,
+              };
+            } else {
+              if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池补足批次未返回pool数组。');
+              rawReturned = parsed.pool.length;
+              supplementResult = {
+                batchIndex, requested: poolSupplementRequested, candidates: parsed.pool, rawReturned,
+                parseFailed: false, durationMs: Date.now() - batchStartedAt,
+              };
+            }
+          } catch (error) {
+            supplementResult = {
+              batchIndex, requested: poolSupplementRequested, candidates: [], rawReturned,
+              parseFailed: rawReturned === null, durationMs: Date.now() - batchStartedAt,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+          const beforeSupplement = candidatePool.length;
+          poolBatchResults.push(supplementResult);
+          processPoolBatch(supplementResult);
+          poolSupplementAdded = candidatePool.length - beforeSupplement;
         }
         const poolGenerationAudit = {
-          strategy: 'parallel_pool_batches_then_fixed_pool_selection',
+          strategy: poolSupplementAttempted ? 'parallel_pool_batches_then_bounded_unique_top_up_then_fixed_pool_selection' : 'parallel_pool_batches_then_fixed_pool_selection',
           startedAt: new Date(poolStartedAt).toISOString(),
           finishedAt: new Date().toISOString(),
           wallMs: Date.now() - poolStartedAt,
@@ -5210,6 +5273,9 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           actual: candidatePool.length,
           shortfall: Math.max(0, premisePoolSize - candidatePool.length),
           targetMet: candidatePool.length >= premisePoolSize,
+          supplementAttempted: poolSupplementAttempted,
+          supplementRequested: poolSupplementRequested,
+          supplementAdded: poolSupplementAdded,
           categoryBindingCounts,
           batchCount: poolBatchResults.length,
           maxConcurrency: poolBatchCount,
@@ -5217,7 +5283,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           failedBatchCount: poolBatchResults.filter(item => item.error).length,
           batches: poolBatchResults.map(batch => ({
             batch: batch.batchIndex + 1,
-            requested: poolBatchSizes[batch.batchIndex],
+            requested: batch.requested,
             rawReturned: batch.rawReturned,
             parseFailed: batch.parseFailed,
             durationMs: batch.durationMs,

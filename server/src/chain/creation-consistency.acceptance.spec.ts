@@ -59,6 +59,23 @@ describe('production cross-module commit boundary with native SQLite', () => {
     }));
   });
 
+  it('persists an early execution-standard failure even when its error notification cannot be delivered', async () => {
+    db.prepare("UPDATE projects SET status='creating', settings='{}' WHERE id=?").run('p');
+    controller.assertExecutionStandardsComplete = vi.fn(() => { throw new Error('创建前执行标准校验失败'); });
+    controller.emitProjectProgress = vi.fn(() => { throw new Error('SSE transport unavailable'); });
+
+    await expect(controller.executeCreateProjectSteps('p', {
+      title: '执行标准前置失败验收', storyType: 'short_story', targetWords: 20_000, selectedIdea: {},
+    })).resolves.toBeUndefined();
+
+    expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
+    expect(controller.emitProjectProgress).toHaveBeenCalledWith('p', expect.objectContaining({
+      type: 'error', success: false, projectId: 'p', step: 'preflight',
+      message: '创建前执行标准校验失败',
+    }));
+    expect(controller.logger.error).toHaveBeenCalledWith(expect.stringContaining('前置错误事件推送失败'));
+  });
+
   it('reviews all outline fields consumed by prose instead of omitting auxiliary scene copies', async () => {
     const values={hot_scenes:JSON.stringify(['截图发到群里，群友看不见那行字。']),setback_scenes:JSON.stringify(['受阻场景完整原文']),
       highlight_points:JSON.stringify(['高潮来源完整原文']),core_content:'补全内容完整原文',plot_points:JSON.stringify({coreEvent:'核心事件完整原文'}),
