@@ -211,7 +211,32 @@ it('does not enter another provider attempt after the last physical call returns
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
   });
-  it('does not repair fiction if either independent audit fails to complete', async () => {
+  it('rechecks only changed overlap pairs after original-pool reselection and drops obsolete pair findings', async () => {
+  const original=selection(),overlapCalls:any[]=[];
+  const c=Object.create(ChainController.prototype) as any;
+  c.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string,_budget:any,_sourceBatch:boolean,_genres:any,_limiter:any,focus:any)=>{
+    if(mode==='overlap'){
+      overlapCalls.push({focus,ids:current.selected.map((item:any)=>item.premiseId)});
+      return focus ? {passed:true,issues:[]} : failure;
+    }
+    return {passed:true,issues:[]};
+  });
+  c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+    const data={replacements:[{replacesPremiseId:'B',premise:premise('C'),comparisons:[compare('A')]}]};
+    expect(options.validate(data)).toBe(true);
+    return {data};
+  });
+  const result=await c.reconcilePremiseSelection(original,2,3,['悬疑'],'');
+  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','C']);
+  expect(overlapCalls).toEqual([
+    {focus:undefined,ids:['A','B']},
+    {focus:['C'],ids:['A','C']},
+  ]);
+  expect(result.selectionAudit.finalReview).toMatchObject({passed:true,issues:[]});
+  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+});
+
+it('does not repair fiction if either independent audit fails to complete', async () => {
     const c=Object.create(ChainController.prototype) as any;
     c.reviewPremiseSelection=vi.fn().mockRejectedValueOnce(new Error('审查协议失败')).mockResolvedValueOnce(failure);
     c.llmCallWithRetry=vi.fn();
@@ -474,7 +499,10 @@ describe('one bounded reserve before identity lock', () => {
 it('requires focused overlap evidence and rejects an unrelated old-pair refusal as protocol failure',async()=>{
  const {premiseOverlapScopeIssues}=await import('./premise-selection-review');const selected=selection();
  expect(premiseOverlapScopeIssues({passed:false,issues:[{premiseId:'A',referencePremiseId:'B'}]},selected,'B')).toEqual([]);
+ expect(premiseOverlapScopeIssues({passed:false,issues:[{premiseId:'A',referencePremiseId:'B'}]},selected,['A','B'])).toEqual([]);
  expect(premiseOverlapScopeIssues({passed:false,issues:[{premiseId:'A',referencePremiseId:'A'}]},selected,'B')[0]).toContain('旧配对');
+ expect(premiseOverlapScopeIssues({passed:false,issues:[{premiseId:'A',referencePremiseId:'A'}]},selected,['A','B'])).toEqual([]);
+ expect(premiseOverlapScopeIssues({passed:false,issues:[]},selected,['B','C'])[0]).toContain('变化项不在当前选择中');
 });
 
 it.each([3,2])('partitions only for output capacity and preserves completed work with %i shared credits',async(initialCredits)=>{

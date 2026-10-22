@@ -284,11 +284,14 @@ export function premiseReserveReselectionPlan(initial: PremiseSelectionResult, c
 
 /** Reused old pairs cannot veto an unrelated replacement. Out-of-scope findings
  * are protocol errors; they must never be silently discarded to obtain a pass. */
-export function premiseOverlapScopeIssues(value:unknown,selection:PremiseSelectionResult,focusId?:string):string[]{
- if(!focusId)return [];
- if(!selection.selected.some(item=>item.premiseId===focusId))return ['同构审核变化项不在当前选择中'];
+export function premiseOverlapScopeIssues(value:unknown,selection:PremiseSelectionResult,focusIds?:string|readonly string[]):string[]{
+ const ids=focusIds===undefined?[]:typeof focusIds==='string'?[focusIds]:[...focusIds];
+ if(!ids.length)return [];
+ const selectedIds=new Set(selection.selected.map(item=>String(item.premiseId)));
+ if(ids.some(id=>!selectedIds.has(String(id))))return ['同构审核变化项不在当前选择中'];
+ const focused=new Set(ids.map(String));
  const issues=(value as PremiseSelectionReview)?.issues;
  if(!Array.isArray(issues))return [];
- return issues.filter(item=>item.premiseId!==focusId&&item.referencePremiseId!==focusId)
+ return issues.filter(item=>!focused.has(String(item.premiseId))&&!focused.has(String(item.referencePremiseId)))
   .map(()=> '本次同构审核只允许返回变化项与保留项之间的问题，旧配对不得重复否决换选');
 }

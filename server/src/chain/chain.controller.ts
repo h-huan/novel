@@ -5939,7 +5939,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   /** 每个项目的已发最大进度，用于把总进度钳制成单调不降（避免步骤回退导致前端进度条倒走） */
   private projectLastPercent = new Map<string, number>();
 
-  private async reviewPremiseSelection(selection: ReturnType<typeof normalizePremiseSelectionPayload>, standard: string, mode: 'overlap' | 'source_drift', physicalCallBudget?: { remaining: number }, sourceBatch = false, requiredGenres:readonly string[]=[], reviewLimiter?:ReturnType<typeof createReviewLimiter>, overlapFocusId?:string): Promise<PremiseSelectionReview> {
+  private async reviewPremiseSelection(selection: ReturnType<typeof normalizePremiseSelectionPayload>, standard: string, mode: 'overlap' | 'source_drift', physicalCallBudget?: { remaining: number }, sourceBatch = false, requiredGenres:readonly string[]=[], reviewLimiter?:ReturnType<typeof createReviewLimiter>, overlapFocusId?:string | readonly string[]): Promise<PremiseSelectionReview> {
     if (mode === 'source_drift' && !sourceBatch) {
       const budget = premiseSourceCallBudget(physicalCallBudget);
       let batches: ReturnType<typeof premiseSourceBatches>;
@@ -5956,17 +5956,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         (batch, _index, allowance) => this.reviewPremiseSelection(batch, standard, mode, allowance, readGenerationBudgets().reviewGroupingMode!==0, requiredGenres, reviewLimiter));
       return mergePremiseSourceBatches(selection, batches, reviews);
     }
+    const overlapFocusIds = overlapFocusId === undefined ? [] : typeof overlapFocusId === 'string' ? [overlapFocusId] : [...overlapFocusId];
     const validateReview = (value: unknown) => mode === 'source_drift' ? [...premiseSourceReviewIssues(value, selection),...premiseGenreFitIssues(value,selection,requiredGenres),...premiseCategoryFitIssues(value,selection),...premisePayoffReviewIssues(value,selection)] : [...premiseSelectionReviewIssues(value, selection),
       ...(Array.isArray((value as PremiseSelectionReview)?.issues) ? (value as PremiseSelectionReview).issues : [])
         .filter(item => item?.kind !== mode).map(() => '当前独立审查只能返回' + mode),
-      ...premiseOverlapScopeIssues(value,selection,overlapFocusId)];
+      ...premiseOverlapScopeIssues(value,selection,overlapFocusIds)];
     const runReview=reviewLimiter||(<T>(task:()=>Promise<T>)=>task());
     const result = await runReview(()=>this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
       standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + '\n当前是锁定前复核，只审查，不修改或重选；先按causalPlan核查每个关键阶段结果的全部必要条件，再分别作来源、分类和流派结论。因果成立检查不受下文“只核对来源”措辞限制，原池和展开同样漏写条件也须返回gap，不能以来源忠实或结局完整代替。'
       + (mode === 'source_drift' ? '本次只核对每个已选项展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺，逐项核对，不审同批重合。核对的是与原池明确约束是否兼容，不要求所有展开句都已逐字写入骨架；具体判据按GEN-002执行。不由评审补造候选没有写的事实。对于代写、转交、救助等多方动作，先分清原文明确的实施者、受益者与接收者；原文没有写明的角色关系不得由评审补成确定事实，更不能在修订前后按相反解释各判一次冲突。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，必须说明选择、升级、反转与代价为何同构；引用两处相似句子之外，还须逐项比较主角选择触发的具体升级、反转改变的胜负条件与最终代价。')
       + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
-      + (overlapFocusId ? '\n【本次变化项】'+overlapFocusId+'；必须逐对比较本项与每个保留项。保留项之间内容未变且已有独立审核结论，本次不重复审这些旧配对；issues只能包含至少一端为本次变化项的真实同构问题，不返回保留项之间的问题。' : '')
+      + (overlapFocusIds.length ? '\n【本次变化项】' + JSON.stringify(overlapFocusIds) + '；必须逐对比较所有至少一端属于本次变化项的候选对，每个无序候选对只审一次。变化项之间也要互相比较；保留项之间内容未变且已有独立审核结论，本次不重复审这些旧配对。issues只能包含至少一端为本次变化项的真实同构问题，不返回保留项之间的问题。' : '')
       + '\n【待锁定已选胚子】' + JSON.stringify(selection.selected)
       + (mode === 'source_drift' ? premiseCategoryReviewDirective(selection) : '')
       + (mode === 'source_drift' ? premisePayoffReviewDirective(selection) : '')
@@ -5999,7 +6000,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}) {
     const sourceReceipts:PremiseSourceReceipts=new Map();
     const sourceScope=JSON.stringify({standard,requiredGenres});
-    const reviewBoth = async (selection: ReturnType<typeof normalizePremiseSelectionPayload>): Promise<PremiseSelectionReview> => {
+    const reviewBoth = async (
+      selection: ReturnType<typeof normalizePremiseSelectionPayload>,
+      changeScope?: { focusIds: readonly string[]; affectedIds: readonly string[] },
+      previousReview?: PremiseSelectionReview,
+    ): Promise<PremiseSelectionReview> => {
       let sourceReviewReuse = { reused: 0, reviewed: 0 };
       const limiter=createReviewLimiter(IDEA_CARD_GENERATION_CONCURRENCY);
       const modes=['source_drift','overlap'] as const;
@@ -6011,17 +6016,52 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               pending=>this.reviewPremiseSelection(pending,standard,mode,budget,false,requiredGenres,limiter),
               counts=>{
                 sourceReviewReuse={reused:Number(counts.reused)||0,reviewed:Number(counts.reviewed)||0};
-                this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核仍覆盖当前选择`);
+                this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核只复核变化项涉及的配对`);
               })
-          : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter));}
+          : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter,changeScope?.focusIds));}
       catch(error){throw new Error('锁定前独立审查未完成，未生成完整卡：'+String(error));}
-      const sourceChecks = reviews.flatMap(review => review.sourceChecks || []);
-      return { passed: reviews.every(review => review.passed), issues: reviews.flatMap(review => review.issues),
+      const sourceReview=reviews[0];
+      const overlapReview=reviews[1];
+      const affectedIds=new Set((changeScope?.affectedIds||[]).map(String));
+      const retainedOverlapIssues=previousReview&&affectedIds.size
+        ? previousReview.issues.filter(issue=>issue.kind==='overlap'
+          && !affectedIds.has(String(issue.premiseId))
+          && !affectedIds.has(String(issue.referencePremiseId)))
+        : [];
+      const overlapIssues=[...retainedOverlapIssues,...(overlapReview?.issues||[])];
+      const issues=[...(sourceReview?.issues||[]),...overlapIssues];
+      const sourceChecks=sourceReview?.sourceChecks||[];
+      return {
+        passed: Boolean(sourceReview?.passed&&overlapReview?.passed&&retainedOverlapIssues.length===0),
+        issues,
         ...(sourceChecks.length ? { sourceChecks } : {}),
-        genreChecks: reviews.flatMap(review=>review.genreChecks||[]),
-        payoffChecks: reviews.flatMap(review=>review.payoffChecks||[]),
-        categoryChecks: reviews.flatMap(review=>review.categoryChecks||[]),
-        sourceReviewReuse };
+        genreChecks: sourceReview?.genreChecks||[],
+        payoffChecks: sourceReview?.payoffChecks||[],
+        categoryChecks: sourceReview?.categoryChecks||[],
+        sourceReviewReuse,
+      };
+    };
+    const selectionChangeScope = (
+      before: ReturnType<typeof normalizePremiseSelectionPayload>,
+      after: ReturnType<typeof normalizePremiseSelectionPayload>,
+    ) => {
+      const beforeById=new Map<string,{index:number;signature:string}>();
+      const afterById=new Map<string,{index:number;signature:string}>();
+      before.selected.forEach((item,index)=>beforeById.set(String(item.premiseId),{index,signature:JSON.stringify(item)}));
+      after.selected.forEach((item,index)=>afterById.set(String(item.premiseId),{index,signature:JSON.stringify(item)}));
+      const affectedIds=new Set<string>();
+      for(const [id,prior] of beforeById){
+        const next=afterById.get(id);
+        if(!next||next.index!==prior.index||next.signature!==prior.signature)affectedIds.add(id);
+      }
+      for(const [id,next] of afterById){
+        const prior=beforeById.get(id);
+        if(!prior||prior.index!==next.index||prior.signature!==next.signature)affectedIds.add(id);
+      }
+      return {
+        focusIds:after.selected.map(item=>String(item.premiseId)).filter(id=>affectedIds.has(id)),
+        affectedIds:[...affectedIds],
+      };
     };
     const initialReview = await reviewBoth(initial);
     const minimumSelectableCount = minimumAcceptableIdeaCount(requestedCount);
@@ -6128,7 +6168,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       reselectionStopReason, sourceRepairCallsRemaining: reselectionBudget.remaining,
       excludedPremiseIds: unresolvedIds, reasons: initialReview.issues.filter(issue=>unresolvedIds.includes(issue.premiseId)),
       completeCardGatePending: true } : {};
-    const postReselectionReview = selected === initial ? initialReview : await reviewBoth(selected);
+    let postReselectionReview: PremiseSelectionReview;
+    if(selected===initial) postReselectionReview=initialReview;
+    else {
+      const changeScope=selectionChangeScope(initial,selected);
+      postReselectionReview=changeScope.focusIds.length
+        ? await reviewBoth(selected,changeScope,initialReview)
+        : retainPremiseReviewEvidence(initial,initialReview,selected);
+    }
     let finalReview=postReselectionReview;
     const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
       attemptedIds=new Set([...initial.selected,...selected.selected].map(item=>String(item.premiseId)));
@@ -6152,19 +6199,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       slots.forEach(slot=>slot.mode='replace_from_pool');
       const before=selected;
       const completed=await reselectScope(slots,unusedIds);
-      let changed=false;
       for(const slot of slots){
         const position=before.selected.findIndex(item=>item.premiseId===slot.replacesPremiseId);
         const replacement=String(selected.selected[position].premiseId);
         if(replacement===String(slot.replacesPremiseId))continue;
-        changed=true;
         attemptedIds.add(replacement);
         reserveHistory.push({replacesPremiseId:String(slot.replacesPremiseId),replacementPremiseId:replacement});
       }
-      // Review every outstanding source through receipt reuse and the merged set
-      // through overlap review; no known gap disappears when a different slot passes.
-      if(!changed)break;
-      finalReview=await reviewBoth(selected);
+      // Reuse unchanged pair verdicts. Re-review only pairs touched by the new/changed
+      // premises; old findings involving a replaced identity no longer apply to the new set.
+      const changeScope=selectionChangeScope(before,selected);
+      if(!changeScope.focusIds.length)break;
+      finalReview=await reviewBoth(selected,changeScope,finalReview);
       if(!completed)break;
     }
     const reserveAudit=reserveHistory.length?{attempted:true,error:null,...reserveHistory[reserveHistory.length-1],
