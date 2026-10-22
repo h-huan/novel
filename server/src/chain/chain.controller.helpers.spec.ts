@@ -1570,7 +1570,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1637,6 +1637,8 @@ describe('idea discovery live orchestrator behavior', () => {
       },
     };
 
+    const requestedCount = failure === 'pool_below_minimum' ? 5 : 2;
+    const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
     const mixed = failure === 'category_inheritance';
     const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
     if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
@@ -1711,15 +1713,15 @@ describe('idea discovery live orchestrator behavior', () => {
       submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
       ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
-    }, 2);
+    }, requestedCount);
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
     const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
     expect(poolCalls).toHaveLength(2);
     expect(poolCalls.map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
-    expect(poolCalls[0][0].prompt).toContain('只生成恰好 4 个轻量题材胚子');
-    expect(poolCalls[1][0].prompt).toContain('只生成恰好 3 个轻量题材胚子');
+    expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
+    expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
     expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
     const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
     expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(2);
@@ -1745,6 +1747,18 @@ describe('idea discovery live orchestrator behavior', () => {
       expect(call[1]).toContain('"plotTags":["调查"]');
       expect(call[1]).toContain('"writingStyle":["简洁"]');
       expect(call[1]).toContain('"pov":"第一人称"');
+    }
+    if (failure === 'pool_below_minimum') {
+      const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
+      expect(completeCardCalls.length).toBeGreaterThan(0);
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
+        target: 15, generated: 2, shortfall: 13, batchCount: 2, maxConcurrency: 2,
+      });
+      expect(result.appealGate.minimumDeliverableCount).toBe(3);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe('incomplete');
+      expect(result.ideas).toEqual([]);
+      return;
     }
     const firstCardCallIndex = generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
     expect(firstCardCallIndex).toBeGreaterThanOrEqual(0);

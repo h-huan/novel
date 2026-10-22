@@ -4853,6 +4853,10 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const discoveryCategories = dto.discoveryCategoryOptions?.length
         ? dto.discoveryCategoryOptions : [dto.storyCategory];
       const variedCategories = discoveryCategories.length > 1 && requestedCount > 1;
+      // Candidate selection may continue with a small usable pool; final delivery still keeps its own minimum.
+      // When category diversity is required, retain at least two category slots whenever two candidates exist.
+      const minimumSelectedCountForPool = (availableCount: number) => variedCategories
+        ? Math.min(2, Math.max(1, availableCount)) : 1;
       const selectedCategoryById = new Map<string, string>();
       const submissionForCategory = (category: string) => {
         const required = platformSubmissionDimensions(dto.platform, dto.storyType, category, dto.targetAudience).includes('genre');
@@ -4999,7 +5003,9 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '候选之间必须在人物欲望、关系结构、主动选择、升级机制、反转作用或兑现代价上有实质差异；不能只换职业、名字或道具，也不能复用历史排除项。',
           '保留用户指定的类型、平台、分类、流派与其它条件。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
         ].join('\n');
-        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false, minimumPremiseSelectionCount)
+        const minimumSelectedCount = promptPhase === 'selection'
+          ? minimumSelectedCountForPool(candidatePool.length) : minimumPremiseSelectionCount;
+        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false, minimumSelectedCount)
           .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；逐项比较全部候选后选出最成熟的题材，不得新增候选或改写原池。')
           .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
           .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
@@ -5286,7 +5292,17 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           this.logger.warn('灵感候选池有 ' + blockedBatchCount + ' 个批次被前置条件阻断；其余批次提供 '
             + candidatePool.length + ' 个可用候选，继续按固定池选优');
         }
-        if (candidatePool.length < minimumPremiseSelectionCount) {
+        if (candidatePool.length === 0) {
+          const allBatchesBlocked = poolBatchResults.length > 0
+            && poolBatchResults.every(item => Boolean(item.blocked));
+          if (allBatchesBlocked) {
+            const firstBlockedBatch = poolBatchResults.find(item => item.blocked)!;
+            throw failWithPoolAudit(
+              prerequisiteError(firstBlockedBatch.blocked),
+              'candidate_pool_generation',
+              'selection_prerequisite_blocked',
+            );
+          }
           const blockedDetails = poolBatchResults.filter(item => item.blocked).map(item =>
             '第' + (item.batchIndex + 1) + '批前置条件阻断：' + String(item.blocked.reason ?? item.blocked.message ?? '未提供原因'),
           );
@@ -5294,10 +5310,9 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             '第' + (item.batchIndex + 1) + '批失败：' + item.error,
           );
           const details = [...blockedDetails, ...batchErrors].join('；');
-          const message = '并发候选池可用题材不足：' + candidatePool.length + '/' + minimumPremiseSelectionCount
-            + '；目标' + premisePoolSize + '，原始返回' + poolFilterTotals.rawReturned
-            + '，去重后可用' + candidatePool.length + (details ? '；' + details : '');
-          throw failWithPoolAudit(new Error(message), 'candidate_pool_generation', 'candidate_pool_below_minimum');
+          const message = '并发候选池没有形成可用题材：目标' + premisePoolSize + '，原始返回' + poolFilterTotals.rawReturned
+            + '，去重后可用0' + (details ? '；' + details : '');
+          throw failWithPoolAudit(new Error(message), 'candidate_pool_generation', 'candidate_pool_empty');
         }
         if (candidatePool.length < premisePoolSize) {
           this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize
@@ -5324,7 +5339,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             const selected = normalizePremiseSelectionPayload({
               pool: candidatePool,
               selectedPremises: parsedSelection && parsedSelection.selectedPremises,
-            }, requestedCount, premisePoolSize, discoveryCategories, minimumPremiseSelectionCount);
+            }, requestedCount, premisePoolSize, discoveryCategories, minimumSelectedCountForPool(candidatePool.length));
             assertPremiseCausalPlans(selected);
             if (!variedCategories) for (const premise of selected.selected) {
               if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) {

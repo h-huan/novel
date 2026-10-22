@@ -380,7 +380,6 @@ const discoveryCallTrace = {
   ...summarizeDiscoveryStepMetrics(stepMetricRows),
 };
 const codeSeedVersion = seedVersion();
-const codeSeedVersion = seedVersion();
 const standardMismatch = standards.filter((s) => {
   const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
   const source = String(s.source ?? '');
