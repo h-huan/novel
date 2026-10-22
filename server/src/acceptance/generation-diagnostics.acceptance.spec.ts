@@ -261,7 +261,7 @@ it('generates a complete idea batch through preselection plus structuring and re
   const request = { storyType: 'short_story' as const, platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards };
 
   const [first, duplicate] = await Promise.all([controller.ideaDiscover(request), controller.ideaDiscover(request)]) as any[];
-  expect(first).toMatchObject({ success: true, totalIdeas: 5 });
+  expect(first, 'idea discovery failed: ' + JSON.stringify({ error: first.error, appealGate: first.appealGate })).toMatchObject({ success: true, totalIdeas: 5 });
   expect(first.appealGate).toMatchObject({
     premisePoolSize: 5,
     premisePoolTarget: 15,
