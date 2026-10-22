@@ -96,8 +96,21 @@ export function confirmedIdeaStoryCard(idea: Record<string, any>): Record<string
   };
 }
 
+export function separateIdeaDiscoveryAudit(idea: Record<string, any>): {
+  confirmedStory: Record<string, any>;
+  ideaDiscoveryAudit: Record<string, any> | null;
+} {
+  const confirmedStory = structuredClone(idea);
+  const audit = confirmedStory.ideaDiscoveryAudit;
+  delete confirmedStory.ideaDiscoveryAudit;
+  return {
+    confirmedStory,
+    ideaDiscoveryAudit: audit && typeof audit === 'object' && !Array.isArray(audit) ? audit : null,
+  };
+}
+
 /**
- * 题材池的“广搜数量”只用于提高搜索覆盖，不是质量 Gate。
+ * 题材池的“广搜数量”只用于提高搜索覆盖，不是质量 Gate.
  * 未被选中的轻量胚子只需最小骨架；只有最终选中的 requestedCount 项需要完整筛选证据。
  */
 export function normalizePremiseSelectionPayload(

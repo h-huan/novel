@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
   confirmedIdeaStoryCard,
+  separateIdeaDiscoveryAudit,
   applyOrderedIdeaRepairPatches,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
@@ -527,5 +528,32 @@ describe('minimum acceptable idea count', () => {
   it('allows at most two missing cards without making a three-card request collapse to one', () => {
     expect([1, 2, 3, 4, 5, 6, 7].map(minimumAcceptableIdeaCount)).toEqual([1, 2, 3, 3, 3, 4, 5]);
     expect(() => minimumAcceptableIdeaCount(0)).toThrow('正整数');
+  });
+});
+
+
+describe('confirmed story persistence boundary', () => {
+  it('keeps the batch discovery audit separate from the canonical selected story without mutating input', () => {
+    const input = {
+      title: '已选题材',
+      sourcePremiseId: 'P2',
+      ideaDiscoveryAudit: {
+        schemaVersion: 8,
+        acceptedEvidence: [{ sourcePremiseId: 'P2', title: '已选题材' }],
+        candidateAssessments: [{ sourcePremiseId: 'P3', passed: false, issues: ['不合格候选'] }],
+      },
+    };
+    const original = structuredClone(input);
+    const result = separateIdeaDiscoveryAudit(input);
+    expect(result.confirmedStory).toEqual({ title: '已选题材', sourcePremiseId: 'P2' });
+    expect(result.ideaDiscoveryAudit).toEqual(original.ideaDiscoveryAudit);
+    expect(input).toEqual(original);
+    expect(JSON.stringify(result.confirmedStory)).not.toContain('candidateAssessments');
+  });
+
+  it('does not invent an audit when the selected story has none', () => {
+    const result = separateIdeaDiscoveryAudit({ title: '自定义题材' });
+    expect(result.confirmedStory).toEqual({ title: '自定义题材' });
+    expect(result.ideaDiscoveryAudit).toBeNull();
   });
 });

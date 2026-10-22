@@ -180,7 +180,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -6458,6 +6458,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       chaptersPerVolume: _legacyChaptersPerVolume,
       totalChapters: _legacyTotalChapters,
       chapterCount: _legacyChapterCount,
+      ideaDiscoveryAudit: _untrustedIdeaDiscoveryAudit,
       ...currentProjectSettings
     } = projectSettings;
     const constitution = updateConstitution({ type: dto.storyType || 'short_story', settings: '{}' }, {
@@ -6469,9 +6470,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       chapterWordRange: creationChapterRange,
       settings: currentProjectSettings,
     });
-    constitution.confirmedStory = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)
-      ? structuredClone(dto.selectedIdea)
+    const rawSelectedIdea = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)
+      ? dto.selectedIdea
       : { summary: String(dto.selectedIdea || '') };
+    const { confirmedStory, ideaDiscoveryAudit } = separateIdeaDiscoveryAudit(rawSelectedIdea);
+    constitution.confirmedStory = confirmedStory;
     constitution.revision = 1;
     // 创建入口前置阻断：平台/分类/基调/文风/流派/视角是【执行前提】，空值 = 标准未执行。
     // 此前这些空值要等生成阶段（assertExecutionStandardsComplete）才被拦下：用户已经选完题材、
@@ -6518,8 +6521,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         categoryWordScale: creationScaleStanding,
       };
     }
-    const normalizedProjectSettings = constitutionSettings({ ...currentProjectSettings,
-      structurePlanning: 'dynamic_by_story_rhythm' }, constitution);
+    const normalizedProjectSettings = {
+      ...constitutionSettings({ ...currentProjectSettings,
+        structurePlanning: 'dynamic_by_story_rhythm' }, constitution),
+      ...(ideaDiscoveryAudit ? { ideaDiscoveryAudit } : {}),
+    };
     dto.settings = normalizedProjectSettings;
 
     const projectId = uuid();

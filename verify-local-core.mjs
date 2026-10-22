@@ -112,6 +112,36 @@ function projectType(project) {
   return String(project?.type ?? constitution?.projectType ?? '').trim() || null;
 }
 
+function projectSettingsObject(project) {
+  const value = project?.settings ?? project?.settings_json;
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return {};
+}
+
+function comparableValue(value) {
+  if (Array.isArray(value)) return value.map(comparableValue).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, comparableValue(value[key])]));
+  if (typeof value === 'number') return value;
+  if (value === null || value === undefined) return null;
+  return String(value).trim();
+}
+
+function comparePersistedField(authoritative, confirmedStory) {
+  const missing = value => value === null || value === undefined || value === '';
+  if (missing(authoritative) || missing(confirmedStory)) {
+    return { status: 'unknown', authoritative: authoritative ?? null, confirmedStory: confirmedStory ?? null };
+  }
+  const left = comparableValue(authoritative);
+  const right = comparableValue(confirmedStory);
+  return { status: JSON.stringify(left) === JSON.stringify(right) ? 'match' : 'mismatch', authoritative: left, confirmedStory: right };
+}
+
 function projectTime(project) {
   const raw = project?.updatedAt ?? project?.updated_at ?? project?.createdAt ?? project?.created_at ?? '';
   const parsed = Date.parse(String(raw));
@@ -257,17 +287,46 @@ async function inspectProject(target) {
   ]);
 
   const project = unwrap(projectRes.data);
+  const projectSettings = projectSettingsObject(project);
   const chapterRows = asArray(chaptersRes.data).slice().sort((a, b) => {
     const ai = Number(a.chapter_index ?? a.chapterIndex ?? a.index ?? a.order ?? 0);
     const bi = Number(b.chapter_index ?? b.chapterIndex ?? b.index ?? b.order ?? 0);
     return ai - bi;
   });
   const runRows = asArray(runsRes.data);
-  const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? null;
+  const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? projectSettings?.creativeConstitution ?? null;
   const confirmedStory = constitution?.confirmedStory && typeof constitution.confirmedStory === 'object' && !Array.isArray(constitution.confirmedStory)
     ? constitution.confirmedStory
     : null;
+  const ideaDiscoveryAudit = projectSettings.ideaDiscoveryAudit ?? confirmedStory?.ideaDiscoveryAudit ?? null;
+  const auditPlacement = {
+    topLevel: Boolean(projectSettings.ideaDiscoveryAudit),
+    embeddedInConfirmedStory: Boolean(confirmedStory?.ideaDiscoveryAudit),
+    status: confirmedStory?.ideaDiscoveryAudit ? 'embedded_in_confirmed_story' : projectSettings.ideaDiscoveryAudit ? 'separated' : 'unknown',
+  };
   const resolvedProjectType = projectType(project);
+  const authoritativeTargetWords = constitution?.targetWords ?? project?.target_words ?? project?.targetWords;
+  const fieldChecks = {
+    storyType: comparePersistedField(resolvedProjectType, confirmedStory?.storyType),
+    targetPlatform: comparePersistedField(constitution?.targetPlatform ?? project?.targetPlatform ?? project?.target_platform, confirmedStory?.targetPlatform),
+    category: comparePersistedField(constitution?.category, confirmedStory?.storyCategory ?? confirmedStory?.category),
+    storyTone: comparePersistedField(constitution?.storyTone, confirmedStory?.storyTone),
+    writingStyle: comparePersistedField(constitution?.writingStyle, confirmedStory?.writingStyle),
+    webNovelGenre: comparePersistedField(constitution?.webNovelGenre, confirmedStory?.webNovelGenre),
+    pov: comparePersistedField(constitution?.pov, confirmedStory?.pov),
+    targetAudience: comparePersistedField(constitution?.targetAudience, confirmedStory?.targetAudience),
+    targetWords: comparePersistedField(Number(authoritativeTargetWords) || null, Number(confirmedStory?.recommendedTargetWords ?? confirmedStory?.estimatedWords) || null),
+  };
+  const selectedPremiseId = String(confirmedStory?.sourcePremiseId || '').trim();
+  const acceptedPremiseIds = Array.isArray(ideaDiscoveryAudit?.acceptedEvidence)
+    ? ideaDiscoveryAudit.acceptedEvidence.map(item => String(item?.sourcePremiseId || '').trim()).filter(Boolean)
+    : [];
+  fieldChecks.sourcePremiseIdInAudit = selectedPremiseId && acceptedPremiseIds.length
+    ? { status: acceptedPremiseIds.includes(selectedPremiseId) ? 'match' : 'mismatch', sourcePremiseId: selectedPremiseId, acceptedPremiseIds }
+    : { status: 'unknown', sourcePremiseId: selectedPremiseId || null, acceptedPremiseIds: acceptedPremiseIds.length ? acceptedPremiseIds : null };
+  const fieldMismatches = Object.entries(fieldChecks).filter(([, check]) => check.status === 'mismatch').map(([field]) => field);
+  const fieldUnknowns = Object.entries(fieldChecks).filter(([, check]) => check.status === 'unknown').map(([field]) => field);
+  const fieldConsistency = { status: fieldMismatches.length ? 'mismatch' : fieldUnknowns.length ? 'partial' : 'match', mismatches: fieldMismatches, unknowns: fieldUnknowns, checks: fieldChecks };
   const firstChapterIndex = Number(chapterRows[0]?.chapter_index ?? chapterRows[0]?.chapterIndex ?? chapterRows[0]?.index ?? chapterRows[0]?.order ?? NaN);
   const firstChapterRun = Number.isFinite(firstChapterIndex)
     ? runRows.find((run) => String(run.stage ?? '').toLowerCase() === 'chapter'
@@ -287,6 +346,8 @@ async function inspectProject(target) {
       targetPlatform: project?.targetPlatform ?? constitution?.targetPlatform ?? null,
       constitutionRevision: constitution?.revision ?? null,
       confirmedStoryPresent: Boolean(confirmedStory),
+      fieldConsistency,
+      auditPlacement,
       storySelection: confirmedStory ? {
         title: confirmedStory.title ?? null,
         hook: confirmedStory.hook ?? null,
@@ -296,7 +357,8 @@ async function inspectProject(target) {
         mainReversal: confirmedStory.mainReversal ?? null,
         noveltyProof: confirmedStory.noveltyProof ?? null,
         readerExperienceProfile: confirmedStory.readerExperienceProfile ?? null,
-        ideaDiscoveryAudit: confirmedStory.ideaDiscoveryAudit ?? null,
+        ideaDiscoveryAudit,
+        auditPlacement,
       } : null,
     } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
     chapters: {
@@ -436,6 +498,23 @@ const gitInfo = {
   branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
   dirty: Boolean(git(['status', '--porcelain'])),
 };
+const healthPayload = unwrap(health.data);
+const backendBuild = healthPayload?.build && typeof healthPayload.build === 'object' ? healthPayload.build : {};
+const backendIdentity = {
+  apiReachable: health.ok,
+  instanceId: healthPayload?.instanceId ?? null,
+  buildVersion: backendBuild.version ?? healthPayload?.version ?? null,
+  buildCommit: backendBuild.commit ?? null,
+  processStartedAt: backendBuild.processStartedAt ?? null,
+  diagnosticsMarker: backendBuild.diagnosticsMarker ?? null,
+  localCommit: gitInfo.commit,
+  loadedLocalRevision: backendBuild.commit && gitInfo.commit
+    ? (String(backendBuild.commit) === String(gitInfo.commit) ? 'match' : 'mismatch')
+    : 'unknown',
+  diagnosticsMarkerStatus: backendBuild.diagnosticsMarker === 'verify-local-build-identity-v1'
+    ? 'present' : backendBuild.diagnosticsMarker ? 'different' : 'unknown',
+};
+runtime.backendIdentity = backendIdentity;
 
 const failedTests = tests.filter((x) => x.status !== 'passed');
 const runtimeProblems = [];
@@ -589,6 +668,14 @@ function projectMarkdown(target) {
   const typeLine = target.expectedType
     ? `${result.project.typeMatches ? 'PASS' : 'FAIL'} · expected=${target.expectedType} · actual=${result.project.type ?? 'unknown'}`
     : `${result.project.type ?? 'unknown'}`;
+  const fieldConsistency = result.project.fieldConsistency;
+  const fieldConsistencyLine = fieldConsistency
+    ? `${fieldConsistency.status} · mismatches=${(fieldConsistency.mismatches || []).join(',') || 'none'} · unknown=${(fieldConsistency.unknowns || []).join(',') || 'none'}`
+    : 'UNKNOWN';
+  const auditPlacement = result.project.auditPlacement;
+  const auditPlacementLine = auditPlacement
+    ? `${auditPlacement.status} · topLevel=${auditPlacement.topLevel} · embedded=${auditPlacement.embeddedInConfirmedStory}`
+    : 'UNKNOWN';
   const diagnostics = result.cockpit?.diagnostics ?? null;
   const isCreating = String(result.project.status || '').toLowerCase() === 'creating';
   const inProgress = !runFull && isCreating && diagnostics?.creationStalled !== true;
@@ -612,7 +699,7 @@ function projectMarkdown(target) {
         ? `IN_PROGRESS · pending=${diagnostics.pendingPersistenceMismatch.join(',')}`
         : `PASS · mismatch=${(diagnostics.persistenceMismatch || []).join(',') || 'none'}`
     : 'UNAVAILABLE';
-  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
+  return `### ${target.label}\n\n- 项目：${result.project.title ?? result.project.id} (${result.project.id})\n- 状态：${statusLine}\n- 类型：${typeLine}\n- confirmedStory：${result.project.confirmedStoryPresent ? 'PASS' : 'FAIL'}\n- 结构完整性：${integrityLine}\n- 创建/持久化诊断：${persistenceLine}\n- 题材字段一致性：${fieldConsistencyLine}\n- 题材审计隔离：${auditPlacementLine}\n- 最近生成：${latestRunLine(result)}\n- 第一章：${firstLine}\n- 第一章 Gate：${gateLine}`;
 }
 
 
@@ -718,7 +805,9 @@ function detailedProjectMarkdown(target) {
       + '；核验状态：' + (stats.persistenceStatus ?? '未知')
       + '；无法核实项：' + JSON.stringify(stats.persistenceUnknown ?? [])
       + '；查询错误：' + JSON.stringify(stats.persistenceQueryErrors ?? []),
-    '- 完整性冲突：' + issues.length, '',
+    '- 完整性冲突：' + issues.length,
+    '- 题材字段一致性：' + JSON.stringify(item.project?.fieldConsistency ?? {}),
+    '- 题材审计隔离：' + JSON.stringify(item.project?.auditPlacement ?? {}), '',
     ...issues.slice(0, 35).map(issue =>
       '- 冲突：' + markdownCell(typeof issue === 'string' ? issue : JSON.stringify(issue), 1400)),
     '',
@@ -777,7 +866,7 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 项目验收\n\n${projectSections}\n\n${detailedSections}\n\n## 仓库测试\n\n${testLines}\n\n${failedTestsMarkdown()}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- 本报告只读取现有 generation_runs 与 cockpit 等接口，不等同于直接读取 Server 进程 stdout/stderr；若有独立服务端日志，可与 JSON 一并提供。\n- generation_runs 最多返回最近 200 条，较早历史需单独提供服务端日志或数据库备份；Markdown 中较长证据可能截断，JSON 保留接口返回的完整结构化数据。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 后端加载身份：${backendIdentity.loadedLocalRevision} · marker=${backendIdentity.diagnosticsMarkerStatus} · build=${backendIdentity.buildCommit ?? 'unknown'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 后端进程身份\n\n- API 实例：${backendIdentity.instanceId ?? 'unknown'}\n- 后端版本：${backendIdentity.buildVersion ?? 'unknown'}\n- 构建提交：${backendIdentity.buildCommit ?? 'unknown'}\n- 与本地提交一致：${backendIdentity.loadedLocalRevision}\n- 诊断标记：${backendIdentity.diagnosticsMarkerStatus}\n- 进程启动时间：${backendIdentity.processStartedAt ?? 'unknown'}\n\n## 项目验收\n\n${projectSections}\n\n${detailedSections}\n\n## 仓库测试\n\n${testLines}\n\n${failedTestsMarkdown()}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- 本报告只读取现有 generation_runs 与 cockpit 等接口，不等同于直接读取 Server 进程 stdout/stderr；若有独立服务端日志，可与 JSON 一并提供。\n- generation_runs 最多返回最近 200 条，较早历史需单独提供服务端日志或数据库备份；Markdown 中较长证据可能截断，JSON 保留接口返回的完整结构化数据。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');

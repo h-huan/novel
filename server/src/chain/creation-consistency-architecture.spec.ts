@@ -110,4 +110,15 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('// 世界观 depth\n    enrichTasks.push');
     expect(controllerSource).toContain('世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔');
   });
+
+  it('keeps batch audit out of confirmedStory and persists it separately for diagnostics', () => {
+    const splitAt = indexOrFail(controllerSource, 'separateIdeaDiscoveryAudit(rawSelectedIdea)');
+    const storyAt = indexOrFail(controllerSource, 'constitution.confirmedStory = confirmedStory;');
+    const auditAt = indexOrFail(controllerSource, '...(ideaDiscoveryAudit ? { ideaDiscoveryAudit } : {})');
+    expect(splitAt).toBeLessThan(storyAt);
+    expect(storyAt).toBeLessThan(auditAt);
+    expect(controllerSource).toContain('ideaDiscoveryAudit: _untrustedIdeaDiscoveryAudit');
+    expect(controllerSource).not.toContain('constitution.confirmedStory = dto.selectedIdea');
+  });
+
 });
