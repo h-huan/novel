@@ -23,9 +23,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Verify local acceptance script syntax
-        run: node --check ../verify-local.mjs && node --check ../verify-local-core.mjs && node --check ../verify-local-diagnostics.mjs
+        run: node --check ../verify-local.mjs && node --check ../verify-local-core.mjs && node --check ../verify-local-diagnostics.mjs && node --check ../verify-local-guard.mjs
       - name: Verify local diagnostics helper tests
-        run: node --test ../verify-local-diagnostics.spec.mjs
+        run: node --test ../verify-local-diagnostics.spec.mjs ../verify-local-guard.test.mjs
       - name: Typecheck
         run: npm run typecheck
       - name: Build
