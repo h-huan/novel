@@ -304,7 +304,10 @@ export function buildExecutionStandard(
     const binding = platformCategoryDimensionBinding(c.targetPlatform, resolvedCategory, dimension, value, c.projectType);
     // 平台给了判据不等于该维自身的执行口径可以丢：两者都必须留在标准里。
     const parts = [binding.requirement];
-    if (binding.gap) parts.push('样本未收录不代表不符合：按作者选择与实际故事内容核验，不要求另补解释，不因缺少样本判未执行。');
+    if (binding.gap) {
+      parts.push('本次分类口径显示存在待核验落差（不得默认通过，也不得仅凭未命中样本直接判错）：' + binding.gap + '；必须作为必答项结合实际故事内容核验。');
+      parts.push('样本未收录不代表不符合：按作者选择与实际故事内容核验，不要求另补解释，不因缺少样本判未执行。');
+    }
     parts.push(genericRule);
     return parts.join('；');
   };
