@@ -36,7 +36,9 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain("stoppedAt:'premise_preselection'");
   });
   it('avoids reviewing an unchanged selection twice and projects chapter events consistently', () => {
-    expect(controllerSource).toContain('selected === initial ? initialReview : await reviewBoth(selected)');
+    expect(controllerSource).toContain('selectionChangeScope(initial,selected)');
+    expect(controllerSource).toContain('reviewBoth(selected,changeScope,initialReview)');
+    expect(controllerSource).toContain('retainPremiseReviewEvidence(initial,initialReview,selected)');
     expect(controllerSource).toContain('【本章事件与状态唯一来源】');
     expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
   });
