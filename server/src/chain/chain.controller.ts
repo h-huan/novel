@@ -4810,17 +4810,19 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     const task = discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
       try {
         const result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
-        return {
-          ...result,
-          discoveryRequestId,
-          discoveryRequestStartedAt,
-          discoveryRequestFinishedAt: new Date().toISOString(),
-        };
+        if (result && typeof result === 'object') {
+          Object.defineProperties(result, {
+            discoveryRequestId: { value: discoveryRequestId, enumerable: false, configurable: true },
+            discoveryRequestStartedAt: { value: discoveryRequestStartedAt, enumerable: false, configurable: true },
+            discoveryRequestFinishedAt: { value: new Date().toISOString(), enumerable: false, configurable: true },
+          });
+        }
+        return result;
       } catch (error) {
-        if (error && typeof error === 'object') Object.assign(error, {
-          discoveryRequestId,
-          discoveryRequestStartedAt,
-          discoveryRequestFinishedAt: new Date().toISOString(),
+        if (error && typeof error === 'object') Object.defineProperties(error, {
+          discoveryRequestId: { value: discoveryRequestId, enumerable: false, configurable: true },
+          discoveryRequestStartedAt: { value: discoveryRequestStartedAt, enumerable: false, configurable: true },
+          discoveryRequestFinishedAt: { value: new Date().toISOString(), enumerable: false, configurable: true },
         });
         throw error;
       }
