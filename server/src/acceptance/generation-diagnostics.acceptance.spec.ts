@@ -219,7 +219,7 @@ it('generates a complete idea batch through preselection plus structuring and re
       readerQuestion: `主角能否在截止日前证明${premises[index - 1].setting}里的异常，同时承担公开证据带来的关系代价`,
     },
   });
-  let structuredCount = 0;
+  const structuredCounts = new Map<string, number>();
   const realLLM = {
     assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
     generate: vi.fn(async (input: any) => {
@@ -230,7 +230,9 @@ it('generates a complete idea batch through preselection plus structuring and re
       if (step === 'idea_premise_source_drift_review') return { content: JSON.stringify(makePremiseReviewFixture(String(input.prompt))) };
       if (step === 'idea_premise_overlap_review') return { content: JSON.stringify({ passed: true, issues: [] }) };
       if (step === 'idea_card_structure') {
-        structuredCount++;
+        const requestGroup = String(input.prompt).includes('排除题材乙') ? 'different-exclusions' : 'default';
+        const structuredCount = (structuredCounts.get(requestGroup) || 0) + 1;
+        structuredCounts.set(requestGroup, structuredCount);
         if (structuredCount > 5) throw Error('同一请求不应重复结构化');
         return { content: JSON.stringify({ ideas: [makeIdea(structuredCount)] }) };
       }
@@ -263,7 +265,12 @@ it('generates a complete idea batch through preselection plus structuring and re
   Object.assign(controller, { realLLM, db: { getDb: () => db }, ideaAppealGate: new IdeaAppealGateService(), logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
   const request = { storyType: 'short_story' as const, platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards };
 
-  const [first, duplicate] = await Promise.all([controller.ideaDiscover(request), controller.ideaDiscover(request)]) as any[];
+  const differentRequest = { ...request, excludeDetails: [{ title: '排除题材乙', hook: '本请求独有的排除依据' }] };
+  const [first, duplicate, distinctResult] = await Promise.all([
+    controller.ideaDiscover(request),
+    controller.ideaDiscover(request),
+    controller.ideaDiscover(differentRequest),
+  ]) as any[];
   expect(first, 'idea discovery failed: ' + JSON.stringify({ error: first.error, appealGate: first.appealGate })).toMatchObject({ success: true, totalIdeas: 5 });
   expect(first.appealGate).toMatchObject({
     premisePoolSize: 5,
@@ -272,11 +279,18 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 5,
   });
   expect(duplicate).toEqual(first);
+  expect(distinctResult.appealGate).toMatchObject({ premisePoolSize: 5, premisePoolTarget: 15, premiseSelected: 5, generated: 5, returned: 5 });
   // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、一次标题与阅读目标独立审查。
-  expect(realLLM.generate).toHaveBeenCalledTimes(11);
+  expect(distinctResult, 'a request with different excludeDetails must not reuse the first result')
+    .toMatchObject({ success: true, totalIdeas: 5 });
+  expect(realLLM.generate).toHaveBeenCalledTimes(22);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
-    ...Array(2).fill('idea_premise_pool_generation'), 'idea_premise_selection','idea_premise_source_drift_review','idea_premise_overlap_review',
-    ...Array(5).fill('idea_card_structure'),'idea_presentation_review',
+    ...Array(4).fill('idea_premise_pool_generation'),
+    ...Array(2).fill('idea_premise_selection'),
+    ...Array(2).fill('idea_premise_source_drift_review'),
+    ...Array(2).fill('idea_premise_overlap_review'),
+    ...Array(10).fill('idea_card_structure'),
+    ...Array(2).fill('idea_presentation_review'),
   ].sort());
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',

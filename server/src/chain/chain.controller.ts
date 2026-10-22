@@ -4793,6 +4793,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       targetWords: String(dto.targetWords || '').trim(),
       count: requestedCount,
       excludeTitles: dto.excludeTitles || [],
+      // Both fields affect the actual prompt; omitting excludeDetails can merge different user requests.
+      excludeDetails: dto.excludeDetails || [],
     });
     if (!this.ideaDiscoveryInFlight) this.ideaDiscoveryInFlight = new Map<string, Promise<any>>();
     const active = this.ideaDiscoveryInFlight.get(requestKey);
