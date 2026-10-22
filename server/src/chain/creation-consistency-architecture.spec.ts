@@ -19,7 +19,11 @@ function indexOrFail(source: string, marker: string): number {
 
 describe('creation consistency architecture invariants', () => {
   it('treats candidate-pool size as a search target and bounds repeated reserve replacement', () => {
-    expect(controllerSource).toContain('if (candidatePool.length < minimumPremiseSelectionCount)');
+    expect(controllerSource).toContain('if (candidatePool.length === 0)');
+    expect(controllerSource).not.toContain('if (candidatePool.length < minimumPremiseSelectionCount)');
+    expect(controllerSource).toContain('minimumSelectedCountForPool');
+    expect(controllerSource).toContain('prerequisiteError(firstBlockedBatch.blocked)');
+    expect(controllerSource).toContain("'candidate_pool_empty'");
     expect(controllerSource).not.toContain('if (candidatePool.length < requestedCount)');
     expect(controllerSource).toContain('reserveReconciliationRounds<1');
     expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
