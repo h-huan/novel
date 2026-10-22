@@ -46,6 +46,60 @@ const makePremiseSelectionFixture = (count = 5) => ({
   })),
 });
 
+function promptArray(prompt: string, marker: string, terminator: string, optional = false): any[] {
+  const markerAt = prompt.indexOf(marker);
+  if (markerAt < 0) {
+    if (optional) return [];
+    throw new Error('review fixture missing prompt marker: ' + marker);
+  }
+  const start = prompt.indexOf('[', markerAt + marker.length);
+  const end = prompt.indexOf(terminator, start);
+  if (start < 0 || end < 0) throw new Error('review fixture cannot locate prompt array: ' + marker);
+  return JSON.parse(prompt.slice(start, end).trim());
+}
+
+function makePremiseReviewFixture(prompt: string) {
+  const sourceCatalog = promptArray(prompt, '【逐字段来源核查目录】', '\n目录中每个ref');
+  const categoryCatalog = promptArray(prompt, '【与完整卡同口径的前置分类审核】', '；categoryChecks', true);
+  const payoffCatalog = promptArray(prompt, '【必返payoffChecks目录】', '\n【逐环节因果计划目录');
+  const causalCatalog = promptArray(prompt, '【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】', '\n先核对每个causalPlan环节');
+  const genreCatalog = promptArray(prompt, '【额外必返genreChecks】', '；每个ref返回status=fulfilled|missing|unknown', true);
+  const genreEvidence = promptArray(prompt, '【流派证据目录：只含已选展开】', '\n【genreChecks单项形状】', true);
+  return {
+    sourceChecks: sourceCatalog.map(row => ({
+      ref: row.ref, status: 'preserved',
+      reason: '原池与已选字段事实兼容，必要条件和结果方向保持一致。',
+    })),
+    categoryChecks: categoryCatalog.map(row => ({
+      ref: row.ref, status: 'fulfilled',
+      evidenceRef: row.ref.slice(0, row.ref.indexOf('.') + 1) + 'coreConflict',
+      reason: '核心冲突与人物主动选择落实了该分类机制，并非只依赖标签。',
+    })),
+    payoffChecks: payoffCatalog.map(row => {
+      const prefix = row.ref.slice(0, row.ref.indexOf('.') + 1);
+      return {
+        ref: row.ref, status: 'supported',
+        actionEvidenceRef: prefix + 'activeChoice',
+        conditionEvidenceRef: prefix + 'escalation',
+        reason: '行动、必要条件与兑现结果在本题材因果计划中逐项对应。',
+        links: causalCatalog.filter(link => String(link.ref).startsWith(prefix)).map(link => ({
+          ref: link.ref, status: 'supported',
+          reason: '本环节的行动与必要条件均已在同一题材字段中建立并支撑结果。',
+        })),
+      };
+    }),
+    genreChecks: genreCatalog.map(row => {
+      const prefix = row.ref.slice(0, row.ref.indexOf('.') + 1);
+      const evidence = genreEvidence.find(item => item.id === prefix + 'coreConflict')
+        || genreEvidence.find(item => String(item.id).startsWith(prefix));
+      return {
+        ref: row.ref, status: 'fulfilled', evidenceRef: evidence?.id,
+        reason: '本题材的核心冲突与主动选择体现了所选流派的实际行动机制。',
+      };
+    }),
+  };
+}
+
 it('learns partial chapter-responsibility progress for future strategy ordering', async () => {
   const db = new DatabaseSync(':memory:');
   try {
@@ -173,8 +227,8 @@ it('generates a complete idea batch through preselection plus structuring and re
       const step = input.metrics?.stepKey;
       if (step === 'idea_premise_pool_generation') return { content: JSON.stringify({ pool: makePremiseSelectionFixture(5).pool }) };
       if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
-      if (step === 'idea_premise_source_drift_review' || step === 'idea_premise_overlap_review')
-        return { content: JSON.stringify({ passed: true, issues: [] }) };
+      if (step === 'idea_premise_source_drift_review') return { content: JSON.stringify(makePremiseReviewFixture(String(input.prompt))) };
+      if (step === 'idea_premise_overlap_review') return { content: JSON.stringify({ passed: true, issues: [] }) };
       if (step === 'idea_card_structure') {
         structuredCount++;
         if (structuredCount > 5) throw Error('同一请求不应重复结构化');
@@ -308,7 +362,9 @@ it('injects the user-declared custom platform standard into the idea prompt as t
       if (input.metrics?.stepKey === 'idea_premise_selection') {
         return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
       }
-      if (['idea_premise_source_drift_review','idea_premise_overlap_review'].includes(input.metrics?.stepKey))
+      if (input.metrics?.stepKey === 'idea_premise_source_drift_review')
+        return { content: JSON.stringify(makePremiseReviewFixture(String(input.prompt))) };
+      if (input.metrics?.stepKey === 'idea_premise_overlap_review')
         return { content: JSON.stringify({ passed: true, issues: [] }) };
       return { content: JSON.stringify({ ideas: [] }) };
     }),
