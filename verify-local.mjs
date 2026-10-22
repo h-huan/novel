@@ -58,7 +58,8 @@ function printDetailedReport(value) {
   const callEvidence = {
     source: trace.source ?? null, totals: trace.totals ?? null,
     phaseBreakdown: trace.phaseBreakdown ?? [], stepBreakdown: trace.stepBreakdown ?? [],
-    exactDuplicateInputGroups: trace.duplicateInputGroups ?? [],
+    sameVersionCallGroups: trace.sameVersionCallGroups ?? [],
+    duplicateClassification: '按 stepKey 与版本元数据分组，不是实际输入指纹；需核对 Run ID 和时间窗',
     callTimeline: calls.slice(0, 50).map(compactRun), omittedCallRows: Math.max(0, calls.length - 50),
   };
   const projectRows = runtime.projects && typeof runtime.projects === 'object'
@@ -85,7 +86,9 @@ function printDetailedReport(value) {
         pendingPersistenceMismatch: diagnostics.pendingPersistenceMismatch ?? null,
         persistenceUnknown: diagnostics.persistenceUnknown ?? null, persistenceQueryErrors: diagnostics.persistenceQueryErrors ?? null,
         persisted: diagnostics.persisted ?? null, slowestSteps: diagnostics.slowestSteps ?? null,
-        exactDuplicateRuns: diagnostics.exactDuplicateRuns ?? null,
+        sameVersionRunGroupCount: diagnostics.exactDuplicateRunGroups ?? null,
+        sameVersionRunGroups: diagnostics.exactDuplicateRuns ?? null,
+        duplicateClassification: '后端按阶段/场景/章节与 prompt/context/constitution 版本分组，不代表输入完全相同',
       },
     }];
   }));
@@ -123,6 +126,17 @@ if (reportUpdated) {
   );
   guardStatus = typeof guard.status === 'number' ? guard.status : 1;
 
+  if (report) {
+    try {
+      // The guard is authoritative for persistence and terminal project status. Reload its
+      // result before printing, otherwise console output can contradict latest.json/latest.md.
+      report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    } catch (error) {
+      console.error('[verify] Guard 核验后的 latest.json 无法读取：' + String(error));
+      report = null;
+      guardStatus = 1;
+    }
+  }
   if (report) printDetailedReport(report);
 }
 

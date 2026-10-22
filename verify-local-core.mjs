@@ -592,6 +592,15 @@ if (runtime.discoveryCallTrace?.source?.correlationMode === 'latest_unbound') {
 if (runtime.discoveryCallTrace?.source?.ok && finalDiscoveryAudit.startedAt && finalDiscoveryAudit.finishedAt && runtime.discoveryCallTrace.runs.length === 0) {
   diagnosticWarnings.push('最新灵感审计时间窗内没有模型调用指标；不能据此宣称耗时或调用次数为零。');
 }
+if (runtime.discoveryCallTrace?.sameVersionCallGroups?.length) {
+  diagnosticWarnings.push('灵感发现存在相同版本元数据组合的多次调用；指标没有保存实际输入指纹，这只能提示人工核对 Run ID、时间窗与请求，不能单独认定重复调用。');
+}
+for (const target of projectTargets) {
+  const diagnostics = inspectedProjects[target.key]?.cockpit?.diagnostics;
+  if (Number(diagnostics?.exactDuplicateRunGroups) > 0) {
+    diagnosticWarnings.push(target.label + '：后端同版本元数据分组数=' + diagnostics.exactDuplicateRunGroups + '；未保存完整输入指纹，不能单独认定为精确重复运行。');
+  }
+}
 runtime.diagnosticWarnings = diagnosticWarnings;
 
 const selectionMode = singleMode
@@ -717,7 +726,7 @@ function detailedIdeaMarkdown() {
     '| ' + cell(row.phase) + ' | ' + row.calls + ' | ' + row.failedCalls + ' | ' + row.sumDurationMs
       + ' | ' + (row.wallMs ?? '未知') + ' | ' + row.internalRetries + ' | ' + row.physicalAttempts + ' | ' + (row.totalTokens ?? '未知') + ' |'
   ).join('\n');
-  const duplicateLines = (trace.duplicateInputGroups || []).map(group =>
+  const duplicateLines = (trace.sameVersionCallGroups || []).map(group =>
     '| ' + cell(group.stepKey) + ' | ' + group.count + ' | ' + cell(group.promptVersion) + ' | '
       + cell(group.contextVersion) + ' | ' + cell(group.constitutionRevision) + ' | ' + cell((group.runIds || []).join(', ')) + ' |'
   ).join('\n');
@@ -763,10 +772,10 @@ function detailedIdeaMarkdown() {
     '|---|---:|---:|---:|---:|---:|---:|---:|',
     stepLines || '| 无可用记录 | — | — | — | — | — | — | — |',
     '',
-    '### 相同输入指纹重复调用',
+    '### 同版本元数据组合的多次调用（不等同于实际输入完全相同）',
     '| stepKey | 次数 | Prompt 版本 | Context 版本 | Constitution 版本 | Run IDs |',
     '|---|---:|---|---|---|---|',
-    duplicateLines || '| 未发现可确认的完全相同输入指纹重复调用 | — | — | — | — | — |',
+    duplicateLines || '| 未发现同版本元数据组合的多次调用 | — | — | — | — | — |',
     '',
     '### 完整模型调用时间线',
     '| Run ID | Step | 尝试 | 内部重试 | 估算物理尝试 | 状态 | 耗时 ms | Token | Gate | 开始 | 结束 | 错误 |',
@@ -796,8 +805,8 @@ function detailedProjectMarkdown(target) {
     '- 指标累计耗时：' + (stats.totalDurationMs ?? 'unknown') + ' ms；Token：'
       + (stats.totalTokens ?? 'unknown') + '；首轮通过率：'
       + (stats.effectiveFirstPassRate ?? 'unknown'),
-    '- 同配置重复成功运行组：' + (stats.exactDuplicateRunGroups ?? 'unknown')
-      + '（同配置不代表重复请求，须核对实际事件和 Run ID）',
+    '- 同版本元数据匹配运行组：' + (stats.exactDuplicateRunGroups ?? 'unknown')
+      + '（仅提示需核对；后端未记录完整输入指纹，不能单凭此字段认定重复请求）',
     '- 已持久化对象：' + JSON.stringify(stats.persisted ?? {}),
     '- 创建停滞：' + (stats.creationStalled ?? 'unknown')
       + '；空闲毫秒：' + (stats.idleMs ?? 'unknown')
@@ -834,7 +843,8 @@ function detailedProjectMarkdown(target) {
     '**后端已识别的慢步骤与可能重复调用**', '',
     '~~~json',
     JSON.stringify({
-      slowestSteps: stats.slowestSteps || [], exactDuplicateRuns: stats.exactDuplicateRuns || [],
+      slowestSteps: stats.slowestSteps || [], sameVersionRunGroups: stats.exactDuplicateRuns || [],
+      duplicateEvidenceLevel: 'same_stage_scenario_chapter_and_prompt_context_constitution_versions_only',
     }, null, 2),
     '~~~',
   ];

@@ -30,7 +30,7 @@ test('normalizes the nested saved idea-discovery audit and partial-card counts',
   assert.equal(audit.phaseTimings.selectionWallMs, 500);
 });
 
-test('reports logical calls, physical attempts, phase wall time and exact duplicate input groups', () => {
+test('reports logical calls, physical attempts, phase wall time and same-version call groups without claiming exact duplicates', () => {
   const rows = [
     { id: 'm1', run_id: 'r1', step_key: 'idea_premise_pool_generation', scenario: 'idea_generate', status: 'success', attempt: 0, duration_ms: 100, internal_retries: 1, total_tokens: 500, model_version: 'deepseek-flash', started_at: '2026-10-22T07:00:00.000Z', finished_at: '2026-10-22T07:00:00.100Z', created_at: '2026-10-22T07:00:00.100Z', prompt_version: 'p1', context_version: 'c1', constitution_revision: 1 },
     { id: 'm2', run_id: 'r2', step_key: 'idea_premise_pool_generation', scenario: 'idea_generate', status: 'success', attempt: 1, duration_ms: 200, internal_retries: 0, total_tokens: 600, model_version: 'deepseek-flash', started_at: '2026-10-22T07:00:00.050Z', finished_at: '2026-10-22T07:00:00.250Z', created_at: '2026-10-22T07:00:00.250Z', prompt_version: 'p1', context_version: 'c1', constitution_revision: 1 },
@@ -45,8 +45,9 @@ test('reports logical calls, physical attempts, phase wall time and exact duplic
   assert.equal(summary.totals.wallMs, 600);
   assert.equal(summary.phaseBreakdown.find(row => row.phase === 'candidate_pool_generation').wallMs, 250);
   assert.equal(summary.phaseBreakdown.find(row => row.phase === 'fixed_pool_selection').wallMs, 300);
-  assert.equal(summary.duplicateInputGroups.length, 1);
-  assert.equal(summary.duplicateInputGroups[0].count, 2);
+  assert.equal(summary.sameVersionCallGroups.length, 1);
+  assert.equal(summary.sameVersionCallGroups[0].count, 2);
+  assert.equal(summary.sameVersionCallGroups[0].evidenceLevel, 'same_version_metadata_only_not_exact_input_fingerprint');
   assert.equal(summary.runs[2].error.includes('secret-token'), false);
 });
 

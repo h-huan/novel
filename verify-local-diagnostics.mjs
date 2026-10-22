@@ -144,7 +144,7 @@ export function summarizeDiscoveryStepMetrics(rows) {
   const duplicateMap = new Map();
   for (const run of runs) {
     if (!run.promptVersion && !run.contextVersion && run.constitutionRevision === null) continue;
-    const key = [run.stepKey, run.promptVersion ?? '', run.contextVersion ?? '', run.constitutionRevision ?? '', run.chapterIndex ?? ''].join('\u001f');
+    const key = [run.projectId ?? '', run.scenario ?? '', run.stepKey, run.promptVersion ?? '', run.contextVersion ?? '', run.constitutionRevision ?? '', run.chapterIndex ?? ''].join('\u001f');
     let group = duplicateMap.get(key);
     if (!group) {
       group = { stepKey: run.stepKey, promptVersion: run.promptVersion, contextVersion: run.contextVersion,
@@ -154,13 +154,13 @@ export function summarizeDiscoveryStepMetrics(rows) {
     if (run.runId) group.runIds.push(run.runId);
     group.attempts.push(run.attempt);
   }
-  const duplicateInputGroups = [...duplicateMap.values()].filter(group => group.runIds.length > 1)
-    .map(group => ({ ...group, count: group.runIds.length }));
+  const sameVersionCallGroups = [...duplicateMap.values()].filter(group => group.runIds.length > 1)
+    .map(group => ({ ...group, count: group.runIds.length, evidenceLevel: 'same_version_metadata_only_not_exact_input_fingerprint' }));
   const starts = runs.map(run => Date.parse(run.startedAt ?? '')).filter(Number.isFinite);
   const finishes = runs.map(run => Date.parse(run.finishedAt ?? '')).filter(Number.isFinite);
   const tokens = runs.filter(run => run.totalTokens !== null);
   return {
-    runs, stepBreakdown, phaseBreakdown, duplicateInputGroups,
+    runs, stepBreakdown, phaseBreakdown, sameVersionCallGroups,
     totals: {
       logicalCalls: runs.length,
       failedCalls: runs.filter(run => String(run.status ?? '').toLowerCase() !== 'success').length,
