@@ -164,7 +164,15 @@ export class GenerationMetricsController {
       characters: count('characters'),
       chapterOutlines: count('outlines', " AND level='chapter'"),
       chapters: count('chapters'),
-      timelineEvents: count('timeline_events'),
+      timelineEvents: (() => {
+        try {
+          const row = db.prepare('SELECT COUNT(*) c FROM timeline_events e JOIN timelines t ON e.timeline_id=t.id WHERE t.project_id=?').get(projectId) as any;
+          return Number(row?.c) || 0;
+        } catch (error) {
+          persistenceQueryErrors.push('timeline_events: ' + redactDiagnosticText(error instanceof Error ? error.message : String(error)));
+          return null;
+        }
+      })(),
     };
 
     const totalDurationMs = metrics.reduce((sum, row) => sum + Math.max(0, Number(row.duration_ms) || 0), 0);
@@ -243,7 +251,10 @@ export class GenerationMetricsController {
     const creationStalled = isCreating && activeGenerationRuns === 0 && idleMs !== null && idleMs >= creationStallThresholdMs;
     // 创建中短暂出现“模型已成功、业务表尚未落库”是允许的中间态；只有失败/完成后仍不一致，
     // 或 creating 已经无运行调用并持续空闲超过阈值，才升级为真正持久化故障。
-    const persistenceMismatch = isCreating && !creationStalled ? [] : observedPersistenceMismatch;
+    const projectStatus = String(project?.status || '').toLowerCase();
+    const persistenceCheckApplicable = ['active', 'completed', 'success'].includes(projectStatus) || creationStalled;
+    const persistenceMismatch = isCreating && !creationStalled
+      ? [] : persistenceCheckApplicable ? observedPersistenceMismatch : [];
     const pendingPersistenceMismatch = isCreating && !creationStalled ? observedPersistenceMismatch : [];
 
     return {
@@ -254,7 +265,10 @@ export class GenerationMetricsController {
       pendingPersistenceMismatch,
       persistenceUnknown,
       persistenceQueryErrors,
-      persistenceStatus: persistenceQueryErrors.length ? 'unknown' : persistenceMismatch.length ? 'mismatch' : pendingPersistenceMismatch.length ? 'pending' : 'consistent',
+      persistenceStatus: persistenceQueryErrors.length ? 'unknown'
+        : isCreating && !creationStalled ? 'pending'
+        : !persistenceCheckApplicable ? 'not_applicable'
+        : persistenceMismatch.length ? 'mismatch' : pendingPersistenceMismatch.length ? 'pending' : 'consistent',
       activeGenerationRuns,
       lastActivityAt: lastActivityMs === null ? null : new Date(lastActivityMs).toISOString(),
       idleMs,

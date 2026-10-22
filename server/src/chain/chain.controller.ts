@@ -4858,8 +4858,10 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const variedCategories = discoveryCategories.length > 1 && requestedCount > 1;
       // Candidate selection may continue with a small usable pool; final delivery still keeps its own minimum.
       // When category diversity is required, retain at least two category slots whenever two candidates exist.
-      const minimumSelectedCountForPool = (availableCount: number) => variedCategories
-        ? Math.min(2, Math.max(1, availableCount)) : 1;
+      // A sufficiently large fixed pool must fill the requested selection slots. A partial
+      // selection is reserved for a genuinely short pool, not a shortcut around review/replacement.
+      const minimumSelectedCountForPool = (availableCount: number) =>
+        Math.min(requestedCount, Math.max(1, availableCount));
       const selectedCategoryById = new Map<string, string>();
       const submissionForCategory = (category: string) => {
         const required = platformSubmissionDimensions(dto.platform, dto.storyType, category, dto.targetAudience).includes('genre');
@@ -5783,8 +5785,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const latestCards=new Map(structuredCards.map(card=>[String(card.sourcePremiseId),card]));
       const attemptedPremiseIds=new Set(selectedPremises.map(item=>String(item.premiseId)));
       const latestAssessment=(id:string)=>[...candidateAssessments].reverse().find(item=>item.sourcePremiseId===id);
-      const missingAfterGate=()=>new Set(accepted.map(card=>String(card.sourcePremiseId||'').trim()).filter(Boolean)).size>=minimumDeliverableCount
-        ? [] : selectedPremises.map(item=>String(item.premiseId)).filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id));
+      // Minimum deliverability is only a final fallback. Do not stop repairing/replacing
+      // rejected slots merely because three cards have passed while the request is for five.
+      const missingAfterGate=()=>selectedPremises
+        .map(item=>String(item.premiseId))
+        .filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id));
       const fulfillmentActions:any[]=[];
       const repairMissing=async(initialMissingPremiseIds:string[])=>{
         const before=new Map(initialMissingPremiseIds.map(id=>[id,latestAssessment(id)]));
@@ -5878,9 +5883,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       });}catch(error){finalGateRepairError=String((error as Error).message);fulfillmentStopReason='completion_unavailable';}
       const acceptedUniqueCount = new Set(accepted.map(card=>String(card?.sourcePremiseId||'').trim()).filter(Boolean)).size;
       if (acceptedUniqueCount >= minimumDeliverableCount && acceptedUniqueCount < requestedCount) {
-        fulfillmentStopReason = 'minimum_acceptable_partial';
-        fulfillmentActions.push({kind:'stop_at_minimum_acceptable_partial',accepted:acceptedUniqueCount,requested:requestedCount,
-          skippedFurtherRepairAndReplacement:true,remainingPresentationCalls:presentationBudget.remaining,
+        if (fulfillmentStopReason === 'requested_quantity_verified') {
+          fulfillmentStopReason = preselectionShortfall ? 'preselection_shortfall' : 'minimum_acceptable_partial';
+        }
+        fulfillmentActions.push({kind:'partial_delivery_after_fulfillment',accepted:acceptedUniqueCount,requested:requestedCount,
+          stopReason:fulfillmentStopReason,
+          repairAttempts:fulfillmentActions.filter(action=>action.kind==='repair').length,
+          replacementAttempts:fulfillmentActions.filter(action=>action.kind==='original_pool_replacement').length,
+          remainingOriginalCandidates:availableOriginalPool().length,
+          remainingPresentationCalls:presentationBudget.remaining,
           remainingSourceCalls:sourceCompletionBudget.remaining,remainingReselectionCalls:reselectionCompletionBudget.remaining});
       }
 
@@ -5971,8 +5982,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           appealGate.returned = selectedAccepted.length;
           appealGate.partial = true;
           appealGate.minimumDeliverableCount = minimumDeliverableCount;
-          appealGate.fulfillment.stopReason = 'minimum_acceptable_partial';
-          const warning = '请求' + requestedCount + '张，最终有' + selectedAccepted.length + '张通过全部质量门；按最低可交付数量' + minimumDeliverableCount + '张返回，缺额' + (requestedCount - selectedAccepted.length) + '张。未降低质量门，已停止为凑数继续修复或换题。';
+          const warning = '请求' + requestedCount + '张，最终有' + selectedAccepted.length + '张通过全部质量门；补足停止原因='
+            + appealGate.fulfillment.stopReason + '，缺额' + (requestedCount - selectedAccepted.length)
+            + '张。未降低质量门，也未把最低可交付数量当作提前停止条件。';
           this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
           return { success: true, status: 'partial', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
             qualifiedIdeas: acceptedWithAudit, warning, appealGate };
@@ -6155,14 +6167,23 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialSelection = retained.selection;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
-        this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + requestedCount
-          + ' 个已独立复核合格题材；达到最低可交付数量，停止为凑数重选。');
-        return { ...partialSelection, selectionAudit: {
-          initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
-          minimumSelectableCount, selectionStopReason: 'minimum_acceptable_partial',
-          excludedPremiseIds: [...partialExcludedIds], reasons: [...initialReview.issues],
-          completeCardGatePending: true,
-        } };
+        const missingSlots = Math.max(0, requestedCount - partialSelection.selected.length);
+        const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
+        const enoughSharedBudget = !shared
+          || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
+        if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
+          this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + requestedCount
+            + ' 个已独立复核合格题材；原池候选或共享审核/重选预算不足以补齐剩余位置，保留真实缺额。');
+          return { ...partialSelection, selectionAudit: {
+            initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
+            minimumSelectableCount, selectionStopReason: 'minimum_acceptable_partial',
+            excludedPremiseIds: [...partialExcludedIds], reasons: [...initialReview.issues],
+            completeCardGatePending: true,
+          } };
+        }
+        this.logger?.warn('锁定前筛选已有 ' + partialSelection.selected.length + '/' + requestedCount
+          + ' 个合格题材；继续对问题位置做原池重选，不因达到最低可交付数量提前停止。');
+        break;
       }
     }
     if (repairPlan.availableCandidates.length < repairPlan.repairSlots.length) {

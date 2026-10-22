@@ -2,7 +2,7 @@ import { standardDirectiveCache } from '../modules/module-standards/standard-dir
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
 import { getPlatform, targetForLength, measureAgainstTarget } from './platform-benchmarks';
 import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
-import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, IDEA_CARD_GENERATION_CONCURRENCY } from '../../shared/src/system-workflow-rules.registry';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ChainController,
@@ -1982,4 +1982,45 @@ it('sends full standards only for actual reviewed cards while preserving all ref
  expect(packed.cards[0].executionStandard||packed.cards[0].executionStandardRefs).toBeTruthy();
  expect(packed.references[0]).not.toHaveProperty('executionStandard');expect(packed.references[0]).not.toHaveProperty('executionStandardRefs');expect(packed.references[0]).not.toHaveProperty('lockedPremise');
  for(const key of ['hook','coreConflict','description','mainReversal','setting','ending','protagonist','scopeBreakdown','storyCategory','storyTone','pov'])expect(packed.references[0][key]).toEqual((reference as any)[key]);
+});
+
+
+describe('idea discovery requested quantity and concurrency regressions', () => {
+  it('asks for all five selected premises when the fixed original pool has fifteen candidates', async () => {
+    const generate = vi.fn(async (request: any) => {
+      const step = request.metrics?.stepKey;
+      if (step === 'idea_premise_pool_generation') {
+        const size = Number(request.prompt.match(/只生成恰好\s+(\d+)\s+个轻量题材胚子/)?.[1] || 0);
+        if (!size) throw new Error('test fixture could not resolve the fixed pool batch size');
+        const attempt = Number(request.metrics?.attempt || 0);
+        return { content: JSON.stringify({ pool: Array.from({ length: size }, (_, index) => ({
+          workingTitle: `原池候选-${attempt}-${index + 1}`,
+          storyCore: `候选${attempt}-${index + 1}的具体人物利益、触发事件、主动选择与因果后果。`,
+          storyCategoryId: 'K1',
+        })) }) };
+      }
+      if (step === 'idea_premise_selection') {
+        return { content: JSON.stringify({ blocked: true, missingRequiredDimensions: ['test-stop'], message: 'selection contract regression sentinel' }) };
+      }
+      throw new Error('unexpected generation step: ' + String(step));
+    });
+    const controller = Object.create(ChainController.prototype) as any;
+    controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    controller.db = { getDb: () => ({ prepare: () => ({ all: () => [] }) }) };
+    const result = await controller.runIdeaDiscovery({
+      storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
+      storyCategory: '悬疑', storyTone: ['紧张'], writingStyle: ['简洁'],
+      webNovelGenre: ['悬疑推理'], submissionTags: ['悬疑'], plotTags: ['调查'],
+      genreFitNote: '', pov: '第一人称', targetWords: '20000', targetAudience: '',
+    }, 5);
+    const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
+    expect(selectionCall).toBeTruthy();
+    expect(selectionCall?.[0].prompt).toContain('必须从轻量胚子池中明确选出恰好 5 个成熟题材');
+    expect(result.success).toBe(false);
+  });
+
+  it('allows five concurrent slots for independent card-generation and review tasks', () => {
+    expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(5);
+  });
 });

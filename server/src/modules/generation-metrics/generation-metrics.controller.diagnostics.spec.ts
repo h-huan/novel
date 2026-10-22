@@ -12,11 +12,13 @@ const controllerFor = (stepRows: any[], runRows: any[], project: any, persistedC
       },
     })),
   };
-  return new GenerationMetricsController({ getCockpit: () => ({ runs: [] }) } as any, { getDb: () => db } as any);
+  const controller = new GenerationMetricsController({ getCockpit: () => ({ runs: [] }) } as any, { getDb: () => db } as any);
+  (controller as any).__testDb = db;
+  return controller;
 };
 
 describe('generation metrics diagnostics', () => {
-  it('surfaces retries, duplicate work and successful generation that was not persisted', () => {
+  it('distinguishes successful model calls from completed workflow persistence', () => {
     const stepRows = [
       { run_id: 'r1', chapter_index: 4, step_key: 'outline_fact_review', scenario: 'review', status: 'success', attempt: 0, duration_ms: 120000, total_tokens: 28000, internal_retries: 1, created_at: '2026-09-28T00:00:00Z' },
       { run_id: 'r2', chapter_index: 4, step_key: 'outline_fact_review', scenario: 'review', status: 'success', attempt: 0, duration_ms: 60000, total_tokens: 14000, internal_retries: 0, created_at: '2026-09-28T00:01:00Z' },
@@ -41,8 +43,22 @@ describe('generation metrics diagnostics', () => {
     expect(cockpit.diagnostics.slowestSteps[0]).toEqual(expect.objectContaining({ runId: 'r1', internalRetries: 1 }));
     expect(cockpit.diagnostics.exactDuplicateRunGroups).toBe(1);
     expect(cockpit.diagnostics.exactDuplicateRuns[0].runIds).toEqual(['r1', 'r2']);
-    expect(cockpit.diagnostics.persistenceMismatch).toContain('outline_success_without_chapter_outline');
+    expect(cockpit.diagnostics.persistenceMismatch).not.toContain('outline_success_without_chapter_outline');
     expect(cockpit.diagnostics.pendingPersistenceMismatch).toEqual([]);
+    expect(cockpit.diagnostics.persistenceStatus).toBe('not_applicable');
+  });
+
+  it('counts timeline events through timelines.project_id instead of querying a nonexistent timeline_events.project_id', () => {
+    const now = new Date().toISOString();
+    const controller: any = controllerFor([], [], { status: 'active', updated_at: now }, {
+      world_settings: 1, characters: 1, outlines: 1, chapters: 1, timeline_events: 7,
+    });
+    const cockpit: any = controller.cockpit('project-active');
+    const sql = controller.__testDb.prepare.mock.calls.map(([statement]: any[]) => String(statement));
+    expect(sql.some((statement: string) => statement.includes('FROM timeline_events e JOIN timelines t ON e.timeline_id=t.id WHERE t.project_id=?'))).toBe(true);
+    expect(cockpit.diagnostics.persisted.timelineEvents).toBe(7);
+    expect(cockpit.diagnostics.persistenceQueryErrors.some((error: string) => error.includes('timeline_events'))).toBe(false);
+    expect(cockpit.diagnostics.persistenceStatus).toBe('consistent');
   });
 
   it('keeps a fresh creating project as an in-progress persistence window instead of a false failure', () => {

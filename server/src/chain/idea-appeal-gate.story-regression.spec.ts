@@ -161,3 +161,48 @@ describe('selected-premise semantic evidence survives wording variation', () => 
     expect(assessment.issues.some((item) => item.includes('短篇首屏钩子信息过弱'))).toBe(false);
   });
 });
+
+
+describe('minimum reader-value quality floor for bound story cards', () => {
+  it('blocks a low-distinctiveness premise with no real progression instead of delivering a generic identity-reveal/ledger-reversal card', () => {
+    const premise = {
+      premiseId: 'P-low-appeal-regression',
+      workingTitle: '一把算盘翻旧账',
+      storyCore: '沈家庶女沈织在账册上看到亏空，二房与祖母都想把责任推给她。',
+      protagonistSituation: '沈家庶女沈织想保住嫁妆和婚事自主，但家里人把她当成只会绣花的人。',
+      openingEvent: '族议前沈织被指做假账，嫁妆当天就要被收走。',
+      coreConflict: '沈织要证明自己没有做假账，二房和祖母都在推责。',
+      activeChoice: '沈织决定把自己经手的两本账摊开，当众证明账目差额。',
+      escalation: '二房把账目责任推给沈织，祖母承认私账，家族开始失去信任。',
+      reversalEffect: '祖母才是做假账的人，沈织证明自己清白，却失去家族靠山。',
+      payoff: '族老确认沈织清白，祖母被送进家庙，沈织拿回嫁妆。',
+      irreplaceableCarrier: '沈织经手的两本账是唯一可以对照的记录。',
+      secondOrderConsequence: '祖母被送进家庙，沈织失去家族靠山，族中重新分配管账权。',
+      readerQuestion: '沈织能不能证明自己没有做假账？',
+      differentiation: '庶女靠账本翻案，旧账最后指向护她长大的祖母。',
+    };
+    const rawCard = {
+      title: '一把算盘翻旧账',
+      hook: '族议前，沈织被指做假账，嫁妆当天就要被收走。她决定把自己经手的两本账摊开，当众证明账目差额。',
+      description: '沈织的账册上有三年亏空。二房推责，祖母认账。她把两本账摊开，证明清白，祖母被送进家庙。',
+      protagonist: '沈家庶女沈织，想保住嫁妆和婚事自主。',
+      coreConflict: '她要证明自己没有做假账，二房与祖母都在推责。',
+      uniquePoint: '沈织靠自己经手的两本账证明清白。',
+      mainReversal: '祖母才是做假账的人，沈织证明自己清白，却失去家族靠山。',
+      noveltyProof: {
+        familiarShell: '古言宅斗翻案',
+        uncommonCombination: '庶女经手账册与祖母私账之间的亏空争议。',
+        avoidedPatterns: '不靠系统或重生。',
+        irreplaceableWhy: '去掉两本账，沈织就无法证明自己经手的账目。',
+        secondOrderConsequence: '祖母被送进家庙，沈织失去家族靠山，族中重新分配管账权。',
+        readerQuestion: '沈织能不能证明自己没有做假账？',
+      },
+    };
+    const bound = bindStructuredIdeaCardToPremise(premise, [rawCard]);
+    const assessment = gate.assess(bound, 'short_story');
+    expect(assessment.signals.descriptionProgressions).toBe(0);
+    expect(assessment.signals.distinctivenessScore).toBeLessThan(6);
+    expect(assessment.issues).toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+    expect(assessment.passed).toBe(false);
+  });
+});
