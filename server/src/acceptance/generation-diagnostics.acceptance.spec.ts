@@ -38,6 +38,11 @@ const makePremiseSelectionFixture = (count = 5) => ({
     secondOrderConsequence: '证据公开后会重新分配责任与利益，并迫使关键关系重新站队',
     readerQuestion: '主角能否在截止时间前证明异常，同时承担公开证据造成的后果',
     differentiation: `第${index + 1}个候选使用独立职业载体、证据链与关系代价，不复用其他题材机制`,
+    causalPlan: [{
+      action: { field: 'activeChoice', quote: '主角必须亲自决定是否公开会改变关系与利益分配的证据' },
+      conditions: [{ field: 'escalation', quote: '每次核验都会让时间压力、职业风险与关系代价继续升级' }],
+      result: { field: 'payoff', quote: '终局兑现证据真相、人物选择与关系变化三项阅读承诺' },
+    }],
   })),
 });
 
