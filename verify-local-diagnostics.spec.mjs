@@ -51,6 +51,22 @@ test('reports logical calls, physical attempts, phase wall time and same-version
   assert.equal(summary.runs[2].error.includes('secret-token'), false);
 });
 
+test('does not group same-version calls across different projects or scenarios as possible duplicates', () => {
+  const base = {
+    step_key: 'idea_premise_pool_generation', status: 'success', attempt: 0, duration_ms: 100,
+    internal_retries: 0, prompt_version: 'p1', context_version: 'c1', constitution_revision: 1,
+  };
+  const summary = summarizeDiscoveryStepMetrics([
+    { ...base, id: 'm1', run_id: 'r1', project_id: 'p1', scenario: 'idea_generate',
+      started_at: '2026-10-22T07:00:00.000Z', finished_at: '2026-10-22T07:00:00.100Z' },
+    { ...base, id: 'm2', run_id: 'r2', project_id: 'p2', scenario: 'idea_generate',
+      started_at: '2026-10-22T07:00:00.200Z', finished_at: '2026-10-22T07:00:00.300Z' },
+    { ...base, id: 'm3', run_id: 'r3', project_id: 'p1', scenario: 'another_scenario',
+      started_at: '2026-10-22T07:00:00.400Z', finished_at: '2026-10-22T07:00:00.500Z' },
+  ]);
+  assert.equal(summary.sameVersionCallGroups.length, 0);
+});
+
 test('redacts credential-shaped keys and secret values without redacting token-count metrics', () => {
   const result = redactDiagnosticValue({ apiKey: 'api-secret-value', nested: { authorization: 'Bearer secret-token', message: 'token=other-secret' }, total_tokens: 1200 });
   const serialized = JSON.stringify(result);
