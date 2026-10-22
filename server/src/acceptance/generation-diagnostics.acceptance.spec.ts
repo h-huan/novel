@@ -243,7 +243,7 @@ it('generates a complete idea batch through preselection plus structuring and re
         const selectedEnd = selectedStart < 0 ? -1 : prompt.indexOf('\n【同批差异参照', selectedStart);
         if (selectedStart < 0 || selectedEnd < 0) throw Error('测试夹具无法解析服务器提供的当前已选胚子');
         const selected = JSON.parse(prompt.slice(selectedStart, selectedEnd).trim());
-        const selectedIndex = Number(String(selected.workingTitle || '').match(/候选题材(\\d+)/)?.[1]);
+        const selectedIndex = Number(String(selected.workingTitle || '').match(/候选题材(\d+)/)?.[1]);
         if (!Number.isInteger(selectedIndex) || selectedIndex < 1 || selectedIndex > 5) throw Error('测试夹具无法识别当前已选胚子');
         if (partial && selectedIndex === 2) throw Error('测试夹具模拟第2张完整卡结构化失败');
         return { content: JSON.stringify({ ideas: [makeIdea(selectedIndex, partial ? '·局部' : '')] }) };
