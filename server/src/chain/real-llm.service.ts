@@ -16,7 +16,7 @@ import { styleFingerprint } from '../modules/writing-quality/style-fingerprint';
 import { missingDimensionJudgePrompt, parseStageScore, SCORE_DIMENSIONS, stageJudgePrompt } from '../modules/writing-quality/stage-score';
 import { deterministicPlatformReview, partitionPlatformIssues } from '../modules/writing-quality/platform-quality-rules';
 import type { QualityStage } from '../modules/writing-quality/quality-issue';
-import { currentCreationProjectId, expectsProjectId } from '../common/creation-context';
+import { currentCreationProjectId, currentDiscoveryRequestId, expectsProjectId } from '../common/creation-context';
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import OpenAI, { type ClientOptions } from 'openai';
 import { ILLMService } from './llm.interface';
@@ -261,6 +261,10 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
     assertGenerationActive();
+    const discoveryRequestId = request.metrics?.discoveryRequestId ?? currentDiscoveryRequestId();
+    if (discoveryRequestId && request.metrics?.discoveryRequestId !== discoveryRequestId) {
+      request = { ...request, metrics: { ...request.metrics, discoveryRequestId } };
+    }
     const start = Date.now();
     const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false);
     const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
@@ -1234,6 +1238,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       this.metrics.record({
         projectId: finalProjectId,
         runId: ctx?.runId,
+        discoveryRequestId: ctx?.discoveryRequestId ?? null,
         chapterIndex: ctx?.chapterIndex ?? null,
         stepKey: ctx?.stepKey ?? null,
         scenario: request.scenario || 'daily',

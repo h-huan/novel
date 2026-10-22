@@ -32,7 +32,8 @@ import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } f
 import { describeCrossStagePathDesign, crossStagePathReviewInput } from './cross-stage-review';
 import { CROSS_STAGE_REVIEW_POLICY, SOURCE_QUALITY_POLICY, OUTLINE_PROJECTION_POLICY, OUTLINE_FACT_REPAIR_SYNC_POLICY, UPSTREAM_REPAIR_ROUTING_LIMITS } from '../../shared/src/system-workflow-rules.registry';
 import { chapterTimePlanRequest, validateChapterTimePlan, chapterTimePlanDirective, chapterTimeDisplaysForEvidenceReview } from './chapter-time-plan';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { discoveryRequestAsyncStorage } from '../common/creation-context';
 import { chapterObligationEvidencePrompt, materializeChapterObligationEvidence, chapterMissingItemTexts, chapterObligationWritingContext, chapterObligationRepairTargets, mergeChapterObligationRepairs, chapterObligationCatalog, chapterObligationReviewDirective, validateChapterObligationReview, parseChapterAlignmentReview, mergeChapterReviewContractCorrection, chapterAlignmentReviewContract, chapterReviewContractCorrectionDirective } from './chapter-alignment-contract';
 import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosis } from './upstream-repair-routing';
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
@@ -4689,6 +4690,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     storyCategory?: string;
     /** 频道提示（男频/女频）：跨频道同名分类（如悬疑脑洞）靠它消歧，缺了模型就拿不到该分类的体量锚点。 */
     targetAudience?: string;
+    discoveryRequestId?: string;
   }) {
     const requestedCount = Number.isInteger(Number(dto.count)) && Number(dto.count) > 0
       ? Math.min(Number(dto.count), 10)
@@ -4803,7 +4805,26 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       this.logger.warn('idea-discover: 相同配置仍在生成，复用当前任务，未重复调用模型');
       return active;
     }
-    const task = this.runIdeaDiscovery(normalizedDto, requestedCount);
+    const discoveryRequestId = String(dto.discoveryRequestId || randomUUID());
+    const discoveryRequestStartedAt = new Date().toISOString();
+    const task = discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
+      try {
+        const result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
+        return {
+          ...result,
+          discoveryRequestId,
+          discoveryRequestStartedAt,
+          discoveryRequestFinishedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        if (error && typeof error === 'object') Object.assign(error, {
+          discoveryRequestId,
+          discoveryRequestStartedAt,
+          discoveryRequestFinishedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
+    });
     this.ideaDiscoveryInFlight.set(requestKey, task);
     try {
       return await task;

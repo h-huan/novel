@@ -3,6 +3,7 @@ import { premiseSourceComparisonCatalog } from './premise-selection-review';
 import { getPlatform, targetForLength, measureAgainstTarget } from './platform-benchmarks';
 import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
 import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY } from '../../shared/src/system-workflow-rules.registry';
+import { currentDiscoveryRequestId, discoveryRequestAsyncStorage } from '../common/creation-context';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ChainController,
@@ -2031,5 +2032,20 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
   it('keeps pool batch sizing independent from five-way card/review concurrency', () => {
     expect(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY).toBe(2);
     expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(5);
+  });
+});
+
+
+describe('discovery request identity isolation', () => {
+  it('keeps request IDs bound to their own overlapping asynchronous task', async () => {
+    const read = (discoveryRequestId: string) => discoveryRequestAsyncStorage.run(
+      { discoveryRequestId },
+      async () => {
+        await Promise.resolve();
+        return currentDiscoveryRequestId();
+      },
+    );
+    await expect(Promise.all([read('discovery-a'), read('discovery-b')]))
+      .resolves.toEqual(['discovery-a', 'discovery-b']);
   });
 });

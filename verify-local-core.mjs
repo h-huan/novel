@@ -422,7 +422,9 @@ const rawIdeaDiscovery = ideaDiscoveryResponse.ok
   : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` };
 const savedDiscoveryAudit = normalizeIdeaDiscoveryAudit(rawIdeaDiscovery);
 const stepMetricsQuery = new URLSearchParams({ scenario: 'idea_generate', limit: '500' });
-if (savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt) {
+if (savedDiscoveryAudit.discoveryRequestId) {
+  stepMetricsQuery.set('discoveryRequestId', savedDiscoveryAudit.discoveryRequestId);
+} else if (savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt) {
   stepMetricsQuery.set('startAt', savedDiscoveryAudit.startedAt);
   stepMetricsQuery.set('endAt', savedDiscoveryAudit.finishedAt);
 }
@@ -434,10 +436,13 @@ const discoveryCallTrace = {
   source: {
     ok: stepMetricsResponse.ok, status: stepMetricsResponse.status, error: stepMetricsResponse.error ?? null,
     endpoint: '/generation-metrics/steps', totalRows: stepMetricRows.length, limit: 500,
-    correlationMode: savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt ? 'audit_time_window' : 'latest_unbound',
-    requestCorrelation: 'time_window_only', discoveryRequestId: savedDiscoveryAudit.discoveryRequestId,
+    correlationMode: savedDiscoveryAudit.discoveryRequestId ? 'discovery_request_id'
+      : savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt ? 'audit_time_window' : 'latest_unbound',
+    requestCorrelation: savedDiscoveryAudit.discoveryRequestId ? 'discovery_request_id'
+      : savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt ? 'time_window_only' : 'unbound',
+    discoveryRequestId: savedDiscoveryAudit.discoveryRequestId,
     auditStartedAt: savedDiscoveryAudit.startedAt, auditFinishedAt: savedDiscoveryAudit.finishedAt,
-    concurrentOverlapPossible: Boolean(savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt),
+    concurrentOverlapPossible: !savedDiscoveryAudit.discoveryRequestId && Boolean(savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt),
   },
   ...summarizeDiscoveryStepMetrics(stepMetricRows),
 };
@@ -760,7 +765,9 @@ function detailedIdeaMarkdown() {
     '- 停止原因：' + (audit.stopReason ?? '无明确记录') + '；错误：' + (audit.error ?? '无') + '；质量警告：' + (audit.qualityWarning ?? '无'),
     '- 调用跟踪：' + (source.ok ? '已查询' : '查询失败') + '；关联方式：' + (source.correlationMode ?? '未知')
       + '；记录数：' + (source.totalRows ?? runs.length) + '；并发重叠可能：' + (source.concurrentOverlapPossible ?? '未知')
-      + '；模型指标不含 discoveryRequestId，时间窗关联不能排除并发请求重叠。',
+      + '；' + (source.requestCorrelation === 'discovery_request_id'
+        ? '模型指标按 discoveryRequestId 精确关联，不混入其他并发请求。'
+        : '模型指标不含 discoveryRequestId，时间窗关联不能排除并发请求重叠。'),
     '',
     '### 阶段耗时与调用次数',
     '| 阶段 | 逻辑调用 | 失败 | 累计耗时 ms | 阶段墙钟 ms | 内部重试 | 估算物理尝试 | Token |',

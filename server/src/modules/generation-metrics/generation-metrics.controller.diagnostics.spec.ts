@@ -43,9 +43,9 @@ describe('generation metrics diagnostics', () => {
     expect(cockpit.diagnostics.slowestSteps[0]).toEqual(expect.objectContaining({ runId: 'r1', internalRetries: 1 }));
     expect(cockpit.diagnostics.exactDuplicateRunGroups).toBe(1);
     expect(cockpit.diagnostics.exactDuplicateRuns[0].runIds).toEqual(['r1', 'r2']);
-    expect(cockpit.diagnostics.persistenceMismatch).not.toContain('outline_success_without_chapter_outline');
+    expect(cockpit.diagnostics.persistenceMismatch).toContain('outline_success_without_chapter_outline');
     expect(cockpit.diagnostics.pendingPersistenceMismatch).toEqual([]);
-    expect(cockpit.diagnostics.persistenceStatus).toBe('not_applicable');
+    expect(cockpit.diagnostics.persistenceStatus).toBe('mismatch');
   });
 
   it('counts timeline events through timelines.project_id instead of querying a nonexistent timeline_events.project_id', () => {
@@ -98,7 +98,7 @@ describe('generation metrics diagnostics', () => {
       step_key: 'idea_premise_pool_generation', scenario: 'idea_generate', status: 'failed',
       attempt: 1, phase: 'pool', duration_ms: 1500, fail_reason: 'Authorization: Bearer secret-token',
       total_tokens: 1200, internal_retries: 2, created_at: '2026-10-22T07:00:01.000Z',
-      model_version: 'deepseek-flash', stage: 'project', gate_status: 'failed',
+      discovery_request_id: 'discovery-1', model_version: 'deepseek-flash', stage: 'project', gate_status: 'failed',
       started_at: '2026-10-22T07:00:00.000Z', finished_at: '2026-10-22T07:00:01.000Z',
       prompt_version: 'prompt-hash', context_version: 'context-hash', constitution_revision: 2,
     }];
@@ -107,11 +107,13 @@ describe('generation metrics diagnostics', () => {
     const controller = new GenerationMetricsController({ getCockpit: () => ({ runs: [] }) } as any,
       { getDb: () => ({ prepare }) } as any);
     const result: any = controller.steps(undefined, 'idea_generate', 'idea_premise_pool_generation',
-      '2026-10-22T07:00:00.000Z', '2026-10-22T07:00:02.000Z', '700');
+      '2026-10-22T07:00:00.000Z', '2026-10-22T07:00:02.000Z', '700', 'discovery-1');
     expect(prepare.mock.calls[0][0]).toContain('LEFT JOIN generation_runs');
     expect(prepare.mock.calls[0][0]).toContain('julianday(m.created_at) >= julianday(?)');
+    expect(prepare.mock.calls[0][0]).toContain('m.discovery_request_id = ?');
     expect(all).toHaveBeenCalledWith('idea_generate', 'idea_premise_pool_generation'.length,
-      'idea_premise_pool_generation', '2026-10-22T07:00:00.000Z', '2026-10-22T07:00:02.000Z', 500);
+      'idea_premise_pool_generation', '2026-10-22T07:00:00.000Z', '2026-10-22T07:00:02.000Z', 'discovery-1', 500);
+    expect(result.filters.discoveryRequestId).toBe('discovery-1');
     expect(result.limit).toBe(500);
     expect(result.items[0].internal_retries).toBe(2);
     expect(result.items[0].fail_reason).not.toContain('secret-token');

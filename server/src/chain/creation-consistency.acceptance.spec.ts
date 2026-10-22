@@ -51,6 +51,13 @@ beforeEach(async () => {
 afterEach(() => db.close());
 
 describe('production cross-module commit boundary with native SQLite', () => {
+  it('reconciles exact discovery request correlation into step metrics storage', () => {
+    const columns = db.prepare('PRAGMA table_info(generation_step_metrics)').all() as any[];
+    expect(columns.map(row => row.name)).toContain('discovery_request_id');
+    const indexes = db.prepare("PRAGMA index_list('generation_step_metrics')").all() as any[];
+    expect(indexes.some(row => row.name === 'idx_generation_step_metrics_discovery_request')).toBe(true);
+  });
+
   it('persists a preflight failure instead of leaving the inserted project shell stuck at creating', async () => {
     db.prepare("UPDATE projects SET status='creating', settings='{}' WHERE id=?").run('p');
     controller.assertExecutionStandardsComplete = vi.fn();

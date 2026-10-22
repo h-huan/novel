@@ -30,7 +30,7 @@ export class ChainPlanningController {
   async ideaDiscover(@Body() dto: Parameters<ChainController['ideaDiscover']>[0]) {
     const requested = Number(dto.count);
     const desiredCount = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 10) : 5;
-    const discoveryRequestId = randomUUID();
+    const requestedDiscoveryRequestId = randomUUID();
     const startedAt = new Date().toISOString();
     const requestSnapshot = redactDiagnosticValue({
       ...ideaDiscoveryAuthorSettings(dto),
@@ -43,20 +43,23 @@ export class ChainPlanningController {
     let result: any = null;
     let thrownError: unknown = null;
     try {
-      result = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
+      result = await this.chain.ideaDiscover({ ...dto, count: desiredCount, discoveryRequestId: requestedDiscoveryRequestId });
     } catch (error) {
       thrownError = error;
     }
     const finishedAt = new Date().toISOString();
+    const discoveryRequestId = String(result?.discoveryRequestId ?? (thrownError as any)?.discoveryRequestId ?? requestedDiscoveryRequestId);
+    const auditStartedAt = String(result?.discoveryRequestStartedAt ?? (thrownError as any)?.discoveryRequestStartedAt ?? startedAt);
+    const auditFinishedAt = String(result?.discoveryRequestFinishedAt ?? (thrownError as any)?.discoveryRequestFinishedAt ?? finishedAt);
 
     if (this.database) {
       try {
         await this.database.dualWrite('latest_idea_discovery_audit', redactDiagnosticValue({
           schemaVersion: 1,
           discoveryRequestId,
-          startedAt,
-          finishedAt,
-          generatedAt: finishedAt,
+          startedAt: auditStartedAt,
+          finishedAt: auditFinishedAt,
+          generatedAt: auditFinishedAt,
           request: requestSnapshot,
           success: !thrownError && result?.success === true,
           totalIdeas: thrownError ? 0 : Number(result?.totalIdeas ?? (Array.isArray(result?.ideas) ? result.ideas.length : 0)) || 0,

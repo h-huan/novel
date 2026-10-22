@@ -38,6 +38,7 @@ export class GenerationMetricsController {
     @Query('startAt') startAt?: string,
     @Query('endAt') endAt?: string,
     @Query('limit') limit?: string,
+    @Query('discoveryRequestId') discoveryRequestId?: string,
   ) {
     const parseTimestamp = (name: string, value?: string): string | null => {
       if (!value) return null;
@@ -60,7 +61,8 @@ export class GenerationMetricsController {
     if (stepPrefix) { where.push('substr(m.step_key, 1, ?) = ?'); params.push(stepPrefix.length, stepPrefix); }
     if (normalizedStartAt) { where.push('julianday(m.created_at) >= julianday(?)'); params.push(normalizedStartAt); }
     if (normalizedEndAt) { where.push('julianday(m.created_at) <= julianday(?)'); params.push(normalizedEndAt); }
-    const sql = `SELECT m.id, m.run_id, m.project_id, m.chapter_index, m.step_key, m.scenario,
+    if (discoveryRequestId) { where.push('m.discovery_request_id = ?'); params.push(discoveryRequestId); }
+    const sql = `SELECT m.id, m.run_id, m.project_id, m.discovery_request_id, m.chapter_index, m.step_key, m.scenario,
       m.status, m.attempt, m.phase, m.duration_ms, m.fail_reason, m.total_tokens,
       COALESCE(m.internal_retries, 0) AS internal_retries, m.created_at, m.model_version,
       r.stage, r.gate_status, r.started_at, r.finished_at, r.prompt_version, r.context_version,
@@ -78,7 +80,7 @@ export class GenerationMetricsController {
       items,
       count: items.length,
       limit: boundedLimit,
-      filters: { projectId: projectId ?? null, scenario: scenario ?? null, stepPrefix: stepPrefix ?? null, startAt: normalizedStartAt, endAt: normalizedEndAt },
+      filters: { projectId: projectId ?? null, scenario: scenario ?? null, stepPrefix: stepPrefix ?? null, startAt: normalizedStartAt, endAt: normalizedEndAt, discoveryRequestId: discoveryRequestId ?? null },
     };
   }
 
@@ -252,7 +254,7 @@ export class GenerationMetricsController {
     // 创建中短暂出现“模型已成功、业务表尚未落库”是允许的中间态；只有失败/完成后仍不一致，
     // 或 creating 已经无运行调用并持续空闲超过阈值，才升级为真正持久化故障。
     const projectStatus = String(project?.status || '').toLowerCase();
-    const persistenceCheckApplicable = ['active', 'completed', 'success'].includes(projectStatus) || creationStalled;
+    const persistenceCheckApplicable = ['active', 'completed', 'success', 'generation_failed', 'failed', 'cancelled'].includes(projectStatus) || creationStalled;
     const persistenceMismatch = isCreating && !creationStalled
       ? [] : persistenceCheckApplicable ? observedPersistenceMismatch : [];
     const pendingPersistenceMismatch = isCreating && !creationStalled ? observedPersistenceMismatch : [];
