@@ -6673,17 +6673,38 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // 这里复用生成入口那唯一一份 assertExecutionStandardsComplete（六维 / 分类归位 / 分类体量
     // 三道判据同一份 standing、同一句文案），把它提到生成流程第 0 步：不通过就不开工。
     // 不降级：不填默认值、不用平台推荐替代、不降低任何判据的 severity。
-    this.assertExecutionStandardsComplete(projectId);
-    const constitution = readConstitution(db.prepare(
-      'SELECT type,target_words,target_platform,writing_style,settings FROM projects WHERE id=?',
-    ).get(projectId) as Record<string, unknown>);
+    let constitution: ReturnType<typeof readConstitution>;
+    try {
+      this.assertExecutionStandardsComplete(projectId);
+      constitution = readConstitution(db.prepare(
+        'SELECT type,target_words,target_platform,writing_style,settings FROM projects WHERE id=?',
+      ).get(projectId) as Record<string, unknown>);
 
-    // Both initial creation and recovery use the persisted authority, never the UI payload
-    // or its batch audit (which includes other selected/rejected story candidates).
-    if (!constitution.confirmedStory || Object.keys(constitution.confirmedStory).length === 0) {
-      throw new Error('项目缺少已持久化的 confirmedStory，不能创建框架');
+      // Both initial creation and recovery use the persisted authority, never the UI payload
+      // or its batch audit (which includes other selected/rejected story candidates).
+      if (!constitution.confirmedStory || Object.keys(constitution.confirmedStory).length === 0) {
+        throw new Error('项目缺少已持久化的 confirmedStory，不能创建框架');
+      }
+      dto = { ...dto, selectedIdea: structuredClone(constitution.confirmedStory) };
+    } catch (error) {
+      // This preflight runs before the main generation try/catch. Without this boundary,
+      // an invalid persisted Canon leaves the already-inserted project stuck at "creating".
+      const message = error instanceof Error ? error.message : String(error);
+      let statusPersistenceError: string | undefined;
+      try {
+        db.prepare("UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ? AND status = 'creating'")
+          .run(now(), projectId);
+      } catch (persistError) {
+        statusPersistenceError = persistError instanceof Error ? persistError.message : String(persistError);
+        this.logger.error(`create-project-async 前置失败状态写入失败 project=${projectId}: ${statusPersistenceError}`);
+      }
+      this.logger.error(`create-project-async 创建前置校验失败 project=${projectId}: ${message}`);
+      this.emitProjectProgress(projectId, {
+        type: 'error', success: false, projectId, step: 'preflight', message,
+        ...(statusPersistenceError ? { statusPersistenceError } : {}),
+      });
+      return;
     }
-    dto = { ...dto, selectedIdea: structuredClone(constitution.confirmedStory) };
     const isShort = dto.storyType !== 'long_novel';
     // 长短篇都从同一张 confirmedStory 做确定性投影；不让两条流程各自摘要一次题材。
     const storyFoundation = buildStoryFoundation(dto.selectedIdea);

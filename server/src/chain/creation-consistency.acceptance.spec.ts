@@ -43,6 +43,22 @@ beforeEach(async () => {
 afterEach(() => db.close());
 
 describe('production cross-module commit boundary with native SQLite', () => {
+  it('persists a preflight failure instead of leaving the inserted project shell stuck at creating', async () => {
+    db.prepare("UPDATE projects SET status='creating', settings='{}' WHERE id=?").run('p');
+    controller.assertExecutionStandardsComplete = vi.fn();
+    controller.emitProjectProgress = vi.fn();
+
+    await expect(controller.executeCreateProjectStepsActive('p', {
+      title: '前置失败验收', storyType: 'short_story', targetWords: 20_000, selectedIdea: {},
+    })).resolves.toBeUndefined();
+
+    expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
+    expect(controller.emitProjectProgress).toHaveBeenCalledWith('p', expect.objectContaining({
+      type: 'error', success: false, projectId: 'p', step: 'preflight',
+      message: '项目缺少已持久化的 confirmedStory，不能创建框架',
+    }));
+  });
+
   it('reviews all outline fields consumed by prose instead of omitting auxiliary scene copies', async () => {
     const values={hot_scenes:JSON.stringify(['截图发到群里，群友看不见那行字。']),setback_scenes:JSON.stringify(['受阻场景完整原文']),
       highlight_points:JSON.stringify(['高潮来源完整原文']),core_content:'补全内容完整原文',plot_points:JSON.stringify({coreEvent:'核心事件完整原文'}),
