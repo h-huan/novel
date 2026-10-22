@@ -1,4 +1,6 @@
 import { Body, Controller, Get, HttpException, Logger, Param, Post, Sse } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { redactDiagnosticText, redactDiagnosticValue } from '../common/diagnostic-redaction';
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
 import { generationTasks } from '../common/generation-cancellation';
@@ -28,30 +30,44 @@ export class ChainPlanningController {
   async ideaDiscover(@Body() dto: Parameters<ChainController['ideaDiscover']>[0]) {
     const requested = Number(dto.count);
     const desiredCount = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 10) : 5;
-
-    // GEN-002：筛选与有界修复由 orchestrator 负责；适配层保留合格卡与缺额诊断。
-    const result: any = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
+    const discoveryRequestId = randomUUID();
+    const startedAt = new Date().toISOString();
+    const requestSnapshot = redactDiagnosticValue({
+      ...ideaDiscoveryAuthorSettings(dto),
+      storyType: dto.storyType ?? null,
+      platform: dto.platform ?? null,
+      storyCategory: dto.storyCategory ?? null,
+      targetAudience: dto.targetAudience ?? null,
+      requestedCount: desiredCount,
+    });
+    let result: any = null;
+    let thrownError: unknown = null;
+    try {
+      result = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
+    } catch (error) {
+      thrownError = error;
+    }
+    const finishedAt = new Date().toISOString();
 
     if (this.database) {
       try {
-        await this.database.dualWrite('latest_idea_discovery_audit', {
+        await this.database.dualWrite('latest_idea_discovery_audit', redactDiagnosticValue({
           schemaVersion: 1,
-          generatedAt: new Date().toISOString(),
-          request: {
-            ...ideaDiscoveryAuthorSettings(dto),
-            storyType: dto.storyType ?? null,
-            platform: dto.platform ?? null,
-            storyCategory: dto.storyCategory ?? null,
-            targetAudience: dto.targetAudience ?? null,
-            requestedCount: desiredCount,
-          },
-          success: result?.success === true,
-          totalIdeas: Number(result?.totalIdeas ?? (Array.isArray(result?.ideas) ? result.ideas.length : 0)) || 0,
+          discoveryRequestId,
+          startedAt,
+          finishedAt,
+          generatedAt: finishedAt,
+          request: requestSnapshot,
+          success: !thrownError && result?.success === true,
+          totalIdeas: thrownError ? 0 : Number(result?.totalIdeas ?? (Array.isArray(result?.ideas) ? result.ideas.length : 0)) || 0,
           qualityWarning: result?.qualityWarning ?? null,
-          error: result?.error ?? null,
-          appealGate: result?.appealGate ?? null,
-          acceptedIdeas: Array.isArray(result?.ideas)
+          error: thrownError
+            ? redactDiagnosticText(thrownError instanceof Error ? thrownError.message : String(thrownError))
+            : result?.error == null ? null : redactDiagnosticText(result.error),
+          appealGate: (thrownError as any)?.appealGate ?? result?.appealGate ?? null,
+          acceptedIdeas: !thrownError && Array.isArray(result?.ideas)
             ? result.ideas.slice(0, desiredCount).map((idea: any) => ({
+                sourcePremiseId: idea?.sourcePremiseId ?? null,
                 title: idea?.title ?? null,
                 hook: idea?.hook ?? null,
                 coreConflict: idea?.coreConflict ?? idea?.conflict ?? null,
@@ -61,11 +77,12 @@ export class ChainPlanningController {
                 ideaAppealGate: idea?.ideaAppealGate ?? null,
               }))
             : [],
-        });
+        }));
       } catch (error) {
-        this.logger.warn(`灵感发现诊断落库失败（不影响题材返回）：${error instanceof Error ? error.message : String(error)}`);
+        this.logger.warn('灵感发现诊断落库失败（不影响题材返回）：' + redactDiagnosticText(error instanceof Error ? error.message : String(error)));
       }
     }
+    if (thrownError) throw thrownError;
     return result;
   }
 

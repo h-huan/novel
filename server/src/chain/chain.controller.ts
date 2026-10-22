@@ -5054,42 +5054,54 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           return new Error('创建前题材筛选被执行前提阻断' + (missing ? '（' + missing + '）' : '') + '：' + (reason || '模型未说明原因') + '；未进入题材质量筛选。');
         };
         const poolStartedAt = Date.now();
-        const poolBatchResults: Array<{ batchIndex: number; candidates: any[]; durationMs: number; error?: string; blocked?: any }> =
-          await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
-            const batchStartedAt = Date.now();
-            try {
-              const response = await this.realLLM.generate({
-                prompt: buildPremiseSelectionPrompt('pool', { batchIndex, batchCount: poolBatchCount, batchSize }),
-                scenario: 'idea_generate',
-                timeout: discoveryBudget.complexTimeoutMs,
-                maxEmptyRetries: 1,
-                responseFormat: 'json_object',
-                metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
-              });
-              const parsed = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
-              if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) return { batchIndex, candidates: [], durationMs: Date.now() - batchStartedAt, blocked: parsed };
-              if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
-              return { batchIndex, candidates: parsed.pool, durationMs: Date.now() - batchStartedAt };
-            } catch (error) {
-              return { batchIndex, candidates: [], durationMs: Date.now() - batchStartedAt, error: error instanceof Error ? error.message : String(error) };
+        const poolBatchResults: Array<{
+          batchIndex: number; candidates: any[]; durationMs: number; rawReturned: number | null;
+          parseFailed: boolean; error?: string; blocked?: any;
+        }> = await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
+          const batchStartedAt = Date.now();
+          let rawReturned: number | null = null;
+          let parsed: any = null;
+          try {
+            const response = await this.realLLM.generate({
+              prompt: buildPremiseSelectionPrompt('pool', { batchIndex, batchCount: poolBatchCount, batchSize }),
+              scenario: 'idea_generate',
+              timeout: discoveryBudget.complexTimeoutMs,
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
+            });
+            parsed = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
+            if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) {
+              rawReturned = 0;
+              return { batchIndex, candidates: [], rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed };
             }
-          }));
+            if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
+            rawReturned = parsed.pool.length;
+            return { batchIndex, candidates: parsed.pool, rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt };
+          } catch (error) {
+            return {
+              batchIndex, candidates: [], rawReturned, parseFailed: rawReturned === null,
+              durationMs: Date.now() - batchStartedAt,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }));
         const candidatePool: Array<Record<string, unknown>> = [];
         const seenTitles = new Set<string>();
         const seenCores = new Set<string>();
         const poolFilterTotals = {
-          rawReturned: 0, validBeforeDedup: 0, invalidShape: 0, invalidFields: 0,
+          rawReturned: 0, rawReturnedUnknownBatches: 0, validBeforeDedup: 0, invalidShape: 0, invalidFields: 0,
           invalidCategory: 0, duplicateCount: 0, uniqueBeyondTarget: 0,
         };
         const categoryBindingCounts: Record<string, number> = {};
         const batchFilterStats = new Map<number, {
-          rawReturned: number; validBeforeDedup: number; invalidShape: number; invalidFields: number;
+          rawReturned: number | null; validBeforeDedup: number; invalidShape: number; invalidFields: number;
           invalidCategory: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
           categoryBindingCounts: Record<string, number>;
         }>();
         for (const batch of poolBatchResults.slice().sort((left, right) => left.batchIndex - right.batchIndex)) {
           const stats = {
-            rawReturned: batch.candidates.length,
+            rawReturned: batch.rawReturned,
             validBeforeDedup: 0,
             invalidShape: 0,
             invalidFields: 0,
@@ -5100,7 +5112,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             categoryBindingCounts: {} as Record<string, number>,
           };
           batchFilterStats.set(batch.batchIndex, stats);
-          poolFilterTotals.rawReturned += batch.candidates.length;
+          if (batch.rawReturned === null) poolFilterTotals.rawReturnedUnknownBatches += 1;
+          else poolFilterTotals.rawReturned += batch.rawReturned;
           for (const raw of batch.candidates) {
             if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
               stats.invalidShape += 1;
@@ -5174,6 +5187,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           wallMs: Date.now() - poolStartedAt,
           target: premisePoolSize,
           rawReturned: poolFilterTotals.rawReturned,
+          rawReturnedUnknownBatches: poolFilterTotals.rawReturnedUnknownBatches,
+          parseFailureBatchCount: poolBatchResults.filter(item => item.parseFailed).length,
           validBeforeDedup: poolFilterTotals.validBeforeDedup,
           invalidCount: poolFilterTotals.invalidShape + poolFilterTotals.invalidFields + poolFilterTotals.invalidCategory,
           invalid: {
@@ -5195,7 +5210,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           batches: poolBatchResults.map(batch => ({
             batch: batch.batchIndex + 1,
             requested: poolBatchSizes[batch.batchIndex],
-            rawReturned: batch.candidates.length,
+            rawReturned: batch.rawReturned,
+            parseFailed: batch.parseFailed,
             durationMs: batch.durationMs,
             error: batch.error || null,
             blocked: batch.blocked ? {
@@ -5207,14 +5223,14 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           })),
         };
         this.logger.log('idea-discover: 候选池并发生成 wallMs=' + poolGenerationAudit.wallMs
-          + '，原始返回=' + poolFilterTotals.rawReturned
+          + '，原始返回=' + poolFilterTotals.rawReturned + '，原始返回未知批次=' + poolFilterTotals.rawReturnedUnknownBatches
           + '，去重前有效=' + poolFilterTotals.validBeforeDedup
           + '，重复=' + poolFilterTotals.duplicateCount
           + '，无效=' + poolGenerationAudit.invalidCount
           + '，批次=' + JSON.stringify(poolGenerationAudit.batches.map(batch => ({
             batch: batch.batch, requested: batch.requested, rawReturned: batch.rawReturned,
             retained: batch.retained, duplicateCount: batch.duplicateCount, durationMs: batch.durationMs,
-            blocked: Boolean(batch.blocked), error: batch.error,
+            blocked: Boolean(batch.blocked), error: Boolean(batch.error), parseFailed: batch.parseFailed,
           }))));
         const failWithPoolAudit = (
           error: unknown,
@@ -5359,11 +5375,9 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               preselectionReviewWallMs,
               preselectedPremises: initialSelection.selected,
               premiseSelected: initialSelection.selected.length,
-              selectionAudit: initialSelection.selectionAudit,
             },
           );
         }
-        const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
         const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
         this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs

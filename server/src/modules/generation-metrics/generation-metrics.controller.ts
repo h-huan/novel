@@ -9,6 +9,7 @@ import { Body, Controller, Get, Param, Post, Put, Query, BadRequestException } f
 import { ApiTags } from '@nestjs/swagger';
 import { GenerationMetricsService } from './generation-metrics.service';
 import { DatabaseService } from '../../database/database.service';
+import { redactDiagnosticText } from '../../common/diagnostic-redaction';
 
 @ApiTags('generation-metrics')
 @Controller('generation-metrics')
@@ -27,6 +28,58 @@ export class GenerationMetricsController {
   cockpit(@Query('projectId') projectId: string) {
     if (!projectId) throw new BadRequestException('缺少项目ID');
     return { ...this.metrics.getCockpit(projectId), diagnostics: this.generationDiagnostics(projectId) };
+  }
+
+  @Get('steps')
+  steps(
+    @Query('projectId') projectId?: string,
+    @Query('scenario') scenario?: string,
+    @Query('stepPrefix') stepPrefix?: string,
+    @Query('startAt') startAt?: string,
+    @Query('endAt') endAt?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parseTimestamp = (name: string, value?: string): string | null => {
+      if (!value) return null;
+      const milliseconds = Date.parse(value);
+      if (!Number.isFinite(milliseconds)) throw new BadRequestException(name + ' must be a valid timestamp');
+      return new Date(milliseconds).toISOString();
+    };
+    const normalizedStartAt = parseTimestamp('startAt', startAt);
+    const normalizedEndAt = parseTimestamp('endAt', endAt);
+    if (normalizedStartAt && normalizedEndAt && Date.parse(normalizedStartAt) > Date.parse(normalizedEndAt)) {
+      throw new BadRequestException('startAt must not be later than endAt');
+    }
+    const requestedLimit = Number(limit);
+    const boundedLimit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(500, Math.floor(requestedLimit)) : 200;
+    const where: string[] = [];
+    const params: any[] = [];
+    if (projectId) { where.push('m.project_id = ?'); params.push(projectId); }
+    if (scenario) { where.push('m.scenario = ?'); params.push(scenario); }
+    if (stepPrefix) { where.push('substr(m.step_key, 1, ?) = ?'); params.push(stepPrefix.length, stepPrefix); }
+    if (normalizedStartAt) { where.push('julianday(m.created_at) >= julianday(?)'); params.push(normalizedStartAt); }
+    if (normalizedEndAt) { where.push('julianday(m.created_at) <= julianday(?)'); params.push(normalizedEndAt); }
+    const sql = `SELECT m.id, m.run_id, m.project_id, m.chapter_index, m.step_key, m.scenario,
+      m.status, m.attempt, m.phase, m.duration_ms, m.fail_reason, m.total_tokens,
+      COALESCE(m.internal_retries, 0) AS internal_retries, m.created_at, m.model_version,
+      r.stage, r.gate_status, r.started_at, r.finished_at, r.prompt_version, r.context_version,
+      r.constitution_revision
+      FROM generation_step_metrics m
+      LEFT JOIN generation_runs r ON r.id = m.run_id
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY m.created_at DESC LIMIT ?`;
+    const rows = this.databaseService.getDb().prepare(sql).all(...params, boundedLimit) as any[];
+    const items = rows.map(row => ({
+      ...row,
+      fail_reason: row.fail_reason == null ? null : redactDiagnosticText(row.fail_reason),
+    }));
+    return {
+      items,
+      count: items.length,
+      limit: boundedLimit,
+      filters: { projectId: projectId ?? null, scenario: scenario ?? null, stepPrefix: stepPrefix ?? null, startAt: normalizedStartAt, endAt: normalizedEndAt },
+    };
   }
 
   @Get('runs')
@@ -96,12 +149,14 @@ export class GenerationMetricsController {
         constitution_revision,duration_ms,started_at,finished_at
       FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 300`).all(projectId) as any[];
     const project = db.prepare('SELECT status,updated_at FROM projects WHERE id=?').get(projectId) as any;
-    const count = (table: string, extra = ''): number => {
+    const persistenceQueryErrors: string[] = [];
+    const count = (table: string, extra = ''): number | null => {
       try {
         const row = db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE project_id=?${extra}`).get(projectId) as any;
         return Number(row?.c) || 0;
-      } catch {
-        return 0;
+      } catch (error) {
+        persistenceQueryErrors.push(table + ': ' + redactDiagnosticText(error instanceof Error ? error.message : String(error)));
+        return null;
       }
     };
     const persisted = {
@@ -166,6 +221,7 @@ export class GenerationMetricsController {
       }));
 
     const successfulStages = new Set(runs.filter(row => row.status === 'success').map(row => String(row.stage || '')));
+    const persistenceUnknown = Object.entries(persisted).filter(([, value]) => value === null).map(([key]) => key);
     const observedPersistenceMismatch: string[] = [];
     if (successfulStages.has('world') && persisted.worldSettings === 0) observedPersistenceMismatch.push('world_success_without_world_setting');
     if (successfulStages.has('character') && persisted.characters === 0) observedPersistenceMismatch.push('character_success_without_character');
@@ -196,6 +252,9 @@ export class GenerationMetricsController {
       persisted,
       persistenceMismatch,
       pendingPersistenceMismatch,
+      persistenceUnknown,
+      persistenceQueryErrors,
+      persistenceStatus: persistenceQueryErrors.length ? 'unknown' : persistenceMismatch.length ? 'mismatch' : 'consistent',
       activeGenerationRuns,
       lastActivityAt: lastActivityMs === null ? null : new Date(lastActivityMs).toISOString(),
       idleMs,

@@ -317,3 +317,22 @@ it('keeps the current response and audit without persisting cross-batch recovery
  expect(await c.ideaDiscover({...dto,count:5} as any)).toBe(result);
  expect(db.dualWrite.mock.calls.map(call=>call[0])).toEqual(['latest_idea_discovery_audit']);
 });
+
+it('persists a timestamped, redacted failed audit before rethrowing an orchestration exception', async () => {
+  const failure = Object.assign(new Error('Authorization: Bearer secret-token'), {
+    appealGate: { stopReason: 'candidate_pool_below_minimum', note: 'token=hidden-token' },
+  });
+  const ideaDiscover = vi.fn().mockRejectedValue(failure);
+  const dualWrite = vi.fn().mockResolvedValue(undefined);
+  const controller = new ChainPlanningController({ ideaDiscover } as any, { dualWrite } as any);
+
+  await expect(controller.ideaDiscover({ ...dto, count: 2 } as any)).rejects.toBe(failure);
+  expect(dualWrite).toHaveBeenCalledTimes(1);
+  const stored = dualWrite.mock.calls[0][1] as any;
+  expect(stored.discoveryRequestId).toEqual(expect.any(String));
+  expect(Date.parse(stored.startedAt)).toBeLessThanOrEqual(Date.parse(stored.finishedAt));
+  expect(stored.success).toBe(false);
+  expect(stored.totalIdeas).toBe(0);
+  expect(stored.error).not.toContain('secret-token');
+  expect(JSON.stringify(stored.appealGate)).not.toContain('hidden-token');
+});
