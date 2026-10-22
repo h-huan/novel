@@ -28,6 +28,8 @@ describe('WritingQualityService.buildPlatformReview（质检侧平台标准）',
     expect(rows.every((row: any) => row.issueType.startsWith('platform_'))).toBe(true);
     expect(rows.map((row: any) => row.issueType)).toContain('platform_dialogue_ratio');
     expect(rows.map((row: any) => row.issueType)).not.toContain('platform_chapter_length');
+    // 明确证明样本低于规划下限；此规则不要求为凑字补写，但超上限仍有独立 Gate。
+    expect(measurements?.metrics.words).toBeLessThan(context.project.creativeConstitution.chapterWordRange.min);
     // 度量与问题必须来自同一份 measureAgainstTarget 结果，而不是「有结论没有数字」
     expect(measurements?.metrics.dialogueRatio).toBeLessThan(0.35);
   });
