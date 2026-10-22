@@ -508,8 +508,13 @@ it('requires focused overlap evidence and rejects an unrelated old-pair refusal 
 it.each([3,2])('partitions only for output capacity and preserves completed work with %i shared credits',async(initialCredits)=>{
  const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),selectedPremises:['A','B','C','D'].map(premise)},4,5);
  const rejected:PremiseSelectionReview={passed:false,issues:['A','B','C'].map(premiseId=>({kind:'source_drift',premiseId,referencePremiseId:premiseId,quote:premise(premiseId).activeChoice,referenceQuote:premise(premiseId).storyCore,reason:'当前展开确实改变原池行动方向'}))};
- const c=Object.create(ChainController.prototype) as any,credits={remaining:initialCredits},scopes:number[]=[];
- c.logger={warn:vi.fn(),log:vi.fn()};c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce(rejected).mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValue({passed:true,issues:[]});
+ const c=Object.create(ChainController.prototype) as any,credits={remaining:initialCredits},scopes:number[]=[],overlapFocuses:any[]=[];
+ c.logger={warn:vi.fn(),log:vi.fn()};
+ let sourceReviewRound=0;
+ c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:string,mode:string,_budget:any,_sourceBatch:boolean,_genres:any,_limiter:any,focus:any)=>{
+  if(mode==='overlap'){overlapFocuses.push(focus);return {passed:true,issues:[]};}
+  return sourceReviewRound++===0?rejected:{passed:true,issues:[]};
+ });
  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
   const section=(label:string,next:string)=>prompt.split(label)[1].split(next)[0].trim();
   const slots=JSON.parse(section('【必须处理的位置及模式】','【可用原池ID】')),current=JSON.parse(section('【当前选择】','【本次独立缺陷】'));
@@ -523,6 +528,9 @@ it.each([3,2])('partitions only for output capacity and preserves completed work
  if(initialCredits===3){expect(scopes.slice(1).reduce((sum,n)=>sum+n,0)).toBe(3);expect(scopes).toHaveLength(3);expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D']);}
  else {expect(scopes).toHaveLength(2);expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','D']);expect(result.selectionAudit).toMatchObject({partial:true,unresolvedPremiseIds:['B','C'],sourceRepairCallsRemaining:0});}
  expect(result.selectionAudit.finalReview.passed).toBe(true);
+ expect(overlapFocuses).toHaveLength(2);
+ expect(overlapFocuses[0]).toBeUndefined();
+ expect(overlapFocuses[1]).toEqual(initialCredits===3?['A','B','C']:['A']);
 });
 it('does not reinterpret a network failure as output capacity or start fallback generations',async()=>{
  const c=Object.create(ChainController.prototype) as any;c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValueOnce(failure);

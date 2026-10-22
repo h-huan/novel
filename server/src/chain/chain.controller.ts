@@ -6045,18 +6045,20 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       before: ReturnType<typeof normalizePremiseSelectionPayload>,
       after: ReturnType<typeof normalizePremiseSelectionPayload>,
     ) => {
-      const beforeById=new Map<string,{index:number;signature:string}>();
-      const afterById=new Map<string,{index:number;signature:string}>();
-      before.selected.forEach((item,index)=>beforeById.set(String(item.premiseId),{index,signature:JSON.stringify(item)}));
-      after.selected.forEach((item,index)=>afterById.set(String(item.premiseId),{index,signature:JSON.stringify(item)}));
+      const beforeById=new Map<string,string>();
+      const afterById=new Map<string,string>();
+      before.selected.forEach(item=>beforeById.set(String(item.premiseId),JSON.stringify(item)));
+      after.selected.forEach(item=>afterById.set(String(item.premiseId),JSON.stringify(item)));
       const affectedIds=new Set<string>();
-      for(const [id,prior] of beforeById){
-        const next=afterById.get(id);
-        if(!next||next.index!==prior.index||next.signature!==prior.signature)affectedIds.add(id);
+      // Selection order is presentation-only. Removing an unresolved item shifts later indices
+      // but does not change those premises or the already-reviewed pairwise verdicts.
+      for(const [id,priorSignature] of beforeById){
+        const nextSignature=afterById.get(id);
+        if(nextSignature===undefined||nextSignature!==priorSignature)affectedIds.add(id);
       }
-      for(const [id,next] of afterById){
-        const prior=beforeById.get(id);
-        if(!prior||prior.index!==next.index||prior.signature!==next.signature)affectedIds.add(id);
+      for(const [id,nextSignature] of afterById){
+        const priorSignature=beforeById.get(id);
+        if(priorSignature===undefined||priorSignature!==nextSignature)affectedIds.add(id);
       }
       return {
         focusIds:after.selected.map(item=>String(item.premiseId)).filter(id=>affectedIds.has(id)),
