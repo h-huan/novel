@@ -6805,6 +6805,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     projectMetricsContext.enterWith(projectId);
     const db = this.db.getDb();
     const now = () => new Date().toISOString();
+    const projectStatusAtStart = String((db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined)?.status || '');
     const { v4: uuid } = require('uuid');
     const warnings: string[] = [];
     let shortHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -6969,14 +6970,74 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       }
     };
 
+    const persistCreationFailure = (
+      step: string,
+      message: string,
+      details: Record<string, unknown> = {},
+      progress?: { step: string; percent: number; message?: string },
+    ): void => {
+      let currentStatus: string | undefined;
+      let statusPersistenceError: string | undefined;
+      try {
+        const current = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined;
+        if (!current) {
+          statusPersistenceError = '项目记录不存在，无法持久化失败状态';
+        } else {
+          currentStatus = String(current.status || '');
+          const expectedStatus = currentStatus === 'creating'
+            ? 'creating'
+            : currentStatus === 'active' && projectStatusAtStart === 'active' ? 'active' : undefined;
+          if (expectedStatus) {
+            const result = db.prepare(
+              'UPDATE projects SET status = \'generation_failed\', updated_at = ? WHERE id = ? AND status = ?',
+            ).run(now(), projectId, expectedStatus) as { changes?: number };
+            if (Number(result?.changes ?? 0) > 0) {
+              currentStatus = 'generation_failed';
+            } else {
+              const latest = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined;
+              currentStatus = latest ? String(latest.status || '') : undefined;
+              if (!currentStatus) statusPersistenceError = '项目记录在状态迁移期间消失';
+              else if (currentStatus === expectedStatus) statusPersistenceError = '失败状态迁移未生效，项目仍处于 ' + expectedStatus;
+            }
+          } else if (currentStatus === 'active') {
+            this.logger.warn('create-project-async 保留并发路径已激活终态 project=' + projectId + '，忽略后续失败通知 step=' + step);
+            return;
+          } else if (currentStatus !== 'generation_failed') {
+            statusPersistenceError = '项目当前状态为 ' + currentStatus + '，未执行失败状态迁移';
+          }
+        }
+      } catch (persistError) {
+        statusPersistenceError = persistError instanceof Error ? persistError.message : String(persistError);
+      }
+      if (statusPersistenceError) {
+        this.logger.error('create-project-async 失败状态写入失败 project=' + projectId + ': ' + statusPersistenceError);
+      }
+      if (progress) {
+        try {
+          emit(progress.step, progress.percent, progress.message || message, 'failed');
+        } catch (emitError) {
+          this.logger.error('create-project-async 失败进度事件推送失败 project=' + projectId + ': '
+            + (emitError instanceof Error ? emitError.message : String(emitError)));
+        }
+      }
+      try {
+        this.emitProjectProgress(projectId, {
+          type: 'error', success: false, projectId, step, message, ...details,
+          ...(statusPersistenceError ? { statusPersistenceError } : {}),
+        });
+      } catch (emitError) {
+        this.logger.error('create-project-async 失败事件推送失败 project=' + projectId + ': '
+          + (emitError instanceof Error ? emitError.message : String(emitError)));
+      }
+    };
+
     try {
       // ====== LLM 可用性预检 ======
       const llmAvailable = await this.realLLM.isAvailable();
       if (!llmAvailable) {
         const errMsg = '未配置 LLM API Key，无法生成内容。请在「设置」页面添加 API Key（BYOK），或在启动 server 前设置 DEEPSEEK_API_KEY 环境变量。';
         this.logger.error(`create-project-async: ${errMsg}`);
-        emit('project', 0, errMsg);
-        this.emitProjectProgress(projectId, { type: 'error', message: errMsg });
+        persistCreationFailure('preflight', errMsg, {}, { step: 'project', percent: 0, message: errMsg });
         return;
       }
 
@@ -7340,8 +7401,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             if (missingLong.length > 0) {
               const message = `长篇项目已创建，但以下内容未真实写入：${missingLong.join('、')}`;
               this.logger.warn(`create-project-async: ${message} project=${projectId}`);
-              db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
-              this.emitProjectProgress(projectId, { type: 'error', success: false, projectId, message, stats: finalStats, warnings });
+              persistCreationFailure(activeGenerationStep, message, { stats: finalStats, warnings });
               return;
             }
             // 长篇综合链在此之前已写入规划资料；这里曾没有跨章数量台账门禁，后果是矛盾章纲可能直接激活。
@@ -7561,8 +7621,10 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
               }
             } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败: ${e.message}`); }
           } else {
-            emit('world', 25, '世界观生成失败，停止创建以避免后续上下文失真', 'failed');
-            this.emitProjectProgress(projectId, { type: 'error', success: false, projectId, message: '世界观生成失败，未继续生成大纲，避免上下文不一致。', warnings });
+            const message = '世界观生成失败，未继续生成大纲，避免上下文不一致。';
+            persistCreationFailure('world', message, { warnings }, {
+              step: 'world', percent: 25, message: '世界观生成失败，停止创建以避免后续上下文失真',
+            });
             return;
           }
         }
@@ -8916,15 +8978,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       if (missing.length > 0) {
         const message = `项目壳已创建，但以下内容未真实写入：${missing.join('、')}`;
         this.logger.warn(`create-project-async: ${message} project=${projectId}`);
-        db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
-        this.emitProjectProgress(projectId, {
-          type: 'error',
-          success: false,
-          projectId,
-          message,
-          stats: finalStats,
-          warnings,
-        });
+        persistCreationFailure(activeGenerationStep, message, { stats: finalStats, warnings });
         return;
       }
 
@@ -8940,10 +8994,10 @@ ${STORY_ENTITY_MODELING_POLICY}
     } catch (err: any) {
       if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
       this.logger.error(`create-project-async 执行失败 project=${projectId}, step=${activeGenerationStep}: ${err.message}`);
-      try {
-        db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
-      } catch {}
-      this.emitProjectProgress(projectId, { type: 'error', cancelled: currentGenerationSignal()?.aborted === true, success: false, projectId, step: activeGenerationStep, message: currentGenerationSignal()?.aborted ? '已取消生成，已完成成果和留存稿已保留' : err.message, warnings });
+      const cancelled = currentGenerationSignal()?.aborted === true;
+      persistCreationFailure(activeGenerationStep,
+        cancelled ? '已取消生成，已完成成果和留存稿已保留' : String(err?.message || err),
+        { cancelled, warnings });
     }
   }
 
@@ -9933,12 +9987,29 @@ ${enrichToneDirective}
           );
         }
       }
+      let statusPersistenceError: string | undefined;
       try {
-        db.prepare("UPDATE projects SET status='generation_failed',updated_at=? WHERE id=?")
-          .run(new Date().toISOString(), projectId);
-      } catch {}
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(error?.message || '恢复生成失败', 409);
+        const result = db.prepare("UPDATE projects SET status='generation_failed',updated_at=? WHERE id=?")
+          .run(new Date().toISOString(), projectId) as { changes?: number };
+        if (Number(result?.changes ?? 0) === 0) {
+          const row = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined;
+          if (!row) statusPersistenceError = '项目记录不存在，失败状态未写入';
+          else if (row.status !== 'generation_failed') statusPersistenceError = '项目状态仍为 ' + String(row.status || '未知');
+        }
+      } catch (statusError) {
+        statusPersistenceError = statusError instanceof Error ? statusError.message : String(statusError);
+        this.logger.error(`恢复生成失败状态写入失败 project=${projectId}: ${statusPersistenceError}`);
+      }
+      if (error instanceof HttpException) {
+        if (statusPersistenceError) {
+          throw new HttpException(`${error.message}；同时失败状态写入失败：${statusPersistenceError}`, 500);
+        }
+        throw error;
+      }
+      throw new HttpException(
+        `${error?.message || '恢复生成失败'}${statusPersistenceError ? '；同时失败状态写入失败：' + statusPersistenceError : ''}`,
+        statusPersistenceError ? 500 : 409,
+      );
     } finally {
       this.generationRecovery.release(projectId);
     }

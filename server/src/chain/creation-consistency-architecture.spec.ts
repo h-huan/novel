@@ -123,4 +123,20 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('constitution.confirmedStory = dto.selectedIdea');
   });
 
+  it('routes early creation failures through the persisted failure boundary before returning', () => {
+    const unavailableAt = indexOrFail(controllerSource, 'if (!llmAvailable) {');
+    const unavailableBoundaryAt = controllerSource.indexOf("persistCreationFailure('preflight', errMsg", unavailableAt);
+    const unavailableReturnAt = controllerSource.indexOf('return;', unavailableAt);
+    expect(unavailableBoundaryAt).toBeGreaterThan(unavailableAt);
+    expect(unavailableBoundaryAt).toBeLessThan(unavailableReturnAt);
+
+    const worldFailureAt = indexOrFail(controllerSource, '世界观生成失败，未继续生成大纲，避免上下文不一致。');
+    const worldBoundaryAt = controllerSource.indexOf("persistCreationFailure('world', message", worldFailureAt);
+    const worldReturnAt = controllerSource.indexOf('return;', worldFailureAt);
+    expect(worldBoundaryAt).toBeGreaterThan(worldFailureAt);
+    expect(worldBoundaryAt).toBeLessThan(worldReturnAt);
+    expect(controllerSource).toContain('失败状态写入失败');
+    expect(controllerSource).not.toContain("catch {}\n      this.emitProjectProgress(projectId, { type: 'error', cancelled:");
+  });
+
 });
