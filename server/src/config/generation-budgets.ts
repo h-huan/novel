@@ -23,8 +23,16 @@ export function saveGenerationBudgets(value:unknown):GenerationBudgets{
  const next=validateGenerationBudgets({...readGenerationBudgets(),...(value as object)}),file=path.join(resolveDataDir(),'generation-budgets.json');
  fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(next,null,2));fs.renameSync(temp,file);return next;
 }
-/** Official DeepSeek /models lists 393216 output tokens for deepseek-flash. Other models keep their existing configured limit. */
+/**
+ * A call's route/request maxTokens is authoritative. structuredOutputTokens is the opt-in
+ * threshold for extended recovery, not a floor that silently inflates every request.
+ * Ordinary calls may recover from a confirmed length truncation up to 32768 tokens;
+ * extended recovery is available only when the caller explicitly requests that threshold.
+ */
 export function generationOutputBounds(model:string,requested:number,settings=readGenerationBudgets()){
- if(model!=='deepseek-flash')return {initial:requested,ceiling:32768};
- return {initial:Math.min(settings.structuredOutputCeiling,Math.max(requested,settings.structuredOutputTokens)),ceiling:settings.structuredOutputCeiling};
+ if(model!=='deepseek-flash')return {initial:requested,ceiling:Math.max(requested,32768)};
+ const initial=Math.min(requested,settings.structuredOutputCeiling);
+ const ordinaryCeiling=Math.min(settings.structuredOutputCeiling,Math.max(initial,32768));
+ const ceiling=requested>=settings.structuredOutputTokens?settings.structuredOutputCeiling:ordinaryCeiling;
+ return {initial,ceiling:Math.max(initial,ceiling)};
 }

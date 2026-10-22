@@ -5074,102 +5074,296 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               return { batchIndex, candidates: [], durationMs: Date.now() - batchStartedAt, error: error instanceof Error ? error.message : String(error) };
             }
           }));
-        const blockedBatch = poolBatchResults.find(item => item.blocked);
-        if (blockedBatch) throw prerequisiteError(blockedBatch.blocked);
         const candidatePool: Array<Record<string, unknown>> = [];
         const seenTitles = new Set<string>();
         const seenCores = new Set<string>();
+        const poolFilterTotals = {
+          rawReturned: 0, validBeforeDedup: 0, invalidShape: 0, invalidFields: 0,
+          invalidCategory: 0, duplicateCount: 0, uniqueBeyondTarget: 0,
+        };
+        const categoryBindingCounts: Record<string, number> = {};
+        const batchFilterStats = new Map<number, {
+          rawReturned: number; validBeforeDedup: number; invalidShape: number; invalidFields: number;
+          invalidCategory: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
+          categoryBindingCounts: Record<string, number>;
+        }>();
         for (const batch of poolBatchResults.slice().sort((left, right) => left.batchIndex - right.batchIndex)) {
+          const stats = {
+            rawReturned: batch.candidates.length,
+            validBeforeDedup: 0,
+            invalidShape: 0,
+            invalidFields: 0,
+            invalidCategory: 0,
+            duplicateCount: 0,
+            retained: 0,
+            uniqueBeyondTarget: 0,
+            categoryBindingCounts: {} as Record<string, number>,
+          };
+          batchFilterStats.set(batch.batchIndex, stats);
+          poolFilterTotals.rawReturned += batch.candidates.length;
           for (const raw of batch.candidates) {
-            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+              stats.invalidShape += 1;
+              poolFilterTotals.invalidShape += 1;
+              continue;
+            }
             const item = raw as Record<string, unknown>;
             const workingTitle = String(item.workingTitle || '').trim();
             const storyCore = String(item.storyCore || '').trim();
             const titleKey = normalizeTitle(workingTitle);
             const coreKey = normalizeTitle(storyCore);
-            if (workingTitle.length < 2 || storyCore.length < 8 || !titleKey || !coreKey
-              || seenTitles.has(titleKey) || seenCores.has(coreKey)) continue;
+            if (workingTitle.length < 2 || storyCore.length < 20 || !titleKey || !coreKey) {
+              stats.invalidFields += 1;
+              poolFilterTotals.invalidFields += 1;
+              continue;
+            }
             let storyCategoryId = 'K1';
             let storyCategory = dto.storyCategory;
             if (variedCategories) {
               const match = String(item.storyCategoryId || '').trim().match(/^K(\d+)$/);
               const categoryIndex = match ? Number(match[1]) - 1 : -1;
-              if (categoryIndex < 0 || !discoveryCategories[categoryIndex]) continue;
+              if (categoryIndex < 0 || !discoveryCategories[categoryIndex]) {
+                stats.invalidCategory += 1;
+                poolFilterTotals.invalidCategory += 1;
+                continue;
+              }
               storyCategoryId = 'K' + (categoryIndex + 1);
               storyCategory = discoveryCategories[categoryIndex];
             }
-            const bound = bindPremiseCategory({
-              premiseId: 'P' + (candidatePool.length + 1),
-              workingTitle,
-              storyCore,
-              storyCategoryId,
-              storyCategory,
-            }, discoveryCategories, false);
-            candidatePool.push(bound);
+            stats.validBeforeDedup += 1;
+            poolFilterTotals.validBeforeDedup += 1;
+            if (seenTitles.has(titleKey) || seenCores.has(coreKey)) {
+              stats.duplicateCount += 1;
+              poolFilterTotals.duplicateCount += 1;
+              continue;
+            }
+            let bound: any;
+            try {
+              bound = bindPremiseCategory({
+                premiseId: 'P' + (candidatePool.length + 1),
+                workingTitle,
+                storyCore,
+                storyCategoryId,
+                storyCategory,
+              }, discoveryCategories, false);
+            } catch {
+              stats.invalidCategory += 1;
+              poolFilterTotals.invalidCategory += 1;
+              stats.validBeforeDedup -= 1;
+              poolFilterTotals.validBeforeDedup -= 1;
+              continue;
+            }
             seenTitles.add(titleKey);
             seenCores.add(coreKey);
-            if (candidatePool.length >= premisePoolSize) break;
+            if (candidatePool.length >= premisePoolSize) {
+              stats.uniqueBeyondTarget += 1;
+              poolFilterTotals.uniqueBeyondTarget += 1;
+              continue;
+            }
+            candidatePool.push(bound);
+            stats.retained += 1;
+            const categoryKey = storyCategory || String(storyCategoryId || 'unknown');
+            stats.categoryBindingCounts[categoryKey] = (stats.categoryBindingCounts[categoryKey] || 0) + 1;
+            categoryBindingCounts[categoryKey] = (categoryBindingCounts[categoryKey] || 0) + 1;
           }
-          if (candidatePool.length >= premisePoolSize) break;
         }
         const poolGenerationAudit = {
           strategy: 'parallel_pool_batches_then_fixed_pool_selection',
+          startedAt: new Date(poolStartedAt).toISOString(),
+          finishedAt: new Date().toISOString(),
           wallMs: Date.now() - poolStartedAt,
           target: premisePoolSize,
+          rawReturned: poolFilterTotals.rawReturned,
+          validBeforeDedup: poolFilterTotals.validBeforeDedup,
+          invalidCount: poolFilterTotals.invalidShape + poolFilterTotals.invalidFields + poolFilterTotals.invalidCategory,
+          invalid: {
+            shape: poolFilterTotals.invalidShape,
+            requiredFields: poolFilterTotals.invalidFields,
+            categoryBinding: poolFilterTotals.invalidCategory,
+          },
+          duplicateCount: poolFilterTotals.duplicateCount,
+          uniqueBeyondTarget: poolFilterTotals.uniqueBeyondTarget,
           generated: candidatePool.length,
+          actual: candidatePool.length,
           shortfall: Math.max(0, premisePoolSize - candidatePool.length),
-          batchCount: poolBatchCount,
+          targetMet: candidatePool.length >= premisePoolSize,
+          categoryBindingCounts,
+          batchCount: poolBatchResults.length,
           maxConcurrency: poolBatchCount,
+          blockedBatchCount: poolBatchResults.filter(item => item.blocked).length,
+          failedBatchCount: poolBatchResults.filter(item => item.error).length,
           batches: poolBatchResults.map(batch => ({
             batch: batch.batchIndex + 1,
             requested: poolBatchSizes[batch.batchIndex],
             rawReturned: batch.candidates.length,
             durationMs: batch.durationMs,
             error: batch.error || null,
+            blocked: batch.blocked ? {
+              reason: String(batch.blocked.reason ?? batch.blocked.message ?? '').slice(0, 500),
+              missingRequiredDimensions: Array.isArray(batch.blocked.missingRequiredDimensions)
+                ? batch.blocked.missingRequiredDimensions : [],
+            } : null,
+            ...(batchFilterStats.get(batch.batchIndex) ?? {}),
           })),
         };
         this.logger.log('idea-discover: 候选池并发生成 wallMs=' + poolGenerationAudit.wallMs
-          + '，batchDurationsMs=' + JSON.stringify(poolGenerationAudit.batches.map(batch => ({ batch: batch.batch, durationMs: batch.durationMs, rawReturned: batch.rawReturned, error: batch.error }))));
+          + '，原始返回=' + poolFilterTotals.rawReturned
+          + '，去重前有效=' + poolFilterTotals.validBeforeDedup
+          + '，重复=' + poolFilterTotals.duplicateCount
+          + '，无效=' + poolGenerationAudit.invalidCount
+          + '，批次=' + JSON.stringify(poolGenerationAudit.batches.map(batch => ({
+            batch: batch.batch, requested: batch.requested, rawReturned: batch.rawReturned,
+            retained: batch.retained, duplicateCount: batch.duplicateCount, durationMs: batch.durationMs,
+            blocked: Boolean(batch.blocked), error: batch.error,
+          }))));
+        const failWithPoolAudit = (
+          error: unknown,
+          stoppedAt: string,
+          stopReason: string,
+          details: Record<string, any> = {},
+        ) => {
+          const message = error instanceof Error ? error.message : String(error);
+          const priorSelectionAudit = details.selectionAudit && typeof details.selectionAudit === 'object'
+            ? details.selectionAudit : {};
+          const phaseTimings = {
+            ...(priorSelectionAudit.phaseTimings && typeof priorSelectionAudit.phaseTimings === 'object'
+              ? priorSelectionAudit.phaseTimings : {}),
+            poolGenerationWallMs: poolGenerationAudit.wallMs,
+            ...(details.selectionWallMs !== undefined ? { selectionWallMs: details.selectionWallMs } : {}),
+            ...(details.preselectionReviewWallMs !== undefined
+              ? { preselectionReviewWallMs: details.preselectionReviewWallMs } : {}),
+            totalWallMs: Date.now() - poolStartedAt,
+          };
+          const preselectedPremises = Array.isArray(details.preselectedPremises) ? details.preselectedPremises : [];
+          return Object.assign(new Error(message), {
+            appealGate: {
+              schemaVersion: 8,
+              mode: 'parallel_pool_batches_then_fixed_pool_selection',
+              requested: requestedCount,
+              premisePoolTarget: premisePoolSize,
+              premisePoolSize: candidatePool.length,
+              premisePoolTargetMet: candidatePool.length >= premisePoolSize,
+              premiseSelected: Number(details.premiseSelected ?? preselectedPremises.length) || 0,
+              generated: 0,
+              qualified: 0,
+              returned: 0,
+              shortfall: requestedCount,
+              minimumDeliverableCount: minimumPremiseSelectionCount,
+              stoppedAt,
+              stopReason,
+              reasons: [message],
+              candidatePool,
+              preselectedPremises,
+              candidateAssessments: [],
+              structuringErrors: [],
+              fulfillment: { stopReason, minimumDeliverableCount: minimumPremiseSelectionCount },
+              selectionAudit: {
+                ...priorSelectionAudit,
+                poolGeneration: poolGenerationAudit,
+                phaseTimings,
+              },
+            },
+          });
+        };
+        const blockedBatchCount = poolGenerationAudit.blockedBatchCount;
+        if (blockedBatchCount > 0) {
+          this.logger.warn('灵感候选池有 ' + blockedBatchCount + ' 个批次被前置条件阻断；其余批次提供 '
+            + candidatePool.length + ' 个可用候选，继续按固定池选优');
+        }
         if (candidatePool.length < minimumPremiseSelectionCount) {
-          const batchErrors = poolBatchResults.filter(item => item.error).map(item => '第' + (item.batchIndex + 1) + '批：' + item.error).join('；');
-          throw new Error('并发候选池只形成' + candidatePool.length + '/' + premisePoolSize + '个有效且去重后的轻量题材，低于最低可交付数量' + minimumPremiseSelectionCount + '个；' + (batchErrors || '候选不足，未进入选优和完整卡生成。'));
+          const blockedDetails = poolBatchResults.filter(item => item.blocked).map(item =>
+            '第' + (item.batchIndex + 1) + '批前置条件阻断：' + String(item.blocked.reason ?? item.blocked.message ?? '未提供原因'),
+          );
+          const batchErrors = poolBatchResults.filter(item => item.error).map(item =>
+            '第' + (item.batchIndex + 1) + '批失败：' + item.error,
+          );
+          const details = [...blockedDetails, ...batchErrors].join('；');
+          const message = '并发候选池可用题材不足：' + candidatePool.length + '/' + minimumPremiseSelectionCount
+            + '；目标' + premisePoolSize + '，原始返回' + poolFilterTotals.rawReturned
+            + '，去重后可用' + candidatePool.length + (details ? '；' + details : '');
+          throw failWithPoolAudit(new Error(message), 'candidate_pool_generation', 'candidate_pool_below_minimum');
         }
         if (candidatePool.length < premisePoolSize) {
-          this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
+          this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize
+            + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
         }
         const selectionStartedAt = Date.now();
-        const selectionResponse = await this.realLLM.generate({
-          prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool }),
-          scenario: 'idea_generate',
-          timeout: discoveryBudget.complexTimeoutMs,
-          maxEmptyRetries: 1,
-          responseFormat: 'json_object',
-          metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
-        });
-        const selectionWallMs = Date.now() - selectionStartedAt;
-        const parsedSelection = parseResponse(selectionResponse.content, '固定候选池选优');
-        if (parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')) throw prerequisiteError(parsedSelection);
-        const initialSelection = normalizePremiseSelectionPayload({
-          pool: candidatePool,
-          selectedPremises: parsedSelection && parsedSelection.selectedPremises,
-        }, requestedCount, premisePoolSize, discoveryCategories, minimumPremiseSelectionCount);
-        assertPremiseCausalPlans(initialSelection);
-        if (!variedCategories) for (const premise of initialSelection.selected) {
-          if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) throw new Error('已选题材未继承本次固定分类');
-          premise.storyCategory = dto.storyCategory;
-        }
+        let selectionWallMs = 0;
+        let parsedSelection: any = null;
+        const initialSelection = await (async () => {
+          try {
+            const selectionResponse = await this.realLLM.generate({
+              prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool }),
+              scenario: 'idea_generate',
+              timeout: discoveryBudget.complexTimeoutMs,
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
+            });
+            selectionWallMs = Date.now() - selectionStartedAt;
+            parsedSelection = parseResponse(selectionResponse.content, '固定候选池选优');
+            if (parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')) {
+              throw prerequisiteError(parsedSelection);
+            }
+            const selected = normalizePremiseSelectionPayload({
+              pool: candidatePool,
+              selectedPremises: parsedSelection && parsedSelection.selectedPremises,
+            }, requestedCount, premisePoolSize, discoveryCategories, minimumPremiseSelectionCount);
+            assertPremiseCausalPlans(selected);
+            if (!variedCategories) for (const premise of selected.selected) {
+              if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
+                throw new Error('已选题材未继承本次固定分类');
+              }
+              premise.storyCategory = dto.storyCategory;
+            }
+            return selected;
+          } catch (error) {
+            selectionWallMs = selectionWallMs || (Date.now() - selectionStartedAt);
+            const selectedRows = Array.isArray(parsedSelection?.selectedPremises) ? parsedSelection.selectedPremises : [];
+            throw failWithPoolAudit(
+              error,
+              'fixed_pool_selection',
+              parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')
+                ? 'selection_prerequisite_blocked' : 'fixed_pool_selection_failed',
+              { selectionWallMs, preselectedPremises: selectedRows, premiseSelected: selectedRows.length },
+            );
+          }
+        })();
         const categoryStandards = discoveryCategories.map(category => {
           const placement = resolveSubmissionCategory(dto.platform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
           return { category, standard: placement.status === 'resolved'
             ? platformCategoryWritingBrief(dto.platform, placement.value, dto.storyType) : '' };
         });
         const preselectionReviewStartedAt = Date.now();
-        const normalizedSelection = await this.reconcilePremiseSelection(initialSelection, requestedCount, premisePoolSize,
-          variedCategories ? discoveryCategories : [dto.storyCategory], buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
-            + ideaDiscoveryAuthorContext(dto)
-            + '\n【本次选择约束】' + autoSelectionRules + '；' + submissionRule
-            + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
-            + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre), dto.webNovelGenre, {reviews:sourceCompletionBudget,reselection:reselectionCompletionBudget});
+        let normalizedSelection: any;
+        try {
+          normalizedSelection = await this.reconcilePremiseSelection(
+            initialSelection, requestedCount, premisePoolSize,
+            variedCategories ? discoveryCategories : [dto.storyCategory],
+            buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
+              + ideaDiscoveryAuthorContext(dto)
+              + '\n【本次选择约束】' + autoSelectionRules + '；' + submissionRule
+              + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
+              + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre),
+            dto.webNovelGenre,
+            { reviews: sourceCompletionBudget, reselection: reselectionCompletionBudget },
+          );
+        } catch (error) {
+          const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
+          throw failWithPoolAudit(
+            error,
+            'preselection_review',
+            'preselection_review_failed',
+            {
+              selectionWallMs,
+              preselectionReviewWallMs,
+              preselectedPremises: initialSelection.selected,
+              premiseSelected: initialSelection.selected.length,
+              selectionAudit: initialSelection.selectionAudit,
+            },
+          );
+        }
+        const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
         const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
         this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
@@ -5637,9 +5831,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         presentationPhysicalCallsUsed: presentationCallLimit - presentationBudget.remaining,
         presentationPhysicalCallLimit: presentationCallLimit,
         reasons: [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 8),
+        candidatePool: premiseDiscovery.pool.map((premise: any) => ({
+          premiseId: premise.premiseId ?? null,
+          workingTitle: premise.workingTitle ?? null,
+          storyCategoryId: premise.storyCategoryId ?? null,
+          storyCategory: premise.storyCategory ?? null,
+          storyCore: premise.storyCore ?? null,
+        })),
         preselectedPremises: selectedPremises,
         candidateAssessments,
         acceptedEvidence: selectedAccepted.map(idea => ({
+          sourcePremiseId: String(idea?.sourcePremiseId || ''),
           title: String(idea?.title || ''),
           densityMode: idea?.readerExperienceProfile?.densityMode,
           pace: idea?.readerExperienceProfile?.pace,
@@ -5695,7 +5897,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : '题材发现失败';
       this.logger.error(`idea-discover 失败: ${message}`);
-      return { success: false, ideas: [], error: message };
+      return { success: false, ideas: [], totalIdeas: 0, error: message, ...((err as any)?.appealGate ? { appealGate: (err as any).appealGate } : {}) };
     }
   }
 
@@ -5767,6 +5969,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const sourceReceipts:PremiseSourceReceipts=new Map();
     const sourceScope=JSON.stringify({standard,requiredGenres});
     const reviewBoth = async (selection: ReturnType<typeof normalizePremiseSelectionPayload>): Promise<PremiseSelectionReview> => {
+      let sourceReviewReuse = { reused: 0, reviewed: 0 };
       const limiter=createReviewLimiter(IDEA_CARD_GENERATION_CONCURRENCY);
       const modes=['source_drift','overlap'] as const;
       const reviewBudget=shared?.reviews||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
@@ -5775,7 +5978,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         (mode,_index,budget)=>mode==='source_drift'
           ? reviewChangedPremiseSources(selection,sourceScope,sourceReceipts,
               pending=>this.reviewPremiseSelection(pending,standard,mode,budget,false,requiredGenres,limiter),
-              counts=>this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核仍覆盖当前选择`))
+              counts=>{
+                sourceReviewReuse={reused:Number(counts.reused)||0,reviewed:Number(counts.reviewed)||0};
+                this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核仍覆盖当前选择`);
+              })
           : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter));}
       catch(error){throw new Error('锁定前独立审查未完成，未生成完整卡：'+String(error));}
       const sourceChecks = reviews.flatMap(review => review.sourceChecks || []);
@@ -5783,7 +5989,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         ...(sourceChecks.length ? { sourceChecks } : {}),
         genreChecks: reviews.flatMap(review=>review.genreChecks||[]),
         payoffChecks: reviews.flatMap(review=>review.payoffChecks||[]),
-        categoryChecks: reviews.flatMap(review=>review.categoryChecks||[]) };
+        categoryChecks: reviews.flatMap(review=>review.categoryChecks||[]),
+        sourceReviewReuse };
     };
     const initialReview = await reviewBoth(initial);
     const minimumSelectableCount = minimumAcceptableIdeaCount(requestedCount);

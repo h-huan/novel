@@ -797,9 +797,9 @@ describe('RealLLMService structured output guard', () => {
   expect(() => parseScoreReviewJson(JSON.stringify({dimensions:{...dimensions,repairs},repairs:[]}))).toThrow();
  });
 
-it('applies saved-generation output sizing at the actual model-call boundary',async()=>{
+it('honors the explicit saved-generation output budget at the actual model-call boundary',async()=>{
  const service=createService(),callModel=vi.fn().mockResolvedValue({content:'{"ok":true}',finishReason:'stop',usage:{promptTokens:5,completionTokens:5,totalTokens:10}});
  (service as any).callModel=callModel;
  await service.generate({prompt:'本地协议检查',scenario:'idea_generate',responseFormat:'json_object',maxTokens:32768,deferQualityGate:true});
- expect(callModel).toHaveBeenCalledOnce();expect(callModel.mock.calls[0][4]).toBe(131072);
+ expect(callModel).toHaveBeenCalledOnce();expect(callModel.mock.calls[0][4]).toBe(32768);
 });

@@ -10,6 +10,7 @@ export interface PremiseSourceCheck {
 
 export interface PremiseSelectionReview {
   passed: boolean;
+  sourceReviewReuse?: { reused: number; reviewed: number };
   issues: Array<{ kind: 'overlap' | 'source_drift' | 'selection_fit'; premiseId: string; referencePremiseId: string;
     quote: string; referenceQuote: string; reason: string; field?: string }>;
   sourceChecks?: PremiseSourceCheck[];
