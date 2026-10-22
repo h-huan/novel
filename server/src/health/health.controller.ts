@@ -35,8 +35,29 @@ export class HealthController {
   }
 
   @Get()
-  check(): { status: string; timestamp: string; instanceId: string | null } {
-    return { status: "ok", timestamp: new Date().toISOString(), instanceId: process.env.NOVEL_INSTANCE_ID || null };
+  check(): {
+    status: string;
+    timestamp: string;
+    instanceId: string | null;
+    build: {
+      commit: string | null;
+      version: string | null;
+      processStartedAt: string;
+      diagnosticsMarker: string;
+    };
+  } {
+    return {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      instanceId: process.env.NOVEL_INSTANCE_ID || null,
+      build: {
+        // Exact revision is reported only when the launcher/deployment supplies it.
+        commit: process.env.NOVEL_BUILD_COMMIT || process.env.GIT_COMMIT_SHA || process.env.GITHUB_SHA || null,
+        version: process.env.npm_package_version || null,
+        processStartedAt: new Date(this.startTime).toISOString(),
+        diagnosticsMarker: "verify-local-build-identity-v1",
+      },
+    };
   }
 
   @Get("full")
