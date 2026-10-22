@@ -254,7 +254,7 @@ export class GenerationMetricsController {
       pendingPersistenceMismatch,
       persistenceUnknown,
       persistenceQueryErrors,
-      persistenceStatus: persistenceQueryErrors.length ? 'unknown' : persistenceMismatch.length ? 'mismatch' : 'consistent',
+      persistenceStatus: persistenceQueryErrors.length ? 'unknown' : persistenceMismatch.length ? 'mismatch' : pendingPersistenceMismatch.length ? 'pending' : 'consistent',
       activeGenerationRuns,
       lastActivityAt: lastActivityMs === null ? null : new Date(lastActivityMs).toISOString(),
       idleMs,

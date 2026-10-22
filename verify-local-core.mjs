@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticText, redactDiagnosticValue } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -23,6 +25,8 @@ const outDir = path.join(root, 'verification');
 fs.mkdirSync(outDir, { recursive: true });
 
 const now = new Date().toISOString();
+const startedAt = now;
+const verificationRunId = randomUUID();
 const singleMode = Boolean(legacyProjectId) && !requestedShortProjectId && !requestedLongProjectId;
 let shortProjectId = requestedShortProjectId;
 let longProjectId = requestedLongProjectId;
@@ -45,8 +49,8 @@ function runProcess(label, cwd, command, commandArgs) {
     durationMs: Date.now() - started,
     startedAt: new Date(started).toISOString(),
     finishedAt: new Date().toISOString(),
-    stdoutTail: tail(stdout),
-    stderrTail: tail(stderr),
+    stdoutTail: redactDiagnosticText(tail(stdout)),
+    stderrTail: redactDiagnosticText(tail(stderr)),
   };
 }
 
@@ -351,20 +355,31 @@ const standardsResponse = health.ok
   ? await request('/module-standards')
   : skippedRuntimeRequest('module-standards');
 const standards = asArray(standardsResponse.data);
-const globalRunsResponse = health.ok
-  ? await request('/generation-metrics/runs?limit=200')
-  : skippedRuntimeRequest('global-generation-runs');
-const recentGlobalRuns = asArray(globalRunsResponse.data);
-const discoveryRunRows = recentGlobalRuns.filter(run =>
-  String(run.stage ?? '').toLowerCase() === 'idea_generate'
-  || String(run.scenario ?? '').toLowerCase() === 'idea_generate'
-  || String(run.step_key ?? run.stepKey ?? '').startsWith('idea_'));
+const rawIdeaDiscovery = ideaDiscoveryResponse.ok
+  ? unwrap(ideaDiscoveryResponse.data)
+  : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` };
+const savedDiscoveryAudit = normalizeIdeaDiscoveryAudit(rawIdeaDiscovery);
+const stepMetricsQuery = new URLSearchParams({ scenario: 'idea_generate', limit: '500' });
+if (savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt) {
+  stepMetricsQuery.set('startAt', savedDiscoveryAudit.startedAt);
+  stepMetricsQuery.set('endAt', savedDiscoveryAudit.finishedAt);
+}
+const stepMetricsResponse = health.ok
+  ? await request('/generation-metrics/steps?' + stepMetricsQuery.toString())
+  : skippedRuntimeRequest('discovery-step-metrics');
+const stepMetricRows = stepMetricsResponse.ok ? asArray(stepMetricsResponse.data) : [];
 const discoveryCallTrace = {
-  source: { ok: globalRunsResponse.ok, status: globalRunsResponse.status,
-    error: globalRunsResponse.error ?? null, totalGlobalRows: recentGlobalRuns.length, limit: 200 },
-  runs: discoveryRunRows.map(runDetail),
-  stepBreakdown: stepBreakdown(discoveryRunRows.map(runDetail)),
+  source: {
+    ok: stepMetricsResponse.ok, status: stepMetricsResponse.status, error: stepMetricsResponse.error ?? null,
+    endpoint: '/generation-metrics/steps', totalRows: stepMetricRows.length, limit: 500,
+    correlationMode: savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt ? 'audit_time_window' : 'latest_unbound',
+    requestCorrelation: 'time_window_only', discoveryRequestId: savedDiscoveryAudit.discoveryRequestId,
+    auditStartedAt: savedDiscoveryAudit.startedAt, auditFinishedAt: savedDiscoveryAudit.finishedAt,
+    concurrentOverlapPossible: Boolean(savedDiscoveryAudit.startedAt && savedDiscoveryAudit.finishedAt),
+  },
+  ...summarizeDiscoveryStepMetrics(stepMetricRows),
 };
+const codeSeedVersion = seedVersion();
 const codeSeedVersion = seedVersion();
 const standardMismatch = standards.filter((s) => {
   const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
@@ -383,7 +398,7 @@ if (health.ok) {
   for (const target of projectTargets) inspectedProjects[target.key] = await inspectProject(target);
 }
 
-const runtime = {
+const runtime = redactDiagnosticValue({
   health,
   preflight: health.ok
     ? { ok: true, rootCause: null, downstreamSkipped: [] }
@@ -393,9 +408,7 @@ const runtime = {
         downstreamSkipped: ['ideaDiscovery', 'standards', 'projectDiscovery', 'projects'],
         detail: health.error ?? `HTTP ${health.status}`,
       },
-  ideaDiscovery: ideaDiscoveryResponse.ok
-    ? unwrap(ideaDiscoveryResponse.data)
-    : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` },
+  ideaDiscovery: rawIdeaDiscovery,
   discoveryCallTrace,
   standards: {
     codeSeedVersion,
@@ -405,7 +418,7 @@ const runtime = {
   },
   projectDiscovery,
   projects: inspectedProjects,
-};
+});
 
 if (!dualMode && inspectedProjects.project) {
   Object.assign(runtime, {
@@ -435,9 +448,8 @@ if (!health.ok) {
   if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
   if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
-  if (!runFull && runtime.ideaDiscovery?.available === true && runtime.ideaDiscovery?.audit?.success === false) {
-    runtimeProblems.push('latest_idea_discovery_failed');
-  }
+  const latestAuditSummary = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery);
+  if (!runFull && latestAuditSummary.available && latestAuditSummary.success === false) runtimeProblems.push('latest_idea_discovery_failed');
 }
 
 if (health.ok) for (const target of projectTargets) {
@@ -491,6 +503,19 @@ if (health.ok) for (const target of projectTargets) {
   }
 }
 
+const diagnosticWarnings = [];
+const finalDiscoveryAudit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery);
+if (!runtime.discoveryCallTrace?.source?.ok) {
+  diagnosticWarnings.push('灵感发现逐步指标查询失败：' + String(runtime.discoveryCallTrace?.source?.error ?? '原因未知'));
+}
+if (runtime.discoveryCallTrace?.source?.correlationMode === 'latest_unbound') {
+  diagnosticWarnings.push('最新灵感审计缺少开始/结束时间，调用记录只能按最近记录查询，无法严格关联。');
+}
+if (runtime.discoveryCallTrace?.source?.ok && finalDiscoveryAudit.startedAt && finalDiscoveryAudit.finishedAt && runtime.discoveryCallTrace.runs.length === 0) {
+  diagnosticWarnings.push('最新灵感审计时间窗内没有模型调用指标；不能据此宣称耗时或调用次数为零。');
+}
+runtime.diagnosticWarnings = diagnosticWarnings;
+
 const selectionMode = singleMode
   ? 'single_project'
   : requestedShortProjectId && requestedLongProjectId
@@ -501,9 +526,13 @@ const selectionMode = singleMode
         ? 'auto_latest_active_short_and_long'
         : 'diagnostic_latest_short_and_long';
 
-const report = {
-  generatedAt: now,
-  command: process.argv.join(' '),
+const finishedAt = new Date().toISOString();
+const report = redactDiagnosticValue({
+  generatedAt: finishedAt,
+  verificationRunId,
+  startedAt,
+  finishedAt,
+  command: redactDiagnosticText(process.argv.join(' ')),
   git: gitInfo,
   options: {
     projectId: legacyProjectId,
@@ -524,7 +553,7 @@ const report = {
     failedTests: failedTests.map((x) => x.label),
     runtimeProblems,
   },
-};
+});
 
 const jsonPath = path.join(outDir, 'latest.json');
 fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
@@ -589,52 +618,82 @@ function projectMarkdown(target) {
 
 
 function detailedIdeaMarkdown() {
-  const data = runtime.ideaDiscovery || {};
-  const audit = data.audit || data.appealGate || data;
-  const evidence = {
-    available: data.available ?? null, success: data.success ?? audit.success ?? null,
-    requested: audit.requested ?? null, preselectionShortfall: audit.preselectionShortfall ?? null,
-    premiseSelected: audit.premiseSelected ?? null, generated: audit.generated ?? null,
-    qualified: audit.qualified ?? null, returned: audit.returned ?? null, shortfall: audit.shortfall ?? null,
-    stopReason: audit.stopReason ?? audit.fulfillment?.stopReason ?? null,
-    physicalCalls: {
-      presentationUsed: audit.presentationPhysicalCallsUsed ?? null,
-      presentationLimit: audit.presentationPhysicalCallLimit ?? null,
-      sourceRemaining: audit.fulfillment?.sourceCallsRemaining ?? null,
-      reselectionRemaining: audit.fulfillment?.reselectionCallsRemaining ?? null,
-    },
-    selectionAudit: audit.selectionAudit ?? null,
-    structuringErrors: audit.structuringErrors ?? null,
-    candidateAssessments: audit.candidateAssessments ?? null,
-    reasons: audit.reasons ?? null,
-  };
-  const detail = JSON.stringify(evidence, null, 2);
+  const audit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery || {});
   const trace = runtime.discoveryCallTrace || {};
-  const calls = trace.runs || [];
-  const callLines = [
-    '### 灵感发现的实际调用时间线', '',
-    '- 样本：' + calls.length + ' 条。全局接口最近 200 条中按 idea_generate 筛选，不代表全部历史。',
-    '- 接口：' + (trace.source?.ok ? 'PASS' : 'UNAVAILABLE') + ' · ' + (trace.source?.error ?? ''),
-    '', '| Run ID | 步骤 | 状态 | 耗时 ms | Gate | 时间 | 错误 |',
-    '|---|---|---|---:|---|---|---|',
-    ...calls.map(run => '| ' + markdownCell(run.id, 48)
-      + ' | ' + markdownCell(run.step_key ?? run.stepKey ?? run.stage ?? run.scenario)
-      + ' | ' + markdownCell(run.status)
-      + ' | ' + (run.durationMs ?? 0)
-      + ' | ' + markdownCell(run.gateStatus)
-      + ' | ' + markdownCell(run.startedAt)
-      + ' | ' + markdownCell(run.error, 550) + ' |'),
-    '', '### 灵感发现耗时分组', '',
-    '| 步骤 | 调用数 | 非成功数 | 耗时 ms |',
-    '|---|---:|---:|---:|',
-    ...(trace.stepBreakdown || []).map(row => '| ' + markdownCell(row.step)
-      + ' | ' + row.calls + ' | ' + row.failures + ' | ' + row.durationMs + ' |'),
-  ];
-  return '## 题材发现：数量、审核、调用预算与失败证据\n\n'
-    + '未提供的证据保留为 null，不推断通过。内容过长时 Markdown 仅显示前 30000 字，完整数据保留在 JSON。\n\n'
-    + '~~~json\n' + detail.slice(0, 30000) + '\n~~~\n\n'
-    + callLines.join('\n') + '\n';
+  const source = trace.source || {};
+  const cell = value => String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  const runs = Array.isArray(trace.runs) ? trace.runs : [];
+  const stepLines = (trace.stepBreakdown || []).map(row =>
+    '| ' + cell(row.stepKey) + ' | ' + row.calls + ' | ' + row.failedCalls + ' | ' + row.sumDurationMs
+      + ' | ' + (row.wallMs ?? '未知') + ' | ' + row.internalRetries + ' | ' + row.physicalAttempts + ' | ' + (row.totalTokens ?? '未知') + ' |'
+  ).join('\n');
+  const phaseLines = (trace.phaseBreakdown || []).map(row =>
+    '| ' + cell(row.phase) + ' | ' + row.calls + ' | ' + row.failedCalls + ' | ' + row.sumDurationMs
+      + ' | ' + (row.wallMs ?? '未知') + ' | ' + row.internalRetries + ' | ' + row.physicalAttempts + ' | ' + (row.totalTokens ?? '未知') + ' |'
+  ).join('\n');
+  const duplicateLines = (trace.duplicateInputGroups || []).map(group =>
+    '| ' + cell(group.stepKey) + ' | ' + group.count + ' | ' + cell(group.promptVersion) + ' | '
+      + cell(group.contextVersion) + ' | ' + cell(group.constitutionRevision) + ' | ' + cell((group.runIds || []).join(', ')) + ' |'
+  ).join('\n');
+  const callLines = runs.map(row =>
+    '| ' + cell(row.runId) + ' | ' + cell(row.stepKey) + ' | ' + cell(row.attempt) + ' | '
+      + row.internalRetries + ' | ' + row.physicalAttempts + ' | ' + cell(row.status) + ' | '
+      + (row.durationMs ?? '未知') + ' | ' + (row.totalTokens ?? '未知') + ' | ' + cell(row.gateStatus) + ' | '
+      + cell(row.startedAt) + ' | ' + cell(row.finishedAt) + ' | ' + cell(row.error) + ' |'
+  ).join('\n');
+  const evidence = {
+    available: audit.available, updatedAt: audit.updatedAt, discoveryRequestId: audit.discoveryRequestId,
+    startedAt: audit.startedAt, finishedAt: audit.finishedAt, request: audit.request, success: audit.success,
+    totalIdeas: audit.totalIdeas, requested: audit.requested, premisePoolTarget: audit.premisePoolTarget,
+    premisePoolSize: audit.premisePoolSize, premiseSelected: audit.premiseSelected, generated: audit.generated,
+    qualified: audit.qualified, returned: audit.returned, shortfall: audit.shortfall,
+    minimumDeliverableCount: audit.minimumDeliverableCount, stopReason: audit.stopReason, error: audit.error,
+    qualityWarning: audit.qualityWarning, poolGeneration: audit.poolGeneration, phaseTimings: audit.phaseTimings,
+    candidatePool: audit.candidatePool, preselectedPremises: audit.preselectedPremises,
+    candidateAssessments: audit.candidateAssessments, selectionAudit: audit.selectionAudit, acceptedIdeas: audit.acceptedIdeas,
+  };
+  return [
+    '## 灵感发现审计',
+    '- 本地验证运行 ID：' + verificationRunId,
+    '- 灵感请求 ID：' + (audit.discoveryRequestId ?? '未知'),
+    '- 审计状态：' + (audit.available ? '已读取' : '不可用') + '；成功：' + (audit.success ?? '未知') + '；更新时间：' + (audit.updatedAt ?? '未知'),
+    '- 请求窗口：' + (audit.startedAt ?? '未知') + ' — ' + (audit.finishedAt ?? '未知'),
+    '- 请求/候选池/选中/完整卡生成/合格/返回：' + (audit.requested ?? '未知') + ' / '
+      + (audit.premisePoolSize ?? '未知') + '（目标 ' + (audit.premisePoolTarget ?? '未知') + '） / '
+      + (audit.premiseSelected ?? '未知') + ' / ' + (audit.generated ?? '未知') + ' / '
+      + (audit.qualified ?? '未知') + ' / ' + (audit.returned ?? '未知') + '；缺额：' + (audit.shortfall ?? '未知'),
+    '- 停止原因：' + (audit.stopReason ?? '无明确记录') + '；错误：' + (audit.error ?? '无') + '；质量警告：' + (audit.qualityWarning ?? '无'),
+    '- 调用跟踪：' + (source.ok ? '已查询' : '查询失败') + '；关联方式：' + (source.correlationMode ?? '未知')
+      + '；记录数：' + (source.totalRows ?? runs.length) + '；并发重叠可能：' + (source.concurrentOverlapPossible ?? '未知')
+      + '；模型指标不含 discoveryRequestId，时间窗关联不能排除并发请求重叠。',
+    '',
+    '### 阶段耗时与调用次数',
+    '| 阶段 | 逻辑调用 | 失败 | 累计耗时 ms | 阶段墙钟 ms | 内部重试 | 估算物理尝试 | Token |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|',
+    phaseLines || '| 无可用记录 | — | — | — | — | — | — | — |',
+    '',
+    '### 按 stepKey 汇总',
+    '| stepKey | 逻辑调用 | 失败 | 累计耗时 ms | 墙钟 ms | 内部重试 | 估算物理尝试 | Token |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|',
+    stepLines || '| 无可用记录 | — | — | — | — | — | — | — |',
+    '',
+    '### 相同输入指纹重复调用',
+    '| stepKey | 次数 | Prompt 版本 | Context 版本 | Constitution 版本 | Run IDs |',
+    '|---|---:|---|---|---|---|',
+    duplicateLines || '| 未发现可确认的完全相同输入指纹重复调用 | — | — | — | — | — |',
+    '',
+    '### 完整模型调用时间线',
+    '| Run ID | Step | 尝试 | 内部重试 | 估算物理尝试 | 状态 | 耗时 ms | Token | Gate | 开始 | 结束 | 错误 |',
+    '|---|---|---:|---:|---:|---|---:|---:|---|---|---|---|',
+    callLines || '| 无可用记录；不能据此推断没有发生模型调用 | — | — | — | — | — | — | — | — | — | — |',
+    '',
+    '### 审计原始证据',
+    '~~~json',
+    JSON.stringify(evidence, null, 2),
+    '~~~',
+  ].join('\n');
 }
+
 function detailedProjectMarkdown(target) {
   const item = inspectedProjects[target.key];
   if (!item) return '';
@@ -656,7 +715,10 @@ function detailedProjectMarkdown(target) {
     '- 已持久化对象：' + JSON.stringify(stats.persisted ?? {}),
     '- 创建停滞：' + (stats.creationStalled ?? 'unknown')
       + '；空闲毫秒：' + (stats.idleMs ?? 'unknown')
-      + '；持久化不一致：' + JSON.stringify(stats.persistenceMismatch ?? []),
+      + '；持久化不一致：' + JSON.stringify(stats.persistenceMismatch ?? [])
+      + '；核验状态：' + (stats.persistenceStatus ?? '未知')
+      + '；无法核实项：' + JSON.stringify(stats.persistenceUnknown ?? [])
+      + '；查询错误：' + JSON.stringify(stats.persistenceQueryErrors ?? []),
     '- 完整性冲突：' + issues.length, '',
     ...issues.slice(0, 35).map(issue =>
       '- 冲突：' + markdownCell(typeof issue === 'string' ? issue : JSON.stringify(issue), 1400)),
