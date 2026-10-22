@@ -11,6 +11,16 @@ const mode = String(report?.options?.mode || '');
 const fullTests = report?.options?.fullTests === true;
 const problems = new Set(Array.isArray(report?.verdict?.runtimeProblems) ? report.verdict.runtimeProblems : []);
 const terminalPersistenceMismatches = [];
+const backendIdentity = report?.runtime?.backendIdentity;
+
+if (!backendIdentity || typeof backendIdentity !== 'object') {
+  if (fullTests) problems.add('backend_identity_unavailable');
+} else {
+  if (backendIdentity.loadedLocalRevision === 'mismatch') problems.add('backend_loaded_revision_mismatch');
+  else if (fullTests && backendIdentity.loadedLocalRevision !== 'match') problems.add('backend_loaded_revision_unknown');
+  if (backendIdentity.diagnosticsMarkerStatus === 'different') problems.add('backend_diagnostics_marker_mismatch');
+  else if (fullTests && backendIdentity.diagnosticsMarkerStatus !== 'present') problems.add('backend_diagnostics_marker_unknown');
+}
 
 if (fullTests && mode !== 'single_project') {
   if (!report?.options?.shortProjectId) problems.add('short_project_missing');

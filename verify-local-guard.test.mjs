@@ -27,6 +27,8 @@ function run(report) {
   return { result, next, nextMarkdown };
 }
 
+const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus: 'present' };
+
 // Quick diagnostics must allow one project and preserve the documented behavior.
 {
   const { result, next, nextMarkdown } = run({
@@ -45,7 +47,10 @@ function run(report) {
 {
   const { result, next, nextMarkdown } = run({
     options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: null },
-    runtime: { projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } } } },
+    runtime: {
+      backendIdentity: verifiedIdentity,
+      projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } } },
+    },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
   });
   assert.equal(result.status, 1);
@@ -59,7 +64,10 @@ function run(report) {
 {
   const { result, next, nextMarkdown } = run({
     options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: 'long-1' },
-    runtime: { projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } }, long: { project: { status: 'active' }, cockpit: { diagnostics: {} } } } },
+    runtime: {
+      backendIdentity: verifiedIdentity,
+      projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } }, long: { project: { status: 'active' }, cockpit: { diagnostics: {} } } },
+    },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
   });
   assert.equal(result.status, 0);
@@ -73,6 +81,7 @@ function run(report) {
   const { result, next, nextMarkdown } = run({
     options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: 'long-1' },
     runtime: {
+      backendIdentity: verifiedIdentity,
       projects: {
         short: {
           project: { status: 'generation_failed' },
@@ -105,6 +114,38 @@ function run(report) {
   assert.equal(next.verdict.status, 'failed');
   assert.ok(next.verdict.runtimeProblems.includes('project_persistence_mismatch_outline_success_without_chapter_outline'));
   assert.match(nextMarkdown, /创建\/持久化诊断：FAIL · mismatch=outline_success_without_chapter_outline/u);
+}
+
+// A stale backend cannot pass even a quick diagnosis.
+{
+  const { result, next } = run({
+    options: { mode: 'single_project', fullTests: false, projectId: 'project-1' },
+    runtime: {
+      backendIdentity: { loadedLocalRevision: 'mismatch', diagnosticsMarkerStatus: 'different' },
+      project: { id: 'project-1', status: 'active' },
+      cockpit: { diagnostics: {} },
+    },
+    verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
+  });
+  assert.equal(result.status, 1);
+  assert.ok(next.verdict.runtimeProblems.includes('backend_loaded_revision_mismatch'));
+  assert.ok(next.verdict.runtimeProblems.includes('backend_diagnostics_marker_mismatch'));
+}
+
+// A full acceptance with unknown build identity must not claim the current code was tested.
+{
+  const { result, next } = run({
+    options: { mode: 'single_project', fullTests: true, projectId: 'project-1' },
+    runtime: {
+      backendIdentity: { loadedLocalRevision: 'unknown', diagnosticsMarkerStatus: 'unknown' },
+      project: { id: 'project-1', status: 'active' },
+      cockpit: { diagnostics: {} },
+    },
+    verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
+  });
+  assert.equal(result.status, 1);
+  assert.ok(next.verdict.runtimeProblems.includes('backend_loaded_revision_unknown'));
+  assert.ok(next.verdict.runtimeProblems.includes('backend_diagnostics_marker_unknown'));
 }
 
 console.log('verify-local-guard tests passed');
