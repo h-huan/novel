@@ -6651,7 +6651,37 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
   /** 后台执行灵感发现创建项目的全部步骤 */
   private executeCreateProjectSteps(projectId: string, dto: { title: string; storyType: string; targetWords: number; selectedIdea: any; settings?: Record<string, unknown> }) {
-    return generationTasks.run('creation', projectId, '', () => this.executeCreateProjectStepsActive(projectId, dto));
+    return generationTasks.run('creation', projectId, '', () => this.executeCreateProjectStepsActive(projectId, dto))
+      .catch((error: unknown) => {
+        // The active pipeline has its own failure handler after initialization. This boundary
+        // catches only errors thrown before that handler starts (e.g. invalid persisted Canon).
+        // A duplicate-task conflict is not a failed creation and must not poison the active run.
+        if (error instanceof ConflictException) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        let transitioned = false;
+        let statusPersistenceError: string | undefined;
+        try {
+          const result = this.db.getDb().prepare(
+            "UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ? AND status = 'creating'",
+          ).run(new Date().toISOString(), projectId) as { changes?: number };
+          transitioned = Number(result?.changes ?? 0) > 0;
+        } catch (persistError) {
+          statusPersistenceError = persistError instanceof Error ? persistError.message : String(persistError);
+          this.logger.error(`create-project-async 前置失败状态写入失败 project=${projectId}: ${statusPersistenceError}`);
+        }
+        // If another path already moved the project out of "creating", its own status is
+        // authoritative. Do not overwrite or duplicate its terminal event.
+        if (!transitioned && !statusPersistenceError) return;
+        this.logger.error(`create-project-async 初始化/前置失败 project=${projectId}: ${message}`);
+        try {
+          this.emitProjectProgress(projectId, {
+            type: 'error', success: false, projectId, step: 'preflight', message,
+            ...(statusPersistenceError ? { statusPersistenceError } : {}),
+          });
+        } catch (emitError) {
+          this.logger.error(`create-project-async 前置错误事件推送失败 project=${projectId}: ${emitError instanceof Error ? emitError.message : String(emitError)}`);
+        }
+      });
   }
 
   private async executeCreateProjectStepsActive(
@@ -6673,38 +6703,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // 这里复用生成入口那唯一一份 assertExecutionStandardsComplete（六维 / 分类归位 / 分类体量
     // 三道判据同一份 standing、同一句文案），把它提到生成流程第 0 步：不通过就不开工。
     // 不降级：不填默认值、不用平台推荐替代、不降低任何判据的 severity。
-    let constitution: ReturnType<typeof readConstitution>;
-    try {
-      this.assertExecutionStandardsComplete(projectId);
-      constitution = readConstitution(db.prepare(
-        'SELECT type,target_words,target_platform,writing_style,settings FROM projects WHERE id=?',
-      ).get(projectId) as Record<string, unknown>);
+    this.assertExecutionStandardsComplete(projectId);
+    const constitution = readConstitution(db.prepare(
+      'SELECT type,target_words,target_platform,writing_style,settings FROM projects WHERE id=?',
+    ).get(projectId) as Record<string, unknown>);
 
-      // Both initial creation and recovery use the persisted authority, never the UI payload
-      // or its batch audit (which includes other selected/rejected story candidates).
-      if (!constitution.confirmedStory || Object.keys(constitution.confirmedStory).length === 0) {
-        throw new Error('项目缺少已持久化的 confirmedStory，不能创建框架');
-      }
-      dto = { ...dto, selectedIdea: structuredClone(constitution.confirmedStory) };
-    } catch (error) {
-      // This preflight runs before the main generation try/catch. Without this boundary,
-      // an invalid persisted Canon leaves the already-inserted project stuck at "creating".
-      const message = error instanceof Error ? error.message : String(error);
-      let statusPersistenceError: string | undefined;
-      try {
-        db.prepare("UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ? AND status = 'creating'")
-          .run(now(), projectId);
-      } catch (persistError) {
-        statusPersistenceError = persistError instanceof Error ? persistError.message : String(persistError);
-        this.logger.error(`create-project-async 前置失败状态写入失败 project=${projectId}: ${statusPersistenceError}`);
-      }
-      this.logger.error(`create-project-async 创建前置校验失败 project=${projectId}: ${message}`);
-      this.emitProjectProgress(projectId, {
-        type: 'error', success: false, projectId, step: 'preflight', message,
-        ...(statusPersistenceError ? { statusPersistenceError } : {}),
-      });
-      return;
+    // Both initial creation and recovery use the persisted authority, never the UI payload
+    // or its batch audit (which includes other selected/rejected story candidates).
+    if (!constitution.confirmedStory || Object.keys(constitution.confirmedStory).length === 0) {
+      throw new Error('项目缺少已持久化的 confirmedStory，不能创建框架');
     }
+    dto = { ...dto, selectedIdea: structuredClone(constitution.confirmedStory) };
     const isShort = dto.storyType !== 'long_novel';
     // 长短篇都从同一张 confirmedStory 做确定性投影；不让两条流程各自摘要一次题材。
     const storyFoundation = buildStoryFoundation(dto.selectedIdea);

@@ -48,7 +48,7 @@ describe('production cross-module commit boundary with native SQLite', () => {
     controller.assertExecutionStandardsComplete = vi.fn();
     controller.emitProjectProgress = vi.fn();
 
-    await expect(controller.executeCreateProjectStepsActive('p', {
+    await expect(controller.executeCreateProjectSteps('p', {
       title: '前置失败验收', storyType: 'short_story', targetWords: 20_000, selectedIdea: {},
     })).resolves.toBeUndefined();
 
