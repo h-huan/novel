@@ -23,3 +23,17 @@ export function dimensionBasisFromPrompt(prompt: string, dimension: string) {
   }
   return undefined;
 }
+
+/** Extract only the current generated artifact from the production review prompt. */
+export function currentGeneratedContentFromPrompt(prompt: string): string {
+  const markers = [...prompt.matchAll(/当前生成结果(?:（[^）]*）)?：/g)];
+  const marker = markers[markers.length - 1];
+  if (!marker || marker.index === undefined) {
+    throw new Error('测试评审提示缺少“当前生成结果”证据段；不得用空引文冒充有效评审');
+  }
+  return prompt.slice(marker.index + marker[0].length)
+    .split(/\r?\n/)
+    .map(line => line.replace(/^\[[^\]]+\]\s*/, ''))
+    .join('\n')
+    .trim();
+}
