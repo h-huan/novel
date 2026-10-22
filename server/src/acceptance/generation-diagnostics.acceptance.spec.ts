@@ -166,7 +166,8 @@ it('generates a complete idea batch through preselection plus structuring and re
     generate: vi.fn(async (input: any) => {
       await new Promise(resolve => setTimeout(resolve, 10));
       const step = input.metrics?.stepKey;
-      if (step === 'idea_premise_selection') return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+      if (step === 'idea_premise_pool_generation') return { content: JSON.stringify({ pool: makePremiseSelectionFixture(5).pool }) };
+      if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
       if (step === 'idea_premise_source_drift_review' || step === 'idea_premise_overlap_review')
         return { content: JSON.stringify({ passed: true, issues: [] }) };
       if (step === 'idea_card_structure') {
@@ -210,9 +211,9 @@ it('generates a complete idea batch through preselection plus structuring and re
   });
   expect(duplicate).toEqual(first);
   // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、一次标题与阅读目标独立审查。
-  expect(realLLM.generate).toHaveBeenCalledTimes(9);
+  expect(realLLM.generate).toHaveBeenCalledTimes(11);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
-    'idea_premise_selection','idea_premise_source_drift_review','idea_premise_overlap_review',
+    ...Array(2).fill('idea_premise_pool_generation'), 'idea_premise_selection','idea_premise_source_drift_review','idea_premise_overlap_review',
     ...Array(5).fill('idea_card_structure'),'idea_presentation_review',
   ].sort());
   expect(first.appealGate).toMatchObject({
@@ -296,8 +297,11 @@ it('injects the user-declared custom platform standard into the idea prompt as t
     generate: vi.fn(async (input: any) => {
       generationCall += 1;
       prompts.push(String(input.prompt));
+      if (input.metrics?.stepKey === 'idea_premise_pool_generation') {
+        return { content: JSON.stringify({ pool: makePremiseSelectionFixture(5).pool }) };
+      }
       if (input.metrics?.stepKey === 'idea_premise_selection') {
-        return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+        return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
       }
       if (['idea_premise_source_drift_review','idea_premise_overlap_review'].includes(input.metrics?.stepKey))
         return { content: JSON.stringify({ passed: true, issues: [] }) };
@@ -317,7 +321,7 @@ it('injects the user-declared custom platform standard into the idea prompt as t
   expect(result.success).toBe(false);
   expect(String(result.error)).toContain('第 1/5 个已选题材结构化失败');
   expect(String(result.error)).toContain('返回 0 张，期望恰好 1 张');
-  expect(realLLM.generate).toHaveBeenCalledTimes(8);
+  expect(realLLM.generate).toHaveBeenCalledTimes(10);
   expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: false });
   expect(result.appealGate.structuringErrors).toHaveLength(5);
   const prompt = prompts.join('\n');
