@@ -42,9 +42,8 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
   if(!premiseSourceReviewIssues({sourceChecks:fresh.review.sourceChecks},input).length){
    for(let index=0;index<input.selected.length;index++){
     const receipt=singleReceipt(input,fresh.review,index),r=receipt.review;
-    // Complete failed reviews are evidence, not passes: reuse the same rejection
-    // only while the premise, source, standards and required genres are identical.
-    // Never cache unknown, incomplete or contradictory review contracts.
+    // Only complete, positive checks are reusable. A rejected item must receive
+    // an independent review even when its source and standard are unchanged.
     let sourceIssuesMatch=false;
     try{
      const materialized=materializePremiseSourceReview({sourceChecks:r.sourceChecks},receipt.selection).issues;
@@ -54,7 +53,7 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
        &&a.field===b.field&&a.quote===b.quote&&a.referenceQuote===b.referenceQuote&&a.reason===b.reason;
      sourceIssuesMatch=materialized.length===recorded.length&&materialized.every(issue=>recorded.some(row=>same(issue,row)));
     }catch{}
-    if(sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
+    if(r.passed===true&&r.issues.length===0&&sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
       &&r.sourceChecks?.every(row=>row.status!=='unknown')
       &&r.payoffChecks?.length===1
       &&!premisePayoffReviewIssues({payoffChecks:r.payoffChecks},receipt.selection).length

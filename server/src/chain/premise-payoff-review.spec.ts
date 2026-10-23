@@ -47,3 +47,14 @@ it('allows an actual independent condition in payoff outside the generator index
  expect(materializePremisePayoffReview({payoffChecks:[rejected]},input)).toHaveLength(1);
  expect(rejected.status).toBe('gap');
 });
+
+it('renders every required causal link inside the final payoff JSON example', () => {
+  const candidate = { ...selection.selected[0], causalPlan: [
+    { action: {field:'activeChoice',quote:selection.selected[0].activeChoice}, conditions: [], result:{field:'payoff',quote:selection.selected[0].payoff} },
+    { action: {field:'escalation',quote:selection.selected[0].escalation}, conditions: [], result:{field:'payoff',quote:selection.selected[0].payoff} },
+  ] };
+  const prompt = premisePayoffReviewDirective({...selection,selected:[candidate]});
+  const example = JSON.parse(prompt.split('形状为')[1].split('。证据编号')[0]);
+  expect(example.links.map((row:any)=>row.ref)).toEqual(['S1.causalPlan[0]','S1.causalPlan[1]']);
+  expect(example.links.every((row:any)=>row.status==='supported|gap|unknown' && row.reason.length>=8)).toBe(true);
+});

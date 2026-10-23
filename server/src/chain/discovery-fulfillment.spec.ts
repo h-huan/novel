@@ -39,3 +39,18 @@ it('repairs a newly exposed local title contract before replacing a stalled stor
   replace:async id=>{replacements.push(id);remaining--;return 'rejected';},fingerprint:()=>String(remaining)});
  expect(replacements).toEqual(['A','B','A']);
 });
+
+it('retains failed protocol evidence and replaces missing cards while original-pool budget remains',async()=>{
+ let missing=['A'],credits=6,attempt=0;const errors:string[]=[];
+ const repair=vi.fn(async()=>{credits--;throw Error('scopeBreakdown原文未唯一定位');});
+ const replace=vi.fn(async()=>{credits--;if(++attempt===1)throw Error('原池换选审核协议未完成');missing=[];return 'replaced' as const;});
+ const result=await fulfillDiscoveryGaps({missing:()=>missing,hasCard:()=>true,canRepair:()=>credits>=2,repair,
+  canReplace:()=>credits>=2,replace,fingerprint:()=>JSON.stringify({missing,credits,attempt}),onError:(phase,error)=>errors.push(phase+':'+(error as Error).message)});
+ expect(result).toBe('requested_quantity_verified');expect(repair).toHaveBeenCalledOnce();expect(replace).toHaveBeenCalledTimes(2);
+ expect(errors).toEqual(['repair:scopeBreakdown原文未唯一定位','replace:原池换选审核协议未完成']);expect(credits).toBe(3);
+});
+it('stops a throwing replacement with no consumed budget or candidate progress',async()=>{
+ const replace=vi.fn(async()=>{throw Error('unexpected callback failure');}),onError=vi.fn();
+ expect(await fulfillDiscoveryGaps({missing:()=>['A'],hasCard:()=>false,canRepair:()=>false,repair:vi.fn(),canReplace:()=>true,replace,fingerprint:()=>'',onError})).toBe('no_material_progress');
+ expect(replace).toHaveBeenCalledOnce();expect(onError).toHaveBeenCalledOnce();
+});

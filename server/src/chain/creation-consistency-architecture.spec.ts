@@ -25,7 +25,8 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('prerequisiteError(firstBlockedBatch.blocked)');
     expect(controllerSource).toContain("'candidate_pool_empty'");
     expect(controllerSource).not.toContain('if (candidatePool.length < requestedCount)');
-    expect(controllerSource).toContain('reserveReconciliationRounds<1');
+    expect(controllerSource).not.toContain('reserveReconciliationRounds<1');
+    expect(controllerSource).toContain('while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0)');
     expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
   });
 

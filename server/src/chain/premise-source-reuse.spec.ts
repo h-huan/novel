@@ -23,7 +23,7 @@ it('reviews only two changed items, restores all fifty checks and rebinds eviden
  expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
  expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
 });
-it('reuses complete unchanged failed evidence without turning rejection into acceptance; invalid and unknown reviews are not cached',async()=>{
+it('rechecks unchanged failed evidence without turning rejection into acceptance; invalid and unknown reviews are not cached',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map();
  const review=vi.fn(async pending=>{const r=report(pending),index=pending.selected.findIndex(item=>item.premiseId==='B');
   if(index>=0){
@@ -35,12 +35,12 @@ it('reuses complete unchanged failed evidence without turning rejection into acc
   }return r;});
  await reviewChangedPremiseSources(input,'standard',cache,review);
  const result=await reviewChangedPremiseSources(input,'standard',cache,review);
- expect(review).toHaveBeenCalledTimes(1);
+ expect(review.mock.calls.map(([pending])=>pending.selected.map(item=>item.premiseId))).toEqual([['A','B','C','D','E'],['B']]);
  expect(result.passed).toBe(false);expect(result.issues[0].premiseId).toBe('B');
  expect(result.sourceChecks?.find(row=>row.ref==='S2.activeChoice')?.status).toBe('drift');
  const changed=structuredClone(input);changed.selected[1].activeChoice+='新事实';
  await reviewChangedPremiseSources(changed,'standard',cache,review);
- expect(review.mock.calls[1][0].selected.map(item=>item.premiseId)).toEqual(['B']);
+ expect(review.mock.calls[2][0].selected.map(item=>item.premiseId)).toEqual(['B']);
  const missing=vi.fn(async()=>({passed:true,issues:[]}));const empty:PremiseSourceReceipts=new Map();
  await reviewChangedPremiseSources(input,'standard',empty,missing);expect(empty.size).toBe(0);
  const unknown=vi.fn(async pending=>{const r=report(pending);r.sourceChecks![0].status='unknown';return r;});

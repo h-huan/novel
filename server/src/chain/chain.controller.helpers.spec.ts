@@ -1762,6 +1762,9 @@ describe('idea discovery live orchestrator behavior', () => {
     for (const call of controller.reviewPremiseSelection.mock.calls) {
       expect(call[0].selected.every((premise: any) => premise.storyCategory)).toBe(true);
       expect(call[1]).toContain('【与完整卡一致的分类标准】');
+      expect(call[1]).not.toContain('"standard":""');
+      const categoryContext=JSON.parse(call[1].split('【与完整卡一致的分类标准】')[1].split('\n【服务器分类编号目录】')[0]);
+      expect(categoryContext.every((row:any)=>row.standard.includes(row.category)&&!row.standard.includes('【项目创作宪法】'))).toBe(true);
       expect(call[1]).toContain('【本次作者明确选择');
       expect(call[1]).toContain('"webNovelGenre":["悬疑推理"]');
       expect(call[1]).toContain('"plotTags":["调查"]');

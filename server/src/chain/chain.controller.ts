@@ -4879,6 +4879,15 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const discoveryCategories = dto.discoveryCategoryOptions?.length
         ? dto.discoveryCategoryOptions : [dto.storyCategory];
       const variedCategories = discoveryCategories.length > 1 && requestedCount > 1;
+      const categoryStandards = discoveryCategories.map(category => {
+        const placement = resolveSubmissionCategory(dto.platform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
+        const official = placement.status === 'resolved' ? platformCategoryWritingBrief(dto.platform, placement.value, dto.storyType) : '';
+        const standard = official || buildExecutionStandard(readConstitution({ type: dto.storyType, target_platform: dto.platform,
+          settings: { ...dto, storyCategory: category } })).dimensions.find(item => item.dimension === 'category')?.requirement;
+        if (!standard) throw new Error('分类执行标准缺失：' + category);
+        return { category, standard };
+      });
+
       // Candidate selection may continue with a small usable pool; final delivery still keeps its own minimum.
       // When category diversity is required, retain at least two category slots whenever two candidates exist.
       // A sufficiently large fixed pool must fill the requested selection slots. A partial
@@ -5453,11 +5462,6 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             );
           }
         })();
-        const categoryStandards = discoveryCategories.map(category => {
-          const placement = resolveSubmissionCategory(dto.platform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
-          return { category, standard: placement.status === 'resolved'
-            ? platformCategoryWritingBrief(dto.platform, placement.value, dto.storyType) : '' };
-        });
         const preselectionReviewStartedAt = Date.now();
         let normalizedSelection: any;
         try {
@@ -5879,6 +5883,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       let fulfillmentStopReason=preselectionShortfall ? 'preselection_shortfall' : 'requested_quantity_verified';
       try {fulfillmentStopReason=await fulfillDiscoveryGaps({
         missing:missingAfterGate,hasCard:id=>latestCards.has(id),
+        onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
         canReplace:()=>availableOriginalPool().length>0&&reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&presentationBudget.remaining>=1+minimumCardReviewCalls(1),
@@ -5891,7 +5896,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             quote:String(premise.payoff),referenceQuote:String(seed.storyCore),reason:'该位置完整卡尚未合格交付：'+(latestAssessment(id)?.issues||['结构化未完成']).join('；')}]};
           const original={...premiseDiscovery,selected:[...attemptedPremiseIds].map(premiseId=>({premiseId}))};
           const reserve=await this.reservePremiseSelection(original,{...premiseDiscovery,selected:selectedPremises},review,requestedCount,premisePoolSize,discoveryCategories,
-            buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
+            buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n【与完整卡一致的分类标准】'+JSON.stringify(categoryStandards)+premiseCategoryIdentityDirective(discoveryCategories)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
             reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget);
           if(reserve.replacementPremiseId)attemptedPremiseIds.add(reserve.replacementPremiseId);
           fulfillmentActions.push({kind:'original_pool_replacement',replaces:id,...reserve});
@@ -5979,7 +5984,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先并发生成轻量候选池，再从固定池选优；入选题材逐张并发结构化并执行原有质量门。目标数量少1-2张时，若仍达到最低可交付数量就返回全部合格卡并停止为凑数继续修复/换题；低于最低数量时才在共享预算内尝试补救，不降低质量。',
+        note: '先并发生成轻量候选池，再从固定池选优；入选题材逐张并发结构化并执行原有质量门。缺额时在原池和共享预算内继续修复或换选，并独立复核；仅在补足不可继续且达到最低可交付数量时明确标注部分交付，不降低质量。',
       };
 
       if (selectedAccepted.length === 0) {
@@ -6221,6 +6226,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reselectionBudget=shared?.reselection||{remaining:readGenerationBudgets().premiseReselectionMaxCalls};
     let selected=initial;
     const completedSlots=new Set<string>();
+    const frozenReselections=new Map<string,Record<string,Record<string,unknown>>>();
     let reselectionStopReason:string|undefined;
     const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
       if(!slots.length)return true;
@@ -6230,16 +6236,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const protectedIds=selected.selected.filter(item=>!ids.has(item.premiseId)).map(item=>item.premiseId);
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
         .filter(id=>!protectedIds.includes(id)&&(!unusedIds||unusedIds.has(String(id))));
-      let frozen:Record<string,Record<string,unknown>>|undefined;
+      const frozenScope=slots.map(slot=>String(slot.replacesPremiseId)).sort().join('|');
+      let frozen=frozenReselections.get(frozenScope);
       const normalize=(value:unknown)=>{
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
         const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
         const premises=Object.fromEntries(rows.map((row:any)=>[row.replacesPremiseId,candidate.selected.find(item=>item.premiseId===row.premise.premiseId)!]));
-        if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||Object.entries(prior).some(([key,entry])=>premises[id][key]!==entry)))
+        if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||Object.entries(prior).some(([key,entry])=>JSON.stringify(premises[id][key])!==JSON.stringify(entry))))
           throw Error('比较协议补正不得更换候选身份或改写premise，只补正comparisons');
         const issues=premiseReplacementComparisonIssues(value,candidate);
-        if(issues.length){frozen??=structuredClone(premises);throw Error(issues.join('；'));}
+        if(issues.length){frozen??=structuredClone(premises);frozenReselections.set(frozenScope,frozen);throw Error(issues.join('；'));}
         return candidate;
       };
       try{
@@ -6253,7 +6260,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n每项comparisons须逐一覆盖合并后其余全部最终题材ID，包括本次其它修订项的新ID；不是只比较正常项，也不要沿用已被替换的旧ID。模型须先确定全部最终候选，再核对各项选择、升级、反转、代价的真实区别。'
           +'\n'+PREMISE_REPLACEMENT_COMPARISON_POLICY+'\n分类候选='+JSON.stringify(categories)
-          +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","comparisons":[{"referencePremiseId":"其余最终ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"因果升级差别至少12字","reversalDifference":"胜负条件差别至少12字","consequenceDifference":"连带代价差别至少12字"}],"premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
+          +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","comparisons":[{"referencePremiseId":"其余最终ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"因果升级差别至少12字","reversalDifference":"胜负条件差别至少12字","consequenceDifference":"连带代价差别至少12字"}],"premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
           {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:reselectionBudget,timeout:LLM_TUNABLES.timeoutSimple(),
             validate:value=>{try{normalize(value);return true;}catch{return false;}},
             describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String((error as Error).message)];}},
@@ -6268,7 +6275,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return true;
       }
     };
-    await reselectScope(repairPlan.repairSlots);
+    while (reselectionBudget.remaining > 0) {
+      const pendingSlots = repairPlan.repairSlots.filter(slot => !completedSlots.has(String(slot.replacesPremiseId)));
+      if (!pendingSlots.length) break;
+      const before = reselectionBudget.remaining;
+      if (await reselectScope(pendingSlots)) break;
+      if (reselectionBudget.remaining >= before) break;
+    }
     const unresolvedIds = repairPlan.repairSlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)))
       .map(slot=>String(slot.replacesPremiseId));
     if (unresolvedIds.length) {
@@ -6293,7 +6306,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       attemptedIds=new Set([...initial.selected,...selected.selected].map(item=>String(item.premiseId)));
     const reserveStartCredits=reselectionBudget.remaining;
     let reserveReconciliationRounds = 0;
-    while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0&&reserveReconciliationRounds<1){
+    while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0){
       reserveReconciliationRounds += 1;
       this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '/1；之后仅保留独立复核通过项，不继续循环换题。');
       if(shared&&shared.reviews.remaining<2)break;
@@ -6384,7 +6397,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         + '\n' + PREMISE_REPLACEMENT_COMPARISON_POLICY
         + '\n整体继承备用骨架的实施者、对象、触发、升级与兑现，逐一比较保留项的真实因果链。'
         + '\n每个premise额外必返causalPlan，按实际关键环节逐字引用本次筛选字段中的行动、条件、结果；不能沿用已换掉题材的计划。结构示例='+JSON.stringify(premiseCausalPlanExample())
-        + '\n只输出JSON:{"replacements":[{"replacesPremiseId":"本问题位置ID","comparisons":[{"referencePremiseId":"保留项ID","actionDifference":"双方主动选择的实质差别至少12字","escalationDifference":"双方因果升级的实质差别至少12字","reversalDifference":"双方反转改变胜负条件的差别至少12字","consequenceDifference":"双方连带代价的实质差别至少12字"}],"premise":{"premiseId":"可用备用ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","storyCategoryId":"原池实际分类K编号"}}]}。恰好一项。',
+        + '\n只输出JSON:{"replacements":[{"replacesPremiseId":"本问题位置ID","comparisons":[{"referencePremiseId":"保留项ID","actionDifference":"双方主动选择的实质差别至少12字","escalationDifference":"双方因果升级的实质差别至少12字","reversalDifference":"双方反转改变胜负条件的差别至少12字","consequenceDifference":"双方连带代价的实质差别至少12字"}],"premise":{"premiseId":"可用备用ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际分类K编号"}}]}。恰好一项。',
         { scenario: 'idea_generate', stepKey: 'idea_premise_pool_reselection', physicalCallBudget: budget,
           timeout: LLM_TUNABLES.timeoutSimple(),
           validate: value => { try { normalize(value); return true; } catch { return false; } },

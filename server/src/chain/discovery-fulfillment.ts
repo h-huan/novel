@@ -25,6 +25,7 @@ export async function fulfillDiscoveryGaps(options:{
  repair:(ids:string[])=>Promise<string[]>;canReplace:()=>boolean;
  replace:(id:string)=>Promise<'replaced'|'rejected'|'unavailable'>;
  fingerprint:()=>string;repairScope?:(id:string)=>string;
+ onError?:(phase:'repair'|'replace',error:unknown)=>void;
 }){
  const stalled=new Set<string>();
  const key=(id:string)=>JSON.stringify([id,options.repairScope?.(id)||'story']);
@@ -34,11 +35,15 @@ export async function fulfillDiscoveryGaps(options:{
   const patchable=missing.filter(id=>!stalled.has(key(id))&&options.hasCard(id));
   if(patchable.length&&options.canRepair(patchable)){
    const repairKeys=new Map(patchable.map(id=>[id,key(id)]));
-   const improved=new Set(await options.repair(patchable));
+   let improved=new Set<string>();
+   try { improved=new Set(await options.repair(patchable)); }
+   catch(error) { options.onError?.('repair',error); }
    for(const id of patchable)if(!improved.has(id))stalled.add(repairKeys.get(id)!);
   }else{
    if(!options.canReplace())return 'budget_or_original_pool_exhausted';
-   const outcome=await options.replace(missing[replacementCursor++%missing.length]);
+   let outcome:'replaced'|'rejected'|'unavailable'='rejected';
+   try { outcome=await options.replace(missing[replacementCursor++%missing.length]); }
+   catch(error) { options.onError?.('replace',error); }
    if(outcome==='unavailable')return 'budget_or_original_pool_exhausted';
    // A rejected preselection consumes its identity/allowance but never creates
    // a complete card. Try a different original-pool candidate if affordable.

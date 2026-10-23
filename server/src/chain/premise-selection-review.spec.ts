@@ -114,9 +114,9 @@ it('does not enter another provider attempt after the last physical call returns
       options.physicalCallBudget.remaining-=2;
       return {data:null,validationIssues:['比较协议补正未完成']};
     });
-    const result=await c.reconcilePremiseSelection(original,2,4,['悬疑'],'');
+    const result=await c.reconcilePremiseSelection(original,2,4,['悬疑'],'',[],{reviews:{remaining:10},reselection:{remaining:2}});
     expect(result.selected.map((p:any)=>p.premiseId)).toEqual(['A']);
-    expect(result.selectionAudit).toMatchObject({partial:true,unresolvedPremiseIds:['B'],sourceRepairCallsRemaining:1});
+    expect(result.selectionAudit).toMatchObject({partial:true,unresolvedPremiseIds:['B'],sourceRepairCallsRemaining:0});
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
   });
   it('重选先逐一比较保留项四项因果差异，不能漏项或四栏复用一句话', () => {
@@ -585,4 +585,23 @@ it('aggregates all failed reserve positions and keeps the remaining failure afte
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
  expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(6);
  expect(credits.remaining).toBe(1);
+});
+
+it('continues beyond one reserve round using untried original identities and one shared allowance',async()=>{
+ const input=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),selectedPremises:['A','B'].map(premise)},2,5);
+ const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
+ c.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
+  const item=current.selected.find((row:any)=>row.premiseId!=='B');
+  return mode==='source_drift'&&item?.premiseId!=='E'?{passed:false,issues:[{kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,quote:item.activeChoice,referenceQuote:input.pool.find(row=>row.premiseId===item.premiseId)!.storyCore,reason:'该候选的具体结果仍缺少原有必要条件'}]}:{passed:true,issues:[]};
+ });
+ let call=0;
+ c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+  const ids=['A','C','D','E'];options.physicalCallBudget.remaining--;
+  return {data:{replacements:[{replacesPremiseId:ids[call],premise:premise(ids[++call]),comparisons:[compare('B')]}]}};
+ });
+ const shared={reviews:{remaining:12},reselection:{remaining:4}};
+ const result=await c.reconcilePremiseSelection(input,2,5,['悬疑'],'原有标准',[],shared);
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['E','B']);
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(3);expect(shared.reselection.remaining).toBe(1);
+ expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selected[1]).toEqual(input.selected[1]);
 });

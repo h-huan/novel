@@ -38,9 +38,12 @@ function runProcess(label, cwd, command, commandArgs) {
     encoding: 'utf8',
     maxBuffer: 20 * 1024 * 1024,
     env: process.env,
+    // Node 22+ cannot launch npm.cmd directly on Windows; arguments here are
+    // fixed repository script names, so the shell can execute that batch file.
+    shell: process.platform === 'win32',
   });
   const stdout = String(result.stdout || '');
-  const stderr = String(result.stderr || '');
+  const stderr = [result.stderr, result.error?.message].filter(Boolean).join('\n');
   const tail = (text) => text.split(/\r?\n/).filter(Boolean).slice(-120).join('\n');
   return {
     label,
@@ -61,8 +64,8 @@ function git(gitArgs) {
 
 function seedVersion() {
   try {
-    const raw = fs.readFileSync(path.join(root, 'server/src/modules/module-standards/module-standards.seed.ts'), 'utf8');
-    const m = raw.match(/SEED_BASELINE_VERSION\s*=\s*(\d+)/);
+    const raw = fs.readFileSync(path.join(root, 'server/shared/src/执行标准.ts'), 'utf8');
+    const m = raw.match(/SYSTEM_WORKFLOW_RULESET_VERSION\s*=\s*(\d+)/);
     return m ? Number(m[1]) : null;
   } catch {
     return null;
@@ -451,7 +454,7 @@ const standardMismatch = standards.filter((s) => {
   const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
   const source = String(s.source ?? '');
   return (Number.isFinite(seed) && codeSeedVersion !== null && seed !== codeSeedVersion)
-    || source !== 'code_seed';
+    || source !== 'system_workflow_rule_registry';
 }).map((s) => ({
   moduleKey: s.moduleKey ?? s.module_key ?? null,
   version: s.version ?? null,
