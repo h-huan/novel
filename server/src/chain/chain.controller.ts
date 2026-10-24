@@ -9652,22 +9652,37 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       throw new Error(`跨模块故事一致性审查未返回完整结构，项目未激活：consistent/contradictions/unrelatedInventions缺失`);
     }
     if (alignment.consistent !== true || contradictions.length > 0) {
+      // Keep the original structured review's source/quote/impact in diagnostics.
+      // This is an unverified model claim, not an independently proven contradiction:
+      // never set evidenceVerified or silently suppress a potential major conflict.
+      const finalReviewFindings = [...(Array.isArray(alignment.contradictions) ? alignment.contradictions : []),
+        ...(Array.isArray(alignment.unrelatedInventions) ? alignment.unrelatedInventions : [])];
+      const originalReviewFinding = (message: string) => finalReviewFindings.find((finding: any) =>
+        (typeof finding === 'string' ? finding.trim() : JSON.stringify(finding)) === message);
       replaceQualityIssues(db, {
         projectId,
         stage: 'project',
         source: 'cross_stage_gate',
         scopeKey: 'creation',
         title: '跨阶段一致性 Gate',
-        issues: contradictions.map((message, index) => ({
-          ruleId: `cross_stage_consistency.${index + 1}`,
-          severity: 'blocking',
-          message,
-          quote: '',
-          content: generatedBundleText,
-          evidenceVerified: false,
-          suggestion: '保持冻结世界观不变，在章纲、未来计划、角色状态、组织、地点或伏笔中选择最小影响修复点后重新检查。',
-          details: { repairAttempt, evidence: '模型未返回可逐字定位的原文，因此按证据不足阻断。' },
-        })),
+        issues: contradictions.map((message, index) => {
+          const reviewFinding = originalReviewFinding(message);
+          return {
+            ruleId: `cross_stage_consistency.${index + 1}`,
+            severity: 'blocking',
+            message,
+            quote: '',
+            content: generatedBundleText,
+            evidenceVerified: false,
+            suggestion: '保持冻结世界观不变，在章纲、未来计划、角色状态、组织、地点或伏笔中选择最小影响修复点后重新检查。',
+            details: {
+              repairAttempt,
+              evidence: '阻断结论仍需核对实际原文；审查原始证据仅供故障定位，不能当成已验证事实。',
+              reviewOrigin: reviewFinding === undefined ? 'independent_stage_or_boundary_review' : 'cross_stage_review',
+              modelFinding: reviewFinding !== undefined && typeof reviewFinding === 'object' ? reviewFinding : null,
+            },
+          };
+        }),
       });
       const gateError = `跨模块一致性经${repairAttempt}次自动修订后仍存${contradictions.length}处问题，已阻断项目激活：${contradictions.join('；')}`;
       try {
