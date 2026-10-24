@@ -23,6 +23,20 @@ export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<str
       const at = foldQuotation(text).indexOf(foldQuotation(anchor.quote));
       // Quote folding replaces one UTF-16 code unit with one: original offsets survive.
       if (at >= 0) return {field,quote:text.slice(at,at+anchor.quote.length)};
+      // Model citations sometimes end a real clause with 。 when its source uses ；.
+      // Recover only that terminal punctuation from ONE exact occurrence in the
+      // declared field. Never infer content, synonyms, negation, numbers or events.
+      if (/[。；]$/.test(anchor.quote)) {
+        const stem = anchor.quote.slice(0, -1);
+        const foldedStem = foldQuotation(stem);
+        const foldedText = foldQuotation(text);
+        const start = foldedText.indexOf(foldedStem);
+        if (stem.length >= 8 && start >= 0
+          && foldedText.indexOf(foldedStem, start + 1) === -1
+          && /[。；]/.test(text.charAt(start + stem.length))) {
+          return {field,quote:text.slice(start, start + stem.length + 1)};
+        }
+      }
     };
     const declared = inField(anchor.field);
     if (declared) return declared;
