@@ -347,8 +347,13 @@ export function retainValidAutomaticPlotTags(card:Record<string,unknown>,
  if(selected.length || !Array.isArray(card.plotTags) || !card.plotTags.length
    || card.plotTags.some(value=>typeof value!=='string'))return card;
  const valid=[...new Set(card.plotTags)].filter((tag):tag is string=>typeof tag==='string'&&dictionary.includes(tag));
- return valid.length && (valid.length!==card.plotTags.length)
-   ? {...card,plotTags:valid}:card;
+ if(!valid.length||valid.length===card.plotTags.length)return card;
+ const next={...card,plotTags:valid};
+ // Card-premise linkage is server-owned WeakMap evidence, not a JSON field.
+ // A plain clone would silently lose the final Gate's authoritative premise.
+ const evidence=selectedPremiseEvidenceForIdeaCard(card);
+ if(evidence)selectedPremiseEvidenceByCard.set(next,evidence);
+ return next;
 }
 
 /** Isolate invalid model patches per card instead of aborting unrelated
