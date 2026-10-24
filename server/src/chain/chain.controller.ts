@@ -6230,6 +6230,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     let reselectionStopReason:string|undefined;
     const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
       if(!slots.length)return true;
+      // This exact four-slot aggregate exceeded the provider's 32768-token
+      // response capacity during local validation. Partition transport before
+      // another minutes-long truncated call; keep every slot, shared allowance,
+      // global comparison requirement and final independent source/overlap Gate.
+      if(slots.length>=4){
+        for(const part of splitReviewMaterial(slots,slot=>({slot,pool:initial.pool.find(item=>item.premiseId===slot.replacesPremiseId)})))
+          if(!await reselectScope(part,unusedIds))return false;
+        return true;
+      }
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
       const ids=new Set(slots.map(slot=>slot.replacesPremiseId));
       const scopedReview:PremiseSelectionReview={passed:false,issues:slots.flatMap(slot=>slot.issues)};
