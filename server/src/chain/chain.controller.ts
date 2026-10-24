@@ -6015,7 +6015,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             + '张。未降低质量门，也未把最低可交付数量当作提前停止条件。';
           this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
           return { success: true, status: 'partial', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
-            qualifiedIdeas: acceptedWithAudit, warning, appealGate };
+            qualifiedIdeas: acceptedWithAudit, warning, qualityWarning: warning, appealGate };
         }
         appealGate.returned = 0;
         const error = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
