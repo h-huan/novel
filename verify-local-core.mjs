@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -380,7 +380,7 @@ async function inspectProject(target) {
       cockpit: { ok: cockpitRes.ok, status: cockpitRes.status, error: cockpitRes.error ?? null },
       integrity: { ok: integrityRes.ok, status: integrityRes.status, error: integrityRes.error ?? null },
     },
-    integrityAudit: integrityRes.ok ? unwrap(integrityRes.data) : { error: integrityRes.error ?? `HTTP ${integrityRes.status}` },
+    integrityAudit: integrityRes.ok ? normalizeProjectIntegrityAudit(unwrap(integrityRes.data)) : { error: integrityRes.error ?? `HTTP ${integrityRes.status}` },
     cockpit: cockpitRes.ok ? unwrap(cockpitRes.data) : { error: cockpitRes.error ?? `HTTP ${cockpitRes.status}` },
     platformAnalytics: analyticsRes.ok ? unwrap(analyticsRes.data) : { error: analyticsRes.error ?? `HTTP ${analyticsRes.status}` },
   };
