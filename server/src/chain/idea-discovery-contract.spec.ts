@@ -475,7 +475,8 @@ describe('server-owned selected-premise evidence', () => {
     expect(selectedPremiseEvidenceForIdeaCard(normalized)).toEqual(expect.objectContaining({
       premiseId:'P-tag-evidence',activeChoice:premise.activeChoice
     }));
-    expect(JSON.stringify(normalized)).not.toContain('P-tag-evidence');
+    expect(normalized.sourcePremiseId).toBe('P-tag-evidence');
+    expect(JSON.stringify(normalized)).not.toContain(premise.activeChoice);
   });
   it('preserves the same server-owned evidence across a bounded local repair clone', () => {
     const premise = selectedPremise('P-repair-evidence');
