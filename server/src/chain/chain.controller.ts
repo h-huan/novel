@@ -6049,13 +6049,23 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     if (mode === 'source_drift' && !sourceBatch) {
       const budget = premiseSourceCallBudget(physicalCallBudget);
       let batches: ReturnType<typeof premiseSourceBatches>;
+      const splitSources=()=>splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
+        .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
       if (readGenerationBudgets().reviewGroupingMode === 0) {
-        try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
-        catch (error) {
-          if (!isReviewOutputCapacityError(error) || selection.selected.length < 2) throw error;
-          this.logger?.warn('来源整体审核遇到输出容量限制，按实际资料体量拆分；沿用原共享预算及全部质量检查');
-          batches=splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
-            .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
+        // Five-premise source audits exhausted the provider's output window in actual
+        // production. Partition the transport before that oversized attempt only
+        // when both independent batch calls fit the existing physical-call budget.
+        // Keep all source/payoff/category/genre checks and the separate global overlap review.
+        if(selection.selected.length>=5&&budget.remaining>=2){
+          this.logger?.warn('来源审核五项以上预先分批，避免已观测到的大输出截断；共享调用预算和独立质量审查不变');
+          batches=splitSources();
+        }else{
+          try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
+          catch (error) {
+            if (!isReviewOutputCapacityError(error) || selection.selected.length < 2) throw error;
+            this.logger?.warn('来源整体审核遇到输出容量限制，按实际资料体量拆分；沿用原共享预算及全部质量检查');
+            batches=splitSources();
+          }
         }
       } else batches = premiseSourceBatches(selection);
       const reviews = await independentReviewBatches(batches, budget, IDEA_CARD_GENERATION_CONCURRENCY,
