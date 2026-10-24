@@ -339,6 +339,55 @@ function withoutIdeaInternalIdentity(value: unknown, internalField: string): Rec
   return Object.fromEntries(Object.entries(record).filter(([key]) => key !== internalField));
 }
 
+/** Only discard invalid *automatic* plot labels already produced by the model.
+ * Never invent a label or rewrite a manually selected author choice. The normal
+ * dictionary Gate and all creative-semantic reviews still run on the result. */
+export function retainValidAutomaticPlotTags(card:Record<string,unknown>,
+  selected:readonly string[],dictionary:readonly string[]):Record<string,unknown>{
+ if(selected.length || !Array.isArray(card.plotTags) || !card.plotTags.length
+   || card.plotTags.some(value=>typeof value!=='string'))return card;
+ const valid=[...new Set(card.plotTags)].filter((tag):tag is string=>typeof tag==='string'&&dictionary.includes(tag));
+ return valid.length && (valid.length!==card.plotTags.length)
+   ? {...card,plotTags:valid}:card;
+}
+
+/** Isolate invalid model patches per card instead of aborting unrelated
+ * independently repairable cards. A rejected patch returns its ORIGINAL FAILED
+ * card and cannot bypass any downstream local or semantic quality Gate. */
+export function applyIsolatedIdeaRepairPatches(
+ cards:readonly Record<string,unknown>[],rawPatches:unknown,
+ options:{
+  titleRepairPositions?:readonly number[];
+  namingRepairPositions?:readonly number[];
+  storyRepairPositions?:readonly number[];
+  dimensionRepairOptions?:readonly Record<string,readonly string[]>[];
+  dimensionOnlyPositions?:readonly number[];
+  dimensionRepairSelections?:readonly Record<string,readonly string[]>[];
+  scopeAllocationPlans?:readonly (IdeaScopeAllocationPlan|undefined)[];
+  metadataOnlyPositions?:readonly number[];
+ },
+ onRejected:(index:number,error:unknown)=>void,
+):Array<Record<string,unknown>>{
+ if(!Array.isArray(rawPatches)||rawPatches.length!==cards.length){
+  const count=Array.isArray(rawPatches)?rawPatches.length:0;
+  throw Error('修复补丁位置数量不符：收到'+count+'，期望'+cards.length+'；不能推测题材归属');
+ }
+ const selected=(indices:readonly number[]|undefined,index:number)=>indices?.includes(index)?[0]:[];
+ return cards.map((card,index)=>{
+  try{
+   return applyOrderedIdeaRepairPatches([card],[rawPatches[index]],
+    selected(options.titleRepairPositions,index),
+    selected(options.namingRepairPositions,index),
+    selected(options.storyRepairPositions,index),
+    [options.dimensionRepairOptions?.[index]||{}],
+    selected(options.dimensionOnlyPositions,index),
+    [options.dimensionRepairSelections?.[index]||{}],
+    [options.scopeAllocationPlans?.[index]],
+    selected(options.metadataOnlyPositions,index))[0];
+  }catch(error){onRejected(index,error);return card;}
+ });
+}
+
 /**
  * 最终 Gate 的一次同题材局部修复协议。
  * premise/card 的内部身份由服务器按数组位置持有，不交给模型回传，避免真实模型遗漏 opaque id
