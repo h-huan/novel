@@ -21,6 +21,26 @@ export function redactDiagnosticValue(value, key = '') {
   return value;
 }
 
+/** A reachable HTTP port is not sufficient evidence that the correct backend is ready.
+ * The same result object feeds all existing runtime/guard checks. */
+export function validateBackendHealth(response) {
+  if (!response || response.ok !== true) {
+    return {
+      ...(response || {}), ok: false,
+      error: response?.error ?? (response?.status == null ? '健康接口无法访问' : `HTTP ${response.status}`),
+      data: response?.data ?? null,
+    };
+  }
+  const data = isRecord(response.data?.data) ? response.data.data : response.data;
+  if (!isRecord(data) || data.status !== 'ok') {
+    return {
+      ...response, ok: false,
+      error: `健康接口没有返回 status=ok（实际：${String(data?.status ?? 'missing')}）`,
+    };
+  }
+  return response;
+}
+
 export function normalizeIdeaDiscoveryAudit(value) {
   const root = isRecord(value?.data) ? value.data : (isRecord(value) ? value : {});
   const envelope = isRecord(root.audit) ? root.audit : root;
