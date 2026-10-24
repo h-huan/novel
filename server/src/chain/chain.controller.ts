@@ -181,7 +181,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, applyIsolatedIdeaRepairPatches, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -5583,7 +5583,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         });
         const rawIdeas = extractIdeaList(response.content || '') || [];
         try {
-          return bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas);
+          return retainValidAutomaticPlotTags(bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas),dto.plotTags,autoOptions.plotTags);
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           throw new Error(`第 ${position + 1}/${requestedCount} 个已选题材结构化失败：${detail}`);
@@ -5853,19 +5853,24 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
           const repairPatches = orderedIdeaRepairPatches(repairPayload, repairTargets.length);
 
-          const repairedCards = applyOrderedIdeaRepairPatches(
+          const repairedCards = applyIsolatedIdeaRepairPatches(
             repairTargets.map((target: any) => target.card as Record<string, unknown>),
-            repairPatches,
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('故事命名')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.storyRepairAllowed ? [index] : []),
-            repairTargets.map((target:any)=>target.dimensionRepairOptions),
-            repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length && target.gateIssues.every((issue:string)=>
+            repairPatches,{
+            titleRepairPositions:repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
+            namingRepairPositions:repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('故事命名')) ? [index] : []),
+            storyRepairPositions:repairTargets.flatMap((target: any, index: number) => target.storyRepairAllowed ? [index] : []),
+            dimensionRepairOptions:repairTargets.map((target:any)=>target.dimensionRepairOptions),
+            dimensionOnlyPositions:repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length && target.gateIssues.every((issue:string)=>
               ['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`)) ? [index] : []),
-            repairTargets.map((target:any)=>target.dimensionRepairSelections),
-            repairTargets.map((target:any)=>target.scopeAllocationPlan),
-            repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length&&target.gateIssues.every((issue:string)=>issue==='篇幅分线合计与总章数不一致'||['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`))?[index]:[]),
-          );
+            dimensionRepairSelections:repairTargets.map((target:any)=>target.dimensionRepairSelections),
+            scopeAllocationPlans:repairTargets.map((target:any)=>target.scopeAllocationPlan),
+            metadataOnlyPositions:repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length&&target.gateIssues.every((issue:string)=>issue==='篇幅分线合计与总章数不一致'||['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`))?[index]:[]),
+          },(index,error)=>{
+            const detail=error instanceof Error?error.message:String(error);
+            const premiseId=String(repairTargets[index]?.card?.sourcePremiseId||'');
+            fulfillmentActions.push({kind:'repair_patch_rejected',premiseId,error:detail});
+            this.logger.warn('idea-discover: '+premiseId+' 的修复补丁被严格协议拒绝，保留原失败卡，不阻断其它卡：'+detail);
+          });
           const changedCards = repairedCards.filter((card,index)=>JSON.stringify(card)!==JSON.stringify(failedCards[index]));
           finalGateRepairGenerated += changedCards.length;
           for(const card of changedCards)latestCards.set(String(card.sourcePremiseId),card);
