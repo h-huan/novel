@@ -31,6 +31,9 @@ describe('outline fact ledger review contract', () => {
     expect(prompt).toContain('若content已明确写出某人签字、交付或当事人承认其指示，不得把该动作或承认判为缺失');
     expect(prompt).toContain('同一群消息“底下没人回”与“回复挂在该消息下”是真冲突');
     expect(prompt).toContain('私聊回复不能当作群消息回复');
+    expect(prompt).toContain('本章新增三笔，累计应为四笔');
+    expect(prompt).toContain('不得仅因看见“三笔”和“四笔”就误报');
+    expect(prompt).toContain('人物直接听到的问话不代表另一角色向其复述过');
   });
 
   it('derives creation criteria from the actual Registry, including cumulative consequences', () => {
