@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { useDiscoveryStore } from '../stores/discoveryStore';
 import { missingExecutionStandards } from '../lib/executionStandards';
-import { discoveryResponseMatchesSelection, discoverySignature, findProjectForIdea, normalizeDiscoveryResponse, standardsForIdea } from './DiscoveryWizardPage';
+import { discoveryResponseMatchesSelection, discoverySignature, findProjectForIdea, mergeDiscoveryBatch, normalizeDiscoveryResponse, standardsForIdea } from './DiscoveryWizardPage';
 import type { Project } from '@novel/shared';
 
 describe('从题材卡创建项目的执行设定', () => {
@@ -128,4 +128,17 @@ it('keeps several discovery POV choices while each created project receives one 
   expect(standardsForIdea(state,{pov:'第三人称限知'}).pov).toBe('第三人称限知');
   expect(standardsForIdea(state,{pov:'第二人称'}).pov).toBe('');
   expect(discoverySignature(state)).not.toBe(discoverySignature({...state,narrativePov:'第一人称'}));
+});
+
+it('补齐缺额只追加新合格卡，保留原卡，并拒绝重复或超额的补齐结果', () => {
+  const make = (title: string) => ({ title, storyType: 'short_story', targetPlatform: 'fanqie', ideaAppealGate: { passed: true } });
+  const saved = [make('原卡甲'), make('原卡乙'), make('原卡丙')];
+  const fresh = [make('补齐丁'), make('补齐戊')];
+  const merged = mergeDiscoveryBatch(saved, fresh, 5);
+  expect(merged).toHaveLength(5);
+  expect(merged?.slice(0, 3)).toEqual(saved);
+  expect(merged?.slice(3)).toEqual(fresh);
+  expect(mergeDiscoveryBatch(saved, [make('原卡甲')], 5)).toBeNull();
+  expect(mergeDiscoveryBatch(saved, fresh.concat(make('超额己')), 5)).toBeNull();
+  expect(mergeDiscoveryBatch(saved, [], 5)).toEqual(saved);
 });
