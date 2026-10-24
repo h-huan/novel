@@ -82,6 +82,10 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('选择导致的升级—改变胜负条件—兑现及代价');
     expect(contract).toContain('共同条件之外的选择、升级机制和兑现路径仍应分别构思');
     expect(contract).toContain('不默认取pool前几项');
+    expect(contract).toContain('建立能指向责任人的具体比对依据');
+    expect(contract).toContain('已问话不等于已取得回答');
+    expect(contract).toContain('对手获知的途径');
+    expect(contract).toContain('普通直接因果不补无关手续或法律条文');
   });
 
   it('carries the whole causal chain into one-card structuring', () => {
