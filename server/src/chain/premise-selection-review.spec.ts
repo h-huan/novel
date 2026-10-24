@@ -23,6 +23,33 @@ const failure: PremiseSelectionReview = { passed: false, issues: [{ kind: 'overl
   quote: '每次救人自己的存在逐渐消失', referenceQuote: '每次救人自己的存在逐渐消失', reason: '选择与代价及旧签字反转机制同构' }] };
 
 describe('premise selection before identity lock', () => {
+  it('prepartitions five-premise source audits within existing credits and merges every independent field check',async()=>{
+    const current=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
+      selectedPremises:['A','B','C','D','E'].map(premise)},5,5);
+    const originalMethod=(ChainController.prototype as any).reviewPremiseSelection;
+    for(const allowed of [1,2]){
+      const c=Object.create(ChainController.prototype) as any,requested:string[][]=[];
+      c.logger={warn:vi.fn()};
+      c.reviewPremiseSelection=vi.fn(async(...args:any[])=>{
+        const [batch,_standard,mode,budget,sourceBatch]=args;
+        expect(mode).toBe('source_drift');
+        if(!sourceBatch)return originalMethod.apply(c,args);
+        requested.push(batch.selected.map((row:any)=>row.premiseId));
+        budget.remaining--;
+        const sourceChecks=premiseSourceComparisonCatalog(batch)
+          .map(row=>({ref:row.ref,status:'preserved',reason:'逐一核对原池因果事实与当前展开，未改变原有核心约束'}));
+        return materializePremiseSourceReview({sourceChecks},batch);
+      });
+      const credits={remaining:allowed};
+      const review=await c.reviewPremiseSelection(current,'原有标准','source_drift',credits);
+      expect(requested.flat()).toEqual(['A','B','C','D','E']);
+      expect(requested).toHaveLength(allowed);
+      expect(credits.remaining).toBe(0);
+      expect(review.passed).toBe(true);
+      expect(review.sourceChecks?.map((row:any)=>row.ref))
+        .toEqual(premiseSourceComparisonCatalog(current).map(row=>row.ref));
+    }
+  });
   it('keeps independent source coverage and overlap rejection when self-description is absent', () => {
     const initial=selection();initial.selected.forEach(row=>delete row.differentiation);
     const catalog=premiseSourceComparisonCatalog(initial);
