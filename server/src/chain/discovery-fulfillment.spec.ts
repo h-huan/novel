@@ -22,6 +22,13 @@ it('does not treat paraphrased reasons or newly introduced blocked dimensions as
  expect(discoveryFailureImproved(assessment(['completion']),assessment(['completion']))).toBe(false);
  expect(discoveryFailureImproved(assessment(['completion','sharing']),assessment(['click']))).toBe(false);
 });
+it('stops a failed reserve protocol when caller marks its unchanged identity as unavailable, even with ample retry budget',async()=>{
+ const replace=vi.fn(async()=>'unavailable' as const),repair=vi.fn();
+ const result=await fulfillDiscoveryGaps({missing:()=>['B'],hasCard:()=>false,canRepair:()=>false,
+  repair,canReplace:()=>true,replace,fingerprint:()=>'{"remaining":12}'});
+ expect(result).toBe('budget_or_original_pool_exhausted');
+ expect(replace).toHaveBeenCalledOnce();expect(repair).not.toHaveBeenCalled();
+});
 it('stops a callback with no candidate, budget or pool progress instead of looping forever',async()=>{
  const replace=vi.fn(async()=>'rejected' as const);
  expect(await fulfillDiscoveryGaps({missing:()=>['A'],hasCard:()=>false,canRepair:()=>false,repair:vi.fn(),canReplace:()=>true,replace,fingerprint:()=>''})).toBe('no_material_progress');
