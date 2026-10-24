@@ -51,6 +51,10 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('【通信渠道与同源事件约束】');
     expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
     expect(controllerSource).toContain('询问某人不等于已经得到答复');
+    expect(controllerSource).toContain('本章新增几笔');
+    expect(controllerSource).toContain('当前账册总共三笔而后章又拿四笔对账');
+    expect(controllerSource).toContain('本人直接听到的问话不得投影成第三人此前向其转述');
+    expect(controllerSource).toContain('推测他人知情不能投影成已有某人报信');
     expect(controllerSource).toContain('核定金额、签署协议、办手续不等于款项实际发放或收到');
     expect(controllerSource).toContain('不能推出整个后续时间段“始终没再进去”');
     expect(controllerSource).toContain('只写记录人记下姓名不能作为已记下具体观察的依据');
