@@ -628,6 +628,39 @@ it('aggregates all failed reserve positions and keeps the remaining failure afte
  expect(credits.remaining).toBe(1);
 });
 
+it('does not buy a third selection when two remaining review credits cannot cover changed five-source batches and overlap',async()=>{
+ const initial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),
+   selectedPremises:['A','B','C','D','E'].map(premise)},5,7);
+ const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
+ let sourceRounds=0,overlapRounds=0;
+ c.reviewPremiseSelection=vi.fn(async(input:any,_standard:string,mode:string,budget:any)=>{
+   if(mode==='overlap'){budget.remaining--;overlapRounds++;return {passed:true,issues:[]};}
+   // Five unchecked sources require two transport batches, plus the independent overlap call.
+   budget.remaining-=2;
+   const failedId=sourceRounds++===0?'E':'F';
+   const row=input.selected.find((item:any)=>item.premiseId===failedId);
+   expect(row).toBeDefined();
+   return {passed:false,issues:[{kind:'source_drift',premiseId:failedId,referencePremiseId:failedId,
+     quote:row.activeChoice,referenceQuote:input.pool.find((item:any)=>item.premiseId===failedId).storyCore,
+     reason:'该候选在独立审查中没有建立结果所需的实际条件'}]};
+ });
+ c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+   options.physicalCallBudget.remaining--;
+   const result={replacements:[{replacesPremiseId:'E',premise:premise('F'),
+     comparisons:['A','B','C','D'].map(compare)}]};
+   expect(options.validate(result)).toBe(true);
+   return {data:result};
+ });
+ const shared={reviews:{remaining:8},reselection:{remaining:3}};
+ const result=await c.reconcilePremiseSelection(initial,5,7,['悬疑'],'',[],shared);
+ expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D']);
+ expect(result.selectionAudit).toMatchObject({partial:true,completeCardGatePending:true});
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+ expect(sourceRounds).toBe(2);expect(overlapRounds).toBe(2);
+ expect(shared.reviews.remaining).toBe(2);expect(shared.reselection.remaining).toBe(2);
+ expect(c.logger.warn.mock.calls.map(([message]:string[])=>message).join(' ')).toContain('终检预算不足');
+});
+
 it('continues beyond one reserve round using untried original identities and one shared allowance',async()=>{
  const input=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),selectedPremises:['A','B'].map(premise)},2,5);
  const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
