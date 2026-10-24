@@ -140,6 +140,35 @@ it('does not enter another provider attempt after the last physical call returns
     expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selectionAudit.partial).not.toBe(true);
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
   });
+  it('replaces one failed card in an already reviewed three-of-five partial batch without demanding five selected identities',async()=>{
+    const partial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),
+      selectedPremises:['A','B','C'].map(premise)},5,7,undefined,3);
+    const failure:PremiseSelectionReview={passed:false,issues:[{kind:'selection_fit',premiseId:'B',referencePremiseId:'B',
+      quote:premise('B').payoff,referenceQuote:premise('B').storyCore,
+      reason:'最终兑现缺少实际完成结果的因果条件'}]};
+    const c=Object.create(ChainController.prototype) as any;
+    c.logger={warn:vi.fn(),error:vi.fn()};
+    const replacement={replacements:[{replacesPremiseId:'B',premise:premise('D'),
+      comparisons:[compare('A'),compare('C')]}]};
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+      expect(prompt).toContain('【本次仍可换选的原池候选】');
+      expect(prompt).toContain('【可用备用ID（只能从这里选）】');
+      expect(options.validate(replacement)).toBe(true);
+      expect(options.validate({replacements:[{...replacement.replacements[0],premise:premise('A')}]})).toBe(false);
+      options.physicalCallBudget.remaining--;
+      return {data:replacement};
+    });
+    c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:string,_mode:string,budget:any)=>{
+      budget.remaining--;return {passed:true,issues:[]};
+    });
+    const repairCredits={remaining:2},reviewCredits={remaining:2};
+    const result=await c.reservePremiseSelection(partial,partial,failure,5,7,['悬疑'],'',repairCredits,['A','C'],[],reviewCredits);
+    expect(result.error).toBeNull();expect(result.review.passed).toBe(true);
+    expect(result.selection.selected.map((item:any)=>item.premiseId)).toEqual(['A','D','C']);
+    expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+    expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+    expect(repairCredits.remaining).toBe(1);expect(reviewCredits.remaining).toBe(0);
+  });
   it('freezes a comparison-only repair candidate and isolates invalid protocol without another selection round', async () => {
     const original=selection();original.pool.push(premise('D'));
     const c=Object.create(ChainController.prototype) as any;
