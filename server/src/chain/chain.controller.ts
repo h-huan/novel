@@ -6052,12 +6052,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const splitSources=()=>splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
         .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
       if (readGenerationBudgets().reviewGroupingMode === 0) {
-        // Five-premise source audits exhausted the provider's output window in actual
-        // production. Partition the transport before that oversized attempt only
-        // when both independent batch calls fit the existing physical-call budget.
+        // Five-premise source audits made multiple expensive calls and exhausted
+        // the shared review allowance in local production. Split large transport
+        // when both independent batches fit the existing physical-call budget.
         // Keep all source/payoff/category/genre checks and the separate global overlap review.
         if(selection.selected.length>=5&&budget.remaining>=2){
-          this.logger?.warn('来源审核五项以上预先分批，避免已观测到的大输出截断；共享调用预算和独立质量审查不变');
+          this.logger?.warn('来源审核五项以上预先分批，降低超大输出请求风险；共享调用预算和独立质量审查不变');
           batches=splitSources();
         }else{
           try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
