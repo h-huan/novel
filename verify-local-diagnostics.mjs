@@ -41,6 +41,14 @@ export function validateBackendHealth(response) {
   return response;
 }
 
+/** API recovery diagnostics place the audit in {success,audit}; retain metadata
+ * but expose the actual completeness fields to the existing guard and report. */
+export function normalizeProjectIntegrityAudit(value) {
+  const root = isRecord(value?.data) ? value.data : value;
+  if (!isRecord(root)) return root;
+  return isRecord(root.audit) ? { ...root, ...root.audit } : root;
+}
+
 export function normalizeIdeaDiscoveryAudit(value) {
   const root = isRecord(value?.data) ? value.data : (isRecord(value) ? value : {});
   const envelope = isRecord(root.audit) ? root.audit : root;
