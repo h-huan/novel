@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
 
 test('normalizes the nested saved idea-discovery audit and partial-card counts', () => {
   const audit = normalizeIdeaDiscoveryAudit({
@@ -90,4 +90,19 @@ test('health preflight rejects reachable but unrelated or unhealthy HTTP 200 ser
   const error500 = validateBackendHealth({ ok: false, status: 500, data: { status: 'down' } });
   assert.equal(error500.ok, false);
   assert.equal(error500.error, 'HTTP 500');
+});
+
+test('reads nested recovery integrity fields without treating missing modules as PASS', () => {
+  const raw = {
+    success: true, diagnosticSchemaVersion: 2,
+    audit: { status: 'generation_failed', missingModules: ['人物', '章节大纲', '正文空壳', '时间线'],
+      consistencyIssues: [], outlineBodyMappingValid: true, canResume: true },
+  };
+  const result = normalizeProjectIntegrityAudit(raw);
+  assert.deepEqual(result.missingModules, raw.audit.missingModules);
+  assert.equal(result.outlineBodyMappingValid, true);
+  assert.equal(result.canResume, true);
+  assert.equal(result.diagnosticSchemaVersion, 2);
+  assert.deepEqual(normalizeProjectIntegrityAudit({ missingModules: ['人物'], consistencyIssues: [] }).missingModules, ['人物']);
+  assert.equal(normalizeProjectIntegrityAudit(null), null);
 });
