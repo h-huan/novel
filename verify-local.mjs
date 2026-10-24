@@ -129,7 +129,7 @@ function threeIssueMarkdown(triage) {
     '### 尚缺的证据与本轮判定边界',
     ...(triage.missingEvidence.length ? triage.missingEvidence.map(item=>'- '+item) : ['- 三项问题的实际证据见下方运行审计；不能仅凭类型检查/构建通过宣布生产验收通过。']),
     '',
-  ].join('\\n');
+  ].join('\n');
 }
 
 function printDetailedReport(value) {
@@ -158,7 +158,7 @@ function printDetailedReport(value) {
     duplicateClassification: '按 stepKey 与版本元数据分组，不是实际输入指纹；需核对 Run ID 和时间窗',
     callTimeline: calls.slice(0, 50).map(compactRun), omittedCallRows: Math.max(0, calls.length - 50),
   };
-  console.log('[verify] 三项问题专项取证：\\n' + JSON.stringify(runtime.threeIssueTriage ?? null, null, 2));
+  console.log('[verify] 三项问题专项取证：\n' + JSON.stringify(runtime.threeIssueTriage ?? null, null, 2));
   const projectRows = runtime.projects && typeof runtime.projects === 'object'
     ? Object.entries(runtime.projects) : runtime.project ? [['project', runtime]] : [];
   const projectEvidence = Object.fromEntries(projectRows.map(([key, item]) => {
@@ -220,7 +220,7 @@ if (reportUpdated) {
   if (report) {
     report.runtime = report.runtime || {};
     report.runtime.threeIssueTriage = triageThreeIssues(report);
-    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\\n', 'utf8');
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
   }
 
   const guard = spawnSync(
@@ -247,11 +247,11 @@ if (reportUpdated) {
     if (fs.existsSync(markdownPath)) {
       const markdown = fs.readFileSync(markdownPath, 'utf8');
       const section = threeIssueMarkdown(report.runtime?.threeIssueTriage || triageThreeIssues(report));
-      const separator = '\\n## Verification Guard\\n';
+      const separator = '\n## Verification Guard\n';
       const pos = markdown.indexOf(separator);
       const updated = pos >= 0
-        ? markdown.slice(0,pos).trimEnd() + '\\n\\n' + section + '\\n' + markdown.slice(pos)
-        : markdown.trimEnd() + '\\n\\n' + section + '\\n';
+        ? markdown.slice(0,pos).trimEnd() + '\n\n' + section + '\n' + markdown.slice(pos)
+        : markdown.trimEnd() + '\n\n' + section + '\n';
       fs.writeFileSync(markdownPath, updated, 'utf8');
     }
     printDetailedReport(report);
