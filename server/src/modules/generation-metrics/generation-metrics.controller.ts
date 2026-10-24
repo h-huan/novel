@@ -140,7 +140,7 @@ export class GenerationMetricsController {
    * 只读诊断视图：不新增日志、不改变 Gate，只把现有 generation_runs /
    * generation_step_metrics 与业务表中已经存在的数据汇总成验收信号。
    * 用于发现“最终 success 但内部先白烧一轮”、完全相同输入重复付费、最慢步骤，
-   * 以及“模型调用成功但生成结果没有落到业务 Canon”的编排/持久化故障。
+   * 以及已激活项目缺少业务 Canon 的编排/持久化故障。
    */
   private generationDiagnostics(projectId: string) {
     const db = this.databaseService.getDb();
@@ -251,13 +251,13 @@ export class GenerationMetricsController {
     const creationStallThresholdMs = 3 * 60 * 1000;
     const isCreating = String(project?.status || '').toLowerCase() === 'creating';
     const creationStalled = isCreating && activeGenerationRuns === 0 && idleMs !== null && idleMs >= creationStallThresholdMs;
-    // 创建中短暂出现“模型已成功、业务表尚未落库”是允许的中间态；只有失败/完成后仍不一致，
-    // 或 creating 已经无运行调用并持续空闲超过阈值，才升级为真正持久化故障。
+    // generation_runs.status=success only means an individual model call completed.
+    // Source review or a later quality Gate can reject that output before any Canon write.
+    // A failed/stalled creation with no world row is therefore not evidence of lost data.
     const projectStatus = String(project?.status || '').toLowerCase();
-    const persistenceCheckApplicable = ['active', 'completed', 'success', 'generation_failed', 'failed', 'cancelled'].includes(projectStatus) || creationStalled;
-    const persistenceMismatch = isCreating && !creationStalled
-      ? [] : persistenceCheckApplicable ? observedPersistenceMismatch : [];
-    const pendingPersistenceMismatch = isCreating && !creationStalled ? observedPersistenceMismatch : [];
+    const persistenceCheckApplicable = ['active', 'completed', 'success'].includes(projectStatus);
+    const persistenceMismatch = persistenceCheckApplicable ? observedPersistenceMismatch : [];
+    const pendingPersistenceMismatch: string[] = [];
 
     return {
       projectStatus: project?.status ?? null,

@@ -43,9 +43,9 @@ describe('generation metrics diagnostics', () => {
     expect(cockpit.diagnostics.slowestSteps[0]).toEqual(expect.objectContaining({ runId: 'r1', internalRetries: 1 }));
     expect(cockpit.diagnostics.exactDuplicateRunGroups).toBe(1);
     expect(cockpit.diagnostics.exactDuplicateRuns[0].runIds).toEqual(['r1', 'r2']);
-    expect(cockpit.diagnostics.persistenceMismatch).toContain('outline_success_without_chapter_outline');
+    expect(cockpit.diagnostics.persistenceMismatch).toEqual([]);
     expect(cockpit.diagnostics.pendingPersistenceMismatch).toEqual([]);
-    expect(cockpit.diagnostics.persistenceStatus).toBe('mismatch');
+    expect(cockpit.diagnostics.persistenceStatus).toBe('not_applicable');
   });
 
   it('counts timeline events through timelines.project_id instead of querying a nonexistent timeline_events.project_id', () => {
@@ -73,10 +73,10 @@ describe('generation metrics diagnostics', () => {
     const cockpit: any = controller.cockpit('project-fresh');
     expect(cockpit.diagnostics.creationStalled).toBe(false);
     expect(cockpit.diagnostics.persistenceMismatch).toEqual([]);
-    expect(cockpit.diagnostics.pendingPersistenceMismatch).toContain('world_success_without_world_setting');
+    expect(cockpit.diagnostics.pendingPersistenceMismatch).toEqual([]);
   });
 
-  it('promotes an idle creating project to a real stalled persistence failure', () => {
+  it('reports an idle creating project as stalled without claiming a model output was committed', () => {
     const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const controller = controllerFor(
       [{ run_id: 'w1', step_key: 'world_building', scenario: 'world_building', status: 'success', attempt: 0, duration_ms: 5000, total_tokens: 5000, internal_retries: 0, created_at: old }],
@@ -88,8 +88,36 @@ describe('generation metrics diagnostics', () => {
     const cockpit: any = controller.cockpit('project-stalled');
     expect(cockpit.diagnostics.activeGenerationRuns).toBe(0);
     expect(cockpit.diagnostics.creationStalled).toBe(true);
-    expect(cockpit.diagnostics.persistenceMismatch).toContain('world_success_without_world_setting');
+    expect(cockpit.diagnostics.persistenceMismatch).toEqual([]);
     expect(cockpit.diagnostics.pendingPersistenceMismatch).toEqual([]);
+    expect(cockpit.diagnostics.persistenceStatus).toBe('not_applicable');
+  });
+
+  it('does not infer a lost world row from successful generation and review calls before a failed source gate', () => {
+    const now = new Date().toISOString();
+    const runs = [
+      { id: 'world-generation', stage: 'world', scenario: 'world_building', status: 'success', started_at: now, finished_at: now },
+      { id: 'world-review', stage: 'world', scenario: 'review', status: 'success', started_at: now, finished_at: now },
+    ];
+    const controller = controllerFor([], runs, { status: 'generation_failed', updated_at: now }, {
+      world_settings: 0, characters: 0, outlines: 0, chapters: 0, timeline_events: 0,
+    });
+    const diagnostics: any = controller.cockpit('failed-world').diagnostics;
+    expect(diagnostics.persisted.worldSettings).toBe(0);
+    expect(diagnostics.persistenceMismatch).toEqual([]);
+    expect(diagnostics.persistenceStatus).toBe('not_applicable');
+  });
+
+  it('still flags a missing world row after a project has been activated', () => {
+    const now = new Date().toISOString();
+    const controller = controllerFor([], [
+      { id: 'world-generation', stage: 'world', scenario: 'world_building', status: 'success', started_at: now, finished_at: now },
+    ], { status: 'active', updated_at: now }, {
+      world_settings: 0, characters: 1, outlines: 1, chapters: 1, timeline_events: 1,
+    });
+    const diagnostics: any = controller.cockpit('active-without-world').diagnostics;
+    expect(diagnostics.persistenceMismatch).toContain('world_success_without_world_setting');
+    expect(diagnostics.persistenceStatus).toBe('mismatch');
   });
 
   it('exposes bounded, time-filtered per-step rows and redacts failure credentials', () => {

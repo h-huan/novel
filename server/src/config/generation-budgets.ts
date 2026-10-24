@@ -24,15 +24,16 @@ export function saveGenerationBudgets(value:unknown):GenerationBudgets{
  fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(next,null,2));fs.renameSync(temp,file);return next;
 }
 /**
- * A call's route/request maxTokens is authoritative. structuredOutputTokens is the opt-in
- * threshold for extended recovery, not a floor that silently inflates every request.
- * Ordinary calls may recover from a confirmed length truncation up to 32768 tokens;
- * extended recovery is available only when the caller explicitly requests that threshold.
+ * Inherited JSON calls use the saved first-round amount and recovery ceiling.
+ * A route default is not an explicit per-task override: treating it as one made
+ * the visible structured settings ineffective and restored the old 32768 cap.
+ * Explicit task limits, ordinary text and other models retain their own budgets.
+ * Transport recovery still consumes the task's existing physical-call allowance.
  */
-export function generationOutputBounds(model:string,requested:number,settings=readGenerationBudgets()){
+export function generationOutputBounds(model:string,requested:number,settings=readGenerationBudgets(),useStructuredDefaults=false){
  if(model!=='deepseek-flash')return {initial:requested,ceiling:Math.max(requested,32768)};
- const initial=Math.min(requested,settings.structuredOutputCeiling);
+ const initial=Math.min(useStructuredDefaults?Math.max(requested,settings.structuredOutputTokens):requested,settings.structuredOutputCeiling);
  const ordinaryCeiling=Math.min(settings.structuredOutputCeiling,Math.max(initial,32768));
- const ceiling=requested>=settings.structuredOutputTokens?settings.structuredOutputCeiling:ordinaryCeiling;
+ const ceiling=useStructuredDefaults||requested>=settings.structuredOutputTokens?settings.structuredOutputCeiling:ordinaryCeiling;
  return {initial,ceiling:Math.max(initial,ceiling)};
 }

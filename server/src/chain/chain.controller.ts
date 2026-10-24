@@ -7685,7 +7685,6 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
               isShort ? 'short' : 'full',
               now(), now()
             );
-            emit('world', 25, '世界观已写入，开始生成大纲', 'done');
             // ★ 将7维度世界观数据传播到 world_system_profiles（前端 WorldProfileEditor 读取的表）
             try {
               const wsId = db.prepare(`SELECT id FROM world_settings WHERE project_id=? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
@@ -7731,6 +7730,9 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
         }
         // 无论新建还是已存在，都把已保存世界观回读为大纲上下文（世界严格先于大纲；重跑时若已有世界观，大纲也必须有世界观上下文，不得为空）
         const savedWorld = db.prepare(`SELECT era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
+        if (!savedWorld) {
+          throw new Error('世界观生成步骤结束但主记录未保存，停止生成大纲；请检查世界观审查与写入日志。');
+        }
         if (savedWorld) {
           const parseMaybeArray = (v: unknown): any[] => {
             if (v == null) return [];

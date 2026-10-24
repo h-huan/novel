@@ -63,3 +63,27 @@ it('passes complete per-card standards into a local repair without allowing iden
  expect(prompt).toContain('本卡甜宠要求：关系升温与具体照顾须推动选择');
  expect(prompt).toContain('不能只修点名因果');expect(prompt).toContain('不要输出平台、分类、篇幅、章数或任何内部标识');
 });
+
+
+it('reuses real category and manual-genre evidence after single-card rebinding and reordering',async()=>{
+ const original=selection();
+ for(const item of [...original.selected,...original.pool])item.storyCategory='悬疑';
+ const scope=JSON.stringify({standard:'相同来源与分类要求',requiredGenres:['扮猪吃虎']});
+ const cache:PremiseSourceReceipts=new Map(),review=vi.fn(async pending=>report(pending));
+ await reviewChangedPremiseSources(original,scope,cache,review);
+ expect(cache.size).toBe(5);
+ const next=structuredClone(original);
+ next.selected=[next.selected[3],next.selected[1],next.selected[0],next.selected[4],next.selected[2]];
+ next.selected[1].activeChoice+='一项新的实际行动';
+ next.selected[3].payoff+='一项新的实际结果';
+ const result=await reviewChangedPremiseSources(next,scope,cache,review);
+ expect(review.mock.calls.map(([pending])=>pending.selected.map(item=>item.premiseId)))
+  .toEqual([['A','B','C','D','E'],['B','E']]);
+ expect(result.passed).toBe(true);
+ expect(result.sourceChecks).toHaveLength(50);
+ for(let index=0;index<next.selected.length;index++){
+  const prefix='S'+(index+1)+'.';
+  expect(result.genreChecks?.find(row=>row.ref===prefix+'genre1')?.evidenceRef).toBe(prefix+'activeChoice');
+  expect(result.categoryChecks?.find(row=>row.ref===prefix+'category')?.evidenceRef).toBe(prefix+'coreConflict');
+ }
+});
