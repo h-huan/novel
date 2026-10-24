@@ -466,6 +466,17 @@ describe('server-owned selected-premise evidence', () => {
     expect(JSON.stringify(card)).not.toContain('protagonistSituation');
   });
 
+  it('preserves server-owned premise authority when an automatic plot tag is removed',()=>{
+    const premise=selectedPremise('P-tag-evidence');
+    const card=bindStructuredIdeaCardToPremise(premise,[{title:'自动标签归位',hook:'已有明确的初始冲突和可验证的真实行动路径。'}]);
+    card.plotTags=['宫斗','模型自造词'] as any;
+    const normalized=retainValidAutomaticPlotTags(card,[],['宫斗','逆袭']);
+    expect(normalized.plotTags).toEqual(['宫斗']);
+    expect(selectedPremiseEvidenceForIdeaCard(normalized)).toEqual(expect.objectContaining({
+      premiseId:'P-tag-evidence',activeChoice:premise.activeChoice
+    }));
+    expect(JSON.stringify(normalized)).not.toContain('P-tag-evidence');
+  });
   it('preserves the same server-owned evidence across a bounded local repair clone', () => {
     const premise = selectedPremise('P-repair-evidence');
     const card = bindStructuredIdeaCardToPremise(premise, [{
