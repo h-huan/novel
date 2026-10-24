@@ -2,7 +2,7 @@ import {fulfillDiscoveryGaps,discoveryFailureImproved} from './discovery-fulfill
 import { assertPremiseCausalPlans, premiseCausalPlanExample } from './premise-causal-plan';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
 import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
-import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
+import {reviewChangedPremiseSources,pendingPremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues} from './premise-selection-review';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import {discoveryDimensionSelectionIssues} from './idea-discovery-contract';
@@ -6328,7 +6328,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0){
       reserveReconciliationRounds += 1;
       this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '/1；之后仅保留独立复核通过项，不继续循环换题。');
-      if(shared&&shared.reviews.remaining<2)break;
       const retained=retainReviewedPremises(selected,finalReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
       const unusedIds=new Set(initial.pool.filter(item=>!attemptedIds.has(String(item.premiseId))).map(item=>String(item.premiseId)));
       if(!retained.excludedPremiseIds.length||!unusedIds.size)break;
@@ -6341,6 +6340,22 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const slots=premiseReselectionPlan(selected,{passed:false,issues:scopedIssues}).repairSlots;
       if(!slots.length)break;
       slots.forEach(slot=>slot.mode='replace_from_pool');
+      // A replacement cannot be used unless its changed sources AND all affected
+      // pairwise overlaps can be independently reviewed. The outer scheduler
+      // reserves one call per mode; five pending sources require a further batch.
+      // Check that total BEFORE spending on another model reselection, otherwise
+      // a two-credit tail can pay for overlap but fail source coverage after minutes.
+      const pendingSources=pendingPremiseSourceReviewCount(selected,sourceScope,sourceReceipts,slots.map(slot=>String(slot.replacesPremiseId)));
+      const grouping=readGenerationBudgets();
+      const sourceCalls=grouping.reviewGroupingMode===0
+        ? (pendingSources>=5?2:1)
+        : Math.max(1,Math.ceil(pendingSources/grouping.sourceBatchSize));
+      const requiredReviewCredits=1+sourceCalls;
+      if(shared&&shared.reviews.remaining<requiredReviewCredits){
+        this.logger?.warn('锁定前备用重选前终检预算不足：剩余'+shared.reviews.remaining
+          +'次，当前变更预计至少需要来源'+sourceCalls+'批与独立同构1批；保留已经审查的结论，隔离失败位置，不启动注定无法验收的重选');
+        break;
+      }
       const before=selected;
       const completed=await reselectScope(slots,unusedIds);
       for(const slot of slots){
