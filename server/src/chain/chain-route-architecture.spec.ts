@@ -99,7 +99,9 @@ describe('chain HTTP architecture', () => {
     );
     expect(desktopPage).toContain("result.status === 'partial'");
     expect(desktopPage).toContain("result.status === 'incomplete'");
-    expect(desktopPage).toContain('normalizeDiscoveryResponse(res, configuredState.ideaCount)');
+    expect(desktopPage).toContain('normalizeDiscoveryResponse(res, requestedThisRun)');
+    expect(desktopPage).toContain('count: requestedThisRun');
+    expect(desktopPage).toContain('mergeDiscoveryBatch(preservedIdeas, newIdeas, configuredState.ideaCount)');
   });
 
   it('repairs outline fact conflicts as a local patch instead of regenerating the whole chapter plan', () => {
