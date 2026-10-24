@@ -144,6 +144,15 @@ export const normalizeDiscoveryResponse = (
   return { ideas, partial: ideas.length < requestedCount && (currentPartial || legacyPartial) };
 };
 
+/** Refill only the missing slots; previously accepted cards are immutable and cannot be silently replaced. */
+export function mergeDiscoveryBatch(preserved: any[], fresh: any[], requestedCount: number): any[] | null {
+  const combined = [...preserved, ...fresh];
+  if (combined.length > requestedCount) return null;
+  const titles = combined.map(idea => String(idea?.title || '').trim());
+  if (titles.some(title => !title) || new Set(titles).size !== titles.length) return null;
+  return combined;
+}
+
 // Absence from a public sample is not evidence of an invalid tag.
 const discoveryGenreProblem = (_state: ReturnType<typeof useDiscoveryStore.getState>): string => '';
 
@@ -833,7 +842,7 @@ const DiscoveryWizardPage: React.FC = () => {
   }, [store, selectProject, navigate, fetchProjects]);
 
   // 配置 → 发现（支持重新生成时传排除列表）
-  const handleStartDiscovery = useCallback(async (excludeTitles?: string[], excludeDetailsArg?: Array<{ title: string; hook?: string; description?: string }>) => {
+  const handleStartDiscovery = useCallback(async (excludeTitles?: string[], excludeDetailsArg?: Array<{ title: string; hook?: string; description?: string }>, fillShortfall = false) => {
     if (ideaRequestInFlightRef.current) {
       store.setStep(1);
       return;
@@ -841,6 +850,10 @@ const DiscoveryWizardPage: React.FC = () => {
     ideaRequestInFlightRef.current = true;
     const configuredState = useDiscoveryStore.getState();
     const requestedSignature = discoverySignature(configuredState);
+    const preservingPartial = fillShortfall && configuredState.generatedSignature === requestedSignature
+      && configuredState.ideas.length > 0 && configuredState.ideas.length < configuredState.ideaCount;
+    const preservedIdeas = preservingPartial ? acceptedDiscoveryIdeas(configuredState.ideas) : [];
+    const requestedThisRun = configuredState.ideaCount - preservedIdeas.length;
     const configuredTarget = configuredState.targetWords.trim();
     if (configuredTarget) {
       const value = Number(configuredTarget);
@@ -885,10 +898,14 @@ const DiscoveryWizardPage: React.FC = () => {
     let generationSucceeded = false;
     store.setStep(1);
     store.setGenerating(true);
-    store.setIdeas([]);
-    store.setGeneratedSignature(null);
-    store.setGenerationDone(false);
-    store.setGenProgress('AI正在批量生成、校验并去重故事题材...');
+    if (!preservingPartial) {
+      store.setIdeas([]);
+      store.setGeneratedSignature(null);
+      store.setGenerationDone(false);
+    }
+    store.setGenProgress(preservingPartial
+      ? `正在保留已有 ${preservedIdeas.length} 张合格卡，仅生成缺少的 ${requestedThisRun} 张...`
+      : 'AI正在批量生成、校验并去重故事题材...');
 
     // 分步进度动画：前 5 步轮转文案，之后切换为真实等待计时，避免用户以为卡死
     const msgs = [
@@ -909,7 +926,7 @@ const DiscoveryWizardPage: React.FC = () => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         const minutes = Math.floor(elapsed / 60);
         const secs = elapsed % 60;
-        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，当前模型正在生成并校验 ${configuredState.ideaCount} 个题材，请勿重复点击...`);
+        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，当前模型正在生成并校验 ${requestedThisRun} 个题材，请勿重复点击...`);
       }
     }, 5000);
 
@@ -928,7 +945,7 @@ const DiscoveryWizardPage: React.FC = () => {
         plotTags: configuredState.selectedPlotTags,
         genreFitNote: configuredState.genreFitNote,
         pov: configuredState.narrativePov,
-        count: configuredState.ideaCount,
+        count: requestedThisRun,
         excludeTitles,
         excludeDetails: excludeDetailsArg,
         targetWords: configuredState.targetWords || undefined,
@@ -940,24 +957,30 @@ const DiscoveryWizardPage: React.FC = () => {
 
       if (requestId !== latestDiscoveryRequestId) return;
 
-      const normalizedResponse = normalizeDiscoveryResponse(res, configuredState.ideaCount);
+      const normalizedResponse = normalizeDiscoveryResponse(res, requestedThisRun);
       if (normalizedResponse) {
-        const { partial, ideas: newIdeas } = normalizedResponse;
-        if ((!partial && newIdeas.length !== configuredState.ideaCount) || newIdeas.length > configuredState.ideaCount) {
-          store.setGenProgress(`❌ 题材数量不足或超额：请求 ${configuredState.ideaCount}，返回 ${newIdeas.length}；本轮未完成，请重新发现。`);
+        const { partial: newPartial, ideas: newIdeas } = normalizedResponse;
+        if ((!newPartial && newIdeas.length !== requestedThisRun) || newIdeas.length > requestedThisRun) {
+          store.setGenProgress(`❌ 本次缺额请求 ${requestedThisRun}，返回 ${newIdeas.length}；保留已有合格卡，未接收异常数量。`);
           return;
         }
         if (acceptedDiscoveryIdeas(newIdeas).length !== newIdeas.length) {
           store.setGenProgress('❌ 有题材未通过当前规则或含禁止命名，本轮不交付缺量批次，请重新发现。');
           return;
         }
-        if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), newIdeas, partial)) {
+        const combinedIdeas = mergeDiscoveryBatch(preservedIdeas, newIdeas, configuredState.ideaCount);
+        if (!combinedIdeas) {
+          store.setGenProgress('❌ 补齐结果存在重复标题或超额；保留原合格卡，不接收异常结果。');
+          return;
+        }
+        const partial = combinedIdeas.length < configuredState.ideaCount;
+        if (!discoveryResponseMatchesSelection(requestedSignature, useDiscoveryStore.getState(), combinedIdeas, partial)) {
           store.setGenProgress('创作设定已改变，或返回题材与所选长短篇/平台不一致；旧结果已丢弃，请重新发现。');
           store.setStep(0);
           return;
         }
         generationSucceeded = true;
-        store.setIdeas(newIdeas);
+        store.setIdeas(combinedIdeas);
         store.setGeneratedSignature(requestedSignature);
         // 记录本次题材标题和完整信息，下次排除用
         const newTitles = newIdeas.map((i: any) => i.title).filter(Boolean);
@@ -973,7 +996,7 @@ const DiscoveryWizardPage: React.FC = () => {
         const missingReason = Array.isArray(selectionReasons) ? selectionReasons.map((item: any) => typeof item?.reason === 'string' ? item.reason : '').filter(Boolean).join('；') : '';
         const missingDetail = partial && missingReason ? `\n未通过原因：${missingReason}` : '';
 
-        store.setGenProgress(partial ? `本批未完成：已保留 ${newIdeas.length}/${configuredState.ideaCount} 个合格故事卡，缺少 ${configuredState.ideaCount-newIdeas.length} 个。可选择已有卡，不会自动补生。${missingDetail}${qualityWarn}` : `✨ 合格故事卡 ${newIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
+        store.setGenProgress(partial ? `本批未完成：已保留 ${combinedIdeas.length}/${configuredState.ideaCount} 个合格故事卡，缺少 ${configuredState.ideaCount-combinedIdeas.length} 个。可选择已有卡，或继续补齐缺额。${missingDetail}${qualityWarn}` : `✨ 合格故事卡 ${combinedIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
         store.setGenProgress(`❌ ${(res as any).error}`);
       } else {
@@ -986,7 +1009,7 @@ const DiscoveryWizardPage: React.FC = () => {
       ideaRequestInFlightRef.current = false;
       if (requestId === latestDiscoveryRequestId) {
         store.setGenerating(false);
-        store.setGenerationDone(generationSucceeded);
+        store.setGenerationDone(generationSucceeded || preservedIdeas.length > 0);
       }
     }
   }, [store]);
@@ -995,6 +1018,13 @@ const DiscoveryWizardPage: React.FC = () => {
   const handleRegenerate = useCallback(() => {
     const currentState = useDiscoveryStore.getState();
     handleStartDiscovery(currentState.prevTitles, currentState.excludeDetails);
+  }, [handleStartDiscovery]);
+
+  const handleFillShortfall = useCallback(() => {
+    const currentState = useDiscoveryStore.getState();
+    if (currentState.ideas.length < currentState.ideaCount && currentState.generatedSignature === discoverySignature(currentState)) {
+      handleStartDiscovery(currentState.prevTitles, currentState.excludeDetails, true);
+    }
   }, [handleStartDiscovery]);
 
   // SSE EventSource 引用，用于组件卸载时清理
@@ -1714,6 +1744,15 @@ const DiscoveryWizardPage: React.FC = () => {
             )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
+            {ideas.length > 0 && ideas.length < ideaCount && generatedSignature === discoverySignature(useDiscoveryStore.getState()) && (
+              <button
+                disabled={isGenerating}
+                onClick={handleFillShortfall}
+                style={{ padding: '6px 14px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', background: 'var(--color-accent)', color: 'var(--color-text-primary)', cursor: isGenerating ? 'not-allowed' : 'pointer' }}
+              >
+                补齐缺额（{ideaCount - ideas.length} 张）
+              </button>
+            )}
             <button
               style={{
                 padding: '6px 14px',
