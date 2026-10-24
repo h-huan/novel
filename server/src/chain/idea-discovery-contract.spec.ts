@@ -4,6 +4,8 @@ import {
   confirmedIdeaStoryCard,
   separateIdeaDiscoveryAudit,
   applyOrderedIdeaRepairPatches,
+  applyIsolatedIdeaRepairPatches,
+  retainValidAutomaticPlotTags,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
   ideaGateLocalRepairDirective,
@@ -41,6 +43,38 @@ describe('idea discovery preselection contract', () => {
     for(const field of ['activeChoice','escalation','reversalEffect','payoff']) {
       expect(()=>normalizePremiseSelectionPayload({pool,selectedPremises:[{...item,[field]:''}]},1,1)).toThrow(field);
     }
+  });
+  it('keeps only already generated legal automatic tags, without choosing new tags or overriding manual choices',()=>{
+    const raw={plotTags:['宫斗','字典外的自造标签','逆袭','宫斗'],description:'不可改动的故事事件'};
+    const valid=retainValidAutomaticPlotTags(raw,[],['宫斗','逆袭','悬念反转']);
+    expect(valid.plotTags).toEqual(['宫斗','逆袭']);
+    expect(valid.description).toBe(raw.description);
+    expect(raw.plotTags).toHaveLength(4);
+    expect(retainValidAutomaticPlotTags(raw,['宫斗'],['宫斗'])).toBe(raw);
+    const unknown={plotTags:['完全不存在的词']};
+    expect(retainValidAutomaticPlotTags(unknown,[],['宫斗'])).toBe(unknown);
+    expect(retainValidAutomaticPlotTags({plotTags:[]},[],['宫斗'])).toEqual({plotTags:[]});
+  });
+  it('isolates illegal card repair patches while preserving exact accepted dictionary and story rules',()=>{
+    const first={sourcePremiseId:'P6',plotTags:['字典外标签'],description:'原故事一'};
+    const second={sourcePremiseId:'P2',plotTags:['宫斗'],description:'原故事二'};
+    const rejected:any[]=[];
+    const fixed=applyIsolatedIdeaRepairPatches([first,second],
+      [{dimensionPatch:{plotTags:['字典外标签']}},{description:'对原故事二已经核实的实际条件作局部补正'}],
+      {dimensionRepairOptions:[{plotTags:['宫斗','逆袭']},{}],
+       dimensionOnlyPositions:[0],metadataOnlyPositions:[0],
+       storyRepairPositions:[1]},
+      (index,error)=>rejected.push({index,reason:String((error as Error).message)}));
+    expect(fixed[0]).toBe(first);
+    expect(fixed[1].description).toBe('对原故事二已经核实的实际条件作局部补正');
+    expect(fixed[1].sourcePremiseId).toBe('P2');
+    expect(rejected).toEqual([{index:0,reason:'标签修复只能修改服务器点名字段并使用本次字典或作者选择的候选'}]);
+    expect(()=>applyIsolatedIdeaRepairPatches([first,second],[{}],{},()=>{})).toThrow('数量不符');
+    // A forbidden manual choice remains forbidden; a legal per-card patch never implies Gate passage.
+    const fixedManual=applyIsolatedIdeaRepairPatches([first],[{dimensionPatch:{plotTags:['逆袭']}}],
+      {dimensionRepairOptions:[{plotTags:['宫斗','逆袭']}],dimensionRepairSelections:[{plotTags:['宫斗']}],
+       dimensionOnlyPositions:[0]},()=>{});
+    expect(fixedManual[0]).toBe(first);
   });
   it('repairs only authorized dictionary fields and rejects invented labels or story edits for dimension-only failures',()=>{
     const original={sourcePremiseId:'P5',storyTone:['温情','热血'],description:'既有完整故事保持不变',ending:'原结局保持不变'};
