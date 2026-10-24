@@ -5900,7 +5900,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget);
           if(reserve.replacementPremiseId)attemptedPremiseIds.add(reserve.replacementPremiseId);
           fulfillmentActions.push({kind:'original_pool_replacement',replaces:id,...reserve});
-          if(reserve.error)throw Error(reserve.error);
+          if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}
           if(!reserve.attempted)return 'unavailable';
           if(!reserve.review.passed)return 'rejected';
           const next=reserve.selection.selected[position];selectedPremises[position]=next;
@@ -6414,7 +6414,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (row?.replacesPremiseId !== plan.replacesPremiseId || !availableIds.includes(String(row?.premise?.premiseId))) {
         throw new Error('备用重选只允许使用尚未入选的原池身份替换本次问题位置');
       }
-      const candidate = normalizeTargetedPremiseReselection(value, current, plan.review, requestedCount, poolTarget, categories);
+      // A reserve replaces one existing failed slot; a previously reviewed partial
+      // selection must not be rejected for still having fewer than requestedCount.
+      // The original final delivery minimum and all independent Gates remain unchanged.
+      const candidate = normalizeTargetedPremiseReselection(value, current, plan.review, requestedCount,
+        poolTarget, categories, current.selected.length);
       const comparisonIssues = premiseReplacementComparisonIssues(value, candidate);
       if (comparisonIssues.length) throw new Error(comparisonIssues.join('；'));
       return candidate;
@@ -6424,9 +6428,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const result = await this.llmCallWithRetry<any>('锁定前原池备用重选',
         standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
         + '\n当前只处理列出的一个缺额位置，在共享预算内选择本批尚未尝试的原池成熟候选；不得沿失败身份再改措辞、改写其它位置、扩池或补生。'
-        + '\n【原池】' + JSON.stringify(initial.pool) + '\n【当前选择】' + JSON.stringify(current.selected)
+        + '\n【本次仍可换选的原池候选】' + JSON.stringify(plan.availableCandidates)
+        + '\n【当前选择】' + JSON.stringify(current.selected)
         + '\n【本次终检证据】' + JSON.stringify(review) + '\n【本问题位置】' + plan.replacesPremiseId
-        + '\n【可用备用ID】' + JSON.stringify(availableIds) + '\n分类候选=' + JSON.stringify(categories)
+        + '\n【可用备用ID（只能从这里选）】' + JSON.stringify(availableIds) + '\n分类候选=' + JSON.stringify(categories)
         + '\n【本次comparisons必须恰好覆盖的referencePremiseId】' + JSON.stringify(current.selected.filter(item=>item.premiseId!==plan.replacesPremiseId).map(item=>item.premiseId))
         + '\n' + PREMISE_REPLACEMENT_COMPARISON_POLICY
         + '\n整体继承备用骨架的实施者、对象、触发、升级与兑现，逐一比较保留项的真实因果链。'
