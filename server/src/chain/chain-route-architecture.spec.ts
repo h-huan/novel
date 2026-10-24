@@ -53,6 +53,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('不能只在人物职业、名字、道具或单个设定上有差异');
     expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
+    expect(source).toContain('qualifiedIdeas: acceptedWithAudit, warning, qualityWarning: warning, appealGate');
     expect(source).toContain('先按causalPlan核查每个关键阶段结果的全部必要条件');
     expect(source).toContain('reviewChangedPremiseSources(');
     expect(source).toContain('if(slots.length>=4)');
