@@ -109,7 +109,9 @@ describe('chain HTTP architecture', () => {
 
     expect(source).toContain('finalGateRepairAttempted');
     expect(source).toContain("repairProtocol: 'budgeted_progress_or_original_pool_replacement'");
-    expect(source).toContain('applyOrderedIdeaRepairPatches');
+    expect(source).toContain('applyIsolatedIdeaRepairPatches');
+    expect(source).toContain('retainValidAutomaticPlotTags');
+    expect(source).toContain("kind:'repair_patch_rejected'");
     expect(source).toContain('ideaGateLocalRepairDirective');
     expect(source).toContain("mode: 'budgeted_original_pool_fulfillment'");
     expect(source).toContain('selectedAccepted.length === 0');
