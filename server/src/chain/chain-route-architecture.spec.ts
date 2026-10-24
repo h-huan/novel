@@ -52,6 +52,12 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('原池缺少必要条件的，不得在展开字段里自造相反事实救活');
     expect(source).toContain('先按causalPlan核查每个关键阶段结果的全部必要条件');
     expect(source).toContain('reviewChangedPremiseSources(');
+    expect(source).toContain('if(slots.length>=4)');
+    expect(source).toContain('splitReviewMaterial(slots,slot=>');
+    expect(source).toContain('if(!await reselectScope(part,unusedIds))return false');
+    expect(source).toContain('isReviewOutputCapacityError(error)');
+    expect(source).toContain('finalReview=await reviewBoth(selected,changeScope,finalReview)');
+
     expect(source).toContain('premisePayoffReviewIssues(value,selection)');
     expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
   });
