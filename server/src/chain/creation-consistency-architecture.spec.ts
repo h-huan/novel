@@ -47,6 +47,9 @@ describe('creation consistency architecture invariants', () => {
   it('prevents cross-channel message contradictions and protects explicit action evidence during outline repair', () => {
     expect(controllerSource).toContain('【通信渠道与同源事件约束】');
     expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
+    expect(controllerSource).toContain('询问某人不等于已经得到答复');
+    expect(controllerSource).toContain('只写记录人记下姓名不能作为已记下具体观察的依据');
+    expect(controllerSource).toContain('scenes.outcome和characterActions.result只能保留为待查状态');
     expect(controllerSource).toContain('【通信渠道矛盾修复规则】');
     expect(controllerSource).toContain('不得删除或忽略该直接证据去迁就错误审查');
   });
