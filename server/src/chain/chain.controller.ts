@@ -8085,7 +8085,7 @@ ${(() => {
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
 【事实与行动结果依赖】${OUTLINE_FACT_REPAIR_SYNC_POLICY}
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
-【本章事件与状态唯一来源】本章content须按时序写清实际发生的行动、必要条件、直接结果与未完成目标。scenes.outcome、characterActions.result、characterStates.stateAfter只能投影同一已发生事实，不得把计划、猜测、未明示的决定或下一章任务写成本章结果。同一物件变更保管人时须写明交付动作、时间与双方；同一时点不得同时在两个人手中或两个地点。人物进出、立场变化必须有本章可见的触发，不能靠字段间互相复述当作已实际发生。\n【通信渠道与同源事件约束】群聊/工作群消息、该消息下的群回复、私聊回复、电话通话是不同的通信事件，必须分别保持渠道、发送者、接收者和回复状态一致。若明确写“某条群消息底下无人回复”，后文不得又称同一条群消息底下存在回复；私聊回复不能被投影成群消息回复。若确有两条消息，必须分别写清渠道和对应内容，不得合并成同一条证据。签字、承认、交付、调取等决定性动作也必须在content中明确发生，再由scenes等字段投影，不能只在辅助字段里新增。
+【本章事件与状态唯一来源】本章content须按时序写清实际发生的行动、必要条件、直接结果与未完成目标。scenes.outcome、characterActions.result、characterStates.stateAfter只能投影同一已发生事实，不得把计划、猜测、未明示的决定或下一章任务写成本章结果。同一物件变更保管人时须写明交付动作、时间与双方；同一时点不得同时在两个人手中或两个地点。人物进出、立场变化必须有本章可见的触发，不能靠字段间互相复述当作已实际发生。\n【通信渠道与同源事件约束】群聊/工作群消息、该消息下的群回复、私聊回复、电话通话是不同的通信事件，必须分别保持渠道、发送者、接收者和回复状态一致。若明确写“某条群消息底下无人回复”，后文不得又称同一条群消息底下存在回复；私聊回复不能被投影成群消息回复。若确有两条消息，必须分别写清渠道和对应内容，不得合并成同一条证据。签字、承认、交付、调取等决定性动作也必须在content中明确发生，再由scenes等字段投影，不能只在辅助字段里新增。尤其要区分“有人口头要求留下/别走”“当事人自愿在场配合”与“具有明确权限的主体实际留置或控制”：没有写明实际发生与合法权限时，不得让scenes.outcome、characterActions.result或characterStates.stateAfter擅自升级为“已扣住/被留下/无法离开”。如果已确认阶段目标不要求实际留置，就按原行动能证明的状态描述，不为填强结论虚构新权限；如确有该阶段固定结果，必须先在content里建立可实行的行动与条件。
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
 按以下文档结构生成。必要字段必须存在；允许按章节职责为空的数组会单独说明：
