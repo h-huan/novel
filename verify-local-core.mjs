@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticText, redactDiagnosticValue } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -165,7 +165,7 @@ function projectSelectionSummary(project) {
 // Runtime diagnostics depend on the same backend. Establish that prerequisite once,
 // then skip dependent probes when it is unavailable instead of reporting cascaded
 // project/standard failures that are only consequences of the same root cause.
-const health = await request('/health');
+const health = validateBackendHealth(await request('/health'));
 
 const projectDiscovery = {
   attempted: false,
