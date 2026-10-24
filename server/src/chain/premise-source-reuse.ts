@@ -9,6 +9,20 @@ type Receipt={selection:PremiseSelectionResult;review:PremiseSelectionReview};
 /** Owned by one reconciliation only. Never persists or crosses discovery runs. */
 export type PremiseSourceReceipts=Map<string,Receipt>;
 
+/** Use precisely the same cache identity when preflighting a changed selection
+ * and when executing its independent source review. */
+const sourceReceiptKey = (selection:PremiseSelectionResult, scope:string,
+  item:PremiseSelectionResult['selected'][number]) => JSON.stringify({scope,item,
+    seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
+
+/** A prospective replacement has no valid receipt, even if its old slot did. */
+export function pendingPremiseSourceReviewCount(selection:PremiseSelectionResult,scope:string,
+  receipts:PremiseSourceReceipts,changingIds:readonly string[]=[]):number {
+ const changing=new Set(changingIds);
+ return selection.selected.filter(item=>changing.has(String(item.premiseId))
+   ||!receipts.has(sourceReceiptKey(selection,scope,item))).length;
+}
+
 function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionReview,index:number):Receipt {
  const item=selection.selected[index],prefix=`S${index+1}.`;
  const rebind=(value:string)=>value.startsWith(prefix)?'S1.'+value.slice(prefix.length):value;
@@ -26,8 +40,7 @@ function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionR
 export async function reviewChangedPremiseSources(selection:PremiseSelectionResult,scope:string,
  receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult)=>Promise<PremiseSelectionReview>,
  observe?:(counts:{reused:number;reviewed:number})=>void):Promise<PremiseSelectionReview> {
- const key=(item:PremiseSelectionResult['selected'][number])=>JSON.stringify({scope,item,
-  seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
+ const key=(item:PremiseSelectionResult['selected'][number])=>sourceReceiptKey(selection,scope,item);
  const requiredGenres=(()=>{try{const parsed=JSON.parse(scope);return Array.isArray(parsed?.requiredGenres)?parsed.requiredGenres as string[]:[];}catch{return [];}})();
  const hits=selection.selected.map(item=>receipts.get(key(item)));
  const pending=selection.selected.filter((_item,index)=>!hits[index]);
