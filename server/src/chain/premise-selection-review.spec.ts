@@ -81,23 +81,37 @@ it('does not enter another provider attempt after the last physical call returns
     expect(issues.join('；')).toContain('必需ID=["P1","P14","P4","P5"]');
     expect(issues.join('；')).toContain('缺少ID=["P14","P4","P5"]');
   });
-  it('corrects all four problem slots in one shared call and independently reviews the complete final selection',async()=>{
+  it('partitions four oversized problem slots before truncation, covers all slots and independently reviews the complete final selection',async()=>{
     const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G','H','I'].map(premise),selectedPremises:['A','B','C','D','E'].map(premise)},5,9);
     const rejected:PremiseSelectionReview={passed:false,issues:['B','C','D','E'].map(premiseId=>({...failure.issues[0],premiseId}))};
-    const c=Object.create(ChainController.prototype) as any,finalIds=['A','F','G','H','I'];let remaining=0;
+    const c=Object.create(ChainController.prototype) as any,finalIds=['A','F','G','H','I'],batches:string[][]=[];
+    const replacementId:Record<string,string>={B:'F',C:'G',D:'H',E:'I'};
     c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValueOnce(rejected)
       .mockImplementation(async(current:any)=>{expect(current.selected.map((p:any)=>p.premiseId)).toEqual(finalIds);return {passed:true,issues:[]};});
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-      expect(prompt).toContain('replacements恰好4项');expect(options.physicalCallBudget.remaining).toBe(3);options.physicalCallBudget.remaining--;remaining=options.physicalCallBudget.remaining;
-      const data={replacements:['B','C','D','E'].map((replacesPremiseId,index)=>({replacesPremiseId,premise:premise(finalIds[index+1]),comparisons:finalIds.filter(id=>id!==finalIds[index+1]).map(compare)}))};
-      expect(options.validate(data)).toBe(true);expect(options.validate({replacements:data.replacements.slice(1)})).toBe(false);
+      const section=(label:string,next:string)=>prompt.split(label)[1].split(next)[0].trim();
+      const slots=JSON.parse(section('【必须处理的位置及模式】','【可用原池ID】')) as Array<{replacesPremiseId:string}>;
+      const current=JSON.parse(section('【当前选择】','【本次独立缺陷】')) as Array<{premiseId:string}>;
+      const ids=slots.map(slot=>slot.replacesPremiseId);
+      expect(ids).toHaveLength(2);
+      expect(prompt).toContain('replacements恰好2项');
+      expect(options.physicalCallBudget.remaining).toBe(3-batches.length);
+      batches.push(ids);options.physicalCallBudget.remaining--;
+      const finalBatchIds=current.map(row=>ids.includes(row.premiseId)?replacementId[row.premiseId]:row.premiseId);
+      const data={replacements:ids.map(replacesPremiseId=>{
+        const id=replacementId[replacesPremiseId];
+        return {replacesPremiseId,premise:premise(id),comparisons:finalBatchIds.filter(row=>row!==id).map(compare)};
+      })};
+      expect(options.validate(data)).toBe(true);
+      expect(options.validate({replacements:data.replacements.slice(1)})).toBe(false);
       expect(options.validate({replacements:data.replacements.map(row=>({...row,comparisons:row.comparisons.slice(1)}))})).toBe(false);
       return {data};
     });
     const result=await c.reconcilePremiseSelection(original,5,9,['悬疑'],'');
+    expect(batches.flat()).toEqual(['B','C','D','E']);
     expect(result.selected.map((p:any)=>p.premiseId)).toEqual(finalIds);expect(result.selected[0]).toEqual(original.selected[0]);
-    expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selectionAudit.partial).not.toBe(true);expect(remaining).toBe(2);
-    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
+    expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selectionAudit.partial).not.toBe(true);
+    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
   });
   it('freezes a comparison-only repair candidate and isolates invalid protocol without another selection round', async () => {
     const original=selection();original.pool.push(premise('D'));
