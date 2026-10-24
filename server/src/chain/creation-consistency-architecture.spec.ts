@@ -48,6 +48,8 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('【通信渠道与同源事件约束】');
     expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
     expect(controllerSource).toContain('询问某人不等于已经得到答复');
+    expect(controllerSource).toContain('核定金额、签署协议、办手续不等于款项实际发放或收到');
+    expect(controllerSource).toContain('不能推出整个后续时间段“始终没再进去”');
     expect(controllerSource).toContain('只写记录人记下姓名不能作为已记下具体观察的依据');
     expect(controllerSource).toContain('scenes.outcome和characterActions.result只能保留为待查状态');
     expect(controllerSource).toContain('【通信渠道矛盾修复规则】');
