@@ -5004,7 +5004,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             premiseId: 'P1',
             workingTitle: '4-16字暂名',
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
-            storyCore: '一句到两句因果骨架：人物处境与起始事件 + 主动选择及其升级 + 反转改变的胜负条件 + 兑现与代价方向；保留用户指定条件，其余路径须有实质差异',
+            storyCore: '轻量因果骨架：人物处境与起始事件、主动选择、关键证据或权限如何使结果成立、反转改变胜负条件、兑现与代价方向；不能以结局断言替代必要条件',
           }],
           selectedPremises: [{
             premiseId: 'P1',
@@ -5035,7 +5035,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本阶段不选题、不展开完整筛选字段，不输出selectedPremises。',
-          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore用一到两句写清人物处境与触发、主动选择、因果升级、改变胜负条件的反转、兑现方向与代价。',
+          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore保持轻量，但必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺实际动作的结局断言；没有可信条件就换一条能成立的故事骨架，而不是先留下缺口交给下游昂贵复核。保留反转、兑现与代价方向。',
           batchFocus,
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
           '候选之间必须在人物欲望、关系结构、主动选择、升级机制、反转作用或兑现代价上有实质差异；不能只换职业、名字或道具，也不能复用历史排除项。',
@@ -5044,7 +5044,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const minimumSelectedCount = promptPhase === 'selection'
           ? minimumSelectedCountForPool(candidatePool.length) : minimumPremiseSelectionCount;
         const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false, minimumSelectedCount)
-          .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；逐项比较全部候选后选出最成熟的题材，不得新增候选或改写原池。')
+          .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；逐项比较后优先选出“关键证据有合法取得与交付路径、关键结果有实际决定者和必要条件、代价由既定行动产生”的成熟题材。原池缺少必要条件的，不得在展开字段里自造相反事实救活；应优先从其余原池选择可成立的不同题材。不得新增候选或改写原池。')
           .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
           .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
         const promptDirective = promptPhase === 'pool' ? poolDirective
