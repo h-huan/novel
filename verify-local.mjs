@@ -41,7 +41,10 @@ function compactRun(run) {
  * Missing server data is unknown, not a successful zero-call/zero-defect result. */
 function triageThreeIssues(report) {
   const runtime = report?.runtime || {};
+  // Core already performs the single authoritative network health probe.
+  // This wrapper only records its result and local recovery instructions.
   const serverReady = runtime.health?.ok === true;
+  const healthEndpoint = String(report?.options?.baseUrl || 'http://127.0.0.1:3100/api/v1').replace(/\/$/, '') + '/health';
   const audit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery || {});
   const trace = runtime.discoveryCallTrace || {};
   const metricsAvailable = trace.source?.ok === true;
@@ -63,11 +66,26 @@ function triageThreeIssues(report) {
     schemaVersion: 1,
     prerequisite: {
       apiBaseUrl: report?.options?.baseUrl ?? null,
+      healthCheckSource: 'verify-local-core.mjs',
+      healthEndpoint,
+      healthCheck: serverReady ? 'passed' : 'blocked',
       serverReachable: serverReady,
-      healthError: runtime.health?.error ?? null,
+      healthHttpStatus: runtime.health?.status ?? null,
+      healthResponseStatus: runtime.health?.data?.status ?? null,
+      healthError: runtime.health?.error ?? (serverReady ? null : `HTTP ${runtime.health?.status ?? 'unknown'}`),
       backendLoadedRevision: runtime.backendIdentity?.loadedLocalRevision ?? 'unknown',
       localGitDirty: report?.git?.dirty ?? null,
       serverStartupStderrCollected: false,
+      // The verification script must not start/kill the user's local dev server.
+      localRecovery: serverReady ? null : {
+        startFromRepositoryRoot: 'cd desktop; npm run dev',
+        backendOnlyAlternative: 'cd server; npm run start:dev',
+        powershellHealthCheck: `Invoke-RestMethod -Uri '${healthEndpoint}' | Select-Object status, build`,
+        expectedStatus: 'ok',
+        rerun: '后端通过健康检查后，以相同参数重新运行 node verify-local.mjs',
+        diagnosticRequired: '如启动失败，保留启动终端的错误输出（含进程退出、端口占用或编译报错）。脚本不能从未运行的后端自动获取启动日志。',
+        doesNotStartBackend: true,
+      },
     },
     ideaLatency: {
       evidenceStatus: !serverReady ? 'not_collected_server_unavailable' : !audit.available ? 'no_saved_idea_audit' : 'saved_audit_available',
@@ -115,8 +133,11 @@ function threeIssueMarkdown(triage) {
   return [
     '## 三项问题专项取证状态',
     '',
-    '- 服务可达：' + (triage.prerequisite.serverReachable ? '是' : '否')
-      + '；健康检查：' + show(triage.prerequisite.healthError)
+    '- 后端健康前置条件：' + (triage.prerequisite.serverReachable ? 'PASS' : 'BLOCKED')
+      + '；地址：' + show(triage.prerequisite.healthEndpoint)
+      + '；HTTP：' + show(triage.prerequisite.healthHttpStatus)
+      + '；应用状态：' + show(triage.prerequisite.healthResponseStatus)
+      + '；错误：' + show(triage.prerequisite.healthError)
       + '；后端修订匹配：' + show(triage.prerequisite.backendLoadedRevision),
     '- ① 灵感耗时：' + latency.evidenceStatus + '；墙钟毫秒：' + show(latency.wallMs)
       + '；调用指标：' + (latency.callMetricsAvailable ? '已采集' : '未采集（不能记为0）'),
@@ -125,6 +146,17 @@ function threeIssueMarkdown(triage) {
       + '；补足停止原因：' + show(count.stopReason),
     '- ③ 创建一致性：' + creation.evidenceStatus + '；采集项目：' + creation.projects.length
       + '；失败运行数：' + (creation.projects.length ? creation.projects.reduce((n,p)=>n+p.failedRunCount,0) : '未知（未取得）'),
+    '',
+    ...(triage.prerequisite.localRecovery ? [
+      '',
+      '### 本地健康检查未通过：操作指引（由现有检查结果生成）',
+      '- 从仓库根目录启动开发环境：`' + triage.prerequisite.localRecovery.startFromRepositoryRoot + '`',
+      '- 只启动后端的备选命令：`' + triage.prerequisite.localRecovery.backendOnlyAlternative + '`',
+      '- 在 PowerShell 核对健康接口：`' + triage.prerequisite.localRecovery.powershellHealthCheck + '`（应返回 status=ok）',
+      '- 重试：' + triage.prerequisite.localRecovery.rerun,
+      '- 启动仍失败：' + triage.prerequisite.localRecovery.diagnosticRequired,
+      '- 后端未就绪时，三项问题的运行结果均为未采集；仓库单元测试通过不代表生产验收通过。',
+    ] : []),
     '',
     '### 尚缺的证据与本轮判定边界',
     ...(triage.missingEvidence.length ? triage.missingEvidence.map(item=>'- '+item) : ['- 三项问题的实际证据见下方运行审计；不能仅凭类型检查/构建通过宣布生产验收通过。']),
