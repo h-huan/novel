@@ -907,27 +907,15 @@ const DiscoveryWizardPage: React.FC = () => {
       ? `正在保留已有 ${preservedIdeas.length} 张合格卡，仅生成缺少的 ${requestedThisRun} 张...`
       : 'AI正在批量生成、校验并去重故事题材...');
 
-    // 分步进度动画：前 5 步轮转文案，之后切换为真实等待计时，避免用户以为卡死
-    const msgs = [
-      '🤖 AI 正在思考故事角度...',
-      '🔍 挖掘独特切入点...',
-      '✍️ 构思故事脉络...',
-      '🎭 塑造主角与冲突...',
-      '✨ 打磨题材细节...',
-    ];
-    let msgIdx = 0;
+    // HTTP 发现接口没有实时阶段事件；不能轮播伪造的“当前阶段”。
+    // 只报告实际经过时间、请求缺额与已冻结的合格卡数量。
     const startTime = Date.now();
     const msgInterval = setInterval(() => {
       if (requestId !== latestDiscoveryRequestId) { clearInterval(msgInterval); return; }
-      if (msgIdx < msgs.length) {
-        store.setGenProgress(msgs[msgIdx]);
-        msgIdx++;
-      } else {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const minutes = Math.floor(elapsed / 60);
-        const secs = elapsed % 60;
-        store.setGenProgress(`⏳ 已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒，当前模型正在生成并校验 ${requestedThisRun} 个题材，请勿重复点击...`);
-      }
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const minutes = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      store.setGenProgress(`已等待 ${minutes > 0 ? `${minutes} 分 ` : ''}${secs} 秒。本次请求 ${requestedThisRun} 张，已保留 ${preservedIdeas.length} 张；服务端可能处于候选生成、筛选或复核阶段，当前接口尚无实时阶段证据，请勿重复提交。`);
     }, 5000);
 
     try {
