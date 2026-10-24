@@ -44,6 +44,27 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('pool.length < premisePoolSize || malformed');
   });
 
+  it('requires causally executable seed candidates and does not relax independent quality gates', () => {
+    const source = read('chain.controller.ts');
+    // The 2026-10-24 production report had 15 seed premises but only 2 qualified:
+    // missing decisive actors/conditions were being discovered after expensive reselection.
+    expect(source).toContain('没有可信条件就换一条能成立的故事骨架');
+    expect(source).toContain('原池缺少必要条件的，不得在展开字段里自造相反事实救活');
+    expect(source).toContain('先按causalPlan核查每个关键阶段结果的全部必要条件');
+    expect(source).toContain('reviewChangedPremiseSources(');
+    expect(source).toContain('premisePayoffReviewIssues(value,selection)');
+    expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
+  });
+
+  it('prevents claims of involuntary detention or binding decisions from being created only in projections', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('口头要求留下/别走');
+    expect(source).toContain('没有写明实际发生与合法权限时');
+    expect(source).toContain('不得让scenes.outcome、characterActions.result或characterStates.stateAfter');
+    expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
+  });
+
   it('materializes each selected premise as exactly one independent full card instead of one five-card JSON batch', () => {
     const source = read('chain.controller.ts');
 
