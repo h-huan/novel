@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth } from './verify-local-diagnostics.mjs';
 
 test('normalizes the nested saved idea-discovery audit and partial-card counts', () => {
   const audit = normalizeIdeaDiscoveryAudit({
@@ -74,4 +74,20 @@ test('redacts credential-shaped keys and secret values without redacting token-c
   assert.equal(serialized.includes('secret-token'), false);
   assert.equal(serialized.includes('other-secret'), false);
   assert.equal(result.total_tokens, 1200);
+});
+
+test('health preflight rejects reachable but unrelated or unhealthy HTTP 200 services', () => {
+  assert.equal(validateBackendHealth({ ok: true, status: 200, data: { status: 'ok' } }).ok, true);
+  const unrelated = validateBackendHealth({ ok: true, status: 200, data: '<html>wrong service</html>' });
+  assert.equal(unrelated.ok, false);
+  assert.match(unrelated.error, /status=ok/);
+  const degraded = validateBackendHealth({ ok: true, status: 200, data: { status: 'degraded' } });
+  assert.equal(degraded.ok, false);
+  assert.match(degraded.error, /degraded/);
+  const unavailable = validateBackendHealth({ ok: false, status: null, error: 'fetch failed', data: null });
+  assert.equal(unavailable.ok, false);
+  assert.equal(unavailable.error, 'fetch failed');
+  const error500 = validateBackendHealth({ ok: false, status: 500, data: { status: 'down' } });
+  assert.equal(error500.ok, false);
+  assert.equal(error500.error, 'HTTP 500');
 });
