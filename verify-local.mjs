@@ -36,6 +36,102 @@ function compactRun(run) {
   };
 }
 
+
+/** Classify only evidence actually returned by the current verification run.
+ * Missing server data is unknown, not a successful zero-call/zero-defect result. */
+function triageThreeIssues(report) {
+  const runtime = report?.runtime || {};
+  const serverReady = runtime.health?.ok === true;
+  const audit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery || {});
+  const trace = runtime.discoveryCallTrace || {};
+  const metricsAvailable = trace.source?.ok === true;
+  const phases = Array.isArray(trace.phaseBreakdown) ? trace.phaseBreakdown : [];
+  const projectMap = runtime.projects && typeof runtime.projects === 'object' ? runtime.projects : {};
+  const projects = Object.entries(projectMap).map(([key, item]) => {
+    const runs = Array.isArray(item?.runTimeline) ? item.runTimeline : [];
+    const failed = runs.filter(run => String(run?.status || '').toLowerCase() === 'failed');
+    return {
+      key, projectId: item?.project?.id ?? null, status: item?.project?.status ?? null,
+      observedRunCount: runs.length, failedRunCount: failed.length,
+      recentFailedRuns: failed.slice(0, 15).map(compactRun),
+      consistencyIssues: item?.integrityAudit?.consistencyIssues ?? null,
+      creationStalled: item?.cockpit?.diagnostics?.creationStalled ?? null,
+      persistenceMismatch: item?.cockpit?.diagnostics?.persistenceMismatch ?? null,
+    };
+  });
+  return {
+    schemaVersion: 1,
+    prerequisite: {
+      apiBaseUrl: report?.options?.baseUrl ?? null,
+      serverReachable: serverReady,
+      healthError: runtime.health?.error ?? null,
+      backendLoadedRevision: runtime.backendIdentity?.loadedLocalRevision ?? 'unknown',
+      localGitDirty: report?.git?.dirty ?? null,
+      serverStartupStderrCollected: false,
+    },
+    ideaLatency: {
+      evidenceStatus: !serverReady ? 'not_collected_server_unavailable' : !audit.available ? 'no_saved_idea_audit' : 'saved_audit_available',
+      requestId: audit.discoveryRequestId ?? null, startedAt: audit.startedAt ?? null, finishedAt: audit.finishedAt ?? null,
+      wallMs: audit.startedAt && audit.finishedAt
+        ? Math.max(0, Date.parse(audit.finishedAt) - Date.parse(audit.startedAt)) || null : null,
+      callMetricsAvailable: metricsAvailable,
+      callsUnobserved: !metricsAvailable,
+      totals: metricsAvailable ? trace.totals ?? null : null,
+      slowestRecordedPhases: metricsAvailable
+        ? [...phases].sort((a,b)=>Number(b.wallMs ?? b.sumDurationMs ?? 0)-Number(a.wallMs ?? a.sumDurationMs ?? 0)).slice(0,8)
+        : [],
+      limitation: metricsAvailable ? '阶段指标反映已存储的调用；同版本分组不是实际相同输入的证明。'
+        : '模型调用指标未获取，不能将空数组视为0次调用。',
+    },
+    ideaCount: {
+      evidenceStatus: !serverReady ? 'not_collected_server_unavailable' : !audit.available ? 'no_saved_idea_audit' : 'saved_audit_available',
+      requested: audit.available ? audit.requested ?? null : null,
+      returned: audit.available ? audit.returned ?? null : null,
+      shortfall: audit.available ? audit.shortfall ?? null : null,
+      stopReason: audit.available ? audit.stopReason ?? null : null,
+      qualified: audit.available ? audit.qualified ?? null : null,
+      acceptedIds: audit.available ? audit.acceptedIdeas.map(idea => idea?.sourcePremiseId ?? null) : [],
+      limitation: '只统计服务端最后一批质量门结果；桌面端补齐后的合并显示数不在本次后端审计中。',
+    },
+    creationConsistency: {
+      evidenceStatus: !serverReady ? 'not_collected_server_unavailable'
+        : projects.length === 0 ? 'no_project_runtime_snapshot' : 'project_runtime_snapshot_available',
+      projects,
+      limitation: '失败运行仅来自现存指标与项目审计，不包括未提供的独立后端 stdout/stderr。',
+    },
+    missingEvidence: [
+      ...(!serverReady ? ['启动并验证当前 http 健康检查；需提供服务端启动错误输出与运行身份，否则三个问题的实时链路均不可判定。'] : []),
+      ...(serverReady && !audit.available ? ['缺少最近一次灵感请求审计；实际执行发现后再验收。'] : []),
+      ...(serverReady && !metricsAvailable ? ['缺少灵感生成逐步模型指标与请求关联证据；不能计算实际模型耗时、重试次数。'] : []),
+      ...(serverReady && projects.length === 0 ? ['缺少项目创建运行记录；需要失败项目的生成运行与完整性审计。'] : []),
+      ...(report?.git?.dirty ? ['本地工作区有未提交修改，Git HEAD 不能代表本轮实际运行源码；需要提供 git diff。'] : []),
+    ],
+  };
+}
+
+function threeIssueMarkdown(triage) {
+  const show = value => value === null || value === undefined ? '未知（未取得）' : String(value);
+  const latency = triage.ideaLatency, count = triage.ideaCount, creation = triage.creationConsistency;
+  return [
+    '## 三项问题专项取证状态',
+    '',
+    '- 服务可达：' + (triage.prerequisite.serverReachable ? '是' : '否')
+      + '；健康检查：' + show(triage.prerequisite.healthError)
+      + '；后端修订匹配：' + show(triage.prerequisite.backendLoadedRevision),
+    '- ① 灵感耗时：' + latency.evidenceStatus + '；墙钟毫秒：' + show(latency.wallMs)
+      + '；调用指标：' + (latency.callMetricsAvailable ? '已采集' : '未采集（不能记为0）'),
+    '- ② 题材数量：' + count.evidenceStatus + '；请求：' + show(count.requested)
+      + '；合格返回：' + show(count.returned) + '；缺额：' + show(count.shortfall)
+      + '；补足停止原因：' + show(count.stopReason),
+    '- ③ 创建一致性：' + creation.evidenceStatus + '；采集项目：' + creation.projects.length
+      + '；失败运行数：' + (creation.projects.length ? creation.projects.reduce((n,p)=>n+p.failedRunCount,0) : '未知（未取得）'),
+    '',
+    '### 尚缺的证据与本轮判定边界',
+    ...(triage.missingEvidence.length ? triage.missingEvidence.map(item=>'- '+item) : ['- 三项问题的实际证据见下方运行审计；不能仅凭类型检查/构建通过宣布生产验收通过。']),
+    '',
+  ].join('\\n');
+}
+
 function printDetailedReport(value) {
   const runtime = value?.runtime || {};
   const audit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery || {});
@@ -62,6 +158,7 @@ function printDetailedReport(value) {
     duplicateClassification: '按 stepKey 与版本元数据分组，不是实际输入指纹；需核对 Run ID 和时间窗',
     callTimeline: calls.slice(0, 50).map(compactRun), omittedCallRows: Math.max(0, calls.length - 50),
   };
+  console.log('[verify] 三项问题专项取证：\\n' + JSON.stringify(runtime.threeIssueTriage ?? null, null, 2));
   const projectRows = runtime.projects && typeof runtime.projects === 'object'
     ? Object.entries(runtime.projects) : runtime.project ? [['project', runtime]] : [];
   const projectEvidence = Object.fromEntries(projectRows.map(([key, item]) => {
@@ -119,6 +216,13 @@ if (reportUpdated) {
     console.error('[verify] 本次生成的 latest.json 无法解析：' + String(error));
   }
 
+  // Preserve the scoped diagnostic snapshot in the same latest.json the guard validates.
+  if (report) {
+    report.runtime = report.runtime || {};
+    report.runtime.threeIssueTriage = triageThreeIssues(report);
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\\n', 'utf8');
+  }
+
   const guard = spawnSync(
     process.execPath,
     [path.join(root, 'verify-local-guard.mjs'), reportPath],
@@ -137,7 +241,21 @@ if (reportUpdated) {
       guardStatus = 1;
     }
   }
-  if (report) printDetailedReport(report);
+  if (report) {
+    // The core recreates latest.md each run; add only this verification's evidence before Guard.
+    const markdownPath = path.join(root, 'verification', 'latest.md');
+    if (fs.existsSync(markdownPath)) {
+      const markdown = fs.readFileSync(markdownPath, 'utf8');
+      const section = threeIssueMarkdown(report.runtime?.threeIssueTriage || triageThreeIssues(report));
+      const separator = '\\n## Verification Guard\\n';
+      const pos = markdown.indexOf(separator);
+      const updated = pos >= 0
+        ? markdown.slice(0,pos).trimEnd() + '\\n\\n' + section + '\\n' + markdown.slice(pos)
+        : markdown.trimEnd() + '\\n\\n' + section + '\\n';
+      fs.writeFileSync(markdownPath, updated, 'utf8');
+    }
+    printDetailedReport(report);
+  }
 }
 
 if (!reportUpdated) {
