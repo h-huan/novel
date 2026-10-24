@@ -12,7 +12,7 @@ import { RealLLMService } from '../chain/real-llm.service';
 import { ChainController } from '../chain/chain.controller';
 import { BenchmarkController } from '../chain/benchmark.controller';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
-import { dimensionBasisFromPrompt } from '../test/quality-review.fixture';
+import { currentGeneratedContentFromPrompt, dimensionBasis } from '../test/quality-review.fixture';
 import { qualityIssue } from '../modules/writing-quality/quality-issue';
 import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
@@ -182,7 +182,7 @@ it('runner calls the production pipeline, isolates labels, and keeps empty state
     metrics.annotateBenchmarkSample(sample.id,['human_secret_label']);
     const spy=vi.fn(async(r:any)=>{
       expect(r.prompt).not.toContain('human_secret_label');
-      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'测试评审',evidence:[content],basis:dimensionBasisFromPrompt(r.prompt,k)}]))})};
+      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:90,reason:'测试评审',evidence:[content],basis:dimensionBasis(p.creativeConstitution,k)}]))})};
     });
     (llm as any).generateInternal=spy;
     const result:any=await controller.run({projectId:p.id,sampleIds:[sample.id]});
@@ -191,8 +191,8 @@ it('runner calls the production pipeline, isolates labels, and keeps empty state
     expect(db.prepare('SELECT COUNT(*) n FROM writing_quality_reports').get().n).toBe(0);
     (llm as any).generateInternal=vi.fn(async(r:any)=>{
       if(r.scenario==='refinement') return {content:JSON.stringify({patches:[{original:'铁门',replacement:'木门'}]})};
-      const current=r.prompt.split('当前生成结果：')[1];
-      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:k==='logic'&&!current.includes('木门')?40:90,reason:'按事实修正门材质',evidence:[current],basis:dimensionBasisFromPrompt(r.prompt,k)}]))})};
+      const current=currentGeneratedContentFromPrompt(r.prompt);
+      return {content:JSON.stringify({dimensions:Object.fromEntries(SCORE_DIMENSIONS.map(k=>[k,{score:k==='logic'&&!current.includes('木门')?40:90,reason:'按事实修正门材质',evidence:[current],basis:dimensionBasis(p.creativeConstitution,k)}]))})};
     });
     const repaired:any=await controller.run({projectId:p.id,sampleIds:[sample.id],repair:true});
     expect(repaired.status).toBe('completed');

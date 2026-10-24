@@ -15,6 +15,21 @@ describe('pending outline fact patches', () => {
     expect(applyOutlineCandidateFactPatches(input, { patches })[0].content).not.toContain('错误投影');
     expect(() => applyOutlineCandidateFactPatches(input, { patches: Array(OUTLINE_FACT_REPAIR_LIMITS.maxPatches + 1).fill(patch()) })).toThrow('项局部替换');
   });
+  it('minimally reconciles the observed group-reply conflict without deleting private-message or signature evidence', () => {
+    const content = '安全员翻出工作群报修消息，底下没人回。随后他另行展示助理发来的私聊回复。陈总问工作群报修底下的回复是谁留的，安全员把手机举高，回复就挂在报修底下，头像是沈曼助理。沈曼承认是她让助理在群里回复“今天拍完、明天换”。导演先签安全条款，威亚组、安全员和替身随后签字。';
+    const input = [{ order: 2, title: '第3章', targetWords: 3500, content,
+      scenes: JSON.stringify({ scenes: [{ outcome: '安全员展示工作群报修消息与另行收到的助理私聊回复。' }], wordCountReason: '按本章事件量安排' }) }];
+    const result = applyOutlineCandidateFactPatches(input, { patches: [
+      { chapterNumber: 3, field: 'content', match: '底下没人回', replacement: '底下有一条群回复' },
+    ] });
+    expect(result[0].content).not.toContain('底下没人回');
+    expect(result[0].content).toContain('底下有一条群回复');
+    expect(result[0].content).toContain('助理发来的私聊回复');
+    expect(result[0].content).toContain('沈曼承认是她让助理在群里回复');
+    expect(result[0].content).toContain('导演先签安全条款');
+    expect(input[0].content).toBe(content);
+  });
+
   it('repairs both projections atomically and preserves other fields and originals', () => {
     const input = candidates();
     const result = applyOutlineCandidateFactPatches(input, { patches: [patch(), patch('scenes')] });

@@ -4,6 +4,8 @@ import { isReviewOutputCapacityError, splitReviewMaterial } from './review-group
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseSourceComparisonCatalog, materializePremiseSourceReview } from './premise-selection-review';
+import { premisePayoffCatalog } from './premise-payoff-review';
+import { premiseCausalCatalog } from './premise-causal-plan';
 
 beforeEach(() => vi.spyOn(config, 'readGenerationBudgets').mockReturnValue({ ...config.GENERATION_BUDGET_DEFAULTS, reviewGroupingMode: 0 }));
 afterEach(() => vi.restoreAllMocks());
@@ -53,7 +55,7 @@ describe('aggregate review before capacity partitioning', () => {
     await expect(c.reviewIdeaPresentation(cards(), [], '', budget)).rejects.toThrow('预算不足');
     expect(budget.remaining).toBe(0); expect(leaves).toHaveLength(1);
   });
-  it('passes all fifty source checks through one production JSON helper call', async () => {
+  it('passes all fifty source checks through two scoped production JSON helper calls', async () => {
     const selection = normalizePremiseSelectionPayload({
       pool: ['A', 'B', 'C', 'D', 'E'].map(premiseId => ({ premiseId, workingTitle: '原题材' + premiseId, storyCore: '主角选择和代价推动具体关系与后果改变' + premiseId })),
       selectedPremises: ['A', 'B', 'C', 'D', 'E'].map(premiseId => ({ premiseId,
@@ -63,14 +65,27 @@ describe('aggregate review before capacity partitioning', () => {
     c.logger = { warn: vi.fn(), error: vi.fn() };
     c.realLLM = { generate: vi.fn(async (request: any) => {
       request.physicalCallBudget.remaining--;
-      return { content: JSON.stringify({ sourceChecks: premiseSourceComparisonCatalog(selection)
-        .map(row => ({ ref: row.ref, status: 'preserved', reason: '展开保持原池的行动方向与既定后果' })) }) };
+      const scopedRows = JSON.parse(String(request.prompt).split('【待锁定已选胚子】')[1].split('\n')[0]);
+      const scopedSelection = { ...selection, selected: scopedRows,
+        pool: selection.pool.filter(item => scopedRows.some((row: any) => row.premiseId === item.premiseId)) };
+      const payoffChecks = premisePayoffCatalog(scopedSelection).map((row, index) => ({
+        ref: row.ref, status: 'supported', actionEvidenceRef: 'S' + (index + 1) + '.activeChoice',
+        conditionEvidenceRef: 'S' + (index + 1) + '.escalation',
+        reason: '逐项核对兑现结果所需的实际行动与必要条件',
+        links: premiseCausalCatalog(scopedSelection.selected[index], 'S' + (index + 1) + '.').map(link => ({
+          ref: link.ref, status: 'supported', reason: '当前因果环节的行动、条件与结果相互成立',
+        })),
+      }));
+      return { content: JSON.stringify({
+        sourceChecks: premiseSourceComparisonCatalog(scopedSelection).map(row => ({ ref: row.ref, status: 'preserved', reason: '展开保持原池的行动方向与既定后果' })), 
+        payoffChecks,
+      }) };
     }) };
     const result = await c.reviewPremiseSelection(selection, '完整既有执行标准', 'source_drift', budget);
-    expect(result.sourceChecks).toHaveLength(50); expect(c.realLLM.generate).toHaveBeenCalledOnce();
-    expect(budget.remaining).toBe(5); expect(JSON.stringify(selection)).toBe(before);
+    expect(result.sourceChecks).toHaveLength(50); expect(c.realLLM.generate).toHaveBeenCalledTimes(2);
+    expect(budget.remaining).toBe(4); expect(JSON.stringify(selection)).toBe(before);
   });
-  it('source capacity partition preserves all refs and a real drift', async () => {
+  it('proactive source partition preserves all refs and a real drift', async () => {
     const selected = ['A', 'B', 'C', 'D', 'E'].map(premiseId => ({ premiseId,
       ...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(key => key !== 'differentiation').map(key => [key, premiseId === 'A' ? '甲'.repeat(1000) : '真实行动推动具体关系和后果改变'])) }));
     const selection = { selected, pool: selected.map(item => ({ ...item, storyCore: item.openingEvent })) } as any;
@@ -84,9 +99,9 @@ describe('aggregate review before capacity partitioning', () => {
         ref: row.ref, status: row.premiseId === 'D' && row.field === 'payoff' ? 'drift' : 'preserved', reason: '原池和展开的具体行动及最终代价相互核对' })) }, part);
     });
     const result = await c.reviewPremiseSelection(selection, '既有标准', 'source_drift', budget);
-    expect(sizes).toEqual([5, 1, 4]); expect(result.sourceChecks).toHaveLength(50);
+    expect(sizes).toEqual([1, 4]); expect(result.sourceChecks).toHaveLength(50);
     expect(result.sourceChecks.find((row: any) => row.ref === 'S4.payoff').status).toBe('drift');
-    expect(result.passed).toBe(false); expect(budget.remaining).toBe(3);
+    expect(result.passed).toBe(false); expect(budget.remaining).toBe(4);
   });
   it('material splitting is lossless, content-driven and terminates at a single item', () => {
     const items = cards(), groups = splitReviewMaterial(items, item => item);

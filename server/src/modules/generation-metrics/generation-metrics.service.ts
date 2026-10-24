@@ -74,6 +74,7 @@ export function chapterResponsibilityIssueSignature(issues: string[]): string {
 /** 一次 LLM 调用的遥测输入 */
 export interface StepMetricInput {
   runId?: string;
+  discoveryRequestId?: string | null;
   projectId?: string | null;
   chapterIndex?: number | null;
   stepKey?: string | null;
@@ -719,15 +720,16 @@ export class GenerationMetricsService implements OnModuleInit {
       this.databaseService.getDb()
         .prepare(
           `INSERT INTO generation_step_metrics
-            (id, project_id, chapter_index, step_key, scenario, model_version, attempt, phase,
+            (id, project_id, discovery_request_id, chapter_index, step_key, scenario, model_version, attempt, phase,
              status, fail_reason, duration_ms, prompt_chars, output_chars, output_words,
              target_words, deficit_words, prompt_tokens, completion_tokens, total_tokens,
              internal_retries, created_at, run_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           id,
           input.projectId ?? null,
+          input.discoveryRequestId ?? null,
           input.chapterIndex ?? null,
           stepKey,
           scenario,

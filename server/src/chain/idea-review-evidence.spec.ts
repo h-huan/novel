@@ -5,7 +5,7 @@ import { presentationGateIssues } from './idea-presentation-review';
 import { vi } from 'vitest';
 import { readerGoalReviewIssues } from './reader-goal-review';
 import { ideaReviewResponseExample } from './idea-review-evidence';
-import { presentationReviewIssues } from './idea-presentation-review';
+import { presentationReviewIssues, targetIdeaReviews } from './idea-presentation-review';
 const cards=[{title:'危险订单',hook:'她亲自退回赔款，决定查明停工的原因。',description:'停工让村民没了收入。她借走邻居的车去找负责人。',setting:'负责人下班必须经过唯一的大门。',ending:'她在大门等到了下班的负责人。',scopeBreakdown:[{summary:'负责人拒绝见她，她留在门口等到下班。'}],executionStandard:'非故事执行规则',lockedPremise:{storyCore:'旧胚子事实'}},
  {title:'第二张卡',hook:'其他卡真实原文不能作为第一张卡证据。'}];
 describe('server-owned idea evidence references',()=>{
@@ -93,4 +93,19 @@ describe('server-owned idea evidence references',()=>{
   expect(ideaReviewEvidenceReferenceIssues(value,cards)).toEqual([]);
  });
 
+});
+
+it('restores uniquely nested reader goals without changing weak verdicts or accepting conflicting envelopes',()=>{
+ const payload:any=ideaReviewResponseExample(),row=payload.reviews[0];row.title=cards[0].title;
+ row.readerGoals.sharing.status='weak';
+ row.payoffBridge.readerGoals=row.readerGoals;row.payoffBridge.issues=row.issues;
+ delete row.readerGoals;delete row.issues;
+ const normalized=targetIdeaReviews(payload,[cards[0]],[]);
+ const resolved=resolveIdeaReviewEvidence(normalized,[cards[0]]);
+ expect(presentationReviewIssues(resolved,[cards[0]],true)).toEqual([]);
+ expect(resolved.reviews[0].readerGoals.sharing.status).toBe('weak');
+ expect(presentationGateIssues(resolved.reviews[0]).join('；')).toContain('传播倾向');
+ expect(row.readerGoals).toBeUndefined();
+ const conflict=structuredClone(payload);conflict.reviews[0].issues=['另一份阻断结论'];
+ expect(()=>targetIdeaReviews(conflict,[cards[0]],[])).toThrow('内外的issues冲突');
 });

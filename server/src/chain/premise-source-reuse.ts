@@ -9,11 +9,25 @@ type Receipt={selection:PremiseSelectionResult;review:PremiseSelectionReview};
 /** Owned by one reconciliation only. Never persists or crosses discovery runs. */
 export type PremiseSourceReceipts=Map<string,Receipt>;
 
+/** Use precisely the same cache identity when preflighting a changed selection
+ * and when executing its independent source review. */
+const sourceReceiptKey = (selection:PremiseSelectionResult, scope:string,
+  item:PremiseSelectionResult['selected'][number]) => JSON.stringify({scope,item,
+    seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
+
+/** A prospective replacement has no valid receipt, even if its old slot did. */
+export function pendingPremiseSourceReviewCount(selection:PremiseSelectionResult,scope:string,
+  receipts:PremiseSourceReceipts,changingIds:readonly string[]=[]):number {
+ const changing=new Set(changingIds);
+ return selection.selected.filter(item=>changing.has(String(item.premiseId))
+   ||!receipts.has(sourceReceiptKey(selection,scope,item))).length;
+}
+
 function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionReview,index:number):Receipt {
  const item=selection.selected[index],prefix=`S${index+1}.`;
  const rebind=(value:string)=>value.startsWith(prefix)?'S1.'+value.slice(prefix.length):value;
  const rows=(values:any[]|undefined)=>values?.filter(row=>row.ref.startsWith(prefix)).map(row=>Object.fromEntries(
-  Object.entries(row).map(([key,value])=>[key,(key==='ref'||/EvidenceRef$/.test(key))&&typeof value==='string'?rebind(value)
+  Object.entries(row).map(([key,value])=>[key,(key==='ref'||/evidenceRef$/i.test(key))&&typeof value==='string'?rebind(value)
    :key==='links'&&Array.isArray(value)?value.map(link=>({...link,ref:rebind(link.ref)})):value])));
  const issues=review.issues.filter(issue=>issue.premiseId===item.premiseId);
  return {selection:{...selection,selected:[item],pool:selection.pool.filter(seed=>seed.premiseId===item.premiseId)},
@@ -26,8 +40,7 @@ function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionR
 export async function reviewChangedPremiseSources(selection:PremiseSelectionResult,scope:string,
  receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult)=>Promise<PremiseSelectionReview>,
  observe?:(counts:{reused:number;reviewed:number})=>void):Promise<PremiseSelectionReview> {
- const key=(item:PremiseSelectionResult['selected'][number])=>JSON.stringify({scope,item,
-  seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
+ const key=(item:PremiseSelectionResult['selected'][number])=>sourceReceiptKey(selection,scope,item);
  const requiredGenres=(()=>{try{const parsed=JSON.parse(scope);return Array.isArray(parsed?.requiredGenres)?parsed.requiredGenres as string[]:[];}catch{return [];}})();
  const hits=selection.selected.map(item=>receipts.get(key(item)));
  const pending=selection.selected.filter((_item,index)=>!hits[index]);
@@ -42,9 +55,8 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
   if(!premiseSourceReviewIssues({sourceChecks:fresh.review.sourceChecks},input).length){
    for(let index=0;index<input.selected.length;index++){
     const receipt=singleReceipt(input,fresh.review,index),r=receipt.review;
-    // Complete failed reviews are evidence, not passes: reuse the same rejection
-    // only while the premise, source, standards and required genres are identical.
-    // Never cache unknown, incomplete or contradictory review contracts.
+    // Only complete, positive checks are reusable. A rejected item must receive
+    // an independent review even when its source and standard are unchanged.
     let sourceIssuesMatch=false;
     try{
      const materialized=materializePremiseSourceReview({sourceChecks:r.sourceChecks},receipt.selection).issues;
@@ -54,7 +66,7 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
        &&a.field===b.field&&a.quote===b.quote&&a.referenceQuote===b.referenceQuote&&a.reason===b.reason;
      sourceIssuesMatch=materialized.length===recorded.length&&materialized.every(issue=>recorded.some(row=>same(issue,row)));
     }catch{}
-    if(sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
+    if(r.passed===true&&r.issues.length===0&&sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
       &&r.sourceChecks?.every(row=>row.status!=='unknown')
       &&r.payoffChecks?.length===1
       &&!premisePayoffReviewIssues({payoffChecks:r.payoffChecks},receipt.selection).length

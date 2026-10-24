@@ -23,7 +23,7 @@ it('reviews only two changed items, restores all fifty checks and rebinds eviden
  expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
  expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
 });
-it('reuses complete unchanged failed evidence without turning rejection into acceptance; invalid and unknown reviews are not cached',async()=>{
+it('rechecks unchanged failed evidence without turning rejection into acceptance; invalid and unknown reviews are not cached',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map();
  const review=vi.fn(async pending=>{const r=report(pending),index=pending.selected.findIndex(item=>item.premiseId==='B');
   if(index>=0){
@@ -35,12 +35,12 @@ it('reuses complete unchanged failed evidence without turning rejection into acc
   }return r;});
  await reviewChangedPremiseSources(input,'standard',cache,review);
  const result=await reviewChangedPremiseSources(input,'standard',cache,review);
- expect(review).toHaveBeenCalledTimes(1);
+ expect(review.mock.calls.map(([pending])=>pending.selected.map(item=>item.premiseId))).toEqual([['A','B','C','D','E'],['B']]);
  expect(result.passed).toBe(false);expect(result.issues[0].premiseId).toBe('B');
  expect(result.sourceChecks?.find(row=>row.ref==='S2.activeChoice')?.status).toBe('drift');
  const changed=structuredClone(input);changed.selected[1].activeChoice+='新事实';
  await reviewChangedPremiseSources(changed,'standard',cache,review);
- expect(review.mock.calls[1][0].selected.map(item=>item.premiseId)).toEqual(['B']);
+ expect(review.mock.calls[2][0].selected.map(item=>item.premiseId)).toEqual(['B']);
  const missing=vi.fn(async()=>({passed:true,issues:[]}));const empty:PremiseSourceReceipts=new Map();
  await reviewChangedPremiseSources(input,'standard',empty,missing);expect(empty.size).toBe(0);
  const unknown=vi.fn(async pending=>{const r=report(pending);r.sourceChecks![0].status='unknown';return r;});
@@ -62,4 +62,28 @@ it('passes complete per-card standards into a local repair without allowing iden
  const prompt=ideaGateLocalRepairDirective([{card:{storyCategory:'古言甜宠'},executionStandard:'本卡甜宠要求：关系升温与具体照顾须推动选择',gateIssues:['修复缺少必要条件的因果']}]);
  expect(prompt).toContain('本卡甜宠要求：关系升温与具体照顾须推动选择');
  expect(prompt).toContain('不能只修点名因果');expect(prompt).toContain('不要输出平台、分类、篇幅、章数或任何内部标识');
+});
+
+
+it('reuses real category and manual-genre evidence after single-card rebinding and reordering',async()=>{
+ const original=selection();
+ for(const item of [...original.selected,...original.pool])item.storyCategory='悬疑';
+ const scope=JSON.stringify({standard:'相同来源与分类要求',requiredGenres:['扮猪吃虎']});
+ const cache:PremiseSourceReceipts=new Map(),review=vi.fn(async pending=>report(pending));
+ await reviewChangedPremiseSources(original,scope,cache,review);
+ expect(cache.size).toBe(5);
+ const next=structuredClone(original);
+ next.selected=[next.selected[3],next.selected[1],next.selected[0],next.selected[4],next.selected[2]];
+ next.selected[1].activeChoice+='一项新的实际行动';
+ next.selected[3].payoff+='一项新的实际结果';
+ const result=await reviewChangedPremiseSources(next,scope,cache,review);
+ expect(review.mock.calls.map(([pending])=>pending.selected.map(item=>item.premiseId)))
+  .toEqual([['A','B','C','D','E'],['B','E']]);
+ expect(result.passed).toBe(true);
+ expect(result.sourceChecks).toHaveLength(50);
+ for(let index=0;index<next.selected.length;index++){
+  const prefix='S'+(index+1)+'.';
+  expect(result.genreChecks?.find(row=>row.ref===prefix+'genre1')?.evidenceRef).toBe(prefix+'activeChoice');
+  expect(result.categoryChecks?.find(row=>row.ref===prefix+'category')?.evidenceRef).toBe(prefix+'coreConflict');
+ }
 });

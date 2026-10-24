@@ -92,6 +92,7 @@ export interface LLMRequest {
    */
   metrics?: {
     runId?: string;
+    discoveryRequestId?: string | null;
     projectId?: string | null;
     chapterIndex?: number | null;
     stepKey?: string | null;

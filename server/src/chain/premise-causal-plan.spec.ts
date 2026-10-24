@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertPremiseCausalPlans, premiseCausalPlanIssues } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues } from './premise-causal-plan';
 import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { materializePremisePayoffReview, premisePayoffReviewIssues } from './premise-payoff-review';
 import { materializePremiseSourceReview, normalizePremiseReselection, premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -33,6 +33,42 @@ function report(s:ReturnType<typeof selection>) {
 }
 
 describe('plan critical prerequisites before full story cards',()=>{
+  it('recovers only the exact terminal semicolon in the observed selected P1 source anchors',()=>{
+    const p:any={
+      premiseId:'P1',
+      activeChoice:'我借地磅单和送货司机的抽检单，匿名打质量热线请质检站到站抽检。',
+      escalation:'质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责；老板的弟弟开始查是谁把钢筋混进废钢。',
+      reversalEffect:'老板早知道调包，还想把我推出去顶罪；我提前把十年分拣记录藏在秤台下，交给质检站和工地监理。',
+      payoff:'废品站关停，我没了藏身处，却被质检站聘为协管员，第一次用真名签字。',
+      causalPlan:[
+        {action:{field:'activeChoice',quote:'我借地磅单和送货司机的抽检单，匿名打质量热线请质检站到站抽检。'},
+          conditions:[],result:{field:'escalation',quote:'质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责。'}},
+        {action:{field:'reversalEffect',quote:'我提前把十年分拣记录藏在秤台下，交给质检站和工地监理。'},
+          conditions:[{field:'reversalEffect',quote:'老板早知道调包，还想把我推出去顶罪。'}],
+          result:{field:'payoff',quote:'废品站关停，我没了藏身处，却被质检站聘为协管员，第一次用真名签字。'}},
+      ],
+    };
+    const original=structuredClone(p);
+    expect(premiseCausalPlanIssues(p)).toEqual(expect.arrayContaining([
+      expect.stringContaining('causalPlan[0]'),expect.stringContaining('causalPlan[1]')]));
+    const bound=bindPremiseCausalPlan(p) as any;
+    expect(bound.causalPlan[0].result.quote).toBe('质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责；');
+    expect(bound.causalPlan[1].conditions[0].quote).toBe('老板早知道调包，还想把我推出去顶罪；');
+    expect(premiseCausalPlanIssues(bound)).toEqual([]);
+    expect(p).toEqual(original);
+    const changed=structuredClone(p);
+    changed.causalPlan[0].result.quote='质检员未按炉批号追溯，报告显示屈服强度不达标，工地停工追责。';
+    expect(premiseCausalPlanIssues(bindPremiseCausalPlan(changed))).not.toEqual([]);
+    const ambiguous=structuredClone(p);
+    ambiguous.escalation='质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责；'+p.escalation;
+    expect(premiseCausalPlanIssues(bindPremiseCausalPlan(ambiguous))).not.toEqual([]);
+  });
+  it('requires exact copied field punctuation in the authoring rule without weakening causal quality checks',()=>{
+    const directive=ideaPremiseSelectionDirective('short_story',5);
+    expect(directive).toContain('原文以“；”连接分句时不得擅自改成“。”');
+    expect(directive).toContain('修改字段后须同步复制实际引用');
+    expect(directive).toContain('conditions可为空的只有普通直接因果');
+  });
   it('requires a real plan at the live boundary and never fabricates it from old prose',()=>{
     const s=selection();delete (s.selected[0] as any).causalPlan;
     expect(()=>assertPremiseCausalPlans(s)).toThrow('生成前因果计划未完成');

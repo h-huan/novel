@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
   confirmedIdeaStoryCard,
+  separateIdeaDiscoveryAudit,
   applyOrderedIdeaRepairPatches,
+  applyIsolatedIdeaRepairPatches,
+  retainValidAutomaticPlotTags,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
   ideaGateLocalRepairDirective,
@@ -11,6 +14,7 @@ import {
   ideaDiscoveryAuthorSettings,
   ideaDiscoveryAuthorContext,
   normalizePremiseSelectionPayload,
+  minimumAcceptableIdeaCount,
   selectedPremiseEvidenceForIdeaCard,
 } from './idea-discovery-contract';
 
@@ -39,6 +43,38 @@ describe('idea discovery preselection contract', () => {
     for(const field of ['activeChoice','escalation','reversalEffect','payoff']) {
       expect(()=>normalizePremiseSelectionPayload({pool,selectedPremises:[{...item,[field]:''}]},1,1)).toThrow(field);
     }
+  });
+  it('keeps only already generated legal automatic tags, without choosing new tags or overriding manual choices',()=>{
+    const raw={plotTags:['宫斗','字典外的自造标签','逆袭','宫斗'],description:'不可改动的故事事件'};
+    const valid=retainValidAutomaticPlotTags(raw,[],['宫斗','逆袭','悬念反转']);
+    expect(valid.plotTags).toEqual(['宫斗','逆袭']);
+    expect(valid.description).toBe(raw.description);
+    expect(raw.plotTags).toHaveLength(4);
+    expect(retainValidAutomaticPlotTags(raw,['宫斗'],['宫斗'])).toBe(raw);
+    const unknown={plotTags:['完全不存在的词']};
+    expect(retainValidAutomaticPlotTags(unknown,[],['宫斗'])).toBe(unknown);
+    expect(retainValidAutomaticPlotTags({plotTags:[]},[],['宫斗'])).toEqual({plotTags:[]});
+  });
+  it('isolates illegal card repair patches while preserving exact accepted dictionary and story rules',()=>{
+    const first={sourcePremiseId:'P6',plotTags:['字典外标签'],description:'原故事一'};
+    const second={sourcePremiseId:'P2',plotTags:['宫斗'],description:'原故事二'};
+    const rejected:any[]=[];
+    const fixed=applyIsolatedIdeaRepairPatches([first,second],
+      [{dimensionPatch:{plotTags:['字典外标签']}},{description:'对原故事二已经核实的实际条件作局部补正'}],
+      {dimensionRepairOptions:[{plotTags:['宫斗','逆袭']},{}],
+       dimensionOnlyPositions:[0],metadataOnlyPositions:[0],
+       storyRepairPositions:[1]},
+      (index,error)=>rejected.push({index,reason:String((error as Error).message)}));
+    expect(fixed[0]).toBe(first);
+    expect(fixed[1].description).toBe('对原故事二已经核实的实际条件作局部补正');
+    expect(fixed[1].sourcePremiseId).toBe('P2');
+    expect(rejected).toEqual([{index:0,reason:'标签修复只能修改服务器点名字段并使用本次字典或作者选择的候选'}]);
+    expect(()=>applyIsolatedIdeaRepairPatches([first,second],[{}],{},()=>{})).toThrow('数量不符');
+    // A forbidden manual choice remains forbidden; a legal per-card patch never implies Gate passage.
+    const fixedManual=applyIsolatedIdeaRepairPatches([first],[{dimensionPatch:{plotTags:['逆袭']}}],
+      {dimensionRepairOptions:[{plotTags:['宫斗','逆袭']}],dimensionRepairSelections:[{plotTags:['宫斗']}],
+       dimensionOnlyPositions:[0]},()=>{});
+    expect(fixedManual[0]).toBe(first);
   });
   it('repairs only authorized dictionary fields and rejects invented labels or story edits for dimension-only failures',()=>{
     const original={sourcePremiseId:'P5',storyTone:['温情','热血'],description:'既有完整故事保持不变',ending:'原结局保持不变'};
@@ -80,6 +116,10 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('选择导致的升级—改变胜负条件—兑现及代价');
     expect(contract).toContain('共同条件之外的选择、升级机制和兑现路径仍应分别构思');
     expect(contract).toContain('不默认取pool前几项');
+    expect(contract).toContain('建立能指向责任人的具体比对依据');
+    expect(contract).toContain('已问话不等于已取得回答');
+    expect(contract).toContain('对手获知的途径');
+    expect(contract).toContain('普通直接因果不补无关手续或法律条文');
   });
 
   it('carries the whole causal chain into one-card structuring', () => {
@@ -102,6 +142,78 @@ describe('idea discovery preselection contract', () => {
     expect(result.pool).toHaveLength(5);
     expect(result.selected).toHaveLength(5);
     expect(result.poolTargetMet).toBe(false);
+  });
+
+  it('continues with a qualified partial pool when the search target exceeds the minimum deliverable count', () => {
+    const pool = Array.from({ length: 3 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '成熟候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具有独立选择、升级和兑现路径的轻量题材骨架。',
+    }));
+    const result = normalizePremiseSelectionPayload({
+      pool,
+      selectedPremises: pool.map(item => selectedPremise(item.premiseId)),
+    }, 5, 15, undefined, 3);
+
+    expect(result.pool).toHaveLength(3);
+    expect(result.selected).toHaveLength(3);
+    expect(result.poolTargetMet).toBe(false);
+    expect(() => normalizePremiseSelectionPayload({
+      pool: pool.slice(0, 2),
+      selectedPremises: pool.slice(0, 2).map(item => selectedPremise(item.premiseId)),
+    }, 5, 15, undefined, 3)).toThrow('低于最低可交付数量 3 个');
+  });
+
+  it('allows fixed-pool selection to proceed with one qualified candidate when the broad pool is short', () => {
+    const pool = [1, 2].map(index => ({
+      premiseId: 'P' + index,
+      workingTitle: '候选' + index,
+      storyCore: '这是一个具有独立选择、升级和兑现路径的轻量题材骨架' + index,
+    }));
+    const result = normalizePremiseSelectionPayload({
+      pool,
+      selectedPremises: [selectedPremise('P1')],
+    }, 5, 15, undefined, 1);
+    const directive = ideaPremiseSelectionDirective('short_story', 5, 15, false, 1);
+
+    expect(result.pool).toHaveLength(2);
+    expect(result.selected).toHaveLength(1);
+    expect(result.poolTargetMet).toBe(false);
+    expect(directive).toContain('只有 1-5 个题材真正满足');
+    expect(directive).toContain('selectedPremises 返回 1-5 项');
+    expect(directive).toContain('绝不为了凑数加入弱项');
+  });
+
+  it('asks the fixed-pool selector for as many mature premises as exist without padding weak candidates', () => {
+    const directive = ideaPremiseSelectionDirective('short_story', 5, 15, false, 3);
+    expect(directive).toContain('只有 3-5 个题材真正满足');
+    expect(directive).toContain('selectedPremises 返回 3-5 项');
+    expect(directive).toContain('绝不为了凑数加入弱项');
+    expect(ideaPremiseSelectionDirective('short_story', 5)).toContain('selectedPremises 返回 恰好 5 项');
+  });
+
+  it('allows fewer independently selected mature premises without relaxing evidence requirements', () => {
+    const pool = Array.from({ length: 15 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具备独立因果路径的轻量题材骨架。',
+    }));
+    const four = pool.slice(0, 4).map(item => selectedPremise(item.premiseId));
+    const result = normalizePremiseSelectionPayload({ pool, selectedPremises: four }, 5, 15, undefined, 3);
+    expect(result.selected).toHaveLength(4);
+    expect(result.poolTargetMet).toBe(true);
+
+    const three = normalizePremiseSelectionPayload({ pool, selectedPremises: four.slice(0, 3) }, 5, 15, undefined, 3);
+    expect(three.selected).toHaveLength(3);
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: four.slice(0, 2) }, 5, 15, undefined, 3))
+      .toThrow('3-5 个成熟题材');
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: four }, 5, 15))
+      .toThrow('5-5 个成熟题材');
+
+    const missingEvidence = four.slice(0, 3).map(item => ({ ...item }));
+    missingEvidence[1] = { ...missingEvidence[1], payoff: '' };
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: missingEvidence }, 5, 15, undefined, 3))
+      .toThrow('payoff');
   });
 
   it('ignores malformed unselected extras instead of letting one weak pool item zero the whole batch', () => {
@@ -354,6 +466,18 @@ describe('server-owned selected-premise evidence', () => {
     expect(JSON.stringify(card)).not.toContain('protagonistSituation');
   });
 
+  it('preserves server-owned premise authority when an automatic plot tag is removed',()=>{
+    const premise=selectedPremise('P-tag-evidence');
+    const card=bindStructuredIdeaCardToPremise(premise,[{title:'自动标签归位',hook:'已有明确的初始冲突和可验证的真实行动路径。'}]);
+    card.plotTags=['宫斗','模型自造词'] as any;
+    const normalized=retainValidAutomaticPlotTags(card,[],['宫斗','逆袭']);
+    expect(normalized.plotTags).toEqual(['宫斗']);
+    expect(selectedPremiseEvidenceForIdeaCard(normalized)).toEqual(expect.objectContaining({
+      premiseId:'P-tag-evidence',activeChoice:premise.activeChoice
+    }));
+    expect(normalized.sourcePremiseId).toBe('P-tag-evidence');
+    expect(JSON.stringify(normalized)).not.toContain(premise.activeChoice);
+  });
   it('preserves the same server-owned evidence across a bounded local repair clone', () => {
     const premise = selectedPremise('P-repair-evidence');
     const card = bindStructuredIdeaCardToPremise(premise, [{
@@ -447,4 +571,39 @@ it('packs local repair standards losslessly with per-card facts and all pending 
  expect(data.cards.map((row:any)=>row.gateIssues)).toEqual(targets.map(row=>row.gateIssues));
  expect(data.cards.map((row:any)=>row.card)).toEqual(targets.map(row=>row.card));
  expect(JSON.stringify(targets)).toBe(before);
+});
+
+
+describe('minimum acceptable idea count', () => {
+  it('allows at most two missing cards without making a three-card request collapse to one', () => {
+    expect([1, 2, 3, 4, 5, 6, 7].map(minimumAcceptableIdeaCount)).toEqual([1, 2, 3, 3, 3, 4, 5]);
+    expect(() => minimumAcceptableIdeaCount(0)).toThrow('正整数');
+  });
+});
+
+
+describe('confirmed story persistence boundary', () => {
+  it('keeps the batch discovery audit separate from the canonical selected story without mutating input', () => {
+    const input = {
+      title: '已选题材',
+      sourcePremiseId: 'P2',
+      ideaDiscoveryAudit: {
+        schemaVersion: 8,
+        acceptedEvidence: [{ sourcePremiseId: 'P2', title: '已选题材' }],
+        candidateAssessments: [{ sourcePremiseId: 'P3', passed: false, issues: ['不合格候选'] }],
+      },
+    };
+    const original = structuredClone(input);
+    const result = separateIdeaDiscoveryAudit(input);
+    expect(result.confirmedStory).toEqual({ title: '已选题材', sourcePremiseId: 'P2' });
+    expect(result.ideaDiscoveryAudit).toEqual(original.ideaDiscoveryAudit);
+    expect(input).toEqual(original);
+    expect(JSON.stringify(result.confirmedStory)).not.toContain('candidateAssessments');
+  });
+
+  it('does not invent an audit when the selected story has none', () => {
+    const result = separateIdeaDiscoveryAudit({ title: '自定义题材' });
+    expect(result.confirmedStory).toEqual({ title: '自定义题材' });
+    expect(result.ideaDiscoveryAudit).toBeNull();
+  });
 });

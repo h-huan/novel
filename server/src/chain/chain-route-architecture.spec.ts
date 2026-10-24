@@ -44,6 +44,37 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('pool.length < premisePoolSize || malformed');
   });
 
+  it('requires causally executable seed candidates and does not relax independent quality gates', () => {
+    const source = read('chain.controller.ts');
+    // The 2026-10-24 production report had 15 seed premises but only 2 qualified:
+    // missing decisive actors/conditions were being discovered after expensive reselection.
+    expect(source).toContain('没有可信条件就换一条能成立的故事骨架');
+    expect(source).toContain('原池缺少必要条件的，不得在展开字段里自造相反事实救活');
+    expect(source).toContain('不能只在人物职业、名字、道具或单个设定上有差异');
+    expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
+    expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
+    expect(source).toContain('qualifiedIdeas: acceptedWithAudit, warning, qualityWarning: warning, appealGate');
+    expect(source).toContain('先按causalPlan核查每个关键阶段结果的全部必要条件');
+    expect(source).toContain('reviewChangedPremiseSources(');
+    expect(source).toContain('if(slots.length>=4)');
+    expect(source).toContain('splitReviewMaterial(slots,slot=>');
+    expect(source).toContain('if(!await reselectScope(part,unusedIds))return false');
+    expect(source).toContain('isReviewOutputCapacityError(error)');
+    expect(source).toContain('finalReview=await reviewBoth(selected,changeScope,finalReview)');
+
+    expect(source).toContain('premisePayoffReviewIssues(value,selection)');
+    expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
+  });
+
+  it('prevents claims of involuntary detention or binding decisions from being created only in projections', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('口头要求留下/别走');
+    expect(source).toContain('没有写明实际发生与合法权限时');
+    expect(source).toContain('不得让scenes.outcome、characterActions.result或characterStates.stateAfter');
+    expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
+  });
+
   it('materializes each selected premise as exactly one independent full card instead of one five-card JSON batch', () => {
     const source = read('chain.controller.ts');
 
@@ -64,7 +95,7 @@ describe('chain HTTP architecture', () => {
     const gate = read('idea-appeal-gate.service.ts');
 
     expect(contract).toContain('selectedPremiseEvidenceByCard = new WeakMap');
-    expect(contract).toContain('selectedPremiseEvidenceByCard.set(boundCard, { ...selectedPremise })');
+    expect(contract).toContain('selectedPremiseEvidenceByCard.set(boundCard, structuredClone(selectedPremise))');
     expect(contract).toContain('const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(card)');
     expect(contract).toContain('selectedPremiseEvidenceByCard.set(next, selectedPremiseEvidence)');
     expect(gate).toContain('selectedPremiseEvidenceForIdeaCard(idea)');
@@ -77,10 +108,12 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('finalGateRepairAttempted');
-    expect(source).toContain("repairProtocol: 'ordered_local_patch_server_owned_identity'");
-    expect(source).toContain('applyOrderedIdeaRepairPatches');
+    expect(source).toContain("repairProtocol: 'budgeted_progress_or_original_pool_replacement'");
+    expect(source).toContain('applyIsolatedIdeaRepairPatches');
+    expect(source).toContain('retainValidAutomaticPlotTags');
+    expect(source).toContain("kind:'repair_patch_rejected'");
     expect(source).toContain('ideaGateLocalRepairDirective');
-    expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
+    expect(source).toContain("mode: 'budgeted_original_pool_fulfillment'");
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
     expect(source).toContain("status: 'incomplete'");
@@ -92,14 +125,31 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('系统不会把部分结果伪装成完整成功');
   });
 
+  it('keeps the desktop discovery wizard aligned with the server partial-success response contract', () => {
+    const desktopPage = fs.readFileSync(
+      path.resolve(chainDir, '../../../desktop/src/renderer/pages/DiscoveryWizardPage.tsx'),
+      'utf8',
+    );
+    expect(desktopPage).toContain("result.status === 'partial'");
+    expect(desktopPage).toContain("result.status === 'incomplete'");
+    expect(desktopPage).toContain('normalizeDiscoveryResponse(res, requestedThisRun)');
+    expect(desktopPage).toContain('count: requestedThisRun');
+    expect(desktopPage).toContain('mergeDiscoveryBatch(preservedIdeas, newIdeas, configuredState.ideaCount)');
+  });
+
   it('repairs outline fact conflicts as a local patch instead of regenerating the whole chapter plan', () => {
     const source = read('chain.controller.ts');
 
-    expect(source).toContain('factRepairFields');
+    const patch = read('outline-fact-patch.ts');
+    expect(source).toContain('OUTLINE_FACT_REPAIR_FIELDS');
     expect(source).toContain('禁止重新生成完整章纲');
-    expect(source).toContain('const preservedTargetWords = chData.targetWords');
-    expect(source).toContain('const preservedWordCountReason = chData.wordCountReason');
+    expect(source).toContain('const actionRepairEvidence = chapterActionRepairEvidence(chData, dependencyCheck.actionFailure)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
+    expect(source).toContain('chData = applyOutlineFactPatch(chData,rawPatch)');
     expect(source).toContain("shortOutlineSourceRunIds.add(String(repair.runId))");
+    expect(patch).toContain('OUTLINE_FACT_REPAIR_FIELDS = [');
+    expect(patch).not.toContain("'targetWords'");
+    expect(patch).not.toContain("'wordCountReason'");
     expect(source).not.toContain('只输出与当前章纲同字段的完整 JSON 对象；修复后所有事件');
   });
 });

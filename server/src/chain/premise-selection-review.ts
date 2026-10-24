@@ -10,6 +10,7 @@ export interface PremiseSourceCheck {
 
 export interface PremiseSelectionReview {
   passed: boolean;
+  sourceReviewReuse?: { reused: number; reviewed: number };
   issues: Array<{ kind: 'overlap' | 'source_drift' | 'selection_fit'; premiseId: string; referencePremiseId: string;
     quote: string; referenceQuote: string; reason: string; field?: string }>;
   sourceChecks?: PremiseSourceCheck[];
@@ -123,7 +124,7 @@ export function materializePremiseSourceReview(value: unknown, selection: Premis
 
 /** Only the original pool may be used before lock; unaffected choices stay server-owned. */
 export function normalizePremiseReselection(value: unknown, original: PremiseSelectionResult,
-  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[]): PremiseSelectionResult {
+  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[], minimumSelectedCount = requestedCount): PremiseSelectionResult {
   const rows = (value as any)?.selectedPremises;
   if (!Array.isArray(rows)) throw new Error('原池重选须提供selectedPremises');
   const affected = new Set(review.issues.map(issue => issue.premiseId));
@@ -138,7 +139,7 @@ export function normalizePremiseReselection(value: unknown, original: PremiseSel
       storyCore: seed.storyCore, ...(seed.storyCategory ? { storyCategory: seed.storyCategory } : {}),
       ...(seed.storyCategoryId ? { storyCategoryId: seed.storyCategoryId } : {}) };
   });
-  const normalized = normalizePremiseSelectionPayload({ pool: original.pool, selectedPremises }, requestedCount, poolTarget, categories);
+  const normalized = normalizePremiseSelectionPayload({ pool: original.pool, selectedPremises }, requestedCount, poolTarget, categories, minimumSelectedCount);
   if (original.selected.some(item => item.causalPlan !== undefined)) assertPremiseCausalPlans(normalized);
   return normalized;
 }
@@ -163,7 +164,7 @@ export function premiseReselectionPlan(original: PremiseSelectionResult, review:
 
 /** Targeted protocol: repair only named slots, merge in original order, then run all existing gates. */
 export function normalizeTargetedPremiseReselection(value: unknown, original: PremiseSelectionResult,
-  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[]): PremiseSelectionResult {
+  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[], minimumSelectedCount = requestedCount): PremiseSelectionResult {
   const plan = premiseReselectionPlan(original, review);
   const replacements = (value as any)?.replacements;
   if (!Array.isArray(replacements) || replacements.length !== plan.repairSlots.length) throw new Error('定向重选必须逐项覆盖所有问题位置，只返回replacements，不返回整批题材');
@@ -179,7 +180,7 @@ export function normalizeTargetedPremiseReselection(value: unknown, original: Pr
     bySlot.set(slotId, row);
   }
   const selectedPremises = original.selected.map(item => bySlot.get(String(item.premiseId)) || item);
-  return normalizePremiseReselection({selectedPremises}, original, review, requestedCount, poolTarget, categories);
+  return normalizePremiseReselection({selectedPremises}, original, review, requestedCount, poolTarget, categories, minimumSelectedCount);
 }
 
 /** Isolate evidenced failures after completed reviews, without rewriting retained premises.
@@ -201,6 +202,58 @@ export function retainReviewedPremises(selection: PremiseSelectionResult, review
     selection: { ...selection, selected: selection.selected.filter(item => !excluded.has(String(item.premiseId))) },
     excludedPremiseIds: [...excluded],
     reasons: review.issues,
+  };
+}
+
+
+/** Reuse the completed review for a retained subset. Every remaining premise and
+ * every remaining pair was already covered by the original review; dropping a
+ * failed premise cannot require another paid review. Re-index S<n> evidence for
+ * the subset while preserving the initial full review separately in the audit. */
+export function retainPremiseReviewEvidence(
+  original: PremiseSelectionResult,
+  review: PremiseSelectionReview,
+  retained: PremiseSelectionResult,
+): PremiseSelectionReview {
+  const retainedIds = new Set(retained.selected.map(item => String(item.premiseId)));
+  const issues = review.issues.filter(item => item.kind === 'overlap'
+    ? retainedIds.has(String(item.premiseId)) && retainedIds.has(String(item.referencePremiseId))
+    : retainedIds.has(String(item.premiseId)));
+  const remapReference = (value: unknown, oldIndex: number, newIndex: number): unknown => {
+    if (typeof value !== 'string') return value;
+    const oldPrefix = 'S' + oldIndex + '.';
+    return value.startsWith(oldPrefix) ? 'S' + newIndex + '.' + value.slice(oldPrefix.length) : value;
+  };
+  const remap = <T extends { ref: string }>(rows: T[] | undefined): T[] | undefined => {
+    if (!Array.isArray(rows)) return undefined;
+    return rows.flatMap(row => {
+      const match = String(row.ref || '').match(/^S(\d+)\.(.+)$/);
+      if (!match) return [row];
+      const oldIndex = Number(match[1]);
+      const originalPremise = original.selected[oldIndex - 1];
+      if (!originalPremise || !retainedIds.has(String(originalPremise.premiseId))) return [];
+      const newIndex = retained.selected.findIndex(item => String(item.premiseId) === String(originalPremise.premiseId)) + 1;
+      if (newIndex <= 0) return [];
+      const mapped: Record<string, any> = { ...row, ref: 'S' + newIndex + '.' + match[2] };
+      for (const key of ['evidenceRef', 'actionEvidenceRef', 'conditionEvidenceRef']) {
+        if (key in mapped) mapped[key] = remapReference(mapped[key], oldIndex, newIndex);
+      }
+      if (Array.isArray(mapped.links)) mapped.links = mapped.links.map((link: any) => link && typeof link === 'object'
+        ? { ...link, ref: remapReference(link.ref, oldIndex, newIndex) } : link);
+      return [mapped as T];
+    });
+  };
+  const sourceChecks = remap(review.sourceChecks);
+  const payoffChecks = remap(review.payoffChecks);
+  const categoryChecks = remap(review.categoryChecks);
+  const genreChecks = remap(review.genreChecks);
+  return {
+    passed: issues.length === 0,
+    issues,
+    ...(sourceChecks ? { sourceChecks } : {}),
+    ...(payoffChecks ? { payoffChecks } : {}),
+    ...(categoryChecks ? { categoryChecks } : {}),
+    ...(genreChecks ? { genreChecks } : {}),
   };
 }
 
@@ -231,11 +284,14 @@ export function premiseReserveReselectionPlan(initial: PremiseSelectionResult, c
 
 /** Reused old pairs cannot veto an unrelated replacement. Out-of-scope findings
  * are protocol errors; they must never be silently discarded to obtain a pass. */
-export function premiseOverlapScopeIssues(value:unknown,selection:PremiseSelectionResult,focusId?:string):string[]{
- if(!focusId)return [];
- if(!selection.selected.some(item=>item.premiseId===focusId))return ['同构审核变化项不在当前选择中'];
+export function premiseOverlapScopeIssues(value:unknown,selection:PremiseSelectionResult,focusIds?:string|readonly string[]):string[]{
+ const ids=focusIds===undefined?[]:typeof focusIds==='string'?[focusIds]:[...focusIds];
+ if(!ids.length)return [];
+ const selectedIds=new Set(selection.selected.map(item=>String(item.premiseId)));
+ if(ids.some(id=>!selectedIds.has(String(id))))return ['同构审核变化项不在当前选择中'];
+ const focused=new Set(ids.map(String));
  const issues=(value as PremiseSelectionReview)?.issues;
  if(!Array.isArray(issues))return [];
- return issues.filter(item=>item.premiseId!==focusId&&item.referencePremiseId!==focusId)
+ return issues.filter(item=>!focused.has(String(item.premiseId))&&!focused.has(String(item.referencePremiseId)))
   .map(()=> '本次同构审核只允许返回变化项与保留项之间的问题，旧配对不得重复否决换选');
 }

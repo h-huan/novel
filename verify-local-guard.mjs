@@ -8,18 +8,34 @@ const reportPath = process.argv[2] || path.join(root, 'verification', 'latest.js
 const markdownPath = path.join(path.dirname(reportPath), 'latest.md');
 const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
 const mode = String(report?.options?.mode || '');
+const fullTests = report?.options?.fullTests === true;
 const problems = new Set(Array.isArray(report?.verdict?.runtimeProblems) ? report.verdict.runtimeProblems : []);
 const terminalPersistenceMismatches = [];
+const backendIdentity = report?.runtime?.backendIdentity;
 
-if (mode.includes('short_and_long')) {
+if (!backendIdentity || typeof backendIdentity !== 'object') {
+  if (fullTests) problems.add('backend_identity_unavailable');
+} else {
+  if (backendIdentity.loadedLocalRevision === 'mismatch') problems.add('backend_loaded_revision_mismatch');
+  else if (fullTests && backendIdentity.loadedLocalRevision !== 'match') problems.add('backend_loaded_revision_unknown');
+  if (backendIdentity.diagnosticsMarkerStatus === 'different') problems.add('backend_diagnostics_marker_mismatch');
+  else if (fullTests && backendIdentity.diagnosticsMarkerStatus !== 'present') problems.add('backend_diagnostics_marker_unknown');
+}
+
+if (fullTests && mode !== 'single_project') {
   if (!report?.options?.shortProjectId) problems.add('short_project_missing');
   if (!report?.options?.longProjectId) problems.add('long_project_missing');
 }
 
 const problemToken = (value) => String(value || 'unknown').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
 
-for (const key of ['short', 'long']) {
-  const result = report?.runtime?.projects?.[key];
+const hasProjectMap = report?.runtime?.projects && typeof report.runtime.projects === 'object'
+  && Object.keys(report.runtime.projects).length > 0;
+const projectEntries = hasProjectMap
+  ? Object.entries(report.runtime.projects)
+  : report?.runtime?.project ? [['project', { project: report.runtime.project, cockpit: report.runtime.cockpit }]] : [];
+
+for (const [key, result] of projectEntries) {
   const status = String(result?.project?.status || '').toLowerCase();
   const diagnostics = result?.cockpit?.diagnostics || {};
   const persistenceMismatch = Array.isArray(diagnostics.persistenceMismatch)
@@ -54,10 +70,6 @@ fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
 if (fs.existsSync(markdownPath)) {
   let markdown = fs.readFileSync(markdownPath, 'utf8');
   markdown = markdown.replace(/- 最终结果：\*\*(?:PASSED|FAILED)\*\*/u, `- 最终结果：**${report.verdict.status.toUpperCase()}**`);
-  markdown = markdown.replace(
-    /- 不带 --full 是故障诊断：自动选择最近项目（包括 creating \/ generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。/u,
-    '- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed）；当模式声明 short_and_long 时必须同时找到短篇和长篇，否则验收失败；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。',
-  );
   for (const mismatch of terminalPersistenceMismatches) {
     markdown = markdown.replace(`创建/持久化诊断：PASS · mismatch=${mismatch}`, `创建/持久化诊断：FAIL · mismatch=${mismatch}`);
   }

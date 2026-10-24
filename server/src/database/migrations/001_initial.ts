@@ -569,6 +569,7 @@ CREATE TABLE IF NOT EXISTS quality_execution_schema (
 CREATE TABLE IF NOT EXISTS generation_step_metrics (
       id TEXT PRIMARY KEY,
       project_id TEXT,
+      discovery_request_id TEXT,
       chapter_index INTEGER,
       step_key TEXT NOT NULL,
       scenario TEXT,
@@ -590,6 +591,8 @@ CREATE TABLE IF NOT EXISTS generation_step_metrics (
       created_at TEXT NOT NULL,
       run_id TEXT REFERENCES generation_runs(id) ON DELETE SET NULL
     );
+CREATE INDEX IF NOT EXISTS idx_generation_step_metrics_discovery_request
+  ON generation_step_metrics(discovery_request_id,created_at);
 
 -- [table] import_export_logs
 CREATE TABLE IF NOT EXISTS import_export_logs (

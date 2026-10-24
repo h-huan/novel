@@ -38,8 +38,67 @@ const makePremiseSelectionFixture = (count = 5) => ({
     secondOrderConsequence: '证据公开后会重新分配责任与利益，并迫使关键关系重新站队',
     readerQuestion: '主角能否在截止时间前证明异常，同时承担公开证据造成的后果',
     differentiation: `第${index + 1}个候选使用独立职业载体、证据链与关系代价，不复用其他题材机制`,
+    causalPlan: [{
+      action: { field: 'activeChoice', quote: '主角必须亲自决定是否公开会改变关系与利益分配的证据' },
+      conditions: [{ field: 'escalation', quote: '每次核验都会让时间压力、职业风险与关系代价继续升级' }],
+      result: { field: 'payoff', quote: '终局兑现证据真相、人物选择与关系变化三项阅读承诺' },
+    }],
   })),
 });
+
+function promptArray(prompt: string, marker: string, terminator: string, optional = false): any[] {
+  const markerAt = prompt.indexOf(marker);
+  if (markerAt < 0) {
+    if (optional) return [];
+    throw new Error('review fixture missing prompt marker: ' + marker);
+  }
+  const start = prompt.indexOf('[', markerAt + marker.length);
+  const end = prompt.indexOf(terminator, start);
+  if (start < 0 || end < 0) throw new Error('review fixture cannot locate prompt array: ' + marker);
+  return JSON.parse(prompt.slice(start, end).trim());
+}
+
+function makePremiseReviewFixture(prompt: string) {
+  const sourceCatalog = promptArray(prompt, '【逐字段来源核查目录】', '\n目录中每个ref');
+  const categoryCatalog = promptArray(prompt, '【与完整卡同口径的前置分类审核】', '；categoryChecks', true);
+  const payoffCatalog = promptArray(prompt, '【必返payoffChecks目录】', '\n【逐环节因果计划目录');
+  const causalCatalog = promptArray(prompt, '【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】', '\n先核对每个causalPlan环节');
+  const genreCatalog = promptArray(prompt, '【额外必返genreChecks】', '；每个ref返回status=fulfilled|missing|unknown', true);
+  const genreEvidence = promptArray(prompt, '【流派证据目录：只含已选展开】', '\n【genreChecks单项形状】', true);
+  return {
+    sourceChecks: sourceCatalog.map(row => ({
+      ref: row.ref, status: 'preserved',
+      reason: '原池与已选字段事实兼容，必要条件和结果方向保持一致。',
+    })),
+    categoryChecks: categoryCatalog.map(row => ({
+      ref: row.ref, status: 'fulfilled',
+      evidenceRef: row.ref.slice(0, row.ref.indexOf('.') + 1) + 'coreConflict',
+      reason: '核心冲突与人物主动选择落实了该分类机制，并非只依赖标签。',
+    })),
+    payoffChecks: payoffCatalog.map(row => {
+      const prefix = row.ref.slice(0, row.ref.indexOf('.') + 1);
+      return {
+        ref: row.ref, status: 'supported',
+        actionEvidenceRef: prefix + 'activeChoice',
+        conditionEvidenceRef: prefix + 'escalation',
+        reason: '行动、必要条件与兑现结果在本题材因果计划中逐项对应。',
+        links: causalCatalog.filter(link => String(link.ref).startsWith(prefix)).map(link => ({
+          ref: link.ref, status: 'supported',
+          reason: '本环节的行动与必要条件均已在同一题材字段中建立并支撑结果。',
+        })),
+      };
+    }),
+    genreChecks: genreCatalog.map(row => {
+      const prefix = row.ref.slice(0, row.ref.indexOf('.') + 1);
+      const evidence = genreEvidence.find(item => item.id === prefix + 'coreConflict')
+        || genreEvidence.find(item => String(item.id).startsWith(prefix));
+      return {
+        ref: row.ref, status: 'fulfilled', evidenceRef: evidence?.id,
+        reason: '本题材的核心冲突与主动选择体现了所选流派的实际行动机制。',
+      };
+    }),
+  };
+}
 
 it('learns partial chapter-responsibility progress for future strategy ordering', async () => {
   const db = new DatabaseSync(':memory:');
@@ -134,9 +193,9 @@ it('generates a complete idea batch through preselection plus structuring and re
       reversal: '地图误差并非为多占土地，而是为掩盖二十年前互换身份的安置名单，迫使主角重新选择保护哪一批住户',
     },
   ];
-  const makeIdea = (index: number) => ({
+  const makeIdea = (index: number, titleSuffix = '') => ({
     sourcePremiseId: `P${index}`,
-    title: premises[index - 1].title,
+    title: `${premises[index - 1].title}${titleSuffix}`,
     alternateTitles: [`${premises[index - 1].title}·备选甲`, `${premises[index - 1].title}·备选乙`],
     storyType: 'short_story',
     angle: `${premises[index - 1].setting}里的${premises[index - 1].hero}危机`,
@@ -160,38 +219,67 @@ it('generates a complete idea batch through preselection plus structuring and re
       readerQuestion: `主角能否在截止日前证明${premises[index - 1].setting}里的异常，同时承担公开证据带来的关系代价`,
     },
   });
-  let structuredCount = 0;
+  const structureAttempts = new Map<string, number>();
   const realLLM = {
     assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
     generate: vi.fn(async (input: any) => {
       await new Promise(resolve => setTimeout(resolve, 10));
       const step = input.metrics?.stepKey;
-      if (step === 'idea_premise_selection') return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
-      if (step === 'idea_premise_source_drift_review' || step === 'idea_premise_overlap_review')
-        return { content: JSON.stringify({ passed: true, issues: [] }) };
+      const partialFixture = String(input.prompt).includes('__partial_delivery_test__');
+      if (step === 'idea_premise_pool_generation') return { content: JSON.stringify({ pool: makePremiseSelectionFixture(partialFixture ? 4 : 5).pool }) };
+      if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(partialFixture ? 4 : 5).selectedPremises }) };
+      if (step === 'idea_premise_source_drift_review') return { content: JSON.stringify(makePremiseReviewFixture(String(input.prompt))) };
+      if (step === 'idea_premise_overlap_review') return { content: JSON.stringify({ passed: true, issues: [] }) };
       if (step === 'idea_card_structure') {
-        structuredCount++;
-        if (structuredCount > 5) throw Error('同一请求不应重复结构化');
-        return { content: JSON.stringify({ ideas: [makeIdea(structuredCount)] }) };
+        const prompt = String(input.prompt);
+        const partial = prompt.includes('__partial_delivery_test__');
+        const requestGroup = partial ? 'partial-delivery' : prompt.includes('排除题材乙') ? 'different-exclusions' : 'default';
+        const attempts = (structureAttempts.get(requestGroup) || 0) + 1;
+        structureAttempts.set(requestGroup, attempts);
+        if (attempts > 5) throw Error('同一请求不应重复结构化');
+        const selectedMarker = '【已选题材胚子（内部标识已由服务器移除）】';
+        const selectedAt = prompt.indexOf(selectedMarker);
+        const selectedStart = selectedAt < 0 ? -1 : prompt.indexOf('{', selectedAt + selectedMarker.length);
+        const selectedEnd = selectedStart < 0 ? -1 : prompt.indexOf('\n【同批差异参照', selectedStart);
+        if (selectedStart < 0 || selectedEnd < 0) throw Error('测试夹具无法解析服务器提供的当前已选胚子');
+        const selected = JSON.parse(prompt.slice(selectedStart, selectedEnd).trim());
+        const selectedIndex = Number(String(selected.workingTitle || '').match(/候选题材(\d+)/)?.[1]);
+        if (!Number.isInteger(selectedIndex) || selectedIndex < 1 || selectedIndex > 5) throw Error('测试夹具无法识别当前已选胚子');
+        if (partial && selectedIndex === 2) throw Error('测试夹具模拟第2张完整卡结构化失败');
+        return { content: JSON.stringify({ ideas: [makeIdea(selectedIndex, partial ? '·局部' : '')] }) };
       }
-      if (step === 'idea_presentation_review') return { content: JSON.stringify({
-        reviews: Array.from({ length: 5 }, (_, index) => {
-          const position = index + 1, card = makeIdea(position);
-          const goal = (field: string) => ({ status: 'supported', evidenceRef: `C${position}.${field}`,
-            reason: '由具体风险、主动选择与可验证结果形成完整阅读期待和实际关系变化。' });
-          return {
-            position, title: card.title, titleCompelling: true, openingCompelling: true,
-            distinctFromBatch: true, storyCoherent: true, payoffCredible: true, platformFit: true,
-            storyEvidenceRef: `C${position}.hook`, payoffEvidenceRef: `C${position}.ending`,
-            platformEvidenceRef: `C${position}.description`,
-            qualityReason: '以本题材实际开篇压力、行动条件及具体责任兑现核对平台与阅读目标。',
-            readerQuestion: '主角能否证实当前异常并承担公开材料后的真实关系后果？',
-            readerGoals: { click: goal('hook'), completion: goal('description'),
-              sharing: goal('ending'), immersion: goal('hook') },
-            issues: [],
-          };
-        }),
-      }) };
+      if (step === 'idea_presentation_review') {
+        const prompt = String(input.prompt);
+        const marker = '【实际题材卡与已通过参考卡】';
+        const markerAt = prompt.indexOf(marker);
+        const jsonStart = markerAt < 0 ? -1 : markerAt + marker.length;
+        const jsonEnd = jsonStart < 0 ? -1 : prompt.indexOf('\n若存在standardLines', jsonStart);
+        if (jsonStart < 0 || jsonEnd < 0) throw Error('测试夹具无法解析完整卡独立审核输入');
+        const packed = JSON.parse(prompt.slice(jsonStart, jsonEnd).trim());
+        const cards = Array.isArray(packed.cards) ? packed.cards : [];
+        return { content: JSON.stringify({
+          reviews: cards.map((card: any, index: number) => {
+            const position = Number(card.position) || index + 1;
+            const title = String(card.title || '');
+            const goal = (field: string) => ({ status: 'supported', evidenceRef: `C${position}.${field}`,
+              reason: '由具体风险、主动选择与可验证结果形成完整阅读期待和实际关系变化。' });
+            return {
+              position, title, titleCompelling: true, openingCompelling: true,
+              distinctFromBatch: true, storyCoherent: true, payoffCredible: true, platformFit: true,
+              storyEvidenceRef: `C${position}.hook`, payoffEvidenceRef: `C${position}.ending`,
+              platformEvidenceRef: `C${position}.description`,
+              payoffBridge: { status: 'supported', actionEvidenceRef: `C${position}.description`,
+                resultEvidenceRef: `C${position}.ending`, conditionEvidenceRef: `C${position}.setting`,
+                reason: '实际行动通过既有现场条件取得可核验证据，随后依法确认责任并兑现关系代价。' },
+              qualityReason: '以本题材实际开篇压力、行动条件及具体责任兑现核对平台与阅读目标。',
+              readerQuestion: '主角能否证实当前异常并承担公开材料后的真实关系后果？',
+              readerGoals: { click: goal('hook'), completion: goal('description'),
+                sharing: goal('ending'), immersion: goal('hook') },
+              issues: [],
+            };
+          }),
+        }) };
+      }
       throw new Error('unexpected idea generation step: '+String(step));
     }),
   };
@@ -200,8 +288,15 @@ it('generates a complete idea batch through preselection plus structuring and re
   Object.assign(controller, { realLLM, db: { getDb: () => db }, ideaAppealGate: new IdeaAppealGateService(), logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
   const request = { storyType: 'short_story' as const, platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards };
 
-  const [first, duplicate] = await Promise.all([controller.ideaDiscover(request), controller.ideaDiscover(request)]) as any[];
-  expect(first).toMatchObject({ success: true, totalIdeas: 5 });
+  const differentRequest = { ...request, excludeDetails: [{ title: '排除题材乙', hook: '本请求独有的排除依据' }] };
+  const partialRequest = { ...request, genreFitNote: '__partial_delivery_test__' };
+  const [first, duplicate, distinctResult, partialResult] = await Promise.all([
+    controller.ideaDiscover(request),
+    controller.ideaDiscover(request),
+    controller.ideaDiscover(differentRequest),
+    controller.ideaDiscover(partialRequest),
+  ]) as any[];
+  expect(first, 'idea discovery failed: ' + JSON.stringify({ error: first.error, appealGate: first.appealGate })).toMatchObject({ success: true, totalIdeas: 5 });
   expect(first.appealGate).toMatchObject({
     premisePoolSize: 5,
     premisePoolTarget: 15,
@@ -209,11 +304,33 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 5,
   });
   expect(duplicate).toEqual(first);
+  expect(distinctResult.appealGate).toMatchObject({ premisePoolSize: 5, premisePoolTarget: 15, premiseSelected: 5, generated: 5, returned: 5 });
   // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、一次标题与阅读目标独立审查。
-  expect(realLLM.generate).toHaveBeenCalledTimes(9);
+  expect(distinctResult, 'a request with different excludeDetails must not reuse the first result')
+    .toMatchObject({ success: true, totalIdeas: 5 });
+  expect(partialResult, 'short pool plus one failed card must still return only the three fully qualified cards')
+    .toMatchObject({ success: true, status: 'partial', totalIdeas: 3 });
+  expect(partialResult.ideas.map((idea: any) => idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
+  expect(partialResult.warning).toContain('缺额2张');
+  expect(partialResult.appealGate).toMatchObject({
+    premisePoolTarget: 15, premisePoolSize: 4, premisePoolTargetMet: false,
+    premiseSelected: 4, generated: 3, qualified: 3, returned: 3, requested: 5,
+    shortfall: 2, partial: true, minimumDeliverableCount: 3,
+  });
+  expect(partialResult.appealGate.selectionAudit.poolGeneration).toMatchObject({
+    supplementAttempted: true, supplementAdded: 0, batchCount: 3,
+  });
+  expect(partialResult.appealGate.structuringErrors).toEqual([
+    expect.objectContaining({ sourcePremiseId: 'P2', error: expect.stringContaining('测试夹具模拟第2张完整卡结构化失败') }),
+  ]);
+  expect(realLLM.generate).toHaveBeenCalledTimes(35);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
-    'idea_premise_selection','idea_premise_source_drift_review','idea_premise_overlap_review',
-    ...Array(5).fill('idea_card_structure'),'idea_presentation_review',
+    ...Array(7).fill('idea_premise_pool_generation'),
+    ...Array(3).fill('idea_premise_selection'),
+    ...Array(5).fill('idea_premise_source_drift_review'),
+    ...Array(3).fill('idea_premise_overlap_review'),
+    ...Array(14).fill('idea_card_structure'),
+    ...Array(3).fill('idea_presentation_review'),
   ].sort());
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
@@ -296,10 +413,15 @@ it('injects the user-declared custom platform standard into the idea prompt as t
     generate: vi.fn(async (input: any) => {
       generationCall += 1;
       prompts.push(String(input.prompt));
-      if (input.metrics?.stepKey === 'idea_premise_selection') {
-        return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+      if (input.metrics?.stepKey === 'idea_premise_pool_generation') {
+        return { content: JSON.stringify({ pool: makePremiseSelectionFixture(5).pool }) };
       }
-      if (['idea_premise_source_drift_review','idea_premise_overlap_review'].includes(input.metrics?.stepKey))
+      if (input.metrics?.stepKey === 'idea_premise_selection') {
+        return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
+      }
+      if (input.metrics?.stepKey === 'idea_premise_source_drift_review')
+        return { content: JSON.stringify(makePremiseReviewFixture(String(input.prompt))) };
+      if (input.metrics?.stepKey === 'idea_premise_overlap_review')
         return { content: JSON.stringify({ passed: true, issues: [] }) };
       return { content: JSON.stringify({ ideas: [] }) };
     }),
@@ -317,7 +439,7 @@ it('injects the user-declared custom platform standard into the idea prompt as t
   expect(result.success).toBe(false);
   expect(String(result.error)).toContain('第 1/5 个已选题材结构化失败');
   expect(String(result.error)).toContain('返回 0 张，期望恰好 1 张');
-  expect(realLLM.generate).toHaveBeenCalledTimes(8);
+  expect(realLLM.generate).toHaveBeenCalledTimes(11);
   expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: false });
   expect(result.appealGate.structuringErrors).toHaveLength(5);
   const prompt = prompts.join('\n');

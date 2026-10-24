@@ -18,16 +18,49 @@ function indexOrFail(source: string, marker: string): number {
 }
 
 describe('creation consistency architecture invariants', () => {
+  it('treats candidate-pool size as a search target and bounds repeated reserve replacement', () => {
+    expect(controllerSource).toContain('if (candidatePool.length === 0)');
+    expect(controllerSource).not.toContain('if (candidatePool.length < minimumPremiseSelectionCount)');
+    expect(controllerSource).toContain('minimumSelectedCountForPool');
+    expect(controllerSource).toContain('prerequisiteError(firstBlockedBatch.blocked)');
+    expect(controllerSource).toContain("'candidate_pool_empty'");
+    expect(controllerSource).not.toContain('if (candidatePool.length < requestedCount)');
+    expect(controllerSource).not.toContain('reserveReconciliationRounds<1');
+    expect(controllerSource).toContain('while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0)');
+    expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
+  });
+
   it('keeps good preselection cards reviewable but never passes an incomplete batch', () => {
     expect(controllerSource).toContain('const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);');
+    expect(controllerSource).toContain('poolTarget, categories, current.selected.length');
+    expect(controllerSource).toContain("if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}");
+    expect(controllerSource).toContain('证据指向具体责任人须有区别于“只是排除自己”的指认依据');
     expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
     expect(controllerSource).not.toContain("stoppedAt:'premise_preselection'");
   });
   it('avoids reviewing an unchanged selection twice and projects chapter events consistently', () => {
-    expect(controllerSource).toContain('selected === initial ? initialReview : await reviewBoth(selected)');
+    expect(controllerSource).toContain('selectionChangeScope(initial,selected)');
+    expect(controllerSource).toContain('reviewBoth(selected,changeScope,initialReview)');
+    expect(controllerSource).toContain('retainPremiseReviewEvidence(initial,initialReview,selected)');
     expect(controllerSource).toContain('【本章事件与状态唯一来源】');
     expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
+  });
+
+  it('prevents cross-channel message contradictions and protects explicit action evidence during outline repair', () => {
+    expect(controllerSource).toContain('【通信渠道与同源事件约束】');
+    expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
+    expect(controllerSource).toContain('询问某人不等于已经得到答复');
+    expect(controllerSource).toContain('本章新增几笔');
+    expect(controllerSource).toContain('当前账册总共三笔而后章又拿四笔对账');
+    expect(controllerSource).toContain('本人直接听到的问话不得投影成第三人此前向其转述');
+    expect(controllerSource).toContain('推测他人知情不能投影成已有某人报信');
+    expect(controllerSource).toContain('核定金额、签署协议、办手续不等于款项实际发放或收到');
+    expect(controllerSource).toContain('不能推出整个后续时间段“始终没再进去”');
+    expect(controllerSource).toContain('只写记录人记下姓名不能作为已记下具体观察的依据');
+    expect(controllerSource).toContain('scenes.outcome和characterActions.result只能保留为待查状态');
+    expect(controllerSource).toContain('【通信渠道矛盾修复规则】');
+    expect(controllerSource).toContain('不得删除或忽略该直接证据去迁就错误审查');
   });
 
   it('short-world directive cannot override the confirmed story or silently rewrite a conflict', () => {
@@ -92,4 +125,31 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('// 世界观 depth\n    enrichTasks.push');
     expect(controllerSource).toContain('世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔');
   });
+
+  it('keeps batch audit out of confirmedStory and persists it separately for diagnostics', () => {
+    const splitAt = indexOrFail(controllerSource, 'separateIdeaDiscoveryAudit(rawSelectedIdea)');
+    const storyAt = indexOrFail(controllerSource, 'constitution.confirmedStory = confirmedStory;');
+    const auditAt = indexOrFail(controllerSource, '...(ideaDiscoveryAudit ? { ideaDiscoveryAudit } : {})');
+    expect(splitAt).toBeLessThan(storyAt);
+    expect(storyAt).toBeLessThan(auditAt);
+    expect(controllerSource).toContain('ideaDiscoveryAudit: _untrustedIdeaDiscoveryAudit');
+    expect(controllerSource).not.toContain('constitution.confirmedStory = dto.selectedIdea');
+  });
+
+  it('routes early creation failures through the persisted failure boundary before returning', () => {
+    const unavailableAt = indexOrFail(controllerSource, 'if (!llmAvailable) {');
+    const unavailableBoundaryAt = controllerSource.indexOf("persistCreationFailure('preflight', errMsg", unavailableAt);
+    const unavailableReturnAt = controllerSource.indexOf('return;', unavailableAt);
+    expect(unavailableBoundaryAt).toBeGreaterThan(unavailableAt);
+    expect(unavailableBoundaryAt).toBeLessThan(unavailableReturnAt);
+
+    const worldFailureAt = indexOrFail(controllerSource, '世界观生成失败，未继续生成大纲，避免上下文不一致。');
+    const worldBoundaryAt = controllerSource.indexOf("persistCreationFailure('world', message", worldFailureAt);
+    const worldReturnAt = controllerSource.indexOf('return;', worldFailureAt);
+    expect(worldBoundaryAt).toBeGreaterThan(worldFailureAt);
+    expect(worldBoundaryAt).toBeLessThan(worldReturnAt);
+    expect(controllerSource).toContain('失败状态写入失败');
+    expect(controllerSource).not.toContain("catch {}\n      this.emitProjectProgress(projectId, { type: 'error', cancelled:");
+  });
+
 });

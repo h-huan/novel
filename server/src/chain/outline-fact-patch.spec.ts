@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {applyOutlineFactPatch} from './outline-fact-patch';
+import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues} from './outline-fact-patch';
 const original={content:'保留原场景。',targetWords:5000,chapterFunction:'既有职责',characterActions:[{action:'对手不知道秘密。',result:'秘密保留。'}],foreshadowing:[{content:'旧伏笔',plannedRecoveryChapter:4}]};
 it('applies dot and bracket addresses atomically while preserving all other fields and the original',()=>{
  const before=JSON.stringify(original);
@@ -33,6 +33,22 @@ it('does not globally replace equal dates, guess ambiguous rewrites or reject ev
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:text.replace('三天前','两天前')},[])).toEqual([]);
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:'他在评审会展示了之前取得的凭据'},[text])).toEqual([]);
 });
+it('requires action-result patches to touch the exact cited causal assertion before re-review',()=>{
+ const chapter={
+  content:'她没有站起，也没有出声。评估程序根据申请材料决定是否发放补偿。',
+  characterActions:[{action:'她没有站起，也没有出声',result:'因为她没有站起或没有出声，家里补偿落空'}],
+  characterStates:[{stateAfter:'家里补偿落空'}],
+ };
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'她没有站起，也没有出声',resultEvidence:'家里补偿落空',
+  reason:'未行动不能证明补偿结果由她造成'}],resultFields:['characterActions.0.result','characterStates.0.stateAfter']};
+ const unrelated={content:chapter.content.replace('她没有站起','她仍没有站起')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[],evidence).join(' '))
+  .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ const targeted={'characterActions.0.result':'家里补偿落空仍由评估程序按申请材料决定，并非她没有站起或没有出声造成'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,targeted,[],evidence)).toEqual([]);
+ expect(chapter.characterActions[0].result).toBe('因为她没有站起或没有出声，家里补偿落空');
+});
 it('rejects nonempty but unchanged patches before semantic re-review, including reordered object keys',()=>{
  const before=structuredClone(original);
  for(const patch of [{content:original.content},{'characterActions.0.result':original.characterActions[0].result},
@@ -55,4 +71,56 @@ it('stops an unchanged patch at the live preflight boundary without spending a s
  expect(()=>outlineFactPatchSynchronizationIssues(original,{content:original.content},rejection.defects)).toThrow('没有实际变化');
  expect(facts).toBe(1);expect(actions).toBe(1);
  expect(rejection.defects).toEqual(['资料未取得却声称已提交']);
+});
+
+
+const conflictingContent = '安全员掏出昨天下午发在剧组工作群里的报修消息，卡扣照片、型号、建议停机，一条不少，底下没人回。'
+  + '他说他先报给了沈曼助理，助理私聊回他一句“沈老师知道了，今天这条必须过，明天换”。'
+  + '陈总转头就问他：工作群里那条报修，底下那条回复是谁留的？'
+  + '安全员把手机举高。回复就挂在报修底下，头像是沈曼助理。'
+  + '沈曼承认是她让助理在群里回复“今天拍完、明天换”。'
+  + '导演先签安全条款，威亚组、安全员和替身随后签字。';
+const conflictingSceneOutcome = '安全员翻出工作群报修消息与另行收到的助理私聊回复“今天必须过、明天换”。';
+const conflictingChapter = {
+  order: 2,
+  title: '第3章',
+  content: conflictingContent,
+  scenes: JSON.stringify({ scenes: [{ outcome: conflictingSceneOutcome }] }),
+};
+const groupReplyConflict = JSON.stringify({
+  location1: '本批·第3章.content',
+  quote1: conflictingContent,
+  location2: '本批·第3章.scenes[0].outcome',
+  quote2: conflictingSceneOutcome,
+  conflict: '第3章content中安全员先称工作群报修消息“底下没人回”，后文又写“回复就挂在报修底下，头像是沈曼助理”；第3章scenes[0].outcome则称安全员另行收到的是助理私聊回复。两处关于同一群消息回复状态的原文无法同时成立。',
+});
+
+it('rejects an unrelated edit when a long quoted field contains the actual contradiction', () => {
+ const unrelated = {
+  content: conflictingContent.replace('卡扣照片、型号、建议停机', '卡扣照片、具体型号、建议停机'),
+ };
+ const issues = outlineFactPatchSynchronizationIssues(conflictingChapter, unrelated, [groupReplyConflict]);
+ expect(issues.join(' ')).toContain('没有直接修改冲突描述中的原始断言');
+});
+
+it('accepts a local edit to the contradictory assertion while preserving separate private-message and signature facts', () => {
+ const patch = {
+  content: conflictingContent.replace('底下没人回', '底下有一条群回复'),
+ };
+ expect(outlineFactPatchSynchronizationIssues(conflictingChapter, patch, [groupReplyConflict])).toEqual([]);
+ const repaired = applyOutlineFactPatch(conflictingChapter, patch);
+ expect(repaired.content).toContain('底下有一条群回复');
+ expect(repaired.content).toContain('助理私聊回他一句');
+ expect(repaired.content).toContain('沈曼承认是她让助理在群里回复');
+ expect(repaired.content).toContain('导演先签安全条款');
+ expect(repaired.scenes).toBe(conflictingChapter.scenes);
+ expect(conflictingChapter.content).toBe(conflictingContent);
+});
+
+it('does not treat a private-message rewrite as a fix for the group-message contradiction', () => {
+ const unrelatedChannelEdit = {
+  content: conflictingContent.replace('助理私聊回他一句', '助理通过群消息回他一句'),
+ };
+ expect(outlineFactPatchSynchronizationIssues(conflictingChapter, unrelatedChannelEdit, [groupReplyConflict]).join(' '))
+  .toContain('没有直接修改冲突描述中的原始断言');
 });

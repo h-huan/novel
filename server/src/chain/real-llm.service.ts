@@ -16,7 +16,7 @@ import { styleFingerprint } from '../modules/writing-quality/style-fingerprint';
 import { missingDimensionJudgePrompt, parseStageScore, SCORE_DIMENSIONS, stageJudgePrompt } from '../modules/writing-quality/stage-score';
 import { deterministicPlatformReview, partitionPlatformIssues } from '../modules/writing-quality/platform-quality-rules';
 import type { QualityStage } from '../modules/writing-quality/quality-issue';
-import { currentCreationProjectId, expectsProjectId } from '../common/creation-context';
+import { currentCreationProjectId, currentDiscoveryRequestId, expectsProjectId } from '../common/creation-context';
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import OpenAI, { type ClientOptions } from 'openai';
 import { ILLMService } from './llm.interface';
@@ -261,6 +261,10 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
     assertGenerationActive();
+    const discoveryRequestId = request.metrics?.discoveryRequestId ?? currentDiscoveryRequestId();
+    if (discoveryRequestId && request.metrics?.discoveryRequestId !== discoveryRequestId) {
+      request = { ...request, metrics: { ...request.metrics, discoveryRequestId } };
+    }
     const start = Date.now();
     const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false);
     const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
@@ -849,9 +853,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
 
     // 路由服务已返回具体版本号（含自定义场景/写作模式），直接使用
     const modelName = routedModel.modelName;
+    const useStructuredDefaults = request.responseFormat === 'json_object' && request.maxTokens === undefined;
+    const outputBounds = generationOutputBounds(modelName, configuredMaxTokens, undefined, useStructuredDefaults);
 
     this.logger.log(
-      `[RealLLM] calling model: ${modelName} (version: ${routedModel.modelVersion}), scenario: ${request.scenario || 'daily'}`,
+      `[RealLLM] calling model: ${modelName} (version: ${routedModel.modelVersion}), scenario: ${request.scenario || 'daily'}, step: ${request.metrics?.stepKey || 'unspecified'}, initialMaxTokens=${outputBounds.initial}, recoveryMaxTokens=${outputBounds.ceiling}`,
     );
 
     const callTimeout = request.timeout ?? 600_000; // 默认10分钟
@@ -929,7 +935,6 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     let lastEmptyError: Error | null = null;
     // 结构化输出被 finish_reason=length 截断时的"同模型扩容"状态：模型与 json_object 模式都不变（非降级），
     // 只把输出上限翻倍后用同一 prompt 重试。硬顶由 structured-truncation.ts 单点定义，与调用侧预算同源。
-    const outputBounds=generationOutputBounds(modelName,configuredMaxTokens);
     let currentMaxTokens = outputBounds.initial;
     // ⚠️ 历史缺陷（防复发，勿改回）：截断扩容曾与"空内容重试"共用同一个 attempt 计数，
     // 于是扩容窗口被空内容预算吃掉 —— 配置 8192 时只能扩到 16384 就抛
@@ -1234,6 +1239,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       this.metrics.record({
         projectId: finalProjectId,
         runId: ctx?.runId,
+        discoveryRequestId: ctx?.discoveryRequestId ?? null,
         chapterIndex: ctx?.chapterIndex ?? null,
         stepKey: ctx?.stepKey ?? null,
         scenario: request.scenario || 'daily',

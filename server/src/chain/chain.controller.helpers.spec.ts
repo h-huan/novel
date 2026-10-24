@@ -2,7 +2,8 @@ import { standardDirectiveCache } from '../modules/module-standards/standard-dir
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
 import { getPlatform, targetForLength, measureAgainstTarget } from './platform-benchmarks';
 import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
-import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY } from '../../shared/src/system-workflow-rules.registry';
+import { currentDiscoveryRequestId, discoveryRequestAsyncStorage } from '../common/creation-context';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ChainController,
@@ -1570,7 +1571,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1592,8 +1593,8 @@ describe('idea discovery live orchestrator behavior', () => {
     const premiseOne = selected('P1', '遗嘱里的门牌号');
     const premiseTwo = selected('P2', '门后的普通秘密');
     const pool = [
-      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore },
-      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore },
+      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore, storyCategoryId: 'K1' },
+      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore, storyCategoryId: failure === 'category_inheritance' ? 'K2' : 'K1' },
     ];
     const common = {
       storyType: 'short_story', targetPlatform: 'fanqie', storyCategory: '悬疑',
@@ -1637,19 +1638,52 @@ describe('idea discovery live orchestrator behavior', () => {
       },
     };
 
+    const requestedCount = failure === 'pool_below_minimum' || failure === 'pool_top_up_unique' ? 5 : 2;
+    const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
     const mixed = failure === 'category_inheritance';
-    const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
+    const topUpPremise = {
+      ...selected('P3', '水库账本提前清空'),
+      storyCore: '山区供水站的账本突然显示水库已被提前放空。维修员决定公开泵站记录，承包商随即关闭备用管线，迫使村民在停水前选出证人。',
+      storyCategoryId: 'K1',
+    };
+    const selectedForBatch = failure === 'pool_top_up_unique'
+      ? [premiseOne, premiseTwo, topUpPremise]
+      : mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }]
+        : [premiseOne, premiseTwo];
     if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
-    const generate = vi.fn()
-      .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: selectedForBatch }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) });
-    if (failure === 'card_network') generate.mockRejectedValueOnce(new Error('card connection reset'));
-    else if (failure === 'card_shape') generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [] }) });
-    else {
-      generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [weakCard] }) });
-      if (failure === 'repair_network') generate.mockRejectedValueOnce(new Error('repair connection reset'));
-      else generate.mockResolvedValueOnce({ content: JSON.stringify({ patches: [{}] }) });
-    }
+    let poolBatchCallsStarted = 0;
+    let releasePoolBatches!: () => void;
+    const bothPoolBatchesStarted = new Promise<void>(resolve => { releasePoolBatches = resolve; });
+    const generate = vi.fn(async (request: any) => {
+      const step = request.metrics?.stepKey;
+      if (step === 'idea_premise_pool_generation') {
+        poolBatchCallsStarted += 1;
+        if (poolBatchCallsStarted >= 2) releasePoolBatches();
+        // A barrier makes the test fail if pool generation is changed back to serial awaits.
+        await bothPoolBatchesStarted;
+        if (failure === 'pool_top_up_unique' && request.metrics?.attempt === 2) {
+          return { content: JSON.stringify({ pool: [{
+            workingTitle: '水库账本提前清空',
+            storyCore: '山区供水站的账本突然显示水库已被提前放空。维修员决定公开泵站记录，承包商随即关闭备用管线，迫使村民在停水前选出证人。',
+            storyCategoryId: 'K1',
+          }] }) };
+        }
+        return { content: JSON.stringify({ pool }) };
+      }
+      if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: selectedForBatch }) };
+      if (step === 'idea_card_structure') {
+        const selectedBlock = request.prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0] || '';
+        if (selectedBlock.includes(premiseOne.workingTitle)) return { content: JSON.stringify({ ideas: [strongCard] }) };
+        if (failure === 'card_network') throw new Error('card connection reset');
+        if (failure === 'card_shape') return { content: JSON.stringify({ ideas: [] }) };
+        return { content: JSON.stringify({ ideas: [weakCard] }) };
+      }
+      if (step === 'idea_card_local_repair') {
+        if (failure === 'repair_network') throw new Error('repair connection reset');
+        return { content: JSON.stringify({ patches: [{}] }) };
+      }
+      throw new Error('unexpected generation step: ' + String(step));
+    });
     const controller = Object.create(ChainController.prototype) as any;
     controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
     controller.reviewPremiseSelection = vi.fn().mockResolvedValue({ passed: true, issues: [] });
@@ -1695,14 +1729,32 @@ describe('idea discovery live orchestrator behavior', () => {
       submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
       ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
-    }, 2);
+    }, requestedCount);
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
+    const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
+    expect(poolCalls).toHaveLength(requestedCount === 5 ? 3 : 2);
+    expect(poolCalls.slice(0, 2).map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
+    if (requestedCount === 5) {
+      expect(poolCalls[2][0].metrics?.attempt).toBe(2);
+      expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
+    }
+    expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
+    expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
+    expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
+    expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
+    const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
+    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(requestedCount === 5 ? 3 : 2);
+    expect(selectionCall?.[0].prompt).toContain('【服务器已固定的候选池；不得新增、改写或重新编号】');
+    expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
+    expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
+    expect(selectionCall?.[0].prompt).toContain('只输出selectedPremises');
     if(failure==='preselection_shortfall'){
       expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(true);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalled();
       expect(result.success).toBe(false);expect(result.status).toBe('incomplete');expect(result.ideas).toEqual([]);
       expect(result.appealGate).toMatchObject({premiseSelected:1,preselectionShortfall:1,requested:2,fulfillment:{stopReason:'preselection_shortfall'}});
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
       expect(Array.isArray(result.qualifiedIdeas)).toBe(true);
       return;
     }
@@ -1710,24 +1762,53 @@ describe('idea discovery live orchestrator behavior', () => {
     for (const call of controller.reviewPremiseSelection.mock.calls) {
       expect(call[0].selected.every((premise: any) => premise.storyCategory)).toBe(true);
       expect(call[1]).toContain('【与完整卡一致的分类标准】');
+      expect(call[1]).not.toContain('"standard":""');
+      const categoryContext=JSON.parse(call[1].split('【与完整卡一致的分类标准】')[1].split('\n【服务器分类编号目录】')[0]);
+      expect(categoryContext.every((row:any)=>row.standard.includes(row.category)&&!row.standard.includes('【项目创作宪法】'))).toBe(true);
       expect(call[1]).toContain('【本次作者明确选择');
       expect(call[1]).toContain('"webNovelGenre":["悬疑推理"]');
       expect(call[1]).toContain('"plotTags":["调查"]');
       expect(call[1]).toContain('"writingStyle":["简洁"]');
       expect(call[1]).toContain('"pov":"第一人称"');
     }
-    expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[1]);
+    if (failure === 'pool_below_minimum') {
+      const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
+      expect(completeCardCalls.length).toBeGreaterThan(0);
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
+        target: 15, generated: 2, shortfall: 13, batchCount: 3, maxConcurrency: 2,
+        supplementAttempted: true, supplementAdded: 0,
+      });
+      expect(result.appealGate.minimumDeliverableCount).toBe(3);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe('incomplete');
+      expect(result.ideas).toEqual([]);
+      return;
+    }
+    if (failure === 'pool_top_up_unique') {
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
+        target: 15, generated: 3, shortfall: 12, batchCount: 3, maxConcurrency: 2,
+        supplementAttempted: true, supplementAdded: 1,
+      });
+      expect(result.success).toBe(false);
+      expect(result.status).toBe('incomplete');
+      expect(result.ideas).toEqual([]);
+      return;
+    }
+    const firstCardCallIndex = generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
+    expect(firstCardCallIndex).toBeGreaterThanOrEqual(0);
+    expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[firstCardCallIndex]);
 
     if (failure === 'review_protocol') {
-      expect(generate).toHaveBeenCalledTimes(3);
+      expect(generate).toHaveBeenCalledTimes(5);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);
       expect(result.error).toContain('审查未完成');
       return;
     }
 
+    expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
     if(failure==='review_budget'){
-      expect(generate).toHaveBeenCalledTimes(3);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(generate).toHaveBeenCalledTimes(5);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('budget_or_original_pool_exhausted');return;
     }
@@ -1735,7 +1816,7 @@ describe('idea discovery live orchestrator behavior', () => {
     // The repair fixture returns an empty patch: preserve the original refusal without another review.
     expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(1);
     if (!cardFailed && failure !== 'repair_network') expect(result.appealGate.repairGenerated).toBe(0);
-    expect(generate).toHaveBeenCalledTimes(cardFailed ? 3 : 4);
+    expect(generate).toHaveBeenCalledTimes(cardFailed ? 5 : 6);
     expect(result.success).toBe(false);
     expect(result.status).toBe('incomplete');
     expect(result.ideas).toHaveLength(0);
@@ -1743,8 +1824,9 @@ describe('idea discovery live orchestrator behavior', () => {
     expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
     if (mixed) {
       expect(result.qualifiedIdeas[0].storyCategory).toBe('悬疑惊悚');
-      expect(generate.mock.calls[1][0].prompt).toContain('分类=悬疑惊悚');
-      expect(generate.mock.calls[2][0].prompt).toContain('分类=现实生活');
+      const cardPrompts = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure').map(([request]: any[]) => request.prompt);
+      expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseOne.workingTitle))).toContain('分类=悬疑惊悚');
+      expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseTwo.workingTitle))).toContain('分类=现实生活');
       expect(result.appealGate.selectedCategories).toEqual(['悬疑惊悚', '现实生活']);
     }
     expect(result.totalIdeas).toBe(0);
@@ -1779,7 +1861,7 @@ describe('discovery before dimension confirmation', () => {
     const result = await controller.runIdeaDiscovery({ storyType: 'short_story', platform: 'fanqie',
       customPlatformNote: '', storyCategory: '年代', storyTone: [], writingStyle: [], webNovelGenre: [],
       submissionTags: [], plotTags: [], genreFitNote: '', pov: '' }, 5);
-    expect(controller.realLLM.generate).toHaveBeenCalledTimes(1);
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(2);
     const prompt = controller.realLLM.generate.mock.calls[0][0].prompt;
     expect(prompt).toContain('当前阶段=灵感发现的题材预选');
     for (const type of ['tone_tag', 'writing_style', 'web_novel_genre', 'narrative_pov']) {
@@ -1887,6 +1969,21 @@ it('does not merge in-flight requests with different selected POV candidates',as
  expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(2);
 });
 
+it('coalesces identical in-flight requests when the omitted category is randomly resolved per call',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;controller.logger={warn:vi.fn()};
+ let resolveTask!:(value:{success:boolean;ideas:any[]})=>void;
+ const pending=new Promise<{success:boolean;ideas:any[]}>(resolve=>{resolveTask=resolve;});
+ controller.runIdeaDiscovery=vi.fn(()=>pending);
+ const random=vi.spyOn(Math,'random').mockReturnValueOnce(0).mockReturnValueOnce(0.999999);
+ try{
+  const request={storyType:'long_novel',platform:'fanqie',storyCategory:''};
+  const first=controller.ideaDiscover(request),second=controller.ideaDiscover(request);
+  expect(random).toHaveBeenCalledTimes(2);
+  expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+  resolveTask({success:true,ideas:[]});
+  await expect(Promise.all([first,second])).resolves.toEqual([{success:true,ideas:[]},{success:true,ideas:[]}]);
+ }finally{random.mockRestore();}
+});
 it('sends full standards only for actual reviewed cards while preserving all reference story comparison fields',async()=>{
  const c=Object.create(ChainController.prototype) as any;let captured='';const stop=Error('local prompt capture');
  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{captured=prompt;throw stop;});
@@ -1897,4 +1994,61 @@ it('sends full standards only for actual reviewed cards while preserving all ref
  expect(packed.cards[0].executionStandard||packed.cards[0].executionStandardRefs).toBeTruthy();
  expect(packed.references[0]).not.toHaveProperty('executionStandard');expect(packed.references[0]).not.toHaveProperty('executionStandardRefs');expect(packed.references[0]).not.toHaveProperty('lockedPremise');
  for(const key of ['hook','coreConflict','description','mainReversal','setting','ending','protagonist','scopeBreakdown','storyCategory','storyTone','pov'])expect(packed.references[0][key]).toEqual((reference as any)[key]);
+});
+
+
+describe('idea discovery requested quantity and concurrency regressions', () => {
+  it('asks for all five selected premises when the fixed original pool has fifteen candidates', async () => {
+    const generate = vi.fn(async (request: any) => {
+      const step = request.metrics?.stepKey;
+      if (step === 'idea_premise_pool_generation') {
+        const size = Number(request.prompt.match(/只生成恰好\s+(\d+)\s+个轻量题材胚子/)?.[1] || 0);
+        if (!size) throw new Error('test fixture could not resolve the fixed pool batch size');
+        const attempt = Number(request.metrics?.attempt || 0);
+        return { content: JSON.stringify({ pool: Array.from({ length: size }, (_, index) => ({
+          workingTitle: `原池候选-${attempt}-${index + 1}`,
+          storyCore: `候选${attempt}-${index + 1}的具体人物利益、触发事件、主动选择与因果后果。`,
+          storyCategoryId: 'K1',
+        })) }) };
+      }
+      if (step === 'idea_premise_selection') {
+        return { content: JSON.stringify({ blocked: true, missingRequiredDimensions: ['test-stop'], message: 'selection contract regression sentinel' }) };
+      }
+      throw new Error('unexpected generation step: ' + String(step));
+    });
+    const controller = Object.create(ChainController.prototype) as any;
+    controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    controller.db = { getDb: () => ({ prepare: () => ({ all: () => [] }) }) };
+    const result = await controller.runIdeaDiscovery({
+      storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
+      storyCategory: '悬疑', storyTone: ['紧张'], writingStyle: ['简洁'],
+      webNovelGenre: ['悬疑推理'], submissionTags: ['悬疑'], plotTags: ['调查'],
+      genreFitNote: '', pov: '第一人称', targetWords: '20000', targetAudience: '',
+    }, 5);
+    const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
+    expect(selectionCall).toBeTruthy();
+    expect(selectionCall?.[0].prompt).toContain('必须从轻量胚子池中明确选出恰好 5 个成熟题材');
+    expect(result.success).toBe(false);
+  });
+
+  it('keeps pool batch sizing independent from five-way card/review concurrency', () => {
+    expect(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY).toBe(2);
+    expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(5);
+  });
+});
+
+
+describe('discovery request identity isolation', () => {
+  it('keeps request IDs bound to their own overlapping asynchronous task', async () => {
+    const read = (discoveryRequestId: string) => discoveryRequestAsyncStorage.run(
+      { discoveryRequestId },
+      async () => {
+        await Promise.resolve();
+        return currentDiscoveryRequestId();
+      },
+    );
+    await expect(Promise.all([read('discovery-a'), read('discovery-b')]))
+      .resolves.toEqual(['discovery-a', 'discovery-b']);
+  });
 });

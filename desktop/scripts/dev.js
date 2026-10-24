@@ -3,7 +3,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const desktopRoot = path.resolve(__dirname, '..');
-const serverRoot = path.resolve(desktopRoot, '..', 'server');
+const repositoryRoot = path.resolve(desktopRoot, '..');
+const serverRoot = path.join(repositoryRoot, 'server');
 const cliArgs = process.argv.slice(2);
 if (!cliArgs.includes('--host')) cliArgs.unshift('--host', '0.0.0.0');
 
@@ -22,6 +23,17 @@ if (process.platform === 'win32') {
     shell: false,
   });
 }
+
+const buildCommitResult = spawnSync('git', ['rev-parse', 'HEAD'], {
+  cwd: repositoryRoot,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'ignore'],
+  windowsHide: true,
+  shell: false,
+});
+const localBuildCommit = buildCommitResult.status === 0
+  ? String(buildCommitResult.stdout || '').trim()
+  : '';
 
 const utf8Env = {
   ...process.env,
@@ -103,7 +115,14 @@ async function ensureBackend() {
     stdio: 'inherit',
     windowsHide: true,
     shell: false,
-    env: { ...utf8Env, PORT: '3100', SERVER_PORT: '3100' },
+    env: {
+      ...utf8Env,
+      NOVEL_BUILD_COMMIT: localBuildCommit,
+      GIT_COMMIT_SHA: localBuildCommit,
+      GITHUB_SHA: localBuildCommit,
+      PORT: '3100',
+      SERVER_PORT: '3100',
+    },
   });
   backend.once('error', error => {
     console.error(`[dev] backend start failed: ${error.message}`);

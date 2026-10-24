@@ -21,12 +21,26 @@ export interface IdeaPresentationVerdict {
   readerGoals?: ReaderGoalReview;
 }
 
+/** Repair only an unambiguous same-row envelope error; never infer a verdict. */
+function normalizePresentationEnvelope(row: any): any {
+  const bridge = row?.payoffBridge;
+  if (!row || typeof row !== 'object' || !bridge || typeof bridge !== 'object' || Array.isArray(bridge)) return row;
+  const next = { ...row, payoffBridge: { ...bridge } };
+  for (const key of ['readerGoals', 'issues', 'warnings']) {
+    if (bridge[key] === undefined) continue;
+    if (row[key] !== undefined && JSON.stringify(row[key]) !== JSON.stringify(bridge[key]))
+      throw new Error('payoffBridge内外的' + key + '冲突，不能猜测审核结论');
+    next[key] = bridge[key];
+    delete next.payoffBridge[key];
+  }
+  return next;
+}
 /** Reference verdicts are never accepted again; unknown/duplicate target rows still fail. */
 export function targetIdeaReviews(value: any, cards: readonly any[], references: readonly any[]): any {
   if (!Array.isArray(value?.reviews)) return value;
   const targets = new Set(cards.map(card => card.title));
   const referenceTitles = new Set(references.map(card => card.title).filter(title => !targets.has(title)));
-  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)).map((row:any)=>({
+  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)).map(normalizePresentationEnvelope).map((row:any)=>({
     ...row, issues: Array.isArray(row?.issues) ? row.issues.map((issue:any)=> {
       if (typeof issue==='string') return issue;
       const criteria=['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'];

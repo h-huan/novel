@@ -18,6 +18,14 @@ const feasibleUpstreamPath = () => ({ data: {
   counterexampleChecks: [{ ref: 'F1', conditionChange: '通过实际取得、核验和交付动作排除只申请未完成的原反例。' }],
 }, warnings: [] });
 const run = () => controller.reviewCreationConsistency('p', { selectedIdea: {} }, '{}', '', [], vi.fn());
+const persistedConfirmedStorySettings = () => JSON.stringify({ creativeConstitution: {
+  schemaVersion: 1, revision: 1, projectType: 'short_story', targetPlatform: 'fanqie', targetWords: 20_000,
+  platformRules: { chapterWords: [1_000, 3_000] }, category: '现实生活', storyTone: ['现实'],
+  writingStyle: ['克制'], webNovelGenre: ['现实题材'], submissionTags: [], plotTags: [],
+  genreFitNote: '', pov: '第三人称', targetAudience: null,
+  confirmedStory: { title: '持久化确认故事', storyCore: '维修员决定公开供水记录，承包商关闭备用管线，迫使村民选出证人。' },
+  chapterWordRange: { min: 1_000, max: 3_000 },
+} });
 
 beforeEach(async () => {
   db = new DatabaseSync(':memory:');
@@ -43,6 +51,88 @@ beforeEach(async () => {
 afterEach(() => db.close());
 
 describe('production cross-module commit boundary with native SQLite', () => {
+  it('reconciles exact discovery request correlation into step metrics storage', () => {
+    const columns = db.prepare('PRAGMA table_info(generation_step_metrics)').all() as any[];
+    expect(columns.map(row => row.name)).toContain('discovery_request_id');
+    const indexes = db.prepare("PRAGMA index_list('generation_step_metrics')").all() as any[];
+    expect(indexes.some(row => row.name === 'idx_generation_step_metrics_discovery_request')).toBe(true);
+  });
+
+  it('persists a preflight failure instead of leaving the inserted project shell stuck at creating', async () => {
+    db.prepare("UPDATE projects SET status='creating', settings='{}' WHERE id=?").run('p');
+    controller.assertExecutionStandardsComplete = vi.fn();
+    controller.emitProjectProgress = vi.fn();
+
+    await expect(controller.executeCreateProjectSteps('p', {
+      title: '前置失败验收', storyType: 'short_story', targetWords: 20_000, selectedIdea: {},
+    })).resolves.toBeUndefined();
+
+    expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
+    expect(controller.emitProjectProgress).toHaveBeenCalledWith('p', expect.objectContaining({
+      type: 'error', success: false, projectId: 'p', step: 'preflight',
+      message: '项目缺少已持久化的 confirmedStory，不能创建框架',
+    }));
+  });
+
+  it('persists an early execution-standard failure even when its error notification cannot be delivered', async () => {
+    db.prepare("UPDATE projects SET status='creating', settings='{}' WHERE id=?").run('p');
+    controller.assertExecutionStandardsComplete = vi.fn(() => { throw new Error('创建前执行标准校验失败'); });
+    controller.emitProjectProgress = vi.fn(() => { throw new Error('SSE transport unavailable'); });
+
+    await expect(controller.executeCreateProjectSteps('p', {
+      title: '执行标准前置失败验收', storyType: 'short_story', targetWords: 20_000, selectedIdea: {},
+    })).resolves.toBeUndefined();
+
+    expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
+    expect(controller.emitProjectProgress).toHaveBeenCalledWith('p', expect.objectContaining({
+      type: 'error', success: false, projectId: 'p', step: 'preflight',
+      message: '创建前执行标准校验失败',
+    }));
+    expect(controller.logger.error).toHaveBeenCalledWith(expect.stringContaining('前置错误事件推送失败'));
+  });
+
+  it('persists the LLM-unavailable failure before error notification and keeps it visible if SSE delivery fails', async () => {
+    db.prepare("UPDATE projects SET status='creating', settings=? WHERE id=?").run(persistedConfirmedStorySettings(), 'p');
+    controller.assertExecutionStandardsComplete = vi.fn();
+    controller.realLLM = { isAvailable: vi.fn().mockResolvedValue(false) };
+    controller.emitProjectProgress = vi.fn((_projectId: string, event: any) => {
+      if (event.type === 'error') {
+        expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
+        throw new Error('SSE transport unavailable');
+      }
+    });
+
+    await expect(controller.executeCreateProjectSteps('p', {
+      title: '模型不可用前置失败验收', storyType: 'short_story', targetWords: 20_000, selectedIdea: { title: 'UI候选不能覆盖持久化事实' },
+    })).resolves.toBeUndefined();
+
+    expect(controller.realLLM.isAvailable).toHaveBeenCalledTimes(1);
+    expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
+    expect(controller.logger.error).toHaveBeenCalledWith(expect.stringContaining('失败事件推送失败'));
+  });
+
+  it('reports a failed status write instead of silently presenting an unexplained creating state', async () => {
+    db.prepare("UPDATE projects SET status='creating', settings=? WHERE id=?").run(persistedConfirmedStorySettings(), 'p');
+    db.exec("CREATE TRIGGER reject_generation_failed BEFORE UPDATE OF status ON projects WHEN NEW.status='generation_failed' BEGIN SELECT RAISE(ABORT, 'forced status persistence failure'); END;");
+    controller.assertExecutionStandardsComplete = vi.fn();
+    controller.realLLM = { isAvailable: vi.fn().mockResolvedValue(false) };
+    let errorEvent: any;
+    controller.emitProjectProgress = vi.fn((_projectId: string, event: any) => {
+      if (event.type === 'error') errorEvent = event;
+    });
+
+    await expect(controller.executeCreateProjectSteps('p', {
+      title: '状态写入失败验收', storyType: 'short_story', targetWords: 20_000, selectedIdea: { title: '持久化确认故事' },
+    })).resolves.toBeUndefined();
+
+    expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('creating');
+    expect(errorEvent).toMatchObject({
+      type: 'error', success: false, projectId: 'p',
+      statusPersistenceError: expect.stringContaining('forced status persistence failure'),
+    });
+    expect(controller.logger.error).toHaveBeenCalledWith(expect.stringContaining('失败状态写入失败'));
+  });
+
   it('reviews all outline fields consumed by prose instead of omitting auxiliary scene copies', async () => {
     const values={hot_scenes:JSON.stringify(['截图发到群里，群友看不见那行字。']),setback_scenes:JSON.stringify(['受阻场景完整原文']),
       highlight_points:JSON.stringify(['高潮来源完整原文']),core_content:'补全内容完整原文',plot_points:JSON.stringify({coreEvent:'核心事件完整原文'}),

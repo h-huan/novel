@@ -2,7 +2,7 @@ import {fulfillDiscoveryGaps,discoveryFailureImproved} from './discovery-fulfill
 import { assertPremiseCausalPlans, premiseCausalPlanExample } from './premise-causal-plan';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
 import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
-import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
+import {reviewChangedPremiseSources,pendingPremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues} from './premise-selection-review';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import {discoveryDimensionSelectionIssues} from './idea-discovery-contract';
@@ -13,7 +13,7 @@ import { independentReviewBatches } from './independent-review-batches';
 import {reserveReviewBatchBudget} from './premise-source-batches';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
 import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective } from './premise-category-fit';
-import { premiseCategoryIdentityDirective } from './premise-category-identity';
+import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence } from './chapter-dependency-review';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
@@ -32,13 +32,14 @@ import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } f
 import { describeCrossStagePathDesign, crossStagePathReviewInput } from './cross-stage-review';
 import { CROSS_STAGE_REVIEW_POLICY, SOURCE_QUALITY_POLICY, OUTLINE_PROJECTION_POLICY, OUTLINE_FACT_REPAIR_SYNC_POLICY, UPSTREAM_REPAIR_ROUTING_LIMITS } from '../../shared/src/system-workflow-rules.registry';
 import { chapterTimePlanRequest, validateChapterTimePlan, chapterTimePlanDirective, chapterTimeDisplaysForEvidenceReview } from './chapter-time-plan';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { discoveryRequestAsyncStorage } from '../common/creation-context';
 import { chapterObligationEvidencePrompt, materializeChapterObligationEvidence, chapterMissingItemTexts, chapterObligationWritingContext, chapterObligationRepairTargets, mergeChapterObligationRepairs, chapterObligationCatalog, chapterObligationReviewDirective, validateChapterObligationReview, parseChapterAlignmentReview, mergeChapterReviewContractCorrection, chapterAlignmentReviewContract, chapterReviewContractCorrectionDirective } from './chapter-alignment-contract';
 import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosis } from './upstream-repair-routing';
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, premiseSelectionFailureReasons, retainReviewedPremises, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, type IdeaPresentationVerdict } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -180,8 +181,8 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
-import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, applyIsolatedIdeaRepairPatches, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
+import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
 import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQuoteRepairs, type ReaderGoalReview } from './reader-goal-review';
@@ -4689,6 +4690,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     storyCategory?: string;
     /** 频道提示（男频/女频）：跨频道同名分类（如悬疑脑洞）靠它消歧，缺了模型就拿不到该分类的体量锚点。 */
     targetAudience?: string;
+    discoveryRequestId?: string;
   }) {
     const requestedCount = Number.isInteger(Number(dto.count)) && Number(dto.count) > 0
       ? Math.min(Number(dto.count), 10)
@@ -4788,11 +4790,14 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       genreFitNote: normalizedDto.genreFitNote,
       pov: normalizedDto.pov,
       discoveryPovOptions: normalizedDto.discoveryPovOptions,
-      storyCategory: normalizedDto.storyCategory,
+      storyCategory: inputCategory || null,
+      discoveryCategoryOptions: normalizedDto.discoveryCategoryOptions,
       targetAudience: String(dto.targetAudience || '').trim(),
       targetWords: String(dto.targetWords || '').trim(),
       count: requestedCount,
       excludeTitles: dto.excludeTitles || [],
+      // Both fields affect the actual prompt; omitting excludeDetails can merge different user requests.
+      excludeDetails: dto.excludeDetails || [],
     });
     if (!this.ideaDiscoveryInFlight) this.ideaDiscoveryInFlight = new Map<string, Promise<any>>();
     const active = this.ideaDiscoveryInFlight.get(requestKey);
@@ -4800,7 +4805,28 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       this.logger.warn('idea-discover: 相同配置仍在生成，复用当前任务，未重复调用模型');
       return active;
     }
-    const task = this.runIdeaDiscovery(normalizedDto, requestedCount);
+    const discoveryRequestId = String(dto.discoveryRequestId || randomUUID());
+    const discoveryRequestStartedAt = new Date().toISOString();
+    const task = discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
+      try {
+        const result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
+        if (result && typeof result === 'object') {
+          Object.defineProperties(result, {
+            discoveryRequestId: { value: discoveryRequestId, enumerable: false, configurable: true },
+            discoveryRequestStartedAt: { value: discoveryRequestStartedAt, enumerable: false, configurable: true },
+            discoveryRequestFinishedAt: { value: new Date().toISOString(), enumerable: false, configurable: true },
+          });
+        }
+        return result;
+      } catch (error) {
+        if (error && typeof error === 'object') Object.defineProperties(error, {
+          discoveryRequestId: { value: discoveryRequestId, enumerable: false, configurable: true },
+          discoveryRequestStartedAt: { value: discoveryRequestStartedAt, enumerable: false, configurable: true },
+          discoveryRequestFinishedAt: { value: new Date().toISOString(), enumerable: false, configurable: true },
+        });
+        throw error;
+      }
+    });
     this.ideaDiscoveryInFlight.set(requestKey, task);
     try {
       return await task;
@@ -4853,6 +4879,21 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const discoveryCategories = dto.discoveryCategoryOptions?.length
         ? dto.discoveryCategoryOptions : [dto.storyCategory];
       const variedCategories = discoveryCategories.length > 1 && requestedCount > 1;
+      const categoryStandards = discoveryCategories.map(category => {
+        const placement = resolveSubmissionCategory(dto.platform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
+        const official = placement.status === 'resolved' ? platformCategoryWritingBrief(dto.platform, placement.value, dto.storyType) : '';
+        const standard = official || buildExecutionStandard(readConstitution({ type: dto.storyType, target_platform: dto.platform,
+          settings: { ...dto, storyCategory: category } })).dimensions.find(item => item.dimension === 'category')?.requirement;
+        if (!standard) throw new Error('分类执行标准缺失：' + category);
+        return { category, standard };
+      });
+
+      // Candidate selection may continue with a small usable pool; final delivery still keeps its own minimum.
+      // When category diversity is required, retain at least two category slots whenever two candidates exist.
+      // A sufficiently large fixed pool must fill the requested selection slots. A partial
+      // selection is reserved for a genuinely short pool, not a shortcut around review/replacement.
+      const minimumSelectedCountForPool = (availableCount: number) =>
+        Math.min(requestedCount, Math.max(1, availableCount));
       const selectedCategoryById = new Map<string, string>();
       const submissionForCategory = (category: string) => {
         const required = platformSubmissionDimensions(dto.platform, dto.storyType, category, dto.targetAudience).includes('genre');
@@ -4946,7 +4987,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
-      const buildPremiseSelectionPrompt = () => {
+      const minimumPremiseSelectionCount = minimumAcceptableIdeaCount(requestedCount);
+      const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>> } = {}) => {
         const excludeText = initialExcludes.length
           ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
           : '';
@@ -4962,7 +5004,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             premiseId: 'P1',
             workingTitle: '4-16字暂名',
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
-            storyCore: '一句到两句因果骨架：人物处境与起始事件 + 主动选择及其升级 + 反转改变的胜负条件 + 兑现与代价方向；保留用户指定条件，其余路径须有实质差异',
+            storyCore: '轻量因果骨架：人物处境与起始事件、主动选择、关键证据或权限如何使结果成立、反转改变胜负条件、兑现与代价方向；不能以结局断言替代必要条件',
           }],
           selectedPremises: [{
             premiseId: 'P1',
@@ -4980,78 +5022,497 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             causalPlan: premiseCausalPlanExample(),
           }],
         };
+        const promptPhase = phase;
+        const batchIndex = options.batchIndex ?? 0;
+        const batchCount = options.batchCount ?? 1;
+        const batchSize = options.batchSize ?? premisePoolSize;
+        const candidatePool = options.pool ?? [];
+        const batchFocus = [
+          '本批优先探索关系压力、利益冲突与人物选择的不同组合。',
+          '本批优先探索资源限制、规则边界、身份责任与主动对手的不同组合。',
+          '本批优先探索反常关系、现实两难、欲望争夺与兑现代价的不同组合。',
+        ][batchIndex % 3];
+        const poolDirective = [
+          '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
+          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本阶段不选题、不展开完整筛选字段，不输出selectedPremises。',
+          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore保持轻量，但必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。人物识破身份须有先前接触该身份信息的真实渠道，证据指向具体责任人须有区别于“只是排除自己”的指认依据，约人到场或设伏抓获须有各方实际到场与配合动机。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺行动链的终局；没有可信条件就换一条能成立的故事骨架，不交给下游昂贵复核补造。保留反转、兑现与代价方向。',
+          batchFocus,
+          candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
+          '候选之间的区别须落实到主动选择如何触发升级、反转如何改变胜负条件、兑现及连带代价这条完整因果链；不能只在人物职业、名字、道具或单个设定上有差异而共用“隐藏旧本领→搜集记录→被反咬→亮出证据→丢工作”的行动模板，也不能复用历史排除项。',
+          '保留用户指定的类型、平台、分类、流派与其它条件。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
+        ].join('\n');
+        const minimumSelectedCount = promptPhase === 'selection'
+          ? minimumSelectedCountForPool(candidatePool.length) : minimumPremiseSelectionCount;
+        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false, minimumSelectedCount)
+          .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；逐项比较后优先选出“关键证据有合法取得与交付路径、关键结果有实际决定者和必要条件、代价由既定行动产生”的成熟题材。原池缺少必要条件的，不得在展开字段里自造相反事实救活；应优先从其余原池选择可成立的不同题材。不得新增候选或改写原池。')
+          .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
+          .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
+        const promptDirective = promptPhase === 'pool' ? poolDirective
+          : promptPhase === 'selection' ? selectionDirective
+          : ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false);
+        const promptSchema = promptPhase === 'pool'
+          ? { pool: [{ ...premiseSchema.pool[0], premiseId: 'B' + (batchIndex + 1) + '-P1' }] }
+          : promptPhase === 'selection' ? { selectedPremises: premiseSchema.selectedPremises } : premiseSchema;
+        const phaseContext = promptPhase === 'pool'
+          ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。只输出pool；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
+          : promptPhase === 'selection'
+            ? '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。'
+            : '当前阶段=灵感发现的题材预选，尚未确认故事卡或创建项目。维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。本轮pool与selectedPremises仍只输出骨架与筛选证据schema。';
+        const poolContext = promptPhase === 'selection'
+          ? '\n【服务器已固定的候选池；不得新增、改写或重新编号】' + JSON.stringify(candidatePool)
+          : promptPhase === 'pool' && candidatePool.length
+            ? '\n【本轮已生成候选池；仅用于排重，不得重复或近似改写】' + JSON.stringify(candidatePool.map(item => ({
+              workingTitle: item.workingTitle, storyCore: item.storyCore, storyCategory: item.storyCategory,
+            })))
+            : '';
         return `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}
-${ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false)}
+${promptDirective}
 【本次执行设定】
 ${ideaDiscoveryAuthorContext(dto)}
 ${premiseCategoryIdentityDirective(discoveryCategories)}
 ${variedCategories ? '在目录分类中广搜不同人物欲望、关系、冲突和兑现路径；已选题材不可全部来自同一分类，分类编号选择后锁定，不靠改标签制造差异。' : ''}
-当前阶段=灵感发现的题材预选，尚未确认故事卡或创建项目。维度选择参数：${autoSelectionRules}；${submissionRule}。本轮 pool 与 selectedPremises 仍只输出下列骨架与筛选证据 schema；具体维度组合在后续完整故事卡中显式返回给用户确认。每个原池storyCore及已选展开都须同时落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材，不能仅在标签字段补齐；缺失关键机制的骨架不得入选，无法组合时如实报告约束不足。
+${phaseContext}
 创作流派的组合须符合可见的行动机制，不能仅根据题材名或隐藏凶手贴标签：${dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre)}
 ${variedCategories ? '后续按每个入选题材的分类分别取得分类证据与体量锚点，不把一个分类的标签用于其它分类。' : categoryWritingBrief ? `【分类证据】${categoryWritingBrief}` : '此分类尚无已核验的官方标签，不编造平台标签。'}
 ${!variedCategories && categoryBenchmark ? `【分类体量参考】${categoryBenchmark}` : ''}
 ${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredTargetWords}；筛选时必须判断题材是否撑得住这一体量。` : '用户未指定总字数；筛选时按平台分类体量和故事自身可持续性判断。'}
+${poolContext}
 ${excludeText}
 只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
-JSON 结构：${JSON.stringify(premiseSchema)}`;
+JSON 结构：${JSON.stringify(promptSchema)}`;
       };
 
       const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown }> => {
-        const response = await this.realLLM.generate({
-          prompt: buildPremiseSelectionPrompt(),
-          scenario: 'idea_generate',
-          // Pool search plus full selected-premise causal planning is a complex task, not short-text generation.
-          timeout: discoveryBudget.complexTimeoutMs,
-          maxEmptyRetries: 1,
-          responseFormat: 'json_object',
-          metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
-        });
-        const normalized = String(response.content || '')
-          .trim()
-          .replace(/^```(?:json)?\s*/i, '')
-          .replace(/\s*```$/i, '');
-        let parsed: any;
+        const poolBatchCount = Math.min(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, premisePoolSize);
+        const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
+        const extraBatchCount = premisePoolSize % poolBatchCount;
+        const poolBatchSizes = Array.from({ length: poolBatchCount }, (_, index) => baseBatchSize + (index < extraBatchCount ? 1 : 0));
+        const parseResponse = (content: unknown, label: string): any => {
+          const normalized = String(content || '').trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '');
+          try {
+            return JSON.parse(jsonrepair(normalized || '{}'));
+          } catch {
+            throw new Error(label + '未返回合法JSON；没有创建完整题材卡。');
+          }
+        };
+        const prerequisiteError = (parsed: any) => {
+          const dimensions = parsed && (parsed.missingRequiredDimensions ?? parsed.missingDimensions);
+          const missing = Array.isArray(dimensions) ? dimensions.map(String).join('、') : '';
+          const reason = String((parsed && (parsed.message || parsed.reason)) || '').trim();
+          return new Error('创建前题材筛选被执行前提阻断' + (missing ? '（' + missing + '）' : '') + '：' + (reason || '模型未说明原因') + '；未进入题材质量筛选。');
+        };
+        const poolStartedAt = Date.now();
+        const poolBatchResults: Array<{
+          batchIndex: number; requested: number; candidates: any[]; durationMs: number; rawReturned: number | null;
+          parseFailed: boolean; error?: string; blocked?: any;
+        }> = await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
+          const batchStartedAt = Date.now();
+          let rawReturned: number | null = null;
+          let parsed: any = null;
+          try {
+            const response = await this.realLLM.generate({
+              prompt: buildPremiseSelectionPrompt('pool', { batchIndex, batchCount: poolBatchCount, batchSize }),
+              scenario: 'idea_generate',
+              timeout: discoveryBudget.complexTimeoutMs,
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
+            });
+            parsed = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
+            if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) {
+              rawReturned = 0;
+              return { batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed };
+            }
+            if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
+            rawReturned = parsed.pool.length;
+            return { batchIndex, requested: batchSize, candidates: parsed.pool, rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt };
+          } catch (error) {
+            return {
+              batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: rawReturned === null,
+              durationMs: Date.now() - batchStartedAt,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }));
+        const candidatePool: Array<Record<string, unknown>> = [];
+        const seenTitles = new Set<string>();
+        const seenCores = new Set<string>();
+        const poolFilterTotals = {
+          rawReturned: 0, rawReturnedUnknownBatches: 0, validBeforeDedup: 0, invalidShape: 0, invalidFields: 0,
+          invalidCategory: 0, duplicateCount: 0, uniqueBeyondTarget: 0,
+        };
+        const categoryBindingCounts: Record<string, number> = {};
+        const batchFilterStats = new Map<number, {
+          rawReturned: number | null; validBeforeDedup: number; invalidShape: number; invalidFields: number;
+          invalidCategory: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
+          categoryBindingCounts: Record<string, number>;
+        }>();
+        const processPoolBatch = (batch: typeof poolBatchResults[number]) => {
+          const stats = {
+            rawReturned: batch.rawReturned,
+            validBeforeDedup: 0,
+            invalidShape: 0,
+            invalidFields: 0,
+            invalidCategory: 0,
+            duplicateCount: 0,
+            retained: 0,
+            uniqueBeyondTarget: 0,
+            categoryBindingCounts: {} as Record<string, number>,
+          };
+          batchFilterStats.set(batch.batchIndex, stats);
+          if (batch.rawReturned === null) poolFilterTotals.rawReturnedUnknownBatches += 1;
+          else poolFilterTotals.rawReturned += batch.rawReturned;
+          for (const raw of batch.candidates) {
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+              stats.invalidShape += 1;
+              poolFilterTotals.invalidShape += 1;
+              continue;
+            }
+            const item = raw as Record<string, unknown>;
+            const workingTitle = String(item.workingTitle || '').trim();
+            const storyCore = String(item.storyCore || '').trim();
+            const titleKey = normalizeTitle(workingTitle);
+            const coreKey = normalizeTitle(storyCore);
+            if (workingTitle.length < 2 || storyCore.length < 20 || !titleKey || !coreKey) {
+              stats.invalidFields += 1;
+              poolFilterTotals.invalidFields += 1;
+              continue;
+            }
+            let storyCategoryId = 'K1';
+            let storyCategory = dto.storyCategory;
+            if (variedCategories) {
+              const match = String(item.storyCategoryId || '').trim().match(/^K(\d+)$/);
+              const categoryIndex = match ? Number(match[1]) - 1 : -1;
+              if (categoryIndex < 0 || !discoveryCategories[categoryIndex]) {
+                stats.invalidCategory += 1;
+                poolFilterTotals.invalidCategory += 1;
+                continue;
+              }
+              storyCategoryId = 'K' + (categoryIndex + 1);
+              storyCategory = discoveryCategories[categoryIndex];
+            }
+            stats.validBeforeDedup += 1;
+            poolFilterTotals.validBeforeDedup += 1;
+            const nearDuplicate = batch.batchIndex >= poolBatchCount && candidatePool.some(existing =>
+              ideaSemanticSimilarity(
+                { title: workingTitle, description: storyCore },
+                { title: String(existing.workingTitle || ''), description: String(existing.storyCore || '') },
+              ) >= 0.42);
+            if (seenTitles.has(titleKey) || seenCores.has(coreKey) || nearDuplicate) {
+              stats.duplicateCount += 1;
+              poolFilterTotals.duplicateCount += 1;
+              continue;
+            }
+            let bound: any;
+            try {
+              bound = bindPremiseCategory({
+                premiseId: 'P' + (candidatePool.length + 1),
+                workingTitle,
+                storyCore,
+                storyCategoryId,
+                storyCategory,
+              }, discoveryCategories, false);
+            } catch {
+              stats.invalidCategory += 1;
+              poolFilterTotals.invalidCategory += 1;
+              stats.validBeforeDedup -= 1;
+              poolFilterTotals.validBeforeDedup -= 1;
+              continue;
+            }
+            seenTitles.add(titleKey);
+            seenCores.add(coreKey);
+            if (candidatePool.length >= premisePoolSize) {
+              stats.uniqueBeyondTarget += 1;
+              poolFilterTotals.uniqueBeyondTarget += 1;
+              continue;
+            }
+            candidatePool.push(bound);
+            stats.retained += 1;
+            const categoryKey = storyCategory || String(storyCategoryId || 'unknown');
+            stats.categoryBindingCounts[categoryKey] = (stats.categoryBindingCounts[categoryKey] || 0) + 1;
+            categoryBindingCounts[categoryKey] = (categoryBindingCounts[categoryKey] || 0) + 1;
+          }
+        };
+        for (const batch of poolBatchResults.slice().sort((left, right) => left.batchIndex - right.batchIndex)) processPoolBatch(batch);
+
+        let poolSupplementAttempted = false;
+        let poolSupplementRequested = 0;
+        let poolSupplementAdded = 0;
+        const canSupplementPool = candidatePool.length < requestedCount
+          && poolBatchResults.some(batch => batch.rawReturned !== null && !batch.blocked && !batch.error);
+        if (canSupplementPool) {
+          poolSupplementAttempted = true;
+          poolSupplementRequested = Math.max(3, requestedCount - candidatePool.length + 2);
+          const batchIndex = poolBatchCount;
+          const batchStartedAt = Date.now();
+          let rawReturned: number | null = null;
+          let supplementResult: typeof poolBatchResults[number];
+          try {
+            const response = await this.realLLM.generate({
+              prompt: buildPremiseSelectionPrompt('pool', {
+                batchIndex, batchCount: poolBatchCount + 1, batchSize: poolSupplementRequested, pool: candidatePool,
+              }),
+              scenario: 'idea_generate',
+              timeout: discoveryBudget.complexTimeoutMs,
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
+            });
+            const parsed = parseResponse(response.content, '候选池补足批次');
+            if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) {
+              rawReturned = 0;
+              supplementResult = {
+                batchIndex, requested: poolSupplementRequested, candidates: [], rawReturned,
+                parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed,
+              };
+            } else {
+              if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池补足批次未返回pool数组。');
+              rawReturned = parsed.pool.length;
+              supplementResult = {
+                batchIndex, requested: poolSupplementRequested, candidates: parsed.pool, rawReturned,
+                parseFailed: false, durationMs: Date.now() - batchStartedAt,
+              };
+            }
+          } catch (error) {
+            supplementResult = {
+              batchIndex, requested: poolSupplementRequested, candidates: [], rawReturned,
+              parseFailed: rawReturned === null, durationMs: Date.now() - batchStartedAt,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+          const beforeSupplement = candidatePool.length;
+          poolBatchResults.push(supplementResult);
+          processPoolBatch(supplementResult);
+          poolSupplementAdded = candidatePool.length - beforeSupplement;
+        }
+        const poolGenerationAudit = {
+          strategy: poolSupplementAttempted ? 'parallel_pool_batches_then_bounded_unique_top_up_then_fixed_pool_selection' : 'parallel_pool_batches_then_fixed_pool_selection',
+          startedAt: new Date(poolStartedAt).toISOString(),
+          finishedAt: new Date().toISOString(),
+          wallMs: Date.now() - poolStartedAt,
+          target: premisePoolSize,
+          rawReturned: poolFilterTotals.rawReturned,
+          rawReturnedUnknownBatches: poolFilterTotals.rawReturnedUnknownBatches,
+          parseFailureBatchCount: poolBatchResults.filter(item => item.parseFailed).length,
+          validBeforeDedup: poolFilterTotals.validBeforeDedup,
+          invalidCount: poolFilterTotals.invalidShape + poolFilterTotals.invalidFields + poolFilterTotals.invalidCategory,
+          invalid: {
+            shape: poolFilterTotals.invalidShape,
+            requiredFields: poolFilterTotals.invalidFields,
+            categoryBinding: poolFilterTotals.invalidCategory,
+          },
+          duplicateCount: poolFilterTotals.duplicateCount,
+          uniqueBeyondTarget: poolFilterTotals.uniqueBeyondTarget,
+          generated: candidatePool.length,
+          actual: candidatePool.length,
+          shortfall: Math.max(0, premisePoolSize - candidatePool.length),
+          targetMet: candidatePool.length >= premisePoolSize,
+          supplementAttempted: poolSupplementAttempted,
+          supplementRequested: poolSupplementRequested,
+          supplementAdded: poolSupplementAdded,
+          categoryBindingCounts,
+          batchCount: poolBatchResults.length,
+          maxConcurrency: poolBatchCount,
+          blockedBatchCount: poolBatchResults.filter(item => item.blocked).length,
+          failedBatchCount: poolBatchResults.filter(item => item.error).length,
+          batches: poolBatchResults.map(batch => ({
+            batch: batch.batchIndex + 1,
+            requested: batch.requested,
+            rawReturned: batch.rawReturned,
+            parseFailed: batch.parseFailed,
+            durationMs: batch.durationMs,
+            error: batch.error || null,
+            blocked: batch.blocked ? {
+              reason: String(batch.blocked.reason ?? batch.blocked.message ?? '').slice(0, 500),
+              missingRequiredDimensions: Array.isArray(batch.blocked.missingRequiredDimensions)
+                ? batch.blocked.missingRequiredDimensions : [],
+            } : null,
+            ...(batchFilterStats.get(batch.batchIndex) ?? {}),
+          })),
+        };
+        this.logger.log('idea-discover: 候选池并发生成 wallMs=' + poolGenerationAudit.wallMs
+          + '，原始返回=' + poolFilterTotals.rawReturned + '，原始返回未知批次=' + poolFilterTotals.rawReturnedUnknownBatches
+          + '，去重前有效=' + poolFilterTotals.validBeforeDedup
+          + '，重复=' + poolFilterTotals.duplicateCount
+          + '，无效=' + poolGenerationAudit.invalidCount
+          + '，批次=' + JSON.stringify(poolGenerationAudit.batches.map(batch => ({
+            batch: batch.batch, requested: batch.requested, rawReturned: batch.rawReturned,
+            retained: batch.retained, duplicateCount: batch.duplicateCount, durationMs: batch.durationMs,
+            blocked: Boolean(batch.blocked), error: Boolean(batch.error), parseFailed: batch.parseFailed,
+          }))));
+        const failWithPoolAudit = (
+          error: unknown,
+          stoppedAt: string,
+          stopReason: string,
+          details: Record<string, any> = {},
+        ) => {
+          const message = error instanceof Error ? error.message : String(error);
+          const priorSelectionAudit = details.selectionAudit && typeof details.selectionAudit === 'object'
+            ? details.selectionAudit : {};
+          const phaseTimings = {
+            ...(priorSelectionAudit.phaseTimings && typeof priorSelectionAudit.phaseTimings === 'object'
+              ? priorSelectionAudit.phaseTimings : {}),
+            poolGenerationWallMs: poolGenerationAudit.wallMs,
+            ...(details.selectionWallMs !== undefined ? { selectionWallMs: details.selectionWallMs } : {}),
+            ...(details.preselectionReviewWallMs !== undefined
+              ? { preselectionReviewWallMs: details.preselectionReviewWallMs } : {}),
+            totalWallMs: Date.now() - poolStartedAt,
+          };
+          const preselectedPremises = Array.isArray(details.preselectedPremises) ? details.preselectedPremises : [];
+          return Object.assign(new Error(message), {
+            appealGate: {
+              schemaVersion: 8,
+              mode: 'parallel_pool_batches_then_fixed_pool_selection',
+              requested: requestedCount,
+              premisePoolTarget: premisePoolSize,
+              premisePoolSize: candidatePool.length,
+              premisePoolTargetMet: candidatePool.length >= premisePoolSize,
+              premiseSelected: Number(details.premiseSelected ?? preselectedPremises.length) || 0,
+              generated: 0,
+              qualified: 0,
+              returned: 0,
+              shortfall: requestedCount,
+              minimumDeliverableCount: minimumPremiseSelectionCount,
+              stoppedAt,
+              stopReason,
+              reasons: [message],
+              candidatePool,
+              preselectedPremises,
+              candidateAssessments: [],
+              structuringErrors: [],
+              fulfillment: { stopReason, minimumDeliverableCount: minimumPremiseSelectionCount },
+              selectionAudit: {
+                ...priorSelectionAudit,
+                poolGeneration: poolGenerationAudit,
+                phaseTimings,
+              },
+            },
+          });
+        };
+        const blockedBatchCount = poolGenerationAudit.blockedBatchCount;
+        if (blockedBatchCount > 0) {
+          this.logger.warn('灵感候选池有 ' + blockedBatchCount + ' 个批次被前置条件阻断；其余批次提供 '
+            + candidatePool.length + ' 个可用候选，继续按固定池选优');
+        }
+        if (candidatePool.length === 0) {
+          const allBatchesBlocked = poolBatchResults.length > 0
+            && poolBatchResults.every(item => Boolean(item.blocked));
+          if (allBatchesBlocked) {
+            const firstBlockedBatch = poolBatchResults.find(item => item.blocked)!;
+            throw failWithPoolAudit(
+              prerequisiteError(firstBlockedBatch.blocked),
+              'candidate_pool_generation',
+              'selection_prerequisite_blocked',
+            );
+          }
+          const blockedDetails = poolBatchResults.filter(item => item.blocked).map(item =>
+            '第' + (item.batchIndex + 1) + '批前置条件阻断：' + String(item.blocked.reason ?? item.blocked.message ?? '未提供原因'),
+          );
+          const batchErrors = poolBatchResults.filter(item => item.error).map(item =>
+            '第' + (item.batchIndex + 1) + '批失败：' + item.error,
+          );
+          const details = [...blockedDetails, ...batchErrors].join('；');
+          const message = '并发候选池没有形成可用题材：目标' + premisePoolSize + '，原始返回' + poolFilterTotals.rawReturned
+            + '，去重后可用0' + (details ? '；' + details : '');
+          throw failWithPoolAudit(new Error(message), 'candidate_pool_generation', 'candidate_pool_empty');
+        }
+        if (candidatePool.length < premisePoolSize) {
+          this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize
+            + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
+        }
+        const selectionStartedAt = Date.now();
+        let selectionWallMs = 0;
+        let parsedSelection: any = null;
+        const initialSelection = await (async () => {
+          try {
+            const selectionResponse = await this.realLLM.generate({
+              prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool }),
+              scenario: 'idea_generate',
+              timeout: discoveryBudget.complexTimeoutMs,
+              maxEmptyRetries: 1,
+              responseFormat: 'json_object',
+              metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
+            });
+            selectionWallMs = Date.now() - selectionStartedAt;
+            parsedSelection = parseResponse(selectionResponse.content, '固定候选池选优');
+            if (parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')) {
+              throw prerequisiteError(parsedSelection);
+            }
+            const selected = normalizePremiseSelectionPayload({
+              pool: candidatePool,
+              selectedPremises: parsedSelection && parsedSelection.selectedPremises,
+            }, requestedCount, premisePoolSize, discoveryCategories, minimumSelectedCountForPool(candidatePool.length));
+            assertPremiseCausalPlans(selected);
+            if (!variedCategories) for (const premise of selected.selected) {
+              if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
+                throw new Error('已选题材未继承本次固定分类');
+              }
+              premise.storyCategory = dto.storyCategory;
+            }
+            return selected;
+          } catch (error) {
+            selectionWallMs = selectionWallMs || (Date.now() - selectionStartedAt);
+            const selectedRows = Array.isArray(parsedSelection?.selectedPremises) ? parsedSelection.selectedPremises : [];
+            throw failWithPoolAudit(
+              error,
+              'fixed_pool_selection',
+              parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')
+                ? 'selection_prerequisite_blocked' : 'fixed_pool_selection_failed',
+              { selectionWallMs, preselectedPremises: selectedRows, premiseSelected: selectedRows.length },
+            );
+          }
+        })();
+        const preselectionReviewStartedAt = Date.now();
+        let normalizedSelection: any;
         try {
-          parsed = JSON.parse(jsonrepair(normalized || '{}'));
-        } catch {
-          throw new Error('创建前题材筛选未返回合法 JSON；系统没有创建任何完整题材卡。');
+          normalizedSelection = await this.reconcilePremiseSelection(
+            initialSelection, requestedCount, premisePoolSize,
+            variedCategories ? discoveryCategories : [dto.storyCategory],
+            buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
+              + ideaDiscoveryAuthorContext(dto)
+              + '\n【本次选择约束】' + autoSelectionRules + '；' + submissionRule
+              + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
+              + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre),
+            dto.webNovelGenre,
+            { reviews: sourceCompletionBudget, reselection: reselectionCompletionBudget },
+          );
+        } catch (error) {
+          const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
+          throw failWithPoolAudit(
+            error,
+            'preselection_review',
+            'preselection_review_failed',
+            {
+              selectionWallMs,
+              preselectionReviewWallMs,
+              preselectedPremises: initialSelection.selected,
+              premiseSelected: initialSelection.selected.length,
+            },
+          );
         }
-        const initialSelection = normalizePremiseSelectionPayload(
-          parsed,
-          requestedCount,
-          premisePoolSize,
-          discoveryCategories,
-        );
-        assertPremiseCausalPlans(initialSelection);
-        // Fixed categories were previously attached only after independent precheck.
-        if (!variedCategories) for (const premise of initialSelection.selected) {
-          if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) throw new Error('已选题材未继承本次固定分类');
-          premise.storyCategory = dto.storyCategory;
-        }
-        const categoryStandards = discoveryCategories.map(category => {
-          const placement = resolveSubmissionCategory(dto.platform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
-          return { category, standard: placement.status === 'resolved'
-            ? platformCategoryWritingBrief(dto.platform, placement.value, dto.storyType) : '' };
-        });
-        const normalizedSelection = await this.reconcilePremiseSelection(initialSelection, requestedCount, premisePoolSize,
-          variedCategories ? discoveryCategories : [dto.storyCategory], buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
-            + ideaDiscoveryAuthorContext(dto)
-            + '\n【本次选择约束】' + autoSelectionRules + '；' + submissionRule
-            + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
-            + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre), dto.webNovelGenre, {reviews:sourceCompletionBudget,reselection:reselectionCompletionBudget});
+        const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
+        this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
+          + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
+          + '，有效池=' + candidatePool.length + '/' + premisePoolSize
+          + '，选中=' + normalizedSelection.selected.length + '/' + requestedCount);
         for (const premise of normalizedSelection.selected) {
           if (!variedCategories && premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
-            throw new Error(`已选题材 ${premise.premiseId} 未继承本次固定分类 ${dto.storyCategory}。`);
+            throw new Error('已选题材 ' + premise.premiseId + ' 未继承本次固定分类 ' + dto.storyCategory + '。');
           }
           premise.storyCategory = variedCategories ? premise.storyCategory : dto.storyCategory;
           selectedCategoryById.set(String(premise.premiseId), String(premise.storyCategory));
         }
         if (!normalizedSelection.poolTargetMet) {
-          this.logger.warn(
-            `idea-discover: 创建前广搜有效轻量胚子 ${normalizedSelection.pool.length}/${premisePoolSize}，但已明确选出 ${normalizedSelection.selected.length}/${requestedCount} 个成熟题材；继续结构化，不用弱题材凑池。`,
-          );
+          this.logger.warn('idea-discover: 创建前广搜有效轻量胚子 ' + normalizedSelection.pool.length + '/' + premisePoolSize
+            + '，但已明确选出 ' + normalizedSelection.selected.length + '/' + requestedCount + ' 个成熟题材；继续结构化，不用弱题材凑池。');
         }
-        return normalizedSelection;
+        const priorAudit = normalizedSelection.selectionAudit && typeof normalizedSelection.selectionAudit === 'object'
+          ? normalizedSelection.selectionAudit as Record<string, unknown> : {};
+        return {
+          ...normalizedSelection,
+          selectionAudit: { ...priorAudit, poolGeneration: poolGenerationAudit,
+            phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs: Date.now() - poolStartedAt } },
+        };
       };
 
       let sameBatchPremises: Array<Record<string, unknown>> = [];
@@ -5122,7 +5583,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         });
         const rawIdeas = extractIdeaList(response.content || '') || [];
         try {
-          return bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas);
+          return retainValidAutomaticPlotTags(bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas),dto.plotTags,autoOptions.plotTags);
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           throw new Error(`第 ${position + 1}/${requestedCount} 个已选题材结构化失败：${detail}`);
@@ -5303,10 +5764,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
       // A short preselection must not erase independently verified premises.
-      // The final quantity gate still rejects a batch below requestedCount.
+      // The final quantity gate may return a partial batch only after the minimum count and all quality gates pass.
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
+      const minimumDeliverableCount = minimumAcceptableIdeaCount(requestedCount);
       if (preselectionShortfall) {
-        this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，最终缺额不能冒充成功。`);
+        this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，若最终达到最低可交付数量则返回明确标注缺额的合格部分结果，不用弱题材凑数。`);
       }
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
       const structuredCards: Array<Record<string, unknown>> = [];
@@ -5350,7 +5812,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const latestCards=new Map(structuredCards.map(card=>[String(card.sourcePremiseId),card]));
       const attemptedPremiseIds=new Set(selectedPremises.map(item=>String(item.premiseId)));
       const latestAssessment=(id:string)=>[...candidateAssessments].reverse().find(item=>item.sourcePremiseId===id);
-      const missingAfterGate=()=>selectedPremises.map(item=>String(item.premiseId)).filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id));
+      // Minimum deliverability is only a final fallback. Do not stop repairing/replacing
+      // rejected slots merely because three cards have passed while the request is for five.
+      const missingAfterGate=()=>selectedPremises
+        .map(item=>String(item.premiseId))
+        .filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id));
       const fulfillmentActions:any[]=[];
       const repairMissing=async(initialMissingPremiseIds:string[])=>{
         const before=new Map(initialMissingPremiseIds.map(id=>[id,latestAssessment(id)]));
@@ -5387,19 +5853,24 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
           const repairPatches = orderedIdeaRepairPatches(repairPayload, repairTargets.length);
 
-          const repairedCards = applyOrderedIdeaRepairPatches(
+          const repairedCards = applyIsolatedIdeaRepairPatches(
             repairTargets.map((target: any) => target.card as Record<string, unknown>),
-            repairPatches,
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('故事命名')) ? [index] : []),
-            repairTargets.flatMap((target: any, index: number) => target.storyRepairAllowed ? [index] : []),
-            repairTargets.map((target:any)=>target.dimensionRepairOptions),
-            repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length && target.gateIssues.every((issue:string)=>
+            repairPatches,{
+            titleRepairPositions:repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
+            namingRepairPositions:repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('故事命名')) ? [index] : []),
+            storyRepairPositions:repairTargets.flatMap((target: any, index: number) => target.storyRepairAllowed ? [index] : []),
+            dimensionRepairOptions:repairTargets.map((target:any)=>target.dimensionRepairOptions),
+            dimensionOnlyPositions:repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length && target.gateIssues.every((issue:string)=>
               ['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`)) ? [index] : []),
-            repairTargets.map((target:any)=>target.dimensionRepairSelections),
-            repairTargets.map((target:any)=>target.scopeAllocationPlan),
-            repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length&&target.gateIssues.every((issue:string)=>issue==='篇幅分线合计与总章数不一致'||['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`))?[index]:[]),
-          );
+            dimensionRepairSelections:repairTargets.map((target:any)=>target.dimensionRepairSelections),
+            scopeAllocationPlans:repairTargets.map((target:any)=>target.scopeAllocationPlan),
+            metadataOnlyPositions:repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length&&target.gateIssues.every((issue:string)=>issue==='篇幅分线合计与总章数不一致'||['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`))?[index]:[]),
+          },(index,error)=>{
+            const detail=error instanceof Error?error.message:String(error);
+            const premiseId=String(repairTargets[index]?.card?.sourcePremiseId||'');
+            fulfillmentActions.push({kind:'repair_patch_rejected',premiseId,error:detail});
+            this.logger.warn('idea-discover: '+premiseId+' 的修复补丁被严格协议拒绝，保留原失败卡，不阻断其它卡：'+detail);
+          });
           const changedCards = repairedCards.filter((card,index)=>JSON.stringify(card)!==JSON.stringify(failedCards[index]));
           finalGateRepairGenerated += changedCards.length;
           for(const card of changedCards)latestCards.set(String(card.sourcePremiseId),card);
@@ -5417,6 +5888,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       let fulfillmentStopReason=preselectionShortfall ? 'preselection_shortfall' : 'requested_quantity_verified';
       try {fulfillmentStopReason=await fulfillDiscoveryGaps({
         missing:missingAfterGate,hasCard:id=>latestCards.has(id),
+        onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
         canReplace:()=>availableOriginalPool().length>0&&reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&presentationBudget.remaining>=1+minimumCardReviewCalls(1),
@@ -5429,11 +5901,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             quote:String(premise.payoff),referenceQuote:String(seed.storyCore),reason:'该位置完整卡尚未合格交付：'+(latestAssessment(id)?.issues||['结构化未完成']).join('；')}]};
           const original={...premiseDiscovery,selected:[...attemptedPremiseIds].map(premiseId=>({premiseId}))};
           const reserve=await this.reservePremiseSelection(original,{...premiseDiscovery,selected:selectedPremises},review,requestedCount,premisePoolSize,discoveryCategories,
-            buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
+            buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n【与完整卡一致的分类标准】'+JSON.stringify(categoryStandards)+premiseCategoryIdentityDirective(discoveryCategories)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
             reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget);
           if(reserve.replacementPremiseId)attemptedPremiseIds.add(reserve.replacementPremiseId);
           fulfillmentActions.push({kind:'original_pool_replacement',replaces:id,...reserve});
-          if(reserve.error)throw Error(reserve.error);
+          if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}
           if(!reserve.attempted)return 'unavailable';
           if(!reserve.review.passed)return 'rejected';
           const next=reserve.selection.selected[position];selectedPremises[position]=next;
@@ -5442,6 +5914,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           await accept([card],'initial');return 'replaced';
         },
       });}catch(error){finalGateRepairError=String((error as Error).message);fulfillmentStopReason='completion_unavailable';}
+      const acceptedUniqueCount = new Set(accepted.map(card=>String(card?.sourcePremiseId||'').trim()).filter(Boolean)).size;
+      if (acceptedUniqueCount >= minimumDeliverableCount && acceptedUniqueCount < requestedCount) {
+        if (fulfillmentStopReason === 'requested_quantity_verified') {
+          fulfillmentStopReason = preselectionShortfall ? 'preselection_shortfall' : 'minimum_acceptable_partial';
+        }
+        fulfillmentActions.push({kind:'partial_delivery_after_fulfillment',accepted:acceptedUniqueCount,requested:requestedCount,
+          stopReason:fulfillmentStopReason,
+          repairAttempts:fulfillmentActions.filter(action=>action.kind==='repair').length,
+          replacementAttempts:fulfillmentActions.filter(action=>action.kind==='original_pool_replacement').length,
+          remainingOriginalCandidates:availableOriginalPool().length,
+          remainingPresentationCalls:presentationBudget.remaining,
+          remainingSourceCalls:sourceCompletionBudget.remaining,remainingReselectionCalls:reselectionCompletionBudget.remaining});
+      }
 
       if (preselectionShortfall && fulfillmentStopReason === 'requested_quantity_verified') fulfillmentStopReason = 'preselection_shortfall';
       const selectedAccepted = accepted
@@ -5478,6 +5963,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         requested: requestedCount,
         shortfall: requestedCount - selectedAccepted.length,
         returned: selectedAccepted.length,
+        partial: false,
+        minimumDeliverableCount,
         rejected: finalMissingPremiseIds.length,
         repairAttempted: finalGateRepairAttempted,
         repairGenerated: finalGateRepairGenerated,
@@ -5485,16 +5972,24 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         presentationPhysicalCallsUsed: presentationCallLimit - presentationBudget.remaining,
         presentationPhysicalCallLimit: presentationCallLimit,
         reasons: [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 8),
+        candidatePool: premiseDiscovery.pool.map((premise: any) => ({
+          premiseId: premise.premiseId ?? null,
+          workingTitle: premise.workingTitle ?? null,
+          storyCategoryId: premise.storyCategoryId ?? null,
+          storyCategory: premise.storyCategory ?? null,
+          storyCore: premise.storyCore ?? null,
+        })),
         preselectedPremises: selectedPremises,
         candidateAssessments,
         acceptedEvidence: selectedAccepted.map(idea => ({
+          sourcePremiseId: String(idea?.sourcePremiseId || ''),
           title: String(idea?.title || ''),
           densityMode: idea?.readerExperienceProfile?.densityMode,
           pace: idea?.readerExperienceProfile?.pace,
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先完成轻量题材池筛选；每个已选 premise 独立结构化恰好一张完整卡，题材身份由服务器绑定。只处理本批缺额；有实质改善时继续局部修复，停滞时从本批未尝试原池换选并完整验收；共享预算不足或原池耗尽时如实报告缺量，不降低质量。',
+        note: '先并发生成轻量候选池，再从固定池选优；入选题材逐张并发结构化并执行原有质量门。缺额时在原池和共享预算内继续修复或换选，并独立复核；仅在补足不可继续且达到最低可交付数量时明确标注部分交付，不降低质量。',
       };
 
       if (selectedAccepted.length === 0) {
@@ -5515,10 +6010,22 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
       const partial = selectedAccepted.length < requestedCount || finalMissingPremiseIds.length > 0;
       if (partial) {
-        appealGate.returned = 0;
         const reason = [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 5).join('；') || finalGateRepairError || '题材结构化或独立审查未通过';
-        const error = `故事题材数量不足：请求 ${requestedCount}，最终通过 ${selectedAccepted.length}；本批未完成，禁止以 success=true 返回缺量结果。未通过原因：${reason}`;
-        this.logger.warn(`idea-discover: ${error}`);
+        if (selectedAccepted.length >= minimumDeliverableCount) {
+          appealGate.returned = selectedAccepted.length;
+          appealGate.partial = true;
+          appealGate.minimumDeliverableCount = minimumDeliverableCount;
+          const warning = '请求' + requestedCount + '张，最终有' + selectedAccepted.length + '张通过全部质量门；补足停止原因='
+            + appealGate.fulfillment.stopReason + '，缺额' + (requestedCount - selectedAccepted.length)
+            + '张。未降低质量门，也未把最低可交付数量当作提前停止条件。';
+          this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
+          return { success: true, status: 'partial', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
+            qualifiedIdeas: acceptedWithAudit, warning, qualityWarning: warning, appealGate };
+        }
+        appealGate.returned = 0;
+        const error = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
+          + '；低于最低可交付数量 ' + minimumDeliverableCount + '。未通过原因：' + reason;
+        this.logger.warn('idea-discover: ' + error);
         return { success: false, status: 'incomplete', ideas: [], totalIdeas: 0,
           qualifiedIdeas: acceptedWithAudit, error, appealGate };
       }
@@ -5532,7 +6039,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : '题材发现失败';
       this.logger.error(`idea-discover 失败: ${message}`);
-      return { success: false, ideas: [], error: message };
+      return { success: false, ideas: [], totalIdeas: 0, error: message, ...((err as any)?.appealGate ? { appealGate: (err as any).appealGate } : {}) };
     }
   }
 
@@ -5543,34 +6050,45 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   /** 每个项目的已发最大进度，用于把总进度钳制成单调不降（避免步骤回退导致前端进度条倒走） */
   private projectLastPercent = new Map<string, number>();
 
-  private async reviewPremiseSelection(selection: ReturnType<typeof normalizePremiseSelectionPayload>, standard: string, mode: 'overlap' | 'source_drift', physicalCallBudget?: { remaining: number }, sourceBatch = false, requiredGenres:readonly string[]=[], reviewLimiter?:ReturnType<typeof createReviewLimiter>, overlapFocusId?:string): Promise<PremiseSelectionReview> {
+  private async reviewPremiseSelection(selection: ReturnType<typeof normalizePremiseSelectionPayload>, standard: string, mode: 'overlap' | 'source_drift', physicalCallBudget?: { remaining: number }, sourceBatch = false, requiredGenres:readonly string[]=[], reviewLimiter?:ReturnType<typeof createReviewLimiter>, overlapFocusId?:string | readonly string[]): Promise<PremiseSelectionReview> {
     if (mode === 'source_drift' && !sourceBatch) {
       const budget = premiseSourceCallBudget(physicalCallBudget);
       let batches: ReturnType<typeof premiseSourceBatches>;
+      const splitSources=()=>splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
+        .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
       if (readGenerationBudgets().reviewGroupingMode === 0) {
-        try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
-        catch (error) {
-          if (!isReviewOutputCapacityError(error) || selection.selected.length < 2) throw error;
-          this.logger?.warn('来源整体审核遇到输出容量限制，按实际资料体量拆分；沿用原共享预算及全部质量检查');
-          batches=splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
-            .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
+        // Five-premise source audits made multiple expensive calls and exhausted
+        // the shared review allowance in local production. Split large transport
+        // when both independent batches fit the existing physical-call budget.
+        // Keep all source/payoff/category/genre checks and the separate global overlap review.
+        if(selection.selected.length>=5&&budget.remaining>=2){
+          this.logger?.warn('来源审核五项以上预先分批，降低超大输出请求风险；共享调用预算和独立质量审查不变');
+          batches=splitSources();
+        }else{
+          try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
+          catch (error) {
+            if (!isReviewOutputCapacityError(error) || selection.selected.length < 2) throw error;
+            this.logger?.warn('来源整体审核遇到输出容量限制，按实际资料体量拆分；沿用原共享预算及全部质量检查');
+            batches=splitSources();
+          }
         }
       } else batches = premiseSourceBatches(selection);
       const reviews = await independentReviewBatches(batches, budget, IDEA_CARD_GENERATION_CONCURRENCY,
         (batch, _index, allowance) => this.reviewPremiseSelection(batch, standard, mode, allowance, readGenerationBudgets().reviewGroupingMode!==0, requiredGenres, reviewLimiter));
       return mergePremiseSourceBatches(selection, batches, reviews);
     }
+    const overlapFocusIds = overlapFocusId === undefined ? [] : typeof overlapFocusId === 'string' ? [overlapFocusId] : [...overlapFocusId];
     const validateReview = (value: unknown) => mode === 'source_drift' ? [...premiseSourceReviewIssues(value, selection),...premiseGenreFitIssues(value,selection,requiredGenres),...premiseCategoryFitIssues(value,selection),...premisePayoffReviewIssues(value,selection)] : [...premiseSelectionReviewIssues(value, selection),
       ...(Array.isArray((value as PremiseSelectionReview)?.issues) ? (value as PremiseSelectionReview).issues : [])
         .filter(item => item?.kind !== mode).map(() => '当前独立审查只能返回' + mode),
-      ...premiseOverlapScopeIssues(value,selection,overlapFocusId)];
+      ...premiseOverlapScopeIssues(value,selection,overlapFocusIds)];
     const runReview=reviewLimiter||(<T>(task:()=>Promise<T>)=>task());
     const result = await runReview(()=>this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
       standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + '\n当前是锁定前复核，只审查，不修改或重选；先按causalPlan核查每个关键阶段结果的全部必要条件，再分别作来源、分类和流派结论。因果成立检查不受下文“只核对来源”措辞限制，原池和展开同样漏写条件也须返回gap，不能以来源忠实或结局完整代替。'
-      + (mode === 'source_drift' ? '本次只核对每个已选项展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺，逐项核对，不审同批重合。核对的是与原池明确约束是否兼容，不要求所有展开句都已逐字写入骨架；具体判据按GEN-002执行。不由评审补造候选没有写的事实。对于代写、转交、救助等多方动作，先分清原文明确的实施者、受益者与接收者；原文没有写明的角色关系不得由评审补成确定事实，更不能在修订前后按相反解释各判一次冲突。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，必须说明选择、升级、反转与代价为何同构；引用两处相似句子之外，还须逐项比较主角选择触发的具体升级、反转改变的胜负条件与最终代价。')
+      + (mode === 'source_drift' ? '本次只核对每个已选项展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺，逐项核对，不审同批重合。核对的是与原池明确约束是否兼容，不要求所有展开句都已逐字写入骨架；具体判据按GEN-002执行。不由评审补造候选没有写的事实。对于代写、转交、救助等多方动作，先分清原文明确的实施者、受益者与接收者；原文没有写明的角色关系不得由评审补成确定事实，更不能在修订前后按相反解释各判一次冲突。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，但不得因职业、地点或证据道具不同就漏掉真实的结构同构。逐项比较行动的策略、行动引发的升级、反转改变的胜负条件及最终代价；如果多张都是“隐藏旧本领→搜集可核验记录→遭对手反咬→亮出文件翻盘→失去岗位”，且四段的实际因果作用相同，即使职位和道具不同也须按真实同构报告，不得等到完整卡阶段才第一次指出。引用两处各自真实的原文并给具体因果理由；普通扮猪吃虎类型外壳本身不构成同构。')
       + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
-      + (overlapFocusId ? '\n【本次变化项】'+overlapFocusId+'；必须逐对比较本项与每个保留项。保留项之间内容未变且已有独立审核结论，本次不重复审这些旧配对；issues只能包含至少一端为本次变化项的真实同构问题，不返回保留项之间的问题。' : '')
+      + (overlapFocusIds.length ? '\n【本次变化项】' + JSON.stringify(overlapFocusIds) + '；必须逐对比较所有至少一端属于本次变化项的候选对，每个无序候选对只审一次。变化项之间也要互相比较；保留项之间内容未变且已有独立审核结论，本次不重复审这些旧配对。issues只能包含至少一端为本次变化项的真实同构问题，不返回保留项之间的问题。' : '')
       + '\n【待锁定已选胚子】' + JSON.stringify(selection.selected)
       + (mode === 'source_drift' ? premiseCategoryReviewDirective(selection) : '')
       + (mode === 'source_drift' ? premisePayoffReviewDirective(selection) : '')
@@ -5603,7 +6121,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}) {
     const sourceReceipts:PremiseSourceReceipts=new Map();
     const sourceScope=JSON.stringify({standard,requiredGenres});
-    const reviewBoth = async (selection: ReturnType<typeof normalizePremiseSelectionPayload>): Promise<PremiseSelectionReview> => {
+    const reviewBoth = async (
+      selection: ReturnType<typeof normalizePremiseSelectionPayload>,
+      changeScope?: { focusIds: readonly string[]; affectedIds: readonly string[] },
+      previousReview?: PremiseSelectionReview,
+    ): Promise<PremiseSelectionReview> => {
+      let sourceReviewReuse = { reused: 0, reviewed: 0 };
       const limiter=createReviewLimiter(IDEA_CARD_GENERATION_CONCURRENCY);
       const modes=['source_drift','overlap'] as const;
       const reviewBudget=shared?.reviews||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
@@ -5612,19 +6135,100 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         (mode,_index,budget)=>mode==='source_drift'
           ? reviewChangedPremiseSources(selection,sourceScope,sourceReceipts,
               pending=>this.reviewPremiseSelection(pending,standard,mode,budget,false,requiredGenres,limiter),
-              counts=>this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核仍覆盖当前选择`))
-          : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter));}
+              counts=>{
+                sourceReviewReuse={reused:Number(counts.reused)||0,reviewed:Number(counts.reviewed)||0};
+                this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核只复核变化项涉及的配对`);
+              })
+          : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter,changeScope?.focusIds));}
       catch(error){throw new Error('锁定前独立审查未完成，未生成完整卡：'+String(error));}
-      const sourceChecks = reviews.flatMap(review => review.sourceChecks || []);
-      return { passed: reviews.every(review => review.passed), issues: reviews.flatMap(review => review.issues),
+      const sourceReview=reviews[0];
+      const overlapReview=reviews[1];
+      const affectedIds=new Set((changeScope?.affectedIds||[]).map(String));
+      const retainedOverlapIssues=previousReview&&affectedIds.size
+        ? previousReview.issues.filter(issue=>issue.kind==='overlap'
+          && !affectedIds.has(String(issue.premiseId))
+          && !affectedIds.has(String(issue.referencePremiseId)))
+        : [];
+      const overlapIssues=[...retainedOverlapIssues,...(overlapReview?.issues||[])];
+      const issues=[...(sourceReview?.issues||[]),...overlapIssues];
+      const sourceChecks=sourceReview?.sourceChecks||[];
+      return {
+        passed: Boolean(sourceReview?.passed&&overlapReview?.passed&&retainedOverlapIssues.length===0),
+        issues,
         ...(sourceChecks.length ? { sourceChecks } : {}),
-        genreChecks: reviews.flatMap(review=>review.genreChecks||[]),
-        payoffChecks: reviews.flatMap(review=>review.payoffChecks||[]),
-        categoryChecks: reviews.flatMap(review=>review.categoryChecks||[]) };
+        genreChecks: sourceReview?.genreChecks||[],
+        payoffChecks: sourceReview?.payoffChecks||[],
+        categoryChecks: sourceReview?.categoryChecks||[],
+        sourceReviewReuse,
+      };
+    };
+    const selectionChangeScope = (
+      before: ReturnType<typeof normalizePremiseSelectionPayload>,
+      after: ReturnType<typeof normalizePremiseSelectionPayload>,
+    ) => {
+      const beforeById=new Map<string,string>();
+      const afterById=new Map<string,string>();
+      before.selected.forEach(item=>beforeById.set(String(item.premiseId),JSON.stringify(item)));
+      after.selected.forEach(item=>afterById.set(String(item.premiseId),JSON.stringify(item)));
+      const affectedIds=new Set<string>();
+      // Selection order is presentation-only. Removing an unresolved item shifts later indices
+      // but does not change those premises or the already-reviewed pairwise verdicts.
+      for(const [id,priorSignature] of beforeById){
+        const nextSignature=afterById.get(id);
+        if(nextSignature===undefined||nextSignature!==priorSignature)affectedIds.add(id);
+      }
+      for(const [id,nextSignature] of afterById){
+        const priorSignature=beforeById.get(id);
+        if(priorSignature===undefined||priorSignature!==nextSignature)affectedIds.add(id);
+      }
+      return {
+        focusIds:after.selected.map(item=>String(item.premiseId)).filter(id=>affectedIds.has(id)),
+        affectedIds:[...affectedIds],
+      };
     };
     const initialReview = await reviewBoth(initial);
-    if (initialReview.passed) return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview } };
+    const minimumSelectableCount = minimumAcceptableIdeaCount(requestedCount);
+    if (initialReview.passed) {
+      const partial = initial.selected.length < requestedCount;
+      return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
+        ...(partial ? { partial: true, minimumSelectableCount, selectionStopReason: 'mature_selection_shortfall', completeCardGatePending: true } : {}) } };
+    }
     const repairPlan = premiseReselectionPlan(initial, initialReview);
+    // If enough independently reviewed premises remain, stop here instead of spending
+    // more calls trying to fill every position. Full-card gates still run afterwards.
+    let partialSelection = initial;
+    let partialReview = initialReview;
+    const partialExcludedIds = new Set<string>();
+    while (!partialReview.passed) {
+      const retained = retainReviewedPremises(partialSelection, partialReview,
+        repairPlan.protectedItems.map(item => String(item.premiseId)));
+      if (retained.selection.selected.length < minimumSelectableCount
+        || retained.selection.selected.length >= partialSelection.selected.length
+        || !retained.excludedPremiseIds.length) break;
+      retained.excludedPremiseIds.forEach(id => partialExcludedIds.add(String(id)));
+      const previouslyReviewedSelection = partialSelection;
+      partialSelection = retained.selection;
+      partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
+      if (partialReview.passed) {
+        const missingSlots = Math.max(0, requestedCount - partialSelection.selected.length);
+        const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
+        const enoughSharedBudget = !shared
+          || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
+        if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
+          this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + requestedCount
+            + ' 个已独立复核合格题材；原池候选或共享审核/重选预算不足以补齐剩余位置，保留真实缺额。');
+          return { ...partialSelection, selectionAudit: {
+            initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
+            minimumSelectableCount, selectionStopReason: 'minimum_acceptable_partial',
+            excludedPremiseIds: [...partialExcludedIds], reasons: [...initialReview.issues],
+            completeCardGatePending: true,
+          } };
+        }
+        this.logger?.warn('锁定前筛选已有 ' + partialSelection.selected.length + '/' + requestedCount
+          + ' 个合格题材；继续对问题位置做原池重选，不因达到最低可交付数量提前停止。');
+        break;
+      }
+    }
     if (repairPlan.availableCandidates.length < repairPlan.repairSlots.length) {
       const retained = retainReviewedPremises(initial, initialReview);
       if (!retained.selection.selected.length) throw new Error('原池没有足够可用的不同题材用于问题位置重选，且没有可保留的已复核题材；不扩大池、不重复下游修复。');
@@ -5637,25 +6241,36 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reselectionBudget=shared?.reselection||{remaining:readGenerationBudgets().premiseReselectionMaxCalls};
     let selected=initial;
     const completedSlots=new Set<string>();
+    const frozenReselections=new Map<string,Record<string,Record<string,unknown>>>();
     let reselectionStopReason:string|undefined;
     const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
       if(!slots.length)return true;
+      // This exact four-slot aggregate exceeded the provider's 32768-token
+      // response capacity during local validation. Partition transport before
+      // another minutes-long truncated call; keep every slot, shared allowance,
+      // global comparison requirement and final independent source/overlap Gate.
+      if(slots.length>=4){
+        for(const part of splitReviewMaterial(slots,slot=>({slot,pool:initial.pool.find(item=>item.premiseId===slot.replacesPremiseId)})))
+          if(!await reselectScope(part,unusedIds))return false;
+        return true;
+      }
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
       const ids=new Set(slots.map(slot=>slot.replacesPremiseId));
       const scopedReview:PremiseSelectionReview={passed:false,issues:slots.flatMap(slot=>slot.issues)};
       const protectedIds=selected.selected.filter(item=>!ids.has(item.premiseId)).map(item=>item.premiseId);
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
         .filter(id=>!protectedIds.includes(id)&&(!unusedIds||unusedIds.has(String(id))));
-      let frozen:Record<string,Record<string,unknown>>|undefined;
+      const frozenScope=slots.map(slot=>String(slot.replacesPremiseId)).sort().join('|');
+      let frozen=frozenReselections.get(frozenScope);
       const normalize=(value:unknown)=>{
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
-        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories);
+        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
         const premises=Object.fromEntries(rows.map((row:any)=>[row.replacesPremiseId,candidate.selected.find(item=>item.premiseId===row.premise.premiseId)!]));
-        if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||Object.entries(prior).some(([key,entry])=>premises[id][key]!==entry)))
+        if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||Object.entries(prior).some(([key,entry])=>JSON.stringify(premises[id][key])!==JSON.stringify(entry))))
           throw Error('比较协议补正不得更换候选身份或改写premise，只补正comparisons');
         const issues=premiseReplacementComparisonIssues(value,candidate);
-        if(issues.length){frozen??=structuredClone(premises);throw Error(issues.join('；'));}
+        if(issues.length){frozen??=structuredClone(premises);frozenReselections.set(frozenScope,frozen);throw Error(issues.join('；'));}
         return candidate;
       };
       try{
@@ -5669,7 +6284,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n每项comparisons须逐一覆盖合并后其余全部最终题材ID，包括本次其它修订项的新ID；不是只比较正常项，也不要沿用已被替换的旧ID。模型须先确定全部最终候选，再核对各项选择、升级、反转、代价的真实区别。'
           +'\n'+PREMISE_REPLACEMENT_COMPARISON_POLICY+'\n分类候选='+JSON.stringify(categories)
-          +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","comparisons":[{"referencePremiseId":"其余最终ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"因果升级差别至少12字","reversalDifference":"胜负条件差别至少12字","consequenceDifference":"连带代价差别至少12字"}],"premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
+          +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","comparisons":[{"referencePremiseId":"其余最终ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"因果升级差别至少12字","reversalDifference":"胜负条件差别至少12字","consequenceDifference":"连带代价差别至少12字"}],"premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
           {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:reselectionBudget,timeout:LLM_TUNABLES.timeoutSimple(),
             validate:value=>{try{normalize(value);return true;}catch{return false;}},
             describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String((error as Error).message)];}},
@@ -5684,7 +6299,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return true;
       }
     };
-    await reselectScope(repairPlan.repairSlots);
+    while (reselectionBudget.remaining > 0) {
+      const pendingSlots = repairPlan.repairSlots.filter(slot => !completedSlots.has(String(slot.replacesPremiseId)));
+      if (!pendingSlots.length) break;
+      const before = reselectionBudget.remaining;
+      if (await reselectScope(pendingSlots)) break;
+      if (reselectionBudget.remaining >= before) break;
+    }
     const unresolvedIds = repairPlan.repairSlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)))
       .map(slot=>String(slot.replacesPremiseId));
     if (unresolvedIds.length) {
@@ -5696,13 +6317,22 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       reselectionStopReason, sourceRepairCallsRemaining: reselectionBudget.remaining,
       excludedPremiseIds: unresolvedIds, reasons: initialReview.issues.filter(issue=>unresolvedIds.includes(issue.premiseId)),
       completeCardGatePending: true } : {};
-    const postReselectionReview = selected === initial ? initialReview : await reviewBoth(selected);
+    let postReselectionReview: PremiseSelectionReview;
+    if(selected===initial) postReselectionReview=initialReview;
+    else {
+      const changeScope=selectionChangeScope(initial,selected);
+      postReselectionReview=changeScope.focusIds.length
+        ? await reviewBoth(selected,changeScope,initialReview)
+        : retainPremiseReviewEvidence(initial,initialReview,selected);
+    }
     let finalReview=postReselectionReview;
     const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
       attemptedIds=new Set([...initial.selected,...selected.selected].map(item=>String(item.premiseId)));
     const reserveStartCredits=reselectionBudget.remaining;
+    let reserveReconciliationRounds = 0;
     while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0){
-      if(shared&&shared.reviews.remaining<2)break;
+      reserveReconciliationRounds += 1;
+      this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '/1；之后仅保留独立复核通过项，不继续循环换题。');
       const retained=retainReviewedPremises(selected,finalReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
       const unusedIds=new Set(initial.pool.filter(item=>!attemptedIds.has(String(item.premiseId))).map(item=>String(item.premiseId)));
       if(!retained.excludedPremiseIds.length||!unusedIds.size)break;
@@ -5715,21 +6345,36 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const slots=premiseReselectionPlan(selected,{passed:false,issues:scopedIssues}).repairSlots;
       if(!slots.length)break;
       slots.forEach(slot=>slot.mode='replace_from_pool');
+      // A replacement cannot be used unless its changed sources AND all affected
+      // pairwise overlaps can be independently reviewed. The outer scheduler
+      // reserves one call per mode; five pending sources require a further batch.
+      // Check that total BEFORE spending on another model reselection, otherwise
+      // a two-credit tail can pay for overlap but fail source coverage after minutes.
+      const pendingSources=pendingPremiseSourceReviewCount(selected,sourceScope,sourceReceipts,slots.map(slot=>String(slot.replacesPremiseId)));
+      const grouping=readGenerationBudgets();
+      const sourceCalls=grouping.reviewGroupingMode===0
+        ? (pendingSources>=5?2:1)
+        : Math.max(1,Math.ceil(pendingSources/grouping.sourceBatchSize));
+      const requiredReviewCredits=1+sourceCalls;
+      if(shared&&shared.reviews.remaining<requiredReviewCredits){
+        this.logger?.warn('锁定前备用重选前终检预算不足：剩余'+shared.reviews.remaining
+          +'次，当前变更预计至少需要来源'+sourceCalls+'批与独立同构1批；保留已经审查的结论，隔离失败位置，不启动注定无法验收的重选');
+        break;
+      }
       const before=selected;
       const completed=await reselectScope(slots,unusedIds);
-      let changed=false;
       for(const slot of slots){
         const position=before.selected.findIndex(item=>item.premiseId===slot.replacesPremiseId);
         const replacement=String(selected.selected[position].premiseId);
         if(replacement===String(slot.replacesPremiseId))continue;
-        changed=true;
         attemptedIds.add(replacement);
         reserveHistory.push({replacesPremiseId:String(slot.replacesPremiseId),replacementPremiseId:replacement});
       }
-      // Review every outstanding source through receipt reuse and the merged set
-      // through overlap review; no known gap disappears when a different slot passes.
-      if(!changed)break;
-      finalReview=await reviewBoth(selected);
+      // Reuse unchanged pair verdicts. Re-review only pairs touched by the new/changed
+      // premises; old findings involving a replaced identity no longer apply to the new set.
+      const changeScope=selectionChangeScope(before,selected);
+      if(!changeScope.focusIds.length)break;
+      finalReview=await reviewBoth(selected,changeScope,finalReview);
       if(!completed)break;
     }
     const reserveAudit=reserveHistory.length?{attempted:true,error:null,...reserveHistory[reserveHistory.length-1],
@@ -5774,7 +6419,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (row?.replacesPremiseId !== plan.replacesPremiseId || !availableIds.includes(String(row?.premise?.premiseId))) {
         throw new Error('备用重选只允许使用尚未入选的原池身份替换本次问题位置');
       }
-      const candidate = normalizeTargetedPremiseReselection(value, current, plan.review, requestedCount, poolTarget, categories);
+      // A reserve replaces one existing failed slot; a previously reviewed partial
+      // selection must not be rejected for still having fewer than requestedCount.
+      // The original final delivery minimum and all independent Gates remain unchanged.
+      const candidate = normalizeTargetedPremiseReselection(value, current, plan.review, requestedCount,
+        poolTarget, categories, current.selected.length);
       const comparisonIssues = premiseReplacementComparisonIssues(value, candidate);
       if (comparisonIssues.length) throw new Error(comparisonIssues.join('；'));
       return candidate;
@@ -5784,14 +6433,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const result = await this.llmCallWithRetry<any>('锁定前原池备用重选',
         standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
         + '\n当前只处理列出的一个缺额位置，在共享预算内选择本批尚未尝试的原池成熟候选；不得沿失败身份再改措辞、改写其它位置、扩池或补生。'
-        + '\n【原池】' + JSON.stringify(initial.pool) + '\n【当前选择】' + JSON.stringify(current.selected)
+        + '\n【本次仍可换选的原池候选】' + JSON.stringify(plan.availableCandidates)
+        + '\n【当前选择】' + JSON.stringify(current.selected)
         + '\n【本次终检证据】' + JSON.stringify(review) + '\n【本问题位置】' + plan.replacesPremiseId
-        + '\n【可用备用ID】' + JSON.stringify(availableIds) + '\n分类候选=' + JSON.stringify(categories)
+        + '\n【可用备用ID（只能从这里选）】' + JSON.stringify(availableIds) + '\n分类候选=' + JSON.stringify(categories)
         + '\n【本次comparisons必须恰好覆盖的referencePremiseId】' + JSON.stringify(current.selected.filter(item=>item.premiseId!==plan.replacesPremiseId).map(item=>item.premiseId))
         + '\n' + PREMISE_REPLACEMENT_COMPARISON_POLICY
         + '\n整体继承备用骨架的实施者、对象、触发、升级与兑现，逐一比较保留项的真实因果链。'
         + '\n每个premise额外必返causalPlan，按实际关键环节逐字引用本次筛选字段中的行动、条件、结果；不能沿用已换掉题材的计划。结构示例='+JSON.stringify(premiseCausalPlanExample())
-        + '\n只输出JSON:{"replacements":[{"replacesPremiseId":"本问题位置ID","comparisons":[{"referencePremiseId":"保留项ID","actionDifference":"双方主动选择的实质差别至少12字","escalationDifference":"双方因果升级的实质差别至少12字","reversalDifference":"双方反转改变胜负条件的差别至少12字","consequenceDifference":"双方连带代价的实质差别至少12字"}],"premise":{"premiseId":"可用备用ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","storyCategoryId":"原池实际分类K编号"}}]}。恰好一项。',
+        + '\n只输出JSON:{"replacements":[{"replacesPremiseId":"本问题位置ID","comparisons":[{"referencePremiseId":"保留项ID","actionDifference":"双方主动选择的实质差别至少12字","escalationDifference":"双方因果升级的实质差别至少12字","reversalDifference":"双方反转改变胜负条件的差别至少12字","consequenceDifference":"双方连带代价的实质差别至少12字"}],"premise":{"premiseId":"可用备用ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际分类K编号"}}]}。恰好一项。',
         { scenario: 'idea_generate', stepKey: 'idea_premise_pool_reselection', physicalCallBudget: budget,
           timeout: LLM_TUNABLES.timeoutSimple(),
           validate: value => { try { normalize(value); return true; } catch { return false; } },
@@ -5927,6 +6577,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n【全部候选，仅修本批】' + JSON.stringify(allCandidates)
       + '\n【允许章节】' + JSON.stringify(batch.map(c => c.order + 1))
       + '\n【矛盾证据】' + JSON.stringify(review.contradictions)
+      + '\n【通信渠道矛盾修复规则】工作群/群聊消息与私聊回复、电话通话是不同事件；不得把私聊改称群回复来掩盖矛盾。对同一群消息，“底下无人回复”与“回复挂在该消息下”不能同时保留；优先在content和scenes的最小必要位置同步修正。修复前必须通读本批完整content与全部字段：若原文已明确写出导演签字、当事人承认或其它决定性动作，不得删除或忽略该直接证据去迁就错误审查；只修复真正互斥的事实，不重写已成立的因果。'
       + '\n只输出JSON:{"patches":[{"chapterNumber":1,"field":"content或scenes","match":"唯一连续原文","replacement":"最小替换"}]}。'
       + `1—${OUTLINE_FACT_REPAIR_LIMITS.maxPatches}项，单章总改动不得超过content与scenes总长${OUTLINE_FACT_REPAIR_LIMITS.maxChangedRatio * 100}%，不得改结构、篇幅配置或篇幅依据。逐处核对同一矛盾在全部候选字段的重复投影，不能只修其中一处。`,
       { projectId, scenario: 'outline', stepKey: 'creation_outline_final_fact_repair', temperature: 0.2,
@@ -6024,6 +6675,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       chaptersPerVolume: _legacyChaptersPerVolume,
       totalChapters: _legacyTotalChapters,
       chapterCount: _legacyChapterCount,
+      ideaDiscoveryAudit: _untrustedIdeaDiscoveryAudit,
       ...currentProjectSettings
     } = projectSettings;
     const constitution = updateConstitution({ type: dto.storyType || 'short_story', settings: '{}' }, {
@@ -6035,9 +6687,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       chapterWordRange: creationChapterRange,
       settings: currentProjectSettings,
     });
-    constitution.confirmedStory = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)
-      ? structuredClone(dto.selectedIdea)
+    const rawSelectedIdea = dto.selectedIdea && typeof dto.selectedIdea === 'object' && !Array.isArray(dto.selectedIdea)
+      ? dto.selectedIdea
       : { summary: String(dto.selectedIdea || '') };
+    const { confirmedStory, ideaDiscoveryAudit } = separateIdeaDiscoveryAudit(rawSelectedIdea);
+    constitution.confirmedStory = confirmedStory;
     constitution.revision = 1;
     // 创建入口前置阻断：平台/分类/基调/文风/流派/视角是【执行前提】，空值 = 标准未执行。
     // 此前这些空值要等生成阶段（assertExecutionStandardsComplete）才被拦下：用户已经选完题材、
@@ -6084,8 +6738,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         categoryWordScale: creationScaleStanding,
       };
     }
-    const normalizedProjectSettings = constitutionSettings({ ...currentProjectSettings,
-      structurePlanning: 'dynamic_by_story_rhythm' }, constitution);
+    const normalizedProjectSettings = {
+      ...constitutionSettings({ ...currentProjectSettings,
+        structurePlanning: 'dynamic_by_story_rhythm' }, constitution),
+      ...(ideaDiscoveryAudit ? { ideaDiscoveryAudit } : {}),
+    };
     dto.settings = normalizedProjectSettings;
 
     const projectId = uuid();
@@ -6209,7 +6866,37 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
   /** 后台执行灵感发现创建项目的全部步骤 */
   private executeCreateProjectSteps(projectId: string, dto: { title: string; storyType: string; targetWords: number; selectedIdea: any; settings?: Record<string, unknown> }) {
-    return generationTasks.run('creation', projectId, '', () => this.executeCreateProjectStepsActive(projectId, dto));
+    return generationTasks.run('creation', projectId, '', () => this.executeCreateProjectStepsActive(projectId, dto))
+      .catch((error: unknown) => {
+        // The active pipeline has its own failure handler after initialization. This boundary
+        // catches only errors thrown before that handler starts (e.g. invalid persisted Canon).
+        // A duplicate-task conflict is not a failed creation and must not poison the active run.
+        if (error instanceof ConflictException) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        let transitioned = false;
+        let statusPersistenceError: string | undefined;
+        try {
+          const result = this.db.getDb().prepare(
+            "UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ? AND status = 'creating'",
+          ).run(new Date().toISOString(), projectId) as { changes?: number };
+          transitioned = Number(result?.changes ?? 0) > 0;
+        } catch (persistError) {
+          statusPersistenceError = persistError instanceof Error ? persistError.message : String(persistError);
+          this.logger.error(`create-project-async 前置失败状态写入失败 project=${projectId}: ${statusPersistenceError}`);
+        }
+        // If another path already moved the project out of "creating", its own status is
+        // authoritative. Do not overwrite or duplicate its terminal event.
+        if (!transitioned && !statusPersistenceError) return;
+        this.logger.error(`create-project-async 初始化/前置失败 project=${projectId}: ${message}`);
+        try {
+          this.emitProjectProgress(projectId, {
+            type: 'error', success: false, projectId, step: 'preflight', message,
+            ...(statusPersistenceError ? { statusPersistenceError } : {}),
+          });
+        } catch (emitError) {
+          this.logger.error(`create-project-async 前置错误事件推送失败 project=${projectId}: ${emitError instanceof Error ? emitError.message : String(emitError)}`);
+        }
+      });
   }
 
   private async executeCreateProjectStepsActive(
@@ -6219,6 +6906,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     projectMetricsContext.enterWith(projectId);
     const db = this.db.getDb();
     const now = () => new Date().toISOString();
+    const projectStatusAtStart = String((db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined)?.status || '');
     const { v4: uuid } = require('uuid');
     const warnings: string[] = [];
     let shortHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -6383,14 +7071,74 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       }
     };
 
+    const persistCreationFailure = (
+      step: string,
+      message: string,
+      details: Record<string, unknown> = {},
+      progress?: { step: string; percent: number; message?: string },
+    ): void => {
+      let currentStatus: string | undefined;
+      let statusPersistenceError: string | undefined;
+      try {
+        const current = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined;
+        if (!current) {
+          statusPersistenceError = '项目记录不存在，无法持久化失败状态';
+        } else {
+          currentStatus = String(current.status || '');
+          const expectedStatus = currentStatus === 'creating'
+            ? 'creating'
+            : currentStatus === 'active' && projectStatusAtStart === 'active' ? 'active' : undefined;
+          if (expectedStatus) {
+            const result = db.prepare(
+              'UPDATE projects SET status = \'generation_failed\', updated_at = ? WHERE id = ? AND status = ?',
+            ).run(now(), projectId, expectedStatus) as { changes?: number };
+            if (Number(result?.changes ?? 0) > 0) {
+              currentStatus = 'generation_failed';
+            } else {
+              const latest = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined;
+              currentStatus = latest ? String(latest.status || '') : undefined;
+              if (!currentStatus) statusPersistenceError = '项目记录在状态迁移期间消失';
+              else if (currentStatus === expectedStatus) statusPersistenceError = '失败状态迁移未生效，项目仍处于 ' + expectedStatus;
+            }
+          } else if (currentStatus === 'active') {
+            this.logger.warn('create-project-async 保留并发路径已激活终态 project=' + projectId + '，忽略后续失败通知 step=' + step);
+            return;
+          } else if (currentStatus !== 'generation_failed') {
+            statusPersistenceError = '项目当前状态为 ' + currentStatus + '，未执行失败状态迁移';
+          }
+        }
+      } catch (persistError) {
+        statusPersistenceError = persistError instanceof Error ? persistError.message : String(persistError);
+      }
+      if (statusPersistenceError) {
+        this.logger.error('create-project-async 失败状态写入失败 project=' + projectId + ': ' + statusPersistenceError);
+      }
+      if (progress) {
+        try {
+          emit(progress.step, progress.percent, progress.message || message, 'failed');
+        } catch (emitError) {
+          this.logger.error('create-project-async 失败进度事件推送失败 project=' + projectId + ': '
+            + (emitError instanceof Error ? emitError.message : String(emitError)));
+        }
+      }
+      try {
+        this.emitProjectProgress(projectId, {
+          type: 'error', success: false, projectId, step, message, ...details,
+          ...(statusPersistenceError ? { statusPersistenceError } : {}),
+        });
+      } catch (emitError) {
+        this.logger.error('create-project-async 失败事件推送失败 project=' + projectId + ': '
+          + (emitError instanceof Error ? emitError.message : String(emitError)));
+      }
+    };
+
     try {
       // ====== LLM 可用性预检 ======
       const llmAvailable = await this.realLLM.isAvailable();
       if (!llmAvailable) {
         const errMsg = '未配置 LLM API Key，无法生成内容。请在「设置」页面添加 API Key（BYOK），或在启动 server 前设置 DEEPSEEK_API_KEY 环境变量。';
         this.logger.error(`create-project-async: ${errMsg}`);
-        emit('project', 0, errMsg);
-        this.emitProjectProgress(projectId, { type: 'error', message: errMsg });
+        persistCreationFailure('preflight', errMsg, {}, { step: 'project', percent: 0, message: errMsg });
         return;
       }
 
@@ -6754,8 +7502,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             if (missingLong.length > 0) {
               const message = `长篇项目已创建，但以下内容未真实写入：${missingLong.join('、')}`;
               this.logger.warn(`create-project-async: ${message} project=${projectId}`);
-              db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
-              this.emitProjectProgress(projectId, { type: 'error', success: false, projectId, message, stats: finalStats, warnings });
+              persistCreationFailure(activeGenerationStep, message, { stats: finalStats, warnings });
               return;
             }
             // 长篇综合链在此之前已写入规划资料；这里曾没有跨章数量台账门禁，后果是矛盾章纲可能直接激活。
@@ -6938,7 +7685,6 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
               isShort ? 'short' : 'full',
               now(), now()
             );
-            emit('world', 25, '世界观已写入，开始生成大纲', 'done');
             // ★ 将7维度世界观数据传播到 world_system_profiles（前端 WorldProfileEditor 读取的表）
             try {
               const wsId = db.prepare(`SELECT id FROM world_settings WHERE project_id=? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
@@ -6975,13 +7721,18 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
               }
             } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败: ${e.message}`); }
           } else {
-            emit('world', 25, '世界观生成失败，停止创建以避免后续上下文失真', 'failed');
-            this.emitProjectProgress(projectId, { type: 'error', success: false, projectId, message: '世界观生成失败，未继续生成大纲，避免上下文不一致。', warnings });
+            const message = '世界观生成失败，未继续生成大纲，避免上下文不一致。';
+            persistCreationFailure('world', message, { warnings }, {
+              step: 'world', percent: 25, message: '世界观生成失败，停止创建以避免后续上下文失真',
+            });
             return;
           }
         }
         // 无论新建还是已存在，都把已保存世界观回读为大纲上下文（世界严格先于大纲；重跑时若已有世界观，大纲也必须有世界观上下文，不得为空）
         const savedWorld = db.prepare(`SELECT era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
+        if (!savedWorld) {
+          throw new Error('世界观生成步骤结束但主记录未保存，停止生成大纲；请检查世界观审查与写入日志。');
+        }
         if (savedWorld) {
           const parseMaybeArray = (v: unknown): any[] => {
             if (v == null) return [];
@@ -7380,7 +8131,7 @@ ${(() => {
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
 【事实与行动结果依赖】${OUTLINE_FACT_REPAIR_SYNC_POLICY}
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
-【本章事件与状态唯一来源】本章content须按时序写清实际发生的行动、必要条件、直接结果与未完成目标。scenes.outcome、characterActions.result、characterStates.stateAfter只能投影同一已发生事实，不得把计划、猜测、未明示的决定或下一章任务写成本章结果。同一物件变更保管人时须写明交付动作、时间与双方；同一时点不得同时在两个人手中或两个地点。人物进出、立场变化必须有本章可见的触发，不能靠字段间互相复述当作已实际发生。
+【本章事件与状态唯一来源】本章content须按时序写清实际发生的行动、必要条件、直接结果与未完成目标。scenes.outcome、characterActions.result、characterStates.stateAfter只能投影同一已发生事实，不得把计划、猜测、未明示的决定或下一章任务写成本章结果。同一物件变更保管人时须写明交付动作、时间与双方；同一时点不得同时在两个人手中或两个地点。人物进出、立场变化必须有本章可见的触发，不能靠字段间互相复述当作已实际发生。涉及同一账册、名单或物证的数量，须沿前章已发生记录逐次区分“本章新增几笔”和“累计总共几笔”，并在content、scenes、characterActions、characterStates中使用同一口径；例如前章已有一笔、本章再记三笔，应明确为新增三笔、累计四笔，不能写成当前账册总共三笔而后章又拿四笔对账。关键消息须写明实际传话者、接收者、传达内容和时点；本人直接听到的问话不得投影成第三人此前向其转述，推测他人知情不能投影成已有某人报信。\n【通信渠道与同源事件约束】群聊/工作群消息、该消息下的群回复、私聊回复、电话通话是不同的通信事件，必须分别保持渠道、发送者、接收者和回复状态一致。若明确写“某条群消息底下无人回复”，后文不得又称同一条群消息底下存在回复；私聊回复不能被投影成群消息回复。若确有两条消息，必须分别写清渠道和对应内容，不得合并成同一条证据。签字、承认、交付、调取等决定性动作也必须在content中明确发生，再由scenes等字段投影，不能只在辅助字段里新增。核定金额、签署协议、办手续不等于款项实际发放或收到，只有明确打款、到账或领取的当事人才可写“已拿到”；一时未写某人返回或进入某处，不能推出整个后续时间段“始终没再进去”，除非正文明确交代时间范围和持续事实。询问某人不等于已经得到答复；看见门牌或认出某物不等于该见闻已经写入辨认笔录、被采信或查明事实；只写记录人记下姓名不能作为已记下具体观察的依据。若场景结果确实依赖已经回答、形成笔录或完成调查，content必须明确实际的回答、记录行为与具体内容，否则相应scenes.outcome和characterActions.result只能保留为待查状态，不得补造已经完成的程序。尤其要区分“有人口头要求留下/别走”“当事人自愿在场配合”与“具有明确权限的主体实际留置或控制”：没有写明实际发生与合法权限时，不得让scenes.outcome、characterActions.result或characterStates.stateAfter擅自升级为“已扣住/被留下/无法离开”。如果已确认阶段目标不要求实际留置，就按原行动能证明的状态描述，不为填强结论虚构新权限；如确有该阶段固定结果，必须先在content里建立可实行的行动与条件。
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
 按以下文档结构生成。必要字段必须存在；允许按章节职责为空的数组会单独说明：
@@ -7445,6 +8196,7 @@ ${(() => {
           let factCheck = dependencyCheck.facts;
           if (!factCheck.consistent || factCheck.contradictions.length || dependencyCheck.actionFailure) {
             const defects = dependencyCheck.defects;
+            const actionRepairEvidence = chapterActionRepairEvidence(chData, dependencyCheck.actionFailure);
             const repair = await this.llmCallWithRetry<any>(`第${order + 1}章事实与结果依赖局部修复`,
               `只修复当前章纲被事实与行动结果审查逐项点名的缺口。两类检查共享本章仅一次局部修复，不因新增审查再开修复循环。已确认题材与前章事实优先，世界观只能作不冲突的补充。不得删除本章职责、不得新增人物、不得换故事。
 【确认题材】${canonicalCreativeBrief}
@@ -7453,7 +8205,7 @@ ${(() => {
 【前章事实台账】${JSON.stringify(priorOutlineFactLedger)}
 【当前章纲】${JSON.stringify(chData)}
 【必须逐项修复】${JSON.stringify(defects)}
-【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(chapterActionRepairEvidence(chData, dependencyCheck.actionFailure))}
+【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(actionRepairEvidence)}
 ${OUTLINE_QUANTITY_SCOPE_POLICY}
 按RPR-001和QLT-003先确定事件先后及实际成立程度，再同步上述结果字段；这些路径用于定位原有事实，不是新增事件要求。若某结果没有成立条件且并非锁定职责，按已有行动实际能证明的程度修正该断言；职责确需此结果时，只能在已确认人物权限和事件边界内补条件，不能为保留强结论而擅自扩大权限。并列或复述不能把行动前的说法挪为触发后的反应。没有路径的缺口保留原始证据与理由，不猜字段或默认为已解决。
 
@@ -7461,16 +8213,16 @@ ${OUTLINE_QUANTITY_SCOPE_POLICY}
               {
                 projectId, chapterIndex: order + 1, scenario: 'outline', stepKey:'creation_chapter_fact_repair', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(),
-                validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects).length===0; } catch { return false; } },
-                describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects); } catch(error) { return [String((error as Error).message)]; } },
-                retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；同一事件各字段保持一致，不改前章或其它事件，不重写整章。',
+                validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence).length===0; } catch { return false; } },
+                describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence); } catch(error) { return [String((error as Error).message)]; } },
+                retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；行动结果缺口必须直接修改actionPath或resultPath所指原文，不能只改同字段无关文字；同一事件各字段保持一致，不改前章或其它事件，不重写整章。',
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
             const rawPatch = repair.data?.patch;
             if (!rawPatch || typeof rawPatch !== 'object' || Array.isArray(rawPatch)) {
               throw new Error(`第${order + 1}章事实局部修复未返回 patch 对象`);
             }
-            const remainingSyncIssues=outlineFactPatchSynchronizationIssues(chData,rawPatch,defects);
+            const remainingSyncIssues=outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence);
             if(remainingSyncIssues.length)throw new Error(`第${order+1}章事实补丁本地同步检查未通过，未发起重复语义复核：${remainingSyncIssues.join('；')}`);
             chData = applyOutlineFactPatch(chData,rawPatch);
             const repairedStructureIssues = assessChapter(chData);
@@ -8329,15 +9081,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       if (missing.length > 0) {
         const message = `项目壳已创建，但以下内容未真实写入：${missing.join('、')}`;
         this.logger.warn(`create-project-async: ${message} project=${projectId}`);
-        db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
-        this.emitProjectProgress(projectId, {
-          type: 'error',
-          success: false,
-          projectId,
-          message,
-          stats: finalStats,
-          warnings,
-        });
+        persistCreationFailure(activeGenerationStep, message, { stats: finalStats, warnings });
         return;
       }
 
@@ -8353,10 +9097,10 @@ ${STORY_ENTITY_MODELING_POLICY}
     } catch (err: any) {
       if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
       this.logger.error(`create-project-async 执行失败 project=${projectId}, step=${activeGenerationStep}: ${err.message}`);
-      try {
-        db.prepare(`UPDATE projects SET status = 'generation_failed', updated_at = ? WHERE id = ?`).run(now(), projectId);
-      } catch {}
-      this.emitProjectProgress(projectId, { type: 'error', cancelled: currentGenerationSignal()?.aborted === true, success: false, projectId, step: activeGenerationStep, message: currentGenerationSignal()?.aborted ? '已取消生成，已完成成果和留存稿已保留' : err.message, warnings });
+      const cancelled = currentGenerationSignal()?.aborted === true;
+      persistCreationFailure(activeGenerationStep,
+        cancelled ? '已取消生成，已完成成果和留存稿已保留' : String(err?.message || err),
+        { cancelled, warnings });
     }
   }
 
@@ -8954,22 +9698,37 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
       throw new Error(`跨模块故事一致性审查未返回完整结构，项目未激活：consistent/contradictions/unrelatedInventions缺失`);
     }
     if (alignment.consistent !== true || contradictions.length > 0) {
+      // Keep the original structured review's source/quote/impact in diagnostics.
+      // This is an unverified model claim, not an independently proven contradiction:
+      // never set evidenceVerified or silently suppress a potential major conflict.
+      const finalReviewFindings = [...(Array.isArray(alignment.contradictions) ? alignment.contradictions : []),
+        ...(Array.isArray(alignment.unrelatedInventions) ? alignment.unrelatedInventions : [])];
+      const originalReviewFinding = (message: string) => finalReviewFindings.find((finding: any) =>
+        (typeof finding === 'string' ? finding.trim() : JSON.stringify(finding)) === message);
       replaceQualityIssues(db, {
         projectId,
         stage: 'project',
         source: 'cross_stage_gate',
         scopeKey: 'creation',
         title: '跨阶段一致性 Gate',
-        issues: contradictions.map((message, index) => ({
-          ruleId: `cross_stage_consistency.${index + 1}`,
-          severity: 'blocking',
-          message,
-          quote: '',
-          content: generatedBundleText,
-          evidenceVerified: false,
-          suggestion: '保持冻结世界观不变，在章纲、未来计划、角色状态、组织、地点或伏笔中选择最小影响修复点后重新检查。',
-          details: { repairAttempt, evidence: '模型未返回可逐字定位的原文，因此按证据不足阻断。' },
-        })),
+        issues: contradictions.map((message, index) => {
+          const reviewFinding = originalReviewFinding(message);
+          return {
+            ruleId: `cross_stage_consistency.${index + 1}`,
+            severity: 'blocking',
+            message,
+            quote: '',
+            content: generatedBundleText,
+            evidenceVerified: false,
+            suggestion: '保持冻结世界观不变，在章纲、未来计划、角色状态、组织、地点或伏笔中选择最小影响修复点后重新检查。',
+            details: {
+              repairAttempt,
+              evidence: '阻断结论仍需核对实际原文；审查原始证据仅供故障定位，不能当成已验证事实。',
+              reviewOrigin: reviewFinding === undefined ? 'independent_stage_or_boundary_review' : 'cross_stage_review',
+              modelFinding: reviewFinding !== undefined && typeof reviewFinding === 'object' ? reviewFinding : null,
+            },
+          };
+        }),
       });
       const gateError = `跨模块一致性经${repairAttempt}次自动修订后仍存${contradictions.length}处问题，已阻断项目激活：${contradictions.join('；')}`;
       try {
@@ -9346,12 +10105,29 @@ ${enrichToneDirective}
           );
         }
       }
+      let statusPersistenceError: string | undefined;
       try {
-        db.prepare("UPDATE projects SET status='generation_failed',updated_at=? WHERE id=?")
-          .run(new Date().toISOString(), projectId);
-      } catch {}
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(error?.message || '恢复生成失败', 409);
+        const result = db.prepare("UPDATE projects SET status='generation_failed',updated_at=? WHERE id=?")
+          .run(new Date().toISOString(), projectId) as { changes?: number };
+        if (Number(result?.changes ?? 0) === 0) {
+          const row = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined;
+          if (!row) statusPersistenceError = '项目记录不存在，失败状态未写入';
+          else if (row.status !== 'generation_failed') statusPersistenceError = '项目状态仍为 ' + String(row.status || '未知');
+        }
+      } catch (statusError) {
+        statusPersistenceError = statusError instanceof Error ? statusError.message : String(statusError);
+        this.logger.error(`恢复生成失败状态写入失败 project=${projectId}: ${statusPersistenceError}`);
+      }
+      if (error instanceof HttpException) {
+        if (statusPersistenceError) {
+          throw new HttpException(`${error.message}；同时失败状态写入失败：${statusPersistenceError}`, 500);
+        }
+        throw error;
+      }
+      throw new HttpException(
+        `${error?.message || '恢复生成失败'}${statusPersistenceError ? '；同时失败状态写入失败：' + statusPersistenceError : ''}`,
+        statusPersistenceError ? 500 : 409,
+      );
     } finally {
       this.generationRecovery.release(projectId);
     }
