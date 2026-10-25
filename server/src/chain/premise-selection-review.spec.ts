@@ -238,7 +238,7 @@ it('does not enter another provider attempt after the last physical call returns
     c.llmCallWithRetry = vi.fn(async (_label: string, prompt: string, options: any) => {
       expect(prompt).toContain('不生成新pool');
       const eligible=JSON.parse(prompt.split('【原池】')[1].split('【当前选择】')[0]);
-      expect(eligible.map((item:any)=>item.premiseId)).toEqual(['B','C']);
+      expect(eligible.map((item:any)=>item.premiseId)).toEqual(['C']); // overlap-rejected B cannot be reused
       expect(prompt).toContain('"premiseId":"A"'); // protected story remains visible in current selection
       expect(options.validate({ replacements: [{ replacesPremiseId: 'B', premise: premise('NEW') }] })).toBe(false);
       expect(prompt).toContain('每项comparisons须逐一覆盖合并后其余全部最终题材ID');
