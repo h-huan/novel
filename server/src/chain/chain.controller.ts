@@ -25,7 +25,7 @@ import { createReviewLimiter } from './review-limiter';
 import { ideaDiscoveryAuthorContext } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
-import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair } from './idea-review-protocol-repair';
+import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
 import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget } from './premise-source-batches';
 import { generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
@@ -12004,7 +12004,9 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       set remaining(value: number) { physicalCallBudget.remaining = value; },
     };
     let goalRepair: ReturnType<typeof ideaReaderGoalRepairPlan> = null;
-    const normalizeReview=(value:unknown)=>goalRepair ? applyIdeaReaderGoalRepair(goalRepair,value) : targetIdeaReviews(value,cards,references);
+    let missingReview: ReturnType<typeof ideaMissingPresentationRowsPlan> = null;
+    const normalizeReview=(value:unknown)=>missingReview ? applyIdeaMissingPresentationRows(missingReview,value,cards,references)
+      :goalRepair ? applyIdeaReaderGoalRepair(goalRepair,value) : targetIdeaReviews(value,cards,references);
     const reviewIssues = (value: unknown) => {
       try { const normalized=normalizeReview(value);return [...ideaReviewEvidenceReferenceIssues(normalized,cards),
         ...ideaPayoffBridgeIssues(normalized,cards),...presentationReviewIssues(resolveIdeaReviewEvidence(normalized,cards),cards,true)];
@@ -12017,9 +12019,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       ...(actual ? {lockedPremise: selectedPremiseEvidenceForIdeaCard(card),
       executionStandard: buildExecutionStandard(readConstitution({ type: card.storyType, target_platform: card.targetPlatform,
         settings: { ...card, customPlatformNote } })).directive} : {}) }));
-    const result = await this.llmCallWithRetry<{ reviews: IdeaPresentationVerdict[] }>(
-      '题材完整故事与兑现独立审查',
-      `本次只审【实际题材卡】${cards.length}张，reviews必须恰好${cards.length}项，position只对应实际题材卡。先独立反证主线解决与关键阶段结果的必要因果，再判断点击、首屏和其它阅读目标。不得先认可题材再替结局寻找解释。对于每张卡，保持已建立规则与对手能力不变，检查即使主角行动完成，所称结果是否仍可能因某个未交代的必要条件而失败；若是，payoffBridge.status=gap、payoffCredible=false，并在issues明确缺失条件。只能用卡片已写出的因果条件，不能因两件事同源、同地、同属一个系统或主角付出代价，就推定一项改变足以造成另一项结果。结果断言不是自身成立条件，能力科学来源与普通动作细节则无需额外解释。参考卡只比较差异，不返回参考卡结论。随后以目标平台普通读者的点击选择独立审查实际标题与首屏。不得把字段齐全、两字重合、职业专名、证据链完整或模型自称独特当作吸引力。`
+    const reviewPrompt = `本次只审【实际题材卡】${cards.length}张，reviews必须恰好${cards.length}项，position只对应实际题材卡。先独立反证主线解决与关键阶段结果的必要因果，再判断点击、首屏和其它阅读目标。不得先认可题材再替结局寻找解释。对于每张卡，保持已建立规则与对手能力不变，检查即使主角行动完成，所称结果是否仍可能因某个未交代的必要条件而失败；若是，payoffBridge.status=gap、payoffCredible=false，并在issues明确缺失条件。只能用卡片已写出的因果条件，不能因两件事同源、同地、同属一个系统或主角付出代价，就推定一项改变足以造成另一项结果。结果断言不是自身成立条件，能力科学来源与普通动作细节则无需额外解释。参考卡只比较差异，不返回参考卡结论。随后以目标平台普通读者的点击选择独立审查实际标题与首屏。不得把字段齐全、两字重合、职业专名、证据链完整或模型自称独特当作吸引力。`
       + '标题应让读者直接感到具体利益冲突、反常关系、危险欲望或迫切未解问题；短意象、道具名和文雅暂名若脱离概要就没有点击动机，应titleCompelling=false。'
       + 'hook应展示命运立即改变的事件、可代入的风险/欲望及主动选择；只写职业查账、比对证据、逐级举报流程不能通过。'
       + '比较同批及参考卡的关系、选择、冲突推进和反转；不要求跨越用户指定分类，但同一职业查案/权力阴谋路径换道具应distinctFromBatch=false。'
@@ -12036,11 +12036,26 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       + '\n【服务器证据编号目录】' + JSON.stringify(ideaReviewEvidenceCatalog(cards).map(({id,field,position})=>({id,field,position})))
       + '\n目录编号只指向本卡上述字段原文，不是新故事。storyEvidenceRef、payoffEvidenceRef、platformEvidenceRef选择hook、description、setting、ending、scopeBreakdown的编号；四项readerGoals各返回evidenceRef（如C1.hook）、status与reason。quote与三个Evidence文本由服务器按编号回填，不要自行重写或拼接。unknown确无依据时省略evidenceRef并令quote为空。只选择对应position的编号，不从参考卡或执行标准找证据。'
       + '\n【实际题材卡与已通过参考卡】' + JSON.stringify(packIdeaReviewStandards(display(cards),display(references,false)))
-      + '\n若存在standardLines，每卡executionStandardRefs的D编号必须按顺序取standardLines原文并用换行拼接，这与该卡完整执行标准逐字等价；所有标准仍逐项执行，不能只看编号或丢弃重复引用。cards是实际待审卡，references只比较差异。',
+      + '\n若存在standardLines，每卡executionStandardRefs的D编号必须按顺序取standardLines原文并用换行拼接，这与该卡完整执行标准逐字等价；所有标准仍逐项执行，不能只看编号或丢弃重复引用。cards是实际待审卡，references只比较差异。';
+    const result = await this.llmCallWithRetry<{ reviews: IdeaPresentationVerdict[] }>(
+      '题材完整故事与兑现独立审查',reviewPrompt,
       { scenario: 'idea_generate', stepKey: 'idea_presentation_review', physicalCallBudget: reviewBudget, temperature: 0.1, timeout: readGenerationBudgets().complexTimeoutMs, maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
         validationRetryPrompt: raw=>{
-          goalRepair=ideaReaderGoalRepairPlan(this.safeExtractJson(raw,null),cards,references);
-          return goalRepair?.prompt;
+          const previous=this.safeExtractJson(raw,null);
+          goalRepair=ideaReaderGoalRepairPlan(previous,cards,references);
+          missingReview=goalRepair?null:ideaMissingPresentationRowsPlan(previous,cards,references);
+          if(goalRepair)return goalRepair.prompt;
+          if(!missingReview)return undefined;
+          // Reuse the ONE existing protocol-correction call. Keep every original
+          // standard and comparison card; request only rows absent from a
+          // demonstrably complete, independently verified partial verdict.
+          return reviewPrompt+'\n【本轮仅补齐缺失的独立审查行】上次报告已有有效完整结论的position='
+            +JSON.stringify(missingReview.base.reviews.map((row:any)=>row.position))
+            +'，原始有效结论保留且不允许重审或升级；本次reviews必须恰好'
+            +missingReview.missing.length+'项，只返回position='
+            +JSON.stringify(missingReview.missing)
+            +'对应的全部六项判据、必要因果证据、四项readerGoals及真实issues。'
+            +'其余卡仍用于同批比较，不返回其结论；不得猜测缺失卡通过或更改已审卡。';
         },
         retryInstruction: '只纠正点名的审查字段。三个EvidenceRef、payoffBridge及四项readerGoals的evidenceRef只能选择对应实际卡目录中的编号，原文由服务器回填，不能自行重写引文或复制执行标准。payoffBridge缺少真实成立条件须保留gap、payoffCredible=false与真实issues，不能用结局断言或换编号将gap改成supported。readerGoals须完整保留click、completion、sharing、immersion及真实status，不能为了通过把weak或unknown改为supported。保留合法判据及已核对证据，不改故事、不改标题；根据证据保留真实不合格结论。',
         validate: value => reviewIssues(value).length === 0,
