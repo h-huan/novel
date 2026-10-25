@@ -79,7 +79,7 @@ describe('server-owned idea evidence references',()=>{
   const sharedBudget={remaining:3};let calls=0;
   c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
    expect(prompt).toContain('服务器证据编号目录');
-   expect(prompt).toContain(JSON.stringify(ideaReviewResponseExample()));
+   expect(prompt).toContain(JSON.stringify(ideaReviewResponseExample([cards[0]])));
    expect(options.physicalCallBudget.remaining).toBe(3-calls++);
    expect(options.physicalCallBudget.recoveryWithoutThinking).toBeUndefined();
    options.physicalCallBudget.remaining--;options.physicalCallBudget.recoveryWithoutThinking=true;
