@@ -15,6 +15,18 @@ describe('server-owned idea evidence references',()=>{
   expect(ideaReviewEvidenceReferenceIssues(example,[cards[0]])).toEqual([]);
   expect(presentationReviewIssues(resolveIdeaReviewEvidence(example,[cards[0]]),[cards[0]],true)).toEqual([]);
  });
+ it('shows the exact number of independent verdict rows with original titles and bound evidence refs',()=>{
+  const batch=[cards[0],{...cards[0],title:'第二个完全不同的真实标题'}];
+  const value=ideaReviewResponseExample(batch);
+  expect(value.reviews.map(row=>[row.position,row.title])).toEqual([[1,cards[0].title],[2,batch[1].title]]);
+  expect(value.reviews[1].storyEvidenceRef).toBe('C2.description');
+  expect(value.reviews[1].payoffBridge.conditionEvidenceRef).toBe('C2.setting');
+  expect(value.reviews[1].readerGoals.completion.evidenceRef).toBe('C2.description');
+  expect(ideaReviewEvidenceReferenceIssues(value,batch)).toEqual([]);
+  expect(ideaPayoffBridgeIssues(value,batch)).toEqual([]);
+  expect(presentationReviewIssues(resolveIdeaReviewEvidence(value,batch),batch,true)).toEqual([]);
+  expect(ideaReviewResponseExample().reviews).toHaveLength(1); // one-card callers unchanged
+ });
  it('does not accept a claimed ending as its own causal condition',()=>{
   const valid={position:1,payoffCredible:true,payoffBridge:{status:'supported',actionEvidenceRef:'C1.description',
    resultEvidenceRef:'C1.ending',conditionEvidenceRef:'C1.setting',reason:'负责人下班只有一条通路，等候可以遇见本人'}};

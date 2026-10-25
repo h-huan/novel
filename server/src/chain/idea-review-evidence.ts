@@ -2,8 +2,8 @@
 export interface IdeaEvidenceEntry { id: string; position: number; field: string; quote: string }
 
 /** The production JSON example includes every required evidence family. */
-export function ideaReviewResponseExample() {
-  return { reviews: [{ position: 1, title: '实际标题', titleCompelling: true, openingCompelling: true,
+export function ideaReviewResponseExample(cards: readonly {title:string}[] = []) {
+  const template = { reviews: [{ position: 1, title: '实际标题', titleCompelling: true, openingCompelling: true,
     distinctFromBatch: true, storyCoherent: true, payoffCredible: true, platformFit: true,
     storyEvidenceRef: 'C1.description', payoffEvidenceRef: 'C1.ending', platformEvidenceRef: 'C1.hook',
     qualityReason: '根据实际设定、选择、因果与平台判据解释判断', readerQuestion: '由实际标题和开篇引发的具体追问',
@@ -12,6 +12,22 @@ export function ideaReviewResponseExample() {
     readerGoals: Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,
       { status: 'supported', evidenceRef: 'C1.description', reason: '依据本卡实际机制说明支持、薄弱或未知的具体理由' }])), issues: [],
   }] };
+  if (!cards.length) return template;
+  return { reviews: cards.map((card,index) => {
+    const row=structuredClone(template.reviews[0]);
+    const position=index+1;
+    const bind=(ref:string)=>ref.replace(/^C1\./,'C'+position+'.');
+    row.position=position;
+    row.title=card.title;
+    row.storyEvidenceRef=bind(row.storyEvidenceRef);
+    row.payoffEvidenceRef=bind(row.payoffEvidenceRef);
+    row.platformEvidenceRef=bind(row.platformEvidenceRef);
+    row.payoffBridge.actionEvidenceRef=bind(row.payoffBridge.actionEvidenceRef);
+    row.payoffBridge.resultEvidenceRef=bind(row.payoffBridge.resultEvidenceRef);
+    row.payoffBridge.conditionEvidenceRef=bind(row.payoffBridge.conditionEvidenceRef);
+    for (const goal of Object.values(row.readerGoals)) goal.evidenceRef=bind(goal.evidenceRef);
+    return row;
+  }) };
 }
 const fields = ['title','hook','description','setting','protagonist','coreConflict','mainReversal','ending','scopeBreakdown'] as const;
 export function ideaReviewEvidenceCatalog(cards: readonly any[]): IdeaEvidenceEntry[] {
