@@ -4858,6 +4858,9 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     targetAudience?: string;
   }, requestedCount: number) {
     this.logger.log(`idea-discover: type=${dto.storyType} platform=${dto.platform} count=${requestedCount}`);
+    // Retain already-paid selection evidence if a later presentation protocol
+    // fails. The failed response must not masquerade as an empty candidate pool.
+    let failureSelectionAudit: Record<string,unknown> | undefined;
     try {
       // 只验证并使用 idea_generate 当前场景所配置的模型；不得切换模型、提供商或模式。
       this.realLLM.assertScenarioModelConfigured('idea_generate');
@@ -5776,6 +5779,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
 
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
+      failureSelectionAudit = {
+        requested: requestedCount,
+        candidatePool: premiseDiscovery.pool,
+        preselectedPremises: premiseDiscovery.selected,
+        selectionAudit: premiseDiscovery.selectionAudit,
+        candidateAssessments,
+      };
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
       // A short preselection must not erase independently verified premises.
@@ -5820,6 +5830,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         || missingPremiseIds.some(id => !structuringErrors.some(item => item.sourcePremiseId === id))) {
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；生成=${structuredCards.length}/${requestedCount}，缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。身份对应异常时停止，不把未知身份当成已通过的原池换选。`);
       }
+      if (failureSelectionAudit) failureSelectionAudit.generated = structuredCards.length;
       await accept(structuredCards, 'initial');
 
       let finalGateRepairAttempted=false,finalGateRepairGenerated=0;
@@ -6088,7 +6099,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : '题材发现失败';
       this.logger.error(`idea-discover 失败: ${message}`);
-      return { success: false, ideas: [], totalIdeas: 0, error: message, ...((err as any)?.appealGate ? { appealGate: (err as any).appealGate } : {}) };
+      return { success: false, ideas: [], totalIdeas: 0, error: message,
+        ...((err as any)?.appealGate ? { appealGate: (err as any).appealGate }
+          : failureSelectionAudit ? { appealGate: { ...failureSelectionAudit,
+              returned: 0, stopReason: 'later_production_or_review_protocol_failed',
+              error: message } } : {}) };
     }
   }
 
