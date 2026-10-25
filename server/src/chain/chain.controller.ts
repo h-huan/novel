@@ -12064,7 +12064,10 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           // Reuse the ONE existing protocol-correction call. Keep every original
           // standard and comparison card; request only rows absent from a
           // demonstrably complete, independently verified partial verdict.
-          return reviewPrompt+'\n【本轮仅补齐缺失的独立审查行】上次报告已有有效完整结论的position='
+          const correctedPrompt=reviewPrompt.replace(
+            `本次只审【实际题材卡】${cards.length}张，reviews必须恰好${cards.length}项，position只对应实际题材卡。`,
+            '本轮只独立审查点名的缺失位置；其余已审卡只作同批差异参照，不重审、不返回其结论。'); 
+          return correctedPrompt+'\n【本轮仅补齐缺失的独立审查行】上次报告已有有效完整结论的position='
             +JSON.stringify(missingReview.base.reviews.map((row:any)=>row.position))
             +'，原始有效结论保留且不允许重审或升级；本次reviews必须恰好'
             +missingReview.missing.length+'项，只返回position='
