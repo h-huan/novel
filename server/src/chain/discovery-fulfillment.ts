@@ -18,6 +18,30 @@ export function discoveryFailureImproved(before:any,after:any){
  return prior.length>0&&next.length<prior.length&&next.every(key=>prior.includes(key));
 }
 
+/** A second same-premise patch cannot fix an unchanged structural chapter/
+ * differentiation deficit if its earlier verified local repair already left
+ * precisely that same deterministic gate and all independent story verdicts
+ * are sound. In this case compare a DIFFERENT, original-pool candidate with
+ * the same independent gates, provided the caller can afford review. */
+export function persistentStructureDeficitRequiresReplacement(
+  assessments:readonly any[], premiseId:string
+):boolean {
+ const history=assessments.filter(a=>String(a?.sourcePremiseId)===premiseId);
+ if(history.length<2)return false;
+ const latest=history[history.length-1], previous=history[history.length-2];
+ const reason='结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付';
+ const review=latest?.presentationReview;
+ if(latest?.attempt!=='repair'||latest?.passed===true
+   ||!Array.isArray(latest?.issues)||latest.issues.length!==1
+   ||latest.issues[0]!==reason||!Array.isArray(previous?.issues)
+   ||!previous.issues.includes(reason)||!review)return false;
+ if(!['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit']
+   .every(key=>review[key]===true)||review.issues?.length)return false;
+ const goals=review.readerGoals;
+ return !!goals&&['click','completion','sharing','immersion']
+   .every(key=>goals[key]?.status==='supported');
+}
+
 /** An explicitly evidenced intrinsic audience limitation cannot be changed by
  * wording-only edits of an immutable premise. It must compete as another
  * original-pool candidate under the same independent source, overlap and

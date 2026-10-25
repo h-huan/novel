@@ -1,4 +1,4 @@
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
@@ -140,7 +140,7 @@ import { findChapterOutline, readOrderedChapterOutlines, chapterOutlineStorySour
 import { hasCurrentProfile } from '../modules/character/character-profile';
 import { chapterLengthReviewBatches, chapterLengthReviewEvidenceErrors, chapterLengthEvidenceAnchors, materializeChapterLengthEvidenceCorrection, chapterLengthConflictProofErrors, mergeChapterLengthEvidenceCorrection, chapterLengthReviewFindings, applyChapterLengthReviewRepairs, chapterLengthReviewInput, validateChapterLengthReview, applyChapterLengthInsertions, chapterLengthInsertionChoices, chapterLengthDigitalTimeValues, CHAPTER_LENGTH_INSERTION_LIMIT, CHAPTER_LENGTH_INSERTION_STATE_CONTRACT } from './chapter-length-expansion';
 import { chapterNumberFromOrder } from '../../shared/src';
-import { outlineFactEvidenceAnchors, resolveOutlineFactEvidence, buildOutlineContinuityContext, describeOutlineFactUpdateProtocol, describeOutlineFactEvidence, chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineChaptersForFactReview, normalizeOutlineFactReview, type OutlineFactLedgerEntry, type OutlineFactReview } from './outline-fact-ledger';
+import { outlineFactReviewNeedsContinuityPolicy, outlineFactEvidenceAnchors, resolveOutlineFactEvidence, buildOutlineContinuityContext, describeOutlineFactUpdateProtocol, describeOutlineFactEvidence, chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineChaptersForFactReview, normalizeOutlineFactReview, type OutlineFactLedgerEntry, type OutlineFactReview } from './outline-fact-ledger';
 import {
   CHAPTER_FORESHADOWING_FIELD,
   CHAPTER_FORESHADOWING_CONTRACT,
@@ -5919,7 +5919,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         missing:missingAfterGate,hasCard:id=>latestCards.has(id),
         onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
-         repairEligible:id=>!readerGoalDeficitRequiresNewPremise(latestAssessment(id)) || !(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0),
+         repairEligible:id=>!(readerGoalDeficitRequiresNewPremise(latestAssessment(id))
+          ||persistentStructureDeficitRequiresReplacement(candidateAssessments,id))
+          || !(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0),
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
         canReplace:()=>reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0,
         fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
@@ -6600,7 +6602,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     let result: Awaited<ReturnType<ChainController['llmCallWithRetry']>>;
     try {
       result = await this.llmCallWithRetry<any>(label,
-        executionStandard + '\n' + buildOutlineFactReviewPrompt({ canonicalBrief, world, previousLedger, chapters, sourceChapters, includePolicy: true }),
+        executionStandard + '\n' + buildOutlineFactReviewPrompt({ canonicalBrief, world, previousLedger, chapters, sourceChapters,
+          includePolicy: outlineFactReviewNeedsContinuityPolicy(executionStandard) }),
         { projectId, chapterIndex, scenario: 'review', temperature: 0.1,stepKey:stepKey||'creation_outline_fact_dependencies',
           timeout: LLM_TUNABLES.timeoutComplex(), maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
           validate: value => validationIssues(value).length === 0,

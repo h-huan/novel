@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
+import { chapterFactsForReview, buildOutlineFactReviewPrompt, outlineFactReviewNeedsContinuityPolicy, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
 import { buildOutlineContinuityContext, describeOutlineFactEvidence } from './outline-fact-ledger';
 import { CHAPTER_RESPONSIBILITY_CRITERIA, chapterResponsibilityPlanningDirective } from '../../shared/src';
 import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY } from '../../shared/src/system-workflow-rules.registry';
@@ -13,6 +13,18 @@ describe('outline fact ledger review contract', () => {
     const corrected = normalizeOutlineFactReview({ consistent: false, contradictions: [{ location1: '第4章.scenes', quote1: '上门请求被拒',
       location2: '第4章.content', quote2: '当日请求被拒', conflict: '待核对' }], ledger: [] });
     expect(describeOutlineFactEvidence(corrected, [chapters], chapters)).toEqual([]);
+  });
+  it('keeps the full continuity policy exactly once when execution standard already injects it',()=>{
+    expect(outlineFactReviewNeedsContinuityPolicy('无此规则')).toBe(true);
+    expect(outlineFactReviewNeedsContinuityPolicy('审核标准：'+OUTLINE_STATE_CONTINUITY_POLICY+'后续')).toBe(false);
+    const compact=buildOutlineFactReviewPrompt({canonicalBrief:'{}',world:{},previousLedger:[],
+      chapters:[{order:4,content:'主角仍持有登记册'}],includePolicy:false});
+    expect(compact).toContain('按已注入CTX-005、CTX-008核对累计状态与时间');
+    expect(compact).toContain('主角仍持有登记册');
+    expect(compact).not.toContain(OUTLINE_STATE_CONTINUITY_POLICY);
+    const complete=buildOutlineFactReviewPrompt({canonicalBrief:'{}',world:{},previousLedger:[],
+      chapters:[{order:4,content:'主角仍持有登记册'}],includePolicy:true});
+    expect(complete).toContain(OUTLINE_STATE_CONTINUITY_POLICY);
   });
   it('uses the same temporal source policy in generation, review and the public rule', () => {
     expect(buildOutlineContinuityContext([], [])).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);

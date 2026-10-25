@@ -1,5 +1,5 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement} from './discovery-fulfillment';
 const assessment=(keys:string[])=>({passed:keys.length===0,issues:[],presentationReview:{titleCompelling:true,openingCompelling:true,distinctFromBatch:true,storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:keys.includes(key)?'weak':'supported',reason:'具体已有缺口'}]))}});
 it('continues beyond two repairs only while independent blocked dimensions strictly improve',async()=>{
  let missing=['A'],credits=8,defects=['click','completion','sharing'];const accepted={id:'already-passed',text:'不可改动'};const before=JSON.stringify(accepted);
@@ -97,6 +97,22 @@ it('routes an independently evidenced intrinsic sharing-limit to original-pool r
  expect(repair).not.toHaveBeenCalled();
  expect(replaceBatch).toHaveBeenCalledOnce();
  expect(replaceBatch).toHaveBeenCalledWith(['P11']);
+});
+it('skips another ineffective local repair only after a verified prior repair left the same sole structural gate',async()=>{
+ const reason='结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付';
+ const review=assessment([]).presentationReview;
+ const history=[{sourcePremiseId:'P10',attempt:'initial',passed:false,issues:[reason,'题材因果不足'],presentationReview:{...review,storyCoherent:false}},
+  {sourcePremiseId:'P10',attempt:'repair',passed:false,issues:[reason],presentationReview:review}];
+ expect(persistentStructureDeficitRequiresReplacement(history,'P10')).toBe(true);
+ expect(persistentStructureDeficitRequiresReplacement(history,'P9')).toBe(false);
+ expect(persistentStructureDeficitRequiresReplacement([history[0]],'P10')).toBe(false);
+ expect(persistentStructureDeficitRequiresReplacement([...history,{...history[1],issues:[reason,'其它缺陷']}],'P10')).toBe(false);
+ expect(persistentStructureDeficitRequiresReplacement([...history,{...history[1],presentationReview:{...review,payoffCredible:false}}],'P10')).toBe(false);
+ let pending=['P10'];const repair=vi.fn(),replaceBatch=vi.fn(async()=>{pending=[];return 'replaced' as const});
+ const result=await fulfillDiscoveryGaps({missing:()=>pending,hasCard:()=>true,repairEligible:id=>!persistentStructureDeficitRequiresReplacement(history,id),canRepair:()=>true,
+  repair,canReplace:()=>true,replaceBatch,fingerprint:()=>JSON.stringify(pending)});
+ expect(result).toBe('requested_quantity_verified');
+ expect(repair).not.toHaveBeenCalled();expect(replaceBatch).toHaveBeenCalledOnce();
 });
 it('does not overgeneralize intrinsic sharing limitations to an improvable opening or actual story incoherence',()=>{
  const weak={...assessment(['sharing'])};

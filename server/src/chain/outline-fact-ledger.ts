@@ -268,6 +268,14 @@ export function describeOutlineFactEvidence(review: OutlineFactReview | null, so
   });
 }
 
+/** Only suppress the second verbatim copy of CTX continuity when that same
+ * complete registry policy is already present in the execution standard.
+ * Otherwise retain it in the fact-review prompt. This is a transport-only
+ * deduplication, not a weakened review contract. */
+export function outlineFactReviewNeedsContinuityPolicy(executionStandard:string):boolean {
+ return !executionStandard.includes(OUTLINE_STATE_CONTINUITY_POLICY);
+}
+
 export function buildOutlineFactReviewPrompt(input: {
   canonicalBrief: string;
   world: unknown;
