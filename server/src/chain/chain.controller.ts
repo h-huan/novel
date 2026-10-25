@@ -12062,7 +12062,8 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       { scenario: 'idea_generate', stepKey: 'idea_presentation_review', physicalCallBudget: reviewBudget, temperature: 0.1, timeout: readGenerationBudgets().complexTimeoutMs, maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
         validationRetryPrompt: raw=>{
           const previous=this.safeExtractJson(raw,null);
-          goalRepair=ideaReaderGoalRepairPlan(previous,cards,references);
+          try{goalRepair=ideaReaderGoalRepairPlan(previous,cards,references);}
+          catch{goalRepair=null;}
           missingReview=goalRepair?null:ideaMissingPresentationRowsPlan(previous,cards,references);
           if(goalRepair)return goalRepair.prompt;
           if(!missingReview)return undefined;

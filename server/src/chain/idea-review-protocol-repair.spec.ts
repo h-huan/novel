@@ -79,9 +79,38 @@ describe('observed 4-card presentation report omitted rows',()=>{
   expect(ideaMissingPresentationRowsPlan({reviews:[]},cards)).toBeNull();
   expect(ideaMissingPresentationRowsPlan({reviews:[rows[0],rows[0]]},cards)).toBeNull();
   const invalid=structuredClone(rows);invalid[1].payoffBridge.status='gap';
-  expect(ideaMissingPresentationRowsPlan({reviews:invalid},cards)).toBeNull();
+  const gapPlan=ideaMissingPresentationRowsPlan({reviews:invalid},cards);
+  expect(gapPlan?.missing).toEqual([2,4]);
+  expect(gapPlan?.base.reviews.map((r:any)=>r.position)).toEqual([1,3]);
   const wrong=structuredClone(rows);wrong[2].readerGoals.click.evidenceRef='C1.hook';
-  expect(ideaMissingPresentationRowsPlan({reviews:wrong},cards)).toBeNull();
+  expect(ideaMissingPresentationRowsPlan({reviews:wrong},cards)?.missing).toEqual([3,4]);
+ });
+ it('rechecks only invalid and missing verdicts while retaining independent valid negatives',async()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  c.logger={warn:vi.fn(),error:vi.fn()};
+  const first=[verdict(1),verdict(2),verdict(3)];
+  first[0].titleCompelling=false;first[0].issues=['标题只有抽象意象，没有实际利益冲突'];
+  first[1].readerGoals.click.evidenceRef='C3.hook'; // invalid cross-card reference
+  const requests:any[]=[];
+  c.realLLM={generate:vi.fn(async(request:any)=>{
+    requests.push(request);
+    request.physicalCallBudget.remaining--;
+    return {content:JSON.stringify(requests.length===1
+      ?{reviews:first}:{reviews:[verdict(2),verdict(4)]})};
+  })};
+  const result=await c.reviewIdeaPresentation(cards,[],'',{remaining:2});
+  expect(result).toHaveLength(4);
+  expect(result[0]).toMatchObject({position:1,titleCompelling:false,issues:first[0].issues});
+  expect(result[1].position).toBe(2);
+  expect(requests).toHaveLength(2);
+  expect(requests[1].prompt).toContain('只返回position=[2,4]');
+  expect(requests[1].prompt).toContain('reviews必须恰好2项');
+ });
+ it('does not reuse ambiguous duplicated verdicts as approval',()=>{
+  const duplicated=[verdict(1),verdict(2),verdict(2)];
+  const plan=ideaMissingPresentationRowsPlan({reviews:duplicated},cards);
+  expect(plan?.missing).toEqual([2,3,4]);
+  expect(plan?.base.reviews.map((row:any)=>row.position)).toEqual([1]);
  });
  it('runs production review with one original call and one missing-row-only correction',async()=>{
   const c=Object.create(ChainController.prototype) as any;

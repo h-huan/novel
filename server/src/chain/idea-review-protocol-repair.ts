@@ -50,27 +50,37 @@ export function applyIdeaReaderGoalRepair(plan:NonNullable<ReturnType<typeof ide
  * already completed row. Only complete, independently verifiable rows are kept.
  * The existing one protocol retry must review every missing card in full. */
 export function ideaMissingPresentationRowsPlan(value:any,cards:readonly any[],references:readonly any[]=[]){
- const base=targetIdeaReviews(value,cards,references);
- if(!Array.isArray(base?.reviews)||!base.reviews.length||base.reviews.length>=cards.length)return null;
- const seen=new Set<number>();
- for(const row of base.reviews){
+ let original:any;
+ try{original=targetIdeaReviews(value,cards,references);}catch{return null;}
+ if(!Array.isArray(original?.reviews)||!original.reviews.length)return null;
+ // A malformed verdict is NOT a content rejection. Retain only independently
+ // valid positions; leave missing, invalid or duplicated positions unreviewed.
+ const counts=new Map<number,number>();
+ for(const row of original.reviews){
+  if(Number.isInteger(row?.position))counts.set(row.position,(counts.get(row.position)||0)+1);
+ }
+ const verified:any[]=[];
+ for(const row of original.reviews){
   const position=row?.position;
-  if(!Number.isInteger(position)||position<1||position>cards.length||seen.has(position)
-    ||row.title!==cards[position-1]?.title)return null;
-  seen.add(position);
-  // Validate each retained row under the ORIGINAL evidence indices first.
+  if(!Number.isInteger(position)||position<1||position>cards.length
+    ||counts.get(position)!==1||row.title!==cards[position-1]?.title)continue;
   if(ideaReviewEvidenceReferenceIssues({reviews:[row]},cards).length
-    ||ideaPayoffBridgeIssues({reviews:[row]},cards).length)return null;
+    ||ideaPayoffBridgeIssues({reviews:[row]},cards).length)continue;
   const rebase=(item:any):any=>Array.isArray(item)?item.map(rebase)
     :item&&typeof item==='object'?Object.fromEntries(Object.entries(item).map(([key,entry])=>[key,rebase(entry)]))
     :typeof item==='string'?item.replace(new RegExp('^C'+position+'\\.'),'C1.'):item;
   const single={...rebase(row),position:1};
-  const resolved=resolveIdeaReviewEvidence({reviews:[single]},[cards[position-1]]);
-  if(presentationReviewIssues(resolved,[cards[position-1]],true).length
-    ||ideaPayoffBridgeIssues({reviews:[single]},[cards[position-1]]).length)return null;
+  try{
+   const resolved=resolveIdeaReviewEvidence({reviews:[single]},[cards[position-1]]);
+   if(presentationReviewIssues(resolved,[cards[position-1]],true).length
+     ||ideaPayoffBridgeIssues({reviews:[single]},[cards[position-1]]).length)continue;
+  }catch{continue;}
+  verified.push(row);
  }
+ if(!verified.length)return null;
+ const seen=new Set(verified.map(row=>row.position));
  const missing=cards.map((_card,index)=>index+1).filter(position=>!seen.has(position));
- return missing.length?{base,missing}:null;
+ return missing.length?{base:{reviews:verified},missing}:null;
 }
 
 export function applyIdeaMissingPresentationRows(plan:NonNullable<ReturnType<typeof ideaMissingPresentationRowsPlan>>,
