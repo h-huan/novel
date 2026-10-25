@@ -43,6 +43,13 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('selectionChangeScope(initial,selected)');
     expect(controllerSource).toContain('reviewBoth(selected,changeScope,initialReview)');
     expect(controllerSource).toContain('retainPremiseReviewEvidence(initial,initialReview,selected)');
+    expect(controllerSource).toContain('【选优终检：不得留给后续长时复审才发现】');
+    expect(controllerSource).toContain('此为选优前的自检，不输出自评分，不代替后续全部独立审查。');
+    expect(controllerSource).toContain('【本章输出前事件投影核对】');
+    expect(controllerSource).toContain('早于物件展示或查验说过的话不能改称看见证据后的改口');
+    expect(controllerSource).toContain('在场沉默不能写成已回答具体问题');
+    expect(controllerSource).toContain('"characterStates":[]');
+    expect(controllerSource).not.toContain('"stateAfter":"本章后状态"');
     expect(controllerSource).toContain('【本章事件与状态唯一来源】');
     expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
   });

@@ -5082,6 +5082,9 @@ ${!variedCategories && categoryBenchmark ? `【分类体量参考】${categoryBe
 ${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredTargetWords}；筛选时必须判断题材是否撑得住这一体量。` : '用户未指定总字数；筛选时按平台分类体量和故事自身可持续性判断。'}
 ${poolContext}
 ${excludeText}
+${promptPhase === 'selection'
+  ? '【选优终检：不得留给后续长时复审才发现】选定身份以前，逐对检查本次入选题材的主动选择、选择触发的升级、改变胜负的必要条件、兑现后的具体代价；两项在这四个因果作用上同构，即使职业、年代、道具和分类不同，也不可同时入选。直接从上述15个原池身份中改选另一条实际行动机制完整、来源因果成立的成熟题材，不新增或改写候选池；不能以凑满数量、只换名字或把不完整条件留给审核作为理由入选。此为选优前的自检，不输出自评分，不代替后续全部独立审查。'
+  : ''}
 只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
 JSON 结构：${JSON.stringify(promptSchema)}`;
       };
@@ -8251,7 +8254,7 @@ ${(() => {
 10. 情绪基调 (emotionalTone) — 简短描述本章情绪走向。
 
 只输出一个合法JSON对象，不要数组、解释或Markdown。`;
-          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章场景、冲突强度与剩余总字数确定","content":"按本章职责顺序概括必要事件链与结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[],"foreshadowing":[],"foreshadowingRecover":[],"characterStates":[{"character":"人物名","stateBefore":"本章前状态","stateAfter":"本章后状态","trigger":"触发事件"}],"hook":"${isFinalChapter ? '可留空或填写终章余韵' : '只引出下一步动机或障碍'}","emotionalTone":"情绪基调"}`;
+          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章场景、冲突强度与剩余总字数确定","content":"按本章职责顺序概括必要事件链与结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[],"foreshadowing":[],"foreshadowingRecover":[],"characterStates":[],"hook":"${isFinalChapter ? '可留空或填写终章余韵' : '只引出下一步动机或障碍'}","emotionalTone":"情绪基调"}`;
 
           // help: coerce string to single-element array
           const toArray = (v: any): any[] => Array.isArray(v) ? v : (typeof v === 'string' && v.trim() ? [v] : []);
@@ -8261,7 +8264,7 @@ ${(() => {
 
           const chapterResult = await this.llmCallWithRetry<any>(
             `第${order + 1}章详细大纲`,
-            chapterPrompt + chapterJsonExample,
+            chapterPrompt + chapterJsonExample + '\n【本章输出前事件投影核对】先以content里按时间实际发生的事件为唯一时间线，再填写scenes.outcome、characterActions.result、characterStates和foreshadowingRecover。门已关只说明关门状态，不能推出谁关门、为什么关门；早于物件展示或查验说过的话不能改称看见证据后的改口；在场沉默不能写成已回答具体问题。需要这些动作才能完成既定章节职责时，先在content写明原有角色实际何时行动、对谁说了什么、前提如何成立，再同步各字段；否则不得把未发生的动作或推断写为既成结果。没有被content明确改变的人物状态，characterStates必须为[]。不能为了填示例而制造新事件，禁止删改原确认题材与上一章事实。',
             {
               temperature: 0.8, timeout: LLM_TUNABLES.timeoutContent(), scenario: 'outline',
               projectId, chapterIndex: order + 1, stepKey: 'creation_chapter_detail',
