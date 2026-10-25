@@ -89,6 +89,9 @@ describe('observed 4-card presentation report omitted rows',()=>{
   expect(result.map((row:any)=>row.position)).toEqual([1,2,3,4]);
   expect(requests).toHaveLength(2);
   expect(requests[1].prompt).toContain('只返回position=[4]');
+  expect(requests[1].prompt).not.toContain('reviews必须恰好4项');
+  expect(requests[1].prompt).toContain('reviews必须恰好1项');
+  expect(requests[1].prompt).toContain('其余已审卡只作同批差异参照');
   expect(requests[1].prompt).toContain('完整执行标准');
   expect(requests[1].prompt).toContain('题材');
  });
