@@ -1,4 +1,4 @@
-import {fulfillDiscoveryGaps,discoveryFailureImproved} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
@@ -5906,17 +5906,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
-        canReplace:()=>availableOriginalPool().length>0&&reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&presentationBudget.remaining>=2,
+        canReplace:()=>reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0,
         fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
         replaceBatch:async ids=>{
           // One original-pool selection and one independent source/overlap review
           // for all outstanding positions. A rejected batch never changes
           // already accepted cards, and never borrows new model-call credits.
           const missing=ids.filter(id=>selectedPremises.some(item=>String(item.premiseId)===id));
-          const targets=missing.slice(0,availableOriginalPool().length);
+          const targetCount=affordableIdeaReplacementCount(missing.length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls);
+          const targets=missing.slice(0,targetCount);
           if(!targets.length)return 'unavailable';
-          const requiredPresentation=targets.length+minimumCardReviewCalls(targets.length);
-          if(presentationBudget.remaining<requiredPresentation)return 'unavailable';
           const reviewIssues=targets.map(id=>{
             const premise=selectedPremises.find(item=>String(item.premiseId)===id)!;
             const seed=premiseDiscovery.pool.find(item=>String(item.premiseId)===id)!;
@@ -5945,9 +5944,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
           }
           const replacementCards:Record<string,unknown>[]=[];
-          for(const {position,premise} of newPremises){
+          for(const [index,{position,premise}] of newPremises.entries()){
             try {
-              const card=await generateStructuredCard(premise,position);
+              // Protect every not-yet-started card and the final independent review.
+              const reserve=newPremises.length-index-1+minimumCardReviewCalls(newPremises.length);
+              const card=await generateStructuredCard(premise,position,reserveReviewBatchBudget(presentationBudget,reserve));
               replacementCards.push(card);structuredCards.push(card);latestCards.set(String(premise.premiseId),card);
             }catch(error){
               const detail=error instanceof Error?error.message:String(error);

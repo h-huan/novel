@@ -18,6 +18,13 @@ export function discoveryFailureImproved(before:any,after:any){
  return prior.length>0&&next.length<prior.length&&next.every(key=>prior.includes(key));
 }
 
+/** Fit only the positions that can each pay for generation AND the unchanged independent card review. 
+ * Never stop a batch of two just because current budget covers only one. */
+export function affordableIdeaReplacementCount(missing:number,pool:number,calls:number,reviewCalls:(count:number)=>number):number{
+ for(let n=Math.min(missing,pool);n>=1;n--){if(calls>=n+reviewCalls(n))return n;}
+ return 0;
+}
+
 /** Completion is governed by remaining work and shared allowances, not rounds.
  * The caller owns all model calls and immutable accepted cards. */
 export async function fulfillDiscoveryGaps(options:{

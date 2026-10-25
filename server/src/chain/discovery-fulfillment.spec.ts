@@ -1,5 +1,5 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount} from './discovery-fulfillment';
 const assessment=(keys:string[])=>({passed:keys.length===0,issues:[],presentationReview:{titleCompelling:true,openingCompelling:true,distinctFromBatch:true,storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:keys.includes(key)?'weak':'supported',reason:'具体已有缺口'}]))}});
 it('continues beyond two repairs only while independent blocked dimensions strictly improve',async()=>{
  let missing=['A'],credits=8,defects=['click','completion','sharing'];const accepted={id:'already-passed',text:'不可改动'};const before=JSON.stringify(accepted);
@@ -69,4 +69,14 @@ it('stops a throwing replacement with no consumed budget or candidate progress',
  const replace=vi.fn(async()=>{throw Error('unexpected callback failure');}),onError=vi.fn();
  expect(await fulfillDiscoveryGaps({missing:()=>['A'],hasCard:()=>false,canRepair:()=>false,repair:vi.fn(),canReplace:()=>true,replace,fingerprint:()=>'',onError})).toBe('no_material_progress');
  expect(replace).toHaveBeenCalledOnce();expect(onError).toHaveBeenCalledOnce();
+});
+
+it('reserves full-card review credits and falls back to one replacement without buying extra calls',()=>{
+ const grouped=(n:number)=>1;
+ expect(affordableIdeaReplacementCount(2,7,2,grouped)).toBe(1);
+ expect(affordableIdeaReplacementCount(2,7,3,grouped)).toBe(2);
+ expect(affordableIdeaReplacementCount(2,7,1,grouped)).toBe(0);
+ expect(affordableIdeaReplacementCount(2,1,5,grouped)).toBe(1);
+ expect(affordableIdeaReplacementCount(2,7,4,n=>n)).toBe(2);
+ expect(affordableIdeaReplacementCount(2,7,3,n=>n)).toBe(1);
 });
