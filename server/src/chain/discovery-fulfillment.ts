@@ -29,6 +29,10 @@ export function readerGoalDeficitRequiresNewPremise(assessment:any):boolean{
    .every(key=>review[key]===true))return false;
  const goals=review.readerGoals;
  if(!goals||goals.sharing?.status!=='weak'||!['click','completion','immersion'].every(key=>goals[key]?.status==='supported'))return false;
+ // Independently true semantics are insufficient if the same card also fails
+ // any deterministic Gate: that local defect must remain eligible for repair.
+ const failures=discoveryFailureDimensions(assessment);
+ if(failures.length!==1||failures[0]!=='readerGoals.sharing')return false;
  const reason=String(goals.sharing?.reason||'');
  // The observed rejection explicitly says that the specific genre's narrow
  // institutional setting limits shareability. Do not generalize to every weak

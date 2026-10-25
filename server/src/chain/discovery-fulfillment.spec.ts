@@ -85,6 +85,8 @@ it('routes an independently evidenced intrinsic sharing-limit to original-pool r
  const observed={...assessment(['sharing']),issues:['传播倾向存在已举证薄弱处：门派水权题材较窄，传播面不如其它卡普适。']};
  observed.presentationReview.readerGoals.sharing.reason='哑奴的代价有记忆点，但仙侠门派水权细节较窄，传播面不如其它卡普适';
  expect(readerGoalDeficitRequiresNewPremise(observed)).toBe(true);
+ expect(readerGoalDeficitRequiresNewPremise({...observed,issues:[...observed.issues,'篇幅分线合计与总章数不一致']})).toBe(false);
+ expect(readerGoalDeficitRequiresNewPremise({...observed,presentationReview:{...observed.presentationReview,issues:['另一项独立证据缺失']}})).toBe(false);
  let remaining=['P11'];
  const repair=vi.fn(),replaceBatch=vi.fn(async()=>{remaining=[];return 'replaced' as const});
  const result=await fulfillDiscoveryGaps({missing:()=>remaining,hasCard:()=>true,
