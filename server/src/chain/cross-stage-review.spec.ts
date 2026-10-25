@@ -57,6 +57,11 @@ describe('cross-module review classification and protocol', () => {
     expect(obligations.map(item=>item.ref)).toEqual(['P1']);
     expect(crossStageRepairObligations(brief,['c的普通字段有误'])).toEqual([]);
     expect(crossStageRepairPlanDirective(obligations,mechanism)).toContain('诊断是待解决的缺口，不是降低成果的指令');
+    // The initial path designer has no edits or E-coordinates yet; its
+    // instructions must not be contaminated by implementation-only rules.
+    const directive=crossStageRepairPlanDirective(obligations,mechanism);
+    expect(directive.split('在同一次回复的edits之前')[0]).not.toContain('edits.replacement');
+    expect(directive).toContain('唯一实际修订位置');
     const value={repairPlans:[{ref:'P1',status:'feasible',mechanismRefs:['S1'],actions:[{anchorId:'E1',evidence:'机构实际调取原件，核验后将结论告知主角。'}],remainingCounterexamples:[]}],edits:[{anchorId:'E1',replacement:'主角报备；机构实际调取原件，核验后将结论告知主角。'}]};
     expect(describeCrossStageRepairPlanValidation(value,obligations,mechanism)).toEqual([]);
     const byPosition={...value,repairPlans:[{...value.repairPlans[0],actions:[{anchorId:'E1'}]}]};
