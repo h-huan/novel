@@ -6462,7 +6462,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const startingSelection=budget.remaining,startingReview=reviewBudget.remaining;
     const used=()=>startingSelection-budget.remaining+startingReview-reviewBudget.remaining;
     const scopedReview:PremiseSelectionReview={passed:false,issues:review.issues.filter(issue=>
-      failedIds.includes(String(issue.premiseId))||issue.kind==='overlap'&&failedIds.includes(String(issue.referencePremiseId)))};
+      failedIds.includes(String(issue.premiseId))||issue.kind==='overlap'&&failedIds.includes(String(issue.referencePremiseId)))
+      .map(issue=>issue.kind==='overlap'&&!failedIds.includes(String(issue.premiseId))
+        &&failedIds.includes(String(issue.referencePremiseId))
+        ? {...issue,premiseId:issue.referencePremiseId,referencePremiseId:issue.premiseId,
+          quote:issue.referenceQuote,referenceQuote:issue.quote}
+        : issue)};
     const normalize=(value:unknown)=>{
       const rows=(value as any)?.replacements;
       if(!Array.isArray(rows)||rows.length!==failedIds.length||
@@ -6481,7 +6486,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const result=await this.llmCallWithRetry<any>('锁定前原池备用汇总重选',
         standard+'\n按已注入GEN-002锁定前继承与差异规则执行。'
         +'\n只为列出的缺额位置从尚未尝试的同批原池挑选成熟候选；固定保留已通过位置、原始事实及全部独立质量要求。'
-        +'\n【可选原池候选】'+JSON.stringify(current.pool.filter(item=>availableIds.includes(String(item.premiseId))))
+        +'\n【本次仍可换选的原池候选】'+JSON.stringify(current.pool.filter(item=>availableIds.includes(String(item.premiseId))))
+        +'\n【可用备用ID（只能从这里选）】'+JSON.stringify(availableIds)
         +'\n【当前选择】'+JSON.stringify(current.selected)
         +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
         +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)

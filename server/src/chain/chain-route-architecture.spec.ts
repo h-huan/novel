@@ -56,7 +56,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('qualifiedIdeas: acceptedWithAudit, warning, qualityWarning: warning, appealGate');
     expect(source).toContain('先按causalPlan核查每个关键阶段结果的全部必要条件');
     expect(source).toContain('reviewChangedPremiseSources(');
-    expect(source).toContain('if(slots.length>=4)');
+    expect(source).not.toContain('if(slots.length>=4)');
     expect(source).toContain('splitReviewMaterial(slots,slot=>');
     expect(source).toContain('if(!await reselectScope(part,unusedIds))return false');
     expect(source).toContain('isReviewOutputCapacityError(error)');
