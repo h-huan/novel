@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GenerationMetricsController } from './generation-metrics.controller';
 
-const controllerFor = (stepRows: any[], runRows: any[], project: any, persistedCounts: Record<string, number>) => {
+const controllerFor = (stepRows: any[], runRows: any[], project: any, persistedCounts: Record<string, number>, failureRun?: any) => {
   const db = {
     prepare: vi.fn((sql: string) => ({
       all: () => sql.includes('generation_step_metrics') ? stepRows : runRows,
       get: () => {
         if (sql.includes('FROM projects')) return project;
+        if (sql.includes('output_text LIKE')) return failureRun;
         const table = Object.keys(persistedCounts).find(name => sql.includes(`FROM ${name}`));
         return { c: table ? persistedCounts[table] : 0 };
       },
@@ -18,6 +19,17 @@ const controllerFor = (stepRows: any[], runRows: any[], project: any, persistedC
 };
 
 describe('generation metrics diagnostics', () => {
+  it.each(['source_review_rejected','persistence_write','persistence_readback'])('exposes the persisted creation failure boundary: %s', origin => {
+    const at = new Date().toISOString();
+    const controller = controllerFor([], [], {status:'generation_failed',updated_at:at}, {world_settings:0}, {
+      id:'business-failure',finished_at:at,error:'本阶段未完成，后续生成已停止',
+      output_text:JSON.stringify({kind:'creation_stage_failure',step:'world',origin}),
+    });
+    const diagnostics:any = controller.cockpit('p').diagnostics;
+    expect(diagnostics.latestCreationFailure).toMatchObject({runId:'business-failure',step:'world',origin});
+    expect(diagnostics.persistenceMismatch).toEqual([]);
+    expect(diagnostics.creationFailureQueryError).toBeNull();
+  });
   it('distinguishes successful model calls from completed workflow persistence', () => {
     const stepRows = [
       { run_id: 'r1', chapter_index: 4, step_key: 'outline_fact_review', scenario: 'review', status: 'success', attempt: 0, duration_ms: 120000, total_tokens: 28000, internal_retries: 1, created_at: '2026-09-28T00:00:00Z' },

@@ -88,6 +88,31 @@ export function assertPremiseCausalPlans(selection: { selected: Record<string, u
   }
 }
 
+/** Repair the citation index only. The model cannot change any story fact,
+ * identity or a valid peer, and the independent semantic gates still follow. */
+export function premiseCausalPlanRepairInput(selection: { selected: Record<string, unknown>[] }) {
+  return selection.selected.filter(item => premiseCausalPlanIssues(item).length).map(item => ({
+    premiseId: item.premiseId,
+    ...Object.fromEntries(narrativeFields.map(field => [field, item[field]])),
+    causalPlan: item.causalPlan, errors: premiseCausalPlanIssues(item),
+  }));
+}
+
+export function applyPremiseCausalPlanRepairs<T extends { selected: Record<string, unknown>[] }>(selection: T, value: any): T {
+  const targets = premiseCausalPlanRepairInput(selection), rows = value?.plans;
+  if (!value || Object.keys(value).some(key => key !== 'plans') || !Array.isArray(rows)
+    || rows.length !== targets.length || new Set(rows.map(row => row?.premiseId)).size !== targets.length
+    || rows.some(row => !targets.some(item => item.premiseId === row?.premiseId)
+      || Object.keys(row).some(key => !['premiseId', 'causalPlan'].includes(key))))
+    throw new Error('因果计划修复只能逐项返回点名身份的causalPlan，不得修改故事或其它题材');
+  const next = { ...selection, selected: selection.selected.map(item => {
+    const row = rows.find(row => row.premiseId === item.premiseId);
+    return row ? bindPremiseCausalPlan({ ...item, causalPlan: row.causalPlan }) : item;
+  }) };
+  assertPremiseCausalPlans(next);
+  return next;
+}
+
 export function premiseCausalCatalog(item: Record<string, unknown>, prefix: string) {
   return (Array.isArray(item.causalPlan) ? item.causalPlan : []).map((link, index) => ({
     ref: `${prefix}causalPlan[${index}]`, ...link,

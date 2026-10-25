@@ -1,7 +1,7 @@
 import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
 import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective} from './premise-payoff-review';
-import {retainReviewedPremises} from './premise-selection-review';
+import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
 const selection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案，并承担失去工作的代价。'}],selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',escalation:'受害人提供已有资料，警方核实现场情况。',payoff:'警方到场解救被困的人，她失去工作。'}],poolTargetMet:true};
 const supported={ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',conditionEvidenceRef:'S1.escalation',reason:'已提供现场地点并由警方核实后到场解救'};
 it('requires an independent payoff verdict even when every source check is preserved',()=>{
@@ -31,9 +31,25 @@ it('routes a real gap to preselection and never retains an unqualified item as l
  const raw={payoffChecks:[{ref:'S1.payoff',status:'gap',reason:'账目没有取得来源，警方也没有实际现场定位依据'}]};
  const issues=materializePremisePayoffReview(raw,selection);
  expect(issues).toHaveLength(1);expect(issues[0].kind).toBe('selection_fit');
+ expect(issues[0].repairMode).toBe('replace_from_pool');
+ const plan=premiseReselectionPlan(selection,{passed:false,issues});
+ expect(plan.repairSlots[0].mode).toBe('replace_from_pool');
+ expect(plan.availableCandidates).toEqual([]);
  expect(retainReviewedPremises(selection,{passed:false,issues}).selection.selected).toHaveLength(0);
  expect(raw.payoffChecks[0].status).toBe('gap');
  expect(()=>materializePremisePayoffReview({payoffChecks:[{...supported,status:'unknown'}]},selection)).toThrow('未评估');
+});
+it('permits restoring an omitted condition only with real same-ID original-pool evidence',()=>{
+ const raw={...supported,status:'gap',gapRepair:'restore_source_conditions',
+  sourceConditionQuote:'她通过已有录音报案',reason:'展开遗漏原池已有录音报案这一实际证据取得和交付条件'};
+ const issues=materializePremisePayoffReview({payoffChecks:[raw]},selection);
+ expect(issues[0].repairMode).toBeUndefined();
+ expect(premiseReselectionPlan(selection,{passed:false,issues}).repairSlots[0].mode).toBe('correct_or_replace_from_pool');
+ for(const sourceConditionQuote of [undefined,'警方回队调取原池没有的门禁刷卡记录','已有录音']){
+  expect(premisePayoffReviewIssues({payoffChecks:[{...raw,sourceConditionQuote}]},selection).length).toBeGreaterThan(0);
+ }
+ expect(premisePayoffReviewIssues({payoffChecks:[{...raw,status:'supported'}]},selection).length).toBeGreaterThan(0);
+ expect(premisePayoffReviewDirective(selection)).toContain('sourceConditionQuote');
 });
 it('allows an actual independent condition in payoff outside the generator index, but does not prove story semantics',()=>{
  const p={...selection.selected[0],payoff:'她把录音交给值班人员，值班人员核验来访登记后通知警员到场。警方暂停处理。',

@@ -151,6 +151,23 @@ export class GenerationMetricsController {
         constitution_revision,duration_ms,started_at,finished_at
       FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 300`).all(projectId) as any[];
     const project = db.prepare('SELECT status,updated_at FROM projects WHERE id=?').get(projectId) as any;
+    let latestCreationFailure: Record<string, unknown> | null = null;
+    let creationFailureQueryError: string | null = null;
+    try {
+      const failure = db.prepare(`SELECT id,output_text,error,finished_at FROM generation_runs
+        WHERE project_id=? AND status='failed' AND output_text LIKE '%"kind":"creation_stage_failure"%'
+        ORDER BY started_at DESC LIMIT 1`).get(projectId) as any;
+      if (typeof failure?.output_text === 'string') {
+        const payload = JSON.parse(failure.output_text);
+        if (payload.kind === 'creation_stage_failure') latestCreationFailure = {
+          runId: failure.id, step: payload.step, origin: payload.origin, finishedAt: failure.finished_at,
+          message: redactDiagnosticText(String(failure.error || '')),
+          ...(payload.statusPersistenceError ? { statusPersistenceError: redactDiagnosticText(String(payload.statusPersistenceError)) } : {}),
+        };
+      }
+    } catch (error) {
+      creationFailureQueryError = redactDiagnosticText(error instanceof Error ? error.message : String(error));
+    }
     const persistenceQueryErrors: string[] = [];
     const count = (table: string, extra = ''): number | null => {
       try {
@@ -261,6 +278,8 @@ export class GenerationMetricsController {
 
     return {
       projectStatus: project?.status ?? null,
+      latestCreationFailure,
+      creationFailureQueryError,
       sample: { stepMetrics: metrics.length, generationRuns: runs.length },
       persisted,
       persistenceMismatch,

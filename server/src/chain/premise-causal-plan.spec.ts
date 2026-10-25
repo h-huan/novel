@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { materializePremisePayoffReview, premisePayoffReviewIssues } from './premise-payoff-review';
 import { materializePremiseSourceReview, normalizePremiseReselection, premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -33,6 +33,34 @@ function report(s:ReturnType<typeof selection>) {
 }
 
 describe('plan critical prerequisites before full story cards',()=>{
+  it('repairs only an incomplete index with existing same-story evidence, preserving all facts and valid peers',()=>{
+    const input=selection(['A','B']),complete=structuredClone(input.selected[0].causalPlan);
+    input.selected[0].causalPlan.pop();
+    const before=structuredClone(input),value={plans:[{premiseId:'A',causalPlan:complete}]};
+    const repaired=applyPremiseCausalPlanRepairs(input,value);
+    expect(premiseCausalPlanIssues(repaired.selected[0])).toEqual([]);
+    expect(repaired.selected[1]).toBe(input.selected[1]);
+    const {causalPlan:oldPlan,...oldStory}=before.selected[0],{causalPlan:newPlan,...newStory}=repaired.selected[0];
+    expect(newStory).toEqual(oldStory);expect(input).toEqual(before);
+    for(const invalid of [
+      {plans:[{...value.plans[0],payoff:'伪造新的结局条件'}]},
+      {plans:[{premiseId:'B',causalPlan:complete}]},
+      {plans:[{premiseId:'A',causalPlan:[{...complete[1],result:{field:'payoff',quote:'原文没有的追责结果'}}]}]},
+      {plans:[]},
+    ])expect(()=>applyPremiseCausalPlanRepairs(input,invalid)).toThrow();
+  });
+  it('spends one existing reselection credit only for invalid plans and keeps the semantic gate independent',async()=>{
+    const input=selection(),complete=structuredClone(input.selected[0].causalPlan);input.selected[0].causalPlan.pop();
+    const c=Object.create(ChainController.prototype) as any,budget={remaining:3};
+    c.realLLM={generate:vi.fn(async(options:any)=>{expect(options.physicalCallBudget).toBe(budget);budget.remaining--;
+      return {content:JSON.stringify({plans:[{premiseId:'A',causalPlan:complete}]})};})};
+    const repaired=await c.completePremiseCausalPlans(input,budget);
+    expect(budget.remaining).toBe(2);expect(c.realLLM.generate).toHaveBeenCalledOnce();
+    expect(await c.completePremiseCausalPlans(repaired,budget)).toBe(repaired);
+    expect(c.realLLM.generate).toHaveBeenCalledOnce();
+    const rows=payoffChecks(repaired);rows[0].status='gap' as any;rows[0].links[0].status='gap';
+    expect(materializePremisePayoffReview({payoffChecks:rows},repaired)[0].kind).toBe('selection_fit');
+  });
   it('recovers only the exact terminal semicolon in the observed selected P1 source anchors',()=>{
     const p:any={
       premiseId:'P1',

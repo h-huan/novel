@@ -2,7 +2,7 @@ import { type PremiseSelectionResult } from './idea-discovery-contract';
 import { type PremiseSelectionReview } from './premise-selection-review';
 import { premiseCausalCatalog, premiseCausalPlanIssues } from './premise-causal-plan';
 export interface PremiseCausalCheck {ref:string;status:'supported'|'gap'|'unknown';reason:string;}
-export interface PremisePayoffCheck {ref:string;status:'supported'|'gap'|'unknown';actionEvidenceRef?:string;conditionEvidenceRef?:string;reason:string;actionEvidenceQuote?:string;conditionEvidenceQuote?:string;links?:PremiseCausalCheck[];}
+export interface PremisePayoffCheck {ref:string;status:'supported'|'gap'|'unknown';actionEvidenceRef?:string;conditionEvidenceRef?:string;reason:string;actionEvidenceQuote?:string;conditionEvidenceQuote?:string;gapRepair?:'restore_source_conditions'|'replace_from_pool';sourceConditionQuote?:string;links?:PremiseCausalCheck[];}
 const ACTION_EVIDENCE_FIELDS=['openingEvent','activeChoice','escalation','reversalEffect'];
 const CONDITION_EVIDENCE_FIELDS=['protagonistSituation','openingEvent','coreConflict','activeChoice','escalation','reversalEffect','irreplaceableCarrier'];
 function permittedEvidenceFields(candidate:Record<string,unknown>|undefined,key:string):string[]{
@@ -31,7 +31,7 @@ export function premisePayoffCatalog(selection:PremiseSelectionResult){
   return selection.selected.map((item,index)=>({ref:'S'+(index+1)+'.payoff',premiseId:String(item.premiseId)}));
 }
 export function premisePayoffReviewDirective(selection:PremiseSelectionResult){
-  return '\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
+  return '\n按已注入GEN-002的缺口路由合同，gap项额外返回gapRepair=restore_source_conditions|replace_from_pool；restore_source_conditions须加sourceConditionQuote，逐字引用同ID原池已建立的全部缺失条件；原池也缺条件或无法给出真实引用时返回replace_from_pool，不补造条件。\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
     +'\n【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】'+JSON.stringify(selection.selected.flatMap((item,index)=>premiseCausalCatalog(item,`S${index+1}.`).map(({ref})=>({ref}))))
     +'\n先核对每个causalPlan环节：action只能直接改变什么、conditions是否实际建立并足以导致result。每个payoffChecks新增links数组，逐一返回本题材目录的{ref,status:"supported|gap|unknown",reason:"具体必要条件为何充分或缺失，至少8字"}，不得漏项、重复、跨题材或靠一条总体认可代替。conditions为空不自动通过，遇到实际必要条件未写仍须gap；原池与展开一起漏写的条件同样为gap。计划遗漏的关键中间结果也须在本题材整体payoffChecks中报告gap，不能仅核对作者自行列出的环节。整体status须与links一致：任一unknown则unknown，其次任一gap则gap，其余才supported；发现计划外缺口可整体gap但保留links的真实结论。'
     +'\n【逐题材允许的行动和条件字段，包含本计划实际使用的字段】'+JSON.stringify(selection.selected.map((candidate,index)=>({ref:`S${index+1}.payoff`,actionFields:permittedEvidenceFields(candidate,'actionEvidenceRef'),conditionFields:permittedEvidenceFields(candidate,'conditionEvidenceRef')})))+'。每个编号须加本卡S序号前缀，不引用自评或读者问题。causalPlan是定位索引，不是证据的封闭白名单；先在本题材全部实际故事字段寻找必要条件，再判断gap。必要行动或条件写在payoff而未被计划选中时，另返actionEvidenceQuote或conditionEvidenceQuote，逐字引用不与计划result断言重叠的实际行动/独立条件；只引用结果或其片段仍拒绝，不为原文没有的条件补故事。'
@@ -46,6 +46,13 @@ export function premisePayoffReviewIssues(value:any,selection:PremiseSelectionRe
     if(!item||seen.has(row.ref)){errors.push('兑现审查编号未知或重复');continue;}seen.add(row.ref);
     if(!['supported','gap','unknown'].includes(row.status)||typeof row.reason!=='string'||row.reason.trim().length<8)errors.push(row.ref+'缺少明确状态与必要条件依据');
     const candidate=selection.selected.find(candidate=>candidate.premiseId===item.premiseId)!;
+    if(row.gapRepair!==undefined&&!['restore_source_conditions','replace_from_pool'].includes(row.gapRepair))errors.push(row.ref+'的gapRepair模式无效');
+    if(row.gapRepair==='restore_source_conditions'){
+      const source=selection.pool.find(seed=>seed.premiseId===item.premiseId);
+      if(row.status!=='gap'||typeof row.sourceConditionQuote!=='string'||row.sourceConditionQuote.trim().length<8
+        ||!String(source?.storyCore||'').includes(row.sourceConditionQuote))
+        errors.push(row.ref+'恢复展开条件须逐字引用同ID原池已有的全部缺失条件，不得补造来源');
+    }
     if(candidate.causalPlan!==undefined){
       errors.push(...premiseCausalPlanIssues(candidate).map(error=>row.ref+'：'+error));
       const expectedLinks=premiseCausalCatalog(candidate,row.ref.slice(0,row.ref.indexOf('.')+1)),links=row.links;
@@ -81,6 +88,7 @@ export function materializePremisePayoffReview(value:any,selection:PremiseSelect
   return value.payoffChecks.filter((row:PremisePayoffCheck)=>row.status==='gap').map((row:PremisePayoffCheck)=>{
     const item=premisePayoffCatalog(selection).find(item=>item.ref===row.ref)!;
     return {kind:'selection_fit' as const,premiseId:item.premiseId,referencePremiseId:item.premiseId,
+      ...(row.gapRepair==='restore_source_conditions'?{}:{repairMode:'replace_from_pool' as const}),
       quote:String(selection.selected.find(p=>p.premiseId===item.premiseId)!.payoff),
       referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[row.reason,...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
   });

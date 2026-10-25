@@ -5,6 +5,8 @@ import { seedAcceptanceProject } from '../acceptance/test-project-fixture';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
 import { ChainController } from './chain.controller';
 import { CROSS_STAGE_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
+import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 
 let db: DatabaseSync;
 let controller: any;
@@ -51,6 +53,16 @@ beforeEach(async () => {
 afterEach(() => db.close());
 
 describe('production cross-module commit boundary with native SQLite', () => {
+  it.each(['source_review_rejected','persistence_write','persistence_readback'] as CreationFailureOrigin[])
+    ('durably records %s separately from successful model calls', origin => {
+      const metrics = new GenerationMetricsService({getDb:()=>db} as any);
+      recordCreationStageFailure(metrics,'p','world',origin,'世界观阶段未提交，后续大纲停止');
+      const row = db.prepare("SELECT status,error,output_text FROM generation_runs WHERE project_id=? ORDER BY started_at DESC LIMIT 1").get('p') as any;
+      expect(row.status).toBe('failed');
+      expect(row.error).toContain('后续大纲停止');
+      expect(JSON.parse(row.output_text)).toMatchObject({kind:'creation_stage_failure',step:'world',origin});
+      expect((db.prepare('SELECT COUNT(*) c FROM world_settings WHERE project_id=?').get('p') as any).c).toBe(1);
+    });
   it('reconciles exact discovery request correlation into step metrics storage', () => {
     const columns = db.prepare('PRAGMA table_info(generation_step_metrics)').all() as any[];
     expect(columns.map(row => row.name)).toContain('discovery_request_id');
@@ -95,6 +107,7 @@ describe('production cross-module commit boundary with native SQLite', () => {
     db.prepare("UPDATE projects SET status='creating', settings=? WHERE id=?").run(persistedConfirmedStorySettings(), 'p');
     controller.assertExecutionStandardsComplete = vi.fn();
     controller.realLLM = { isAvailable: vi.fn().mockResolvedValue(false) };
+    controller.generationMetrics = new GenerationMetricsService({getDb:()=>db} as any);
     controller.emitProjectProgress = vi.fn((_projectId: string, event: any) => {
       if (event.type === 'error') {
         expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
@@ -109,6 +122,8 @@ describe('production cross-module commit boundary with native SQLite', () => {
     expect(controller.realLLM.isAvailable).toHaveBeenCalledTimes(1);
     expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p') as any).status).toBe('generation_failed');
     expect(controller.logger.error).toHaveBeenCalledWith(expect.stringContaining('失败事件推送失败'));
+    const failure = db.prepare("SELECT output_text FROM generation_runs WHERE project_id=? AND status='failed' ORDER BY started_at DESC LIMIT 1").get('p') as any;
+    expect(JSON.parse(failure.output_text)).toMatchObject({kind:'creation_stage_failure',step:'preflight'});
   });
 
   it('reports a failed status write instead of silently presenting an unexplained creating state', async () => {

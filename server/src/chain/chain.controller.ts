@@ -1,5 +1,6 @@
 import {fulfillDiscoveryGaps,discoveryFailureImproved} from './discovery-fulfillment';
-import { assertPremiseCausalPlans, premiseCausalPlanExample } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
+import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
 import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
 import {reviewChangedPremiseSources,pendingPremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -5438,11 +5439,25 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             if (parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')) {
               throw prerequisiteError(parsedSelection);
             }
-            const selected = normalizePremiseSelectionPayload({
+            // Validate story shape and identity first. An incomplete citation
+            // index gets one plan-only correction before the unchanged strict
+            // normalizer and independent source/payoff gates run.
+            const rawSelected = parsedSelection?.selectedPremises;
+            const shaped = normalizePremiseSelectionPayload({
               pool: candidatePool,
-              selectedPremises: parsedSelection && parsedSelection.selectedPremises,
+              selectedPremises: Array.isArray(rawSelected) ? rawSelected.map(item => {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+                const { causalPlan: _pendingIndex, ...story } = item;
+                return story;
+              }) : rawSelected,
             }, requestedCount, premisePoolSize, discoveryCategories, minimumSelectedCountForPool(candidatePool.length));
-            assertPremiseCausalPlans(selected);
+            const indexed = { ...shaped, selected: shaped.selected.map(item => bindPremiseCausalPlan({
+              ...item, causalPlan: rawSelected.find((row: any) => row?.premiseId === item.premiseId)?.causalPlan,
+            })) };
+            const repaired = await this.completePremiseCausalPlans(indexed, reselectionCompletionBudget);
+            const selected = normalizePremiseSelectionPayload({pool:candidatePool,selectedPremises:repaired.selected},
+              requestedCount,premisePoolSize,discoveryCategories,minimumSelectedCountForPool(candidatePool.length));
+            selectionWallMs = Date.now() - selectionStartedAt;
             if (!variedCategories) for (const premise of selected.selected) {
               if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
                 throw new Error('已选题材未继承本次固定分类');
@@ -6050,6 +6065,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   /** 每个项目的已发最大进度，用于把总进度钳制成单调不降（避免步骤回退导致前端进度条倒走） */
   private projectLastPercent = new Map<string, number>();
 
+  private async completePremiseCausalPlans<T extends { selected: Record<string, unknown>[] }>(selection: T, budget: { remaining: number }): Promise<T> {
+    const targets = premiseCausalPlanRepairInput(selection);
+    if (!targets.length) return selection;
+    const response = await this.realLLM.generate({
+      prompt: '只补全点名题材的causalPlan引用索引，不修改或补造任何故事字段、条件、身份与结果。逐环节引用下方本题材已有的实际行动、条件与结果，覆盖主线payoff；条件未写时不得编造，普通直接因果可为空。修好索引后仍须独立审查真实因果，不能自行声明通过。只返回JSON:{"plans":[{"premiseId":"点名ID","causalPlan":'
+        + JSON.stringify(premiseCausalPlanExample()) + '}]}；恰好覆盖全部点名ID，不返回其它字段。\n【不可修改的实际故事字段与索引问题】' + JSON.stringify(targets),
+      scenario: 'idea_generate', responseFormat: 'json_object', temperature: 0.1,
+      timeout: LLM_TUNABLES.timeoutComplex(), maxEmptyRetries: 0, physicalCallBudget: budget,
+      metrics: { stepKey: 'idea_premise_causal_plan_contract', attempt: 0 },
+    });
+    return applyPremiseCausalPlanRepairs(selection, this.safeExtractJson(response.content, {}));
+  }
+
   private async reviewPremiseSelection(selection: ReturnType<typeof normalizePremiseSelectionPayload>, standard: string, mode: 'overlap' | 'source_drift', physicalCallBudget?: { remaining: number }, sourceBatch = false, requiredGenres:readonly string[]=[], reviewLimiter?:ReturnType<typeof createReviewLimiter>, overlapFocusId?:string | readonly string[]): Promise<PremiseSelectionReview> {
     if (mode === 'source_drift' && !sourceBatch) {
       const budget = premiseSourceCallBudget(physicalCallBudget);
@@ -6057,20 +6085,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const splitSources=()=>splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
         .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
       if (readGenerationBudgets().reviewGroupingMode === 0) {
-        // Five-premise source audits made multiple expensive calls and exhausted
-        // the shared review allowance in local production. Split large transport
-        // when both independent batches fit the existing physical-call budget.
-        // Keep all source/payoff/category/genre checks and the separate global overlap review.
-        if(selection.selected.length>=5&&budget.remaining>=2){
-          this.logger?.warn('来源审核五项以上预先分批，降低超大输出请求风险；共享调用预算和独立质量审查不变');
+        try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
+        catch (error) {
+          if (!isReviewOutputCapacityError(error) || selection.selected.length < 2) throw error;
+          this.logger?.warn('来源整体审核遇到输出容量限制，按实际资料体量拆分；沿用原共享预算及全部质量检查');
           batches=splitSources();
-        }else{
-          try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
-          catch (error) {
-            if (!isReviewOutputCapacityError(error) || selection.selected.length < 2) throw error;
-            this.logger?.warn('来源整体审核遇到输出容量限制，按实际资料体量拆分；沿用原共享预算及全部质量检查');
-            batches=splitSources();
-          }
         }
       } else batches = premiseSourceBatches(selection);
       const reviews = await independentReviewBatches(batches, budget, IDEA_CARD_GENERATION_CONCURRENCY,
@@ -6245,15 +6264,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     let reselectionStopReason:string|undefined;
     const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
       if(!slots.length)return true;
-      // This exact four-slot aggregate exceeded the provider's 32768-token
-      // response capacity during local validation. Partition transport before
-      // another minutes-long truncated call; keep every slot, shared allowance,
-      // global comparison requirement and final independent source/overlap Gate.
-      if(slots.length>=4){
-        for(const part of splitReviewMaterial(slots,slot=>({slot,pool:initial.pool.find(item=>item.premiseId===slot.replacesPremiseId)})))
-          if(!await reselectScope(part,unusedIds))return false;
-        return true;
-      }
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
       const ids=new Set(slots.map(slot=>slot.replacesPremiseId));
       const scopedReview:PremiseSelectionReview={passed:false,issues:slots.flatMap(slot=>slot.issues)};
@@ -6332,7 +6342,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     let reserveReconciliationRounds = 0;
     while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0){
       reserveReconciliationRounds += 1;
-      this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '/1；之后仅保留独立复核通过项，不继续循环换题。');
+      this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '；仅使用未尝试原池身份和剩余共享预算，全部修改仍须独立复核。');
       const retained=retainReviewedPremises(selected,finalReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
       const unusedIds=new Set(initial.pool.filter(item=>!attemptedIds.has(String(item.premiseId))).map(item=>String(item.premiseId)));
       if(!retained.excludedPremiseIds.length||!unusedIds.size)break;
@@ -6347,13 +6357,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       slots.forEach(slot=>slot.mode='replace_from_pool');
       // A replacement cannot be used unless its changed sources AND all affected
       // pairwise overlaps can be independently reviewed. The outer scheduler
-      // reserves one call per mode; five pending sources require a further batch.
+      // reserves one aggregate call per mode, or the configured source batches.
       // Check that total BEFORE spending on another model reselection, otherwise
       // a two-credit tail can pay for overlap but fail source coverage after minutes.
       const pendingSources=pendingPremiseSourceReviewCount(selected,sourceScope,sourceReceipts,slots.map(slot=>String(slot.replacesPremiseId)));
       const grouping=readGenerationBudgets();
       const sourceCalls=grouping.reviewGroupingMode===0
-        ? (pendingSources>=5?2:1)
+        ? 1
         : Math.max(1,Math.ceil(pendingSources/grouping.sourceBatchSize));
       const requiredReviewCredits=1+sourceCalls;
       if(shared&&shared.reviews.remaining<requiredReviewCredits){
@@ -6950,10 +6960,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     });
 
     let activeGenerationStep = 'world';
+    let activeFailureOrigin: CreationFailureOrigin = 'generation_execution';
     let activeGenerationMessage = '正在生成创作资料...';
     const emit = (step: string, percent: number, message: string, status: 'running' | 'done' | 'failed' = 'running') => {
       assertGenerationActive();
-      if (status === 'running' && step !== 'project' && step !== 'done') { activeGenerationStep = step; activeGenerationMessage = message; }
+      if (status === 'running' && step !== 'project' && step !== 'done') {
+        if (activeGenerationStep !== step) activeFailureOrigin = 'generation_execution';
+        activeGenerationStep = step; activeGenerationMessage = message;
+      }
       this.emitProjectProgress(projectId, { type: 'progress', step, percent, message, status, counts: getCreationCounts() });
     };
 
@@ -7113,6 +7127,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (statusPersistenceError) {
         this.logger.error('create-project-async 失败状态写入失败 project=' + projectId + ': ' + statusPersistenceError);
       }
+      try {
+        recordCreationStageFailure(this.generationMetrics, projectId, step, activeFailureOrigin, message,
+          { ...details, ...(statusPersistenceError ? { statusPersistenceError } : {}) });
+      } catch (recordError) {
+        this.logger.error('create-project-async 阶段失败记录写入失败 project=' + projectId + ': ' + String(recordError));
+      }
       if (progress) {
         try {
           emit(progress.step, progress.percent, progress.message || message, 'failed');
@@ -7123,7 +7143,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       }
       try {
         this.emitProjectProgress(projectId, {
-          type: 'error', success: false, projectId, step, message, ...details,
+          type: 'error', success: false, projectId, step, message, ...details, failureOrigin: activeFailureOrigin,
           ...(statusPersistenceError ? { statusPersistenceError } : {}),
         });
       } catch (emitError) {
@@ -7631,6 +7651,7 @@ ${STORY_ENTITY_MODELING_POLICY}
 - endingDirection——结局基调与解决方向。
 
 JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName || '主角'}」姓名...","atmosphere":"...","rules":["..."],"geography":"...","locations":["..."],"socialRules":["..."],"specialSettings":"无特殊设定时必须为空字符串","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{"name":"...","leader":"...","scope":"活动范围","protagonistRelation":"与主角关系"}],"endingDirection":"..."}`;
+          activeFailureOrigin = 'generation_contract';
           const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, {
             temperature: 0.5,
             timeout: LLM_TUNABLES.timeoutComplex(),
@@ -7645,9 +7666,11 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
           let worldCandidate = worldResult.data;
           let worldCandidateRunId = worldResult.runId;
           const originalWorldCandidate=structuredClone(worldCandidate);
+          activeFailureOrigin = 'source_review_incomplete';
           let sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
             { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
           if (!sourceReview.consistent) {
+            activeFailureOrigin = 'source_repair_contract';
             const repair = await this.llmCallWithRetry<any>('世界观上层事实修复',
               `只修复尚未保存的世界观候选，不改写已确认题材和创作设定，不修改已保存或冻结的世界观。\n【上层】${canonicalCreativeBrief}\n【当前世界观】${JSON.stringify(worldCandidate)}\n【逐字证据与冲突】${JSON.stringify(sourceReview.contradictions)}\n【本次允许局部替换位置】${JSON.stringify(worldSourceAnchors(worldCandidate).filter(anchor=>sourceReview.conflicts.some(issue=>issue.lowerRef===anchor.ref)))}\n只返回JSON:{"edits":[{"ref":"允许的L编号","match":"该位置逐字存在且唯一的待改短原文","replacement":"局部新文本"}]}。所有已举证位置须覆盖，同一位置多条问题合并一个局部替换，保留该位置其它内容及所有非目标内容。不返回完整世界观，不新增规则、对象或事件；修后完整候选仍按原结构和来源合同验收。`,
               { projectId, scenario: 'world_building', stepKey:'world_source_local_repair', temperature: 0.25, timeout: LLM_TUNABLES.timeoutComplex(),
@@ -7656,13 +7679,16 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
             if(!repair.data)throw Error('世界观局部修复未通过补丁合同，原候选未改动：'+(repair.validationIssues||[]).join('；'));
             worldCandidate = applyUncommittedWorldPatch(worldCandidate,repair.data,sourceReview);
             worldCandidateRunId = repair.runId;
+            activeFailureOrigin = 'source_review_incomplete';
             sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
               { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
           }
           if (!sourceReview.consistent) {
+            activeFailureOrigin = 'source_review_rejected';
             throw new Error(`世界观与确认题材仍冲突，未保存或生成大纲：${worldReviewFailureOrigin(originalWorldCandidate,worldCandidate,sourceReview).join('；')}；原文证据：${sourceReview.contradictions.join('；')}`);
           }
           if (worldCandidate && typeof worldCandidate === 'object') {
+            activeFailureOrigin = 'quality_gate';
             this.generatedCanonGuard.assertStructuredCanCommit({
               projectId,
               runId: worldCandidateRunId,
@@ -7670,6 +7696,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
               expectedScenarios: ['world_building'],
             });
             const wd = worldCandidate;
+            activeFailureOrigin = 'persistence_write';
             // 注意：outlineContextPrefix 不再使用瞬时原始 LLM 输出，改为写入后从 DB 回读（见下方），确保大纲上下文=已落库模块
             db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
@@ -7729,6 +7756,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
           }
         }
         // 无论新建还是已存在，都把已保存世界观回读为大纲上下文（世界严格先于大纲；重跑时若已有世界观，大纲也必须有世界观上下文，不得为空）
+        activeFailureOrigin = 'persistence_readback';
         const savedWorld = db.prepare(`SELECT era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
         if (!savedWorld) {
           throw new Error('世界观生成步骤结束但主记录未保存，停止生成大纲；请检查世界观审查与写入日志。');

@@ -23,7 +23,7 @@ const failure: PremiseSelectionReview = { passed: false, issues: [{ kind: 'overl
   quote: '每次救人自己的存在逐渐消失', referenceQuote: '每次救人自己的存在逐渐消失', reason: '选择与代价及旧签字反转机制同构' }] };
 
 describe('premise selection before identity lock', () => {
-  it('prepartitions five-premise source audits within existing credits and merges every independent field check',async()=>{
+  it('reviews five-premise sources in one call and preserves every independent field check',async()=>{
     const current=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
       selectedPremises:['A','B','C','D','E'].map(premise)},5,5);
     const originalMethod=(ChainController.prototype as any).reviewPremiseSelection;
@@ -43,8 +43,8 @@ describe('premise selection before identity lock', () => {
       const credits={remaining:allowed};
       const review=await c.reviewPremiseSelection(current,'原有标准','source_drift',credits);
       expect(requested.flat()).toEqual(['A','B','C','D','E']);
-      expect(requested).toHaveLength(allowed);
-      expect(credits.remaining).toBe(0);
+      expect(requested).toHaveLength(1);
+      expect(credits.remaining).toBe(allowed-1);
       expect(review.passed).toBe(true);
       expect(review.sourceChecks?.map((row:any)=>row.ref))
         .toEqual(premiseSourceComparisonCatalog(current).map(row=>row.ref));
@@ -108,7 +108,7 @@ it('does not enter another provider attempt after the last physical call returns
     expect(issues.join('；')).toContain('必需ID=["P1","P14","P4","P5"]');
     expect(issues.join('；')).toContain('缺少ID=["P14","P4","P5"]');
   });
-  it('partitions four oversized problem slots before truncation, covers all slots and independently reviews the complete final selection',async()=>{
+  it('repairs four problem slots in one response and independently reviews the complete final selection',async()=>{
     const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G','H','I'].map(premise),selectedPremises:['A','B','C','D','E'].map(premise)},5,9);
     const rejected:PremiseSelectionReview={passed:false,issues:['B','C','D','E'].map(premiseId=>({...failure.issues[0],premiseId}))};
     const c=Object.create(ChainController.prototype) as any,finalIds=['A','F','G','H','I'],batches:string[][]=[];
@@ -120,8 +120,8 @@ it('does not enter another provider attempt after the last physical call returns
       const slots=JSON.parse(section('【必须处理的位置及模式】','【可用原池ID】')) as Array<{replacesPremiseId:string}>;
       const current=JSON.parse(section('【当前选择】','【本次独立缺陷】')) as Array<{premiseId:string}>;
       const ids=slots.map(slot=>slot.replacesPremiseId);
-      expect(ids).toHaveLength(2);
-      expect(prompt).toContain('replacements恰好2项');
+      expect(ids).toHaveLength(4);
+      expect(prompt).toContain('replacements恰好4项');
       expect(options.physicalCallBudget.remaining).toBe(3-batches.length);
       batches.push(ids);options.physicalCallBudget.remaining--;
       const finalBatchIds=current.map(row=>ids.includes(row.premiseId)?replacementId[row.premiseId]:row.premiseId);
@@ -138,7 +138,7 @@ it('does not enter another provider attempt after the last physical call returns
     expect(batches.flat()).toEqual(['B','C','D','E']);
     expect(result.selected.map((p:any)=>p.premiseId)).toEqual(finalIds);expect(result.selected[0]).toEqual(original.selected[0]);
     expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selectionAudit.partial).not.toBe(true);
-    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
+    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
   });
   it('replaces one failed card in an already reviewed three-of-five partial batch without demanding five selected identities',async()=>{
     const partial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),
@@ -658,6 +658,7 @@ it('aggregates all failed reserve positions and keeps the remaining failure afte
 });
 
 it('does not buy a third selection when two remaining review credits cannot cover changed five-source batches and overlap',async()=>{
+ vi.mocked(budgetConfig.readGenerationBudgets).mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:1,sourceBatchSize:3});
  const initial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),
    selectedPremises:['A','B','C','D','E'].map(premise)},5,7);
  const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};

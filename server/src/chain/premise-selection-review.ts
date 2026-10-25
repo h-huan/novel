@@ -12,7 +12,7 @@ export interface PremiseSelectionReview {
   passed: boolean;
   sourceReviewReuse?: { reused: number; reviewed: number };
   issues: Array<{ kind: 'overlap' | 'source_drift' | 'selection_fit'; premiseId: string; referencePremiseId: string;
-    quote: string; referenceQuote: string; reason: string; field?: string }>;
+    quote: string; referenceQuote: string; reason: string; field?: string; repairMode?: 'replace_from_pool' }>;
   sourceChecks?: PremiseSourceCheck[];
   payoffChecks?: PremisePayoffCheck[];
   genreChecks?: Array<{ref:string;status:string;field?:string;quote?:string;evidenceRef?:string;reason:string}>;
@@ -147,18 +147,18 @@ export function normalizePremiseReselection(value: unknown, original: PremiseSel
 /** Build repair slots from verified reviews; unaffected selections stay server-owned. */
 export function premiseReselectionPlan(original: PremiseSelectionResult, review: PremiseSelectionReview) {
   const affected = new Set(review.issues.map(issue => issue.premiseId));
-  const overlapIds = new Set(review.issues.filter(issue => issue.kind === 'overlap').map(issue => issue.premiseId));
+  const replacementIds = new Set(review.issues.filter(issue => issue.kind === 'overlap' || issue.repairMode === 'replace_from_pool').map(issue => issue.premiseId));
   const protectedItems = original.selected.filter(item => !affected.has(String(item.premiseId)));
   return {
     protectedItems,
     repairSlots: original.selected.filter(item => affected.has(String(item.premiseId))).map(item => ({
       replacesPremiseId: item.premiseId,
-      mode: overlapIds.has(String(item.premiseId)) ? 'replace_from_pool' : 'correct_or_replace_from_pool',
+      mode: replacementIds.has(String(item.premiseId)) ? 'replace_from_pool' : 'correct_or_replace_from_pool',
       original: item,
       issues: review.issues.filter(issue => issue.premiseId === item.premiseId),
     })),
     availableCandidates: original.pool.filter(item => !protectedItems.some(protectedItem => protectedItem.premiseId === item.premiseId)
-      && !overlapIds.has(String(item.premiseId))),
+      && !replacementIds.has(String(item.premiseId))),
   };
 }
 
@@ -175,7 +175,7 @@ export function normalizeTargetedPremiseReselection(value: unknown, original: Pr
     if (!slot || bySlot.has(slotId)) throw new Error('定向重选位置未知或重复，不能修改正常项');
     const row = change?.premise;
     if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('定向重选必须提供完整premise筛选证据');
-    if (slot.mode === 'replace_from_pool' && row.premiseId === slotId) throw new Error('已证实同构的题材必须从原池换选，不能保留原身份只换表述');
+    if (slot.mode === 'replace_from_pool' && row.premiseId === slotId) throw new Error('已证实同构或原池缺少兑现条件的题材必须从原池换选，不能保留原身份补造条件或只换表述');
     if (!plan.availableCandidates.some(item => item.premiseId === row.premiseId)) throw new Error('定向重选须选择可用原池身份，不能复制正常项、已淘汰同构项或补生题材');
     bySlot.set(slotId, row);
   }
