@@ -5039,7 +5039,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore保持轻量，但必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。人物识破身份须有先前接触该身份信息的真实渠道，证据指向具体责任人须有区别于“只是排除自己”的指认依据，约人到场或设伏抓获须有各方实际到场与配合动机。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺行动链的终局；没有可信条件就换一条能成立的故事骨架，不交给下游昂贵复核补造。保留反转、兑现与代价方向。',
           batchFocus,
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
-          '候选之间的区别须落实到主动选择如何触发升级、反转如何改变胜负条件、兑现及连带代价这条完整因果链；不能只在人物职业、名字、道具或单个设定上有差异而共用“隐藏旧本领→搜集记录→被反咬→亮出证据→丢工作”的行动模板，也不能复用历史排除项。',
+          '同一批不能让多数题材靠相同的行动、反制、翻盘与代价结构支撑：比较每个storyCore里主角真正采取的策略、对手如何改变局面、靠哪项已经建立的条件让胜负转换、赢后损失的具体性质。若已有两项都靠私存岗位记录、遭反咬、第三方核账而翻盘，其余题材必须改用实质不同且能够成立的行动与兑现机制，不准只换职业、场所或物证名称。对不同机制同样核对授权和因果，不为凑差异编造条件。',
           '保留用户指定的类型、平台、分类、流派与其它条件。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
         ].join('\n');
         const minimumSelectedCount = promptPhase === 'selection'
@@ -5708,7 +5708,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
           // 最终吸引力/留存 Gate 只做独立验收：完整题材卡已经来自前置轻量候选池的明确筛选。
           // 这里不得再承担主要选题、换题或质量补生；失败只进入审计并阻断该卡展示。
-          const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType, presentationReview);
+          const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType);
           issues.push(...appealAssessment.issues);
           const uniqueIssues = Array.from(new Set(issues));
           const passed = uniqueIssues.length === 0;

@@ -295,7 +295,7 @@ describe('IdeaAppealGateService', () => {
   });
 });
 
-it('uses independently verified story progressions instead of rejecting a good bound story for absent connector words',()=>{
+it('keeps the original two-dimensional deterministic Gate rather than bypassing its blocking issue',()=>{
  const premise={premiseId:'P-no-keywords',workingTitle:'楼道尽头的签字',storyCore:'女儿必须查明父亲被错误登记并当场作出选择，交出原始记录会失去自己的职位。',
    protagonistSituation:'父亲在医院的身份登记被改动，女儿承担家庭开销。',
    openingEvent:'护士通知父亲已经自愿离院，女儿看到父亲仍在病房。',
@@ -325,12 +325,5 @@ it('uses independently verified story progressions instead of rejecting a good b
  }]);
  const bare=gate.assess(card,'short_story');
  expect(bare.issues).toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
- const supported={titleCompelling:true,openingCompelling:true,distinctFromBatch:true,
-  storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],
-  readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:'supported'}]))} as any;
- const withEvidence=gate.assess(card,'short_story',supported);
- expect(withEvidence.issues).not.toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
- expect(withEvidence.warnings.some(issue=>issue.includes('词面差异度与推进连接词'))).toBe(true);
- expect(gate.assess(card,'short_story',{...supported,payoffCredible:false}).issues)
-  .toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+ expect(bare.passed).toBe(false);
 });

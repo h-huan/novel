@@ -74,3 +74,10 @@ it('renders every required causal link inside the final payoff JSON example', ()
   expect(example.links.map((row:any)=>row.ref)).toEqual(['S1.causalPlan[0]','S1.causalPlan[1]']);
   expect(example.links.every((row:any)=>row.status==='supported|gap|unknown' && row.reason.length>=8)).toBe(true);
 });
+
+it('requires existing independent payoff review to check evidence delivery to an authorized decision-maker',()=>{
+ const prompt=premisePayoffReviewDirective(selection);
+ expect(prompt).toContain('证据以实际写出的动作交给了谁');
+ expect(prompt).toContain('原池和展开都漏掉这道决定性桥接时整体应为gap');
+ expect(prompt).toContain('不能仅核对作者自行列出的环节');
+});
