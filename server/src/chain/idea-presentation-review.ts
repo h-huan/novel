@@ -59,7 +59,12 @@ export function targetIdeaReviews(value: any, cards: readonly any[], references:
 
 /** Bind an independent semantic judgement to exactly the cards actually reviewed. */
 export function presentationReviewIssues(value: any, cards: readonly any[], requireReaderGoals = false): string[] {
-  if (!Array.isArray(value?.reviews) || value.reviews.length !== cards.length) return ['标题与首屏审查必须逐卡返回完整结论'];
+  if (!Array.isArray(value?.reviews)) return ['标题与首屏审查必须逐卡返回完整结论：缺少reviews数组'];
+  if (value.reviews.length !== cards.length) {
+    const seen=new Set(value.reviews.map((row:any)=>row?.position).filter((pos:unknown)=>Number.isInteger(pos)));
+    const missing=cards.map((_card,index)=>index+1).filter(pos=>!seen.has(pos));
+    return ['标题与首屏审查必须逐卡返回完整结论：要求'+cards.length+'项，实际'+value.reviews.length+'项，缺失位置='+JSON.stringify(missing)];
+  }
   const seen = new Set<number>();
   const issues: string[] = [];
   for (const row of value.reviews) {

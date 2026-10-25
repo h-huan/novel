@@ -530,12 +530,17 @@ if (!health.ok) {
   // Root-cause-first: downstream runtime checks were not executed.
   runtimeProblems.push('server_unavailable');
 } else {
+  // Full production acceptance cannot certify a different or unidentified
+  // backend. Ordinary dev startup and quick diagnostics remain unaffected.
+  if (runFull && backendIdentity.loadedLocalRevision !== 'match') runtimeProblems.push('backend_revision_unverified');
   if (standardsResponse.ok && !runtime.standards.consistent) runtimeProblems.push('execution_standard_drift');
   if (projectDiscovery.attempted && !projectDiscovery.ok) runtimeProblems.push('project_auto_discovery_failed');
   if (runFull && dualMode && (!shortProjectId || !longProjectId)) runtimeProblems.push('dual_project_pair_incomplete');
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
   const latestAuditSummary = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery);
-  if (!runFull && latestAuditSummary.available && latestAuditSummary.success === false) runtimeProblems.push('latest_idea_discovery_failed');
+  if (latestAuditSummary.available && latestAuditSummary.success === false) runtimeProblems.push('latest_idea_discovery_failed');
+  if (runFull && latestAuditSummary.available && Number(latestAuditSummary.shortfall) > 0)
+    runtimeProblems.push('latest_idea_discovery_shortfall_' + Number(latestAuditSummary.shortfall));
 }
 
 if (health.ok) for (const target of projectTargets) {

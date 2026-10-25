@@ -1,6 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows} from './idea-review-protocol-repair';
 import {ideaReviewResponseExample,ideaPayoffBridgeIssues} from './idea-review-evidence';
+import {presentationReviewIssues} from './idea-presentation-review';
 import {ChainController} from './chain.controller';
 const card={title:'当面退回委托',hook:'她把错误订单退回，拒绝替别人签字。',description:'她到唯一出口等负责人下班。',setting:'负责人下班只能从此门经过。',ending:'她在门口等到负责人。'};
 const fixture=()=>{
@@ -44,6 +45,13 @@ describe('one targeted reader-goal protocol correction',()=>{
  });
 });
 
+
+it('reports review-count contract failures with actual missing positions rather than a generic error',()=>{
+ const cards=[{title:'卡片A'},{title:'卡片B'},{title:'卡片C'}];
+ const issues=presentationReviewIssues({reviews:[{position:1,title:'卡片A'}]},cards);
+ expect(issues).toHaveLength(1);
+ expect(issues[0]).toContain('要求3项，实际1项，缺失位置=[2,3]');
+});
 
 describe('observed 4-card presentation report omitted rows',()=>{
  const cards=Array.from({length:4},(_,index)=>({...card,title:'独立题材'+(index+1)}));

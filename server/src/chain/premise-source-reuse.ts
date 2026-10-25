@@ -50,13 +50,14 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
   const input=pending.length===selection.selected.length?selection:{...selection,selected:pending,
    pool:selection.pool.filter(seed=>pending.some(item=>item.premiseId===seed.premiseId))};
   fresh={selection:input,review:await review(input)};
-  // The production reviewer validates all contracts before returning. Require a
-  // complete, positive receipt as well; absent/failed/unknown receipts never reuse.
+  // Every memoized verdict is bound to this exact premise and source/standard.
+  // Reuse a complete, evidenced rejection too: re-scoring the very same failed
+  // input cannot remove its defect. Unknown/incomplete results are never memoized.
   if(!premiseSourceReviewIssues({sourceChecks:fresh.review.sourceChecks},input).length){
    for(let index=0;index<input.selected.length;index++){
     const receipt=singleReceipt(input,fresh.review,index),r=receipt.review;
-    // Only complete, positive checks are reusable. A rejected item must receive
-    // an independent review even when its source and standard are unchanged.
+    // Complete negative evidence must remain a rejection after memoization;
+    // mismatched semantic flags, fabricated reasons and unknowns cannot enter.
     let sourceIssuesMatch=false;
     try{
      const materialized=materializePremiseSourceReview({sourceChecks:r.sourceChecks},receipt.selection).issues;
@@ -66,7 +67,12 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
        &&a.field===b.field&&a.quote===b.quote&&a.referenceQuote===b.referenceQuote&&a.reason===b.reason;
      sourceIssuesMatch=materialized.length===recorded.length&&materialized.every(issue=>recorded.some(row=>same(issue,row)));
     }catch{}
-    if(r.passed===true&&r.issues.length===0&&sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
+    const hasKnownFailure=!!r.sourceChecks?.some(row=>row.status==='drift')
+      ||!!r.payoffChecks?.some(row=>row.status==='gap'||(row.links||[]).some(link=>link.status==='gap'))
+      ||!!r.genreChecks?.some(row=>row.status==='missing')
+      ||!!r.categoryChecks?.some(row=>row.status==='missing');
+    if(r.passed===(r.issues.length===0) && r.passed===!hasKnownFailure
+      && sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
       &&r.sourceChecks?.every(row=>row.status!=='unknown')
       &&r.payoffChecks?.length===1
       &&!premisePayoffReviewIssues({payoffChecks:r.payoffChecks},receipt.selection).length

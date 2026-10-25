@@ -6319,6 +6319,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const protectedIds=selected.selected.filter(item=>!ids.has(item.premiseId)).map(item=>item.premiseId);
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
         .filter(id=>!protectedIds.includes(id)&&(!unusedIds||unusedIds.has(String(id))));
+      // Keep the canonical pool unchanged for server-side validation. Only send
+      // identities that can legally fill these slots; discarded and protected
+      // identities in the full pool cannot be selected, and protected story facts
+      // are already in 【当前选择】. Do not spend tokens on unreachable candidates.
+      const selectablePool=initial.pool.filter(item=>availableIds.includes(String(item.premiseId)));
       const frozenScope=slots.map(slot=>String(slot.replacesPremiseId)).sort().join('|');
       let frozen=frozenReselections.get(frozenScope);
       const normalize=(value:unknown)=>{
@@ -6335,7 +6340,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       try{
         const result=await this.llmCallWithRetry<any>(unusedIds?'锁定前原池备用汇总重选':'锁定前原池重选',
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
-          +'\n【原池】'+JSON.stringify(initial.pool)+'\n【当前选择】'+JSON.stringify(selected.selected)
+          +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(selected.selected)
           +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)+'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool可纠正原身份展开。不得复制其它位置、改变分类或用正常项填空。'

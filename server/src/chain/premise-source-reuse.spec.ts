@@ -23,7 +23,7 @@ it('reviews only two changed items, restores all fifty checks and rebinds eviden
  expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
  expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
 });
-it('rechecks unchanged failed evidence without turning rejection into acceptance; invalid and unknown reviews are not cached',async()=>{
+it('reuses only complete failed evidence unchanged, never upgrading a rejection; unknown and invalid reviews remain uncached',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map();
  const review=vi.fn(async pending=>{const r=report(pending),index=pending.selected.findIndex(item=>item.premiseId==='B');
   if(index>=0){
@@ -35,18 +35,39 @@ it('rechecks unchanged failed evidence without turning rejection into acceptance
   }return r;});
  await reviewChangedPremiseSources(input,'standard',cache,review);
  const result=await reviewChangedPremiseSources(input,'standard',cache,review);
- expect(review.mock.calls.map(([pending])=>pending.selected.map(item=>item.premiseId))).toEqual([['A','B','C','D','E'],['B']]);
+ expect(review.mock.calls.map(([pending])=>pending.selected.map(item=>item.premiseId))).toEqual([['A','B','C','D','E']]);
+ expect(cache.size).toBe(5);
  expect(result.passed).toBe(false);expect(result.issues[0].premiseId).toBe('B');
  expect(result.sourceChecks?.find(row=>row.ref==='S2.activeChoice')?.status).toBe('drift');
  const changed=structuredClone(input);changed.selected[1].activeChoice+='新事实';
  await reviewChangedPremiseSources(changed,'standard',cache,review);
- expect(review.mock.calls[2][0].selected.map(item=>item.premiseId)).toEqual(['B']);
+ expect(review.mock.calls[1][0].selected.map(item=>item.premiseId)).toEqual(['B']);
+ expect(cache.size).toBe(6); // the old rejected version is immutable evidence, not a pass
  const missing=vi.fn(async()=>({passed:true,issues:[]}));const empty:PremiseSourceReceipts=new Map();
  await reviewChangedPremiseSources(input,'standard',empty,missing);expect(empty.size).toBe(0);
  const unknown=vi.fn(async pending=>{const r=report(pending);r.sourceChecks![0].status='unknown';return r;});
  const unknownCache:PremiseSourceReceipts=new Map();
  await reviewChangedPremiseSources(input,'standard',unknownCache,unknown);expect(unknownCache.size).toBe(4); // Other four valid premises remain reusable; the unknown A is excluded.
 });
+it('keeps definitive source failure after selection reordering without paying for identical evidence',async()=>{
+ const original=selection(),cache:PremiseSourceReceipts=new Map(),review=vi.fn(async pending=>{
+  const r=report(pending),i=pending.selected.findIndex(row=>row.premiseId==='B');
+  if(i<0)return r;
+  const check=r.sourceChecks!.find(row=>row.ref===`S${i+1}.activeChoice`)!;
+  check.status='drift';check.reason='原池主动选择与当前版本明确互斥，实际不能同时发生';
+  const isolated={...pending,selected:[pending.selected[i]],pool:pending.pool.filter(seed=>seed.premiseId==='B')};
+  r.issues=materializePremiseSourceReview({sourceChecks:r.sourceChecks!.filter(row=>row.ref.startsWith(`S${i+1}.`)).map(row=>({...row,ref:row.ref.replace(`S${i+1}.`,'S1.')}))},isolated).issues;
+  r.passed=false;return r;
+ });
+ await reviewChangedPremiseSources(original,'standards',cache,review);
+ const reversed=structuredClone(original);reversed.selected.reverse();
+ const result=await reviewChangedPremiseSources(reversed,'standards',cache,review);
+ expect(review).toHaveBeenCalledTimes(1);
+ expect(result.passed).toBe(false);
+ expect(result.issues.map(issue=>issue.premiseId)).toContain('B');
+ expect(result.sourceChecks?.find(row=>row.ref==='S4.activeChoice')?.status).toBe('drift');
+});
+
 it('invalidates on source facts, category, standards, genre scope and a new run',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map(),review=vi.fn(async pending=>report(pending));
  await reviewChangedPremiseSources(input,'standards+genres',cache,review);
