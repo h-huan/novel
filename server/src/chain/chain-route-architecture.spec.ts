@@ -50,7 +50,7 @@ describe('chain HTTP architecture', () => {
     // missing decisive actors/conditions were being discovered after expensive reselection.
     expect(source).toContain('没有可信条件就换一条能成立的故事骨架');
     expect(source).toContain('原池缺少必要条件的，不得在展开字段里自造相反事实救活');
-    expect(source).toContain('不能只在人物职业、名字、道具或单个设定上有差异');
+    expect(source).toContain('不准只换职业、场所或物证名称');
     expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
     expect(source).toContain('qualifiedIdeas: acceptedWithAudit, warning, qualityWarning: warning, appealGate');
