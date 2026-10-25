@@ -38,8 +38,7 @@ export function crossStageRepairPlanDirective(obligations:ReturnType<typeof cros
     +'\n先对照被指出的具体反例与原位置：原样保留的旧行动可支持未出错的成果，却不能说明待修缺口已经解决。feasible必须通过实际条件变化排除被指出的反例；仅声称规章禁止、未来会核查或缩小结果口径，都不构成排除。历史时段的记录不能直接证明另一时段，只有实际查证或行动安排覆盖相同时段时才可成立。无法补齐就返回blocked，不回送原文并宣称修复。'
     +'\n【本批路径必须完成的成果】'+JSON.stringify(obligations)
     +'\n【路径机制引用目录，原文见不可修改来源】'+JSON.stringify(sourceEvidenceCatalog(mechanismText).map(({id,path})=>({id,path})))
-    +'\nrepairPlans.actions的anchorId必须引用本次edits同一个E编号，或引用未改动的实际位置；若本次新写动作尚无编号，直接从edits对应replacement逐字取一段至少8字evidence，服务器仅在唯一匹配实际修订位置时回填缺失编号。绝不虚构位置、把拟议设计当实际文本、修改已给出的编号或用原样旧文本冒充解决。'
-    + '\n在同一次回复的edits之前返回repairPlans，每项{ref:"实际P编号",status:"feasible|blocked",mechanismRefs:["实际S编号"],actions:[{anchorId:"实际E编号"}],remainingCounterexamples:["仍无法排除的真实缺口"]}。逐项覆盖上述成果。feasible必须有实际行动并且remainingCounterexamples为空，机制引用只用独立来源；actions只引用实际取得、核验或交付行动的位置编号，不抄写旧原文或另写证据句。服务端从该编号的replacement或未修改原文读取实际候选；位置引用不能自证行动成立，完整候选仍须独立核验实际取得与依赖。edits仅列实际改动，不复制无需修改的位置；未修改行动可支持保留的成果，但不能说明待修缺口已解决。blocked须说明缺口且不返回任何edits；无法形成方案就如实阻断，不拿降级文本充作有效输出。此设计只用于审查，不写入小说正文；后续独立验收仍决定是否通过。';
+    + '\n在同一次回复的edits之前返回repairPlans，每项{ref:"实际P编号",status:"feasible|blocked",mechanismRefs:["实际S编号"],actions:[{anchorId:"实际E编号",evidence:"可选：逐字摘自本次实际edits.replacement的取得行动"}],remainingCounterexamples:["仍无法排除的真实缺口"]}。只有已经写进edits.replacement的新动作漏填anchorId时才返回该动作连续原文evidence；服务端只在唯一实际修订位置能够逐字核对时补齐缺失编号，不得凭设计文字猜编号或改变明确给出的编号。逐项覆盖上述成果。feasible必须有实际行动并且remainingCounterexamples为空，机制引用只用独立来源；actions只引用实际取得、核验或交付行动的位置编号，不抄写旧原文或另写证据句。服务端从该编号的replacement或未修改原文读取实际候选；位置引用不能自证行动成立，完整候选仍须独立核验实际取得与依赖。edits仅列实际改动，不复制无需修改的位置；未修改行动可支持保留的成果，但不能说明待修缺口已解决。blocked须说明缺口且不返回任何edits；无法形成方案就如实阻断，不拿降级文本充作有效输出。此设计只用于审查，不写入小说正文；后续独立验收仍决定是否通过。';
 }
 /** A model may quote an action from its actual edit but omit the E coordinate.
  * Bind only verbatim evidence with ONE matching edited location. Never invent
@@ -54,7 +53,7 @@ export function bindCrossStageRepairActionCoordinates(value:any):any {
    const evidence=action.evidence;
    if(typeof evidence!=='string'||evidence.trim().length<8)continue;
    const matches=value.edits.filter((edit:any)=>typeof edit?.anchorId==='string'
-    && /^E[1-9]\\d*$/.test(edit.anchorId)
+    && /^E[1-9]\d*$/.test(edit.anchorId)
     && typeof edit.replacement==='string'&&edit.replacement.includes(evidence));
    if(matches.length===1)action.anchorId=matches[0].anchorId;
   }
