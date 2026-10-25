@@ -60,6 +60,18 @@ it('rejects edits unrelated to an explicitly cited result when the evidence addr
    .toContain('没有直接修改行动结果审核点名的行动/结果原文');
  expect(chapter.characterActions[0].result).toBe('四瓶摆上了柜台');
 });
+it('decodes verified JSON-escaped audit anchors before checking an exact local result patch',()=>{
+ const chapter={content:'先问周德海。随后当着众人拧开瓶盖。',characterActions:[{
+  action:'她问："药是谁灌进瓶里的？"',result:'老板沉默，仍没有答复'}]};
+ const quote=JSON.stringify(chapter.characterActions[0].action).slice(1,-1);
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+   actionEvidence:quote,resultEvidence:chapter.characterActions[0].result,
+   reason:'质问并未使老板承认事实'}]};
+ const corrected={'characterActions.0.action':'她问："你把药灌进旧饮料瓶卖过吗？"'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,corrected,[],evidence)).toEqual([]);
+ const wrong={'characterActions.0.result':'老板仍然沉默，改口无从证明'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[],evidence)).toEqual([]);
+});
 it('rejects nonempty but unchanged patches before semantic re-review, including reordered object keys',()=>{
  const before=structuredClone(original);
  for(const patch of [{content:original.content},{'characterActions.0.result':original.characterActions[0].result},

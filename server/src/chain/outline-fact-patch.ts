@@ -95,6 +95,14 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
    if(literal&&before.includes(literal))return changeTouchesFragment(before,after,evidenceClause(before,literal));
    const escaped=literal?JSON.stringify(literal).slice(1,-1):'';
    if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,evidenceClause(before,escaped));
+   // Audit anchors retain the JSON-escaped spelling of quoted/newline text,
+   // while chapter leaves contain actual characters. Decode only valid JSON
+   // escapes before declaring an explicit address mismatched.
+   if(literal){try{
+    const decoded=JSON.parse('"'+literal+'"');
+    if(typeof decoded==='string'&&before.includes(decoded))
+     return changeTouchesFragment(before,after,evidenceClause(before,decoded));
+   }catch{}}
    // If the auditor supplies an explicit quote which cannot be found at this
    // address, changing any other text in that field does not repair this gap.
    // Absent quotes still allow whole-field change; independent review remains decisive.
