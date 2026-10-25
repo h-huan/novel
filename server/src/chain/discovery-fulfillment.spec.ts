@@ -1,5 +1,5 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise} from './discovery-fulfillment';
 const assessment=(keys:string[])=>({passed:keys.length===0,issues:[],presentationReview:{titleCompelling:true,openingCompelling:true,distinctFromBatch:true,storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:keys.includes(key)?'weak':'supported',reason:'具体已有缺口'}]))}});
 it('continues beyond two repairs only while independent blocked dimensions strictly improve',async()=>{
  let missing=['A'],credits=8,defects=['click','completion','sharing'];const accepted={id:'already-passed',text:'不可改动'};const before=JSON.stringify(accepted);
@@ -79,4 +79,31 @@ it('reserves full-card review credits and falls back to one replacement without 
  expect(affordableIdeaReplacementCount(2,1,5,grouped)).toBe(1);
  expect(affordableIdeaReplacementCount(2,7,4,n=>n)).toBe(2);
  expect(affordableIdeaReplacementCount(2,7,3,n=>n)).toBe(1);
+});
+
+it('routes an independently evidenced intrinsic sharing-limit to original-pool replacement without a futile same-premise model repair', async()=>{
+ const observed={...assessment(['sharing']),issues:['传播倾向存在已举证薄弱处：门派水权题材较窄，传播面不如其它卡普适。']};
+ observed.presentationReview.readerGoals.sharing.reason='哑奴的代价有记忆点，但仙侠门派水权细节较窄，传播面不如其它卡普适';
+ expect(readerGoalDeficitRequiresNewPremise(observed)).toBe(true);
+ let remaining=['P11'];
+ const repair=vi.fn(),replaceBatch=vi.fn(async()=>{remaining=[];return 'replaced' as const});
+ const result=await fulfillDiscoveryGaps({missing:()=>remaining,hasCard:()=>true,
+  repairEligible:()=>!readerGoalDeficitRequiresNewPremise(observed),
+  canRepair:()=>true,repair,canReplace:()=>true,replaceBatch,fingerprint:()=>JSON.stringify(remaining)});
+ expect(result).toBe('requested_quantity_verified');
+ expect(repair).not.toHaveBeenCalled();
+ expect(replaceBatch).toHaveBeenCalledOnce();
+ expect(replaceBatch).toHaveBeenCalledWith(['P11']);
+});
+it('does not overgeneralize intrinsic sharing limitations to an improvable opening or actual story incoherence',()=>{
+ const weak={...assessment(['sharing'])};
+ weak.presentationReview.readerGoals.sharing.reason='开头未把人物选择与受害亲属的实际影响展示清楚';
+ expect(readerGoalDeficitRequiresNewPremise(weak)).toBe(false);
+ const nonSharing=assessment(['click']);
+ nonSharing.presentationReview.readerGoals.click.reason='只在介绍背景，首屏没有现实利益冲突';
+ expect(readerGoalDeficitRequiresNewPremise(nonSharing)).toBe(false);
+ const noCausal={...assessment(['sharing'])};
+ noCausal.presentationReview.readerGoals.sharing.reason='仙侠门派水权细节较窄，传播面不如其它卡普适';
+ noCausal.presentationReview.storyCoherent=false;
+ expect(readerGoalDeficitRequiresNewPremise(noCausal)).toBe(false);
 });

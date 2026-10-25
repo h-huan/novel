@@ -18,6 +18,25 @@ export function discoveryFailureImproved(before:any,after:any){
  return prior.length>0&&next.length<prior.length&&next.every(key=>prior.includes(key));
 }
 
+/** An explicitly evidenced intrinsic audience limitation cannot be changed by
+ * wording-only edits of an immutable premise. It must compete as another
+ * original-pool candidate under the same independent source, overlap and
+ * presentation gates. Other sharing weaknesses are still repairable. */
+export function readerGoalDeficitRequiresNewPremise(assessment:any):boolean{
+ const review=assessment?.presentationReview;
+ if(!review||!Array.isArray(review.issues)||review.issues.length) return false;
+ if(!['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit']
+   .every(key=>review[key]===true))return false;
+ const goals=review.readerGoals;
+ if(!goals||goals.sharing?.status!=='weak'||!['click','completion','immersion'].every(key=>goals[key]?.status==='supported'))return false;
+ const reason=String(goals.sharing?.reason||'');
+ // The observed rejection explicitly says that the specific genre's narrow
+ // institutional setting limits shareability. Do not generalize to every weak
+ // sharing goal; a missing relatable hook can be repaired in the same card.
+ return /(?:题材|类型|门派|流派|设定|背景|规则|细节)/.test(reason)
+   && /(?:较窄|小众|不如.+普适|受众.+狭窄|传播面.+窄)/.test(reason);
+}
+
 /** Fit only the positions that can each pay for generation AND the unchanged independent card review. 
  * Never stop a batch of two just because current budget covers only one. */
 export function affordableIdeaReplacementCount(missing:number,pool:number,calls:number,reviewCalls:(count:number)=>number):number{
@@ -32,7 +51,7 @@ export async function fulfillDiscoveryGaps(options:{
  repair:(ids:string[])=>Promise<string[]>;canReplace:()=>boolean;
  replace?:(id:string)=>Promise<'replaced'|'rejected'|'unavailable'>;
  replaceBatch?:(ids:string[])=>Promise<'replaced'|'rejected'|'unavailable'>;
- fingerprint:()=>string;repairScope?:(id:string)=>string;
+ fingerprint:()=>string;repairScope?:(id:string)=>string;repairEligible?:(id:string)=>boolean;
  onError?:(phase:'repair'|'replace',error:unknown)=>void;
 }){
  const stalled=new Set<string>();
@@ -40,7 +59,7 @@ export async function fulfillDiscoveryGaps(options:{
  let replacementCursor=0;
  while(options.missing().length){
   const before=options.fingerprint(),stalledBefore=stalled.size,missing=options.missing();
-  const patchable=missing.filter(id=>!stalled.has(key(id))&&options.hasCard(id));
+  const patchable=missing.filter(id=>!stalled.has(key(id))&&options.hasCard(id)&&(options.repairEligible?.(id)??true));
   if(patchable.length&&options.canRepair(patchable)){
    const repairKeys=new Map(patchable.map(id=>[id,key(id)]));
    let improved=new Set<string>();

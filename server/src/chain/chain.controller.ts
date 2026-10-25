@@ -1,4 +1,4 @@
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
@@ -5905,6 +5905,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         missing:missingAfterGate,hasCard:id=>latestCards.has(id),
         onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
+         repairEligible:id=>!readerGoalDeficitRequiresNewPremise(latestAssessment(id)) || !(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0),
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
         canReplace:()=>reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0,
         fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
