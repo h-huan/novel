@@ -44,3 +44,45 @@ export function applyIdeaReaderGoalRepair(plan:NonNullable<ReturnType<typeof ide
  }
  return next;
 }
+
+
+/** Recover a response that omitted review rows, without judging or rewriting any
+ * already completed row. Only complete, independently verifiable rows are kept.
+ * The existing one protocol retry must review every missing card in full. */
+export function ideaMissingPresentationRowsPlan(value:any,cards:readonly any[],references:readonly any[]=[]){
+ const base=targetIdeaReviews(value,cards,references);
+ if(!Array.isArray(base?.reviews)||!base.reviews.length||base.reviews.length>=cards.length)return null;
+ const seen=new Set<number>();
+ for(const row of base.reviews){
+  const position=row?.position;
+  if(!Number.isInteger(position)||position<1||position>cards.length||seen.has(position)
+    ||row.title!==cards[position-1]?.title)return null;
+  seen.add(position);
+  // Validate each retained row under the ORIGINAL evidence indices first.
+  if(ideaReviewEvidenceReferenceIssues({reviews:[row]},cards).length
+    ||ideaPayoffBridgeIssues({reviews:[row]},cards).length)return null;
+  const rebase=(item:any):any=>Array.isArray(item)?item.map(rebase)
+    :item&&typeof item==='object'?Object.fromEntries(Object.entries(item).map(([key,entry])=>[key,rebase(entry)]))
+    :typeof item==='string'?item.replace(new RegExp('^C'+position+'\\.'),'C1.'):item;
+  const single={...rebase(row),position:1};
+  const resolved=resolveIdeaReviewEvidence({reviews:[single]},[cards[position-1]]);
+  if(presentationReviewIssues(resolved,[cards[position-1]],true).length
+    ||ideaPayoffBridgeIssues({reviews:[single]},[cards[position-1]]).length)return null;
+ }
+ const missing=cards.map((_card,index)=>index+1).filter(position=>!seen.has(position));
+ return missing.length?{base,missing}:null;
+}
+
+export function applyIdeaMissingPresentationRows(plan:NonNullable<ReturnType<typeof ideaMissingPresentationRowsPlan>>,
+ value:any,cards:readonly any[],references:readonly any[]=[]){
+ const patched=targetIdeaReviews(value,cards,references);
+ if(!Array.isArray(patched?.reviews)||patched.reviews.length!==plan.missing.length)
+  throw Error('补齐审查须完整覆盖缺失位置，不能重审已保留结论');
+ const missing=new Set(plan.missing),seen=new Set<number>();
+ for(const row of patched.reviews){
+  if(!row||!missing.has(row.position)||seen.has(row.position)
+    ||row.title!==cards[row.position-1]?.title)throw Error('补齐审查位置未知、重复或篡改原题材');
+  seen.add(row.position);
+ }
+ return {reviews:[...plan.base.reviews,...patched.reviews].sort((a:any,b:any)=>a.position-b.position)};
+}
