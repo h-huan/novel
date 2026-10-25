@@ -78,15 +78,22 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 process.once('exit', stopChildren);
 
-async function backendHealthy() {
+async function readBackendHealth() {
   try {
     const response = await fetch(healthUrl, { signal: AbortSignal.timeout(1500) });
-    if (!response.ok) return false;
+    if (!response.ok) return null;
     const body = await response.json();
-    return body?.status === 'ok';
+    return body?.status === 'ok' ? body : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function backendHealthy() {
+  const health = await readBackendHealth();
+  // A healthy process with a missing/older revision is not our backend.
+  // This same check is required after launching before reporting readiness.
+  return !!localBuildCommit && health?.build?.commit === localBuildCommit;
 }
 
 async function waitForBackend(child) {
@@ -102,9 +109,20 @@ async function waitForBackend(child) {
 }
 
 async function ensureBackend() {
-  if (await backendHealthy()) {
-    console.log('[dev] reuse healthy backend at http://127.0.0.1:3100');
-    return;
+  if (!localBuildCommit) {
+    throw new Error('本地 Git 提交无法确认，不能启动或复用无法识别版本的后端；请检查 git rev-parse HEAD。');
+  }
+  const existing = await readBackendHealth();
+  if (existing) {
+    if (existing.build?.commit === localBuildCommit) {
+      console.log('[dev] reuse verified backend at http://127.0.0.1:3100 (' + localBuildCommit + ')');
+      return;
+    }
+    // Do not kill an unrelated process; this port may host another project.
+    throw new Error('端口3100已存在旧版或未标记版本的后端，当前提交=' + localBuildCommit
+      + '，运行提交=' + (existing.build?.commit || 'unknown')
+      + '，启动时间=' + (existing.build?.processStartedAt || 'unknown')
+      + '。请先关闭旧后端进程再重启，不能复用或覆盖这个端口。');
   }
   if (!fs.existsSync(nestEntry)) {
     throw new Error(`Nest CLI 不存在：${nestEntry}；请先在 server 目录执行 npm ci。`);

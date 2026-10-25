@@ -27,6 +27,16 @@ function run(report) {
   return { result, next, nextMarkdown };
 }
 
+// The development launcher must not reuse a healthy but stale backend.
+// A health response with commit=null is NOT evidence of the loaded source.
+{
+  const launcher = fs.readFileSync(path.join(root, 'desktop', 'scripts', 'dev.js'), 'utf8');
+  assert.match(launcher, /health\?\.build\?\.commit === localBuildCommit/u);
+  assert.match(launcher, /existing\.build\?\.commit === localBuildCommit/u);
+  assert.match(launcher, /端口3100已存在旧版或未标记版本的后端/u);
+  assert.doesNotMatch(launcher, /if \(await backendHealthy\(\)\) \{\s*console\.log\('\[dev\] reuse healthy backend/u);
+}
+
 const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus: 'present' };
 
 // Quick diagnostics must allow one project and preserve the documented behavior.
