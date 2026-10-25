@@ -84,6 +84,7 @@ it('reserves full-card review credits and falls back to one replacement without 
 it('routes an independently evidenced intrinsic sharing-limit to original-pool replacement without a futile same-premise model repair', async()=>{
  const observed={...assessment(['sharing']),issues:['传播倾向存在已举证薄弱处：门派水权题材较窄，传播面不如其它卡普适。']};
  observed.presentationReview.readerGoals.sharing.reason='哑奴的代价有记忆点，但仙侠门派水权细节较窄，传播面不如其它卡普适';
+ observed.issues=[`传播倾向存在已举证薄弱处：${observed.presentationReview.readerGoals.sharing.reason}`];
  expect(readerGoalDeficitRequiresNewPremise(observed)).toBe(true);
  expect(readerGoalDeficitRequiresNewPremise({...observed,issues:[...observed.issues,'篇幅分线合计与总章数不一致']})).toBe(false);
  expect(readerGoalDeficitRequiresNewPremise({...observed,presentationReview:{...observed.presentationReview,issues:['另一项独立证据缺失']}})).toBe(false);
