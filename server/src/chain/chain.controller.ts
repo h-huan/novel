@@ -5708,7 +5708,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
           // 最终吸引力/留存 Gate 只做独立验收：完整题材卡已经来自前置轻量候选池的明确筛选。
           // 这里不得再承担主要选题、换题或质量补生；失败只进入审计并阻断该卡展示。
-          const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType);
+          const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType, presentationReview);
           issues.push(...appealAssessment.issues);
           const uniqueIssues = Array.from(new Set(issues));
           const passed = uniqueIssues.length === 0;

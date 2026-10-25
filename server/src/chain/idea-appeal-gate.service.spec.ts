@@ -294,3 +294,43 @@ describe('IdeaAppealGateService', () => {
     );
   });
 });
+
+it('uses independently verified story progressions instead of rejecting a good bound story for absent connector words',()=>{
+ const premise={premiseId:'P-no-keywords',workingTitle:'楼道尽头的签字',storyCore:'女儿必须查明父亲被错误登记并当场作出选择，交出原始记录会失去自己的职位。',
+   protagonistSituation:'父亲在医院的身份登记被改动，女儿承担家庭开销。',
+   openingEvent:'护士通知父亲已经自愿离院，女儿看到父亲仍在病房。',
+   coreConflict:'女儿要证明父亲仍在院，院方要求她接受登记结果。',
+   activeChoice:'女儿向院方当面提交父亲的原始登记单，要求核对记录。',
+   escalation:'记录编号关联另一位老人，院方拒绝查阅当班交接。',
+   reversalEffect:'女儿拿到交接记录，发现登记错误会让另一户失去照护资格。',
+   payoff:'院方更正登记且通知两户重新核对照护资格，女儿失去岗位。',
+   irreplaceableCarrier:'同一份入院记录分别影响两户老人的照护资格。',
+   secondOrderConsequence:'记录更正使另一户必须重办手续，女儿也失去岗位。',
+   readerQuestion:'女儿能否让院方更正登记，同时保住另一户的照护？'};
+ const card=bindStructuredIdeaCardToPremise(premise,[{
+   title:'父亲还在病房，系统却说他出院了',
+   hook:'护士说父亲已经自愿离院，可他就在病床上。我拿出登记单要求核对，主任拿我的饭碗逼我签字。',
+   description:'我把原始登记单放在窗口，院方拿离院证明驳回。交接记录里的老人名字属于隔壁病房；我向主管当面指出错号，一纸更正会影响两户照护资格。我签下申请，父亲恢复住院记录，另一户重新办理资格，我被停职。',
+   protagonist:'承担家庭开销的女儿',coreConflict:premise.coreConflict,
+   uniquePoint:'一张登记单连接两户老人共同面临的照护资格风险。',
+   mainReversal:'同一编号的交接记录涉及另一户照护资格，女儿必须两户一起纠正。',
+   setting:'医院的住院登记和交接记录同时影响两户资格。',
+   ending:'院方重新核对两户登记并更正错误，女儿因此停职。',
+   scopeBreakdown:[{arc:'核对',chapters:2,reason:'发现登记差异',outcome:'查出两户姓名绑定'},
+    {arc:'抉择',chapters:2,reason:'必须提交更正材料',outcome:'两户分别更正登记并承担代价'}],
+   noveltyProof:{familiarShell:'医院记录误写',uncommonCombination:'两户老人登记编号重合造成照护资格问题',
+    avoidedPatterns:'不是靠万能录音直接曝光解决',irreplaceableWhy:'同一个交接编号必须同时改正两户登记',
+    secondOrderConsequence:'更正完成了，但原来的承诺已经无法照旧履行',
+    readerQuestion:'女儿怎样让两户都得到正确的登记？'}
+ }]);
+ const bare=gate.assess(card,'short_story');
+ expect(bare.issues).toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+ const supported={titleCompelling:true,openingCompelling:true,distinctFromBatch:true,
+  storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],
+  readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:'supported'}]))} as any;
+ const withEvidence=gate.assess(card,'short_story',supported);
+ expect(withEvidence.issues).not.toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+ expect(withEvidence.warnings.some(issue=>issue.includes('词面差异度与推进连接词'))).toBe(true);
+ expect(gate.assess(card,'short_story',{...supported,payoffCredible:false}).issues)
+  .toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+});

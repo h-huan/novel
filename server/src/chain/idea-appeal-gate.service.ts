@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import type { IdeaPresentationVerdict } from './idea-presentation-review';
 
 type StoryType = 'short_story' | 'long_novel';
 type DensityMode = '短篇集中兑现' | '长篇分阶段波动';
@@ -147,7 +148,7 @@ function titleHasStoryAnchor(title: string, evidence: string): boolean {
 
 @Injectable()
 export class IdeaAppealGateService {
-  assess(idea: any, storyType: StoryType): IdeaAppealAssessment {
+  assess(idea: any, storyType: StoryType, independentReview?: IdeaPresentationVerdict): IdeaAppealAssessment {
     const title = normalized(idea?.title);
     const hook = normalized(idea?.hook);
     const description = normalized(idea?.description);
@@ -294,8 +295,18 @@ export class IdeaAppealGateService {
       if (structuredDistinctive === 0) issues.push('结构化题材证据缺少不可替代载体、差异化或二阶后果，题材身份仍不足');
     }
     const minimumProgressions = storyType === 'short_story' ? 2 : 3;
+    // Keyword/transition-marker counts are proxies, not a causal or progression
+    // judgement. An independently evidence-bound, unanimously supported card
+    // must not be rejected solely for avoiding formulaic connector words.
+    const independentlyVerified = independentReview
+      && ['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit']
+        .every(key => (independentReview as any)[key] === true)
+      && Array.isArray(independentReview.issues) && independentReview.issues.length === 0
+      && independentReview.readerGoals && ['click','completion','sharing','immersion']
+        .every(key => (independentReview.readerGoals as any)[key]?.status === 'supported');
     if (boundPremiseEvidence && distinctivenessScore < minDistinctiveness && descriptionProgressions < minimumProgressions) {
-      issues.push('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+      if (independentlyVerified) warnings.push('词面差异度与推进连接词同时偏少，但全部实际故事与四项阅读目标已经通过有原文证据的独立审核；保留代理分数供诊断，不按词面误杀');
+      else issues.push('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
     } else if (distinctivenessScore < minDistinctiveness) {
       warnings.push(`词面差异度代理分偏低（${distinctivenessScore}/10）；单项分数只用于排序/复核，与阶段推进同时偏弱时才阻断`);
     }
