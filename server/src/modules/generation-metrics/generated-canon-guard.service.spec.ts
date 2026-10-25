@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GeneratedCanonGuardService } from './generated-canon-guard.service';
+import { qualityStage } from '../../routing/scenario-taxonomy';
 
 describe('GeneratedCanonGuardService', () => {
   const projectRow = {
@@ -107,5 +108,32 @@ describe('GeneratedCanonGuardService', () => {
     expect(() => service.assertStructuredCanCommit({
       projectId: 'project-1', runId: 'run-1', expectedStages: ['world'],
     })).toThrow('阶段不匹配');
+  });
+});
+
+describe('creation outline repair provenance contract', () => {
+  it('attributes the two existing creation fact repairs to outline without widening Canon permissions', () => {
+    for (const stepKey of ['creation_chapter_fact_repair', 'creation_outline_final_fact_repair']) {
+      expect(qualityStage('outline', stepKey)).toBe('outline');
+    }
+    expect(qualityStage('outline', 'creation_chapter_detail')).toBe('outline');
+    expect(qualityStage('world_building', 'world_source_local_repair')).toBe('world');
+    expect(qualityStage('review', 'outline_fact_review')).toBe('outline');
+    expect(qualityStage('review', 'writing_repair')).toBe('refinement');
+    expect(qualityStage('polish', 'refinement')).toBe('refinement');
+  });
+  it('still rejects any refinement-stage run offered as outline evidence', () => {
+    const projectId = 'creation-proof';
+    const row = {
+      id: 'repair-run', project_id: projectId, stage: 'refinement', scenario: 'outline',
+      status: 'success', gate_status: 'not_evaluated', output_text: '{"patch":{}}',
+    };
+    const databaseService = { getDb: () => ({prepare:()=>({get:()=>row})}) } as any;
+    const generationMetrics = {runIsCurrent:()=>true} as any;
+    const guard = new GeneratedCanonGuardService(databaseService,generationMetrics);
+    expect(()=>guard.assertStructuredCanCommit({
+      projectId,runId:'repair-run',expectedStages:['outline'],expectedScenarios:['outline'],
+    })).toThrow('阶段不匹配');
+    expect(qualityStage('outline','creation_outline_final_fact_repair')).toBe('outline');
   });
 });

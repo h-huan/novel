@@ -94,6 +94,11 @@ export function qualityStage(scenario?: string | null, stepKey?: string | null):
   const key = `${scenarioKey} ${step}`;
   if (/world/.test(key)) return 'world';
   if (/character/.test(key) && !/review|repair/.test(key)) return 'character';
+  // Creation-time chapter-detail/final-outline fact patches are source-preserving
+  // outline artifacts. Their provenance must remain 'outline' because the
+  // unchanged Canon guard verifies all pending outline runIds before persistence.
+  // Generic review/polish repairs continue to belong to 'refinement'.
+  if (scenarioKey === 'outline' && /^(?:creation_chapter_fact_repair|creation_outline_final_fact_repair)$/.test(step)) return 'outline';
   if (/outline|organization|foreshadow|timeline/.test(key) && !/repair/.test(key)) return 'outline';
   // A review/repair that belongs to a chapter must use the same bounded context
   // budget and chapter-contract selection as drafting. Previously plain `review`
