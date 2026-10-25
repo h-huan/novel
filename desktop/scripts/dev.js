@@ -78,21 +78,37 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 process.once('exit', stopChildren);
 
-async function backendHealthy() {
+async function backendHealth() {
   try {
     const response = await fetch(healthUrl, { signal: AbortSignal.timeout(1500) });
-    if (!response.ok) return false;
+    if (!response.ok) return null;
     const body = await response.json();
-    return body?.status === 'ok';
+    if (body?.status !== 'ok') return null;
+    return { buildCommit: String(body?.build?.commit || '').trim() };
   } catch {
-    return false;
+    return null;
+  }
+}
+
+// A ready port is not proof that the code currently on disk is running.
+// Never silently reuse a stale or unidentified process for production tests.
+function assertBackendMatchesCurrentCheckout(health) {
+  if (!localBuildCommit) throw new Error('无法核验当前 Git HEAD，不能宣称后端运行的是最新代码');
+  if (health.buildCommit !== localBuildCommit) {
+    throw new Error('端口3100已有后端，但运行提交为 ' + (health.buildCommit || 'unknown')
+      + '，当前工作分支为 ' + localBuildCommit
+      + '。请先关闭旧后端并重新启动；拒绝把旧进程当作新版验收');
   }
 }
 
 async function waitForBackend(child) {
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await backendHealthy()) return;
+    const health = await backendHealth();
+    if (health) {
+      assertBackendMatchesCurrentCheckout(health);
+      return;
+    }
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(`服务端启动进程提前退出（code=${child.exitCode ?? 'null'}, signal=${child.signalCode ?? 'none'}）`);
     }
@@ -102,10 +118,13 @@ async function waitForBackend(child) {
 }
 
 async function ensureBackend() {
-  if (await backendHealthy()) {
-    console.log('[dev] reuse healthy backend at http://127.0.0.1:3100');
+  const existing = await backendHealth();
+  if (existing) {
+    assertBackendMatchesCurrentCheckout(existing);
+    console.log('[dev] reuse verified backend at http://127.0.0.1:3100');
     return;
   }
+  if (!localBuildCommit) throw new Error('无法核验当前 Git HEAD，拒绝以未知构建身份启动后端');
   if (!fs.existsSync(nestEntry)) {
     throw new Error(`Nest CLI 不存在：${nestEntry}；请先在 server 目录执行 npm ci。`);
   }
