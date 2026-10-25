@@ -95,10 +95,10 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
    if(literal&&before.includes(literal))return changeTouchesFragment(before,after,evidenceClause(before,literal));
    const escaped=literal?JSON.stringify(literal).slice(1,-1):'';
    if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,evidenceClause(before,escaped));
-   // Some projected paths are nested inside JSON serialized in a string field.
-   // If the exact anchor cannot be found in that serialization, only field overlap
-   // can be checked locally; the independent semantic review remains authoritative.
-   return true;
+   // If the auditor supplies an explicit quote which cannot be found at this
+   // address, changing any other text in that field does not repair this gap.
+   // Absent quotes still allow whole-field change; independent review remains decisive.
+   return !literal;
   }
   return false;
  };

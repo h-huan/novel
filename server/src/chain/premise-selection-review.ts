@@ -145,6 +145,13 @@ export function normalizePremiseReselection(value: unknown, original: PremiseSel
 }
 
 /** Build repair slots from verified reviews; unaffected selections stay server-owned. */
+/** The identical original pool storyCore and workingTitle are supplied in the
+ * source-review pool section. Omit only those redundant keys from selected
+ * review input; preserve category, expanded facts and all causalPlan links. */
+export function sourceReviewSelectionView(selected: PremiseSelectionResult['selected']) {
+ return selected.map(({storyCore:_source,workingTitle:_title,...expanded})=>expanded);
+}
+
 export function premiseReselectionPlan(original: PremiseSelectionResult, review: PremiseSelectionReview) {
   const affected = new Set(review.issues.map(issue => issue.premiseId));
   const replacementIds = new Set(review.issues.filter(issue => issue.kind === 'overlap' || issue.repairMode === 'replace_from_pool').map(issue => issue.premiseId));

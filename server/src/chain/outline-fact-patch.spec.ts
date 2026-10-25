@@ -49,6 +49,17 @@ it('requires action-result patches to touch the exact cited causal assertion bef
  expect(outlineFactPatchSynchronizationIssues(chapter,targeted,[],evidence)).toEqual([]);
  expect(chapter.characterActions[0].result).toBe('因为她没有站起或没有出声，家里补偿落空');
 });
+it('rejects edits unrelated to an explicitly cited result when the evidence address is wrong',()=>{
+ const chapter={content:'回村时卷帘门已关，没人见到关门动作。',
+  characterActions:[{action:'柳长顺将四瓶摆上柜台',result:'四瓶摆上了柜台'}]};
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'周德海实际上关门',resultEvidence:'他说出了关门原因',
+  reason:'卷帘门已关不证明实际关门者'}]};
+ const unrelated={'characterActions.0.result':'四瓶摆好了，但关门者依旧未知'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[],evidence).join(' '))
+   .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ expect(chapter.characterActions[0].result).toBe('四瓶摆上了柜台');
+});
 it('rejects nonempty but unchanged patches before semantic re-review, including reordered object keys',()=>{
  const before=structuredClone(original);
  for(const patch of [{content:original.content},{'characterActions.0.result':original.characterActions[0].result},

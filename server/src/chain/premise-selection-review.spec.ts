@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
 
@@ -23,6 +23,20 @@ const failure: PremiseSelectionReview = { passed: false, issues: [{ kind: 'overl
   quote: '每次救人自己的存在逐渐消失', referenceQuote: '每次救人自己的存在逐渐消失', reason: '选择与代价及旧签字反转机制同构' }] };
 
 describe('premise selection before identity lock', () => {
+ it('sends each source item only once while retaining every expanded fact and its identity',()=>{
+   const current=selection(), viewed=sourceReviewSelectionView(current.selected);
+   expect(viewed).toHaveLength(current.selected.length);
+   expect(viewed.every(row=>!('storyCore' in row)&&!('workingTitle' in row))).toBe(true);
+   for(let i=0;i<viewed.length;i++) {
+     expect(viewed[i].premiseId).toBe(current.selected[i].premiseId);
+     expect(viewed[i].activeChoice).toBe(current.selected[i].activeChoice);
+     for(const [key,value]of Object.entries(current.selected[i])) {
+       if(!['storyCore','workingTitle'].includes(key))expect(viewed[i][key]).toEqual(value);
+     }
+     expect(current.pool[i].storyCore).toBe(current.selected[i].storyCore);
+   }
+ });
+
   it('reviews five-premise sources in one call and preserves every independent field check',async()=>{
     const current=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
       selectedPremises:['A','B','C','D','E'].map(premise)},5,5);
