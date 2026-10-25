@@ -1,11 +1,34 @@
 import { expect, it, vi } from 'vitest';
-import { reviewChapterDependencies, chapterActionRepairEvidence } from './chapter-dependency-review';
+import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { causalEvidenceAnchorOptions } from '../modules/writing-quality/causal-review';
 
 const chapter = { content: '提出新的处理方案', foreshadowingRecover: [{ method: '争议已经解除' }] };
 const factPass = { consistent: true, contradictions: [], ledger: ['既有事实'] };
 const actionGap = () => Object.assign(new Error('行动不足以支持已解决的结果'), {
   gateRejection: true as const, report: { status: 422, topic: 'outline_alignment', sections: ['只有提出方案，没有对方接受或状态改变的证据'] },
+});
+it('local patch evidence uses precisely the same numbered body as the independent action audit',()=>{
+ const raw={chapterFunction:null,content:'进店后她问老板谁放的药，老板一直没有回答。',
+  characterActions:[{character:'老板',action:'他没有回应',result:'当场亲口承认药是他放的'}]};
+ const normalized=planningChapterForCausalReview(raw,3,'climax');
+ const anchors=causalEvidenceAnchorOptions(JSON.stringify([normalized]),{});
+ const result=anchors.find(item=>item.path==='0.characterActions.0.result');
+ const action=anchors.find(item=>item.path==='0.characterActions.0.action');
+ expect(result?.id).toBeTruthy();
+ expect(action?.id).toBeTruthy();
+ const failure=Object.assign(actionGap(),{planningActionAudit:{transitions:[{
+   status:'gap',resultAnchorId:result?.id,actionAnchorId:action?.id,
+   resultEvidence:result?.text,actionEvidence:action?.text,reason:'沉默不能作为承认'}]}});
+ const correct=chapterActionRepairEvidence(normalized,failure);
+ expect(correct.gaps).toEqual([expect.objectContaining({
+   actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+   resultEvidence:result?.text})]);
+ // A raw, non-canonical body is NOT guaranteed to share its serialized
+ // evidence IDs: the server-inserted chapterFunction can change indexes.
+ const wrong=chapterActionRepairEvidence(raw,failure);
+ expect(wrong.gaps[0].resultPath).not.toBe('characterActions.0.result');
+ expect(raw.chapterFunction).toBeNull();
+ expect(normalized.chapterFunction).toBe('climax');
 });
 it('同一候选的两项独立审核并行启动，仍须全部结束才能返回', async () => {
   let releaseFacts!: () => void, releaseActions!: () => void;

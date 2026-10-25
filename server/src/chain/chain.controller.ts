@@ -16,7 +16,7 @@ import { isReviewOutputCapacityError, splitReviewMaterial } from './review-group
 import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective } from './premise-category-fit';
 import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
-import { reviewChapterDependencies, chapterActionRepairEvidence } from './chapter-dependency-review';
+import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
 import { PREMISE_REPLACEMENT_COMPARISON_POLICY, SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
@@ -8295,15 +8295,16 @@ ${(() => {
             currentWorldForOutlineReview, priorOutlineFactLedger,
             [chapterFactsForReview(order, candidate)],
             executionStandardForReview, order + 1, acceptedOutlineSources);
+          const causalReviewChapter=(candidate:Record<string,any>)=>planningChapterForCausalReview(candidate,order+1,expectedChapter.func);
           const reviewChapterActions = (candidate: Record<string, any>) => this.realLLM.validatePlanningActions(projectId,
-            [{ ...candidate, chapterNumber: order + 1, chapterFunction: expectedChapter.func }],
+            [causalReviewChapter(candidate)],
             { chapterResponsibilities: chapterResponsibilityPlan, priorChapters: acceptedOutlineSources,
               priorLedger: priorOutlineFactLedger, world: currentWorldForOutlineReview });
           let dependencyCheck = await reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions);
           let factCheck = dependencyCheck.facts;
           if (!factCheck.consistent || factCheck.contradictions.length || dependencyCheck.actionFailure) {
             const defects = dependencyCheck.defects;
-            const actionRepairEvidence = chapterActionRepairEvidence(chData, dependencyCheck.actionFailure);
+            const actionRepairEvidence = chapterActionRepairEvidence(causalReviewChapter(chData), dependencyCheck.actionFailure);
             const repair = await this.llmCallWithRetry<any>(`第${order + 1}章事实与结果依赖局部修复`,
               `只修复当前章纲被事实与行动结果审查逐项点名的缺口。两类检查共享本章仅一次局部修复，不因新增审查再开修复循环。已确认题材与前章事实优先，世界观只能作不冲突的补充。不得删除本章职责、不得新增人物、不得换故事。
 【确认题材】${canonicalCreativeBrief}
