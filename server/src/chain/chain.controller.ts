@@ -112,7 +112,7 @@ import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout, type Ha
 import { assessHardlineRepairProgress } from './hardline-repair-progress';
 import { detectSourceCountdownRisk } from './source-countdown-consistency';
 import { describeWorldSourceCandidate } from './source-rule-consistency';
-import { buildWorldSourceReviewPrompt, describeWorldSourceReview, materializeWorldSourceReview, applyUncommittedWorldPatch, worldSourceAnchors, worldReviewFailureOrigin, type WorldSourceReview } from './world-source-review';
+import { buildWorldSourceReviewPrompt, describeWorldSourceReview, materializeWorldSourceReview, applyUncommittedWorldPatch, worldSourceAnchors, worldCreationAuthority, worldReviewFailureOrigin, type WorldSourceReview } from './world-source-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
 import { buildStoryFoundation } from '../modules/canon/canon-policy';
 import {
@@ -7636,13 +7636,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         this.isProjectLongNovel(projectId),
       ).target.openingHookChars;
       const chapterCreationParameters = `【本次章纲参数】${JSON.stringify({ projectType:constitution.projectType, openingHookChars:shortOpenHookChars })}`;
+      const worldAuthority = worldCreationAuthority(dto.selectedIdea, constitution);
       const canonicalCreativeBrief = JSON.stringify({
         title: dto.title,
         type: dto.storyType,
         targetWords: dto.targetWords,
         platform: constitution.targetPlatform,
-        projectCard: constitution,
-        confirmedStory: dto.selectedIdea,
+        projectCard: worldAuthority.constitution,
+        confirmedStory: worldAuthority.confirmedStory,
         storyFoundation,
       });
       let completeOutlineFactsReviewed = false;
@@ -7722,7 +7723,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
           const originalWorldCandidate=structuredClone(worldCandidate);
           activeFailureOrigin = 'source_review_incomplete';
           let sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
-            { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
+            worldAuthority, '世界观主记录', worldCandidate, executionStandardForReview);
           if (!sourceReview.consistent) {
             activeFailureOrigin = 'source_repair_contract';
             const repair = await this.llmCallWithRetry<any>('世界观上层事实修复',
@@ -7735,7 +7736,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
             worldCandidateRunId = repair.runId;
             activeFailureOrigin = 'source_review_incomplete';
             sourceReview = await this.reviewChildSource(projectId, '已确认题材与创作设定',
-              { confirmedStory: dto.selectedIdea, constitution }, '世界观主记录', worldCandidate, executionStandardForReview);
+              worldAuthority, '世界观主记录', worldCandidate, executionStandardForReview);
           }
           if (!sourceReview.consistent) {
             activeFailureOrigin = 'source_review_rejected';
