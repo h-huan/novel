@@ -40,7 +40,7 @@ import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosi
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, type IdeaPresentationVerdict } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -5906,28 +5906,60 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
-        canReplace:()=>availableOriginalPool().length>0&&reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&presentationBudget.remaining>=1+minimumCardReviewCalls(1),
+        canReplace:()=>availableOriginalPool().length>0&&reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&presentationBudget.remaining>=2,
         fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
-        replace:async id=>{
-          const position=selectedPremises.findIndex(item=>String(item.premiseId)===id),premise=selectedPremises[position];
-          if(!premise)return 'unavailable';
-          const seed=premiseDiscovery.pool.find(item=>String(item.premiseId)===id)!;
-          const review:PremiseSelectionReview={passed:false,issues:[{kind:'selection_fit',premiseId:id,referencePremiseId:id,
-            quote:String(premise.payoff),referenceQuote:String(seed.storyCore),reason:'该位置完整卡尚未合格交付：'+(latestAssessment(id)?.issues||['结构化未完成']).join('；')}]};
+        replaceBatch:async ids=>{
+          // One original-pool selection and one independent source/overlap review
+          // for all outstanding positions. A rejected batch never changes
+          // already accepted cards, and never borrows new model-call credits.
+          const missing=ids.filter(id=>selectedPremises.some(item=>String(item.premiseId)===id));
+          const targets=missing.slice(0,availableOriginalPool().length);
+          if(!targets.length)return 'unavailable';
+          const requiredPresentation=targets.length+minimumCardReviewCalls(targets.length);
+          if(presentationBudget.remaining<requiredPresentation)return 'unavailable';
+          const reviewIssues=targets.map(id=>{
+            const premise=selectedPremises.find(item=>String(item.premiseId)===id)!;
+            const seed=premiseDiscovery.pool.find(item=>String(item.premiseId)===id)!;
+            return {kind:'selection_fit' as const,premiseId:id,referencePremiseId:id,
+              quote:String(premise.payoff),referenceQuote:String(seed.storyCore),
+              reason:'该位置完整卡尚未合格交付：'+(latestAssessment(id)?.issues||['结构化未完成']).join('；')};
+          });
+          const review:PremiseSelectionReview={passed:false,issues:reviewIssues};
           const original={...premiseDiscovery,selected:[...attemptedPremiseIds].map(premiseId=>({premiseId}))};
-          const reserve=await this.reservePremiseSelection(original,{...premiseDiscovery,selected:selectedPremises},review,requestedCount,premisePoolSize,discoveryCategories,
+          const reserve=await this.reservePremiseSelection(original,{...premiseDiscovery,selected:selectedPremises},
+            review,requestedCount,premisePoolSize,discoveryCategories,
             buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n【与完整卡一致的分类标准】'+JSON.stringify(categoryStandards)+premiseCategoryIdentityDirective(discoveryCategories)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
             reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget);
-          if(reserve.replacementPremiseId)attemptedPremiseIds.add(reserve.replacementPremiseId);
-          fulfillmentActions.push({kind:'original_pool_replacement',replaces:id,...reserve});
+          for(const entry of reserve.replacements||[])attemptedPremiseIds.add(entry.replacementPremiseId);
+          fulfillmentActions.push({kind:'original_pool_replacement',replaces:targets,...reserve});
           if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}
           if(!reserve.attempted)return 'unavailable';
           if(!reserve.review.passed)return 'rejected';
-          const next=reserve.selection.selected[position];selectedPremises[position]=next;
-          selectedCategoryById.set(String(next.premiseId),String(next.storyCategory||dto.storyCategory));
-          const card=await generateStructuredCard(next,position);structuredCards.push(card);latestCards.set(String(next.premiseId),card);
-          await accept([card],'initial');return 'replaced';
-        },
+          const newPremises=reserve.replacements.map(entry=>{
+            const position=selectedPremises.findIndex(item=>String(item.premiseId)===entry.replacesPremiseId);
+            return {position,premise:reserve.selection.selected[position]};
+          });
+          if(newPremises.some(item=>item.position<0||!item.premise))throw Error('汇总换选返回未知槽位，未接纳任何完整卡');
+          for(const {position,premise} of newPremises){
+            selectedPremises[position]=premise;
+            selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
+          }
+          const replacementCards:Record<string,unknown>[]=[];
+          for(const {position,premise} of newPremises){
+            try {
+              const card=await generateStructuredCard(premise,position);
+              replacementCards.push(card);structuredCards.push(card);latestCards.set(String(premise.premiseId),card);
+            }catch(error){
+              const detail=error instanceof Error?error.message:String(error);
+              const premiseId=String(premise.premiseId);
+              structuringErrors.push({sourcePremiseId:premiseId,error:detail});
+              candidateAssessments.push({sourcePremiseId:premiseId,attempt:'initial',passed:false,issues:[detail]});
+              rejectedReasons.push(detail);
+            }
+          }
+          if(replacementCards.length)await accept(replacementCards,'initial');
+          return 'replaced';
+},
       });}catch(error){finalGateRepairError=String((error as Error).message);fulfillmentStopReason='completion_unavailable';}
       const acceptedUniqueCount = new Set(accepted.map(card=>String(card?.sourcePremiseId||'').trim()).filter(Boolean)).size;
       if (acceptedUniqueCount >= minimumDeliverableCount && acceptedUniqueCount < requestedCount) {
@@ -6412,69 +6444,84 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     current: ReturnType<typeof normalizePremiseSelectionPayload>, review: PremiseSelectionReview,
     requestedCount: number, poolTarget: number, categories: readonly string[], standard: string,
     repairBudget: { remaining: number }, protectedIds: readonly string[], requiredGenres:readonly string[]=[], sharedReviewBudget?:{remaining:number}) {
-    const plan = premiseReserveReselectionPlan(initial, current, review, protectedIds);
-    const unchanged = { selection: current, review, attempted: false, error: null as string | null,
-      replacesPremiseId: plan?.replacesPremiseId, replacementPremiseId: undefined as string | undefined,
-      physicalCallBudgetUsed: 0 };
-    if (!plan || repairBudget.remaining <= 0) return unchanged;
+    const retained=retainReviewedPremises(current,review,protectedIds);
+    const failedIds=retained.excludedPremiseIds.filter(id=>current.selected.some(item=>String(item.premiseId)===id));
+    const attemptedIds=new Set([...initial.selected,...current.selected].map(item=>String(item.premiseId)));
+    const availableIds=current.pool.map(item=>String(item.premiseId)).filter(id=>!attemptedIds.has(id));
+    const canAttempt=failedIds.length>0&&availableIds.length>=failedIds.length;
+    const unchanged={selection:current,review,attempted:false,error:null as string|null,
+      replacesPremiseId:canAttempt?failedIds[0]:undefined,
+      replacementPremiseId:undefined as string|undefined,
+      replacements:[] as Array<{replacesPremiseId:string;replacementPremiseId:string}>,
+      physicalCallBudgetUsed:0};
+    if(!canAttempt||repairBudget.remaining<=0)return unchanged;
     const budget=repairBudget,reviewBudget=sharedReviewBudget||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
-    // One changed source item and its comparisons against all retained items.
-    const minimumReviewCalls=2;
-    if(reviewBudget.remaining<minimumReviewCalls)return unchanged;
-    const initialSelectionCredits=budget.remaining,initialReviewCredits=reviewBudget.remaining;
-    const used=()=>initialSelectionCredits-budget.remaining+initialReviewCredits-reviewBudget.remaining;
-    const availableIds = plan.availableCandidates.map(item => String(item.premiseId));
-    const normalize = (value: unknown) => {
-      const row = (value as any)?.replacements?.[0];
-      if (row?.replacesPremiseId !== plan.replacesPremiseId || !availableIds.includes(String(row?.premise?.premiseId))) {
-        throw new Error('备用重选只允许使用尚未入选的原池身份替换本次问题位置');
-      }
-      // A reserve replaces one existing failed slot; a previously reviewed partial
-      // selection must not be rejected for still having fewer than requestedCount.
-      // The original final delivery minimum and all independent Gates remain unchanged.
-      const candidate = normalizeTargetedPremiseReselection(value, current, plan.review, requestedCount,
-        poolTarget, categories, current.selected.length);
-      const comparisonIssues = premiseReplacementComparisonIssues(value, candidate);
-      if (comparisonIssues.length) throw new Error(comparisonIssues.join('；'));
+    // The two independent audits cover every changed premise and every affected
+    // pair; they run once per completed batch, not once per missing card.
+    if(reviewBudget.remaining<2)return unchanged;
+    const startingSelection=budget.remaining,startingReview=reviewBudget.remaining;
+    const used=()=>startingSelection-budget.remaining+startingReview-reviewBudget.remaining;
+    const scopedReview:PremiseSelectionReview={passed:false,issues:review.issues.filter(issue=>
+      failedIds.includes(String(issue.premiseId))||issue.kind==='overlap'&&failedIds.includes(String(issue.referencePremiseId)))};
+    const normalize=(value:unknown)=>{
+      const rows=(value as any)?.replacements;
+      if(!Array.isArray(rows)||rows.length!==failedIds.length||
+        new Set(rows.map((row:any)=>String(row?.premise?.premiseId))).size!==failedIds.length||
+        rows.some((row:any)=>!failedIds.includes(String(row?.replacesPremiseId))||
+          !availableIds.includes(String(row?.premise?.premiseId))))
+        throw Error('汇总换选须用未尝试的原池身份一一替换全部缺额，不得重用或伪造身份');
+      const candidate=normalizeTargetedPremiseReselection(value,current,scopedReview,requestedCount,
+        poolTarget,categories,current.selected.length);
+      const comparisonIssues=premiseReplacementComparisonIssues(value,candidate);
+      if(comparisonIssues.length)throw Error(comparisonIssues.join('；'));
       return candidate;
     };
-    let replacementPremiseId: string | undefined;
+    let replacements: Array<{replacesPremiseId:string;replacementPremiseId:string}>=[];
     try {
-      const result = await this.llmCallWithRetry<any>('锁定前原池备用重选',
-        standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
-        + '\n当前只处理列出的一个缺额位置，在共享预算内选择本批尚未尝试的原池成熟候选；不得沿失败身份再改措辞、改写其它位置、扩池或补生。'
-        + '\n【本次仍可换选的原池候选】' + JSON.stringify(plan.availableCandidates)
-        + '\n【当前选择】' + JSON.stringify(current.selected)
-        + '\n【本次终检证据】' + JSON.stringify(review) + '\n【本问题位置】' + plan.replacesPremiseId
-        + '\n【可用备用ID（只能从这里选）】' + JSON.stringify(availableIds) + '\n分类候选=' + JSON.stringify(categories)
-        + '\n【本次comparisons必须恰好覆盖的referencePremiseId】' + JSON.stringify(current.selected.filter(item=>item.premiseId!==plan.replacesPremiseId).map(item=>item.premiseId))
-        + '\n' + PREMISE_REPLACEMENT_COMPARISON_POLICY
-        + '\n整体继承备用骨架的实施者、对象、触发、升级与兑现，逐一比较保留项的真实因果链。'
-        + '\n每个premise额外必返causalPlan，按实际关键环节逐字引用本次筛选字段中的行动、条件、结果；不能沿用已换掉题材的计划。结构示例='+JSON.stringify(premiseCausalPlanExample())
-        + '\n只输出JSON:{"replacements":[{"replacesPremiseId":"本问题位置ID","comparisons":[{"referencePremiseId":"保留项ID","actionDifference":"双方主动选择的实质差别至少12字","escalationDifference":"双方因果升级的实质差别至少12字","reversalDifference":"双方反转改变胜负条件的差别至少12字","consequenceDifference":"双方连带代价的实质差别至少12字"}],"premise":{"premiseId":"可用备用ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际分类K编号"}}]}。恰好一项。',
-        { scenario: 'idea_generate', stepKey: 'idea_premise_pool_reselection', physicalCallBudget: budget,
-          timeout: LLM_TUNABLES.timeoutSimple(),
-          validate: value => { try { normalize(value); return true; } catch { return false; } },
-          describeValidation: value => { try { normalize(value); return []; } catch (error) { return [error instanceof Error ? error.message : String(error)]; } } });
-      const candidate = normalize(result.data);
-      replacementPremiseId = String((result.data as any).replacements[0].premise.premiseId);
+      const result=await this.llmCallWithRetry<any>('锁定前原池备用汇总重选',
+        standard+'\n按已注入GEN-002锁定前继承与差异规则执行。'
+        +'\n只为列出的缺额位置从尚未尝试的同批原池挑选成熟候选；固定保留已通过位置、原始事实及全部独立质量要求。'
+        +'\n【可选原池候选】'+JSON.stringify(current.pool.filter(item=>availableIds.includes(String(item.premiseId))))
+        +'\n【当前选择】'+JSON.stringify(current.selected)
+        +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
+        +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
+        +'\n【最终所有题材的差异合同】'+PREMISE_REPLACEMENT_COMPARISON_POLICY
+        +'\n每张替代题材的causalPlan须引用该题材已写的行动、条件和结果，不得发明缺失条件。'
+        +'\n只输出JSON:{"replacements":[{"replacesPremiseId":"缺额ID","comparisons":[{"referencePremiseId":"其余最终题材ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"升级差别至少12字","reversalDifference":"反转差别至少12字","consequenceDifference":"代价差别至少12字"}],"premise":{"premiseId":"可选原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"实际分类K编号"}}]}；replacements恰好'+failedIds.length+'项，不回传已通过项。',
+        {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:budget,
+          timeout:LLM_TUNABLES.timeoutSimple(),
+          validate:value=>{try{normalize(value);return true;}catch{return false;}},
+          describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String(error instanceof Error?error.message:error)];}}});
+      const candidate=normalize(result.data);
+      replacements=(result.data as any).replacements.map((row:any)=>({
+        replacesPremiseId:String(row.replacesPremiseId),replacementPremiseId:String(row.premise.premiseId)}));
+      const changedIds=replacements.map(row=>row.replacementPremiseId);
+      const changed=candidate.selected.filter(item=>changedIds.includes(String(item.premiseId)));
+      const changedSelection={...candidate,selected:changed,pool:candidate.pool.filter(item=>changedIds.includes(String(item.premiseId)))};
       const limiter=createReviewLimiter(IDEA_CARD_GENERATION_CONCURRENCY);
-      const reviews=await independentReviewBatches(['source_drift','overlap'] as const,reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,
-        (mode,_index,allowance)=>this.reviewPremiseSelection(mode==='source_drift'
-          ? {...candidate,selected:candidate.selected.filter(item=>item.premiseId===replacementPremiseId),pool:candidate.pool.filter(item=>item.premiseId===replacementPremiseId)}
-          : candidate,standard,mode,allowance,false,requiredGenres,limiter,mode==='overlap'?replacementPremiseId:undefined));
-      const sourcePosition=candidate.selected.findIndex(item=>item.premiseId===replacementPremiseId)+1;
-      const sourceChecks = reviews.flatMap(item => item.sourceChecks || []).map(row=>({...row,ref:row.ref.replace(/^S1\./,`S${sourcePosition}.`)}));
-      const retainedKnownIssues=review.issues.filter(issue=>issue.premiseId!==plan.replacesPremiseId
-        &&!(issue.kind==='overlap'&&issue.referencePremiseId===plan.replacesPremiseId));
-      const finalReview = { passed: retainedKnownIssues.length===0&&reviews.every(item => item.passed), issues: [...retainedKnownIssues,...reviews.flatMap(item => item.issues)],
-        ...(sourceChecks.length ? { sourceChecks } : {}),scope:{sourcePremiseIds:[replacementPremiseId],overlapFocusId:replacementPremiseId} };
-      return { selection: candidate, review: finalReview, attempted: true, error: null,
-        replacesPremiseId: plan.replacesPremiseId, replacementPremiseId, physicalCallBudgetUsed: used() };
-    } catch (error) {
-      // Only the already reviewed selection is usable after an incomplete reserve audit.
-      return { ...unchanged, attempted: true, replacementPremiseId,
-        error: '原池换选或独立审核未完成：'+(error instanceof Error ? error.message : String(error)), physicalCallBudgetUsed: used() };
+      const reviews=await independentReviewBatches(['source_drift','overlap'] as const,
+        reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,(mode,_index,allowance)=>
+          this.reviewPremiseSelection(mode==='source_drift'?changedSelection:candidate,
+            standard,mode,allowance,false,requiredGenres,limiter,mode==='overlap'?changedIds:undefined));
+      const sourceChecks=(reviews[0].sourceChecks||[]).map(row=>{
+        const local=Number(/^S(\d+)\./.exec(row.ref)?.[1])-1;
+        const global=candidate.selected.findIndex(item=>String(item.premiseId)===String(changed[local]?.premiseId));
+        if(global<0)throw Error('汇总来源审核编号不属于实际替代题材');
+        return {...row,ref:row.ref.replace(/^S\d+\./,'S'+(global+1)+'.')};
+      });
+      const retainedIssues=review.issues.filter(issue=>!failedIds.includes(String(issue.premiseId))
+        &&!(issue.kind==='overlap'&&failedIds.includes(String(issue.referencePremiseId))));
+      const issues=[...retainedIssues,...reviews.flatMap(row=>row.issues)];
+      const finalReview={passed:issues.length===0&&reviews.every(row=>row.passed),issues,
+        ...(sourceChecks.length?{sourceChecks}:{}),
+        scope:{sourcePremiseIds:changedIds,overlapFocusId:changedIds.length===1?changedIds[0]:changedIds}};
+      return {selection:candidate,review:finalReview,attempted:true,error:null,
+        replacesPremiseId:replacements[0]?.replacesPremiseId,
+        replacementPremiseId:replacements[0]?.replacementPremiseId,replacements,physicalCallBudgetUsed:used()};
+    }catch(error){
+      return {...unchanged,attempted:true,replacementPremiseId:replacements[0]?.replacementPremiseId,
+        replacements,error:'原池换选或独立审核未完成：'+(error instanceof Error?error.message:String(error)),
+        physicalCallBudgetUsed:used()};
     }
   }
 

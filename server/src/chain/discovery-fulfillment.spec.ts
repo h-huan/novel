@@ -14,6 +14,15 @@ it('switches a stalled card to an original-pool candidate and never repairs or r
   canReplace:()=>credits>=2&&rejected.size<2,replace:async id=>{calls.push('replace:'+id);credits--;version++;rejected.add('tried'+version);if(version===1)return 'rejected';missing=[];return 'replaced';},fingerprint:()=>JSON.stringify({missing,credits,version})});
  expect(result).toBe('requested_quantity_verified');expect(calls).toEqual(['repair:bad','replace:bad','replace:bad']);
 });
+it('batches all missing slots into a single replacement request without modifying accepted cards',async()=>{
+ let pending=['B','C'],replacements=0,credits=4;const calls:string[][]=[];
+ const result=await fulfillDiscoveryGaps({missing:()=>pending,hasCard:()=>false,canRepair:()=>false,
+  repair:vi.fn(),canReplace:()=>credits>=2,
+  replaceBatch:async ids=>{calls.push([...ids]);credits-=2;replacements++;pending=[];return 'replaced';},
+  fingerprint:()=>JSON.stringify({pending,credits})});
+ expect(result).toBe('requested_quantity_verified');expect(replacements).toBe(1);
+ expect(calls).toEqual([['B','C']]);expect(credits).toBe(2);
+});
 it('does not pay for a patch when no independent review credit remains',async()=>{
  const repair=vi.fn(),replace=vi.fn();expect(await fulfillDiscoveryGaps({missing:()=>['A'],hasCard:()=>true,canRepair:()=>false,repair,canReplace:()=>false,replace,fingerprint:()=>''})).toBe('budget_or_original_pool_exhausted');
  expect(repair).not.toHaveBeenCalled();expect(replace).not.toHaveBeenCalled();

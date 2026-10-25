@@ -23,7 +23,8 @@ export function discoveryFailureImproved(before:any,after:any){
 export async function fulfillDiscoveryGaps(options:{
  missing:()=>string[];hasCard:(id:string)=>boolean;canRepair:(ids:string[])=>boolean;
  repair:(ids:string[])=>Promise<string[]>;canReplace:()=>boolean;
- replace:(id:string)=>Promise<'replaced'|'rejected'|'unavailable'>;
+ replace?:(id:string)=>Promise<'replaced'|'rejected'|'unavailable'>;
+ replaceBatch?:(ids:string[])=>Promise<'replaced'|'rejected'|'unavailable'>;
  fingerprint:()=>string;repairScope?:(id:string)=>string;
  onError?:(phase:'repair'|'replace',error:unknown)=>void;
 }){
@@ -42,7 +43,11 @@ export async function fulfillDiscoveryGaps(options:{
   }else{
    if(!options.canReplace())return 'budget_or_original_pool_exhausted';
    let outcome:'replaced'|'rejected'|'unavailable'='rejected';
-   try { outcome=await options.replace(missing[replacementCursor++%missing.length]); }
+   try {
+    if(options.replaceBatch)outcome=await options.replaceBatch(missing);
+    else if(options.replace)outcome=await options.replace(missing[replacementCursor++%missing.length]);
+    else throw Error('缺额补齐未配置换选入口');
+   }
    catch(error) { options.onError?.('replace',error); }
    if(outcome==='unavailable')return 'budget_or_original_pool_exhausted';
    // A rejected preselection consumes its identity/allowance but never creates

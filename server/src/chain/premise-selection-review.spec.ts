@@ -709,3 +709,30 @@ it('continues beyond one reserve round using untried original identities and one
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(3);expect(shared.reselection.remaining).toBe(1);
  expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selected[1]).toEqual(input.selected[1]);
 });
+
+it('replaces two missing positions under one source and one overlap review, preserving the passed position',async()=>{
+ const pool=['A','B','C','D','E'].map(premise);
+ const current=normalizePremiseSelectionPayload({pool,selectedPremises:['A','B','C'].map(premise)},3,5);
+ const initial=current,controller=Object.create(ChainController.prototype) as any;
+ const review:PremiseSelectionReview={passed:false,issues:['B','C'].map(premiseId=>({kind:'selection_fit',premiseId,referencePremiseId:premiseId,
+   quote:premise(premiseId).activeChoice,referenceQuote:premise(premiseId).storyCore,reason:'完整卡主线兑现缺失必要条件'}))};
+ const attempts={remaining:2},sources={remaining:2};
+ controller.llmCallWithRetry=vi.fn(async(_step:string,_prompt:string,options:any)=>{
+  const data={replacements:[{replacesPremiseId:'B',premise:premise('D'),comparisons:['A','E'].map(compare)},
+    {replacesPremiseId:'C',premise:premise('E'),comparisons:['A','D'].map(compare)}]};
+  expect(options.validate(data)).toBe(true);attempts.remaining--;return {data};
+ });
+ controller.reviewPremiseSelection=vi.fn(async(selection:any,_standard:string,mode:string,budget:any,_batch:any,_genres:any,_limiter:any,focus:any)=>{
+  budget.remaining--;
+  if(mode==='source_drift')expect(selection.selected.map((p:any)=>p.premiseId)).toEqual(['D','E']);
+  else {expect(selection.selected.map((p:any)=>p.premiseId)).toEqual(['A','D','E']);expect(focus).toEqual(['D','E']);}
+  return {passed:true,issues:[],sourceChecks:[]};
+ });
+ const result=await controller.reservePremiseSelection(initial,current,review,3,5,['悬疑'],'',attempts,['A'],[],sources);
+ expect(result.attempted).toBe(true);expect(result.review.passed).toBe(true);
+ expect(result.replacements).toEqual([{replacesPremiseId:'B',replacementPremiseId:'D'},{replacesPremiseId:'C',replacementPremiseId:'E'}]);
+ expect(result.selection.selected.map((p:any)=>p.premiseId)).toEqual(['A','D','E']);
+ expect(result.selection.selected[0]).toEqual(current.selected[0]);
+ expect(attempts.remaining).toBe(1);expect(sources.remaining).toBe(0);
+ expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+});
