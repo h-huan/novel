@@ -4,9 +4,9 @@ import {WORLD_SOURCE_AUDIT_POLICY} from '../../shared/src/system-workflow-rules.
 /** The confirmed story is already a field of the creation constitution.
  * Give the source reviewer one authoritative copy of its facts, without
  * altering the persisted constitution, platform constraints, or audit ledger. */
-export function worldCreationAuthority(
- confirmedStory:unknown, constitution:Record<string,unknown>,
-):{confirmedStory:unknown;constitution:Record<string,unknown>}{
+export function worldCreationAuthority<T extends {confirmedStory?:unknown}>(
+ confirmedStory:unknown, constitution:T,
+){
  const {confirmedStory:_duplicate, ...standards}=constitution;
  return {confirmedStory,constitution:standards};
 }
