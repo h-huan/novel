@@ -56,5 +56,5 @@ export function premiseCategoryReviewDirective(selection: PremiseSelectionResult
     + '；categoryChecks每个ref恰好一项，返回status=fulfilled|missing|unknown、reason至少8字。'
     + '按上方同一份分类标准检查核心冲突、主动选择及兑现，不能因标签相同、职业背景或附带感情就视为分类成立。'
     + 'fulfilled须提供本题材已选展开的evidenceRef；missing须指出具体分类机制缺失，不改题材或分类。'
-    + (includeEvidenceCatalog ? '\n【已选展开证据目录】' + JSON.stringify(premiseGenreEvidenceCatalog(selection).map(({ id, field, premiseId }) => ({ id, field, premiseId }))) : '\n使用同一请求后面的【流派证据目录：只含已选展开】作为分类evidenceRef的共同编号目录，逐字资料不变。');
+    + (includeEvidenceCatalog ? '\n【已选展开证据目录】' + JSON.stringify(premiseGenreEvidenceCatalog(selection).map(({ id, field, premiseId }) => ({ id, field, premiseId }))) : '\n分类evidenceRef使用本次同一请求中已列出的完整流派字段编号目录，原文、编号与审核规则全部保留，不重复展开。');
 }
