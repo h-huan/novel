@@ -66,7 +66,10 @@ const hasProjectMap = report?.runtime?.projects && typeof report.runtime.project
   && Object.keys(report.runtime.projects).length > 0;
 const projectEntries = hasProjectMap
   ? Object.entries(report.runtime.projects)
-  : report?.runtime?.project ? [['project', { project: report.runtime.project, cockpit: report.runtime.cockpit }]] : [];
+  : report?.runtime?.project ? [['project', {
+    project: report.runtime.project, cockpit: report.runtime.cockpit,
+    firstChapterRun: report.runtime.firstChapterRun, latestRun: report.runtime.latestRun,
+  }]] : [];
 
 for (const [key, result] of projectEntries) {
   const status = String(result?.project?.status || '').toLowerCase();
