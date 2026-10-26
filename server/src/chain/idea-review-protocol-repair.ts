@@ -11,9 +11,14 @@ export function ideaReaderGoalRepairPlan(value:any,cards:readonly any[],referenc
  const withoutGoals={reviews:resolved.reviews.map(({readerGoals,...rest}:any)=>rest)};
  if(presentationReviewIssues(withoutGoals,cards).length||ideaPayoffBridgeIssues(base,cards).length
   ||ideaReviewEvidenceReferenceIssues(base,cards).some(error=>!error.includes('readerGoals.')))return null;
+ const refIssues=ideaReviewEvidenceReferenceIssues(base,cards);
  const targets:{position:number;key:string;previous:any}[]=resolved.reviews.flatMap((row:any)=>{
   const errors=readerGoalReviewIssues(row.readerGoals,ideaReviewCitableNarrativeText(cards[row.position-1]));
-  return Object.keys(READER_GOAL_LABELS).filter(key=>errors.some(error=>error.startsWith(key+'（')))
+  return Object.keys(READER_GOAL_LABELS).filter(key=>
+    errors.some(error=>error.startsWith(key+'（'))
+    // An unknown goal with a broken evidenceRef materializes to quote='', so
+    // the quote validator alone cannot notice its invalid server reference.
+    || refIssues.some(error=>error.startsWith('第'+row.position+'张题材审查：readerGoals.'+key+'.evidenceRef')))
    .map(key=>({position:row.position,key,previous:base.reviews.find((item:any)=>item.position===row.position)?.readerGoals?.[key]}));
  });
  if(!targets.length)return null;
