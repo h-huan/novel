@@ -38,6 +38,16 @@ describe('执行标准种子（story_dict）不变量', () => {
     expect(creativeTagGroup('亲情与利益', '情节与体验')).toBe('主题');
     expect(creativeTagGroup('自建玩法', '情节与体验')).toBe('情节与体验');
   });
+  it('only extends genuinely different themes and preserves author-owned dictionary groups', () => {
+    const added=['野心与底线','规则与人情','归属与离开'];
+    for(const label of added){
+      expect(plots.filter(row=>row.label===label)).toHaveLength(1);
+      expect(creativeTagGroup(label,'情节与体验')).toBe('主题');
+      expect(CREATIVE_TAG_GUIDES[label].length).toBeGreaterThan(24);
+    }
+    expect(STORY_DICT_SEED_VERSION).toBeGreaterThanOrEqual(28);
+    expect(creativeTagGroup('修仙','主题与设定')).toBe('主题与设定');
+  });
   it('内置创作流派都有同源操作定义，自定义值不冒用其他流派定义', () => {
     expect(genres.map(g => g.label)).toEqual(WEB_NOVEL_GENRE_SEED_LABELS);
     for (const genre of genres) expect(dimensionGuide('genre', genre.label)).not.toBe('');
