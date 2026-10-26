@@ -226,7 +226,7 @@ export function resolveOutlineFactEvidence(value:unknown,anchors:OutlineFactAnch
  * This is a generation/repair instruction, not an inferred fact or a new Gate.
  * A later chapter's "three days ago" is NOT the earlier chapter's date. */
 export const OUTLINE_RELATIVE_TIME_SOURCE_RULE =
-  '跨章日期继承：对前章“X天前/后”“昨日”“明日”“三日后”等相对日期，先记录说话所在章节/事件时点，再计算本章事件时点与原事件的间隔；到新章只能保持原事件绝对时点，不能原样复述前章相对数字。比如前章传令当天说“木牌三天前丢了”，三日后的审判如再提同一丢失事件，应写“六天前丢的”或明确“传令那日我说过三天前就丢了”，不能仍按审判当天写“三天前丢的”。这是相对时间换算示例，不得把其中人物、地点或物品加入其它故事。先核对已接受前章和时间台账；若日期间隔尚未建立，不编造天数，用原事件或前次说法作锚点。人物了解信息的时点同理：未实际听见、看见、获告知时，不能写成已经理解并据此行动。当前章content、scenes、characterActions、characterStates应同步表达同一时间与认知状态。';
+  '跨章日期继承：对前章“X天前/后”“昨日”“明日”“三日后”等相对日期，先记录说话所在章节/事件时点，再计算本章事件时点与原事件的间隔；到新章只能保持原事件绝对时点，不能原样复述前章相对数字。比如前章某日说“这件东西三天前丢了”，三日后的审判如再提同一丢失事件，应写“六天前丢的”或明确“传令那日我说过三天前就丢了”，不能仍按审判当天写“三天前丢的”。这是相对时间换算示例，不得把其中人物、地点或物品加入其它故事。先核对已接受前章和时间台账；若日期间隔尚未建立，不编造天数，用原事件或前次说法作锚点。人物了解信息的时点同理：未实际听见、看见、获告知时，不能写成已经理解并据此行动。当前章content、scenes、characterActions、characterStates应同步表达同一时间与认知状态。';
 
 /** Generation consumes the same evidence and history as review and repair. */
 export function buildOutlineContinuityContext(sourceChapters: unknown[], previousLedger: OutlineFactLedgerEntry[], includePolicy = true): string {
