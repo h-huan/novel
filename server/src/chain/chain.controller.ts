@@ -5974,15 +5974,35 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             selectedPremises[position]=premise;
             selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
           }
+          // A batch of independently reviewed replacements has no dependency
+          // between its card structuring calls. Use the SAME bounded scheduler
+          // as initial cards, instead of serially awaiting each replacement.
+          // Reserve the final independent presentation review before dispatch;
+          // each model call consumes the existing shared physical-call budget.
+          const reserveCardReviewCalls=minimumCardReviewCalls(newPremises.length);
+          if(presentationBudget.remaining<newPremises.length+reserveCardReviewCalls)
+            return 'unavailable';
+          presentationBudget.remaining-=reserveCardReviewCalls;
+          let replacementResults:PromiseSettledResult<Record<string,unknown>>[];
+          try {
+            replacementResults=await independentReviewBatches(newPremises,presentationBudget,
+              IDEA_CARD_GENERATION_CONCURRENCY,async({position,premise},_index,budget)=>{
+                try {
+                  return {status:'fulfilled' as const,value:await generateStructuredCard(premise,position,budget)};
+                }catch(reason){return {status:'rejected' as const,reason};}
+              });
+          } finally {
+            presentationBudget.remaining+=reserveCardReviewCalls;
+          }
           const replacementCards:Record<string,unknown>[]=[];
-          for(const [index,{position,premise}] of newPremises.entries()){
-            try {
-              // Protect every not-yet-started card and the final independent review.
-              const reserve=newPremises.length-index-1+minimumCardReviewCalls(newPremises.length);
-              const card=await generateStructuredCard(premise,position,reserveReviewBatchBudget(presentationBudget,reserve));
-              replacementCards.push(card);structuredCards.push(card);latestCards.set(String(premise.premiseId),card);
-            }catch(error){
-              const detail=error instanceof Error?error.message:String(error);
+          for(const [index,{premise}] of newPremises.entries()){
+            const result=replacementResults[index];
+            if(result.status==='fulfilled'){
+              replacementCards.push(result.value);
+              structuredCards.push(result.value);
+              latestCards.set(String(premise.premiseId),result.value);
+            }else{
+              const detail=result.reason instanceof Error?result.reason.message:String(result.reason);
               const premiseId=String(premise.premiseId);
               structuringErrors.push({sourcePremiseId:premiseId,error:detail});
               candidateAssessments.push({sourcePremiseId:premiseId,attempt:'initial',passed:false,issues:[detail]});

@@ -31,6 +31,33 @@ describe('independent review scheduling', () => {
     release[2](); release[0]();
     expect(await running).toEqual([0, 1, 2]); expect(peak).toBe(2); expect(parent.remaining).toBe(3);
   });
+  it('structures independently selected replacement cards together while preserving the separate final-review credit and failed-card identity', async () => {
+    const physical={remaining:5}; // two cards + one review + existing surplus
+    const finalReviewCredits=1;
+    physical.remaining-=finalReviewCredits;
+    let active=0,peak=0;
+    const inputs=[{premiseId:'P7',position:0},{premiseId:'P8',position:2}];
+    const settled=await independentReviewBatches(inputs,physical,2,async(premise,_index,budget)=>{
+      active++;peak=Math.max(peak,active);
+      budget.remaining--;
+      await Promise.resolve();
+      active--;
+      return premise.premiseId==='P8'
+        ? {status:'rejected' as const,reason:new Error('原质量Gate不通过')}
+        : {status:'fulfilled' as const,value:{sourcePremiseId:premise.premiseId}};
+    });
+    physical.remaining+=finalReviewCredits;
+    expect(peak).toBe(2);
+    expect(settled).toMatchObject([
+      {status:'fulfilled',value:{sourcePremiseId:'P7'}},
+      {status:'rejected',reason:expect.any(Error)},
+    ]);
+    expect(physical.remaining).toBe(3);
+    // The reserved final review credit is still available. Unqualified
+    // replacements cannot be silently promoted into the accepted card set.
+    const finished=settled.filter(row=>row.status==='fulfilled').map(row=>row.value.sourcePremiseId);
+    expect(finished).toEqual(['P7']);
+  });
   it('protects every first call from another batch consuming retry surplus', async () => {
     const parent = { remaining: 4 }, used: number[] = [];
     await independentReviewBatches([0, 1, 2], parent, 2, async (item, _index, budget) => {
