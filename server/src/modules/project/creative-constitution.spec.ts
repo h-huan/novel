@@ -36,6 +36,35 @@ describe('creative constitution boundary', () => {
     expect(buildExecutionStandard(loaded).directive).toContain('情节取向「逆袭」');
     expect(buildExecutionStandard(loaded).directive).toContain(fitted.genreFitNote);
   });
+  it('applies existing plot tags as event-level operations without scheduling random payoffs', () => {
+    const c=updateConstitution({}, {
+      targetPlatform:'fanqie',type:'short_story', category:'男频脑洞',
+      storyTone:['紧张'], writingStyle:['口语化'], webNovelGenre:['扮猪吃虎'],
+      plotTags:['悬念反转','打脸回报','人物牺牲','梗'], pov:'第一人称',
+    });
+    const rule=buildExecutionStandard(c).dimensions.find(d=>d.dimension==='genre')!.requirement;
+    expect(rule).toContain('情节取向「悬念反转、打脸回报、人物牺牲、梗」');
+    expect(rule).toContain('前置线索');
+    expect(rule).toContain('既有误判');
+    expect(rule).toContain('人物先拥有可见的目标');
+    expect(rule).toContain('再次出现须带来新作用或反差');
+    expect(rule).toContain('不为凑热血、搞笑、反转、梗或刀点增加未获授权的事件');
+    expect(rule).toContain('扮猪吃虎');
+  });
+  it('inherits a known tone meaning for a plot tag and avoids a second copy if tone already selected', () => {
+    const c=updateConstitution({}, {
+      storyTone:['热血'], plotTags:['热血','搞笑','刀人','自定义原样标签'],
+    });
+    const standard=buildExecutionStandard(c);
+    const plot=standard.dimensions.find(d=>d.dimension==='genre')!.requirement;
+    const tone=standard.dimensions.find(d=>d.dimension==='tone')!.requirement;
+    expect(tone).toContain('靠「立目标—受挫—突破」推进');
+    expect(plot).toContain('情节取向「热血、搞笑、刀人、自定义原样标签」');
+    expect(plot).toContain('笑点来自情境反差');
+    expect(plot).toContain('已投入的关系');
+    expect(plot).not.toContain('热血：靠「立目标—受挫—突破」');
+    expect(plot).not.toContain('自定义原样标签：');
+  });
   it('builds the constitution only from canonical project fields', () => {
     const c = updateConstitution({ settings: '{}' }, { title: 'test', type: 'short_story', targetPlatform: 'zhihu' });
     expect(c).toMatchObject({ projectType: 'short_story', targetPlatform: 'zhihu' });
