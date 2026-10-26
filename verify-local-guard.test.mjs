@@ -67,6 +67,27 @@ function run(report) {
   if (!parser.error) assert.equal(parser.status, 0, 'restart.ps1 PowerShell parser errors: ' + parser.stderr);
 }
 
+// Direct server launchers are also first-class paths. A port occupied by a
+// healthy unverified backend must not cause a new start to silently succeed.
+// The reported commit is captured only after build-freshness validation.
+{
+  const main = fs.readFileSync(path.join(root, 'server', 'src', 'main.ts'), 'utf8');
+  const health = fs.readFileSync(path.join(root, 'server', 'src', 'health', 'health.controller.ts'), 'utf8');
+  const scripts = JSON.parse(fs.readFileSync(path.join(root, 'server', 'package.json'), 'utf8')).scripts;
+  assert.match(scripts['start:dev'], /nest.*start --watch/u);
+  assert.match(scripts['start:prod'], /dist\/src\/main\.js/u);
+  assert.ok(main.indexOf('assertBuildIsFresh();') < main.indexOf('stampLocalCheckoutRevision();'),
+    'do not advertise a checkout commit before confirming compiled output freshness');
+  assert.match(main, /function stampLocalCheckoutRevision\(\): void/u);
+  assert.match(main, /path\.basename\(serverRoot\) !== 'server'/u);
+  assert.match(main, /path\.join\(checkoutRoot, '\.git'\)/u);
+  assert.match(main, /process\.env\.NOVEL_BUILD_COMMIT = commit/u);
+  assert.doesNotMatch(main, /duplicate start skipped|existingNovelServer/u);
+  assert.match(main, /bootstrap\(\)\.then\(\(app\) =>/u);
+  assert.match(health, /this\.buildCommit = process\.env\.NOVEL_BUILD_COMMIT/u);
+  assert.match(health, /commit: this\.buildCommit/u);
+}
+
 const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus: 'present' };
 
 // Quick diagnostics must allow one project and preserve the documented behavior.
