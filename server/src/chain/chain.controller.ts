@@ -6364,9 +6364,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const frozenReselections=new Map<string,Record<string,Record<string,unknown>>>();
     // An optional standby is NOT an accepted premise. Only a fully independent
     // source + causal + category/genre + overlap review may promote its identity.
-    let pendingBackup:ReturnType<typeof normalizePremiseSelectionPayload>|null=null;
+    const pendingBackup={current:null as ReturnType<typeof normalizePremiseSelectionPayload>|null};
     let reselectionStopReason:string|undefined;
-    const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
+    const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>,allowBackup=true):Promise<boolean>=>{
       if(!slots.length)return true;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
       const ids=new Set(slots.map(slot=>slot.replacesPremiseId));
@@ -6384,9 +6384,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // One current and one alternative candidate may share the existing
       // independent source+overlap review, but NEVER consume extra allowances.
       // Keep a spare source credit for a real output-capacity partition.
-      const canReviewBackup=!!unusedIds && slots.length===1 && availableIds.length>=2
+      const canReviewBackup=allowBackup &&!!unusedIds && slots.length===1 && availableIds.length>=2
         &&(!shared||shared.reviews.remaining>=sourceCreditsForTwo+2);
-      pendingBackup=null;
+      pendingBackup.current=null;
       const frozenScope=slots.map(slot=>String(slot.replacesPremiseId)).sort().join('|');
       let frozen=frozenReselections.get(frozenScope);
       const normalize=(value:unknown)=>{
@@ -6439,7 +6439,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               const payload={replacements:result.data.backupReplacements};
               const backup=normalizeTargetedPremiseReselection(payload,selected,scopedReview,
                 requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
-              if(!premiseReplacementComparisonIssues(payload,backup).length)pendingBackup=backup;
+              if(!premiseReplacementComparisonIssues(payload,backup).length)pendingBackup.current=backup;
             }
           }catch{/* Optional candidate has no authority to bypass existing contracts. */}
         }
@@ -6448,7 +6448,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         if(!isReviewOutputCapacityError(error)||slots.length<2)throw error;
         this.logger?.warn('汇总重选遇到输出容量限制，按实际材料体量拆分，所有分块共享原调用预算及完整最终审核');
         for(const part of splitReviewMaterial(slots,slot=>({slot,pool:initial.pool.find(item=>item.premiseId===slot.replacesPremiseId)})))
-          if(!await reselectScope(part,unusedIds))return false;
+          if(!await reselectScope(part,unusedIds,false))return false;
         return true;
       }
     };
@@ -6517,7 +6517,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       }
       const before=selected;
       const completed=await reselectScope(slots,unusedIds);
-      const backup=pendingBackup;pendingBackup=null;
+      const backup=slots.length===1?pendingBackup.current:null;pendingBackup.current=null;
       const primary=selected;
       // The two alternative identities never co-exist in a delivered set.
       // Both are nevertheless compared independently against ALL retained
