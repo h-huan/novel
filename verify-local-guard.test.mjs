@@ -230,6 +230,27 @@ const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus
   assert.match(nextMarkdown, /backend_loaded_revision_mismatch/u);
 }
 
+// Restarting to the correct HEAD must not relabel the persisted older
+// discovery failure as a newly executed check. The historical error stays
+// inspectable, but current-version production verification is still missing.
+{
+  const { result, next } = run({
+    options: { mode: 'diagnostic_latest_short_and_long', fullTests: false, shortProjectId: 'short-1' },
+    runtime: {
+      backendIdentity: { loadedLocalRevision: 'match', processStartedAt: '2026-10-26T05:55:00.000Z', diagnosticsMarkerStatus: 'present' },
+      ideaDiscovery: { available: true, audit: { finishedAt: '2026-10-26T03:52:25.755Z', success: false } },
+      projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } } },
+    },
+    verdict: { status: 'failed', rootCause: 'latest_idea_discovery_failed',
+      failedTests: [], runtimeProblems: ['latest_idea_discovery_failed'] },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(next.verdict.rootCause, 'latest_idea_audit_predates_backend_start');
+  assert.ok(next.verdict.runtimeProblems.includes('latest_idea_discovery_failed'));
+  assert.ok(next.verdict.runtimeProblems.includes('latest_idea_audit_predates_backend_start'));
+  assert.equal(next.runtime.currentRevisionEvidence.ideaDiscovery, 'historical_only');
+}
+
 // A full acceptance with unknown build identity must not claim the current code was tested.
 {
   const { result, next } = run({
