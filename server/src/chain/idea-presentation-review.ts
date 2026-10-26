@@ -84,7 +84,7 @@ export function presentationReviewIssues(value: any, cards: readonly any[], requ
         if (typeof row?.[key] !== 'boolean') issues.push(`${prefix}：${key}必须为布尔值`);
       }
       for (const key of ['storyEvidence', 'payoffEvidence', 'platformEvidence']) {
-        if (!card || !resolveQualityEvidence(fictionNarrativeText(card), row?.[key]).verified) issues.push(`${prefix}：${key}不能连续定位到题材卡原文；必须逐字引用对应卡的hook、setting、description、ending或scopeBreakdown，不得引用executionStandard、分类规则或参考卡，不得改写或拼接`);
+        if (!card || !resolveQualityEvidence(ideaReviewCitableNarrativeText(card), row?.[key]).verified) issues.push(`${prefix}：${key}不能连续定位到题材卡原文；必须逐字引用对应卡的hook、setting、description、ending或scopeBreakdown，不得引用executionStandard、分类规则或参考卡，不得改写或拼接`);
       }
       if (typeof row?.qualityReason !== 'string' || row.qualityReason.trim().length < 8) issues.push(`${prefix}：qualityReason至少8字`);
       if (typeof row?.readerQuestion !== 'string' || row.readerQuestion.trim().length < 8) issues.push(`${prefix}：readerQuestion至少8字`);
