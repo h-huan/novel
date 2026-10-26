@@ -6522,14 +6522,31 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // The two alternative identities never co-exist in a delivered set.
       // Both are nevertheless compared independently against ALL retained
       // peers; source receipts are bound to their separate, immutable pool IDs.
-      const standby=backup?.selected.find(item=>
+      let standby=backup?.selected.find(item=>
         !primary.selected.some(row=>row.premiseId===item.premiseId));
-      if(standby)attemptedIds.add(String(standby.premiseId));
       const auditSelection=standby
         ? {...primary,selected:[...primary.selected,standby]} :primary;
       const changeScope=selectionChangeScope(before,auditSelection);
       if(!changeScope.focusIds.length)break;
-      const independentVerdicts=await reviewBoth(auditSelection,changeScope,finalReview);
+      let independentVerdicts:PremiseSelectionReview;
+      try{
+        independentVerdicts=await reviewBoth(auditSelection,changeScope,finalReview);
+        if(standby)attemptedIds.add(String(standby.premiseId));
+      }catch(error){
+        if(!standby)throw error;
+        // An optional standby must never make a formerly valid primary fail
+        // solely because its *combined* review exceeded output/protocol
+        // capacity. Use existing remaining credits to audit the same primary
+        // through the original two independent Gates; do NOT accept it blind.
+        const primaryScope=selectionChangeScope(before,primary);
+        const grouping=readGenerationBudgets();
+        const sourceCalls=grouping.reviewGroupingMode===0?1:
+          Math.ceil(primaryScope.focusIds.length/grouping.sourceBatchSize);
+        if(shared&&shared.reviews.remaining<sourceCalls+1)throw error;
+        this.logger?.warn('备用题材联合复核未完成，按原有单候选来源和同构Gate复核主方案，不借用质量结论');
+        independentVerdicts=await reviewBoth(primary,primaryScope,finalReview);
+        standby=undefined;
+      }
       if(standby){
         const primaryVerdict=retainPremiseReviewEvidence(auditSelection,independentVerdicts,primary);
         const backupVerdict=retainPremiseReviewEvidence(auditSelection,independentVerdicts,backup!);

@@ -805,6 +805,42 @@ it('accepts only a backup with independent source and overlap approval, in the S
  expect(result.selected.every((row:any)=>row.premiseId!=='D')).toBe(true);
 });
 
+it('falls back to the original two independent source and overlap gates when an OPTIONAL combined standby review fails',async()=>{
+ const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
+   selectedPremises:['A','B'].map(premise)},2,5);
+ const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
+ let failedCombined=false;
+ c.reviewPremiseSelection=vi.fn(async(input:any,_standard:string,mode:string,budget:any)=>{
+   budget.remaining--;
+   if(mode==='overlap')return {passed:true,issues:[]};
+   const identities=input.selected.map((row:any)=>row.premiseId);
+   if(identities.includes('D')&&identities.includes('E')){
+     failedCombined=true;
+     throw Error('额外备用的联合来源审核输出容量不足');
+   }
+   const bad=input.selected.find((row:any)=>row.premiseId==='A'||row.premiseId==='C');
+   return bad?{passed:false,issues:[{kind:'selection_fit',premiseId:bad.premiseId,
+     referencePremiseId:bad.premiseId,quote:bad.activeChoice,
+     referenceQuote:original.pool.find(row=>row.premiseId===bad.premiseId)!.storyCore,
+     reason:'此候选仍缺少必要的结果成立条件'}]}:{passed:true,issues:[]};
+ });
+ let count=0;
+ c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+   options.physicalCallBudget.remaining--;count++;
+   const value=count===1?{replacements:[{replacesPremiseId:'A',premise:premise('C'),comparisons:[compare('B')]}]}
+     :{replacements:[{replacesPremiseId:'C',premise:premise('D'),comparisons:[compare('B')]}],
+       backupReplacements:[{replacesPremiseId:'C',premise:premise('E'),comparisons:[compare('B')]}]};
+   expect(options.validate(value)).toBe(true);return {data:value};
+ });
+ const outcome=await c.reconcilePremiseSelection(original,2,5,['悬疑'],'',[],{
+   reviews:{remaining:12},reselection:{remaining:4}});
+ expect(failedCombined).toBe(true);
+ expect(outcome.selected.map((row:any)=>row.premiseId)).toEqual(['D','B']);
+ expect(outcome.selectionAudit.finalReview.passed).toBe(true);
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
+ expect(c.logger.warn.mock.calls.flat().join(' ')).toContain('按原有单候选');
+});
+
 it('continues beyond one reserve round using untried original identities and one shared allowance',async()=>{
  const input=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),selectedPremises:['A','B'].map(premise)},2,5);
  const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
