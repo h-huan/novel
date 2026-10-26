@@ -416,14 +416,26 @@ if ($Only -in @('all', 'back')) {
   Write-Step "等待后端健康检查：http://127.0.0.1:$BackendPort/api/v1/health"
   $deadline = (Get-Date).AddSeconds($HealthTimeoutSeconds)
   $healthy = $false
+  $reportedBuildCommit = 'unknown'
   do {
     try {
       $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 5 -ErrorAction Stop
-      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) { $healthy = $true; break }
+      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
+        $healthData = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+        $reportedBuildCommit = [string]$healthData.build.commit
+        if ($healthData.status -eq 'ok' -and $reportedBuildCommit -ceq $localBuildCommit) {
+          $healthy = $true
+          break
+        }
+      }
     } catch { }
     Start-Sleep -Seconds 1
   } while ((Get-Date) -lt $deadline)
-  if ($healthy) { Write-Step '后端健康检查通过' } else { Write-Note '后端健康检查超时，请查看 logs/backend.err.log' }
+  if ($healthy) {
+    Write-Step "后端健康检查及提交版本通过：$localBuildCommit"
+  } else {
+    throw "后端未按本次提交就绪：期望 $localBuildCommit，API 报告 $reportedBuildCommit。未启动前端，检查 logs/backend.err.log 和端口占用。"
+  }
 }
 
 # 启动顺序是硬约束：后端未就绪就起前端，前端会在这段时间里反复抛
