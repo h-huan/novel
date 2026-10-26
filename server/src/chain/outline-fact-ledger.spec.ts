@@ -37,7 +37,7 @@ describe('outline fact ledger review contract', () => {
       {order:1,content:'第二日立了抵当字据。'}];
     const original=JSON.stringify(accepted);
     expect(TEMPORAL_FACT_CONTINUITY_POLICY).toContain('跨章复述同一事件');
-    expect(TEMPORAL_FACT_CONTINUITY_POLICY).toContain('事件发生时刻不变');
+    expect(TEMPORAL_FACT_CONTINUITY_POLICY).toContain('两章实际时点换算');
     const embedded=buildOutlineContinuityContext(accepted,[],true);
     const compact=buildOutlineContinuityContext(accepted,[],false);
     expect(embedded).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
