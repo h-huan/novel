@@ -10586,10 +10586,18 @@ ${enrichToneDirective}
         return traits.length ? `- ${traits.join('；')}` : `- ${character.name}（资料待补全）`;
       });
       const nameList = characters.map(c => c.name).filter(Boolean).join('、');
+      // A source card saying "未具名（第一人称我）" is not permission to
+      // invent a surname, nickname or named speaking neighbor for the hero.
+      // The existing downstream alignment Gate still independently verifies
+      // that named roles are within the authorized character inventory.
+      const unnamedProtagonist = characters.some(c => /未具名.*(?:第一人称|[“‘"']我)/u.test(String(c.name || '')));
+      const unnamedNameRule = unnamedProtagonist
+        ? '\n【未具名第一人称主角】角色卡中的“未具名”是姓名尚未确立，不是“可以自行命名”。不得自行给“我”添加“小陈”等带姓称呼、外号、全名；对白中需要称呼时用符合身份的通用称谓，不得通过新增有姓名或台词的邻居/围观者解决场面推进。'
+        : '';
       return `【角色卡·硬约束】
 以下是本项目已生成的全部固定角色，正文必须严格遵守，禁止改名、禁止改身份、禁止改年龄外貌、禁止新增不在此列表中的固定角色。只有路人/背景人物（无姓名、无台词、不推动剧情）允许自由发挥。
 ${cards.join('\n')}
-【出场角色白名单】${nameList}
+【出场角色白名单】${nameList}${unnamedNameRule}
 违反以上任何一条即视为正文不合格。`;
     } catch (error) {
       throw new Error(`角色写作上下文构建失败：${error instanceof Error ? error.message : String(error)}`);
@@ -12042,8 +12050,12 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     };
     const display = (items: any[],actual=true) => items.map((card, index) => ({ position: index + 1, title: card.title, storyType: card.storyType, targetPlatform: card.targetPlatform, storyCategory: card.storyCategory,
       hook: card.hook, coreConflict: card.coreConflict, mainReversal: card.mainReversal, description: card.description,
+      // Existing generated claims must reach the independent reviewer; they
+      // are NOT evidence of their own truth. Compare them to narrative fields.
+      uniquePoint: card.uniquePoint, noveltyProof: card.noveltyProof,
       setting: card.setting, protagonist: card.protagonist, ending: card.ending, scopeBreakdown: card.scopeBreakdown,
-      storyTone: card.storyTone, writingStyle: card.writingStyle, webNovelGenre: card.webNovelGenre, pov: card.pov,
+      storyTone: card.storyTone, writingStyle: card.writingStyle, webNovelGenre: card.webNovelGenre,
+      plotTags: card.plotTags, submissionTags: card.submissionTags, pov: card.pov,
       ...(actual ? {lockedPremise: selectedPremiseEvidenceForIdeaCard(card),
       executionStandard: buildExecutionStandard(readConstitution({ type: card.storyType, target_platform: card.targetPlatform,
         settings: { ...card, customPlatformNote } })).directive} : {}) }));
@@ -12051,6 +12063,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       + '标题应让读者直接感到具体利益冲突、反常关系、危险欲望或迫切未解问题；短意象、道具名和文雅暂名若脱离概要就没有点击动机，应titleCompelling=false。'
       + 'hook应展示命运立即改变的事件、可代入的风险/欲望及主动选择；只写职业查账、比对证据、逐级举报流程不能通过。'
       + '比较同批及参考卡的关系、选择、冲突推进和反转；不要求跨越用户指定分类，但同一职业查案/权力阴谋路径换道具应distinctFromBatch=false。'
+      + '逐张核对uniquePoint、noveltyProof中声称的不可替代组合和记忆点，判断真实hook、description、stage outcome是否存在一次读者能复述的独特选择、冲突场面、关系冲击或带代价的反转；这些自述字段只能当待验证主张，不得替代故事原文证据。只有换职业、换证物、换人名的自证翻案套路，哪怕每张都有不同专业术语，也不得把distinctFromBatch标为true；缺少脱离标题模板仍有点击理由的本故事事件时titleCompelling或openingCompelling须为false。具体热血、幽默、荒诞、反讽等情绪与记忆功能只按本卡选择的storyTone、plotTags及实际事件审核，不要求所有题材都搞笑、热血，也不按标签数量凑资格；标签与正文的实际情绪/行动脱节则platformFit=false，并在issues给出当前标签与真实故事的差距。'
       + 'readerQuestion必须是由实际标题与开篇引发的具体读者追问，不要泛泛问真相是什么；不合格时issues写具体理由和可沿原故事修正的表达。'
       + '还须独立核对storyCoherent（能力触发、边界与代价是否前后一致，人物主动选择和必要因果是否自洽）、payoffCredible（开篇承诺是否由既定选择和代价兑现，不能靠新能力或省略权利/程序条件收束）、platformFit（故事机制是否符合所附平台、分类与流派标准，而非只填标签）。反转不得取消已成立前提，身份、证据与亲属关系不能直接等同法律或程序效果。短篇闭环不要求情绪圆满，更不能一次揭露无条件解决所有冲突。能力的科学来源或幕后起源尚未揭示、悬疑信息暂时保留，不能单独判因果失败，不要求题材卡把全部谜底解释完；必须指出具体互斥事实或兑现结果缺少的必要前提。道具词和意象不能单独判标题失败，要看它是否已经形成可理解的利益、关系、危险或问题。'
       + '按已注入QLT-003核对必要因果、四项阅读目标及题材证据编号。'
