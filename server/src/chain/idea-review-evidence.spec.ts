@@ -6,7 +6,11 @@ import { vi } from 'vitest';
 import { readerGoalReviewIssues } from './reader-goal-review';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { presentationReviewIssues, targetIdeaReviews } from './idea-presentation-review';
-const cards=[{title:'危险订单',hook:'她亲自退回赔款，决定查明停工的原因。',description:'停工让村民没了收入。她借走邻居的车去找负责人。',setting:'负责人下班必须经过唯一的大门。',ending:'她在大门等到了下班的负责人。',scopeBreakdown:[{summary:'负责人拒绝见她，她留在门口等到下班。'}],executionStandard:'非故事执行规则',lockedPremise:{storyCore:'旧胚子事实'}},
+const cards=[{title:'危险订单',
+ uniquePoint:'她退回赔款转身堵唯一的出口，逼负责人当面解释停工',
+ noveltyProof:{uncommonCombination:'唯一出口与主动退回赔款组合，是否有故事支撑须独立审查',avoidedPatterns:'不靠凭空公布证据'},
+ plotTags:['身份错位','打脸回报'],storyTone:['热血'],
+ hook:'她亲自退回赔款，决定查明停工的原因。',description:'停工让村民没了收入。她借走邻居的车去找负责人。',setting:'负责人下班必须经过唯一的大门。',ending:'她在大门等到了下班的负责人。',scopeBreakdown:[{summary:'负责人拒绝见她，她留在门口等到下班。'}],executionStandard:'非故事执行规则',lockedPremise:{storyCore:'旧胚子事实'}},
  {title:'第二张卡',hook:'其他卡真实原文不能作为第一张卡证据。'}];
 describe('server-owned idea evidence references',()=>{
  it('validates the same complete response example included in the production prompt',()=>{
@@ -79,6 +83,12 @@ describe('server-owned idea evidence references',()=>{
   const sharedBudget={remaining:3};let calls=0;
   c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
    expect(prompt).toContain('服务器证据编号目录');
+   expect(prompt).toContain('她退回赔款转身堵唯一的出口');
+   expect(prompt).toContain('唯一出口与主动退回赔款组合');
+   expect(prompt).toContain('打脸回报');
+   expect(prompt).toContain('自述字段只能当待验证主张');
+   // Self-declared novelty may be compared but must never become story evidence.
+   expect(ideaReviewEvidenceCatalog(cards).some(item=>/uniquePoint|noveltyProof/.test(item.field))).toBe(false);
    expect(prompt).toContain(JSON.stringify(ideaReviewResponseExample([cards[0]])));
    expect(options.physicalCallBudget.remaining).toBe(3-calls++);
    expect(options.physicalCallBudget.recoveryWithoutThinking).toBeUndefined();
