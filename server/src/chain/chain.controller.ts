@@ -6533,6 +6533,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if(standby){
         const primaryVerdict=retainPremiseReviewEvidence(auditSelection,independentVerdicts,primary);
         const backupVerdict=retainPremiseReviewEvidence(auditSelection,independentVerdicts,backup!);
+        // Project first, then retain only genuine defects of the individual
+        // alternatives. A mutual primary-vs-backup overlap is not a blocker
+        // because these alternatives can never coexist in a final batch.
+        if(!primaryVerdict.passed)rememberRejected(primaryVerdict);
+        if(!backupVerdict.passed)rememberRejected(backupVerdict);
         if(!primaryVerdict.passed&&backupVerdict.passed){
           selected=backup!;
           finalReview=backupVerdict;

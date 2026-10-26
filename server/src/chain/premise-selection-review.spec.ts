@@ -801,6 +801,8 @@ it('accepts only a backup with independent source and overlap approval, in the S
  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(6);
  expect(shared.reselection.remaining).toBe(2);
  expect(result.selectionAudit.reserve.replacements).toContainEqual({replacesPremiseId:'C',replacementPremiseId:'E'});
+ expect(result.selectionAudit.rejectedHistory.some((row:any)=>row.premiseId==='D')).toBe(true);
+ expect(result.selected.every((row:any)=>row.premiseId!=='D')).toBe(true);
 });
 
 it('continues beyond one reserve round using untried original identities and one shared allowance',async()=>{
