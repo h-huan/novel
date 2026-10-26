@@ -1,4 +1,4 @@
-import { fictionNarrativeText } from '../../shared/src/fiction-naming';
+import { ideaReviewCitableNarrativeText } from './idea-review-evidence';
 import { resolveQualityEvidence } from '../modules/writing-quality/quality-issue';
 import { readerGoalReviewIssues, readerGoalGateIssues, type ReaderGoalReview } from './reader-goal-review';
 
@@ -68,11 +68,11 @@ export function presentationReviewIssues(value: any, cards: readonly any[], requ
   const seen = new Set<number>();
   const issues: string[] = [];
   for (const row of value.reviews) {
-    if (requireReaderGoals || row?.readerGoals !== undefined) issues.push(...readerGoalReviewIssues(row?.readerGoals, fictionNarrativeText(cards[row?.position - 1] || {})).map(issue => '第' + (row?.position ?? '?') + '张题材审查：readerGoals.' + issue));
+    if (requireReaderGoals || row?.readerGoals !== undefined) issues.push(...readerGoalReviewIssues(row?.readerGoals, ideaReviewCitableNarrativeText(cards[row?.position - 1] || {})).map(issue => '第' + (row?.position ?? '?') + '张题材审查：readerGoals.' + issue));
     if (!Number.isInteger(row?.position) || row.position < 1 || row.position > cards.length || seen.has(row.position)
       || row.title !== cards[row.position - 1].title
       || ['titleCompelling', 'openingCompelling', 'distinctFromBatch', 'storyCoherent', 'payoffCredible', 'platformFit'].some(key => typeof row[key] !== 'boolean')
-      || ['storyEvidence', 'payoffEvidence', 'platformEvidence'].some(key => !resolveQualityEvidence(fictionNarrativeText(cards[row.position - 1]), row[key]).verified)
+      || ['storyEvidence', 'payoffEvidence', 'platformEvidence'].some(key => !resolveQualityEvidence(ideaReviewCitableNarrativeText(cards[row.position - 1]), row[key]).verified)
       || typeof row.qualityReason !== 'string' || row.qualityReason.trim().length < 8
       || typeof row.readerQuestion !== 'string' || row.readerQuestion.trim().length < 8
       || !Array.isArray(row.issues) || row.issues.some((issue: any) => typeof issue !== 'string' || !issue.trim())
