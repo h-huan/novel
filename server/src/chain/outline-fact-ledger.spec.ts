@@ -38,6 +38,7 @@ describe('outline fact ledger review contract', () => {
     const prior=JSON.stringify(accepted);
     const prompt=buildOutlineContinuityContext(accepted,[],false);
     expect(prompt).toContain(OUTLINE_RELATIVE_TIME_SOURCE_RULE);
+    expect(prompt).toContain(OUTLINE_RELATIVE_TIME_SOURCE_RULE + '\n【已确认前章原始资料】');
     expect(prompt).toContain('三日后的审判');
     expect(prompt).toContain('六天前丢的');
     expect(prompt).toContain('人物了解信息的时点');
