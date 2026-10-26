@@ -2623,14 +2623,17 @@ ${localPatchContract('hardline_local_replacement')}
         });
       }
       const chapterContract = this.readChapterOutlineContract(dto.projectId, dto.chapterId);
-      // RAG 上下文注入: 检索项目相关的角色和世界观信息
+      // The character whitelist is an authoritative input to BOTH writing
+      // and review. Never silently lose it when optional context assembly fails.
+      const characterContext = this.buildCharacterWritingContext(dto.projectId);
+      if (!characterContext.trim()) {
+        throw new HttpException('本章缺少已确稿角色白名单，已停止正文生成，不能自行命名主角或编造出场人物', 409);
+      }
       let ragContext = '';
       try {
         const stateContext = this.buildWritingStateContext(dto.projectId, dto.chapterNumber);
-        const characterContext = this.buildCharacterWritingContext(dto.projectId);
         const worldContext = this.buildWorldWritingContext(dto.projectId);
         const locationContext = this.buildLocationWritingContext(dto.projectId);
-        if (characterContext) ragContext += `\n${characterContext}`;
         if (worldContext) ragContext += `\n${worldContext}`;
         if (locationContext) ragContext += `\n${locationContext}`;
         if (stateContext.contextText || stateContext.pendingTotal > 0) {
@@ -2642,7 +2645,11 @@ ${localPatchContract('hardline_local_replacement')}
         }
         // 正文生成只使用统一状态管理中的已确稿资料。
         // 旧向量库可能包含未确稿角色/世界观片段，不能直接进入正文提示。
-      } catch { /* RAG失败不影响主流程 */ }
+      } catch (error) {
+        throw new HttpException(
+          '已确稿写作上下文加载失败，停止正文生成而不降级到缺失事实的提示：'
+            + (error instanceof Error ? error.message : String(error)), 409);
+      }
 
       // 自动从数据库组装 outline + chapterContext（前端不传时后端自动补）
       let outline = (dto.outline || {}) as any;
@@ -2700,6 +2707,8 @@ ${localPatchContract('hardline_local_replacement')}
         let prompt = `你正在创作第${targetChapter.chapter_index}章 ${chapterHeading}。
 
 ${this.resolvePlatformToneDirective(dto.projectId)}
+## 本章人物授权（先于正文展开执行）
+${characterContext}
 ## 不可偏离的详细大纲
 ${chapterOutlineText}
 
@@ -2731,7 +2740,7 @@ ${this.authorRevisionRequirements(dto.prompt)}
           chapterIndex: Number(targetChapter.chapter_index),
           chapterTitle: chapterContract.title,
           outlineContract: chapterContract.text,
-          storyContext: this.authorRevisionRequirements(dto.prompt) + confirmedStateText,
+          storyContext: this.authorRevisionRequirements(dto.prompt) + characterContext + confirmedStateText,
           subsequentChapterBoundary: this.buildSubsequentChapterBoundary(dto.projectId, Number(targetChapter.chapter_index)),
           wordRange,
           ...this.chapterRetryParameters(dto.retryRunId,dto.projectId,Number(targetChapter.chapter_index),chapterContract.text),
@@ -4518,11 +4527,14 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
           if (patched) Object.assign(currentOutline, patched);
         }
         const confirmedContext = this.buildWritingStateContext(dto.projectId, chapterRow.chapter_index || 1);
+        const characterContext = this.buildCharacterWritingContext(dto.projectId);
+        if (!characterContext.trim()) {
+          throw new HttpException('本章缺少已确稿角色白名单，已停止正文生成', 409);
+        }
         const confirmedStateContext = [
           confirmedContext.contextText || 'No dynamic state yet.',
           confirmedContext.stateGuard,
           ...confirmedContext.pendingSummary.map(item => `Pending: ${item}`),
-          this.buildCharacterWritingContext(dto.projectId),
           this.buildWorldWritingContext(dto.projectId),
           this.buildLocationWritingContext(dto.projectId),
         ].join('\n');
@@ -4548,6 +4560,8 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
         const streamPrompt = `你正在创作第${chapterRow.chapter_index}章 ${currentOutline?.title || `第${chapterRow.chapter_index}章`}。
 
 ${this.resolvePlatformToneDirective(dto.projectId)}
+        ## 本章人物授权（先于正文展开执行）
+        ${characterContext}
         ## 不可偏离的详细大纲
         ${chapterOutlineText}
 
@@ -4574,7 +4588,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           chapterIndex: Number(chapterRow.chapter_index),
           chapterTitle: String(currentOutline.title || ''),
           outlineContract: this.buildChapterOutlineContext(currentOutline),
-          storyContext: this.authorRevisionRequirements(dto.prompt) + confirmedStateContext,
+          storyContext: this.authorRevisionRequirements(dto.prompt) + characterContext + confirmedStateContext,
           subsequentChapterBoundary: this.buildSubsequentChapterBoundary(dto.projectId, Number(chapterRow.chapter_index)),
           wordRange: this.getChapterWordRange(dto.projectId, currentTargetWords),
           ...this.chapterRetryParameters(dto.retryRunId,dto.projectId,Number(chapterRow.chapter_index),this.buildChapterOutlineContext(currentOutline)),
