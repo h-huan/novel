@@ -40,6 +40,15 @@ export function ideaReviewEvidenceCatalog(cards: readonly any[]): IdeaEvidenceEn
   cards.forEach((card,index)=>fields.forEach(field=>visit(card?.[field],index+1,field)));
   return entries;
 }
+/**
+ * The same server-owned citable narrative must be used by ref binding and
+ * reader-goal literal-quote checks. A reviewer's noveltyProof / uniquePoint,
+ * execution standard, or reference card can inform scrutiny but NEVER prove
+ * the card's own click, completion, sharing or immersion.
+ */
+export function ideaReviewCitableNarrativeText(card: any): string {
+  return ideaReviewEvidenceCatalog([card]).map(entry=>entry.quote).join('\n');
+}
 /** A bad supplied reference cannot fall back to a plausible-looking generated quote. */
 export function resolveIdeaReviewEvidence(value: any, cards: readonly any[]): any {
   if(!Array.isArray(value?.reviews)) return value;
