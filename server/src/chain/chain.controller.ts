@@ -6532,7 +6532,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         +'\n【当前选择】'+JSON.stringify(current.selected)
         +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
         +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
-        +'\n【最终所有题材的差异合同】按已注入GEN-002对应合同执行，全部最终身份仍逐一比较。
+        +'\n【最终所有题材的差异合同】按已注入GEN-002对应合同执行，全部最终身份仍逐一比较。'
         +'\n每张替代题材的causalPlan须引用该题材已写的行动、条件和结果，不得发明缺失条件。'
         +'\n只输出JSON:{"replacements":[{"replacesPremiseId":"缺额ID","comparisons":[{"referencePremiseId":"其余最终题材ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"升级差别至少12字","reversalDifference":"反转差别至少12字","consequenceDifference":"代价差别至少12字"}],"premise":{"premiseId":"可选原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"实际分类K编号"}}]}；replacements恰好'+failedIds.length+'项，不回传已通过项。',
         {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:budget,
