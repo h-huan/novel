@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chapterFactsForReview, buildOutlineFactReviewPrompt, outlineFactReviewNeedsContinuityPolicy, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
-import { buildOutlineContinuityContext, OUTLINE_RELATIVE_TIME_SOURCE_RULE, describeOutlineFactEvidence } from './outline-fact-ledger';
+import { buildOutlineContinuityContext, describeOutlineFactEvidence } from './outline-fact-ledger';
 import { CHAPTER_RESPONSIBILITY_CRITERIA, chapterResponsibilityPlanningDirective } from '../../shared/src';
 import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY } from '../../shared/src/system-workflow-rules.registry';
 
@@ -32,21 +32,24 @@ describe('outline fact ledger review contract', () => {
     expect(getSystemWorkflowRule('CTX-008')!.details).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
     expect(chapterResponsibilityPlanningDirective()).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
   });
-  it('anchors later relative dates and character knowledge to earlier literal facts without touching accepted chapters',()=>{
-    const accepted=[{order:0,content:'传令当天我说木牌三天前就丢了。三日后要审。'},
+  it('shares CTX-008 for chapter-relative dates without duplicating it in a source-only prompt',()=>{
+    const accepted=[{order:0,content:'传令当天我说木牌三天前就丢了，三日后要审。'},
       {order:1,content:'第二日立了抵当字据。'}];
-    const prior=JSON.stringify(accepted);
-    const prompt=buildOutlineContinuityContext(accepted,[],false);
-    expect(prompt).toContain(OUTLINE_RELATIVE_TIME_SOURCE_RULE);
-    expect(prompt).toContain(OUTLINE_RELATIVE_TIME_SOURCE_RULE + '\n【已确认前章原始资料】');
-    expect(prompt).toContain('三日后的审判');
-    expect(prompt).toContain('六天前丢的');
-    expect(prompt).toContain('人物了解信息的时点');
-    expect(prompt).toContain('传令当天我说木牌三天前就丢了');
-    expect(JSON.stringify(accepted)).toBe(prior);
-    expect(buildOutlineContinuityContext([],[],false)).not.toContain(OUTLINE_RELATIVE_TIME_SOURCE_RULE);
-    expect(buildOutlineFactReviewPrompt({canonicalBrief:'{}',world:{},previousLedger:[],sourceChapters:accepted,
-      chapters:[{order:2,content:'第三日审判那天，他又说三天前丢了'}]})).toContain('传令当天我说木牌三天前就丢了');
+    const original=JSON.stringify(accepted);
+    expect(TEMPORAL_FACT_CONTINUITY_POLICY).toContain('跨章复述同一事件');
+    expect(TEMPORAL_FACT_CONTINUITY_POLICY).toContain('事件发生时刻不变');
+    const embedded=buildOutlineContinuityContext(accepted,[],true);
+    const compact=buildOutlineContinuityContext(accepted,[],false);
+    expect(embedded).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+    expect(compact).not.toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+    expect(compact).toContain('按已注入CTX-005、CTX-008');
+    expect(compact).toContain('传令当天我说木牌三天前就丢了');
+    expect(embedded.split(TEMPORAL_FACT_CONTINUITY_POLICY)).toHaveLength(2);
+    expect(JSON.stringify(accepted)).toBe(original);
+    const review=buildOutlineFactReviewPrompt({canonicalBrief:'{}',world:{},previousLedger:[],
+      sourceChapters:accepted,chapters:[{order:2,content:'三日后审判再次提到原事件'}],includePolicy:false});
+    expect(review).toContain('传令当天我说木牌三天前就丢了');
+    expect(review).not.toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
   });
   it('separates group replies from private messages and checks direct positive evidence before blocking creation', () => {
     const prompt = buildOutlineFactReviewPrompt({
