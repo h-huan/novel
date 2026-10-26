@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
 
@@ -13,6 +13,27 @@ const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, s
   escalation: '每次救人自己的存在逐渐消失', reversalEffect: '旧签字构成超自然代价源头', payoff: '承担存在代价使家属获得赔偿',
   irreplaceableCarrier: '职业权限与利益冲突直接绑定', secondOrderConsequence: '救人也让家庭关系不可逆改变',
   readerQuestion: '人物如何承担不可逆选择后果', differentiation: '差异须实际落在选择与兑现中' });
+it('keeps all substantive overlap facts and sources in memory while removing repeated plan quotations from the model input',()=>{
+  const first={...premise('A'),causalPlan:[{action:{field:'activeChoice',quote:'救人需要承担被遗忘的代价A'},
+    conditions:[{field:'escalation',quote:'每次救人自己的存在逐渐消失'}],
+    result:{field:'payoff',quote:'承担存在代价使家属获得赔偿'}}]};
+  const second={...premise('B'),causalPlan:[{action:{field:'activeChoice',quote:'救人需要承担被遗忘的代价B'},
+    conditions:[],result:{field:'payoff',quote:'承担存在代价使家属获得赔偿'}}]};
+  const original=structuredClone([first,second]);
+  const viewed=overlapReviewSelectionView([first,second]);
+  expect(viewed).toHaveLength(2);
+  for(let i=0;i<2;i++){
+    for(const field of ['premiseId','workingTitle','storyCategory','protagonistSituation','openingEvent','coreConflict',
+      'activeChoice','escalation','reversalEffect','payoff','irreplaceableCarrier','secondOrderConsequence','readerQuestion']){
+      expect(viewed[i][field]).toEqual(original[i][field]);
+    }
+    expect(viewed[i]).not.toHaveProperty('storyCore');
+    expect(viewed[i]).not.toHaveProperty('causalPlan');
+  }
+  expect([first,second]).toEqual(original);
+  expect(JSON.stringify(viewed).length).toBeLessThan(JSON.stringify(original).length);
+});
+
 const compare = (referencePremiseId: string) => ({ referencePremiseId,
   actionDifference: '候选主动改变任务路线，保留项通过固定岗位履职推进',
   escalationDifference: '候选每次行动损失已有资源，保留项面临对手逐步升级限制',

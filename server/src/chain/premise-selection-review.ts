@@ -152,6 +152,13 @@ export function sourceReviewSelectionView(selected: PremiseSelectionResult['sele
  return selected.map(({storyCore:_source,workingTitle:_title,...expanded})=>expanded);
 }
 
+/** The overlap reviewer compares selected causal facts, not their already
+ * anchored causalPlan copies or original-pool storyCore. The independent
+ * source/payoff reviewer still receives the full causalPlan and original pool. */
+export function overlapReviewSelectionView(selected: PremiseSelectionResult['selected']) {
+ return selected.map(({storyCore:_source,causalPlan:_plan,...expanded})=>expanded);
+}
+
 export function premiseReselectionPlan(original: PremiseSelectionResult, review: PremiseSelectionReview) {
   const affected = new Set(review.issues.map(issue => issue.premiseId));
   const replacementIds = new Set(review.issues.filter(issue => issue.kind === 'overlap' || issue.repairMode === 'replace_from_pool').map(issue => issue.premiseId));
