@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ideaReviewEvidenceCatalog,resolveIdeaReviewEvidence,ideaReviewEvidenceReferenceIssues,ideaPayoffBridgeIssues } from './idea-review-evidence';
+import { ideaReviewEvidenceCatalog,ideaReviewCitableNarrativeText,resolveIdeaReviewEvidence,ideaReviewEvidenceReferenceIssues,ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { ChainController } from './chain.controller';
 import { presentationGateIssues } from './idea-presentation-review';
 import { vi } from 'vitest';
@@ -49,6 +49,20 @@ describe('server-owned idea evidence references',()=>{
   const entries=ideaReviewEvidenceCatalog(cards);
   expect(entries.find(e=>e.id==='C1.scopeBreakdown[0].summary')?.quote).toBe(cards[0].scopeBreakdown?.[0].summary);
   expect(entries.some(e=>e.field.includes('executionStandard')||e.field.includes('lockedPremise'))).toBe(false);
+ });
+ it('separates seller novelty claims from reader-goal proof even when those claims are sent for review',()=>{
+  const text=ideaReviewCitableNarrativeText(cards[0]);
+  expect(text).toContain(cards[0].hook);
+  expect(text).toContain(cards[0].description);
+  expect(text).not.toContain(cards[0].uniquePoint);
+  expect(text).not.toContain(cards[0].noveltyProof.uncommonCombination);
+  const base=ideaReviewResponseExample([cards[0]]);
+  base.reviews[0].readerGoals.sharing.evidenceRef='C1.uniquePoint';
+  expect(ideaReviewEvidenceReferenceIssues(base,[cards[0]]).join('；')).toContain('readerGoals.sharing.evidenceRef');
+  const direct=structuredClone(ideaReviewResponseExample([cards[0]]));
+  delete (direct.reviews[0].readerGoals.sharing as any).evidenceRef;
+  (direct.reviews[0].readerGoals.sharing as any).quote=cards[0].uniquePoint;
+  expect(presentationReviewIssues(resolveIdeaReviewEvidence(direct,[cards[0]]),[cards[0]],true).join('；')).toContain('sharing（传播倾向）引文不能逐字定位');
  });
  it('fills exact original text while preserving the semantic status and reason',()=>{
   const row={position:1,title:cards[0].title,platformEvidenceRef:'C1.hook',readerGoals:{completion:{status:'weak',evidenceRef:'C1.scopeBreakdown[0].summary',quote:'模型改写的句子',reason:'当前内容没有足够阶段兑现，读完倾向仍需改善'}}};
