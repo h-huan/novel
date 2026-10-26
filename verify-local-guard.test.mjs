@@ -83,7 +83,11 @@ function run(report) {
   assert.match(main, /path\.join\(checkoutRoot, '\.git'\)/u);
   assert.match(main, /process\.env\.NOVEL_BUILD_COMMIT = commit/u);
   assert.doesNotMatch(main, /duplicate start skipped|existingNovelServer/u);
-  assert.match(main, /bootstrap\(\)\.then\(\(app\) =>/u);
+  assert.match(main, /probeExistingNovelServer\(cliPort\)\.then/u);
+  assert.match(main, /return bootstrap\(\);/u);
+  assert.match(main, /当前进程未启动，也没有复用旧进程/u);
+  assert.ok(main.indexOf('probeExistingNovelServer(cliPort).then') < main.indexOf('return bootstrap();'),
+    'check occupied healthy ports before Nest initializes SQLite providers');
   assert.match(health, /this\.buildCommit = process\.env\.NOVEL_BUILD_COMMIT/u);
   assert.match(health, /commit: this\.buildCommit/u);
 }
