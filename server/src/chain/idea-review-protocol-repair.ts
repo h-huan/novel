@@ -1,7 +1,7 @@
-import {fictionNarrativeText} from '../../shared/src/fiction-naming';
+
 import {readerGoalReviewIssues,READER_GOAL_LABELS} from './reader-goal-review';
 import {targetIdeaReviews,presentationReviewIssues} from './idea-presentation-review';
-import {ideaReviewEvidenceReferenceIssues,ideaPayoffBridgeIssues,resolveIdeaReviewEvidence,ideaReviewEvidenceCatalog} from './idea-review-evidence';
+import {ideaReviewEvidenceReferenceIssues,ideaPayoffBridgeIssues,resolveIdeaReviewEvidence,ideaReviewEvidenceCatalog,ideaReviewCitableNarrativeText} from './idea-review-evidence';
 
 /** Reuse the existing single protocol correction, retaining every valid judgment. */
 export function ideaReaderGoalRepairPlan(value:any,cards:readonly any[],references:readonly any[]=[]){
@@ -12,7 +12,7 @@ export function ideaReaderGoalRepairPlan(value:any,cards:readonly any[],referenc
  if(presentationReviewIssues(withoutGoals,cards).length||ideaPayoffBridgeIssues(base,cards).length
   ||ideaReviewEvidenceReferenceIssues(base,cards).some(error=>!error.includes('readerGoals.')))return null;
  const targets:{position:number;key:string;previous:any}[]=resolved.reviews.flatMap((row:any)=>{
-  const errors=readerGoalReviewIssues(row.readerGoals,fictionNarrativeText(cards[row.position-1]));
+  const errors=readerGoalReviewIssues(row.readerGoals,ideaReviewCitableNarrativeText(cards[row.position-1]));
   return Object.keys(READER_GOAL_LABELS).filter(key=>errors.some(error=>error.startsWith(key+'（')))
    .map(key=>({position:row.position,key,previous:base.reviews.find((item:any)=>item.position===row.position)?.readerGoals?.[key]}));
  });
