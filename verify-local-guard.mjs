@@ -35,6 +35,26 @@ if (staleBackend) {
   };
 }
 
+// Persisted "latest" means newest record in SQLite, not a record produced
+// by the running process. After a correct restart the database can still
+// contain the previous backend's failed discovery audit. Preserve that audit,
+// but distinguish historical data from current-revision production evidence.
+const currentBackendStartMs = Date.parse(String(backendIdentity?.processStartedAt || ''));
+const rawDiscoveryAudit = report?.runtime?.ideaDiscovery?.audit ?? report?.runtime?.ideaDiscovery ?? {};
+const previousDiscoveryEndMs = Date.parse(String(rawDiscoveryAudit?.finishedAt || ''));
+const historicalIdeaAudit = backendIdentity?.loadedLocalRevision === 'match'
+  && Number.isFinite(currentBackendStartMs)
+  && Number.isFinite(previousDiscoveryEndMs)
+  && previousDiscoveryEndMs < currentBackendStartMs;
+if (historicalIdeaAudit) {
+  problems.add('latest_idea_audit_predates_backend_start');
+  report.runtime.currentRevisionEvidence = {
+    ...(report.runtime.currentRevisionEvidence || {}),
+    ideaDiscovery: 'historical_only',
+    detail: '最后一轮灵感记录结束于本次后端启动之前；必须在当前版本重新执行，不能用数据库历史记录验证本次修复。',
+  };
+}
+
 if (fullTests && mode !== 'single_project') {
   if (!report?.options?.shortProjectId) problems.add('short_project_missing');
   if (!report?.options?.longProjectId) problems.add('long_project_missing');
@@ -75,6 +95,7 @@ report.verdict = {
   ...(report.verdict || {}),
   status: runtimeProblems.length === 0 && failedTests.length === 0 ? 'passed' : 'failed',
   rootCause: staleBackend ? 'backend_loaded_revision_mismatch'
+    : historicalIdeaAudit ? 'latest_idea_audit_predates_backend_start'
     : runtimeProblems[0] || report?.verdict?.rootCause || null,
   failedTests,
   runtimeProblems,
