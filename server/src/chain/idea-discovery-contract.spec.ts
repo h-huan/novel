@@ -33,6 +33,16 @@ const selectedPremise = (premiseId: string) => ({
   differentiation: '冲突由具体职业责任和不可替换关系共同推动，不靠换名套路',
 });
 
+describe('requested genre is an identity constraint, not a duplicate verdict',()=>{
+  it('keeps the selected genre shell and requires an event-level distinguishing beat without new fields',()=>{
+    const prompt=ideaPremiseSelectionDirective('short_story',5,15);
+    expect(prompt).toContain('隐藏能力、被低估、亮出本事属于应当兑现的共同类型承诺');
+    expect(prompt).toContain('本身不算重复');
+    expect(prompt).toContain('不可互换的关键操作、意外升级、胜负转向和实际代价');
+    expect(prompt).toContain('不要求硬塞热血、搞笑、热梗');
+    expect(prompt).toContain('入选骨架应有至少一个真实事件构成可简短转述的记忆点');
+  });
+});
 describe('idea discovery preselection contract', () => {
   it('allows omitted self-assessed differentiation but keeps every causal field mandatory', () => {
     const item:any=selectedPremise('P1');delete item.differentiation;
