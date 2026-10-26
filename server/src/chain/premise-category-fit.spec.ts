@@ -22,7 +22,7 @@ describe('same-request premise source catalogue transport', () => {
       .map(field=>({id:'S'+(index+1)+'.'+field,field,premiseId:p.premiseId}))));
     expect(full).toContain(catalogue);
     expect(shared).not.toContain(catalogue);
-    expect(shared).toContain('【流派证据目录：只含已选展开】');
+    expect(shared).toContain('已列出的完整流派字段编号目录');
     expect(full).toContain('categoryChecks每个ref恰好一项');
     expect(shared).toContain('categoryChecks每个ref恰好一项');
   });
@@ -32,7 +32,7 @@ describe('same-request premise source catalogue transport', () => {
     const payoffChecks=s.selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'既定行动支撑已写结果且没有缺失条件'}));
     const genreChecks=s.selected.map((_,i)=>({ref:'S'+(i+1)+'.genre1',status:'fulfilled',evidenceRef:'S'+(i+1)+'.activeChoice',reason:'角色行动体现隐藏实力的反制过程'}));
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-      expect((prompt.match(/【流派证据目录：只含已选展开】/gu)||[])).toHaveLength(2); // one directive reference, one real catalogue
+      expect((prompt.match(/【流派证据目录：只含已选展开】/gu)||[])).toHaveLength(1); // only one actual shared catalogue
       expect(prompt).not.toContain('【已选展开证据目录】');
       expect(prompt).toContain('必返genreChecks');
       expect(prompt).toContain('前置分类审核');
