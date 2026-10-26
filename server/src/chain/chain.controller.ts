@@ -6374,9 +6374,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
           +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(selected.selected)
           +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)
-          +(rejectedHistory.some(row=>!ids.has(row.premiseId))
+          +(rejectedHistory.some(row=>!ids.has(row.premiseId)
+              &&!selected.selected.some(item=>String(item.premiseId)===row.premiseId))
             ?'\n【此前独立复核已确认的失败路径（候选不得重用同类缺失条件）】'
-              +JSON.stringify(rejectedHistory.filter(row=>!ids.has(row.premiseId)).slice(-8))
+              +JSON.stringify(rejectedHistory.filter(row=>!ids.has(row.premiseId)
+                &&!selected.selected.some(item=>String(item.premiseId)===row.premiseId)).slice(-8))
             :'')
           +'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
