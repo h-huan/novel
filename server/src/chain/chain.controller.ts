@@ -6362,6 +6362,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     let selected=initial;
     const completedSlots=new Set<string>();
     const frozenReselections=new Map<string,Record<string,Record<string,unknown>>>();
+    // An optional standby is NOT an accepted premise. Only a fully independent
+    // source + causal + category/genre + overlap review may promote its identity.
+    let pendingBackup:ReturnType<typeof normalizePremiseSelectionPayload>|null=null;
     let reselectionStopReason:string|undefined;
     const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
       if(!slots.length)return true;
@@ -6376,6 +6379,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // identities in the full pool cannot be selected, and protected story facts
       // are already in 【当前选择】. Do not spend tokens on unreachable candidates.
       const selectablePool=initial.pool.filter(item=>availableIds.includes(String(item.premiseId)));
+      const grouping=readGenerationBudgets();
+      const sourceCreditsForTwo=grouping.reviewGroupingMode===0?1:Math.ceil(2/grouping.sourceBatchSize);
+      // One current and one alternative candidate may share the existing
+      // independent source+overlap review, but NEVER consume extra allowances.
+      // Keep a spare source credit for a real output-capacity partition.
+      const canReviewBackup=!!unusedIds && slots.length===1 && availableIds.length>=2
+        &&(!shared||shared.reviews.remaining>=sourceCreditsForTwo+2);
+      pendingBackup=null;
       const frozenScope=slots.map(slot=>String(slot.replacesPremiseId)).sort().join('|');
       let frozen=frozenReselections.get(frozenScope);
       const normalize=(value:unknown)=>{
@@ -6407,13 +6418,32 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n每项comparisons须逐一覆盖合并后其余全部最终题材ID，包括本次其它修订项的新ID；不是只比较正常项，也不要沿用已被替换的旧ID。模型须先确定全部最终候选，再核对各项选择、升级、反转、代价的真实区别。'
           +'\n按已注入GEN-002的最终差异比较合同执行。分类候选='+JSON.stringify(categories)
+          +(canReviewBackup?'\n可选备用：在同一个响应中额外提供backupReplacements（恰好一项），替代同一个槽位但必须选取与主replacements不同的未尝试原池ID，并完整提供与主候选相同的字段、因果计划、与其它保留项的比较。它不是新增题材、不是通过结论；两张只会有一张入选且各自须通过独立来源、因果、分类、流派和同构审核。确无成熟备选时省略backupReplacements，不得凑数。':'')
           +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","comparisons":[{"referencePremiseId":"其余最终ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"因果升级差别至少12字","reversalDifference":"胜负条件差别至少12字","consequenceDifference":"连带代价差别至少12字"}],"premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
           {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:reselectionBudget,timeout:LLM_TUNABLES.timeoutSimple(),
             validate:value=>{try{normalize(value);return true;}catch{return false;}},
             describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String((error as Error).message)];}},
             retryInstruction:'按点名的协议问题补正：comparisons错误只补正比较，保留上次全部完整premise和身份；causalPlan错误只补齐计划或纠正指向现有字段的原文锚点，不重写故事来迎合引用。覆盖每个最终候选以外的其它最终ID，不换题，不重写正常项。'});
         if(!result.data){reselectionStopReason='原池重选协议纠正未完成，未处理位置隔离：'+(result.validationIssues||result.warnings||[]).join('；');return false;}
-        selected=normalize(result.data);slots.forEach(slot=>completedSlots.add(String(slot.replacesPremiseId)));return true;
+        const primary=normalize(result.data);
+        if(canReviewBackup&&Array.isArray(result.data.backupReplacements)
+          &&result.data.backupReplacements.length===1){
+          // Invalid OPTIONAL backup cannot turn a valid main replacement into
+          // a protocol retry. Validate identity, original facts and comparisons
+          // with the exact same normalizers used for real replacements.
+          try{
+            const row=result.data.backupReplacements[0],primaryId=String(result.data.replacements[0]?.premise?.premiseId||'');
+            const backupId=String(row?.premise?.premiseId||'');
+            if(row?.replacesPremiseId===slots[0].replacesPremiseId
+              &&backupId&&backupId!==primaryId&&availableIds.includes(backupId)){
+              const payload={replacements:result.data.backupReplacements};
+              const backup=normalizeTargetedPremiseReselection(payload,selected,scopedReview,
+                requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
+              if(!premiseReplacementComparisonIssues(payload,backup).length)pendingBackup=backup;
+            }
+          }catch{/* Optional candidate has no authority to bypass existing contracts. */}
+        }
+        selected=primary;slots.forEach(slot=>completedSlots.add(String(slot.replacesPremiseId)));return true;
       }catch(error){
         if(!isReviewOutputCapacityError(error)||slots.length<2)throw error;
         this.logger?.warn('汇总重选遇到输出容量限制，按实际材料体量拆分，所有分块共享原调用预算及完整最终审核');
@@ -6487,6 +6517,30 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       }
       const before=selected;
       const completed=await reselectScope(slots,unusedIds);
+      const backup=pendingBackup;pendingBackup=null;
+      const primary=selected;
+      // The two alternative identities never co-exist in a delivered set.
+      // Both are nevertheless compared independently against ALL retained
+      // peers; source receipts are bound to their separate, immutable pool IDs.
+      const standby=backup?.selected.find(item=>
+        !primary.selected.some(row=>row.premiseId===item.premiseId));
+      if(standby)attemptedIds.add(String(standby.premiseId));
+      const auditSelection=standby
+        ? {...primary,selected:[...primary.selected,standby]} :primary;
+      const changeScope=selectionChangeScope(before,auditSelection);
+      if(!changeScope.focusIds.length)break;
+      const independentVerdicts=await reviewBoth(auditSelection,changeScope,finalReview);
+      if(standby){
+        const primaryVerdict=retainPremiseReviewEvidence(auditSelection,independentVerdicts,primary);
+        const backupVerdict=retainPremiseReviewEvidence(auditSelection,independentVerdicts,backup!);
+        if(!primaryVerdict.passed&&backupVerdict.passed){
+          selected=backup!;
+          finalReview=backupVerdict;
+        }else{
+          selected=primary;
+          finalReview=primaryVerdict;
+        }
+      }else finalReview=independentVerdicts;
       for(const slot of slots){
         const position=before.selected.findIndex(item=>item.premiseId===slot.replacesPremiseId);
         const replacement=String(selected.selected[position].premiseId);
@@ -6494,11 +6548,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         attemptedIds.add(replacement);
         reserveHistory.push({replacesPremiseId:String(slot.replacesPremiseId),replacementPremiseId:replacement});
       }
-      // Reuse unchanged pair verdicts. Re-review only pairs touched by the new/changed
-      // premises; old findings involving a replaced identity no longer apply to the new set.
-      const changeScope=selectionChangeScope(before,selected);
-      if(!changeScope.focusIds.length)break;
-      finalReview=await reviewBoth(selected,changeScope,finalReview);
       rememberRejected(finalReview);
       if(!completed)break;
     }

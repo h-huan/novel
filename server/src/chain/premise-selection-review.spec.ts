@@ -767,6 +767,42 @@ it('does not buy a third selection when two remaining review credits cannot cove
  expect(c.logger.warn.mock.calls.map(([message]:string[])=>message).join(' ')).toContain('终检预算不足');
 });
 
+it('accepts only a backup with independent source and overlap approval, in the SAME reserve model call',async()=>{
+ const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
+   selectedPremises:['A','B'].map(premise)},2,5);
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.logger={warn:vi.fn(),log:vi.fn()};
+ controller.reviewPremiseSelection=vi.fn(async(selection:any,_standard:string,mode:string,budget:any)=>{
+   budget.remaining--;
+   if(mode==='overlap')return {passed:true,issues:[]};
+   const target=selection.selected.filter((row:any)=>row.premiseId!=='B');
+   const bad=target.find((row:any)=>row.premiseId==='A'||row.premiseId==='C'||row.premiseId==='D');
+   return bad?{passed:false,issues:[{kind:'selection_fit',premiseId:bad.premiseId,
+     referencePremiseId:bad.premiseId,quote:bad.activeChoice,
+     referenceQuote:original.pool.find(row=>row.premiseId===bad.premiseId)!.storyCore,
+     reason:'这个候选无法交代结局的实际必要条件'}]}:{passed:true,issues:[]};
+ });
+ let call=0;
+ controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+   options.physicalCallBudget.remaining--;
+   const data=++call===1?
+     {replacements:[{replacesPremiseId:'A',premise:premise('C'),comparisons:[compare('B')]}]}:
+     {replacements:[{replacesPremiseId:'C',premise:premise('D'),comparisons:[compare('B')]}],
+       backupReplacements:[{replacesPremiseId:'C',premise:premise('E'),comparisons:[compare('B')]}]};
+   expect(options.validate(data)).toBe(true);
+   if(call===2)expect(prompt).toContain('backupReplacements');
+   return {data};
+ });
+ const shared={reviews:{remaining:12},reselection:{remaining:4}};
+ const result=await controller.reconcilePremiseSelection(original,2,5,['悬疑'],'',[],shared);
+ expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['E','B']);
+ expect(result.selectionAudit.finalReview.passed).toBe(true);
+ expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(2);
+ expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(6);
+ expect(shared.reselection.remaining).toBe(2);
+ expect(result.selectionAudit.reserve.replacements).toContainEqual({replacesPremiseId:'C',replacementPremiseId:'E'});
+});
+
 it('continues beyond one reserve round using untried original identities and one shared allowance',async()=>{
  const input=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),selectedPremises:['A','B'].map(premise)},2,5);
  const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
