@@ -18,12 +18,27 @@ export function ideaReaderGoalRepairPlan(value:any,cards:readonly any[],referenc
  });
  if(!targets.length)return null;
  const positions=new Set(targets.map(target=>target.position));
+ // A short citation-only patch is valid ONLY when the earlier verdict already
+ // contains a legal status and reason. Otherwise the model must return its own
+ // actual semantic judgment. A one-size-fits-all evidence-only JSON example
+ // previously caused missing-status repairs to fail after nine minutes.
+ const patchExample={goalPatches:targets.map(target=>{
+  const before=target.previous;
+  const validStatus=before&&['supported','weak','unknown'].includes(before.status);
+  const validReason=typeof before?.reason==='string'&&before.reason.trim().length>=8;
+  return {position:target.position,key:target.key,item:validStatus&&validReason
+   ?{evidenceRef:'C'+target.position+'.description'}
+   :{status:validStatus?before.status:'weak|unknown|supported（按本卡真实证据独立选择）',
+     evidenceRef:'C'+target.position+'.description',
+     reason:validReason?before.reason:'根据本卡真实事件写至少8字的具体支持或薄弱理由'}};
+ })};
  return {base,targets,prompt:'只补正点名的readerGoals协议项，不重新审整批，不改故事或其它判断。'
   +'原有效status、reason必须原样保留；缺失状态须按实际故事判断，不能从错误字段名推定通过。'
   +'已经具有合法status及至少8字reason的项，只返回新的evidenceRef（无法找到真实支持时留空，原审核不得视为通过）；status和reason由服务器保留，无须重抄。缺失或不合法的status/reason才返回完整status、evidenceRef、reason；绝不可升级原弱项或改写原理由。'
   +'\n【待补正固定位置】'+JSON.stringify(targets)
   +'\n【这些卡的完整故事证据目录】'+JSON.stringify(ideaReviewEvidenceCatalog(cards).filter(row=>positions.has(row.position)))
-  +'\n只输出JSON:{"goalPatches":[{"position":实际位置,"key":"点名项","item":{"evidenceRef":"本卡有效故事字段编号"}}]}。已有合法状态及理由的item只能带evidenceRef；状态或理由缺失者须额外返回真实status及至少8字reason。不能引用uniquePoint、noveltyProof等自述卖点字段，不得因无法找出证据而编造编号。每个点名项恰好一条，其它项不返回。'};
+  +'\n【本次各位置的确切补正JSON形状（按实际字段缺失情况分别生成）】'+JSON.stringify(patchExample)
+  +'\n上方status中的竖线表示候选值，实际返回只能是supported、weak、unknown之一，不得原样返回竖线或括号说明。对缺失status的项，必须按本卡证据独立返回一个真实状态；对原status及reason均有效的项，item只能带evidenceRef。示例evidenceRef不是自动成立的结论，必须以真实本卡证据目录支持原判断才使用；不支持时不可伪造事实，保留weak或unknown。不能引用uniquePoint、noveltyProof等自述卖点字段。每个点名项恰好一条，其它项不返回。'};
 }
 export function applyIdeaReaderGoalRepair(plan:NonNullable<ReturnType<typeof ideaReaderGoalRepairPlan>>,value:any){
  const patches=value?.goalPatches;
