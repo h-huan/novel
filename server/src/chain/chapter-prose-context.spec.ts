@@ -32,6 +32,38 @@ describe('chapter character source authority',()=>{
  });
 });
 
+describe('canonical character preflight on the normal body entry',()=>{
+ const controller=()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  c.logger={log:vi.fn(),error:vi.fn()};
+  c.workflowGuard={assertCanGenerateBody:vi.fn()};
+  c.assertExecutionStandardsComplete=vi.fn();
+  c.rolloutDetailedOutlines=vi.fn();
+  c.db={getDb:()=>({prepare:()=>({get:()=>({id:'chapter-1',outline_id:'outline-1',chapter_index:1,target_words:3500})})})};
+  c.getChapterWordRange=()=>({min:2500,max:5000});
+  c.beginChapterGeneration=()=> 'run-1';
+  c.finishChapterGeneration=vi.fn();
+  c.repairOutlineConsistency=vi.fn();
+  c.readChapterOutlineContract=()=>({title:'第一章',text:'本章只执行此前确定的事件'});
+  c.realLLM={generate:vi.fn()};
+  return c;
+ };
+ it('stops before calling a model when the confirmed character inventory is empty',async()=>{
+  const c=controller();
+  c.characterService={findByProjectId:()=>[]};
+  await expect(c.generate({projectId:'p',chapterId:'chapter-1'})).rejects.toThrow('缺少已确稿角色白名单');
+  expect(c.realLLM.generate).not.toHaveBeenCalled();
+  expect(c.finishChapterGeneration).toHaveBeenCalledWith('run-1');
+ });
+ it('does not silently drop a named cast after canonical state context loading fails',async()=>{
+  const c=controller();
+  c.characterService={findByProjectId:()=>[{id:'lead',name:'未具名（第一人称‘我’）',age:28}],
+    getWritingSummary:()=>({profile:{identity_occupation:'废品站收购员'}})};
+  c.buildWritingStateContext=()=>{throw Error('已确稿状态读取中断')};
+  await expect(c.generate({projectId:'p',chapterId:'chapter-1'})).rejects.toThrow('已确稿写作上下文加载失败');
+  expect(c.realLLM.generate).not.toHaveBeenCalled();
+ });
+});
 describe('chapter expansion prose context',()=>{
  it.each([2478,2785])('never generates padding for a retained %i-word draft',async words=>{
   const c=Object.create(ChainController.prototype) as any;const original='她'.repeat(words)+'。';
