@@ -2,7 +2,7 @@ import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
 import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective} from './premise-payoff-review';
 import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
-import { PREMISE_PAYOFF_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 const selection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案，并承担失去工作的代价。'}],selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',escalation:'受害人提供已有资料，警方核实现场情况。',payoff:'警方到场解救被困的人，她失去工作。'}],poolTargetMet:true};
 const supported={ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',conditionEvidenceRef:'S1.escalation',reason:'已提供现场地点并由警方核实后到场解救'};
@@ -84,6 +84,9 @@ it('uses the single GEN-002 authority contract before full-card generation inste
  expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('报备不等于获准实施');
  expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('离岗者不自动具有操作权限');
  expect(authoritative).toContain(PREMISE_PAYOFF_REVIEW_POLICY);
+ const replacementDirective=standardDirectiveCache.get('idea_generate','idea_premise_pool_reselection');
+ expect(replacementDirective).toContain(PREMISE_REPLACEMENT_COMPARISON_POLICY);
+ expect(replacementDirective).toContain('GEN-002');
  expect(task).toContain('按已注入GEN-002的兑现必要条件合同');
  expect(task).not.toContain('报备不等于获准实施');
  const gap={...supported,status:'gap',reason:'仅有报备行为，缺少有权人员实际启动和审批的必要桥接'};
