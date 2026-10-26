@@ -59,6 +59,58 @@ describe('five-card reader sharing citation regression (observed positions 1, 3,
   expect(result.filter((row:any)=>row.readerGoals.sharing.status==='weak')).toHaveLength(3);
  });
 });
+describe('mixed validity reader-goal targeted repair contracts',()=>{
+ it('asks for a real status when it was absent, while citation-only targets cannot change good judgments',()=>{
+  const cards=[{...card,title:'A题材'}, {...card,title:'B题材'}];
+  const review:any=ideaReviewResponseExample(cards);
+  delete review.reviews[0].readerGoals.click.status;
+  review.reviews[0].readerGoals.click.reason='具体事件中读者利益与主角主动反击有足够证据可核实';
+  review.reviews[1].readerGoals.sharing.evidenceRef='C2.uniquePoint';
+  review.reviews[1].readerGoals.sharing.status='weak';
+  review.reviews[1].readerGoals.sharing.reason='当前剧情缺少读者愿意转述的关系冲突和事件';
+  const plan=ideaReaderGoalRepairPlan(review,cards)!;
+  expect(plan.targets.map(row=>[row.position,row.key])).toEqual([[1,'click'],[2,'sharing']]);
+  const example=JSON.parse(plan.prompt.split('【本次各位置的确切补正JSON形状（按实际字段缺失情况分别生成）】')[1].split('\n上方status')[0]);
+  expect(example.goalPatches[0].item).toHaveProperty('status');
+  expect(example.goalPatches[0].item).toHaveProperty('reason');
+  expect(example.goalPatches[1].item).not.toHaveProperty('status');
+  expect(example.goalPatches[1].item).not.toHaveProperty('reason');
+  const patch={goalPatches:[
+   {position:1,key:'click',item:{status:'weak',evidenceRef:'C1.hook',reason:'具体事件中读者利益与主角主动反击有足够证据可核实'}},
+   {position:2,key:'sharing',item:{evidenceRef:'C2.description'}},
+  ]};
+  const merged=applyIdeaReaderGoalRepair(plan,patch);
+  expect(merged.reviews[0].readerGoals.click.status).toBe('weak');
+  expect(merged.reviews[1].readerGoals.sharing.status).toBe('weak');
+  expect(merged.reviews[1].readerGoals.sharing.reason).toBe(review.reviews[1].readerGoals.sharing.reason);
+  expect(ideaReviewEvidenceReferenceIssues(merged,cards)).toEqual([]);
+  expect(presentationReviewIssues(resolveIdeaReviewEvidence(merged,cards),cards,true)).toEqual([]);
+  expect(()=>applyIdeaReaderGoalRepair(plan,{goalPatches:[
+   {position:1,key:'click',item:{evidenceRef:'C1.hook'}},
+   {position:2,key:'sharing',item:{evidenceRef:'C2.description'}},
+  ]})).toThrow('缺失的阅读目标状态未补齐');
+ });
+ it('consumes only the existing single bounded protocol repair on a missing status',async()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  c.logger={warn:vi.fn(),error:vi.fn()};
+  const initial:any=ideaReviewResponseExample([card]);
+  delete initial.reviews[0].readerGoals.sharing.status;
+  const calls:any[]=[];
+  c.realLLM={generate:vi.fn(async(request:any)=>{
+   calls.push(request);request.physicalCallBudget.remaining--;
+   if(calls.length===2){
+    expect(request.prompt).toContain('【本次各位置的确切补正JSON形状');
+    return {content:JSON.stringify({goalPatches:[{position:1,key:'sharing',item:{
+      status:'weak',reason:initial.reviews[0].readerGoals.sharing.reason,evidenceRef:'C1.description'}}]})};
+   }
+   return {content:JSON.stringify(initial)};
+  })};
+  const result=await c.reviewIdeaPresentation([card],[],'',{remaining:2});
+  expect(calls).toHaveLength(2);
+  expect(result[0].readerGoals.sharing.status).toBe('weak');
+  expect(result[0].readerGoals.sharing.reason).toBe(initial.reviews[0].readerGoals.sharing.reason);
+ });
+});
 describe('one targeted reader-goal protocol correction',()=>{
  it('returns only the invalid field while keeping all negative findings and causal gaps',()=>{
   const base=fixture();base.reviews[0].payoffCredible=false;base.reviews[0].payoffBridge={status:'gap',actionEvidenceRef:'C1.description',resultEvidenceRef:'C1.ending',reason:'原故事没有建立使结果必然成立的必要条件'};
