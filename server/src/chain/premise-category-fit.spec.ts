@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit } from './premise-category-fit';
+import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective } from './premise-category-fit';
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -11,6 +11,41 @@ const selection = () => normalizePremiseSelectionPayload({
 }, 2, 2);
 const withCategories = () => { const s = selection(); s.selected.forEach(p => { p.storyCategory = '青春虐恋'; }); return s; };
 const checks = { categoryChecks: [1, 2].map(n => ({ ref: `S${n}.category`, status: 'fulfilled', evidenceRef: `S${n}.coreConflict`, reason: '具体恋爱选择与情感代价构成核心冲突' })) };
+
+describe('same-request premise source catalogue transport', () => {
+  it('keeps an exact standalone catalogue and suppresses only the duplicate when genre shares it', () => {
+    const s = withCategories();
+    const full = premiseCategoryReviewDirective(s);
+    const shared = premiseCategoryReviewDirective(s, false);
+    const catalogue = JSON.stringify(s.selected.flatMap((p,index)=>SELECTED_PREMISE_FIELDS
+      .filter(field=>typeof p[field]==='string' && String(p[field]).length >= 8)
+      .map(field=>({id:'S'+(index+1)+'.'+field,field,premiseId:p.premiseId}))));
+    expect(full).toContain(catalogue);
+    expect(shared).not.toContain(catalogue);
+    expect(shared).toContain('【流派证据目录：只含已选展开】');
+    expect(full).toContain('categoryChecks每个ref恰好一项');
+    expect(shared).toContain('categoryChecks每个ref恰好一项');
+  });
+  it('passes category and manual-genre rules with one shared evidence catalogue, without skipping either review', async () => {
+    const c=Object.create(ChainController.prototype) as any, s=withCategories();
+    const sourceChecks=premiseSourceComparisonCatalog(s).map(row=>({ref:row.ref,status:'preserved',reason:'逐项核实当前事实未改变原池约束'}));
+    const payoffChecks=s.selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'既定行动支撑已写结果且没有缺失条件'}));
+    const genreChecks=s.selected.map((_,i)=>({ref:'S'+(i+1)+'.genre1',status:'fulfilled',evidenceRef:'S'+(i+1)+'.activeChoice',reason:'角色行动体现隐藏实力的反制过程'}));
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+      expect((prompt.match(/【流派证据目录：只含已选展开】/gu)||[])).toHaveLength(2); // one directive reference, one real catalogue
+      expect(prompt).not.toContain('【已选展开证据目录】');
+      expect(prompt).toContain('必返genreChecks');
+      expect(prompt).toContain('前置分类审核');
+      const value={sourceChecks,payoffChecks,genreChecks,...checks};
+      expect(options.validate(value)).toEqual(true);
+      options.physicalCallBudget.remaining--;return {data:value};
+    });
+    const result=await c.reviewPremiseSelection(s,'完整标准','source_drift',{remaining:1},true,['扮猪吃虎']);
+    expect(result.passed).toBe(true);
+    expect(result.genreChecks).toHaveLength(2);
+    expect(result.categoryChecks).toHaveLength(2);
+  });
+});
 
 describe('category checked before complete cards', () => {
   it('requires coverage, valid own-premise evidence and concrete reasons', () => {
