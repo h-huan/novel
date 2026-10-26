@@ -59,9 +59,11 @@ function run(report) {
     'normal and -Watch must be the only backend launcher branches');
   // Use the actual PowerShell parser whenever it is installed (including
   // Windows development and supported CI runners); no code is executed.
-  const parser = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command',
-    '$tok=$null;$err=$null;[System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$tok,[ref]$err)|Out-Null;if($err.Count){$err|ForEach-Object{Write-Error $_};exit 1}',
-    path.join(root, 'restart.ps1')], { encoding: 'utf8' });
+  const psPath = path.join(root, 'restart.ps1').replace(/'/g, "''");
+  const psCommand = "$tok=$null;$err=$null;[System.Management.Automation.Language.Parser]::ParseFile('"
+    + psPath + "',[ref]$tok,[ref]$err)|Out-Null;if($err.Count){$err|ForEach-Object{Write-Error $_};exit 1}";
+  const parser = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', psCommand],
+    { encoding: 'utf8' });
   if (!parser.error) assert.equal(parser.status, 0, 'restart.ps1 PowerShell parser errors: ' + parser.stderr);
 }
 
