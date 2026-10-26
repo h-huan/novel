@@ -52,6 +52,17 @@ function run(report) {
   assert.ok(watchStart > stamp && normalStart > watchStart,
     'both backend launch paths must inherit the version stamp');
   assert.match(restart, /\$gitStatus -ne 0 -or \$localBuildCommit -notmatch/u);
+  assert.ok(restart.includes("$localBuildCommit -notmatch '^[0-9a-fA-F]{40}$') {"),
+    'PowerShell version validation must remain syntactically complete');
+  assert.match(restart, /throw '无法确认当前 Git HEAD/u);
+  assert.equal((restart.match(/^\s*\$backend = Start-Process/gmu) || []).length, 2,
+    'normal and -Watch must be the only backend launcher branches');
+  // Use the actual PowerShell parser whenever it is installed (including
+  // Windows development and supported CI runners); no code is executed.
+  const parser = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command',
+    '$tok=$null;$err=$null;[System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$tok,[ref]$err)|Out-Null;if($err.Count){$err|ForEach-Object{Write-Error $_};exit 1}',
+    path.join(root, 'restart.ps1')], { encoding: 'utf8' });
+  if (!parser.error) assert.equal(parser.status, 0, 'restart.ps1 PowerShell parser errors: ' + parser.stderr);
 }
 
 const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus: 'present' };
