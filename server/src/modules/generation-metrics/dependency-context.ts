@@ -119,8 +119,21 @@ export function dependencyContext(
   for (const c of characterCandidates) if (c.name && currentText.includes(c.name)) involved.add(c.id);
 
   let selected = rowsByIds(db, 'characters', projectId, [...involved]);
-  if (!selected.length && !['chapter', 'refinement'].includes(stage) && tableExists(db, 'characters')) {
-    selected = db.prepare("SELECT * FROM characters WHERE project_id=? AND role='protagonist' ORDER BY id LIMIT 8").all(projectId) as any[];
+  // First-person narrators may be saved as "未具名（第一人称我）": their
+  // canonical name need not occur in the chapter outline or prose. Without
+  // the protagonist receipt, the final chapter review/repair uses a context
+  // missing the role contract even though the first-pass prompt has it.
+  // Restore that SAME saved protagonist (not a new character) when absent.
+  // Keep all explicitly bound characters and propagate this dependency to
+  // confirmed state/timeline selection below.
+  const isBodyStage = stage === 'chapter' || stage === 'refinement';
+  if (tableExists(db, 'characters') &&
+      (isBodyStage ? !selected.some(row => row.role === 'protagonist') : selected.length === 0)) {
+    const protagonists = db.prepare(
+      "SELECT * FROM characters WHERE project_id=? AND role='protagonist' ORDER BY id LIMIT 8",
+    ).all(projectId) as any[];
+    selected = mergeById(selected, protagonists);
+    for (const row of protagonists) if (row.id) involved.add(String(row.id));
   }
 
   const hasProfiles = tableExists(db, 'character_extended_profiles');
