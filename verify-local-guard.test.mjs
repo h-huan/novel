@@ -251,6 +251,26 @@ const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus
   assert.equal(next.runtime.currentRevisionEvidence.ideaDiscovery, 'historical_only');
 }
 
+// A legacy first-chapter run must remain visible without masquerading as a
+// fresh successful generation on the new backend after restart.
+{
+  const { result, next } = run({
+    options: { mode: 'single_project', fullTests: false, projectId: 'short-1' },
+    runtime: {
+      backendIdentity: { loadedLocalRevision: 'match', processStartedAt: '2026-10-26T05:55:00.000Z', diagnosticsMarkerStatus: 'present' },
+      project: { id: 'short-1', status: 'active' },
+      firstChapterRun: { status: 'failed', finished_at: '2026-10-26T02:22:48.928Z' },
+      cockpit: { diagnostics: {} },
+    },
+    verdict: { status: 'failed', rootCause: 'project_first_chapter_empty',
+      failedTests: [], runtimeProblems: ['project_first_chapter_empty'] },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(next.verdict.rootCause, 'project_first_chapter_run_predates_backend_start');
+  assert.equal(next.runtime.currentRevisionEvidence.projects.project.firstChapter, 'historical_only');
+  assert.ok(next.verdict.runtimeProblems.includes('project_first_chapter_empty'));
+}
+
 // A full acceptance with unknown build identity must not claim the current code was tested.
 {
   const { result, next } = run({
