@@ -16,6 +16,15 @@ describe('natural prose and evidenced reading goals',()=>{
       expect(prompt.split(CHAPTER_PROSE_SCOPE_POLICY).length-1).toBe(1);
     }
   });
+  it('drives humor, reversals and character highlights from already confirmed actions, not random inserted scenes',()=>{
+    for(const phrase of ['已确认的欲望、弱点、关系和说话策略','具体触发','高光和钩子','前置可回溯信息','不为爽点强迫每章反转或牺牲']){
+      expect(CHAPTER_PROSE_SCOPE_POLICY).toContain(phrase);
+    }
+    new ModuleStandardsService().onModuleInit();
+    for(const stage of ['writing','review','quality_refine']){
+      expect(standardDirectiveCache.get(stage)).toContain('高光和钩子只突出已经安排');
+    }
+  });
   it('does not exchange human tone for broken logic or unnecessary explanations',()=>{
     expect(NATURAL_PROSE_POLICY).toContain('事实矛盾');
     expect(NATURAL_PROSE_POLICY).toContain('必要因果');
