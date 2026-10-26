@@ -110,7 +110,9 @@ describe('creation failure regressions',()=>{
   const controller=Object.create(ChainController.prototype) as any;
   controller.generationMetrics={beginRun:vi.fn(()=>({id:'review-failed'})),finishRun:vi.fn(),record:vi.fn()};
   controller.llmCallWithRetry=vi.fn(async(_name:any,prompt:any,options:any)=>{
-   expect(prompt).toContain('platformEvidence引用体现平台机制的故事事件');
+   expect(prompt).toContain('platformEvidenceRef指向体现平台机制的实际故事事件');
+   expect(prompt).toContain('原文由服务器回填');
+   expect(prompt).toContain('不得引用executionStandard');
    expect(options.retryInstruction).toContain('不改故事');
    return {data:null,validationIssues:issues,warnings:[]};
   });
