@@ -3,7 +3,7 @@ export const CREATIVE_DICTIONARY_VERSION = 27;
 export type CreativeTagGroup = '主题' | '主题与设定' | '人物与关系' | '情节与体验' | '平台标签（待核实分组）';
 export const DISCOVERY_TAG_GROUPS: ReadonlyArray<{ key: CreativeTagGroup; label: string; description: string }> = [
   { key: '主题', label: '主题', description: '故事关注的问题，例如家庭责任、自我认同、亲情与利益。' },
-  { key: '主题与设定', label: '主题与设定', description: '故事背景与核心设定，例如穿越、修仙、末世、系统。' },
+  { key: '主题与设定', label: '世界与设定', description: '故事发生的背景、身份条件与核心规则，例如穿越、修仙、末世、系统。' },
   { key: '人物与关系', label: '人物与关系', description: '人物类型与关系结构，例如婆媳、夫妻、师徒、战神、无CP。' },
   { key: '情节与体验', label: '情节与体验', description: '主要冲突与阅读体验，例如种田经营、战神归来、探案、甜宠、轻松。' },
   { key: '平台标签（待核实分组）', label: '平台补充标签', description: '所选平台分类中可参考的作品标签，候选会随分类变化。' },
