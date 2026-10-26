@@ -75,6 +75,19 @@ it('renders every required causal link inside the final payoff JSON example', ()
   expect(example.links.every((row:any)=>row.status==='supported|gap|unknown' && row.reason.length>=8)).toBe(true);
 });
 
+it('rejects unsupported operational authority at the preselection gate before paying for complete cards',()=>{
+ const prompt=premisePayoffReviewDirective(selection);
+ expect(prompt).toContain('报备/提出申请、合法批准、实际执行及结果生效');
+ expect(prompt).toContain('巡检或报备职责不自动取得启动');
+ expect(prompt).toContain('原池故事只声称“这是职责范围”');
+ expect(prompt).toContain('原池和展开');
+ const policeCheck={...supported,status:'gap',reason:'巡检或报备不等于操作权，没有授权主体执行的证据'};
+ const failures=materializePremisePayoffReview({payoffChecks:[policeCheck]},selection);
+ expect(failures).toHaveLength(1);
+ expect(failures[0].repairMode).toBe('replace_from_pool');
+ expect(premiseReselectionPlan(selection,{passed:false,issues:failures}).repairSlots[0].mode).toBe('replace_from_pool');
+ expect(materializePremisePayoffReview({payoffChecks:[supported]},selection)).toEqual([]);
+});
 it('requires existing independent payoff review to check evidence delivery to an authorized decision-maker',()=>{
  const prompt=premisePayoffReviewDirective(selection);
  expect(prompt).toContain('证据以实际写出的动作交给了谁');
