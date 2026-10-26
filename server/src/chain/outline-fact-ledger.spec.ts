@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { chapterFactsForReview, buildOutlineFactReviewPrompt, outlineFactReviewNeedsContinuityPolicy, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
 import { buildOutlineContinuityContext, describeOutlineFactEvidence } from './outline-fact-ledger';
 import { CHAPTER_RESPONSIBILITY_CRITERIA, chapterResponsibilityPlanningDirective } from '../../shared/src';
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY } from '../../shared/src/system-workflow-rules.registry';
 
 describe('outline fact ledger review contract', () => {
@@ -50,6 +51,20 @@ describe('outline fact ledger review contract', () => {
       sourceChapters:accepted,chapters:[{order:2,content:'三日后审判再次提到原事件'}],includePolicy:false});
     expect(review).toContain('传令当天我说木牌三天前就丢了');
     expect(review).not.toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+  });
+  it('delivers the same CTX-008 policy to detail creation, outline fact review and one local repair',()=>{
+    standardDirectiveCache.rebuild();
+    for(const [scenario,stepKey] of [
+      ['outline','creation_chapter_detail'],
+      ['review','creation_outline_fact_dependencies'],
+      ['outline','creation_chapter_fact_repair'],
+    ] as const){
+      const fromRegistry=standardDirectiveCache.get(scenario,stepKey);
+      expect(fromRegistry).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+      expect(fromRegistry).toContain('跨章复述同一事件');
+    }
+    const input=buildOutlineContinuityContext([{order:0,content:'角色交代物品此前已丢失'}],[],false);
+    expect(input).not.toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
   });
   it('separates group replies from private messages and checks direct positive evidence before blocking creation', () => {
     const prompt = buildOutlineFactReviewPrompt({
