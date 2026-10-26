@@ -34,11 +34,11 @@ export function ideaReaderGoalRepairPlan(value:any,cards:readonly any[],referenc
  })};
  return {base,targets,prompt:'只补正点名的readerGoals协议项，不重新审整批，不改故事或其它判断。'
   +'原有效status、reason必须原样保留；缺失状态须按实际故事判断，不能从错误字段名推定通过。'
-  +'已经具有合法status及至少8字reason的项，只返回新的evidenceRef（无法找到真实支持时留空，原审核不得视为通过）；status和reason由服务器保留，无须重抄。缺失或不合法的status/reason才返回完整status、evidenceRef、reason；绝不可升级原弱项或改写原理由。'
+  +'已经具有合法status及至少8字reason的项，只补正evidenceRef；status和reason由服务器保留，无须重抄。若原status=unknown且确无可引用事件，应省略evidenceRef键（不是写空字符串），服务器会回填空quote；原status=supported或weak而真实故事无可支持的编号时不能伪造，保持协议阻断。缺失或不合法的status/reason才返回完整真实status及reason；绝不可升级原弱项或改写原理由。'
   +'\n【待补正固定位置】'+JSON.stringify(targets)
   +'\n【这些卡的完整故事证据目录】'+JSON.stringify(ideaReviewEvidenceCatalog(cards).filter(row=>positions.has(row.position)))
   +'\n【本次各位置的确切补正JSON形状（按实际字段缺失情况分别生成）】'+JSON.stringify(patchExample)
-  +'\n上方status中的竖线表示候选值，实际返回只能是supported、weak、unknown之一，不得原样返回竖线或括号说明。对缺失status的项，必须按本卡证据独立返回一个真实状态；对原status及reason均有效的项，item只能带evidenceRef。示例evidenceRef不是自动成立的结论，必须以真实本卡证据目录支持原判断才使用；不支持时不可伪造事实，保留weak或unknown。不能引用uniquePoint、noveltyProof等自述卖点字段。每个点名项恰好一条，其它项不返回。'};
+  +'\n上方status中的竖线表示候选值，实际返回只能是supported、weak、unknown之一，不得原样返回竖线或括号说明。对缺失status的项，必须按本卡证据独立返回一个真实状态；对原status及reason均有效的项，item只能补evidenceRef，不得改动原结论。示例evidenceRef不是自动成立的结论，必须以真实本卡证据目录支持原判断才使用；真实unknown且无本卡支持事件时省略evidenceRef键，不得写空串；原supported/weak没有证据则保留阻断，不能暗中降低。不能引用uniquePoint、noveltyProof等自述卖点字段。每个点名项恰好一条，其它项不返回。'};
 }
 export function applyIdeaReaderGoalRepair(plan:NonNullable<ReturnType<typeof ideaReaderGoalRepairPlan>>,value:any){
  const patches=value?.goalPatches;
@@ -64,6 +64,14 @@ export function applyIdeaReaderGoalRepair(plan:NonNullable<ReturnType<typeof ide
   const revisedItem=statusValid&&reasonValid
     ?{...before,evidenceRef:patch.item.evidenceRef}
     :{...before,...patch.item};
+  // An unknown judgment with no supporting source uses the existing
+  // unreferenced/empty-quote protocol. Clearing a stale, model-authored
+  // quotation is citation materialization, not a change to its verdict.
+  if(revisedItem.status==='unknown' && (revisedItem.evidenceRef===undefined
+      || revisedItem.evidenceRef===null || revisedItem.evidenceRef==='')){
+    delete revisedItem.evidenceRef;
+    revisedItem.quote='';
+  }
   if(!statusValid&&!['supported','weak','unknown'].includes(revisedItem.status))
    throw Error('缺失的阅读目标状态未补齐');
   if(!reasonValid&&(typeof revisedItem.reason!=='string'||revisedItem.reason.trim().length<8))
