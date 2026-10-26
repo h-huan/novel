@@ -230,7 +230,7 @@ export const OUTLINE_RELATIVE_TIME_SOURCE_RULE =
 
 /** Generation consumes the same evidence and history as review and repair. */
 export function buildOutlineContinuityContext(sourceChapters: unknown[], previousLedger: OutlineFactLedgerEntry[], includePolicy = true): string {
-  const chronology = sourceChapters.length ? OUTLINE_RELATIVE_TIME_SOURCE_RULE + '\\n' : '';
+  const chronology = sourceChapters.length ? OUTLINE_RELATIVE_TIME_SOURCE_RULE + '\n' : '';
   return `${includePolicy ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n${chronology}【已确认前章原始资料】${JSON.stringify(normalizeOutlineChaptersForFactReview(sourceChapters))}\n【前批事实台账】${serializeOutlineFactLedger(previousLedger)}`;
 }
 
