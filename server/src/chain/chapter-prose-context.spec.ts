@@ -5,6 +5,33 @@ import {ChapterService} from '../modules/chapter/chapter.service';
 import {WritingQualityService} from '../modules/writing-quality/writing-quality.service';
 
 const source='她把卡片放在长椅上。\n\n雨棚外的车还在等她。\n\n她看了一眼门口。\n\n他没有回答。\n\n她问他还等什么。\n\n他捏起卡片。\n\n墙上的灯还亮着。';
+describe('chapter character source authority',()=>{
+ it('explicitly forbids inventing a surname for a confirmed unnamed first-person lead',()=>{
+  const controller=Object.create(ChainController.prototype) as any;
+  const names=['未具名（第一人称‘我’）','马长顺'];
+  controller.characterService={
+   findByProjectId:()=>names.map((name,index)=>({id:'c'+index,name,age:30})),
+   getWritingSummary:(_projectId:string,id:string)=>({profile:{identity_occupation:id==='c0'?'收废品主角':'项目经理'}}),
+  };
+  const prompt=controller.buildCharacterWritingContext('project-1');
+  expect(prompt).toContain('【未具名第一人称主角】');
+  expect(prompt).toContain('不得自行给“我”添加“小陈”');
+  expect(prompt).toContain('无姓名、无台词、不推动剧情');
+  expect(prompt).toContain('【出场角色白名单】');
+  expect(prompt).toContain('马长顺');
+ });
+ it('does not apply unnamed lead restriction to a project with an explicitly named hero',()=>{
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.characterService={
+   findByProjectId:()=>[{id:'lead',name:'陈光',age:28}],
+   getWritingSummary:()=>({profile:{identity_occupation:'工厂门卫'}}),
+  };
+  const prompt=controller.buildCharacterWritingContext('project-2');
+  expect(prompt).toContain('陈光');
+  expect(prompt).not.toContain('【未具名第一人称主角】');
+ });
+});
+
 describe('chapter expansion prose context',()=>{
  it.each([2478,2785])('never generates padding for a retained %i-word draft',async words=>{
   const c=Object.create(ChainController.prototype) as any;const original='她'.repeat(words)+'。';
