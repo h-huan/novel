@@ -229,6 +229,28 @@ export function buildOutlineContinuityContext(sourceChapters: unknown[], previou
   return `${includePolicy ? OUTLINE_STATE_CONTINUITY_POLICY : "按已注入CTX-005、CTX-008核对累计状态与时间。"}\n【已确认前章原始资料】${JSON.stringify(normalizeOutlineChaptersForFactReview(sourceChapters))}\n【前批事实台账】${serializeOutlineFactLedger(previousLedger)}`;
 }
 
+/** A local repair already receives the FULL accepted chapters and current draft.
+ * Do not transmit both multi-page fact quotes again in the review-defect list.
+ * Keep precise locations, contradiction and arithmetic; retain the untouched
+ * complete evidence in the independent validators and audit records.
+ * Unstructured action-review complaints remain verbatim. */
+export function outlineFactRepairPromptDefects(defects: readonly string[]): Array<string | Record<string, string>> {
+  return defects.map(defect => {
+    let row: Record<string, unknown>;
+    try { row = JSON.parse(defect); } catch { return defect; }
+    if (!row || typeof row !== 'object' || Array.isArray(row)
+      || typeof row.location1 !== 'string' || typeof row.location2 !== 'string'
+      || typeof row.quote1 !== 'string' || typeof row.quote2 !== 'string'
+      || typeof row.conflict !== 'string') return defect;
+    return {
+      location1: row.location1,
+      location2: row.location2,
+      conflict: row.conflict,
+      ...(typeof row.calculation === 'string' ? { calculation: row.calculation } : {}),
+    };
+  });
+}
+
 /** Review quotations must exist in actual supplied text, not just sound plausible. */
 export function describeOutlineFactEvidence(review: OutlineFactReview | null, sources: unknown[], chapterSources: unknown[] = []): string[] {
   if (!review) return [];
