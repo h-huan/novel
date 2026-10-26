@@ -33,6 +33,24 @@ it('does not globally replace equal dates, guess ambiguous rewrites or reject ev
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:text.replace('三天前','两天前')},[])).toEqual([]);
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:'他在评审会展示了之前取得的凭据'},[text])).toEqual([]);
 });
+it('rejects a chapter-3 patch that keeps the relative-day contradiction from accepted chapter 1',()=>{
+ const first='传令那日，我当众说木牌三天前就丢了';
+ const second='雷台开审已是三日后，我仍说三天前丢的，丢时没报';
+ const chapter={content:second,scenes:[{outcome:'他说三天前丢的'}],characterActions:[{action:'当众说三天前丢的',result:'仍不认私闯'}]};
+ const defect=JSON.stringify({location1:'前章·第1章.content',quote1:first,
+  location2:'本批·第3章.content',quote2:second,
+  conflict:'第1章“木牌三天前就丢了”指传令前三日，第3章“三天前丢的”却以三日后的雷台为基准，丢失事件时点不一致。',
+  calculation:'T0-3 != (T0+3)-3'});
+ const wrong={'scenes.0.outcome':'他在雷台重复丢失事实'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[defect]).join('；'))
+  .toContain('没有直接修改冲突描述中的原始断言');
+ const valid={content:'雷台开审已是三日后，我说六天前丢的，丢时没报',
+   'scenes.0.outcome':'他说六天前丢的',
+   'characterActions.0.action':'当众说六天前丢的'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,valid,[defect])).toEqual([]);
+ expect(applyOutlineFactPatch(chapter,valid).characterActions[0].result).toBe('仍不认私闯');
+ expect(chapter.content).toBe(second);
+});
 it('requires action-result patches to touch the exact cited causal assertion before re-review',()=>{
  const chapter={
   content:'她没有站起，也没有出声。评估程序根据申请材料决定是否发放补偿。',
