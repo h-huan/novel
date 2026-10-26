@@ -2,6 +2,8 @@ import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
 import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective} from './premise-payoff-review';
 import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
+import { PREMISE_PAYOFF_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 const selection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案，并承担失去工作的代价。'}],selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',escalation:'受害人提供已有资料，警方核实现场情况。',payoff:'警方到场解救被困的人，她失去工作。'}],poolTargetMet:true};
 const supported={ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',conditionEvidenceRef:'S1.escalation',reason:'已提供现场地点并由警方核实后到场解救'};
 it('requires an independent payoff verdict even when every source check is preserved',()=>{
@@ -75,16 +77,18 @@ it('renders every required causal link inside the final payoff JSON example', ()
   expect(example.links.every((row:any)=>row.status==='supported|gap|unknown' && row.reason.length>=8)).toBe(true);
 });
 
-it('rejects unsupported operational authority at the preselection gate before paying for complete cards',()=>{
- const prompt=premisePayoffReviewDirective(selection);
- expect(prompt).toContain('报备/提出申请、合法批准、实际执行及结果生效');
- expect(prompt).toContain('巡检或报备职责不自动取得启动');
- expect(prompt).toContain('原池故事只声称“这是职责范围”');
- expect(prompt).toContain('原池和展开');
- const policeCheck={...supported,status:'gap',reason:'巡检或报备不等于操作权，没有授权主体执行的证据'};
- const failures=materializePremisePayoffReview({payoffChecks:[policeCheck]},selection);
+it('uses the single GEN-002 authority contract before full-card generation instead of repeating it in the task prompt',()=>{
+ standardDirectiveCache.rebuild();
+ const authoritative=standardDirectiveCache.get('idea_generate','idea_premise_source_drift_review');
+ const task= premisePayoffReviewDirective(selection);
+ expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('报备不等于获准实施');
+ expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('离岗者不自动具有操作权限');
+ expect(authoritative).toContain(PREMISE_PAYOFF_REVIEW_POLICY);
+ expect(task).toContain('按已注入GEN-002的兑现必要条件合同');
+ expect(task).not.toContain('报备不等于获准实施');
+ const gap={...supported,status:'gap',reason:'仅有报备行为，缺少有权人员实际启动和审批的必要桥接'};
+ const failures=materializePremisePayoffReview({payoffChecks:[gap]},selection);
  expect(failures).toHaveLength(1);
- expect(failures[0].repairMode).toBe('replace_from_pool');
  expect(premiseReselectionPlan(selection,{passed:false,issues:failures}).repairSlots[0].mode).toBe('replace_from_pool');
  expect(materializePremisePayoffReview({payoffChecks:[supported]},selection)).toEqual([]);
 });
