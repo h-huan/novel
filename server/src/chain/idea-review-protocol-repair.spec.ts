@@ -90,6 +90,18 @@ describe('mixed validity reader-goal targeted repair contracts',()=>{
    {position:2,key:'sharing',item:{evidenceRef:'C2.description'}},
   ]})).toThrow('缺失的阅读目标状态未补齐');
  });
+ it('repairs invalid unknown evidence without changing unknown verdict or fabricating a source',()=>{
+  const row:any=ideaReviewResponseExample([card]);
+  row.reviews[0].readerGoals.immersion={status:'unknown',evidenceRef:'C1.noveltyProof',quote:'模型自行编造的证明',reason:'原故事没有足够证据证明真实代入程度'};
+  const plan=ideaReaderGoalRepairPlan(row,[card])!;
+  expect(plan.targets.map(t=>t.key)).toEqual(['immersion']);
+  expect(plan.prompt).toContain('unknown且无本卡支持事件时省略evidenceRef');
+  const updated=applyIdeaReaderGoalRepair(plan,{goalPatches:[{position:1,key:'immersion',item:{}}]});
+  expect(updated.reviews[0].readerGoals.immersion).toEqual({
+   status:'unknown',quote:'',reason:row.reviews[0].readerGoals.immersion.reason});
+  expect(ideaReviewEvidenceReferenceIssues(updated,[card])).toEqual([]);
+  expect(presentationReviewIssues(resolveIdeaReviewEvidence(updated,[card]),[card],true)).toEqual([]);
+ });
  it('consumes only the existing single bounded protocol repair on a missing status',async()=>{
   const c=Object.create(ChainController.prototype) as any;
   c.logger={warn:vi.fn(),error:vi.fn()};
