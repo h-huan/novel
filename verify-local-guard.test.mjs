@@ -55,6 +55,12 @@ function run(report) {
   assert.ok(restart.includes("$localBuildCommit -notmatch '^[0-9a-fA-F]{40}$') {"),
     'PowerShell version validation must remain syntactically complete');
   assert.match(restart, /throw '无法确认当前 Git HEAD/u);
+  // PowerShell must not announce readiness or launch the frontend merely
+  // because an older process responds HTTP 200.
+  assert.match(restart, /\$reportedBuildCommit -ceq \$localBuildCommit/u);
+  assert.match(restart, /\$healthData\.status -eq 'ok'/u);
+  assert.match(restart, /throw "后端未按本次提交就绪/u);
+  assert.doesNotMatch(restart, /if \(\$healthy\).*Write-Note '后端健康检查超时/u);
   assert.equal((restart.match(/^\s*\$backend = Start-Process/gmu) || []).length, 2,
     'normal and -Watch must be the only backend launcher branches');
   // Use the actual PowerShell parser whenever it is installed (including
@@ -195,6 +201,33 @@ const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus
   assert.equal(result.status, 1);
   assert.ok(next.verdict.runtimeProblems.includes('backend_loaded_revision_mismatch'));
   assert.ok(next.verdict.runtimeProblems.includes('backend_diagnostics_marker_mismatch'));
+}
+
+// Reproduce the latest report's ordering: an old backend can have a genuine
+// historical failed idea audit, but the FIRST reason this is not a valid new
+// production run is the loaded revision. Never mark preflight healthy.
+{
+  const { result, next, nextMarkdown } = run({
+    options: { mode: 'diagnostic_latest_short_and_long', fullTests: false, shortProjectId: 'short-1' },
+    runtime: {
+      preflight: { ok: true, rootCause: null, downstreamSkipped: [] },
+      backendIdentity: { loadedLocalRevision: 'mismatch', localCommit: '7c2f193', buildCommit: '5c635819', diagnosticsMarkerStatus: 'present' },
+      ideaDiscovery: { available: true, success: false },
+      projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } } },
+    },
+    verdict: {
+      status: 'failed', rootCause: 'latest_idea_discovery_failed',
+      failedTests: [], runtimeProblems: ['latest_idea_discovery_failed'],
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(next.verdict.rootCause, 'backend_loaded_revision_mismatch');
+  assert.equal(next.runtime.preflight.ok, false);
+  assert.equal(next.runtime.preflight.rootCause, 'backend_loaded_revision_mismatch');
+  assert.equal(next.runtime.preflight.evidenceScope, 'historical_only');
+  assert.ok(next.verdict.runtimeProblems.includes('latest_idea_discovery_failed'));
+  assert.ok(next.verdict.runtimeProblems.includes('backend_loaded_revision_mismatch'));
+  assert.match(nextMarkdown, /backend_loaded_revision_mismatch/u);
 }
 
 // A full acceptance with unknown build identity must not claim the current code was tested.
