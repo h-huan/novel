@@ -89,6 +89,27 @@ for (const [key, result] of projectEntries) {
   if (status === 'generation_failed') problems.add(`${key}_project_status_generation_failed`);
 }
 
+// The first-chapter run is also persisted across restarts; project status and
+// 0-word content may be real historical defects, but are NOT proof that the
+// freshly loaded checkout generated that chapter. Do not discard old evidence.
+const historicalChapterRunKeys = [];
+if (backendIdentity?.loadedLocalRevision === 'match' && Number.isFinite(currentBackendStartMs)) {
+  for (const [key, result] of projectEntries) {
+    const chapterRun = result?.firstChapterRun;
+    const runEndMs = Date.parse(String(chapterRun?.finished_at ?? chapterRun?.finishedAt ?? ''));
+    if (Number.isFinite(runEndMs) && runEndMs < currentBackendStartMs) {
+      historicalChapterRunKeys.push(key);
+      problems.add(`${key}_first_chapter_run_predates_backend_start`);
+      report.runtime.currentRevisionEvidence ??= {};
+      report.runtime.currentRevisionEvidence.projects ??= {};
+      report.runtime.currentRevisionEvidence.projects[key] = {
+        firstChapter: 'historical_only',
+        detail: '当前第一章调用记录早于后端启动时间，不能用于证明本版本首章生成成功或失败。',
+      };
+    }
+  }
+}
+
 const runtimeProblems = [...problems];
 const failedTests = Array.isArray(report?.verdict?.failedTests) ? report.verdict.failedTests : [];
 report.verdict = {
@@ -96,6 +117,7 @@ report.verdict = {
   status: runtimeProblems.length === 0 && failedTests.length === 0 ? 'passed' : 'failed',
   rootCause: staleBackend ? 'backend_loaded_revision_mismatch'
     : historicalIdeaAudit ? 'latest_idea_audit_predates_backend_start'
+    : historicalChapterRunKeys.length ? historicalChapterRunKeys[0] + '_first_chapter_run_predates_backend_start'
     : runtimeProblems[0] || report?.verdict?.rootCause || null,
   failedTests,
   runtimeProblems,
