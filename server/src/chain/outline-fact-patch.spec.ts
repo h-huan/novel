@@ -43,7 +43,7 @@ it('rejects a chapter-3 patch that keeps the relative-day contradiction from acc
   calculation:'T0-3 != (T0+3)-3'});
  const wrong={'scenes.0.outcome':'他在雷台重复丢失事实'};
  expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[defect]).join('；'))
-  .toContain('没有直接修改冲突描述中的原始断言');
+  .toContain('事实补丁未触及当前章的冲突引文');
  const valid={content:'雷台开审已是三日后，我说六天前丢的，丢时没报',
    'scenes.0.outcome':'他说六天前丢的',
    'characterActions.0.action':'当众说六天前丢的'};
