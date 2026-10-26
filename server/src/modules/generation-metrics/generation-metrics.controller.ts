@@ -84,6 +84,25 @@ export class GenerationMetricsController {
     };
   }
 
+
+  @Get('idea-activity')
+  ideaActivity(@Query('startAt') startAt?: string) {
+    const timestamp = startAt ? Date.parse(startAt) : null;
+    if (startAt && !Number.isFinite(timestamp)) throw new BadRequestException('startAt must be a valid timestamp');
+    // Deliberately exclude raw prompts, outputs and context snapshots. A model
+    // run exists before any finished step metrics or final discovery audit.
+    const rows = this.databaseService.getDb().prepare(
+      "SELECT id,stage,scenario,status,started_at,finished_at,duration_ms,model,error " +
+      "FROM generation_runs WHERE scenario='idea_generate' " +
+      "AND (? IS NULL OR julianday(started_at)>=julianday(?)) " +
+      "ORDER BY started_at DESC LIMIT 200"
+    ).all(startAt ? new Date(timestamp!).toISOString() : null,
+      startAt ? new Date(timestamp!).toISOString() : null) as Array<Record<string,unknown>>;
+    return {items: rows.map(row=>({...row,
+      error:row.error==null?null:redactDiagnosticText(String(row.error))})),
+      count:rows.length,truncated:rows.length===200};
+  }
+
   @Get('runs')
   runs(@Query('projectId') projectId?: string, @Query('limit') limit?: string) {
     return { items: this.metrics.getRuns(projectId, Number(limit) || 50) };

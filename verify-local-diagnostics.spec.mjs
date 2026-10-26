@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity } from './verify-local-diagnostics.mjs';
 
 test('normalizes the nested saved idea-discovery audit and partial-card counts', () => {
   const audit = normalizeIdeaDiscoveryAudit({
@@ -105,4 +105,23 @@ test('reads nested recovery integrity fields without treating missing modules as
   assert.equal(result.diagnosticSchemaVersion, 2);
   assert.deepEqual(normalizeProjectIntegrityAudit({ missingModules: ['人物'], consistencyIssues: [] }).missingModules, ['人物']);
   assert.equal(normalizeProjectIntegrityAudit(null), null);
+});
+
+test('unfinished and cancelled discovery calls remain visible despite an older completed audit',()=>{
+ const records=[
+  {id:'old',scenario:'idea_generate',status:'success',started_at:'2026-10-26T10:58:00Z'},
+  {id:'done',scenario:'idea_generate',status:'success',started_at:'2026-10-26T23:24:40Z',finished_at:'2026-10-26T23:25:30Z'},
+  {id:'cancelled',scenario:'idea_generate',status:'cancelled',started_at:'2026-10-26T23:26:00Z',finished_at:'2026-10-26T23:33:00Z'},
+  {id:'running',scenario:'idea_generate',status:'running',started_at:'2026-10-26T23:34:00Z'},
+  {id:'orphaned',scenario:'idea_generate',status:'running',started_at:'2026-10-26T20:00:00Z'},
+  {id:'other',scenario:'writing',status:'running',started_at:'2026-10-26T23:35:00Z'}
+ ];
+ const activity=summarizeRecentIdeaActivity(records,'2026-10-26T11:28:33Z','2026-10-26T23:24:24Z','2026-10-26T23:44:00Z');
+ assert.equal(activity.totalRecent,4);
+ assert.equal(activity.running,1);assert.equal(activity.staleRunning,1);
+ assert.equal(activity.cancelled,1);assert.equal(activity.finished,1);
+ assert.equal(activity.runs.find(r=>r.runId==='running').elapsedMs,600000);
+ assert.equal(activity.runs.find(r=>r.runId==='orphaned').staleProcess,true);
+ assert.equal(activity.runs.some(r=>r.runId==='old'||r.runId==='other'),false);
+ assert.equal(activity.association,'after_latest_completed_audit_time_only');
 });

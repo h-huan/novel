@@ -200,3 +200,29 @@ export function summarizeDiscoveryStepMetrics(rows) {
     },
   };
 }
+
+/** The latest discovery audit covers completed batches, not interrupted calls.
+ * Newer model calls have no discovery_request_id in generation_runs; do not
+ * misrepresent time proximity as exact correlation. */
+export function summarizeRecentIdeaActivity(rows,completedAuditFinishedAt,backendStartedAt,inspectedAt){
+ const stamp=value=>{const t=Date.parse(String(value||''));return Number.isFinite(t)?t:null;};
+ const cutoff=stamp(completedAuditFinishedAt),backend=stamp(backendStartedAt),now=stamp(inspectedAt)??Date.now();
+ const sorted=(Array.isArray(rows)?rows:[]).filter(row=>{
+  const t=stamp(row.started_at??row.startedAt);
+  return row.scenario==='idea_generate'&&t!==null&&(cutoff===null||t>cutoff);
+ }).sort((a,b)=>(stamp(b.started_at??b.startedAt)??0)-(stamp(a.started_at??a.startedAt)??0));
+ const runs=sorted.slice(0,40).map(row=>{
+  const startedAt=row.started_at??row.startedAt??null,finishedAt=row.finished_at??row.finishedAt??null;
+  const start=stamp(startedAt),finish=stamp(finishedAt),status=String(row.status??'unknown').toLowerCase();
+  return {runId:row.id??null,stage:row.stage??null,status,startedAt,finishedAt,
+   elapsedMs:start===null?null:Math.max(0,(finish??now)-start),
+   staleProcess:status==='running'&&backend!==null&&start!==null&&start<backend,
+   model:row.model??null,error:row.error==null?null:redactDiagnosticText(row.error)};
+ });
+ return {association:'after_latest_completed_audit_time_only',latestCompletedAuditFinishedAt:completedAuditFinishedAt??null,
+  totalRecent:sorted.length,running:runs.filter(x=>x.status==='running'&&!x.staleProcess).length,
+  staleRunning:runs.filter(x=>x.staleProcess).length,
+  cancelled:runs.filter(x=>x.status==='cancelled').length,
+  finished:runs.filter(x=>x.status==='success'||x.status==='failed').length,
+  runs,truncated:sorted.length>runs.length};
+}

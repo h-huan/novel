@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, summarizeRecentIdeaActivity, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -424,6 +424,16 @@ const rawIdeaDiscovery = ideaDiscoveryResponse.ok
   ? unwrap(ideaDiscoveryResponse.data)
   : { available: false, error: ideaDiscoveryResponse.error ?? `HTTP ${ideaDiscoveryResponse.status}` };
 const savedDiscoveryAudit = normalizeIdeaDiscoveryAudit(rawIdeaDiscovery);
+const ideaActivityQuery = savedDiscoveryAudit.finishedAt
+ ? '?startAt='+encodeURIComponent(savedDiscoveryAudit.finishedAt):'';
+const ideaActivityResponse = health.ok
+ ? await request('/generation-metrics/idea-activity'+ideaActivityQuery)
+ : skippedRuntimeRequest('idea-activity');
+const latestIdeaActivity = {
+ source:{ok:ideaActivityResponse.ok,status:ideaActivityResponse.status,error:ideaActivityResponse.error??null},
+ ...summarizeRecentIdeaActivity(ideaActivityResponse.ok?asArray(ideaActivityResponse.data):[],
+  savedDiscoveryAudit.finishedAt,health.data?.build?.processStartedAt,new Date().toISOString()),
+};
 const stepMetricsQuery = new URLSearchParams({ scenario: 'idea_generate', limit: '500' });
 if (savedDiscoveryAudit.discoveryRequestId) {
   stepMetricsQuery.set('discoveryRequestId', savedDiscoveryAudit.discoveryRequestId);
@@ -478,6 +488,7 @@ const runtime = redactDiagnosticValue({
         detail: health.error ?? `HTTP ${health.status}`,
       },
   ideaDiscovery: rawIdeaDiscovery,
+  ideaActivity: latestIdeaActivity,
   discoveryCallTrace,
   standards: {
     codeSeedVersion,
@@ -595,6 +606,8 @@ if (health.ok) for (const target of projectTargets) {
 }
 
 const diagnosticWarnings = [];
+if (!runtime.ideaActivity?.source?.ok) diagnosticWarnings.push('灵感进行中/取消调用查询失败：只能看到最新完成的审计。');
+if (runtime.ideaActivity?.totalRecent>0) diagnosticWarnings.push('最新完成审计之后还存在灵感模型调用，其中进行中 '+runtime.ideaActivity.running+'、已取消 '+runtime.ideaActivity.cancelled+'；这些调用不属于旧审计。');
 const finalDiscoveryAudit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery);
 if (!runtime.discoveryCallTrace?.source?.ok) {
   diagnosticWarnings.push('灵感发现逐步指标查询失败：' + String(runtime.discoveryCallTrace?.source?.error ?? '原因未知'));
@@ -762,7 +775,14 @@ function detailedIdeaMarkdown() {
   };
   return [
     '## 灵感发现审计',
-    '- 本地验证运行 ID：' + verificationRunId,
+    '### 完成审计后的实时/中止活动（仅按时间关联）',
+    '- 最新完成审计之后的模型调用：' + (runtime.ideaActivity?.totalRecent??'查询失败')
+      + '；运行中：' + (runtime.ideaActivity?.running??'未知')
+      + '；取消：' + (runtime.ideaActivity?.cancelled??'未知')
+      + '；旧进程遗留：' + (runtime.ideaActivity?.staleRunning??'未知'),
+    ...(runtime.ideaActivity?.runs||[]).map(r=>'- '+r.status+' · '+r.runId+' · '+r.stage
+      +' · 运行/历时 '+r.elapsedMs+' ms · '+r.startedAt+(r.staleProcess?'（旧进程遗留记录）':'')),
+    '',    '- 本地验证运行 ID：' + verificationRunId,
     '- 灵感请求 ID：' + (audit.discoveryRequestId ?? '未知'),
     '- 审计状态：' + (audit.available ? '已读取' : '不可用') + '；成功：' + (audit.success ?? '未知') + '；更新时间：' + (audit.updatedAt ?? '未知'),
     '- 请求窗口：' + (audit.startedAt ?? '未知') + ' — ' + (audit.finishedAt ?? '未知'),
