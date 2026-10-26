@@ -14,6 +14,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 import * as fs from 'fs';
+import { spawnSync } from 'node:child_process';
 import * as path from 'path';
 
 // ── 启动时加载 .env（不受 process.cwd() 影响） ──
@@ -171,16 +172,28 @@ export async function bootstrap(options: { port?: number; host?: string } = {}):
   return app;
 }
 
-async function existingNovelServer(port: number): Promise<boolean> {
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    if (!response.ok) return false;
-    const body = await response.json() as { status?: string };
-    return body.status === 'ok';
-  } catch {
-    return false;
+/**
+ * Every source checkout launcher (restart.ps1, npm run start:dev,
+ * npm run start:prod, desktop npm run dev) must report its startup revision.
+ * A deployment/package without the actual server source tree must NOT guess
+ * a commit from an enclosing, unrelated Git checkout.
+ *
+ * Called once after dist/source freshness validation, never in /health:
+ * updating the checkout must not silently update a still-running process.
+ */
+function stampLocalCheckoutRevision(): void {
+  if (process.env.NOVEL_BUILD_COMMIT || process.env.GIT_COMMIT_SHA || process.env.GITHUB_SHA) return;
+  const checkoutRoot = path.resolve(serverRoot, '..');
+  if (path.basename(serverRoot) !== 'server'
+    || !fs.existsSync(path.join(checkoutRoot, '.git'))
+    || !fs.existsSync(path.join(serverRoot, 'src', 'main.ts'))) return;
+  const result = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], {
+    cwd: serverRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true, timeout: 2000,
+  });
+  const commit = String(result.stdout || '').trim();
+  if (result.status === 0 && /^[a-f0-9]{40}$/i.test(commit)) {
+    process.env.NOVEL_BUILD_COMMIT = commit;
   }
 }
 
@@ -189,19 +202,15 @@ if (require.main === module) {
   // 「健康检查全绿但跑着上一版代码」的进程，用户从日志根本分辨不出来。
   try {
     assertBuildIsFresh();
+    stampLocalCheckoutRevision();
   } catch (err) {
     console.error(`[server] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
-  const cliPort = parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
-  existingNovelServer(cliPort).then((running) => {
-    if (running) {
-      console.log(`[server] already running at http://127.0.0.1:${cliPort}; duplicate start skipped`);
-      return null;
-    }
-    return bootstrap();
-  }).then((app) => {
-    if (!app) return;
+  // A pre-existing healthy HTTP service is not proof of the same revision.
+  // Never exit successfully without starting this process. Let bootstrap
+  // surface EADDRINUSE and retain the existing server untouched.
+  bootstrap().then((app) => {
     if (process.env.NOVEL_MANAGED_SERVER !== '1') return;
 
     let closing = false;
