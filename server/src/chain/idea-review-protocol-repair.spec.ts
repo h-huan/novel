@@ -26,7 +26,7 @@ describe('five-card reader sharing citation regression (observed positions 1, 3,
   const original=response();
   const plan=ideaReaderGoalRepairPlan(original,fiveCards)!;
   expect(plan.targets.map(t=>[t.position,t.key])).toEqual([[1,'sharing'],[3,'sharing'],[5,'sharing']]);
-  expect(plan.prompt).toContain('只返回新的evidenceRef');
+  expect(plan.prompt).toContain('只补正evidenceRef');
   expect(plan.prompt).toContain('不能引用uniquePoint');
   const fixes={goalPatches:[1,3,5].map(position=>({position,key:'sharing',item:{evidenceRef:'C'+position+'.description'}}))};
   const repaired=applyIdeaReaderGoalRepair(plan,fixes);
