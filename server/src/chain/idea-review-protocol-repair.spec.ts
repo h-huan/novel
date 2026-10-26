@@ -1,6 +1,6 @@
 import {describe,it,expect,vi} from 'vitest';
 import {ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows} from './idea-review-protocol-repair';
-import {ideaReviewResponseExample,ideaPayoffBridgeIssues} from './idea-review-evidence';
+import {ideaReviewResponseExample,ideaPayoffBridgeIssues,ideaReviewEvidenceReferenceIssues,resolveIdeaReviewEvidence} from './idea-review-evidence';
 import {presentationReviewIssues} from './idea-presentation-review';
 import {ChainController} from './chain.controller';
 const card={title:'当面退回委托',hook:'她把错误订单退回，拒绝替别人签字。',description:'她到唯一出口等负责人下班。',setting:'负责人下班只能从此门经过。',ending:'她在门口等到负责人。'};
@@ -9,6 +9,56 @@ const fixture=()=>{
  const value:any={reviews:[row]};value.reviews[0].readerGoals.immersion={supported:'',evidenceRef:'C1.description',reason:'她主动拒绝错误委托的选择与处境都有具体依据'};
  return value;
 };
+describe('five-card reader sharing citation regression (observed positions 1, 3, 5)',()=>{
+ const fiveCards=Array.from({length:5},(_,i)=>({...card,title:'第'+(i+1)+'张不同题材',
+  uniquePoint:'宣称有独特传播价值的主张，不能当故事证据'}));
+ const response=()=>{
+  const value:any=ideaReviewResponseExample(fiveCards);
+  for(const p of [1,3,5]){
+   value.reviews[p-1].readerGoals.sharing={
+    status:'weak',reason:'故事事件虽可转述，但还缺值得读者主动讨论的真实关系取舍',
+    evidenceRef:'C'+p+'.uniquePoint',
+   };
+  }
+  return value;
+ };
+ it('repairs only three invalid evidence refs and retains all verdicts, including weak sharing',()=>{
+  const original=response();
+  const plan=ideaReaderGoalRepairPlan(original,fiveCards)!;
+  expect(plan.targets.map(t=>[t.position,t.key])).toEqual([[1,'sharing'],[3,'sharing'],[5,'sharing']]);
+  expect(plan.prompt).toContain('只返回新的evidenceRef');
+  expect(plan.prompt).toContain('不能引用uniquePoint');
+  const fixes={goalPatches:[1,3,5].map(position=>({position,key:'sharing',item:{evidenceRef:'C'+position+'.description'}}))};
+  const repaired=applyIdeaReaderGoalRepair(plan,fixes);
+  expect(ideaReviewEvidenceReferenceIssues(repaired,fiveCards)).toEqual([]);
+  expect(presentationReviewIssues(resolveIdeaReviewEvidence(repaired,fiveCards),fiveCards,true)).toEqual([]);
+  for(const position of [1,3,5]){
+   expect(repaired.reviews[position-1].readerGoals.sharing.status).toBe('weak');
+   expect(repaired.reviews[position-1].readerGoals.sharing.reason).toBe(original.reviews[position-1].readerGoals.sharing.reason);
+  }
+  const forged=applyIdeaReaderGoalRepair(plan,{goalPatches:[1,3,5].map(position=>({
+   position,key:'sharing',item:{evidenceRef:'C'+position+'.uniquePoint'}}))});
+  expect(ideaReviewEvidenceReferenceIssues(forged,fiveCards)).toHaveLength(3);
+  expect(()=>applyIdeaReaderGoalRepair(plan,{goalPatches:[1,3,5].map(position=>({
+   position,key:'sharing',item:{evidenceRef:'C'+position+'.description',status:'supported'}}))})).toThrow('不能改变');
+ });
+ it('uses just the existing one protocol correction call and does not turn weak goals into pass',async()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  c.logger={warn:vi.fn(),error:vi.fn()};
+  const requestCalls:any[]=[];
+  c.realLLM={generate:vi.fn(async(request:any)=>{
+   requestCalls.push(request);request.physicalCallBudget.remaining--;
+   return {content:JSON.stringify(requestCalls.length===1?response():{
+    goalPatches:[1,3,5].map(position=>({position,key:'sharing',item:{evidenceRef:'C'+position+'.description'}})),
+   })};
+  })};
+  const result=await c.reviewIdeaPresentation(fiveCards,[],'',{remaining:2});
+  expect(requestCalls).toHaveLength(2);
+  expect(requestCalls[1].prompt).toContain('goalPatches');
+  expect(result).toHaveLength(5);
+  expect(result.filter((row:any)=>row.readerGoals.sharing.status==='weak')).toHaveLength(3);
+ });
+});
 describe('one targeted reader-goal protocol correction',()=>{
  it('returns only the invalid field while keeping all negative findings and causal gaps',()=>{
   const base=fixture();base.reviews[0].payoffCredible=false;base.reviews[0].payoffBridge={status:'gap',actionEvidenceRef:'C1.description',resultEvidenceRef:'C1.ending',reason:'原故事没有建立使结果必然成立的必要条件'};
