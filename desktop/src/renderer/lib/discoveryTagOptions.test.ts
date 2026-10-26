@@ -13,7 +13,7 @@ describe('discovery group identity and display label',()=>{
   expect(options.find(item=>item.value==='修仙')?.group).toBe('主题与设定');
   expect(options.find(item=>item.value==='亲情与利益')?.group).toBe('主题');
   expect(options.find(item=>item.value==='热血')?.group).toBe('情节与体验');
-  expect(DISCOVERY_TAG_GROUPS.some(item=>item.key==='世界与设定')).toBe(false);
+  expect(DISCOVERY_TAG_GROUPS.map(item=>item.key)).not.toContain('世界与设定');
  });
 });
 describe('字典与发现标签同步', () => {
