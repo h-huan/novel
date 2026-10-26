@@ -6540,9 +6540,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       physicalCallBudgetUsed:0};
     if(!canAttempt||repairBudget.remaining<=0)return unchanged;
     const budget=repairBudget,reviewBudget=sharedReviewBudget||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
-    // The two independent audits cover every changed premise and every affected
-    // pair; they run once per completed batch, not once per missing card.
-    if(reviewBudget.remaining<2)return unchanged;
+    // A grouping-mode source audit may require more than one physical call.
+    // Reserve the entire changed-source coverage PLUS one independent overlap
+    // call BEFORE buying a replacement proposal. Otherwise a doomed proposal
+    // consumes an expensive model call while its required Gate is unaffordable.
+    const grouping=readGenerationBudgets();
+    const sourceReviewCalls=grouping.reviewGroupingMode===0
+      ? 1 : Math.ceil(failedIds.length/grouping.sourceBatchSize);
+    const requiredReviewCalls=sourceReviewCalls+1;
+    if(reviewBudget.remaining<requiredReviewCalls)return unchanged;
+    const priorRejectedHistory=Array.isArray((current as any).selectionAudit?.rejectedHistory)
+      ? (current as any).selectionAudit.rejectedHistory.filter((row:{premiseId:string})=>
+        !current.selected.some(item=>String(item.premiseId)===String(row.premiseId))).slice(-8)
+      : [];
     const startingSelection=budget.remaining,startingReview=reviewBudget.remaining;
     const used=()=>startingSelection-budget.remaining+startingReview-reviewBudget.remaining;
     const scopedReview:PremiseSelectionReview={passed:false,issues:review.issues.filter(issue=>
@@ -6574,9 +6584,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         +'\n【可用备用ID（只能从这里选）】'+JSON.stringify(availableIds)
         +'\n【当前选择】'+JSON.stringify(current.selected)
         +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
-        +((current as any).selectionAudit?.rejectedHistory?.length
+        +(priorRejectedHistory.length
           ?'\n【本批先前已验证不合格的因果或分类路径】'
-            +JSON.stringify((current as any).selectionAudit.rejectedHistory.slice(-8))
+            +JSON.stringify(priorRejectedHistory)
           :'')
         +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
         +'\n【最终所有题材的差异合同】按已注入GEN-002对应合同执行，全部最终身份仍逐一比较。'

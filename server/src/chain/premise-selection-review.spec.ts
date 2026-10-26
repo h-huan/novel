@@ -573,6 +573,45 @@ describe('one bounded reserve before identity lock', () => {
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1); expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(2);
     expect(current.selected.map(item=>item.premiseId)).toEqual(['A','C']);
   });
+  it('does not spend the reserve model call if grouped source coverage and independent overlap cannot both be afforded',async()=>{
+    vi.mocked(budgetConfig.readGenerationBudgets).mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,
+      reviewGroupingMode:1,sourceBatchSize:1});
+    const pool=['A','B','C','D','E'].map(premise);
+    const current=normalizePremiseSelectionPayload({pool,selectedPremises:['A','B','C'].map(premise)},3,5);
+    const reject:PremiseSelectionReview={passed:false,issues:['B','C'].map(premiseId=>({
+      kind:'selection_fit',premiseId,referencePremiseId:premiseId,
+      quote:premise(premiseId).activeChoice,referenceQuote:premise(premiseId).storyCore,
+      reason:'当前候选缺少导致最终结果成立的因果必要条件'}))};
+    const c=Object.create(ChainController.prototype) as any;
+    c.llmCallWithRetry=vi.fn();c.reviewPremiseSelection=vi.fn();
+    const sourceCredits={remaining:2},proposalCredits={remaining:2};
+    const result=await c.reservePremiseSelection(current,current,reject,3,5,['悬疑'],'',
+      proposalCredits,['A'],[],sourceCredits);
+    expect(result.attempted).toBe(false);
+    expect(result.selection).toBe(current);expect(result.review).toBe(reject);
+    expect(sourceCredits.remaining).toBe(2);expect(proposalCredits.remaining).toBe(2);
+    expect(c.llmCallWithRetry).not.toHaveBeenCalled();
+    expect(c.reviewPremiseSelection).not.toHaveBeenCalled();
+  });
+  it('excludes a corrected retained identity from historical failures sent to reserve selection',async()=>{
+    const {initial,current,review}=fixture();
+    (current as any).selectionAudit={rejectedHistory:[
+      {premiseId:'A',kind:'selection_fit',reason:'旧版A证据缺口已经被修正，不能当成当前失败'},
+      {premiseId:'X',kind:'source_drift',reason:'先前淘汰X的因果条件被错误改写'},
+    ]};
+    const c=Object.create(ChainController.prototype) as any;
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+      expect(prompt).toContain('先前淘汰X的因果条件被错误改写');
+      expect(prompt).not.toContain('旧版A证据缺口已经被修正');
+      options.physicalCallBudget.remaining--;
+      return {data:{replacements:[{replacesPremiseId:'C',premise:premise('D'),comparisons:[compare('A')]}]}};
+    });
+    c.reviewPremiseSelection=vi.fn(async()=>({passed:true,issues:[]}));
+    const result=await c.reservePremiseSelection(initial,current,review,2,4,['悬疑'],'',
+      {remaining:2},['A'],[],{remaining:2});
+    expect(result.review.passed).toBe(true);
+    expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+  });
   it('keeps the prior reviewed failure when either reserve audit is unavailable', async () => {
     const {initial,current,review}=fixture(); const c=Object.create(ChainController.prototype) as any;
     c.llmCallWithRetry=vi.fn().mockResolvedValue({data:{replacements:[{replacesPremiseId:'C',premise:premise('D'),comparisons:[compare('A')]}]}});
