@@ -1,9 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import { chapterFactsForReview, buildOutlineFactReviewPrompt, outlineFactReviewNeedsContinuityPolicy, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
-import { buildOutlineContinuityContext, describeOutlineFactEvidence } from './outline-fact-ledger';
+import { buildOutlineContinuityContext, outlineFactRepairPromptDefects, describeOutlineFactEvidence } from './outline-fact-ledger';
 import { CHAPTER_RESPONSIBILITY_CRITERIA, chapterResponsibilityPlanningDirective } from '../../shared/src';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY } from '../../shared/src/system-workflow-rules.registry';
+
+describe('local fact repair evidence ownership and prompt size', () => {
+ it('retains both full source chapters and original gate evidence but removes duplicate full quotes in the repair request',()=>{
+   const chapter1='第1章写在传令当天：木牌三天前丢失。'+'此前世界事实与人物状态。'.repeat(450);
+   const chapter3='第3章写三天后审判：木牌三天前丢失。'+'审判世界细节与人物动作。'.repeat(550);
+   const defect=JSON.stringify({location1:'前章·第1章.content',quote1:chapter1,
+     location2:'本批·第3章.content',quote2:chapter3,
+     conflict:'第1章传令时已丢三天与三天后的第3章再次称三天前丢失，事件时点不一致。',
+     calculation:'(T0 - 3) !== (T0 + 3 - 3)'});
+   const raw=[defect,'行动结果缺少已发生的必要条件'];
+   const original=JSON.stringify(raw);
+   const trimmed=outlineFactRepairPromptDefects(raw);
+   expect(trimmed).toEqual([{
+     location1:'前章·第1章.content',location2:'本批·第3章.content',
+     conflict:'第1章传令时已丢三天与三天后的第3章再次称三天前丢失，事件时点不一致。',
+     calculation:'(T0 - 3) !== (T0 + 3 - 3)'},raw[1]]);
+   expect(JSON.stringify(trimmed).length).toBeLessThan(defect.length/8);
+   const prompt='【已确认前章原始资料】'+JSON.stringify([{content:chapter1}])
+     +'【当前章纲】'+JSON.stringify({content:chapter3})
+     +'【必须逐项修复】'+JSON.stringify(trimmed);
+   expect(prompt).toContain(chapter1);
+   expect(prompt).toContain(chapter3);
+   expect(prompt).toContain('T0 - 3');
+   expect(JSON.stringify(raw)).toBe(original);
+   expect(normalizeOutlineFactReview({consistent:false,contradictions:[{
+      location1:'前章·第1章.content',quote1:chapter1,
+      location2:'本批·第3章.content',quote2:chapter3,conflict:'时点不一致'}],ledger:[]})?.consistent).toBe(false);
+ });
+ it('does not guess locations or strip unstructured evidence',()=>{
+   for(const entry of ['剧情依赖不成立','{"conflict":"无出处不能成立"}','{"location1":"前章","quote1":"片段"}']){
+     expect(outlineFactRepairPromptDefects([entry])).toEqual([entry]);
+   }
+ });
+});
 
 describe('outline fact ledger review contract', () => {
   it.each(['第3章 characterStates.stateAfter', '第三章.scenes', 'chapterNumber=3.scenes'])('rejects a real quotation assigned to the wrong chapter: %s', location1 => {
