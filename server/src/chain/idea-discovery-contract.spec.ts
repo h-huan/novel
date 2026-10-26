@@ -33,6 +33,36 @@ const selectedPremise = (premiseId: string) => ({
   differentiation: '冲突由具体职业责任和不可替换关系共同推动，不靠换名套路',
 });
 
+describe('locked-card structuring reference transport',()=>{
+  it('retains full target facts and all peer causal differences without repeatedly sending peer source and self-praise',()=>{
+    const target={...selectedPremise('P1'),workingTitle:'目标题材',storyCore:'目标原池事实保留且不得更改',causalPlan:[{action:{field:'activeChoice',quote:'目标行动'}}]};
+    const peer={...selectedPremise('P2'),workingTitle:'参照题材',storyCategory:'都市日常',
+      storyCore:'参照原池完整故事不应在每张其它卡里重复'.repeat(60),
+      differentiation:'参照候选自己声称新颖不得替代真正故事区别'.repeat(30),
+      causalPlan:[{action:{field:'activeChoice',quote:'参照重复行动'},conditions:[],result:{field:'payoff',quote:'参照重复结局'}}]};
+    const before=structuredClone([target,peer]);
+    const prompt=ideaCardStructuringDirective(target,[target,peer],false);
+    const refs=JSON.parse(prompt.split('【同批差异参照（只作边界，不生成或借用其故事路径）】\\n')[1]);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toEqual({
+      workingTitle:peer.workingTitle,storyCategory:peer.storyCategory,
+      protagonistSituation:peer.protagonistSituation,openingEvent:peer.openingEvent,
+      coreConflict:peer.coreConflict,activeChoice:peer.activeChoice,
+      escalation:peer.escalation,reversalEffect:peer.reversalEffect,
+      payoff:peer.payoff,irreplaceableCarrier:peer.irreplaceableCarrier,
+      secondOrderConsequence:peer.secondOrderConsequence,readerQuestion:peer.readerQuestion,
+    });
+    expect(prompt).toContain(target.storyCore);
+    expect(prompt).toContain('目标行动');
+    expect(prompt).not.toContain(peer.storyCore);
+    expect(prompt).not.toContain(peer.differentiation);
+    expect(prompt).not.toContain('参照重复行动');
+    expect([target,peer]).toEqual(before);
+    const oldPeers=Object.fromEntries(Object.entries(peer).filter(([key])=>key!=='premiseId'&&key!=='causalPlan'));
+    expect(JSON.stringify(refs).length).toBeLessThan(JSON.stringify([oldPeers]).length/2);
+  });
+});
+
 describe('requested genre is an identity constraint, not a duplicate verdict',()=>{
   it('keeps the selected genre shell and requires an event-level distinguishing beat without new fields',()=>{
     const prompt=ideaPremiseSelectionDirective('short_story',5,15);

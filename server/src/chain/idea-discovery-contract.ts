@@ -262,8 +262,17 @@ export function ideaCardStructuringDirective(
   const safePremise = Object.fromEntries(
     Object.entries(selectedPremise || {}).filter(([key]) => key !== 'premiseId'),
   );
+  // Peers are difference boundaries, not sources to be expanded again.
+  // Keep every causal action, condition, reversal and consequence for comparison;
+  // avoid retransmitting raw storyCore, internal causalPlan and novelty self-claims
+  // in each of the other selected cards' independent structuring requests.
+  const peerDifferenceFields = new Set([
+    'workingTitle', 'storyCategory', 'protagonistSituation', 'openingEvent',
+    'coreConflict', 'activeChoice', 'escalation', 'reversalEffect', 'payoff',
+    'irreplaceableCarrier', 'secondOrderConsequence', 'readerQuestion',
+  ]);
   const references = batch.filter(item => item.premiseId !== selectedPremise.premiseId).map(item =>
-    Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'premiseId' && key !== 'causalPlan')));
+    Object.fromEntries(Object.entries(item).filter(([key]) => peerDifferenceFields.has(key))));
   return `【完整题材卡结构化】
 ${includePreselectionPolicy ? IDEA_PRESELECTION_REVIEW_POLICY : "按已注入GEN-002锁定前继承与差异规则执行。"}
 这个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把这一项结构化成恰好 1 张完整题材卡，不再重新选题。
