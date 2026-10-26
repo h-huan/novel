@@ -6280,6 +6280,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
         ...(partial ? { partial: true, minimumSelectableCount, selectionStopReason: 'mature_selection_shortfall', completeCardGatePending: true } : {}) } };
     }
+    // Preserve evidenced negative candidates across THIS request. A replacement
+    // model must not lose the prior round's independently verified failure modes.
+    // This is evidence reuse, not another Gate, a call, or a larger budget.
+    const rejectedHistory:Array<{premiseId:string;kind:string;reason:string}>=[];
+    const rememberRejected=(review:PremiseSelectionReview)=>{
+      for(const issue of review.issues||[]){
+        const row={premiseId:String(issue.premiseId),kind:String(issue.kind),reason:String(issue.reason||'').trim()};
+        if(row.premiseId&&row.reason&&!rejectedHistory.some(item=>
+          item.premiseId===row.premiseId&&item.kind===row.kind&&item.reason===row.reason))
+          rejectedHistory.push(row);
+      }
+    };
+    rememberRejected(initialReview);
     const repairPlan = premiseReselectionPlan(initial, initialReview);
     // If enough independently reviewed premises remain, stop here instead of spending
     // more calls trying to fill every position. Full-card gates still run afterwards.
@@ -6360,7 +6373,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const result=await this.llmCallWithRetry<any>(unusedIds?'锁定前原池备用汇总重选':'锁定前原池重选',
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
           +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(selected.selected)
-          +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)+'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
+          +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)
+          +(rejectedHistory.some(row=>!ids.has(row.premiseId))
+            ?'\n【此前独立复核已确认的失败路径（候选不得重用同类缺失条件）】'
+              +JSON.stringify(rejectedHistory.filter(row=>!ids.has(row.premiseId)).slice(-8))
+            :'')
+          +'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool可纠正原身份展开。不得复制其它位置、改变分类或用正常项填空。'
           +'\n每个premise额外必返causalPlan，按下面JSON结构与已注入GEN-002规则逐项锚定原文；条数由实际事件决定，不按示例凑数。'
@@ -6408,6 +6426,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         ? await reviewBoth(selected,changeScope,initialReview)
         : retainPremiseReviewEvidence(initial,initialReview,selected);
     }
+    rememberRejected(postReselectionReview);
     let finalReview=postReselectionReview;
     const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
       attemptedIds=new Set([...initial.selected,...selected.selected].map(item=>String(item.premiseId)));
@@ -6458,6 +6477,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const changeScope=selectionChangeScope(before,selected);
       if(!changeScope.focusIds.length)break;
       finalReview=await reviewBoth(selected,changeScope,finalReview);
+      rememberRejected(finalReview);
       if(!completed)break;
     }
     const reserveAudit=reserveHistory.length?{attempted:true,error:null,...reserveHistory[reserveHistory.length-1],
@@ -6478,7 +6498,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         ...budgetPartialAudit, partial: true, excludedPremiseIds: [...unresolvedIds,...retained.excludedPremiseIds],
         reasons: [...(budgetPartialAudit.reasons || []),...retained.reasons], completeCardGatePending: true } };
     }
-    return { ...selected, selectionAudit: { initialReview, reselectionAttempted: true, reserve: reserveAudit, finalReview, ...budgetPartialAudit } };
+    return { ...selected, selectionAudit: { initialReview, reselectionAttempted: true, reserve: reserveAudit, finalReview,
+      rejectedHistory, ...budgetPartialAudit } };
   }
 
   private async reservePremiseSelection(initial: ReturnType<typeof normalizePremiseSelectionPayload>,
@@ -6531,6 +6552,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         +'\n【可用备用ID（只能从这里选）】'+JSON.stringify(availableIds)
         +'\n【当前选择】'+JSON.stringify(current.selected)
         +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
+        +((current as any).selectionAudit?.rejectedHistory?.length
+          ?'\n【本批先前已验证不合格的因果或分类路径】'
+            +JSON.stringify((current as any).selectionAudit.rejectedHistory.slice(-8))
+          :'')
         +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
         +'\n【最终所有题材的差异合同】按已注入GEN-002对应合同执行，全部最终身份仍逐一比较。'
         +'\n每张替代题材的causalPlan须引用该题材已写的行动、条件和结果，不得发明缺失条件。'

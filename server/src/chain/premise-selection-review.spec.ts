@@ -745,6 +745,11 @@ it('continues beyond one reserve round using untried original identities and one
  expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['E','B']);
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(3);expect(shared.reselection.remaining).toBe(1);
  expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selected[1]).toEqual(input.selected[1]);
+ const prompts=c.llmCallWithRetry.mock.calls.map((call:any[])=>String(call[1]));
+ expect(prompts[1]).toContain('此前独立复核已确认的失败路径');
+ expect(prompts[1]).toContain('"premiseId":"A"');
+ expect(prompts[2]).toContain('"premiseId":"C"');
+ expect(result.selectionAudit.rejectedHistory.map((row:any)=>row.premiseId)).toEqual(['A','C','D']);
 });
 
 it('replaces two missing positions under one source and one overlap review, preserving the passed position',async()=>{
