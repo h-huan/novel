@@ -20,10 +20,10 @@ export function ideaReaderGoalRepairPlan(value:any,cards:readonly any[],referenc
  const positions=new Set(targets.map(target=>target.position));
  return {base,targets,prompt:'只补正点名的readerGoals协议项，不重新审整批，不改故事或其它判断。'
   +'原有效status、reason必须原样保留；缺失状态须按实际故事判断，不能从错误字段名推定通过。'
-  +'每项返回status(supported|weak|unknown)、本卡evidenceRef、至少8字reason；真实薄弱处保持weak/unknown。'
+  +'已经具有合法status及至少8字reason的项，只返回新的evidenceRef（无法找到真实支持时留空，原审核不得视为通过）；status和reason由服务器保留，无须重抄。缺失或不合法的status/reason才返回完整status、evidenceRef、reason；绝不可升级原弱项或改写原理由。'
   +'\n【待补正固定位置】'+JSON.stringify(targets)
   +'\n【这些卡的完整故事证据目录】'+JSON.stringify(ideaReviewEvidenceCatalog(cards).filter(row=>positions.has(row.position)))
-  +'\n只输出JSON:{"goalPatches":[{"position":实际位置,"key":"点名项","item":{"status":"supported|weak|unknown","evidenceRef":"本卡编号","reason":"具体理由"}}]}。每个点名项恰好一条，其它项不返回。'};
+  +'\n只输出JSON:{"goalPatches":[{"position":实际位置,"key":"点名项","item":{"evidenceRef":"本卡有效故事字段编号"}}]}。已有合法状态及理由的item只能带evidenceRef；状态或理由缺失者须额外返回真实status及至少8字reason。不能引用uniquePoint、noveltyProof等自述卖点字段，不得因无法找出证据而编造编号。每个点名项恰好一条，其它项不返回。'};
 }
 export function applyIdeaReaderGoalRepair(plan:NonNullable<ReturnType<typeof ideaReaderGoalRepairPlan>>,value:any){
  const patches=value?.goalPatches;
@@ -35,12 +35,26 @@ export function applyIdeaReaderGoalRepair(plan:NonNullable<ReturnType<typeof ide
   if(!target||seen.has(key)||!patch.item||typeof patch.item!=='object'||Array.isArray(patch.item))throw Error('阅读目标补正位置未知、重复或缺少item');
   seen.add(key);
   const before=target.previous;
-  if(before&&['supported','weak','unknown'].includes(before.status)&&patch.item.status!==before.status)
+  if(before&&['supported','weak','unknown'].includes(before.status)
+    &&patch.item.status!==undefined&&patch.item.status!==before.status)
    throw Error('协议补正不能改变原有效阅读目标状态');
-  if(typeof before?.reason==='string'&&before.reason.trim().length>=8&&patch.item.reason!==before.reason)
+  if(typeof before?.reason==='string'&&before.reason.trim().length>=8
+    &&patch.item.reason!==undefined&&patch.item.reason!==before.reason)
    throw Error('协议补正不能改写原有效阅读目标理由');
+  const statusValid=before&&['supported','weak','unknown'].includes(before.status);
+  const reasonValid=typeof before?.reason==='string'&&before.reason.trim().length>=8;
+  // Pure citation correction must never ask the model to retranscribe existing
+  // judgments. Their statuses/reasons stay byte-for-byte identical; the normal
+  // full report validator still proves the selected ref belongs to this card.
+  const revisedItem=statusValid&&reasonValid
+    ?{...before,evidenceRef:patch.item.evidenceRef}
+    :{...before,...patch.item};
+  if(!statusValid&&!['supported','weak','unknown'].includes(revisedItem.status))
+   throw Error('缺失的阅读目标状态未补齐');
+  if(!reasonValid&&(typeof revisedItem.reason!=='string'||revisedItem.reason.trim().length<8))
+   throw Error('缺失的阅读目标理由未补齐');
   next.reviews.find((row:any)=>row.position===target.position).readerGoals={
-   ...next.reviews.find((row:any)=>row.position===target.position).readerGoals,[target.key]:patch.item};
+   ...next.reviews.find((row:any)=>row.position===target.position).readerGoals,[target.key]:revisedItem};
  }
  return next;
 }
