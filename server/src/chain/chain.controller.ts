@@ -6163,7 +6163,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
       + (overlapFocusIds.length ? '\n【本次变化项】' + JSON.stringify(overlapFocusIds) + '；必须逐对比较所有至少一端属于本次变化项的候选对，每个无序候选对只审一次。变化项之间也要互相比较；保留项之间内容未变且已有独立审核结论，本次不重复审这些旧配对。issues只能包含至少一端为本次变化项的真实同构问题，不返回保留项之间的问题。' : '')
       + '\n【待锁定已选胚子】' + JSON.stringify(mode==='source_drift'?sourceReviewSelectionView(selection.selected):selection.selected)
-      + (mode === 'source_drift' ? premiseCategoryReviewDirective(selection) : '')
+      + (mode === 'source_drift' ? premiseCategoryReviewDirective(selection, requiredGenres.length === 0) : '')
       + (mode === 'source_drift' ? premisePayoffReviewDirective(selection) : '')
       + (mode === 'source_drift'
         ? '\n【逐字段来源核查目录】' + JSON.stringify(premiseSourceComparisonCatalog(selection).map(({ref,premiseId,field})=>({ref,premiseId,field})))
