@@ -18,7 +18,7 @@ import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
-import { PREMISE_REPLACEMENT_COMPARISON_POLICY, SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
 import { createReviewLimiter } from './review-limiter';
@@ -6363,10 +6363,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)+'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool可纠正原身份展开。不得复制其它位置、改变分类或用正常项填空。'
-          +'\n每个premise额外必返causalPlan，沿原池重新核对全部关键状态转移，锚点逐字引用本次修订后的筛选字段；保留已成立条件，不只补点名结果。结构示例（条数按实际关键环节，不照抄示例文字）='+JSON.stringify(premiseCausalPlanExample())
+          +'\n每个premise额外必返causalPlan，按下面JSON结构与已注入GEN-002规则逐项锚定原文；条数由实际事件决定，不按示例凑数。'
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n每项comparisons须逐一覆盖合并后其余全部最终题材ID，包括本次其它修订项的新ID；不是只比较正常项，也不要沿用已被替换的旧ID。模型须先确定全部最终候选，再核对各项选择、升级、反转、代价的真实区别。'
-          +'\n'+PREMISE_REPLACEMENT_COMPARISON_POLICY+'\n分类候选='+JSON.stringify(categories)
+          +'\n按已注入GEN-002的最终差异比较合同执行。分类候选='+JSON.stringify(categories)
           +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","comparisons":[{"referencePremiseId":"其余最终ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"因果升级差别至少12字","reversalDifference":"胜负条件差别至少12字","consequenceDifference":"连带代价差别至少12字"}],"premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
           {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:reselectionBudget,timeout:LLM_TUNABLES.timeoutSimple(),
             validate:value=>{try{normalize(value);return true;}catch{return false;}},
@@ -6532,7 +6532,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         +'\n【当前选择】'+JSON.stringify(current.selected)
         +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
         +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
-        +'\n【最终所有题材的差异合同】'+PREMISE_REPLACEMENT_COMPARISON_POLICY
+        +'\n【最终所有题材的差异合同】按已注入GEN-002对应合同执行，全部最终身份仍逐一比较。
         +'\n每张替代题材的causalPlan须引用该题材已写的行动、条件和结果，不得发明缺失条件。'
         +'\n只输出JSON:{"replacements":[{"replacesPremiseId":"缺额ID","comparisons":[{"referencePremiseId":"其余最终题材ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"升级差别至少12字","reversalDifference":"反转差别至少12字","consequenceDifference":"代价差别至少12字"}],"premise":{"premiseId":"可选原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"实际分类K编号"}}]}；replacements恰好'+failedIds.length+'项，不回传已通过项。',
         {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:budget,
