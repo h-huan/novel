@@ -1,5 +1,5 @@
 /** Author choices, not a claim about any platform's official submission fields. */
-export const CREATIVE_DICTIONARY_VERSION = 27;
+export const CREATIVE_DICTIONARY_VERSION = 28;
 export type CreativeTagGroup = '主题' | '主题与设定' | '人物与关系' | '情节与体验' | '平台标签（待核实分组）';
 export const DISCOVERY_TAG_GROUPS: ReadonlyArray<{ key: CreativeTagGroup; label: string; description: string }> = [
   { key: '主题', label: '主题', description: '故事关注的问题，例如家庭责任、自我认同、亲情与利益。' },
@@ -63,6 +63,9 @@ export const ADDITIONAL_CREATIVE_TAGS: Record<string, { group: CreativeTagGroup;
   '自由与责任': { group: '主题', guide: '个人自由与对他人的责任形成两难，结局回应选择及其代价。' },
   '正义与代价': { group: '主题', guide: '追求公正的行动受到现实限制，结果体现选择的收益与损失。' },
   '偏见与和解': { group: '主题', guide: '偏见通过事件被检验，和解需要认知变化与实际行动。' },
+  '野心与底线': { group: '主题', guide: '人物追求地位、成功或资源时遭遇不可回避的底线选择，收益与妥协的后果进入具体事件，不以野心标签替代行动。' },
+  '规则与人情': { group: '主题', guide: '正式规则与私人情义形成实际冲突，人物在权责、关系及公平之间行动并承担结果，不靠旁白裁判立场。' },
+  '归属与离开': { group: '主题', guide: '人物对家庭、群体或生活位置的归属需求与离开的必要性形成真实抉择，离开或留下改变关系及可得机会。' },
   '身份错位': { group: '主题与设定', guide: '身份变化影响权限、关系与知情范围，原身份和新身份的后果保持连续。' },
   '平行世界': { group: '主题与设定', guide: '世界之间的差异、联系和跨越条件清晰，信息与人物状态按规则承接。' },
   '古穿今': { group: '主题与设定', guide: '古代人物进入现代，知识局限、适应过程和身份问题参与冲突。' },
