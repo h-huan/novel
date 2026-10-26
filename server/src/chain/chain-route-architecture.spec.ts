@@ -62,7 +62,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('const canReviewBackup=allowBackup');
     expect(source).toContain('pendingBackup.current=null');
     expect(source).toContain('isReviewOutputCapacityError(error)');
-    expect(source).toContain('const independentVerdicts=await reviewBoth(auditSelection,changeScope,finalReview)');
+    expect(source).toContain('independentVerdicts=await reviewBoth(auditSelection,changeScope,finalReview)');
+    expect(source).toContain('independentVerdicts=await reviewBoth(primary,primaryScope,finalReview)');
     expect(source).toContain('retainPremiseReviewEvidence(auditSelection,independentVerdicts,primary)');
     expect(source).toContain('retainPremiseReviewEvidence(auditSelection,independentVerdicts,backup!)');
 
