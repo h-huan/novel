@@ -197,6 +197,25 @@ function stampLocalCheckoutRevision(): void {
   }
 }
 
+/**
+ * Preflight the existing listener BEFORE Nest providers and SQLite open.
+ * A healthy HTTP response alone is not a revision/ownership certificate.
+ * Preserve the old no-second-database behavior, but never exit successfully
+ * without starting the requested process.
+ */
+async function probeExistingNovelServer(port: number): Promise<{ commit: string | null } | null> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!response.ok) return null;
+    const body = await response.json() as { status?: string; build?: { commit?: string | null } };
+    return body.status === 'ok' ? { commit: body.build?.commit || null } : null;
+  } catch {
+    return null;
+  }
+}
+
 if (require.main === module) {
   // 陈旧产物必须在占用端口之前就拦住：先起来再发现问题，只会留下一个
   // 「健康检查全绿但跑着上一版代码」的进程，用户从日志根本分辨不出来。
@@ -207,10 +226,14 @@ if (require.main === module) {
     console.error(`[server] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
-  // A pre-existing healthy HTTP service is not proof of the same revision.
-  // Never exit successfully without starting this process. Let bootstrap
-  // surface EADDRINUSE and retain the existing server untouched.
-  bootstrap().then((app) => {
+  // Probe before creating providers or opening the SQLite connection.
+  const cliPort = parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
+  probeExistingNovelServer(cliPort).then((existing) => {
+    if (existing) {
+      throw new Error(`端口 ${cliPort} 已有后端运行（commit=${existing.commit || 'unknown'}）；当前进程未启动，也没有复用旧进程。请先安全结束已有任务，再使用项目统一重启入口。`);
+    }
+    return bootstrap();
+  }).then((app) => {
     if (process.env.NOVEL_MANAGED_SERVER !== '1') return;
 
     let closing = false;
