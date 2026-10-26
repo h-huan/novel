@@ -140,7 +140,7 @@ import { findChapterOutline, readOrderedChapterOutlines, chapterOutlineStorySour
 import { hasCurrentProfile } from '../modules/character/character-profile';
 import { chapterLengthReviewBatches, chapterLengthReviewEvidenceErrors, chapterLengthEvidenceAnchors, materializeChapterLengthEvidenceCorrection, chapterLengthConflictProofErrors, mergeChapterLengthEvidenceCorrection, chapterLengthReviewFindings, applyChapterLengthReviewRepairs, chapterLengthReviewInput, validateChapterLengthReview, applyChapterLengthInsertions, chapterLengthInsertionChoices, chapterLengthDigitalTimeValues, CHAPTER_LENGTH_INSERTION_LIMIT, CHAPTER_LENGTH_INSERTION_STATE_CONTRACT } from './chapter-length-expansion';
 import { chapterNumberFromOrder } from '../../shared/src';
-import { outlineFactReviewNeedsContinuityPolicy, outlineFactEvidenceAnchors, resolveOutlineFactEvidence, buildOutlineContinuityContext, OUTLINE_RELATIVE_TIME_SOURCE_RULE, describeOutlineFactUpdateProtocol, describeOutlineFactEvidence, chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineChaptersForFactReview, normalizeOutlineFactReview, type OutlineFactLedgerEntry, type OutlineFactReview } from './outline-fact-ledger';
+import { outlineFactReviewNeedsContinuityPolicy, outlineFactEvidenceAnchors, resolveOutlineFactEvidence, buildOutlineContinuityContext, describeOutlineFactUpdateProtocol, describeOutlineFactEvidence, chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineChaptersForFactReview, normalizeOutlineFactReview, type OutlineFactLedgerEntry, type OutlineFactReview } from './outline-fact-ledger';
 import {
   CHAPTER_FORESHADOWING_FIELD,
   CHAPTER_FORESHADOWING_CONTRACT,
@@ -6616,7 +6616,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     let result: Awaited<ReturnType<ChainController['llmCallWithRetry']>>;
     try {
       result = await this.llmCallWithRetry<any>(label,
-        executionStandard + '\n' + (sourceChapters.length ? OUTLINE_RELATIVE_TIME_SOURCE_RULE + '\n' : '') + buildOutlineFactReviewPrompt({ canonicalBrief, world, previousLedger, chapters, sourceChapters,
+        executionStandard + '\n' + buildOutlineFactReviewPrompt({ canonicalBrief, world, previousLedger, chapters, sourceChapters,
           includePolicy: outlineFactReviewNeedsContinuityPolicy(executionStandard) }),
         { projectId, chapterIndex, scenario: 'review', temperature: 0.1,stepKey:stepKey||'creation_outline_fact_dependencies',
           timeout: LLM_TUNABLES.timeoutComplex(), maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
@@ -8328,7 +8328,6 @@ ${(() => {
 【已保存世界规则】${JSON.stringify(currentWorldForOutlineReview)}
 【已确认前章原始资料】${JSON.stringify(acceptedOutlineSources)}
 【前章事实台账】${JSON.stringify(priorOutlineFactLedger)}
-【相对时间与角色认知换算；只改当前章】${OUTLINE_RELATIVE_TIME_SOURCE_RULE}
 【当前章纲】${JSON.stringify(chData)}
 【必须逐项修复】${JSON.stringify(defects)}
 【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(actionRepairEvidence)}
