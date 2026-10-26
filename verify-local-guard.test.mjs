@@ -37,6 +37,23 @@ function run(report) {
   assert.doesNotMatch(launcher, /if \(await backendHealthy\(\)\) \{\s*console\.log\('\[dev\] reuse healthy backend/u);
 }
 
+// The existing restart.ps1 is itself a backend launcher. Both its normal
+// build path and -Watch path must stamp the revision before Start-Process,
+// otherwise desktop/scripts/dev.js rejects this project's own healthy server.
+{
+  const restart = fs.readFileSync(path.join(root, 'restart.ps1'), 'utf8');
+  const backendBranch = restart.indexOf("if ($Only -in @('all', 'back')) {");
+  const gitHead = restart.indexOf('git -C $ProjectRoot rev-parse --verify HEAD');
+  const stamp = restart.indexOf('$env:NOVEL_BUILD_COMMIT = $localBuildCommit');
+  const watchStart = restart.indexOf('$backend = Start-Process', stamp);
+  const normalStart = restart.indexOf('$backend = Start-Process', watchStart + 1);
+  assert.ok(backendBranch >= 0 && gitHead > backendBranch && stamp > gitHead,
+    'backend version must be captured inside backend startup');
+  assert.ok(watchStart > stamp && normalStart > watchStart,
+    'both backend launch paths must inherit the version stamp');
+  assert.match(restart, /\$gitStatus -ne 0 -or \$localBuildCommit -notmatch/u);
+}
+
 const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus: 'present' };
 
 // Quick diagnostics must allow one project and preserve the documented behavior.
