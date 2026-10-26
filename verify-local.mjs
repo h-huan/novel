@@ -74,6 +74,9 @@ function triageThreeIssues(report) {
       healthResponseStatus: runtime.health?.data?.status ?? null,
       healthError: runtime.health?.error ?? (serverReady ? null : `HTTP ${runtime.health?.status ?? 'unknown'}`),
       backendLoadedRevision: runtime.backendIdentity?.loadedLocalRevision ?? 'unknown',
+      currentRevisionVerified: serverReady && runtime.backendIdentity?.loadedLocalRevision === 'match',
+      evidenceScope: runtime.backendIdentity?.loadedLocalRevision === 'mismatch'
+        ? 'historical_only' : serverReady ? 'current_revision_or_unverified' : 'unavailable',
       localGitDirty: report?.git?.dirty ?? null,
       serverStartupStderrCollected: false,
       // The verification script must not start/kill the user's local dev server.
@@ -119,6 +122,8 @@ function triageThreeIssues(report) {
     },
     missingEvidence: [
       ...(!serverReady ? ['启动并验证当前 http 健康检查；需提供服务端启动错误输出与运行身份，否则三个问题的实时链路均不可判定。'] : []),
+      ...(serverReady && runtime.backendIdentity?.loadedLocalRevision !== 'match'
+        ? ['后端运行提交与本地 HEAD 不一致或未知：当前证据只能用于历史诊断，不能证明最新修复已生效；请先确认正在生成的任务已完成，再安全重启同一项目后端并复验。'] : []),
       ...(serverReady && !audit.available ? ['缺少最近一次灵感请求审计；实际执行发现后再验收。'] : []),
       ...(serverReady && !metricsAvailable ? ['缺少灵感生成逐步模型指标与请求关联证据；不能计算实际模型耗时、重试次数。'] : []),
       ...(serverReady && projects.length === 0 ? ['缺少项目创建运行记录；需要失败项目的生成运行与完整性审计。'] : []),
@@ -138,7 +143,8 @@ function threeIssueMarkdown(triage) {
       + '；HTTP：' + show(triage.prerequisite.healthHttpStatus)
       + '；应用状态：' + show(triage.prerequisite.healthResponseStatus)
       + '；错误：' + show(triage.prerequisite.healthError)
-      + '；后端修订匹配：' + show(triage.prerequisite.backendLoadedRevision),
+      + '；后端修订匹配：' + show(triage.prerequisite.backendLoadedRevision)
+      + '；证据适用范围：' + show(triage.prerequisite.evidenceScope),
     '- ① 灵感耗时：' + latency.evidenceStatus + '；墙钟毫秒：' + show(latency.wallMs)
       + '；调用指标：' + (latency.callMetricsAvailable ? '已采集' : '未采集（不能记为0）'),
     '- ② 题材数量：' + count.evidenceStatus + '；请求：' + show(count.requested)
