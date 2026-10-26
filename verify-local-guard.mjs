@@ -22,6 +22,19 @@ if (!backendIdentity || typeof backendIdentity !== 'object') {
   else if (fullTests && backendIdentity.diagnosticsMarkerStatus !== 'present') problems.add('backend_diagnostics_marker_unknown');
 }
 
+// Revision identity is upstream of every current-run business assertion.
+ // Keep saved historical snapshots readable, but never certify them as if this
+ // checkout executed them. A reachable server is not a verified server.
+const staleBackend = backendIdentity?.loadedLocalRevision === 'mismatch';
+if (staleBackend) {
+  report.runtime.preflight = {
+    ok: false, rootCause: 'backend_loaded_revision_mismatch',
+    downstreamSkipped: ['current_revision_production_acceptance'],
+    evidenceScope: 'historical_only',
+    detail: '本地 Git HEAD 与健康接口 build.commit 不一致；下方记录来自旧后端，不能证明当前修复是否生效。',
+  };
+}
+
 if (fullTests && mode !== 'single_project') {
   if (!report?.options?.shortProjectId) problems.add('short_project_missing');
   if (!report?.options?.longProjectId) problems.add('long_project_missing');
@@ -61,7 +74,8 @@ const failedTests = Array.isArray(report?.verdict?.failedTests) ? report.verdict
 report.verdict = {
   ...(report.verdict || {}),
   status: runtimeProblems.length === 0 && failedTests.length === 0 ? 'passed' : 'failed',
-  rootCause: runtimeProblems[0] || report?.verdict?.rootCause || null,
+  rootCause: staleBackend ? 'backend_loaded_revision_mismatch'
+    : runtimeProblems[0] || report?.verdict?.rootCause || null,
   failedTests,
   runtimeProblems,
 };
