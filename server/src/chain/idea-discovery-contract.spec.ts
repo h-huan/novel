@@ -42,7 +42,7 @@ describe('locked-card structuring reference transport',()=>{
       causalPlan:[{action:{field:'activeChoice',quote:'参照重复行动'},conditions:[],result:{field:'payoff',quote:'参照重复结局'}}]};
     const before=structuredClone([target,peer]);
     const prompt=ideaCardStructuringDirective(target,[target,peer],false);
-    const refs=JSON.parse(prompt.split('【同批差异参照（只作边界，不生成或借用其故事路径）】\\n')[1]);
+    const refs=JSON.parse(prompt.split('【同批差异参照（只作边界，不生成或借用其故事路径）】')[1].trim());
     expect(refs).toHaveLength(1);
     expect(refs[0]).toEqual({
       workingTitle:peer.workingTitle,storyCategory:peer.storyCategory,
