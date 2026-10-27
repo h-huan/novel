@@ -767,6 +767,44 @@ it('does not buy a third selection when two remaining review credits cannot cove
  expect(c.logger.warn.mock.calls.map(([message]:string[])=>message).join(' ')).toContain('终检预算不足');
 });
 
+it('chooses two first-round alternates after one shared independent review without increasing call budgets',async()=>{
+ const initial=normalizePremiseSelectionPayload({
+  pool:['A','B','C','D','E','F','G'].map(premise),
+  selectedPremises:['A','B','C'].map(premise)},3,7);
+ const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
+ c.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string,budget:any)=>{
+  budget.remaining--;
+  if(mode==='overlap')return {passed:true,issues:[]};
+  const issues=current.selected.filter((row:any)=>['A','B','D','E'].includes(row.premiseId))
+   .map((row:any)=>({kind:'selection_fit',premiseId:row.premiseId,referencePremiseId:row.premiseId,
+     quote:row.activeChoice,referenceQuote:initial.pool.find(seed=>seed.premiseId===row.premiseId)!.storyCore,
+     reason:'该候选缺少结局必要条件，不能仅凭角色决定宣告胜利'}));
+  return {passed:issues.length===0,issues};
+ });
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+  options.physicalCallBudget.remaining--;
+  expect(prompt).toContain('backupReplacements');
+  const value={replacements:[
+    {replacesPremiseId:'A',premise:premise('D'),comparisons:['E','C'].map(compare)},
+    {replacesPremiseId:'B',premise:premise('E'),comparisons:['D','C'].map(compare)}],
+   backupReplacements:[
+    {replacesPremiseId:'A',premise:premise('F'),comparisons:['G','C'].map(compare)},
+    {replacesPremiseId:'B',premise:premise('G'),comparisons:['F','C'].map(compare)}]};
+  expect(options.validate(value)).toBe(true);
+  return {data:value};
+ });
+ const shared={reviews:{remaining:15},reselection:{remaining:3}};
+ const result=await c.reconcilePremiseSelection(initial,3,7,['悬疑'],'',[],shared);
+ expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['F','G','C']);
+ expect(result.selectionAudit.finalReview.passed).toBe(true);
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+ expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
+ expect(shared.reselection.remaining).toBe(2);
+ expect(result.selectionAudit.rejectedHistory.some((issue:any)=>issue.premiseId==='D')).toBe(true);
+ expect(result.selectionAudit.rejectedHistory.some((issue:any)=>issue.premiseId==='E')).toBe(true);
+ expect(result.selected[2]).toEqual(initial.selected[2]);
+});
+
 it('accepts only a backup with independent source and overlap approval, in the SAME reserve model call',async()=>{
  const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
    selectedPremises:['A','B'].map(premise)},2,5);
