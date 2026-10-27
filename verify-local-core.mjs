@@ -834,7 +834,7 @@ function detailedIdeaMarkdown() {
         + '；内部重试=' + (trace.totals?.internalRetries ?? '未知')
         + '；只按请求 ID 关联，不代表该请求已结束',
       ...(trace.stepBreakdown || []).map(step =>
-        '- ' + step.stepKey + '：调用 ' + step.logicalCalls + '，累计 ' + step.sumDurationMs
+        '- ' + step.stepKey + '：调用 ' + step.calls + '，累计 ' + step.sumDurationMs
         + ' ms，Token ' + (step.totalTokens ?? '未知')),
     ]),
     '',    '- 本地验证运行 ID：' + verificationRunId,
