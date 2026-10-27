@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { generationRulesetSnapshotIsCurrent } from './generation-metrics.service';
+import { DatabaseSync } from 'node:sqlite';
+import { GenerationMetricsService, generationRulesetSnapshotIsCurrent } from './generation-metrics.service';
 
 describe('generation ruleset staleness', () => {
   const digest = 'a'.repeat(64);
@@ -16,4 +17,30 @@ describe('generation ruleset staleness', () => {
     expect(generationRulesetSnapshotIsCurrent('{bad json', 77, digest)).toBe(false);
     expect(generationRulesetSnapshotIsCurrent(null, 77, digest)).toBe(false);
   });
+});
+
+describe('generation run request identity at model-call start', () => {
+ it('persists exact discoveryRequestId before any finished step metric exists', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+   db.exec(`CREATE TABLE generation_runs (
+    id TEXT PRIMARY KEY, project_id TEXT, discovery_request_id TEXT, stage TEXT, scenario TEXT,
+    status TEXT, constitution_revision INTEGER, constitution_json TEXT, prompt_version TEXT,
+    context_version TEXT, context_snapshot TEXT, chapter_index INTEGER, standards_snapshot TEXT,
+    started_at TEXT)`);
+   const service = new GenerationMetricsService({ getDb: () => db } as any);
+   const idea = service.beginRun(undefined, 'idea_generate', 'a factual premise', undefined,
+    'idea_premise_pool_generation', undefined, true, 'request-123');
+   const actual = db.prepare('SELECT discovery_request_id,status FROM generation_runs WHERE id=?')
+    .get(idea.id) as { discovery_request_id:string|null; status:string };
+   expect(actual).toEqual({ discovery_request_id:'request-123',status:'running' });
+   const daily = service.beginRun(undefined, 'daily', 'unrelated work', undefined,
+    undefined, undefined, true, 'request-123');
+   const unrelated = db.prepare('SELECT discovery_request_id FROM generation_runs WHERE id=?')
+    .get(daily.id) as { discovery_request_id:string|null };
+   expect(unrelated.discovery_request_id).toBeNull();
+  } finally {
+   db.close();
+  }
+ });
 });
