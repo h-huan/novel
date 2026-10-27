@@ -3,8 +3,8 @@
  *
  * 实现：
  * - PromptChain 链定义加载与校验
- * - ChainExecutor 顺序执行/条件分支/重试逻辑
- * - Handlebars 模板变量注入
+ * - 当前两条固定长篇链的 Prompt 节点顺序执行和质量拒绝传递
+ * - 经唯一 PromptRegistry 的模板变量注入
  * - 执行上下文管理
  *
  * 仅由当前固定长篇基础与章纲编排消费，具体业务约束以唯一执行标准为准
@@ -26,13 +26,6 @@ import {
   ChainState,
 } from './chain.types';
 
-/** 节点执行上下文（运行时） */
-interface NodeExecutionContext {
-  node: ChainNode;
-  resolvedInput: Record<string, unknown>;
-  retryCount: number;
-}
-
 interface PromptNodeExecutionResult {
   output: unknown;
   runId?: string;
@@ -41,9 +34,6 @@ interface PromptNodeExecutionResult {
 @Injectable()
 export class ChainEngineService {
   private readonly logger = new Logger(ChainEngineService.name);
-
-  /** 模拟节点延迟（开发用） */
-  private readonly mockNodeDelay = 100;
 
   constructor(
     private readonly promptRegistry: PromptRegistryService,
@@ -108,7 +98,7 @@ export class ChainEngineService {
           // Quality-rejected dependencies are unusable even in a chain that
           // permits ordinary optional-node failures. Preserve the upstream
           // report and stop before downstream generation invents a substitute.
-          if (chain.config.strictMode || nodeResult.gateReport || node.type !== 'prompt') {
+          if (chain.config.strictMode || nodeResult.gateReport || node.type !== 'prompt' || !node.promptTemplateId) {
             overallState = 'failed';
             break;
           }
@@ -291,19 +281,16 @@ export class ChainEngineService {
     chain: PromptChain,
   ): Promise<PromptNodeExecutionResult> {
     // 获取并渲染 Prompt 模板
-    let prompt: string;
-    if (node.promptTemplateId) {
-      prompt = this.promptRegistry.render(node.promptTemplateId, {
+    if (!node.promptTemplateId) {
+      throw new Error('固定生产 Prompt 节点缺少注册模板 ID，禁止改用输入 JSON 作为临时提示词');
+    }
+    const prompt = this.promptRegistry.render(node.promptTemplateId, {
         ...context.variables,
         ...input,
         user_input: { ...(context.variables['user_input'] as Record<string, unknown> || {}) },
         chain_output: { ...context.nodeOutputs },
         retry_count: retryCount,
       });
-    } else {
-      // 无模板 ID 时，使用输入拼接
-      prompt = JSON.stringify(input, null, 2);
-    }
 
     // 调用 LLM
     const response = await this.llm.generate({
