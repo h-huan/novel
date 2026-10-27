@@ -81,7 +81,6 @@ export class ChainEngineService {
         context.timestamps[node.id] = new Date();
         context.nodeOutputs[node.id] = nodeResult.output;
 
-        // 将节点输出映射到全局变量
         // 处理失败情况
         if (nodeResult.status === 'failed') {
           errors.push({
@@ -147,7 +146,7 @@ export class ChainEngineService {
   }
 
   /**
-   * 执行单个节点（支持重试逻辑）
+   * 固定规划节点单次执行；有新证据的恢复由上层共享预算控制
    */
   async executeNode(
     node: ChainNode,
@@ -163,7 +162,7 @@ export class ChainEngineService {
     // verified and bounded repair budgets. This engine makes one attempt.
     try {
       const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
-       const { output, runId } = await this.executePromptNode(node, resolvedInput, context, chain);
+      const { output, runId } = await this.executePromptNode(node, resolvedInput, context, chain);
       return {
         nodeId: node.id, nodeName: node.name, status: 'success', output,
         ...(runId ? { runId } : {}),
@@ -199,7 +198,7 @@ export class ChainEngineService {
     context: ExecutionContext,
     chain: PromptChain,
   ): Promise<PromptNodeExecutionResult> {
-    // 获取并渲染 Prompt 模板
+    // 仅从当前注册模板渲染本节点 Prompt
     const prompt = this.promptRegistry.render(node.promptTemplateId, {
         ...context.variables,
         ...input,
