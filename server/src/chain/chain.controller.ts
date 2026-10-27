@@ -5248,7 +5248,11 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             }
             stats.validBeforeDedup += 1;
             poolFilterTotals.validBeforeDedup += 1;
-            const nearDuplicate = batch.batchIndex >= poolBatchCount && candidatePool.some(existing =>
+            // Treat the original parallel pool and later top-up identically. Previously
+            // only top-up batches received semantic deduplication, so an initial
+            // pool of renamed clones reached selection and paid for repeated
+            // independent overlap review and reselection.
+            const nearDuplicate = candidatePool.some(existing =>
               ideaSemanticSimilarity(
                 { title: workingTitle, description: storyCore },
                 { title: String(existing.workingTitle || ''), description: String(existing.storyCore || '') },
