@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseReplacementComparisonIssues } from './premise-selection-review';
 
@@ -31,6 +31,24 @@ it('keeps all substantive overlap facts and sources in memory while removing rep
   }
   expect([first,second]).toEqual(original);
   expect(JSON.stringify(viewed).length).toBeLessThan(JSON.stringify(original).length);
+});
+
+it('keeps the defective source plan and complete independent-review selection while shrinking unchanged reselection peers',()=>{
+  const make=(id:string)=>({...premise(id),causalPlan:[{
+    action:{field:'activeChoice',quote:'救人需要承担被遗忘的代价'+id},
+    conditions:[{field:'escalation',quote:'每次救人自己的存在逐渐消失'}],
+    result:{field:'payoff',quote:'承担存在代价使家属获得赔偿'},
+  }]});
+  const selected=[make('A'),make('B'),make('C')],original=structuredClone(selected);
+  const prompt=premiseReselectionPromptSelection(selected,new Set(['B']));
+  expect(prompt[1]).toEqual(original[1]);
+  for(const i of [0,2]){
+    expect(prompt[i]).not.toHaveProperty('causalPlan');
+    for(const field of ['premiseId','storyCore','storyCategory','activeChoice','escalation','reversalEffect','payoff','secondOrderConsequence'])
+      expect(prompt[i][field]).toEqual(original[i][field]);
+  }
+  expect(selected).toEqual(original);
+  expect(JSON.stringify(prompt).length).toBeLessThan(JSON.stringify(selected).length);
 });
 
 const compare = (referencePremiseId: string) => ({ referencePremiseId,
