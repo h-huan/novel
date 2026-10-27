@@ -780,7 +780,7 @@ function detailedIdeaMarkdown() {
       + '；运行中：' + (runtime.ideaActivity?.running??'未知')
       + '；取消：' + (runtime.ideaActivity?.cancelled??'未知')
       + '；旧进程遗留：' + (runtime.ideaActivity?.staleRunning??'未知'),
-    ...(runtime.ideaActivity?.runs||[]).map(r=>'- '+r.status+' · '+r.runId+' · '+r.stage
+    ...(runtime.ideaActivity?.runs||[]).map(r=>'- '+r.status+' · '+r.runId+' · request='+String(r.discoveryRequestId??'unknown')+' · '+r.stage
       +' · 运行/历时 '+r.elapsedMs+' ms · '+r.startedAt+(r.staleProcess?'（旧进程遗留记录）':'')),
     '',    '- 本地验证运行 ID：' + verificationRunId,
     '- 灵感请求 ID：' + (audit.discoveryRequestId ?? '未知'),
