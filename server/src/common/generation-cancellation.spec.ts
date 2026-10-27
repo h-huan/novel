@@ -9,13 +9,15 @@ describe('discovery cancellation propagates to the actual running model task',()
   const active=tasks.run('discovery','idea-123','',async()=>{
    const signal=currentGenerationSignal();
    expect(signal).toBeDefined();
-   return new Promise<never>((_resolve,reject)=>{
-    signal!.addEventListener('abort',()=>{
-     try{assertGenerationActive();reject(Error('Cancellation signal failed to prevent generation'));}
-     catch(error){reject(error);}
-    },{once:true});
+   const cancellation=new Promise<void>(resolve=>{
+    signal!.addEventListener('abort',resolve,{once:true});
     signalReady();
    });
+   await cancellation;
+   // The async continuation is under the original discovery AsyncLocalStorage
+   // context, unlike the external thread that dispatches the abort event.
+   assertGenerationActive();
+   return 'should not return after cancel';
   });
   await ready;
   expect(tasks.cancel('discovery','idea-other').cancelled).toBe(false);
