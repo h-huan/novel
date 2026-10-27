@@ -6148,7 +6148,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             + appealGate.fulfillment.stopReason + '，缺额' + (requestedCount - selectedAccepted.length)
             + '张。未降低质量门，也未把最低可交付数量当作提前停止条件。';
           this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
-          return { success: false, status: 'incomplete', ideas: [], totalIdeas: acceptedWithAudit.length,
+          return { success: false, status: 'incomplete', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
             qualifiedIdeas: acceptedWithAudit, error: warning, warning, qualityWarning: warning, appealGate };
         }
         appealGate.returned = 0;
