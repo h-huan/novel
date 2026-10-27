@@ -5753,6 +5753,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           !localIssues.get(candidate)!.length
           && !appealAssessments.get(candidate)!.issues.length
           && !alreadyBlocked(candidate));
+        const reviewableSet=new Set(reviewable);
         const presentationReviews=reviewable.length
           ? await this.reviewIdeaPresentation(reviewable,accepted,dto.customPlatformNote,presentationBudget) : [];
         const presentationByTitle = new Map(presentationReviews.map(review => [review.title, review]));
@@ -5760,7 +5761,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const titleKey = normalizeTitle(candidate?.title);
           const issues = [...localIssues.get(candidate)!];
           const presentationReview = presentationByTitle.get(candidate.title);
-          if(!issues.length)issues.push(...presentationGateIssues(presentationReview));
+          // For known deterministic rejects, there was intentionally no paid
+          // presentation call. Do not manufacture a "review missing" failure.
+          if(!issues.length&&reviewableSet.has(candidate))issues.push(...presentationGateIssues(presentationReview));
           if (!titleKey || seen.has(titleKey)) issues.push('标题与已有或同批题材重复');
           const closest = [...initialExcludes, ...accepted]
             .map(reference => ({ reference, similarity: ideaSemanticSimilarity(candidate, reference) }))
