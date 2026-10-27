@@ -7,7 +7,7 @@ import type { SystemWorkflowRule } from './system-workflow-rule.types';
 /** 连续修复的升级边界；这是流程预算，不是正文质量阈值。 */
 export const UPSTREAM_REPAIR_ROUTING_LIMITS = { sameFamilyAfterAttempts: 1, maxLocalAttemptsBeforeDiagnosis: 2, maxSourceRepairModelCalls: 3 } as const;
 export const UPSTREAM_REPAIR_ROUTING_POLICY = '同类缺陷经局部修复仍存在且未证明新的实质改善、问题集合增长或局部修复进入连续循环时，先回查章节合同、上下文装配、生成执行与审查协议，再决定处理阶段。不得只因有局部改善持续下游修复；已经由证据复核确认解决了不同问题时，不因共享宽泛问题标签提前停止，仍遵守连续局部尝试上限与共享调用预算；上游诊断必须引用本次输入与正文证据，不能把猜测当已确认源冲突。诊断未完成时保留草稿与原质量结论；修改已确认上游事实须按原作者确认与锁定规则处理，不能自动重写正文或回写Canon。质量候选回滚时须同时显示原稿保留与候选复检的实际阻断或未知维度，不只重复修复前的旧缺陷。失败候选的事实不得进入Canon，其必要条件诊断须作为只读反馈传给下一次源头修订，依赖未通过的候选仅在内存继续修订，锚点取本轮候选位置目录，原Canon作为提交原值校验基线；整体复检通过后才原子提交。原因相同的必要依赖修改一起保留，只有显式声明的互斥备选组才做成本择一；相同或无变化候选不重复复检。每个源头修订任务共用物理模型调用预算，扩容、网络恢复和协议纠错不能重置预算；耗尽或候选复检仍失败时如实停止，不能把停止当验收成功。';
-export const SYSTEM_WORKFLOW_RULESET_VERSION = 251;
+export const SYSTEM_WORKFLOW_RULESET_VERSION = 252;
 
 export const IDEA_AGGREGATE_RESERVE_POLICY = '锁定前终检发现多个问题位置时，按完整有效审核清单汇总处理，不把首项的局部review覆盖整批review而丢掉其余未解缺陷。备用身份从本批未尝试原池中选择；可用身份足够时一次覆盖全部当前缺额，同时比较合并后的最终候选，不逐卡串行换选再各自重复整轮审核。输出容量确实不足才按实际材料拆分，拆分共享原预算并保留已完成工作。改动后来源审核复用同批同内容已通过凭证，未通过或改变的项继续审核，同构审核覆盖合并选择。一个位置通过不清除其它位置的缺口，实际候选或调用预算不足时保持全部未解决问题并如实缺量，不扩大池、不增加预算、不绕过最终质量门。';
 
@@ -533,8 +533,9 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
     id: 'WF-002', name: '受控业务重试', category: 'workflow', level: 'P1', status: 'active', blocking: true,
     scenarios: ALL_SCENES, consumers: ['retry', 'semantic_gate', 'test'], dependencies: ['WF-001'],
     summary: '业务重试只用于可修结构错误或有新质量证据的可修失败；不可重试 Gate/重复失败签名立即停止，不得无限尝试。',
-    details: ['同一结构化任务由统一调用器执行有界纠正；耗尽后不得叠加同问题的结构修复或 JSON 重建整对象生成；本地语法恢复的完整候选仍须通过原字段校验。', '题材独立审查的协议或证据来源校验失败属于审查未完成，不能当作故事内容缺陷触发题材重写。错误须逐卡点名字段与引用来源。锁定胚子的独立完整卡按统一并发上限生成，结果保持胚子顺序；同批比较与最终质量门保持完整。', '题材因果、兑现或平台机制的有效审查拒绝后，局部修复须能覆盖设定、结局与阶段中的同一问题；只准授权字段的逐字定位替换，不能只修概要留下旧事实。保留人物、选择方向、规则数值和代价；无法沿原事实修复则继续拒绝。悬疑信息暂未揭示、超自然能力未解释科学来源，不等于因果缺陷；只在缺少必要前提、触发边界或结果互斥时阻断。'],
-    implementationRefs: ['server/src/chain/chain.controller.ts'],
+    details: ['结构化任务由统一调用器在共享预算内有据纠正，不叠加同问题原样重试或整对象重生。长篇固定顺序Prompt链的节点全部必需；任一节点失败立即停止下游并保留原错误与质量证据，不存在失败后继续的可选节点流程。本地语法恢复候选仍须按原字段验收。', '题材独立审查的协议或证据来源校验失败属于审查未完成，不能当作故事内容缺陷触发题材重写。错误须逐卡点名字段与引用来源。锁定胚子的独立完整卡按统一并发上限生成，结果保持胚子顺序；同批比较与最终质量门保持完整。', '题材因果、兑现或平台机制的有效审查拒绝后，局部修复须能覆盖设定、结局与阶段中的同一问题；只准授权字段的逐字定位替换，不能只修概要留下旧事实。保留人物、选择方向、规则数值和代价；无法沿原事实修复则继续拒绝。悬疑信息暂未揭示、超自然能力未解释科学来源，不等于因果缺陷；只在缺少必要前提、触发边界或结果互斥时阻断。'],
+    implementationRefs: ['server/src/chain/chain.controller.ts', 'server/src/chain/chain-engine.service.ts', 'server/src/chain/chain-template.service.ts'],
+    testRefs: ['server/src/chain/chain-engine.service.spec.ts'],
   }),
   rule({
     id: 'WF-003', name: '网络恢复集中在 Provider', category: 'workflow', level: 'P0', status: 'active', blocking: false,
