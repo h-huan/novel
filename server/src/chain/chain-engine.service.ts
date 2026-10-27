@@ -7,7 +7,7 @@
  * - Handlebars 模板变量注入
  * - 执行上下文管理
  *
- * 设计基于 Prompt Chain 架构文档的引擎层规范
+ * 仅由当前固定长篇基础与章纲编排消费，具体业务约束以唯一执行标准为准
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { PromptRegistryService } from './prompt-registry.service';
@@ -347,7 +347,7 @@ export class ChainEngineService {
       timeout: node.timeout * 1000,
       scenario: node.chainId || chain.id,
       // 项目归属必须显式声明，不能只靠请求上下文兜底：
-      // 三条链都由后台任务执行（长篇创建、模板执行），ALS 里没有项目 id，
+      // 两条固定长篇链由后台任务执行，ALS 里不保证有项目 id，
       // 缺了它 beginRun 拿不到创作宪法，埋点也只进平台级（静默空值）。
       // stepKey 走唯一别名表 standardScene，使质量阶段 / 中文标签 / 归属判定同口径；
       // 平台级链路（context.projectId 为空）保持原样，不强行归属。
@@ -356,7 +356,7 @@ export class ChainEngineService {
         ...(context.projectId ? { projectId: context.projectId } : {}),
       },
       retryCount,
-      // 本引擎的节点输出契约就是 JSON（三个链的每个节点都要求"输出合法JSON"）。
+      // 当前两条固定长篇链的所有生产 Prompt 节点均要求合法 JSON。
       // 显式声明 JSON 模式后，real-llm 会在 finish_reason=length（输出被截断）时
       // 用同一模型、同一 prompt、更大输出上限重发；这是同模型扩容，不是降级。
       responseFormat: 'json_object',
