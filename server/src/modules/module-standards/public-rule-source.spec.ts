@@ -57,6 +57,12 @@ describe('public rule governance', () => {
     expect(policy).toContain('同步更新唯一执行标准');
     expect(policy).toContain('真实token、耗时与质量需同版本本地运行证实');
     expect(gov.consumers).not.toContain('prompt');
+    const workflow = SYSTEM_WORKFLOW_RULES.find(rule => rule.id === 'WF-002')!;
+    expect(workflow.details!.join('')).toContain('长篇固定顺序Prompt链的节点全部必需');
+    expect(workflow.details!.join('')).toContain('任一节点失败立即停止下游');
+    expect(workflow.implementationRefs).toContain('server/src/chain/chain-engine.service.ts');
+    expect(workflow.implementationRefs).toContain('server/src/chain/chain-template.service.ts');
+
 
     const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
     const maintenance = readFileSync(join(repoRoot, 'DEVELOPMENT_GOVERNANCE.md'), 'utf8');
