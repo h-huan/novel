@@ -223,7 +223,9 @@ it('does not enter another provider attempt after the last physical call returns
       const row={replacesPremiseId:'B',premise:premise('C'),comparisons:[]};
       expect(options.validate({replacements:[row]})).toBe(true);
       expect(options.validate({replacements:[{...row,premise:premise('NEW')}]})).toBe(false);
-      expect(options.validate({replacements:[{...row,premise:{...premise('C'),payoff:'改写成新的兑现结果'},comparisons:[compare('A')]}]})).toBe(false);
+      // Pool identities are checked here; the separate source-review Gate
+       // must determine whether changed payoff actually drifts from its source.
+       expect(options.validate({replacements:[{...row,premise:{...premise('C'),payoff:'改写成新的兑现结果'},comparisons:[compare('A')]}]})).toBe(true);
       expect(options.validate({replacements:[{...row,comparisons:[compare('A')]}]})).toBe(true);
       expect(options.retryInstruction).toContain('causalPlan错误');
       options.physicalCallBudget.remaining-=2;
