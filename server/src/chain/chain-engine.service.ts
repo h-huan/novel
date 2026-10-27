@@ -12,7 +12,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PromptRegistryService } from './prompt-registry.service';
 import { RealLLMService } from './real-llm.service';
-import { gateFailureLabel, isGateRejection, GateRejectionError, classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
+import { gateFailureLabel, isGateRejection, GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';
 import { describeChapterResponsibilityPlan } from '../../shared/src/chapter-responsibility-review';
 import { jsonrepair } from 'jsonrepair';
 import { standardScene } from '../routing/scenario-taxonomy';
@@ -168,101 +168,46 @@ export class ChainEngineService {
     const nodeLog = `[${node.chainId}/${node.id}]`;
     this.logger.log(`${nodeLog} 开始执行`);
 
-    let currentRetryCount = 0;
-    // A generic node retry has no validator feedback and would replay the same
-    // prompt. Transport recovery is already handled once inside RealLLMService;
-    // content corrections belong to the evidence-aware business workflow.
-    const maxRetries = 0;
-    let lastOutput: unknown = null;
-    let lastError: string | null = null;
-    // Gate 拒绝的结构化报告：Error 实例跨节点边界会退化成字符串，报告必须单独留住，
-    // 否则上游只能看到「缺少世界观/volumes 为空」这类下游症状，真实成因被吞掉。
-    let lastGateReport: GateFailureReport | undefined;
-
-    while (currentRetryCount <= maxRetries) {
-      try {
-        // 1. 输入映射：从上下文提取本节点需要的变量
-        const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
-
-        // Only current Prompt nodes may participate in a fixed production chain.
-        // Enforce this before skipOnEmptyInput: a retired node with empty input
-        // must not silently skip and unlock downstream generation.
-        if (node.type !== 'prompt') {
-          throw new Error('当前固定生产链不支持历史 Transform/Condition 节点，拒绝执行');
-        }
-
-        // 2. 检查是否跳过
-        if (node.skipOnEmptyInput && this.isInputEmpty(resolvedInput)) {
-          this.logger.log(`${nodeLog} 输入为空，跳过此节点`);
-          return {
-            nodeId: node.id,
-            nodeName: node.name,
-            status: 'skipped',
-            output: null,
-            latency: Date.now() - startTime,
-            retryCount: 0,
-            timestamp: new Date(),
-          };
-        }
-
-        const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
-        const output = promptResult.output;
-        const runId = promptResult.runId;
-
-        lastOutput = output;
-
+    // Generic node retries would resend the same prompt with no new evidence.
+    // RealLLM owns transport recovery; task-level semantic fixes own their own
+    // verified and bounded repair budgets. This engine makes one attempt.
+    try {
+      const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
+      // A retired node must not skip itself to unlock downstream generation.
+      if (node.type !== 'prompt') {
+        throw new Error('当前固定生产链不支持历史 Transform/Condition 节点，拒绝执行');
+      }
+      if (!node.promptTemplateId) {
+        throw new Error('固定生产 Prompt 节点缺少注册模板 ID，禁止改用输入 JSON 作为临时提示词');
+      }
+      if (node.skipOnEmptyInput && this.isInputEmpty(resolvedInput)) {
+        this.logger.log(`${nodeLog} 输入为空，跳过此节点`);
         return {
-          nodeId: node.id,
-          nodeName: node.name,
-          status: 'success',
-          output,
-          ...(runId ? { runId } : {}),
-          latency: Date.now() - startTime,
-          retryCount: currentRetryCount,
-          timestamp: new Date(),
-        };
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-        if (isGateRejection(error)) {
-          lastGateReport = error.report;
-          this.logger.error(`${nodeLog} 被质量 Gate 拒绝（${gateFailureLabel(error.report)}）: ${lastError}`);
-        } else {
-          this.logger.error(`${nodeLog} 执行错误: ${lastError}`);
-        }
-
-        if (currentRetryCount < maxRetries) {
-          currentRetryCount++;
-          this.logger.warn(`${nodeLog} 第${currentRetryCount}次重试`);
-          await this.delay(500); // 重试前短暂等待
-          continue;
-        }
-
-        return {
-          nodeId: node.id,
-          nodeName: node.name,
-          status: 'failed',
-          output: lastOutput,
-          error: lastError,
-          gateReport: lastGateReport,
-          latency: Date.now() - startTime,
-          retryCount: currentRetryCount,
-          timestamp: new Date(),
+          nodeId: node.id, nodeName: node.name, status: 'skipped', output: null,
+          latency: Date.now() - startTime, retryCount: 0, timestamp: new Date(),
         };
       }
-    }
 
-    // 不应到达这里
-    return {
-      nodeId: node.id,
-      nodeName: node.name,
-      status: 'failed',
-      output: lastOutput,
-      error: lastError || '达到最大重试次数',
-      gateReport: lastGateReport,
-      latency: Date.now() - startTime,
-      retryCount: currentRetryCount,
-      timestamp: new Date(),
-    };
+      const { output, runId } = await this.executePromptNode(node, resolvedInput, context, 0, chain);
+      return {
+        nodeId: node.id, nodeName: node.name, status: 'success', output,
+        ...(runId ? { runId } : {}),
+        latency: Date.now() - startTime, retryCount: 0, timestamp: new Date(),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const gateReport = isGateRejection(error) ? error.report : undefined;
+      if (gateReport) {
+        this.logger.error(`${nodeLog} 被质量 Gate 拒绝（${gateFailureLabel(gateReport)}）: ${message}`);
+      } else {
+        this.logger.error(`${nodeLog} 执行错误: ${message}`);
+      }
+      return {
+        nodeId: node.id, nodeName: node.name, status: 'failed', output: null,
+        error: message, gateReport,
+        latency: Date.now() - startTime, retryCount: 0, timestamp: new Date(),
+      };
+    }
   }
 
   // ==================== Prompt 节点执行 ====================
@@ -501,7 +446,4 @@ export class ChainEngineService {
       );
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }
