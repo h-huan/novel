@@ -78,8 +78,12 @@ describe('creation consistency architecture invariants', () => {
     // All accepted earlier chapters are still sent as source facts; the full
     // responsibilities remain. Do not resend a redundant prefix of that plan.
     expect(controllerSource).toContain('buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, false)');
-    expect(controllerSource).toContain('【全书章节分工与动态节拍】');
+    expect(controllerSource).toContain('【后续章节职责与节拍（本章禁止提前执行）】');
+    expect(controllerSource).toContain('chapterResponsibilityPlan.slice(chapterIndex + 1)');
+    expect(controllerSource).toContain('chapterResponsibilities: chapterResponsibilityPlan, priorChapters: acceptedOutlineSources');
     expect(controllerSource).not.toContain('completedTaskBoundary');
+    expect(controllerSource).not.toContain('nextTaskBoundary');
+    expect(controllerSource).not.toContain('【全书章节分工与动态节拍】');
     expect(controllerSource).not.toContain('【已经完成、禁止重演的章节任务】');
   });
 
