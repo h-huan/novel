@@ -9604,57 +9604,86 @@ ${STORY_ENTITY_MODELING_POLICY}
       // a contradictory alias elsewhere in the same chapter. Batch by chapter.
       const groups=new Map<string,typeof targets>();
       for(const target of targets){const group=groups.get(target.chapterId)||[];group.push(target);groups.set(target.chapterId,group);}
-      for(const rows of groups.values()){
+      // Independent chapter source checks have no cross-chapter write
+      // dependency. Run the SAME complete review in a bounded queue, then
+      // merge in stable chapter order before interpreting any conflicts.
+      const sourceGroups=[...groups.values()];
+      const sourceGroupResults=await boundedDiscoveryMap(sourceGroups,IDEA_CARD_GENERATION_CONCURRENCY,async rows=>{
         const cacheKey='boundary:'+JSON.stringify({rows,context});
         const cached=verifiedSourceReviews.get(cacheKey);
-        if(cached){findings.push(...cached);continue;}
+        if(cached)return {rows,cacheKey,cached,checks:[] as any[],findings:cached};
         const responses=await reviewFixedSourceChecklist(rows,async batch=>{
-        const response=await this.llmCallWithRetry<any>('章纲来源边界专项复核',
-        outlineSourceBoundaryReviewPrompt(batch,context),{
-          projectId,scenario:'review',temperature:0.1,stepKey:'creation_outline_source_boundary',
-          validate:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).verified,
-          describeValidation:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).errors,
-          retryInstruction:'仅修正点名章纲的核对依据和状态，不改章纲，不补造能力，不以总审查通过替代各项结果。',
+          const response=await this.llmCallWithRetry<any>('章纲来源边界专项复核',
+            outlineSourceBoundaryReviewPrompt(batch,context),{
+              projectId,scenario:'review',temperature:0.1,stepKey:'creation_outline_source_boundary',
+              validate:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).verified,
+              describeValidation:value=>validateOutlineSourceBoundaryPartialReview(value,batch,context).errors,
+              retryInstruction:'仅修正点名章纲的核对依据和状态，不改章纲，不补造能力，不以总审查通过替代各项结果。',
+            });
+          if(!response.data)throw new Error('章纲来源边界专项未完成，停止上游修复与正文生成。');
+          return response.data;
         });
-      if(!response.data)throw new Error('章纲来源边界专项未完成，停止上游修复与正文生成。');
-      return response.data;
-        });
-      const checked=validateOutlineSourceBoundaryReview({checks:responses.flatMap(response=>response.checks)},rows,context);
-      if(!checked.verified)throw new Error('章纲来源边界专项证据未通过：'+checked.errors.join('；'));
-      // Keep the source report even when it flags a gap. The result audit
-      // may provide a disputed prerequisite in the SAME chapter; returning
-      // before it runs makes a false-positive impossible to reconcile.
-      boundaryReports.set(rows[0].chapterId,{rows,checks:responses.flatMap(response=>response.checks)});
-      if(checked.verified&&!checked.findings.length)verifiedSourceReviews.set(cacheKey,checked.findings);
+        const checks=responses.flatMap(response=>response.checks);
+        const checked=validateOutlineSourceBoundaryReview({checks},rows,context);
+        if(!checked.verified)throw new Error('章纲来源边界专项证据未通过：'+checked.errors.join('；'));
+        return {rows,cacheKey,cached:undefined,checks,findings:checked.findings};
+      });
+      const sourceFailure=sourceGroupResults.find(result=>result.status==='rejected') as PromiseRejectedResult|undefined;
+      if(sourceFailure)throw sourceFailure.reason;
+      for(const result of sourceGroupResults){
+        const row=(result as PromiseFulfilledResult<{
+          rows:typeof targets;cacheKey:string;cached:string[]|undefined;checks:any[];findings:string[];
+        }>).value;
+        if(row.cached){findings.push(...row.cached);continue;}
+        // A gap is not erased: retain it for same-chapter result-proof
+        // reconciliation, never mark an unverified verdict as reusable.
+        boundaryReports.set(row.rows[0].chapterId,{rows:row.rows,checks:row.checks});
+        if(!row.findings.length)verifiedSourceReviews.set(row.cacheKey,row.findings);
       }
       const disputedChapters=new Set([...boundaryReports.entries()].filter(([,report])=>
         validateOutlineSourceBoundaryReview({checks:report.checks},report.rows,context).findings.length
       ).map(([id])=>id));
-      for(const row of bundle.chapters){
-        // Once a source gap exists, only inspect its chapter's result proofs;
-        // do not spend calls on unaffected later chapters before source repair.
-        if(disputedChapters.size && !disputedChapters.has(row.id))continue;
-        if(!outlineResultClaimCatalog([row]).length)continue;
+      // These chapter-local result claims use frozen, read-only inputs.
+      // Keep each claim's original full proof and the existing per-chapter
+      // protocol Gate, but avoid serially waiting for unrelated chapters.
+      const resultTasks=await boundedDiscoveryMap(bundle.chapters,IDEA_CARD_GENERATION_CONCURRENCY,async row=>{
+        if(disputedChapters.size&&!disputedChapters.has(row.id))return {kind:'skip' as const};
+        const claims=outlineResultClaimCatalog([row]);
+        if(!claims.length)return {kind:'skip' as const};
         const proofContext=sourceBoundaryEvidenceContext(JSON.stringify({world:bundle.world,worldProfiles:bundle.worldProfiles,chapters:[row]}));
         const cacheKey='result:'+proofContext;
         const cached=verifiedSourceReviews.get(cacheKey);
-        if(cached){findings.push(...cached);resultReports.set(row.id,verifiedResultProofs.get(cacheKey)||[]);continue;}
-        const responses=await reviewFixedCatalog(outlineResultClaimCatalog([row]),async batch=>{
-        const refs=batch.map(item=>item.ref);
-        const result=await this.llmCallWithRetry<any>('章纲关键结果专项复核',outlineResultClaimPrompt([row],proofContext,refs),{
-          projectId,scenario:'review',stepKey:'creation_outline_result_proof',temperature:0.1,
-          validate:(value:any)=>validateOutlineResultClaims(value,[row],proofContext,refs).verified,
-          describeValidation:(value:any)=>validateOutlineResultClaims(value,[row],proofContext,refs).errors,
-          retryInstruction:SOURCE_EVIDENCE_REFERENCE_POLICY+'只修正固定ref的缺项或引用编号，不抄写或省略拼接basisEvidence。保留已成立缺口与冲突，不改章纲，不用另一条正确动作替换本条结果。',
+        if(cached)return {kind:'cached' as const,id:row.id,findings:cached,checks:verifiedResultProofs.get(cacheKey)||[]};
+        const responses=await reviewFixedCatalog(claims,async batch=>{
+          const refs=batch.map(item=>item.ref);
+          const result=await this.llmCallWithRetry<any>('章纲关键结果专项复核',outlineResultClaimPrompt([row],proofContext,refs),{
+            projectId,scenario:'review',stepKey:'creation_outline_result_proof',temperature:0.1,
+            validate:(value:any)=>validateOutlineResultClaims(value,[row],proofContext,refs).verified,
+            describeValidation:(value:any)=>validateOutlineResultClaims(value,[row],proofContext,refs).errors,
+            retryInstruction:SOURCE_EVIDENCE_REFERENCE_POLICY+'只修正固定ref的缺项或引用编号，不抄写或省略拼接basisEvidence。保留已成立缺口与冲突，不改章纲，不用另一条正确动作替换本条结果。',
+          });
+          if(!result.data)throw new Error('章纲关键结果复核未完成：'+row.id);
+          return result.data;
         });
-        if(!result.data)throw new Error('章纲关键结果复核未完成：'+row.id);
-        return result.data;
-        });
-        const checked=validateOutlineResultClaims({checks:responses.flatMap(response=>response.checks)},[row],proofContext);
+        const checks=responses.flatMap(response=>response.checks);
+        const checked=validateOutlineResultClaims({checks},[row],proofContext);
         if(!checked.verified)throw new Error(checked.errors.join('；'));
-        resultReports.set(row.id,responses.flatMap(response=>response.checks));
-        findings.push(...checked.findings);
-        if(!checked.findings.length){verifiedSourceReviews.set(cacheKey,checked.findings);verifiedResultProofs.set(cacheKey,resultReports.get(row.id)!);}
+        return {kind:'reviewed' as const,id:row.id,cacheKey,checks,findings:checked.findings};
+      });
+      const resultFailure=resultTasks.find(result=>result.status==='rejected') as PromiseRejectedResult|undefined;
+      if(resultFailure)throw resultFailure.reason;
+      for(const task of resultTasks){
+        const result=(task as PromiseFulfilledResult<
+          {kind:'skip'}|{kind:'cached';id:string;findings:string[];checks:any[]}|
+          {kind:'reviewed';id:string;cacheKey:string;findings:string[];checks:any[]}
+        >).value;
+        if(result.kind==='skip')continue;
+        resultReports.set(result.id,result.checks);
+        findings.push(...result.findings);
+        if(result.kind==='reviewed'&&!result.findings.length){
+          verifiedSourceReviews.set(result.cacheKey,result.findings);
+          verifiedResultProofs.set(result.cacheKey,result.checks);
+        }
       }
       // Two valid reports can disagree about a prerequisite. Resolve their
       // evidence before routing a plan repair; neither verdict overrides the
