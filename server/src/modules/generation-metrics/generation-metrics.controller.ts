@@ -94,9 +94,11 @@ export class GenerationMetricsController {
     const rows = this.databaseService.getDb().prepare(
       "SELECT id,stage,scenario,status,started_at,finished_at,duration_ms,model,error " +
       "FROM generation_runs WHERE scenario='idea_generate' " +
-      "AND (? IS NULL OR julianday(started_at)>=julianday(?)) " +
+      "AND (? IS NULL OR julianday(started_at)>=julianday(?) " +
+      "OR julianday(finished_at)>julianday(?) OR status='running') " +
       "ORDER BY started_at DESC LIMIT 200"
     ).all(startAt ? new Date(timestamp!).toISOString() : null,
+      startAt ? new Date(timestamp!).toISOString() : null,
       startAt ? new Date(timestamp!).toISOString() : null) as Array<Record<string,unknown>>;
     return {items: rows.map(row=>({...row,
       error:row.error==null?null:redactDiagnosticText(String(row.error))})),

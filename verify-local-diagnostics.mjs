@@ -209,7 +209,9 @@ export function summarizeRecentIdeaActivity(rows,completedAuditFinishedAt,backen
  const cutoff=stamp(completedAuditFinishedAt),backend=stamp(backendStartedAt),now=stamp(inspectedAt)??Date.now();
  const sorted=(Array.isArray(rows)?rows:[]).filter(row=>{
   const t=stamp(row.started_at??row.startedAt);
-  return row.scenario==='idea_generate'&&t!==null&&(cutoff===null||t>cutoff);
+  const end=stamp(row.finished_at??row.finishedAt);
+  return row.scenario==='idea_generate'&&t!==null
+    &&(cutoff===null||t>cutoff||(end!==null&&end>cutoff)||row.status==='running');
  }).sort((a,b)=>(stamp(b.started_at??b.startedAt)??0)-(stamp(a.started_at??a.startedAt)??0));
  const runs=sorted.slice(0,40).map(row=>{
   const startedAt=row.started_at??row.startedAt??null,finishedAt=row.finished_at??row.finishedAt??null;

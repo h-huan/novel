@@ -124,4 +124,12 @@ test('unfinished and cancelled discovery calls remain visible despite an older c
  assert.equal(activity.runs.find(r=>r.runId==='orphaned').staleProcess,true);
  assert.equal(activity.runs.some(r=>r.runId==='old'||r.runId==='other'),false);
  assert.equal(activity.association,'after_latest_completed_audit_time_only');
+ const overlap=summarizeRecentIdeaActivity([
+  {id:'old-active',scenario:'idea_generate',status:'running',started_at:'2026-10-26T10:00:00Z'},
+  {id:'newly-cancelled',scenario:'idea_generate',status:'cancelled',started_at:'2026-10-26T10:40:00Z',finished_at:'2026-10-26T11:31:00Z'}
+ ],'2026-10-26T11:28:33Z','2026-10-26T09:00:00Z','2026-10-26T11:44:00Z');
+ assert.equal(overlap.totalRecent,2);
+ assert.equal(overlap.running,1);
+ assert.equal(overlap.cancelled,1);
+
 });
