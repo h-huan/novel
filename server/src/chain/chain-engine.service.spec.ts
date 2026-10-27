@@ -104,12 +104,14 @@ describe('ChainEngineService', () => {
     }
   });
 
-  it.each(['transform', 'condition'] as const)('rejects unregistered %s nodes without invoking the model or following any stale branch', async (kind) => {
+  it.each([['transform', false], ['condition', false], ['transform', true], ['condition', true]] as const)('rejects unregistered %s nodes even with empty-input skip=%s', async (kind, skipOnEmptyInput) => {
     const obsoleteNode = {
       ...mockNode,
       id: kind === 'transform' ? 'old_transform' : 'old_condition',
       type: kind,
       promptTemplateId: undefined,
+      skipOnEmptyInput,
+      inputMapping: skipOnEmptyInput ? { missing: 'user_input.unset' } : mockNode.inputMapping,
     };
     const result = await service.execute({ ...testChain, nodes: [obsoleteNode, mockNode] }, { test: 'hello' });
     expect(result.status).toBe('failed');
