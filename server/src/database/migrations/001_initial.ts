@@ -453,6 +453,7 @@ CREATE TABLE IF NOT EXISTS generation_lessons (
 CREATE TABLE IF NOT EXISTS generation_runs (
       id TEXT PRIMARY KEY,
       project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      discovery_request_id TEXT,
       stage TEXT NOT NULL,
       scenario TEXT NOT NULL,
       status TEXT NOT NULL,
