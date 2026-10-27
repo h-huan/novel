@@ -97,7 +97,9 @@ it('uses the single GEN-002 authority contract before full-card generation inste
 });
 it('requires existing independent payoff review to check evidence delivery to an authorized decision-maker',()=>{
  const prompt=premisePayoffReviewDirective(selection);
- expect(prompt).toContain('证据以实际写出的动作交给了谁');
+ expect(prompt).toContain('谁实际交付、谁接收');
+ expect(prompt).toContain('能录到内容不等于取得受他人控制的原件');
+ expect(prompt).toContain('实际取得或获准复制、保全不被撤销、移交接收');
  expect(prompt).toContain('原池和展开都漏掉这道决定性桥接时整体应为gap');
  expect(prompt).toContain('不能仅核对作者自行列出的环节');
 });
