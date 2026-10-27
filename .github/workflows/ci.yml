@@ -112,6 +112,26 @@ jobs:
             echo "npm run dev did not open an Electron process"
             exit 1
           fi
+          # A process alone is not enough: verify the real launcher has a
+          # viewable GUI window instead of being tray-only or minimized.
+          if ! command -v xwininfo >/dev/null; then
+            echo "xwininfo is required for Electron window visibility acceptance"
+            exit 1
+          fi
+          window_visible=0
+          for attempt in $(seq 1 15); do
+            if xwininfo -name "AI写作平台 - 欢迎" 2>/dev/null | grep -q 'Map State: IsViewable'; then
+              window_visible=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$window_visible" != 1 ]; then
+            cat /tmp/novel-electron-start.log
+            xwininfo -root -tree || true
+            echo "Electron started but did not display a viewable launcher window"
+            exit 1
+          fi
           if curl -fsS http://127.0.0.1:3100/api/v1/health >/dev/null 2>&1; then
             echo "desktop launcher must not automatically start backend on port 3100"
             exit 1
