@@ -5,7 +5,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
 import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
-import { premiseReplacementComparisonIssues } from './premise-selection-review';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
   storyCategory: '悬疑', storyCategoryId:'K1', protagonistSituation: '为家人争取生存机会', openingEvent: '具体异常迫使人物亲自行动',
@@ -154,12 +153,6 @@ it('does not enter another provider attempt after the last physical call returns
     expect(c.realLLM.generate).toHaveBeenCalledTimes(1);expect(budget.remaining).toBe(0);
     expect(result.data).toBeNull();expect(result.validationIssues).toEqual(['缺少必需比较ID']);
   });
-  it('compares repaired and pending IDs and reports the exact missing references', () => {
-    const current={...selection(),selected:['P1','P14','P8','P4','P5'].map(premise)};
-    const issues=premiseReplacementComparisonIssues({replacements:[{replacesPremiseId:'P3',premise:premise('P8'),comparisons:[compare('P1')]}]},current);
-    expect(issues.join('；')).toContain('必需ID=["P1","P14","P4","P5"]');
-    expect(issues.join('；')).toContain('缺少ID=["P14","P4","P5"]');
-  });
   it('repairs four problem slots in one response and independently reviews the complete final selection',async()=>{
     const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G','H','I'].map(premise),selectedPremises:['A','B','C','D','E'].map(premise)},5,9);
     const rejected:PremiseSelectionReview={passed:false,issues:['B','C','D','E'].map(premiseId=>({...failure.issues[0],premiseId}))};
@@ -183,7 +176,7 @@ it('does not enter another provider attempt after the last physical call returns
       })};
       expect(options.validate(data)).toBe(true);
       expect(options.validate({replacements:data.replacements.slice(1)})).toBe(false);
-      expect(options.validate({replacements:data.replacements.map(row=>({...row,comparisons:row.comparisons.slice(1)}))})).toBe(false);
+      expect(options.validate({replacements:data.replacements.map(({comparisons,...row})=>row)})).toBe(true);
       return {data};
     });
     const result=await c.reconcilePremiseSelection(original,5,9,['悬疑'],'');
@@ -200,11 +193,11 @@ it('does not enter another provider attempt after the last physical call returns
       reason:'最终兑现缺少实际完成结果的因果条件'}]};
     const c=Object.create(ChainController.prototype) as any;
     c.logger={warn:vi.fn(),error:vi.fn()};
-    const replacement={replacements:[{replacesPremiseId:'B',premise:premise('D'),
-      comparisons:[compare('A'),compare('C')]}]};
+    const replacement={replacements:[{replacesPremiseId:'B',premise:premise('D')}]};
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
       expect(prompt).toContain('【本次仍可换选的原池候选】');
       expect(prompt).toContain('【可用备用ID（只能从这里选）】');
+      expect(prompt).not.toContain('"comparisons"');
       expect(options.validate(replacement)).toBe(true);
       expect(options.validate({replacements:[{...replacement.replacements[0],premise:premise('A')}]})).toBe(false);
       options.physicalCallBudget.remaining--;
@@ -221,18 +214,18 @@ it('does not enter another provider attempt after the last physical call returns
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(2);
     expect(repairCredits.remaining).toBe(1);expect(reviewCredits.remaining).toBe(0);
   });
-  it('freezes a comparison-only repair candidate and isolates invalid protocol without another selection round', async () => {
+  it('validates immutable pool identity without an extra comparison-correction round', async () => {
     const original=selection();original.pool.push(premise('D'));
     const c=Object.create(ChainController.prototype) as any;
     c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValueOnce(failure)
       .mockImplementation(async(current:any)=>{expect(current.selected.map((p:any)=>p.premiseId)).toEqual(['A']);return {passed:true,issues:[]};});
     c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
       const row={replacesPremiseId:'B',premise:premise('C'),comparisons:[]};
-      expect(options.validate({replacements:[row]})).toBe(false);
-      expect(options.validate({replacements:[{...row,premise:premise('D'),comparisons:[compare('A')]}]})).toBe(false);
+      expect(options.validate({replacements:[row]})).toBe(true);
+      expect(options.validate({replacements:[{...row,premise:premise('NEW')}]})).toBe(false);
       expect(options.validate({replacements:[{...row,premise:{...premise('C'),payoff:'改写成新的兑现结果'},comparisons:[compare('A')]}]})).toBe(false);
       expect(options.validate({replacements:[{...row,comparisons:[compare('A')]}]})).toBe(true);
-      expect(options.retryInstruction).toContain('保留上次全部完整premise和身份');
+      expect(options.retryInstruction).toContain('causalPlan错误');
       options.physicalCallBudget.remaining-=2;
       return {data:null,validationIssues:['比较协议补正未完成']};
     });
@@ -240,15 +233,6 @@ it('does not enter another provider attempt after the last physical call returns
     expect(result.selected.map((p:any)=>p.premiseId)).toEqual(['A']);
     expect(result.selectionAudit).toMatchObject({partial:true,unresolvedPremiseIds:['B'],sourceRepairCallsRemaining:0});
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
-  });
-  it('重选先逐一比较保留项四项因果差异，不能漏项或四栏复用一句话', () => {
-    const candidate=selection();
-    const row={replacesPremiseId:'B',premise:premise('B'),comparisons:[compare('A')]};
-    expect(premiseReplacementComparisonIssues({replacements:[row]},candidate)).toEqual([]);
-    expect(premiseReplacementComparisonIssues({replacements:[{...row,comparisons:[]}]},candidate).length).toBeGreaterThan(0);
-    expect(premiseReplacementComparisonIssues({replacements:[{...row,comparisons:[compare('C')]}]},candidate).length).toBeGreaterThan(0);
-    const repeated={...compare('A'),actionDifference:'只是在不同职业里使用不同道具',escalationDifference:'只是在不同职业里使用不同道具',reversalDifference:'只是在不同职业里使用不同道具',consequenceDifference:'只是在不同职业里使用不同道具'};
-    expect(premiseReplacementComparisonIssues({replacements:[{...row,comparisons:[repeated]}]},candidate).length).toBeGreaterThan(0);
   });
   it('binds evidence to each declared premise and rejects invented references or inconsistent verdicts', () => {
     expect(premiseSelectionReviewIssues(failure, selection())).toEqual([]);
@@ -293,7 +277,8 @@ it('does not enter another provider attempt after the last physical call returns
       expect(eligible.map((item:any)=>item.premiseId)).toEqual(['C']); // overlap-rejected B cannot be reused
       expect(prompt).toContain('"premiseId":"A"'); // protected story remains visible in current selection
       expect(options.validate({ replacements: [{ replacesPremiseId: 'B', premise: premise('NEW') }] })).toBe(false);
-      expect(prompt).toContain('每项comparisons须逐一覆盖合并后其余全部最终题材ID');
+      expect(prompt).not.toContain('每项comparisons须逐一覆盖');
+      expect(prompt).toContain('独立同构复核');
       expect(prompt).toContain('修订须复查全部筛选字段的同一因果事实');
       expect(prompt).toContain('原池动作的实施者、受益者或接收者未写清时');
       expect(prompt).toContain('replacements恰好1项');

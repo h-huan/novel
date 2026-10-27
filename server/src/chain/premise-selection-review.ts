@@ -22,36 +22,6 @@ const containsQuote = (value: Record<string, unknown> | undefined, quote: unknow
   typeof quote === 'string' && quote.trim().length >= 8 && !!value
   && Object.values(value).some(text => typeof text === 'string' && text.includes(quote));
 
-/** A replacement must compare its causal structure against every retained item
- * before spending the existing independent-review calls. This is a generation
- * contract, never a substitute for the overlap gate. */
-export function premiseReplacementComparisonIssues(value: unknown, candidate: PremiseSelectionResult): string[] {
-  const replacements = (value as any)?.replacements;
-  if (!Array.isArray(replacements)) return ['重选缺少替换项'];
-  const errors: string[] = [];
-  const fields = ['actionDifference','escalationDifference','reversalDifference','consequenceDifference'];
-  for (const row of replacements) {
-    const expected = candidate.selected.filter(item => item.premiseId !== row?.premise?.premiseId).map(item => item.premiseId);
-    const comparisons = row?.comparisons;
-    if (!Array.isArray(comparisons) || comparisons.length !== expected.length
-      || new Set(comparisons.map((item:any)=>item?.referencePremiseId)).size !== expected.length
-      || comparisons.some((item:any)=>!expected.includes(item?.referencePremiseId))) {
-      const actual = Array.isArray(comparisons) ? comparisons.map((item:any)=>item?.referencePremiseId) : [];
-      errors.push('重选comparisons须逐一覆盖全部保留题材的实际ID，不得漏项或重复；必需ID='
-        + JSON.stringify(expected) + '；缺少ID=' + JSON.stringify(expected.filter(id=>!actual.includes(id)))
-        + '；未知ID=' + JSON.stringify(actual.filter(id=>!expected.includes(id)))
-        + '；重复ID=' + JSON.stringify(actual.filter((id,index)=>actual.indexOf(id)!==index))); continue;
-    }
-    for (const comparison of comparisons) {
-      if (fields.some(field => typeof comparison[field] !== 'string' || comparison[field].trim().length < 12)
-        || new Set(fields.map(field=>comparison[field])).size !== fields.length) {
-        errors.push('重选须分别说明主动选择、升级、反转作用、连带代价的实质差别，每项至少12字，不能四项重复同一句');
-      }
-    }
-  }
-  return errors;
-}
-
 /** Evidence belongs to the declared premise, not merely somewhere in the batch. */
 export function premiseSelectionReviewIssues(value: unknown, selection: PremiseSelectionResult): string[] {
   const review = value as PremiseSelectionReview;

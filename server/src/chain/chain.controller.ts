@@ -17,7 +17,6 @@ import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategor
 import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
-import { premiseReplacementComparisonIssues } from './premise-selection-review';
 import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
@@ -6424,7 +6423,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reselectionBudget=shared?.reselection||{remaining:readGenerationBudgets().premiseReselectionMaxCalls};
     let selected=initial;
     const completedSlots=new Set<string>();
-    const frozenReselections=new Map<string,Record<string,Record<string,unknown>>>();
     // An optional standby is NOT an accepted premise. Only a fully independent
     // source + causal + category/genre + overlap review may promote its identity.
     const pendingBackup={current:null as ReturnType<typeof normalizePremiseSelectionPayload>|null};
@@ -6456,17 +6454,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         && availableIds.length>=alternateSize
         &&(!shared||shared.reviews.remaining>=groupedSourceCalls+2);
       pendingBackup.current=null;
-      const frozenScope=slots.map(slot=>String(slot.replacesPremiseId)).sort().join('|');
-      let frozen=frozenReselections.get(frozenScope);
       const normalize=(value:unknown)=>{
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
         const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
-        const premises=Object.fromEntries(rows.map((row:any)=>[row.replacesPremiseId,candidate.selected.find(item=>item.premiseId===row.premise.premiseId)!]));
-        if(frozen&&Object.entries(frozen).some(([id,prior])=>!premises[id]||Object.entries(prior).some(([key,entry])=>JSON.stringify(premises[id][key])!==JSON.stringify(entry))))
-          throw Error('比较协议补正不得更换候选身份或改写premise，只补正comparisons');
-        const issues=premiseReplacementComparisonIssues(value,candidate);
-        if(issues.length){frozen??=structuredClone(premises);frozenReselections.set(frozenScope,frozen);throw Error(issues.join('；'));}
         return candidate;
       };
       try{
@@ -6485,14 +6476,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool可纠正原身份展开。不得复制其它位置、改变分类或用正常项填空。'
           +'\n每个premise额外必返causalPlan，按下面JSON结构与已注入GEN-002规则逐项锚定原文；条数由实际事件决定，不按示例凑数。'
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
-          +'\n每项comparisons须逐一覆盖合并后其余全部最终题材ID，包括本次其它修订项的新ID；不是只比较正常项，也不要沿用已被替换的旧ID。模型须先确定全部最终候选，再核对各项选择、升级、反转、代价的真实区别。'
+          +'\n先确定全部最终候选，并实质核对行动、升级、反转与代价差异；不要生成逐对自评文本，所有涉及新候选的比较仍由服务器独立同构复核。'
           +'\n按已注入GEN-002的最终差异比较合同执行。分类候选='+JSON.stringify(categories)
-          +(canReviewBackup?'\n可选备用：在同一个响应中额外提供backupReplacements，须恰好覆盖本次全部问题槽位，一槽一项、无重复原池ID；备用所有身份须与主replacements不同，且仍属于未尝试的同批原池。每项完整提供与主候选相同字段、因果计划和与同批其它最终保留项的comparisons。备用不是额外入选数，不是通过结论；服务器独立核查来源、因果、分类、流派和全部相关同构配对，再从各槽位主备中择取可通过的组合。没有成熟备选时省略backupReplacements，绝不凑数。':'')
-          +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","comparisons":[{"referencePremiseId":"其余最终ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"因果升级差别至少12字","reversalDifference":"胜负条件差别至少12字","consequenceDifference":"连带代价差别至少12字"}],"premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
+          +(canReviewBackup?'\n可选备用：在同一个响应中额外提供backupReplacements，须恰好覆盖本次全部问题槽位，一槽一项、无重复原池ID；备用所有身份须与主replacements不同，且仍属于未尝试的同批原池。每项完整提供与主候选相同的筛选字段与因果计划。备用不是额外入选数，不是通过结论；服务器独立核查来源、因果、分类、流派和全部相关同构配对，再从各槽位主备中择取可通过的组合。没有成熟备选时省略backupReplacements，绝不凑数。':'')
+          +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
           {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:reselectionBudget,timeout:LLM_TUNABLES.timeoutSimple(),
             validate:value=>{try{normalize(value);return true;}catch{return false;}},
             describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String((error as Error).message)];}},
-            retryInstruction:'按点名的协议问题补正：comparisons错误只补正比较，保留上次全部完整premise和身份；causalPlan错误只补齐计划或纠正指向现有字段的原文锚点，不重写故事来迎合引用。覆盖每个最终候选以外的其它最终ID，不换题，不重写正常项。'});
+            retryInstruction:'按点名的协议问题补正：causalPlan错误只补齐计划或纠正指向现有字段的原文锚点，不重写故事来迎合引用。不得重写已通过项、伪造原池身份或填造必要条件。'});
         if(!result.data){reselectionStopReason='原池重选协议纠正未完成，未处理位置隔离：'+(result.validationIssues||result.warnings||[]).join('；');return false;}
         const primary=normalize(result.data);
         primary.selected.forEach(row=>attemptedBeforeReserve.add(String(row.premiseId)));
@@ -6510,10 +6501,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               const payload={replacements:result.data.backupReplacements};
               const backup=normalizeTargetedPremiseReselection(payload,selected,scopedReview,
                 requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
-              if(!premiseReplacementComparisonIssues(payload,backup).length){
-                pendingBackup.current=backup;
-                backup.selected.forEach(row=>attemptedBeforeReserve.add(String(row.premiseId)));
-              }
+              // Backup still requires the same independent source, causal and overlap reviews.
+              pendingBackup.current=backup;
+              backup.selected.forEach(row=>attemptedBeforeReserve.add(String(row.premiseId)));
             }
           } catch {/* An optional backup never bypasses immutable-source validation. */}
         }
@@ -6766,8 +6756,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         throw Error('汇总换选须用未尝试的原池身份一一替换全部缺额，不得重用或伪造身份');
       const candidate=normalizeTargetedPremiseReselection(value,current,scopedReview,requestedCount,
         poolTarget,categories,current.selected.length);
-      const comparisonIssues=premiseReplacementComparisonIssues(value,candidate);
-      if(comparisonIssues.length)throw Error(comparisonIssues.join('；'));
+      // Independent changed-source and overlap Gate, not generated self-comparison, is authoritative.
       return candidate;
     };
     let replacements: Array<{replacesPremiseId:string;replacementPremiseId:string}>=[];
@@ -6784,9 +6773,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             +JSON.stringify(priorRejectedHistory)
           :'')
         +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
-        +'\n【最终所有题材的差异合同】按已注入GEN-002对应合同执行，全部最终身份仍逐一比较。'
+        +'\n【替代题材实质差异】生成时须比较主动选择、升级、反转及代价，省略模型自评表；下游独立同构审核仍逐对核对最终身份。'
         +'\n每张替代题材的causalPlan须引用该题材已写的行动、条件和结果，不得发明缺失条件。'
-        +'\n只输出JSON:{"replacements":[{"replacesPremiseId":"缺额ID","comparisons":[{"referencePremiseId":"其余最终题材ID","actionDifference":"主动选择实质差别至少12字","escalationDifference":"升级差别至少12字","reversalDifference":"反转差别至少12字","consequenceDifference":"代价差别至少12字"}],"premise":{"premiseId":"可选原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"实际分类K编号"}}]}；replacements恰好'+failedIds.length+'项，不回传已通过项。',
+        +'\n只输出JSON:{"replacements":[{"replacesPremiseId":"缺额ID","premise":{"premiseId":"可选原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"实际分类K编号"}}]}；replacements恰好'+failedIds.length+'项，不回传已通过项。',
         {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:budget,
           timeout:LLM_TUNABLES.timeoutSimple(),
           validate:value=>{try{normalize(value);return true;}catch{return false;}},
