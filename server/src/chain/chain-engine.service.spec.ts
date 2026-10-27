@@ -23,7 +23,6 @@ describe('ChainEngineService', () => {
     promptTemplateId: 'test-template',
     modelConfig: { temperature: 0.5 },
     inputMapping: { test: 'user_input.test' },
-    outputMapping: { result: 'test_node.result' },
     timeout: 30,
     description: '测试节点',
   };
