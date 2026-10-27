@@ -91,6 +91,28 @@ const acceptedIdea = (index: number) => ({
   ideaDiscoveryAudit: audit,
 });
 
+describe('ChainPlanningController discovery cancellation identity', () => {
+  it('preserves the exact renderer request ID for model execution and diagnostics', async () => {
+    const clientId = '2c6275cc-b11d-4c0d-bbe5-1d5015bca639';
+    const ideaDiscover = vi.fn().mockResolvedValue({ success: false, ideas: [], error: '模拟终止' });
+    const dualWrite = vi.fn().mockResolvedValue(undefined);
+    const controller = new ChainPlanningController({ ideaDiscover } as any, { dualWrite } as any);
+    await controller.ideaDiscover({ ...dto, count: 5, discoveryRequestId: clientId } as any);
+    expect(ideaDiscover).toHaveBeenCalledWith(expect.objectContaining({ discoveryRequestId: clientId, count: 5 }));
+    expect(dualWrite).toHaveBeenCalledWith('latest_idea_discovery_audit',
+      expect.objectContaining({ discoveryRequestId: clientId }));
+  });
+
+  it('creates a safe server ID only when legacy input has no valid request ID', async () => {
+    const ideaDiscover = vi.fn().mockResolvedValue({ success: false, ideas: [] });
+    const controller = new ChainPlanningController({ ideaDiscover } as any);
+    await controller.ideaDiscover({ ...dto, discoveryRequestId: '../wrong/request', count: 5 } as any);
+    const actual = ideaDiscover.mock.calls[0][0].discoveryRequestId;
+    expect(actual).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(actual).not.toBe('../wrong/request');
+  });
+});
+
 describe('ChainPlanningController idea-discovery transport adapter', () => {
   it('does not oversample or rescreen a complete batch already accepted by the final gate', async () => {
     const upstream = {
