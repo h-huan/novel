@@ -45,9 +45,9 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('retainPremiseReviewEvidence(initial,initialReview,selected)');
     expect(controllerSource).toContain('【选优终检：不得留给后续长时复审才发现】');
     expect(controllerSource).toContain('此为选优前的自检，不输出自评分，不代替后续全部独立审查。');
-    expect(controllerSource).toContain('【本章输出前事件投影核对】');
-    expect(controllerSource).toContain('早于物件展示或查验说过的话不能改称看见证据后的改口');
-    expect(controllerSource).toContain('在场沉默不能写成已回答具体问题');
+    expect(controllerSource).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(controllerSource).toContain('先发生的话不能改称见证后来证据的反应');
+    expect(controllerSource).toContain('沉默、询问或下一章计划升级为已执行结果');
     expect(controllerSource).toContain('"characterStates":[]');
     expect(controllerSource).not.toContain('"stateAfter":"本章后状态"');
     expect(controllerSource).toContain('【本章事件与状态唯一来源】');
@@ -59,12 +59,12 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
     expect(controllerSource).toContain('询问某人不等于已经得到答复');
     expect(controllerSource).toContain('本章新增几笔');
-    expect(controllerSource).toContain('当前账册总共三笔而后章又拿四笔对账');
+    expect(controllerSource).toContain('所有字段使用同一时点和口径');
     expect(controllerSource).toContain('本人直接听到的问话不得投影成第三人此前向其转述');
     expect(controllerSource).toContain('推测他人知情不能投影成已有某人报信');
     expect(controllerSource).toContain('核定金额、签署协议、办手续不等于款项实际发放或收到');
-    expect(controllerSource).toContain('不能推出整个后续时间段“始终没再进去”');
-    expect(controllerSource).toContain('只写记录人记下姓名不能作为已记下具体观察的依据');
+    expect(controllerSource).toContain('没有明写的后续行动、持续状态和范围不可凭空补全');
+    expect(controllerSource).toContain('仅记下身份不得推定具体证据已记录、被采信或已完成调查');
     expect(controllerSource).toContain('scenes.outcome和characterActions.result只能保留为待查状态');
     expect(controllerSource).toContain('【通信渠道矛盾修复规则】');
     expect(controllerSource).toContain('不得删除或忽略该直接证据去迁就错误审查');
@@ -89,6 +89,21 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('每进门');
     expect(controllerSource).not.toContain('仅楼内回拨');
     expect(controllerSource).not.toContain('已确认题材的触发条件、回拨范围、抹除对象');
+  });
+
+  it('keeps patch-only synchronization policy out of first draft but in the one local repair contract', () => {
+    const draftAt = indexOrFail(controllerSource, 'const chapterPrompt =');
+    const draftEnd = indexOrFail(controllerSource, 'const chapterJsonExample =');
+    const draft = controllerSource.slice(draftAt, draftEnd);
+    const repairAt = indexOrFail(controllerSource, '【局部修复硬约束】禁止重新生成完整章纲');
+    const repairEnd = controllerSource.indexOf('stepKey:\'creation_chapter_fact_repair\'', repairAt);
+    expect(repairEnd).toBeGreaterThan(repairAt);
+    expect(draft).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(draft).not.toContain('OUTLINE_FACT_REPAIR_SYNC_POLICY');
+    expect(draft).toContain('【数量、信息与证据连续性】');
+    expect(draft).toContain('【通信渠道与同源事件约束】');
+    expect(controllerSource.slice(repairAt, repairEnd)).toContain('${OUTLINE_FACT_PATCH_ADDRESS_POLICY}${OUTLINE_FACT_REPAIR_SYNC_POLICY}');
+    expect(controllerSource).not.toContain('【本章输出前事件投影核对】');
   });
 
   it('short-world directive cannot override the confirmed story or silently rewrite a conflict', () => {
