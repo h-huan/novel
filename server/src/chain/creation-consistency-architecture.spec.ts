@@ -184,6 +184,17 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('顺序生成角色/世界观/组织/伏笔');
   });
 
+  it('collects short foreshadowing from accepted outlines without a dormant long-model path', () => {
+    const shortCollection = indexOrFail(controllerSource, 'const generatedForeshadowings = collectOutlineForeshadowings(outlineForeshadowRows);');
+    const shortPersistence = controllerSource.indexOf('INSERT INTO foreshadowings', shortCollection);
+    const savedCount = controllerSource.indexOf('const fsCountNow = getCreationCounts().foreshadowings;', shortCollection);
+    expect(shortPersistence).toBeGreaterThan(shortCollection);
+    expect(savedCount).toBeGreaterThan(shortPersistence);
+    expect(controllerSource).not.toContain('伏笔生成(长篇)');
+    expect(controllerSource).not.toContain('globalForeshadowings || []');
+    expect(controllerSource).toContain('foreshadowingGenerationConfirmedEmpty = generatedForeshadowings.length === 0');
+  });
+
   it('does not run a late world-depth mutation after downstream canon exists', () => {
     expect(controllerSource).not.toContain('// 世界观 depth\n    enrichTasks.push');
     expect(controllerSource).toContain('世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔');
