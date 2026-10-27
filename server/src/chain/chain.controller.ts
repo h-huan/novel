@@ -4822,7 +4822,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     }
     const discoveryRequestId = String(dto.discoveryRequestId || randomUUID());
     const discoveryRequestStartedAt = new Date().toISOString();
-    const task = discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
+    const task = generationTasks.run('discovery', discoveryRequestId, '', () =>
+      discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
       try {
         const result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
         if (result && typeof result === 'object') {
@@ -4841,13 +4842,18 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         });
         throw error;
       }
-    });
+    }));
     this.ideaDiscoveryInFlight.set(requestKey, task);
     try {
       return await task;
     } finally {
       this.ideaDiscoveryInFlight.delete(requestKey);
     }
+  }
+
+  @Post('cancel-idea-discovery/:requestId')
+  cancelIdeaDiscovery(@Param('requestId') requestId:string) {
+    return generationTasks.cancel('discovery', requestId);
   }
 
   private async runIdeaDiscovery(dto: {

@@ -630,6 +630,9 @@ const DiscoveryWizardPage: React.FC = () => {
   // 平台未建模分类树时为空：该平台没有频道概念，只显示「不限定」，不拿别家频道凑数。
   const audienceOptions = hasVerifiedCategoryOptions ? audienceChannelOptions(targetPlatform) : [];
   const ideaRequestInFlightRef = useRef(false);
+  const activeIdeaDiscoveryIdRef = useRef<string | null>(null);
+  const cancelledIdeaDiscoveryIdRef = useRef<string | null>(null);
+  const [cancellingIdeaDiscovery,setCancellingIdeaDiscovery] = useState(false);
 
   // 挂载/重新进入时按 store 现状恢复，而不是无条件清空。
   // 发现灵感走普通 HTTP 长请求，组件卸载（路由切走）不会中断它，完成后仍写回全局 store，
@@ -895,6 +898,10 @@ const DiscoveryWizardPage: React.FC = () => {
     }
     setConfigError('');
     const requestId = ++latestDiscoveryRequestId;
+    const discoveryRequestId = globalThis.crypto?.randomUUID?.()
+      ?? ('idea-'+Date.now()+'-'+requestId+'-'+Math.random().toString(36).slice(2));
+    activeIdeaDiscoveryIdRef.current = discoveryRequestId;
+    cancelledIdeaDiscoveryIdRef.current = null;
     let generationSucceeded = false;
     store.setStep(1);
     store.setGenerating(true);
@@ -923,6 +930,7 @@ const DiscoveryWizardPage: React.FC = () => {
       // 「平台大类/平台子类」，后端按同一份平台分类树解析，不让模型从标签里猜题材方向。
       const categoryValue = [configuredState.selectedCategory, configuredState.selectedSubCategory].filter(Boolean).join('/');
       const res = await api.post<any>('/chain/idea-discover', {
+        discoveryRequestId,
         storyType: configuredState.storyType,
         platform: configuredState.targetPlatform,
         customPlatformNote: configuredState.customPlatformNote,
@@ -986,21 +994,42 @@ const DiscoveryWizardPage: React.FC = () => {
 
         store.setGenProgress(partial ? `本批未完成：已保留 ${combinedIdeas.length}/${configuredState.ideaCount} 个合格故事卡，缺少 ${configuredState.ideaCount-combinedIdeas.length} 个。可选择已有卡，或继续补齐缺额。${missingDetail}${qualityWarn}` : `✨ 合格故事卡 ${combinedIdeas.length} / ${configuredState.ideaCount}（已排除 ${excludeTitles?.length || 0} 个旧题材）${qualityWarn}`);
       } else if ((res as any)?.error) {
-        store.setGenProgress(`❌ ${(res as any).error}`);
+        store.setGenProgress(cancelledIdeaDiscoveryIdRef.current===discoveryRequestId
+          ? '已取消本次灵感发现；未通过完整质量门的题材不会交付。'
+          : `❌ ${(res as any).error}`);
       } else {
         store.setGenProgress('⚠️ 暂时没有找到合适的题材，换个配置试试？');
       }
     } catch (err: any) {
       clearInterval(msgInterval);
-      if (requestId === latestDiscoveryRequestId) store.setGenProgress(`❌ ${err.message || '生成失败，请重试'}`);
+      if (requestId === latestDiscoveryRequestId) store.setGenProgress(
+        cancelledIdeaDiscoveryIdRef.current===discoveryRequestId
+        ? '已取消本次灵感发现；未通过完整质量门的题材不会交付。'
+        : `❌ ${err.message || '生成失败，请重试'}`);
     } finally {
       ideaRequestInFlightRef.current = false;
+      if(activeIdeaDiscoveryIdRef.current===discoveryRequestId)activeIdeaDiscoveryIdRef.current=null;
       if (requestId === latestDiscoveryRequestId) {
         store.setGenerating(false);
         store.setGenerationDone(generationSucceeded || preservedIdeas.length > 0);
       }
     }
   }, [store]);
+
+  const cancelIdeaDiscovery = async () => {
+    const id=activeIdeaDiscoveryIdRef.current;
+    if(!id||cancellingIdeaDiscovery)return;
+    setCancellingIdeaDiscovery(true);
+    try {
+      const result=await api.post<{cancelled:boolean;message:string}>(
+        '/chain/cancel-idea-discovery/'+encodeURIComponent(id),{},30_000);
+      if(result.cancelled){
+        cancelledIdeaDiscoveryIdRef.current=id;
+        store.setGenProgress('已发出取消指令，正在停止当前模型调用；不会把未通过质量门的结果当作完成。');
+      }else store.setGenProgress(result.message||'当前请求已结束，无法取消。');
+    }catch(error:any){store.setGenProgress('取消失败：'+String(error?.message||error));}
+    finally{setCancellingIdeaDiscovery(false);}
+  };
 
   // 重新发现（排除已出现的题材，传完整详情用于更精确去重）
   const handleRegenerate = useCallback(() => {
@@ -1675,6 +1704,11 @@ const DiscoveryWizardPage: React.FC = () => {
             <div style={s.progressBarInner} />
           </div>
           <div style={{ ...s.genText, marginTop: '8px' }}>{genProgress}</div>
+          <button type="button" onClick={() => void cancelIdeaDiscovery()}
+            disabled={cancellingIdeaDiscovery}
+            style={{...s.retryBtn,marginTop:'12px',opacity:cancellingIdeaDiscovery?0.6:1}}>
+            {cancellingIdeaDiscovery?'正在发送取消…':'取消本次灵感发现'}
+          </button>
           <div style={{ ...s.genText, fontSize: 'var(--font-size-xs)', opacity: 0.5, marginTop: '4px' }}>
             每条题材都会独立生成并通过结构、吸引力与篇幅一致性检查
             <span style={s.genDot}>&nbsp;</span>
