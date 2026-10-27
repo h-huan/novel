@@ -870,8 +870,8 @@ export class ChainController {
     onRetainedLengthFailure?: (runId: string, sourceDraft: string) => void;
     initialContent?: string;
     prepareInitialDraft?: (draft: string) => Promise<string>;
-    /** 业务步骤埋点上下文：项目/章节 + 当前是首版还是大纲对齐精修 */
-    metricsContext?: { projectId?: string; chapterIndex?: number; phase?: 'first' | 'repair' | 'benchmark_refine' };
+    /** 首版正文的项目/章节埋点上下文。审核修订另走现行局部精修入口。 */
+    metricsContext?: { projectId?: string; chapterIndex?: number };
   }): Promise<string> {
     const {basePrompt,targetWords,scenario,temperature=0.7}=params;
     const range=params.wordRange||{...CHAPTER_WORD_RANGE};
@@ -886,13 +886,12 @@ export class ChainController {
     try {
       if(!lastContent){
         params.onProgress?.({label:'按大纲生成首版正文',message:'按本章冲突与人物目标创作，篇幅仅供参考，不为字数添加内容。',progress:20});
-        const phase=params.metricsContext?.phase;
         let response: {content:string};
         try { response=await this.realLLM.generate({
           prompt:basePrompt+this.buildFirstPassLengthParameters(targetWords,range,lengthCalib),
           scenario,temperature,maxTokens:LLM_TUNABLES.BODY_MAXTOKENS,deferQualityGate:true,
           metrics:{projectId:metricsProjectId,chapterIndex:params.metricsContext?.chapterIndex,
-            stepKey:phase==='repair'?'body_alignment_repair':phase==='benchmark_refine'?'body_benchmark_refine':'body_first',attempt,targetWords,prevWords:null},
+            stepKey:'body_first',attempt,targetWords,prevWords:null},
         }); } catch(error) {
           throw new HttpException(`章节生成调用失败，正文未保存：${error instanceof Error ? error.message : String(error)}`,502);
         }
@@ -1898,7 +1897,7 @@ ${localPatchContract('hardline_local_replacement')}
     try {
     content = await this.generateBodyWithLengthGuard({
       basePrompt: boundedFirstPassPrompt, targetWords, scenario, temperature, onProgress, wordRange, initialContent: params.initialContent,
-      metricsContext: { projectId, chapterIndex, phase: 'first' },
+      metricsContext: { projectId, chapterIndex },
       prepareInitialDraft: draft => this.prepareChapterTimePlanDraft({content:draft,plan:timePlan,basePrompt:boundedFirstPassPrompt,projectId,chapterIndex}),
       onLengthInsertion: sourceDraft => { if (!lengthSourceDraft) lengthSourceDraft = sourceDraft; },
       onRetainedLengthFailure: (runId, sourceDraft) => {
@@ -2684,7 +2683,7 @@ ${localPatchContract('hardline_local_replacement')}
         throw new HttpException('本章确认故事上下文不完整，已停止生成；不会使用通用提示词替代详细大纲', 409);
       }
 
-      // 严格基于已绑定的详细大纲做单次 LLM 生成（2026-07-24 取消天龙8步后）
+      // 只按已绑定、已确认的详细大纲生成正文。
       if (outline && Object.keys(outline).length > 0) {
         const povInstruction = (() => {
           const pov = String((chapterContext as any).pov || '').trim();
@@ -4396,7 +4395,7 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
    * 流式输出生成端点（SSE实时显示进度）
    * 支持两种模式：
    *   1. 简易模式（无 chapterId）：直接调 LLM，按段落推送
-   *   2. 单次 LLM 模式（有 chapterId）：严格按详细大纲单次生成，输出最终正文（2026-07-24 取消天龙8步 Chain 后的统一路径）
+   *   2. 章节模式（有 chapterId）：按已确认详细大纲生成，并通过完整正文质量验收
    */
   @Post('stream-generate')
   async streamGenerate(
@@ -4551,9 +4550,7 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
         const templateId = dto.templateId || 'body-by-outline';
         send({ type: 'start', message: `开始【${templateId}】生成第${chapterRow.chapter_index}章...` });
 
-        // 取消天龙8步 Chain（2026-07-24）：改为单次 LLM 调用 + 严格按详细大纲生成
-        // 字数收敛统一交给 generateBodyWithLengthGuard，内部已含真实 LLM 超时兜底。
-        // 进度通过 SSE 心跳事件推送给前端，不再有"目标→诱因→...→钩子"逐节点推进。
+        // 使用已确认章纲执行正文生成；前端进度由 SSE 心跳推送。
         const chapterOutlineText = currentOutline ? this.buildChapterOutlineContext(currentOutline) : (dto.prompt || '');
         // 大纲严格性约束（红线 + 绿区）：与 /chain/generate 同源，统一维护
         const povInstruction = (() => {

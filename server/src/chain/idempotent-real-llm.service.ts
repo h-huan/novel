@@ -15,7 +15,6 @@ import { standardDirectiveCache } from '../modules/module-standards/standard-dir
 import { LLM_TUNABLES } from '../config/llm-tunables';
 
 const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
-const AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP = 'body_alignment_repair';
 const SINGLE_IDEA_CARD_MARKER = 'JSON 结构（ideas 必须恰好 1 项）';
 const SINGLE_IDEA_CARD_RECOVERY_DIRECTIVE =
   '【结构恢复】上一响应没有满足本次唯一输出契约。不要换题、不要重选 premise、不要修改题材身份；仅把同一个已选题材按原请求完整输出为 {"ideas":[{...}]}，且 ideas 必须恰好 1 项。不要返回空数组、单独的 idea 字段、裸卡片或额外解释。';
@@ -28,16 +27,15 @@ const STORY_CARD_REPAIR_FLOOR =
  * The public provider token is still RealLLMService. This subclass keeps runtime
  * invariants at the single LLM boundary without adding a second router or quality system:
  * 1) exact successful creation/planning/review calls may be reused after recovery or duplicate orchestration;
- * 2) the historical automatic whole-chapter alignment rewrite is physically blocked;
- * 3) project-scoped outputs carry their generation_runs.id so downstream Canon commits
+ * 2) project-scoped outputs carry their generation_runs.id so downstream Canon commits
  *    can prove which exact gated generation produced the artifact;
- * 4) an exhausted transient transport failure gets one configurable outer recovery round
+ * 3) an exhausted transient transport failure gets one configurable outer recovery round
  *    with the exact same configured model/request, so a short socket reset does not abort
  *    the whole creation pipeline after RealLLM's single immediate network retry;
- * 5) the one-premise/one-card idea structuring contract gets one technical shape recovery
+ * 4) the one-premise/one-card idea structuring contract gets one technical shape recovery
  *    on the same premise instead of silently turning a malformed provider JSON shape into
  *    a missing user-requested idea card;
- * 6) a short-story-card audit keeps the exact audited candidate for the immediately
+ * 5) a short-story-card audit keeps the exact audited candidate for the immediately
  *    following repair, preventing the repair call from rebuilding the whole card from
  *    premise+rules and creating a different conflict elsewhere.
  *
@@ -61,11 +59,6 @@ export class IdempotentRealLLMService extends RealLLMService {
 
   override async generate(request: LLMRequest): Promise<LLMResponse> {
     assertGenerationActive();
-    const stepKey = String(request.metrics?.stepKey || '').trim();
-    if (stepKey === AUTOMATIC_WHOLE_CHAPTER_REPAIR_STEP) {
-      throw new Error('自动整章大纲对齐重写已禁用：保留当前稿，只允许有逐字证据的局部事实/硬红线修复');
-    }
-
     const projectId = request.metrics?.projectId ?? currentCreationProjectId() ?? undefined;
     this.captureReviewedShortStoryCard(request, projectId);
     const effectiveRequest = this.withReviewedShortStoryCardForRepair(request, projectId);
