@@ -28,6 +28,19 @@ function presentationFixture(error?: Error, budget = { remaining: 6 }) {
 }
 
 describe('aggregate review before capacity partitioning', () => {
+  it('partitions four real cards before a large combined presentation review, with each peer still available as a reference', async () => {
+    const { c, leaves, budget } = presentationFixture(undefined, { remaining: 4 });
+    const items=cards().slice(0,4);
+    const before=JSON.stringify(items);
+    const result=await c.reviewIdeaPresentation(items, [], '', budget, false, true);
+    expect(leaves.map(row=>row.items.length)).toEqual([2,2]);
+    expect(result.map((row:any)=>row.position)).toEqual([1,2,3,4]);
+    expect(result.every((row:any)=>row.platformFit===false)).toBe(true);
+    for(const row of leaves)expect([...row.items,...row.refs].map((x:any)=>x.title).sort())
+      .toEqual(items.map(item=>item.title).sort());
+    expect(budget.remaining).toBe(2);
+    expect(JSON.stringify(items)).toBe(before);
+  });
   it('audits five cards together despite old two-card setting, preserving genuine rejections', async () => {
     const { c, leaves, budget } = presentationFixture();
     const result = await c.reviewIdeaPresentation(cards(), [], '', budget);

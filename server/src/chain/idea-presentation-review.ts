@@ -3,7 +3,7 @@
  * all independent partitions. Batching is a latency optimization, never a
  * prerequisite for completing a valid five-card review under a small budget. */
 export function shouldBatchIdeaPresentation(count:number,groupingMode:number,batchSize:number,availableReviewCalls:number):boolean {
-  return groupingMode===0&&count>=5&&batchSize>=1&&count>batchSize
+  return groupingMode===0&&count>=4&&batchSize>=1&&count>batchSize
     &&availableReviewCalls>=Math.ceil(count/batchSize);
 }
 import { ideaReviewCitableNarrativeText } from './idea-review-evidence';

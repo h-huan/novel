@@ -9816,7 +9816,16 @@ ${crossStageReviewDirective()}${crossStagePromiseDirective(canonicalCreativeBrie
       throw new Error(`跨模块故事一致性审查未返回完整结构，未执行修订或激活：${alignmentResult.warnings.join('；') || 'consistent/contradictions/unrelatedInventions缺失'}`);
     }
     warnings.push(...crossStageAdvisories(alignment));
-    let contradictions = [...crossStageBlockingIssues(alignment),...await reviewStagePromises(generatedBundle),...await reviewSourceBoundaries(generatedBundle)];
+    // Both detailed checks read the same frozen bundle but neither consumes
+    // the other's verdict. Execute them concurrently, then drain BOTH results
+    // before applying any repair to the bundle. Keep their independent gates
+    // and unchanged findings, and never overlap an in-flight check with edits.
+    const [stagePromiseResult, sourceBoundaryResult] = await Promise.allSettled([
+      reviewStagePromises(generatedBundle), reviewSourceBoundaries(generatedBundle),
+    ]);
+    if(stagePromiseResult.status==='rejected')throw stagePromiseResult.reason;
+    if(sourceBoundaryResult.status==='rejected')throw sourceBoundaryResult.reason;
+    let contradictions = [...crossStageBlockingIssues(alignment),...stagePromiseResult.value,...sourceBoundaryResult.value];
     // 一致性修订迭代：最多 2 次"修订→复查"；不能只按问题数量判断是否无进展，
     // 因为修好一个问题后可能暴露另一个，数量不变仍应继续修订。
     let repairAttempt = 0;
