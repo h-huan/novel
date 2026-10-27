@@ -8847,7 +8847,7 @@ ${(() => {
       }
 
 
-      // ====== 步骤2-5：按需补充角色/世界观/组织/伏笔 ======
+      // ====== 步骤2-5：复用已验收世界观，按需补充角色/组织/伏笔 ======
       // 检查 DB，缺什么补什么，保证前端根节点都有真实数据。 
       const db_check = this.db.getDb();
       const hasCharacters = (db_check.prepare('SELECT COUNT(*) as c FROM characters WHERE project_id = ?').get(projectId) as any)?.c > 0;
@@ -8894,9 +8894,9 @@ ${(() => {
         emit('orgs', 85, `${hasOrganizations && hasMapPoints ? '✓' : ''}组织与地图已就绪`, hasOrganizations && hasMapPoints ? 'done' : 'failed');
         emit('foreshadowing', 95, `${hasForeshadowings ? '✓' : ''}伏笔已就绪`, hasForeshadowings ? 'done' : 'failed');
       } else {
-        emit('characters', 50, '顺序生成角色/世界观/组织/伏笔...');
+        emit('characters', 50, '基于已验收世界观顺序生成角色/组织/伏笔...');
 
-        // --- 按文档层级顺序执行：世界观→角色→关系→组织→伏笔→时间线（每步在上一步落库后生成，保证一致）---
+        // --- 前序世界观已独立验收落库；后续只有角色→关系→组织→伏笔的补全任务。---
         const sequentialTasks: Array<() => Promise<{ step: string; warnings: string[] }>> = [];
 
         // 任务A：角色生成（仅当 DB 中无角色时执行）
