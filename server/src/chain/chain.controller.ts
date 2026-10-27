@@ -5081,7 +5081,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           batchFocus,
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
           '同一批不能让多数题材靠相同的行动、反制、翻盘与代价结构支撑：比较每个storyCore里主角真正采取的策略、对手如何改变局面、靠哪项已经建立的条件让胜负转换、赢后损失的具体性质。若已有两项都靠私存岗位记录、遭反咬、第三方核账而翻盘，其余题材必须改用实质不同且能够成立的行动与兑现机制，不准只换职业、场所或物证名称。对不同机制同样核对授权和因果，不为凑差异编造条件。',
-          '保留用户指定的类型、平台、分类、流派与其它条件。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
+          '保留用户指定的类型、平台、分类、流派与其它条件。每个storyCategoryId必须与该项人物关系、核心冲突、主动选择和兑现机制实质相符；类型只在结尾点缀或职业背景出现的胚子应重新构思，不能留给后续模型通过改标签或补写救活。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
         ].join('\n');
         const minimumSelectedCount = promptPhase === 'selection'
           ? minimumSelectedCountForPool(candidatePool.length) : minimumPremiseSelectionCount;
