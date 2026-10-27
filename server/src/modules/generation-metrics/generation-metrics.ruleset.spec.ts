@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import { reconcileSchema } from '../../database/schema-reconciler';
 import { GenerationMetricsService, generationRulesetSnapshotIsCurrent } from './generation-metrics.service';
 
 describe('generation ruleset staleness', () => {
@@ -42,5 +43,27 @@ describe('generation run request identity at model-call start', () => {
   } finally {
    db.close();
   }
+ });
+});
+
+describe('legacy database discovery-run identity upgrade',()=>{
+ it('adds the new attribution column idempotently without discarding historical rows',()=>{
+  const db=new DatabaseSync(':memory:');
+  try{
+   db.exec(`CREATE TABLE quality_benchmark_samples(id TEXT PRIMARY KEY);
+    CREATE TABLE generation_runs(
+     id TEXT PRIMARY KEY,stage TEXT,scenario TEXT,status TEXT,
+     gate_status TEXT DEFAULT 'not_evaluated',started_at TEXT
+    );
+    INSERT INTO generation_runs(id,stage,scenario,status,started_at)
+    VALUES('historic','project','idea_generate','success','2026-10-26T23:00:00Z');`);
+   const initial=reconcileSchema(db);
+   expect(initial.actions).toContain('generation_runs.discovery_request_id');
+   const row=db.prepare('SELECT discovery_request_id,status FROM generation_runs WHERE id=?')
+    .get('historic') as {discovery_request_id:string|null;status:string};
+   expect(row).toEqual({discovery_request_id:null,status:'success'});
+   const next=reconcileSchema(db);
+   expect(next.actions).not.toContain('generation_runs.discovery_request_id');
+  }finally{db.close();}
  });
 });
