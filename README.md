@@ -39,21 +39,31 @@ cd ..\desktop
 npm ci
 ```
 
-正常桌面开发：
+开发时**分别在独立终端启动**后端和前端。任何一个命令都不会启动、重启或关闭另一个进程。
 
-```powershell
-cd desktop
-node scripts/dev.js
-```
-
-服务端固定使用 `3100`，桌面开发前端固定使用 `5173`。端口被占用时应明确失败，不允许静默切换到其他端口。
-
-只调试后端时：
+终端一，仅后端：
 
 ```powershell
 cd server
 npm run start:dev
 ```
+
+终端二，仅前端 Vite：
+
+```powershell
+cd desktop
+npm run dev
+```
+
+需要 Electron 桌面窗口时，先在终端二保持 Vite 运行，再在终端三显式启动窗口（不启动后端）：
+
+```powershell
+cd desktop
+$env:VITE_DEV_SERVER_URL = "http://127.0.0.1:5173/"
+npx electron .
+```
+
+服务端固定使用 `3100`，前端固定使用 `5173`。被占用时明确报错，不自动结束旧进程、不复用启动器、不静默切换端口。桌面窗口和状态查询只检查后端健康状态，不负责启动或停止后端。关闭服务端应在对应后端终端按 Ctrl+C；运行中的灵感或小说任务不应被脚本强制清理。
 
 ## 仓库验证
 
