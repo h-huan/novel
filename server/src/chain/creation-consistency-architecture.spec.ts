@@ -168,6 +168,22 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('wsCount = reusingFrozenWorld ? 1 : 0');
   });
 
+  it('has one creation-world authority and no legacy post-outline world regeneration', () => {
+    const shortWorld = indexOrFail(controllerSource, 'const worldResult = await this.llmCallWithRetry<any>(\'世界观生成\', worldPrompt, {');
+    const savedWorld = indexOrFail(controllerSource, 'const savedWorld = db.prepare');
+    const chapterOutlines = indexOrFail(controllerSource, 'const chapterPrompt =');
+    const guard = indexOrFail(controllerSource, '创建期世界观主记录缺失或无效：前序世界观必须先通过审核并落库');
+    const enrichment = indexOrFail(controllerSource, '// 任务C：组织/地点生成');
+    expect(shortWorld).toBeLessThan(savedWorld);
+    expect(savedWorld).toBeLessThan(chapterOutlines);
+    expect(chapterOutlines).toBeLessThan(guard);
+    expect(guard).toBeLessThan(enrichment);
+    expect(controllerSource.match(/const worldPrompt =/g)).toHaveLength(1);
+    expect(controllerSource).not.toContain('world_system_profiles 已创建 (sequential path');
+    expect(controllerSource).not.toContain('任务B：世界观生成（仅当 DB 中无世界观时执行');
+    expect(controllerSource).not.toContain('顺序生成角色/世界观/组织/伏笔');
+  });
+
   it('does not run a late world-depth mutation after downstream canon exists', () => {
     expect(controllerSource).not.toContain('// 世界观 depth\n    enrichTasks.push');
     expect(controllerSource).toContain('世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔');
