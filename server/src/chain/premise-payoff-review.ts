@@ -31,7 +31,7 @@ export function premisePayoffCatalog(selection:PremiseSelectionResult){
   return selection.selected.map((item,index)=>({ref:'S'+(index+1)+'.payoff',premiseId:String(item.premiseId)}));
 }
 export function premisePayoffReviewDirective(selection:PremiseSelectionResult){
-  return '\n按已注入GEN-002的缺口路由合同，gap项额外返回gapRepair=restore_source_conditions|replace_from_pool；restore_source_conditions须加sourceConditionQuote，逐字引用同ID原池已建立的全部缺失条件；原池也缺条件或无法给出真实引用时返回replace_from_pool，不补造条件。\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
+  return '\n按已注入GEN-002的缺口路由合同，每个status=gap项必须明确返回gapRepair=restore_source_conditions|replace_from_pool；缺省不是自动要求换题。若原池storyCore和入选展开已经写出后来实际发生的物证核验、权限、传递及决定，仅causalPlan把终局错误地绑定到较早环节，则返回restore_source_conditions，并用sourceConditionQuote逐字引用原池已存在的关键事件或条件：优先保留同ID原题材，局部纠正因果引用，经过独立来源/兑现/同构复核后方能通过。restore_source_conditions必须加sourceConditionQuote，逐字引用同ID原池已建立的相关关键条件；若原池确实缺少决定性条件或找不到原始引用，则返回replace_from_pool，不得通过改引用伪造条件。\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
     +'\n【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】'+JSON.stringify(selection.selected.flatMap((item,index)=>premiseCausalCatalog(item,`S${index+1}.`).map(({ref})=>({ref}))))
     +'\n先核对每个causalPlan环节：action只能直接改变什么、conditions是否实际建立并足以导致result。每个payoffChecks新增links数组，逐一返回本题材目录的{ref,status:"supported|gap|unknown",reason:"具体必要条件为何充分或缺失，至少8字"}，不得漏项、重复、跨题材或靠一条总体认可代替。conditions为空不自动通过，遇到实际必要条件未写仍须gap；原池与展开一起漏写的条件同样为gap。计划遗漏的关键中间结果也须在本题材整体payoffChecks中报告gap，不能仅核对作者自行列出的环节。若关键照片、录音、原始母带、样本、账本等证据受公司、对手或他人保管控制，而结局要求主角提交给警方、机构或有决定权者，必须分别核对产生证据、实际取得或获准复制、保全不被撤销、移交接收这几步在原池与展开中是否真实发生；能录到内容不等于取得受他人控制的原件，不能从录音间存在母带直接推定主角能带出或提交。证据只在主角或熟人手中时同样核对谁实际交付、谁接收、接收者知情且有权怎样处理；仅有报案或口头建议不等于证据进入处理流程。原池和展开都漏掉这道决定性桥接时整体应为gap，不可因终局已经写出就标supported。整体status须与links一致：任一unknown则unknown，其次任一gap则gap，其余才supported；发现计划外缺口可整体gap但保留links的真实结论。'
     +'\n【逐题材允许的行动和条件字段，包含本计划实际使用的字段】'+JSON.stringify(selection.selected.map((candidate,index)=>({ref:`S${index+1}.payoff`,actionFields:permittedEvidenceFields(candidate,'actionEvidenceRef'),conditionFields:permittedEvidenceFields(candidate,'conditionEvidenceRef')})))+'。每个编号须加本卡S序号前缀，不引用自评或读者问题。causalPlan是定位索引，不是证据的封闭白名单；先在本题材全部实际故事字段寻找必要条件，再判断gap。必要行动或条件写在payoff而未被计划选中时，另返actionEvidenceQuote或conditionEvidenceQuote，逐字引用不与计划result断言重叠的实际行动/独立条件；只引用结果或其片段仍拒绝，不为原文没有的条件补故事。'
@@ -46,7 +46,8 @@ export function premisePayoffReviewIssues(value:any,selection:PremiseSelectionRe
     if(!item||seen.has(row.ref)){errors.push('兑现审查编号未知或重复');continue;}seen.add(row.ref);
     if(!['supported','gap','unknown'].includes(row.status)||typeof row.reason!=='string'||row.reason.trim().length<8)errors.push(row.ref+'缺少明确状态与必要条件依据');
     const candidate=selection.selected.find(candidate=>candidate.premiseId===item.premiseId)!;
-    if(row.gapRepair!==undefined&&!['restore_source_conditions','replace_from_pool'].includes(row.gapRepair))errors.push(row.ref+'的gapRepair模式无效');
+    if(row.status==='gap'&&!['restore_source_conditions','replace_from_pool'].includes(row.gapRepair))errors.push(row.ref+'缺少可执行的真实缺口路由gapRepair；不得默认把仅有索引问题的成熟题材强制换选');
+    if(row.status!=='gap'&&row.gapRepair!==undefined)errors.push(row.ref+'非gap项不得无故要求补救');
     if(row.gapRepair==='restore_source_conditions'){
       const source=selection.pool.find(seed=>seed.premiseId===item.premiseId);
       if(row.status!=='gap'||typeof row.sourceConditionQuote!=='string'||row.sourceConditionQuote.trim().length<8

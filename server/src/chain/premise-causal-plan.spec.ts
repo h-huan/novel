@@ -139,6 +139,22 @@ describe('plan critical prerequisites before full story cards',()=>{
     const p=premise();p.causalPlan.pop();
     expect(premiseCausalPlanIssues(p)).toContain('causalPlan须覆盖主线兑现，不能只列开端或普通动作');
   });
+  it('requires semantic gaps to choose source-backed correction or genuine source replacement',()=>{
+    const data=selection(),row=payoffChecks(data)[0];
+    row.status='gap' as any;row.links[0].status='gap';
+    expect(premisePayoffReviewIssues({payoffChecks:[row]},data)).toContain(
+      'S1.payoff缺少可执行的真实缺口路由gapRepair；不得默认把仅有索引问题的成熟题材强制换选');
+    (row as any).gapRepair='restore_source_conditions';
+    (row as any).sourceConditionQuote='主角按已有条件求援，救出被困者并承担真实代价。';
+    expect(premisePayoffReviewIssues({payoffChecks:[row]},data)).toEqual([]);
+    const issue=materializePremisePayoffReview({payoffChecks:[row]},data)[0];
+    expect(issue.repairMode).toBeUndefined();
+    (row as any).gapRepair='replace_from_pool';delete (row as any).sourceConditionQuote;
+    expect(materializePremisePayoffReview({payoffChecks:[row]},data)[0].repairMode).toBe('replace_from_pool');
+    (row as any).gapRepair='restore_source_conditions';
+    expect(premisePayoffReviewIssues({payoffChecks:[row]},data)).toContain(
+      'S1.payoff恢复展开条件须逐字引用同ID原池已有的全部缺失条件，不得补造来源');
+  });
   it('cannot bless a missing intermediate condition with a positive overall verdict',()=>{
     const s=selection(),rows=payoffChecks(s);rows[0].links[0].status='gap';
     expect(premisePayoffReviewIssues({payoffChecks:rows},s)).toContain('S1.payoff不能用总体通过掩盖中间因果缺口');

@@ -6235,7 +6235,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const targets = premiseCausalPlanRepairInput(selection);
     if (!targets.length) return selection;
     const response = await this.realLLM.generate({
-      prompt: PREMISE_CAUSAL_SEQUENCE_DIRECTIVE + '\\n只补全点名题材的causalPlan引用索引，不修改或补造任何故事字段、条件、身份与结果。逐环节引用下方本题材已有的实际行动、条件与结果，覆盖主线payoff；条件未写时不得编造，普通直接因果可为空。修好索引后仍须独立审查真实因果，不能自行声明通过。只返回JSON:{"plans":[{"premiseId":"点名ID","causalPlan":'
+      prompt: PREMISE_CAUSAL_SEQUENCE_DIRECTIVE + '\n只补全点名题材的causalPlan引用索引，不修改或补造任何故事字段、条件、身份与结果。逐环节引用下方本题材已有的实际行动、条件与结果，覆盖主线payoff；条件未写时不得编造，普通直接因果可为空。修好索引后仍须独立审查真实因果，不能自行声明通过。只返回JSON:{"plans":[{"premiseId":"点名ID","causalPlan":'
         + JSON.stringify(premiseCausalPlanExample()) + '}]}；恰好覆盖全部点名ID，不返回其它字段。\n【不可修改的实际故事字段与索引问题】' + JSON.stringify(targets),
       scenario: 'idea_generate', responseFormat: 'json_object', temperature: 0.1,
       timeout: LLM_TUNABLES.timeoutComplex(), maxEmptyRetries: 0, physicalCallBudget: budget,
@@ -6287,7 +6287,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       { scenario: 'idea_generate', stepKey: 'idea_premise_' + mode + '_review', temperature: 0.1, timeout: LLM_TUNABLES.timeoutComplex(), physicalCallBudget,
         validate: value => validateReview(value).length === 0,
         describeValidation: value => validateReview(value),
-        retryInstruction: '只补齐缺失的核查编号或纠正审查JSON及引用；payoffChecks逐题材保留真实gap/unknown，引用本题材已有行动与条件，不能用兑现结论自证；genreChecks已落实仅选择本卡已选展开证据目录的evidenceRef，不引用原池storyCore、不抄写引文；保留已完成的逐字段结论与真实drift/unknown；不得为纠正协议把冲突改成preserved，不重写题材或用虚构证据补齐。' }));
+        retryInstruction: '只补齐缺失的核查编号或纠正审查JSON及引用；payoffChecks的gap必须返回真实路由与原池存在条件的引用，区分计划错绑和原池真实缺条件，不得默认强制换题；逐题材保留真实gap/unknown，引用本题材已有行动与条件，不能用兑现结论自证；genreChecks已落实仅选择本卡已选展开证据目录的evidenceRef，不引用原池storyCore、不抄写引文；保留已完成的逐字段结论与真实drift/unknown；不得为纠正协议把冲突改成preserved，不重写题材或用虚构证据补齐。' }));
     if(!result.data)throw Error('锁定前题材复核协议未完成：'+(result.validationIssues||result.warnings||['缺少合法审核结果']).join('；'));
     const issues = validateReview(result.data);
     if (issues.length) throw new Error('锁定前题材复核协议错误，未生成完整卡：' + issues.join('；'));
