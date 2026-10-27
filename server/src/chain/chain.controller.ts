@@ -1,4 +1,4 @@
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
@@ -6053,7 +6053,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const reserve=await this.reservePremiseSelection(original,{...premiseDiscovery,selected:selectedPremises},
             review,requestedCount,premisePoolSize,discoveryCategories,
             buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n【与完整卡一致的分类标准】'+JSON.stringify(categoryStandards)+premiseCategoryIdentityDirective(discoveryCategories)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
-            reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget);
+            reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget,
+             rejectedCardPathsForReselection(candidateAssessments,selectedPremises.map(item=>String(item.premiseId))));
           for(const entry of reserve.replacements||[])attemptedPremiseIds.add(entry.replacementPremiseId);
           fulfillmentActions.push({kind:'original_pool_replacement',replaces:targets,...reserve});
           if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}
@@ -6773,7 +6774,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   private async reservePremiseSelection(initial: ReturnType<typeof normalizePremiseSelectionPayload>,
     current: ReturnType<typeof normalizePremiseSelectionPayload>, review: PremiseSelectionReview,
     requestedCount: number, poolTarget: number, categories: readonly string[], standard: string,
-    repairBudget: { remaining: number }, protectedIds: readonly string[], requiredGenres:readonly string[]=[], sharedReviewBudget?:{remaining:number}) {
+    repairBudget: { remaining: number }, protectedIds: readonly string[], requiredGenres:readonly string[]=[], sharedReviewBudget?:{remaining:number},
+    rejectedCardPaths:readonly {premiseId:string;title:string;issues:string[]}[] = []) {
     const retained=retainReviewedPremises(current,review,protectedIds);
     const failedIds=retained.excludedPremiseIds.filter(id=>current.selected.some(item=>String(item.premiseId)===id));
     const attemptedIds=new Set([...initial.selected,...current.selected].map(item=>String(item.premiseId)));
@@ -6833,6 +6835,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           ?'\n【本批先前已验证不合格的因果或分类路径】'
             +JSON.stringify(priorRejectedHistory)
           :'')
+        +(rejectedCardPaths.length ? '\n【本轮其它完整卡已有独立拒绝证据：只防止同类缺口反复出现，不禁止同流派或降低审查】'
+          +JSON.stringify(rejectedCardPaths) : '')
         +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
         +'\n【替代题材实质差异】生成时须比较主动选择、升级、反转及代价，省略模型自评表；下游独立同构审核仍逐对核对最终身份。'
         +'\n每张替代题材的causalPlan须引用该题材已写的行动、条件和结果，不得发明缺失条件。'

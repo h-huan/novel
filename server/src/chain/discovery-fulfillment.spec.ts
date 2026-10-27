@@ -1,5 +1,20 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection} from './discovery-fulfillment';
+it('uses only latest evidenced rejected-card paths, not superseded failures or current slots',()=>{
+ const rows=[
+  {sourcePremiseId:'P2',title:'未修前',passed:false,issues:['兑现条件缺失']},
+  {sourcePremiseId:'P2',title:'已修好',passed:true,issues:[]},
+  {sourcePremiseId:'P3',title:'楼上水费',passed:false,issues:['钥匙无人持有']},
+  {sourcePremiseId:'P3',title:'楼上水费',passed:false,issues:['读数不能证明具体收费账目']},
+  {sourcePremiseId:'P11',title:'数车牌',passed:false,issues:['阶段结构不完整']},
+  {sourcePremiseId:'P7',title:'旧拖拉机',passed:false,issues:['泵编号无法证明处分责任']},
+ ];
+ expect(rejectedCardPathsForReselection(rows,['P1','P11','P7'])).toEqual([
+  {premiseId:'P3',title:'楼上水费',issues:['读数不能证明具体收费账目']}]);
+ expect(rejectedCardPathsForReselection(rows,[],1)).toEqual([
+  {premiseId:'P7',title:'旧拖拉机',issues:['泵编号无法证明处分责任']}]);
+ expect(rejectedCardPathsForReselection([...rows,{sourcePremiseId:'P7',passed:true}],[]).some(x=>x.premiseId==='P7')).toBe(false);
+});
 it('holds final-card review credits without increasing the total source-call budget',()=>{
  const total=12,reserve=reservePostCardSourceReviewCredits(total,5,0,3);
  expect(reserve).toBe(2);

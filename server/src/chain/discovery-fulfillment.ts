@@ -1,4 +1,22 @@
 import {presentationGateIssues} from './idea-presentation-review';
+/** The latest factual failures of no-longer-active cards inform a *new* pool
+ * choice, without an extra call or granting/disallowing any identity. */
+export function rejectedCardPathsForReselection(
+ assessments: readonly any[], activePremiseIds: readonly string[], limit=8,
+): Array<{premiseId:string;title:string;issues:string[]}> {
+ const active=new Set(activePremiseIds.map(String));
+ const latest=new Map<string,{premiseId:string;title:string;issues:string[]}>();
+ for(const row of assessments){
+  const premiseId=String(row?.sourcePremiseId||'').trim();
+  if(!premiseId)continue;
+  if(row?.passed===true){latest.delete(premiseId);continue;}
+  const issues=Array.isArray(row?.issues)?row.issues.filter((value:unknown):value is string=>
+   typeof value==='string'&&!!value.trim()).map((value:string)=>value.slice(0,350)).slice(0,4):[];
+  if(issues.length)latest.set(premiseId,{premiseId,title:String(row?.title||'').slice(0,60),issues});
+ }
+ return [...latest.values()].filter(row=>!active.has(row.premiseId)).slice(-Math.max(0,Math.min(8,limit)));
+}
+
 /** Only independently verified reduction in blocked dimensions justifies
  * another patch to the same card. Wording changes are not progress. */
 export function discoveryFailureDimensions(assessment:any):string[]{
