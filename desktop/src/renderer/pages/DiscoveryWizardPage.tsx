@@ -901,6 +901,7 @@ const DiscoveryWizardPage: React.FC = () => {
     const discoveryRequestId = globalThis.crypto?.randomUUID?.()
       ?? ('idea-'+Date.now()+'-'+requestId+'-'+Math.random().toString(36).slice(2));
     activeIdeaDiscoveryIdRef.current = discoveryRequestId;
+    store.setActiveDiscoveryRequestId(discoveryRequestId);
     cancelledIdeaDiscoveryIdRef.current = null;
     let generationSucceeded = false;
     store.setStep(1);
@@ -1009,6 +1010,8 @@ const DiscoveryWizardPage: React.FC = () => {
     } finally {
       ideaRequestInFlightRef.current = false;
       if(activeIdeaDiscoveryIdRef.current===discoveryRequestId)activeIdeaDiscoveryIdRef.current=null;
+      if(useDiscoveryStore.getState().activeDiscoveryRequestId===discoveryRequestId)
+        store.setActiveDiscoveryRequestId(null);
       if (requestId === latestDiscoveryRequestId) {
         store.setGenerating(false);
         store.setGenerationDone(generationSucceeded || preservedIdeas.length > 0);
@@ -1017,7 +1020,7 @@ const DiscoveryWizardPage: React.FC = () => {
   }, [store]);
 
   const cancelIdeaDiscovery = async () => {
-    const id=activeIdeaDiscoveryIdRef.current;
+    const id=activeIdeaDiscoveryIdRef.current || useDiscoveryStore.getState().activeDiscoveryRequestId;
     if(!id||cancellingIdeaDiscovery)return;
     setCancellingIdeaDiscovery(true);
     try {
