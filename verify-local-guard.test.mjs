@@ -38,10 +38,10 @@ function run(report) {
   assert.equal(scripts.dev,'vite --host 0.0.0.0');
   // The normal desktop dev command MUST display Electron, not just Vite's browser page.
   // Vite may launch/rebuild the Electron UI; it must never start a NestJS backend.
-  assert.match(vite,/onstart: \(\) => startElectronHidden\(\)/u);
-  assert.match(vite,/function startElectronHidden\(\): void/u);
+  assert.match(vite,/onstart: \(\) => startElectronApp\(\)/u);
+  assert.match(vite,/function startElectronApp\(\): void/u);
   assert.match(vite,/spawn\(electronExecutable, \['\.', '--no-sandbox'\]/u);
-  assert.match(vite,/windowsHide: true/u);
+  assert.match(vite,/windowsHide: false/u, 'GUI subprocess must not request hidden windows');
   assert.doesNotMatch(vite,/restart\.ps1|scripts\/dev\.js|server\/dist\/src\/main\.js|npm run start:dev/u);
   assert.doesNotMatch(scripts.dev,/scripts\/dev\.js|restart\.ps1/u);
   assert.match(main,/async function checkServerConnection/u);
@@ -61,8 +61,11 @@ function run(report) {
   assert.ok(main.includes("launcherWindow.loadURL(VITE_DEV_SERVER_URL + 'launcher.html')"));
   assert.ok(main.includes('createWindow();'));
   assert.ok(!vite.includes('onstart: () => {}'));
-  assert.ok(main.includes('launcherWindow.focus();'), 'startup launcher must take focus');
-  assert.ok(main.includes('mainWindow.focus();'), 'editor window must take focus');
+  assert.ok(main.includes('revealLoadedWindow(launcherWindow);'), 'launcher uses shared foreground restoration');
+  assert.ok(main.includes('revealLoadedWindow(mainWindow);'), 'editor uses shared foreground restoration');
+  assert.ok(main.includes("window.once('ready-to-show', reveal)"), 'foreground when Chromium signals readiness');
+  assert.ok(main.includes("window.webContents.once('did-finish-load', reveal)"), 'foreground after document load when ready-to-show is absent');
+  assert.ok(main.includes('window.show();') && main.includes('window.focus();'), 'normal launch must show and focus both windows');
   assert.ok(main.includes('mainWindow.isMinimized()'), 'do not persist minimized placement');
   assert.ok(main.includes('screen.getAllDisplays()'), 'screen-bound check for previously saved window placement');
   assert.ok(main.includes("tray.on('double-click', restoreApplicationWindow)"),
