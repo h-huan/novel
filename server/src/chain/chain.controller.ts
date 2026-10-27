@@ -6831,7 +6831,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         +'\n只为列出的缺额位置从尚未尝试的同批原池挑选成熟候选；固定保留已通过位置、原始事实及全部独立质量要求。'
         +'\n【本次仍可换选的原池候选】'+JSON.stringify(current.pool.filter(item=>availableIds.includes(String(item.premiseId))))
         +'\n【可用备用ID（只能从这里选）】'+JSON.stringify(availableIds)
-        +'\n【当前选择】'+JSON.stringify(current.selected)
+        + '\n【当前选择】'+JSON.stringify(premiseReselectionPromptSelection(current.selected,new Set(failedIds)))
         +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
         +(priorRejectedHistory.length
           ?'\n【本批先前已验证不合格的因果或分类路径】'
