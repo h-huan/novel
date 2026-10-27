@@ -1,5 +1,19 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits} from './discovery-fulfillment';
+it('holds final-card review credits without increasing the total source-call budget',()=>{
+ const total=12,reserve=reservePostCardSourceReviewCredits(total,5,0,3);
+ expect(reserve).toBe(2);
+ let preselection=total-reserve;
+ // Five calls of source/overlap pairs exhaust only preselection's portion.
+ for(let i=0;i<5;i++)preselection-=2;
+ expect(preselection).toBe(0);
+ const cardCredits=preselection+reserve;
+ expect(cardCredits).toBe(2);
+ expect(total-reserve+reserve).toBe(total);
+ expect(reservePostCardSourceReviewCredits(3,5,0,3)).toBe(0);
+ expect(reservePostCardSourceReviewCredits(12,5,1,1)).toBe(3);
+});
+
 const assessment=(keys:string[])=>({passed:keys.length===0,issues:[],presentationReview:{titleCompelling:true,openingCompelling:true,distinctFromBatch:true,storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:keys.includes(key)?'weak':'supported',reason:'具体已有缺口'}]))}});
 it('continues beyond two repairs only while independent blocked dimensions strictly improve',async()=>{
  let missing=['A'],credits=8,defects=['click','completion','sharing'];const accepted={id:'already-passed',text:'不可改动'};const before=JSON.stringify(accepted);
