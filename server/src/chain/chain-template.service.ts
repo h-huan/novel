@@ -99,7 +99,7 @@ export class ChainTemplateService {
         { name: 'planning', source: 'user_input', path: 'user_input.planning', required: false },
       ],
       executionMode: 'sequential',
-      config: { timeout: 1500, maxRetries: 0, enableLogging: true, strictMode: false },
+      config: { timeout: 1500, maxRetries: 0, enableLogging: true, strictMode: true },
       createdAt: now,
       updatedAt: now,
     });
