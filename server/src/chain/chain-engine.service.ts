@@ -163,7 +163,7 @@ export class ChainEngineService {
     // verified and bounded repair budgets. This engine makes one attempt.
     try {
       const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
-       const { output, runId } = await this.executePromptNode(node, resolvedInput, context, 0, chain);
+       const { output, runId } = await this.executePromptNode(node, resolvedInput, context, chain);
       return {
         nodeId: node.id, nodeName: node.name, status: 'success', output,
         ...(runId ? { runId } : {}),
@@ -197,7 +197,6 @@ export class ChainEngineService {
     node: ChainNode,
     input: Record<string, unknown>,
     context: ExecutionContext,
-    retryCount: number,
     chain: PromptChain,
   ): Promise<PromptNodeExecutionResult> {
     // 获取并渲染 Prompt 模板
@@ -206,7 +205,6 @@ export class ChainEngineService {
         ...input,
         user_input: { ...(context.variables['user_input'] as Record<string, unknown> || {}) },
         chain_output: { ...context.nodeOutputs },
-        retry_count: retryCount,
       });
 
     // 调用 LLM
@@ -228,7 +226,6 @@ export class ChainEngineService {
         stepKey: standardScene(node.chainId || chain.id),
         ...(context.projectId ? { projectId: context.projectId } : {}),
       },
-      retryCount,
       // 当前两条固定长篇链的所有生产 Prompt 节点均要求合法 JSON。
       // 显式声明 JSON 模式后，real-llm 会在 finish_reason=length（输出被截断）时
       // 用同一模型、同一 prompt、更大输出上限重发；这是同模型扩容，不是降级。
@@ -241,18 +238,17 @@ export class ChainEngineService {
     // 尝试解析 JSON。解析失败必须留下可诊断证据（长度/首尾片段/finishReason），
     // 否则调用方只会看到"缺少某字段"，真实故障（截断/非法 JSON/字段名不符）被掩盖。
     const parsedOutput = this.tryParseJSON(response.content);
-    if (typeof parsedOutput !== 'object' || parsedOutput === null
-      || (['long-novel-flexible-outline', 'long-novel-init-foundation'].includes(chain.id) && Array.isArray(parsedOutput))) {
+    if (typeof parsedOutput !== 'object' || parsedOutput === null || Array.isArray(parsedOutput)) {
       const raw = typeof response.content === 'string' ? response.content : String(response.content);
       this.logger.error(
-        `[${chain.id}/${node.id}] LLM 输出不是合法 JSON：contentLength=${raw.length}, `
+        `[${chain.id}/${node.id}] LLM 输出不是合法 JSON 对象：contentLength=${raw.length}, `
         + `finishReason=${response.finishReason ?? 'unknown'}, `
         + `head=${JSON.stringify(raw.slice(0, 300))}, tail=${JSON.stringify(raw.slice(-300))}`,
       );
-      if (['long-novel-flexible-outline', 'long-novel-init-foundation'].includes(chain.id)) {
-        throw new GateRejectionError(classifyGateFailure({ evaluationStatus: 'not_evaluated', topic: 'quality_gate', gateStatus: 'not_evaluated',
-          buckets: { review_incomplete: [`上游节点${node.id}未返回合法JSON对象，禁止将原文当作已完成结构继续下游`] } }), raw);
-      }
+      throw new GateRejectionError(classifyGateFailure({
+        evaluationStatus: 'not_evaluated', topic: 'quality_gate', gateStatus: 'not_evaluated',
+        buckets: { review_incomplete: [`上游节点${node.id}未返回合法JSON对象，禁止将原文当作已完成结构继续下游`] },
+      }), raw);
     }
     if (node.chainId === 'long-novel-flexible-outline' && node.id === 'node_1_analysis') {
       const issues = describeChapterResponsibilityPlan(parsedOutput, context.variables['user_input'] && (context.variables['user_input'] as any).chapterLimit);
