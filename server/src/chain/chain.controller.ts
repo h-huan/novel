@@ -8163,6 +8163,9 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
         if (!savedWorld) {
           throw new Error('世界观生成步骤结束但主记录未保存，停止生成大纲；请检查世界观审查与写入日志。');
         }
+        // Execute the original world-rule completeness Gate here, before paying
+        // for the story card and per-chapter outlines. Do not repeat it late.
+        this.assertProjectSourceCompleteness(projectId);
         if (savedWorld) {
           const parseMaybeArray = (v: unknown): any[] => {
             if (v == null) return [];
@@ -9367,8 +9370,8 @@ ${STORY_ENTITY_MODELING_POLICY}
       }
 
       // ====== 最终统计 ======
-      // 深度资料已经在跨模块审查前完成，不能在激活后改变正文会读取的事实。
-      this.assertProjectSourceCompleteness(projectId);
+      // The world-rule completeness Gate already ran before outlining; source
+      // fidelity and cross-module consistency were independently checked above.
       await this.generationRecovery.assertActivationReady(projectId);
       const counts = getCreationCounts();
       const finalStats = {
