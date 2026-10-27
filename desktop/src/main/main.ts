@@ -14,6 +14,7 @@ import {
   dialog,
   nativeImage,
   globalShortcut,
+  screen,
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
@@ -68,7 +69,9 @@ function getWindowStatePath(): string {
 // ---------- 窗口状态持久化 ----------
 
 function saveWindowBounds(): void {
-  if (!mainWindow) return;
+  // Windows can emit move/resize while minimizing to the taskbar. Never
+  // persist that temporary lower-right placement as the next editor launch.
+  if (!mainWindow || mainWindow.isMinimized() || mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
   try {
     const bounds = mainWindow.getBounds();
     fs.writeFileSync(getWindowStatePath(), JSON.stringify(bounds, null, 2), 'utf-8');
@@ -84,7 +87,18 @@ function loadWindowBounds(): WindowBounds {
       const saved = JSON.parse(data) as WindowBounds;
       // 验证保存的坐标在屏幕范围内
       if (typeof saved.width === 'number' && typeof saved.height === 'number') {
-        return saved;
+        // A monitor may have been unplugged or Windows may have persisted
+        // minimized coordinates. Only reuse visible, usable bounds.
+        const displays = screen.getAllDisplays();
+        if (Number.isFinite(saved.width) && Number.isFinite(saved.height)
+          && saved.width >= 1024 && saved.height >= 680
+          && Number.isFinite(saved.x) && Number.isFinite(saved.y)
+          && displays.some(display => {
+            const area = display.workArea;
+            const overlapWidth = Math.min(saved.x! + saved.width, area.x + area.width) - Math.max(saved.x!, area.x);
+            const overlapHeight = Math.min(saved.y! + saved.height, area.y + area.height) - Math.max(saved.y!, area.y);
+            return overlapWidth >= 200 && overlapHeight >= 150;
+          })) return saved;
       }
     }
   } catch {
@@ -197,13 +211,14 @@ function createTray(): void {
  */
 function createLauncherWindow(): void {
   launcherWindow = new BrowserWindow({
+    center: true,
     width: 900,
     height: 680,
     minWidth: 700,
     minHeight: 500,
     title: 'AI写作平台',
     backgroundColor: '#1a1a2e',
-    show: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -213,7 +228,10 @@ function createLauncherWindow(): void {
   });
 
   launcherWindow.once('ready-to-show', () => {
-    launcherWindow?.show();
+    if (!launcherWindow || launcherWindow.isDestroyed()) return;
+    if (launcherWindow.isMinimized()) launcherWindow.restore();
+    launcherWindow.show();
+    launcherWindow.focus();
   });
 
   launcherWindow.on('closed', () => {
@@ -252,7 +270,7 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
     minHeight: 680,
     title: projectTitle ? `${projectTitle} - AI写作平台` : 'AI写作平台',
     backgroundColor: '#1a1a2e',
-    show: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -263,7 +281,10 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
 
   // 窗口准备好后再显示，避免白屏闪烁
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   });
 
   // 保存窗口位置/大小（移动/调整时）
@@ -702,6 +723,8 @@ function restoreApplicationWindow(): void {
     return;
   }
   if (target.isMinimized()) target.restore();
+  // A visible window may still be behind the Vite terminal; bring the
+  // original single instance to the foreground instead of a tray-only launch.
   target.show();
   target.focus();
 }
