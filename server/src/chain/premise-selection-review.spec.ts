@@ -606,6 +606,36 @@ it('stops single-slot reselection on transport/truncation failure without genera
 });
 
 describe('one bounded reserve before identity lock', () => {
+  it('does not resend protected causal plans during a failed-card reserve; keeps facts and actual rejected plan', async () => {
+    const {initial,current,review}=fixture();
+    const protectedPlan=[{action:{field:'activeChoice',quote:premise('A').activeChoice},
+      conditions:[],result:{field:'payoff',quote:premise('A').payoff}}];
+    const failedPlan=[{action:{field:'activeChoice',quote:premise('C').activeChoice},
+      conditions:[],result:{field:'payoff',quote:premise('C').payoff}}];
+    (current.selected[0] as any).causalPlan=protectedPlan;
+    (current.selected[1] as any).causalPlan=failedPlan;
+    const unchanged=structuredClone(current.selected);
+    const c=Object.create(ChainController.prototype) as any;
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{
+      const encoded=prompt.split('【当前选择】')[1]?.split('【全部缺额的真实原因】')[0];
+      const view=JSON.parse(encoded);
+      expect(view).toHaveLength(2);
+      expect(view[0]).not.toHaveProperty('causalPlan');
+      expect(view[0].activeChoice).toBe(unchanged[0].activeChoice);
+      expect(view[0].payoff).toBe(unchanged[0].payoff);
+      expect(view[1]).toEqual(unchanged[1]);
+      throw new Error('模型不可用；保留原拒绝结论');
+    });
+    c.reviewPremiseSelection=vi.fn();
+    const result=await c.reservePremiseSelection(initial,current,review,2,4,['悬疑'],'',
+      {remaining:2},['A'],[],{remaining:2});
+    expect(result.review).toBe(review);
+    expect(result.selection).toBe(current);
+    expect(result.error).toContain('模型不可用');
+    expect(current.selected).toEqual(unchanged);
+    expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+    expect(c.reviewPremiseSelection).not.toHaveBeenCalled();
+  });
   const fixture = () => {
     const initial = selection(); initial.pool.push(premise('D'));
     const current = normalizeTargetedPremiseReselection({replacements:[{replacesPremiseId:'B',premise:premise('C'),comparisons:[compare('A')]}]},
