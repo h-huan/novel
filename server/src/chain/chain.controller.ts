@@ -9251,8 +9251,7 @@ ${STORY_ENTITY_MODELING_POLICY}
             emit('foreshadowing', 95, '伏笔已存在，跳过', 'done');
             return { step: 'foreshadowing', warnings: [] };
           }
-          if (isShort) {
-            // 短篇章纲已经保存了结构化伏笔。直接汇总原字段，避免二次生成改错埋设章、
+          // 短篇章纲已经保存了结构化伏笔。直接汇总原字段，避免二次生成改错埋设章、
             // 回收章或证据文本；没有结构化伏笔时明确确认为空。
             const outlineForeshadowRows = db.prepare(`SELECT "order", scenes FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`)
               .all(projectId) as Array<{ order: number; scenes?: unknown }>;
@@ -9277,49 +9276,6 @@ ${STORY_ENTITY_MODELING_POLICY}
                 this.logger.warn(`create-project-async: 伏笔写入失败 project=${projectId}: ${error.message}`);
               }
             }
-          } else {
-            const fsResult = await this.llmCallWithRetry<any>('伏笔生成(长篇)',
-
-              `基于题材"${dto.title}"为长篇生成三类伏笔，必须具体到物件/动作/话语偏差/地图地点/组织线索，不要一句话空泛提示。${styleInstruction}全书伏笔要像核心功法、血脉、身份谜团一样贯穿全文；卷级伏笔跨多个章节回收；章节伏笔服务小场景。三类伏笔要交叉存在，不要等一个结束才开启另一个。每条包含 content,type,importance,scope,buriedChapter,recoveryChapter,recoveryWindowStart,recoveryWindowEnd,evidenceText,riskLevel(low|medium|high),recoveryCondition,payoffDescription,relatedCharacters,relatedOrganizations,relatedMapPoints。输出JSON:{"globalForeshadowings":[...],"longForeshadowings":[...],"shortForeshadowings":[...]}`,
-              { temperature: 0.8, timeout: LLM_TUNABLES.timeoutMedium(), projectId, scenario: 'foreshadowing' }
-            );
-            taskWarnings.push(...fsResult.warnings);
-            if (fsResult.data) {
-              this.generatedCanonGuard.assertStructuredCanCommit({
-                projectId,
-                runId: fsResult.runId,
-                expectedStages: ['outline'],
-                expectedScenarios: ['foreshadowing'],
-              });
-              const allFs: any[] = [
-                ...(fsResult.data.globalForeshadowings || []).map((f: any) => ({ ...f, scope: 'global', importance: f.importance || 3 })),
-                ...(fsResult.data.longForeshadowings || []).map((f: any) => ({ ...f, scope: 'volume', importance: f.importance || 2 })),
-                ...(fsResult.data.shortForeshadowings || []).map((f: any) => ({ ...f, scope: 'chapter', importance: f.importance || 1 })),
-              ];
-              for (const fs of allFs) {
-                if (!fs.content) continue;
-                try {
-                  const rawImportance = Number(fs.importance);
-                  const importance = Number.isFinite(rawImportance) ? Math.max(1, Math.min(3, Math.round(rawImportance))) : 2;
-                  const buriedChapter = Math.max(1, parseInt(String(fs.buriedChapter || fs.setupChapter || 1).match(/\d+/)?.[0] || '1', 10));
-                  const recoveryChapterText = String(fs.recoveryChapter || fs.payoffChapter || '');
-                  const recoveryChapterMatch = recoveryChapterText.match(/\d+/);
-                  const recoveryChapter = recoveryChapterMatch ? Math.max(buriedChapter, parseInt(recoveryChapterMatch[0], 10)) : null;
-                  db.prepare(`INSERT INTO foreshadowings (id, project_id, content, status, type, importance, scope, buried_at, buried_chapter_index, planned_recovery_at, planned_recovery_chapter_index, recovery_window_start, recovery_window_end, evidence_text, risk_level, recovery_condition, payoff_description, related_character_ids, related_reversal_ids, overdue_threshold, created_at, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-                    uuid(), projectId, enrichForeshadowContent(fs), 'active', serializeGeneratedSqlText(fs.type, 'hint'), importance,
-                    serializeGeneratedSqlText(fs.scope, 'chapter'), now(), buriedChapter, null, recoveryChapter,
-                    fs.recoveryWindowStart || recoveryChapter, fs.recoveryWindowEnd || recoveryChapter,
-                    serializeGeneratedSqlText(fs.evidenceText || fs.content), serializeGeneratedSqlText(fs.riskLevel, 'medium'),
-                    serializeGeneratedSqlText(fs.recoveryCondition), serializeGeneratedSqlText(fs.payoffDescription), '[]', '[]', 5, now(), now()
-                  );
-                } catch (error: any) {
-                  taskWarnings.push(`伏笔写入失败: ${error.message}`);
-                  this.logger.warn(`create-project-async: 长篇伏笔写入失败 project=${projectId}: ${error.message}`);
-                }
-              }
-            }
-          }
           const fsCountNow = getCreationCounts().foreshadowings;
           const foreshadowingStepDone = fsCountNow > 0 || foreshadowingGenerationConfirmedEmpty;
           emit(
