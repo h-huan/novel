@@ -211,6 +211,11 @@ describe('creation consistency architecture invariants', () => {
     expect(prompt).toContain('未规划成长变化时 growthTags=[]');
     expect(prompt).toContain('没有足够依据写[]');
     expect(prompt).toContain('"growthTags":[],"tags":[]');
+    expect(prompt).toContain('【关系与过去】relationships仅收录已确认关系');
+    expect(prompt).toContain('"relationships":[]');
+    expect(prompt).toContain('缺证据留空，不补造过往事件');
+    expect(prompt).not.toContain('"role":"主角|女主角|重要配角|主要反派|导师同盟|其他"');
+    expect(prompt).not.toContain('"relationships":[{"targetName":');
     expect(prompt).not.toContain('需要包含 5 个核心人物');
     expect(prompt).not.toContain('童年被关地下室导致幽闭恐惧');
     expect(controllerSource).toContain('const confirmedCharacterNames = [');
