@@ -4,6 +4,7 @@ import { getPlatform, targetForLength, measureAgainstTarget } from './platform-b
 import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
 import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY } from '../../shared/src/system-workflow-rules.registry';
 import { currentDiscoveryRequestId, discoveryRequestAsyncStorage } from '../common/creation-context';
+import { currentGenerationSignal, assertGenerationActive } from '../common/generation-cancellation';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ChainController,
@@ -1983,6 +1984,50 @@ it('coalesces identical in-flight requests when the omitted category is randomly
   resolveTask({success:true,ideas:[]});
   await expect(Promise.all([first,second])).resolves.toEqual([{success:true,ideas:[]},{success:true,ideas:[]}]);
  }finally{random.mockRestore();}
+});
+it('cancels a coalesced discovery through either caller ID, without losing the shared task',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.logger={warn:vi.fn()};
+ let release!:()=>void;
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ let signal:AbortSignal|undefined;
+ controller.runIdeaDiscovery=vi.fn(async()=>{
+  signal=currentGenerationSignal();
+  await pending;
+  assertGenerationActive();
+  return {success:true,ideas:[]};
+ });
+ const common={storyType:'short_story' as const,platform:'fanqie',storyCategory:'都市日常'};
+ const first=controller.ideaDiscover({...common,discoveryRequestId:'origin-1'});
+ const second=controller.ideaDiscover({...common,discoveryRequestId:'alias-2'});
+ expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+ expect(signal?.aborted).toBe(false);
+ expect(controller.cancelIdeaDiscovery('alias-2').cancelled).toBe(true);
+ expect(signal?.aborted).toBe(true);
+ release();
+ const results=await Promise.allSettled([first,second]);
+ expect(results.map(result=>result.status)).toEqual(['rejected','rejected']);
+ expect(controller.cancelIdeaDiscovery('origin-1').cancelled).toBe(false);
+ expect(controller.cancelIdeaDiscovery('alias-2').cancelled).toBe(false);
+ // Completion releases the in-flight configuration; a later identical request
+ // starts a new task rather than receiving the cancelled result.
+ controller.runIdeaDiscovery=vi.fn().mockResolvedValue({success:true,ideas:[]});
+ await expect(controller.ideaDiscover({...common,discoveryRequestId:'next-3'})).resolves.toMatchObject({success:true});
+ expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+});
+it('does not let the same request ID cancel a different in-flight configuration',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.logger={warn:vi.fn()};
+ let release!:()=>void;
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ controller.runIdeaDiscovery=vi.fn(async()=>{await pending;return {success:true,ideas:[]};});
+ const common={storyType:'short_story' as const,platform:'fanqie',storyCategory:'都市日常'};
+ const first=controller.ideaDiscover({...common,discoveryRequestId:'shared-id'});
+ await expect(controller.ideaDiscover({...common,pov:'第三人称限知',discoveryRequestId:'shared-id'}))
+  .rejects.toThrow(/请求ID正在被另一个任务使用/);
+ expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+ release();
+ await expect(first).resolves.toMatchObject({success:true});
 });
 it('sends full standards only for actual reviewed cards while preserving all reference story comparison fields',async()=>{
  const c=Object.create(ChainController.prototype) as any;let captured='';const stop=Error('local prompt capture');
