@@ -55,7 +55,7 @@ if (fs.existsSync(envPath)) {
  * 启动前断言「运行的产物就是当前源码编译出来的」。
  *
  * 为什么必须有：后端以 node dist/src/main.js 单进程运行，源码改动不会自动生效。
- * 一旦有人绕过 restart.ps1（直接 npm run start:prod，或构建失败后重跑旧产物），
+ * 即使直接 npm run start:prod，或构建失败后重跑旧产物，
  * 端口、健康检查、单 listener 断言全都是绿的，但跑的是上一版代码 ——
  * 「明明改了却没生效 / 怎么会有旧程序 / 同一个问题反复出现」就是这么来的。
  * 这类静默陈旧无法从日志分辨，只能在启动时硬拦住。
@@ -173,8 +173,8 @@ export async function bootstrap(options: { port?: number; host?: string } = {}):
 }
 
 /**
- * Every source checkout launcher (restart.ps1, npm run start:dev,
- * npm run start:prod, desktop npm run dev) must report its startup revision.
+ * Explicit independent server launchers (npm run start:dev and
+ * npm run start:prod) must report their startup revision.
  * A deployment/package without the actual server source tree must NOT guess
  * a commit from an enclosing, unrelated Git checkout.
  *
@@ -230,7 +230,7 @@ if (require.main === module) {
   const cliPort = parseInt(process.env.PORT ?? process.env.SERVER_PORT ?? '3100', 10);
   probeExistingNovelServer(cliPort).then((existing) => {
     if (existing) {
-      throw new Error(`端口 ${cliPort} 已有后端运行（commit=${existing.commit || 'unknown'}）；当前进程未启动，也没有复用旧进程。请先安全结束已有任务，再使用项目统一重启入口。`);
+      throw new Error(`端口 ${cliPort} 已有后端运行（commit=${existing.commit || 'unknown'}）；当前进程未启动，也没有复用旧进程。请先安全结束已有任务，再从 server 目录独立启动后端。`);
     }
     return bootstrap();
   }).then((app) => {
