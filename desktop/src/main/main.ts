@@ -152,15 +152,7 @@ function createTray(): void {
   const contextMenu = Menu.buildFromTemplate([
     {
       label: '显示窗口',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        } else if (launcherWindow) {
-          launcherWindow.show();
-          launcherWindow.focus();
-        }
-      },
+      click: () => restoreApplicationWindow(),
     },
     {
       label: '最小化到托盘',
@@ -182,24 +174,7 @@ function createTray(): void {
   tray.setContextMenu(contextMenu);
 
   // 双击托盘图标恢复窗口
-  tray.on('double-click', () => {
-    // 优先恢复主窗口，否则恢复引导窗口
-    if (mainWindow) {
-      if (mainWindow.isVisible()) {
-        mainWindow.focus();
-      } else {
-        mainWindow.show();
-        mainWindow.focus();
-      }
-    } else if (launcherWindow) {
-      if (launcherWindow.isVisible()) {
-        launcherWindow.focus();
-      } else {
-        launcherWindow.show();
-        launcherWindow.focus();
-      }
-    }
-  });
+  tray.on('double-click', restoreApplicationWindow);
 }
 
 // ---------- 窗口管理 ----------
