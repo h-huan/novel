@@ -474,6 +474,31 @@ const discoveryCallTrace = {
   },
   ...summarizeDiscoveryStepMetrics(stepMetricRows),
 };
+// A completed idea audit may predate the current backend while a NEW request
+// is consuming many model calls. The old audit's step trace is not that new
+// request. Read exact request-scoped metrics, without running any model or
+// inferring that an unfinished request has passed quality/quantity Gates.
+const backendStartedAt = Date.parse(String(unwrap(health.data)?.build?.processStartedAt || ''));
+const activeRequestIds = [...new Set((latestIdeaActivity.runs || [])
+  .filter(row => row.discoveryRequestId && !row.staleProcess
+    && Number.isFinite(backendStartedAt)
+    && Date.parse(String(row.startedAt || '')) >= backendStartedAt
+    && row.discoveryRequestId !== savedDiscoveryAudit.discoveryRequestId)
+  .map(row => String(row.discoveryRequestId)))].slice(0, 3);
+const activeRequestCallTraces = await Promise.all(activeRequestIds.map(async discoveryRequestId => {
+  const query = new URLSearchParams({ discoveryRequestId, limit: '500' });
+  // Do not restrict scenario: creation, revision and writing can share one
+  // discovery request identity and must remain distinguishable by stepKey.
+  const response = await request('/generation-metrics/steps?' + query.toString());
+  const rows = response.ok ? asArray(response.data) : [];
+  return {
+    discoveryRequestId,
+    source: { ok: response.ok, status: response.status, error: response.error ?? null,
+      correlationMode: 'discovery_request_id', totalRows: rows.length },
+    ...summarizeDiscoveryStepMetrics(rows),
+    provisional: true,
+  };
+}));
 const codeSeedVersion = seedVersion();
 const standardMismatch = standards.filter((s) => {
   const seed = Number(s.seedBaselineVersion ?? s.seed_baseline_version ?? NaN);
@@ -505,6 +530,7 @@ const runtime = redactDiagnosticValue({
   ideaDiscovery: rawIdeaDiscovery,
   ideaActivity: latestIdeaActivity,
   discoveryCallTrace,
+  activeRequestCallTraces,
   standards: {
     codeSeedVersion,
     activeCount: standards.length,
@@ -797,6 +823,20 @@ function detailedIdeaMarkdown() {
       + '；旧进程遗留：' + (runtime.ideaActivity?.staleRunning??'未知'),
     ...(runtime.ideaActivity?.runs||[]).map(r=>'- '+r.status+' · '+r.runId+' · request='+String(r.discoveryRequestId??'unknown')+' · '+r.stage
       +' · 运行/历时 '+r.elapsedMs+' ms · '+r.startedAt+(r.staleProcess?'（旧进程遗留记录）':'')),
+    '',
+    '### 当前后端其它请求的精确调用链（进行中不代表交付）',
+    ...(runtime.activeRequestCallTraces || []).flatMap(trace => [
+      '- request=' + trace.discoveryRequestId
+        + '；逐步指标=' + (trace.source.ok ? '已读取' : '不可用')
+        + '；逻辑调用=' + (trace.totals?.logicalCalls ?? '未知')
+        + '；物理尝试估算=' + (trace.totals?.physicalAttempts ?? '未知')
+        + '；Token=' + (trace.totals?.totalTokens ?? '未知')
+        + '；内部重试=' + (trace.totals?.internalRetries ?? '未知')
+        + '；只按请求 ID 关联，不代表该请求已结束',
+      ...(trace.stepBreakdown || []).map(step =>
+        '- ' + step.stepKey + '：调用 ' + step.logicalCalls + '，累计 ' + step.sumDurationMs
+        + ' ms，Token ' + (step.totalTokens ?? '未知')),
+    ]),
     '',    '- 本地验证运行 ID：' + verificationRunId,
     '- 灵感请求 ID：' + (audit.discoveryRequestId ?? '未知'),
     '- 审计状态：' + (audit.available ? '已读取' : '不可用') + '；成功：' + (audit.success ?? '未知') + '；更新时间：' + (audit.updatedAt ?? '未知'),
