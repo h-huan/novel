@@ -8525,9 +8525,10 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           const remainingChapterCount = chapterTitles.length - chapterIndex - 1;
           const isFinalChapter = remainingChapterCount === 0;
           const currentBeat = chapterResponsibilityPlan[chapterIndex];
-          const nextTaskBoundary = chapterResponsibilityPlan[chapterIndex + 1]
-            ? { chapter: chapterResponsibilityPlan[chapterIndex + 1].chapter, title: chapterResponsibilityPlan[chapterIndex + 1].title, reserved: chapterResponsibilityPlan[chapterIndex + 1].responsibility }
-            : null;
+          // Previous chapters are already present as accepted source records;
+          // the current chapter is stated above. Only future duties are needed
+          // here to protect their still-unspent story obligations.
+          const futureChapterTasks = chapterResponsibilityPlan.slice(chapterIndex + 1);
           const allowedMin = Math.max(CHAPTER_WORD_MIN, dto.targetWords - plannedChapterWords - remainingChapterCount * CHAPTER_WORD_MAX);
           const allowedMax = Math.min(CHAPTER_WORD_MAX, dto.targetWords - plannedChapterWords - remainingChapterCount * CHAPTER_WORD_MIN);
           if (allowedMin > allowedMax) {
@@ -8541,8 +8542,7 @@ ${buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, 
 【本章节】
 第${order + 1}章"${expectedChapter.title}"（功能:${expectedChapter.func}）
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
-【下一章保留任务、本章禁止提前执行】${JSON.stringify(nextTaskBoundary)}
-          【全书章节分工与动态节拍】${JSON.stringify(chapterResponsibilityPlan)}
+【后续章节职责与节拍（本章禁止提前执行）】${JSON.stringify(futureChapterTasks)}
 当前章叙事节拍：${JSON.stringify(currentBeat?.beatLabel || '')}。节拍来自章节职责，不按固定章数强制爽点；本章只需完成与职责相符的推进价值。
 【正文展开尺度与场景边界】${CHAPTER_PROSE_SCOPE_POLICY}
 本章只能完成自己的推进任务；不得提前执行后续章节的推进任务或结局（章职能边界，判据 CR-3）。收尾按已注入章纲标准与当前章节职责执行。
