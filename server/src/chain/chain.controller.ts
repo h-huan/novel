@@ -5733,8 +5733,28 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // Deterministic contracts run before a paid semantic review. Invalid
         // metadata stays rejected and enters its authorized targeted repair.
         const localIssues=new Map(candidates.map(candidate=>[candidate,assessIdeaQuality(candidate)]));
-        const reviewable=candidates.filter(candidate=>!localIssues.get(candidate)!.length);
-        const presentationReviews = reviewable.length ? await this.reviewIdeaPresentation(reviewable, accepted, dto.customPlatformNote, presentationBudget) : [];
+        // A deterministic blocking Gate is independent of semantic presentation:
+        // never pay for an expensive model review of a card already guaranteed
+        // to fail unchanged title, similarity, metadata or appeal contracts.
+        // Only check peers accepted BEFORE this batch here: a sibling card
+        // might fail its semantic review, so intra-batch comparisons still run
+        // in the original sequential acceptance order below.
+        const appealAssessments=new Map(candidates.map(candidate=>[candidate,this.ideaAppealGate.assess(candidate,dto.storyType)]));
+        const priorAccepted=[...accepted];
+        const alreadyBlocked=(candidate:any)=>{
+          const titleKey=normalizeTitle(candidate?.title);
+          if(!titleKey||seen.has(titleKey))return true;
+          if([...initialExcludes,...priorAccepted].some(reference=>ideaSemanticSimilarity(candidate,reference)>=0.42))return true;
+          const combination=JSON.stringify(['storyTone','writingStyle','webNovelGenre','plotTags','pov','submissionTags']
+            .map(field=>candidate?.[field]));
+          return autoSelectionRequested&&seenCombinations.has(combination);
+        };
+        const reviewable=candidates.filter(candidate=>
+          !localIssues.get(candidate)!.length
+          && !appealAssessments.get(candidate)!.issues.length
+          && !alreadyBlocked(candidate));
+        const presentationReviews=reviewable.length
+          ? await this.reviewIdeaPresentation(reviewable,accepted,dto.customPlatformNote,presentationBudget) : [];
         const presentationByTitle = new Map(presentationReviews.map(review => [review.title, review]));
         for (const candidate of candidates) {
           const titleKey = normalizeTitle(candidate?.title);
@@ -5754,7 +5774,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
           // 最终吸引力/留存 Gate 只做独立验收：完整题材卡已经来自前置轻量候选池的明确筛选。
           // 这里不得再承担主要选题、换题或质量补生；失败只进入审计并阻断该卡展示。
-          const appealAssessment = this.ideaAppealGate.assess(candidate, dto.storyType);
+          const appealAssessment = appealAssessments.get(candidate)!;
           issues.push(...appealAssessment.issues);
           const uniqueIssues = Array.from(new Set(issues));
           const passed = uniqueIssues.length === 0;
