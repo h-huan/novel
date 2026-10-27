@@ -1572,7 +1572,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1639,6 +1639,28 @@ describe('idea discovery live orchestrator behavior', () => {
       },
     };
 
+    if (failure === 'tag_combo_reused') {
+      // The same valid "紧张 / 简洁 / 悬疑推理 / 调查" combination is
+      // appropriate for two substantially different stories. It may not be
+      // used as a proxy for narrative duplication or force label mutation.
+      Object.assign(weakCard, {
+        title: '菜市秤盘上的欠条',
+        hook: '天亮前，我给菜市场的老秤换零件时，发现有人用我母亲的名字签下整条街的赊账。老板要我马上交出旧秤，我决定留在摊位与债主对账，否则摊主们今天就会被赶走。',
+        description: '最初，我只想修好常出故障的菜市老秤，让母亲的摊位能继续营业。清晨，承包商拿着赊账合同逼摊主连夜交钱，我发现账目上的签名来自已经停用多年的旧秤编号。随后，我主动组织摊主逐户核对真实赊欠，承包商转而威胁撤销摊位租约，昔日朋友也站到了对面。直到老会计出示当时独立保管的对账存根，我才发现承包商借市场搬迁把原来的押金改成了新债。最后，我必须选择公开账本并失去优先续租机会，还是替母亲保留摊位但让其他人承担债务；我公开核对结果，迫使合同签署方重新确认押金，并承担失去母亲信任的代价。',
+        protagonist: '一直替家人修理摊位设备、想保住母亲生意的普通维修工。',
+        coreConflict: '市场承包商借假账逼摊主搬迁，维修工要用旧账存根守住合法押金和邻里信任。',
+        uniquePoint: '一只旧秤记录的维修日期意外成为全街争议账款的关键，逼主角在母亲和邻里之间表态。',
+        mainReversal: '原来承包商想吞掉的是押金而非赊账，维修工从替母亲修秤改为带领摊主公开对账，也失去续租优先权。',
+        noveltyProof: {
+          familiarShell: '市井家庭与摊位争夺',
+          uncommonCombination: '菜市场老秤、摊位租约和独立保管的押金存根让物件牵连真实利益关系',
+          avoidedPatterns: '不靠突然出现的万能录像或陌生机构自动裁决',
+          irreplaceableWhy: '没有修秤日期和市场租约便找不到假账来源，失去母亲关系也没有两难抉择',
+          secondOrderConsequence: '摊主拿回部分押金后站队改变，维修工失去自己最珍惜的续租机会',
+          readerQuestion: '修秤日期怎样揭穿被改的押金，维修工又能否保住母亲的信任？',
+        },
+      });
+    }
     const requestedCount = failure === 'pool_below_minimum' || failure === 'pool_top_up_unique' ? 5 : 2;
     const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
     const mixed = failure === 'category_inheritance';
@@ -1720,13 +1742,13 @@ describe('idea discovery live orchestrator behavior', () => {
     controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     controller.db = {
       getDb: () => ({
-        prepare: () => ({ all: () => [] }),
+        prepare: () => ({ all: () => failure === 'tag_combo_reused' ? [{ label: '紧张' }] : [] }),
       }),
     };
 
     const result = await controller.runIdeaDiscovery({
       storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
-      storyTone: ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
+      storyTone: failure === 'tag_combo_reused' ? [] : ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
       submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
       ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
@@ -1814,6 +1836,15 @@ describe('idea discovery live orchestrator behavior', () => {
       expect(generate).toHaveBeenCalledTimes(5);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('budget_or_original_pool_exhausted');return;
+    }
+    if (failure === 'tag_combo_reused') {
+      expect(result.success).toBe(true);
+      expect(result.ideas).toHaveLength(2);
+      expect(result.ideas.map((card: any) => card.storyTone)).toEqual([['紧张'], ['紧张']]);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(controller.reviewIdeaPresentation.mock.calls[0][0]).toHaveLength(2);
+      expect(result.appealGate.candidateAssessments?.every((card:any)=>card.passed)).not.toBe(false);
+      return;
     }
     const cardFailed = failure === 'card_network' || failure === 'card_shape';
     // The repair fixture returns an empty patch: preserve the original refusal without another review.
