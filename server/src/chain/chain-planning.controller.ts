@@ -30,7 +30,12 @@ export class ChainPlanningController {
   async ideaDiscover(@Body() dto: Parameters<ChainController['ideaDiscover']>[0]) {
     const requested = Number(dto.count);
     const desiredCount = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 10) : 5;
-    const requestedDiscoveryRequestId = randomUUID();
+    // The renderer owns the request ID used by cancellation. Replacing it
+    // here orphaned the model task after a UI timeout or Cancel click.
+    // Generate an ID only for legacy callers that did not send a valid one.
+    const clientRequestId = typeof dto.discoveryRequestId === 'string' ? dto.discoveryRequestId.trim() : '';
+    const requestedDiscoveryRequestId = /^[A-Za-z0-9_-]{1,128}$/.test(clientRequestId)
+      ? clientRequestId : randomUUID();
     const startedAt = new Date().toISOString();
     const requestSnapshot = redactDiagnosticValue({
       ...ideaDiscoveryAuthorSettings(dto),
