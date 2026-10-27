@@ -2078,6 +2078,47 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
     expect(result.success).toBe(false);
   });
 
+
+  it('rejects near-identical proposals in the ORIGINAL parallel pool before paid model selection', async () => {
+    const generate = vi.fn(async (request: any) => {
+      if (request.metrics?.stepKey === 'idea_premise_pool_generation') {
+        const attempt = Number(request.metrics?.attempt || 0);
+        const selected = attempt === 0
+          ? [0, 0, 1, 2] : [3, 4, 5];
+        return { content: JSON.stringify({ pool: selected.map((index,position) => ({
+          workingTitle: attempt === 0 && position === 1 ? '首批换名复刻'
+            : '实际新机制' + index,
+          storyCore: diversePoolStories[index],
+          storyCategoryId: 'K1',
+        })) }) };
+      }
+      if (request.metrics?.stepKey === 'idea_premise_selection') {
+        // Fail intentionally after observing the actual fixed shortlist.
+        expect(request.prompt).not.toContain('首批换名复刻');
+        return { content: JSON.stringify({blocked:true,reason:'test sentinel'}) };
+      }
+      throw new Error('unexpected generation stage');
+    });
+    const c = Object.create(ChainController.prototype) as any;
+    c.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    c.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    c.db = { getDb: () => ({prepare: () => ({all: () => []})}) };
+    const outcome = await c.runIdeaDiscovery({
+      storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+      storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+      submissionTags:['悬疑'],plotTags:['调查'],genreFitNote:'',
+      pov:'第一人称',targetWords:'20000',targetAudience:'',customPlatformNote:'',
+    },2);
+    expect(outcome.success).toBe(false);
+    expect(outcome.appealGate.selectionAudit.poolGeneration).toMatchObject({
+      rawReturned:7,duplicateCount:1,generated:6,
+    });
+    expect(generate.mock.calls.filter(([request]:any[]) =>
+      request.metrics?.stepKey==='idea_premise_pool_generation')).toHaveLength(2);
+    expect(generate.mock.calls.filter(([request]:any[]) =>
+      request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
+  });
+
   it('keeps pool batch sizing independent from five-way card/review concurrency', () => {
     expect(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY).toBe(2);
     expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(5);
