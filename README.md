@@ -30,7 +30,7 @@ README 不重复标准内容，也不维护标准版本号。代码中的扫描�
 - `/project/:id/writing-quality`：质量报告
 - `/project/:id/refinement`：精修
 
-长篇首次创建通过 `long-novel-init-foundation` 建立主线骨架与世界规则，然后由创建流程自身生成角色和首批详细章纲；后续详细章纲随正文推进按需滚动补足。大纲页的独立 `/chain/generate-outline` 使用 `long-novel-flexible-outline` 生成待确认候选，不是首次创建的第二条固定规划链。必需节点失败时停止下游并保留原始错误。正文生成走独立的现行写作与质检闭环，具体质量标准以唯一执行标准为准。
+长篇首次创建通过 `long-novel-init-foundation` 建立主线骨架与世界规则，然后由创建流程自身生成角色和首批详细章纲；后续详细章纲随正文推进按需滚动补足，新增批次继承已确稿世界与前章纲并独立审核，不覆盖已有正文。首次创建并不生成全书所有详细章纲；后续新增角色、地点或组织还须通过原有建档/确认入口。大纲页的独立 `/chain/generate-outline` 使用 `long-novel-flexible-outline` 生成待确认候选，不是首次创建的第二条固定规划链。必需节点失败时停止下游并保留原始错误。正文生成走独立的现行写作与质检闭环，具体质量标准以唯一执行标准为准。
 
 API 文档：`server/docs/API.md`  
 用户操作说明：`server/docs/user-guide.md`

@@ -7949,7 +7949,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             this.emitProjectProgress(projectId, {
               type: 'done', success: true, projectId, stats: finalStats,
               mode: 'configured_full_plan',
-              tip: `已按${dto.targetWords}字目标配置生成完整规划。`,
+              tip: `已按${dto.targetWords}字目标完成全书卷级骨架及当前细纲窗口；后续细纲随正文推进，不代表全书全部详细章纲已生成。`,
             });
             return;
           }
