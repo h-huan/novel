@@ -100,7 +100,7 @@ npm run test:e2e
 node verify-local.mjs
 ```
 
-该命令不会要求短篇和长篇同时存在，也不会只查 `active` 项目。它会自动检查最近的项目（包括 `creating` / `generation_failed`），并在报告中显示项目状态、结构审计、最近 generation run 及其 `error`。灵感发现无论成功还是全部候选被淘汰，最近一批结果都会写入 `runtime.ideaDiscovery`，其中包含唯一前置 Gate 的候选证据、通过/淘汰数量与原因，因此即使尚未创建任何项目也能复盘题材阶段。若项目壳未落库，报告仍会标记 `no_projects_found`；此时应先查看 `runtime.ideaDiscovery`。只有灵感诊断本身也不可用时，才需要结合创建页错误信息和 Server 日志定位项目持久化之前的故障。
+该命令不会要求短篇和长篇同时存在，也不会只查 `active` 项目。它会自动检查最近的项目（包括 `creating` / `generation_failed`），并在报告中显示项目状态、结构审计、最近 generation run 及其 `error`。灵感发现无论成功还是全部候选被淘汰，最近一批结果都会写入 `runtime.ideaDiscovery`，其中包含前置来源与同构审查、完整题材卡质量验收的候选证据、通过/淘汰数量与原因，因此即使尚未创建任何项目也能复盘题材阶段。若项目壳未落库，报告仍会标记 `no_projects_found`；此时应先查看 `runtime.ideaDiscovery`。只有灵感诊断本身也不可用时，才需要结合创建页错误信息和 Server 日志定位项目持久化之前的故障。
 
 ### 最终完整验收（默认推荐）
 
