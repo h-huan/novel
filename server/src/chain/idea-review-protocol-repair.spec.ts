@@ -248,3 +248,33 @@ describe('observed 4-card presentation report omitted rows',()=>{
   expect(requests[1].prompt).toContain('题材');
  });
 });
+
+
+describe('five-card bounded semantic review preserves independent gates and full batch comparisons',()=>{
+ it('uses the already-bounded scheduler without re-reviewing a card or dropping any peer reference',async()=>{
+  const cards=Array.from({length:5},(_,index)=>({...card,
+    title:'第'+(index+1)+'个独立题材',
+    uniquePoint:'由人物的选择和代价而非名称形成的区别'}));
+  const prompts:any[]=[];
+  const c=Object.create(ChainController.prototype) as any;
+  c.logger={warn:vi.fn(),error:vi.fn()};
+  c.realLLM={generate:vi.fn(async(request:any)=>{
+   const section=request.prompt.split('【实际题材卡与已通过参考卡】')[1]?.split('\n若存在standardLines')[0];
+   if(!section)throw Error('丢失完整卡和参考卡');
+   const input=JSON.parse(section);
+   prompts.push(input);
+   request.physicalCallBudget.remaining-=1;
+   return {content:JSON.stringify(ideaReviewResponseExample(input.cards))};
+  })};
+  const reviews=await c.reviewIdeaPresentation(cards,[],'',{remaining:3},false,true);
+  expect(prompts.map(row=>row.cards.length).sort()).toEqual([1,2,2]);
+  expect(prompts.map(row=>row.references.length).sort()).toEqual([3,3,4]);
+  for(const input of prompts){
+   const observed=[...input.cards,...input.references].map(row=>row.title);
+   expect(new Set(observed)).toEqual(new Set(cards.map(row=>row.title)));
+  }
+  expect(reviews).toHaveLength(5);
+  expect(reviews.map(row=>row.title)).toEqual(cards.map(row=>row.title));
+  expect(reviews.every(row=>row.payoffCredible&&row.storyCoherent&&row.platformFit&&!!row.readerGoals)).toBe(true);
+ });
+});

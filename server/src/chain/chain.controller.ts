@@ -5728,7 +5728,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const seenCombinations = new Set<string>();
       // Initial review, its protocol/network recoveries and changed-card rechecks share one ceiling.
       const presentationBudget = { remaining: presentationCallLimit };
-      const minimumCardReviewCalls=(count:number)=>discoveryBudget.reviewGroupingMode===0?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
+      // The five-card semantic report has repeatedly hit the provider's output
+      // recovery path. Partition only that large initial/replacement review.
+      // Every card still gets all independent verdicts and compares against
+      // EVERY other card as a reference; smaller reviews preserve all Gates.
+      const boundedPresentationReview=(count:number)=>count>=5
+        && discoveryBudget.reviewGroupingMode===0 && count>discoveryBudget.presentationBatchSize;
+      const minimumCardReviewCalls=(count:number)=>discoveryBudget.reviewGroupingMode===0&&!boundedPresentationReview(count)
+        ?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
       const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
         // Deterministic contracts run before a paid semantic review. Invalid
         // metadata stays rejected and enters its authorized targeted repair.
@@ -5755,7 +5762,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           && !alreadyBlocked(candidate));
         const reviewableSet=new Set(reviewable);
         const presentationReviews=reviewable.length
-          ? await this.reviewIdeaPresentation(reviewable,accepted,dto.customPlatformNote,presentationBudget) : [];
+          ? await this.reviewIdeaPresentation(reviewable,accepted,dto.customPlatformNote,presentationBudget,false,boundedPresentationReview(reviewable.length)) : [];
         const presentationByTitle = new Map(presentationReviews.map(review => [review.title, review]));
         for (const candidate of candidates) {
           const titleKey = normalizeTitle(candidate?.title);
@@ -12285,11 +12292,19 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
    * @returns { data, rawContent, warnings }
    */
   private async reviewIdeaPresentation(cards: any[], references: any[] = [], customPlatformNote = '',
-    physicalCallBudget: {remaining:number} = {remaining:readGenerationBudgets().presentationMaxPhysicalCalls}, aggregateAttempt = false): Promise<IdeaPresentationVerdict[]> {
+    physicalCallBudget: {remaining:number} = {remaining:readGenerationBudgets().presentationMaxPhysicalCalls}, aggregateAttempt = false,
+    preferBoundedBatches = false): Promise<IdeaPresentationVerdict[]> {
     if (!cards.length) return [];
     const grouping=readGenerationBudgets();
     let batches:Array<{start:number;batch:any[]}>|undefined;
-    if(grouping.reviewGroupingMode===0&&!aggregateAttempt){
+    if(preferBoundedBatches && grouping.reviewGroupingMode===0 && !aggregateAttempt
+      && cards.length>grouping.presentationBatchSize){
+      // Preempt the observed full-batch token-cap recovery for large idea sets;
+      // existing cross-batch reference comparison and full verification remain.
+      batches=[];
+      for(let start=0;start<cards.length;start+=grouping.presentationBatchSize)
+        batches.push({start,batch:cards.slice(start,start+grouping.presentationBatchSize)});
+    }else if(grouping.reviewGroupingMode===0&&!aggregateAttempt){
       try{return await this.reviewIdeaPresentation(cards,references,customPlatformNote,physicalCallBudget,true);}
       catch(error){
         if(!isReviewOutputCapacityError(error)||cards.length<2)throw error;
