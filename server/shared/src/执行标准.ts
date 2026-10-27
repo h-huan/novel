@@ -7,7 +7,7 @@ import type { SystemWorkflowRule } from './system-workflow-rule.types';
 /** 连续修复的升级边界；这是流程预算，不是正文质量阈值。 */
 export const UPSTREAM_REPAIR_ROUTING_LIMITS = { sameFamilyAfterAttempts: 1, maxLocalAttemptsBeforeDiagnosis: 2, maxSourceRepairModelCalls: 3 } as const;
 export const UPSTREAM_REPAIR_ROUTING_POLICY = '同类缺陷经局部修复仍存在且未证明新的实质改善、问题集合增长或局部修复进入连续循环时，先回查章节合同、上下文装配、生成执行与审查协议，再决定处理阶段。不得只因有局部改善持续下游修复；已经由证据复核确认解决了不同问题时，不因共享宽泛问题标签提前停止，仍遵守连续局部尝试上限与共享调用预算；上游诊断必须引用本次输入与正文证据，不能把猜测当已确认源冲突。诊断未完成时保留草稿与原质量结论；修改已确认上游事实须按原作者确认与锁定规则处理，不能自动重写正文或回写Canon。质量候选回滚时须同时显示原稿保留与候选复检的实际阻断或未知维度，不只重复修复前的旧缺陷。失败候选的事实不得进入Canon，其必要条件诊断须作为只读反馈传给下一次源头修订，依赖未通过的候选仅在内存继续修订，锚点取本轮候选位置目录，原Canon作为提交原值校验基线；整体复检通过后才原子提交。原因相同的必要依赖修改一起保留，只有显式声明的互斥备选组才做成本择一；相同或无变化候选不重复复检。每个源头修订任务共用物理模型调用预算，扩容、网络恢复和协议纠错不能重置预算；耗尽或候选复检仍失败时如实停止，不能把停止当验收成功。';
-export const SYSTEM_WORKFLOW_RULESET_VERSION = 250;
+export const SYSTEM_WORKFLOW_RULESET_VERSION = 251;
 
 export const IDEA_AGGREGATE_RESERVE_POLICY = '锁定前终检发现多个问题位置时，按完整有效审核清单汇总处理，不把首项的局部review覆盖整批review而丢掉其余未解缺陷。备用身份从本批未尝试原池中选择；可用身份足够时一次覆盖全部当前缺额，同时比较合并后的最终候选，不逐卡串行换选再各自重复整轮审核。输出容量确实不足才按实际材料拆分，拆分共享原预算并保留已完成工作。改动后来源审核复用同批同内容已通过凭证，未通过或改变的项继续审核，同构审核覆盖合并选择。一个位置通过不清除其它位置的缺口，实际候选或调用预算不足时保持全部未解决问题并如实缺量，不扩大池、不增加预算、不绕过最终质量门。';
 
@@ -111,7 +111,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
     id: 'GOV-004', name: '规则依赖与变更影响', category: 'governance', level: 'P0', status: 'active', blocking: false,
     scenarios: ALL_SCENES, consumers: ['api', 'ui', 'test'], dependencies: ['GOV-003'],
     summary: '每项需求调整与问题修复都须举一反三：追溯规则与数据源头，排查同一机制的相关场景、模块和输入类型，不能只修当前小说或当前报错入口。规则声明依赖；上游变更必须重新验证所有下游 Prompt、Gate、Repair、Save、UI 与测试。',
-    details: ['先明确需求适用范围和失败证据，检查生成、上下文装配、审查、修复、保存及展示的同类路径，按受影响消费者记录已检查、已修复、未验证或不适用及原因；用不同题材、身份、关系或输入形态的代表性案例和反例验证可复用机制。修复共用规则或实现，消除重复、冲突定义并保持质量门；不把单篇人名、剧情、台词或一次失败的特例写成普遍规则，不将限定需求强推全部作品，不据举一反三擅改已确认故事或无关功能。连续局部修复仍失败时按 RPR-005 回查上游，验证未完成不得声称全链路有效。'],
+    details: ['先明确需求适用范围和失败证据，检查生成、上下文装配、审查、修复、保存及展示的同类路径，按受影响消费者记录已检查、已修复、未验证或不适用及原因；用不同题材、身份、关系或输入形态的代表性案例和反例验证可复用机制。修复共用规则或实现，消除重复、冲突定义并保持质量门；不把单篇人名、剧情、台词或一次失败的特例写成普遍规则，不将限定需求强推全部作品，不据举一反三擅改已确认故事或无关功能。连续局部修复仍失败时按 RPR-005 回查上游，验证未完成不得声称全链路有效。每次持续开发或接续上一轮问题，须先读取当前分支README.md、DEVELOPMENT_GOVERNANCE.md和本执行标准的相关Rule ID及依赖，核对最新代码、旧实现和历史验收记录，不能凭旧提示词或过期报告修改。重要业务流程、调用顺序、重试预算、规则、输入合同、恢复与验收改变时，须在同一轮同步更新唯一执行标准、README中必要入口说明及对应API/使用文档和回归测试；README与文档只记录操作和指向权威，不另复制标准正文、版本和阈值。新机制替代旧机制时，沿调用方、执行器、审核、修复、持久化、恢复、提示词与文档追查并删除旧入口、旧分支、重复上下文和过时测试，不能在旧流程外叠加第二套实现；合并前逐项证明审核责任和数据版本等价，必要独立Gate及证据不删减。代码和文档改变须同一变更集完成消费者追溯及Typecheck/Unit/Acceptance/Build/适用E2E；真实token、耗时与质量需同版本本地运行证实，未实测必须明确未验证，不得把CI通过或删除行数当作性能改善。'],
     testRefs: ['server/src/modules/module-standards/module-standards.service.spec.ts'],
     implementationRefs: ['server/shared/src/执行标准.ts', 'server/src/modules/module-standards/module-standards.service.ts'],
   }),
