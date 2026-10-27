@@ -137,7 +137,7 @@ describe('generation metrics diagnostics', () => {
       id: 'metric-1', run_id: 'run-1', project_id: 'project-1', chapter_index: null,
       step_key: 'idea_premise_pool_generation', scenario: 'idea_generate', status: 'failed',
       attempt: 1, phase: 'pool', duration_ms: 1500, fail_reason: 'Authorization: Bearer secret-token',
-      total_tokens: 1200, internal_retries: 2, created_at: '2026-10-22T07:00:01.000Z',
+      prompt_tokens: 500, completion_tokens: 700, total_tokens: 1200, internal_retries: 2, created_at: '2026-10-22T07:00:01.000Z',
       discovery_request_id: 'discovery-1', model_version: 'deepseek-flash', stage: 'project', gate_status: 'failed',
       started_at: '2026-10-22T07:00:00.000Z', finished_at: '2026-10-22T07:00:01.000Z',
       prompt_version: 'prompt-hash', context_version: 'context-hash', constitution_revision: 2,
@@ -151,11 +151,14 @@ describe('generation metrics diagnostics', () => {
     expect(prepare.mock.calls[0][0]).toContain('LEFT JOIN generation_runs');
     expect(prepare.mock.calls[0][0]).toContain('julianday(m.created_at) >= julianday(?)');
     expect(prepare.mock.calls[0][0]).toContain('m.discovery_request_id = ?');
+    expect(prepare.mock.calls[0][0]).toContain('m.prompt_tokens, m.completion_tokens, m.total_tokens');
     expect(all).toHaveBeenCalledWith('idea_generate', 'idea_premise_pool_generation'.length,
       'idea_premise_pool_generation', '2026-10-22T07:00:00.000Z', '2026-10-22T07:00:02.000Z', 'discovery-1', 500);
     expect(result.filters.discoveryRequestId).toBe('discovery-1');
     expect(result.limit).toBe(500);
     expect(result.items[0].internal_retries).toBe(2);
+    expect(result.items[0].prompt_tokens).toBe(500);
+    expect(result.items[0].completion_tokens).toBe(700);
     expect(result.items[0].fail_reason).not.toContain('secret-token');
     expect(result.filters.startAt).toBe('2026-10-22T07:00:00.000Z');
   });
