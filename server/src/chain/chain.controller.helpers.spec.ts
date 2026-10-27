@@ -1577,7 +1577,7 @@ describe('idea discovery live orchestrator behavior', () => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
       workingTitle: title,
-      storyCore: `${title}的具体人物处境、起始事件与冲突骨架。`,
+      storyCore: `【处境触发】${title}主角遇到涉及家人住房和收入的现实异常，不得立即退出。【主动选择】主角主动留存原始记录并要求有权的人确认来源。【必要条件】已核实记录须交给有权处理的人，获得正式回复后才能追责。【反转兑现】责任关系改变，主角即使获得证据也承担家庭和职业代价。【分类流派机制】具体悬疑证据、追查行动和现实关系压力共同完成该流派的正面冲突。`,
       causalPlan: [{action:{field:'activeChoice',quote:'主角决定留下证据并主动查清来源'},conditions:[{field:'reversalEffect',quote:'关键事实改变了主角原先的目标'}],result:{field:'payoff',quote:'让真正责任方承担后果'}}],
       protagonistSituation: '主角要守住家人、住处和现实收入，无法无代价退出当前冲突。',
       openingEvent: '一份现实记录出现无法解释的矛盾，迫使主角当天处理。',
@@ -1644,7 +1644,7 @@ describe('idea discovery live orchestrator behavior', () => {
     const mixed = failure === 'category_inheritance';
     const topUpPremise = {
       ...selected('P3', '水库账本提前清空'),
-      storyCore: '山区供水站的账本突然显示水库已被提前放空。维修员决定公开泵站记录，承包商随即关闭备用管线，迫使村民在停水前选出证人。',
+      storyCore: '【处境触发】山区供水站的账本突然显示水库已被提前放空。【主动选择】维修员主动核验泵站记录并通知村民保留原件。【必要条件】记录送到有权调查的水务人员手里后经核对才能认定原因。【反转兑现】承包商关闭备用管线导致村民被迫做出选择，维修员也面临失业代价。【分类流派机制】山区悬疑调查和真实水源控制权推动冲突升级并改变人物关系。',
       storyCategoryId: 'K1',
     };
     const selectedForBatch = failure === 'pool_top_up_unique'
@@ -1665,7 +1665,7 @@ describe('idea discovery live orchestrator behavior', () => {
         if (failure === 'pool_top_up_unique' && request.metrics?.attempt === 2) {
           return { content: JSON.stringify({ pool: [{
             workingTitle: '水库账本提前清空',
-            storyCore: '山区供水站的账本突然显示水库已被提前放空。维修员决定公开泵站记录，承包商随即关闭备用管线，迫使村民在停水前选出证人。',
+            storyCore: '【处境触发】山区供水站的账本突然显示水库已被提前放空。【主动选择】维修员主动核验泵站记录并通知村民保留原件。【必要条件】记录送到有权调查的水务人员手里后经核对才能认定原因。【反转兑现】承包商关闭备用管线导致村民被迫做出选择，维修员也面临失业代价。【分类流派机制】山区悬疑调查和真实水源控制权推动冲突升级并改变人物关系。',
             storyCategoryId: 'K1',
           }] }) };
         }
@@ -2052,7 +2052,7 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
         const attempt = Number(request.metrics?.attempt || 0);
         return { content: JSON.stringify({ pool: Array.from({ length: size }, (_, index) => ({
           workingTitle: `原池候选-${attempt}-${index + 1}`,
-          storyCore: `候选${attempt}-${index + 1}的具体人物利益、触发事件、主动选择与因果后果。`,
+          storyCore: `【处境触发】候选${attempt}-${index + 1}面临马上失去实际生活利益的危机。【主动选择】主角主动追查并把关键证据交给有权受理的人。【必要条件】已有实物材料必须先经核验再由负责部门形成可执行决定。【反转兑现】真相指向原本施压的人，主角解决眼前风险也承担损失。【分类流派机制】悬疑线索的发现、检验和反击推动核心关系与读者追问发展。`,
           storyCategoryId: 'K1',
         })) }) };
       }
