@@ -35,6 +35,19 @@ it('injects the same missing-prerequisite constraint into initial selection, sou
  }
 });
 
+it('keeps causal validity and tag-conditioned appeal distinct from preselection to full-card and prose review',()=>{
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ for(const [scene,step] of [['idea_generate','idea_premise_selection'],['idea_generate','idea_card_structure'],
+  ['idea_generate','idea_presentation_review'],['writing','body_first'],['review','alignment_review']] as const){
+  const directive=standardDirectiveCache.get(scene,step);
+  expect(directive).toContain('故事成立与吸引读者是并列且不可互代的判断');
+  expect(directive).toContain('相同标签组合不自动同构');
+  expect(directive).toContain('不得为迎合标签改变已确认人物');
+  expect(directive).toContain('正文阶段以已写现场与实际人物反应验收');
+ }
+ const unrelated=standardDirectiveCache.get('review','alignment_reader_goal_evidence');
+ expect(unrelated).not.toContain('故事成立与吸引读者是并列且不可互代的判断');
+});
 it('injectStandard=false really disables public-rule injection instead of leaving a second inline preflight rule', async () => {
   standardDirectiveCache.rebuild(activeSystemWorkflowRules());
   const service = new RealLLMService({

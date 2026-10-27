@@ -5754,9 +5754,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const rejectedReasons: string[] = [];
       const candidateAssessments: any[] = [];
       const seen = new Set(initialExcludes.map(item => normalizeTitle(item.title)));
-      const autoSelectionRequested = !dto.storyTone.length || !dto.writingStyle.length || !dto.webNovelGenre.length
-        || !dto.plotTags.length || !dto.pov || (submissionRequired && !dto.submissionTags.length);
-      const seenCombinations = new Set<string>();
+      // Identical author/auto-selected tag combinations are not narrative
+      // duplicates. Only story evidence and the independent semantic overlap
+      // and reader-appeal gates may reject an otherwise valid card.
       // Initial review, its protocol/network recoveries and changed-card rechecks share one ceiling.
       const presentationBudget = { remaining: presentationCallLimit };
       // The five-card semantic report has repeatedly hit the provider's output
@@ -5786,9 +5786,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const titleKey=normalizeTitle(candidate?.title);
           if(!titleKey||seen.has(titleKey))return true;
           if([...initialExcludes,...priorAccepted].some(reference=>ideaSemanticSimilarity(candidate,reference)>=0.42))return true;
-          const combination=JSON.stringify(['storyTone','writingStyle','webNovelGenre','plotTags','pov','submissionTags']
-            .map(field=>candidate?.[field]));
-          return autoSelectionRequested&&seenCombinations.has(combination);
+          return false;
         };
         const reviewable=candidates.filter(candidate=>
           !localIssues.get(candidate)!.length
@@ -5812,10 +5810,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           if (closest?.similarity >= 0.42) {
             issues.push(`题材机制与“${closest.reference.title}”过于接近`);
           }
-          const combination = JSON.stringify(['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags', 'pov', 'submissionTags']
-            .map(field => candidate?.[field]));
-          if (autoSelectionRequested && seenCombinations.has(combination)) issues.push('自动组合与本批已通过题材重复');
-
+ 
           // 最终吸引力/留存 Gate 只做独立验收：完整题材卡已经来自前置轻量候选池的明确筛选。
           // 这里不得再承担主要选题、换题或质量补生；失败只进入审计并阻断该卡展示。
           const appealAssessment = appealAssessments.get(candidate)!;
@@ -5858,7 +5853,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             continue;
           }
           seen.add(titleKey);
-          seenCombinations.add(combination);
           accepted.push({
             ...candidate,
             storyType: dto.storyType,
@@ -12460,7 +12454,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     const reviewPrompt = `本次只审【实际题材卡】${cards.length}张，reviews必须恰好${cards.length}项，position只对应实际题材卡。先独立反证主线解决与关键阶段结果的必要因果，再判断点击、首屏和其它阅读目标。不得先认可题材再替结局寻找解释。对于每张卡，保持已建立规则与对手能力不变，检查即使主角行动完成，所称结果是否仍可能因某个未交代的必要条件而失败；若是，payoffBridge.status=gap、payoffCredible=false，并在issues明确缺失条件。只能用卡片已写出的因果条件，不能因两件事同源、同地、同属一个系统或主角付出代价，就推定一项改变足以造成另一项结果。结果断言不是自身成立条件，能力科学来源与普通动作细节则无需额外解释。参考卡只比较差异，不返回参考卡结论。随后以目标平台普通读者的点击选择独立审查实际标题与首屏。不得把字段齐全、两字重合、职业专名、证据链完整或模型自称独特当作吸引力。`
       + '标题应让读者直接感到具体利益冲突、反常关系、危险欲望或迫切未解问题；短意象、道具名和文雅暂名若脱离概要就没有点击动机，应titleCompelling=false。'
       + 'hook应展示命运立即改变的事件、可代入的风险/欲望及主动选择；只写职业查账、比对证据、逐级举报流程不能通过。'
-      + '比较同批及参考卡的关系、选择、冲突推进和反转；不要求跨越用户指定分类，但同一职业查案/权力阴谋路径换道具应distinctFromBatch=false。'
+      + '比较同批及参考卡的关系、选择、冲突推进和反转；不要求跨越用户指定分类，但同一职业查案/权力阴谋路径换道具应distinctFromBatch=false。实际故事的逻辑、来源和标签适配通过，不能自动得出有点击、完读与传播潜力；须分别结合标题、首屏和后续选择变化判断。相同基调、文风、流派与情节标签组合本身不算同构，不允许为造不同标签或热闹场面而改写事实。同一流派的共同承诺应被兑现，但不能强迫每种故事使用打脸、取证、公开翻案或牺牲的同一胜负路径。'
       + '逐张核对uniquePoint、noveltyProof中声称的不可替代组合和记忆点，判断真实hook、description、stage outcome是否存在一次读者能复述的独特选择、冲突场面、关系冲击或带代价的反转；这些自述字段只能当待验证主张，不得替代故事原文证据。只有换职业、换证物、换人名的自证翻案套路，哪怕每张都有不同专业术语，也不得把distinctFromBatch标为true；缺少脱离标题模板仍有点击理由的本故事事件时titleCompelling或openingCompelling须为false。具体热血、幽默、荒诞、反讽等情绪与记忆功能只按本卡选择的storyTone、plotTags及实际事件审核，不要求所有题材都搞笑、热血，也不按标签数量凑资格；标签与正文的实际情绪/行动脱节则platformFit=false，并在issues给出当前标签与真实故事的差距。'
       + 'readerQuestion必须是由实际标题与开篇引发的具体读者追问，不要泛泛问真相是什么；不合格时issues写具体理由和可沿原故事修正的表达。'
       + '还须独立核对storyCoherent（能力触发、边界与代价是否前后一致，人物主动选择和必要因果是否自洽）、payoffCredible（开篇承诺是否由既定选择和代价兑现，不能靠新能力或省略权利/程序条件收束）、platformFit（故事机制是否符合所附平台、分类与流派标准，而非只填标签）。反转不得取消已成立前提，身份、证据与亲属关系不能直接等同法律或程序效果。短篇闭环不要求情绪圆满，更不能一次揭露无条件解决所有冲突。能力的科学来源或幕后起源尚未揭示、悬疑信息暂时保留，不能单独判因果失败，不要求题材卡把全部谜底解释完；必须指出具体互斥事实或兑现结果缺少的必要前提。道具词和意象不能单独判标题失败，要看它是否已经形成可理解的利益、关系、危险或问题。'
