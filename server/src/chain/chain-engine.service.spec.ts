@@ -122,6 +122,17 @@ describe('ChainEngineService', () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it('does not replace a missing registered template with a raw JSON prompt', async () => {
+    const result = await service.execute({
+      ...testChain,
+      nodes: [{ ...mockNode, promptTemplateId: undefined }, mockNode],
+    }, { test: 'hello' });
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(1);
+    expect(result.nodeResults[0].error).toContain('禁止改用输入 JSON 作为临时提示词');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   describe('execute', () => {
     it('should handle empty chains gracefully', async () => {
       const emptyChain = { ...testChain, nodes: [] };
