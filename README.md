@@ -30,6 +30,8 @@ README 不重复标准内容，也不维护标准版本号。代码中的扫描�
 - `/project/:id/writing-quality`：质量报告
 - `/project/:id/refinement`：精修
 
+当前创建与写作不执行历史八步正文合成链；固定长篇规划只由两条已注册的模板链驱动，不存在无模板节点自行以输入 JSON 生成正文的补救入口。实现与调用错误以当前唯一执行标准、已注册编排和模型运行证据为准。
+
 API 文档：`server/docs/API.md`  
 用户操作说明：`server/docs/user-guide.md`
 
