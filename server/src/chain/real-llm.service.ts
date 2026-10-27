@@ -266,7 +266,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       request = { ...request, metrics: { ...request.metrics, discoveryRequestId } };
     }
     const start = Date.now();
-    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false);
+    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false, discoveryRequestId);
     const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
       '【项目唯一创作宪法；所有生成内容必须继承】', JSON.stringify(run.constitution),
       ...(request.scenario === 'long-novel-flexible-outline' && run.context
