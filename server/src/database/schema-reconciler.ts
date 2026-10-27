@@ -74,6 +74,16 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       db.exec('CREATE INDEX IF NOT EXISTS idx_generation_step_metrics_discovery_request ON generation_step_metrics(discovery_request_id,created_at)');
     }
 
+    // Pre-project idea calls must be attributable even before any step metric
+    // finishes. Existing databases are reconciled without losing old runs.
+    if (hasTable(db, 'generation_runs')) {
+      if (!hasColumn(db, 'generation_runs', 'discovery_request_id')) {
+        db.exec('ALTER TABLE generation_runs ADD COLUMN discovery_request_id TEXT');
+        actions.push('generation_runs.discovery_request_id');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generation_runs_discovery_request ON generation_runs(discovery_request_id,started_at)');
+    }
+
     // generation_runs 的终态必须与 gate_status 一致。过去 finishRun 只写 status，
     // 生成在进入质量评估前失败时会永久留下 failed + not_evaluated，界面和恢复逻辑
     // 无法分辨“没评审”与“已经失败”。把这个约束下沉到数据库边界，避免每个调用点
