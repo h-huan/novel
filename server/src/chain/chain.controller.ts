@@ -8864,13 +8864,17 @@ ${(() => {
         socialRules: worldRow.social_rules,
         specialSettings: worldRow.special_settings,
       });
+      // The already source-reviewed world is the only authority for this creation.
+      // A missing/incomplete record is an upstream failure, not permission to
+      // generate a different world after the detailed outlines were accepted.
+      if (!hasWorldSetting) throw new Error('创建期世界观主记录缺失或无效：前序世界观必须先通过审核并落库，禁止启动第二套世界观生成链。');
       const hasOrganizations = (db_check.prepare('SELECT COUNT(*) as c FROM organizations WHERE project_id = ?').get(projectId) as any)?.c > 0;
       const hasMapPoints = (db_check.prepare('SELECT COUNT(*) as c FROM map_points WHERE project_id = ?').get(projectId) as any)?.c > 0;
       const hasForeshadowings = (db_check.prepare('SELECT COUNT(*) as c FROM foreshadowings WHERE project_id = ?').get(projectId) as any)?.c > 0;
       const hasTimeline = !!(db_check.prepare('SELECT id FROM timelines WHERE project_id = ?').get(projectId));
       const hasTimelineEvents = (db_check.prepare('SELECT COUNT(*) as c FROM timeline_events e JOIN timelines t ON e.timeline_id = t.id WHERE t.project_id = ?').get(projectId) as any)?.c > 0;
 
-      const needAny = !hasCharacters || !hasWorldSetting || !hasOrganizations || !hasMapPoints || !hasForeshadowings || !hasTimeline || !hasTimelineEvents;
+      const needAny = !hasCharacters || !hasOrganizations || !hasMapPoints || !hasForeshadowings || !hasTimeline || !hasTimelineEvents;
 
       const generatedChapterContext = (db.prepare(`SELECT "order", title, content, scenes FROM outlines WHERE project_id = ? AND level = 'chapter' ORDER BY "order"`).all(projectId) as any[])
         .map(row => ({ order: Number(row.order) + 1, title: row.title, content: String(row.content || '').slice(0, 500), details: row.scenes }));
@@ -9095,92 +9099,6 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
           return { step: 'character_relations', warnings: taskWarnings };
         });
 
-        // 任务B：世界观生成（仅当 DB 中无世界观时执行；已有则不重复生成，避免耗时）
-        sequentialTasks.push(async (): Promise<{ step: string; warnings: string[] }> => {
-          const taskWarnings: string[] = [];
-          if (hasWorldSetting) {
-            emit('world', 75, '世界观已存在，跳过（不重复生成）', 'done');
-            return { step: 'world', warnings: [] };
-          }
-          const worldPrompt = `从完整创作上下文中整理世界资料，不得只看书名重新发挥。上下文:${groundedCreativeContext}\n${canonicalCreativeBrief}\n${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}\n保持确认题材的时代、类型、主角和冲突；不得新增已确认题材以外的力量、制度或势力；题材已明确的超自然触发、时间范围与证据抹除必须逐项保留，不得把其作用缩成角色感知，也不得凭空创造免疫抹除的保底物证。\n按已注入AUTH-002世界资料补全边界执行。\n整体不超过2500字。${STORY_ENTITY_MODELING_POLICY}\n只输出7维度JSON：geography,socialStructure,powerSystem,economy,culture,history,factions。\n字段职责边界（禁止互相包含）：socialStructure只写阶级/政治/经济/信仰格局，不得写行业规则或地点；geography只写地理与地点分布；socialRules（若有）只写行业规则/法律边界/社会行为规范；powerSystem只写力量/科技体系；economy只写货币/贸易/产业。\nJSON格式:{"geography":"...","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{...}], "locations":["核心地点名"], "socialRules":"行业规则/法律边界/社会行为规范（短句列表，不含社会结构与地点）", "specialSettings":"特殊设定（无则空字符串）", "endingDirection":"结局基调与解决方向"}`;
-          const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, { temperature: 0.5, timeout: LLM_TUNABLES.timeoutComplex(), projectId, scenario: 'world_building', maxTokens: 24576 });
-          taskWarnings.push(...worldResult.warnings);
-
-          if (worldResult.data && typeof worldResult.data === 'object') {
-            try {
-              this.generatedCanonGuard.assertStructuredCanCommit({
-                projectId,
-                runId: worldResult.runId,
-                expectedStages: ['world'],
-                expectedScenarios: ['world_building'],
-              });
-              const wd = worldResult.data;
-              const wid = uuid();
-              db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-                wid, projectId, dto.title + '世界观', serializeGeneratedSqlText(wd.era),
-                JSON.stringify(Array.isArray(wd.geography) ? wd.geography : []),
-                JSON.stringify(Array.isArray(wd.factions) ? wd.factions : []),
-                JSON.stringify([wd.rules || '']), serializeGeneratedSqlText(wd.atmosphere),
-                JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
-                serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
-                JSON.stringify(Array.isArray(wd.locations) ? wd.locations : []),
-                serializeGeneratedSqlText(wd.socialRules),
-                serializeGeneratedSqlText(wd.specialSettings),
-                isShort ? 'short' : 'full',
-                now(), now()
-              );
-              emit('world', 75, '世界观已写入', 'done');
-              // ★ 同样传播到 world_system_profiles（前端读取的表）
-              try {
-                const existingProfile = db.prepare(`SELECT id FROM world_system_profiles WHERE world_setting_id=?`).get(wid);
-                if (!existingProfile) {
-                  const pid = require('crypto').randomUUID();
-                  const c = wd.constraints || {};
-                  db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id,
-                    synopsis, basic_info, era, locations, atmosphere_tone, rules,
-                    social_structure, tech_supernatural, system_mechanics,
-                    culture_customs, naming_rules, scale_plan, ending,
-                    hierarchy_rules, supplementary, created_at, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-                    pid, projectId, wid,
-                    serializeGeneratedSqlText(wd.storyPremise || wd.premise || dto.title),
-                    serializeGeneratedSqlText(dto.title + ' | ' + (wd.era || '')),
-                    serializeGeneratedSqlText(wd.history || wd.era || ''),
-                    serializeGeneratedSqlText(wd.geography || ''),
-                    serializeGeneratedSqlText(wd.atmosphere || ''),
-                    serializeGeneratedSqlText(wd.rules || ''),
-                    serializeGeneratedSqlText(wd.socialStructure || ''),
-                    serializeGeneratedSqlText(wd.powerSystem || ''),
-                    serializeGeneratedSqlText(wd.powerSystem || ''),
-                    serializeGeneratedSqlText(wd.culture || ''),
-                    '', '',
-                    serializeGeneratedSqlText(wd.endingDirection || ''),
-                    STORY_FACT_PRIORITY,
-                    serializeGeneratedSqlText((wd.economy || '') + ' | ' + (Array.isArray(wd.factions) ? wd.factions.map((f:any)=>f?.name||f).join('，') : '')),
-                    now(), now()
-                  );
-                  this.logger.log(`world_system_profiles 已创建 (sequential path, pid=${pid})`);
-                }
-              } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败(sequential): ${e.message}`); }
-            } catch (e: any) {
-              taskWarnings.push(`世界观写入失败: ${e.message}`);
-              emit('world', 75, '世界观写入失败', 'failed');
-              throw new Error(taskWarnings.join('；'));
-            }
-          } else {
-            taskWarnings.push('世界观生成失败');
-            emit('world', 75, '世界观生成失败', 'failed');
-            throw new Error(taskWarnings.join('；'));
-          }
-          // A successful model response alone does not prove that the world
-          // record is present. Downstream organization/outline work reads DB.
-          if (!db.prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId)) {
-            throw new Error('世界观生成结束但主记录未落库，停止依赖其事实的后续任务');
-          }
-          return { step: 'world', warnings: taskWarnings };
-        });
-
         // 任务C：组织/地点生成（仅当 DB 中无组织时执行）
         sequentialTasks.push(async (): Promise<{ step: string; warnings: string[] }> => {
           const taskWarnings: string[] = [];
@@ -9190,8 +9108,8 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
           }
           let canonicalLocationNames: string[] = [];
           try {
-            // Read after the world task has persisted its record. The outer
-            // worldRow snapshot was taken before this sequential generation.
+            // Re-read the world that passed source review before chapter generation.
+            // Never substitute a second world from this downstream enrichment queue.
             const latestWorld = db.prepare('SELECT locations FROM world_settings WHERE project_id=? ORDER BY created_at DESC LIMIT 1').get(projectId) as any;
             const parsed = Array.isArray(latestWorld?.locations) ? latestWorld.locations : JSON.parse(String(latestWorld?.locations || '[]'));
             canonicalLocationNames = (Array.isArray(parsed) ? parsed : [])
