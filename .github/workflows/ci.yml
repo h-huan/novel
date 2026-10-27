@@ -88,6 +88,35 @@ jobs:
         run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+      - name: Electron desktop startup smoke
+        shell: bash
+        run: |
+          # Verify the actual desktop dev entrypoint, not just its Vite bundle.
+          # A backend must never be created by this desktop command.
+          xvfb-run -a bash -euo pipefail <<'SH'
+          npm run dev > /tmp/novel-electron-start.log 2>&1 &
+          launcher_pid=$!
+          trap 'kill "$launcher_pid" 2>/dev/null || true' EXIT
+          opened=0
+          for attempt in $(seq 1 25); do
+            if curl -fsS http://127.0.0.1:5173/launcher.html >/dev/null 2>&1 \
+                && ps -eo args | grep -F "${PWD}/node_modules/electron/dist/electron . --no-sandbox" | grep -v grep >/dev/null; then
+              opened=1
+              break
+            fi
+            if ! kill -0 "$launcher_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$opened" != 1 ]; then
+            cat /tmp/novel-electron-start.log
+            echo "npm run dev did not open an Electron process"
+            exit 1
+          fi
+          if curl -fsS http://127.0.0.1:3100/api/v1/health >/dev/null 2>&1; then
+            echo "desktop launcher must not automatically start backend on port 3100"
+            exit 1
+          fi
+          SH
       - name: Quality cockpit E2E
         run: npm run test:e2e:quality
       - uses: actions/upload-artifact@v4
