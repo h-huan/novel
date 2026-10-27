@@ -18,6 +18,7 @@ const legacyProjectId = valueOf('--project') || process.env.VERIFY_PROJECT_ID ||
 const requestedShortProjectId = valueOf('--short-project') || process.env.VERIFY_SHORT_PROJECT_ID || null;
 const requestedLongProjectId = valueOf('--long-project') || process.env.VERIFY_LONG_PROJECT_ID || null;
 const baseUrl = (valueOf('--base') || process.env.VERIFY_BASE_URL || 'http://127.0.0.1:3100/api/v1').replace(/\/$/, '');
+let effectiveBaseUrl = baseUrl;
 const runFull = has('--full');
 const runE2E = has('--e2e');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -74,7 +75,7 @@ function seedVersion() {
 
 async function request(endpoint) {
   try {
-    const response = await fetch(`${baseUrl}${endpoint}`, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(`${effectiveBaseUrl}${endpoint}`, { signal: AbortSignal.timeout(5000) });
     let data = null;
     const text = await response.text();
     if (text) {
@@ -82,7 +83,11 @@ async function request(endpoint) {
     }
     return { ok: response.ok, status: response.status, data };
   } catch (error) {
-    return { ok: false, status: null, error: error instanceof Error ? error.message : String(error), data: null };
+    const cause = error?.cause;
+    const code = typeof cause?.code === 'string' ? cause.code : null;
+    return { ok: false, status: null,
+      error: (error instanceof Error ? error.message : String(error)) + (code ? ' (' + code + ')' : ''),
+      data: null };
   }
 }
 
@@ -165,7 +170,17 @@ function projectSelectionSummary(project) {
 // Runtime diagnostics depend on the same backend. Establish that prerequisite once,
 // then skip dependent probes when it is unavailable instead of reporting cascaded
 // project/standard failures that are only consequences of the same root cause.
-const health = validateBackendHealth(await request('/health'));
+// A source checkout may listen on localhost/IPv6 while the diagnostic default
+// is IPv4. Probe exactly one other loopback spelling on an unreachable default,
+// never reinterpret that failure as proof that no backend process was started.
+let healthResponse=await request('/health');
+if (!healthResponse.ok && baseUrl==='http://127.0.0.1:3100/api/v1' && healthResponse.status===null) {
+  effectiveBaseUrl='http://localhost:3100/api/v1';
+  const alternative=await request('/health');
+  if (alternative.ok) healthResponse=alternative;
+  else effectiveBaseUrl=baseUrl;
+}
+const health = validateBackendHealth(healthResponse);
 
 const projectDiscovery = {
   attempted: false,
@@ -550,7 +565,7 @@ if (!health.ok) {
   if (!runFull && !singleMode && projectTargets.length === 0) runtimeProblems.push('no_projects_found');
   const latestAuditSummary = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery);
   if (latestAuditSummary.available && latestAuditSummary.success === false) runtimeProblems.push('latest_idea_discovery_failed');
-  if (runFull && latestAuditSummary.available && Number(latestAuditSummary.shortfall) > 0)
+  if (latestAuditSummary.available && Number(latestAuditSummary.shortfall) > 0)
     runtimeProblems.push('latest_idea_discovery_shortfall_' + Number(latestAuditSummary.shortfall));
 }
 
@@ -654,7 +669,7 @@ const report = redactDiagnosticValue({
     shortProjectId,
     longProjectId,
     mode: selectionMode,
-    baseUrl,
+    baseUrl: effectiveBaseUrl,
     fullTests: runFull,
     e2e: runE2E,
   },
