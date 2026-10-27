@@ -5086,7 +5086,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const minimumSelectedCount = promptPhase === 'selection'
           ? minimumSelectedCountForPool(candidatePool.length) : minimumPremiseSelectionCount;
         const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false, minimumSelectedCount)
-          .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；逐项比较后优先选出“关键证据有合法取得与交付路径、关键结果有实际决定者和必要条件、代价由既定行动产生”的成熟题材。原池缺少必要条件的，不得在展开字段里自造相反事实救活；应优先从其余原池选择可成立的不同题材。不得新增候选或改写原池。')
+          .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；先按每项已有的分类检查主线：核心冲突、主动选择、反转和兑现必须落实该分类的关键关系或行动机制，不能以职业背景、末尾情绪或类型标签代替；不适配分类的候选不得选中，也不得偷偷改分类。再比较关键证据的取得与交付路径、真实决定者、兑现必要条件及既定行动引发的代价。原池缺必要条件的，不在展开字段自造相反事实救活；优先选择原池中机制成熟且互不重合的题材。不得新增候选或改写原池。')
           .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
           .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
         const promptDirective = promptPhase === 'pool' ? poolDirective
