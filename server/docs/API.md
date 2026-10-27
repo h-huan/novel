@@ -11,9 +11,9 @@ POST /api/v1/chain/idea-discover
 Content-Type: application/json
 ```
 
-服务只调用 `idea_generate` 当前模式所配置的具体模型。一次请求先批量生成，缺项时最多使用同一模型补齐一次；不会切换模型、提供商或模式，也不会创建占位题材。
+服务只调用 `idea_generate` 当前模式所配置的具体模型。一次请求先广搜原池并锁定题材，执行独立来源/类别/流派/兑现及同构核对，再逐卡结构化并经完整质量 Gate 验收。未达用户请求数量时，在同批原池、已证缺陷和各阶段共享物理调用预算内处理修复或换选；无进展、可用候选不足或预算耗尽时如实标记缺额，不创建占位题材、不扩大原池、不切换模型/提供商/模式，也不把部分交付冒充完整成功。具体判据、预算及流程以唯一执行标准和现行实现为准。
 
-篇幅、平台、分类、基调、文风、流派和视角等创作要求以根目录 `QUALITY_EXECUTION.md` 为唯一规范说明；代码侧低层阈值从 shared/platform benchmark 等唯一常量来源读取，API 文档不复制第二套规则。
+篇幅、平台、分类、基调、文风、流派、视角等创作要求以 `server/shared/src/执行标准.ts` 的唯一执行标准、Creative Constitution 和授权参数源为准；`QUALITY_EXECUTION.md` 仅为旧链接兼容，不承载独立规则。本 API 文档不复制第二套阈值或质量 Gate。
 
 ### 创建小说
 
@@ -22,7 +22,7 @@ POST /api/v1/chain/create-project-async
 Content-Type: application/json
 ```
 
-该接口只接受 `/chain/idea-discover` 已确认故事卡及完整执行标准，先建立 `creating` 项目壳，再按唯一生成主链构建世界观、角色和大纲；通过激活前完整性/一致性检查后才进入 `active`。
+该接口使用已通过验收并由用户选定的故事卡及当前创作宪法，先建立 `creating` 项目壳。短篇先审核并保存世界观，再据此生成章纲并进行逐章事实/行动审查及保存前整批事实复核；后续角色、组织、伏笔基于已验收来源补全，不再启动第二套世界观生成。长篇走自身的综合创建路径。项目激活前仍需完整来源、跨模块事实一致性、阶段兑现及恢复检查通过；失败如实保留诊断而非标记 `active`。具体质量判据以唯一执行标准为准。
 
 不存在通用 `POST /projects` 创建入口；`/projects` 只负责读取、更新既有项目和删除项目，避免再次形成第二条创建链。
 
@@ -76,7 +76,7 @@ GET /api/v1/generation-metrics/content-reports?projectId=<id>&stage=chapter&seve
 GET /api/v1/platform-analytics/overview?projectId=<id>&days=30
 ```
 
-质量判断必须有证据。Blocking 问题停止交付；证据不足时返回未评估/证据不足，不允许空问题集合冒充通过。具体标准只见 `QUALITY_EXECUTION.md`。
+质量判断必须有证据。Blocking 问题停止交付；证据不足时返回未评估/证据不足，不允许空问题集合冒充通过。具体标准只见 `server/shared/src/执行标准.ts`。
 
 ## 当前执行规则只读视图
 
@@ -86,7 +86,7 @@ GET /api/v1/module-standards/status
 GET /api/v1/module-standards/:key
 ```
 
-该接口只展示当前代码侧可执行镜像。运行时不再提供“让模型重新归纳并改写 hard rules”的写接口。规范变更必须通过代码 + `QUALITY_EXECUTION.md` + 测试在同一提交中完成。
+该接口只展示唯一执行标准的当前代码投影，不提供“让模型重新归纳并改写 hard rules”的写入口。重要流程调整必须同步核对 `server/shared/src/执行标准.ts`、`README.md`、本 API 文档、相关用户指南、消费者及回归测试；具体开发维护顺序以 `DEVELOPMENT_GOVERNANCE.md` 为准。
 
 ## 健康检查
 
