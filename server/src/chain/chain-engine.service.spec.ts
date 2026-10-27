@@ -104,6 +104,21 @@ describe('ChainEngineService', () => {
     }
   });
 
+  it.each(['transform', 'condition'] as const)('rejects unregistered %s nodes without invoking the model or following any stale branch', async (kind) => {
+    const obsoleteNode = {
+      ...mockNode,
+      id: kind === 'transform' ? 'old_transform' : 'old_condition',
+      type: kind,
+      promptTemplateId: undefined,
+    };
+    const result = await service.execute({ ...testChain, nodes: [obsoleteNode, mockNode] }, { test: 'hello' });
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(1);
+    expect(result.nodeResults[0].status).toBe('failed');
+    expect(result.nodeResults[0].error).toContain('不支持历史 Transform/Condition 节点');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   describe('execute', () => {
     it('should handle empty chains gracefully', async () => {
       const emptyChain = { ...testChain, nodes: [] };
