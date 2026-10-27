@@ -53,7 +53,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('不准只换职业、场所或物证名称');
     expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
-    expect(source).toContain("success: false, status: 'incomplete', ideas: []");
+    expect(source).toContain("success: false, status: 'incomplete', ideas: acceptedWithAudit");
     expect(source).toContain('qualifiedIdeas: acceptedWithAudit, error: warning, warning, qualityWarning: warning, appealGate');
     expect(source).toContain('先按causalPlan核查每个关键阶段结果的全部必要条件');
     expect(source).toContain('reviewChangedPremiseSources(');
