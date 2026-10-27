@@ -1,3 +1,11 @@
+
+/** Preserve one-call aggregate coverage when the shared allowance cannot fund
+ * all independent partitions. Batching is a latency optimization, never a
+ * prerequisite for completing a valid five-card review under a small budget. */
+export function shouldBatchIdeaPresentation(count:number,groupingMode:number,batchSize:number,availableReviewCalls:number):boolean {
+  return groupingMode===0&&count>=5&&batchSize>=1&&count>batchSize
+    &&availableReviewCalls>=Math.ceil(count/batchSize);
+}
 import { ideaReviewCitableNarrativeText } from './idea-review-evidence';
 import { resolveQualityEvidence } from '../modules/writing-quality/quality-issue';
 import { readerGoalReviewIssues, readerGoalGateIssues, type ReaderGoalReview } from './reader-goal-review';

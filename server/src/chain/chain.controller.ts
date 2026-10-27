@@ -42,7 +42,7 @@ import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenc
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
 import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
-import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, type IdeaPresentationVerdict } from './idea-presentation-review';
+import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
 import { readConstitution, updateConstitution, constitutionSettings, buildExecutionStandard, missingConstitutionStandards, genreFitProblem, categoryPlacementProblem, categoryPlacementMessage, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, audienceChannelHint, platformStandardProblem, buildPlatformStyleDirective, resolveProjectStandardDirective, styleIntensityGuides, type CreativeConstitution } from '../modules/project/creative-constitution';
 import {
@@ -5732,10 +5732,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // recovery path. Partition only that large initial/replacement review.
       // Every card still gets all independent verdicts and compares against
       // EVERY other card as a reference; smaller reviews preserve all Gates.
-      const boundedPresentationReview=(count:number)=>count>=5
-        && discoveryBudget.reviewGroupingMode===0 && count>discoveryBudget.presentationBatchSize;
-      const minimumCardReviewCalls=(count:number)=>discoveryBudget.reviewGroupingMode===0&&!boundedPresentationReview(count)
-        ?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
+      const boundedPresentationReview=(count:number,availableReviewCalls=presentationBudget.remaining)=>
+        shouldBatchIdeaPresentation(count,discoveryBudget.reviewGroupingMode,
+          discoveryBudget.presentationBatchSize,availableReviewCalls);
+      const minimumCardReviewCalls=(count:number,generationCalls=0)=>
+        discoveryBudget.reviewGroupingMode===0
+          &&!boundedPresentationReview(count,presentationBudget.remaining-generationCalls)
+          ?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
       const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
         // Deterministic contracts run before a paid semantic review. Invalid
         // metadata stays rejected and enters its authorized targeted repair.
@@ -5877,8 +5880,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const structuringErrors: Array<{ sourcePremiseId: string; error: string }> = [];
       // 已选题材逐一结构化：用户要 5 个题材时是 5 个 premise 各创建 1 张卡，
       // 不是把 5 张完整卡塞进一个大 JSON，也不是对同一张卡反复改写 5 次。
-      if(presentationBudget.remaining<selectedPremises.length+minimumCardReviewCalls(selectedPremises.length))throw Error('完整卡共享预算不足以生成并验收当前目标数量，未发起完整卡请求');
-      const reservedInitialReviewCalls=minimumCardReviewCalls(selectedPremises.length);
+      if(presentationBudget.remaining<selectedPremises.length+minimumCardReviewCalls(selectedPremises.length,selectedPremises.length))throw Error('完整卡共享预算不足以生成并验收当前目标数量，未发起完整卡请求');
+      const reservedInitialReviewCalls=minimumCardReviewCalls(selectedPremises.length,selectedPremises.length);
       presentationBudget.remaining-=reservedInitialReviewCalls;
       let results:PromiseSettledResult<Record<string,unknown>>[];
       try {results=await independentReviewBatches(selectedPremises,presentationBudget,IDEA_CARD_GENERATION_CONCURRENCY,
@@ -5995,16 +5998,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
          repairEligible:id=>!(readerGoalDeficitRequiresNewPremise(latestAssessment(id))
           ||persistentStructureDeficitRequiresReplacement(candidateAssessments,id))
-          || !(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0),
+          || !(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0),
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
-        canReplace:()=>reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls)>0,
+        canReplace:()=>reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0,
         fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
         replaceBatch:async ids=>{
           // One original-pool selection and one independent source/overlap review
           // for all outstanding positions. A rejected batch never changes
           // already accepted cards, and never borrows new model-call credits.
           const missing=ids.filter(id=>selectedPremises.some(item=>String(item.premiseId)===id));
-          const targetCount=affordableIdeaReplacementCount(missing.length,availableOriginalPool().length,presentationBudget.remaining,minimumCardReviewCalls);
+          const targetCount=affordableIdeaReplacementCount(missing.length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count));
           const targets=missing.slice(0,targetCount);
           if(!targets.length)return 'unavailable';
           const reviewIssues=targets.map(id=>{
@@ -6039,7 +6042,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           // as initial cards, instead of serially awaiting each replacement.
           // Reserve the final independent presentation review before dispatch;
           // each model call consumes the existing shared physical-call budget.
-          const reserveCardReviewCalls=minimumCardReviewCalls(newPremises.length);
+          const reserveCardReviewCalls=minimumCardReviewCalls(newPremises.length,newPremises.length);
           if(presentationBudget.remaining<newPremises.length+reserveCardReviewCalls)
             return 'unavailable';
           presentationBudget.remaining-=reserveCardReviewCalls;
@@ -12297,8 +12300,9 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     if (!cards.length) return [];
     const grouping=readGenerationBudgets();
     let batches:Array<{start:number;batch:any[]}>|undefined;
-    if(preferBoundedBatches && grouping.reviewGroupingMode===0 && !aggregateAttempt
-      && cards.length>grouping.presentationBatchSize){
+    if(preferBoundedBatches && !aggregateAttempt
+      && shouldBatchIdeaPresentation(cards.length,grouping.reviewGroupingMode,
+        grouping.presentationBatchSize,physicalCallBudget.remaining)){
       // Preempt the observed full-batch token-cap recovery for large idea sets;
       // existing cross-batch reference comparison and full verification remain.
       batches=[];

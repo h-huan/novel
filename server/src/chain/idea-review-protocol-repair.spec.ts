@@ -1,7 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows} from './idea-review-protocol-repair';
 import {ideaReviewResponseExample,ideaPayoffBridgeIssues,ideaReviewEvidenceReferenceIssues,resolveIdeaReviewEvidence} from './idea-review-evidence';
-import {presentationReviewIssues} from './idea-presentation-review';
+import {presentationReviewIssues,shouldBatchIdeaPresentation} from './idea-presentation-review';
 import {ChainController} from './chain.controller';
 const card={title:'当面退回委托',hook:'她把错误订单退回，拒绝替别人签字。',description:'她到唯一出口等负责人下班。',setting:'负责人下班只能从此门经过。',ending:'她在门口等到负责人。'};
 const fixture=()=>{
@@ -276,5 +276,30 @@ describe('five-card bounded semantic review preserves independent gates and full
   expect(reviews).toHaveLength(5);
   expect(reviews.map(row=>row.title)).toEqual(cards.map(row=>row.title));
   expect(reviews.every(row=>row.payoffCredible&&row.storyCoherent&&row.platformFit&&!!row.readerGoals)).toBe(true);
+ });
+});
+
+describe('semantic review batching honors the original physical-call ceiling',()=>{
+ it('preserves aggregate review when three partitions cannot be funded',()=>{
+  expect(shouldBatchIdeaPresentation(5,0,2,2)).toBe(false);
+  expect(shouldBatchIdeaPresentation(5,0,2,3)).toBe(true);
+  expect(shouldBatchIdeaPresentation(5,0,2,1)).toBe(false);
+  expect(shouldBatchIdeaPresentation(4,0,2,12)).toBe(false);
+  expect(shouldBatchIdeaPresentation(5,1,2,12)).toBe(false);
+ });
+ it('falls back to one full independent semantic review with one available call',async()=>{
+  const cards=Array.from({length:5},(_,i)=>({...card,title:'低额度题材'+(i+1)}));
+  const c=Object.create(ChainController.prototype) as any;
+  c.logger={warn:vi.fn(),error:vi.fn()};
+  const llm=vi.fn(async(req:any)=>{
+    req.physicalCallBudget.remaining--;
+    return {content:JSON.stringify(ideaReviewResponseExample(cards))};
+  });
+  c.realLLM={generate:llm};
+  const budget={remaining:1};
+  const rows=await c.reviewIdeaPresentation(cards,[],'',budget,false,true);
+  expect(rows).toHaveLength(5);
+  expect(llm).toHaveBeenCalledOnce();
+  expect(budget.remaining).toBe(0);
  });
 });
