@@ -928,10 +928,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       && ['creation_cross_stage_repair','creation_cross_stage_path_design'].includes(request.metrics?.stepKey || '');
     const crossStageReviewUnit = request.structuredReviewUnitCount === 1 && request.scenario === 'review'
       && ['creation_cross_stage_review','creation_cross_stage_path_review'].includes(request.metrics?.stepKey || '');
-    const singleStructuredUnit = upstreamRepairUnit || crossStageReviewUnit || request.metrics?.stepKey === 'creation_chapter_detail'
+    const singleIdeaCardReview = request.structuredReviewUnitCount === 1
+      && request.scenario === 'idea_generate'
+      && request.metrics?.stepKey === 'idea_presentation_review';
+    const singleStructuredUnit = upstreamRepairUnit || crossStageReviewUnit || singleIdeaCardReview || request.metrics?.stepKey === 'creation_chapter_detail'
       || (request.structuredRepairIssueCount === 1 && request.scenario === 'refinement'
         && /^outline_local_repair_\d+$/.test(request.metrics?.stepKey || ''));
-    const unitLabel = upstreamRepairUnit ? '单组源头修订' : crossStageReviewUnit ? '完整跨阶段决定' : request.metrics?.stepKey === 'creation_chapter_detail' ? '单章详细大纲' : '单项局部修复';
+    const unitLabel = upstreamRepairUnit ? '单组源头修订' : crossStageReviewUnit ? '完整跨阶段决定' : singleIdeaCardReview ? '单张题材卡独立审核' : request.metrics?.stepKey === 'creation_chapter_detail' ? '单章详细大纲' : '单项局部修复';
     let lastEmptyError: Error | null = null;
     // 结构化输出被 finish_reason=length 截断时的"同模型扩容"状态：模型与 json_object 模式都不变（非降级），
     // 只把输出上限翻倍后用同一 prompt 重试。硬顶由 structured-truncation.ts 单点定义，与调用侧预算同源。

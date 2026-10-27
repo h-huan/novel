@@ -123,6 +123,30 @@ it('cancels an already opened OpenAI compatible stream instead of retaining its 
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
+it.each([true,false])('recovers an actual one-card idea review truncated at the explicit ceiling, valid=%s',async(valid)=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockResolvedValueOnce({content:'{"reviews":[{"position":1,',finishReason:'length'})
+    .mockResolvedValueOnce({content:valid?'{"reviews":[{"position":1,"payoffCredible":false,"issues":["真实缺失条件"]}]}':'{"reviews":[',finishReason:valid?'stop':'length'});
+  (service as any).callModel=callModel;
+  const request={prompt:'完整原池和单张题材卡、四项目标及全部原始证据',scenario:'idea_generate',responseFormat:'json_object' as const,
+    maxTokens:32768,structuredReviewUnitCount:1,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}};
+  if(valid)expect(JSON.parse((await service.generate(request)).content).reviews[0].payoffCredible).toBe(false);
+  else await expect(service.generate(request)).rejects.toMatchObject({structuredOutputTruncated:true});
+  expect(callModel).toHaveBeenCalledTimes(2);
+  expect(callModel.mock.calls[0].slice(0,7)).toEqual(callModel.mock.calls[1].slice(0,7));
+  expect(callModel.mock.calls[1][8]).toBe(true);
+  expect(budget.remaining).toBe(0);
+});
+it('does not disable thinking or add recovery for a multi-card review after a partial truncation',async()=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockResolvedValue({content:'{"reviews":[',finishReason:'length'});
+  (service as any).callModel=callModel;
+  await expect(service.generate({prompt:'两张完整题材卡',scenario:'idea_generate',responseFormat:'json_object',
+    maxTokens:32768,structuredReviewUnitCount:2,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}}))
+    .rejects.toMatchObject({structuredOutputTruncated:true});
+  expect(callModel).toHaveBeenCalledTimes(1);
+  expect(budget.remaining).toBe(1);
+});
 it('recovers a complete cross-stage decision without re-generating its source candidate or changing the model contract', async () => {
   const service=createService(),budget={remaining:2};
   const callModel=vi.fn().mockResolvedValueOnce({content:'{"consistent":true,"contradictions":[',finishReason:'length'})

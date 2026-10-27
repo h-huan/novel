@@ -179,6 +179,27 @@ function createTray(): void {
 
 // ---------- 窗口管理 ----------
 
+/** ready-to-show is not guaranteed when Chromium does not paint a hidden
+ * window (including some Windows GPU / Vite startup paths). Show once the
+ * document is ready as a second route; neither path creates another window.
+ * Never force always-on-top: normal launches should not cover fullscreen games. */
+function revealLoadedWindow(window: BrowserWindow): void {
+  let revealed = false;
+  const reveal = () => {
+    if (revealed || window.isDestroyed()) return;
+    revealed = true;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  };
+  window.once('ready-to-show', reveal);
+  window.webContents.once('did-finish-load', reveal);
+  window.webContents.once('did-fail-load', (_event, _errorCode, _description, _url, isMainFrame) => {
+    if (isMainFrame) reveal();
+  });
+}
+
+
 /**
  * 创建引导窗口（欢迎窗口）
  * 类似 IntelliJ IDEA 的欢迎界面：项目列表 + 灵感发现 + 新建项目
@@ -202,12 +223,7 @@ function createLauncherWindow(): void {
     },
   });
 
-  launcherWindow.once('ready-to-show', () => {
-    if (!launcherWindow || launcherWindow.isDestroyed()) return;
-    if (launcherWindow.isMinimized()) launcherWindow.restore();
-    launcherWindow.show();
-    launcherWindow.focus();
-  });
+  revealLoadedWindow(launcherWindow);
 
   launcherWindow.on('closed', () => {
     launcherWindow = null;
@@ -255,12 +271,7 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
   });
 
   // 窗口准备好后再显示，避免白屏闪烁
-  mainWindow.once('ready-to-show', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  });
+  revealLoadedWindow(mainWindow);
 
   // 保存窗口位置/大小（移动/调整时）
   mainWindow.on('resize', saveWindowBounds);

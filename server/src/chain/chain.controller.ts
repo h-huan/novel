@@ -12457,7 +12457,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       + '\n若存在standardLines，每卡executionStandardRefs的D编号必须按顺序取standardLines原文并用换行拼接，这与该卡完整执行标准逐字等价；所有标准仍逐项执行，不能只看编号或丢弃重复引用。cards是实际待审卡，references只比较差异。';
     const result = await this.llmCallWithRetry<{ reviews: IdeaPresentationVerdict[] }>(
       '题材完整故事与兑现独立审查',reviewPrompt,
-      { scenario: 'idea_generate', stepKey: 'idea_presentation_review', physicalCallBudget: reviewBudget, temperature: 0.1, timeout: readGenerationBudgets().complexTimeoutMs, maxTokens: LLM_TUNABLES.CONSISTENCY_CHECK_MIN,
+      { scenario: 'idea_generate', stepKey: 'idea_presentation_review', physicalCallBudget: reviewBudget, structuredReviewUnitCount: cards.length, temperature: 0.1, timeout: readGenerationBudgets().complexTimeoutMs,
         validationRetryPrompt: raw=>{
           const previous=this.safeExtractJson(raw,null);
           try{goalRepair=ideaReaderGoalRepairPlan(previous,cards,references);}
