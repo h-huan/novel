@@ -831,8 +831,10 @@ function detailedIdeaMarkdown() {
         + '；逻辑调用=' + (trace.totals?.logicalCalls ?? '未知')
         + '；物理尝试估算=' + (trace.totals?.physicalAttempts ?? '未知')
         + '；Token=' + (trace.totals?.totalTokens ?? '未知')
-        + '；输入=' + (trace.stepBreakdown?.reduce((n,row)=>n+(row.promptTokens??0),0) ?? '未知')
-        + '；完成输出(含推理)=' + (trace.stepBreakdown?.reduce((n,row)=>n+(row.completionTokens??0),0) ?? '未知')
+        + '；输入=' + (trace.stepBreakdown?.length && trace.stepBreakdown.every(row=>row.promptTokens !== null)
+          ? trace.stepBreakdown.reduce((n,row)=>n+row.promptTokens,0) : '未知')
+        + '；完成输出(含推理)=' + (trace.stepBreakdown?.length && trace.stepBreakdown.every(row=>row.completionTokens !== null)
+          ? trace.stepBreakdown.reduce((n,row)=>n+row.completionTokens,0) : '未知')
         + '；内部重试=' + (trace.totals?.internalRetries ?? '未知')
         + '；只按请求 ID 关联，不代表该请求已结束',
       ...(trace.stepBreakdown || []).map(step =>
