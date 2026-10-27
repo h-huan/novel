@@ -2088,7 +2088,10 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
         return { content: JSON.stringify({ pool: selected.map((index,position) => ({
           workingTitle: attempt === 0 && position === 1 ? '首批换名复刻'
             : '实际新机制' + index,
-          storyCore: diversePoolStories[index],
+          storyCore: attempt === 0 && position === 1
+            ? diversePoolStories[index].replace('失语气象员', '气象台值班员')
+              .replace('浮标全部报出逆风', '海上浮标一起报告逆风')
+            : diversePoolStories[index],
           storyCategoryId: 'K1',
         })) }) };
       }
