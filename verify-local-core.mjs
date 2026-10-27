@@ -432,7 +432,7 @@ const ideaActivityResponse = health.ok
 const latestIdeaActivity = {
  source:{ok:ideaActivityResponse.ok,status:ideaActivityResponse.status,error:ideaActivityResponse.error??null},
  ...summarizeRecentIdeaActivity(ideaActivityResponse.ok?asArray(ideaActivityResponse.data):[],
-  savedDiscoveryAudit.finishedAt,health.data?.build?.processStartedAt,new Date().toISOString()),
+  savedDiscoveryAudit.finishedAt,unwrap(health.data)?.build?.processStartedAt,new Date().toISOString()),
 };
 const stepMetricsQuery = new URLSearchParams({ scenario: 'idea_generate', limit: '500' });
 if (savedDiscoveryAudit.discoveryRequestId) {

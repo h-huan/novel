@@ -228,3 +228,32 @@ export function summarizeRecentIdeaActivity(rows,completedAuditFinishedAt,backen
   finished:runs.filter(x=>x.status==='success'||x.status==='failed').length,
   runs,truncated:sorted.length>runs.length};
 }
+
+/** Translate live model-call activity into a diagnostic-only, evidence-scoped
+ * triage. A generation_runs record is NOT a completed discovery request; no
+ * count or quality verdict is inferred from partial calls. */
+export function summarizeIdeaActivityEvidence(activity) {
+ const ready=activity?.source?.ok===true;
+ const rows=ready&&Array.isArray(activity.runs)?activity.runs:[];
+ const running=rows.filter(row=>row.status==='running'&&!row.staleProcess);
+ const cancelled=rows.filter(row=>row.status==='cancelled');
+ const stale=rows.filter(row=>row.status==='running'&&row.staleProcess);
+ const status=!ready?'unavailable':running.length?'running_calls_visible'
+   :cancelled.length?'cancelled_calls_visible'
+   :rows.length?'later_call_records_visible':'no_later_calls';
+ return {
+  status,sourceAvailable:ready,
+  association:ready?activity.association??'unbound':null,
+  totalRecent:ready?Number(activity.totalRecent??rows.length):null,
+  running:ready?running.length:null,cancelled:ready?cancelled.length:null,
+  staleRunning:ready?stale.length:null,
+  records:rows.slice(0,20).map(row=>({
+   runId:row.runId??null,stage:row.stage??null,status:row.status??null,
+   startedAt:row.startedAt??null,finishedAt:row.finishedAt??null,
+   elapsedMs:row.elapsedMs??null,staleProcess:row.staleProcess===true,
+   error:row.error==null?null:redactDiagnosticText(row.error)
+  })),
+  truncated:ready?Boolean(activity.truncated||rows.length>20):null,
+  limitation:'只显示已持久化的模型调用，可能跨多个灵感请求；没有最终审计时不能推断已生成数量、整批耗时或独立质量门通过。'
+ };
+}

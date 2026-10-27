@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { normalizeIdeaDiscoveryAudit, redactDiagnosticText } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, redactDiagnosticText, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const reportPath = path.join(root, 'verification', 'latest.json');
@@ -47,6 +47,10 @@ function triageThreeIssues(report) {
   const healthEndpoint = String(report?.options?.baseUrl || 'http://127.0.0.1:3100/api/v1').replace(/\/$/, '') + '/health';
   const audit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery || {});
   const trace = runtime.discoveryCallTrace || {};
+  const activity = summarizeIdeaActivityEvidence(runtime.ideaActivity);
+  const latestAuditIsHistorical = report?.runtime?.currentRevisionEvidence?.ideaDiscovery==='historical_only'
+    || Boolean(runtime.backendIdentity?.processStartedAt&&audit.finishedAt&&
+      Date.parse(audit.finishedAt)<Date.parse(runtime.backendIdentity.processStartedAt));
   const metricsAvailable = trace.source?.ok === true;
   const phases = Array.isArray(trace.phaseBreakdown) ? trace.phaseBreakdown : [];
   const projectMap = runtime.projects && typeof runtime.projects === 'object' ? runtime.projects : {};
@@ -91,7 +95,12 @@ function triageThreeIssues(report) {
       },
     },
     ideaLatency: {
-      evidenceStatus: !serverReady ? 'not_collected_server_unavailable' : !audit.available ? 'no_saved_idea_audit' : 'saved_audit_available',
+      evidenceStatus: !serverReady ? 'not_collected_server_unavailable'
+        : activity.status==='running_calls_visible'?'incomplete_model_calls_observed'
+        : activity.status==='cancelled_calls_visible'?'cancelled_model_calls_observed'
+        : !audit.available?'no_saved_idea_audit':latestAuditIsHistorical?'historical_completed_audit_only':'saved_audit_available',
+      completedAuditHistorical:latestAuditIsHistorical,
+      activityAfterCompletedAudit:activity,
       requestId: audit.discoveryRequestId ?? null, startedAt: audit.startedAt ?? null, finishedAt: audit.finishedAt ?? null,
       wallMs: audit.startedAt && audit.finishedAt
         ? Math.max(0, Date.parse(audit.finishedAt) - Date.parse(audit.startedAt)) || null : null,
@@ -101,18 +110,22 @@ function triageThreeIssues(report) {
       slowestRecordedPhases: metricsAvailable
         ? [...phases].sort((a,b)=>Number(b.wallMs ?? b.sumDurationMs ?? 0)-Number(a.wallMs ?? a.sumDurationMs ?? 0)).slice(0,8)
         : [],
-      limitation: metricsAvailable ? '阶段指标反映已存储的调用；同版本分组不是实际相同输入的证明。'
-        : '模型调用指标未获取，不能将空数组视为0次调用。',
+      limitation: '墙钟耗时和合格数量仅属于上述最新已完成审计，不代表正在运行或被中止的发现请求。'
+        +(metricsAvailable?' 阶段指标为已完成模型调用；同版本分组不证明输入重复。':' 旧审计调用指标不可用，不能把未知记为0。'),
     },
     ideaCount: {
-      evidenceStatus: !serverReady ? 'not_collected_server_unavailable' : !audit.available ? 'no_saved_idea_audit' : 'saved_audit_available',
+      evidenceStatus: !serverReady?'not_collected_server_unavailable'
+        : activity.status==='running_calls_visible'?'incomplete_request_quantity_unknown'
+        : activity.status==='cancelled_calls_visible'?'cancelled_request_quantity_unknown'
+        : !audit.available?'no_saved_idea_audit':latestAuditIsHistorical?'historical_completed_audit_only':'saved_audit_available',
+      completedAuditRequestId:audit.discoveryRequestId??null,
       requested: audit.available ? audit.requested ?? null : null,
       returned: audit.available ? audit.returned ?? null : null,
       shortfall: audit.available ? audit.shortfall ?? null : null,
       stopReason: audit.available ? audit.stopReason ?? null : null,
       qualified: audit.available ? audit.qualified ?? null : null,
       acceptedIds: audit.available ? audit.acceptedIdeas.map(idea => idea?.sourcePremiseId ?? null) : [],
-      limitation: '只统计服务端最后一批质量门结果；桌面端补齐后的合并显示数不在本次后端审计中。',
+      limitation: '数量是最近一次已完成服务端质量审计的历史数据；未完成/取消的请求没有可认定合格数量。桌面端补齐合并数不在此处。',
     },
     creationConsistency: {
       evidenceStatus: !serverReady ? 'not_collected_server_unavailable'
@@ -125,7 +138,10 @@ function triageThreeIssues(report) {
       ...(serverReady && runtime.backendIdentity?.loadedLocalRevision !== 'match'
         ? ['后端运行提交与本地 HEAD 不一致或未知：当前证据只能用于历史诊断，不能证明最新修复已生效；请先确认正在生成的任务已完成，再安全重启同一项目后端并复验。'] : []),
       ...(serverReady && !audit.available ? ['缺少最近一次灵感请求审计；实际执行发现后再验收。'] : []),
-      ...(serverReady && !metricsAvailable ? ['缺少灵感生成逐步模型指标与请求关联证据；不能计算实际模型耗时、重试次数。'] : []),
+      ...(serverReady && !metricsAvailable ? ['缺少已完成审计的模型步骤指标；不能推断调用次数。'] : []),
+      ...(serverReady && !activity.sourceAvailable ? ['进行中/取消的灵感模型运行记录未获取，不能据此认为没有执行中的模型调用。'] : []),
+      ...(serverReady && activity.running>0 ? ['检测到仍在运行的灵感模型调用；所示已完成审计耗时和合格数不能代表这批未完成请求。'] : []),
+      ...(serverReady && activity.staleRunning>0 ? ['检测到旧进程遗留的running记录，不能当作当前进程仍在生成；其状态需与已取消请求区别。'] : []),
       ...(serverReady && projects.length === 0 ? ['缺少项目创建运行记录；需要失败项目的生成运行与完整性审计。'] : []),
       ...(report?.git?.dirty ? ['本地工作区有未提交修改，Git HEAD 不能代表本轮实际运行源码；需要提供 git diff。'] : []),
     ],
@@ -145,11 +161,26 @@ function threeIssueMarkdown(triage) {
       + '；错误：' + show(triage.prerequisite.healthError)
       + '；后端修订匹配：' + show(triage.prerequisite.backendLoadedRevision)
       + '；证据适用范围：' + show(triage.prerequisite.evidenceScope),
-    '- ① 灵感耗时：' + latency.evidenceStatus + '；墙钟毫秒：' + show(latency.wallMs)
-      + '；调用指标：' + (latency.callMetricsAvailable ? '已采集' : '未采集（不能记为0）'),
-    '- ② 题材数量：' + count.evidenceStatus + '；请求：' + show(count.requested)
+    '- ① 灵感耗时：' + latency.evidenceStatus + '；**上次完成审计的历史墙钟**（非当前未完成请求）ms：' + show(latency.wallMs)
+      + '；历史审计ID：' + show(latency.requestId)
+      + '；该审计早于当前后端：' + show(latency.completedAuditHistorical)
+      + '；完成审计调用指标：' + (latency.callMetricsAvailable ? '已采集' : '未采集（不能记为0）'),
+    '- ② 题材数量：' + count.evidenceStatus + '；**上次完成审计**请求：' + show(count.requested)
       + '；合格返回：' + show(count.returned) + '；缺额：' + show(count.shortfall)
-      + '；补足停止原因：' + show(count.stopReason),
+      + '；停止原因：' + show(count.stopReason)
+      + '。未完成请求数量未知，不能沿用旧值。',
+    '### 未完成/已取消的灵感模型调用（最新完成审计之外）',
+    '- 记录状态：' + latency.activityAfterCompletedAudit.status
+      + '；时间邻近，不是精确请求ID归属；总记录：'+show(latency.activityAfterCompletedAudit.totalRecent)
+      + '；运行中：'+show(latency.activityAfterCompletedAudit.running)
+      + '；已取消：'+show(latency.activityAfterCompletedAudit.cancelled)
+      + '；旧进程遗留running：'+show(latency.activityAfterCompletedAudit.staleRunning),
+    ...latency.activityAfterCompletedAudit.records.map(row=>
+      '- '+show(row.status)+' · run='+show(row.runId)+' · stage='+show(row.stage)
+       +' · 已持续/历时='+show(row.elapsedMs)+'ms · 开始='+show(row.startedAt)
+       +(row.staleProcess?'（旧进程遗留）':'')),
+    '- '+latency.activityAfterCompletedAudit.limitation,
+    '',
     '- ③ 创建一致性：' + creation.evidenceStatus + '；采集项目：' + creation.projects.length
       + '；失败运行数：' + (creation.projects.length ? creation.projects.reduce((n,p)=>n+p.failedRunCount,0) : '未知（未取得）'),
     '',
@@ -233,6 +264,8 @@ function printDetailedReport(value) {
   }, null, 2));
   console.log('[verify] 灵感发现阶段与质量门证据：\n' + JSON.stringify(poolEvidence, null, 2).slice(0, 26000));
   console.log('[verify] 灵感发现实际调用时间线：\n' + JSON.stringify(callEvidence, null, 2).slice(0, 22000));
+  console.log('[verify] 运行中/已中止灵感调用（不冒充最近完成审计）：\n'
+    +JSON.stringify(summarizeIdeaActivityEvidence(runtime.ideaActivity),null,2).slice(0,14000));
   console.log('[verify] 诊断警告：\n' + JSON.stringify(runtime.diagnosticWarnings ?? [], null, 2));
   console.log('[verify] 项目创建、落库与失败步骤证据：\n' + JSON.stringify(projectEvidence, null, 2).slice(0, 20000));
   const failedTests = Array.isArray(value.tests) ? value.tests.filter(test => test.status !== 'passed') : [];

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
 
 test('normalizes the nested saved idea-discovery audit and partial-card counts', () => {
   const audit = normalizeIdeaDiscoveryAudit({
@@ -132,4 +132,25 @@ test('unfinished and cancelled discovery calls remain visible despite an older c
  assert.equal(overlap.running,1);
  assert.equal(overlap.cancelled,1);
 
+});
+
+test('live idea evidence is kept separate from the last completed request and does not fabricate a quality verdict',()=>{
+ const activity={
+  source:{ok:true},association:'after_latest_completed_audit_time_only',totalRecent:3,
+  runs:[
+   {runId:'r-current',stage:'idea_generate',status:'running',startedAt:'2026-10-27T00:01:00Z',elapsedMs:1200000,staleProcess:false},
+   {runId:'r-cancel',status:'cancelled',elapsedMs:800000,staleProcess:false},
+   {runId:'r-orphan',status:'running',elapsedMs:700000,staleProcess:true},
+  ]
+ };
+ const evidence=summarizeIdeaActivityEvidence(activity);
+ assert.equal(evidence.status,'running_calls_visible');
+ assert.equal(evidence.totalRecent,3);
+ assert.equal(evidence.running,1);assert.equal(evidence.cancelled,1);
+ assert.equal(evidence.staleRunning,1);
+ assert.deepEqual(evidence.records.map(row=>row.runId),['r-current','r-cancel','r-orphan']);
+ assert.equal(Object.hasOwn(evidence,'qualified'),false);
+ assert.equal(Object.hasOwn(evidence,'returned'),false);
+ assert.equal(summarizeIdeaActivityEvidence({source:{ok:false},runs:activity.runs}).status,'unavailable');
+ assert.equal(summarizeIdeaActivityEvidence({source:{ok:true},runs:activity.runs.slice(1)}).status,'cancelled_calls_visible');
 });
