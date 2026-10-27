@@ -168,6 +168,20 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('wsCount = reusingFrozenWorld ? 1 : 0');
   });
 
+  it('moves the same world completeness Gate before costly short outline generation without duplicating it', () => {
+    const shortWorldReadback = indexOrFail(controllerSource, 'const savedWorld = db.prepare');
+    const earlyGate = controllerSource.indexOf('this.assertProjectSourceCompleteness(projectId);', shortWorldReadback);
+    const firstStoryCard = controllerSource.indexOf('const canonicalCardFromIdea', shortWorldReadback);
+    const chapterPrompt = controllerSource.indexOf('const chapterPrompt =', shortWorldReadback);
+    expect(earlyGate).toBeGreaterThan(shortWorldReadback);
+    expect(earlyGate).toBeLessThan(firstStoryCard);
+    expect(firstStoryCard).toBeLessThan(chapterPrompt);
+    // The short creation's late duplicate was removed. Other callers (writing
+    // and long creation) still own their original completeness checks.
+    expect(controllerSource.slice(shortWorldReadback).match(/this\\.assertProjectSourceCompleteness\\(projectId\\);/g)).toHaveLength(1);
+    expect(controllerSource).toContain('await this.generationRecovery.assertActivationReady(projectId)');
+  });
+
   it('has one creation-world authority and no legacy post-outline world regeneration', () => {
     const shortWorld = indexOrFail(controllerSource, 'const worldResult = await this.llmCallWithRetry<any>(\'世界观生成\', worldPrompt, {');
     const savedWorld = indexOrFail(controllerSource, 'const savedWorld = db.prepare');
