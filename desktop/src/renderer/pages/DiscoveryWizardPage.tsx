@@ -1003,10 +1003,26 @@ const DiscoveryWizardPage: React.FC = () => {
       }
     } catch (err: any) {
       clearInterval(msgInterval);
-      if (requestId === latestDiscoveryRequestId) store.setGenProgress(
-        cancelledIdeaDiscoveryIdRef.current===discoveryRequestId
-        ? '已取消本次灵感发现；未通过完整质量门的题材不会交付。'
-        : `❌ ${err.message || '生成失败，请重试'}`);
+      if (requestId === latestDiscoveryRequestId) {
+        if (typeof err?.message === 'string' && err.message.startsWith('请求超时')) {
+          // Aborting the browser fetch alone does NOT stop the server's model
+          // task. Cancel with the same client-owned ID to avoid orphaned work
+          // contending with the next discovery request.
+          let stopped = false;
+          try {
+            const cancellation = await api.post<{ cancelled: boolean }>(
+              '/chain/cancel-idea-discovery/' + encodeURIComponent(discoveryRequestId), {}, 30_000);
+            stopped = cancellation.data?.cancelled === true;
+          } catch { /* Network failure must not be presented as cancellation. */ }
+          store.setGenProgress(stopped
+            ? '本次发现请求超时，已向后端发送取消并确认受理；没有把未通过质量门的卡当作完成。'
+            : '本次发现请求超时，未能确认后端任务已经停止；请检查模型活动记录，勿立即重复发起。');
+        } else {
+          store.setGenProgress(cancelledIdeaDiscoveryIdRef.current===discoveryRequestId
+            ? '已取消本次灵感发现；未通过完整质量门的题材不会交付。'
+            : `❌ ${err.message || '生成失败，请重试'}`);
+        }
+      }
     } finally {
       ideaRequestInFlightRef.current = false;
       if(activeIdeaDiscoveryIdRef.current===discoveryRequestId)activeIdeaDiscoveryIdRef.current=null;
