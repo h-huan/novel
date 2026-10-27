@@ -69,6 +69,13 @@ describe('public rule governance', () => {
     expect(api).toContain('同批原池');
     expect(api).toContain('短篇先审核并保存世界观');
     expect(api).not.toContain('缺项时最多使用同一模型补齐一次');
+    expect(api).toContain('旧 `Transform`/`Condition` 编排');
+    expect(readme).toContain('固定长篇规划只由两条已注册的模板链驱动');
+    const chainTypes = readFileSync(join(process.cwd(), 'src/chain/chain.types.ts'), 'utf8');
+    expect(chainTypes).toContain("export type NodeType = 'prompt';");
+    expect(chainTypes).toContain("export type ExecutionMode = 'sequential';");
+    expect(chainTypes).not.toContain('export interface Branch');
+
     expect(api).not.toContain('QUALITY_EXECUTION.md` 为唯一规范');
     expect(api).not.toContain('代码 + `QUALITY_EXECUTION.md` + 测试');
     expect(skill).toContain('唯一执行标准 server/shared/src/执行标准.ts');
@@ -118,6 +125,7 @@ describe('public rule governance', () => {
       /node_9_chapter_synthesis/,
       /node_0_context_assembly/,
       /_branch_jump/,
+      /prompt = JSON\.stringify\(input, null, 2\)/,
 
       /chapterSynthesisMaxTokens/,
       /请将以下8步草稿扩写并重写/,
