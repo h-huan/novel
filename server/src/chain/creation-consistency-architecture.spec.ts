@@ -70,6 +70,27 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('不得删除或忽略该直接证据去迁就错误审查');
   });
 
+  it('uses one mandatory final short-outline fact audit without legacy unreachable recheck', () => {
+    const finalAudit = indexOrFail(controllerSource, 'await this.assertOutlineCandidateFacts(projectId, canonicalCreativeBrief, executionStandardForReview,');
+    const persistedOutline = controllerSource.indexOf("db.exec('BEGIN IMMEDIATE')", finalAudit);
+    expect(persistedOutline).toBeGreaterThan(finalAudit);
+    expect(controllerSource).not.toContain('completeOutlineFactsReviewed');
+    // All accepted earlier chapters are still sent as source facts; the full
+    // responsibilities remain. Do not resend a redundant prefix of that plan.
+    expect(controllerSource).toContain('buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, false)');
+    expect(controllerSource).toContain('【全书章节分工与动态节拍】');
+    expect(controllerSource).not.toContain('completedTaskBoundary');
+    expect(controllerSource).not.toContain('【已经完成、禁止重演的章节任务】');
+  });
+
+  it('does not leak a past novel\'s mechanics into every new world and cross-stage review', () => {
+    expect(controllerSource).toContain('能力、信息、物件与证据的触发条件、作用对象、范围、时序、存续及可取得性以【唯一故事基准】为准');
+    expect(controllerSource).toContain('深度档案不得增造原骨架没有的规则、代价或结果');
+    expect(controllerSource).not.toContain('每进门');
+    expect(controllerSource).not.toContain('仅楼内回拨');
+    expect(controllerSource).not.toContain('已确认题材的触发条件、回拨范围、抹除对象');
+  });
+
   it('short-world directive cannot override the confirmed story or silently rewrite a conflict', () => {
     expect(controllerSource).toContain('【已确认世界规则（不得覆盖已确认题材的核心事实）】');
     expect(controllerSource).not.toContain('【已确认世界规则（高于故事卡和章纲措辞）】');
