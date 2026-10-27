@@ -13,9 +13,6 @@ import type { GateFailureReport } from '../modules/writing-quality/gate-failure'
 /** 节点执行类型 */
 export type NodeType = 'prompt';
 
-/** 执行模式 */
-export type ExecutionMode = 'sequential';
-
 /** 链状态 */
 export type ChainState = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'partial';
 
@@ -130,13 +127,10 @@ export interface ChainNode {
   name: string;               // 如 "素材解析"
   type: NodeType;
   chainId: string;            // 所属 Chain ID
-  promptTemplateId?: string;  // 指向模板库的模板 ID
+  promptTemplateId: string;   // 必须来自固定注册模板
   modelConfig: ModelSpec;
   inputMapping: Record<string, string>;   // 变量路径 → 节点输入
-  outputMapping: Record<string, string>;  // 节点输出 → 上下文路径
   timeout: number;            // 超时秒数
-  retryCount: number;         // 兼容旧模板；通用引擎不据此原样重放节点
-  skipOnEmptyInput?: boolean; // 输入为空时是否跳过此节点
   description?: string;
 }
 
@@ -173,23 +167,15 @@ export interface PromptChain {
   description: string;
   nodes: ChainNode[];
   variables: VariableDef[];
-  executionMode: ExecutionMode;
-  config: ChainConfig;
 }
 
-export interface ChainConfig {
-  timeout: number;
-  maxRetries: number;
-  enableLogging: boolean;
-  strictMode: boolean;
-}
 
 // ==================== 执行结果 ====================
 
 export interface NodeResult {
   nodeId: string;
   nodeName: string;
-  status: 'success' | 'failed' | 'skipped' | 'partial';
+  status: 'success' | 'failed';
   output: unknown;
   error?: string;
   /** Prompt 节点对应的 generation_runs.id；非 LLM 节点为空。 */
