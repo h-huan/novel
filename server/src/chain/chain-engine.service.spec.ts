@@ -113,7 +113,8 @@ describe('ChainEngineService', () => {
       skipOnEmptyInput,
       inputMapping: skipOnEmptyInput ? { missing: 'user_input.unset' } : mockNode.inputMapping,
     };
-    const result = await service.execute({ ...testChain, nodes: [obsoleteNode, mockNode] }, { test: 'hello' });
+    // Model unexpected persisted/HTTP data at runtime without reopening retired node types.
+    const result = await service.execute({ ...testChain, nodes: [obsoleteNode as unknown as typeof mockNode, mockNode] }, { test: 'hello' });
     expect(result.status).toBe('failed');
     expect(result.nodeResults).toHaveLength(1);
     expect(result.nodeResults[0].status).toBe('failed');
@@ -170,8 +171,8 @@ describe('ChainEngineService', () => {
       const context = {
         chainId: 'test-chain',
         variables: { user_input: { test: 'hello' }, test: 'hello' },
-        nodeOutputs: {}, retryCounters: {},
-        startTime: new Date(), timestamps: {}, metadata: {},
+        nodeOutputs: {},
+        startTime: new Date(), timestamps: {},
       };
 
       const result = await service.executeNode({ ...mockNode, retryCount: 5 }, context, testChain);
@@ -198,8 +199,8 @@ describe('ChainEngineService', () => {
       const context = {
         chainId: 'test-chain',
         variables: { user_input: { test: 'hello' }, test: 'hello' },
-        nodeOutputs: {}, retryCounters: {},
-        startTime: new Date(), timestamps: {}, metadata: {},
+        nodeOutputs: {},
+        startTime: new Date(), timestamps: {},
       };
 
       const result = await service.executeNode({ ...mockNode, retryCount: 0 }, context, testChain);
