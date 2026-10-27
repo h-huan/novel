@@ -195,6 +195,22 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('foreshadowingGenerationConfirmedEmpty = generatedForeshadowings.length === 0');
   });
 
+  it('does not force invented fixed-role characters or unsupported growth tags into creation', () => {
+    const start = indexOrFail(controllerSource, 'const charPrompt =');
+    const end = controllerSource.indexOf("const charResult = await this.llmCallWithRetry<any[]>('角色生成'", start);
+    expect(end).toBeGreaterThan(start);
+    const prompt = controllerSource.slice(start, end);
+    expect(prompt).toContain('【角色事实台账（字段只能从这些逐字证据归纳）】');
+    expect(prompt).toContain('不为凑固定人数添加女主角、反派、导师或同盟');
+    expect(prompt).toContain('未规划成长变化时 growthTags=[]');
+    expect(prompt).toContain('没有足够依据写[]');
+    expect(prompt).toContain('"growthTags":[],"tags":[]');
+    expect(prompt).not.toContain('需要包含 5 个核心人物');
+    expect(prompt).not.toContain('童年被关地下室导致幽闭恐惧');
+    expect(controllerSource).toContain('const confirmedCharacterNames = [');
+    expect(controllerSource).toContain('normalizeGeneratedCharacters(value)');
+  });
+
   it('does not run a late world-depth mutation after downstream canon exists', () => {
     expect(controllerSource).not.toContain('// 世界观 depth\n    enrichTasks.push');
     expect(controllerSource).toContain('世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔');
