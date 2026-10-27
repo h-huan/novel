@@ -781,7 +781,7 @@ it('chooses two first-round alternates after one shared independent review witho
   budget.remaining--;
   if(mode==='overlap')return {passed:true,issues:[]};
   const issues=current.selected.filter((row:any)=>['A','B','D','E'].includes(row.premiseId))
-   .map((row:any)=>({kind:'selection_fit',premiseId:row.premiseId,referencePremiseId:row.premiseId,
+   .map((row:any)=>({kind:'selection_fit',repairMode:'replace_from_pool',premiseId:row.premiseId,referencePremiseId:row.premiseId,
      quote:row.activeChoice,referenceQuote:initial.pool.find(seed=>seed.premiseId===row.premiseId)!.storyCore,
      reason:'该候选缺少结局必要条件，不能仅凭角色决定宣告胜利'}));
   return {passed:issues.length===0,issues};
@@ -820,7 +820,7 @@ it('accepts only a backup with independent source and overlap approval, in the S
    if(mode==='overlap')return {passed:true,issues:[]};
    const target=selection.selected.filter((row:any)=>row.premiseId!=='B');
    const bad=target.find((row:any)=>row.premiseId==='A'||row.premiseId==='C'||row.premiseId==='D');
-   return bad?{passed:false,issues:[{kind:'selection_fit',premiseId:bad.premiseId,
+   return bad?{passed:false,issues:[{kind:'selection_fit',repairMode:'replace_from_pool',premiseId:bad.premiseId,
      referencePremiseId:bad.premiseId,quote:bad.activeChoice,
      referenceQuote:original.pool.find(row=>row.premiseId===bad.premiseId)!.storyCore,
      reason:'这个候选无法交代结局的实际必要条件'}]}:{passed:true,issues:[]};
@@ -862,7 +862,7 @@ it('falls back to the original two independent source and overlap gates when an 
      throw Error('额外备用的联合来源审核输出容量不足');
    }
    const bad=input.selected.find((row:any)=>row.premiseId==='A'||row.premiseId==='C');
-   return bad?{passed:false,issues:[{kind:'selection_fit',premiseId:bad.premiseId,
+   return bad?{passed:false,issues:[{kind:'selection_fit',repairMode:'replace_from_pool',premiseId:bad.premiseId,
      referencePremiseId:bad.premiseId,quote:bad.activeChoice,
      referenceQuote:original.pool.find(row=>row.premiseId===bad.premiseId)!.storyCore,
      reason:'此候选仍缺少必要的结果成立条件'}]}:{passed:true,issues:[]};
@@ -902,6 +902,7 @@ it('continues beyond one reserve round using untried original identities and one
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(3);expect(shared.reselection.remaining).toBe(1);
  expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selected[1]).toEqual(input.selected[1]);
  const prompts=c.llmCallWithRetry.mock.calls.map((call:any[])=>String(call[1]));
+ expect(prompts[0]).not.toContain('backupReplacements');
  expect(prompts[1]).toContain('此前独立复核已确认的失败路径');
  expect(prompts[1]).toContain('"premiseId":"A"');
  expect(prompts[2]).toContain('"premiseId":"C"');
