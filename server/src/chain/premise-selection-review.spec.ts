@@ -50,6 +50,41 @@ it('keeps the defective source plan and complete independent-review selection wh
   expect(JSON.stringify(prompt).length).toBeLessThan(JSON.stringify(selected).length);
 });
 
+it('allows citation-only correction for an evidenced selection-fit slot without regenerating its story', () => {
+  const plan=(id:string)=>[{action:{field:'activeChoice',quote:premise(id).activeChoice},
+    conditions:[{field:'escalation',quote:premise(id).escalation}],
+    result:{field:'payoff',quote:premise(id).payoff}}];
+  const source=normalizePremiseSelectionPayload({
+    pool:['A','B','C'].map(premise),
+    selectedPremises:['A','B'].map(id=>({...premise(id),causalPlan:plan(id)})),
+  },2,3);
+  const issue={kind:'selection_fit' as const,premiseId:'B',referencePremiseId:'B',
+    quote:premise('B').payoff,referenceQuote:premise('B').storyCore,
+    reason:'此前引用计划越过了已写出的必要核验与决定环节'};
+  const improved=[{action:{field:'activeChoice',quote:premise('B').activeChoice},
+    conditions:[],result:{field:'escalation',quote:premise('B').escalation}},
+    {action:{field:'reversalEffect',quote:premise('B').reversalEffect},
+      conditions:[{field:'escalation',quote:premise('B').escalation}],
+      result:{field:'payoff',quote:premise('B').payoff}}];
+  const repaired=normalizeTargetedPremiseReselection({replacements:[
+    {replacesPremiseId:'B',premise:{premiseId:'B',causalPlan:improved}},
+  ]},source,{passed:false,issues:[issue]},2,3);
+  expect(repaired.selected[0]).toEqual(source.selected[0]);
+  expect(repaired.selected[1]).toEqual({...source.selected[1],causalPlan:improved});
+  expect(source.selected[1].causalPlan).toEqual(plan('B'));
+  expect(()=>normalizeTargetedPremiseReselection({replacements:[
+    {replacesPremiseId:'B',premise:{premiseId:'B',causalPlan:improved}},
+  ]},source,{passed:false,issues:[{...issue,repairMode:'replace_from_pool'}]},2,3)).toThrow('必须从原池换选');
+  expect(()=>normalizeTargetedPremiseReselection({replacements:[
+    {replacesPremiseId:'B',premise:{premiseId:'B',causalPlan:improved}},
+  ]},source,{passed:false,issues:[{...issue,kind:'source_drift',field:'payoff'}]},2,3)).toThrow();
+  const fabricated=[...improved,{action:{field:'activeChoice',quote:'没有发生的动作'},
+    conditions:[],result:{field:'payoff',quote:premise('B').payoff}}];
+  expect(()=>normalizeTargetedPremiseReselection({replacements:[
+    {replacesPremiseId:'B',premise:{premiseId:'B',causalPlan:fabricated}},
+  ]},source,{passed:false,issues:[issue]},2,3)).toThrow('因果计划');
+});
+
 const compare = (referencePremiseId: string) => ({ referencePremiseId,
   actionDifference: '候选主动改变任务路线，保留项通过固定岗位履职推进',
   escalationDifference: '候选每次行动损失已有资源，保留项面临对手逐步升级限制',

@@ -175,6 +175,18 @@ export function normalizeTargetedPremiseReselection(value: unknown, original: Pr
     if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('定向重选必须提供完整premise筛选证据');
     if (slot.mode === 'replace_from_pool' && row.premiseId === slotId) throw new Error('已证实同构或原池缺少兑现条件的题材必须从原池换选，不能保留原身份补造条件或只换表述');
     if (!plan.availableCandidates.some(item => item.premiseId === row.premiseId)) throw new Error('定向重选须选择可用原池身份，不能复制正常项、已淘汰同构项或补生题材');
+    // An independently evidenced citation-only defect must not regenerate ten
+    // already-expanded story fields. Only selection-fit (not source-drift or
+    // overlap) may preserve the original identity with a plan-only payload.
+    // The plan is still anchored and independently reviewed after normalization.
+    const planOnly = row.premiseId === slotId && slot.mode === 'correct_or_replace_from_pool'
+      && slot.issues.length > 0 && slot.issues.every(issue => issue.kind === 'selection_fit')
+      && Object.keys(row).every(key => key === 'premiseId' || key === 'causalPlan')
+      && Array.isArray(row.causalPlan);
+    if (planOnly) {
+      bySlot.set(slotId, { ...slot.original, causalPlan: row.causalPlan });
+      continue;
+    }
     bySlot.set(slotId, row);
   }
   const selectedPremises = original.selected.map(item => bySlot.get(String(item.premiseId)) || item);
