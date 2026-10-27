@@ -831,11 +831,14 @@ function detailedIdeaMarkdown() {
         + '；逻辑调用=' + (trace.totals?.logicalCalls ?? '未知')
         + '；物理尝试估算=' + (trace.totals?.physicalAttempts ?? '未知')
         + '；Token=' + (trace.totals?.totalTokens ?? '未知')
+        + '；输入=' + (trace.stepBreakdown?.reduce((n,row)=>n+(row.promptTokens??0),0) ?? '未知')
+        + '；完成输出(含推理)=' + (trace.stepBreakdown?.reduce((n,row)=>n+(row.completionTokens??0),0) ?? '未知')
         + '；内部重试=' + (trace.totals?.internalRetries ?? '未知')
         + '；只按请求 ID 关联，不代表该请求已结束',
       ...(trace.stepBreakdown || []).map(step =>
         '- ' + step.stepKey + '：调用 ' + step.calls + '，累计 ' + step.sumDurationMs
-        + ' ms，Token ' + (step.totalTokens ?? '未知')),
+        + ' ms，Token ' + (step.totalTokens ?? '未知')
+        + '（输入 ' + (step.promptTokens ?? '未知') + '，完成输出(含推理) ' + (step.completionTokens ?? '未知') + '）'),
     ]),
     '',    '- 本地验证运行 ID：' + verificationRunId,
     '- 灵感请求 ID：' + (audit.discoveryRequestId ?? '未知'),
