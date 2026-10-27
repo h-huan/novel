@@ -9079,10 +9079,20 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
                   this.logger.log(`world_system_profiles 已创建 (sequential path, pid=${pid})`);
                 }
               } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败(sequential): ${e.message}`); }
-            } catch (e: any) { taskWarnings.push(`世界观写入失败: ${e.message}`); emit('world', 75, '世界观写入失败', 'failed'); }
+            } catch (e: any) {
+              taskWarnings.push(`世界观写入失败: ${e.message}`);
+              emit('world', 75, '世界观写入失败', 'failed');
+              throw new Error(taskWarnings.join('；'));
+            }
           } else {
             taskWarnings.push('世界观生成失败');
             emit('world', 75, '世界观生成失败', 'failed');
+            throw new Error(taskWarnings.join('；'));
+          }
+          // A successful model response alone does not prove that the world
+          // record is present. Downstream organization/outline work reads DB.
+          if (!db.prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId)) {
+            throw new Error('世界观生成结束但主记录未落库，停止依赖其事实的后续任务');
           }
           return { step: 'world', warnings: taskWarnings };
         });
@@ -9096,7 +9106,10 @@ JSON格式：[{"name":"姓名","role":"主角|女主角|重要配角|主要反�
           }
           let canonicalLocationNames: string[] = [];
           try {
-            const parsed = Array.isArray(worldRow?.locations) ? worldRow.locations : JSON.parse(String(worldRow?.locations || '[]'));
+            // Read after the world task has persisted its record. The outer
+            // worldRow snapshot was taken before this sequential generation.
+            const latestWorld = db.prepare('SELECT locations FROM world_settings WHERE project_id=? ORDER BY created_at DESC LIMIT 1').get(projectId) as any;
+            const parsed = Array.isArray(latestWorld?.locations) ? latestWorld.locations : JSON.parse(String(latestWorld?.locations || '[]'));
             canonicalLocationNames = (Array.isArray(parsed) ? parsed : [])
               .map((item: any) => String(item?.name || item || '').trim()).filter(Boolean);
           } catch {}
@@ -9328,6 +9341,9 @@ ${STORY_ENTITY_MODELING_POLICY}
             results.push({ status: 'fulfilled', value: await runTask() });
           } catch (reason) {
             results.push({ status: 'rejected', reason });
+            // Remaining tasks depend on earlier persisted facts. Continuing
+            // after a hard upstream failure spends calls on invalid context.
+            break;
           }
         }
         const rejectedReasons: string[] = [];
