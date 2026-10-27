@@ -305,7 +305,7 @@ it('generates a complete idea batch through preselection plus structuring and re
   });
   expect(duplicate).toEqual(first);
   expect(distinctResult.appealGate).toMatchObject({ premisePoolSize: 5, premisePoolTarget: 15, premiseSelected: 5, generated: 5, returned: 5 });
-  // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、一次标题与阅读目标独立审查。
+  // 同配置并发请求仅共享一条生成链；五张卡的独立语义复核按原有批大小并发，仍以其它卡为对照。
   expect(distinctResult, 'a request with different excludeDetails must not reuse the first result')
     .toMatchObject({ success: true, totalIdeas: 5 });
   expect(partialResult, 'short pool plus one failed card must still return only the three fully qualified cards')
@@ -324,14 +324,14 @@ it('generates a complete idea batch through preselection plus structuring and re
   expect(partialResult.appealGate.structuringErrors).toEqual([
     expect.objectContaining({ sourcePremiseId: 'P2', error: expect.stringContaining('测试夹具模拟第2张完整卡结构化失败') }),
   ]);
-  expect(realLLM.generate).toHaveBeenCalledTimes(33);
+  expect(realLLM.generate).toHaveBeenCalledTimes(37);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
     ...Array(7).fill('idea_premise_pool_generation'),
     ...Array(3).fill('idea_premise_selection'),
     ...Array(3).fill('idea_premise_source_drift_review'),
     ...Array(3).fill('idea_premise_overlap_review'),
     ...Array(14).fill('idea_card_structure'),
-    ...Array(3).fill('idea_presentation_review'),
+    ...Array(7).fill('idea_presentation_review'),
   ].sort());
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
