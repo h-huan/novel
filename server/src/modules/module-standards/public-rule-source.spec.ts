@@ -116,6 +116,9 @@ describe('public rule governance', () => {
       /buildNarrativeQualityContract/,
       /buildAlignmentRepairPrompt/,
       /node_9_chapter_synthesis/,
+      /node_0_context_assembly/,
+      /_branch_jump/,
+
       /chapterSynthesisMaxTokens/,
       /请将以下8步草稿扩写并重写/,
       /天龙8步已于.*取消，短篇与长篇正文统一由/,
