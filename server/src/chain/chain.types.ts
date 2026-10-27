@@ -62,7 +62,7 @@ export interface LLMRequest {
   temperature?: number;
   maxTokens?: number;
   timeout?: number;
-  /** 写作场景，用于模型路由选择（如 idea_generation, body_writing 等） */
+  /** 场景先经 scenario-taxonomy 归一：如 idea_generate、outline、writing、review；不得使用旧别名自建一套路由。 */
   scenario?: string;
   /** 章节功能，用于动态路由（如 exposition, climax 等） */
   chapterFunction?: string;
