@@ -284,7 +284,8 @@ describe('semantic review batching honors the original physical-call ceiling',()
   expect(shouldBatchIdeaPresentation(5,0,2,2)).toBe(false);
   expect(shouldBatchIdeaPresentation(5,0,2,3)).toBe(true);
   expect(shouldBatchIdeaPresentation(5,0,2,1)).toBe(false);
-  expect(shouldBatchIdeaPresentation(4,0,2,12)).toBe(false);
+  expect(shouldBatchIdeaPresentation(4,0,2,12)).toBe(true);
+  expect(shouldBatchIdeaPresentation(4,0,2,1)).toBe(false);
   expect(shouldBatchIdeaPresentation(5,1,2,12)).toBe(false);
  });
  it('falls back to one full independent semantic review with one available call',async()=>{

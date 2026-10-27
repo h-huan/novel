@@ -17,8 +17,8 @@ function presentationFixture(error?: Error, budget = { remaining: 6 }) {
   const c = Object.create(ChainController.prototype) as any;
   c.logger = { warn: vi.fn() };
   const original = c.reviewIdeaPresentation, leaves: any[] = [];
-  c.reviewIdeaPresentation = vi.fn(async (items: any[], refs: any[], note: string, allowance: any, aggregateAttempt = false) => {
-    if (!aggregateAttempt) return original.call(c, items, refs, note, allowance);
+  c.reviewIdeaPresentation = vi.fn(async (items: any[], refs: any[], note: string, allowance: any, aggregateAttempt = false, preferBoundedBatches = false) => {
+    if (!aggregateAttempt) return original.call(c, items, refs, note, allowance, aggregateAttempt, preferBoundedBatches);
     allowance.remaining--; leaves.push({ items, refs });
     if (error && items.length === 5) throw error;
     return items.map((item, index) => ({ position: index + 1, title: item.title, platformFit: false,
