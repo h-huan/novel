@@ -1023,10 +1023,10 @@ const DiscoveryWizardPage: React.FC = () => {
     try {
       const result=await api.post<{cancelled:boolean;message:string}>(
         '/chain/cancel-idea-discovery/'+encodeURIComponent(id),{},30_000);
-      if(result.cancelled){
+      if(result.data?.cancelled){
         cancelledIdeaDiscoveryIdRef.current=id;
         store.setGenProgress('已发出取消指令，正在停止当前模型调用；不会把未通过质量门的结果当作完成。');
-      }else store.setGenProgress(result.message||'当前请求已结束，无法取消。');
+      }else store.setGenProgress(result.data?.message||'当前请求已结束，无法取消。');
     }catch(error:any){store.setGenProgress('取消失败：'+String(error?.message||error));}
     finally{setCancellingIdeaDiscovery(false);}
   };
