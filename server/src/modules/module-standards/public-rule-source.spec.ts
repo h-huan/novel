@@ -49,6 +49,29 @@ describe('public rule governance', () => {
     expect(activeSystemWorkflowRules().every(rule=>rule.id&&rule.summary)).toBe(true);
   });
 
+  it('requires read-first source cleanup and same-change documentation synchronization without parallel standards', () => {
+    const gov = SYSTEM_WORKFLOW_RULES.find(rule => rule.id === 'GOV-004')!;
+    const policy = gov.details!.join(' ');
+    expect(policy).toContain('先读取当前分支README.md、DEVELOPMENT_GOVERNANCE.md');
+    expect(policy).toContain('删除旧入口、旧分支、重复上下文和过时测试');
+    expect(policy).toContain('同步更新唯一执行标准');
+    expect(policy).toContain('真实token、耗时与质量需同版本本地运行证实');
+    expect(gov.consumers).not.toContain('prompt');
+
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    const maintenance = readFileSync(join(repoRoot, 'DEVELOPMENT_GOVERNANCE.md'), 'utf8');
+    const api = readFileSync(join(process.cwd(), 'docs/API.md'), 'utf8');
+    expect(readme).toContain('[开发治理规范](DEVELOPMENT_GOVERNANCE.md)');
+    expect(readme).toContain('同一轮变更');
+    expect(maintenance).toContain('每轮接续先读权威，改完同步维护');
+    expect(maintenance).toContain('旧入口、旧提示词');
+    expect(api).toContain('同批原池');
+    expect(api).toContain('短篇先审核并保存世界观');
+    expect(api).not.toContain('缺项时最多使用同一模型补齐一次');
+    expect(api).not.toContain('QUALITY_EXECUTION.md` 为唯一规范');
+    expect(api).not.toContain('代码 + `QUALITY_EXECUTION.md` + 测试');
+  });
+
   it('every active rule has implementation ownership and P0/P1 rules have non-UI execution/governance consumers', () => {
     const failures = activeSystemWorkflowRules().flatMap((rule) => {
       const problems: string[] = [];
