@@ -154,3 +154,23 @@ test('live idea evidence is kept separate from the last completed request and do
  assert.equal(summarizeIdeaActivityEvidence({source:{ok:false},runs:activity.runs}).status,'unavailable');
  assert.equal(summarizeIdeaActivityEvidence({source:{ok:true},runs:activity.runs.slice(1)}).status,'cancelled_calls_visible');
 });
+
+test('attributes running calls to persisted request IDs while marking mixed legacy records',()=>{
+ const start='2026-10-27T00:02:00Z';
+ const rows=[
+  {id:'a',discovery_request_id:'request-a',scenario:'idea_generate',status:'running',started_at:start},
+  {id:'b',discovery_request_id:'request-b',scenario:'idea_generate',status:'cancelled',started_at:start,finished_at:'2026-10-27T00:05:00Z'},
+ ];
+ const current=summarizeRecentIdeaActivity(rows,'2026-10-26T23:30:00Z','2026-10-27T00:00:00Z','2026-10-27T00:10:00Z');
+ assert.equal(current.association,'exact_discovery_request_id_per_model_run');
+ assert.deepEqual(current.runs.map(x=>x.discoveryRequestId),['request-a','request-b']);
+ const evidence=summarizeIdeaActivityEvidence({source:{ok:true},...current});
+ assert.deepEqual(evidence.records.map(x=>x.discoveryRequestId),['request-a','request-b']);
+ assert.equal(evidence.running,1);
+ assert.equal(evidence.cancelled,1);
+ assert.equal(Object.hasOwn(evidence,'qualified'),false);
+ const mixed=summarizeRecentIdeaActivity([...rows,{id:'legacy',scenario:'idea_generate',status:'success',started_at:start}],
+  '2026-10-26T23:30:00Z','2026-10-27T00:00:00Z','2026-10-27T00:10:00Z');
+ assert.equal(mixed.association,'mixed_exact_request_id_and_time_only');
+ assert.equal(mixed.runs.find(x=>x.runId==='legacy').discoveryRequestId,null);
+});
