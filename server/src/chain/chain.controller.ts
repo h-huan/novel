@@ -5254,8 +5254,11 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             // independent overlap review and reselection.
             const nearDuplicate = candidatePool.some(existing =>
               ideaSemanticSimilarity(
-                { title: workingTitle, description: storyCore },
-                { title: String(existing.workingTitle || ''), description: String(existing.storyCore || '') },
+                // The exact title key is already checked below. Comparing
+                // generic provisional titles here incorrectly eliminates
+                // distinct causal paths ("候选题材1", "候选题材2", etc.).
+                { description: storyCore },
+                { description: String(existing.storyCore || '') },
               ) >= 0.42);
             if (seenTitles.has(titleKey) || seenCores.has(coreKey) || nearDuplicate) {
               stats.duplicateCount += 1;
