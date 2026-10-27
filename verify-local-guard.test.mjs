@@ -36,8 +36,14 @@ function run(report) {
   assert.equal(fs.existsSync(path.join(root,'restart.ps1')),false);
   assert.equal(fs.existsSync(path.join(root,'desktop','scripts','dev.js')),false);
   assert.equal(scripts.dev,'vite --host 0.0.0.0');
-  assert.match(vite,/onstart: \(\) => \{\}/u);
-  assert.doesNotMatch(vite,/startElectronHidden|stopElectronChild|taskkill\.exe/u);
+  // The normal desktop dev command MUST display Electron, not just Vite's browser page.
+  // Vite may launch/rebuild the Electron UI; it must never start a NestJS backend.
+  assert.match(vite,/onstart: \(\) => startElectronHidden\(\)/u);
+  assert.match(vite,/function startElectronHidden\(\): void/u);
+  assert.match(vite,/spawn\(electronExecutable, \['\.', '--no-sandbox'\]/u);
+  assert.match(vite,/windowsHide: true/u);
+  assert.doesNotMatch(vite,/restart\.ps1|scripts\/dev\.js|server\/dist\/src\/main\.js|npm run start:dev/u);
+  assert.doesNotMatch(scripts.dev,/scripts\/dev\.js|restart\.ps1/u);
   assert.match(main,/async function checkServerConnection/u);
   assert.doesNotMatch(main,/startManagedServer|managedServerProcess|NOVEL_MANAGED_SERVER|spawn\(/u);
   assert.match(main,/ipcMain\.handle\('start-server'/u);
