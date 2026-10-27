@@ -86,18 +86,20 @@ export class GenerationMetricsController {
 
 
   @Get('idea-activity')
-  ideaActivity(@Query('startAt') startAt?: string) {
+  ideaActivity(@Query('startAt') startAt?: string, @Query('discoveryRequestId') discoveryRequestId?: string) {
     const timestamp = startAt ? Date.parse(startAt) : null;
     if (startAt && !Number.isFinite(timestamp)) throw new BadRequestException('startAt must be a valid timestamp');
     // Deliberately exclude raw prompts, outputs and context snapshots. A model
     // run exists before any finished step metrics or final discovery audit.
     const rows = this.databaseService.getDb().prepare(
-      "SELECT id,stage,scenario,status,started_at,finished_at,duration_ms,model,error " +
+      "SELECT id,discovery_request_id,stage,scenario,status,started_at,finished_at,duration_ms,model,error " +
       "FROM generation_runs WHERE scenario='idea_generate' " +
+      "AND (? IS NULL OR discovery_request_id=?) " +
       "AND (? IS NULL OR julianday(started_at)>=julianday(?) " +
       "OR julianday(finished_at)>julianday(?) OR status='running') " +
       "ORDER BY started_at DESC LIMIT 200"
-    ).all(startAt ? new Date(timestamp!).toISOString() : null,
+    ).all(discoveryRequestId ?? null, discoveryRequestId ?? null,
+      startAt ? new Date(timestamp!).toISOString() : null,
       startAt ? new Date(timestamp!).toISOString() : null,
       startAt ? new Date(timestamp!).toISOString() : null) as Array<Record<string,unknown>>;
     return {items: rows.map(row=>({...row,
