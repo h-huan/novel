@@ -52,15 +52,15 @@ function run(report) {
   assert.doesNotMatch(main,/ensureServerRunning/u);
   const guide = fs.readFileSync(path.join(root,'server','docs','user-guide.md'),'utf8');
   const governance = fs.readFileSync(path.join(root,'DEVELOPMENT_GOVERNANCE.md'),'utf8');
-  assert.doesNotMatch(guide,/restart\\.ps1|scripts\\/dev\\.js/u);
-  assert.match(guide,/npm run dev/u);
-  assert.match(guide,/Electron 窗口/u);
-  assert.match(guide,/server\\/shared\\/src\\/执行标准\\.ts/u);
-  assert.match(governance,/server\\/shared\\/src\\/执行标准\\.ts/u);
-  assert.match(main,/new BrowserWindow\\(/u);
-  assert.match(main,/launcherWindow\\.loadURL\\(VITE_DEV_SERVER_URL \+ 'launcher\\.html'\\)/u);
-  assert.match(main,/createWindow\\(\\);/u);
-  assert.doesNotMatch(vite,/onstart:\\s*\\(\\)\\s*=>\\s*\\{\\s*\\}/u);
+  assert.ok(!guide.includes('restart.ps1') && !guide.includes('scripts/dev.js'));
+  assert.ok(guide.includes('npm run dev'));
+  assert.ok(guide.includes('Electron 窗口'));
+  assert.ok(guide.includes('server/shared/src/执行标准.ts'));
+  assert.ok(governance.includes('server/shared/src/执行标准.ts'));
+  assert.ok(main.includes('new BrowserWindow('));
+  assert.ok(main.includes("launcherWindow.loadURL(VITE_DEV_SERVER_URL + 'launcher.html')"));
+  assert.ok(main.includes('createWindow();'));
+  assert.ok(!vite.includes('onstart: () => {}'));
 }
 
 // Direct server launchers are also first-class paths. A port occupied by a
