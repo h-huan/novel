@@ -72,6 +72,21 @@ export function affordableIdeaReplacementCount(missing:number,pool:number,calls:
  return 0;
 }
 
+/** Hold the existing two independent review modes (changed-source and overlap)
+ * for one final-card replacement batch. These are NOT extra credits: the
+ * preselection and card fulfillment phases share exactly the saved ceiling.
+ * Leave enough for the initial independent preselection source + overlap Gate.
+ * For configured grouped sources, reserve each required source batch. */
+export function reservePostCardSourceReviewCredits(
+  total: number, requested: number, groupingMode: number, sourceBatchSize: number,
+): number {
+  if (!Number.isInteger(total) || total < 0 || requested <= 0) return 0;
+  const sourceBatches = groupingMode === 0 ? 1 :
+    Math.ceil(Math.min(requested, 2) / Math.max(1, sourceBatchSize));
+  const needed = sourceBatches + 1;
+  return total >= needed * 2 ? needed : 0;
+}
+
 /** Completion is governed by remaining work and shared allowances, not rounds.
  * The caller owns all model calls and immutable accepted cards. */
 export async function fulfillDiscoveryGaps(options:{
