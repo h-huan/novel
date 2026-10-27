@@ -6584,7 +6584,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       }
       const before=selected;
       const completed=await reselectScope(slots,unusedIds);
-      const backup=slots.length===1?pendingBackup.current:null;pendingBackup.current=null;
+      const backup=slots.length===1?readPendingBackup():null;pendingBackup.current=null;
       const primary=selected;
       // The two alternative identities never co-exist in a delivered set.
       // Both are nevertheless compared independently against ALL retained
