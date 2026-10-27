@@ -11,10 +11,10 @@ import type { GateFailureReport } from '../modules/writing-quality/gate-failure'
 // ==================== 基础类型 ====================
 
 /** 节点执行类型 */
-export type NodeType = 'prompt' | 'condition' | 'parallel' | 'loop' | 'transform';
+export type NodeType = 'prompt';
 
 /** 执行模式 */
-export type ExecutionMode = 'sequential' | 'condition_branch' | 'parallel' | 'loop' | 'hybrid';
+export type ExecutionMode = 'sequential';
 
 /** 链状态 */
 export type ChainState = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'partial';
@@ -124,13 +124,6 @@ export interface LLMResponse {
 
 // ==================== Chain Node ====================
 
-/** 条件分支 */
-export interface Branch {
-  condition: string;          // 条件表达式
-  targetNodeId: string;       // 条件满足时跳转的节点 ID
-  description?: string;
-}
-
 /** Chain 节点 */
 export interface ChainNode {
   id: string;                 // 如 "node_1_material_parse"
@@ -141,8 +134,6 @@ export interface ChainNode {
   modelConfig: ModelSpec;
   inputMapping: Record<string, string>;   // 变量路径 → 节点输入
   outputMapping: Record<string, string>;  // 节点输出 → 上下文路径
-  branches?: Branch[];
-  nextOnSuccess?: string[];   // 成功后的下一个节点 ID，默认按序
   timeout: number;            // 超时秒数
   retryCount: number;         // 兼容旧模板；通用引擎不据此原样重放节点
   skipOnEmptyInput?: boolean; // 输入为空时是否跳过此节点
@@ -167,10 +158,8 @@ export interface ExecutionContext {
   chainId: string;
   variables: Record<string, unknown>;
   nodeOutputs: Record<string, unknown>;
-  retryCounters: Record<string, number>;
   startTime: Date;
   timestamps: Record<string, Date>;
-  metadata: Record<string, unknown>;
   /** 所属小说项目：项目内场景埋点/宪法注入的归属；平台级链路（灵感发现/定时任务）为 undefined */
   projectId?: string;
 }
