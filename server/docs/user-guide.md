@@ -4,26 +4,23 @@
 
 ## 启动
 
-从仓库根目录运行：
-
-```powershell
-.\restart.ps1
-```
-
-或分别启动：
+从仓库根目录分别打开两个终端。后端独立启动：
 
 ```powershell
 cd server
-npm install
-npm run build
-npm run start:prod
+npm ci
+npm run start:dev
+```
 
-cd ..\desktop
-npm install
+桌面端独立启动：
+
+```powershell
+cd desktop
+npm ci
 npm run dev
 ```
 
-后端默认地址：`http://127.0.0.1:3100`。
+桌面端命令启动 Vite 与 Electron 窗口，**不会自动拉起或重启后端**；后端需要在自己的终端单独启动。后端默认地址：`http://127.0.0.1:3100`。
 
 ## 主要入口
 
@@ -41,7 +38,7 @@ npm run dev
 
 ## 执行标准
 
-项目唯一规范文件是仓库根目录 `QUALITY_EXECUTION.md`。本指南不重复篇幅、平台阈值、质量 Gate、AI 痕迹或修复规则；这些规则发生变化时只修改唯一规范及其对应代码实现。
+小说业务与质量规则的唯一来源是 `server/shared/src/执行标准.ts`；`QUALITY_EXECUTION.md` 仅保留旧链接兼容，不维护独立规则。本指南不重复篇幅、平台阈值、质量 Gate、AI 痕迹或修复规则。
 
 ## 本地验收
 
