@@ -7995,7 +7995,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         confirmedStory: worldAuthority.confirmedStory,
         storyFoundation,
       });
-      let completeOutlineFactsReviewed = false;
       // ====== 步骤1：生成大纲 ======
       // 新流程先生成世界观，再用世界观作为大纲、角色与后续资料的上下文。 
       emit('world', 10, '先生成支撑题材骨架的世界规则，再生成角色与详细章纲...');
@@ -8030,8 +8029,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 【唯一故事基准】${canonicalCreativeBrief}
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
 保留基准的时代、类型、地点、冲突、主角和结局方向；禁止把现实题材改成末世/修仙/科幻/超能力/架空制度。
-超自然能力的触发条件、影响范围与证据存续一律以【唯一故事基准】为准。这里曾另写“现实物证不能消失”，后果是题材卡若明确写户口本/照片被抹除，世界观会擅自保留它们，章纲再依赖这些不应存在的物证。不能把原题材的「每进门」改成「完整进出」，也不能把「现实回拨」改成「仅楼内回拨」。若剧情需要证据，必须先在题材已保留的证据范围内设计调查链；不得创造与题材互斥的保底档案。
-感知到的信息可以被角色记住、转述并作为调查方向，除非唯一故事基准明确禁止；但角色的转述不能复现原始声音、不能单独作为法定证据。不得擅自新增“离开现场后无法记忆或无法转述”之类会切断既定调查链的限制。
+能力、信息、物件与证据的触发条件、作用对象、范围、时序、存续及可取得性以【唯一故事基准】为准；不得新增与已确认事实互斥的限制、万能证据或调查渠道。口述、记忆与原始记录应按本故事已确认的能力和证据边界区别处理。
 ${protagonistName ? `【必须保留的主角（不得改名、不得换成别人）】${protagonistName}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
 
 按已注入AUTH-002世界资料补全边界执行。
@@ -8527,8 +8525,6 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           const remainingChapterCount = chapterTitles.length - chapterIndex - 1;
           const isFinalChapter = remainingChapterCount === 0;
           const currentBeat = chapterResponsibilityPlan[chapterIndex];
-          const completedTaskBoundary = chapterResponsibilityPlan.slice(0, chapterIndex)
-            .map(item => ({ chapter: item.chapter, title: item.title, completed: item.responsibility }));
           const nextTaskBoundary = chapterResponsibilityPlan[chapterIndex + 1]
             ? { chapter: chapterResponsibilityPlan[chapterIndex + 1].chapter, title: chapterResponsibilityPlan[chapterIndex + 1].title, reserved: chapterResponsibilityPlan[chapterIndex + 1].responsibility }
             : null;
@@ -8545,14 +8541,13 @@ ${buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, 
 【本章节】
 第${order + 1}章"${expectedChapter.title}"（功能:${expectedChapter.func}）
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
-【已经完成、禁止重演的章节任务】${JSON.stringify(completedTaskBoundary)}
 【下一章保留任务、本章禁止提前执行】${JSON.stringify(nextTaskBoundary)}
           【全书章节分工与动态节拍】${JSON.stringify(chapterResponsibilityPlan)}
 当前章叙事节拍：${JSON.stringify(currentBeat?.beatLabel || '')}。节拍来自章节职责，不按固定章数强制爽点；本章只需完成与职责相符的推进价值。
 【正文展开尺度与场景边界】${CHAPTER_PROSE_SCOPE_POLICY}
 本章只能完成自己的推进任务；不得提前执行后续章节的推进任务或结局（章职能边界，判据 CR-3）。收尾按已注入章纲标准与当前章节职责执行。
 设定:${ideaSpan}
-【核心层级纪律（最高优先级）】${STORY_FACT_PRIORITY}。本章大纲必须继承已确认题材与已锁定事实；已保存世界观仅能补充不冲突的细节，不得把世界观后来增写的触发条件、时间范围或证据存续盖过题材卡。这里曾有第二份「世界观 > 大纲 > 正文」层级，后果是确认题材被世界观新规则覆盖，再被大纲和正文重复执行。
+【核心层级纪律（最高优先级）】${STORY_FACT_PRIORITY}。本章大纲必须继承已确认题材与已锁定事实；已保存世界观仅能补充不冲突的细节，不得把世界观后来增写的触发条件、时间范围或证据存续盖过题材卡。
             【硬性连续性】人物姓名保持一致；亲属关系、责任归属、既定事件真相和结局须在事实与因果上遵守确认题材，允许不改变事实的表达差异；不得无因新增伤病、物证、神秘气味、秘密关系或新事件。已经在前文完成的推进任务不得换一种说法再次发生（判据 CR-4）。人物改变立场、回头相助或突然交出关键材料，必须写明前文已有动机及本章可见触发。新增细节必须在本章产生作用，或明确写入foreshadowing并在后续既定事件中有回收位置。
             【制度与权限程序】${chapterResponsibilityCriteriaText(['CR-6', 'CR-7'])}
 【人物智力底线】关键反派不得因一句普通试探、随口提问或无压力闲聊，直接泄露只有责任人/知情人掌握的事实。秘密暴露必须来自可验证的外部证据、连续诱导形成的认知误判、有明确利益诱因的主动谎言，或高压下与既有说法发生的细小矛盾；content、scenes、characterActions、conflicts 和 highlights 必须写清触发与暴露程度，不能靠“脱口而出”完成关键揭示。
@@ -8612,9 +8607,8 @@ ${(() => {
             throw new Error(`第${order + 1}章详细大纲多次修复仍未能通过完整性校验（${chapterIssues.join('；') || '解析为非法JSON'}），未写入任何大纲。请稍后单独重生成该章或检查 LLM 返回。`);
           }
 
-          // 这里曾只检查单章 JSON 结构，等两章都生成后才查时间与名单算式；
-          // 第一章的「回拨一小时」对「手机快一小时」因此带进第二章，最后整套资料回滚。
-          // 在每章接力点按同一事实台账核查，修的是当前章，不改已确认题材或前章。
+          // 在每章接力点审查时间与累计事实，阻止错误进入后续章节。
+              // 在每章接力点按同一事实台账核查，修的是当前章，不改已确认题材或前章。
           const reviewChapterFacts = (candidate: Record<string, any>) => this.reviewOutlineFacts(
             projectId, '第' + (order + 1) + '章生成前事实台账', canonicalCreativeBrief,
             currentWorldForOutlineReview, priorOutlineFactLedger,
@@ -8806,7 +8800,6 @@ ${(() => {
             }
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
           });
-        completeOutlineFactsReviewed = true;
 
         for (const runId of shortOutlineSourceRunIds) {
           this.generatedCanonGuard.assertStructuredCanCommit({
@@ -8852,11 +8845,6 @@ ${(() => {
         this.logger.warn(`仍有少量章节细纲偏短：应生成 ${chapterTitles.length} 章，${detailedOutlineCount} 章达到详细标准，${chapterTitles.length - detailedOutlineCount} 章偏短（已达 90% 合格线，继续创建）`);
       }
 
-      if (outlineWriteCount > 0) {
-        // 此前只有激活前的跨模块审查，章纲中的名单基线错误会先传给角色与伏笔，
-        // 后果是多个模块复述同一矛盾；这里提前执行同一执行标准中的事实台账门禁。
-        if (!completeOutlineFactsReviewed) await this.assertOutlineFactLedger(projectId, canonicalCreativeBrief, executionStandardForReview);
-      }
 
       // ====== 步骤2-5：按需补充角色/世界观/组织/伏笔 ======
       // 检查 DB，缺什么补什么，保证前端根节点都有真实数据。 
@@ -9799,7 +9787,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       `核对生成资料是否严格属于同一个已确认故事。只判断事实一致性，不评价文风，不允许因为字段丰富就判定通过。${SOURCE_QUALITY_POLICY}\n${executionStandardForReview}
 【唯一故事基准】${canonicalCreativeBrief}
 【生成资料】${generatedBundleText}
-重点检查：${STORY_FACT_PRIORITY}。逐项核对已确认题材的触发条件、回拨范围、抹除对象和证据存续有没有被世界观主记录、深度档案或章纲擅自改变；深度档案不能新添骨架没有的代价或规则。继续检查时代、角色身份、地点、数量基线、时间线、各章因果、伏笔证据。任何下层改写上层事实或资料源互斥，必须 consistent=false 并指出字段与原文。
+重点检查：${STORY_FACT_PRIORITY}。逐项核对已确认题材的触发条件、影响对象、权限及能力边界、状态和证据存续是否被世界观主记录、深度档案或章纲改变；深度档案不得增造原骨架没有的规则、代价或结果。继续检查时代、角色身份、地点、数量基线、时间线、各章因果、伏笔证据。任何下层改写上层事实或资料源互斥，必须 consistent=false 并指出字段与原文。
 ${crossStageReviewDirective()}${crossStagePromiseDirective(canonicalCreativeBrief,generatedBundleText)}`,
       {
         temperature: 0.1,
