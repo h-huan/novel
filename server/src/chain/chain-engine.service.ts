@@ -24,7 +24,6 @@ import {
   NodeResult,
   ChainError,
   ChainState,
-  NodeType,
 } from './chain.types';
 
 /** 节点执行上下文（运行时） */
@@ -82,13 +81,6 @@ export class ChainEngineService {
         // 进度回调：节点开始
         onProgress?.(i, node.id, 'started');
 
-        // 检查分支跳转标记
-        if (context.metadata['_branch_jump'] && context.metadata['_branch_jump'] !== node.id) {
-          continue;
-        }
-        // 清除跳转标记
-        delete context.metadata['_branch_jump'];
-
         const nodeResult = await this.executeNode(node, context, chain);
         nodeResults.push(nodeResult);
 
@@ -116,22 +108,13 @@ export class ChainEngineService {
           // Quality-rejected dependencies are unusable even in a chain that
           // permits ordinary optional-node failures. Preserve the upstream
           // report and stop before downstream generation invents a substitute.
-          if (chain.config.strictMode || nodeResult.gateReport) {
+          if (chain.config.strictMode || nodeResult.gateReport || node.type !== 'prompt') {
             overallState = 'failed';
             break;
           }
 
         }
 
-      }
-
-      // 检查是否有分支跳转
-      if (context.metadata['_branch_jump']) {
-        const targetId = context.metadata['_branch_jump'] as string;
-        const targetNode = chain.nodes.find((n) => n.id === targetId);
-        if (targetNode) {
-          this.logger.log(`[${chain.id}] 条件分支跳转到: ${targetId}`);
-        }
       }
 
       // 汇总结果
@@ -225,30 +208,14 @@ export class ChainEngineService {
           };
         }
 
-        // 3. 根据节点类型执行
-        let output: unknown;
-        let runId: string | undefined;
-
-        switch (node.type) {
-          case 'prompt': {
-            const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
-            output = promptResult.output;
-            runId = promptResult.runId;
-            break;
-          }
-          case 'transform':
-            output = await this.executeTransformNode(node, resolvedInput, context);
-            break;
-          case 'condition':
-            output = this.executeConditionNode(node, resolvedInput, context);
-            break;
-          default: {
-            const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
-            output = promptResult.output;
-            runId = promptResult.runId;
-            break;
-          }
+        // Fixed production templates only contain Prompt nodes; retired
+        // transforms/conditions must not silently produce unreviewed story data.
+        if (node.type !== 'prompt') {
+          throw new Error('当前固定生产链不支持历史 Transform/Condition 节点，拒绝执行');
         }
+        const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
+        const output = promptResult.output;
+        const runId = promptResult.runId;
 
         lastOutput = output;
 
@@ -389,77 +356,6 @@ export class ChainEngineService {
       }), response.content);
     }
     return { output: parsedOutput, ...(response.runId ? { runId: response.runId } : {}) };
-  }
-
-  /**
-   * 执行 Transform 节点（非 LLM 处理节点）
-   * 负责数据转换、上下文装配、结果合成
-   */
-  private async executeTransformNode(
-    node: ChainNode,
-    input: Record<string, unknown>,
-    context: ExecutionContext,
-  ): Promise<unknown> {
-    this.logger.log(`[${node.id}] Transform 节点执行`);
-
-    // ---- 节点0：上下文装配 ----
-    if (node.id === 'node_0_context_assembly') {
-      const outline = input['outline'] as any;
-      const chapterContext = input['chapterContext'] as any;
-      const chapterNumber = input['chapterNumber'] as number;
-      const chapterOutline = input['chapterOutline'] as any;
-
-      // 从 context.variables 里取 RAG 增强的上下文（如果有的话）
-      const ragContext = context.variables['ragContext'] as any;
-      const characterStates = context.variables['characterStates'] as any[];
-      const foreshadowingStatus = context.variables['foreshadowingStatus'] as any[];
-
-      const assembled = {
-        outline,
-        chapterContext,
-        chapterNumber,
-        chapterOutline,
-        // RAG 上下文：前文摘要、角色最新状态、伏笔状态
-        ragContext: ragContext || null,
-        characterStates: characterStates || [],
-        foreshadowingStatus: foreshadowingStatus || [],
-        // 装配时间戳（用于调试）
-        assembledAt: new Date().toISOString(),
-      };
-
-      this.logger.log(`[node_0] 上下文装配完成：章节${chapterNumber}，角色${characterStates?.length || 0}个，伏笔${foreshadowingStatus?.length || 0}条`);
-      return assembled;
-    }
-
-    // ---- 其他 Transform 节点：默认透传 ----
-    this.logger.debug(`[${node.id}] Transform 节点透传`);
-    return input;
-  }
-
-  /**
-   * 执行 Condition 节点（条件分支）
-   */
-  private executeConditionNode(
-    node: ChainNode,
-    input: Record<string, unknown>,
-    context: ExecutionContext,
-  ): unknown {
-    this.logger.debug(`[${node.id}] Condition 节点执行`);
-
-    if (node.branches && node.branches.length > 0) {
-      // 简单条件评估（当前选择第一个匹配的分支）
-      const matchedBranch = node.branches[0];
-      context.metadata['_branch_jump'] = matchedBranch.targetNodeId;
-      this.logger.log(`[${node.id}] 条件分支: ${matchedBranch.description} → ${matchedBranch.targetNodeId}`);
-
-      return {
-        matched: true,
-        targetNodeId: matchedBranch.targetNodeId,
-        description: matchedBranch.description,
-      };
-    }
-
-    return { matched: false };
   }
 
   // ==================== 辅助方法 ====================
