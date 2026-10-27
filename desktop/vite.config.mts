@@ -3,6 +3,47 @@ const configDirectory = fileURLToPath(new URL('.', import.meta.url));
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { createRequire } from 'node:module';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+
+const require = createRequire(import.meta.url);
+let electronChild: ChildProcess | null = null;
+const expectedElectronExits = new Set<number>();
+
+function stopElectronChild(): void {
+  const child = electronChild;
+  if (!child?.pid || child.exitCode !== null) return;
+  expectedElectronExits.add(child.pid);
+  if (process.platform === 'win32') {
+    spawnSync('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore', windowsHide: true, shell: false,
+    });
+  } else {
+    child.kill('SIGTERM');
+  }
+  electronChild = null;
+}
+
+function startElectronHidden(): void {
+  const electronExecutable = require('electron') as string;
+  stopElectronChild();
+  const child = spawn(electronExecutable, ['.', '--no-sandbox'], {
+    cwd: configDirectory,
+    stdio: 'inherit',
+    windowsHide: true,
+    shell: false,
+    env: process.env,
+  });
+  electronChild = child;
+  child.once('exit', code => {
+    const expected = child.pid ? expectedElectronExits.delete(child.pid) : false;
+    if (electronChild === child) electronChild = null;
+    if (!expected) process.exit(code ?? 0);
+  });
+}
+
+process.once('exit', stopElectronChild);
+
 // 固定端口职责：管理端 5173，服务端 API 3100。
 const backendPort = 3100;
 
@@ -26,9 +67,9 @@ export default defineConfig({
           },
         },
       },
-      // 只编译 Electron 主进程与 preload；开发者需单独启动 Electron。
-      // 显式覆盖插件默认 onstart 行为，防止 Vite 自动拉起/重启 Electron。
-      onstart: () => {},
+      // Vite 的主进程构建完成后恢复 Electron 窗口及热重启。
+      // 仅启动 Electron；后端 3100 由独立进程管理，主进程只检查连接状态。
+      onstart: () => startElectronHidden(),
     }),
     renderer(),
   ],
