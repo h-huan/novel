@@ -4870,7 +4870,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
   cancelIdeaDiscovery(@Param('requestId') requestId:string) {
     const sharedTask = [...(this.ideaDiscoveryInFlight?.values() ?? [])]
       .find(entry => entry.requestIds.has(requestId));
-    return generationTasks.cancel('discovery', sharedTask?.canonicalRequestId ?? requestId);
+    if (sharedTask) requestId = sharedTask.canonicalRequestId;
+    return generationTasks.cancel('discovery', requestId);
   }
 
   private async runIdeaDiscovery(dto: {
