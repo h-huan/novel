@@ -171,12 +171,12 @@ function threeIssueMarkdown(triage) {
       + '。未完成请求数量未知，不能沿用旧值。',
     '### 未完成/已取消的灵感模型调用（最新完成审计之外）',
     '- 记录状态：' + latency.activityAfterCompletedAudit.status
-      + '；时间邻近，不是精确请求ID归属；总记录：'+show(latency.activityAfterCompletedAudit.totalRecent)
+      + '；归属：'+show(latency.activityAfterCompletedAudit.association)+'（旧记录缺ID时仍按时间邻近）；总记录：'+show(latency.activityAfterCompletedAudit.totalRecent)
       + '；运行中：'+show(latency.activityAfterCompletedAudit.running)
       + '；已取消：'+show(latency.activityAfterCompletedAudit.cancelled)
       + '；旧进程遗留running：'+show(latency.activityAfterCompletedAudit.staleRunning),
     ...latency.activityAfterCompletedAudit.records.map(row=>
-      '- '+show(row.status)+' · run='+show(row.runId)+' · stage='+show(row.stage)
+      '- '+show(row.status)+' · run='+show(row.runId)+' · request='+show(row.discoveryRequestId)+' · stage='+show(row.stage)
        +' · 已持续/历时='+show(row.elapsedMs)+'ms · 开始='+show(row.startedAt)
        +(row.staleProcess?'（旧进程遗留）':'')),
     '- '+latency.activityAfterCompletedAudit.limitation,
