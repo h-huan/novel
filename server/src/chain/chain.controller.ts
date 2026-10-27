@@ -6487,8 +6487,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       reselectionStopReason, sourceRepairCallsRemaining: reselectionBudget.remaining,
       excludedPremiseIds: unresolvedIds, reasons: initialReview.issues.filter(issue=>unresolvedIds.includes(issue.premiseId)),
       completeCardGatePending: true } : {};
-    let postReselectionReview: PremiseSelectionReview;
-    const firstBackup=pendingBackup.current;
+    // A missing or incomplete optional audit must retain the previous failing
+    // verdict, never initialize a vacuous passed result.
+    let postReselectionReview: PremiseSelectionReview=initialReview;
+    const readPendingBackup=():ReturnType<typeof normalizePremiseSelectionPayload>|null=>pendingBackup.current;
+    const firstBackup=readPendingBackup();
     pendingBackup.current=null;
     if(selected===initial) postReselectionReview=initialReview;
     else if(firstBackup){
