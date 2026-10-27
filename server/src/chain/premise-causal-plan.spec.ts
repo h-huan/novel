@@ -66,7 +66,7 @@ describe('plan critical prerequisites before full story cards',()=>{
     expect(budget.remaining).toBe(2);expect(c.realLLM.generate).toHaveBeenCalledOnce();
     expect(await c.completePremiseCausalPlans(repaired,budget)).toBe(repaired);
     expect(c.realLLM.generate).toHaveBeenCalledOnce();
-    const rows=payoffChecks(repaired);rows[0].status='gap' as any;rows[0].links[0].status='gap';
+    const rows=payoffChecks(repaired);rows[0].status='gap' as any;(rows[0] as any).gapRepair='replace_from_pool';rows[0].links[0].status='gap';
     expect(materializePremisePayoffReview({payoffChecks:rows},repaired)[0].kind).toBe('selection_fit');
   });
   it('recovers only the exact terminal semicolon in the observed selected P1 source anchors',()=>{
@@ -158,7 +158,7 @@ describe('plan critical prerequisites before full story cards',()=>{
   it('cannot bless a missing intermediate condition with a positive overall verdict',()=>{
     const s=selection(),rows=payoffChecks(s);rows[0].links[0].status='gap';
     expect(premisePayoffReviewIssues({payoffChecks:rows},s)).toContain('S1.payoff不能用总体通过掩盖中间因果缺口');
-    (rows[0] as any).status='gap';
+    (rows[0] as any).status='gap';(rows[0] as any).gapRepair='replace_from_pool';
     expect(materializePremisePayoffReview({payoffChecks:rows},s)[0].reason).toContain('causalPlan[0]');
   });
   it('cannot hide an unassessed intermediate condition as a completed rejection or pass',()=>{
@@ -178,7 +178,7 @@ describe('plan critical prerequisites before full story cards',()=>{
     }
   });
   it.each(['警方到场没有接收求援和实际出警依据','血纹转移不在已建立能力边界内','看见处方单不等于律师取得该处方单','限位开关没有录音或记录振动的能力'])('routes evidenced missing prerequisites upstream: %s',reason=>{
-    const s=selection(),rows=payoffChecks(s);(rows[0] as any).status='gap';rows[0].links[0]={...rows[0].links[0],status:'gap',reason};
+    const s=selection(),rows=payoffChecks(s);(rows[0] as any).status='gap';(rows[0] as any).gapRepair='replace_from_pool';rows[0].links[0]={...rows[0].links[0],status:'gap',reason};
     const issues=materializePremisePayoffReview({payoffChecks:rows},s);
     expect(issues[0]).toMatchObject({kind:'selection_fit',premiseId:'A'});expect(issues[0].reason).toContain(reason);
   });

@@ -30,7 +30,7 @@ it.each([false,true])('starts both production preselection reviews and drains th
  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
 });
 it('routes a real gap to preselection and never retains an unqualified item as locked',()=>{
- const raw={payoffChecks:[{ref:'S1.payoff',status:'gap',reason:'账目没有取得来源，警方也没有实际现场定位依据'}]};
+ const raw={payoffChecks:[{ref:'S1.payoff',status:'gap',gapRepair:'replace_from_pool',reason:'账目没有取得来源，警方也没有实际现场定位依据'}]};
  const issues=materializePremisePayoffReview(raw,selection);
  expect(issues).toHaveLength(1);expect(issues[0].kind).toBe('selection_fit');
  expect(issues[0].repairMode).toBe('replace_from_pool');
@@ -61,7 +61,7 @@ it('allows an actual independent condition in payoff outside the generator index
  for(const quote of [undefined,'警方暂停处理。','暂停处理',p.payoff,'另一题材才有的证据']){
   expect(premisePayoffReviewIssues({payoffChecks:[{...row,conditionEvidenceQuote:quote}]},input).length).toBeGreaterThan(0);
  }
- const rejected={...row,status:'gap',reason:'尽管该行动存在，仍缺少另一项决定性证据'};
+ const rejected={...row,status:'gap',gapRepair:'replace_from_pool',reason:'尽管该行动存在，仍缺少另一项决定性证据'};
  expect(materializePremisePayoffReview({payoffChecks:[rejected]},input)).toHaveLength(1);
  expect(rejected.status).toBe('gap');
 });
@@ -89,7 +89,7 @@ it('uses the single GEN-002 authority contract before full-card generation inste
  expect(replacementDirective).toContain('GEN-002');
  expect(task).toContain('按已注入GEN-002的兑现必要条件合同');
  expect(task).not.toContain('报备不等于获准实施');
- const gap={...supported,status:'gap',reason:'仅有报备行为，缺少有权人员实际启动和审批的必要桥接'};
+ const gap={...supported,status:'gap',gapRepair:'replace_from_pool',reason:'仅有报备行为，缺少有权人员实际启动和审批的必要桥接'};
  const failures=materializePremisePayoffReview({payoffChecks:[gap]},selection);
  expect(failures).toHaveLength(1);
  expect(premiseReselectionPlan(selection,{passed:false,issues:failures}).repairSlots[0].mode).toBe('replace_from_pool');
