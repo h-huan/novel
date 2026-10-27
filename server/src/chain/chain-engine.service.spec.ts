@@ -101,7 +101,20 @@ describe('ChainEngineService', () => {
       expect(production.nodes.length).toBeGreaterThan(0);
       expect(production.nodes.every(node => node.type === 'prompt')).toBe(true);
       expect(production.nodes.every(node => !!node.promptTemplateId)).toBe(true);
+      expect(production.config.strictMode).toBe(true);
     }
+  });
+
+  it('does not call a downstream node when a fixed long-outline prerequisite fails', async () => {
+    const registry = new ChainTemplateService(service);
+    const production = registry.getDetail('long-novel-flexible-outline');
+    generate.mockRejectedValueOnce(new Error('前序关键节点无有效模型结果')).mockResolvedValue(mockLLMOutput);
+    const result = await service.execute({
+      ...production, nodes: [mockNode, { ...mockNode, id: 'downstream' }],
+    }, { test: 'hello' });
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(1);
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 
   it.each([['transform', false], ['condition', false], ['transform', true], ['condition', true]] as const)('rejects unregistered %s nodes even with empty-input skip=%s', async (kind, skipOnEmptyInput) => {
