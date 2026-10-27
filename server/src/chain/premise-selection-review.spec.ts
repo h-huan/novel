@@ -32,6 +32,23 @@ it('keeps all substantive overlap facts and sources in memory while removing rep
   expect(JSON.stringify(viewed).length).toBeLessThan(JSON.stringify(original).length);
 });
 
+it('keeps overlap judgment scoped to pairwise story paths rather than repeating the source and causal-plan gate', async()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+    expect(prompt).toContain('当前是锁定前独立同构复核');
+    expect(prompt).toContain('当前审查类型=overlap');
+    expect(prompt).not.toContain('先按causalPlan核查');
+    expect(prompt).not.toContain('逐字段来源核查目录');
+    expect(prompt).not.toContain('【逐环节因果计划目录');
+    const result={passed:true,issues:[]};
+    expect(options.validate(result)).toBe(true);
+    return {data:result};
+  });
+  const result=await c.reviewPremiseSelection(selection(),'原有标准','overlap');
+  expect(result).toEqual({passed:true,issues:[]});
+  expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+});
+
 it('keeps the defective source plan and complete independent-review selection while shrinking unchanged reselection peers',()=>{
   const make=(id:string)=>({...premise(id),causalPlan:[{
     action:{field:'activeChoice',quote:'救人需要承担被遗忘的代价'+id},
