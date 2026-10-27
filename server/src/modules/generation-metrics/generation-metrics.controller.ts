@@ -63,7 +63,8 @@ export class GenerationMetricsController {
     if (normalizedEndAt) { where.push('julianday(m.created_at) <= julianday(?)'); params.push(normalizedEndAt); }
     if (discoveryRequestId) { where.push('m.discovery_request_id = ?'); params.push(discoveryRequestId); }
     const sql = `SELECT m.id, m.run_id, m.project_id, m.discovery_request_id, m.chapter_index, m.step_key, m.scenario,
-      m.status, m.attempt, m.phase, m.duration_ms, m.fail_reason, m.total_tokens,
+      m.status, m.attempt, m.phase, m.duration_ms, m.fail_reason,
+      m.prompt_tokens, m.completion_tokens, m.total_tokens,
       COALESCE(m.internal_retries, 0) AS internal_retries, m.created_at, m.model_version,
       r.stage, r.gate_status, r.started_at, r.finished_at, r.prompt_version, r.context_version,
       r.constitution_revision
