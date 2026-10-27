@@ -25,6 +25,16 @@ it('injects Rule-ID based public standards with preserved detailed clauses', asy
   expect(system).toContain('凭空增加事件、时间、地点');
 });
 
+it('injects the same missing-prerequisite constraint into initial selection, source review and structuring', () => {
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ for(const step of ['idea_premise_pool_generation','idea_premise_selection','idea_premise_source_drift_review','idea_card_structure']){
+  const directive=standardDirectiveCache.get('idea_generate',step);
+  expect(directive).toContain('【系统规则 GEN-002');
+  expect(directive).toContain('原池与展开都缺的关键桥接应在首次选优审查判gap');
+  expect(directive).toContain('异常读数不等于证明了具体收费账目或责任人');
+ }
+});
+
 it('injectStandard=false really disables public-rule injection instead of leaving a second inline preflight rule', async () => {
   standardDirectiveCache.rebuild(activeSystemWorkflowRules());
   const service = new RealLLMService({
