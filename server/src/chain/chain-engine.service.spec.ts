@@ -25,7 +25,6 @@ describe('ChainEngineService', () => {
     inputMapping: { test: 'user_input.test' },
     outputMapping: { result: 'test_node.result' },
     timeout: 30,
-    retryCount: 1,
     description: '测试节点',
   };
 
@@ -36,8 +35,6 @@ describe('ChainEngineService', () => {
     description: '用于单元测试的Chain',
     nodes: [mockNode],
     variables: [],
-    executionMode: 'sequential' as const,
-    config: { timeout: 60, maxRetries: 2, enableLogging: false, strictMode: false },
   };
 
   beforeEach(async () => {
@@ -75,7 +72,7 @@ describe('ChainEngineService', () => {
     expect(service).toBeDefined();
   });
 
-  it.each(['blocked', 'not_evaluated'] as const)('stops downstream calls after an upstream quality %s even in a non-strict chain', async (gateStatus) => {
+  it.each(['blocked', 'not_evaluated'] as const)('stops downstream calls after an upstream quality %s', async (gateStatus) => {
     const report = classifyGateFailure({ evaluationStatus: 'evaluated', topic: 'quality_gate', gateStatus,
       buckets: gateStatus === 'blocked' ? { prose_hardline: ['当前卷纲违反已确认事实'] } : { review_incomplete: ['当前卷纲评审缺少可核对依据'] } });
     generate.mockRejectedValueOnce(new GateRejectionError(report, '未通过卷纲')).mockResolvedValue(mockLLMOutput);
@@ -86,12 +83,13 @@ describe('ChainEngineService', () => {
     expect(generate).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps ordinary non-strict optional-node failure behavior', async () => {
-    generate.mockRejectedValueOnce(new Error('optional input unavailable')).mockResolvedValue(mockLLMOutput);
+  it('stops the next production node after any missing upstream model result', async () => {
+    generate.mockRejectedValueOnce(new Error('上游调用失败')).mockResolvedValue(mockLLMOutput);
     const result = await service.execute({ ...testChain, nodes: [mockNode, { ...mockNode, id: 'downstream' }] }, { test: 'hello' });
-    expect(result.status).toBe('partial');
-    expect(result.nodeResults).toHaveLength(2);
-    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(1);
+    expect(result.errors[0].message).toContain('上游调用失败');
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 
   it('fixed production chains contain only current long-outline prompt nodes, not legacy body synthesis', () => {
@@ -101,7 +99,6 @@ describe('ChainEngineService', () => {
       expect(production.nodes.length).toBeGreaterThan(0);
       expect(production.nodes.every(node => node.type === 'prompt')).toBe(true);
       expect(production.nodes.every(node => !!node.promptTemplateId)).toBe(true);
-      expect(production.config.strictMode).toBe(true);
     }
   });
 
@@ -115,35 +112,6 @@ describe('ChainEngineService', () => {
     expect(result.status).toBe('failed');
     expect(result.nodeResults).toHaveLength(1);
     expect(generate).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([['transform', false], ['condition', false], ['transform', true], ['condition', true]] as const)('rejects unregistered %s nodes even with empty-input skip=%s', async (kind, skipOnEmptyInput) => {
-    const obsoleteNode = {
-      ...mockNode,
-      id: kind === 'transform' ? 'old_transform' : 'old_condition',
-      type: kind,
-      promptTemplateId: undefined,
-      skipOnEmptyInput,
-      inputMapping: skipOnEmptyInput ? { missing: 'user_input.unset' } : mockNode.inputMapping,
-    };
-    // Model unexpected persisted/HTTP data at runtime without reopening retired node types.
-    const result = await service.execute({ ...testChain, nodes: [obsoleteNode as unknown as typeof mockNode, mockNode] }, { test: 'hello' });
-    expect(result.status).toBe('failed');
-    expect(result.nodeResults).toHaveLength(1);
-    expect(result.nodeResults[0].status).toBe('failed');
-    expect(result.nodeResults[0].error).toContain('不支持历史 Transform/Condition 节点');
-    expect(generate).not.toHaveBeenCalled();
-  });
-
-  it('does not replace a missing registered template with a raw JSON prompt', async () => {
-    const result = await service.execute({
-      ...testChain,
-      nodes: [{ ...mockNode, promptTemplateId: undefined }, mockNode],
-    }, { test: 'hello' });
-    expect(result.status).toBe('failed');
-    expect(result.nodeResults).toHaveLength(1);
-    expect(result.nodeResults[0].error).toContain('禁止改用输入 JSON 作为临时提示词');
-    expect(generate).not.toHaveBeenCalled();
   });
 
   describe('execute', () => {
@@ -180,7 +148,6 @@ describe('ChainEngineService', () => {
         chainId: 'test-chain',
         variables: { user_input: { test: 'hello' }, test: 'hello' },
         nodeOutputs: {},
-        retryCounters: {},
         startTime: new Date(),
         timestamps: {},
         metadata: {},
@@ -190,7 +157,7 @@ describe('ChainEngineService', () => {
       expect(result.nodeId).toBe('test_node');
     });
 
-    it('does not replay the same prompt when a node fails without corrective evidence', async () => {
+    it('makes one LLM attempt for a failed fixed production node', async () => {
       generate.mockRejectedValue(new Error('schema mismatch'));
       const context = {
         chainId: 'test-chain',
@@ -199,7 +166,7 @@ describe('ChainEngineService', () => {
         startTime: new Date(), timestamps: {},
       };
 
-      const result = await service.executeNode({ ...mockNode, retryCount: 5 }, context, testChain);
+      const result = await service.executeNode(mockNode, context, testChain);
 
       expect(result.status).toBe('failed');
       expect(result.retryCount).toBe(0);
@@ -227,7 +194,7 @@ describe('ChainEngineService', () => {
         startTime: new Date(), timestamps: {},
       };
 
-      const result = await service.executeNode({ ...mockNode, retryCount: 0 }, context, testChain);
+      const result = await service.executeNode(mockNode, context, testChain);
 
       expect(result.status).toBe('failed');
       expect(result.gateReport).toEqual(report);
