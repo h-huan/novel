@@ -376,10 +376,8 @@ export class ChainEngineService {
         ...userInput,
       },
       nodeOutputs: {},
-      retryCounters: {},
       startTime: new Date(),
       timestamps: {},
-      metadata: {},
       // 项目归属：项目内节点的埋点/宪法注入必须能定位到这本书；平台级链路（无 projectId）保持 undefined。
       projectId: typeof userInput.projectId === 'string' ? userInput.projectId : undefined,
     };
