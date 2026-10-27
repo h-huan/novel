@@ -226,8 +226,15 @@ it('generates a complete idea batch through preselection plus structuring and re
       await new Promise(resolve => setTimeout(resolve, 10));
       const step = input.metrics?.stepKey;
       const partialFixture = String(input.prompt).includes('__partial_delivery_test__');
-      if (step === 'idea_premise_pool_generation') return { content: JSON.stringify({ pool: makePremiseSelectionFixture(partialFixture ? 4 : 5).pool }) };
-      if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(partialFixture ? 4 : 5).selectedPremises }) };
+      if (step === 'idea_premise_pool_generation') {
+        expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
+        expect(input.prompt).toContain('分类不能靠结尾点题或改标签补救');
+        return { content: JSON.stringify({ pool: makePremiseSelectionFixture(partialFixture ? 4 : 5).pool }) };
+      }
+      if (step === 'idea_premise_selection') {
+        expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
+        return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(partialFixture ? 4 : 5).selectedPremises }) };
+      }
       if (step === 'idea_premise_source_drift_review') return { content: JSON.stringify(makePremiseReviewFixture(String(input.prompt))) };
       if (step === 'idea_premise_overlap_review') return { content: JSON.stringify({ passed: true, issues: [] }) };
       if (step === 'idea_card_structure') {

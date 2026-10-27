@@ -5042,6 +5042,13 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const categoryBenchmark = categoryResolution.status === 'resolved'
           ? platformCategoryBenchmarkNote(dto.platform, categoryResolution.value, dto.storyType)
           : '';
+        // Avoid asking an expensive post-selection source/category audit to
+        // discover defects that the candidate generator was never shown.
+        // Same category contract, no new model call or weaker Gate.
+        const candidateCategoryRequirements = '\n【每项分类核心机制：生成与选优使用与审核相同的标准】'
+          + JSON.stringify(categoryStandards)
+          + '\n每项的核心冲突、双方关系、主动行动、升级、兑现和代价必须由所选分类的核心机制驱动。感情分类尤其不能只用职业翻案或查案作为主线、最后安排一次恋爱点缀；重要关系的双向选择、推进与结果必须承担实质剧情。分类不能靠结尾点题或改标签补救。'
+          + '\n各题材的结果须有已建立的必要条件和实际执行链；不能让封店直接等于退赔、发现线索直接等于有权处置或人物无缘无故提前到场。';
         const premiseSchema = {
           pool: [{
             premiseId: 'P1',
@@ -5113,6 +5120,7 @@ ${promptDirective}
 【本次执行设定】
 ${ideaDiscoveryAuthorContext(dto)}
 ${premiseCategoryIdentityDirective(discoveryCategories)}
+${candidateCategoryRequirements}
 ${variedCategories ? '在目录分类中广搜不同人物欲望、关系、冲突和兑现路径；已选题材不可全部来自同一分类，分类编号选择后锁定，不靠改标签制造差异。' : ''}
 ${phaseContext}
 创作流派的组合须符合可见的行动机制，不能仅根据题材名或隐藏凶手贴标签：${dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre)}
