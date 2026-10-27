@@ -82,10 +82,6 @@ export class ChainEngineService {
         context.nodeOutputs[node.id] = nodeResult.output;
 
         // 将节点输出映射到全局变量
-        if (nodeResult.status === 'success' && nodeResult.output) {
-          this.applyOutputMapping(node, nodeResult.output, context);
-        }
-
         // 处理失败情况
         if (nodeResult.status === 'failed') {
           errors.push({
@@ -95,22 +91,16 @@ export class ChainEngineService {
             recoverable: false,
           });
 
-          // Quality-rejected dependencies are unusable even in a chain that
-          // permits ordinary optional-node failures. Preserve the upstream
-          // report and stop before downstream generation invents a substitute.
-          if (chain.config.strictMode || nodeResult.gateReport || node.type !== 'prompt' || !node.promptTemplateId) {
-            overallState = 'failed';
-            break;
-          }
-
+          // Every node in the fixed sequential production chain is required.
+          // Preserve the original node failure evidence and do not run successors.
+          overallState = 'failed';
+          break;
         }
 
       }
 
       // 汇总结果
-      if (overallState === 'running') {
-        overallState = errors.length > 0 ? 'partial' : 'completed';
-      }
+      if (overallState === 'running') overallState = 'completed';
 
       const endTime = new Date();
       const totalLatency = endTime.getTime() - startTime.getTime();
@@ -173,22 +163,7 @@ export class ChainEngineService {
     // verified and bounded repair budgets. This engine makes one attempt.
     try {
       const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
-      // A retired node must not skip itself to unlock downstream generation.
-      if (node.type !== 'prompt') {
-        throw new Error('当前固定生产链不支持历史 Transform/Condition 节点，拒绝执行');
-      }
-      if (!node.promptTemplateId) {
-        throw new Error('固定生产 Prompt 节点缺少注册模板 ID，禁止改用输入 JSON 作为临时提示词');
-      }
-      if (node.skipOnEmptyInput && this.isInputEmpty(resolvedInput)) {
-        this.logger.log(`${nodeLog} 输入为空，跳过此节点`);
-        return {
-          nodeId: node.id, nodeName: node.name, status: 'skipped', output: null,
-          latency: Date.now() - startTime, retryCount: 0, timestamp: new Date(),
-        };
-      }
-
-      const { output, runId } = await this.executePromptNode(node, resolvedInput, context, 0, chain);
+       const { output, runId } = await this.executePromptNode(node, resolvedInput, context, 0, chain);
       return {
         nodeId: node.id, nodeName: node.name, status: 'success', output,
         ...(runId ? { runId } : {}),
@@ -226,9 +201,6 @@ export class ChainEngineService {
     chain: PromptChain,
   ): Promise<PromptNodeExecutionResult> {
     // 获取并渲染 Prompt 模板
-    if (!node.promptTemplateId) {
-      throw new Error('固定生产 Prompt 节点缺少注册模板 ID，禁止改用输入 JSON 作为临时提示词');
-    }
     const prompt = this.promptRegistry.render(node.promptTemplateId, {
         ...context.variables,
         ...input,
@@ -354,53 +326,6 @@ export class ChainEngineService {
     return current;
   }
 
-  /**
-   * 将节点输出映射到上下文变量
-   */
-  private applyOutputMapping(
-    node: ChainNode,
-    output: unknown,
-    context: ExecutionContext,
-  ): void {
-    if (typeof output !== 'object' || output === null) return;
-
-    const outputObj = output as Record<string, unknown>;
-    // 自动映射：node.id → nodeOutputs[node.id]
-    context.nodeOutputs[node.id] = output;
-
-    // 按 outputMapping 显式映射
-    for (const [key, path] of Object.entries(node.outputMapping)) {
-      const value = outputObj[key];
-      if (value !== undefined) {
-        this.setPath(context, `chain_output.${path}`, value);
-      }
-    }
-  }
-
-  /**
-   * 按路径设置变量值
-   */
-  private setPath(context: ExecutionContext, path: string, value: unknown): void {
-    const parts = path.split('.');
-    const varName = parts[0];
-
-    if (!context.variables[varName]) {
-      context.variables[varName] = {};
-    }
-
-    let current = context.variables[varName] as Record<string, unknown>;
-    for (let i = 1; i < parts.length - 1; i++) {
-      if (!current[parts[i]]) {
-        current[parts[i]] = {};
-      }
-      current = current[parts[i]] as Record<string, unknown>;
-    }
-
-    if (parts.length > 1) {
-      current[parts[parts.length - 1]] = value;
-    }
-  }
-
   /** 保持调用方配置温度；重复运行不得靠升温碰运气。 */
   private calculateTemperature(baseTemp: number): number {
     return Math.max(0.2, Math.min(1.2, baseTemp));
@@ -436,14 +361,5 @@ export class ChainEngineService {
     return text;
   }
 
-  /**
-   * 检查输入是否为空
-   */
-  private isInputEmpty(input: Record<string, unknown>): boolean {
-    return Object.keys(input).length === 0 ||
-      Object.values(input).every(
-        (v) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0),
-      );
-  }
 
 }
