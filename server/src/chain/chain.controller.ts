@@ -1,4 +1,4 @@
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
@@ -4904,7 +4904,9 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       this.realLLM.assertScenarioModelConfigured('idea_generate');
       const discoveryBudget=readGenerationBudgets();
       const presentationCallLimit=discoveryBudget.presentationMaxPhysicalCalls;
-      const sourceCompletionBudget={remaining:discoveryBudget.sourceMaxPhysicalCalls};
+      const finalCardSourceReserve=reservePostCardSourceReviewCredits(discoveryBudget.sourceMaxPhysicalCalls,
+        requestedCount,discoveryBudget.reviewGroupingMode,discoveryBudget.sourceBatchSize);
+      const sourceCompletionBudget={remaining:discoveryBudget.sourceMaxPhysicalCalls-finalCardSourceReserve};
       const reselectionCompletionBudget={remaining:discoveryBudget.premiseReselectionMaxCalls};
       const chapterTuple = targetForLength(getPlatform(dto.platform), dto.storyType).chapterWords;
       const chapterRange = { min: chapterTuple[0], max: chapterTuple[1] };
@@ -5820,6 +5822,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
 
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
+      // The same shared source budget flows into final-card replacement.
+      // Hold one source+overlap review pair instead of spending all credits
+      // on preselection reserve rounds before a card has passed its final Gate.
+      sourceCompletionBudget.remaining+=finalCardSourceReserve;
       failureSelectionAudit = {
         requested: requestedCount,
         candidatePool: premiseDiscovery.pool,
@@ -6142,8 +6148,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             + appealGate.fulfillment.stopReason + '，缺额' + (requestedCount - selectedAccepted.length)
             + '张。未降低质量门，也未把最低可交付数量当作提前停止条件。';
           this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
-          return { success: true, status: 'partial', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
-            qualifiedIdeas: acceptedWithAudit, warning, qualityWarning: warning, appealGate };
+          return { success: false, status: 'incomplete', ideas: [], totalIdeas: acceptedWithAudit.length,
+            qualifiedIdeas: acceptedWithAudit, error: warning, warning, qualityWarning: warning, appealGate };
         }
         appealGate.returned = 0;
         const error = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
