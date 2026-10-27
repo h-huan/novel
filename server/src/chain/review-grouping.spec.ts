@@ -73,9 +73,9 @@ describe('aggregate review before capacity partitioning', () => {
       ...config.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:0,sourceBatchSize:3,
     });
     const sel = normalizePremiseSelectionPayload({
-      pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'原始有效条件'+premiseId})),
+      pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'主角选择和代价推动具体关系与后果改变'+premiseId})),
       selectedPremises:['A','B','C','D','E'].map(premiseId=>({premiseId,
-        ...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(f=>f!=='differentiation').map(f=>[f,'本题的可信行动与结果'+premiseId]))})),
+        ...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(f=>f!=='differentiation').map(f=>[f,'主角选择和代价推动具体关系与后果改变'+premiseId]))})),
     },5,5);
     const c=Object.create(ChainController.prototype) as any;
     c.logger={warn:vi.fn()};
