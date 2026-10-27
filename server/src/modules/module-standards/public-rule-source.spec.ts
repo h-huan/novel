@@ -61,6 +61,7 @@ describe('public rule governance', () => {
     const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
     const maintenance = readFileSync(join(repoRoot, 'DEVELOPMENT_GOVERNANCE.md'), 'utf8');
     const api = readFileSync(join(process.cwd(), 'docs/API.md'), 'utf8');
+    const skill = readFileSync(join(repoRoot, 'docs/skills/novel-source-quality/SKILL.md'), 'utf8');
     expect(readme).toContain('[开发治理规范](DEVELOPMENT_GOVERNANCE.md)');
     expect(readme).toContain('同一轮变更');
     expect(maintenance).toContain('每轮接续先读权威，改完同步维护');
@@ -70,6 +71,10 @@ describe('public rule governance', () => {
     expect(api).not.toContain('缺项时最多使用同一模型补齐一次');
     expect(api).not.toContain('QUALITY_EXECUTION.md` 为唯一规范');
     expect(api).not.toContain('代码 + `QUALITY_EXECUTION.md` + 测试');
+    expect(skill).toContain('唯一执行标准 server/shared/src/执行标准.ts');
+    expect(skill).toContain('删掉被替代的旧分支、重复提示词和过时断言');
+    expect(skill).not.toContain('公共正文要求只在那里维护');
+
   });
 
   it('every active rule has implementation ownership and P0/P1 rules have non-UI execution/governance consumers', () => {
