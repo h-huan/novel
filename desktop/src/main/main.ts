@@ -194,9 +194,15 @@ function revealLoadedWindow(window: BrowserWindow): void {
   };
   window.once('ready-to-show', reveal);
   window.webContents.once('did-finish-load', reveal);
+  window.webContents.once('dom-ready', reveal);
   window.webContents.once('did-fail-load', (_event, _errorCode, _description, _url, isMainFrame) => {
     if (isMainFrame) reveal();
   });
+  // Headless Windows/Xvfb and certain GPU startup paths can create an invisible
+  // Chromium window without ever delivering ready-to-show or did-finish-load.
+  // A single bounded fallback makes an ordinary launch visible even then.
+  const fallback = setTimeout(reveal, 1500);
+  window.once('closed', () => clearTimeout(fallback));
 }
 
 

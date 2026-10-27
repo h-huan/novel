@@ -85,7 +85,7 @@ describe('aggregate review before capacity partitioning', () => {
       if(!leaf)return original.call(c,input,standard,mode,budget,leaf,...rest);
       seen.push(input.selected.length);budget.remaining--;
       return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(input).map(row=>({
-        ref:row.ref,status:'preserved',reason:'每个事件与原故事来源相互兼容'))},input);
+        ref:row.ref,status:'preserved',reason:'每个事件与原故事来源相互兼容'}))},input);
     });
     const result=await c.reviewPremiseSelection(sel,'有效标准','source_drift',{remaining:2});
     expect(result.sourceChecks).toHaveLength(50);

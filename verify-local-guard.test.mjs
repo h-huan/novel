@@ -65,6 +65,8 @@ function run(report) {
   assert.ok(main.includes('revealLoadedWindow(mainWindow);'), 'editor uses shared foreground restoration');
   assert.ok(main.includes("window.once('ready-to-show', reveal)"), 'foreground when Chromium signals readiness');
   assert.ok(main.includes("window.webContents.once('did-finish-load', reveal)"), 'foreground after document load when ready-to-show is absent');
+  assert.ok(main.includes("window.webContents.once('dom-ready', reveal)"), 'foreground when the renderer DOM becomes ready');
+  assert.ok(main.includes("const fallback = setTimeout(reveal, 1500)"), 'foreground when hidden Chromium emits no readiness event');
   assert.ok(main.includes('window.show();') && main.includes('window.focus();'), 'normal launch must show and focus both windows');
   assert.ok(main.includes('mainWindow.isMinimized()'), 'do not persist minimized placement');
   assert.ok(main.includes('screen.getAllDisplays()'), 'screen-bound check for previously saved window placement');
