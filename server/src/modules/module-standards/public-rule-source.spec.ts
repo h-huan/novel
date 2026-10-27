@@ -74,6 +74,9 @@ describe('public rule governance', () => {
     expect(skill).toContain('唯一执行标准 server/shared/src/执行标准.ts');
     expect(skill).toContain('删掉被替代的旧分支、重复提示词和过时断言');
     expect(skill).not.toContain('公共正文要求只在那里维护');
+    expect(skill).not.toContain('不自动提交Git');
+    expect(skill).toContain('Git 修改、提交和推送以当前用户授权');
+    expect(readme).not.toContain('唯一前置 Gate 的候选证据');
 
   });
 
@@ -115,6 +118,11 @@ describe('public rule governance', () => {
       /node_9_chapter_synthesis/,
       /chapterSynthesisMaxTokens/,
       /请将以下8步草稿扩写并重写/,
+      /天龙8步已于.*取消，短篇与长篇正文统一由/,
+      /registerAllTemplates/,
+      /三个链的每个节点都要求/,
+      /三条链都由后台任务执行/,
+
 
       /SHORT_IDEA_HOOK_MIN_SIGNALS/,
       /每1000字必须有钩子或爽点/,
