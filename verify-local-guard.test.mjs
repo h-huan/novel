@@ -61,6 +61,19 @@ function run(report) {
   assert.ok(main.includes("launcherWindow.loadURL(VITE_DEV_SERVER_URL + 'launcher.html')"));
   assert.ok(main.includes('createWindow();'));
   assert.ok(!vite.includes('onstart: () => {}'));
+  assert.ok(main.includes('launcherWindow.focus();'), 'startup launcher must take focus');
+  assert.ok(main.includes('mainWindow.focus();'), 'editor window must take focus');
+  assert.ok(main.includes('mainWindow.isMinimized()'), 'do not persist minimized placement');
+  assert.ok(main.includes('screen.getAllDisplays()'), 'screen-bound check for previously saved window placement');
+  assert.ok(main.includes("tray.on('double-click', restoreApplicationWindow)"),
+    'tray restore must unminimize instead of leaving the window on the taskbar');
+  const planning = fs.readFileSync(path.join(root,'server','src','chain','chain-planning.controller.ts'),'utf8');
+  const wizard = fs.readFileSync(path.join(root,'desktop','src','renderer','pages','DiscoveryWizardPage.tsx'),'utf8');
+  assert.ok(planning.includes('dto.discoveryRequestId.trim()'),
+    'planning route must propagate renderer cancellation IDs');
+  assert.ok(wizard.includes("err.message.startsWith('请求超时')"));
+  assert.ok(wizard.includes("'/chain/cancel-idea-discovery/' + encodeURIComponent(discoveryRequestId)"),
+    'HTTP timeout must cancel the exact server request instead of orphaning model work');
 }
 
 // Direct server launchers are also first-class paths. A port occupied by a
