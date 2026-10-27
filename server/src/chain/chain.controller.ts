@@ -11987,10 +11987,17 @@ ${summarizeOutlineConsistency(pending)}`,
     // The project constitution/confirmed story is already injected by RealLLM for project-scoped calls;
     // do not duplicate the entire project card in the prompt.
     const confirmedWorld = this.buildWorldWritingContext(projectId, false);
+    const worldForReview = db.prepare(
+      'SELECT * FROM world_settings WHERE project_id=? ORDER BY created_at ASC LIMIT 1',
+    ).get(projectId);
+    if (!worldForReview) throw new HttpException('缺少已确认世界观，无法审核或写入长篇滚动章纲',409);
+    const constitution = readConstitution(project);
+    const canonicalBrief = JSON.stringify({ title: project.title, confirmedStory: constitution.confirmedStory });
 
     // 4) 按卷、分批（每批最多 4 章）滚动生成并落库
     const ROLLOUT_BATCH = 4;
     let added = 0;
+    let rollingFactLedger: OutlineFactLedgerEntry[] = [];
     for (let i = 0; i < missingGlobalNos.length;) {
       const firstNo = missingGlobalNos[i];
       const firstSpan = locate(firstNo);
@@ -12018,7 +12025,7 @@ ${summarizeOutlineConsistency(pending)}`,
         }
       }
       const previousOutline = batchNos[0] > 1
-        ? db.prepare(`SELECT title,content,scenes,chapter_function FROM outlines
+        ? db.prepare(`SELECT "order",title,content,scenes,chapter_function FROM outlines
             WHERE project_id=? AND level='chapter' AND "order"=? LIMIT 1`)
             .get(projectId,batchNos[0]-2) as any
         : null;
@@ -12063,6 +12070,23 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
         expectedStages: ['outline'],
         expectedScenarios: ['outline'],
       });
+      // New chapters are a new fact source, not a continuation of the prior
+      // creation Gate's approval. Reuse that same independent fact-ledger Gate
+      // once per changed batch; never recertify already saved detailed outlines.
+      const candidateFacts = normalizeOutlineChaptersForFactReview(
+        batchChapters.map((chapter: any, index: number) => chapterFactsForReview(batchNos[index] - 1, chapter)),
+      );
+      const reviewed = await this.reviewOutlineFacts(
+        projectId, `长篇滚动第${batchNos[0]}-${batchNos[batchNos.length-1]}章事实与行动来源复核`,
+        canonicalBrief, worldForReview, rollingFactLedger, candidateFacts, platformDirective,
+        batchNos[0], previousOutline ? [previousOutline] : [], 'rollout_outline_fact_dependencies',
+      );
+      if (!reviewed.consistent || reviewed.contradictions.length) {
+        throw this.outlineFactGateError(projectId,
+          `滚动第${batchNos[0]}-${batchNos[batchNos.length-1]}章有已举证事实矛盾，未保存本批细纲`,
+          { contradictions: reviewed.contradictions, candidateFacts }, 'fact_conflict', batchNos[0]);
+      }
+      rollingFactLedger = reviewed.ledger;
 
       for (let idx = 0; idx < batchChapters.length; idx++) {
         const ch = batchChapters[idx];

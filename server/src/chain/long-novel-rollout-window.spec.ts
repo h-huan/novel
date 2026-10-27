@@ -15,6 +15,8 @@ function fixture(writtenMax: number, existingAuthoredChapter = false) {
         ? { title: '长篇测试', type: 'long_novel', target_words: 240000, target_platform: 'fanqie', settings: '{}' }
         : sql.includes('COALESCE(MAX(chapter_index),0)')
           ? { m: writtenMax }
+          : sql.includes('FROM world_settings')
+            ? { rules: '夜间仅持证者可入内', story_premise: '调查一座旧城' }
           : sql.includes('FROM chapters') && sql.includes('chapter_index=?')
             ? existingAuthoredChapter ? { id:'authored', content:'作者已经写过正文',word_count:9,status:'draft' } : undefined
             : sql.includes('FROM outlines') && sql.includes('"order"=?')
@@ -31,6 +33,7 @@ function fixture(writtenMax: number, existingAuthoredChapter = false) {
   controller.resolvePlatformToneDirective = () => '项目已确认创作标准';
   controller.buildWorldWritingContext = () => '世界规则：夜间仅持证者可入内';
   controller.generatedCanonGuard = { assertStructuredCanCommit: vi.fn() };
+  controller.reviewOutlineFacts = vi.fn(async () => ({ consistent: true, contradictions: [], ledger: [] }));
   controller.llmCallWithRetry = vi.fn(async (_step: string, prompt: string) => {
     const match = /本批范围：本卷第\d+-\d+章，即全书第(\d+)-(\d+)章，共(\d+)章/.exec(prompt);
     if (!match) throw Error('没有按卷传入合法滚动批次');
@@ -69,9 +72,23 @@ describe('ARCH-004 progressive outline window', () => {
     expect(prompts.every((prompt:string)=>prompt.includes('已经完成上一章的调查'))).toBe(true);
     expect(prompts.every((prompt:string)=>prompt.includes('项目已确认创作标准'))).toBe(true);
     expect(controller.generatedCanonGuard.assertStructuredCanCommit).toHaveBeenCalledTimes(4);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(4);
+    expect(controller.reviewOutlineFacts.mock.calls[0][9]).toBe('rollout_outline_fact_dependencies');
     expect(inserts.filter(sql => sql.includes('INSERT INTO outlines'))).toHaveLength(15);
     expect(inserts.filter(sql => sql.includes('INSERT INTO chapters'))).toHaveLength(15);
     expect(inserts.filter(sql => sql.includes('UPDATE chapters'))).toHaveLength(0);
+  });
+
+  it('rejects an independently proven fact contradiction before writing the changed batch', async () => {
+    const { controller, inserts } = fixture(15);
+    controller.reviewOutlineFacts.mockResolvedValueOnce({
+      consistent: false, contradictions: ['已举证事实冲突'], ledger: [],
+    });
+    controller.outlineFactGateError = (_projectId:string,message:string) => new Error(message);
+    await expect(controller.rolloutDetailedOutlines('project')).rejects.toThrow('已举证事实矛盾');
+    expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(1);
+    expect(inserts).toHaveLength(0);
   });
 
   it('rejects an authored future chapter before buying another outline model call', async () => {
