@@ -4446,6 +4446,8 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
       this.assertExecutionStandardsComplete(dto.projectId);
       // 单次 LLM 模式：有 chapterId 时严格按已绑定详细大纲生成
       if (dto.chapterId) {
+        // 与普通正文共用同一滚动细纲窗口；短篇和窗口充足时不会触发模型。
+        await this.rolloutDetailedOutlines(dto.projectId);
         // 加载章节信息
         const chapterRow = this.db.prepare('SELECT * FROM chapters WHERE id = ? AND project_id = ?')
           .get(dto.chapterId, dto.projectId) as any;
@@ -11954,8 +11956,14 @@ ${summarizeOutlineConsistency(pending)}`,
       (db.prepare(`SELECT COALESCE(MAX(chapter_index),0) m FROM chapters WHERE project_id=? AND COALESCE(word_count,0)>0`)
         .get(projectId) as any)?.m || 0,
     );
-    const frontier = Math.max(detailedOrders.size, writtenMax);
-    const target = Math.min(totalEstimated, frontier + lookahead);
+    // 只根据已写正文消耗的细纲判断是否需要补纲，已生成但尚未写的细纲不是新的推进边界。
+    // 使用已有 ARCH-004 窗口和触发阈值；接近窗口末端时再按批次补齐，避免每写一章就生成一章。
+    let contiguousDetailed = 0;
+    while (detailedOrders.has(contiguousDetailed)) contiguousDetailed++;
+    const remainingDetailed = contiguousDetailed - writtenMax;
+    const trigger = Math.min(lookahead, LONG_OUTLINE_ROLLOUT_TRIGGER);
+    const target = Math.min(totalEstimated,
+      remainingDetailed <= trigger ? writtenMax + lookahead : contiguousDetailed);
     const missingGlobalNos: number[] = [];
     for (let n = 1; n <= target; n++) {
       if (!detailedOrders.has(n - 1)) missingGlobalNos.push(n);

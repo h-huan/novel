@@ -75,9 +75,13 @@ describe('public rule governance', () => {
     expect(api).toContain('同批原池');
     expect(api).toContain('短篇先审核并保存世界观');
     expect(api).not.toContain('缺项时最多使用同一模型补齐一次');
-    expect(api).toContain('固定顺序的 Prompt 规划链');
+    expect(api).toContain('长篇首次创建通过 `long-novel-init-foundation`');
+    expect(api).toContain('独立 `POST /api/v1/chain/generate-outline`');
+    expect(api).not.toContain('两条固定顺序的 Prompt 规划链');
     expect(api).not.toContain('旧 `Transform`/`Condition` 编排');
-    expect(readme).toContain('两条固定顺序的规划链');
+    expect(readme).toContain('长篇首次创建通过 `long-novel-init-foundation`');
+    expect(readme).toContain('独立 `/chain/generate-outline`');
+    expect(readme).not.toContain('长篇创建使用两条固定顺序的规划链');
     const chainTypes = readFileSync(join(process.cwd(), 'src/chain/chain.types.ts'), 'utf8');
     expect(chainTypes).toContain("export type NodeType = 'prompt';");
     expect(chainTypes).not.toContain('export type ExecutionMode');
