@@ -48,7 +48,7 @@ PUT    /api/v1/projects/:projectId/chapters/:id
 DELETE /api/v1/projects/:projectId/chapters/:id
 ```
 
-正文真实生成走 Chain 写作入口；是否成功必须以 `chapters.content` 实际落库及对应 Gate/质量报告为准。
+正文真实生成由 `ChainWritingController` 调用现行章节写作及质量闭环；固定 Prompt Chain 模板只用于长篇规划，不负责正文合成。是否成功仍以 `chapters.content` 实际落库及对应 Gate/质量报告为准。
 
 ## 模型配置
 
