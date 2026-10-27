@@ -194,6 +194,13 @@ export class ChainEngineService {
         // 1. 输入映射：从上下文提取本节点需要的变量
         const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
 
+        // Only current Prompt nodes may participate in a fixed production chain.
+        // Enforce this before skipOnEmptyInput: a retired node with empty input
+        // must not silently skip and unlock downstream generation.
+        if (node.type !== 'prompt') {
+          throw new Error('当前固定生产链不支持历史 Transform/Condition 节点，拒绝执行');
+        }
+
         // 2. 检查是否跳过
         if (node.skipOnEmptyInput && this.isInputEmpty(resolvedInput)) {
           this.logger.log(`${nodeLog} 输入为空，跳过此节点`);
@@ -208,11 +215,6 @@ export class ChainEngineService {
           };
         }
 
-        // Fixed production templates only contain Prompt nodes; retired
-        // transforms/conditions must not silently produce unreviewed story data.
-        if (node.type !== 'prompt') {
-          throw new Error('当前固定生产链不支持历史 Transform/Condition 节点，拒绝执行');
-        }
         const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
         const output = promptResult.output;
         const runId = promptResult.runId;
