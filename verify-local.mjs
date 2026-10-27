@@ -85,8 +85,8 @@ function triageThreeIssues(report) {
       serverStartupStderrCollected: false,
       // The verification script must not start/kill the user's local dev server.
       localRecovery: serverReady ? null : {
-        startFromRepositoryRoot: 'cd desktop; npm run dev',
-        backendOnlyAlternative: 'cd server; npm run start:dev',
+        startFromRepositoryRoot: 'cd server; npm run start:dev',
+        backendOnlyAlternative: 'cd server; npm run start:prod（需先 npm run build）',
         powershellHealthCheck: `Invoke-RestMethod -Uri '${healthEndpoint}' | Select-Object status, build`,
         expectedStatus: 'ok',
         rerun: '后端通过健康检查后，以相同参数重新运行 node verify-local.mjs',
@@ -187,8 +187,8 @@ function threeIssueMarkdown(triage) {
     ...(triage.prerequisite.localRecovery ? [
       '',
       '### 本地健康检查未通过：操作指引（由现有检查结果生成）',
-      '- 从仓库根目录启动开发环境：`' + triage.prerequisite.localRecovery.startFromRepositoryRoot + '`',
-      '- 只启动后端的备选命令：`' + triage.prerequisite.localRecovery.backendOnlyAlternative + '`',
+      '- 单独启动后端：`' + triage.prerequisite.localRecovery.startFromRepositoryRoot + '`',
+      '- 独立生产入口：`' + triage.prerequisite.localRecovery.backendOnlyAlternative + '`',
       '- 在 PowerShell 核对健康接口：`' + triage.prerequisite.localRecovery.powershellHealthCheck + '`（应返回 status=ok）',
       '- 重试：' + triage.prerequisite.localRecovery.rerun,
       '- 启动仍失败：' + triage.prerequisite.localRecovery.diagnosticRequired,
