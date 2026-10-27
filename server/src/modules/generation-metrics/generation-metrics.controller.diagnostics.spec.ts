@@ -183,3 +183,18 @@ describe('generation metrics diagnostics', () => {
   });
 
 });
+
+describe('precise discovery activity attribution',()=>{
+ it('reads active model runs with persisted discovery_request_id and filters on the requested identity',()=>{
+  const rows=[{id:'run-active',discovery_request_id:'request-active',scenario:'idea_generate',status:'running',
+   started_at:'2026-10-27T00:02:00Z',finished_at:null,error:null}];
+  const all=vi.fn(()=>rows),prepare=vi.fn(()=>({all}));
+  const controller=new GenerationMetricsController({getCockpit:()=>({runs:[]})} as any,
+   {getDb:()=>({prepare})} as any);
+  const result=controller.ideaActivity(undefined,'request-active');
+  expect(result.items).toEqual(rows);
+  expect(prepare.mock.calls[0][0]).toContain('SELECT id,discovery_request_id');
+  expect(prepare.mock.calls[0][0]).toContain('discovery_request_id=?');
+  expect(all).toHaveBeenCalledWith('request-active','request-active',null,null,null);
+ });
+});
