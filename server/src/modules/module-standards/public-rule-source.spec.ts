@@ -84,6 +84,30 @@ describe('public rule governance', () => {
     expect(skill).not.toContain('不自动提交Git');
     expect(skill).toContain('Git 修改、提交和推送以当前用户授权');
     expect(readme).not.toContain('唯一前置 Gate 的候选证据');
+    const publicDocuments: readonly [string, string][] = [
+      ['README.md', readme],
+      ['DEVELOPMENT_GOVERNANCE.md', maintenance],
+      ['QUALITY_EXECUTION.md', readFileSync(join(repoRoot, 'QUALITY_EXECUTION.md'), 'utf8')],
+      ['server/docs/API.md', api],
+      ['server/docs/user-guide.md', readFileSync(join(process.cwd(), 'docs/user-guide.md'), 'utf8')],
+      ['docs/skills/novel-source-quality/SKILL.md', skill],
+    ];
+    for (const [path, currentText] of publicDocuments) {
+      expect(currentText, path).toContain('server/shared/src/执行标准.ts');
+      // No old production instructions may survive in a reference document.
+      for (const obsolete of [
+        /缺项时最多使用同一模型补齐一次/,
+        /一次请求只能补齐一次/,
+        /QUALITY_EXECUTION\.md.{0,35}(?:为唯一规范|作为唯一规范)/,
+        /registerAllTemplates/,
+        /正文统一由.{0,30}单次\s*LLM/,
+        /需要包含\s*5\s*个核心人物/,
+        /天龙8步已于/,
+      ]) {
+        expect(currentText, path).not.toMatch(obsolete);
+      }
+    }
+
 
   });
 
