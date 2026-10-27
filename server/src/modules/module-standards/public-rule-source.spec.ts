@@ -112,6 +112,10 @@ describe('public rule governance', () => {
       /buildOutlineAdherenceContract/,
       /buildNarrativeQualityContract/,
       /buildAlignmentRepairPrompt/,
+      /node_9_chapter_synthesis/,
+      /chapterSynthesisMaxTokens/,
+      /请将以下8步草稿扩写并重写/,
+
       /SHORT_IDEA_HOOK_MIN_SIGNALS/,
       /每1000字必须有钩子或爽点/,
       /至少每3组问答插入/,
