@@ -76,9 +76,9 @@ describe('chain HTTP architecture', () => {
 
   it('prevents claims of involuntary detention or binding decisions from being created only in projections', () => {
     const source = read('chain.controller.ts');
-    expect(source).toContain('口头要求留下/别走');
-    expect(source).toContain('没有写明实际发生与合法权限时');
-    expect(source).toContain('不得让scenes.outcome、characterActions.result或characterStates.stateAfter');
+    expect(source).toContain('口头要求、自愿配合和合法实际控制不可混同');
+    expect(source).toContain('缺权限或执行动作时不得写成强制留置');
+    expect(source).toContain('scenes.outcome、characterActions.result、characterStates.stateAfter及伏笔回收必须从同一已发生事件投影');
     expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
     expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
   });
