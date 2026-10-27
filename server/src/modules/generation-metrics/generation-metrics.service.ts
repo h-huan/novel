@@ -203,7 +203,7 @@ export class GenerationMetricsService implements OnModuleInit {
     return Number(result.changes || 0);
   }
 
-  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true) {
+  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true, discoveryRequestId?: string | null) {
     const db = this.databaseService.getDb();
     // 项目内场景缺 projectId 一律阻断：以前这里静默取 constitution=null、runId 不注入 systemPrompt、
     // 记录退化成平台级，等于「没有执行标准的链路」照常跑完却看着正常（review/summary 判定失标的真因）。
@@ -217,9 +217,10 @@ export class GenerationMetricsService implements OnModuleInit {
     const id = crypto.randomUUID();
     const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
     const stage = qualityStage(scenario, stepKey);
-    db.prepare(`INSERT INTO generation_runs (id, project_id, stage, scenario, status, constitution_revision,
-      constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
-      id, projectId ?? null, stage, scenario, 'running', constitution?.revision ?? null,
+    db.prepare(`INSERT INTO generation_runs (id, project_id, discovery_request_id, stage, scenario, status, constitution_revision,
+      constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, projectId ?? null, scenario === 'idea_generate' ? discoveryRequestId ?? null : null,
+      stage, scenario, 'running', constitution?.revision ?? null,
       constitution ? JSON.stringify(constitution) : null, digest(systemPrompt || ''), digest(prompt), new Date().toISOString());
     const compiled = row ? compileContext(db, { projectId: projectId!, stage, chapterIndex }) : null;
     const context = compiled?.snapshot || '';
