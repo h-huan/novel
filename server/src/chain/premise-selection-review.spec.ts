@@ -343,6 +343,28 @@ it('does not enter another provider attempt after the last physical call returns
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
     expect(result.selectionAudit.reselectionAttempted).toBe(true);
   });
+  it('does not buy the same failed original-pool reselection again after protocol correction fails',async()=>{
+    const c=Object.create(ChainController.prototype) as any;
+    c.logger={warn:vi.fn()};
+    c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValueOnce(failure);
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+      expect(prompt).toContain('【必须处理的位置及模式】');
+      expect(options.physicalCallBudget.remaining).toBeGreaterThanOrEqual(2);
+      // The same scoped proposal has already consumed both JSON corrections.
+      // No source data, selected identity or reviewed issue changed.
+      options.physicalCallBudget.remaining-=2;
+      return {data:null,validationIssues:['同一原池候选协议两次补正仍失败']};
+    });
+    const result=await c.reconcilePremiseSelection(selection(),2,3,['悬疑'],'');
+    expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+    expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A']);
+    expect(result.selectionAudit).toMatchObject({
+      partial:true,unresolvedPremiseIds:['B'],excludedPremiseIds:['B'],
+    });
+    // The unfixed candidate is not falsely accepted merely to meet quantity.
+    expect(result.selectionAudit.finalReview.passed).toBe(true);
+  });
+
   it('isolates a repaired duplicate and retains the original unaffected choice after one reselection', async () => {
     const c = Object.create(ChainController.prototype) as any;
     const finalFailure = {...failure, issues:[{...failure.issues[0],premiseId:'A',referencePremiseId:'C'}]};

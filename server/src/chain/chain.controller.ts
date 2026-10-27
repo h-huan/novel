@@ -6554,12 +6554,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return true;
       }
     };
-    while (reselectionBudget.remaining > 0) {
+    // The scoped proposal already has its own bounded JSON correction. If it
+    // fails without changing inputs or independent evidence, restarting it in
+    // this outer loop can only buy the same failed proposal repeatedly.
+    if (reselectionBudget.remaining > 0) {
       const pendingSlots = repairPlan.repairSlots.filter(slot => !completedSlots.has(String(slot.replacesPremiseId)));
-      if (!pendingSlots.length) break;
-      const before = reselectionBudget.remaining;
-      if (await reselectScope(pendingSlots)) break;
-      if (reselectionBudget.remaining >= before) break;
+      if (pendingSlots.length) await reselectScope(pendingSlots);
     }
     const unresolvedIds = repairPlan.repairSlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)))
       .map(slot=>String(slot.replacesPremiseId));
