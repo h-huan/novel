@@ -202,8 +202,8 @@ export function summarizeDiscoveryStepMetrics(rows) {
 }
 
 /** The latest discovery audit covers completed batches, not interrupted calls.
- * Newer model calls have no discovery_request_id in generation_runs; do not
- * misrepresent time proximity as exact correlation. */
+ * Correlate new model runs by persisted discovery_request_id; legacy rows have
+ * no identity and must retain their time-only uncertainty. */
 export function summarizeRecentIdeaActivity(rows,completedAuditFinishedAt,backendStartedAt,inspectedAt){
  const stamp=value=>{const t=Date.parse(String(value||''));return Number.isFinite(t)?t:null;};
  const cutoff=stamp(completedAuditFinishedAt),backend=stamp(backendStartedAt),now=stamp(inspectedAt)??Date.now();
@@ -213,15 +213,20 @@ export function summarizeRecentIdeaActivity(rows,completedAuditFinishedAt,backen
   return row.scenario==='idea_generate'&&t!==null
     &&(cutoff===null||t>cutoff||(end!==null&&end>cutoff)||row.status==='running');
  }).sort((a,b)=>(stamp(b.started_at??b.startedAt)??0)-(stamp(a.started_at??a.startedAt)??0));
+ const knownRequestIds=sorted.filter(row=>String(row.discovery_request_id??row.discoveryRequestId??'').trim()).length;
+ const association=!knownRequestIds?'after_latest_completed_audit_time_only'
+  :knownRequestIds===sorted.length?'exact_discovery_request_id_per_model_run'
+  :'mixed_exact_request_id_and_time_only';
  const runs=sorted.slice(0,40).map(row=>{
   const startedAt=row.started_at??row.startedAt??null,finishedAt=row.finished_at??row.finishedAt??null;
   const start=stamp(startedAt),finish=stamp(finishedAt),status=String(row.status??'unknown').toLowerCase();
-  return {runId:row.id??null,stage:row.stage??null,status,startedAt,finishedAt,
+  return {runId:row.id??null,discoveryRequestId:row.discovery_request_id??row.discoveryRequestId??null,
+   stage:row.stage??null,status,startedAt,finishedAt,
    elapsedMs:start===null?null:Math.max(0,(finish??now)-start),
    staleProcess:status==='running'&&backend!==null&&start!==null&&start<backend,
    model:row.model??null,error:row.error==null?null:redactDiagnosticText(row.error)};
  });
- return {association:'after_latest_completed_audit_time_only',latestCompletedAuditFinishedAt:completedAuditFinishedAt??null,
+ return {association,latestCompletedAuditFinishedAt:completedAuditFinishedAt??null,
   totalRecent:sorted.length,running:runs.filter(x=>x.status==='running'&&!x.staleProcess).length,
   staleRunning:runs.filter(x=>x.staleProcess).length,
   cancelled:runs.filter(x=>x.status==='cancelled').length,
@@ -248,12 +253,13 @@ export function summarizeIdeaActivityEvidence(activity) {
   running:ready?running.length:null,cancelled:ready?cancelled.length:null,
   staleRunning:ready?stale.length:null,
   records:rows.slice(0,20).map(row=>({
-   runId:row.runId??null,stage:row.stage??null,status:row.status??null,
+   runId:row.runId??null,discoveryRequestId:row.discoveryRequestId??null,
+   stage:row.stage??null,status:row.status??null,
    startedAt:row.startedAt??null,finishedAt:row.finishedAt??null,
    elapsedMs:row.elapsedMs??null,staleProcess:row.staleProcess===true,
    error:row.error==null?null:redactDiagnosticText(row.error)
   })),
   truncated:ready?Boolean(activity.truncated||rows.length>20):null,
-  limitation:'只显示已持久化的模型调用，可能跨多个灵感请求；没有最终审计时不能推断已生成数量、整批耗时或独立质量门通过。'
+  limitation:'新模型调用逐条记录精确请求ID；旧调用缺ID时仍仅能按时间邻近归类，不同请求不能混为一批；没有最终审计时不能推断已生成数量、整批耗时或独立质量门通过。'
  };
 }
