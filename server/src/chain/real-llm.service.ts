@@ -1017,6 +1017,25 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         );
 
         if (request.responseFormat === 'json_object' && result.finishReason === 'length') {
+          // A single idea-card review that produced *no JSON content at all* has
+          // already consumed its reasoning/output quota. Enlarging 131k→262k→
+          // 393k and paying for the same failed reasoning is the expensive path
+          // seen in local diagnostics. This is a failed-call recovery only:
+          // preserve normal reasoning for all successful runs; retry the exact
+          // same model, prompt, JSON contract and quota once without thinking.
+          // Partial JSON is different: it may actually need more output tokens
+          // and must retain the existing lossless expansion path.
+          if (singleIdeaCardReview && !result.content.trim() && !preserveThinking
+            && !thinkingDisabledAttempted && hasRecoveryAllowance()) {
+            this.logger.warn('单张完整卡审核推理耗尽且未产生JSON，沿用原额度同模型关闭思考补发一次；正常审核仍使用完整推理');
+            const recovered = await callWithoutThinking();
+            if (recovered.content.trim() && recovered.finishReason !== 'length') {
+              const response = this.toResponse(recovered, modelName, request, startTime);
+              emit('success', { resp: response });
+              return response;
+            }
+            stopTruncated(recovered, '单张完整卡审核无正文截断，关闭思考补发仍未取得完整JSON，停止无效扩容');
+          }
           // 关键修复：截断根因是输出配额不足，用相同 maxTokens 重试必然再次截断。
           // 在模型输出上限内把 maxTokens 翻倍，用【同一模型/同一 prompt/同一 json 模式】重试（不换模型、不去 json，非降级）。
           // 扩容预算独立于空内容重试预算：只要没到硬顶就继续翻倍，直到装得下或到顶。

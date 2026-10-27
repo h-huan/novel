@@ -123,6 +123,20 @@ it('cancels an already opened OpenAI compatible stream instead of retaining its 
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
+it.each([true,false])('avoids serial output-cap expansion after an empty one-card review at a large configured cap (valid=%s)',async(valid)=>{
+ const service=createService(),budget={remaining:3};
+ const callModel=vi.fn().mockResolvedValueOnce({content:'',finishReason:'length'})
+  .mockResolvedValueOnce({content:valid?'{"reviews":[{"position":1,"payoffCredible":false,"issues":["核验缺少必要条件"]}]}':'',finishReason:valid?'stop':'length'});
+ (service as any).callModel=callModel;
+ const request={prompt:'真实卡与完整事实来源',scenario:'idea_generate',responseFormat:'json_object' as const,
+  maxTokens:131072,structuredReviewUnitCount:1,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}};
+ if(valid)expect(JSON.parse((await service.generate(request)).content).reviews[0].payoffCredible).toBe(false);
+ else await expect(service.generate(request)).rejects.toMatchObject({structuredOutputTruncated:true});
+ expect(callModel).toHaveBeenCalledTimes(2);
+ expect(callModel.mock.calls.map(call=>call[4])).toEqual([131072,131072]);
+ expect(callModel.mock.calls.map(call=>call[8])).toEqual([undefined,true]);
+ expect(budget.remaining).toBe(1);
+});
 it.each([true,false])('recovers an actual one-card idea review truncated at the explicit ceiling, valid=%s',async(valid)=>{
   const service=createService(),budget={remaining:2};
   const callModel=vi.fn().mockResolvedValueOnce({content:'{"reviews":[{"position":1,',finishReason:'length'})
