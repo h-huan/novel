@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE } from './premise-causal-plan';
 import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { materializePremisePayoffReview, premisePayoffReviewIssues } from './premise-payoff-review';
 import { materializePremiseSourceReview, normalizePremiseReselection, premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -33,6 +33,14 @@ function report(s:ReturnType<typeof selection>) {
 }
 
 describe('plan critical prerequisites before full story cards',()=>{
+  it('models intermediate result before payoff and teaches generation to keep later prerequisites separate',()=>{
+    const steps=premiseCausalPlanExample();
+    expect(steps).toHaveLength(2);
+    expect(steps[0].result.field).toBe('escalation');
+    expect(steps[1].result.field).toBe('payoff');
+    expect(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE).toContain('中间动作不得直接标终局payoff');
+    expect(ideaPremiseSelectionDirective('short_story',5)).toContain(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE);
+  });
   it('repairs only an incomplete index with existing same-story evidence, preserving all facts and valid peers',()=>{
     const input=selection(['A','B']),complete=structuredClone(input.selected[0].causalPlan);
     input.selected[0].causalPlan.pop();

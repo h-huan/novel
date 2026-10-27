@@ -1,5 +1,5 @@
 import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits} from './discovery-fulfillment';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
 import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
@@ -6235,7 +6235,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const targets = premiseCausalPlanRepairInput(selection);
     if (!targets.length) return selection;
     const response = await this.realLLM.generate({
-      prompt: '只补全点名题材的causalPlan引用索引，不修改或补造任何故事字段、条件、身份与结果。逐环节引用下方本题材已有的实际行动、条件与结果，覆盖主线payoff；条件未写时不得编造，普通直接因果可为空。修好索引后仍须独立审查真实因果，不能自行声明通过。只返回JSON:{"plans":[{"premiseId":"点名ID","causalPlan":'
+      prompt: PREMISE_CAUSAL_SEQUENCE_DIRECTIVE + '\\n只补全点名题材的causalPlan引用索引，不修改或补造任何故事字段、条件、身份与结果。逐环节引用下方本题材已有的实际行动、条件与结果，覆盖主线payoff；条件未写时不得编造，普通直接因果可为空。修好索引后仍须独立审查真实因果，不能自行声明通过。只返回JSON:{"plans":[{"premiseId":"点名ID","causalPlan":'
         + JSON.stringify(premiseCausalPlanExample()) + '}]}；恰好覆盖全部点名ID，不返回其它字段。\n【不可修改的实际故事字段与索引问题】' + JSON.stringify(targets),
       scenario: 'idea_generate', responseFormat: 'json_object', temperature: 0.1,
       timeout: LLM_TUNABLES.timeoutComplex(), maxEmptyRetries: 0, physicalCallBudget: budget,
@@ -6490,7 +6490,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           +'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool可纠正原身份展开。不得复制其它位置、改变分类或用正常项填空。'
-          +'\n每个premise额外必返causalPlan，按下面JSON结构与已注入GEN-002规则逐项锚定原文；条数由实际事件决定，不按示例凑数。'
+          +'\n每个premise额外必返causalPlan，按下面JSON结构与已注入GEN-002规则逐项锚定原文；条数由实际事件决定，不按示例凑数。'+PREMISE_CAUSAL_SEQUENCE_DIRECTIVE
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n先确定全部最终候选，并实质核对行动、升级、反转与代价差异；不要生成逐对自评文本，所有涉及新候选的比较仍由服务器独立同构复核。'
           +'\n按已注入GEN-002的最终差异比较合同执行。分类候选='+JSON.stringify(categories)

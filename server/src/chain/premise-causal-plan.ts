@@ -49,10 +49,24 @@ export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<str
   }))};
 }
 
+/** One independent generation/review contract: distinguish a genuine missing
+ * story prerequisite from a citation plan that skips a later established event.
+ * The model can use any count of steps, including one for true direct causality.
+ */
+export const PREMISE_CAUSAL_SEQUENCE_DIRECTIVE =
+  '因果计划只绑定故事已写出的实际状态变化。中间动作不得直接标终局payoff：主角准备或提出请求，只能得到已发生的直接结果；若最终胜负还依赖后续物证取得/核验、他人到场、负责人认定、对手行动或程序决定，须把这些动作及既有条件接续成后续环节，不能让前一步越级产生终局。每个result只填写该步action及其已成立conditions实际产生的结果，不能把后续结果提前填写；后一步的条件必须已在故事字段中存在，不能由终局倒推。最后一个关键环节应承接真正的payoff与代价，条件缺失时不能靠改causalPlan引用伪造成立；普通直接因果允许一环，不按示例强制凑环节。';
+
 export function premiseCausalPlanExample(): PremiseCausalLink[] {
-  return [{ action: { field: 'activeChoice', quote: '本项实际行动的连续原文' },
-    conditions: [{ field: 'escalation', quote: '本项已建立的必要条件连续原文' }],
-    result: { field: 'payoff', quote: '由该行动和条件支撑的结果连续原文' } }];
+  // Two-stage illustration prevents the old single action->payoff example
+  // from teaching the model to attach a multi-step finale to the opening act.
+  return [
+    { action: { field: 'activeChoice', quote: '主角实际发起第一项行动的连续原文' },
+      conditions: [{ field: 'openingEvent', quote: '促使该行动发生的已建立条件连续原文' }],
+      result: { field: 'escalation', quote: '第一项行动当下真正产生的变化连续原文' } },
+    { action: { field: 'reversalEffect', quote: '后续物证核验或决定者实际行动的连续原文' },
+      conditions: [{ field: 'escalation', quote: '后续决定者已有证据与权限的连续原文' }],
+      result: { field: 'payoff', quote: '经后续步骤才兑现的结局与代价连续原文' } },
+  ];
 }
 
 export function premiseCausalPlanIssues(item: Record<string, unknown>): string[] {
