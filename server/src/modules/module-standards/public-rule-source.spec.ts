@@ -69,11 +69,25 @@ describe('public rule governance', () => {
     expect(api).toContain('同批原池');
     expect(api).toContain('短篇先审核并保存世界观');
     expect(api).not.toContain('缺项时最多使用同一模型补齐一次');
-    expect(api).toContain('旧 `Transform`/`Condition` 编排');
-    expect(readme).toContain('固定长篇规划只由两条已注册的模板链驱动');
+    expect(api).toContain('固定顺序的 Prompt 规划链');
+    expect(api).not.toContain('旧 `Transform`/`Condition` 编排');
+    expect(readme).toContain('两条固定顺序的规划链');
     const chainTypes = readFileSync(join(process.cwd(), 'src/chain/chain.types.ts'), 'utf8');
     expect(chainTypes).toContain("export type NodeType = 'prompt';");
-    expect(chainTypes).toContain("export type ExecutionMode = 'sequential';");
+    expect(chainTypes).not.toContain('export type ExecutionMode');
+    expect(chainTypes).not.toContain('export interface ChainConfig');
+    expect(chainTypes).not.toContain('skipOnEmptyInput');
+    expect(chainTypes).not.toContain('outputMapping');
+    expect(chainTypes).toContain('promptTemplateId: string;');
+    const chainEngine = readFileSync(join(process.cwd(), 'src/chain/chain-engine.service.ts'), 'utf8');
+    expect(chainEngine).not.toContain('strictMode');
+    expect(chainEngine).not.toContain('executeTransformNode(');
+    expect(chainEngine).not.toContain('executeConditionNode(');
+    expect(chainEngine).not.toContain("overallState = errors.length > 0 ? 'partial'");
+    const templates = readFileSync(join(process.cwd(), 'src/chain/chain-template.service.ts'), 'utf8');
+    expect(templates).not.toContain('config: { timeout:');
+    expect(templates).not.toContain('retryCount: 0');
+
     expect(chainTypes).not.toContain('export interface Branch');
 
     expect(api).not.toContain('QUALITY_EXECUTION.md` 为唯一规范');
