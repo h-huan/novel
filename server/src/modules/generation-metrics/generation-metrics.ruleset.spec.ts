@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
+// Vitest aliases node:sqlite to a no-op database. Read the actual built-in
+// through Node's require for persistence/migration assertions.
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 import { reconcileSchema } from '../../database/schema-reconciler';
 import { GenerationMetricsService, generationRulesetSnapshotIsCurrent } from './generation-metrics.service';
 
