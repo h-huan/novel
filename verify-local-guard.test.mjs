@@ -27,50 +27,23 @@ function run(report) {
   return { result, next, nextMarkdown };
 }
 
-// The development launcher must not reuse a healthy but stale backend.
-// A health response with commit=null is NOT evidence of the loaded source.
+// Startup is deliberately non-cascading. Each launcher must have a single
+// owner; status polling and IPC must never create or kill a backend.
 {
-  const launcher = fs.readFileSync(path.join(root, 'desktop', 'scripts', 'dev.js'), 'utf8');
-  assert.match(launcher, /health\?\.build\?\.commit === localBuildCommit/u);
-  assert.match(launcher, /existing\.build\?\.commit === localBuildCommit/u);
-  assert.match(launcher, /端口3100已存在旧版或未标记版本的后端/u);
-  assert.doesNotMatch(launcher, /if \(await backendHealthy\(\)\) \{\s*console\.log\('\[dev\] reuse healthy backend/u);
-}
-
-// The existing restart.ps1 is itself a backend launcher. Both its normal
-// build path and -Watch path must stamp the revision before Start-Process,
-// otherwise desktop/scripts/dev.js rejects this project's own healthy server.
-{
-  const restart = fs.readFileSync(path.join(root, 'restart.ps1'), 'utf8');
-  const backendBranch = restart.indexOf("if ($Only -in @('all', 'back')) {");
-  const gitHead = restart.indexOf('git -C $ProjectRoot rev-parse --verify HEAD');
-  const stamp = restart.indexOf('$env:NOVEL_BUILD_COMMIT = $localBuildCommit');
-  const watchStart = restart.indexOf('$backend = Start-Process', stamp);
-  const normalStart = restart.indexOf('$backend = Start-Process', watchStart + 1);
-  assert.ok(backendBranch >= 0 && gitHead > backendBranch && stamp > gitHead,
-    'backend version must be captured inside backend startup');
-  assert.ok(watchStart > stamp && normalStart > watchStart,
-    'both backend launch paths must inherit the version stamp');
-  assert.match(restart, /\$gitStatus -ne 0 -or \$localBuildCommit -notmatch/u);
-  assert.ok(restart.includes("$localBuildCommit -notmatch '^[0-9a-fA-F]{40}$') {"),
-    'PowerShell version validation must remain syntactically complete');
-  assert.match(restart, /throw '无法确认当前 Git HEAD/u);
-  // PowerShell must not announce readiness or launch the frontend merely
-  // because an older process responds HTTP 200.
-  assert.match(restart, /\$reportedBuildCommit -ceq \$localBuildCommit/u);
-  assert.match(restart, /\$healthData\.status -eq 'ok'/u);
-  assert.match(restart, /throw "后端未按本次提交就绪/u);
-  assert.doesNotMatch(restart, /if \(\$healthy\).*Write-Note '后端健康检查超时/u);
-  assert.equal((restart.match(/^\s*\$backend = Start-Process/gmu) || []).length, 2,
-    'normal and -Watch must be the only backend launcher branches');
-  // Use the actual PowerShell parser whenever it is installed (including
-  // Windows development and supported CI runners); no code is executed.
-  const psPath = path.join(root, 'restart.ps1').replace(/'/g, "''");
-  const psCommand = "$tok=$null;$err=$null;[System.Management.Automation.Language.Parser]::ParseFile('"
-    + psPath + "',[ref]$tok,[ref]$err)|Out-Null;if($err.Count){$err|ForEach-Object{Write-Error $_};exit 1}";
-  const parser = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', psCommand],
-    { encoding: 'utf8' });
-  if (!parser.error) assert.equal(parser.status, 0, 'restart.ps1 PowerShell parser errors: ' + parser.stderr);
+  const scripts = JSON.parse(fs.readFileSync(path.join(root,'desktop','package.json'),'utf8')).scripts;
+  const vite = fs.readFileSync(path.join(root,'desktop','vite.config.mts'),'utf8');
+  const main = fs.readFileSync(path.join(root,'desktop','src','main','main.ts'),'utf8');
+  assert.equal(fs.existsSync(path.join(root,'restart.ps1')),false);
+  assert.equal(fs.existsSync(path.join(root,'desktop','scripts','dev.js')),false);
+  assert.equal(scripts.dev,'vite --host 0.0.0.0');
+  assert.match(vite,/onstart: \(\) => \{\}/u);
+  assert.doesNotMatch(vite,/startElectronHidden|stopElectronChild|taskkill\.exe/u);
+  assert.match(main,/async function checkServerConnection/u);
+  assert.doesNotMatch(main,/startManagedServer|managedServerProcess|NOVEL_MANAGED_SERVER|spawn\(/u);
+  assert.match(main,/ipcMain\.handle\('start-server'/u);
+  assert.match(main,/ipcMain\.handle\('stop-server'/u);
+  assert.match(main,/await checkServerConnection\(SERVER_PORT\)/u);
+  assert.doesNotMatch(main,/ensureServerRunning/u);
 }
 
 // Direct server launchers are also first-class paths. A port occupied by a
