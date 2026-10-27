@@ -11983,6 +11983,10 @@ ${summarizeOutlineConsistency(pending)}`,
       `SELECT content,planned_recovery_chapter_index FROM foreshadowings WHERE project_id=? AND status='active' LIMIT 20`,
     ).all(projectId) as any[];
     const platformDirective = this.resolvePlatformToneDirective(projectId);
+    // Rolling outlines must consume the same confirmed world as chapter writing.
+    // The project constitution/confirmed story is already injected by RealLLM for project-scoped calls;
+    // do not duplicate the entire project card in the prompt.
+    const confirmedWorld = this.buildWorldWritingContext(projectId, false);
 
     // 4) 按卷、分批（每批最多 4 章）滚动生成并落库
     const ROLLOUT_BATCH = 4;
@@ -12001,6 +12005,26 @@ ${summarizeOutlineConsistency(pending)}`,
         j++;
       }
       const localNos = batchNos.map(n => n - firstSpan.start + 1);
+      // A draft shell is writable, but an authored or locked chapter must never
+      // be rebound to a freshly generated outline. Check before the paid call.
+      for (const chapterNo of batchNos) {
+        const existing = db.prepare(
+          'SELECT id,content,word_count,status FROM chapters WHERE project_id=? AND chapter_index=?',
+        ).get(projectId,chapterNo) as any;
+        if (existing && (Number(existing.word_count || 0) > 0
+          || String(existing.content || '').trim()
+          || !['draft','planned'].includes(String(existing.status || '')))) {
+          throw new HttpException(`全书第${chapterNo}章已有正文或非草稿状态，停止自动补纲，保留作者已确认内容`,409);
+        }
+      }
+      const previousOutline = batchNos[0] > 1
+        ? db.prepare(`SELECT title,content,scenes,chapter_function FROM outlines
+            WHERE project_id=? AND level='chapter' AND "order"=? LIMIT 1`)
+            .get(projectId,batchNos[0]-2) as any
+        : null;
+      if (batchNos[0] > 1 && !previousOutline) {
+        throw new HttpException(`全书第${batchNos[0]-1}章缺少已确认章纲，不允许凭空续接下批细纲`,409);
+      }
       opts.onProgress?.(
         `滚动补纲：《${firstSpan.vol.title}》本卷第${localNos[0]}-${localNos[localNos.length - 1]}章（全书第${batchNos[0]}-${batchNos[batchNos.length - 1]}章）`,
       );
@@ -12012,6 +12036,8 @@ ${summarizeOutlineConsistency(pending)}`,
 全书规划：共${totalEstimated}章、${spans.length}卷。
 本卷规划：${JSON.stringify({ title: firstSpan.vol.title, theme: volMeta.theme, goal: volMeta.goal, keyEvents: volMeta.keyEvents, climax: volMeta.climax })}
 主要人物：${JSON.stringify(mainChars)}
+【已确认世界观完整来源（同正文权威资料）】：${confirmedWorld}
+【上一章已确认详细章纲（只读接力，不得重复已完成任务）】：${JSON.stringify(previousOutline)}
 当前在埋伏笔（不得遗忘，应按规划推进/提醒/回收）：${JSON.stringify(activeForeshadowings)}
 【已写正文进展·最高事实，不得与之矛盾】：
 ${storySoFar || '（开篇首批，尚无已写正文）'}
@@ -12072,6 +12098,14 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
         ).get(projectId, globalNo) as any;
         const ts = new Date().toISOString();
         if (existingChapter) {
+          const currentChapter = db.prepare(
+            'SELECT content,word_count,status FROM chapters WHERE id=? AND project_id=?',
+          ).get(existingChapter.id,projectId) as any;
+          if (!currentChapter || Number(currentChapter.word_count || 0) > 0
+            || String(currentChapter.content || '').trim()
+            || !['draft','planned'].includes(String(currentChapter.status || ''))) {
+            throw new HttpException(`全书第${globalNo}章生成期间已被写入或锁定，停止重绑章纲`,409);
+          }
           db.prepare(`UPDATE chapters SET outline_id=?, volume_index=?, title=?, updated_at=? WHERE id=?`)
             .run(oid, Number(firstSpan.vol.order) + 1, ch.title || `第${globalNo}章`, ts, existingChapter.id);
         } else {

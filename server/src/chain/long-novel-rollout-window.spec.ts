@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
 
-function fixture(writtenMax: number) {
+function fixture(writtenMax: number, existingAuthoredChapter = false) {
   const controller = Object.create(ChainController.prototype) as any;
   const inserts: string[] = [];
   const detailRows = Array.from({ length: 20 }, (_, order) => ({ order }));
@@ -15,7 +15,11 @@ function fixture(writtenMax: number) {
         ? { title: '长篇测试', type: 'long_novel', target_words: 240000, target_platform: 'fanqie', settings: '{}' }
         : sql.includes('COALESCE(MAX(chapter_index),0)')
           ? { m: writtenMax }
-          : undefined,
+          : sql.includes('FROM chapters') && sql.includes('chapter_index=?')
+            ? existingAuthoredChapter ? { id:'authored', content:'作者已经写过正文',word_count:9,status:'draft' } : undefined
+            : sql.includes('FROM outlines') && sql.includes('"order"=?')
+              ? { title:'前一章', content:'已经完成上一章的调查', scenes:'{}', chapter_function:'conflict' }
+              : undefined,
       all: () => sql.includes("level='volume'") ? volumeRows
         : sql.includes("level='chapter'") ? detailRows
           : [],
@@ -25,6 +29,7 @@ function fixture(writtenMax: number) {
   controller.db = { getDb: () => db };
   controller.logger = { log: vi.fn() };
   controller.resolvePlatformToneDirective = () => '项目已确认创作标准';
+  controller.buildWorldWritingContext = () => '世界规则：夜间仅持证者可入内';
   controller.generatedCanonGuard = { assertStructuredCanCommit: vi.fn() };
   controller.llmCallWithRetry = vi.fn(async (_step: string, prompt: string) => {
     const match = /本批范围：本卷第\d+-\d+章，即全书第(\d+)-(\d+)章，共(\d+)章/.exec(prompt);
@@ -59,9 +64,20 @@ describe('ARCH-004 progressive outline window', () => {
     const result = await controller.rolloutDetailedOutlines('project');
     expect(result).toMatchObject({ added: 15, target: 35, totalEstimated: 60 });
     expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(4);
+    const prompts=controller.llmCallWithRetry.mock.calls.map((call:any[])=>call[1]);
+    expect(prompts.every((prompt:string)=>prompt.includes('世界规则：夜间仅持证者可入内'))).toBe(true);
+    expect(prompts.every((prompt:string)=>prompt.includes('已经完成上一章的调查'))).toBe(true);
+    expect(prompts.every((prompt:string)=>prompt.includes('项目已确认创作标准'))).toBe(true);
     expect(controller.generatedCanonGuard.assertStructuredCanCommit).toHaveBeenCalledTimes(4);
     expect(inserts.filter(sql => sql.includes('INSERT INTO outlines'))).toHaveLength(15);
     expect(inserts.filter(sql => sql.includes('INSERT INTO chapters'))).toHaveLength(15);
     expect(inserts.filter(sql => sql.includes('UPDATE chapters'))).toHaveLength(0);
+  });
+
+  it('rejects an authored future chapter before buying another outline model call', async () => {
+    const { controller, inserts } = fixture(15, true);
+    await expect(controller.rolloutDetailedOutlines('project')).rejects.toThrow('已有正文或非草稿状态');
+    expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
   });
 });
