@@ -109,6 +109,8 @@ export function discoveryStepMetricDetail(row = {}) {
     stage: row.stage ?? null, scenario: row.scenario ?? null, stepKey, step_key: stepKey,
     status: row.status ?? null, attempt: numeric(row.attempt), phase: row.phase ?? null,
     durationMs: numeric(row.duration_ms ?? row.durationMs), internalRetries, physicalAttempts: 1 + internalRetries,
+    promptTokens: numeric(row.prompt_tokens ?? row.promptTokens),
+    completionTokens: numeric(row.completion_tokens ?? row.completionTokens),
     totalTokens: numeric(row.total_tokens ?? row.totalTokens), model: row.model_version ?? row.model ?? null,
     startedAt: row.started_at ?? row.startedAt ?? null,
     finishedAt: row.finished_at ?? row.finishedAt ?? row.created_at ?? null,
@@ -138,6 +140,7 @@ function aggregateMetrics(runs, keyFn) {
     let group = groups.get(key);
     if (!group) {
       group = { key, calls: 0, failedCalls: 0, internalRetries: 0, physicalAttempts: 0, sumDurationMs: 0,
+        promptTokens: 0, completionTokens: 0, hasPromptTokens: false, hasCompletionTokens: false,
         totalTokens: 0, hasTokenCount: false, firstStartMs: null, lastFinishMs: null, runIds: [] };
       groups.set(key, group);
     }
@@ -146,6 +149,8 @@ function aggregateMetrics(runs, keyFn) {
     group.internalRetries += run.internalRetries;
     group.physicalAttempts += run.physicalAttempts;
     group.sumDurationMs += run.durationMs ?? 0;
+    if (run.promptTokens !== null) { group.promptTokens += run.promptTokens; group.hasPromptTokens = true; }
+    if (run.completionTokens !== null) { group.completionTokens += run.completionTokens; group.hasCompletionTokens = true; }
     if (run.totalTokens !== null) { group.totalTokens += run.totalTokens; group.hasTokenCount = true; }
     const start = run.startedAt ? Date.parse(run.startedAt) : NaN;
     const finish = run.finishedAt ? Date.parse(run.finishedAt) : NaN;
@@ -157,6 +162,8 @@ function aggregateMetrics(runs, keyFn) {
     key: group.key, calls: group.calls, failedCalls: group.failedCalls, internalRetries: group.internalRetries,
     physicalAttempts: group.physicalAttempts, sumDurationMs: group.sumDurationMs,
     wallMs: group.firstStartMs !== null && group.lastFinishMs !== null ? Math.max(0, group.lastFinishMs - group.firstStartMs) : null,
+    promptTokens: group.hasPromptTokens ? group.promptTokens : null,
+    completionTokens: group.hasCompletionTokens ? group.completionTokens : null,
     totalTokens: group.hasTokenCount ? group.totalTokens : null, runIds: group.runIds,
   })).sort((a, b) => a.key > b.key ? 1 : a.key < b.key ? -1 : 0);
 }
