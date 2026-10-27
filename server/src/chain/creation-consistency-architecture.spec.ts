@@ -200,7 +200,13 @@ describe('creation consistency architecture invariants', () => {
     const end = controllerSource.indexOf("const charResult = await this.llmCallWithRetry<any[]>('角色生成'", start);
     expect(end).toBeGreaterThan(start);
     const prompt = controllerSource.slice(start, end);
-    expect(prompt).toContain('【角色事实台账（字段只能从这些逐字证据归纳）】');
+    expect(prompt).toContain('【角色来源定位目录（原文见上方唯一完整创作上下文）】');
+    expect(prompt).toContain('已确认题材是最高事实基准');
+    expect(prompt).toContain('每一项仍须回读对应的实际原文才能确定');
+    expect(prompt).toContain('没有明确证据，填写"unavailable"或留空');
+    expect(prompt).not.toContain('必须以世界观为唯一事实依据');
+    expect(prompt).not.toContain('characterFactLedger');
+    expect(prompt).toContain('characterEvidenceLocations');
     expect(prompt).toContain('不为凑固定人数添加女主角、反派、导师或同盟');
     expect(prompt).toContain('未规划成长变化时 growthTags=[]');
     expect(prompt).toContain('没有足够依据写[]');
@@ -208,6 +214,11 @@ describe('creation consistency architecture invariants', () => {
     expect(prompt).not.toContain('需要包含 5 个核心人物');
     expect(prompt).not.toContain('童年被关地下室导致幽闭恐惧');
     expect(controllerSource).toContain('const confirmedCharacterNames = [');
+    expect(controllerSource).toContain('const characterEvidenceLocations = [...new Set(confirmedCharacterNames)]');
+    expect(controllerSource).toContain('confirmedStoryFields: Object.entries(dto.selectedIdea || {})');
+    expect(controllerSource).toContain('chapterOrders: generatedChapterContext.filter');
+    expect(controllerSource).not.toContain('confirmedStoryEvidence: Object.fromEntries');
+    expect(controllerSource).not.toContain('chapterEvidence: generatedChapterContext');
     expect(controllerSource).toContain('normalizeGeneratedCharacters(value)');
   });
 
