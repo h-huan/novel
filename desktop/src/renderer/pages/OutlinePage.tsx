@@ -607,8 +607,18 @@ const OutlinePage: React.FC = () => {
     setSyncMessage('大纲修改已保存。受影响的伏笔位置、时间顺序和人物状态会列入修改提醒，由作者决定是否采用。');
   }, [loadVolumes]);
 
+  // 独立大纲候选不是创建时章纲的第二份事实源：只允许写入尚无大纲的项目。
+  // 已有正式书纲/卷纲/章纲须在原节点编辑或滚动补纲，不允许盲目追加第二棵树。
+  const assertIndependentOutlineDestinationEmpty = useCallback(async () => {
+    const response = await api.get(`/projects/${projectId}/outlines`);
+    const rows = (response as any).data ?? response;
+    if (!Array.isArray(rows)) throw new Error('未取得可核验的大纲清单，停止生成或保存，避免覆盖已有故事事实');
+    if (rows.length > 0) throw new Error('项目已有保存的大纲；独立生成候选不能追加第二套大纲。请直接编辑已有节点，长篇后续细纲使用滚动补纲。');
+  }, [projectId]);
+
   const saveGeneratedOutline = useCallback(async (volumesToSave: VolumeNode[], meta: Record<string, any>) => {
     if (!projectId || volumesToSave.length === 0) return;
+    await assertIndependentOutlineDestinationEmpty();
     let totalChapters = 0;
 
     if (Object.keys(meta).length > 0) {
@@ -726,7 +736,7 @@ const OutlinePage: React.FC = () => {
       };
       await api.put(`/projects/${projectId}`, { settings: JSON.stringify(settings) });
     } catch {}
-  }, [projectId]);
+  }, [projectId, assertIndependentOutlineDestinationEmpty]);
 
   const mapGeneratedChapter = (chapter: any, index: number, total: number): ChapterNode => {
     const content = chapter.content || chapter.summary || chapter.description || '';
@@ -836,6 +846,7 @@ const OutlinePage: React.FC = () => {
     setGenProgress('正在生成大纲...');
 
     try {
+      await assertIndependentOutlineDestinationEmpty();
       const configuredTotalWords = Number(targetWords || currentProject?.targetWords || 0);
       if (!Number.isInteger(configuredTotalWords) || configuredTotalWords <= 0) throw new Error('项目未配置有效的目标总字数');
       // 走服务端权威入口：服务端先校验项目卡片上的执行标准（平台/分类/基调/文风/流派/视角/题材标签），
@@ -869,7 +880,7 @@ const OutlinePage: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, material, targetWords, targetWordsRange, generateCount, workScale, updatePlan, projectType, checkAction, currentProject?.targetWords, projectSettings, missingStandards, targetWordsBlock]);
+  }, [projectId, material, targetWords, targetWordsRange, generateCount, workScale, updatePlan, projectType, checkAction, currentProject?.targetWords, projectSettings, missingStandards, targetWordsBlock, assertIndependentOutlineDestinationEmpty]);
 
   const handleSaveGenerated = useCallback(async () => {
     setGenProgress('正在保存大纲...');

@@ -16,6 +16,10 @@ describe('outline chapter responsibilities use explicit sources', () => {
     expect(source).toContain('chapterFunction: normalizeFunction(chapter.chapterFunction),');
     expect(source).toContain('chapterFunction: normalizeFunction(chapter.chapterFunction || chapter.function),');
   });
+  it('prevents duplicate independent planning before model execution and before save', () => {
+    expect(source).toContain('await assertIndependentOutlineDestinationEmpty();');
+    expect(source.split('await assertIndependentOutlineDestinationEmpty();')).toHaveLength(3);
+  });
   it('manual blank chapter placeholders do not assert a numbered narrative beat', () => {
     expect(source.match(/chapterFunction: 'paving',/g)).toHaveLength(2);
   });
