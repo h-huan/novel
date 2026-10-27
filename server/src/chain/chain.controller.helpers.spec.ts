@@ -1751,12 +1751,12 @@ describe('idea discovery live orchestrator behavior', () => {
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
     expect(selectionCall?.[0].prompt).toContain('只输出selectedPremises');
     if(failure==='preselection_shortfall'){
-      expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(true);
-      expect(controller.reviewIdeaPresentation).toHaveBeenCalled();
+      expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(false);
+      expect(controller.reviewIdeaPresentation).not.toHaveBeenCalled();
       expect(result.success).toBe(false);expect(result.status).toBe('incomplete');expect(result.ideas).toEqual([]);
-      expect(result.appealGate).toMatchObject({premiseSelected:1,preselectionShortfall:1,requested:2,fulfillment:{stopReason:'preselection_shortfall'}});
+      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,stopReason:'preselection_shortfall',stoppedAt:'preselection_review'});
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
-      expect(Array.isArray(result.qualifiedIdeas)).toBe(true);
+      expect(result.qualifiedIdeas).toEqual([]);
       return;
     }
     expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
@@ -1774,7 +1774,9 @@ describe('idea discovery live orchestrator behavior', () => {
     }
     if (failure === 'pool_below_minimum') {
       const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
-      expect(completeCardCalls.length).toBeGreaterThan(0);
+      expect(completeCardCalls).toHaveLength(0);
+      expect(controller.reviewIdeaPresentation).not.toHaveBeenCalled();
+      expect(result.appealGate.stopReason).toBe('preselection_shortfall');
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
         target: 15, generated: 2, shortfall: 13, batchCount: 3, maxConcurrency: 2,
         supplementAttempted: true, supplementAdded: 0,

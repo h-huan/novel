@@ -5571,6 +5571,22 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
           + '，有效池=' + candidatePool.length + '/' + premisePoolSize
           + '，选中=' + normalizedSelection.selected.length + '/' + requestedCount);
+        // Once independent preselection has exhausted its fixed pool, fewer
+        // qualified premises than the delivery floor can never be rescued by
+        // downstream card/presentation processing. Preserve the full failure
+        // evidence and avoid model work whose output must be discarded.
+        if (normalizedSelection.selected.length < minimumPremiseSelectionCount) {
+          throw failWithPoolAudit(
+            new Error('锁定前仅保留 ' + normalizedSelection.selected.length + '/' + requestedCount
+              + ' 个独立审查合格题材，低于最低可交付数量 ' + minimumPremiseSelectionCount
+              + '；原池补救已结束，跳过无法交付的完整卡生成与审核。'),
+            'preselection_review','preselection_shortfall',{
+              selectionWallMs,preselectionReviewWallMs,
+              preselectedPremises:normalizedSelection.selected,
+              premiseSelected:normalizedSelection.selected.length,
+              selectionAudit:normalizedSelection.selectionAudit,
+            });
+        }
         for (const premise of normalizedSelection.selected) {
           if (!variedCategories && premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
             throw new Error('已选题材 ' + premise.premiseId + ' 未继承本次固定分类 ' + dto.storyCategory + '。');
@@ -6217,6 +6233,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const message = err instanceof Error ? err.message : '题材发现失败';
       this.logger.error(`idea-discover 失败: ${message}`);
       return { success: false, ideas: [], totalIdeas: 0, error: message,
+        ...((err as any)?.appealGate?.stopReason==='preselection_shortfall'
+          ? {status:'incomplete',qualifiedIdeas:[]} : {}),
         ...((err as any)?.appealGate ? { appealGate: (err as any).appealGate }
           : failureSelectionAudit ? { appealGate: { ...failureSelectionAudit,
               returned: 0, stopReason: 'later_production_or_review_protocol_failed',
