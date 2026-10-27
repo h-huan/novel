@@ -8556,9 +8556,10 @@ ${(() => {
   return ideaNames.length > 0 ? `【允许出现的人物（禁止新增任何不在列的人物或神秘角色）】${ideaNames.join('、')}\n` : '';
 })()}【允许出现的地点】仅限已确认世界观中明确存在的地点；禁止新增拍卖行、码头仓库、工厂等未确认地点。
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
-【事实与行动结果依赖】${OUTLINE_FACT_REPAIR_SYNC_POLICY}
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
-【本章事件与状态唯一来源】本章content须按时序写清实际发生的行动、必要条件、直接结果与未完成目标。scenes.outcome、characterActions.result、characterStates.stateAfter只能投影同一已发生事实，不得把计划、猜测、未明示的决定或下一章任务写成本章结果。同一物件变更保管人时须写明交付动作、时间与双方；同一时点不得同时在两个人手中或两个地点。人物进出、立场变化必须有本章可见的触发，不能靠字段间互相复述当作已实际发生。涉及同一账册、名单或物证的数量，须沿前章已发生记录逐次区分“本章新增几笔”和“累计总共几笔”，并在content、scenes、characterActions、characterStates中使用同一口径；例如前章已有一笔、本章再记三笔，应明确为新增三笔、累计四笔，不能写成当前账册总共三笔而后章又拿四笔对账。关键消息须写明实际传话者、接收者、传达内容和时点；本人直接听到的问话不得投影成第三人此前向其转述，推测他人知情不能投影成已有某人报信。\n【通信渠道与同源事件约束】群聊/工作群消息、该消息下的群回复、私聊回复、电话通话是不同的通信事件，必须分别保持渠道、发送者、接收者和回复状态一致。若明确写“某条群消息底下无人回复”，后文不得又称同一条群消息底下存在回复；私聊回复不能被投影成群消息回复。若确有两条消息，必须分别写清渠道和对应内容，不得合并成同一条证据。签字、承认、交付、调取等决定性动作也必须在content中明确发生，再由scenes等字段投影，不能只在辅助字段里新增。核定金额、签署协议、办手续不等于款项实际发放或收到，只有明确打款、到账或领取的当事人才可写“已拿到”；一时未写某人返回或进入某处，不能推出整个后续时间段“始终没再进去”，除非正文明确交代时间范围和持续事实。询问某人不等于已经得到答复；看见门牌或认出某物不等于该见闻已经写入辨认笔录、被采信或查明事实；只写记录人记下姓名不能作为已记下具体观察的依据。若场景结果确实依赖已经回答、形成笔录或完成调查，content必须明确实际的回答、记录行为与具体内容，否则相应scenes.outcome和characterActions.result只能保留为待查状态，不得补造已经完成的程序。尤其要区分“有人口头要求留下/别走”“当事人自愿在场配合”与“具有明确权限的主体实际留置或控制”：没有写明实际发生与合法权限时，不得让scenes.outcome、characterActions.result或characterStates.stateAfter擅自升级为“已扣住/被留下/无法离开”。如果已确认阶段目标不要求实际留置，就按原行动能证明的状态描述，不为填强结论虚构新权限；如确有该阶段固定结果，必须先在content里建立可实行的行动与条件。
+【本章事件与状态唯一来源】content按时序记录本章实际发生的行动、成立条件、直接结果与未完成目标；scenes.outcome、characterActions.result、characterStates.stateAfter及伏笔回收必须从同一已发生事件投影，不得把准备、猜测、沉默、询问或下一章计划升级为已执行结果。物件保管权转移须有可见交付、时间与双方；同一时点不得同时在两个人手中或两个地点。人物位置、知情、关系和立场变化须有本章可见触发，先发生的话不能改称见证后来证据的反应。
+【数量、信息与证据连续性】同一对象的本章新增几笔与前章累计总数分别计量，所有字段使用同一时点和口径。关键消息写清实际发送者、接收者、渠道、内容和时间；本人直接听到的问话不得投影成第三人此前向其转述，推测他人知情不能投影成已有某人报信。仅记下身份不得推定具体证据已记录、被采信或已完成调查；没有明写的后续行动、持续状态和范围不可凭空补全。
+【通信渠道与同源事件约束】群消息、群回复、私聊、电话各自是独立事件；私聊回复不能被投影成群消息回复，群消息无人回复不能又在同一条下生成回复。签字、承认、交付、调取、核抄等决定性行动须在content实际发生并有必要条件，再投影到其余字段；核定金额、签署协议、办手续不等于款项实际发放或收到。询问某人不等于已经得到答复；没有实际回答、记录及内容时，scenes.outcome和characterActions.result只能保留为待查状态。口头要求、自愿配合和合法实际控制不可混同；缺权限或执行动作时不得写成强制留置、限制行动或其他既成外部结果。已确认章节职责确需该结果，先以本书既定人物、规则和事件建立可实行的条件，不为通过审查虚构权限或重写确认故事。
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
 按以下文档结构生成。必要字段必须存在；允许按章节职责为空的数组会单独说明：
@@ -8584,7 +8585,7 @@ ${(() => {
 
           const chapterResult = await this.llmCallWithRetry<any>(
             `第${order + 1}章详细大纲`,
-            chapterPrompt + chapterJsonExample + '\n【本章输出前事件投影核对】先以content里按时间实际发生的事件为唯一时间线，再填写scenes.outcome、characterActions.result、characterStates和foreshadowingRecover。门已关只说明关门状态，不能推出谁关门、为什么关门；早于物件展示或查验说过的话不能改称看见证据后的改口；在场沉默不能写成已回答具体问题。需要这些动作才能完成既定章节职责时，先在content写明原有角色实际何时行动、对谁说了什么、前提如何成立，再同步各字段；否则不得把未发生的动作或推断写为既成结果。没有被content明确改变的人物状态，characterStates必须为[]。不能为了填示例而制造新事件，禁止删改原确认题材与上一章事实。',
+            chapterPrompt + chapterJsonExample,
             {
               temperature: 0.8, timeout: LLM_TUNABLES.timeoutContent(), scenario: 'outline',
               projectId, chapterIndex: order + 1, stepKey: 'creation_chapter_detail',
