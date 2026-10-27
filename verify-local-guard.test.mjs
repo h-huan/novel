@@ -4,8 +4,36 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { summarizeDiscoveryStepMetrics } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+ 
+// Existing step metrics already store prompt/completion usage. The diagnostic
+// may report a sum only when EVERY metric row provided that counter.
+{
+  const rows=[
+    {run_id:'r1',step_key:'creation_world',status:'success',duration_ms:10,
+      prompt_tokens:500,completion_tokens:700,total_tokens:1200,internal_retries:0},
+    {run_id:'r2',step_key:'creation_world',status:'success',duration_ms:12,
+      prompt_tokens:300,completion_tokens:500,total_tokens:800,internal_retries:0},
+  ];
+  const result=summarizeDiscoveryStepMetrics(rows);
+  assert.equal(result.totals.logicalCalls,2);
+  assert.equal(result.runs[0].promptTokens,500);
+  assert.equal(result.runs[0].completionTokens,700);
+  assert.equal(result.stepBreakdown[0].promptTokens,800);
+  assert.equal(result.stepBreakdown[0].completionTokens,1200);
+  assert.equal(result.stepBreakdown[0].totalTokens,2000);
+  const incomplete=summarizeDiscoveryStepMetrics([...rows,{...rows[0],
+    run_id:'r3',prompt_tokens:null,completion_tokens:null}]);
+  assert.equal(incomplete.stepBreakdown[0].promptTokens,null);
+  assert.equal(incomplete.stepBreakdown[0].completionTokens,null);
+  const diagnosticScript=fs.readFileSync(path.join(root,'verify-local-core.mjs'),'utf8');
+  assert.match(diagnosticScript,/new URLSearchParams\(\{ discoveryRequestId, limit: '500' \}\)/u);
+  assert.match(diagnosticScript,/row\.discoveryRequestId !== savedDiscoveryAudit\.discoveryRequestId/u);
+  assert.match(diagnosticScript,/Date\.parse\(String\(row\.startedAt/u);
+}
+
 
 function run(report) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'novel-verify-guard-'));
