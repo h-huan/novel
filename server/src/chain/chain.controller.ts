@@ -8913,27 +8913,29 @@ ${(() => {
             dto.selectedIdea?.protagonist,
             ...(Array.isArray(dto.selectedIdea?.characters) ? dto.selectedIdea.characters : []),
           ].map((item: any) => String(typeof item === 'string' ? item : item?.name || '').split(/[，,]/)[0].trim()).filter(Boolean);
-          const characterFactLedger = [...new Set(confirmedCharacterNames)].map(name => ({
+          // The entire confirmed story and all chapter source text are already
+          // in groundedCreativeContext. Point to those exact records instead of
+          // quoting the same long evidence once for every named character.
+          const characterEvidenceLocations = [...new Set(confirmedCharacterNames)].map(name => ({
             name,
-            confirmedStoryEvidence: Object.fromEntries(Object.entries(dto.selectedIdea || {}).filter(([, value]) =>
-              serializeGeneratedSqlText(value).includes(name))),
-            chapterEvidence: generatedChapterContext.filter(chapter => JSON.stringify(chapter).includes(name)).map(chapter => ({
-              order: chapter.order,
-              title: chapter.title,
-              evidence: `${chapter.content || ''} ${serializeGeneratedSqlText(chapter.details)}`.slice(0, 1800),
-            })),
+            confirmedStoryFields: Object.entries(dto.selectedIdea || {})
+              .filter(([, value]) => serializeGeneratedSqlText(value).includes(name))
+              .map(([field]) => field),
+            chapterOrders: generatedChapterContext.filter(chapter => JSON.stringify(chapter).includes(name))
+              .map(chapter => chapter.order),
           }));
-          const charPrompt = `从已确认题材、详细章纲和已保存的世界观（下方上下文）中整理实际参与故事的人物，必须以世界观为唯一事实依据，不得与世界观冲突。世界观中的氛围基调、规则设定必须体现在人物性格、动机和行为方式中。
+          const charPrompt = `从已确认题材、详细章纲和已保存的世界观（下方上下文）中整理实际参与故事的人物。已确认题材是最高事实基准；已审核世界观与章纲只能补充不冲突的细节，不得擅改确认人物、身份、关系、主线事实或结局。世界观中的氛围基调、已确认规则须体现在人物性格、动机和行为方式中。
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
 
 【完整创作上下文】${groundedCreativeContext}
-【角色事实台账（字段只能从这些逐字证据归纳）】${JSON.stringify(characterFactLedger)}
+【角色来源定位目录（原文见上方唯一完整创作上下文）】${JSON.stringify(characterEvidenceLocations)}
+目录只定位本角色在确认题材的字段和章纲章号；年龄、身份、关系、成长、资源与对白等每一项仍须回读对应的实际原文才能确定，不得把姓名出现等同于该字段已有具体证据。
 
 人物数量由章纲中的行动者和冲突需要决定；保留确认题材中的姓名、身份、关系、目标和结局方向，不得替换主角或反派。只收录对情节有实际作用的人物。
-年龄、就学经历、亲属关系、口头禅和说话归属若在事实台账中没有明确证据，填写"unavailable"或留空；不得根据姓名、职业或常识推测。口头禅必须能在证据中找到同一角色说出的原句，不能挪用其他角色台词。
+年龄、就学经历、亲属关系、口头禅和说话归属若在唯一创作上下文的原文中没有明确证据，填写"unavailable"或留空；不得根据姓名、职业、目录命中或常识推测。口头禅必须能在原文中找到同一角色说出的原句，不能挪用其他角色台词。
 ${dto.selectedIdea?.protagonist ? `【必须包含的主角（不可省略或改名）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}
 
-角色名单以已确认题材、角色事实台账和详细章纲的实际行动者为准：必须保留确认主角与已有关键角色，按真实剧情需要建立人物档案，不为凑固定人数添加女主角、反派、导师或同盟；别名不另建重复人物。每个真实人物的字段必须严格按以下结构：
+角色名单以已确认题材、来源定位目录和详细章纲的实际行动者为准：必须保留确认主角与已有关键角色，按真实剧情需要建立人物档案，不为凑固定人数添加女主角、反派、导师或同盟；别名不另建重复人物。每个真实人物的字段必须严格按以下结构：
 【读者代入信息】readerEmpathyPoint按已注入角色设计执行标准填写。
 【成长标签】仅在既定情节有实际事件触发并能支持状态变化时，写入相应的"从→到"成长标签；未规划成长变化时 growthTags=[]，不得为凑数量或流派刻板印象虚构转变。
 【角色定位标签】仅由该角色已确认身份、目标与行动提炼 tags；没有足够依据写[]，不得为凑数量添加身份、阴谋或人格设定。
