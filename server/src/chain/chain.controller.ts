@@ -718,7 +718,13 @@ class GenerateTitleDto {
 export class ChainController {
   private readonly logger = new Logger(ChainController.name);
   private readonly activeChapterGenerations = new Map<string, number>();
-  private ideaDiscoveryInFlight = new Map<string, Promise<any>>();
+  // Identical configurations share one physical task. All request identities
+  // observing that task must be able to cancel the same underlying work.
+  private ideaDiscoveryInFlight = new Map<string, {
+    task: Promise<any>;
+    canonicalRequestId: string;
+    requestIds: Set<string>;
+  }>();
 
   constructor(
     private readonly chainEngine: ChainEngineService,
@@ -4814,13 +4820,19 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       // Both fields affect the actual prompt; omitting excludeDetails can merge different user requests.
       excludeDetails: dto.excludeDetails || [],
     });
-    if (!this.ideaDiscoveryInFlight) this.ideaDiscoveryInFlight = new Map<string, Promise<any>>();
-    const active = this.ideaDiscoveryInFlight.get(requestKey);
-    if (active) {
-      this.logger.warn('idea-discover: 相同配置仍在生成，复用当前任务，未重复调用模型');
-      return active;
-    }
+    if (!this.ideaDiscoveryInFlight) this.ideaDiscoveryInFlight = new Map();
     const discoveryRequestId = String(dto.discoveryRequestId || randomUUID());
+    const active = this.ideaDiscoveryInFlight.get(requestKey);
+    // A caller ID may only identify one live task, including coalesced aliases.
+    // Never route one request's cancellation to an unrelated configuration.
+    const idInOtherTask = [...this.ideaDiscoveryInFlight.entries()].some(([key, entry]) =>
+      key !== requestKey && entry.requestIds.has(discoveryRequestId));
+    if (idInOtherTask) throw new HttpException('灵感请求ID正在被另一个任务使用', 409);
+    if (active) {
+      active.requestIds.add(discoveryRequestId);
+      this.logger.warn('idea-discover: 相同配置仍在生成，复用当前任务，未重复调用模型');
+      return active.task;
+    }
     const discoveryRequestStartedAt = new Date().toISOString();
     const task = generationTasks.run('discovery', discoveryRequestId, '', () =>
       discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
@@ -4843,17 +4855,22 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         throw error;
       }
     }));
-    this.ideaDiscoveryInFlight.set(requestKey, task);
+    this.ideaDiscoveryInFlight.set(requestKey, {
+      task, canonicalRequestId: discoveryRequestId, requestIds: new Set([discoveryRequestId]),
+    });
     try {
       return await task;
     } finally {
-      this.ideaDiscoveryInFlight.delete(requestKey);
+      // Do not clear a newer request if an earlier task already settled.
+      if (this.ideaDiscoveryInFlight.get(requestKey)?.task === task) this.ideaDiscoveryInFlight.delete(requestKey);
     }
   }
 
   @Post('cancel-idea-discovery/:requestId')
   cancelIdeaDiscovery(@Param('requestId') requestId:string) {
-    return generationTasks.cancel('discovery', requestId);
+    const sharedTask = [...(this.ideaDiscoveryInFlight?.values() ?? [])]
+      .find(entry => entry.requestIds.has(requestId));
+    return generationTasks.cancel('discovery', sharedTask?.canonicalRequestId ?? requestId);
   }
 
   private async runIdeaDiscovery(dto: {
