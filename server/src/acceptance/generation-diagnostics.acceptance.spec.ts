@@ -309,8 +309,9 @@ it('generates a complete idea batch through preselection plus structuring and re
   expect(distinctResult, 'a request with different excludeDetails must not reuse the first result')
     .toMatchObject({ success: true, totalIdeas: 5 });
   expect(partialResult, 'short pool plus one failed card must still return only the three fully qualified cards')
-    .toMatchObject({ success: true, status: 'partial', totalIdeas: 3 });
-  expect(partialResult.ideas.map((idea: any) => idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
+    .toMatchObject({ success: false, status: 'incomplete', totalIdeas: 3 });
+  expect(partialResult.ideas).toEqual([]);
+  expect(partialResult.qualifiedIdeas.map((idea: any) => idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
   expect(partialResult.warning).toContain('缺额2张');
   expect(partialResult.appealGate).toMatchObject({
     premisePoolTarget: 15, premisePoolSize: 4, premisePoolTargetMet: false,
