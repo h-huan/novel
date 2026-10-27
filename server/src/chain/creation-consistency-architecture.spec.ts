@@ -178,7 +178,7 @@ describe('creation consistency architecture invariants', () => {
     expect(firstStoryCard).toBeLessThan(chapterPrompt);
     // The short creation's late duplicate was removed. Other callers (writing
     // and long creation) still own their original completeness checks.
-    expect(controllerSource.slice(shortWorldReadback).match(/this\\.assertProjectSourceCompleteness\\(projectId\\);/g)).toHaveLength(1);
+    expect(controllerSource.slice(shortWorldReadback).match(/this\.assertProjectSourceCompleteness\(projectId\);/g)).toHaveLength(1);
     expect(controllerSource).toContain('await this.generationRecovery.assertActivationReady(projectId)');
   });
 
