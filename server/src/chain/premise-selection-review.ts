@@ -160,6 +160,19 @@ export function overlapReviewSelectionView(selected: PremiseSelectionResult['sel
  return selected.map(({causalPlan:_plan,...expanded})=>expanded);
 }
 
+/** Prompt-only representation for a targeted reselection. The server still keeps
+ * the complete original selection and all causal plans for independent gates.
+ * Unchanged peers need their real actions/conditions for comparison, not a second
+ * copy of causalPlan quotations already anchored in those fields. A failed slot
+ * retains its entire plan so a correction can preserve all dependent actions. */
+export function premiseReselectionPromptSelection(
+  selected: PremiseSelectionResult['selected'], repairIds: ReadonlySet<string>,
+) {
+  return selected.map(item => repairIds.has(String(item.premiseId))
+    ? item
+    : (({ causalPlan: _repeatedAnchors, ...facts }) => facts)(item));
+}
+
 export function premiseReselectionPlan(original: PremiseSelectionResult, review: PremiseSelectionReview) {
   const affected = new Set(review.issues.map(issue => issue.premiseId));
   const replacementIds = new Set(review.issues.filter(issue => issue.kind === 'overlap' || issue.repairMode === 'replace_from_pool').map(issue => issue.premiseId));
