@@ -91,6 +91,9 @@ jobs:
       - name: Electron desktop startup smoke
         shell: bash
         run: |
+          # xwininfo (x11-utils) is not on every hosted Ubuntu runner.
+          # Install the inspection tool only in CI, never in the desktop app.
+          sudo apt-get install -y x11-utils
           # Verify the actual desktop dev entrypoint, not just its Vite bundle.
           # A backend must never be created by this desktop command.
           xvfb-run -a bash -euo pipefail <<'SH'
