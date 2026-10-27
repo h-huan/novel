@@ -82,7 +82,7 @@ describe('category checked before complete cards', () => {
   });
 });
 
-it('continues unresolved preselection slots after a protocol failure while the shared budget remains', async () => {
+it('isolates a failed unchanged preselection proposal instead of spending the remaining credits on identical input', async () => {
   const c = Object.create(ChainController.prototype) as any, s = selection();
   c.logger = { warn: vi.fn(), log: vi.fn() };
   let sourceCalls = 0;
@@ -99,7 +99,8 @@ it('continues unresolved preselection slots after a protocol failure while the s
   });
   const budget = { reviews: { remaining: 10 }, reselection: { remaining: 3 } };
   const result = await c.reconcilePremiseSelection(s, 2, 2, [], '本次执行标准', [], budget);
-  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
-  expect(budget.reselection.remaining).toBe(1);
-  expect(result.selected.map((item: any) => item.premiseId)).toEqual(['A', 'B']);
+  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+  expect(budget.reselection.remaining).toBe(2);
+  expect(result.selected.map((item: any) => item.premiseId)).toEqual(['B']);
+  expect(result.selectionAudit).toMatchObject({partial:true,unresolvedPremiseIds:['A']});
 });

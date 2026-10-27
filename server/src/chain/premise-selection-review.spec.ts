@@ -345,7 +345,7 @@ it('does not enter another provider attempt after the last physical call returns
   });
   it('does not buy the same failed original-pool reselection again after protocol correction fails',async()=>{
     const c=Object.create(ChainController.prototype) as any;
-    c.logger={warn:vi.fn()};
+    c.logger={warn:vi.fn(),log:vi.fn()};
     c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce({passed:true,issues:[]}).mockResolvedValueOnce(failure);
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
       expect(prompt).toContain('【必须处理的位置及模式】');
