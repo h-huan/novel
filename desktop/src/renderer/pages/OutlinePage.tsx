@@ -374,23 +374,6 @@ const normalizeGoalArc = (value: unknown): GoalArcType => {
   ].includes(arc) ? arc : 'accumulate_burst') as GoalArcType;
 };
 
-const inferRhythmByOrder = (order: number): ChapterFunctionType => {
-  const shortRhythm: ChapterFunctionType[] = [
-    'opening',
-    'exposition',
-    'rising_action',
-    'conflict',
-    'climax',
-    'transition',
-    'climax',
-    'cliffhanger',
-    'resolution',
-  ];
-  if (order >= 1 && order <= shortRhythm.length) return shortRhythm[order - 1];
-  const cycle: ChapterFunctionType[] = ['charging', 'conflict', 'explosion', 'breathing', 'paving', 'cliffhanger'];
-  return cycle[(Math.max(order, 1) - 1) % cycle.length];
-};
-
 const OutlinePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const projectId = id || '';
@@ -485,13 +468,12 @@ const OutlinePage: React.FC = () => {
 
   const toChapterNode = useCallback((ch: any): ChapterNode => {
     const sceneData = parseOutlineScenes(ch);
-    const order = Number(ch.order || ch.chapterNumber || ch.chapter_index || 0);
     const rawFunction = ch.chapterFunction || ch.chapter_function || sceneData.chapterFunction || ch.function;
     const normalizedFunction = normalizeFunction(rawFunction);
     return {
       id: ch.id,
       title: ch.title || '未命名章节',
-      chapterFunction: normalizedFunction === 'paving' && order > 0 ? inferRhythmByOrder(order) : normalizedFunction,
+      chapterFunction: normalizedFunction,
       goalArc: normalizeGoalArc(ch.goalArc || ch.goal_arc || sceneData.goalArc),
       targetWords: Number(ch.targetWords || ch.target_words || sceneData.targetWords || 0),
       content: ch.content || '',
@@ -685,7 +667,7 @@ const OutlinePage: React.FC = () => {
       const volumeId = volumeData?.id || volumeData?.data?.id;
       if (!volumeId) continue;
 
-      for (const [chapterIndex, chapter] of volume.chapters.entries()) {
+      for (const chapter of volume.chapters) {
         await api.post(`/projects/${projectId}/outlines`, {
           level: 'chapter',
           parentId: volumeId,
@@ -693,9 +675,7 @@ const OutlinePage: React.FC = () => {
           title: chapter.title,
           content: chapter.content || '',
           timeline: chapter.timeline || '',
-          chapterFunction: normalizeFunction(chapter.chapterFunction) === 'paving'
-            ? inferRhythmByOrder(chapterIndex + 1)
-            : normalizeFunction(chapter.chapterFunction),
+          chapterFunction: normalizeFunction(chapter.chapterFunction),
           goalArc: chapter.goalArc || 'accumulate_burst',
           targetWords: (() => {
             const value = Number(chapter.targetWords);
@@ -753,9 +733,7 @@ const OutlinePage: React.FC = () => {
     return {
       id: `generated-ch-${index + 1}`,
       title: chapter.title || chapter.chapterTitle || `第${index + 1}章`,
-      chapterFunction: normalizeFunction(chapter.chapterFunction || chapter.function) === 'paving'
-        ? inferRhythmByOrder(index + 1)
-        : normalizeFunction(chapter.chapterFunction || chapter.function),
+      chapterFunction: normalizeFunction(chapter.chapterFunction || chapter.function),
       goalArc: normalizeGoalArc(chapter.goalArc),
       targetWords: Number(chapter.targetWords || 0),
       wordCountReason: chapter.wordCountReason || chapter.targetWordsReason || '',
@@ -979,7 +957,7 @@ const OutlinePage: React.FC = () => {
           reversalPoint: '',
           targetWords: chapterTargetWords,
         }),
-        chapterFunction: inferRhythmByOrder(order),
+        chapterFunction: 'paving',
         goalArc: normalizeGoalArc('accumulate_burst'),
         targetWords: chapterTargetWords,
       });
@@ -1163,7 +1141,7 @@ const OutlinePage: React.FC = () => {
         const targetWords = Number(values.targetWords);
         if (!values.title.trim() || !Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_MIN || targetWords > CHAPTER_WORD_MAX) throw new Error(`请填写标题和 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标字数。`);
         const volume = volumes.find(item => item.id === volumeId); const order = (volume?.chapters.length || 0) + 1;
-        const response = await api.post(`/projects/${projectId}/outlines`, { level: 'chapter', parentId: volumeId, order, title: values.title.trim(), content: '', chapterFunction: inferRhythmByOrder(order), goalArc: 'accumulate_burst', targetWords });
+        const response = await api.post(`/projects/${projectId}/outlines`, { level: 'chapter', parentId: volumeId, order, title: values.title.trim(), content: '', chapterFunction: 'paving', goalArc: 'accumulate_burst', targetWords });
         const data = (response as any).data ?? response;
         await refreshAfterChange(data?.id || data?.data?.id);
         setGenProgress('章节已新增；请补齐具体事件链后再锁定。');
