@@ -50,6 +50,17 @@ function run(report) {
   assert.match(main,/ipcMain\.handle\('stop-server'/u);
   assert.match(main,/await checkServerConnection\(SERVER_PORT\)/u);
   assert.doesNotMatch(main,/ensureServerRunning/u);
+  const guide = fs.readFileSync(path.join(root,'server','docs','user-guide.md'),'utf8');
+  const governance = fs.readFileSync(path.join(root,'DEVELOPMENT_GOVERNANCE.md'),'utf8');
+  assert.doesNotMatch(guide,/restart\\.ps1|scripts\\/dev\\.js/u);
+  assert.match(guide,/npm run dev/u);
+  assert.match(guide,/Electron 窗口/u);
+  assert.match(guide,/server\\/shared\\/src\\/执行标准\\.ts/u);
+  assert.match(governance,/server\\/shared\\/src\\/执行标准\\.ts/u);
+  assert.match(main,/new BrowserWindow\\(/u);
+  assert.match(main,/launcherWindow\\.loadURL\\(VITE_DEV_SERVER_URL \+ 'launcher\\.html'\\)/u);
+  assert.match(main,/createWindow\\(\\);/u);
+  assert.doesNotMatch(vite,/onstart:\\s*\\(\\)\\s*=>\\s*\\{\\s*\\}/u);
 }
 
 // Direct server launchers are also first-class paths. A port occupied by a
