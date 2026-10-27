@@ -2732,8 +2732,6 @@ ${this.authorRevisionRequirements(dto.prompt)}
 
 ## 直接输出
 请直接输出完整章节正文，不要任何解释、前缀、JSON、Markdown 标题。`;
-        // 把已注入的 RAG（角色/世界观/地点）追加到 prompt 末尾
-        if (ragContext) prompt += `\n\n【已确稿 RAG 补充】\n${ragContext}`;
 
         const { content: fullContent, qualityReport } = await this.generateBodyWithAlignmentGuard({
           basePrompt: prompt,

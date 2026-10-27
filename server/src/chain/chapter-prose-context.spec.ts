@@ -63,6 +63,32 @@ describe('canonical character preflight on the normal body entry',()=>{
   await expect(c.generate({projectId:'p',chapterId:'chapter-1'})).rejects.toThrow('已确稿写作上下文加载失败');
   expect(c.realLLM.generate).not.toHaveBeenCalled();
  });
+ it('includes confirmed world, location and writing state once in the ordinary body prompt',async()=>{
+  const c=controller();
+  c.buildCharacterWritingContext=()=> '已确认角色：林川';
+  c.buildWritingStateContext=()=>({contextText:'写作状态：证物已移交',pendingTotal:0,pendingSummary:[],stateGuard:'不得改变已确认事实'});
+  c.buildWorldWritingContext=()=> '世界规则：夜间禁止开门';
+  c.buildLocationWritingContext=()=> '地点：北城值班室';
+  c.resolvePlatformToneDirective=()=> '采用平台标准';
+  c.authorRevisionRequirements=()=> '';
+  c.chapterRetryParameters=()=> ({});
+  c.buildSubsequentChapterBoundary=()=> '';
+  c.generateBodyWithAlignmentGuard=vi.fn().mockResolvedValue({content:'林川收起证物。',qualityReport:{}});
+  c.assertNoBlockingGeneratedContentIssues=vi.fn();
+  c.characterService={checkConsistency:vi.fn().mockReturnValue({})};
+  c.worldSettingService={checkConsistency:vi.fn().mockReturnValue({})};
+  c.mapPointService={checkConsistency:vi.fn().mockReturnValue({})};
+  const result=await c.generate({projectId:'p',chapterId:'chapter-1',outline:{title:'第一章'},chapterContext:{pov:'第三人称'}});
+  expect(result.success).toBe(true);
+  const args=c.generateBodyWithAlignmentGuard.mock.calls[0][0];
+  for(const fact of ['世界规则：夜间禁止开门','地点：北城值班室','写作状态：证物已移交']){
+    expect(args.basePrompt.split(fact)).toHaveLength(2);
+    expect(args.storyContext).toContain(fact);
+  }
+  expect(args.basePrompt).not.toContain('【已确稿 RAG 补充】');
+  expect(args.basePrompt).toContain('## 不可偏离的详细大纲');
+  expect(args.basePrompt).toContain('已确认角色：林川');
+ });
 });
 describe('chapter expansion prose context',()=>{
  it.each([2478,2785])('never generates padding for a retained %i-word draft',async words=>{
