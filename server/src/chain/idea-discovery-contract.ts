@@ -109,6 +109,27 @@ export function separateIdeaDiscoveryAudit(idea: Record<string, any>): {
   };
 }
 
+
+/** The source pool must contain the real causal and category facts needed to
+ * shortlist a story. This is a structural gate; semantic review is unchanged. */
+export const PREMISE_SEED_FACT_LABELS = ['处境触发','主动选择','必要条件','反转兑现','分类流派机制'] as const;
+export function premiseSeedFactIssues(storyCore: unknown): string[] {
+  const raw = typeof storyCore === 'string' ? storyCore.trim() : '';
+  const labels = PREMISE_SEED_FACT_LABELS.map(label => '【' + label + '】');
+  const positions = labels.map(label => raw.indexOf(label));
+  if (positions.some(position => position < 0)
+    || positions.some((position,index) => index>0 && position<=positions[index-1]))
+    return ['候选骨架缺少有序的处境触发、主动选择、必要条件、反转兑现、分类流派机制'];
+  const issues: string[] = [];
+  for (let i=0;i<labels.length;i++) {
+    const section = raw.slice(positions[i]+labels[i].length,
+      i+1<labels.length?positions[i+1]:undefined).trim();
+    if (section.replace(/[，。；：、！!？?\s]/g,'').length < 12)
+      issues.push(labels[i]+'缺少足以进入选优的实际事件或因果条件');
+  }
+  return issues;
+}
+
 /**
  * 题材池的“广搜数量”只用于提高搜索覆盖，不是质量 Gate.
  * 未被选中的轻量胚子只需最小骨架；只有最终选中的 requestedCount 项需要完整筛选证据。

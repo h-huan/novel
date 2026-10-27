@@ -23,7 +23,7 @@ const makePremiseSelectionFixture = (count = 5) => ({
   pool: Array.from({ length: count }, (_, index) => ({
     premiseId: `P${index + 1}`,
     workingTitle: `候选题材${index + 1}`,
-    storyCore: `普通人在限时压力中发现异常证据并主动追查，最终必须承担选择造成的关系后果${index + 1}`,
+    storyCore: `【处境触发】普通人在限时压力中发现职业现场出现异常证据${index + 1}。【主动选择】当事人亲自核验现场材料并决定是否公开证据。【必要条件】材料经过核实到达有权处理的负责人后，才能对责任作出决定。【反转兑现】对手隐瞒被已有证据击破，主角承担公开真相造成的关系后果。【分类流派机制】职业悬疑中的现实危机、个人追查和关键证据共同推动主角决定及关系变化。`,
   })),
   selectedPremises: Array.from({ length: count }, (_, index) => ({
     premiseId: `P${index + 1}`,

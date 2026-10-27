@@ -181,7 +181,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, applyIsolatedIdeaRepairPatches, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, applyIsolatedIdeaRepairPatches, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaGateLocalRepairDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -5054,7 +5054,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             premiseId: 'P1',
             workingTitle: '4-16字暂名',
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
-            storyCore: '轻量因果骨架：人物处境与起始事件、主动选择、关键证据或权限如何使结果成立、反转改变胜负条件、兑现与代价方向；不能以结局断言替代必要条件',
+            storyCore: '【处境触发】具体人物、风险和迫使行动的事件。【主动选择】主角实际采取的区别性行动。【必要条件】行动取得关键资料、到达能处理的人或触发对手反应的已建立条件。【反转兑现】改变胜负条件的事件、实际结果与代价。【分类流派机制】分类与所选流派如何通过主线人物关系和行动真正兑现。',
           }],
           selectedPremises: [{
             premiseId: 'P1',
@@ -5085,7 +5085,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本阶段不选题、不展开完整筛选字段，不输出selectedPremises。',
-          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore保持轻量，但必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。人物识破身份须有先前接触该身份信息的真实渠道，证据指向具体责任人须有区别于“只是排除自己”的指认依据，约人到场或设伏抓获须有各方实际到场与配合动机。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺行动链的终局；没有可信条件就换一条能成立的故事骨架，不交给下游昂贵复核补造。保留反转、兑现与代价方向。',
+          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore必须分为有序五小节【处境触发】【主动选择】【必要条件】【反转兑现】【分类流派机制】，小节内写具体人物、事件和条件，不要空泛自评。【必要条件】须交代证据如何传递、谁为何到场、谁有权决定、对手如何响应，不能留到选优和完整卡再补造；本阶段即产出可以选优的有因果结构的轻量候选，不要重复输出另一份完整卡。并且必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。人物识破身份须有先前接触该身份信息的真实渠道，证据指向具体责任人须有区别于“只是排除自己”的指认依据，约人到场或设伏抓获须有各方实际到场与配合动机。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺行动链的终局；没有可信条件就换一条能成立的故事骨架，不交给下游昂贵复核补造。保留反转、兑现与代价方向。',
           batchFocus,
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
           '同一批不能让多数题材靠相同的行动、反制、翻盘与代价结构支撑：比较每个storyCore里主角真正采取的策略、对手如何改变局面、靠哪项已经建立的条件让胜负转换、赢后损失的具体性质。若已有两项都靠私存岗位记录、遭反咬、第三方核账而翻盘，其余题材必须改用实质不同且能够成立的行动与兑现机制，不准只换职业、场所或物证名称。对不同机制同样核对授权和因果，不为凑差异编造条件。',
@@ -5130,7 +5130,7 @@ ${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredT
 ${poolContext}
 ${excludeText}
 ${promptPhase === 'selection'
-  ? '【选优终检：不得留给后续长时复审才发现】选定身份以前，逐对检查本次入选题材的主动选择、选择触发的升级、改变胜负的必要条件、兑现后的具体代价；两项在这四个因果作用上同构，即使职业、年代、道具和分类不同，也不可同时入选。直接从上述实际固定原池身份中改选另一条实际行动机制完整、来源因果成立的成熟题材，不新增或改写候选池；不能以凑满数量、只换名字或把不完整条件留给审核作为理由入选。此为选优前的自检，不输出自评分，不代替后续全部独立审查。'
+  ? '【选优终检：不得留给后续长时复审才发现】选定身份以前，须用原池五小节验证【必要条件】与【分类流派机制】是否确实在故事行动中成立；不能在展开筛选字段时新造原池未交代的关键决定者、到场、传递、权限及代价。然后逐对检查本次入选题材的主动选择、选择触发的升级、改变胜负的必要条件、兑现后的具体代价；两项在这四个因果作用上同构，即使职业、年代、道具和分类不同，也不可同时入选。直接从上述实际固定原池身份中改选另一条实际行动机制完整、来源因果成立的成熟题材，不新增或改写候选池；不能以凑满数量、只换名字或把不完整条件留给审核作为理由入选。此为选优前的自检，不输出自评分，不代替后续全部独立审查。'
   : ''}
 只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
 JSON 结构：${JSON.stringify(promptSchema)}`;
@@ -5227,7 +5227,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             const storyCore = String(item.storyCore || '').trim();
             const titleKey = normalizeTitle(workingTitle);
             const coreKey = normalizeTitle(storyCore);
-            if (workingTitle.length < 2 || storyCore.length < 20 || !titleKey || !coreKey) {
+            if (workingTitle.length < 2 || storyCore.length < 20 || !titleKey || !coreKey
+              || premiseSeedFactIssues(storyCore).length) {
               stats.invalidFields += 1;
               poolFilterTotals.invalidFields += 1;
               continue;
