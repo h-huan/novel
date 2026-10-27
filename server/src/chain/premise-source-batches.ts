@@ -3,6 +3,19 @@ import {readGenerationBudgets} from '../config/generation-budgets';
 import { type PremiseSelectionResult } from './idea-discovery-contract';
 import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 
+/** When a complete unchanged selection exceeds the existing source batch size,
+ * the source/payoff/genre/category checks are premise-local. Run the same full
+ * checklist on disjoint premise groups concurrently; the separate overlap
+ * review retains cross-card responsibility. Leave a protocol-correction credit
+ * or use the original aggregate path rather than compromising recoverability.
+ * This never increases the shared maximum number of physical calls. */
+export function shouldBatchLargePremiseSourceReview(
+  count:number, groupingMode:number, batchSize:number, availableCalls:number,
+):boolean{
+  const partitions=Math.ceil(count/Math.max(1,batchSize));
+  return groupingMode===0&&count>=4&&batchSize>=1&&partitions>=2
+    &&availableCalls>=partitions+1;
+}
 export function premiseSourceBatches(selection: PremiseSelectionResult): PremiseSelectionResult[] {
   const size=readGenerationBudgets().sourceBatchSize;
   const parts:Array<typeof selection.selected>=[];for(let start=0;start<selection.selected.length;start+=size)parts.push(selection.selected.slice(start,start+size));

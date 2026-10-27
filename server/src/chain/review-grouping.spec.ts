@@ -68,7 +68,33 @@ describe('aggregate review before capacity partitioning', () => {
     await expect(c.reviewIdeaPresentation(cards(), [], '', budget)).rejects.toThrow('预算不足');
     expect(budget.remaining).toBe(0); expect(leaves).toHaveLength(1);
   });
+  it('keeps the aggregate review when partitions cannot preserve a protocol-correction credit', async () => {
+    vi.mocked(config.readGenerationBudgets).mockReturnValue({
+      ...config.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:0,sourceBatchSize:3,
+    });
+    const sel = normalizePremiseSelectionPayload({
+      pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'原始有效条件'+premiseId})),
+      selectedPremises:['A','B','C','D','E'].map(premiseId=>({premiseId,
+        ...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(f=>f!=='differentiation').map(f=>[f,'本题的可信行动与结果'+premiseId]))})),
+    },5,5);
+    const c=Object.create(ChainController.prototype) as any;
+    c.logger={warn:vi.fn()};
+    const seen:number[]=[];
+    const original=c.reviewPremiseSelection;
+    c.reviewPremiseSelection=vi.fn(async (input:any,standard:string,mode:string,budget:any,leaf=false,...rest:any[])=>{
+      if(!leaf)return original.call(c,input,standard,mode,budget,leaf,...rest);
+      seen.push(input.selected.length);budget.remaining--;
+      return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(input).map(row=>({
+        ref:row.ref,status:'preserved',reason:'每个事件与原故事来源相互兼容'))},input);
+    });
+    const result=await c.reviewPremiseSelection(sel,'有效标准','source_drift',{remaining:2});
+    expect(result.sourceChecks).toHaveLength(50);
+    expect(seen).toEqual([5]);
+  });
   it('passes all fifty source checks through one production JSON helper call', async () => {
+    vi.mocked(config.readGenerationBudgets).mockReturnValue({
+      ...config.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:0,sourceBatchSize:5,
+    });
     const selection = normalizePremiseSelectionPayload({
       pool: ['A', 'B', 'C', 'D', 'E'].map(premiseId => ({ premiseId, workingTitle: '原题材' + premiseId, storyCore: '主角选择和代价推动具体关系与后果改变' + premiseId })),
       selectedPremises: ['A', 'B', 'C', 'D', 'E'].map(premiseId => ({ premiseId,
@@ -98,7 +124,30 @@ describe('aggregate review before capacity partitioning', () => {
     expect(result.sourceChecks).toHaveLength(50); expect(c.realLLM.generate).toHaveBeenCalledTimes(1);
     expect(budget.remaining).toBe(5); expect(JSON.stringify(selection)).toBe(before);
   });
+  it('automatically audits five unchanged premises in parallel 3+2 without losing evidence or a real rejection', async()=>{
+    const pool=['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,
+      storyCore:'原创故事的前置行动、权属和结局'+premiseId}));
+    const selection=normalizePremiseSelectionPayload({pool,
+      selectedPremises:pool.map(seed=>({premiseId:seed.premiseId,...Object.fromEntries(
+        SELECTED_PREMISE_FIELDS.filter(field=>field!=='differentiation').map(field=>[field,'由原有行动导致后果'+seed.premiseId]))}))},5,5);
+    const c=Object.create(ChainController.prototype) as any, original=c.reviewPremiseSelection, seen:number[]=[];
+    c.logger={warn:vi.fn()};
+    c.reviewPremiseSelection=vi.fn(async (input:any,standard:string,mode:string,budget:any,leaf=false,...rest:any[])=>{
+      if(!leaf)return original.call(c,input,standard,mode,budget,leaf,...rest);
+      seen.push(input.selected.length);budget.remaining--;
+      return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(input).map(row=>({
+        ref:row.ref,status:row.premiseId==='D'&&row.field==='payoff'?'drift':'preserved',
+        reason:'逐项核对既定事件必要条件、执行者和兑现结果'}))},input);
+    });
+    const budget={remaining:6},result=await c.reviewPremiseSelection(selection,'有效标准','source_drift',budget);
+    expect(seen).toEqual([3,2]);expect(result.sourceChecks).toHaveLength(50);
+    expect(result.issues.map((row:any)=>row.premiseId)).toEqual(['D']);expect(result.passed).toBe(false);
+    expect(budget.remaining).toBe(4);
+  });
   it('source capacity fallback preserves all refs and a real drift', async () => {
+    vi.mocked(config.readGenerationBudgets).mockReturnValue({
+      ...config.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:0,sourceBatchSize:5,
+    });
     const selected = ['A', 'B', 'C', 'D', 'E'].map(premiseId => ({ premiseId,
       ...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(key => key !== 'differentiation').map(key => [key, premiseId === 'A' ? '甲'.repeat(1000) : '真实行动推动具体关系和后果改变'])) }));
     const selection = { selected, pool: selected.map(item => ({ ...item, storyCore: item.openingEvent })) } as any;

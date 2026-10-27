@@ -25,7 +25,7 @@ import { ideaDiscoveryAuthorContext } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
-import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget } from './premise-source-batches';
+import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget, shouldBatchLargePremiseSourceReview } from './premise-source-batches';
 import { generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
 import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } from './cross-stage-patch';
@@ -6269,7 +6269,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       let batches: ReturnType<typeof premiseSourceBatches>;
       const splitSources=()=>splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
         .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
-      if (readGenerationBudgets().reviewGroupingMode === 0) {
+      const grouping=readGenerationBudgets();
+      if (shouldBatchLargePremiseSourceReview(selection.selected.length,grouping.reviewGroupingMode,
+        grouping.sourceBatchSize,budget.remaining)) {
+        // The latest local trace spent 218 seconds on one five-premise source
+        // call. All fifty source fields plus genre/category/payoff remain fully
+        // checked, but two independent 3+2 partitions no longer block each
+        // other. Protocol-capacity fallback within each partition is unchanged.
+        batches=premiseSourceBatches(selection);
+      } else if (grouping.reviewGroupingMode === 0) {
         try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
         catch (error) {
           if (!isReviewOutputCapacityError(error) || selection.selected.length < 2) throw error;

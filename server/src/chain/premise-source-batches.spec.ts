@@ -5,7 +5,7 @@ afterEach(()=>vi.restoreAllMocks());
 import {ChainController} from './chain.controller';
 import {SELECTED_PREMISE_FIELDS,normalizePremiseSelectionPayload} from './idea-discovery-contract';
 import {premiseSourceComparisonCatalog,materializePremiseSourceReview} from './premise-selection-review';
-import {premiseSourceBatches,mergePremiseSourceBatches,premiseSourceCallBudget,reserveReviewBatchBudget} from './premise-source-batches';
+import {premiseSourceBatches,mergePremiseSourceBatches,premiseSourceCallBudget,reserveReviewBatchBudget,shouldBatchLargePremiseSourceReview} from './premise-source-batches';
 
 const selection=()=>normalizePremiseSelectionPayload({
  pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'原题材'+premiseId,storyCore:'主角选择守住原有承诺并承担自己行动带来的真实后果'+premiseId})),
@@ -14,6 +14,13 @@ const selection=()=>normalizePremiseSelectionPayload({
 const report=(batch:ReturnType<typeof selection>)=>({payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开事实兼容原池所述的行动方向与代价'}))});
 
 describe('bounded premise source review batches',()=>{
+ it('only partitions large unchanged source sets when shared recovery credits remain',()=>{
+  expect(shouldBatchLargePremiseSourceReview(5,0,3,10)).toBe(true);
+  expect(shouldBatchLargePremiseSourceReview(4,0,3,3)).toBe(true);
+  expect(shouldBatchLargePremiseSourceReview(3,0,3,10)).toBe(false);
+  expect(shouldBatchLargePremiseSourceReview(5,0,3,2)).toBe(false);
+  expect(shouldBatchLargePremiseSourceReview(5,1,3,10)).toBe(false);
+ });
  it('keeps full facts in 3+2 batches and rebinds all fifty checks without losing a real drift',()=>{
   const original=selection(),before=JSON.stringify(original),batches=premiseSourceBatches(original);
   expect(batches.map(batch=>batch.selected.length)).toEqual([3,2]);
