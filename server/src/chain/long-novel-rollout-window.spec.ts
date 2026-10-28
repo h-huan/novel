@@ -48,7 +48,7 @@ function fixture(writtenMax: number, existingAuthoredChapter = false) {
         conflict: '调查遭遇拒绝', hook: '门外有人敲门',
         scenes: ['值班室'], targetWords: 4000,
         wordCountReason: '调查与选择需要两个有效场景', chapterFunction: 'conflict',
-      })) },
+      })), newEntities: [] },
       runId: 'reviewed-outline-run',
     };
   });

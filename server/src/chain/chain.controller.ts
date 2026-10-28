@@ -1,3 +1,4 @@
+import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,persistentStructureDeficitRequiresReplacement,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
@@ -11974,11 +11975,30 @@ ${summarizeOutlineConsistency(pending)}`,
     const storySoFar = recent
       .map(c => `第${c.chapter_index}章《${c.title}》结尾进展：${String(c.content || '').slice(-1200)}`)
       .join('\n');
-    const mainChars = (db.prepare(
-      `SELECT name,identity,role,arc FROM characters WHERE project_id=? ORDER BY is_pov_character DESC, created_at ASC LIMIT 12`,
-    ).all(projectId) as any[]).map(c => ({ name: c.name, identity: c.identity, arc: c.arc }));
+    const allChars = db.prepare(
+      `SELECT name,identity,role,arc,is_pov_character FROM characters WHERE project_id=? ORDER BY is_pov_character DESC, created_at ASC`,
+    ).all(projectId) as any[];
+    const volumeFocus = [storySoFar, ...volRows.map(row => String(row.content || ''))].join('\n');
+    const mainChars = allChars.filter((c, index) => index < 12
+      || (String(c.name || '').length > 1 && volumeFocus.includes(String(c.name))))
+      .map(c => ({ name:c.name, identity:c.identity, role:c.role, arc:c.arc }));
+    const knownCharacterNames = allChars.map(c => c.name).filter(Boolean);
     const activeForeshadowings = db.prepare(
-      `SELECT content,planned_recovery_chapter_index FROM foreshadowings WHERE project_id=? AND status='active' LIMIT 20`,
+      `SELECT content,planned_recovery_chapter_index FROM foreshadowings WHERE project_id=? AND status='active' ORDER BY planned_recovery_chapter_index ASC, created_at ASC`,
+    ).all(projectId) as any[];
+    // Confirmed entity and state sources are shared with body-writing context;
+    // pending discoveries remain soft candidates, never confirmed canon.
+    const organizations = db.prepare(
+      'SELECT name,type,description,leader,territory FROM organizations WHERE project_id=? ORDER BY created_at ASC',
+    ).all(projectId) as any[];
+    const locations = db.prepare(
+      'SELECT name,type,description FROM map_points WHERE project_id=? ORDER BY created_at ASC',
+    ).all(projectId) as any[];
+    const confirmedStates = db.prepare(
+      "SELECT target_type,target_label,summary FROM state_items WHERE project_id=? AND status='confirmed' AND authority='hard_fact' ORDER BY updated_at ASC",
+    ).all(projectId) as any[];
+    const pendingEntities = db.prepare(
+      "SELECT target_type,target_label,summary FROM state_items WHERE project_id=? AND status='pending' AND source_type='rollout_outline' ORDER BY updated_at ASC",
     ).all(projectId) as any[];
     const platformDirective = this.resolvePlatformToneDirective(projectId);
     // Rolling outlines must consume the same confirmed world as chapter writing.
@@ -12040,7 +12060,12 @@ ${summarizeOutlineConsistency(pending)}`,
 项目：${project.title}
 全书规划：共${totalEstimated}章、${spans.length}卷。
 本卷规划：${JSON.stringify({ title: firstSpan.vol.title, theme: volMeta.theme, goal: volMeta.goal, keyEvents: volMeta.keyEvents, climax: volMeta.climax })}
-主要人物：${JSON.stringify(mainChars)}
+已确稿主要人物：${JSON.stringify(mainChars)}
+全部已确稿角色姓名索引（不能忘记或擅自改名）：${JSON.stringify(knownCharacterNames)}
+已建档组织与势力（不可擅自更名或推翻）：${JSON.stringify(organizations)}
+已建档地点（不可无因改变空间或关系）：${JSON.stringify(locations)}
+已确认状态事实（硬约束）：${JSON.stringify(confirmedStates)}
+已审核的待确认新增实体（仅软候选，不得当作事实）：${JSON.stringify(pendingEntities)}
 【已确认世界观完整来源（同正文权威资料）】：${confirmedWorld}
 【上一章已确认详细章纲（只读接力，不得重复已完成任务）】：${JSON.stringify(previousOutline)}
 当前在埋伏笔（不得遗忘，应按规划推进/提醒/回收）：${JSON.stringify(activeForeshadowings)}
@@ -12049,7 +12074,8 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
 本批范围：本卷第${localNos[0]}-${localNos[localNos.length - 1]}章，即全书第${batchNos[0]}-${batchNos[batchNos.length - 1]}章，共${batchNos.length}章；上一批/上一章结尾必须自然衔接本批第一章开头。
 章节篇幅：每章 targetWords 必须在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字之间，按本章剧情任务、场景数量、冲突强度单独决定，不得平均分配，并给出 wordCountReason。
 
-每章必须包含 title,targetWords,wordCountReason,content（具体事件链和结果）,chapterFunction,scenes（所有必要具体场景数组）,characterActions,conflict,highlight,hook,timelineEvent。${CHAPTER_FORESHADOWING_CONTRACT}章节功能随剧情交替，不得整批都是铺垫。只输出合法JSON：{"chapters":[...]}`;
+每章必须包含 title,targetWords,wordCountReason,content（具体事件链和结果）,chapterFunction,scenes（所有必要具体场景数组）,characterActions,conflict,highlight,hook,timelineEvent。${CHAPTER_FORESHADOWING_CONTRACT}章节功能随剧情交替，不得整批都是铺垫。
+【滚动实体来源目录】必须同步输出newEntities数组：只记本批真实首次引入、后续需要跟踪的有名人物、组织势力、地点和伏笔；已有建档者不能再次算新增。每项：{"type":"character|organization|map_point|foreshadowing","name":"实体在本章的实际名称","chapterNumber":本次全书章号,"evidenceQuote":"从本章content逐字截取的事件原文，至少8字并包含名称"}。不得把无姓名背景路人、想象、未发生事件或缺乏来源的猜测写成建档事实。没有新增实体时仍必须输出newEntities:[]，不能省略。新增实体经本批独立事实审核后只成为待作者确认的档案，不得自称已确稿。只输出合法JSON：{"chapters":[...],"newEntities":[...]}`;
 
       const result = await this.llmCallWithRetry<any>(
         `长篇滚动章纲 全书${batchNos[0]}-${batchNos[batchNos.length - 1]}`,
@@ -12085,6 +12111,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           { contradictions: reviewed.contradictions, candidateFacts }, 'fact_conflict', batchNos[0]);
       }
       rollingFactLedger = reviewed.ledger;
+      const newEntities = validateRollingEntityProposals(result.data, batchChapters, batchNos);
 
       // Validate the entire changed batch before opening a write transaction;
       // otherwise a late invalid chapter leaves a partly persisted outline.
@@ -12161,6 +12188,30 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
         }
         added++;
       }
+        for (const proposal of newEntities) {
+          const table = proposal.type === 'character' ? 'characters'
+            : proposal.type === 'organization' ? 'organizations'
+            : proposal.type === 'map_point' ? 'map_points' : 'foreshadowings';
+          const field = proposal.type === 'foreshadowing' ? 'content' : 'name';
+          const existed = db.prepare(`SELECT id FROM ${table} WHERE project_id=? AND ${field}=? LIMIT 1`)
+            .get(projectId, proposal.type === 'foreshadowing' ? proposal.evidenceQuote : proposal.name);
+          if (existed) continue;
+          const outline = db.prepare(`SELECT id FROM outlines WHERE project_id=? AND level='chapter' AND "order"=? LIMIT 1`)
+            .get(projectId, proposal.chapterNumber - 1) as any;
+          const chapter = db.prepare('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?')
+            .get(projectId, proposal.chapterNumber) as any;
+          if (!outline?.id || !chapter?.id) throw Error('滚动实体缺少已保存的章纲与章节证据');
+          this.stateItemService.create(projectId, {
+            sourceType:'rollout_outline', sourceId:String(outline.id),
+            sourceChapterId:String(chapter.id), targetType:proposal.type,
+            targetLabel:proposal.name, title:proposal.name,
+            summary:proposal.evidenceQuote,content:proposal.evidenceQuote,
+            status:'pending',authority:'soft_candidate',
+            source:'reviewed_rollout_outline',createdBy:'rollout_outline',
+            payload:{intent:'entity_create',entityProposal:proposal},
+            tags:['long_novel','entity_proposal'],
+          });
+        }
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
