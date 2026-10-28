@@ -11930,7 +11930,6 @@ ${summarizeOutlineConsistency(pending)}`,
     ).get(projectId);
     if (!worldForReview) throw new HttpException('缺少已确认世界观，无法审核或写入长篇滚动章纲',409);
     const constitution = readConstitution(project);
-    const canonicalBrief = JSON.stringify({ title: project.title, confirmedStory: constitution.confirmedStory });
 
     // 4) 按卷、分批（每批最多 4 章）滚动生成并落库
     const ROLLOUT_BATCH = 4;
@@ -12038,9 +12037,19 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       const candidateFacts = normalizeOutlineChaptersForFactReview(
         batchChapters.map((chapter: any, index: number) => chapterFactsForReview(batchNos[index] - 1, chapter)),
       );
+      // The independent Gate must see the volume contract as an authoritative
+      // source, not only the generation prompt. Keep one per-changed-batch
+      // verdict; no duplicate review or edits to book/volume canon.
+      const batchCanonicalBrief = JSON.stringify({
+        title: project.title, confirmedStory: constitution.confirmedStory,
+        volumePlan: {
+          id:firstSpan.vol.id, title:firstSpan.vol.title, content:firstSpan.vol.content,
+          theme:volMeta.theme, goal:volMeta.goal, keyEvents:volMeta.keyEvents, climax:volMeta.climax,
+        },
+      });
       const reviewed = await this.reviewOutlineFacts(
         projectId, `长篇滚动第${batchNos[0]}-${batchNos[batchNos.length-1]}章事实与行动来源复核`,
-        canonicalBrief, worldForReview, rollingFactLedger, candidateFacts, platformDirective,
+        batchCanonicalBrief, worldForReview, rollingFactLedger, candidateFacts, platformDirective,
         batchNos[0], previousOutline ? [previousOutline] : [], 'rollout_outline_fact_dependencies',
       );
       if (!reviewed.consistent || reviewed.contradictions.length) {

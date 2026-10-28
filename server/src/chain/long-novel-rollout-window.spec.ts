@@ -77,6 +77,9 @@ describe('ARCH-004 progressive outline window', () => {
     expect(controller.generatedCanonGuard.assertStructuredCanCommit).toHaveBeenCalledTimes(4);
     expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(4);
     expect(controller.reviewOutlineFacts.mock.calls[0][9]).toBe('rollout_outline_fact_dependencies');
+    const bookAndVolume = JSON.parse(controller.reviewOutlineFacts.mock.calls[0][2]);
+    expect(bookAndVolume).toMatchObject({ title:'长篇测试', volumePlan:{id:'volume-1',title:'起势卷',theme:'追查',goal:'识别真相',content:'主线逐步推进'} });
+
     expect(inserts.filter(sql => sql.includes('INSERT INTO outlines'))).toHaveLength(15);
     expect(inserts.filter(sql => sql.includes('INSERT INTO chapters'))).toHaveLength(15);
     expect(inserts.filter(sql => sql.includes('UPDATE chapters'))).toHaveLength(0);
