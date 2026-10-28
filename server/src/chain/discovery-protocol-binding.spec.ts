@@ -45,7 +45,7 @@ describe('bind existing causal evidence without model protocol repairs',()=>{
     p.causalPlan=[{action:{field:'payoff',quote:'她向值班人员报告仓库地址。'},conditions:[{field:'payoff',quote:'值班人员派出救援队。'}],result:{field:'payoff',quote:'救援队打开仓库救出被困者。'}}];
     const bound=bindPremiseCausalPlan(p),selection={pool:[],selected:[bound],poolTargetMet:true};
     expect(premiseCausalPlanIssues(bound)).toEqual([]);
-    expect(premisePayoffReviewIssues({payoffChecks:[{ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.payoff',conditionEvidenceRef:'S1.payoff',reason:'已有报告地点与实际派遣事件，行动条件不同于结果断言。',links:[{ref:'S1.causalPlan[0]',status:'supported',reason:'值班派出救援队后才到场，事件桥接已经写明。'}]}]},selection)).toEqual([]);
+    expect(premisePayoffReviewIssues({payoffChecks:[{ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.payoff',conditionEvidenceRef:'S1.payoff',reversalCheck:{status:'supported',actionEvidenceRef:'S1.activeChoice',reason:'主角实际通报仓库位置，救援队按既有行动核对被困地点'},reason:'已有报告地点与实际派遣事件，行动条件不同于结果断言。',links:[{ref:'S1.causalPlan[0]',status:'supported',reason:'值班派出救援队后才到场，事件桥接已经写明。'}]}]},selection)).toEqual([]);
     p.causalPlan[0].conditions[0].quote=p.causalPlan[0].result.quote;
     expect(premiseCausalPlanIssues(bindPremiseCausalPlan(p))).toContain('causalPlan[0]不能用同一结果断言自证行动或条件');
   });

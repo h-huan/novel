@@ -24,7 +24,7 @@ function premise(id = 'A') {
 const selection = (ids = ['A']) => ({pool:ids.map(premise),selected:ids.map(premise),poolTargetMet:true});
 function payoffChecks(s: ReturnType<typeof selection>) {
   return s.selected.map((item,index) => ({ref:`S${index+1}.payoff`,status:'supported' as const,
-    actionEvidenceRef:`S${index+1}.activeChoice`,conditionEvidenceRef:`S${index+1}.escalation`,reason:'实际到场由报告地点及值班派遣触发，不由结局倒推。',
+    actionEvidenceRef:`S${index+1}.activeChoice`,reversalCheck:{status:'supported' as const,actionEvidenceRef:`S${index+1}.activeChoice`,reason:'主角通报地点和值班派遣引发救援队核对现场'},conditionEvidenceRef:`S${index+1}.escalation`,reason:'实际到场由报告地点及值班派遣触发，不由结局倒推。',
     links:item.causalPlan.map((_,n)=>({ref:`S${index+1}.causalPlan[${n}]`,status:'supported' as 'supported'|'gap'|'unknown',reason:'已建立接收者、实际派遣与定位，到场条件成立。'}))}));
 }
 function report(s:ReturnType<typeof selection>) {
