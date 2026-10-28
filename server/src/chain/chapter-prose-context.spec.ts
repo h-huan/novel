@@ -53,7 +53,7 @@ describe('canonical character preflight on the normal body entry',()=>{
  it('uses the database chapter index when optional chapterNumber is absent',async()=>{
   const c=controller();
   c.assertRollingEntitiesConfirmed=vi.fn(()=>{throw Error('有待确认新实体');});
-  await expect(c.generate({projectId:'p',chapterId:'chapter-1'})).rejects.toThrow('有待确认新实体');
+  await expect(c.generate({projectId:'p',chapterId:'chapter-1'})).resolves.toMatchObject({success:false,error:'有待确认新实体'});
   expect(c.assertRollingEntitiesConfirmed).toHaveBeenCalledWith('p',1);
   expect(c.realLLM.generate).not.toHaveBeenCalled();
  });
