@@ -25,6 +25,7 @@ it('audits reversal success independently from later costs within the existing p
  const failures=materializePremisePayoffReview({payoffChecks:[gap]},bad);
  expect(failures).toHaveLength(1);
  expect(failures[0].quote).toBe(bad.selected[0].reversalEffect);
+ expect(failures[0].reason).toContain('缺少正确配件取得、装配与试机');
  expect(premisePayoffReviewDirective(input)).toContain('不能只审payoff段');
 });
 it('requires an independent payoff verdict even when every source check is preserved',()=>{

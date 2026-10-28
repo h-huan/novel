@@ -120,6 +120,6 @@ export function materializePremisePayoffReview(value:any,selection:PremiseSelect
     return {kind:'selection_fit' as const,premiseId:item.premiseId,referencePremiseId:item.premiseId,
       ...(row.gapRepair==='restore_source_conditions'?{}:{repairMode:'replace_from_pool' as const}),
       quote:String(selection.selected.find(p=>p.premiseId===item.premiseId)![row.reversalCheck?.status==='gap'?'reversalEffect':'payoff']),
-      referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[row.reason,...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
+      referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[row.reason,...(row.reversalCheck?.status==='gap'?['反转阶段：'+row.reversalCheck.reason]:[]),...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
   });
 }
