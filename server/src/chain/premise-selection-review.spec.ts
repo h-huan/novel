@@ -977,3 +977,17 @@ it('keeps two independently reviewed replacements and isolates a third failed ca
   expect(()=>verifiedReserveReplacements(changed,{...review,passed:true},pairs,['A']))
     .toThrow('换选审核证据不可用');
 });
+
+it('isolates cross-card overlap in a replacement batch without reusing a rejected pair',()=>{
+  const current=normalizePremiseSelectionPayload({pool:['A','B','C','D'].map(premise),
+    selectedPremises:['A','B','C'].map(premise)},3,4);
+  const replacements=[{replacesPremiseId:'X',replacementPremiseId:'B'},
+    {replacesPremiseId:'Y',replacementPremiseId:'C'}];
+  const checks=premiseSourceComparisonCatalog(current).filter(row=>row.premiseId==='B'||row.premiseId==='C')
+    .map(row=>({ref:row.ref,status:'preserved' as const,reason:'原池和展开一致'}));
+  const issue={kind:'overlap' as const,premiseId:'B',referencePremiseId:'C',
+    quote:premise('B').activeChoice,referenceQuote:premise('C').activeChoice,
+    reason:'两项主角主动选择与兑现实际同构，不能同时交付'};
+  expect(verifiedReserveReplacements(current,{passed:false,issues:[issue],sourceChecks:checks},replacements,['A']))
+    .toEqual([replacements[1]]);
+});
