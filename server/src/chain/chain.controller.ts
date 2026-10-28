@@ -6014,6 +6014,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         new Set(accepted.map(card=>String(card.sourcePremiseId))),requestedCount);
       const fulfillmentActions:any[]=[];
       const repairMissing=async(initialMissingPremiseIds:string[])=>{
+        const before=new Map(initialMissingPremiseIds.map(id=>[id,latestAssessment(id)]));
         const initialIssueByPremiseId = new Map(candidateAssessments
           .filter((item: any) => item?.passed !== true && item?.sourcePremiseId)
           .map((item: any) => [String(item.sourcePremiseId), item.issues]));
