@@ -39,7 +39,7 @@ describe('canonical character preflight on the normal body entry',()=>{
   c.workflowGuard={assertCanGenerateBody:vi.fn()};
   c.assertExecutionStandardsComplete=vi.fn();
   c.rolloutDetailedOutlines=vi.fn();
-  c.db={getDb:()=>({prepare:()=>({get:()=>({id:'chapter-1',outline_id:'outline-1',chapter_index:1,target_words:3500})})})};
+  c.db={getDb:()=>({prepare:()=>({get:()=>({id:'chapter-1',outline_id:'outline-1',chapter_index:1,target_words:3500}),all:()=>[]})})};
   c.getChapterWordRange=()=>({min:2500,max:5000});
   c.beginChapterGeneration=()=> 'run-1';
   c.finishChapterGeneration=vi.fn();
@@ -90,6 +90,19 @@ describe('canonical character preflight on the normal body entry',()=>{
   expect(args.basePrompt).toContain('已确认角色：林川');
  });
 });
+describe('long-novel pending entity preflight before prose model cost',()=>{
+ it('blocks any unconfirmed or rejected rolled-out entity and names the review target',()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  c.db={getDb:()=>({prepare:()=>({all:()=>[{target_type:'character',target_label:'沈诺'}]})})};
+  expect(()=>c.assertRollingEntitiesConfirmed('p',21)).toThrow('沈诺');
+ });
+ it('allows a chapter whose own rolled-out entity dossiers have all been resolved',()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
+  expect(()=>c.assertRollingEntitiesConfirmed('p',21)).not.toThrow();
+ });
+});
+
 describe('chapter expansion prose context',()=>{
  it.each([2478,2785])('never generates padding for a retained %i-word draft',async words=>{
   const c=Object.create(ChainController.prototype) as any;const original='她'.repeat(words)+'。';
