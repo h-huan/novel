@@ -112,42 +112,46 @@ export function reservePostCardSourceReviewCredits(
   return total >= needed * 2 ? needed : 0;
 }
 
-/** Completion is governed by remaining work and shared allowances, not rounds.
- * The caller owns all model calls and immutable accepted cards. */
+/** Each rejected card receives at most one consolidated local repair. A partial
+ * reduction in its Gate failures is not authority to repeatedly pay for repairs
+ * of that same source premise: remaining failures go to an independently vetted
+ * replacement in the original pool. Passing every Gate is still mandatory. */
 export async function fulfillDiscoveryGaps(options:{
  missing:()=>string[];hasCard:(id:string)=>boolean;canRepair:(ids:string[])=>boolean;
- repair:(ids:string[])=>Promise<string[]>;canReplace:()=>boolean;
+ repair:(ids:string[])=>Promise<unknown>;canReplace:()=>boolean;
  replace?:(id:string)=>Promise<'replaced'|'rejected'|'unavailable'>;
  replaceBatch?:(ids:string[])=>Promise<'replaced'|'rejected'|'unavailable'>;
- fingerprint:()=>string;repairScope?:(id:string)=>string;repairEligible?:(id:string)=>boolean;
+ fingerprint:()=>string;repairEligible?:(id:string)=>boolean;
  onError?:(phase:'repair'|'replace',error:unknown)=>void;
 }){
- const stalled=new Set<string>();
- const key=(id:string)=>JSON.stringify([id,options.repairScope?.(id)||'story']);
+ const repairedOnce=new Set<string>();
  let replacementCursor=0;
  while(options.missing().length){
-  const before=options.fingerprint(),stalledBefore=stalled.size,missing=options.missing();
-  const patchable=missing.filter(id=>!stalled.has(key(id))&&options.hasCard(id)&&(options.repairEligible?.(id)??true));
+  const missing=options.missing();
+  const patchable=missing.filter(id=>!repairedOnce.has(id)&&options.hasCard(id)&&(options.repairEligible?.(id)??true));
   if(patchable.length&&options.canRepair(patchable)){
-   const repairKeys=new Map(patchable.map(id=>[id,key(id)]));
-   let improved=new Set<string>();
-   try { improved=new Set(await options.repair(patchable)); }
+   // Commit the attempt before calling the model, even if it throws. A retry
+   // under a different review status is still a repair of the same source card.
+   for(const id of patchable)repairedOnce.add(id);
+   try { await options.repair(patchable); }
    catch(error) { options.onError?.('repair',error); }
-   for(const id of patchable)if(!improved.has(id))stalled.add(repairKeys.get(id)!);
-  }else{
-   if(!options.canReplace())return 'budget_or_original_pool_exhausted';
-   let outcome:'replaced'|'rejected'|'unavailable'='rejected';
-   try {
-    if(options.replaceBatch)outcome=await options.replaceBatch(missing);
-    else if(options.replace)outcome=await options.replace(missing[replacementCursor++%missing.length]);
-    else throw Error('缺额补齐未配置换选入口');
-   }
-   catch(error) { options.onError?.('replace',error); }
-   if(outcome==='unavailable')return 'budget_or_original_pool_exhausted';
-   // A rejected preselection consumes its identity/allowance but never creates
-   // a complete card. Try a different original-pool candidate if affordable.
+   // Assess the changed card through the caller's unchanged independent Gate.
+   // A remaining gap is replaced rather than sent through another repair round.
+   continue;
   }
-  if(options.missing().length&&before===options.fingerprint()&&stalled.size===stalledBefore)return 'no_material_progress';
+  if(!options.canReplace())return 'budget_or_original_pool_exhausted';
+  const before=options.fingerprint();
+  let outcome:'replaced'|'rejected'|'unavailable'='rejected';
+  try {
+   if(options.replaceBatch)outcome=await options.replaceBatch(missing);
+   else if(options.replace)outcome=await options.replace(missing[replacementCursor++%missing.length]);
+   else throw Error('缺额补齐未配置换选入口');
+  }
+  catch(error) { options.onError?.('replace',error); }
+  if(outcome==='unavailable')return 'budget_or_original_pool_exhausted';
+  // A rejected proposal consumes its pool identity or budget. If neither
+  // changes, do not spin into another identical replacement call.
+  if(options.missing().length&&before===options.fingerprint())return 'no_material_progress';
  }
  return 'requested_quantity_verified';
 }
