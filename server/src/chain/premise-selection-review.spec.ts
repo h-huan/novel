@@ -111,6 +111,36 @@ const selection = () => normalizePremiseSelectionPayload({ pool: ['A', 'B', 'C']
 const failure: PremiseSelectionReview = { passed: false, issues: [{ kind: 'overlap', premiseId: 'B', referencePremiseId: 'A',
   quote: '每次救人自己的存在逐渐消失', referenceQuote: '每次救人自己的存在逐渐消失', reason: '选择与代价及旧签字反转机制同构' }] };
 
+it('replaces only one real delivery shortfall when four of eight passed rather than rerunning four slots',async()=>{
+  const ids=['A','B','C','D','E','F','G','H','I'];
+  const input=normalizePremiseSelectionPayload({
+    pool:ids.map(premise),selectedPremises:ids.slice(0,8).map(premise),
+  },8,15);
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.logger={log:vi.fn(),warn:vi.fn()};
+  controller.reviewPremiseSelection=vi.fn(async(selection:any,_standard:string,mode:string)=>{
+    if(mode==='overlap')return {passed:true,issues:[]};
+    const checks=premiseSourceComparisonCatalog(selection).map(entry=>({
+      ref:entry.ref,
+      status:(['E','F','G','H'].includes(entry.premiseId)&&entry.field==='payoff'
+        ?'drift':'preserved') as 'drift'|'preserved',
+      reason:'审核明确比较实际因果字段是否忠实于原池原始故事路径',
+    }));
+    return materializePremiseSourceReview({sourceChecks:checks},selection);
+  });
+  controller.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
+    expect(prompt).toContain('replacements恰好1项');
+    const replacement={replacements:[{replacesPremiseId:'E',premise:premise('I')}]};
+    expect(options.validate(replacement)).toBe(true);
+    return {data:replacement};
+  });
+  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],undefined,5);
+  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D','I']);
+  expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
+  expect(result.selectionAudit).toMatchObject({discardedSurplusPremiseIds:['F','G','H']});
+  expect(result.selectionAudit.finalReview.passed).toBe(true);
+});
+
 it('reuses all independent reviews and avoids repeated pool reselection when five of eight are verified',async()=>{
   const ids=['A','B','C','D','E','F','G','H'];
   const input=normalizePremiseSelectionPayload({
