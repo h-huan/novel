@@ -2629,7 +2629,9 @@ ${localPatchContract('hardline_local_replacement')}
         });
       }
       const chapterContract = this.readChapterOutlineContract(dto.projectId, dto.chapterId);
-      this.assertRollingEntitiesConfirmed(dto.projectId, Number(dto.chapterNumber));
+      // The persisted chapter index is authoritative; chapterNumber is optional
+      // in the body request and must never disable the pending-entity Gate.
+      this.assertRollingEntitiesConfirmed(dto.projectId, Number(targetChapter.chapter_index));
       // The character whitelist is an authoritative input to BOTH writing
       // and review. Never silently lose it when optional context assembly fails.
       const characterContext = this.buildCharacterWritingContext(dto.projectId);
