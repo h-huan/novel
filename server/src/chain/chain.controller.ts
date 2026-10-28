@@ -163,7 +163,7 @@ import { ConsistencyCheckService } from '../state/consistency-check.service';
 import { CharacterService, PROFILE_FIELDS } from '../modules/character/character.service';
 import { loadCharacterNames } from '../modules/character/character-names';
 import { WorldSettingService, WORLD_PROFILE_FIELDS } from '../modules/world-setting/world-setting.service';
-import { withAtomicWorldProfile } from './world-persistence';
+import { assertWorldProfileAvailable, withAtomicWorldProfile } from './world-persistence';
 import { MapPointService } from '../modules/map-point/map-point.service';
 import { EmbeddingService } from '../rag/embedding.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
@@ -7451,6 +7451,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           ? db.prepare('SELECT * FROM world_system_profiles WHERE project_id=? AND world_setting_id=? LIMIT 1')
               .get(projectId, existingFrozenWorld.id) as any
           : null;
+        if (existingFrozenWorld) {
+          assertWorldProfileAvailable(db, projectId, String(existingFrozenWorld.id));
+        }
         const frozenWorldConstraints = existingFrozenWorld
           ? this.safeExtractJson<Record<string, any>>(String(existingFrozenWorld.constraints || '{}'), {})
           : {};
@@ -7589,9 +7592,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     serializeGeneratedSqlText((worldSetting.economy || '') + ' | ' + (Array.isArray(worldSetting.factions) ? worldSetting.factions.map((f:any)=>f?.name||f).join('，') : '')),
                     now(), now()
                   );
-                  if (!db.prepare('SELECT 1 FROM world_system_profiles WHERE project_id=? AND world_setting_id=?').get(projectId, wid)) {
-                    throw new Error('长篇世界观关联档案写入后回读失败');
-                  }
+                  assertWorldProfileAvailable(db, projectId, wid);
                 });
                 wsCount++;
               } catch (error: any) {
@@ -8016,9 +8017,7 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
                 serializeGeneratedSqlText((wd.economy || '') + ' | ' + (Array.isArray(wd.factions) ? wd.factions.map((f:any)=>f?.name||f).join('，') : '')),
                 now(), now()
               );
-              if (!db.prepare('SELECT 1 FROM world_system_profiles WHERE project_id=? AND world_setting_id=?').get(projectId, worldSettingId)) {
-                throw new Error('短篇世界观关联档案写入后回读失败');
-              }
+              assertWorldProfileAvailable(db, projectId, worldSettingId);
             });
           } else {
             const message = '世界观生成失败，未继续生成大纲，避免上下文不一致。';
@@ -8030,10 +8029,11 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
         }
         // 无论新建还是已存在，都把已保存世界观回读为大纲上下文（世界严格先于大纲；重跑时若已有世界观，大纲也必须有世界观上下文，不得为空）
         activeFailureOrigin = 'persistence_readback';
-        const savedWorld = db.prepare(`SELECT era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
+        const savedWorld = db.prepare(`SELECT id, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
         if (!savedWorld) {
           throw new Error('世界观生成步骤结束但主记录未保存，停止生成大纲；请检查世界观审查与写入日志。');
         }
+        assertWorldProfileAvailable(db, projectId, String(savedWorld.id));
         // Execute the original world-rule completeness Gate here, before paying
         // for the story card and per-chapter outlines. Do not repeat it late.
         this.assertProjectSourceCompleteness(projectId);
