@@ -385,6 +385,7 @@ const OutlinePage: React.FC = () => {
   const [activeView, setActiveView] = useState<'generate' | 'browse'>('browse');
   const [isGenerating, setIsGenerating] = useState(false);
   const [rolloutBusy, setRolloutBusy] = useState(false);
+  const [rolloutAppendCount, setRolloutAppendCount] = useState<1 | 3 | 5 | 10>(3);
   const [genProgress, setGenProgress] = useState('');
   const [volumes, setVolumes] = useState<VolumeNode[]>([]);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
@@ -1510,23 +1511,52 @@ const OutlinePage: React.FC = () => {
             <EmptyState title="暂无大纲" hint="请在灵感发现中创建项目，或切换到 AI 大纲生成。" action={<button type="button" onClick={() => setActiveView('generate')} style={styles.primarySmallButton}>立即生成大纲</button>} />
           ) : projectType === 'long' ? (
             <>
+              <div style={{ ...styles.treePanel, marginBottom: 12, padding: 12 }}>
+                <div style={styles.treeTitle}>全书骨架（非正文、非章节列表）</div>
+                <p style={{ margin: '8px 0', fontSize: 13, color: 'var(--color-text-dim)', lineHeight: 1.7 }}>
+                  故事核心与结局方向、世界规则、分卷目标、人物与势力、伏笔及时间线共同构成全书骨架；
+                  后续详细章纲只执行骨架，不等于骨架本身。
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
+                  <Link to={`/project/${projectId}/dashboard`}>全书主线与创作核心</Link>
+                  <Link to={`/project/${projectId}/world`}>世界观与规则</Link>
+                  <Link to={`/project/${projectId}/characters`}>人物体系</Link>
+                  <Link to={`/project/${projectId}/organization-map`}>势力与地点</Link>
+                  <Link to={`/project/${projectId}/foreshadowing`}>全书／卷级伏笔</Link>
+                  <Link to={`/project/${projectId}/timeline`}>关键时间线</Link>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 13, color: 'var(--color-text-soft)' }}>
+                  <strong>全书分卷规划</strong>（{volumes.length} 卷）：
+                  {volumes.map(volume => volume.title).join('、') || '尚未生成卷纲'}
+                </div>
+              </div>
               <div style={styles.treePanel}>
                 <div style={{ ...styles.treeTitle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-                  <span>全书骨架 · 章节列表</span>
+                  <span>章节列表（已生成的详细章纲）</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>补充后续详细大纲</span>
-                    {([1, 3, 5, 10] as const).map(count => (
-                      <button
-                        key={count}
-                        type="button"
-                        style={{ ...styles.operationButton, opacity: rolloutBusy ? 0.55 : 1 }}
-                        onClick={() => handleRolloutOutline(count)}
-                        disabled={rolloutBusy}
-                        title={`依照已确认卷纲及已写正文，只新增 ${count} 章详细大纲；经过同一独立事实与一致性审核，不覆盖旧内容`}
-                      >
-                        补 {count} 章
-                      </button>
-                    ))}
+                    <label htmlFor="rollout-append-count" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>补充后续详细大纲</label>
+                    <select
+                      id="rollout-append-count"
+                      aria-label="选择补充章数"
+                      style={{ ...styles.input, width: 92 }}
+                      value={rolloutAppendCount}
+                      onChange={event => setRolloutAppendCount(Number(event.target.value) as 1 | 3 | 5 | 10)}
+                      disabled={rolloutBusy}
+                    >
+                      <option value={1}>1 章</option>
+                      <option value={3}>3 章</option>
+                      <option value={5}>5 章</option>
+                      <option value={10}>10 章</option>
+                    </select>
+                    <button
+                      type="button"
+                      style={{ ...styles.operationButton, opacity: rolloutBusy ? 0.55 : 1 }}
+                      onClick={() => handleRolloutOutline(rolloutAppendCount)}
+                      disabled={rolloutBusy}
+                      title="依照已确认卷纲与已写正文，补充所选数量的详细章纲；使用原有独立事实审核，不覆盖旧内容"
+                    >
+                      {rolloutBusy ? '补纲中…' : '补充章纲'}
+                    </button>
                   </div>
                 </div>
                 <div style={styles.treeContent}>
