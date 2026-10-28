@@ -2099,6 +2099,9 @@ it('dispatches exactly five initial full-card calls after eight shortlisted cand
     irreplaceableCarrier:'工作权限和家属责任共同决定具体行动路径',
     secondOrderConsequence:'调查让旧同事失去岗位并改变家人对主角的信任',
     readerQuestion:'究竟谁在关键时刻更改凭证并获得具体利益',
+    causalPlan:[{action:{field:'activeChoice',quote:'主角自行核对原始记录并承担被停职的现实代价'},
+      conditions:[{field:'escalation',quote:'对手夺取通行权限迫使主角改变调查方式'}],
+      result:{field:'payoff',quote:'主角以合法核验改变结局并承担失去原岗位的代价'}}],
   });
   const strong=(idx:number)=>({
     storyType:'short_story',targetPlatform:'fanqie',storyCategory:'悬疑',
@@ -2146,7 +2149,8 @@ it('dispatches exactly five initial full-card calls after eight shortlisted cand
     webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],
     genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:''},5);
   expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
-  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toHaveLength(5);
+  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure'),
+    JSON.stringify({error:(c.logger.error.mock.calls||[]),warn:(c.logger.warn.mock.calls||[])}).slice(0,1200)).toHaveLength(5);
   expect(c.reviewIdeaPresentation).toHaveBeenCalledOnce();
   expect(c.logger.log.mock.calls.some((args:any[])=>args.some((value:any)=>String(value).includes('锁定完整卡 5 个')))).toBe(true);
 });
