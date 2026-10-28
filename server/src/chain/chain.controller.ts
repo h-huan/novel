@@ -6308,8 +6308,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const citationOnlySlots=repairPlan.repairSlots.filter(slot=>
       slot.mode==='correct_or_replace_from_pool' &&slot.issues.length>0
       &&slot.issues.every(issue=>issue.kind==='selection_fit')).length;
-    const recoverySlots=repairPlan.repairSlots.slice(0,
-      Math.min(neededReplacementSlots,freshPoolCount+citationOnlySlots));
+    const recoverySlots=deliveryCount<requestedCount
+      ?repairPlan.repairSlots.slice(0,Math.min(neededReplacementSlots,freshPoolCount+citationOnlySlots))
+      :repairPlan.repairSlots;
     const surplusRejectedIds=repairPlan.repairSlots.slice(recoverySlots.length)
       .map(item=>String(item.replacesPremiseId));
     // If enough independently reviewed premises remain, stop here instead of spending
@@ -6376,7 +6377,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         &&slot.issues.length>0&&slot.issues.every(issue=>issue.kind==='selection_fit'))
         .map(slot=>String(slot.replacesPremiseId)));
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
-        .filter(id=>(!attemptedBeforeReserve.has(String(id))||citationOnlyIds.has(String(id)))
+        .filter(id=>(deliveryCount>=requestedCount||!attemptedBeforeReserve.has(String(id))
+          ||citationOnlyIds.has(String(id)))
           &&!protectedIds.includes(id)&&(!unusedIds||unusedIds.has(String(id))));
       // Keep the canonical pool unchanged for server-side validation. Only send
       // identities that can legally fill these slots; discarded and protected
@@ -6511,7 +6513,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           referencePremiseId:issue.premiseId,quote:issue.referenceQuote,referenceQuote:issue.quote});
       const plannedSlots=premiseReselectionPlan(selected,{passed:false,issues:scopedIssues}).repairSlots;
       const realShortfall=Math.max(0,requestedCount-retained.selection.selected.length);
-      const slots=plannedSlots.slice(0,Math.min(unusedIds.size,realShortfall));
+      const slots=deliveryCount<requestedCount
+        ?plannedSlots.slice(0,Math.min(unusedIds.size,realShortfall))
+        :plannedSlots;
       if(!slots.length)break;
       slots.forEach(slot=>slot.mode='replace_from_pool');
       // A replacement cannot be used unless its changed sources AND all affected
