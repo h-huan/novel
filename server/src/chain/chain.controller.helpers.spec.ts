@@ -1976,7 +1976,7 @@ it('sends matching complete pool sources to source review and every selected ite
  await controller.reviewPremiseSelection(selection,'既定标准','source_drift');
  const source=controller.llmCallWithRetry.mock.calls[0][1];expect(source).toContain('保留原始骨架完整内容');expect(source).not.toContain('未选原池项专用标记');
  await controller.reviewPremiseSelection(selection,'既定标准','overlap');
- const overlap=controller.llmCallWithRetry.mock.calls[1][1];expect(overlap).toContain('保留原始骨架完整内容');expect(overlap).not.toContain('原轻量池');
+ const overlap=controller.llmCallWithRetry.mock.calls[1][1];expect(overlap).not.toContain('保留原始骨架完整内容');expect(overlap).toContain('她拨通电话并说明具体情况');expect(overlap).not.toContain('原轻量池');
 });
 
 it('supplies exact saved closing text while retaining the complete predecessor for handoff review',()=>{
@@ -2072,7 +2072,9 @@ it('sends full standards only for actual reviewed cards while preserving all ref
  const packed=JSON.parse(captured.split('【实际题材卡与已通过参考卡】')[1].split('\n若存在standardLines')[0]);
  expect(packed.cards[0].executionStandard||packed.cards[0].executionStandardRefs).toBeTruthy();
  expect(packed.references[0]).not.toHaveProperty('executionStandard');expect(packed.references[0]).not.toHaveProperty('executionStandardRefs');expect(packed.references[0]).not.toHaveProperty('lockedPremise');
- for(const key of ['hook','coreConflict','description','mainReversal','setting','ending','protagonist','scopeBreakdown','storyCategory','storyTone','pov'])expect(packed.references[0][key]).toEqual((reference as any)[key]);
+ for(const key of ['hook','coreConflict','description','mainReversal','setting','ending','protagonist','scopeBreakdown','storyCategory'])expect(packed.references[0][key]).toEqual((reference as any)[key]);
+  for(const key of ['storyTone','pov','noveltyProof','uniquePoint'])expect(packed.references[0]).not.toHaveProperty(key);
+  expect(packed.cards[0].storyTone).toEqual(actual.storyTone);expect(packed.cards[0].pov).toEqual(actual.pov);
 });
 
 
