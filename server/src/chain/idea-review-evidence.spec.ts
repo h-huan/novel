@@ -32,8 +32,7 @@ it('sends every actual story field to independent Gate but only genuine narrativ
   for(const key of ['title','storyCategory','hook','description','setting','protagonist',
     'coreConflict','mainReversal','ending','scopeBreakdown'])
     expect(peer[key]).toEqual(reference[key]);
-  for(const key of ['sourcePremiseId','executionStandard','noveltyProof',
-    'webNovelGenre','plotTags','submissionTags','readerGoals'])
+  for(const key of ['sourcePremiseId','executionStandard','noveltyProof','readerGoals'])
     expect(peer).not.toHaveProperty(key);
   expect(reference).toEqual(before);
   expect(JSON.stringify(peer).length).toBeLessThan(JSON.stringify(reference).length);
