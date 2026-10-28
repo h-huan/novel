@@ -11986,6 +11986,24 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
         expectedStages: ['outline'],
         expectedScenarios: ['outline'],
       });
+      // Deterministic shape and cited-entity checks run BEFORE paid independent
+      // fact review. Invalid model JSON never buys a review it cannot pass.
+      const newEntities = validateRollingEntityProposals(result.data, batchChapters, batchNos);
+
+      // Validate the entire changed batch before opening a write transaction;
+      // otherwise a late invalid chapter leaves a partly persisted outline.
+      for (let idx = 0; idx < batchChapters.length; idx++) {
+        const ch = batchChapters[idx];
+        const globalNo = batchNos[idx];
+        if (!ch?.title || !ch?.content || !ch?.conflict || !ch?.hook || !Array.isArray(ch?.scenes)) {
+          throw new HttpException(`全书第${globalNo}章滚动章纲字段不完整（缺标题/事件链/冲突/钩子/场景）`, 502);
+        }
+        const tw = Number(ch.targetWords);
+        if (!Number.isInteger(tw) || tw < CHAPTER_WORD_RANGE.min || tw > CHAPTER_WORD_RANGE.max || !String(ch.wordCountReason || '').trim()) {
+          throw new HttpException(`全书第${globalNo}章滚动章纲必须给出${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字动态目标及篇幅理由`, 502);
+        }
+      }
+
       // New chapters are a new fact source, not a continuation of the prior
       // creation Gate's approval. Reuse that same independent fact-ledger Gate
       // once per changed batch; never recertify already saved detailed outlines.
@@ -12003,21 +12021,6 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           { contradictions: reviewed.contradictions, candidateFacts }, 'fact_conflict', batchNos[0]);
       }
       rollingFactLedger = reviewed.ledger;
-      const newEntities = validateRollingEntityProposals(result.data, batchChapters, batchNos);
-
-      // Validate the entire changed batch before opening a write transaction;
-      // otherwise a late invalid chapter leaves a partly persisted outline.
-      for (let idx = 0; idx < batchChapters.length; idx++) {
-        const ch = batchChapters[idx];
-        const globalNo = batchNos[idx];
-        if (!ch?.title || !ch?.content || !ch?.conflict || !ch?.hook || !Array.isArray(ch?.scenes)) {
-          throw new HttpException(`全书第${globalNo}章滚动章纲字段不完整（缺标题/事件链/冲突/钩子/场景）`, 502);
-        }
-        const tw = Number(ch.targetWords);
-        if (!Number.isInteger(tw) || tw < CHAPTER_WORD_RANGE.min || tw > CHAPTER_WORD_RANGE.max || !String(ch.wordCountReason || '').trim()) {
-          throw new HttpException(`全书第${globalNo}章滚动章纲必须给出${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字动态目标及篇幅理由`, 502);
-        }
-      }
       db.exec('BEGIN IMMEDIATE');
       try {
         // Recheck inside the write lock: manual editing or another worker may
@@ -12031,13 +12034,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
         const ch = batchChapters[idx];
         const globalNo = batchNos[idx];
         const localNo = localNos[idx];
-        if (!ch?.title || !ch?.content || !ch?.conflict || !ch?.hook || !Array.isArray(ch?.scenes)) {
-          throw new HttpException(`全书第${globalNo}章滚动章纲字段不完整（缺标题/事件链/冲突/钩子/场景）`, 502);
-        }
-        const tw = Number(ch.targetWords);
-        if (!Number.isInteger(tw) || tw < CHAPTER_WORD_RANGE.min || tw > CHAPTER_WORD_RANGE.max || !String(ch.wordCountReason || '').trim()) {
-          throw new HttpException(`全书第${globalNo}章滚动章纲必须给出${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字动态目标及篇幅理由`, 502);
-        }
+        const tw = Number(ch.targetWords); // Validated for the entire batch before the independent Gate.
         const oid = uuidV4();
         db.prepare(`INSERT INTO outlines (id,project_id,level,parent_id,"order",title,content,chapter_function,goal_arc,target_words,actual_words,foreshadowing_ids,plot_points,status,character_ids,scenes,volumes,book_skeleton,created_at,updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(

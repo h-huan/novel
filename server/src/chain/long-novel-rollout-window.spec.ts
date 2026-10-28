@@ -136,4 +136,17 @@ describe('ARCH-004 progressive outline window', () => {
     expect(sql).not.toContain('ROLLBACK');
   });
 
+  it('rejects a missing new-entity manifest before paying for the independent fact reviewer',async()=>{
+    const {controller,inserts}=fixture(15);
+    const generator=controller.llmCallWithRetry.getMockImplementation();
+    controller.llmCallWithRetry.mockImplementationOnce(async(...args:any[])=>{
+      const response=await generator(...args);
+      delete response.data.newEntities;
+      return response;
+    });
+    await expect(controller.rolloutDetailedOutlines('project')).rejects.toThrow('newEntities');
+    expect(controller.reviewOutlineFacts).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+  });
+
 });
