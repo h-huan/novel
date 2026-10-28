@@ -384,6 +384,7 @@ const OutlinePage: React.FC = () => {
 
   const [activeView, setActiveView] = useState<'generate' | 'browse'>('browse');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [rolloutBusy, setRolloutBusy] = useState(false);
   const [genProgress, setGenProgress] = useState('');
   const [volumes, setVolumes] = useState<VolumeNode[]>([]);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
@@ -1035,40 +1036,6 @@ const OutlinePage: React.FC = () => {
     }
   }, [projectId, refreshAfterChange]);
 
-  const handleContinueCreate = useCallback(async (count: number) => {
-    if (!projectId) return;
-    const targetsInput = window.prompt(
-      `请依次填写 ${count} 个章节的目标字数（每章 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}，逗号分隔；应按各章任务分别决定）`,
-      '',
-    );
-    if (targetsInput === null) return;
-    const chapterTargets = targetsInput.split(/[,，\s]+/).filter(Boolean).map(Number);
-    if (chapterTargets.length !== count || chapterTargets.some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) {
-      alert(`必须提供 ${count} 个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标。`);
-      return;
-    }
-    try {
-      const res = await api.post(`/projects/${projectId}/outlines/continue`, {
-        fromOutlineId: selectedChapter?.id,
-        count,
-        chapterTargets,
-        planning: {
-          workScale,
-          targetWordsRange,
-          structureMode: 'dynamic_by_story_rhythm',
-          chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX },
-          updatePlan,
-        },
-      });
-      const data = (res as any).data ?? res;
-      const last = data?.outlines?.[data.outlines.length - 1];
-      await refreshAfterChange(last?.id);
-      setGenProgress(`已续创建 ${data?.outlines?.length || count} 章细纲。`);
-    } catch (error: any) {
-      alert(`续创建失败：${error?.message || '未知错误'}`);
-    }
-  }, [projectId, selectedChapter, workScale, targetWordsRange, updatePlan, refreshAfterChange]);
-
   const handleExpandChapter = useCallback(async () => {
     if (!projectId || !selectedChapter) return;
     setGenProgress('正在基于已确认资料生成本章详细大纲…');
@@ -1107,22 +1074,24 @@ const OutlinePage: React.FC = () => {
     }
   }, [projectId, selectedChapter, refreshAfterChange]);
 
-  const handleRolloutOutline = useCallback(async () => {
-    if (!projectId) return;
-    setGenProgress('正在结合已写正文滚动补全后续约20章详细章纲…');
+  const handleRolloutOutline = useCallback(async (appendCount: 1 | 3 | 5 | 10) => {
+    if (!projectId || rolloutBusy) return;
+    setRolloutBusy(true);
+    setGenProgress(`正在按已确认书纲、卷纲、已有章纲与正文补充 ${appendCount} 章，并进行一致性审核…`);
     try {
-      const res = await api.post('/chain/rollout-outline', { projectId });
+      // Explicit append count shares the same audited long-form rollout route
+      // as automatic refill. It never depends on selecting a chapter.
+      const res = await api.post('/chain/rollout-outline', { projectId, appendCount });
       const data = (res as any).data ?? res;
-      setGenProgress(
-        data?.added > 0
-          ? `已结合最新剧情滚动新增 ${data.added} 章详细章纲（当前细纲 ${data.detailedTotal}/${data.totalEstimated} 章）。`
-          : '详细章纲已足够领先当前正文，无需补充。',
-      );
+      if (data?.added !== appendCount) throw new Error('服务端新增章数与请求不一致，请检查大纲记录');
       await refreshAfterChange();
+      setGenProgress(`已新增 ${data.added} 章详细章纲（共 ${data.detailedTotal}/${data.totalEstimated} 章）；新人物、势力、地点和伏笔须在状态确稿中心确认后写正文。`);
     } catch (error: any) {
-      setGenProgress(`滚动补纲失败，未写入内容：${error?.message || '未知错误'}`);
+      setGenProgress(`补充章纲未完成：${error?.message || '未知错误'}`);
+    } finally {
+      setRolloutBusy(false);
     }
-  }, [projectId, refreshAfterChange]);
+  }, [projectId, refreshAfterChange, rolloutBusy]);
 
   const openInsertDialog = useCallback((chapterId: string, position: 'before' | 'after') => {
     openOperationDialog({
@@ -1208,21 +1177,6 @@ const OutlinePage: React.FC = () => {
       },
     });
   }, [openOperationDialog, projectId, refreshAfterChange, volumes]);
-
-  const openContinueDialog = useCallback((count: number) => {
-    openOperationDialog({
-      title: `续创建 ${count} 章`, description: '请逐章填写目标字数，逗号分隔。系统按实际章节任务创建，不会固定套用章数或字数。', confirmLabel: '确认续创建',
-      fields: [{ key: 'targets', label: `${count} 个目标字数`, initialValue: Array.from({ length: count }, () => '3600').join(',') }],
-      onConfirm: async values => {
-        const chapterTargets = values.targets.split(/[,，\s]+/).filter(Boolean).map(Number);
-        if (chapterTargets.length !== count || chapterTargets.some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) throw new Error(`请填写 ${count} 个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数。`);
-        const response = await api.post(`/projects/${projectId}/outlines/continue`, { fromOutlineId: selectedChapter?.id, count, chapterTargets, planning: { workScale, targetWordsRange, structureMode: 'dynamic_by_story_rhythm', chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX }, updatePlan } });
-        const data = (response as any).data ?? response;
-        await refreshAfterChange(data?.outlines?.at(-1)?.id);
-        setGenProgress(`已续创建 ${data?.outlines?.length || count} 章细纲。`);
-      },
-    });
-  }, [openOperationDialog, projectId, refreshAfterChange, selectedChapter?.id, targetWordsRange, updatePlan, workScale]);
 
   const renderContextPanel = () => {
     if (!selectedChapter || !chapterContext) return null;
@@ -1357,28 +1311,6 @@ const OutlinePage: React.FC = () => {
         <div style={styles.impactNotice}>
           修改后，相关伏笔位置、时间顺序和人物状态会出现在修改提醒中；系统不会擅自改写正文。
         </div>
-        <div style={styles.impactNotice}>
-          续创建：
-          {[1, 2, 5, 10].map(count => (
-            <button key={count} type="button" style={{ ...styles.operationButton, marginLeft: 8 }} onClick={() => openContinueDialog(count)}>
-              续 {count} 章
-            </button>
-          ))}
-        </div>
-
-        {projectType === 'long' && (
-          <div style={styles.impactNotice}>
-            长篇渐进式大纲：创建时只细排前20章，之后在正文生成时自动结合剧情滚动补全；也可现在手动
-            <button
-              type="button"
-              style={{ ...styles.operationButton, marginLeft: 8 }}
-              onClick={handleRolloutOutline}
-              title="结合最新已写正文，把后续详细章纲补到领先约20章"
-            >
-              立即滚动补纲
-            </button>
-          </div>
-        )}
         <div style={styles.qualityPanel}>
           <div style={styles.qualityTitle}>本章写作要点</div>
           <div style={styles.qualityList}>
@@ -1579,7 +1511,24 @@ const OutlinePage: React.FC = () => {
           ) : projectType === 'long' ? (
             <>
               <div style={styles.treePanel}>
-                <div style={styles.treeTitle}>全书骨架</div>
+                <div style={{ ...styles.treeTitle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <span>全书骨架 · 章节列表</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>补充后续详细大纲</span>
+                    {([1, 3, 5, 10] as const).map(count => (
+                      <button
+                        key={count}
+                        type="button"
+                        style={{ ...styles.operationButton, opacity: rolloutBusy ? 0.55 : 1 }}
+                        onClick={() => handleRolloutOutline(count)}
+                        disabled={rolloutBusy}
+                        title={`依照已确认卷纲及已写正文，只新增 ${count} 章详细大纲；经过同一独立事实与一致性审核，不覆盖旧内容`}
+                      >
+                        补 {count} 章
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div style={styles.treeContent}>
                   {volumes.map(volume => (
                     <div key={volume.id} style={styles.volumeBlock}>
