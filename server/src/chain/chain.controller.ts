@@ -6639,10 +6639,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // must not pay to choose the exact same disproved candidate again.
     const attemptedBeforeReserve=new Set(initial.selected.map(row=>String(row.premiseId)));
     let reselectionStopReason:string|undefined;
-    // A repeated model request is justified only by new correction evidence or
-    // changed premises. Bind protocol feedback to the exact scoped input.
-    const reselectionProtocolFailures = new Map<string,{signature:string;issues:string[]}>();
-    let repeatedProtocolFailure = false;
+    // The structured helper owns its own protocol correction. Never add an
+    // outer identical retry without any changed premise or new evidence.
     const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
       if(!slots.length)return true;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
@@ -6656,9 +6654,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // identities in the full pool cannot be selected, and protected story facts
       // are already in 【当前选择】. Do not spend tokens on unreachable candidates.
       const selectablePool=initial.pool.filter(item=>availableIds.includes(String(item.premiseId)));
-      const protocolScopeKey=JSON.stringify({slots:slots.map(slot=>({id:slot.replacesPremiseId,mode:slot.mode})),
-        selected:selected.selected,availableIds});
-      const previousProtocol=reselectionProtocolFailures.get(protocolScopeKey);
       const normalize=(value:unknown)=>{
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
@@ -6670,8 +6665,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
           +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(premiseReselectionPromptSelection(selected.selected,ids))
           +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)
-          +(previousProtocol?'\n【同一原池与题材在上轮协议补正后仍未通过的具体错误；仅纠正结构/引用，不改变故事事实】'
-            +JSON.stringify(previousProtocol.issues):'')
           +(rejectedHistory.some(row=>!ids.has(row.premiseId)
               &&!selected.selected.some(item=>String(item.premiseId)===row.premiseId))
             ?'\n【此前独立复核已确认的失败路径（候选不得重用同类缺失条件）】'
@@ -6694,13 +6687,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         if(!result.data){
           const issues=(result.validationIssues?.length?result.validationIssues
             :result.warnings?.length?result.warnings:['未得到有效的原池重选JSON']).map(String).slice(0,8);
-          const signature=JSON.stringify(issues);
-          // The next outer attempt may recover using these explicit reasons.
-          // If it independently reproduces the same failure on the same
-          // source input despite correction feedback, a third replay adds no
-          // evidence and must not consume the remainder of the shared budget.
-          repeatedProtocolFailure=Boolean(previousProtocol&&previousProtocol.signature===signature);
-          reselectionProtocolFailures.set(protocolScopeKey,{signature,issues});
+          // The helper already used its bounded structured correction. Without
+          // new facts another outer try only repeats this failed model scope.
           reselectionStopReason='原池重选协议纠正未完成，未处理位置隔离：'+issues.join('；');
           return false;
         }
@@ -6715,15 +6703,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return true;
       }
     };
-    // Preserve a recovery opportunity when the model has returned actionable
-    // protocol errors; do not reset those errors and purchase identical retries.
-    while(reselectionBudget.remaining>0){
-      const pendingSlots=recoverySlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)));
-      if(!pendingSlots.length)break;
-      const before=reselectionBudget.remaining;
-      if(await reselectScope(pendingSlots))break;
-      if(repeatedProtocolFailure||reselectionBudget.remaining>=before)break;
-    }
+    // A single selection scope per actual missing set. The inner helper
+    // already corrects malformed structured output; on failure isolate slots.
+    const pendingSlots=recoverySlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)));
+    if(pendingSlots.length&&reselectionBudget.remaining>0)
+      await reselectScope(pendingSlots);
     const unresolvedIds = recoverySlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)))
       .map(slot=>String(slot.replacesPremiseId));
     const rejectedExtraIds=surplusRejectedIds.filter(id=>!unresolvedIds.includes(id));

@@ -463,16 +463,15 @@ it('does not enter another provider attempt after the last physical call returns
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
       expect(prompt).toContain('【必须处理的位置及模式】');
       expect(options.physicalCallBudget.remaining).toBeGreaterThanOrEqual(2);
-      // The previous protocol problem is carried into the second proposal.
-      if(c.llmCallWithRetry.mock.calls.length===2)
-        expect(prompt).toContain('同一原池候选协议两次补正仍失败');
+      // The mocked helper already exhausted its own correction.
+      expect(c.llmCallWithRetry.mock.calls.length).toBe(1);
       options.physicalCallBudget.remaining--;
       return {data:null,validationIssues:['同一原池候选协议两次补正仍失败']};
     });
     const result=await c.reconcilePremiseSelection(selection(),2,3,['悬疑'],'');
-    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
-    // One shared credit is preserved after the same failure repeats despite
-    // corrective feedback. No invalid premise is accepted.
+    expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+    // No unchanged outer replay after the helper has already failed.
+    // No invalid premise is accepted.
     expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A']);
     expect(result.selectionAudit).toMatchObject({
       partial:true,unresolvedPremiseIds:['B'],excludedPremiseIds:['B'],
