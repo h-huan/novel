@@ -37,11 +37,6 @@ export function discoveryFailureDimensions(assessment:any):string[]{
  for(const issue of assessment?.issues||[])if(typeof issue==='string'&&!semanticIssues.has(issue))dimensions.push(issue);
  return [...new Set(dimensions)].sort();
 }
-export function discoveryFailureImproved(before:any,after:any){
- if(after?.passed===true)return true;
- const prior=discoveryFailureDimensions(before),next=discoveryFailureDimensions(after);
- return prior.length>0&&next.length<prior.length&&next.every(key=>prior.includes(key));
-}
 
 
 /** An explicitly evidenced intrinsic audience limitation cannot be changed by
