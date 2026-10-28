@@ -160,8 +160,8 @@ describe('ARCH-004 progressive outline window', () => {
       if(sql.includes('INSERT INTO outlines'))return {...st,run:(id:string,_p:string,_level:string,_parent:string,order:number,...rest:any[])=>{
         savedOutlines.set(order,id);return st.run(id,_p,_level,_parent,order,...rest);
       }};
-      if(sql.includes('INSERT INTO chapters'))return {...st,run:(id:string,_p:string,_outline:string,chapterNo:number,...rest:any[])=>{
-        savedChapters.set(chapterNo,id);return st.run(id,_p,_outline,chapterNo,...rest);
+      if(sql.includes('INSERT INTO chapters'))return {...st,run:(id:string,_p:string,_outline:string,volumeNo:number,chapterNo:number,...rest:any[])=>{
+        savedChapters.set(chapterNo,id);return st.run(id,_p,_outline,volumeNo,chapterNo,...rest);
       }};
       if(sql.includes('SELECT id FROM outlines WHERE project_id=?'))return {...st,get:(_p:string,order:number)=>savedOutlines.has(order)?{id:savedOutlines.get(order)}:undefined};
       if(sql.includes('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?'))return {...st,get:(_p:string,chapterNo:number)=>savedChapters.has(chapterNo)?{id:savedChapters.get(chapterNo)}:undefined};
