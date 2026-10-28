@@ -246,8 +246,8 @@ describe('observed 4-card presentation report omitted rows',()=>{
   expect(result[0]).toMatchObject({position:1,titleCompelling:false,issues:first[0].issues});
   expect(result[1].position).toBe(2);
   expect(requests).toHaveLength(2);
-  expect(requests[1].prompt).toContain('只返回position=[2,4]');
-  expect(requests[1].prompt).toContain('reviews必须恰好2项');
+  expect(requests[1].prompt).toContain('【本轮点名的原始位置】[2,4]');
+  expect(requests[1].prompt).toContain('reviews恰好2行');
  });
  it('does not reuse ambiguous duplicated verdicts as approval',()=>{
   const duplicated=[verdict(1),verdict(2),verdict(2)];
@@ -269,10 +269,10 @@ describe('observed 4-card presentation report omitted rows',()=>{
   expect(result.map((row:any)=>row.position)).toEqual([1,2,3,4]);
   expect(requests).toHaveLength(2);
   expect(requests[0].prompt).toContain(JSON.stringify(ideaReviewResponseExample(cards)));
-  expect(requests[1].prompt).toContain('只返回position=[4]');
+  expect(requests[1].prompt).toContain('【本轮点名的原始位置】[4]');
   expect(requests[1].prompt).not.toContain('reviews必须恰好4项');
-  expect(requests[1].prompt).toContain('reviews必须恰好1项');
-  expect(requests[1].prompt).toContain('其余已审卡只作同批差异参照');
+  expect(requests[1].prompt).toContain('reviews恰好1行');
+  expect(requests[1].prompt).toContain('其他卡只供同批差异比较');
   expect(requests[1].prompt).toContain('完整执行标准');
   expect(requests[1].prompt).toContain('题材');
  });
