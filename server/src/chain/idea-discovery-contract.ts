@@ -139,8 +139,10 @@ export function premiseSeedFactIssues(storyCore: unknown): string[] {
 }
 
 /**
- * 题材池的“广搜数量”只用于提高搜索覆盖，不是质量 Gate.
- * 未被选中的轻量胚子只需最小骨架；只有最终选中的 requestedCount 项需要完整筛选证据。
+ * 广搜候选数量只改善搜索覆盖，不能当成质量 Gate。
+ * 未选中的轻量胚子保留最小事实骨架；独立筛选通过的整组预选项
+ * （允许超过用户交付数）都须保留完整来源/因果证据并进入并发成卡，
+ * 最终交付数量只在完整卡审核之后截取。
  */
 export function normalizePremiseSelectionPayload(
   payload: unknown,
