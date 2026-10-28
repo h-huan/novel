@@ -8,8 +8,8 @@ export type IdeaStoryType = 'short_story' | 'long_novel';
 
 export class PremiseNamingError extends Error {}
 
-/** Keep at most three extra original-pool paths for a five-card request.
- * This consumes no extra pool creation calls or model-call budget. */
+/** Size the reviewed shortlist from this request, not from a hard-coded
+ * five-card workflow; cap screening surplus at three original-pool paths. */
 /** Split AFTER independent source/causal/genre/category/overlap approval.
  * The two-to-three surplus paths are audited reserves, NOT additional full
  * cards. Preserve the model's ranked selection order, except when a varied
@@ -38,7 +38,7 @@ export function partitionReviewedIdeaPremises<T extends { premiseId:unknown;stor
 export function ideaPreselectionCapacity(requestedCount:number,availableCount:number):number {
   if(!Number.isInteger(requestedCount)||requestedCount<1)throw Error('题材数量必须为正整数');
   if(!Number.isInteger(availableCount)||availableCount<0)throw Error('候选池数量无效');
-  return Math.min(availableCount,requestedCount+(requestedCount>=5?3:0));
+  return Math.min(availableCount,requestedCount+Math.min(3,Math.max(1,Math.ceil(requestedCount/2))));
 }
 
 /** Keep partial delivery useful: requests above two still return at least three qualified cards. */

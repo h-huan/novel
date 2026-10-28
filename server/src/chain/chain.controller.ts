@@ -6526,10 +6526,23 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // other failed candidates excluded; never treat them as accepted or passed.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
     const neededReplacementSlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
+    // Hedge a real delivery deficit with ONE additional original-pool candidate
+    // in the SAME recovery wave. For four vetted and five requested, examine
+    // two rather than launching one, waiting for failure, then launching one.
+    // Never create a surplus when there is no actual deficit; never exceed
+    // existing pool identities or shared credits. Independent source/overlap
+    // reviews remain mandatory for both results.
+    const reviewCredits=shared?.reviews.remaining??readGenerationBudgets().sourceMaxPhysicalCalls;
+    const selectionCredits=shared?.reselection.remaining??readGenerationBudgets().premiseReselectionMaxCalls;
+    const extraHedge=deliveryCount<requestedCount&&neededReplacementSlots>0
+      &&repairPlan.availableCandidates.length>neededReplacementSlots
+      &&repairPlan.repairSlots.length>neededReplacementSlots
+      &&reviewCredits>=2&&selectionCredits>0?1:0;
     const recoverySlots=deliveryCount<requestedCount
-      ?repairPlan.repairSlots.slice(0,neededReplacementSlots):repairPlan.repairSlots;
+      ?repairPlan.repairSlots.slice(0,Math.min(repairPlan.availableCandidates.length,neededReplacementSlots+extraHedge))
+      :repairPlan.repairSlots;
     const surplusRejectedIds=deliveryCount<requestedCount
-      ?repairPlan.repairSlots.slice(neededReplacementSlots).map(item=>String(item.replacesPremiseId)):[];
+      ?repairPlan.repairSlots.slice(recoverySlots.length).map(item=>String(item.replacesPremiseId)):[];
     // If enough independently reviewed premises remain, stop here instead of spending
     // more calls trying to fill every position. Full-card gates still run afterwards.
     let partialSelection = initial;
@@ -6690,6 +6703,25 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       ? await reviewBoth(selected,changeScope,initialReview)
       : retainPremiseReviewEvidence(initial,initialReview,selected);
     rememberRejected(postReselectionReview);
+    // All paid correction work for this wave has already been independently
+    // rechecked. A failed hedged candidate is not another delivery deficit
+    // when the other candidate filled the final missing slot. Discard its
+    // issue/identity, reuse the complete subset evidence, and STOP reselection.
+    if(deliveryCount<requestedCount&&!postReselectionReview.passed){
+      const retained=retainReviewedPremises(selected,postReselectionReview,
+        repairPlan.protectedItems.map(item=>String(item.premiseId)));
+      const retainedReview=retainPremiseReviewEvidence(selected,postReselectionReview,retained.selection);
+      if(retained.selection.selected.length>=deliveryCount&&retainedReview.passed){
+        this.logger?.log('锁定前一次并发冗余恢复已满足实际交付目标 '
+          +retained.selection.selected.length+'/'+deliveryCount+'，不再串行换选');
+        return {...retained.selection,selectionAudit:{
+          initialReview,reselectionAttempted:true,finalReview:retainedReview,
+          reviewedRecoveryCandidates:recoverySlots.length,deliveryCount,
+          discardedHedgeIds:retained.excludedPremiseIds,
+          rejectedHistory,selectionStopReason:'reviewed_hedge_filled_delivery',
+          completeCardGatePending:true}};
+      }
+    }
     let finalReview=postReselectionReview;
     const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
       attemptedIds=new Set([...attemptedBeforeReserve,...selected.selected.map(item=>String(item.premiseId))]);
