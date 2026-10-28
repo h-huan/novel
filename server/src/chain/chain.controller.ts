@@ -6572,7 +6572,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const retained = retainReviewedPremises(selected, finalReview, repairPlan.protectedItems.map(item => String(item.premiseId)));
       if (!retained.selection.selected.length) throw new Error(message);
       this.logger?.warn(`锁定前重选复核部分未通过：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，隔离 ${retained.excludedPremiseIds.join('、')}；继续完整卡原有质量验收，不补生或重复重选。`);
-      return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true, reserve: reserveAudit, finalReview,
+      const retainedEvidence=retainPremiseReviewEvidence(selected,finalReview,retained.selection);
+      return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true, reserve: reserveAudit,
+        finalReview: retainedEvidence,
         ...budgetPartialAudit, partial: true, excludedPremiseIds: [...unresolvedIds,...retained.excludedPremiseIds],
         reasons: [...(budgetPartialAudit.reasons || []),...retained.reasons], completeCardGatePending: true } };
     }
