@@ -310,7 +310,7 @@ export function ideaCardStructuringDirective(
   const peerDifferenceFields = new Set([
     // Full server-owned facts were reviewed before structuring; keep the
     // distinct causal paths here. Final review still sees all full cards.
-    'workingTitle','storyCategory','activeChoice','escalation',
+    'workingTitle','storyCategory','coreConflict','activeChoice','escalation',
     'reversalEffect','payoff','irreplaceableCarrier',
   ]);
   const references = batch.filter(item => item.premiseId !== selectedPremise.premiseId).map(item =>

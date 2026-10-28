@@ -80,7 +80,7 @@ describe('locked-card structuring reference transport',()=>{
     expect(refs).toHaveLength(1);
     expect(refs[0]).toEqual({
       workingTitle:peer.workingTitle,storyCategory:peer.storyCategory,
-      activeChoice:peer.activeChoice,escalation:peer.escalation,
+      coreConflict:peer.coreConflict,activeChoice:peer.activeChoice,escalation:peer.escalation,
       reversalEffect:peer.reversalEffect,payoff:peer.payoff,
       irreplaceableCarrier:peer.irreplaceableCarrier,
     });
