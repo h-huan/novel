@@ -127,6 +127,53 @@ describe('ARCH-004 progressive outline window', () => {
     expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(4);
   });
 
+  it.each([1, 3, 5, 10])('manual list refill adds exactly %i chapters using the unchanged independent gates', async appendCount => {
+    const {controller,inserts}=fixture(0);
+    const result=await controller.rolloutOutline({projectId:'project',appendCount});
+    expect(result).toMatchObject({success:true,added:appendCount,target:20+appendCount,detailedTotal:20+appendCount});
+    expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(Math.ceil(appendCount/4));
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(Math.ceil(appendCount/4));
+    expect(controller.generatedCanonGuard.assertStructuredCanCommit).toHaveBeenCalledTimes(Math.ceil(appendCount/4));
+    expect(inserts.filter(sql=>sql.includes('INSERT INTO outlines'))).toHaveLength(appendCount);
+    expect(inserts.filter(sql=>sql.includes('INSERT INTO chapters'))).toHaveLength(appendCount);
+    expect(inserts.filter(sql=>sql.includes('UPDATE chapters'))).toHaveLength(0);
+  });
+
+  it('rejects invalid manual counts and conflicting automatic parameters before spending on a model', async()=>{
+    const {controller}=fixture(0);
+    await expect(controller.rolloutOutline({projectId:'project',appendCount:2})).rejects.toThrow('仅可选择');
+    await expect(controller.rolloutOutline({projectId:'project',appendCount:3,lookahead:20})).rejects.toThrow('不能同时');
+    expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+  });
+
+  it('keeps automatic refill dormant but lets an explicit user request add chapters', async()=>{
+    const {controller}=fixture(0);
+    expect((await controller.rolloutDetailedOutlines('project')).added).toBe(0);
+    expect((await controller.rolloutDetailedOutlines('project',{appendCount:3})).added).toBe(3);
+    expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
+  });
+
+  it('does not overrun volume plan or silently fill a hole in the saved chapter tree', async()=>{
+    const f=fixture(0);
+    const db=f.controller.db.getDb();
+    const orig=db.prepare;
+    db.prepare=(sql:string)=>{
+      const stmt=orig(sql);
+      if(sql.includes("level='volume'"))return {...stmt,all:()=>[{id:'volume-1',title:'短卷',order:0,content:'主线',volumes:JSON.stringify({estimatedChapters:21})}]};
+      return stmt;
+    };
+    await expect(f.controller.rolloutDetailedOutlines('project',{appendCount:3})).rejects.toThrow('仅剩1章');
+    expect(f.controller.llmCallWithRetry).not.toHaveBeenCalled();
+
+    db.prepare=(sql:string)=>{
+      const stmt=orig(sql);
+      if(sql.includes('SELECT "order"')&&sql.includes("level='chapter'")) return {...stmt,all:()=>[...Array.from({length:20},(_,order)=>({order})),{order:22}]};
+      return stmt;
+    };
+    await expect(f.controller.rolloutDetailedOutlines('project',{appendCount:1})).rejects.toThrow('细纲不连续');
+    expect(f.controller.llmCallWithRetry).not.toHaveBeenCalled();
+  });
+
   it('persists each verified batch atomically', async () => {
     const {controller} = fixture(15);
     await controller.rolloutDetailedOutlines('project');

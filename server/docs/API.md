@@ -28,7 +28,11 @@ Content-Type: application/json
 
 ### 长篇增量实体确稿
 
-滚动章纲 `POST /api/v1/chain/rollout-outline` 每次只在需要填补细纲窗口时调用模型。返回的新实体先作为 `state_items` 中 `source_type=rollout_outline` 的 `pending` 候选，不等于已经更新人物卡、地图、势力或伏笔。
+滚动章纲 `POST /api/v1/chain/rollout-outline` 在自动模式下只于细纲窗口不足时调用模型；大纲章节列表也可明确传入 `appendCount: 1 | 3 | 5 | 10`，沿用同一份卷级规划、已写正文、角色/组织/地点/伏笔来源及独立事实质量 Gate，严格新增指定数量，不使用自动20章目标，不覆盖已有章纲和正文。卷级章数不足、细纲中有缺口或正文超前时直接拒绝，不代替作者重规划整个小说。
+
+请求只含 `projectId` 时维持原有自动滚动逻辑；`appendCount` 与 `lookahead` 不得同时传入。短篇在创建时已有全篇章纲，不使用长篇手动补纲。
+
+返回的新实体先作为 `state_items` 中 `source_type=rollout_outline` 的 `pending` 候选，不等于已经更新人物卡、地图、势力或伏笔。
 
 ```http
 GET  /api/v1/projects/:projectId/state/items?status=pending

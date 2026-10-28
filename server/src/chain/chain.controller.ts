@@ -11793,7 +11793,7 @@ ${summarizeOutlineConsistency(pending)}`,
    */
   private async rolloutDetailedOutlines(
     projectId: string,
-    opts: { lookahead?: number; onProgress?: (message: string) => void } = {},
+    opts: { lookahead?: number; appendCount?: 1 | 3 | 5 | 10; onProgress?: (message: string) => void } = {},
   ): Promise<{ added: number; detailedTotal: number; target: number; totalEstimated: number }> {
     // Both streaming and non-streaming writing paths may request a refill.
     // Serializing per project prevents duplicated model calls and stale snapshots.
@@ -11813,7 +11813,7 @@ ${summarizeOutlineConsistency(pending)}`,
 
   private async rolloutDetailedOutlinesOnce(
     projectId: string,
-    opts: { lookahead?: number; onProgress?: (message: string) => void } = {},
+    opts: { lookahead?: number; appendCount?: 1 | 3 | 5 | 10; onProgress?: (message: string) => void } = {},
   ): Promise<{ added: number; detailedTotal: number; target: number; totalEstimated: number }> {
     const db = this.db.getDb();
     const project = db.prepare(
@@ -11822,7 +11822,13 @@ ${summarizeOutlineConsistency(pending)}`,
     if (!project) throw new HttpException('项目不存在', 404);
     // 短篇是单线闭环、创建时一次性出全纲，不需要滚动窗口。
     if (project.type !== 'long_novel') {
+      if (opts.appendCount !== undefined) throw new HttpException('短篇在创建时已完成全篇章纲；请在现有章节调整，不可滚动追加新的完整规划', 409);
       return { added: 0, detailedTotal: 0, target: 0, totalEstimated: 0 };
+    }
+    // Manual refill and automatic ahead-window refill are two entry modes of
+    // the SAME canonical writing/audit/persistence pipeline, not new chains.
+    if (opts.appendCount !== undefined && !([1, 3, 5, 10] as readonly number[]).includes(opts.appendCount)) {
+      throw new HttpException('补充章纲数量仅可选择 1、3、5 或 10 章', 400);
     }
     const { v4: uuidV4 } = require('uuid');
     const lookahead = Number.isInteger(opts.lookahead) && Number(opts.lookahead) > 0
@@ -11860,7 +11866,19 @@ ${summarizeOutlineConsistency(pending)}`,
     while (detailedOrders.has(contiguousDetailed)) contiguousDetailed++;
     const remainingDetailed = contiguousDetailed - writtenMax;
     const trigger = Math.min(lookahead, LONG_OUTLINE_ROLLOUT_TRIGGER);
-    const target = Math.min(totalEstimated,
+    const manualCount = opts.appendCount;
+    // Explicit additions append exactly N detailed chapters, independent of
+    // the automatic low-runway trigger. Do not fill holes or replace authored
+    // mid-book plans under an innocent-looking "add N" operation.
+    if (manualCount !== undefined) {
+      if (detailedOrders.size !== contiguousDetailed || writtenMax > contiguousDetailed) {
+        throw new HttpException('现有细纲不连续或正文超出细纲，先修复章纲/正文映射，禁止自动插入并改变既有小说', 409);
+      }
+      if (contiguousDetailed + manualCount > totalEstimated) {
+        throw new HttpException(`卷级规划仅剩${Math.max(0, totalEstimated - contiguousDetailed)}章可补，无法按请求一次新增${manualCount}章；请保持既有书纲并选择可补数量`, 409);
+      }
+    }
+    const target = manualCount !== undefined ? contiguousDetailed + manualCount : Math.min(totalEstimated,
       remainingDetailed <= trigger ? writtenMax + lookahead : contiguousDetailed);
     const missingGlobalNos: number[] = [];
     for (let n = 1; n <= target; n++) {
@@ -12133,10 +12151,13 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
   }
 
   @Post('rollout-outline')
-  async rolloutOutline(@Body() dto: { projectId: string; lookahead?: number }) {
+  async rolloutOutline(@Body() dto: { projectId: string; lookahead?: number; appendCount?: 1 | 3 | 5 | 10 }) {
     const projectId = String(dto?.projectId || '').trim();
     if (!projectId) throw new HttpException('缺少 projectId', 400);
-    const result = await this.rolloutDetailedOutlines(projectId, { lookahead: dto.lookahead });
+    if (dto.appendCount !== undefined && dto.lookahead !== undefined) {
+      throw new HttpException('手动补充固定章数不能同时传自动滚动窗口参数', 400);
+    }
+    const result = await this.rolloutDetailedOutlines(projectId, { lookahead: dto.lookahead, appendCount: dto.appendCount });
     return { success: true, ...result };
   }
 
