@@ -5,7 +5,7 @@ import { presentationGateIssues } from './idea-presentation-review';
 import { vi } from 'vitest';
 import { readerGoalReviewIssues } from './reader-goal-review';
 import { ideaReviewResponseExample } from './idea-review-evidence';
-import { presentationReviewIssues, targetIdeaReviews, compactIdeaPresentationReferences } from './idea-presentation-review';
+import { presentationReviewIssues, targetIdeaReviews, compactIdeaPresentationReferences, bindIdeaPresentationVerdicts } from './idea-presentation-review';
 it('binds final card verdicts to their real positions even when the generated titles collide',()=>{
   const a={title:'相同的标题',sourcePremiseId:'P1'};
   const b={title:'相同的标题',sourcePremiseId:'P2'};
