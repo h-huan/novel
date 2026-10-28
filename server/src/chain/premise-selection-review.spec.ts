@@ -879,116 +879,30 @@ it('does not buy a third selection when two remaining review credits cannot cove
  expect(c.logger.warn.mock.calls.map(([message]:string[])=>message).join(' ')).toContain('终检预算不足');
 });
 
-it('chooses two first-round alternates after one shared independent review without increasing call budgets',async()=>{
- const initial=normalizePremiseSelectionPayload({
-  pool:['A','B','C','D','E','F','G'].map(premise),
-  selectedPremises:['A','B','C'].map(premise)},3,7);
+it('reviews the one changed original-pool candidate through both independent gates without generating backup', async()=>{
+ const input=normalizePremiseSelectionPayload({
+  pool:['A','B','C','D'].map(premise),selectedPremises:['A','B'].map(premise)},2,4);
  const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
  c.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string,budget:any)=>{
   budget.remaining--;
   if(mode==='overlap')return {passed:true,issues:[]};
-  const issues=current.selected.filter((row:any)=>['A','B','D','E'].includes(row.premiseId))
-   .map((row:any)=>({kind:'selection_fit',repairMode:'replace_from_pool',premiseId:row.premiseId,referencePremiseId:row.premiseId,
-     quote:row.activeChoice,referenceQuote:initial.pool.find(seed=>seed.premiseId===row.premiseId)!.storyCore,
-     reason:'该候选缺少结局必要条件，不能仅凭角色决定宣告胜利'}));
-  return {passed:issues.length===0,issues};
+  const bad=current.selected.find((row:any)=>row.premiseId==='A');
+  return bad?{passed:false,issues:[{kind:'selection_fit',repairMode:'replace_from_pool',
+   premiseId:'A',referencePremiseId:'A',quote:bad.activeChoice,
+   referenceQuote:input.pool[0].storyCore,reason:'原池主角行动缺少必要条件'}]}:{passed:true,issues:[]};
  });
  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
   options.physicalCallBudget.remaining--;
-  expect(prompt).toContain('backupReplacements');
-  const value={replacements:[
-    {replacesPremiseId:'A',premise:premise('D'),comparisons:['E','C'].map(compare)},
-    {replacesPremiseId:'B',premise:premise('E'),comparisons:['D','C'].map(compare)}],
-   backupReplacements:[
-    {replacesPremiseId:'A',premise:premise('F'),comparisons:['G','C'].map(compare)},
-    {replacesPremiseId:'B',premise:premise('G'),comparisons:['F','C'].map(compare)}]};
-  expect(options.validate(value)).toBe(true);
-  return {data:value};
+  expect(prompt).not.toContain('backupReplacements');
+  const value={replacements:[{replacesPremiseId:'A',premise:premise('C'),comparisons:[compare('B')]}]};
+  expect(options.validate(value)).toBe(true);return {data:value};
  });
- const shared={reviews:{remaining:15},reselection:{remaining:3}};
- const result=await c.reconcilePremiseSelection(initial,3,7,['悬疑'],'',[],shared);
- expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['F','G','C']);
+ const result=await c.reconcilePremiseSelection(input,2,4,['悬疑'],'',[],{
+   reviews:{remaining:8},reselection:{remaining:3}});
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['C','B']);
  expect(result.selectionAudit.finalReview.passed).toBe(true);
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
  expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
- expect(shared.reselection.remaining).toBe(2);
- expect(result.selectionAudit.rejectedHistory.some((issue:any)=>issue.premiseId==='D')).toBe(true);
- expect(result.selectionAudit.rejectedHistory.some((issue:any)=>issue.premiseId==='E')).toBe(true);
- expect(result.selected[2]).toEqual(initial.selected[2]);
-});
-
-it('accepts only a backup with independent source and overlap approval, in the SAME reserve model call',async()=>{
- const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
-   selectedPremises:['A','B'].map(premise)},2,5);
- const controller=Object.create(ChainController.prototype) as any;
- controller.logger={warn:vi.fn(),log:vi.fn()};
- controller.reviewPremiseSelection=vi.fn(async(selection:any,_standard:string,mode:string,budget:any)=>{
-   budget.remaining--;
-   if(mode==='overlap')return {passed:true,issues:[]};
-   const target=selection.selected.filter((row:any)=>row.premiseId!=='B');
-   const bad=target.find((row:any)=>row.premiseId==='A'||row.premiseId==='C'||row.premiseId==='D');
-   return bad?{passed:false,issues:[{kind:'selection_fit',repairMode:'replace_from_pool',premiseId:bad.premiseId,
-     referencePremiseId:bad.premiseId,quote:bad.activeChoice,
-     referenceQuote:original.pool.find(row=>row.premiseId===bad.premiseId)!.storyCore,
-     reason:'这个候选无法交代结局的实际必要条件'}]}:{passed:true,issues:[]};
- });
- let call=0;
- controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-   options.physicalCallBudget.remaining--;
-   const data=++call===1?
-     {replacements:[{replacesPremiseId:'A',premise:premise('C'),comparisons:[compare('B')]}]}:
-     {replacements:[{replacesPremiseId:'C',premise:premise('D'),comparisons:[compare('B')]}],
-       backupReplacements:[{replacesPremiseId:'C',premise:premise('E'),comparisons:[compare('B')]}]};
-   expect(options.validate(data)).toBe(true);
-   if(call===2)expect(prompt).toContain('backupReplacements');
-   return {data};
- });
- const shared={reviews:{remaining:12},reselection:{remaining:4}};
- const result=await controller.reconcilePremiseSelection(original,2,5,['悬疑'],'',[],shared);
- expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['E','B']);
- expect(result.selectionAudit.finalReview.passed).toBe(true);
- expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(2);
- expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(6);
- expect(shared.reselection.remaining).toBe(2);
- expect(result.selectionAudit.reserve.replacements).toContainEqual({replacesPremiseId:'C',replacementPremiseId:'E'});
- expect(result.selectionAudit.rejectedHistory.some((row:any)=>row.premiseId==='D')).toBe(true);
- expect(result.selected.every((row:any)=>row.premiseId!=='D')).toBe(true);
-});
-
-it('falls back to the original two independent source and overlap gates when an OPTIONAL combined standby review fails',async()=>{
- const original=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
-   selectedPremises:['A','B'].map(premise)},2,5);
- const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
- let failedCombined=false;
- c.reviewPremiseSelection=vi.fn(async(input:any,_standard:string,mode:string,budget:any)=>{
-   budget.remaining--;
-   if(mode==='overlap')return {passed:true,issues:[]};
-   const identities=input.selected.map((row:any)=>row.premiseId);
-   if(identities.includes('D')&&identities.includes('E')){
-     failedCombined=true;
-     throw Error('额外备用的联合来源审核输出容量不足');
-   }
-   const bad=input.selected.find((row:any)=>row.premiseId==='A'||row.premiseId==='C');
-   return bad?{passed:false,issues:[{kind:'selection_fit',repairMode:'replace_from_pool',premiseId:bad.premiseId,
-     referencePremiseId:bad.premiseId,quote:bad.activeChoice,
-     referenceQuote:original.pool.find(row=>row.premiseId===bad.premiseId)!.storyCore,
-     reason:'此候选仍缺少必要的结果成立条件'}]}:{passed:true,issues:[]};
- });
- let count=0;
- c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
-   options.physicalCallBudget.remaining--;count++;
-   const value=count===1?{replacements:[{replacesPremiseId:'A',premise:premise('C'),comparisons:[compare('B')]}]}
-     :{replacements:[{replacesPremiseId:'C',premise:premise('D'),comparisons:[compare('B')]}],
-       backupReplacements:[{replacesPremiseId:'C',premise:premise('E'),comparisons:[compare('B')]}]};
-   expect(options.validate(value)).toBe(true);return {data:value};
- });
- const outcome=await c.reconcilePremiseSelection(original,2,5,['悬疑'],'',[],{
-   reviews:{remaining:12},reselection:{remaining:4}});
- expect(failedCombined).toBe(true);
- expect(outcome.selected.map((row:any)=>row.premiseId)).toEqual(['D','B']);
- expect(outcome.selectionAudit.finalReview.passed).toBe(true);
- expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
- expect(c.logger.warn.mock.calls.flat().join(' ')).toContain('按原有单候选');
 });
 
 it('continues beyond one reserve round using untried original identities and one shared allowance',async()=>{

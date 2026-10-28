@@ -61,7 +61,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("generationTasks.cancel('discovery', requestId)");
     expect(source).not.toContain('if(slots.length>=4)');
     expect(source).toContain('splitReviewMaterial(slots,slot=>');
-    expect(source).toContain('if(!await reselectScope(part,unusedIds,false))return false');
+    expect(source).toContain('if(!await reselectScope(part,unusedIds))return false');
     expect(source).toContain('isReviewOutputCapacityError(error)');
     expect(source).not.toContain('backupReplacements');
     expect(source).not.toContain('pendingBackup');
