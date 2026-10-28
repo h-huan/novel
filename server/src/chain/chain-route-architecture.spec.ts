@@ -168,7 +168,10 @@ describe('chain HTTP architecture', () => {
     expect(eligibility).toContain('readerGoalDeficitRequiresNewPremise');
     expect(eligibility).not.toContain('reselectionCompletionBudget');
     expect(eligibility).not.toContain('sourceCompletionBudget');
-    expect(source).toContain('canReplace:()=>reselectionCompletionBudget.remaining>0');
+    expect(source).toContain('canReplace:()=>(');
+    expect(source).toContain('availableReviewedReserves().length');
+    expect(source).toContain('reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2');
+    expect(source).toContain('kind:\'reviewed_reserve_replacement\'');
     const jsonRetry = source.slice(source.indexOf('private async llmCallWithRetry'));
     expect(jsonRetry).toContain('this.safeExtractJson<T>(rawContent, null as unknown as T)');
     expect(jsonRetry).not.toContain('const lineParsed: any[] = []');
