@@ -5601,7 +5601,11 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           normalizedSelection.selectionAudit?.finalReview;
         const reusableIndependentEvidence=Boolean(reviewedEvidence?.passed
           &&!premiseSelectionReviewIssues(reviewedEvidence,normalizedSelection).length
-          &&!premiseSourceReviewIssues(reviewedEvidence,normalizedSelection).length
+          // Source verifier accepts a SOURCE-ONLY protocol; finalReview also
+          // owns passed/issues for the combined independent verdict. Passing
+          // that combined object directly always flagged a protocol error,
+          // silently disabling every already-reviewed reserve.
+          &&!premiseSourceReviewIssues({sourceChecks:reviewedEvidence.sourceChecks},normalizedSelection).length
           &&!premisePayoffReviewIssues(reviewedEvidence,normalizedSelection).length
           &&!premiseGenreFitIssues(reviewedEvidence,normalizedSelection,dto.webNovelGenre).length
           &&!premiseCategoryFitIssues(reviewedEvidence,normalizedSelection).length
