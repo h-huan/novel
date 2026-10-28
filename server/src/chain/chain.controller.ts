@@ -10842,9 +10842,13 @@ ${excerpt}`;
       WHERE s.project_id=? AND s.source_type='rollout_outline'
         AND (s.status <> 'confirmed' OR s.authority <> 'hard_fact')
         AND c.chapter_index<=?
-      ORDER BY s.target_type,s.target_label`).all(projectId,chapterNumber) as any[];
+        AND EXISTS (SELECT 1 FROM outlines o
+          WHERE o.project_id=s.project_id AND o.level='chapter'
+            AND o."order">=c.chapter_index-1 AND o."order"<?
+            AND INSTR(COALESCE(o.content,'')||COALESCE(o.scenes,'')||COALESCE(o.title,''),s.target_label)>0)
+      ORDER BY s.target_type,s.target_label`).all(projectId,chapterNumber,chapterNumber) as any[];
     if(pending.length) {
-      throw new HttpException(`第${chapterNumber}章存在尚未确稿的新增人物、组织、地点或伏笔：${pending.map(row=>String(row.target_label)).join('、')}。请在状态确稿中心逐项确认；如已拒绝，须先修正章纲并重新核定实体证据。正文生成暂不消耗模型调用。`,409);
+      throw new HttpException(`第${chapterNumber}章仍引用尚未确稿的新增人物、组织、地点或伏笔：${pending.map(row=>String(row.target_label)).join('、')}。请在状态确稿中心逐项确认；拒绝时须从后续相关章纲移除或替换此实体，不能保留未授权的出场。正文生成暂不消耗模型调用。`,409);
     }
   }
 
