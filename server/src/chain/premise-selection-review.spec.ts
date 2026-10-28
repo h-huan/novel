@@ -145,6 +145,41 @@ it('selects two original-pool alternatives for one real delivery shortfall and s
   expect(result.selectionAudit.finalReview.passed).toBe(true);
 });
 
+it('stops reserve reselection after the second verified wave fills five of eight without paying for leftover failures',async()=>{
+  const ids='ABCDEFGHIJKLM'.split('');
+  const input=normalizePremiseSelectionPayload({
+    pool:ids.map(premise),selectedPremises:ids.slice(0,8).map(premise),
+  },8,15);
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.logger={log:vi.fn(),warn:vi.fn()};
+  const rejected=new Set(['D','E','F','G','H','J','K','M']);
+  controller.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
+    if(mode==='overlap')return {passed:true,issues:[]};
+    return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(current).map(entry=>({
+      ref:entry.ref,status:rejected.has(entry.premiseId)&&entry.field==='payoff'?'drift':'preserved',
+      reason:'核对题材原池与展开的真实行动和必要条件后记录的判定依据',
+    }))},current);
+  });
+  let waves=0;
+  controller.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
+    const first=waves++===0;
+    expect(prompt).toContain(first?'replacements恰好3项':'replacements恰好2项');
+    const from=first?['D','E','F']:['J','K'];
+    const to=first?['I','J','K']:['L','M'];
+    const data={replacements:from.map((id,index)=>({
+      replacesPremiseId:id,premise:premise(to[index]),
+    }))};
+    expect(options.validate(data)).toBe(true);
+    return {data};
+  });
+  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],undefined,5);
+  expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','I','L']);
+  expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(2);
+  expect(result.selectionAudit.finalReview.passed).toBe(true);
+  expect(result.selectionAudit.selectionStopReason).toBe('reviewed_delivery_after_reselection');
+  expect(result.selectionAudit.excludedPremiseIds).toContain('M');
+});
+
 it('reuses all independent reviews and avoids repeated pool reselection when five of eight are verified',async()=>{
   const ids=['A','B','C','D','E','F','G','H'];
   const input=normalizePremiseSelectionPayload({
