@@ -6298,8 +6298,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // screening slots merely because five delivery slots remain intact.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
     const neededReplacementSlots=Math.max(0,requestedCount-initiallyRetained.selection.selected.length);
+    // The repair planner includes failed *selected* identities as potential
+    // self-corrections. They are NOT fresh pool choices. Count only genuinely
+    // unused pool identities, plus a proven plan-only selection-fit correction;
+    // otherwise a two-item original reserve produces a four-slot doomed call.
+    const previouslyExpandedIds=new Set(initial.selected.map(row=>String(row.premiseId)));
+    const freshPoolCount=repairPlan.availableCandidates.filter(item=>
+      !previouslyExpandedIds.has(String(item.premiseId))).length;
+    const citationOnlySlots=repairPlan.repairSlots.filter(slot=>
+      slot.mode==='correct_or_replace_from_pool' &&slot.issues.length>0
+      &&slot.issues.every(issue=>issue.kind==='selection_fit')).length;
     const recoverySlots=repairPlan.repairSlots.slice(0,
-      Math.min(repairPlan.availableCandidates.length,neededReplacementSlots));
+      Math.min(neededReplacementSlots,freshPoolCount+citationOnlySlots));
     const surplusRejectedIds=repairPlan.repairSlots.slice(recoverySlots.length)
       .map(item=>String(item.replacesPremiseId));
     // If enough independently reviewed premises remain, stop here instead of spending
@@ -6362,8 +6372,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const ids=new Set<string>(slots.map(slot=>String(slot.replacesPremiseId)));
       const scopedReview:PremiseSelectionReview={passed:false,issues:slots.flatMap(slot=>slot.issues)};
       const protectedIds=selected.selected.filter(item=>!ids.has(String(item.premiseId))).map(item=>item.premiseId);
+      const citationOnlyIds=new Set(slots.filter(slot=>slot.mode==='correct_or_replace_from_pool'
+        &&slot.issues.length>0&&slot.issues.every(issue=>issue.kind==='selection_fit'))
+        .map(slot=>String(slot.replacesPremiseId)));
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
-        .filter(id=>!protectedIds.includes(id)&&(!unusedIds||unusedIds.has(String(id))));
+        .filter(id=>(!attemptedBeforeReserve.has(String(id))||citationOnlyIds.has(String(id)))
+          &&!protectedIds.includes(id)&&(!unusedIds||unusedIds.has(String(id))));
       // Keep the canonical pool unchanged for server-side validation. Only send
       // identities that can legally fill these slots; discarded and protected
       // identities in the full pool cannot be selected, and protected story facts
