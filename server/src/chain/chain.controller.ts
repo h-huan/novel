@@ -6515,7 +6515,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       this.logger?.warn(`锁定前重选复核部分未通过：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，隔离 ${retained.excludedPremiseIds.join('、')}；继续完整卡原有质量验收，不补生或重复重选。`);
       const retainedEvidence=retainPremiseReviewEvidence(selected,finalReview,retained.selection);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true,
-        finalReview: retainedEvidence,
+        finalReview: retainedEvidence, rejectedHistory,
         ...budgetPartialAudit, partial: true, excludedPremiseIds: [...unresolvedIds,...retained.excludedPremiseIds],
         reasons: [...(budgetPartialAudit.reasons || []),...retained.reasons], completeCardGatePending: true } };
     }
