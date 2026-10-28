@@ -646,26 +646,31 @@ if (health.ok) for (const target of projectTargets) {
   }
 }
 
+// A failed health prerequisite owns the single authoritative warning. Do not
+// misreport downstream probes deliberately skipped as separate model/metric
+// failures or as an unbound completed audit.
 const diagnosticWarnings = [];
-if (!runtime.ideaActivity?.source?.ok) diagnosticWarnings.push('灵感进行中/取消调用查询失败：只能看到最新完成的审计。');
-if (runtime.ideaActivity?.totalRecent>0) diagnosticWarnings.push('最新完成审计之后还存在灵感模型调用，其中进行中 '+runtime.ideaActivity.running+'、已取消 '+runtime.ideaActivity.cancelled+'；这些调用不属于旧审计。');
-const finalDiscoveryAudit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery);
-if (!runtime.discoveryCallTrace?.source?.ok) {
-  diagnosticWarnings.push('灵感发现逐步指标查询失败：' + String(runtime.discoveryCallTrace?.source?.error ?? '原因未知'));
-}
-if (runtime.discoveryCallTrace?.source?.correlationMode === 'latest_unbound') {
-  diagnosticWarnings.push('最新灵感审计缺少开始/结束时间，调用记录只能按最近记录查询，无法严格关联。');
-}
-if (runtime.discoveryCallTrace?.source?.ok && finalDiscoveryAudit.startedAt && finalDiscoveryAudit.finishedAt && runtime.discoveryCallTrace.runs.length === 0) {
-  diagnosticWarnings.push('最新灵感审计时间窗内没有模型调用指标；不能据此宣称耗时或调用次数为零。');
-}
-if (runtime.discoveryCallTrace?.sameVersionCallGroups?.length) {
-  diagnosticWarnings.push('灵感发现存在相同版本元数据组合的多次调用；指标没有保存实际输入指纹，这只能提示人工核对 Run ID、时间窗与请求，不能单独认定重复调用。');
-}
-for (const target of projectTargets) {
-  const diagnostics = inspectedProjects[target.key]?.cockpit?.diagnostics;
-  if (Number(diagnostics?.exactDuplicateRunGroups) > 0) {
-    diagnosticWarnings.push(target.label + '：后端同版本元数据分组数=' + diagnostics.exactDuplicateRunGroups + '；未保存完整输入指纹，不能单独认定为精确重复运行。');
+if (health.ok) {
+  if (!runtime.ideaActivity?.source?.ok) diagnosticWarnings.push('灵感进行中/取消调用查询失败：只能看到最新完成的审计。');
+  if (runtime.ideaActivity?.totalRecent>0) diagnosticWarnings.push('最新完成审计之后还存在灵感模型调用，其中进行中 '+runtime.ideaActivity.running+'、已取消 '+runtime.ideaActivity.cancelled+'；这些调用不属于旧审计。');
+  const finalDiscoveryAudit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery);
+  if (!runtime.discoveryCallTrace?.source?.ok) {
+    diagnosticWarnings.push('灵感发现逐步指标查询失败：' + String(runtime.discoveryCallTrace?.source?.error ?? '原因未知'));
+  }
+  if (runtime.discoveryCallTrace?.source?.correlationMode === 'latest_unbound') {
+    diagnosticWarnings.push('最新灵感审计缺少开始/结束时间，调用记录只能按最近记录查询，无法严格关联。');
+  }
+  if (runtime.discoveryCallTrace?.source?.ok && finalDiscoveryAudit.startedAt && finalDiscoveryAudit.finishedAt && runtime.discoveryCallTrace.runs.length === 0) {
+    diagnosticWarnings.push('最新灵感审计时间窗内没有模型调用指标；不能据此宣称耗时或调用次数为零。');
+  }
+  if (runtime.discoveryCallTrace?.sameVersionCallGroups?.length) {
+    diagnosticWarnings.push('灵感发现存在相同版本元数据组合的多次调用；指标没有保存实际输入指纹，这只能提示人工核对 Run ID、时间窗与请求，不能单独认定重复调用。');
+  }
+  for (const target of projectTargets) {
+    const diagnostics = inspectedProjects[target.key]?.cockpit?.diagnostics;
+    if (Number(diagnostics?.exactDuplicateRunGroups) > 0) {
+      diagnosticWarnings.push(target.label + '：后端同版本元数据分组数=' + diagnostics.exactDuplicateRunGroups + '；未保存完整输入指纹，不能单独认定为精确重复运行。');
+    }
   }
 }
 runtime.diagnosticWarnings = diagnosticWarnings;
