@@ -1,9 +1,6 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import {fulfillDiscoveryGaps,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots,unchangedSemanticDeficitAfterPatch} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
-import { orderedIdeaRepairPatches } from './idea-discovery-contract';
-import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
 import {reviewChangedPremiseSources,pendingPremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues} from './premise-selection-review';
 import {readGenerationBudgets} from '../config/generation-budgets';
@@ -4916,9 +4913,10 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       this.realLLM.assertScenarioModelConfigured('idea_generate');
       const discoveryBudget=readGenerationBudgets();
       const presentationCallLimit=discoveryBudget.presentationMaxPhysicalCalls;
-      const finalCardSourceReserve=reservePostCardSourceReviewCredits(discoveryBudget.sourceMaxPhysicalCalls,
-        requestedCount,discoveryBudget.reviewGroupingMode,discoveryBudget.sourceBatchSize);
-      const sourceCompletionBudget={remaining:discoveryBudget.sourceMaxPhysicalCalls-finalCardSourceReserve};
+      // All source/cause/genre/category and pairwise evidence is established
+      // before full cards. No source credits are reserved for a later card
+      // replacement phase: selected vetted premises are expanded together.
+      const sourceCompletionBudget={remaining:discoveryBudget.sourceMaxPhysicalCalls};
       const reselectionCompletionBudget={remaining:discoveryBudget.premiseReselectionMaxCalls};
       const chapterTuple = targetForLength(getPlatform(dto.platform), dto.storyType).chapterWords;
       const chapterRange = { min: chapterTuple[0], max: chapterTuple[1] };
@@ -5144,7 +5142,7 @@ ${promptPhase === 'selection'
 JSON 结构：${JSON.stringify(promptSchema)}`;
       };
 
-      const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown; reviewedReservePremises: Array<Record<string,unknown>> }> => {
+      const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown }> => {
         const poolBatchCount = Math.min(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, premisePoolSize);
         const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
         const extraBatchCount = premisePoolSize % poolBatchCount;
@@ -5588,38 +5586,19 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           );
         }
         const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
-        // Independent review covered the entire seven/eight-item shortlist.
-        // Only the best five enter paid card structuring/presentation. Remaining
-        // independently verified paths are kept as no-cost reviewed reserves.
+        // The final shortlist is the independently reviewed, factually
+        // retained selection, not a five-slot prefix. Every vetted selected
+        // premise proceeds to concurrent card structuring and final Gate.
+        // There are no unstructured post-card reserves or replacement slots.
         const reviewedPremiseCount=normalizedSelection.selected.length;
-        const deliveryPartition=partitionReviewedIdeaPremises(
-          normalizedSelection.selected,requestedCount,variedCategories);
-        // A reserve can skip a NEW source+overlap call only if complete
-        // independent evidence is present and validated for ALL eight original
-        // contenders. An incomplete/unknown review cannot grant this shortcut.
-        const reviewedEvidence:PremiseSelectionReview|undefined=
-          normalizedSelection.selectionAudit?.finalReview;
-        const reusableIndependentEvidence=Boolean(reviewedEvidence?.passed
-          &&!premiseSelectionReviewIssues(reviewedEvidence,normalizedSelection).length
-          // Source verifier accepts a SOURCE-ONLY protocol; finalReview also
-          // owns passed/issues for the combined independent verdict. Passing
-          // that combined object directly always flagged a protocol error,
-          // silently disabling every already-reviewed reserve.
-          &&!premiseSourceReviewIssues({sourceChecks:reviewedEvidence.sourceChecks},normalizedSelection).length
-          &&!premisePayoffReviewIssues(reviewedEvidence,normalizedSelection).length
-          &&!premiseGenreFitIssues(reviewedEvidence,normalizedSelection,dto.webNovelGenre).length
-          &&!premiseCategoryFitIssues(reviewedEvidence,normalizedSelection).length
-          &&reviewedEvidence.sourceChecks?.every(row=>row.status==='preserved'));
-        const reviewedReserves=reusableIndependentEvidence?deliveryPartition.reserves:[];
-        normalizedSelection={...normalizedSelection,selected:deliveryPartition.selected,
-          reviewedReservePremises:reviewedReserves,
+        normalizedSelection={...normalizedSelection,
           selectionAudit:{...normalizedSelection.selectionAudit,
             reviewedBeforeCardLock:reviewedPremiseCount,
-            cardSlotsLocked:deliveryPartition.selected.length,
-            reviewedReservePremiseIds:reviewedReserves.map(item=>String(item.premiseId)),
-            unverifiedSurplusCount:deliveryPartition.reserves.length-reviewedReserves.length}};
-        this.logger.log('idea-discover: 独立审核 '+reviewedPremiseCount+' 个，锁定完整卡 '
-          +deliveryPartition.selected.length+' 个，已有完整证据的备用 '+reviewedReserves.length+' 个');
+            cardSlotsLocked:reviewedPremiseCount,
+            reviewedReservePremiseIds:[],
+            unverifiedSurplusCount:0}};
+        this.logger.log('idea-discover: 独立审核后保留 '+reviewedPremiseCount
+          +' 个题材，全部进入并发完整卡生成；最终仅交付 '+requestedCount+' 个合格优选结果');
         this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
           + '，有效池=' + candidatePool.length + '/' + premisePoolSize
@@ -5821,9 +5800,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         discoveryBudget.reviewGroupingMode===0
           &&!boundedPresentationReview(count,presentationBudget.remaining-generationCalls)
           ?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
-      const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial',
-        maxNewAccepted=Number.POSITIVE_INFINITY) => {
-        const acceptedBeforeBatch=accepted.length;
+      const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
         // Deterministic contracts run before a paid semantic review. Invalid
         // metadata stays rejected and enters its authorized targeted repair.
         const localIssues=new Map(candidates.map(candidate=>[candidate,assessIdeaQuality(candidate)]));
@@ -5905,13 +5882,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             rejectedReasons.push(...uniqueIssues);
             continue;
           }
-          // Every hedged path receives its full independent verdict. Verified
-          // surplus beyond the actual missing delivery slots is not delivered,
-          // not added to global duplicate history, and cannot open new slots.
-          if(accepted.length-acceptedBeforeBatch>=maxNewAccepted){
-            candidateAssessments[candidateAssessments.length-1].withheldVerifiedSurplus=true;
-            continue;
-          }
           seen.add(titleKey);
           accepted.push({
             ...candidate,
@@ -5940,10 +5910,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
 
       const premiseDiscovery = await discoverPremisePoolBeforeCards();
-      // The same shared source budget flows into final-card replacement.
-      // Hold one source+overlap review pair instead of spending all credits
-      // on preselection reserve rounds before a card has passed its final Gate.
-      sourceCompletionBudget.remaining+=finalCardSourceReserve;
       failureSelectionAudit = {
         requested: requestedCount,
         candidatePool: premiseDiscovery.pool,
@@ -5963,8 +5929,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
       const structuredCards: Array<Record<string, unknown>> = [];
       const structuringErrors: Array<{ sourcePremiseId: string; error: string }> = [];
-      // 已选题材逐一结构化：用户要 5 个题材时是 5 个 premise 各创建 1 张卡，
-      // 不是把 5 张完整卡塞进一个大 JSON，也不是对同一张卡反复改写 5 次。
+      // 已通过锁定前独立质量门的每个题材均单独并发结构化。
+      // 数量只在完整卡独立质量门之后截取，不在此前留下待生成候补。
       if(presentationBudget.remaining<selectedPremises.length+minimumCardReviewCalls(selectedPremises.length,selectedPremises.length))throw Error('完整卡共享预算不足以生成并验收当前目标数量，未发起完整卡请求');
       const reservedInitialReviewCalls=minimumCardReviewCalls(selectedPremises.length,selectedPremises.length);
       presentationBudget.remaining-=reservedInitialReviewCalls;
@@ -5998,270 +5964,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (failureSelectionAudit) failureSelectionAudit.generated = structuredCards.length;
       await accept(structuredCards, 'initial');
 
-      let finalGateRepairAttempted=false,finalGateRepairGenerated=0;
-      let finalGateRepairError:string|null=null;
-      const latestCards=new Map(structuredCards.map(card=>[String(card.sourcePremiseId),card]));
-      const attemptedPremiseIds=new Set(selectedPremises.map(item=>String(item.premiseId)));
-      const reviewedReservePremises:Array<Record<string,unknown>> =
-        [...(premiseDiscovery.reviewedReservePremises||[])];
-      const availableReviewedReserves=()=>reviewedReservePremises.filter(item=>
-        !attemptedPremiseIds.has(String(item.premiseId)));
-      const latestAssessment=(id:string)=>[...candidateAssessments].reverse().find(item=>item.sourcePremiseId===id);
-      // Minimum deliverability is only a final fallback. Do not stop repairing/replacing
-      // rejected slots merely because three cards have passed while the request is for five.
-      const missingAfterGate=()=>missingRequestedIdeaSlots(
-        selectedPremises.map(item=>String(item.premiseId)),
-        new Set(accepted.map(card=>String(card.sourcePremiseId))),requestedCount);
-      const fulfillmentActions:any[]=[];
-      const repairMissing=async(initialMissingPremiseIds:string[])=>{
-        const before=new Map(initialMissingPremiseIds.map(id=>[id,latestAssessment(id)]));
-        const initialIssueByPremiseId = new Map(candidateAssessments
-          .filter((item: any) => item?.passed !== true && item?.sourcePremiseId)
-          .map((item: any) => [String(item.sourcePremiseId), item.issues]));
-        const failedCards = [...latestCards.values()].filter((item: any) => initialMissingPremiseIds.includes(String(item?.sourcePremiseId || '').trim()));
-        const failedPremises = selectedPremises.filter((item: any) => initialMissingPremiseIds.includes(String(item?.premiseId || '').trim()));
-        const repairTargets = failedCards.map((card: any) => ({
-          premise: failedPremises.find((item: any) => String(item?.premiseId || '').trim() === String(card?.sourcePremiseId || '').trim()),
-          card,
-          executionStandard: buildExecutionStandard(readConstitution({type:card.storyType,target_platform:card.targetPlatform,settings:{...card,customPlatformNote:dto.customPlatformNote}})).directive,
-          gateIssues: initialIssueByPremiseId.get(String(card?.sourcePremiseId || '').trim()) || [],
-          storyRepairAllowed: ((review:any)=>!!review && ([review.storyCoherent,review.payoffCredible,review.platformFit].includes(false) || Object.values(review.readerGoals||{}).some((goal:any)=>goal.status!=='supported')))(latestAssessment(String(card.sourcePremiseId))?.presentationReview),
-          dimensionRepairSelections: Object.fromEntries((['storyTone','writingStyle','webNovelGenre','plotTags'] as const).map(field=>[field,dto[field]])),
-          dimensionRepairOptions: Object.fromEntries((['storyTone','writingStyle','webNovelGenre','plotTags'] as const)
-            .filter(field=>(initialIssueByPremiseId.get(String(card.sourcePremiseId)) || []).includes(`${field}未继承选择或未从字典有效组合`))
-            .map(field=>[field,dto[field].length ? dto[field] : autoOptions[field]])),
-          scopeAllocationPlan:(initialIssueByPremiseId.get(String(card.sourcePremiseId))||[]).includes('篇幅分线合计与总章数不一致')?ideaScopeAllocationRepairPlan(card):undefined,
-        }));
-        try {
-          const reviewCallsNeeded=minimumCardReviewCalls(repairTargets.length);
-          if(presentationBudget.remaining<reviewCallsNeeded+1)throw new Error('同题材修复未执行：剩余独立审核调用 '+presentationBudget.remaining+' 次，不足以验收 '+repairTargets.length+' 张修改卡（至少 '+reviewCallsNeeded+' 次）；不发起无法验收的修复请求。');
-          finalGateRepairAttempted=true;
-          const repairResponse = await this.realLLM.generate({
-            physicalCallBudget:reserveReviewBatchBudget(presentationBudget,reviewCallsNeeded),
-            prompt: `${buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)}\n${ideaGateLocalRepairDirective(repairTargets)}`,
-            scenario: 'idea_generate',
-            metrics:{stepKey:'idea_card_local_repair',attempt:0},
-            timeout: LLM_TUNABLES.timeoutSimple(),
-            maxEmptyRetries: 1,
-            responseFormat: 'json_object',
-          });
-          const repairPayload = this.safeExtractJson<Record<string, unknown>>(String(repairResponse.content || ''), {});
-          const repairPatches = orderedIdeaRepairPatches(repairPayload, repairTargets.length);
-
-          const repairedCards = applyIsolatedIdeaRepairPatches(
-            repairTargets.map((target: any) => target.card as Record<string, unknown>),
-            repairPatches,{
-            titleRepairPositions:repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('标题')) ? [index] : []),
-            namingRepairPositions:repairTargets.flatMap((target: any, index: number) => target.gateIssues.some((issue: string) => issue.includes('故事命名')) ? [index] : []),
-            storyRepairPositions:repairTargets.flatMap((target: any, index: number) => target.storyRepairAllowed ? [index] : []),
-            dimensionRepairOptions:repairTargets.map((target:any)=>target.dimensionRepairOptions),
-            dimensionOnlyPositions:repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length && target.gateIssues.every((issue:string)=>
-              ['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`)) ? [index] : []),
-            dimensionRepairSelections:repairTargets.map((target:any)=>target.dimensionRepairSelections),
-            scopeAllocationPlans:repairTargets.map((target:any)=>target.scopeAllocationPlan),
-            metadataOnlyPositions:repairTargets.flatMap((target:any,index:number)=>target.gateIssues.length&&target.gateIssues.every((issue:string)=>issue==='篇幅分线合计与总章数不一致'||['storyTone','writingStyle','webNovelGenre','plotTags'].some(field=>issue===`${field}未继承选择或未从字典有效组合`))?[index]:[]),
-          },(index,error)=>{
-            const detail=error instanceof Error?error.message:String(error);
-            const premiseId=String(repairTargets[index]?.card?.sourcePremiseId||'');
-            fulfillmentActions.push({kind:'repair_patch_rejected',premiseId,error:detail});
-            this.logger.warn('idea-discover: '+premiseId+' 的修复补丁被严格协议拒绝，保留原失败卡，不阻断其它卡：'+detail);
-          });
-          const changedCards = repairedCards.filter((card,index)=>{
-            if(JSON.stringify(card)===JSON.stringify(failedCards[index]))return false;
-            const premiseId=String(card.sourcePremiseId);
-            // Independent negative semantic facts remain binding when the
-            // patch only rewrites novelty/self-praise rather than the story.
-            // Do not purchase another identical reviewer verdict; retain the
-            // original failure and allow the existing vetted-pool fallback.
-            if(unchangedSemanticDeficitAfterPatch(failedCards[index],card,before.get(premiseId))){
-              fulfillmentActions.push({kind:'irrelevant_self_claim_patch',premiseId,
-                reason:'已拒绝的真实故事与创作配置未修改，仅自述卖点改变'});
-              return false;
-            }
-            return true;
-          });
-          finalGateRepairGenerated += changedCards.length;
-          if (changedCards.length) {
-            // The proposed patch is NOT the latest reviewed card until its
-            // independent semantic/evidence protocol completes. Previously a
-            // failed presentation call left an unverified edited card in
-            // latestCards, making later repair/fulfillment continue from
-            // content whose Gate never produced any verdict.
-            await accept(changedCards, 'repair');
-            for (const card of changedCards)latestCards.set(String(card.sourcePremiseId),card);
-          } else this.logger.warn('最终 Gate 局部修复没有实际改变，保留原拒绝结论，跳过重复模型复核。');
-        } catch (repairError) {
-          finalGateRepairError = repairError instanceof Error ? repairError.message : String(repairError);
-          this.logger.warn(`idea-discover: 局部修复未完成：${finalGateRepairError}`);
-          throw repairError;
-        }
-        fulfillmentActions.push({kind:'repair',premiseIds:initialMissingPremiseIds,remaining:presentationBudget.remaining});
-      };
-      const availableOriginalPool=()=>premiseDiscovery.pool.filter(item=>!attemptedPremiseIds.has(String(item.premiseId)));
-      let fulfillmentStopReason=preselectionShortfall ? 'preselection_shortfall' : 'requested_quantity_verified';
-      try {fulfillmentStopReason=await fulfillDiscoveryGaps({
-        missing:missingAfterGate,hasCard:id=>latestCards.has(id),
-        onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
-        // Same-premise repairs can be independently verified even when there
-        // is no budget or available candidate for optional pool replacement.
-        repairEligible:id=>!readerGoalDeficitRequiresNewPremise(latestAssessment(id)),
-        canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
-        canReplace:()=>(
-          affordableIdeaReplacementCount(missingAfterGate().length,availableReviewedReserves().length,
-            presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0
-          ||(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2
-            &&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,
-              presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0)),
-        fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
-        replaceBatch:async ids=>{
-          // One original-pool selection and one independent source/overlap review
-          // for all outstanding positions. A rejected batch never changes
-          // already accepted cards, and never borrows new model-call credits.
-          const missing=ids.filter(id=>selectedPremises.some(item=>String(item.premiseId)===id));
-          // Only one true shortfall needs two simultaneous card alternatives:
-          // hedge within the existing call allowance, and preserve the first
-          // qualifying card without starting another serial recovery round.
-          const canHedgeOneSlot=missing.length===1&&availableReviewedReserves().length>=2;
-          const vettedReserveCount=affordableIdeaReplacementCount(
-            missing.length+(canHedgeOneSlot?1:0),availableReviewedReserves().length,
-            presentationBudget.remaining,count=>minimumCardReviewCalls(count,count));
-          const vettedReserve=availableReviewedReserves().slice(0,vettedReserveCount);
-          const hedgedReserve=vettedReserve.length>missing.length;
-          let newPremises:Array<{position:number;premise:Record<string,unknown>}>;
-          let targetIds:string[]=[];
-          if(vettedReserve.length){
-            // Every reserve was already included in the source, payoff, genre,
-            // category and pairwise overlap verdict before any full card call.
-            // Reusing that verdict is not skipping review. No new pool selection
-            // or source/overlap LLM call is needed.
-            targetIds=missing.slice(0,Math.min(missing.length,vettedReserve.length));
-            newPremises=vettedReserve.map((premise,index)=>({
-              position:selectedPremises.findIndex(item=>String(item.premiseId)===
-                targetIds[Math.min(index,targetIds.length-1)]),premise}));
-            for(const row of vettedReserve)attemptedPremiseIds.add(String(row.premiseId));
-            fulfillmentActions.push({kind:'reviewed_reserve_replacement',
-              replaces:targetIds,replacementPremiseIds:vettedReserve.map(row=>String(row.premiseId)),
-              hedgedCandidateCount:vettedReserve.length,deliverySlots:targetIds.length,
-              reusedPreselectionEvidence:true});
-          }else{
-          const targetCount=affordableIdeaReplacementCount(missing.length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count));
-          const targets=missing.slice(0,targetCount);
-          if(!targets.length)return 'unavailable';
-          const reviewIssues=targets.map(id=>{
-            const premise=selectedPremises.find(item=>String(item.premiseId)===id)!;
-            const seed=premiseDiscovery.pool.find(item=>String(item.premiseId)===id)!;
-            return {kind:'selection_fit' as const,premiseId:id,referencePremiseId:id,
-              quote:String(premise.payoff),referenceQuote:String(seed.storyCore),
-              reason:'该位置完整卡尚未合格交付：'+(latestAssessment(id)?.issues||['结构化未完成']).join('；')};
-          });
-          const review:PremiseSelectionReview={passed:false,issues:reviewIssues};
-          const original={...premiseDiscovery,selected:[...attemptedPremiseIds].map(premiseId=>({premiseId}))};
-          const reserve=await this.reservePremiseSelection(original,{...premiseDiscovery,selected:selectedPremises},
-            review,selectedPremises.length,premisePoolSize,discoveryCategories,
-            buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n【与完整卡一致的分类标准】'+JSON.stringify(categoryStandards)+premiseCategoryIdentityDirective(discoveryCategories)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
-            reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget,
-             rejectedCardPathsForReselection(candidateAssessments,selectedPremises.map(item=>String(item.premiseId))));
-          for(const entry of reserve.replacements||[])attemptedPremiseIds.add(entry.replacementPremiseId);
-          fulfillmentActions.push({kind:'original_pool_replacement',replaces:targets,...reserve});
-          if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}
-          if(!reserve.attempted)return 'unavailable';
-          // Both independent reviews already completed. Isolate only those
-          // replacement identities with actual source/causal/overlap failures.
-          const verified=verifiedReserveReplacements(reserve.selection,reserve.review,
-            reserve.replacements,accepted.map(card=>String(card.sourcePremiseId)));
-          fulfillmentActions.push({kind:'replacement_review_reuse',
-            acceptedReplacementPremiseIds:verified.map(row=>row.replacementPremiseId),
-            rejectedReplacementPremiseIds:reserve.replacements.filter(row=>
-              !verified.some(kept=>kept.replacementPremiseId===row.replacementPremiseId))
-              .map(row=>row.replacementPremiseId)});
-          if(!verified.length)return 'rejected';
-          newPremises=verified.map(entry=>{
-            const position=selectedPremises.findIndex(item=>String(item.premiseId)===entry.replacesPremiseId);
-            return {position,premise:reserve.selection.selected[position]};
-          });
-          }
-          if(newPremises.some(item=>item.position<0||!item.premise))throw Error('汇总换选返回未知槽位，未接纳任何完整卡');
-          // A batch of independently reviewed replacements has no dependency
-          // between its card structuring calls. Use the SAME bounded scheduler
-          // as initial cards, instead of serially awaiting each replacement.
-          // Reserve the final independent presentation review before dispatch;
-          // each model call consumes the existing shared physical-call budget.
-          const reserveCardReviewCalls=minimumCardReviewCalls(newPremises.length,newPremises.length);
-          if(presentationBudget.remaining<newPremises.length+reserveCardReviewCalls)
-            return 'unavailable';
-          // Only mutate active slots once generation and independent final
-          // review can both be funded by the existing physical-call budget.
-          for(const {position,premise} of newPremises){
-            if(!hedgedReserve)selectedPremises[position]=premise;
-            selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
-          }
-          // Preserve the original failed slot until one independently passed
-          // alternative can actually be committed. Both alternatives remain
-          // peer references during structuring; no unreviewed facts are added.
-          sameBatchPremises=hedgedReserve
-            ? [...selectedPremises,...vettedReserve] : [...selectedPremises];
-          presentationBudget.remaining-=reserveCardReviewCalls;
-          let replacementResults:PromiseSettledResult<Record<string,unknown>>[];
-          try {
-            replacementResults=await independentReviewBatches(newPremises,presentationBudget,
-              IDEA_CARD_GENERATION_CONCURRENCY,async({position,premise},_index,budget)=>{
-                try {
-                  return {status:'fulfilled' as const,value:await generateStructuredCard(premise,position,budget)};
-                }catch(reason){return {status:'rejected' as const,reason};}
-              });
-          } finally {
-            presentationBudget.remaining+=reserveCardReviewCalls;
-          }
-          const replacementCards:Record<string,unknown>[]=[];
-          for(const [index,{premise}] of newPremises.entries()){
-            const result=replacementResults[index];
-            if(result.status==='fulfilled'){
-              replacementCards.push(result.value);
-              structuredCards.push(result.value);
-              latestCards.set(String(premise.premiseId),result.value);
-            }else{
-              const detail=result.reason instanceof Error?result.reason.message:String(result.reason);
-              const premiseId=String(premise.premiseId);
-              structuringErrors.push({sourcePremiseId:premiseId,error:detail});
-              candidateAssessments.push({sourcePremiseId:premiseId,attempt:'initial',passed:false,issues:[detail]});
-              rejectedReasons.push(detail);
-            }
-          }
-          if(replacementCards.length)await accept(replacementCards,'initial',
-            hedgedReserve?targetIds.length:Number.POSITIVE_INFINITY);
-          if(hedgedReserve){
-            const winner=accepted.find(card=>vettedReserve.some(item=>
-              String(item.premiseId)===String(card.sourcePremiseId)));
-            if(winner){
-              const replacement=newPremises.find(item=>
-                String(item.premise.premiseId)===String(winner.sourcePremiseId));
-              if(!replacement)throw Error('已通过完整卡的身份不能对应锁定前审核题材');
-              selectedPremises[replacement.position]=replacement.premise;
-              sameBatchPremises=[...selectedPremises];
-              fulfillmentActions.push({kind:'hedged_card_selected',
-                premiseId:String(winner.sourcePremiseId),discardedVerifiedSurplus:
-                  vettedReserve.filter(item=>String(item.premiseId)!==String(winner.sourcePremiseId))
-                    .map(item=>String(item.premiseId))});
-            }
-          }
-          return 'replaced';
-},
-      });}catch(error){finalGateRepairError=String((error as Error).message);fulfillmentStopReason='completion_unavailable';}
-      const acceptedUniqueCount = new Set(accepted.map(card=>String(card?.sourcePremiseId||'').trim()).filter(Boolean)).size;
-      if (acceptedUniqueCount >= minimumDeliverableCount && acceptedUniqueCount < requestedCount) {
-        if (fulfillmentStopReason === 'requested_quantity_verified') {
-          fulfillmentStopReason = preselectionShortfall ? 'preselection_shortfall' : 'minimum_acceptable_partial';
-        }
-        fulfillmentActions.push({kind:'partial_delivery_after_fulfillment',accepted:acceptedUniqueCount,requested:requestedCount,
-          stopReason:fulfillmentStopReason,
-          repairAttempts:fulfillmentActions.filter(action=>action.kind==='repair').length,
-          replacementAttempts:fulfillmentActions.filter(action=>action.kind==='original_pool_replacement').length,
-          remainingOriginalCandidates:availableOriginalPool().length,
-          remainingPresentationCalls:presentationBudget.remaining,
-          remainingSourceCalls:sourceCompletionBudget.remaining,remainingReselectionCalls:reselectionCompletionBudget.remaining});
-      }
-
-      if (preselectionShortfall && fulfillmentStopReason === 'requested_quantity_verified') fulfillmentStopReason = 'preselection_shortfall';
+      // Failed cards are not silently patched, reselected, or replaced after
+      // the final Gate. Their evidence stays in candidateAssessments. Since
+      // EVERY independently vetted selected premise was structured in the
+      // same wave, final selection can filter the entire verified set once.
+      const finalGateRepairAttempted=false,finalGateRepairGenerated=0;
+      const finalGateRepairError:string|null=null;
+      const fulfillmentActions: any[]=[];
+      const fulfillmentStopReason='parallel_full_card_gate_complete';
       const selectedAccepted = accepted
         .sort((left, right) =>
           Number(right?.ideaAppealGate?.distinctivenessScore || 0) - Number(left?.ideaAppealGate?.distinctivenessScore || 0)
@@ -6274,12 +5984,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         finalAcceptedPremiseIds,requestedCount);
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
       const finalRejectedReasons = latestIdeaFailureReasons(candidateAssessments,finalMissingPremiseIds);
-      const qualifiedCount = selectedAccepted.length;
+      const qualifiedCount = accepted.length;
       const appealGate = {
         schemaVersion: 8,
-        mode: 'budgeted_original_pool_fulfillment',
+        mode: 'parallel_vetted_full_card_filter',
         structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
-        repairProtocol: 'budgeted_progress_or_original_pool_replacement',
+        repairProtocol: 'no_post_card_repair_or_replacement',
         fulfillment:{stopReason:fulfillmentStopReason,actions:fulfillmentActions,sourceCallsRemaining:sourceCompletionBudget.remaining,reselectionCallsRemaining:reselectionCompletionBudget.remaining},
         premisePoolSize: premiseDiscovery.pool.length,
         categorySelectionMode: variedCategories ? 'per_premise_from_platform_candidates' : 'fixed_category',
@@ -6287,7 +5997,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
-        preselectionSurplus: premiseDiscovery.reviewedReservePremises.length,
+        preselectionSurplus: Math.max(0,selectedPremises.length-requestedCount),
         preselectionShortfall,
         selectionAudit: premiseDiscovery.selectionAudit,
         generated: structuredCards.length,
@@ -6323,12 +6033,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先并发生成轻量候选池，再从固定池选优；入选题材逐张并发结构化并执行原有质量门。缺额时在原池和共享预算内继续修复或换选，并独立复核；仅在补足不可继续且达到最低可交付数量时明确标注部分交付，不降低质量。',
+        note: '先锁定平台、分类、流派和因果条件，并发生成轻量候选；从固定原池预选并完成独立来源、因果、分类、流派及差异审核。独立审核通过的全部题材并发结构化和终审，合格后按实际吸引力及差异信号选择至请求数量；未通过题材剔除，不发起完整卡之后的修复或候补替换。',
       };
 
       if (selectedAccepted.length === 0) {
         const rejectionSummary = finalRejectedReasons.slice(0, 10).join('；') || uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
-        this.logger.warn(`idea-discover: 共享预算与原池完成策略执行后 0/${requestedCount} 通过：${rejectionSummary}`);
+        this.logger.warn(`idea-discover: 并发完整卡独立终审后 0/${requestedCount} 通过：${rejectionSummary}`);
         return {
           success: false,
           ideas: [],
@@ -6337,7 +6047,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             ? `本次创建前筛选的 ${requestedCount} 个题材均未形成可展示结果，且同题材局部修复协议未完成：${finalGateRepairError}`
             : structuredCards.length === 0
               ? `本次创建前筛选的 ${requestedCount} 个题材全部结构化失败：${rejectionSummary}。已保留诊断，未用旧批次或弱卡补数。`
-              : `本次创建前筛选的 ${requestedCount} 个题材经本批缺额完成策略后均未通过：${rejectionSummary}；未用旧批次或弱卡补数。`,
+              : `本批经过完整卡独立终审仍无合格题材：${rejectionSummary}；已剔除失败卡，未用候补或弱卡补数。`,
           appealGate,
         };
       }
@@ -6349,9 +6059,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           appealGate.returned = selectedAccepted.length;
           appealGate.partial = true;
           appealGate.minimumDeliverableCount = minimumDeliverableCount;
-          const warning = '请求' + requestedCount + '张，最终有' + selectedAccepted.length + '张通过全部质量门；补足停止原因='
-            + appealGate.fulfillment.stopReason + '，缺额' + (requestedCount - selectedAccepted.length)
-            + '张。未降低质量门，也未把最低可交付数量当作提前停止条件。';
+          const warning = '请求' + requestedCount + '张，并发完整卡独立终审后有' + selectedAccepted.length
+            + '张通过全部质量门，缺额' + (requestedCount - selectedAccepted.length)
+            + '张；本批全部已选题材均已生成与审核，没有完整卡之后的串行修复或候补替换。';
           this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
           return { success: false, status: 'incomplete', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
             qualifiedIdeas: acceptedWithAudit, error: warning, warning, qualityWarning: warning, appealGate };
@@ -6363,7 +6073,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return { success: false, status: 'incomplete', ideas: [], totalIdeas: 0,
           qualifiedIdeas: acceptedWithAudit, error, appealGate };
       }
-      this.logger.log(`idea-discover: 完成 ${acceptedWithAudit.length}/${requestedCount} 个合格题材；只返回最终 Gate 通过项；缺额按共享预算修订或从本批原池换选`);
+      this.logger.log(`idea-discover: 并发结构化和独立终审通过 ${qualifiedCount} 个，仅返回优选 ${acceptedWithAudit.length}/${requestedCount} 个`);
       return {
         success: true,
         ideas: acceptedWithAudit,
@@ -6868,135 +6578,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     }
     return { ...selected, selectionAudit: { initialReview, reselectionAttempted: true, reserve: reserveAudit, finalReview,
       rejectedHistory, ...budgetPartialAudit } };
-  }
-
-  private async reservePremiseSelection(initial: ReturnType<typeof normalizePremiseSelectionPayload>,
-    current: ReturnType<typeof normalizePremiseSelectionPayload>, review: PremiseSelectionReview,
-    requestedCount: number, poolTarget: number, categories: readonly string[], standard: string,
-    repairBudget: { remaining: number }, protectedIds: readonly string[], requiredGenres:readonly string[]=[], sharedReviewBudget?:{remaining:number},
-    rejectedCardPaths:readonly {premiseId:string;title:string;issues:string[]}[] = []) {
-    const retained=retainReviewedPremises(current,review,protectedIds);
-    const failedIds=retained.excludedPremiseIds.filter(id=>current.selected.some(item=>String(item.premiseId)===id));
-    const attemptedIds=new Set([...initial.selected,...current.selected].map(item=>String(item.premiseId)));
-    const availableIds=current.pool.map(item=>String(item.premiseId)).filter(id=>!attemptedIds.has(id));
-    const canAttempt=failedIds.length>0&&availableIds.length>=failedIds.length;
-    const unchanged={selection:current,review,attempted:false,error:null as string|null,
-      replacesPremiseId:canAttempt?failedIds[0]:undefined,
-      replacementPremiseId:undefined as string|undefined,
-      replacements:[] as Array<{replacesPremiseId:string;replacementPremiseId:string}>,
-      physicalCallBudgetUsed:0};
-    if(!canAttempt||repairBudget.remaining<=0)return unchanged;
-    const budget=repairBudget,reviewBudget=sharedReviewBudget||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
-    // A grouping-mode source audit may require more than one physical call.
-    // Reserve the entire changed-source coverage PLUS one independent overlap
-    // call BEFORE buying a replacement proposal. Otherwise a doomed proposal
-    // consumes an expensive model call while its required Gate is unaffordable.
-    const grouping=readGenerationBudgets();
-    const sourceReviewCalls=grouping.reviewGroupingMode===0
-      ? 1 : Math.ceil(failedIds.length/grouping.sourceBatchSize);
-    const requiredReviewCalls=sourceReviewCalls+1;
-    if(reviewBudget.remaining<requiredReviewCalls)return unchanged;
-    const priorRejectedHistory=Array.isArray((current as any).selectionAudit?.rejectedHistory)
-      ? (current as any).selectionAudit.rejectedHistory.filter((row:{premiseId:string})=>
-        !current.selected.some(item=>String(item.premiseId)===String(row.premiseId))).slice(-8)
-      : [];
-    const startingSelection=budget.remaining,startingReview=reviewBudget.remaining;
-    const used=()=>startingSelection-budget.remaining+startingReview-reviewBudget.remaining;
-    const scopedReview:PremiseSelectionReview={passed:false,issues:review.issues.filter(issue=>
-      failedIds.includes(String(issue.premiseId))||issue.kind==='overlap'&&failedIds.includes(String(issue.referencePremiseId)))
-      .map(issue=>issue.kind==='overlap'&&!failedIds.includes(String(issue.premiseId))
-        &&failedIds.includes(String(issue.referencePremiseId))
-        ? {...issue,premiseId:issue.referencePremiseId,referencePremiseId:issue.premiseId,
-          quote:issue.referenceQuote,referenceQuote:issue.quote}
-        : issue)};
-    const normalize=(value:unknown)=>{
-      const rows=(value as any)?.replacements;
-      if(!Array.isArray(rows)||rows.length!==failedIds.length||
-        new Set(rows.map((row:any)=>String(row?.premise?.premiseId))).size!==failedIds.length||
-        rows.some((row:any)=>!failedIds.includes(String(row?.replacesPremiseId))||
-          !availableIds.includes(String(row?.premise?.premiseId))))
-        throw Error('汇总换选须用未尝试的原池身份一一替换全部缺额，不得重用或伪造身份');
-      const candidate=normalizeTargetedPremiseReselection(value,current,scopedReview,requestedCount,
-        poolTarget,categories,current.selected.length);
-      // Independent changed-source and overlap Gate, not generated self-comparison, is authoritative.
-      return candidate;
-    };
-    let replacements: Array<{replacesPremiseId:string;replacementPremiseId:string}>=[];
-    try {
-      const result=await this.llmCallWithRetry<any>('锁定前原池备用汇总重选',
-        standard+'\n按已注入GEN-002锁定前继承与差异规则执行。'
-        +'\n只为列出的缺额位置从尚未尝试的同批原池挑选成熟候选；固定保留已通过位置、原始事实及全部独立质量要求。'
-        +'\n【本次仍可换选的原池候选】'+JSON.stringify(current.pool.filter(item=>availableIds.includes(String(item.premiseId))))
-        +'\n【可用备用ID（只能从这里选）】'+JSON.stringify(availableIds)
-        + '\n【当前选择】'+JSON.stringify(premiseReselectionPromptSelection(current.selected,new Set(failedIds)))
-        +'\n【全部缺额的真实原因】'+JSON.stringify(scopedReview.issues)
-        +(priorRejectedHistory.length
-          ?'\n【本批先前已验证不合格的因果或分类路径】'
-            +JSON.stringify(priorRejectedHistory)
-          :'')
-        +(rejectedCardPaths.length ? '\n【本轮其它完整卡已有独立拒绝证据：只防止同类缺口反复出现，不禁止同流派或降低审查】'
-          +JSON.stringify(rejectedCardPaths) : '')
-        +'\n【必须替换的槽位ID】'+JSON.stringify(failedIds)
-        +'\n【替代题材实质差异】生成时须比较主动选择、升级、反转及代价，省略模型自评表；下游独立同构审核仍逐对核对最终身份。'
-        +'\n每张替代题材的causalPlan须引用该题材已写的行动、条件和结果，不得发明缺失条件。'
-        +'\n只输出JSON:{"replacements":[{"replacesPremiseId":"缺额ID","premise":{"premiseId":"可选原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"实际分类K编号"}}]}；replacements恰好'+failedIds.length+'项，不回传已通过项。',
-        {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:budget,
-          timeout:LLM_TUNABLES.timeoutSimple(),
-          validate:value=>{try{normalize(value);return true;}catch{return false;}},
-          describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String(error instanceof Error?error.message:error)];}}});
-      const candidate=normalize(result.data);
-      replacements=(result.data as any).replacements.map((row:any)=>({
-        replacesPremiseId:String(row.replacesPremiseId),replacementPremiseId:String(row.premise.premiseId)}));
-      const changedIds=replacements.map(row=>row.replacementPremiseId);
-      const changed=candidate.selected.filter(item=>changedIds.includes(String(item.premiseId)));
-      const changedSelection={...candidate,selected:changed,pool:candidate.pool.filter(item=>changedIds.includes(String(item.premiseId)))};
-      const limiter=createReviewLimiter(IDEA_CARD_GENERATION_CONCURRENCY);
-      const reviews=await independentReviewBatches(['source_drift','overlap'] as const,
-        reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,(mode,_index,allowance)=>
-          this.reviewPremiseSelection(mode==='source_drift'?changedSelection:candidate,
-            standard,mode,allowance,false,requiredGenres,limiter,mode==='overlap'?changedIds:undefined));
-      // Source review returns all four independently judged dimensions for
-      // changed premises. Preserve their existing proof instead of dropping
-      // payoff/genre/category receipts when reindexing the replacement to
-      // its actual position among unchanged protected stories.
-      const rebaseChecks=<T extends {ref:string}>(rows:readonly T[]|undefined):T[]=>{
-        return (rows||[]).map(row=>{
-          const local=Number(/^S(\d+)\./.exec(row.ref)?.[1])-1;
-          const global=candidate.selected.findIndex(item=>String(item.premiseId)===String(changed[local]?.premiseId));
-          if(!Number.isInteger(local)||local<0||global<0)
-            throw Error('汇总来源审核编号不属于实际替代题材');
-          const oldPrefix='S'+(local+1)+'.',newPrefix='S'+(global+1)+'.';
-          const ref=(value:unknown)=>typeof value==='string'&&value.startsWith(oldPrefix)
-            ?newPrefix+value.slice(oldPrefix.length):value;
-          const mapped:any={...row,ref:ref(row.ref)};
-          for(const key of ['evidenceRef','actionEvidenceRef','conditionEvidenceRef'])
-            if(key in mapped)mapped[key]=ref(mapped[key]);
-          if(Array.isArray(mapped.links))mapped.links=mapped.links.map((link:any)=>
-            link&&typeof link==='object'?{...link,ref:ref(link.ref)}:link);
-          return mapped as T;
-        });
-      };
-      const sourceChecks=rebaseChecks(reviews[0].sourceChecks);
-      const payoffChecks=rebaseChecks(reviews[0].payoffChecks);
-      const genreChecks=rebaseChecks(reviews[0].genreChecks);
-      const categoryChecks=rebaseChecks(reviews[0].categoryChecks);
-      const retainedIssues=review.issues.filter(issue=>!failedIds.includes(String(issue.premiseId))
-        &&!(issue.kind==='overlap'&&failedIds.includes(String(issue.referencePremiseId))));
-      const issues=[...retainedIssues,...reviews.flatMap(row=>row.issues)];
-      const finalReview={passed:issues.length===0&&reviews.every(row=>row.passed),issues,
-        ...(sourceChecks.length?{sourceChecks}:{}),
-        ...(payoffChecks.length?{payoffChecks}:{}),
-        ...(genreChecks.length?{genreChecks}:{}),
-        ...(categoryChecks.length?{categoryChecks}:{}),
-        scope:{sourcePremiseIds:changedIds,overlapFocusId:changedIds.length===1?changedIds[0]:changedIds}};
-      return {selection:candidate,review:finalReview,attempted:true,error:null,
-        replacesPremiseId:replacements[0]?.replacesPremiseId,
-        replacementPremiseId:replacements[0]?.replacementPremiseId,replacements,physicalCallBudgetUsed:used()};
-    }catch(error){
-      return {...unchanged,attempted:true,replacementPremiseId:replacements[0]?.replacementPremiseId,
-        replacements,error:'原池换选或独立审核未完成：'+(error instanceof Error?error.message:String(error)),
-        physicalCallBudgetUsed:used()};
-    }
   }
 
   private async reviewChildSource(projectId: string, parentName: string, parent: unknown,
