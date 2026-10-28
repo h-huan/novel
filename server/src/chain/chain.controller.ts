@@ -5969,8 +5969,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // the final Gate. Their evidence stays in candidateAssessments. Since
       // EVERY independently vetted selected premise was structured in the
       // same wave, final selection can filter the entire verified set once.
-      const finalGateRepairAttempted=false,finalGateRepairGenerated=0;
-      const finalGateRepairError:string|null=null;
       const fulfillmentActions: any[]=[];
       const fulfillmentStopReason='parallel_full_card_gate_complete';
       const selectedAccepted = accepted
@@ -5980,11 +5978,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           || Number(Boolean(right?.ideaAppealGate?.hookHasRelationship)) - Number(Boolean(left?.ideaAppealGate?.hookHasRelationship)))
         .slice(0, requestedCount);
       const finalAcceptedPremiseIds = new Set(selectedAccepted.map((idea: any) => String(idea?.sourcePremiseId || '').trim()).filter(Boolean));
+      const allQualifiedPremiseIds=new Set(accepted.map((idea:any)=>String(idea?.sourcePremiseId||'').trim()));
+      const finalRejectedPremiseIds=selectedPremises.map((item:any)=>String(item?.premiseId||'').trim())
+        .filter(id=>id&&!allQualifiedPremiseIds.has(id));
       const finalMissingPremiseIds = missingRequestedIdeaSlots(
         selectedPremises.map((item:any)=>String(item?.premiseId||'').trim()),
         finalAcceptedPremiseIds,requestedCount);
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
-      const finalRejectedReasons = latestIdeaFailureReasons(candidateAssessments,finalMissingPremiseIds);
+      const finalRejectedReasons = latestIdeaFailureReasons(candidateAssessments,finalRejectedPremiseIds);
       const qualifiedCount = accepted.length;
       const appealGate = {
         schemaVersion: 8,
@@ -5999,6 +6000,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
         preselectionSurplus: Math.max(0,selectedPremises.length-requestedCount),
+        independentlyVettedPremises:selectedPremises.length,
+        fullCardCandidates:selectedPremises.length,
+        fullCardQualifiedSurplus:Math.max(0,accepted.length-requestedCount),
         preselectionShortfall,
         selectionAudit: premiseDiscovery.selectionAudit,
         generated: structuredCards.length,
@@ -6010,10 +6014,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         returned: selectedAccepted.length,
         partial: false,
         minimumDeliverableCount,
-        rejected: finalMissingPremiseIds.length,
-        repairAttempted: finalGateRepairAttempted,
-        repairGenerated: finalGateRepairGenerated,
-        repairError: finalGateRepairError,
+        rejected: finalRejectedPremiseIds.length,
+        repairAttempted: false,
+        repairGenerated: 0,
+        repairError: null,
         presentationPhysicalCallsUsed: presentationCallLimit - presentationBudget.remaining,
         presentationPhysicalCallLimit: presentationCallLimit,
         reasons: [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 8),
@@ -6044,18 +6048,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           success: false,
           ideas: [],
           totalIdeas: 0,
-          error: finalGateRepairError
-            ? `本次创建前筛选的 ${requestedCount} 个题材均未形成可展示结果，且同题材局部修复协议未完成：${finalGateRepairError}`
-            : structuredCards.length === 0
-              ? `本次创建前筛选的 ${requestedCount} 个题材全部结构化失败：${rejectionSummary}。已保留诊断，未用旧批次或弱卡补数。`
-              : `本批经过完整卡独立终审仍无合格题材：${rejectionSummary}；已剔除失败卡，未用候补或弱卡补数。`,
+          error: structuredCards.length === 0
+            ? `本批已选的 ${selectedPremises.length} 个题材全部结构化失败：${rejectionSummary}。保留失败证据，不用旧批次或弱卡补数。`
+            : `本批并发完整卡终审后仍无合格题材：${rejectionSummary}；不使用卡后候补或弱卡补数。`,
           appealGate,
         };
       }
       const acceptedWithAudit = selectedAccepted.map(idea => ({ ...idea, ideaDiscoveryAudit: appealGate }));
       const partial = selectedAccepted.length < requestedCount || finalMissingPremiseIds.length > 0;
       if (partial) {
-        const reason = [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 5).join('；') || finalGateRepairError || '题材结构化或独立审查未通过';
+        const reason = [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 5).join('；') || '题材结构化或独立审查未通过';
         if (selectedAccepted.length >= minimumDeliverableCount) {
           appealGate.returned = selectedAccepted.length;
           appealGate.partial = true;
