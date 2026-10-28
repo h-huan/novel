@@ -142,7 +142,8 @@ it('selects two original-pool alternatives for one real delivery shortfall and s
   expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
   expect(result.selectionAudit).toMatchObject({
     partial:true,completeCardGatePending:true,
-    excludedPremiseIds:expect.arrayContaining(['G','H','J']),
+    excludedPremiseIds:expect.arrayContaining(['J']),
+    discardedSurplusPremiseIds:expect.arrayContaining(['G','H']),
   });
   expect(result.selectionAudit.reasons.some((row:any)=>row.premiseId==='J')).toBe(true);
   expect(result.selectionAudit.finalReview.passed).toBe(true);
