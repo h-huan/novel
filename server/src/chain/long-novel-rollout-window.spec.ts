@@ -293,6 +293,7 @@ describe('ARCH-004 progressive outline window', () => {
     let query='';
     const debts=[
       {id:'short',content:'小伏笔',status:'active',scope:'volume',recovery_window_end:24},
+      {id:'seed',content:'尚未激活的埋设',status:'buried',scope:'global',recovery_window_end:85},
       {id:'book',content:'全书暗线',status:'reminder',scope:'global',recovery_window_end:60},
       {id:'medium',content:'中线',status:'pending',scope:'volume',recovery_window_end:36},
     ];
@@ -305,7 +306,7 @@ describe('ARCH-004 progressive outline window', () => {
     };
     await controller.rolloutDetailedOutlines('project');
     const prompt=controller.llmCallWithRetry.mock.calls[0][1] as string;
-    expect(query).toContain("'active','reminder','pending'");
+    expect(query).toContain("'buried','active','reminder','pending'");
     for(const debt of debts) {
       expect(prompt).toContain(debt.id);
       expect(prompt).toContain(debt.content);

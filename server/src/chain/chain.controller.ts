@@ -11932,7 +11932,7 @@ ${summarizeOutlineConsistency(pending)}`,
       `SELECT id,content,status,type,scope,importance,buried_chapter_index,
               planned_recovery_chapter_index,recovery_window_start,recovery_window_end,
               recovery_condition,payoff_description,evidence_text
-       FROM foreshadowings WHERE project_id=? AND status IN ('active','reminder','pending')
+       FROM foreshadowings WHERE project_id=? AND status IN ('buried','active','reminder','pending')
        ORDER BY CASE WHEN recovery_window_end IS NULL THEN 1 ELSE 0 END,
                 recovery_window_end ASC, buried_chapter_index ASC, created_at ASC`,
     ).all(projectId) as any[];
