@@ -1888,6 +1888,104 @@ describe('idea discovery live orchestrator behavior', () => {
   });
 });
 
+
+it('structures two pre-reviewed reserves concurrently for one missing card and selects only the qualified alternative',async()=>{
+  const seed=(i:number)=>({
+    premiseId:'P'+i,workingTitle:'备选机制'+i,
+    storyCategoryId:'K1',storyCategory:'悬疑',
+    storyCore:'【处境触发】当事人收到第'+i+'份相互矛盾的合同通知，必须当天保护家人权益。'
+      +'【主动选择】主角主动调取有权合法查询的原始清单，拒绝接受对方要求撤回的条件。'
+      +'【必要条件】负责处理的机构收到清单并逐项独立核对，才能决定是否恢复资格。'
+      +'【反转兑现】旧记录指向真正责任方，主角赢得纠正但失去工作合作机会。'
+      +'【分类流派机制】悬疑推进依靠人物真实决定、矛盾证据和对手的具体反制。',
+  });
+  const selected=(i:number)=>({
+    ...seed(i),
+    protagonistSituation:'主角必须在今天之内保护家人已经确认的现实权益',
+    openingEvent:'刚到手的登记单与原始凭证出现无法解释的冲突',
+    coreConflict:'对方坚持不核验记录而主角必须争取真实的处理决定',
+    activeChoice:'主角主动核对留存凭证而拒绝放弃家人的权益',
+    escalation:'对方通过岗位权限限制主角访问原始档案并加大压力',
+    reversalEffect:'原始日期证明更改者拥有独立权限并改变争议责任归属',
+    payoff:'相关管理人员根据真实原始凭证完成纠正且主角失去旧岗位',
+    irreplaceableCarrier:'特定管理权限决定谁能合法获得并修改这些记录',
+    secondOrderConsequence:'纠正决定让原先支持对方的同事重新站队',
+    readerQuestion:'记录为何会在两份正式凭证之间产生决定性的差异',
+    causalPlan:[{action:{field:'activeChoice',quote:'主角主动核对留存凭证而拒绝放弃家人的权益'},
+      conditions:[{field:'escalation',quote:'对方通过岗位权限限制主角访问原始档案并加大压力'}],
+      result:{field:'payoff',quote:'相关管理人员根据真实原始凭证完成纠正且主角失去旧岗位'}}],
+  });
+  const card=(title:string)=>({
+    title,storyType:'short_story',targetPlatform:'fanqie',storyCategory:'悬疑',
+    storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+    submissionTags:['悬疑'],plotTags:['调查'],pov:'第一人称',
+    hook:'清晨我发现家人的登记资格被陌生人改写，当天处理期限就要结束，我决定追查最初签收的记录，必须先确认有权决定的人。',
+    description:'我发现一份签收凭证与原始清单对不上，争议当天必须完成申报。我主动向管理部门申请核验，负责人员说要查原件，不能根据任何人的口头承诺直接恢复资格。对方在此期间限制我接触记录，试图让我在工作与家人权益之间做选择。我借助本来就有权查阅的历史留存数据找到关键日期差异，之后正式办理核验申请，相关人员按流程核对而不是直接听我的结论。最终记录中的责任人与真实经手人被确认，我保住了家人的申诉资格，却失去原本的合作机会，也改变了同事之间的信任关系。',
+    protagonist:'承担现实家庭责任的普通员工，必须在有限期限内取得核验资格',
+    coreConflict:'家人的利益被错误登记威胁，对方主动阻止核验并试图迫使主角放弃',
+    uniquePoint:'原始签收记录背后隐藏着双方不同的权限与实际决定顺序',
+    mainReversal:'负责处理的人根据时间戳确认了真正修改记录者，关系格局因而改变',
+    noveltyProof:{familiarShell:'现实行业里的权责悬疑冲突',
+      uncommonCombination:'家属登记期限与历史签收记录产生新型利益矛盾',
+      avoidedPatterns:'不用突然出现的万能证人或没有依据的处罚',
+      irreplaceableWhy:'没有相应的记录权限与期限条件，就无法推导故事既定的处理结果',
+      secondOrderConsequence:'纠正结果让共同工作的同事重新考虑彼此的信任与利益关系',
+      readerQuestion:'到底是谁在签收时间与登记记录之间插入错误的决定'},
+    estimatedWords:20000,plannedChapters:5,
+    scopeBreakdown:[{arc:'事实调查与决定',chapters:5,reason:'五章分别承担触发、主动选择、反制、核验与兑现'}],
+  });
+  let reserveCalls=0,releaseBoth!:()=>void;
+  const both=new Promise<void>(resolve=>{releaseBoth=resolve;});
+  const generate=vi.fn(async(req:any)=>{
+    const step=req.metrics?.stepKey;
+    if(step==='idea_premise_pool_generation')
+      return {content:JSON.stringify({pool:[seed(1),seed(2),seed(3),seed(4)]})};
+    if(step==='idea_premise_selection')
+      return {content:JSON.stringify({selectedPremises:[selected(1)]})};
+    if(step==='idea_card_structure'){
+      const title=req.prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]||'';
+      if(title.includes('备选机制1'))return {content:JSON.stringify({ideas:[card('短')]})};
+      reserveCalls++;if(reserveCalls===2)releaseBoth();
+      await both;
+      return {content:JSON.stringify({ideas:[card(title.includes('备选机制2')?'短':'三点之前必须核对')]})};
+    }
+    if(step==='idea_card_local_repair')return {content:JSON.stringify({patches:[{}]})};
+    throw Error('unexpected stage '+step);
+  });
+  const c=Object.create(ChainController.prototype) as any;
+  c.realLLM={assertScenarioModelConfigured:vi.fn(),generate};
+  c.completePremiseCausalPlans=vi.fn(async(input:any)=>input);
+  c.reconcilePremiseSelection=vi.fn(async(input:any)=>({
+    ...input,selected:input.selected.slice(0,1),
+    reviewedReservePremises:[selected(2),selected(3)],
+    selectionAudit:{finalReview:{passed:true,issues:[]}},
+  }));
+  c.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((value:any,index:number)=>({
+    position:index+1,title:value.title,titleCompelling:true,openingCompelling:true,distinctFromBatch:true,
+    storyCoherent:true,payoffCredible:true,platformFit:true,
+    storyEvidence:value.hook,payoffEvidence:value.description,platformEvidence:value.hook,
+    qualityReason:'完整核对了当前实际故事的因果成立、标题、平台和吸引力证据',
+    readerQuestion:'现在谁有权作出核验决定？',issues:[],
+  })));
+  c.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[],
+    signals:{distinctivenessScore:4,descriptionProgressions:4,hookHasRelationship:true},
+    readerExperienceProfile:{densityMode:'balanced',pace:'continuous',evidence:[]}}))};
+  c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
+  c.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
+  const result=await c.runIdeaDiscovery({
+    storyType:'short_story',platform:'fanqie',customPlatformNote:'',storyCategory:'悬疑',
+    storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],
+    plotTags:['调查'],genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:'',
+  },1);
+  expect(reserveCalls).toBe(2);
+  expect(result.appealGate.fulfillment.actions).toEqual(expect.arrayContaining([
+    expect.objectContaining({kind:'reviewed_reserve_replacement',hedgedCandidateCount:2,deliverySlots:1}),
+    expect.objectContaining({kind:'hedged_card_selected',premiseId:'P3'}),
+  ]));
+  expect(result.qualifiedIdeas.map((item:any)=>item.sourcePremiseId)).toEqual(['P3']);
+  expect(result.appealGate.returned).toBe(1);
+});
+
 describe('discovery before dimension confirmation', () => {
   it('provides dictionary choices to premise selection and preserves a prerequisite refusal without retrying or weakening gates', async () => {
     const controller = Object.create(ChainController.prototype) as any;
