@@ -8,6 +8,14 @@ export type IdeaStoryType = 'short_story' | 'long_novel';
 
 export class PremiseNamingError extends Error {}
 
+/** Keep at most three extra original-pool paths for a five-card request.
+ * This consumes no extra pool creation calls or model-call budget. */
+export function ideaPreselectionCapacity(requestedCount:number,availableCount:number):number {
+  if(!Number.isInteger(requestedCount)||requestedCount<1)throw Error('题材数量必须为正整数');
+  if(!Number.isInteger(availableCount)||availableCount<0)throw Error('候选池数量无效');
+  return Math.min(availableCount,requestedCount+(requestedCount>=5?3:0));
+}
+
 /** Keep partial delivery useful: requests above two still return at least three qualified cards. */
 export function minimumAcceptableIdeaCount(requestedCount: number): number {
   if (!Number.isInteger(requestedCount) || requestedCount < 1) throw new Error('题材数量必须为正整数');
@@ -300,9 +308,10 @@ export function ideaCardStructuringDirective(
   // avoid retransmitting raw storyCore, internal causalPlan and novelty self-claims
   // in each of the other selected cards' independent structuring requests.
   const peerDifferenceFields = new Set([
-    'workingTitle', 'storyCategory', 'protagonistSituation', 'openingEvent',
-    'coreConflict', 'activeChoice', 'escalation', 'reversalEffect', 'payoff',
-    'irreplaceableCarrier', 'secondOrderConsequence', 'readerQuestion',
+    // Full server-owned facts were reviewed before structuring; keep the
+    // distinct causal paths here. Final review still sees all full cards.
+    'workingTitle','storyCategory','activeChoice','escalation',
+    'reversalEffect','payoff','irreplaceableCarrier',
   ]);
   const references = batch.filter(item => item.premiseId !== selectedPremise.premiseId).map(item =>
     Object.fromEntries(Object.entries(item).filter(([key]) => peerDifferenceFields.has(key))));

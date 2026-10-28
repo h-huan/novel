@@ -9,6 +9,7 @@ import {
   retainValidAutomaticPlotTags,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
+  ideaPreselectionCapacity,
   ideaCardHistoryTitleReminder,
   ideaGateLocalRepairDirective,
   ideaHookRequirement,
@@ -55,6 +56,17 @@ describe('locked-card historical exclusion transport', () => {
   });
 });
 
+describe('bounded preselection surplus',()=>{
+  it('keeps eight reviewed paths only when the fixed pool supports five plus three',()=>{
+    expect(ideaPreselectionCapacity(5,15)).toBe(8);
+    expect(ideaPreselectionCapacity(5,6)).toBe(6);
+    expect(ideaPreselectionCapacity(5,5)).toBe(5);
+    expect(ideaPreselectionCapacity(2,12)).toBe(2);
+    expect(ideaPreselectionCapacity(1,10)).toBe(1);
+    expect(()=>ideaPreselectionCapacity(5,-1)).toThrow('候选池数量无效');
+  });
+});
+
 describe('locked-card structuring reference transport',()=>{
   it('retains full target facts and all peer causal differences without repeatedly sending peer source and self-praise',()=>{
     const target={...selectedPremise('P1'),workingTitle:'目标题材',storyCore:'目标原池事实保留且不得更改',causalPlan:[{action:{field:'activeChoice',quote:'目标行动'}}]};
@@ -68,11 +80,9 @@ describe('locked-card structuring reference transport',()=>{
     expect(refs).toHaveLength(1);
     expect(refs[0]).toEqual({
       workingTitle:peer.workingTitle,storyCategory:peer.storyCategory,
-      protagonistSituation:peer.protagonistSituation,openingEvent:peer.openingEvent,
-      coreConflict:peer.coreConflict,activeChoice:peer.activeChoice,
-      escalation:peer.escalation,reversalEffect:peer.reversalEffect,
-      payoff:peer.payoff,irreplaceableCarrier:peer.irreplaceableCarrier,
-      secondOrderConsequence:peer.secondOrderConsequence,readerQuestion:peer.readerQuestion,
+      activeChoice:peer.activeChoice,escalation:peer.escalation,
+      reversalEffect:peer.reversalEffect,payoff:peer.payoff,
+      irreplaceableCarrier:peer.irreplaceableCarrier,
     });
     expect(prompt).toContain(target.storyCore);
     expect(prompt).toContain('目标行动');

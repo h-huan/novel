@@ -60,8 +60,8 @@ export const CHARACTER_VOICE_COMPARISON_ISSUE_TYPES = ['same_voice_characters'] 
 
 /** Candidate-pool generation uses two broad batches; keep batch count independent from downstream card/review concurrency. */
 export const IDEA_PREMISE_POOL_GENERATION_CONCURRENCY = 2;
-/** Independent card-structuring and review tasks may overlap up to the five-card request size; dependent stages still await their prerequisites. */
-export const IDEA_CARD_GENERATION_CONCURRENCY = 5;
+/** Independent card-structuring and review tasks may overlap up to the eight-premise reviewed reserve; dependent stages still await their prerequisites. */
+export const IDEA_CARD_GENERATION_CONCURRENCY = 8;
 
 /** Naming constraint on fictional story content, not on routing/platform metadata. */
 export const FICTION_NAMING_POLICY = {
