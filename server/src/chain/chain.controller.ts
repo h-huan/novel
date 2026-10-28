@@ -6259,21 +6259,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
     };
     const initialReview = await reviewBoth(initial);
-    // If five of up to eight already survived ALL independent source, causal,
-    // category, genre and overlap checks, new model-driven reselection only
-    // repeats work. Keep the vetted subset and its reindexed evidence.
-    if(deliveryCount<requestedCount&&!initialReview.passed){
-      const retained=retainReviewedPremises(initial,initialReview);
-      const retainedReview=retainPremiseReviewEvidence(initial,initialReview,retained.selection);
-      if(retainedReview.passed&&retained.selection.selected.length>=deliveryCount){
-        this.logger?.log('锁定前冗余候选已满足交付目标：'+retained.selection.selected.length
-          +'个通过独立审核；目标'+deliveryCount+'，跳过重选');
-        return {...retained.selection,selectionAudit:{initialReview,reselectionAttempted:false,
-          finalReview:retainedReview,excludedPremiseIds:retained.excludedPremiseIds,
-          selectionStopReason:'reviewed_surplus_retained',reasons:retained.reasons,
-          preselectionTarget:requestedCount,requestedDeliveryCount:deliveryCount,completeCardGatePending:true}};
-      }
-    }
+    // The delivery floor cannot prematurely finish the bounded screening
+    // shortlist: complete-card independent Gate may still reject valid-looking
+    // premises. Fill only existing preselection slots from original candidates
+    // with the unchanged shared review/reselection budgets, then expand all
+    // independently vetted survivors together.
     const minimumSelectableCount = minimumAcceptableIdeaCount(deliveryCount);
     if (initialReview.passed) {
       const partial = initial.selected.length < requestedCount;
@@ -6294,29 +6284,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     };
     rememberRejected(initialReview);
     const repairPlan = premiseReselectionPlan(initial, initialReview);
-    // Seven/eight screened positions are NOT all delivery obligations. After
-    // isolating actual defects, replace only the number still needed to reach
-    // the user's five slots, not every rejected surplus candidate. Leave the
-    // other failed candidates excluded; never treat them as accepted or passed.
+    // All rejected positions in the existing preselection shortlist are
+    // potential full-card candidates. Do not throw away three source-verified
+    // screening slots merely because five delivery slots remain intact.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-    const neededReplacementSlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
-    // Hedge a real delivery deficit with ONE additional original-pool candidate
-    // in the SAME recovery wave. For four vetted and five requested, examine
-    // two rather than launching one, waiting for failure, then launching one.
-    // Never create a surplus when there is no actual deficit; never exceed
-    // existing pool identities or shared credits. Independent source/overlap
-    // reviews remain mandatory for both results.
-    const reviewCredits=shared?.reviews.remaining??readGenerationBudgets().sourceMaxPhysicalCalls;
-    const selectionCredits=shared?.reselection.remaining??readGenerationBudgets().premiseReselectionMaxCalls;
-    const extraHedge=deliveryCount<requestedCount&&neededReplacementSlots>0
-      &&repairPlan.availableCandidates.length>neededReplacementSlots
-      &&repairPlan.repairSlots.length>neededReplacementSlots
-      &&reviewCredits>=2&&selectionCredits>0?1:0;
-    const recoverySlots=deliveryCount<requestedCount
-      ?repairPlan.repairSlots.slice(0,Math.min(repairPlan.availableCandidates.length,neededReplacementSlots+extraHedge))
-      :repairPlan.repairSlots;
-    const surplusRejectedIds=deliveryCount<requestedCount
-      ?repairPlan.repairSlots.slice(recoverySlots.length).map(item=>String(item.replacesPremiseId)):[];
+    const neededReplacementSlots=Math.max(0,requestedCount-initiallyRetained.selection.selected.length);
+    const recoverySlots=repairPlan.repairSlots.slice(0,
+      Math.min(repairPlan.availableCandidates.length,neededReplacementSlots));
+    const surplusRejectedIds=repairPlan.repairSlots.slice(recoverySlots.length)
+      .map(item=>String(item.replacesPremiseId));
     // If enough independently reviewed premises remain, stop here instead of spending
     // more calls trying to fill every position. Full-card gates still run afterwards.
     let partialSelection = initial;
@@ -6333,7 +6309,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialSelection = retained.selection;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
-        const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
+        const missingSlots = Math.max(0, requestedCount - partialSelection.selected.length);
         const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
@@ -6347,8 +6323,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             completeCardGatePending: true,
           } };
         }
-        this.logger?.warn('锁定前筛选已有 ' + partialSelection.selected.length + '/' + requestedCount
-          + ' 个合格题材；继续对问题位置做原池重选，不因达到最低可交付数量提前停止。');
+        this.logger?.warn('锁定前已有 ' + partialSelection.selected.length + '/' + requestedCount
+          + ' 个审核合格预选题材；在原池与共享预算内补齐待审核预选容量，而不只是凑齐交付数量。');
         break;
       }
     }
@@ -6469,7 +6445,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const retained=retainReviewedPremises(selected,postReselectionReview,
         repairPlan.protectedItems.map(item=>String(item.premiseId)));
       const retainedReview=retainPremiseReviewEvidence(selected,postReselectionReview,retained.selection);
-      if(retained.selection.selected.length>=deliveryCount&&retainedReview.passed){
+      if(retained.selection.selected.length>=requestedCount&&retainedReview.passed){
         this.logger?.log('锁定前一次并发冗余恢复已满足实际交付目标 '
           +retained.selection.selected.length+'/'+deliveryCount+'，不再串行换选');
         return {...retained.selection,selectionAudit:{
@@ -6492,7 +6468,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if(deliveryCount>=requestedCount||finalReview.passed)return null;
       const survivor=retainReviewedPremises(selected,finalReview,
         repairPlan.protectedItems.map(item=>String(item.premiseId)));
-      if(survivor.selection.selected.length<deliveryCount)return null;
+      if(survivor.selection.selected.length<requestedCount)return null;
       const receipts=retainPremiseReviewEvidence(selected,finalReview,survivor.selection);
       return receipts.passed?{survivor,receipts}:null;
     };
@@ -6511,10 +6487,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         .map(issue=>ids.has(String(issue.premiseId))?issue:{...issue,premiseId:issue.referencePremiseId,
           referencePremiseId:issue.premiseId,quote:issue.referenceQuote,referenceQuote:issue.quote});
       const plannedSlots=premiseReselectionPlan(selected,{passed:false,issues:scopedIssues}).repairSlots;
-      const realShortfall=Math.max(0,deliveryCount-retained.selection.selected.length);
-      const slots=deliveryCount<requestedCount
-        ?plannedSlots.slice(0,Math.min(unusedIds.size,realShortfall+(realShortfall>0&&unusedIds.size>realShortfall?1:0)))
-        :plannedSlots;
+      const realShortfall=Math.max(0,requestedCount-retained.selection.selected.length);
+      const slots=plannedSlots.slice(0,Math.min(unusedIds.size,realShortfall));
       if(!slots.length)break;
       slots.forEach(slot=>slot.mode='replace_from_pool');
       // A replacement cannot be used unless its changed sources AND all affected
