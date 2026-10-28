@@ -64,11 +64,25 @@ it('holds final-card review credits without increasing the total source-call bud
 });
 
 const assessment=(keys:string[])=>({passed:keys.length===0,issues:[],presentationReview:{titleCompelling:true,openingCompelling:true,distinctFromBatch:true,storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:keys.includes(key)?'weak':'supported',reason:'具体已有缺口'}]))}});
-it('continues beyond two repairs only while independent blocked dimensions strictly improve',async()=>{
+it('never purchases a second patch for the same rejected card merely because one blocked dimension improved',async()=>{
  let missing=['A'],credits=8,defects=['click','completion','sharing'];const accepted={id:'already-passed',text:'不可改动'};const before=JSON.stringify(accepted);
- const repair=vi.fn(async()=>{credits-=2;const prior=assessment(defects);defects=defects.slice(1);if(!defects.length)missing=[];return discoveryFailureImproved(prior,assessment(defects))?['A']:[];});
+ const repair=vi.fn(async()=>{credits-=2;const prior=assessment(defects);defects=defects.slice(1);return discoveryFailureImproved(prior,assessment(defects))?['A']:[];});
  const result=await fulfillDiscoveryGaps({missing:()=>missing,hasCard:()=>true,canRepair:()=>credits>=2,repair,canReplace:()=>false,replace:vi.fn(),fingerprint:()=>JSON.stringify({missing,credits,defects})});
- expect(result).toBe('requested_quantity_verified');expect(repair).toHaveBeenCalledTimes(3);expect(credits).toBe(2);expect(JSON.stringify(accepted)).toBe(before);
+ expect(result).toBe('budget_or_original_pool_exhausted');expect(repair).toHaveBeenCalledOnce();expect(credits).toBe(6);expect(JSON.stringify(accepted)).toBe(before);
+});
+it('rechecks a consolidated patch through the independent acceptance state and replaces only remaining failures',async()=>{
+ const slots=['P1','P2','P3'];
+ const accepted=new Set(['P3']);
+ const repair=vi.fn(async(ids:string[])=>{expect(ids).toEqual(['P1','P2']);accepted.add('P2');return ['P1','P2'];});
+ const replaceBatch=vi.fn(async(ids:string[])=>{expect(ids).toEqual(['P1']);accepted.add('P1');return 'replaced' as const;});
+ const result=await fulfillDiscoveryGaps({
+  missing:()=>missingRequestedIdeaSlots(slots,accepted,3),
+  hasCard:()=>true,canRepair:()=>true,repair,canReplace:()=>true,replaceBatch,
+  fingerprint:()=>JSON.stringify([...accepted].sort()),
+ });
+ expect(result).toBe('requested_quantity_verified');
+ expect(repair).toHaveBeenCalledOnce();
+ expect(replaceBatch).toHaveBeenCalledOnce();
 });
 it('switches a stalled card to an original-pool candidate and never repairs or replaces an accepted card',async()=>{
  let missing=['bad'],credits=6,version=0;const rejected=new Set<string>(),calls:string[]=[];
@@ -107,12 +121,12 @@ it('stops a callback with no candidate, budget or pool progress instead of loopi
  expect(replace).toHaveBeenCalledTimes(1);
 });
 
-it('repairs a newly exposed local title contract before replacing a stalled story and rotates rejected slots',async()=>{
+it('does not resubmit a partly repaired card for newly exposed defects and still rotates rejected pool slots',async()=>{
  let deficits=['A','B'],credits=12,scope='story';const calls:string[]=[];
- await fulfillDiscoveryGaps({missing:()=>deficits,hasCard:()=>true,repairScope:id=>id==='B'?scope:'story',
-  canRepair:()=>credits>0,repair:async ids=>{calls.push('repair:'+ids.join(','));credits--;if(scope==='story')scope='local_contract';else deficits=deficits.filter(id=>id!=='B');return [];},
+ await fulfillDiscoveryGaps({missing:()=>deficits,hasCard:()=>true,
+  canRepair:()=>credits>0,repair:async ids=>{calls.push('repair:'+ids.join(','));credits--;scope='local_contract';return [];},
   canReplace:()=>credits>0,replace:async id=>{calls.push('replace:'+id);credits--;deficits=[];return 'replaced';},fingerprint:()=>JSON.stringify({deficits,credits,scope})});
- expect(calls).toEqual(['repair:A,B','repair:B','replace:A']);
+ expect(calls).toEqual(['repair:A,B','replace:A']);
  let remaining=3;const replacements:string[]=[];
  await fulfillDiscoveryGaps({missing:()=>['A','B'],hasCard:()=>false,canRepair:()=>false,repair:vi.fn(),canReplace:()=>remaining>0,
   replace:async id=>{replacements.push(id);remaining--;return 'rejected';},fingerprint:()=>String(remaining)});
