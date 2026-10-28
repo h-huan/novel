@@ -67,6 +67,29 @@ export function readerGoalDeficitRequiresNewPremise(assessment:any):boolean{
    && /(?:较窄|小众|不如.+普适|受众.+狭窄|传播面.+窄)/.test(reason);
 }
 
+/** Self-advertised novelty is NOT story evidence. If a previous full semantic
+ * verdict identified a real blocking defect, rewriting only uniquePoint or
+ * noveltyProof cannot resolve it. Skip another paid semantic review of
+ * byte-for-byte unchanged narrative and configuration; all actual changes to
+ * story facts, title, scope or selected dimensions still get the full Gate.
+ * This is a strict negative-only check, never an automatic pass. */
+export function unchangedSemanticDeficitAfterPatch(
+ beforeCard:Record<string,any>,afterCard:Record<string,any>,previousAssessment:any,
+):boolean{
+ const review=previousAssessment?.presentationReview;
+ if(!review)return false;
+ const failed=['titleCompelling','openingCompelling','distinctFromBatch',
+   'storyCoherent','payoffCredible','platformFit'].some(key=>review[key]===false)
+   ||Array.isArray(review.issues)&&review.issues.length>0
+   ||Object.values(review.readerGoals||{}).some((value:any)=>value?.status!=='supported');
+ if(!failed)return false;
+ const relevant=['title','hook','description','setting','ending','scopeBreakdown',
+   'protagonist','coreConflict','mainReversal','storyType','targetPlatform',
+   'storyCategory','storyTone','writingStyle','webNovelGenre','plotTags',
+   'submissionTags','pov','estimatedWords','recommendedTargetWords','plannedChapters'];
+ return relevant.every(field=>JSON.stringify(beforeCard?.[field])===JSON.stringify(afterCard?.[field]));
+}
+
 /** Fit only the positions that can each pay for generation AND the unchanged independent card review. 
  * Never stop a batch of two just because current budget covers only one. */
 export function affordableIdeaReplacementCount(missing:number,pool:number,calls:number,reviewCalls:(count:number)=>number):number{

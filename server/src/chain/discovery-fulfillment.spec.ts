@@ -1,5 +1,32 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots,unchangedSemanticDeficitAfterPatch} from './discovery-fulfillment';
+
+it('never pays to rereview a semantic failure if the patch rewrote only unverified novelty claims',()=>{
+ const card={
+   title:'家属的资格为何消失',hook:'当晚收到错误通知，他决定去找原始登记。',
+   description:'他主动核对登记，遭到阻拦，却继续追查真正经手人。',
+   setting:'单位原始记录受到权限限制',ending:'当事人最终承担工作的代价',
+   scopeBreakdown:[{arc:'纠正原登记',chapters:5}],
+   storyType:'short_story',targetPlatform:'fanqie',plotTags:['调查'],
+   uniquePoint:'旧卖点',noveltyProof:{uncommonCombination:'旧的未经证实自评'},
+ };
+ const rejected={presentationReview:{
+   titleCompelling:true,openingCompelling:true,distinctFromBatch:true,
+   storyCoherent:false,payoffCredible:true,platformFit:true,issues:['缺少必要因果条件'],
+   readerGoals:{click:{status:'supported'},sharing:{status:'weak'}},
+ }};
+ expect(unchangedSemanticDeficitAfterPatch(card,{...card,
+   uniquePoint:'新卖点',noveltyProof:{uncommonCombination:'改写后的自评'}},rejected)).toBe(true);
+ expect(unchangedSemanticDeficitAfterPatch(card,{...card,
+   description:card.description+'。新增此前遗漏的核验行动'},rejected)).toBe(false);
+ expect(unchangedSemanticDeficitAfterPatch(card,{...card,title:'今天谁改了家属资格'},rejected)).toBe(false);
+ expect(unchangedSemanticDeficitAfterPatch(card,{...card,plotTags:['调查','关系反转']},rejected)).toBe(false);
+ expect(unchangedSemanticDeficitAfterPatch(card,{...card,
+   uniquePoint:'改写卖点'}, {presentationReview:{storyCoherent:true,issues:[],
+     readerGoals:{click:{status:'supported'},sharing:{status:'supported'}}}})).toBe(false);
+ expect(unchangedSemanticDeficitAfterPatch(card,{...card,
+   uniquePoint:'改写卖点'}, {issues:['标题过短']})).toBe(false);
+});
 it('only fulfills the user-requested five despite eight independently vetted slots',()=>{
  const slots=['P1','P2','P3','P4','P5','P6','P7','P8'];
  expect(missingRequestedIdeaSlots(slots,new Set(['P1','P2','P3','P4','P5']),5)).toEqual([]);

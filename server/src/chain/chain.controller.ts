@@ -1,5 +1,5 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots,unchangedSemanticDeficitAfterPatch} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
@@ -6066,7 +6066,20 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             fulfillmentActions.push({kind:'repair_patch_rejected',premiseId,error:detail});
             this.logger.warn('idea-discover: '+premiseId+' 的修复补丁被严格协议拒绝，保留原失败卡，不阻断其它卡：'+detail);
           });
-          const changedCards = repairedCards.filter((card,index)=>JSON.stringify(card)!==JSON.stringify(failedCards[index]));
+          const changedCards = repairedCards.filter((card,index)=>{
+            if(JSON.stringify(card)===JSON.stringify(failedCards[index]))return false;
+            const premiseId=String(card.sourcePremiseId);
+            // Independent negative semantic facts remain binding when the
+            // patch only rewrites novelty/self-praise rather than the story.
+            // Do not purchase another identical reviewer verdict; retain the
+            // original failure and allow the existing vetted-pool fallback.
+            if(unchangedSemanticDeficitAfterPatch(failedCards[index],card,before.get(premiseId))){
+              fulfillmentActions.push({kind:'irrelevant_self_claim_patch',premiseId,
+                reason:'已拒绝的真实故事与创作配置未修改，仅自述卖点改变'});
+              return false;
+            }
+            return true;
+          });
           finalGateRepairGenerated += changedCards.length;
           if (changedCards.length) {
             // The proposed patch is NOT the latest reviewed card until its
