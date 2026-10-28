@@ -21,7 +21,9 @@ function fixture(writtenMax: number, existingAuthoredChapter = false) {
           : sql.includes('FROM chapters') && sql.includes('chapter_index=?')
             ? existingAuthoredChapter ? { id:'authored', content:'作者已经写过正文',word_count:9,status:'draft' } : undefined
             : sql.includes('FROM outlines') && sql.includes('"order"=?')
-              ? { title:'前一章', content:'已经完成上一章的调查', scenes:'{}', chapter_function:'conflict' }
+              ? sql.includes('SELECT id FROM outlines')
+                ? undefined
+                : { title:'前一章', content:'已经完成上一章的调查', scenes:'{}', chapter_function:'conflict' }
               : undefined,
       all: () => sql.includes("level='volume'") ? volumeRows
         : sql.includes("level='chapter'") ? detailRows
