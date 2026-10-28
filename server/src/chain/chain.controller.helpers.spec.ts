@@ -2180,8 +2180,13 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   expect(c.reviewIdeaPresentation.mock.calls[0][0][4].description).not.toContain('微信');
   expect(outcome.success,JSON.stringify({error:outcome.error,gate:outcome.appealGate?.candidateAssessments?.map((x:any)=>({id:x.sourcePremiseId,issues:x.issues}))})).toBe(true);
   expect(outcome.ideas).toHaveLength(5);
+  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')
+    .map(([request]:any[])=>request.metrics.attempt).sort((a:number,b:number)=>a-b))
+    .toEqual(Array.from({length:8},(_,index)=>index));
   expect(outcome.appealGate).toMatchObject({
-    requested:5,generated:8,qualified:6,returned:5,
+    requested:5,generated:8,fullCardDispatched:8,
+    fullCardDispatchedIds:['P1','P2','P3','P4','P5','P6','P7','P8'],
+    qualified:6,returned:5,
     repairAttempted:false,repairGenerated:0,
     mode:'parallel_vetted_full_card_filter',
     repairProtocol:'no_post_card_repair_or_replacement',
