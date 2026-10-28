@@ -6766,8 +6766,21 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
       attemptedIds=new Set([...attemptedBeforeReserve,...selected.selected.map(item=>String(item.premiseId))]);
     const reserveStartCredits=reselectionBudget.remaining;
+    // A negative verdict on unused shortlist surplus must not trigger
+    // another paid selection when the remaining, independently reviewed
+    // stories already cover the actual delivery request. Preserve every
+    // source/payoff/genre/category/overlap receipt for the retained subset.
+    const retainedFullDelivery=()=>{
+      if(deliveryCount>=requestedCount||finalReview.passed)return null;
+      const survivor=retainReviewedPremises(selected,finalReview,
+        repairPlan.protectedItems.map(item=>String(item.premiseId)));
+      if(survivor.selection.selected.length<deliveryCount)return null;
+      const receipts=retainPremiseReviewEvidence(selected,finalReview,survivor.selection);
+      return receipts.passed?{survivor,receipts}:null;
+    };
     let reserveReconciliationRounds = 0;
     while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0){
+      if(retainedFullDelivery())break;
       reserveReconciliationRounds += 1;
       this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '；仅使用未尝试原池身份和剩余共享预算，全部修改仍须独立复核。');
       const retained=retainReviewedPremises(selected,finalReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
@@ -6779,7 +6792,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const scopedIssues=finalReview.issues.filter(issue=>ids.has(String(issue.premiseId))||issue.kind==='overlap'&&ids.has(String(issue.referencePremiseId)))
         .map(issue=>ids.has(String(issue.premiseId))?issue:{...issue,premiseId:issue.referencePremiseId,
           referencePremiseId:issue.premiseId,quote:issue.referenceQuote,referenceQuote:issue.quote});
-      const slots=premiseReselectionPlan(selected,{passed:false,issues:scopedIssues}).repairSlots;
+      const plannedSlots=premiseReselectionPlan(selected,{passed:false,issues:scopedIssues}).repairSlots;
+      const realShortfall=Math.max(0,deliveryCount-retained.selection.selected.length);
+      const slots=deliveryCount<requestedCount
+        ?plannedSlots.slice(0,Math.min(unusedIds.size,realShortfall+(realShortfall>0&&unusedIds.size>realShortfall?1:0)))
+        :plannedSlots;
       if(!slots.length)break;
       slots.forEach(slot=>slot.mode='replace_from_pool');
       // A replacement cannot be used unless its changed sources AND all affected
@@ -6816,6 +6833,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reserveAudit=reserveHistory.length?{attempted:true,error:null,...reserveHistory[reserveHistory.length-1],
       replacements:reserveHistory,physicalCallBudgetUsed:reserveStartCredits-reselectionBudget.remaining,
       sharedCallsRemaining:reselectionBudget.remaining}:undefined;
+    const fullyVetted=retainedFullDelivery();
+    if(fullyVetted){
+      this.logger?.log('锁定前保留已完整审核的交付名额 '
+        +fullyVetted.survivor.selection.selected.length+'/'+deliveryCount
+        +'，跳过备用重选及额外来源/同构审核');
+      return {...fullyVetted.survivor.selection,selectionAudit:{
+        initialReview,reselectionAttempted:true,reserve:reserveAudit,
+        finalReview:fullyVetted.receipts,reviewedBeforeCardLock:selected.selected.length,
+        excludedPremiseIds:fullyVetted.survivor.excludedPremiseIds,
+        reasons:fullyVetted.survivor.reasons,rejectedHistory,
+        selectionStopReason:'reviewed_delivery_after_reselection',
+        completeCardGatePending:true}};
+    }
     if (!finalReview.passed) {
       const message = '锁定前原池重选后复核仍未通过，未生成完整卡：' + finalReview.issues.map(item => item.reason).join('；');
       try {
