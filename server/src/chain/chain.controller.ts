@@ -22,7 +22,7 @@ import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } f
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
 import { createReviewLimiter } from './review-limiter';
-import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity } from './idea-discovery-contract';
+import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity, partitionReviewedIdeaPremises } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
@@ -5588,6 +5588,20 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           );
         }
         const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
+        // Independent review covered the entire seven/eight-item shortlist.
+        // Only the best five enter paid card structuring/presentation. Remaining
+        // independently verified paths are kept as no-cost reviewed reserves.
+        const reviewedPremiseCount=normalizedSelection.selected.length;
+        const deliveryPartition=partitionReviewedIdeaPremises(
+          normalizedSelection.selected,requestedCount,variedCategories);
+        normalizedSelection={...normalizedSelection,selected:deliveryPartition.selected,
+          reviewedReservePremises:deliveryPartition.reserves,
+          selectionAudit:{...normalizedSelection.selectionAudit,
+            reviewedBeforeCardLock:reviewedPremiseCount,
+            cardSlotsLocked:deliveryPartition.selected.length,
+            reviewedReservePremiseIds:deliveryPartition.reserves.map(item=>String(item.premiseId))}};
+        this.logger.log('idea-discover: 独立审核 '+reviewedPremiseCount+' 个，锁定完整卡 '
+          +deliveryPartition.selected.length+' 个，已审未结构化备用 '+deliveryPartition.reserves.length+' 个');
         this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
           + '，有效池=' + candidatePool.length + '/' + premisePoolSize
@@ -5961,6 +5975,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       let finalGateRepairError:string|null=null;
       const latestCards=new Map(structuredCards.map(card=>[String(card.sourcePremiseId),card]));
       const attemptedPremiseIds=new Set(selectedPremises.map(item=>String(item.premiseId)));
+      const reviewedReservePremises:Array<Record<string,unknown>> =
+        [...(premiseDiscovery.reviewedReservePremises||[])];
+      const availableReviewedReserves=()=>reviewedReservePremises.filter(item=>
+        !attemptedPremiseIds.has(String(item.premiseId)));
       const latestAssessment=(id:string)=>[...candidateAssessments].reverse().find(item=>item.sourcePremiseId===id);
       // Minimum deliverability is only a final fallback. Do not stop repairing/replacing
       // rejected slots merely because three cards have passed while the request is for five.
@@ -6044,13 +6062,35 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // is no budget or available candidate for optional pool replacement.
         repairEligible:id=>!readerGoalDeficitRequiresNewPremise(latestAssessment(id)),
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
-        canReplace:()=>reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0,
+        canReplace:()=>(
+          affordableIdeaReplacementCount(missingAfterGate().length,availableReviewedReserves().length,
+            presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0
+          ||(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2
+            &&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,
+              presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0)),
         fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
         replaceBatch:async ids=>{
           // One original-pool selection and one independent source/overlap review
           // for all outstanding positions. A rejected batch never changes
           // already accepted cards, and never borrows new model-call credits.
           const missing=ids.filter(id=>selectedPremises.some(item=>String(item.premiseId)===id));
+          const vettedReserveCount=affordableIdeaReplacementCount(missing.length,availableReviewedReserves().length,
+            presentationBudget.remaining,count=>minimumCardReviewCalls(count,count));
+          const vettedReserve=availableReviewedReserves().slice(0,vettedReserveCount);
+          let newPremises:Array<{position:number;premise:Record<string,unknown>}>;
+          if(vettedReserve.length){
+            // Every reserve was already included in the source, payoff, genre,
+            // category and pairwise overlap verdict before any full card call.
+            // Reusing that verdict is not skipping review. No new pool selection
+            // or source/overlap LLM call is needed.
+            const targetIds=missing.slice(0,vettedReserve.length);
+            newPremises=vettedReserve.map((premise,index)=>({
+              position:selectedPremises.findIndex(item=>String(item.premiseId)===targetIds[index]),premise}));
+            for(const row of vettedReserve)attemptedPremiseIds.add(String(row.premiseId));
+            fulfillmentActions.push({kind:'reviewed_reserve_replacement',
+              replaces:targetIds,replacementPremiseIds:vettedReserve.map(row=>String(row.premiseId)),
+              reusedPreselectionEvidence:true});
+          }else{
           const targetCount=affordableIdeaReplacementCount(missing.length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count));
           const targets=missing.slice(0,targetCount);
           if(!targets.length)return 'unavailable';
@@ -6082,10 +6122,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               !verified.some(kept=>kept.replacementPremiseId===row.replacementPremiseId))
               .map(row=>row.replacementPremiseId)});
           if(!verified.length)return 'rejected';
-          const newPremises=verified.map(entry=>{
+          newPremises=verified.map(entry=>{
             const position=selectedPremises.findIndex(item=>String(item.premiseId)===entry.replacesPremiseId);
             return {position,premise:reserve.selection.selected[position]};
           });
+          }
           if(newPremises.some(item=>item.position<0||!item.premise))throw Error('汇总换选返回未知槽位，未接纳任何完整卡');
           // A batch of independently reviewed replacements has no dependency
           // between its card structuring calls. Use the SAME bounded scheduler
@@ -6101,6 +6142,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             selectedPremises[position]=premise;
             selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
           }
+          // Peer-difference references follow the current active positions;
+          // do not retransmit replaced/failed identities to later cards.
+          sameBatchPremises=[...selectedPremises];
           presentationBudget.remaining-=reserveCardReviewCalls;
           let replacementResults:PromiseSettledResult<Record<string,unknown>>[];
           try {
