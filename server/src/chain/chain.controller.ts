@@ -10832,11 +10832,15 @@ ${excerpt}`;
 
   private assertRollingEntitiesConfirmed(projectId:string,chapterNumber:number):void {
     if(!Number.isInteger(chapterNumber)||chapterNumber<1)return;
-    const pending=this.db.getDb().prepare(`SELECT target_type,target_label FROM state_items
-      WHERE project_id=? AND source_type='rollout_outline'
-        AND (status <> 'confirmed' OR authority <> 'hard_fact')
-        AND source_chapter_id IN (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?)
-      ORDER BY target_type,target_label`).all(projectId,projectId,chapterNumber) as any[];
+    // A pending entity introduced in an earlier outline is also required by
+    // every later chapter. Checking only this chapter allowed downstream prose
+    // to use a still-unconfirmed named person or faction.
+    const pending=this.db.getDb().prepare(`SELECT DISTINCT s.target_type,s.target_label FROM state_items s
+      JOIN chapters c ON c.id=s.source_chapter_id AND c.project_id=s.project_id
+      WHERE s.project_id=? AND s.source_type='rollout_outline'
+        AND (s.status <> 'confirmed' OR s.authority <> 'hard_fact')
+        AND c.chapter_index<=?
+      ORDER BY s.target_type,s.target_label`).all(projectId,chapterNumber) as any[];
     if(pending.length) {
       throw new HttpException(`第${chapterNumber}章存在尚未确稿的新增人物、组织、地点或伏笔：${pending.map(row=>String(row.target_label)).join('、')}。请在状态确稿中心逐项确认；如已拒绝，须先修正章纲并重新核定实体证据。正文生成暂不消耗模型调用。`,409);
     }
@@ -12085,6 +12089,15 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           const existed = db.prepare(`SELECT id FROM ${table} WHERE project_id=? AND ${field}=? LIMIT 1`)
             .get(projectId, proposal.type === 'foreshadowing' ? proposal.evidenceQuote : proposal.name);
           if (existed) continue;
+          // A named entity first introduced in a preceding rolling batch is
+          // still one identity. Different source quotes must not create
+          // multiple pending dossiers that cannot all be confirmed.
+          const priorProposal=db.prepare(`SELECT id FROM state_items
+            WHERE project_id=? AND source_type='rollout_outline'
+              AND target_type=? AND target_label=?
+              AND status <> 'archived' LIMIT 1`)
+            .get(projectId,proposal.type,proposal.name) as any;
+          if (priorProposal) continue;
           const outline = db.prepare(`SELECT id FROM outlines WHERE project_id=? AND level='chapter' AND "order"=? LIMIT 1`)
             .get(projectId, proposal.chapterNumber - 1) as any;
           const chapter = db.prepare('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?')
