@@ -1977,7 +1977,7 @@ it('structures two pre-reviewed reserves concurrently for one missing card and s
     storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],
     plotTags:['调查'],genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:'',
   },1);
-  expect(reserveCalls).toBe(2);
+  expect(reserveCalls,JSON.stringify({status:result.status,error:result.error,appealGate:result.appealGate,generatedSteps:generate.mock.calls.map(([row]:any[])=>row.metrics?.stepKey)}).slice(0,2500)).toBe(2);
   expect(result.appealGate.fulfillment.actions).toEqual(expect.arrayContaining([
     expect.objectContaining({kind:'reviewed_reserve_replacement',hedgedCandidateCount:2,deliverySlots:1}),
     expect.objectContaining({kind:'hedged_card_selected',premiseId:'P3'}),
