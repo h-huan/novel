@@ -82,7 +82,7 @@ describe('category checked before complete cards', () => {
   });
 });
 
-it('continues unresolved preselection slots after a protocol failure with corrective feedback and shared budget', async () => {
+it('isolates unresolved preselection slots after the structured helper already exhausted protocol correction', async () => {
   const c = Object.create(ChainController.prototype) as any, s = selection();
   c.logger = { warn: vi.fn(), log: vi.fn() };
   let sourceCalls = 0;
@@ -90,17 +90,20 @@ it('continues unresolved preselection slots after a protocol failure with correc
     if (mode === 'source_drift' && sourceCalls++ === 0) return { passed: false, issues: [{ kind: 'selection_fit', premiseId: 'A', referencePremiseId: 'A', quote: String(s.selected[0].coreConflict), referenceQuote: String(s.pool[0].storyCore), reason: '当前行动未落实原有关键成立条件' }] };
     return { passed: true, issues: [] };
   });
-  let attempts = 0;
   c.llmCallWithRetry = vi.fn(async (_label: string, prompt: string, options: any) => {
     expect(prompt).toContain('"causalPlan":[');
     options.physicalCallBudget.remaining--;
-    if (++attempts === 1) return { data: null, validationIssues: ['causalPlan协议未完成'] };
-    expect(prompt).toContain('causalPlan协议未完成');
-    return { data: { replacements: [{ replacesPremiseId: 'A', premise: { ...s.selected[0], activeChoice: String(s.selected[0].activeChoice) + '并按已明确条件实际完成交付' }, comparisons: [{ referencePremiseId: 'B', actionDifference: '双方主动选择和具体执行行动明显不同', escalationDifference: '双方选择引发的实际升级因果明显不同', reversalDifference: '双方反转改变的目标和胜负条件不同', consequenceDifference: '双方行动引发的后续结果与代价不同' }] }] } };
+    // The real helper has ALREADY used its one internal protocol correction.
+    // No new premise or independently verified evidence justifies replaying
+    // the very same source and slot from the outer orchestration.
+    return { data: null, validationIssues: ['causalPlan协议未完成'] };
   });
   const budget = { reviews: { remaining: 10 }, reselection: { remaining: 3 } };
   const result = await c.reconcilePremiseSelection(s, 2, 2, [], '本次执行标准', [], budget);
-  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
-  expect(budget.reselection.remaining).toBe(1);
-  expect(result.selected.map((item: any) => item.premiseId)).toEqual(['A', 'B']);
+  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+  expect(budget.reselection.remaining).toBe(2);
+  expect(result.selected.map((item: any) => item.premiseId)).toEqual(['B']);
+  expect(result.selectionAudit).toMatchObject({
+    partial: true, unresolvedPremiseIds: ['A'],
+  });
 });
