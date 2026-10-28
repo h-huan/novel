@@ -149,7 +149,7 @@ export function applyIdeaMissingPresentationRows(plan:NonNullable<ReturnType<typ
 export function missingIdeaPresentationRetryPrompt(
  originalPrompt:string,
  plan:NonNullable<ReturnType<typeof ideaMissingPresentationRowsPlan>>,
- displayedCards:readonly Record<string,any>[],
+ displayedCards:readonly (Record<string,any>&{title:string})[],
  displayedReferences:readonly Record<string,any>[],
 ):string{
  const marker='只输出JSON：',index=originalPrompt.lastIndexOf(marker);
