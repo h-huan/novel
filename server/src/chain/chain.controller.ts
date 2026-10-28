@@ -5817,7 +5817,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         discoveryBudget.reviewGroupingMode===0
           &&!boundedPresentationReview(count,presentationBudget.remaining-generationCalls)
           ?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
-      const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
+      const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial',
+        maxNewAccepted=Number.POSITIVE_INFINITY) => {
+        const acceptedBeforeBatch=accepted.length;
         // Deterministic contracts run before a paid semantic review. Invalid
         // metadata stays rejected and enters its authorized targeted repair.
         const localIssues=new Map(candidates.map(candidate=>[candidate,assessIdeaQuality(candidate)]));
@@ -5897,6 +5899,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           });
           if (!passed) {
             rejectedReasons.push(...uniqueIssues);
+            continue;
+          }
+          // Every hedged path receives its full independent verdict. Verified
+          // surplus beyond the actual missing delivery slots is not delivered,
+          // not added to global duplicate history, and cannot open new slots.
+          if(accepted.length-acceptedBeforeBatch>=maxNewAccepted){
+            candidateAssessments[candidateAssessments.length-1].withheldVerifiedSurplus=true;
             continue;
           }
           seen.add(titleKey);
@@ -6088,21 +6097,30 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           // for all outstanding positions. A rejected batch never changes
           // already accepted cards, and never borrows new model-call credits.
           const missing=ids.filter(id=>selectedPremises.some(item=>String(item.premiseId)===id));
-          const vettedReserveCount=affordableIdeaReplacementCount(missing.length,availableReviewedReserves().length,
+          // Only one true shortfall needs two simultaneous card alternatives:
+          // hedge within the existing call allowance, and preserve the first
+          // qualifying card without starting another serial recovery round.
+          const canHedgeOneSlot=missing.length===1&&availableReviewedReserves().length>=2;
+          const vettedReserveCount=affordableIdeaReplacementCount(
+            missing.length+(canHedgeOneSlot?1:0),availableReviewedReserves().length,
             presentationBudget.remaining,count=>minimumCardReviewCalls(count,count));
           const vettedReserve=availableReviewedReserves().slice(0,vettedReserveCount);
+          const hedgedReserve=vettedReserve.length>missing.length;
           let newPremises:Array<{position:number;premise:Record<string,unknown>}>;
+          let targetIds:string[]=[];
           if(vettedReserve.length){
             // Every reserve was already included in the source, payoff, genre,
             // category and pairwise overlap verdict before any full card call.
             // Reusing that verdict is not skipping review. No new pool selection
             // or source/overlap LLM call is needed.
-            const targetIds=missing.slice(0,vettedReserve.length);
+            targetIds=missing.slice(0,Math.min(missing.length,vettedReserve.length));
             newPremises=vettedReserve.map((premise,index)=>({
-              position:selectedPremises.findIndex(item=>String(item.premiseId)===targetIds[index]),premise}));
+              position:selectedPremises.findIndex(item=>String(item.premiseId)===
+                targetIds[Math.min(index,targetIds.length-1)]),premise}));
             for(const row of vettedReserve)attemptedPremiseIds.add(String(row.premiseId));
             fulfillmentActions.push({kind:'reviewed_reserve_replacement',
               replaces:targetIds,replacementPremiseIds:vettedReserve.map(row=>String(row.premiseId)),
+              hedgedCandidateCount:vettedReserve.length,deliverySlots:targetIds.length,
               reusedPreselectionEvidence:true});
           }else{
           const targetCount=affordableIdeaReplacementCount(missing.length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count));
@@ -6153,12 +6171,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           // Only mutate active slots once generation and independent final
           // review can both be funded by the existing physical-call budget.
           for(const {position,premise} of newPremises){
-            selectedPremises[position]=premise;
+            if(!hedgedReserve)selectedPremises[position]=premise;
             selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
           }
-          // Peer-difference references follow the current active positions;
-          // do not retransmit replaced/failed identities to later cards.
-          sameBatchPremises=[...selectedPremises];
+          // Preserve the original failed slot until one independently passed
+          // alternative can actually be committed. Both alternatives remain
+          // peer references during structuring; no unreviewed facts are added.
+          sameBatchPremises=hedgedReserve
+            ? [...selectedPremises,...vettedReserve] : [...selectedPremises];
           presentationBudget.remaining-=reserveCardReviewCalls;
           let replacementResults:PromiseSettledResult<Record<string,unknown>>[];
           try {
@@ -6186,7 +6206,23 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               rejectedReasons.push(detail);
             }
           }
-          if(replacementCards.length)await accept(replacementCards,'initial');
+          if(replacementCards.length)await accept(replacementCards,'initial',
+            hedgedReserve?targetIds.length:Number.POSITIVE_INFINITY);
+          if(hedgedReserve){
+            const winner=accepted.find(card=>vettedReserve.some(item=>
+              String(item.premiseId)===String(card.sourcePremiseId)));
+            if(winner){
+              const replacement=newPremises.find(item=>
+                String(item.premise.premiseId)===String(winner.sourcePremiseId));
+              if(!replacement)throw Error('已通过完整卡的身份不能对应锁定前审核题材');
+              selectedPremises[replacement.position]=replacement.premise;
+              sameBatchPremises=[...selectedPremises];
+              fulfillmentActions.push({kind:'hedged_card_selected',
+                premiseId:String(winner.sourcePremiseId),discardedVerifiedSurplus:
+                  vettedReserve.filter(item=>String(item.premiseId)!==String(winner.sourcePremiseId))
+                    .map(item=>String(item.premiseId))});
+            }
+          }
           return 'replaced';
 },
       });}catch(error){finalGateRepairError=String((error as Error).message);fulfillmentStopReason='completion_unavailable';}
