@@ -2083,6 +2083,74 @@ it('sends full standards only for actual reviewed cards while preserving all ref
 
 
 const diversePoolStories = ["【处境触发】失语气象员发现台风前的浮标全部报出逆风。【主动选择】他决定乘船核对维修合同和海浪方向。【必要条件】港务主管取得真实风速日志才能调整撤离航道。【反转兑现】走私船藏在错误风向背后，他揭露后失去同僚支持。【分类流派机制】海岛灾难悬疑以撤离选择和职业代价推进。","【处境触发】营养师发现社区餐盒里的配料与过敏病例不一致。【主动选择】她决定保留留样追查代餐券背后的供货方。【必要条件】食安人员检测留样并核对签字后才能定责。【反转兑现】真正被操纵的是监护文件，她举报却失去食堂资格。【分类流派机制】社区现实悬疑以老人权益和家属关系推进。","【处境触发】提词员发现剧团的老戏突然缺少最后七句唱词。【主动选择】她决定查验旧演出录像与演员的口型。【必要条件】收养档案与原始台本经核对才能确认身份。【反转兑现】唱词藏着一次身份顶替，她揭露后失去师父信任。【分类流派机制】剧团身份悬疑以师徒抉择和舞台证据推进。","【处境触发】训导员发现退役检疫犬总对空货箱示警。【主动选择】他决定查阅犬只芯片编号和货车冷链记录。【必要条件】口岸安检核实车辆监控与检疫记录才能扣查。【反转兑现】药材是合法诱饵，活体繁育犬才是目标，他丢了旧友。【分类流派机制】边境物流悬疑以动物身份与同事情谊推进。","【处境触发】测绘员发现旧城区一条有人居住的窄巷从新版地图消失。【主动选择】她决定用井盖距离和居民门牌核对现场。【必要条件】住房部门取得测绘底图才能重审拆迁补偿。【反转兑现】消失的巷子关联旧身份交换，她查明真相却伤害邻里。【分类流派机制】城市测绘悬疑以安置权益和身份争夺推进。","【处境触发】矿场工人发现定位仪显示休班同事仍在井下。【主动选择】他拒签安全表并保全矿灯定位记录。【必要条件】矿井值守员确认实时定位及出入登记才能启动救援。【反转兑现】违章更改轨道的竟是工友，他揭发后失去晋升机会。【分类流派机制】矿井生存悬疑以设备边界和朋友责任推进。","【处境触发】列车员发现夜班行李舱有一件没有主人却每天称重的包裹。【主动选择】她决定核查运单条码与站台摄像记录。【必要条件】铁路安保取得封签交接书后才可定位真正发件人。【反转兑现】包裹装着被调换的医疗器材，她追查后被停职。【分类流派机制】铁路职业悬疑以时间压力和乘客信任推进。","【处境触发】养老院护工发现探视簿上出现三名不存在的亲属。【主动选择】她决定核验老人亲笔信与探视人照片。【必要条件】社工访谈老人并核验监护授权后才能暂停财产转移。【反转兑现】老监护人借探视取得权限，她阻止后被家属误解。【分类流派机制】养老生活悬疑以孤独老人和照护信任推进。","【处境触发】快递站临时工发现无人认领包裹总被系统自动签收。【主动选择】她决定保存扫码枪缓存并追踪异常账号。【必要条件】站长取出原始权限日志后才能申请调查。【反转兑现】幕后操作者是她的旧搭档，她维护客户却失去友情。【分类流派机制】都市物流悬疑以岗位权限和合伙背叛推进。","【处境触发】渔村养殖户发现水塘里突然出现本地不该有的鱼种。【主动选择】他决定暂停销售并追查夜间运输车。【必要条件】水产专家鉴定水样且追查车辆卸货记录才可定责。【反转兑现】外来鱼是合作社投放用来夺取合同，他告发后失去市场。【分类流派机制】海边商业悬疑以生态损失和社区利益推进。","【处境触发】文物修复师发现博物馆古画的底层颜料不符合藏品年代。【主动选择】她暂停展览并用成像仪比对入藏底册。【必要条件】馆方委员会收到原始图像与保管链才可认定调包。【反转兑现】造假为了掩盖师父当年的损毁，她公开后断绝师徒关系。【分类流派机制】文物悬疑由修复技术和守护秘密的伦理推进。","【处境触发】医院化验助理发现亲子报告的采样编码被人交换。【主动选择】他决定封存样本并核对当天采血记录。【必要条件】医院双人复验和身份确认后才可更正报告。【反转兑现】被隐瞒的收养安排牵出两家旧案，他更正后破坏家庭。【分类流派机制】医疗伦理悬疑以血缘选择与专业职责推进。","【处境触发】短视频剪辑师发现直播合约的分账账号被悄悄替换。【主动选择】她决定回溯签约记录与剪辑工程的提交时间。【必要条件】平台核验数字签名及签约主体才可撤销异常分账。【反转兑现】替换账号的人是她的搭档，她拿回收益却解散团队。【分类流派机制】网络职场悬疑以合伙信任和账户权限推进。","【处境触发】旧城消防员发现大楼逃生通道被登记成私人客厅。【主动选择】他决定复查建筑验收图纸并测量实际墙体。【必要条件】主管部门核对竣工资料及现场通道才能重启验收。【反转兑现】房屋违规改造牵涉自己姑母，他保住通道却失去家人。【分类流派机制】公共安全悬疑以物权争夺与亲情代价推进。","【处境触发】深夜出租司机发现所有路线单据都指向一条已封闭的山路。【主动选择】他决定重走站点并检查车载收费终端。【必要条件】交通站核对原始行车轨迹才可查明虚报里程者。【反转兑现】真正牟利的是运营公司，他揭露后失去营运资格。【分类流派机制】交通社会悬疑以交通规则和司机生计推进。"];
+it('dispatches exactly five initial full-card calls after eight shortlisted candidates pass selection',async()=>{
+  const entries=diversePoolStories.map((storyCore,index)=>({
+    workingTitle:'原池主题'+(index+1),storyCore,storyCategoryId:'K1',
+  }));
+  const selectionFields=(id:string)=>({
+    premiseId:id,storyCategory:'悬疑',storyCategoryId:'K1',
+    protagonistSituation:'主角被现实责任迫使行动，否则家人利益立刻受损',
+    openingEvent:'当天一份无法解释的记录迫使主角主动查证',
+    coreConflict:'对手主动篡改凭证而主角必须保护具体家庭利益',
+    activeChoice:'主角自行核对原始记录并承担被停职的现实代价',
+    escalation:'对手夺取通行权限迫使主角改变调查方式',
+    reversalEffect:'原记录揭示责任归属让双方的目标出现逆转',
+    payoff:'主角以合法核验改变结局并承担失去原岗位的代价',
+    irreplaceableCarrier:'工作权限和家属责任共同决定具体行动路径',
+    secondOrderConsequence:'调查让旧同事失去岗位并改变家人对主角的信任',
+    readerQuestion:'究竟谁在关键时刻更改凭证并获得具体利益',
+  }));
+  const strong=(idx:number)=>({
+    storyType:'short_story',targetPlatform:'fanqie',storyCategory:'悬疑',
+    storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+    plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
+    title:'第'+(idx+1)+'次核验改变了归属',
+    hook:'凌晨三点有人用我的名字领走了最后一份救助名额，我必须当天查清谁改动了登记，否则家人将失去最后的申诉机会。',
+    description:'当天我发现登记被改，负责核验的人要求我拿出原始凭证。为保住家人的实际权益，我主动找出第一次签收的记录，却遭到负责人的反对和停职威胁。我没有选择接受补偿，而是找到实际有权限的人员，让对方依规核对原件与流水。对手发现记录无法删除后转而联合同事阻止我。最终我在公开场合证明签收日期与登记时间矛盾，正式负责人员根据记录作出决定，挽回家人的权益，但也失去原来的工作资格。',
+    protagonist:'不得不保护家人实际利益的普通工作人员',
+    coreConflict:'主角要证明真实签收责任，对手不惜让其停职来阻止核验',
+    uniquePoint:'原始签收日期改变了两方争夺救助资格的局面',
+    mainReversal:'核验让真正的登记责任方现身，原本被怀疑的主角因此反过来掌握证据',
+    noveltyProof:{familiarShell:'现实职业悬疑',uncommonCombination:'登记原件与家属利益结合成必要冲突',
+      avoidedPatterns:'拒绝突然出现万能证人',irreplaceableWhy:'没有原始签收流程就无法判断谁有权限决定结果',
+      secondOrderConsequence:'真实责任曝光令旧同事的职业关系发生不可逆变化',
+      readerQuestion:'究竟是谁更改原始记录并利用这份登记争夺权益'},
+    estimatedWords:20000,plannedChapters:5,
+    scopeBreakdown:[{arc:'主要事件闭环',chapters:5,reason:'五章完成递进、核验、反转与代价'}],
+  });
+  const generate=vi.fn(async(request:any)=>{
+    const step=request.metrics?.stepKey;
+    if(step==='idea_premise_pool_generation'){
+      const batch=Number(request.metrics?.attempt||0);
+      return {content:JSON.stringify({pool:entries.slice(batch===0?0:8,batch===0?8:15)})};
+    }
+    if(step==='idea_premise_selection')
+      return {content:JSON.stringify({selectedPremises:Array.from({length:8},(_,i)=>selectionFields('P'+(i+1)))})};
+    if(step==='idea_card_structure')
+      return {content:JSON.stringify({ideas:[strong(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure').length-1)]})};
+    throw Error('unexpected step '+step);
+  });
+  const c=Object.create(ChainController.prototype) as any;
+  c.realLLM={assertScenarioModelConfigured:vi.fn(),generate};
+  c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
+  c.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
+  c.completePremiseCausalPlans=vi.fn(async(input:any)=>input);
+  c.reconcilePremiseSelection=vi.fn(async(input:any)=>({
+    ...input,selectionAudit:{finalReview:{passed:true,issues:[]}},
+  }));
+  c.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[]}))};
+  const stop=new Error('test stop immediately after first card review');
+  c.reviewIdeaPresentation=vi.fn(async()=>{throw stop;});
+  await c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+    customPlatformNote:'',storyTone:['紧张'],writingStyle:['简洁'],
+    webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],
+    genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:''},5);
+  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
+  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toHaveLength(5);
+  expect(c.reviewIdeaPresentation).toHaveBeenCalledOnce();
+  expect(c.logger.log.mock.calls.some((args:any[])=>args.some((value:any)=>String(value).includes('锁定完整卡 5 个')))).toBe(true);
+});
+
 describe('idea discovery requested quantity and concurrency regressions', () => {
   it('asks for up to eight mature preselected premises for five delivery slots from the fixed fifteen', async () => {
     const generate = vi.fn(async (request: any) => {
