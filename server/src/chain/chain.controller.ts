@@ -22,7 +22,7 @@ import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } f
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
 import { createReviewLimiter } from './review-limiter';
-import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder } from './idea-discovery-contract';
+import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
@@ -5105,7 +5105,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '保留用户指定的类型、平台、分类、流派与其它条件。每个storyCategoryId必须与该项人物关系、核心冲突、主动选择和兑现机制实质相符；类型只在结尾点缀或职业背景出现的胚子应重新构思，不能留给后续模型通过改标签或补写救活。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
         ].join('\n');
         const minimumSelectedCount = minimumSelectedCountForPool(candidatePool.length);
-        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, requestedCount, premisePoolSize, false, minimumSelectedCount)
+        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, ideaPreselectionCapacity(requestedCount,candidatePool.length), premisePoolSize, false, minimumSelectedCount)
           .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；先按每项已有的分类检查主线：核心冲突、主动选择、反转和兑现必须落实该分类的关键关系或行动机制，不能以职业背景、末尾情绪或类型标签代替；不适配分类的候选不得选中，也不得偷偷改分类。再比较关键证据的取得与交付路径、真实决定者、兑现必要条件及既定行动引发的代价。原池缺少必要条件的，不得在展开字段里自造相反事实救活；优先选择原池中机制成熟且互不重合的题材。不得新增候选或改写原池。')
           .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
           .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
@@ -5499,6 +5499,10 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize
             + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
         }
+        // Up to three additional paths from the SAME fixed pool are selected
+        // and independently reviewed before card construction, avoiding serial
+        // original-pool reselection for every downstream failure.
+        const preselectionTarget=ideaPreselectionCapacity(requestedCount,candidatePool.length);
         const selectionStartedAt = Date.now();
         let selectionWallMs = 0;
         let parsedSelection: any = null;
@@ -5528,13 +5532,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
                 const { causalPlan: _pendingIndex, ...story } = item;
                 return story;
               }) : rawSelected,
-            }, requestedCount, premisePoolSize, discoveryCategories, minimumSelectedCountForPool(candidatePool.length));
+            }, preselectionTarget, premisePoolSize, discoveryCategories, minimumSelectedCountForPool(candidatePool.length));
             const indexed = { ...shaped, selected: shaped.selected.map(item => bindPremiseCausalPlan({
               ...item, causalPlan: rawSelected.find((row: any) => row?.premiseId === item.premiseId)?.causalPlan,
             })) };
             const repaired = await this.completePremiseCausalPlans(indexed, reselectionCompletionBudget);
             const selected = normalizePremiseSelectionPayload({pool:candidatePool,selectedPremises:repaired.selected},
-              requestedCount,premisePoolSize,discoveryCategories,minimumSelectedCountForPool(candidatePool.length));
+              preselectionTarget,premisePoolSize,discoveryCategories,minimumSelectedCountForPool(candidatePool.length));
             selectionWallMs = Date.now() - selectionStartedAt;
             if (!variedCategories) for (const premise of selected.selected) {
               if (premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
@@ -5559,7 +5563,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         let normalizedSelection: any;
         try {
           normalizedSelection = await this.reconcilePremiseSelection(
-            initialSelection, requestedCount, premisePoolSize,
+            initialSelection, preselectionTarget, premisePoolSize,
             variedCategories ? discoveryCategories : [dto.storyCategory],
             buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
               + ideaDiscoveryAuthorContext(dto)
@@ -5567,7 +5571,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
               + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre),
             dto.webNovelGenre,
-            { reviews: sourceCompletionBudget, reselection: reselectionCompletionBudget },
+            { reviews: sourceCompletionBudget, reselection: reselectionCompletionBudget }, requestedCount,
           );
         } catch (error) {
           const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
@@ -6353,7 +6357,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   }
 
   private async reconcilePremiseSelection(initial: ReturnType<typeof normalizePremiseSelectionPayload>, requestedCount: number,
-    poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}) {
+    poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}, deliveryCount=requestedCount) {
     const sourceReceipts:PremiseSourceReceipts=new Map();
     const sourceScope=JSON.stringify({standard,requiredGenres});
     const reviewBoth = async (
@@ -6422,6 +6426,21 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
     };
     const initialReview = await reviewBoth(initial);
+    // If five of up to eight already survived ALL independent source, causal,
+    // category, genre and overlap checks, new model-driven reselection only
+    // repeats work. Keep the vetted subset and its reindexed evidence.
+    if(deliveryCount<requestedCount&&!initialReview.passed){
+      const retained=retainReviewedPremises(initial,initialReview);
+      const retainedReview=retainPremiseReviewEvidence(initial,initialReview,retained.selection);
+      if(retainedReview.passed&&retained.selection.selected.length>=deliveryCount){
+        this.logger?.log('锁定前冗余候选已满足交付目标：'+retained.selection.selected.length
+          +'个通过独立审核；目标'+deliveryCount+'，跳过重选');
+        return {...retained.selection,selectionAudit:{initialReview,reselectionAttempted:false,
+          finalReview:retainedReview,excludedPremiseIds:retained.excludedPremiseIds,
+          selectionStopReason:'reviewed_surplus_retained',reasons:retained.reasons,
+          preselectionTarget:requestedCount,requestedDeliveryCount:deliveryCount,completeCardGatePending:true}};
+      }
+    }
     const minimumSelectableCount = minimumAcceptableIdeaCount(requestedCount);
     if (initialReview.passed) {
       const partial = initial.selected.length < requestedCount;
