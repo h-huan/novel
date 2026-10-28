@@ -7,7 +7,7 @@ import type { SystemWorkflowRule } from './system-workflow-rule.types';
 /** 连续修复的升级边界；这是流程预算，不是正文质量阈值。 */
 export const UPSTREAM_REPAIR_ROUTING_LIMITS = { sameFamilyAfterAttempts: 1, maxLocalAttemptsBeforeDiagnosis: 2, maxSourceRepairModelCalls: 3 } as const;
 export const UPSTREAM_REPAIR_ROUTING_POLICY = '同类缺陷经局部修复仍存在且未证明新的实质改善、问题集合增长或局部修复进入连续循环时，先回查章节合同、上下文装配、生成执行与审查协议，再决定处理阶段。不得只因有局部改善持续下游修复；已经由证据复核确认解决了不同问题时，不因共享宽泛问题标签提前停止，仍遵守连续局部尝试上限与共享调用预算；上游诊断必须引用本次输入与正文证据，不能把猜测当已确认源冲突。诊断未完成时保留草稿与原质量结论；修改已确认上游事实须按原作者确认与锁定规则处理，不能自动重写正文或回写Canon。质量候选回滚时须同时显示原稿保留与候选复检的实际阻断或未知维度，不只重复修复前的旧缺陷。失败候选的事实不得进入Canon，其必要条件诊断须作为只读反馈传给下一次源头修订，依赖未通过的候选仅在内存继续修订，锚点取本轮候选位置目录，原Canon作为提交原值校验基线；整体复检通过后才原子提交。原因相同的必要依赖修改一起保留，只有显式声明的互斥备选组才做成本择一；相同或无变化候选不重复复检。每个源头修订任务共用物理模型调用预算，扩容、网络恢复和协议纠错不能重置预算；耗尽或候选复检仍失败时如实停止，不能把停止当验收成功。';
-export const SYSTEM_WORKFLOW_RULESET_VERSION = 252;
+export const SYSTEM_WORKFLOW_RULESET_VERSION = 253;
 
 export const IDEA_AGGREGATE_RESERVE_POLICY = '锁定前终检发现多个问题位置时，按完整有效审核清单汇总处理，不把首项的局部review覆盖整批review而丢掉其余未解缺陷。备用身份从本批未尝试原池中选择；可用身份足够时一次覆盖全部当前缺额，同时比较合并后的最终候选，不逐卡串行换选再各自重复整轮审核。输出容量确实不足才按实际材料拆分，拆分共享原预算并保留已完成工作。改动后来源审核复用同批同内容已通过凭证，未通过或改变的项继续审核，同构审核覆盖合并选择。一个位置通过不清除其它位置的缺口，实际候选或调用预算不足时保持全部未解决问题并如实缺量，不扩大池、不增加预算、不绕过最终质量门。';
 
@@ -29,7 +29,7 @@ export const SOURCE_EVIDENCE_REFERENCE_POLICY = '来源引文编号支持单项�
 export const CHAPTER_PROSE_SCOPE_POLICY = '质量优先，宁短勿水。章纲目标与字数下限是规划参考，低于下限或目标差额均不触发补写，不以短稿阻止送审锁定；空正文、超上限及事实、因果、语言质量仍须验收。章纲列出的常规检查、准备、出行和操作步骤可以概括完成；只有改变局势、提供必要线索、构成因果条件，或体现有分量的人物选择和情绪变化的步骤才展开；展示职业熟练、物件具体或生活气息本身不是展开理由。删除后当前冲突、判断、关系理解、有效情绪或已安排的后续兑现均不受影响的工序与旁枝，删除或概括，不为它临时编造后续用途，不以清单逐项搬演当作忠实大纲。一个概述或选择已经体现人物熟悉、认真或紧张时，不再靠多个同功能工序反复证明；必要的不同风险线索、因果条件与有变化的情绪仍保留。检验动作的主体、已呈现位置与操作对象是否实际可达，身体动作、设备操作及先后是否可行，不能为职业细节牺牲常识；缺必要条件不得由审核凭空补出远程控制、他人代劳或特殊设备来判通过。自然可理解的正常移动仍可省略，不为每次操作补过程解释。允许章纲外服务本章冲突、人物关系或有效情绪体验的小场景，但不得改动已确认事实、关键因果与结果、人物知情和时间约束、章末出口或提前消费后章任务；不为字数另起无关支线。人物性格的戏剧性须从当前已确认的欲望、弱点、关系和说话策略与本章真实阻碍碰撞中出现：同一压力下不同角色可以选择回避、硬顶、试探或自嘲，但行动及对白须符合其已知处境；不能为制造笑点、热血或刀点随机换性格或新增事故。正文先核对已确认平台、分类、基调、文风、流派、视角及情节标签在当章到期的具体故事作用；正文阅读吸引力应从真实场景中的选择、阻力、关系变化和阶段回报产生，不用完整因果证明取代阅读体验。未选定的刺激、幽默、伤感、反转、打脸不是必填项；已选悬疑可用可信信息差，生活题材可用关系与利益变化，轻松基调不强加惨烈代价，克制文风不强加喊话和夸张标题。章节不承担的未来兑现不得提前消费；只因标签词出现而没有现场或用户期望依据时，不新增事故、权力、配角和动作，也不为改变气氛破坏确认题材与后续章纲。高光和钩子只突出已经安排的具体触发、主角/对手选择、可感知的局势或关系变化与到期代价；梗应由角色间已有反差或前后呼应承担功能，不能靠插网络热词；反转要有前置可回溯信息并改变胜负条件，不为爽点强迫每章反转或牺牲。审核区分必要事件缺失与合理概括、有效小场景，具体说明冗余或作用，不能把未逐项描摹工序当缺失，也不能因新增未列场景就判偏纲。';
 export const IDEA_DISCOVERY_REWORK_POLICY = '完整故事卡审查的JSON示例须覆盖全部必需字段，包括兑现桥接与四项阅读目标；文字合同与示例不能互相遗漏。初次完整卡审查、其协议补正、网络/截断恢复及实际变更卡的复核共享配置中的完整卡独立审核物理调用上限，不能每次补正重置。空补丁或合并后无变化候选保留原拒绝结论，不再次调用模型复核。仅标签字典组合失败时，在共享预算的局部修复内只修改服务器点名字段，并仅使用本次字典或作者已选候选；不得改故事或用户其它设置，仍执行全部原有验收。标签生成、校验和局部修复使用相同合同：手动项全部原样继承，随机项为字典内非空且不重复的一项或多项，不强加最多两项。创建前已选数量不足请求数时，不得仅因达到最低可交付数量就提前结束；只要固定原池仍有未选且未淘汰的候选、并且共享预算足够，就必须继续补足缺位，依次完成来源/分类/流派/兑现/同构审核、单卡结构化与独立质量审核。独立候选生成、各候选结构化及互不依赖的审核须在配置并发上限内并发执行；依赖前序结果的步骤仍按依赖顺序。只有原池无可用候选、共享预算不足或连续补足未产生新合格卡时，才可如实报告缺额；请求5张时5张全部通过质量门才算完整成功，3至4张仅在可用候选与预算内的补足和审核尝试结束后标注部分交付，少于3张失败。修复请求前先确认剩余独立审核调用足以复核全部修改卡，不为注定无法交付的下游继续花费。点击、完读、传播、深度、代入和爽点必须由具体文本证据支撑；题材同构、推进不足或仅靠身份反差/公开翻案/牺牲收尾的普通套路卡不得通过，不能靠自评分、空泛承诺或降低质量门补数。缺量保持未完成，预算用尽不能当验收通过。';
 
-export const PREMISE_REPLACEMENT_COMPARISON_POLICY = '定向重选与原池备用重选在同一次生成中按服务器列出的当前其余全部已选ID逐一比较（包含已修订项和待处理项，不只初审正常项），再展开替换项。每个replacements元素除replacesPremiseId、premise外，必须另带comparisons数组，恰好覆盖其余已选ID各一次；每项为{referencePremiseId,actionDifference,escalationDifference,reversalDifference,consequenceDifference}，四段分别具体说明双方主动选择、因果升级、反转如何改变胜负条件、连带代价的实质差别，每段至少12字。不能只列职业道具或把同一句差异抄四遍；共同主题及作者已选条件仍须继承。不增加候选池或调用预算，比较协议补正固定候选身份与完整premise；共享预算耗尽或协议仍不完整时隔离未完成位置，仅让剩余实际候选完成双独立复核，缺量如实报告。这份生成者比较不代替后续独立来源和同构审查。';
+export const PREMISE_REPLACEMENT_COMPARISON_POLICY = '定向重选在同一次生成中按服务器列出的当前其余全部已选ID逐一比较（包含已修订项和待处理项，不只初审正常项），再展开替换项。比较双方主动选择、因果升级、反转如何改变胜负条件及连带代价，不能只换职业道具或复述类型共性；共同主题及作者已选条件仍须继承。比较在生成者内部完成，不输出comparisons自评数组，不新增候选、调用或协议补正任务；实际差异仍由后续独立同构审核逐对举证。共享预算耗尽或协议不完整时隔离未完成位置，仅让剩余实际候选完成原有独立来源和同构复核，缺量如实报告。';
 /** Default language acceptance floor; project score policy remains explicitly configurable. */
 export const DEFAULT_LANGUAGE_SCORE_FLOOR = 70;
 export const OUTLINE_FACT_REPAIR_SYNC_POLICY = '非空patch若只回写原值、重复相同数组对象或仅调整对象键顺序，仍属没有实际变化；本地识别并在原补丁协议预算内反馈，不为未改候选再跑事实、行动语义审核，不清除原拒绝结论。实际变化的候选仍执行原结构与完整依赖质量门。付费语义复核前执行保守的本地同步预检：仅针对已有拒绝证据、且补丁已明确改动时间的同一完整事件原句，核对其它当前章字段是否仍留完全相同上下文的旧值；遗漏须在现有补丁协议纠正预算内列明原路径，不自动全局替换，不追加审核或修复循环。无法逐字定位、不同事件或缺少明确改动时交给原独立事实与行动门判断，本地无报错不等于语义通过。' + '修复同一事件的时间、数量、状态或结果时，须同步当前章纲中引用该事实的content、scenes、characterActions、conflicts、highlights、characterStates及伏笔相关字段。被点名的是事实，不只是一条字段路径；同一事实的必要关联字段属于本次局部修复范围，未关联的字段保持原值。声称完成的外部结果须有实际满足必要条件的行动支撑；意愿、提议或开始协商不自动等于对方接受、状态已改变或结果已生效，伏笔回收与结局也不能用另一处结果断言自证。可在既有事件、人物权限和规则内补齐被点名的行动依赖，不得改写前章、已确认世界规则、锁定结局或另起主线事件；无法有据修复时保持阻断。局部修复保留未被点名的原句与既有事实精度，不为补某个结果重写无关段落或凭空提升人物知情、证据效力和物件能力；必要关联事实仍须同步修复。事实与行动结果失败共享本章一次局部修复，修复后两类检查均须通过；保留结构、篇幅与职责。';
@@ -685,14 +685,33 @@ export const SYSTEM_WORKFLOW_PROMPT_RULE_SCOPE_BY_STEP: Readonly<Record<string,r
  * independent final validator remain authoritative and are not filtered here. */
 const IDEA_GENERATION_PROMPT_DETAILS: Readonly<Record<string, readonly string[]>> = {
   'ARCH-005': [STORY_PREREQUISITE_POLICY],
+  'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY, IDEA_SCOPE_ALLOCATION_POLICY],
   'QLT-003': [STORY_ACCEPTANCE_SCOPE_POLICY,
     SHORT_STORY_QUALITY_POLICY, READER_ENGAGEMENT_POLICY,
     '当前任务生成可核验的故事事件与必要条件，不输出正文评分、引文纠错、逐章验收或修复报告。计划可以保留未到揭示时点的答案，决定性结果的必要条件仍须成立；平台、分类、全部作者选择与原创表达仍按完整执行标准落实。'],
 };
 export const SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP: Readonly<Record<string,Readonly<Record<string,readonly string[]>>>> =
   Object.fromEntries([
-    ...['idea_premise_selection','idea_premise_pool_reselection','idea_card_structure','idea_card_local_repair']
+    ...['idea_premise_selection','idea_card_structure','idea_card_local_repair']
       .map(step=>[step,IDEA_GENERATION_PROMPT_DETAILS]),
+    ['idea_premise_pool_reselection', {...IDEA_GENERATION_PROMPT_DETAILS,
+      'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_GAP_REPAIR_POLICY,
+        PREMISE_REPLACEMENT_COMPARISON_POLICY, IDEA_PROTOCOL_BINDING_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY]}],
+    // The pool has no expanded source fields or causalPlan to audit yet.
+    ['idea_premise_pool_generation', {...IDEA_GENERATION_PROMPT_DETAILS,
+      'GEN-002': [IDEA_CARD_PROMISE_CLOSURE_POLICY]}],
+    // Each independent worker receives its own complete contract, rather than
+    // generation/reselection budgets and unrelated chapter-report machinery.
+    ['idea_premise_source_drift_review', {'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_PAYOFF_REVIEW_POLICY]}],
+    ['idea_premise_overlap_review', {'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY]}],
+    ['idea_presentation_review', {
+      // IDEA_PAYOFF_BRIDGE_POLICY already includes STORY_PREREQUISITE_POLICY.
+      'ARCH-005': [],
+      'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY],
+      'QLT-003': [STORY_ACCEPTANCE_SCOPE_POLICY, SHORT_STORY_QUALITY_POLICY,
+        READER_ENGAGEMENT_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY,
+        IDEA_REVIEW_EVIDENCE_POLICY, IDEA_PAYOFF_BRIDGE_POLICY],
+    }],
     ...['creation_chapter_detail','creation_chapter_fact_repair'].map(step=>[step,{
       'QLT-003':[STORY_PREREQUISITE_POLICY,SOURCE_QUALITY_POLICY,SHORT_STORY_QUALITY_POLICY,READER_ENGAGEMENT_POLICY,STORY_ENTITY_MODELING_POLICY],
     }]),
