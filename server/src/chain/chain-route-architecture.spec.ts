@@ -162,4 +162,22 @@ describe('chain HTTP architecture', () => {
     expect(patch).not.toContain("'wordCountReason'");
     expect(source).not.toContain('只输出与当前章纲同字段的完整 JSON 对象；修复后所有事件');
   });
+  it('keeps one JSON extraction path and decouples repair from optional pool replacement', () => {
+    const source = read('chain.controller.ts');
+    const repairStart = source.indexOf('repairEligible:id=>');
+    const repairEnd = source.indexOf('canRepair:ids=>', repairStart);
+    expect(repairStart).toBeGreaterThan(0);
+    const eligibility = source.slice(repairStart, repairEnd);
+    expect(eligibility).toContain('readerGoalDeficitRequiresNewPremise');
+    expect(eligibility).toContain('persistentStructureDeficitRequiresReplacement');
+    expect(eligibility).not.toContain('reselectionCompletionBudget');
+    expect(eligibility).not.toContain('sourceCompletionBudget');
+    expect(source).toContain('canReplace:()=>reselectionCompletionBudget.remaining>0');
+    const jsonRetry = source.slice(source.indexOf('private async llmCallWithRetry'));
+    expect(jsonRetry).toContain('this.safeExtractJson<T>(rawContent, null as unknown as T)');
+    expect(jsonRetry).not.toContain('const lineParsed: any[] = []');
+    expect(jsonRetry).not.toContain('rawContent.matchAll(');
+    expect(jsonRetry).toContain('if (parsedAnyResponse && lastValidationIssues.length > 0)');
+  });
+
 });

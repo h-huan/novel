@@ -6018,9 +6018,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         missing:missingAfterGate,hasCard:id=>latestCards.has(id),
         onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
         repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
-         repairEligible:id=>!(readerGoalDeficitRequiresNewPremise(latestAssessment(id))
-          ||persistentStructureDeficitRequiresReplacement(candidateAssessments,id))
-          || !(reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0),
+        // Same-premise repairs can be independently verified even when there
+        // is no budget or available candidate for optional pool replacement.
+        repairEligible:id=>!(readerGoalDeficitRequiresNewPremise(latestAssessment(id))
+          ||persistentStructureDeficitRequiresReplacement(candidateAssessments,id)),
         canRepair:ids=>presentationBudget.remaining>=1+minimumCardReviewCalls(ids.length),repair:repairMissing,
         canReplace:()=>reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2&&affordableIdeaReplacementCount(missingAfterGate().length,availableOriginalPool().length,presentationBudget.remaining,count=>minimumCardReviewCalls(count,count))>0,
         fingerprint:()=>JSON.stringify({accepted:accepted.map(card=>card.sourcePremiseId),cards:[...latestCards],attempted:[...attemptedPremiseIds],budgets:[presentationBudget.remaining,sourceCompletionBudget.remaining,reselectionCompletionBudget.remaining]}),
@@ -12630,79 +12631,9 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       return { data: null, rawContent, warnings, validationIssues: [...lastValidationIssues], usage, runId };
     }
 
-    // ===== 降级解析：两次重试均失败后，尝试从 rawContent 抢救数据 =====
-    // 降级1：逐行解析（LLM 可能每行输出一个 JSON 对象）
-    const lines = rawContent.split('\n').filter(l => l.trim());
-    const lineParsed: any[] = [];
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line.trim());
-        if (obj && typeof obj === 'object') lineParsed.push(obj);
-      } catch {}
-    }
-    if (lineParsed.length > 0) {
-      // 如果期望的是数组，直接返回；如果期望的是对象，逐行尝试，优先返回第一个通过校验的对象
-      if (lineParsed.length === 1) {
-        if (accepts(lineParsed[0])) {
-          warnings.push(`${stepName}: 通过逐行解析恢复 1 条数据`);
-          this.logger.warn(warnings[warnings.length - 1]);
-          return { data: lineParsed[0] as unknown as T, rawContent, warnings, usage, runId };
-        }
-      } else {
-        if (accepts(lineParsed)) {
-          warnings.push(`${stepName}: 通过逐行解析恢复 ${lineParsed.length} 条数据`);
-          this.logger.warn(warnings[warnings.length - 1]);
-          return { data: lineParsed as unknown as T, rawContent, warnings, usage, runId };
-        }
-        for (const obj of lineParsed) {
-          if (accepts(obj)) {
-            warnings.push(`${stepName}: 多行 JSON 中仅第 1 个通过校验的对象被采用`);
-            return { data: obj as unknown as T, rawContent, warnings, usage, runId };
-          }
-        }
-      }
-    }
-
-    // 降级2：修复尾部逗号后整体解析
-    try {
-      let fixed = rawContent
-        .replace(/,\s*([\]\}])/g, '$1')
-        .replace(/,\s*$/gm, '');
-      const parsed = JSON.parse(fixed);
-      if (accepts(parsed)) {
-        this.logger.warn(`${stepName}: 通过修复尾部逗号解析成功`);
-        warnings.push(`${stepName}: 通过修复尾部逗号解析成功`);
-        return { data: parsed as T, rawContent, warnings, usage, runId };
-      }
-    } catch {}
-
-    // 降级3：提取最长 {...} 或 [...] 块，修复后解析
-    try {
-      const allText = rawContent;
-      const objMatches = [...allText.matchAll(/\{[\s\S]*?\}/g)];
-      const arrMatches = [...allText.matchAll(/\[[\s\S]*?\]/g)];
-      const allMatches = [...objMatches, ...arrMatches].sort((a, b) => b[0].length - a[0].length);
-      for (const m of allMatches) {
-        try {
-          const parsed = JSON.parse(m[0]);
-          if (accepts(parsed)) {
-            this.logger.warn(`${stepName}: 通过提取JSON块解析成功，长度: ${m[0].length}`);
-            warnings.push(`${stepName}: 通过提取JSON块解析成功`);
-            return { data: parsed as T, rawContent, warnings, usage, runId };
-          }
-        } catch {}
-        try {
-          let fixed = m[0].replace(/,\s*([\]\}])/g, '$1').replace(/,\s*$/gm, '');
-          const parsed = JSON.parse(fixed);
-          if (accepts(parsed)) {
-            this.logger.warn(`${stepName}: 通过提取JSON块+修复逗号解析成功，长度: ${m[0].length}`);
-            warnings.push(`${stepName}: 通过提取JSON块+修复逗号解析成功`);
-            return { data: parsed as T, rawContent, warnings, usage, runId };
-          }
-        } catch {}
-      }
-    } catch {}
-
+    // safeExtractJson already performs syntax repair and balanced extraction.
+    // A second line/regex salvage can promote nested review fragments and must
+    // not replace the original full-document validation verdict.
     if (parsedAnyResponse) {
       // 解析抢救可能只看到内层数组/补丁，不能覆盖真正阻断本次任务的首次校验原因。
       const detail = accumulatedValidationIssues.join('；') || lastValidationIssues.join('；') || '字段结构不符合要求';
