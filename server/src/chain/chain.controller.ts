@@ -5966,7 +5966,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // rejected slots merely because three cards have passed while the request is for five.
       const missingAfterGate=()=>selectedPremises
         .map(item=>String(item.premiseId))
-        .filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id));
+        .filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id))
+        // Surplus reviewed cards are not a delivery shortfall. Spend existing
+        // repair credits only when fewer than the user-requested count passed.
+        .slice(0,Math.max(0,requestedCount-accepted.length));
       const fulfillmentActions:any[]=[];
       const repairMissing=async(initialMissingPremiseIds:string[])=>{
         const before=new Map(initialMissingPremiseIds.map(id=>[id,latestAssessment(id)]));
@@ -6064,7 +6067,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const review:PremiseSelectionReview={passed:false,issues:reviewIssues};
           const original={...premiseDiscovery,selected:[...attemptedPremiseIds].map(premiseId=>({premiseId}))};
           const reserve=await this.reservePremiseSelection(original,{...premiseDiscovery,selected:selectedPremises},
-            review,requestedCount,premisePoolSize,discoveryCategories,
+            review,selectedPremises.length,premisePoolSize,discoveryCategories,
             buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)+ideaDiscoveryAuthorContext(dto)+'\n【与完整卡一致的分类标准】'+JSON.stringify(categoryStandards)+premiseCategoryIdentityDirective(discoveryCategories)+'\n流派定义：'+dimensionGuidesText('genre',dto.webNovelGenre),
             reselectionCompletionBudget,accepted.map(card=>String(card.sourcePremiseId)),dto.webNovelGenre,sourceCompletionBudget,
              rejectedCardPathsForReselection(candidateAssessments,selectedPremises.map(item=>String(item.premiseId))));
@@ -6156,7 +6159,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const finalAcceptedPremiseIds = new Set(selectedAccepted.map((idea: any) => String(idea?.sourcePremiseId || '').trim()).filter(Boolean));
       const finalMissingPremiseIds = selectedPremises
         .map((item: any) => String(item?.premiseId || '').trim())
-        .filter((id: string) => id && !finalAcceptedPremiseIds.has(id));
+        .filter((id: string) => id && !finalAcceptedPremiseIds.has(id))
+        .slice(0,Math.max(0,requestedCount-selectedAccepted.length));
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
       const finalRejectedReasons = latestIdeaFailureReasons(candidateAssessments,finalMissingPremiseIds);
       const qualifiedCount = selectedAccepted.length;
@@ -6172,6 +6176,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
+        preselectionSurplus: Math.max(0,selectedPremises.length-requestedCount),
         preselectionShortfall,
         selectionAudit: premiseDiscovery.selectionAudit,
         generated: structuredCards.length,
