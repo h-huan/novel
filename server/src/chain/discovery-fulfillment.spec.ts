@@ -1,5 +1,12 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots} from './discovery-fulfillment';
+it('only fulfills the user-requested five despite eight independently vetted slots',()=>{
+ const slots=['P1','P2','P3','P4','P5','P6','P7','P8'];
+ expect(missingRequestedIdeaSlots(slots,new Set(['P1','P2','P3','P4','P5']),5)).toEqual([]);
+ expect(missingRequestedIdeaSlots(slots,new Set(['P1','P2','P3']),5)).toEqual(['P4','P5']);
+ expect(missingRequestedIdeaSlots(slots,new Set(),5)).toEqual(slots.slice(0,5));
+ expect(missingRequestedIdeaSlots(slots,new Set(['P1','P2','P3','P4','P5','P6']),5)).toEqual([]);
+});
 it('uses only latest evidenced rejected-card paths, not superseded failures or current slots',()=>{
  const rows=[
   {sourcePremiseId:'P2',title:'未修前',passed:false,issues:['兑现条件缺失']},

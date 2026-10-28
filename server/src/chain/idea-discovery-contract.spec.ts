@@ -102,6 +102,8 @@ describe('requested genre is an identity constraint, not a duplicate verdict',()
     expect(prompt).toContain('本身不算重复');
     expect(prompt).toContain('不可互换的关键操作、意外升级、胜负转向和实际代价');
     expect(prompt).toContain('不要求硬塞热血、搞笑、热梗');
+    expect(prompt).toContain('收存证据、准备材料不能冒充导致对手行动');
+    expect(prompt).toContain('恋爱类不能只有查案、补课、事后作证');
     expect(prompt).toContain('入选骨架应有至少一个真实事件构成可简短转述的记忆点');
   });
 });

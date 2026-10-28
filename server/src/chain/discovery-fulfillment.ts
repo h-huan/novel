@@ -1,4 +1,11 @@
 import {presentationGateIssues} from './idea-presentation-review';
+
+/** A reviewed surplus is not a user delivery obligation. Both the live
+ * fulfillment scheduler and final failure report consume this same count. */
+export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:ReadonlySet<string>,requestedCount:number):string[] {
+  return slotIds.filter(id=>!!id&&!acceptedIds.has(id)).slice(0,Math.max(0,requestedCount-acceptedIds.size));
+}
+
 /** The latest factual failures of no-longer-active cards inform a *new* pool
  * choice, without an extra call or granting/disallowing any identity. */
 export function rejectedCardPathsForReselection(

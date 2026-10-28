@@ -1,5 +1,5 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots} from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import { orderedIdeaRepairPatches } from './idea-discovery-contract';
@@ -5964,12 +5964,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const latestAssessment=(id:string)=>[...candidateAssessments].reverse().find(item=>item.sourcePremiseId===id);
       // Minimum deliverability is only a final fallback. Do not stop repairing/replacing
       // rejected slots merely because three cards have passed while the request is for five.
-      const missingAfterGate=()=>selectedPremises
-        .map(item=>String(item.premiseId))
-        .filter(id=>!accepted.some(card=>String(card.sourcePremiseId)===id))
-        // Surplus reviewed cards are not a delivery shortfall. Spend existing
-        // repair credits only when fewer than the user-requested count passed.
-        .slice(0,Math.max(0,requestedCount-accepted.length));
+      const missingAfterGate=()=>missingRequestedIdeaSlots(
+        selectedPremises.map(item=>String(item.premiseId)),
+        new Set(accepted.map(card=>String(card.sourcePremiseId))),requestedCount);
       const fulfillmentActions:any[]=[];
       const repairMissing=async(initialMissingPremiseIds:string[])=>{
         const before=new Map(initialMissingPremiseIds.map(id=>[id,latestAssessment(id)]));
@@ -6157,10 +6154,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           || Number(Boolean(right?.ideaAppealGate?.hookHasRelationship)) - Number(Boolean(left?.ideaAppealGate?.hookHasRelationship)))
         .slice(0, requestedCount);
       const finalAcceptedPremiseIds = new Set(selectedAccepted.map((idea: any) => String(idea?.sourcePremiseId || '').trim()).filter(Boolean));
-      const finalMissingPremiseIds = selectedPremises
-        .map((item: any) => String(item?.premiseId || '').trim())
-        .filter((id: string) => id && !finalAcceptedPremiseIds.has(id))
-        .slice(0,Math.max(0,requestedCount-selectedAccepted.length));
+      const finalMissingPremiseIds = missingRequestedIdeaSlots(
+        selectedPremises.map((item:any)=>String(item?.premiseId||'').trim()),
+        finalAcceptedPremiseIds,requestedCount);
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
       const finalRejectedReasons = latestIdeaFailureReasons(candidateAssessments,finalMissingPremiseIds);
       const qualifiedCount = selectedAccepted.length;
