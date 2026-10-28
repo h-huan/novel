@@ -24,15 +24,15 @@ export function rejectedCardPathsForReselection(
  return [...latest.values()].filter(row=>!active.has(row.premiseId)).slice(-Math.max(0,Math.min(8,limit)));
 }
 
-/** Only independently verified reduction in blocked dimensions justifies
- * another patch to the same card. Wording changes are not progress. */
+/** Enumerate real blocking dimensions for intrinsic audience-fit routing.
+ * This does not authorize another same-card repair or replace any Gate. */
 export function discoveryFailureDimensions(assessment:any):string[]{
  const review=assessment?.presentationReview,dimensions:string[]=[];
  for(const key of ['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'])
   if(review?.[key]===false)dimensions.push(key);
  for(const [key,value] of Object.entries(review?.readerGoals||{}))if((value as any)?.status!=='supported')dimensions.push('readerGoals.'+key);
- // Keep deterministic failures too; do not call a card improved by hiding a
- // configuration/shape failure behind an otherwise positive semantic review.
+ // Include deterministic failures so a separate metadata defect does not
+ // masquerade as an intrinsic sharing-only limitation.
  const semanticIssues=new Set(presentationGateIssues(review));
  for(const issue of assessment?.issues||[])if(typeof issue==='string'&&!semanticIssues.has(issue))dimensions.push(issue);
  return [...new Set(dimensions)].sort();
