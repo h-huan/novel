@@ -28,7 +28,10 @@ describe('bounded premise source review batches',()=>{
   const original=selection(),before=JSON.stringify(original),batches=premiseSourceBatches(original);
   expect(batches.map(batch=>batch.selected.length)).toEqual([3,2]);
   const raw=batches.map(report);raw[1].sourceChecks.find(row=>row.ref==='S1.payoff')!.status='drift';
-  const merged=mergePremiseSourceBatches(original,batches,raw.map((value,index)=>materializePremiseSourceReview(value,batches[index])));
+  const merged=mergePremiseSourceBatches(original,batches,raw.map((value,index)=>({
+    ...materializePremiseSourceReview(value,batches[index]),
+    payoffChecks:value.payoffChecks,
+  })));
   expect(merged.passed).toBe(false);expect(merged.sourceChecks).toHaveLength(50);
   expect(merged.sourceChecks!.find(row=>row.ref==='S4.payoff')?.status).toBe('drift');
  expect(merged.payoffChecks?.find(row=>row.ref==='S4.payoff')?.reversalCheck?.actionEvidenceRef).toBe('S4.activeChoice');
