@@ -267,7 +267,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
     id: 'CTX-007', name: '伏笔生命周期与知识边界', category: 'context', level: 'P1', status: 'active', blocking: true,
     scenarios: ['foreshadowing', 'outline', 'writing', 'review'], consumers: ['prompt', 'semantic_gate', 'persistence'], dependencies: ['CTX-003'],
     summary: '伏笔必须具有稳定生命周期状态、埋设/推进/回收位置与未结负债；推进不得越过角色和读者知识边界。',
-    details: ['短篇少而集中；长篇可跨卷但必须持续可追踪。完结/卷末能够枚举仍未回收的有效负债，关键反转有前置证据。'],
+    details: ['短篇少而集中、长篇允许短中长线、卷线与全书线并行交织：同章可涉及多条伏笔，同一伏笔可跨章多次提醒、误判、阶段揭示及局部兑现；一条线的回收不得关闭其它线。按实际因果与人物知识边界选择埋设、推进与回收，不以固定章数、每章条数或scope划定串行工序。章纲、正文与回收共享原伏笔身份及可核验来源，新增和旧线索推进分开建档；已确认核心兑现后才回收，卷末或完结能枚举未结负债，关键反转有前置证据。'],
     implementationRefs: ['server/src/chain/foreshadowing-contract.ts', 'server/src/chain/chain.controller.ts'],
   }),
   rule({
