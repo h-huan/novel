@@ -5958,6 +5958,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       try {results=await independentReviewBatches(selectedPremises,presentationBudget,IDEA_CARD_GENERATION_CONCURRENCY,
         async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{try{return {status:'fulfilled',value:await generateStructuredCard(premise,index,budget)};}catch(reason){return {status:'rejected',reason};}});}
       finally {presentationBudget.remaining+=reservedInitialReviewCalls;}
+      // A scheduling duplicate must never be hidden by the later card/slot
+      // counter. In particular, six paid card tasks for five vetted premises
+      // are a failed dispatch invariant, not "five cards generated".
+      const dispatchedIds=new Set(fullCardDispatchPremiseIds);
+      if (fullCardDispatchPremiseIds.length!==selectedPremises.length
+        ||dispatchedIds.size!==selectedPremises.length
+        ||selectedPremises.some((row:any)=>!dispatchedIds.has(String(row.premiseId)))) {
+        throw new Error('完整卡模型派发与已审核选优题材不一致：入选='+selectedPremises.length
+          +'，派发='+fullCardDispatchPremiseIds.length
+          +'，具体ID='+fullCardDispatchPremiseIds.join('、')+'；已停止，不将异常调用伪装成正常结果');
+      }
       for (let index = 0; index < results.length; index++) {
         const selectedPremise = selectedPremises[index] as Record<string, unknown>;
         try {
