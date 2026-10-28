@@ -6500,7 +6500,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           preselectionTarget:requestedCount,requestedDeliveryCount:deliveryCount,completeCardGatePending:true}};
       }
     }
-    const minimumSelectableCount = minimumAcceptableIdeaCount(requestedCount);
+    const minimumSelectableCount = minimumAcceptableIdeaCount(deliveryCount);
     if (initialReview.passed) {
       const partial = initial.selected.length < requestedCount;
       return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
@@ -6520,6 +6520,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     };
     rememberRejected(initialReview);
     const repairPlan = premiseReselectionPlan(initial, initialReview);
+    // Seven/eight screened positions are NOT all delivery obligations. After
+    // isolating actual defects, replace only the number still needed to reach
+    // the user's five slots, not every rejected surplus candidate. Leave the
+    // other failed candidates excluded; never treat them as accepted or passed.
+    const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
+    const neededReplacementSlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
+    const recoverySlots=deliveryCount<requestedCount
+      ?repairPlan.repairSlots.slice(0,neededReplacementSlots):repairPlan.repairSlots;
+    const surplusRejectedIds=deliveryCount<requestedCount
+      ?repairPlan.repairSlots.slice(neededReplacementSlots).map(item=>String(item.replacesPremiseId)):[];
     // If enough independently reviewed premises remain, stop here instead of spending
     // more calls trying to fill every position. Full-card gates still run afterwards.
     let partialSelection = initial;
@@ -6536,7 +6546,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialSelection = retained.selection;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
-        const missingSlots = Math.max(0, requestedCount - partialSelection.selected.length);
+        const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
         const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
@@ -6555,7 +6565,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         break;
       }
     }
-    if (repairPlan.availableCandidates.length < repairPlan.repairSlots.length) {
+    if (repairPlan.availableCandidates.length < recoverySlots.length) {
       const retained = retainReviewedPremises(initial, initialReview);
       if (!retained.selection.selected.length) throw new Error('原池没有足够可用的不同题材用于问题位置重选，且没有可保留的已复核题材；不扩大池、不重复下游修复。');
       this.logger?.warn(`锁定前原池不足：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，问题项隔离，不凑数。`);
@@ -6651,23 +6661,29 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // Preserve a recovery opportunity when the model has returned actionable
     // protocol errors; do not reset those errors and purchase identical retries.
     while(reselectionBudget.remaining>0){
-      const pendingSlots=repairPlan.repairSlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)));
+      const pendingSlots=recoverySlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)));
       if(!pendingSlots.length)break;
       const before=reselectionBudget.remaining;
       if(await reselectScope(pendingSlots))break;
       if(repeatedProtocolFailure||reselectionBudget.remaining>=before)break;
     }
-    const unresolvedIds = repairPlan.repairSlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)))
+    const unresolvedIds = recoverySlots.filter(slot=>!completedSlots.has(String(slot.replacesPremiseId)))
       .map(slot=>String(slot.replacesPremiseId));
-    if (unresolvedIds.length) {
-      selected = { ...selected, selected: selected.selected.filter(item=>!unresolvedIds.includes(String(item.premiseId))) };
+    const rejectedExtraIds=surplusRejectedIds.filter(id=>!unresolvedIds.includes(id));
+    const isolatedIds=[...unresolvedIds,...rejectedExtraIds];
+    if (isolatedIds.length) {
+      selected = { ...selected, selected: selected.selected.filter(item=>!isolatedIds.includes(String(item.premiseId))) };
       if (!selected.selected.length) throw new Error(reselectionStopReason || '没有完成重选且可独立复核的题材');
-      this.logger?.warn(`${reselectionStopReason}；隔离 ${unresolvedIds.join('、')}，仅复核剩余 ${selected.selected.length}/${requestedCount} 个题材。`);
+      this.logger?.warn('锁定前隔离 '+isolatedIds.join('、')+'（未完成必需位置 '
+        +unresolvedIds.length+'，无需继续修复的冗余候选 '+rejectedExtraIds.length
+        +'），仅复核剩余 '+selected.selected.length+'/'+deliveryCount+' 个交付题材。');
     }
     const budgetPartialAudit = unresolvedIds.length ? { partial: true, unresolvedPremiseIds: unresolvedIds,
       reselectionStopReason, sourceRepairCallsRemaining: reselectionBudget.remaining,
-      excludedPremiseIds: unresolvedIds, reasons: initialReview.issues.filter(issue=>unresolvedIds.includes(issue.premiseId)),
-      completeCardGatePending: true } : {};
+      excludedPremiseIds: isolatedIds, discardedSurplusPremiseIds: rejectedExtraIds,
+      reasons: initialReview.issues.filter(issue=>unresolvedIds.includes(issue.premiseId)),
+      completeCardGatePending: true }
+      : rejectedExtraIds.length ? {discardedSurplusPremiseIds:rejectedExtraIds} : {};
     // Only the changed facts and pairs need a new independent verdict.
     const changeScope=selectionChangeScope(initial,selected);
     const postReselectionReview=changeScope.focusIds.length
