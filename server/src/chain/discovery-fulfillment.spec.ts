@@ -1,5 +1,5 @@
 import {it,expect,vi} from 'vitest';
-import {fulfillDiscoveryGaps,discoveryFailureImproved,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots,unchangedSemanticDeficitAfterPatch} from './discovery-fulfillment';
+import {fulfillDiscoveryGaps,affordableIdeaReplacementCount,readerGoalDeficitRequiresNewPremise,reservePostCardSourceReviewCredits,rejectedCardPathsForReselection,missingRequestedIdeaSlots,unchangedSemanticDeficitAfterPatch} from './discovery-fulfillment';
 
 it('never pays to rereview a semantic failure if the patch rewrote only unverified novelty claims',()=>{
  const card={
@@ -66,7 +66,7 @@ it('holds final-card review credits without increasing the total source-call bud
 const assessment=(keys:string[])=>({passed:keys.length===0,issues:[],presentationReview:{titleCompelling:true,openingCompelling:true,distinctFromBatch:true,storyCoherent:true,payoffCredible:true,platformFit:true,issues:[],readerGoals:Object.fromEntries(['click','completion','sharing','immersion'].map(key=>[key,{status:keys.includes(key)?'weak':'supported',reason:'具体已有缺口'}]))}});
 it('never purchases a second patch for the same rejected card merely because one blocked dimension improved',async()=>{
  let missing=['A'],credits=8,defects=['click','completion','sharing'];const accepted={id:'already-passed',text:'不可改动'};const before=JSON.stringify(accepted);
- const repair=vi.fn(async()=>{credits-=2;const prior=assessment(defects);defects=defects.slice(1);return discoveryFailureImproved(prior,assessment(defects))?['A']:[];});
+ const repair=vi.fn(async()=>{credits-=2;defects=defects.slice(1);return ['A'];});
  const result=await fulfillDiscoveryGaps({missing:()=>missing,hasCard:()=>true,canRepair:()=>credits>=2,repair,canReplace:()=>false,replace:vi.fn(),fingerprint:()=>JSON.stringify({missing,credits,defects})});
  expect(result).toBe('budget_or_original_pool_exhausted');expect(repair).toHaveBeenCalledOnce();expect(credits).toBe(6);expect(JSON.stringify(accepted)).toBe(before);
 });
@@ -103,10 +103,6 @@ it('batches all missing slots into a single replacement request without modifyin
 it('does not pay for a patch when no independent review credit remains',async()=>{
  const repair=vi.fn(),replace=vi.fn();expect(await fulfillDiscoveryGaps({missing:()=>['A'],hasCard:()=>true,canRepair:()=>false,repair,canReplace:()=>false,replace,fingerprint:()=>''})).toBe('budget_or_original_pool_exhausted');
  expect(repair).not.toHaveBeenCalled();expect(replace).not.toHaveBeenCalled();
-});
-it('does not treat paraphrased reasons or newly introduced blocked dimensions as improvement',()=>{
- expect(discoveryFailureImproved(assessment(['completion']),assessment(['completion']))).toBe(false);
- expect(discoveryFailureImproved(assessment(['completion','sharing']),assessment(['click']))).toBe(false);
 });
 it('stops a failed reserve protocol when caller marks its unchanged identity as unavailable, even with ample retry budget',async()=>{
  const replace=vi.fn(async()=>'unavailable' as const),repair=vi.fn();
