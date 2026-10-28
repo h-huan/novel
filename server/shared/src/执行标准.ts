@@ -410,7 +410,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
   rule({
     id: 'QLT-006', name: '灵感吸引力不得按固定 N-of-M 关键词阻断', category: 'quality', level: 'P2', status: 'active', blocking: true,
     scenarios: ['idea_generate'], consumers: ['prompt', 'semantic_gate', 'test'], dependencies: ['GEN-002', 'QLT-003'],
-    summary: '短篇钩子必须保留主角具体行动或明确选择，并由具体故事锚点、因果冲突/关系/信息差和可兑现方向形成阅读承诺。异常、压力、关系等信号可以按故事自然组合；不得用“4 类命中至少 3 类”之类固定计数作为 Hard Gate。关键词只能作为风险证据；若服务器绑定的结构化题材证据或完整语义审查明确证明行动/选择、因果升级、反转效果、持续追问或兑现方向不足，则语义 Gate 可以阻断。',
+    summary: '短篇钩子必须保留主角具体行动或明确选择，并由具体故事锚点、因果冲突/关系/信息差和可兑现方向形成阅读承诺。异常、压力、关系等信号可以按故事自然组合；不得用“4 类命中至少 3 类”之类固定计数作为 Hard Gate。词面推进标志和差异代理分也只能作为风险证据，不能组合成固定计数 Hard Gate；完整卡须由独立语义审查核对实际行动变化、阶段升级与可复述的独特事件，已证不足仍须阻断。若服务器绑定的结构化题材证据或完整语义审查明确证明行动/选择、因果升级、反转效果、持续追问或兑现方向不足，则语义 Gate 可以阻断。',
     implementationRefs: ['server/src/chain/idea-discovery-contract.ts', 'server/src/chain/idea-appeal-gate.service.ts'],
   }),
   rule({

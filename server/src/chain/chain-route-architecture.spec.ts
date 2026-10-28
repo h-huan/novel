@@ -166,7 +166,6 @@ describe('chain HTTP architecture', () => {
     expect(repairStart).toBeGreaterThan(0);
     const eligibility = source.slice(repairStart, repairEnd);
     expect(eligibility).toContain('readerGoalDeficitRequiresNewPremise');
-    expect(eligibility).toContain('persistentStructureDeficitRequiresReplacement');
     expect(eligibility).not.toContain('reselectionCompletionBudget');
     expect(eligibility).not.toContain('sourceCompletionBudget');
     expect(source).toContain('canReplace:()=>reselectionCompletionBudget.remaining>0');

@@ -163,8 +163,8 @@ describe('selected-premise semantic evidence survives wording variation', () => 
 });
 
 
-describe('minimum reader-value quality floor for bound story cards', () => {
-  it('blocks a low-distinctiveness premise with no real progression instead of delivering a generic identity-reveal/ledger-reversal card', () => {
+describe('lexical risks in bound story cards', () => {
+  it('flags low lexical distinctiveness and progression for story review', () => {
     const premise = {
       premiseId: 'P-low-appeal-regression',
       workingTitle: '一把算盘翻旧账',
@@ -202,7 +202,7 @@ describe('minimum reader-value quality floor for bound story cards', () => {
     const assessment = gate.assess(bound, 'short_story');
     expect(assessment.signals.descriptionProgressions).toBe(0);
     expect(assessment.signals.distinctivenessScore).toBeLessThan(6);
-    expect(assessment.issues).toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
-    expect(assessment.passed).toBe(false);
+    expect(assessment.issues).not.toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+    expect(assessment.warnings.join('；')).toContain('独立语义审查');
   });
 });

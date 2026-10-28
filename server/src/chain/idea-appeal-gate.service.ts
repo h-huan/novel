@@ -293,12 +293,10 @@ export class IdeaAppealGateService {
       ].filter((value) => value.length >= 8).length;
       if (structuredDistinctive === 0) issues.push('结构化题材证据缺少不可替代载体、差异化或二阶后果，题材身份仍不足');
     }
-    const minimumProgressions = storyType === 'short_story' ? 2 : 3;
-    // Preserve the original deterministic Gate independently of semantic review.
-    if (boundPremiseEvidence && distinctivenessScore < minDistinctiveness && descriptionProgressions < minimumProgressions) {
-      issues.push('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
-    } else if (distinctivenessScore < minDistinctiveness) {
-      warnings.push(`词面差异度代理分偏低（${distinctivenessScore}/10）；单项分数只用于排序/复核，与阶段推进同时偏弱时才阻断`);
+    // These two numbers are lexical signals. The independent presentation
+    // review checks actual differentiation and progression against the story.
+    if (distinctivenessScore < minDistinctiveness) {
+      warnings.push(`词面差异度代理分偏低（${distinctivenessScore}/10）；须由独立语义审查核对实际差异与阶段推进`);
     }
 
     if (!struggleAgency) warnings.push('抗争/争取空间偏弱：后续章纲应让主角通过选择和行动获得热血感，而不是被动承受');

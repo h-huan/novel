@@ -295,7 +295,7 @@ describe('IdeaAppealGateService', () => {
   });
 });
 
-it('keeps the original two-dimensional deterministic Gate rather than bypassing its blocking issue',()=>{
+it('sends combined lexical risks to the independent story review',()=>{
  const premise={premiseId:'P-no-keywords',workingTitle:'楼道尽头的签字',storyCore:'女儿必须查明父亲被错误登记并当场作出选择，交出原始记录会失去自己的职位。',
    protagonistSituation:'父亲在医院的身份登记被改动，女儿承担家庭开销。',
    openingEvent:'护士通知父亲已经自愿离院，女儿看到父亲仍在病房。',
@@ -324,6 +324,6 @@ it('keeps the original two-dimensional deterministic Gate rather than bypassing 
     readerQuestion:'女儿怎样让两户都得到正确的登记？'}
  }]);
  const bare=gate.assess(card,'short_story');
- expect(bare.issues).toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
- expect(bare.passed).toBe(false);
+ expect(bare.issues).not.toContain('结构化题材的差异化与阶段推进同时不足，不能作为合格卡交付');
+ expect(bare.warnings.join('；')).toContain('独立语义审查');
 });
