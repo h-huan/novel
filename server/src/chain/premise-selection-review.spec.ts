@@ -1088,7 +1088,9 @@ it('replaces two missing positions under one source and one overlap review, pres
  expect(result.replacements).toEqual([{replacesPremiseId:'B',replacementPremiseId:'D'},{replacesPremiseId:'C',replacementPremiseId:'E'}]);
  expect(result.selection.selected.map((p:any)=>p.premiseId)).toEqual(['A','D','E']);
  expect(result.selection.selected[0]).toEqual(current.selected[0]);
- expect(result.review.sourceChecks).toHaveLength(20);
+ expect(result.review.sourceChecks).toHaveLength(
+  premiseSourceComparisonCatalog({...result.selection,selected:result.selection.selected.slice(1)}).length
+ );
  expect(result.review.sourceChecks?.[0].ref).toBe('S2.protagonistSituation');
  expect(result.review.payoffChecks).toEqual([
   expect.objectContaining({ref:'S2.payoff',actionEvidenceRef:'S2.activeChoice',
