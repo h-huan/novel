@@ -1,3 +1,4 @@
+import { ModuleRef } from '@nestjs/core';
 import { qualityIssue } from '../modules/writing-quality/quality-issue';
 import { readConstitution, constitutionSettings } from '../modules/project/creative-constitution';
 import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
@@ -36,6 +37,7 @@ export class StateItemService {
   constructor(
     private readonly databaseService: DatabaseService,
     @Optional() private readonly continuityService?: ContinuityService,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   list(projectId: string, query: { status?: string; targetType?: string; limit?: string | number; sourceChapterId?: string } = {}) {
@@ -240,13 +242,16 @@ export class StateItemService {
       const payload = existingPayload;
       const writeback = payload.intent === 'canonical_change'
         ? this.applyCanonicalChange(projectId, payload.canonicalChange)
-        : this.confirmReviewOnly(projectId, item, payload, confirmedBy);
+        : payload.intent === 'entity_create'
+          ? this.applyReviewedEntityCreation(projectId, item, payload.entityProposal)
+          : this.confirmReviewOnly(projectId, item, payload, confirmedBy);
       const confirmationResult = { ...writeback, confirmedAt: new Date().toISOString() };
+      const canonicalWritten = writeback.mode === 'canonical_change' || writeback.mode === 'entity_create';
       db.prepare(`
         UPDATE state_items
         SET status = 'confirmed', authority = ?, payload = ?, confirmed_by = ?, confirmed_at = datetime('now'), updated_at = datetime('now')
         WHERE project_id = ? AND id = ?
-      `).run(writeback.mode === 'canonical_change' ? 'hard_fact' : 'excluded', JSON.stringify({ ...payload, confirmationResult }), confirmedBy, projectId, id);
+      `).run(canonicalWritten ? 'hard_fact' : 'excluded', JSON.stringify({ ...payload, confirmationResult }), confirmedBy, projectId, id);
       if (writeback.mode === 'canonical_change') {
         db.prepare(`UPDATE character_evolution_events SET status = 'confirmed', confirmed_at = datetime('now'), updated_at = datetime('now') WHERE project_id = ? AND source_state_item_id = ?`)
           .run(projectId, id);
@@ -965,6 +970,63 @@ export class StateItemService {
       .get(projectId, target.id) as any;
     if (verified?.review_status !== 'confirmed') throw new BadRequestException(`Failed to confirm review target: ${target.id}`);
     return { mode: 'review_only', applied: true, verified: true, canonicalType: item.targetType, canonicalId: target.id };
+  }
+
+  /**
+   * One-click author confirmation for a rolled-outline entity. The chapter
+   * outline is the immutable evidence anchor, and the existing entity service
+   * remains the SINGLE canonical writer. Missing providers or old source
+   * evidence are hard failures, never review-only success.
+   */
+  private applyReviewedEntityCreation(projectId:string,item:any,proposal:any) {
+    const type=String(proposal?.type||'');
+    const name=String(proposal?.name||'').trim();
+    const quote=String(proposal?.evidenceQuote||'').trim();
+    const chapterNumber=Number(proposal?.chapterNumber);
+    const targetTypes=['character','organization','map_point','foreshadowing'];
+    if(!targetTypes.includes(type)||name.length<2||quote.length<8
+       ||!quote.includes(name)||!Number.isInteger(chapterNumber)||chapterNumber<1
+       ||item.sourceType!=='rollout_outline'||item.targetType!==type
+       ||String(item.targetLabel||'')!==name||!item.sourceId) {
+      throw new BadRequestException('新增实体确稿提案没有有效来源、目标类型或章节证据');
+    }
+    const db=this.databaseService.getDb();
+    const source=db.prepare(`SELECT id,content,"order" FROM outlines
+       WHERE project_id=? AND id=? AND level='chapter'`).get(projectId,item.sourceId) as any;
+    if(!source||Number(source.order)+1!==chapterNumber
+       ||!String(source.content||'').includes(quote)) {
+      throw new BadRequestException('增量实体的原章纲证据已失效，必须重新审查，不可直接确稿');
+    }
+    const table=type==='character'?'characters':type==='organization'?'organizations'
+      :type==='map_point'?'map_points':'foreshadowings';
+    const field=type==='foreshadowing'?'content':'name';
+    const match=type==='foreshadowing'?quote:name;
+    const already=db.prepare(`SELECT id FROM ${table} WHERE project_id=? AND ${field}=? LIMIT 1`)
+      .get(projectId,match) as any;
+    if(already)throw new BadRequestException('同名实体已建档，须人工核对关联关系，不允许新建同名副本');
+    if(!this.moduleRef)throw new BadRequestException('实体建档服务未就绪，未确稿');
+    // Resolve existing domain writers at confirmation time. No StateModule ->
+    // Character/Map/Organization/Clue module dependency cycle is introduced.
+    const types:Record<string,()=>any>={
+      character:()=>require('../modules/character/character.service').CharacterService,
+      organization:()=>require('../modules/organization/organization.service').OrganizationService,
+      map_point:()=>require('../modules/map-point/map-point.service').MapPointService,
+      foreshadowing:()=>require('../modules/foreshadowing/foreshadowing.service').ForeshadowingService,
+    };
+    const writer=this.moduleRef.get(types[type](),{strict:false});
+    if(!writer?.create)throw new BadRequestException('现行实体服务不可用，未写入确稿');
+    const dto=type==='character'?{name,role:'supporting',background:quote}
+      :type==='organization'?{name,description:quote}
+      :type==='map_point'?{name,description:quote}
+      :{content:quote,buriedChapterIndex:chapterNumber,evidenceText:quote};
+    const written=writer.create(projectId,dto);
+    const canonicalId=String(written?.id||'');
+    if(!canonicalId)throw new BadRequestException('实体服务没有返回建档标识，回滚本次确稿');
+    const verified=db.prepare(`SELECT id,${field} FROM ${table} WHERE project_id=? AND id=?`)
+      .get(projectId,canonicalId) as any;
+    if(!verified||String(verified[field])!==match)
+      throw new BadRequestException('新增实体建档未逐项核实，回滚本次确稿');
+    return {mode:'entity_create',applied:true,verified:true,canonicalType:type,canonicalId,sourceOutlineId:item.sourceId};
   }
 
   private applyCanonicalChange(projectId: string, canonicalChange: any) {
