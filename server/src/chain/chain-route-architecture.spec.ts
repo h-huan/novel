@@ -84,7 +84,9 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('const generateStructuredCard = async');
-    expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas)');
+    expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise,normalizedIdeas)');
+    expect(source).toContain("applyFictionNamingReplacements(raw,{'微信':'青信'})");
+    expect(source).toContain('const prohibited = prohibitedFictionNames(candidate)');
     expect(source).toContain('第 ${position + 1}/${requestedCount} 个已选题材结构化失败');
     expect(source).toContain("structuringProtocol: 'one_selected_premise_per_call_server_owned_identity'");
     expect(source).toContain('JSON 结构（ideas 必须恰好 1 项）');
