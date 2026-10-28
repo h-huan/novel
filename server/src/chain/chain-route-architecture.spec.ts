@@ -159,19 +159,15 @@ describe('chain HTTP architecture', () => {
     expect(patch).not.toContain("'wordCountReason'");
     expect(source).not.toContain('只输出与当前章纲同字段的完整 JSON 对象；修复后所有事件');
   });
-  it('keeps one JSON extraction path and decouples repair from optional pool replacement', () => {
+  it('keeps one JSON extraction path and removes post-card retry/replacement without weakening review', () => {
     const source = read('chain.controller.ts');
-    const repairStart = source.indexOf('repairEligible:id=>');
-    const repairEnd = source.indexOf('canRepair:ids=>', repairStart);
-    expect(repairStart).toBeGreaterThan(0);
-    const eligibility = source.slice(repairStart, repairEnd);
-    expect(eligibility).toContain('readerGoalDeficitRequiresNewPremise');
-    expect(eligibility).not.toContain('reselectionCompletionBudget');
-    expect(eligibility).not.toContain('sourceCompletionBudget');
-    expect(source).toContain('canReplace:()=>(');
-    expect(source).toContain('availableReviewedReserves().length');
-    expect(source).toContain('reselectionCompletionBudget.remaining>0&&sourceCompletionBudget.remaining>=2');
-    expect(source).toContain('kind:\'reviewed_reserve_replacement\'');
+    const afterGate = source.slice(source.indexOf('await accept(structuredCards'), source.indexOf('const selectedAccepted = accepted'));
+    expect(afterGate).not.toContain('reservePremiseSelection(');
+    expect(afterGate).not.toContain('repairMissing(');
+    expect(afterGate).not.toContain('fulfillDiscoveryGaps(');
+    expect(source).toContain('全部进入并发完整卡生成');
+    expect(source).toContain("const selectedAccepted = accepted");
+    expect(source).toContain("await accept(structuredCards, 'initial')");
     const jsonRetry = source.slice(source.indexOf('private async llmCallWithRetry'));
     expect(jsonRetry).toContain('this.safeExtractJson<T>(rawContent, null as unknown as T)');
     expect(jsonRetry).not.toContain('const lineParsed: any[] = []');
