@@ -18,7 +18,7 @@ function indexOrFail(source: string, marker: string): number {
 }
 
 describe('creation consistency architecture invariants', () => {
-  it('treats candidate-pool size as a search target and bounds repeated reserve replacement', () => {
+  it('treats candidate-pool size as a search target and prohibits paid serial reserve replacement', () => {
     expect(controllerSource).toContain('if (candidatePool.length === 0)');
     expect(controllerSource).not.toContain('if (candidatePool.length < minimumPremiseSelectionCount)');
     expect(controllerSource).toContain('minimumSelectedCountForPool');
@@ -26,7 +26,8 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain("'candidate_pool_empty'");
     expect(controllerSource).not.toContain('if (candidatePool.length < requestedCount)');
     expect(controllerSource).not.toContain('reserveReconciliationRounds<1');
-    expect(controllerSource).toContain('while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0)');
+    expect(controllerSource).not.toContain('while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0)');
+    expect(controllerSource).toContain('const finalReview=postReselectionReview;');
     expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
   });
 
