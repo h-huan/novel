@@ -20,6 +20,25 @@ describe('outline chapter responsibilities use explicit sources', () => {
     expect(source).toContain('await assertIndependentOutlineDestinationEmpty();');
     expect(source.split('await assertIndependentOutlineDestinationEmpty();')).toHaveLength(3);
   });
+  it('places long-form refill controls in the chapter list, not selected chapter details', () => {
+    const detailStart = source.indexOf('const renderDetail = () =>');
+    const browseStart = source.indexOf("activeView === 'browse' &&");
+    const controls = source.indexOf('补充后续详细大纲', browseStart);
+    const detail = source.slice(detailStart, browseStart);
+    expect(controls).toBeGreaterThan(browseStart);
+    expect(detail).not.toContain('立即滚动补纲');
+    expect(detail).not.toContain('openContinueDialog');
+    expect(source).toContain('([1, 3, 5, 10] as const).map(count =>');
+    expect(source).toContain('onClick={() => handleRolloutOutline(count)}');
+  });
+  it('sends an exact manual chapter count to the existing audited rollout route', () => {
+    const handler = source.slice(source.indexOf('const handleRolloutOutline = useCallback('), source.indexOf('const openInsertDialog = useCallback('));
+    expect(handler).toContain("api.post('/chain/rollout-outline', { projectId, appendCount })");
+    expect(handler).toContain('if (data?.added !== appendCount)');
+    expect(handler).not.toContain('selectedChapter');
+    expect(source).not.toContain('handleContinueCreate');
+  });
+
   it('manual blank chapter placeholders do not assert a numbered narrative beat', () => {
     expect(source.match(/chapterFunction: 'paving',/g)).toHaveLength(2);
   });
