@@ -1764,6 +1764,12 @@ describe('idea discovery live orchestrator behavior', () => {
       expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
     }
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
+    expect(poolCalls.every(([request]:any[]) =>
+      request.prompt.includes('【每项分类核心机制：生成与选优使用与审核相同的标准】')
+      && request.prompt.includes('"webNovelGenre":["悬疑推理"]')
+      && request.prompt.includes('"plotTags":["调查"]')
+      && request.prompt.includes('【必要条件】')
+    )).toBe(true);
      expect(poolCalls[0][0].prompt).toContain('对决定性结果先做反事实核对');
     expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
     expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
