@@ -149,4 +149,64 @@ describe('ARCH-004 progressive outline window', () => {
     expect(inserts).toHaveLength(0);
   });
 
+  it('saves a cited new character only as a pending state item inside the audited outline transaction',async()=>{
+    const {controller}=fixture(15);
+    const savedOutlines=new Map<number,string>();
+    const savedChapters=new Map<number,string>();
+    const db=controller.db.getDb();
+    const priorPrepare=db.prepare;
+    db.prepare=(sql:string)=>{
+      const st=priorPrepare(sql);
+      if(sql.includes('INSERT INTO outlines'))return {...st,run:(id:string,_p:string,_level:string,_parent:string,order:number,...rest:any[])=>{
+        savedOutlines.set(order,id);return st.run(id,_p,_level,_parent,order,...rest);
+      }};
+      if(sql.includes('INSERT INTO chapters'))return {...st,run:(id:string,_p:string,_outline:string,chapterNo:number,...rest:any[])=>{
+        savedChapters.set(chapterNo,id);return st.run(id,_p,_outline,chapterNo,...rest);
+      }};
+      if(sql.includes('SELECT id FROM outlines WHERE project_id=?'))return {...st,get:(_p:string,order:number)=>savedOutlines.has(order)?{id:savedOutlines.get(order)}:undefined};
+      if(sql.includes('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?'))return {...st,get:(_p:string,chapterNo:number)=>savedChapters.has(chapterNo)?{id:savedChapters.get(chapterNo)}:undefined};
+      return st;
+    };
+    controller.stateItemService={create:vi.fn(()=>({id:'proposal'}))};
+    controller.llmCallWithRetry.mockResolvedValueOnce({runId:'run-21',data:{
+      chapters:[{title:'旧城入口',content:'新人物沈诺在西坡站等待交接。',conflict:'接头迟到',hook:'门外脚步突然停下',
+        scenes:['西坡站入口'],targetWords:4000,wordCountReason:'接头需要时间与反应',chapterFunction:'conflict'}],
+      newEntities:[{type:'character',name:'沈诺',evidenceQuote:'新人物沈诺在西坡站等待交接',chapterNumber:21}],
+    }});
+    const result=await controller.rolloutDetailedOutlines('project',{lookahead:6});
+    expect(result.added).toBe(1);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(1);
+    expect(controller.stateItemService.create).toHaveBeenCalledWith('project',expect.objectContaining({
+      sourceType:'rollout_outline',targetType:'character',targetLabel:'沈诺',
+      status:'pending',authority:'soft_candidate',sourceId:expect.any(String),
+      sourceChapterId:expect.any(String),
+      payload:{intent:'entity_create',entityProposal:expect.objectContaining({name:'沈诺',chapterNumber:21})},
+    }));
+    expect(db.exec.mock.calls.map((x:any[])=>x[0])).toEqual(['BEGIN IMMEDIATE','COMMIT']);
+  });
+
+  it('rolls back a batch when staging its independently reviewed entity fails',async()=>{
+    const {controller}=fixture(15);
+    const db=controller.db.getDb();
+    const oldPrepare=db.prepare;
+    const written=new Map<number,string>();
+    db.prepare=(sql:string)=>{
+      const st=oldPrepare(sql);
+      if(sql.includes('INSERT INTO outlines'))return {...st,run:(id:string,_p:string,_level:string,_parent:string,order:number,...rest:any[])=>{
+        written.set(order,id);return st.run(id,_p,_level,_parent,order,...rest);
+      }};
+      if(sql.includes('SELECT id FROM outlines WHERE project_id=?'))return {...st,get:(_p:string,order:number)=>written.has(order)?{id:written.get(order)}:undefined};
+      if(sql.includes('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?'))return {...st,get:()=>({id:'chapter-21'})};
+      return st;
+    };
+    controller.stateItemService={create:vi.fn(()=>{throw Error('保存候选状态中断')})};
+    controller.llmCallWithRetry.mockResolvedValueOnce({runId:'run-21',data:{
+      chapters:[{title:'旧城入口',content:'新人物沈诺在西坡站等待交接。',conflict:'接头迟到',hook:'门外脚步突然停下',
+        scenes:['西坡站入口'],targetWords:4000,wordCountReason:'接头需要时间与反应',chapterFunction:'conflict'}],
+      newEntities:[{type:'character',name:'沈诺',evidenceQuote:'新人物沈诺在西坡站等待交接',chapterNumber:21}],
+    }});
+    await expect(controller.rolloutDetailedOutlines('project',{lookahead:6})).rejects.toThrow('保存候选状态中断');
+    expect(db.exec.mock.calls.map((x:any[])=>x[0])).toEqual(['BEGIN IMMEDIATE','ROLLBACK']);
+  });
+
 });
