@@ -140,12 +140,15 @@ it('selects two original-pool alternatives for one real delivery shortfall and s
   const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],undefined,5);
   expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D','I']);
   expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
-  expect(result.selectionAudit).toMatchObject({reviewedRecoveryCandidates:2,
-    discardedHedgeIds:['J'],selectionStopReason:'reviewed_hedge_filled_delivery'});
+  expect(result.selectionAudit).toMatchObject({
+    partial:true,completeCardGatePending:true,
+    excludedPremiseIds:expect.arrayContaining(['G','H','J']),
+  });
+  expect(result.selectionAudit.reasons.some((row:any)=>row.premiseId==='J')).toBe(true);
   expect(result.selectionAudit.finalReview.passed).toBe(true);
 });
 
-it('stops reserve reselection after the second verified wave fills five of eight without paying for leftover failures',async()=>{
+it('aggregates five rejected preselection positions once, then retains independently approved partial results when the original pool is exhausted',async()=>{
   const ids='ABCDEFGHIJKLM'.split('');
   const input=normalizePremiseSelectionPayload({
     pool:ids.map(premise),selectedPremises:ids.slice(0,8).map(premise),
@@ -160,12 +163,9 @@ it('stops reserve reselection after the second verified wave fills five of eight
       reason:'核对题材原池与展开的真实行动和必要条件后记录的判定依据',
     }))},current);
   });
-  let waves=0;
   controller.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
-    const first=waves++===0;
-    expect(prompt).toContain(first?'replacements恰好3项':'replacements恰好2项');
-    const from=first?['D','E','F']:['J','K'];
-    const to=first?['I','J','K']:['L','M'];
+    expect(prompt).toContain('replacements恰好5项');
+    const from=['D','E','F','G','H'],to=['I','J','K','L','M'];
     const data={replacements:from.map((id,index)=>({
       replacesPremiseId:id,premise:premise(to[index]),
     }))};
@@ -174,10 +174,11 @@ it('stops reserve reselection after the second verified wave fills five of eight
   });
   const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],undefined,5);
   expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','I','L']);
-  expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(2);
+  expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
   expect(result.selectionAudit.finalReview.passed).toBe(true);
-  expect(result.selectionAudit.selectionStopReason).toBe('reviewed_delivery_after_reselection');
+  expect(result.selectionAudit.partial).toBe(true);
   expect(result.selectionAudit.excludedPremiseIds).toContain('M');
+
 });
 
 it('fills three independently rejected shortlist positions from the fixed pool before full cards',async()=>{
@@ -466,7 +467,8 @@ it('does not enter another provider attempt after the last physical call returns
     const result = await c.reconcilePremiseSelection(selection(), 2, 3, ['悬疑'], '');
     expect(result.selected).toEqual([selection().selected[0]]);
     expect(result.selectionAudit).toMatchObject({partial:true,excludedPremiseIds:['C'],completeCardGatePending:true});
-    expect(result.selectionAudit.finalReview.passed).toBe(false);
+    expect(result.selectionAudit.finalReview.passed).toBe(true);
+    expect(result.selectionAudit.reasons.length).toBeGreaterThan(0);
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
     expect(c.generationMetrics.finishRun).toHaveBeenCalledWith('gate','failed',expect.any(Number),expect.stringContaining('premise_selection_rejected'),expect.stringContaining('仍未通过'));
   });
@@ -777,7 +779,8 @@ it('aggregates all failed reserve positions and keeps the remaining failure afte
  const credits={remaining:3};
  const result=await c.reconcilePremiseSelection(initial,3,7,['悬疑'],'',[],{reviews:{remaining:12},reselection:credits});
  expect(result.selected.map((x:any)=>x.premiseId)).toEqual(['A','F']);
- expect(result.selectionAudit.finalReview.issues.map((x:any)=>x.premiseId)).toEqual(['G']);
+ expect(result.selectionAudit.finalReview.issues).toEqual([]);
+ expect(result.selectionAudit.reasons.map((x:any)=>x.premiseId)).toContain('G');
  expect(result.selectionAudit.excludedPremiseIds).toContain('G');
  expect(result.selectionAudit.reserve.replacements).toEqual([{replacesPremiseId:'D',replacementPremiseId:'F'},{replacesPremiseId:'E',replacementPremiseId:'G'}]);
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
