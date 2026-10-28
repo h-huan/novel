@@ -274,6 +274,8 @@ describe('observed 4-card presentation report omitted rows',()=>{
   expect(requests[1].prompt).toContain('reviews恰好1行');
   expect(requests[1].prompt).toContain('其他卡只供同批差异比较');
   expect(requests[1].prompt).toContain('全部执行标准保持原审核要求');
+  expect(requests[1].prompt.length).toBeLessThan(requests[0].prompt.length);
+  expect(requests[1].prompt).not.toContain(JSON.stringify(ideaReviewResponseExample(cards)));
   expect(requests[1].prompt).toContain('题材');
  });
 });
