@@ -10,6 +10,7 @@ import {
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
   ideaPreselectionCapacity,
+  partitionReviewedIdeaPremises,
   ideaCardHistoryTitleReminder,
   ideaGateLocalRepairDirective,
   ideaHookRequirement,
@@ -57,6 +58,23 @@ describe('locked-card historical exclusion transport', () => {
 });
 
 describe('bounded preselection surplus',()=>{
+  it('locks only five complete-card paths and retains three vetted reserves without mutation',()=>{
+    const input=Array.from({length:8},(_,i)=>({premiseId:'P'+(i+1),storyCategory:'悬疑'}));
+    const original=structuredClone(input);
+    const result=partitionReviewedIdeaPremises(input,5);
+    expect(result.selected.map(item=>item.premiseId)).toEqual(['P1','P2','P3','P4','P5']);
+    expect(result.reserves.map(item=>item.premiseId)).toEqual(['P6','P7','P8']);
+    expect(input).toEqual(original);
+  });
+  it('retains a second reviewed category among five without adding card work',()=>{
+    const input=Array.from({length:8},(_,i)=>({premiseId:'P'+(i+1),storyCategory:i===6?'现实生活':'悬疑惊悚'}));
+    const result=partitionReviewedIdeaPremises(input,5,true);
+    expect(result.selected).toHaveLength(5);
+    expect(new Set(result.selected.map(item=>item.storyCategory)).size).toBe(2);
+    expect(result.reserves).toHaveLength(3);
+    expect(new Set([...result.selected,...result.reserves].map(item=>item.premiseId)).size).toBe(8);
+  });
+
   it('keeps eight reviewed paths only when the fixed pool supports five plus three',()=>{
     expect(ideaPreselectionCapacity(5,15)).toBe(8);
     expect(ideaPreselectionCapacity(5,6)).toBe(6);

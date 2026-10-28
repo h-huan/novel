@@ -10,6 +10,31 @@ export class PremiseNamingError extends Error {}
 
 /** Keep at most three extra original-pool paths for a five-card request.
  * This consumes no extra pool creation calls or model-call budget. */
+/** Split AFTER independent source/causal/genre/category/overlap approval.
+ * The two-to-three surplus paths are audited reserves, NOT additional full
+ * cards. Preserve the model's ranked selection order, except when a varied
+ * category would otherwise disappear from the five delivered positions. */
+export function partitionReviewedIdeaPremises<T extends { premiseId:unknown;storyCategory?:unknown }>(
+  vetted:readonly T[],requestedCount:number,requireCategoryDiversity=false,
+):{selected:T[];reserves:T[]} {
+  if(!Number.isInteger(requestedCount)||requestedCount<1)throw Error('题材数量必须为正整数');
+  const chosen=new Set(vetted.slice(0,requestedCount).map(item=>String(item.premiseId)));
+  if(requireCategoryDiversity&&requestedCount>1&&chosen.size===requestedCount) {
+    const active=vetted.filter(item=>chosen.has(String(item.premiseId)));
+    const categories=new Set(active.map(item=>String(item.storyCategory||'')));
+    if(categories.size===1) {
+      const distinct=vetted.find(item=>!chosen.has(String(item.premiseId))
+        &&String(item.storyCategory||'')!==String(active[0]?.storyCategory||''));
+      if(distinct) {
+        chosen.delete(String(active[active.length-1].premiseId));
+        chosen.add(String(distinct.premiseId));
+      }
+    }
+  }
+  return {selected:vetted.filter(item=>chosen.has(String(item.premiseId))).slice(0,requestedCount),
+    reserves:vetted.filter(item=>!chosen.has(String(item.premiseId)))};
+}
+
 export function ideaPreselectionCapacity(requestedCount:number,availableCount:number):number {
   if(!Number.isInteger(requestedCount)||requestedCount<1)throw Error('题材数量必须为正整数');
   if(!Number.isInteger(availableCount)||availableCount<0)throw Error('候选池数量无效');
