@@ -1,5 +1,5 @@
 import {describe,it,expect,vi} from 'vitest';
-import {ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows} from './idea-review-protocol-repair';
+import {ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows,missingIdeaPresentationRetryPrompt} from './idea-review-protocol-repair';
 import {ideaReviewResponseExample,ideaPayoffBridgeIssues,ideaReviewEvidenceReferenceIssues,resolveIdeaReviewEvidence} from './idea-review-evidence';
 import {presentationReviewIssues,shouldBatchIdeaPresentation} from './idea-presentation-review';
 import {ChainController} from './chain.controller';
@@ -167,6 +167,35 @@ it('reports review-count contract failures with actual missing positions rather 
  expect(issues[0]).toContain('要求3项，实际1项，缺失位置=[2,3]');
 });
 
+
+it('does not retransmit completed cards standards or a full-batch schema when only one review row is missing',()=>{
+ const cards=Array.from({length:4},(_,index)=>({
+   title:'不同题材'+(index+1),
+   hook:'迫切的关系困境'+(index+1),
+   description:'人物选择、被动反制与实际付出代价的因果路径'+(index+1),
+   setting:'故事的限制条件'+(index+1),ending:'兑现代价'+(index+1),
+   executionStandard:'完整执行标准专属于题材'+(index+1),
+   lockedPremise:{storyCore:'原池限制'+(index+1)},
+ }));
+ const good=ideaReviewResponseExample(cards);
+ const plan=ideaMissingPresentationRowsPlan({reviews:good.reviews.slice(0,3)},cards);
+ expect(plan?.missing).toEqual([4]);
+ const initial='本次只审【实际题材卡】4张，reviews必须恰好4项，position只对应实际题材卡。'
+   +'因果、来源、标题、开篇与四项阅读目标全部依照同一严格标准。只输出JSON：'
+   +JSON.stringify(good)+'\\n【完整待审卡】'+JSON.stringify(cards);
+ const prompt=missingIdeaPresentationRetryPrompt(initial,plan!,cards,[]);
+ expect(prompt).toContain('完整执行标准专属于题材4');
+ expect(prompt).not.toContain('完整执行标准专属于题材1');
+ expect(prompt).not.toContain('完整执行标准专属于题材2');
+ expect(prompt).not.toContain('完整执行标准专属于题材3');
+ expect(prompt).toContain('"position":4');
+ expect(prompt).toContain('"title":"不同题材4"');
+ expect(prompt).toContain('"reviews":[{"position":4');
+ expect(prompt).not.toContain('"reviews":[{"position":1');
+ expect(prompt).toContain('"title":"不同题材1"');
+ expect(prompt).toContain('因果、来源、标题、开篇与四项阅读目标全部依照同一严格标准');
+ expect(prompt).not.toContain('【完整待审卡】');
+});
 describe('observed 4-card presentation report omitted rows',()=>{
  const cards=Array.from({length:4},(_,index)=>({...card,title:'独立题材'+(index+1)}));
  const verdict=(position:number)=>{

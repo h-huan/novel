@@ -25,7 +25,7 @@ import { createReviewLimiter } from './review-limiter';
 import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity, partitionReviewedIdeaPremises } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
-import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
+import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan, missingIdeaPresentationRetryPrompt,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
 import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget, shouldBatchLargePremiseSourceReview } from './premise-source-batches';
 import { generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
@@ -12674,19 +12674,11 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           missingReview=goalRepair?null:ideaMissingPresentationRowsPlan(previous,cards,references);
           if(goalRepair)return goalRepair.prompt;
           if(!missingReview)return undefined;
-          // Reuse the ONE existing protocol-correction call. Keep every original
-          // standard and comparison card; request only rows absent from a
-          // demonstrably complete, independently verified partial verdict.
-          const correctedPrompt=reviewPrompt.replace(
-            `本次只审【实际题材卡】${cards.length}张，reviews必须恰好${cards.length}项，position只对应实际题材卡。`,
-            '本轮只独立审查点名的缺失位置；其余已审卡只作同批差异参照，不重审、不返回其结论。'); 
-          return correctedPrompt+'\n【本轮仅补齐缺失的独立审查行】上次报告已有有效完整结论的position='
-            +JSON.stringify(missingReview.base.reviews.map((row:any)=>row.position))
-            +'，原始有效结论保留且不允许重审或升级；本次reviews必须恰好'
-            +missingReview.missing.length+'项，只返回position='
-            +JSON.stringify(missingReview.missing)
-            +'对应的全部六项判据、必要因果证据、四项readerGoals及真实issues。'
-            +'其余卡仍用于同批比较，不返回其结论；不得猜测缺失卡通过或更改已审卡。';
+          // Correct missing rows using the helper's ORIGINAL single protocol
+          // recovery call, but do not retransmit already-verified cards'
+          // execution standards or a contradictory full-batch JSON example.
+          return missingIdeaPresentationRetryPrompt(reviewPrompt,missingReview,
+            display(cards),compactIdeaPresentationReferences(display(references,false)));
         },
         retryInstruction: '只纠正点名的审查字段。三个EvidenceRef、payoffBridge及四项readerGoals的evidenceRef只能选择对应实际卡目录中的编号，原文由服务器回填，不能自行重写引文或复制执行标准。payoffBridge缺少真实成立条件须保留gap、payoffCredible=false与真实issues，不能用结局断言或换编号将gap改成supported。readerGoals须完整保留click、completion、sharing、immersion及真实status，不能为了通过把weak或unknown改为supported。保留合法判据及已核对证据，不改故事、不改标题；根据证据保留真实不合格结论。',
         validate: value => reviewIssues(value).length === 0,

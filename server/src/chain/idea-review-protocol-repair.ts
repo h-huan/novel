@@ -1,7 +1,8 @@
 
 import {readerGoalReviewIssues,READER_GOAL_LABELS} from './reader-goal-review';
 import {targetIdeaReviews,presentationReviewIssues} from './idea-presentation-review';
-import {ideaReviewEvidenceReferenceIssues,ideaPayoffBridgeIssues,resolveIdeaReviewEvidence,ideaReviewEvidenceCatalog,ideaReviewCitableNarrativeText} from './idea-review-evidence';
+import {ideaReviewEvidenceReferenceIssues,ideaPayoffBridgeIssues,resolveIdeaReviewEvidence,ideaReviewEvidenceCatalog,ideaReviewCitableNarrativeText,ideaReviewResponseExample} from './idea-review-evidence';
+import {packIdeaReviewStandards} from './idea-discovery-contract';
 
 /** Reuse the existing single protocol correction, retaining every valid judgment. */
 export function ideaReaderGoalRepairPlan(value:any,cards:readonly any[],references:readonly any[]=[]){
@@ -137,4 +138,49 @@ export function applyIdeaMissingPresentationRows(plan:NonNullable<ReturnType<typ
   seen.add(row.position);
  }
  return {reviews:[...plan.base.reviews,...patched.reviews].sort((a:any,b:any)=>a.position-b.position)};
+}
+
+/** The original response already independently verified the other rows.
+ * Reuse their verdicts; the existing single correction call must send full
+ * standards ONLY for missing cards and complete story COMPARISON material
+ * for already-reviewed cards. The entire original review prompt used to
+ * contradict its own "missing rows only" instruction with a full-batch JSON
+ * example and retransmit every card's standards on this correction. */
+export function missingIdeaPresentationRetryPrompt(
+ originalPrompt:string,
+ plan:NonNullable<ReturnType<typeof ideaMissingPresentationRowsPlan>>,
+ displayedCards:readonly Record<string,any>[],
+ displayedReferences:readonly Record<string,any>[],
+):string{
+ const marker='只输出JSON：',index=originalPrompt.lastIndexOf(marker);
+ if(index<0)throw Error('完整卡原审核指令缺少质量输出协议，不能生成缺行补正');
+ const needed=new Set(plan.missing);
+ const actual=displayedCards.filter((_card,index)=>needed.has(index+1));
+ const peers=displayedCards.filter((_card,index)=>!needed.has(index+1))
+   .map(({executionStandard,lockedPremise,noveltyProof,readerGoals,...story})=>story);
+ const prefix=originalPrompt.slice(0,index).replace(
+   /^本次只审【实际题材卡】\d+张，reviews必须恰好\d+项，position只对应实际题材卡。/,
+   '本次仅独立审查下方点名的缺失位置，其他卡只供同批差异比较；六项判据、兑现必要因果、四项阅读目标及全部执行标准保持原审核要求。');
+ const schema=ideaReviewResponseExample(displayedCards)
+   .reviews.filter(row=>needed.has(row.position));
+ const catalog=ideaReviewEvidenceCatalog(displayedCards).filter(row=>needed.has(row.position))
+   .map(({id,field,position})=>({id,field,position}));
+ // Keep original positions, not a renumbered 1..N subset: the server binds
+ // each citation to the original target, and verifies every returned row.
+ const actualWithOriginalPositions=actual.map(card=>({
+   ...card,position:displayedCards.findIndex(row=>row===card)+1,
+ }));
+ const packed=packIdeaReviewStandards(actualWithOriginalPositions,[...displayedReferences,...peers]);
+ return prefix+marker+JSON.stringify({reviews:schema})
+   +'\n【本轮点名的原始位置】'+JSON.stringify(plan.missing)
+   +'；reviews恰好'+plan.missing.length+'行，position和title必须保留原始编号与标题。'
+   +'\n【已完整审核并原样保留的位置；不得再次输出其审查结论】'
+   +JSON.stringify(plan.base.reviews.map((row:any)=>row.position))
+   +'\n【只有待补卡可引用的服务器证据目录】'+JSON.stringify(catalog)
+   +'\n【实际待审完整卡与其执行标准、其它已审故事只作同批参考】'+JSON.stringify(packed)
+   +'\n若含standardLines，按executionStandardRefs原顺序逐行还原该卡全部执行标准；'
+   +'reference只比较人物选择、关系、升级、反转和代价，不返回其结论。'
+   +'不得将其它卡或参考卡的证据用于补卡，不得因已有行通过而推定补卡也通过。'
+   +'源头事实、必要条件、六项判据、payoffBridge和四项目标均与初次审核使用相同严格标准；'
+   +'真实gap、weak、unknown必须保留，不为减少输出而补造事实。';
 }
