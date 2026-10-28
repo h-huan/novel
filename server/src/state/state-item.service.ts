@@ -1,4 +1,5 @@
 import { ModuleRef } from '@nestjs/core';
+import { ENTITY_WRITER_TOKENS } from './entity-writer-tokens';
 import { qualityIssue } from '../modules/writing-quality/quality-issue';
 import { readConstitution, constitutionSettings } from '../modules/project/creative-constitution';
 import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
@@ -1005,15 +1006,10 @@ export class StateItemService {
       .get(projectId,match) as any;
     if(already)throw new BadRequestException('同名实体已建档，须人工核对关联关系，不允许新建同名副本');
     if(!this.moduleRef)throw new BadRequestException('实体建档服务未就绪，未确稿');
-    // Resolve existing domain writers at confirmation time. No StateModule ->
-    // Character/Map/Organization/Clue module dependency cycle is introduced.
-    const types:Record<string,()=>any>={
-      character:()=>require('../modules/character/character.service').CharacterService,
-      organization:()=>require('../modules/organization/organization.service').OrganizationService,
-      map_point:()=>require('../modules/map-point/map-point.service').MapPointService,
-      foreshadowing:()=>require('../modules/foreshadowing/foreshadowing.service').ForeshadowingService,
-    };
-    const writer=this.moduleRef.get(types[type](),{strict:false});
+    // Resolve the domain-owned service through its existing-instance alias,
+    // not a second insert implementation or a circular StateModule import.
+    const writer=this.moduleRef.get<any>(
+      ENTITY_WRITER_TOKENS[type as keyof typeof ENTITY_WRITER_TOKENS],{strict:false});
     if(!writer?.create)throw new BadRequestException('现行实体服务不可用，未写入确稿');
     const dto=type==='character'?{name,role:'supporting',background:quote}
       :type==='organization'?{name,description:quote}
