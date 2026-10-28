@@ -15,14 +15,6 @@ const sourceReceiptKey = (selection:PremiseSelectionResult, scope:string,
   item:PremiseSelectionResult['selected'][number]) => JSON.stringify({scope,item,
     seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
 
-/** Count the NEXT reserve review against unchanged survivors and fresh replacement
- * IDs, never against the rejected items that will disappear. */
-export function pendingReservePremiseSourceReviewCount(retained:PremiseSelectionResult,scope:string,
-  receipts:PremiseSourceReceipts,incomingCount:number):number {
- if(!Number.isSafeInteger(incomingCount)||incomingCount<0)throw Error('备用题材数量无效');
- return pendingPremiseSourceReviewCount(retained,scope,receipts)+incomingCount;
-}
-
 /** A prospective replacement has no valid receipt, even if its old slot did. */
 export function pendingPremiseSourceReviewCount(selection:PremiseSelectionResult,scope:string,
   receipts:PremiseSourceReceipts,changingIds:readonly string[]=[]):number {

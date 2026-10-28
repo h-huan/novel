@@ -2,7 +2,7 @@ import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import { missingRequestedIdeaSlots } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
-import {reviewChangedPremiseSources,pendingReservePremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
+import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues} from './premise-selection-review';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import {discoveryDimensionSelectionIssues} from './idea-discovery-contract';
@@ -6385,7 +6385,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     let reselectionStopReason:string|undefined;
     // The structured helper owns its own protocol correction. Never add an
     // outer identical retry without any changed premise or new evidence.
-    const reselectScope=async(slots:typeof repairPlan.repairSlots, unusedIds?:Set<string>):Promise<boolean>=>{
+    const reselectScope=async(slots:typeof repairPlan.repairSlots):Promise<boolean>=>{
       if(!slots.length)return true;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
       const ids=new Set<string>(slots.map(slot=>String(slot.replacesPremiseId)));
@@ -6397,7 +6397,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
         .filter(id=>(deliveryCount>=requestedCount||!attemptedBeforeReserve.has(String(id))
           ||citationOnlyIds.has(String(id)))
-          &&!protectedIds.includes(id)&&(!unusedIds||unusedIds.has(String(id))));
+          &&!protectedIds.includes(id));
       // Keep the canonical pool unchanged for server-side validation. Only send
       // identities that can legally fill these slots; discarded and protected
       // identities in the full pool cannot be selected, and protected story facts
@@ -6410,7 +6410,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return candidate;
       };
       try{
-        const result=await this.llmCallWithRetry<any>(unusedIds?'锁定前原池备用汇总重选':'锁定前原池重选',
+        const result=await this.llmCallWithRetry<any>('锁定前原池一次汇总重选',
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
           +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(premiseReselectionPromptSelection(selected.selected,ids))
           +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)
@@ -6448,7 +6448,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         if(!isReviewOutputCapacityError(error)||slots.length<2)throw error;
         this.logger?.warn('汇总重选遇到输出容量限制，按实际材料体量拆分，所有分块共享原调用预算及完整最终审核');
         for(const part of splitReviewMaterial(slots,slot=>({slot,pool:initial.pool.find(item=>item.premiseId===slot.replacesPremiseId)})))
-          if(!await reselectScope(part,unusedIds))return false;
+          if(!await reselectScope(part))return false;
         return true;
       }
     };
@@ -6499,93 +6499,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           completeCardGatePending:true}};
       }
     }
-    let finalReview=postReselectionReview;
-    const reserveHistory:Array<{replacesPremiseId:string;replacementPremiseId:string}>=[],
-      attemptedIds=new Set([...attemptedBeforeReserve,...selected.selected.map(item=>String(item.premiseId))]);
-    const reserveStartCredits=reselectionBudget.remaining;
-    // A negative verdict on unused shortlist surplus must not trigger
-    // another paid selection when the remaining, independently reviewed
-    // stories already cover the actual delivery request. Preserve every
-    // source/payoff/genre/category/overlap receipt for the retained subset.
-    const retainedFullDelivery=()=>{
-      if(deliveryCount>=requestedCount||finalReview.passed)return null;
-      const survivor=retainReviewedPremises(selected,finalReview,
-        repairPlan.protectedItems.map(item=>String(item.premiseId)));
-      if(survivor.selection.selected.length<requestedCount)return null;
-      const receipts=retainPremiseReviewEvidence(selected,finalReview,survivor.selection);
-      return receipts.passed?{survivor,receipts}:null;
-    };
-    let reserveReconciliationRounds = 0;
-    while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0){
-      if(retainedFullDelivery())break;
-      reserveReconciliationRounds += 1;
-      this.logger?.warn('锁定前备用重选轮次 ' + reserveReconciliationRounds + '；仅使用未尝试原池身份和剩余共享预算，全部修改仍须独立复核。');
-      const retained=retainReviewedPremises(selected,finalReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-      const unusedIds=new Set(initial.pool.filter(item=>!attemptedIds.has(String(item.premiseId))).map(item=>String(item.premiseId)));
-      if(!retained.excludedPremiseIds.length||!unusedIds.size)break;
-      // Preserve the WHOLE outstanding review. A slot-only review can erase other
-      // known failures and allow them to surface again after full-card generation.
-      const ids=new Set(retained.excludedPremiseIds.slice(0,unusedIds.size));
-      const scopedIssues=finalReview.issues.filter(issue=>ids.has(String(issue.premiseId))||issue.kind==='overlap'&&ids.has(String(issue.referencePremiseId)))
-        .map(issue=>ids.has(String(issue.premiseId))?issue:{...issue,premiseId:issue.referencePremiseId,
-          referencePremiseId:issue.premiseId,quote:issue.referenceQuote,referenceQuote:issue.quote});
-      const plannedSlots=premiseReselectionPlan(selected,{passed:false,issues:scopedIssues}).repairSlots;
-      const realShortfall=Math.max(0,requestedCount-retained.selection.selected.length);
-      const slots=deliveryCount<requestedCount
-        ?plannedSlots.slice(0,Math.min(unusedIds.size,realShortfall))
-        :plannedSlots;
-      if(!slots.length)break;
-      slots.forEach(slot=>slot.mode='replace_from_pool');
-      // A replacement cannot be used unless its changed sources AND all affected
-      // pairwise overlaps can be independently reviewed. The outer scheduler
-      // reserves one aggregate call per mode, or the configured source batches.
-      // Check that total BEFORE spending on another model reselection, otherwise
-      // a two-credit tail can pay for overlap but fail source coverage after minutes.
-      // The replacement IDs have no cached source receipts. An estimate using
-      // rejected OLD IDs could under-reserve a grouped independent review.
-      const pendingSources=pendingReservePremiseSourceReviewCount(retained.selection,sourceScope,sourceReceipts,slots.length);
-      const grouping=readGenerationBudgets();
-      const sourceCalls=grouping.reviewGroupingMode===0
-        ? 1
-        : Math.max(1,Math.ceil(pendingSources/grouping.sourceBatchSize));
-      const overlapCalls=retained.selection.selected.length+slots.length>1?1:0;
-      const requiredReviewCredits=overlapCalls+sourceCalls;
-      if(shared&&shared.reviews.remaining<requiredReviewCredits){
-        this.logger?.warn('锁定前备用重选前终检预算不足：剩余'+shared.reviews.remaining
-          +'次，当前变更预计至少需要来源'+sourceCalls+'批、独立同构'+overlapCalls+'批；保留已经审查的结论，隔离失败位置，不启动注定无法验收的重选');
-        break;
-      }
-      const before=selected;
-      const completed=await reselectScope(slots,unusedIds);
-      const changeScope=selectionChangeScope(before,selected);
-      if(!changeScope.focusIds.length)break;
-      finalReview=await reviewBoth(selected,changeScope,finalReview);
-      for(const slot of slots){
-        const position=before.selected.findIndex(item=>item.premiseId===slot.replacesPremiseId);
-        const replacement=String(selected.selected[position].premiseId);
-        if(replacement===String(slot.replacesPremiseId))continue;
-        attemptedIds.add(replacement);
-        reserveHistory.push({replacesPremiseId:String(slot.replacesPremiseId),replacementPremiseId:replacement});
-      }
-      rememberRejected(finalReview);
-      if(!completed)break;
-    }
-    const reserveAudit=reserveHistory.length?{attempted:true,error:null,...reserveHistory[reserveHistory.length-1],
-      replacements:reserveHistory,physicalCallBudgetUsed:reserveStartCredits-reselectionBudget.remaining,
-      sharedCallsRemaining:reselectionBudget.remaining}:undefined;
-    const fullyVetted=retainedFullDelivery();
-    if(fullyVetted){
-      this.logger?.log('锁定前保留已完整审核的交付名额 '
-        +fullyVetted.survivor.selection.selected.length+'/'+deliveryCount
-        +'，跳过备用重选及额外来源/同构审核');
-      return {...fullyVetted.survivor.selection,selectionAudit:{
-        initialReview,reselectionAttempted:true,reserve:reserveAudit,
-        finalReview:fullyVetted.receipts,reviewedBeforeCardLock:selected.selected.length,
-        excludedPremiseIds:fullyVetted.survivor.excludedPremiseIds,
-        reasons:fullyVetted.survivor.reasons,rejectedHistory,
-        selectionStopReason:'reviewed_delivery_after_reselection',
-        completeCardGatePending:true}};
-    }
+    // A rejected alternative cannot trigger another paid reserve wave: the one
+    // original-pool correction and its complete independent re-review are final.
+    const finalReview=postReselectionReview;
     if (!finalReview.passed) {
       const message = '锁定前原池重选后复核仍未通过，未生成完整卡：' + finalReview.issues.map(item => item.reason).join('；');
       try {
@@ -6598,12 +6514,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (!retained.selection.selected.length) throw new Error(message);
       this.logger?.warn(`锁定前重选复核部分未通过：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，隔离 ${retained.excludedPremiseIds.join('、')}；继续完整卡原有质量验收，不补生或重复重选。`);
       const retainedEvidence=retainPremiseReviewEvidence(selected,finalReview,retained.selection);
-      return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true, reserve: reserveAudit,
+      return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true,
         finalReview: retainedEvidence,
         ...budgetPartialAudit, partial: true, excludedPremiseIds: [...unresolvedIds,...retained.excludedPremiseIds],
         reasons: [...(budgetPartialAudit.reasons || []),...retained.reasons], completeCardGatePending: true } };
     }
-    return { ...selected, selectionAudit: { initialReview, reselectionAttempted: true, reserve: reserveAudit, finalReview,
+    return { ...selected, selectionAudit: { initialReview, reselectionAttempted: true, finalReview,
       rejectedHistory, ...budgetPartialAudit } };
   }
 
