@@ -21,7 +21,7 @@ describe('bounded premise source review batches',()=>{
   expect(shouldBatchLargePremiseSourceReview(8,0,4,2)).toBe(true);
   expect(shouldBatchLargePremiseSourceReview(4,0,3,3)).toBe(true);
   expect(shouldBatchLargePremiseSourceReview(3,0,3,10)).toBe(false);
-  expect(shouldBatchLargePremiseSourceReview(5,0,3,2)).toBe(false);
+  expect(shouldBatchLargePremiseSourceReview(5,0,3,2)).toBe(true);
   expect(shouldBatchLargePremiseSourceReview(5,1,3,10)).toBe(false);
  });
  it('keeps full facts in 3+2 batches and rebinds all fifty checks without losing a real drift',()=>{

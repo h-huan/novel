@@ -185,7 +185,7 @@ describe('premise selection before identity lock', () => {
    }
  });
 
-  it('reviews five-premise sources in one call and preserves every independent field check',async()=>{
+  it('reviews all five-premise fields in aggregate or funded concurrent batches',async()=>{
     const current=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
       selectedPremises:['A','B','C','D','E'].map(premise)},5,5);
     const originalMethod=(ChainController.prototype as any).reviewPremiseSelection;
@@ -205,8 +205,8 @@ describe('premise selection before identity lock', () => {
       const credits={remaining:allowed};
       const review=await c.reviewPremiseSelection(current,'原有标准','source_drift',credits);
       expect(requested.flat()).toEqual(['A','B','C','D','E']);
-      expect(requested).toHaveLength(1);
-      expect(credits.remaining).toBe(allowed-1);
+      expect(requested).toHaveLength(allowed===1?1:2);
+      expect(credits.remaining).toBe(0);
       expect(review.passed).toBe(true);
       expect(review.sourceChecks?.map((row:any)=>row.ref))
         .toEqual(premiseSourceComparisonCatalog(current).map(row=>row.ref));

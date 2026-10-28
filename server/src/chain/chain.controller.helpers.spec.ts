@@ -2015,7 +2015,7 @@ it('structures two pre-reviewed reserves concurrently for one missing card and s
     expect.objectContaining({kind:'reviewed_reserve_replacement',hedgedCandidateCount:2,deliverySlots:1}),
     expect.objectContaining({kind:'hedged_card_selected',premiseId:'P3'}),
   ]));
-  expect(result.qualifiedIdeas.map((item:any)=>item.sourcePremiseId)).toEqual(['P3']);
+  expect(result.ideas.map((item:any)=>item.sourcePremiseId)).toEqual(['P3']);
   expect(result.appealGate.returned).toBe(1);
 });
 

@@ -68,7 +68,7 @@ describe('aggregate review before capacity partitioning', () => {
     await expect(c.reviewIdeaPresentation(cards(), [], '', budget)).rejects.toThrow('预算不足');
     expect(budget.remaining).toBe(0); expect(leaves).toHaveLength(1);
   });
-  it('keeps the aggregate review when partitions cannot preserve a protocol-correction credit', async () => {
+  it('uses fully funded concurrent partitions even when no extra correction credit remains', async () => {
     vi.mocked(config.readGenerationBudgets).mockReturnValue({
       ...config.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:0,sourceBatchSize:3,
     });
@@ -89,7 +89,7 @@ describe('aggregate review before capacity partitioning', () => {
     });
     const result=await c.reviewPremiseSelection(sel,'有效标准','source_drift',{remaining:2});
     expect(result.sourceChecks).toHaveLength(50);
-    expect(seen).toEqual([5]);
+    expect(seen).toEqual([3,2]);
   });
   it('passes all fifty source checks through one production JSON helper call', async () => {
     vi.mocked(config.readGenerationBudgets).mockReturnValue({
