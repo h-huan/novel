@@ -1525,7 +1525,7 @@ describe('cross-chapter boundary enforcement', () => {
     controller.realLLM = { generate: vi.fn().mockResolvedValue({ content: JSON.stringify({
       patches: [
         { original: '二楼那户仍写着名字。', replacement: '二楼那户已变成空白。' },
-        { original: '屋里只有一本账册。', replacement: '屋里只有一本账册！！' },
+        { original: '屋里只有一本账册。', replacement: '屋里只有一本账册！！！！' },
       ],
     }) }) };
     const after = await controller.repairOutlineFactsLocally({
@@ -1534,7 +1534,7 @@ describe('cross-chapter boundary enforcement', () => {
     });
     expect(after).toContain('二楼那户已变成空白。');
     expect(after).toContain('屋里只有一本账册。');
-    expect(after).not.toContain('屋里只有一本账册！！');
+    expect(after).not.toContain('屋里只有一本账册！！！！');
   });
 
   it('surfaces a network failure in local outline repair instead of silently rewriting the chapter', async () => {
