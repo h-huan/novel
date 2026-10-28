@@ -109,6 +109,12 @@ describe('requested genre is an identity constraint, not a duplicate verdict',()
     expect(prompt).toContain('收存证据、准备材料不能冒充导致对手行动');
     expect(prompt).toContain('恋爱类不能只有查案、补课、事后作证');
     expect(prompt).toContain('入选骨架应有至少一个真实事件构成可简短转述的记忆点');
+    // Output economy is a transport optimization, not permission to omit
+    // causal links or downgrade the preselection quality contract.
+    expect(prompt).toContain('最短连续原文');
+    expect(prompt).toContain('不丢掉决定性桥接');
+    expect(prompt).toContain('勿跨字段重述同一整段');
+    expect(prompt).toContain('必要的行动主体、对象、前置能力与兑现条件必须完整保留');
   });
 });
 describe('idea discovery preselection contract', () => {
