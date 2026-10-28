@@ -190,7 +190,7 @@ import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQu
 import { causalEvidenceAnchors, applyCausalAuditRepair, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit } from '../modules/writing-quality/causal-review';
 import { chapterReviewRetryContent, chapterReviewRetrySource, chapterReviewRetryTimePlan } from './chapter-review-retry';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
-import { prohibitedFictionNames } from '../../shared/src/fiction-naming';
+import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
 import { chapterDetailStructureIssues } from './chapter-detail-contract';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
@@ -5683,7 +5683,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
 硬性要求：
 1. targetPlatform 必须原样等于“${dto.platform}”，storyType 必须等于“${dto.storyType}”；不得推荐或改写平台。
 2. ${targetRule} plannedChapters 必须满足 estimatedWords ÷ 章节数落在每章 ${chapterRange.min}-${chapterRange.max} 字；scopeBreakdown.chapters是每阶段占用的章节数量，不是阶段序号或结束章号，所有阶段数量合计必须等于plannedChapters。先分配数量，再写阶段文字与事件，不让阶段文字与数量相互矛盾。
- 3. 已选值必须原样继承；留空维度按创作字典为每个题材显式组合，不得空着创建：${autoSelectionRules}；${cardSubmissionRule}。每项 JSON 必须额外包含 storyCategory="${cardCategory}"、submissionTags 数组及 plotTags 数组；示例 JSON 中的空数组只是字段形状，不代表可留空。题材、钩子、事件链必须体现这些选择。与其它已选题材的差异已经在创建前筛选阶段确定，本阶段只忠实结构化当前胚子，不得为了制造差异换题。
+ 3. 已选值必须原样继承；留空维度按创作字典为每个题材显式组合，不得空着创建：${autoSelectionRules}；${cardSubmissionRule}。每项 JSON 必须额外包含 storyCategory="${cardCategory}"、submissionTags 数组及 plotTags 数组；示例 JSON 中的空数组只是字段形状，不代表可留空。题材、钩子、事件链必须体现这些选择。与其它已选题材的差异已经在创建前筛选阶段确定，本阶段只忠实结构化当前胚子，不得为了制造差异换题。包含scopeBreakdown、人物和阶段规划的全部叙事字段必须使用虚构的软件及平台名称，不能夹带真实商业品牌。
 ${excludeText}${structureText}
 
 JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
@@ -5706,7 +5706,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         });
         const rawIdeas = extractIdeaList(response.content || '') || [];
         try {
-          return retainValidAutomaticPlotTags(bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas),dto.plotTags,autoOptions.plotTags);
+          // A prohibited chat-brand nickname can appear in an optional narrative
+          // field even when the premise was clean. Use the EXISTING literal
+          // name-only transformer before server-owned premise binding; preserve
+          // all story facts and the unchanged final naming/quality Gate.
+          const normalizedIdeas=rawIdeas.map(raw=>{
+            if(!raw||typeof raw!=='object'||Array.isArray(raw))return raw;
+            return prohibitedFictionNames(raw).includes('微信')
+              ?applyFictionNamingReplacements(raw,{'微信':'青信'}):raw;
+          });
+          return retainValidAutomaticPlotTags(bindStructuredIdeaCardToPremise(selectedPremise,normalizedIdeas),dto.plotTags,autoOptions.plotTags);
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           throw new Error(`第 ${position + 1}/${requestedCount} 个已选题材结构化失败：${detail}`);
