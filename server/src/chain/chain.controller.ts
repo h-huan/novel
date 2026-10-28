@@ -6103,7 +6103,6 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       try {fulfillmentStopReason=await fulfillDiscoveryGaps({
         missing:missingAfterGate,hasCard:id=>latestCards.has(id),
         onError:(phase,error)=>{finalGateRepairError=error instanceof Error?error.message:String(error);fulfillmentActions.push({kind:phase+'_failed',error:finalGateRepairError});},
-        repairScope:id=>latestAssessment(id)?.presentationReview?'story':'local_contract',
         // Same-premise repairs can be independently verified even when there
         // is no budget or available candidate for optional pool replacement.
         repairEligible:id=>!readerGoalDeficitRequiresNewPremise(latestAssessment(id)),
