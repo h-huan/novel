@@ -20,7 +20,10 @@ function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionR
  const rebind=(value:string)=>value.startsWith(prefix)?'S1.'+value.slice(prefix.length):value;
  const rows=(values:any[]|undefined)=>values?.filter(row=>row.ref.startsWith(prefix)).map(row=>Object.fromEntries(
   Object.entries(row).map(([key,value])=>[key,(key==='ref'||/evidenceRef$/i.test(key))&&typeof value==='string'?rebind(value)
-   :key==='links'&&Array.isArray(value)?value.map(link=>({...link,ref:rebind(link.ref)})):value])));
+   :key==='links'&&Array.isArray(value)?value.map(link=>({...link,ref:rebind(link.ref)}))
+    :key==='reversalCheck'&&value&&typeof value==='object'
+      ?{...value,...(typeof (value as any).actionEvidenceRef==='string'?{actionEvidenceRef:rebind((value as any).actionEvidenceRef)}:{})}
+      :value])));
  const issues=review.issues.filter(issue=>issue.premiseId===item.premiseId);
  return {selection:{...selection,selected:[item],pool:selection.pool.filter(seed=>seed.premiseId===item.premiseId)},
   review:{passed:issues.length===0,issues,sourceChecks:rows(review.sourceChecks),

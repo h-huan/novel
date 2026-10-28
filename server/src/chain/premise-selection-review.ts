@@ -246,7 +246,11 @@ export function retainPremiseReviewEvidence(
       const newIndex = retained.selected.findIndex(item => String(item.premiseId) === String(originalPremise.premiseId)) + 1;
       if (newIndex <= 0) return [];
       const mapped: Record<string, any> = { ...row, ref: 'S' + newIndex + '.' + match[2] };
-      for (const key of ['evidenceRef', 'actionEvidenceRef', 'conditionEvidenceRef']) {
+      if (mapped.reversalCheck && typeof mapped.reversalCheck === 'object'
+          && typeof mapped.reversalCheck.actionEvidenceRef === 'string')
+          mapped.reversalCheck = {...mapped.reversalCheck,
+            actionEvidenceRef: remapReference(mapped.reversalCheck.actionEvidenceRef, oldIndex, newIndex)};
+        for (const key of ['evidenceRef', 'actionEvidenceRef', 'conditionEvidenceRef']) {
         if (key in mapped) mapped[key] = remapReference(mapped[key], oldIndex, newIndex);
       }
       if (Array.isArray(mapped.links)) mapped.links = mapped.links.map((link: any) => link && typeof link === 'object'

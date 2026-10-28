@@ -20,6 +20,7 @@ it('reviews only two changed items, restores all fifty checks and rebinds eviden
  expect(review.mock.calls.map(([input])=>input.selected.map(item=>item.premiseId))).toEqual([['A','B','C','D','E'],['B','E']]);
  expect(result.passed).toBe(true);expect(result.sourceChecks).toHaveLength(50);
  expect(result.payoffChecks?.find(row=>row.ref==='S5.payoff')?.actionEvidenceRef).toBe('S5.activeChoice');
+ expect(result.payoffChecks?.find(row=>row.ref==='S5.payoff')?.reversalCheck?.actionEvidenceRef).toBe('S5.activeChoice');
  expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
  expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
 });
@@ -105,6 +106,7 @@ it('reuses real category and manual-genre evidence after single-card rebinding a
  for(let index=0;index<next.selected.length;index++){
   const prefix='S'+(index+1)+'.';
   expect(result.genreChecks?.find(row=>row.ref===prefix+'genre1')?.evidenceRef).toBe(prefix+'activeChoice');
+  expect(result.payoffChecks?.find(row=>row.ref===prefix+'payoff')?.reversalCheck?.actionEvidenceRef).toBe(prefix+'activeChoice');
   expect(result.categoryChecks?.find(row=>row.ref===prefix+'category')?.evidenceRef).toBe(prefix+'coreConflict');
  }
 });

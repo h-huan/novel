@@ -60,6 +60,8 @@ export function mergePremiseSourceBatches(selection: PremiseSelectionResult, bat
     const rebind=(ref:string)=>ref.replace(/^S\d+\./,'S'+(position+1)+'.');
     return {...check,ref:rebind(check.ref),...(check.actionEvidenceRef?{actionEvidenceRef:rebind(check.actionEvidenceRef)}:{}),
       ...(check.conditionEvidenceRef?{conditionEvidenceRef:rebind(check.conditionEvidenceRef)}:{}),
+      ...(check.reversalCheck?{reversalCheck:{...check.reversalCheck,
+        ...(check.reversalCheck.actionEvidenceRef?{actionEvidenceRef:rebind(check.reversalCheck.actionEvidenceRef)}:{})}}:{}),
       ...(check.links?{links:check.links.map(link=>({...link,ref:rebind(link.ref)}))}:{})};
   }));
   result.passed=result.issues.length===0;return result;
