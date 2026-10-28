@@ -17,18 +17,19 @@ it.each([{...supported,actionEvidenceRef:'S2.activeChoice'},{...supported,action
  expect(premisePayoffReviewIssues({payoffChecks:[row]},selection).length).toBeGreaterThan(0);
 });
 it.each([false,true])('starts both production preselection reviews and drains the peer before returning (failure=%s)',async fail=>{
+ const pair={...selection,selected:[selection.selected[0],{...selection.selected[0],premiseId:'P2'}]};
  const controller=Object.create(ChainController.prototype) as any,started:string[]=[],releases:Record<string,()=>void>={},limiters:unknown[]=[];
  controller.reviewPremiseSelection=vi.fn(async(candidate:any,_standard:string,mode:string,_budget:unknown,_batch:boolean,_genres:unknown,limiter:unknown)=>{
-   expect(candidate).toBe(selection);limiters.push(limiter);started.push(mode);
+   expect(candidate).toBe(pair);limiters.push(limiter);started.push(mode);
    await new Promise<void>(resolve=>{releases[mode]=resolve;});
    if(fail&&mode==='source_drift')throw Error('source protocol incomplete');
    return {passed:true,issues:[]};
  });
- let done=false;const result=controller.reconcilePremiseSelection(selection,1,1,[],'').then((value:any)=>{done=true;return value;},(error:Error)=>{done=true;return error;});
+ let done=false;const result=controller.reconcilePremiseSelection(pair,2,2,[],'').then((value:any)=>{done=true;return value;},(error:Error)=>{done=true;return error;});
  expect(started).toEqual(['source_drift','overlap']);expect(limiters[0]).toBe(limiters[1]);
  releases.source_drift();await new Promise(resolve=>setTimeout(resolve,0));expect(done).toBe(false);
  releases.overlap();const value=await result;
- if(fail)expect(value.message).toContain('未生成完整卡');else expect(value.selected).toBe(selection.selected);
+ if(fail)expect(value.message).toContain('未生成完整卡');else expect(value.selected).toBe(pair.selected);
  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
 });
 it('routes a real gap to preselection and never retains an unqualified item as locked',()=>{
