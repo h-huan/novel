@@ -9,6 +9,7 @@ import {
   retainValidAutomaticPlotTags,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
+  ideaCardHistoryTitleReminder,
   ideaGateLocalRepairDirective,
   ideaHookRequirement,
   ideaPremiseSelectionDirective,
@@ -32,6 +33,26 @@ const selectedPremise = (premiseId: string) => ({
   secondOrderConsequence: '规则启动后第三方受益，迫使原本同盟的人重新站队',
   readerQuestion: '主角能否在失去工作前找到真正操纵订单的人',
   differentiation: '冲突由具体职业责任和不可替换关系共同推动，不靠换名套路',
+});
+
+describe('locked-card historical exclusion transport', () => {
+  it('does not repeat full historical story material once the premise is locked, while retaining every title', () => {
+    const excludes = [
+      { title: '旧题材一', hook: '历史钩子秘密不应重复给已锁定题材卡'.repeat(15), description: '历史故事完整概要应在上游去重和最终Gate保留'.repeat(40) },
+      { title: '旧题材二', hook: '第二条历史钩子', description: '第二条历史概要' },
+    ];
+    const original = structuredClone(excludes);
+    const prompt = ideaCardHistoryTitleReminder(excludes);
+    expect(prompt).toContain('1. 旧题材一');
+    expect(prompt).toContain('2. 旧题材二');
+    expect(prompt).toContain('最终去重仍使用原始完整历史');
+    expect(prompt).not.toContain(excludes[0].hook);
+    expect(prompt).not.toContain(excludes[0].description);
+    expect(prompt).not.toContain(excludes[1].description);
+    expect(excludes).toEqual(original);
+    expect(prompt.length).toBeLessThan(JSON.stringify(excludes).length / 3);
+    expect(ideaCardHistoryTitleReminder([])).toBe('');
+  });
 });
 
 describe('locked-card structuring reference transport',()=>{

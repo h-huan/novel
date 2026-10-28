@@ -22,7 +22,7 @@ import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } f
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
 import { createReviewLimiter } from './review-limiter';
-import { ideaDiscoveryAuthorContext } from './idea-discovery-contract';
+import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
@@ -5637,9 +5637,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const cardSchema = JSON.parse(outputSchemaWithAuto);
         cardSchema.ideas[0].storyCategory = cardCategory;
         cardSchema.ideas[0].submissionTags = dto.submissionTags.length ? dto.submissionTags : (submission.required ? ['从本分类标签候选选择1-2项'] : []);
-        const excludeText = excludes.length
-          ? `\n历史作品与本次明确排除题材（标题、职业场景、异常机制、核心冲突、代价和反转均不得换名复用）：\n${excludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 160)}` : ''}`).join('\n')}`
-          : '';
+        const excludeText = ideaCardHistoryTitleReminder(excludes);
         const structureText = ideaCardStructuringDirective(selectedPremise, sameBatchPremises, false);
         // 灵感阶段就把该平台分类的头部实测体量锚点交给模型。
         // 不带锚点，模型只能凭故事类型自由选体量：长篇默认挑 10-30 万，落到具体平台分类下就落在
