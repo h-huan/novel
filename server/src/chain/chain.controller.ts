@@ -40,7 +40,7 @@ import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosi
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
+import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, verifiedReserveReplacements, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -6062,16 +6062,21 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           fulfillmentActions.push({kind:'original_pool_replacement',replaces:targets,...reserve});
           if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}
           if(!reserve.attempted)return 'unavailable';
-          if(!reserve.review.passed)return 'rejected';
-          const newPremises=reserve.replacements.map(entry=>{
+          // Both independent reviews already completed. Isolate only those
+          // replacement identities with actual source/causal/overlap failures.
+          const verified=verifiedReserveReplacements(reserve.selection,reserve.review,
+            reserve.replacements,accepted.map(card=>String(card.sourcePremiseId)));
+          fulfillmentActions.push({kind:'replacement_review_reuse',
+            acceptedReplacementPremiseIds:verified.map(row=>row.replacementPremiseId),
+            rejectedReplacementPremiseIds:reserve.replacements.filter(row=>
+              !verified.some(kept=>kept.replacementPremiseId===row.replacementPremiseId))
+              .map(row=>row.replacementPremiseId)});
+          if(!verified.length)return 'rejected';
+          const newPremises=verified.map(entry=>{
             const position=selectedPremises.findIndex(item=>String(item.premiseId)===entry.replacesPremiseId);
             return {position,premise:reserve.selection.selected[position]};
           });
           if(newPremises.some(item=>item.position<0||!item.premise))throw Error('汇总换选返回未知槽位，未接纳任何完整卡');
-          for(const {position,premise} of newPremises){
-            selectedPremises[position]=premise;
-            selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
-          }
           // A batch of independently reviewed replacements has no dependency
           // between its card structuring calls. Use the SAME bounded scheduler
           // as initial cards, instead of serially awaiting each replacement.
@@ -6080,6 +6085,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const reserveCardReviewCalls=minimumCardReviewCalls(newPremises.length,newPremises.length);
           if(presentationBudget.remaining<newPremises.length+reserveCardReviewCalls)
             return 'unavailable';
+          // Only mutate active slots once generation and independent final
+          // review can both be funded by the existing physical-call budget.
+          for(const {position,premise} of newPremises){
+            selectedPremises[position]=premise;
+            selectedCategoryById.set(String(premise.premiseId),String(premise.storyCategory||dto.storyCategory));
+          }
           presentationBudget.remaining-=reserveCardReviewCalls;
           let replacementResults:PromiseSettledResult<Record<string,unknown>>[];
           try {

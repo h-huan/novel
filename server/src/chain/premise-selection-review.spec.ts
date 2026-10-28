@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, verifiedReserveReplacements, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -955,4 +955,25 @@ it('replaces two missing positions under one source and one overlap review, pres
  expect(result.selection.selected[0]).toEqual(current.selected[0]);
  expect(attempts.remaining).toBe(1);expect(sources.remaining).toBe(0);
  expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+});
+
+it('keeps two independently reviewed replacements and isolates a third failed causal plan without another review',()=>{
+  const changed=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F'].map(premise),
+    selectedPremises:['A','D','E','F'].map(premise)},4,6);
+  const pairs=[{replacesPremiseId:'B',replacementPremiseId:'D'},
+    {replacesPremiseId:'C',replacementPremiseId:'E'},
+    {replacesPremiseId:'G',replacementPremiseId:'F'}];
+  const sourceChecks=premiseSourceComparisonCatalog(changed)
+    .filter(row=>['D','E','F'].includes(row.premiseId))
+    .map(row=>({ref:row.ref,status:'preserved' as const,reason:'逐字段核对已有原池事实和因果'}));
+  const issue={kind:'selection_fit' as const,premiseId:'F',referencePremiseId:'F',
+    quote:premise('F').payoff,referenceQuote:premise('F').storyCore,
+    reason:'决定性结果缺少可核验的中间行动条件'};
+  const review:PremiseSelectionReview={passed:false,issues:[issue],sourceChecks};
+  expect(verifiedReserveReplacements(changed,review,pairs,['A'])).toEqual(pairs.slice(0,2));
+  expect(changed.selected.map(x=>x.premiseId)).toEqual(['A','D','E','F']);
+  expect(()=>verifiedReserveReplacements(changed,{...review,sourceChecks:sourceChecks.slice(1)},pairs,['A']))
+    .toThrow('换选独立来源审核缺失');
+  expect(()=>verifiedReserveReplacements(changed,{...review,passed:true},pairs,['A']))
+    .toThrow('换选审核证据不可用');
 });
