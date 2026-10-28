@@ -6230,7 +6230,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
-        preselectionSurplus: Math.max(0,selectedPremises.length-requestedCount),
+        preselectionSurplus: premiseDiscovery.reviewedReservePremises.length,
         preselectionShortfall,
         selectionAudit: premiseDiscovery.selectionAudit,
         generated: structuredCards.length,
