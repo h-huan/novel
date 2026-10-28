@@ -32,6 +32,7 @@ it('requires an independent payoff verdict even when every source check is prese
  expect(premisePayoffReviewIssues({payoffChecks:[supported]},selection)).toEqual([]);
  expect(premisePayoffReviewDirective(selection)).toContain('不把结局声称');
  expect(premisePayoffReviewDirective(selection)).toContain('对象、数量和时间跨度');
+ expect(premisePayoffReviewDirective(selection)).toContain('未来可能获得的资格');
  expect(premisePayoffReviewDirective(selection)).toContain('不能替故事补出未写的补救行动');
 });
 it.each([{...supported,actionEvidenceRef:'S2.activeChoice'},{...supported,actionEvidenceRef:'S1.payoff'},{...supported,actionEvidenceRef:'S1.differentiation'},{...supported,conditionEvidenceRef:'S1.nonexistent'},{...supported,actionEvidenceRef:undefined}])('rejects wrong-card, result-only, absent and missing action references',row=>{
