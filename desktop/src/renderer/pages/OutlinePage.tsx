@@ -1511,8 +1511,11 @@ const OutlinePage: React.FC = () => {
             <EmptyState title="暂无大纲" hint="请在灵感发现中创建项目，或切换到 AI 大纲生成。" action={<button type="button" onClick={() => setActiveView('generate')} style={styles.primarySmallButton}>立即生成大纲</button>} />
           ) : projectType === 'long' ? (
             <>
-              <div style={{ ...styles.treePanel, marginBottom: 12, padding: 12 }}>
-                <div style={styles.treeTitle}>全书骨架（非正文、非章节列表）</div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+                <details style={{ flexShrink: 0, padding: '6px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                    全书骨架 · 世界观／主线与分卷／人物势力／伏笔／时间线
+                  </summary>
                 <p style={{ margin: '8px 0', fontSize: 13, color: 'var(--color-text-dim)', lineHeight: 1.7 }}>
                   故事核心与结局方向、世界规则、分卷目标、人物与势力、伏笔及时间线共同构成全书骨架；
                   后续详细章纲只执行骨架，不等于骨架本身。
@@ -1525,12 +1528,13 @@ const OutlinePage: React.FC = () => {
                   <Link to={`/project/${projectId}/foreshadowing`}>全书／卷级伏笔</Link>
                   <Link to={`/project/${projectId}/timeline`}>关键时间线</Link>
                 </div>
-                <div style={{ marginTop: 10, fontSize: 13, color: 'var(--color-text-soft)' }}>
-                  <strong>全书分卷规划</strong>（{volumes.length} 卷）：
-                  {volumes.map(volume => volume.title).join('、') || '尚未生成卷纲'}
-                </div>
-              </div>
-              <div style={styles.treePanel}>
+                  <div style={{ marginTop: 10, fontSize: 13, color: 'var(--color-text-soft)' }}>
+                    <strong>全书分卷规划</strong>（{volumes.length} 卷）：
+                    {volumes.map(volume => volume.title).join('、') || '尚未生成卷纲'}
+                  </div>
+                </details>
+                <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+                  <div style={styles.treePanel}>
                 <div style={{ ...styles.treeTitle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                   <span>章节列表（已生成的详细章纲）</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -1604,7 +1608,9 @@ const OutlinePage: React.FC = () => {
                   ))}
                 </div>
               </div>
-              <div style={styles.detailPanel}>{selectedChapter ? renderDetail() : <EmptyState title="点击左侧章节查看详情" />}</div>
+                  <div style={styles.detailPanel}>{selectedChapter ? renderDetail() : <EmptyState title="点击左侧章节查看详情" />}</div>
+                </div>
+              </div>
             </>
           ) : (
             <>
