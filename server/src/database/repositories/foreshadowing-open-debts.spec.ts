@@ -3,8 +3,9 @@ import {ForeshadowingRepository} from './foreshadowing.repository';
 describe('open foreshadowing debt across independent concurrent threads',()=>{
  it('keeps buried, active, reminded and legacy-pending stories visible to ongoing planning and warnings',()=>{
   const queries:string[]=[];
-  const repo=Object.create(ForeshadowingRepository.prototype) as any;
-  repo.db={prepare:(sql:string)=>{queries.push(sql);return {all:()=>[]};}};
+  const repo=new ForeshadowingRepository({getDb:()=>({
+    prepare:(sql:string)=>{queries.push(sql);return {all:()=>[]};},
+  })} as any);
   repo.getPending('p');
   repo.getOverdueWarnings('p',30);
   expect(queries).toHaveLength(2);
