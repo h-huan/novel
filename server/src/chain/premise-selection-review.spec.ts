@@ -180,29 +180,34 @@ it('stops reserve reselection after the second verified wave fills five of eight
   expect(result.selectionAudit.excludedPremiseIds).toContain('M');
 });
 
-it('reuses all independent reviews and avoids repeated pool reselection when five of eight are verified',async()=>{
-  const ids=['A','B','C','D','E','F','G','H'];
-  const input=normalizePremiseSelectionPayload({
-    pool:ids.map(premise),selectedPremises:ids.map(premise),
-  },8,15);
-  const source=materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(input).map(row=>({
-    ref:row.ref,status:(['F','G','H'].includes(row.premiseId)?'drift':'preserved') as 'drift'|'preserved',
-    reason:'逐字段比对当前完整事实与原始来源后形成的真实审查结论',
-  }))},input);
+it('fills three independently rejected shortlist positions from the fixed pool before full cards',async()=>{
+  const ids='ABCDEFGHIJK'.split('');
+  const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
+    selectedPremises:ids.slice(0,8).map(premise)},8,15);
   const controller=Object.create(ChainController.prototype) as any;
   controller.logger={log:vi.fn(),warn:vi.fn()};
-  controller.reviewPremiseSelection=vi.fn(async(_selection:any,_standard:string,mode:string)=>
-    mode==='source_drift'?source:{passed:true,issues:[]});
-  controller.llmCallWithRetry=vi.fn();
-  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],undefined,5);
-  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D','E']);
-  expect(result.selectionAudit).toMatchObject({reselectionAttempted:false,
-    selectionStopReason:'reviewed_surplus_retained',requestedDeliveryCount:5,preselectionTarget:8});
-  expect(result.selectionAudit.initialReview.issues).toHaveLength(source.issues.length);
-  expect(result.selectionAudit.finalReview).toMatchObject({passed:true,issues:[]});
-  expect(result.selectionAudit.finalReview.sourceChecks).toHaveLength(premiseSourceComparisonCatalog({ ...input,selected:input.selected.slice(0,5) }).length);
-  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
-  expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+  controller.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
+    if(mode==='overlap')return {passed:true,issues:[]};
+    return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(current).map(row=>({
+      ref:row.ref,status:['F','G','H'].includes(row.premiseId)&&row.field==='payoff'?'drift':'preserved',
+      reason:'核对该题材来源、行动和结果必要条件后的实质事实判定',
+    }))},current);
+  });
+  controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+    expect(prompt).toContain('replacements恰好3项');
+    const data={replacements:['F','G','H'].map((id,index)=>({
+      replacesPremiseId:id,premise:premise(['I','J','K'][index]),
+    }))};
+    expect(options.validate(data)).toBe(true);
+    return {data};
+  });
+  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],
+    {reviews:{remaining:12},reselection:{remaining:3}},5);
+  expect(result.selected.map((x:any)=>x.premiseId)).toEqual(['A','B','C','D','E','I','J','K']);
+  expect(result.selectionAudit.reselectionAttempted).toBe(true);
+  expect(result.selectionAudit.finalReview.passed).toBe(true);
+  expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
+  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(4);
 });
 
 it('does not call an overlap model for a singleton request because no pair exists',async()=>{
