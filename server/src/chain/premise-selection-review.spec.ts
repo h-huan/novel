@@ -22,12 +22,11 @@ it('keeps all substantive overlap facts and sources in memory while removing rep
   const viewed=overlapReviewSelectionView([first,second]);
   expect(viewed).toHaveLength(2);
   for(let i=0;i<2;i++){
-    for(const field of ['premiseId','workingTitle','storyCategory','protagonistSituation','openingEvent','coreConflict',
+    for(const field of ['premiseId','workingTitle','storyCore','storyCategory','protagonistSituation','openingEvent','coreConflict',
       'activeChoice','escalation','reversalEffect','payoff','irreplaceableCarrier','secondOrderConsequence','readerQuestion']){
       expect(viewed[i][field]).toEqual(original[i][field]);
     }
     expect(viewed[i]).not.toHaveProperty('causalPlan');
-    expect(viewed[i]).not.toHaveProperty('storyCore');
   }
   expect([first,second]).toEqual(original);
   expect(JSON.stringify(viewed).length).toBeLessThan(JSON.stringify(original).length);

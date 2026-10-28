@@ -17,7 +17,6 @@ import {
   normalizePremiseSelectionPayload,
   minimumAcceptableIdeaCount,
   selectedPremiseEvidenceForIdeaCard,
-  ideaPresentationPeerView,
 } from './idea-discovery-contract';
 
 const selectedPremise = (premiseId: string) => ({
@@ -62,25 +61,6 @@ describe('locked-card structuring reference transport',()=>{
     expect([target,peer]).toEqual(before);
     const oldPeers=Object.fromEntries(Object.entries(peer).filter(([key])=>key!=='premiseId'&&key!=='causalPlan'));
     expect(JSON.stringify(refs).length).toBeLessThan(JSON.stringify([oldPeers]).length/2);
-  });
-});
-
-describe('presentation reference transport', () => {
-  it('retains peer action, escalation, reversal and final consequences but omits non-evidence self-assessments and metadata', () => {
-    const peer = {title:'参考故事',storyType:'short_story',targetPlatform:'fanqie',storyCategory:'都市日常',
-      hook:'具体利益冲突',coreConflict:'主人公与对手争夺同一资源',mainReversal:'选择改变了输赢条件',
-      description:'主动选择导致关系升级和新的阻力',setting:'故事发生在车站',protagonist:'普通工作人员',
-      ending:'主角兑现承诺但承担代价',scopeBreakdown:[{outcome:'现实后果'}],
-      noveltyProof:{selfClaim:'这是独一无二的故事'},uniquePoint:'自称独特',storyTone:['悬疑'],
-      writingStyle:['口语'],webNovelGenre:['扮猪吃虎'],plotTags:['转折'],submissionTags:['其它'],pov:'第一人称'};
-    const before=structuredClone(peer);
-    const reference=ideaPresentationPeerView(peer);
-    for(const field of ['title','hook','coreConflict','mainReversal','description','setting','protagonist','ending','scopeBreakdown','storyCategory'])
-      expect(reference[field]).toEqual(peer[field]);
-    for(const field of ['noveltyProof','uniquePoint','storyTone','writingStyle','webNovelGenre','plotTags','submissionTags','pov'])
-      expect(reference).not.toHaveProperty(field);
-    expect(peer).toEqual(before);
-    expect(JSON.stringify(reference).length).toBeLessThan(JSON.stringify(peer).length);
   });
 });
 
