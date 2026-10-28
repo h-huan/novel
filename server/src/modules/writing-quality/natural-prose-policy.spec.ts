@@ -25,6 +25,17 @@ describe('natural prose and evidenced reading goals',()=>{
       expect(standardDirectiveCache.get(stage)).toContain('高光和钩子只突出已经安排');
     }
   });
+  it('requires expressive punctuation, natural paragraph breaks, flexible numerals, and traceable dialogue without a second style gate',()=>{
+    for(const phrase of ['问号、感叹号','【】可用于','一至五字','谁在当前场景对谁说','“三分钟”','不要求把自然口语'])
+      expect(NATURAL_PROSE_POLICY).toContain(phrase);
+    const punctuation=detectForbiddenTells('“真的吗？！”她问。\\n\\n【次日·门口】他看完通知，回到办公室。');
+    expect(punctuation.some(row=>row.ruleId==='56-punct-stacking')).toBe(false);
+    new ModuleStandardsService().onModuleInit();
+    for(const stage of ['writing','review','quality_refine']){
+      const standard=standardDirectiveCache.get(stage);
+      expect(standard.split(NATURAL_PROSE_POLICY).length-1).toBe(1);
+    }
+  });
   it('does not exchange human tone for broken logic or unnecessary explanations',()=>{
     expect(NATURAL_PROSE_POLICY).toContain('事实矛盾');
     expect(NATURAL_PROSE_POLICY).toContain('必要因果');

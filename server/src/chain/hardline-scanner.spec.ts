@@ -291,6 +291,15 @@ describe('hardline-scanner 规则55 AI 高频模糊词密度', () => {
 });
 
 describe('isLanguageHardline 阻断集合（只保留可确定证据）', () => {
+  it('distinguishes genuine malformed punctuation runs from legitimate emotional emphasis',()=>{
+    const normal='“快看！！”她喊了一声。\\n\\n“真的吗？！”他还在核对来电。\\n\\n“怎么会？？？”她又看了一遍。';
+    expect(detectForbiddenTells(normal).some(f=>f.ruleId==='56-punct-stacking')).toBe(false);
+    const malformed='“等等！！！！”她伸手拦住。\\n\\n“为什么？！？”他问。';
+    const abnormal=detectForbiddenTells(malformed).find(f=>f.ruleId==='56-punct-stacking');
+    expect(abnormal?.occurrenceCount).toBe(2);
+    expect(abnormal?.hitCharOffsets).toEqual([malformed.indexOf('！！！！'),malformed.indexOf('？！？')]);
+    expect(isLanguageHardline('56-punct-stacking')).toBe(true);
+  });
   it('客观可复算/可定位的重复、格式和明确语言错误继续阻断保存', () => {
     for (const id of ['15c', '15d', '33', '35', '35b', '42', '44', '54-measure-word-mismatch', '56-punct-stacking']) expect(isLanguageHardline(id), id).toBe(true);
   });
