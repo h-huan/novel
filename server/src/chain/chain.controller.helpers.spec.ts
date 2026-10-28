@@ -1572,7 +1572,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused', 'pool_naming'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1691,7 +1691,8 @@ describe('idea discovery live orchestrator behavior', () => {
             storyCategoryId: 'K1',
           }] }) };
         }
-        return { content: JSON.stringify({ pool }) };
+        return { content: JSON.stringify({ pool: failure==='pool_naming'&&request.metrics?.attempt===0
+          ? [{...pool[0],workingTitle:'禁止命名的前置候选',storyCore:pool[0].storyCore+'宠物豆包被接回家。'},...pool] : pool }) };
       }
       if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: selectedForBatch }) };
       if (step === 'idea_card_structure') {
@@ -1773,6 +1774,11 @@ describe('idea discovery live orchestrator behavior', () => {
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
     expect(selectionCall?.[0].prompt).toContain('只输出selectedPremises');
+     if(failure==='pool_naming'){
+       expect(selectionCall?.[0].prompt).not.toContain('禁止命名的前置候选');
+       expect(selectionCall?.[0].prompt).not.toContain('宠物豆包被接回家');
+       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({invalid:{naming:1},generated:2,supplementAttempted:false});
+     }
     if(failure==='preselection_shortfall'){
       expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(false);
       expect(controller.reviewIdeaPresentation).not.toHaveBeenCalled();

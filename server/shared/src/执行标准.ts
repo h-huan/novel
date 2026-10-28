@@ -7,7 +7,9 @@ import type { SystemWorkflowRule } from './system-workflow-rule.types';
 /** 连续修复的升级边界；这是流程预算，不是正文质量阈值。 */
 export const UPSTREAM_REPAIR_ROUTING_LIMITS = { sameFamilyAfterAttempts: 1, maxLocalAttemptsBeforeDiagnosis: 2, maxSourceRepairModelCalls: 3 } as const;
 export const UPSTREAM_REPAIR_ROUTING_POLICY = '同类缺陷经局部修复仍存在且未证明新的实质改善、问题集合增长或局部修复进入连续循环时，先回查章节合同、上下文装配、生成执行与审查协议，再决定处理阶段。不得只因有局部改善持续下游修复；已经由证据复核确认解决了不同问题时，不因共享宽泛问题标签提前停止，仍遵守连续局部尝试上限与共享调用预算；上游诊断必须引用本次输入与正文证据，不能把猜测当已确认源冲突。诊断未完成时保留草稿与原质量结论；修改已确认上游事实须按原作者确认与锁定规则处理，不能自动重写正文或回写Canon。质量候选回滚时须同时显示原稿保留与候选复检的实际阻断或未知维度，不只重复修复前的旧缺陷。失败候选的事实不得进入Canon，其必要条件诊断须作为只读反馈传给下一次源头修订，依赖未通过的候选仅在内存继续修订，锚点取本轮候选位置目录，原Canon作为提交原值校验基线；整体复检通过后才原子提交。原因相同的必要依赖修改一起保留，只有显式声明的互斥备选组才做成本择一；相同或无变化候选不重复复检。每个源头修订任务共用物理模型调用预算，扩容、网络恢复和协议纠错不能重置预算；耗尽或候选复检仍失败时如实停止，不能把停止当验收成功。';
-export const SYSTEM_WORKFLOW_RULESET_VERSION = 253;
+export const SYSTEM_WORKFLOW_RULESET_VERSION = 254;
+
+export const IDEA_PRESELECTION_PREREQUISITE_POLICY = '原池筛选先落实本次平台分类、已选流派的真实人物与行动条件，每个手动流派须逐卡返回独立genreChecks及本卡已选展开evidenceRef，由服务器绑定真实原文，不引用原池来替代展开证据，全部落实方可锁定，不能以来源保持替代维度适配；完整卡独立审核每批按设置中的完整卡审核批量、其它卡仍作为同构参考，所有批次与协议纠正共享设置中的完整卡审核调用上限，每批为尚未运行批次保留至少一次调用，协议纠正只能使用剩余余额；余额不足即停且不得展示未审核卡。不能等完整卡阶段才检查标签适配。沿用现有来源核对中的行动、反转与兑现条目，锁定前检查决定性结果的必要能力和条件；来源保留不等于结果成立，未建立的关键能力不得留到完整卡临时新增。锁定前的同一次选优与来源兑现复核必须先尝试推翻每项关键胜负转换：异常读数不等于证明了具体收费账目或责任人；发现一件物证不等于证明了另一个物件被谁处置；通知有权者来查看门锁不等于已取得钥匙、进入权限、各方配合动机或实际开门行动。核对真实必要的取得、保全、转交、到场、授权和结果决定；结果的对象、数量与时间跨度必须由已发生行动的作用范围及已建立条件支撑，不能由结局倒推历史损失已恢复或他人已决定并执行。不得把结局主张、他人会配合或后果已发生当作必要条件的证明。原池与展开都缺的关键桥接应在首次选优审查判gap，不留给完整卡补造或反复换选；普通直接因果不强加行政手续，也不增加模型调用。普通直接因果不强加手续，不扩大物理调用上限或修复轮次，最终完整卡质量门继续保留。';
 
 export const IDEA_AGGREGATE_RESERVE_POLICY = '锁定前终检发现多个问题位置时，按完整有效审核清单汇总处理，不把首项的局部review覆盖整批review而丢掉其余未解缺陷。备用身份从本批未尝试原池中选择；可用身份足够时一次覆盖全部当前缺额，同时比较合并后的最终候选，不逐卡串行换选再各自重复整轮审核。输出容量确实不足才按实际材料拆分，拆分共享原预算并保留已完成工作。改动后来源审核复用同批同内容已通过凭证，未通过或改变的项继续审核，同构审核覆盖合并选择。一个位置通过不清除其它位置的缺口，实际候选或调用预算不足时保持全部未解决问题并如实缺量，不扩大池、不增加预算、不绕过最终质量门。';
 
@@ -290,7 +292,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
     scenarios: ['idea_generate', 'world_building', 'character_design', 'outline', 'writing', 'review'], consumers: ['prompt', 'persistence', 'semantic_gate'], dependencies: ['AUTH-001'],
     summary: '灵感卡确认后，创建项目必须继承最终平台、分类、基调、文风、流派、作品/情节标签、POV、核心钩子与故事事实。题材池、淘汰候选、筛选理由仅用于诊断，不得注入确认题材的后续生成/评审上下文。单卡失败不能清空其它已通过卡；不足明确显示缺额，不用弱题材补数。 整批完成条件由 WF-005 唯一定义；合格项必须保留，不足不得伪装完成。HTTP 适配层不得另启换题补生。未预选分类且平台有多个可用分类时，整批题材须跨分类探索，不得先随机固定一个分类再生成全部卡；每个入选题材锁定并继承自己的分类。用户已选分类时保持该分类。实质差异仍须体现在人物欲望、关系、冲突机制、选择后果与兑现路径，不能只换分类标签、职业或道具。',
     details: [
-      '原池筛选先落实本次平台分类、已选流派的真实人物与行动条件，每个手动流派须逐卡返回独立genreChecks及本卡已选展开evidenceRef，由服务器绑定真实原文，不引用原池来替代展开证据，全部落实方可锁定，不能以来源保持替代维度适配；完整卡独立审核每批按设置中的完整卡审核批量、其它卡仍作为同构参考，所有批次与协议纠正共享设置中的完整卡审核调用上限，每批为尚未运行批次保留至少一次调用，协议纠正只能使用剩余余额；余额不足即停且不得展示未审核卡。不能等完整卡阶段才检查标签适配。沿用现有来源核对中的行动、反转与兑现条目，锁定前检查决定性结果的必要能力和条件；来源保留不等于结果成立，未建立的关键能力不得留到完整卡临时新增。锁定前的同一次选优与来源兑现复核必须先尝试推翻每项关键胜负转换：异常读数不等于证明了具体收费账目或责任人；发现一件物证不等于证明了另一个物件被谁处置；通知有权者来查看门锁不等于已取得钥匙、进入权限、各方配合动机或实际开门行动。核对真实必要的取得、保全、转交、到场、授权和结果决定；结果的对象、数量与时间跨度必须由已发生行动的作用范围及已建立条件支撑，不能由结局倒推历史损失已恢复或他人已决定并执行。不得把结局主张、他人会配合或后果已发生当作必要条件的证明。原池与展开都缺的关键桥接应在首次选优审查判gap，不留给完整卡补造或反复换选；普通直接因果不强加行政手续，也不增加模型调用。普通直接因果不强加手续，不扩大物理调用上限或修复轮次，最终完整卡质量门继续保留。',IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY, IDEA_DISCOVERY_REWORK_POLICY, PREMISE_PAYOFF_REVIEW_POLICY, IDEA_PROTOCOL_BINDING_POLICY, IDEA_SCOPE_ALLOCATION_POLICY, IDEA_AGGREGATE_RESERVE_POLICY, IDEA_DISCOVERY_FULFILLMENT_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY],
+      IDEA_PRESELECTION_PREREQUISITE_POLICY,IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY, IDEA_DISCOVERY_REWORK_POLICY, PREMISE_PAYOFF_REVIEW_POLICY, IDEA_PROTOCOL_BINDING_POLICY, IDEA_SCOPE_ALLOCATION_POLICY, IDEA_AGGREGATE_RESERVE_POLICY, IDEA_DISCOVERY_FULFILLMENT_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY],
     implementationRefs: ['server/src/chain/idea-discovery-contract.ts', 'server/src/chain/premise-selection-review.ts', 'server/src/chain/premise-payoff-review.ts', 'server/src/chain/review-limiter.ts', 'server/src/chain/discovery-fulfillment.ts', 'server/src/chain/chain.controller.ts'],
   }),
   rule({
@@ -342,7 +344,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
     id: 'GEN-008', name: '故事命名与原创表达', category: 'generation', level: 'P1', status: 'active', blocking: true,
     scenarios: ['idea_generate', 'world', 'character', 'outline', ...WRITING_SCENES], consumers: ['prompt', 'deterministic_gate', 'repair', 'test'], dependencies: ['GEN-002'],
     summary: `故事标题、人物或宠物命名、概要、设定、结局与章节规划使用原创虚构名称，不借真实产品、品牌或知名作品/IP名称制造点击。当前明确禁止字样：${FICTION_NAMING_POLICY.prohibitedNames.join('、')}；即使用作宠物名也须改名。平台选择、模型路由、日志和来源引用属于业务元数据，不冒充故事内容。命名筛查不是法律侵权结论，也不保证仅换名称即可消除剧情抄袭风险。`,
-    details: ['轻量已选胚子与完整卡均检查已知禁止命名。Gate点名后只允许同题材一次名称映射修复，在全部故事文本统一替换且复检；不改角色行为、身份、关系或剧情，不自动替换已确认小说。未知品牌/IP与剧情近似风险继续由语义审查核对。'],
+    details: ['原始轻量池在去重及付费选优前执行同一命名检查，命中项隔离并记入无效命名计数，不能先压掉合法同批项或拖到选优后让整批失败。轻量已选胚子与完整卡仍检查已知禁止命名。Gate点名后只允许同题材一次名称映射修复，在全部故事文本统一替换且复检；不改角色行为、身份、关系或剧情，不自动替换已确认小说。未知品牌/IP与剧情近似风险继续由语义审查核对。'],
     parameterRefs: ['server/shared/src/执行标准.ts'],
     implementationRefs: ['server/shared/src/fiction-naming.ts', 'server/src/chain/idea-discovery-contract.ts', 'server/src/chain/chain.controller.ts'],
     testRefs: ['server/src/chain/fiction-naming.spec.ts'],
@@ -685,7 +687,7 @@ export const SYSTEM_WORKFLOW_PROMPT_RULE_SCOPE_BY_STEP: Readonly<Record<string,r
  * independent final validator remain authoritative and are not filtered here. */
 const IDEA_GENERATION_PROMPT_DETAILS: Readonly<Record<string, readonly string[]>> = {
   'ARCH-005': [STORY_PREREQUISITE_POLICY],
-  'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY, IDEA_SCOPE_ALLOCATION_POLICY],
+  'GEN-002': [IDEA_PRESELECTION_PREREQUISITE_POLICY, IDEA_PRESELECTION_REVIEW_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY, IDEA_SCOPE_ALLOCATION_POLICY],
   'QLT-003': [STORY_ACCEPTANCE_SCOPE_POLICY,
     SHORT_STORY_QUALITY_POLICY, READER_ENGAGEMENT_POLICY,
     '当前任务生成可核验的故事事件与必要条件，不输出正文评分、引文纠错、逐章验收或修复报告。计划可以保留未到揭示时点的答案，决定性结果的必要条件仍须成立；平台、分类、全部作者选择与原创表达仍按完整执行标准落实。'],
@@ -695,19 +697,19 @@ export const SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP: Readonly<Record<string
     ...['idea_premise_selection','idea_card_structure','idea_card_local_repair']
       .map(step=>[step,IDEA_GENERATION_PROMPT_DETAILS]),
     ['idea_premise_pool_reselection', {...IDEA_GENERATION_PROMPT_DETAILS,
-      'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_GAP_REPAIR_POLICY,
+      'GEN-002': [IDEA_PRESELECTION_PREREQUISITE_POLICY, IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_GAP_REPAIR_POLICY,
         PREMISE_REPLACEMENT_COMPARISON_POLICY, IDEA_PROTOCOL_BINDING_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY]}],
     // The pool has no expanded source fields or causalPlan to audit yet.
     ['idea_premise_pool_generation', {...IDEA_GENERATION_PROMPT_DETAILS,
-      'GEN-002': [IDEA_CARD_PROMISE_CLOSURE_POLICY]}],
+      'GEN-002': [IDEA_PRESELECTION_PREREQUISITE_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY]}],
     // Each independent worker receives its own complete contract, rather than
     // generation/reselection budgets and unrelated chapter-report machinery.
-    ['idea_premise_source_drift_review', {'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_PAYOFF_REVIEW_POLICY]}],
+    ['idea_premise_source_drift_review', {'GEN-002': [IDEA_PRESELECTION_PREREQUISITE_POLICY, IDEA_PRESELECTION_REVIEW_POLICY, PREMISE_PAYOFF_REVIEW_POLICY]}],
     ['idea_premise_overlap_review', {'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY]}],
     ['idea_presentation_review', {
       // IDEA_PAYOFF_BRIDGE_POLICY already includes STORY_PREREQUISITE_POLICY.
       'ARCH-005': [],
-      'GEN-002': [IDEA_PRESELECTION_REVIEW_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY],
+      'GEN-002': [IDEA_PRESELECTION_PREREQUISITE_POLICY, IDEA_PRESELECTION_REVIEW_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY],
       'QLT-003': [STORY_ACCEPTANCE_SCOPE_POLICY, SHORT_STORY_QUALITY_POLICY,
         READER_ENGAGEMENT_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY,
         IDEA_REVIEW_EVIDENCE_POLICY, IDEA_PAYOFF_BRIDGE_POLICY],

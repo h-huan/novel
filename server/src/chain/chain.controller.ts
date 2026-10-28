@@ -5201,12 +5201,12 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const seenCores = new Set<string>();
         const poolFilterTotals = {
           rawReturned: 0, rawReturnedUnknownBatches: 0, validBeforeDedup: 0, invalidShape: 0, invalidFields: 0,
-          invalidCategory: 0, duplicateCount: 0, uniqueBeyondTarget: 0,
+          invalidCategory: 0, invalidNaming: 0, duplicateCount: 0, uniqueBeyondTarget: 0,
         };
         const categoryBindingCounts: Record<string, number> = {};
         const batchFilterStats = new Map<number, {
           rawReturned: number | null; validBeforeDedup: number; invalidShape: number; invalidFields: number;
-          invalidCategory: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
+          invalidCategory: number; invalidNaming: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
           categoryBindingCounts: Record<string, number>;
         }>();
         const processPoolBatch = (batch: typeof poolBatchResults[number]) => {
@@ -5216,6 +5216,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             invalidShape: 0,
             invalidFields: 0,
             invalidCategory: 0,
+            invalidNaming: 0,
             duplicateCount: 0,
             retained: 0,
             uniqueBeyondTarget: 0,
@@ -5239,6 +5240,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               || premiseSeedFactIssues(storyCore).length) {
               stats.invalidFields += 1;
               poolFilterTotals.invalidFields += 1;
+              continue;
+            }
+            // Apply the existing naming Gate before deduplication and paid selection.
+            // A forbidden seed must neither suppress a valid peer nor abort all slots later.
+            if (prohibitedFictionNames({workingTitle,storyCore}).length) {
+              stats.invalidNaming += 1;
+              poolFilterTotals.invalidNaming += 1;
               continue;
             }
             let storyCategoryId = 'K1';
@@ -5365,11 +5373,12 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           rawReturnedUnknownBatches: poolFilterTotals.rawReturnedUnknownBatches,
           parseFailureBatchCount: poolBatchResults.filter(item => item.parseFailed).length,
           validBeforeDedup: poolFilterTotals.validBeforeDedup,
-          invalidCount: poolFilterTotals.invalidShape + poolFilterTotals.invalidFields + poolFilterTotals.invalidCategory,
+          invalidCount: poolFilterTotals.invalidShape + poolFilterTotals.invalidFields + poolFilterTotals.invalidCategory + poolFilterTotals.invalidNaming,
           invalid: {
             shape: poolFilterTotals.invalidShape,
             requiredFields: poolFilterTotals.invalidFields,
             categoryBinding: poolFilterTotals.invalidCategory,
+            naming: poolFilterTotals.invalidNaming,
           },
           duplicateCount: poolFilterTotals.duplicateCount,
           uniqueBeyondTarget: poolFilterTotals.uniqueBeyondTarget,
