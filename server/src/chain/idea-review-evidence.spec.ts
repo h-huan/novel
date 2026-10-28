@@ -5,13 +5,39 @@ import { presentationGateIssues } from './idea-presentation-review';
 import { vi } from 'vitest';
 import { readerGoalReviewIssues } from './reader-goal-review';
 import { ideaReviewResponseExample } from './idea-review-evidence';
-import { presentationReviewIssues, targetIdeaReviews } from './idea-presentation-review';
+import { presentationReviewIssues, targetIdeaReviews, compactIdeaPresentationReferences } from './idea-presentation-review';
 const cards=[{title:'危险订单',
  uniquePoint:'她退回赔款转身堵唯一的出口，逼负责人当面解释停工',
  noveltyProof:{uncommonCombination:'唯一出口与主动退回赔款组合，是否有故事支撑须独立审查',avoidedPatterns:'不靠凭空公布证据'},
  plotTags:['身份错位','打脸回报'],storyTone:['热血'],
  hook:'她亲自退回赔款，决定查明停工的原因。',description:'停工让村民没了收入。她借走邻居的车去找负责人。',setting:'负责人下班必须经过唯一的大门。',ending:'她在大门等到了下班的负责人。',scopeBreakdown:[{summary:'负责人拒绝见她，她留在门口等到下班。'}],executionStandard:'非故事执行规则',lockedPremise:{storyCore:'旧胚子事实'}},
  {title:'第二张卡',hook:'其他卡真实原文不能作为第一张卡证据。'}];
+
+it('sends every actual story field to independent Gate but only genuine narrative facts for peer comparison',()=>{
+  const reference={
+    position:2,title:'另一个已审核故事',storyCategory:'悬疑',hook:'当晚只有他发现了错误',
+    description:'他主动追查档案，逼迫对手改变协议，最终承担失业的代价',
+    setting:'夜班档案保管室',protagonist:'仍有工作和家庭责任的人物',
+    coreConflict:'保住亲人的权益和履行单位职责发生冲突',
+    mainReversal:'对方利用规则限制主角，真实责任后来反转',
+    ending:'主角承担职业代价但改变了处理结果',
+    scopeBreakdown:[{arc:'结果',chapters:2,reason:'规则和人物关系变化'}],
+    sourcePremiseId:'P2',executionStandard:'不属于比较故事事实的机器规则',
+    noveltyProof:{uncommonCombination:'未经证实的作者自评独特性'},
+    webNovelGenre:['悬疑推理'],plotTags:['调查'],submissionTags:['悬疑'],
+    readerGoals:{sharing:{status:'supported',reason:'作者自评'}},
+  };
+  const before=structuredClone(reference);
+  const [peer]=compactIdeaPresentationReferences([reference]);
+  for(const key of ['title','storyCategory','hook','description','setting','protagonist',
+    'coreConflict','mainReversal','ending','scopeBreakdown'])
+    expect(peer[key]).toEqual(reference[key]);
+  for(const key of ['sourcePremiseId','executionStandard','noveltyProof',
+    'webNovelGenre','plotTags','submissionTags','readerGoals'])
+    expect(peer).not.toHaveProperty(key);
+  expect(reference).toEqual(before);
+  expect(JSON.stringify(peer).length).toBeLessThan(JSON.stringify(reference).length);
+});
 describe('server-owned idea evidence references',()=>{
  it('validates the same complete response example included in the production prompt',()=>{
   const example=ideaReviewResponseExample();example.reviews[0].title=cards[0].title;

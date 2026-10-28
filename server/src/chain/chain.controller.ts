@@ -42,7 +42,7 @@ import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenc
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
 import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, verifiedReserveReplacements, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
-import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict } from './idea-presentation-review';
+import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
 import { readConstitution, updateConstitution, constitutionSettings, buildExecutionStandard, missingConstitutionStandards, genreFitProblem, categoryPlacementProblem, categoryPlacementMessage, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, audienceChannelHint, platformStandardProblem, buildPlatformStyleDirective, resolveProjectStandardDirective, styleIntensityGuides, type CreativeConstitution } from '../modules/project/creative-constitution';
 import {
@@ -6432,7 +6432,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + (mode === 'source_drift'
         ? '\n【逐字段来源核查目录】' + JSON.stringify(premiseSourceComparisonCatalog(selection).map(({ref,premiseId,field})=>({ref,premiseId,field})))
           + '\n目录中每个ref恰好核查一次，把对应字段与同ID原池storyCore整体比较，特别检查触发动作、承接对象、有无记录等含否定的适用条件、身份及结果方向；反转和兑现不能把原条件改成相反条件。原池是事实基准，已选展开是待核查候选，不能因为同一个新规则在多个展开字段重复就当它已有来源。逐项写出原约束与当前字段如何可同时成立，或哪里互斥；不能只说一致、无问题或重复题材新颖。preserved表示保留原约束且兼容，允许合理新增细节；drift须说明被改变的明确主线事实或必要条件；unknown须说明无法判断兼容性的具体缺失条件，不能只因原池未提及候选细节而判未知。'
-          + '\n【精简逐项说明】每个ref仍须独立核对并返回状态与至少8字的比较理由。preserved只指出本字段与原池对应的关键事实如何相容，不重述两侧全文；drift和unknown保留完整事实、缺口及因果理由。不要输出思考过程、自评分或重复引文。'
+          + '\n【精简逐项说明】每个ref仍须独立核对并返回状态与至少8字的比较理由。preserved只指出本字段与原池对应的关键事实如何相容，通常8—30字足够，不重述两侧全文；drift和unknown必须写清真实事实冲突与缺口，不限制必要证据长度。不要输出思考过程、自评分或重复引文。'
           + (requiredGenres.length ? '\n【额外必返genreChecks】'+JSON.stringify(premiseGenreFitCatalog(selection,requiredGenres))+'；每个ref返回status=fulfilled|missing|unknown、reason至少8字。fulfilled须返回evidenceRef，选择下方同一S编号的已选展开证据，服务器回填field与quote，不要抄写引文，不要引用原池storyCore。证明该流派定义所需的人物与行动机制，不可只引用标签名。每卡须全部落实所有手动流派，不得按卡分摊；未落实返回missing，未知返回unknown。此检查独立于来源忠实度，不得以preserved代替流派适配。\n【流派证据目录：只含已选展开】'+JSON.stringify(premiseGenreEvidenceCatalog(selection).map(({id,premiseId,field})=>({id,premiseId,field})))+'\n【genreChecks单项形状】{"ref":"S1.genre1","status":"fulfilled|missing|unknown","evidenceRef":"S1.protagonistSituation","reason":"按实际流派定义与所选故事证据解释，不预设通过"}，missing或unknown可省略evidenceRef。' : '')
           + '\n只输出一个JSON对象，包含sourceChecks数组、必返payoffChecks数组、上方要求的categoryChecks数组及genreChecks数组（未指定分类可省略categoryChecks，未手动选流派可省略genreChecks）。来源、兑现条件、分类与流派分别判断，不以来源兼容代替结果成立、分类或流派落实。sourceChecks每项为{"ref":"实际目录编号","status":"preserved|drift|unknown","reason":"原池约束与该字段实际事实的比较理由，至少8字"}。所有要求的目录均须覆盖全部编号，不能用整体passed或空issues替代；不重写题材，不自行抄写或拼接引文，服务器按ref绑定原文。'
         : '\n当前审查类型=overlap\n只输出JSON:{"passed":true,"issues":[]}。有已举证问题则passed=false，issues项为'
@@ -12651,7 +12651,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       + '每个position原样返回实际title，六个判据为布尔值；示例支持状态仅示结构，实际缺少条件时返回gap、payoffCredible=false及真实issues。只输出JSON：' + JSON.stringify(ideaReviewResponseExample(cards))
       + '\n【服务器证据编号目录】' + JSON.stringify(ideaReviewEvidenceCatalog(cards).map(({id,field,position})=>({id,field,position})))
       + '\n目录编号只指向本卡上述字段原文，不是新故事。uniquePoint、noveltyProof是待核实的卖点自述，不在可引用目录里，即使原文表面有说服力也不能拿来自证readerGoals.sharing。storyEvidenceRef、payoffEvidenceRef、platformEvidenceRef只能选择hook、description、setting、ending、scopeBreakdown的编号；四项readerGoals各返回本卡在此目录真实存在的evidenceRef（如C1.hook）、status与reason，不能引用自述或其它position。quote与三个Evidence文本由服务器按编号回填，不要自行重写或拼接。unknown确无依据时省略evidenceRef并令quote为空。无法找到证据则评为weak或unknown，不得凭空生成编号或改写已有卡片原文。'
-      + '\n【实际题材卡与已通过参考卡】' + JSON.stringify(packIdeaReviewStandards(display(cards),display(references,false)))
+      + '\n【实际题材卡与已通过参考卡】' + JSON.stringify(packIdeaReviewStandards(display(cards),compactIdeaPresentationReferences(display(references,false))))
       + '\n若存在standardLines，每卡executionStandardRefs的D编号必须按顺序取standardLines原文并用换行拼接，这与该卡完整执行标准逐字等价；所有标准仍逐项执行，不能只看编号或丢弃重复引用。cards是实际待审卡，references只比较差异。';
     const result = await this.llmCallWithRetry<{ reviews: IdeaPresentationVerdict[] }>(
       '题材完整故事与兑现独立审查',reviewPrompt,

@@ -6,6 +6,17 @@ export function shouldBatchIdeaPresentation(count:number,groupingMode:number,bat
   return groupingMode===0&&count>=4&&batchSize>=1&&count>batchSize
     &&availableReviewCalls>=Math.ceil(count/batchSize);
 }
+/** Reference cards are comparison material, not additional cards to be
+ * assessed. Preserve every narrative fact needed for genuine relation,
+ * choice, escalation, reversal and payoff comparison, without retransmitting
+ * labels, author self-praise or execution settings for each peer review.
+ * The actual target cards remain completely unchanged. */
+export function compactIdeaPresentationReferences(references:readonly Record<string,any>[]) {
+  const narrative=['position','title','storyCategory','hook','description','setting','protagonist',
+    'coreConflict','mainReversal','ending','scopeBreakdown'] as const;
+  return references.map(row=>Object.fromEntries(narrative
+    .filter(key=>row[key]!==undefined).map(key=>[key,row[key]])));
+}
 import { ideaReviewCitableNarrativeText } from './idea-review-evidence';
 import { resolveQualityEvidence } from '../modules/writing-quality/quality-issue';
 import { readerGoalReviewIssues, readerGoalGateIssues, type ReaderGoalReview } from './reader-goal-review';
