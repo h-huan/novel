@@ -190,13 +190,17 @@ describe('ARCH-004 progressive outline window', () => {
     const db=controller.db.getDb();
     const oldPrepare=db.prepare;
     const written=new Map<number,string>();
+    const writtenChapters=new Map<number,string>();
     db.prepare=(sql:string)=>{
       const st=oldPrepare(sql);
       if(sql.includes('INSERT INTO outlines'))return {...st,run:(id:string,_p:string,_level:string,_parent:string,order:number,...rest:any[])=>{
         written.set(order,id);return st.run(id,_p,_level,_parent,order,...rest);
       }};
+      if(sql.includes('INSERT INTO chapters'))return {...st,run:(id:string,_p:string,_outline:string,volumeNo:number,chapterNo:number,...rest:any[])=>{
+        writtenChapters.set(chapterNo,id);return st.run(id,_p,_outline,volumeNo,chapterNo,...rest);
+      }};
       if(sql.includes('SELECT id FROM outlines WHERE project_id=?'))return {...st,get:(_p:string,order:number)=>written.has(order)?{id:written.get(order)}:undefined};
-      if(sql.includes('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?'))return {...st,get:()=>({id:'chapter-21'})};
+      if(sql.includes('SELECT id FROM chapters WHERE project_id=? AND chapter_index=?'))return {...st,get:(_p:string,chapterNo:number)=>writtenChapters.has(chapterNo)?{id:writtenChapters.get(chapterNo)}:undefined};
       return st;
     };
     controller.stateItemService={create:vi.fn(()=>{throw Error('保存候选状态中断')})};
