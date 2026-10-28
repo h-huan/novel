@@ -5144,7 +5144,7 @@ ${promptPhase === 'selection'
 JSON 结构：${JSON.stringify(promptSchema)}`;
       };
 
-      const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown }> => {
+      const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown; reviewedReservePremises: Array<Record<string,unknown>> }> => {
         const poolBatchCount = Math.min(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, premisePoolSize);
         const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
         const extraBatchCount = premisePoolSize % poolBatchCount;
