@@ -111,6 +111,31 @@ const selection = () => normalizePremiseSelectionPayload({ pool: ['A', 'B', 'C']
 const failure: PremiseSelectionReview = { passed: false, issues: [{ kind: 'overlap', premiseId: 'B', referencePremiseId: 'A',
   quote: '每次救人自己的存在逐渐消失', referenceQuote: '每次救人自己的存在逐渐消失', reason: '选择与代价及旧签字反转机制同构' }] };
 
+it('reuses all independent reviews and avoids repeated pool reselection when five of eight are verified',async()=>{
+  const ids=['A','B','C','D','E','F','G','H'];
+  const input=normalizePremiseSelectionPayload({
+    pool:ids.map(premise),selectedPremises:ids.map(premise),
+  },8,15);
+  const source=materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(input).map(row=>({
+    ref:row.ref,status:(['F','G','H'].includes(row.premiseId)?'drift':'preserved') as 'drift'|'preserved',
+    reason:'逐字段比对当前完整事实与原始来源后形成的真实审查结论',
+  }))},input);
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.logger={log:vi.fn(),warn:vi.fn()};
+  controller.reviewPremiseSelection=vi.fn(async(_selection:any,_standard:string,mode:string)=>
+    mode==='source_drift'?source:{passed:true,issues:[]});
+  controller.llmCallWithRetry=vi.fn();
+  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],undefined,5);
+  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D','E']);
+  expect(result.selectionAudit).toMatchObject({reselectionAttempted:false,
+    selectionStopReason:'reviewed_surplus_retained',requestedDeliveryCount:5,preselectionTarget:8});
+  expect(result.selectionAudit.initialReview.issues).toHaveLength(source.issues.length);
+  expect(result.selectionAudit.finalReview).toMatchObject({passed:true,issues:[]});
+  expect(result.selectionAudit.finalReview.sourceChecks).toHaveLength(premiseSourceComparisonCatalog({ ...input,selected:input.selected.slice(0,5) }).length);
+  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+  expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+});
+
 describe('premise selection before identity lock', () => {
  it('sends each source item only once while retaining every expanded fact and its identity',()=>{
    const current=selection(), viewed=sourceReviewSelectionView(current.selected);
