@@ -10,6 +10,7 @@ function fixture(writtenMax: number, existingAuthoredChapter = false) {
     volumes: JSON.stringify({ estimatedChapters: 60, theme: '追查', goal: '识别真相' }),
   }];
   const db = {
+    exec: vi.fn(),
     prepare: (sql: string) => ({
       get: () => sql.includes('FROM projects')
         ? { title: '长篇测试', type: 'long_novel', target_words: 240000, target_platform: 'fanqie', settings: '{}' }
@@ -97,4 +98,40 @@ describe('ARCH-004 progressive outline window', () => {
     expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
     expect(inserts).toHaveLength(0);
   });
+  it('serializes simultaneous refill requests for one project and avoids the second paid generation', async () => {
+    const {controller} = fixture(15);
+    // The fake DB must reflect the committed outline window on the second read.
+    const db = controller.db.getDb();
+    const originalPrepare = db.prepare;
+    let updated = false;
+    db.prepare = (sql:string) => {
+      const statement = originalPrepare(sql);
+      if (sql.includes("level='chapter'") && sql.includes('SELECT "order"')) {
+        return {...statement, all:()=>Array.from({length:updated?35:20},(_,order)=>({order}))};
+      }
+      return statement;
+    };
+    const originalExecute = controller.rolloutDetailedOutlinesOnce.bind(controller);
+    controller.rolloutDetailedOutlinesOnce = async (...args:any[])=>{
+      const result=await originalExecute(...args);
+      updated=true;
+      return result;
+    };
+    const results = await Promise.all([
+      controller.rolloutDetailedOutlines('project'),
+      controller.rolloutDetailedOutlines('project'),
+    ]);
+    expect(results.map((r:any)=>r.added)).toEqual([15,0]);
+    expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(4);
+  });
+
+  it('persists each verified batch atomically', async () => {
+    const {controller} = fixture(15);
+    await controller.rolloutDetailedOutlines('project');
+    const sql=controller.db.getDb().exec.mock.calls.map((call:any[])=>call[0]);
+    expect(sql.filter((s:string)=>s==='BEGIN IMMEDIATE')).toHaveLength(4);
+    expect(sql.filter((s:string)=>s==='COMMIT')).toHaveLength(4);
+    expect(sql).not.toContain('ROLLBACK');
+  });
+
 });

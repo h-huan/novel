@@ -717,6 +717,7 @@ class GenerateTitleDto {
 export class ChainController {
   private readonly logger = new Logger(ChainController.name);
   private readonly activeChapterGenerations = new Map<string, number>();
+  private readonly rollingOutlineInFlight = new Map<string, Promise<void>>();
   // Identical configurations share one physical task. All request identities
   // observing that task must be able to cancel the same underlying work.
   private ideaDiscoveryInFlight = new Map<string, {
@@ -11891,6 +11892,26 @@ ${summarizeOutlineConsistency(pending)}`,
     projectId: string,
     opts: { lookahead?: number; onProgress?: (message: string) => void } = {},
   ): Promise<{ added: number; detailedTotal: number; target: number; totalEstimated: number }> {
+    // Both streaming and non-streaming writing paths may request a refill.
+    // Serializing per project prevents duplicated model calls and stale snapshots.
+    if (!this.rollingOutlineInFlight) this.rollingOutlineInFlight = new Map();
+    const previous = this.rollingOutlineInFlight.get(projectId);
+    let release!: () => void;
+    const ticket = new Promise<void>(resolve => { release = resolve; });
+    this.rollingOutlineInFlight.set(projectId, ticket);
+    try {
+      if (previous) await previous;
+      return await this.rolloutDetailedOutlinesOnce(projectId, opts);
+    } finally {
+      release();
+      if (this.rollingOutlineInFlight.get(projectId) === ticket) this.rollingOutlineInFlight.delete(projectId);
+    }
+  }
+
+  private async rolloutDetailedOutlinesOnce(
+    projectId: string,
+    opts: { lookahead?: number; onProgress?: (message: string) => void } = {},
+  ): Promise<{ added: number; detailedTotal: number; target: number; totalEstimated: number }> {
     const db = this.db.getDb();
     const project = db.prepare(
       'SELECT title, type, target_words, target_platform, settings FROM projects WHERE id=?',
@@ -12065,6 +12086,28 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       }
       rollingFactLedger = reviewed.ledger;
 
+      // Validate the entire changed batch before opening a write transaction;
+      // otherwise a late invalid chapter leaves a partly persisted outline.
+      for (let idx = 0; idx < batchChapters.length; idx++) {
+        const ch = batchChapters[idx];
+        const globalNo = batchNos[idx];
+        if (!ch?.title || !ch?.content || !ch?.conflict || !ch?.hook || !Array.isArray(ch?.scenes)) {
+          throw new HttpException(`全书第${globalNo}章滚动章纲字段不完整（缺标题/事件链/冲突/钩子/场景）`, 502);
+        }
+        const tw = Number(ch.targetWords);
+        if (!Number.isInteger(tw) || tw < CHAPTER_WORD_RANGE.min || tw > CHAPTER_WORD_RANGE.max || !String(ch.wordCountReason || '').trim()) {
+          throw new HttpException(`全书第${globalNo}章滚动章纲必须给出${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字动态目标及篇幅理由`, 502);
+        }
+      }
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        // Recheck inside the write lock: manual editing or another worker may
+        // have created an outline while the model and independent Gate ran.
+        for (const chapterNo of batchNos) {
+          const occupied = db.prepare(`SELECT id FROM outlines WHERE project_id=? AND level='chapter' AND "order"=? LIMIT 1`)
+            .get(projectId, chapterNo - 1) as any;
+          if (occupied) throw new HttpException(`全书第${chapterNo}章细纲已由其它操作保存，不允许覆盖或重复插入`, 409);
+        }
       for (let idx = 0; idx < batchChapters.length; idx++) {
         const ch = batchChapters[idx];
         const globalNo = batchNos[idx];
@@ -12117,6 +12160,11 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           );
         }
         added++;
+      }
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
       }
       i = j;
     }
