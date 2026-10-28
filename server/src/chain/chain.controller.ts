@@ -163,6 +163,7 @@ import { ConsistencyCheckService } from '../state/consistency-check.service';
 import { CharacterService, PROFILE_FIELDS } from '../modules/character/character.service';
 import { loadCharacterNames } from '../modules/character/character-names';
 import { WorldSettingService, WORLD_PROFILE_FIELDS } from '../modules/world-setting/world-setting.service';
+import { withAtomicWorldProfile } from './world-persistence';
 import { MapPointService } from '../modules/map-point/map-point.service';
 import { EmbeddingService } from '../rag/embedding.service';
 import { GenerationRecoveryService } from './generation-recovery.service';
@@ -7550,33 +7551,28 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             if (!reusingFrozenWorld && Object.keys(worldSetting).length > 0) {
               const wid = uuid();
               try {
-                db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, created_at, updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
-                  wid, projectId, `${dto.title}世界观`, serializeGeneratedSqlText(worldSetting.era),
-                  JSON.stringify(worldSetting.geography || worldSetting.locations || []),
-                  JSON.stringify(worldSetting.factions || worldSetting.organizations || []),
-                  JSON.stringify([worldSetting.rules || worldSetting.powerSystem || '']),
-                  serializeGeneratedSqlText(worldSetting.atmosphere), JSON.stringify({
-                    socialStructure: worldSetting.socialStructure || '',
-                    powerSystem: worldSetting.powerSystem || '',
-                    economy: worldSetting.economy || '',
-                    culture: worldSetting.culture || '',
-                    history: worldSetting.history || '',
-                  }), now(), now()
-                );
-                wsCount++;
-              // ★ 传播到 world_system_profiles（长篇路径）
-              try {
-                const existingProfile = db.prepare(`SELECT id FROM world_system_profiles WHERE world_setting_id=?`).get(wid);
-                if (!existingProfile) {
-                  const pid = require('crypto').randomUUID();
+                withAtomicWorldProfile(db, () => {
+                  db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+                    wid, projectId, `${dto.title}世界观`, serializeGeneratedSqlText(worldSetting.era),
+                    JSON.stringify(worldSetting.geography || worldSetting.locations || []),
+                    JSON.stringify(worldSetting.factions || worldSetting.organizations || []),
+                    JSON.stringify([worldSetting.rules || worldSetting.powerSystem || '']),
+                    serializeGeneratedSqlText(worldSetting.atmosphere), JSON.stringify({
+                      socialStructure: worldSetting.socialStructure || '',
+                      powerSystem: worldSetting.powerSystem || '',
+                      economy: worldSetting.economy || '',
+                      culture: worldSetting.culture || '',
+                      history: worldSetting.history || '',
+                    }), now(), now()
+                  );
                   db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id,
                     synopsis, basic_info, era, locations, atmosphere_tone, rules,
                     social_structure, tech_supernatural, system_mechanics,
                     culture_customs, naming_rules, scale_plan, ending,
                     hierarchy_rules, supplementary, created_at, updated_at)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-                    pid, projectId, wid,
+                    uuid(), projectId, wid,
                     serializeGeneratedSqlText(worldSetting.storyPremise || dto.title),
                     serializeGeneratedSqlText(dto.title + ' | ' + (worldSetting.era || '')),
                     serializeGeneratedSqlText(worldSetting.history || worldSetting.era || ''),
@@ -7593,10 +7589,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     serializeGeneratedSqlText((worldSetting.economy || '') + ' | ' + (Array.isArray(worldSetting.factions) ? worldSetting.factions.map((f:any)=>f?.name||f).join('，') : '')),
                     now(), now()
                   );
-                }
-              } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败(长篇): ${e.message}`); }
+                  if (!db.prepare('SELECT 1 FROM world_system_profiles WHERE project_id=? AND world_setting_id=?').get(projectId, wid)) {
+                    throw new Error('长篇世界观关联档案写入后回读失败');
+                  }
+                });
+                wsCount++;
               } catch (error: any) {
-                throw new Error(`世界观写入失败：${error.message}`);
+                throw new Error(`世界观与关联档案原子写入失败：${error.message}`);
               }
             }
 
@@ -7976,56 +7975,51 @@ JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName |
             });
             const wd = worldCandidate;
             activeFailureOrigin = 'persistence_write';
-            // 注意：outlineContextPrefix 不再使用瞬时原始 LLM 输出，改为写入后从 DB 回读（见下方），确保大纲上下文=已落库模块
-            db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-              uuid(), projectId, `${dto.title}世界观`, serializeGeneratedSqlText(wd.era),
-              JSON.stringify(Array.isArray(wd.geography) ? wd.geography : (typeof wd.geography === 'string' ? [wd.geography] : [])),
-              JSON.stringify(Array.isArray(wd.factions) ? wd.factions : []),
-              JSON.stringify(Array.isArray(wd.rules) ? wd.rules : (wd.rules ? [wd.rules] : [])), serializeGeneratedSqlText(wd.atmosphere),
-              JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
-              serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
-              JSON.stringify(Array.isArray(wd.locations) ? wd.locations : []),
-              serializeGeneratedSqlText(wd.socialRules),
-              serializeGeneratedSqlText(wd.specialSettings),
-              isShort ? 'short' : 'full',
-              now(), now()
-            );
-            // ★ 将7维度世界观数据传播到 world_system_profiles（前端 WorldProfileEditor 读取的表）
-            try {
-              const wsId = db.prepare(`SELECT id FROM world_settings WHERE project_id=? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
-              if (wsId?.id) {
-                const existingProfile = db.prepare(`SELECT id FROM world_system_profiles WHERE world_setting_id=?`).get(wsId.id);
-                if (!existingProfile) {
-                  const pid = require('crypto').randomUUID();
-                  const c = wd.constraints || {};
-                  db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id,
-                    synopsis, basic_info, era, locations, atmosphere_tone, rules,
-                    social_structure, tech_supernatural, system_mechanics,
-                    culture_customs, naming_rules, scale_plan, ending,
-                    hierarchy_rules, supplementary, created_at, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-                    pid, projectId, wsId.id,
-                    serializeGeneratedSqlText(wd.storyPremise || wd.premise || dto.title),
-                    serializeGeneratedSqlText(dto.title + ' | ' + (wd.era || '')),
-                    serializeGeneratedSqlText(wd.history || wd.era || ''),
-                    serializeGeneratedSqlText(wd.geography || ''),
-                    serializeGeneratedSqlText(wd.atmosphere || ''),
-                    serializeGeneratedSqlText(wd.rules || ''),
-                    serializeGeneratedSqlText(wd.socialStructure || ''),
-                    serializeGeneratedSqlText(wd.powerSystem || ''),
-                    serializeGeneratedSqlText(wd.powerSystem || ''),
-                    serializeGeneratedSqlText(wd.culture || ''),
-                    '', '',
-                    serializeGeneratedSqlText(wd.endingDirection || ''),
-                    STORY_FACT_PRIORITY,
-                    serializeGeneratedSqlText((wd.economy || '') + ' | ' + (Array.isArray(wd.factions) ? wd.factions.map((f:any)=>f?.name||f).join('，') : '')),
-                    now(), now()
-                  );
-                  this.logger.log(`world_system_profiles 已创建 (pid=${pid})，7维度数据已传播`);
-                }
+            // 世界观主记录与正文依赖的 profile 必须一起成功或一起回滚。
+            // 下游大纲只使用事务提交后从数据库回读的世界观。
+            const worldSettingId = uuid();
+            withAtomicWorldProfile(db, () => {
+              db.prepare(`INSERT INTO world_settings (id, project_id, name, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                worldSettingId, projectId, `${dto.title}世界观`, serializeGeneratedSqlText(wd.era),
+                JSON.stringify(Array.isArray(wd.geography) ? wd.geography : (typeof wd.geography === 'string' ? [wd.geography] : [])),
+                JSON.stringify(Array.isArray(wd.factions) ? wd.factions : []),
+                JSON.stringify(Array.isArray(wd.rules) ? wd.rules : (wd.rules ? [wd.rules] : [])), serializeGeneratedSqlText(wd.atmosphere),
+                JSON.stringify({ socialStructure: wd.socialStructure || '', powerSystem: wd.powerSystem || '', economy: wd.economy || '', culture: wd.culture || '', history: wd.history || '', endingDirection: wd.endingDirection || '' }),
+                serializeGeneratedSqlText(wd.storyPremise || wd.premise, dto.title),
+                JSON.stringify(Array.isArray(wd.locations) ? wd.locations : []),
+                serializeGeneratedSqlText(wd.socialRules),
+                serializeGeneratedSqlText(wd.specialSettings),
+                isShort ? 'short' : 'full',
+                now(), now()
+              );
+              db.prepare(`INSERT INTO world_system_profiles (id, project_id, world_setting_id,
+                synopsis, basic_info, era, locations, atmosphere_tone, rules,
+                social_structure, tech_supernatural, system_mechanics,
+                culture_customs, naming_rules, scale_plan, ending,
+                hierarchy_rules, supplementary, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                uuid(), projectId, worldSettingId,
+                serializeGeneratedSqlText(wd.storyPremise || wd.premise || dto.title),
+                serializeGeneratedSqlText(dto.title + ' | ' + (wd.era || '')),
+                serializeGeneratedSqlText(wd.history || wd.era || ''),
+                serializeGeneratedSqlText(wd.geography || ''),
+                serializeGeneratedSqlText(wd.atmosphere || ''),
+                serializeGeneratedSqlText(wd.rules || ''),
+                serializeGeneratedSqlText(wd.socialStructure || ''),
+                serializeGeneratedSqlText(wd.powerSystem || ''),
+                serializeGeneratedSqlText(wd.powerSystem || ''),
+                serializeGeneratedSqlText(wd.culture || ''),
+                '', '',
+                serializeGeneratedSqlText(wd.endingDirection || ''),
+                STORY_FACT_PRIORITY,
+                serializeGeneratedSqlText((wd.economy || '') + ' | ' + (Array.isArray(wd.factions) ? wd.factions.map((f:any)=>f?.name||f).join('，') : '')),
+                now(), now()
+              );
+              if (!db.prepare('SELECT 1 FROM world_system_profiles WHERE project_id=? AND world_setting_id=?').get(projectId, worldSettingId)) {
+                throw new Error('短篇世界观关联档案写入后回读失败');
               }
-            } catch (e: any) { this.logger.warn(`world_system_profiles 传播失败: ${e.message}`); }
+            });
           } else {
             const message = '世界观生成失败，未继续生成大纲，避免上下文不一致。';
             persistCreationFailure('world', message, { warnings }, {
