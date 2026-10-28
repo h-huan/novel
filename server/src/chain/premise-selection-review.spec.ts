@@ -760,36 +760,35 @@ it('tries an original-pool replacement when the initial selection is short and o
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
 });
 
-it('aggregates all failed reserve positions and keeps the remaining failure after another slot passes',async()=>{
- const initial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),selectedPremises:['A','B','C'].map(premise)},3,7);
- const c=Object.create(ChainController.prototype) as any;
- const issues=(ids:string[])=>({passed:!ids.length,issues:ids.map(id=>({kind:'source_drift',premiseId:id,referencePremiseId:id,quote:premise(id).activeChoice,referenceQuote:premise(id).storyCore,reason:'决定性物证缺少实际取得和交付条件'}))});
- let sourceRound=0;
- c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:string,mode:string)=>{
-  if(mode==='overlap')return {passed:true,issues:[]};
-  return [issues(['B','C']),issues(['D','E']),issues(['G'])][sourceRound++];
+it('rejects failed replacements after one independently reviewed pooled wave without further reserve calls',async()=>{
+ const input=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),selectedPremises:['A','B','C'].map(premise)},3,7);
+ const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
+ const issues=(ids:string[])=>({passed:!ids.length,issues:ids.map(id=>({kind:'source_drift',premiseId:id,referencePremiseId:id,quote:premise(id).activeChoice,referenceQuote:premise(id).storyCore,reason:'原池与展开缺失因果必要条件且无法支持具体结果'}))});
+ let round=0;
+ c.reviewPremiseSelection=vi.fn(async(_selected:any,_standard:string,mode:string)=>{
+   if(mode==='overlap')return {passed:true,issues:[]};
+   return round++===0?issues(['B','C']):issues(['D','E']);
  });
- let generation=0;
- c.llmCallWithRetry=vi.fn(async(label:string,prompt:string,options:any)=>{
-  options.physicalCallBudget.remaining--;
-  const changes=generation++===0?[['B','D'],['C','E']]:[['D','F'],['E','G']];
-  if(generation===2){expect(label).toContain('备用');expect(prompt).toContain('"replacesPremiseId":"D"');expect(prompt).toContain('"replacesPremiseId":"E"');}
-  const finalIds=['A',...changes.map(([,to])=>to)];
-  return {data:{replacements:changes.map(([from,to])=>({replacesPremiseId:from,premise:premise(to),comparisons:finalIds.filter(id=>id!==to).map(compare)}))}};
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+   expect(prompt).toContain('replacements恰好2项');
+   const changes=[['B','D'],['C','E']];
+   const data={replacements:changes.map(([from,to])=>({replacesPremiseId:from,premise:premise(to),comparisons:['A',...changes.map(([,target])=>target)].filter(id=>id!==to).map(compare)}))};
+   expect(options.validate(data)).toBe(true);
+   options.physicalCallBudget.remaining--;
+   return {data};
  });
- const credits={remaining:3};
- const result=await c.reconcilePremiseSelection(initial,3,7,['悬疑'],'',[],{reviews:{remaining:12},reselection:credits});
- expect(result.selected.map((x:any)=>x.premiseId)).toEqual(['A','F']);
- expect(result.selectionAudit.finalReview.issues).toEqual([]);
- expect(result.selectionAudit.reasons.map((x:any)=>x.premiseId)).toContain('G');
- expect(result.selectionAudit.excludedPremiseIds).toContain('G');
- expect(result.selectionAudit.reserve.replacements).toEqual([{replacesPremiseId:'D',replacementPremiseId:'F'},{replacesPremiseId:'E',replacementPremiseId:'G'}]);
- expect(c.llmCallWithRetry).toHaveBeenCalledTimes(2);
- expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(6);
- expect(credits.remaining).toBe(1);
+ const budget={reviews:{remaining:12},reselection:{remaining:3}};
+ const result=await c.reconcilePremiseSelection(input,3,7,['悬疑'],'',[],budget);
+ expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A']);
+ expect(result.selectionAudit.finalReview.passed).toBe(true);
+ expect(result.selectionAudit).toMatchObject({partial:true,completeCardGatePending:true});
+ expect(result.selectionAudit.excludedPremiseIds).toEqual(expect.arrayContaining(['D','E']));
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+ expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
+ expect(budget.reselection.remaining).toBe(2);
 });
 
-it('does not buy a third selection when two remaining review credits cannot cover changed five-source batches and overlap',async()=>{
+it('does not spend unused budget on serial backup when one replacement wave still has defects',async()=>{
  vi.mocked(budgetConfig.readGenerationBudgets).mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:1,sourceBatchSize:3});
  const initial=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F','G'].map(premise),
    selectedPremises:['A','B','C','D','E'].map(premise)},5,7);
@@ -797,30 +796,27 @@ it('does not buy a third selection when two remaining review credits cannot cove
  let sourceRounds=0,overlapRounds=0;
  c.reviewPremiseSelection=vi.fn(async(input:any,_standard:string,mode:string,budget:any)=>{
    if(mode==='overlap'){budget.remaining--;overlapRounds++;return {passed:true,issues:[]};}
-   // Five unchecked sources require two transport batches, plus the independent overlap call.
    budget.remaining-=2;
-   const failedId=sourceRounds++===0?'E':'F';
-   const row=input.selected.find((item:any)=>item.premiseId===failedId);
-   expect(row).toBeDefined();
-   return {passed:false,issues:[{kind:'source_drift',premiseId:failedId,referencePremiseId:failedId,
-     quote:row.activeChoice,referenceQuote:input.pool.find((item:any)=>item.premiseId===failedId).storyCore,
-     reason:'该候选在独立审查中没有建立结果所需的实际条件'}]};
+   const id=sourceRounds++===0?'E':'F';
+   const row=input.selected.find((item:any)=>item.premiseId===id);
+   return {passed:false,issues:[{kind:'source_drift',premiseId:id,referencePremiseId:id,
+     quote:row.activeChoice,referenceQuote:input.pool.find((item:any)=>item.premiseId===id).storyCore,
+     reason:'独立审查没有建立目标结果所需的可核验必要条件'}]};
  });
  c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
    options.physicalCallBudget.remaining--;
-   const result={replacements:[{replacesPremiseId:'E',premise:premise('F'),
-     comparisons:['A','B','C','D'].map(compare)}]};
-   expect(options.validate(result)).toBe(true);
-   return {data:result};
+   const data={replacements:[{replacesPremiseId:'E',premise:premise('F'),comparisons:['A','B','C','D'].map(compare)}]};
+   expect(options.validate(data)).toBe(true);return {data};
  });
- const shared={reviews:{remaining:8},reselection:{remaining:3}};
- const result=await c.reconcilePremiseSelection(initial,5,7,['悬疑'],'',[],shared);
+ const budget={reviews:{remaining:8},reselection:{remaining:3}};
+ const result=await c.reconcilePremiseSelection(initial,5,7,['悬疑'],'',[],budget);
  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D']);
  expect(result.selectionAudit).toMatchObject({partial:true,completeCardGatePending:true});
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
  expect(sourceRounds).toBe(2);expect(overlapRounds).toBe(2);
- expect(shared.reviews.remaining).toBe(2);expect(shared.reselection.remaining).toBe(2);
- expect(c.logger.warn.mock.calls.map(([message]:string[])=>message).join(' ')).toContain('终检预算不足');
+ expect(budget.reviews.remaining).toBe(2);
+ expect(budget.reselection.remaining).toBe(2);
+ expect(c.logger.warn.mock.calls.join(' ')).not.toContain('备用重选轮次');
 });
 
 it('reviews the one changed original-pool candidate through both independent gates without generating backup', async()=>{
@@ -849,29 +845,29 @@ it('reviews the one changed original-pool candidate through both independent gat
  expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
 });
 
-it('continues beyond one reserve round using untried original identities and one shared allowance',async()=>{
+it('retains prior rejected identities after the only authorized reselection wave',async()=>{
  const input=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),selectedPremises:['A','B'].map(premise)},2,5);
  const c=Object.create(ChainController.prototype) as any;c.logger={warn:vi.fn(),log:vi.fn()};
  c.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
-  const item=current.selected.find((row:any)=>row.premiseId!=='B');
-  return mode==='source_drift'&&item?.premiseId!=='E'?{passed:false,issues:[{kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,quote:item.activeChoice,referenceQuote:input.pool.find(row=>row.premiseId===item.premiseId)!.storyCore,reason:'该候选的具体结果仍缺少原有必要条件'}]}:{passed:true,issues:[]};
+   const row=current.selected.find((item:any)=>item.premiseId!=='B');
+   return mode==='source_drift'&&row?.premiseId!=='E'
+     ?{passed:false,issues:[{kind:'selection_fit',premiseId:row.premiseId,referencePremiseId:row.premiseId,
+       quote:row.activeChoice,referenceQuote:input.pool.find(item=>item.premiseId===row.premiseId)!.storyCore,
+       reason:'原池缺少重要结果所需的必要条件与权限'}]}
+     :{passed:true,issues:[]};
  });
- let call=0;
  c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
-  const ids=['A','C','D','E'];options.physicalCallBudget.remaining--;
-  return {data:{replacements:[{replacesPremiseId:ids[call],premise:premise(ids[++call]),comparisons:[compare('B')]}]}};
+   options.physicalCallBudget.remaining--;
+   return {data:{replacements:[{replacesPremiseId:'A',premise:premise('C'),comparisons:[compare('B')]}]}};
  });
- const shared={reviews:{remaining:12},reselection:{remaining:4}};
- const result=await c.reconcilePremiseSelection(input,2,5,['悬疑'],'原有标准',[],shared);
- expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['E','B']);
- expect(c.llmCallWithRetry).toHaveBeenCalledTimes(3);expect(shared.reselection.remaining).toBe(1);
- expect(result.selectionAudit.finalReview.passed).toBe(true);expect(result.selected[1]).toEqual(input.selected[1]);
- const prompts=c.llmCallWithRetry.mock.calls.map((call:any[])=>String(call[1]));
- expect(prompts[0]).not.toContain('backupReplacements');
- expect(prompts[1]).toContain('此前独立复核已确认的失败路径');
- expect(prompts[1]).toContain('"premiseId":"A"');
- expect(prompts[2]).toContain('"premiseId":"C"');
- expect(result.selectionAudit.rejectedHistory.map((row:any)=>row.premiseId)).toEqual(['A','C','D']);
+ const budget={reviews:{remaining:12},reselection:{remaining:4}};
+ const result=await c.reconcilePremiseSelection(input,2,5,['悬疑'],'原有标准',[],budget);
+ expect(result.selected.map((r:any)=>r.premiseId)).toEqual(['B']);
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+ expect(budget.reselection.remaining).toBe(3);
+ expect(result.selectionAudit.finalReview.passed).toBe(true);
+ expect(result.selectionAudit.rejectedHistory.map((r:any)=>r.premiseId)).toEqual(['A','C']);
+ expect(result.selected[0]).toEqual(input.selected[1]);
 });
 
 it('keeps two independently reviewed replacements and isolates a third failed causal plan without another review',()=>{
