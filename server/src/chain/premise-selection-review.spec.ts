@@ -536,7 +536,7 @@ it('does not repair fiction if either independent audit fails to complete', asyn
   it('instructs source review to separate an actual request from a later motive reveal', async () => {
     const c = Object.create(ChainController.prototype) as any;
     c.llmCallWithRetry = vi.fn().mockResolvedValue({ data: { sourceChecks: premiseSourceComparisonCatalog(selection())
-      .map(row=>({ref:row.ref,status:'preserved',reason:'当前字段保留原池的行动对象和结果方向'})), categoryChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.category',status:'fulfilled',evidenceRef:'S'+(i+1)+'.activeChoice',reason:'当前主线人物选择体现该分类的具体机制'})),payoffChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'逐项核对既定行动和已有成立条件后确认结果'})) } });
+      .map(row=>({ref:row.ref,status:'preserved',reason:'当前字段保留原池的行动对象和结果方向'})), categoryChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.category',status:'fulfilled',evidenceRef:'S'+(i+1)+'.activeChoice',reason:'当前主线人物选择体现该分类的具体机制'})),payoffChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'当前主角主动行动与既有条件支撑反转阶段变化'},reason:'逐项核对既定行动和已有成立条件后确认结果'})) } });
     await c.reviewPremiseSelection(selection(), '', 'source_drift');
     const prompt = c.llmCallWithRetry.mock.calls[0][1] as string;
     expect(prompt).toContain('先核实展开是否仍保留请求发生');

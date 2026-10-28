@@ -110,6 +110,7 @@ describe('aggregate review before capacity partitioning', () => {
       const payoffChecks = premisePayoffCatalog(scopedSelection).map((row, index) => ({
         ref: row.ref, status: 'supported', actionEvidenceRef: 'S' + (index + 1) + '.activeChoice',
         conditionEvidenceRef: 'S' + (index + 1) + '.escalation',
+        reversalCheck: {status:'supported',actionEvidenceRef:'S' + (index + 1) + '.activeChoice',reason:'本题材具体选择和既定必要条件支持反转阶段变化'},
         reason: '逐项核对兑现结果所需的实际行动与必要条件',
         links: premiseCausalCatalog(scopedSelection.selected[index], 'S' + (index + 1) + '.').map(link => ({
           ref: link.ref, status: 'supported', reason: '当前因果环节的行动、条件与结果相互成立',
