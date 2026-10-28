@@ -1763,6 +1763,7 @@ describe('idea discovery live orchestrator behavior', () => {
       expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
     }
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
+     expect(poolCalls[0][0].prompt).toContain('每个结果先核对影响对象、数量和时间跨度');
     expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
     expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
     expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
