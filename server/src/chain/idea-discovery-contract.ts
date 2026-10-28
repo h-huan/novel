@@ -612,6 +612,17 @@ export function ideaHookRequirement(storyType: IdeaStoryType): string {
 }
 
 
+/** Reference cards participate only in independent narrative difference review.
+ * Their self-reported novelty, metadata and author tags are neither evidence nor
+ * review targets; send the actual story events and staged outcomes instead.
+ * All target cards still reach the reviewer unchanged with their locked source. */
+export function ideaPresentationPeerView(card: Record<string, unknown>) {
+  const fields = ['title','storyType','targetPlatform','storyCategory','hook','coreConflict',
+    'mainReversal','description','setting','protagonist','ending','scopeBreakdown'] as const;
+  return Object.fromEntries(fields.filter(field => card[field] !== undefined)
+    .map(field => [field, card[field]]));
+}
+
 /** Prompt transport only: each complete standard is an ordered list of exact lines. */
 export function packIdeaReviewStandards(cards:Record<string,any>[],references:Record<string,any>[]) {
  const standardLines:Record<string,string>={},ids=new Map<string,string>();

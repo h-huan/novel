@@ -122,12 +122,12 @@ export function sourceReviewSelectionView(selected: PremiseSelectionResult['sele
  return selected.map(({storyCore:_source,workingTitle:_title,...expanded})=>expanded);
 }
 
-/** Keep the selected original-pool storyCore for cross-story comparison;
- * only omit causalPlan: its action/condition/result quotes are anchored in the
- * preserved expanded story fields. The independent payoff review still reads
- * and validates the complete causalPlan. */
+/** Overlap compares the expanded causal path, not the immutable source pool.
+ * The same storyCore is already checked by the independent source/payoff gate;
+ * do not send it a second time to a pairwise difference reviewer.
+ * Keep the actual expanded action, escalation, reversal and consequence. */
 export function overlapReviewSelectionView(selected: PremiseSelectionResult['selected']) {
- return selected.map(({causalPlan:_plan,...expanded})=>expanded);
+ return selected.map(({causalPlan:_plan,storyCore:_source,...expanded})=>expanded);
 }
 
 /** Prompt-only representation for a targeted reselection. The server still keeps
