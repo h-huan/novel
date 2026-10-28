@@ -205,6 +205,25 @@ it('reuses all independent reviews and avoids repeated pool reselection when fiv
   expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
 });
 
+it('does not call an overlap model for a singleton request because no pair exists',async()=>{
+  const input=normalizePremiseSelectionPayload({pool:[premise('A')],
+    selectedPremises:[premise('A')]},1,1);
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.logger={log:vi.fn(),warn:vi.fn()};
+  controller.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
+    if(mode==='overlap')throw Error('single candidate cannot form an overlap pair');
+    return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(current).map(row=>({
+      ref:row.ref,status:'preserved',reason:'逐项核对原池实际故事与候选事实没有矛盾',
+    }))},current);
+  });
+  const shared={reviews:{remaining:1},reselection:{remaining:0}};
+  const result=await controller.reconcilePremiseSelection(input,1,1,['悬疑'],'',[],shared,1);
+  expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A']);
+  expect(result.selectionAudit.finalReview).toMatchObject({passed:true,issues:[]});
+  expect(controller.reviewPremiseSelection).toHaveBeenCalledOnce();
+  expect(shared.reviews.remaining).toBe(1);
+});
+
 describe('premise selection before identity lock', () => {
  it('sends each source item only once while retaining every expanded fact and its identity',()=>{
    const current=selection(), viewed=sourceReviewSelectionView(current.selected);

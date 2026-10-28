@@ -6466,7 +6466,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     ): Promise<PremiseSelectionReview> => {
       let sourceReviewReuse = { reused: 0, reviewed: 0 };
       const limiter=createReviewLimiter(IDEA_CARD_GENERATION_CONCURRENCY);
-      const modes=['source_drift','overlap'] as const;
+      // One selected premise has no unordered cross-premise pair to compare.
+      // Do not reserve or spend an overlap model call for an empty relation.
+      // Historical similarity and every source/causal/category/genre check
+      // remain active on the single actual candidate.
+      const modes=selection.selected.length<2?(['source_drift'] as const):(['source_drift','overlap'] as const);
       const reviewBudget=shared?.reviews||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
       let reviews:PremiseSelectionReview[];
       try {reviews=await independentReviewBatches(modes,reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,
@@ -6480,7 +6484,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter,changeScope?.focusIds));}
       catch(error){throw new Error('锁定前独立审查未完成，未生成完整卡：'+String(error));}
       const sourceReview=reviews[0];
-      const overlapReview=reviews[1];
+      const overlapReview:PremiseSelectionReview=reviews[1]||{passed:true,issues:[]};
       const affectedIds=new Set((changeScope?.affectedIds||[]).map(String));
       const retainedOverlapIssues=previousReview&&affectedIds.size
         ? previousReview.issues.filter(issue=>issue.kind==='overlap'
