@@ -2118,7 +2118,7 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
     title:entries[idx].workingTitle,
     hook:diversePoolStories[idx].slice(0,100),
-    description:diversePoolStories[idx],
+    description:idx===4 ? diversePoolStories[idx]+'我用微信发送原始取证记录，其他故事事实保持不变。' : diversePoolStories[idx],
     protagonist:diversePoolStories[idx].slice(0,38),
     coreConflict:diversePoolStories[idx],
     uniquePoint:diversePoolStories[idx].slice(-90),
@@ -2174,6 +2174,10 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     JSON.stringify({error:(c.logger.error.mock.calls||[]),warn:(c.logger.warn.mock.calls||[])}).slice(0,1200)).toHaveLength(8);
   expect(c.reviewIdeaPresentation).toHaveBeenCalledOnce();
   expect(c.reviewIdeaPresentation.mock.calls[0][0]).toHaveLength(8);
+  // A chat-platform brand in optional prose is normalized before premise
+  // binding, without skipping the full-card independent quality review.
+  expect(c.reviewIdeaPresentation.mock.calls[0][0][4].description).toContain('青信');
+  expect(c.reviewIdeaPresentation.mock.calls[0][0][4].description).not.toContain('微信');
   expect(outcome.success,JSON.stringify({error:outcome.error,gate:outcome.appealGate?.candidateAssessments?.map((x:any)=>({id:x.sourcePremiseId,issues:x.issues}))})).toBe(true);
   expect(outcome.ideas).toHaveLength(5);
   expect(outcome.appealGate).toMatchObject({
