@@ -2099,7 +2099,7 @@ it('dispatches exactly five initial full-card calls after eight shortlisted cand
     irreplaceableCarrier:'工作权限和家属责任共同决定具体行动路径',
     secondOrderConsequence:'调查让旧同事失去岗位并改变家人对主角的信任',
     readerQuestion:'究竟谁在关键时刻更改凭证并获得具体利益',
-  }));
+  });
   const strong=(idx:number)=>({
     storyType:'short_story',targetPlatform:'fanqie',storyCategory:'悬疑',
     storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
