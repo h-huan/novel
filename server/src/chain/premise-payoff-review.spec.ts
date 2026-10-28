@@ -87,6 +87,10 @@ it('uses the single GEN-002 authority contract before full-card generation inste
  expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('报备不等于获准实施');
  expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('离岗者不自动具有操作权限');
  expect(authoritative).toContain(PREMISE_PAYOFF_REVIEW_POLICY);
+ expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('指认具体下毒者、造假者或操纵者');
+ expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('发现毒物、异常材料、毁证动机仅证明异常存在');
+ expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('原池与展开都缺归责桥接时判gap');
+ expect(task).not.toContain('发现毒物、异常材料、毁证动机仅证明异常存在');
  const replacementDirective=standardDirectiveCache.get('idea_generate','idea_premise_pool_reselection');
  expect(replacementDirective).toContain(PREMISE_REPLACEMENT_COMPARISON_POLICY);
  expect(replacementDirective).toContain('GEN-002');
