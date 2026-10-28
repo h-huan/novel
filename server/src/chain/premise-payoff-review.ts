@@ -2,7 +2,7 @@ import { type PremiseSelectionResult } from './idea-discovery-contract';
 import { type PremiseSelectionReview } from './premise-selection-review';
 import { premiseCausalCatalog, premiseCausalPlanIssues } from './premise-causal-plan';
 export interface PremiseCausalCheck {ref:string;status:'supported'|'gap'|'unknown';reason:string;}
-export interface PremisePayoffCheck {ref:string;status:'supported'|'gap'|'unknown';reversalCheck?:{status:'supported'|'gap'|'unknown';actionEvidenceRef?:string;reason:string};actionEvidenceRef?:string;conditionEvidenceRef?:string;reason:string;actionEvidenceQuote?:string;conditionEvidenceQuote?:string;gapRepair?:'restore_source_conditions'|'replace_from_pool';sourceConditionQuote?:string;links?:PremiseCausalCheck[];}
+export interface PremisePayoffCheck {ref:string;status:'supported'|'gap'|'unknown';reversalCheck?:{status:'supported'|'gap'|'unknown';actionEvidenceRef?:string;actionEvidenceQuote?:string;reason:string};actionEvidenceRef?:string;conditionEvidenceRef?:string;reason:string;actionEvidenceQuote?:string;conditionEvidenceQuote?:string;gapRepair?:'restore_source_conditions'|'replace_from_pool';sourceConditionQuote?:string;links?:PremiseCausalCheck[];}
 const ACTION_EVIDENCE_FIELDS=['openingEvent','activeChoice','escalation','reversalEffect'];
 const CONDITION_EVIDENCE_FIELDS=['protagonistSituation','openingEvent','coreConflict','activeChoice','escalation','reversalEffect','irreplaceableCarrier'];
 function permittedEvidenceFields(candidate:Record<string,unknown>|undefined,key:string):string[]{
@@ -33,7 +33,7 @@ export function premisePayoffCatalog(selection:PremiseSelectionResult){
 export function premisePayoffReviewDirective(selection:PremiseSelectionResult){
   return '\n按已注入GEN-002的缺口路由合同，每个status=gap项必须明确返回gapRepair=restore_source_conditions|replace_from_pool；缺省不是自动要求换题。若原池storyCore和入选展开已经写出后来实际发生的物证核验、权限、传递及决定，仅causalPlan把终局错误地绑定到较早环节，则返回restore_source_conditions，并用sourceConditionQuote逐字引用原池已存在的关键事件或条件：优先保留同ID原题材，局部纠正因果引用，经过独立来源/兑现/同构复核后方能通过。restore_source_conditions必须加sourceConditionQuote，逐字引用同ID原池已建立的相关关键条件；若原池确实缺少决定性条件或找不到原始引用，则返回replace_from_pool，不得通过改引用伪造条件。\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
     +'\n【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】'+JSON.stringify(selection.selected.flatMap((item,index)=>premiseCausalCatalog(item,`S${index+1}.`).map(({ref})=>({ref}))))
-    +'\n先核对每个causalPlan环节：action只能直接改变什么、conditions是否实际建立并足以导致result。另须核对reversalEffect中每项已经发生的关键反转结果，不能只审payoff段的结局和代价。对每个题材返回reversalCheck={status,actionEvidenceRef,reason}：supported引用本题材此前实际行动或升级并说明所有决定性反转结果的必要条件如何真实成立；gap须将本项整体status标为gap并按同一gapRepair处理，unknown令整体unknown。causalPlan把反转里的结果误填作action时，该结果不构成自身成立的证据。逐个核对结局声称改变的对象、数量和时间跨度是否落在前述行动实际影响的范围内；每一项决定性结果即使看似自洽，也要判断在原文行动与条件全部成立时是否仍有合理的不成立情形，并指出原池哪项已有事实排除了它。若不能排除，整体或对应links必须判gap，原池确实漏掉必要条件时必须replace_from_pool；仅原池已写出真实后续条件、causalPlan错引时才restore_source_conditions。昨天入库与今天报失并不天然矛盾，发现故障并不表示备件已修复装机，挪位协议不等于经营许可或主管机关已撤销资格。影响起始时间晚于声称的追溯期，或中止某机制却声称既有损失已恢复时，须指出缺少的历史来源、核算、决定或执行条件，不能替故事补出未写的补救行动。这只是必要因果核查，不要求所有故事出现账目或手续。每个payoffChecks新增links数组，逐一返回本题材目录的{ref,status:"supported|gap|unknown",reason:"具体必要条件为何充分或缺失，至少8字"}，不得漏项、重复、跨题材或靠一条总体认可代替。conditions为空不自动通过，遇到实际必要条件未写仍须gap；原池与展开一起漏写的条件同样为gap。计划遗漏的关键中间结果也须在本题材整体payoffChecks中报告gap，不能仅核对作者自行列出的环节。若关键照片、录音、原始母带、样本、账本等证据受公司、对手或他人保管控制，而结局要求主角提交给警方、机构或有决定权者，必须分别核对产生证据、实际取得或获准复制、保全不被撤销、移交接收这几步在原池与展开中是否真实发生；能录到内容不等于取得受他人控制的原件，不能从录音间存在母带直接推定主角能带出或提交。证据只在主角或熟人手中时同样核对谁实际交付、谁接收、接收者知情且有权怎样处理；仅有报案或口头建议不等于证据进入处理流程。原池和展开都漏掉这道决定性桥接时整体应为gap，不可因终局已经写出就标supported。整体status须与links一致：任一unknown则unknown，其次任一gap则gap，其余才supported；发现计划外缺口可整体gap但保留links的真实结论。'
+    +'\n先核对每个causalPlan环节：action只能直接改变什么、conditions是否实际建立并足以导致result。另须核对reversalEffect中每项已经发生的关键反转结果，不能只审payoff段的结局和代价。对每个题材返回reversalCheck={status,actionEvidenceRef,reason}：supported引用本题材此前实际行动或升级；若真正的操作写在reversalEffect内，另返actionEvidenceQuote逐字引用与结局断言分离的操作原文，不用整段结果自证；说明所有决定性反转结果的必要条件如何真实成立；gap须将本项整体status标为gap并按同一gapRepair处理，unknown令整体unknown。causalPlan把反转里的结果误填作action时，该结果不构成自身成立的证据。逐个核对结局声称改变的对象、数量和时间跨度是否落在前述行动实际影响的范围内；每一项决定性结果即使看似自洽，也要判断在原文行动与条件全部成立时是否仍有合理的不成立情形，并指出原池哪项已有事实排除了它。若不能排除，整体或对应links必须判gap，原池确实漏掉必要条件时必须replace_from_pool；仅原池已写出真实后续条件、causalPlan错引时才restore_source_conditions。昨天入库与今天报失并不天然矛盾，发现故障并不表示备件已修复装机，挪位协议不等于经营许可或主管机关已撤销资格。影响起始时间晚于声称的追溯期，或中止某机制却声称既有损失已恢复时，须指出缺少的历史来源、核算、决定或执行条件，不能替故事补出未写的补救行动。这只是必要因果核查，不要求所有故事出现账目或手续。每个payoffChecks新增links数组，逐一返回本题材目录的{ref,status:"supported|gap|unknown",reason:"具体必要条件为何充分或缺失，至少8字"}，不得漏项、重复、跨题材或靠一条总体认可代替。conditions为空不自动通过，遇到实际必要条件未写仍须gap；原池与展开一起漏写的条件同样为gap。计划遗漏的关键中间结果也须在本题材整体payoffChecks中报告gap，不能仅核对作者自行列出的环节。若关键照片、录音、原始母带、样本、账本等证据受公司、对手或他人保管控制，而结局要求主角提交给警方、机构或有决定权者，必须分别核对产生证据、实际取得或获准复制、保全不被撤销、移交接收这几步在原池与展开中是否真实发生；能录到内容不等于取得受他人控制的原件，不能从录音间存在母带直接推定主角能带出或提交。证据只在主角或熟人手中时同样核对谁实际交付、谁接收、接收者知情且有权怎样处理；仅有报案或口头建议不等于证据进入处理流程。原池和展开都漏掉这道决定性桥接时整体应为gap，不可因终局已经写出就标supported。整体status须与links一致：任一unknown则unknown，其次任一gap则gap，其余才supported；发现计划外缺口可整体gap但保留links的真实结论。'
     +'\n【逐题材允许的行动和条件字段，包含本计划实际使用的字段】'+JSON.stringify(selection.selected.map((candidate,index)=>({ref:`S${index+1}.payoff`,actionFields:permittedEvidenceFields(candidate,'actionEvidenceRef'),conditionFields:permittedEvidenceFields(candidate,'conditionEvidenceRef')})))+'。每个编号须加本卡S序号前缀，不引用自评或读者问题。causalPlan是定位索引，不是证据的封闭白名单；先在本题材全部实际故事字段寻找必要条件，再判断gap。必要行动或条件写在payoff而未被计划选中时，另返actionEvidenceQuote或conditionEvidenceQuote，逐字引用不与计划result断言重叠的实际行动/独立条件；只引用结果或其片段仍拒绝，不为原文没有的条件补故事。'
     +'\npayoffChecks每个ref恰好一项，形状为{"ref":"S1.payoff","status":"supported|gap|unknown","reversalCheck":{"status":"supported|gap|unknown","actionEvidenceRef":"S1.activeChoice","reason":"核对反转中全部实际已声称结果的成立条件"},"actionEvidenceRef":"S1.activeChoice","conditionEvidenceRef":"S1.escalation","links":'+JSON.stringify(premiseCausalCatalog(selection.selected[0], 'S1.').map(({ref})=>({ref,status:'supported|gap|unknown',reason:'逐项说明该环节的行动和必要条件是否足以导致结果'})))+',"reason":"至少8字逐项说明决定性结果的必要条件如何取得或缺失"}。证据编号只选本题材实际展开字段名（S序号加字段名）；supported须有行动证据，额外必要条件须有conditionEvidenceRef；普通直接因果无需另造手续。gap与unknown可省略证据，不编造引用。不能用payoff中的结果断言或另一处相同断言自证；实际行动或独立条件恰在payoff段内时，须由causalPlan绑定其中不同于结果的真实原文，不能以字段名代替语义角色。';
 }
@@ -68,9 +68,18 @@ export function premisePayoffReviewIssues(value:any,selection:PremiseSelectionRe
           const prefix=row.ref.slice(0,row.ref.indexOf('.')+1);
           const field=typeof reversal.actionEvidenceRef==='string'&&reversal.actionEvidenceRef.startsWith(prefix)
             ?reversal.actionEvidenceRef.slice(prefix.length):'';
-          if(!['openingEvent','activeChoice','escalation'].includes(field)
+          if(!['openingEvent','activeChoice','escalation','reversalEffect'].includes(field)
             ||typeof candidate[field]!=='string'||candidate[field].trim().length<8)
-            errors.push(row.ref+'反转成立必须引用本题材此前实际行动或升级，不得用反转结果自证');
+            errors.push(row.ref+'反转成立必须引用本题材实际行动，不能用反转结果自证');
+          else if(field==='reversalEffect'){
+            const quote=reversal.actionEvidenceQuote;
+            if(typeof quote!=='string'||quote.trim().length<8
+              ||quote===candidate.reversalEffect||!candidate.reversalEffect.includes(quote))
+              errors.push(row.ref+'反转段兼含操作与结果时必须逐字引用独立操作，不得引用整段结果自证');
+            else errors.push(...unplannedPayoffEvidenceIssues({
+              ref:row.ref,actionEvidenceQuote:quote,
+            },candidate,'actionEvidenceRef','reversalEffect'));
+          }
         }
       }
     }
@@ -110,7 +119,7 @@ export function materializePremisePayoffReview(value:any,selection:PremiseSelect
     const item=premisePayoffCatalog(selection).find(item=>item.ref===row.ref)!;
     return {kind:'selection_fit' as const,premiseId:item.premiseId,referencePremiseId:item.premiseId,
       ...(row.gapRepair==='restore_source_conditions'?{}:{repairMode:'replace_from_pool' as const}),
-      quote:String(selection.selected.find(p=>p.premiseId===item.premiseId)!.payoff),
+      quote:String(selection.selected.find(p=>p.premiseId===item.premiseId)![row.reversalCheck?.status==='gap'?'reversalEffect':'payoff']),
       referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[row.reason,...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
   });
 }

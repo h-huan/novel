@@ -13,13 +13,18 @@ it('audits reversal success independently from later costs within the existing p
    reason:'主角交付录音和地点，警方核对之后实际到场救人，形成具体行动条件'}};
  expect(premisePayoffReviewIssues({payoffChecks:[supported]},input).join('')).toContain('反转阶段');
  expect(premisePayoffReviewIssues({payoffChecks:[ok]},input)).toEqual([]);
- expect(premisePayoffReviewIssues({payoffChecks:[{...ok,reversalCheck:{...ok.reversalCheck,actionEvidenceRef:'S1.reversalEffect'}}]},input).join('')).toContain('不得用反转结果自证');
+ expect(premisePayoffReviewIssues({payoffChecks:[{...ok,reversalCheck:{...ok.reversalCheck,actionEvidenceRef:'S1.reversalEffect'}}]},input).join('')).toContain('独立操作');
+ const inReversal={...ok,reversalCheck:{...ok.reversalCheck,actionEvidenceRef:'S1.reversalEffect',
+   actionEvidenceQuote:'警方核实收到的录音和具体地点后实际到场'}};
+ expect(premisePayoffReviewIssues({payoffChecks:[inReversal]},input)).toEqual([]);
  expect(premisePayoffReviewIssues({payoffChecks:[{...ok,reversalCheck:{status:'gap',reason:'客户签约缺少真实承诺及决定依据'}}]},input).join('')).toContain('整体不得通过');
  const bad={...input,selected:[{...input.selected[0],
    reversalEffect:'只发现机器故障，没获得配件也没试机，却声称已经恢复交货并得到续单。'}]};
  const gap={...ok,status:'gap',gapRepair:'replace_from_pool',reversalCheck:{status:'gap',
    reason:'缺少正确配件取得、装配与试机，尚不足以支持恢复交货'}};
- expect(materializePremisePayoffReview({payoffChecks:[gap]},bad)).toHaveLength(1);
+ const failures=materializePremisePayoffReview({payoffChecks:[gap]},bad);
+ expect(failures).toHaveLength(1);
+ expect(failures[0].quote).toBe(bad.selected[0].reversalEffect);
  expect(premisePayoffReviewDirective(input)).toContain('不能只审payoff段');
 });
 it('requires an independent payoff verdict even when every source check is preserved',()=>{
