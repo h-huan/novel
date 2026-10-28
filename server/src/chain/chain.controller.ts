@@ -11298,33 +11298,9 @@ ${content}
     const balanced = extractBalancedJson<T>(cleaned);
     if (balanced !== null) return balanced;
 
-    // 尝试提取 { ... } 块（取最长匹配，避免只拿到第一个字段）
-    const objMatches = [...cleaned.matchAll(/\{[\s\S]*?\}/g)];
-    if (objMatches.length > 0) {
-      // 按长度降序，优先尝试最大的那个（最可能是完整 JSON）
-      objMatches.sort((a, b) => b[0].length - a[0].length);
-      for (const m of objMatches) {
-        try { return JSON.parse(m[0]) as T; } catch {}
-        try {
-          let fixed = m[0].replace(/,\s*([\]\}])/g, '$1').replace(/,\s*$/gm, '');
-          return JSON.parse(fixed) as T;
-        } catch {}
-      }
-    }
-
-    // 尝试提取 [ ... ] 块（同样取最长）
-    const arrMatches = [...cleaned.matchAll(/\[[\s\S]*?\]/g)];
-    if (arrMatches.length > 0) {
-      arrMatches.sort((a, b) => b[0].length - a[0].length);
-      for (const m of arrMatches) {
-        try { return JSON.parse(m[0]) as T; } catch {}
-        try {
-          let fixed = m[0].replace(/,\s*([\]\}])/g, '$1').replace(/,\s*$/gm, '');
-          return JSON.parse(fixed) as T;
-        } catch {}
-      }
-    }
-
+    // Balanced scanning above is the final recovery path. Non-greedy
+    // regex fragments can extract inner objects from an invalid outer audit
+    // and falsely treat incomplete evidence as a valid full result.
     this.logger.warn(`safeExtractJson: 无法解析 JSON，原始内容前300字: ${content.slice(0, 300)}`);
     return fallback;
   }

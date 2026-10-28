@@ -180,4 +180,12 @@ describe('chain HTTP architecture', () => {
     expect(jsonRetry).toContain('if (parsedAnyResponse && lastValidationIssues.length > 0)');
   });
 
+  it('does not promote a nested JSON fragment into an independently reviewed result', () => {
+    const source = read('chain.controller.ts');
+    const safeJson = source.slice(source.indexOf('private safeExtractJson'), source.indexOf('private loadChapterOutlineConsistencyRows'));
+    expect(safeJson).toContain('extractBalancedJson<T>(cleaned)');
+    expect(safeJson).not.toContain('cleaned.matchAll(');
+    expect(source).not.toContain('const lineParsed: any[] = []');
+  });
+
 });
