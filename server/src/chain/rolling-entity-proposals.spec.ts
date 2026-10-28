@@ -10,7 +10,7 @@ describe('rolling source anchored entity proposals',()=>{
    expect(validateRollingEntityProposals(valid,chapters,[21])).toHaveLength(3);
  });
  it('rejects fabricated facts and invalid chapter coordinates',()=>{
-   expect(()=>validateRollingEntityProposals({newEntities:[{...valid.newEntities[0],evidenceQuote:'沈诺是秘密首领'}]},chapters,[21])).toThrow('逐字引用');
+   expect(()=>validateRollingEntityProposals({newEntities:[{...valid.newEntities[0],evidenceQuote:'沈诺其实一直是秘密首领'}]},chapters,[21])).toThrow('逐字引用');
    expect(()=>validateRollingEntityProposals({newEntities:[{...valid.newEntities[0],chapterNumber:22}]},chapters,[21])).toThrow('无效');
  });
  it('requires an explicit manifest and never assumes omitted entity checking passed',()=>{
