@@ -2,7 +2,7 @@ import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import { missingRequestedIdeaSlots } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
-import {reviewChangedPremiseSources,pendingPremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
+import {reviewChangedPremiseSources,pendingReservePremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues} from './premise-selection-review';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import {discoveryDimensionSelectionIssues} from './idea-discovery-contract';
@@ -6546,15 +6546,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // reserves one aggregate call per mode, or the configured source batches.
       // Check that total BEFORE spending on another model reselection, otherwise
       // a two-credit tail can pay for overlap but fail source coverage after minutes.
-      const pendingSources=pendingPremiseSourceReviewCount(selected,sourceScope,sourceReceipts,slots.map(slot=>String(slot.replacesPremiseId)));
+      // The replacement IDs have no cached source receipts. An estimate using
+      // rejected OLD IDs could under-reserve a grouped independent review.
+      const pendingSources=pendingReservePremiseSourceReviewCount(retained.selection,sourceScope,sourceReceipts,slots.length);
       const grouping=readGenerationBudgets();
       const sourceCalls=grouping.reviewGroupingMode===0
         ? 1
         : Math.max(1,Math.ceil(pendingSources/grouping.sourceBatchSize));
-      const requiredReviewCredits=1+sourceCalls;
+      const overlapCalls=retained.selection.selected.length+slots.length>1?1:0;
+      const requiredReviewCredits=overlapCalls+sourceCalls;
       if(shared&&shared.reviews.remaining<requiredReviewCredits){
         this.logger?.warn('锁定前备用重选前终检预算不足：剩余'+shared.reviews.remaining
-          +'次，当前变更预计至少需要来源'+sourceCalls+'批与独立同构1批；保留已经审查的结论，隔离失败位置，不启动注定无法验收的重选');
+          +'次，当前变更预计至少需要来源'+sourceCalls+'批、独立同构'+overlapCalls+'批；保留已经审查的结论，隔离失败位置，不启动注定无法验收的重选');
         break;
       }
       const before=selected;

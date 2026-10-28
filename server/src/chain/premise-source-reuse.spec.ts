@@ -1,7 +1,7 @@
 import {it,expect,vi} from 'vitest';
 import {normalizePremiseSelectionPayload,SELECTED_PREMISE_FIELDS,ideaGateLocalRepairDirective} from './idea-discovery-contract';
 import {premiseSourceComparisonCatalog,materializePremiseSourceReview,type PremiseSelectionReview} from './premise-selection-review';
-import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
+import {reviewChangedPremiseSources,pendingPremiseSourceReviewCount,pendingReservePremiseSourceReviewCount,type PremiseSourceReceipts} from './premise-source-reuse';
 const selection=()=>normalizePremiseSelectionPayload({
  pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'原池既定行动、条件和代价均保持真实一致'+premiseId})),
  selectedPremises:['A','B','C','D','E'].map(premiseId=>({premiseId,...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(key=>key!=='differentiation').map(key=>[key,'既定的具体人物行动、必要条件与结果'+premiseId]))})),
@@ -107,4 +107,15 @@ it('reuses real category and manual-genre evidence after single-card rebinding a
   expect(result.genreChecks?.find(row=>row.ref===prefix+'genre1')?.evidenceRef).toBe(prefix+'activeChoice');
   expect(result.categoryChecks?.find(row=>row.ref===prefix+'category')?.evidenceRef).toBe(prefix+'coreConflict');
  }
+});
+
+it('budgets next reserve source review using fresh identities, not rejected old identities',async()=>{
+ const input=selection(),cache:PremiseSourceReceipts=new Map();
+ await reviewChangedPremiseSources(input,'same scope',cache,async pending=>report(pending));
+ const retained={...input,selected:input.selected.slice(0,3)};
+ expect(pendingPremiseSourceReviewCount(retained,'same scope',cache)).toBe(0);
+ expect(pendingReservePremiseSourceReviewCount(retained,'same scope',cache,2)).toBe(2);
+ const changed=structuredClone(retained);changed.selected[1].activeChoice+='真实变更';
+ expect(pendingReservePremiseSourceReviewCount(changed,'same scope',cache,2)).toBe(3);
+ expect(()=>pendingReservePremiseSourceReviewCount(retained,'same scope',cache,-1)).toThrow('备用题材数量无效');
 });
