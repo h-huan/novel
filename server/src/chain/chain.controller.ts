@@ -2629,6 +2629,7 @@ ${localPatchContract('hardline_local_replacement')}
         });
       }
       const chapterContract = this.readChapterOutlineContract(dto.projectId, dto.chapterId);
+      this.assertRollingEntitiesConfirmed(dto.projectId, Number(dto.chapterNumber));
       // The character whitelist is an authoritative input to BOTH writing
       // and review. Never silently lose it when optional context assembly fails.
       const characterContext = this.buildCharacterWritingContext(dto.projectId);
@@ -2640,8 +2641,10 @@ ${localPatchContract('hardline_local_replacement')}
         const stateContext = this.buildWritingStateContext(dto.projectId, dto.chapterNumber);
         const worldContext = this.buildWorldWritingContext(dto.projectId);
         const locationContext = this.buildLocationWritingContext(dto.projectId);
+        const organizationContext = this.buildOrganizationWritingContext(dto.projectId);
         if (worldContext) ragContext += `\n${worldContext}`;
         if (locationContext) ragContext += `\n${locationContext}`;
+        if (organizationContext) ragContext += `\n${organizationContext}`;
         if (stateContext.contextText || stateContext.pendingTotal > 0) {
           ragContext += '\n【写作状态上下文】\n' + (stateContext.contextText || '暂无状态上下文。');
           ragContext += `\n【状态使用规则】${stateContext.stateGuard}`;
@@ -4532,6 +4535,7 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
           const patched = repairedOutlines.get(String(currentOutline.id));
           if (patched) Object.assign(currentOutline, patched);
         }
+        this.assertRollingEntitiesConfirmed(dto.projectId, Number(chapterRow.chapter_index || 1));
         const confirmedContext = this.buildWritingStateContext(dto.projectId, chapterRow.chapter_index || 1);
         const characterContext = this.buildCharacterWritingContext(dto.projectId);
         if (!characterContext.trim()) {
@@ -4543,6 +4547,7 @@ confidence 只能依据原文证据给出 0 到 1 的值；没有证据的数组
           ...confirmedContext.pendingSummary.map(item => `Pending: ${item}`),
           this.buildWorldWritingContext(dto.projectId),
           this.buildLocationWritingContext(dto.projectId),
+          this.buildOrganizationWritingContext(dto.projectId),
         ].join('\n');
         const previousLedger = this.buildPreviousChapterLedger(dto.projectId, Number(chapterRow.chapter_index || 1));
 
@@ -10816,6 +10821,28 @@ ${excerpt}`;
     } catch (error) {
       // 这里曾静默返回空世界观，后果是正文照常生成却失去时间/名单规则，随后 Gate 反复失败。
       throw new Error(`世界观写作上下文构建失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private buildOrganizationWritingContext(projectId:string):string {
+    try {
+      const rows=this.db.getDb().prepare(
+        'SELECT name,type,description,leader,territory FROM organizations WHERE project_id=? ORDER BY created_at ASC',
+      ).all(projectId) as any[];
+      return rows.length ? '【已建档组织势力·不得擅自改名、改从属或改权限】\n'+JSON.stringify(rows) : '';
+    } catch (error) {
+      throw new Error('组织势力权威资料加载失败：'+(error instanceof Error?error.message:String(error)));
+    }
+  }
+
+  private assertRollingEntitiesConfirmed(projectId:string,chapterNumber:number):void {
+    if(!Number.isInteger(chapterNumber)||chapterNumber<1)return;
+    const pending=this.db.getDb().prepare(`SELECT target_type,target_label FROM state_items
+      WHERE project_id=? AND source_type='rollout_outline' AND status='pending'
+        AND source_chapter_id IN (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?)
+      ORDER BY target_type,target_label`).all(projectId,projectId,chapterNumber) as any[];
+    if(pending.length) {
+      throw new HttpException(`第${chapterNumber}章存在尚未确稿的新增人物、组织、地点或伏笔：${pending.map(row=>String(row.target_label)).join('、')}。请在状态确稿中心逐项确认或拒绝，正文生成暂不消耗模型调用。`,409);
     }
   }
 
