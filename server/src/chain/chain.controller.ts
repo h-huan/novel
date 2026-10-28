@@ -496,18 +496,23 @@ export const collectOutlineForeshadowings = (rows: Array<{ order: number; scenes
       try { scenes = JSON.parse(scenes); } catch { scenes = {}; }
     }
     const items = Array.isArray(scenes?.foreshadowing) ? scenes.foreshadowing : [];
-    for (const item of items) {
-      const content = serializeGeneratedSqlText(item?.content || item?.evidenceText).trim();
-      if (!content) continue;
-      const recovery = Number(item?.plannedRecoveryChapter || item?.recoveryChapter);
+    // Short outlines already store all of their chapter-level clues. Resolve
+    // follow-up actions against the previously planted source; never create
+    // a fresh database thread just because the same clue is reminded later.
+    const normalized = items.map((item:any)=>({
+      ...item, content:serializeGeneratedSqlText(item?.content || item?.evidenceText).trim(),
+      action:item?.action || '埋设',
+    })).filter((item:any)=>item.content);
+    const merged=mergePlannedForeshadowingActions(collected,normalized,Number(row.order)+1);
+    for (const item of merged.slice(collected.length)) {
+      const recovery = Number(item.plannedRecoveryChapter || item.recoveryChapter);
       collected.push({
         ...item,
-        content,
         buriedChapter: Number(row.order) + 1,
         recoveryChapter: Number.isInteger(recovery) && recovery > Number(row.order) + 1 ? recovery : null,
-        evidenceText: serializeGeneratedSqlText(item?.evidenceText || content),
-        recoveryCondition: serializeGeneratedSqlText(item?.recoveryCondition || item?.plannedPayoff || ''),
-        scope: serializeGeneratedSqlText(item?.scope, 'chapter'),
+        evidenceText: serializeGeneratedSqlText(item.evidenceText || item.content),
+        recoveryCondition: serializeGeneratedSqlText(item.recoveryCondition || item.plannedPayoff || ''),
+        scope: serializeGeneratedSqlText(item.scope, 'chapter'),
       });
     }
   }
