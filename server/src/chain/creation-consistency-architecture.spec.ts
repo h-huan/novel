@@ -32,8 +32,10 @@ describe('creation consistency architecture invariants', () => {
 
   it('keeps good preselection cards reviewable but never passes an incomplete batch', () => {
     expect(controllerSource).toContain('const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);');
-    expect(controllerSource).toContain('poolTarget,categories,current.selected.length');
-    expect(controllerSource).toContain("if(reserve.error){finalGateRepairError=reserve.error;return 'unavailable';}");
+    expect(controllerSource).toContain('全部进入并发完整卡生成');
+    expect(controllerSource).toContain("await accept(structuredCards, 'initial')");
+    expect(controllerSource).not.toContain('this.reservePremiseSelection(');
+    expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
     expect(controllerSource).toContain('证据指向具体责任人须有区别于“只是排除自己”的指认依据');
     expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
