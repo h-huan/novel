@@ -717,7 +717,7 @@ class GenerateTitleDto {
 export class ChainController {
   private readonly logger = new Logger(ChainController.name);
   private readonly activeChapterGenerations = new Map<string, number>();
-  private readonly rollingOutlineInFlight = new Map<string, Promise<void>>();
+  private rollingOutlineInFlight = new Map<string, Promise<void>>();
   // Identical configurations share one physical task. All request identities
   // observing that task must be able to cancel the same underlying work.
   private ideaDiscoveryInFlight = new Map<string, {
