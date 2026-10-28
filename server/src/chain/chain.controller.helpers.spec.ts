@@ -2110,13 +2110,13 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     storyType:'short_story',targetPlatform:'fanqie',storyCategory:'悬疑',
     storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
     plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
-    title:'第'+(idx+1)+'次核验改变了归属',
-    hook:'凌晨三点有人用我的名字领走了最后一份救助名额，我必须当天查清谁改动了登记，否则家人将失去最后的申诉机会。',
-    description:'当天我发现登记被改，负责核验的人要求我拿出原始凭证。为保住家人的实际权益，我主动找出第一次签收的记录，却遭到负责人的反对和停职威胁。我没有选择接受补偿，而是找到实际有权限的人员，让对方依规核对原件与流水。对手发现记录无法删除后转而联合同事阻止我。最终我在公开场合证明签收日期与登记时间矛盾，正式负责人员根据记录作出决定，挽回家人的权益，但也失去原来的工作资格。',
-    protagonist:'不得不保护家人实际利益的普通工作人员',
-    coreConflict:'主角要证明真实签收责任，对手不惜让其停职来阻止核验',
-    uniquePoint:'原始签收日期改变了两方争夺救助资格的局面',
-    mainReversal:'核验让真正的登记责任方现身，原本被怀疑的主角因此反过来掌握证据',
+    title:entries[idx].workingTitle,
+    hook:diversePoolStories[idx].slice(0,100),
+    description:diversePoolStories[idx],
+    protagonist:diversePoolStories[idx].slice(0,38),
+    coreConflict:diversePoolStories[idx],
+    uniquePoint:diversePoolStories[idx].slice(-90),
+    mainReversal:diversePoolStories[idx].slice(-105),
     noveltyProof:{familiarShell:'现实职业悬疑',uncommonCombination:'登记原件与家属利益结合成必要冲突',
       avoidedPatterns:'拒绝突然出现万能证人',irreplaceableWhy:'没有原始签收流程就无法判断谁有权限决定结果',
       secondOrderConsequence:'真实责任曝光令旧同事的职业关系发生不可逆变化',
@@ -2144,10 +2144,22 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   c.reconcilePremiseSelection=vi.fn(async(input:any)=>({
     ...input,selectionAudit:{finalReview:{passed:true,issues:[]}},
   }));
-  c.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[]}))};
-  const stop=new Error('test stop immediately after first card review');
-  c.reviewIdeaPresentation=vi.fn(async()=>{throw stop;});
-  await c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+  c.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[],
+    signals:{distinctivenessScore:4,descriptionProgressions:4,hookHasRelationship:true},
+    readerExperienceProfile:{densityMode:'balanced',pace:'continuous',evidence:[]}}))};
+  c.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((card,index)=>{
+    const passed=index>=2;
+    return {position:index+1,title:card.title,titleCompelling:true,openingCompelling:true,
+      distinctFromBatch:true,storyCoherent:true,payoffCredible:passed,platformFit:true,
+      storyEvidence:card.hook,payoffEvidence:card.description,platformEvidence:card.hook,
+      qualityReason:'按已存在的实际行动和原因验证主线兑现',
+      readerQuestion:'主角的选择会导致哪些不可逆后果？',
+      issues:passed?[]:['缺少已交代的决定性条件，不能承认兑现'],readerGoals:{
+        click:{status:'supported'},completion:{status:'supported'},sharing:{status:'supported'},immersion:{status:'supported'},
+      },
+    };
+  }));
+  const outcome=await c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
     customPlatformNote:'',storyTone:['紧张'],writingStyle:['简洁'],
     webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],
     genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:''},5);
@@ -2155,6 +2167,17 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure'),
     JSON.stringify({error:(c.logger.error.mock.calls||[]),warn:(c.logger.warn.mock.calls||[])}).slice(0,1200)).toHaveLength(8);
   expect(c.reviewIdeaPresentation).toHaveBeenCalledOnce();
+  expect(c.reviewIdeaPresentation.mock.calls[0][0]).toHaveLength(8);
+  expect(outcome.success,JSON.stringify({error:outcome.error,gate:outcome.appealGate?.candidateAssessments?.map((x:any)=>({id:x.sourcePremiseId,issues:x.issues}))})).toBe(true);
+  expect(outcome.ideas).toHaveLength(5);
+  expect(outcome.appealGate).toMatchObject({
+    requested:5,generated:8,qualified:6,returned:5,
+    repairAttempted:false,repairGenerated:0,
+    mode:'parallel_vetted_full_card_filter',
+    repairProtocol:'no_post_card_repair_or_replacement',
+  });
+  expect(outcome.appealGate.candidateAssessments.filter((row:any)=>!row.passed)).toHaveLength(2);
+  expect(generate.mock.calls.filter(([row]:any[])=>['idea_card_local_repair','idea_premise_pool_reselection'].includes(row.metrics?.stepKey))).toHaveLength(0);
   expect(c.logger.log.mock.calls.some((args:any[])=>args.some((value:any)=>String(value).includes('全部进入并发完整卡生成')))).toBe(true);
 });
 
