@@ -152,6 +152,40 @@ export const describeGlobalForeshadowingDefect = (item: any): string | null => {
   return null;
 };
 
+/**
+ * The initial long-novel detailed-outline window collects ONE canonical
+ * proposed thread per first plant, while reminder/reveal/payoff chapter
+ * actions only refer back to it. The chapter action arrays keep all of those
+ * later events (many chapters to many concurrent threads) unchanged.
+ * Nothing here marks a planned payoff as already performed in prose.
+ */
+export function mergePlannedForeshadowingActions(
+  registered: readonly any[], actions: readonly any[], chapterNumber: number,
+): any[] {
+  const result=[...registered];
+  for(const item of actions){
+    const action=String(item?.action||'').trim();
+    if(!(FORESHADOWING_ACTIONS as readonly string[]).includes(action))
+      throw Error(`第${chapterNumber}章伏笔动作未按唯一契约声明：${action||'空'}`);
+    const content=String(item?.content||'').trim();
+    const reference=String(item?.reference||content).trim();
+    if(action==='埋设'){
+      if(result.some(row=>String(row?.content||'').trim()===content))
+        throw Error(`第${chapterNumber}章重复埋设已存在的伏笔：${content}；应按原线索身份推进`);
+      result.push({...item,content,scope:item.scope,setupChapter:chapterNumber,
+        recoveryChapter:item.recoveryChapter||null});
+      continue;
+    }
+    if(!result.some(row=>
+      String(row?.id||'').trim()===reference
+      ||String(row?.content||'').trim()===reference))
+      throw Error(`第${chapterNumber}章伏笔${action}缺少已埋设的来源线索：${reference}；不得凭空推进或回收`);
+    // One payoff is local to the referenced thread: it never shuts other
+    // threads and does not rewrite the original planting or recovery plan.
+  }
+  return result;
+}
+
 const ACTIONS_TEXT = FORESHADOWING_ACTIONS.map(action => `“${action}”`).join('、');
 const RISK_TEXT = GENERATED_FORESHADOWING_RISK_LEVELS.join('、');
 const TYPE_TEXT = GENERATED_FORESHADOWING_TYPES.join('、');

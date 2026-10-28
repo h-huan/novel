@@ -146,6 +146,7 @@ import {
   CHAPTER_FORESHADOWING_CONTRACT,
   GLOBAL_FORESHADOWING_CONTRACT,
   readChapterForeshadowing,
+  mergePlannedForeshadowingActions,
   describeForeshadowingDefect,
   describeGlobalForeshadowingDefect,
 } from './foreshadowing-contract';
@@ -11675,16 +11676,13 @@ ${summarizeOutlineConsistency(pending)}`,
           };
           chapters.push(normalizedChapter);
           plannedChapterWords = nextPlannedWords;
-          for (const item of chapterForeshadowings) {
-            if (!item?.content || String(item.action || '').toLowerCase() === '回收') continue;
-            foreshadowings.push({
-              ...item,
-              content: String(item.content),
-              scope: item.scope || 'chapter',
-              setupChapter: chapterNumber,
-              recoveryChapter: item.recoveryChapter || null,
-            });
-          }
+          // All threads may interleave; reminders and intermediate reveal
+          // events refer to an existing plant and never create a second row.
+          // Do not close a thread merely because a future chapter plans a
+          // partial payoff. Only actually written/reviewed prose can do that.
+          const updatedThreads=mergePlannedForeshadowingActions(
+            foreshadowings,chapterForeshadowings,chapterNumber);
+          foreshadowings.splice(0,foreshadowings.length,...updatedThreads);
           if (chapter.timelineEvent) {
             const event = typeof chapter.timelineEvent === 'string'
               ? { title: chapter.title, description: chapter.timelineEvent }
@@ -11729,6 +11727,16 @@ ${summarizeOutlineConsistency(pending)}`,
       .filter((defect: string | null): defect is string => Boolean(defect));
     if (globalForeshadowingDefects.length > 0) {
       throw new Error(`长篇跨卷伏笔不符合契约：${globalForeshadowingDefects.join('；')}`);
+    }
+    // First-window clues and book-scale threads are not disjoint stages.
+    // A book-level registration may not duplicate a line already planted
+    // in an earlier chapter or repeated in this same response.
+    const registeredTitles=new Set(foreshadowings.map(row=>String(row.content||'').trim()));
+    for(const thread of globalForeshadowings){
+      const key=String(thread?.content||'').trim();
+      if(registeredTitles.has(key))
+        throw Error(`长篇跨卷伏笔重复登记已埋设线索：${key}；应继续原线索而非新建另一条`);
+      registeredTitles.add(key);
     }
     foreshadowings.push(...globalForeshadowings);
     if (timeline.length === 0) {
