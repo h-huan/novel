@@ -1,4 +1,4 @@
-import {describe,expect,it,vi} from 'vitest';
+import {describe,expect,it} from 'vitest';
 import {ForeshadowingRepository} from './foreshadowing.repository';
 describe('open foreshadowing debt across independent concurrent threads',()=>{
  it('keeps buried, active, reminded and legacy-pending stories visible to ongoing planning and warnings',()=>{
