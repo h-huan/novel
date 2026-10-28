@@ -273,7 +273,7 @@ describe('observed 4-card presentation report omitted rows',()=>{
   expect(requests[1].prompt).not.toContain('reviews必须恰好4项');
   expect(requests[1].prompt).toContain('reviews恰好1行');
   expect(requests[1].prompt).toContain('其他卡只供同批差异比较');
-  expect(requests[1].prompt).toContain('完整执行标准');
+  expect(requests[1].prompt).toContain('全部执行标准保持原审核要求');
   expect(requests[1].prompt).toContain('题材');
  });
 });
