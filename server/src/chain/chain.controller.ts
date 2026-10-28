@@ -190,7 +190,7 @@ import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQu
 import { causalEvidenceAnchors, applyCausalAuditRepair, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit } from '../modules/writing-quality/causal-review';
 import { chapterReviewRetryContent, chapterReviewRetrySource, chapterReviewRetryTimePlan } from './chapter-review-retry';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
-import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
+import { prohibitedFictionNames, normalizeGeneratedFictionNames } from '../../shared/src/fiction-naming';
 import { chapterDetailStructureIssues } from './chapter-detail-contract';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
@@ -5716,15 +5716,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         });
         const rawIdeas = extractIdeaList(response.content || '') || [];
         try {
-          // A prohibited chat-brand nickname can appear in an optional narrative
-          // field even when the premise was clean. Use the EXISTING literal
-          // name-only transformer before server-owned premise binding; preserve
-          // all story facts and the unchanged final naming/quality Gate.
-          const normalizedIdeas=rawIdeas.map(raw=>{
-            if(!raw||typeof raw!=='object'||Array.isArray(raw))return raw;
-            return prohibitedFictionNames(raw).includes('微信')
-              ?applyFictionNamingReplacements(raw,{'微信':'青信'}):raw;
-          });
+          // Normalize all names covered by the unified fiction naming rule,
+          // not one logged brand. Only generated narrative fields are changed.
+          const normalizedIdeas=rawIdeas.map(raw=>
+            raw&&typeof raw==='object'&&!Array.isArray(raw)?normalizeGeneratedFictionNames(raw):raw);
           return retainValidAutomaticPlotTags(bindStructuredIdeaCardToPremise(selectedPremise,normalizedIdeas),dto.plotTags,autoOptions.plotTags);
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);

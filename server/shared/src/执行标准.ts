@@ -7,7 +7,7 @@ import type { SystemWorkflowRule } from './system-workflow-rule.types';
 /** 连续修复的升级边界；这是流程预算，不是正文质量阈值。 */
 export const UPSTREAM_REPAIR_ROUTING_LIMITS = { sameFamilyAfterAttempts: 1, maxLocalAttemptsBeforeDiagnosis: 2, maxSourceRepairModelCalls: 3 } as const;
 export const UPSTREAM_REPAIR_ROUTING_POLICY = '同类缺陷经局部修复仍存在且未证明新的实质改善、问题集合增长或局部修复进入连续循环时，先回查章节合同、上下文装配、生成执行与审查协议，再决定处理阶段。不得只因有局部改善持续下游修复；已经由证据复核确认解决了不同问题时，不因共享宽泛问题标签提前停止，仍遵守连续局部尝试上限与共享调用预算；上游诊断必须引用本次输入与正文证据，不能把猜测当已确认源冲突。诊断未完成时保留草稿与原质量结论；修改已确认上游事实须按原作者确认与锁定规则处理，不能自动重写正文或回写Canon。质量候选回滚时须同时显示原稿保留与候选复检的实际阻断或未知维度，不只重复修复前的旧缺陷。失败候选的事实不得进入Canon，其必要条件诊断须作为只读反馈传给下一次源头修订，依赖未通过的候选仅在内存继续修订，锚点取本轮候选位置目录，原Canon作为提交原值校验基线；整体复检通过后才原子提交。原因相同的必要依赖修改一起保留，只有显式声明的互斥备选组才做成本择一；相同或无变化候选不重复复检。每个源头修订任务共用物理模型调用预算，扩容、网络恢复和协议纠错不能重置预算；耗尽或候选复检仍失败时如实停止，不能把停止当验收成功。';
-export const SYSTEM_WORKFLOW_RULESET_VERSION = 257;
+export const SYSTEM_WORKFLOW_RULESET_VERSION = 258;
 
 export const IDEA_PRESELECTION_PREREQUISITE_POLICY = '轻量候选池生成前先锁定本次作者已选平台、分类、流派与创作维度及同一来源因果标准；各候选并发生成时逐项实际满足，先筛掉结构与分类不符项再选优，独立复核不等于事后确定标准。原池筛选先落实本次平台分类、已选流派的真实人物与行动条件，每个手动流派须逐卡返回独立genreChecks及本卡已选展开evidenceRef，由服务器绑定真实原文，不引用原池来替代展开证据，全部落实方可锁定，不能以来源保持替代维度适配；完整卡独立审核每批按设置中的完整卡审核批量、其它卡仍作为同构参考，所有批次与协议纠正共享设置中的完整卡审核调用上限，每批为尚未运行批次保留至少一次调用，协议纠正只能使用剩余余额；余额不足即停且不得展示未审核卡。不能等完整卡阶段才检查标签适配。沿用现有来源核对中的行动、反转与兑现条目，锁定前检查决定性结果的必要能力和条件；来源保留不等于结果成立，未建立的关键能力不得留到完整卡临时新增。锁定前的同一次选优与来源兑现复核必须先尝试推翻每项关键胜负转换：异常读数不等于证明了具体收费账目或责任人；发现一件物证不等于证明了另一个物件被谁处置；通知有权者来查看门锁不等于已取得钥匙、进入权限、各方配合动机或实际开门行动。核对真实必要的取得、保全、转交、到场、授权和结果决定；结果的对象、数量与时间跨度必须由已发生行动的作用范围及已建立条件支撑，指认具体责任人还须有能把其与其他可能责任人区分的实际经手、授权或行为证据，发现异常、毒源或毁证不能直接当作证明他就是实施者，不能由结局倒推历史损失已恢复或他人已决定并执行。不得把结局主张、他人会配合或后果已发生当作必要条件的证明。原池与展开都缺的关键桥接应在首次选优审查判gap，不留给完整卡补造或反复换选；普通直接因果不强加行政手续，也不增加模型调用。普通直接因果不强加手续，不扩大物理调用上限或修复轮次，最终完整卡质量门继续保留。';
 
@@ -66,6 +66,14 @@ export const IDEA_CARD_GENERATION_CONCURRENCY = 5;
 /** Naming constraint on fictional story content, not on routing/platform metadata. */
 export const FICTION_NAMING_POLICY = {
   prohibitedNames: ['豆包', 'ChatGPT', 'DeepSeek', '文心一言', '通义千问', '腾讯元宝', 'Kimi', '美团', '饿了么', '微信', '抖音'],
+  // Single source for literal aliases used ONLY in unconfirmed story text.
+  // The prohibited-name Gate stays active after replacement.
+  fictionalAliases: {
+    '豆包': '云芽', 'ChatGPT': '星语助手', 'DeepSeek': '深舟助手',
+    '文心一言': '文思助手', '通义千问': '万象助手',
+    '腾讯元宝': '星图助手', 'Kimi': '青月助手',
+    '美团': '团食', '饿了么': '饭到了', '微信': '青信', '抖音': '映音',
+  },
   narrativeFields: ['title', 'alternateTitles', 'workingTitle', 'storyCore', 'protagonistSituation', 'openingEvent', 'activeChoice', 'escalation', 'reversalEffect', 'payoff', 'irreplaceableCarrier', 'secondOrderConsequence', 'readerQuestion', 'differentiation', 'hook', 'description', 'setting', 'protagonist', 'characters', 'coreConflict', 'conflict', 'uniquePoint', 'uniqueSelling', 'mainReversal', 'ending', 'noveltyProof', 'scopeBreakdown'],
 } as const;
 
