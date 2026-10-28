@@ -62,13 +62,10 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('if(slots.length>=4)');
     expect(source).toContain('splitReviewMaterial(slots,slot=>');
     expect(source).toContain('if(!await reselectScope(part,unusedIds,false))return false');
-    expect(source).toContain('const canReviewBackup=allowBackup');
-    expect(source).toContain('pendingBackup.current=null');
     expect(source).toContain('isReviewOutputCapacityError(error)');
-    expect(source).toContain('independentVerdicts=await reviewBoth(auditSelection,changeScope,finalReview)');
-    expect(source).toContain('independentVerdicts=await reviewBoth(primary,primaryScope,finalReview)');
-    expect(source).toContain('retainPremiseReviewEvidence(auditSelection,independentVerdicts,primary)');
-    expect(source).toContain('retainPremiseReviewEvidence(auditSelection,independentVerdicts,backup!)');
+    expect(source).not.toContain('backupReplacements');
+    expect(source).not.toContain('pendingBackup');
+    expect(source).toContain('finalReview=await reviewBoth(selected,changeScope,finalReview)');
 
     expect(source).toContain('premisePayoffReviewIssues(value,selection)');
     expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
