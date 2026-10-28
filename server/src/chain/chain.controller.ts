@@ -5594,14 +5594,28 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const reviewedPremiseCount=normalizedSelection.selected.length;
         const deliveryPartition=partitionReviewedIdeaPremises(
           normalizedSelection.selected,requestedCount,variedCategories);
+        // A reserve can skip a NEW source+overlap call only if complete
+        // independent evidence is present and validated for ALL eight original
+        // contenders. An incomplete/unknown review cannot grant this shortcut.
+        const reviewedEvidence:PremiseSelectionReview|undefined=
+          normalizedSelection.selectionAudit?.finalReview;
+        const reusableIndependentEvidence=Boolean(reviewedEvidence?.passed
+          &&!premiseSelectionReviewIssues(reviewedEvidence,normalizedSelection).length
+          &&!premiseSourceReviewIssues(reviewedEvidence,normalizedSelection).length
+          &&!premisePayoffReviewIssues(reviewedEvidence,normalizedSelection).length
+          &&!premiseGenreFitIssues(reviewedEvidence,normalizedSelection,dto.webNovelGenre).length
+          &&!premiseCategoryFitIssues(reviewedEvidence,normalizedSelection).length
+          &&reviewedEvidence.sourceChecks?.every(row=>row.status==='preserved'));
+        const reviewedReserves=reusableIndependentEvidence?deliveryPartition.reserves:[];
         normalizedSelection={...normalizedSelection,selected:deliveryPartition.selected,
-          reviewedReservePremises:deliveryPartition.reserves,
+          reviewedReservePremises:reviewedReserves,
           selectionAudit:{...normalizedSelection.selectionAudit,
             reviewedBeforeCardLock:reviewedPremiseCount,
             cardSlotsLocked:deliveryPartition.selected.length,
-            reviewedReservePremiseIds:deliveryPartition.reserves.map(item=>String(item.premiseId))}};
+            reviewedReservePremiseIds:reviewedReserves.map(item=>String(item.premiseId)),
+            unverifiedSurplusCount:deliveryPartition.reserves.length-reviewedReserves.length}};
         this.logger.log('idea-discover: 独立审核 '+reviewedPremiseCount+' 个，锁定完整卡 '
-          +deliveryPartition.selected.length+' 个，已审未结构化备用 '+deliveryPartition.reserves.length+' 个');
+          +deliveryPartition.selected.length+' 个，已有完整证据的备用 '+reviewedReserves.length+' 个');
         this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
           + '，有效池=' + candidatePool.length + '/' + premisePoolSize
