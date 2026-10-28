@@ -123,8 +123,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("status: 'incomplete'");
     expect(source).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
-    expect(source).toContain('repairGenerated: finalGateRepairGenerated');
-    expect(source).toContain('repairError: finalGateRepairError');
+    expect(source).toContain('repairGenerated: 0');
+    expect(source).toContain('repairError: null');
     expect(source).not.toContain('selectedAccepted.length !== requestedCount');
     expect(source).not.toContain('系统不会把部分结果伪装成完整成功');
   });
