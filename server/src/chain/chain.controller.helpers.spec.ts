@@ -1956,11 +1956,43 @@ it('structures two pre-reviewed reserves concurrently for one missing card and s
   const c=Object.create(ChainController.prototype) as any;
   c.realLLM={assertScenarioModelConfigured:vi.fn(),generate};
   c.completePremiseCausalPlans=vi.fn(async(input:any)=>input);
-  c.reconcilePremiseSelection=vi.fn(async(input:any)=>({
-    ...input,selected:input.selected.slice(0,1),
-    reviewedReservePremises:[selected(2),selected(3)],
-    selectionAudit:{finalReview:{passed:true,issues:[]}},
-  }));
+  c.reconcilePremiseSelection=vi.fn(async(input:any)=>{
+    // The live orchestrator is allowed to reuse these two reserves only with
+    // COMPLETE independent source, payoff, genre and category receipts for
+    // the entire initial shortlist. Do not bypass this real guard in the test.
+    const reviewed={...input,selected:[selected(1),selected(2),selected(3)]};
+    const {premiseSourceComparisonCatalog}=await import('./premise-selection-review');
+    const {premiseGenreFitCatalog}=await import('./premise-genre-fit');
+    const {premiseCategoryCatalog}=await import('./premise-category-fit');
+    const {premisePayoffCatalog}=await import('./premise-payoff-review');
+    const {premiseCausalCatalog}=await import('./premise-causal-plan');
+    const sourceChecks=premiseSourceComparisonCatalog(reviewed).map(row=>({
+      ref:row.ref,status:'preserved',reason:'每项来源与原始行动规则核对完成，未修改关键事实。',
+    }));
+    const genreChecks=premiseGenreFitCatalog(reviewed,['悬疑推理']).map(row=>{
+      const idx=reviewed.selected.findIndex((item:any)=>item.premiseId===row.premiseId);
+      return {ref:row.ref,status:'fulfilled',field:'coreConflict',
+        quote:reviewed.selected[idx].coreConflict,evidenceRef:'S'+(idx+1)+'.coreConflict',
+        reason:'独立核对主要冲突与实际选择确实落实了悬疑类型机制。'};
+    });
+    const categoryChecks=premiseCategoryCatalog(reviewed).map(row=>{
+      const idx=reviewed.selected.findIndex((item:any)=>item.premiseId===row.premiseId);
+      return {ref:row.ref,status:'fulfilled',evidenceRef:'S'+(idx+1)+'.coreConflict',
+        reason:'独立核对主线人物关系、行动冲突与结局属于指定分类。'};
+    });
+    const payoffChecks=premisePayoffCatalog(reviewed).map((row,index)=>({
+      ref:row.ref,status:'supported',
+      actionEvidenceRef:'S'+(index+1)+'.activeChoice',
+      conditionEvidenceRef:'S'+(index+1)+'.escalation',
+      reason:'各个决定性环节的实际行动、限制和责任人核验条件已经独立判断。',
+      links:premiseCausalCatalog(reviewed.selected[index],'S'+(index+1)+'.')
+        .map(link=>({ref:link.ref,status:'supported',
+          reason:'对应行动条件与结果的必要因果联系已经核对并成立。'})),
+    }));
+    return {...reviewed,selectionAudit:{finalReview:{
+      passed:true,issues:[],sourceChecks,genreChecks,categoryChecks,payoffChecks,
+    }}};
+  });
   c.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((value:any,index:number)=>({
     position:index+1,title:value.title,titleCompelling:true,openingCompelling:true,distinctFromBatch:true,
     storyCoherent:true,payoffCredible:true,platformFit:true,
