@@ -6068,9 +6068,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           });
           const changedCards = repairedCards.filter((card,index)=>JSON.stringify(card)!==JSON.stringify(failedCards[index]));
           finalGateRepairGenerated += changedCards.length;
-          for(const card of changedCards)latestCards.set(String(card.sourcePremiseId),card);
-          if (changedCards.length) await accept(changedCards, 'repair');
-          else this.logger.warn('最终 Gate 局部修复没有实际改变，保留原拒绝结论，跳过重复模型复核。');
+          if (changedCards.length) {
+            // The proposed patch is NOT the latest reviewed card until its
+            // independent semantic/evidence protocol completes. Previously a
+            // failed presentation call left an unverified edited card in
+            // latestCards, making later repair/fulfillment continue from
+            // content whose Gate never produced any verdict.
+            await accept(changedCards, 'repair');
+            for (const card of changedCards)latestCards.set(String(card.sourcePremiseId),card);
+          } else this.logger.warn('最终 Gate 局部修复没有实际改变，保留原拒绝结论，跳过重复模型复核。');
         } catch (repairError) {
           finalGateRepairError = repairError instanceof Error ? repairError.message : String(repairError);
           this.logger.warn(`idea-discover: 局部修复未完成：${finalGateRepairError}`);
