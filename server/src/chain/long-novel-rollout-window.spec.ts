@@ -213,4 +213,27 @@ describe('ARCH-004 progressive outline window', () => {
     expect(db.exec.mock.calls.map((x:any[])=>x[0])).toEqual(['BEGIN IMMEDIATE','ROLLBACK']);
   });
 
+  it('does not create a second pending dossier for the same named entity in a later rolling batch',async()=>{
+    const {controller}=fixture(15);
+    const db=controller.db.getDb();
+    const original=db.prepare;
+    db.prepare=(sql:string)=>{
+      const statement=original(sql);
+      if(sql.includes('FROM state_items')&&sql.includes("source_type='rollout_outline'"))
+        return {...statement,get:()=>({id:'earlier-pending-dossier'})};
+      return statement;
+    };
+    controller.stateItemService={create:vi.fn()};
+    controller.llmCallWithRetry.mockResolvedValueOnce({runId:'run-21',data:{
+      chapters:[{title:'旧城入口',content:'新人物沈诺在西坡站等待交接。',conflict:'接头迟到',hook:'脚步突然停下',
+        scenes:['西坡站入口'],targetWords:4000,wordCountReason:'现场需要两轮对话与反应',chapterFunction:'conflict'}],
+      newEntities:[{type:'character',name:'沈诺',evidenceQuote:'新人物沈诺在西坡站等待交接',chapterNumber:21}],
+    }});
+    const result=await controller.rolloutDetailedOutlines('project',{lookahead:6});
+    expect(result.added).toBe(1);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(1);
+    expect(controller.stateItemService.create).not.toHaveBeenCalled();
+  });
+
+
 });

@@ -96,6 +96,16 @@ describe('long-novel pending entity preflight before prose model cost',()=>{
   c.db={getDb:()=>({prepare:()=>({all:()=>[{target_type:'character',target_label:'沈诺'}]})})};
   expect(()=>c.assertRollingEntitiesConfirmed('p',21)).toThrow('沈诺');
  });
+ it('blocks prose for an earlier still-unconfirmed entity, not just entities introduced in this chapter',()=>{
+  const controller=Object.create(ChainController.prototype) as any;
+  const all=vi.fn(()=>[{target_type:'character',target_label:'沈诺'}]);
+  const prepare=vi.fn(()=>({all}));
+  controller.db={getDb:()=>({prepare})};
+  expect(()=>controller.assertRollingEntitiesConfirmed('p',25)).toThrow('沈诺');
+  expect(prepare.mock.calls[0][0]).toContain('JOIN chapters c');
+  expect(prepare.mock.calls[0][0]).toContain('c.chapter_index<=?');
+  expect(all).toHaveBeenCalledWith('p',25);
+ });
  it('allows a chapter whose own rolled-out entity dossiers have all been resolved',()=>{
   const c=Object.create(ChainController.prototype) as any;
   c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
