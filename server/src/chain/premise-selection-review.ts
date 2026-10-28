@@ -217,33 +217,6 @@ export function retainReviewedPremises(selection: PremiseSelectionResult, review
 
 
 
-/**
- * Reuse a completed independent source+overlap verdict per replacement rather
- * than discarding verified peers when another candidate is rejected. Missing
- * source coverage never becomes a partial pass.
- */
-export function verifiedReserveReplacements(
-  selection: PremiseSelectionResult, review: PremiseSelectionReview,
-  replacements: readonly { replacesPremiseId: string; replacementPremiseId: string }[],
-  protectedIds: readonly string[] = [],
-): Array<{ replacesPremiseId: string; replacementPremiseId: string }> {
-  const errors = premiseSelectionReviewIssues(review, selection);
-  if (errors.length) throw new Error('换选审核证据不可用：' + errors.join('；'));
-  const replacementIds = new Set(replacements.map(item => item.replacementPremiseId));
-  if (replacementIds.size !== replacements.length
-    || replacements.some(item => !selection.selected.some(row => String(row.premiseId) === item.replacementPremiseId)))
-    throw new Error('换选候选身份与完整审核选择不一致');
-  const sourceCatalog = premiseSourceComparisonCatalog(selection).filter(row => replacementIds.has(row.premiseId));
-  const sourceChecks = new Map((review.sourceChecks || []).map(row => [row.ref, row]));
-  if (!review.sourceChecks?.length || sourceCatalog.some(row => !sourceChecks.has(row.ref) || sourceChecks.get(row.ref)?.status === 'unknown'))
-    throw new Error('换选独立来源审核缺失或存在未知项，不允许部分接纳');
-  const retained = retainReviewedPremises(selection, review, protectedIds);
-  const retainedIds = new Set(retained.selection.selected.map(item => String(item.premiseId)));
-  return replacements.filter(item => retainedIds.has(item.replacementPremiseId)
-    && sourceCatalog.filter(row => row.premiseId === item.replacementPremiseId)
-      .every(row => sourceChecks.get(row.ref)?.status === 'preserved'));
-}
-
 /** Reuse the completed review for a retained subset. Every remaining premise and
  * every remaining pair was already covered by the original review; dropping a
  * failed premise cannot require another paid review. Re-index S<n> evidence for
@@ -301,23 +274,6 @@ export function premiseSelectionFailureReasons(audit: unknown): string[] {
   const items = Array.isArray(value?.reasons) ? value.reasons
     : value?.finalReview?.passed === false ? value.finalReview.issues : [];
   return [...new Set(items.map(item => typeof item?.reason === 'string' ? item.reason.trim() : '').filter(Boolean))];
-}
-
-/** One remaining failed position may use an untouched original-pool identity. */
-export function premiseReserveReselectionPlan(initial: PremiseSelectionResult, current: PremiseSelectionResult,
-  review: PremiseSelectionReview, protectedIds: readonly string[] = []) {
-  const retained = retainReviewedPremises(current, review, protectedIds);
-  if (retained.excludedPremiseIds.length !== 1) return null;
-  const replacesPremiseId = retained.excludedPremiseIds[0];
-  const attemptedIds = new Set([...initial.selected, ...current.selected].map(item => String(item.premiseId)));
-  const availableCandidates = current.pool.filter(item => !attemptedIds.has(String(item.premiseId)));
-  if (!availableCandidates.length) return null;
-  const issues = review.issues.filter(item => item.premiseId === replacesPremiseId
-    || (item.kind === 'overlap' && item.referencePremiseId === replacesPremiseId))
-    .map(item => item.premiseId === replacesPremiseId ? item : { ...item,
-      premiseId: item.referencePremiseId, referencePremiseId: item.premiseId,
-      quote: item.referenceQuote, referenceQuote: item.quote });
-  return { replacesPremiseId, availableCandidates, review: { passed: false, issues } as PremiseSelectionReview };
 }
 
 /** Reused old pairs cannot veto an unrelated replacement. Out-of-scope findings

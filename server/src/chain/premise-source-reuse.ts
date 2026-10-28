@@ -15,14 +15,6 @@ const sourceReceiptKey = (selection:PremiseSelectionResult, scope:string,
   item:PremiseSelectionResult['selected'][number]) => JSON.stringify({scope,item,
     seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
 
-/** A prospective replacement has no valid receipt, even if its old slot did. */
-export function pendingPremiseSourceReviewCount(selection:PremiseSelectionResult,scope:string,
-  receipts:PremiseSourceReceipts,changingIds:readonly string[]=[]):number {
- const changing=new Set(changingIds);
- return selection.selected.filter(item=>changing.has(String(item.premiseId))
-   ||!receipts.has(sourceReceiptKey(selection,scope,item))).length;
-}
-
 function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionReview,index:number):Receipt {
  const item=selection.selected[index],prefix=`S${index+1}.`;
  const rebind=(value:string)=>value.startsWith(prefix)?'S1.'+value.slice(prefix.length):value;

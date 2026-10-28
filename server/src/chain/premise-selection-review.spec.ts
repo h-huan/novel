@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseReserveReselectionPlan, retainReviewedPremises, retainPremiseReviewEvidence, verifiedReserveReplacements, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -868,39 +868,4 @@ it('retains prior rejected identities after the only authorized reselection wave
  expect(result.selectionAudit.finalReview.passed).toBe(true);
  expect(result.selectionAudit.rejectedHistory.map((r:any)=>r.premiseId)).toEqual(['A','C']);
  expect(result.selected[0]).toEqual(input.selected[1]);
-});
-
-it('keeps two independently reviewed replacements and isolates a third failed causal plan without another review',()=>{
-  const changed=normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F'].map(premise),
-    selectedPremises:['A','D','E','F'].map(premise)},4,6);
-  const pairs=[{replacesPremiseId:'B',replacementPremiseId:'D'},
-    {replacesPremiseId:'C',replacementPremiseId:'E'},
-    {replacesPremiseId:'G',replacementPremiseId:'F'}];
-  const sourceChecks=premiseSourceComparisonCatalog(changed)
-    .filter(row=>['D','E','F'].includes(row.premiseId))
-    .map(row=>({ref:row.ref,status:'preserved' as const,reason:'逐字段核对已有原池事实和因果'}));
-  const issue={kind:'selection_fit' as const,premiseId:'F',referencePremiseId:'F',
-    quote:premise('F').payoff,referenceQuote:premise('F').storyCore,
-    reason:'决定性结果缺少可核验的中间行动条件'};
-  const review:PremiseSelectionReview={passed:false,issues:[issue],sourceChecks};
-  expect(verifiedReserveReplacements(changed,review,pairs,['A'])).toEqual(pairs.slice(0,2));
-  expect(changed.selected.map(x=>x.premiseId)).toEqual(['A','D','E','F']);
-  expect(()=>verifiedReserveReplacements(changed,{...review,sourceChecks:sourceChecks.slice(1)},pairs,['A']))
-    .toThrow('换选独立来源审核缺失');
-  expect(()=>verifiedReserveReplacements(changed,{...review,passed:true},pairs,['A']))
-    .toThrow('换选审核证据不可用');
-});
-
-it('isolates cross-card overlap in a replacement batch without reusing a rejected pair',()=>{
-  const current=normalizePremiseSelectionPayload({pool:['A','B','C','D'].map(premise),
-    selectedPremises:['A','B','C'].map(premise)},3,4);
-  const replacements=[{replacesPremiseId:'X',replacementPremiseId:'B'},
-    {replacesPremiseId:'Y',replacementPremiseId:'C'}];
-  const checks=premiseSourceComparisonCatalog(current).filter(row=>row.premiseId==='B'||row.premiseId==='C')
-    .map(row=>({ref:row.ref,status:'preserved' as const,reason:'原池和展开一致'}));
-  const issue={kind:'overlap' as const,premiseId:'B',referencePremiseId:'C',
-    quote:premise('B').activeChoice,referenceQuote:premise('C').activeChoice,
-    reason:'两项主角主动选择与兑现实际同构，不能同时交付'};
-  expect(verifiedReserveReplacements(current,{passed:false,issues:[issue],sourceChecks:checks},replacements,['A']))
-    .toEqual([replacements[1]]);
 });
