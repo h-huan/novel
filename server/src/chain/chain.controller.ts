@@ -10838,11 +10838,12 @@ ${excerpt}`;
   private assertRollingEntitiesConfirmed(projectId:string,chapterNumber:number):void {
     if(!Number.isInteger(chapterNumber)||chapterNumber<1)return;
     const pending=this.db.getDb().prepare(`SELECT target_type,target_label FROM state_items
-      WHERE project_id=? AND source_type='rollout_outline' AND status='pending'
+      WHERE project_id=? AND source_type='rollout_outline'
+        AND (status <> 'confirmed' OR authority <> 'hard_fact')
         AND source_chapter_id IN (SELECT id FROM chapters WHERE project_id=? AND chapter_index=?)
       ORDER BY target_type,target_label`).all(projectId,projectId,chapterNumber) as any[];
     if(pending.length) {
-      throw new HttpException(`第${chapterNumber}章存在尚未确稿的新增人物、组织、地点或伏笔：${pending.map(row=>String(row.target_label)).join('、')}。请在状态确稿中心逐项确认或拒绝，正文生成暂不消耗模型调用。`,409);
+      throw new HttpException(`第${chapterNumber}章存在尚未确稿的新增人物、组织、地点或伏笔：${pending.map(row=>String(row.target_label)).join('、')}。请在状态确稿中心逐项确认；如已拒绝，须先修正章纲并重新核定实体证据。正文生成暂不消耗模型调用。`,409);
     }
   }
 
