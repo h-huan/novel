@@ -39,12 +39,12 @@ describe('locked-card historical exclusion transport', () => {
   it('does not repeat full historical story material once the premise is locked, while retaining every title', () => {
     const excludes = [
       { title: '旧题材一', hook: '历史钩子秘密不应重复给已锁定题材卡'.repeat(15), description: '历史故事完整概要应在上游去重和最终Gate保留'.repeat(40) },
-      { title: '旧题材二', hook: '第二条历史钩子', description: '第二条历史概要' },
+      { title: '旧\n题材二', hook: '第二条历史钩子', description: '第二条历史概要' },
     ];
     const original = structuredClone(excludes);
     const prompt = ideaCardHistoryTitleReminder(excludes);
     expect(prompt).toContain('1. 旧题材一');
-    expect(prompt).toContain('2. 旧题材二');
+    expect(prompt).toContain('2. 旧 题材二');
     expect(prompt).toContain('最终去重仍使用原始完整历史');
     expect(prompt).not.toContain(excludes[0].hook);
     expect(prompt).not.toContain(excludes[0].description);

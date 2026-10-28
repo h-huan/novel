@@ -283,7 +283,7 @@ ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生�
 export function ideaCardHistoryTitleReminder(excludes: readonly { title: string; hook?: string; description?: string }[]): string {
   if (!excludes.length) return '';
   return '\n【历史作品与本次明确排除的标题（历史故事内容已在选优时完整比较，最终去重仍使用原始完整历史）】\n'
-    + excludes.map((item, index) => `${index + 1}. ${String(item.title || '').replace(/\\s+/g, ' ').trim()}`).join('\n')
+    + excludes.map((item, index) => `${index + 1}. ${String(item.title || '').replace(/\s+/g, ' ').trim()}`).join('\n')
     + '\n本阶段只结构化已经锁定的题材；不得复制排除标题，也不得为规避历史相似度改变已锁定的人物选择、机制、反转与兑现。';
 }
 
