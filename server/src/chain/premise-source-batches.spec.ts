@@ -14,8 +14,11 @@ const selection=()=>normalizePremiseSelectionPayload({
 const report=(batch:ReturnType<typeof selection>)=>({payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开事实兼容原池所述的行动方向与代价'}))});
 
 describe('bounded premise source review batches',()=>{
- it('only partitions large unchanged source sets when shared recovery credits remain',()=>{
+ it('partitions large source sets whenever each independent batch has one funded call',()=>{
   expect(shouldBatchLargePremiseSourceReview(5,0,3,10)).toBe(true);
+  expect(shouldBatchLargePremiseSourceReview(8,0,3,3)).toBe(true);
+  expect(shouldBatchLargePremiseSourceReview(8,0,3,2)).toBe(false);
+  expect(shouldBatchLargePremiseSourceReview(8,0,4,2)).toBe(true);
   expect(shouldBatchLargePremiseSourceReview(4,0,3,3)).toBe(true);
   expect(shouldBatchLargePremiseSourceReview(3,0,3,10)).toBe(false);
   expect(shouldBatchLargePremiseSourceReview(5,0,3,2)).toBe(false);

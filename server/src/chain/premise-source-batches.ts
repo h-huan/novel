@@ -3,18 +3,18 @@ import {readGenerationBudgets} from '../config/generation-budgets';
 import { type PremiseSelectionResult } from './idea-discovery-contract';
 import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 
-/** When a complete unchanged selection exceeds the existing source batch size,
- * the source/payoff/genre/category checks are premise-local. Run the same full
- * checklist on disjoint premise groups concurrently; the separate overlap
- * review retains cross-card responsibility. Leave a protocol-correction credit
- * or use the original aggregate path rather than compromising recoverability.
- * This never increases the shared maximum number of physical calls. */
+/** Source/payoff/genre/category reviews are premise-local. Independently review
+ * every disjoint group concurrently, keeping cross-card overlap in its separate
+ * original Gate. When the remaining shared budget covers exactly one first call
+ * per group, splitting is still cheaper than a single eight-card monolith:
+ * protocol failure then stops honestly instead of fabricating a recovery credit.
+ * No gate, physical-call allowance or timeout is increased. */
 export function shouldBatchLargePremiseSourceReview(
   count:number, groupingMode:number, batchSize:number, availableCalls:number,
 ):boolean{
   const partitions=Math.ceil(count/Math.max(1,batchSize));
   return groupingMode===0&&count>=4&&batchSize>=1&&partitions>=2
-    &&availableCalls>=partitions+1;
+    &&availableCalls>=partitions;
 }
 export function premiseSourceBatches(selection: PremiseSelectionResult): PremiseSelectionResult[] {
   const size=readGenerationBudgets().sourceBatchSize;
