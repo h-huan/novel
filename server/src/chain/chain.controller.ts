@@ -42,7 +42,7 @@ import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenc
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
 import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, verifiedReserveReplacements, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
-import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences } from './idea-presentation-review';
+import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences,bindIdeaPresentationVerdicts } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
 import { readConstitution, updateConstitution, constitutionSettings, buildExecutionStandard, missingConstitutionStandards, genreFitProblem, categoryPlacementProblem, categoryPlacementMessage, categoryWordScaleStanding, categoryWordScaleBlocked, categoryWordScaleMessage, audienceChannelHint, platformStandardProblem, buildPlatformStyleDirective, resolveProjectStandardDirective, styleIntensityGuides, type CreativeConstitution } from '../modules/project/creative-constitution';
 import {
@@ -5848,11 +5848,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const reviewableSet=new Set(reviewable);
         const presentationReviews=reviewable.length
           ? await this.reviewIdeaPresentation(reviewable,accepted,dto.customPlatformNote,presentationBudget,false,boundedPresentationReview(reviewable.length)) : [];
-        const presentationByTitle = new Map(presentationReviews.map(review => [review.title, review]));
+        const presentationByCandidate=bindIdeaPresentationVerdicts(reviewable,presentationReviews);
         for (const candidate of candidates) {
           const titleKey = normalizeTitle(candidate?.title);
           const issues = [...localIssues.get(candidate)!];
-          const presentationReview = presentationByTitle.get(candidate.title);
+          const presentationReview = presentationByCandidate.get(candidate);
           // For known deterministic rejects, there was intentionally no paid
           // presentation call. Do not manufacture a "review missing" failure.
           if(!issues.length&&reviewableSet.has(candidate))issues.push(...presentationGateIssues(presentationReview));

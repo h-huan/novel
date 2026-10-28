@@ -45,6 +45,26 @@ export interface IdeaPresentationVerdict {
   readerGoals?: ReaderGoalReview;
 }
 
+/** Verdict position is server-owned. Titles are NOT unique identities.
+ * A title-keyed Map silently reused the last verdict when two candidates
+ * shared a title, causing false rejection and further needless repair calls.
+ * Bind to the exact original objects using the validated original positions. */
+export function bindIdeaPresentationVerdicts<T extends {title:string}>(
+ cards:readonly T[], verdicts:readonly IdeaPresentationVerdict[],
+):Map<T,IdeaPresentationVerdict>{
+ const bound=new Map<T,IdeaPresentationVerdict>();
+ for(const verdict of verdicts){
+   if(!Number.isInteger(verdict?.position)||verdict.position<1||verdict.position>cards.length)
+     throw Error('完整卡独立审核位置缺失或越界，不得按标题猜测归属');
+   const candidate=cards[verdict.position-1];
+   if(verdict.title!==candidate.title||bound.has(candidate))
+     throw Error('完整卡独立审核标题、位置不匹配或重复，不得错配其它故事');
+   bound.set(candidate,verdict);
+ }
+ if(bound.size!==cards.length)throw Error('完整卡独立审核未覆盖全部实际候选');
+ return bound;
+}
+
 /** Repair only an unambiguous same-row envelope error; never infer a verdict. */
 function normalizePresentationEnvelope(row: any): any {
   const bridge = row?.payoffBridge;

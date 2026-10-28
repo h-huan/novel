@@ -6,6 +6,18 @@ import { vi } from 'vitest';
 import { readerGoalReviewIssues } from './reader-goal-review';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { presentationReviewIssues, targetIdeaReviews, compactIdeaPresentationReferences } from './idea-presentation-review';
+it('binds final card verdicts to their real positions even when the generated titles collide',()=>{
+  const a={title:'相同的标题',sourcePremiseId:'P1'};
+  const b={title:'相同的标题',sourcePremiseId:'P2'};
+  const first={position:1,title:a.title,titleCompelling:false};
+  const second={position:2,title:b.title,titleCompelling:true};
+  const receipts=bindIdeaPresentationVerdicts([a,b],[second,first] as any);
+  expect(receipts.get(a)?.titleCompelling).toBe(false);
+  expect(receipts.get(b)?.titleCompelling).toBe(true);
+  expect(()=>bindIdeaPresentationVerdicts([a,b],[second,second] as any)).toThrow('重复');
+  expect(()=>bindIdeaPresentationVerdicts([a,b],[{...first,position:3}] as any)).toThrow('越界');
+  expect(()=>bindIdeaPresentationVerdicts([a,b],[{...first,title:'错误标题'},second] as any)).toThrow('不匹配');
+});
 const cards=[{title:'危险订单',
  uniquePoint:'她退回赔款转身堵唯一的出口，逼负责人当面解释停工',
  noveltyProof:{uncommonCombination:'唯一出口与主动退回赔款组合，是否有故事支撑须独立审查',avoidedPatterns:'不靠凭空公布证据'},
