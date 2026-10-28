@@ -79,8 +79,12 @@ describe('bounded preselection surplus',()=>{
     expect(ideaPreselectionCapacity(5,15)).toBe(8);
     expect(ideaPreselectionCapacity(5,6)).toBe(6);
     expect(ideaPreselectionCapacity(5,5)).toBe(5);
-    expect(ideaPreselectionCapacity(2,12)).toBe(2);
-    expect(ideaPreselectionCapacity(1,10)).toBe(1);
+    expect(ideaPreselectionCapacity(2,12)).toBe(3);
+    expect(ideaPreselectionCapacity(1,10)).toBe(2);
+    expect(ideaPreselectionCapacity(3,12)).toBe(5);
+    expect(ideaPreselectionCapacity(4,12)).toBe(6);
+    expect(ideaPreselectionCapacity(8,24)).toBe(11);
+    expect(ideaPreselectionCapacity(10,7)).toBe(7);
     expect(()=>ideaPreselectionCapacity(5,-1)).toThrow('候选池数量无效');
   });
 });
