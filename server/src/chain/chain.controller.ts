@@ -6938,17 +6938,39 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,(mode,_index,allowance)=>
           this.reviewPremiseSelection(mode==='source_drift'?changedSelection:candidate,
             standard,mode,allowance,false,requiredGenres,limiter,mode==='overlap'?changedIds:undefined));
-      const sourceChecks=(reviews[0].sourceChecks||[]).map(row=>{
-        const local=Number(/^S(\d+)\./.exec(row.ref)?.[1])-1;
-        const global=candidate.selected.findIndex(item=>String(item.premiseId)===String(changed[local]?.premiseId));
-        if(global<0)throw Error('汇总来源审核编号不属于实际替代题材');
-        return {...row,ref:row.ref.replace(/^S\d+\./,'S'+(global+1)+'.')};
-      });
+      // Source review returns all four independently judged dimensions for
+      // changed premises. Preserve their existing proof instead of dropping
+      // payoff/genre/category receipts when reindexing the replacement to
+      // its actual position among unchanged protected stories.
+      const rebaseChecks=<T extends {ref:string}>(rows:readonly T[]|undefined):T[]=>{
+        return (rows||[]).map(row=>{
+          const local=Number(/^S(\d+)\./.exec(row.ref)?.[1])-1;
+          const global=candidate.selected.findIndex(item=>String(item.premiseId)===String(changed[local]?.premiseId));
+          if(!Number.isInteger(local)||local<0||global<0)
+            throw Error('汇总来源审核编号不属于实际替代题材');
+          const oldPrefix='S'+(local+1)+'.',newPrefix='S'+(global+1)+'.';
+          const ref=(value:unknown)=>typeof value==='string'&&value.startsWith(oldPrefix)
+            ?newPrefix+value.slice(oldPrefix.length):value;
+          const mapped:any={...row,ref:ref(row.ref)};
+          for(const key of ['evidenceRef','actionEvidenceRef','conditionEvidenceRef'])
+            if(key in mapped)mapped[key]=ref(mapped[key]);
+          if(Array.isArray(mapped.links))mapped.links=mapped.links.map((link:any)=>
+            link&&typeof link==='object'?{...link,ref:ref(link.ref)}:link);
+          return mapped as T;
+        });
+      };
+      const sourceChecks=rebaseChecks(reviews[0].sourceChecks);
+      const payoffChecks=rebaseChecks(reviews[0].payoffChecks);
+      const genreChecks=rebaseChecks(reviews[0].genreChecks);
+      const categoryChecks=rebaseChecks(reviews[0].categoryChecks);
       const retainedIssues=review.issues.filter(issue=>!failedIds.includes(String(issue.premiseId))
         &&!(issue.kind==='overlap'&&failedIds.includes(String(issue.referencePremiseId))));
       const issues=[...retainedIssues,...reviews.flatMap(row=>row.issues)];
       const finalReview={passed:issues.length===0&&reviews.every(row=>row.passed),issues,
         ...(sourceChecks.length?{sourceChecks}:{}),
+        ...(payoffChecks.length?{payoffChecks}:{}),
+        ...(genreChecks.length?{genreChecks}:{}),
+        ...(categoryChecks.length?{categoryChecks}:{}),
         scope:{sourcePremiseIds:changedIds,overlapFocusId:changedIds.length===1?changedIds[0]:changedIds}};
       return {selection:candidate,review:finalReview,attempted:true,error:null,
         replacesPremiseId:replacements[0]?.replacesPremiseId,

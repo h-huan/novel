@@ -1058,13 +1058,48 @@ it('replaces two missing positions under one source and one overlap review, pres
   budget.remaining--;
   if(mode==='source_drift')expect(selection.selected.map((p:any)=>p.premiseId)).toEqual(['D','E']);
   else {expect(selection.selected.map((p:any)=>p.premiseId)).toEqual(['A','D','E']);expect(focus).toEqual(['D','E']);}
-  return {passed:true,issues:[],sourceChecks:[]};
+  if(mode==='source_drift'){
+    return {
+      passed:true,issues:[],
+      sourceChecks:premiseSourceComparisonCatalog(selection).map((item:any)=>({
+        ref:item.ref,status:'preserved',
+        reason:'对应行动和条件均完整比对且保留原始题材事实',
+      })),
+      payoffChecks:selection.selected.map((_item:any,index:number)=>({
+        ref:'S'+(index+1)+'.payoff',status:'supported',
+        actionEvidenceRef:'S'+(index+1)+'.activeChoice',
+        reason:'已审行动和决定的因果联系获得真实凭据',
+        links:[{ref:'S'+(index+1)+'.causal1',status:'supported',reason:'已核验实际因果条件'}],
+      })),
+      genreChecks:selection.selected.map((_item:any,index:number)=>({
+        ref:'S'+(index+1)+'.genre1',status:'fulfilled',
+        evidenceRef:'S'+(index+1)+'.activeChoice',reason:'流派通过已选行动真正兑现',
+      })),
+      categoryChecks:selection.selected.map((_item:any,index:number)=>({
+        ref:'S'+(index+1)+'.category',status:'fulfilled',
+        evidenceRef:'S'+(index+1)+'.coreConflict',reason:'分类主要机制已独立核验通过',
+      })),
+    };
+  }
+  return {passed:true,issues:[]};
  });
  const result=await controller.reservePremiseSelection(initial,current,review,3,5,['悬疑'],'',attempts,['A'],[],sources);
  expect(result.attempted).toBe(true);expect(result.review.passed).toBe(true);
  expect(result.replacements).toEqual([{replacesPremiseId:'B',replacementPremiseId:'D'},{replacesPremiseId:'C',replacementPremiseId:'E'}]);
  expect(result.selection.selected.map((p:any)=>p.premiseId)).toEqual(['A','D','E']);
  expect(result.selection.selected[0]).toEqual(current.selected[0]);
+ expect(result.review.sourceChecks).toHaveLength(20);
+ expect(result.review.sourceChecks?.[0].ref).toBe('S2.protagonistSituation');
+ expect(result.review.payoffChecks).toEqual([
+  expect.objectContaining({ref:'S2.payoff',actionEvidenceRef:'S2.activeChoice',
+    links:[expect.objectContaining({ref:'S2.causal1'})]}),
+  expect.objectContaining({ref:'S3.payoff',actionEvidenceRef:'S3.activeChoice',
+    links:[expect.objectContaining({ref:'S3.causal1'})]}),
+ ]);
+ expect(result.review.genreChecks?.map((row:any)=>row.evidenceRef)).toEqual(['S2.activeChoice','S3.activeChoice']);
+ expect(result.review.categoryChecks?.map((row:any)=>row.evidenceRef)).toEqual(['S2.coreConflict','S3.coreConflict']);
+ expect(verifiedReserveReplacements(result.selection,result.review,result.replacements,['A']))
+  .toEqual(result.replacements);
  expect(attempts.remaining).toBe(1);expect(sources.remaining).toBe(0);
  expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
 });
