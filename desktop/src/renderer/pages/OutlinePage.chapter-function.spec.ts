@@ -28,8 +28,19 @@ describe('outline chapter responsibilities use explicit sources', () => {
     expect(controls).toBeGreaterThan(browseStart);
     expect(detail).not.toContain('立即滚动补纲');
     expect(detail).not.toContain('openContinueDialog');
-    expect(source).toContain('([1, 3, 5, 10] as const).map(count =>');
-    expect(source).toContain('onClick={() => handleRolloutOutline(count)}');
+    expect(source).toContain('aria-label="选择补充章数"');
+    expect(source).toContain('onClick={() => handleRolloutOutline(rolloutAppendCount)}');
+    expect(source).toContain('useState<1 | 3 | 5 | 10>(3)');
+    for (const n of [1, 3, 5, 10]) expect(source).toContain(`<option value={${n}}>${n} 章</option>`);
+    expect(source).not.toContain('([1, 3, 5, 10] as const).map(count =>');
+  });
+  it('does not mislabel chapter rows as the whole-book structure', () => {
+    const browse=source.slice(source.indexOf("activeView === 'browse' &&"));
+    expect(browse).toContain('全书骨架 · 世界观／主线与分卷／人物势力／伏笔／时间线');
+    expect(browse).toContain('章节列表（已生成的详细章纲）');
+    expect(browse).not.toContain('全书骨架 · 章节列表');
+    expect(browse).toContain('全书分卷规划');
+    expect(browse).toContain('选择补充章数');
   });
   it('sends an exact manual chapter count to the existing audited rollout route', () => {
     const handler = source.slice(source.indexOf('const handleRolloutOutline = useCallback('), source.indexOf('const openInsertDialog = useCallback('));
