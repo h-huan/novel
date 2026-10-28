@@ -1,4 +1,5 @@
 import {describe,expect,it} from 'vitest';
+import {collectOutlineForeshadowings} from './chain.controller';
 import {CHAPTER_FORESHADOWING_CONTRACT,GLOBAL_FORESHADOWING_CONTRACT,
   FORESHADOWING_INTERLEAVING_POLICY, mergePlannedForeshadowingActions} from './foreshadowing-contract';
 
@@ -38,4 +39,24 @@ describe('concurrent, many-to-many foreshadow threads',()=>{
    expect(GLOBAL_FORESHADOWING_CONTRACT).toContain(FORESHADOWING_INTERLEAVING_POLICY);
    expect(CHAPTER_FORESHADOWING_CONTRACT).toContain('reference');
  });
+ it('the existing short-outline collector persists only the original plant across parallel later reminders',()=>{
+  const rows=[
+   {order:0, scenes:JSON.stringify({foreshadowing:[
+      chapter('旧钟表','埋设'),chapter('失踪账册','埋设')]})},
+   {order:1, scenes:JSON.stringify({foreshadowing:[
+      chapter('旧钟表','提醒','旧钟表'),chapter('失踪账册','激活','失踪账册')]})},
+   {order:2, scenes:JSON.stringify({foreshadowing:[
+      chapter('旧钟表','回收','旧钟表'),chapter('失踪账册','提醒','失踪账册')]})},
+  ];
+  const result=collectOutlineForeshadowings(rows);
+  expect(result).toHaveLength(2);
+  expect(result.map(row=>[row.content,row.buriedChapter])).toEqual([
+    ['旧钟表',1],['失踪账册',1]]);
+ });
+ it('short-outline collector rejects an orphan reminder instead of registering it as a new story fact',()=>{
+   expect(()=>collectOutlineForeshadowings([
+     {order:2,scenes:JSON.stringify({foreshadowing:[chapter('并不存在的旧钥匙','提醒')]})},
+   ])).toThrow('缺少已埋设');
+ });
+
 });
