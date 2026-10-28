@@ -112,13 +112,12 @@ describe('chain HTTP architecture', () => {
   it('preserves final-gate-passed selected premises as diagnostics when the batch is incomplete', () => {
     const source = read('chain.controller.ts');
 
-    expect(source).toContain('finalGateRepairAttempted');
-    expect(source).toContain("repairProtocol: 'budgeted_progress_or_original_pool_replacement'");
-    expect(source).toContain('applyIsolatedIdeaRepairPatches');
+    expect(source).toContain("repairProtocol: 'no_post_card_repair_or_replacement'");
     expect(source).toContain('retainValidAutomaticPlotTags');
-    expect(source).toContain("kind:'repair_patch_rejected'");
-    expect(source).toContain('ideaGateLocalRepairDirective');
-    expect(source).toContain("mode: 'budgeted_original_pool_fulfillment'");
+    expect(source).not.toContain('await fulfillDiscoveryGaps(');
+    expect(source).not.toContain("kind:'repair_patch_rejected'");
+    expect(source).toContain("mode: 'parallel_vetted_full_card_filter'");
+    expect(source).toContain('await accept(structuredCards');
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
     expect(source).toContain("status: 'incomplete'");
