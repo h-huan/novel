@@ -1,4 +1,6 @@
 import {describe,it,expect,vi} from 'vitest';
+import { createRequire } from 'node:module';
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 import {chapterLengthReviewInput,chapterLengthReviewBatches,chapterLengthReviewFindings,chapterLengthConflictProofErrors,validateChapterLengthReview,applyChapterLengthInsertions} from './chapter-length-expansion';
 import {ChainController} from './chain.controller';
 import {ChapterService} from '../modules/chapter/chapter.service';
@@ -111,7 +113,33 @@ describe('long-novel pending entity preflight before prose model cost',()=>{
   expect(()=>controller.assertRollingEntitiesConfirmed('p',25)).toThrow('沈诺');
   expect(prepare.mock.calls[0][0]).toContain('JOIN chapters c');
   expect(prepare.mock.calls[0][0]).toContain('c.chapter_index<=?');
-  expect(all).toHaveBeenCalledWith('p',25);
+  expect(prepare.mock.calls[0][0]).toContain('AND EXISTS (SELECT 1 FROM outlines o');
+  expect(all).toHaveBeenCalledWith('p',25,25);
+ });
+ it('blocks a previously rejected character still mentioned in later outlines, but allows a genuinely revised story',()=>{
+  const db=new DatabaseSync(':memory:');
+  try {
+    db.exec(`
+      CREATE TABLE chapters(id TEXT,project_id TEXT,chapter_index INTEGER);
+      CREATE TABLE outlines(id TEXT,project_id TEXT,level TEXT,"order" INTEGER,title TEXT,content TEXT,scenes TEXT);
+      CREATE TABLE state_items(project_id TEXT,source_type TEXT,source_chapter_id TEXT,
+        target_type TEXT,target_label TEXT,status TEXT,authority TEXT);
+      INSERT INTO chapters VALUES ('c21','p',21),('c25','p',25);
+      INSERT INTO outlines VALUES ('o21','p','chapter',20,'首次出场','沈诺来到西坡站','[]');
+      INSERT INTO outlines VALUES ('o25','p','chapter',24,'继续调查','沈诺交出资料','[]');
+      INSERT INTO state_items VALUES ('p','rollout_outline','c21','character','沈诺','rejected','excluded');
+    `);
+    const c=Object.create(ChainController.prototype) as any;
+    c.db={getDb:()=>db};
+    expect(()=>c.assertRollingEntitiesConfirmed('p',25)).toThrow('沈诺');
+    db.prepare("UPDATE outlines SET content='换由另一名已确认角色调查' WHERE id='o21'").run();
+    expect(()=>c.assertRollingEntitiesConfirmed('p',25)).toThrow('沈诺');
+    db.prepare("UPDATE outlines SET content='已确稿人员交出资料' WHERE id='o25'").run();
+    expect(()=>c.assertRollingEntitiesConfirmed('p',25)).not.toThrow();
+    db.prepare("UPDATE outlines SET content='沈诺交出资料' WHERE id='o25'").run();
+    db.prepare("UPDATE state_items SET status='confirmed',authority='hard_fact'").run();
+    expect(()=>c.assertRollingEntitiesConfirmed('p',25)).not.toThrow();
+  } finally {db.close();}
  });
  it('allows a chapter whose own rolled-out entity dossiers have all been resolved',()=>{
   const c=Object.create(ChainController.prototype) as any;
