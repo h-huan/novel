@@ -5641,6 +5641,10 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
       };
 
       let sameBatchPremises: Array<Record<string, unknown>> = [];
+      // Actual business dispatches, separate from the metrics provider's
+      // physical-call timeline. This disambiguates an extra metric row from
+      // a second card task without changing any generation/quality budget.
+      const fullCardDispatchPremiseIds: string[] = [];
       const buildPrompt = (
         excludes: Array<{ title: string; hook?: string; description?: string }>,
         selectedPremise: Record<string, unknown>,
@@ -5694,6 +5698,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         position: number,
         physicalCallBudget?:{remaining:number},
       ): Promise<Record<string, unknown>> => {
+        const sourcePremiseId=String(selectedPremise.premiseId||'');
+        fullCardDispatchPremiseIds.push(sourcePremiseId);
+        this.logger.log('idea-discover: 完整卡实际模型派发 premiseId='+sourcePremiseId+' index='+position
+          +' dispatched='+fullCardDispatchPremiseIds.length);
         const response = await this.realLLM.generate({
           prompt: buildPrompt(initialExcludes, selectedPremise),
           physicalCallBudget: physicalCallBudget||reserveReviewBatchBudget(presentationBudget,minimumCardReviewCalls(1)),
@@ -5702,7 +5710,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           // 这里只允许底层对“空响应”做一次技术重取；不会换 premise，也不会重新选题。
           maxEmptyRetries: 1,
           responseFormat: 'json_object',
-          metrics: { stepKey: 'idea_card_structure', attempt: 0 },
+          // attempt identifies this immutable card position for diagnostics,
+          // consistent with the pool's batchIndex. It does not grant retries.
+          metrics: { stepKey: 'idea_card_structure', attempt: position },
         });
         const rawIdeas = extractIdeaList(response.content || '') || [];
         try {
@@ -6015,6 +6025,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         preselectionShortfall,
         selectionAudit: premiseDiscovery.selectionAudit,
         generated: structuredCards.length,
+        fullCardDispatched:fullCardDispatchPremiseIds.length,
+        fullCardDispatchedIds:[...fullCardDispatchPremiseIds],
         evaluatedAttempts: candidateAssessments.length,
         structuringErrors,
         qualified: qualifiedCount,
