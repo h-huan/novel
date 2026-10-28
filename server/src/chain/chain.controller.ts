@@ -11704,9 +11704,17 @@ ${summarizeOutlineConsistency(pending)}`,
     this.logger.log(`长篇初始细纲窗口完成：前 ${volumes.reduce((n: number, v: any) => n + (v.chapters?.length || 0), 0)} 章详细章纲，累计目标 ${plannedChapterWords} 字；全书目标 ${input.targetWords} 字，剩余章随写作滚动生成。`);
 
     input.onProgress?.('foreshadowing', '详细章纲已通过验收，开始校验跨卷伏笔');
-    const globalPrompt = `${platformDirective ? platformDirective + "\n\n" : ""}依据已确认的长篇地基和完整分卷目录，识别真正贯穿全书或跨卷的伏笔。数量由实际主线、人物弧和世界规则决定，不得固定数量；没有跨卷伏笔时返回空数组，不得为填充模块编造线索。${GLOBAL_FORESHADOWING_CONTRACT}只输出合法JSON：{"foreshadowings":[{"content":"","type":"","scope":"global|volume","setupChapter":1,"recoveryChapter":2,"recoveryWindowStart":2,"recoveryWindowEnd":3,"evidenceText":"","riskLevel":"medium","recoveryCondition":"","payoffDescription":""}]}。
+    // This is NOT a second chronological stage of the story. The first-window
+    // chapter clues may already have started several parallel book-level arcs;
+    // compare their real source IDs/content before registering new global debt.
+    const initialClueSources = foreshadowings.map(row => ({
+      content:row.content, scope:row.scope, setupChapter:row.setupChapter,
+      recoveryChapter:row.recoveryChapter, evidenceText:row.evidenceText,
+    }));
+    const globalPrompt = `${platformDirective ? platformDirective + "\n\n" : ""}依据已确认的长篇地基、完整分卷目录和已生成的首个细纲窗口，识别真正贯穿全书或跨卷的伏笔。不同范围伏笔从开篇就可互相交织，而不是先结束本卷小伏笔再启动全书伏笔。不得重复登记首个窗口已埋设的同一条伏笔；可在它的既有线索之上补充不同来源、关联及后续兑现范围。数量由实际主线、人物弧和世界规则决定，不得固定数量；没有独立跨卷伏笔时返回空数组，不得为填充模块编造线索。${GLOBAL_FORESHADOWING_CONTRACT}只输出合法JSON：{"foreshadowings":[{"content":"","type":"","scope":"global|volume","setupChapter":1,"recoveryChapter":2,"recoveryWindowStart":2,"recoveryWindowEnd":3,"evidenceText":"","riskLevel":"medium","recoveryCondition":"","payoffDescription":""}]}。
 地基：${JSON.stringify({ coreSetting: foundation.coreSetting, skeletonVolumes: normalizedSkeletons })}
-分卷目录：${JSON.stringify(volumes.map((volume: any) => ({ title: volume.title, theme: volume.theme, chapters: volume.chapters.map((chapter: any) => ({ chapterNumber: chapter.chapterNumber, title: chapter.title, chapterFunction: chapter.chapterFunction })) })))}`;
+分卷目录：${JSON.stringify(volumes.map((volume: any) => ({ title: volume.title, theme: volume.theme, chapters: volume.chapters.map((chapter: any) => ({ chapterNumber: chapter.chapterNumber, title: chapter.title, chapterFunction: chapter.chapterFunction })) })))}
+已创建的首窗章级伏笔（只读来源，同一身份不得重建）：${JSON.stringify(initialClueSources)}`;
     const globalResult = await this.llmCallWithRetry<any>('长篇跨卷伏笔', globalPrompt, {
       temperature: 0.7,
       projectId: input.projectId,
@@ -11903,8 +11911,17 @@ ${summarizeOutlineConsistency(pending)}`,
       || (String(c.name || '').length > 1 && volumeFocus.includes(String(c.name))))
       .map(c => ({ name:c.name, identity:c.identity, role:c.role, arc:c.arc }));
     const knownCharacterNames = allChars.map(c => c.name).filter(Boolean);
+    // A reminder is still an open story debt. Do not drop it from the next
+    // window just because the thread was advanced from active to reminder.
+    // Include stable IDs, scope, evidence and independent recovery ranges so
+    // multiple threads can be advanced or paid off in the SAME chapter.
     const activeForeshadowings = db.prepare(
-      `SELECT content,planned_recovery_chapter_index FROM foreshadowings WHERE project_id=? AND status='active' ORDER BY planned_recovery_chapter_index ASC, created_at ASC`,
+      `SELECT id,content,status,type,scope,importance,buried_chapter_index,
+              planned_recovery_chapter_index,recovery_window_start,recovery_window_end,
+              recovery_condition,payoff_description,evidence_text
+       FROM foreshadowings WHERE project_id=? AND status IN ('active','reminder','pending')
+       ORDER BY CASE WHEN recovery_window_end IS NULL THEN 1 ELSE 0 END,
+                recovery_window_end ASC, buried_chapter_index ASC, created_at ASC`,
     ).all(projectId) as any[];
     // Confirmed entity and state sources are shared with body-writing context;
     // pending discoveries remain soft candidates, never confirmed canon.
@@ -11987,7 +12004,7 @@ ${summarizeOutlineConsistency(pending)}`,
 已审核的待确认新增实体（仅软候选，不得当作事实）：${JSON.stringify(pendingEntities)}
 【已确认世界观完整来源（同正文权威资料）】：${confirmedWorld}
 【上一章已确认详细章纲（只读接力，不得重复已完成任务）】：${JSON.stringify(previousOutline)}
-当前在埋伏笔（不得遗忘，应按规划推进/提醒/回收）：${JSON.stringify(activeForeshadowings)}
+【所有尚未完结的伏笔（各有稳定ID、生命周期、作用范围和回收窗口；可在同一章交织多条，不得按scope串行清空）】：${JSON.stringify(activeForeshadowings)}
 【已写正文进展·最高事实，不得与之矛盾】：
 ${storySoFar || '（开篇首批，尚无已写正文）'}
 本批范围：本卷第${localNos[0]}-${localNos[localNos.length - 1]}章，即全书第${batchNos[0]}-${batchNos[batchNos.length - 1]}章，共${batchNos.length}章；上一批/上一章结尾必须自然衔接本批第一章开头。

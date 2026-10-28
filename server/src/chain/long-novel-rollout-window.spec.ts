@@ -286,4 +286,33 @@ describe('ARCH-004 progressive outline window', () => {
   });
 
 
+  it('retains multiple live threads including reminded and legacy-pending threads across the same refill',async()=>{
+    const {controller}=fixture(15);
+    const db=controller.db.getDb();
+    const original=db.prepare;
+    let query='';
+    const debts=[
+      {id:'short',content:'小伏笔',status:'active',scope:'volume',recovery_window_end:24},
+      {id:'book',content:'全书暗线',status:'reminder',scope:'global',recovery_window_end:60},
+      {id:'medium',content:'中线',status:'pending',scope:'volume',recovery_window_end:36},
+    ];
+    db.prepare=(sql:string)=>{
+      if(sql.includes('FROM foreshadowings')) {
+        query=sql;
+        return {all:()=>debts};
+      }
+      return original(sql);
+    };
+    await controller.rolloutDetailedOutlines('project');
+    const prompt=controller.llmCallWithRetry.mock.calls[0][1] as string;
+    expect(query).toContain("'active','reminder','pending'");
+    for(const debt of debts) {
+      expect(prompt).toContain(debt.id);
+      expect(prompt).toContain(debt.content);
+      expect(prompt).toContain(debt.scope);
+    }
+    expect(prompt).toContain('同一章交织多条');
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(4);
+  });
+
 });
