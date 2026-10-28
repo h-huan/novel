@@ -8,7 +8,7 @@ const selection=()=>normalizePremiseSelectionPayload({
 },5,5);
 const report=(input:ReturnType<typeof selection>):PremiseSelectionReview=>({passed:true,issues:[],
  sourceChecks:premiseSourceComparisonCatalog(input).map(row=>({ref:row.ref,status:'preserved',reason:'完整核对当前展开与原池必要事实后确认保留'})),
- payoffChecks:input.selected.map((_item,i)=>({ref:`S${i+1}.payoff`,status:'supported',actionEvidenceRef:`S${i+1}.activeChoice`,reason:'既定行动通过已写明的必要条件造成结果'})),
+ payoffChecks:input.selected.map((_item,i)=>({ref:`S${i+1}.payoff`,status:'supported',actionEvidenceRef:`S${i+1}.activeChoice`,reversalCheck:{status:'supported',actionEvidenceRef:`S${i+1}.activeChoice`,reason:'前段实际选择支持反转结果成立的必要条件'},reason:'既定行动通过已写明的必要条件造成结果'})),
  genreChecks:input.selected.map((_item,i)=>({ref:`S${i+1}.genre1`,status:'fulfilled',evidenceRef:`S${i+1}.activeChoice`,reason:'当前主动选择已落实指定流派机制'})),
  categoryChecks:input.selected.map((_item,i)=>({ref:`S${i+1}.category`,status:'fulfilled',evidenceRef:`S${i+1}.coreConflict`,reason:'核心冲突与所选分类阅读承诺一致'})),
 });

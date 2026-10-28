@@ -6,6 +6,19 @@ import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } f
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 const selection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案，并承担失去工作的代价。'}],selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',escalation:'受害人提供已有资料，警方核实现场情况。',payoff:'警方到场解救被困的人，她失去工作。'}],poolTargetMet:true};
 const supported={ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',conditionEvidenceRef:'S1.escalation',reason:'已提供现场地点并由警方核实后到场解救'};
+it('audits reversal success independently from later costs within the existing payoff Gate',()=>{
+ const input={...selection,selected:[{...selection.selected[0],
+   reversalEffect:'拆出错误零件之后，客户当场续签了整年供货合同。'}]};
+ const ok={...supported,reversalCheck:{status:'supported',actionEvidenceRef:'S1.activeChoice',
+   reason:'主角主动提交已有录音，但合同签署仍需明确客户决定依据'}};
+ expect(premisePayoffReviewIssues({payoffChecks:[supported]},input).join('')).toContain('反转阶段');
+ expect(premisePayoffReviewIssues({payoffChecks:[ok]},input)).toEqual([]);
+ expect(premisePayoffReviewIssues({payoffChecks:[{...ok,reversalCheck:{...ok.reversalCheck,actionEvidenceRef:'S1.reversalEffect'}}]},input).join('')).toContain('不得用反转结果自证');
+ expect(premisePayoffReviewIssues({payoffChecks:[{...ok,reversalCheck:{status:'gap',reason:'客户签约缺少真实承诺及决定依据'}}]},input).join('')).toContain('整体不得通过');
+ const gap={...ok,status:'gap',gapRepair:'replace_from_pool',reversalCheck:{status:'gap',reason:'客户签约没有取得明确承诺的成立条件'}};
+ expect(materializePremisePayoffReview({payoffChecks:[gap]},input)).toHaveLength(1);
+ expect(premisePayoffReviewDirective(input)).toContain('不能只审payoff段');
+});
 it('requires an independent payoff verdict even when every source check is preserved',()=>{
  expect(premisePayoffReviewIssues({sourceChecks:[]},selection)).toEqual([expect.stringContaining('payoffChecks')]);
  expect(premisePayoffReviewIssues({payoffChecks:[supported]},selection)).toEqual([]);
