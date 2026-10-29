@@ -89,7 +89,7 @@ export function materializePremiseSourceReview(value: unknown, selection: Premis
     const item=catalog.find(entry=>entry.ref===row.ref)!;
     const candidate=selection.selected.find(p=>p.premiseId===item.premiseId)!;
     issues.push({kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,
-      repairMode:'replace_from_pool',quote:String(candidate[item.field]||candidate.activeChoice||''),
+      repairMode:'replace_from_pool',quote:String(candidate[item.field]||'').trim().length>=8?String(candidate[item.field]):String(candidate.activeChoice),
       referenceQuote:item.source,reason:'来源未确认，不能假定一致或已举证冲突：'+row.reason});
   }
   const review: PremiseSelectionReview = { passed: issues.length === 0, issues, sourceChecks };

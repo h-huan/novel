@@ -42,6 +42,7 @@ export function materializePremiseCategoryFit(value: any, selection: PremiseSele
     const premise = selection.selected.find(item => item.premiseId === entry.premiseId)!;
     const seed = selection.pool.find(item => item.premiseId === entry.premiseId)!;
     return { kind: 'selection_fit' as const, premiseId: entry.premiseId, referencePremiseId: entry.premiseId,
+       ...(row.status==='unknown'?{repairMode:'replace_from_pool' as const}:{}),
       quote: String(premise.coreConflict), referenceQuote: String(seed.storyCore), field: 'storyCategory',
       reason: row.status==='unknown' ? `分类【${entry.category}】未确认，禁止锁定：${row.reason}` : `分类【${entry.category}】未落实到核心冲突与人物选择：${row.reason}` };
   });
