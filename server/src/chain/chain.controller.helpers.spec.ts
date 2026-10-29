@@ -1781,9 +1781,15 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
     expect(selectionCall?.[0].prompt).toContain('只输出selectedPremises');
      if(failure==='pool_naming'){
-       expect(selectionCall?.[0].prompt).not.toContain('禁止命名的前置候选');
+       // The established fictional-name map repairs the unconfirmed seed
+       // BEFORE dedup/selection. The resulting story still passes the exact
+       // same prohibited-name Gate; the renamed duplicate is not a new slot.
+       expect(selectionCall?.[0].prompt).toContain('禁止命名的前置候选');
+       expect(selectionCall?.[0].prompt).toContain('宠物云芽被接回家');
        expect(selectionCall?.[0].prompt).not.toContain('宠物豆包被接回家');
-       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({invalid:{naming:1},generated:2,supplementAttempted:false});
+       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
+         invalid:{naming:0},generated:2,supplementAttempted:false,
+       });
      }
     if(failure==='preselection_shortfall'){
       expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(false);
