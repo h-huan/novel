@@ -153,18 +153,21 @@ export function premiseReselectionPromptSelection(
 
 export function premiseReselectionPlan(original: PremiseSelectionResult, review: PremiseSelectionReview) {
   const affected = new Set(review.issues.map(issue => issue.premiseId));
-  // A reviewer omitted its evidence; this says nothing about the story. Keep
-  // the card rejected, but do not spend a story-rewrite or reselection call on
-  // that reviewer protocol failure, or recycle the unverified identity.
+  // A reviewer omitted its evidence: this does NOT prove the original story
+  // defective, nor authorize passing that unverified identity. A failed
+  // protocol position may use an UNUSED fixed-pool identity in the SAME
+  // already-bounded aggregate reselection, then undergo every independent
+  // review. Never rewrite the unverified original or add a recovery wave.
   const protocolRejectedIds = new Set(original.selected.filter(item => {
     const issues = review.issues.filter(issue => issue.premiseId === item.premiseId);
     return issues.length > 0 && issues.every(issue => issue.protocolIncomplete === true);
   }).map(item => item.premiseId));
   const replacementIds = new Set(review.issues.filter(issue => issue.kind === 'overlap' || issue.repairMode === 'replace_from_pool').map(issue => issue.premiseId));
+  for(const id of protocolRejectedIds) replacementIds.add(id);
   const protectedItems = original.selected.filter(item => !affected.has(String(item.premiseId)));
   return {
     protectedItems,
-    repairSlots: original.selected.filter(item => affected.has(String(item.premiseId)) && !protocolRejectedIds.has(String(item.premiseId))).map(item => ({
+    repairSlots: original.selected.filter(item => affected.has(String(item.premiseId))).map(item => ({
       replacesPremiseId: item.premiseId,
       mode: replacementIds.has(String(item.premiseId)) ? 'replace_from_pool' : 'correct_or_replace_from_pool',
       original: item,
