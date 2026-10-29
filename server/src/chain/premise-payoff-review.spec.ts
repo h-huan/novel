@@ -199,3 +199,11 @@ it('makes the existing independent source/payoff verdict test adversarial consen
  expect(prompt).toContain('过去的投诉录音、旧账与历史档案只能证明其中真实记载的事件');
  expect(prompt).toContain('不能被当作以后另一份雇佣约定');
 });
+
+it('keeps repair routing strictly conditional on a real gap rather than poisoning a supported verdict',()=>{
+  const prompt=premisePayoffReviewDirective(selection);
+  expect(prompt).toContain('status=supported或unknown必须完全省略gapRepair与sourceConditionQuote字段');
+  expect(premisePayoffReviewIssues({payoffChecks:[{...supported,gapRepair:'replace_from_pool'}]},selection))
+    .toEqual(expect.arrayContaining([expect.stringContaining('非gap项不得无故要求补救')]));
+  expect(premisePayoffReviewIssues({payoffChecks:[supported]},selection)).toEqual([]);
+});
