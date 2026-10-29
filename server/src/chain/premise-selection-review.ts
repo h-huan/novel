@@ -131,12 +131,12 @@ export function sourceReviewSelectionView(selected: PremiseSelectionResult['sele
  return selected.map(({storyCore:_source,workingTitle:_title,...expanded})=>expanded);
 }
 
-/** Keep the selected original-pool storyCore for cross-story comparison;
- * only omit causalPlan: its action/condition/result quotes are anchored in the
- * preserved expanded story fields. The independent payoff review still reads
- * and validates the complete causalPlan. */
+/** Overlap examines the actual expanded choices, escalation, reversal and cost.
+ * The separate source/causal Gate has the full storyCore and causalPlan. Neither
+ * can establish a distinct pairwise mechanism, so do not replay those long
+ * source and citation copies in the independent overlap prompt. */
 export function overlapReviewSelectionView(selected: PremiseSelectionResult['selected']) {
- return selected.map(({causalPlan:_plan,...expanded})=>expanded);
+ return selected.map(({causalPlan:_plan,storyCore:_original,workingTitle:_title,...expanded})=>expanded);
 }
 
 /** Prompt-only representation for a targeted reselection. The server still keeps
@@ -149,7 +149,8 @@ export function premiseReselectionPromptSelection(
 ) {
   return selected.map(item => repairIds.has(String(item.premiseId))
     ? item
-    : (({ causalPlan: _repeatedAnchors, ...facts }) => facts)(item));
+    : (({ causalPlan: _repeatedAnchors, storyCore: _sourceAlreadyLocked,
+        workingTitle: _sourceTitle, ...facts }) => facts)(item));
 }
 
 export function premiseReselectionPlan(original: PremiseSelectionResult, review: PremiseSelectionReview) {
