@@ -33,6 +33,20 @@ function report(s:ReturnType<typeof selection>) {
   return {...materializePremiseSourceReview({sourceChecks},s),payoffChecks:payoffChecks(s)};
 }
 
+it('rebinds whitespace-only citation differences without inventing missing causality or altering facts',()=>{
+ const original=premise();
+ original.activeChoice='我把实名登记资料交给\n值班人员，取得受理回执。';
+ original.causalPlan[0].action={field:'activeChoice',quote:'我把实名登记资料交给 值班人员，取得受理回执。'};
+ const correct=bindPremiseCausalPlan(original) as typeof original;
+ expect(correct.causalPlan[0].action.quote).toBe('我把实名登记资料交给\n值班人员，取得受理回执。');
+ expect(premiseCausalPlanIssues(correct)).toEqual([]);
+ const invalid=structuredClone(original);
+ invalid.causalPlan[0].action.quote='我把匿名登记资料交给 值班人员，取得受理回执。';
+ expect(premiseCausalPlanIssues(bindPremiseCausalPlan(invalid))).not.toEqual([]);
+ const repeated=structuredClone(original);
+ repeated.activeChoice=original.activeChoice+'又一次：'+original.activeChoice;
+ expect(premiseCausalPlanIssues(bindPremiseCausalPlan(repeated))).not.toEqual([]);
+});
 describe('plan critical prerequisites before full story cards',()=>{
   it('models intermediate result before payoff and teaches generation to keep later prerequisites separate',()=>{
     const steps=premiseCausalPlanExample();

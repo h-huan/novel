@@ -23,6 +23,24 @@ export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<str
       const at = foldQuotation(text).indexOf(foldQuotation(anchor.quote));
       // Quote folding replaces one UTF-16 code unit with one: original offsets survive.
       if (at >= 0) return {field,quote:text.slice(at,at+anchor.quote.length)};
+      // Source prose and a JSON citation can have different line wrapping.
+      // Recover ONLY a unique otherwise-identical contiguous quotation;
+      // never change negation, digits, punctuation, characters or event roles.
+      // Build the offset map so the returned evidence is verbatim source text.
+      const textOffsets:number[]=[];
+      let compactText='';
+      for(let pos=0;pos<text.length;pos++){
+        if(/\s/u.test(text[pos]))continue;
+        compactText+=foldQuotation(text[pos]);textOffsets.push(pos);
+      }
+      const compactQuote=foldQuotation(anchor.quote).replace(/\s/gu,'');
+      if(compactQuote.length>=8){
+        const index=compactText.indexOf(compactQuote);
+        if(index>=0&&compactText.indexOf(compactQuote,index+1)===-1){
+          const quote=text.slice(textOffsets[index],textOffsets[index+compactQuote.length-1]+1);
+          if(quote.trim())return {field,quote};
+        }
+      }
       // Model citations sometimes end a real clause with 。 when its source uses ；.
       // Recover only that terminal punctuation from ONE exact occurrence in the
       // declared field. Never infer content, synonyms, negation, numbers or events.
