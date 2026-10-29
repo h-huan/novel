@@ -38,7 +38,11 @@ export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<str
         const index=compactText.indexOf(compactQuote);
         if(index>=0&&compactText.indexOf(compactQuote,index+1)===-1){
           const quote=text.slice(textOffsets[index],textOffsets[index+compactQuote.length-1]+1);
-          if(quote.trim())return {field,quote};
+          // A space *inside* an uninterrupted source term can change its
+          // quoted identity (e.g. 空账 vs 空 账). Recover layout differences
+          // only when the actual source span is itself whitespace-wrapped.
+          if(quote.trim()&&(!/\\s/u.test(anchor.quote)||/\\s/u.test(quote)))
+            return {field,quote};
         }
       }
       // Model citations sometimes end a real clause with 。 when its source uses ；.
