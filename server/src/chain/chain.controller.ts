@@ -6163,8 +6163,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         .filter(item => item?.kind !== mode).map(() => '当前独立审查只能返回' + mode),
       ...premiseOverlapScopeIssues(value,selection,overlapFocusIds)];
     const runReview=reviewLimiter||(<T>(task:()=>Promise<T>)=>task());
+    // Overlap is a separate pairwise structural comparison. Category and
+    // genre definitions are already independently audited by the source
+    // review; repeating their full manuals in the overlap model call wastes
+    // preselection time without contributing overlap evidence. Retain the
+    // platform, author-selected dimensions, actual stories and GEN-002 rules.
+    const reviewStandard = mode==='overlap'
+      ? standard.split('\n【与完整卡一致的分类标准】',1)[0]
+      : standard;
     const result = await runReview(()=>this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
-      standard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
+      reviewStandard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + (mode === 'source_drift'
         ? '\n当前是锁定前多项独立结论的同次审核，只审查，不修改或重选。必须分别完成causalPlan每个关键结果的必要条件与整体反转兑现核对、原池来源继承、分类机制和手动流派落实；原池与展开同样漏写关键成立条件也须返回gap，来源忠实与结局完整都不能代替因果成立。'
         : '\n当前是锁定前独立同构复核：只比较本批故事的主动策略、行动升级、胜负转换机制和代价，不重复执行来源、逐环节因果成立、分类或流派审核；这些由另一个独立Gate负责。此输入不包含causalPlan索引，比较依据为已选故事中实际发生的行动与结果。')

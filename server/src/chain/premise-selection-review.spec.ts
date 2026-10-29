@@ -527,6 +527,30 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(2);
     expect(c.llmCallWithRetry).not.toHaveBeenCalled();
   });
+  it('avoids repeating full category and genre manuals in pairwise overlap while retaining author requirements and every source gate',async()=>{
+    const standard='平台真实风格规则\n【本次作者明确选择】第一人称/扮猪吃虎'
+      +'\n【与完整卡一致的分类标准】'+('完整分类规则及证据目录'.repeat(500))
+      +'\n【流派定义，与生成阶段一致】'+('完整流派规则'.repeat(500));
+    const c=Object.create(ChainController.prototype) as any;
+    const prompts:string[]=[];
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,_options:any)=>{
+      prompts.push(prompt);return {data:{passed:true,issues:[]}};
+    });
+    const input=selection();
+    const overlap=await c.reviewPremiseSelection(input,standard,'overlap');
+    expect(overlap).toMatchObject({passed:true,issues:[]});
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('平台真实风格规则');
+    expect(prompts[0]).toContain('第一人称/扮猪吃虎');
+    expect(prompts[0]).toContain('必须逐对比较');
+    expect(prompts[0]).toContain('已选胚子');
+    expect(prompts[0]).not.toContain('完整分类规则及证据目录');
+    expect(prompts[0]).not.toContain('完整流派规则');
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{prompts.push(prompt);return {data:null};});
+    await expect(c.reviewPremiseSelection(input,standard,'source_drift',undefined,true)).rejects.toThrow();
+    expect(prompts[1]).toContain('完整分类规则及证据目录');
+    expect(prompts[1]).toContain('完整流派规则');
+  });
   it('rejects a diversity result delivered to the source-only audit', async () => {
     const c=Object.create(ChainController.prototype) as any;
     c.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{
