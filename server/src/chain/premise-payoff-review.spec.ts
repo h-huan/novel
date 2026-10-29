@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
-import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective} from './premise-payoff-review';
+import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,quarantineUnprovenReversalEvidence} from './premise-payoff-review';
 import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
 import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
@@ -30,6 +30,21 @@ it('reuses existing exact causal action in reversalEffect without an invented se
  expect(premisePayoffReviewIssues({payoffChecks:[resultOnly]},input).join('')).toContain('不能用结果自证');
  expect(premisePayoffReviewIssues({payoffChecks:[{...row,
    reversalCheck:{...row.reversalCheck,actionEvidenceQuote:undefined}}]},input)).toEqual([]);
+});
+it('isolates one unprovable reversal citation without approving it or losing its independently vetted peer',()=>{
+ const first={...selection.selected[0],premiseId:'P1',reversalEffect:'检查完成以后，公司宣布所有订单恢复。'};
+ const second={...selection.selected[0],premiseId:'P2',reversalEffect:'报告地点后，值班人员确认现场并派人到场。'};
+ const input={...selection,pool:[{...selection.pool[0],premiseId:'P1'},{...selection.pool[0],premiseId:'P2'}],selected:[first,second]};
+ const checks={payoffChecks:[
+   {...supported,ref:'S1.payoff',reversalCheck:{status:'supported',actionEvidenceRef:'S1.reversalEffect',reason:'公司称已恢复订单，但没有独立行动锚点'}},
+   {...supported,ref:'S2.payoff',actionEvidenceRef:'S2.activeChoice',conditionEvidenceRef:'S2.escalation',
+     reversalCheck:{status:'supported',actionEvidenceRef:'S2.activeChoice',reason:'主角提出报告并促使值班人员核实和派人'}}]};
+ const normalized=quarantineUnprovenReversalEvidence(checks,input);
+ expect(checks.payoffChecks[0].status).toBe('supported');
+ expect(normalized.payoffChecks.map((row:any)=>row.status)).toEqual(['unknown','supported']);
+ expect(premisePayoffReviewIssues(normalized,input)).toEqual([]);
+ expect(materializePremisePayoffReview(normalized,input)).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'P1',repairMode:'replace_from_pool'})]);
+ expect(quarantineUnprovenReversalEvidence(normalized,input)).toEqual(normalized);
 });
 it('audits reversal success independently from later costs within the existing payoff Gate',()=>{
  const input={...selection,selected:[{...selection.selected[0],

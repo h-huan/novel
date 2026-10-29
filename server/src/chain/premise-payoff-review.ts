@@ -120,6 +120,23 @@ export function premisePayoffReviewIssues(value:any,selection:PremiseSelectionRe
   }
   return errors;
 }
+/** A completed source review may fail to cite a usable reversal-stage action
+ * for just one premise. Preserve the substantive review and mark THAT premise
+ * unverified instead of treating its missing redundant coordinate as a failure
+ * of all peer reviews. This never invents an action, edits story facts, or
+ * upgrades an uncertain result; the standard materializer rejects unknown. */
+export function quarantineUnprovenReversalEvidence(value:any,selection:PremiseSelectionResult):any{
+ if(!Array.isArray(value?.payoffChecks))return value;
+ const faults=premisePayoffReviewIssues(value,selection);
+ const affected=new Set(value.payoffChecks.filter((row:PremisePayoffCheck)=>
+   faults.some(error=>error.startsWith(row.ref+'反转证据必须有独立行动的逐字锚点'))).map((row:PremisePayoffCheck)=>row.ref));
+ if(!affected.size)return value;
+ return {...value,payoffChecks:value.payoffChecks.map((row:PremisePayoffCheck)=>
+   !affected.has(row.ref)?row:{...row,status:'unknown' as const,
+     reason:'本题材反转行动的独立引用仍未确认：'+row.reason,
+     reversalCheck:{...row.reversalCheck,status:'unknown' as const,
+       reason:'已有反转行动证据不能与结果断言分离：'+(row.reversalCheck?.reason||row.reason)}})};
+}
 export function materializePremisePayoffReview(value:any,selection:PremiseSelectionResult):PremiseSelectionReview['issues']{
   const errors=premisePayoffReviewIssues(value,selection);if(errors.length)throw Error(errors.join('；'));
   // Preserve unknown as a per-premise negative verdict: it is not approval,
