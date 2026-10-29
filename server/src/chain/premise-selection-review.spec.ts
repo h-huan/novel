@@ -542,7 +542,7 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain('平台真实风格规则');
     expect(prompts[0]).toContain('第一人称/扮猪吃虎');
-    expect(prompts[0]).toContain('必须逐对比较');
+    expect(prompts[0]).toContain('本次只逐对比较已选项');
     expect(prompts[0]).toContain('已选胚子');
     expect(prompts[0]).not.toContain('完整分类规则及证据目录');
     expect(prompts[0]).not.toContain('完整流派规则');
