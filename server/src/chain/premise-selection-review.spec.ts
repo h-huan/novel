@@ -22,13 +22,11 @@ it('keeps all substantive overlap facts and sources in memory while removing rep
   const viewed=overlapReviewSelectionView([first,second]);
   expect(viewed).toHaveLength(2);
   for(let i=0;i<2;i++){
-    for(const field of ['premiseId','storyCategory','protagonistSituation','openingEvent','coreConflict',
+    for(const field of ['premiseId','workingTitle','storyCore','storyCategory','protagonistSituation','openingEvent','coreConflict',
       'activeChoice','escalation','reversalEffect','payoff','irreplaceableCarrier','secondOrderConsequence','readerQuestion']){
       expect(viewed[i][field]).toEqual(original[i][field]);
     }
     expect(viewed[i]).not.toHaveProperty('causalPlan');
-    expect(viewed[i]).not.toHaveProperty('storyCore');
-    expect(viewed[i]).not.toHaveProperty('workingTitle');
   }
   expect([first,second]).toEqual(original);
   expect(JSON.stringify(viewed).length).toBeLessThan(JSON.stringify(original).length);
@@ -62,9 +60,7 @@ it('keeps the defective source plan and complete independent-review selection wh
   expect(prompt[1]).toEqual(original[1]);
   for(const i of [0,2]){
     expect(prompt[i]).not.toHaveProperty('causalPlan');
-    expect(prompt[i]).not.toHaveProperty('storyCore');
-    expect(prompt[i]).not.toHaveProperty('workingTitle');
-    for(const field of ['premiseId','storyCategory','activeChoice','escalation','reversalEffect','payoff','secondOrderConsequence'])
+    for(const field of ['premiseId','storyCore','storyCategory','activeChoice','escalation','reversalEffect','payoff','secondOrderConsequence'])
       expect(prompt[i][field]).toEqual(original[i][field]);
   }
   expect(selected).toEqual(original);
@@ -201,7 +197,7 @@ it('fills three independently rejected shortlist positions from the fixed pool b
   });
   controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
     expect(prompt).toContain('replacements恰好3项');
-    const evidencePrompt=prompt.split('【本次独立缺陷（原文已在当前选择及原池中，保留每条独立结论和理由）】')[1]
+    const evidencePrompt=prompt.split('【本次独立缺陷】')[1]
       ?.split('【必须处理的位置及模式】')[0];
     expect(evidencePrompt).toBeDefined();
     expect(evidencePrompt).not.toContain('referenceQuote');
