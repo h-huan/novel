@@ -69,7 +69,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('const finalReview=postReselectionReview;');
     expect(source).not.toContain('reserveReconciliationRounds');
 
-    expect(source).toContain('premisePayoffReviewIssues(quarantineUnprovenReversalEvidence(value,selection),selection)');
+    expect(source).toContain('quarantineIncompletePremiseReviews(value,selection,requiredGenres)');
     expect(source).toContain('review.issues.push(...materializePremisePayoffReview(payoffEvidence,selection))');
     expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
   });

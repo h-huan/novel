@@ -18,7 +18,8 @@ import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-ru
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
-import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview, quarantineUnprovenReversalEvidence } from './premise-payoff-review';
+import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
+import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { createReviewLimiter } from './review-limiter';
 import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
@@ -6170,7 +6171,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       return mergePremiseSourceBatches(selection, batches, reviews);
     }
     const overlapFocusIds = overlapFocusId === undefined ? [] : typeof overlapFocusId === 'string' ? [overlapFocusId] : [...overlapFocusId];
-    const validateReview = (value: unknown) => mode === 'source_drift' ? [...premiseSourceReviewIssues(value, selection),...premiseGenreFitIssues(value,selection,requiredGenres),...premiseCategoryFitIssues(value,selection),...premisePayoffReviewIssues(quarantineUnprovenReversalEvidence(value,selection),selection)] : [...premiseSelectionReviewIssues(value, selection),
+    const validateReview = (value: unknown) => mode === 'source_drift' ? (() => { const reviewed=quarantineIncompletePremiseReviews(value,selection,requiredGenres); return [...premiseSourceReviewIssues(reviewed, selection),...premiseGenreFitIssues(reviewed,selection,requiredGenres),...premiseCategoryFitIssues(reviewed,selection),...premisePayoffReviewIssues(reviewed,selection)]; })() : [...premiseSelectionReviewIssues(value, selection),
       ...(Array.isArray((value as PremiseSelectionReview)?.issues) ? (value as PremiseSelectionReview).issues : [])
         .filter(item => item?.kind !== mode).map(() => '当前独立审查只能返回' + mode),
       ...premiseOverlapScopeIssues(value,selection,overlapFocusIds)];
@@ -6202,14 +6203,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const issues = validateReview(result.data);
     if (issues.length) throw new Error('锁定前题材复核协议错误，未生成完整卡：' + issues.join('；'));
     if(mode!=='source_drift')return result.data;
-    const review=materializePremiseSourceReview(result.data,selection);
-    review.issues.push(...materializePremiseGenreFit(result.data,selection,requiredGenres));
-    review.issues.push(...materializePremiseCategoryFit(result.data,selection));
-    const payoffEvidence=quarantineUnprovenReversalEvidence(result.data,selection);
+    const reviewedData=quarantineIncompletePremiseReviews(result.data,selection,requiredGenres);
+    const review=materializePremiseSourceReview(reviewedData,selection);
+    review.issues.push(...materializePremiseGenreFit(reviewedData,selection,requiredGenres));
+    review.issues.push(...materializePremiseCategoryFit(reviewedData,selection));
+    const payoffEvidence=reviewedData;
     review.issues.push(...materializePremisePayoffReview(payoffEvidence,selection));
     review.payoffChecks=payoffEvidence.payoffChecks;
-    review.categoryChecks=(result.data as any).categoryChecks;
-    review.genreChecks=resolvePremiseGenreEvidence(result.data,selection)?.genreChecks;
+    review.categoryChecks=(reviewedData as any).categoryChecks;
+    review.genreChecks=resolvePremiseGenreEvidence(reviewedData,selection)?.genreChecks;
     review.passed=review.issues.length===0;return review;
   }
 

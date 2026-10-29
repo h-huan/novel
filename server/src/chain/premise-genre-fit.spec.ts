@@ -93,9 +93,12 @@ describe('source batches through the production JSON retry helper',()=>{
   expect(result.genreChecks.at(-1).evidenceRef).toBe('S5.protagonistSituation');
   expect(parent.remaining).toBe(0);expect(c.realLLM.generate).toHaveBeenCalledTimes(2);
  });
- it('does not retry using a concurrently started peer batch allowance or return a partial pass',async()=>{
+ it('rejects malformed genre evidence per card without spending a peer batch allowance',async()=>{
   const {c,original,parent}=fixture(true);
-  await expect(c.reviewPremiseSelection(original,'全部手动流派真实约束','source_drift',parent,false,genres)).rejects.toThrow('S1.genre1');
+  const result=await c.reviewPremiseSelection(original,'全部手动流派真实约束','source_drift',parent,false,genres);
+  expect(result.passed).toBe(false);
+  expect([...new Set(result.issues.map((issue:any)=>issue.premiseId))]).toEqual(['A','D']);
+  expect(result.genreChecks.filter((row:any)=>row.ref.startsWith('S2.')).every((row:any)=>row.status==='fulfilled')).toBe(true);
   expect(c.realLLM.generate).toHaveBeenCalledTimes(2);expect(parent.remaining).toBe(0);
  });
 });

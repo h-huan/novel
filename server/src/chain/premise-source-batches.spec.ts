@@ -4,8 +4,9 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import {ChainController} from './chain.controller';
 import {SELECTED_PREMISE_FIELDS,normalizePremiseSelectionPayload} from './idea-discovery-contract';
-import {premiseSourceComparisonCatalog,materializePremiseSourceReview} from './premise-selection-review';
+import {premiseSourceComparisonCatalog,materializePremiseSourceReview,premiseReselectionPlan} from './premise-selection-review';
 import {premiseSourceBatches,mergePremiseSourceBatches,premiseSourceCallBudget,reserveReviewBatchBudget,shouldBatchLargePremiseSourceReview} from './premise-source-batches';
+import {quarantineIncompletePremiseReviews} from './premise-review-quarantine';
 
 const selection=()=>normalizePremiseSelectionPayload({
  pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'原题材'+premiseId,storyCore:'主角选择守住原有承诺并承担自己行动带来的真实后果'+premiseId})),
@@ -14,6 +15,47 @@ const selection=()=>normalizePremiseSelectionPayload({
 const report=(batch:ReturnType<typeof selection>)=>({payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'此前实际行动与升级支持当前反转的成立条件'},reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开事实兼容原池所述的行动方向与代价'}))});
 
 describe('bounded premise source review batches',()=>{
+ it('isolates one malformed premise receipt while keeping a peer verdict and without another review call',async()=>{
+  const c=Object.create(ChainController.prototype) as any;
+  const original={...selection(),selected:selection().selected.slice(0,2)};
+  const raw=report(original);
+  raw.sourceChecks=raw.sourceChecks.filter(row=>row.ref!=='S1.activeChoice');
+  raw.payoffChecks[0].actionEvidenceRef='S2.activeChoice';
+  c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+    expect(options.validate(raw)).toBe(true);
+    return {data:raw};
+  });
+  const reviewed=await c.reviewPremiseSelection(original,'现有标准','source_drift',{remaining:1},true);
+  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+  expect(reviewed.passed).toBe(false);
+  expect(reviewed.issues.every((issue:any)=>issue.premiseId==='A')).toBe(true);
+  expect(premiseReselectionPlan(original,reviewed).repairSlots).toHaveLength(0);
+  expect(premiseReselectionPlan(original,reviewed).availableCandidates.every(row=>row.premiseId!=='A')).toBe(true);
+  expect(reviewed.sourceChecks!.filter(row=>row.ref.startsWith('S2.')).every(row=>row.status==='preserved')).toBe(true);
+  expect(reviewed.payoffChecks?.find(row=>row.ref==='S2.payoff')?.status).toBe('supported');
+ });
+ it('keeps unattributable review rows as a protocol failure',()=>{
+  const original={...selection(),selected:selection().selected.slice(0,2)};
+  const raw=report(original);
+  raw.sourceChecks.push({ref:'S9.activeChoice',status:'preserved',reason:'无法定位到实际题材的额外审核结论'});
+  expect(quarantineIncompletePremiseReviews(raw,original,[])).toBe(raw);
+ });
+ it('isolates wrong-card category evidence and preserves a peer causal gap',()=>{
+  const original={...selection(),selected:selection().selected.slice(0,2)};
+  original.selected.forEach(row=>row.storyCategory='悬疑惊悚');
+  const raw:any=report(original);
+  raw.categoryChecks=[
+    {ref:'S1.category',status:'fulfilled',evidenceRef:'S1.activeChoice',reason:'主角行动落实分类所需的主线调查机制'},
+    {ref:'S2.category',status:'fulfilled',evidenceRef:'S1.activeChoice',reason:'错误地借用另一张卡的行动作为分类证据'},
+  ];
+  raw.payoffChecks[0]={...raw.payoffChecks[0],status:'gap',gapRepair:'replace_from_pool',
+    reason:'现有行动尚未建立取得决定性证据的必要条件',protocolIncomplete:true};
+  const normalized=quarantineIncompletePremiseReviews(raw,original,[]);
+  expect(normalized.payoffChecks[0]).toMatchObject({ref:'S1.payoff',status:'gap',gapRepair:'replace_from_pool'});
+  expect(normalized.payoffChecks[0].protocolIncomplete).toBeUndefined();
+  expect(normalized.categoryChecks.find((row:any)=>row.ref==='S2.category')).toMatchObject({status:'unknown'});
+  expect(normalized.sourceChecks.filter((row:any)=>row.ref.startsWith('S1.')).every((row:any)=>row.status==='preserved')).toBe(true);
+ });
  it('partitions large source sets whenever each independent batch has one funded call',()=>{
   expect(shouldBatchLargePremiseSourceReview(5,0,3,10)).toBe(true);
   expect(shouldBatchLargePremiseSourceReview(8,0,3,3)).toBe(true);

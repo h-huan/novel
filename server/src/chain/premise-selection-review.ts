@@ -6,13 +6,15 @@ export interface PremiseSourceCheck {
   ref: string;
   status: 'preserved' | 'drift' | 'unknown';
   reason: string;
+  protocolIncomplete?: boolean;
 }
+export const PREMISE_REVIEW_PROTOCOL_REASON = '本题材独立审核的证据协议未完成';
 
 export interface PremiseSelectionReview {
   passed: boolean;
   sourceReviewReuse?: { reused: number; reviewed: number };
   issues: Array<{ kind: 'overlap' | 'source_drift' | 'selection_fit'; premiseId: string; referencePremiseId: string;
-    quote: string; referenceQuote: string; reason: string; field?: string; repairMode?: 'replace_from_pool' }>;
+    quote: string; referenceQuote: string; reason: string; field?: string; repairMode?: 'replace_from_pool'; protocolIncomplete?: boolean }>;
   sourceChecks?: PremiseSourceCheck[];
   payoffChecks?: PremisePayoffCheck[];
   genreChecks?: Array<{ref:string;status:string;field?:string;quote?:string;evidenceRef?:string;reason:string}>;
@@ -89,7 +91,8 @@ export function materializePremiseSourceReview(value: unknown, selection: Premis
     const item=catalog.find(entry=>entry.ref===row.ref)!;
     const candidate=selection.selected.find(p=>p.premiseId===item.premiseId)!;
     issues.push({kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,
-      repairMode:'replace_from_pool',quote:String(candidate[item.field]||'').trim().length>=8?String(candidate[item.field]):String(candidate.activeChoice),
+      repairMode:'replace_from_pool',...(row.protocolIncomplete ? {protocolIncomplete:true} : {}),
+      quote:String(candidate[item.field]||'').trim().length>=8?String(candidate[item.field]):String(candidate.activeChoice),
       referenceQuote:item.source,reason:'来源未确认，不能假定一致或已举证冲突：'+row.reason});
   }
   const review: PremiseSelectionReview = { passed: issues.length === 0, issues, sourceChecks };
@@ -151,17 +154,25 @@ export function premiseReselectionPromptSelection(
 
 export function premiseReselectionPlan(original: PremiseSelectionResult, review: PremiseSelectionReview) {
   const affected = new Set(review.issues.map(issue => issue.premiseId));
+  // A reviewer omitted its evidence; this says nothing about the story. Keep
+  // the card rejected, but do not spend a story-rewrite or reselection call on
+  // that reviewer protocol failure, or recycle the unverified identity.
+  const protocolRejectedIds = new Set(original.selected.filter(item => {
+    const issues = review.issues.filter(issue => issue.premiseId === item.premiseId);
+    return issues.length > 0 && issues.every(issue => issue.protocolIncomplete === true);
+  }).map(item => item.premiseId));
   const replacementIds = new Set(review.issues.filter(issue => issue.kind === 'overlap' || issue.repairMode === 'replace_from_pool').map(issue => issue.premiseId));
   const protectedItems = original.selected.filter(item => !affected.has(String(item.premiseId)));
   return {
     protectedItems,
-    repairSlots: original.selected.filter(item => affected.has(String(item.premiseId))).map(item => ({
+    repairSlots: original.selected.filter(item => affected.has(String(item.premiseId)) && !protocolRejectedIds.has(String(item.premiseId))).map(item => ({
       replacesPremiseId: item.premiseId,
       mode: replacementIds.has(String(item.premiseId)) ? 'replace_from_pool' : 'correct_or_replace_from_pool',
       original: item,
       issues: review.issues.filter(issue => issue.premiseId === item.premiseId),
     })),
-    availableCandidates: original.pool.filter(item => !protectedItems.some(protectedItem => protectedItem.premiseId === item.premiseId)
+    availableCandidates: original.pool.filter(item => !protocolRejectedIds.has(String(item.premiseId))
+      && !protectedItems.some(protectedItem => protectedItem.premiseId === item.premiseId)
       && !replacementIds.has(String(item.premiseId))),
   };
 }

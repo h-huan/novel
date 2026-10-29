@@ -5,6 +5,7 @@ import { materializePremisePayoffReview, premisePayoffReviewIssues } from './pre
 import { materializePremiseSourceReview, normalizePremiseReselection, premiseSourceComparisonCatalog } from './premise-selection-review';
 import { mergePremiseSourceBatches } from './premise-source-batches';
 import { reviewChangedPremiseSources } from './premise-source-reuse';
+import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { ChainController } from './chain.controller';
 import { IDEA_PRESELECTION_REVIEW_POLICY, STORY_PREREQUISITE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 
@@ -188,7 +189,9 @@ describe('plan critical prerequisites before full story cards',()=>{
       expect(prompt).toContain('原池和展开同样漏写条件也须返回gap');expect(prompt).toContain('S1.causalPlan[1]');
       expect(options.validate(value)).toBe(true);
       const old={...value,payoffChecks:value.payoffChecks.map(({links,...row})=>row)};
-      expect(options.validate(old)).toBe(false);budget.remaining--;return {data:value};
+      expect(options.validate(old)).toBe(true);
+      expect(quarantineIncompletePremiseReviews(old,s,[]).payoffChecks[0].status).toBe('unknown');
+      budget.remaining--;return {data:value};
     });
     const result=await c.reviewPremiseSelection(s,'既有标准','source_drift',budget,true);
     expect(result.passed).toBe(true);expect(c.llmCallWithRetry).toHaveBeenCalledOnce();expect(budget.remaining).toBe(0);

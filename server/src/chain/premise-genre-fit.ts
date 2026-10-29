@@ -42,6 +42,8 @@ export function materializePremiseGenreFit(value:any,selection:PremiseSelectionR
  return value.genreChecks.filter((row:any)=>row.status!=='fulfilled').map((row:any)=>{
   const entry=catalog.find(item=>item.ref===row.ref)!,candidate=selection.selected.find(item=>item.premiseId===entry.premiseId)!,source=selection.pool.find(item=>item.premiseId===entry.premiseId)!;
   return {kind:'selection_fit' as const,premiseId:entry.premiseId,referencePremiseId:entry.premiseId,
-     ...(row.status==='unknown'?{repairMode:'replace_from_pool' as const}:{}),quote:String(candidate.protagonistSituation),referenceQuote:String(source.storyCore),reason:(row.status==='unknown'?'已选流派未确认【':'未落实已选流派【')+entry.genre+'】：'+row.reason};
+     ...(row.status==='unknown'?{repairMode:'replace_from_pool' as const}:{}),
+     ...(row.protocolIncomplete ? {protocolIncomplete:true} : {}),
+     quote:String(candidate.protagonistSituation),referenceQuote:String(source.storyCore),reason:(row.status==='unknown'?'已选流派未确认【':'未落实已选流派【')+entry.genre+'】：'+row.reason};
  });
 }

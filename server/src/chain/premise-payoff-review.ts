@@ -1,8 +1,8 @@
 import { type PremiseSelectionResult } from './idea-discovery-contract';
-import { type PremiseSelectionReview } from './premise-selection-review';
+import { type PremiseSelectionReview, PREMISE_REVIEW_PROTOCOL_REASON } from './premise-selection-review';
 import { premiseCausalCatalog, premiseCausalPlanIssues } from './premise-causal-plan';
 export interface PremiseCausalCheck {ref:string;status:'supported'|'gap'|'unknown';reason:string;}
-export interface PremisePayoffCheck {ref:string;status:'supported'|'gap'|'unknown';reversalCheck?:{status:'supported'|'gap'|'unknown';actionEvidenceRef?:string;actionEvidenceQuote?:string;reason:string};actionEvidenceRef?:string;conditionEvidenceRef?:string;reason:string;actionEvidenceQuote?:string;conditionEvidenceQuote?:string;gapRepair?:'restore_source_conditions'|'replace_from_pool';sourceConditionQuote?:string;links?:PremiseCausalCheck[];}
+export interface PremisePayoffCheck {ref:string;status:'supported'|'gap'|'unknown';protocolIncomplete?:boolean;reversalCheck?:{status:'supported'|'gap'|'unknown';actionEvidenceRef?:string;actionEvidenceQuote?:string;reason:string};actionEvidenceRef?:string;conditionEvidenceRef?:string;reason:string;actionEvidenceQuote?:string;conditionEvidenceQuote?:string;gapRepair?:'restore_source_conditions'|'replace_from_pool';sourceConditionQuote?:string;links?:PremiseCausalCheck[];}
 const ACTION_EVIDENCE_FIELDS=['openingEvent','activeChoice','escalation','reversalEffect'];
 const CONDITION_EVIDENCE_FIELDS=['protagonistSituation','openingEvent','coreConflict','activeChoice','escalation','reversalEffect','irreplaceableCarrier'];
 function permittedEvidenceFields(candidate:Record<string,unknown>|undefined,key:string):string[]{
@@ -132,8 +132,8 @@ export function quarantineUnprovenReversalEvidence(value:any,selection:PremiseSe
    row&&typeof row.ref==='string'&&faults.some(error=>error.startsWith(row.ref+'反转证据必须有独立行动的逐字锚点'))).map((row:PremisePayoffCheck)=>row.ref));
  if(!affected.size)return value;
  return {...value,payoffChecks:value.payoffChecks.map((row:PremisePayoffCheck)=>
-   !affected.has(row?.ref)?row:{...row,status:'unknown' as const,
-     reason:'本题材反转行动的独立引用仍未确认：'+row.reason,
+   !affected.has(row?.ref)?row:{...row,status:'unknown' as const,protocolIncomplete:true,
+     reason:PREMISE_REVIEW_PROTOCOL_REASON+'：本题材反转行动的独立引用仍未确认：'+row.reason,
      reversalCheck:{...row.reversalCheck,status:'unknown' as const,
        reason:'已有反转行动证据不能与结果断言分离：'+(row.reversalCheck?.reason||row.reason)}})};
 }
@@ -145,6 +145,7 @@ export function materializePremisePayoffReview(value:any,selection:PremiseSelect
     const item=premisePayoffCatalog(selection).find(item=>item.ref===row.ref)!;
     return {kind:'selection_fit' as const,premiseId:item.premiseId,referencePremiseId:item.premiseId,
       ...(row.status==='unknown'||row.gapRepair!=='restore_source_conditions'?{repairMode:'replace_from_pool' as const}:{}),
+      ...(row.protocolIncomplete ? {protocolIncomplete:true} : {}),
       quote:String(selection.selected.find(p=>p.premiseId===item.premiseId)![row.reversalCheck?.status==='gap'?'reversalEffect':'payoff']),
       referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[...(row.status==='unknown'?['兑现必要条件未确认，不得锁定']:[]),row.reason,...(row.reversalCheck?.status==='gap'?['反转阶段：'+row.reversalCheck.reason]:[]),...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
   });
