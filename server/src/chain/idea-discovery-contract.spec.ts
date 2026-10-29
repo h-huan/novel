@@ -735,3 +735,18 @@ describe('source-to-card payoff continuity in the existing selection call',()=>{
     expect(prompt).toContain('任何录音、记录或材料须严格说明它实际证明的是哪一次事件');
   });
 });
+
+it('normalizes only source-authorized fictional-name aliases before the unchanged pool naming Gate',async()=>{
+  const {normalizeGeneratedFictionNames,prohibitedFictionNames}=await import('../../shared/src/fiction-naming');
+  const original={premiseId:'B2-P7',workingTitle:'微信里的旧账本',
+    storyCore:'【处境触发】她在微信上发现合同误会。【主动选择】她向家人对账。【必要条件】当事人已有完整书面流水。【反转兑现】双方核对原件后解除误会。【分类流派机制】关键反转来自她原先隐藏的记账能力。',
+    storyCategoryId:'K1'};
+  expect(prohibitedFictionNames(original)).toContain('微信');
+  const repaired=normalizeGeneratedFictionNames(original);
+  expect(repaired.premiseId).toBe(original.premiseId);
+  expect(repaired.storyCategoryId).toBe(original.storyCategoryId);
+  expect(repaired.storyCore).toContain('完整书面流水');
+  expect(repaired.workingTitle).toContain('青信');
+  expect(prohibitedFictionNames(repaired)).toEqual([]);
+  expect(prohibitedFictionNames(original)).toContain('微信');
+});
