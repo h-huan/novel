@@ -553,6 +553,7 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     // A custom platform note may legitimately contain the same literal text
     // before the actual, server-appended category-manual separator.
     const prefix='用户自定义说明\n【与完整卡一致的分类标准】这只是原话';
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{prompts.push(prompt);return {data:{passed:true,issues:[]}};});
     await c.reviewPremiseSelection(input,prefix+'\n'+standard,'overlap');
     expect(prompts[2]).toContain('这只是原话');
     expect(prompts[2]).toContain('第一人称/扮猪吃虎');
