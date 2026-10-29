@@ -51,6 +51,19 @@ describe('bounded premise source review batches',()=>{
    expect(partial.issues).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'D',repairMode:'replace_from_pool'})]);
    expect(partial.sourceChecks?.find(row=>row.ref==='S4.protagonistSituation')?.status).toBe('unknown');
  });
+ it('deduplicates a source unknown already included in the scoped review',()=>{
+    const original=selection(),batches=premiseSourceBatches(original);
+    const reviews=batches.map(batch=>{
+      const raw=report(batch);
+      if(batch.selected[0]?.premiseId==='D')raw.sourceChecks[0].status='unknown';
+      const source=materializePremiseSourceReview(raw,batch);
+      return {...source,payoffChecks:raw.payoffChecks};
+    });
+    const merged=mergePremiseSourceBatches(original,batches,reviews);
+    expect(merged.passed).toBe(false);
+    expect(merged.issues.filter(issue=>issue.premiseId==='D')).toHaveLength(1);
+    expect(merged.issues[0]).toMatchObject({kind:'selection_fit',premiseId:'D'});
+  });
  it('shares the two-call cap with a live external allowance',()=>{
   const parent={remaining:3},budget=premiseSourceCallBudget(parent);
   expect(budget.remaining).toBe(3);budget.remaining--;expect(parent.remaining).toBe(2);

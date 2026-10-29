@@ -40,7 +40,14 @@ export function mergePremiseSourceBatches(selection: PremiseSelectionResult, bat
     });
   });
   const result=materializePremiseSourceReview({ sourceChecks }, selection);
-  result.issues.push(...reviews.flatMap(review=>review.issues.filter(issue=>issue.kind==='selection_fit')));
+  // A source "unknown" is materialized from merged sourceChecks. Avoid
+  // counting the exact same independent negative receipt a second time.
+  for(const issue of reviews.flatMap(review=>review.issues.filter(issue=>issue.kind==='selection_fit'))){
+    if(!result.issues.some(existing=>existing.kind===issue.kind&&existing.premiseId===issue.premiseId
+      &&existing.referencePremiseId===issue.referencePremiseId&&existing.reason===issue.reason
+      &&existing.quote===issue.quote&&existing.referenceQuote===issue.referenceQuote))
+      result.issues.push(issue);
+  }
   result.genreChecks=batches.flatMap((batch,index)=>(reviews[index].genreChecks||[]).map(check=>{
     const local=Number(/^S(\d+)\./.exec(check.ref)?.[1])-1;
     const position=selection.selected.findIndex(item=>item.premiseId===batch.selected[local]?.premiseId);
