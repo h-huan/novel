@@ -12,7 +12,7 @@ import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { independentReviewBatches } from './independent-review-batches';
 import {reserveReviewBatchBudget} from './premise-source-batches';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
-import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective } from './premise-category-fit';
+import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards } from './premise-category-fit';
 import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
@@ -6190,7 +6190,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const standardBoundary=standard.lastIndexOf(optionalStandardBoundary);
     const reviewStandard=mode==='overlap'&&standardBoundary>=0
       ? standard.slice(0,standardBoundary)
-      : standard;
+      : mode==='source_drift'
+        ? scopePremiseReviewCategoryStandards(standard,selection.selected)
+        : standard;
     const result = await runReview(()=>this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
       reviewStandard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + (mode === 'source_drift'
