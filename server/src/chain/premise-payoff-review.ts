@@ -84,7 +84,7 @@ export function premisePayoffReviewIssues(value:any,selection:PremiseSelectionRe
             const quotes=supplied===undefined?planActions:[supplied];
             const valid=quotes.some((quote:string)=>quote.trim().length>=8
               &&quote!==candidate.reversalEffect
-              &&candidate.reversalEffect.includes(quote)
+              &&String(candidate.reversalEffect).includes(quote)
               &&unplannedPayoffEvidenceIssues({ref:row.ref,actionEvidenceQuote:quote},
                 candidate,'actionEvidenceRef','reversalEffect').length===0);
             if(!valid)errors.push(row.ref+'反转证据必须有独立行动的逐字锚点（可复用本卡已核对causalPlan.action），不能用结果自证');
