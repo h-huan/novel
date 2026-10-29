@@ -558,7 +558,8 @@ describe('source coverage before premise lock', () => {
     expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('不要求原池穷尽展开细节');
     expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('不能仅因原池未提及就判drift或unknown');
     expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('新增专业等级、权限、能力、关键证据或因果前提');
-    expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('真实unknown仍阻断，不转成preserved');
+    expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('真实unknown阻断该题材锁定，不转成preserved');
+    expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('不把单项未知当成整批传输协议失败');
   });
   const report = () => ({sourceChecks:premiseSourceComparisonCatalog(selection()).map(row=>({ref:row.ref,
     status:'preserved' as 'preserved'|'drift'|'unknown',reason:'当前字段保留原池的行动对象和结果方向'}))});
