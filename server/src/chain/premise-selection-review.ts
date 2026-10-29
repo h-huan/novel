@@ -163,7 +163,7 @@ export function premiseReselectionPlan(original: PremiseSelectionResult, review:
     return issues.length > 0 && issues.every(issue => issue.protocolIncomplete === true);
   }).map(item => item.premiseId));
   const replacementIds = new Set(review.issues.filter(issue => issue.kind === 'overlap' || issue.repairMode === 'replace_from_pool').map(issue => issue.premiseId));
-  for(const id of protocolRejectedIds) replacementIds.add(id);
+  for(const id of protocolRejectedIds) replacementIds.add(String(id));
   const protectedItems = original.selected.filter(item => !affected.has(String(item.premiseId)));
   return {
     protectedItems,
