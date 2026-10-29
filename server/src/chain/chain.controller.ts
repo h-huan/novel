@@ -6346,8 +6346,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const citationOnlySlots=repairPlan.repairSlots.filter(slot=>
       slot.mode==='correct_or_replace_from_pool' &&slot.issues.length>0
       &&slot.issues.every(issue=>issue.kind==='selection_fit')).length;
+    // One recovered slot is not a reliable delivery when its independent
+    // review can still fail. Keep a small hedge INSIDE the existing single
+    // reselection response (no added model round, budget, or weaker Gate).
+    // The original pool and its already-fixed eight-card shortlist bound the
+    // number of positions; only independently approved survivors proceed.
+    const recoveryHedgeCount = neededReplacementSlots > 0
+      ? Math.min(2,Math.max(1,Math.ceil(neededReplacementSlots/2))) : 0;
     const recoverySlots=deliveryCount<requestedCount
-      ?repairPlan.repairSlots.slice(0,Math.min(neededReplacementSlots,freshPoolCount+citationOnlySlots))
+      ?repairPlan.repairSlots.slice(0,Math.min(
+        neededReplacementSlots+recoveryHedgeCount,
+        freshPoolCount+citationOnlySlots,
+      ))
       :repairPlan.repairSlots;
     const surplusRejectedIds=repairPlan.repairSlots.slice(recoverySlots.length)
       .map(item=>String(item.replacesPremiseId));
