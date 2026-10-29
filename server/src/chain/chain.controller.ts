@@ -5098,7 +5098,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本阶段不选题、不展开完整筛选字段，不输出selectedPremises。',
-          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore必须分为有序五小节【处境触发】【主动选择】【必要条件】【反转兑现】【分类流派机制】，小节内写具体人物、事件和条件，不要空泛自评。【必要条件】须交代证据如何传递、谁为何到场、谁有权决定、对手如何响应，不能留到选优和完整卡再补造；本阶段即产出可以选优的有因果结构的轻量候选，不要重复输出另一份完整卡。并且必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。人物识破身份须有先前接触该身份信息的真实渠道，证据指向具体责任人须有区别于“只是排除自己”的指认依据，约人到场或设伏抓获须有各方实际到场与配合动机。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺行动链的终局；对决定性结果先做反事实核对：在已写的行动、证据、时间和权限全部成立时，结果是否仍可能不发生？若可能，原池必须明确写出排除该可能的关键事实，否则换用其他成立的故事机制，不能留给完整卡凭空补证。昨日入库与今日报失未必互斥，发现故障不等于备件已经修复，流程瑕疵不等于有经营许可或撤销决定。没有可信条件就换一条能成立的故事骨架，不交给下游昂贵复核补造。保留反转、兑现与代价方向。',
+          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore用事实密集的简短叙述，优先控制在300—500汉字；这只是去掉重复描写和解释的写作目标，不得为字数删除人物动机、证据取得和交付、对手反制、决定权限、结果成立条件或不可逆代价，必要时允许超过。storyCore必须分为有序五小节【处境触发】【主动选择】【必要条件】【反转兑现】【分类流派机制】，小节内写具体人物、事件和条件，不要空泛自评。【必要条件】须交代证据如何传递、谁为何到场、谁有权决定、对手如何响应，不能留到选优和完整卡再补造；本阶段即产出可以选优的有因果结构的轻量候选，不要重复输出另一份完整卡。并且必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。人物识破身份须有先前接触该身份信息的真实渠道，证据指向具体责任人须有区别于“只是排除自己”的指认依据，约人到场或设伏抓获须有各方实际到场与配合动机。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺行动链的终局；对决定性结果先做反事实核对：在已写的行动、证据、时间和权限全部成立时，结果是否仍可能不发生？若可能，原池必须明确写出排除该可能的关键事实，否则换用其他成立的故事机制，不能留给完整卡凭空补证。昨日入库与今日报失未必互斥，发现故障不等于备件已经修复，流程瑕疵不等于有经营许可或撤销决定。没有可信条件就换一条能成立的故事骨架，不交给下游昂贵复核补造。保留反转、兑现与代价方向。',
           batchFocus,
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
           '同一批不能让多数题材靠相同的行动、反制、翻盘与代价结构支撑：比较每个storyCore里主角真正采取的策略、对手如何改变局面、靠哪项已经建立的条件让胜负转换、赢后损失的具体性质。若已有两项都靠私存岗位记录、遭反咬、第三方核账而翻盘，其余题材必须改用实质不同且能够成立的行动与兑现机制，不准只换职业、场所或物证名称。对不同机制同样核对授权和因果，不为凑差异编造条件。',
@@ -6408,6 +6408,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
       const ids=new Set<string>(slots.map(slot=>String(slot.replacesPremiseId)));
       const scopedReview:PremiseSelectionReview={passed:false,issues:slots.flatMap(slot=>slot.issues)};
+      // Full story and original evidence follow below. The independent issues
+      // retain their identity, kind, affected field and precise reasons, while
+      // duplicate multi-kilobyte quotes stay in the server-owned audit only.
+      const reviewForPrompt={...scopedReview,issues:scopedReview.issues.map(
+        ({quote:_selectedQuote,referenceQuote:_sourceQuote,...issue})=>issue)};
       const protectedIds=selected.selected.filter(item=>!ids.has(String(item.premiseId))).map(item=>item.premiseId);
       const citationOnlyIds=new Set(slots.filter(slot=>slot.mode==='correct_or_replace_from_pool'
         &&slot.issues.length>0&&slot.issues.every(issue=>issue.kind==='selection_fit'))
@@ -6431,7 +6436,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const result=await this.llmCallWithRetry<any>('锁定前原池一次汇总重选',
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
           +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(premiseReselectionPromptSelection(selected.selected,ids))
-          +'\n【本次独立缺陷】'+JSON.stringify(scopedReview)
+          +'\n【本次独立缺陷（原文已在当前选择及原池中，保留每条独立结论和理由）】'+JSON.stringify(reviewForPrompt)
           +(rejectedHistory.some(row=>!ids.has(row.premiseId)
               &&!selected.selected.some(item=>String(item.premiseId)===row.premiseId))
             ?'\n【此前独立复核已确认的失败路径（候选不得重用同类缺失条件）】'
