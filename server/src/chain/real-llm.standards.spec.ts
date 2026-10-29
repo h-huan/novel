@@ -5,6 +5,24 @@ import { activeSystemWorkflowRules, SYSTEM_WORKFLOW_RULESET_VERSION } from '../m
 
 afterEach(() => standardDirectiveCache.clear());
 
+
+it('uses bounded reasoning only for literal causal-plan citation repair, not creative or independent quality Gates', () => {
+  const service = new RealLLMService({} as any);
+  const oldEffort = process.env.LLM_REASONING_EFFORT;
+  try {
+    delete process.env.LLM_REASONING_EFFORT;
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBe('low');
+    for (const step of ['idea_premise_pool_generation','idea_premise_selection',
+      'idea_premise_source_drift_review','idea_premise_overlap_review','idea_card_structure']) {
+      expect((service as any).resolveReasoningEffort('idea_generate',step)).toBeUndefined();
+    }
+    process.env.LLM_REASONING_EFFORT = 'high';
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBe('high');
+  } finally {
+    if(oldEffort===undefined)delete process.env.LLM_REASONING_EFFORT;
+    else process.env.LLM_REASONING_EFFORT=oldEffort;
+  }
+});
 it('injects Rule-ID based public standards with preserved detailed clauses', async () => {
   standardDirectiveCache.rebuild(activeSystemWorkflowRules());
   const service = new RealLLMService({

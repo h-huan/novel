@@ -1304,6 +1304,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   private resolveReasoningEffort(scenario?: string, stepKey?: string): 'low' | 'medium' | 'high' | undefined {
     const configured = process.env.LLM_REASONING_EFFORT;
     if (configured) return configured === 'low' || configured === 'medium' || configured === 'high' ? configured : undefined;
+    // This task ONLY rebinds exact quotations to existing immutable story
+    // fields; the strict structural validator and independent semantic review
+    // remain unchanged. Avoid spending full narrative reasoning on an address
+    // repair that cannot add or edit a story fact.
+    if (scenario === 'idea_generate' && stepKey === 'idea_premise_causal_plan_contract') return 'low';
     if (scenario === 'idea_generate' && stepKey === 'idea_presentation_review') {
       const reviewOverride = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
       if (reviewOverride) return reviewOverride === 'low' || reviewOverride === 'medium' || reviewOverride === 'high' ? reviewOverride : undefined;
