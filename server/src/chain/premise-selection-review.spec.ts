@@ -917,3 +917,35 @@ it('retains prior rejected identities after the only authorized reselection wave
  expect(result.selectionAudit.rejectedHistory.map((r:any)=>r.premiseId)).toEqual(['A','C']);
  expect(result.selected[0]).toEqual(input.selected[1]);
 });
+
+it('uses the existing single original-pool replacement wave for an unverified reviewer-protocol slot',async()=>{
+  const input=normalizePremiseSelectionPayload({
+    pool:['A','B','C','D'].map(premise),
+    selectedPremises:['A','B'].map(premise),
+  },2,4);
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.logger={log:vi.fn(),warn:vi.fn()};
+  controller.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
+    if(mode==='overlap')return {passed:true,issues:[]};
+    const checks=premiseSourceComparisonCatalog(current).map(row=>({
+      ref:row.ref,
+      status:row.premiseId==='A'&&row.field==='payoff'?'unknown':'preserved',
+      reason:'独立审核缺少可归属原题材的必要来源确认',
+      ...(row.premiseId==='A'&&row.field==='payoff'?{protocolIncomplete:true}:{}),
+    }));
+    return materializePremiseSourceReview({sourceChecks:checks},current);
+  });
+  controller.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+    const value={replacements:[{replacesPremiseId:'A',premise:premise('C')}]};
+    expect(options.validate(value)).toBe(true);
+    options.physicalCallBudget.remaining--;
+    return {data:value};
+  });
+  const shared={reviews:{remaining:12},reselection:{remaining:3}};
+  const result=await controller.reconcilePremiseSelection(input,3,4,['悬疑'],'',[],shared,2);
+  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['C','B']);
+  expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
+  expect(result.selectionAudit).toMatchObject({reselectionAttempted:true,finalReview:{passed:true,issues:[]}});
+  expect(shared.reselection.remaining).toBe(2);
+  expect(result.selected.every((item:any)=>item.premiseId!=='A')).toBe(true);
+});
