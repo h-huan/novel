@@ -45,6 +45,7 @@ it('isolates one unprovable reversal citation without approving it or losing its
  expect(premisePayoffReviewIssues(normalized,input)).toEqual([]);
  expect(materializePremisePayoffReview(normalized,input)).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'P1',repairMode:'replace_from_pool'})]);
  expect(quarantineUnprovenReversalEvidence(normalized,input)).toEqual(normalized);
+ expect(quarantineUnprovenReversalEvidence({payoffChecks:[null]},input)).toEqual({payoffChecks:[null]});
 });
 it('audits reversal success independently from later costs within the existing payoff Gate',()=>{
  const input={...selection,selected:[{...selection.selected[0],

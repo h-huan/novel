@@ -129,10 +129,10 @@ export function quarantineUnprovenReversalEvidence(value:any,selection:PremiseSe
  if(!Array.isArray(value?.payoffChecks))return value;
  const faults=premisePayoffReviewIssues(value,selection);
  const affected=new Set(value.payoffChecks.filter((row:PremisePayoffCheck)=>
-   faults.some(error=>error.startsWith(row.ref+'反转证据必须有独立行动的逐字锚点'))).map((row:PremisePayoffCheck)=>row.ref));
+   row&&typeof row.ref==='string'&&faults.some(error=>error.startsWith(row.ref+'反转证据必须有独立行动的逐字锚点'))).map((row:PremisePayoffCheck)=>row.ref));
  if(!affected.size)return value;
  return {...value,payoffChecks:value.payoffChecks.map((row:PremisePayoffCheck)=>
-   !affected.has(row.ref)?row:{...row,status:'unknown' as const,
+   !affected.has(row?.ref)?row:{...row,status:'unknown' as const,
      reason:'本题材反转行动的独立引用仍未确认：'+row.reason,
      reversalCheck:{...row.reversalCheck,status:'unknown' as const,
        reason:'已有反转行动证据不能与结果断言分离：'+(row.reversalCheck?.reason||row.reason)}})};
