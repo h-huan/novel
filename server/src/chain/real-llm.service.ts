@@ -50,6 +50,7 @@ type ModelUsage = {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  reasoningTokens?: number;
 };
 
 type ModelCallResult = {
@@ -913,7 +914,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     const maxEmptyRetries = request.maxEmptyRetries === 0 ? 0 : 1;
     let thinkingDisabledAttempted = request.physicalCallBudget?.recoveryWithoutThinking === true;
     const hasRecoveryAllowance = () => !request.physicalCallBudget || request.physicalCallBudget.remaining > 0;
-    const callBudgetedModel = (...args: Parameters<RealLLMService['callModel']>) => {
+    // The step metric aggregates a logical request. This independent physical
+    // timeline records each actual provider attempt, including hidden retries
+    // and recoveries, without changing budgets, semantic review or persistence.
+    let physicalCallSequence = 0;
+    const callBudgetedModel = async (...args: Parameters<RealLLMService['callModel']>): Promise<ModelCallResult> => {
       assertGenerationActive();
       if (request.physicalCallBudget) {
         if (request.physicalCallBudget.remaining <= 0) {
@@ -921,7 +926,36 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         }
         request.physicalCallBudget.remaining--;
       }
-      return this.callModel(...args);
+      const call = ++physicalCallSequence;
+      const physicalStartedAt = Date.now();
+      const identity = {
+        discoveryRequestId: request.metrics?.discoveryRequestId ?? null,
+        stepKey: request.metrics?.stepKey ?? null,
+        attempt: request.metrics?.attempt ?? 0,
+        call,
+      };
+      try {
+        const result = await this.callModel(...args);
+        this.logger.log('[RealLLM physical] ' + JSON.stringify({
+          ...identity,
+          elapsedMs: Date.now() - physicalStartedAt,
+          promptTokens: result.usage?.promptTokens ?? null,
+          completionTokens: result.usage?.completionTokens ?? null,
+          reasoningTokens: result.usage?.reasoningTokens ?? null,
+          totalTokens: result.usage?.totalTokens ?? null,
+          finishReason: result.finishReason ?? null,
+          reasoningDisabled: args[8] === true || process.env.LLM_DISABLE_THINKING === '1',
+        }));
+        return result;
+      } catch (error) {
+        this.logger.warn('[RealLLM physical] ' + JSON.stringify({
+          ...identity,
+          elapsedMs: Date.now() - physicalStartedAt,
+          failed: true,
+          errorType: error instanceof Error ? error.name : typeof error,
+        }));
+        throw error;
+      }
     };
     // 显式单项契约与步骤/场景共同约束；普通多项 JSON 不获得额外恢复。
     const upstreamRepairUnit = request.structuredRepairUnitCount === 1 && request.scenario === 'review'
@@ -1453,12 +1487,14 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         if (delta) content += delta;
         const fr = chunk.choices?.[0]?.finish_reason;
         if (fr) finishReason = fr;
-        const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
+        const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } }).usage;
         if (chunkUsage) {
           usage = {
             promptTokens: typeof chunkUsage.prompt_tokens === 'number' ? chunkUsage.prompt_tokens : usage?.promptTokens,
             completionTokens: typeof chunkUsage.completion_tokens === 'number' ? chunkUsage.completion_tokens : usage?.completionTokens,
             totalTokens: typeof chunkUsage.total_tokens === 'number' ? chunkUsage.total_tokens : usage?.totalTokens,
+            reasoningTokens: typeof chunkUsage.completion_tokens_details?.reasoning_tokens === 'number'
+              ? chunkUsage.completion_tokens_details.reasoning_tokens : usage?.reasoningTokens,
           };
         }
       }
