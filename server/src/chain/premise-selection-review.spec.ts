@@ -22,11 +22,13 @@ it('keeps all substantive overlap facts and sources in memory while removing rep
   const viewed=overlapReviewSelectionView([first,second]);
   expect(viewed).toHaveLength(2);
   for(let i=0;i<2;i++){
-    for(const field of ['premiseId','workingTitle','storyCore','storyCategory','protagonistSituation','openingEvent','coreConflict',
+    for(const field of ['premiseId','storyCategory','protagonistSituation','openingEvent','coreConflict',
       'activeChoice','escalation','reversalEffect','payoff','irreplaceableCarrier','secondOrderConsequence','readerQuestion']){
       expect(viewed[i][field]).toEqual(original[i][field]);
     }
     expect(viewed[i]).not.toHaveProperty('causalPlan');
+    expect(viewed[i]).not.toHaveProperty('storyCore');
+    expect(viewed[i]).not.toHaveProperty('workingTitle');
   }
   expect([first,second]).toEqual(original);
   expect(JSON.stringify(viewed).length).toBeLessThan(JSON.stringify(original).length);
@@ -60,7 +62,9 @@ it('keeps the defective source plan and complete independent-review selection wh
   expect(prompt[1]).toEqual(original[1]);
   for(const i of [0,2]){
     expect(prompt[i]).not.toHaveProperty('causalPlan');
-    for(const field of ['premiseId','storyCore','storyCategory','activeChoice','escalation','reversalEffect','payoff','secondOrderConsequence'])
+    expect(prompt[i]).not.toHaveProperty('storyCore');
+    expect(prompt[i]).not.toHaveProperty('workingTitle');
+    for(const field of ['premiseId','storyCategory','activeChoice','escalation','reversalEffect','payoff','secondOrderConsequence'])
       expect(prompt[i][field]).toEqual(original[i][field]);
   }
   expect(selected).toEqual(original);
