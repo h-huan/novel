@@ -165,7 +165,7 @@ describe('plan critical prerequisites before full story cards',()=>{
     const s=selection(),rows=payoffChecks(s);rows[0].links[0].status='unknown';
     expect(premisePayoffReviewIssues({payoffChecks:rows},s).length).toBeGreaterThan(0);
     (rows[0] as any).status='unknown';
-    expect(()=>materializePremisePayoffReview({payoffChecks:rows},s)).toThrow('未评估');
+    expect(materializePremisePayoffReview({payoffChecks:rows},s)).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'A',repairMode:'replace_from_pool',reason:expect.stringContaining('未确认')})]);
   });
   it('rejects absent, duplicate and wrong-card checks while preserving true gaps',()=>{
     const s=selection(['A','B']);

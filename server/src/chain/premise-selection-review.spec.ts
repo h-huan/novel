@@ -601,7 +601,7 @@ describe('source coverage before premise lock', () => {
   it('keeps uncertainty separate from a proved drift and rejects duplicate or mixed reports', () => {
     const value=report();value.sourceChecks[0].status='unknown';
     expect(premiseSourceReviewIssues(value,selection())).toEqual([]);
-    expect(()=>materializePremiseSourceReview(value,selection())).toThrow('仍未确认');
+    expect(materializePremiseSourceReview(value,selection())).toMatchObject({passed:false,issues:[expect.objectContaining({kind:'selection_fit',premiseId:'A'})]});
     const duplicate=report();duplicate.sourceChecks.push(duplicate.sourceChecks[0]);
     expect(premiseSourceReviewIssues(duplicate,selection()).join('；')).toContain('重复');
     expect(premiseSourceReviewIssues({...report(),passed:true,issues:[]},selection()).join('；')).toContain('并行');
