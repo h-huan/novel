@@ -142,6 +142,7 @@ it('selects two original-pool alternatives for one real delivery shortfall and s
   expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
   expect(result.selectionAudit).toMatchObject({
     partial:true,completeCardGatePending:true,
+    reviewedRecoveryCandidates:2,deliveryCount:5,
     excludedPremiseIds:expect.arrayContaining(['J']),
     discardedSurplusPremiseIds:expect.arrayContaining(['G','H']),
   });
