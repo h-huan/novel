@@ -548,6 +548,11 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     expect(prompt).toContain('不要求所有展开句都已逐字写入骨架');
     expect(prompt).toContain('不能只因原池未提及候选细节而判未知');
     expect(prompt).not.toContain('不能确认则unknown');
+    expect(prompt).toContain('同次审核');
+    expect(prompt).toContain('反转兑现核对');
+    expect(prompt).toContain('来源继承这一部分');
+    expect(prompt).toContain('本次仍须完成上文因果兑现、分类与流派结论');
+    expect(prompt).not.toContain('本次只核对每个已选项');
   });
 
 });
