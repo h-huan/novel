@@ -6551,6 +6551,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const retainedEvidence=retainPremiseReviewEvidence(selected,finalReview,retained.selection);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true,
         finalReview: retainedEvidence, rejectedHistory,
+        reviewedRecoveryCandidates: recoverySlots.length, deliveryCount,
         ...budgetPartialAudit, partial: true, excludedPremiseIds: [...unresolvedIds,...retained.excludedPremiseIds],
         reasons: [...(budgetPartialAudit.reasons || []),...retained.reasons], completeCardGatePending: true } };
     }
