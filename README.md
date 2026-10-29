@@ -8,6 +8,8 @@
 
 README 不重复标准内容，也不维护标准版本号。代码中的扫描器、Creative Constitution、ChapterPlan、平台基准和模块 seed 都是该标准的可执行实现。
 
+灵感发现按请求数量验收整批结果；不足额的合格卡只作为诊断候选，不计为成功交付。服务端复用已审来源结局，完整卡展示字段仍独立过质量门。使用方式及响应见 [API 文档](server/docs/API.md) 与 [用户指南](server/docs/user-guide.md)。
+
 ## 开发与持续修复必读
 
 每次接续修改前，先确认当前分支的 HEAD，并阅读本 README、[开发治理规范](DEVELOPMENT_GOVERNANCE.md) 和上述**唯一执行标准**中的相关 Rule ID；结合真实最新诊断、调用方与上下游代码确定根因，不能照搬旧窗口推断。

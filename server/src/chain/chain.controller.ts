@@ -183,7 +183,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard, minimumAcceptableIdeaCount } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -5043,7 +5043,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
-      const minimumPremiseSelectionCount = minimumAcceptableIdeaCount(requestedCount);
+      const minimumPremiseSelectionCount = requestedCount;
       const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>> } = {}) => {
         const excludeText = initialExcludes.length
           ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
@@ -5606,13 +5606,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           + '，有效池=' + candidatePool.length + '/' + premisePoolSize
           + '，选中=' + normalizedSelection.selected.length + '/' + requestedCount);
         // Once independent preselection has exhausted its fixed pool, fewer
-        // qualified premises than the delivery floor can never be rescued by
+        // qualified premises than the requested count can never be rescued by
         // downstream card/presentation processing. Preserve the full failure
         // evidence and avoid model work whose output must be discarded.
         if (normalizedSelection.selected.length < minimumPremiseSelectionCount) {
           throw failWithPoolAudit(
             new Error('锁定前仅保留 ' + normalizedSelection.selected.length + '/' + requestedCount
-              + ' 个独立审查合格题材，低于最低可交付数量 ' + minimumPremiseSelectionCount
+              + ' 个独立审查合格题材，未达到本次请求数量 ' + minimumPremiseSelectionCount
               + '；原池补救已结束，跳过无法交付的完整卡生成与审核。'),
             'preselection_review','preselection_shortfall',{
               selectionWallMs,preselectionReviewWallMs,
@@ -5656,6 +5656,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           : submission.required ? `submissionTags 从本分类候选 ${JSON.stringify(submission.options)} 选择1-2项；没有候选则报告前提缺失，不编造`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
         const cardSchema = JSON.parse(outputSchemaWithAuto);
+        delete cardSchema.ideas[0].ending;
         cardSchema.ideas[0].storyCategory = cardCategory;
         cardSchema.ideas[0].submissionTags = dto.submissionTags.length ? dto.submissionTags : (submission.required ? ['从本分类标签候选选择1-2项'] : []);
         const excludeText = ideaCardHistoryTitleReminder(excludes);
@@ -5935,13 +5936,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
-      // A short preselection must not erase independently verified premises.
-      // The final quantity gate may return a partial batch only after the minimum count and all quality gates pass.
+      // Only the exact requested number can be delivered after all quality gates pass.
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
-      const minimumDeliverableCount = minimumAcceptableIdeaCount(requestedCount);
-      if (preselectionShortfall) {
-        this.logger.warn(`idea-discover: 创建前筛选保留 ${selectedPremises.length}/${requestedCount} 个合格题材；继续完整卡审核，若最终达到最低可交付数量则返回明确标注缺额的合格部分结果，不用弱题材凑数。`);
-      }
+      const minimumDeliverableCount = requestedCount;
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
       const structuredCards: Array<Record<string, unknown>> = [];
       const structuringErrors: Array<{ sourcePremiseId: string; error: string }> = [];
@@ -6086,20 +6083,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const partial = selectedAccepted.length < requestedCount || finalMissingPremiseIds.length > 0;
       if (partial) {
         const reason = [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 5).join('；') || '题材结构化或独立审查未通过';
-        if (selectedAccepted.length >= minimumDeliverableCount) {
-          appealGate.returned = selectedAccepted.length;
-          appealGate.partial = true;
-          appealGate.minimumDeliverableCount = minimumDeliverableCount;
-          const warning = '请求' + requestedCount + '张，并发完整卡独立终审后有' + selectedAccepted.length
-            + '张通过全部质量门，缺额' + (requestedCount - selectedAccepted.length)
-            + '张；本批全部已选题材均已生成与审核，没有完整卡之后的串行修复或候补替换。';
-          this.logger.warn('idea-discover: ' + warning + (reason ? ' 未通过原因：' + reason : ''));
-          return { success: false, status: 'incomplete', ideas: acceptedWithAudit, totalIdeas: acceptedWithAudit.length,
-            qualifiedIdeas: acceptedWithAudit, error: warning, warning, qualityWarning: warning, appealGate };
-        }
+        appealGate.partial = true;
         appealGate.returned = 0;
         const error = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
-          + '；低于最低可交付数量 ' + minimumDeliverableCount + '。未通过原因：' + reason;
+          + '；未达到本次请求数量 ' + minimumDeliverableCount + '。未通过原因：' + reason;
         this.logger.warn('idea-discover: ' + error);
         return { success: false, status: 'incomplete', ideas: [], totalIdeas: 0,
           qualifiedIdeas: acceptedWithAudit, error, appealGate };
@@ -6294,7 +6281,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // premises. Fill only existing preselection slots from original candidates
     // with the unchanged shared review/reselection budgets, then expand all
     // independently vetted survivors together.
-    const minimumSelectableCount = minimumAcceptableIdeaCount(deliveryCount);
+    const minimumSelectableCount = deliveryCount;
     if (initialReview.passed) {
       const partial = initial.selected.length < requestedCount;
       return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
@@ -6359,7 +6346,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             + ' 个已独立复核合格题材；原池候选或共享审核/重选预算不足以补齐剩余位置，保留真实缺额。');
           return { ...partialSelection, selectionAudit: {
             initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
-            minimumSelectableCount, selectionStopReason: 'minimum_acceptable_partial',
+            minimumSelectableCount, selectionStopReason: 'original_pool_or_budget_shortfall',
             excludedPremiseIds: [...partialExcludedIds], reasons: [...initialReview.issues],
             completeCardGatePending: true,
           } };
@@ -6409,7 +6396,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const normalize=(value:unknown)=>{
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
-        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,minimumAcceptableIdeaCount(requestedCount));
+        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,Math.min(requestedCount,selected.selected.length));
         return candidate;
       };
       try{

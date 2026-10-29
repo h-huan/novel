@@ -6,6 +6,19 @@ import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } f
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 const selection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案，并承担失去工作的代价。'}],selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',escalation:'受害人提供已有资料，警方核实现场情况。',payoff:'警方到场解救被困的人，她失去工作。'}],poolTargetMet:true};
 const supported={ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',conditionEvidenceRef:'S1.escalation',reason:'已提供现场地点并由警方核实后到场解救'};
+it('does not reuse a claimed capture as its own prior reversal action when the plan only concludes a later reward',()=>{
+ const item={...selection.selected[0],reversalEffect:'第三夜对手在后山取走旧批货物，被负责人当场截住并指认。',
+  payoff:'主角被调入核心部门，从此失去原有清净生活。',
+  causalPlan:[{action:{field:'reversalEffect',quote:'第三夜对手在后山取走旧批货物，被负责人当场截住'},
+   conditions:[{field:'escalation',quote:selection.selected[0].escalation}],
+   result:{field:'payoff',quote:'主角被调入核心部门'}}]};
+ const input={...selection,selected:[item]},row={...supported,actionEvidenceRef:'S1.reversalEffect',
+  reversalCheck:{status:'supported',actionEvidenceRef:'S1.reversalEffect',reason:'负责人到场截住并指认，因此反转已经成立'},
+  links:[{ref:'S1.causalPlan[0]',status:'supported',reason:'先被当场截住，之后主角获得新的岗位'}]};
+ expect(premisePayoffReviewIssues({payoffChecks:[row]},input).join('')).toContain('不能用结果自证');
+ const normalized=quarantineUnprovenReversalEvidence({payoffChecks:[row]},input);
+ expect(materializePremisePayoffReview(normalized,input)[0]).toMatchObject({premiseId:'P1',protocolIncomplete:true});
+});
 it('reuses existing exact causal action in reversalEffect without an invented second quotation',()=>{
  const candidate={...selection.selected[0],
   reversalEffect:'我把原始文件交给窗口，工作人员核验身份后暂停登记。',

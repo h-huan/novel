@@ -17,7 +17,6 @@ import {
   ideaDiscoveryAuthorSettings,
   ideaDiscoveryAuthorContext,
   normalizePremiseSelectionPayload,
-  minimumAcceptableIdeaCount,
   selectedPremiseEvidenceForIdeaCard,
 } from './idea-discovery-contract';
 
@@ -658,15 +657,14 @@ it('packs local repair standards losslessly with per-card facts and all pending 
 });
 
 
-describe('minimum acceptable idea count', () => {
-  it('allows at most two missing cards without making a three-card request collapse to one', () => {
-    expect([1, 2, 3, 4, 5, 6, 7].map(minimumAcceptableIdeaCount)).toEqual([1, 2, 3, 3, 3, 4, 5]);
-    expect(() => minimumAcceptableIdeaCount(0)).toThrow('正整数');
-  });
-});
-
-
 describe('confirmed story persistence boundary', () => {
+  it('keeps reviewed agreement as agreement when card formatting invents completed registration',()=>{
+    const source={premiseId:'P1',reversalEffect:'办理方暂缓，要求相关人员先协商。',payoff:'丈夫同意加名，主角与家人关系破裂。'};
+    const card=bindStructuredIdeaCardToPremise(source,[{title:'原题材',ending:'名字已回到协议上，后续产权登记也已经写上。',description:'原有协商行动'}]);
+    expect(card.ending).toBe(source.reversalEffect+'\n'+source.payoff);
+    expect(card.description).toBe('原有协商行动');
+    expect(selectedPremiseEvidenceForIdeaCard(card)?.payoff).toBe(source.payoff);
+  });
   it('keeps the batch discovery audit separate from the canonical selected story without mutating input', () => {
     const input = {
       title: '已选题材',

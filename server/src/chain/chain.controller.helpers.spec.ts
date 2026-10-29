@@ -1571,7 +1571,7 @@ describe('cross-chapter finding partition', () => {
 });
 
 
-describe('idea discovery live orchestrator behavior', () => {
+describe('idea discovery orchestrator with simulated model responses', () => {
   it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused', 'pool_naming'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
@@ -1816,7 +1816,7 @@ describe('idea discovery live orchestrator behavior', () => {
         target: 15, generated: 2, shortfall: 13, batchCount: 3, maxConcurrency: 2,
         supplementAttempted: true, supplementAdded: 0,
       });
-      expect(result.appealGate.minimumDeliverableCount).toBe(3);
+      expect(result.appealGate.minimumDeliverableCount).toBe(5);
       expect(result.success).toBe(false);
       expect(result.status).toBe('incomplete');
       expect(result.ideas).toEqual([]);

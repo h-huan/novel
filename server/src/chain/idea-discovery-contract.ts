@@ -16,12 +16,6 @@ export function ideaPreselectionCapacity(requestedCount:number,availableCount:nu
   return Math.min(availableCount,requestedCount+Math.min(3,Math.max(1,Math.ceil(requestedCount/2))));
 }
 
-/** Keep partial delivery useful: requests above two still return at least three qualified cards. */
-export function minimumAcceptableIdeaCount(requestedCount: number): number {
-  if (!Number.isInteger(requestedCount) || requestedCount < 1) throw new Error('题材数量必须为正整数');
-  return requestedCount <= 2 ? requestedCount : Math.max(3, requestedCount - 2);
-}
-
 /** Current rejection and attempt history are different views. Never report a
  * fixed initial defect as the reason the latest candidate is still blocked. */
 export function latestIdeaFailureReasons(assessments:readonly {sourcePremiseId?:unknown;passed?:unknown;issues?:unknown}[],missingIds:readonly string[]):string[]{
@@ -321,12 +315,12 @@ export function ideaCardStructuringDirective(
 ${includePreselectionPolicy ? IDEA_PRESELECTION_REVIEW_POLICY : "按已注入GEN-002锁定前继承与差异规则执行。"}
 这个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把这一项结构化成恰好 1 张完整题材卡，不再重新选题。
 ${includePreselectionPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的同一必要条件合同展开。'}
-先读取causalPlan逐项确定本卡setting、description、mainReversal、ending和scopeBreakdown各自承接的行动、条件、结果，再写展示表达。所有影响成败的已审条件须落入实际故事字段，不能只留在内部计划；可以换表达，不能删掉取得、传递、触发或决定的环节。新加人名或场景不等于获准增加新能力、权限、证据渠道或自动到场安排。不要在卡中回传causalPlan或审查自评，服务器保留内部来源，最终审核仍独立执行。
+先读取causalPlan逐项确定本卡setting、description、mainReversal和scopeBreakdown各自承接的行动、条件、结果，再写展示表达。ending由服务器继承已审核的reversalEffect和payoff，不要生成另一份结局。所有影响成败的已审条件须落入实际故事字段，不能只留在内部计划；可以换表达，不能删掉取得、传递、触发或决定的环节。新加人名或场景不等于获准增加新能力、权限、证据渠道或自动到场安排。原事实中的提议、同意、承诺和未来目标不能在任一字段升级为已实际完成、已生效或已取得的权利；人物指认或栽赃也不能擅自具体化为某件物品已被转移到另一地点。不要在卡中回传causalPlan或审查自评，服务器保留内部来源，最终审核仍独立执行。
 - 服务器已经锁定题材身份；不要输出 premiseId、sourcePremiseId 或任何内部标识，系统会在返回后绑定原题材身份。
 - 禁止替换、合并、拆分、另造题材，禁止因为某字段难写就把故事换成更容易过 Gate 的套路。
 - 创作标签仅规定该卡已选择的类型期待，不是新增事件的许可证；同样标签可产生不同关系、策略、代价和阅读体验。先找本卡真实可复述的选择与局面改变，再决定标题和首屏怎样表达，不能为了标签而加不曾在原池出现的胜利、背叛、笑点或悲剧。标题竞争力和真实因果要分别成立，不得以其一代替另一项。
 - 标题必须先兑现点击承诺：脱离概要也能看懂具体冲突、反常关系或未解问题；从原故事已有事件和关系中提炼，不沿用文雅暂名，不靠夸张空话和虚假设定。hook先写命运改变的现场与人物选择，不用职业查证流程开篇。
-- hook、description、setting、ending、scopeBreakdown、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；能力触发、持续时间、代价与同一人物状态须在所有字段一致。只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
+- hook、description、setting、scopeBreakdown、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；ending由服务器从已审来源继承。能力触发、持续时间、代价与同一人物状态须在所有字段一致。只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
 - 最终 Gate 独立验收，失败须如实拒绝；由服务器在本批原池与共享预算内处理缺额，模型不得自行换身份、补生题材、改写其它题材或使用旧批次。
 写完后再逐项核对原池骨架和所选胚子中的触发动作、人物身份与知情、到场事件、时间阶段、升级机制和结局方向；同一事实在所有卡片字段中保持一致。人物当时的请求可以有后来才揭露的另一层动机，但请求发生这一事实必须保留。
 原池storyCore是事实来源；其它已选字段是经过来源核查的展开，不能用重复出现的展开新规则替代原池条件。若仍发现两者互斥，不得通过新增例外或能力把错误前提圆成另一故事。
@@ -360,7 +354,15 @@ export function bindStructuredIdeaCardToPremise(
     Object.entries(rawCard as Record<string, unknown>)
       .filter(([key]) => key !== 'sourcePremiseId' && key !== 'premiseId' && key !== 'causalPlan'),
   );
-  const boundCard = bindUniqueIdeaScopeAllocation({ ...safeCard, sourcePremiseId: premiseId });
+  // The conclusion is a frozen fact, not a second generation task. Keeping the
+  // reviewed state prevents formatting from turning agreement into completed
+  // registration or inventing a new terminal event. All other fields and the
+  // inherited conclusion still go through the independent semantic Gate.
+  const closure=[selectedPremise.reversalEffect,selectedPremise.payoff]
+    .filter((value):value is string=>typeof value==='string'&&!!value.trim());
+  const ending=closure.filter((value,index)=>!closure.some((other,otherIndex)=>otherIndex!==index
+    &&other.includes(value)&&(other.length>value.length||otherIndex<index))).join('\n');
+  const boundCard = bindUniqueIdeaScopeAllocation({ ...safeCard, ...(ending?{ending}:{}), sourcePremiseId: premiseId });
   selectedPremiseEvidenceByCard.set(boundCard, structuredClone(selectedPremise));
   return boundCard;
 }

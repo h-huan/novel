@@ -31,8 +31,9 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
   });
 
-  it('keeps good preselection cards reviewable but never passes an incomplete batch', () => {
-    expect(controllerSource).toContain('const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);');
+  it('stops before paid card work when preselection cannot meet the requested count', () => {
+    expect(controllerSource).toContain('const minimumPremiseSelectionCount = requestedCount;');
+    expect(controllerSource).toContain("'preselection_shortfall'");
     expect(controllerSource).toContain('全部进入并发完整卡生成');
     expect(controllerSource).toContain("await accept(structuredCards, 'initial')");
     expect(controllerSource).not.toContain('this.reservePremiseSelection(');
