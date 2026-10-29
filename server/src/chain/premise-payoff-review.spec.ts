@@ -187,3 +187,15 @@ it('requires existing independent payoff review to check evidence delivery to an
  expect(prompt).toContain('原池和展开都漏掉这道决定性桥接时整体应为gap');
  expect(prompt).toContain('不能仅核对作者自行列出的环节');
 });
+
+// The latest model trace rejected P8/P12 only after card review although
+// the original pool already omitted a credible antagonist response and
+// equated procedural suspension with a terminal entitlement decision.
+it('makes the existing independent source/payoff verdict test adversarial consent, finality and specific evidence provenance',()=>{
+ const prompt=premisePayoffReviewDirective(selection);
+ expect(prompt).toContain('对手已有警觉、拒绝或逃避的动机');
+ expect(prompt).toContain('请求开门、交付材料、改口配合');
+ expect(prompt).toContain('暂停受理、中止办理、进入调查');
+ expect(prompt).toContain('过去的投诉录音、旧账与历史档案只能证明其中真实记载的事件');
+ expect(prompt).toContain('不能被当作以后另一份雇佣约定');
+});
