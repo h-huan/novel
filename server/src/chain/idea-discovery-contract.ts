@@ -249,12 +249,18 @@ export function ideaPremiseSelectionDirective(
   poolSize = Math.max(requestedCount * 3, requestedCount + 5),
   includeSharedPolicy = true,
   minimumSelectedCount = requestedCount,
+  fixedPoolSelection = false,
 ): string {
   const minimumCount = Math.min(requestedCount, Math.max(1, Number.isInteger(minimumSelectedCount) ? minimumSelectedCount : requestedCount));
   const selectedCountText = minimumCount < requestedCount ? `${minimumCount}-${requestedCount}` : `恰好 ${requestedCount}`;
   const selectionQuantityRule = minimumCount < requestedCount
     ? `先尽可能从轻量胚子池中选出 ${requestedCount} 个成熟题材；若经过比较只有 ${selectedCountText} 个题材真正满足全部因果、差异、平台和作者条件，则只返回实际合格项，绝不为了凑数加入弱项。`
     : `必须从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。`;
+  // Fixed-pool selection is a separate transport contract, not a regex
+  // patch over the default generation prompt. An old string replacement could
+  // silently stop matching when the canonical directive changed, leaving a
+  // contradictory instruction to generate a second pool.
+  const fixedPoolRule = '服务器已提供固定候选池，共' + poolSize + '个轻量胚子；先按每项已有的分类检查主线：核心冲突、主动选择、反转和兑现必须落实该分类的关键关系或行动机制，不能以职业背景、末尾情绪或类型标签代替；不适配分类的候选不得选中，也不得偷偷改分类。再比较关键证据的取得与交付路径、真实决定者、兑现必要条件及既定行动引发的代价。原池缺少必要条件的，不得在展开字段里自造相反事实救活；优先选择原池中机制成熟且互不重合的题材。中段及后段的推进须由主角在新阻力下做出实质选择，或由已写的主动选择持续引发有区别的不可逆后果；仅靠配角依次揭露旧资料、向读者解释或重复一个证据，不算持续推进。原池没有这种真实选择或后果，不能在展开阶段临时补造救活。不得新增候选或改写原池。';
   const storyTypeRule = storyType === 'short_story'
     ? '短篇必须能在有限篇幅内形成单线闭环和明确兑现；反转少而重，不能靠不断加设定续命。'
     : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
@@ -268,12 +274,12 @@ ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生�
 选中前先在内部逐项对照原池 storyCore 与所选 openingEvent、coreConflict、activeChoice、escalation、reversalEffect、payoff：已明确的触发动作、人物身份、到场事件、时间阶段和结局方向须保留；未明确的真实动机可经反转揭示，但人物当时提出请求这一事件不能凭动机反转被取消。原池骨架涉及代写、转交、救助等多方动作时，要写清谁实施、为谁实施、交给谁或影响谁；没有明确的对象关系不得在展开时自行定成相反事实。只在内部检查，不增加输出字段。
 合理展开可补充原池未限定且与原约束兼容的细节；不得把原有职业或专业经历升级成更高等级、冠军资历、新权限或新能力来取得胜负，也不能让新增关键证据、对手目的或新角色取代原骨架的反转和兑现依赖。展开需要的关键身份与因果条件应在本次原池骨架中先明确，不能等到筛选字段再偷偷升级。
 先固定原池中每条规则的触发动作、作用对象及适用条件，再展开选择、升级、反转与兑现。尤其核对“有/无、已经/尚未、只作用于/不作用于”等条件；后文不能把作用对象改成其排除对象，也不能用一个此前没有的例外或新能力兑现原机制做不到的结果。若原机制无法支撑拟定结局，选择符合原规则的行动与代价，或在锁定前改选原池成熟候选，不把矛盾留给完整卡修复。selectedPremises 不返回或重写storyCore、workingTitle；这两项由服务器从原池继承。
-1. 以 ${poolSize} 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。${poolSize} 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ${requestedCount} 个成熟题材，可以少于 ${poolSize}，禁止为了凑数填弱项。
+${fixedPoolSelection ? '1. ' + fixedPoolRule : '1. 以 ' + poolSize + ' 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。' + poolSize + ' 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ' + requestedCount + ' 个成熟题材，可以少于 ' + poolSize + '，禁止为了凑数填弱项。'}
 2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${selectedCountText} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。每个字段只写本字段独有且可由原池支持的事件事实，勿跨字段重述同一整段；必要的行动主体、对象、前置能力与兑现条件必须完整保留，不准为缩短输出压缩掉重要因果。
 3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
 4. ${selectionQuantityRule}payoff须写出从主角行动到结果成立的必要桥接：涉及他人决定、机构认可或对手配合时，说明谁依据什么作出该决定，不能把交出证据、人情口碑、集体支持或主动请求直接当成对方必然认可。尤其是证据导致追责、翻案、查封或撤职的结局，须在原池骨架和已选字段中建立能指向责任人的具体比对依据、材料到达有权处理者的路径以及实际决定，不能只凭可疑线索直接认定责任人；已问话不等于已取得回答，证据公开不等于程序自动完成。若代价依赖对手知道主角举报或取证，须写明对手获知的途径；causalPlan同步覆盖决定性中间条件，不准只在payoff中声称已发生。普通直接因果不补无关手续或法律条文；原池没有可成立的路径时，在锁定前选择其它成熟项，不把缺口留给完整卡再编新规则。
 5. ${storyTypeRule}
-6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 返回 ${selectedCountText} 项，每项都必须是原池真实身份并包含完整筛选证据；不足 ${minimumCount} 项时按前提/质量失败处理，不补造或弱化条件。不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
+${fixedPoolSelection ? '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。' : '6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 返回 ' + selectedCountText + ' 项，每项都必须是原池真实身份并包含完整筛选证据；不足 ' + minimumCount + ' 项时按前提/质量失败处理，不补造或弱化条件。'}不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
 }
 
 /**

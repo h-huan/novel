@@ -5105,10 +5105,10 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '保留用户指定的类型、平台、分类、流派与其它条件。每个storyCategoryId必须与该项人物关系、核心冲突、主动选择和兑现机制实质相符；类型只在结尾点缀或职业背景出现的胚子应重新构思，不能留给后续模型通过改标签或补写救活。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
         ].join('\n');
         const minimumSelectedCount = minimumSelectedCountForPool(candidatePool.length);
-        const selectionDirective = ideaPremiseSelectionDirective(dto.storyType, ideaPreselectionCapacity(requestedCount,candidatePool.length), premisePoolSize, false, minimumSelectedCount)
-          .replace(/1\. 以 [\s\S]*?(?=\n2\.)/, '1. 服务器已提供固定候选池，共' + candidatePool.length + '个轻量胚子；先按每项已有的分类检查主线：核心冲突、主动选择、反转和兑现必须落实该分类的关键关系或行动机制，不能以职业背景、末尾情绪或类型标签代替；不适配分类的候选不得选中，也不得偷偷改分类。再比较关键证据的取得与交付路径、真实决定者、兑现必要条件及既定行动引发的代价。原池缺少必要条件的，不得在展开字段里自造相反事实救活；优先选择原池中机制成熟且互不重合的题材。中段及后段的推进须由主角在新阻力下做出实质选择，或由已写的主动选择持续引发有区别的不可逆后果；仅靠配角依次揭露旧资料、向读者解释或重复一个证据，不算持续推进。原池没有这种真实选择或后果，不能在展开阶段临时补造救活。不得新增候选或改写原池。')
-          .replace('原池范围和已有调用不增加模型调用。', '候选池已在前一阶段通过有界并发生成；当前阶段只从固定候选中选择和展开，不再生成候选。')
-          .replace(/6\. 输出 pool 和 selectedPremises：[^\n]*/, '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。');
+        const selectionDirective = ideaPremiseSelectionDirective(
+          dto.storyType, ideaPreselectionCapacity(requestedCount,candidatePool.length),
+          candidatePool.length, false, minimumSelectedCount, true,
+        );
         const promptDirective = promptPhase === 'pool' ? poolDirective : selectionDirective;
         const promptSchema = promptPhase === 'pool'
           ? { pool: [{ ...premiseSchema.pool[0], premiseId: 'B' + (batchIndex + 1) + '-P1' }] }

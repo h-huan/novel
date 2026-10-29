@@ -657,6 +657,22 @@ it('packs local repair standards losslessly with per-card facts and all pending 
 });
 
 
+
+it('fixed-pool selection uses the canonical single-output contract without obsolete runtime substitutions', () => {
+ const rule=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
+ expect(rule).toContain('服务器已提供固定候选池，共15个轻量胚子');
+ expect(rule).toContain('只输出selectedPremises；');
+ expect(rule).toContain('中段及后段的推进须由主角');
+ expect(rule).toContain('逐对比较');
+ expect(rule).toContain('必要条件');
+ expect(rule).not.toContain('6. 输出 pool 和 selectedPremises');
+ expect(rule).not.toContain('1. 以 15 个');
+ expect(rule).not.toContain('原池范围和已有调用不增加模型调用');
+ const legacy=ideaPremiseSelectionDirective('short_story',8,15,false,5);
+ expect(legacy).toContain('1. 以 15 个');
+ expect(legacy).toContain('6. 输出 pool 和 selectedPremises');
+});
+
 describe('confirmed story persistence boundary', () => {
   it('keeps reviewed agreement as agreement when card formatting invents completed registration',()=>{
     const source={premiseId:'P1',reversalEffect:'办理方暂缓，要求相关人员先协商。',payoff:'丈夫同意加名，主角与家人关系破裂。'};
