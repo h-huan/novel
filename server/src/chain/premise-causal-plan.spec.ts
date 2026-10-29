@@ -40,6 +40,10 @@ it('rebinds whitespace-only citation differences without inventing missing causa
  const correct=bindPremiseCausalPlan(original) as typeof original;
  expect(correct.causalPlan[0].action.quote).toBe('我把实名登记资料交给\n值班人员，取得受理回执。');
  expect(premiseCausalPlanIssues(correct)).toEqual([]);
+ const separated=structuredClone(original);
+ separated.activeChoice='他还欠下一段等长的“空 账”。';
+ separated.causalPlan[0].action.quote='他还欠下一段等长的“空账”。';
+ expect(premiseCausalPlanIssues(bindPremiseCausalPlan(separated))).not.toEqual([]);
  const invalid=structuredClone(original);
  invalid.causalPlan[0].action.quote='我把匿名登记资料交给 值班人员，取得受理回执。';
  expect(premiseCausalPlanIssues(bindPremiseCausalPlan(invalid))).not.toEqual([]);
