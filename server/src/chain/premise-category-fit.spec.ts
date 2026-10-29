@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective } from './premise-category-fit';
+import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards } from './premise-category-fit';
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -106,4 +106,24 @@ it('isolates unresolved preselection slots after the structured helper already e
   expect(result.selectionAudit).toMatchObject({
     partial: true, unresolvedPremiseIds: ['A'],
   });
+});
+
+it('retains every selected category standard and all surrounding instructions while removing only unrelated categories',()=>{
+  const rules=[
+    {category:'年代',standard:'年代必须由历史时期资源与制度驱动主线'},
+    {category:'都市日常',standard:'都市日常要有生活选择和后果'},
+    {category:'玄幻仙侠',standard:'仙侠规则必须限制能力与代价'},
+  ];
+  const standard='平台准则\\n【与完整卡一致的分类标准】'+JSON.stringify(rules)
+    +'\\n【服务器分类编号目录】保留原来全部类别的身份核查\\n【流派定义】所有原始流派标准保留';
+  const subset=scopePremiseReviewCategoryStandards(standard,[
+    {storyCategory:'年代'}, {storyCategory:'玄幻仙侠'},
+  ]);
+  expect(subset).toContain(rules[0].standard);
+  expect(subset).toContain(rules[2].standard);
+  expect(subset).not.toContain(rules[1].standard);
+  expect(subset).toContain('【服务器分类编号目录】保留原来全部类别的身份核查');
+  expect(subset).toContain('【流派定义】所有原始流派标准保留');
+  expect(scopePremiseReviewCategoryStandards(standard,[{storyCategory:'未知分类'}])).toBe(standard);
+  expect(scopePremiseReviewCategoryStandards('既有标准', [{storyCategory:'年代'}])).toBe('既有标准');
 });
