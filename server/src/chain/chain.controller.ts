@@ -110,7 +110,7 @@ import {
 import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout, type HardlineFinding, type HardlineProfile } from './hardline-scanner';
 import { assessHardlineRepairProgress } from './hardline-repair-progress';
 import { detectSourceCountdownRisk } from './source-countdown-consistency';
-import { describeWorldSourceCandidate } from './source-rule-consistency';
+import { confirmedWorldProtagonistName, describeWorldSourceCandidate } from './source-rule-consistency';
 import { buildWorldSourceReviewPrompt, describeWorldSourceReview, materializeWorldSourceReview, applyUncommittedWorldPatch, worldSourceAnchors, worldCreationAuthority, worldReviewFailureOrigin, type WorldSourceReview } from './world-source-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
 import { buildStoryFoundation } from '../modules/canon/canon-policy';
@@ -7675,19 +7675,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         if (!existingWorld) {
           emit('world', 18, '先生成世界观，供后续大纲与人物保持上下文');
           // 确定性主角名（首段，用于校验世界观是否保留主角，防止模型改名导致后续全偏）
-          const protagonistName = (dto.selectedIdea?.protagonist || '').split(/[，,。：:；;\s（(]/)[0].trim();
+          const protagonistName = confirmedWorldProtagonistName(dto.selectedIdea?.protagonist);
           const worldPrompt = `为这部小说整理服务于剧情的完整世界观设定，不是另写一个同名故事。
 【唯一故事基准】${canonicalCreativeBrief}
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
 保留基准的时代、类型、地点、冲突、主角和结局方向；禁止把现实题材改成末世/修仙/科幻/超能力/架空制度。
 能力、信息、物件与证据的触发条件、作用对象、范围、时序、存续及可取得性以【唯一故事基准】为准；不得新增与已确认事实互斥的限制、万能证据或调查渠道。口述、记忆与原始记录应按本故事已确认的能力和证据边界区别处理。
-${protagonistName ? `【必须保留的主角（不得改名、不得换成别人）】${protagonistName}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
+${protagonistName ? `【必须保留的主角（不得改名、不得换成别人）】${protagonistName}\n` : '【主角身份约束】题材未确认主角实名时，保留第一人称/匿名叙述身份，不得为主角新增姓名、姓氏或绰号；可用“我”指代。\n'}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
 
 按已注入AUTH-002世界资料补全边界执行。
 输出一个 JSON 对象。内容长度按既定故事需要，整体不超过 1500 字；核心必需字段完整，非必要资料不凑字数：
 
 - era——时代/时间线：具体年代、关键历史节点、与剧情的因果。
-- storyPremise——故事前提：一句话，**必须出现主角「${protagonistName || '主角'}」的姓名与身份，不得改名**。
+- storyPremise——故事前提：一句话，**${protagonistName ? `必须保留已确认主角「${protagonistName}」的姓名与身份，不得改名` : '必须保留主角已确认身份；匿名第一人称不得被赋予新姓名'}**。
 - atmosphere——氛围基调：全书情绪定位，说明紧张/悬疑等从何而来、如何传递。
 - rules——核心规则数组：只列本故事真正需要的核心因果规则，不设固定条数；每条写成"谁在什么条件下做什么会发生什么"的 if-then 形式，并写清作用对象、载体与可见范围（谁看得见、谁受影响）；每条规则只授予它字面写出的能力，规则之间不得互相否定——不得出现一条写某站只对某人可见、另一条又要求别人在此下车这类互斥设定；任何作用于他人的效果都必须写明该效果抵达他人的授权路径。
 - geography——地理：大陆/区域分布 + 关键地点（标剧情功能）。
@@ -7703,7 +7703,7 @@ ${protagonistName ? `【必须保留的主角（不得改名、不得换成别�
 ${STORY_ENTITY_MODELING_POLICY}
 - endingDirection——结局基调与解决方向。
 
-JSON格式:{"era":"...","storyPremise":"必须包含主角「${protagonistName || '主角'}」姓名...","atmosphere":"...","rules":["..."],"geography":"...","locations":["..."],"socialRules":["..."],"specialSettings":"无特殊设定时必须为空字符串","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{"name":"...","leader":"...","scope":"活动范围","protagonistRelation":"与主角关系"}],"endingDirection":"..."}`;
+JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确认主角「${protagonistName}」及身份` : '保持已确认主角身份，匿名第一人称不得新增姓名'}...","atmosphere":"...","rules":["..."],"geography":"...","locations":["..."],"socialRules":["..."],"specialSettings":"无特殊设定时必须为空字符串","socialStructure":"...","powerSystem":"...","economy":"...","culture":"...","history":"...","factions":[{"name":"...","leader":"...","scope":"活动范围","protagonistRelation":"与主角关系"}],"endingDirection":"..."}`;
           activeFailureOrigin = 'generation_contract';
           const worldResult = await this.llmCallWithRetry<any>('世界观生成', worldPrompt, {
             temperature: 0.5,
