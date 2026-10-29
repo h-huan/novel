@@ -6,6 +6,31 @@ import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } f
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 const selection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案，并承担失去工作的代价。'}],selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',escalation:'受害人提供已有资料，警方核实现场情况。',payoff:'警方到场解救被困的人，她失去工作。'}],poolTargetMet:true};
 const supported={ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',conditionEvidenceRef:'S1.escalation',reason:'已提供现场地点并由警方核实后到场解救'};
+it('reuses existing exact causal action in reversalEffect without an invented second quotation',()=>{
+ const candidate={...selection.selected[0],
+  reversalEffect:'我把原始文件交给窗口，工作人员核验身份后暂停登记。',
+  causalPlan:[
+   {action:{field:'reversalEffect',quote:'我把原始文件交给窗口'},conditions:[],
+    result:{field:'reversalEffect',quote:'工作人员核验身份后暂停登记'}},
+   {action:{field:'reversalEffect',quote:'工作人员核验身份后暂停登记'},conditions:[],
+    result:{field:'payoff',quote:selection.selected[0].payoff}},
+  ]};
+ const input={...selection,selected:[candidate]};
+ const row={...supported,reversalCheck:{status:'supported' as const,
+   actionEvidenceRef:'S1.reversalEffect',reason:'文件已交给窗口，随后工作人员核验并暂停登记'},
+   links:candidate.causalPlan.map((_,i)=>({ref:`S1.causalPlan[${i}]`,status:'supported',
+     reason:'逐环节核对实际行动和发生条件'}))};
+ expect(premisePayoffReviewIssues({payoffChecks:[row]},input)).toEqual([]);
+ const wrong={...candidate,causalPlan:[{...candidate.causalPlan[0],action:{field:'reversalEffect',
+   quote:'工作人员核验身份后暂停登记'}},candidate.causalPlan[1]]};
+ expect(premisePayoffReviewIssues({payoffChecks:[row]}, {...input,selected:[wrong]}).length).toBeGreaterThan(0);
+ const withoutPlan={...candidate,causalPlan:[{...candidate.causalPlan[0],action:{field:'activeChoice',
+   quote:candidate.activeChoice}},candidate.causalPlan[1]]};
+ const resultOnly={...row,reversalCheck:{...row.reversalCheck,actionEvidenceQuote:'工作人员核验身份后暂停登记'}};
+ expect(premisePayoffReviewIssues({payoffChecks:[resultOnly]},input).join('')).toContain('不能用结果自证');
+ expect(premisePayoffReviewIssues({payoffChecks:[{...row,
+   reversalCheck:{...row.reversalCheck,actionEvidenceQuote:undefined}}]},input)).toEqual([]);
+});
 it('audits reversal success independently from later costs within the existing payoff Gate',()=>{
  const input={...selection,selected:[{...selection.selected[0],
    reversalEffect:'警方核实收到的录音和具体地点后实际到场，解救了被困人员。'}]};
