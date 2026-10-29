@@ -122,13 +122,13 @@ export function premisePayoffReviewIssues(value:any,selection:PremiseSelectionRe
 }
 export function materializePremisePayoffReview(value:any,selection:PremiseSelectionResult):PremiseSelectionReview['issues']{
   const errors=premisePayoffReviewIssues(value,selection);if(errors.length)throw Error(errors.join('；'));
-  const unknown=value.payoffChecks.filter((row:PremisePayoffCheck)=>row.status==='unknown');
-  if(unknown.length)throw Error('锁定前兑现必要条件未评估：'+unknown.map((row:PremisePayoffCheck)=>row.ref+'：'+row.reason).join('；'));
-  return value.payoffChecks.filter((row:PremisePayoffCheck)=>row.status==='gap').map((row:PremisePayoffCheck)=>{
+  // Preserve unknown as a per-premise negative verdict: it is not approval,
+  // and it cannot poison already verified peers in the same source batch.
+  return value.payoffChecks.filter((row:PremisePayoffCheck)=>row.status!=='supported').map((row:PremisePayoffCheck)=>{
     const item=premisePayoffCatalog(selection).find(item=>item.ref===row.ref)!;
     return {kind:'selection_fit' as const,premiseId:item.premiseId,referencePremiseId:item.premiseId,
-      ...(row.gapRepair==='restore_source_conditions'?{}:{repairMode:'replace_from_pool' as const}),
+      ...(row.status==='unknown'||row.gapRepair!=='restore_source_conditions'?{repairMode:'replace_from_pool' as const}:{}),
       quote:String(selection.selected.find(p=>p.premiseId===item.premiseId)![row.reversalCheck?.status==='gap'?'reversalEffect':'payoff']),
-      referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[row.reason,...(row.reversalCheck?.status==='gap'?['反转阶段：'+row.reversalCheck.reason]:[]),...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
+      referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[...(row.status==='unknown'?['兑现必要条件未确认，不得锁定']:[]),row.reason,...(row.reversalCheck?.status==='gap'?['反转阶段：'+row.reversalCheck.reason]:[]),...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
   });
 }

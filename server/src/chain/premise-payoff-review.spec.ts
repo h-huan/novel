@@ -90,7 +90,7 @@ it('routes a real gap to preselection and never retains an unqualified item as l
  expect(plan.availableCandidates).toEqual([]);
  expect(retainReviewedPremises(selection,{passed:false,issues}).selection.selected).toHaveLength(0);
  expect(raw.payoffChecks[0].status).toBe('gap');
- expect(()=>materializePremisePayoffReview({payoffChecks:[{...supported,status:'unknown'}]},selection)).toThrow('未评估');
+ expect(materializePremisePayoffReview({payoffChecks:[{...supported,status:'unknown',reason:'兑现真实条件尚未获得独立确认'}]},selection)).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'P1',repairMode:'replace_from_pool'})]);
 });
 it('permits restoring an omitted condition only with real same-ID original-pool evidence',()=>{
  const raw={...supported,status:'gap',gapRepair:'restore_source_conditions',

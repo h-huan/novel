@@ -39,9 +39,8 @@ export function materializePremiseGenreFit(value:any,selection:PremiseSelectionR
  if(!genres.length)return [];
  value=resolvePremiseGenreEvidence(value,selection);
  const catalog=premiseGenreFitCatalog(selection,genres);
- if(value.genreChecks.some((row:any)=>row.status==='unknown'))throw Error('手动流派适配尚未确认，不能锁定题材');
- return value.genreChecks.filter((row:any)=>row.status==='missing').map((row:any)=>{
+ return value.genreChecks.filter((row:any)=>row.status!=='fulfilled').map((row:any)=>{
   const entry=catalog.find(item=>item.ref===row.ref)!,candidate=selection.selected.find(item=>item.premiseId===entry.premiseId)!,source=selection.pool.find(item=>item.premiseId===entry.premiseId)!;
-  return {kind:'selection_fit' as const,premiseId:entry.premiseId,referencePremiseId:entry.premiseId,quote:String(candidate.protagonistSituation),referenceQuote:String(source.storyCore),reason:'未落实已选流派【'+entry.genre+'】：'+row.reason};
+  return {kind:'selection_fit' as const,premiseId:entry.premiseId,referencePremiseId:entry.premiseId,quote:String(candidate.protagonistSituation),referenceQuote:String(source.storyCore),reason:(row.status==='unknown'?'已选流派未确认【':'未落实已选流派【')+entry.genre+'】：'+row.reason};
  });
 }

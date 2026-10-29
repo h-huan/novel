@@ -37,15 +37,13 @@ export function materializePremiseCategoryFit(value: any, selection: PremiseSele
   const errors = premiseCategoryFitIssues(value, selection);
   if (errors.length) throw new Error(errors.join('；'));
   if (!premiseCategoryCatalog(selection).length) return [];
-  if (value.categoryChecks.some((row: PremiseCategoryCheck) => row.status === 'unknown'))
-    throw new Error('分类与主线适配尚未确认，不能锁定题材');
-  return value.categoryChecks.filter((row: PremiseCategoryCheck) => row.status === 'missing').map((row: PremiseCategoryCheck) => {
+  return value.categoryChecks.filter((row: PremiseCategoryCheck) => row.status !== 'fulfilled').map((row: PremiseCategoryCheck) => {
     const entry = premiseCategoryCatalog(selection).find(item => item.ref === row.ref)!;
     const premise = selection.selected.find(item => item.premiseId === entry.premiseId)!;
     const seed = selection.pool.find(item => item.premiseId === entry.premiseId)!;
     return { kind: 'selection_fit' as const, premiseId: entry.premiseId, referencePremiseId: entry.premiseId,
       quote: String(premise.coreConflict), referenceQuote: String(seed.storyCore), field: 'storyCategory',
-      reason: `分类【${entry.category}】未落实到核心冲突与人物选择：${row.reason}` };
+      reason: row.status==='unknown' ? `分类【${entry.category}】未确认，禁止锁定：${row.reason}` : `分类【${entry.category}】未落实到核心冲突与人物选择：${row.reason}` };
   });
 }
 

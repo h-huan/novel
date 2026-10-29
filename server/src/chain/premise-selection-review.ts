@@ -77,15 +77,21 @@ export function materializePremiseSourceReview(value: unknown, selection: Premis
   const errors = premiseSourceReviewIssues(value, selection);
   if (errors.length) throw new Error('来源复核覆盖未完成：' + errors.join('；'));
   const sourceChecks = (value as { sourceChecks: PremiseSourceCheck[] }).sourceChecks;
-  const unknown = sourceChecks.filter(row => row.status === 'unknown');
-  if (unknown.length) throw new Error('来源事实仍未确认，不能锁定或当成已举证冲突去修故事：'
-    + unknown.map(row => row.ref + '：' + row.reason).join('；'));
+  // A complete "unknown" verdict is a failed Gate for that identity, not a
+  // malformed response that discards independent conclusions for every peer.
   const catalog = premiseSourceComparisonCatalog(selection);
   const issues: PremiseSelectionReview['issues'] = sourceChecks.filter(row => row.status === 'drift').map(row => {
     const item = catalog.find(entry => entry.ref === row.ref)!;
     return { kind: 'source_drift', premiseId: item.premiseId, referencePremiseId: item.premiseId,
       field: item.field, quote: item.candidate, referenceQuote: item.source, reason: row.reason };
   });
+  for(const row of sourceChecks.filter(row=>row.status==='unknown')){
+    const item=catalog.find(entry=>entry.ref===row.ref)!;
+    const candidate=selection.selected.find(p=>p.premiseId===item.premiseId)!;
+    issues.push({kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,
+      repairMode:'replace_from_pool',quote:String(candidate[item.field]||candidate.activeChoice||''),
+      referenceQuote:item.source,reason:'来源未确认，不能假定一致或已举证冲突：'+row.reason});
+  }
   const review: PremiseSelectionReview = { passed: issues.length === 0, issues, sourceChecks };
   const evidenceErrors = premiseSelectionReviewIssues(review, selection);
   if (evidenceErrors.length) throw new Error('来源复核证据无效：' + evidenceErrors.join('；'));
