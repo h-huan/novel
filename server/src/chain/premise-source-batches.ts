@@ -18,9 +18,45 @@ export function shouldBatchLargePremiseSourceReview(
 }
 export function premiseSourceBatches(selection: PremiseSelectionResult): PremiseSelectionResult[] {
   const size=readGenerationBudgets().sourceBatchSize;
-  const parts:Array<typeof selection.selected>=[];for(let start=0;start<selection.selected.length;start+=size)parts.push(selection.selected.slice(start,start+size));
-  return parts.map(selected => ({
-    ...selection, selected, pool: selection.pool.filter(row => selected.some(item => item.premiseId === row.premiseId)),
+  const items=selection.selected, count=items.length;
+  if(!count)return [];
+  // A slow large partition dictates wall time even when smaller peers finish
+  // in parallel. Balance actual transmitted story material while preserving
+  // consecutive premise order, each existing batch-size cap and EXACTLY the
+  // old number of independent review calls. No field or Gate is omitted.
+  const groups=Math.ceil(count/size);
+  const weights=items.map(item=>JSON.stringify({
+    selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId),
+  }).length);
+  const prefix=[0];
+  for(const weight of weights)prefix.push(prefix[prefix.length-1]+weight);
+  const costs=Array.from({length:groups+1},()=>Array<number>(count+1).fill(Infinity));
+  const boundaries=Array.from({length:groups+1},()=>Array<number>(count+1).fill(-1));
+  costs[0][0]=0;
+  for(let group=1;group<=groups;group++){
+    for(let end=group;end<=count;end++){
+      const minimumStart=Math.max(group-1,end-size);
+      for(let start=minimumStart;start<end;start++){
+        if(!Number.isFinite(costs[group-1][start]))continue;
+        const cost=Math.max(costs[group-1][start],prefix[end]-prefix[start]);
+        // On an exact tie retain the original full-first-batch partition.
+        if(cost<costs[group][end]||(cost===costs[group][end]&&start>boundaries[group][end])){
+          costs[group][end]=cost;boundaries[group][end]=start;
+        }
+      }
+    }
+  }
+  if(!Number.isFinite(costs[groups][count]))throw new Error('来源审核批次无法无损分组');
+  const parts:Array<typeof items>=[];
+  let end=count;
+  for(let group=groups;group>0;group--){
+    const start=boundaries[group][end];
+    if(start<0)throw new Error('来源审核批次边界无效');
+    parts.push(items.slice(start,end));end=start;
+  }
+  parts.reverse();
+  return parts.map(selected=>({
+    ...selection,selected,pool:selection.pool.filter(row=>selected.some(item=>item.premiseId===row.premiseId)),
   }));
 }
 

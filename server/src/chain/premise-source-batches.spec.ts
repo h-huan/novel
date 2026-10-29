@@ -79,6 +79,22 @@ describe('bounded premise source review batches',()=>{
  expect(merged.payoffChecks?.find(row=>row.ref==='S4.payoff')?.reversalCheck?.actionEvidenceRef).toBe('S4.activeChoice');
   expect(merged.issues[0].premiseId).toBe('D');expect(JSON.stringify(original)).toBe(before);
  });
+ it('balances uneven review material without increasing calls, changing order or dropping any source evidence',()=>{
+   const original=selection();
+   const heavy={...original.selected[0],activeChoice:'主角亲自完成不可替代的实际行动'.repeat(220)};
+   const input={...original,selected:[heavy,...original.selected.slice(1)]};
+   const batches=premiseSourceBatches(input);
+   expect(batches.map(batch=>batch.selected.length)).toEqual([2,3]);
+   expect(batches.flatMap(batch=>batch.selected.map(item=>item.premiseId))).toEqual(['A','B','C','D','E']);
+   expect(batches).toHaveLength(2);
+   const reports=batches.map(report);
+   const merged=mergePremiseSourceBatches(input,batches,reports.map((value,index)=>({
+     ...materializePremiseSourceReview(value,batches[index]),payoffChecks:value.payoffChecks,
+   })));
+   expect(merged.sourceChecks).toHaveLength(50);
+   expect(merged.payoffChecks?.map(row=>row.ref)).toEqual(['S1.payoff','S2.payoff','S3.payoff','S4.payoff','S5.payoff']);
+   expect(merged.passed).toBe(true);
+ });
  it('rejects missing batches, missing or duplicate checks and unknown outcomes',()=>{
   const original=selection(),batches=premiseSourceBatches(original);
   const reviews=batches.map(batch=>materializePremiseSourceReview(report(batch),batch));
