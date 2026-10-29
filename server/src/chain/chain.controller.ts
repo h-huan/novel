@@ -5601,12 +5601,19 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const reviewedPremiseCount=normalizedSelection.selected.length;
         normalizedSelection={...normalizedSelection,
           selectionAudit:{...normalizedSelection.selectionAudit,
+            initialPreselectionCount:initialSelection.selected.length,
+            initialPreselectionIds:initialSelection.selected.map(item=>String(item.premiseId)),
+            preselectionCapacityTarget:preselectionTarget,
+            preselectionAfterReview:reviewedPremiseCount,
+            preselectionCapacityGap:Math.max(0,preselectionTarget-reviewedPremiseCount),
             reviewedBeforeCardLock:reviewedPremiseCount,
             cardSlotsLocked:reviewedPremiseCount,
             reviewedReservePremiseIds:[],
             unverifiedSurplusCount:0}};
-        this.logger.log('idea-discover: 独立审核后保留 '+reviewedPremiseCount
-          +' 个题材，全部进入并发完整卡生成；最终仅交付 '+requestedCount+' 个合格优选结果');
+        this.logger.log('idea-discover: 独立审核后保留 '+reviewedPremiseCount+'/'+preselectionTarget
+          +' 个预选题材（入选前='+initialSelection.selected.length+'；审核后冗余='+Math.max(0,reviewedPremiseCount-requestedCount)
+          +'；审核容量缺口='+Math.max(0,preselectionTarget-reviewedPremiseCount)
+          +'），全部进入并发完整卡生成；最终仅交付 '+requestedCount+' 个合格优选结果');
         this.logger.log('idea-discover: 固定候选池选优 wallMs=' + selectionWallMs
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
           + '，有效池=' + candidatePool.length + '/' + premisePoolSize
@@ -6028,6 +6035,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: selectedPremises.length,
+        preselectionCapacityTarget:ideaPreselectionCapacity(requestedCount,premiseDiscovery.pool.length),
+        preselectionCapacityGap:Math.max(0,ideaPreselectionCapacity(requestedCount,premiseDiscovery.pool.length)-selectedPremises.length),
         preselectionSurplus: Math.max(0,selectedPremises.length-requestedCount),
         independentlyVettedPremises:selectedPremises.length,
         fullCardCandidates:selectedPremises.length,
