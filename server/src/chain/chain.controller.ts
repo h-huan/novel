@@ -5567,7 +5567,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             variedCategories ? discoveryCategories : [dto.storyCategory],
             buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
               + ideaDiscoveryAuthorContext(dto)
-              + '\n【本次选择约束】' + autoSelectionRules + '；' + submissionRule
+              // Source/category/genre/causal and overlap reviews inspect the
+              // already fixed author settings and actual story mechanisms.
+              // Automatic option dictionaries were used during pool/selection;
+              // retransmitting the full unchosen lists to EVERY review batch
+              // adds prompt tokens but no reviewable premise evidence.
+              // Keep all manually selected author constraints, official
+              // category standards and exact genre definitions below.
               + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
               + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre),
             dto.webNovelGenre,
