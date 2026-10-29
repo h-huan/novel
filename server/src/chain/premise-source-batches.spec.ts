@@ -32,7 +32,7 @@ describe('bounded premise source review batches',()=>{
   expect(premiseReselectionPlan(original,reviewed).repairSlots).toHaveLength(0);
   expect(premiseReselectionPlan(original,reviewed).availableCandidates.every(row=>row.premiseId!=='A')).toBe(true);
   expect(reviewed.sourceChecks!.filter(row=>row.ref.startsWith('S2.')).every(row=>row.status==='preserved')).toBe(true);
-  expect(reviewed.sourceChecks!.find(row=>row.ref==='S1.activeChoice')?.reason).toContain('尚未核查');
+  expect(reviewed.sourceChecks!.find(row=>row.ref==='S1.activeChoice')?.reason).toContain('审核证据跨题材引用');
   expect(reviewed.payoffChecks?.find(row=>row.ref==='S2.payoff')?.status).toBe('supported');
  });
  it('keeps unattributable review rows as a protocol failure',()=>{
