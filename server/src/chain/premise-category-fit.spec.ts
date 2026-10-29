@@ -114,8 +114,8 @@ it('retains every selected category standard and all surrounding instructions wh
     {category:'都市日常',standard:'都市日常要有生活选择和后果'},
     {category:'玄幻仙侠',standard:'仙侠规则必须限制能力与代价'},
   ];
-  const standard='平台准则\\n【与完整卡一致的分类标准】'+JSON.stringify(rules)
-    +'\\n【服务器分类编号目录】保留原来全部类别的身份核查\\n【流派定义】所有原始流派标准保留';
+  const standard='平台准则\n【与完整卡一致的分类标准】'+JSON.stringify(rules)
+    +'\n【服务器分类编号目录】保留原来全部类别的身份核查\n【流派定义】所有原始流派标准保留';
   const subset=scopePremiseReviewCategoryStandards(standard,[
     {storyCategory:'年代'}, {storyCategory:'玄幻仙侠'},
   ]);
