@@ -5232,23 +5232,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               continue;
             }
             const item = raw as Record<string, unknown>;
-            // The same source-authorized fictional aliases already normalize
-            // complete cards. Apply them to UNCONFIRMED seeds before the naming
-            // Gate as well: one repairable real-brand mention must not cost an
-            // otherwise valid original-pool identity. Unknown names still fail.
-            let narrative: Record<string, any>;
-            try {
-              narrative = normalizeGeneratedFictionNames({
-                workingTitle: String(item.workingTitle || '').trim(),
-                storyCore: String(item.storyCore || '').trim(),
-              });
-            } catch {
-              stats.invalidNaming += 1;
-              poolFilterTotals.invalidNaming += 1;
-              continue;
-            }
-            const workingTitle = String(narrative.workingTitle || '').trim();
-            const storyCore = String(narrative.storyCore || '').trim();
+            const workingTitle = String(item.workingTitle || '').trim();
+            const storyCore = String(item.storyCore || '').trim();
             const titleKey = normalizeTitle(workingTitle);
             const coreKey = normalizeTitle(storyCore);
             if (workingTitle.length < 2 || storyCore.length < 20 || !titleKey || !coreKey
