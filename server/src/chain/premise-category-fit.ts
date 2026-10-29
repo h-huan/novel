@@ -58,3 +58,27 @@ export function premiseCategoryReviewDirective(selection: PremiseSelectionResult
     + 'fulfilled须提供本题材已选展开的evidenceRef；missing须指出具体分类机制缺失，不改题材或分类。'
     + (includeEvidenceCatalog ? '\n【已选展开证据目录】' + JSON.stringify(premiseGenreEvidenceCatalog(selection).map(({ id, field, premiseId }) => ({ id, field, premiseId }))) : '\n分类evidenceRef使用本次同一请求中已列出的完整流派字段编号目录，原文、编号与审核规则全部保留，不重复展开。');
 }
+
+/** Transmit only the official category definitions actually used by this
+ * independent source-review batch. The full verified standards remain in the
+ * controller and in the model-independent quality Gate; unrelated categories
+ * cannot change whether this batch's specific stories fit their own genre. */
+export function scopePremiseReviewCategoryStandards(
+  standard: string, selected: readonly Record<string, unknown>[],
+): string {
+  const marker='\n【与完整卡一致的分类标准】';
+  const markerAt=standard.lastIndexOf(marker);
+  if(markerAt<0)return standard;
+  const from=markerAt+marker.length,until=standard.indexOf('\n',from);
+  if(until<0)return standard;
+  let definitions: unknown;
+  try { definitions=JSON.parse(standard.slice(from,until)); } catch { return standard; }
+  if(!Array.isArray(definitions)||!definitions.every(row=>row&&typeof row==='object'
+    &&typeof (row as any).category==='string'))return standard;
+  const categories=new Set(selected.map(row=>String(row.storyCategory||'')));
+  const relevant=definitions.filter(row=>categories.has(String(row.category)));
+  // A malformed or missing category cannot silently lose a standard.
+  if(!relevant.length||categories.size>new Set(relevant.map(row=>String(row.category))).size
+    ||relevant.length===definitions.length)return standard;
+  return standard.slice(0,from)+JSON.stringify(relevant)+standard.slice(until);
+}
