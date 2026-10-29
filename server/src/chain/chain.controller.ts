@@ -6438,7 +6438,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const result=await this.llmCallWithRetry<any>('锁定前原池一次汇总重选',
           standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
           +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(premiseReselectionPromptSelection(selected.selected,ids))
-          +'\n【本次独立缺陷（原文已在当前选择及原池中，保留每条独立结论和理由）】'+JSON.stringify(reviewForPrompt)
+          +'\n【本次独立缺陷】'+JSON.stringify(reviewForPrompt)
           +(rejectedHistory.some(row=>!ids.has(row.premiseId)
               &&!selected.selected.some(item=>String(item.premiseId)===row.premiseId))
             ?'\n【此前独立复核已确认的失败路径（候选不得重用同类缺失条件）】'
