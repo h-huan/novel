@@ -201,6 +201,12 @@ it('fills three independently rejected shortlist positions from the fixed pool b
   });
   controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
     expect(prompt).toContain('replacements恰好3项');
+    const evidencePrompt=prompt.split('【本次独立缺陷（原文已在当前选择及原池中，保留每条独立结论和理由）】')[1]
+      ?.split('【必须处理的位置及模式】')[0];
+    expect(evidencePrompt).toBeDefined();
+    expect(evidencePrompt).not.toContain('referenceQuote');
+    expect(evidencePrompt).not.toContain('"quote":');
+    expect(evidencePrompt).toContain('"reason"');
     const data={replacements:['F','G','H'].map((id,index)=>({
       replacesPremiseId:id,premise:premise(['I','J','K'][index]),
     }))};
