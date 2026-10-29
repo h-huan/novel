@@ -317,30 +317,28 @@ it('generates a complete idea batch through preselection plus structuring and re
   // 同配置并发请求仅共享一条生成链；五张卡的独立语义复核按原有批大小并发，仍以其它卡为对照。
   expect(distinctResult, 'a request with different excludeDetails must not reuse the first result')
     .toMatchObject({ success: true, totalIdeas: 5 });
-  expect(partialResult, 'short pool plus one failed card must still return only the three fully qualified cards')
-    .toMatchObject({ success: false, status: 'incomplete', totalIdeas: 3 });
-  expect(partialResult.ideas.map((idea: any) => idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
-  expect(partialResult.qualifiedIdeas.map((idea: any) => idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
-  expect(partialResult.warning).toContain('缺额2张');
+  expect(partialResult, 'three qualified cards cannot complete a request for five')
+    .toMatchObject({ success: false, status: 'incomplete', totalIdeas: 0 });
+  expect(partialResult.ideas).toEqual([]);
+  expect(partialResult.qualifiedIdeas).toEqual([]);
+  expect(partialResult.error).toContain('锁定前仅保留');
   expect(partialResult.appealGate).toMatchObject({
     premisePoolTarget: 15, premisePoolSize: 4, premisePoolTargetMet: false,
-    premiseSelected: 4, generated: 3, qualified: 3, returned: 3, requested: 5,
-    shortfall: 2, partial: true, minimumDeliverableCount: 3,
+    premiseSelected: 4, generated: 0, qualified: 0, returned: 0, requested: 5,
+    minimumDeliverableCount: 5, stopReason: 'preselection_shortfall',
   });
   expect(partialResult.appealGate.selectionAudit.poolGeneration).toMatchObject({
     supplementAttempted: true, supplementAdded: 0, batchCount: 3,
   });
-  expect(partialResult.appealGate.structuringErrors).toEqual([
-    expect.objectContaining({ sourcePremiseId: 'P2', error: expect.stringContaining('测试夹具模拟第2张完整卡结构化失败') }),
-  ]);
-  expect(realLLM.generate).toHaveBeenCalledTimes(40);
+  expect(partialResult.appealGate.structuringErrors).toEqual([]);
+  expect(realLLM.generate).toHaveBeenCalledTimes(35);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
     ...Array(7).fill('idea_premise_pool_generation'),
     ...Array(3).fill('idea_premise_selection'),
     ...Array(6).fill('idea_premise_source_drift_review'),
     ...Array(3).fill('idea_premise_overlap_review'),
-    ...Array(14).fill('idea_card_structure'),
-    ...Array(7).fill('idea_presentation_review'),
+    ...Array(10).fill('idea_card_structure'),
+    ...Array(6).fill('idea_presentation_review'),
   ].sort());
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
