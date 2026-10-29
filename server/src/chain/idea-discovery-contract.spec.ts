@@ -717,3 +717,21 @@ describe('candidate seed structural evidence prevents downstream rescue',()=>{
   expect(premiseSeedFactIssues(front+'【必要条件】记录须经过有权核查人员确认并作出书面决定后才产生效果。'+end)).toEqual([]);
  });
 });
+
+// Regression from 2026-10-29 real 5/15/5/3 trace: a legitimate preselection
+// surplus is only useful when the original story and its full card both keep
+// the same actor decisions, actual evidence and terminal status.
+describe('source-to-card payoff continuity in the existing selection call',()=>{
+  it('tests opposing actors and provisional results before selecting an apparently mature premise',()=>{
+    const prompt=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
+    expect(prompt).toContain('对手按已写性格可能采取的拒绝、拖延、不开门');
+    expect(prompt).toContain('暂停、调查、受理与最终撤销、退还、追责');
+    expect(prompt).toContain('旧录音只证明其实际记录过的旧事件');
+  });
+  it('does not upgrade a stopped process or past recording to a new completed outcome during card structuring',()=>{
+    const prompt=ideaCardStructuringDirective(selectedPremise('P1'),[],false);
+    expect(prompt).toContain('暂缓/中止、调查和未来目标');
+    expect(prompt).toContain('对方必然答应');
+    expect(prompt).toContain('任何录音、记录或材料须严格说明它实际证明的是哪一次事件');
+  });
+});
