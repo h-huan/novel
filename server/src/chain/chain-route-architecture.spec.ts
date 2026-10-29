@@ -56,7 +56,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
     expect(source).toContain("success: false, status: 'incomplete', ideas: [], totalIdeas: 0");
     expect(source).toContain('qualifiedIdeas: acceptedWithAudit, error, appealGate');
-    expect(source).toContain('先按causalPlan核查每个关键阶段结果的全部必要条件');
+    expect(source).toContain('causalPlan每个关键结果的必要条件与整体反转兑现核对');
+    expect(source).toContain('分类机制和手动流派落实');
     expect(source).toContain('reviewChangedPremiseSources(');
     expect(source).toContain("generationTasks.run('discovery', discoveryRequestId");
     expect(source).toContain("generationTasks.cancel('discovery', requestId)");

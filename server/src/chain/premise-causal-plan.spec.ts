@@ -204,7 +204,7 @@ describe('plan critical prerequisites before full story cards',()=>{
   it('checks all transitions inside the existing source call, without a new review step',async()=>{
     const s=selection(),c=Object.create(ChainController.prototype) as any,{passed,issues,...value}=report(s),budget={remaining:1};
     c.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
-      expect(prompt).toContain('原池和展开同样漏写条件也须返回gap');expect(prompt).toContain('S1.causalPlan[1]');
+      expect(prompt).toContain('原池与展开同样漏写关键成立条件也须返回gap');expect(prompt).toContain('S1.causalPlan[1]');
       expect(options.validate(value)).toBe(true);
       const old={...value,payoffChecks:value.payoffChecks.map(({links,...row})=>row)};
       expect(options.validate(old)).toBe(true);
