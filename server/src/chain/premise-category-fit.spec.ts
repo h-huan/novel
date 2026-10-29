@@ -64,7 +64,7 @@ describe('category checked before complete cards', () => {
     missing.categoryChecks[0].status = 'missing'; missing.categoryChecks[0].reason = '救援和举报构成主线，恋爱只是背景';
     expect(materializePremiseCategoryFit(missing, s)).toEqual([expect.objectContaining({ kind: 'selection_fit', premiseId: 'A', field: 'storyCategory' })]);
     missing.categoryChecks[0].status = 'unknown';
-    expect(() => materializePremiseCategoryFit(missing, s)).toThrow('尚未确认');
+    expect(materializePremiseCategoryFit(missing,s)).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'A',reason:expect.stringContaining('未确认')})]);
   });
   it('integrates into the same source call and rejects omitted category evidence', async () => {
     const c = Object.create(ChainController.prototype) as any, s = withCategories();

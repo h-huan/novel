@@ -282,7 +282,10 @@ describe('premise selection before identity lock', () => {
     expect(premiseSourceReviewIssues({sourceChecks},initial)).toEqual([]);
     expect(premiseSourceReviewIssues({sourceChecks:sourceChecks.slice(1)},initial).length).toBeGreaterThan(0);
     const unknown={sourceChecks:sourceChecks.map((row,index)=>index?row:{...row,status:'unknown'})};
-    expect(()=>materializePremiseSourceReview(unknown,initial)).toThrow('来源事实仍未确认');
+    const result=materializePremiseSourceReview(unknown,initial);
+    expect(result.passed).toBe(false);
+    expect(result.issues).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'A',repairMode:'replace_from_pool'})]);
+    expect(result.sourceChecks?.[0].status).toBe('unknown');
     expect(premiseSelectionReviewIssues(failure,initial)).toEqual([]);
     expect(failure.passed).toBe(false);
     initial.selected[0].differentiation='他明确声称自己的选择与别人不同';

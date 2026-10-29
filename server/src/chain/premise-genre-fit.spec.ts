@@ -29,7 +29,7 @@ describe('manual genre proof contract',()=>{
  it('retains actual missing and unknown states under numbered evidence',()=>{
   const batch=selection(),value=fit(batch) as any;value.genreChecks[0]={ref:'S1.genre1',status:'missing',reason:'当前隐藏能力没有改变任何误判与人物行动选择'};
   expect(materializePremiseGenreFit(value,batch,genres)[0].kind).toBe('selection_fit');
-  value.genreChecks[0].status='unknown';expect(()=>materializePremiseGenreFit(value,batch,genres)).toThrow('尚未确认');
+  value.genreChecks[0].status='unknown';expect(materializePremiseGenreFit(value,batch,genres)).toEqual([expect.objectContaining({kind:'selection_fit',reason:expect.stringContaining('未确认')})]);
  });
  it('requires every chosen genre on every card, rejecting omissions, duplicates and wrong-card evidence',()=>{
   const batch=selection(),value=fit(batch);expect(value.genreChecks).toHaveLength(15);
@@ -49,7 +49,7 @@ describe('manual genre proof contract',()=>{
  });
  it('blocks unknown conclusions without fabricating a story conflict; random selection needs no manual proofs',()=>{
   const batch=selection(),value=fit(batch);value.genreChecks[0].status='unknown';
-  expect(()=>materializePremiseGenreFit(value,batch,genres)).toThrow('尚未确认');expect(materializePremiseGenreFit({},batch,[])).toEqual([]);
+  expect(materializePremiseGenreFit(value,batch,genres)).toEqual([expect.objectContaining({kind:'selection_fit',reason:expect.stringContaining('未确认')})]);expect(materializePremiseGenreFit({},batch,[])).toEqual([]);
  });
  it('cannot accept preserved source checks without the new fit proofs',async()=>{
   const batch=premiseSourceBatches(selection())[0],c=Object.create(ChainController.prototype) as any;

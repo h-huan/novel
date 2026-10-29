@@ -38,7 +38,7 @@ it('audits reversal success independently from later costs within the existing p
    reason:'主角交付录音和地点，警方核对之后实际到场救人，形成具体行动条件'}};
  expect(premisePayoffReviewIssues({payoffChecks:[supported]},input).join('')).toContain('反转阶段');
  expect(premisePayoffReviewIssues({payoffChecks:[ok]},input)).toEqual([]);
- expect(premisePayoffReviewIssues({payoffChecks:[{...ok,reversalCheck:{...ok.reversalCheck,actionEvidenceRef:'S1.reversalEffect'}}]},input).join('')).toContain('独立操作');
+ expect(premisePayoffReviewIssues({payoffChecks:[{...ok,reversalCheck:{...ok.reversalCheck,actionEvidenceRef:'S1.reversalEffect'}}]},input).join('')).toContain('逐字锚点');
  const inReversal={...ok,reversalCheck:{...ok.reversalCheck,actionEvidenceRef:'S1.reversalEffect',
    actionEvidenceQuote:'警方核实收到的录音和具体地点后实际到场'}};
  expect(premisePayoffReviewIssues({payoffChecks:[inReversal]},input)).toEqual([]);
