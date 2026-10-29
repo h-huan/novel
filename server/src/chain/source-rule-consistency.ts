@@ -6,6 +6,20 @@
  * They require stable fact/rule identity (source-fact-consistency.ts) or semantic
  * cross-source review. No novel-specific nouns or mechanisms belong in this file.
  */
+/** Bind only a genuinely confirmed name; an anonymous narrator or role
+ * description must never become a mandatory personal name in the world plan. */
+export function confirmedWorldProtagonistName(protagonist: unknown): string {
+  const raw = typeof protagonist === 'string' ? protagonist.trim() : '';
+  if (!raw) return '';
+  const explicitlyNamed = /^我(?:叫|名叫)([\p{Script=Han}]{1,4})(?=[，,。：:；;\s（(]|$)/u.exec(raw);
+  if (explicitlyNamed) return explicitlyNamed[1];
+  const token = raw.split(/[，,。：:；;\s（(]/)[0].trim();
+  if (/^(?:我|本人|主角|叙述者|匿名主角|无名主角|未命名主角|第一人称主角)$/.test(token)
+    || /^我(?:是|在|曾|被|要|想|有|没|从|正|只|以|靠|做|原|后来)/.test(token)
+    || /^(?:一名|一个|这位|这名|某位)/.test(token)) return '';
+  return token;
+}
+
 export function describeWorldSourceCandidate(value: unknown, protagonistName = ''): string[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return ['世界观未返回JSON对象'];
   const world = value as Record<string, unknown>;
