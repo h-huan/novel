@@ -6168,8 +6168,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // review; repeating their full manuals in the overlap model call wastes
     // preselection time without contributing overlap evidence. Retain the
     // platform, author-selected dimensions, actual stories and GEN-002 rules.
-    const reviewStandard = mode==='overlap'
-      ? standard.split('\n【与完整卡一致的分类标准】',1)[0]
+    // The caller appends this server-owned marker after any custom platform
+    // note. Use the LAST occurrence so author text cannot accidentally cut
+    // off the locked settings or platform contract.
+    const optionalStandardBoundary='\n【与完整卡一致的分类标准】';
+    const standardBoundary=standard.lastIndexOf(optionalStandardBoundary);
+    const reviewStandard=mode==='overlap'&&standardBoundary>=0
+      ? standard.slice(0,standardBoundary)
       : standard;
     const result = await runReview(()=>this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
       reviewStandard + '\n按已注入GEN-002锁定前继承与差异规则执行。'

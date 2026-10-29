@@ -550,6 +550,14 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     await expect(c.reviewPremiseSelection(input,standard,'source_drift',undefined,true)).rejects.toThrow();
     expect(prompts[1]).toContain('完整分类规则及证据目录');
     expect(prompts[1]).toContain('完整流派规则');
+    // A custom platform note may legitimately contain the same literal text
+    // before the actual, server-appended category-manual separator.
+    const prefix='用户自定义说明\n【与完整卡一致的分类标准】这只是原话';
+    await c.reviewPremiseSelection(input,prefix+'\n'+standard,'overlap');
+    expect(prompts[2]).toContain('这只是原话');
+    expect(prompts[2]).toContain('第一人称/扮猪吃虎');
+    expect(prompts[2]).not.toContain('完整分类规则及证据目录');
+
   });
   it('rejects a diversity result delivered to the source-only audit', async () => {
     const c=Object.create(ChainController.prototype) as any;
