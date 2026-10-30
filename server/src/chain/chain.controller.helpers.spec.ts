@@ -1764,6 +1764,10 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
     }
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
+    // Parallel batches cannot see one another: preserve complementary actual
+    // strategy search directions without adding calls or reducing any Gate.
+    expect(poolCalls[0][0].prompt).toContain('现场行动、关系博弈、资源选择');
+    expect(poolCalls[1][0].prompt).toContain('规则权限、信息误导、交易选择');
     expect(poolCalls.every(([request]:any[]) =>
       request.prompt.includes('【每项分类核心机制：生成与选优使用与审核相同的标准】')
       && request.prompt.includes('"webNovelGenre":["悬疑推理"]')
