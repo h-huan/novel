@@ -5042,9 +5042,17 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         : submissionRequired
           ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
+      // One verified standard for original and supplemental lightweight candidates.
+      const preselectionAuditStandard=buildPlatformStyleDirective(dto.platform,dto.storyType,dto.customPlatformNote)
+        +ideaDiscoveryAuthorContext(dto)
+        +'\n【与完整卡一致的分类标准】'+JSON.stringify(categoryStandards)
+        +premiseCategoryIdentityDirective(discoveryCategories)
+        +'\n【流派定义，与生成阶段一致】'
+        +dimensionGuidesText('genre',dto.webNovelGenre.length?dto.webNovelGenre:autoOptions.webNovelGenre);
+
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
       const minimumPremiseSelectionCount = requestedCount;
-      const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>> } = {}) => {
+      const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>>; targetCount?: number; minimumCount?: number } = {}) => {
         const excludeText = initialExcludes.length
           ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
           : '';
@@ -5112,8 +5120,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         ].join('\n');
         const minimumSelectedCount = minimumSelectedCountForPool(candidatePool.length);
         const selectionDirective = ideaPremiseSelectionDirective(
-          dto.storyType, ideaPreselectionCapacity(requestedCount,candidatePool.length),
-          candidatePool.length, false, minimumSelectedCount, true,
+          dto.storyType, options.targetCount ?? ideaPreselectionCapacity(requestedCount,candidatePool.length),
+          candidatePool.length, false, options.minimumCount ?? minimumSelectedCount, true,
         );
         const promptDirective = promptPhase === 'pool' ? poolDirective : selectionDirective;
         const promptSchema = promptPhase === 'pool'
@@ -5571,17 +5579,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           normalizedSelection = await this.reconcilePremiseSelection(
             initialSelection, preselectionTarget, premisePoolSize,
             variedCategories ? discoveryCategories : [dto.storyCategory],
-            buildPlatformStyleDirective(dto.platform, dto.storyType, dto.customPlatformNote)
-              + ideaDiscoveryAuthorContext(dto)
-              // Source/category/genre/causal and overlap reviews inspect the
-              // already fixed author settings and actual story mechanisms.
-              // Automatic option dictionaries were used during pool/selection;
-              // retransmitting the full unchosen lists to EVERY review batch
-              // adds prompt tokens but no reviewable premise evidence.
-              // Keep all manually selected author constraints, official
-              // category standards and exact genre definitions below.
-              + '\n【与完整卡一致的分类标准】' + JSON.stringify(categoryStandards) + premiseCategoryIdentityDirective(discoveryCategories)
-              + '\n【流派定义，与生成阶段一致】' + dimensionGuidesText('genre', dto.webNovelGenre.length ? dto.webNovelGenre : autoOptions.webNovelGenre),
+            preselectionAuditStandard,
             dto.webNovelGenre,
             { reviews: sourceCompletionBudget, reselection: reselectionCompletionBudget }, requestedCount,
           );
