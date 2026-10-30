@@ -5628,12 +5628,10 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         // which pass. There is no additional generation/review call and the
         // quality standard is unchanged. A genuine zero-survivor set still fails.
         if (normalizedSelection.selected.length === 0) {
-          throw failWithPoolAudit(new Error('锁定前独立审核后没有合格题材，无法进入完整卡质量验收。'),
-            'preselection_review','preselection_shortfall',{
-              selectionWallMs,preselectionReviewWallMs,
-              preselectedPremises:[],premiseSelected:0,
-              selectionAudit:normalizedSelection.selectionAudit,
-            });
+          // A zero-survivor preselection cannot produce cards, but the
+          // server-owned one-wave LIGHTWEIGHT refill may still rescue valid
+          // unused seeds. Never present the rejected originals as approved.
+          this.logger.warn('idea-discover: 首次选前审核0个合格候选；进入同一有界轻量补足路径，全部旧失败身份不得复用。');
         }
         if (normalizedSelection.selected.length < minimumPremiseSelectionCount)
           this.logger.warn('idea-discover: 锁定前仅有 '+normalizedSelection.selected.length
@@ -6029,6 +6027,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             ?selectionAudit.initialPreselectionIds.map(String):[]),
           ...(Array.isArray(selectionAudit?.excludedPremiseIds)
             ?selectionAudit.excludedPremiseIds.map(String):[]),
+          ...(Array.isArray(selectionAudit?.rejectedHistory)
+            ?selectionAudit.rejectedHistory.map((row:any)=>String(row?.premiseId||'')):[]),
         ]);
         const unusedSeeds=premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId)));
         const desiredSupplement=Math.max(missingAfterFirstGate,
@@ -6649,7 +6649,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     }
     if (repairPlan.availableCandidates.length < recoverySlots.length) {
       const retained = retainReviewedPremises(initial, initialReview);
-      if (!retained.selection.selected.length) throw new Error('原池没有足够可用的不同题材用于问题位置重选，且没有可保留的已复核题材；不扩大池、不重复下游修复。');
+      if (!retained.selection.selected.length)this.logger?.warn('原池没有可保留的独立审核合格题材；移交后续一次有界轻量候选补足，不放行任何失败旧身份。');
       this.logger?.warn(`锁定前原池不足：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，问题项隔离，不凑数。`);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
         partial: true, excludedPremiseIds: retained.excludedPremiseIds, reasons: retained.reasons, completeCardGatePending: true } };
@@ -6772,7 +6772,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const isolatedIds=[...unresolvedIds,...rejectedExtraIds];
     if (isolatedIds.length) {
       selected = { ...selected, selected: selected.selected.filter(item=>!isolatedIds.includes(String(item.premiseId))) };
-      if (!selected.selected.length) throw new Error(reselectionStopReason || '没有完成重选且可独立复核的题材');
+      if (!selected.selected.length)this.logger?.warn('锁定前所有原选项均被隔离；禁止重新接受失败旧身份，改由一次轻量候选补足决定是否仍能交付。');
       this.logger?.warn('锁定前隔离 '+isolatedIds.join('、')+'（未完成必需位置 '
         +unresolvedIds.length+'，无需继续修复的冗余候选 '+rejectedExtraIds.length
         +'），仅复核剩余 '+selected.selected.length+'/'+deliveryCount+' 个交付题材。');
@@ -6824,7 +6824,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           JSON.stringify({ kind: 'premise_selection_rejected', initialReview, finalReview, selected: selected.selected }), message);
       } catch (recordError) { this.logger?.warn('筛选终检失败记录写入失败：' + String(recordError)); }
       const retained = retainReviewedPremises(selected, finalReview, repairPlan.protectedItems.map(item => String(item.premiseId)));
-      if (!retained.selection.selected.length) throw new Error(message);
+      if (!retained.selection.selected.length)this.logger?.warn('锁定前终检没有合格原选项；保留真实失败证据供新的轻量候选规避，不将旧审查结论改为通过。');
       this.logger?.warn(`锁定前重选复核部分未通过：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，隔离 ${retained.excludedPremiseIds.join('、')}；继续完整卡原有质量验收，不补生或重复重选。`);
       const retainedEvidence=retainPremiseReviewEvidence(selected,finalReview,retained.selection);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true,
