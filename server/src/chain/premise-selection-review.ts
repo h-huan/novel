@@ -87,8 +87,14 @@ export function materializePremiseSourceReview(value: unknown, selection: Premis
     return { kind: 'source_drift', premiseId: item.premiseId, referencePremiseId: item.premiseId,
       field: item.field, quote: item.candidate, referenceQuote: item.source, reason: row.reason };
   });
+  const reportedProtocolFailures = new Set<string>();
   for(const row of sourceChecks.filter(row=>row.status==='unknown')){
     const item=catalog.find(entry=>entry.ref===row.ref)!;
+    // A single broken source-report contract creates one failed Gate for this
+    // premise, not ten identical story-defect warnings. Full unknown receipts
+    // remain in sourceChecks for forensic auditing and are never passed.
+    if(row.protocolIncomplete&&reportedProtocolFailures.has(item.premiseId))continue;
+    if(row.protocolIncomplete)reportedProtocolFailures.add(item.premiseId);
     const candidate=selection.selected.find(p=>p.premiseId===item.premiseId)!;
     issues.push({kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,
       repairMode:'replace_from_pool',...(row.protocolIncomplete ? {protocolIncomplete:true} : {}),
