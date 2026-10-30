@@ -4,7 +4,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import {ChainController} from './chain.controller';
 import {SELECTED_PREMISE_FIELDS,normalizePremiseSelectionPayload} from './idea-discovery-contract';
-import {premiseSourceComparisonCatalog,materializePremiseSourceReview,premiseReselectionPlan} from './premise-selection-review';
+import {premiseSourceComparisonCatalog,materializePremiseSourceReview,premiseReselectionPlan,overlapReviewSelectionView} from './premise-selection-review';
 import {premiseSourceBatches,mergePremiseSourceBatches,premiseSourceCallBudget,reserveReviewBatchBudget,shouldBatchLargePremiseSourceReview} from './premise-source-batches';
 import {quarantineIncompletePremiseReviews} from './premise-review-quarantine';
 
@@ -15,6 +15,15 @@ const selection=()=>normalizePremiseSelectionPayload({
 const report=(batch:ReturnType<typeof selection>)=>({payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'此前实际行动与升级支持当前反转的成立条件'},reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开事实兼容原池所述的行动方向与代价'}))});
 
 describe('bounded premise source review batches',()=>{
+ it('overlap review keeps actual expanded mechanics without a second source story copy',()=>{
+  const source=selection();
+  const projected=overlapReviewSelectionView(source.selected);
+  expect(projected).toHaveLength(source.selected.length);
+  expect(projected.every(item=>!('storyCore' in item)&&!('causalPlan' in item))).toBe(true);
+  expect(projected.map(item=>item.activeChoice)).toEqual(source.selected.map(item=>item.activeChoice));
+  expect(projected.map(item=>item.payoff)).toEqual(source.selected.map(item=>item.payoff));
+ });
+
  it('isolates one malformed premise receipt while keeping a peer verdict and without another review call',async()=>{
   const c=Object.create(ChainController.prototype) as any;
   const original={...selection(),selected:selection().selected.slice(0,2)};
