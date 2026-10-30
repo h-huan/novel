@@ -74,6 +74,24 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
  }
  const planPending=pending.filter(row=>priorById.has(String(row.premiseId)));
  const fullPending=pending.filter(row=>!priorById.has(String(row.premiseId)));
+ // When ALL changed identities only corrected their causal citation index,
+ // the earlier independent source/category/genre verdict is still complete.
+ // Rechecking the unchanged ten fields per card via the full source model
+ // wastes the slowest preselection phase. Re-audit every changed payoff link
+ // once with the EXISTING review allowance and retain the original source
+ // evidence; never reuse a negative payoff verdict as a pass.
+ if(reviewPlanOnly&&sharedBudget&&pending.length>0&&planPending.length===pending.length){
+  const unchanged=hits.filter((row):row is Receipt=>!!row);
+  const pendingSelection:PremiseSelectionResult={...selection,selected:pending,
+   pool:selection.pool.filter(seed=>pending.some(item=>item.premiseId===seed.premiseId))};
+  const previous=planPending.map(item=>priorById.get(String(item.premiseId))!);
+  const independentBaseline=mergePremiseSourceBatches(pendingSelection,
+   previous.map(row=>row.selection),previous.map(row=>row.review));
+  const checked=await reviewPlanOnly(pendingSelection,independentBaseline,sharedBudget);
+  return mergePremiseSourceBatches(selection,
+   [...unchanged.map(row=>row.selection),pendingSelection],
+   [...unchanged.map(row=>row.review),checked]);
+ }
  const batchSize=readGenerationBudgets().sourceBatchSize;
  const grouping=readGenerationBudgets();
  const existingCallFloor=(grouping.reviewGroupingMode===0&&pending.length<4)
