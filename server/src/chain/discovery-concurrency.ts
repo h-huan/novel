@@ -12,7 +12,10 @@ export function adaptiveDiscoveryConcurrency(
   logicalCores: availableParallelism(), freeBytes: freemem(),
  },
 ): number {
- if (!Number.isInteger(workItems) || workItems < 1) throw Error('并发任务数量必须为正整数');
+ if (!Number.isInteger(workItems) || workItems < 0) throw Error('并发任务数量不能为负数');
+ // Zero independent work is normal when all checks were cached or none were
+ // applicable. Give the map helper a valid inert limit; it will launch none.
+ if (workItems===0) return 1;
  const cores=Number.isFinite(snapshot.logicalCores)&&snapshot.logicalCores>0?snapshot.logicalCores:1;
  const free=Number.isFinite(snapshot.freeBytes)&&snapshot.freeBytes>0?snapshot.freeBytes:0;
  // Reserve at least 35% of usable logical processors for GUI, system and
