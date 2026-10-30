@@ -34,7 +34,8 @@ describe('bounded premise source review batches',()=>{
   expect(recovery.repairSlots[0]).toMatchObject({replacesPremiseId:'A',mode:'replace_from_pool'});
   expect(recovery.availableCandidates.every(row=>row.premiseId!=='A')).toBe(true);
   expect(reviewed.sourceChecks!.filter(row=>row.ref.startsWith('S2.')).every(row=>row.status==='preserved')).toBe(true);
-  expect(reviewed.sourceChecks!.find(row=>row.ref==='S1.activeChoice')?.reason).toContain('审核证据跨题材引用');
+  expect(reviewed.sourceChecks!.find(row=>row.ref==='S1.activeChoice')?.reason).toContain('尚未核查');
+  expect(reviewed.payoffChecks?.find(row=>row.ref==='S1.payoff')?.reason).toContain('审核证据跨题材引用');
   expect(reviewed.payoffChecks?.find(row=>row.ref==='S2.payoff')?.status).toBe('supported');
  });
  it('a malformed payoff protocol preserves independently valid source, category and peer review evidence',()=>{
@@ -48,9 +49,9 @@ describe('bounded premise source review batches',()=>{
   raw.payoffChecks[0]={...raw.payoffChecks[0],
     gapRepair:'restore_source_conditions',sourceConditionQuote:'原池实际已经满足必要条件'};
   const result=quarantineIncompletePremiseReviews(raw,original,[]);
-  expect(result.payoffChecks[0].status).toBe('unknown');
-  expect(result.payoffChecks[0].protocolIncomplete).toBe(true);
-  expect(result.payoffChecks[1].status).toBe('supported');
+  expect(result.payoffChecks.find((row:any)=>row.ref==='S1.payoff')?.status).toBe('unknown');
+  expect(result.payoffChecks.find((row:any)=>row.ref==='S1.payoff')?.protocolIncomplete).toBe(true);
+  expect(result.payoffChecks.find((row:any)=>row.ref==='S2.payoff')?.status).toBe('supported');
   expect(result.sourceChecks.every((row:any)=>row.status==='preserved')).toBe(true);
   expect(result.categoryChecks.every((row:any)=>row.status==='fulfilled')).toBe(true);
  });
