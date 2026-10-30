@@ -2200,8 +2200,9 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
   // Real preselection dedup rejects four copies of one generic story even
   // when their IDs differ. Use genuinely different already-grounded seed paths.
   const core=(id:string)=>diversePoolStories[Number(id.slice(1))-1];
+  const seedTitles:Record<string,string>={P1:'逆风浮标的谎报',P2:'代餐券上的过敏',P3:'失踪的戏词',P4:'空货箱的警报'};
   const seeds=['P1','P2','P3','P4'].map(id=>({
-    premiseId:id,workingTitle:'独立案情'+id,storyCore:core(id),storyCategoryId:'K1',
+    premiseId:id,workingTitle:seedTitles[id],storyCore:core(id),storyCategoryId:'K1',
   }));
   const expand=(id:string)=>({
     premiseId:id,storyCategory:'悬疑',storyCategoryId:'K1',
@@ -2256,7 +2257,8 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
       return {content:JSON.stringify({selectedPremises:['P3','P4'].map(expand)})};
     }
     if(step==='idea_card_structure'){
-      const id=String(request.prompt.match(/"workingTitle":"独立案情(P[1-4])"/)?.[1]||'');
+      const id=Object.keys(seedTitles).find(key=>request.prompt.includes(
+        '"workingTitle":"'+seedTitles[key]+'"'))||'';
       if(!id)throw Error('完整卡丢失了原池身份');
       return {content:JSON.stringify({ideas:[card(id)]})};
     }
@@ -2290,7 +2292,8 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
   expect(result.totalIdeas).toBe(2);
   expect(result.ideas.map((row:any)=>row.sourcePremiseId)).toEqual(['P1','P3']);
   expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure')
-    .map(([row]:any[])=>row.prompt.match(/"workingTitle":"独立案情(P[1-4])"/)?.[1]))
+    .map(([row]:any[])=>Object.keys(seedTitles).find(key=>row.prompt.includes(
+      '"workingTitle":"'+seedTitles[key]+'"'))))
     .toEqual(['P1','P2','P3','P4']);
   expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_premise_pool_refill')).toHaveLength(0);
   expect(controller.reconcilePremiseSelection).toHaveBeenCalledTimes(2);
