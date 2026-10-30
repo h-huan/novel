@@ -2432,9 +2432,9 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
       request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
   });
 
-  it('keeps two pool batches independent from five-way full-card/review concurrency', () => {
+  it('keeps two pool batches independent from the bounded adaptive remote-work ceiling', () => {
     expect(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY).toBe(2);
-    expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(5);
+    expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(8);
   });
 });
 
