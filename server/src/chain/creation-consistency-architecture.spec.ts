@@ -42,7 +42,7 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('ideas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
     expect(controllerSource).toContain("if (normalizedSelection.selected.length === 0)");
-    expect(controllerSource).toContain("status: 'partial'");
+    expect(controllerSource).toContain("status: 'incomplete'");
     expect(controllerSource).not.toContain("if (normalizedSelection.selected.length < minimumPremiseSelectionCount) {");
     expect(controllerSource).not.toContain("stoppedAt:'premise_preselection'");
   });
