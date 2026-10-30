@@ -58,8 +58,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('不准只换职业、场所或物证名称');
     expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
-    expect(source).toContain("success: true, status: 'partial', ideas: acceptedWithAudit");
-    expect(source).toContain('totalIdeas: acceptedWithAudit.length, warning, appealGate');
+    expect(source).toContain("success: false, status: 'incomplete', ideas: []");
+    expect(source).toContain('qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning, appealGate');
     expect(source).toContain('causalPlan每个关键结果的必要条件与整体反转兑现核对');
     expect(source).toContain('分类机制和手动流派落实');
     expect(source).toContain('reviewChangedPremiseSources(');
@@ -181,8 +181,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('presentationBudget.remaining>=minimumPresentationCredits');
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
-    expect(source).toContain("status: 'partial'");
-    expect(source).toContain('ideas: acceptedWithAudit');
+    expect(source).toContain("status: 'incomplete'");
+    expect(source).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
     expect(source).toContain('repairGenerated: supplementaryStructured.length');
     expect(source).toContain("repairError: fulfillmentActions.find(item=>item.phase==='refill_blocked')?.reason||null");
