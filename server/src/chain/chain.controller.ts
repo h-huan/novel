@@ -5,7 +5,8 @@ import { recordCreationStageFailure, type CreationFailureOrigin } from './creati
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues,premiseOverlapPairs} from './premise-selection-review';
 import {readGenerationBudgets} from '../config/generation-budgets';
-import {discoveryDimensionSelectionIssues} from './idea-discovery-contract';
+import { discoveryDimensionSelectionIssues, ideaGateLocalRepairDirective, orderedIdeaRepairPatches, applyIsolatedIdeaRepairPatches } from './idea-discovery-contract';
+import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
 import {premiseGenreFitCatalog,premiseGenreEvidenceCatalog,resolvePremiseGenreEvidence,premiseGenreFitIssues,materializePremiseGenreFit} from './premise-genre-fit';
 import { discoveryPovChoices } from '../../shared/src/discovery-pov';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
@@ -5330,11 +5331,16 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         let poolSupplementAttempted = false;
         let poolSupplementRequested = 0;
         let poolSupplementAdded = 0;
-        const canSupplementPool = candidatePool.length < requestedCount
+        const minimumViablePool = ideaPreselectionCapacity(requestedCount, premisePoolSize);
+        // Replenish the *screening* capacity, not just the final delivery floor:
+        // preliminary source/causal/genre reviews and full-card gates may reject
+        // valid-looking seeds. A pool of five for five is already understocked.
+        const canSupplementPool = candidatePool.length < minimumViablePool
           && poolBatchResults.some(batch => batch.rawReturned !== null && !batch.blocked && !batch.error);
         if (canSupplementPool) {
           poolSupplementAttempted = true;
-          poolSupplementRequested = Math.max(3, requestedCount - candidatePool.length + 2);
+          const screeningGap = minimumViablePool - candidatePool.length;
+          poolSupplementRequested = screeningGap + Math.max(1, Math.ceil(screeningGap / 2));
           const batchIndex = poolBatchCount;
           const batchStartedAt = Date.now();
           let rawReturned: number | null = null;
@@ -5833,6 +5839,66 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           &&!boundedPresentationReview(count,presentationBudget.remaining-generationCalls)
           ?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
       const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
+        // Existing metadata-only repair contract had no production caller:
+        // invalid dictionary tags or an ordinal/quantity mix-up went directly
+        // to rejection even when the already-produced card could be fixed
+        // without changing its plot. Use at most ONE shared-budget call for
+        // eligible cards, then rerun EVERY unchanged local and semantic Gate.
+        // A failed/malformed patch never counts as a passed card.
+        const repairable = candidates.map((card, index) => {
+          const issues = assessIdeaQuality(card);
+          const scopePlan = ideaScopeAllocationRepairPlan(card);
+          const metadataIssues = issues.every(issue =>
+            ['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags'].some(field =>
+              issue === field + '未继承选择或未从字典有效组合')
+            || (issue === '篇幅分线合计与总章数不一致' && !!scopePlan));
+          return { card, index, issues, scopePlan, metadataIssues };
+        }).filter(item => item.issues.length > 0 && item.metadataIssues);
+        const repairTargets = repairable.slice(0, discoveryBudget.presentationBatchSize);
+        if (repairTargets.length && presentationBudget.remaining > minimumCardReviewCalls(candidates.length)) {
+          try {
+            const targets = repairTargets.map(item => {
+              const fields = ['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags'] as const;
+              const flagged = fields.filter(field => item.issues.some(issue => issue.startsWith(field + '未继承')));
+              return {
+                premise: sameBatchPremises.find(row => String(row.premiseId) === String(item.card.sourcePremiseId)),
+                card: item.card,
+                gateIssues: item.issues,
+                dimensionRepairOptions: Object.fromEntries(flagged.map(field => [field, dto[field].length ? dto[field] : autoOptions[field]])),
+                dimensionRepairSelections: Object.fromEntries(flagged.map(field => [field, dto[field]])),
+                scopeAllocationPlan: item.scopePlan,
+                storyRepairAllowed: false,
+              };
+            });
+            const response = await this.realLLM.generate({
+              prompt: ideaGateLocalRepairDirective(targets),
+              scenario: 'idea_generate', responseFormat: 'json_object',
+              temperature: 0.1, timeout: LLM_TUNABLES.timeoutSimple(),
+              maxEmptyRetries: 0, physicalCallBudget: presentationBudget,
+              metrics: { stepKey: 'idea_card_metadata_repair', attempt: attempt === 'initial' ? 0 : 1 },
+            });
+            const raw = JSON.parse(jsonrepair(String(response.content || '{}')
+              .replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '')));
+            const patches = orderedIdeaRepairPatches(raw, repairTargets.length);
+            const repaired = applyIsolatedIdeaRepairPatches(
+              repairTargets.map(item => item.card), patches,
+              {
+                dimensionRepairOptions: targets.map(item => item.dimensionRepairOptions),
+                dimensionRepairSelections: targets.map(item => item.dimensionRepairSelections),
+                dimensionOnlyPositions: repairTargets.map((_, index) => index),
+                scopeAllocationPlans: repairTargets.map(item => item.scopePlan),
+                metadataOnlyPositions: repairTargets.map((_, index) => index),
+              },
+              (index, error) => this.logger.warn('idea-discover: 卡片元数据局部补丁无效 '+repairTargets[index].card.sourcePremiseId+': '+String(error)),
+            );
+            candidates = candidates.map((card, index) => {
+              const repairIndex = repairTargets.findIndex(item => item.index === index);
+              return repairIndex >= 0 ? repaired[repairIndex] : card;
+            });
+          } catch (error) {
+            this.logger.warn('idea-discover: 卡片局部修复未完成，原卡仍需接受全部质量门：'+String(error));
+          }
+        }
         // Deterministic contracts run before a paid semantic review. Invalid
         // metadata stays rejected and enters its authorized targeted repair.
         const localIssues=new Map(candidates.map(candidate=>[candidate,assessIdeaQuality(candidate)]));
