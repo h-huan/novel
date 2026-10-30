@@ -18,7 +18,7 @@ import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
+import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
 import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { createReviewLimiter } from './review-limiter';
@@ -8737,12 +8737,12 @@ ${(() => {
               {
                 projectId, chapterIndex: order + 1, scenario: 'outline', stepKey:'creation_chapter_fact_repair', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(),
-                validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence).length===0; } catch { return false; } },
-                describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence); } catch(error) { return [String((error as Error).message)]; } },
+                validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,alignOutlineFactCountProjections(chData!,(value as any)?.patch,defects),defects,actionRepairEvidence).length===0; } catch { return false; } },
+                describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,alignOutlineFactCountProjections(chData!,(value as any)?.patch,defects),defects,actionRepairEvidence); } catch(error) { return [String((error as Error).message)]; } },
                 retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；行动结果缺口必须直接修改actionPath或resultPath所指原文，不能只改同字段无关文字；同一事件的数量与时序必须连同content、对话、scenes和characterActions中所有已点名投影一起修正；保留可证实的增量算式，不改前章或其它事件，不重写整章。',
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
-            const rawPatch = repair.data?.patch;
+            const rawPatch = repair.data?.patch ? alignOutlineFactCountProjections(chData,repair.data.patch,defects) : null;
             if (!rawPatch || typeof rawPatch !== 'object' || Array.isArray(rawPatch)) {
               throw new Error(`第${order + 1}章事实局部修复未返回 patch 对象`);
             }
