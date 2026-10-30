@@ -1,5 +1,5 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import { missingRequestedIdeaSlots } from './discovery-fulfillment';
+import { missingRequestedIdeaSlots, affordableFullCardRefillCount } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -5053,7 +5053,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
 
       const premisePoolSize = Math.max(requestedCount * 3, requestedCount + 5);
       const minimumPremiseSelectionCount = requestedCount;
-      const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>>; targetCount?: number; minimumCount?: number } = {}) => {
+      const buildPremiseSelectionPrompt = (phase: 'pool' | 'selection' = 'selection', options: { batchIndex?: number; batchCount?: number; batchSize?: number; pool?: Array<Record<string, unknown>>; targetCount?: number; minimumCount?: number; failureReasons?: string[] } = {}) => {
         const excludeText = initialExcludes.length
           ? `\n【历史作品与本次明确排除题材】以下题材的标题、职业/生活载体、关系结构、核心机制、追查路径和关键反转均不得换名复用：\n${initialExcludes.map((item, index) => `${index + 1}. ${item.title}${item.hook ? `｜${item.hook}` : ''}${item.description ? `｜${String(item.description).slice(0, 180)}` : ''}`).join('\n')}`
           : '';
@@ -5131,6 +5131,10 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const phaseContext = promptPhase === 'pool'
           ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。只输出pool；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
           : '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。';
+        const priorDefectContext = promptPhase === 'pool' && options.failureReasons?.length
+          ? '\n【已拒绝的因果缺陷样例：仅用于避免再次生成同类错误，不得复写旧故事、也不得篡改审核结论】'
+            + JSON.stringify(options.failureReasons.slice(-8).map(reason => String(reason).slice(0,380)))
+          : '';
         const poolContext = promptPhase === 'selection'
           ? '\n【服务器已固定的候选池；不得新增、改写或重新编号】' + JSON.stringify(candidatePool)
           : promptPhase === 'pool' && candidatePool.length
@@ -5151,6 +5155,7 @@ ${variedCategories ? '后续按每个入选题材的分类分别取得分类证�
 ${!variedCategories && categoryBenchmark ? `【分类体量参考】${categoryBenchmark}` : ''}
 ${configuredTargetWords !== null ? `用户已指定目标总字数 ${configuredTargetWords}；筛选时必须判断题材是否撑得住这一体量。` : '用户未指定总字数；筛选时按平台分类体量和故事自身可持续性判断。'}
 ${poolContext}
+${priorDefectContext}
 ${excludeText}
 ${promptPhase === 'selection'
   ? '【选优终检：不得留给后续长时复审才发现】选定身份以前，须用原池五小节验证【必要条件】与【分类流派机制】是否确实在故事行动中成立；不能在展开筛选字段时新造原池未交代的关键决定者、到场、传递、权限及代价。然后逐对检查本次入选题材的主动选择、选择触发的升级、改变胜负的必要条件、兑现后的具体代价；两项在这四个因果作用上同构，即使职业、年代、道具和分类不同，也不可同时入选。直接从上述实际固定原池身份中改选另一条实际行动机制完整、来源因果成立的成熟题材，不新增或改写候选池；不能以凑满数量、只换名字或把不完整条件留给审核作为理由入选。此为选优前的自检，不输出自评分，不代替后续全部独立审查。'
@@ -6097,12 +6102,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             ?selectionAudit.rejectedHistory.map((row:any)=>String(row?.premiseId||'')):[]),
         ]);
         const unusedSeeds=premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId)));
-        const desiredSupplement=Math.max(missingAfterFirstGate,
-          missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2));
-        const minimumPresentationCredits=missingAfterFirstGate+1;
+        // Screening hedge is constrained by the credits for BOTH full-card
+        // creation and subsequent independent review, avoiding a doomed
+        // second expensive shortlist when one of those phases cannot run.
+        const desiredSupplement=affordableFullCardRefillCount(
+          missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2),
+          presentationBudget.remaining,discoveryBudget.presentationBatchSize);
         fulfillmentStopReason='bounded_refill_unavailable';
-        if(sourceCompletionBudget.remaining>=2 && reselectionCompletionBudget.remaining>=1
-          &&presentationBudget.remaining>=minimumPresentationCredits){
+        if(desiredSupplement>=missingAfterFirstGate
+          &&sourceCompletionBudget.remaining>=(desiredSupplement===1?1:2)
+          &&reselectionCompletionBudget.remaining>=1){
           // Add fresh seed identities only if the already-paid original pool
           // cannot provide the desired gap plus a small dynamic hedge.
           const seedDeficit=Math.max(0,desiredSupplement-unusedSeeds.length);
@@ -6119,7 +6128,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 IDEA_PREMISE_POOL_GENERATION_CONCURRENCY,async(size,index,budget)=>{
                   const answer=await this.realLLM.generate({
                     prompt:buildPremiseSelectionPrompt('pool',{pool:premiseDiscovery.pool,
-                      batchIndex:index,batchCount,batchSize:size}),
+                      batchIndex:index,batchCount,batchSize:size,
+                      failureReasons:rejectedReasons}),
                     scenario:'idea_generate',responseFormat:'json_object',
                     timeout:discoveryBudget.complexTimeoutMs,maxEmptyRetries:0,
                     physicalCallBudget:budget,
@@ -6173,7 +6183,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             }
           }
           const refillTarget=Math.min(unusedSeeds.length,desiredSupplement,
-            Math.max(0,presentationBudget.remaining-1));
+            affordableFullCardRefillCount(unusedSeeds.length,
+              presentationBudget.remaining,discoveryBudget.presentationBatchSize));
           if(refillTarget>=missingAfterFirstGate
             &&presentationBudget.remaining>=refillTarget+Math.ceil(refillTarget/discoveryBudget.presentationBatchSize)
             &&reselectionCompletionBudget.remaining>=1){
