@@ -99,7 +99,7 @@ it('allows only explicitly marked qualified partial results without weakening th
  expect(discoveryResponseMatchesSelection(signature,state,[{...one,targetPlatform:'other'}],true)).toBe(false);
 });
 
-it('normalizes the current server partial-success contract and the legacy incomplete contract', () => {
+it('normalizes the current server incomplete contract and a previous partial-success response', () => {
   const base = { storyType: 'short_story', targetPlatform: 'fanqie', ideaAppealGate: { passed: true } };
   const partialIdeas = [base, { ...base, title: '第二张' }, { ...base, title: '第三张' }];
   expect(normalizeDiscoveryResponse({ success: true, status: 'partial', ideas: partialIdeas, warning: '缺额2张' }, 5))
