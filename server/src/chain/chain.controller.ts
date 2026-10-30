@@ -5090,10 +5090,16 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const batchCount = options.batchCount ?? 1;
         const batchSize = options.batchSize ?? premisePoolSize;
         const candidatePool = options.pool ?? [];
+        // The parallel pool groups cannot see each other's generated stories.
+        // Give them complementary causal-strategy search directions BEFORE
+        // selection, not a late, paid overlap rejection of near-identical
+        // "hidden expert -> retained records -> authority exposes opponent".
+        // These are exploration preferences, never permission to violate the
+        // author's category/genre or skip the independent difference Gate.
         const batchFocus = [
-          '本批优先探索关系压力、利益冲突与人物选择的不同组合。',
-          '本批优先探索资源限制、规则边界、身份责任与主动对手的不同组合。',
-          '本批优先探索反常关系、现实两难、欲望争夺与兑现代价的不同组合。',
+          '本批优先让隐藏本领通过现场行动、关系博弈、资源选择或对手即时反制改变局面；不要把多数故事写成“暗存岗位记录→第三方核查→官方处理”，也不按职业或物证换皮。',
+          '本批优先探索规则权限、信息误导、交易选择、对手反制与代价的不同因果路径；尤其避开“隐姓基层职业→秘密保留书面记录→遭反咬→记录比对翻盘→失去工作”的统一模板，不能只换机构与设备。',
+          '本批优先探索反常关系、现实两难、欲望争夺和不可逆后果；每项主角选择须改变对手下一步可行行动，不只由配角递上旧档案揭露已有真相。',
         ][batchIndex % 3];
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
