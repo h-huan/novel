@@ -335,7 +335,10 @@ it('generates a complete idea batch through preselection plus structuring and re
   });
   expect(partialResult.appealGate.structuringErrors).toHaveLength(1);
   expect(partialResult.appealGate.structuringErrors[0].sourcePremiseId).toBe('P2');
-  expect(realLLM.generate).toHaveBeenCalledTimes(40);
+  // Only the partial request may trigger supplementary lightweight seeds.
+  // The simulated provider rejects unknown refill operations; the server must
+  // keep the three passed cards and never regenerate those passed premises.
+  expect(realLLM.generate).toHaveBeenCalledTimes(42);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
     ...Array(7).fill('idea_premise_pool_generation'),
     ...Array(3).fill('idea_premise_selection'),
@@ -343,7 +346,10 @@ it('generates a complete idea batch through preselection plus structuring and re
     ...Array(3).fill('idea_premise_overlap_review'),
     ...Array(14).fill('idea_card_structure'),
     ...Array(7).fill('idea_presentation_review'),
+    ...Array(2).fill('idea_premise_pool_refill'),
   ].sort());
+  expect(partialResult.appealGate.fulfillment.actions.some((action:any)=>
+    action.phase==='lightweight_pool_refill_failed')).toBe(true);
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,
@@ -451,8 +457,12 @@ it('injects the user-declared custom platform standard into the idea prompt as t
   expect(result.success).toBe(false);
   expect(String(result.error)).toContain('第 1/5 个已选题材结构化失败');
   expect(String(result.error)).toContain('返回 0 张，期望恰好 1 张');
-  expect(realLLM.generate).toHaveBeenCalledTimes(11);
-  expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: false });
+  expect(realLLM.generate).toHaveBeenCalledTimes(13);
+  // The bounded refill is attempted only because zero complete cards passed;
+  // a malformed supplemental reply cannot turn any failed card into a pass.
+  expect(realLLM.generate.mock.calls.filter(([call]:any[])=>
+    call.metrics?.stepKey==='idea_premise_pool_refill')).toHaveLength(2);
+  expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: true });
   expect(result.appealGate.structuringErrors).toHaveLength(5);
   const prompt = prompts.join('\n');
   expect(prompt).toContain('每章末尾必须留一个可验证的实物线索');
