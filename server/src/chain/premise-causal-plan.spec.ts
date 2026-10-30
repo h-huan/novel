@@ -56,6 +56,10 @@ describe('plan critical prerequisites before full story cards',()=>{
     const steps=premiseCausalPlanExample();
     expect(steps).toHaveLength(2);
     expect(steps[0].result.field).toBe('escalation');
+    // A later payoff must be attributed to an executed verification/decision,
+    // not to a reversal paragraph that may only claim the outcome.
+    expect(steps[1].action.field).toBe('escalation');
+    expect(steps[1].conditions[0].field).toBe('escalation');
     expect(steps[1].result.field).toBe('payoff');
     expect(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE).toContain('中间动作不得直接标终局payoff');
     expect(ideaPremiseSelectionDirective('short_story',5)).toContain(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE);
