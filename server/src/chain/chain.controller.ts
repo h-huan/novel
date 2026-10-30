@@ -6359,6 +6359,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         freshPoolCount+citationOnlySlots,
       ))
       :repairPlan.repairSlots;
+    // A hedge is wasted when it attempts the same uncertain citation-only
+    // repair as the primary recovery. If the fixed pool has a genuinely unused
+    // identity after funding mandatory replacements, diversify ONE optional
+    // hedge. This is still the same one-model-call reselection and every new
+    // identity must pass the full independent review.
+    const mandatoryPoolSlots=recoverySlots.slice(0,neededReplacementSlots)
+      .filter(slot=>slot.mode==='replace_from_pool').length;
+    const poolHedgeId=deliveryCount<requestedCount && freshPoolCount>mandatoryPoolSlots
+      ?recoverySlots.slice(neededReplacementSlots)
+        .find(slot=>slot.mode==='correct_or_replace_from_pool')?.replacesPremiseId
+      :undefined;
     const surplusRejectedIds=repairPlan.repairSlots.slice(recoverySlots.length)
       .map(item=>String(item.replacesPremiseId));
     // If enough independently reviewed premises remain, stop here instead of spending
@@ -6418,8 +6429,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reselectScope=async(slots:typeof repairPlan.repairSlots):Promise<boolean>=>{
       if(!slots.length)return true;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
-      const ids=new Set<string>(slots.map(slot=>String(slot.replacesPremiseId)));
-      const scopedReview:PremiseSelectionReview={passed:false,issues:slots.flatMap(slot=>slot.issues)};
+      const scopedSlots=slots.map(slot=>String(slot.replacesPremiseId)===poolHedgeId
+        ?{...slot,mode:'replace_from_pool' as const}:slot);
+      const ids=new Set<string>(scopedSlots.map(slot=>String(slot.replacesPremiseId)));
+      const scopedReview:PremiseSelectionReview={passed:false,issues:scopedSlots.flatMap(slot=>
+        slot.issues.map(issue=>String(issue.premiseId)===poolHedgeId
+          ?{...issue,repairMode:'replace_from_pool' as const}:issue))};
       // Full story and original evidence follow below. The independent issues
       // retain their identity, kind, affected field and precise reasons, while
       // duplicate multi-kilobyte quotes stay in the server-owned audit only.
@@ -6455,7 +6470,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               +JSON.stringify(rejectedHistory.filter(row=>!ids.has(row.premiseId)
                 &&!selected.selected.some(item=>String(item.premiseId)===row.premiseId)).slice(-8))
             :'')
-          +'\n【必须处理的位置及模式】'+JSON.stringify(slots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
+          +'\n【必须处理的位置及模式】'+JSON.stringify(scopedSlots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool优先保留原身份、只修复已被来源事实支持的因果引用或遗漏展开，不安排额外备用方案；若原池实缺条件仍须换题。不得复制其它位置、改变分类或用正常项填空。'
           +'\n若本位置只有causalPlan把已存在的后续行动、核验、决定或代价错误绑定在前一步，且原池与当前全部筛选字段已具备完整成立条件，则只返回该位置的{"premiseId":"原身份ID","causalPlan":[实际逐字锚定的环节]}；服务器继承其余原故事字段，绝不为修索引重写全文。仅selection_fit且非强制换选的位置支持此精简形式；存在来源漂移、展开遗漏的实际条件时仍须按原协议返回完整相关字段，原池实缺条件或已证同构则必须换身份，不能靠索引补造事实。'
