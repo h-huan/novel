@@ -35,3 +35,18 @@ export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved
  const hedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4))):0;
  return {mandatory,hedge,total:mandatory+hedge};
 }
+
+/** Reuse authored title options before paying for another card. Never invent a
+ * title or relax the original length Gate: the resulting card still goes
+ * through duplicate, appeal and independent presentation checks. */
+export function retainValidStructuredIdeaTitle<T extends {title?:unknown;alternateTitles?:unknown}>(
+ card:T,originalWorkingTitle:unknown,
+):T {
+ const valid=(value:unknown):value is string=>typeof value==='string'
+   &&((value.replace(/[《》「」]/g,'').trim().replace(/[，、,\s]/g,'').length)>=4)
+   &&((value.replace(/[《》「」]/g,'').trim().replace(/[，、,\s]/g,'').length)<=16);
+ if(valid(card.title))return card;
+ const alternatives=Array.isArray(card.alternateTitles)?card.alternateTitles:[];
+ const replacement=[...alternatives,originalWorkingTitle].find(valid);
+ return replacement?{...card,title:replacement}:card;
+}
