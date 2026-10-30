@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
-import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,quarantineUnprovenReversalEvidence} from './premise-payoff-review';
+import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,premiseUnmappedOutcomeClaims,quarantineUnprovenReversalEvidence} from './premise-payoff-review';
 import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
 import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
@@ -206,4 +206,19 @@ it('keeps repair routing strictly conditional on a real gap rather than poisonin
   expect(premisePayoffReviewIssues({payoffChecks:[{...supported,gapRepair:'replace_from_pool'}]},selection))
     .toEqual(expect.arrayContaining([expect.stringContaining('非gap项不得无故要求补救')]));
   expect(premisePayoffReviewIssues({payoffChecks:[supported]},selection)).toEqual([]);
+});
+
+it('flags an unanchored separate outcome for independent review without inventing a new Gate',()=>{
+  const input:any={selected:[{
+    premiseId:'P3',
+    reversalEffect:'稽核科核实欠缴社保并要求单位补缴',
+    payoff:'厂子关了半条线，主角搬离夫家；老周拿到了工伤认定。',
+    causalPlan:[{result:{field:'payoff',quote:'厂子关了半条线，主角搬离夫家'}}],
+  }]};
+  const focus=premiseUnmappedOutcomeClaims(input);
+  expect(focus).toContainEqual({ref:'S1.payoff',claim:'老周拿到了工伤认定'});
+  expect(focus).not.toContainEqual(expect.objectContaining({claim:expect.stringContaining('厂子关了半条线')}));
+  const directive=premisePayoffReviewDirective(input);
+  expect(directive).toContain('老周拿到了工伤认定');
+  expect(directive).toContain('非新增质量门');
 });
