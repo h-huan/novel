@@ -1572,7 +1572,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery orchestrator with simulated model responses', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused', 'pool_naming'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused', 'pool_naming', 'dimension_microrepair'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1622,6 +1622,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
         readerQuestion: '遗嘱为什么写着自家门牌，母亲的遗忘又和父亲替人担责有什么关系？',
       },
     };
+    if (failure === 'dimension_microrepair') strongCard.plotTags = ['未授权标签'];
     const weakCard = {
       ...common,
       title: '门后的普通秘密',
@@ -1701,6 +1702,10 @@ describe('idea discovery orchestrator with simulated model responses', () => {
         if (failure === 'card_network') throw new Error('card connection reset');
         if (failure === 'card_shape') return { content: JSON.stringify({ ideas: [] }) };
         return { content: JSON.stringify({ ideas: [weakCard] }) };
+      }
+      if (step === 'idea_card_metadata_repair') {
+        if (failure !== 'dimension_microrepair') throw Error('unexpected metadata repair');
+        return { content: JSON.stringify({ patches: [{ dimensionPatch: { plotTags: ['调查'] } }] }) };
       }
       if (step === 'idea_card_local_repair') {
         if (failure === 'repair_network') throw new Error('repair connection reset');
@@ -1846,6 +1851,17 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       expect(generate).toHaveBeenCalledTimes(6);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('bounded_refill_shared_budget_shortfall');return;
+    }
+    if (failure === 'dimension_microrepair') {
+      const calls = generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_metadata_repair');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0].prompt).toContain('plotTags');
+      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
+      expect(result.ideas[0].sourcePremiseId).toBe('P1');
+      expect(result.ideas[0].plotTags).toEqual(['调查']);
+      expect(result.ideas[0].mainReversal).toBe(strongCard.mainReversal);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      return;
     }
     if (failure === 'tag_combo_reused') {
       expect(result.success).toBe(true);
