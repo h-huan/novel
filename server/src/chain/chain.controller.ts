@@ -8694,11 +8694,24 @@ ${(() => {
 
           // 在每章接力点审查时间与累计事实，阻止错误进入后续章节。
               // 在每章接力点按同一事实台账核查，修的是当前章，不改已确认题材或前章。
+          // The actual chapter can consume a later planned payoff even when
+          // the full-book responsibility preflight was valid. Review the
+          // CURRENT content against unspent future duties before it enters the
+          // accepted ledger; otherwise a late chapter repeatedly tries to
+          // re-achieve the earlier chapter's real result. These are planning
+          // boundaries, never new confirmed story facts or source citations.
+          const futureResponsibilityReviewContext =
+            '\n【后续章节未兑现任务（仅是规划，不是已发生的证据）】'
+            +JSON.stringify(futureChapterTasks)
+            +'\n依据现有CR-3/CR-4逐项核对本章content是否实际提前完成后章专属结果。'
+            +'若本章实际已完成某项后章结果，按本章具体原文记录职责越界并仅修本章；'
+            +'后章不得再重复兑现。只因题目、道具或动机相似而没有实质结果的，不判越界。'
+            +'不能凭后章规划反过来新增或篡改当前章节事实。';
           const reviewChapterFacts = (candidate: Record<string, any>) => this.reviewOutlineFacts(
             projectId, '第' + (order + 1) + '章生成前事实台账', canonicalCreativeBrief,
             currentWorldForOutlineReview, priorOutlineFactLedger,
             [chapterFactsForReview(order, candidate)],
-            executionStandardForReview, order + 1, acceptedOutlineSources);
+            executionStandardForReview+futureResponsibilityReviewContext, order + 1, acceptedOutlineSources);
           const causalReviewChapter=(candidate:Record<string,any>)=>planningChapterForCausalReview(candidate,order+1,expectedChapter.func);
           const reviewChapterActions = (candidate: Record<string, any>) => this.realLLM.validatePlanningActions(projectId,
             [causalReviewChapter(candidate)],
