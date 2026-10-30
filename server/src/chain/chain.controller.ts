@@ -8642,7 +8642,7 @@ ${(() => {
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
 【本章事件与状态唯一来源】content按时序记录本章实际发生的行动、成立条件、直接结果与未完成目标；scenes.outcome、characterActions.result、characterStates.stateAfter及伏笔回收必须从同一已发生事件投影，不得把准备、猜测、沉默、询问或下一章计划升级为已执行结果。物件保管权转移须有可见交付、时间与双方；同一时点不得同时在两个人手中或两个地点。人物位置、知情、关系和立场变化须有本章可见触发，先发生的话不能改称见证后来证据的反应。
-【数量、信息与证据连续性】同一对象的本章新增几笔与前章累计总数分别计量，所有字段使用同一时点和口径。关键消息写清实际发送者、接收者、渠道、内容和时间；本人直接听到的问话不得投影成第三人此前向其转述，推测他人知情不能投影成已有某人报信。仅记下身份不得推定具体证据已记录、被采信或已完成调查；没有明写的后续行动、持续状态和范围不可凭空补全。
+【数量、信息与证据连续性】同一对象的本章新增几笔与前章累计总数分别计量，所有字段使用同一时点和口径。涉及损失、死亡、证据或交易数量时，先在content按每步增量列出可核算的本章合计，再把这一个已核算数字投影到人物实际台词、scenes.outcome、characterActions.action/result及结尾状态；同一批次不能在正文写四条、对话写五条、行动字段再写五条。人物说谎或统计口径不同必须在本章明写原因与实际范围，不得靠读者猜测。关键消息写清实际发送者、接收者、渠道、内容和时间；本人直接听到的问话不得投影成第三人此前向其转述，推测他人知情不能投影成已有某人报信。仅记下身份不得推定具体证据已记录、被采信或已完成调查；没有明写的后续行动、持续状态和范围不可凭空补全。
 【通信渠道与同源事件约束】群消息、群回复、私聊、电话各自是独立事件；私聊回复不能被投影成群消息回复，群消息无人回复不能又在同一条下生成回复。签字、承认、交付、调取、核抄等决定性行动须在content实际发生并有必要条件，再投影到其余字段；核定金额、签署协议、办手续不等于款项实际发放或收到。询问某人不等于已经得到答复；没有实际回答、记录及内容时，scenes.outcome和characterActions.result只能保留为待查状态。口头要求、自愿配合和合法实际控制不可混同；缺权限或执行动作时不得写成强制留置、限制行动或其他既成外部结果。已确认章节职责确需该结果，先以本书既定人物、规则和事件建立可实行的条件，不为通过审查虚构权限或重写确认故事。
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
@@ -8733,13 +8733,13 @@ ${(() => {
 【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(actionRepairEvidence)}
 按已注入CTX-005、CTX-008、RPR-001和QLT-003先确定事件先后及实际成立程度，再同步上述结果字段；这些路径用于定位原有事实，不是新增事件要求。若某结果没有成立条件且并非锁定职责，按已有行动实际能证明的程度修正该断言；本章的文件保管、后续行动或付出代价，不得重述为前章已完成的联名、机构决定或救援成功；职责确需此结果时，只能在已确认人物权限和事件边界内补条件，不能为保留强结论而擅自扩大权限。并列或复述不能把行动前的说法挪为触发后的反应。没有路径的缺口保留原始证据与理由，不猜字段或默认为已解决。
 
-【局部修复硬约束】禁止重新生成完整章纲。只输出 JSON 对象 {"patch":{...}}，patch 只包含确实需要修改的事实字段或其已存在子路径（如characterActions.7.action或characterActions[7].action）。允许的顶层字段=${JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)}。禁止输出 targetWords、wordCountReason、chapterFunction、goalArc 等结构/篇幅字段。${OUTLINE_FACT_PATCH_ADDRESS_POLICY}${OUTLINE_FACT_REPAIR_SYNC_POLICY}`,
+【跨字段数量矛盾定向修复】若独立审查已按实际行动算出同一事件的数量（例如三条中两条早已死亡、第三条之后死亡，另一条随后死亡，合计四条），须保留有行动证据的数量并把冲突的台词、content与characterActions逐处统一；只改台词不改行动字段、或只改行动不改台词，都不算修复。绝不把已成立的计数改成错误数字以迁就其它字段。若角色故意虚报，必须有原故事支持，不能临时编造解释。\n【局部修复硬约束】禁止重新生成完整章纲。只输出 JSON 对象 {"patch":{...}}，patch 只包含确实需要修改的事实字段或其已存在子路径（如characterActions.7.action或characterActions[7].action）。允许的顶层字段=${JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)}。禁止输出 targetWords、wordCountReason、chapterFunction、goalArc 等结构/篇幅字段。${OUTLINE_FACT_PATCH_ADDRESS_POLICY}${OUTLINE_FACT_REPAIR_SYNC_POLICY}`,
               {
                 projectId, chapterIndex: order + 1, scenario: 'outline', stepKey:'creation_chapter_fact_repair', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(),
                 validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence).length===0; } catch { return false; } },
                 describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,(value as any)?.patch,defects,actionRepairEvidence); } catch(error) { return [String((error as Error).message)]; } },
-                retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；行动结果缺口必须直接修改actionPath或resultPath所指原文，不能只改同字段无关文字；同一事件各字段保持一致，不改前章或其它事件，不重写整章。',
+                retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；行动结果缺口必须直接修改actionPath或resultPath所指原文，不能只改同字段无关文字；同一事件的数量与时序必须连同content、对话、scenes和characterActions中所有已点名投影一起修正；保留可证实的增量算式，不改前章或其它事件，不重写整章。',
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
             const rawPatch = repair.data?.patch;
