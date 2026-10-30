@@ -3,7 +3,7 @@ import { missingRequestedIdeaSlots } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
-import {premiseOverlapScopeIssues} from './premise-selection-review';
+import {premiseOverlapScopeIssues,premiseOverlapPairs} from './premise-selection-review';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import {discoveryDimensionSelectionIssues} from './idea-discovery-contract';
 import {premiseGenreFitCatalog,premiseGenreEvidenceCatalog,resolvePremiseGenreEvidence,premiseGenreFitIssues,materializePremiseGenreFit} from './premise-genre-fit';
@@ -6200,7 +6200,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         : '\n当前是锁定前独立同构复核：只比较本批故事的主动策略、行动升级、胜负转换机制和代价，不重复执行来源、逐环节因果成立、分类或流派审核；这些由另一个独立Gate负责。此输入不包含causalPlan索引，比较依据为已选故事中实际发生的行动与结果。')
       + (mode === 'source_drift' ? '本次来源继承这一部分逐项核对每个已选展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺；同批重合由另一个独立Gate审核，本次仍须完成上文因果兑现、分类与流派结论。核对的是与原池明确约束是否兼容，不要求所有展开句都已逐字写入骨架；具体判据按GEN-002执行。不由评审补造候选没有写的事实。对于代写、转交、救助等多方动作，先分清原文明确的实施者、受益者与接收者；原文没有写明的角色关系不得由评审补成确定事实，更不能在修订前后按相反解释各判一次冲突。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，但不得因职业、地点或证据道具不同就漏掉真实的结构同构。逐项比较行动的策略、行动引发的升级、反转改变的胜负条件及最终代价；如果多张都是“隐藏旧本领→搜集可核验记录→遭对手反咬→亮出文件翻盘→失去岗位”，且四段的实际因果作用相同，即使职位和道具不同也须按真实同构报告，不得等到完整卡阶段才第一次指出。引用两处各自真实的原文并给具体因果理由；普通扮猪吃虎类型外壳本身不构成同构。')
       + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
-      + (overlapFocusIds.length ? '\n【本次变化项】' + JSON.stringify(overlapFocusIds) + '；必须逐对比较所有至少一端属于本次变化项的候选对，每个无序候选对只审一次。变化项之间也要互相比较；保留项之间内容未变且已有独立审核结论，本次不重复审这些旧配对。issues只能包含至少一端为本次变化项的真实同构问题，不返回保留项之间的问题。' : '')
+      + (overlapFocusIds.length ? '\n【本次变化项】' + JSON.stringify(overlapFocusIds)
+        + '\n【本次必须独立比较的无序题材配对】' + JSON.stringify(premiseOverlapPairs(selection,overlapFocusIds))
+        + '。逐对核对所有列出配对，包括变化项之间与变化项对保留项；保留项之间的旧配对已独立核查，不重复消耗模型审查。只报告列出配对中的实际同构缺陷，issues可以交换两端身份但不能引用目录之外的配对；不得因题材身份、职业或证据道具不同遗漏实质同构。' : '')
       + '\n【待锁定已选胚子】' + JSON.stringify(mode==='source_drift'?sourceReviewSelectionView(selection.selected):overlapReviewSelectionView(selection.selected))
       + (mode === 'source_drift' ? premiseCategoryReviewDirective(selection, requiredGenres.length === 0) : '')
       + (mode === 'source_drift' ? premisePayoffReviewDirective(selection) : '')
