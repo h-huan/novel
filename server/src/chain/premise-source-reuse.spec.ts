@@ -209,3 +209,37 @@ it('does not upgrade an independently rejected corrected payoff when all changed
  expect(source).toHaveBeenCalledTimes(1);
  expect(check).toHaveBeenCalledTimes(1);
 });
+
+it('memoizes independently approved plan-only corrections without ever skipping changed source facts',async()=>{
+ const initial=selection(),receipts:PremiseSourceReceipts=new Map();
+ const scope=JSON.stringify({standard:'fixed full review standards',requiredGenres:[]});
+ const full=vi.fn(async input=>report(input));
+ await reviewChangedPremiseSources(initial,scope,receipts,full);
+ expect(receipts.size).toBe(5);
+ const repaired=structuredClone(initial);
+ for(const [index,word] of [[1,'第一个'],[3,'第二个']] as const) {
+  repaired.selected[index].causalPlan=[{action:{field:'activeChoice',quote:word+'行动'},
+   conditions:[],result:{field:'payoff',quote:word+'结果'}}];
+ }
+ const planOnly=vi.fn(async (pending:ReturnType<typeof selection>,baseline:PremiseSelectionReview)=>{
+  expect(pending.selected.map(x=>x.premiseId)).toEqual(['B','D']);
+  expect(baseline.sourceChecks).toHaveLength(20);
+  return {...baseline,payoffChecks:report(pending).payoffChecks,issues:[],passed:true};
+ });
+ const budget={remaining:5};
+ const once=await reviewChangedPremiseSources(repaired,scope,receipts,full,undefined,planOnly,budget);
+ expect(once.passed).toBe(true);
+ expect(receipts.size).toBe(7);
+ const again=await reviewChangedPremiseSources(repaired,scope,receipts,full,undefined,planOnly,budget);
+ expect(again.passed).toBe(true);
+ expect(again.sourceChecks).toHaveLength(50);
+ expect(again.payoffChecks).toHaveLength(5);
+ expect(planOnly).toHaveBeenCalledTimes(1);
+ expect(full).toHaveBeenCalledTimes(1);
+ expect(budget.remaining).toBe(5);
+ const changed=structuredClone(repaired);
+ changed.selected[1].activeChoice+='新增的事实行为';
+ await reviewChangedPremiseSources(changed,scope,receipts,full,undefined,planOnly,budget);
+ expect(full.mock.calls.at(-1)?.[0].selected.map((row:any)=>row.premiseId)).toEqual(['B']);
+ expect(full).toHaveBeenCalledTimes(2);
+});
