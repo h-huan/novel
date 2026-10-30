@@ -2265,7 +2265,12 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
       return {content:JSON.stringify({selectedPremises:['P3','P4'].map(expand)})};
     }
     if(step==='idea_card_structure'){
-      const id=Object.keys(seedTitles).find(key=>request.prompt.includes(
+      // A full-card prompt also lists other selected premises as difference
+      // references. Only the server-locked CURRENT premise may identify the
+      // generated card; picking a peer title silently manufactures duplicates.
+      const current=request.prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]
+        ?.split('【同批差异参照')[0]||'';
+      const id=Object.keys(seedTitles).find(key=>current.includes(
         '"workingTitle":"'+seedTitles[key]+'"'))||'';
       if(!id)throw Error('完整卡丢失了原池身份');
       return {content:JSON.stringify({ideas:[card(id)]})};
@@ -2308,7 +2313,8 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
   }).slice(0,6000));
   expect(result.ideas.map((row:any)=>row.sourcePremiseId)).toEqual(['P1','P3']);
   expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure')
-    .map(([row]:any[])=>Object.keys(seedTitles).find(key=>row.prompt.includes(
+    .map(([row]:any[])=>Object.keys(seedTitles).find(key=>(row.prompt.split(
+      '【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]||'').includes(
       '"workingTitle":"'+seedTitles[key]+'"'))))
     .toEqual(['P1','P2','P3','P4']);
   expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_premise_pool_refill')).toHaveLength(0);
