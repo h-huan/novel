@@ -1786,12 +1786,13 @@ describe('idea discovery orchestrator with simulated model responses', () => {
        expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({invalid:{naming:1},generated:2,supplementAttempted:false});
      }
     if(failure==='preselection_shortfall'){
-      expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(false);
-      expect(controller.reviewIdeaPresentation).not.toHaveBeenCalled();
-      expect(result.success).toBe(false);expect(result.status).toBe('incomplete');expect(result.ideas).toEqual([]);
-      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,stopReason:'preselection_shortfall',stoppedAt:'preselection_review'});
+      const cardCalls=generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure');
+      expect(cardCalls).toHaveLength(1);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
+      expect(result.ideas.map((card:any)=>card.sourcePremiseId)).toEqual(['P1']);
+      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,returned:1,qualified:1,partial:true});
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
-      expect(result.qualifiedIdeas).toEqual([]);
       return;
     }
     expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
@@ -1807,29 +1808,20 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       expect(call[1]).toContain('"writingStyle":["简洁"]');
       expect(call[1]).toContain('"pov":"第一人称"');
     }
-    if (failure === 'pool_below_minimum') {
+    if (failure === 'pool_below_minimum' || failure === 'pool_top_up_unique') {
+      const supplemented=failure==='pool_top_up_unique', expectedCount=supplemented?3:2;
       const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
-      expect(completeCardCalls).toHaveLength(0);
-      expect(controller.reviewIdeaPresentation).not.toHaveBeenCalled();
-      expect(result.appealGate.stopReason).toBe('preselection_shortfall');
-      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
-        target: 15, generated: 2, shortfall: 13, batchCount: 3, maxConcurrency: 2,
-        supplementAttempted: true, supplementAdded: 0,
+      expect(completeCardCalls).toHaveLength(expectedCount);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:expectedCount});
+      expect(result.ideas).toHaveLength(expectedCount);
+      expect(result.appealGate).toMatchObject({
+        requested:5,returned:expectedCount,qualified:expectedCount,partial:true,minimumDeliverableCount:5,
       });
-      expect(result.appealGate.minimumDeliverableCount).toBe(5);
-      expect(result.success).toBe(false);
-      expect(result.status).toBe('incomplete');
-      expect(result.ideas).toEqual([]);
-      return;
-    }
-    if (failure === 'pool_top_up_unique') {
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
-        target: 15, generated: 3, shortfall: 12, batchCount: 3, maxConcurrency: 2,
-        supplementAttempted: true, supplementAdded: 1,
+        target:15,generated:expectedCount,shortfall:15-expectedCount,batchCount:3,maxConcurrency:2,
+        supplementAttempted:true,supplementAdded:supplemented?1:0,
       });
-      expect(result.success).toBe(false);
-      expect(result.status).toBe('incomplete');
-      expect(result.ideas).toEqual([]);
       return;
     }
     const firstCardCallIndex = generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
@@ -1847,7 +1839,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
     if(failure==='review_budget'){
       expect(generate).toHaveBeenCalledTimes(5);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
-      expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
+      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('parallel_full_card_gate_complete');return;
     }
     if (failure === 'tag_combo_reused') {
@@ -1865,20 +1857,19 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(result.appealGate.repairGenerated).toBe(0);
     expect(generate).toHaveBeenCalledTimes(5);
     expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_local_repair')).toHaveLength(0);
-    expect(result.success).toBe(false);
-    expect(result.status).toBe('incomplete');
-    expect(result.ideas).toHaveLength(0);
-    expect(result.qualifiedIdeas).toHaveLength(1);
-    expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
+    expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
+    expect(result.ideas).toHaveLength(1);
+    expect(result.ideas[0].sourcePremiseId).toBe('P1');
+    expect(result.appealGate).toMatchObject({requested:2,qualified:1,returned:1,partial:true});
     if (mixed) {
-      expect(result.qualifiedIdeas[0].storyCategory).toBe('悬疑惊悚');
+      expect(result.ideas[0].storyCategory).toBe('悬疑惊悚');
       const cardPrompts = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure').map(([request]: any[]) => request.prompt);
       expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseOne.workingTitle))).toContain('分类=悬疑惊悚');
       expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseTwo.workingTitle))).toContain('分类=现实生活');
       expect(result.appealGate.selectedCategories).toEqual(['悬疑惊悚', '现实生活']);
     }
-    expect(result.totalIdeas).toBe(0);
-    expect(result.error).toContain('请求 2，最终通过 1');
+    expect(result.totalIdeas).toBe(1);
+    expect(result.warning).toContain('请求 2，最终通过 1');
     if (cardFailed) {
       expect(result.appealGate.structuringErrors).toEqual([expect.objectContaining({ sourcePremiseId: 'P2' })]);
     }
