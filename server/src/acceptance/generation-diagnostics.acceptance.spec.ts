@@ -335,14 +335,14 @@ it('generates a complete idea batch through preselection plus structuring and re
   });
   expect(partialResult.appealGate.structuringErrors).toHaveLength(1);
   expect(partialResult.appealGate.structuringErrors[0].sourcePremiseId).toBe('P2');
-  expect(realLLM.generate).toHaveBeenCalledTimes(41);
+  expect(realLLM.generate).toHaveBeenCalledTimes(40);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
     ...Array(7).fill('idea_premise_pool_generation'),
     ...Array(3).fill('idea_premise_selection'),
     ...Array(6).fill('idea_premise_source_drift_review'),
     ...Array(3).fill('idea_premise_overlap_review'),
     ...Array(14).fill('idea_card_structure'),
-    ...Array(8).fill('idea_presentation_review'),
+    ...Array(7).fill('idea_presentation_review'),
   ].sort());
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
