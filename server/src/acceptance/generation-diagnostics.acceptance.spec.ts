@@ -320,14 +320,15 @@ it('generates a complete idea batch through preselection plus structuring and re
   // A short original pool and one deliberately broken card must not erase the
   // other three independently verified full cards. Their quality gates are
   // unchanged and the UI can use the explicit partial-success response.
-  expect(partialResult, 'three approved cards must be delivered despite a five-card request')
-    .toMatchObject({ success: true, status: 'partial', totalIdeas: 3 });
-  expect(partialResult.ideas).toHaveLength(3);
-  expect(partialResult.ideas.map((idea:any)=>idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
+  expect(partialResult, 'three approved cards must be retained for recovery, not counted as a successful five-card request')
+    .toMatchObject({ success: false, status: 'incomplete', totalIdeas: 0 });
+  expect(partialResult.ideas).toHaveLength(0);
+  expect(partialResult.qualifiedIdeas).toHaveLength(3);
+  expect(partialResult.qualifiedIdeas.map((idea:any)=>idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
   expect(partialResult.warning).toContain('缺额 2');
   expect(partialResult.appealGate).toMatchObject({
     premisePoolTarget: 15, premisePoolSize: 4, premisePoolTargetMet: false,
-    premiseSelected: 4, generated: 3, qualified: 3, returned: 3, requested: 5,
+    premiseSelected: 4, generated: 3, qualified: 3, returned: 0, requested: 5,
     minimumDeliverableCount: 5, partial: true,
   });
   expect(partialResult.appealGate.selectionAudit.poolGeneration).toMatchObject({
