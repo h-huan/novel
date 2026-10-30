@@ -5618,22 +5618,22 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           + '，锁定前审核与必要换选 wallMs=' + preselectionReviewWallMs
           + '，有效池=' + candidatePool.length + '/' + premisePoolSize
           + '，选中=' + normalizedSelection.selected.length + '/' + requestedCount);
-        // Once independent preselection has exhausted its fixed pool, fewer
-        // qualified premises than the requested count can never be rescued by
-        // downstream card/presentation processing. Preserve the full failure
-        // evidence and avoid model work whose output must be discarded.
-        if (normalizedSelection.selected.length < minimumPremiseSelectionCount) {
-          throw failWithPoolAudit(
-            new Error('锁定前仅保留 ' + normalizedSelection.selected.length + '/' + requestedCount
-              + ' 个独立审查合格题材，未达到本次请求数量 ' + minimumPremiseSelectionCount
-              + '；原池补救已结束，跳过无法交付的完整卡生成与审核。'),
+        // A shortfall is a delivery deficit, not evidence that all retained
+        // premises are bad. Run the SAME full-card and final independent gates
+        // for every independently approved survivor, then return only those
+        // which pass. There is no additional generation/review call and the
+        // quality standard is unchanged. A genuine zero-survivor set still fails.
+        if (normalizedSelection.selected.length === 0) {
+          throw failWithPoolAudit(new Error('锁定前独立审核后没有合格题材，无法进入完整卡质量验收。'),
             'preselection_review','preselection_shortfall',{
               selectionWallMs,preselectionReviewWallMs,
-              preselectedPremises:normalizedSelection.selected,
-              premiseSelected:normalizedSelection.selected.length,
+              preselectedPremises:[],premiseSelected:0,
               selectionAudit:normalizedSelection.selectionAudit,
             });
         }
+        if (normalizedSelection.selected.length < minimumPremiseSelectionCount)
+          this.logger.warn('idea-discover: 锁定前仅有 '+normalizedSelection.selected.length
+            +'/'+requestedCount+' 个合格题材；继续生成及独立终审，保留真实缺额，不把未验收胚子冒充合格卡。');
         for (const premise of normalizedSelection.selected) {
           if (!variedCategories && premise.storyCategory && premise.storyCategory !== dto.storyCategory) {
             throw new Error('已选题材 ' + premise.premiseId + ' 未继承本次固定分类 ' + dto.storyCategory + '。');
@@ -6099,12 +6099,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (partial) {
         const reason = [...premiseSelectionFailureReasons(premiseDiscovery.selectionAudit), ...finalRejectedReasons].slice(0, 5).join('；') || '题材结构化或独立审查未通过';
         appealGate.partial = true;
-        appealGate.returned = 0;
-        const error = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
-          + '；未达到本次请求数量 ' + minimumDeliverableCount + '。未通过原因：' + reason;
-        this.logger.warn('idea-discover: ' + error);
-        return { success: false, status: 'incomplete', ideas: [], totalIdeas: 0,
-          qualifiedIdeas: acceptedWithAudit, error, appealGate };
+        appealGate.returned = acceptedWithAudit.length;
+        const warning = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
+          + '，缺额 ' + (requestedCount-selectedAccepted.length) + '。未通过原因：' + reason;
+        this.logger.warn('idea-discover: ' + warning);
+        return { success: true, status: 'partial', ideas: acceptedWithAudit,
+          totalIdeas: acceptedWithAudit.length, warning, appealGate };
       }
       this.logger.log(`idea-discover: 并发结构化和独立终审通过 ${qualifiedCount} 个，仅返回优选 ${acceptedWithAudit.length}/${requestedCount} 个`);
       return {
