@@ -1,6 +1,8 @@
 import {type PremiseSelectionResult} from './idea-discovery-contract';
 import {type PremiseSelectionReview, premiseSourceReviewIssues, premiseSelectionReviewIssues, materializePremiseSourceReview} from './premise-selection-review';
 import {mergePremiseSourceBatches} from './premise-source-batches';
+import {readGenerationBudgets} from '../config/generation-budgets';
+import {independentReviewBatches, type ReviewCallBudget} from './independent-review-batches';
 import {premisePayoffReviewIssues} from './premise-payoff-review';
 import {premiseGenreFitIssues} from './premise-genre-fit';
 import {premiseCategoryFitIssues} from './premise-category-fit';
@@ -34,12 +36,66 @@ function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionR
  * is deliberately not cached: changed cards must still be compared to retained cards. */
 export async function reviewChangedPremiseSources(selection:PremiseSelectionResult,scope:string,
  receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult)=>Promise<PremiseSelectionReview>,
- observe?:(counts:{reused:number;reviewed:number})=>void):Promise<PremiseSelectionReview> {
+ observe?:(counts:{reused:number;reviewed:number})=>void,
+ reviewPlanOnly?:(pending:PremiseSelectionResult,prior:PremiseSelectionReview,budget:ReviewCallBudget)=>Promise<PremiseSelectionReview>,
+ sharedBudget?:ReviewCallBudget):Promise<PremiseSelectionReview> {
  const key=(item:PremiseSelectionResult['selected'][number])=>sourceReceiptKey(selection,scope,item);
  const requiredGenres=(()=>{try{const parsed=JSON.parse(scope);return Array.isArray(parsed?.requiredGenres)?parsed.requiredGenres as string[]:[];}catch{return [];}})();
  const hits=selection.selected.map(item=>receipts.get(key(item)));
  const pending=selection.selected.filter((_item,index)=>!hits[index]);
  observe?.({reused:selection.selected.length-pending.length,reviewed:pending.length});
+ // A citation-only correction changes the causalPlan, not the already
+ // independently checked source story, category or genre facts. Re-review its
+ // payoff links, but do NOT repeat the full source/category/genre audit.
+ // Only use the fast path when it replaces at least two existing source
+ // partitions, so physical call count cannot grow. Other changes retain the
+ // original complete independent review without any shortcut.
+ const priorById=new Map<string,Receipt>();
+ if(reviewPlanOnly&&sharedBudget){
+  for(const item of pending){
+   const seed=selection.pool.find(row=>row.premiseId===item.premiseId);
+   for(const receipt of receipts.values()){
+    const previous=receipt.selection.selected[0];
+    if(!previous||previous.premiseId!==item.premiseId
+      ||JSON.stringify(receipt.selection.pool[0])!==JSON.stringify(seed)
+      ||JSON.stringify({...previous,causalPlan:undefined})!==JSON.stringify({...item,causalPlan:undefined})
+      ||JSON.stringify(previous.causalPlan)===JSON.stringify(item.causalPlan)
+      ||receipt.review.sourceChecks?.some(row=>row.status!=='preserved')
+      ||!receipt.review.sourceChecks?.length
+      ||receipt.review.genreChecks?.some(row=>row.status!=='fulfilled')
+      ||receipt.review.categoryChecks?.some(row=>row.status!=='fulfilled')
+      ||!receipt.review.payoffChecks?.length)continue;
+    // The scope is part of the exact receipt key. A receipt from another
+    // standard or manual genre selection is never a reusable proof.
+    if(!receipts.has(sourceReceiptKey(receipt.selection,scope,previous)))continue;
+    priorById.set(String(item.premiseId),receipt);break;
+   }
+  }
+ }
+ const planPending=pending.filter(row=>priorById.has(String(row.premiseId)));
+ const fullPending=pending.filter(row=>!priorById.has(String(row.premiseId)));
+ const batchSize=readGenerationBudgets().sourceBatchSize;
+ const existingCallFloor=Math.ceil(pending.length/Math.max(1,batchSize));
+ if(reviewPlanOnly&&sharedBudget&&planPending.length&&fullPending.length
+    &&existingCallFloor>=2&&planPending.length<=batchSize&&fullPending.length<=batchSize
+    &&sharedBudget.remaining>=2){
+   const makeSelection=(items:typeof pending):PremiseSelectionResult=>({...selection,selected:items,
+     pool:selection.pool.filter(seed=>items.some(item=>item.premiseId===seed.premiseId))});
+   const cases=[{kind:'full' as const,selection:makeSelection(fullPending)},
+     {kind:'plan' as const,selection:makeSelection(planPending)}];
+   const parts=await independentReviewBatches(cases,sharedBudget,2,async ({kind,selection:part},_index,budget)=>{
+    if(kind==='full')return {selection:part,review:await review(part)};
+    const prior=planPending.map(item=>priorById.get(String(item.premiseId))!);
+    const base=mergePremiseSourceBatches(part,prior.map(row=>row.selection),prior.map(row=>row.review));
+    return {selection:part,review:await reviewPlanOnly(part,base,budget)};
+   });
+   const reused=hits.filter((row):row is Receipt=>!!row);
+   const merged=mergePremiseSourceBatches(selection,[...reused,...parts].map(row=>row.selection),
+     [...reused,...parts].map(row=>row.review));
+   // The complete final source and payoff coverage is checked by the same
+   // materializer as the ordinary route. Nothing is marked passed by default.
+   return merged;
+ }
  let fresh:Receipt|undefined;
  if(pending.length){
   const input=pending.length===selection.selected.length?selection:{...selection,selected:pending,
