@@ -38,15 +38,26 @@ export function premisePayoffCatalog(selection:PremiseSelectionResult){
  * determine whether the outcome is material and causally established.
  */
 export function premiseUnmappedOutcomeClaims(selection:PremiseSelectionResult){
- return selection.selected.flatMap((item,index)=>{
-  const results=(Array.isArray(item.causalPlan)?item.causalPlan:[])
-   .map((link:any)=>typeof link?.result?.quote==='string'?link.result.quote.trim():'')
-   .filter(Boolean);
-  return (['reversalEffect','payoff'] as const).flatMap(field=>
-   String(item[field]||'').split(/[；。！？\\n]+/u).map(text=>text.trim())
-    .filter(text=>text.length>=8&&!results.some(quote=>text.includes(quote)||quote.includes(text)))
-    .slice(0,4).map(claim=>({ref:`S${index+1}.${field}`,claim:claim.slice(0,160)})));
- });
+  return selection.selected.flatMap((item,index)=>{
+    const results=(Array.isArray(item.causalPlan)?item.causalPlan:[])
+      .map((link:any)=>typeof link?.result?.quote==='string'?link.result.quote.trim():'')
+      .filter(Boolean);
+    return (['reversalEffect','payoff'] as const).flatMap(field=>
+      String(item[field]||'').split(/[；。！？\n]+/u).flatMap(sentence=>{
+        const text=sentence.trim();
+        if(!text)return [];
+        // A citation to ONE result clause does not establish the other
+        // outcomes in the same sentence. Remove exactly the cited spans,
+        // leaving the rest for the existing independent payoff review.
+        if(results.some(quote=>quote.includes(text)))return [];
+        let uncovered=text;
+        for(const quote of results){
+          if(uncovered.includes(quote))uncovered=uncovered.replace(quote,'');
+        }
+        const claim=uncovered.replace(/^[，、,：:\s]+|[，、,：:\s]+$/gu,'').trim();
+        return claim.length>=6?[{ref:`S${index+1}.${field}`,claim:claim.slice(0,160)}]:[];
+      }));
+  });
 }
 export function premisePayoffReviewDirective(selection:PremiseSelectionResult){
   return '\n按已注入GEN-002的缺口路由合同，每个status=gap项必须明确返回gapRepair=restore_source_conditions|replace_from_pool；只有status=gap时才可出现gapRepair。status=supported或unknown必须完全省略gapRepair与sourceConditionQuote字段（不要返回null或空串）；不能因为问题讨论过缺口就让已判supported的项附带修复指令。缺省不是自动要求换题。若原池storyCore和入选展开已经写出后来实际发生的物证核验、权限、传递及决定，仅causalPlan把终局错误地绑定到较早环节，则返回restore_source_conditions，并用sourceConditionQuote逐字引用原池已存在的关键事件或条件：优先保留同ID原题材，局部纠正因果引用，经过独立来源/兑现/同构复核后方能通过。restore_source_conditions必须加sourceConditionQuote，逐字引用同ID原池已建立的相关关键条件；若原池确实缺少决定性条件或找不到原始引用，则返回replace_from_pool，不得通过改引用伪造条件。\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
