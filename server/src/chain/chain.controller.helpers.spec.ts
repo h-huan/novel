@@ -2223,16 +2223,16 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
     }],
   });
   const card=(id:string)=>({
-    title:'案情'+id+'公开',storyType:'short_story',targetPlatform:'fanqie',
+    title:seedTitles[id],storyType:'short_story',targetPlatform:'fanqie',
     storyCategory:'悬疑',storyTone:['紧张'],writingStyle:['简洁'],
     webNovelGenre:['悬疑推理'],plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
-    hook:'权益即将被人夺走时，我发现了完整原始记录。我必须当天向有权者提交，否则连家人的住处都保不住，工作也可能丢掉。',
-    description:'我本想安稳完成当天的工作，没想到原始记录突然证明有人正在转移属于家人的权益。我选择保留本人可以接触的原件，并向有权核实的人员提交。对手以撤掉岗位和断绝收入相威胁，还让同事劝我放弃。材料被正式接收，审核人员核实了日期、签名和实际交付的凭证，才改变此前的决定。结果权益保住了，我却失去原本的岗位，也必须承受家人信任发生的变化。这些变化只能从实际提交、核验和决定推出，不能借别人的故事替代。',
-    coreConflict:'主角要提交真实记录保住权益，对手主动阻止证据核验',
-    uniquePoint:'核验过程让主角在家庭信任与已有工作之间作出不可逆选择',
-    mainReversal:'原先会夺走权益的错误决定被真实核验推翻，主角付出工作代价',
+    hook:core(id).slice(0,105),
+    description:core(id)+'这条故事通过明确的职业现场、当时已经取得的材料和真实到场的审查者共同推进；主角面对的是自己已经建立的现实关系及其代价。',
+    coreConflict:core(id).slice(0,115),
+    uniquePoint:core(id).slice(80,175),
+    mainReversal:core(id).slice(-110),
     noveltyProof:{
-      familiarShell:'职场记录争议',uncommonCombination:'现场保管原件和真实利益争夺',
+      familiarShell:'职业现场的真实冲突',uncommonCombination:'围绕'+seedTitles[id]+'的具体身份、现场证据和利益争夺',
       avoidedPatterns:'不靠神秘证据或凭空出现的决定者',
       irreplaceableWhy:'没有现场原件和核验权限就无法产生实际决定',
       secondOrderConsequence:'旧同事开始反对主角，原有合作关系因此崩裂',
