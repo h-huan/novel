@@ -97,6 +97,10 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('若前章已通过联名、决定、交付或对手改口实现目标');
     expect(source).toContain('不能再把保管同一文件、重述既有决定写成第二次实现该目标');
     expect(source).toContain('本章的文件保管、后续行动或付出代价，不得重述为前章已完成');
+    const shared = fs.readFileSync(path.resolve(chainDir, '../../shared/src/chapter-responsibility-review.ts'), 'utf8');
+    expect(shared).toContain('【跨章已完成结果不得重复兑现】');
+    expect(shared).toContain('每章的responsibility必须能被该章content与characterActions自己的实际行动独立证明');
+    expect(source).toContain('chapterResponsibilityPlanningDirective(false)');
     expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
   });
 
