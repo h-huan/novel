@@ -536,6 +536,41 @@ it('does not enter another provider attempt after the last physical call returns
   expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
 });
 
+it('reuses independent overlap when only the causalPlan citation index changes, but still rechecks semantic payoff',async()=>{
+  const plan=(id:string)=>[{action:{field:'activeChoice',quote:premise(id).activeChoice},
+    conditions:[{field:'escalation',quote:premise(id).escalation}],
+    result:{field:'payoff',quote:premise(id).payoff}}];
+  const original=normalizePremiseSelectionPayload({
+    pool:['A','B','C'].map(premise),
+    selectedPremises:['A','B'].map(id=>({...premise(id),causalPlan:plan(id)})),
+  },2,3);
+  const issue={kind:'selection_fit' as const,premiseId:'B',referencePremiseId:'B',
+    quote:premise('B').payoff,referenceQuote:premise('B').storyCore,
+    reason:'当前因果引用越过在故事中已建立的真实中间行动'};
+  let sourceCalls=0,overlapCalls=0;
+  const c=Object.create(ChainController.prototype) as any;
+  c.reviewPremiseSelection=vi.fn(async(_current:any,_std:string,mode:string)=>{
+    if(mode==='overlap'){overlapCalls++;return {passed:true,issues:[]};}
+    sourceCalls++;return sourceCalls===1?{passed:false,issues:[issue]}:{passed:true,issues:[]};
+  });
+  const improved=[{action:{field:'activeChoice',quote:premise('B').activeChoice},
+    conditions:[],result:{field:'escalation',quote:premise('B').escalation}},
+    {action:{field:'reversalEffect',quote:premise('B').reversalEffect},
+      conditions:[{field:'escalation',quote:premise('B').escalation}],
+      result:{field:'payoff',quote:premise('B').payoff}}];
+  c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+    const data={replacements:[{replacesPremiseId:'B',premise:{premiseId:'B',causalPlan:improved}}]};
+    expect(options.validate(data)).toBe(true);return {data};
+  });
+  const result=await c.reconcilePremiseSelection(original,2,3,['悬疑'],'');
+  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B']);
+  expect(result.selected[1].causalPlan).toEqual(improved);
+  expect(result.selectionAudit.finalReview.passed).toBe(true);
+  expect(sourceCalls).toBe(2);
+  expect(overlapCalls).toBe(1);
+  expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+});
+
 it('does not repair fiction if either independent audit fails to complete', async () => {
     const c=Object.create(ChainController.prototype) as any;
     c.reviewPremiseSelection=vi.fn().mockRejectedValueOnce(new Error('审查协议失败')).mockResolvedValueOnce(failure);
