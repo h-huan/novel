@@ -5955,7 +5955,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
       sameBatchPremises = premiseDiscovery.selected;
       const selectedPremises = premiseDiscovery.selected;
-      // Only the exact requested number can be delivered after all quality gates pass.
+      // Deliver up to the requested count, but only cards passing every applicable final Gate. A real shortfall remains explicit.
       const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);
       const minimumDeliverableCount = requestedCount;
       const selectedPremiseIdSet = new Set(selectedPremises.map((item: any) => String(item?.premiseId || '').trim()));
@@ -6008,7 +6008,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       await accept(structuredCards, 'initial');
 
       // Failed cards are not silently patched, reselected, or replaced after
-      // the final Gate. Their evidence stays in candidateAssessments. Since
+      // the final Gate; approved peers remain deliverable even when the target
+      // cannot be filled. Failure evidence stays in candidateAssessments. Since
       // EVERY independently vetted selected premise was structured in the
       // same wave, final selection can filter the entire verified set once.
       const fulfillmentActions: any[]=[];
