@@ -90,6 +90,37 @@ it('decodes verified JSON-escaped audit anchors before checking an exact local r
  const wrong={'characterActions.0.result':'老板仍然沉默，改口无从证明'};
  expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[],evidence)).toEqual([]);
 });
+it('targets the already-completed prior-chapter outcome instead of repeating it in the next chapter',()=>{
+ const acceptedPrior='前一章五个大队已签联名，书记改口，同意放映队自负盈亏继续留下';
+ const chapter={
+  content:'我把联名纸重新压回箱底。那张纸保住了放映队，队里的人都松了口气。',
+  scenes:[{outcome:'重新收起联名纸让放映队得以留下'}],
+  characterActions:[{action:'把联名纸重新压回箱底',result:'因此让放映队留下'}],
+  characterStates:[{stateAfter:'放映队因本章的收纸动作得以保留'}],
+ };
+ const proof={gaps:[{
+  actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'把联名纸重新压回箱底',resultEvidence:'因此让放映队留下',
+  reason:'前章已完成留队，本章只能产生保管或承担后续代价的新增结果',
+ }]};
+ const wrong={content:chapter.content.replace('重新压回','仔细压回')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[],proof).join('；'))
+  .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ const valid={
+  content:'我把联名纸重新压回箱底。留队早在前一章由联名和书记改口决定，这一章我付出攒下的结婚钱垫付片子。',
+  'scenes.0.outcome':'联名纸归档，我用个人积蓄承担放映队继续运转的费用',
+  'characterActions.0.result':'把联名纸归档；本章只产生个人垫付片子的实际代价',
+  'characterStates.0.stateAfter':'放映队继续运转，个人积蓄已用于片子费用',
+ };
+ expect(outlineFactPatchSynchronizationIssues(chapter,valid,[],proof)).toEqual([]);
+ const next=applyOutlineFactPatch(chapter,valid);
+ expect(next.content).toContain('留队早在前一章由联名和书记改口决定');
+ expect(next.characterActions[0].result).not.toContain('因此让放映队留下');
+ expect(next.scenes[0].outcome).toContain('个人积蓄');
+ expect(acceptedPrior).toContain('前一章');
+ expect(chapter.characterActions[0].result).toBe('因此让放映队留下');
+});
+
 it('rejects nonempty but unchanged patches before semantic re-review, including reordered object keys',()=>{
  const before=structuredClone(original);
  for(const patch of [{content:original.content},{'characterActions.0.result':original.characterActions[0].result},
