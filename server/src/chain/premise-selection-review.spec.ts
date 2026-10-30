@@ -177,8 +177,8 @@ it('aggregates five rejected preselection positions once, then retains independe
     }))},current);
   });
   controller.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
-    expect(prompt).toContain('replacements恰好5项');
-    const from=['D','E','F','G','H'],to=['I','J','K','L','M'];
+    expect(prompt).toContain('replacements恰好4项');
+    const from=['D','E','F','G'],to=['I','J','K','L'];
     const data={replacements:from.map((id,index)=>({
       replacesPremiseId:id,premise:premise(to[index]),
     }))};
@@ -190,46 +190,33 @@ it('aggregates five rejected preselection positions once, then retains independe
   expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
   expect(result.selectionAudit.finalReview.passed).toBe(true);
   expect(result.selectionAudit.partial).toBe(true);
-  expect(result.selectionAudit.excludedPremiseIds).toContain('M');
+  expect(result.selectionAudit.excludedPremiseIds).toContain('J');
   expect(result.selectionAudit.selectionStopReason).toBe('reviewed_hedge_filled_delivery');
 
 });
 
-it('fills three independently rejected shortlist positions from the fixed pool before full cards',async()=>{
-  const ids='ABCDEFGHIJK'.split('');
-  const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
-    selectedPremises:ids.slice(0,8).map(premise)},8,15);
-  const controller=Object.create(ChainController.prototype) as any;
-  controller.logger={log:vi.fn(),warn:vi.fn()};
-  controller.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
-    if(mode==='overlap')return {passed:true,issues:[]};
-    return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(current).map(row=>({
-      ref:row.ref,status:['F','G','H'].includes(row.premiseId)&&row.field==='payoff'?'drift':'preserved',
-      reason:'核对该题材来源、行动和结果必要条件后的实质事实判定',
-    }))},current);
-  });
-  controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-    expect(prompt).toContain('replacements恰好3项');
-    const evidencePrompt=prompt.split('【本次独立缺陷】')[1]
-      ?.split('【必须处理的位置及模式】')[0];
-    expect(evidencePrompt).toBeDefined();
-    expect(evidencePrompt).not.toContain('referenceQuote');
-    expect(evidencePrompt).not.toContain('"quote":');
-    expect(evidencePrompt).toContain('"reason"');
-    const data={replacements:['F','G','H'].map((id,index)=>({
-      replacesPremiseId:id,premise:premise(['I','J','K'][index]),
-    }))};
-    expect(options.validate(data)).toBe(true);
-    return {data};
-  });
-  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],
-    {reviews:{remaining:12},reselection:{remaining:3}},5);
-  expect(result.selected.map((x:any)=>x.premiseId)).toEqual(['A','B','C','D','E','I','J','K']);
-  expect(result.selectionAudit.reselectionAttempted).toBe(true);
-  expect(result.selectionAudit.finalReview.passed).toBe(true);
-  expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
-  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(4);
-});
+it('does not spend a reselection call on optional screening slots once five delivery candidates passed the same Gates',async()=>{
+   const ids='ABCDEFGHIJK'.split('');
+   const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
+     selectedPremises:ids.slice(0,8).map(premise)},8,15);
+   const controller=Object.create(ChainController.prototype) as any;
+   controller.logger={log:vi.fn(),warn:vi.fn()};
+   controller.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
+     if(mode==='overlap')return {passed:true,issues:[]};
+     return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(current).map(row=>({
+       ref:row.ref,status:['F','G','H'].includes(row.premiseId)&&row.field==='payoff'?'drift':'preserved',
+       reason:'核对该题材来源、行动和结果必要条件后的实质事实判定',
+     }))},current);
+   });
+   controller.llmCallWithRetry=vi.fn(async()=>{throw Error('delivery already covered; no paid reselection allowed')});
+   const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],
+     {reviews:{remaining:12},reselection:{remaining:3}},5);
+   expect(result.selected.map((x:any)=>x.premiseId)).toEqual(['A','B','C','D','E']);
+   expect(result.selectionAudit.reselectionAttempted).toBe(false);
+   expect(result.selectionAudit.finalReview.passed).toBe(true);
+   expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+   expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+ });
 
 it('does not call an overlap model for a singleton request because no pair exists',async()=>{
   const input=normalizePremiseSelectionPayload({pool:[premise('A')],
