@@ -85,9 +85,9 @@ export function premiseCausalPlanExample(): PremiseCausalLink[] {
     { action: { field: 'activeChoice', quote: '主角实际发起第一项行动的连续原文' },
       conditions: [{ field: 'openingEvent', quote: '促使该行动发生的已建立条件连续原文' }],
       result: { field: 'escalation', quote: '第一项行动当下真正产生的变化连续原文' } },
-    { action: { field: 'reversalEffect', quote: '后续物证核验或决定者实际行动的连续原文' },
-      conditions: [{ field: 'escalation', quote: '后续决定者已有证据与权限的连续原文' }],
-      result: { field: 'payoff', quote: '经后续步骤才兑现的结局与代价连续原文' } },
+    { action: { field: 'escalation', quote: '后续核验者实际到场核验或决定的连续原文' },
+      conditions: [{ field: 'escalation', quote: '核验前已取得的独立证据与决定权限连续原文' }],
+      result: { field: 'payoff', quote: '经后续动作才兑现的结局与代价连续原文' } },
   ];
 }
 
