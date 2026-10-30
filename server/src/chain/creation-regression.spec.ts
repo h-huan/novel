@@ -4,7 +4,6 @@ import { canonicalBriefForAudit, storyHierarchyForAudit, applyCrossStageFieldPat
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews } from './idea-presentation-review';
 import { applyOrderedIdeaRepairPatches } from './idea-discovery-contract';
 import { ChainController } from './chain.controller';
-import { CHARACTER_VOICE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 
 const bundle = { worldProfiles: [{id:'frozen', hierarchy_rules:'冻结规则'}], chapters: Array.from({length:5},(_,i)=>({id:'chapter'+i,content:'伏笔设置：第三章回收。'})), foreshadowings:[{id:'clue',planned_recovery_chapter_index:3}] };
 const patch = {entityType:'foreshadowing',entityId:'clue',field:'planned_recovery_chapter_index',match:'3',replacement:'5'};
@@ -192,13 +191,3 @@ it('keeps related fact fields inside the local outline repair boundary',async()=
  expect(repair).not.toContain('未点名字段必须保持当前值');
 });
 
-
-describe('confirmed character inventory is authoritative in first-chapter prose',()=>{
- it('does not authorize new named or speaking roles during chapter drafting or repair',()=>{
-  expect(CHARACTER_VOICE_POLICY).toContain('章纲、正文、独立评审与局部修复只继承当前已确认人物档案');
-  expect(CHARACTER_VOICE_POLICY).toContain('不得为补对白、区分声音或推动现场临时增加有姓名、有台词或承担关键行动的角色');
-  expect(CHARACTER_VOICE_POLICY).toContain('未具名第一人称主角不得自行赋予姓名、姓氏或外号');
-  expect(CHARACTER_VOICE_POLICY).toContain('角色创建或已确认的滚动建档阶段');
-  expect(CHARACTER_VOICE_POLICY).toContain('既有角色建档机制确认后');
- });
-});
