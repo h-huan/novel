@@ -31,7 +31,7 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
   });
 
-  it('stops before paid card work when preselection cannot meet the requested count', () => {
+  it('keeps the strict preselection Gate and still fully reviews surviving candidates for partial delivery', () => {
     expect(controllerSource).toContain('const minimumPremiseSelectionCount = requestedCount;');
     expect(controllerSource).toContain("'preselection_shortfall'");
     expect(controllerSource).toContain('全部进入并发完整卡生成');
@@ -39,8 +39,11 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('this.reservePremiseSelection(');
     expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
     expect(controllerSource).toContain('证据指向具体责任人须有区别于“只是排除自己”的指认依据');
-    expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
+    expect(controllerSource).toContain('ideas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
+    expect(controllerSource).toContain("if (normalizedSelection.selected.length === 0)");
+    expect(controllerSource).toContain("status: 'partial'");
+    expect(controllerSource).not.toContain("if (normalizedSelection.selected.length < minimumPremiseSelectionCount) {");
     expect(controllerSource).not.toContain("stoppedAt:'premise_preselection'");
   });
   it('avoids reviewing an unchanged selection twice and projects chapter events consistently', () => {
