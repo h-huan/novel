@@ -37,6 +37,33 @@ describe('bounded premise source review batches',()=>{
   expect(reviewed.sourceChecks!.find(row=>row.ref==='S1.activeChoice')?.reason).toContain('审核证据跨题材引用');
   expect(reviewed.payoffChecks?.find(row=>row.ref==='S2.payoff')?.status).toBe('supported');
  });
+ it('a malformed payoff protocol preserves independently valid source, category and peer review evidence',()=>{
+  const original={...selection(),selected:selection().selected.slice(0,2)};
+  original.selected.forEach(row=>row.storyCategory='悬疑惊悚');
+  const raw:any=report(original);
+  raw.categoryChecks=[
+    {ref:'S1.category',status:'fulfilled',evidenceRef:'S1.activeChoice',reason:'主角选择与行动在此分类下形成具体调查机制'},
+    {ref:'S2.category',status:'fulfilled',evidenceRef:'S2.activeChoice',reason:'主角选择与行动在此分类下形成具体调查机制'},
+  ];
+  raw.payoffChecks[0]={...raw.payoffChecks[0],
+    gapRepair:'restore_source_conditions',sourceConditionQuote:'原池实际已经满足必要条件'};
+  const result=quarantineIncompletePremiseReviews(raw,original,[]);
+  expect(result.payoffChecks[0].status).toBe('unknown');
+  expect(result.payoffChecks[0].protocolIncomplete).toBe(true);
+  expect(result.payoffChecks[1].status).toBe('supported');
+  expect(result.sourceChecks.every((row:any)=>row.status==='preserved')).toBe(true);
+  expect(result.categoryChecks.every((row:any)=>row.status==='fulfilled')).toBe(true);
+ });
+ it('a missing source field does not erase its separately verified payoff receipt',()=>{
+  const original={...selection(),selected:selection().selected.slice(0,2)};
+  const raw:any=report(original);
+  raw.sourceChecks=raw.sourceChecks.filter((row:any)=>row.ref!=='S1.activeChoice');
+  const result=quarantineIncompletePremiseReviews(raw,original,[]);
+  expect(result.sourceChecks.find((row:any)=>row.ref==='S1.activeChoice')?.status).toBe('unknown');
+  expect(result.payoffChecks.every((row:any)=>row.status==='supported')).toBe(true);
+  expect(result.sourceChecks.filter((row:any)=>row.ref.startsWith('S2.'))
+    .every((row:any)=>row.status==='preserved')).toBe(true);
+ });
  it('keeps unattributable review rows as a protocol failure',()=>{
   const original={...selection(),selected:selection().selected.slice(0,2)};
   const raw=report(original);
