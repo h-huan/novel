@@ -5847,8 +5847,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // Existing metadata-only repair contract had no production caller:
         // invalid dictionary tags or an ordinal/quantity mix-up went directly
         // to rejection even when the already-produced card could be fixed
-        // without changing its plot. Use at most ONE shared-budget call for
-        // eligible cards, then rerun EVERY unchanged local and semantic Gate.
+        // without changing its plot. Batch all eligible cards using the SAME
+        // shared physical-call budget, then rerun EVERY local and semantic Gate.
         // A failed/malformed patch never counts as a passed card.
         const repairable = candidates.map((card, index) => {
           const issues = assessIdeaQuality(card);
