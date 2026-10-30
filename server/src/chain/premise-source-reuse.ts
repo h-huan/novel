@@ -35,7 +35,7 @@ function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionR
 /** Source/genre/category/payoff checks are local to one premise. Pairwise overlap
  * is deliberately not cached: changed cards must still be compared to retained cards. */
 export async function reviewChangedPremiseSources(selection:PremiseSelectionResult,scope:string,
- receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult)=>Promise<PremiseSelectionReview>,
+ receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult,budget?:ReviewCallBudget)=>Promise<PremiseSelectionReview>,
  observe?:(counts:{reused:number;reviewed:number})=>void,
  reviewPlanOnly?:(pending:PremiseSelectionResult,prior:PremiseSelectionReview,budget:ReviewCallBudget)=>Promise<PremiseSelectionReview>,
  sharedBudget?:ReviewCallBudget):Promise<PremiseSelectionReview> {
@@ -84,7 +84,7 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
    const cases=[{kind:'full' as const,selection:makeSelection(fullPending)},
      {kind:'plan' as const,selection:makeSelection(planPending)}];
    const parts=await independentReviewBatches(cases,sharedBudget,2,async ({kind,selection:part},_index,budget)=>{
-    if(kind==='full')return {selection:part,review:await review(part)};
+    if(kind==='full')return {selection:part,review:await review(part,budget)};
     const prior=planPending.map(item=>priorById.get(String(item.premiseId))!);
     const base=mergePremiseSourceBatches(part,prior.map(row=>row.selection),prior.map(row=>row.review));
     return {selection:part,review:await reviewPlanOnly(part,base,budget)};
