@@ -6019,7 +6019,17 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       let fulfillmentStopReason='full_card_target_met';
       const missingAfterFirstGate=Math.max(0,requestedCount-accepted.length);
       if(missingAfterFirstGate){
-        const previouslySelectedIds=new Set(selectedPremises.map(item=>String(item.premiseId)));
+        // A rejected preselection identity is already consumed evidence, even
+        // when it never became a full card. Reusing it in the refill wave is
+        // the old repeated-selection loop that caused needless calls and gaps.
+        const selectionAudit=premiseDiscovery.selectionAudit as Record<string,any>|undefined;
+        const previouslySelectedIds=new Set<string>([
+          ...selectedPremises.map(item=>String(item.premiseId)),
+          ...(Array.isArray(selectionAudit?.initialPreselectionIds)
+            ?selectionAudit.initialPreselectionIds.map(String):[]),
+          ...(Array.isArray(selectionAudit?.excludedPremiseIds)
+            ?selectionAudit.excludedPremiseIds.map(String):[]),
+        ]);
         const unusedSeeds=premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId)));
         const desiredSupplement=Math.max(missingAfterFirstGate,
           missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2));
