@@ -163,3 +163,49 @@ it('retains independently evidenced plan-recheck rejection rather than inheritin
  expect(output.passed).toBe(false);
  expect(output.issues.some(issue=>issue.premiseId==='A')).toBe(true);
 });
+
+it('routes an all-plan-only revision to one independent payoff recheck, never to repeated source reviews',async()=>{
+ const initial=selection(),receipts:PremiseSourceReceipts=new Map();
+ const scope=JSON.stringify({standard:'same standards',requiredGenres:[]});
+ const source=vi.fn(async input=>report(input));
+ await reviewChangedPremiseSources(initial,scope,receipts,source);
+ const next=structuredClone(initial);
+ next.selected[1].causalPlan=[{action:{field:'activeChoice',quote:'原行动'},conditions:[],result:{field:'payoff',quote:'原结果'}}];
+ next.selected[3].causalPlan=[{action:{field:'activeChoice',quote:'另一个实际行动'},conditions:[],result:{field:'payoff',quote:'另一个实际结果'}}];
+ const check=vi.fn(async(input:ReturnType<typeof selection>,previous:PremiseSelectionReview,budget:{remaining:number})=>{
+  expect(input.selected.map(item=>item.premiseId)).toEqual(['B','D']);
+  expect(previous.sourceChecks).toHaveLength(20);
+  expect(previous.genreChecks).toHaveLength(2);
+  expect(previous.categoryChecks).toHaveLength(2);
+  expect(budget.remaining).toBeGreaterThan(0);
+  return {...previous,payoffChecks:report(input).payoffChecks,issues:[],passed:true};
+ });
+ const budget={remaining:5};
+ const result=await reviewChangedPremiseSources(next,scope,receipts,source,undefined,check,budget);
+ expect(source).toHaveBeenCalledTimes(1);
+ expect(check).toHaveBeenCalledTimes(1);
+ expect(result.passed).toBe(true);
+ expect(result.sourceChecks).toHaveLength(50);
+ expect(result.payoffChecks).toHaveLength(5);
+ expect(result.payoffChecks?.find(row=>row.ref==='S4.payoff')?.actionEvidenceRef).toBe('S4.activeChoice');
+ expect(budget.remaining).toBe(5);
+});
+it('does not upgrade an independently rejected corrected payoff when all changed cards are plan-only',async()=>{
+ const initial=selection(),receipts:PremiseSourceReceipts=new Map();
+ const scope=JSON.stringify({standard:'same standards',requiredGenres:[]});
+ const source=vi.fn(async input=>report(input));
+ await reviewChangedPremiseSources(initial,scope,receipts,source);
+ const next=structuredClone(initial);
+ next.selected[0].causalPlan=[{action:{field:'activeChoice',quote:'旧行动'},conditions:[],result:{field:'payoff',quote:'旧兑现'}}];
+ const check=vi.fn(async(input:ReturnType<typeof selection>,previous:PremiseSelectionReview)=>({
+  ...previous,passed:false,issues:[{kind:'selection_fit' as const,
+   premiseId:input.selected[0].premiseId,referencePremiseId:input.selected[0].premiseId,
+   quote:String(input.selected[0].activeChoice),referenceQuote:String(input.pool[0].storyCore),
+   reason:'复核后仍缺足以产生结果的必要条件'}],
+ }));
+ const result=await reviewChangedPremiseSources(next,scope,receipts,source,undefined,check,{remaining:2});
+ expect(result.passed).toBe(false);
+ expect(result.issues.some(row=>row.premiseId==='A')).toBe(true);
+ expect(source).toHaveBeenCalledTimes(1);
+ expect(check).toHaveBeenCalledTimes(1);
+});
