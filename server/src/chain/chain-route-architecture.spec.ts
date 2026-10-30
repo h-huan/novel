@@ -79,6 +79,27 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
   });
 
+  it('keeps evidenced physical proof and relationship conditions at the candidate source, not just final-card rejection', () => {
+    const source = read('chain.controller.ts');
+    const contract = read('idea-discovery-contract.ts');
+    expect(source).toContain('留在钥匙柄上的标记不能作为锁芯痕迹');
+    expect(source).toContain('反派私库样本');
+    expect(source).toContain('仅是男女朋友就不能凭空出现婚内财产');
+    expect(source).toContain('主角承诺亲自递送材料');
+    expect(source).toContain('核对物证的物理来源与样本取得链');
+    expect(contract).toContain('标记在钥匙柄上就不能突然成为锁芯的痕迹');
+    expect(contract).toContain('不在完整卡终审之后补生、换身份、重选');
+    expect(contract).not.toContain('由服务器在本批原池与共享预算内处理缺额');
+  });
+
+  it('anchors each new chapter result to an unconsumed chapter-local action instead of re-awarding prior outcomes', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('若前章已通过联名、决定、交付或对手改口实现目标');
+    expect(source).toContain('不能再把保管同一文件、重述既有决定写成第二次实现该目标');
+    expect(source).toContain('本章的文件保管、后续行动或付出代价，不得重述为前章已完成');
+    expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+  });
+
   it('stops recovery once actual delivery count is independently vetted, not surplus screening count', () => {
     const source = read('chain.controller.ts');
     expect(source).toContain('retained.selection.selected.length>=deliveryCount&&retainedReview.passed');
