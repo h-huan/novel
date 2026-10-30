@@ -60,8 +60,8 @@ export const CHARACTER_VOICE_COMPARISON_ISSUE_TYPES = ['same_voice_characters'] 
 
 /** Candidate-pool generation uses two broad batches; keep batch count independent from downstream card/review concurrency. */
 export const IDEA_PREMISE_POOL_GENERATION_CONCURRENCY = 2;
-/** Five is a concurrency ceiling, not the number of cards requested. Work items are derived from the current request; dependent stages still await their prerequisites. */
-export const IDEA_CARD_GENERATION_CONCURRENCY = 5;
+/** Maximum simultaneous remote tasks, not a fixed local worker count. The server chooses a smaller active limit from available CPU and free RAM, reserving capacity for Electron, OS and other work; all source, appeal and independent quality Gates retain their original budgets. */
+export const IDEA_CARD_GENERATION_CONCURRENCY = 8;
 
 /** Naming constraint on fictional story content, not on routing/platform metadata. */
 export const FICTION_NAMING_POLICY = {
