@@ -85,6 +85,7 @@ export function chapterResponsibilityPlanningDirective(includeSharedPolicies = t
   return [
     "【生成前规则执行编译 · 判据与审查/修复同源】逐项核对所有受世界规则约束的事件、程序与效果：作用主体、作用对象、载体、全部前置条件、人数/数量、证据组合、触发时点和能力范围都必须与已确认世界规则一致；不得因章纲压缩而省略会改变是否生效的必要条件。",
     responsibilityJudgmentRules(includeSharedPolicies),
+    "【跨章已完成结果不得重复兑现】规划章节唯一责任时，为每章分别明确此前尚未完成的结果和本章实际新增的行动。前章已经通过联名、审批、签字或其它决定完成的保全、留任、撤销、救助，后章仅持有同一张纸、回忆旧事或重复强调既定承诺，不能再次声称完成同一结果；后章须承接真实尚未发生的经营、付出代价、关系转变、剩余危机或新的有效行动。每章的responsibility必须能被该章content与characterActions自己的实际行动独立证明，而不是借前章的结果自证。不要制造多余反转或额外条件；保持已确认故事结果及合法重复发生的日常机制。",
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
   ].join("\n");
 }
