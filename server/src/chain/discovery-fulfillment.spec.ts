@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {missingRequestedIdeaSlots,affordableFullCardRefillCount,preselectionRecoveryTarget} from './discovery-fulfillment';
+import {missingRequestedIdeaSlots,affordableFullCardRefillCount,preselectionRecoveryTarget,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
 
 it('reserves independent quality-review calls for each affordable refill batch',()=>{
  expect(affordableFullCardRefillCount(5,9,2)).toBe(5);
@@ -32,4 +32,15 @@ it('limits costly preselection reselection to real user delivery deficits plus b
  expect(preselectionRecoveryTarget(1,0)).toEqual({mandatory:1,hedge:1,total:2});
  expect(preselectionRecoveryTarget(10,3)).toEqual({mandatory:7,hedge:2,total:9});
  expect(()=>preselectionRecoveryTarget(5,-1)).toThrow();
+});
+
+it('uses only authored, correctly sized title alternatives before unchanged quality Gates',()=>{
+ const original={title:'这是一个超过标准长度而无法使用的完整小说标题名称',alternateTitles:['我让老人坐了起来','更短故事'],sourcePremiseId:'P5'};
+ const fixed=retainValidStructuredIdeaTitle(original,'伺候人的手艺，不丢人');
+ expect(fixed.title).toBe('我让老人坐了起来');
+ expect(original.title).not.toBe(fixed.title);
+ expect(fixed.sourcePremiseId).toBe('P5');
+ expect(retainValidStructuredIdeaTitle({...original,title:'原本就合格'},'备用')).toMatchObject({title:'原本就合格'});
+ expect(retainValidStructuredIdeaTitle({...original,alternateTitles:[]},'伺候人的手艺，不丢人').title).toBe('伺候人的手艺，不丢人');
+ expect(retainValidStructuredIdeaTitle({...original,alternateTitles:[]},'无').title).toBe(original.title);
 });
