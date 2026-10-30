@@ -6575,7 +6575,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return {...retained.selection,selectionAudit:{
           initialReview,reselectionAttempted:true,finalReview:retainedReview,
           reviewedRecoveryCandidates:recoverySlots.length,deliveryCount,
+          partial:retained.selection.selected.length<requestedCount,
+          excludedPremiseIds:[...new Set([...isolatedIds,...retained.excludedPremiseIds])],
+          discardedSurplusPremiseIds:rejectedExtraIds,
           discardedHedgeIds:retained.excludedPremiseIds,
+          reasons:postReselectionReview.issues.filter(issue=>retained.excludedPremiseIds.includes(String(issue.premiseId))),
           rejectedHistory,selectionStopReason:'reviewed_hedge_filled_delivery',
           completeCardGatePending:true}};
       }
