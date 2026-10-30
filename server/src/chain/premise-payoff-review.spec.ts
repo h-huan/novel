@@ -222,3 +222,28 @@ it('flags an unanchored separate outcome for independent review without inventin
   expect(directive).toContain('老周拿到了工伤认定');
   expect(directive).toContain('非新增质量门');
 });
+
+it('does not hide another consequential outcome in the sentence when the plan cites only its first clause',()=>{
+  const input:any={selected:[{
+    premiseId:'P7',reversalEffect:'窗口已完成核验，随后撤销了全部持有人的许可',
+    payoff:'受理人员确认提交材料，负责部门随后撤销三家商户的许可证并执行清退。',
+    causalPlan:[{result:{field:'payoff',quote:'受理人员确认提交材料'}}],
+  }]};
+  const focus=premiseUnmappedOutcomeClaims(input);
+  expect(focus).toContainEqual({ref:'S1.payoff',
+    claim:'负责部门随后撤销三家商户的许可证并执行清退'});
+  expect(focus.some((row:any)=>row.claim.includes('撤销了全部持有人的许可'))).toBe(true);
+  expect(focus.some((row:any)=>row.claim.includes('受理人员确认提交材料'))).toBe(false);
+});
+
+it('does not silently discard the fifth unmapped outcome or split an English name at the letter n',()=>{
+  const input:any={selected:[{premiseId:'P9',
+    reversalEffect:'第一家仓库停运。第二家仓库停运。第三家仓库停运。第四家仓库停运。第五家仓库停运。',
+    payoff:'联系人Annie当面交给主管有记录的签收单。',
+    causalPlan:[{result:{field:'payoff',quote:'主管有记录的签收单'}}],
+  }]};
+  const focus=premiseUnmappedOutcomeClaims(input);
+  expect(focus.filter((row:any)=>row.ref==='S1.reversalEffect')).toHaveLength(5);
+  expect(focus.some((row:any)=>row.claim.includes('第五家仓库停运'))).toBe(true);
+  expect(focus.some((row:any)=>row.claim.includes('联系人Annie当面交给'))).toBe(true);
+});
