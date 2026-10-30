@@ -2291,7 +2291,13 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
     targetWords:'20000',targetAudience:'',
   },2);
   expect(result.success,JSON.stringify({error:result.error,gate:result.appealGate?.fulfillment})).toBe(true);
-  expect(result.totalIdeas).toBe(2);
+  expect(result.totalIdeas,JSON.stringify({
+    fulfillment:result.appealGate?.fulfillment,
+    candidateAssessments:result.appealGate?.candidateAssessments?.map((row:any)=>({
+      id:row.sourcePremiseId,passed:row.passed,issues:row.issues,
+    })),
+    structuringErrors:result.appealGate?.structuringErrors,
+  }).slice(0,6000)).toBe(2);
   expect(result.ideas.map((row:any)=>row.sourcePremiseId)).toEqual(['P1','P3']);
   expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure')
     .map(([row]:any[])=>Object.keys(seedTitles).find(key=>row.prompt.includes(
