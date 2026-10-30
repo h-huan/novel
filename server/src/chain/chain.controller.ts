@@ -6511,7 +6511,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const reviewForPrompt={...scopedReview,issues:scopedReview.issues.map(
         ({quote:_selectedQuote,referenceQuote:_sourceQuote,...issue})=>issue)};
       const protectedIds=selected.selected.filter(item=>!ids.has(String(item.premiseId))).map(item=>item.premiseId);
-      const citationOnlyIds=new Set(slots.filter(slot=>slot.mode==='correct_or_replace_from_pool'
+      const citationOnlyIds=new Set(scopedSlots.filter(slot=>slot.mode==='correct_or_replace_from_pool'
         &&slot.issues.length>0&&slot.issues.every(issue=>issue.kind==='selection_fit'))
         .map(slot=>String(slot.replacesPremiseId)));
       // Match the existing server normalizer: an independently evidenced
