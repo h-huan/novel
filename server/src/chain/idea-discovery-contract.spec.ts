@@ -742,3 +742,18 @@ describe('source-to-card payoff continuity in the existing selection call',()=>{
     expect(prompt).toContain('不能从同款物品或排除自身跳到他人归责');
   });
 });
+
+
+describe('locked-card title recovery stays inside original quality pipeline',()=>{
+ it('converts only overlong authored card titles and keeps source evidence bound to the returned object',()=>{
+  const premise={...selectedPremise('P5'),workingTitle:'伺候人的手艺，不丢人'};
+  const title='瘫了三年的老人，在我手心写下药苦和秘密';
+  const card=bindStructuredIdeaCardToPremise(premise,[{
+   title,alternateTitles:['老人掌心的秘密'],hook:'第十天老人写下药苦',description:'保洁发现老人换药',
+   scopeBreakdown:[],
+  }]);
+  expect(card.title).toBe('老人掌心的秘密');
+  expect(card.sourcePremiseId).toBe('P5');
+  expect(selectedPremiseEvidenceForIdeaCard(card)).toMatchObject({premiseId:'P5'});
+ });
+});
