@@ -1,5 +1,5 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import { missingRequestedIdeaSlots, affordableFullCardRefillCount } from './discovery-fulfillment';
+import { missingRequestedIdeaSlots, affordableFullCardRefillCount, preselectionRecoveryTarget } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -6688,7 +6688,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // actual delivery deficit is mandatory. A bounded surplus guards final
     // full-card rejection without serially repairing every failed hedge.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-    const neededReplacementSlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
+    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length);
+    const neededReplacementSlots=recoveryTarget.mandatory;
     // The repair planner includes failed *selected* identities as potential
     // self-corrections. They are NOT fresh pool choices. Count only genuinely
     // unused pool identities, plus a proven plan-only selection-fit correction;
@@ -6704,8 +6705,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // reselection response (no added model round, budget, or weaker Gate).
     // The original pool and its already-fixed eight-card shortlist bound the
     // number of positions; only independently approved survivors proceed.
-    const recoveryHedgeCount = neededReplacementSlots > 0
-      ? Math.min(2,Math.max(1,Math.ceil(neededReplacementSlots*3/4))) : 0;
+    const recoveryHedgeCount=recoveryTarget.hedge;
     const recoverySlots=deliveryCount<requestedCount
       ?repairPlan.repairSlots.slice(0,Math.min(
         neededReplacementSlots+recoveryHedgeCount,
