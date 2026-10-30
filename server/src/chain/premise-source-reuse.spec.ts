@@ -123,7 +123,7 @@ it('rechecks corrected causal plans without repeating unchanged independently ve
  next.selected[1].causalPlan=[{action:{field:'activeChoice',quote:'另一事件'},conditions:[],result:{field:'payoff',quote:'另一结果'}}];
  next.selected[2].activeChoice+='实际新增的主角行动';
  next.selected[3].payoff+='实际改变的结局';
- const payoffOnly=vi.fn(async (input,prior,budget)=>{
+ const payoffOnly=vi.fn(async (input:ReturnType<typeof selection>,prior:PremiseSelectionReview,budget:{remaining:number})=>{
    expect(input.selected.map(row=>row.premiseId)).toEqual(['A','B']);
    expect(prior.sourceChecks).toHaveLength(20);
    expect(prior.genreChecks).toHaveLength(2);
@@ -152,7 +152,7 @@ it('retains independently evidenced plan-recheck rejection rather than inheritin
  next.selected[1].causalPlan=[{action:{field:'activeChoice',quote:'另一事件'},conditions:[],result:{field:'payoff',quote:'另一结果'}}];
  next.selected[2].activeChoice+='实际新增行动';
  next.selected[3].payoff+='实际新增结局';
- const payoffOnly=vi.fn(async (input,prior)=>{
+ const payoffOnly=vi.fn(async (input:ReturnType<typeof selection>,prior:PremiseSelectionReview)=>{
   const failed=input.selected[0];
   return {...prior,passed:false,issues:[{kind:'selection_fit' as const,
     premiseId:String(failed.premiseId),referencePremiseId:String(failed.premiseId),
