@@ -217,14 +217,20 @@ it('memoizes independently approved plan-only corrections without ever skipping 
  await reviewChangedPremiseSources(initial,scope,receipts,full);
  expect(receipts.size).toBe(5);
  const repaired=structuredClone(initial);
- for(const [index,word] of [[1,'第一个'],[3,'第二个']] as const) {
-  repaired.selected[index].causalPlan=[{action:{field:'activeChoice',quote:word+'行动'},
-   conditions:[],result:{field:'payoff',quote:word+'结果'}}];
+ for(const index of [1,3]){
+  const item=repaired.selected[index];
+  item.causalPlan=[{action:{field:'activeChoice',quote:String(item.activeChoice)},
+    conditions:[{field:'escalation',quote:String(item.escalation)}],
+    result:{field:'payoff',quote:String(item.payoff)}}];
  }
  const planOnly=vi.fn(async (pending:ReturnType<typeof selection>,baseline:PremiseSelectionReview)=>{
   expect(pending.selected.map(x=>x.premiseId)).toEqual(['B','D']);
   expect(baseline.sourceChecks).toHaveLength(20);
-  return {...baseline,payoffChecks:report(pending).payoffChecks,issues:[],passed:true};
+  const independent=report(pending);
+  const checked=independent.payoffChecks!.map((row,index)=>({...row,
+    links:[{ref:`S${index+1}.causalPlan[0]`,status:'supported' as const,
+      reason:'主角原有行动已满足每一环节的实际必要条件'}]}));
+  return {...baseline,payoffChecks:checked,issues:[],passed:true};
  });
  const budget={remaining:5};
  const once=await reviewChangedPremiseSources(repaired,scope,receipts,full,undefined,planOnly,budget);
