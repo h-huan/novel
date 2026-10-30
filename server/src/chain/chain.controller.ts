@@ -6034,6 +6034,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             const batchCount=Math.min(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY,seedDeficit,
               reselectionCompletionBudget.remaining-1);
             if(batchCount>0){
+              try{
               const seedSizes=Array.from({length:batchCount},(_,index)=>
                 Math.floor(seedDeficit/batchCount)+(index<seedDeficit%batchCount?1:0));
               const existingKeys=new Set(premiseDiscovery.pool.flatMap(seed=>[
@@ -6071,6 +6072,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               fulfillmentActions.push({phase:'lightweight_pool_refill',
                 requested:seedDeficit,retained:unusedSeeds.length-
                   premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId))).length});
+              }catch(error){
+                // A failed supplementary generation is not permission to turn
+                // previously validated cards into a failed whole request.
+                const reason=error instanceof Error?error.message:String(error);
+                fulfillmentActions.push({phase:'lightweight_pool_refill_failed',reason});
+                rejectedReasons.push('补充轻量候选失败：'+reason);
+                this.logger.warn('idea-discover: 补生候选失败，保留原合格卡：'+reason);
+              }
             }
           }
           const refillTarget=Math.min(unusedSeeds.length,desiredSupplement,
