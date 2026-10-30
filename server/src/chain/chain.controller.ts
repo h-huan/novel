@@ -6125,7 +6125,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 let generated:PromiseSettledResult<Record<string,unknown>>[];
                 try{
                   generated=await independentReviewBatches(supplementarySelected,presentationBudget,
-                    IDEA_CARD_GENERATION_CONCURRENCY,async(premise,index,budget):PromiseSettledResult<Record<string,unknown>>=>{
+                    IDEA_CARD_GENERATION_CONCURRENCY,async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{
                       try{return {status:'fulfilled',value:await generateStructuredCard(premise,
                         selectedPremises.length+index,budget)};}
                       catch(reason){return {status:'rejected',reason};}
