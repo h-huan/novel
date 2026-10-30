@@ -190,4 +190,3 @@ it('keeps related fact fields inside the local outline repair boundary',async()=
  expect(repair).toContain('${OUTLINE_FACT_REPAIR_SYNC_POLICY}');
  expect(repair).not.toContain('未点名字段必须保持当前值');
 });
-
