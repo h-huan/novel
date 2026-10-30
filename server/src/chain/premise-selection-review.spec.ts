@@ -157,6 +157,7 @@ it('selects two original-pool alternatives for one real delivery shortfall and s
     discardedSurplusPremiseIds:expect.arrayContaining(['G','H']),
   });
   expect(result.selectionAudit.reasons.some((row:any)=>row.premiseId==='J')).toBe(true);
+  expect(result.selectionAudit.selectionStopReason).toBe('reviewed_hedge_filled_delivery');
   expect(result.selectionAudit.finalReview.passed).toBe(true);
 });
 
@@ -190,6 +191,7 @@ it('aggregates five rejected preselection positions once, then retains independe
   expect(result.selectionAudit.finalReview.passed).toBe(true);
   expect(result.selectionAudit.partial).toBe(true);
   expect(result.selectionAudit.excludedPremiseIds).toContain('M');
+  expect(result.selectionAudit.selectionStopReason).toBe('reviewed_hedge_filled_delivery');
 
 });
 
