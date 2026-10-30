@@ -108,6 +108,8 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
     const normalizer = read('premise-selection-review.ts');
     expect(source).toContain('const reselectionOutputShape=');
+    // A mandatory hedged replacement must not receive the old plan-only JSON template.
+    expect(source).toContain('const citationOnlyIds=new Set(scopedSlots.filter');
     expect(source).toContain('citationOnlyIds.has(String(slot.replacesPremiseId))');
     expect(source).toContain('【每个问题位置的实际输出形状】');
     expect(source).not.toContain('只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID"');
