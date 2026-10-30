@@ -1798,9 +1798,9 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       const cardCalls=generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure');
       expect(cardCalls).toHaveLength(1);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
-      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
-      expect(result.ideas.map((card:any)=>card.sourcePremiseId)).toEqual(['P1']);
-      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,returned:1,qualified:1,partial:true});
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+      expect(result.qualifiedIdeas.map((card:any)=>card.sourcePremiseId)).toEqual(['P1']);
+      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,returned:0,qualified:1,partial:true});
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:3,maxConcurrency:2});
       return;
     }
@@ -1823,10 +1823,10 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
       expect(completeCardCalls).toHaveLength(expectedCount);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
-      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:verifiedCount});
-      expect(result.ideas).toHaveLength(verifiedCount);
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+      expect(result.qualifiedIdeas).toHaveLength(verifiedCount);
       expect(result.appealGate).toMatchObject({
-        requested:5,returned:verifiedCount,qualified:verifiedCount,partial:true,minimumDeliverableCount:5,
+        requested:5,returned:0,qualified:verifiedCount,partial:true,minimumDeliverableCount:5,
       });
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
         target:15,generated:expectedCount,shortfall:15-expectedCount,batchCount:3,maxConcurrency:2,
@@ -1849,17 +1849,17 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:3,maxConcurrency:2});
     if(failure==='review_budget'){
       expect(generate).toHaveBeenCalledTimes(6);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
-      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});expect(result.appealGate.repairAttempted).toBe(false);
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('bounded_refill_shared_budget_shortfall');return;
     }
     if (failure === 'dimension_microrepair') {
       const calls = generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_metadata_repair');
       expect(calls).toHaveLength(1);
       expect(calls[0][0].prompt).toContain('plotTags');
-      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
-      expect(result.ideas[0].sourcePremiseId).toBe('P1');
-      expect(result.ideas[0].plotTags).toEqual(['调查']);
-      expect(result.ideas[0].mainReversal).toBe(strongCard.mainReversal);
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+      expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
+      expect(result.qualifiedIdeas[0].plotTags).toEqual(['调查']);
+      expect(result.qualifiedIdeas[0].mainReversal).toBe(strongCard.mainReversal);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       return;
     }
@@ -1882,18 +1882,18 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(firstWaveCalls).toHaveLength(6);
     expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_premise_pool_refill').length).toBeLessThanOrEqual(2);
     expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_local_repair')).toHaveLength(0);
-    expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
-    expect(result.ideas).toHaveLength(1);
-    expect(result.ideas[0].sourcePremiseId).toBe('P1');
-    expect(result.appealGate).toMatchObject({requested:2,qualified:1,returned:1,partial:true});
+    expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+    expect(result.ideas).toHaveLength(0);expect(result.qualifiedIdeas).toHaveLength(1);
+    expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
+    expect(result.appealGate).toMatchObject({requested:2,qualified:1,returned:0,partial:true});
     if (mixed) {
-      expect(result.ideas[0].storyCategory).toBe('悬疑惊悚');
+      expect(result.qualifiedIdeas[0].storyCategory).toBe('悬疑惊悚');
       const cardPrompts = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure').map(([request]: any[]) => request.prompt);
       expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseOne.workingTitle))).toContain('分类=悬疑惊悚');
       expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseTwo.workingTitle))).toContain('分类=现实生活');
       expect(result.appealGate.selectedCategories).toEqual(['悬疑惊悚', '现实生活']);
     }
-    expect(result.totalIdeas).toBe(1);
+    expect(result.totalIdeas).toBe(0);
     expect(result.warning).toContain('请求 2，最终通过 1');
     if (cardFailed) {
       expect(result.appealGate.structuringErrors).toEqual([expect.objectContaining({ sourcePremiseId: 'P2' })]);
