@@ -128,6 +128,39 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       }
     }
 
+    // Initial creation and resumed creation insert the same canonical world/profile
+    // fields. Historical databases may already have migration 001 recorded but
+    // still predate these columns; CREATE TABLE IF NOT EXISTS cannot add them.
+    // Reconcile only required write/read fields, never replace either table or
+    // the persisted story facts. Keep the source-review/transaction Gate intact.
+    const worldCreationColumns: Array<{table:string;columns:Array<[string,string]>}> = [
+      {table:'world_settings',columns:[
+        ['rules',"TEXT DEFAULT '[]'"],['atmosphere',"TEXT DEFAULT ''"],
+        ['story_premise',"TEXT DEFAULT ''"],['locations',"TEXT DEFAULT '[]'"],
+        ['social_rules',"TEXT DEFAULT ''"],['special_settings',"TEXT DEFAULT ''"],
+        ['setting_type',"TEXT DEFAULT 'full'"],
+      ]},
+      {table:'world_system_profiles',columns:[
+        ['synopsis',"TEXT DEFAULT ''"],['basic_info',"TEXT DEFAULT ''"],
+        ['era',"TEXT DEFAULT ''"],['locations',"TEXT DEFAULT ''"],
+        ['atmosphere_tone',"TEXT DEFAULT ''"],['rules',"TEXT DEFAULT ''"],
+        ['social_structure',"TEXT DEFAULT ''"],['tech_supernatural',"TEXT DEFAULT ''"],
+        ['system_mechanics',"TEXT DEFAULT ''"],['culture_customs',"TEXT DEFAULT ''"],
+        ['naming_rules',"TEXT DEFAULT ''"],['scale_plan',"TEXT DEFAULT ''"],
+        ['ending',"TEXT DEFAULT ''"],['hierarchy_rules',"TEXT DEFAULT ''"],
+        ['supplementary',"TEXT DEFAULT ''"],
+      ]},
+    ];
+    for (const {table,columns} of worldCreationColumns) {
+      if (!hasTable(db,table)) continue;
+      for (const [name,definition] of columns) {
+        if (!hasColumn(db,table,name)) {
+          db.exec(`ALTER TABLE "${table}" ADD COLUMN "${name}" ${definition}`);
+          actions.push(`creation_world_column.${table}.${name}`);
+        }
+      }
+    }
+
     const schemaTableIsCurrent =
       hasColumn(db, 'quality_execution_schema', 'id') &&
       hasColumn(db, 'quality_execution_schema', 'version') &&
