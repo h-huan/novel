@@ -196,3 +196,29 @@ it('does not treat a private-message rewrite as a fix for the group-message cont
  expect(outlineFactPatchSynchronizationIssues(conflictingChapter, unrelatedChannelEdit, [groupReplyConflict]).join(' '))
   .toContain('没有直接修改冲突描述中的原始断言');
 });
+
+
+it('does not accept a fish-count repair that leaves the opposite count in dialogue or action fields',()=>{
+ const chapter={
+  content:'三条翻肚的草鱼，两条已经硬了。后来又死了两条，前后四条。我把四条死鱼捞进一只空桶。我说：我就自己死了五条。',
+  characterActions:[{action:'把五条死鱼捞进空桶，挑出一条去找老葛',result:'老葛答应开市再核对'}],
+ };
+ const issue=JSON.stringify({
+  location1:'本批·第3章.content',quote1:chapter.content,
+  location2:'本批·第3章.characterActions[0].action',quote2:chapter.characterActions[0].action,
+  conflict:'content写“前后四条”“我把四条死鱼捞进一只空桶”，台词却说“我就自己死了五条”，characterActions写“把五条死鱼捞进空桶”。同批死鱼只有四条。',
+  calculation:'前后共4条，与5条相差1条。',
+ });
+ const dialogueOnly={content:chapter.content.replace('我就自己死了五条','我就自己死了四条')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,dialogueOnly,[issue]).join('；'))
+   .toContain('数量矛盾仍在多个已举证字段中并存');
+ const actionOnly={'characterActions.0.action':'把四条死鱼捞进空桶，挑出一条去找老葛'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,actionOnly,[issue]).join('；'))
+   .toContain('数量矛盾仍在多个已举证字段中并存');
+ const complete={...dialogueOnly,...actionOnly};
+ expect(outlineFactPatchSynchronizationIssues(chapter,complete,[issue])).toEqual([]);
+ const corrected=applyOutlineFactPatch(chapter,complete);
+ expect(corrected.content).toContain('死了四条');
+ expect(corrected.characterActions[0].action).toContain('四条死鱼');
+ expect(chapter.content).toContain('死了五条');
+});
