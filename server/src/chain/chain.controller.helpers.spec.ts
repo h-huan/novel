@@ -2270,7 +2270,9 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
   controller.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
   controller.completePremiseCausalPlans=vi.fn(async(input:any)=>input);
   controller.reconcilePremiseSelection=vi.fn(async(input:any)=>({...input,selectionAudit:{finalReview:{passed:true,issues:[]}}}));
-  controller.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[]}))};
+  controller.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[],
+    signals:{distinctivenessScore:4,descriptionProgressions:4,hookHasRelationship:true},
+    readerExperienceProfile:{densityMode:'balanced',pace:'continuous',evidence:[]}}))};
   controller.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((row,index)=>{
     const pass=row.sourcePremiseId!=='P2';
     return {position:index+1,title:row.title,titleCompelling:true,
