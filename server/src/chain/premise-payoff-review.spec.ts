@@ -198,6 +198,10 @@ it('makes the existing independent source/payoff verdict test adversarial consen
  expect(prompt).toContain('暂停受理、中止办理、进入调查');
  expect(prompt).toContain('过去的投诉录音、旧账与历史档案只能证明其中真实记载的事件');
  expect(prompt).toContain('不能被当作以后另一份雇佣约定');
+ // 2026-10-30 independent review: "supported" with a field-only reversal
+ // citation remains unverified unless the actual operation is anchored.
+ expect(prompt).toContain('只给S序号.reversalEffect字段名却没有独立操作的逐字锚点属于证据协议不完整');
+ expect(prompt).toContain('优先引用本题材openingEvent、activeChoice或escalation里真实发生');
 });
 
 it('keeps repair routing strictly conditional on a real gap rather than poisoning a supported verdict',()=>{
