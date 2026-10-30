@@ -127,7 +127,7 @@ export const discoveryResponseMatchesSelection = (
   && (allowQualifiedPartial ? ideas.length > 0 && ideas.length < state.ideaCount : ideas.length === state.ideaCount)
   && ideas.every((idea) => idea.storyType === state.storyType && idea.targetPlatform === state.targetPlatform);
 
-/** Normalize both the current server partial-success contract and the legacy incomplete contract. */
+/** Accept current incomplete diagnostic results and older partial-success responses; only full batches finish discovery. */
 export const normalizeDiscoveryResponse = (
   response: unknown,
   requestedCount: number,
