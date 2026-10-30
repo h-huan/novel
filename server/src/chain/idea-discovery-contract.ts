@@ -1,3 +1,4 @@
+import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE } from './premise-causal-plan';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
@@ -368,7 +369,10 @@ export function bindStructuredIdeaCardToPremise(
     .filter((value):value is string=>typeof value==='string'&&!!value.trim());
   const ending=closure.filter((value,index)=>!closure.some((other,otherIndex)=>otherIndex!==index
     &&other.includes(value)&&(other.length>value.length||otherIndex<index))).join('\n');
-  const boundCard = bindUniqueIdeaScopeAllocation({ ...safeCard, ...(ending?{ending}:{}), sourcePremiseId: premiseId });
+  // Existing alternate titles or the fixed seed title may correct a pure length
+  // failure without a new LLM call; no unreviewed card is marked approved.
+  const titledCard = retainValidStructuredIdeaTitle(safeCard, selectedPremise.workingTitle);
+  const boundCard = bindUniqueIdeaScopeAllocation({ ...titledCard, ...(ending?{ending}:{}), sourcePremiseId: premiseId });
   selectedPremiseEvidenceByCard.set(boundCard, structuredClone(selectedPremise));
   return boundCard;
 }
