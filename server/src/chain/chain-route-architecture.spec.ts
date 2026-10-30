@@ -104,6 +104,17 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
   });
 
+  it('uses existing plan-only reselection support instead of requesting unchanged whole stories', () => {
+    const source = read('chain.controller.ts');
+    const normalizer = read('premise-selection-review.ts');
+    expect(source).toContain('const reselectionOutputShape=');
+    expect(source).toContain('citationOnlyIds.has(String(slot.replacesPremiseId))');
+    expect(source).toContain('【每个问题位置的实际输出形状】');
+    expect(source).not.toContain('只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID"');
+    expect(normalizer).toContain('const planOnly = row.premiseId === slotId');
+    expect(normalizer).toContain('bySlot.set(slotId, { ...slot.original, causalPlan: row.causalPlan })');
+  });
+
   it('stops recovery once actual delivery count is independently vetted, not surplus screening count', () => {
     const source = read('chain.controller.ts');
     expect(source).toContain('retained.selection.selected.length>=deliveryCount&&retainedReview.passed');
