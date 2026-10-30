@@ -6569,7 +6569,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const retained=retainReviewedPremises(selected,postReselectionReview,
         repairPlan.protectedItems.map(item=>String(item.premiseId)));
       const retainedReview=retainPremiseReviewEvidence(selected,postReselectionReview,retained.selection);
-      if(retained.selection.selected.length>=requestedCount&&retainedReview.passed){
+      if(retained.selection.selected.length>=deliveryCount&&retainedReview.passed){
         this.logger?.log('锁定前一次并发冗余恢复已满足实际交付目标 '
           +retained.selection.selected.length+'/'+deliveryCount+'，不再串行换选');
         return {...retained.selection,selectionAudit:{
