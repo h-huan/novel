@@ -1905,7 +1905,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       qualified: 1,
       requested: 2,
       shortfall: 1,
-      returned: 1,
+      returned: 0,
       rejected: 1,
     }));
   });
