@@ -16,7 +16,12 @@ export function affordableFullCardRefillCount(
 }
 
 export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:ReadonlySet<string>,requestedCount:number):string[] {
-  return slotIds.filter(id=>!!id&&!acceptedIds.has(id)).slice(0,Math.max(0,requestedCount-acceptedIds.size));
+  if (!Number.isInteger(requestedCount) || requestedCount < 0) throw Error('请求交付数量无效');
+  const uniqueSlots = [...new Set(slotIds.filter(id => !!id))];
+  // Only approved identities belonging to this reviewed batch satisfy its delivery demand.
+  // Unknown or duplicate IDs must not hide a genuine shortfall.
+  const approvedInBatch = uniqueSlots.filter(id => acceptedIds.has(id)).length;
+  return uniqueSlots.filter(id => !acceptedIds.has(id)).slice(0, Math.max(0, requestedCount - approvedInBatch));
 }
 
 /** One scoped preselection repair wave: optional screening surplus is not
