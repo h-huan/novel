@@ -6153,6 +6153,44 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     return applyPremiseCausalPlanRepairs(selection, this.safeExtractJson(response.content, {}));
   }
 
+  /** Citation-only changes must independently recheck the ACTUAL outcome links,
+   * but need not pay to re-audit unchanged source facts, category and genre.
+   * No previous payoff verdict is upgraded or reused: only the validated
+   * recheck can replace its original negative finding. */
+  private async reviewChangedPremisePayoff(
+    selection: ReturnType<typeof normalizePremiseSelectionPayload>,
+    baseline: PremiseSelectionReview,
+    standard: string,
+    physicalCallBudget: {remaining:number},
+  ): Promise<PremiseSelectionReview> {
+    const validate=(value:unknown)=>premisePayoffReviewIssues(value,selection);
+    const response=await this.llmCallWithRetry<any>('已核对题材的因果引用定向复核',
+      standard
+      +'\n本批仅有causalPlan原文引用与因果索引发生变化；原池storyCore和全部展开叙事字段均未改变。'
+      +'来源继承、分类机制、指定流派原审查仍有效，不重写或猜测那些结论。'
+      +'但原payoff缺口仍是阻断，不得沿用旧通过结论或仅因为引用修正就宣告因果成立。'
+      +'逐项独立核对本次实际causalPlan每个行动、条件、结果，以及计划外反转与兑现主张。'
+      +'真实缺口须返回gap并按同一原池来源证据决定restore_source_conditions或replace_from_pool。'
+      +'本轮只输出payoffChecks，不返回sourceChecks、categoryChecks、genreChecks或新的故事事实。'
+      +'\n【唯一不可更改的原池】'+JSON.stringify(selection.pool)
+      +'\n【索引修正后的题材全文】'+JSON.stringify(selection.selected)
+      +premisePayoffReviewDirective(selection)
+      +'\n只输出JSON：{"payoffChecks":[按上述逐卡目录完整填写每项因果核查]}。',
+      {scenario:'idea_generate',stepKey:'idea_premise_payoff_recheck',temperature:0.1,
+        timeout:LLM_TUNABLES.timeoutComplex(),physicalCallBudget,
+        validate:value=>validate(value).length===0,
+        describeValidation:value=>validate(value),
+        retryInstruction:'只补齐payoffChecks的真实因果引用或审查协议字段；不得改动当前题材或把仍缺少样本、权限、行动的gap改成supported。'},
+    );
+    if(!response.data)throw new Error('变更因果引用的独立兑现复核未完成：'+(response.validationIssues||response.warnings||[]).join('；'));
+    const failures=materializePremisePayoffReview(response.data,selection);
+    // The fast path is entered only after every source field, category and
+    // genre already has a completed, reusable independent review. All prior
+    // selection_fit issues in this path originated from the OLD causal plan.
+    return {...baseline,payoffChecks:response.data.payoffChecks,issues:failures,
+      passed:failures.length===0};
+  }
+
   private async reviewPremiseSelection(selection: ReturnType<typeof normalizePremiseSelectionPayload>, standard: string, mode: 'overlap' | 'source_drift', physicalCallBudget?: { remaining: number }, sourceBatch = false, requiredGenres:readonly string[]=[], reviewLimiter?:ReturnType<typeof createReviewLimiter>, overlapFocusId?:string | readonly string[]): Promise<PremiseSelectionReview> {
     if (mode === 'source_drift' && !sourceBatch) {
       const budget = premiseSourceCallBudget(physicalCallBudget);
@@ -6268,11 +6306,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       try {reviews=await independentReviewBatches(modes,reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,
         (mode,_index,budget)=>mode==='source_drift'
           ? reviewChangedPremiseSources(selection,sourceScope,sourceReceipts,
-              pending=>this.reviewPremiseSelection(pending,standard,mode,budget,false,requiredGenres,limiter),
+              (pending,allowance)=>this.reviewPremiseSelection(pending,standard,mode,allowance||budget,false,requiredGenres,limiter),
               counts=>{
                 sourceReviewReuse={reused:Number(counts.reused)||0,reviewed:Number(counts.reviewed)||0};
                 this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核只复核变化项涉及的配对`);
-              })
+              },
+              (pending,prior,allowance)=>this.reviewChangedPremisePayoff(pending,prior,standard,allowance),budget)
           : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter,changeScope?.pairFocusIds));}
       catch(error){throw new Error('锁定前独立审查未完成，未生成完整卡：'+String(error));}
       const sourceReview=reviews[0];
