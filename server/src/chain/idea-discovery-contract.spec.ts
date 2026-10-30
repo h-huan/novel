@@ -112,8 +112,8 @@ describe('requested genre is an identity constraint, not a duplicate verdict',()
     // causal links or downgrade the preselection quality contract.
     expect(prompt).toContain('最短连续原文');
     expect(prompt).toContain('不丢掉决定性桥接');
-    expect(prompt).toContain('勿跨字段重述同一整段');
-    expect(prompt).toContain('必要的行动主体、对象、前置能力与兑现条件必须完整保留');
+    expect(prompt).toContain('严格避免重复叙述原池全文和其它字段');
+    expect(prompt).toContain('必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留');
   });
 });
 describe('idea discovery preselection contract', () => {
@@ -731,6 +731,10 @@ describe('source-to-card payoff continuity in the existing selection call',()=>{
     expect(prompt).toContain('临时拦截、未签字、封存或暂缓若随后被对手撤销');
     expect(prompt).toContain('社保稽核与工伤认定');
     expect(prompt).toContain('进入走廊或同地出现');
+    expect(prompt).toContain('人物是否有途径得知其随后说出的秘密或单号');
+    expect(prompt).toContain('关键物证/账本/录像如何在实际地点与保管人之间移动');
+    expect(prompt).toContain('结果由谁在什么条件下作出有效决定');
+    expect(prompt).toContain('必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留');
   });
   it('does not upgrade a stopped process or past recording to a new completed outcome during card structuring',()=>{
     const prompt=ideaCardStructuringDirective(selectedPremise('P1'),[],false);
@@ -740,10 +744,6 @@ describe('source-to-card payoff continuity in the existing selection call',()=>{
     expect(prompt).toContain('临时拦截被对手绕过后');
     expect(prompt).toContain('不同机关的调查、受理、认定');
     expect(prompt).toContain('不能从同款物品或排除自身跳到他人归责');
-    expect(prompt).toContain('人物是否有途径得知其随后说出的秘密或单号');
-    expect(prompt).toContain('关键物证/账本/录像如何在实际地点与保管人之间移动');
-    expect(prompt).toContain('结果由谁在什么条件下作出有效决定');
-    expect(prompt).toContain('必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留');
   });
 });
 
