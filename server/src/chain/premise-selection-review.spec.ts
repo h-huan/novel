@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -959,4 +959,34 @@ it('uses the existing single original-pool replacement wave for an unverified re
   expect(result.selectionAudit).toMatchObject({reselectionAttempted:true,finalReview:{passed:true,issues:[]}});
   expect(shared.reselection.remaining).toBe(2);
   expect(result.selected.every((item:any)=>item.premiseId!=='A')).toBe(true);
+});
+
+it('enumerates only post-reselection pairs involving changed identities and does not duplicate old pairs',async()=>{
+  const ids=['A','B','C','D'];
+  const selected=normalizePremiseSelectionPayload({
+    pool:ids.map(premise),selectedPremises:ids.map(premise),
+  },4,4);
+  expect(premiseOverlapPairs(selected,['C'])).toEqual([
+    {premiseId:'A',referencePremiseId:'C'},
+    {premiseId:'B',referencePremiseId:'C'},
+    {premiseId:'C',referencePremiseId:'D'},
+  ]);
+  expect(premiseOverlapPairs(selected,['B','D'])).toEqual([
+    {premiseId:'A',referencePremiseId:'B'},
+    {premiseId:'A',referencePremiseId:'D'},
+    {premiseId:'B',referencePremiseId:'C'},
+    {premiseId:'B',referencePremiseId:'D'},
+    {premiseId:'C',referencePremiseId:'D'},
+  ]);
+  expect(premiseOverlapPairs(selected)).toHaveLength(6);
+  const c=Object.create(ChainController.prototype) as any;
+  c.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
+    const scope=prompt.split('【本次必须独立比较的无序题材配对】')[1]?.split('。逐对核对')[0];
+    expect(JSON.parse(scope)).toEqual(premiseOverlapPairs(selected,['C']));
+    expect(prompt).toContain('不重复消耗模型审查');
+    expect(options.validate({passed:true,issues:[]})).toBe(true);
+    return {data:{passed:true,issues:[]}};
+  });
+  await c.reviewPremiseSelection(selected,'已核验的相同执行设定','overlap',undefined,false,[],undefined,['C']);
+  expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
 });
