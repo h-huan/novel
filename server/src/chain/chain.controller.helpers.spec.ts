@@ -1572,7 +1572,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery orchestrator with simulated model responses', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused', 'pool_naming', 'dimension_microrepair'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused', 'pool_naming', 'dimension_microrepair', 'dimension_multi_microrepair'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1640,7 +1640,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       },
     };
 
-    if (failure === 'tag_combo_reused') {
+    if (failure === 'tag_combo_reused' || failure === 'dimension_multi_microrepair') {
       // The same valid "紧张 / 简洁 / 悬疑推理 / 调查" combination is
       // appropriate for two substantially different stories. It may not be
       // used as a proxy for narrative duplication or force label mutation.
@@ -1661,6 +1661,10 @@ describe('idea discovery orchestrator with simulated model responses', () => {
           readerQuestion: '修秤日期怎样揭穿被改的押金，维修工又能否保住母亲的信任？',
         },
       });
+    }
+    if (failure === 'dimension_multi_microrepair') {
+      strongCard.plotTags = ['未授权标签'];
+      weakCard.plotTags = ['未授权标签'];
     }
     const requestedCount = failure === 'pool_below_minimum' || failure === 'pool_top_up_unique' ? 5 : 2;
     const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
@@ -1704,8 +1708,8 @@ describe('idea discovery orchestrator with simulated model responses', () => {
         return { content: JSON.stringify({ ideas: [weakCard] }) };
       }
       if (step === 'idea_card_metadata_repair') {
-        if (failure !== 'dimension_microrepair') throw Error('unexpected metadata repair');
-        return { content: JSON.stringify({ patches: [{ dimensionPatch: { plotTags: ['调查'] } }] }) };
+        if (!['dimension_microrepair','dimension_multi_microrepair'].includes(failure)) throw Error('unexpected metadata repair');
+        return { content: JSON.stringify({ patches: Array.from({length:failure==='dimension_multi_microrepair'?2:1},()=>({ dimensionPatch: { plotTags: ['调查'] } })) }) };
       }
       if (step === 'idea_card_local_repair') {
         if (failure === 'repair_network') throw new Error('repair connection reset');
@@ -1860,6 +1864,14 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
       expect(result.qualifiedIdeas[0].plotTags).toEqual(['调查']);
       expect(result.qualifiedIdeas[0].mainReversal).toBe(strongCard.mainReversal);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      return;
+    }
+    if (failure === 'dimension_multi_microrepair') {
+      expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_metadata_repair')).toHaveLength(1);
+      expect(result.success).toBe(true);
+      expect(result.ideas).toHaveLength(2);
+      expect(result.ideas.map((card:any)=>card.plotTags)).toEqual([['调查'],['调查']]);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       return;
     }
