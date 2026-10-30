@@ -740,6 +740,10 @@ describe('source-to-card payoff continuity in the existing selection call',()=>{
     expect(prompt).toContain('临时拦截被对手绕过后');
     expect(prompt).toContain('不同机关的调查、受理、认定');
     expect(prompt).toContain('不能从同款物品或排除自身跳到他人归责');
+    expect(prompt).toContain('人物是否有途径得知其随后说出的秘密或单号');
+    expect(prompt).toContain('关键物证/账本/录像如何在实际地点与保管人之间移动');
+    expect(prompt).toContain('结果由谁在什么条件下作出有效决定');
+    expect(prompt).toContain('必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留');
   });
 });
 
