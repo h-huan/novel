@@ -1845,7 +1845,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     if(failure==='review_budget'){
       expect(generate).toHaveBeenCalledTimes(5);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});expect(result.appealGate.repairAttempted).toBe(false);
-      expect(result.appealGate.fulfillment.stopReason).toBe('parallel_full_card_gate_complete');return;
+      expect(result.appealGate.fulfillment.stopReason).toBe('bounded_refill_shared_budget_shortfall');return;
     }
     if (failure === 'tag_combo_reused') {
       expect(result.success).toBe(true);
@@ -1857,10 +1857,14 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       return;
     }
     const cardFailed = failure === 'card_network' || failure === 'card_shape';
-    // No card-repair step exists after the initial independent final Gate.
+    // The first complete-card Gate still runs once. Refilling is demand-driven,
+    // may attempt one bounded seed top-up, and must never lose passed cards.
     expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(1);
     expect(result.appealGate.repairGenerated).toBe(0);
-    expect(generate).toHaveBeenCalledTimes(5);
+    const firstWaveCalls=generate.mock.calls.filter(([req]:any[])=>
+      ['idea_premise_pool_generation','idea_premise_selection','idea_card_structure'].includes(req.metrics?.stepKey));
+    expect(firstWaveCalls).toHaveLength(5);
+    expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_premise_pool_refill').length).toBeLessThanOrEqual(2);
     expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_local_repair')).toHaveLength(0);
     expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
     expect(result.ideas).toHaveLength(1);
