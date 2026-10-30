@@ -1757,12 +1757,12 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
     const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
-    expect(poolCalls).toHaveLength(requestedCount === 5 ? 3 : 2);
+    // These fixtures only return the requested number of distinct seeds;
+    // preserve one screened-reserve top-up regardless of request size.
+    expect(poolCalls).toHaveLength(3);
     expect(poolCalls.slice(0, 2).map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
-    if (requestedCount === 5) {
-      expect(poolCalls[2][0].metrics?.attempt).toBe(2);
-      expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
-    }
+    expect(poolCalls[2][0].metrics?.attempt).toBe(2);
+    expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
     // Parallel batches cannot see one another: preserve complementary actual
     // strategy search directions without adding calls or reducing any Gate.
@@ -1779,7 +1779,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
     expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
     const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
-    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(requestedCount === 5 ? 3 : 2);
+    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(3);
     expect(selectionCall?.[0].prompt).toContain('【服务器已固定的候选池；不得新增、改写或重新编号】');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
@@ -1787,7 +1787,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
      if(failure==='pool_naming'){
        expect(selectionCall?.[0].prompt).not.toContain('禁止命名的前置候选');
        expect(selectionCall?.[0].prompt).not.toContain('宠物豆包被接回家');
-       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({invalid:{naming:1},generated:2,supplementAttempted:false});
+       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({invalid:{naming:1},generated:2,supplementAttempted:true,supplementAdded:0});
      }
     if(failure==='preselection_shortfall'){
       const cardCalls=generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure');
@@ -1796,7 +1796,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
       expect(result.ideas.map((card:any)=>card.sourcePremiseId)).toEqual(['P1']);
       expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,returned:1,qualified:1,partial:true});
-      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:3,maxConcurrency:2});
       return;
     }
     expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
@@ -1834,16 +1834,16 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[firstCardCallIndex]);
 
     if (failure === 'review_protocol') {
-      expect(generate).toHaveBeenCalledTimes(5);
+      expect(generate).toHaveBeenCalledTimes(6);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);
       expect(result.error).toContain('审查未完成');
       return;
     }
 
-    expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:2,maxConcurrency:2});
+    expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:3,maxConcurrency:2});
     if(failure==='review_budget'){
-      expect(generate).toHaveBeenCalledTimes(5);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(generate).toHaveBeenCalledTimes(6);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});expect(result.appealGate.repairAttempted).toBe(false);
       expect(result.appealGate.fulfillment.stopReason).toBe('bounded_refill_shared_budget_shortfall');return;
     }
@@ -1863,7 +1863,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(result.appealGate.repairGenerated).toBe(0);
     const firstWaveCalls=generate.mock.calls.filter(([req]:any[])=>
       ['idea_premise_pool_generation','idea_premise_selection','idea_card_structure'].includes(req.metrics?.stepKey));
-    expect(firstWaveCalls).toHaveLength(5);
+    expect(firstWaveCalls).toHaveLength(6);
     expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_premise_pool_refill').length).toBeLessThanOrEqual(2);
     expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_local_repair')).toHaveLength(0);
     expect(result).toMatchObject({success:true,status:'partial',totalIdeas:1});
