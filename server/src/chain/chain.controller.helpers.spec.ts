@@ -2196,6 +2196,111 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   expect(c.logger.log.mock.calls.some((args:any[])=>args.some((value:any)=>String(value).includes('全部进入并发完整卡生成')))).toBe(true);
 });
 
+it('fills a failed final-card delivery slot from unused lightweight seeds without regenerating approved cards',async()=>{
+  const core=(id:string)=>'【处境触发】'+id+'发现关键权益即将被剥夺，必须在当日采取行动。'
+    +'【主动选择】主角亲自取出可核验的原始材料，请求有权人到场核实。'
+    +'【必要条件】记录由本人实际取得，接收者核对并履行了适用的决定程序。'
+    +'【反转兑现】对手面对已成立的材料被迫改变行动，主角赢回权益也失去工作。'
+    +'【分类流派机制】悬疑以调查和必要条件驱动，线索改变双方的选择和代价。';
+  const seeds=['P1','P2','P3','P4'].map(id=>({
+    premiseId:id,workingTitle:'独立案情'+id,storyCore:core(id),storyCategoryId:'K1',
+  }));
+  const expand=(id:string)=>({
+    premiseId:id,storyCategory:'悬疑',storyCategoryId:'K1',
+    protagonistSituation:'主角担心失去家庭收入，必须守住一项已经确认的权益',
+    openingEvent:'一份原始文件表明权益将被他人非法转移，主角必须当天核实',
+    coreConflict:'主角需要公开原始材料，对手则试图阻止有权人员核验',
+    activeChoice:'主角亲自保存原始材料并提交给负责审核的人员',
+    escalation:'审核人员收到原件并安排实地核验，对手开始施压',
+    reversalEffect:'核验结果确立主角的申诉事实，对手的行动路径被限制',
+    payoff:'实际审核确认转移无效，主角守住权益却丢了原来的工作',
+    irreplaceableCarrier:'实际工作环境与保管材料的责任决定谁能调取原件',
+    secondOrderConsequence:'相关人失去对原材料的控制，主角与旧同事关系改变',
+    readerQuestion:'主角能否及时保存并提交原始材料避免权益被转移',
+    causalPlan:[{
+      action:{field:'activeChoice',quote:'主角亲自保存原始材料并提交给负责审核的人员'},
+      conditions:[{field:'escalation',quote:'审核人员收到原件并安排实地核验'}],
+      result:{field:'payoff',quote:'实际审核确认转移无效，主角守住权益却丢了原来的工作'},
+    }],
+  });
+  const card=(id:string)=>({
+    title:'案情'+id+'公开',storyType:'short_story',targetPlatform:'fanqie',
+    storyCategory:'悬疑',storyTone:['紧张'],writingStyle:['简洁'],
+    webNovelGenre:['悬疑推理'],plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
+    hook:'权益即将被人夺走时，我发现了完整原始记录。我必须当天向有权者提交，否则连家人的住处都保不住，工作也可能丢掉。',
+    description:'我本想安稳完成当天的工作，没想到原始记录突然证明有人正在转移属于家人的权益。我选择保留本人可以接触的原件，并向有权核实的人员提交。对手以撤掉岗位和断绝收入相威胁，还让同事劝我放弃。材料被正式接收，审核人员核实了日期、签名和实际交付的凭证，才改变此前的决定。结果权益保住了，我却失去原本的岗位，也必须承受家人信任发生的变化。这些变化只能从实际提交、核验和决定推出，不能借别人的故事替代。',
+    coreConflict:'主角要提交真实记录保住权益，对手主动阻止证据核验',
+    uniquePoint:'核验过程让主角在家庭信任与已有工作之间作出不可逆选择',
+    mainReversal:'原先会夺走权益的错误决定被真实核验推翻，主角付出工作代价',
+    noveltyProof:{
+      familiarShell:'职场记录争议',uncommonCombination:'现场保管原件和真实利益争夺',
+      avoidedPatterns:'不靠神秘证据或凭空出现的决定者',
+      irreplaceableWhy:'没有现场原件和核验权限就无法产生实际决定',
+      secondOrderConsequence:'旧同事开始反对主角，原有合作关系因此崩裂',
+      readerQuestion:'她能否在丢掉工作前完成证据提交和决定核验',
+    },
+    estimatedWords:20000,plannedChapters:5,
+    scopeBreakdown:[{arc:'完整调查与决定',chapters:5,reason:'五章完成调查核验与关系代价'}],
+    setting:'普通城区中的记录保管与核验程序',protagonist:'保管原件的普通员工',
+  });
+  const generate=vi.fn(async(request:any)=>{
+    const step=request.metrics?.stepKey;
+    if(step==='idea_premise_pool_generation'){
+      const batch=Number(request.metrics?.attempt||0);
+      return {content:JSON.stringify({pool:seeds.slice(batch===0?0:2,batch===0?2:4)})};
+    }
+    if(step==='idea_premise_selection')
+      return {content:JSON.stringify({selectedPremises:['P1','P2'].map(expand)})};
+    if(step==='idea_premise_refill_selection'){
+      expect(request.prompt).toContain('"premiseId":"P3"');
+      expect(request.prompt).toContain('"premiseId":"P4"');
+      expect(request.prompt).not.toContain('"premiseId":"P1"');
+      return {content:JSON.stringify({selectedPremises:['P3','P4'].map(expand)})};
+    }
+    if(step==='idea_card_structure'){
+      const id=String(request.prompt.match(/"workingTitle":"独立案情(P[1-4])"/)?.[1]||'');
+      if(!id)throw Error('完整卡丢失了原池身份');
+      return {content:JSON.stringify({ideas:[card(id)]})};
+    }
+    throw Error('unexpected model call '+step);
+  });
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.realLLM={assertScenarioModelConfigured:vi.fn(),generate};
+  controller.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
+  controller.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
+  controller.completePremiseCausalPlans=vi.fn(async(input:any)=>input);
+  controller.reconcilePremiseSelection=vi.fn(async(input:any)=>({...input,selectionAudit:{finalReview:{passed:true,issues:[]}}}));
+  controller.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[]}))};
+  controller.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((row,index)=>{
+    const pass=row.sourcePremiseId!=='P2';
+    return {position:index+1,title:row.title,titleCompelling:true,
+      openingCompelling:true,distinctFromBatch:true,storyCoherent:true,
+      payoffCredible:pass,platformFit:true,
+      storyEvidence:row.hook,payoffEvidence:row.description,platformEvidence:row.hook,
+      qualityReason:'在真实材料取得及审核程序后才接受具体兑现结论',
+      readerQuestion:'主角能否在失业之前完成证据提交和权益核验？',
+      issues:pass?[]:['该题材的因果证据还存在未经证明的真实缺口']};
+  }));
+  const result=await controller.runIdeaDiscovery({
+    storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+    customPlatformNote:'',storyTone:['紧张'],writingStyle:['简洁'],
+    webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],
+    plotTags:['调查'],genreFitNote:'',pov:'第一人称',
+    targetWords:'20000',targetAudience:'',
+  },2);
+  expect(result.success,JSON.stringify({error:result.error,gate:result.appealGate?.fulfillment})).toBe(true);
+  expect(result.totalIdeas).toBe(2);
+  expect(result.ideas.map((row:any)=>row.sourcePremiseId)).toEqual(['P1','P3']);
+  expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure')
+    .map(([row]:any[])=>row.prompt.match(/"workingTitle":"独立案情(P[1-4])"/)?.[1]))
+    .toEqual(['P1','P2','P3','P4']);
+  expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_premise_pool_refill')).toHaveLength(0);
+  expect(controller.reconcilePremiseSelection).toHaveBeenCalledTimes(2);
+  expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(2);
+  expect(result.appealGate.fulfillment.stopReason).toBe('bounded_refill_met_target');
+  expect(result.appealGate).toMatchObject({requested:2,returned:2,shortfall:0});
+});
+
 describe('idea discovery requested quantity and concurrency regressions', () => {
   it('asks for up to eight mature preselected premises for five delivery slots from the fixed fifteen', async () => {
     const generate = vi.fn(async (request: any) => {
