@@ -27,16 +27,15 @@ export function quarantineIncompletePremiseReviews(value: any, selection: Premis
     ...(Array.isArray(value.genreChecks) ? {genreChecks:stripMarker(value.genreChecks)} : {}),
     ...(Array.isArray(value.categoryChecks) ? {categoryChecks:stripMarker(value.categoryChecks)} : {}) };
   value = quarantineUnprovenReversalEvidence(value, selection);
-  const isolated = new Set<number>();
-  const protocolReasons = new Map<number,string[]>();
+  // A malformed payoff receipt is NOT evidence that the already verified
+  // source/category/genre receipts for the same identity are unknown.
+  // Quarantine by (premise, review family), not by the whole premise. Every
+  // failed family remains fail-closed; no independently unverified Gate passes.
+  type Family = 'sourceChecks'|'payoffChecks'|'genreChecks'|'categoryChecks';
+  const families: Family[] = ['sourceChecks','payoffChecks','genreChecks','categoryChecks'];
+  const invalid = new Map<number,Map<Family,string[]>>();
   for (let index = 0; index < selection.selected.length; index++) {
     const prefix = `S${index + 1}.`;
-    const ownedRows = allRows.flatMap(rows => rows.filter((row: any) => row.ref.startsWith(prefix)));
-    const foreign = ownedRows.some((row: any) => [row.evidenceRef, row.actionEvidenceRef,
-      row.conditionEvidenceRef, row.reversalCheck?.actionEvidenceRef,
-      ...(Array.isArray(row.links) ? row.links.map((link: any) => link?.ref) : [])]
-      .some(ref => typeof ref === 'string' && /^S\d+\./.test(ref) && !ref.startsWith(prefix)));
-    if (foreign) { isolated.add(index); protocolReasons.set(index,['审核证据跨题材引用，不能证明本卡独立结论']); continue; }
     const scoped: PremiseSelectionResult = { ...selection, selected: [selection.selected[index]],
       pool: selection.pool.filter(row => row.premiseId === selection.selected[index].premiseId) };
     const rebind = (ref: string) => ref.startsWith(prefix) ? 'S1.' + ref.slice(prefix.length) : ref;
@@ -54,39 +53,58 @@ export function quarantineIncompletePremiseReviews(value: any, selection: Premis
       sourceChecks: rows(value.sourceChecks), payoffChecks: rows(value.payoffChecks),
       genreChecks: rows(value.genreChecks || []), categoryChecks: rows(value.categoryChecks || []),
     }, scoped);
-    const errors = [
-      ...premiseSourceReviewIssues(local, scoped),
-      ...premisePayoffReviewIssues(local, scoped),
-      ...premiseGenreFitIssues(local, scoped, requiredGenres),
-      ...premiseCategoryFitIssues(local, scoped),
-    ];
-    if (errors.length) { isolated.add(index); protocolReasons.set(index,errors); }
+    const checks: Record<Family,string[]> = {
+      sourceChecks: premiseSourceReviewIssues(local,scoped),
+      payoffChecks: premisePayoffReviewIssues(local,scoped),
+      genreChecks: premiseGenreFitIssues(local,scoped,requiredGenres),
+      categoryChecks: premiseCategoryFitIssues(local,scoped),
+    };
+    const originalRows:Record<Family,any[]> = {
+      sourceChecks: value.sourceChecks, payoffChecks:value.payoffChecks,
+      genreChecks:value.genreChecks||[], categoryChecks:value.categoryChecks||[],
+    };
+    for (const family of families) {
+      const foreign = originalRows[family].filter(row => row.ref.startsWith(prefix))
+        .some((row: any) => [row.evidenceRef,row.actionEvidenceRef,row.conditionEvidenceRef,
+          row.reversalCheck?.actionEvidenceRef,
+          ...(Array.isArray(row.links) ? row.links.map((link: any) => link?.ref) : [])]
+          .some(ref => typeof ref === 'string' && /^S\d+\./.test(ref) && !ref.startsWith(prefix)));
+      if (foreign) checks[family].push('审核证据跨题材引用，不能证明本卡独立结论');
+      if (checks[family].length) {
+        const issues=invalid.get(index)||new Map<Family,string[]>();
+        issues.set(family,checks[family]);invalid.set(index,issues);
+      }
+    }
   }
-  if (!isolated.size) return value;
-  const keep = (items: any[]) => items.filter(row => !isolated.has(Number(/^S(\d+)\./.exec(row.ref)?.[1]) - 1));
-  const sourceChecks = keep(value.sourceChecks);
-  const payoffChecks = keep(value.payoffChecks);
-  const genreChecks = keep(value.genreChecks || []);
-  const categoryChecks = keep(value.categoryChecks || []);
-  for (const index of isolated) {
+  if (!invalid.size) return value;
+  const result:Record<Family,any[]> = {
+    sourceChecks:[...value.sourceChecks],payoffChecks:[...value.payoffChecks],
+    genreChecks:[...(value.genreChecks||[])],categoryChecks:[...(value.categoryChecks||[])],
+  };
+  for (const [index,faults] of invalid) {
     const prefix = `S${index + 1}.`;
     const scoped: PremiseSelectionResult = { ...selection, selected: [selection.selected[index]],
       pool: selection.pool.filter(row => row.premiseId === selection.selected[index].premiseId) };
-    // Keep actual failed check names, not eleven indistinguishable unknown rows.
-    // Missing or invalid verdicts still fail; this does not weaken the Gate.
-    const localReason=reason+'：'+(protocolReasons.get(index)||['未能定位审核协议缺陷']).slice(0,4).join('；');
-    sourceChecks.push(...premiseSourceComparisonCatalog(scoped).map(row => ({
-      ref: prefix + row.field, status: 'unknown', reason: localReason, protocolIncomplete: true,
-    })));
-    payoffChecks.push({ ref: prefix + 'payoff', status: 'unknown', reason: localReason, protocolIncomplete: true,
-      reversalCheck: { status: 'unknown', reason: localReason },
-      links: premiseCausalCatalog(scoped.selected[0], prefix).map(row => ({ ref: row.ref, status: 'unknown', reason: localReason })) });
-    genreChecks.push(...premiseGenreFitCatalog(scoped, requiredGenres).map(row => ({
-      ref: prefix + row.ref.slice(3), status: 'unknown', reason: localReason, protocolIncomplete: true,
-    })));
-    categoryChecks.push(...premiseCategoryCatalog(scoped).map(row => ({
-      ref: prefix + row.ref.slice(3), status: 'unknown', reason: localReason, protocolIncomplete: true,
-    })));
+    for (const [family,errors] of faults) {
+      result[family] = result[family].filter(row => !row.ref.startsWith(prefix));
+      const localReason=reason+'：'+errors.slice(0,4).join('；');
+      if (family === 'sourceChecks') result.sourceChecks.push(...premiseSourceComparisonCatalog(scoped).map(row => ({
+        ref: prefix + row.field, status: 'unknown', reason: localReason, protocolIncomplete: true,
+      })));
+      if (family === 'payoffChecks') result.payoffChecks.push({
+        ref: prefix + 'payoff', status: 'unknown', reason: localReason, protocolIncomplete: true,
+        reversalCheck: { status: 'unknown', reason: localReason },
+        links: premiseCausalCatalog(scoped.selected[0], prefix).map(row => ({
+          ref: row.ref, status: 'unknown', reason: localReason,
+        })),
+      });
+      if (family === 'genreChecks') result.genreChecks.push(...premiseGenreFitCatalog(scoped, requiredGenres).map(row => ({
+        ref: prefix + row.ref.slice(3), status: 'unknown', reason: localReason, protocolIncomplete: true,
+      })));
+      if (family === 'categoryChecks') result.categoryChecks.push(...premiseCategoryCatalog(scoped).map(row => ({
+        ref: prefix + row.ref.slice(3), status: 'unknown', reason: localReason, protocolIncomplete: true,
+      })));
+    }
   }
-  return { ...value, sourceChecks, payoffChecks, genreChecks, categoryChecks };
+  return { ...value,...result };
 }
