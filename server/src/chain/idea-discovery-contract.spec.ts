@@ -727,11 +727,17 @@ describe('source-to-card payoff continuity in the existing selection call',()=>{
     expect(prompt).toContain('对手按已写性格可能采取的拒绝、拖延、不开门');
     expect(prompt).toContain('暂停、调查、受理与最终撤销、退还、追责');
     expect(prompt).toContain('旧录音只证明其实际记录过的旧事件');
+    expect(prompt).toContain('临时拦截、未签字、封存或暂缓若随后被对手撤销');
+    expect(prompt).toContain('社保稽核与工伤认定');
+    expect(prompt).toContain('进入走廊或同地出现');
   });
   it('does not upgrade a stopped process or past recording to a new completed outcome during card structuring',()=>{
     const prompt=ideaCardStructuringDirective(selectedPremise('P1'),[],false);
     expect(prompt).toContain('暂缓/中止、调查和未来目标');
     expect(prompt).toContain('对方必然答应');
     expect(prompt).toContain('任何录音、记录或材料须严格说明它实际证明的是哪一次事件');
+    expect(prompt).toContain('临时拦截被对手绕过后');
+    expect(prompt).toContain('不同机关的调查、受理、认定');
+    expect(prompt).toContain('不能从同款物品或排除自身跳到他人归责');
   });
 });
