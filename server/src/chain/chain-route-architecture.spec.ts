@@ -79,6 +79,12 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
   });
 
+  it('stops recovery once actual delivery count is independently vetted, not surplus screening count', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('retained.selection.selected.length>=deliveryCount&&retainedReview.passed');
+    expect(source).not.toContain('retained.selection.selected.length>=requestedCount&&retainedReview.passed');
+  });
+
   it('prevents claims of involuntary detention or binding decisions from being created only in projections', () => {
     const source = read('chain.controller.ts');
     expect(source).toContain('口头要求、自愿配合和合法实际控制不可混同');
