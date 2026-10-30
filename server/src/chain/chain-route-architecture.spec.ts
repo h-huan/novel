@@ -177,8 +177,11 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("stepKey:'idea_premise_pool_refill'");
     expect(source).toContain("stepKey:'idea_premise_refill_selection'");
     expect(source).toContain("await accept(supplementaryStructured,'repair')");
-    expect(source).toContain('sourceCompletionBudget.remaining>=2');
-    expect(source).toContain('presentationBudget.remaining>=minimumPresentationCredits');
+    expect(source).toContain('affordableFullCardRefillCount(');
+    expect(source).toContain('desiredSupplement>=missingAfterFirstGate');
+    expect(source).toContain('sourceCompletionBudget.remaining>=(desiredSupplement===1?1:2)');
+    expect(source).toContain('failureReasons:rejectedReasons');
+    expect(source).not.toContain('minimumPresentationCredits');
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
     expect(source).toContain("status: 'incomplete'");
@@ -190,7 +193,7 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('系统不会把部分结果伪装成完整成功');
   });
 
-  it('keeps the desktop discovery wizard aligned with the server partial-success response contract', () => {
+  it('keeps the desktop discovery wizard aligned with current incomplete and earlier partial response contracts', () => {
     const desktopPage = fs.readFileSync(
       path.resolve(chainDir, '../../../desktop/src/renderer/pages/DiscoveryWizardPage.tsx'),
       'utf8',
