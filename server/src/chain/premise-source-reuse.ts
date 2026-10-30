@@ -75,7 +75,9 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
  const planPending=pending.filter(row=>priorById.has(String(row.premiseId)));
  const fullPending=pending.filter(row=>!priorById.has(String(row.premiseId)));
  const batchSize=readGenerationBudgets().sourceBatchSize;
- const existingCallFloor=Math.ceil(pending.length/Math.max(1,batchSize));
+ const grouping=readGenerationBudgets();
+ const existingCallFloor=(grouping.reviewGroupingMode===0&&pending.length<4)
+   ?1:Math.ceil(pending.length/Math.max(1,batchSize));
  if(reviewPlanOnly&&sharedBudget&&planPending.length&&fullPending.length
     &&existingCallFloor>=2&&planPending.length<=batchSize&&fullPending.length<=batchSize
     &&sharedBudget.remaining>=2){
