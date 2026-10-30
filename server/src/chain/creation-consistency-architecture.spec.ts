@@ -90,6 +90,12 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('【后续章节职责与节拍（本章禁止提前执行）】');
     expect(controllerSource).toContain('chapterResponsibilityPlan.slice(chapterIndex + 1)');
     expect(controllerSource).toContain('chapterResponsibilities: chapterResponsibilityPlan, priorChapters: acceptedOutlineSources');
+    expect(controllerSource).toContain('const futureResponsibilityReviewContext');
+    expect(controllerSource).toContain('executionStandardForReview+futureResponsibilityReviewContext');
+    expect(controllerSource).toContain('后续章节未兑现任务（仅是规划，不是已发生的证据）');
+    expect(indexOrFail(controllerSource, 'const futureResponsibilityReviewContext')).toBeLessThan(
+      indexOrFail(controllerSource, 'let dependencyCheck = await reviewChapterDependencies(chData'));
+
     expect(controllerSource).not.toContain('completedTaskBoundary');
     expect(controllerSource).not.toContain('nextTaskBoundary');
     expect(controllerSource).not.toContain('【全书章节分工与动态节拍】');
