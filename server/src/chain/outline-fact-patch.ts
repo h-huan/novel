@@ -38,6 +38,77 @@ export function applyOutlineFactPatch(chapter:Record<string,any>,patch:unknown):
   return next;
 }
 
+/** Finish a model's already-evidenced count correction in an omitted,
+ * explicitly cited projection. Do NOT choose a count, change a story event or
+ * infer arithmetic: the independent fact review must name a total, show BOTH
+ * variants in exact current-chapter quotations, and the model must ALREADY
+ * correct one variant to that existing total. The normal independent fact
+ * and action Gates must still re-review the completed candidate. */
+export function alignOutlineFactCountProjections(
+ chapter:Record<string,any>,patch:unknown,defects:readonly string[],
+):Record<string,unknown>{
+ const draft=applyOutlineFactPatch(chapter,patch);
+ const updated:Record<string,unknown>={...(patch as Record<string,unknown>)};
+ const leaves=(value:unknown,path='',rows=new Map<string,string>()):Map<string,string>=>{
+  if(typeof value==='string')rows.set(path,value);
+  else if(Array.isArray(value))value.forEach((item,i)=>leaves(item,path?path+'.'+i:String(i),rows));
+  else if(value&&typeof value==='object')for(const [key,item] of Object.entries(value)){
+   if(path||OUTLINE_FACT_REPAIR_FIELDS.includes(key as any))leaves(item,path?path+'.'+key:key,rows);
+  }
+  return rows;
+ };
+ const original=leaves(chapter),after=leaves(draft);
+ const number=(value:string):number|null=>{
+  if(/^\d+$/.test(value))return Number(value);
+  const simple:Record<string,number>={零:0,〇:0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9,十:10};
+  return Object.hasOwn(simple,value)?simple[value]:null;
+ };
+ const quantity=/([0-9零〇一二两三四五六七八九十百千万]+)(条|个|次|张|件|人|辆|只|份|本|箱|笔|颗|位)/g;
+ for(const defect of defects){
+  let row:any;try{row=JSON.parse(defect);}catch{continue;}
+  if(!row||typeof row.conflict!=='string'||typeof row.calculation!=='string')continue;
+  // "共四条" or "共4条" is an explicit audited total; "相差一条"
+  // alone never authorizes a replacement.
+  const totals=[...row.calculation.matchAll(/(?:总计|合计|共计|总共|共|应为)\s*([0-9零〇一二两三四五六七八九十百千万]+)(条|个|次|张|件|人|辆|只|份|本|箱|笔|颗|位)/g)];
+  if(totals.length!==1)continue;
+  const expected=number(totals[0][1]),unit=totals[0][2];
+  if(expected===null)continue;
+  const cited=[...row.conflict.matchAll(/“([^”]{2,180})”/g)].map(match=>match[1])
+   .filter(quote=>[...original.values()].some(text=>text.includes(quote)));
+  const variants=cited.map(quote=>({quote,counts:[...quote.matchAll(quantity)]
+   .filter(match=>match[2]===unit&&number(match[1])!==null)}))
+   .filter(item=>item.counts.length===1)
+   .map(item=>({quote:item.quote,count:number(item.counts[0][1])!,token:item.counts[0][0]}));
+  const correct=variants.find(item=>item.count===expected);
+  if(!correct||!variants.some(item=>item.count!==expected))continue;
+  // Require a true pre-existing model edit from an incorrect variant to
+  // the count already proven elsewhere, not just an edited surrounding word.
+  const modelResolved=variants.some(item=>item.count!==expected&&[...original].some(([path,text])=>{
+   if(!text.includes(item.quote))return false;
+   const revised=after.get(path);
+   return revised!==undefined&&!revised.includes(item.quote)
+    &&revised.includes(item.quote.replace(item.token,correct.token));
+  }));
+  if(!modelResolved)continue;
+  for(const item of variants.filter(item=>item.count!==expected)){
+   for(const [path,oldText] of original){
+    if(!oldText.includes(item.quote))continue;
+    let present=typeof updated[path]==='string'?String(updated[path]):after.get(path);
+    if(typeof present!=='string'||!present.includes(item.quote))continue;
+    if(present.split(item.quote).length!==2)continue;
+    // Never add an overlapping parent-child patch. The original validator
+    // owns such a complex edit; leave it for its normal bounded correction.
+    if(Object.keys(updated).some(key=>key!==path&&(
+     path.startsWith(key.replace(/\[(0|[1-9]\d*)\]/g,'.$1')+'.')
+     ||key.replace(/\[(0|[1-9]\d*)\]/g,'.$1').startsWith(path+'.'))))continue;
+    present=present.replace(item.quote,item.quote.replace(item.token,correct.token));
+    updated[path]=present;
+   }
+  }
+ }
+ return updated;
+}
+
 /** Catch an omitted duplicate of an already rejected event before paying for a
  * semantic re-review. No dates are computed and no text is changed here.
  * Require an identical full event clause on both sides of one changed duration;
