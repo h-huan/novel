@@ -6360,8 +6360,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const warning = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
           + '，缺额 ' + (requestedCount-selectedAccepted.length) + '。未通过原因：' + reason;
         this.logger.warn('idea-discover: ' + warning);
-        return { success: true, status: 'partial', ideas: acceptedWithAudit,
-          totalIdeas: acceptedWithAudit.length, warning, appealGate };
+        // Only a fully satisfied requested batch is a successful delivery.
+        // Keep independently approved cards in a diagnostic/recovery field so
+        // the UI can offer missing-slot continuation without misrepresenting
+        // three approved stories as a successful five-story request.
+        appealGate.returned = 0;
+        return { success: false, status: 'incomplete', ideas: [],
+          qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning, appealGate };
       }
       this.logger.log(`idea-discover: 并发结构化和独立终审通过 ${qualifiedCount} 个，仅返回优选 ${acceptedWithAudit.length}/${requestedCount} 个`);
       return {
