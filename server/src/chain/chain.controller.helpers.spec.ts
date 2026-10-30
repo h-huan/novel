@@ -2227,7 +2227,7 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
     storyCategory:'悬疑',storyTone:['紧张'],writingStyle:['简洁'],
     webNovelGenre:['悬疑推理'],plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
     hook:core(id).slice(0,105),
-    description:core(id)+'这条故事通过明确的职业现场、当时已经取得的材料和真实到场的审查者共同推进；主角面对的是自己已经建立的现实关系及其代价。',
+    description:core(id),
     coreConflict:core(id).slice(0,115),
     uniquePoint:core(id).slice(80,175),
     mainReversal:core(id).slice(-110),
@@ -2240,7 +2240,10 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
     },
     estimatedWords:20000,plannedChapters:5,
     scopeBreakdown:[{arc:'完整调查与决定',chapters:5,reason:'五章完成调查核验与关系代价'}],
-    setting:'普通城区中的记录保管与核验程序',protagonist:'保管原件的普通员工',
+    // Keep setting and protagonist grounded in each distinct seed, instead of
+    // introducing identical generic prose that artificially triggers the
+    // unchanged 0.42 semantic-duplication Gate.
+    setting:core(id).slice(0,42),protagonist:core(id).match(/【处境触发】(.{3,6})/)?.[1]||core(id).slice(0,12),
   });
   const generate=vi.fn(async(request:any)=>{
     const step=request.metrics?.stepKey;
