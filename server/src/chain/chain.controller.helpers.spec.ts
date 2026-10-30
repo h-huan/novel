@@ -2256,7 +2256,12 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
     if(step==='idea_premise_refill_selection'){
       expect(request.prompt).toContain('"premiseId":"P3"');
       expect(request.prompt).toContain('"premiseId":"P4"');
-      expect(request.prompt).not.toContain('"premiseId":"P1"');
+      // The generic schema may legitimately contain example ID P1. Only
+      // the server-supplied candidate pool is forbidden from reusing P1.
+      const eligiblePool=request.prompt.split('【服务器已固定的候选池；不得新增、改写或重新编号】')[1]?.split('\n')[0]||'';
+      expect(eligiblePool).toContain('"premiseId":"P3"');
+      expect(eligiblePool).toContain('"premiseId":"P4"');
+      expect(eligiblePool).not.toContain('"premiseId":"P1"');
       return {content:JSON.stringify({selectedPremises:['P3','P4'].map(expand)})};
     }
     if(step==='idea_card_structure'){
