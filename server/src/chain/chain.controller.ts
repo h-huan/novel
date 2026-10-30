@@ -6514,6 +6514,25 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const citationOnlyIds=new Set(slots.filter(slot=>slot.mode==='correct_or_replace_from_pool'
         &&slot.issues.length>0&&slot.issues.every(issue=>issue.kind==='selection_fit'))
         .map(slot=>String(slot.replacesPremiseId)));
+      // Match the existing server normalizer: an independently evidenced
+      // citation-only failure may return the corrected plan alone. The old
+      // trailing full-story JSON example contradicted that rule and caused
+      // redundant story regeneration during the slow reselection call.
+      const fullReselectionShape = {
+        premiseId:'可用原池真实ID',protagonistSituation:'原池主人公处境',
+        openingEvent:'原池触发',coreConflict:'原池冲突',
+        activeChoice:'原池实际选择',escalation:'必要条件与升级',
+        reversalEffect:'反转',payoff:'有因果条件的兑现',
+        irreplaceableCarrier:'不可替代载体',
+        secondOrderConsequence:'二阶后果',readerQuestion:'读者追问',
+        causalPlan:premiseCausalPlanExample(),storyCategoryId:'原池实际K编号',
+      };
+      const reselectionOutputShape={replacements:scopedSlots.map(slot=>({
+        replacesPremiseId:String(slot.replacesPremiseId),
+        premise:citationOnlyIds.has(String(slot.replacesPremiseId))
+          ?{premiseId:String(slot.replacesPremiseId),causalPlan:premiseCausalPlanExample()}
+          :fullReselectionShape,
+      }))};
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
         .filter(id=>(deliveryCount>=requestedCount||!attemptedBeforeReserve.has(String(id))
           ||citationOnlyIds.has(String(id)))
@@ -6548,7 +6567,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n先确定全部最终候选，并实质核对行动、升级、反转与代价差异；不要生成逐对自评文本，所有涉及新候选的比较仍由服务器独立同构复核。'
           +'\n按已注入GEN-002的最终差异比较合同执行。分类候选='+JSON.stringify(categories)
-          +'\n只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID","premise":{"premiseId":"可用原池ID","protagonistSituation":"...","openingEvent":"...","coreConflict":"...","activeChoice":"...","escalation":"...","reversalEffect":"...","payoff":"...","irreplaceableCarrier":"...","secondOrderConsequence":"...","readerQuestion":"...","causalPlan":'+JSON.stringify(premiseCausalPlanExample())+',"storyCategoryId":"原池实际K编号"}}]}。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。',
+          +'\n【每个问题位置的实际输出形状】只输出JSON：'+JSON.stringify(reselectionOutputShape)+'。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。只有原池与既有故事字段已满足全部兑现条件的纯引用错误可按短式原ID修正；若需要换题，必须改用原池真实新ID并补齐以下完整字段：'+JSON.stringify(fullReselectionShape)',
           {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:reselectionBudget,timeout:LLM_TUNABLES.timeoutSimple(),
             validate:value=>{try{normalize(value);return true;}catch{return false;}},
             describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String((error as Error).message)];}},
