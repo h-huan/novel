@@ -384,7 +384,8 @@ describe('idea discovery preselection contract', () => {
     expect(directive).toContain('候选二');
     expect(directive).not.toContain('P2');
     expect(directive).toContain('不要输出 premiseId、sourcePremiseId');
-    expect(directive).toContain('模型不得自行换身份、补生题材、改写其它题材或使用旧批次');
+    expect(directive).toContain('不在完整卡终审之后补生、换身份、重选或再追加修复轮次');
+    expect(directive).toContain('模型不得自行改写其它题材或使用旧批次');
   });
 
   it('binds each one-card response back to the server-owned selected premise identity', () => {
