@@ -178,6 +178,36 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
    if(containsQuote(current,currentQuote))issues.push('事实补丁未触及当前章的冲突引文“'+currentQuote.slice(0,100)+'”；前章已接受事实是不可变来源，须修正当前章及其投影，不得反向改写前章。');
   }
  }
+ // A fact review may cite several projections of the SAME counted event:
+ // dialogue, summary and character action can each state "five" while the
+ // actual narrated calculation proves "four". Merely touching one cited phrase
+ // is not sufficient. Require at least ONE of the mutually exclusive numeric
+ // variants to be removed from ALL its cited current-chapter assertions before
+ // paying for another independent semantic review. Do not decide which count
+ // is true, alter unrelated quantities, or treat an uncited number as evidence.
+ for(const defect of defects){
+  let row:any;try{row=JSON.parse(defect);}catch{continue;}
+  if(!row||typeof row.conflict!=='string'||!String(row.calculation||'').trim())continue;
+  const quotes=conflictFragments(row.conflict);
+  const variants=new Map<string,Map<string,Set<string>>>();
+  for(const quote of quotes){
+   if(![...old.values()].some(value=>value.includes(quote)))continue;
+   for(const match of quote.matchAll(/([0-9零〇一二两三四五六七八九十百千万]+)(条|个|次|张|件|人|辆|只|份|本|箱|笔|颗|位|天|日|小时|分钟|秒)/g)){
+    const unit=match[2],quantity=match[1];
+    if(!variants.has(unit))variants.set(unit,new Map());
+    const units=variants.get(unit)!;
+    if(!units.has(quantity))units.set(quantity,new Set());
+    units.get(quantity)!.add(quote);
+   }
+  }
+  for(const [unit,counts] of variants){
+   if(counts.size<2)continue;
+   const stillCited=(quote:string)=>[...current.values()].some(value=>value.includes(quote));
+   if([...counts.values()].every(quotesForCount=>[...quotesForCount].some(stillCited))){
+    issues.push('同一事件的'+unit+'数量矛盾仍在多个已举证字段中并存；须统一修正同一数值在content、人物台词、characterActions等原有投影，不能只改一处。');
+   }
+  }
+ }
  for(const [oldClause,newClause]of changes)for(const [path,text]of current){
   if(clauses(text).includes(oldClause))issues.push(`补丁未同步已点名事件：${path}仍为“${oldClause}”，同一事件其它字段已改为“${newClause}”；核对并修正原有对应路径，不改无关事件或前章。`);
  }
