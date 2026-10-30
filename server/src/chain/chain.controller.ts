@@ -10,6 +10,7 @@ import { ideaScopeAllocationRepairPlan } from './idea-scope-allocation';
 import {premiseGenreFitCatalog,premiseGenreEvidenceCatalog,resolvePremiseGenreEvidence,premiseGenreFitIssues,materializePremiseGenreFit} from './premise-genre-fit';
 import { discoveryPovChoices } from '../../shared/src/discovery-pov';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
+import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { independentReviewBatches } from './independent-review-batches';
 import {reserveReviewBatchBudget} from './premise-source-batches';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
@@ -185,7 +186,7 @@ import {
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
 import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
-import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
 import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQuoteRepairs, type ReaderGoalReview } from './reader-goal-review';
@@ -5877,7 +5878,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             +fundedGroups.length+'/'+repairGroups.length+' 批');
         if(fundedGroups.length){
           const repairedGroups=await independentReviewBatches(
-            fundedGroups,presentationBudget,IDEA_CARD_GENERATION_CONCURRENCY,
+            fundedGroups,presentationBudget,adaptiveDiscoveryConcurrency(fundedGroups.length),
             async(group,groupIndex,budget)=>{
               const targets=group.map(item=>{
                 const fields=['storyTone','writingStyle','webNovelGenre','plotTags'] as const;
@@ -6055,7 +6056,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const reservedInitialReviewCalls=minimumCardReviewCalls(selectedPremises.length,selectedPremises.length);
       presentationBudget.remaining-=reservedInitialReviewCalls;
       let results:PromiseSettledResult<Record<string,unknown>>[];
-      try {results=await independentReviewBatches(selectedPremises,presentationBudget,IDEA_CARD_GENERATION_CONCURRENCY,
+      try {results=await independentReviewBatches(selectedPremises,presentationBudget,adaptiveDiscoveryConcurrency(selectedPremises.length),
         async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{try{return {status:'fulfilled',value:await generateStructuredCard(premise,index,budget)};}catch(reason){return {status:'rejected',reason};}});}
       finally {presentationBudget.remaining+=reservedInitialReviewCalls;}
       // A scheduling duplicate must never be hidden by the later card/slot
@@ -6256,7 +6257,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 let generated:PromiseSettledResult<Record<string,unknown>>[];
                 try{
                   generated=await independentReviewBatches(supplementarySelected,presentationBudget,
-                    IDEA_CARD_GENERATION_CONCURRENCY,async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{
+                    adaptiveDiscoveryConcurrency(supplementarySelected.length),async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{
                       try{return {status:'fulfilled',value:await generateStructuredCard(premise,
                         selectedPremises.length+index,budget)};}
                       catch(reason){return {status:'rejected',reason};}
@@ -6500,7 +6501,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           batches=splitSources();
         }
       } else batches = premiseSourceBatches(selection);
-      const reviews = await independentReviewBatches(batches, budget, IDEA_CARD_GENERATION_CONCURRENCY,
+      const reviews = await independentReviewBatches(batches, budget, adaptiveDiscoveryConcurrency(batches.length),
         (batch, _index, allowance) => this.reviewPremiseSelection(batch, standard, mode, allowance, readGenerationBudgets().reviewGroupingMode!==0, requiredGenres, reviewLimiter));
       return mergePremiseSourceBatches(selection, batches, reviews);
     }
@@ -6576,7 +6577,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       previousReview?: PremiseSelectionReview,
     ): Promise<PremiseSelectionReview> => {
       let sourceReviewReuse = { reused: 0, reviewed: 0 };
-      const limiter=createReviewLimiter(IDEA_CARD_GENERATION_CONCURRENCY);
+      const limiter=createReviewLimiter(adaptiveDiscoveryConcurrency(Math.max(1,selection.selected.length)));
       // One selected premise has no unordered cross-premise pair to compare.
       // Do not reserve or spend an overlap model call for an empty relation.
       // Historical similarity and every source/causal/category/genre check
@@ -6590,7 +6591,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const modes=needsPairReview?(['source_drift','overlap'] as const):(['source_drift'] as const);
       const reviewBudget=shared?.reviews||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
       let reviews:PremiseSelectionReview[];
-      try {reviews=await independentReviewBatches(modes,reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,
+      try {reviews=await independentReviewBatches(modes,reviewBudget,adaptiveDiscoveryConcurrency(modes.length),
         (mode,_index,budget)=>mode==='source_drift'
           ? reviewChangedPremiseSources(selection,sourceScope,sourceReceipts,
               (pending,allowance)=>this.reviewPremiseSelection(pending,standard,mode,allowance||budget,false,requiredGenres,limiter),
@@ -9589,7 +9590,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       // Independent reviews may run within the EXISTING discovery concurrency
       // ceiling. Drain all in-flight verdicts before propagating failures,
       // preserve stage order and reuse only successful exact-input receipts.
-      const results=await boundedDiscoveryMap(inputs,IDEA_CARD_GENERATION_CONCURRENCY,async input=>{
+      const results=await boundedDiscoveryMap(inputs,adaptiveDiscoveryConcurrency(inputs.length),async input=>{
         const key=JSON.stringify(input);
         if(verifiedStagePromises.has(key))return verifiedStagePromises.get(key)!;
         const prompt=stagePromiseReviewPrompt(input.brief,input.candidateText);
@@ -9631,7 +9632,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       // dependency. Run the SAME complete review in a bounded queue, then
       // merge in stable chapter order before interpreting any conflicts.
       const sourceGroups=[...groups.values()];
-      const sourceGroupResults=await boundedDiscoveryMap(sourceGroups,IDEA_CARD_GENERATION_CONCURRENCY,async rows=>{
+      const sourceGroupResults=await boundedDiscoveryMap(sourceGroups,adaptiveDiscoveryConcurrency(sourceGroups.length),async rows=>{
         const cacheKey='boundary:'+JSON.stringify({rows,context});
         const cached=verifiedSourceReviews.get(cacheKey);
         if(cached)return {rows,cacheKey,cached,checks:[] as any[],findings:cached};
@@ -9669,7 +9670,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       // These chapter-local result claims use frozen, read-only inputs.
       // Keep each claim's original full proof and the existing per-chapter
       // protocol Gate, but avoid serially waiting for unrelated chapters.
-      const resultTasks=await boundedDiscoveryMap(bundle.chapters,IDEA_CARD_GENERATION_CONCURRENCY,async row=>{
+      const resultTasks=await boundedDiscoveryMap(bundle.chapters,adaptiveDiscoveryConcurrency(bundle.chapters.length),async row=>{
         if(disputedChapters.size&&!disputedChapters.has(row.id))return {kind:'skip' as const};
         const claims=outlineResultClaimCatalog([row]);
         if(!claims.length)return {kind:'skip' as const};
@@ -12607,7 +12608,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       for(let start=0;start<cards.length;start+=grouping.presentationBatchSize)batches.push({start,batch:cards.slice(start,start+grouping.presentationBatchSize)});
     }
     if(batches){
-      const reviews=await independentReviewBatches(batches,physicalCallBudget,IDEA_CARD_GENERATION_CONCURRENCY,async({start,batch},_index,allowance)=>{
+      const reviews=await independentReviewBatches(batches,physicalCallBudget,adaptiveDiscoveryConcurrency(batches.length),async({start,batch},_index,allowance)=>{
         const otherCards=cards.filter((_,index)=>index<start||index>=start+batch.length);
         const rows=await this.reviewIdeaPresentation(batch,[...references,...otherCards],customPlatformNote,allowance);
         const rebase=(value:any):any=>Array.isArray(value)?value.map(rebase):value&&typeof value==='object'
