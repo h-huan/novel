@@ -6777,6 +6777,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         +unresolvedIds.length+'，无需继续修复的冗余候选 '+rejectedExtraIds.length
         +'），仅复核剩余 '+selected.selected.length+'/'+deliveryCount+' 个交付题材。');
     }
+    if(!selected.selected.length){
+      // An empty reviewed set has no source links to re-audit. Preserve the
+      // prior actual negative verdict and move to fresh lightweight identities.
+      // Calling the independent review with zero cards would be a pure protocol
+      // error and obscure the independently evidenced rejections.
+      return {...selected,selectionAudit:{
+        initialReview,finalReview:initialReview,reselectionAttempted:pendingSlots.length>0,
+        partial:true,excludedPremiseIds:isolatedIds,
+        reasons:[...initialReview.issues],rejectedHistory,
+        selectionStopReason:'zero_survivors_bounded_fresh_refill',
+        completeCardGatePending:true,
+      }};
+    }
     const budgetPartialAudit = unresolvedIds.length ? { partial: true, unresolvedPremiseIds: unresolvedIds,
       reselectionStopReason, sourceRepairCallsRemaining: reselectionBudget.remaining,
       excludedPremiseIds: isolatedIds, discardedSurplusPremiseIds: rejectedExtraIds,
