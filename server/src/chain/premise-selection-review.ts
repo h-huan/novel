@@ -144,6 +144,16 @@ export function overlapReviewSelectionView(selected: PremiseSelectionResult['sel
  return selected.map(({causalPlan:_plan,...expanded})=>expanded);
 }
 
+/** Every unordered comparison involving a changed identity must be reviewed
+ * once after reselection. Unchanged pairs retain their prior independent
+ * verdict; this index is a prompt boundary, never a replacement for the Gate. */
+export function premiseOverlapPairs(selection:PremiseSelectionResult,focusIds:readonly string[]=[]){
+  const changed=new Set(focusIds.map(String));
+  return selection.selected.flatMap((left,index)=>selection.selected.slice(index+1)
+    .filter(right=>!changed.size||changed.has(String(left.premiseId))||changed.has(String(right.premiseId)))
+    .map(right=>({premiseId:String(left.premiseId),referencePremiseId:String(right.premiseId)})));
+}
+
 /** Prompt-only representation for a targeted reselection. The server still keeps
  * the complete original selection and all causal plans for independent gates.
  * Unchanged peers need their real actions/conditions for comparison, not a second
