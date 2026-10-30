@@ -39,7 +39,7 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('this.reservePremiseSelection(');
     expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
     expect(controllerSource).toContain('证据指向具体责任人须有区别于“只是排除自己”的指认依据');
-    expect(controllerSource).toContain('ideas: acceptedWithAudit');
+    expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
     expect(controllerSource).toContain("if (normalizedSelection.selected.length === 0)");
     expect(controllerSource).toContain("status: 'incomplete'");
@@ -62,6 +62,8 @@ describe('creation consistency architecture invariants', () => {
   });
 
   it('prevents cross-channel message contradictions and protects explicit action evidence during outline repair', () => {
+    expect(controllerSource).toContain('若独立审核已证明原职责结果在前章完成，则必须删除当前章对旧结果的重复兑现声明');
+    expect(controllerSource).toContain('保留真实未完成任务，不新增人物、不虚构行动、不更换故事');
     expect(controllerSource).toContain('【通信渠道与同源事件约束】');
     expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
     expect(controllerSource).toContain('询问某人不等于已经得到答复');
