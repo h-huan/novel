@@ -2,6 +2,8 @@ import {it,expect,vi} from 'vitest';
 import {normalizePremiseSelectionPayload,SELECTED_PREMISE_FIELDS,ideaGateLocalRepairDirective} from './idea-discovery-contract';
 import {premiseSourceComparisonCatalog,materializePremiseSourceReview,type PremiseSelectionReview} from './premise-selection-review';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
+import { premisePayoffReviewIssues } from './premise-payoff-review';
+import { premiseCausalPlanIssues } from './premise-causal-plan';
 const selection=()=>normalizePremiseSelectionPayload({
  pool:['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'原池既定行动、条件和代价均保持真实一致'+premiseId})),
  selectedPremises:['A','B','C','D','E'].map(premiseId=>({premiseId,...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(key=>key!=='differentiation').map(key=>[key,'既定的具体人物行动、必要条件与结果'+premiseId]))})),
@@ -212,6 +214,11 @@ it('does not upgrade an independently rejected corrected payoff when all changed
 
 it('memoizes independently approved plan-only corrections without ever skipping changed source facts',async()=>{
  const initial=selection(),receipts:PremiseSourceReceipts=new Map();
+ for(const item of initial.selected){
+  item.activeChoice='主角亲自向保管人申请核验原始材料并承担实际代价'+item.premiseId;
+  item.escalation='核验后保管人依法交付材料，阻碍方无法再隐匿关键记录'+item.premiseId;
+  item.payoff='有权处理者收到经核验的材料后作出明确处理决定'+item.premiseId;
+ }
  const scope=JSON.stringify({standard:'fixed full review standards',requiredGenres:[]});
  const full=vi.fn(async input=>report(input));
  await reviewChangedPremiseSources(initial,scope,receipts,full);
@@ -222,6 +229,7 @@ it('memoizes independently approved plan-only corrections without ever skipping 
   item.causalPlan=[{action:{field:'activeChoice',quote:String(item.activeChoice)},
     conditions:[{field:'escalation',quote:String(item.escalation)}],
     result:{field:'payoff',quote:String(item.payoff)}}];
+  expect(premiseCausalPlanIssues(item)).toEqual([]);
  }
  const planOnly=vi.fn(async (pending:ReturnType<typeof selection>,baseline:PremiseSelectionReview)=>{
   expect(pending.selected.map(x=>x.premiseId)).toEqual(['B','D']);
@@ -230,6 +238,7 @@ it('memoizes independently approved plan-only corrections without ever skipping 
   const checked=independent.payoffChecks!.map((row,index)=>({...row,
     links:[{ref:`S${index+1}.causalPlan[0]`,status:'supported' as const,
       reason:'主角原有行动已满足每一环节的实际必要条件'}]}));
+  expect(premisePayoffReviewIssues({payoffChecks:checked},pending)).toEqual([]);
   return {...baseline,payoffChecks:checked,issues:[],passed:true};
  });
  const budget={remaining:5};
