@@ -18,3 +18,15 @@ export function affordableFullCardRefillCount(
 export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:ReadonlySet<string>,requestedCount:number):string[] {
   return slotIds.filter(id=>!!id&&!acceptedIds.has(id)).slice(0,Math.max(0,requestedCount-acceptedIds.size));
 }
+
+/** One scoped preselection repair wave: optional screening surplus is not
+ * a delivery deficit. Only actual missing delivery slots are mandatory.
+ * A small model-reviewed hedge remains for full-card rejection, without
+ * filling every failed optional screening slot through serial reselection. */
+export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved:number):{mandatory:number;hedge:number;total:number}{
+ if(!Number.isInteger(deliveryCount)||deliveryCount<1||!Number.isInteger(retainedApproved)||retainedApproved<0)
+   throw Error('预选交付容量参数无效');
+ const mandatory=Math.max(0,deliveryCount-retainedApproved);
+ const hedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4))):0;
+ return {mandatory,hedge,total:mandatory+hedge};
+}
