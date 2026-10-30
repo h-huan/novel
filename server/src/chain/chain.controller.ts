@@ -6246,7 +6246,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const sourceScope=JSON.stringify({standard,requiredGenres});
     const reviewBoth = async (
       selection: ReturnType<typeof normalizePremiseSelectionPayload>,
-      changeScope?: { focusIds: readonly string[]; affectedIds: readonly string[] },
+      changeScope?: { focusIds: readonly string[]; affectedIds: readonly string[]; pairFocusIds: readonly string[]; pairAffectedIds: readonly string[] },
       previousReview?: PremiseSelectionReview,
     ): Promise<PremiseSelectionReview> => {
       let sourceReviewReuse = { reused: 0, reviewed: 0 };
@@ -6255,7 +6255,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // Do not reserve or spend an overlap model call for an empty relation.
       // Historical similarity and every source/causal/category/genre check
       // remain active on the single actual candidate.
-      const modes=selection.selected.length<2?(['source_drift'] as const):(['source_drift','overlap'] as const);
+      // Independent overlap compares the NARRATIVE view, which intentionally
+      // omits causalPlan. If only its citation index changed (or failed items
+      // were removed), all surviving old pairs already have independent
+      // verdicts. Keep source/payoff re-review, skip the paid identical pair call.
+      const needsPairReview=selection.selected.length>=2
+        && (!previousReview||!changeScope||changeScope.pairFocusIds.length>0);
+      const modes=needsPairReview?(['source_drift','overlap'] as const):(['source_drift'] as const);
       const reviewBudget=shared?.reviews||{remaining:readGenerationBudgets().sourceMaxPhysicalCalls};
       let reviews:PremiseSelectionReview[];
       try {reviews=await independentReviewBatches(modes,reviewBudget,IDEA_CARD_GENERATION_CONCURRENCY,
@@ -6266,11 +6272,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 sourceReviewReuse={reused:Number(counts.reused)||0,reviewed:Number(counts.reviewed)||0};
                 this.logger?.log(`锁定前来源审核：同批同内容复用 ${counts.reused} 项，独立审核 ${counts.reviewed} 项；同构审核只复核变化项涉及的配对`);
               })
-          : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter,changeScope?.focusIds));}
+          : this.reviewPremiseSelection(selection,standard,mode,budget,false,requiredGenres,limiter,changeScope?.pairFocusIds));}
       catch(error){throw new Error('锁定前独立审查未完成，未生成完整卡：'+String(error));}
       const sourceReview=reviews[0];
       const overlapReview:PremiseSelectionReview=reviews[1]||{passed:true,issues:[]};
-      const affectedIds=new Set((changeScope?.affectedIds||[]).map(String));
+      const affectedIds=new Set((changeScope?.pairAffectedIds||[]).map(String));
       const retainedOverlapIssues=previousReview&&affectedIds.size
         ? previousReview.issues.filter(issue=>issue.kind==='overlap'
           && !affectedIds.has(String(issue.premiseId))
@@ -6298,6 +6304,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       before.selected.forEach(item=>beforeById.set(String(item.premiseId),JSON.stringify(item)));
       after.selected.forEach(item=>afterById.set(String(item.premiseId),JSON.stringify(item)));
       const affectedIds=new Set<string>();
+      const beforePairById=new Map(before.selected.map(item=>[String(item.premiseId),
+        JSON.stringify(overlapReviewSelectionView([item])[0])]));
+      const afterPairById=new Map(after.selected.map(item=>[String(item.premiseId),
+        JSON.stringify(overlapReviewSelectionView([item])[0])]));
+      const pairAffectedIds=new Set<string>();
+      for(const [id,signature] of beforePairById)
+        if(afterPairById.get(id)!==signature)pairAffectedIds.add(id);
+      for(const [id,signature] of afterPairById)
+        if(beforePairById.get(id)!==signature)pairAffectedIds.add(id);
       // Selection order is presentation-only. Removing an unresolved item shifts later indices
       // but does not change those premises or the already-reviewed pairwise verdicts.
       for(const [id,priorSignature] of beforeById){
@@ -6311,6 +6326,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       return {
         focusIds:after.selected.map(item=>String(item.premiseId)).filter(id=>affectedIds.has(id)),
         affectedIds:[...affectedIds],
+        pairFocusIds:after.selected.map(item=>String(item.premiseId)).filter(id=>pairAffectedIds.has(id)),
+        pairAffectedIds:[...pairAffectedIds],
       };
     };
     const initialReview = await reviewBoth(initial);
