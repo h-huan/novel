@@ -17,6 +17,9 @@ it('never confuses surplus vetted candidates with user delivery slots',()=>{
  expect(missingRequestedIdeaSlots(ids,new Set(['P2','P3','P4','P6']),5)).toHaveLength(1);
  expect(missingRequestedIdeaSlots(ids,new Set(ids),5)).toEqual([]);
  expect(missingRequestedIdeaSlots(ids,new Set(),5)).toEqual(ids.slice(0,5));
+ expect(missingRequestedIdeaSlots(ids,new Set(['P1','OUTSIDE']),5)).toEqual(['P2','P3','P4','P5']);
+ expect(missingRequestedIdeaSlots(['P1','P1','P2','P3'],new Set(['P1']),3)).toEqual(['P2','P3']);
+ expect(()=>missingRequestedIdeaSlots(ids,new Set(),-1)).toThrow();
 });
 
 it('limits costly preselection reselection to real user delivery deficits plus bounded hedge',()=>{
