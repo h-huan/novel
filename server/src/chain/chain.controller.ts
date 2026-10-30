@@ -6683,11 +6683,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     };
     rememberRejected(initialReview);
     const repairPlan = premiseReselectionPlan(initial, initialReview);
-    // All rejected positions in the existing preselection shortlist are
-    // potential full-card candidates. Do not throw away three source-verified
-    // screening slots merely because five delivery slots remain intact.
+    // Rejected positions are repair options, not mandatory replacements. The
+    // screened shortlist may target more than the author requested; only the
+    // actual delivery deficit is mandatory. A bounded surplus guards final
+    // full-card rejection without serially repairing every failed hedge.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-    const neededReplacementSlots=Math.max(0,requestedCount-initiallyRetained.selection.selected.length);
+    const neededReplacementSlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
     // The repair planner includes failed *selected* identities as potential
     // self-corrections. They are NOT fresh pool choices. Count only genuinely
     // unused pool identities, plus a proven plan-only selection-fit correction;
@@ -6704,7 +6705,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // The original pool and its already-fixed eight-card shortlist bound the
     // number of positions; only independently approved survivors proceed.
     const recoveryHedgeCount = neededReplacementSlots > 0
-      ? Math.min(2,Math.max(1,Math.ceil(neededReplacementSlots/2))) : 0;
+      ? Math.min(2,Math.max(1,Math.ceil(neededReplacementSlots*3/4))) : 0;
     const recoverySlots=deliveryCount<requestedCount
       ?repairPlan.repairSlots.slice(0,Math.min(
         neededReplacementSlots+recoveryHedgeCount,
@@ -6745,12 +6746,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialSelection = retained.selection;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
-        const missingSlots = Math.max(0, requestedCount - partialSelection.selected.length);
+        const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
         const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
         if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
-          this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + requestedCount
+          this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + deliveryCount
             + ' 个已独立复核合格题材；原池候选或共享审核/重选预算不足以补齐剩余位置，保留真实缺额。');
           return { ...partialSelection, selectionAudit: {
             initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
@@ -6759,7 +6760,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             completeCardGatePending: true,
           } };
         }
-        this.logger?.warn('锁定前已有 ' + partialSelection.selected.length + '/' + requestedCount
+        this.logger?.warn('锁定前已有 ' + partialSelection.selected.length + '/' + deliveryCount
           + ' 个审核合格预选题材；在原池与共享预算内补齐待审核预选容量，而不只是凑齐交付数量。');
         break;
       }
