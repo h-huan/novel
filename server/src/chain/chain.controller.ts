@@ -5859,50 +5859,71 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             || (issue === '篇幅分线合计与总章数不一致' && !!scopePlan));
           return { card, index, issues, scopePlan, metadataIssues };
         }).filter(item => item.issues.length > 0 && item.metadataIssues);
-        const repairTargets = repairable.slice(0, discoveryBudget.presentationBatchSize);
-        if (repairTargets.length && presentationBudget.remaining > minimumCardReviewCalls(candidates.length)) {
-          try {
-            const targets = repairTargets.map(item => {
-              const fields = ['storyTone', 'writingStyle', 'webNovelGenre', 'plotTags'] as const;
-              const flagged = fields.filter(field => item.issues.some(issue => issue.startsWith(field + '未继承')));
-              return {
-                premise: sameBatchPremises.find(row => String(row.premiseId) === String(item.card.sourcePremiseId)),
-                card: item.card,
-                gateIssues: item.issues,
-                dimensionRepairOptions: Object.fromEntries(flagged.map(field => [field, dto[field].length ? dto[field] : autoOptions[field]])),
-                dimensionRepairSelections: Object.fromEntries(flagged.map(field => [field, dto[field]])),
-                scopeAllocationPlan: item.scopePlan,
-                storyRepairAllowed: false,
-              };
+        // Repair every independently eligible card that fits the ORIGINAL shared
+        // budget, in configured concurrent groups. A fixed first-two slice
+        // silently discarded repairable peers despite unused credits.
+        const batchSize=Math.max(1,discoveryBudget.presentationBatchSize);
+        const repairGroups:typeof repairable[]=[];
+        for(let offset=0;offset<repairable.length;offset+=batchSize)
+          repairGroups.push(repairable.slice(offset,offset+batchSize));
+        // Reserve conservative final-review credits before spending any on
+        // metadata; semantic Gate is unchanged and still runs on all repaired
+        // cards. No fresh model allowance, retry loop or story mutation.
+        const reservedReviewCalls=Math.ceil(candidates.length/batchSize);
+        const fundedGroups=repairGroups.slice(0,
+          Math.max(0,presentationBudget.remaining-reservedReviewCalls));
+        if(fundedGroups.length<repairGroups.length)
+          this.logger.warn('idea-discover: 部分元数据修复缺少共享预算，未修复卡保留原拒绝结论：'
+            +fundedGroups.length+'/'+repairGroups.length+' 批');
+        if(fundedGroups.length){
+          const repairedGroups=await independentReviewBatches(
+            fundedGroups,presentationBudget,IDEA_CARD_GENERATION_CONCURRENCY,
+            async(group,groupIndex,budget)=>{
+              const targets=group.map(item=>{
+                const fields=['storyTone','writingStyle','webNovelGenre','plotTags'] as const;
+                const flagged=fields.filter(field=>item.issues.some(issue=>
+                  issue.startsWith(field+'未继承')));
+                return {
+                  premise:sameBatchPremises.find(row=>String(row.premiseId)===String(item.card.sourcePremiseId)),
+                  card:item.card,gateIssues:item.issues,
+                  dimensionRepairOptions:Object.fromEntries(flagged.map(field=>
+                    [field,dto[field].length?dto[field]:autoOptions[field]])),
+                  dimensionRepairSelections:Object.fromEntries(flagged.map(field=>[field,dto[field]])),
+                  scopeAllocationPlan:item.scopePlan,
+                  storyRepairAllowed:false,
+                };
+              });
+              try{
+                const response=await this.realLLM.generate({
+                  prompt:ideaGateLocalRepairDirective(targets),
+                  scenario:'idea_generate',responseFormat:'json_object',
+                  temperature:0.1,timeout:LLM_TUNABLES.timeoutSimple(),
+                  maxEmptyRetries:0,physicalCallBudget:budget,
+                  metrics:{stepKey:'idea_card_metadata_repair',
+                    attempt:(attempt==='initial'?0:1)*100+groupIndex},
+                });
+                const raw=JSON.parse(jsonrepair(String(response.content||'{}')
+                  .replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'')));
+                const patches=orderedIdeaRepairPatches(raw,group.length);
+                return applyIsolatedIdeaRepairPatches(
+                  group.map(item=>item.card),patches,{
+                    dimensionRepairOptions:targets.map(item=>item.dimensionRepairOptions),
+                    dimensionRepairSelections:targets.map(item=>item.dimensionRepairSelections),
+                    dimensionOnlyPositions:group.flatMap((item,index)=>item.scopePlan?[]:[index]),
+                    scopeAllocationPlans:group.map(item=>item.scopePlan),
+                    metadataOnlyPositions:group.map((_,index)=>index),
+                  },(index,error)=>this.logger.warn('idea-discover: 卡片元数据局部补丁无效 '
+                    +group[index].card.sourcePremiseId+': '+String(error)));
+              }catch(error){
+                this.logger.warn('idea-discover: 第'+(groupIndex+1)
+                  +'组元数据局部修复未完成，原卡仍需过原质量门：'+String(error));
+                return group.map(item=>item.card);
+              }
             });
-            const response = await this.realLLM.generate({
-              prompt: ideaGateLocalRepairDirective(targets),
-              scenario: 'idea_generate', responseFormat: 'json_object',
-              temperature: 0.1, timeout: LLM_TUNABLES.timeoutSimple(),
-              maxEmptyRetries: 0, physicalCallBudget: presentationBudget,
-              metrics: { stepKey: 'idea_card_metadata_repair', attempt: attempt === 'initial' ? 0 : 1 },
-            });
-            const raw = JSON.parse(jsonrepair(String(response.content || '{}')
-              .replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '')));
-            const patches = orderedIdeaRepairPatches(raw, repairTargets.length);
-            const repaired = applyIsolatedIdeaRepairPatches(
-              repairTargets.map(item => item.card), patches,
-              {
-                dimensionRepairOptions: targets.map(item => item.dimensionRepairOptions),
-                dimensionRepairSelections: targets.map(item => item.dimensionRepairSelections),
-                dimensionOnlyPositions: repairTargets.flatMap((item, index) => item.scopePlan ? [] : [index]),
-                scopeAllocationPlans: repairTargets.map(item => item.scopePlan),
-                metadataOnlyPositions: repairTargets.map((_, index) => index),
-              },
-              (index, error) => this.logger.warn('idea-discover: 卡片元数据局部补丁无效 '+repairTargets[index].card.sourcePremiseId+': '+String(error)),
-            );
-            candidates = candidates.map((card, index) => {
-              const repairIndex = repairTargets.findIndex(item => item.index === index);
-              return repairIndex >= 0 ? repaired[repairIndex] : card;
-            });
-          } catch (error) {
-            this.logger.warn('idea-discover: 卡片局部修复未完成，原卡仍需接受全部质量门：'+String(error));
-          }
+          const corrected=new Map<number,any>();
+          fundedGroups.forEach((group,index)=>group.forEach((item,position)=>
+            corrected.set(item.index,repairedGroups[index][position])));
+          candidates=candidates.map((card,index)=>corrected.get(index)||card);
         }
         // Deterministic contracts run before a paid semantic review. Invalid
         // metadata stays rejected and enters its authorized targeted repair.
