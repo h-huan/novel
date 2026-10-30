@@ -5885,7 +5885,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               {
                 dimensionRepairOptions: targets.map(item => item.dimensionRepairOptions),
                 dimensionRepairSelections: targets.map(item => item.dimensionRepairSelections),
-                dimensionOnlyPositions: repairTargets.map((_, index) => index),
+                dimensionOnlyPositions: repairTargets.flatMap((item, index) => item.scopePlan ? [] : [index]),
                 scopeAllocationPlans: repairTargets.map(item => item.scopePlan),
                 metadataOnlyPositions: repairTargets.map((_, index) => index),
               },
