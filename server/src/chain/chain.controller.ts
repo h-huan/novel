@@ -6364,10 +6364,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // identity after funding mandatory replacements, diversify ONE optional
     // hedge. This is still the same one-model-call reselection and every new
     // identity must pass the full independent review.
-    const mandatoryPoolSlots=recoverySlots.slice(0,neededReplacementSlots)
+    // The delivery floor and the larger preselection screening target differ.
+    // A one-card delivery shortage must not be miscounted as four mandatory
+    // repairs just because we intended to screen eight for five deliveries.
+    const missingDeliverySlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
+    const mandatoryPoolSlots=recoverySlots.slice(0,missingDeliverySlots)
       .filter(slot=>slot.mode==='replace_from_pool').length;
-    const poolHedgeId=deliveryCount<requestedCount && freshPoolCount>mandatoryPoolSlots
-      ?recoverySlots.slice(neededReplacementSlots)
+    const poolHedgeId=deliveryCount<requestedCount && missingDeliverySlots>0
+      && freshPoolCount>mandatoryPoolSlots
+      ?recoverySlots.slice(missingDeliverySlots)
         .find(slot=>slot.mode==='correct_or_replace_from_pool')?.replacesPremiseId
       :undefined;
     const surplusRejectedIds=repairPlan.repairSlots.slice(recoverySlots.length)
