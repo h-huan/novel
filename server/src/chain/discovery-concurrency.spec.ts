@@ -14,5 +14,6 @@ it('reserves memory and never expands beyond actual demand or remote task ceilin
  expect(adaptiveDiscoveryConcurrency(20,{logicalCores:16,freeBytes:1024**3})).toBe(2);
  expect(adaptiveDiscoveryConcurrency(3,{logicalCores:16,freeBytes:16*gib})).toBe(3);
  expect(adaptiveDiscoveryConcurrency(1,{logicalCores:16,freeBytes:16*gib})).toBe(1);
- expect(()=>adaptiveDiscoveryConcurrency(0,{logicalCores:8,freeBytes:16*gib})).toThrow();
+ expect(adaptiveDiscoveryConcurrency(0,{logicalCores:8,freeBytes:16*gib})).toBe(1);
+ expect(()=>adaptiveDiscoveryConcurrency(-1,{logicalCores:8,freeBytes:16*gib})).toThrow();
 });
