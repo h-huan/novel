@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { assertWorldProfileAvailable, withAtomicWorldProfile } from './world-persistence';
+import { up as initializeSchema } from '../database/migrations/001_initial';
+import { reconcileSchema } from '../database/schema-reconciler';
 
 const database = () => {
   const db = new DatabaseSync(':memory:');
@@ -10,6 +12,31 @@ const database = () => {
   `);
   return db;
 };
+
+describe('existing database world/profile creation compatibility', () => {
+  it('restores missing creation columns without replacing historical rows and is idempotent', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      initializeSchema(db);
+      db.prepare('INSERT INTO projects(id,title,type,status,settings,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+        .run('legacy-project','保留故事','short_story','generation_failed','{}','2026-01-01','2026-01-01');
+      db.prepare('INSERT INTO world_settings(id,project_id,name,created_at,updated_at) VALUES (?,?,?,?,?)')
+        .run('world-legacy','legacy-project','原有世界观','2026-01-01','2026-01-01');
+      db.prepare('INSERT INTO world_system_profiles(id,project_id,world_setting_id,created_at,updated_at) VALUES (?,?,?,?,?)')
+        .run('profile-legacy','legacy-project','world-legacy','2026-01-01','2026-01-01');
+      db.exec('ALTER TABLE world_settings DROP COLUMN social_rules');
+      db.exec('ALTER TABLE world_system_profiles DROP COLUMN synopsis');
+      const first = reconcileSchema(db);
+      expect(first.actions).toContain('creation_world_column.world_settings.social_rules');
+      expect(first.actions).toContain('creation_world_column.world_system_profiles.synopsis');
+      expect(db.prepare('SELECT name,social_rules FROM world_settings WHERE id=?').get('world-legacy'))
+        .toMatchObject({name:'原有世界观',social_rules:''});
+      expect(db.prepare('SELECT world_setting_id,synopsis FROM world_system_profiles WHERE id=?').get('profile-legacy'))
+        .toMatchObject({world_setting_id:'world-legacy',synopsis:''});
+      expect(reconcileSchema(db).actions.filter(action => action.startsWith('creation_world_column.'))).toEqual([]);
+    } finally { db.close(); }
+  });
+});
 
 describe('world and profile atomic persistence', () => {
   it('rolls back the canonical world when the required profile write fails', () => {
