@@ -6567,7 +6567,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n先确定全部最终候选，并实质核对行动、升级、反转与代价差异；不要生成逐对自评文本，所有涉及新候选的比较仍由服务器独立同构复核。'
           +'\n按已注入GEN-002的最终差异比较合同执行。分类候选='+JSON.stringify(categories)
-          +'\n【每个问题位置的实际输出形状】只输出JSON：'+JSON.stringify(reselectionOutputShape)+'。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。只有原池与既有故事字段已满足全部兑现条件的纯引用错误可按短式原ID修正；若需要换题，必须改用原池真实新ID并补齐以下完整字段：'+JSON.stringify(fullReselectionShape)',
+          +'\n【每个问题位置的实际输出形状】只输出JSON：'+JSON.stringify(reselectionOutputShape)+'。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。只有原池与既有故事字段已满足全部兑现条件的纯引用错误可按短式原ID修正；若需要换题，必须改用原池真实新ID并补齐以下完整字段：'+JSON.stringify(fullReselectionShape),
           {scenario:'idea_generate',stepKey:'idea_premise_pool_reselection',physicalCallBudget:reselectionBudget,timeout:LLM_TUNABLES.timeoutSimple(),
             validate:value=>{try{normalize(value);return true;}catch{return false;}},
             describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String((error as Error).message)];}},
