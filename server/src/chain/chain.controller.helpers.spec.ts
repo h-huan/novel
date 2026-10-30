@@ -1814,13 +1814,14 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     }
     if (failure === 'pool_below_minimum' || failure === 'pool_top_up_unique') {
       const supplemented=failure==='pool_top_up_unique', expectedCount=supplemented?3:2;
+      const verifiedCount=1; // Only P1 has the required final Gate evidence; weak peers remain rejected.
       const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
       expect(completeCardCalls).toHaveLength(expectedCount);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
-      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:expectedCount});
-      expect(result.ideas).toHaveLength(expectedCount);
+      expect(result).toMatchObject({success:true,status:'partial',totalIdeas:verifiedCount});
+      expect(result.ideas).toHaveLength(verifiedCount);
       expect(result.appealGate).toMatchObject({
-        requested:5,returned:expectedCount,qualified:expectedCount,partial:true,minimumDeliverableCount:5,
+        requested:5,returned:verifiedCount,qualified:verifiedCount,partial:true,minimumDeliverableCount:5,
       });
       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
         target:15,generated:expectedCount,shortfall:15-expectedCount,batchCount:3,maxConcurrency:2,
@@ -1884,7 +1885,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       qualified: 1,
       requested: 2,
       shortfall: 1,
-      returned: 0,
+      returned: 1,
       rejected: 1,
     }));
   });
