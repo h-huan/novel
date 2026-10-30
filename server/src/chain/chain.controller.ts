@@ -6005,13 +6005,166 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (failureSelectionAudit) failureSelectionAudit.generated = structuredCards.length;
       await accept(structuredCards, 'initial');
 
-      // Failed cards are not silently patched, reselected, or replaced after
-      // the final Gate; approved peers remain deliverable even when the target
-      // cannot be filled. Failure evidence stays in candidateAssessments. Since
-      // EVERY independently vetted selected premise was structured in the
-      // same wave, final selection can filter the entire verified set once.
+      // Complete-card rejects are a DELIVERY deficit, not an instruction to
+      // quietly return fewer cards. Reuse unused LIGHTWEIGHT seeds first. If the
+      // original pool cannot cover the deficit, create one bounded parallel seed
+      // top-up, then run the SAME expansion, independent source/causal/category/
+      // genre/overlap and full-card/presentation Gates. No approved card is
+      // regenerated and every paid call uses the EXISTING shared allowances.
+      // This is a single demand-driven recovery wave, never an unconditional
+      // extra round or a retry loop for a factually disproved story.
+      const supplementarySelected: Array<Record<string,unknown>>=[];
+      const supplementaryStructured: Array<Record<string,unknown>>=[];
       const fulfillmentActions: any[]=[];
-      const fulfillmentStopReason='parallel_full_card_gate_complete';
+      let fulfillmentStopReason='full_card_target_met';
+      const missingAfterFirstGate=Math.max(0,requestedCount-accepted.length);
+      if(missingAfterFirstGate){
+        const previouslySelectedIds=new Set(selectedPremises.map(item=>String(item.premiseId)));
+        const unusedSeeds=premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId)));
+        const desiredSupplement=Math.max(missingAfterFirstGate,
+          missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2));
+        const minimumPresentationCredits=missingAfterFirstGate+1;
+        fulfillmentStopReason='bounded_refill_unavailable';
+        if(sourceCompletionBudget.remaining>=2 && reselectionCompletionBudget.remaining>=1
+          &&presentationBudget.remaining>=minimumPresentationCredits){
+          // Add fresh seed identities only if the already-paid original pool
+          // cannot provide the desired gap plus a small dynamic hedge.
+          const seedDeficit=Math.max(0,desiredSupplement-unusedSeeds.length);
+          if(seedDeficit>0 && reselectionCompletionBudget.remaining>=2){
+            const batchCount=Math.min(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY,seedDeficit,
+              reselectionCompletionBudget.remaining-1);
+            if(batchCount>0){
+              const seedSizes=Array.from({length:batchCount},(_,index)=>
+                Math.floor(seedDeficit/batchCount)+(index<seedDeficit%batchCount?1:0));
+              const existingKeys=new Set(premiseDiscovery.pool.flatMap(seed=>[
+                'title:'+normalizeTitle(seed.workingTitle),'core:'+normalizeTitle(seed.storyCore)]));
+              const newSeedBatches=await independentReviewBatches(seedSizes,reselectionCompletionBudget,
+                IDEA_PREMISE_POOL_GENERATION_CONCURRENCY,async(size,index,budget)=>{
+                  const answer=await this.realLLM.generate({
+                    prompt:buildPremiseSelectionPrompt('pool',{pool:premiseDiscovery.pool,
+                      batchIndex:index,batchCount,batchSize:size}),
+                    scenario:'idea_generate',responseFormat:'json_object',
+                    timeout:discoveryBudget.complexTimeoutMs,maxEmptyRetries:0,
+                    physicalCallBudget:budget,
+                    metrics:{stepKey:'idea_premise_pool_refill',attempt:index},
+                  });
+                  const value=JSON.parse(jsonrepair(String(answer.content||'{}')
+                    .replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'')));
+                  if(!Array.isArray(value.pool))throw Error('补足候选没有返回pool数组');
+                  return value.pool;
+                });
+              let nextId=1;
+              for(const batch of newSeedBatches)for(const raw of batch){
+                if(!raw||typeof raw!=='object'||Array.isArray(raw))continue;
+                const seed=raw as Record<string,unknown>;
+                const title=String(seed.workingTitle||'').trim();
+                const core=String(seed.storyCore||'').trim();
+                const titleKey='title:'+normalizeTitle(title);
+                const coreKey='core:'+normalizeTitle(core);
+                if(title.length<2||core.length<20||premiseSeedFactIssues(core).length
+                  ||prohibitedFictionNames({workingTitle:title,storyCore:core}).length
+                  ||existingKeys.has(titleKey)||existingKeys.has(coreKey))continue;
+                existingKeys.add(titleKey);existingKeys.add(coreKey);
+                unusedSeeds.push({...seed,premiseId:'R-P'+nextId++,
+                  workingTitle:title,storyCore:core});
+              }
+              fulfillmentActions.push({phase:'lightweight_pool_refill',
+                requested:seedDeficit,retained:unusedSeeds.length-
+                  premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId))).length});
+            }
+          }
+          const refillTarget=Math.min(unusedSeeds.length,desiredSupplement,
+            Math.max(0,presentationBudget.remaining-1));
+          if(refillTarget>=missingAfterFirstGate
+            &&presentationBudget.remaining>=refillTarget+Math.ceil(refillTarget/discoveryBudget.presentationBatchSize)
+            &&reselectionCompletionBudget.remaining>=1){
+            try{
+              const selectionAnswer=await this.realLLM.generate({
+                prompt:buildPremiseSelectionPrompt('selection',{pool:unusedSeeds,
+                  targetCount:refillTarget,minimumCount:missingAfterFirstGate}),
+                scenario:'idea_generate',responseFormat:'json_object',
+                timeout:discoveryBudget.complexTimeoutMs,maxEmptyRetries:0,
+                physicalCallBudget:reselectionCompletionBudget,
+                metrics:{stepKey:'idea_premise_refill_selection',attempt:0},
+              });
+              const raw=JSON.parse(jsonrepair(String(selectionAnswer.content||'{}')
+                .replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'')));
+              const source=Array.isArray(raw.selectedPremises)?raw.selectedPremises:[];
+              const prelim=normalizePremiseSelectionPayload({
+                pool:unusedSeeds,
+                selectedPremises:source.map((item:any)=>{
+                  if(!item||typeof item!=='object'||Array.isArray(item))return item;
+                  const {causalPlan:_pendingIndex,...story}=item;
+                  return story;
+                }),
+              },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
+              const withPlans={...prelim,selected:prelim.selected.map(item=>bindPremiseCausalPlan({
+                ...item,causalPlan:source.find((row:any)=>row?.premiseId===item.premiseId)?.causalPlan,
+              }))};
+              const planned=await this.completePremiseCausalPlans(withPlans,reselectionCompletionBudget);
+              const aligned=normalizePremiseSelectionPayload({
+                pool:unusedSeeds,selectedPremises:planned.selected,
+              },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
+              const reviewed=await this.reconcilePremiseSelection(
+                aligned,refillTarget,unusedSeeds.length,
+                discoveryCategories,preselectionAuditStandard,dto.webNovelGenre,
+                {reviews:sourceCompletionBudget,reselection:reselectionCompletionBudget},
+                missingAfterFirstGate);
+              for(const premise of reviewed.selected){
+                const id=String(premise.premiseId);
+                if(previouslySelectedIds.has(id))throw Error('补足候选重复使用已进入完整卡的题材身份');
+                selectedCategoryById.set(id,String(premise.storyCategory||dto.storyCategory));
+                supplementarySelected.push(premise);
+              }
+              sameBatchPremises=[...selectedPremises,...supplementarySelected];
+              if(supplementarySelected.length){
+                const reserved=minimumCardReviewCalls(supplementarySelected.length,supplementarySelected.length);
+                if(presentationBudget.remaining<reserved+supplementarySelected.length)
+                  throw Error('剩余完整卡预算无法覆盖补足生成和独立终审');
+                presentationBudget.remaining-=reserved;
+                let generated:PromiseSettledResult<Record<string,unknown>>[];
+                try{
+                  generated=await independentReviewBatches(supplementarySelected,presentationBudget,
+                    IDEA_CARD_GENERATION_CONCURRENCY,async(premise,index,budget):PromiseSettledResult<Record<string,unknown>>=>{
+                      try{return {status:'fulfilled',value:await generateStructuredCard(premise,
+                        selectedPremises.length+index,budget)};}
+                      catch(reason){return {status:'rejected',reason};}
+                    });
+                }finally{presentationBudget.remaining+=reserved;}
+                const freshIds=new Set<string>();
+                for(let index=0;index<generated.length;index++){
+                  const result=generated[index],premise=supplementarySelected[index];
+                  if(result.status==='rejected'){
+                    const detail=String(result.reason instanceof Error?result.reason.message:result.reason);
+                    structuringErrors.push({sourcePremiseId:String(premise.premiseId),error:detail});
+                    candidateAssessments.push({sourcePremiseId:String(premise.premiseId),attempt:'repair',
+                      passed:false,issues:[detail]});
+                    rejectedReasons.push(detail);continue;
+                  }
+                  const id=String(result.value.sourcePremiseId||'');
+                  if(id!==String(premise.premiseId)||freshIds.has(id))
+                    throw Error('补足完整卡的服务器身份错位或重复');
+                  freshIds.add(id);supplementaryStructured.push(result.value);
+                }
+                await accept(supplementaryStructured,'repair');
+              }
+              fulfillmentActions.push({phase:'refill_from_lightweight',
+                screened:reviewed.selected.length,structured:supplementaryStructured.length,
+                deliveredAfterGate:Math.min(requestedCount,accepted.length)});
+              fulfillmentStopReason=accepted.length>=requestedCount
+                ?'bounded_refill_met_target':'bounded_refill_ended_with_real_shortfall';
+            }catch(error){
+              const reason=error instanceof Error?error.message:String(error);
+              rejectedReasons.push('补足阶段未完成：'+reason);
+              fulfillmentActions.push({phase:'refill_blocked',reason});
+              fulfillmentStopReason='bounded_refill_protocol_or_quality_blocked';
+              this.logger.warn('idea-discover: 补足阶段终止（保留已合格卡）：'+reason);
+            }
+          }else fulfillmentStopReason='bounded_refill_pool_or_presentation_budget_shortfall';
+        }else fulfillmentStopReason='bounded_refill_shared_budget_shortfall';
+      }
+      const allReviewedPremises=[...selectedPremises,...supplementarySelected];
+      if(failureSelectionAudit)failureSelectionAudit.generated=structuredCards.length+supplementaryStructured.length;
       const selectedAccepted = accepted
         .sort((left, right) =>
           Number(right?.ideaAppealGate?.distinctivenessScore || 0) - Number(left?.ideaAppealGate?.distinctivenessScore || 0)
@@ -6020,10 +6173,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         .slice(0, requestedCount);
       const finalAcceptedPremiseIds = new Set(selectedAccepted.map((idea: any) => String(idea?.sourcePremiseId || '').trim()).filter(Boolean));
       const allQualifiedPremiseIds=new Set(accepted.map((idea:any)=>String(idea?.sourcePremiseId||'').trim()));
-      const finalRejectedPremiseIds=selectedPremises.map((item:any)=>String(item?.premiseId||'').trim())
+      const finalRejectedPremiseIds=allReviewedPremises.map((item:any)=>String(item?.premiseId||'').trim())
         .filter(id=>id&&!allQualifiedPremiseIds.has(id));
       const finalMissingPremiseIds = missingRequestedIdeaSlots(
-        selectedPremises.map((item:any)=>String(item?.premiseId||'').trim()),
+        allReviewedPremises.map((item:any)=>String(item?.premiseId||'').trim()),
         finalAcceptedPremiseIds,requestedCount);
       const uniqueRejectedReasons = Array.from(new Set(rejectedReasons));
       const finalRejectedReasons = latestIdeaFailureReasons(candidateAssessments,finalRejectedPremiseIds);
@@ -6032,23 +6185,23 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         schemaVersion: 8,
         mode: 'parallel_vetted_full_card_filter',
         structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
-        repairProtocol: 'no_post_card_repair_or_replacement',
+        repairProtocol: 'one_budgeted_lightweight_refill_wave_after_full_card_gate',
         fulfillment:{stopReason:fulfillmentStopReason,actions:fulfillmentActions,sourceCallsRemaining:sourceCompletionBudget.remaining,reselectionCallsRemaining:reselectionCompletionBudget.remaining},
         premisePoolSize: premiseDiscovery.pool.length,
         categorySelectionMode: variedCategories ? 'per_premise_from_platform_candidates' : 'fixed_category',
         selectedCategories: [...new Set(selectedPremises.map(premise => selectedCategoryById.get(String(premise.premiseId))))],
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
-        premiseSelected: selectedPremises.length,
+        premiseSelected: allReviewedPremises.length,
         preselectionCapacityTarget:ideaPreselectionCapacity(requestedCount,premiseDiscovery.pool.length),
         preselectionCapacityGap:Math.max(0,ideaPreselectionCapacity(requestedCount,premiseDiscovery.pool.length)-selectedPremises.length),
         preselectionSurplus: Math.max(0,selectedPremises.length-requestedCount),
-        independentlyVettedPremises:selectedPremises.length,
-        fullCardCandidates:selectedPremises.length,
+        independentlyVettedPremises:allReviewedPremises.length,
+        fullCardCandidates:allReviewedPremises.length,
         fullCardQualifiedSurplus:Math.max(0,accepted.length-requestedCount),
         preselectionShortfall,
         selectionAudit: premiseDiscovery.selectionAudit,
-        generated: structuredCards.length,
+        generated: structuredCards.length+supplementaryStructured.length,
         fullCardDispatched:fullCardDispatchPremiseIds.length,
         fullCardDispatchedIds:[...fullCardDispatchPremiseIds],
         evaluatedAttempts: candidateAssessments.length,
@@ -6073,7 +6226,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           storyCategory: premise.storyCategory ?? null,
           storyCore: premise.storyCore ?? null,
         })),
-        preselectedPremises: selectedPremises,
+        preselectedPremises: allReviewedPremises,
         candidateAssessments,
         acceptedEvidence: selectedAccepted.map(idea => ({
           sourcePremiseId: String(idea?.sourcePremiseId || ''),
@@ -6083,7 +6236,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           evidence: idea?.readerExperienceProfile?.evidence,
           distinctivenessScore: idea?.ideaAppealGate?.distinctivenessScore,
         })),
-        note: '先锁定平台、分类、流派和因果条件，并发生成轻量候选；从固定原池预选并完成独立来源、因果、分类、流派及差异审核。独立审核通过的全部题材并发结构化和终审，合格后按实际吸引力及差异信号选择至请求数量；未通过题材剔除，不发起完整卡之后的修复或候补替换。',
+        note: '先锁定平台、分类、流派和因果条件，并发生成轻量候选；从固定原池预选并完成独立来源、因果、分类、流派及差异审核。独立审核通过的全部题材并发结构化和终审，合格后按实际吸引力及差异信号选择至请求数量；未通过题材剔除；若仍缺交付数量，则在既有共享预算内从未使用的轻量候选补位，原池不足时并发补生一批轻量候选，再走同一独立复核、成卡与终审；预算不足如实返回缺额。',
       };
 
       if (selectedAccepted.length === 0) {
