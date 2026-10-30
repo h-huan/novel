@@ -6074,10 +6074,24 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 const coreKey='core:'+normalizeTitle(core);
                 if(title.length<2||core.length<20||premiseSeedFactIssues(core).length
                   ||prohibitedFictionNames({workingTitle:title,storyCore:core}).length
-                  ||existingKeys.has(titleKey)||existingKeys.has(coreKey))continue;
+                  ||existingKeys.has(titleKey)||existingKeys.has(coreKey)
+                  ||[...premiseDiscovery.pool,...unusedSeeds].some(previous=>
+                    ideaSemanticSimilarity({description:core},
+                      {description:String(previous.storyCore||'')})>=0.42))continue;
+                // The initial and supplemental pools must enforce the SAME
+                // category identity and semantic deduplication before paid
+                // selection. A malformed category must not consume a refill.
+                let bound:Record<string,unknown>;
+                try{
+                  bound=bindPremiseCategory({
+                    premiseId:'R-P'+nextId,
+                    workingTitle:title,storyCore:core,
+                    storyCategoryId:variedCategories?seed.storyCategoryId:'K1',
+                    storyCategory:variedCategories?undefined:dto.storyCategory,
+                  },discoveryCategories,false);
+                }catch{continue;}
                 existingKeys.add(titleKey);existingKeys.add(coreKey);
-                unusedSeeds.push({...seed,premiseId:'R-P'+nextId++,
-                  workingTitle:title,storyCore:core});
+                unusedSeeds.push(bound);nextId++;
               }
               fulfillmentActions.push({phase:'lightweight_pool_refill',
                 requested:seedDeficit,retained:unusedSeeds.length-
