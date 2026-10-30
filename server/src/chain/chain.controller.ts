@@ -5499,18 +5499,6 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize
             + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
         }
-        // No amount of selection, independent review or full-card work can
-        // deliver more distinct identities than the actual vetted source pool.
-        // A bounded pool supplement has already run above when applicable.
-        // Fail with its real diagnostics instead of paying for a doomed
-        // selection/reselection/review chain.
-        if (candidatePool.length < minimumPremiseSelectionCount) {
-          throw failWithPoolAudit(
-            new Error('创建前有效原池仅 ' + candidatePool.length + '/' + requestedCount
-              + ' 个题材；已执行有界候选补足，仍不能满足实际请求数，不再启动无结果的后续模型审核。'),
-            'candidate_pool_generation', 'candidate_pool_shortfall',
-          );
-        }
         // Up to three additional paths from the SAME fixed pool are selected
         // and independently reviewed before card construction, avoiding serial
         // original-pool reselection for every downstream failure.
