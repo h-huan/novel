@@ -137,11 +137,12 @@ export function sourceReviewSelectionView(selected: PremiseSelectionResult['sele
  return selected.map(({storyCore:_source,workingTitle:_title,...expanded})=>expanded);
 }
 
-/** Keep source storyCore and the selected expanded evidence for pairwise
- * mechanism comparison; omit only the repeated causalPlan quotations. The
- * source and payoff Gates independently inspect and validate the full plan. */
+/** Pairwise overlap compares the actual expanded action, escalation, reversal
+ * and cost, not a second verbatim copy of the source seed or causal quotations.
+ * Full seed inheritance and causal validity remain independently checked by
+ * the source/payoff Gate; server-owned selection and audit are unchanged. */
 export function overlapReviewSelectionView(selected: PremiseSelectionResult['selected']) {
- return selected.map(({causalPlan:_plan,...expanded})=>expanded);
+ return selected.map(({causalPlan:_plan,storyCore:_seed,...expanded})=>expanded);
 }
 
 /** Prompt-only representation for a targeted reselection. The server still keeps
