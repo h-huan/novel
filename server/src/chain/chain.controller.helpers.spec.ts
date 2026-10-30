@@ -2189,7 +2189,7 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     qualified:6,returned:5,
     repairAttempted:false,repairGenerated:0,
     mode:'parallel_vetted_full_card_filter',
-    repairProtocol:'no_post_card_repair_or_replacement',
+    repairProtocol:'one_budgeted_lightweight_refill_wave_after_full_card_gate',
   });
   expect(outcome.appealGate.candidateAssessments.filter((row:any)=>!row.passed)).toHaveLength(2);
   expect(generate.mock.calls.filter(([row]:any[])=>['idea_card_local_repair','idea_premise_pool_reselection'].includes(row.metrics?.stepKey))).toHaveLength(0);
