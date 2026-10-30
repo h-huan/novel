@@ -130,6 +130,16 @@ it('selects two original-pool alternatives for one real delivery shortfall and s
   });
   controller.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
     expect(prompt).toContain('replacements恰好2项');
+    // The required slot may keep the original corrected citation. The single
+    // optional hedge must use a different *unused* original-pool identity,
+    // otherwise two correlated plan repairs can both fail the same review.
+    expect(prompt).toContain('"replacesPremiseId":"E","mode":"correct_or_replace_from_pool"');
+    expect(prompt).toContain('"replacesPremiseId":"F","mode":"replace_from_pool"');
+    const invalidHedge={replacements:[
+      {replacesPremiseId:'E',premise:premise('I')},
+      {replacesPremiseId:'F',premise:premise('F')},
+    ]};
+    expect(options.validate(invalidHedge)).toBe(false);
     const replacement={replacements:[
       {replacesPremiseId:'E',premise:premise('I')},
       {replacesPremiseId:'F',premise:premise('J')},
