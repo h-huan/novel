@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues} from './outline-fact-patch';
+import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections} from './outline-fact-patch';
 const original={content:'保留原场景。',targetWords:5000,chapterFunction:'既有职责',characterActions:[{action:'对手不知道秘密。',result:'秘密保留。'}],foreshadowing:[{content:'旧伏笔',plannedRecoveryChapter:4}]};
 it('applies dot and bracket addresses atomically while preserving all other fields and the original',()=>{
  const before=JSON.stringify(original);
@@ -221,4 +221,31 @@ it('does not accept a fish-count repair that leaves the opposite count in dialog
  expect(corrected.content).toContain('死了四条');
  expect(corrected.characterActions[0].action).toContain('四条死鱼');
  expect(chapter.content).toContain('死了五条');
+});
+
+it('completes only a counted action assertion explicitly cited by an independent arithmetic conflict',()=>{
+ const chapter={content:'三条翻肚鱼里两条已经死了，剩下一条后来也死了；另外一条后半夜死了，前后四条。我把四条死鱼捞进桶里。我说我就自己死了五条。',
+  characterActions:[{action:'把五条死鱼捞进空桶，等老葛检查',result:'他同意来查看'}],
+  hook:'明天还能卖鱼吗'};
+ const defect=JSON.stringify({location1:'本批·第3章.content',quote1:chapter.content,
+  location2:'本批·第3章.characterActions[0].action',quote2:chapter.characterActions[0].action,
+  conflict:'content写“前后四条”“我把四条死鱼捞进桶里”，但台词写“我就自己死了五条”，人物行动又写“把五条死鱼捞进空桶”。',
+  calculation:'三条中的两条加第三条共3，随后死1条，共4条。'});
+ const proposal={content:chapter.content.replace('我就自己死了五条','我就自己死了四条')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,proposal,[defect]).length).toBeGreaterThan(0);
+ const completed=alignOutlineFactCountProjections(chapter,proposal,[defect]);
+ expect(completed).toMatchObject({...proposal,'characterActions.0.action':'把四条死鱼捞进空桶，等老葛检查'});
+ expect(outlineFactPatchSynchronizationIssues(chapter,completed,[defect])).toEqual([]);
+ expect(applyOutlineFactPatch(chapter,completed).hook).toBe(chapter.hook);
+ expect(chapter.characterActions[0].action).toContain('五条死鱼');
+});
+it('never guesses counts without an explicit total, a correct in-source variant and a prior model correction',()=>{
+ const chapter={content:'前后四条。我说死了五条。',characterActions:[{action:'把五条死鱼捞进空桶'}]};
+ const conflict={location1:'本批.content',quote1:chapter.content,location2:'本批.action',quote2:chapter.characterActions[0].action,
+  conflict:'“前后四条”与“死了五条”“把五条死鱼捞进空桶”互斥。'};
+ const patch={content:chapter.content.replace('我说','我曾说')};
+ expect(alignOutlineFactCountProjections(chapter,patch,[JSON.stringify({...conflict,calculation:'相差1条'})])).toEqual(patch);
+ expect(alignOutlineFactCountProjections(chapter,patch,[JSON.stringify({...conflict,calculation:'共4条'})])).toEqual(patch);
+ const corrected={content:chapter.content.replace('死了五条','死了四条')};
+ expect(alignOutlineFactCountProjections(chapter,corrected,[JSON.stringify({...conflict,calculation:'没有足够算式'})])).toEqual(corrected);
 });
