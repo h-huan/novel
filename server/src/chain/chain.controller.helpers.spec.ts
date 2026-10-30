@@ -2197,11 +2197,9 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
 });
 
 it('fills a failed final-card delivery slot from unused lightweight seeds without regenerating approved cards',async()=>{
-  const core=(id:string)=>'【处境触发】'+id+'发现关键权益即将被剥夺，必须在当日采取行动。'
-    +'【主动选择】主角亲自取出可核验的原始材料，请求有权人到场核实。'
-    +'【必要条件】记录由本人实际取得，接收者核对并履行了适用的决定程序。'
-    +'【反转兑现】对手面对已成立的材料被迫改变行动，主角赢回权益也失去工作。'
-    +'【分类流派机制】悬疑以调查和必要条件驱动，线索改变双方的选择和代价。';
+  // Real preselection dedup rejects four copies of one generic story even
+  // when their IDs differ. Use genuinely different already-grounded seed paths.
+  const core=(id:string)=>diversePoolStories[Number(id.slice(1))-1];
   const seeds=['P1','P2','P3','P4'].map(id=>({
     premiseId:id,workingTitle:'独立案情'+id,storyCore:core(id),storyCategoryId:'K1',
   }));
