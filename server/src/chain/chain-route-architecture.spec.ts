@@ -88,8 +88,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('主角承诺亲自递送材料');
     expect(source).toContain('核对物证的物理来源与样本取得链');
     expect(contract).toContain('标记在钥匙柄上就不能突然成为锁芯的痕迹');
-    expect(contract).toContain('不在完整卡终审之后补生、换身份、重选');
-    expect(contract).not.toContain('由服务器在本批原池与共享预算内处理缺额');
+    expect(contract).toContain('一次有界轻量候选补足、候选独立复核和完整卡终审');
+    expect(contract).toContain('模型此轮只能忠实结构化当前已锁定身份');
   });
 
   it('anchors each new chapter result to an unconsumed chapter-local action instead of re-awarding prior outcomes', () => {
@@ -167,19 +167,25 @@ describe('chain HTTP architecture', () => {
   it('preserves final-gate-passed selected premises as diagnostics when the batch is incomplete', () => {
     const source = read('chain.controller.ts');
 
-    expect(source).toContain("repairProtocol: 'no_post_card_repair_or_replacement'");
+    expect(source).toContain("repairProtocol: 'one_budgeted_lightweight_refill_wave_after_full_card_gate'");
     expect(source).toContain('retainValidAutomaticPlotTags');
     expect(source).not.toContain('await fulfillDiscoveryGaps(');
     expect(source).not.toContain("kind:'repair_patch_rejected'");
     expect(source).toContain("mode: 'parallel_vetted_full_card_filter'");
     expect(source).toContain('await accept(structuredCards');
+    expect(source).toContain('const missingAfterFirstGate=Math.max(0,requestedCount-accepted.length)');
+    expect(source).toContain("stepKey:'idea_premise_pool_refill'");
+    expect(source).toContain("stepKey:'idea_premise_refill_selection'");
+    expect(source).toContain("await accept(supplementaryStructured,'repair')");
+    expect(source).toContain('sourceCompletionBudget.remaining>=2');
+    expect(source).toContain('presentationBudget.remaining>=minimumPresentationCredits');
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
     expect(source).toContain("status: 'partial'");
     expect(source).toContain('ideas: acceptedWithAudit');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
-    expect(source).toContain('repairGenerated: 0');
-    expect(source).toContain('repairError: null');
+    expect(source).toContain('repairGenerated: supplementaryStructured.length');
+    expect(source).toContain("repairError: fulfillmentActions.find(item=>item.phase==='refill_blocked')?.reason||null");
     expect(source).not.toContain('selectedAccepted.length !== requestedCount');
     expect(source).not.toContain('系统不会把部分结果伪装成完整成功');
   });
