@@ -111,3 +111,55 @@ it('reuses real category and manual-genre evidence after single-card rebinding a
  }
 });
 
+
+it('rechecks corrected causal plans without repeating unchanged independently verified source, category and genre checks',async()=>{
+ const initial=selection(),receipts:PremiseSourceReceipts=new Map();
+ const full=vi.fn(async input=>report(input));
+ const scope=JSON.stringify({standard:'same standards',requiredGenres:[]});
+ await reviewChangedPremiseSources(initial,scope,receipts,full);
+ const next=structuredClone(initial);
+ // Two repairs alter only the citation index; two other stories really change.
+ next.selected[0].causalPlan=[{action:{field:'activeChoice',quote:'旧事件'},conditions:[],result:{field:'payoff',quote:'旧结果'}}];
+ next.selected[1].causalPlan=[{action:{field:'activeChoice',quote:'另一事件'},conditions:[],result:{field:'payoff',quote:'另一结果'}}];
+ next.selected[2].activeChoice+='实际新增的主角行动';
+ next.selected[3].payoff+='实际改变的结局';
+ const payoffOnly=vi.fn(async (input,prior,budget)=>{
+   expect(input.selected.map(row=>row.premiseId)).toEqual(['A','B']);
+   expect(prior.sourceChecks).toHaveLength(20);
+   expect(prior.genreChecks).toHaveLength(2);
+   expect(prior.categoryChecks).toHaveLength(2);
+   expect(budget.remaining).toBeGreaterThanOrEqual(1);
+   return {...prior,payoffChecks:report(input).payoffChecks,passed:true,issues:[]};
+ });
+ const sharedBudget={remaining:12};
+ const output=await reviewChangedPremiseSources(next,scope,receipts,full,undefined,payoffOnly,sharedBudget);
+ expect(full.mock.calls.map(([input])=>input.selected.map(row=>row.premiseId)))
+   .toEqual([['A','B','C','D','E'],['C','D']]);
+ expect(payoffOnly).toHaveBeenCalledTimes(1);
+ expect(sharedBudget.remaining).toBe(12);
+ expect(output.sourceChecks).toHaveLength(50);
+ expect(output.payoffChecks).toHaveLength(5);
+ expect(output.passed).toBe(true);
+});
+
+it('retains independently evidenced plan-recheck rejection rather than inheriting old payoff approval',async()=>{
+ const initial=selection(),receipts:PremiseSourceReceipts=new Map();
+ const scope=JSON.stringify({standard:'same standards',requiredGenres:[]});
+ const full=vi.fn(async input=>report(input));
+ await reviewChangedPremiseSources(initial,scope,receipts,full);
+ const next=structuredClone(initial);
+ next.selected[0].causalPlan=[{action:{field:'activeChoice',quote:'旧事件'},conditions:[],result:{field:'payoff',quote:'旧结果'}}];
+ next.selected[1].causalPlan=[{action:{field:'activeChoice',quote:'另一事件'},conditions:[],result:{field:'payoff',quote:'另一结果'}}];
+ next.selected[2].activeChoice+='实际新增行动';
+ next.selected[3].payoff+='实际新增结局';
+ const payoffOnly=vi.fn(async (input,prior)=>{
+  const failed=input.selected[0];
+  return {...prior,passed:false,issues:[{kind:'selection_fit' as const,
+    premiseId:String(failed.premiseId),referencePremiseId:String(failed.premiseId),
+    quote:String(failed.activeChoice),referenceQuote:String(input.pool.find(row=>row.premiseId===failed.premiseId)?.storyCore),
+    reason:'因果引用更新后仍缺少实际取得证据并发生决定的必要条件'}]};
+ });
+ const output=await reviewChangedPremiseSources(next,scope,receipts,full,undefined,payoffOnly,{remaining:12});
+ expect(output.passed).toBe(false);
+ expect(output.issues.some(issue=>issue.premiseId==='A')).toBe(true);
+});
