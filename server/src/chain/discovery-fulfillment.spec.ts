@@ -23,6 +23,10 @@ it('preflights every source partition and the independent overlap before spendin
  expect(premiseReviewCallFloor(0,3)).toBe(0);
  expect(premiseReviewCallFloor(1,3)).toBe(1);
  expect(premiseReviewCallFloor(3,3)).toBe(2);
+ expect(premiseReviewCallFloor(3,2)).toBe(2); // default monolithic 3-card source review
+ expect(premiseReviewCallFloor(3,2,1)).toBe(3); // configured split review
+ expect(affordableReviewedPremiseCount(5,2,2,0)).toBe(3);
+ expect(affordableReviewedPremiseCount(5,2,2,1)).toBe(2);
  expect(premiseReviewCallFloor(4,3)).toBe(3);
  expect(premiseReviewCallFloor(5,3)).toBe(3);
  // Actual failed run: four needed with only two independent review credits.
