@@ -6828,6 +6828,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // identities in the full pool cannot be selected, and protected story facts
       // are already in 【当前选择】. Do not spend tokens on unreachable candidates.
       const selectablePool=initial.pool.filter(item=>availableIds.includes(String(item.premiseId)));
+      // The unchanged originals and the actually available replacements are
+      // the complete set of possible categories in this one bounded call.
+      // Keep BOTH sets when scoping standards so a new category never loses
+      // its author/platform requirement merely because it was not selected.
+      const scopedReselectionStandard=scopePremiseReviewCategoryStandards(
+        standard,[...selected.selected,...selectablePool]);
       const normalize=(value:unknown)=>{
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
@@ -6836,7 +6842,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
       try{
         const result=await this.llmCallWithRetry<any>('锁定前原池一次汇总重选',
-          standard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
+          scopedReselectionStandard+'\n按已注入GEN-002锁定前继承与差异规则执行。一次汇总处理下列全部问题位置，不返回正常项，不生成新pool；正常项由服务器保留。'
           +'\n【原池】'+JSON.stringify(selectablePool)+'\n【当前选择】'+JSON.stringify(premiseReselectionPromptSelection(selected.selected,ids))
           +'\n【本次独立缺陷】'+JSON.stringify(reviewForPrompt)
           +(rejectedHistory.some(row=>!ids.has(row.premiseId)
