@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards } from './premise-category-fit';
+import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -126,4 +126,42 @@ it('retains every selected category standard and all surrounding instructions wh
   expect(subset).toContain('【流派定义】所有原始流派标准保留');
   expect(scopePremiseReviewCategoryStandards(standard,[{storyCategory:'未知分类'}])).toBe(standard);
   expect(scopePremiseReviewCategoryStandards('既有标准', [{storyCategory:'年代'}])).toBe('既有标准');
+});
+
+
+describe('causal-only review prompt uses previously validated category/genre receipts',()=>{
+ it('keeps author/platform rules and removes only a server-appended redundant classification tail',()=>{
+  const core='作者确认的平台风格与人物因果标准';
+  const full=core+'\n【与完整卡一致的分类标准】'+JSON.stringify([{category:'青春虐恋',rules:['恋爱行动']}])
+    +'\n【流派定义，与生成阶段一致】已独立审核过的流派要求';
+  expect(corePremiseReviewStandard(full)).toBe(core);
+  expect(corePremiseReviewStandard(core)).toBe(core);
+  expect(corePremiseReviewStandard('自定义补充：分类标准不能丢失')).toBe('自定义补充：分类标准不能丢失');
+ });
+ it('preserves strict independent payoff checking while skipping the redundant genre/category glossary',async()=>{
+  const c=Object.create(ChainController.prototype) as any,s=withCategories();
+  const payoffChecks=s.selected.map((_,i)=>({
+   ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',
+   reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',
+     reason:'已经发生的前置选择和当前障碍共同支持反转的结果'},
+   reason:'独立核实行动与必要条件足以引发最终结果',
+  }));
+  const baseline:any={passed:true,issues:[],sourceChecks:[],payoffChecks,categoryChecks:checks.categoryChecks};
+  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+   expect(prompt).toContain('作者确认的平台风格与人物因果标准');
+   expect(prompt).toContain('【索引修正后的题材全文】');
+   expect(prompt).toContain('【唯一不可更改的原池】');
+   expect(prompt).toContain('【必返payoffChecks目录】');
+   expect(prompt).not.toContain('【与完整卡一致的分类标准】');
+   expect(prompt).not.toContain('【流派定义，与生成阶段一致】');
+   expect(options.validate({payoffChecks})).toBe(true);
+   return {data:{payoffChecks}};
+  });
+  const result=await c.reviewChangedPremisePayoff(s,baseline,
+   '作者确认的平台风格与人物因果标准\n【与完整卡一致的分类标准】[]\n【流派定义，与生成阶段一致】旧定义',{remaining:2});
+  expect(result.passed).toBe(true);
+  expect(result.issues).toEqual([]);
+  expect(result.categoryChecks).toEqual(checks.categoryChecks);
+  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+ });
 });
