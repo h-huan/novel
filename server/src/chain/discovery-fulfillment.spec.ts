@@ -1,5 +1,22 @@
 import {it,expect} from 'vitest';
-import {missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,preselectionRecoveryTarget,minimumReselectionReviewCalls,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+import {missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+
+it('keeps final-card refill review credits without cloning or overspending the original allowance',()=>{
+ const budget={remaining:12};
+ const initial=reserveFinalRefillReviewCapacity(budget,4,2);
+ expect(initial.remaining).toBe(10);
+ initial.remaining-=4;expect(budget.remaining).toBe(8);expect(initial.remaining).toBe(6);
+ initial.remaining-=3;expect(budget.remaining).toBe(5);
+ initial.refundReservedCalls(1);expect(budget.remaining).toBe(6);
+ // After preselection, the refill gets the REAL unused underlying credits.
+ expect(budget.remaining).toBe(6);
+ const tight={remaining:3};
+ const noReserve=reserveFinalRefillReviewCapacity(tight,4,2);
+ expect(noReserve.remaining).toBe(3);
+ noReserve.remaining-=2;expect(tight.remaining).toBe(1);
+ expect(()=>{initial.remaining=-1;}).toThrow();
+ expect(()=>reserveFinalRefillReviewCapacity({remaining:-1},1,2)).toThrow();
+});
 
 it('reserves independent quality-review calls for each affordable refill batch',()=>{
  expect(affordableFullCardRefillCount(5,9,2)).toBe(5);
