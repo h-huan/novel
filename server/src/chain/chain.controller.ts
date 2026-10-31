@@ -10938,7 +10938,11 @@ ${enrichToneDirective}
       // invent a surname, nickname or named speaking neighbor for the hero.
       // The existing downstream alignment Gate still independently verifies
       // that named roles are within the authorized character inventory.
-      const unnamedProtagonist = characters.some(c => /未具名.*(?:第一人称|[“‘"']我)/u.test(String(c.name || '')));
+      const unnamedProtagonist = characters.some(c => {
+        const label=String(c.name || '').trim();
+        return /未具名.*(?:第一人称|[“‘"']我)/u.test(label)
+          || (c.role==='protagonist' && /^(?:未具名|未命名|待命名)(?:\\s*[（(].*[）)])?$/u.test(label));
+      });
       const unnamedNameRule = unnamedProtagonist
         ? '\n【未具名第一人称主角】角色卡中的“未具名”是姓名尚未确立，不是“可以自行命名”。不得自行给“我”添加“小陈”等带姓称呼、外号、全名；对白中需要称呼时用符合身份的通用称谓，不得通过新增有姓名或台词的邻居/围观者解决场面推进。'
         : '';
