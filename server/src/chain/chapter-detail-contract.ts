@@ -12,7 +12,7 @@ export function chapterDetailJsonExample(
    ||allowedMin<1||allowedMin>allowedMax)
   throw Error('详细章纲示例的章节字数区间无效');
  const exampleTarget=Math.floor((allowedMin+allowedMax)/2);
- return '\\n【JSON结构示例，仅示范字段，不得复制示例内容】'
+ return '\n【JSON结构示例，仅示范字段，不得复制示例内容】'
    +JSON.stringify({
      title:'本章标题',targetWords:exampleTarget,
      wordCountReason:'依据本章场景、冲突强度与剩余总字数确定',
