@@ -68,7 +68,7 @@ export function premiseCategoryReviewDirective(selection: PremiseSelectionResult
  * category catalogue and following genre glossary from these two specialist
  * prompts. Source/category/genre review still receives the complete standard. */
 export function corePremiseReviewStandard(standard:string):string {
- const marker='\\n【与完整卡一致的分类标准】';
+ const marker='\n【与完整卡一致的分类标准】';
  const index=standard.lastIndexOf(marker);
  return index>=0?standard.slice(0,index):standard;
 }
