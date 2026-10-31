@@ -11,10 +11,7 @@ import type { GateFailureReport } from '../modules/writing-quality/gate-failure'
 // ==================== 基础类型 ====================
 
 /** 节点执行类型 */
-export type NodeType = 'prompt' | 'condition' | 'parallel' | 'loop' | 'transform';
-
-/** 执行模式 */
-export type ExecutionMode = 'sequential' | 'condition_branch' | 'parallel' | 'loop' | 'hybrid';
+export type NodeType = 'prompt';
 
 /** 链状态 */
 export type ChainState = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'partial';
@@ -62,7 +59,7 @@ export interface LLMRequest {
   temperature?: number;
   maxTokens?: number;
   timeout?: number;
-  /** 写作场景，用于模型路由选择（如 idea_generation, body_writing 等） */
+  /** 场景先经 scenario-taxonomy 归一：如 idea_generate、outline、writing、review；不得使用旧别名自建一套路由。 */
   scenario?: string;
   /** 章节功能，用于动态路由（如 exposition, climax 等） */
   chapterFunction?: string;
@@ -92,6 +89,7 @@ export interface LLMRequest {
    */
   metrics?: {
     runId?: string;
+    discoveryRequestId?: string | null;
     projectId?: string | null;
     chapterIndex?: number | null;
     stepKey?: string | null;
@@ -123,28 +121,16 @@ export interface LLMResponse {
 
 // ==================== Chain Node ====================
 
-/** 条件分支 */
-export interface Branch {
-  condition: string;          // 条件表达式
-  targetNodeId: string;       // 条件满足时跳转的节点 ID
-  description?: string;
-}
-
 /** Chain 节点 */
 export interface ChainNode {
   id: string;                 // 如 "node_1_material_parse"
   name: string;               // 如 "素材解析"
   type: NodeType;
   chainId: string;            // 所属 Chain ID
-  promptTemplateId?: string;  // 指向模板库的模板 ID
+  promptTemplateId: string;   // 必须来自固定注册模板
   modelConfig: ModelSpec;
   inputMapping: Record<string, string>;   // 变量路径 → 节点输入
-  outputMapping: Record<string, string>;  // 节点输出 → 上下文路径
-  branches?: Branch[];
-  nextOnSuccess?: string[];   // 成功后的下一个节点 ID，默认按序
   timeout: number;            // 超时秒数
-  retryCount: number;         // 兼容旧模板；通用引擎不据此原样重放节点
-  skipOnEmptyInput?: boolean; // 输入为空时是否跳过此节点
   description?: string;
 }
 
@@ -166,10 +152,8 @@ export interface ExecutionContext {
   chainId: string;
   variables: Record<string, unknown>;
   nodeOutputs: Record<string, unknown>;
-  retryCounters: Record<string, number>;
   startTime: Date;
   timestamps: Record<string, Date>;
-  metadata: Record<string, unknown>;
   /** 所属小说项目：项目内场景埋点/宪法注入的归属；平台级链路（灵感发现/定时任务）为 undefined */
   projectId?: string;
 }
@@ -183,23 +167,15 @@ export interface PromptChain {
   description: string;
   nodes: ChainNode[];
   variables: VariableDef[];
-  executionMode: ExecutionMode;
-  config: ChainConfig;
 }
 
-export interface ChainConfig {
-  timeout: number;
-  maxRetries: number;
-  enableLogging: boolean;
-  strictMode: boolean;
-}
 
 // ==================== 执行结果 ====================
 
 export interface NodeResult {
   nodeId: string;
   nodeName: string;
-  status: 'success' | 'failed' | 'skipped' | 'partial';
+  status: 'success' | 'failed';
   output: unknown;
   error?: string;
   /** Prompt 节点对应的 generation_runs.id；非 LLM 节点为空。 */

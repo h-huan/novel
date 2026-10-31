@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { confirmedStoryFacts } from '../canon/canon-policy';
 import { buildBenchmarkDirective, getPlatform, normalizePlatformId, targetForLength } from '../../chain/platform-benchmarks';
 import { scorePolicy } from '../writing-quality/score-policy';
-import { CREATIVE_TAG_GUIDES, CHAPTER_WORD_RANGE, describeCategoryPlacement, dimensionGuidesText, EXECUTION_STANDARD_DIMENSIONS, platformCreationFieldNames, platformSubmissionDimensions, platformCategoryBenchmarkNote, platformCategoryDimensionBinding, platformCategoryTreeVerification, platformCategoryWritingBrief, platformCategoryWritingNote, platformHasOwnCategoryTree, platformStandardProblem, resolveSubmissionCategory, CATEGORY_WORD_SCALE_DEVIATION_MIN_CHARS, audienceChannelHint, categoryWordScaleBlocked, categoryWordScaleLine, categoryWordScaleMessage, categoryWordScaleStanding, type CategoryWordScaleInput, type CategoryWordScaleStanding, type CategoryWordScaleStatus, type ExecutionStandardDimensionKey } from '../../../shared/src';
+import { CREATIVE_TAG_GUIDES, TONE_GUIDES, CHAPTER_WORD_RANGE, describeCategoryPlacement, dimensionGuidesText, EXECUTION_STANDARD_DIMENSIONS, platformCreationFieldNames, platformSubmissionDimensions, platformCategoryBenchmarkNote, platformCategoryDimensionBinding, platformCategoryTreeVerification, platformCategoryWritingBrief, platformCategoryWritingNote, platformHasOwnCategoryTree, platformStandardProblem, resolveSubmissionCategory, CATEGORY_WORD_SCALE_DEVIATION_MIN_CHARS, audienceChannelHint, categoryWordScaleBlocked, categoryWordScaleLine, categoryWordScaleMessage, categoryWordScaleStanding, type CategoryWordScaleInput, type CategoryWordScaleStanding, type CategoryWordScaleStatus, type ExecutionStandardDimensionKey } from '../../../shared/src';
 export { platformStandardProblem } from '../../../shared/src';
 import type { PlatformBoundDimension } from '../../../shared/src';
 
@@ -304,7 +304,10 @@ export function buildExecutionStandard(
     const binding = platformCategoryDimensionBinding(c.targetPlatform, resolvedCategory, dimension, value, c.projectType);
     // 平台给了判据不等于该维自身的执行口径可以丢：两者都必须留在标准里。
     const parts = [binding.requirement];
-    if (binding.gap) parts.push('样本未收录不代表不符合：按作者选择与实际故事内容核验，不要求另补解释，不因缺少样本判未执行。');
+    if (binding.gap) {
+      parts.push('本次分类口径显示存在待核验落差（不得默认通过，也不得仅凭未命中样本直接判错）：' + binding.gap + '；必须作为必答项结合实际故事内容核验。');
+      parts.push('样本未收录不代表不符合：按作者选择与实际故事内容核验，不要求另补解释，不因缺少样本判未执行。');
+    }
     parts.push(genericRule);
     return parts.join('；');
   };
@@ -362,7 +365,13 @@ export function buildExecutionStandard(
       + dimensionGuidesText('style', styleList)));
   const plotTags = c.plotTags ?? [];
   const submissionTags = c.submissionTags ?? [];
-  const plotLine = plotTags.length ? `；情节取向「${plotTags.join('、')}」必须落实到人物行动、冲突与回报，不得只写在标签里${plotTags.filter(tag => CREATIVE_TAG_GUIDES[tag]).map(tag => '；' + tag + '：' + CREATIVE_TAG_GUIDES[tag]).join('')}` : '';
+  // Plot tags can share labels with legacy tone tags (e.g. 热血、刀人).
+  // Carry their executable meaning even if chosen ONLY as a plot tag; if the
+  // same label already has a tone standard, do not transmit that rule twice.
+  const plotGuide = (tag: string) => CREATIVE_TAG_GUIDES[tag] || TONE_GUIDES[tag] || '';
+  const plotGuideLines = [...new Set(plotTags)].filter(tag => plotGuide(tag) && !c.storyTone.includes(tag))
+    .map(tag => '；' + tag + '：' + plotGuide(tag)).join('');
+  const plotLine = plotTags.length ? `；情节取向「${plotTags.join('、')}」必须落实到人物行动、冲突与回报，不得只写在标签里${plotGuideLines}；只落实本章职责及已有铺垫能够支持的事件，不为凑热血、搞笑、反转、梗或刀点增加未获授权的事件` : '';
   push('genre', '流派与作品标签', [...c.webNovelGenre, ...submissionTags, ...plotTags].join('、'),
     dimensionRequirement('genre', submissionTags.join('、'),
       `创作流派按「${c.webNovelGenre.join('、')}」执行；平台作品标签按「${submissionTags.join('、')}」兑现到可见的人物、关系与事件中；核心预期按当前阶段与章纲揭示安排推进，全书承诺在约定阶段兑现，不要求每章完成全部反转、救赎或真相揭示${plotLine}` + dimensionGuidesText('genre', c.webNovelGenre)));

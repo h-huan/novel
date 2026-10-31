@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertPremiseCausalPlans, premiseCausalPlanIssues } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE } from './premise-causal-plan';
 import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { materializePremisePayoffReview, premisePayoffReviewIssues } from './premise-payoff-review';
 import { materializePremiseSourceReview, normalizePremiseReselection, premiseSourceComparisonCatalog } from './premise-selection-review';
 import { mergePremiseSourceBatches } from './premise-source-batches';
 import { reviewChangedPremiseSources } from './premise-source-reuse';
+import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { ChainController } from './chain.controller';
 import { IDEA_PRESELECTION_REVIEW_POLICY, STORY_PREREQUISITE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 
@@ -24,7 +25,7 @@ function premise(id = 'A') {
 const selection = (ids = ['A']) => ({pool:ids.map(premise),selected:ids.map(premise),poolTargetMet:true});
 function payoffChecks(s: ReturnType<typeof selection>) {
   return s.selected.map((item,index) => ({ref:`S${index+1}.payoff`,status:'supported' as const,
-    actionEvidenceRef:`S${index+1}.activeChoice`,conditionEvidenceRef:`S${index+1}.escalation`,reason:'实际到场由报告地点及值班派遣触发，不由结局倒推。',
+    actionEvidenceRef:`S${index+1}.activeChoice`,reversalCheck:{status:'supported' as const,actionEvidenceRef:`S${index+1}.activeChoice`,reason:'主角通报地点和值班派遣引发救援队核对现场'},conditionEvidenceRef:`S${index+1}.escalation`,reason:'实际到场由报告地点及值班派遣触发，不由结局倒推。',
     links:item.causalPlan.map((_,n)=>({ref:`S${index+1}.causalPlan[${n}]`,status:'supported' as 'supported'|'gap'|'unknown',reason:'已建立接收者、实际派遣与定位，到场条件成立。'}))}));
 }
 function report(s:ReturnType<typeof selection>) {
@@ -32,7 +33,101 @@ function report(s:ReturnType<typeof selection>) {
   return {...materializePremiseSourceReview({sourceChecks},s),payoffChecks:payoffChecks(s)};
 }
 
+it('rebinds whitespace-only citation differences without inventing missing causality or altering facts',()=>{
+ const original=premise();
+ original.activeChoice='我把实名登记资料交给\n值班人员，取得受理回执。';
+ original.causalPlan[0].action={field:'activeChoice',quote:'我把实名登记资料交给 值班人员，取得受理回执。'};
+ const correct=bindPremiseCausalPlan(original) as typeof original;
+ expect(correct.causalPlan[0].action.quote).toBe('我把实名登记资料交给\n值班人员，取得受理回执。');
+ expect(premiseCausalPlanIssues(correct)).toEqual([]);
+ const separated=structuredClone(original);
+ separated.activeChoice='他还欠下一段等长的“空 账”。';
+ separated.causalPlan[0].action.quote='他还欠下一段等长的“空账”。';
+ expect(premiseCausalPlanIssues(bindPremiseCausalPlan(separated))).not.toEqual([]);
+ const invalid=structuredClone(original);
+ invalid.causalPlan[0].action.quote='我把匿名登记资料交给 值班人员，取得受理回执。';
+ expect(premiseCausalPlanIssues(bindPremiseCausalPlan(invalid))).not.toEqual([]);
+ const repeated=structuredClone(original);
+ repeated.activeChoice=original.activeChoice+'又一次：'+original.activeChoice;
+ expect(premiseCausalPlanIssues(bindPremiseCausalPlan(repeated))).not.toEqual([]);
+});
 describe('plan critical prerequisites before full story cards',()=>{
+  it('models intermediate result before payoff and teaches generation to keep later prerequisites separate',()=>{
+    const steps=premiseCausalPlanExample();
+    expect(steps).toHaveLength(2);
+    expect(steps[0].result.field).toBe('escalation');
+    // A later payoff must be attributed to an executed verification/decision,
+    // not to a reversal paragraph that may only claim the outcome.
+    expect(steps[1].action.field).toBe('escalation');
+    expect(steps[1].conditions[0].field).toBe('escalation');
+    expect(steps[1].result.field).toBe('payoff');
+    expect(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE).toContain('中间动作不得直接标终局payoff');
+    expect(ideaPremiseSelectionDirective('short_story',5)).toContain(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE);
+  });
+  it('repairs only an incomplete index with existing same-story evidence, preserving all facts and valid peers',()=>{
+    const input=selection(['A','B']),complete=structuredClone(input.selected[0].causalPlan);
+    input.selected[0].causalPlan.pop();
+    const before=structuredClone(input),value={plans:[{premiseId:'A',causalPlan:complete}]};
+    const repaired=applyPremiseCausalPlanRepairs(input,value);
+    expect(premiseCausalPlanIssues(repaired.selected[0])).toEqual([]);
+    expect(repaired.selected[1]).toBe(input.selected[1]);
+    const {causalPlan:oldPlan,...oldStory}=before.selected[0],{causalPlan:newPlan,...newStory}=repaired.selected[0];
+    expect(newStory).toEqual(oldStory);expect(input).toEqual(before);
+    for(const invalid of [
+      {plans:[{...value.plans[0],payoff:'伪造新的结局条件'}]},
+      {plans:[{premiseId:'B',causalPlan:complete}]},
+      {plans:[{premiseId:'A',causalPlan:[{...complete[1],result:{field:'payoff',quote:'原文没有的追责结果'}}]}]},
+      {plans:[]},
+    ])expect(()=>applyPremiseCausalPlanRepairs(input,invalid)).toThrow();
+  });
+  it('spends one existing reselection credit only for invalid plans and keeps the semantic gate independent',async()=>{
+    const input=selection(),complete=structuredClone(input.selected[0].causalPlan);input.selected[0].causalPlan.pop();
+    const c=Object.create(ChainController.prototype) as any,budget={remaining:3};
+    c.realLLM={generate:vi.fn(async(options:any)=>{expect(options.physicalCallBudget).toBe(budget);budget.remaining--;
+      return {content:JSON.stringify({plans:[{premiseId:'A',causalPlan:complete}]})};})};
+    const repaired=await c.completePremiseCausalPlans(input,budget);
+    expect(budget.remaining).toBe(2);expect(c.realLLM.generate).toHaveBeenCalledOnce();
+    expect(await c.completePremiseCausalPlans(repaired,budget)).toBe(repaired);
+    expect(c.realLLM.generate).toHaveBeenCalledOnce();
+    const rows=payoffChecks(repaired);rows[0].status='gap' as any;(rows[0] as any).gapRepair='replace_from_pool';rows[0].links[0].status='gap';
+    expect(materializePremisePayoffReview({payoffChecks:rows},repaired)[0].kind).toBe('selection_fit');
+  });
+  it('recovers only the exact terminal semicolon in the observed selected P1 source anchors',()=>{
+    const p:any={
+      premiseId:'P1',
+      activeChoice:'我借地磅单和送货司机的抽检单，匿名打质量热线请质检站到站抽检。',
+      escalation:'质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责；老板的弟弟开始查是谁把钢筋混进废钢。',
+      reversalEffect:'老板早知道调包，还想把我推出去顶罪；我提前把十年分拣记录藏在秤台下，交给质检站和工地监理。',
+      payoff:'废品站关停，我没了藏身处，却被质检站聘为协管员，第一次用真名签字。',
+      causalPlan:[
+        {action:{field:'activeChoice',quote:'我借地磅单和送货司机的抽检单，匿名打质量热线请质检站到站抽检。'},
+          conditions:[],result:{field:'escalation',quote:'质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责。'}},
+        {action:{field:'reversalEffect',quote:'我提前把十年分拣记录藏在秤台下，交给质检站和工地监理。'},
+          conditions:[{field:'reversalEffect',quote:'老板早知道调包，还想把我推出去顶罪。'}],
+          result:{field:'payoff',quote:'废品站关停，我没了藏身处，却被质检站聘为协管员，第一次用真名签字。'}},
+      ],
+    };
+    const original=structuredClone(p);
+    expect(premiseCausalPlanIssues(p)).toEqual(expect.arrayContaining([
+      expect.stringContaining('causalPlan[0]'),expect.stringContaining('causalPlan[1]')]));
+    const bound=bindPremiseCausalPlan(p) as any;
+    expect(bound.causalPlan[0].result.quote).toBe('质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责；');
+    expect(bound.causalPlan[1].conditions[0].quote).toBe('老板早知道调包，还想把我推出去顶罪；');
+    expect(premiseCausalPlanIssues(bound)).toEqual([]);
+    expect(p).toEqual(original);
+    const changed=structuredClone(p);
+    changed.causalPlan[0].result.quote='质检员未按炉批号追溯，报告显示屈服强度不达标，工地停工追责。';
+    expect(premiseCausalPlanIssues(bindPremiseCausalPlan(changed))).not.toEqual([]);
+    const ambiguous=structuredClone(p);
+    ambiguous.escalation='质检员按炉批号追溯，报告显示屈服强度不达标，工地停工追责；'+p.escalation;
+    expect(premiseCausalPlanIssues(bindPremiseCausalPlan(ambiguous))).not.toEqual([]);
+  });
+  it('requires exact copied field punctuation in the authoring rule without weakening causal quality checks',()=>{
+    const directive=ideaPremiseSelectionDirective('short_story',5);
+    expect(directive).toContain('原文以“；”连接分句时不得擅自改成“。”');
+    expect(directive).toContain('修改字段后须同步复制实际引用');
+    expect(directive).toContain('conditions可为空的只有普通直接因果');
+  });
   it('requires a real plan at the live boundary and never fabricates it from old prose',()=>{
     const s=selection();delete (s.selected[0] as any).causalPlan;
     expect(()=>assertPremiseCausalPlans(s)).toThrow('生成前因果计划未完成');
@@ -67,17 +162,33 @@ describe('plan critical prerequisites before full story cards',()=>{
     const p=premise();p.causalPlan.pop();
     expect(premiseCausalPlanIssues(p)).toContain('causalPlan须覆盖主线兑现，不能只列开端或普通动作');
   });
+  it('requires semantic gaps to choose source-backed correction or genuine source replacement',()=>{
+    const data=selection(),row=payoffChecks(data)[0];
+    row.status='gap' as any;row.links[0].status='gap';
+    expect(premisePayoffReviewIssues({payoffChecks:[row]},data)).toContain(
+      'S1.payoff缺少可执行的真实缺口路由gapRepair；不得默认把仅有索引问题的成熟题材强制换选');
+    (row as any).gapRepair='restore_source_conditions';
+    (row as any).sourceConditionQuote='主角按已有条件求援，救出被困者并承担真实代价。';
+    expect(premisePayoffReviewIssues({payoffChecks:[row]},data)).toEqual([]);
+    const issue=materializePremisePayoffReview({payoffChecks:[row]},data)[0];
+    expect(issue.repairMode).toBeUndefined();
+    (row as any).gapRepair='replace_from_pool';delete (row as any).sourceConditionQuote;
+    expect(materializePremisePayoffReview({payoffChecks:[row]},data)[0].repairMode).toBe('replace_from_pool');
+    (row as any).gapRepair='restore_source_conditions';
+    expect(premisePayoffReviewIssues({payoffChecks:[row]},data)).toContain(
+      'S1.payoff恢复展开条件须逐字引用同ID原池已有的全部缺失条件，不得补造来源');
+  });
   it('cannot bless a missing intermediate condition with a positive overall verdict',()=>{
     const s=selection(),rows=payoffChecks(s);rows[0].links[0].status='gap';
     expect(premisePayoffReviewIssues({payoffChecks:rows},s)).toContain('S1.payoff不能用总体通过掩盖中间因果缺口');
-    (rows[0] as any).status='gap';
+    (rows[0] as any).status='gap';(rows[0] as any).gapRepair='replace_from_pool';
     expect(materializePremisePayoffReview({payoffChecks:rows},s)[0].reason).toContain('causalPlan[0]');
   });
   it('cannot hide an unassessed intermediate condition as a completed rejection or pass',()=>{
     const s=selection(),rows=payoffChecks(s);rows[0].links[0].status='unknown';
     expect(premisePayoffReviewIssues({payoffChecks:rows},s).length).toBeGreaterThan(0);
     (rows[0] as any).status='unknown';
-    expect(()=>materializePremisePayoffReview({payoffChecks:rows},s)).toThrow('未评估');
+    expect(materializePremisePayoffReview({payoffChecks:rows},s)).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'A',repairMode:'replace_from_pool',reason:expect.stringContaining('未确认')})]);
   });
   it('rejects absent, duplicate and wrong-card checks while preserving true gaps',()=>{
     const s=selection(['A','B']);
@@ -90,17 +201,19 @@ describe('plan critical prerequisites before full story cards',()=>{
     }
   });
   it.each(['警方到场没有接收求援和实际出警依据','血纹转移不在已建立能力边界内','看见处方单不等于律师取得该处方单','限位开关没有录音或记录振动的能力'])('routes evidenced missing prerequisites upstream: %s',reason=>{
-    const s=selection(),rows=payoffChecks(s);(rows[0] as any).status='gap';rows[0].links[0]={...rows[0].links[0],status:'gap',reason};
+    const s=selection(),rows=payoffChecks(s);(rows[0] as any).status='gap';(rows[0] as any).gapRepair='replace_from_pool';rows[0].links[0]={...rows[0].links[0],status:'gap',reason};
     const issues=materializePremisePayoffReview({payoffChecks:rows},s);
     expect(issues[0]).toMatchObject({kind:'selection_fit',premiseId:'A'});expect(issues[0].reason).toContain(reason);
   });
   it('checks all transitions inside the existing source call, without a new review step',async()=>{
     const s=selection(),c=Object.create(ChainController.prototype) as any,{passed,issues,...value}=report(s),budget={remaining:1};
     c.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
-      expect(prompt).toContain('原池和展开同样漏写条件也须返回gap');expect(prompt).toContain('S1.causalPlan[1]');
+      expect(prompt).toContain('原池与展开同样漏写关键成立条件也须返回gap');expect(prompt).toContain('S1.causalPlan[1]');
       expect(options.validate(value)).toBe(true);
       const old={...value,payoffChecks:value.payoffChecks.map(({links,...row})=>row)};
-      expect(options.validate(old)).toBe(false);budget.remaining--;return {data:value};
+      expect(options.validate(old)).toBe(true);
+      expect(quarantineIncompletePremiseReviews(old,s,[]).payoffChecks[0].status).toBe('unknown');
+      budget.remaining--;return {data:value};
     });
     const result=await c.reviewPremiseSelection(s,'既有标准','source_drift',budget,true);
     expect(result.passed).toBe(true);expect(c.llmCallWithRetry).toHaveBeenCalledOnce();expect(budget.remaining).toBe(0);

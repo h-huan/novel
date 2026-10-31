@@ -2,7 +2,9 @@ import { standardDirectiveCache } from '../modules/module-standards/standard-dir
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
 import { getPlatform, targetForLength, measureAgainstTarget } from './platform-benchmarks';
 import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
-import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY } from '../../shared/src/system-workflow-rules.registry';
+import { currentDiscoveryRequestId, discoveryRequestAsyncStorage } from '../common/creation-context';
+import { currentGenerationSignal, assertGenerationActive } from '../common/generation-cancellation';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ChainController,
@@ -1523,7 +1525,7 @@ describe('cross-chapter boundary enforcement', () => {
     controller.realLLM = { generate: vi.fn().mockResolvedValue({ content: JSON.stringify({
       patches: [
         { original: '二楼那户仍写着名字。', replacement: '二楼那户已变成空白。' },
-        { original: '屋里只有一本账册。', replacement: '屋里只有一本账册！！' },
+        { original: '屋里只有一本账册。', replacement: '屋里只有一本账册！！！！' },
       ],
     }) }) };
     const after = await controller.repairOutlineFactsLocally({
@@ -1532,7 +1534,7 @@ describe('cross-chapter boundary enforcement', () => {
     });
     expect(after).toContain('二楼那户已变成空白。');
     expect(after).toContain('屋里只有一本账册。');
-    expect(after).not.toContain('屋里只有一本账册！！');
+    expect(after).not.toContain('屋里只有一本账册！！！！');
   });
 
   it('surfaces a network failure in local outline repair instead of silently rewriting the chapter', async () => {
@@ -1569,13 +1571,13 @@ describe('cross-chapter finding partition', () => {
 });
 
 
-describe('idea discovery live orchestrator behavior', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall'])(
+describe('idea discovery orchestrator with simulated model responses', () => {
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_top_up_unique', 'tag_combo_reused', 'pool_naming', 'dimension_microrepair', 'dimension_multi_microrepair'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
       workingTitle: title,
-      storyCore: `${title}的具体人物处境、起始事件与冲突骨架。`,
+      storyCore: id === 'P1' ? "【处境触发】女儿发现亡父的遗嘱竟然写有陌生门牌号。【主动选择】她决定查阅不动产登记和父亲的亲笔签章。【必要条件】公证员核对旧登记底册才能确认产权转移。【反转兑现】父亲曾替同事担债，她保住房屋却被亲族猜疑。【分类流派机制】家庭债务悬疑依靠遗产关系和产权记录推进。" : "【处境触发】住户在夜间停电时听见隔壁传来已搬走者的敲门声。【主动选择】他决定用楼道监控和快递签收单核验来客。【必要条件】物业调取门禁原始时段后才能定位来客身份。【反转兑现】邻居用敲门声隐藏被追查的家人，他揭露后失去朋友。【分类流派机制】邻里身份悬疑由信任危机与门禁证据推动。",
       causalPlan: [{action:{field:'activeChoice',quote:'主角决定留下证据并主动查清来源'},conditions:[{field:'reversalEffect',quote:'关键事实改变了主角原先的目标'}],result:{field:'payoff',quote:'让真正责任方承担后果'}}],
       protagonistSituation: '主角要守住家人、住处和现实收入，无法无代价退出当前冲突。',
       openingEvent: '一份现实记录出现无法解释的矛盾，迫使主角当天处理。',
@@ -1592,8 +1594,8 @@ describe('idea discovery live orchestrator behavior', () => {
     const premiseOne = selected('P1', '遗嘱里的门牌号');
     const premiseTwo = selected('P2', '门后的普通秘密');
     const pool = [
-      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore },
-      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore },
+      { premiseId: 'P1', workingTitle: premiseOne.workingTitle, storyCore: premiseOne.storyCore, storyCategoryId: 'K1' },
+      { premiseId: 'P2', workingTitle: premiseTwo.workingTitle, storyCore: premiseTwo.storyCore, storyCategoryId: failure === 'category_inheritance' ? 'K2' : 'K1' },
     ];
     const common = {
       storyType: 'short_story', targetPlatform: 'fanqie', storyCategory: '悬疑',
@@ -1620,6 +1622,7 @@ describe('idea discovery live orchestrator behavior', () => {
         readerQuestion: '遗嘱为什么写着自家门牌，母亲的遗忘又和父亲替人担责有什么关系？',
       },
     };
+    if (failure === 'dimension_microrepair') strongCard.plotTags = ['未授权标签'];
     const weakCard = {
       ...common,
       title: '门后的普通秘密',
@@ -1637,19 +1640,83 @@ describe('idea discovery live orchestrator behavior', () => {
       },
     };
 
-    const mixed = failure === 'category_inheritance';
-    const selectedForBatch = mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }] : [premiseOne, premiseTwo];
-    if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
-    const generate = vi.fn()
-      .mockResolvedValueOnce({ content: JSON.stringify({ pool, selectedPremises: selectedForBatch }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ ideas: [strongCard] }) });
-    if (failure === 'card_network') generate.mockRejectedValueOnce(new Error('card connection reset'));
-    else if (failure === 'card_shape') generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [] }) });
-    else {
-      generate.mockResolvedValueOnce({ content: JSON.stringify({ ideas: [weakCard] }) });
-      if (failure === 'repair_network') generate.mockRejectedValueOnce(new Error('repair connection reset'));
-      else generate.mockResolvedValueOnce({ content: JSON.stringify({ patches: [{}] }) });
+    if (failure === 'tag_combo_reused' || failure === 'dimension_multi_microrepair') {
+      // The same valid "紧张 / 简洁 / 悬疑推理 / 调查" combination is
+      // appropriate for two substantially different stories. It may not be
+      // used as a proxy for narrative duplication or force label mutation.
+      Object.assign(weakCard, {
+        title: '菜市秤盘上的欠条',
+        hook: '天亮前，我给菜市场的老秤换零件时，发现有人用我母亲的名字签下整条街的赊账。老板要我马上交出旧秤，我决定留在摊位与债主对账，否则摊主们今天就会被赶走。',
+        description: '最初，我只想修好常出故障的菜市老秤，让母亲的摊位能继续营业。清晨，承包商拿着赊账合同逼摊主连夜交钱，我发现账目上的签名来自已经停用多年的旧秤编号。随后，我主动组织摊主逐户核对真实赊欠，承包商转而威胁撤销摊位租约，昔日朋友也站到了对面。直到老会计出示当时独立保管的对账存根，我才发现承包商借市场搬迁把原来的押金改成了新债。最后，我必须选择公开账本并失去优先续租机会，还是替母亲保留摊位但让其他人承担债务；我公开核对结果，迫使合同签署方重新确认押金，并承担失去母亲信任的代价。',
+        protagonist: '一直替家人修理摊位设备、想保住母亲生意的普通维修工。',
+        coreConflict: '市场承包商借假账逼摊主搬迁，维修工要用旧账存根守住合法押金和邻里信任。',
+        uniquePoint: '一只旧秤记录的维修日期意外成为全街争议账款的关键，逼主角在母亲和邻里之间表态。',
+        mainReversal: '原来承包商想吞掉的是押金而非赊账，维修工从替母亲修秤改为带领摊主公开对账，也失去续租优先权。',
+        noveltyProof: {
+          familiarShell: '市井家庭与摊位争夺',
+          uncommonCombination: '菜市场老秤、摊位租约和独立保管的押金存根让物件牵连真实利益关系',
+          avoidedPatterns: '不靠突然出现的万能录像或陌生机构自动裁决',
+          irreplaceableWhy: '没有修秤日期和市场租约便找不到假账来源，失去母亲关系也没有两难抉择',
+          secondOrderConsequence: '摊主拿回部分押金后站队改变，维修工失去自己最珍惜的续租机会',
+          readerQuestion: '修秤日期怎样揭穿被改的押金，维修工又能否保住母亲的信任？',
+        },
+      });
     }
+    if (failure === 'dimension_multi_microrepair') {
+      strongCard.plotTags = ['未授权标签'];
+      weakCard.plotTags = ['未授权标签'];
+    }
+    const requestedCount = failure === 'pool_below_minimum' || failure === 'pool_top_up_unique' ? 5 : 2;
+    const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
+    const mixed = failure === 'category_inheritance';
+    const topUpPremise = {
+      ...selected('P3', '水库账本提前清空'),
+      storyCore: '【处境触发】山区供水站的账本突然显示水库已被提前放空。【主动选择】维修员主动核验泵站记录并通知村民保留原件。【必要条件】记录送到有权调查的水务人员手里后经核对才能认定原因。【反转兑现】承包商关闭备用管线导致村民被迫做出选择，维修员也面临失业代价。【分类流派机制】山区悬疑调查和真实水源控制权推动冲突升级并改变人物关系。',
+      storyCategoryId: 'K1',
+    };
+    const selectedForBatch = failure === 'pool_top_up_unique'
+      ? [premiseOne, premiseTwo, topUpPremise]
+      : mixed ? [{ ...premiseOne, storyCategory: '悬疑惊悚' }, { ...premiseTwo, storyCategory: '现实生活' }]
+        : [premiseOne, premiseTwo];
+    if (mixed) { strongCard.storyCategory = '悬疑惊悚'; weakCard.storyCategory = '现实生活'; }
+    let poolBatchCallsStarted = 0;
+    let releasePoolBatches!: () => void;
+    const bothPoolBatchesStarted = new Promise<void>(resolve => { releasePoolBatches = resolve; });
+    const generate = vi.fn(async (request: any) => {
+      const step = request.metrics?.stepKey;
+      if (step === 'idea_premise_pool_generation') {
+        poolBatchCallsStarted += 1;
+        if (poolBatchCallsStarted >= 2) releasePoolBatches();
+        // A barrier makes the test fail if pool generation is changed back to serial awaits.
+        await bothPoolBatchesStarted;
+        if (failure === 'pool_top_up_unique' && request.metrics?.attempt === 2) {
+          return { content: JSON.stringify({ pool: [{
+            workingTitle: '水库账本提前清空',
+            storyCore: '【处境触发】山区供水站的账本突然显示水库已被提前放空。【主动选择】维修员主动核验泵站记录并通知村民保留原件。【必要条件】记录送到有权调查的水务人员手里后经核对才能认定原因。【反转兑现】承包商关闭备用管线导致村民被迫做出选择，维修员也面临失业代价。【分类流派机制】山区悬疑调查和真实水源控制权推动冲突升级并改变人物关系。',
+            storyCategoryId: 'K1',
+          }] }) };
+        }
+        return { content: JSON.stringify({ pool: failure==='pool_naming'&&request.metrics?.attempt===0
+          ? [{...pool[0],workingTitle:'禁止命名的前置候选',storyCore:pool[0].storyCore+'宠物豆包被接回家。'},...pool] : pool }) };
+      }
+      if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: selectedForBatch }) };
+      if (step === 'idea_card_structure') {
+        const selectedBlock = request.prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0] || '';
+        if (selectedBlock.includes(premiseOne.workingTitle)) return { content: JSON.stringify({ ideas: [strongCard] }) };
+        if (failure === 'card_network') throw new Error('card connection reset');
+        if (failure === 'card_shape') return { content: JSON.stringify({ ideas: [] }) };
+        return { content: JSON.stringify({ ideas: [weakCard] }) };
+      }
+      if (step === 'idea_card_metadata_repair') {
+        if (!['dimension_microrepair','dimension_multi_microrepair'].includes(failure)) throw Error('unexpected metadata repair');
+        return { content: JSON.stringify({ patches: Array.from({length:failure==='dimension_multi_microrepair'?2:1},()=>({ dimensionPatch: { plotTags: ['调查'] } })) }) };
+      }
+      if (step === 'idea_card_local_repair') {
+        if (failure === 'repair_network') throw new Error('repair connection reset');
+        return { content: JSON.stringify({ patches: [{}] }) };
+      }
+      throw new Error('unexpected generation step: ' + String(step));
+    });
     const controller = Object.create(ChainController.prototype) as any;
     controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
     controller.reviewPremiseSelection = vi.fn().mockResolvedValue({ passed: true, issues: [] });
@@ -1685,74 +1752,165 @@ describe('idea discovery live orchestrator behavior', () => {
     controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     controller.db = {
       getDb: () => ({
-        prepare: () => ({ all: () => [] }),
+        prepare: () => ({ all: () => failure === 'tag_combo_reused' ? [{ label: '紧张' }] : [] }),
       }),
     };
 
     const result = await controller.runIdeaDiscovery({
       storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
-      storyTone: ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
+      storyTone: failure === 'tag_combo_reused' ? [] : ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
       submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
       ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
-    }, 2);
+    }, requestedCount);
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
+    const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
+    // These fixtures only return the requested number of distinct seeds;
+    // preserve one screened-reserve top-up regardless of request size.
+    expect(poolCalls).toHaveLength(3);
+    expect(poolCalls.slice(0, 2).map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
+    expect(poolCalls[2][0].metrics?.attempt).toBe(2);
+    expect(poolCalls[2][0].prompt).toContain('本轮已生成候选池');
+    expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
+    // Parallel batches cannot see one another: preserve complementary actual
+    // strategy search directions without adding calls or reducing any Gate.
+    expect(poolCalls[0][0].prompt).toContain('现场行动、关系博弈、资源选择');
+    expect(poolCalls[1][0].prompt).toContain('规则权限、信息误导、交易选择');
+    expect(poolCalls.every(([request]:any[]) =>
+      request.prompt.includes('【每项分类核心机制：生成与选优使用与审核相同的标准】')
+      && request.prompt.includes('"webNovelGenre":["悬疑推理"]')
+      && request.prompt.includes('"plotTags":["调查"]')
+      && request.prompt.includes('【必要条件】')
+    )).toBe(true);
+     expect(poolCalls[0][0].prompt).toContain('对决定性结果先做反事实核对');
+    expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
+    expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
+    expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
+    const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
+    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(3);
+    expect(selectionCall?.[0].prompt).toContain('【服务器已固定的候选池；不得新增、改写或重新编号】');
+    expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
+    expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
+    expect(selectionCall?.[0].prompt).toContain('只输出selectedPremises');
+     if(failure==='pool_naming'){
+       expect(selectionCall?.[0].prompt).not.toContain('禁止命名的前置候选');
+       expect(selectionCall?.[0].prompt).not.toContain('宠物豆包被接回家');
+       expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({invalid:{naming:1},generated:2,supplementAttempted:true,supplementAdded:0});
+     }
     if(failure==='preselection_shortfall'){
-      expect(generate.mock.calls.some(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')).toBe(true);
-      expect(controller.reviewIdeaPresentation).toHaveBeenCalled();
-      expect(result.success).toBe(false);expect(result.status).toBe('incomplete');expect(result.ideas).toEqual([]);
-      expect(result.appealGate).toMatchObject({premiseSelected:1,preselectionShortfall:1,requested:2,fulfillment:{stopReason:'preselection_shortfall'}});
-      expect(Array.isArray(result.qualifiedIdeas)).toBe(true);
+      const cardCalls=generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure');
+      expect(cardCalls).toHaveLength(1);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+      expect(result.qualifiedIdeas.map((card:any)=>card.sourcePremiseId)).toEqual(['P1']);
+      expect(result.appealGate).toMatchObject({premiseSelected:1,requested:2,returned:0,qualified:1,partial:true});
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:3,maxConcurrency:2});
       return;
     }
     expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
     for (const call of controller.reviewPremiseSelection.mock.calls) {
       expect(call[0].selected.every((premise: any) => premise.storyCategory)).toBe(true);
       expect(call[1]).toContain('【与完整卡一致的分类标准】');
+      expect(call[1]).not.toContain('"standard":""');
+      const categoryContext=JSON.parse(call[1].split('【与完整卡一致的分类标准】')[1].split('\n【服务器分类编号目录】')[0]);
+      expect(categoryContext.every((row:any)=>row.standard.includes(row.category)&&!row.standard.includes('【项目创作宪法】'))).toBe(true);
       expect(call[1]).toContain('【本次作者明确选择');
       expect(call[1]).toContain('"webNovelGenre":["悬疑推理"]');
       expect(call[1]).toContain('"plotTags":["调查"]');
       expect(call[1]).toContain('"writingStyle":["简洁"]');
       expect(call[1]).toContain('"pov":"第一人称"');
     }
-    expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[1]);
+    if (failure === 'pool_below_minimum' || failure === 'pool_top_up_unique') {
+      const supplemented=failure==='pool_top_up_unique', expectedCount=supplemented?3:2;
+      const verifiedCount=1; // Only P1 has the required final Gate evidence; weak peers remain rejected.
+      const completeCardCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
+      expect(completeCardCalls).toHaveLength(expectedCount);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+      expect(result.qualifiedIdeas).toHaveLength(verifiedCount);
+      expect(result.appealGate).toMatchObject({
+        requested:5,returned:0,qualified:verifiedCount,partial:true,minimumDeliverableCount:5,
+      });
+      expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({
+        target:15,generated:expectedCount,shortfall:15-expectedCount,batchCount:3,maxConcurrency:2,
+        supplementAttempted:true,supplementAdded:supplemented?1:0,
+      });
+      return;
+    }
+    const firstCardCallIndex = generate.mock.calls.findIndex(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure');
+    expect(firstCardCallIndex).toBeGreaterThanOrEqual(0);
+    expect(controller.reviewPremiseSelection.mock.invocationCallOrder[0]).toBeLessThan(generate.mock.invocationCallOrder[firstCardCallIndex]);
 
     if (failure === 'review_protocol') {
-      expect(generate).toHaveBeenCalledTimes(3);
+      expect(generate).toHaveBeenCalledTimes(6);
       expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
       expect(result.success).toBe(false);
       expect(result.error).toContain('审查未完成');
       return;
     }
 
+    expect(result.appealGate.selectionAudit.poolGeneration).toMatchObject({target:7,generated:2,shortfall:5,batchCount:3,maxConcurrency:2});
     if(failure==='review_budget'){
-      expect(generate).toHaveBeenCalledTimes(3);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
-      expect(result.success).toBe(false);expect(result.appealGate.repairAttempted).toBe(false);
-      expect(result.appealGate.fulfillment.stopReason).toBe('budget_or_original_pool_exhausted');return;
+      expect(generate).toHaveBeenCalledTimes(6);expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});expect(result.appealGate.repairAttempted).toBe(false);
+      expect(result.appealGate.fulfillment.stopReason).toBe('bounded_refill_shared_budget_shortfall');return;
+    }
+    if (failure === 'dimension_microrepair') {
+      const calls = generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_metadata_repair');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0].prompt).toContain('plotTags');
+      expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+      expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
+      expect(result.qualifiedIdeas[0].plotTags).toEqual(['调查']);
+      expect(result.qualifiedIdeas[0].mainReversal).toBe(strongCard.mainReversal);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      return;
+    }
+    if (failure === 'dimension_multi_microrepair') {
+      expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_metadata_repair')).toHaveLength(1);
+      expect(result.success).toBe(true);
+      expect(result.ideas).toHaveLength(2);
+      expect(result.ideas.map((card:any)=>card.plotTags)).toEqual([['调查'],['调查']]);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      return;
+    }
+    if (failure === 'tag_combo_reused') {
+      expect(result.success).toBe(true);
+      expect(result.ideas).toHaveLength(2);
+      expect(result.ideas.map((card: any) => card.storyTone)).toEqual([['紧张'], ['紧张']]);
+      expect(controller.reviewIdeaPresentation).toHaveBeenCalledOnce();
+      expect(controller.reviewIdeaPresentation.mock.calls[0][0]).toHaveLength(2);
+      expect(result.appealGate.candidateAssessments?.every((card:any)=>card.passed)).not.toBe(false);
+      return;
     }
     const cardFailed = failure === 'card_network' || failure === 'card_shape';
-    // The repair fixture returns an empty patch: preserve the original refusal without another review.
+    // The first complete-card Gate still runs once. Refilling is demand-driven,
+    // may attempt one bounded seed top-up, and must never lose passed cards.
     expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(1);
-    if (!cardFailed && failure !== 'repair_network') expect(result.appealGate.repairGenerated).toBe(0);
-    expect(generate).toHaveBeenCalledTimes(cardFailed ? 3 : 4);
-    expect(result.success).toBe(false);
-    expect(result.status).toBe('incomplete');
-    expect(result.ideas).toHaveLength(0);
-    expect(result.qualifiedIdeas).toHaveLength(1);
+    expect(result.appealGate.repairGenerated).toBe(0);
+    const firstWaveCalls=generate.mock.calls.filter(([req]:any[])=>
+      ['idea_premise_pool_generation','idea_premise_selection','idea_card_structure'].includes(req.metrics?.stepKey));
+    expect(firstWaveCalls).toHaveLength(6);
+    expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_premise_pool_refill').length).toBeLessThanOrEqual(2);
+    expect(generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_local_repair')).toHaveLength(0);
+    expect(result).toMatchObject({success:false,status:'incomplete',totalIdeas:0});
+    expect(result.ideas).toHaveLength(0);expect(result.qualifiedIdeas).toHaveLength(1);
     expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
+    expect(result.appealGate).toMatchObject({requested:2,qualified:1,returned:0,partial:true});
     if (mixed) {
       expect(result.qualifiedIdeas[0].storyCategory).toBe('悬疑惊悚');
-      expect(generate.mock.calls[1][0].prompt).toContain('分类=悬疑惊悚');
-      expect(generate.mock.calls[2][0].prompt).toContain('分类=现实生活');
+      const cardPrompts = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_card_structure').map(([request]: any[]) => request.prompt);
+      expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseOne.workingTitle))).toContain('分类=悬疑惊悚');
+      expect(cardPrompts.find(prompt => prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]?.includes(premiseTwo.workingTitle))).toContain('分类=现实生活');
       expect(result.appealGate.selectedCategories).toEqual(['悬疑惊悚', '现实生活']);
     }
     expect(result.totalIdeas).toBe(0);
-    expect(result.error).toContain('请求 2，最终通过 1');
+    expect(result.warning).toContain('请求 2，最终通过 1');
     if (cardFailed) {
       expect(result.appealGate.structuringErrors).toEqual([expect.objectContaining({ sourcePremiseId: 'P2' })]);
     }
-    if (failure === 'repair_network') expect(result.appealGate.repairError).toContain('repair connection reset');
+    expect(result.appealGate.repairError).toBe(null);
     expect(result.appealGate).toEqual(expect.objectContaining({
       premiseSelected: 2,
       generated: cardFailed ? 1 : 2,
@@ -1764,6 +1922,8 @@ describe('idea discovery live orchestrator behavior', () => {
     }));
   });
 });
+
+
 
 describe('discovery before dimension confirmation', () => {
   it('provides dictionary choices to premise selection and preserves a prerequisite refusal without retrying or weakening gates', async () => {
@@ -1779,7 +1939,7 @@ describe('discovery before dimension confirmation', () => {
     const result = await controller.runIdeaDiscovery({ storyType: 'short_story', platform: 'fanqie',
       customPlatformNote: '', storyCategory: '年代', storyTone: [], writingStyle: [], webNovelGenre: [],
       submissionTags: [], plotTags: [], genreFitNote: '', pov: '' }, 5);
-    expect(controller.realLLM.generate).toHaveBeenCalledTimes(1);
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(2);
     const prompt = controller.realLLM.generate.mock.calls[0][0].prompt;
     expect(prompt).toContain('当前阶段=灵感发现的题材预选');
     for (const type of ['tone_tag', 'writing_style', 'web_novel_genre', 'narrative_pov']) {
@@ -1887,6 +2047,65 @@ it('does not merge in-flight requests with different selected POV candidates',as
  expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(2);
 });
 
+it('coalesces identical in-flight requests when the omitted category is randomly resolved per call',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;controller.logger={warn:vi.fn()};
+ let resolveTask!:(value:{success:boolean;ideas:any[]})=>void;
+ const pending=new Promise<{success:boolean;ideas:any[]}>(resolve=>{resolveTask=resolve;});
+ controller.runIdeaDiscovery=vi.fn(()=>pending);
+ const random=vi.spyOn(Math,'random').mockReturnValueOnce(0).mockReturnValueOnce(0.999999);
+ try{
+  const request={storyType:'long_novel',platform:'fanqie',storyCategory:''};
+  const first=controller.ideaDiscover(request),second=controller.ideaDiscover(request);
+  expect(random).toHaveBeenCalledTimes(2);
+  expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+  resolveTask({success:true,ideas:[]});
+  await expect(Promise.all([first,second])).resolves.toEqual([{success:true,ideas:[]},{success:true,ideas:[]}]);
+ }finally{random.mockRestore();}
+});
+it('cancels a coalesced discovery through either caller ID, without losing the shared task',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.logger={warn:vi.fn()};
+ let release!:()=>void;
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ let signal:AbortSignal|undefined;
+ controller.runIdeaDiscovery=vi.fn(async()=>{
+  signal=currentGenerationSignal();
+  await pending;
+  assertGenerationActive();
+  return {success:true,ideas:[]};
+ });
+ const common={storyType:'short_story' as const,platform:'fanqie',storyCategory:'都市日常'};
+ const first=controller.ideaDiscover({...common,discoveryRequestId:'origin-1'});
+ const second=controller.ideaDiscover({...common,discoveryRequestId:'alias-2'});
+ expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+ expect(signal?.aborted).toBe(false);
+ expect(controller.cancelIdeaDiscovery('alias-2').cancelled).toBe(true);
+ expect(signal?.aborted).toBe(true);
+ release();
+ const results=await Promise.allSettled([first,second]);
+ expect(results.map(result=>result.status)).toEqual(['rejected','rejected']);
+ expect(controller.cancelIdeaDiscovery('origin-1').cancelled).toBe(false);
+ expect(controller.cancelIdeaDiscovery('alias-2').cancelled).toBe(false);
+ // Completion releases the in-flight configuration; a later identical request
+ // starts a new task rather than receiving the cancelled result.
+ controller.runIdeaDiscovery=vi.fn().mockResolvedValue({success:true,ideas:[]});
+ await expect(controller.ideaDiscover({...common,discoveryRequestId:'next-3'})).resolves.toMatchObject({success:true});
+ expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+});
+it('does not let the same request ID cancel a different in-flight configuration',async()=>{
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.logger={warn:vi.fn()};
+ let release!:()=>void;
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ controller.runIdeaDiscovery=vi.fn(async()=>{await pending;return {success:true,ideas:[]};});
+ const common={storyType:'short_story' as const,platform:'fanqie',storyCategory:'都市日常'};
+ const first=controller.ideaDiscover({...common,discoveryRequestId:'shared-id'});
+ await expect(controller.ideaDiscover({...common,pov:'第三人称限知',discoveryRequestId:'shared-id'}))
+  .rejects.toThrow(/请求ID正在被另一个任务使用/);
+ expect(controller.runIdeaDiscovery).toHaveBeenCalledTimes(1);
+ release();
+ await expect(first).resolves.toMatchObject({success:true});
+});
 it('sends full standards only for actual reviewed cards while preserving all reference story comparison fields',async()=>{
  const c=Object.create(ChainController.prototype) as any;let captured='';const stop=Error('local prompt capture');
  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{captured=prompt;throw stop;});
@@ -1897,4 +2116,339 @@ it('sends full standards only for actual reviewed cards while preserving all ref
  expect(packed.cards[0].executionStandard||packed.cards[0].executionStandardRefs).toBeTruthy();
  expect(packed.references[0]).not.toHaveProperty('executionStandard');expect(packed.references[0]).not.toHaveProperty('executionStandardRefs');expect(packed.references[0]).not.toHaveProperty('lockedPremise');
  for(const key of ['hook','coreConflict','description','mainReversal','setting','ending','protagonist','scopeBreakdown','storyCategory','storyTone','pov'])expect(packed.references[0][key]).toEqual((reference as any)[key]);
+});
+
+
+const diversePoolStories = ["【处境触发】失语气象员发现台风前的浮标全部报出逆风。【主动选择】他决定乘船核对维修合同和海浪方向。【必要条件】港务主管取得真实风速日志才能调整撤离航道。【反转兑现】走私船藏在错误风向背后，他揭露后失去同僚支持。【分类流派机制】海岛灾难悬疑以撤离选择和职业代价推进。","【处境触发】营养师发现社区餐盒里的配料与过敏病例不一致。【主动选择】她决定保留留样追查代餐券背后的供货方。【必要条件】食安人员检测留样并核对签字后才能定责。【反转兑现】真正被操纵的是监护文件，她举报却失去食堂资格。【分类流派机制】社区现实悬疑以老人权益和家属关系推进。","【处境触发】提词员发现剧团的老戏突然缺少最后七句唱词。【主动选择】她决定查验旧演出录像与演员的口型。【必要条件】收养档案与原始台本经核对才能确认身份。【反转兑现】唱词藏着一次身份顶替，她揭露后失去师父信任。【分类流派机制】剧团身份悬疑以师徒抉择和舞台证据推进。","【处境触发】训导员发现退役检疫犬总对空货箱示警。【主动选择】他决定查阅犬只芯片编号和货车冷链记录。【必要条件】口岸安检核实车辆监控与检疫记录才能扣查。【反转兑现】药材是合法诱饵，活体繁育犬才是目标，他丢了旧友。【分类流派机制】边境物流悬疑以动物身份与同事情谊推进。","【处境触发】测绘员发现旧城区一条有人居住的窄巷从新版地图消失。【主动选择】她决定用井盖距离和居民门牌核对现场。【必要条件】住房部门取得测绘底图才能重审拆迁补偿。【反转兑现】消失的巷子关联旧身份交换，她查明真相却伤害邻里。【分类流派机制】城市测绘悬疑以安置权益和身份争夺推进。","【处境触发】矿场工人发现定位仪显示休班同事仍在井下。【主动选择】他拒签安全表并保全矿灯定位记录。【必要条件】矿井值守员确认实时定位及出入登记才能启动救援。【反转兑现】违章更改轨道的竟是工友，他揭发后失去晋升机会。【分类流派机制】矿井生存悬疑以设备边界和朋友责任推进。","【处境触发】列车员发现夜班行李舱有一件没有主人却每天称重的包裹。【主动选择】她决定核查运单条码与站台摄像记录。【必要条件】铁路安保取得封签交接书后才可定位真正发件人。【反转兑现】包裹装着被调换的医疗器材，她追查后被停职。【分类流派机制】铁路职业悬疑以时间压力和乘客信任推进。","【处境触发】养老院护工发现探视簿上出现三名不存在的亲属。【主动选择】她决定核验老人亲笔信与探视人照片。【必要条件】社工访谈老人并核验监护授权后才能暂停财产转移。【反转兑现】老监护人借探视取得权限，她阻止后被家属误解。【分类流派机制】养老生活悬疑以孤独老人和照护信任推进。","【处境触发】快递站临时工发现无人认领包裹总被系统自动签收。【主动选择】她决定保存扫码枪缓存并追踪异常账号。【必要条件】站长取出原始权限日志后才能申请调查。【反转兑现】幕后操作者是她的旧搭档，她维护客户却失去友情。【分类流派机制】都市物流悬疑以岗位权限和合伙背叛推进。","【处境触发】渔村养殖户发现水塘里突然出现本地不该有的鱼种。【主动选择】他决定暂停销售并追查夜间运输车。【必要条件】水产专家鉴定水样且追查车辆卸货记录才可定责。【反转兑现】外来鱼是合作社投放用来夺取合同，他告发后失去市场。【分类流派机制】海边商业悬疑以生态损失和社区利益推进。","【处境触发】文物修复师发现博物馆古画的底层颜料不符合藏品年代。【主动选择】她暂停展览并用成像仪比对入藏底册。【必要条件】馆方委员会收到原始图像与保管链才可认定调包。【反转兑现】造假为了掩盖师父当年的损毁，她公开后断绝师徒关系。【分类流派机制】文物悬疑由修复技术和守护秘密的伦理推进。","【处境触发】医院化验助理发现亲子报告的采样编码被人交换。【主动选择】他决定封存样本并核对当天采血记录。【必要条件】医院双人复验和身份确认后才可更正报告。【反转兑现】被隐瞒的收养安排牵出两家旧案，他更正后破坏家庭。【分类流派机制】医疗伦理悬疑以血缘选择与专业职责推进。","【处境触发】短视频剪辑师发现直播合约的分账账号被悄悄替换。【主动选择】她决定回溯签约记录与剪辑工程的提交时间。【必要条件】平台核验数字签名及签约主体才可撤销异常分账。【反转兑现】替换账号的人是她的搭档，她拿回收益却解散团队。【分类流派机制】网络职场悬疑以合伙信任和账户权限推进。","【处境触发】旧城消防员发现大楼逃生通道被登记成私人客厅。【主动选择】他决定复查建筑验收图纸并测量实际墙体。【必要条件】主管部门核对竣工资料及现场通道才能重启验收。【反转兑现】房屋违规改造牵涉自己姑母，他保住通道却失去家人。【分类流派机制】公共安全悬疑以物权争夺与亲情代价推进。","【处境触发】深夜出租司机发现所有路线单据都指向一条已封闭的山路。【主动选择】他决定重走站点并检查车载收费终端。【必要条件】交通站核对原始行车轨迹才可查明虚报里程者。【反转兑现】真正牟利的是运营公司，他揭露后失去营运资格。【分类流派机制】交通社会悬疑以交通规则和司机生计推进。"];
+it('dispatches every independently vetted shortlist premise to concurrent full-card generation',async()=>{
+  const entries=diversePoolStories.map((storyCore,index)=>({
+    workingTitle:'原池主题'+(index+1),storyCore,storyCategoryId:'K1',
+  }));
+  const selectionFields=(id:string)=>({
+    premiseId:id,storyCategory:'悬疑',storyCategoryId:'K1',
+    protagonistSituation:'主角被现实责任迫使行动，否则家人利益立刻受损',
+    openingEvent:'当天一份无法解释的记录迫使主角主动查证',
+    coreConflict:'对手主动篡改凭证而主角必须保护具体家庭利益',
+    activeChoice:'主角自行核对原始记录并承担被停职的现实代价',
+    escalation:'对手夺取通行权限迫使主角改变调查方式',
+    reversalEffect:'原记录揭示责任归属让双方的目标出现逆转',
+    payoff:'主角以合法核验改变结局并承担失去原岗位的代价',
+    irreplaceableCarrier:'工作权限和家属责任共同决定具体行动路径',
+    secondOrderConsequence:'调查让旧同事失去岗位并改变家人对主角的信任',
+    readerQuestion:'究竟谁在关键时刻更改凭证并获得具体利益',
+    causalPlan:[{action:{field:'activeChoice',quote:'主角自行核对原始记录并承担被停职的现实代价'},
+      conditions:[{field:'escalation',quote:'对手夺取通行权限迫使主角改变调查方式'}],
+      result:{field:'payoff',quote:'主角以合法核验改变结局并承担失去原岗位的代价'}}],
+  });
+  const strong=(idx:number)=>({
+    storyType:'short_story',targetPlatform:'fanqie',storyCategory:'悬疑',
+    storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+    plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
+    title:entries[idx].workingTitle,
+    hook:diversePoolStories[idx].slice(0,100),
+    description:idx===4 ? diversePoolStories[idx]+'我用微信发送原始取证记录，其他故事事实保持不变。' : diversePoolStories[idx],
+    protagonist:diversePoolStories[idx].slice(0,38),
+    coreConflict:diversePoolStories[idx],
+    uniquePoint:diversePoolStories[idx].slice(-90),
+    mainReversal:diversePoolStories[idx].slice(-105),
+    noveltyProof:{familiarShell:'现实职业悬疑',uncommonCombination:'登记原件与家属利益结合成必要冲突',
+      avoidedPatterns:'拒绝突然出现万能证人',irreplaceableWhy:'没有原始签收流程就无法判断谁有权限决定结果',
+      secondOrderConsequence:'真实责任曝光令旧同事的职业关系发生不可逆变化',
+      readerQuestion:'究竟是谁更改原始记录并利用这份登记争夺权益'},
+    estimatedWords:20000,plannedChapters:5,
+    scopeBreakdown:[{arc:'主要事件闭环',chapters:5,reason:'五章完成递进、核验、反转与代价'}],
+  });
+  const generate=vi.fn(async(request:any)=>{
+    const step=request.metrics?.stepKey;
+    if(step==='idea_premise_pool_generation'){
+      const batch=Number(request.metrics?.attempt||0);
+      return {content:JSON.stringify({pool:entries.slice(batch===0?0:8,batch===0?8:15)})};
+    }
+    if(step==='idea_premise_selection')
+      return {content:JSON.stringify({selectedPremises:Array.from({length:8},(_,i)=>selectionFields('P'+(i+1)))})};
+    if(step==='idea_card_structure')
+      return {content:JSON.stringify({ideas:[strong(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure').length-1)]})};
+    throw Error('unexpected step '+step);
+  });
+  const c=Object.create(ChainController.prototype) as any;
+  c.realLLM={assertScenarioModelConfigured:vi.fn(),generate};
+  c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
+  c.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
+  c.completePremiseCausalPlans=vi.fn(async(input:any)=>input);
+  c.reconcilePremiseSelection=vi.fn(async(input:any)=>({
+    ...input,selectionAudit:{finalReview:{passed:true,issues:[]}},
+  }));
+  c.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[],
+    signals:{distinctivenessScore:4,descriptionProgressions:4,hookHasRelationship:true},
+    readerExperienceProfile:{densityMode:'balanced',pace:'continuous',evidence:[]}}))};
+  c.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((card,index)=>{
+    const passed=index>=2;
+    return {position:index+1,title:card.title,titleCompelling:true,openingCompelling:true,
+      distinctFromBatch:true,storyCoherent:true,payoffCredible:passed,platformFit:true,
+      storyEvidence:card.hook,payoffEvidence:card.description,platformEvidence:card.hook,
+      qualityReason:'按已存在的实际行动和原因验证主线兑现',
+      readerQuestion:'主角的选择会导致哪些不可逆后果？',
+      issues:passed?[]:['缺少已交代的决定性条件，不能承认兑现'],readerGoals:{
+        click:{status:'supported'},completion:{status:'supported'},sharing:{status:'supported'},immersion:{status:'supported'},
+      },
+    };
+  }));
+  const outcome=await c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+    customPlatformNote:'',storyTone:['紧张'],writingStyle:['简洁'],
+    webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],
+    genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:''},5);
+  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
+  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure'),
+    JSON.stringify({error:(c.logger.error.mock.calls||[]),warn:(c.logger.warn.mock.calls||[])}).slice(0,1200)).toHaveLength(8);
+  expect(c.reviewIdeaPresentation).toHaveBeenCalledOnce();
+  expect(c.reviewIdeaPresentation.mock.calls[0][0]).toHaveLength(8);
+  // A chat-platform brand in optional prose is normalized before premise
+  // binding, without skipping the full-card independent quality review.
+  expect(c.reviewIdeaPresentation.mock.calls[0][0][4].description).toContain('青信');
+  expect(c.reviewIdeaPresentation.mock.calls[0][0][4].description).not.toContain('微信');
+  expect(outcome.success,JSON.stringify({error:outcome.error,gate:outcome.appealGate?.candidateAssessments?.map((x:any)=>({id:x.sourcePremiseId,issues:x.issues}))})).toBe(true);
+  expect(outcome.ideas).toHaveLength(5);
+  expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')
+    .map(([request]:any[])=>request.metrics.attempt).sort((a:number,b:number)=>a-b))
+    .toEqual(Array.from({length:8},(_,index)=>index));
+  expect(outcome.appealGate).toMatchObject({
+    requested:5,generated:8,fullCardDispatched:8,
+    fullCardDispatchedIds:['P1','P2','P3','P4','P5','P6','P7','P8'],
+    qualified:6,returned:5,
+    repairAttempted:false,repairGenerated:0,
+    mode:'parallel_vetted_full_card_filter',
+    repairProtocol:'one_budgeted_lightweight_refill_wave_after_full_card_gate',
+  });
+  expect(outcome.appealGate.candidateAssessments.filter((row:any)=>!row.passed)).toHaveLength(2);
+  expect(generate.mock.calls.filter(([row]:any[])=>['idea_card_local_repair','idea_premise_pool_reselection'].includes(row.metrics?.stepKey))).toHaveLength(0);
+  expect(c.logger.log.mock.calls.some((args:any[])=>args.some((value:any)=>String(value).includes('全部进入并发完整卡生成')))).toBe(true);
+});
+
+it('fills a failed final-card delivery slot from unused lightweight seeds without regenerating approved cards',async()=>{
+  // Real preselection dedup rejects four copies of one generic story even
+  // when their IDs differ. Use genuinely different already-grounded seed paths.
+  const core=(id:string)=>diversePoolStories[Number(id.slice(1))-1];
+  const seedTitles:Record<string,string>={P1:'逆风浮标的谎报',P2:'代餐券上的过敏',P3:'失踪的戏词',P4:'空货箱的警报'};
+  const seeds=['P1','P2','P3','P4'].map(id=>({
+    premiseId:id,workingTitle:seedTitles[id],storyCore:core(id),storyCategoryId:'K1',
+  }));
+  const expand=(id:string)=>({
+    premiseId:id,storyCategory:'悬疑',storyCategoryId:'K1',
+    protagonistSituation:'主角担心失去家庭收入，必须守住一项已经确认的权益',
+    openingEvent:'一份原始文件表明权益将被他人非法转移，主角必须当天核实',
+    coreConflict:'主角需要公开原始材料，对手则试图阻止有权人员核验',
+    activeChoice:'主角亲自保存原始材料并提交给负责审核的人员',
+    escalation:'审核人员收到原件并安排实地核验，对手开始施压',
+    reversalEffect:'核验结果确立主角的申诉事实，对手的行动路径被限制',
+    payoff:'实际审核确认转移无效，主角守住权益却丢了原来的工作',
+    irreplaceableCarrier:'实际工作环境与保管材料的责任决定谁能调取原件',
+    secondOrderConsequence:'相关人失去对原材料的控制，主角与旧同事关系改变',
+    readerQuestion:'主角能否及时保存并提交原始材料避免权益被转移',
+    causalPlan:[{
+      action:{field:'activeChoice',quote:'主角亲自保存原始材料并提交给负责审核的人员'},
+      conditions:[{field:'escalation',quote:'审核人员收到原件并安排实地核验'}],
+      result:{field:'payoff',quote:'实际审核确认转移无效，主角守住权益却丢了原来的工作'},
+    }],
+  });
+  const card=(id:string)=>({
+    title:seedTitles[id],storyType:'short_story',targetPlatform:'fanqie',
+    storyCategory:'悬疑',storyTone:['紧张'],writingStyle:['简洁'],
+    webNovelGenre:['悬疑推理'],plotTags:['调查'],submissionTags:['悬疑'],pov:'第一人称',
+    hook:core(id).slice(0,105),
+    description:core(id),
+    coreConflict:core(id).slice(0,115),
+    uniquePoint:core(id).slice(80,175),
+    mainReversal:core(id).slice(-110),
+    noveltyProof:{
+      familiarShell:'职业现场的真实冲突',uncommonCombination:'围绕'+seedTitles[id]+'的具体身份、现场证据和利益争夺',
+      avoidedPatterns:'不靠神秘证据或凭空出现的决定者',
+      irreplaceableWhy:'没有现场原件和核验权限就无法产生实际决定',
+      secondOrderConsequence:'旧同事开始反对主角，原有合作关系因此崩裂',
+      readerQuestion:'她能否在丢掉工作前完成证据提交和决定核验',
+    },
+    estimatedWords:20000,plannedChapters:5,
+    scopeBreakdown:[{arc:'完整调查与决定',chapters:5,reason:'五章完成调查核验与关系代价'}],
+    // Keep setting and protagonist grounded in each distinct seed, instead of
+    // introducing identical generic prose that artificially triggers the
+    // unchanged 0.42 semantic-duplication Gate.
+    setting:core(id).slice(0,42),protagonist:core(id).match(/【处境触发】(.{3,6})/)?.[1]||core(id).slice(0,12),
+  });
+  const generate=vi.fn(async(request:any)=>{
+    const step=request.metrics?.stepKey;
+    if(step==='idea_premise_pool_generation'){
+      const batch=Number(request.metrics?.attempt||0);
+      return {content:JSON.stringify({pool:seeds.slice(batch===0?0:2,batch===0?2:4)})};
+    }
+    if(step==='idea_premise_selection')
+      return {content:JSON.stringify({selectedPremises:['P1','P2'].map(expand)})};
+    if(step==='idea_premise_refill_selection'){
+      expect(request.prompt).toContain('"premiseId":"P3"');
+      expect(request.prompt).toContain('"premiseId":"P4"');
+      // The generic schema may legitimately contain example ID P1. Only
+      // the server-supplied candidate pool is forbidden from reusing P1.
+      const eligiblePool=request.prompt.split('【服务器已固定的候选池；不得新增、改写或重新编号】')[1]?.split('\n')[0]||'';
+      expect(eligiblePool).toContain('"premiseId":"P3"');
+      expect(eligiblePool).toContain('"premiseId":"P4"');
+      expect(eligiblePool).not.toContain('"premiseId":"P1"');
+      return {content:JSON.stringify({selectedPremises:['P3','P4'].map(expand)})};
+    }
+    if(step==='idea_card_structure'){
+      // A full-card prompt also lists other selected premises as difference
+      // references. Only the server-locked CURRENT premise may identify the
+      // generated card; picking a peer title silently manufactures duplicates.
+      const current=request.prompt.split('【已选题材胚子（内部标识已由服务器移除）】')[1]
+        ?.split('【同批差异参照')[0]||'';
+      const id=Object.keys(seedTitles).find(key=>current.includes(
+        '"workingTitle":"'+seedTitles[key]+'"'))||'';
+      if(!id)throw Error('完整卡丢失了原池身份');
+      return {content:JSON.stringify({ideas:[card(id)]})};
+    }
+    throw Error('unexpected model call '+step);
+  });
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.realLLM={assertScenarioModelConfigured:vi.fn(),generate};
+  controller.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
+  controller.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
+  controller.completePremiseCausalPlans=vi.fn(async(input:any)=>input);
+  controller.reconcilePremiseSelection=vi.fn(async(input:any)=>({...input,selectionAudit:{finalReview:{passed:true,issues:[]}}}));
+  controller.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[],
+    signals:{distinctivenessScore:4,descriptionProgressions:4,hookHasRelationship:true},
+    readerExperienceProfile:{densityMode:'balanced',pace:'continuous',evidence:[]}}))};
+  controller.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((row,index)=>{
+    const pass=row.sourcePremiseId!=='P2';
+    return {position:index+1,title:row.title,titleCompelling:true,
+      openingCompelling:true,distinctFromBatch:true,storyCoherent:true,
+      payoffCredible:pass,platformFit:true,
+      storyEvidence:row.hook,payoffEvidence:row.description,platformEvidence:row.hook,
+      qualityReason:'在真实材料取得及审核程序后才接受具体兑现结论',
+      readerQuestion:'主角能否在失业之前完成证据提交和权益核验？',
+      issues:pass?[]:['该题材的因果证据还存在未经证明的真实缺口']};
+  }));
+  const result=await controller.runIdeaDiscovery({
+    storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+    customPlatformNote:'',storyTone:['紧张'],writingStyle:['简洁'],
+    webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],
+    plotTags:['调查'],genreFitNote:'',pov:'第一人称',
+    targetWords:'20000',targetAudience:'',
+  },2);
+  expect(result.success,JSON.stringify({error:result.error,gate:result.appealGate?.fulfillment})).toBe(true);
+  if(result.totalIdeas!==2)throw new Error('补足回归未交齐：'+JSON.stringify({
+    totalIdeas:result.totalIdeas,fulfillment:result.appealGate?.fulfillment,
+    candidateAssessments:result.appealGate?.candidateAssessments?.map((row:any)=>({
+      id:row.sourcePremiseId,passed:row.passed,issues:row.issues,
+    })),
+    structuringErrors:result.appealGate?.structuringErrors,
+  }).slice(0,6000));
+  expect(result.ideas.map((row:any)=>row.sourcePremiseId)).toEqual(['P1','P3']);
+  expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure')
+    .map(([row]:any[])=>Object.keys(seedTitles).find(key=>(row.prompt.split(
+      '【已选题材胚子（内部标识已由服务器移除）】')[1]?.split('【同批差异参照')[0]||'').includes(
+      '"workingTitle":"'+seedTitles[key]+'"'))))
+    .toEqual(['P1','P2','P3','P4']);
+  expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_premise_pool_refill')).toHaveLength(0);
+  expect(controller.reconcilePremiseSelection).toHaveBeenCalledTimes(2);
+  expect(controller.reviewIdeaPresentation).toHaveBeenCalledTimes(2);
+  expect(result.appealGate.fulfillment.stopReason).toBe('bounded_refill_met_target');
+  expect(result.appealGate).toMatchObject({requested:2,returned:2,shortfall:0});
+});
+
+describe('idea discovery requested quantity and concurrency regressions', () => {
+  it('asks for up to eight mature preselected premises for five delivery slots from the fixed fifteen', async () => {
+    const generate = vi.fn(async (request: any) => {
+      const step = request.metrics?.stepKey;
+      if (step === 'idea_premise_pool_generation') {
+        const size = Number(request.prompt.match(/只生成恰好\s+(\d+)\s+个轻量题材胚子/)?.[1] || 0);
+        if (!size) throw new Error('test fixture could not resolve the fixed pool batch size');
+        const attempt = Number(request.metrics?.attempt || 0);
+        return { content: JSON.stringify({ pool: Array.from({ length: size }, (_, index) => ({
+          workingTitle: `原池候选-${attempt}-${index + 1}`,
+          storyCore: diversePoolStories[attempt * 8 + index],
+          storyCategoryId: 'K1',
+        })) }) };
+      }
+      if (step === 'idea_premise_selection') {
+        return { content: JSON.stringify({ blocked: true, missingRequiredDimensions: ['test-stop'], message: 'selection contract regression sentinel' }) };
+      }
+      throw new Error('unexpected generation step: ' + String(step));
+    });
+    const controller = Object.create(ChainController.prototype) as any;
+    controller.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    controller.db = { getDb: () => ({ prepare: () => ({ all: () => [] }) }) };
+    const result = await controller.runIdeaDiscovery({
+      storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
+      storyCategory: '悬疑', storyTone: ['紧张'], writingStyle: ['简洁'],
+      webNovelGenre: ['悬疑推理'], submissionTags: ['悬疑'], plotTags: ['调查'],
+      genreFitNote: '', pov: '第一人称', targetWords: '20000', targetAudience: '',
+    }, 5);
+    const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
+    expect(selectionCall).toBeTruthy();
+    expect(selectionCall?.[0].prompt).toContain('先尽可能从轻量胚子池中选出 8 个成熟题材');
+    expect(selectionCall?.[0].prompt).toContain('5-8 个题材');
+    expect(result.success).toBe(false);
+  });
+
+
+  it('rejects near-identical proposals in the ORIGINAL parallel pool before paid model selection', async () => {
+    const generate = vi.fn(async (request: any) => {
+      if (request.metrics?.stepKey === 'idea_premise_pool_generation') {
+        const attempt = Number(request.metrics?.attempt || 0);
+        const selected = attempt === 0
+          ? [0, 0, 1, 2] : [3, 4, 5];
+        return { content: JSON.stringify({ pool: selected.map((index,position) => ({
+          workingTitle: attempt === 0 && position === 1 ? '首批换名复刻'
+            : '实际新机制' + index,
+          storyCore: attempt === 0 && position === 1
+            ? diversePoolStories[index].replace('失语气象员', '气象台值班员')
+              .replace('浮标全部报出逆风', '海上浮标一起报告逆风')
+            : diversePoolStories[index],
+          storyCategoryId: 'K1',
+        })) }) };
+      }
+      if (request.metrics?.stepKey === 'idea_premise_selection') {
+        // Fail intentionally after observing the actual fixed shortlist.
+        expect(request.prompt).not.toContain('首批换名复刻');
+        return { content: JSON.stringify({blocked:true,reason:'test sentinel'}) };
+      }
+      throw new Error('unexpected generation stage');
+    });
+    const c = Object.create(ChainController.prototype) as any;
+    c.realLLM = { assertScenarioModelConfigured: vi.fn(), generate };
+    c.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    c.db = { getDb: () => ({prepare: () => ({all: () => []})}) };
+    const outcome = await c.runIdeaDiscovery({
+      storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+      storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+      submissionTags:['悬疑'],plotTags:['调查'],genreFitNote:'',
+      pov:'第一人称',targetWords:'20000',targetAudience:'',customPlatformNote:'',
+    },2);
+    expect(outcome.success).toBe(false);
+    expect(outcome.appealGate.selectionAudit.poolGeneration).toMatchObject({
+      rawReturned:7,duplicateCount:1,generated:6,
+    });
+    expect(generate.mock.calls.filter(([request]:any[]) =>
+      request.metrics?.stepKey==='idea_premise_pool_generation')).toHaveLength(2);
+    expect(generate.mock.calls.filter(([request]:any[]) =>
+      request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
+  });
+
+  it('keeps two pool batches independent from the bounded adaptive remote-work ceiling', () => {
+    expect(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY).toBe(2);
+    expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(8);
+  });
+});
+
+
+describe('discovery request identity isolation', () => {
+  it('keeps request IDs bound to their own overlapping asynchronous task', async () => {
+    const read = (discoveryRequestId: string) => discoveryRequestAsyncStorage.run(
+      { discoveryRequestId },
+      async () => {
+        await Promise.resolve();
+        return currentDiscoveryRequestId();
+      },
+    );
+    await expect(Promise.all([read('discovery-a'), read('discovery-b')]))
+      .resolves.toEqual(['discovery-a', 'discovery-b']);
+  });
 });

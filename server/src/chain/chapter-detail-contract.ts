@@ -1,5 +1,48 @@
 import { validateChapterEndingBoundary, validateForeshadowingBoundary } from './adaptive-narrative';
 
+/** Normalize only a single-object provider envelope; content and schema
+ * completeness remain the responsibility of chapterDetailStructureIssues.
+ * The root chapter always wins over unrelated nested metadata. */
+export function unwrapSingleChapterEnvelope(value:unknown):unknown {
+ if(!value||typeof value!=='object'||Array.isArray(value))return value;
+ const obj=value as Record<string,unknown>;
+ const shape=(row:Record<string,unknown>)=>['title','content','scenes','characterActions','targetWords']
+   .some(field=>Object.prototype.hasOwnProperty.call(row,field));
+ if(shape(obj))return obj;
+ for(const field of ['data','result','outline']){
+  const child=obj[field];
+  if(child&&typeof child==='object'&&!Array.isArray(child)
+    &&shape(child as Record<string,unknown>))return child;
+ }
+ return obj;
+}
+
+/** The example shown to the model must be valid for the CURRENT chapter.
+ * A hardcoded 3500-word example contradicted real 4400-5000-word chapter
+ * intervals and caused avoidable schema retries during project creation.
+ * This is prompt transport only: content and causal quality still come from
+ * the actual chapter and pass the existing strict validator and story Gates. */
+export function chapterDetailJsonExample(
+ allowedMin:number,allowedMax:number,isFinalChapter:boolean,confirmedTitle?:string,
+):string {
+ if(!Number.isInteger(allowedMin)||!Number.isInteger(allowedMax)
+   ||allowedMin<1||allowedMin>allowedMax)
+  throw Error('详细章纲示例的章节字数区间无效');
+ const exampleTarget=Math.floor((allowedMin+allowedMax)/2);
+ return '\n【JSON结构示例，仅示范字段，不得复制示例内容】'
+   +JSON.stringify({
+     title:typeof confirmedTitle==='string'&&confirmedTitle.trim()?confirmedTitle.trim():'本章标题',targetWords:exampleTarget,
+     wordCountReason:'依据本章场景、冲突强度与剩余总字数确定',
+     content:'按本章职责顺序概括必要事件链与结果',
+     scenes:[{location:'具体地点',goal:'本场目标',conflict:'本场阻碍',outcome:'本场结果'}],
+     characterActions:[{character:'人物名',action:'本章实际行动',result:'行动结果'}],
+     conflicts:[{name:'冲突名',parties:['A','B'],trigger:'触发条件',escalation:'升级路径',resolution:'本章解决程度'}],
+     highlights:[],foreshadowing:[],foreshadowingRecover:[],characterStates:[],
+     hook:isFinalChapter?'可留空或填写终章余韵':'只引出下一步动机或障碍',
+     emotionalTone:'情绪基调',
+   });
+}
+
 /** Task-local JSON schema under GEN-005; story completeness is reviewed against ChapterPlan. */
 export function chapterDetailStructureIssues(candidate: Record<string, any> | null, context: {
   allowedMin: number;

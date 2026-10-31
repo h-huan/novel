@@ -23,18 +23,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Verify local acceptance script syntax
-        run: node --check ../verify-local.mjs
+        run: node --check ../verify-local.mjs && node --check ../verify-local-core.mjs && node --check ../verify-local-diagnostics.mjs && node --check ../verify-local-guard.mjs
+      - name: Verify local diagnostics helper tests
+        run: node --test ../verify-local-diagnostics.spec.mjs ../verify-local-guard.test.mjs
       - name: Typecheck
         run: npm run typecheck
       - name: Build
+        id: build
         run: npm run build
       - name: Unit tests
+        id: unit_tests
         run: npm test
       - name: Acceptance tests
+        if: ${{ always() && steps.build.outcome == 'success' }}
         run: npm run test:acceptance
       - name: API E2E
+        if: ${{ always() && steps.build.outcome == 'success' }}
         run: npm run test:e2e
       - name: Detect real LLM credential
+        if: ${{ always() && steps.build.outcome == 'success' }}
         id: real_llm
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -46,7 +53,7 @@ jobs:
             echo "DEEPSEEK_API_KEY secret not configured; real-model golden path will be skipped."
           fi
       - name: Real LLM golden path
-        if: steps.real_llm.outputs.enabled == 'true'
+        if: ${{ always() && steps.build.outcome == 'success' && steps.real_llm.outputs.enabled == 'true' }}
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
@@ -71,8 +78,8 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Verify server launcher syntax
-        run: node --check scripts/dev.js && node --check scripts/prepare-server-runtime.js
+      - name: Verify standalone tooling syntax
+        run: node --check scripts/prepare-server-runtime.js
       - name: Typecheck
         run: npm run typecheck
       - name: Unit tests
@@ -81,6 +88,58 @@ jobs:
         run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+      - name: Electron desktop startup smoke
+        shell: bash
+        run: |
+          # xwininfo (x11-utils) is not on every hosted Ubuntu runner.
+          # Install the inspection tool only in CI, never in the desktop app.
+          sudo apt-get install -y x11-utils
+          # Verify the actual desktop dev entrypoint, not just its Vite bundle.
+          # A backend must never be created by this desktop command.
+          xvfb-run -a bash -euo pipefail <<'SH'
+          npm run dev > /tmp/novel-electron-start.log 2>&1 &
+          launcher_pid=$!
+          trap 'kill "$launcher_pid" 2>/dev/null || true' EXIT
+          opened=0
+          for attempt in $(seq 1 25); do
+            if curl -fsS http://127.0.0.1:5173/launcher.html >/dev/null 2>&1 \
+                && ps -eo args | grep -F "${PWD}/node_modules/electron/dist/electron . --no-sandbox" | grep -v grep >/dev/null; then
+              opened=1
+              break
+            fi
+            if ! kill -0 "$launcher_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$opened" != 1 ]; then
+            cat /tmp/novel-electron-start.log
+            echo "npm run dev did not open an Electron process"
+            exit 1
+          fi
+          # A process alone is not enough: verify the real launcher has a
+          # viewable GUI window instead of being tray-only or minimized.
+          if ! command -v xwininfo >/dev/null; then
+            echo "xwininfo is required for Electron window visibility acceptance"
+            exit 1
+          fi
+          window_visible=0
+          for attempt in $(seq 1 15); do
+            if xwininfo -name "AI写作平台 - 欢迎" 2>/dev/null | grep -q 'Map State: IsViewable'; then
+              window_visible=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$window_visible" != 1 ]; then
+            cat /tmp/novel-electron-start.log
+            xwininfo -root -tree || true
+            echo "Electron started but did not display a viewable launcher window"
+            exit 1
+          fi
+          if curl -fsS http://127.0.0.1:3100/api/v1/health >/dev/null 2>&1; then
+            echo "desktop launcher must not automatically start backend on port 3100"
+            exit 1
+          fi
+          SH
       - name: Quality cockpit E2E
         run: npm run test:e2e:quality
       - uses: actions/upload-artifact@v4

@@ -11,8 +11,8 @@ export function assertGenerationActive(): void {
 }
 export class GenerationTasks {
   private readonly active = new Map<string, AbortController>();
-  private key(scope: 'chapter' | 'creation', projectId: string, chapterId = '') { return JSON.stringify([scope, projectId, chapterId]); }
-  async run<T>(scope: 'chapter' | 'creation', projectId: string, chapterId: string, work: () => Promise<T>): Promise<T> {
+  private key(scope: 'chapter' | 'creation' | 'discovery', projectId: string, chapterId = '') { return JSON.stringify([scope, projectId, chapterId]); }
+  async run<T>(scope: 'chapter' | 'creation' | 'discovery', projectId: string, chapterId: string, work: () => Promise<T>): Promise<T> {
     const key = this.key(scope, projectId, chapterId);
     if (this.active.has(key)) throw new ConflictException('该任务仍在执行或停止中，请稍后再试');
     const controller = new AbortController();
@@ -20,7 +20,7 @@ export class GenerationTasks {
     try { return await context.run(controller.signal, work); }
     finally { if (this.active.get(key) === controller) this.active.delete(key); }
   }
-  cancel(scope: 'chapter' | 'creation', projectId: string, chapterId = '') {
+  cancel(scope: 'chapter' | 'creation' | 'discovery', projectId: string, chapterId = '') {
     const controller = this.active.get(this.key(scope, projectId, chapterId));
     if (!controller) return { cancelled: false, message: '该任务已结束或没有正在执行的生成' };
     controller.abort(new GenerationCancelledError());

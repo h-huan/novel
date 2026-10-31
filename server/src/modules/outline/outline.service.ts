@@ -1,7 +1,7 @@
 /**
  * 大纲 Service
  */
-import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import { OutlineRepository } from '../../database/repositories/outline.repository';
 import { DatabaseService } from '../../database/database.service';
@@ -74,6 +74,11 @@ export class OutlineService {
     const id = uuid();
     const level = dto.level || 'chapter';
     const order = dto.order ?? 0;
+    if (level === 'book') {
+      const existing = this.db.getDb().prepare("SELECT id FROM outlines WHERE project_id = ? AND level = 'book' LIMIT 1")
+        .get(projectId) as { id: string } | undefined;
+      if (existing) throw new ConflictException('项目已有全书总纲；不能通过新增书纲重复保存独立候选，必须先核对原大纲和已确认事实');
+    }
     const targetWords = level === 'chapter' ? this.resolveChapterTargetWords(projectId, dto.targetWords) : (dto.targetWords || 0);
     if (level === 'chapter') this.shiftSiblings(projectId, dto.parentId || null, order, 1);
 

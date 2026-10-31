@@ -1,5 +1,16 @@
 import {it,expect} from 'vitest';
-import {applyOutlineFactPatch} from './outline-fact-patch';
+import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections, extractOutlineFactPatch} from './outline-fact-patch';
+it('unpacks an independently audited factual patch without inventing story changes',()=>{
+ const patch={'characterActions.0.result':'客户收到函件，但未签署续约协议'};
+ expect(extractOutlineFactPatch({patch})).toEqual(patch);
+ expect(extractOutlineFactPatch({data:{patch}})).toEqual(patch);
+ expect(extractOutlineFactPatch({result:{patch}})).toEqual(patch);
+ for(const invalid of [null,{patch:{}},{patch:[]},{content:'直接重写整章'}, {data:{status:'ok'}},{patch:'text'}])
+   expect(()=>extractOutlineFactPatch(invalid)).toThrow('非空patch对象');
+ expect(()=>applyOutlineFactPatch({characterActions:[{result:'客户已签署续约协议'}]},
+   extractOutlineFactPatch({patch}))).not.toThrow();
+});
+
 const original={content:'保留原场景。',targetWords:5000,chapterFunction:'既有职责',characterActions:[{action:'对手不知道秘密。',result:'秘密保留。'}],foreshadowing:[{content:'旧伏笔',plannedRecoveryChapter:4}]};
 it('applies dot and bracket addresses atomically while preserving all other fields and the original',()=>{
  const before=JSON.stringify(original);
@@ -33,6 +44,94 @@ it('does not globally replace equal dates, guess ambiguous rewrites or reject ev
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:text.replace('三天前','两天前')},[])).toEqual([]);
  expect(outlineFactPatchSynchronizationIssues({...chapter,foreshadowingRecover:[{method:text}]},{content:'他在评审会展示了之前取得的凭据'},[text])).toEqual([]);
 });
+it('rejects a chapter-3 patch that keeps the relative-day contradiction from accepted chapter 1',()=>{
+ const first='传令那日，我当众说木牌三天前就丢了';
+ const second='雷台开审已是三日后，我仍说三天前丢的，丢时没报';
+ const chapter={content:second,scenes:[{outcome:'他说三天前丢的'}],characterActions:[{action:'当众说三天前丢的',result:'仍不认私闯'}]};
+ const defect=JSON.stringify({location1:'前章·第1章.content',quote1:first,
+  location2:'本批·第3章.content',quote2:second,
+  conflict:'第1章“木牌三天前就丢了”指传令前三日，第3章“三天前丢的”却以三日后的雷台为基准，丢失事件时点不一致。',
+  calculation:'T0-3 != (T0+3)-3'});
+ const wrong={'scenes.0.outcome':'他在雷台重复丢失事实'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[defect]).join('；'))
+  .toContain('事实补丁未触及当前章的冲突引文');
+ const valid={content:'雷台开审已是三日后，我说六天前丢的，丢时没报',
+   'scenes.0.outcome':'他说六天前丢的',
+   'characterActions.0.action':'当众说六天前丢的'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,valid,[defect])).toEqual([]);
+ expect(applyOutlineFactPatch(chapter,valid).characterActions[0].result).toBe('仍不认私闯');
+ expect(chapter.content).toBe(second);
+});
+it('requires action-result patches to touch the exact cited causal assertion before re-review',()=>{
+ const chapter={
+  content:'她没有站起，也没有出声。评估程序根据申请材料决定是否发放补偿。',
+  characterActions:[{action:'她没有站起，也没有出声',result:'因为她没有站起或没有出声，家里补偿落空'}],
+  characterStates:[{stateAfter:'家里补偿落空'}],
+ };
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'她没有站起，也没有出声',resultEvidence:'家里补偿落空',
+  reason:'未行动不能证明补偿结果由她造成'}],resultFields:['characterActions.0.result','characterStates.0.stateAfter']};
+ const unrelated={content:chapter.content.replace('她没有站起','她仍没有站起')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[],evidence).join(' '))
+  .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ const targeted={'characterActions.0.result':'家里补偿落空仍由评估程序按申请材料决定，并非她没有站起或没有出声造成'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,targeted,[],evidence)).toEqual([]);
+ expect(chapter.characterActions[0].result).toBe('因为她没有站起或没有出声，家里补偿落空');
+});
+it('rejects edits unrelated to an explicitly cited result when the evidence address is wrong',()=>{
+ const chapter={content:'回村时卷帘门已关，没人见到关门动作。',
+  characterActions:[{action:'柳长顺将四瓶摆上柜台',result:'四瓶摆上了柜台'}]};
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'周德海实际上关门',resultEvidence:'他说出了关门原因',
+  reason:'卷帘门已关不证明实际关门者'}]};
+ const unrelated={'characterActions.0.result':'四瓶摆好了，但关门者依旧未知'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[],evidence).join(' '))
+   .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ expect(chapter.characterActions[0].result).toBe('四瓶摆上了柜台');
+});
+it('decodes verified JSON-escaped audit anchors before checking an exact local result patch',()=>{
+ const chapter={content:'先问周德海。随后当着众人拧开瓶盖。',characterActions:[{
+  action:'她问："药是谁灌进瓶里的？"',result:'老板沉默，仍没有答复'}]};
+ const quote=JSON.stringify(chapter.characterActions[0].action).slice(1,-1);
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+   actionEvidence:quote,resultEvidence:chapter.characterActions[0].result,
+   reason:'质问并未使老板承认事实'}]};
+ const corrected={'characterActions.0.action':'她问："你把药灌进旧饮料瓶卖过吗？"'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,corrected,[],evidence)).toEqual([]);
+ const wrong={'characterActions.0.result':'老板仍然沉默，改口无从证明'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[],evidence)).toEqual([]);
+});
+it('targets the already-completed prior-chapter outcome instead of repeating it in the next chapter',()=>{
+ const acceptedPrior='前一章五个大队已签联名，书记改口，同意放映队自负盈亏继续留下';
+ const chapter={
+  content:'我把联名纸重新压回箱底。那张纸保住了放映队，队里的人都松了口气。',
+  scenes:[{outcome:'重新收起联名纸让放映队得以留下'}],
+  characterActions:[{action:'把联名纸重新压回箱底',result:'因此让放映队留下'}],
+  characterStates:[{stateAfter:'放映队因本章的收纸动作得以保留'}],
+ };
+ const proof={gaps:[{
+  actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'把联名纸重新压回箱底',resultEvidence:'因此让放映队留下',
+  reason:'前章已完成留队，本章只能产生保管或承担后续代价的新增结果',
+ }]};
+ const wrong={content:chapter.content.replace('重新压回','仔细压回')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,wrong,[],proof).join('；'))
+  .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ const valid={
+  content:'我把联名纸重新压回箱底。留队早在前一章由联名和书记改口决定，这一章我付出攒下的结婚钱垫付片子。',
+  'scenes.0.outcome':'联名纸归档，我用个人积蓄承担放映队继续运转的费用',
+  'characterActions.0.result':'把联名纸归档；本章只产生个人垫付片子的实际代价',
+  'characterStates.0.stateAfter':'放映队继续运转，个人积蓄已用于片子费用',
+ };
+ expect(outlineFactPatchSynchronizationIssues(chapter,valid,[],proof)).toEqual([]);
+ const next=applyOutlineFactPatch(chapter,valid);
+ expect(next.content).toContain('留队早在前一章由联名和书记改口决定');
+ expect(next.characterActions[0].result).not.toContain('因此让放映队留下');
+ expect(next.scenes[0].outcome).toContain('个人积蓄');
+ expect(acceptedPrior).toContain('前一章');
+ expect(chapter.characterActions[0].result).toBe('因此让放映队留下');
+});
+
 it('rejects nonempty but unchanged patches before semantic re-review, including reordered object keys',()=>{
  const before=structuredClone(original);
  for(const patch of [{content:original.content},{'characterActions.0.result':original.characterActions[0].result},
@@ -55,4 +154,109 @@ it('stops an unchanged patch at the live preflight boundary without spending a s
  expect(()=>outlineFactPatchSynchronizationIssues(original,{content:original.content},rejection.defects)).toThrow('没有实际变化');
  expect(facts).toBe(1);expect(actions).toBe(1);
  expect(rejection.defects).toEqual(['资料未取得却声称已提交']);
+});
+
+
+const conflictingContent = '安全员掏出昨天下午发在剧组工作群里的报修消息，卡扣照片、型号、建议停机，一条不少，底下没人回。'
+  + '他说他先报给了沈曼助理，助理私聊回他一句“沈老师知道了，今天这条必须过，明天换”。'
+  + '陈总转头就问他：工作群里那条报修，底下那条回复是谁留的？'
+  + '安全员把手机举高。回复就挂在报修底下，头像是沈曼助理。'
+  + '沈曼承认是她让助理在群里回复“今天拍完、明天换”。'
+  + '导演先签安全条款，威亚组、安全员和替身随后签字。';
+const conflictingSceneOutcome = '安全员翻出工作群报修消息与另行收到的助理私聊回复“今天必须过、明天换”。';
+const conflictingChapter = {
+  order: 2,
+  title: '第3章',
+  content: conflictingContent,
+  scenes: JSON.stringify({ scenes: [{ outcome: conflictingSceneOutcome }] }),
+};
+const groupReplyConflict = JSON.stringify({
+  location1: '本批·第3章.content',
+  quote1: conflictingContent,
+  location2: '本批·第3章.scenes[0].outcome',
+  quote2: conflictingSceneOutcome,
+  conflict: '第3章content中安全员先称工作群报修消息“底下没人回”，后文又写“回复就挂在报修底下，头像是沈曼助理”；第3章scenes[0].outcome则称安全员另行收到的是助理私聊回复。两处关于同一群消息回复状态的原文无法同时成立。',
+});
+
+it('rejects an unrelated edit when a long quoted field contains the actual contradiction', () => {
+ const unrelated = {
+  content: conflictingContent.replace('卡扣照片、型号、建议停机', '卡扣照片、具体型号、建议停机'),
+ };
+ const issues = outlineFactPatchSynchronizationIssues(conflictingChapter, unrelated, [groupReplyConflict]);
+ expect(issues.join(' ')).toContain('没有直接修改冲突描述中的原始断言');
+});
+
+it('accepts a local edit to the contradictory assertion while preserving separate private-message and signature facts', () => {
+ const patch = {
+  content: conflictingContent.replace('底下没人回', '底下有一条群回复'),
+ };
+ expect(outlineFactPatchSynchronizationIssues(conflictingChapter, patch, [groupReplyConflict])).toEqual([]);
+ const repaired = applyOutlineFactPatch(conflictingChapter, patch);
+ expect(repaired.content).toContain('底下有一条群回复');
+ expect(repaired.content).toContain('助理私聊回他一句');
+ expect(repaired.content).toContain('沈曼承认是她让助理在群里回复');
+ expect(repaired.content).toContain('导演先签安全条款');
+ expect(repaired.scenes).toBe(conflictingChapter.scenes);
+ expect(conflictingChapter.content).toBe(conflictingContent);
+});
+
+it('does not treat a private-message rewrite as a fix for the group-message contradiction', () => {
+ const unrelatedChannelEdit = {
+  content: conflictingContent.replace('助理私聊回他一句', '助理通过群消息回他一句'),
+ };
+ expect(outlineFactPatchSynchronizationIssues(conflictingChapter, unrelatedChannelEdit, [groupReplyConflict]).join(' '))
+  .toContain('没有直接修改冲突描述中的原始断言');
+});
+
+
+it('does not accept a fish-count repair that leaves the opposite count in dialogue or action fields',()=>{
+ const chapter={
+  content:'三条翻肚的草鱼，两条已经硬了。后来又死了两条，前后四条。我把四条死鱼捞进一只空桶。我说：我就自己死了五条。',
+  characterActions:[{action:'把五条死鱼捞进空桶，挑出一条去找老葛',result:'老葛答应开市再核对'}],
+ };
+ const issue=JSON.stringify({
+  location1:'本批·第3章.content',quote1:chapter.content,
+  location2:'本批·第3章.characterActions[0].action',quote2:chapter.characterActions[0].action,
+  conflict:'content写“前后四条”“我把四条死鱼捞进一只空桶”，台词却说“我就自己死了五条”，characterActions写“把五条死鱼捞进空桶”。同批死鱼只有四条。',
+  calculation:'前后共4条，与5条相差1条。',
+ });
+ const dialogueOnly={content:chapter.content.replace('我就自己死了五条','我就自己死了四条')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,dialogueOnly,[issue]).join('；'))
+   .toContain('数量矛盾仍在多个已举证字段中并存');
+ const actionOnly={'characterActions.0.action':'把四条死鱼捞进空桶，挑出一条去找老葛'};
+ expect(outlineFactPatchSynchronizationIssues(chapter,actionOnly,[issue]).join('；'))
+   .toContain('数量矛盾仍在多个已举证字段中并存');
+ const complete={...dialogueOnly,...actionOnly};
+ expect(outlineFactPatchSynchronizationIssues(chapter,complete,[issue])).toEqual([]);
+ const corrected=applyOutlineFactPatch(chapter,complete);
+ expect(corrected.content).toContain('死了四条');
+ expect(corrected.characterActions[0].action).toContain('四条死鱼');
+ expect(chapter.content).toContain('死了五条');
+});
+
+it('completes only a counted action assertion explicitly cited by an independent arithmetic conflict',()=>{
+ const chapter={content:'三条翻肚鱼里两条已经死了，剩下一条后来也死了；另外一条后半夜死了，前后四条。我把四条死鱼捞进桶里。我说我就自己死了五条。',
+  characterActions:[{action:'把五条死鱼捞进空桶，等老葛检查',result:'他同意来查看'}],
+  hook:'明天还能卖鱼吗'};
+ const defect=JSON.stringify({location1:'本批·第3章.content',quote1:chapter.content,
+  location2:'本批·第3章.characterActions[0].action',quote2:chapter.characterActions[0].action,
+  conflict:'content写“前后四条”“我把四条死鱼捞进桶里”，但台词写“我就自己死了五条”，人物行动又写“把五条死鱼捞进空桶”。',
+  calculation:'三条中的两条加第三条共3，随后死1条，共4条。'});
+ const proposal={content:chapter.content.replace('我就自己死了五条','我就自己死了四条')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,proposal,[defect]).length).toBeGreaterThan(0);
+ const completed=alignOutlineFactCountProjections(chapter,proposal,[defect]);
+ expect(completed).toMatchObject({...proposal,'characterActions.0.action':'把四条死鱼捞进空桶，等老葛检查'});
+ expect(outlineFactPatchSynchronizationIssues(chapter,completed,[defect])).toEqual([]);
+ expect(applyOutlineFactPatch(chapter,completed).hook).toBe(chapter.hook);
+ expect(chapter.characterActions[0].action).toContain('五条死鱼');
+});
+it('never guesses counts without an explicit total, a correct in-source variant and a prior model correction',()=>{
+ const chapter={content:'前后四条。我说死了五条。',characterActions:[{action:'把五条死鱼捞进空桶'}]};
+ const conflict={location1:'本批.content',quote1:chapter.content,location2:'本批.action',quote2:chapter.characterActions[0].action,
+  conflict:'“前后四条”与“死了五条”“把五条死鱼捞进空桶”互斥。'};
+ const patch={content:chapter.content.replace('我说','我曾说')};
+ expect(alignOutlineFactCountProjections(chapter,patch,[JSON.stringify({...conflict,calculation:'相差1条'})])).toEqual(patch);
+ expect(alignOutlineFactCountProjections(chapter,patch,[JSON.stringify({...conflict,calculation:'共4条'})])).toEqual(patch);
+ const corrected={content:chapter.content.replace('死了五条','死了四条')};
+ expect(alignOutlineFactCountProjections(chapter,corrected,[JSON.stringify({...conflict,calculation:'没有足够算式'})])).toEqual(corrected);
 });

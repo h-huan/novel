@@ -3,17 +3,16 @@
  *
  * 实现：
  * - PromptChain 链定义加载与校验
- * - ChainExecutor 顺序执行/条件分支/重试逻辑
- * - Handlebars 模板变量注入
+ * - 当前两条固定长篇链的 Prompt 节点顺序执行和质量拒绝传递
+ * - 经唯一 PromptRegistry 的模板变量注入
  * - 执行上下文管理
  *
- * 设计基于 Prompt Chain 架构文档的引擎层规范
+ * 仅由当前固定长篇基础与章纲编排消费，具体业务约束以唯一执行标准为准
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { PromptRegistryService } from './prompt-registry.service';
 import { RealLLMService } from './real-llm.service';
-import { CHAPTER_WORD_RANGE } from '../../shared/src';
-import { gateFailureLabel, isGateRejection, GateRejectionError, classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
+import { gateFailureLabel, isGateRejection, GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';
 import { describeChapterResponsibilityPlan } from '../../shared/src/chapter-responsibility-review';
 import { jsonrepair } from 'jsonrepair';
 import { standardScene } from '../routing/scenario-taxonomy';
@@ -25,24 +24,7 @@ import {
   NodeResult,
   ChainError,
   ChainState,
-  NodeType,
 } from './chain.types';
-
-/**
- * Chinese prose is close to one token per character for the configured models.
- * Keep a small completion margin, but never advertise enough budget for a
- * second full chapter when the chapter contract is 3000–5000 words.
- */
-export const chapterSynthesisMaxTokens = (targetWords: number): number => (
-  Math.min(6_000, Math.max(3_600, Math.ceil(targetWords * 1.15)))
-);
-
-/** 节点执行上下文（运行时） */
-interface NodeExecutionContext {
-  node: ChainNode;
-  resolvedInput: Record<string, unknown>;
-  retryCount: number;
-}
 
 interface PromptNodeExecutionResult {
   output: unknown;
@@ -52,9 +34,6 @@ interface PromptNodeExecutionResult {
 @Injectable()
 export class ChainEngineService {
   private readonly logger = new Logger(ChainEngineService.name);
-
-  /** 模拟节点延迟（开发用） */
-  private readonly mockNodeDelay = 100;
 
   constructor(
     private readonly promptRegistry: PromptRegistryService,
@@ -92,13 +71,6 @@ export class ChainEngineService {
         // 进度回调：节点开始
         onProgress?.(i, node.id, 'started');
 
-        // 检查分支跳转标记
-        if (context.metadata['_branch_jump'] && context.metadata['_branch_jump'] !== node.id) {
-          continue;
-        }
-        // 清除跳转标记
-        delete context.metadata['_branch_jump'];
-
         const nodeResult = await this.executeNode(node, context, chain);
         nodeResults.push(nodeResult);
 
@@ -109,11 +81,6 @@ export class ChainEngineService {
         context.timestamps[node.id] = new Date();
         context.nodeOutputs[node.id] = nodeResult.output;
 
-        // 将节点输出映射到全局变量
-        if (nodeResult.status === 'success' && nodeResult.output) {
-          this.applyOutputMapping(node, nodeResult.output, context);
-        }
-
         // 处理失败情况
         if (nodeResult.status === 'failed') {
           errors.push({
@@ -123,31 +90,16 @@ export class ChainEngineService {
             recoverable: false,
           });
 
-          // Quality-rejected dependencies are unusable even in a chain that
-          // permits ordinary optional-node failures. Preserve the upstream
-          // report and stop before downstream generation invents a substitute.
-          if (chain.config.strictMode || nodeResult.gateReport) {
-            overallState = 'failed';
-            break;
-          }
-
+          // Every node in the fixed sequential production chain is required.
+          // Preserve the original node failure evidence and do not run successors.
+          overallState = 'failed';
+          break;
         }
 
-      }
-
-      // 检查是否有分支跳转
-      if (context.metadata['_branch_jump']) {
-        const targetId = context.metadata['_branch_jump'] as string;
-        const targetNode = chain.nodes.find((n) => n.id === targetId);
-        if (targetNode) {
-          this.logger.log(`[${chain.id}] 条件分支跳转到: ${targetId}`);
-        }
       }
 
       // 汇总结果
-      if (overallState === 'running') {
-        overallState = errors.length > 0 ? 'partial' : 'completed';
-      }
+      if (overallState === 'running') overallState = 'completed';
 
       const endTime = new Date();
       const totalLatency = endTime.getTime() - startTime.getTime();
@@ -194,7 +146,7 @@ export class ChainEngineService {
   }
 
   /**
-   * 执行单个节点（支持重试逻辑）
+   * 固定规划节点单次执行；有新证据的恢复由上层共享预算控制
    */
   async executeNode(
     node: ChainNode,
@@ -205,115 +157,31 @@ export class ChainEngineService {
     const nodeLog = `[${node.chainId}/${node.id}]`;
     this.logger.log(`${nodeLog} 开始执行`);
 
-    let currentRetryCount = 0;
-    // A generic node retry has no validator feedback and would replay the same
-    // prompt. Transport recovery is already handled once inside RealLLMService;
-    // content corrections belong to the evidence-aware business workflow.
-    const maxRetries = 0;
-    let lastOutput: unknown = null;
-    let lastError: string | null = null;
-    // Gate 拒绝的结构化报告：Error 实例跨节点边界会退化成字符串，报告必须单独留住，
-    // 否则上游只能看到「缺少世界观/volumes 为空」这类下游症状，真实成因被吞掉。
-    let lastGateReport: GateFailureReport | undefined;
-
-    while (currentRetryCount <= maxRetries) {
-      try {
-        // 1. 输入映射：从上下文提取本节点需要的变量
-        const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
-
-        // 2. 检查是否跳过
-        if (node.skipOnEmptyInput && this.isInputEmpty(resolvedInput)) {
-          this.logger.log(`${nodeLog} 输入为空，跳过此节点`);
-          return {
-            nodeId: node.id,
-            nodeName: node.name,
-            status: 'skipped',
-            output: null,
-            latency: Date.now() - startTime,
-            retryCount: 0,
-            timestamp: new Date(),
-          };
-        }
-
-        // 3. 根据节点类型执行
-        let output: unknown;
-        let runId: string | undefined;
-
-        switch (node.type) {
-          case 'prompt': {
-            const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
-            output = promptResult.output;
-            runId = promptResult.runId;
-            break;
-          }
-          case 'transform':
-            output = await this.executeTransformNode(node, resolvedInput, context);
-            break;
-          case 'condition':
-            output = this.executeConditionNode(node, resolvedInput, context);
-            break;
-          default: {
-            const promptResult = await this.executePromptNode(node, resolvedInput, context, currentRetryCount, chain);
-            output = promptResult.output;
-            runId = promptResult.runId;
-            break;
-          }
-        }
-
-        lastOutput = output;
-
-        return {
-          nodeId: node.id,
-          nodeName: node.name,
-          status: 'success',
-          output,
-          ...(runId ? { runId } : {}),
-          latency: Date.now() - startTime,
-          retryCount: currentRetryCount,
-          timestamp: new Date(),
-        };
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-        if (isGateRejection(error)) {
-          lastGateReport = error.report;
-          this.logger.error(`${nodeLog} 被质量 Gate 拒绝（${gateFailureLabel(error.report)}）: ${lastError}`);
-        } else {
-          this.logger.error(`${nodeLog} 执行错误: ${lastError}`);
-        }
-
-        if (currentRetryCount < maxRetries) {
-          currentRetryCount++;
-          this.logger.warn(`${nodeLog} 第${currentRetryCount}次重试`);
-          await this.delay(500); // 重试前短暂等待
-          continue;
-        }
-
-        return {
-          nodeId: node.id,
-          nodeName: node.name,
-          status: 'failed',
-          output: lastOutput,
-          error: lastError,
-          gateReport: lastGateReport,
-          latency: Date.now() - startTime,
-          retryCount: currentRetryCount,
-          timestamp: new Date(),
-        };
+    // Generic node retries would resend the same prompt with no new evidence.
+    // RealLLM owns transport recovery; task-level semantic fixes own their own
+    // verified and bounded repair budgets. This engine makes one attempt.
+    try {
+      const resolvedInput = this.resolveInputMapping(node.inputMapping, context);
+      const { output, runId } = await this.executePromptNode(node, resolvedInput, context, chain);
+      return {
+        nodeId: node.id, nodeName: node.name, status: 'success', output,
+        ...(runId ? { runId } : {}),
+        latency: Date.now() - startTime, retryCount: 0, timestamp: new Date(),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const gateReport = isGateRejection(error) ? error.report : undefined;
+      if (gateReport) {
+        this.logger.error(`${nodeLog} 被质量 Gate 拒绝（${gateFailureLabel(gateReport)}）: ${message}`);
+      } else {
+        this.logger.error(`${nodeLog} 执行错误: ${message}`);
       }
+      return {
+        nodeId: node.id, nodeName: node.name, status: 'failed', output: null,
+        error: message, gateReport,
+        latency: Date.now() - startTime, retryCount: 0, timestamp: new Date(),
+      };
     }
-
-    // 不应到达这里
-    return {
-      nodeId: node.id,
-      nodeName: node.name,
-      status: 'failed',
-      output: lastOutput,
-      error: lastError || '达到最大重试次数',
-      gateReport: lastGateReport,
-      latency: Date.now() - startTime,
-      retryCount: currentRetryCount,
-      timestamp: new Date(),
-    };
   }
 
   // ==================== Prompt 节点执行 ====================
@@ -328,23 +196,15 @@ export class ChainEngineService {
     node: ChainNode,
     input: Record<string, unknown>,
     context: ExecutionContext,
-    retryCount: number,
     chain: PromptChain,
   ): Promise<PromptNodeExecutionResult> {
-    // 获取并渲染 Prompt 模板
-    let prompt: string;
-    if (node.promptTemplateId) {
-      prompt = this.promptRegistry.render(node.promptTemplateId, {
+    // 仅从当前注册模板渲染本节点 Prompt
+    const prompt = this.promptRegistry.render(node.promptTemplateId, {
         ...context.variables,
         ...input,
         user_input: { ...(context.variables['user_input'] as Record<string, unknown> || {}) },
         chain_output: { ...context.nodeOutputs },
-        retry_count: retryCount,
       });
-    } else {
-      // 无模板 ID 时，使用输入拼接
-      prompt = JSON.stringify(input, null, 2);
-    }
 
     // 调用 LLM
     const response = await this.llm.generate({
@@ -357,7 +217,7 @@ export class ChainEngineService {
       timeout: node.timeout * 1000,
       scenario: node.chainId || chain.id,
       // 项目归属必须显式声明，不能只靠请求上下文兜底：
-      // 三条链都由后台任务执行（长篇创建、模板执行），ALS 里没有项目 id，
+      // 两条固定长篇链由后台任务执行，ALS 里不保证有项目 id，
       // 缺了它 beginRun 拿不到创作宪法，埋点也只进平台级（静默空值）。
       // stepKey 走唯一别名表 standardScene，使质量阶段 / 中文标签 / 归属判定同口径；
       // 平台级链路（context.projectId 为空）保持原样，不强行归属。
@@ -365,8 +225,7 @@ export class ChainEngineService {
         stepKey: standardScene(node.chainId || chain.id),
         ...(context.projectId ? { projectId: context.projectId } : {}),
       },
-      retryCount,
-      // 本引擎的节点输出契约就是 JSON（三个链的每个节点都要求"输出合法JSON"）。
+      // 当前两条固定长篇链的所有生产 Prompt 节点均要求合法 JSON。
       // 显式声明 JSON 模式后，real-llm 会在 finish_reason=length（输出被截断）时
       // 用同一模型、同一 prompt、更大输出上限重发；这是同模型扩容，不是降级。
       responseFormat: 'json_object',
@@ -378,18 +237,17 @@ export class ChainEngineService {
     // 尝试解析 JSON。解析失败必须留下可诊断证据（长度/首尾片段/finishReason），
     // 否则调用方只会看到"缺少某字段"，真实故障（截断/非法 JSON/字段名不符）被掩盖。
     const parsedOutput = this.tryParseJSON(response.content);
-    if (typeof parsedOutput !== 'object' || parsedOutput === null
-      || (['long-novel-flexible-outline', 'long-novel-init-foundation'].includes(chain.id) && Array.isArray(parsedOutput))) {
+    if (typeof parsedOutput !== 'object' || parsedOutput === null || Array.isArray(parsedOutput)) {
       const raw = typeof response.content === 'string' ? response.content : String(response.content);
       this.logger.error(
-        `[${chain.id}/${node.id}] LLM 输出不是合法 JSON：contentLength=${raw.length}, `
+        `[${chain.id}/${node.id}] LLM 输出不是合法 JSON 对象：contentLength=${raw.length}, `
         + `finishReason=${response.finishReason ?? 'unknown'}, `
         + `head=${JSON.stringify(raw.slice(0, 300))}, tail=${JSON.stringify(raw.slice(-300))}`,
       );
-      if (['long-novel-flexible-outline', 'long-novel-init-foundation'].includes(chain.id)) {
-        throw new GateRejectionError(classifyGateFailure({ evaluationStatus: 'not_evaluated', topic: 'quality_gate', gateStatus: 'not_evaluated',
-          buckets: { review_incomplete: [`上游节点${node.id}未返回合法JSON对象，禁止将原文当作已完成结构继续下游`] } }), raw);
-      }
+      throw new GateRejectionError(classifyGateFailure({
+        evaluationStatus: 'not_evaluated', topic: 'quality_gate', gateStatus: 'not_evaluated',
+        buckets: { review_incomplete: [`上游节点${node.id}未返回合法JSON对象，禁止将原文当作已完成结构继续下游`] },
+      }), raw);
     }
     if (node.chainId === 'long-novel-flexible-outline' && node.id === 'node_1_analysis') {
       const issues = describeChapterResponsibilityPlan(parsedOutput, context.variables['user_input'] && (context.variables['user_input'] as any).chapterLimit);
@@ -399,207 +257,6 @@ export class ChainEngineService {
       }), response.content);
     }
     return { output: parsedOutput, ...(response.runId ? { runId: response.runId } : {}) };
-  }
-
-  /**
-   * 执行 Transform 节点（非 LLM 处理节点）
-   * 负责数据转换、上下文装配、结果合成
-   */
-  private async executeTransformNode(
-    node: ChainNode,
-    input: Record<string, unknown>,
-    context: ExecutionContext,
-  ): Promise<unknown> {
-    this.logger.log(`[${node.id}] Transform 节点执行`);
-
-    // ---- 节点0：上下文装配 ----
-    if (node.id === 'node_0_context_assembly') {
-      const outline = input['outline'] as any;
-      const chapterContext = input['chapterContext'] as any;
-      const chapterNumber = input['chapterNumber'] as number;
-      const chapterOutline = input['chapterOutline'] as any;
-
-      // 从 context.variables 里取 RAG 增强的上下文（如果有的话）
-      const ragContext = context.variables['ragContext'] as any;
-      const characterStates = context.variables['characterStates'] as any[];
-      const foreshadowingStatus = context.variables['foreshadowingStatus'] as any[];
-
-      const assembled = {
-        outline,
-        chapterContext,
-        chapterNumber,
-        chapterOutline,
-        // RAG 上下文：前文摘要、角色最新状态、伏笔状态
-        ragContext: ragContext || null,
-        characterStates: characterStates || [],
-        foreshadowingStatus: foreshadowingStatus || [],
-        // 装配时间戳（用于调试）
-        assembledAt: new Date().toISOString(),
-      };
-
-      this.logger.log(`[node_0] 上下文装配完成：章节${chapterNumber}，角色${characterStates?.length || 0}个，伏笔${foreshadowingStatus?.length || 0}条`);
-      return assembled;
-    }
-
-    // ---- 节点9：正文合成 ----
-    if (node.id === 'node_9_chapter_synthesis') {
-      // input 里的字段来自 inputMapping，可能是对象也可能是字符串
-      const extractText = (val: unknown): string => {
-        if (typeof val === 'string') return val;
-        if (val && typeof val === 'object') {
-          // 尝试取常见文本字段
-          const obj = val as Record<string, unknown>;
-          return (obj['actionText'] || obj['reversalText'] || obj['costText'] || obj['hookText'] || obj['text'] || obj['content'] || JSON.stringify(val)) as string;
-        }
-        return String(val || '');
-      };
-
-      const goalText = extractText(input['goal']);
-      const triggerText = extractText(input['trigger']);
-      const actionText = extractText(input['action']);
-      const obstacleText = extractText(input['obstacle']);
-      const misjudgeText = extractText(input['misjudge']);
-      const reversalText = extractText(input['reversal']);
-      const costText = extractText(input['cost']);
-      const hookText = extractText(input['hook']);
-      const targetWords = Number(input['targetWords']);
-      if (!Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_RANGE.min || targetWords > CHAPTER_WORD_RANGE.max) {
-        throw new Error(`本章缺少有效的${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字动态目标，拒绝生成正文`);
-      }
-      const countNarrativeWords = (text: string) => {
-        const chinese = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-        const english = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ').split(/\s+/).filter(token => /[a-zA-Z]/.test(token)).length;
-        return chinese + english;
-      };
-      const outputMaxTokens = chapterSynthesisMaxTokens(targetWords);
-
-      // 将8步输出拼接为完整章节正文
-      const sections: string[] = [];
-
-      if (goalText) sections.push(goalText);
-      if (triggerText) sections.push(triggerText);
-      if (actionText) sections.push(actionText);
-      if (obstacleText) sections.push(`\n${obstacleText}`);
-      if (misjudgeText) sections.push(`\n${misjudgeText}`);
-      if (reversalText) sections.push(`\n${reversalText}`);
-      if (costText) sections.push(`\n${costText}`);
-      if (hookText) sections.push(`\n${hookText}`);
-
-      const fullText = sections.join('\n\n').trim();
-
-      // 通过 LLM 将拼接的8步文本润色为连贯、有风格的章节正文
-      let polishedText = fullText;
-      try {
-        const sceneContext = typeof context.variables['chapterFunction'] === 'string' ? context.variables['chapterFunction'] : '';
-        const chapterOutline = String(input['chapterOutline'] || context.variables['chapterOutline'] || '').trim();
-        const chapterContext = input['chapterContext'] || context.variables['chapterContext'];
-        if (!chapterOutline || chapterOutline.length < 20) {
-          throw new Error('本章缺少可执行的详细大纲，拒绝用八步法自行编造故事');
-        }
-        const serializedContext = typeof chapterContext === 'string'
-          ? chapterContext
-          : JSON.stringify(chapterContext || {});
-        const chapterContract = `【本章不可偏离的创作合同】\n章节：第${input['chapterNumber'] || context.variables['chapterNumber'] || ''}章\n详细大纲：\n${chapterOutline}\n\n确认的故事上下文（人物、世界观、时间线、前文与伏笔）：\n${serializedContext}\n\n合同执行规则：正文必须把详细大纲中的核心事件、冲突、人物行动和结尾钩子写成实际发生的叙事；不得用同主题的另一件事替代，不得引入合同外的主线人物、设定、案件或结局。若八步草稿与合同冲突，以合同为准并重写草稿。`;
-        const stylePrompt = `你是中文小说作者。请将以下8步草稿扩写并重写为连贯、完整、可直接阅读的章节正文。不要分段加小标题，自然融合为连续叙事。
-本章动态目标为${targetWords}字；最终正文必须在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字之间。不得概述、压缩、跳过场景或以提纲代替叙事；请用事件推进、行动、对话、细节和心理变化自然达到篇幅。只输出正文，不输出字数、说明或JSON。
-
-要求：
-1. 正文必须服从已确认的大纲、角色状态、世界观规则、时间线和伏笔；八步法只作为内部骨架，正文不得出现步骤标识，也不得为了文风改写既有事实。
-2. 使用自然短段落而非整齐分节；句式、段长、信息密度要随人物和场景变化，禁止排比、对仗、总结式升华和模板化收束。
-3. 具体不空泛：让情节通过可观察的动作、物件、声音、光线、气味、触感和即时选择发生；少用“紧张”“悲伤”“他很愤怒”这类结论代替现场。
-4. 角色必须像独立的人：说话节奏、词汇、回避方式、注意的东西和行动逻辑都要从其已知设定、立场和经历推出。不要让所有人语气相同，也不要为制造差异凭空增加设定。
-5. 留白而非讲解：不要替读者解释每个动机、因果和情绪。允许答非所问、话说半截、沉默、误会、被忽略的物件和没有立刻追问的细节，让读者自行连接含义。
-6. 不要过度工整，但“毛边”只能来自人物的犹豫、偏见、临时选择或信息差；不得偏离本章剧情任务、破坏角色逻辑或跳过应有的关键事件。
-7. 开头尽快进入事件，对话必须带有各自目的和潜台词，避免角色轮流完整解释；结尾保留与本章大纲一致的钩子或未解信息。
-8. 本章功能是：${sceneContext}。确保剧情推进匹配此功能定位。
-
-${chapterContract}
-
-草稿内容：
-${fullText}`;
-
-        const llmResp = await this.llm.generate({
-          prompt: stylePrompt,
-          metrics: { projectId: context.projectId, stepKey: 'chapter_synthesis' },
-          scenario: 'chapter_synthesis',
-          temperature: 0.7,
-          maxTokens: outputMaxTokens,
-        });
-        if (!llmResp?.content || llmResp.content.length <= fullText.length * 0.3) {
-          throw new Error('章节合成结果为空或明显不完整');
-        }
-        polishedText = llmResp.content;
-        const generatedWords = countNarrativeWords(polishedText);
-        if (generatedWords < CHAPTER_WORD_RANGE.min) {
-          const expansion = await this.llm.generate({
-            prompt: `以下章节初稿只有${generatedWords}字，未达到本章${targetWords}字的写作合同。请在不改变既有角色、世界观规则、事件顺序、时间线、伏笔和结局钩子的前提下，输出一篇完整重写后的正文，不是续写片段。必须通过补足可感知的行动、场景转换、人物对话、细节、心理与因果推进，将全文控制在${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，目标约${targetWords}字。
-人物不许同声同气：让每人按自己的立场、习惯与信息量说话、回避或行动；不要把动机和真相替读者解释完，用停顿、错答、物件、未被追问的细节保留推想空间。允许节奏有毛边，但不得偏离章节大纲或制造新设定。只输出正文，不要解释。\n\n${chapterContract}\n\n初稿：\n${polishedText}`,
-            metrics: { projectId: context.projectId, stepKey: 'chapter_synthesis' },
-            scenario: 'chapter_synthesis',
-            temperature: 0.7,
-            maxTokens: outputMaxTokens,
-          });
-          if (!expansion?.content) throw new Error('章节补写未返回正文');
-          polishedText = expansion.content;
-        }
-        const expandedWords = countNarrativeWords(polishedText);
-        if (expandedWords > CHAPTER_WORD_RANGE.max) {
-          const compression = await this.llm.generate({
-            prompt: `以下完整章节为${expandedWords}字，超过本章${targetWords}字的写作合同。请在不删除详细大纲要求的核心事件、冲突、人物行动、因果、伏笔和结尾钩子的前提下，输出一篇完整精炼重写后的正文，不是摘要、删节片段或续写。删去重复解释、同义反复和无效场景，保留可感知的动作、对话和关键细节。全文必须严格为${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字，目标约${targetWords}字。只输出正文，不要解释。\n\n${chapterContract}\n\n待精炼全文：\n${polishedText}`,
-            metrics: { projectId: context.projectId, stepKey: 'chapter_synthesis' },
-            scenario: 'chapter_synthesis',
-            temperature: 0.55,
-            maxTokens: outputMaxTokens,
-          });
-          if (!compression?.content) throw new Error('章节精炼未返回正文');
-          polishedText = compression.content;
-        }
-        const finalWords = countNarrativeWords(polishedText);
-        if (finalWords < CHAPTER_WORD_RANGE.min || finalWords > CHAPTER_WORD_RANGE.max) {
-          throw new Error(`章节合成后的正文为${finalWords}字，不符合${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字要求`);
-        }
-      } catch (e) {
-        throw new Error(`章节合成失败，未使用原始步骤拼接内容降级：${e instanceof Error ? e.message : String(e)}`);
-      }
-
-      this.logger.log(`[node_9] 正文合成完成：原始 ${fullText.length} → 润色后 ${polishedText.length} 字符`);
-
-      return {
-        fullText: polishedText,
-        wordCount: polishedText.length,
-        stepsUsed: 8,
-      };
-    }
-
-    // ---- 其他 Transform 节点：默认透传 ----
-    this.logger.debug(`[${node.id}] Transform 节点透传`);
-    return input;
-  }
-
-  /**
-   * 执行 Condition 节点（条件分支）
-   */
-  private executeConditionNode(
-    node: ChainNode,
-    input: Record<string, unknown>,
-    context: ExecutionContext,
-  ): unknown {
-    this.logger.debug(`[${node.id}] Condition 节点执行`);
-
-    if (node.branches && node.branches.length > 0) {
-      // 简单条件评估（当前选择第一个匹配的分支）
-      const matchedBranch = node.branches[0];
-      context.metadata['_branch_jump'] = matchedBranch.targetNodeId;
-      this.logger.log(`[${node.id}] 条件分支: ${matchedBranch.description} → ${matchedBranch.targetNodeId}`);
-
-      return {
-        matched: true,
-        targetNodeId: matchedBranch.targetNodeId,
-        description: matchedBranch.description,
-      };
-    }
-
-    return { matched: false };
   }
 
   // ==================== 辅助方法 ====================
@@ -618,10 +275,8 @@ ${fullText}`;
         ...userInput,
       },
       nodeOutputs: {},
-      retryCounters: {},
       startTime: new Date(),
       timestamps: {},
-      metadata: {},
       // 项目归属：项目内节点的埋点/宪法注入必须能定位到这本书；平台级链路（无 projectId）保持 undefined。
       projectId: typeof userInput.projectId === 'string' ? userInput.projectId : undefined,
     };
@@ -666,53 +321,6 @@ ${fullText}`;
     return current;
   }
 
-  /**
-   * 将节点输出映射到上下文变量
-   */
-  private applyOutputMapping(
-    node: ChainNode,
-    output: unknown,
-    context: ExecutionContext,
-  ): void {
-    if (typeof output !== 'object' || output === null) return;
-
-    const outputObj = output as Record<string, unknown>;
-    // 自动映射：node.id → nodeOutputs[node.id]
-    context.nodeOutputs[node.id] = output;
-
-    // 按 outputMapping 显式映射
-    for (const [key, path] of Object.entries(node.outputMapping)) {
-      const value = outputObj[key];
-      if (value !== undefined) {
-        this.setPath(context, `chain_output.${path}`, value);
-      }
-    }
-  }
-
-  /**
-   * 按路径设置变量值
-   */
-  private setPath(context: ExecutionContext, path: string, value: unknown): void {
-    const parts = path.split('.');
-    const varName = parts[0];
-
-    if (!context.variables[varName]) {
-      context.variables[varName] = {};
-    }
-
-    let current = context.variables[varName] as Record<string, unknown>;
-    for (let i = 1; i < parts.length - 1; i++) {
-      if (!current[parts[i]]) {
-        current[parts[i]] = {};
-      }
-      current = current[parts[i]] as Record<string, unknown>;
-    }
-
-    if (parts.length > 1) {
-      current[parts[parts.length - 1]] = value;
-    }
-  }
-
   /** 保持调用方配置温度；重复运行不得靠升温碰运气。 */
   private calculateTemperature(baseTemp: number): number {
     return Math.max(0.2, Math.min(1.2, baseTemp));
@@ -748,17 +356,5 @@ ${fullText}`;
     return text;
   }
 
-  /**
-   * 检查输入是否为空
-   */
-  private isInputEmpty(input: Record<string, unknown>): boolean {
-    return Object.keys(input).length === 0 ||
-      Object.values(input).every(
-        (v) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0),
-      );
-  }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }

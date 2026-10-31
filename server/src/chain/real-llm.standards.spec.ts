@@ -5,6 +5,24 @@ import { activeSystemWorkflowRules, SYSTEM_WORKFLOW_RULESET_VERSION } from '../m
 
 afterEach(() => standardDirectiveCache.clear());
 
+
+it('uses bounded reasoning only for literal causal-plan citation repair, not creative or independent quality Gates', () => {
+  const service = new RealLLMService({} as any);
+  const oldEffort = process.env.LLM_REASONING_EFFORT;
+  try {
+    delete process.env.LLM_REASONING_EFFORT;
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBe('low');
+    for (const step of ['idea_premise_pool_generation','idea_premise_selection',
+      'idea_premise_source_drift_review','idea_premise_overlap_review','idea_card_structure']) {
+      expect((service as any).resolveReasoningEffort('idea_generate',step)).toBeUndefined();
+    }
+    process.env.LLM_REASONING_EFFORT = 'high';
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBe('high');
+  } finally {
+    if(oldEffort===undefined)delete process.env.LLM_REASONING_EFFORT;
+    else process.env.LLM_REASONING_EFFORT=oldEffort;
+  }
+});
 it('injects Rule-ID based public standards with preserved detailed clauses', async () => {
   standardDirectiveCache.rebuild(activeSystemWorkflowRules());
   const service = new RealLLMService({
@@ -25,6 +43,29 @@ it('injects Rule-ID based public standards with preserved detailed clauses', asy
   expect(system).toContain('凭空增加事件、时间、地点');
 });
 
+it('injects the same missing-prerequisite constraint into initial selection, source review and structuring', () => {
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ for(const step of ['idea_premise_pool_generation','idea_premise_selection','idea_premise_source_drift_review','idea_card_structure']){
+  const directive=standardDirectiveCache.get('idea_generate',step);
+  expect(directive).toContain('【系统规则 GEN-002');
+  expect(directive).toContain('原池与展开都缺的关键桥接应在首次选优审查判gap');
+  expect(directive).toContain('异常读数不等于证明了具体收费账目或责任人');
+ }
+});
+
+it('keeps causal validity and tag-conditioned appeal distinct from preselection to full-card and prose review',()=>{
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ for(const [scene,step] of [['idea_generate','idea_premise_selection'],['idea_generate','idea_card_structure'],
+  ['idea_generate','idea_presentation_review'],['writing','body_first'],['review','alignment_review']] as const){
+  const directive=standardDirectiveCache.get(scene,step);
+  expect(directive).toContain('故事成立与吸引读者是并列且不可互代的判断');
+  expect(directive).toContain('相同标签组合不自动同构');
+  expect(directive).toContain('不得为迎合标签改变已确认人物');
+  expect(directive).toContain('正文阶段以已写现场与实际人物反应验收');
+ }
+ const unrelated=standardDirectiveCache.get('review','alignment_reader_goal_evidence');
+ expect(unrelated).not.toContain('故事成立与吸引读者是并列且不可互代的判断');
+});
 it('injectStandard=false really disables public-rule injection instead of leaving a second inline preflight rule', async () => {
   standardDirectiveCache.rebuild(activeSystemWorkflowRules());
   const service = new RealLLMService({

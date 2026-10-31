@@ -3,11 +3,60 @@ import {readGenerationBudgets} from '../config/generation-budgets';
 import { type PremiseSelectionResult } from './idea-discovery-contract';
 import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
 
+/** Source/payoff/genre/category reviews are premise-local. Independently review
+ * every disjoint group concurrently, keeping cross-card overlap in its separate
+ * original Gate. When the remaining shared budget covers exactly one first call
+ * per group, splitting is still cheaper than a single eight-card monolith:
+ * protocol failure then stops honestly instead of fabricating a recovery credit.
+ * No gate, physical-call allowance or timeout is increased. */
+export function shouldBatchLargePremiseSourceReview(
+  count:number, groupingMode:number, batchSize:number, availableCalls:number,
+):boolean{
+  const partitions=Math.ceil(count/Math.max(1,batchSize));
+  return groupingMode===0&&count>=4&&batchSize>=1&&partitions>=2
+    &&availableCalls>=partitions;
+}
 export function premiseSourceBatches(selection: PremiseSelectionResult): PremiseSelectionResult[] {
   const size=readGenerationBudgets().sourceBatchSize;
-  const parts:Array<typeof selection.selected>=[];for(let start=0;start<selection.selected.length;start+=size)parts.push(selection.selected.slice(start,start+size));
-  return parts.map(selected => ({
-    ...selection, selected, pool: selection.pool.filter(row => selected.some(item => item.premiseId === row.premiseId)),
+  const items=selection.selected, count=items.length;
+  if(!count)return [];
+  // A slow large partition dictates wall time even when smaller peers finish
+  // in parallel. Balance actual transmitted story material while preserving
+  // consecutive premise order, each existing batch-size cap and EXACTLY the
+  // old number of independent review calls. No field or Gate is omitted.
+  const groups=Math.ceil(count/size);
+  const weights=items.map(item=>JSON.stringify({
+    selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId),
+  }).length);
+  const prefix=[0];
+  for(const weight of weights)prefix.push(prefix[prefix.length-1]+weight);
+  const costs=Array.from({length:groups+1},()=>Array<number>(count+1).fill(Infinity));
+  const boundaries=Array.from({length:groups+1},()=>Array<number>(count+1).fill(-1));
+  costs[0][0]=0;
+  for(let group=1;group<=groups;group++){
+    for(let end=group;end<=count;end++){
+      const minimumStart=Math.max(group-1,end-size);
+      for(let start=minimumStart;start<end;start++){
+        if(!Number.isFinite(costs[group-1][start]))continue;
+        const cost=Math.max(costs[group-1][start],prefix[end]-prefix[start]);
+        // On an exact tie retain the original full-first-batch partition.
+        if(cost<costs[group][end]||(cost===costs[group][end]&&start>boundaries[group][end])){
+          costs[group][end]=cost;boundaries[group][end]=start;
+        }
+      }
+    }
+  }
+  if(!Number.isFinite(costs[groups][count]))throw new Error('来源审核批次无法无损分组');
+  const parts:Array<typeof items>=[];
+  let end=count;
+  for(let group=groups;group>0;group--){
+    const start=boundaries[group][end];
+    if(start<0)throw new Error('来源审核批次边界无效');
+    parts.push(items.slice(start,end));end=start;
+  }
+  parts.reverse();
+  return parts.map(selected=>({
+    ...selection,selected,pool:selection.pool.filter(row=>selected.some(item=>item.premiseId===row.premiseId)),
   }));
 }
 
@@ -27,7 +76,14 @@ export function mergePremiseSourceBatches(selection: PremiseSelectionResult, bat
     });
   });
   const result=materializePremiseSourceReview({ sourceChecks }, selection);
-  result.issues.push(...reviews.flatMap(review=>review.issues.filter(issue=>issue.kind==='selection_fit')));
+  // A source "unknown" is materialized from merged sourceChecks. Avoid
+  // counting the exact same independent negative receipt a second time.
+  for(const issue of reviews.flatMap(review=>review.issues.filter(issue=>issue.kind==='selection_fit'))){
+    if(!result.issues.some(existing=>existing.kind===issue.kind&&existing.premiseId===issue.premiseId
+      &&existing.referencePremiseId===issue.referencePremiseId&&existing.reason===issue.reason
+      &&existing.quote===issue.quote&&existing.referenceQuote===issue.referenceQuote))
+      result.issues.push(issue);
+  }
   result.genreChecks=batches.flatMap((batch,index)=>(reviews[index].genreChecks||[]).map(check=>{
     const local=Number(/^S(\d+)\./.exec(check.ref)?.[1])-1;
     const position=selection.selected.findIndex(item=>item.premiseId===batch.selected[local]?.premiseId);
@@ -47,6 +103,8 @@ export function mergePremiseSourceBatches(selection: PremiseSelectionResult, bat
     const rebind=(ref:string)=>ref.replace(/^S\d+\./,'S'+(position+1)+'.');
     return {...check,ref:rebind(check.ref),...(check.actionEvidenceRef?{actionEvidenceRef:rebind(check.actionEvidenceRef)}:{}),
       ...(check.conditionEvidenceRef?{conditionEvidenceRef:rebind(check.conditionEvidenceRef)}:{}),
+      ...(check.reversalCheck?{reversalCheck:{...check.reversalCheck,
+        ...(check.reversalCheck.actionEvidenceRef?{actionEvidenceRef:rebind(check.reversalCheck.actionEvidenceRef)}:{})}}:{}),
       ...(check.links?{links:check.links.map(link=>({...link,ref:rebind(link.ref)}))}:{})};
   }));
   result.passed=result.issues.length===0;return result;

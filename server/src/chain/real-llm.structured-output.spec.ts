@@ -123,6 +123,44 @@ it('cancels an already opened OpenAI compatible stream instead of retaining its 
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
+it.each([true,false])('avoids serial output-cap expansion after an empty one-card review at a large configured cap (valid=%s)',async(valid)=>{
+ const service=createService(),budget={remaining:3};
+ const callModel=vi.fn().mockResolvedValueOnce({content:'',finishReason:'length'})
+  .mockResolvedValueOnce({content:valid?'{"reviews":[{"position":1,"payoffCredible":false,"issues":["核验缺少必要条件"]}]}':'',finishReason:valid?'stop':'length'});
+ (service as any).callModel=callModel;
+ const request={prompt:'真实卡与完整事实来源',scenario:'idea_generate',responseFormat:'json_object' as const,
+  maxTokens:131072,structuredReviewUnitCount:1,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}};
+ if(valid)expect(JSON.parse((await service.generate(request)).content).reviews[0].payoffCredible).toBe(false);
+ else await expect(service.generate(request)).rejects.toMatchObject({structuredOutputTruncated:true});
+ expect(callModel).toHaveBeenCalledTimes(2);
+ expect(callModel.mock.calls.map(call=>call[4])).toEqual([131072,131072]);
+ expect(callModel.mock.calls.map(call=>call[8])).toEqual([undefined,true]);
+ expect(budget.remaining).toBe(1);
+});
+it.each([true,false])('recovers an actual one-card idea review truncated at the explicit ceiling, valid=%s',async(valid)=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockResolvedValueOnce({content:'{"reviews":[{"position":1,',finishReason:'length'})
+    .mockResolvedValueOnce({content:valid?'{"reviews":[{"position":1,"payoffCredible":false,"issues":["真实缺失条件"]}]}':'{"reviews":[',finishReason:valid?'stop':'length'});
+  (service as any).callModel=callModel;
+  const request={prompt:'完整原池和单张题材卡、四项目标及全部原始证据',scenario:'idea_generate',responseFormat:'json_object' as const,
+    maxTokens:32768,structuredReviewUnitCount:1,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}};
+  if(valid)expect(JSON.parse((await service.generate(request)).content).reviews[0].payoffCredible).toBe(false);
+  else await expect(service.generate(request)).rejects.toMatchObject({structuredOutputTruncated:true});
+  expect(callModel).toHaveBeenCalledTimes(2);
+  expect(callModel.mock.calls[0].slice(0,7)).toEqual(callModel.mock.calls[1].slice(0,7));
+  expect(callModel.mock.calls[1][8]).toBe(true);
+  expect(budget.remaining).toBe(0);
+});
+it('does not disable thinking or add recovery for a multi-card review after a partial truncation',async()=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockResolvedValue({content:'{"reviews":[',finishReason:'length'});
+  (service as any).callModel=callModel;
+  await expect(service.generate({prompt:'两张完整题材卡',scenario:'idea_generate',responseFormat:'json_object',
+    maxTokens:32768,structuredReviewUnitCount:2,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}}))
+    .rejects.toMatchObject({structuredOutputTruncated:true});
+  expect(callModel).toHaveBeenCalledTimes(1);
+  expect(budget.remaining).toBe(1);
+});
 it('recovers a complete cross-stage decision without re-generating its source candidate or changing the model contract', async () => {
   const service=createService(),budget={remaining:2};
   const callModel=vi.fn().mockResolvedValueOnce({content:'{"consistent":true,"contradictions":[',finishReason:'length'})
@@ -529,7 +567,7 @@ describe('RealLLMService structured output guard', () => {
     const callModel = vi.fn().mockResolvedValue({ content: '{"ok":true}', finishReason: 'stop' });
     (service as any).callModel = callModel;
 
-    const response = await service.generate({ prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object' });
+    const response = await service.generate({ prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxTokens: 4096 });
 
     // The transport now carries explicit thinking override and abort signal.
     expect(callModel.mock.calls[0][0]).toBe('deepseek-flash');
@@ -618,7 +656,7 @@ describe('RealLLMService structured output guard', () => {
     (service as any).callModel = callModel;
 
     const response = await service.generate({
-      prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxEmptyRetries: 1,
+      prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxTokens: 4096, maxEmptyRetries: 1,
     });
 
     expect(response.content).toBe('{"ideas":[]}');
@@ -797,9 +835,36 @@ describe('RealLLMService structured output guard', () => {
   expect(() => parseScoreReviewJson(JSON.stringify({dimensions:{...dimensions,repairs},repairs:[]}))).toThrow();
  });
 
-it('applies saved-generation output sizing at the actual model-call boundary',async()=>{
+it('honors the explicit saved-generation output budget at the actual model-call boundary',async()=>{
  const service=createService(),callModel=vi.fn().mockResolvedValue({content:'{"ok":true}',finishReason:'stop',usage:{promptTokens:5,completionTokens:5,totalTokens:10}});
  (service as any).callModel=callModel;
  await service.generate({prompt:'本地协议检查',scenario:'idea_generate',responseFormat:'json_object',maxTokens:32768,deferQualityGate:true});
- expect(callModel).toHaveBeenCalledOnce();expect(callModel.mock.calls[0][4]).toBe(131072);
+ expect(callModel).toHaveBeenCalledOnce();expect(callModel.mock.calls[0][4]).toBe(32768);
+});
+
+
+it.each([false,true])('uses the persisted output budget at the source-review model boundary, truncated=%s',async(truncated)=>{
+ const fs=await import('node:fs'),os=await import('node:os'),path=await import('node:path');
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'novel-output-boundary-'));
+ const previous=process.env.DATA_DIR;
+ try{
+  process.env.DATA_DIR=directory;
+  fs.writeFileSync(path.join(directory,'generation-budgets.json'),JSON.stringify({structuredOutputTokens:131072,structuredOutputCeiling:393216}));
+  const service=createService(),budget={remaining:2};
+  const content=JSON.stringify({sourceChecks:[{ref:'S1.payoff',status:'drift',reason:'原池必要条件与候选实际触发条件互斥'}]});
+  const callModel=truncated
+   ?vi.fn().mockResolvedValueOnce({content:'{"sourceChecks":[',finishReason:'length'})
+     .mockResolvedValueOnce({content,finishReason:'stop'})
+   :vi.fn().mockResolvedValue({content,finishReason:'stop'});
+  (service as any).callModel=callModel;
+  const result=await service.generate({prompt:'完整原池事实及待核查题材',scenario:'idea_generate',responseFormat:'json_object',
+   deferQualityGate:true,physicalCallBudget:budget,metrics:{stepKey:'idea_premise_source_drift_review'}});
+  expect(result.content).toBe(content);
+  expect(callModel.mock.calls.map(call=>call[4])).toEqual(truncated?[131072,262144]:[131072]);
+  expect(budget.remaining).toBe(truncated?0:1);
+  expect(callModel.mock.calls.every(call=>call[0]==='deepseek-flash'&&call[1]==='完整原池事实及待核查题材'&&call[6]==='json_object'&&call[8]===undefined)).toBe(true);
+ }finally{
+  if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;
+  fs.rmSync(directory,{recursive:true,force:true});
+ }
 });

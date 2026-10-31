@@ -91,6 +91,28 @@ const acceptedIdea = (index: number) => ({
   ideaDiscoveryAudit: audit,
 });
 
+describe('ChainPlanningController discovery cancellation identity', () => {
+  it('preserves the exact renderer request ID for model execution and diagnostics', async () => {
+    const clientId = '2c6275cc-b11d-4c0d-bbe5-1d5015bca639';
+    const ideaDiscover = vi.fn().mockResolvedValue({ success: false, ideas: [], error: '模拟终止' });
+    const dualWrite = vi.fn().mockResolvedValue(undefined);
+    const controller = new ChainPlanningController({ ideaDiscover } as any, { dualWrite } as any);
+    await controller.ideaDiscover({ ...dto, count: 5, discoveryRequestId: clientId } as any);
+    expect(ideaDiscover).toHaveBeenCalledWith(expect.objectContaining({ discoveryRequestId: clientId, count: 5 }));
+    expect(dualWrite).toHaveBeenCalledWith('latest_idea_discovery_audit',
+      expect.objectContaining({ discoveryRequestId: clientId }));
+  });
+
+  it('creates a safe server ID only when legacy input has no valid request ID', async () => {
+    const ideaDiscover = vi.fn().mockResolvedValue({ success: false, ideas: [] });
+    const controller = new ChainPlanningController({ ideaDiscover } as any);
+    await controller.ideaDiscover({ ...dto, discoveryRequestId: '../wrong/request', count: 5 } as any);
+    const actual = ideaDiscover.mock.calls[0][0].discoveryRequestId;
+    expect(actual).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(actual).not.toBe('../wrong/request');
+  });
+});
+
 describe('ChainPlanningController idea-discovery transport adapter', () => {
   it('does not oversample or rescreen a complete batch already accepted by the final gate', async () => {
     const upstream = {
@@ -316,4 +338,23 @@ it('keeps the current response and audit without persisting cross-batch recovery
  const c=new ChainPlanningController({ideaDiscover:vi.fn().mockResolvedValue(result)} as any,db as any);
  expect(await c.ideaDiscover({...dto,count:5} as any)).toBe(result);
  expect(db.dualWrite.mock.calls.map(call=>call[0])).toEqual(['latest_idea_discovery_audit']);
+});
+
+it('persists a timestamped, redacted failed audit before rethrowing an orchestration exception', async () => {
+  const failure = Object.assign(new Error('Authorization: Bearer secret-token'), {
+    appealGate: { stopReason: 'candidate_pool_below_minimum', note: 'token=hidden-token' },
+  });
+  const ideaDiscover = vi.fn().mockRejectedValue(failure);
+  const dualWrite = vi.fn().mockResolvedValue(undefined);
+  const controller = new ChainPlanningController({ ideaDiscover } as any, { dualWrite } as any);
+
+  await expect(controller.ideaDiscover({ ...dto, count: 2 } as any)).rejects.toBe(failure);
+  expect(dualWrite).toHaveBeenCalledTimes(1);
+  const stored = dualWrite.mock.calls[0][1] as any;
+  expect(stored.discoveryRequestId).toEqual(expect.any(String));
+  expect(Date.parse(stored.startedAt)).toBeLessThanOrEqual(Date.parse(stored.finishedAt));
+  expect(stored.success).toBe(false);
+  expect(stored.totalIdeas).toBe(0);
+  expect(stored.error).not.toContain('secret-token');
+  expect(JSON.stringify(stored.appealGate)).not.toContain('hidden-token');
 });

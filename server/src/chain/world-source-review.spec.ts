@@ -1,6 +1,6 @@
 import {describe,it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
-import {applyUncommittedWorldPatch,buildWorldSourceReviewPrompt,describeWorldSourceReview,materializeWorldSourceReview,worldSourceAnchors,worldReviewFailureOrigin} from './world-source-review';
+import {applyUncommittedWorldPatch,buildWorldSourceReviewPrompt,describeWorldSourceReview,materializeWorldSourceReview,worldSourceAnchors,worldCreationAuthority,worldReviewFailureOrigin} from './world-source-review';
 const parent={confirmed:{relation:'店主欠俱乐部人情。',place:'店铺占一楼大厅与二楼训练间。'}};
 const child={history:'俱乐部欠店主人情。',geography:'店铺在二楼，一楼大厅另有机器。',rules:['每局结束分别结算。','对方能拒绝诱饵。'],specialSettings:''};
 const findings=()=>[
@@ -72,4 +72,17 @@ describe('unpublished world source review and minimal repair',()=>{
   await expect(controller.reviewChildSource('p','上层',parent,'世界观',child,'标准')).rejects.toThrow('未评估');
   expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
  });
+});
+
+it('does not submit the confirmed story twice to world generation and independent source review',()=>{
+ const story={hook:'父亲被误登记出院，女儿必须公开两户同号病历。',ending:'女儿失去岗位后，两户老人恢复各自记录。'};
+ const constitution={targetPlatform:'fanqie',storyTone:['现实'],confirmedStory:structuredClone(story)};
+ const snapshot=JSON.stringify(constitution);
+ const authority=worldCreationAuthority(story,constitution);
+ expect(authority).toEqual({confirmedStory:story,constitution:{targetPlatform:'fanqie',storyTone:['现实']}});
+ expect(JSON.stringify(constitution)).toBe(snapshot);
+ const anchors=worldSourceAnchors(authority,'U');
+ expect(anchors.filter(row=>row.text===story.hook)).toHaveLength(1);
+ expect(anchors.filter(row=>row.text===story.ending)).toHaveLength(1);
+ expect(anchors.some(row=>row.text==='fanqie')).toBe(true);
 });

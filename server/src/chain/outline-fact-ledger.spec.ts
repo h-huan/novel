@@ -1,8 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { chapterFactsForReview, buildOutlineFactReviewPrompt, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
-import { buildOutlineContinuityContext, describeOutlineFactEvidence } from './outline-fact-ledger';
+import { chapterFactsForReview, buildOutlineFactReviewPrompt, outlineFactReviewNeedsContinuityPolicy, describeOutlineFactReview, normalizeOutlineFactReview, normalizeOutlineChaptersForFactReview } from './outline-fact-ledger';
+import { buildOutlineContinuityContext, outlineFactRepairPromptDefects, describeOutlineFactEvidence } from './outline-fact-ledger';
 import { CHAPTER_RESPONSIBILITY_CRITERIA, chapterResponsibilityPlanningDirective } from '../../shared/src';
+import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY } from '../../shared/src/system-workflow-rules.registry';
+
+describe('local fact repair evidence ownership and prompt size', () => {
+ it('retains both full source chapters and original gate evidence but removes duplicate full quotes in the repair request',()=>{
+   const chapter1='第1章写在传令当天：木牌三天前丢失。'+'此前世界事实与人物状态。'.repeat(450);
+   const chapter3='第3章写三天后审判：木牌三天前丢失。'+'审判世界细节与人物动作。'.repeat(550);
+   const defect=JSON.stringify({location1:'前章·第1章.content',quote1:chapter1,
+     location2:'本批·第3章.content',quote2:chapter3,
+     conflict:'第1章传令时已丢三天与三天后的第3章再次称三天前丢失，事件时点不一致。',
+     calculation:'(T0 - 3) !== (T0 + 3 - 3)'});
+   const raw=[defect,'行动结果缺少已发生的必要条件'];
+   const original=JSON.stringify(raw);
+   const trimmed=outlineFactRepairPromptDefects(raw);
+   expect(trimmed).toEqual([{
+     location1:'前章·第1章.content',location2:'本批·第3章.content',
+     conflict:'第1章传令时已丢三天与三天后的第3章再次称三天前丢失，事件时点不一致。',
+     calculation:'(T0 - 3) !== (T0 + 3 - 3)'},raw[1]]);
+   expect(JSON.stringify(trimmed).length).toBeLessThan(defect.length/8);
+   const prompt='【已确认前章原始资料】'+JSON.stringify([{content:chapter1}])
+     +'【当前章纲】'+JSON.stringify({content:chapter3})
+     +'【必须逐项修复】'+JSON.stringify(trimmed);
+   expect(prompt).toContain(chapter1);
+   expect(prompt).toContain(chapter3);
+   expect(prompt).toContain('T0 - 3');
+   expect(JSON.stringify(raw)).toBe(original);
+   expect(normalizeOutlineFactReview({consistent:false,contradictions:[{
+      location1:'前章·第1章.content',quote1:chapter1,
+      location2:'本批·第3章.content',quote2:chapter3,conflict:'时点不一致'}],ledger:[]})?.consistent).toBe(false);
+ });
+ it('does not guess locations or strip unstructured evidence',()=>{
+   for(const entry of ['剧情依赖不成立','{"conflict":"无出处不能成立"}','{"location1":"前章","quote1":"片段"}']){
+     expect(outlineFactRepairPromptDefects([entry])).toEqual([entry]);
+   }
+ });
+});
 
 describe('outline fact ledger review contract', () => {
   it.each(['第3章 characterStates.stateAfter', '第三章.scenes', 'chapterNumber=3.scenes'])('rejects a real quotation assigned to the wrong chapter: %s', location1 => {
@@ -14,12 +49,73 @@ describe('outline fact ledger review contract', () => {
       location2: '第4章.content', quote2: '当日请求被拒', conflict: '待核对' }], ledger: [] });
     expect(describeOutlineFactEvidence(corrected, [chapters], chapters)).toEqual([]);
   });
+  it('keeps the full continuity policy exactly once when execution standard already injects it',()=>{
+    expect(outlineFactReviewNeedsContinuityPolicy('无此规则')).toBe(true);
+    expect(outlineFactReviewNeedsContinuityPolicy('审核标准：'+OUTLINE_STATE_CONTINUITY_POLICY+'后续')).toBe(false);
+    const compact=buildOutlineFactReviewPrompt({canonicalBrief:'{}',world:{},previousLedger:[],
+      chapters:[{order:4,content:'主角仍持有登记册'}],includePolicy:false});
+    expect(compact).toContain('按已注入CTX-005、CTX-008核对累计状态与时间');
+    expect(compact).toContain('主角仍持有登记册');
+    expect(compact).not.toContain(OUTLINE_STATE_CONTINUITY_POLICY);
+    const complete=buildOutlineFactReviewPrompt({canonicalBrief:'{}',world:{},previousLedger:[],
+      chapters:[{order:4,content:'主角仍持有登记册'}],includePolicy:true});
+    expect(complete).toContain(OUTLINE_STATE_CONTINUITY_POLICY);
+  });
   it('uses the same temporal source policy in generation, review and the public rule', () => {
     expect(buildOutlineContinuityContext([], [])).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
     expect(buildOutlineFactReviewPrompt({ canonicalBrief: '{}', world: {}, previousLedger: [], chapters: [{ order: 0, content: '事件' }] })).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
     expect(getSystemWorkflowRule('CTX-008')!.details).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
     expect(chapterResponsibilityPlanningDirective()).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
   });
+  it('shares CTX-008 for chapter-relative dates without duplicating it in a source-only prompt',()=>{
+    const accepted=[{order:0,content:'传令当天我说木牌三天前就丢了，三日后要审。'},
+      {order:1,content:'第二日立了抵当字据。'}];
+    const original=JSON.stringify(accepted);
+    expect(TEMPORAL_FACT_CONTINUITY_POLICY).toContain('跨章复述同一事件');
+    expect(TEMPORAL_FACT_CONTINUITY_POLICY).toContain('两章实际时点换算');
+    const embedded=buildOutlineContinuityContext(accepted,[],true);
+    const compact=buildOutlineContinuityContext(accepted,[],false);
+    expect(embedded).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+    expect(compact).not.toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+    expect(compact).toContain('按已注入CTX-005、CTX-008');
+    expect(compact).toContain('传令当天我说木牌三天前就丢了');
+    expect(embedded.split(TEMPORAL_FACT_CONTINUITY_POLICY)).toHaveLength(2);
+    expect(JSON.stringify(accepted)).toBe(original);
+    const review=buildOutlineFactReviewPrompt({canonicalBrief:'{}',world:{},previousLedger:[],
+      sourceChapters:accepted,chapters:[{order:2,content:'三日后审判再次提到原事件'}],includePolicy:false});
+    expect(review).toContain('传令当天我说木牌三天前就丢了');
+    expect(review).not.toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+  });
+  it('delivers the same CTX-008 policy to detail creation, outline fact review and one local repair',()=>{
+    standardDirectiveCache.rebuild();
+    for(const [scenario,stepKey] of [
+      ['outline','creation_chapter_detail'],
+      ['review','creation_outline_fact_dependencies'],
+      ['outline','creation_chapter_fact_repair'],
+    ] as const){
+      const fromRegistry=standardDirectiveCache.get(scenario,stepKey);
+      expect(fromRegistry).toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+      expect(fromRegistry).toContain('跨章复述同一事件');
+    }
+    const input=buildOutlineContinuityContext([{order:0,content:'角色交代物品此前已丢失'}],[],false);
+    expect(input).not.toContain(TEMPORAL_FACT_CONTINUITY_POLICY);
+  });
+  it('separates group replies from private messages and checks direct positive evidence before blocking creation', () => {
+    const prompt = buildOutlineFactReviewPrompt({
+      canonicalBrief: '{}',
+      world: {},
+      previousLedger: [],
+      chapters: [{ order: 2, content: '工作群报修消息底下没人回；助理私聊回复安全员。导演先签了安全条款。' }],
+    });
+    expect(prompt).toContain('必须通读同一批完整content、scenes、characterActions及相邻字段');
+    expect(prompt).toContain('若content已明确写出某人签字、交付或当事人承认其指示，不得把该动作或承认判为缺失');
+    expect(prompt).toContain('同一群消息“底下没人回”与“回复挂在该消息下”是真冲突');
+    expect(prompt).toContain('私聊回复不能当作群消息回复');
+    expect(prompt).toContain('本章新增三笔，累计应为四笔');
+    expect(prompt).toContain('不得仅因看见“三笔”和“四笔”就误报');
+    expect(prompt).toContain('人物直接听到的问话不代表另一角色向其复述过');
+  });
+
   it('derives creation criteria from the actual Registry, including cumulative consequences', () => {
     expect(CHAPTER_RESPONSIBILITY_CRITERIA).toEqual(getSystemWorkflowRule('ARCH-005')!.clauses!.map(c => ({ id: c.id, label: c.label, check: c.text })));
     expect(chapterResponsibilityPlanningDirective()).toContain(OUTLINE_STATE_CONTINUITY_POLICY);

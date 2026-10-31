@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { describeWorldSourceCandidate } from './source-rule-consistency';
+import { confirmedWorldProtagonistName, describeWorldSourceCandidate } from './source-rule-consistency';
 
 describe('generic world source validation', () => {
+  it('does not misidentify anonymous first-person narration and roles as names', () => {
+    for (const description of ['我，一名修理工', '我是个修理工', '主角：修理工', '匿名主角', '叙述者', '一名技工']) {
+      expect(confirmedWorldProtagonistName(description)).toBe('');
+    }
+  });
+
+  it('retains an actually named first-person protagonist', () => {
+    expect(confirmedWorldProtagonistName('李明，修理工')).toBe('李明');
+    expect(confirmedWorldProtagonistName('我叫李明，修理工')).toBe('李明');
+  });
   it('rejects malformed/empty world records without encoding a particular story mechanic', () => {
     expect(describeWorldSourceCandidate({ error: '生成失败', rules: [] }, '甲'))
       .toContain('世界观rules必须包含至少一条非空因果规则；具体数量由本作品结构需要决定，不设公共固定配额');

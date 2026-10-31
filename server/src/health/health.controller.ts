@@ -26,17 +26,42 @@ export interface RagHealthResult {
 @Controller("health")
 export class HealthController {
   private readonly startTime: number;
+  // Snapshot once. A Git checkout update or environment mutation must not
+  // make an already-running backend claim a revision it never loaded.
+  private readonly buildCommit: string | null;
 
   constructor(
     @Optional() @Inject(VectorIndexService)
     private readonly vectorIndex?: VectorIndexService,
   ) {
     this.startTime = Date.now();
+    this.buildCommit = process.env.NOVEL_BUILD_COMMIT || process.env.GIT_COMMIT_SHA || process.env.GITHUB_SHA || null;
   }
 
   @Get()
-  check(): { status: string; timestamp: string; instanceId: string | null } {
-    return { status: "ok", timestamp: new Date().toISOString(), instanceId: process.env.NOVEL_INSTANCE_ID || null };
+  check(): {
+    status: string;
+    timestamp: string;
+    instanceId: string | null;
+    build: {
+      commit: string | null;
+      version: string | null;
+      processStartedAt: string;
+      diagnosticsMarker: string;
+    };
+  } {
+    return {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      instanceId: process.env.NOVEL_INSTANCE_ID || null,
+      build: {
+        // Captured at startup, never inferred anew on each health request.
+        commit: this.buildCommit,
+        version: process.env.npm_package_version || null,
+        processStartedAt: new Date(this.startTime).toISOString(),
+        diagnosticsMarker: "verify-local-build-identity-v1",
+      },
+    };
   }
 
   @Get("full")

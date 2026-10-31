@@ -2,6 +2,7 @@
  * OutlineService 单元测试
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { ConflictException } from '@nestjs/common';
 import { OutlineService } from './outline.service';
 import { OutlineRepository } from '../../database/repositories/outline.repository';
 
@@ -66,6 +67,19 @@ describe('OutlineService', () => {
 
       expect(result.title).toBe('第一章大纲');
       expect(result.chapterFunction).toBe('breathing');
+    });
+
+    it('does not insert a second book skeleton when the project already has a confirmed book', () => {
+      const prepare = vi.fn(() => ({
+        get: vi.fn().mockReturnValue({ id: 'existing-book' }),
+        all: vi.fn().mockReturnValue([]),
+        run: vi.fn(),
+      }));
+      const guarded = new OutlineService(repo, { getDb: () => ({ prepare }) } as any);
+      expect(() => guarded.create('project-1', { level: 'book', title: '独立候选书纲' }))
+        .toThrow(ConflictException);
+      expect(prepare).toHaveBeenCalledWith(expect.stringContaining("level = 'book'"));
+      expect(repo.insert).not.toHaveBeenCalled();
     });
 
     it('accepts both 3000 and 5000 word boundaries and rejects values outside them', () => {

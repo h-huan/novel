@@ -37,6 +37,18 @@ export const GENERATED_FORESHADOWING_TYPES = [
 ] as const;
 export type GeneratedForeshadowingType = (typeof GENERATED_FORESHADOWING_TYPES)[number];
 
+/** Across chapter/volume/global scopes, threads interleave rather than form a stage queue.
+ * Scope means the scale of a thread; it is not its turn in a serial workflow.
+ * Keep this guidance in the existing single generation contract, not in a
+ * second prompt chain or a preset chapter-count rhythm. */
+export const FORESHADOWING_INTERLEAVING_POLICY = [
+  '【伏笔交织与多对多纪律】短线、中线、长线、卷线、全书线按故事实际因果同时存在、并行推进，不按长度、卷序或固定章节数排队，不要求先回收小伏笔才能埋设或推进大伏笔。',
+  '同一章节可以对多条已有伏笔分别埋设、递进线索、提醒或回收；同一条伏笔可以跨多章、多卷由不同人物、物件、事件提供互补线索。每次出现要有本章实际事件和人物知识范围内的来源证据，不为密度或表格完整性强行安排。',
+  '一条伏笔可经历多次提醒、误判、部分揭示、风险升级与阶段性兑现；局部结果不等于全书答案已揭示。只在该伏笔的核心承诺已实际兑现时标记回收，不把其它仍有效伏笔同时关闭。',
+  'scope 的 chapter、volume、global 表示影响范围，不是必须依次完成的三道工序；跨几章的短线也可以属于 volume。回收窗口是独立线索的规划范围，不是固定比例或所有线索共同的倒计时。',
+  '后续章纲只沿已经确稿的线索身份继续，不改写前文已埋设的条件、人物知情、物件去向或已兑现结果；同一条旧线索优先引用原线索身份和证据，不因换个描述便重复建新伏笔。'
+].join('\n');
+
 /** 章级伏笔动作。只有“回收”允许省略回收区间/条件/兑现效果。 */
 export const FORESHADOWING_ACTIONS = ['埋设', '激活', '提醒', '回收'] as const;
 export const FORESHADOWING_RECOVERY_ACTION = '回收';
@@ -140,6 +152,40 @@ export const describeGlobalForeshadowingDefect = (item: any): string | null => {
   return null;
 };
 
+/**
+ * The initial long-novel detailed-outline window collects ONE canonical
+ * proposed thread per first plant, while reminder/reveal/payoff chapter
+ * actions only refer back to it. The chapter action arrays keep all of those
+ * later events (many chapters to many concurrent threads) unchanged.
+ * Nothing here marks a planned payoff as already performed in prose.
+ */
+export function mergePlannedForeshadowingActions(
+  registered: readonly any[], actions: readonly any[], chapterNumber: number,
+): any[] {
+  const result=[...registered];
+  for(const item of actions){
+    const action=String(item?.action||'').trim();
+    if(!(FORESHADOWING_ACTIONS as readonly string[]).includes(action))
+      throw Error(`第${chapterNumber}章伏笔动作未按唯一契约声明：${action||'空'}`);
+    const content=String(item?.content||'').trim();
+    const reference=String(item?.reference||content).trim();
+    if(action==='埋设'){
+      if(result.some(row=>String(row?.content||'').trim()===content))
+        throw Error(`第${chapterNumber}章重复埋设已存在的伏笔：${content}；应按原线索身份推进`);
+      result.push({...item,content,scope:item.scope,setupChapter:chapterNumber,
+        recoveryChapter:item.recoveryChapter||null});
+      continue;
+    }
+    if(!result.some(row=>
+      String(row?.id||'').trim()===reference
+      ||String(row?.content||'').trim()===reference))
+      throw Error(`第${chapterNumber}章伏笔${action}缺少已埋设的来源线索：${reference}；不得凭空推进或回收`);
+    // One payoff is local to the referenced thread: it never shuts other
+    // threads and does not rewrite the original planting or recovery plan.
+  }
+  return result;
+}
+
 const ACTIONS_TEXT = FORESHADOWING_ACTIONS.map(action => `“${action}”`).join('、');
 const RISK_TEXT = GENERATED_FORESHADOWING_RISK_LEVELS.join('、');
 const TYPE_TEXT = GENERATED_FORESHADOWING_TYPES.join('、');
@@ -147,14 +193,18 @@ const SCOPE_TEXT = GENERATED_FORESHADOWING_SCOPES.join('、');
 
 /** 章级伏笔契约原文：直接拼进章纲提示词，与 describeForeshadowingDefect 逐条对齐。 */
 export const CHAPTER_FORESHADOWING_CONTRACT = [
+  FORESHADOWING_INTERLEAVING_POLICY,
   `伏笔字段 ${CHAPTER_FORESHADOWING_FIELD}（只在本章确有动作时填写，否则必须返回空数组 []）：`,
-  `- 每项必填 content（伏笔本体：具体到物件、话语偏差、动作、地点或组织线索）、action（只能取 ${ACTIONS_TEXT} 之一）、evidenceText（本章可验证的原文证据）、riskLevel（只能取 ${RISK_TEXT} 之一，小写英文，不得写“高/中/低”等中文等级）、type（只能取 ${TYPE_TEXT} 之一）、scope（只能取 ${SCOPE_TEXT} 之一：本章内部的小场景伏笔用 chapter，跨多章但不出卷用 volume，贯穿全书用 global）；`,
+  `- 每项必填 content（伏笔本体：具体到物件、话语偏差、动作、地点或组织线索）、action（只能取 ${ACTIONS_TEXT} 之一）、evidenceText（本章可验证的原文证据）、riskLevel（只能取 ${RISK_TEXT} 之一，小写英文，不得写“高/中/低”等中文等级）、type（只能取 ${TYPE_TEXT} 之一）、scope（只能取 ${SCOPE_TEXT} 之一：仅本章内兑现的短线可用 chapter，同卷跨章伏笔不论短中长均用 volume，跨卷及全书用 global）；`,
+  '- 旧线索在后续章被提醒、补证或阶段揭示时，可用 reference 逐字指向已有伏笔ID或既有内容；本章仅记录本次新事实和本次作用，不重复建档、重设埋设章、重开回收窗口。多条线索同章可分别出现，各自独立保留未结结果。',
   `- action 不是“回收”的每一项，必须同时给出 recoveryWindowStart、recoveryWindowEnd（回收窗口起止章号，整数）、recoveryCondition（满足什么条件才回收）、payoffDescription（回收时兑现什么效果）；这四项缺任意一项即为不合格，此时不要把该条写进 ${CHAPTER_FORESHADOWING_FIELD}，宁可为空数组；`,
   '- recoveryChapter（预期回收章号，整数）可选，有明确规划时填写。',
 ].join('\n');
 
 /** 跨卷伏笔契约原文：与 describeGlobalForeshadowingDefect 逐条对齐。 */
 export const GLOBAL_FORESHADOWING_CONTRACT = [
+  FORESHADOWING_INTERLEAVING_POLICY,
+  '跨卷/全书伏笔与当前卷的小伏笔、角色伏笔可以同时推进；本环节只补充真正跨卷的已成立线索，不因它们尚未回收而禁止短线另起，也不得把已存在的章级线索换名字重复登记。',
   `跨卷伏笔每项必须同时给出 content、setupChapter（埋设章号）、recoveryWindowStart、recoveryWindowEnd、evidenceText、riskLevel（只能取 ${RISK_TEXT} 之一，小写英文）、type（只能取 ${TYPE_TEXT} 之一）、scope（只能取 global/volume 之一，不得写 chapter）、recoveryCondition、payoffDescription；`,
   '缺任意一项即为不合格——若无法一次给全，请改成返回空数组，不要提交半条线索。',
 ].join('\n');

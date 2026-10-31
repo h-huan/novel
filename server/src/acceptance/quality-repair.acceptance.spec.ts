@@ -6,7 +6,7 @@ import { ProjectRepository } from '../database/repositories/project.repository';
 import { GenerationMetricsService } from '../modules/generation-metrics/generation-metrics.service';
 import { RealLLMService } from '../chain/real-llm.service';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
-import { dimensionBasisFromPrompt } from '../test/quality-review.fixture';
+import { currentGeneratedContentFromPrompt, dimensionBasis } from '../test/quality-review.fixture';
 import { seedAcceptanceProject } from './test-project-fixture';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 const original = '小镇中央的钟楼挂着红色旗帜。居民每天清晨开门，傍晚收摊。守夜人按照既定规矩检查城门，不得擅自离开岗位。';
@@ -22,11 +22,11 @@ for (const regression of [false, true]) it(`repairs, rechecks, compares and ${re
     (llm as any).generateInternal = vi.fn(async (r: any) => {
       if (r.scenario === 'refinement') return { content: JSON.stringify({ patches: [{ original: '红色', replacement: '蓝色' }] }) };
       if (r.scenario === 'review') {
-        const current = r.prompt.split('当前生成结果：')[1];
+        const current = currentGeneratedContentFromPrompt(r.prompt);
         const fixed = current.includes('蓝色');
         return { content: JSON.stringify({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, {
           score: k === 'context' && !fixed ? 40 : k === 'logic' && fixed && regression ? 80 : 90,
-          reason: fixed ? '与既定资料一致' : '旗帜颜色与既定资料冲突', evidence: [current], basis: dimensionBasisFromPrompt(r.prompt, k),
+          reason: fixed ? '与既定资料一致' : '旗帜颜色与既定资料冲突', evidence: [current], basis: dimensionBasis(project.creativeConstitution, k),
         }])) }) };
       }
       return { content: original, model: 'fixture' };
@@ -60,7 +60,7 @@ it('blocks stale constitution output even when the evaluator gives high scores',
     const metrics = new GenerationMetricsService(database);
     const llm = new RealLLMService({} as any, metrics);
     (llm as any).generateInternal = vi.fn(async (r: any) => {
-      if (r.scenario === 'review') return { content: JSON.stringify({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 99, reason: '满足', evidence: [original], basis: dimensionBasisFromPrompt(r.prompt,k) }])) }) };
+      if (r.scenario === 'review') return { content: JSON.stringify({ dimensions: Object.fromEntries(SCORE_DIMENSIONS.map(k => [k, { score: 99, reason: '满足', evidence: [original], basis: dimensionBasis(project.creativeConstitution,k) }])) }) };
       projects.update(project.id, { targetPlatform: 'zhihu' });
       return { content: original };
     });

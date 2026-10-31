@@ -1,6 +1,8 @@
 import {type PremiseSelectionResult} from './idea-discovery-contract';
 import {type PremiseSelectionReview, premiseSourceReviewIssues, premiseSelectionReviewIssues, materializePremiseSourceReview} from './premise-selection-review';
 import {mergePremiseSourceBatches} from './premise-source-batches';
+import {readGenerationBudgets} from '../config/generation-budgets';
+import {independentReviewBatches, type ReviewCallBudget} from './independent-review-batches';
 import {premisePayoffReviewIssues} from './premise-payoff-review';
 import {premiseGenreFitIssues} from './premise-genre-fit';
 import {premiseCategoryFitIssues} from './premise-category-fit';
@@ -9,42 +11,40 @@ type Receipt={selection:PremiseSelectionResult;review:PremiseSelectionReview};
 /** Owned by one reconciliation only. Never persists or crosses discovery runs. */
 export type PremiseSourceReceipts=Map<string,Receipt>;
 
+/** Use precisely the same cache identity when preflighting a changed selection
+ * and when executing its independent source review. */
+const sourceReceiptKey = (selection:PremiseSelectionResult, scope:string,
+  item:PremiseSelectionResult['selected'][number]) => JSON.stringify({scope,item,
+    seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
+
 function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionReview,index:number):Receipt {
  const item=selection.selected[index],prefix=`S${index+1}.`;
  const rebind=(value:string)=>value.startsWith(prefix)?'S1.'+value.slice(prefix.length):value;
  const rows=(values:any[]|undefined)=>values?.filter(row=>row.ref.startsWith(prefix)).map(row=>Object.fromEntries(
-  Object.entries(row).map(([key,value])=>[key,(key==='ref'||/EvidenceRef$/.test(key))&&typeof value==='string'?rebind(value)
-   :key==='links'&&Array.isArray(value)?value.map(link=>({...link,ref:rebind(link.ref)})):value])));
+  Object.entries(row).map(([key,value])=>[key,(key==='ref'||/evidenceRef$/i.test(key))&&typeof value==='string'?rebind(value)
+   :key==='links'&&Array.isArray(value)?value.map(link=>({...link,ref:rebind(link.ref)}))
+    :key==='reversalCheck'&&value&&typeof value==='object'
+      ?{...value,...(typeof (value as any).actionEvidenceRef==='string'?{actionEvidenceRef:rebind((value as any).actionEvidenceRef)}:{})}
+      :value])));
  const issues=review.issues.filter(issue=>issue.premiseId===item.premiseId);
  return {selection:{...selection,selected:[item],pool:selection.pool.filter(seed=>seed.premiseId===item.premiseId)},
   review:{passed:issues.length===0,issues,sourceChecks:rows(review.sourceChecks),
    genreChecks:rows(review.genreChecks),categoryChecks:rows(review.categoryChecks),payoffChecks:rows(review.payoffChecks)} as PremiseSelectionReview};
 }
 
-/** Source/genre/category/payoff checks are local to one premise. Pairwise overlap
- * is deliberately not cached: changed cards must still be compared to retained cards. */
-export async function reviewChangedPremiseSources(selection:PremiseSelectionResult,scope:string,
- receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult)=>Promise<PremiseSelectionReview>,
- observe?:(counts:{reused:number;reviewed:number})=>void):Promise<PremiseSelectionReview> {
- const key=(item:PremiseSelectionResult['selected'][number])=>JSON.stringify({scope,item,
-  seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
- const requiredGenres=(()=>{try{const parsed=JSON.parse(scope);return Array.isArray(parsed?.requiredGenres)?parsed.requiredGenres as string[]:[];}catch{return [];}})();
- const hits=selection.selected.map(item=>receipts.get(key(item)));
- const pending=selection.selected.filter((_item,index)=>!hits[index]);
- observe?.({reused:selection.selected.length-pending.length,reviewed:pending.length});
- let fresh:Receipt|undefined;
- if(pending.length){
-  const input=pending.length===selection.selected.length?selection:{...selection,selected:pending,
-   pool:selection.pool.filter(seed=>pending.some(item=>item.premiseId===seed.premiseId))};
-  fresh={selection:input,review:await review(input)};
-  // The production reviewer validates all contracts before returning. Require a
-  // complete, positive receipt as well; absent/failed/unknown receipts never reuse.
-  if(!premiseSourceReviewIssues({sourceChecks:fresh.review.sourceChecks},input).length){
+/** A completed independent verdict is reusable only for the exact story facts and review scope.
+ * The same validation applies to full source review and causal-index-only rechecks;
+ * no skipped/unknown check or unproved semantic rejection is promoted to approval. */
+function cacheVerifiedSourceReview(
+ input:PremiseSelectionResult, review:PremiseSelectionReview, scope:string,
+ receipts:PremiseSourceReceipts, requiredGenres:readonly string[],
+):void {
+ const key=(item:PremiseSelectionResult['selected'][number])=>sourceReceiptKey(input,scope,item);
+  if(!premiseSourceReviewIssues({sourceChecks:review.sourceChecks},input).length){
    for(let index=0;index<input.selected.length;index++){
-    const receipt=singleReceipt(input,fresh.review,index),r=receipt.review;
-    // Complete failed reviews are evidence, not passes: reuse the same rejection
-    // only while the premise, source, standards and required genres are identical.
-    // Never cache unknown, incomplete or contradictory review contracts.
+    const receipt=singleReceipt(input,review,index),r=receipt.review;
+    // Complete negative evidence must remain a rejection after memoization;
+    // mismatched semantic flags, fabricated reasons and unknowns cannot enter.
     let sourceIssuesMatch=false;
     try{
      const materialized=materializePremiseSourceReview({sourceChecks:r.sourceChecks},receipt.selection).issues;
@@ -54,7 +54,12 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
        &&a.field===b.field&&a.quote===b.quote&&a.referenceQuote===b.referenceQuote&&a.reason===b.reason;
      sourceIssuesMatch=materialized.length===recorded.length&&materialized.every(issue=>recorded.some(row=>same(issue,row)));
     }catch{}
-    if(sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
+    const hasKnownFailure=!!r.sourceChecks?.some(row=>row.status==='drift')
+      ||!!r.payoffChecks?.some(row=>row.status==='gap'||(row.links||[]).some(link=>link.status==='gap'))
+      ||!!r.genreChecks?.some(row=>row.status==='missing')
+      ||!!r.categoryChecks?.some(row=>row.status==='missing');
+    if(r.passed===(r.issues.length===0) && r.passed===!hasKnownFailure
+      && sourceIssuesMatch&&!premiseSelectionReviewIssues(r,receipt.selection).length
       &&r.sourceChecks?.every(row=>row.status!=='unknown')
       &&r.payoffChecks?.length===1
       &&!premisePayoffReviewIssues({payoffChecks:r.payoffChecks},receipt.selection).length
@@ -66,6 +71,105 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
      receipts.set(key(input.selected[index]),structuredClone(receipt));
    }
   }
+}
+
+/** Source/genre/category/payoff checks are local to one premise. Pairwise overlap
+ * is deliberately not cached: changed cards must still be compared to retained cards. */
+export async function reviewChangedPremiseSources(selection:PremiseSelectionResult,scope:string,
+ receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult,budget?:ReviewCallBudget)=>Promise<PremiseSelectionReview>,
+ observe?:(counts:{reused:number;reviewed:number})=>void,
+ reviewPlanOnly?:(pending:PremiseSelectionResult,prior:PremiseSelectionReview,budget:ReviewCallBudget)=>Promise<PremiseSelectionReview>,
+ sharedBudget?:ReviewCallBudget):Promise<PremiseSelectionReview> {
+ const key=(item:PremiseSelectionResult['selected'][number])=>sourceReceiptKey(selection,scope,item);
+ const requiredGenres=(()=>{try{const parsed=JSON.parse(scope);return Array.isArray(parsed?.requiredGenres)?parsed.requiredGenres as string[]:[];}catch{return [];}})();
+ const hits=selection.selected.map(item=>receipts.get(key(item)));
+ const pending=selection.selected.filter((_item,index)=>!hits[index]);
+ observe?.({reused:selection.selected.length-pending.length,reviewed:pending.length});
+ // A citation-only correction changes the causalPlan, not the already
+ // independently checked source story, category or genre facts. Re-review its
+ // payoff links, but do NOT repeat the full source/category/genre audit.
+ // Only use the fast path when it replaces at least two existing source
+ // partitions, so physical call count cannot grow. Other changes retain the
+ // original complete independent review without any shortcut.
+ const priorById=new Map<string,Receipt>();
+ if(reviewPlanOnly&&sharedBudget){
+  for(const item of pending){
+   const seed=selection.pool.find(row=>row.premiseId===item.premiseId);
+   for(const receipt of receipts.values()){
+    const previous=receipt.selection.selected[0];
+    if(!previous||previous.premiseId!==item.premiseId
+      ||JSON.stringify(receipt.selection.pool[0])!==JSON.stringify(seed)
+      ||JSON.stringify({...previous,causalPlan:undefined})!==JSON.stringify({...item,causalPlan:undefined})
+      ||JSON.stringify(previous.causalPlan)===JSON.stringify(item.causalPlan)
+      ||receipt.review.sourceChecks?.some(row=>row.status!=='preserved')
+      ||!receipt.review.sourceChecks?.length
+      ||receipt.review.genreChecks?.some(row=>row.status!=='fulfilled')
+      ||receipt.review.categoryChecks?.some(row=>row.status!=='fulfilled')
+      ||!receipt.review.payoffChecks?.length)continue;
+    // The scope is part of the exact receipt key. A receipt from another
+    // standard or manual genre selection is never a reusable proof.
+    if(!receipts.has(sourceReceiptKey(receipt.selection,scope,previous)))continue;
+    priorById.set(String(item.premiseId),receipt);break;
+   }
+  }
+ }
+ const planPending=pending.filter(row=>priorById.has(String(row.premiseId)));
+ const fullPending=pending.filter(row=>!priorById.has(String(row.premiseId)));
+ // When ALL changed identities only corrected their causal citation index,
+ // the earlier independent source/category/genre verdict is still complete.
+ // Rechecking the unchanged ten fields per card via the full source model
+ // wastes the slowest preselection phase. Re-audit every changed payoff link
+ // once with the EXISTING review allowance and retain the original source
+ // evidence; never reuse a negative payoff verdict as a pass.
+ if(reviewPlanOnly&&sharedBudget&&pending.length>0&&planPending.length===pending.length){
+  const unchanged=hits.filter((row):row is Receipt=>!!row);
+  const pendingSelection:PremiseSelectionResult={...selection,selected:pending,
+   pool:selection.pool.filter(seed=>pending.some(item=>item.premiseId===seed.premiseId))};
+  const previous=planPending.map(item=>priorById.get(String(item.premiseId))!);
+  const independentBaseline=mergePremiseSourceBatches(pendingSelection,
+   previous.map(row=>row.selection),previous.map(row=>row.review));
+  const checked=await reviewPlanOnly(pendingSelection,independentBaseline,sharedBudget);
+  const combined=mergePremiseSourceBatches(selection,
+   [...unchanged.map(row=>row.selection),pendingSelection],
+   [...unchanged.map(row=>row.review),checked]);
+  cacheVerifiedSourceReview(pendingSelection,checked,scope,receipts,requiredGenres);
+  return combined;
+ }
+ const batchSize=readGenerationBudgets().sourceBatchSize;
+ const grouping=readGenerationBudgets();
+ const existingCallFloor=(grouping.reviewGroupingMode===0&&pending.length<4)
+   ?1:Math.ceil(pending.length/Math.max(1,batchSize));
+ if(reviewPlanOnly&&sharedBudget&&planPending.length&&fullPending.length
+    &&existingCallFloor>=2&&planPending.length<=batchSize&&fullPending.length<=batchSize
+    &&sharedBudget.remaining>=2){
+   const makeSelection=(items:typeof pending):PremiseSelectionResult=>({...selection,selected:items,
+     pool:selection.pool.filter(seed=>items.some(item=>item.premiseId===seed.premiseId))});
+   const cases=[{kind:'full' as const,selection:makeSelection(fullPending)},
+     {kind:'plan' as const,selection:makeSelection(planPending)}];
+   const parts=await independentReviewBatches(cases,sharedBudget,2,async ({kind,selection:part},_index,budget)=>{
+    if(kind==='full')return {selection:part,review:await review(part,budget)};
+    const prior=planPending.map(item=>priorById.get(String(item.premiseId))!);
+    const base=mergePremiseSourceBatches(part,prior.map(row=>row.selection),prior.map(row=>row.review));
+    return {selection:part,review:await reviewPlanOnly(part,base,budget)};
+   });
+   const reused=hits.filter((row):row is Receipt=>!!row);
+   const merged=mergePremiseSourceBatches(selection,[...reused,...parts].map(row=>row.selection),
+     [...reused,...parts].map(row=>row.review));
+   // All branches store only independently evidenced, same-scope verdicts.
+   // A repeated unchanged plan correction must not repay the same review.
+   for(const part of parts)cacheVerifiedSourceReview(part.selection,part.review,scope,receipts,requiredGenres);
+   return merged;
+ }
+ let fresh:Receipt|undefined;
+ if(pending.length){
+  const input=pending.length===selection.selected.length?selection:{...selection,selected:pending,
+   pool:selection.pool.filter(seed=>pending.some(item=>item.premiseId===seed.premiseId))};
+  fresh={selection:input,review:await review(input)};
+  // Every memoized verdict is bound to this exact premise and source/standard.
+  // Reuse a complete, evidenced rejection too: re-scoring the very same failed
+  // input cannot remove its defect. Unknown/incomplete results are never memoized.
+
+  cacheVerifiedSourceReview(input,fresh.review,scope,receipts,requiredGenres);
  }
  if(!hits.some(Boolean))return fresh!.review;
  const parts=hits.filter((entry):entry is Receipt=>!!entry);

@@ -49,6 +49,92 @@ describe('public rule governance', () => {
     expect(activeSystemWorkflowRules().every(rule=>rule.id&&rule.summary)).toBe(true);
   });
 
+  it('requires read-first source cleanup and same-change documentation synchronization without parallel standards', () => {
+    const gov = SYSTEM_WORKFLOW_RULES.find(rule => rule.id === 'GOV-004')!;
+    const policy = gov.details!.join(' ');
+    expect(policy).toContain('先读取当前分支README.md、DEVELOPMENT_GOVERNANCE.md');
+    expect(policy).toContain('删除旧入口、旧分支、重复上下文和过时测试');
+    expect(policy).toContain('同步更新唯一执行标准');
+    expect(policy).toContain('真实token、耗时与质量需同版本本地运行证实');
+    expect(gov.consumers).not.toContain('prompt');
+    const workflow = SYSTEM_WORKFLOW_RULES.find(rule => rule.id === 'WF-002')!;
+    expect(workflow.details!.join('')).toContain('长篇固定顺序Prompt链的节点全部必需');
+    expect(workflow.details!.join('')).toContain('任一节点失败立即停止下游');
+    expect(workflow.implementationRefs).toContain('server/src/chain/chain-engine.service.ts');
+    expect(workflow.implementationRefs).toContain('server/src/chain/chain-template.service.ts');
+
+
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    const maintenance = readFileSync(join(repoRoot, 'DEVELOPMENT_GOVERNANCE.md'), 'utf8');
+    const api = readFileSync(join(process.cwd(), 'docs/API.md'), 'utf8');
+    const skill = readFileSync(join(repoRoot, 'docs/skills/novel-source-quality/SKILL.md'), 'utf8');
+    expect(readme).toContain('[开发治理规范](DEVELOPMENT_GOVERNANCE.md)');
+    expect(readme).toContain('同一轮变更');
+    expect(maintenance).toContain('每轮接续先读权威，改完同步维护');
+    expect(maintenance).toContain('旧入口、旧提示词');
+    expect(api).toContain('同批原池');
+    expect(api).toContain('短篇先审核并保存世界观');
+    expect(api).not.toContain('缺项时最多使用同一模型补齐一次');
+    expect(api).toContain('长篇首次创建通过 `long-novel-init-foundation`');
+    expect(api).toContain('独立 `POST /api/v1/chain/generate-outline`');
+    expect(api).not.toContain('两条固定顺序的 Prompt 规划链');
+    expect(api).not.toContain('旧 `Transform`/`Condition` 编排');
+    expect(readme).toContain('长篇首次创建通过 `long-novel-init-foundation`');
+    expect(readme).toContain('独立 `/chain/generate-outline`');
+    expect(readme).not.toContain('长篇创建使用两条固定顺序的规划链');
+    const chainTypes = readFileSync(join(process.cwd(), 'src/chain/chain.types.ts'), 'utf8');
+    expect(chainTypes).toContain("export type NodeType = 'prompt';");
+    expect(chainTypes).not.toContain('export type ExecutionMode');
+    expect(chainTypes).not.toContain('export interface ChainConfig');
+    expect(chainTypes).not.toContain('skipOnEmptyInput');
+    expect(chainTypes).not.toContain('outputMapping');
+    expect(chainTypes).toContain('promptTemplateId: string;');
+    const chainEngine = readFileSync(join(process.cwd(), 'src/chain/chain-engine.service.ts'), 'utf8');
+    expect(chainEngine).not.toContain('strictMode');
+    expect(chainEngine).not.toContain('executeTransformNode(');
+    expect(chainEngine).not.toContain('executeConditionNode(');
+    expect(chainEngine).not.toContain("overallState = errors.length > 0 ? 'partial'");
+    const templates = readFileSync(join(process.cwd(), 'src/chain/chain-template.service.ts'), 'utf8');
+    expect(templates).not.toContain('config: { timeout:');
+    expect(templates).not.toContain('retryCount: 0');
+
+    expect(chainTypes).not.toContain('export interface Branch');
+
+    expect(api).not.toContain('QUALITY_EXECUTION.md` 为唯一规范');
+    expect(api).not.toContain('代码 + `QUALITY_EXECUTION.md` + 测试');
+    expect(skill).toContain('唯一执行标准 server/shared/src/执行标准.ts');
+    expect(skill).toContain('删掉被替代的旧分支、重复提示词和过时断言');
+    expect(skill).not.toContain('公共正文要求只在那里维护');
+    expect(skill).not.toContain('不自动提交Git');
+    expect(skill).toContain('Git 修改、提交和推送以当前用户授权');
+    expect(readme).not.toContain('唯一前置 Gate 的候选证据');
+    const publicDocuments: readonly [string, string][] = [
+      ['README.md', readme],
+      ['DEVELOPMENT_GOVERNANCE.md', maintenance],
+      ['QUALITY_EXECUTION.md', readFileSync(join(repoRoot, 'QUALITY_EXECUTION.md'), 'utf8')],
+      ['server/docs/API.md', api],
+      ['server/docs/user-guide.md', readFileSync(join(process.cwd(), 'docs/user-guide.md'), 'utf8')],
+      ['docs/skills/novel-source-quality/SKILL.md', skill],
+    ];
+    for (const [path, currentText] of publicDocuments) {
+      expect(currentText, path).toContain('server/shared/src/执行标准.ts');
+      // No old production instructions may survive in a reference document.
+      for (const obsolete of [
+        /缺项时最多使用同一模型补齐一次/,
+        /一次请求只能补齐一次/,
+        /QUALITY_EXECUTION\.md.{0,35}(?:为唯一规范|作为唯一规范)/,
+        /registerAllTemplates/,
+        /正文统一由.{0,30}单次\s*LLM/,
+        /需要包含\s*5\s*个核心人物/,
+        /天龙8步已于/,
+      ]) {
+        expect(currentText, path).not.toMatch(obsolete);
+      }
+    }
+
+
+  });
+
   it('every active rule has implementation ownership and P0/P1 rules have non-UI execution/governance consumers', () => {
     const failures = activeSystemWorkflowRules().flatMap((rule) => {
       const problems: string[] = [];
@@ -84,6 +170,19 @@ describe('public rule governance', () => {
       /buildOutlineAdherenceContract/,
       /buildNarrativeQualityContract/,
       /buildAlignmentRepairPrompt/,
+      /node_9_chapter_synthesis/,
+      /node_0_context_assembly/,
+      /_branch_jump/,
+      /prompt = JSON\.stringify\(input, null, 2\)/,
+
+      /chapterSynthesisMaxTokens/,
+      /请将以下8步草稿扩写并重写/,
+      /天龙8步已于.*取消，短篇与长篇正文统一由/,
+      /registerAllTemplates/,
+      /三个链的每个节点都要求/,
+      /三条链都由后台任务执行/,
+
+
       /SHORT_IDEA_HOOK_MIN_SIGNALS/,
       /每1000字必须有钩子或爽点/,
       /至少每3组问答插入/,

@@ -23,8 +23,17 @@ export function saveGenerationBudgets(value:unknown):GenerationBudgets{
  const next=validateGenerationBudgets({...readGenerationBudgets(),...(value as object)}),file=path.join(resolveDataDir(),'generation-budgets.json');
  fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(next,null,2));fs.renameSync(temp,file);return next;
 }
-/** Official DeepSeek /models lists 393216 output tokens for deepseek-flash. Other models keep their existing configured limit. */
-export function generationOutputBounds(model:string,requested:number,settings=readGenerationBudgets()){
- if(model!=='deepseek-flash')return {initial:requested,ceiling:32768};
- return {initial:Math.min(settings.structuredOutputCeiling,Math.max(requested,settings.structuredOutputTokens)),ceiling:settings.structuredOutputCeiling};
+/**
+ * Inherited JSON calls use the saved first-round amount and recovery ceiling.
+ * A route default is not an explicit per-task override: treating it as one made
+ * the visible structured settings ineffective and restored the old 32768 cap.
+ * Explicit task limits, ordinary text and other models retain their own budgets.
+ * Transport recovery still consumes the task's existing physical-call allowance.
+ */
+export function generationOutputBounds(model:string,requested:number,settings=readGenerationBudgets(),useStructuredDefaults=false){
+ if(model!=='deepseek-flash')return {initial:requested,ceiling:Math.max(requested,32768)};
+ const initial=Math.min(useStructuredDefaults?Math.max(requested,settings.structuredOutputTokens):requested,settings.structuredOutputCeiling);
+ const ordinaryCeiling=Math.min(settings.structuredOutputCeiling,Math.max(initial,32768));
+ const ceiling=useStructuredDefaults||requested>=settings.structuredOutputTokens?settings.structuredOutputCeiling:ordinaryCeiling;
+ return {initial,ceiling:Math.max(initial,ceiling)};
 }

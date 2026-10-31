@@ -1,12 +1,13 @@
 /**
  * Prompt Chain 模块
  *
- * 提供完整的链式编排引擎，包含：
- * - Chain 编排引擎（顺序执行/条件分支/重试）
- * - Prompt 模板仓库（只注册有真实消费者的模板；清单与理由见 prompt-registry.service 的 registerAllTemplates）
- * - 天龙8步已于 2026-07-24 取消，短篇与长篇正文统一由 /chain/generate 单次 LLM 严格按大纲生成
- * - RealLLM 服务（真实 LLM API 调用；同输入创建阶段由同一 provider 做持久化幂等复用）
- * - /chain/* 路由按 planning / writing / utility 三类小 Controller 注册
+ * 当前仅通过 ChainTemplateService 的两条固定长篇规划链使用 ChainEngine；
+ * PromptRegistryService.registerFixedTemplates 只维护这两条链实际引用的五个模板。
+ * 正文生成走 ChainWritingController → ChainController 的现行生成与质量闭环，
+ * 不是历史八步合成节点，也不能称为只有一次 LLM 物理调用。
+ * RealLLM 提供实际模型调用，IdempotentRealLLMService 管理可复用的同输入调用。
+ * /chain/* 路由按 planning / writing / utility Controller 注册；
+ * 小说业务判据只来自 server/shared/src/执行标准.ts。
  *
  * ⚠️ MockLLMService 已移除 — 研发中禁用模拟数据，必须接入真实 LLM
  */

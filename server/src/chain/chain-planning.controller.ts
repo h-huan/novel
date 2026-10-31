@@ -1,4 +1,6 @@
 import { Body, Controller, Get, HttpException, Logger, Param, Post, Sse } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { redactDiagnosticText, redactDiagnosticValue } from '../common/diagnostic-redaction';
 import { ApiTags } from '@nestjs/swagger';
 import { ChainController } from './chain.controller';
 import { generationTasks } from '../common/generation-cancellation';
@@ -28,30 +30,52 @@ export class ChainPlanningController {
   async ideaDiscover(@Body() dto: Parameters<ChainController['ideaDiscover']>[0]) {
     const requested = Number(dto.count);
     const desiredCount = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 10) : 5;
-
-    // GEN-002：筛选与有界修复由 orchestrator 负责；适配层保留合格卡与缺额诊断。
-    const result: any = await this.chain.ideaDiscover({ ...dto, count: desiredCount });
+    // The renderer owns the request ID used by cancellation. Replacing it
+    // here orphaned the model task after a UI timeout or Cancel click.
+    // Generate an ID only for legacy callers that did not send a valid one.
+    const clientRequestId = typeof dto.discoveryRequestId === 'string' ? dto.discoveryRequestId.trim() : '';
+    const requestedDiscoveryRequestId = /^[A-Za-z0-9_-]{1,128}$/.test(clientRequestId)
+      ? clientRequestId : randomUUID();
+    const startedAt = new Date().toISOString();
+    const requestSnapshot = redactDiagnosticValue({
+      ...ideaDiscoveryAuthorSettings(dto),
+      storyType: dto.storyType ?? null,
+      platform: dto.platform ?? null,
+      storyCategory: dto.storyCategory ?? null,
+      targetAudience: dto.targetAudience ?? null,
+      requestedCount: desiredCount,
+    });
+    let result: any = null;
+    let thrownError: unknown = null;
+    try {
+      result = await this.chain.ideaDiscover({ ...dto, count: desiredCount, discoveryRequestId: requestedDiscoveryRequestId });
+    } catch (error) {
+      thrownError = error;
+    }
+    const finishedAt = new Date().toISOString();
+    const discoveryRequestId = String(result?.discoveryRequestId ?? (thrownError as any)?.discoveryRequestId ?? requestedDiscoveryRequestId);
+    const auditStartedAt = String(result?.discoveryRequestStartedAt ?? (thrownError as any)?.discoveryRequestStartedAt ?? startedAt);
+    const auditFinishedAt = String(result?.discoveryRequestFinishedAt ?? (thrownError as any)?.discoveryRequestFinishedAt ?? finishedAt);
 
     if (this.database) {
       try {
-        await this.database.dualWrite('latest_idea_discovery_audit', {
+        await this.database.dualWrite('latest_idea_discovery_audit', redactDiagnosticValue({
           schemaVersion: 1,
-          generatedAt: new Date().toISOString(),
-          request: {
-            ...ideaDiscoveryAuthorSettings(dto),
-            storyType: dto.storyType ?? null,
-            platform: dto.platform ?? null,
-            storyCategory: dto.storyCategory ?? null,
-            targetAudience: dto.targetAudience ?? null,
-            requestedCount: desiredCount,
-          },
-          success: result?.success === true,
-          totalIdeas: Number(result?.totalIdeas ?? (Array.isArray(result?.ideas) ? result.ideas.length : 0)) || 0,
+          discoveryRequestId,
+          startedAt: auditStartedAt,
+          finishedAt: auditFinishedAt,
+          generatedAt: auditFinishedAt,
+          request: requestSnapshot,
+          success: !thrownError && result?.success === true,
+          totalIdeas: thrownError ? 0 : Number(result?.totalIdeas ?? (Array.isArray(result?.ideas) ? result.ideas.length : 0)) || 0,
           qualityWarning: result?.qualityWarning ?? null,
-          error: result?.error ?? null,
-          appealGate: result?.appealGate ?? null,
-          acceptedIdeas: Array.isArray(result?.ideas)
+          error: thrownError
+            ? redactDiagnosticText(thrownError instanceof Error ? thrownError.message : String(thrownError))
+            : result?.error == null ? null : redactDiagnosticText(result.error),
+          appealGate: (thrownError as any)?.appealGate ?? result?.appealGate ?? null,
+          acceptedIdeas: !thrownError && Array.isArray(result?.ideas)
             ? result.ideas.slice(0, desiredCount).map((idea: any) => ({
+                sourcePremiseId: idea?.sourcePremiseId ?? null,
                 title: idea?.title ?? null,
                 hook: idea?.hook ?? null,
                 coreConflict: idea?.coreConflict ?? idea?.conflict ?? null,
@@ -61,11 +85,12 @@ export class ChainPlanningController {
                 ideaAppealGate: idea?.ideaAppealGate ?? null,
               }))
             : [],
-        });
+        }));
       } catch (error) {
-        this.logger.warn(`灵感发现诊断落库失败（不影响题材返回）：${error instanceof Error ? error.message : String(error)}`);
+        this.logger.warn('灵感发现诊断落库失败（不影响题材返回）：' + redactDiagnosticText(error instanceof Error ? error.message : String(error)));
       }
     }
+    if (thrownError) throw thrownError;
     return result;
   }
 

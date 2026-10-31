@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
-import { chapterDetailStructureIssues } from './chapter-detail-contract';
+import { chapterDetailStructureIssues, chapterDetailJsonExample, unwrapSingleChapterEnvelope } from './chapter-detail-contract';
 
 const context = { allowedMin: CHAPTER_WORD_RANGE.min, allowedMax: CHAPTER_WORD_RANGE.max, chapterNumber: 1, totalChapters: 5 };
 const chapter = () => ({
@@ -9,6 +9,42 @@ const chapter = () => ({
   scenes: [{ location: '旧食堂', goal: '确认能否盘铺', conflict: '租期与成本尚未明确', outcome: '查清租约并签订交接清单' }],
   characterActions: [{ character: '主角', action: '核对清单后接收钥匙', result: '取得食堂经营权' }],
   conflicts: [], highlights: [], foreshadowing: [], foreshadowingRecover: [], characterStates: [], hook: '次日开始营业', emotionalTone: '谨慎期待',
+});
+
+describe('chapter payload object envelopes never weaken GEN-005',()=>{
+ it('accepts only a chapter-like single nested object, not arbitrary metadata',()=>{
+  const inner=chapter();
+  for(const key of ['data','result','outline']){
+   expect(unwrapSingleChapterEnvelope({[key]:inner})).toEqual(inner);
+  }
+  const outer={...inner,data:{title:'unrelated nested record'}};
+  expect(unwrapSingleChapterEnvelope(outer)).toEqual(outer);
+  expect(unwrapSingleChapterEnvelope({data:{message:'error'}})).toEqual({data:{message:'error'}});
+ });
+ it('still rejects an incomplete nested chapter after unpacking',()=>{
+  const nested=unwrapSingleChapterEnvelope({data:{title:'节选',targetWords:3500}});
+  expect(chapterDetailStructureIssues(nested as Record<string,any>,{
+    allowedMin:4400,allowedMax:5000,chapterNumber:3,totalChapters:4,
+  })).toContain('scenes必须是非空数组');
+ });
+});
+
+describe('chapter example follows actual dynamic word limits',()=>{
+ it('never shows the model a disallowed static 3500-word example for a 4400-5000 chapter',()=>{
+  const text=chapterDetailJsonExample(4400,5000,false,'第三章：旧销归谁');
+  const example=JSON.parse(text.slice(text.indexOf('{')));
+  expect(example.targetWords).toBe(4700);
+  expect(example.title).toBe('第三章：旧销归谁');
+  expect(chapterDetailStructureIssues(example,{allowedMin:4400,allowedMax:5000,chapterNumber:3,totalChapters:4})).toEqual([]);
+  expect(example.characterActions).toHaveLength(1);
+ });
+ it('covers another legal range and the final-chapter boundary',()=>{
+  const text=chapterDetailJsonExample(2000,4000,true);
+  const example=JSON.parse(text.slice(text.indexOf('{')));
+  expect(example.targetWords).toBe(3000);
+  expect(chapterDetailStructureIssues(example,{allowedMin:2000,allowedMax:4000,chapterNumber:4,totalChapters:4})).toEqual([]);
+  expect(()=>chapterDetailJsonExample(5000,4400,false)).toThrow();
+ });
 });
 
 describe('chapter detail schema under GEN-005', () => {

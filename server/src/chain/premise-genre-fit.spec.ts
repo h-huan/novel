@@ -29,7 +29,7 @@ describe('manual genre proof contract',()=>{
  it('retains actual missing and unknown states under numbered evidence',()=>{
   const batch=selection(),value=fit(batch) as any;value.genreChecks[0]={ref:'S1.genre1',status:'missing',reason:'当前隐藏能力没有改变任何误判与人物行动选择'};
   expect(materializePremiseGenreFit(value,batch,genres)[0].kind).toBe('selection_fit');
-  value.genreChecks[0].status='unknown';expect(()=>materializePremiseGenreFit(value,batch,genres)).toThrow('尚未确认');
+  value.genreChecks[0].status='unknown';expect(materializePremiseGenreFit(value,batch,genres)).toEqual([expect.objectContaining({kind:'selection_fit',reason:expect.stringContaining('未确认')})]);
  });
  it('requires every chosen genre on every card, rejecting omissions, duplicates and wrong-card evidence',()=>{
   const batch=selection(),value=fit(batch);expect(value.genreChecks).toHaveLength(15);
@@ -49,7 +49,7 @@ describe('manual genre proof contract',()=>{
  });
  it('blocks unknown conclusions without fabricating a story conflict; random selection needs no manual proofs',()=>{
   const batch=selection(),value=fit(batch);value.genreChecks[0].status='unknown';
-  expect(()=>materializePremiseGenreFit(value,batch,genres)).toThrow('尚未确认');expect(materializePremiseGenreFit({},batch,[])).toEqual([]);
+  expect(materializePremiseGenreFit(value,batch,genres)).toEqual([expect.objectContaining({kind:'selection_fit',reason:expect.stringContaining('未确认')})]);expect(materializePremiseGenreFit({},batch,[])).toEqual([]);
  });
  it('cannot accept preserved source checks without the new fit proofs',async()=>{
   const batch=premiseSourceBatches(selection())[0],c=Object.create(ChainController.prototype) as any;
@@ -80,7 +80,7 @@ describe('source batches through the production JSON retry helper',()=>{
   c.realLLM={generate:vi.fn(async(request:any)=>{
    expect(request.physicalCallBudget.remaining).toBe(1);
    request.physicalCallBudget.remaining--;
-   const batch=batches[index++],value:any={payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'原池明确行动和当前展开事件及后果可同时成立'})),...fit(batch)};
+   const batch=batches[index++],value:any={payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'人物已有实际选择与因果条件支撑反转变化'},reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'原池明确行动和当前展开事件及后果可同时成立'})),...fit(batch)};
    value.genreChecks=value.genreChecks.map(({field,quote,...row}:any)=>({...row,evidenceRef:row.ref.split('.')[0]+'.'+field}));
    if(broken)value.genreChecks[0].evidenceRef='S1.storyCore';
    return {content:JSON.stringify(value)};
@@ -93,9 +93,12 @@ describe('source batches through the production JSON retry helper',()=>{
   expect(result.genreChecks.at(-1).evidenceRef).toBe('S5.protagonistSituation');
   expect(parent.remaining).toBe(0);expect(c.realLLM.generate).toHaveBeenCalledTimes(2);
  });
- it('does not retry using a concurrently started peer batch allowance or return a partial pass',async()=>{
+ it('rejects malformed genre evidence per card without spending a peer batch allowance',async()=>{
   const {c,original,parent}=fixture(true);
-  await expect(c.reviewPremiseSelection(original,'全部手动流派真实约束','source_drift',parent,false,genres)).rejects.toThrow('S1.genre1');
+  const result=await c.reviewPremiseSelection(original,'全部手动流派真实约束','source_drift',parent,false,genres);
+  expect(result.passed).toBe(false);
+  expect([...new Set(result.issues.map((issue:any)=>issue.premiseId))]).toEqual(['A','D']);
+  expect(result.genreChecks.filter((row:any)=>row.ref.startsWith('S2.')).every((row:any)=>row.status==='fulfilled')).toBe(true);
   expect(c.realLLM.generate).toHaveBeenCalledTimes(2);expect(parent.remaining).toBe(0);
  });
 });

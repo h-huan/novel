@@ -1,7 +1,7 @@
 import { ideaCardStructuringDirective } from '../../chain/idea-discovery-contract';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { standardDirectiveCache } from './standard-directive.cache';
-import { activeSystemWorkflowRules, WORLD_SOURCE_COMPLETENESS_POLICY, IDEA_PRESELECTION_REVIEW_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY, OUTLINE_STATE_ACCUMULATION_POLICY, CROSS_STAGE_REVIEW_POLICY, STORY_CAUSAL_REVIEW_POLICY, CHARACTER_VOICE_POLICY, READER_ENGAGEMENT_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, SOURCE_QUALITY_POLICY } from './system-workflow-rules.registry';
+import { activeSystemWorkflowRules, WORLD_SOURCE_COMPLETENESS_POLICY, IDEA_PRESELECTION_REVIEW_POLICY, TEMPORAL_FACT_CONTINUITY_POLICY, OUTLINE_STATE_ACCUMULATION_POLICY, CROSS_STAGE_REVIEW_POLICY, STORY_CAUSAL_REVIEW_POLICY, CHARACTER_VOICE_POLICY, READER_ENGAGEMENT_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, SOURCE_QUALITY_POLICY, STORY_PREREQUISITE_POLICY, IDEA_REVIEW_EVIDENCE_POLICY, IDEA_PAYOFF_BRIDGE_POLICY, SHORT_STORY_QUALITY_POLICY, IDEA_CARD_PROMISE_CLOSURE_POLICY } from './system-workflow-rules.registry';
 import { RealLLMService } from '../../chain/real-llm.service';
 import { crossStageReviewDirective } from '../../chain/cross-stage-review';
 import { buildOutlineContinuityContext, buildOutlineFactReviewPrompt } from '../../chain/outline-fact-ledger';
@@ -104,10 +104,30 @@ it('uses task-specific generation details while retaining full final quality rul
  expect(selected).not.toContain('坐标由程序按 UTF-16');
  expect(standardDirectiveCache.snapshot('idea_generate',true,'idea_premise_selection').ruleIds)
   .toEqual(standardDirectiveCache.snapshot('idea_generate').ruleIds);
- expect(standardDirectiveCache.get('idea_generate','idea_presentation_review')).toBe(full);
+ const presentation=standardDirectiveCache.get('idea_generate','idea_presentation_review');
+ expect(presentation.length).toBeLessThan(full.length);
+ for(const policy of [IDEA_PRESELECTION_REVIEW_POLICY,IDEA_CARD_PROMISE_CLOSURE_POLICY,
+   IDEA_REVIEW_EVIDENCE_POLICY,IDEA_PAYOFF_BRIDGE_POLICY,SHORT_STORY_QUALITY_POLICY,
+   READER_ENGAGEMENT_POLICY,PLATFORM_MEASUREMENT_REVIEW_POLICY])expect(presentation).toContain(policy);
+ expect(count(presentation,STORY_PREREQUISITE_POLICY)).toBe(1);
+ expect(presentation).not.toContain('坐标由程序按 UTF-16');
  expect(standardDirectiveCache.get('review')).toContain('坐标由程序按 UTF-16');
  expect(standardDirectiveCache.snapshot('review').ruleIds).toEqual(expect.arrayContaining(['QLT-003','QLT-011','QLT-014']));
  standardDirectiveCache.clear();
+});
+it('keeps full discovery judgments and sources while excluding server-owned retries and obsolete self-comparison output',()=>{
+ standardDirectiveCache.rebuild();
+ const pool=standardDirectiveCache.get('idea_generate','idea_premise_pool_generation');
+ expect(pool).toContain(IDEA_CARD_PROMISE_CLOSURE_POLICY);
+ expect(count(pool,STORY_PREREQUISITE_POLICY)).toBe(1);
+ expect(pool).not.toContain('坐标由程序按 UTF-16');
+ const source=standardDirectiveCache.get('idea_generate','idea_premise_source_drift_review');
+ for(const text of ['逐项覆盖','payoffChecks','unknown'])expect(source).toContain(text);
+ const replacement=standardDirectiveCache.get('idea_generate','idea_premise_pool_reselection');
+ expect(replacement).toContain('不输出comparisons自评数组');
+ expect(replacement).not.toContain('必须另带comparisons数组');
+ expect(source).not.toContain('presentationMaxPhysicalCalls');
+ expect(standardDirectiveCache.get('review','alignment_review')).toContain('坐标由程序按 UTF-16');
 });
 it('keeps chapter causal and source requirements during outline generation without injecting prose-report machinery',()=>{
  standardDirectiveCache.rebuild();

@@ -16,7 +16,7 @@ import { styleFingerprint } from '../modules/writing-quality/style-fingerprint';
 import { missingDimensionJudgePrompt, parseStageScore, SCORE_DIMENSIONS, stageJudgePrompt } from '../modules/writing-quality/stage-score';
 import { deterministicPlatformReview, partitionPlatformIssues } from '../modules/writing-quality/platform-quality-rules';
 import type { QualityStage } from '../modules/writing-quality/quality-issue';
-import { currentCreationProjectId, expectsProjectId } from '../common/creation-context';
+import { currentCreationProjectId, currentDiscoveryRequestId, expectsProjectId } from '../common/creation-context';
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import OpenAI, { type ClientOptions } from 'openai';
 import { ILLMService } from './llm.interface';
@@ -50,6 +50,7 @@ type ModelUsage = {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  reasoningTokens?: number;
 };
 
 type ModelCallResult = {
@@ -261,8 +262,12 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
     assertGenerationActive();
+    const discoveryRequestId = request.metrics?.discoveryRequestId ?? currentDiscoveryRequestId();
+    if (discoveryRequestId && request.metrics?.discoveryRequestId !== discoveryRequestId) {
+      request = { ...request, metrics: { ...request.metrics, discoveryRequestId } };
+    }
     const start = Date.now();
-    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false);
+    const run = this.metrics?.beginRun?.(request.metrics?.projectId ?? currentCreationProjectId() ?? undefined, request.scenario || 'daily', request.prompt, request.systemPrompt, request.metrics?.stepKey, request.metrics?.chapterIndex, request.injectStandard !== false, discoveryRequestId);
     const enriched = run?.constitution ? { ...request, systemPrompt: [request.systemPrompt,
       '【项目唯一创作宪法；所有生成内容必须继承】', JSON.stringify(run.constitution),
       ...(request.scenario === 'long-novel-flexible-outline' && run.context
@@ -849,9 +854,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
 
     // 路由服务已返回具体版本号（含自定义场景/写作模式），直接使用
     const modelName = routedModel.modelName;
+    const useStructuredDefaults = request.responseFormat === 'json_object' && request.maxTokens === undefined;
+    const outputBounds = generationOutputBounds(modelName, configuredMaxTokens, undefined, useStructuredDefaults);
 
     this.logger.log(
-      `[RealLLM] calling model: ${modelName} (version: ${routedModel.modelVersion}), scenario: ${request.scenario || 'daily'}`,
+      `[RealLLM] calling model: ${modelName} (version: ${routedModel.modelVersion}), scenario: ${request.scenario || 'daily'}, step: ${request.metrics?.stepKey || 'unspecified'}, initialMaxTokens=${outputBounds.initial}, recoveryMaxTokens=${outputBounds.ceiling}`,
     );
 
     const callTimeout = request.timeout ?? 600_000; // 默认10分钟
@@ -907,7 +914,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     const maxEmptyRetries = request.maxEmptyRetries === 0 ? 0 : 1;
     let thinkingDisabledAttempted = request.physicalCallBudget?.recoveryWithoutThinking === true;
     const hasRecoveryAllowance = () => !request.physicalCallBudget || request.physicalCallBudget.remaining > 0;
-    const callBudgetedModel = (...args: Parameters<RealLLMService['callModel']>) => {
+    // The step metric aggregates a logical request. This independent physical
+    // timeline records each actual provider attempt, including hidden retries
+    // and recoveries, without changing budgets, semantic review or persistence.
+    let physicalCallSequence = 0;
+    const callBudgetedModel = async (...args: Parameters<RealLLMService['callModel']>): Promise<ModelCallResult> => {
       assertGenerationActive();
       if (request.physicalCallBudget) {
         if (request.physicalCallBudget.remaining <= 0) {
@@ -915,21 +926,52 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         }
         request.physicalCallBudget.remaining--;
       }
-      return this.callModel(...args);
+      const call = ++physicalCallSequence;
+      const physicalStartedAt = Date.now();
+      const identity = {
+        discoveryRequestId: request.metrics?.discoveryRequestId ?? null,
+        stepKey: request.metrics?.stepKey ?? null,
+        attempt: request.metrics?.attempt ?? 0,
+        call,
+      };
+      try {
+        const result = await this.callModel(...args);
+        this.logger.log('[RealLLM physical] ' + JSON.stringify({
+          ...identity,
+          elapsedMs: Date.now() - physicalStartedAt,
+          promptTokens: result.usage?.promptTokens ?? null,
+          completionTokens: result.usage?.completionTokens ?? null,
+          reasoningTokens: result.usage?.reasoningTokens ?? null,
+          totalTokens: result.usage?.totalTokens ?? null,
+          finishReason: result.finishReason ?? null,
+          reasoningDisabled: args[8] === true || process.env.LLM_DISABLE_THINKING === '1',
+        }));
+        return result;
+      } catch (error) {
+        this.logger.warn('[RealLLM physical] ' + JSON.stringify({
+          ...identity,
+          elapsedMs: Date.now() - physicalStartedAt,
+          failed: true,
+          errorType: error instanceof Error ? error.name : typeof error,
+        }));
+        throw error;
+      }
     };
     // 显式单项契约与步骤/场景共同约束；普通多项 JSON 不获得额外恢复。
     const upstreamRepairUnit = request.structuredRepairUnitCount === 1 && request.scenario === 'review'
       && ['creation_cross_stage_repair','creation_cross_stage_path_design'].includes(request.metrics?.stepKey || '');
     const crossStageReviewUnit = request.structuredReviewUnitCount === 1 && request.scenario === 'review'
       && ['creation_cross_stage_review','creation_cross_stage_path_review'].includes(request.metrics?.stepKey || '');
-    const singleStructuredUnit = upstreamRepairUnit || crossStageReviewUnit || request.metrics?.stepKey === 'creation_chapter_detail'
+    const singleIdeaCardReview = request.structuredReviewUnitCount === 1
+      && request.scenario === 'idea_generate'
+      && request.metrics?.stepKey === 'idea_presentation_review';
+    const singleStructuredUnit = upstreamRepairUnit || crossStageReviewUnit || singleIdeaCardReview || request.metrics?.stepKey === 'creation_chapter_detail'
       || (request.structuredRepairIssueCount === 1 && request.scenario === 'refinement'
         && /^outline_local_repair_\d+$/.test(request.metrics?.stepKey || ''));
-    const unitLabel = upstreamRepairUnit ? '单组源头修订' : crossStageReviewUnit ? '完整跨阶段决定' : request.metrics?.stepKey === 'creation_chapter_detail' ? '单章详细大纲' : '单项局部修复';
+    const unitLabel = upstreamRepairUnit ? '单组源头修订' : crossStageReviewUnit ? '完整跨阶段决定' : singleIdeaCardReview ? '单张题材卡独立审核' : request.metrics?.stepKey === 'creation_chapter_detail' ? '单章详细大纲' : '单项局部修复';
     let lastEmptyError: Error | null = null;
     // 结构化输出被 finish_reason=length 截断时的"同模型扩容"状态：模型与 json_object 模式都不变（非降级），
     // 只把输出上限翻倍后用同一 prompt 重试。硬顶由 structured-truncation.ts 单点定义，与调用侧预算同源。
-    const outputBounds=generationOutputBounds(modelName,configuredMaxTokens);
     let currentMaxTokens = outputBounds.initial;
     // ⚠️ 历史缺陷（防复发，勿改回）：截断扩容曾与"空内容重试"共用同一个 attempt 计数，
     // 于是扩容窗口被空内容预算吃掉 —— 配置 8192 时只能扩到 16384 就抛
@@ -1009,6 +1051,25 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         );
 
         if (request.responseFormat === 'json_object' && result.finishReason === 'length') {
+          // A single idea-card review that produced *no JSON content at all* has
+          // already consumed its reasoning/output quota. Enlarging 131k→262k→
+          // 393k and paying for the same failed reasoning is the expensive path
+          // seen in local diagnostics. This is a failed-call recovery only:
+          // preserve normal reasoning for all successful runs; retry the exact
+          // same model, prompt, JSON contract and quota once without thinking.
+          // Partial JSON is different: it may actually need more output tokens
+          // and must retain the existing lossless expansion path.
+          if (singleIdeaCardReview && !result.content.trim() && !preserveThinking
+            && !thinkingDisabledAttempted && hasRecoveryAllowance()) {
+            this.logger.warn('单张完整卡审核推理耗尽且未产生JSON，沿用原额度同模型关闭思考补发一次；正常审核仍使用完整推理');
+            const recovered = await callWithoutThinking();
+            if (recovered.content.trim() && recovered.finishReason !== 'length') {
+              const response = this.toResponse(recovered, modelName, request, startTime);
+              emit('success', { resp: response });
+              return response;
+            }
+            stopTruncated(recovered, '单张完整卡审核无正文截断，关闭思考补发仍未取得完整JSON，停止无效扩容');
+          }
           // 关键修复：截断根因是输出配额不足，用相同 maxTokens 重试必然再次截断。
           // 在模型输出上限内把 maxTokens 翻倍，用【同一模型/同一 prompt/同一 json 模式】重试（不换模型、不去 json，非降级）。
           // 扩容预算独立于空内容重试预算：只要没到硬顶就继续翻倍，直到装得下或到顶。
@@ -1234,6 +1295,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       this.metrics.record({
         projectId: finalProjectId,
         runId: ctx?.runId,
+        discoveryRequestId: ctx?.discoveryRequestId ?? null,
         chapterIndex: ctx?.chapterIndex ?? null,
         stepKey: ctx?.stepKey ?? null,
         scenario: request.scenario || 'daily',
@@ -1276,6 +1338,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   private resolveReasoningEffort(scenario?: string, stepKey?: string): 'low' | 'medium' | 'high' | undefined {
     const configured = process.env.LLM_REASONING_EFFORT;
     if (configured) return configured === 'low' || configured === 'medium' || configured === 'high' ? configured : undefined;
+    // This task ONLY rebinds exact quotations to existing immutable story
+    // fields; the strict structural validator and independent semantic review
+    // remain unchanged. Avoid spending full narrative reasoning on an address
+    // repair that cannot add or edit a story fact.
+    if (scenario === 'idea_generate' && stepKey === 'idea_premise_causal_plan_contract') return 'low';
     if (scenario === 'idea_generate' && stepKey === 'idea_presentation_review') {
       const reviewOverride = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
       if (reviewOverride) return reviewOverride === 'low' || reviewOverride === 'medium' || reviewOverride === 'high' ? reviewOverride : undefined;
@@ -1420,12 +1487,14 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         if (delta) content += delta;
         const fr = chunk.choices?.[0]?.finish_reason;
         if (fr) finishReason = fr;
-        const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
+        const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } }).usage;
         if (chunkUsage) {
           usage = {
             promptTokens: typeof chunkUsage.prompt_tokens === 'number' ? chunkUsage.prompt_tokens : usage?.promptTokens,
             completionTokens: typeof chunkUsage.completion_tokens === 'number' ? chunkUsage.completion_tokens : usage?.completionTokens,
             totalTokens: typeof chunkUsage.total_tokens === 'number' ? chunkUsage.total_tokens : usage?.totalTokens,
+            reasoningTokens: typeof chunkUsage.completion_tokens_details?.reasoning_tokens === 'number'
+              ? chunkUsage.completion_tokens_details.reasoning_tokens : usage?.reasoningTokens,
           };
         }
       }

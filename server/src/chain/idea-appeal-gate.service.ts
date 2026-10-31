@@ -293,7 +293,11 @@ export class IdeaAppealGateService {
       ].filter((value) => value.length >= 8).length;
       if (structuredDistinctive === 0) issues.push('结构化题材证据缺少不可替代载体、差异化或二阶后果，题材身份仍不足');
     }
-    if (distinctivenessScore < minDistinctiveness) warnings.push(`词面差异度代理分偏低（${distinctivenessScore}/10）；仅用于排序/复核，不作为固定 N-of-M Hard Gate`);
+    // These two numbers are lexical signals. The independent presentation
+    // review checks actual differentiation and progression against the story.
+    if (distinctivenessScore < minDistinctiveness) {
+      warnings.push(`词面差异度代理分偏低（${distinctivenessScore}/10）；须由独立语义审查核对实际差异与阶段推进`);
+    }
 
     if (!struggleAgency) warnings.push('抗争/争取空间偏弱：后续章纲应让主角通过选择和行动获得热血感，而不是被动承受');
     if (!painPotential) warnings.push('题材卡尚未显出自然的情感代价；后续只能在建立关系/愿望投入后安排“刀点”，禁止为了虐而虐');

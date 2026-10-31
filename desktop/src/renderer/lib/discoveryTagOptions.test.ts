@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { discoveryTagOptions, toggleDiscoveryTagSelection, dictionaryDiscoveryTags, dictionaryRowsForTag } from './discoveryTagOptions';
+import { DISCOVERY_TAG_GROUPS } from '@novel/shared';
 
+describe('discovery group identity and display label',()=>{
+ it('shows world/setting separately from theme without changing saved tag group keys',()=>{
+  const group=DISCOVERY_TAG_GROUPS.find(item=>item.key==='主题与设定');
+  expect(group?.label).toBe('世界与设定');
+  const options=discoveryTagOptions(
+    {selectedGenres:['修仙'],selectedPlotTags:['亲情与利益'],selectedTones:['热血'],selectedSubmissionTags:[]},
+    {selectedGenres:[],selectedPlotTags:[],selectedTones:[],selectedSubmissionTags:[]},
+  );
+  expect(options.find(item=>item.value==='修仙')?.group).toBe('主题与设定');
+  expect(options.find(item=>item.value==='亲情与利益')?.group).toBe('主题');
+  expect(options.find(item=>item.value==='热血')?.group).toBe('情节与体验');
+  expect(DISCOVERY_TAG_GROUPS.map(item=>item.key)).not.toContain('世界与设定');
+ });
+});
 describe('字典与发现标签同步', () => {
   it('字典页与发现页复用同一投影，包含旧情绪词、别名和自建关系分组', () => {
     const rows = [
