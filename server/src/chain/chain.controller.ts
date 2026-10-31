@@ -41,7 +41,7 @@ import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosi
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, type PremiseSelectionReview } from './premise-selection-review';
+import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences,bindIdeaPresentationVerdicts } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -6609,11 +6609,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // Preserve all prior independently confirmed overlap failures unless
       // one of the actual pair's story identities changed or was removed.
       // Otherwise a plan-only repair silently upgrades a rejected pair.
-      const retainedOverlapIssues=previousReview
-        ? previousReview.issues.filter(issue=>issue.kind==='overlap'
-          && !affectedIds.has(String(issue.premiseId))
-          && !affectedIds.has(String(issue.referencePremiseId)))
-        : [];
+      const retainedOverlapIssues=retainUnchangedOverlapIssues(previousReview,affectedIds);
       const overlapIssues=[...retainedOverlapIssues,...(overlapReview?.issues||[])];
       const issues=[...(sourceReview?.issues||[]),...overlapIssues];
       const sourceChecks=sourceReview?.sourceChecks||[];
