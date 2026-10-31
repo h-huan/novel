@@ -13,9 +13,10 @@ const chapter = () => ({
 
 describe('chapter example follows actual dynamic word limits',()=>{
  it('never shows the model a disallowed static 3500-word example for a 4400-5000 chapter',()=>{
-  const text=chapterDetailJsonExample(4400,5000,false);
+  const text=chapterDetailJsonExample(4400,5000,false,'第三章：旧销归谁');
   const example=JSON.parse(text.slice(text.indexOf('{')));
   expect(example.targetWords).toBe(4700);
+  expect(example.title).toBe('第三章：旧销归谁');
   expect(chapterDetailStructureIssues(example,{allowedMin:4400,allowedMax:5000,chapterNumber:3,totalChapters:4})).toEqual([]);
   expect(example.characterActions).toHaveLength(1);
  });
