@@ -55,6 +55,16 @@ describe('locked-card historical exclusion transport', () => {
   });
 });
 
+describe('original fixed-pool causation must anticipate evidenced final Gate failures',()=>{
+ it('requires real contract, evidence attribution and authority before any selected payoff is promised',()=>{
+  const prompt=ideaPremiseSelectionDirective('short_story',5,15,false,5,true);
+  expect(prompt).toContain('退出投标不自动触发违约金');
+  expect(prompt).toContain('报警或举报不自动授予进入特定私人场所的权限');
+  expect(prompt).toContain('辨出被破坏物品的异常不等于证明具体人员实施');
+  expect(prompt).toContain('原池缺少必要条件的，不得在展开字段里自造相反事实救活');
+ });
+});
+
 describe('bounded preselection surplus',()=>{
   it('keeps eight reviewed paths only when the fixed pool supports five plus three',()=>{
     expect(ideaPreselectionCapacity(5,15)).toBe(8);
