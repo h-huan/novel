@@ -67,6 +67,21 @@ export function premiseCategoryReviewDirective(selection: PremiseSelectionResult
  * verdicts. Keep the full platform and author contract but omit the redundant
  * category catalogue and following genre glossary from these two specialist
  * prompts. Source/category/genre review still receives the complete standard. */
+/** Only categories present in the immutable candidate pool can be selected.
+ * Keep the complete source standards while generating the pool; at fixed-pool
+ * selection time omit impossible category glossaries, without losing a single
+ * applicable requirement. Unexpected/missing category bindings fail open to
+ * the FULL standards, never to an incomplete checklist. */
+export function scopePremiseSelectionCategoryStandards<T extends {category:string}>(
+ standards:readonly T[], pool:readonly {storyCategory?:unknown}[],
+):T[] {
+ if(!pool.length)return [...standards];
+ const actual=new Set(pool.map(row=>typeof row.storyCategory==='string'?row.storyCategory.trim():'').filter(Boolean));
+ if(!actual.size)return [...standards];
+ const scoped=standards.filter(row=>actual.has(row.category));
+ return actual.size===new Set(scoped.map(row=>row.category)).size?scoped:[...standards];
+}
+
 export function corePremiseReviewStandard(standard:string):string {
  const marker='\n【与完整卡一致的分类标准】';
  const index=standard.lastIndexOf(marker);
