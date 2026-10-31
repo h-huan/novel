@@ -15,6 +15,29 @@ export function affordableFullCardRefillCount(
  return count;
 }
 
+/** Minimum independent source/payoff and overlap calls required to vet
+ * a fixed number of newly selected premises. Never borrow credits from
+ * selection or presentation budgets to fabricate an approved result. */
+export function premiseReviewCallFloor(count:number, sourceBatchSize:number):number {
+ if(!Number.isInteger(count)||count<0||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1)
+  throw Error('题材独立复核预算参数无效');
+ if(!count)return 0;
+ return Math.ceil(count/sourceBatchSize)+(count>1?1:0);
+}
+
+/** Trim only optional refill hedges when source review cannot cover them.
+ * The mandatory delivery gap remains a hard requirement at the call site.
+ * No review is skipped for any candidate actually returned. */
+export function affordableReviewedPremiseCount(
+ availableCount:number,sourceCredits:number,sourceBatchSize:number,
+):number {
+ if(!Number.isInteger(availableCount)||availableCount<0||!Number.isInteger(sourceCredits)||sourceCredits<0)
+  throw Error('补充题材审核额度无效');
+ let count=availableCount;
+ while(count>0&&premiseReviewCallFloor(count,sourceBatchSize)>sourceCredits)count--;
+ return count;
+}
+
 export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:ReadonlySet<string>,requestedCount:number):string[] {
   if (!Number.isInteger(requestedCount) || requestedCount < 0) throw Error('请求交付数量无效');
   const uniqueSlots = [...new Set(slotIds.filter(id => !!id))];
