@@ -16,6 +16,15 @@ it('does not pay for a replacement when its independent source and overlap revie
  expect(minimumReselectionReviewCalls(8,true)).toBe(2);
  expect(minimumReselectionReviewCalls(5,false)).toBe(1);
  expect(minimumReselectionReviewCalls(1,true)).toBe(1);
+ // A grouping-mode-1 original-pool repair of five changed premises needs
+ // two source partitions and one independent changed-pair review, not two.
+ expect(minimumReselectionReviewCalls(8,true,5,3,1)).toBe(3);
+ expect(minimumReselectionReviewCalls(8,true,8,3,1)).toBe(4);
+ expect(minimumReselectionReviewCalls(8,true,8,3,0)).toBe(2);
+ expect(minimumReselectionReviewCalls(5,false,4,3,1)).toBe(2);
+ expect(()=>minimumReselectionReviewCalls(5,true,6,3,1)).toThrow();
+ expect(()=>minimumReselectionReviewCalls(5,true,1,0,1)).toThrow();
+ expect(()=>minimumReselectionReviewCalls(5,true,1,3,2)).toThrow();
  expect(()=>minimumReselectionReviewCalls(0,true)).toThrow();
 });
 
