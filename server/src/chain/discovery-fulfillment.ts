@@ -64,9 +64,19 @@ export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:
  * in a multi-card shortlist also changes pairs and needs overlap review.
  * This is an admission check, never a quality pass or a new call allowance.
  */
-export function minimumReselectionReviewCalls(selectedCount:number,forcesNewIdentity:boolean):number {
- if(!Number.isInteger(selectedCount)||selectedCount<1)throw Error('重选复核的已选数量无效');
- return forcesNewIdentity&&selectedCount>1?2:1;
+export function minimumReselectionReviewCalls(
+ selectedCount:number,forcesNewIdentity:boolean,changedCount=1,sourceBatchSize=3,groupingMode=0,
+):number {
+ if(!Number.isInteger(selectedCount)||selectedCount<1
+   ||!Number.isInteger(changedCount)||changedCount<1||changedCount>selectedCount
+   ||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1||![0,1].includes(groupingMode))
+  throw Error('重选复核的已选数量或来源分组无效');
+ // Changed facts require source/payoff re-review. With explicit grouping,
+ // every disjoint source partition must be funded before reselection.
+ // Default grouping retains its existing single-review fallback if split
+ // partitions are unaffordable; this is a lower bound, not a quality pass.
+ const sourceCalls=groupingMode===1?Math.ceil(changedCount/sourceBatchSize):1;
+ return sourceCalls+(forcesNewIdentity&&selectedCount>1?1:0);
 }
 
 /** One scoped preselection repair wave: optional screening surplus is not
