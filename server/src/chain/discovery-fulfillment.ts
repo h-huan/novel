@@ -28,11 +28,25 @@ export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:
  * a delivery deficit. Only actual missing delivery slots are mandatory.
  * A small model-reviewed hedge remains for full-card rejection, without
  * filling every failed optional screening slot through serial reselection. */
-export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved:number):{mandatory:number;hedge:number;total:number}{
- if(!Number.isInteger(deliveryCount)||deliveryCount<1||!Number.isInteger(retainedApproved)||retainedApproved<0)
-   throw Error('预选交付容量参数无效');
+export function preselectionRecoveryTarget(
+ deliveryCount:number,retainedApproved:number,screeningTarget=deliveryCount,
+):{mandatory:number;hedge:number;total:number}{
+ if(!Number.isInteger(deliveryCount)||deliveryCount<1||!Number.isInteger(retainedApproved)||retainedApproved<0
+   ||!Number.isInteger(screeningTarget)||screeningTarget<deliveryCount)
+   throw Error('预选交付与筛选容量参数无效');
  const mandatory=Math.max(0,deliveryCount-retainedApproved);
- const hedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4))):0;
+ // Already reviewed surplus is not a guaranteed complete-card pass. When a
+ // larger shortlist was budgeted before any model calls, retain at most two
+ // additional screened options from the SAME fixed pool and SAME reselection
+ // wave. Refill these before paying for the much slower card-stage fallback.
+ // This never increases physical-call budgets, expands the pool, or changes
+ // final Gate criteria. A caller can still decline the optional hedge if the
+ // original pool or shared budget cannot fund it.
+ const ordinaryHedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4))):0;
+ const screeningGap=Math.max(0,screeningTarget-retainedApproved-mandatory);
+ const hedge=screeningTarget>deliveryCount
+   ?Math.min(2,screeningGap)
+   :ordinaryHedge;
  return {mandatory,hedge,total:mandatory+hedge};
 }
 
