@@ -3,7 +3,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, retainUnchangedOverlapIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -1013,4 +1013,21 @@ it('enumerates only post-reselection pairs involving changed identities and does
   });
   await c.reviewPremiseSelection(selected,'已核验的相同执行设定','overlap',undefined,false,[],undefined,['C']);
   expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+});
+
+it('preserves independently failed overlap evidence across plan-only edits, never silently upgrading it',()=>{
+ const issue={kind:'overlap' as const,premiseId:'B',referencePremiseId:'D',
+   quote:'两者均通过请求封存原始材料迫使物业表态',referenceQuote:'请求封存原始材料迫使物业作出决定',
+   reason:'两张题材的行动升级反转和代价路径相同'};
+ const sourceIssue={kind:'selection_fit' as const,premiseId:'A',referencePremiseId:'A',
+   quote:'补证尚未完成',referenceQuote:'原池先行动作尚未完成',reason:'缺少实际交付条件'};
+ const previous:PremiseSelectionReview={passed:false,issues:[issue,sourceIssue]};
+ const noNarrativeChange=retainUnchangedOverlapIssues(previous,new Set());
+ expect(noNarrativeChange).toEqual([issue]);
+ expect(retainUnchangedOverlapIssues(previous,new Set(['A']))).toEqual([issue]);
+ expect(retainUnchangedOverlapIssues(previous,new Set(['B']))).toEqual([]);
+ expect(retainUnchangedOverlapIssues(previous,new Set(['D']))).toEqual([]);
+ expect(retainUnchangedOverlapIssues(previous,new Set(['B','D']))).toEqual([]);
+ expect(retainUnchangedOverlapIssues(undefined,new Set())).toEqual([]);
+ expect(previous.issues).toHaveLength(2);
 });
