@@ -6,7 +6,7 @@ import { validateChapterEndingBoundary, validateForeshadowingBoundary } from './
  * This is prompt transport only: content and causal quality still come from
  * the actual chapter and pass the existing strict validator and story Gates. */
 export function chapterDetailJsonExample(
- allowedMin:number,allowedMax:number,isFinalChapter:boolean,
+ allowedMin:number,allowedMax:number,isFinalChapter:boolean,confirmedTitle?:string,
 ):string {
  if(!Number.isInteger(allowedMin)||!Number.isInteger(allowedMax)
    ||allowedMin<1||allowedMin>allowedMax)
@@ -14,7 +14,7 @@ export function chapterDetailJsonExample(
  const exampleTarget=Math.floor((allowedMin+allowedMax)/2);
  return '\n【JSON结构示例，仅示范字段，不得复制示例内容】'
    +JSON.stringify({
-     title:'本章标题',targetWords:exampleTarget,
+     title:typeof confirmedTitle==='string'&&confirmedTitle.trim()?confirmedTitle.trim():'本章标题',targetWords:exampleTarget,
      wordCountReason:'依据本章场景、冲突强度与剩余总字数确定',
      content:'按本章职责顺序概括必要事件链与结果',
      scenes:[{location:'具体地点',goal:'本场目标',conflict:'本场阻碍',outcome:'本场结果'}],
