@@ -18,23 +18,27 @@ export function affordableFullCardRefillCount(
 /** Minimum independent source/payoff and overlap calls required to vet
  * a fixed number of newly selected premises. Never borrow credits from
  * selection or presentation budgets to fabricate an approved result. */
-export function premiseReviewCallFloor(count:number, sourceBatchSize:number):number {
- if(!Number.isInteger(count)||count<0||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1)
+export function premiseReviewCallFloor(count:number, sourceBatchSize:number, groupingMode=0):number {
+ if(!Number.isInteger(count)||count<0||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1
+   ||!Number.isInteger(groupingMode)||![0,1].includes(groupingMode))
   throw Error('题材独立复核预算参数无效');
  if(!count)return 0;
- return Math.ceil(count/sourceBatchSize)+(count>1?1:0);
+ // Default mode sends 1-3 premises together; its source gate does not
+ // partition a three-card review merely because sourceBatchSize is two.
+ const sourceCalls=groupingMode===0&&count<4?1:Math.ceil(count/sourceBatchSize);
+ return sourceCalls+(count>1?1:0);
 }
 
 /** Trim only optional refill hedges when source review cannot cover them.
  * The mandatory delivery gap remains a hard requirement at the call site.
  * No review is skipped for any candidate actually returned. */
 export function affordableReviewedPremiseCount(
- availableCount:number,sourceCredits:number,sourceBatchSize:number,
+ availableCount:number,sourceCredits:number,sourceBatchSize:number,groupingMode=0,
 ):number {
  if(!Number.isInteger(availableCount)||availableCount<0||!Number.isInteger(sourceCredits)||sourceCredits<0)
   throw Error('补充题材审核额度无效');
  let count=availableCount;
- while(count>0&&premiseReviewCallFloor(count,sourceBatchSize)>sourceCredits)count--;
+ while(count>0&&premiseReviewCallFloor(count,sourceBatchSize,groupingMode)>sourceCredits)count--;
  return count;
 }
 
