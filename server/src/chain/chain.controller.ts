@@ -6802,7 +6802,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // call and wasted paid selection with one shared review credit left.
       // Pure plan-only outputs still spend only their actual payoff recheck.
       const requiredReviewCalls=minimumReselectionReviewCalls(
-        selected.selected.length,true);
+        selected.selected.length,true,scopedSlots.length,
+        readGenerationBudgets().sourceBatchSize,readGenerationBudgets().reviewGroupingMode);
       if(shared && shared.reviews.remaining<requiredReviewCalls){
         reselectionStopReason='锁定前独立复核额度不足以覆盖重选后的来源及同构审核，未发起无法验收的原池重选';
         return false;
