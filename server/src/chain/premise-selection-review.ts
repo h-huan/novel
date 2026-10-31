@@ -147,6 +147,19 @@ export function overlapReviewSelectionView(selected: PremiseSelectionResult['sel
 /** Every unordered comparison involving a changed identity must be reviewed
  * once after reselection. Unchanged pairs retain their prior independent
  * verdict; this index is a prompt boundary, never a replacement for the Gate. */
+/** Preserve independently evidenced pair rejections when only citation indexes,
+ * unaffected narratives or selection positions changed. A changed or removed
+ * member invalidates the old pair verdict; the revised pair must be reviewed.
+ * Never reinterpret a previously failed pair as independently approved. */
+export function retainUnchangedOverlapIssues(
+ previous:PremiseSelectionReview|undefined,
+ changedNarrativeIds:ReadonlySet<string>,
+):PremiseSelectionReview['issues'] {
+ return (previous?.issues||[]).filter(issue=>issue.kind==='overlap'
+   && !changedNarrativeIds.has(String(issue.premiseId))
+   && !changedNarrativeIds.has(String(issue.referencePremiseId)));
+}
+
 export function premiseOverlapPairs(selection:PremiseSelectionResult,focusIds:readonly string[]=[]){
   const changed=new Set(focusIds.map(String));
   return selection.selected.flatMap((left,index)=>selection.selected.slice(index+1)
