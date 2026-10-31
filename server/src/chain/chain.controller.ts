@@ -8649,6 +8649,11 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           // exists. Only unwrap an OBJECT with recognizable chapter fields;
           // never manufacture absent story text or bypass the same validator.
           if(value && typeof value==='object'&&!Array.isArray(value)){
+            // Never prefer incidental nested metadata over an actual top-level
+            // chapter. A wrapper is eligible only when the outer level has
+            // none of the chapter fields checked by the unchanged validator.
+            if(['title','content','scenes','characterActions','targetWords']
+              .some(field=>Object.prototype.hasOwnProperty.call(value,field)))return value;
             for(const key of ['data','result','outline'] as const){
               const nested=value[key];
               if(nested && typeof nested==='object'&&!Array.isArray(nested)
