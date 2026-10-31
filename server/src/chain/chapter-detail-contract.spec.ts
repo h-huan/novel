@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
-import { chapterDetailStructureIssues, chapterDetailJsonExample } from './chapter-detail-contract';
+import { chapterDetailStructureIssues, chapterDetailJsonExample, unwrapSingleChapterEnvelope } from './chapter-detail-contract';
 
 const context = { allowedMin: CHAPTER_WORD_RANGE.min, allowedMax: CHAPTER_WORD_RANGE.max, chapterNumber: 1, totalChapters: 5 };
 const chapter = () => ({
@@ -9,6 +9,24 @@ const chapter = () => ({
   scenes: [{ location: '旧食堂', goal: '确认能否盘铺', conflict: '租期与成本尚未明确', outcome: '查清租约并签订交接清单' }],
   characterActions: [{ character: '主角', action: '核对清单后接收钥匙', result: '取得食堂经营权' }],
   conflicts: [], highlights: [], foreshadowing: [], foreshadowingRecover: [], characterStates: [], hook: '次日开始营业', emotionalTone: '谨慎期待',
+});
+
+describe('chapter payload object envelopes never weaken GEN-005',()=>{
+ it('accepts only a chapter-like single nested object, not arbitrary metadata',()=>{
+  const inner=chapter();
+  for(const key of ['data','result','outline']){
+   expect(unwrapSingleChapterEnvelope({[key]:inner})).toEqual(inner);
+  }
+  const outer={...inner,data:{title:'unrelated nested record'}};
+  expect(unwrapSingleChapterEnvelope(outer)).toEqual(outer);
+  expect(unwrapSingleChapterEnvelope({data:{message:'error'}})).toEqual({data:{message:'error'}});
+ });
+ it('still rejects an incomplete nested chapter after unpacking',()=>{
+  const nested=unwrapSingleChapterEnvelope({data:{title:'节选',targetWords:3500}});
+  expect(chapterDetailStructureIssues(nested as Record<string,any>,{
+    allowedMin:4400,allowedMax:5000,chapterNumber:3,totalChapters:4,
+  })).toContain('scenes必须是非空数组');
+ });
 });
 
 describe('chapter example follows actual dynamic word limits',()=>{
