@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
+import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, scopePremiseSelectionCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -106,6 +106,24 @@ it('isolates unresolved preselection slots after the structured helper already e
   expect(result.selectionAudit).toMatchObject({
     partial: true, unresolvedPremiseIds: ['A'],
   });
+});
+
+it('reduces only unreachable category manuals in fixed-pool selection without dropping any actual candidate standard',()=>{
+ const standards=[
+  {category:'都市日常',standard:'真实日常选择与实际关系代价'},
+  {category:'玄幻仙侠',standard:'能力规则与修行代价'},
+  {category:'年代',standard:'时期制度与资源影响人物行动'},
+  {category:'民国旧影',standard:'时代关系及权利边界'},
+ ];
+ const actual=[{storyCategory:'都市日常'},{storyCategory:'年代'},
+   {storyCategory:'都市日常'}];
+ const before=JSON.stringify(standards);
+ expect(scopePremiseSelectionCategoryStandards(standards,actual)).toEqual([standards[0],standards[2]]);
+ expect(scopePremiseSelectionCategoryStandards(standards,[])).toEqual(standards);
+ expect(scopePremiseSelectionCategoryStandards(standards,[{storyCategory:'未知的分类'}])).toEqual(standards);
+ expect(scopePremiseSelectionCategoryStandards(standards,[{}])).toEqual(standards);
+ expect(scopePremiseSelectionCategoryStandards(standards,[...actual,{storyCategory:'未知分类'}])).toEqual(standards);
+ expect(JSON.stringify(standards)).toBe(before);
 });
 
 it('retains every selected category standard and all surrounding instructions while removing only unrelated categories',()=>{
