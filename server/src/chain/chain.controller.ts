@@ -5833,8 +5833,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // and reader-appeal gates may reject an otherwise valid card.
       // Initial review, its protocol/network recoveries and changed-card rechecks share one ceiling.
       const presentationBudget = { remaining: presentationCallLimit };
-      // The five-card semantic report has repeatedly hit the provider's output
-      // recovery path. Partition only that large initial/replacement review.
+      // Large semantic reports can reach the provider's output ceiling.
+      // Partition only after capacity evidence from the current review.
       // Every card still gets all independent verdicts and compares against
       // EVERY other card as a reference; smaller reviews preserve all Gates.
       const boundedPresentationReview=(count:number,availableReviewCalls=presentationBudget.remaining)=>
@@ -6488,10 +6488,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const grouping=readGenerationBudgets();
       if (shouldBatchLargePremiseSourceReview(selection.selected.length,grouping.reviewGroupingMode,
         grouping.sourceBatchSize,budget.remaining)) {
-        // The latest local trace spent 218 seconds on one five-premise source
-        // call. All fifty source fields plus genre/category/payoff remain fully
-        // checked, but two independent 3+2 partitions no longer block each
-        // other. Protocol-capacity fallback within each partition is unchanged.
+        // Large independent source partitions should not block one another.
+        // Preserve per-premise source fields and genre/category/payoff evidence
+        // in every partition; derive partitions from the live request size. Protocol-capacity fallback within each partition is unchanged.
         batches=premiseSourceBatches(selection);
       } else if (grouping.reviewGroupingMode === 0) {
         try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
@@ -6704,7 +6703,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // One recovered slot is not a reliable delivery when its independent
     // review can still fail. Keep a small hedge INSIDE the existing single
     // reselection response (no added model round, budget, or weaker Gate).
-    // The original pool and its already-fixed eight-card shortlist bound the
+    // The original pool and request-derived screening capacity bound the
     // number of positions; only independently approved survivors proceed.
     const recoveryHedgeCount=recoveryTarget.hedge;
     const recoverySlots=deliveryCount<requestedCount
