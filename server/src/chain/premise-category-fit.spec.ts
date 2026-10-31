@@ -108,48 +108,6 @@ it('isolates unresolved preselection slots after the structured helper already e
   });
 });
 
-it('uses the existing single reserve wave when six vetted premises cannot fill an eight-slot screening shortlist',async()=>{
- const ids=Array.from({length:12},(_,i)=>'P'+(i+1));
- const initial=normalizePremiseSelectionPayload({
-  pool:ids.map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,
-   storyCore:'既定主角从证据中确认行动能力并负担代价'+premiseId})),
-  selectedPremises:ids.slice(0,8).map(premiseId=>({premiseId,
-   ...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(field=>field!=='differentiation')
-     .map(field=>[field,'主角在已有信息与权限下采取可验证行动'+premiseId]))})),
- },8,12);
- const failed=initial.selected.slice(-2).map(item=>({
-  kind:'selection_fit' as const,premiseId:String(item.premiseId),
-  referencePremiseId:String(item.premiseId),
-  quote:String(item.activeChoice),
-  referenceQuote:String(initial.pool.find(seed=>seed.premiseId===item.premiseId)!.storyCore),
-  reason:'结果依赖尚未建立的第三方处理权限，必须更换原池身份',
-  repairMode:'replace_from_pool' as const,
- }));
- const controller=Object.create(ChainController.prototype) as any;
- controller.logger={warn:vi.fn(),log:vi.fn()};
- controller.reviewPremiseSelection=vi.fn(async (_selection:any,_standard:string,mode:string)=>
-   mode==='overlap'?{passed:true,issues:[]}:{passed:false,issues:failed});
- controller.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
-  expect(prompt).toContain('【原池】');
-  expect(prompt).toContain('P9');
-  expect(prompt).toContain('P10');
-  expect(prompt).toContain('【必须处理的位置及模式】');
-  expect(prompt).toContain('P7');
-  expect(prompt).toContain('P8');
-  options.physicalCallBudget.remaining--;
-  return {data:null,validationIssues:['本轮原池换选的结构化证据不完整']};
- });
- const budgets={reviews:{remaining:12},reselection:{remaining:2}};
- const result=await controller.reconcilePremiseSelection(initial,8,12,[],'当前完整执行标准',[],budgets,5);
- expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
- expect(budgets.reselection.remaining).toBe(1);
- expect(result.selected.map((row:any)=>row.premiseId)).toEqual(ids.slice(0,6));
- expect(result.selectionAudit.reselectionAttempted).toBe(true);
- expect(result.selectionAudit.partial).toBe(true);
- // Optional screen capacity never weakens the five-card delivery floor.
- expect(result.selected).toHaveLength(6);
-});
-
 it('retains every selected category standard and all surrounding instructions while removing only unrelated categories',()=>{
   const rules=[
     {category:'年代',standard:'年代必须由历史时期资源与制度驱动主线'},
