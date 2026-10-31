@@ -34,12 +34,20 @@ export function premiseReviewCallFloor(count:number, sourceBatchSize:number, gro
  * No review is skipped for any candidate actually returned. */
 export function affordableReviewedPremiseCount(
  availableCount:number,sourceCredits:number,sourceBatchSize:number,groupingMode=0,
+ mandatoryCount=0,
 ):number {
- if(!Number.isInteger(availableCount)||availableCount<0||!Number.isInteger(sourceCredits)||sourceCredits<0)
+ if(!Number.isInteger(availableCount)||availableCount<0||!Number.isInteger(sourceCredits)||sourceCredits<0
+   ||!Number.isInteger(mandatoryCount)||mandatoryCount<0||mandatoryCount>availableCount)
   throw Error('补充题材审核额度无效');
  let count=availableCount;
  while(count>0&&premiseReviewCallFloor(count,sourceBatchSize,groupingMode)>sourceCredits)count--;
- return count;
+ if(count>=mandatoryCount)return count;
+ // In default grouping mode the existing source reviewer deliberately tries
+ // one complete monolithic review when there are not enough credits to split.
+ // Keep that valid route for MANDATORY delivery slots, while never spending
+ // money on an unauditable optional screening hedge.
+ const oneSourcePlusOverlap=mandatoryCount>1?2:mandatoryCount;
+ return groupingMode===0&&sourceCredits>=oneSourcePlusOverlap?mandatoryCount:count;
 }
 
 export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:ReadonlySet<string>,requestedCount:number):string[] {
