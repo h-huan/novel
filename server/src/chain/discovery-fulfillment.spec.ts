@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {missingRequestedIdeaSlots,affordableFullCardRefillCount,preselectionRecoveryTarget,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+import {missingRequestedIdeaSlots,affordableFullCardRefillCount,preselectionRecoveryTarget,minimumReselectionReviewCalls,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
 
 it('reserves independent quality-review calls for each affordable refill batch',()=>{
  expect(affordableFullCardRefillCount(5,9,2)).toBe(5);
@@ -9,6 +9,14 @@ it('reserves independent quality-review calls for each affordable refill batch',
  expect(affordableFullCardRefillCount(5,1,2)).toBe(0);
  expect(affordableFullCardRefillCount(0,24,2)).toBe(0);
  expect(()=>affordableFullCardRefillCount(5,3,0)).toThrow();
+});
+
+it('does not pay for a replacement when its independent source and overlap reviews are unfundable',()=>{
+ expect(minimumReselectionReviewCalls(5,true)).toBe(2);
+ expect(minimumReselectionReviewCalls(8,true)).toBe(2);
+ expect(minimumReselectionReviewCalls(5,false)).toBe(1);
+ expect(minimumReselectionReviewCalls(1,true)).toBe(1);
+ expect(()=>minimumReselectionReviewCalls(0,true)).toThrow();
 });
 
 it('never confuses surplus vetted candidates with user delivery slots',()=>{
