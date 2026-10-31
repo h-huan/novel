@@ -22,6 +22,29 @@ describe('chapter character source authority',()=>{
   expect(prompt).toContain('【出场角色白名单】');
   expect(prompt).toContain('马长顺');
  });
+ it('applies the same first-chapter prohibition when the protagonist card is simply unnamed',()=>{
+  for(const placeholder of ['未具名','未命名','待命名']){
+   const controller=Object.create(ChainController.prototype) as any;
+   controller.characterService={
+    findByProjectId:()=>[{id:'lead',name:placeholder,role:'protagonist',age:28},
+      {id:'guard',name:'马长顺',role:'main',age:51}],
+    getWritingSummary:()=>({profile:{identity_occupation:'当前确认的角色身份'}}),
+   };
+   const prompt=controller.buildCharacterWritingContext('project-unnamed');
+   expect(prompt).toContain('【未具名第一人称主角】');
+   expect(prompt).toContain('不得自行给“我”添加“小陈”');
+   expect(prompt).toContain('马长顺');
+  }
+ });
+ it('does not impose an unnamed narrator restriction just because a background role lacks a name',()=>{
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.characterService={
+   findByProjectId:()=>[{id:'lead',name:'陈光',role:'protagonist'},
+     {id:'background',name:'未具名',role:'other'}],
+   getWritingSummary:()=>({profile:{identity_occupation:'人物原有身份'}}),
+  };
+  expect(controller.buildCharacterWritingContext('project-named')).not.toContain('【未具名第一人称主角】');
+ });
  it('does not apply unnamed lead restriction to a project with an explicitly named hero',()=>{
   const controller=Object.create(ChainController.prototype) as any;
   controller.characterService={
