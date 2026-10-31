@@ -6743,17 +6743,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
         const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
-        // A requested five-card delivery needs a *screened* surplus because
-        // independent complete-card review may reject plausible premises.
-        // Do not stop at 6/5 when the already planned eight-card shortlist has
-        // two empty, fundable slots in the same original-pool selection wave.
-        // The optional surplus is never mandatory delivery and must not
-        // consume calls that the shared review budget cannot afford.
-        const availableRecoverySlots = recoverySlots.length;
         const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
-        if (availableRecoverySlots===0 || !enoughOriginalCandidates || !enoughSharedBudget) {
+        if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
           this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + deliveryCount
             + ' 个已独立复核合格题材；原池候选或共享审核/重选预算不足以补齐剩余位置，保留真实缺额。');
           return { ...partialSelection, selectionAudit: {
