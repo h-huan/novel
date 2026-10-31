@@ -1343,16 +1343,6 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     // remain unchanged. Avoid spending full narrative reasoning on an address
     // repair that cannot add or edit a story fact.
     if (scenario === 'idea_generate' && stepKey === 'idea_premise_causal_plan_contract') return 'low';
-    // Selection and the post-lock card formatter transform an existing fixed
-    // premise rather than invent a new plot. The last real audit spent 40K
-    // completion tokens / 231s on one selector, before any independent audit.
-    // Bound ONLY these source-bound planning/structuring steps to medium;
-    // original candidate creativity and every independent source, payoff,
-    // overlap and final quality review retain their existing reasoning config.
-    // The global environment override above still permits high explicitly.
-    if (scenario === 'idea_generate'
-      && (stepKey === 'idea_premise_selection' || stepKey === 'idea_card_structure'))
-      return 'medium';
     if (scenario === 'idea_generate' && stepKey === 'idea_presentation_review') {
       const reviewOverride = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
       if (reviewOverride) return reviewOverride === 'low' || reviewOverride === 'medium' || reviewOverride === 'high' ? reviewOverride : undefined;
