@@ -6684,7 +6684,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // actual delivery deficit is mandatory. A bounded surplus guards final
     // full-card rejection without serially repairing every failed hedge.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length,requestedCount);
+    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length);
     const neededReplacementSlots=recoveryTarget.mandatory;
     // The repair planner includes failed *selected* identities as potential
     // self-corrections. They are NOT fresh pool choices. Count only genuinely
@@ -6719,8 +6719,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const missingDeliverySlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
     const mandatoryPoolSlots=recoverySlots.slice(0,missingDeliverySlots)
       .filter(slot=>slot.mode==='replace_from_pool').length;
-    const poolHedgeId=deliveryCount<requestedCount
-      && recoverySlots.length>missingDeliverySlots
+    const poolHedgeId=deliveryCount<requestedCount && missingDeliverySlots>0
       && freshPoolCount>mandatoryPoolSlots
       ?recoverySlots.slice(missingDeliverySlots)
         .find(slot=>slot.mode==='correct_or_replace_from_pool')?.replacesPremiseId
@@ -6751,8 +6750,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // The optional surplus is never mandatory delivery and must not
         // consume calls that the shared review budget cannot afford.
         const availableRecoverySlots = recoverySlots.length;
-        const enoughOriginalCandidates = repairPlan.availableCandidates.length >=
-          Math.max(missingSlots,availableRecoverySlots);
+        const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
         if (availableRecoverySlots===0 || !enoughOriginalCandidates || !enoughSharedBudget) {
