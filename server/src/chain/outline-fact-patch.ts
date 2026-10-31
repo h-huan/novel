@@ -8,6 +8,23 @@ export const OUTLINE_FACT_REPAIR_FIELDS = [
   'characterStates','hook','nextChapterHook','nextHook','emotionalTone','mood','turningPoint','reversalPoint',
 ] as const;
 
+/** A valid patch can be returned in the documented JSON envelope or a
+ * single provider data/result envelope. Do not mistake an invalid/missing
+ * patch for an empty successful repair; never synthesize edits. */
+export function extractOutlineFactPatch(value:unknown):Record<string,unknown> {
+ const obj=(value&&typeof value==='object'&&!Array.isArray(value))
+   ?value as Record<string,unknown>:null;
+ const nested=(obj?.data&&typeof obj.data==='object'&&!Array.isArray(obj.data))
+   ?obj.data as Record<string,unknown>:
+   (obj?.result&&typeof obj.result==='object'&&!Array.isArray(obj.result))
+   ?obj.result as Record<string,unknown>:null;
+ const candidate=obj&&Object.hasOwn(obj,'patch')?obj.patch:nested?.patch;
+ if(!candidate||typeof candidate!=='object'||Array.isArray(candidate)
+   ||Object.keys(candidate).length===0)
+  throw Error('事实局部修复必须返回包含非空patch对象的JSON；不得返回完整章纲、文字解释或空补丁');
+ return candidate as Record<string,unknown>;
+}
+
 /** Apply only existing addresses under authorized story fields. Validate the
  * whole patch before mutating a clone; never append a guessed array member. */
 export function applyOutlineFactPatch(chapter:Record<string,any>,patch:unknown):Record<string,any> {
