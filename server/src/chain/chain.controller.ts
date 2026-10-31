@@ -19,7 +19,7 @@ import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections, OUTLINE_FACT_REPAIR_FIELDS } from './outline-fact-patch';
+import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections, OUTLINE_FACT_REPAIR_FIELDS , extractOutlineFactPatch } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
 import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { createReviewLimiter } from './review-limiter';
@@ -8807,15 +8807,52 @@ ${(() => {
               {
                 projectId, chapterIndex: order + 1, scenario: 'outline', stepKey:'creation_chapter_fact_repair', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(),
-                validate: value => { try { return outlineFactPatchSynchronizationIssues(chData!,alignOutlineFactCountProjections(chData!,(value as any)?.patch,defects),defects,actionRepairEvidence).length===0; } catch { return false; } },
-                describeValidation: value => { try { return outlineFactPatchSynchronizationIssues(chData!,alignOutlineFactCountProjections(chData!,(value as any)?.patch,defects),defects,actionRepairEvidence); } catch(error) { return [String((error as Error).message)]; } },
+                // One shared protocol for the retry validator AND the actual
+                // apply step: a rejected patch must never become a generic
+                // "missing patch" error that hides the real evidence defects.
+                validate: value => {
+                  try {
+                    const patch=extractOutlineFactPatch(value);
+                    const aligned=alignOutlineFactCountProjections(chData!,patch,defects);
+                    return outlineFactPatchSynchronizationIssues(chData!,aligned,defects,actionRepairEvidence).length===0;
+                  }catch{return false;}
+                },
+                describeValidation: value => {
+                  try {
+                    const patch=extractOutlineFactPatch(value);
+                    const aligned=alignOutlineFactCountProjections(chData!,patch,defects);
+                    return outlineFactPatchSynchronizationIssues(chData!,aligned,defects,actionRepairEvidence);
+                  }catch(error){return [String((error as Error).message)];}
+                },
+                // Reuse the already permitted second attempt, not a new loop
+                // or full chapter rewrite. Keep the original immutable story
+                // and cited defects, but show actual protocol errors and
+                // forbid incomplete JSON/only-analysis output.
+                validationRetryPrompt: previousRaw => {
+                  let issues:string[];
+                  try{
+                    const previous=this.safeExtractJson<any>(previousRaw,null);
+                    const patch=extractOutlineFactPatch(previous);
+                    const aligned=alignOutlineFactCountProjections(chData!,patch,defects);
+                    issues=outlineFactPatchSynchronizationIssues(chData!,aligned,defects,actionRepairEvidence);
+                  }catch(error){issues=[String((error as Error).message)];}
+                  return '只根据既有原章纲与原始审核证据完成这一次局部修复，不得发明行动、新增人物或改写前章。'
+                    +'\\n【当前章纲】'+JSON.stringify(chData)
+                    +'\\n【确认题材】'+canonicalCreativeBrief
+                    +'\\n【原始审查缺口】'+JSON.stringify(outlineFactRepairPromptDefects(defects))
+                    +'\\n【实际行动缺口】'+JSON.stringify(actionRepairEvidence)
+                    +'\\n【上一版必须修正的问题】'+issues.join('；')
+                    +'\\n【授权补丁路径】'+JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)
+                    +OUTLINE_FACT_PATCH_ADDRESS_POLICY+OUTLINE_FACT_REPAIR_SYNC_POLICY
+                    +'\\n只能返回完整JSON对象 {"patch":{"content":"修正后原文或其它现有字段地址":"..."}}，patch必须非空，且只修改已存在的故事字段及已核实的缺口。禁止返回分析、完整章纲、无实际变化的patch。';
+                },
                 retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；行动结果缺口必须直接修改actionPath或resultPath所指原文，不能只改同字段无关文字；同一事件的数量与时序必须连同content、对话、scenes和characterActions中所有已点名投影一起修正；保留可证实的增量算式，不改前章或其它事件，不重写整章。',
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
-            const rawPatch = repair.data?.patch ? alignOutlineFactCountProjections(chData,repair.data.patch,defects) : null;
-            if (!rawPatch || typeof rawPatch !== 'object' || Array.isArray(rawPatch)) {
-              throw new Error(`第${order + 1}章事实局部修复未返回 patch 对象`);
+            if(!repair.data){
+              throw new Error(`第${order + 1}章事实局部修复未通过原有补丁协议与事件同步校验：${(repair.validationIssues||repair.warnings).join('；')||'模型没有返回可验证的局部补丁'}`);
             }
+            const rawPatch=alignOutlineFactCountProjections(chData,extractOutlineFactPatch(repair.data),defects);
             const remainingSyncIssues=outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence);
             if(remainingSyncIssues.length)throw new Error(`第${order+1}章事实补丁本地同步检查未通过，未发起重复语义复核：${remainingSyncIssues.join('；')}`);
             chData = applyOutlineFactPatch(chData,rawPatch);
