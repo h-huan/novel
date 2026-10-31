@@ -100,10 +100,10 @@ export function scopePremiseReviewCategoryStandards(
   try { definitions=JSON.parse(standard.slice(from,until)); } catch { return standard; }
   if(!Array.isArray(definitions)||!definitions.every(row=>row&&typeof row==='object'
     &&typeof (row as any).category==='string'))return standard;
-  const categories=new Set(selected.map(row=>String(row.storyCategory||'')));
-  const relevant=definitions.filter(row=>categories.has(String(row.category)));
-  // A malformed or missing category cannot silently lose a standard.
-  if(!relevant.length||categories.size>new Set(relevant.map(row=>String(row.category))).size
-    ||relevant.length===definitions.length)return standard;
+  // Both source review and fixed-pool selection use one verified category
+  // projection. Missing bindings preserve the complete standards.
+  const relevant=scopePremiseSelectionCategoryStandards(
+    definitions as Array<{category:string}>,selected);
+  if(relevant.length===definitions.length)return standard;
   return standard.slice(0,from)+JSON.stringify(relevant)+standard.slice(until);
 }
