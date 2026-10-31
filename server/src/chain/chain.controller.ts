@@ -8059,8 +8059,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             this.assertProjectSourceCompleteness(projectId);
             await this.generationRecovery.assertActivationReady(projectId);
             emit('review', 98, '激活前质量门禁已通过', 'done');
+            // Persist terminal state before advertising 100% completion. A
+            // failed database update must never produce an apparent success
+            // event while the project still remains in "creating".
+            const longActivation=db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ? AND status IN ('creating','generation_failed')`).run(now(), projectId);
+            if(Number(longActivation.changes)!==1)throw new Error('长篇激活状态未成功持久化，不能报告项目创建完成');
             emit('done', 100, `长篇生成完成（${volumeWriteCount}卷${outlineWriteCount}章）`, 'done');
-            db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ?`).run(now(), projectId);
             this.emitProjectProgress(projectId, {
               type: 'done', success: true, projectId, stats: finalStats,
               mode: 'configured_full_plan',
@@ -9523,8 +9527,11 @@ ${STORY_ENTITY_MODELING_POLICY}
       }
 
       if (shortHeartbeatTimer) { clearInterval(shortHeartbeatTimer); shortHeartbeatTimer = null; }
+      // Complete only after the durable activation transition succeeds:
+      // otherwise SSE can report 100% on a still-incomplete project.
+      const shortActivation=db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ? AND status IN ('creating','generation_failed')`).run(now(), projectId);
+      if(Number(shortActivation.changes)!==1)throw new Error('短篇激活状态未成功持久化，不能报告项目创建完成');
       emit('done', 100, '全部内容生成完成', 'done');
-      db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ?`).run(now(), projectId);
       this.logger.log(`create-project-async: 完成 project=${projectId}`);
       this.emitProjectProgress(projectId, {
         type: 'done', success: true, projectId, stats: finalStats,
