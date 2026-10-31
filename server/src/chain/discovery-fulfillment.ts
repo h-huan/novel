@@ -1,3 +1,29 @@
+/** Lend initial preselection only its share of the EXISTING review calls.
+ * Keep enough credits for a potential final-card deficit. Both stages still
+ * use independent semantic/source/overlap Gates; credits are never cloned.
+ * A live getter ensures nested partition reservations/refunds hit the parent. */
+export function reserveFinalRefillReviewCapacity(
+ parent:{remaining:number},initialReviewFloor:number,requiredRefillFloor:number,
+):{remaining:number; refundReservedCalls:(amount:number)=>void} {
+ if(!Number.isInteger(parent.remaining)||parent.remaining<0
+   ||![initialReviewFloor,requiredRefillFloor].every(Number.isInteger)
+   ||initialReviewFloor<0||requiredRefillFloor<0)
+  throw Error('预选与补足审核额度无效');
+ const reserve=parent.remaining>=initialReviewFloor+requiredRefillFloor
+   ?requiredRefillFloor:0;
+ return {
+  get remaining(){return parent.remaining-reserve;},
+  set remaining(value:number){
+   if(!Number.isInteger(value)||value<0)throw Error('预选审核额度不能透支');
+   parent.remaining+=value-this.remaining;
+  },
+  refundReservedCalls(amount:number){
+   if(!Number.isInteger(amount)||amount<0)throw Error('审核归还额度无效');
+   parent.remaining+=amount;
+  },
+ };
+}
+
 /** Delivery slots are bounded by the user's request, never by the number of
  * independently vetted or fully generated candidate cards. */
 /** The generation and final review share one non-increasing budget. Reserve
