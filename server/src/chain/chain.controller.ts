@@ -8837,19 +8837,19 @@ ${(() => {
                     issues=outlineFactPatchSynchronizationIssues(chData!,aligned,defects,actionRepairEvidence);
                   }catch(error){issues=[String((error as Error).message)];}
                   return '只根据既有原章纲与原始审核证据完成这一次局部修复，不得发明行动、新增人物或改写前章。'
-                    +'\\n【当前章纲】'+JSON.stringify(chData)
-                    +'\\n【确认题材】'+canonicalCreativeBrief
-                    +'\\n【冻结世界规则】'+JSON.stringify(currentWorldForOutlineReview)
-                    +'\\n【已确认前章】'+JSON.stringify(acceptedOutlineSources)
-                    +'\\n【前章事实台账】'+JSON.stringify(priorOutlineFactLedger)
-                    +'\\n【原始审查缺口】'+JSON.stringify(outlineFactRepairPromptDefects(defects))
-                    +'\\n【实际行动缺口】'+JSON.stringify(actionRepairEvidence)
-                    +'\\n【上一版必须修正的问题】'+issues.join('；')
-                    +'\\n【授权补丁路径】'+JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)
+                    +'\n【当前章纲】'+JSON.stringify(chData)
+                    +'\n【确认题材】'+canonicalCreativeBrief
+                    +'\n【冻结世界规则】'+JSON.stringify(currentWorldForOutlineReview)
+                    +'\n【已确认前章】'+JSON.stringify(acceptedOutlineSources)
+                    +'\n【前章事实台账】'+JSON.stringify(priorOutlineFactLedger)
+                    +'\n【原始审查缺口】'+JSON.stringify(outlineFactRepairPromptDefects(defects))
+                    +'\n【实际行动缺口】'+JSON.stringify(actionRepairEvidence)
+                    +'\n【上一版必须修正的问题】'+issues.join('；')
+                    +'\n必须直接修复已有actionPath/resultPath指向的因果断言；计数、对话、content、scenes及characterActions的同源结果同时保持一致，不改写前章，不凭空新增事实。'
+                    +'\n【授权补丁路径】'+JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)
                     +OUTLINE_FACT_PATCH_ADDRESS_POLICY+OUTLINE_FACT_REPAIR_SYNC_POLICY
-                    +'\\n只能返回完整JSON对象 {"patch":{"content":"修正后的完整content原文"}}，或使用其它实际已存在的授权字段路径替换content。patch必须非空，只修改原有字段及已核实的缺口，不得发明事实；禁止返回分析、完整章纲、无实际变化的patch。';
+                    +'\n只能返回完整JSON对象 {"patch":{"content":"修正后的完整content原文"}}，或使用其它实际已存在的授权字段路径替换content。patch必须非空，只修改原有字段及已核实的缺口，不得发明事实；禁止返回分析、完整章纲、无实际变化的patch。';
                 },
-                retryInstruction: '保持已完成的局部修订，只补正验证点名的遗漏路径；行动结果缺口必须直接修改actionPath或resultPath所指原文，不能只改同字段无关文字；同一事件的数量与时序必须连同content、对话、scenes和characterActions中所有已点名投影一起修正；保留可证实的增量算式，不改前章或其它事件，不重写整章。',
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
             if(!repair.data){
