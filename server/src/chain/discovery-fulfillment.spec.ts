@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {missingRequestedIdeaSlots,affordableFullCardRefillCount,preselectionRecoveryTarget,minimumReselectionReviewCalls,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+import {missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,preselectionRecoveryTarget,minimumReselectionReviewCalls,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
 
 it('reserves independent quality-review calls for each affordable refill batch',()=>{
  expect(affordableFullCardRefillCount(5,9,2)).toBe(5);
@@ -17,6 +17,25 @@ it('does not pay for a replacement when its independent source and overlap revie
  expect(minimumReselectionReviewCalls(5,false)).toBe(1);
  expect(minimumReselectionReviewCalls(1,true)).toBe(1);
  expect(()=>minimumReselectionReviewCalls(0,true)).toThrow();
+});
+
+it('preflights every source partition and the independent overlap before spending a refill selection',()=>{
+ expect(premiseReviewCallFloor(0,3)).toBe(0);
+ expect(premiseReviewCallFloor(1,3)).toBe(1);
+ expect(premiseReviewCallFloor(3,3)).toBe(2);
+ expect(premiseReviewCallFloor(4,3)).toBe(3);
+ expect(premiseReviewCallFloor(5,3)).toBe(3);
+ // Actual failed run: four needed with only two independent review credits.
+ // Do not pay for the extra pool + selection calls when 4/5 cannot be audited.
+ expect(affordableReviewedPremiseCount(5,2,3)).toBe(3);
+ expect(affordableReviewedPremiseCount(5,1,3)).toBe(1);
+ expect(affordableReviewedPremiseCount(5,0,3)).toBe(0);
+ // Three mandatory cards can proceed with two credits; optional hedges
+ // cannot displace the independently verifiable delivery floor.
+ expect(affordableReviewedPremiseCount(5,2,3)).toBe(3);
+ expect(affordableReviewedPremiseCount(5,3,3)).toBe(5);
+ expect(()=>affordableReviewedPremiseCount(3,-1,3)).toThrow();
+ expect(()=>premiseReviewCallFloor(4,0)).toThrow();
 });
 
 it('never confuses surplus vetted candidates with user delivery slots',()=>{
