@@ -6605,7 +6605,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const sourceReview=reviews[0];
       const overlapReview:PremiseSelectionReview=reviews[1]||{passed:true,issues:[]};
       const affectedIds=new Set((changeScope?.pairAffectedIds||[]).map(String));
-      const retainedOverlapIssues=previousReview&&affectedIds.size
+      // A causalPlan citation correction does not change the narrative pair.
+      // Preserve all prior independently confirmed overlap failures unless
+      // one of the actual pair's story identities changed or was removed.
+      // Otherwise a plan-only repair silently upgrades a rejected pair.
+      const retainedOverlapIssues=previousReview
         ? previousReview.issues.filter(issue=>issue.kind==='overlap'
           && !affectedIds.has(String(issue.premiseId))
           && !affectedIds.has(String(issue.referencePremiseId)))
