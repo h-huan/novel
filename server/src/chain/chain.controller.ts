@@ -1,5 +1,5 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import { missingRequestedIdeaSlots, affordableFullCardRefillCount, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
+import { missingRequestedIdeaSlots, affordableFullCardRefillCount, affordableReviewedPremiseCount, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -6129,12 +6129,20 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // Screening hedge is constrained by the credits for BOTH full-card
         // creation and subsequent independent review, avoiding a doomed
         // second expensive shortlist when one of those phases cannot run.
-        const desiredSupplement=affordableFullCardRefillCount(
-          missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2),
-          presentationBudget.remaining,discoveryBudget.presentationBatchSize);
+        // The former two-call shortcut ignored the actual source partition
+        // count. It spent new seed/selection calls even when the later
+        // independent source+overlap reviews could not possibly finish.
+        // Preserve mandatory delivery slots; reduce optional hedge only when
+        // the existing review allowance can cover every selected premise.
+        const desiredSupplement=Math.min(
+          affordableFullCardRefillCount(
+            missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2),
+            presentationBudget.remaining,discoveryBudget.presentationBatchSize),
+          affordableReviewedPremiseCount(
+            missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2),
+            sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize));
         fulfillmentStopReason='bounded_refill_unavailable';
         if(desiredSupplement>=missingAfterFirstGate
-          &&sourceCompletionBudget.remaining>=(desiredSupplement===1?1:2)
           &&reselectionCompletionBudget.remaining>=1){
           // Add fresh seed identities only if the already-paid original pool
           // cannot provide the desired gap plus a small dynamic hedge.
