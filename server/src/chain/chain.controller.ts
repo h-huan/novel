@@ -8701,7 +8701,7 @@ ${(() => {
 10. 情绪基调 (emotionalTone) — 简短描述本章情绪走向。
 
 只输出一个合法JSON对象，不要数组、解释或Markdown。`;
-          const chapterJsonExample = chapterDetailJsonExample(allowedMin, allowedMax, isFinalChapter);
+          const chapterJsonExample = chapterDetailJsonExample(allowedMin, allowedMax, isFinalChapter, expectedChapter.title);
 
           // help: coerce string to single-element array
           const toArray = (v: any): any[] => Array.isArray(v) ? v : (typeof v === 'string' && v.trim() ? [v] : []);
