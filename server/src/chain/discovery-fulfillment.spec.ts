@@ -27,6 +27,13 @@ it('preflights every source partition and the independent overlap before spendin
  expect(premiseReviewCallFloor(3,2,1)).toBe(3); // configured split review
  expect(affordableReviewedPremiseCount(5,2,2,0)).toBe(3);
  expect(affordableReviewedPremiseCount(5,2,2,1)).toBe(2);
+ // Default mode has an existing monolithic source-review fallback for a
+ // mandatory set; never silently discard required slots to save a credit.
+ expect(affordableReviewedPremiseCount(5,2,2,0,4)).toBe(4);
+ expect(affordableReviewedPremiseCount(5,3,2,0,4)).toBe(4);
+ expect(affordableReviewedPremiseCount(5,1,2,0,4)).toBe(1);
+ expect(affordableReviewedPremiseCount(5,2,2,1,4)).toBe(2);
+ expect(()=>affordableReviewedPremiseCount(3,2,2,0,4)).toThrow();
  expect(premiseReviewCallFloor(4,3)).toBe(3);
  expect(premiseReviewCallFloor(5,3)).toBe(3);
  // Actual failed run: four needed with only two independent review credits.
