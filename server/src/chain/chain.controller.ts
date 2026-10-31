@@ -14,7 +14,7 @@ import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { independentReviewBatches } from './independent-review-batches';
 import {reserveReviewBatchBudget} from './premise-source-batches';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
-import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
+import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, scopePremiseSelectionCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
 import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
@@ -5069,7 +5069,9 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         // discover defects that the candidate generator was never shown.
         // Same category contract, no new model call or weaker Gate.
         const candidateCategoryRequirements = '\n【每项分类核心机制：生成与选优使用与审核相同的标准】'
-          + JSON.stringify(categoryStandards)
+          + JSON.stringify(phase==='selection'
+            ?scopePremiseSelectionCategoryStandards(categoryStandards,options.pool??[])
+            :categoryStandards)
           + '\n每项的核心冲突、双方关系、主动行动、升级、兑现和代价必须由所选分类的核心机制驱动。感情分类尤其不能只用职业翻案或查案作为主线、最后安排一次恋爱点缀；重要关系的双向选择、推进与结果必须承担实质剧情。分类不能靠结尾点题或改标签补救。'
           + '\n各题材的结果须有已建立的必要条件和实际执行链；不能让封店直接等于退赔、发现线索直接等于有权处置或人物无缘无故提前到场。尤其检查临时阻断是否在后续兑现前被对手解除、社保稽核是否被误当工伤认定，以及同款物品或排除主角的证据是否被误作他人实际经手的独立归责证据。核对物证实际附着位置（钥匙柄、锁芯等不得互换）、双方样本的实际取得与保管、当事人的真实法律或人物关系（未婚恋人不能无由使用婚内财产权利），以及已安排给主角的必要行动是否在结局真实执行并产生结果。';
         const premiseSchema = {
