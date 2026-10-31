@@ -30,6 +30,22 @@ describe('chain HTTP architecture', () => {
     }
   });
 
+  it('does not report short or long project creation complete before the active state is stored', () => {
+    const source=read('chain.controller.ts');
+    const longPersist=source.indexOf('const longActivation=db.prepare(');
+    const longDone=source.indexOf("emit('done', 100, \`长篇生成完成");
+    const shortPersist=source.indexOf('const shortActivation=db.prepare(');
+    const shortDone=source.indexOf("emit('done', 100, '全部内容生成完成'");
+    expect(longPersist).toBeGreaterThan(0);
+    expect(shortPersist).toBeGreaterThan(longPersist);
+    expect(longDone).toBeGreaterThan(longPersist);
+    expect(shortDone).toBeGreaterThan(shortPersist);
+    expect(source).toContain("if(Number(longActivation.changes)!==1)throw");
+    expect(source).toContain("if(Number(shortActivation.changes)!==1)throw");
+    // Existing failed-project and active-project resumes remain authorized.
+    expect(source.match(/status IN \\('creating','generation_failed','active'\\)/g)).toHaveLength(2);
+  });
+
   it('keeps broad premise search as a non-blocking target before full idea cards', () => {
     const source = read('chain.controller.ts');
 
