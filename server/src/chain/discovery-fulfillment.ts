@@ -24,6 +24,16 @@ export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:
   return uniqueSlots.filter(id => !acceptedIds.has(id)).slice(0, Math.max(0, requestedCount - approvedInBatch));
 }
 
+/** Lower bound for the NEXT independently reviewed original-pool correction.
+ * A changed/new narrative needs source/payoff review; replacing an identity
+ * in a multi-card shortlist also changes pairs and needs overlap review.
+ * This is an admission check, never a quality pass or a new call allowance.
+ */
+export function minimumReselectionReviewCalls(selectedCount:number,forcesNewIdentity:boolean):number {
+ if(!Number.isInteger(selectedCount)||selectedCount<1)throw Error('重选复核的已选数量无效');
+ return forcesNewIdentity&&selectedCount>1?2:1;
+}
+
 /** One scoped preselection repair wave: optional screening surplus is not
  * a delivery deficit. Only actual missing delivery slots are mandatory.
  * A small model-reviewed hedge remains for full-card rejection, without
