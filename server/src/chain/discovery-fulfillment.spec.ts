@@ -34,6 +34,17 @@ it('limits costly preselection reselection to real user delivery deficits plus b
  expect(()=>preselectionRecoveryTarget(5,-1)).toThrow();
 });
 
+it('fills only bounded pre-vetted screening surplus from the original pool before paid full-card review',()=>{
+ expect(preselectionRecoveryTarget(5,6,8)).toEqual({mandatory:0,hedge:2,total:2});
+ expect(preselectionRecoveryTarget(5,7,8)).toEqual({mandatory:0,hedge:1,total:1});
+ expect(preselectionRecoveryTarget(5,8,8)).toEqual({mandatory:0,hedge:0,total:0});
+ expect(preselectionRecoveryTarget(5,3,8)).toEqual({mandatory:2,hedge:2,total:4});
+ expect(preselectionRecoveryTarget(5,4,8)).toEqual({mandatory:1,hedge:2,total:3});
+ expect(preselectionRecoveryTarget(5,4,6)).toEqual({mandatory:1,hedge:1,total:2});
+ expect(preselectionRecoveryTarget(5,6,5)).toEqual({mandatory:0,hedge:0,total:0});
+ expect(()=>preselectionRecoveryTarget(5,6,4)).toThrow();
+});
+
 it('uses only authored, correctly sized title alternatives before unchanged quality Gates',()=>{
  const original={title:'这是一个超过标准长度而无法使用的完整小说标题名称',alternateTitles:['我让老人坐了起来','更短故事'],sourcePremiseId:'P5'};
  const fixed=retainValidStructuredIdeaTitle(original,'伺候人的手艺，不丢人');
