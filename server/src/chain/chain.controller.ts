@@ -6684,7 +6684,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // actual delivery deficit is mandatory. A bounded surplus guards final
     // full-card rejection without serially repairing every failed hedge.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length);
+    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length,requestedCount);
     const neededReplacementSlots=recoveryTarget.mandatory;
     // The repair planner includes failed *selected* identities as potential
     // self-corrections. They are NOT fresh pool choices. Count only genuinely
@@ -6719,7 +6719,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const missingDeliverySlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
     const mandatoryPoolSlots=recoverySlots.slice(0,missingDeliverySlots)
       .filter(slot=>slot.mode==='replace_from_pool').length;
-    const poolHedgeId=deliveryCount<requestedCount && missingDeliverySlots>0
+    const poolHedgeId=deliveryCount<requestedCount
+      && recoverySlots.length>missingDeliverySlots
       && freshPoolCount>mandatoryPoolSlots
       ?recoverySlots.slice(missingDeliverySlots)
         .find(slot=>slot.mode==='correct_or_replace_from_pool')?.replacesPremiseId
@@ -6743,10 +6744,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
         const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
-        const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
+        // A requested five-card delivery needs a *screened* surplus because
+        // independent complete-card review may reject plausible premises.
+        // Do not stop at 6/5 when the already planned eight-card shortlist has
+        // two empty, fundable slots in the same original-pool selection wave.
+        // The optional surplus is never mandatory delivery and must not
+        // consume calls that the shared review budget cannot afford.
+        const availableRecoverySlots = recoverySlots.length;
+        const enoughOriginalCandidates = repairPlan.availableCandidates.length >=
+          Math.max(missingSlots,availableRecoverySlots);
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
-        if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
+        if (availableRecoverySlots===0 || !enoughOriginalCandidates || !enoughSharedBudget) {
           this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + deliveryCount
             + ' 个已独立复核合格题材；原池候选或共享审核/重选预算不足以补齐剩余位置，保留真实缺额。');
           return { ...partialSelection, selectionAudit: {
