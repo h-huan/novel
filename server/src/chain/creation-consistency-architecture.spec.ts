@@ -10,6 +10,10 @@ const patchSource = readFileSync(
   fileURLToPath(new URL('./cross-stage-patch.ts', import.meta.url)),
   'utf8',
 );
+const chapterDetailSource = readFileSync(
+  fileURLToPath(new URL('./chapter-detail-contract.ts', import.meta.url)),
+  'utf8',
+);
 
 function indexOrFail(source: string, marker: string): number {
   const index = source.indexOf(marker);
@@ -55,7 +59,8 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
     expect(controllerSource).toContain('先发生的话不能改称见证后来证据的反应');
     expect(controllerSource).toContain('沉默、询问或下一章计划升级为已执行结果');
-    expect(controllerSource).toContain('"characterStates":[]');
+    expect(controllerSource).toContain('chapterDetailJsonExample(allowedMin, allowedMax, isFinalChapter, expectedChapter.title)');
+    expect(chapterDetailSource).toContain('characterStates:[]');
     expect(controllerSource).not.toContain('"stateAfter":"本章后状态"');
     expect(controllerSource).toContain('【本章事件与状态唯一来源】');
     expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
