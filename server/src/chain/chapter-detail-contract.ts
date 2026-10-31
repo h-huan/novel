@@ -1,5 +1,22 @@
 import { validateChapterEndingBoundary, validateForeshadowingBoundary } from './adaptive-narrative';
 
+/** Normalize only a single-object provider envelope; content and schema
+ * completeness remain the responsibility of chapterDetailStructureIssues.
+ * The root chapter always wins over unrelated nested metadata. */
+export function unwrapSingleChapterEnvelope(value:unknown):unknown {
+ if(!value||typeof value!=='object'||Array.isArray(value))return value;
+ const obj=value as Record<string,unknown>;
+ const shape=(row:Record<string,unknown>)=>['title','content','scenes','characterActions','targetWords']
+   .some(field=>Object.prototype.hasOwnProperty.call(row,field));
+ if(shape(obj))return obj;
+ for(const field of ['data','result','outline']){
+  const child=obj[field];
+  if(child&&typeof child==='object'&&!Array.isArray(child)
+    &&shape(child as Record<string,unknown>))return child;
+ }
+ return obj;
+}
+
 /** The example shown to the model must be valid for the CURRENT chapter.
  * A hardcoded 3500-word example contradicted real 4400-5000-word chapter
  * intervals and caused avoidable schema retries during project creation.
