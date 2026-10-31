@@ -6140,7 +6140,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             presentationBudget.remaining,discoveryBudget.presentationBatchSize),
           affordableReviewedPremiseCount(
             missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2),
-            sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize));
+            sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,
+            discoveryBudget.reviewGroupingMode));
         fulfillmentStopReason='bounded_refill_unavailable';
         if(desiredSupplement>=missingAfterFirstGate
           &&reselectionCompletionBudget.remaining>=1){
