@@ -6796,12 +6796,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
       const scopedSlots=slots.map(slot=>String(slot.replacesPremiseId)===poolHedgeId
         ?{...slot,mode:'replace_from_pool' as const}:slot);
-      // A replacement changes both its own source/payoff evidence and every
-      // pair involving it. Do not spend the reselection call unless the
-      // existing shared budget can at least start both independent Gates.
-      // A causal-plan-only correction needs its one payoff recheck instead.
+      // Either mode may change story facts or replace an identity. Even
+      // correct_or_replace_from_pool is allowed to return a different premise;
+      // assuming it is always plan-only under-reserved the independent overlap
+      // call and wasted paid selection with one shared review credit left.
+      // Pure plan-only outputs still spend only their actual payoff recheck.
       const requiredReviewCalls=minimumReselectionReviewCalls(
-        selected.selected.length,scopedSlots.some(slot=>slot.mode==='replace_from_pool'));
+        selected.selected.length,true);
       if(shared && shared.reviews.remaining<requiredReviewCalls){
         reselectionStopReason='锁定前独立复核额度不足以覆盖重选后的来源及同构审核，未发起无法验收的原池重选';
         return false;
